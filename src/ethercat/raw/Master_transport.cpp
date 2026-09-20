@@ -30,6 +30,10 @@
 #include <cerrno>
 #include "sii/SIIReader.hpp"
 #include <inttypes.h>
+#ifdef __linux__
+#include <poll.h>
+#include <unistd.h>
+#endif
 
 namespace EtherCAT {
 
@@ -245,9 +249,12 @@ WaitResult Master::waitForPreRegistered(size_t slot, uint32_t timeout_ms)
 
 uint8_t Master::allocIdx()
 {
+    // Skip the entire reserved cyclic-slot range (0xF8..0xFD) plus the
+    // fire-and-forget index (0xFE) — i.e. everything >= kCyclicSlotBase.
+    // This also skips 0xFF, leaving 0..0xF7 for regular traffic.
     uint8_t idx;
     do { idx = next_idx_.fetch_add(1, std::memory_order_relaxed); }
-    while (idx == kFireAndForgetIdx);
+    while (idx >= IPDOTransport::kCyclicSlotBase);
     return idx;
 }
 
@@ -883,6 +890,15 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
         const uint16_t wkc =
             le16_to_host(*reinterpret_cast<const uint16_t*>(frame + wkc_offset));
 
+        if (dg->idx >= IPDOTransport::kCyclicSlotBase &&
+            dg->idx <  IPDOTransport::kCyclicSlotBase + IPDOTransport::kNumCyclicSlots) {
+            // Cyclic fast path: deposit into the fixed slot without building
+            // an RxDatagram or touching the router.  The cyclic thread waits
+            // on the slot's sequence counter.
+            depositCyclicSlot(dg->idx - IPDOTransport::kCyclicSlotBase,
+                              dg->cmd, adp, ado, frame + data_offset,
+                              datalen, wkc);
+        } else {
         RxDatagram msg{};
         msg.idx = dg->idx; msg.cmd = dg->cmd; msg.adp = adp; msg.ado = ado;
         msg.datalen = datalen; msg.wkc = wkc;
@@ -915,6 +931,7 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
                 }
             }
         }
+        }
 
         const size_t dg_total = sizeof(EtherCAT::DatagramHeader) + datalen + sizeof(uint16_t);
         if (remaining < dg_total) break;
@@ -924,6 +941,410 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
 
         if (!more_flag) break;
     }
+}
+
+// ============================================================================
+// Cyclic fast path — reserved-index fixed response slots
+// ============================================================================
+
+void Master::depositCyclicSlot(uint8_t slot_idx, Command cmd,
+                               uint16_t adp, uint16_t ado,
+                               const uint8_t* payload, uint16_t datalen,
+                               uint16_t wkc)
+{
+    auto& s = cyclic_slots_[slot_idx];
+    // A copy-mode deposit replaces any held channel view — release the old
+    // cookie first so ring slots aren't pinned forever.
+    if (s.cookie >= 0 && cyclic_channel_) {
+        cyclic_channel_->rxRelease(static_cast<uint32_t>(s.cookie));
+    }
+    s.cookie  = -1;
+    s.payload = s.data;
+    s.cmd     = static_cast<uint8_t>(cmd);
+    s.adp     = adp;
+    s.ado     = ado;
+    s.datalen = datalen;
+    s.wkc     = wkc;
+    if (datalen > 0) {
+        std::memcpy(s.data, payload,
+                    std::min<size_t>(datalen, sizeof(s.data)));
+    }
+    // release: payload fields must be visible before the seq bump.
+    s.seq.fetch_add(1, std::memory_order_release);
+
+#ifdef __linux__
+    // Wake a cyclic thread blocked in ppoll() — needed when the poll thread
+    // won the recv race and this deposit happened on the "wrong" fd.
+    if (cyclic_notify_fd_ >= 0) {
+        const uint64_t one = 1;
+        ssize_t r = ::write(cyclic_notify_fd_, &one, sizeof(one));
+        (void)r;  // EAGAIN (counter saturated) is fine — waiter already woken
+    }
+#endif
+}
+
+void Master::publishCyclicSlotView(uint8_t slot_idx, Command cmd,
+                                   uint16_t adp, uint16_t ado,
+                                   const uint8_t* payload, uint16_t datalen,
+                                   uint16_t wkc, uint32_t cookie)
+{
+    auto& s = cyclic_slots_[slot_idx];
+    if (s.cookie >= 0 && cyclic_channel_) {
+        cyclic_channel_->rxRelease(static_cast<uint32_t>(s.cookie));
+    }
+    s.cookie  = static_cast<int64_t>(cookie);
+    s.payload = payload;
+    s.cmd     = static_cast<uint8_t>(cmd);
+    s.adp     = adp;
+    s.ado     = ado;
+    s.datalen = datalen;
+    s.wkc     = wkc;
+    s.seq.fetch_add(1, std::memory_order_release);
+
+#ifdef __linux__
+    if (cyclic_notify_fd_ >= 0) {
+        const uint64_t one = 1;
+        ssize_t r = ::write(cyclic_notify_fd_, &one, sizeof(one));
+        (void)r;
+    }
+#endif
+}
+
+uint64_t Master::cyclicSlotToken(uint8_t slot) const
+{
+    if (slot >= IPDOTransport::kNumCyclicSlots) return 0;
+    return cyclic_slots_[slot].seq.load(std::memory_order_acquire);
+}
+
+namespace {
+
+/// Build the 26-byte [eth][ecat][datagram-hdr] prefix of a cyclic frame.
+void buildCyclicFrameHeader(uint8_t* buf, const uint8_t* src_mac,
+                            EtherCAT::Command cmd, uint8_t slot,
+                            uint16_t adp, uint16_t ado, uint16_t datalen,
+                            bool roundtrip)
+{
+    using namespace EtherCAT::Raw;
+    constexpr uint8_t dst_mac[6] = {0x01, 0x01, 0x05, 0x00, 0x00, 0x00};
+    auto* hdr = reinterpret_cast<EtherCATSingleDgramFrameHeader*>(buf);
+    std::memcpy(hdr->eth.dst, dst_mac, 6);
+    std::memcpy(hdr->eth.src, src_mac, 6);
+    hdr->eth.etherType_be = host_to_be16(EtherCAT::kEtherTypeEtherCAT);
+
+    const uint16_t payload_len = static_cast<uint16_t>(
+        sizeof(EtherCATDatagramHeader) + datalen + sizeof(uint16_t));
+    constexpr uint16_t type = 0x1;
+    hdr->ec.raw_le = host_to_le16(
+        static_cast<uint16_t>((payload_len & 0x07FFu) | ((type & 0x0Fu) << 12)));
+
+    hdr->dg.cmd    = cmd;
+    hdr->dg.idx    = EtherCAT::IPDOTransport::kCyclicSlotBase + slot;
+    hdr->dg.adp_le = host_to_le16(adp);
+    hdr->dg.ado_le = host_to_le16(ado);
+    const uint16_t flags = roundtrip ? (1u << 14) : 0u;
+    hdr->dg.lenFlags.raw_le =
+        host_to_le16(static_cast<uint16_t>((datalen & 0x07FFu) | flags));
+    hdr->dg.irq_le = host_to_le16(0);
+}
+
+} // namespace
+
+bool Master::sendCyclicDatagram(Command cmd, uint8_t slot,
+                                uint16_t adp, uint16_t ado,
+                                const void* data, uint16_t datalen,
+                                bool roundtrip)
+{
+    using namespace Raw;
+    if (slot >= IPDOTransport::kNumCyclicSlots) return false;
+    if (cancel_requested_.load(std::memory_order_acquire)) return false;
+
+    // Channel path (socket backend): header on the stack + payload in place
+    // → one sendmsg(), zero payload copies.  Ring backend would copy once
+    // into a TX slot — callers in Rotating image mode use sendCyclicFrame
+    // to avoid even that.
+    if (cyclic_channel_) {
+        uint8_t hdr_buf[kCyclicFramePayloadOff];
+        buildCyclicFrameHeader(hdr_buf, src_mac_, cmd, slot, adp, ado,
+                               datalen, roundtrip);
+        CyclicTxParts parts;
+        parts.header      = hdr_buf;
+        parts.header_len  = kCyclicFramePayloadOff;
+        parts.payload     = static_cast<const uint8_t*>(data);
+        parts.payload_len = datalen;
+        parts.wkc         = 0;
+        if (debug_flags_.txPackets) {
+            // Compose into cyclic_tx_buf_ purely for the debug dump.
+            std::memcpy(cyclic_tx_buf_, hdr_buf, sizeof(hdr_buf));
+            uint8_t* p = cyclic_tx_buf_ + sizeof(hdr_buf);
+            if (datalen > 0) std::memcpy(p, data, datalen);
+            *reinterpret_cast<uint16_t*>(p + datalen) = host_to_le16(0);
+            PacketDebugger::printEtherCATFrame(cyclic_tx_buf_,
+                kCyclicFramePayloadOff + datalen + sizeof(uint16_t),
+                true, false);
+        }
+        return cyclic_channel_->txSendParts(parts);
+    }
+
+    constexpr size_t kMinEthFrameNoFcs = 60;
+
+    const size_t required_len =
+        sizeof(EtherCATSingleDgramFrameHeader) + datalen + sizeof(uint16_t);
+    if (required_len > sizeof(cyclic_tx_buf_)) {
+        return false;
+    }
+    const size_t frame_len =
+        (required_len < kMinEthFrameNoFcs) ? kMinEthFrameNoFcs : required_len;
+
+    buildCyclicFrameHeader(cyclic_tx_buf_, src_mac_, cmd, slot, adp, ado,
+                           datalen, roundtrip);
+
+    uint8_t* payload = cyclic_tx_buf_ + sizeof(EtherCATSingleDgramFrameHeader);
+    if (datalen > 0) {
+        if (data) std::memcpy(payload, data, datalen);
+        else      std::memset(payload, 0, datalen);
+    }
+    *reinterpret_cast<uint16_t*>(payload + datalen) = host_to_le16(0);
+
+    if (debug_flags_.txPackets) {
+        PacketDebugger::printEtherCATFrame(cyclic_tx_buf_, frame_len, true, false);
+    }
+    // Single attempt — no retry spin on the cyclic path; a missed cycle is
+    // reported via the error counter rather than retried inside the deadline.
+    return sendWithEncapsulation(cyclic_tx_buf_, frame_len);
+}
+
+uint8_t* Master::acquireCyclicTxFrame()
+{
+    return cyclic_channel_ ? cyclic_channel_->txAcquire() : nullptr;
+}
+
+bool Master::sendCyclicFrame(uint32_t frame_len)
+{
+    if (!cyclic_channel_) return false;
+    return cyclic_channel_->txCommitFrame(frame_len);
+}
+
+void Master::composeCyclicHeader(uint8_t* frame, Command cmd, uint8_t slot,
+                                 uint16_t adp, uint16_t ado, uint16_t datalen,
+                                 bool roundtrip)
+{
+    buildCyclicFrameHeader(frame, src_mac_, cmd, slot, adp, ado,
+                           datalen, roundtrip);
+}
+
+/**
+ * @brief Walk a frame received on the cyclic channel.
+ *
+ * Pure-cyclic frames (all datagrams idx >= kCyclicSlotBase) publish their
+ * payload views into the slots without copying.  Anything else (async or
+ * mixed frames — only possible when the BPF demux is absent/failed) is
+ * routed through the regular parser, which deposits/routes per datagram.
+ */
+void Master::dispatchChannelFrame(const CyclicFrameView& v)
+{
+    using namespace Raw;
+    const uint8_t* f    = v.frame;
+    const size_t   flen = v.frame_len;
+    constexpr size_t kEcatHdr = sizeof(EtherCAT::EthernetHeader);       // 14
+    constexpr size_t kDgHdr   = sizeof(EtherCAT::DatagramHeader);       // 10
+    if (flen < kEcatHdr + sizeof(EtherCAT::FrameHeader)) return;
+
+    const uint16_t ec_len = le16_to_host(
+        *reinterpret_cast<const uint16_t*>(f + kEcatHdr)) & 0x07FFu;
+    if (flen < kEcatHdr + sizeof(EtherCAT::FrameHeader) + ec_len) return;
+
+    // Classify pass: any non-cyclic idx → whole frame to the parser.
+    size_t off = kEcatHdr + sizeof(EtherCAT::FrameHeader);
+    size_t rem = ec_len;
+    bool   all_cyclic = true;
+    while (rem >= kDgHdr + sizeof(uint16_t) && off + kDgHdr <= flen) {
+        const uint8_t  idx       = f[off + 1];
+        const uint16_t len_flags = le16_to_host(
+            *reinterpret_cast<const uint16_t*>(f + off + 6));
+        const uint16_t dl   = len_flags & 0x07FFu;
+        const bool     more = (len_flags & 0x8000u) != 0;
+        if (idx <  IPDOTransport::kCyclicSlotBase ||
+            idx >= IPDOTransport::kCyclicSlotBase +
+                   IPDOTransport::kNumCyclicSlots) {
+            all_cyclic = false;
+            break;
+        }
+        const size_t dgt = kDgHdr + dl + sizeof(uint16_t);
+        if (rem < dgt || off + dgt > flen) { all_cyclic = false; break; }
+        rem -= dgt; off += dgt;
+        if (!more) break;
+    }
+
+    if (!all_cyclic) {
+        handleRxFrame(f, flen);   // parser deposits/routes per datagram
+        return;
+    }
+
+    // Publish pass — every datagram is cyclic; hand payload views to slots.
+    off = kEcatHdr + sizeof(EtherCAT::FrameHeader);
+    rem = ec_len;
+    while (rem >= kDgHdr + sizeof(uint16_t) && off + kDgHdr <= flen) {
+        const uint8_t  idx       = f[off + 1];
+        const uint8_t  cmd       = f[off];
+        const uint16_t adp       = le16_to_host(
+            *reinterpret_cast<const uint16_t*>(f + off + 2));
+        const uint16_t ado       = le16_to_host(
+            *reinterpret_cast<const uint16_t*>(f + off + 4));
+        const uint16_t len_flags = le16_to_host(
+            *reinterpret_cast<const uint16_t*>(f + off + 6));
+        const uint16_t dl   = len_flags & 0x07FFu;
+        const bool     more = (len_flags & 0x8000u) != 0;
+        const size_t   data_off = off + kDgHdr;
+        const size_t   dgt      = kDgHdr + dl + sizeof(uint16_t);
+        if (rem < dgt || off + dgt > flen) break;
+        const uint16_t wkc = le16_to_host(
+            *reinterpret_cast<const uint16_t*>(f + data_off + dl));
+
+        cyclic_channel_->rxHold(v.cookie);
+        publishCyclicSlotView(idx - IPDOTransport::kCyclicSlotBase,
+                              static_cast<Command>(cmd), adp, ado,
+                              f + data_off, dl, wkc, v.cookie);
+        rem -= dgt; off += dgt;
+        if (!more) break;
+    }
+}
+
+bool Master::waitCyclicSlotView(uint8_t slot, uint64_t token,
+                                uint32_t timeout_ns, CyclicSlotView& out)
+{
+    if (slot >= IPDOTransport::kNumCyclicSlots) return false;
+    auto& s = cyclic_slots_[slot];
+
+    auto read_slot = [&]() -> bool {
+        // Seqlock read: the publisher writes the fields then bumps seq
+        // (release).  Re-check seq after the read — a second publish
+        // landing mid-read is detected and retried.
+        for (int tries = 0; tries < 8; ++tries) {
+            const uint64_t s0 = s.seq.load(std::memory_order_acquire);
+            out.cmd     = s.cmd;
+            out.adp     = s.adp;
+            out.ado     = s.ado;
+            out.datalen = s.datalen;
+            out.wkc     = s.wkc;
+            out.payload = s.payload ? s.payload : s.data;
+            const int64_t cookie = s.cookie;
+            out.cookie  = cookie >= 0 ? static_cast<uint32_t>(cookie) : 0;
+            out.channel = cookie >= 0 ? cyclic_channel_.get() : nullptr;
+            if (s.seq.load(std::memory_order_acquire) == s0) return true;
+        }
+        return true;   // accept last read — publisher is single-writer
+    };
+
+    auto& clock = Tether::Platform::Clock::instance();
+    const int64_t deadline_ns =
+        clock.getMicroseconds() * 1000 + static_cast<int64_t>(timeout_ns);
+
+    // Fast path: response already deposited.
+    if (s.seq.load(std::memory_order_acquire) != token) {
+        return read_slot();
+    }
+
+    // Channel path: drain the cyclic ring/socket directly — cyclic frames
+    // publish slot views, stray async frames go to the normal parser.
+    if (cyclic_channel_) {
+        CyclicFrameView views[8];
+        while (true) {
+            if (s.seq.load(std::memory_order_acquire) != token) {
+                return read_slot();
+            }
+            if (cancel_requested_.load(std::memory_order_acquire)) return false;
+            const int64_t now_ns = clock.getMicroseconds() * 1000;
+            const int64_t remain = deadline_ns - now_ns;
+            if (remain <= 0) return false;
+
+            const int n = cyclic_channel_->rxPoll(
+                views, 8, static_cast<uint32_t>(remain));
+            for (int i = 0; i < n; ++i) {
+                dispatchChannelFrame(views[i]);
+            }
+        }
+    }
+
+    // Software path: ppoll on deposit-eventfd + optional direct socket drain.
+#ifdef __linux__
+    struct pollfd fds[2];
+    nfds_t nfds = 0;
+    int efd_pos = -1, sock_pos = -1;
+    if (cyclic_notify_fd_ >= 0) {
+        efd_pos = static_cast<int>(nfds);
+        fds[nfds++] = { cyclic_notify_fd_, POLLIN, 0 };
+    }
+    const int sockfd = iface_.receive
+        ? static_cast<int>(reinterpret_cast<intptr_t>(iface_.native_handle))
+        : -1;
+    if (sockfd >= 0) {
+        sock_pos = static_cast<int>(nfds);
+        fds[nfds++] = { sockfd, POLLIN, 0 };
+    }
+
+    while (nfds > 0) {
+        if (s.seq.load(std::memory_order_acquire) != token) {
+            return read_slot();
+        }
+        if (cancel_requested_.load(std::memory_order_acquire)) return false;
+        const int64_t now_ns = clock.getMicroseconds() * 1000;
+        const int64_t remain = deadline_ns - now_ns;
+        if (remain <= 0) return false;
+
+        struct timespec ts;
+        ts.tv_sec  = remain / 1'000'000'000LL;
+        ts.tv_nsec = remain % 1'000'000'000LL;
+        int ret = ppoll(fds, nfds, &ts, nullptr);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            return false;
+        }
+        if (ret == 0) return false;  // deadline reached
+
+        if (sock_pos >= 0 && (fds[sock_pos].revents & POLLIN)) {
+            uint8_t buf[1600];
+            size_t n = 0;
+            while (iface_.receive(buf, sizeof(buf), &n)) {
+                if (n > 0) handleRxFrame(buf, n);
+                n = 0;
+            }
+        }
+        if (efd_pos >= 0 && (fds[efd_pos].revents & POLLIN)) {
+            uint64_t v;
+            ssize_t r = ::read(cyclic_notify_fd_, &v, sizeof(v));
+            (void)r;
+        }
+    }
+#endif
+
+    // Fallback: bounded spin on the sequence counter (no fd wake-up path —
+    // e.g. eventfd unavailable, or non-Linux).  Bounded by the deadline so
+    // a dead link cannot wedge the cyclic thread.
+    while (true) {
+        if (s.seq.load(std::memory_order_acquire) != token) {
+            return read_slot();
+        }
+        if (cancel_requested_.load(std::memory_order_acquire)) return false;
+        if (clock.getMicroseconds() * 1000 >= deadline_ns) return false;
+    }
+}
+
+bool Master::waitCyclicSlot(uint8_t slot, uint64_t token,
+                            uint32_t timeout_ns, RxDatagram& out)
+{
+    CyclicSlotView view{};
+    if (!waitCyclicSlotView(slot, token, timeout_ns, view)) return false;
+    out.idx     = IPDOTransport::kCyclicSlotBase + slot;
+    out.cmd     = static_cast<Command>(view.cmd);
+    out.adp     = view.adp;
+    out.ado     = view.ado;
+    out.datalen = view.datalen;
+    out.wkc     = view.wkc;
+    if (view.datalen > 0 && view.payload) {
+        std::memcpy(out.data, view.payload,
+                    std::min<size_t>(view.datalen, sizeof(out.data)));
+    }
+    return true;
 }
 
 } // namespace EtherCAT

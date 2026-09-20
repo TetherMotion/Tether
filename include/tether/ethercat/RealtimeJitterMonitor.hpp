@@ -26,8 +26,8 @@
  * @endcode
  */
 
+#include <atomic>
 #include <cstdint>
-#include <mutex>
 
 namespace EtherCAT {
 
@@ -131,11 +131,20 @@ private:
     JitterConfig config_;
     const char*  name_;
 
-    bool     has_prev_ = false;  ///< Whether we have a previous timestamp
-    uint64_t prev_ns_  = 0;     ///< Timestamp of previous cycle
+    // Written only by recordCycle() (the owning realtime thread).
+    std::atomic<bool>     has_prev_{false};
+    std::atomic<uint64_t> prev_ns_{0};
 
-    JitterStats stats_;
-    mutable std::mutex mutex_;
+    // Lock-free stats: single writer (recordCycle), many readers (getStats).
+    // recordCycle() never takes a lock — a diagnostics thread calling
+    // getStats() can therefore never block the realtime thread.
+    std::atomic<uint64_t> cycle_count_{0};
+    std::atomic<uint32_t> max_jitter_us_{0};
+    std::atomic<uint32_t> avg_jitter_us_{0};
+    std::atomic<uint64_t> warning_count_{0};
+    std::atomic<uint64_t> critical_count_{0};
+    std::atomic<uint32_t> last_period_us_{0};
+    std::atomic<bool>     realtime_ok_{true};
 };
 
 } // namespace EtherCAT

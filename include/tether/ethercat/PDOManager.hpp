@@ -47,6 +47,10 @@ namespace EtherCAT {
 class IPDOTransport;
 class PDOManager;
 class LogicalAddressManager;
+class ICyclicChannel;             // defined in CyclicChannel.hpp
+struct CyclicSlotView;
+class ProcessImage;
+enum class ImageMode : uint8_t;   // defined in ProcessImage.hpp
 
 namespace PDO {
 
@@ -151,6 +155,13 @@ struct PDOEntry {
     uint16_t pdo_index;
 
     bool     enabled;
+    /**
+     * @brief Force this entry onto the buffered (app_buffer) path even when
+     *        a ProcessImage mode is active.  Set for FSoE-managed PDOs —
+     *        safe frames are staged and CRC'd by the FSoE layer and must
+     *        not be written in place by the application.
+     */
+    bool     image_exclude{false};
     uint32_t error_count;
     uint32_t success_count;
 };
@@ -301,6 +312,103 @@ public:
     /// Fire-and-forget index constant
     static constexpr uint8_t kFireAndForgetIdx = 0xFE;
 
+    // ------------------------------------------------------------------
+    // Cyclic fast path: reserved index range + fixed response slots.
+    //
+    // Datagrams sent with idx in [kCyclicSlotBase, kCyclicSlotBase +
+    // kNumCyclicSlots) bypass TransactionRouter entirely: the RX parser
+    // deposits them into fixed preallocated slots that the cyclic thread
+    // polls on a sequence counter — no mutex, no condition variable, and
+    // no RxDatagram copy on the hot path.  allocIdx() never returns an
+    // index in this range.
+    // ------------------------------------------------------------------
+    static constexpr uint8_t kCyclicSlotBase = ::EtherCAT::kCyclicSlotBaseIdx;
+    static constexpr size_t  kNumCyclicSlots = ::EtherCAT::kNumCyclicSlots;
+
+    /// @return true if the transport implements the cyclic slot fast path.
+    virtual bool supportsCyclicFastPath() const { return false; }
+
+    /**
+     * @brief Read the current sequence token of a cyclic slot.
+     *
+     * Call BEFORE sendCyclicDatagram().  The token distinguishes the
+     * response belonging to the upcoming send from stale deposits.
+     */
+    virtual uint64_t cyclicSlotToken(uint8_t slot) {
+        (void)slot; return 0;
+    }
+
+    /**
+     * @brief Send a single datagram on a reserved cyclic slot index.
+     * @param slot   Slot number in [0, kNumCyclicSlots)
+     * @return true if the frame was handed to the wire.
+     */
+    virtual bool sendCyclicDatagram(Command cmd, uint8_t slot,
+                                    uint16_t adp, uint16_t ado,
+                                    const void* data, uint16_t datalen,
+                                    bool roundtrip) {
+        (void)cmd; (void)slot; (void)adp; (void)ado;
+        (void)data; (void)datalen; (void)roundtrip;
+        return false;
+    }
+
+    /**
+     * @brief Wait until the response for @p token arrives on @p slot.
+     *
+     * On Linux this blocks in ppoll() on the socket + a deposit eventfd —
+     * the calling thread sleeps until either the response lands or the
+     * deadline passes.  Without a receive path it falls back to a bounded
+     * sequence-counter spin.
+     *
+     * @param timeout_ns  Maximum wait in nanoseconds (sub-ms scale).
+     * @return true and fills @p out on success; false on timeout/cancel.
+     */
+    virtual bool waitCyclicSlot(uint8_t slot, uint64_t token,
+                                uint32_t timeout_ns, RxDatagram& out) {
+        (void)slot; (void)token; (void)timeout_ns; (void)out;
+        return false;
+    }
+
+    /**
+     * @brief View-returning variant of waitCyclicSlot().
+     *
+     * `out.payload` points into the slot's inline buffer (software path)
+     * or into channel-owned ring/bank memory (channel path — `out.channel`
+     * / `out.cookie` then identify the held region).
+     */
+    virtual bool waitCyclicSlotView(uint8_t slot, uint64_t token,
+                                    uint32_t timeout_ns,
+                                    CyclicSlotView& out) {
+        (void)slot; (void)token; (void)timeout_ns; (void)out;
+        return false;
+    }
+
+    /**
+     * @brief Acquire the channel's next TX frame buffer (Rotating image
+     *        mode).  nullptr when no channel exists.
+     */
+    virtual uint8_t* acquireCyclicTxFrame() { return nullptr; }
+
+    /**
+     * @brief Compose [eth][ecat][dg-hdr] into an acquired frame buffer
+     *        (payload region follows at offset 26).
+     */
+    virtual void composeCyclicHeader(uint8_t* frame, Command cmd,
+                                     uint8_t slot, uint16_t adp,
+                                     uint16_t ado, uint16_t datalen,
+                                     bool roundtrip) {
+        (void)frame; (void)cmd; (void)slot; (void)adp; (void)ado;
+        (void)datalen; (void)roundtrip;
+    }
+
+    /// Commit the frame composed into the last acquireCyclicTxFrame() buffer.
+    virtual bool sendCyclicFrame(uint32_t frame_len) {
+        (void)frame_len; return false;
+    }
+
+    /// @return the cyclic channel, or nullptr on the software path.
+    virtual ICyclicChannel* cyclicChannel() { return nullptr; }
+
     virtual bool writeRegister(uint16_t adp, uint16_t ado,
                                const void* data, uint16_t len,
                                unsigned int timeout_ms) = 0;
@@ -433,6 +541,29 @@ public:
     uint32_t maxLogicalSliceLength() const;
     /// Logical placement of every enabled PDO entry (empty if unavailable).
     std::vector<PDO::LogicalEntrySlice> describeLogicalEntries() const;
+
+    /**
+     * @brief Whole-image LRW exchange over the reserved-slot cyclic fast path.
+     *
+     * For use inside CyclicExecutive's exchange step.  Bypasses the
+     * TransactionRouter entirely when the transport supports the fast path;
+     * falls back to exchangeAllLRW() semantics otherwise.  Keeps the
+     * per-slave PDO counters that the OP-transition check reads.
+     *
+     * @param rx_timeout_ns  Response wait budget in nanoseconds.
+     */
+    bool exchangeAllLRWCyclic(uint32_t rx_timeout_ns = 200'000,
+                              ProcessImage* image = nullptr);
+
+    /**
+     * @brief Configure @p image for the current PDO mapping in @p mode.
+     *
+     * Computes each enabled entry's byte offset in the LRW process image;
+     * entries sharing a byte with a neighbour or flagged
+     * `PDOEntry::image_exclude` stay buffered (offset -1).
+     * Requires an initialized LogicalAddressManager.
+     */
+    bool configureProcessImage(ProcessImage& image, ImageMode mode);
 
     // ----- Callback mode (Mode 3) -----
     // Per-entry callbacks fire during sendAll()/receiveAll() on the calling thread.

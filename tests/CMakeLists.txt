@@ -946,6 +946,7 @@ set(ETHERCAT_COMMON_SRC
     ../src/ethercat/raw/SDOErrorDecoder.cpp
     ../src/ethercat/raw/PDOManager.cpp
     ../src/ethercat/raw/LogicalAddressManager.cpp
+    ../src/ethercat/ProcessImage.cpp
     ../src/ethercat/DCClass.cpp
     ../src/ethercat/RealtimeLoop.cpp
     ../src/ethercat/RealtimeJitterMonitor.cpp
@@ -968,9 +969,11 @@ create_ethercat_test(pdo
         ethercat/test_custom_pdo_mapping.cpp
         ethercat/test_multi_pdo_mapping.cpp
         ethercat/test_synapticon_pdo_mapping.cpp
+        ethercat/test_process_image.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/raw/PDOManager.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
+        ../src/ethercat/ProcessImage.cpp
         ../src/ethercat/CoEManager.cpp
         ../src/ethercat/raw/SDOErrorDecoder.cpp
         ../src/ethercat/FaultDetection.cpp
@@ -1007,6 +1010,7 @@ create_ethercat_test(protocol
         ../src/ethercat/raw/SDOErrorDecoder.cpp
         ../src/ethercat/raw/PDOManager.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
+        ../src/ethercat/ProcessImage.cpp
         ../src/ethercat/DebugGate.cpp
         ../src/ethercat/Retry.cpp
         ../src/ethercat/host_stubs.cpp
@@ -1090,6 +1094,7 @@ tether_add_test_executable(tether_ethercat_master_tests
     ethercat/test_slave_names.cpp
     ethercat/test_slave_discovery_manager.cpp
     ethercat/test_transaction_router_waitany.cpp
+    ethercat/test_cyclic_channel.cpp
 )
 
 target_include_directories(tether_ethercat_master_tests PRIVATE

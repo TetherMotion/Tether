@@ -44,6 +44,9 @@
 
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/DebugGate.hpp"
+#include "tether/ethercat/CyclicChannel.hpp"
+#include "tether/ethercat/CyclicExecutive.hpp"
+#include "tether/ethercat/ProcessImage.hpp"
 #include "tether/ethercat/EtherCATTransport.hpp"
 #include "tether/ethercat/SlaveIdentity.hpp"
 #include "tether/ethercat/EtherCATConfig.hpp"
@@ -289,6 +292,50 @@ public:
     bool startQueueModeLoop(const RealtimeMotionLoopConfig& config);
     void stopQueueModeLoop();
     bool isQueueModeLoopRunning() const;
+
+    // ---- Cyclic executive (deadline-driven fast loop) ---------------------
+    //
+    // Single cyclic thread that sleeps directly on an absolute deadline
+    // (clock_nanosleep TIMER_ABSTIME on Linux — no timer-thread -> event ->
+    // worker hop) and drives the phase pipeline:
+    //   [inline DC] -> PreExchange -> LRW exchange -> PostExchange -> Motion
+    //
+    // Uses the reserved-index cyclic fast path for the PDO exchange when the
+    // transport supports it (responses deposited into fixed slots — no
+    // TransactionRouter round-trip).
+    struct CyclicLoopConfig {
+        uint32_t cycle_period_us{1000};
+        bool     enable_dc_synchronization{false};
+        uint32_t sync_interval_cycles{10};
+        /// Run the registered MotionControlCallback in the MotionControl
+        /// phase of the cyclic thread.  If false, motion is left to an
+        /// external source/thread (external-motion use case).
+        bool     motion_in_loop{true};
+        /// Threading/timing options — priority, affinity, sleep mode,
+        /// DC placement (dedicated thread / inline / disabled).
+        CyclicExecutive::Config exec{};
+
+        /// Wire datapath: Auto = packet ring when supported, socket
+        /// sendmsg/recv bank otherwise (loud log on fallback).
+        /// Unavailable platforms/capabilities degrade to the software
+        /// deposit path — correctness is never affected.
+        CyclicWireMode wire_mode{CyclicWireMode::Auto};
+
+        /// Process-image exposure mode (see ProcessImage.hpp).
+        /// Buffered keeps the legacy per-entry app_buffer exchange.
+        ImageMode image_mode{ImageMode::Buffered};
+    };
+
+    /// Process image — valid once the cyclic loop is running with an
+    /// image_mode other than Buffered.  Safe to cache the reference;
+    /// epoch() changes on re-configuration.
+    ProcessImage&       processImage()       { return process_image_; }
+    const ProcessImage& processImage() const { return process_image_; }
+    bool startCyclicLoop() { return startCyclicLoop(CyclicLoopConfig{}); }
+    bool startCyclicLoop(const CyclicLoopConfig& config);
+    void stopCyclicLoop();
+    bool isCyclicLoopRunning() const;
+    CyclicExecutive::Stats getCyclicLoopStats() const;
 
     // ---- Frame handling ----------------------------------------------------
 
@@ -1001,6 +1048,43 @@ public:
                                         size_t buffer_size);
     WaitResult waitForPreRegistered(size_t slot, uint32_t timeout_ms);
 
+    // ---- Cyclic fast path (used by MasterPDOTransport) --------------------
+    // Reserved idx range [kCyclicSlotBase, +kNumCyclicSlots): responses are
+    // deposited into fixed slots by the RX parser and consumed by the cyclic
+    // thread without touching the TransactionRouter.
+    bool     supportsCyclicFastPath() const { return static_cast<bool>(iface_.send); }
+    uint64_t cyclicSlotToken(uint8_t slot) const;
+    bool     sendCyclicDatagram(Command cmd, uint8_t slot,
+                                uint16_t adp, uint16_t ado,
+                                const void* data, uint16_t datalen,
+                                bool roundtrip);
+    /**
+     * @brief Commit a frame already composed into a txAcquire() buffer
+     *        (Rotating image mode — the LAM wrote the header at
+     *        frame_base, the application wrote the payload at
+     *        frame_base+kCyclicFramePayloadOff).
+     */
+    bool     sendCyclicFrame(uint32_t frame_len);
+    /// Wire-offset of the first datagram's payload in a cyclic frame
+    /// (eth 14 + ecat-hdr 2 + dg-hdr 10).
+    static constexpr uint32_t kCyclicFramePayloadOff = 26;
+    /// Acquire the channel's next TX frame (Rotating mode).
+    uint8_t* acquireCyclicTxFrame();
+
+    bool     waitCyclicSlot(uint8_t slot, uint64_t token,
+                            uint32_t timeout_ns, RxDatagram& out);
+    /// View-returning variant — payload points into the slot's inline
+    /// buffer (copy path) or into channel ring/bank memory (view path).
+    bool     waitCyclicSlotView(uint8_t slot, uint64_t token,
+                                uint32_t timeout_ns, CyclicSlotView& out);
+    /// Compose [eth][ecat][dg-hdr] into an acquired frame buffer
+    /// (Rotating image mode).
+    void     composeCyclicHeader(uint8_t* frame, Command cmd, uint8_t slot,
+                                 uint16_t adp, uint16_t ado, uint16_t datalen,
+                                 bool roundtrip);
+    /// Channel accessor for the process image / transport adapter.
+    ICyclicChannel* cyclicChannel() const { return cyclic_channel_.get(); }
+
     // ---- Frame capacity ----------------------------------------------------
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION
@@ -1016,6 +1100,9 @@ public:
 
 private:
     friend class SlaveDiscoveryManager;
+    /// Test seam — lets tests inject a cyclic channel and drive the
+    /// private dispatch path without a live AF_PACKET socket.
+    friend struct MasterCyclicTestAccess;
 
     // ---- Internal helpers --------------------------------------------------
     bool setPreopAndConfirm(uint16_t slave_index);
@@ -1034,6 +1121,19 @@ private:
     void ensureRxQueues();
     void flushRxQueue();
     void parseEtherCATFrame(const uint8_t* frame, size_t length);
+    void depositCyclicSlot(uint8_t slot_idx, Command cmd,
+                           uint16_t adp, uint16_t ado,
+                           const uint8_t* payload, uint16_t datalen,
+                           uint16_t wkc);
+    /// View-mode deposit: payload points into channel-owned memory held by
+    /// `cookie`.  The previous held cookie (if any) is released.
+    void publishCyclicSlotView(uint8_t slot_idx, Command cmd,
+                               uint16_t adp, uint16_t ado,
+                               const uint8_t* payload, uint16_t datalen,
+                               uint16_t wkc, uint32_t cookie);
+    /// Route a frame received on the cyclic channel: pure-cyclic frames
+    /// publish slot views, mixed/async frames go to the parser.
+    void dispatchChannelFrame(const CyclicFrameView& view);
 
     // ---- EtherCAT-over-UDP encapsulation ----------------------------------
 #if TETHER_ENABLE_UDP_ENCAPSULATION
@@ -1078,6 +1178,42 @@ private:
 
     // Index allocator
     std::atomic<uint8_t> next_idx_{0};
+
+    // ---- Cyclic fast path state ----
+    // Fixed response slots for reserved idx range — written by whoever
+    // parses the RX frame (poll thread OR the cyclic thread itself via
+    // direct receive), read by the cyclic thread.  seq is bumped AFTER the
+    // payload fields are written (release) so a reader that observes a seq
+    // change sees a complete datagram.
+    struct CyclicRxSlot {
+        std::atomic<uint64_t> seq{0};
+        uint8_t  cmd{0};
+        uint16_t adp{0};
+        uint16_t ado{0};
+        uint16_t datalen{0};
+        uint16_t wkc{0};
+        /// View mode: points into channel memory (cookie holds the slot).
+        /// Copy mode: points at data[].  Never null after first publish.
+        const uint8_t* payload{nullptr};
+        /// Channel cookie of the held view; -1 = copy mode / none.
+        int64_t cookie{-1};
+        uint8_t  data[1486];
+    };
+    std::array<CyclicRxSlot, kNumCyclicSlots> cyclic_slots_{};
+    std::unique_ptr<CyclicExecutive> cyclic_loop_;
+    /// Datapath channel (Linux: socket or PACKET_MMAP ring backend).
+    /// Created by startCyclicLoop() when the transport exposes a raw fd;
+    /// nullptr → software deposit path (unchanged behaviour).
+    std::unique_ptr<ICyclicChannel> cyclic_channel_;
+    ProcessImage process_image_;
+    ImageMode    active_image_mode_ = ImageMode::Buffered;
+    /// Persistent cyclic TX frame buffer — avoids a 1514-byte zeroed stack
+    /// buffer per cycle.  Only the cyclic thread writes it.
+    uint8_t cyclic_tx_buf_[1514] = {};
+    /// Linux eventfd signalled on every cyclic-slot deposit so a blocked
+    /// cyclic waiter wakes immediately even when the poll thread consumed
+    /// the frame.  -1 when unavailable / non-Linux.
+    int cyclic_notify_fd_ = -1;
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION
     // IP identification counter for UDP encapsulation

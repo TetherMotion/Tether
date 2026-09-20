@@ -4,9 +4,14 @@
  */
 
 #include "tether/platform/IPlatformTimer.hpp"
+#include "tether/platform/IDeadlineTimer.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 #include "driver/gptimer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#include <atomic>
 
 namespace EtherCAT {
 namespace Platform {
@@ -209,6 +214,126 @@ private:
 std::unique_ptr<IPlatformTimer> createPlatformTimer()
 {
     return std::make_unique<ESP32Timer>();
+}
+
+// ============================================================================
+// Deadline timer — vTaskDelayUntil gives the same absolute-deadline
+// semantics as TIMER_ABSTIME on Linux (no drift, deadline skipping on
+// overrun is done manually since vTaskDelayUntil wakes immediately when
+// the deadline is in the past).
+// ============================================================================
+
+class ESP32DeadlineTimer : public IDeadlineTimer {
+public:
+    bool start(uint64_t period_ns) override {
+        return startAt(nowNs() + period_ns, period_ns);
+    }
+
+    bool startAt(uint64_t first_deadline_ns, uint64_t period_ns) override {
+        if (period_ns == 0) return false;
+        period_ns_   = period_ns;
+        next_ns_     = first_deadline_ns;
+        next_tick_   = xTaskGetTickCount();
+        running_.store(true, std::memory_order_release);
+        return true;
+    }
+
+    bool waitNext(Tick& out) override {
+        if (!running_.load(std::memory_order_acquire)) return false;
+
+        // FreeRTOS tick granularity limits how closely we can hit the
+        // ns deadline; convert the remaining sleep to ticks (min 0).
+        const int64_t now_us   = esp_timer_get_time();
+        const int64_t sleep_us = static_cast<int64_t>(next_ns_ / 1000ULL) - now_us;
+        if (sleep_us > 0) {
+            const TickType_t ticks =
+                static_cast<TickType_t>(sleep_us / (1000 * portTICK_PERIOD_MS)) + 1;
+            vTaskDelayUntil(&next_tick_, ticks);
+        }
+
+        const uint64_t woke = nowNs();
+        out.deadline_ns = next_ns_;
+        out.woke_ns     = woke;
+
+        uint64_t next = next_ns_ + period_ns_;
+        uint32_t missed = 0;
+        while (next <= woke) {
+            next += period_ns_;
+            ++missed;
+        }
+        out.missed = missed;
+        next_ns_   = next;
+        return running_.load(std::memory_order_acquire);
+    }
+
+    void requestStop() override {
+        running_.store(false, std::memory_order_release);
+        vTaskDelay(1);  // no-op hint; the task itself checks the flag
+    }
+
+    bool     isRunning() const override { return running_.load(std::memory_order_acquire); }
+    uint64_t periodNs()  const override { return period_ns_; }
+
+protected:
+    static uint64_t nowNs() {
+        return static_cast<uint64_t>(esp_timer_get_time()) * 1000ULL;
+    }
+
+    std::atomic<bool> running_{false};
+    uint64_t   period_ns_ = 0;
+    uint64_t   next_ns_   = 0;
+    TickType_t next_tick_ = 0;
+};
+
+/**
+ * Hybrid variant: vTaskDelayUntil for the bulk of the period, then spin on
+ * esp_timer_get_time() (a register read on ESP32) for the spin tail.
+ */
+class ESP32HybridDeadlineTimer : public ESP32DeadlineTimer {
+public:
+    explicit ESP32HybridDeadlineTimer(uint64_t spin_window_ns)
+        : spin_window_ns_(spin_window_ns) {}
+
+    bool waitNext(Tick& out) override {
+        if (!isRunning()) return false;
+        // Split the wait: task-delay the coarse part, then spin the tail.
+        const uint64_t target = next_ns_;
+        if (spin_window_ns_ > 0 && target > spin_window_ns_) {
+            const int64_t coarse_us =
+                static_cast<int64_t>((target - spin_window_ns_) / 1000ULL) -
+                esp_timer_get_time();
+            if (coarse_us > 0) {
+                const TickType_t ticks = static_cast<TickType_t>(
+                    coarse_us / (1000 * portTICK_PERIOD_MS)) + 1;
+                vTaskDelayUntil(&next_tick_, ticks);
+            }
+            while (esp_timer_get_time() < static_cast<int64_t>(target / 1000ULL) &&
+                   running_.load(std::memory_order_relaxed)) {
+            }
+        }
+        const uint64_t woke = nowNs();
+        out.deadline_ns = next_ns_;
+        out.woke_ns     = woke;
+        uint64_t next = next_ns_ + period_ns_;
+        uint32_t missed = 0;
+        while (next <= woke) { next += period_ns_; ++missed; }
+        out.missed = missed;
+        next_ns_   = next;
+        return running_.load(std::memory_order_acquire);
+    }
+
+private:
+    uint64_t spin_window_ns_;
+};
+
+std::unique_ptr<IDeadlineTimer> createDeadlineTimer()
+{
+    return std::make_unique<ESP32DeadlineTimer>();
+}
+
+std::unique_ptr<IDeadlineTimer> createHybridDeadlineTimer(uint64_t spin_window_ns)
+{
+    return std::make_unique<ESP32HybridDeadlineTimer>(spin_window_ns);
 }
 
 } // namespace Platform

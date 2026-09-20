@@ -9,6 +9,7 @@
 
 #include "PDOManager.hpp"
 #include "tether/ethercat/LogicalAddressManager.hpp"
+#include "tether/ethercat/ProcessImage.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/utils/ColoredBitsetFormatter.hpp"
 #include "tether/platform/EspCompat.hpp"
@@ -1412,6 +1413,43 @@ bool PDOManager::exchangeLRWSlice(uint32_t offset, uint32_t length) {
         }
     }
     return ok;
+}
+
+bool PDOManager::exchangeAllLRWCyclic(uint32_t rx_timeout_ns,
+                                      ProcessImage* image) {
+    if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
+        return exchangeAll();
+    }
+    const bool ok = logical_addr_mgr_->exchangeAllLRWCyclic(
+        mapping_, rx_timeout_ns, image);
+    if (ok) {
+        // Mirror the per-slave counters like exchangeLRWSlice() does.
+        for (const auto& s : logical_addr_mgr_->describeEntries(mapping_)) {
+            if (s.slave_index >= PDO::kMaxPDOSlaves) continue;
+            if (s.direction == PDO::PDODirection::RxPDO)
+                slave_configs_[s.slave_index].pdo_request_count++;
+            else
+                slave_configs_[s.slave_index].pdo_reply_count++;
+        }
+    }
+    return ok;
+}
+
+bool PDOManager::configureProcessImage(ProcessImage& image,
+                                       ImageMode mode) {
+    if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
+        return false;
+    }
+    int32_t offsets[ProcessImage::kMaxEntries];
+    const size_t n = logical_addr_mgr_->computeImageOffsets(
+        mapping_, offsets, ProcessImage::kMaxEntries);
+    ProcessImage::Config cfg;
+    cfg.mode          = mode;
+    cfg.rx_bytes      = logical_addr_mgr_->totalRxPDOBytes();
+    cfg.tx_bytes      = logical_addr_mgr_->totalTxPDOBytes();
+    cfg.entry_offsets = offsets;
+    cfg.entry_count   = n;
+    return image.configure(cfg);
 }
 
 uint32_t PDOManager::maxLogicalSliceLength() const {

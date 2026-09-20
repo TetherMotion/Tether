@@ -170,6 +170,19 @@ struct RxDatagram {
 };
 
 /**
+ * @brief Reserved datagram-index range for the cyclic fast path.
+ *
+ * Datagrams sent with an idx in [kCyclicSlotBaseIdx, kCyclicSlotBaseIdx +
+ * kNumCyclicSlots) are deposited into fixed per-slot mailboxes by the RX
+ * parser instead of going through TransactionRouter — no mutex, no
+ * condition variable on the cyclic hot path.  allocIdx() never returns an
+ * index >= kCyclicSlotBaseIdx (which also reserves 0xFE fire-and-forget).
+ * (IPDOTransport exposes the same values as kCyclicSlotBase/kNumCyclicSlots.)
+ */
+inline constexpr uint8_t kCyclicSlotBaseIdx = 0xF8;
+inline constexpr size_t  kNumCyclicSlots    = 6;   ///< slots 0xF8..0xFD
+
+/**
  * @brief Specification for a single datagram within a multi-datagram frame
  *
  * Used by Master::sendMultiDatagram() to pack multiple datagrams into one

@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <functional>
 #include <format>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,7 @@
 namespace EtherCAT {
 
 class IPDOTransport;
+class ProcessImage;    // defined in ProcessImage.hpp
 
 class LogicalAddressManager {
 public:
@@ -123,6 +125,41 @@ public:
      * @return true if the LRW exchange succeeded (sent + response received)
      */
     bool exchangeAllLRW(const PDO::PDOMapping& mapping);
+
+    /**
+     * @brief Whole-image LRW exchange over the transport's cyclic fast path.
+     *
+     * Same semantics as exchangeAllLRW() but uses the reserved-index slot
+     * bank: the datagram is sent on a fixed reserved index and the response
+     * is collected from a fixed deposit slot — no TransactionRouter
+     * round-trip, no condition variable, and the payload is staged in a
+     * persistent buffer instead of a large stack array.
+     *
+     * Falls back to exchangeAllLRW() when the transport does not implement
+     * the fast path.
+     *
+     * @param mapping        PDOMapping with all PDO entries
+     * @param rx_timeout_ns  Response wait budget in ns (default 200 µs).
+     *                       Must fit inside the caller's cycle budget.
+     * @return true on success
+     */
+    bool exchangeAllLRWCyclic(const PDO::PDOMapping& mapping,
+                              uint32_t rx_timeout_ns = 200'000,
+                              ProcessImage* image = nullptr);
+
+    /**
+     * @brief Compute each mapping entry's byte offset in the LRW process
+     *        image for ProcessImage::configure().
+     *
+     * Entries sharing a byte with a neighbour (bit-packed PDOs) or flagged
+     * @c PDOEntry::image_exclude (FSoE-managed) are marked -1 — they stay
+     *        on the app_buffer path in image modes.
+     *
+     * @return number of entries written (== mapping.entry_count(), clamped
+     *         to @p cap)
+     */
+    size_t computeImageOffsets(const PDO::PDOMapping& mapping,
+                               int32_t* out, size_t cap) const;
 
     /**
      * @brief Build and send an LRW datagram for specific slaves only.
@@ -244,6 +281,14 @@ private:
     bool exchangeLRWImpl(const PDO::PDOMapping& mapping,
                          uint32_t offset, uint32_t length,
                          bool enforce_slice_limit);
+
+    /// Persistent LRW payload for the cyclic fast path — allocated at
+    /// buildAddressMap() time (or lazily on first cyclic exchange), sized to
+    /// the total process image.  Avoids the ~64 KiB stack buffer the router
+    /// path uses per call.
+    std::unique_ptr<uint8_t[]> cyclic_payload_;
+    uint32_t cyclic_payload_size_{0};
+    void ensureCyclicPayload(uint32_t size);
 
     /// Build the log prefix for a slave (uses prefix_provider_ if set, else default)
     std::string slavePrefix(uint16_t idx) const {
