@@ -29,7 +29,7 @@
 #include <vector>
 
 #include "tether/platform/EspCompat.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/SMRegisters.hpp"

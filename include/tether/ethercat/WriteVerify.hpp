@@ -37,7 +37,7 @@
 #include <cstddef>
 #include <cstring>
 
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 namespace EtherCAT {
 namespace Verify {
@@ -236,7 +236,7 @@ public:
 class WriteVerifier {
 public:
     /// Maximum data length for a single write-verify operation.
-    /// Configurable via ECAT_WRITE_VERIFY_MAX_DATA_LEN in TetherConfig.hpp.
+    /// Configurable via ECAT_WRITE_VERIFY_MAX_DATA_LEN in EtherCATConfig.hpp.
     /// This is a Tether-internal stack buffer limit.
     static constexpr uint16_t kMaxDataLen = ECAT_WRITE_VERIFY_MAX_DATA_LEN;
 

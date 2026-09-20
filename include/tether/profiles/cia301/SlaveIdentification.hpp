@@ -50,7 +50,7 @@
 #include <cstddef>
 #include <cstring>
 #include "profiles/cia301/CiA301Defs.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 namespace EtherCAT {
 class Master;  // forward declaration

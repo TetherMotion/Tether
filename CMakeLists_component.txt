@@ -21,9 +21,48 @@ elseif(NOT EXISTS "${SUBMODULE_PATH}/include/SLIPStream/Buffer.hpp")
     )
 endif()
 
+# =============================================================================
+# Generated config header (tether/TetherConfig.hpp)
+# =============================================================================
+# Map Kconfig (sdkconfig) options onto the TETHER_ENABLE_* variables consumed
+# by TetherConfig.hpp.in, then generate the header into the component build
+# directory — the same file the standalone CMake build produces. This makes
+# the generated header (not per-flag compile definitions) the single source
+# of truth on the ESP-IDF path as well.
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/TetherVersion.cmake)
+set(Tether_VERSION_MAJOR ${TETHER_VERSION_MAJOR})
+set(Tether_VERSION_MINOR ${TETHER_VERSION_MINOR})
+set(Tether_VERSION_PATCH ${TETHER_VERSION_PATCH})
+set(Tether_VERSION       ${TETHER_VERSION})
+
+foreach(_f IN ITEMS
+        ETHERCAT CIA301 CIA401 CIA402 CIA404 CIA405 CIA406 CIA408 CIA410
+        CIA417 CIA430 GCODE MOTION CONTROL FSOE KLIPPER KLIPPER_CAN
+        KLIPPER_HTTP PRESSURE_ADVANCE KINEMATICS SII)
+    if(CONFIG_TETHER_ENABLE_${_f})
+        set(TETHER_ENABLE_${_f} ON)
+    else()
+        set(TETHER_ENABLE_${_f} OFF)
+    endif()
+endforeach()
+
+# Platform / HAL selection on ESP32
+set(TETHER_ENABLE_HAL       ON)
+set(TETHER_ENABLE_ESP32_HAL ON)
+set(TETHER_ENABLE_STM32_HAL OFF)
+set(TETHER_ENABLE_LINUX_HAL OFF)
+set(TETHER_PLATFORM_LINUX   OFF)
+set(TETHER_PLATFORM_WINDOWS OFF)
+set(TETHER_PLATFORM_MACOS   OFF)
+
+configure_file(
+    ${CMAKE_CURRENT_LIST_DIR}/include/tether/TetherConfig.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/include/tether/TetherConfig.hpp
+)
+
 # Collect sources based on Kconfig options
 set(TETHER_SRCS "")
-set(TETHER_INCLUDE_DIRS "include")
+set(TETHER_INCLUDE_DIRS "include" "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 
 # Always include shared sources
 file(GLOB_RECURSE SHARED_SRCS "src/shared/*.cpp")
@@ -190,60 +229,26 @@ set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 20)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_EXTENSIONS ON)
 
-# Add compile definitions based on Kconfig
+# Compile definitions that are NOT covered by the generated TetherConfig.hpp.
+# All TETHER_ENABLE_* feature flags now come from the generated header
+# (configure_file above), not from per-flag compile definitions.
 target_compile_definitions(${COMPONENT_LIB} PUBLIC
     TETHER_ESP32=1
     GCODE_STANDALONE_CAPI=1
 )
 
-# Force-enable EtherCAT for local coverage builds when Kconfig is not processed
-# (safe: this only defines the compile-time flag so host stubs are not compiled)
-target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_ETHERCAT=1)
+# When this file is configured outside a real ESP-IDF build (e.g. local
+# coverage runs where Kconfig is not processed), the generated header reports
+# every feature as disabled. Preserve the historical behavior of
+# force-enabling the EtherCAT flag in that case only; under a real IDF build
+# CONFIG_TETHER_ENABLE_ETHERCAT is always defined and the Kconfig value rules.
+if(NOT DEFINED CONFIG_TETHER_ENABLE_ETHERCAT)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_ETHERCAT=1)
+endif()
 
 if(CONFIG_TETHER_ENABLE_ETHERCAT)
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_ETHERCAT=1)
     # Indicate we are compiling the full EtherCAT master implementation.
     target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_COMPILE_MASTER=1)
-endif()
-
-if(CONFIG_TETHER_ENABLE_CIA402)
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_CIA402=1)
-endif()
-
-if(CONFIG_TETHER_ENABLE_CIA301)
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_CIA301=1)
-endif()
-
-if(CONFIG_TETHER_ENABLE_CIA401)
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_CIA401=1)
-endif()
-
-if(CONFIG_TETHER_ENABLE_CIA406)
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_CIA406=1)
-endif()
-
-if(CONFIG_TETHER_ENABLE_GCODE)
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_GCODE=1)
-endif()
-
-if(CONFIG_TETHER_ENABLE_MOTION)
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_MOTION=1)
-endif()
-
-if(CONFIG_TETHER_ENABLE_CONTROL)
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_CONTROL=1)
-endif()
-
-if(CONFIG_TETHER_ENABLE_FSOE)
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_FSOE=1)
-endif()
-
-if(CONFIG_TETHER_ENABLE_KINEMATICS)
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_KINEMATICS=1)
-endif()
-
-if(CONFIG_TETHER_ENABLE_KLIPPER)
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC TETHER_ENABLE_KLIPPER=1)
 endif()
 
 # Per-driver compile definitions (including header-only drivers)

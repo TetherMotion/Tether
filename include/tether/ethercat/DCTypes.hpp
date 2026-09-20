@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <vector>
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 namespace EtherCAT {
 

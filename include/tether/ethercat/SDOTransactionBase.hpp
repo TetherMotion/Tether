@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 namespace EtherCAT { class Master; }
 

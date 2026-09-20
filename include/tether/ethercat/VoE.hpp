@@ -103,12 +103,12 @@
  * VoE requests are processed by the SDO background task. The queue is
  * thread-safe for submitting requests from any context.
  * 
- * @note Configure VoE in TetherConfig.hpp with ECAT_FEATURE_VOE_ENABLED
+ * @note Configure VoE in EtherCATConfig.hpp with ECAT_FEATURE_VOE_ENABLED
  */
 
 #pragma once
 
-#include "TetherConfig.hpp"
+#include "EtherCATConfig.hpp"
 
 #if ECAT_FEATURE_VOE_ENABLED
 

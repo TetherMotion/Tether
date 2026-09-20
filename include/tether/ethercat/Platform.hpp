@@ -11,7 +11,7 @@
  * ## Platform Selection
  * 
  * The platform is selected automatically based on ECAT_PLATFORM_FILESYSTEM
- * in TetherConfig.hpp. Supported platforms:
+ * in EtherCATConfig.hpp. Supported platforms:
  * 
  * - **ESP32 + LittleFS** (ECAT_PLATFORM_ESP32_LITTLEFS): Default for ESP32
  * - **ESP32 + SPIFFS** (ECAT_PLATFORM_ESP32_SPIFFS): Legacy ESP32
@@ -49,7 +49,7 @@
 
 #pragma once
 
-#include "TetherConfig.hpp"
+#include "EtherCATConfig.hpp"
 
 #include <cstdint>
 #include <cstddef>

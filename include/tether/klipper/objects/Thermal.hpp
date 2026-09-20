@@ -17,6 +17,12 @@
 
 #pragma once
 
+// Generated feature flags (TETHER_ENABLE_*). Including it here keeps
+// feature-gated declarations identical between the library and consumers.
+#if __has_include("tether/TetherConfig.hpp")
+#include "tether/TetherConfig.hpp"
+#endif
+
 #include "tether/control/PIDControllers.hpp"
 #if TETHER_ENABLE_PRESSURE_ADVANCE
 #include "tether/control/extrusion/FlowAdaptiveHeaterController.hpp"

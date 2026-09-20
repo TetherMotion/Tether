@@ -69,7 +69,7 @@ int PDOMapping::add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
     if (m_entry_count >= kMaxPDOEntries) {
         TETHER_LOGE(TAG,
             "Tether internal PDO entry limit reached ({} entries). This is a Tether limit, "
-            "not a slave limit. Increase ECAT_PDO_MAX_ENTRIES in TetherConfig.hpp.",
+            "not a slave limit. Increase ECAT_PDO_MAX_ENTRIES in EtherCATConfig.hpp.",
             kMaxPDOEntries);
         return -1;
     }
@@ -79,7 +79,7 @@ int PDOMapping::add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
             size,
             (size > kMaxPDOSize)
                 ? "This is a Tether limit, not a slave limit. "
-                  "Increase ECAT_PDO_MAX_BUFFER_SIZE in TetherConfig.hpp."
+                  "Increase ECAT_PDO_MAX_BUFFER_SIZE in EtherCATConfig.hpp."
                 : "Buffer is null or size is zero.");
         return -1;
     }
@@ -106,7 +106,7 @@ int PDOMapping::add_txpdo(uint16_t slave_index, void* buffer, uint16_t size,
     if (m_entry_count >= kMaxPDOEntries) {
         TETHER_LOGE(TAG,
             "Tether internal PDO entry limit reached ({} entries). This is a Tether limit, "
-            "not a slave limit. Increase ECAT_PDO_MAX_ENTRIES in TetherConfig.hpp.",
+            "not a slave limit. Increase ECAT_PDO_MAX_ENTRIES in EtherCATConfig.hpp.",
             kMaxPDOEntries);
         return -1;
     }
@@ -116,7 +116,7 @@ int PDOMapping::add_txpdo(uint16_t slave_index, void* buffer, uint16_t size,
             size,
             (size > kMaxPDOSize)
                 ? "This is a Tether limit, not a slave limit. "
-                  "Increase ECAT_PDO_MAX_BUFFER_SIZE in TetherConfig.hpp."
+                  "Increase ECAT_PDO_MAX_BUFFER_SIZE in EtherCATConfig.hpp."
                 : "Buffer is null or size is zero.");
         return -1;
     }

@@ -80,7 +80,7 @@
 #endif
 
 // Include configuration first
-#include "TetherConfig.hpp"
+#include "EtherCATConfig.hpp"
 
 // Class-based master API (new)
 #include "Master.hpp"

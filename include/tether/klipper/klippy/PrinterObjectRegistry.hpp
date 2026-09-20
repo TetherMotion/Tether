@@ -15,6 +15,12 @@
 
 #pragma once
 
+// Generated feature flags (TETHER_ENABLE_*). Including it here keeps
+// feature-gated declarations identical between the library and consumers.
+#if __has_include("tether/TetherConfig.hpp")
+#include "tether/TetherConfig.hpp"
+#endif
+
 #include "tether/klipper/klippy/PrinterObjects.hpp"
 #include "tether/klipper/klippy/PrinterObjectsE2.hpp"
 #include "tether/klipper/klippy/VirtualSdcard.hpp"

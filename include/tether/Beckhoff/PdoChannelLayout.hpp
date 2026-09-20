@@ -23,7 +23,7 @@
 #include <span>
 #include <vector>
 
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 #if TETHER_ENABLE_SII
 #include "tether/sii/SIIParser.hpp"

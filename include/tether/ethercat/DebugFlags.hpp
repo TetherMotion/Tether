@@ -9,6 +9,13 @@
 #include <string>
 #include <vector>
 
+// Generated feature flags (TETHER_ENABLE_FSOE gates members below — the flag
+// must be visible to every TU that includes this header or the struct layout
+// would differ between the library and its consumers).
+#if __has_include("tether/TetherConfig.hpp")
+#include "tether/TetherConfig.hpp"
+#endif
+
 #include "tether/ethercat/DebugGate.hpp"
 
 namespace EtherCAT {
@@ -89,7 +96,7 @@ struct EtherCATSlaveDebugFlags {
     bool dc = false;
     bool pdoConfiguration = false;
     bool shutdown = false;
-#ifdef TETHER_ENABLE_FSOE
+#if TETHER_ENABLE_FSOE
     bool fsoe = false;
     bool fsoeFrame = false;
     bool fsoeRaw = false;
@@ -128,7 +135,7 @@ public:
     bool pdoConfiguration = false;
     bool shutdown = false;
 
-#ifdef TETHER_ENABLE_FSOE
+#if TETHER_ENABLE_FSOE
     // FSoE-specific debug flags (per-slave filterable)
     bool fsoe = false;
     bool fsoeFrame = false;
@@ -157,7 +164,7 @@ public:
     SlaveFilter dcFilt;
     SlaveFilter pdoConfigurationFilt;
     SlaveFilter shutdownFilt;
-#ifdef TETHER_ENABLE_FSOE
+#if TETHER_ENABLE_FSOE
     SlaveFilter fsoeFilt;
     SlaveFilter fsoeFrameFilt;
     SlaveFilter fsoeRawFilt;
@@ -180,7 +187,7 @@ public:
                fmmu || siiEeprom || eeprom || coeReads || coeWrites || coeRxPackets ||
                coeTxPackets || verifyPreOp || verifySafeOp || pdoSm || dc ||
                pdoConfiguration || shutdown
-#ifdef TETHER_ENABLE_FSOE
+#if TETHER_ENABLE_FSOE
                || fsoe || fsoeFrame || fsoeRaw || fsoeWire || fsoeSequence || fsoeCrc
                || fsoeSlaveState
 #endif
@@ -215,7 +222,7 @@ public:
         s.dc            = dc && dcFilt.allows(slave_index);
         s.pdoConfiguration = pdoConfiguration && pdoConfigurationFilt.allows(slave_index);
         s.shutdown      = shutdown && shutdownFilt.allows(slave_index);
-#ifdef TETHER_ENABLE_FSOE
+#if TETHER_ENABLE_FSOE
         s.fsoe          = fsoe && fsoeFilt.allows(slave_index);
         s.fsoeFrame     = fsoeFrame && fsoeFrameFilt.allows(slave_index);
         s.fsoeRaw       = fsoeRaw && fsoeRawFilt.allows(slave_index);

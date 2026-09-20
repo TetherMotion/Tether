@@ -54,7 +54,7 @@
 #include "profiles/cia301/CiA402Defs.hpp"
 #include "tether/drives/DynaDrive/Registers/Statusword.hpp"
 #include "tether/drives/DynaDrive/Registers/Controlword.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 #include "tether/ethercat/Slave.hpp"  // for Slave::MultiPDOAssignment
 #include "tether/ethercat/Master.hpp" // for Master::slaveLogPrefix()
 #include "tether/profiles/cia402/CiA402StateUtils.hpp"  // ECState, DriveState, getECStateName, etc.

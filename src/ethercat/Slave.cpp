@@ -292,7 +292,7 @@ SlaveError Slave::configurePDOSyncManagers(
         TETHER_LOGE( TAG,
             "{}: Index exceeds Tether internal max PDO slaves ({}). "
             "This is a Tether limit, not a slave limit. "
-            "Increase ECAT_PDO_MAX_SLAVES in TetherConfig.hpp.",
+            "Increase ECAT_PDO_MAX_SLAVES in EtherCATConfig.hpp.",
             logPrefix().c_str(), PDO::kMaxPDOSlaves);
         return SlaveError::PDOConfigFailed;
     }

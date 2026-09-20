@@ -62,7 +62,7 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
         TETHER_LOGE(TAG,
             "buildAddressMap: slave_count {} exceeds Tether internal max {}. "
             "This is a Tether limit, not a slave limit. "
-            "Increase ECAT_PDO_MAX_SLAVES in TetherConfig.hpp.",
+            "Increase ECAT_PDO_MAX_SLAVES in EtherCATConfig.hpp.",
             slave_count, PDO::kMaxPDOSlaves);
         return false;
     }
@@ -374,7 +374,7 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
         TETHER_LOGE(TAG,
             "exchangeLRW: total data {} exceeds Tether internal buffer capacity "
             "(max={} = {} bytes/slave * {} slaves). This is a Tether limit, not a slave limit. "
-            "Increase ECAT_PDO_MAX_BUFFER_SIZE or ECAT_PDO_MAX_SLAVES in TetherConfig.hpp.",
+            "Increase ECAT_PDO_MAX_BUFFER_SIZE or ECAT_PDO_MAX_SLAVES in EtherCATConfig.hpp.",
             total_data, kMaxLRWPayload,
             PDO::kMaxPDOSize, PDO::kMaxPDOSlaves);
         stats_.send_errors++;

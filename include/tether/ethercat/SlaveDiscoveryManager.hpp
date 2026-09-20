@@ -67,7 +67,7 @@
 
 #pragma once
 
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 #include <cstdint>
 #include <future>

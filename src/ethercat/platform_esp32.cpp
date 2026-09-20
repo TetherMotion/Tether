@@ -7,7 +7,7 @@
  */
 
 #include "Platform.hpp"
-#include "TetherConfig.hpp"
+#include "EtherCATConfig.hpp"
 
 #if defined(ESP_PLATFORM)
 

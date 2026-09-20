@@ -32,7 +32,7 @@
 #include <optional>
 
 #include "tether/ethercat/ESITypes.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 namespace EtherCAT {
 

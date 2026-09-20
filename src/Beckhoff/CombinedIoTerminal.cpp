@@ -10,7 +10,7 @@
 #include "tether/Beckhoff/PdoChannelLayout.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 #include "tether/platform/Platform.hpp"
 
 #if TETHER_ENABLE_SII

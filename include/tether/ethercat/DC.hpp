@@ -19,7 +19,7 @@
 
 #include "tether/platform/EspCompat.hpp"
 #include "tether/platform/IPlatformTimer.hpp"
-#include "tether/ethercat/TetherConfig.hpp"
+#include "tether/ethercat/EtherCATConfig.hpp"
 
 namespace EtherCAT {
 
