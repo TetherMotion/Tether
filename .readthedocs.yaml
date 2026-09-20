@@ -15,7 +15,10 @@ build:
   jobs:
     # Breathe reads Doxygen XML from build/xml (see breathe_projects in
     # docs/conf.py); the Doxyfile's XML_OUTPUT matches that path.
+    # Doxygen cannot create nested output directories, so the parent
+    # build/ dir (gitignored, absent on fresh clones) must exist first.
     pre_build:
+      - mkdir -p build/xml
       - doxygen Doxyfile
 
 # Build documentation in the "docs/" directory with Sphinx

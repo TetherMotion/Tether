@@ -32,7 +32,6 @@ INTERNAL_DOCS          = NO
 CASE_SENSE_NAMES       = YES
 HIDE_SCOPE_NAMES       = NO
 SHOW_INCLUDE_FILES     = YES
-SHOW_GROUPED_MEMBRS    = YES
 INLINE_INFO            = YES
 SORT_MEMBER_DOCS       = YES
 SORT_BRIEF_DOCS        = NO
@@ -91,7 +90,6 @@ VERBATIM_HEADERS       = YES
 # Configuration options related to the alphabetical class index
 # -------------------------------------------------------------------------
 ALPHABETICAL_INDEX     = YES
-COLS_IN_ALPHA_INDEX    = 5
 IGNORE_PREFIX          = 
 
 # -------------------------------------------------------------------------
@@ -116,8 +114,6 @@ GENERATE_LATEX         = NO
 # -------------------------------------------------------------------------
 GENERATE_XML           = YES
 XML_OUTPUT             = build/xml
-XML_SCHEMA             =
-XML_DTD                =
 XML_PROGRAMLISTING     = YES
 
 # -------------------------------------------------------------------------
@@ -140,17 +136,12 @@ TAGFILES               =
 GENERATE_TAGFILE       =
 ALLEXTERNALS           = NO
 EXTERNAL_GROUPS        = YES
-PERL_PATH              = /usr/bin/perl
 
 # -------------------------------------------------------------------------
 # Configuration options related to the dot tool
 # -------------------------------------------------------------------------
-CLASS_DIAGRAMS         = NO
-MSCGEN_PATH            = 
 HAVE_DOT               = NO
 DOT_NUM_THREADS        = 0
-DOT_FONTNAME           = Helvetica
-DOT_FONTSIZE           = 10
 CLASS_GRAPH            = NO
 COLLABORATION_GRAPH    = NO
 GROUP_GRAPHS           = NO
@@ -170,7 +161,6 @@ DOTFILE_DIRS           =
 MSCFILE_DIRS           =
 DOT_GRAPH_MAX_NODES    = 50
 MAX_DOT_GRAPH_DEPTH    = 0
-DOT_TRANSPARENT        = NO
 DOT_MULTI_TARGETS      = NO
 GENERATE_LEGEND        = NO
 DOT_CLEANUP            = YES
