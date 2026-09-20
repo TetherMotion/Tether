@@ -107,10 +107,15 @@ HTML_EXTRA_STYLESHEET  =
 HTML_EXTRA_FILES       = 
 
 # -------------------------------------------------------------------------
+# Configuration options related to LaTeX output
+# -------------------------------------------------------------------------
+GENERATE_LATEX         = NO
+
+# -------------------------------------------------------------------------
 # Configuration options related to the XML output
 # -------------------------------------------------------------------------
 GENERATE_XML           = YES
-XML_OUTPUT             = ../build/xml
+XML_OUTPUT             = build/xml
 XML_SCHEMA             =
 XML_DTD                =
 XML_PROGRAMLISTING     = YES

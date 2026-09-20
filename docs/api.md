@@ -15,26 +15,15 @@ The Tether library is a modular C++ library for EtherCAT motion control. It prov
 
 ## Core Classes
 
-### Example Class Documentation
-
-Below is an example of how to document C++ classes using Breathe directives in Markdown.
-
-```{doxygenclass} MyClass
-:members:
-:protected-members:
-:private-members:
-:undoc-members:
-```
-
 ### EtherCAT Master
 
-```{doxygenclass} Master
+```{doxygenclass} EtherCAT::Master
 :members:
 ```
 
 ### Motion Controller
 
-```{doxygenclass} MotionController
+```{doxygenclass} tether::motion::Cia402MotionController
 :members:
 ```
 
@@ -48,45 +37,35 @@ Below is an example of how to document C++ classes using Breathe directives in M
 
 ### Hardware Abstraction Layer
 
-```{doxygenclass} HAL
+```{doxygennamespace} EtherCAT::HAL
 :members:
 ```
 
 ### Control Algorithms
 
-```{doxygenclass} PIDController
+```{doxygenclass} tether::control::PIDController
 :members:
 ```
 
 ### G-code Interpreter
 
-```{doxygenclass} GCodeParser
+```{doxygenclass} GCode::Parser
 :members:
 ```
 
 ### Motion Planning
 
-```{doxygenclass} MotionPlanner
+```{doxygenclass} MotionPlanner::MotionPlanBuilder
 :members:
 ```
 
 ### EtherCAT Components
 
-#### Common Types
-
-```{doxygennamespace} tether::ethercat
-:members:
-```
-
-#### Master Implementation
-
-```{doxygenclass} Master
-:members:
-```
+The `EtherCAT::Master` class is documented under [Core Classes](#core-classes) above.
 
 #### Slave Emulation
 
-```{doxygenclass} Slave
+```{doxygenclass} EtherCAT::Slave
 :members:
 ```
 
@@ -148,7 +127,7 @@ void setupMotionControl() {
 
 For more detailed information on specific components, see:
 
-- [EtherCAT Inventory](ETHERCAT_INVENTORY.md)
+- [PDO Modes](PDOModes.md)
 - [IO Protocol](IOProtocol.md)
 - [Motion Replanner](MotionReplanner.md)
 - [HAL Porting Guide](HAL_PORTING_GUIDE.md)

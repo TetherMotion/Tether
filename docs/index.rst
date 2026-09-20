@@ -5,37 +5,79 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: API Reference
 
    api
-   ETHERCAT_INVENTORY
+
+.. toctree::
+   :maxdepth: 2
+   :caption: EtherCAT & HAL
+
    EXTRACT_ESI
    HAL_PORTING_GUIDE
-   CrossCompiling
+   PDOModes
+   FSoECrcResync
    IOProtocol
    IOProtocolWireFormat
+   CrossCompiling
    ModelIdentification
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Motion
+
    MotionReplanner
+   SnapSpaceVelocityProfiler
+   motion/Architecture
    motion/GeometryFoundations
    motion/BlendingAlgorithm
-   motion/Architecture
    motion/MotionChain
    motion/VelocityProfilerSelection
    motion/CertificationPath
    motion/ToppraDerivation
+   motion/AnalyticalTOPPRA
    motion/AlgorithmComparison
+   motion/ParetoTimeEnergyOptimal
+   motion/WeightedSwitchingStructure
    motion/ImplementationGuide
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Klipper
+
+   KlipperArchitecture
    KlipperProtocol
    KlipperTerminology
    KlipperGcodeCommands
-   KlipperMoonrakerApi
    KlipperPrinterObjects
+   KlipperMoonrakerApi
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Extrusion
+
    extrusion/NonNewtonianPressureAdvance
-   extrusion/FlowAdaptiveTemperatureControl
+   extrusion/AnalyticalExtrusionCompensation
    extrusion/RheologyModels
    extrusion/DeconvolutionControllers
    extrusion/LPVDeconvolution
-   GLOBAL_STATE
+   extrusion/FlowAdaptiveTemperatureControl
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Simulation
+
+   simulation/aerospace_systems
+   simulation/biological_systems
+   simulation/chaotic_systems
+   simulation/chemical_systems
+   simulation/delay_systems
+   simulation/electrical_systems
+   simulation/fluid_systems
+   simulation/mechanical_systems
+   simulation/rotational_systems
+   simulation/system_identification_benchmarks
+   simulation/thermal_systems
 
 Overview
 --------
