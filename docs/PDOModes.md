@@ -471,7 +471,7 @@ All modes update the same `TransferStats` structure, accessible via `pdo.getStat
 
 ## See Also
 
-- [Tether API Documentation](api.md)
+- [Tether API Reference](api/library_root.rst)
 - [HAL Porting Guide](HAL_PORTING_GUIDE.md)
 - [IO Protocol](IOProtocol.md)
 - `include/tether/ethercat/PDOModes.hpp` — Type definitions

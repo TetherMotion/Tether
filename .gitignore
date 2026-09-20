@@ -44,3 +44,8 @@ test_output/
 
 # Devin local config (machine-specific, not for commit)
 .devin/config.local.json
+
+# Sphinx/Exhale generated docs artifacts
+docs/api/
+docs/_doxygen/
+docs/_build/

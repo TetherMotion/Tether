@@ -5,6 +5,7 @@ on:
     branches: [ main, master, develop ]
   pull_request:
     branches: [ main, master, develop ]
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -515,23 +516,19 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y doxygen
+        sudo apt-get install -y doxygen graphviz
         python3 -m pip install -r docs/requirements.txt
 
-    - name: Generate Doxygen XML
-      # Breathe consumes the XML at build/xml (see docs/conf.py
-      # breathe_projects); XML_OUTPUT in the Doxyfile matches that path.
-      # Doxygen cannot create nested output directories, so the parent
-      # build/ dir (gitignored, absent on fresh clones) must exist first.
-      run: |
-        mkdir -p build/xml
-        doxygen Doxyfile
-
     - name: Build HTML documentation
+      # Exhale executes Doxygen automatically during the Sphinx build
+      # (exhaleExecutesDoxygen in docs/conf.py) and generates the full
+      # API .rst tree under docs/api/ — no separate doxygen step needed.
+      # -j auto parallelizes reading/writing across the runner's cores
+      # (ubuntu-latest: 4 vCPUs), which matters at ~13k generated pages.
       # -W --keep-going: treat Sphinx/Breathe warnings (missing toctree
       # entries, unresolved doxygenclass targets, dead myst xrefs) as
       # errors so the docs can't silently rot again.
-      run: sphinx-build -W --keep-going -b html docs build/docs/html
+      run: sphinx-build -W --keep-going -j auto -b html docs build/docs/html
 
     - name: Upload documentation artifact
       uses: actions/upload-artifact@v7
