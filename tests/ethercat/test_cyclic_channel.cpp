@@ -1167,15 +1167,18 @@ TEST_F(RingChannelMemoryTest, RxPendingTracksDeliverable) {
 }
 
 TEST_F(RingChannelMemoryTest, TxAcquireCommitCycle) {
+    // The kernel reads SOCK_RAW TX frames at the fixed offset
+    // tp_hdrlen - sizeof(sockaddr_ll) (= 32), not TPACKET2_HDRLEN.
+    constexpr uint32_t kTxOff = TPACKET2_HDRLEN - sizeof(struct sockaddr_ll);
     uint8_t* dst = ch_->txAcquire();
     ASSERT_NE(dst, nullptr);
-    EXPECT_EQ(dst, tx_mem_.get() + TPACKET2_HDRLEN);   // slot 0 data area
+    EXPECT_EQ(dst, tx_mem_.get() + kTxOff);   // slot 0 data area
     std::memset(dst, 0x5A, 42);
     EXPECT_TRUE(ch_->txCommitFrame(42));   // pads to 60; kick on socketpair
     EXPECT_EQ(txSlot(0)->tp_status,
               static_cast<uint32_t>(TP_STATUS_SEND_REQUEST));
     EXPECT_EQ(txSlot(0)->tp_len, 60u);
-    EXPECT_EQ(txSlot(0)->tp_mac, static_cast<uint16_t>(TPACKET2_HDRLEN));
+    EXPECT_EQ(txSlot(0)->tp_mac, static_cast<uint16_t>(kTxOff));
     EXPECT_EQ(ch_->txDeferred(), 0u);
 }
 
@@ -1310,32 +1313,64 @@ TEST_F(LivePacketTest, KernelDemuxOnLoopback) {
         ASSERT_EQ(sendto(tx, f, sizeof(f), 0, (sockaddr*)&ll, sizeof(ll)),
                   (ssize_t)sizeof(f));
     };
-    auto got = [&](int fd) -> bool {
+    // Loopback carries ambient traffic (ND/ARP/other suite frames) on an
+    // ETH_P_ALL socket, so "did we receive anything" is not a valid demux
+    // check — inspect the received frame's idx + ethertype instead.  Returns
+    // the number of received frames whose datagram idx equals `want_idx` and
+    // whose ethertype is EtherCAT (or `any` when want_idx<0).
+    auto countIdx = [&](int fd, int want_idx, int window_ms) {
+        int n = 0;
         uint8_t b[2048];
-        pollfd p{fd, POLLIN, 0};
-        if (poll(&p, 1, 300) <= 0) return false;
-        return recv(fd, b, sizeof(b), 0) > 0;
+        const auto end = std::chrono::steady_clock::now() +
+                         std::chrono::milliseconds(window_ms);
+        while (std::chrono::steady_clock::now() < end) {
+            pollfd p{fd, POLLIN, 0};
+            if (poll(&p, 1, 20) <= 0) continue;
+            ssize_t len = recv(fd, b, sizeof(b), 0);
+            if (len <= 18) continue;
+            if (want_idx < 0) { ++n; continue; }
+            if (b[12] == 0x88 && b[13] == 0xA4 && b[17] == want_idx) ++n;
+        }
+        return n;
     };
+    // A received frame is a cyclic ECAT datagram iff ethertype 0x88A4 and
+    // idx in [0xF8,0xFD].
+    auto countCyclic = [&](int fd, int window_ms) {
+        int n = 0;
+        uint8_t b[2048];
+        const auto end = std::chrono::steady_clock::now() +
+                         std::chrono::milliseconds(window_ms);
+        while (std::chrono::steady_clock::now() < end) {
+            pollfd p{fd, POLLIN, 0};
+            if (poll(&p, 1, 20) <= 0) continue;
+            ssize_t len = recv(fd, b, sizeof(b), 0);
+            if (len > 18 && b[12] == 0x88 && b[13] == 0xA4 &&
+                b[17] >= 0xF8 && b[17] <= 0xFD) ++n;
+        }
+        return n;
+    };
+    // Drain ambient traffic so stale frames don't skew the assertions.
+    countIdx(cyc, -1, 120); countIdx(asy, -1, 120);
 
-    sendFrame(0xF8);
-    EXPECT_TRUE(got(cyc));
-    EXPECT_FALSE(got(asy));
+    sendFrame(0xF8);                          // cyclic → cyclic socket only
+    EXPECT_EQ(countIdx(cyc, 0xF8, 300), 1);
+    EXPECT_EQ(countCyclic(asy, 300), 0);
 
-    sendFrame(0x42);
-    EXPECT_FALSE(got(cyc));
-    EXPECT_TRUE(got(asy));
+    sendFrame(0x42);                          // async idx → async socket only
+    EXPECT_EQ(countIdx(cyc, 0x42, 300), 0);
+    EXPECT_EQ(countIdx(asy, 0x42, 300), 1);
 
-    sendFrame(0xFD);
-    EXPECT_TRUE(got(cyc));
-    EXPECT_FALSE(got(asy));
+    sendFrame(0xFD);                          // top of cyclic range
+    EXPECT_EQ(countIdx(cyc, 0xFD, 300), 1);
+    EXPECT_EQ(countCyclic(asy, 300), 0);
 
-    sendFrame(0xFE);
-    EXPECT_FALSE(got(cyc));
-    EXPECT_TRUE(got(asy));
+    sendFrame(0xFE);                          // just above range → async
+    EXPECT_EQ(countCyclic(cyc, 300), 0);
+    EXPECT_EQ(countIdx(asy, 0xFE, 300), 1);
 
-    sendFrame(0xF8, 0x0800);                 // non-ECAT ethertype
-    EXPECT_FALSE(got(cyc));
-    EXPECT_TRUE(got(asy));
+    sendFrame(0xF8, 0x0800);                  // cyclic idx but non-ECAT type
+    EXPECT_EQ(countCyclic(cyc, 300), 0);
+    EXPECT_EQ(countIdx(asy, -1, 300) >= 1, true);  // async sees non-ECAT frame
 
     close(tx); close(cyc); close(asy);
 }
@@ -1412,31 +1447,49 @@ TEST(CyclicChannelFactory, AttachFiltersRejectBadFd) {
     EXPECT_FALSE(cyclicChannelAttachAsyncFilter(-1));
 }
 
-// A valid async_fd gets its mirror filter attached before the cyclic socket
-// open fails unprivileged — the factory must still return nullptr.
-TEST(CyclicChannelFactory, AsyncFdAttachThenSocketOpenFails) {
+// A valid async_fd gets its mirror filter attached regardless of privilege;
+// the cyclic socket open then fails unprivileged but succeeds under runec.
+TEST(CyclicChannelFactory, AsyncFdAttachThenSocketOpen) {
     int sv[2];
     ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
     CyclicChannelConfig cfg;
-    cfg.ifindex  = 1;              // lo exists; open still needs CAP_NET_RAW
+    cfg.ifindex  = 1;              // lo exists
     cfg.async_fd = sv[0];
-    EXPECT_EQ(createCyclicChannel(cfg), nullptr);
+    auto ch = createCyclicChannel(cfg);
+    if (haveCapNetRaw()) {
+        EXPECT_NE(ch, nullptr);   // socket open succeeded under runec
+    } else {
+        EXPECT_EQ(ch, nullptr);   // unprivileged: open fails after attach
+    }
     ::close(sv[0]);
     ::close(sv[1]);
 }
 
-TEST(CyclicChannelFactory, PacketRingModeFailsUnprivileged) {
+TEST(CyclicChannelFactory, PacketRingModeResultByPrivilege) {
     CyclicChannelConfig cfg;
     cfg.ifindex   = 1;
     cfg.wire_mode = CyclicWireMode::PacketRing;
-    EXPECT_EQ(createCyclicChannel(cfg), nullptr);
+    auto ch = createCyclicChannel(cfg);
+    if (haveCapNetRaw()) {
+        ASSERT_NE(ch, nullptr);            // PACKET_MMAP ring succeeded
+        EXPECT_TRUE(ch->zeroCopy());
+    } else {
+        EXPECT_EQ(ch, nullptr);
+    }
 }
 
-TEST(CyclicChannelFactory, AutoModeFallsBackAndFailsUnprivileged) {
+TEST(CyclicChannelFactory, AutoModeResultByPrivilege) {
     CyclicChannelConfig cfg;
     cfg.ifindex   = 1;
-    cfg.wire_mode = CyclicWireMode::Auto;   // ring fails → socket fails
-    EXPECT_EQ(createCyclicChannel(cfg), nullptr);
+    cfg.wire_mode = CyclicWireMode::Auto;
+    auto ch = createCyclicChannel(cfg);
+    // Under CAP_NET_RAW the ring backend is created; without it, open fails.
+    if (haveCapNetRaw()) {
+        ASSERT_NE(ch, nullptr);
+        EXPECT_TRUE(ch->zeroCopy());
+    } else {
+        EXPECT_EQ(ch, nullptr);
+    }
 }
 
 TEST(CyclicChannelFactory, SocketChannelForFdRejectsBadFd) {

@@ -1118,6 +1118,36 @@ target_compile_definitions(tether_ethercat_master_tests PRIVATE
 
 gtest_discover_tests(tether_ethercat_master_tests PROPERTIES TIMEOUT 30)
 
+# Privileged realtime integration tests — exercise AF_PACKET / PACKET_MMAP
+# rings / kernel cBPF demux / SCHED_FIFO / SCHED_DEADLINE / CPU isolation /
+# mlock.  Every test auto-skips without the needed capability, so the binary
+# is a clean no-op unprivileged.  Run it with the caps `runec` grants
+# (CAP_NET_RAW + CAP_NET_ADMIN + CAP_SYS_NICE):
+#     runec ./bin/tests/tether_ethercat_rt_privileged_tests
+tether_add_test_executable(tether_ethercat_rt_privileged_tests
+    ethercat/test_rt_privileged.cpp
+)
+
+target_include_directories(tether_ethercat_rt_privileged_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+
+target_link_libraries(tether_ethercat_rt_privileged_tests
+    tether_ethercat_common
+    tether_ethercat_master
+    GTest::gtest_main
+    GTest::gmock
+)
+
+target_compile_definitions(tether_ethercat_rt_privileged_tests PRIVATE
+    TETHER_COMPILE_MASTER=1
+)
+
+gtest_discover_tests(tether_ethercat_rt_privileged_tests PROPERTIES TIMEOUT 60)
+
 # EtherCAT slave supervisor tests (needs full Master linkage for ALResetController,
 # SlaveStatusPoller, and Slave access)
 tether_add_test_executable(tether_ethercat_supervisor_tests

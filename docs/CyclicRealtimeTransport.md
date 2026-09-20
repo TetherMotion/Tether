@@ -948,10 +948,11 @@ budget.  Zero-copy is the enabler; deterministic ownership is the point.
 ## 12. Testing & verification
 
 Tests live in `tests/ethercat/test_cyclic_channel.cpp`,
-`tests/ethercat/test_process_image.cpp`, and
+`tests/ethercat/test_process_image.cpp`,
+`tests/ethercat/test_rt_privileged.cpp`, and
 `tests/platform/test_rt_platform.cpp`, in the
 `tether_ethercat_master_tests` / `tether_ethercat_pdo_tests` /
-`tether_platform_tests` targets.
+`tether_platform_tests` / `tether_ethercat_rt_privileged_tests` targets.
 
 ### What is proven where
 
@@ -966,6 +967,7 @@ Tests live in `tests/ethercat/test_cyclic_channel.cpp`,
 | ProcessImage / LAM | `configure()` + fake `IPDOTransport` | all 5 modes, carry-forward, commit gating, rotating attach/detach, publish view/copy/parts + seq, entry offsets + exclusions, `EntryHandle` epoch invalidation, `waitInput` wake/timeout/reconfigure, shm export + attach lifecycle, multi-slice send/collect, strict-WKC learn + mismatch, forced-buffered gather/scatter |
 | Rt platform | `test_rt_platform.cpp` | `CpuIsolation` claim/release/auto-select/leave-one-free/explicit + conflict, `RtMemory` lock/prefault/slack best-effort paths |
 | **Live kernel demux + rings** | `LivePacketTest` on loopback: two real AF_PACKET sockets with opposite filters, real ring RX/TX, factory `Auto` | **auto-skipped without `CAP_NET_RAW`** — runs in privileged CI |
+| **Privileged end-to-end** | `test_rt_privileged.cpp` under `runec` — see below | real veth wire, kernel rings, SCHED_FIFO/DEADLINE, CPU claims |
 | Factory validation | `CyclicChannelFactory.InvalidIfindexFails` — fails before socket creation | unconditional |
 
 ### The privilege seam
@@ -986,6 +988,43 @@ A skipped live test is **not** claimed as live AF_PACKET coverage — the
 kernel-verifier path (AF_UNIX attach) plus the userspace VM over the exact
 instruction bytes plus the memory-seam ring tests is the proof that runs
 unconditionally.
+
+### Privileged suite — `runec`
+
+`tether_ethercat_rt_privileged_tests` is the dedicated privileged binary.
+Every test probes its required capability at runtime and `GTEST_SKIP()`s
+cleanly when it is absent, so the binary is safe to run unprivileged (it
+just skips).  Run it under `runec` to grant the ambient capabilities
+without becoming root:
+
+```bash
+cmake --build build --target tether_ethercat_rt_privileged_tests -j8
+runec ./build/bin/tests/tether_ethercat_rt_privileged_tests
+```
+
+`runec` is a setuid helper that launches the binary with
+`CAP_NET_RAW + CAP_NET_ADMIN + CAP_SYS_NICE` while keeping the caller's
+uid — enough for AF_PACKET/TPACKET/cBPF, veth creation, `SCHED_FIFO`,
+`SCHED_DEADLINE`, and CPU affinity.  The suite proves on a **real `veth`
+pair** (created and torn down by the test):
+
+- `createCyclicChannel` socket/ring/auto backends on a live ifindex.
+- `LinuxRingChannel` on a real kernel ring: `walkRing`, `rxPending`,
+  `rxHold`/`rxRelease`, `txAcquire`/`txCommitFrame`/`txSendParts`,
+  TX-ring exhaustion, deferred-kick `txDeferred`.
+- The full TX→wire→RX path: a ring-committed frame crosses the veth to a
+  peer socket and is echoed back into a slot.
+- Kernel cBPF demultiplexing: cyclic idx `0xF8–0xFD` reaches only the
+  cyclic socket, not the async socket, on a clean interface.
+- `Master::startCyclicLoop` on a real wire + `waitCyclicSlotView`
+  success/timeout, and `CyclicExecutive` exchanging at `SCHED_FIFO`.
+- `CpuIsolation` runtime claims/release, `PR_SET_TIMERSLACK`,
+  `SCHED_DEADLINE` admission + affinity ordering, `mlock`/`mlockall`/
+  stack-prefault best-effort paths.
+
+`mlockall` skips when `RLIMIT_MEMLOCK` is too small to lock the whole
+process — an environment limit, reported as a skip rather than a failure.
+Under `runec` the cyclic transport file reaches ~95 % line coverage.
 
 ---
 
@@ -1066,6 +1105,7 @@ channel for diagnostics (`backendName()`, `zeroCopy()`, `droppedRx()`,
 | `include/tether/ethercat/PDOManager.hpp` | `PDOEntry::image_exclude`, `IPDOTransport` cyclic API |
 | `include/tether/ethercat/Master.hpp` | `CyclicLoopConfig` (wire/image/sched/mlock/cpu-iso/split/shm/strict-wkc), slot bank, test seam |
 | `tests/ethercat/test_cyclic_channel.cpp` | BPF VM + kernel BPF + socket channel + ring-memory + wait-path + Master + live tests |
+| `tests/ethercat/test_rt_privileged.cpp` | privileged suite: real veth wire, kernel rings, demux, Master wait, CyclicExecutive, sched/CPU/mem (run under `runec`) |
 | `tests/ethercat/test_process_image.cpp` | image modes + LAM exchange + handles + waitInput + shm |
 | `tests/platform/test_rt_platform.cpp` | `CpuIsolation` claims + `RtMemory` best-effort paths |
 | `QUESTIONS.md` | open design questions deferred from the FastLoop review |
