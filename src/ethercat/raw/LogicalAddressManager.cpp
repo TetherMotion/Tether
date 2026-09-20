@@ -4,6 +4,8 @@
  */
 
 #include "tether/ethercat/LogicalAddressManager.hpp"
+#include "tether/ethercat/ProcessImage.hpp"
+#include "tether/ethercat/CyclicChannel.hpp"
 #include "tether/ethercat/Types.hpp"
 
 #include <algorithm>
@@ -121,6 +123,7 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
                 slave_count, total_rxpdo_bytes_, total_txpdo_bytes_,
                 total_rxpdo_bytes_ + total_txpdo_bytes_);
 
+    ensureCyclicPayload(total_rxpdo_bytes_ + total_txpdo_bytes_);
     return true;
 }
 
@@ -228,6 +231,7 @@ bool LogicalAddressManager::buildAddressMapFromMultiPDO(
                     return total;
                 }());
 
+    ensureCyclicPayload(total_rxpdo_bytes_ + total_txpdo_bytes_);
     return true;
 }
 
@@ -303,6 +307,231 @@ bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
     return exchangeLRWImpl(mapping, 0,
                            total_rxpdo_bytes_ + total_txpdo_bytes_,
                            /*enforce_slice_limit=*/false);
+}
+
+void LogicalAddressManager::ensureCyclicPayload(uint32_t size) {
+    if (size == 0 || cyclic_payload_size_ >= size) return;
+    cyclic_payload_ = std::make_unique<uint8_t[]>(size);
+    cyclic_payload_size_ = size;
+}
+
+// ============================================================================
+// exchangeAllLRWCyclic — whole-image LRW over the reserved-slot fast path
+// ============================================================================
+
+size_t LogicalAddressManager::computeImageOffsets(
+        const PDO::PDOMapping& mapping, int32_t* out, size_t cap) const {
+    const size_t n = std::min(mapping.entry_count(), cap);
+    for (size_t i = 0; i < n; ++i) out[i] = -1;
+    if (!initialized_ || slave_count_ == 0) return n;
+
+    std::array<uint32_t, PDO::kMaxPDOSlaves> rx_running{};
+    std::array<uint32_t, PDO::kMaxPDOSlaves> tx_running{};
+    for (size_t i = 0; i < mapping.entry_count(); i++) {
+        const PDO::PDOEntry* e = mapping.get_entry(i);
+        if (!e || !e->enabled) continue;
+        if (e->slave_index >= slave_count_) continue;
+        if (!addr_map_[e->slave_index].active) continue;
+        const auto& addr = addr_map_[e->slave_index];
+        uint32_t off;
+        if (e->direction == PDO::PDODirection::RxPDO) {
+            off = addr.rxpdo_logical_addr - base_logical_addr_
+                + rx_running[e->slave_index];
+            rx_running[e->slave_index] += e->data_size;
+        } else {
+            off = addr.txpdo_logical_addr - base_logical_addr_
+                + tx_running[e->slave_index];
+            tx_running[e->slave_index] += e->data_size;
+        }
+        if (i < n && e->data_size > 0 && !e->image_exclude) {
+            out[i] = static_cast<int32_t>(off);
+        }
+    }
+
+    // Forced-buffered: entries sharing a byte with a neighbour (bit-packed
+    // PDOs — read-modify-write on a shared byte would race).
+    for (size_t i = 0; i < n; ++i) {
+        if (out[i] < 0) continue;
+        const PDO::PDOEntry* ei = mapping.get_entry(i);
+        const uint32_t a0 = static_cast<uint32_t>(out[i]);
+        const uint32_t a1 = a0 + ei->data_size;
+        for (size_t j = i + 1; j < n; ++j) {
+            if (out[j] < 0) continue;
+            const PDO::PDOEntry* ej = mapping.get_entry(j);
+            const uint32_t b0 = static_cast<uint32_t>(out[j]);
+            const uint32_t b1 = b0 + ej->data_size;
+            if (a0 < b1 && b0 < a1) { out[i] = -1; out[j] = -1; }
+        }
+    }
+    return n;
+}
+
+bool LogicalAddressManager::exchangeAllLRWCyclic(const PDO::PDOMapping& mapping,
+                                                 uint32_t rx_timeout_ns,
+                                                 ProcessImage* image) {
+    if (!transport_.supportsCyclicFastPath()) {
+        return exchangeAllLRW(mapping);
+    }
+    if (!initialized_ || slave_count_ == 0) {
+        stats_.send_errors++;
+        return false;
+    }
+    const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
+    if (total_data == 0) return true;
+    if (total_data > cyclic_payload_size_) {
+        ensureCyclicPayload(total_data);
+        if (total_data > cyclic_payload_size_) {
+            stats_.send_errors++;
+            return false;
+        }
+    }
+
+    const bool img_active = image && image->configured() &&
+                            image->mode() != ImageMode::Buffered;
+
+    // ---- Choose the TX payload ------------------------------------------
+    // Buffered/legacy: staged cyclic_payload_, memset + full app_buffer
+    // gather (unchanged semantics).
+    // Image modes: the image's send buffer (Direct/TripleBuffered) or the
+    // acquired TX frame's payload region (Rotating); only forced-buffered
+    // entries (-1 offsets) are gathered from app_buffer — image-mapped
+    // entries are already written in place by the application.
+    uint8_t* payload         = cyclic_payload_.get();
+    uint8_t* rotating_frame  = nullptr;
+    bool     rotating_send   = false;
+
+    if (img_active && image->mode() == ImageMode::Rotating) {
+        rotating_frame = image->rotatingFrameBase();
+        if (!rotating_frame) {
+            // First cycle (or ring underflow last cycle): acquire now so
+            // outputWrite() becomes valid for the remainder of this cycle.
+            rotating_frame = transport_.acquireCyclicTxFrame();
+            image->attachTxFrame(rotating_frame);
+        }
+        if (rotating_frame) {
+            payload        = rotating_frame + kCyclicFramePayloadOff;
+            rotating_send  = true;
+        }
+    } else if (img_active) {
+        payload = const_cast<uint8_t*>(image->acquireSendImage());
+    }
+
+    if (!payload) {
+        // Rotating with no channel or an exhausted ring — legacy fallback.
+        payload = cyclic_payload_.get();
+        rotating_send = false;
+    }
+
+    if (!img_active) {
+        std::memset(payload, 0, total_data);
+    }
+
+    // Gather RxPDO bytes from app buffers for entries that are NOT image
+    // mapped (all entries on the legacy path; only -1-offset entries in
+    // image modes).  No memset on image paths: unwritten regions carry
+    // stale bytes forward — the Rotating full-refresh contract documents
+    // that as intended behaviour.
+    std::array<uint32_t, PDO::kMaxPDOSlaves> rx_running{};
+    for (size_t i = 0; i < mapping.entry_count(); i++) {
+        const PDO::PDOEntry* e = mapping.get_entry(i);
+        if (!e || !e->enabled || e->direction != PDO::PDODirection::RxPDO) continue;
+        if (e->slave_index >= slave_count_) continue;
+        if (!addr_map_[e->slave_index].active) continue;
+
+        const auto& addr = addr_map_[e->slave_index];
+        const uint32_t entry_off = addr.rxpdo_logical_addr - base_logical_addr_
+                                 + rx_running[e->slave_index];
+        rx_running[e->slave_index] += e->data_size;
+        if (!e->app_buffer || e->data_size == 0) continue;
+        if (entry_off + e->data_size > total_data) break;  // layout guard
+        if (img_active && image->entryOffset(i) >= 0) continue; // in-image
+
+        std::memcpy(payload + entry_off, e->app_buffer, e->data_size);
+    }
+
+    const uint32_t logical_addr = base_logical_addr_;
+    const uint16_t adp = static_cast<uint16_t>(logical_addr & 0xFFFF);
+    const uint16_t ado = static_cast<uint16_t>((logical_addr >> 16) & 0xFFFF);
+
+    // Reserved slot 0 for the primary cyclic LRW exchange.
+    constexpr uint8_t kSlot = 0;
+    const uint64_t token = transport_.cyclicSlotToken(kSlot);
+
+    bool sent;
+    if (rotating_send) {
+        // Payload already lives inside the channel TX frame — compose the
+        // header in place, append WKC, commit.  Zero copies end to end.
+        transport_.composeCyclicHeader(rotating_frame, Command::LRW, kSlot,
+                                       adp, ado,
+                                       static_cast<uint16_t>(total_data),
+                                       true);
+        *reinterpret_cast<uint16_t*>(
+            rotating_frame + kCyclicFramePayloadOff + total_data) = 0;
+        image->detachTxFrame();
+        sent = transport_.sendCyclicFrame(
+            kCyclicFramePayloadOff + total_data + sizeof(uint16_t));
+        // Attach next cycle's frame so outputWrite() stays valid for the
+        // remainder of this cycle and the next.
+        image->attachTxFrame(transport_.acquireCyclicTxFrame());
+    } else {
+        sent = transport_.sendCyclicDatagram(Command::LRW, kSlot, adp, ado,
+                                             payload,
+                                             static_cast<uint16_t>(total_data),
+                                             true);
+    }
+    if (!sent) {
+        stats_.send_errors++;
+        return false;
+    }
+
+    CyclicSlotView resp{};
+    if (!transport_.waitCyclicSlotView(kSlot, token, rx_timeout_ns, resp)) {
+        stats_.timeout_errors++;
+        return false;
+    }
+    if (resp.wkc == 0) {
+        stats_.wkc_errors++;
+        return false;
+    }
+
+    // Publish the received payload as the input image (zero-copy view when
+    // a channel holds it, owned-bank copy otherwise).
+    if (img_active && resp.payload) {
+        if (resp.channel) {
+            image->publishInputView(resp.payload, resp.datalen,
+                                    resp.cookie, resp.channel);
+        } else {
+            image->publishInputCopy(resp.payload, resp.datalen);
+        }
+    }
+
+    // Scatter TxPDO (read) data back into app buffers — only for entries
+    // that are NOT image mapped (image-mapped entries are read via
+    // inputRead()/inputPtr()).
+    if (resp.datalen >= total_data && resp.payload) {
+        const uint8_t* rx_data = resp.payload;
+        std::array<uint32_t, PDO::kMaxPDOSlaves> tx_running{};
+        for (size_t i = 0; i < mapping.entry_count(); i++) {
+            const PDO::PDOEntry* e = mapping.get_entry(i);
+            if (!e || !e->enabled || e->direction != PDO::PDODirection::TxPDO) continue;
+            if (e->slave_index >= slave_count_) continue;
+            if (!addr_map_[e->slave_index].active) continue;
+
+            const auto& addr = addr_map_[e->slave_index];
+            const uint32_t entry_off = addr.txpdo_logical_addr - base_logical_addr_
+                                     + tx_running[e->slave_index];
+            tx_running[e->slave_index] += e->data_size;
+            if (!e->app_buffer || e->data_size == 0) continue;
+            if (entry_off + e->data_size > resp.datalen) break;
+            if (img_active && image->entryOffset(i) >= 0) continue;
+
+            std::memcpy(static_cast<uint8_t*>(e->app_buffer),
+                        rx_data + entry_off, e->data_size);
+        }
+    }
+
+    stats_.success++;
+    return true;
 }
 
 bool LogicalAddressManager::exchangeLRWSlice(const PDO::PDOMapping& mapping,

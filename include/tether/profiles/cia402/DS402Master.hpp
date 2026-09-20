@@ -260,6 +260,21 @@ public:
         const Master::PollingMotionLoopConfig& config);
     void stopMotionControlLoop();
 
+    /**
+     * @brief Start the deadline-driven cyclic executive.
+     *
+     * Replaces startDistributedClocks() + startRealtimeMotionControlLoop()
+     * with a single low-latency loop: one thread sleeps directly on an
+     * absolute deadline (clock_nanosleep TIMER_ABSTIME) and runs the LRW
+     * exchange via the reserved-index fast path; DC sync runs on a
+     * dedicated fault-isolated thread by default (config.exec.dc_placement).
+     *
+     * Motion controllers run in the loop's MotionControl phase unless
+     * config.motion_in_loop is false (external motion source).
+     */
+    bool startCyclicLoop(const Master::CyclicLoopConfig& config);
+    void stopCyclicLoop();
+
     size_t driveCount() const { return drives_.size(); }
     CiA402Drive* driveAt(size_t index);
     const CiA402Drive* driveAt(size_t index) const;

@@ -202,6 +202,26 @@ public:
      * @return Number of frames processed
      */
     virtual int poll(Milliseconds timeoutMs = 0) = 0;
+
+    /**
+     * @brief Receive one frame directly into a caller buffer (non-blocking).
+     *
+     * Optional fast path used by the cyclic executive: lets the cyclic
+     * thread drain the socket itself inside its bounded response wait,
+     * instead of relying on a separate poll thread.  Implementations apply
+     * the same EtherType filtering as poll(); the returned frame is the
+     * complete Ethernet frame (including header).
+     *
+     * @param buffer    Output buffer
+     * @param capacity  Buffer capacity in bytes
+     * @param info      Optional frame metadata output (may be null)
+     * @return >0 frame length, 0 = no frame pending, -1 = unsupported/error
+     */
+    virtual int recvFrame(uint8_t* buffer, size_t capacity,
+                          RxFrameInfo* info = nullptr) {
+        (void)buffer; (void)capacity; (void)info;
+        return -1;
+    }
     
     // --- Filtering ---
     

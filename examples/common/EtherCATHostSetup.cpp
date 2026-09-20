@@ -77,6 +77,17 @@ bool initHostEthernet(HostEtherNetSession& session,
     session.ni->send = [eth = session.eth.get()](const uint8_t* data, size_t len) -> bool {
         return eth->transmit(data, len) == EtherCAT::HAL::Error::OK;
     };
+    // Direct-receive fast path: lets the cyclic executive drain the socket
+    // itself inside its bounded response wait (ppoll on socket + eventfd).
+    // Only wired on the non-VLAN interface — VLAN-routed masters must not
+    // bypass the VLANRouter.
+    session.ni->native_handle = session.eth->nativeHandle();
+    session.ni->receive = [eth = session.eth.get()](uint8_t* buf, size_t cap,
+                                                  size_t* out) -> bool {
+        int r = eth->recvFrame(buf, cap, nullptr);
+        if (r > 0) { *out = static_cast<size_t>(r); return true; }
+        return false;
+    };
 
     return true;
 }
@@ -108,6 +119,11 @@ bool setupVlanAndRxCallback(HostEtherNetSession& session,
                             const VlanConfig& vlan,
                             const char* /*tag*/) {
     if (vlan.enabled) {
+        // VLAN-routed masters must not bypass the VLANRouter: drop the
+        // direct-receive fast path so the cyclic executive waits on the
+        // eventfd/slot while the poll thread keeps demuxing by VLAN tag.
+        session.ni->receive = nullptr;
+        session.ni->native_handle = nullptr;
         session.router = std::make_unique<EtherCAT::VLANRouter>();
         session.router->setBackend(session.ni.get());
         if (vlan.rxAny) {

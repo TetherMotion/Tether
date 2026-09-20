@@ -7,12 +7,18 @@
  */
 
 #include "tether/platform/IPlatformTimer.hpp"
+#include "tether/platform/IDeadlineTimer.hpp"
 #include "tether/platform/EspCompat.hpp"
 
 #include <thread>
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#ifdef __linux__
+#include <ctime>
+#include <cerrno>
+#include <pthread.h>
+#endif
 
 namespace EtherCAT {
 namespace Platform {
@@ -195,6 +201,132 @@ std::unique_ptr<IPlatformTimer> createHostTimer() {
 // Factory function for platform abstraction
 std::unique_ptr<IPlatformTimer> createPlatformTimer() {
     return std::make_unique<HostTimer>();
+}
+
+// ============================================================================
+// Deadline timer — sleeps the CALLING thread on an absolute deadline.
+// ============================================================================
+
+/**
+ * @brief Generic deadline timer: absolute std::chrono steady_clock deadline.
+ *
+ * One virtual call + one kernel sleep per cycle; no producer thread, no
+ * event, no mutex.  On Linux the steady_clock deadline maps 1:1 onto
+ * clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME).
+ */
+class HostDeadlineTimer : public IDeadlineTimer {
+public:
+    bool start(uint64_t period_ns) override {
+        return startAt(nowNs() + period_ns, period_ns);
+    }
+
+    bool startAt(uint64_t first_deadline_ns, uint64_t period_ns) override {
+        if (period_ns == 0) return false;
+        period_ns_ = period_ns;
+        next_ns_   = first_deadline_ns;
+        running_.store(true, std::memory_order_release);
+        return true;
+    }
+
+    bool waitNext(Tick& out) override {
+        if (!running_.load(std::memory_order_acquire)) return false;
+
+        sleepUntilNs(next_ns_);
+
+        const uint64_t woke = nowNs();
+        out.deadline_ns = next_ns_;
+        out.woke_ns     = woke;
+
+        // Advance the fixed schedule; skip (and count) overrun deadlines so
+        // an overrun never turns into a burst of back-to-back wake-ups.
+        uint64_t next = next_ns_ + period_ns_;
+        uint32_t missed = 0;
+        while (next <= woke) {
+            next += period_ns_;
+            ++missed;
+        }
+        out.missed = missed;
+        next_ns_   = next;
+        return running_.load(std::memory_order_acquire);
+    }
+
+    void requestStop() override {
+        running_.store(false, std::memory_order_release);
+    }
+
+    bool     isRunning() const override { return running_.load(std::memory_order_acquire); }
+    uint64_t periodNs()  const override { return period_ns_; }
+
+protected:
+    static uint64_t nowNs() {
+#ifdef __linux__
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+               static_cast<uint64_t>(ts.tv_nsec);
+#else
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+#endif
+    }
+
+    virtual void sleepUntilNs(uint64_t deadline_ns) {
+#ifdef __linux__
+        struct timespec ts;
+        ts.tv_sec  = static_cast<time_t>(deadline_ns / 1'000'000'000ULL);
+        ts.tv_nsec = static_cast<long>(deadline_ns % 1'000'000'000ULL);
+        int ret;
+        do {
+            ret = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr);
+        } while (ret == EINTR && running_.load(std::memory_order_relaxed));
+#else
+        std::this_thread::sleep_until(
+            std::chrono::steady_clock::time_point(std::chrono::nanoseconds(deadline_ns)));
+#endif
+    }
+
+    std::atomic<bool> running_{false};
+    uint64_t period_ns_ = 0;
+    uint64_t next_ns_   = 0;
+};
+
+/**
+ * @brief Hybrid deadline timer: kernel sleep + userspace spin tail.
+ *
+ * Sleeps until (deadline - spin_window_ns), then busy-polls the vDSO
+ * CLOCK_MONOTONIC (no syscall in the spin) until the exact deadline.
+ * Trades spin_window_ns of CPU per cycle for near-zero wake-up latency.
+ */
+class HybridDeadlineTimer : public HostDeadlineTimer {
+public:
+    explicit HybridDeadlineTimer(uint64_t spin_window_ns)
+        : spin_window_ns_(spin_window_ns) {}
+
+protected:
+    void sleepUntilNs(uint64_t deadline_ns) override {
+        const uint64_t spin = spin_window_ns_;
+        if (spin > 0 && deadline_ns > spin) {
+            HostDeadlineTimer::sleepUntilNs(deadline_ns - spin);
+            while (nowNs() < deadline_ns &&
+                   running_.load(std::memory_order_relaxed)) {
+                // clock_gettime is vDSO on Linux — pure userspace read.
+            }
+        } else {
+            HostDeadlineTimer::sleepUntilNs(deadline_ns);
+        }
+    }
+
+private:
+    uint64_t spin_window_ns_;
+};
+
+std::unique_ptr<IDeadlineTimer> createDeadlineTimer() {
+    return std::make_unique<HostDeadlineTimer>();
+}
+
+std::unique_ptr<IDeadlineTimer> createHybridDeadlineTimer(uint64_t spin_window_ns) {
+    return std::make_unique<HybridDeadlineTimer>(spin_window_ns);
 }
 
 } // namespace Platform

@@ -24,6 +24,10 @@
 #include <cerrno>
 #include <atomic>
 
+#ifndef SOL_PACKET
+#define SOL_PACKET 263
+#endif
+
 namespace EtherCAT {
 namespace HAL {
 
@@ -96,6 +100,16 @@ public:
         // Set socket to non-blocking
         int flags = fcntl(m_socket, F_GETFL, 0);
         fcntl(m_socket, F_SETFL, flags | O_NONBLOCK);
+
+#ifdef PACKET_IGNORE_OUTGOING
+        // Don't deliver our own transmitted frames back to us — removes one
+        // wasted wake-up + copy per cyclic TX.  Non-fatal if unsupported.
+        {
+            int one = 1;
+            setsockopt(m_socket, SOL_PACKET, PACKET_IGNORE_OUTGOING,
+                       &one, sizeof(one));
+        }
+#endif
 
         // Mark initialized before performing operations that require initialized state
         m_initialized = true;
@@ -318,6 +332,52 @@ public:
         }
 
         return count;
+    }
+
+    int recvFrame(uint8_t* buffer, size_t capacity,
+                  RxFrameInfo* info) override {
+        if (!m_initialized || m_socket < 0) return -1;
+
+        // Drain past filtered/outgoing frames so the caller sees either a
+        // deliverable frame or an empty queue — never a "consumed but
+        // dropped" result that would prematurely end a drain loop.
+        for (int guard = 0; guard < 64; ++guard) {
+            struct sockaddr_ll sll;
+            socklen_t sll_len = sizeof(sll);
+            ssize_t len = recvfrom(m_socket, buffer, capacity, MSG_DONTWAIT,
+                                   (struct sockaddr*)&sll, &sll_len);
+            if (len <= 0) return 0;   // EAGAIN: queue empty
+
+            if (sll.sll_pkttype == PACKET_OUTGOING) continue;
+
+            if (len >= 14) {
+                uint16_t ethertype = (buffer[12] << 8) | buffer[13];
+                bool hasVlan = (ethertype == kEtherType8021Q);
+                uint16_t checkType = ethertype;
+                if (hasVlan && len >= 18) {
+                    checkType = (buffer[16] << 8) | buffer[17];
+                }
+                if (m_ethertypeFilter != 0 && checkType != m_ethertypeFilter) {
+                    m_stats.rxFiltered++;
+                    continue;
+                }
+                if (info) {
+                    info->timestamp = getCurrentTimestamp();
+                    info->vlanTagPresent = hasVlan;
+                    info->vlanId = (hasVlan && len >= 18)
+                        ? static_cast<uint16_t>(((buffer[14] & 0x0F) << 8) | buffer[15])
+                        : 0;
+                    info->vlanPriority = (hasVlan && len >= 18)
+                        ? static_cast<uint8_t>((buffer[14] >> 5) & 0x07)
+                        : 0;
+                }
+            }
+
+            m_stats.rxFrames++;
+            m_stats.rxBytes += static_cast<uint64_t>(len);
+            return static_cast<int>(len);
+        }
+        return 0;
     }
 
     void setEthertypeFilter(uint16_t ethertype) override {

@@ -295,6 +295,18 @@ void DS402Master::stopMotionControlLoop()
     ethercat_master_.stopMotionControlLoop();
 }
 
+bool DS402Master::startCyclicLoop(const Master::CyclicLoopConfig& config)
+{
+    ethercat_master_.setMotionControlCallback(
+        [this](double dt_seconds) { return updateMotionControllers(dt_seconds); });
+    return ethercat_master_.startCyclicLoop(config);
+}
+
+void DS402Master::stopCyclicLoop()
+{
+    ethercat_master_.stopCyclicLoop();
+}
+
 CiA402Drive* DS402Master::driveAt(size_t index)
 {
     if (index >= drives_.size()) {

@@ -34,6 +34,12 @@
 #include <cerrno>
 #include "sii/SIIReader.hpp"
 #include <inttypes.h>
+#ifdef __linux__
+#include <sys/eventfd.h>
+#include <sys/socket.h>
+#include <netpacket/packet.h>
+#include <unistd.h>
+#endif
 
 namespace EtherCAT {
 
@@ -305,6 +311,46 @@ public:
         return master_.maxEtherCATPayloadPerFrame();
     }
 
+    // ---- Cyclic fast path ----
+    bool supportsCyclicFastPath() const override {
+        return master_.supportsCyclicFastPath();
+    }
+    uint64_t cyclicSlotToken(uint8_t slot) override {
+        return master_.cyclicSlotToken(slot);
+    }
+    bool sendCyclicDatagram(Command cmd, uint8_t slot,
+                            uint16_t adp, uint16_t ado,
+                            const void* data, uint16_t datalen,
+                            bool roundtrip) override {
+        return master_.sendCyclicDatagram(cmd, slot, adp, ado,
+                                          data, datalen, roundtrip);
+    }
+    bool waitCyclicSlot(uint8_t slot, uint64_t token,
+                        uint32_t timeout_ns, RxDatagram& out) override {
+        return master_.waitCyclicSlot(slot, token, timeout_ns, out);
+    }
+    bool waitCyclicSlotView(uint8_t slot, uint64_t token,
+                            uint32_t timeout_ns,
+                            CyclicSlotView& out) override {
+        return master_.waitCyclicSlotView(slot, token, timeout_ns, out);
+    }
+    uint8_t* acquireCyclicTxFrame() override {
+        return master_.acquireCyclicTxFrame();
+    }
+    void composeCyclicHeader(uint8_t* frame, Command cmd,
+                             uint8_t slot, uint16_t adp,
+                             uint16_t ado, uint16_t datalen,
+                             bool roundtrip) override {
+        master_.composeCyclicHeader(frame, cmd, slot, adp, ado,
+                                    datalen, roundtrip);
+    }
+    bool sendCyclicFrame(uint32_t frame_len) override {
+        return master_.sendCyclicFrame(frame_len);
+    }
+    ICyclicChannel* cyclicChannel() override {
+        return master_.cyclicChannel();
+    }
+
 private:
     Master& master_;
 };
@@ -462,6 +508,13 @@ Master::Master(const Config& config)
         [this](uint16_t i) { return slaveLogPrefix(i); });
     status_poller_ = std::make_unique<SlaveStatusPoller>(*fault_transport_);
     slave_supervisor_ = std::make_unique<SlaveSupervisor>(*this);
+
+#ifdef __linux__
+    // Cyclic-slot deposit notification: the RX parser writes to this fd
+    // after depositing a reserved-idx datagram so a cyclic thread blocked
+    // in ppoll() wakes immediately.  Non-fatal if unavailable.
+    cyclic_notify_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+#endif
 }
 
 Master::~Master()
@@ -470,6 +523,13 @@ Master::~Master()
 
     // Clean up per-master packet router
     packet_router_.shutdown();
+
+#ifdef __linux__
+    if (cyclic_notify_fd_ >= 0) {
+        close(cyclic_notify_fd_);
+        cyclic_notify_fd_ = -1;
+    }
+#endif
 }
 
 
@@ -511,6 +571,7 @@ void Master::stop()
     const bool was_running = running_.load(std::memory_order_acquire);
     requestCancel();  // sets cancel flag + wakes packet router waiters
     stopMotionControlLoop();
+    stopCyclicLoop();
     if (slave_supervisor_) {
         slave_supervisor_->stop();
     }
@@ -623,6 +684,168 @@ void Master::stopMotionControlLoop()
 bool Master::isMotionControlLoopRunning() const
 {
     return motion_control_loop_ && motion_control_loop_->isRunning();
+}
+
+// ============================================================================
+// Cyclic executive — deadline-driven fast loop
+// ============================================================================
+
+bool Master::startCyclicLoop(const CyclicLoopConfig& config)
+{
+    stopCyclicLoop();
+    stopMotionControlLoop();
+    clearCancel();
+
+    CyclicExecutive::Config exec_cfg = config.exec;
+    exec_cfg.cycle_period_us    = config.cycle_period_us;
+    exec_cfg.dc_interval_cycles = config.sync_interval_cycles;
+    if (config.enable_dc_synchronization &&
+        exec_cfg.dc_placement == CyclicExecutive::DCPlacement::Disabled) {
+        // Caller asked for DC sync but left placement at a disabled value —
+        // default to the fault-isolated dedicated thread.
+        exec_cfg.dc_placement = CyclicExecutive::DCPlacement::DedicatedThread;
+    }
+    if (!config.enable_dc_synchronization) {
+        exec_cfg.dc_placement = CyclicExecutive::DCPlacement::Disabled;
+    }
+    exec_cfg.jitter    = JitterConfig::defaults(config.cycle_period_us);
+    exec_cfg.dc_jitter = JitterConfig::defaults(
+        config.cycle_period_us * config.sync_interval_cycles);
+
+    // Exchange: LRW process image via the reserved-slot fast path when the
+    // transport supports it, falling back to the router path otherwise.
+    CyclicExecutive::TaskFn exchange_fn = [this]() -> bool {
+        bool ok = true;
+        if (pdo_) {
+            if (logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
+                ok = pdo_->exchangeAllLRWCyclic(200'000, &process_image_);
+            } else {
+                ok = pdo_->exchangeAll();
+            }
+        }
+        for (auto& g : pdo_groups_) {
+            if (g.pdo) ok = g.pdo->exchangeAll() && ok;
+        }
+        return ok;
+    };
+
+    CyclicExecutive::TaskFn dc_fn;
+    if (config.enable_dc_synchronization) {
+        dc_fn = [this]() -> bool {
+            if (!dc_ || dc_->getState() == DC::DCState::Disabled) return true;
+            EtherCATDC* dc = dc_->get();
+            return dc ? dc->sendSyncFrame() : true;
+        };
+    }
+
+    CyclicExecutive::TimeFunc time_fn;
+    if (dc_ && dc_->getState() != DC::DCState::Disabled) {
+        time_fn = [this]() -> uint64_t {
+            EtherCATDC* dc = dc_->get();
+            return dc ? dc->getMasterTimeNs() : 0;
+        };
+    }
+
+    // ---- Cyclic channel + process image ----------------------------------
+    // The channel needs a raw AF_PACKET fd — only the direct-EtherCAT path
+    // exposes one (iface_.receive/native_handle are stripped for VLAN and
+    // absent under UDP encapsulation or polling transports).
+    cyclic_channel_.reset();
+    active_image_mode_ = ImageMode::Buffered;
+    process_image_.configure({});
+
+#ifdef __linux__
+    if (iface_.receive && iface_.native_handle &&
+        !isUdpEncapsulationEnabled()) {
+        const int fd = static_cast<int>(
+            reinterpret_cast<intptr_t>(iface_.native_handle));
+        sockaddr_ll sll{};
+        socklen_t sll_len = sizeof(sll);
+        int ifindex = 0;
+        if (::getsockname(fd, reinterpret_cast<sockaddr*>(&sll),
+                          &sll_len) == 0) {
+            ifindex = sll.sll_ifindex;
+        }
+        CyclicChannelConfig cc;
+        cc.ifindex   = ifindex;
+        cc.async_fd  = fd;
+        cc.wire_mode = config.wire_mode;
+        cyclic_channel_ = createCyclicChannel(cc);
+        if (!cyclic_channel_) {
+            TETHER_LOGW(TAG, "cyclic channel unavailable — using software "
+                             "deposit path (no ring/BPF acceleration)");
+        }
+    }
+#endif
+
+    ImageMode mode = config.image_mode;
+    if (mode == ImageMode::Rotating && !cyclic_channel_) {
+        TETHER_LOGW(TAG, "Rotating image mode requires a cyclic channel — "
+                         "falling back to Direct");
+        mode = ImageMode::Direct;
+    }
+    if (mode != ImageMode::Buffered && pdo_ &&
+        logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
+        if (pdo_->configureProcessImage(process_image_, mode)) {
+            active_image_mode_ = mode;
+            TETHER_LOGI(TAG, "process image active: mode={} rx={}B tx={}B",
+                        static_cast<int>(mode),
+                        process_image_.outputBytes(),
+                        process_image_.inputBytes());
+        } else {
+            TETHER_LOGW(TAG, "process image configure failed — "
+                             "buffered exchange");
+        }
+    }
+
+    cyclic_loop_ = std::make_unique<CyclicExecutive>(
+        std::move(exchange_fn), std::move(dc_fn), std::move(time_fn), exec_cfg);
+
+    if (config.motion_in_loop && motion_control_callback_) {
+        const double dt = static_cast<double>(config.cycle_period_us) / 1e6;
+        auto cb = motion_control_callback_;
+        cyclic_loop_->addTask(TaskPhase::MotionControl,
+            [this, cb, dt]() -> bool {
+                if (cancel_requested_.load(std::memory_order_acquire)) {
+                    return false;
+                }
+                return cb(dt);
+            });
+    }
+
+    return cyclic_loop_->start();
+}
+
+void Master::stopCyclicLoop()
+{
+    if (cyclic_loop_) {
+        cyclic_loop_->stop();
+        cyclic_loop_.reset();
+    }
+    // Drop the held input-view cookie before the channel dies.
+    process_image_.configure({});
+    // Release ring/bank cookies held by the cyclic slots, then tear down.
+    if (cyclic_channel_) {
+        for (auto& s : cyclic_slots_) {
+            if (s.cookie >= 0) {
+                cyclic_channel_->rxRelease(static_cast<uint32_t>(s.cookie));
+            }
+            s.cookie  = -1;
+            s.payload = nullptr;
+        }
+    }
+    cyclic_channel_.reset();
+    active_image_mode_ = ImageMode::Buffered;
+}
+
+bool Master::isCyclicLoopRunning() const
+{
+    return cyclic_loop_ && cyclic_loop_->isRunning();
+}
+
+CyclicExecutive::Stats Master::getCyclicLoopStats() const
+{
+    return cyclic_loop_ ? cyclic_loop_->getStats() : CyclicExecutive::Stats{};
 }
 
 // ============================================================================
