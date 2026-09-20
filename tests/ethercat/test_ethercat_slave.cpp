@@ -73,7 +73,7 @@ TEST(SlaveErrorTest, AllErrorsHaveStrings) {
     // slaveErrorToString should return non-null for every value
     EXPECT_STREQ(slaveErrorToString(SlaveError::Ok), "Ok");
     EXPECT_STREQ(slaveErrorToString(SlaveError::MailboxNotConfigured),
-        "Mailbox (SM0/SM1) not configured — call configureMailbox() or assumeMailboxAlreadyConfigured() first");
+        "Mailbox (SM0/SM1) not configured — call configureMailbox(), assumeMailboxAlreadyConfigured(), or markNoMailbox() for mailbox-less slaves");
     EXPECT_STREQ(slaveErrorToString(SlaveError::PDONotConfigured),
         "PDO sync-managers not configured — call configurePDOSyncManagers() first");
     EXPECT_STREQ(slaveErrorToString(SlaveError::InvalidStateTransition),

@@ -30,6 +30,7 @@
 #include "logging/Logger.hpp"
 #include "raw/RawWireFormat.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstring>
@@ -117,6 +118,8 @@ int openCyclicSocket(int ifindex) {
     int one = 1;
     setsockopt(fd, SOL_PACKET, PACKET_IGNORE_OUTGOING, &one, sizeof(one));
     setsockopt(fd, SOL_PACKET, PACKET_TIMESTAMP, &one, sizeof(one));
+    // Kernel RX timestamps arrive via recvmsg SCM_TIMESTAMPNS cmsgs.
+    setsockopt(fd, SOL_SOCKET, SO_TIMESTAMPNS, &one, sizeof(one));
 
     // Receive only EtherCAT frames — keeps non-ECAT noise out entirely.
     struct sockaddr_ll sll{};
@@ -231,38 +234,12 @@ public:
             }
         }
 
-        int n = 0;
-        while (n < max_views) {
-            Bank* b = freeBank();
-            if (!b) { ++dropped_rx_; break; }
-            const ssize_t len = ::recvfrom(fd_, b->buf, sizeof(b->buf),
-                                           MSG_DONTWAIT, nullptr, nullptr);
-            if (len <= 0) break;                      // drained
-            b->emitted = true;
-            views[n].frame     = b->buf;
-            views[n].frame_len = static_cast<uint32_t>(len);
-            views[n].stamp_ns  = monoNowNs();
-            views[n].cookie    = static_cast<uint32_t>(b - bank_);
-            ++n;
-        }
+        int n = drainSocket(views, max_views);
         if (n > 0 || timeout_ns == 0) return n;
 
         const int r = waitReadable(fd_, timeout_ns);
         if (r <= 0) return r < 0 ? -errno : 0;
-        while (n < max_views) {
-            Bank* b = freeBank();
-            if (!b) { ++dropped_rx_; break; }
-            const ssize_t len = ::recvfrom(fd_, b->buf, sizeof(b->buf),
-                                           MSG_DONTWAIT, nullptr, nullptr);
-            if (len <= 0) break;
-            b->emitted = true;
-            views[n].frame     = b->buf;
-            views[n].frame_len = static_cast<uint32_t>(len);
-            views[n].stamp_ns  = monoNowNs();
-            views[n].cookie    = static_cast<uint32_t>(b - bank_);
-            ++n;
-        }
-        return n;
+        return drainSocket(views, max_views);
     }
 
     void rxHold(uint32_t cookie) override {
@@ -298,6 +275,46 @@ protected:
         return nullptr;
     }
 
+    /// recvmsg() drain: kernel RX timestamp via SCM_TIMESTAMPNS cmsg when
+    /// the socket provides it (SO_TIMESTAMPNS/PACKET_TIMESTAMP), else a
+    /// monotonic userspace stamp.
+    int drainSocket(CyclicFrameView* views, int max_views) {
+        int n = 0;
+        while (n < max_views) {
+            Bank* b = freeBank();
+            if (!b) { ++dropped_rx_; break; }
+            alignas(8) uint8_t cbuf[64];
+            struct iovec   iov { b->buf, sizeof(b->buf) };
+            struct msghdr  msg {};
+            msg.msg_iov        = &iov;
+            msg.msg_iovlen     = 1;
+            msg.msg_control    = cbuf;
+            msg.msg_controllen = sizeof(cbuf);
+            const ssize_t len = ::recvmsg(fd_, &msg, MSG_DONTWAIT);
+            if (len <= 0) break;                      // drained
+            uint64_t stamp = 0;
+            for (struct cmsghdr* c = CMSG_FIRSTHDR(&msg); c;
+                 c = CMSG_NXTHDR(&msg, c)) {
+                if (c->cmsg_level == SOL_SOCKET &&
+                    c->cmsg_type == SCM_TIMESTAMPNS) {
+                    const auto* ts =
+                        reinterpret_cast<const struct timespec*>(CMSG_DATA(c));
+                    stamp = static_cast<uint64_t>(ts->tv_sec) *
+                            1'000'000'000ULL +
+                            static_cast<uint64_t>(ts->tv_nsec);
+                    break;
+                }
+            }
+            b->emitted = true;
+            views[n].frame     = b->buf;
+            views[n].frame_len = static_cast<uint32_t>(len);
+            views[n].stamp_ns  = stamp ? stamp : monoNowNs();
+            views[n].cookie    = static_cast<uint32_t>(b - bank_);
+            ++n;
+        }
+        return n;
+    }
+
     int fd_;
     int ifindex_;
     uint8_t tx_buf_[kFrameBytes]{};
@@ -312,8 +329,9 @@ protected:
 class LinuxRingChannel : public LinuxSocketChannel {
 public:
     struct Config {
-        uint32_t rx_blocks = 128;
-        uint32_t tx_blocks = 16;
+        uint32_t rx_blocks  = 128;
+        uint32_t tx_blocks  = 16;
+        uint32_t rx_spin_ns = 0;   ///< busy-poll window inside rxPoll()
     };
 
     LinuxRingChannel(int fd, int ifindex, const Config& cfg)
@@ -331,6 +349,23 @@ public:
         return true;
     }
 
+    /// Test seam: adopt caller-provided ring buffers instead of kernel
+    /// PACKET_MMAP rings.  Lets tests exercise the walk/hold/cursor
+    /// mechanics on synthetic tpacket2_hdr layouts without CAP_NET_RAW.
+    /// The memory is borrowed — teardownRings() does not unmap it.
+    void adoptRingsForTest(uint8_t* rx, uint32_t rx_frame_size,
+                           uint32_t rx_frames,
+                           uint8_t* tx, uint32_t tx_frame_size,
+                           uint32_t tx_frames) {
+        rx_ring_ = rx;  rx_ring_len_ = 0;
+        rx_frame_size_ = rx_frame_size;  rx_frames_ = rx_frames;
+        rx_holds_    = std::make_unique<std::atomic<int>[]>(rx_frames_);
+        rx_consumed_ = std::make_unique<std::atomic<bool>[]>(rx_frames_);
+        tx_ring_ = tx;  tx_ring_len_ = 0;
+        tx_frame_size_ = tx_frame_size;  tx_frames_ = tx_frames;
+        rings_borrowed_ = true;
+    }
+
     // ---- TX (ring) ----
     uint8_t* txAcquire() override {
         if (!tx_ring_) return LinuxSocketChannel::txAcquire();
@@ -339,6 +374,7 @@ public:
             auto* hdr = txSlot(idx);
             if (hdr->tp_status == TP_STATUS_AVAILABLE) {
                 tx_acquired_ = static_cast<int64_t>(idx);
+                tx_cursor_   = (idx + 1) % tx_frames_;   // resume past it
                 return txData(hdr);
             }
         }
@@ -365,7 +401,14 @@ public:
         // One kick flushes every queued SEND_REQUEST slot.
         const ssize_t s = ::sendto(fd_, nullptr, 0, MSG_DONTWAIT,
                                    nullptr, 0);
-        return s >= 0 || errno == EAGAIN;     // EAGAIN: kick deferred to next
+        if (s < 0 && errno == EAGAIN) {
+            // Frame stays queued — kernel TX queue is full, it flushes on
+            // the next kick.  That is a *late* cyclic frame: count it so
+            // the deferral is visible in diagnostics.
+            tx_deferred_.fetch_add(1, std::memory_order_relaxed);
+            return true;
+        }
+        return s >= 0;
     }
 
     bool txSendParts(const CyclicTxParts& p) override {
@@ -391,9 +434,41 @@ public:
                uint32_t timeout_ns) override {
         int n = walkRing(views, max_views);
         if (n > 0 || timeout_ns == 0) return n;
-        const int r = waitReadable(fd_, timeout_ns);
+
+        // Optional spin phase: poll slot memory directly — a DMA write is
+        // visible with zero syscalls and zero scheduler latency.  This is
+        // what makes the whole cycle boundary syscall-free on a dedicated
+        // core (paired with a HybridSpin deadline timer).  The spin shares
+        // the caller's timeout budget, never extends it.
+        const uint64_t deadline = monoNowNs() + timeout_ns;
+        if (cfg_.rx_spin_ns > 0) {
+            const uint64_t stop =
+                std::min(deadline, monoNowNs() + cfg_.rx_spin_ns);
+            while (monoNowNs() < stop) {
+                if (rxPending())
+                    return walkRing(views, max_views);
+            }
+        }
+        const uint64_t now = monoNowNs();
+        if (now >= deadline) return 0;
+
+        const int r = waitReadable(fd_,
+            static_cast<uint32_t>(deadline - now));
         if (r <= 0) return r < 0 ? -errno : 0;
         return walkRing(views, max_views);
+    }
+
+    /// Any surfaced-but-unconsumed slot?  Pure memory reads — spin-safe.
+    bool rxPending() const override {
+        if (!rx_ring_) return false;
+        for (uint32_t i = 0; i < rx_frames_; ++i) {
+            const auto* hdr = reinterpret_cast<const struct tpacket2_hdr*>(
+                rx_ring_ + static_cast<size_t>(i) * rx_frame_size_);
+            if ((hdr->tp_status & TP_STATUS_USER) &&
+                !rx_consumed_[i].load(std::memory_order_acquire))
+                return true;
+        }
+        return false;
     }
 
     void rxHold(uint32_t cookie) override {
@@ -415,6 +490,9 @@ public:
     int  fd() const override { return fd_; }
     bool zeroCopy() const override { return true; }
     const char* backendName() const override { return "ring"; }
+    uint64_t txDeferred() const override {
+        return tx_deferred_.load(std::memory_order_relaxed);
+    }
 
 private:
     bool initRxRing() {
@@ -480,6 +558,11 @@ private:
     }
 
     void teardownRings() {
+        if (rings_borrowed_) {   // test seam — caller owns the memory
+            rx_ring_ = nullptr;
+            tx_ring_ = nullptr;
+            return;
+        }
         struct tpacket_req req{};
         if (rx_ring_) {
             setsockopt(fd_, SOL_PACKET, PACKET_RX_RING, &req, sizeof(req));
@@ -506,22 +589,25 @@ private:
     }
 
     int walkRing(CyclicFrameView* views, int max_views) {
-        // First pass: free slots that were consumed and are no longer held.
-        for (uint32_t i = 0; i < rx_frames_; ++i) {
-            if (rx_consumed_[i].load(std::memory_order_acquire) &&
-                rx_holds_[i].load(std::memory_order_acquire) == 0 &&
-                (rxSlot(i)->tp_status & TP_STATUS_USER)) {
-                rx_consumed_[i].store(false, std::memory_order_release);
-                __sync_synchronize();
-                rxSlot(i)->tp_status = TP_STATUS_KERNEL;
-            }
-        }
-
+        // Single wrap-around pass from the resume cursor: free
+        // consumed-and-unheld slots AND emit pending ones in one sweep.
+        // (The free check must cover every slot; the emit side resumes at
+        // rx_cursor_ so a quiescent poll costs O(active) not O(frames).)
         int n = 0;
-        for (uint32_t idx = 0; idx < rx_frames_ && n < max_views; ++idx) {
+        uint32_t last_emitted = rx_cursor_;
+        for (uint32_t k = 0; k < rx_frames_; ++k) {
+            const uint32_t idx = (rx_cursor_ + k) % rx_frames_;
             auto* hdr = rxSlot(idx);
             if (!(hdr->tp_status & TP_STATUS_USER)) continue;
-            if (rx_consumed_[idx].load(std::memory_order_acquire)) continue;
+            if (rx_consumed_[idx].load(std::memory_order_acquire)) {
+                if (rx_holds_[idx].load(std::memory_order_acquire) == 0) {
+                    rx_consumed_[idx].store(false, std::memory_order_release);
+                    __sync_synchronize();
+                    hdr->tp_status = TP_STATUS_KERNEL;
+                }
+                continue;
+            }
+            if (n >= max_views) break;
 
             views[n].frame     = reinterpret_cast<const uint8_t*>(hdr) +
                                  hdr->tp_mac;
@@ -531,11 +617,13 @@ private:
                 hdr->tp_nsec;
             views[n].cookie    = idx;
             ++n;
+            last_emitted = idx;
             // Do NOT clear tp_status here — the consumer may rxHold() this
             // cookie after rxPoll returns.  Consumed-and-unheld slots are
-            // recycled at the start of the next walk.
+            // recycled on the next walk (here or in rxRelease).
             rx_consumed_[idx].store(true, std::memory_order_release);
         }
+        if (n > 0) rx_cursor_ = (last_emitted + 1) % rx_frames_;
         return n;
     }
 
@@ -554,6 +642,9 @@ private:
     uint32_t tx_frames_ = 0;
     int64_t  tx_acquired_ = -1;   // index of the last txAcquire() slot
     uint32_t tx_cursor_ = 0;
+    uint32_t rx_cursor_ = 0;
+    bool     rings_borrowed_ = false;   // adoptRingsForTest() seam
+    std::atomic<uint64_t> tx_deferred_{0};
 };
 
 } // namespace
@@ -611,7 +702,8 @@ std::unique_ptr<ICyclicChannel> createCyclicChannel(
         const int fd = openCyclicSocket(cfg.ifindex);
         if (fd >= 0) {
             LinuxRingChannel::Config rcfg{cfg.rx_ring_blocks,
-                                          cfg.tx_ring_blocks};
+                                          cfg.tx_ring_blocks,
+                                          cfg.rx_spin_ns};
             auto ring = std::make_unique<LinuxRingChannel>(fd, cfg.ifindex,
                                                            rcfg);
             if (ring->init()) {
@@ -653,12 +745,30 @@ std::unique_ptr<ICyclicChannel> createCyclicSocketChannelForFd(
 }
 
 std::unique_ptr<ICyclicChannel> createCyclicRingChannelForFd(
-    int fd, int ifindex, uint32_t rx_ring_blocks, uint32_t tx_ring_blocks)
+    int fd, int ifindex, uint32_t rx_ring_blocks, uint32_t tx_ring_blocks,
+    uint32_t rx_spin_ns)
 {
     if (fd < 0) return nullptr;
-    LinuxRingChannel::Config rcfg{rx_ring_blocks, tx_ring_blocks};
+    LinuxRingChannel::Config rcfg{rx_ring_blocks, tx_ring_blocks, rx_spin_ns};
     auto ring = std::make_unique<LinuxRingChannel>(fd, ifindex, rcfg);
     if (!ring->init()) return nullptr;   // dtor closes fd + unmaps
+    return ring;
+}
+
+std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
+    int fd, int ifindex,
+    void* rx_ring, uint32_t rx_frame_size, uint32_t rx_frames,
+    void* tx_ring, uint32_t tx_frame_size, uint32_t tx_frames,
+    uint32_t rx_spin_ns)
+{
+    if (fd < 0 || !rx_ring || rx_frame_size == 0 || rx_frames == 0)
+        return nullptr;
+    LinuxRingChannel::Config rcfg{0, 0, rx_spin_ns};
+    auto ring = std::make_unique<LinuxRingChannel>(fd, ifindex, rcfg);
+    ring->adoptRingsForTest(static_cast<uint8_t*>(rx_ring), rx_frame_size,
+                            rx_frames,
+                            static_cast<uint8_t*>(tx_ring), tx_frame_size,
+                            tx_frames);
     return ring;
 }
 
@@ -686,7 +796,11 @@ std::unique_ptr<ICyclicChannel> createCyclicSocketChannelForFd(
     int, int) { return nullptr; }
 
 std::unique_ptr<ICyclicChannel> createCyclicRingChannelForFd(
-    int, int, uint32_t, uint32_t) { return nullptr; }
+    int, int, uint32_t, uint32_t, uint32_t) { return nullptr; }
+
+std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
+    int, int, void*, uint32_t, uint32_t, void*, uint32_t, uint32_t,
+    uint32_t) { return nullptr; }
 
 } // namespace EtherCAT
 

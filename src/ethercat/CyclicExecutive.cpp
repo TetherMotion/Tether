@@ -8,6 +8,7 @@
 
 #include "tether/ethercat/CyclicExecutive.hpp"
 #include "tether/platform/Platform.hpp"
+#include "tether/platform/RtMemory.hpp"
 
 namespace EtherCAT {
 
@@ -160,9 +161,39 @@ void CyclicExecutive::stop() {
 // ============================================================================
 
 void CyclicExecutive::cyclicMain() {
-    if (!Tether::Platform::setCurrentThreadRealtime(config_.priority)) {
-        TETHER_LOGW(TAG, "Cyclic thread could not acquire SCHED_FIFO; "
-                         "running with normal scheduling");
+    if (config_.low_timer_slack) {
+        // ~50 µs default timer slack applies to every sleep/ppoll on
+        // non-RT threads; under SCHED_FIFO the kernel skips it anyway.
+        Tether::Platform::setCurrentThreadTimerSlack(1);
+    }
+    if (config_.stack_prefault_bytes > 0) {
+        Tether::Platform::prefaultCurrentStack(
+            std::min<uint32_t>(config_.stack_prefault_bytes,
+                               static_cast<uint32_t>(config_.stack_size)
+                                   - 16 * 1024));
+    }
+
+    bool rt = false;
+    if (config_.sched_class == SchedClass::Deadline) {
+        const uint64_t period_ns =
+            static_cast<uint64_t>(config_.cycle_period_us) * 1000ULL;
+        const uint64_t runtime = config_.dl_runtime_ns
+            ? config_.dl_runtime_ns : period_ns / 2;
+        const uint64_t deadline = config_.dl_deadline_ns
+            ? config_.dl_deadline_ns : period_ns;
+        rt = Tether::Platform::setCurrentThreadDeadline(runtime, deadline,
+                                                        period_ns);
+        if (!rt) {
+            TETHER_LOGW(TAG, "SCHED_DEADLINE unavailable — falling back "
+                             "to SCHED_FIFO");
+        }
+    }
+    if (!rt) {
+        rt = Tether::Platform::setCurrentThreadRealtime(config_.priority);
+    }
+    if (!rt) {
+        TETHER_LOGW(TAG, "Cyclic thread could not acquire realtime "
+                         "scheduling; running with normal scheduling");
     }
 
     const uint64_t period_ns =
@@ -242,6 +273,9 @@ bool CyclicExecutive::runPhase(size_t phase_idx) {
 // ============================================================================
 
 void CyclicExecutive::dcMain() {
+    if (config_.low_timer_slack) {
+        Tether::Platform::setCurrentThreadTimerSlack(1);
+    }
     if (!Tether::Platform::setCurrentThreadRealtime(config_.dc_priority)) {
         TETHER_LOGW(TAG, "DC sync thread could not acquire SCHED_FIFO; "
                          "running with normal scheduling");

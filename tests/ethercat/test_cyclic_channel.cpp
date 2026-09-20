@@ -19,10 +19,12 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <deque>
 #include <string>
 #include <thread>
 #include <vector>
@@ -520,6 +522,12 @@ struct MasterCyclicTestAccess {
     static void dispatch(Master& m, const CyclicFrameView& v) {
         m.dispatchChannelFrame(v);
     }
+    static void setRxSpinNs(Master& m, uint32_t ns) {
+        m.rx_spin_ns_ = ns;
+    }
+    static int cyclicWaiters(Master& m) {
+        return m.cyclic_waiters_.load(std::memory_order_acquire);
+    }
 };
 } // namespace EtherCAT
 
@@ -536,6 +544,17 @@ public:
     uint8_t hdr_copy[64] = {};   // header points into a dead stack buffer
     bool    send_parts_result = true;
 
+    // Scriptable RX queue: queued frames are served by rxPoll() as views
+    // into owned storage; rx_pending_val forces rxPending() true.
+    struct RxFrame { std::array<uint8_t, 1600> data{}; size_t len = 0;
+                     uint32_t cookie = 0; };
+    std::deque<RxFrame> rxq;
+    /// Stable pool the views point into — deque elements die on pop,
+    /// so served frames are copied here to keep views valid.
+    RxFrame served[16] = {};
+    bool rx_pending_val = false;
+    int  rx_poll_calls  = 0;
+
     uint8_t* txAcquire() override { return tx_buf; }
     size_t   txCapacity() const override { return sizeof(tx_buf); }
     bool     txCommitFrame(uint32_t) override { return true; }
@@ -547,7 +566,23 @@ public:
         last_parts.header = hdr_copy;
         return send_parts_result;
     }
-    int  rxPoll(CyclicFrameView*, int, uint32_t) override { return 0; }
+    int  rxPoll(CyclicFrameView* views, int max_views,
+                uint32_t) override {
+        ++rx_poll_calls;
+        int n = 0;
+        while (n < max_views && n < 16 && !rxq.empty()) {
+            served[n]          = rxq.front();
+            rxq.pop_front();
+            views[n].frame     = served[n].data.data();
+            views[n].frame_len = served[n].len;
+            views[n].cookie    = served[n].cookie;
+            ++n;
+        }
+        return n;
+    }
+    bool rxPending() const override {
+        return rx_pending_val || !rxq.empty();
+    }
     void rxHold(uint32_t)   override { holds.fetch_add(1); }
     void rxRelease(uint32_t) override { holds.fetch_sub(1); }
     int  fd() const override { return -1; }
@@ -614,6 +649,30 @@ TEST_F(MasterCyclicTest, SoftwareDepositCopyPath) {
     EXPECT_EQ(view.payload[0], 0x11);
     EXPECT_EQ(view.payload[3], 0x44);
     EXPECT_EQ(view.channel, nullptr);   // copy path — no channel view
+}
+
+TEST_F(MasterCyclicTest, LegacyWaitCyclicSlotAndToken) {
+    // Deposit into slot 1, then read it back through the RxDatagram
+    // compatibility overload — same wait, materialized copy.
+    uint8_t frame[128];
+    const uint8_t pay[3] = {0xDE, 0xAD, 0xBEEF & 0xFF};
+    const size_t n = buildEcatFrame(frame, 0x0C, 0xF9, 0xAAAA, 0xBBBB,
+                                    pay, 3, 5);
+    master_.handleRxFrame(frame, n);
+
+    // Token reflects the published sequence; out-of-range slot → 0.
+    EXPECT_GT(master_.cyclicSlotToken(1), 0u);
+    EXPECT_EQ(master_.cyclicSlotToken(0xFF), 0u);
+
+    RxDatagram out{};
+    ASSERT_TRUE(master_.waitCyclicSlot(1, /*token=*/0, 0, out));
+    EXPECT_EQ(out.idx, kCyclicSlotBaseIdx + 1);
+    EXPECT_EQ(out.adp, 0xAAAAu);
+    EXPECT_EQ(out.ado, 0xBBBBu);
+    EXPECT_EQ(out.datalen, 3u);
+    EXPECT_EQ(out.wkc, 5u);
+    EXPECT_EQ(out.data[0], 0xDE);
+    EXPECT_EQ(out.data[1], 0xAD);
 }
 
 TEST_F(MasterCyclicTest, AsyncIdxDoesNotDepositCyclicSlot) {
@@ -767,6 +826,436 @@ static bool haveCapNetRaw() {
     return false;
 }
 
+// ============================================================================
+// Unified wait path: eventfd wake, bounded drain, spin phase, fallbacks
+// ============================================================================
+
+TEST_F(MasterCyclicTest, DepositWakesBlockedWaiterViaEventfd) {
+    // A waiter blocked in waitCyclicSlotView must be woken by a deposit
+    // arriving on another thread — the eventfd path covers the case where
+    // no wire fd is pollable.
+    std::atomic<bool> got{false};
+    CyclicSlotView view{};
+    std::thread waiter([&] {
+        got = master_.waitCyclicSlotView(3, 0, 2'000'000'000u, view);
+    });
+    // Give the waiter a moment to register + block.
+    for (int i = 0; i < 200 &&
+         MasterCyclicTestAccess::cyclicWaiters(master_) == 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(MasterCyclicTestAccess::cyclicWaiters(master_), 1);
+
+    const uint8_t pay[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+    uint8_t frame[128];
+    const size_t n = buildEcatFrame(frame, 0x0C, 0xFB, 1, 1, pay, 4, 2);
+    master_.handleRxFrame(frame, n);
+
+    waiter.join();
+    ASSERT_TRUE(got);
+    EXPECT_EQ(view.datalen, 4u);
+    EXPECT_EQ(view.payload[0], 0xDE);
+    EXPECT_EQ(MasterCyclicTestAccess::cyclicWaiters(master_), 0);
+}
+
+TEST_F(MasterCyclicTest, WaiterRegisteredBeforeBlockingNoMissedDeposit) {
+    // Deposit BEFORE the wait starts: the seq fast-path returns it without
+    // ever registering a waiter.
+    const uint8_t pay[2] = {0x01};
+    uint8_t frame[128];
+    const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 2, 1);
+    master_.handleRxFrame(frame, n);
+
+    CyclicSlotView view{};
+    ASSERT_TRUE(master_.waitCyclicSlotView(0, 0, 1'000'000, view));
+    EXPECT_EQ(view.datalen, 2u);
+    EXPECT_EQ(MasterCyclicTestAccess::cyclicWaiters(master_), 0);
+}
+
+TEST_F(MasterCyclicTest, BoundedDrainLeavesQueuedFrames) {
+    // iface_.receive software path: >8 queued frames per wake must not all
+    // be consumed in one drain — POLLIN stays asserted for the rest.
+    // Restart the master with a receive callback that serves a queue.
+    master_.stop();
+
+    std::deque<std::pair<std::array<uint8_t, 1600>, size_t>> q;
+    for (int i = 0; i < 20; ++i) {
+        std::pair<std::array<uint8_t, 1600>, size_t> f;
+        const uint8_t pay[2] = {static_cast<uint8_t>(i), 0};
+        f.second = buildEcatFrame(f.first.data(), 0x07,
+                                  static_cast<uint8_t>(0x10 + i),  // async idx
+                                  0, 0, pay, 2, 1);
+        q.push_back(std::move(f));
+    }
+    // Socketpair as the fake wire fd: writing a byte makes POLLIN fire.
+    int sv[2] = {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+    const char kick = 'K';
+    ASSERT_EQ(::write(sv[0], &kick, 1), 1);
+
+    NetworkInterface iface2{};
+    iface2.send = iface_.send;
+    iface2.native_handle = reinterpret_cast<void*>(
+        static_cast<intptr_t>(sv[1]));
+    iface2.receive = [&q](uint8_t* buf, size_t max, size_t* out) -> bool {
+        if (q.empty()) { *out = 0; return false; }
+        auto& f = q.front();
+        const size_t n = std::min(f.second, max);
+        std::memcpy(buf, f.first.data(), n);
+        *out = n;
+        q.pop_front();
+        return true;
+    };
+    master_.start(iface2, mac_);
+    master_.clearCancel();  // stop() leaves cancel set; restart clears it
+
+    // A wait on an unfilled slot drains at most 8 frames per wake, then
+    // keeps polling — the queued async frames are consumed over several
+    // iterations rather than one unbounded drain.  Timeout is generous;
+    // the key assertion is that the wait bounded the drain.
+    CyclicSlotView view{};
+    const auto t0 = std::chrono::steady_clock::now();
+    EXPECT_FALSE(master_.waitCyclicSlotView(0, 0, 30'000'000, view));
+    const auto el = std::chrono::steady_clock::now() - t0;
+    EXPECT_LT(el, std::chrono::seconds(2));
+    // The 20 queued async frames were drained in ≤8-frame batches across
+    // the repeated POLLIN wakeups — POLLIN stays asserted on the pending
+    // kick byte so all of them arrive before the deadline.
+    EXPECT_TRUE(q.empty());
+    ::close(sv[0]);
+    ::close(sv[1]);
+}
+
+TEST_F(MasterCyclicTest, SpinPhaseDrainsChannelWithoutBlocking) {
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+    MasterCyclicTestAccess::setRxSpinNs(master_, 10'000'000u);  // 10 ms
+
+    // Queue a cyclic frame on the stub — rxPending() true → the spin
+    // phase exits early into rxPoll → dispatch → deposit → read.
+    StubChannel::RxFrame f;
+    const uint8_t pay[4] = {0xA5, 0xA5, 0xA5, 0xA5};
+    f.len = buildEcatFrame(f.data.data(), 0x0C, 0xF8, 0, 0, pay, 4, 1);
+    f.cookie = 9;
+    stubp->rxq.push_back(f);
+
+    CyclicSlotView view{};
+    ASSERT_TRUE(master_.waitCyclicSlotView(0, 0, 500'000'000u, view));
+    EXPECT_GT(stubp->rx_poll_calls, 0);
+    EXPECT_EQ(view.datalen, 4u);
+    EXPECT_EQ(view.payload[0], 0xA5);
+    // Channel-sourced view — holds the cookie.
+    EXPECT_EQ(view.channel, stubp);
+    EXPECT_EQ(view.cookie, 9u);
+    EXPECT_EQ(stubp->holds.load(), 1);
+}
+
+TEST_F(MasterCyclicTest, SpinPhaseHonoursDeadlineWhenNothingArrives) {
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    stubp->rx_pending_val = true;   // pending but never delivers a frame
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+    MasterCyclicTestAccess::setRxSpinNs(master_, 10'000'000u);
+
+    CyclicSlotView view{};
+    const auto t0 = std::chrono::steady_clock::now();
+    EXPECT_FALSE(master_.waitCyclicSlotView(0, 0, 15'000'000, view));
+    const auto el = std::chrono::steady_clock::now() - t0;
+    EXPECT_GE(el, std::chrono::milliseconds(13));
+    EXPECT_LT(el, std::chrono::seconds(2));
+}
+
+TEST_F(MasterCyclicTest, CancelDuringChannelSpinWait) {
+    auto stub = std::make_unique<StubChannel>();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+    MasterCyclicTestAccess::setRxSpinNs(master_, 5'000'000u);
+
+    std::atomic<bool> got{true};
+    CyclicSlotView view{};
+    std::thread waiter([&] {
+        got = master_.waitCyclicSlotView(1, 0, 500'000'000u, view);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    master_.requestCancel();
+    waiter.join();
+    EXPECT_FALSE(got);
+    master_.clearCancel();
+}
+
+TEST_F(MasterCyclicTest, TimestampOnChannelFrameView) {
+    // dispatchChannelFrame stamps the deposit — the slot view carries a
+    // monotonic timestamp (0 only when the frame came pre-stamped).
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    const uint8_t pay[2] = {0x77};
+    uint8_t frame[128];
+    const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 2, 1);
+    CyclicFrameView v{};
+    v.frame = frame; v.frame_len = n; v.cookie = 1;
+    v.stamp_ns = 123456789;   // pre-stamped channel frames keep their stamp
+    MasterCyclicTestAccess::dispatch(master_, v);
+
+    CyclicSlotView view{};
+    ASSERT_TRUE(master_.waitCyclicSlotView(0, 0, 0, view));
+    EXPECT_EQ(view.stamp_ns, 123456789u);
+    (void)stubp;
+}
+
+TEST_F(MasterCyclicTest, SocketChannelTimestampsViaRecvmsg) {
+    // The socket backend stamps each received frame — via SCM_TIMESTAMPNS
+    // when the kernel provides it, else a monotonic fallback.
+    int sv[2] = {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+    auto ch = createCyclicSocketChannelForFd(sv[1], 0);
+    ASSERT_NE(ch, nullptr);
+
+    const uint8_t pay[8] = {1, 2, 3, 4};
+    ASSERT_EQ(::send(sv[0], pay, sizeof(pay), 0), (ssize_t)sizeof(pay));
+
+    CyclicFrameView v[2];
+    const int n = ch->rxPoll(v, 2, 200'000'000);
+    ASSERT_GE(n, 1);
+    EXPECT_GT(v[0].stamp_ns, 0u);
+    // Sanity: stamp is plausibly "now" (within the last minute).
+    timespec ts{};
+    ::clock_gettime(CLOCK_MONOTONIC, &ts);
+    const uint64_t now = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ull
+                       + ts.tv_nsec;
+    EXPECT_LE(v[0].stamp_ns, now);
+    EXPECT_GT(v[0].stamp_ns, now - 60'000'000'000ull);
+    ::close(sv[0]);
+}
+
+// ============================================================================
+// Ring backend over injected memory — exercises walkRing / cursors /
+// hold-release / slot recycling / TX acquire-commit / deferred-kick
+// without CAP_NET_RAW.  The socketpair fd supplies the TX kick and the
+// pollable fd; the "kernel" is simulated by flagging tpacket2_hdr slots.
+// ============================================================================
+
+class RingChannelMemoryTest : public ::testing::Test {
+protected:
+    static constexpr uint32_t kRxN = 8;
+    static constexpr uint32_t kTxN = 4;
+    static constexpr uint32_t kFrameSize =
+        TPACKET_ALIGN(TPACKET2_HDRLEN + 1600);
+
+    int sv_[2] = {-1, -1};
+    std::unique_ptr<uint8_t[]> rx_mem_, tx_mem_;
+    std::unique_ptr<ICyclicChannel> ch_;
+
+    static void emitOn(tpacket2_hdr* h, const uint8_t* frame, uint16_t len,
+                       uint32_t sec = 1, uint32_t nsec = 500) {
+        h->tp_mac     = TPACKET2_HDRLEN;
+        h->tp_net     = static_cast<uint16_t>(h->tp_mac + 14);
+        h->tp_len     = len;
+        h->tp_snaplen = len;
+        h->tp_sec     = sec;
+        h->tp_nsec    = nsec;
+        std::memcpy(reinterpret_cast<uint8_t*>(h) + TPACKET2_HDRLEN,
+                    frame, len);
+        __sync_synchronize();          // payload before status, like the NIC
+        h->tp_status = TP_STATUS_USER;
+    }
+
+    void SetUp() override {
+        ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv_), 0);
+        rx_mem_ = std::make_unique<uint8_t[]>(kFrameSize * kRxN);
+        tx_mem_ = std::make_unique<uint8_t[]>(kFrameSize * kTxN);
+        std::memset(rx_mem_.get(), 0, kFrameSize * kRxN);
+        std::memset(tx_mem_.get(), 0, kFrameSize * kTxN);
+        ch_ = createCyclicRingChannelForMemory(
+            sv_[0], 1,
+            rx_mem_.get(), kFrameSize, kRxN,
+            tx_mem_.get(), kFrameSize, kTxN, 0);
+        ASSERT_TRUE(ch_);
+        EXPECT_STREQ(ch_->backendName(), "ring");
+        EXPECT_TRUE(ch_->zeroCopy());
+    }
+    void TearDown() override {
+        ch_.reset();                    // channel closes its fd
+        ::close(sv_[0]); ::close(sv_[1]);
+    }
+
+    tpacket2_hdr* rxSlot(uint32_t i) {
+        return reinterpret_cast<tpacket2_hdr*>(rx_mem_.get() + i * kFrameSize);
+    }
+    tpacket2_hdr* txSlot(uint32_t i) {
+        return reinterpret_cast<tpacket2_hdr*>(tx_mem_.get() + i * kFrameSize);
+    }
+    void emitRx(uint32_t i, const uint8_t* frame, uint16_t len,
+                uint32_t sec = 1, uint32_t nsec = 500) {
+        emitOn(rxSlot(i), frame, len, sec, nsec);
+    }
+};
+
+TEST_F(RingChannelMemoryTest, EmitsUserSlotWithKernelStamp) {
+    const uint8_t payload[60] = {0xAB};
+    emitRx(0, payload, sizeof(payload), /*sec*/7, /*nsec*/123456789);
+    CyclicFrameView v[4];
+    ASSERT_EQ(ch_->rxPoll(v, 4, 0), 1);
+    EXPECT_EQ(v[0].frame_len, 60u);
+    EXPECT_EQ(v[0].frame[0], 0xAB);
+    EXPECT_EQ(v[0].cookie, 0u);
+    EXPECT_EQ(v[0].stamp_ns, 7'000'000'000ull + 123456789ull);
+    EXPECT_EQ(v[0].frame, reinterpret_cast<const uint8_t*>(rxSlot(0)) +
+                          TPACKET2_HDRLEN);
+}
+
+TEST_F(RingChannelMemoryTest, ConsumedSlotRecycledOnNextWalk) {
+    const uint8_t payload[64] = {0x11};
+    emitRx(0, payload, sizeof(payload));
+    CyclicFrameView v[4];
+    ASSERT_EQ(ch_->rxPoll(v, 4, 0), 1);
+    // Consumed but possibly-still-referenced: stays USER until next walk.
+    EXPECT_EQ(rxSlot(0)->tp_status & TP_STATUS_USER,
+              static_cast<uint32_t>(TP_STATUS_USER));
+    EXPECT_EQ(ch_->rxPoll(v, 4, 0), 0);   // walk recycles it
+    EXPECT_EQ(rxSlot(0)->tp_status & TP_STATUS_USER, 0u);
+    EXPECT_FALSE(ch_->rxPending());
+}
+
+TEST_F(RingChannelMemoryTest, HoldPinsSlotUntilRelease) {
+    const uint8_t payload[64] = {0x22};
+    emitRx(0, payload, sizeof(payload));
+    CyclicFrameView v[4];
+    ASSERT_EQ(ch_->rxPoll(v, 4, 0), 1);
+    ch_->rxHold(v[0].cookie);
+    EXPECT_EQ(ch_->rxPoll(v, 4, 0), 0);   // held → not recycled
+    EXPECT_EQ(rxSlot(0)->tp_status & TP_STATUS_USER,
+              static_cast<uint32_t>(TP_STATUS_USER));
+    ch_->rxRelease(v[0].cookie);          // last hold + consumed → kernel
+    EXPECT_EQ(rxSlot(0)->tp_status & TP_STATUS_USER, 0u);
+    EXPECT_FALSE(ch_->rxPending());
+}
+
+TEST_F(RingChannelMemoryTest, DoubleReleaseClampedAtZero) {
+    const uint8_t payload[64] = {0x33};
+    emitRx(0, payload, sizeof(payload));
+    CyclicFrameView v[4];
+    ASSERT_EQ(ch_->rxPoll(v, 4, 0), 1);
+    ch_->rxRelease(v[0].cookie);          // release with no hold: clamp
+    ch_->rxRelease(v[0].cookie);          // double release: still clamped
+    EXPECT_EQ(ch_->rxPoll(v, 4, 0), 0);   // recycled cleanly next walk
+    EXPECT_EQ(rxSlot(0)->tp_status & TP_STATUS_USER, 0u);
+}
+
+TEST_F(RingChannelMemoryTest, CursorResumesAfterLastEmitted) {
+    const uint8_t payload[64] = {0x44};
+    for (uint32_t i = 0; i < 4; ++i) emitRx(i, payload, sizeof(payload));
+    CyclicFrameView v[2];
+    ASSERT_EQ(ch_->rxPoll(v, 2, 0), 2);
+    EXPECT_EQ(v[0].cookie, 0u);
+    EXPECT_EQ(v[1].cookie, 1u);
+    ASSERT_EQ(ch_->rxPoll(v, 2, 0), 2);
+    EXPECT_EQ(v[0].cookie, 2u);
+    EXPECT_EQ(v[1].cookie, 3u);
+}
+
+TEST_F(RingChannelMemoryTest, RxPendingTracksDeliverable) {
+    const uint8_t payload[64] = {0x55};
+    EXPECT_FALSE(ch_->rxPending());
+    emitRx(3, payload, sizeof(payload));
+    EXPECT_TRUE(ch_->rxPending());
+    CyclicFrameView v[4];
+    ASSERT_EQ(ch_->rxPoll(v, 4, 0), 1);
+    EXPECT_EQ(v[0].cookie, 3u);
+    EXPECT_FALSE(ch_->rxPending());       // consumed ≠ pending
+}
+
+TEST_F(RingChannelMemoryTest, TxAcquireCommitCycle) {
+    uint8_t* dst = ch_->txAcquire();
+    ASSERT_NE(dst, nullptr);
+    EXPECT_EQ(dst, tx_mem_.get() + TPACKET2_HDRLEN);   // slot 0 data area
+    std::memset(dst, 0x5A, 42);
+    EXPECT_TRUE(ch_->txCommitFrame(42));   // pads to 60; kick on socketpair
+    EXPECT_EQ(txSlot(0)->tp_status,
+              static_cast<uint32_t>(TP_STATUS_SEND_REQUEST));
+    EXPECT_EQ(txSlot(0)->tp_len, 60u);
+    EXPECT_EQ(txSlot(0)->tp_mac, static_cast<uint16_t>(TPACKET2_HDRLEN));
+    EXPECT_EQ(ch_->txDeferred(), 0u);
+}
+
+TEST_F(RingChannelMemoryTest, TxRingExhaustionReturnsNull) {
+    for (uint32_t i = 0; i < kTxN; ++i) {
+        ASSERT_NE(ch_->txAcquire(), nullptr) << "slot " << i;
+        ASSERT_TRUE(ch_->txCommitFrame(60));
+    }
+    EXPECT_EQ(ch_->txAcquire(), nullptr);   // all SEND_REQUEST
+    CyclicTxParts p{};  uint8_t h[16] = {};
+    p.header = h; p.header_len = sizeof(h);
+    EXPECT_FALSE(ch_->txSendParts(p));
+    // Kernel drains the ring → slot reusable, cursor resumes past it.
+    txSlot(kTxN - 1)->tp_status = TP_STATUS_AVAILABLE;
+    EXPECT_NE(ch_->txAcquire(), nullptr);
+}
+
+TEST_F(RingChannelMemoryTest, TxCommitWithoutAcquireFails) {
+    EXPECT_FALSE(ch_->txCommitFrame(60));
+    // …and after a real commit, a stray second commit also fails.
+    ASSERT_NE(ch_->txAcquire(), nullptr);
+    ASSERT_TRUE(ch_->txCommitFrame(60));
+    EXPECT_FALSE(ch_->txCommitFrame(60));
+}
+
+TEST_F(RingChannelMemoryTest, DeferredKickCountedOnEagain) {
+    // Fill the peer's receive queue so the TX kick hits EAGAIN — the
+    // frame stays queued and the deferral is counted, not hidden.
+    int rcvbuf = 2304;
+    ::setsockopt(sv_[1], SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+    int sends = 0;
+    while (sends < 200'000 &&
+           ::send(sv_[0], "", 0, MSG_DONTWAIT) >= 0) ++sends;
+    if (sends >= 200'000)
+        GTEST_SKIP() << "peer queue never filled — cannot force EAGAIN";
+    ASSERT_NE(ch_->txAcquire(), nullptr);
+    EXPECT_TRUE(ch_->txCommitFrame(60));
+    EXPECT_GE(ch_->txDeferred(), 1u);
+    EXPECT_EQ(txSlot(0)->tp_status,
+              static_cast<uint32_t>(TP_STATUS_SEND_REQUEST));
+}
+
+TEST_F(RingChannelMemoryTest, PollTimeoutHonoursDeadline) {
+    const auto t0 = std::chrono::steady_clock::now();
+    CyclicFrameView v[2];
+    EXPECT_EQ(ch_->rxPoll(v, 2, 20'000'000), 0);
+    const auto el = std::chrono::steady_clock::now() - t0;
+    EXPECT_GE(el, std::chrono::milliseconds(15));
+    EXPECT_LT(el, std::chrono::seconds(2));
+}
+
+TEST_F(RingChannelMemoryTest, SpinObservesLateDelivery) {
+    // A slot surfaced during the spin window is collected without any
+    // wire activity — the pure-memory rxPending() sees the DMA write.
+    int sv2[2] = {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv2), 0);
+    auto mem2 = std::make_unique<uint8_t[]>(kFrameSize * kRxN);
+    std::memset(mem2.get(), 0, kFrameSize * kRxN);
+    auto ch2 = createCyclicRingChannelForMemory(
+        sv2[0], 1, mem2.get(), kFrameSize, kRxN,
+        nullptr, 0, 0, /*rx_spin_ns*/60'000'000);
+    ASSERT_TRUE(ch2);
+
+    const uint8_t payload[60] = {0x66};
+    std::thread producer([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        emitOn(reinterpret_cast<tpacket2_hdr*>(mem2.get()),
+               payload, sizeof(payload), 2, 42);
+    });
+    CyclicFrameView v[1];
+    const auto t0 = std::chrono::steady_clock::now();
+    ASSERT_EQ(ch2->rxPoll(v, 1, 200'000'000), 1);
+    const auto el = std::chrono::steady_clock::now() - t0;
+    producer.join();
+    EXPECT_EQ(v[0].stamp_ns, 2'000'000'000ull + 42ull);
+    EXPECT_LT(el, std::chrono::milliseconds(100));  // spin exit ≪ timeout
+    ch2.reset();
+    ::close(sv2[0]); ::close(sv2[1]);
+}
+
 class LivePacketTest : public ::testing::Test {
 protected:
     unsigned ifindex_ = 0;
@@ -904,6 +1393,79 @@ TEST(CyclicChannelFactory, InvalidIfindexFails) {
     EXPECT_EQ(createCyclicChannel(cfg), nullptr);
     cfg.ifindex = -5;
     EXPECT_EQ(createCyclicChannel(cfg), nullptr);
+}
+
+// The kernel accepts SO_ATTACH_FILTER on any socket — attaching the public
+// cyclic/async programs to an AF_UNIX pair exercises the real attach path
+// (the same setsockopt AF_PACKET uses) without CAP_NET_RAW.
+TEST(CyclicChannelFactory, AttachFiltersOnUnixFd) {
+    int sv[2];
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+    EXPECT_TRUE(cyclicChannelAttachCyclicFilter(sv[0]));
+    EXPECT_TRUE(cyclicChannelAttachAsyncFilter(sv[1]));
+    ::close(sv[0]);
+    ::close(sv[1]);
+}
+
+TEST(CyclicChannelFactory, AttachFiltersRejectBadFd) {
+    EXPECT_FALSE(cyclicChannelAttachCyclicFilter(-1));
+    EXPECT_FALSE(cyclicChannelAttachAsyncFilter(-1));
+}
+
+// A valid async_fd gets its mirror filter attached before the cyclic socket
+// open fails unprivileged — the factory must still return nullptr.
+TEST(CyclicChannelFactory, AsyncFdAttachThenSocketOpenFails) {
+    int sv[2];
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+    CyclicChannelConfig cfg;
+    cfg.ifindex  = 1;              // lo exists; open still needs CAP_NET_RAW
+    cfg.async_fd = sv[0];
+    EXPECT_EQ(createCyclicChannel(cfg), nullptr);
+    ::close(sv[0]);
+    ::close(sv[1]);
+}
+
+TEST(CyclicChannelFactory, PacketRingModeFailsUnprivileged) {
+    CyclicChannelConfig cfg;
+    cfg.ifindex   = 1;
+    cfg.wire_mode = CyclicWireMode::PacketRing;
+    EXPECT_EQ(createCyclicChannel(cfg), nullptr);
+}
+
+TEST(CyclicChannelFactory, AutoModeFallsBackAndFailsUnprivileged) {
+    CyclicChannelConfig cfg;
+    cfg.ifindex   = 1;
+    cfg.wire_mode = CyclicWireMode::Auto;   // ring fails → socket fails
+    EXPECT_EQ(createCyclicChannel(cfg), nullptr);
+}
+
+TEST(CyclicChannelFactory, SocketChannelForFdRejectsBadFd) {
+    EXPECT_EQ(createCyclicSocketChannelForFd(-1, 1), nullptr);
+}
+
+// PACKET_RX_RING on a non-packet socket fails setsockopt — the channel
+// teardown owns and closes the fd, so only the peer is closed here.
+TEST(CyclicChannelFactory, RingChannelForFdFailsOnNonPacketSocket) {
+    int sv[2];
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+    EXPECT_EQ(createCyclicRingChannelForFd(sv[0], 1, 4, 2), nullptr);
+    ::close(sv[1]);
+}
+
+TEST(CyclicChannelFactory, RingChannelForMemoryRejectsBadArgs) {
+    int sv[2];
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+    alignas(4096) static uint8_t ring[4096 * 8];
+    EXPECT_EQ(createCyclicRingChannelForMemory(-1, 1, ring, 2048, 4,
+                                               ring, 2048, 4), nullptr);
+    EXPECT_EQ(createCyclicRingChannelForMemory(sv[0], 1, nullptr, 2048, 4,
+                                               ring, 2048, 4), nullptr);
+    EXPECT_EQ(createCyclicRingChannelForMemory(sv[0], 1, ring, 0, 4,
+                                               ring, 2048, 4), nullptr);
+    EXPECT_EQ(createCyclicRingChannelForMemory(sv[0], 1, ring, 2048, 0,
+                                               ring, 2048, 4), nullptr);
+    ::close(sv[0]);
+    ::close(sv[1]);
 }
 
 TEST_F(LivePacketTest, AsyncFilterAttachViaConfig) {

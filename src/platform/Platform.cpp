@@ -12,9 +12,12 @@
 
 #ifdef __linux__
 #include <sys/utsname.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <fstream>
 #include <cstdlib>
 #include <cstring>
+#include <cerrno>
 #endif
 
 namespace Tether {
@@ -135,6 +138,42 @@ bool setCurrentThreadRealtime(int priority) {
     // Non-Linux platforms: best-effort no-op (ESP32 FreeRTOS scheduling handled elsewhere)
     (void)priority;
     return true;
+#endif
+}
+
+bool setCurrentThreadDeadline(uint64_t runtime_ns, uint64_t deadline_ns,
+                              uint64_t period_ns) {
+#ifdef __linux__
+    // sched_attr has no stable glibc wrapper — use the syscall directly.
+    struct sched_attr_local {
+        uint32_t size;
+        uint32_t sched_policy;
+        uint64_t sched_flags;
+        int32_t  sched_nice;
+        uint32_t sched_priority;
+        uint64_t sched_runtime;
+        uint64_t sched_deadline;
+        uint64_t sched_period;
+    } attr{};
+    attr.size           = sizeof(attr);
+    attr.sched_policy   = 6 /* SCHED_DEADLINE */;
+    attr.sched_runtime  = runtime_ns;
+    attr.sched_deadline = deadline_ns;
+    attr.sched_period   = period_ns;
+    const long ret = syscall(SYS_sched_setattr, 0, &attr, 0);
+    if (ret != 0) {
+        TETHER_LOGW("Platform",
+            "setCurrentThreadDeadline: sched_setattr failed ({}) — "
+            "caller should fall back to SCHED_FIFO", strerror(errno));
+        return false;
+    }
+    TETHER_LOGI("Platform",
+        "SCHED_DEADLINE applied: runtime={}ns deadline={}ns period={}ns",
+        runtime_ns, deadline_ns, period_ns);
+    return true;
+#else
+    (void)runtime_ns; (void)deadline_ns; (void)period_ns;
+    return false;
 #endif
 }
 
