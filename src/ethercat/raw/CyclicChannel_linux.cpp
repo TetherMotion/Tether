@@ -340,11 +340,48 @@ public:
     ~LinuxRingChannel() override { teardownRings(); }
 
     bool init() {
-        if (!initRxRing()) return false;
-        if (!initTxRing()) {
-            // TX ring optional — socket sendto still works; only zero-copy
-            // TX is lost.
+        // PACKET_VERSION must be set once, before any ring exists — calling
+        // it again after a ring is configured returns EBUSY and wedges the
+        // subsequent ring setup.
+        const int ver = TPACKET_V2;
+        if (setsockopt(fd_, SOL_PACKET, PACKET_VERSION, &ver, sizeof(ver)) < 0)
+            return false;
+
+        // The kernel allocates RX and TX rings as ONE contiguous pg_vec
+        // ([RX blocks | TX blocks]); they must be mapped by a single mmap of
+        // the combined size at offset 0 — a second mmap for TX is EINVAL.
+        struct tpacket_req rx_req{}, tx_req{};
+        if (!configRxRing(&rx_req)) return false;
+        const bool have_tx = configTxRing(&tx_req);   // optional — sendto works
+        if (!have_tx)
             TETHER_LOGW(TAG, "TX ring unavailable — cyclic TX uses sendto");
+
+        const size_t rx_len =
+            static_cast<size_t>(rx_req.tp_block_size) * rx_req.tp_block_nr;
+        const size_t tx_len = have_tx
+            ? static_cast<size_t>(tx_req.tp_block_size) * tx_req.tp_block_nr
+            : 0;
+        void* base = mmap(nullptr, rx_len + tx_len, PROT_READ | PROT_WRITE,
+                          MAP_SHARED, fd_, 0);
+        if (base == MAP_FAILED) {
+            struct tpacket_req clear{};
+            setsockopt(fd_, SOL_PACKET, PACKET_RX_RING, &clear, sizeof(clear));
+            if (have_tx)
+                setsockopt(fd_, SOL_PACKET, PACKET_TX_RING, &clear, sizeof(clear));
+            return false;
+        }
+
+        rx_ring_       = static_cast<uint8_t*>(base);
+        rx_ring_len_   = rx_len + tx_len;         // combined mapping length
+        rx_frame_size_ = rx_req.tp_frame_size;
+        rx_frames_     = rx_req.tp_frame_nr;
+        rx_holds_      = std::make_unique<std::atomic<int>[]>(rx_frames_);
+        rx_consumed_   = std::make_unique<std::atomic<bool>[]>(rx_frames_);
+        if (have_tx) {
+            tx_ring_       = rx_ring_ + rx_len;   // TX region follows RX
+            tx_ring_len_   = tx_len;
+            tx_frame_size_ = tx_req.tp_frame_size;
+            tx_frames_     = tx_req.tp_frame_nr;
         }
         return true;
     }
@@ -382,7 +419,7 @@ public:
     }
 
     size_t txCapacity() const override {
-        return tx_ring_ ? tx_frame_size_ - TPACKET2_HDRLEN
+        return tx_ring_ ? tx_frame_size_ - kTxDataOff
                         : LinuxSocketChannel::txCapacity();
     }
 
@@ -392,7 +429,11 @@ public:
         auto* hdr = txSlot(static_cast<uint32_t>(tx_acquired_));
         tx_acquired_ = -1;
         if (frame_len < 60) frame_len = 60;   // min Ethernet frame (no FCS)
-        hdr->tp_mac     = TPACKET2_HDRLEN;
+        // Without PACKET_TX_HAS_OFF the kernel ignores tp_mac and reads the
+        // frame at the fixed offset tp_hdrlen - sizeof(sockaddr_ll); we place
+        // the data there (kTxDataOff) and still set tp_mac to match so the
+        // layout stays correct if TX_HAS_OFF is ever enabled.
+        hdr->tp_mac     = kTxDataOff;
         hdr->tp_net     = hdr->tp_mac + 14;
         hdr->tp_len     = frame_len;
         hdr->tp_snaplen = frame_len;
@@ -495,66 +536,35 @@ public:
     }
 
 private:
-    bool initRxRing() {
-        const int ver = TPACKET_V2;
-        if (setsockopt(fd_, SOL_PACKET, PACKET_VERSION, &ver, sizeof(ver)) < 0)
-            return false;
-
+    // Configure PACKET_RX_RING; fills *req for the caller to size the mmap.
+    // tp_block_size must be a whole number of pages — pack floor(page /
+    // frame_size) frames into each page-sized block.
+    bool configRxRing(struct tpacket_req* req) {
+        const uint32_t page = (uint32_t)::sysconf(_SC_PAGESIZE);
         const uint32_t frame_size = TPACKET_ALIGN(TPACKET2_HDRLEN + 1600);
-        const uint32_t fpb = frame_size <= 4096 ? 4096 / frame_size : 1;
-        struct tpacket_req req{};
-        req.tp_block_size = fpb * frame_size;
-        req.tp_block_nr   = cfg_.rx_blocks;
-        req.tp_frame_size = frame_size;
-        req.tp_frame_nr   = fpb * cfg_.rx_blocks;
-        if (req.tp_frame_nr == 0) return false;
-
-        if (setsockopt(fd_, SOL_PACKET, PACKET_RX_RING, &req, sizeof(req)) < 0)
-            return false;
-
-        const size_t map_len =
-            static_cast<size_t>(req.tp_block_size) * req.tp_block_nr;
-        void* map = mmap(nullptr, map_len, PROT_READ | PROT_WRITE,
-                         MAP_SHARED, fd_, 0);
-        if (map == MAP_FAILED) return false;
-
-        rx_ring_       = static_cast<uint8_t*>(map);
-        rx_ring_len_   = map_len;
-        rx_frame_size_ = req.tp_frame_size;
-        rx_frames_     = req.tp_frame_nr;
-        rx_holds_      = std::make_unique<std::atomic<int>[]>(rx_frames_);
-        rx_consumed_   = std::make_unique<std::atomic<bool>[]>(rx_frames_);
-        return true;
+        const uint32_t fpb = frame_size <= page ? page / frame_size : 1;
+        req->tp_block_size = fpb * frame_size;
+        req->tp_block_size = (req->tp_block_size + page - 1) / page * page;
+        req->tp_block_nr   = cfg_.rx_blocks;
+        req->tp_frame_size = frame_size;
+        req->tp_frame_nr   = fpb * cfg_.rx_blocks;
+        if (req->tp_frame_nr == 0) return false;
+        return setsockopt(fd_, SOL_PACKET, PACKET_RX_RING, req,
+                          sizeof(*req)) == 0;
     }
 
-    bool initTxRing() {
-        const int ver = TPACKET_V2;
-        if (setsockopt(fd_, SOL_PACKET, PACKET_VERSION, &ver, sizeof(ver)) < 0)
-            return false;
-
+    bool configTxRing(struct tpacket_req* req) {
+        const uint32_t page = (uint32_t)::sysconf(_SC_PAGESIZE);
         const uint32_t frame_size = TPACKET_ALIGN(TPACKET2_HDRLEN + 1600);
-        const uint32_t fpb = frame_size <= 4096 ? 4096 / frame_size : 1;
-        struct tpacket_req req{};
-        req.tp_block_size = fpb * frame_size;
-        req.tp_block_nr   = cfg_.tx_blocks;
-        req.tp_frame_size = frame_size;
-        req.tp_frame_nr   = fpb * cfg_.tx_blocks;
-        if (req.tp_frame_nr == 0) return false;
-
-        if (setsockopt(fd_, SOL_PACKET, PACKET_TX_RING, &req, sizeof(req)) < 0)
-            return false;
-
-        const size_t map_len =
-            static_cast<size_t>(req.tp_block_size) * req.tp_block_nr;
-        void* map = mmap(nullptr, map_len, PROT_READ | PROT_WRITE,
-                         MAP_SHARED, fd_, 0);
-        if (map == MAP_FAILED) return false;
-
-        tx_ring_       = static_cast<uint8_t*>(map);
-        tx_ring_len_   = map_len;
-        tx_frame_size_ = req.tp_frame_size;
-        tx_frames_     = req.tp_frame_nr;
-        return true;
+        const uint32_t fpb = frame_size <= page ? page / frame_size : 1;
+        req->tp_block_size = fpb * frame_size;
+        req->tp_block_size = (req->tp_block_size + page - 1) / page * page;
+        req->tp_block_nr   = cfg_.tx_blocks;
+        req->tp_frame_size = frame_size;
+        req->tp_frame_nr   = fpb * cfg_.tx_blocks;
+        if (req->tp_frame_nr == 0) return false;
+        return setsockopt(fd_, SOL_PACKET, PACKET_TX_RING, req,
+                          sizeof(*req)) == 0;
     }
 
     void teardownRings() {
@@ -564,15 +574,14 @@ private:
             return;
         }
         struct tpacket_req req{};
-        if (rx_ring_) {
-            setsockopt(fd_, SOL_PACKET, PACKET_RX_RING, &req, sizeof(req));
-            munmap(rx_ring_, rx_ring_len_);
-            rx_ring_ = nullptr;
-        }
         if (tx_ring_) {
             setsockopt(fd_, SOL_PACKET, PACKET_TX_RING, &req, sizeof(req));
-            munmap(tx_ring_, tx_ring_len_);
-            tx_ring_ = nullptr;
+            tx_ring_ = nullptr;   // TX region shares the single RX mapping
+        }
+        if (rx_ring_) {
+            setsockopt(fd_, SOL_PACKET, PACKET_RX_RING, &req, sizeof(req));
+            munmap(rx_ring_, rx_ring_len_);   // rx_ring_len_ is the combined size
+            rx_ring_ = nullptr;
         }
     }
 
@@ -584,8 +593,13 @@ private:
         return reinterpret_cast<struct tpacket2_hdr*>(
             tx_ring_ + static_cast<size_t>(i) * tx_frame_size_);
     }
+    // TX frame data lives at tp_hdrlen - sizeof(sockaddr_ll) from the slot
+    // start (the kernel's fixed offset for SOCK_RAW when PACKET_TX_HAS_OFF
+    // is not enabled).  Equals TPACKET2_HDRLEN - sizeof(sockaddr_ll) = 32.
+    static constexpr uint32_t kTxDataOff =
+        TPACKET2_HDRLEN - sizeof(struct sockaddr_ll);
     static uint8_t* txData(struct tpacket2_hdr* hdr) {
-        return reinterpret_cast<uint8_t*>(hdr) + TPACKET2_HDRLEN;
+        return reinterpret_cast<uint8_t*>(hdr) + kTxDataOff;
     }
 
     int walkRing(CyclicFrameView* views, int max_views) {
