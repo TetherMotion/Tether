@@ -693,4 +693,4 @@ See `docs/MotionReplanner.md` for details.
 | [ImplementationGuide.md](ImplementationGuide.md) | How to read and extend the motion planner code |
 | [KlipperArchitecture.md](../KlipperArchitecture.md) | Klipper module architecture and threading |
 | [MotionReplanner.md](../MotionReplanner.md) | Online replanning |
-| [Extrusion docs](../extrusion/) | Pressure advance and non-Newtonian compensation |
+| [Extrusion docs](../extrusion/NonNewtonianPressureAdvance.md) | Pressure advance and non-Newtonian compensation |

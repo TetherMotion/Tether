@@ -502,3 +502,35 @@ jobs:
       with:
         name: test-timing-analysis
         path: build/timing_results/
+
+  docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+      # No submodules needed: Doxygen only scans include/tether and src.
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y doxygen
+        python3 -m pip install -r docs/requirements.txt
+
+    - name: Generate Doxygen XML
+      # Breathe consumes the XML at build/xml (see docs/conf.py
+      # breathe_projects); XML_OUTPUT in the Doxyfile matches that path.
+      run: doxygen Doxyfile
+
+    - name: Build HTML documentation
+      # -W --keep-going: treat Sphinx/Breathe warnings (missing toctree
+      # entries, unresolved doxygenclass targets, dead myst xrefs) as
+      # errors so the docs can't silently rot again.
+      run: sphinx-build -W --keep-going -b html docs build/docs/html
+
+    - name: Upload documentation artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: documentation
+        path: build/docs/html
