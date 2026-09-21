@@ -182,6 +182,17 @@ struct PDOEntry {
      *        not be written in place by the application.
      */
     bool     image_exclude{false};
+    /**
+     * @brief A buffered-path accessor (entryData, entryDataAs, resolve)
+     *        handed out a pointer into storage[] — the application holds
+     *        storage-bound state.  Image-mode exchanges still bridge such
+     *        entries: the gather copies storage to the wire and the scatter
+     *        copies the wire back to storage, so device-level PDO accessors
+     *        stay coherent in every image mode (they just pay a per-entry
+     *        copy).  `mutable` like storage[] — marking is a binding
+     *        observation, not mapping metadata.
+     */
+    mutable bool storage_bound{false};
     uint32_t error_count;
     uint32_t success_count;
 };
@@ -241,21 +252,26 @@ public:
     }
     /// Direct index access — the fast path for RT code that caches the
     /// pointer once after registration.  nullptr on out-of-range.
+    /// Taking a storage pointer marks the entry `storage_bound`: image-mode
+    /// exchanges keep bridging it so the cached pointer stays live.
     uint8_t* entryDataMut(size_t index) {
-        return index < m_entry_count ? m_entries[index].storage : nullptr;
+        if (index >= m_entry_count) return nullptr;
+        m_entries[index].storage_bound = true;
+        return m_entries[index].storage;
     }
     const uint8_t* entryData(size_t index) const {
-        return index < m_entry_count ? m_entries[index].storage : nullptr;
+        if (index >= m_entry_count) return nullptr;
+        m_entries[index].storage_bound = true;
+        return m_entries[index].storage;
     }
     /// Typed access — nullptr when sizeof(T) exceeds the registered size.
     template<typename T> T* entryDataAs(size_t index) {
         return (index < m_entry_count && sizeof(T) <= m_entries[index].data_size)
-                   ? reinterpret_cast<T*>(m_entries[index].storage) : nullptr;
+                   ? reinterpret_cast<T*>(entryDataMut(index)) : nullptr;
     }
     template<typename T> const T* entryDataAs(size_t index) const {
         return (index < m_entry_count && sizeof(T) <= m_entries[index].data_size)
-                   ? reinterpret_cast<const T*>(m_entries[index].storage)
-                   : nullptr;
+                   ? reinterpret_cast<const T*>(entryData(index)) : nullptr;
     }
     /// Epoch-checked resolve — nullptr when the handle is stale or the
     /// entry is out of range.
@@ -399,6 +415,19 @@ public:
      * response belonging to the upcoming send from stale deposits.
      */
     virtual uint64_t cyclicSlotToken(uint8_t slot) {
+        (void)slot; return 0;
+    }
+
+    /**
+     * @brief Generation bit of the last datagram sent on @p slot.
+     *
+     * Stamped into lenFlags reserved bit 13 by sendCyclicDatagram()/
+     * composeCyclicHeader() and echoed verbatim by the ring — a deposit
+     * carrying the previous generation is a stale response that outlived
+     * its cycle's timeout.  Default 0 disables the check (transports
+     * without a stamped header echo views with gen==0 anyway).
+     */
+    virtual uint8_t cyclicSlotGen(uint8_t slot) {
         (void)slot; return 0;
     }
 

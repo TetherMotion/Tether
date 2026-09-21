@@ -92,8 +92,20 @@ public:
     // the mapping-epoch guard.
     std::function<void()> on_wait;
 
+    // Send-generation echo (stale-deposit ABA guard): the fake toggles
+    // tx_gen per send like Master does; echo_tx_gen stamps it into served
+    // views, and serve_stale_once makes the FIRST wait return the
+    // previous generation — a deposit that outlived its own cycle.
+    uint8_t tx_gen = 0;
+    bool echo_tx_gen = false;
+    bool serve_stale_once = false;
+    bool stale_served = false;
+
     bool supportsCyclicFastPath() const override { return true; }
     uint64_t cyclicSlotToken(uint8_t slot) override { return slot; }
+    // 0 unless echoing — transports without a stamped header disable the
+    // check by reporting gen 0 (matching unmarked views).
+    uint8_t cyclicSlotGen(uint8_t) override { return echo_tx_gen ? tx_gen : 0; }
     size_t maxEtherCATPayloadPerFrame() const override {
         return fake_frame_payload ? fake_frame_payload : 1498;
     }
@@ -103,6 +115,7 @@ public:
                             const void* data, uint16_t datalen,
                             bool) override {
         if (!send_ok) return false;
+        tx_gen ^= 1;   // per-slot in reality; single-slot fixture is fine
         std::memcpy(last_sent_frame, data, datalen);
         last_sent_len = datalen;
         if (send_count < kSlots) {
@@ -120,6 +133,14 @@ public:
         if (on_wait) on_wait();
         if (!resp_ok) return false;
         out = per_slot_resp ? resp_slots[slot] : resp_view;
+        if (echo_tx_gen) {
+            if (serve_stale_once && !stale_served) {
+                stale_served = true;
+                out.gen = tx_gen ^ 1;   // previous generation — stale
+            } else {
+                out.gen = tx_gen;
+            }
+        }
         return true;
     }
 
@@ -189,6 +210,15 @@ protected:
 
         mapping.add_rxpdo(0, 8);
         mapping.add_txpdo(0, 8);
+        // NOTE: no eager entryDataMut here — taking a storage pointer marks
+        // the entry storage_bound (bridged in image modes).  Tests opt in
+        // via bindStorage() so image-mode coverage exercises pure-image
+        // entries by default.
+    }
+
+    /// Bind both entries to the buffered storage path — what device
+    /// layers (CiA402Drive::registerPDOBuffers etc.) do.
+    void bindStorage() {
         rx_app = mapping.entryDataMut(0);
         tx_app = mapping.entryDataMut(1);
     }
@@ -468,6 +498,7 @@ TEST(ProcessImageModeTest, EpochBumpsOnReconfigure) {
 
 TEST_F(ProcessImageTest, BufferedExchangeUsesAppBuffers) {
     ProcessImage img;   // unconfigured → legacy path
+    bindStorage();
     rx_app[0] = 0xAA;
     // Response must carry the full image + nonzero WKC.
     transport.resp_view.payload = transport.resp_data;
@@ -509,8 +540,8 @@ TEST_F(ProcessImageTest, DirectModeSendsImageInPlace) {
     EXPECT_EQ(img.inputSeq(), 1u);
     ASSERT_NE(img.inputRead(), nullptr);
     EXPECT_EQ(img.inputRead()[8], 0x99);
-    // tx_app untouched for the image-mapped entry.
-    EXPECT_EQ(tx_app[0], 0);
+    // Unbound entry stays image-mapped: no scatter into entry storage.
+    EXPECT_EQ(mapping.get_entry(1)->storage[0], 0);
 }
 
 TEST_F(ProcessImageTest, TripleBufferedExchangeCarriesCommittedData) {
@@ -574,6 +605,7 @@ TEST_F(ProcessImageTest, RotatingModeSendsInPlaceFrame) {
 TEST_F(ProcessImageTest, ForcedBufferedEntriesStillGathered) {
     // image_exclude on the RxPDO entry → it stays on app_buffer even in
     // Direct mode (FSoE-style staged PDOs).
+    bindStorage();
     mapping.get_entry_mut(0)->image_exclude = true;
 
     ProcessImage img;
@@ -619,6 +651,7 @@ TEST_F(ProcessImageTest, MappingMutationDuringCollectSkipsScatter) {
     // A slave-recovery re-registration mutating the mapping while the
     // response wait is in flight must not scatter into entries whose
     // logical offsets are now stale.
+    bindStorage();
     transport.resp_view.payload = transport.resp_data;
     transport.resp_view.datalen = 16;
     transport.resp_view.wkc     = 3;
@@ -637,6 +670,7 @@ TEST_F(ProcessImageTest, MappingMutationDuringCollectSkipsScatter) {
 
 TEST_F(ProcessImageTest, StableMappingCollectsNormally) {
     // Control: no mutation → scatter happens (TxPDO storage updated).
+    bindStorage();
     transport.resp_view.payload = transport.resp_data;
     transport.resp_view.datalen = 16;
     transport.resp_view.wkc     = 3;
@@ -648,6 +682,111 @@ TEST_F(ProcessImageTest, StableMappingCollectsNormally) {
     EXPECT_EQ(tx_app[0], 0x48);
     EXPECT_EQ(tx_app[7], 0x4F);
     EXPECT_EQ(mgr.getStats().success, 1u);
+}
+
+// ============================================================================
+// Storage-bound bridge — device accessors stay coherent in image modes
+// ============================================================================
+
+TEST_F(ProcessImageTest, StorageBoundBridgeKeepsDirectModeCoherent) {
+    // Bind BEFORE configure (the normal device-registration order):
+    // computeImageOffsets keeps bound entries out of the image table, and
+    // the exchange bridges them — storage writes reach the wire, wire
+    // responses reach storage.
+    bindStorage();
+
+    ProcessImage img;
+    int32_t offs[ProcessImage::kMaxEntries];
+    const size_t n = mgr.computeImageOffsets(mapping, offs,
+                                             ProcessImage::kMaxEntries);
+    EXPECT_EQ(offs[0], -1);   // bound → storage-owned, not image-addressed
+    EXPECT_EQ(offs[1], -1);
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = mgr.totalRxPDOBytes();
+    cfg.tx_bytes = mgr.totalTxPDOBytes();
+    cfg.entry_offsets = offs; cfg.entry_count = n;
+    ASSERT_TRUE(img.configure(cfg));
+
+    rx_app[0] = 0xB7;                       // device-level write
+    transport.resp_view.payload = transport.resp_data;
+    transport.resp_view.datalen = 16;
+    transport.resp_view.wkc     = 3;
+    transport.resp_data[8] = 0x5A;          // TxPDO response byte
+
+    ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
+    EXPECT_EQ(transport.last_sent_frame[0], 0xB7);  // storage → wire
+    EXPECT_EQ(tx_app[0], 0x5A);                     // wire → storage
+    EXPECT_EQ(img.inputSeq(), 1u);                  // image still published
+}
+
+TEST_F(ProcessImageTest, LateBoundEntryStillBridges) {
+    // Accessor taken AFTER the image was configured: the offsets table
+    // image-maps the entry, but storage_bound wins at exchange time —
+    // late-binding (e.g. recovery re-registration) stays coherent.
+    ProcessImage img;
+    int32_t offs[ProcessImage::kMaxEntries];
+    const size_t n = mgr.computeImageOffsets(mapping, offs,
+                                             ProcessImage::kMaxEntries);
+    ASSERT_EQ(offs[0], 0);    // unbound → image-mapped
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = mgr.totalRxPDOBytes();
+    cfg.tx_bytes = mgr.totalTxPDOBytes();
+    cfg.entry_offsets = offs; cfg.entry_count = n;
+    ASSERT_TRUE(img.configure(cfg));
+
+    bindStorage();          // device binds its buffers post-configure
+    rx_app[0] = 0x9C;
+    img.outputWrite()[0] = 0x11;            // image byte loses to storage
+    transport.resp_view.payload = transport.resp_data;
+    transport.resp_view.datalen = 16;
+    transport.resp_view.wkc     = 3;
+    transport.resp_data[8] = 0x42;
+
+    ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
+    EXPECT_EQ(transport.last_sent_frame[0], 0x9C);
+    EXPECT_EQ(tx_app[0], 0x42);
+}
+
+// ============================================================================
+// Stale-deposit ABA — send-generation echo rejects old responses
+// ============================================================================
+
+TEST_F(ProcessImageTest, StaleDepositRejectedThenRealResponseCollected) {
+    bindStorage();
+    transport.echo_tx_gen = true;
+    transport.serve_stale_once = true;   // first wait returns old gen
+    transport.resp_view.payload = transport.resp_data;
+    transport.resp_view.datalen = 16;
+    transport.resp_view.wkc     = 3;
+    for (int i = 0; i < 16; ++i) transport.resp_data[i] =
+        static_cast<uint8_t>(0x40 + i);
+
+    ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, nullptr));
+    EXPECT_EQ(mgr.getStats().stale_responses, 1u);
+    EXPECT_EQ(mgr.getStats().timeout_errors, 0u);
+    EXPECT_EQ(mgr.getStats().success, 1u);
+    EXPECT_EQ(transport.wait_calls, 2);   // stale consumed + one re-wait
+    EXPECT_EQ(tx_app[0], 0x48);           // fresh data scattered
+}
+
+TEST_F(ProcessImageTest, StaleDepositTimeoutCountsMiss) {
+    // Stale arrives, no real response follows → honest miss, stale still
+    // consumed so it can't alias the next cycle either.
+    bindStorage();
+    transport.echo_tx_gen = true;
+    transport.serve_stale_once = true;
+    transport.resp_view.payload = transport.resp_data;
+    transport.resp_view.datalen = 16;
+    transport.resp_view.wkc     = 3;
+    transport.on_wait = [this]() {
+        if (transport.stale_served) transport.resp_ok = false;
+    };
+
+    EXPECT_FALSE(mgr.exchangeAllLRWCyclic(mapping, 200'000, nullptr));
+    EXPECT_EQ(mgr.getStats().stale_responses, 1u);
+    EXPECT_EQ(mgr.getStats().timeout_errors, 1u);
 }
 
 // ============================================================================

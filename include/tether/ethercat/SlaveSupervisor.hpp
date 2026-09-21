@@ -265,6 +265,17 @@ struct RecoveryConfig {
     /// If false, only the affected slave is suspended.
     bool stop_loop_during_recovery = true;
 
+    /// Quiesce the cyclic/async wire exchange around the recovery
+    /// handler's re-initialization (default: true).  The handler mutates
+    /// the PDO mapping — suspension serializes that against the loop
+    /// thread instead of relying on the epoch guard alone.  Applies to
+    /// the cyclic and async loops; legacy loops use
+    /// stop_loop_during_recovery.
+    bool suspend_cyclic_exchange = true;
+
+    /// Max wait for the exchange to quiesce during suspend (µs).
+    uint32_t exchange_suspend_timeout_us = 20'000;
+
     /// Additional AL status codes (beyond the standard critical set) that
     /// should trigger recovery.  Values are raw AL_STATUS_CODE register
     /// values (e.g. 0xAC00 for a vendor-specific code).

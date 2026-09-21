@@ -339,6 +339,10 @@ struct CyclicSlotView {
     /// Frame arrival timestamp (kernel stamp when available, else the
     /// deposit's monotonic now).
     uint64_t        stamp_ns = 0;
+    /// Send-generation bit echoed from the datagram's lenFlags reserved
+    /// bit 13 — distinguishes a fresh response from a stale deposit that
+    /// survived a timed-out cycle (stale-deposit ABA guard).
+    uint8_t         gen     = 0;
 };
 
 } // namespace EtherCAT

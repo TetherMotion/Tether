@@ -119,6 +119,7 @@ Each reserved index maps to a fixed `CyclicRxSlot` in `Master`:
 struct CyclicRxSlot {
     std::atomic<uint64_t> seq{0};   // bumped after fields are written
     uint8_t  cmd;  uint16_t adp, ado, datalen, wkc;
+    uint8_t  gen;                   // echoed send generation (lenFlags bit 13)
     const uint8_t* payload;         // view into channel memory, or data[]
     int64_t cookie{-1};             // channel cookie, -1 = inline copy
     uint8_t  data[1486];            // inline buffer for the copy path
@@ -129,6 +130,21 @@ Publication is single-writer: write fields → `seq.fetch_add(1, release)`.
 The reader (cyclic thread) snapshots the token *before* sending and waits
 for `seq != token` — no router lookup, no allocation, no condvar on the
 wait itself.
+
+**Send generation (stale-deposit guard):** the seq token alone can't
+distinguish "this cycle's response" from "last cycle's response that
+arrived a hair after its timeout".  Every cyclic send therefore toggles a
+per-slot generation bit carried in datagram `lenFlags` reserved bit 13 —
+reserved bits are echoed verbatim by slaves (bit 14 is the
+circulating-frame flag, bit 15 the more flag; 11–13 are free).  Collect
+rejects a deposit echoing the previous generation, refreshes the token
+baseline, and re-waits once inside the *same* deadline — the real
+response still lands on this cycle's budget, and the stale deposit can
+never alias a later slot wait.  Transports that don't stamp `gen` report
+0 from `cyclicSlotGen()`, which matches unmarked deposits — the check
+self-disables.  Residual: a deposit exactly two cycles late aliases (the
+bit repeats); one-cycle-late — the only physically plausible case on an
+in-order ring — is covered.
 
 ---
 
@@ -462,18 +478,18 @@ Typed accessors `outputPtr<T>(entry_idx)` / `inputPtr<T>(entry_idx)` combine
 offset lookup + bounds check; `epoch()` bumps on every `configure()` so
 cached offsets/pointers can be validated across re-mapping.
 
-**Device-layer caveat (storage-bound accessors):** CiA402 drives,
+**Storage-bound accessors bridge automatically:** CiA402 drives,
 Beckhoff terminals, RP20 and Axia80 bind their PDO accessors to
-`PDOEntry::storage` (`PDOMapping::entryDataMut`) at registration time —
-before `configureProcessImage` assigns offsets.  In non-`Buffered` modes
-the wire payload is the image, so those accessors read/write storage the
-exchange no longer consults (and vice-versa for collected inputs).
-`startCyclicLoop` warns when `image_mode != Buffered` meets
-`motion_in_loop` for exactly this reason: use `Buffered` with
-storage-bound device APIs, or drive the image through
-`outputWrite()`/`inputRead()`/`EntryHandle` directly.  Rebinding device
-buffers into the image post-configuration is a tracked open item
-(QUESTIONS.md — audit findings).
+`PDOEntry::storage` (`PDOMapping::entryDataMut` et al.).  Every
+buffered-path accessor marks the entry `storage_bound`; such entries
+are kept out of the image-offset table (`computeImageOffsets` → −1)
+and are bridged by the exchange itself — the gather copies
+storage→wire and the scatter copies wire→storage even in image modes.
+Because the gather/scatter predicates test the flag directly (not the
+offsets table), an accessor taken *after* `configureProcessImage` —
+e.g. a recovery re-registration — still bridges.  Cost: one per-entry
+`memcpy` per direction for bound entries, versus zero-copy for pure
+image-mapped entries (`outputWrite()`/`inputRead()`/`EntryHandle`).
 
 ### 6.4 `EntryHandle` — epoch-checked entry references
 
@@ -610,16 +626,31 @@ win: the ~10–30 µs wire round-trip stops consuming the wait budget.
    copy-bank staging otherwise), then scatter forced-buffered TxPDO
    entries.
 
-**Mapping-epoch guard (mid-exchange recovery):** both halves snapshot
-`mapping.epoch()` at entry.  `cyclicSend` re-checks after the gather —
-a `clear()`/`remove_entries_for_slave()` racing the gather (slave
-recovery re-registration) makes the cycle return false without emitting
-a frame built from torn offsets.  `cyclicCollect` re-checks after the
-slot wait — a mutation landing while responses were in flight skips the
-scatter into now-stale entries (logged once per occurrence) but still
-consumes the responses.  The race degrades to a skipped cycle, never
-to torn data; `stop_loop_during_recovery` remains the hard-serialization
-option for legacy loops.
+**Recovery coordination — suspend + epoch guard:** the supervisor wraps
+`reinitializeSlave` (which re-registers PDO mappings) in
+`Master::suspendCyclicExchange()`/`resumeCyclicExchange()` when
+`RecoveryConfig::suspend_cyclic_exchange` is set (default; timeout via
+`exchange_suspend_timeout_us`, 20 ms).  Suspend sets a flag the
+exchange/collect tasks check at entry and blocks until a quiesce bump
+proves no send/collect is in flight (the loops are single-threaded, so
+one gated entry is a full proof).  An idle async loop in `OnSend` mode
+is kicked out of `waitSend` so the gate is observed promptly rather than
+after the full timeout.  On timeout the flag is released and recovery
+proceeds anyway — the epoch guard below covers that window.  Suspension
+doesn't survive a loop restart (start clears it) and isn't reentrant.
+
+**Mapping-epoch guard (mid-exchange mutation):** the safety net under
+the handshake, and the only protection when suspension is disabled or
+times out.  Both halves snapshot `mapping.epoch()` at entry.
+`cyclicSend` re-checks after the gather — a
+`clear()`/`remove_entries_for_slave()` racing the gather makes the cycle
+return false without emitting a frame built from torn offsets.
+`cyclicCollect` re-checks after the slot wait — a mutation landing while
+responses were in flight skips the scatter into now-stale entries
+(logged once per occurrence) but still consumes the responses.  The race
+degrades to a skipped cycle, never to torn data;
+`stop_loop_during_recovery` remains the hard-serialization option for
+legacy loops.
 
 #### Multi-slice images
 
@@ -1331,6 +1362,13 @@ img.triggerSend();                             // the send edge
 auto ast = master.getAsyncLoopStats();         // wakes/sends/coalesced/
                                                // collects/idle_collects
 master.stopAsyncLoop();
+
+// --- Recovery coordination (normally via SlaveSupervisor) ---------------
+// RecoveryConfig::suspend_cyclic_exchange (default on) wraps the
+// recovery handler in this pair; direct use for custom mutation windows:
+master.suspendCyclicExchange(/*timeout_us*/ 20'000);   // gates send+collect
+// ... mutate the PDO mapping safely here ...
+master.resumeCyclicExchange();
 ```
 
 `PDOManager::configureProcessImage()` is called internally by

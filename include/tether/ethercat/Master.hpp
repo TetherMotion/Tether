@@ -559,6 +559,29 @@ public:
     bool isCyclicLoopRunning() const;
     CyclicExecutive::Stats getCyclicLoopStats() const;
 
+    /**
+     * @brief Quiesce the wire exchange for mid-loop mapping mutation.
+     *
+     * Slave recovery re-registers PDO entries while a cyclic or async
+     * loop iterates the mapping.  This suspends the exchange/collect
+     * tasks and blocks until the loop thread has passed a quiesce point
+     * (no send or collect in flight), or the timeout elapses.  Returns
+     * true when the exchange is safely suspended — or immediately when
+     * no loop is running.  On timeout the suspension is released and
+     * false is returned (the caller may still proceed — the mapping
+     * epoch guard degrades a collision to a skipped cycle).
+     *
+     * NOT reentrant — every suspend must be paired with exactly one
+     * resumeCyclicExchange().  Suspension does not survive a loop
+     * restart (start clears the flag).
+     */
+    bool suspendCyclicExchange(uint32_t timeout_us = 20'000);
+    void resumeCyclicExchange();
+    /// True while the exchange is suspended by suspendCyclicExchange().
+    bool cyclicExchangeSuspended() const {
+        return exchange_suspended_.load(std::memory_order_acquire);
+    }
+
     /// Async send-on-change loop — see AsyncLoopConfig.  Explicitly
     /// separate from startCyclicLoop: the user chooses the loop model.
     bool startAsyncLoop() { return startAsyncLoop(AsyncLoopConfig{}); }
@@ -1284,6 +1307,10 @@ public:
     // thread without touching the TransactionRouter.
     bool     supportsCyclicFastPath() const { return static_cast<bool>(iface_.send); }
     uint64_t cyclicSlotToken(uint8_t slot) const;
+    /// Generation bit of the last datagram sent on @p slot — the echo
+    /// distinguishes a fresh response from a stale deposit that outlived
+    /// its cycle's timeout (stale-deposit ABA guard).
+    uint8_t  cyclicSlotGen(uint8_t slot) const;
     bool     sendCyclicDatagram(Command cmd, uint8_t slot,
                                 uint16_t adp, uint16_t ado,
                                 const void* data, uint16_t datalen,
@@ -1371,15 +1398,16 @@ private:
     void depositCyclicSlot(uint8_t slot_idx, Command cmd,
                            uint16_t adp, uint16_t ado,
                            const uint8_t* payload, uint16_t datalen,
-                           uint16_t wkc);
+                           uint16_t wkc, uint8_t gen);
     /// View-mode deposit: payload points into channel-owned memory held by
     /// `cookie`.  The previous held cookie (if any) is released.
     /// `stamp_ns` carries the frame's kernel timestamp (0 → deposit-time).
+    /// `gen` is the echoed send-generation bit (lenFlags res-bit 13).
     void publishCyclicSlotView(uint8_t slot_idx, Command cmd,
                                uint16_t adp, uint16_t ado,
                                const uint8_t* payload, uint16_t datalen,
                                uint16_t wkc, uint32_t cookie,
-                               uint64_t stamp_ns = 0);
+                               uint64_t stamp_ns = 0, uint8_t gen = 0);
     /// Route a frame received on the cyclic channel: pure-cyclic frames
     /// publish slot views, mixed/async frames go to the parser.
     void dispatchChannelFrame(const CyclicFrameView& view);
@@ -1449,6 +1477,9 @@ private:
         /// Frame arrival timestamp (kernel stamp when the channel provides
         /// one, else monotonic now at deposit).
         uint64_t stamp_ns{0};
+        /// Send-generation bit echoed from the datagram's lenFlags res-bit
+        /// 13 — collect rejects deposits of the previous generation.
+        uint8_t  gen{0};
         uint8_t  data[1486];
     };
     std::array<CyclicRxSlot, kNumCyclicSlots> cyclic_slots_{};
@@ -1487,6 +1518,17 @@ private:
     /// Split-exchange collect-task invocations — diagnostic counter that
     /// also lets tests observe collect-task ordering within a phase.
     std::atomic<uint64_t> cyclic_collect_calls_{0};
+
+    /// Per-slot send generation (lenFlags res-bit 13), toggled on every
+    /// cyclic send — written/read on the cyclic thread only.
+    std::array<uint8_t, kNumCyclicSlots> cyclic_slot_gen_{};
+
+    /// Exchange suspension for mid-loop mapping mutation (slave
+    /// recovery): while set, the exchange/collect tasks skip their work
+    /// and bump exchange_quiesced_ — the suspender waits for a bump to
+    /// prove the loop thread passed a quiesce point.  NOT reentrant.
+    std::atomic<bool>     exchange_suspended_{false};
+    std::atomic<uint32_t> exchange_quiesced_{0};
 
     /// CPU claims held while the cyclic loop runs (CpuIsolationConfig);
     /// -1 = no claim.  Released by stopCyclicLoop() / ~Master().

@@ -462,6 +462,13 @@ bool SlaveSupervisor::attemptRecovery(uint16_t slave_index) {
             }
 
             bool ok = false;
+            // The handler mutates the PDO mapping — quiesce the cyclic/
+            // async exchange first so no send/collect iterates it
+            // mid-mutation (the epoch guard remains the safety net).
+            const bool exchange_suspended =
+                config_.suspend_cyclic_exchange &&
+                master_.suspendCyclicExchange(
+                    config_.exchange_suspend_timeout_us);
             try {
                 ok = recovery_handler_->reinitializeSlave(slave_index);
             } catch (const std::exception& e) {
@@ -472,6 +479,9 @@ bool SlaveSupervisor::attemptRecovery(uint16_t slave_index) {
                 TETHER_LOGE(TAG, "{}: Recovery handler threw unknown exception",
                             master_.slaveLogPrefix(slave_index).c_str());
                 ok = false;
+            }
+            if (exchange_suspended) {
+                master_.resumeCyclicExchange();
             }
 
             if (ok) {

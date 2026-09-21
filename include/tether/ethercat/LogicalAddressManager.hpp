@@ -277,6 +277,9 @@ public:
         uint32_t wkc_errors{0};
         uint32_t send_errors{0};
         uint32_t timeout_errors{0};
+        /// Responses whose echoed send-generation didn't match the pending
+        /// send — a stale deposit surviving a timed-out cycle.
+        uint32_t stale_responses{0};
     };
     Stats getStats() const;
     void  resetStats();
@@ -358,7 +361,7 @@ private:
 
     // ---- Cyclic slice / split-phase state (cyclic thread only) ----
     static constexpr size_t kMaxCyclicSlices = IPDOTransport::kNumCyclicSlots;
-    struct PendingSlice { uint64_t token; uint32_t off; uint32_t len; };
+    struct PendingSlice { uint64_t token; uint32_t off; uint32_t len; uint8_t gen; };
     std::array<PendingSlice, kMaxCyclicSlices> cyclic_pending_{};
     uint8_t  cyclic_pending_count_{0};   ///< slices awaiting collect
     uint8_t  cyclic_slice_count_{1};     ///< slices needed for the image
