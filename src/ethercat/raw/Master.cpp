@@ -704,6 +704,10 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     stopAsyncLoop();   // mutually exclusive — the user picks the loop model
     stopCyclicLoop();
     stopMotionControlLoop();
+    // A legacy DC realtime loop (dc().start()) drives its own PDO exchange —
+    // it must not run alongside the cyclic exchange or two LRW streams share
+    // the wire.  DC sync frames are driven by the executive's own DC task.
+    if (dc_ && dc_->getState() == DC::DCState::Running) dc_->stop();
     clearCancel();
 
     CyclicExecutive::Config exec_cfg = config.exec;
@@ -815,15 +819,18 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
 
     CyclicExecutive::TaskFn dc_fn;
     if (config.enable_dc_synchronization) {
+        // Gate on isInitialized(), not Running — under the cyclic executive
+        // there is no legacy DC loop to flip the state; initialize() arms
+        // the slaves' sync units and this task emits the sync frames.
         dc_fn = [this]() -> bool {
-            if (!dc_ || dc_->getState() == DC::DCState::Disabled) return true;
+            if (!dc_ || !dc_->isInitialized()) return true;
             EtherCATDC* dc = dc_->get();
             return dc ? dc->sendSyncFrame() : true;
         };
     }
 
     CyclicExecutive::TimeFunc time_fn;
-    if (dc_ && dc_->getState() != DC::DCState::Disabled) {
+    if (dc_ && dc_->isInitialized()) {
         time_fn = [this]() -> uint64_t {
             EtherCATDC* dc = dc_->get();
             return dc ? dc->getMasterTimeNs() : 0;
@@ -925,6 +932,9 @@ bool Master::startAsyncLoop(const AsyncLoopConfig& config)
     stopAsyncLoop();
     stopCyclicLoop();
     stopMotionControlLoop();
+    // A running legacy DC loop owns its own PDO exchange — it must not
+    // share the wire with the async loop's sends.
+    if (dc_ && dc_->getState() == DC::DCState::Running) dc_->stop();
     clearCancel();
 
     AsyncCyclicLoop::Config ecfg = config.exec;
@@ -1009,8 +1019,10 @@ bool Master::startAsyncLoop(const AsyncLoopConfig& config)
     };
     AsyncCyclicLoop::TaskFn dc_fn;
     if (ecfg.dc_interval_us > 0) {
+        // Same isInitialized() gate as the cyclic path — the async DC
+        // thread owns the sync cadence; no legacy DC loop is required.
         dc_fn = [this]() -> bool {
-            if (!dc_ || dc_->getState() == DC::DCState::Disabled) return true;
+            if (!dc_ || !dc_->isInitialized()) return true;
             EtherCATDC* dc = dc_->get();
             return dc ? dc->sendSyncFrame() : true;
         };
