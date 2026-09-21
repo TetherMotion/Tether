@@ -708,6 +708,43 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     // it must not run alongside the cyclic exchange or two LRW streams share
     // the wire.  DC sync frames are driven by the executive's own DC task.
     if (dc_ && dc_->getState() == DC::DCState::Running) dc_->stop();
+
+    // Optional DC auto-init — an explicit dc_config initializes DC here so
+    // the app cannot forget the initialize-before-start ordering.  When DC
+    // is already initialized the existing setup is kept.
+    if (config.dc_config && !(dc_ && dc_->isInitialized())) {
+        const uint16_t n = getDiscoveredSlaveCount();
+        if (n > 0 && dc().init(*config.dc_config, n)) {
+            TETHER_LOGI(TAG, "cyclic loop: DC auto-initialized "
+                             "({} slaves)", n);
+        } else {
+            TETHER_LOGW(TAG, "cyclic loop: dc_config set but DC init failed "
+                             "(slaves={}) — sync disabled", n);
+        }
+    }
+
+    const bool dc_sync_enabled = config.enable_dc_synchronization ||
+                                 config.dc_config.has_value();
+
+    // Loud validation — these combinations silently no-op otherwise.
+    if (config.motion_in_loop && !motion_control_callback_) {
+        TETHER_LOGW(TAG, "cyclic loop: motion_in_loop is set but no motion "
+                         "control callback is registered — the MotionControl "
+                         "phase will be empty");
+    }
+    if (config.exchange_placement == ExchangePlacement::SplitLate &&
+        config.motion_in_loop) {
+        TETHER_LOGW(TAG, "cyclic loop: SplitLate collects after the "
+                         "MotionControl phase — in-loop motion reads "
+                         "previous-cycle inputs (intended only for external "
+                         "motion sources)");
+    }
+    if (dc_sync_enabled && !(dc_ && dc_->isInitialized())) {
+        TETHER_LOGW(TAG, "cyclic loop: DC synchronization enabled but DC was "
+                         "never initialized — the DC task will idle (set "
+                         "dc_config or call dc().init() first)");
+    }
+
     clearCancel();
 
     CyclicExecutive::Config exec_cfg = config.exec;
@@ -766,13 +803,13 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
         exec_cfg.stack_prefault_bytes = 0;
     }
 
-    if (config.enable_dc_synchronization &&
+    if (dc_sync_enabled &&
         exec_cfg.dc_placement == CyclicExecutive::DCPlacement::Disabled) {
         // Caller asked for DC sync but left placement at a disabled value —
         // default to the fault-isolated dedicated thread.
         exec_cfg.dc_placement = CyclicExecutive::DCPlacement::DedicatedThread;
     }
-    if (!config.enable_dc_synchronization) {
+    if (!dc_sync_enabled) {
         exec_cfg.dc_placement = CyclicExecutive::DCPlacement::Disabled;
     }
     exec_cfg.jitter    = JitterConfig::defaults(config.cycle_period_us);
@@ -818,14 +855,16 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     }
 
     CyclicExecutive::TaskFn dc_fn;
-    if (config.enable_dc_synchronization) {
+    if (dc_sync_enabled) {
         // Gate on isInitialized(), not Running — under the cyclic executive
         // there is no legacy DC loop to flip the state; initialize() arms
-        // the slaves' sync units and this task emits the sync frames.
+        // the slaves' sync units and this task emits the sync frames.  No
+        // reference slave (init ran but nothing DC-capable) → idle quietly.
         dc_fn = [this]() -> bool {
             if (!dc_ || !dc_->isInitialized()) return true;
             EtherCATDC* dc = dc_->get();
-            return dc ? dc->sendSyncFrame() : true;
+            if (!dc || dc->referenceSlave() < 0) return true;
+            return dc->sendSyncFrame();
         };
     }
 

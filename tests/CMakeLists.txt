@@ -400,6 +400,7 @@ set(CIA402_COVERAGE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_60xxParameters.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_cia402_pdo_fallback.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_cia402_protocol.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/profiles/cia402/test_ds402_master_loop.cpp"
 )
 if(TETHER_DRIVE_AS715N)
     list(APPEND CIA402_COVERAGE_SOURCES

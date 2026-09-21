@@ -55,6 +55,7 @@
 #include "tether/sii/SIIManager.hpp"
 #endif
 #include "tether/ethercat/SlaveDiscoveryManager.hpp"
+#include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ethercat/TransactionRouter.hpp"
 #include "tether/ethercat/ESIFile.hpp"
@@ -409,6 +410,65 @@ public:
         /// learned expected value is counted as an error — catches partial
         /// slave dropout, which wkc==0 alone cannot see.
         bool strict_wkc{true};
+
+        /// Optional DC configuration.  When set, startCyclicLoop()
+        /// initializes distributed clocks itself (dc().init) unless DC is
+        /// already initialized, and implies enable_dc_synchronization —
+        /// the executive's dedicated DC task then emits sync frames every
+        /// sync_interval_cycles.  Setting this removes the
+        /// "initializeDistributedClocks() before start" ordering trap.
+        /// NOTE: startDistributedClocks()/dc().start() must NOT be used
+        /// with the cyclic loop — that legacy realtime loop owns a second
+        /// PDO exchange and is stopped on start.
+        std::optional<DC::DCConfig> dc_config{};
+
+        /// Conservative low-latency preset: Split exchange placement (the
+        /// wire round-trip overlaps the phases between send and collect),
+        /// Auto wire mode (kernel ring when available), runtime CPU
+        /// isolation opt-in, default granular memory locking.  Everything
+        /// degrades gracefully on hosts without the capabilities.
+        static CyclicLoopConfig lowLatency(uint32_t cycle_period_us = 1000) {
+            CyclicLoopConfig c;
+            c.cycle_period_us     = cycle_period_us;
+            c.exchange_placement  = ExchangePlacement::Split;
+            c.cpu_isolation.enabled = true;
+            return c;
+        }
+    };
+
+    /**
+     * @brief RAII handle for a running cyclic loop.
+     *
+     * Returned by startCyclicLoopScoped(): engaged when the loop started,
+     * empty on failure.  The destructor calls stopCyclicLoop() — the loop
+     * cannot be left running by an early return or exception.  Move-only.
+     */
+    class CyclicLoopGuard {
+    public:
+        CyclicLoopGuard() = default;
+        ~CyclicLoopGuard() { stop(); }
+        CyclicLoopGuard(const CyclicLoopGuard&) = delete;
+        CyclicLoopGuard& operator=(const CyclicLoopGuard&) = delete;
+        CyclicLoopGuard(CyclicLoopGuard&& o) noexcept
+            : master_(o.master_) { o.master_ = nullptr; }
+        CyclicLoopGuard& operator=(CyclicLoopGuard&& o) noexcept {
+            if (this != &o) {
+                stop();
+                master_ = o.master_;
+                o.master_ = nullptr;
+            }
+            return *this;
+        }
+        /// true while the guard owns a running loop.
+        explicit operator bool() const { return master_ != nullptr; }
+        /// Stop early; safe to call explicitly (destructor then no-ops).
+        void stop() {
+            if (master_) { master_->stopCyclicLoop(); master_ = nullptr; }
+        }
+    private:
+        friend class Master;
+        explicit CyclicLoopGuard(Master* m) : master_(m) {}
+        Master* master_ = nullptr;
     };
 
     /**
@@ -470,6 +530,15 @@ public:
     const ProcessImage& processImage() const { return process_image_; }
     bool startCyclicLoop() { return startCyclicLoop(CyclicLoopConfig{}); }
     bool startCyclicLoop(const CyclicLoopConfig& config);
+    /**
+     * @brief RAII variant — returns an engaged CyclicLoopGuard on success
+     *        (loop stops when it goes out of scope), empty guard on failure.
+     */
+    [[nodiscard]] CyclicLoopGuard startCyclicLoopScoped(
+        const CyclicLoopConfig& config) {
+        return startCyclicLoop(config) ? CyclicLoopGuard(this)
+                                       : CyclicLoopGuard{};
+    }
     void stopCyclicLoop();
     bool isCyclicLoopRunning() const;
     CyclicExecutive::Stats getCyclicLoopStats() const;

@@ -676,11 +676,22 @@ copies the view out — legacy callers keep working.
    (`dc().start()` / `startDistributedClocks()`) is stopped too — its
    `RealtimeLoop` drives `exchangePhysical` on its own cadence and must
    never share the wire with the cyclic exchange.  DC sync under the
-   executive needs only `initializeDistributedClocks()`: the sync task
-   gates on `DCManager::isInitialized()` (the slave sync units are armed
-   by `initialize()`), so `enable_dc_synchronization` emits sync frames
-   from the dedicated DC task without a legacy loop.  `startAsyncLoop`
-   applies the same exclusion and gate.
+   executive needs only DC *initialization*: the sync task gates on
+   `DCManager::isInitialized()`, so `enable_dc_synchronization` emits sync
+   frames from the dedicated DC task without a legacy loop.
+   `startAsyncLoop` applies the same exclusion and gate.
+0a. **DC auto-init** (`dc_config`, optional): when set, `startCyclicLoop`
+    calls `dc().init(*dc_config, discovered_slaves)` unless DC is already
+    initialized — the `initializeDistributedClocks()`-before-start
+    ordering rule disappears.  Setting `dc_config` implies
+    `enable_dc_synchronization`.  Init failure or zero discovered slaves
+    logs a warning and the DC task idles (`referenceSlave() < 0`); the
+    loop still starts.
+0b. **Validation warnings** — combinations that would otherwise silently
+    no-op are logged at start: `motion_in_loop` without a registered
+    motion callback, `SplitLate` + in-loop motion (collect lands after the
+    motion phase → controllers read previous-cycle inputs), and DC sync
+    enabled with DC never initialized.
 1. **CPU claims** (`cpu_isolation.enabled`, opt-in): the runtime allocator
    claims `cyclic_cpu`/`dc_cpu` (explicit or auto-selected, preferring
    kernel-isolated CPUs and never taking the last CPU).  With root +
@@ -722,6 +733,28 @@ copies the view out — legacy callers keep working.
 (releases the held input cookie *before* the channel dies), releases every
 slot's held cookie, destroys the channel, then **releases the CPU claims**
 — the `atexit` hook covers abnormal exit.
+
+#### Convenience API
+
+* `CyclicLoopConfig::lowLatency(cycle_us)` — preset for the common
+  low-jitter configuration: `Split` placement, `Auto` wire mode, runtime
+  CPU-isolation opt-in, granular default memory locking.  Every step still
+  degrades gracefully without privileges.
+* `startCyclicLoopScoped(cfg)` → `Master::CyclicLoopGuard` — move-only RAII
+  handle; the destructor stops the loop, so early returns and exceptions
+  cannot leave a realtime exchange running.  A disengaged guard means
+  startup failed.  `DS402Master::startCyclicLoopScoped` wires the motion
+  callback and returns the same guard.
+* `DS402Master` motion-controller mutation is safe at any time: with no
+  loop running, `addMotionController`/`removeMotionController`/
+  `clearMotionControllers` act synchronously (start/stop on the caller).
+  While a loop runs they enqueue ordered ops applied by the loop thread at
+  the top of the next `updateMotionControllers()` pass — `start()` stays
+  synchronous on add, `stop()` runs on the loop thread after the last
+  `update()`.  `stopCyclicLoop`/`stopMotionControlLoop`/`~DS402Master`
+  drain leftover ops, and `clearCyclicTasks()` defers task destruction the
+  same way (`CyclicTaskScheduler` rebuilds its schedule snapshot only on
+  the executing thread).
 
 ### 7.5 Test seam
 
@@ -1188,7 +1221,16 @@ Under `runec` the cyclic transport file reaches ~95 % line coverage.
 ## 13. API quick reference
 
 ```cpp
-// --- Configure ---------------------------------------------------------
+// --- Minimal: preset + RAII + auto-DC ----------------------------------
+auto cfg = Master::CyclicLoopConfig::lowLatency(1000);  // Split, CPU iso
+cfg.dc_config = DC::DCConfig::defaults();      // init DC + enable sync task
+{
+    auto loop = master.startCyclicLoopScoped(cfg);     // stops on scope exit
+    if (!loop) { /* startup failed */ }
+    ... run ...
+}                                                // loop stopped
+
+// --- Configure (full knob set) ------------------------------------------
 Master::CyclicLoopConfig cfg;
 cfg.cycle_period_us = 250;                       // 4 kHz
 cfg.wire_mode  = CyclicWireMode::Auto;           // ring → socket → software

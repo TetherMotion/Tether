@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -146,6 +147,9 @@ public:
 
     DS402Master();
     explicit DS402Master(const Master::Config& config);
+    /// Applies any controller/task mutations still queued from a previous
+    /// loop run before the members destruct.
+    ~DS402Master();
 
     void start(const NetworkInterface& iface, const uint8_t src_mac[6]);
 
@@ -173,6 +177,12 @@ public:
     bool isDS402Slave(uint16_t slave_index) const;
     bool isManagedDrive(uint16_t slave_index) const;
 
+    /// Register a motion controller for a managed drive.
+    ///
+    /// The controller's start() runs synchronously so failures are reported
+    /// to the caller.  While a realtime loop is running the registration is
+    /// deferred: the controller joins the loop at the next cycle boundary,
+    /// applied on the loop thread — safe to call at any time.
     bool addMotionController(uint16_t slave_index, std::unique_ptr<IDriveMotionController> controller);
     template<typename RxPDO>
     bool addMotionController(uint16_t slave_index,
@@ -184,7 +194,12 @@ public:
             slave_index,
             std::make_unique<GenericDriveMotionController<RxPDO>>(target, std::move(source), scale));
     }
+    /// Remove a controller.  While a realtime loop is running the removal
+    /// (and the controller's stop()) is deferred to the loop thread's next
+    /// pass; with no loop running it happens synchronously.  Returns false
+    /// if no controller is registered or pending for the slave.
     bool removeMotionController(uint16_t slave_index);
+    /// Remove all controllers.  Deferred to the loop thread while running.
     void clearMotionControllers();
     bool addCyclicTask(std::unique_ptr<ICyclicTask> task);
     bool addCyclicTask(std::unique_ptr<ICyclicTask> task, TaskPhase phase, uint8_t priority = 128);
@@ -273,6 +288,10 @@ public:
      * config.motion_in_loop is false (external motion source).
      */
     bool startCyclicLoop(const Master::CyclicLoopConfig& config);
+    /// RAII variant: returns a guard that owns the running loop and stops it
+    /// on destruction.  A disengaged guard means startup failed.
+    [[nodiscard]] Master::CyclicLoopGuard startCyclicLoopScoped(
+        const Master::CyclicLoopConfig& config);
     void stopCyclicLoop();
 
     size_t driveCount() const { return drives_.size(); }
@@ -299,12 +318,38 @@ public:
 private:
     void ensureSlaveRoleCapacity(uint16_t slave_index);
 
+    /// True while a realtime loop thread may be iterating controllers/tasks.
+    bool realtimeLoopRunning() const;
+    /// Stop and erase a controller by slave index.  Caller thread only —
+    /// must not run concurrently with updateMotionControllers().
+    bool eraseController(uint16_t slave_index);
+    /// Apply queued controller/task mutations.  Called at the top of
+    /// updateMotionControllers() (the loop thread) and by the stop/clear
+    /// paths once no loop is running.
+    void drainControllerOps();
+
+    struct PendingControllerOp {
+        enum class Kind : uint8_t { Add, Remove, Clear } kind;
+        uint16_t slave_index{0};
+        std::unique_ptr<IDriveMotionController> controller;
+    };
+
     Master ethercat_master_;
     std::vector<std::unique_ptr<CiA402Drive>> drives_;
     std::vector<SlaveRole> slave_roles_;
+    // Iterated by updateMotionControllers().  While a loop runs it is only
+    // mutated by drainControllerOps() on the loop thread; when idle it is
+    // only touched by the application thread — never concurrently.
     std::vector<std::pair<uint16_t, std::unique_ptr<IDriveMotionController>>> motion_controllers_;
     CyclicTaskScheduler cyclic_task_scheduler_;
     std::vector<std::unique_ptr<ICyclicTask>> owned_tasks_;  // Keep ownership for backward compat
+    // Cross-thread mutation plumbing: application-thread add/remove/clear
+    // calls enqueue ops here; the loop thread applies them in order.
+    std::mutex motion_ctl_mutex_;
+    std::vector<PendingControllerOp> pending_controller_ops_;
+    std::vector<std::unique_ptr<ICyclicTask>> retired_tasks_;
+    std::atomic<bool> controller_ops_pending_{false};
+    std::atomic<bool> tasks_retired_{false};
 };
 
 } // namespace EtherCAT

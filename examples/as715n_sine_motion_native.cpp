@@ -217,19 +217,17 @@ int runSineMotion(EtherCAT::DS402Master& master,
     std::thread fault_monitor(faultMonitorLoop, std::ref(master),
                               slave_index, std::cref(monitor_stop));
 
-    // Deadline-driven fast loop (CyclicExecutive): the exchange runs via the
-    // reserved-slot cyclic datapath — kernel ring backend when available —
-    // and DC sync is emitted by the executive's own dedicated thread, so no
-    // separate startDistributedClocks() loop is needed.  Split placement
-    // overlaps the wire round-trip with the phases between send and collect.
-    EtherCAT::Master::CyclicLoopConfig loop_config;
-    loop_config.cycle_period_us = 1000;
+    // Deadline-driven fast loop (CyclicExecutive): lowLatency() picks the
+    // low-jitter profile — reserved-slot cyclic datapath (kernel ring when
+    // available), Split exchange placement, runtime CPU isolation.  Setting
+    // dc_config arms the slaves' sync units and enables the executive's
+    // dedicated DC sync task — no separate initializeDistributedClocks() or
+    // startDistributedClocks() call is needed (the latter must NOT be used
+    // alongside the cyclic loop: it would put a second PDO stream on the
+    // wire).
+    auto loop_config = EtherCAT::Master::CyclicLoopConfig::lowLatency(1000);
     loop_config.sync_interval_cycles = 10;
-    loop_config.enable_dc_synchronization = true;
-    loop_config.exchange_placement =
-        EtherCAT::Master::ExchangePlacement::Split;
-    loop_config.cpu_isolation.enabled = true;   // runtime opt-in; logs and
-                                                // degrades when unavailable
+    loop_config.dc_config = EtherCAT::DC::DCConfig::defaults();
     // For CSP, set the current position as home before moving.
     if (target == CyclicTarget::Position) {
         auto* drive = master.driveBySlaveIndex(slave_index);
@@ -274,23 +272,25 @@ int runSineMotion(EtherCAT::DS402Master& master,
         return 4;
     }
 
-    // Register the controller before starting the realtime loop.  The loop
-    // invokes updateMotionControllers() immediately and motion_controllers_
-    // is not safe to modify concurrently with that update.
-    if (!master.startCyclicLoop(loop_config)) {
+    // The scoped guard owns the running loop: on scope exit — including
+    // early returns — it stops the exchange, so a leaked realtime loop is
+    // impossible.  Controller add/remove is deferred to the loop thread
+    // while running, so both are safe at any point in the lifecycle.
+    auto loop = master.startCyclicLoopScoped(loop_config);
+    if (!loop) {
         TETHER_LOGE(TAG, "Failed to start cyclic loop");
         monitor_stop.store(true);
         fault_monitor.join();
-        (void)master.removeMotionController(slave_index);
         return 3;
     }
 
     Tether::Platform::Clock::instance().delayMilliseconds(
         static_cast<uint32_t>(args.duration * 1000.0));
-    master.stopCyclicLoop();
     monitor_stop.store(true);
     fault_monitor.join();
-    (void)master.removeMotionController(slave_index);
+
+    loop.stop();                                     // stop the exchange first
+    (void)master.removeMotionController(slave_index);  // synchronous now
     return 0;
 }
 
@@ -455,18 +455,10 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    // initializeDistributedClocks() arms the slaves' sync units; the cyclic
-    // loop's dedicated DC task then emits the sync frames — the legacy
-    // startDistributedClocks() realtime loop would compete with the cyclic
-    // exchange on the wire and is therefore not started.
-    {
-        EtherCAT::DC::DCConfig dc_config = EtherCAT::DC::DCConfig::defaults();
-        if (!master.initializeDistributedClocks(dc_config)) {
-            TETHER_LOGE(TAG, "Failed to initialize distributed clocks");
-            Tether::Examples::stopHostMasterSession(master, session);
-            return 2;
-        }
-    }
+    // Distributed clocks are armed by the cyclic loop itself — the
+    // CyclicLoopConfig::dc_config set in runSineMotion() initializes DC
+    // during startup, and the executive's dedicated DC task emits the sync
+    // frames while the loop runs.
 
     int rc = 0;
     if (!configureDrive(master, slave_index)) {

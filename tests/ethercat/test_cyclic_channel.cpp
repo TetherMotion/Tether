@@ -25,6 +25,7 @@
 #include <chrono>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -594,6 +595,9 @@ struct MasterCyclicTestAccess {
     static size_t cyclicTaskCount(Master& m, TaskPhase p) {
         return m.cyclic_loop_ ? m.cyclic_loop_->taskCount(p) : 0;
     }
+    static void setDiscoveredSlaveCount(Master& m, uint16_t n) {
+        m.discovered_slave_count_.store(n, std::memory_order_release);
+    }
 };
 } // namespace EtherCAT
 
@@ -715,9 +719,13 @@ protected:
     Master master_;
     NetworkInterface iface_{};
     uint8_t mac_[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+    /// Optional tap on every transmitted frame (set before traffic starts).
+    std::function<bool(const uint8_t*, size_t)> send_hook_;
 
     void SetUp() override {
-        iface_.send = [](const uint8_t*, size_t) { return true; };
+        iface_.send = [this](const uint8_t* f, size_t n) {
+            return send_hook_ ? send_hook_(f, n) : true;
+        };
         master_.start(iface_, mac_);
     }
     void TearDown() override { master_.stop(); }
@@ -1596,6 +1604,161 @@ TEST_F(MasterCyclicTest, AtomicPlacementRegistersNoCollectTask) {
     for (TaskPhase p : {TaskPhase::PostExchange, TaskPhase::MotionControl,
                         TaskPhase::Diagnostics})
         EXPECT_EQ(MasterCyclicTestAccess::cyclicTaskCount(master_, p), 0u);
+    master_.stopCyclicLoop();
+}
+
+// ============================================================================
+// Convenience API: lowLatency() preset, CyclicLoopGuard RAII, dc_config
+// auto-init, and start-time validation of silent misconfigurations.
+// ============================================================================
+
+TEST_F(MasterCyclicTest, LowLatencyPreset) {
+    const auto cfg = Master::CyclicLoopConfig::lowLatency(500);
+    EXPECT_EQ(cfg.cycle_period_us, 500u);
+    EXPECT_EQ(cfg.exchange_placement, Master::ExchangePlacement::Split);
+    EXPECT_TRUE(cfg.cpu_isolation.enabled);
+    EXPECT_EQ(cfg.wire_mode, CyclicWireMode::Auto);
+    EXPECT_FALSE(cfg.dc_config.has_value());
+    // Default arg is 1 kHz.
+    EXPECT_EQ(Master::CyclicLoopConfig::lowLatency().cycle_period_us, 1000u);
+}
+
+TEST_F(MasterCyclicTest, ScopedGuardStopsLoopOnScopeExit) {
+    {
+        auto guard = master_.startCyclicLoopScoped(
+            Master::CyclicLoopConfig::lowLatency(500));
+        ASSERT_TRUE(static_cast<bool>(guard));
+        EXPECT_TRUE(master_.isCyclicLoopRunning());
+    }   // destructor stops the loop
+    EXPECT_FALSE(master_.isCyclicLoopRunning());
+}
+
+TEST_F(MasterCyclicTest, ScopedGuardMoveTransfersOwnership) {
+    Master::CyclicLoopGuard guard;
+    {
+        auto inner = master_.startCyclicLoopScoped(
+            Master::CyclicLoopConfig::lowLatency(500));
+        ASSERT_TRUE(static_cast<bool>(inner));
+        guard = std::move(inner);              // move-assign
+        EXPECT_FALSE(static_cast<bool>(inner));
+        EXPECT_TRUE(static_cast<bool>(guard));
+    }
+    EXPECT_TRUE(master_.isCyclicLoopRunning());  // still owned by `guard`
+
+    Master::CyclicLoopGuard moved(std::move(guard));  // move-construct
+    EXPECT_FALSE(static_cast<bool>(guard));
+    EXPECT_TRUE(master_.isCyclicLoopRunning());
+
+    moved.stop();                              // explicit stop
+    EXPECT_FALSE(master_.isCyclicLoopRunning());
+    moved.stop();                              // idempotent
+    EXPECT_FALSE(static_cast<bool>(moved));
+}
+
+TEST_F(MasterCyclicTest, EmptyGuardIsSafe) {
+    Master::CyclicLoopGuard g;
+    EXPECT_FALSE(static_cast<bool>(g));
+    g.stop();   // must not crash
+}
+
+TEST_F(MasterCyclicTest, DcConfigAutoInitializesAndSyncs) {
+    // Fake one DC-capable slave: readRegister(DCSysTime) returns non-zero,
+    // every other register access succeeds instantly (no wire waits).
+    master_.setAprdTestCallback(
+        [](uint16_t, uint16_t ado, void* out, uint16_t len, unsigned int) {
+            if (out && len) std::memset(out, 0, len);
+            if (ado == 0x0910 && out && len >= 1) {   // DCSysTime
+                static_cast<uint8_t*>(out)[0] = 0x42;  // non-zero → capable
+            }
+            return true;
+        });
+    master_.setApwrTestCallback(
+        [](uint16_t, uint16_t, const void*, uint16_t, unsigned int) {
+            return true;
+        });
+    MasterCyclicTestAccess::setDiscoveredSlaveCount(master_, 1);
+
+    // Count DC sync frames on the wire: BWR (cmd 0x08) to DCSysTime 0x0910.
+    std::atomic<int> sync_frames{0};
+    send_hook_ = [&sync_frames](const uint8_t* f, size_t n) {
+        if (n >= 26 && f[16] == 0x08 && f[20] == 0x10 && f[21] == 0x09) {
+            ++sync_frames;
+        }
+        return true;
+    };
+
+    auto cfg = Master::CyclicLoopConfig::lowLatency(500);
+    cfg.sync_interval_cycles = 1;                  // sync every cycle
+    cfg.dc_config = DC::DCConfig::defaults();      // implies DC sync
+
+    auto guard = master_.startCyclicLoopScoped(cfg);
+    ASSERT_TRUE(static_cast<bool>(guard));
+
+    // dc_config initialized DC itself — no manual init call was made.
+    EXPECT_TRUE(master_.dc().isInitialized());
+
+    // The executive's dedicated DC task emits sync frames autonomously.
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(3);
+    while (sync_frames.load() == 0 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+    EXPECT_GT(sync_frames.load(), 0);
+}
+
+TEST_F(MasterCyclicTest, DcConfigWithNoSlavesDegradesGracefully) {
+    // dc_config set but nothing discovered: init is skipped, a warning is
+    // logged, and the loop still starts — the DC task idles quietly.
+    auto cfg = Master::CyclicLoopConfig::lowLatency(500);
+    cfg.dc_config = DC::DCConfig::defaults();
+    auto guard = master_.startCyclicLoopScoped(cfg);
+    ASSERT_TRUE(static_cast<bool>(guard));
+    EXPECT_TRUE(master_.isCyclicLoopRunning());
+    EXPECT_FALSE(master_.dc().isInitialized());
+}
+
+TEST_F(MasterCyclicTest, StartCyclicLoopStopsLegacyDcLoop) {
+    // Bring up the legacy DC realtime loop on a fake DC-capable slave,
+    // then start the cyclic loop — the legacy loop (a second PDO stream)
+    // must be stopped while the DC instance stays initialized for the
+    // executive's own sync task.
+    master_.setAprdTestCallback(
+        [](uint16_t, uint16_t ado, void* out, uint16_t len, unsigned int) {
+            if (out && len) std::memset(out, 0, len);
+            if (ado == 0x0910 && out && len >= 1) {
+                static_cast<uint8_t*>(out)[0] = 0x42;
+            }
+            return true;
+        });
+    master_.setApwrTestCallback(
+        [](uint16_t, uint16_t, const void*, uint16_t, unsigned int) {
+            return true;
+        });
+    MasterCyclicTestAccess::setDiscoveredSlaveCount(master_, 1);
+
+    ASSERT_TRUE(master_.dc().init(DC::DCConfig::defaults(), 1));
+    ASSERT_TRUE(master_.dc().start());
+    ASSERT_EQ(master_.dc().getState(), DC::DCState::Running);
+
+    ASSERT_TRUE(master_.startCyclicLoop(
+        Master::CyclicLoopConfig::lowLatency(500)));
+
+    // Legacy loop stopped; DC instance retained for the cyclic DC task.
+    EXPECT_NE(master_.dc().getState(), DC::DCState::Running);
+    EXPECT_TRUE(master_.dc().isInitialized());
+    master_.stopCyclicLoop();
+}
+
+TEST_F(MasterCyclicTest, ValidationWarningsDoNotBlockStart) {
+    // Loud warnings, graceful start: motion_in_loop with no callback and
+    // SplitLate + motion are flagged but must not fail startup.
+    Master::CyclicLoopConfig cfg{};
+    cfg.cycle_period_us = 500;
+    cfg.motion_in_loop = true;                   // no callback registered
+    cfg.exchange_placement = Master::ExchangePlacement::SplitLate;
+    ASSERT_TRUE(master_.startCyclicLoop(cfg));
+    EXPECT_TRUE(master_.isCyclicLoopRunning());
     master_.stopCyclicLoop();
 }
 
