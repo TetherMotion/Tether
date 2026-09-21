@@ -124,18 +124,23 @@ bool CiA402Drive::gotoOp() {
                 // Read AL_STATUS_CODE
                 uint16_t al_code = 0;
                 m_master->readRegister(SlaveAddress(m_slave_index), 0x0134, al_code, 200);
-                // Read DC SYNC active register
+                // Read DC SYNC active register — only when DC was initialized;
+                // otherwise the reads spam CRITICAL uninitialized-DC errors.
+                const bool dc_init = m_master->dc().isInitialized();
                 uint8_t dc_sync_act = 0;
-                m_master->dc().get()->readRegister(m_slave_index, DCRegisters::DCSyncAct, &dc_sync_act, 1, 200);
-
-                // Read DC System Time
-                uint8_t dc_time[8] = {0};
-                m_master->dc().get()->readRegister(m_slave_index, DCRegisters::DCSysTime, dc_time, 8, 200);
-                uint64_t sys_time_lo = dc_time[0] | (dc_time[1]<<8) | (dc_time[2]<<16) | (dc_time[3]<<24);
-
-                // Read SYNC Latch status (0x098E) — bit 0 toggles with each SYNC0 event
+                uint64_t sys_time_lo = 0;
                 uint8_t sync_latch = 0;
-                m_master->dc().get()->readRegister(m_slave_index, DCRegisters::DCSyncLatch, &sync_latch, 1, 200);
+                if (dc_init) {
+                    m_master->dc().get()->readRegister(m_slave_index, DCRegisters::DCSyncAct, &dc_sync_act, 1, 200);
+
+                    // Read DC System Time
+                    uint8_t dc_time[8] = {0};
+                    m_master->dc().get()->readRegister(m_slave_index, DCRegisters::DCSysTime, dc_time, 8, 200);
+                    sys_time_lo = dc_time[0] | (dc_time[1]<<8) | (dc_time[2]<<16) | (dc_time[3]<<24);
+
+                    // Read SYNC Latch status (0x098E) — bit 0 toggles with each SYNC0 event
+                    m_master->dc().get()->readRegister(m_slave_index, DCRegisters::DCSyncLatch, &sync_latch, 1, 200);
+                }
                 // Read SM2 SM Event Request (0x0820) to see if outputs are being consumed
                 uint8_t sm2_event = 0;
                 m_master->readRegister(SlaveAddress(m_slave_index), 0x0820, sm2_event, 200);
@@ -298,8 +303,8 @@ bool CiA402Drive::transitionSafeOpToOp() {
     // The initial DC config during slave discovery may have failed because
     // the slave wasn't ready. Now that we're in SAFE_OP with SM configured,
     // retry the DC SYNC configuration.
-    TETHER_LOGI(TAG, "{}: Reconfiguring DC SYNC in SAFE_OP", logPrefix().c_str());
-    if (m_master) {
+    if (m_master && m_master->dc().isInitialized()) {
+        TETHER_LOGI(TAG, "{}: Reconfiguring DC SYNC in SAFE_OP", logPrefix().c_str());
         if (!m_master->dc().reconfigureSync(m_slave_index))
             TETHER_LOGW(TAG, "{}: DC reconfiguration failed, continuing anyway", logPrefix().c_str());
     }
