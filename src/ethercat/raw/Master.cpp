@@ -320,6 +320,9 @@ public:
     uint64_t cyclicSlotToken(uint8_t slot) override {
         return master_.cyclicSlotToken(slot);
     }
+    uint8_t cyclicSlotGen(uint8_t slot) override {
+        return master_.cyclicSlotGen(slot);
+    }
     bool sendCyclicDatagram(Command cmd, uint8_t slot,
                             uint16_t adp, uint16_t ado,
                             const void* data, uint16_t datalen,
@@ -744,23 +747,14 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
                          "never initialized — the DC task will idle (set "
                          "dc_config or call dc().init() first)");
     }
-    // In image modes the wire payload IS the process image — mapped entries
-    // bypass PDOEntry::storage entirely (gather and scatter).  The device
-    // layers (CiA402Drive::rxPDO<T>()/txPDO<T>(), terminals, klipper mapping
-    // writes) all go through entry storage, so in-loop motion combined with
-    // a non-Buffered image silently sends stale/zero outputs and feeds stale
-    // inputs.  Image modes are for producers/consumers that use
-    // processImage().outputWrite()/inputRead() directly.
-    if (config.motion_in_loop &&
-        config.image_mode != ImageMode::Buffered) {
-        TETHER_LOGW(TAG, "cyclic loop: motion_in_loop with image_mode != "
-                         "Buffered — drive-level PDO accessors write entry "
-                         "storage which image modes bypass; mapped entries "
-                         "will exchange image bytes instead (use Buffered or "
-                         "write the process image directly)");
-    }
+    // Storage-bound entries (any buffered-path accessor taken) are bridged
+    // by the exchange itself — image modes stay coherent for device-level
+    // PDO accessors without any warning gate.
 
     clearCancel();
+    // A suspension must not leak into a fresh loop — the suspender (slave
+    // recovery) may have died between suspend and resume.
+    exchange_suspended_.store(false, std::memory_order_release);
 
     CyclicExecutive::Config exec_cfg = config.exec;
     exec_cfg.cycle_period_us    = config.cycle_period_us;
@@ -842,6 +836,14 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
 
     CyclicExecutive::TaskFn exchange_fn = [this, split_exchange,
                                            cyclic_rx_budget_ns]() -> bool {
+        // Exchange suspension (slave recovery re-registers the mapping):
+        // skip the cycle's wire work and bump the quiesce counter the
+        // suspender waits on.  Runs at task entry — the single-threaded
+        // executive guarantees no exchange is in flight at that point.
+        if (exchange_suspended_.load(std::memory_order_acquire)) {
+            exchange_quiesced_.fetch_add(1, std::memory_order_relaxed);
+            return true;
+        }
         bool ok = true;
         if (pdo_) {
             if (logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
@@ -865,6 +867,10 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     CyclicExecutive::TaskFn collect_fn;
     if (split_exchange) {
         collect_fn = [this]() -> bool {
+            if (exchange_suspended_.load(std::memory_order_acquire)) {
+                exchange_quiesced_.fetch_add(1, std::memory_order_relaxed);
+                return true;
+            }
             cyclic_collect_calls_.fetch_add(1, std::memory_order_relaxed);
             return !pdo_ || pdo_->cyclicCollect(&process_image_);
         };
@@ -979,6 +985,48 @@ CyclicExecutive::Stats Master::getCyclicLoopStats() const
     return cyclic_loop_ ? cyclic_loop_->getStats() : CyclicExecutive::Stats{};
 }
 
+bool Master::suspendCyclicExchange(uint32_t timeout_us)
+{
+    const bool any_loop = isCyclicLoopRunning() || isAsyncLoopRunning();
+    if (!any_loop) return true;   // nothing to quiesce
+
+    const uint32_t q0 =
+        exchange_quiesced_.load(std::memory_order_relaxed);
+    exchange_suspended_.store(true, std::memory_order_release);
+    // Kick an idle async loop out of waitSend — in OnSend mode with no
+    // producers triggering, no gated task would otherwise run and the
+    // wait below would burn the whole timeout.  The woken loop hits the
+    // suspension gate before touching the wire.  (CyclicExecutive needs
+    // no kick: its deadline timer bounds every task-entry interval.)
+    if (isAsyncLoopRunning()) process_image_.triggerSend();
+
+    // Wait for the loop thread to pass a gated task entry — proves no
+    // send/collect is executing (single-threaded loop) and all future
+    // exchange work is gated until resume.
+    auto& clock = Tether::Platform::Clock::instance();
+    const int64_t deadline_us =
+        clock.getMicroseconds() + static_cast<int64_t>(timeout_us);
+    while (exchange_quiesced_.load(std::memory_order_relaxed) == q0) {
+        if (!isCyclicLoopRunning() && !isAsyncLoopRunning()) {
+            return true;   // loop died mid-suspend — trivially quiesced
+        }
+        if (clock.getMicroseconds() >= deadline_us) {
+            exchange_suspended_.store(false, std::memory_order_release);
+            TETHER_LOGW(TAG, "cyclic exchange suspend timed out — "
+                             "released (epoch guard still covers the "
+                             "mutation)");
+            return false;
+        }
+        clock.delayMicroseconds(50);
+    }
+    return true;
+}
+
+void Master::resumeCyclicExchange()
+{
+    exchange_suspended_.store(false, std::memory_order_release);
+}
+
 // ============================================================================
 // Async send-on-change loop — external-producer RxPDO source
 // ============================================================================
@@ -996,6 +1044,7 @@ bool Master::startAsyncLoop(const AsyncLoopConfig& config)
     // share the wire with the async loop's sends.
     if (dc_ && dc_->getState() == DC::DCState::Running) dc_->stop();
     clearCancel();
+    exchange_suspended_.store(false, std::memory_order_release);
 
     AsyncCyclicLoop::Config ecfg = config.exec;
     ecfg.collect_mode         = config.collect_mode;
@@ -1061,6 +1110,10 @@ bool Master::startAsyncLoop(const AsyncLoopConfig& config)
     // atomic exchange when no logical address manager is configured.
     AsyncCyclicLoop::TaskFn send_fn =
         [this, rx_timeout = config.rx_timeout_ns]() -> bool {
+            if (exchange_suspended_.load(std::memory_order_acquire)) {
+                exchange_quiesced_.fetch_add(1, std::memory_order_relaxed);
+                return true;
+            }
             bool ok = true;
             if (pdo_) {
                 if (logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
@@ -1075,6 +1128,10 @@ bool Master::startAsyncLoop(const AsyncLoopConfig& config)
             return ok;
         };
     AsyncCyclicLoop::TaskFn collect_fn = [this]() -> bool {
+        if (exchange_suspended_.load(std::memory_order_acquire)) {
+            exchange_quiesced_.fetch_add(1, std::memory_order_relaxed);
+            return true;
+        }
         return !pdo_ || pdo_->cyclicCollect(&process_image_);
     };
     AsyncCyclicLoop::TaskFn dc_fn;

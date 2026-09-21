@@ -501,6 +501,69 @@ TEST(MasterAsyncLoop, RestartWhileAsyncBlockedInWait) {
     master.stop();
 }
 
+TEST(MasterAsyncLoop, SuspendWakesIdleLoopAndQuiesces) {
+    // OnSend + no producers → the loop blocks in waitSend indefinitely.
+    // suspendCyclicExchange must kick it out of the wait so the exchange
+    // gate is observed promptly — without the kick this burns the whole
+    // timeout and returns false.
+    NetworkInterface iface{};
+    iface.send = [](const uint8_t*, size_t) { return true; };
+    Master master;
+    const uint8_t mac[6] = {0x02,0,0,0,0,1};
+    master.start(iface, mac);
+
+    Master::AsyncLoopConfig cfg;
+    cfg.collect_mode = AsyncCyclicLoop::CollectMode::OnSend;
+    cfg.max_idle_ns  = 0;                     // no idle keep-alive tick
+    ASSERT_TRUE(master.startAsyncLoop(cfg));
+    std::this_thread::sleep_for(5ms);         // let it reach waitSend
+
+    const auto t0 = std::chrono::steady_clock::now();
+    ASSERT_TRUE(master.suspendCyclicExchange(2'000'000));   // 2 s budget
+    const auto el = std::chrono::steady_clock::now() - t0;
+    EXPECT_LT(el, std::chrono::milliseconds(500));
+    EXPECT_TRUE(master.cyclicExchangeSuspended());
+
+    master.resumeCyclicExchange();
+    EXPECT_FALSE(master.cyclicExchangeSuspended());
+    // The loop still functions after resume.
+    master.processImage().triggerSend();
+    ASSERT_TRUE(waitFor([&] {
+        return master.getAsyncLoopStats().sends >= 1;
+    }));
+    master.stop();
+}
+
+TEST(MasterAsyncLoop, SuspendStopsSendsWhileSuspended) {
+    // Producer triggers during suspension must not emit wire traffic.
+    NetworkInterface iface{};
+    std::atomic<uint64_t> wire_sends{0};
+    iface.send = [&](const uint8_t*, size_t) {
+        wire_sends.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    };
+    Master master;
+    const uint8_t mac[6] = {0x02,0,0,0,0,1};
+    master.start(iface, mac);
+
+    Master::AsyncLoopConfig cfg;
+    cfg.collect_mode = AsyncCyclicLoop::CollectMode::OnSend;
+    ASSERT_TRUE(master.startAsyncLoop(cfg));
+    ASSERT_TRUE(master.suspendCyclicExchange(500'000));
+
+    const uint64_t s0 = wire_sends.load();
+    master.processImage().triggerSend();
+    std::this_thread::sleep_for(10ms);
+    EXPECT_EQ(wire_sends.load(), s0);   // gated — no wire send
+
+    master.resumeCyclicExchange();
+    master.processImage().triggerSend();
+    ASSERT_TRUE(waitFor([&] {
+        return master.getAsyncLoopStats().sends >= 1;
+    }));
+    master.stop();
+}
+
 TEST(MasterAsyncLoop, StopCyclicLoopLeavesAsyncDatapathAlive) {
     // stopCyclicLoop() while only the async loop runs must not tear down
     // the shared datapath out from under the async thread.

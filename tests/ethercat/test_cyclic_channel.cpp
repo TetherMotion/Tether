@@ -31,7 +31,9 @@
 #include <vector>
 
 #include "tether/ethercat/CyclicChannel.hpp"
+#include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/Types.hpp"
 
 #ifdef __linux__
@@ -598,6 +600,9 @@ struct MasterCyclicTestAccess {
     static uint64_t cyclicCollectCalls(Master& m) {
         return m.cyclic_collect_calls_.load(std::memory_order_relaxed);
     }
+    static uint32_t exchangeQuiesced(Master& m) {
+        return m.exchange_quiesced_.load(std::memory_order_relaxed);
+    }
     static void setDiscoveredSlaveCount(Master& m, uint16_t n) {
         m.discovered_slave_count_.store(n, std::memory_order_release);
     }
@@ -664,11 +669,12 @@ public:
 };
 
 /// Build a wire-format EtherCAT frame with one datagram.
-/// Returns frame length (>=60).
+/// Returns frame length (>=60).  `gen` stamps lenFlags res-bit 13 — the
+/// echoed send generation the stale-deposit guard checks.
 size_t buildEcatFrame(uint8_t* f, uint8_t cmd, uint8_t idx,
                       uint16_t adp, uint16_t ado,
                       const uint8_t* payload, uint16_t datalen,
-                      uint16_t wkc, bool more = false)
+                      uint16_t wkc, bool more = false, uint8_t gen = 0)
 {
     std::memset(f, 0, 14);
     f[12] = 0x88; f[13] = 0xA4;
@@ -679,7 +685,8 @@ size_t buildEcatFrame(uint8_t* f, uint8_t cmd, uint8_t idx,
     f[17] = idx;
     std::memcpy(f + 18, &adp, 2);
     std::memcpy(f + 20, &ado, 2);
-    const uint16_t len_flags = (datalen & 0x07FF) | (more ? 0x8000 : 0);
+    const uint16_t len_flags = (datalen & 0x07FF) | (more ? 0x8000 : 0)
+                             | ((gen & 1) << 13);
     std::memcpy(f + 22, &len_flags, 2);
     std::memset(f + 24, 0, 2);                    // irq
     if (datalen) std::memcpy(f + 26, payload, datalen);
@@ -1636,6 +1643,144 @@ TEST_F(MasterCyclicTest, AtomicPlacementRegistersNoCollectTask) {
                         TaskPhase::Diagnostics})
         EXPECT_EQ(MasterCyclicTestAccess::cyclicTaskCount(master_, p), 0u);
     master_.stopCyclicLoop();
+}
+
+// ============================================================================
+// Exchange suspension — recovery handshake (audit follow-up)
+// ============================================================================
+
+TEST_F(MasterCyclicTest, SuspendWithNoLoopIsTriviallyQuiesced) {
+    EXPECT_TRUE(master_.suspendCyclicExchange(20'000));
+    EXPECT_FALSE(master_.cyclicExchangeSuspended());   // nothing to hold
+}
+
+TEST_F(MasterCyclicTest, SuspendGatesExchangeWhileLoopKeepsRunning) {
+    // While suspended, the exchange/collect tasks hit the gate at entry
+    // (quiesced bumps every pass) and no wire send runs — the rest of the
+    // executive keeps ticking.
+    std::atomic<uint64_t> sends{0};
+    send_hook_ = [&](const uint8_t*, size_t) {
+        sends.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    };
+    std::atomic<uint64_t> motion_ticks{0};
+    master_.setMotionControlCallback([&](double) {
+        motion_ticks.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    });
+
+    Master::CyclicLoopConfig cfg{};
+    cfg.cycle_period_us = 200;
+    cfg.motion_in_loop = true;
+    ASSERT_TRUE(master_.startCyclicLoop(cfg));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    ASSERT_TRUE(master_.suspendCyclicExchange(50'000));
+    EXPECT_TRUE(master_.cyclicExchangeSuspended());
+
+    const uint64_t s0 = sends.load();
+    const uint64_t m0 = motion_ticks.load();
+    const uint32_t q0 =
+        MasterCyclicTestAccess::exchangeQuiesced(master_);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    EXPECT_EQ(sends.load(), s0);            // wire work gated
+    EXPECT_GT(motion_ticks.load(), m0);     // loop still alive
+    EXPECT_GT(MasterCyclicTestAccess::exchangeQuiesced(master_), q0);
+
+    master_.resumeCyclicExchange();
+    EXPECT_FALSE(master_.cyclicExchangeSuspended());
+    master_.stopCyclicLoop();
+}
+
+TEST_F(MasterCyclicTest, SuspendFromLoopThreadTimesOutAndReleases) {
+    // A suspend issued from inside a loop task can never observe a quiesce
+    // bump (the single thread is busy) — it must time out, release the
+    // flag, and let the loop continue.
+    std::atomic<bool>     suspend_result{true};
+    std::atomic<uint64_t> ticks{0};
+    master_.setMotionControlCallback([&](double) {
+        if (ticks.fetch_add(1, std::memory_order_relaxed) == 5) {
+            suspend_result.store(
+                master_.suspendCyclicExchange(5'000));   // 5 ms
+        }
+        return true;
+    });
+    Master::CyclicLoopConfig cfg{};
+    cfg.cycle_period_us = 200;
+    cfg.motion_in_loop = true;
+    ASSERT_TRUE(master_.startCyclicLoop(cfg));
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    EXPECT_FALSE(suspend_result.load());
+    EXPECT_FALSE(master_.cyclicExchangeSuspended());   // released
+    const uint64_t t0 = ticks.load();
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_GT(ticks.load(), t0);                        // loop recovered
+    master_.stopCyclicLoop();
+}
+
+// ============================================================================
+// Stale-deposit guard through the REAL transport adapter — regression for
+// cyclicSlotGen not being forwarded by MasterPDOTransport (pending.gen
+// would read 0 while the wire echoes the toggled bit → alternating misses).
+// ============================================================================
+
+TEST_F(MasterCyclicTest, GenBitRejectsStaleDepositEndToEnd) {
+    auto& lam = master_.logicalAddressManager();
+    lam.init();
+    PDO::SlaveConfig configs[PDO::kMaxPDOSlaves] = {};
+    configs[0].configured = true;
+    configs[0].sm[2] = PDO::SyncManagerConfig::process_output(0x1800, 8);
+    configs[0].rxpdo_size = 8;
+    configs[0].sm[3] = PDO::SyncManagerConfig::process_input(0x1C00, 8);
+    configs[0].txpdo_size = 8;
+    ASSERT_TRUE(lam.buildAddressMap(configs, 1));
+
+    auto& pdo = master_.pdo();
+    pdo.init();
+    pdo.mapping().add_rxpdo(0, 8);
+    pdo.mapping().add_txpdo(0, 8);
+
+    // Capture the gen stamped into the outgoing datagram's lenFlags bit 13.
+    uint8_t sent_gen = 0xFF;
+    send_hook_ = [&](const uint8_t* f, size_t n) {
+        if (n >= 24) {
+            const uint16_t lf = static_cast<uint16_t>(f[22] | (f[23] << 8));
+            sent_gen = static_cast<uint8_t>((lf >> 13) & 1u);
+        }
+        return true;
+    };
+
+    // Cycle 1: send stamps the toggled gen; the transport's gen accessor
+    // (through the IPDOTransport adapter) must report the same bit.
+    ASSERT_TRUE(pdo.cyclicSend(nullptr, 5'000));
+    ASSERT_NE(sent_gen, 0xFF);
+    EXPECT_EQ(master_.cyclicSlotGen(0), sent_gen);
+
+    // Deposit a response echoing the PREVIOUS generation — a stale deposit
+    // surviving an earlier timeout.  collect consumes it, finds no fresh
+    // response in the remaining deadline, and reports the miss honestly.
+    uint8_t stale_frame[128];
+    const uint8_t pay[16] = {};
+    const size_t ns = buildEcatFrame(stale_frame, 0x0C, 0xF8, 0, 0,
+                                     pay, 16, 3, false, sent_gen ^ 1);
+    master_.handleRxFrame(stale_frame, ns);
+
+    EXPECT_FALSE(pdo.cyclicCollect(nullptr));
+    EXPECT_EQ(lam.getStats().stale_responses, 1u);
+    EXPECT_EQ(lam.getStats().timeout_errors, 1u);
+
+    // Cycle 2: gen toggles again (sent_gen is refreshed by the hook); a
+    // deposit echoing the CURRENT gen is accepted — the stale deposit
+    // above must not have poisoned the slot.
+    ASSERT_TRUE(pdo.cyclicSend(nullptr, 5'000));
+    uint8_t fresh_frame[128];
+    const size_t nf = buildEcatFrame(fresh_frame, 0x0C, 0xF8, 0, 0,
+                                     pay, 16, 3, false, sent_gen);
+    master_.handleRxFrame(fresh_frame, nf);
+    EXPECT_TRUE(pdo.cyclicCollect(nullptr));
+    EXPECT_EQ(lam.getStats().stale_responses, 1u);   // unchanged
+    EXPECT_EQ(lam.getStats().success, 1u);
 }
 
 // ============================================================================

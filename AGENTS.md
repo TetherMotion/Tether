@@ -286,7 +286,12 @@ re-initializing it from scratch.
 1. Critical condition detected → `CriticalDetected` event
 2. Slave(s) suspended (PDO data not passed to motion controllers)
 3. `ALResetController` forces slave to `INIT` (two-step AL reset with ack)
-4. `ISlaveRecoveryHandler::reinitializeSlave()` called
+4. `ISlaveRecoveryHandler::reinitializeSlave()` called — with
+   `RecoveryConfig::suspend_cyclic_exchange` (default on) the cyclic/async
+   wire exchange is quiesced first via `Master::suspendCyclicExchange()`
+   so no send/collect iterates the PDO mapping mid-mutation
+   (`exchange_suspend_timeout_us` bounds the wait; the mapping-epoch
+   guard is the fallback)
 5. On success: slave resumed, `RecoverySucceeded` event, attempt count reset
 6. On failure: retry (up to `max_attempts`), then `RecoveryGaveUp` + `Failed`
 

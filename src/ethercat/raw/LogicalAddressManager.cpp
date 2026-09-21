@@ -346,7 +346,11 @@ size_t LogicalAddressManager::computeImageOffsets(
                 + tx_running[e->slave_index];
             tx_running[e->slave_index] += e->data_size;
         }
-        if (i < n && e->data_size > 0 && !e->image_exclude) {
+        // storage_bound entries keep the offset OUT of the image table —
+        // the application holds a pointer into entry storage, so the
+        // exchange bridges them (gather/scatter) even in image modes.
+        if (i < n && e->data_size > 0 && !e->image_exclude &&
+            !e->storage_bound) {
             out[i] = static_cast<int32_t>(off);
         }
     }
@@ -490,7 +494,12 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
         rx_running[e->slave_index] += e->data_size;
         if (e->data_size == 0) continue;
         if (entry_off + e->data_size > total_data) break;  // layout guard
-        if (img_active && image->entryOffset(i) >= 0) continue; // in-image
+        // Image-mapped entries live in the payload already; storage-bound
+        // ones bridge — the device layer's cached storage pointer must
+        // reach the wire even when the offsets table image-maps it (e.g.
+        // an accessor taken after configureProcessImage()).
+        if (img_active && !e->storage_bound &&
+            image->entryOffset(i) >= 0) continue; // in-image
 
         std::memcpy(payload + entry_off, e->storage, e->data_size);
     }
@@ -549,6 +558,9 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
             pending_image_ = nullptr;
             return false;
         }
+        // Send-generation stamped by the transport — collect rejects
+        // deposits echoing the previous generation (stale-deposit ABA).
+        cyclic_pending_[s].gen = transport_.cyclicSlotGen(slot);
         ++cyclic_pending_count_;
     }
     return true;
@@ -624,9 +636,47 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
 
     // One wake for the whole mask (Q3) — the transport's fallback still
     // walks per-slot, so correctness never depends on the fast path.
-    const uint32_t arrived =
+    uint32_t arrived =
         transport_.waitCyclicSlotMask(mask, tokens.data(), remaining,
                                       views.data());
+
+    // Stale-deposit guard: a response deposited late — past its own
+    // cycle's timeout — echoes the PREVIOUS send generation (lenFlags
+    // res-bit 13).  Detect it, consume the deposit (refresh the token
+    // baseline) and give the real response the remaining deadline once.
+    // A second mismatch is pathological (two stales in flight) → miss.
+    uint32_t stale_mask = 0;
+    for (uint8_t s = 0; s < nslices; ++s) {
+        if ((arrived & (1u << s)) &&
+            views[s].gen != cyclic_pending_[s].gen) {
+            stale_mask |= 1u << s;
+            stats_.stale_responses++;
+        }
+    }
+    if (stale_mask) {
+        for (uint8_t s = 0; s < nslices; ++s) {
+            if (stale_mask & (1u << s))
+                tokens[s] = transport_.cyclicSlotToken(s);
+        }
+        const uint64_t now2 = monoNowNs();
+        const uint32_t remain2 = now2 < cyclic_deadline_ns_
+            ? static_cast<uint32_t>(cyclic_deadline_ns_ - now2) : 0;
+        const uint32_t arrived2 = remain2
+            ? transport_.waitCyclicSlotMask(stale_mask, tokens.data(),
+                                            remain2, views.data())
+            : 0;
+        // Retry winner must carry THIS send's generation; a second stale
+        // or a timeout both leave the slot un-arrived.
+        arrived = (arrived & ~stale_mask) | (arrived2 & stale_mask);
+        for (uint8_t s = 0; s < nslices; ++s) {
+            if ((arrived2 & (1u << s)) &&
+                views[s].gen != cyclic_pending_[s].gen) {
+                arrived &= ~(1u << s);
+                stats_.stale_responses++;
+            }
+        }
+    }
+
     for (uint8_t s = 0; s < nslices; ++s) {
         if (!(arrived & (1u << s))) {
             stats_.timeout_errors++;
@@ -700,7 +750,10 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
                                  + tx_running[e->slave_index];
         tx_running[e->slave_index] += e->data_size;
         if (e->data_size == 0) continue;
-        if (img_active && image->entryOffset(i) >= 0) continue;
+        // Mirror of the gather predicate: storage-bound entries scatter
+        // back into storage even when the offsets table image-maps them.
+        if (img_active && !e->storage_bound &&
+            image->entryOffset(i) >= 0) continue;
 
         // Copy from whichever slice(s) cover the entry range.
         uint32_t done = 0;

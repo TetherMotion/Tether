@@ -771,3 +771,80 @@ TEST_F(SlaveSupervisorTest, FailedStateIgnoresNewTriggers) {
 
     sup.stop();
 }
+
+// ============================================================================
+// Exchange suspension during recovery (audit follow-up)
+// ============================================================================
+
+TEST_F(SlaveSupervisorTest, RecoverySuspendsExchangeWhileHandlerRuns) {
+    // The recovery handler re-registers PDO mappings — with
+    // suspend_cyclic_exchange the cyclic exchange must be quiesced while
+    // it runs, and resumed after.  Observable: the flag is set inside the
+    // handler invocation and clear after recovery completes.
+    NetworkInterface iface{};
+    iface.send = [](const uint8_t*, size_t) { return true; };
+    const uint8_t mac[6] = {0x02, 0, 0, 0, 0, 1};
+    master_.start(iface, mac);
+    Master::CyclicLoopConfig lcfg{};
+    lcfg.cycle_period_us = 500;
+    ASSERT_TRUE(master_.startCyclicLoop(lcfg));
+
+    auto& sup = master_.slaveSupervisor();
+    sup.configure(defaultConfig());   // suspend_cyclic_exchange defaults on
+
+    std::atomic<bool> suspended_in_handler{false};
+    auto handler = std::make_unique<MockRecoveryHandler>();
+    EXPECT_CALL(*handler, reinitializeSlave(0))
+        .WillOnce(Invoke([&](uint16_t) {
+            suspended_in_handler.store(master_.cyclicExchangeSuspended());
+            return true;
+        }));
+    sup.setRecoveryHandler(std::move(handler));
+
+    ASSERT_TRUE(sup.start());
+    sup.markCritical(0, "Recovery under a live cyclic loop");
+
+    EXPECT_TRUE(suspended_in_handler.load());
+    EXPECT_FALSE(master_.cyclicExchangeSuspended());   // resumed
+    EXPECT_TRUE(master_.isCyclicLoopRunning());        // loop survived
+
+    sup.stop();
+    master_.stopCyclicLoop();
+    master_.stop();
+}
+
+TEST_F(SlaveSupervisorTest, RecoveryWithoutSuspendLeavesExchangeUngated) {
+    // Opt-out: suspend_cyclic_exchange = false → the flag stays clear
+    // inside the handler (epoch guard remains the safety net).
+    NetworkInterface iface{};
+    iface.send = [](const uint8_t*, size_t) { return true; };
+    const uint8_t mac[6] = {0x02, 0, 0, 0, 0, 1};
+    master_.start(iface, mac);
+    Master::CyclicLoopConfig lcfg{};
+    lcfg.cycle_period_us = 500;
+    ASSERT_TRUE(master_.startCyclicLoop(lcfg));
+
+    auto& sup = master_.slaveSupervisor();
+    auto cfg = defaultConfig();
+    cfg.suspend_cyclic_exchange = false;
+    sup.configure(cfg);
+
+    std::atomic<bool> suspended_in_handler{true};
+    auto handler = std::make_unique<MockRecoveryHandler>();
+    EXPECT_CALL(*handler, reinitializeSlave(0))
+        .WillOnce(Invoke([&](uint16_t) {
+            suspended_in_handler.store(master_.cyclicExchangeSuspended());
+            return true;
+        }));
+    sup.setRecoveryHandler(std::move(handler));
+
+    ASSERT_TRUE(sup.start());
+    sup.markCritical(0, "Recovery with suspension disabled");
+
+    EXPECT_FALSE(suspended_in_handler.load());
+    EXPECT_TRUE(master_.isCyclicLoopRunning());
+
+    sup.stop();
+    master_.stopCyclicLoop();
+    master_.stop();
+}

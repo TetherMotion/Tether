@@ -217,34 +217,44 @@ now records **what was decided and where it lives**.  Items marked
 
 The detailed motion-loop audit surfaced these, in addition to the fixes
 already landed (collect-before-motion ordering, epoch guards, deferred
-drive erase, `findDriveRaw` teardown):
+drive erase, `findDriveRaw` teardown).  All three are now resolved:
 
-* **Device-layer storage vs. process-image coherence.**  All device
-  layers (CiA402 `registerPDOBuffers`, Beckhoff terminals, RP20, Axia80)
-  bind their PDO accessors to `PDOEntry::storage` via
-  `PDOMapping::entryDataMut()`.  In non-`Buffered` image modes the wire
-  payload comes from / goes to the `ProcessImage` banks and entry
-  storage is skipped entirely — drive-level `rxPDO<T>()`/`txPDO<T>()`
-  writes never reach the wire and responses never reach the accessors.
-  Mitigation landed: `startCyclicLoop` warns when `image_mode !=
-  Buffered` is combined with `motion_in_loop`.  The full fix (rebinding
-  device buffers into the image after `computeImageOffsets`, or moving
-  device APIs onto `ProcessImage` accessors) is a breaking refactor and
-  stays open — **default `image_mode` is `Buffered`, which is coherent**,
-  so this only bites users who opt into image modes with storage-bound
-  device APIs.
-* **Stale-deposit ABA.**  A response arriving *after* its cycle timed
-  out can be consumed as the next cycle's data on the same slot (WKC
-  still passes — the datagram did execute).  Essentially impossible on
-  a real ring (in-order return), but the seq mechanism can't tell
-  "new" from "very late".  A per-cycle nonce would close it at the
-  cost of the fixed-header zero-copy design.
-* **Recovery ↔ exchange coordination.**  The supervisor's recovery
-  handler mutates `PDOMapping` (`resetPDORegistration` +
-  re-registration).  The mapping-epoch guard now makes the in-flight
-  cycle abort safely, and `stop_loop_during_recovery` covers the
-  legacy loops; what remains open is formally serializing recovery
-  with the cyclic executive (recovery currently runs on the
-  supervisor thread; the epoch guard converts the race into a skipped
-  cycle rather than torn data — acceptable, but a hard handshake would
-  be cleaner).
+* **Device-layer storage vs. process-image coherence — RESOLVED.**
+  All device layers (CiA402 `registerPDOBuffers`, Beckhoff terminals,
+  RP20, Axia80) bind their PDO accessors to `PDOEntry::storage` via
+  `PDOMapping::entryDataMut()`.  Buffered-path accessors now mark the
+  entry `storage_bound`; `computeImageOffsets` keeps bound entries out
+  of the image-offset table (offset −1), and the cyclic gather/scatter
+  predicates honor the flag directly — so a device accessor taken even
+  *after* `configureProcessImage` still bridges (storage→wire on send,
+  wire→storage on collect).  Image modes are coherent for device-level
+  PDO access; bound entries pay one per-entry `memcpy` per direction
+  instead of being zero-copy.  `ProcessImage`-native access
+  (`outputWrite`/`inputRead`/`EntryHandle`) remains the zero-copy path
+  for entries that never take a storage pointer.
+* **Stale-deposit ABA — RESOLVED (1-bit generation).**  A response
+  arriving *after* its cycle timed out could be consumed as the next
+  cycle's data on the same slot.  Each slot now toggles a send
+  generation carried in datagram `lenFlags` reserved bit 13 (slaves
+  echo reserved bits verbatim; bits 11–13 were free, bit 14 is the
+  circulating-frame flag already in use).  `cyclicCollect` rejects a
+  deposit echoing the previous generation, refreshes the slot token,
+  and re-waits once within the same deadline — the real response still
+  lands on this cycle's budget.  Residual limitation: with a 1-bit
+  nonce, a deposit exactly *two* cycles late aliases (gen repeats);
+  the dominant one-cycle-late case is covered, and a wider nonce would
+  need header space that doesn't exist without a second datagram.
+  Transports that never stamp `gen` report 0, which matches unmarked
+  deposits — the check self-disables.
+* **Recovery ↔ exchange coordination — RESOLVED.**  The supervisor
+  calls `Master::suspendCyclicExchange()` before the recovery handler
+  mutates `PDOMapping`, and `resumeCyclicExchange()` after
+  (`RecoveryConfig::suspend_cyclic_exchange`, default on; timeout via
+  `exchange_suspend_timeout_us`, default 20 ms).  Suspension gates the
+  exchange/collect tasks at entry; the suspender waits for a quiesce
+  bump, which proves no send/collect is in flight (single-threaded
+  loop).  An idle async loop in `OnSend` mode is kicked out of
+  `waitSend` so the gate is observed promptly.  On timeout the flag is
+  released and recovery proceeds anyway — the mapping-epoch guard
+  degrades a collision to a skipped cycle.  Not reentrant: one
+  suspender at a time, paired suspend/resume.

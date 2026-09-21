@@ -906,7 +906,8 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
             // on the slot's sequence counter.
             depositCyclicSlot(dg->idx - IPDOTransport::kCyclicSlotBase,
                               dg->cmd, adp, ado, frame + data_offset,
-                              datalen, wkc);
+                              datalen, wkc,
+                              static_cast<uint8_t>((len_flags >> 13) & 0x1u));
         } else {
         RxDatagram msg{};
         msg.idx = dg->idx; msg.cmd = dg->cmd; msg.adp = adp; msg.ado = ado;
@@ -959,7 +960,7 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
 void Master::depositCyclicSlot(uint8_t slot_idx, Command cmd,
                                uint16_t adp, uint16_t ado,
                                const uint8_t* payload, uint16_t datalen,
-                               uint16_t wkc)
+                               uint16_t wkc, uint8_t gen)
 {
     auto& s = cyclic_slots_[slot_idx];
     // A copy-mode deposit replaces any held channel view — release the old
@@ -974,6 +975,7 @@ void Master::depositCyclicSlot(uint8_t slot_idx, Command cmd,
     s.ado     = ado;
     s.datalen = datalen;
     s.wkc     = wkc;
+    s.gen     = gen;
     s.stamp_ns = Tether::Platform::Clock::instance().getMicroseconds() * 1000;
     if (datalen > 0) {
         std::memcpy(s.data, payload,
@@ -1004,7 +1006,7 @@ void Master::publishCyclicSlotView(uint8_t slot_idx, Command cmd,
                                    uint16_t adp, uint16_t ado,
                                    const uint8_t* payload, uint16_t datalen,
                                    uint16_t wkc, uint32_t cookie,
-                                   uint64_t stamp_ns)
+                                   uint64_t stamp_ns, uint8_t gen)
 {
     auto& s = cyclic_slots_[slot_idx];
     if (s.cookie >= 0 && cyclic_channel_) {
@@ -1017,6 +1019,7 @@ void Master::publishCyclicSlotView(uint8_t slot_idx, Command cmd,
     s.ado     = ado;
     s.datalen = datalen;
     s.wkc     = wkc;
+    s.gen     = gen;
     // The channel's kernel stamp when present, else stamp at deposit.
     s.stamp_ns = stamp_ns ? stamp_ns
         : Tether::Platform::Clock::instance().getMicroseconds() * 1000;
@@ -1038,13 +1041,21 @@ uint64_t Master::cyclicSlotToken(uint8_t slot) const
     return cyclic_slots_[slot].seq.load(std::memory_order_seq_cst);
 }
 
+uint8_t Master::cyclicSlotGen(uint8_t slot) const
+{
+    if (slot >= IPDOTransport::kNumCyclicSlots) return 0;
+    return cyclic_slot_gen_[slot];
+}
+
 namespace {
 
 /// Build the 26-byte [eth][ecat][datagram-hdr] prefix of a cyclic frame.
+/// `gen` stamps the send-generation bit into lenFlags res-bit 13 — echoed
+/// verbatim by the ring so collect can reject stale deposits.
 void buildCyclicFrameHeader(uint8_t* buf, const uint8_t* src_mac,
                             EtherCAT::Command cmd, uint8_t slot,
                             uint16_t adp, uint16_t ado, uint16_t datalen,
-                            bool roundtrip)
+                            bool roundtrip, uint8_t gen)
 {
     using namespace EtherCAT::Raw;
     constexpr uint8_t dst_mac[6] = {0x01, 0x01, 0x05, 0x00, 0x00, 0x00};
@@ -1063,7 +1074,9 @@ void buildCyclicFrameHeader(uint8_t* buf, const uint8_t* src_mac,
     hdr->dg.idx    = EtherCAT::IPDOTransport::kCyclicSlotBase + slot;
     hdr->dg.adp_le = host_to_le16(adp);
     hdr->dg.ado_le = host_to_le16(ado);
-    const uint16_t flags = roundtrip ? (1u << 14) : 0u;
+    const uint16_t flags =
+        (roundtrip ? (1u << 14) : 0u) |
+        (static_cast<uint16_t>(gen & 0x1u) << 13);
     hdr->dg.lenFlags.raw_le =
         host_to_le16(static_cast<uint16_t>((datalen & 0x07FFu) | flags));
     hdr->dg.irq_le = host_to_le16(0);
@@ -1080,6 +1093,11 @@ bool Master::sendCyclicDatagram(Command cmd, uint8_t slot,
     if (slot >= IPDOTransport::kNumCyclicSlots) return false;
     if (cancel_requested_.load(std::memory_order_acquire)) return false;
 
+    // Toggle the send generation — collect rejects echoes of the previous
+    // generation (stale deposits surviving a timed-out cycle).
+    const uint8_t gen =
+        (cyclic_slot_gen_[slot] = cyclic_slot_gen_[slot] ^ 1u);
+
     // Channel path (socket backend): header on the stack + payload in place
     // → one sendmsg(), zero payload copies.  Ring backend would copy once
     // into a TX slot — callers in Rotating image mode use sendCyclicFrame
@@ -1087,7 +1105,7 @@ bool Master::sendCyclicDatagram(Command cmd, uint8_t slot,
     if (cyclic_channel_) {
         uint8_t hdr_buf[kCyclicFramePayloadOff];
         buildCyclicFrameHeader(hdr_buf, src_mac_, cmd, slot, adp, ado,
-                               datalen, roundtrip);
+                               datalen, roundtrip, gen);
         CyclicTxParts parts;
         parts.header      = hdr_buf;
         parts.header_len  = kCyclicFramePayloadOff;
@@ -1118,7 +1136,7 @@ bool Master::sendCyclicDatagram(Command cmd, uint8_t slot,
         (required_len < kMinEthFrameNoFcs) ? kMinEthFrameNoFcs : required_len;
 
     buildCyclicFrameHeader(cyclic_tx_buf_, src_mac_, cmd, slot, adp, ado,
-                           datalen, roundtrip);
+                           datalen, roundtrip, gen);
 
     uint8_t* payload = cyclic_tx_buf_ + sizeof(EtherCATSingleDgramFrameHeader);
     if (datalen > 0) {
@@ -1150,8 +1168,10 @@ void Master::composeCyclicHeader(uint8_t* frame, Command cmd, uint8_t slot,
                                  uint16_t adp, uint16_t ado, uint16_t datalen,
                                  bool roundtrip)
 {
+    const uint8_t gen =
+        (cyclic_slot_gen_[slot] = cyclic_slot_gen_[slot] ^ 1u);
     buildCyclicFrameHeader(frame, src_mac_, cmd, slot, adp, ado,
-                           datalen, roundtrip);
+                           datalen, roundtrip, gen);
 }
 
 /**
@@ -1232,7 +1252,8 @@ void Master::dispatchChannelFrame(const CyclicFrameView& v)
         cyclic_channel_->rxHold(v.cookie);
         publishCyclicSlotView(idx - IPDOTransport::kCyclicSlotBase,
                               static_cast<Command>(cmd), adp, ado,
-                              f + data_off, dl, wkc, v.cookie, v.stamp_ns);
+                              f + data_off, dl, wkc, v.cookie, v.stamp_ns,
+                              static_cast<uint8_t>((len_flags >> 13) & 0x1u));
         rem -= dgt; off += dgt;
         if (!more) break;
     }
@@ -1255,6 +1276,7 @@ bool Master::waitCyclicSlotView(uint8_t slot, uint64_t token,
             out.ado     = s.ado;
             out.datalen = s.datalen;
             out.wkc     = s.wkc;
+            out.gen     = s.gen;
             out.stamp_ns = s.stamp_ns;
             out.payload = s.payload ? s.payload : s.data;
             const int64_t cookie = s.cookie;
