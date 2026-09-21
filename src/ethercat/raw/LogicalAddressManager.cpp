@@ -423,6 +423,15 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
         return false;
     }
     cyclic_slice_count_ = static_cast<uint8_t>(nslices);
+
+    // Concurrent mapping mutation (slave recovery re-registers PDO entries
+    // on the supervisor thread while this iterates) produces a torn gather
+    // — wrong bytes on the wire for every slave.  Snapshot the epoch now
+    // and re-check after the gather; a changed epoch aborts the emit
+    // silently (a skipped cycle, not an error — the mapping owner is
+    // mid-reconfiguration and the next cycle uses the new layout).
+    const uint32_t map_epoch0 = mapping.epoch();
+
     // Derive per-slice expected WKC from the slave set (Q6) — overrides
     // any learned values; underivable slices keep the learn sentinel.
     deriveExpectedWkc(mapping);
@@ -484,6 +493,16 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
         if (img_active && image->entryOffset(i) >= 0) continue; // in-image
 
         std::memcpy(payload + entry_off, e->storage, e->data_size);
+    }
+
+    // Mapping changed under the gather — the staged payload mixes two
+    // layouts.  Drop this cycle's emit rather than write torn outputs.
+    if (mapping.epoch() != map_epoch0) {
+        TETHER_LOGW(TAG, "cyclic send skipped: PDO mapping changed "
+                         "mid-gather (slave re-registration?)");
+        cyclic_pending_count_ = 0;
+        pending_image_ = nullptr;
+        return true;
     }
 
     // ---- Emit slices -----------------------------------------------------
@@ -578,10 +597,17 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
     }
     const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
     const uint8_t nslices = cyclic_pending_count_;
-    if (nslices == 0) return total_data == 0;
+    // Nothing pending means the send half didn't emit (skipped, paused, or
+    // failed — already counted there).  An empty collect is not an error.
+    if (nslices == 0) return true;
     image = pending_image_;
     const bool img_active = image && image->configured() &&
                             image->mode() != ImageMode::Buffered;
+
+    // See cyclicSend: a mapping mutation during the wait/publish/scatter
+    // window leaves entry offsets inconsistent — skip this cycle's publish
+    // and scatter when the epoch moved.
+    const uint32_t map_epoch0 = mapping.epoch();
 
     bool ok = true;
     std::array<const CyclicSlotView*, kMaxCyclicSlices> resps{};
@@ -624,6 +650,16 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
     cyclic_pending_count_ = 0;
     pending_image_ = nullptr;
     if (!ok) return false;
+
+    // The mapping changed while the responses were in flight — entry
+    // offsets (and image layout) no longer match the gathered mapping.
+    // Drop the publish/scatter; the datagram already executed on the wire.
+    if (mapping.epoch() != map_epoch0) {
+        TETHER_LOGW(TAG, "cyclic collect skipped: PDO mapping changed "
+                         "mid-exchange (slave re-registration?)");
+        stats_.success++;
+        return true;
+    }
 
     // ---- Publish the input image --------------------------------------
     if (img_active) {

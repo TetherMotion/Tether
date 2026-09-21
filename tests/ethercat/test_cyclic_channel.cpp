@@ -595,6 +595,9 @@ struct MasterCyclicTestAccess {
     static size_t cyclicTaskCount(Master& m, TaskPhase p) {
         return m.cyclic_loop_ ? m.cyclic_loop_->taskCount(p) : 0;
     }
+    static uint64_t cyclicCollectCalls(Master& m) {
+        return m.cyclic_collect_calls_.load(std::memory_order_relaxed);
+    }
     static void setDiscoveredSlaveCount(Master& m, uint16_t n) {
         m.discovered_slave_count_.store(n, std::memory_order_release);
     }
@@ -1593,6 +1596,34 @@ TEST_F(MasterCyclicTest, SplitLatePinsDiagnosticsRegardless) {
     EXPECT_EQ(MasterCyclicTestAccess::cyclicTaskCount(
                   master_, TaskPhase::MotionControl), 0u);
     master_.stopCyclicLoop();
+}
+
+TEST_F(MasterCyclicTest, CollectRunsBeforeMotionInSharedPhase) {
+    // collect_phase = MotionControl must run collect BEFORE the motion
+    // task — in-phase order is registration order, and only
+    // collect→motion hands the controller this cycle's inputs.
+    Master::CyclicLoopConfig cfg{};
+    cfg.cycle_period_us = 200;
+    cfg.exchange_placement = Master::ExchangePlacement::Split;
+    cfg.collect_phase = TaskPhase::MotionControl;
+    cfg.motion_in_loop = true;
+
+    std::atomic<uint64_t> motion_calls{0};
+    std::atomic<bool>     violation{false};
+    master_.setMotionControlCallback([&](double) {
+        const uint64_t n = motion_calls.fetch_add(1) + 1;
+        // Collect must already have run in THIS cycle — i.e. the collect
+        // counter is at least the number of this motion call.
+        if (MasterCyclicTestAccess::cyclicCollectCalls(master_) < n) {
+            violation.store(true);
+        }
+        return true;
+    });
+    ASSERT_TRUE(master_.startCyclicLoop(cfg));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    master_.stopCyclicLoop();
+    EXPECT_GE(motion_calls.load(), 10u);
+    EXPECT_FALSE(violation.load());
 }
 
 TEST_F(MasterCyclicTest, AtomicPlacementRegistersNoCollectTask) {

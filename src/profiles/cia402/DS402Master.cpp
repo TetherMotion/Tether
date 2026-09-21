@@ -6,11 +6,19 @@
 
 namespace EtherCAT {
 
-DS402Master::DS402Master() = default;
+DS402Master::DS402Master()
+{
+    // See member comments: fixed capacity keeps concurrent loop-thread
+    // iteration free of reallocation hazards.
+    drives_.reserve(PDO::kMaxPDOSlaves);
+    slave_roles_.resize(PDO::kMaxPDOSlaves, SlaveRole::NonDS402);
+}
 
 DS402Master::DS402Master(const Master::Config& config)
     : ethercat_master_(config)
 {
+    drives_.reserve(PDO::kMaxPDOSlaves);
+    slave_roles_.resize(PDO::kMaxPDOSlaves, SlaveRole::NonDS402);
 }
 
 DS402Master::~DS402Master()
@@ -128,13 +136,22 @@ void DS402Master::setSlaveRole(uint16_t slave_index, SlaveRole role)
     slave_roles_[slave_index] = role;
 
     if (role == SlaveRole::NonDS402) {
-        (void)removeMotionController(slave_index);
-        drives_.erase(
-            std::remove_if(drives_.begin(), drives_.end(),
-                           [slave_index](const std::unique_ptr<CiA402Drive>& drive) {
-                               return drive && drive->slaveIndex() == slave_index;
-                           }),
-            drives_.end());
+        if (realtimeLoopRunning()) {
+            // The loop thread iterates drives_ via driveBySlaveIndex() —
+            // defer the erase to drainControllerOps() on that thread.
+            std::lock_guard<std::mutex> lock(motion_ctl_mutex_);
+            pending_controller_ops_.push_back(
+                {PendingControllerOp::Kind::EraseDrive, slave_index, {}});
+            controller_ops_pending_.store(true, std::memory_order_release);
+        } else {
+            (void)removeMotionController(slave_index);
+            drives_.erase(
+                std::remove_if(drives_.begin(), drives_.end(),
+                               [slave_index](const std::unique_ptr<CiA402Drive>& drive) {
+                                   return drive && drive->slaveIndex() == slave_index;
+                               }),
+                drives_.end());
+        }
     }
 }
 
@@ -179,6 +196,19 @@ bool DS402Master::realtimeLoopRunning() const
            ethercat_master_.isCyclicLoopRunning();
 }
 
+CiA402Drive* DS402Master::findDriveRaw(uint16_t slave_index)
+{
+    // Same scan as driveBySlaveIndex() but WITHOUT the role gate — the
+    // role flips synchronously on a deferred EraseDrive while the drive
+    // object lives until the drain; teardown must still reach it.
+    for (auto& drive : drives_) {
+        if (drive && drive->slaveIndex() == slave_index) {
+            return drive.get();
+        }
+    }
+    return nullptr;
+}
+
 bool DS402Master::eraseController(uint16_t slave_index)
 {
     auto it = std::find_if(
@@ -188,7 +218,7 @@ bool DS402Master::eraseController(uint16_t slave_index)
         return false;
     }
 
-    if (auto* drive = driveBySlaveIndex(slave_index)) {
+    if (auto* drive = findDriveRaw(slave_index)) {
         it->second->stop(*drive);
     }
     motion_controllers_.erase(it);
@@ -222,12 +252,23 @@ void DS402Master::drainControllerOps()
         case PendingControllerOp::Kind::Clear:
             for (auto& entry : motion_controllers_) {
                 if (entry.second) {
-                    if (auto* drive = driveBySlaveIndex(entry.first)) {
+                    if (auto* drive = findDriveRaw(entry.first)) {
                         entry.second->stop(*drive);
                     }
                 }
             }
             motion_controllers_.clear();
+            break;
+        case PendingControllerOp::Kind::EraseDrive:
+            // Controller first, then the drive object — the controller's
+            // stop() may still touch the drive's PDO buffers.
+            eraseController(op.slave_index);
+            drives_.erase(
+                std::remove_if(drives_.begin(), drives_.end(),
+                    [idx = op.slave_index](const std::unique_ptr<CiA402Drive>& drive) {
+                        return drive && drive->slaveIndex() == idx;
+                    }),
+                drives_.end());
             break;
         }
     }
@@ -307,7 +348,7 @@ void DS402Master::clearMotionControllers()
     drainControllerOps();  // apply anything stranded by a prior run
     for (auto& entry : motion_controllers_) {
         if (entry.second) {
-            if (auto* drive = driveBySlaveIndex(entry.first)) {
+            if (auto* drive = findDriveRaw(entry.first)) {
                 entry.second->stop(*drive);
             }
         }
@@ -374,6 +415,12 @@ bool DS402Master::updateMotionControllers(double dt_seconds)
     for (auto& entry : motion_controllers_) {
         // Skip slaves that are suspended (in recovery)
         if (supervisor.isSlaveSuspended(entry.first)) {
+            continue;
+        }
+        // A queued EraseDrive flips the role synchronously while the
+        // controller erasure waits for this drain — the controller is
+        // already dead weight; skip it rather than failing the cycle.
+        if (!isManagedDrive(entry.first)) {
             continue;
         }
         auto* drive = driveBySlaveIndex(entry.first);

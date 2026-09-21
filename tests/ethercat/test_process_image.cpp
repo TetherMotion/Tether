@@ -8,6 +8,7 @@
 #include <gmock/gmock.h>
 #include <atomic>
 #include <cstring>
+#include <functional>
 #include <thread>
 
 #ifdef __linux__
@@ -87,6 +88,9 @@ public:
     CyclicSlotView resp_slots[kSlots] = {};
     uint8_t        resp_slot_data[kSlots][1600] = {};
     size_t         fake_frame_payload = 0;   // 0 → default 1498
+    // Invoked inside waitCyclicSlotView — mutation-injection seam for
+    // the mapping-epoch guard.
+    std::function<void()> on_wait;
 
     bool supportsCyclicFastPath() const override { return true; }
     uint64_t cyclicSlotToken(uint8_t slot) override { return slot; }
@@ -113,6 +117,7 @@ public:
     bool waitCyclicSlotView(uint8_t slot, uint64_t, uint32_t,
                             CyclicSlotView& out) override {
         ++wait_calls;
+        if (on_wait) on_wait();
         if (!resp_ok) return false;
         out = per_slot_resp ? resp_slots[slot] : resp_view;
         return true;
@@ -604,6 +609,45 @@ TEST_F(ProcessImageTest, TimeoutFails) {
     transport.resp_ok = false;
     EXPECT_FALSE(mgr.exchangeAllLRWCyclic(mapping, 200'000, nullptr));
     EXPECT_EQ(mgr.getStats().timeout_errors, 1u);
+}
+
+// ============================================================================
+// Mapping-epoch guard — mid-exchange mapping mutation (slave recovery)
+// ============================================================================
+
+TEST_F(ProcessImageTest, MappingMutationDuringCollectSkipsScatter) {
+    // A slave-recovery re-registration mutating the mapping while the
+    // response wait is in flight must not scatter into entries whose
+    // logical offsets are now stale.
+    transport.resp_view.payload = transport.resp_data;
+    transport.resp_view.datalen = 16;
+    transport.resp_view.wkc     = 3;
+    for (int i = 0; i < 16; ++i) transport.resp_data[i] =
+        static_cast<uint8_t>(0x40 + i);
+
+    transport.on_wait = [this]() { mapping.remove_entries_for_slave(0); };
+    EXPECT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, nullptr));
+    EXPECT_EQ(mapping.entry_count(), 0u);
+    // Vacated slots were zeroed by the removal — the skipped scatter must
+    // NOT have written response bytes into them.
+    EXPECT_EQ(tx_app[0], 0);
+    EXPECT_EQ(mgr.getStats().timeout_errors, 0u);
+    EXPECT_EQ(mgr.getStats().success, 1u);
+}
+
+TEST_F(ProcessImageTest, StableMappingCollectsNormally) {
+    // Control: no mutation → scatter happens (TxPDO storage updated).
+    transport.resp_view.payload = transport.resp_data;
+    transport.resp_view.datalen = 16;
+    transport.resp_view.wkc     = 3;
+    for (int i = 0; i < 16; ++i) transport.resp_data[i] =
+        static_cast<uint8_t>(0x40 + i);
+
+    EXPECT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, nullptr));
+    // TxPDO entry (entry 1, logical offset 8) collects bytes 8..15.
+    EXPECT_EQ(tx_app[0], 0x48);
+    EXPECT_EQ(tx_app[7], 0x4F);
+    EXPECT_EQ(mgr.getStats().success, 1u);
 }
 
 // ============================================================================

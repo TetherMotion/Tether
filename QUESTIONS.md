@@ -212,3 +212,39 @@ now records **what was decided and where it lives**.  Items marked
   implementation until the Npcap-based channel lands.
 * **Image > 2 frames at 4 kHz** (Q16): physics, documented as a sizing
   rule — not an implementation task.
+
+## Audit findings (motion-loop review)
+
+The detailed motion-loop audit surfaced these, in addition to the fixes
+already landed (collect-before-motion ordering, epoch guards, deferred
+drive erase, `findDriveRaw` teardown):
+
+* **Device-layer storage vs. process-image coherence.**  All device
+  layers (CiA402 `registerPDOBuffers`, Beckhoff terminals, RP20, Axia80)
+  bind their PDO accessors to `PDOEntry::storage` via
+  `PDOMapping::entryDataMut()`.  In non-`Buffered` image modes the wire
+  payload comes from / goes to the `ProcessImage` banks and entry
+  storage is skipped entirely — drive-level `rxPDO<T>()`/`txPDO<T>()`
+  writes never reach the wire and responses never reach the accessors.
+  Mitigation landed: `startCyclicLoop` warns when `image_mode !=
+  Buffered` is combined with `motion_in_loop`.  The full fix (rebinding
+  device buffers into the image after `computeImageOffsets`, or moving
+  device APIs onto `ProcessImage` accessors) is a breaking refactor and
+  stays open — **default `image_mode` is `Buffered`, which is coherent**,
+  so this only bites users who opt into image modes with storage-bound
+  device APIs.
+* **Stale-deposit ABA.**  A response arriving *after* its cycle timed
+  out can be consumed as the next cycle's data on the same slot (WKC
+  still passes — the datagram did execute).  Essentially impossible on
+  a real ring (in-order return), but the seq mechanism can't tell
+  "new" from "very late".  A per-cycle nonce would close it at the
+  cost of the fixed-header zero-copy design.
+* **Recovery ↔ exchange coordination.**  The supervisor's recovery
+  handler mutates `PDOMapping` (`resetPDORegistration` +
+  re-registration).  The mapping-epoch guard now makes the in-flight
+  cycle abort safely, and `stop_loop_during_recovery` covers the
+  legacy loops; what remains open is formally serializing recovery
+  with the cyclic executive (recovery currently runs on the
+  supervisor thread; the epoch guard converts the race into a skipped
+  cycle rather than torn data — acceptable, but a hard handshake would
+  be cleaner).
