@@ -100,7 +100,6 @@ bool CiA402Drive::registerPDOBuffers() {
     if (m_rxpdo_size > 0) {
         m_rxpdo_entry_index = mapping->add_rxpdo(
             m_slave_index,
-            m_rxpdo_buffer,
             m_rxpdo_size,
             m_rxpdo_index,
             PDO::PDOAddressMode::Position
@@ -109,6 +108,11 @@ bool CiA402Drive::registerPDOBuffers() {
             TETHER_LOGE(TAG, "{}: Failed to register RxPDO buffer!", logPrefix().c_str());
             return false;
         }
+        // Rebind the PDO view into the mapping's entry storage (Q1) —
+        // carries over anything staged in the scratch buffer.
+        uint8_t* dst = mapping->entryDataMut(m_rxpdo_entry_index);
+        std::memcpy(dst, m_rxpdo_buffer, m_rxpdo_size);
+        m_rxpdo_buffer = dst;
         TETHER_LOGI(TAG, "{}: Registered RxPDO {} bytes (entry {})",
                  logPrefix().c_str(), m_rxpdo_size, m_rxpdo_entry_index);
     }
@@ -116,7 +120,6 @@ bool CiA402Drive::registerPDOBuffers() {
     if (m_txpdo_size > 0) {
         m_txpdo_entry_index = mapping->add_txpdo(
             m_slave_index,
-            m_txpdo_buffer,
             m_txpdo_size,
             m_txpdo_index,
             PDO::PDOAddressMode::Position
@@ -125,6 +128,9 @@ bool CiA402Drive::registerPDOBuffers() {
             TETHER_LOGE(TAG, "{}: Failed to register TxPDO buffer!", logPrefix().c_str());
             return false;
         }
+        uint8_t* dst = mapping->entryDataMut(m_txpdo_entry_index);
+        std::memcpy(dst, m_txpdo_buffer, m_txpdo_size);
+        m_txpdo_buffer = dst;
         TETHER_LOGI(TAG, "{}: Registered TxPDO {} bytes (entry {})",
                  logPrefix().c_str(), m_txpdo_size, m_txpdo_entry_index);
     }
@@ -141,6 +147,17 @@ void CiA402Drive::resetPDORegistration() {
     m_pdo_registered = false;
     m_rxpdo_entry_index = -1;
     m_txpdo_entry_index = -1;
+    // Unbind from entry storage before remove_entries_for_slave() compacts
+    // the mapping — the pointers would otherwise alias a recycled slot.
+    // Preserve staged contents in the scratch buffers (Q1).
+    if (m_rxpdo_buffer != m_rxpdo_scratch && m_rxpdo_size > 0) {
+        std::memcpy(m_rxpdo_scratch, m_rxpdo_buffer, m_rxpdo_size);
+        m_rxpdo_buffer = m_rxpdo_scratch;
+    }
+    if (m_txpdo_buffer != m_txpdo_scratch && m_txpdo_size > 0) {
+        std::memcpy(m_txpdo_scratch, m_txpdo_buffer, m_txpdo_size);
+        m_txpdo_buffer = m_txpdo_scratch;
+    }
 }
 
 } // namespace EtherCAT

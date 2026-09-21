@@ -338,8 +338,8 @@ inline void bumpOutputCounter(EtherCAT::PDOManager& pdo,
         auto* e = mapping.get_entry_mut(i);
         if (e && e->slave_index == slave_index &&
             e->direction == EtherCAT::PDO::PDODirection::RxPDO &&
-            e->pdo_index == 0x1601 && e->app_buffer && e->data_size >= 4) {
-            auto* p = static_cast<uint8_t*>(e->app_buffer);
+            e->pdo_index == 0x1601 && e->data_size >= 4) {
+            auto* p = e->storage;
             const uint32_t n = (static_cast<uint32_t>(p[0]) |
                                 (static_cast<uint32_t>(p[1]) << 8) |
                                 (static_cast<uint32_t>(p[2]) << 16) |

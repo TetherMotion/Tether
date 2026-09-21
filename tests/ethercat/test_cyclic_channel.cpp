@@ -87,7 +87,7 @@ uint32_t runBpf(const sock_filter* prog, size_t n,
             if (op == BPF_JEQ)      taken = (a == in.k);
             else if (op == BPF_JGE) taken = (a >= in.k);
             else if (op == BPF_JGT) taken = (a >  in.k);
-            else if (op == BPF_JA)  taken = true;
+            else if (op == BPF_JA) { pc += in.k + 1; break; }  // kernel: pc += k
             pc += taken ? (in.jt + 1) : (in.jf + 1);
             break;
         }
@@ -113,6 +113,22 @@ std::vector<uint8_t> makeEcatFrame(uint8_t idx, uint16_t ethertype = 0x88A4,
     return f;
 }
 
+/// 802.1Q-tagged EtherCAT frame: [dst 6][src 6][0x8100][TCI][inner-et]
+/// [ecat hdr][cmd][idx @21]... — Q15 demux path.
+std::vector<uint8_t> makeVlanEcatFrame(uint8_t idx,
+                                       uint16_t inner_et = 0x88A4,
+                                       size_t len = 64)
+{
+    std::vector<uint8_t> f(len, 0);
+    if (len > 13) { f[12] = 0x81; f[13] = 0x00; }
+    if (len > 15) { f[14] = 0x00; f[15] = 0x01; }        // TCI: VLAN 1
+    if (len > 17) { f[16] = inner_et >> 8; f[17] = inner_et & 0xFF; }
+    if (len > 18) f[18] = 0x10;
+    if (len > 20) f[20] = 0x0C;
+    if (len > 21) f[21] = idx;
+    return f;
+}
+
 #endif // __linux__
 
 } // anonymous namespace
@@ -124,9 +140,9 @@ std::vector<uint8_t> makeEcatFrame(uint8_t idx, uint16_t ethertype = 0x88A4,
 // ============================================================================
 
 TEST(CyclicBpf, ProgramShape) {
-    CyclicBpfInsn prog[8];
-    ASSERT_EQ(cyclicChannelBpfProgram(true, prog, 8), kCyclicBpfInsnCount);
-    ASSERT_EQ(cyclicChannelBpfProgram(false, prog, 8), kCyclicBpfInsnCount);
+    CyclicBpfInsn prog[16];
+    ASSERT_EQ(cyclicChannelBpfProgram(true, prog, 16), kCyclicBpfInsnCount);
+    ASSERT_EQ(cyclicChannelBpfProgram(false, prog, 16), kCyclicBpfInsnCount);
     // Too-small buffer must return 0 without writing.
     EXPECT_EQ(cyclicChannelBpfProgram(true, prog, 3), 0u);
     EXPECT_EQ(cyclicChannelBpfProgram(true, nullptr, 0), 0u);
@@ -141,49 +157,49 @@ TEST(CyclicBpf, InsnLayoutMatchesSockFilter) {
 }
 
 TEST(CyclicBpf, CyclicFilterAcceptsOnlyCyclicIdx) {
-    CyclicBpfInsn prog[8];
-    ASSERT_EQ(cyclicChannelBpfProgram(true, prog, 8), kCyclicBpfInsnCount);
+    CyclicBpfInsn prog[16];
+    ASSERT_EQ(cyclicChannelBpfProgram(true, prog, 16), kCyclicBpfInsnCount);
     const auto* f = reinterpret_cast<const sock_filter*>(prog);
 
     for (uint8_t idx : {0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD}) {
         auto frame = makeEcatFrame(idx);
-        EXPECT_NE(runBpf(f, 7, frame.data(), frame.size()), 0u)
+        EXPECT_NE(runBpf(f, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
             << "idx 0x" << std::hex << (int)idx;
     }
     for (uint8_t idx : {0x00, 0x01, 0x7F, 0xF7, 0xFE, 0xFF}) {
         auto frame = makeEcatFrame(idx);
-        EXPECT_EQ(runBpf(f, 7, frame.data(), frame.size()), 0u)
+        EXPECT_EQ(runBpf(f, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
             << "idx 0x" << std::hex << (int)idx;
     }
 }
 
 TEST(CyclicBpf, AsyncFilterRejectsOnlyCyclicIdx) {
-    CyclicBpfInsn prog[8];
-    ASSERT_EQ(cyclicChannelBpfProgram(false, prog, 8), kCyclicBpfInsnCount);
+    CyclicBpfInsn prog[16];
+    ASSERT_EQ(cyclicChannelBpfProgram(false, prog, 16), kCyclicBpfInsnCount);
     const auto* f = reinterpret_cast<const sock_filter*>(prog);
 
     for (uint8_t idx : {0xF8, 0xFA, 0xFD}) {
         auto frame = makeEcatFrame(idx);
-        EXPECT_EQ(runBpf(f, 7, frame.data(), frame.size()), 0u);
+        EXPECT_EQ(runBpf(f, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u);
     }
     for (uint8_t idx : {0x00, 0x42, 0xF7, 0xFE, 0xFF}) {
         auto frame = makeEcatFrame(idx);
-        EXPECT_NE(runBpf(f, 7, frame.data(), frame.size()), 0u);
+        EXPECT_NE(runBpf(f, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u);
     }
 }
 
 TEST(CyclicBpf, NonEtherCatEtherTypes) {
-    CyclicBpfInsn progA[8], progB[8];
-    cyclicChannelBpfProgram(true, progA, 8);
+    CyclicBpfInsn progA[16], progB[16];
+    cyclicChannelBpfProgram(true, progA, 16);
     const auto* cyc = reinterpret_cast<const sock_filter*>(progA);
-    cyclicChannelBpfProgram(false, progB, 8);
+    cyclicChannelBpfProgram(false, progB, 16);
     const auto* asy = reinterpret_cast<const sock_filter*>(progB);
 
     for (uint16_t et : {0x0800, 0x8100, 0x0001, 0xFFFF}) {
         auto frame = makeEcatFrame(0xF8, et);
-        EXPECT_EQ(runBpf(cyc, 7, frame.data(), frame.size()), 0u)
+        EXPECT_EQ(runBpf(cyc, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
             << "et 0x" << std::hex << et;
-        EXPECT_NE(runBpf(asy, 7, frame.data(), frame.size()), 0u)
+        EXPECT_NE(runBpf(asy, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
             << "et 0x" << std::hex << et;
     }
 }
@@ -192,26 +208,66 @@ TEST(CyclicBpf, ShortFramesRejectedOnBoth) {
     // Kernel semantics: an out-of-bounds ABS load fails the whole filter →
     // the packet is rejected for that socket.  Malformed <18-byte frames
     // therefore land on NEITHER socket.
-    CyclicBpfInsn progA[8], progB[8];
-    cyclicChannelBpfProgram(true, progA, 8);
+    CyclicBpfInsn progA[16], progB[16];
+    cyclicChannelBpfProgram(true, progA, 16);
     const auto* cyc = reinterpret_cast<const sock_filter*>(progA);
-    cyclicChannelBpfProgram(false, progB, 8);
+    cyclicChannelBpfProgram(false, progB, 16);
     const auto* asy = reinterpret_cast<const sock_filter*>(progB);
 
     for (size_t len : {0u, 10u, 13u, 14u, 16u, 17u}) {
         auto frame = makeEcatFrame(0xF8, 0x88A4, len);
-        EXPECT_EQ(runBpf(cyc, 7, frame.data(), frame.size()), 0u)
+        EXPECT_EQ(runBpf(cyc, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
             << "len " << len;
         // Async also drops ECAT-short frames; <14B drops before the
         // ethertype check even runs.
-        EXPECT_EQ(runBpf(asy, 7, frame.data(), frame.size()), 0u)
+        EXPECT_EQ(runBpf(asy, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
             << "len " << len;
     }
     // A ≥14-byte frame with a non-ECAT ethertype IS accepted by the async
     // filter (the OOB idx load is never reached).
     auto vlan = makeEcatFrame(0, 0x8100, 18);
-    EXPECT_EQ(runBpf(cyc, 7, vlan.data(), vlan.size()), 0u);
-    EXPECT_NE(runBpf(asy, 7, vlan.data(), vlan.size()), 0u);
+    EXPECT_EQ(runBpf(cyc, kCyclicBpfInsnCount, vlan.data(), vlan.size()), 0u);
+    EXPECT_NE(runBpf(asy, kCyclicBpfInsnCount, vlan.data(), vlan.size()), 0u);
+}
+
+TEST(CyclicBpf, VlanTaggedCyclicIdxDemux) {
+    // Q15: 802.1Q-tagged EtherCAT — inner EtherType at [16:18], first
+    // datagram idx at byte 21.  Cyclic idxes must reach socket A, async
+    // idxes socket B, VLAN-non-ECAT socket B.
+    CyclicBpfInsn progA[16], progB[16];
+    cyclicChannelBpfProgram(true, progA, 16);
+    const auto* cyc = reinterpret_cast<const sock_filter*>(progA);
+    cyclicChannelBpfProgram(false, progB, 16);
+    const auto* asy = reinterpret_cast<const sock_filter*>(progB);
+
+    for (uint8_t idx : {0xF8, 0xFA, 0xFD}) {
+        auto frame = makeVlanEcatFrame(idx);
+        EXPECT_NE(runBpf(cyc, kCyclicBpfInsnCount, frame.data(),
+                         frame.size()), 0u)
+            << "vlan cyclic idx 0x" << std::hex << (int)idx;
+        EXPECT_EQ(runBpf(asy, kCyclicBpfInsnCount, frame.data(),
+                         frame.size()), 0u)
+            << "vlan cyclic idx 0x" << std::hex << (int)idx;
+    }
+    for (uint8_t idx : {0x00, 0x42, 0xF7, 0xFE, 0xFF}) {
+        auto frame = makeVlanEcatFrame(idx);
+        EXPECT_EQ(runBpf(cyc, kCyclicBpfInsnCount, frame.data(),
+                         frame.size()), 0u)
+            << "vlan async idx 0x" << std::hex << (int)idx;
+        EXPECT_NE(runBpf(asy, kCyclicBpfInsnCount, frame.data(),
+                         frame.size()), 0u)
+            << "vlan async idx 0x" << std::hex << (int)idx;
+    }
+    // VLAN wrapper around a non-ECAT payload → socket B only.
+    auto nonEcat = makeVlanEcatFrame(0xF8, /*inner_et=*/0x0800);
+    EXPECT_EQ(runBpf(cyc, kCyclicBpfInsnCount, nonEcat.data(),
+                     nonEcat.size()), 0u);
+    EXPECT_NE(runBpf(asy, kCyclicBpfInsnCount, nonEcat.data(),
+                     nonEcat.size()), 0u);
+    // Truncated VLAN frame (< 22 B) faults the idx load → rejected on A.
+    auto trunc = makeVlanEcatFrame(0xF8, 0x88A4, 21);
+    EXPECT_EQ(runBpf(cyc, kCyclicBpfInsnCount, trunc.data(),
+                     trunc.size()), 0u);
 }
 
 // ============================================================================
@@ -225,8 +281,8 @@ TEST(CyclicBpfKernel, UnixSocketpairRunsCyclicProgramInKernel) {
     int sv[2] = {-1, -1};
     ASSERT_EQ(socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
 
-    CyclicBpfInsn prog[8];
-    ASSERT_EQ(cyclicChannelBpfProgram(true, prog, 8), kCyclicBpfInsnCount);
+    CyclicBpfInsn prog[16];
+    ASSERT_EQ(cyclicChannelBpfProgram(true, prog, 16), kCyclicBpfInsnCount);
     sock_fprog fp{static_cast<unsigned short>(kCyclicBpfInsnCount),
                        reinterpret_cast<sock_filter*>(prog)};
     ASSERT_EQ(setsockopt(sv[1], SOL_SOCKET, SO_ATTACH_FILTER,
@@ -262,8 +318,8 @@ TEST(CyclicBpfKernel, UnixSocketpairRunsAsyncProgramInKernel) {
     int sv[2] = {-1, -1};
     ASSERT_EQ(socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
 
-    CyclicBpfInsn prog[8];
-    cyclicChannelBpfProgram(false, prog, 8);
+    CyclicBpfInsn prog[16];
+    cyclicChannelBpfProgram(false, prog, 16);
     sock_fprog fp{static_cast<unsigned short>(kCyclicBpfInsnCount),
                        reinterpret_cast<sock_filter*>(prog)};
     ASSERT_EQ(setsockopt(sv[1], SOL_SOCKET, SO_ATTACH_FILTER,
@@ -525,8 +581,18 @@ struct MasterCyclicTestAccess {
     static void setRxSpinNs(Master& m, uint32_t ns) {
         m.rx_spin_ns_ = ns;
     }
+    static void setSlotSpinNs(Master& m, uint32_t ns) {
+        m.slot_spin_ns_ = ns;
+    }
+    static void setSlotWaitFallback(
+        Master& m, Master::CyclicLoopConfig::SlotWaitFallback f) {
+        m.slot_wait_fallback_ = f;
+    }
     static int cyclicWaiters(Master& m) {
         return m.cyclic_waiters_.load(std::memory_order_acquire);
+    }
+    static size_t cyclicTaskCount(Master& m, TaskPhase p) {
+        return m.cyclic_loop_ ? m.cyclic_loop_->taskCount(p) : 0;
     }
 };
 } // namespace EtherCAT
@@ -612,6 +678,33 @@ size_t buildEcatFrame(uint8_t* f, uint8_t cmd, uint8_t idx,
     if (datalen) std::memcpy(f + 26, payload, datalen);
     std::memcpy(f + 26 + datalen, &wkc, 2);
     size_t len = 26 + datalen + 2;
+    return len < 60 ? 60 : len;
+}
+
+/// Same as buildEcatFrame but wrapped in an 802.1Q tag — everything past
+/// the Ethernet header shifts 4 bytes deeper (Q15).
+size_t buildVlanEcatFrame(uint8_t* f, uint8_t cmd, uint8_t idx,
+                          uint16_t adp, uint16_t ado,
+                          const uint8_t* payload, uint16_t datalen,
+                          uint16_t wkc, bool more = false)
+{
+    std::memset(f, 0, 18);
+    f[12] = 0x81; f[13] = 0x00;                    // outer: 802.1Q
+    f[14] = 0x00; f[15] = 0x01;                    // TCI: VLAN 1
+    f[16] = 0x88; f[17] = 0xA4;                    // inner: EtherCAT
+    const uint16_t ecat_len = static_cast<uint16_t>(10 + datalen + 2);
+    f[18] = ecat_len & 0xFF;
+    f[19] = ((ecat_len >> 8) & 0x07) | 0x10;       // type=1
+    f[20] = cmd;
+    f[21] = idx;
+    std::memcpy(f + 22, &adp, 2);
+    std::memcpy(f + 24, &ado, 2);
+    const uint16_t len_flags = (datalen & 0x07FF) | (more ? 0x8000 : 0);
+    std::memcpy(f + 26, &len_flags, 2);
+    std::memset(f + 28, 0, 2);                     // irq
+    if (datalen) std::memcpy(f + 30, payload, datalen);
+    std::memcpy(f + 30 + datalen, &wkc, 2);
+    size_t len = 30 + datalen + 2;
     return len < 60 ? 60 : len;
 }
 
@@ -1257,6 +1350,390 @@ TEST_F(RingChannelMemoryTest, SpinObservesLateDelivery) {
     EXPECT_LT(el, std::chrono::milliseconds(100));  // spin exit ≪ timeout
     ch2.reset();
     ::close(sv2[0]); ::close(sv2[1]);
+}
+
+TEST_F(MasterCyclicTest, VlanTaggedCyclicFrameDepositsSlot) {
+    // Q15: a VLAN-wrapped cyclic datagram through the full parse path must
+    // land in its slot — the parser skips the 4-byte tag.
+    auto stub = std::make_unique<StubChannel>();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    uint8_t frame[128];
+    const uint8_t pay[4] = {0x42, 0x43, 0x44, 0x45};
+    const size_t n = buildVlanEcatFrame(frame, 0x0C, 0xF8, 0x1111, 0x2222,
+                                        pay, 4, 7);
+    master_.handleRxFrame(frame, n);
+
+    CyclicSlotView view{};
+    ASSERT_TRUE(master_.waitCyclicSlotView(0, 0, 1'000'000, view));
+    EXPECT_EQ(view.datalen, 4u);
+    EXPECT_EQ(view.wkc, 7u);
+    EXPECT_EQ(view.adp, 0x1111u);
+    EXPECT_EQ(view.payload[0], 0x42);
+}
+
+TEST_F(MasterCyclicTest, VlanTaggedChannelFrameDepositsSlot) {
+    // Q15: the channel fast path (dispatchChannelFrame) must also find the
+    // shifted EtherCAT header under a VLAN tag.
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    uint8_t frame[128];
+    const uint8_t pay[3] = {0x9A, 0x9B, 0x9C};
+    const size_t n = buildVlanEcatFrame(frame, 0x0C, 0xF9, 0x3333, 0x4444,
+                                        pay, 3, 2);
+    CyclicFrameView v{};
+    v.frame = frame; v.frame_len = n; v.cookie = 11;
+    MasterCyclicTestAccess::dispatch(master_, v);
+
+    CyclicSlotView view{};
+    ASSERT_TRUE(master_.waitCyclicSlotView(1, 0, 0, view));
+    EXPECT_EQ(view.datalen, 3u);
+    EXPECT_EQ(view.payload[1], 0x9B);
+    EXPECT_EQ(view.cookie, 11u);   // zero-copy view preserved
+    (void)stubp;
+}
+
+TEST_F(MasterCyclicTest, PiggybackIdxDoesNotDepositSlot) {
+    // Q14: a frame whose first datagram carries the piggyback idx (0xFE)
+    // must NOT deposit into a cyclic slot — it goes through the normal
+    // parser as async traffic.
+    auto stub = std::make_unique<StubChannel>();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    uint8_t frame[128];
+    const uint8_t pay[2] = {0x01, 0x02};
+    const size_t n = buildEcatFrame(frame, 0x07, kPiggybackIdx,
+                                    0, 0, pay, 2, 1);
+    CyclicFrameView v{};
+    v.frame = frame; v.frame_len = n; v.cookie = 5;
+    MasterCyclicTestAccess::dispatch(master_, v);
+
+    CyclicSlotView view{};
+    for (uint8_t s = 0; s < 6; ++s)
+        EXPECT_FALSE(master_.waitCyclicSlotView(s, 0, 0, view))
+            << "slot " << (int)s;
+}
+
+TEST_F(MasterCyclicTest, WaitCyclicSlotMaskAllArrive) {
+    // Q3: one wait over a multi-slot mask — every published slot fills.
+    uint8_t f0[128], f2[128];
+    const uint8_t p0[2] = {0xA0, 0x01};
+    const uint8_t p2[2] = {0xA2, 0x03};
+    master_.handleRxFrame(f0, buildEcatFrame(f0, 0x0C, 0xF8, 1, 0, p0, 2, 1));
+    master_.handleRxFrame(f2, buildEcatFrame(f2, 0x0C, 0xFA, 2, 0, p2, 2, 2));
+
+    CyclicSlotView views[6]{};
+    uint64_t tokens[6]{};
+    const uint32_t arrived =
+        master_.waitCyclicSlotMask(0b101, tokens, 1'000'000, views);
+    EXPECT_EQ(arrived, 0b101u);
+    ASSERT_NE(views[0].payload, nullptr);
+    EXPECT_EQ(views[0].datalen, 2u);
+    EXPECT_EQ(views[0].payload[0], 0xA0);
+    ASSERT_NE(views[2].payload, nullptr);
+    EXPECT_EQ(views[2].datalen, 2u);
+    EXPECT_EQ(views[2].wkc, 2u);
+    EXPECT_EQ(views[1].payload, nullptr);   // untouched — not in mask
+}
+
+TEST_F(MasterCyclicTest, WaitCyclicSlotMaskPartialOnTimeout) {
+    // Only slot 0 published — the mask wait must return just the arrived
+    // bits, and the shared deadline bounds the whole wait.
+    uint8_t f0[128];
+    const uint8_t p0[1] = {0x77};
+    master_.handleRxFrame(f0, buildEcatFrame(f0, 0x0C, 0xF8, 0, 0, p0, 1, 1));
+
+    CyclicSlotView views[6]{};
+    uint64_t tokens[6]{};
+    const auto t0 = std::chrono::steady_clock::now();
+    const uint32_t arrived =
+        master_.waitCyclicSlotMask(0b101, tokens, 10'000'000, views);
+    const auto el = std::chrono::steady_clock::now() - t0;
+    EXPECT_EQ(arrived, 0b001u);
+    EXPECT_EQ(views[0].datalen, 1u);
+    EXPECT_LT(el, std::chrono::seconds(2));
+}
+
+TEST_F(MasterCyclicTest, NoFdYieldFallbackWakesOnDeposit) {
+    // Q22 Yield: stub channel has fd()=-1 and no notify eventfd exists
+    // (no cyclic loop started) — the wait falls to the bounded poll loop
+    // and must still observe a deposit from another thread.
+    auto stub = std::make_unique<StubChannel>();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+    MasterCyclicTestAccess::setSlotWaitFallback(
+        master_, Master::CyclicLoopConfig::SlotWaitFallback::Yield);
+
+    const uint8_t pay[2] = {0x5A, 0x5B};
+    std::thread pub([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        uint8_t frame[128];
+        const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 2, 3);
+        master_.handleRxFrame(frame, n);
+    });
+    CyclicSlotView view{};
+    EXPECT_TRUE(master_.waitCyclicSlotView(0, 0, 500'000'000u, view));
+    pub.join();
+    EXPECT_EQ(view.datalen, 2u);
+    EXPECT_EQ(view.payload[0], 0x5A);
+}
+
+TEST_F(MasterCyclicTest, NoFdSpinFallbackWakesOnDeposit) {
+    // Q22 Spin: same path, tight re-check cadence instead of yield.
+    auto stub = std::make_unique<StubChannel>();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+    MasterCyclicTestAccess::setSlotWaitFallback(
+        master_, Master::CyclicLoopConfig::SlotWaitFallback::Spin);
+
+    const uint8_t pay[2] = {0xC1, 0xC2};
+    std::thread pub([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        uint8_t frame[128];
+        const size_t n = buildEcatFrame(frame, 0x0C, 0xF9, 0, 0, pay, 2, 4);
+        master_.handleRxFrame(frame, n);
+    });
+    CyclicSlotView view{};
+    const auto t0 = std::chrono::steady_clock::now();
+    EXPECT_TRUE(master_.waitCyclicSlotView(1, 0, 500'000'000u, view));
+    const auto el = std::chrono::steady_clock::now() - t0;
+    pub.join();
+    EXPECT_EQ(view.payload[1], 0xC2);
+    EXPECT_LT(el, std::chrono::milliseconds(400));  // spin sees it fast
+}
+
+TEST_F(MasterCyclicTest, NoFdFallbackTimeoutBoundsWait) {
+    // With nothing arriving both fallbacks must honour the deadline.
+    auto stub = std::make_unique<StubChannel>();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+    for (auto f : {Master::CyclicLoopConfig::SlotWaitFallback::Yield,
+                   Master::CyclicLoopConfig::SlotWaitFallback::Spin}) {
+        MasterCyclicTestAccess::setSlotWaitFallback(master_, f);
+        CyclicSlotView view{};
+        const auto t0 = std::chrono::steady_clock::now();
+        EXPECT_FALSE(master_.waitCyclicSlotView(3, 0, 8'000'000, view));
+        const auto el = std::chrono::steady_clock::now() - t0;
+        EXPECT_GE(el, std::chrono::milliseconds(5));
+        EXPECT_LT(el, std::chrono::seconds(2));
+    }
+}
+
+TEST_F(MasterCyclicTest, SlotSpinPhaseObservesDeposit) {
+    // Q11: slot_spin_ns spins on the slot seq directly — a deposit during
+    // the window is observed without waiting for the ppoll wake.
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+    MasterCyclicTestAccess::setSlotSpinNs(master_, 60'000'000u);  // 60 ms
+
+    const uint8_t pay[2] = {0x11, 0x22};
+    std::thread pub([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        uint8_t frame[128];
+        const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 2, 1);
+        master_.handleRxFrame(frame, n);
+    });
+    CyclicSlotView view{};
+    const auto t0 = std::chrono::steady_clock::now();
+    ASSERT_TRUE(master_.waitCyclicSlotView(0, 0, 500'000'000u, view));
+    const auto el = std::chrono::steady_clock::now() - t0;
+    pub.join();
+    EXPECT_EQ(view.payload[0], 0x11);
+    EXPECT_LT(el, std::chrono::milliseconds(400));
+    (void)stubp;
+}
+
+TEST_F(MasterCyclicTest, CollectPhaseClampedAfterExchange) {
+    // Q2: collect_phase = Exchange is invalid (it IS the send point) —
+    // clamped to PostExchange with a warning.
+    Master::CyclicLoopConfig cfg{};
+    cfg.cycle_period_us = 1000;
+    cfg.exchange_placement = Master::ExchangePlacement::Split;
+    cfg.collect_phase = TaskPhase::Exchange;   // → clamps PostExchange
+    ASSERT_TRUE(master_.startCyclicLoop(cfg));
+    EXPECT_EQ(MasterCyclicTestAccess::cyclicTaskCount(
+                  master_, TaskPhase::PostExchange), 1u);
+    EXPECT_EQ(MasterCyclicTestAccess::cyclicTaskCount(
+                  master_, TaskPhase::Diagnostics), 0u);
+    master_.stopCyclicLoop();
+}
+
+TEST_F(MasterCyclicTest, CollectPhaseUserSelected) {
+    // Q2: a later phase is honored — MotionControl collect overlaps the
+    // PostExchange gap.
+    Master::CyclicLoopConfig cfg{};
+    cfg.cycle_period_us = 1000;
+    cfg.exchange_placement = Master::ExchangePlacement::Split;
+    cfg.collect_phase = TaskPhase::MotionControl;
+    ASSERT_TRUE(master_.startCyclicLoop(cfg));
+    EXPECT_EQ(MasterCyclicTestAccess::cyclicTaskCount(
+                  master_, TaskPhase::MotionControl), 1u);
+    EXPECT_EQ(MasterCyclicTestAccess::cyclicTaskCount(
+                  master_, TaskPhase::PostExchange), 0u);
+    master_.stopCyclicLoop();
+}
+
+TEST_F(MasterCyclicTest, SplitLatePinsDiagnosticsRegardless) {
+    // SplitLate ignores collect_phase entirely — Diagnostics is the point.
+    Master::CyclicLoopConfig cfg{};
+    cfg.cycle_period_us = 1000;
+    cfg.exchange_placement = Master::ExchangePlacement::SplitLate;
+    cfg.collect_phase = TaskPhase::MotionControl;   // ignored
+    ASSERT_TRUE(master_.startCyclicLoop(cfg));
+    EXPECT_EQ(MasterCyclicTestAccess::cyclicTaskCount(
+                  master_, TaskPhase::Diagnostics), 1u);
+    EXPECT_EQ(MasterCyclicTestAccess::cyclicTaskCount(
+                  master_, TaskPhase::MotionControl), 0u);
+    master_.stopCyclicLoop();
+}
+
+TEST_F(MasterCyclicTest, AtomicPlacementRegistersNoCollectTask) {
+    // Atomic: send+collect fused — no separate collect task at all.
+    Master::CyclicLoopConfig cfg{};
+    cfg.cycle_period_us = 1000;
+    cfg.exchange_placement = Master::ExchangePlacement::Atomic;
+    ASSERT_TRUE(master_.startCyclicLoop(cfg));
+    for (TaskPhase p : {TaskPhase::PostExchange, TaskPhase::MotionControl,
+                        TaskPhase::Diagnostics})
+        EXPECT_EQ(MasterCyclicTestAccess::cyclicTaskCount(master_, p), 0u);
+    master_.stopCyclicLoop();
+}
+
+// ============================================================================
+// RingChannelV3MemoryTest — TPACKET_V3 block-mode prototype (Q17).
+// Synthetic ring = tpacket_block_desc array; each block chains tpacket3_hdr
+// frames via tp_next_offset.  Cookies are (block << 16 | pkt).
+// ============================================================================
+
+class RingChannelV3MemoryTest : public ::testing::Test {
+protected:
+    static constexpr uint32_t kBlocks     = 4;
+    static constexpr uint32_t kBlockSize  = 4096;
+
+    int sv_[2] = {-1, -1};
+    std::unique_ptr<uint8_t[]> rx_mem_;
+    std::unique_ptr<ICyclicChannel> ch_;
+
+    /// Write `count` frames into block `b`, chained via tp_next_offset,
+    /// each carrying `frame` (same payload for all — the test varies the
+    /// cookie/stamp, not the bytes).  Marks the block TP_STATUS_USER last.
+    void emitBlock(uint32_t b, const uint8_t* frame, uint16_t len,
+                   uint32_t count, uint32_t sec = 1, uint32_t nsec = 7) {
+        auto* bd = reinterpret_cast<tpacket_block_desc*>(
+            rx_mem_.get() + b * kBlockSize);
+        uint8_t* base = reinterpret_cast<uint8_t*>(bd);
+        const uint32_t stride =
+            TPACKET_ALIGN(TPACKET3_HDRLEN + len);
+        uint32_t off = TPACKET_ALIGN(sizeof(tpacket_block_desc));
+        tpacket3_hdr* prev = nullptr;
+        for (uint32_t i = 0; i < count; ++i, off += stride) {
+            auto* h = reinterpret_cast<tpacket3_hdr*>(base + off);
+            std::memset(h, 0, sizeof(*h));
+            h->tp_next_offset = 0;
+            h->tp_sec    = sec;
+            h->tp_nsec   = nsec + i;
+            h->tp_snaplen = len;
+            h->tp_len    = len;
+            h->tp_mac    = TPACKET3_HDRLEN;
+            std::memcpy(reinterpret_cast<uint8_t*>(h) + TPACKET3_HDRLEN,
+                        frame, len);
+            if (prev) prev->tp_next_offset = stride;
+            prev = h;
+        }
+        bd->version = TPACKET_V3;
+        bd->hdr.bh1.num_pkts            = count;
+        bd->hdr.bh1.offset_to_first_pkt =
+            TPACKET_ALIGN(sizeof(tpacket_block_desc));
+        bd->hdr.bh1.blk_len             = kBlockSize;
+        __sync_synchronize();
+        bd->hdr.bh1.block_status = TP_STATUS_USER;
+    }
+
+    tpacket_block_desc* block(uint32_t b) {
+        return reinterpret_cast<tpacket_block_desc*>(
+            rx_mem_.get() + b * kBlockSize);
+    }
+
+    void SetUp() override {
+        ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv_), 0);
+        rx_mem_ = std::make_unique<uint8_t[]>(kBlockSize * kBlocks);
+        std::memset(rx_mem_.get(), 0, kBlockSize * kBlocks);
+        ch_ = createCyclicRingChannelV3ForMemory(
+            sv_[0], 1, rx_mem_.get(), kBlockSize, kBlocks);
+        ASSERT_TRUE(ch_);
+    }
+    void TearDown() override {
+        ch_.reset();
+        ::close(sv_[0]); ::close(sv_[1]);
+    }
+};
+
+TEST_F(RingChannelV3MemoryTest, EmitsAllFramesInBlock) {
+    const uint8_t payload[60] = {0xAB};
+    emitBlock(0, payload, sizeof(payload), 3);
+
+    CyclicFrameView v[4];
+    ASSERT_EQ(ch_->rxPoll(v, 4, 0), 3);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(v[i].frame_len, sizeof(payload));
+        EXPECT_EQ(v[i].frame[0], 0xAB);
+        EXPECT_EQ(v[i].stamp_ns, 1'000'000'000ull + 7u + i);
+        EXPECT_EQ(v[i].cookie >> 16, 0u);
+        EXPECT_EQ(v[i].cookie & 0xFFFF, static_cast<uint32_t>(i));
+    }
+    // Fully emitted → consumed; next poll frees the block.
+    EXPECT_EQ(ch_->rxPoll(v, 4, 0), 0);
+    EXPECT_EQ(block(0)->hdr.bh1.block_status & TP_STATUS_USER, 0u);
+}
+
+TEST_F(RingChannelV3MemoryTest, HeldFramePinsWholeBlock) {
+    const uint8_t payload[60] = {0xCD};
+    emitBlock(1, payload, sizeof(payload), 2);
+
+    CyclicFrameView v[4];
+    ASSERT_EQ(ch_->rxPoll(v, 4, 0), 2);
+    ch_->rxHold(v[0].cookie);
+    // Even with both frames emitted the block stays USER while held.
+    EXPECT_EQ(ch_->rxPoll(v, 4, 0), 0);
+    EXPECT_EQ(block(1)->hdr.bh1.block_status & TP_STATUS_USER,
+              static_cast<uint32_t>(TP_STATUS_USER));
+    ch_->rxRelease(v[0].cookie);
+    EXPECT_EQ(block(1)->hdr.bh1.block_status & TP_STATUS_USER, 0u);
+}
+
+TEST_F(RingChannelV3MemoryTest, MaxViewsCutResumesRemainingFrames) {
+    const uint8_t payload[60] = {0xEF};
+    emitBlock(2, payload, sizeof(payload), 3);
+
+    CyclicFrameView v[2];
+    ASSERT_EQ(ch_->rxPoll(v, 2, 0), 2);      // cut at max_views
+    EXPECT_EQ(v[1].cookie & 0xFFFF, 1u);
+    // Block still USER, not consumed — the third frame resumes here.
+    ASSERT_EQ(ch_->rxPoll(v, 2, 0), 1);
+    EXPECT_EQ(v[0].cookie, (2u << 16) | 2u);
+    EXPECT_EQ(ch_->rxPoll(v, 2, 0), 0);      // now drained → retired
+}
+
+TEST_F(RingChannelV3MemoryTest, SweepCoversMultipleBlocks) {
+    const uint8_t payload[60] = {0x11};
+    emitBlock(0, payload, sizeof(payload), 1);
+    emitBlock(3, payload, sizeof(payload), 2);
+
+    CyclicFrameView v[8];
+    ASSERT_EQ(ch_->rxPoll(v, 8, 0), 3);
+    EXPECT_EQ(v[0].cookie >> 16, 0u);
+    EXPECT_EQ(v[1].cookie >> 16, 3u);
+    EXPECT_EQ(v[2].cookie >> 16, 3u);
+    EXPECT_EQ(v[2].cookie & 0xFFFF, 1u);
+}
+
+TEST_F(RingChannelV3MemoryTest, KernelBlocksSkipped) {
+    CyclicFrameView v[4];
+    EXPECT_EQ(ch_->rxPoll(v, 4, 0), 0);      // all TP_STATUS_KERNEL
+    const uint8_t payload[60] = {0x22};
+    emitBlock(1, payload, sizeof(payload), 1);
+    ASSERT_EQ(ch_->rxPoll(v, 4, 0), 1);
+    EXPECT_EQ(v[0].cookie >> 16, 1u);
 }
 
 class LivePacketTest : public ::testing::Test {

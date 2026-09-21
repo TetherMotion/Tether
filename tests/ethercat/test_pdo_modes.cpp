@@ -84,7 +84,7 @@ TEST_F(PDOModesTest, SendAllIncrementsCycleCount) {
     mgr.init();
 
     uint32_t rx_buf = 0xDEAD;
-    mgr.mapping().add_rxpdo(0, &rx_buf, sizeof(rx_buf), 0x1600, PDOAddressMode::Position);
+    mgr.mapping().add_rxpdo(0, sizeof(rx_buf), 0x1600, PDOAddressMode::Position);
 
     EXPECT_CALL(transport, sendMultiDatagram(_, _))
         .WillOnce(Return(1));
@@ -97,8 +97,8 @@ TEST_F(PDOModesTest, ExchangeAllCallsSendThenReceive) {
     mgr.init();
 
     uint32_t tx_buf = 0xAA, rx_buf = 0;
-    mgr.mapping().add_rxpdo(0, &tx_buf, sizeof(tx_buf), 0x1600, PDOAddressMode::Position);
-    mgr.mapping().add_txpdo(0, &rx_buf, sizeof(rx_buf), 0x1A00, PDOAddressMode::Position);
+    mgr.mapping().add_rxpdo(0, sizeof(tx_buf), 0x1600, PDOAddressMode::Position);
+    mgr.mapping().add_txpdo(0, sizeof(rx_buf), 0x1A00, PDOAddressMode::Position);
 
     EXPECT_CALL(transport, sendMultiDatagram(_, _))
         .WillRepeatedly(Return(1));
@@ -122,7 +122,7 @@ TEST_F(PDOModesTest, CallbackFiresOnTxSent) {
     mgr.configureCallbackMode();
 
     uint32_t rx_buf = 0xBEEF;
-    int idx = mgr.mapping().add_rxpdo(0, &rx_buf, sizeof(rx_buf), 0x1600, PDOAddressMode::Position);
+    int idx = mgr.mapping().add_rxpdo(0, sizeof(rx_buf), 0x1600, PDOAddressMode::Position);
     ASSERT_GE(idx, 0);
 
     std::atomic<int> callback_count{0};
@@ -148,10 +148,10 @@ TEST_F(PDOModesTest, CallbackFiresOnRxReceived) {
     mgr.init();
     mgr.configureCallbackMode();
 
-    uint32_t tx_buf = 0;
     // Use ConfiguredAddress mode so the TxPDO goes through the confirmed response path
-    int idx = mgr.mapping().add_txpdo(0, &tx_buf, sizeof(tx_buf), 0x1A00, PDOAddressMode::ConfiguredAddress);
+    int idx = mgr.mapping().add_txpdo(0, sizeof(uint32_t), 0x1A00, PDOAddressMode::ConfiguredAddress);
     ASSERT_GE(idx, 0);
+    auto& tx_buf = *mgr.mapping().entryDataAs<uint32_t>(static_cast<size_t>(idx));
 
     std::atomic<int> callback_count{0};
 
@@ -195,7 +195,7 @@ TEST_F(PDOModesTest, CallbackDisabledByConfig) {
     mgr.configureCallbackMode(config);
 
     uint32_t rx_buf = 0xBEEF;
-    int idx = mgr.mapping().add_rxpdo(0, &rx_buf, sizeof(rx_buf), 0x1600, PDOAddressMode::Position);
+    int idx = mgr.mapping().add_rxpdo(0, sizeof(rx_buf), 0x1600, PDOAddressMode::Position);
     ASSERT_GE(idx, 0);
 
     std::atomic<int> callback_count{0};
@@ -234,9 +234,9 @@ TEST_F(PDOModesTest, EnqueueTxAndQueueCycle) {
     config.underrun_policy = UnderrunPolicy::RepeatLastFrame;
     mgr.configureQueueMode(config);
 
-    uint32_t rx_buf = 0;
-    int rx_idx = mgr.mapping().add_rxpdo(0, &rx_buf, sizeof(rx_buf), 0x1600, PDOAddressMode::Position);
+    int rx_idx = mgr.mapping().add_rxpdo(0, sizeof(uint32_t), 0x1600, PDOAddressMode::Position);
     ASSERT_GE(rx_idx, 0);
+    auto& rx_buf = *mgr.mapping().entryDataAs<uint32_t>(static_cast<size_t>(rx_idx));
 
     // Enqueue a TX frame
     auto frame = std::make_shared<PDOFrame>();
@@ -270,9 +270,9 @@ TEST_F(PDOModesTest, QueueModeUnderrunRepeatsLastFrame) {
     config.underrun_policy = UnderrunPolicy::RepeatLastFrame;
     mgr.configureQueueMode(config);
 
-    uint32_t rx_buf = 0;
-    int rx_idx = mgr.mapping().add_rxpdo(0, &rx_buf, sizeof(rx_buf), 0x1600, PDOAddressMode::Position);
+    int rx_idx = mgr.mapping().add_rxpdo(0, sizeof(uint32_t), 0x1600, PDOAddressMode::Position);
     ASSERT_GE(rx_idx, 0);
+    auto& rx_buf = *mgr.mapping().entryDataAs<uint32_t>(static_cast<size_t>(rx_idx));
 
     // First cycle: enqueue data
     auto frame = std::make_shared<PDOFrame>();
@@ -305,7 +305,7 @@ TEST_F(PDOModesTest, QueueModeEventsGenerated) {
     mgr.configureQueueMode(config);
 
     uint32_t rx_buf = 0;
-    int rx_idx = mgr.mapping().add_rxpdo(0, &rx_buf, sizeof(rx_buf), 0x1600, PDOAddressMode::Position);
+    int rx_idx = mgr.mapping().add_rxpdo(0, sizeof(rx_buf), 0x1600, PDOAddressMode::Position);
     ASSERT_GE(rx_idx, 0);
 
     auto frame = std::make_shared<PDOFrame>();
@@ -342,7 +342,7 @@ TEST_F(PDOModesTest, QueueModeUnderrunEventGenerated) {
     mgr.configureQueueMode(config);
 
     uint32_t rx_buf = 0;
-    mgr.mapping().add_rxpdo(0, &rx_buf, sizeof(rx_buf), 0x1600, PDOAddressMode::Position);
+    mgr.mapping().add_rxpdo(0, sizeof(rx_buf), 0x1600, PDOAddressMode::Position);
 
     // sendMultiDatagram may or may not be called (all entries may be skipped by SkipCycle)
     EXPECT_CALL(transport, sendMultiDatagram(_, _))
@@ -372,7 +372,7 @@ TEST_F(PDOModesTest, QueueModeTryDequeueRx) {
 
     uint32_t tx_buf = 0;
     // Use ConfiguredAddress mode so the TxPDO goes through the confirmed response path
-    int tx_idx = mgr.mapping().add_txpdo(0, &tx_buf, sizeof(tx_buf), 0x1A00, PDOAddressMode::ConfiguredAddress);
+    int tx_idx = mgr.mapping().add_txpdo(0, sizeof(tx_buf), 0x1A00, PDOAddressMode::ConfiguredAddress);
     ASSERT_GE(tx_idx, 0);
 
     EXPECT_CALL(transport, sendMultiDatagram(_, _))

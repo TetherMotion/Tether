@@ -806,17 +806,12 @@ protected:
 #endif
     fmmu::FMMUManager fmmu_mgr_{*this};
 
-    // -- Buffers for auto-configured PDO entries from SII ---------------------
-    std::vector<uint8_t> pdo_rx_buffer_;
-    std::vector<uint8_t> pdo_tx_buffer_;
-
     // -- Custom PDO mapping state ----------------------------------------------
     struct CustomPDOInfo {
         uint16_t pdo_index = 0;
         PDO::PDODirection direction = PDO::PDODirection::TxPDO;
         uint16_t total_size = 0;
         std::vector<CustomPDOFieldLayout> fields;
-        std::vector<uint8_t> buffer;
         int mapping_entry_index = -1;
         /// OD entries synthesized from the slave's own PDO mapping by
         /// registerExistingPDO().  Owns the objects that fields[].entry

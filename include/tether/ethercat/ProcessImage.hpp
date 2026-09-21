@@ -7,12 +7,12 @@
  * The EtherCAT LRW datagram payload *is* a fixed-layout process image:
  * RxPDO region [0, rx_bytes) written by the master, TxPDO region
  * [rx_bytes, rx_bytes + tx_bytes) written by slaves.  Instead of the legacy
- * per-entry app_buffer gather/scatter, an application can read/write the
+ * per-entry buffered-storage gather/scatter, an application can read/write the
  * image in place through this API.
  *
  * Modes (hierarchy safe → unsafe):
  *
- *   Buffered       — image API inactive; entries use app_buffer memcpy.
+ *   Buffered       — image API inactive; entries use their storage[] memcpy.
  *   DoubleBuffered — writer owns a *persistent* write buffer; the wire owns
  *                    a separate send snapshot.  Untouched fields keep their
  *                    last values forever — partial writes are inherently
@@ -55,7 +55,7 @@
  * inside the image, computed at configure() time with the same layout walk
  * as LogicalAddressManager::describeEntries().  Entries sharing a byte with
  * a neighbour (bit-packed PDOs) or flagged PDOEntry::image_exclude are
- * marked -1 → they stay on the app_buffer path even in image modes.
+ * marked -1 → they stay on the buffered-storage path even in image modes.
  */
 
 #include <atomic>
@@ -83,7 +83,7 @@ enum class ImageMode : uint8_t {
  * image epoch at acquisition time.  resolve()/ptr accessors return
  * nullptr when the image was re-configured since — the raw-pointer
  * lifetime bug entryOffset()+arithmetic cannot catch.  offset < 0 marks
- * a forced-buffered entry (use its app_buffer path).
+ * a forced-buffered entry (resolve() hits entry storage, not the image).
  */
 struct EntryHandle {
     uint32_t index  = UINT32_MAX;   ///< mapping entry index
@@ -97,6 +97,19 @@ struct EntryHandle {
 /// shm header — layout shared between the exporting master and any
 /// process-external motion source attaching via attachShared().
 /// Keep POD + naturally aligned atomics; the struct is mmap'd verbatim.
+/// One exported entry-table row (Q4).  Attachers discover every mapped PDO
+/// field — slave, PDO, direction, image offset, size — without hardcoding
+/// layout knowledge.  Stored in a table after the input region.
+struct ShmEntryDesc {
+    uint32_t index;          ///< mapping-entry index (entryHandle().index)
+    uint32_t slave_index;
+    uint32_t pdo_index;      ///< e.g. 0x1600
+    uint32_t direction;      ///< PDODirection as u32
+    int32_t  offset;         ///< byte offset in its region (-1 = buffered)
+    uint32_t size;           ///< bytes
+    char     label[16];      ///< human tag, e.g. "rx:s2:0x1600" (may be empty)
+};
+
 struct ShmImageHeader {
     uint32_t magic;           ///< kShmMagic
     uint32_t version;         ///< kShmVersion
@@ -110,18 +123,45 @@ struct ShmImageHeader {
     std::atomic<uint32_t> out_waiters; ///< registered output waiters
     std::atomic<uint32_t> send_seq;    ///< async-loop send-request counter
     std::atomic<uint32_t> send_waiters;///< registered send waiters
-    uint32_t reserved[12];
+    // ---- handshake (Q20): exporter fills all fields + checksum, then
+    // ---- release-publishes ready=1 last.  Attachers must check ready and
+    // ---- validate checksum before trusting any offset/size field.
+    std::atomic<uint32_t> ready;       ///< 1 = export complete & consistent
+    std::atomic<uint32_t> checksum;    ///< FNV-1a over fixed sizing fields
+    // ---- async-loop additions ----
+    std::atomic<uint64_t> send_stamp_ns;///< mono stamp of last triggerSend
+    std::atomic<uint32_t> send_epoch;   ///< waiters generation (Q25 reclaim)
+    std::atomic<uint32_t> flags;        ///< kShmFlag* feature bits
+    // ---- optional seqlock words (Q5), one per region ----
+    std::atomic<uint32_t> rx_lock_seq;  ///< output region: odd = write active
+    std::atomic<uint32_t> tx_lock_seq;  ///< input region:  odd = write active
+    // ---- entry-table export (Q4) ----
+    std::atomic<uint32_t> entry_count;  ///< rows published (post-ready)
+    uint32_t entry_table_off;           ///< byte offset of ShmEntryDesc[]
+    // ---- per-producer trigger accounting (Q26) ----
+    std::atomic<uint32_t> producer_triggers[8]; ///< bump per triggerSend(id)
+    std::atomic<uint32_t> producer_claims;      ///< slot bitmap (claimProducerSlot)
 };
 inline constexpr uint32_t kShmMagic   = 0x54494D47;  ///< 'TIMG'
-inline constexpr uint32_t kShmVersion = 1;
-/// Payload layout: [ShmImageHeader][output rx_bytes][input tx_bytes],
+inline constexpr uint32_t kShmVersion = 2;
+/// shm header flag bits.
+inline constexpr uint32_t kShmFlagSeqlock    = 1u << 0;  ///< region seqlocks on
+inline constexpr uint32_t kShmFlagEntryTable = 1u << 1;  ///< entry table present
+/// Max producer slots in producer_triggers[] (registerProducer).
+inline constexpr uint32_t kMaxShmProducers = 8;
+/// Payload layout: [ShmImageHeader][output rx_bytes][input tx_bytes][entries],
 /// regions 64-byte aligned after the header.
 struct ShmImageLayout {
     static constexpr uint32_t kHeaderPadded = 256;
     static uint32_t outputOff()                { return kHeaderPadded; }
     static uint32_t inputOff(uint32_t rx)      { return kHeaderPadded + rx; }
-    static uint32_t totalBytes(uint32_t rx, uint32_t tx) {
+    /// Byte offset where the exported entry table begins (when present).
+    static uint32_t entryTableOff(uint32_t rx, uint32_t tx) {
         return kHeaderPadded + rx + tx;
+    }
+    static uint32_t totalBytes(uint32_t rx, uint32_t tx,
+                               uint32_t entry_rows = 0) {
+        return kHeaderPadded + rx + tx + entry_rows * sizeof(ShmEntryDesc);
     }
 };
 
@@ -143,6 +183,13 @@ public:
         /// process-external motion source can attachShared() to it.
         /// Forces Direct-style semantics (zero copy both ways).
         const char* shm_name = nullptr;
+        /// shm only: enable the per-region seqlock words so external
+        /// readers can detect a torn snapshot while the opposite side
+        /// writes.  Off by default — zero-copy stays zero-cost.
+        bool shm_seqlock = false;
+        /// shm only: rows to reserve for the exported entry table
+        /// (exportEntryTable).  Defaults to entry_count when unset.
+        uint32_t shm_entry_capacity = 0;
     };
 
     ProcessImage() = default;
@@ -452,6 +499,55 @@ public:
             : out_seq_.load(std::memory_order_acquire);
     }
 
+    /// shm feature flags exported by the creator (kShmFlag*).
+    uint32_t shmFlags() const { return shm_flags_; }
+
+    /**
+     * @brief Attach-side handshake (Q20): true when the exporter has
+     *        completed its export — `ready` set and header checksum
+     *        verified.  attachShared() already enforces this; expose it
+     *        for late attachers polling a not-yet-exported segment.
+     */
+    bool shmReady() const { return shm_ready_; }
+
+    /**
+     * @brief Exported entry table (Q4) — rows of ShmEntryDesc describing
+     *        every mapping entry's image placement.  Lets an external
+     *        process discover fields (slave/pdo/direction/offset/size)
+     *        instead of hardcoding raw offsets.  nullptr/0 when the
+     *        exporter didn't export a table.
+     */
+    const ShmEntryDesc* shmEntryTable() const { return shm_entries_; }
+    uint32_t            shmEntryCount() const { return shm_entry_count_; }
+
+    /// shm region selector for the optional seqlock API (Q5).
+    enum class ShmRegion : uint8_t { Output = 0, Input };
+
+    /**
+     * @brief Region-write begin/end (single-writer seqlock — Q5).
+     *        The writer of a shm region (external producer → Output,
+     *        master collector → Input) brackets its update so readers
+     *        can detect torn snapshots.  Only when kShmFlagSeqlock.
+     */
+    void shmWriteBegin(ShmRegion r);
+    void shmWriteEnd(ShmRegion r);
+
+    /**
+     * @brief Reader side of the seqlock: begin returns the sequence
+     *        stamp; end returns true when the region was quiescent across
+     *        the read (even seq both times, unchanged).  Retry the read
+     *        when end returns false.
+     */
+    uint32_t shmReadBegin(ShmRegion r) const;
+    bool     shmReadEnd(ShmRegion r, uint32_t stamp) const;
+
+    /**
+     * @brief Exporter-side: fill the reserved entry-table rows.  Called
+     *        by PDOManager after configure() when shm is active; rows
+     *        beyond capacity are truncated.  Publishes entry_count last.
+     */
+    void exportEntryTable(const ShmEntryDesc* rows, uint32_t count);
+
     // ====================================================================
     // Async-loop send trigger (producer side: any thread/process)
     // ====================================================================
@@ -466,20 +562,42 @@ public:
      * *every* loop mode and must not imply a send — the cyclic loop
      * transmits on its own deadline regardless.  Bumps sendSeq() and
      * wakes any waitSend() sleeper (cross-process when shm-backed).
+     *
+     * @param producer_id  diagnostic bucket from claimProducerSlot()
+     *        (0 = anonymous).  Per-producer counts land in
+     *        producerTriggerCount() — purely observability; every id
+     *        drives the same shared send_seq (latest image wins).
      */
-    void triggerSend() {
-        auto* w = sendSeqWord();
-        w->fetch_add(1, std::memory_order_release);
-        // Only pay the wake syscall when a waiter is registered — the
-        // waiter registers before re-checking the word, so a trigger
-        // landing between the check and the registration is still seen.
-        if (sendWaitersWord()->load(std::memory_order_acquire) > 0)
-            sendWakeAll();
-    }
+    void triggerSend(uint32_t producer_id = 0);
 
     /// Send-request counter — bumped once per triggerSend().
     uint32_t sendSeq() const {
         return sendSeqWord()->load(std::memory_order_acquire);
+    }
+
+    /// CLOCK_MONOTONIC stamp of the last triggerSend() (0 = never).
+    /// The async loop reads this to derive trigger→send latency.
+    uint64_t sendStampNs() const {
+        return sendStampWord()->load(std::memory_order_acquire);
+    }
+
+    /// Claim a per-producer accounting slot (1..kMaxShmProducers-1).
+    /// Returns -1 when all slots are taken — fall back to id 0, which is
+    /// always available.  Cross-process safe in shm mode (bitmap in the
+    /// header).  Slot 0 is the shared anonymous bucket.
+    int claimProducerSlot();
+
+    /// Trigger count recorded under producer slot @p id (0..7).
+    uint32_t producerTriggerCount(uint32_t id) const;
+
+    /// Which loop kind consumes triggerSend() — set by Master on
+    /// startCyclicLoop/startAsyncLoop so a misplaced triggerSend can warn
+    /// once instead of being silently dropped (Q27).
+    enum class SendConsumer : uint8_t { None = 0, Cyclic, Async };
+    void setSendConsumer(SendConsumer c) {
+        send_consumer_.store(static_cast<uint8_t>(c),
+                             std::memory_order_release);
+        cyclic_trigger_warned_.store(false, std::memory_order_release);
     }
 
     /**
@@ -520,8 +638,35 @@ private:
     std::atomic<uint32_t>* sendWaitersWord() {
         return shm_send_waiters_ ? shm_send_waiters_ : &send_waiters_;
     }
+    std::atomic<uint64_t>* sendStampWord() {
+        return shm_send_stamp_ ? shm_send_stamp_ : &send_stamp_ns_;
+    }
+    const std::atomic<uint64_t>* sendStampWord() const {
+        return shm_send_stamp_ ? shm_send_stamp_ : &send_stamp_ns_;
+    }
+    std::atomic<uint32_t>* sendEpochWord() {
+        return shm_send_epoch_ ? shm_send_epoch_ : &send_epoch_;
+    }
+    /// Producer accounting words: shm array when backed, else members.
+    std::atomic<uint32_t>* producerTriggers() {
+        return shm_prod_triggers_ ? shm_prod_triggers_ : prod_triggers_;
+    }
+    const std::atomic<uint32_t>* producerTriggers() const {
+        return shm_prod_triggers_ ? shm_prod_triggers_ : prod_triggers_;
+    }
+    std::atomic<uint32_t>* producerClaims() {
+        return shm_prod_claims_ ? shm_prod_claims_ : &prod_claims_;
+    }
+    /// Seqlock word for a shm region (nullptr when flag off).
+    std::atomic<uint32_t>* lockSeq(ShmRegion r);
+    const std::atomic<uint32_t>* lockSeq(ShmRegion r) const;
+    /// One-shot "triggerSend while cyclic owns the wire" warn (Q27).
+    void warnCyclicTrigger();
+    /// FNV-1a over the fixed sizing/offset fields the checksum guards.
+    static uint32_t headerChecksum(const ShmImageHeader& h);
     void releaseShm();
-    bool mapShm(const char* name, bool create, uint32_t rx, uint32_t tx);
+    bool mapShm(const char* name, bool create, uint32_t rx, uint32_t tx,
+                uint32_t entry_rows, bool seqlock);
 
     ImageMode mode_ = ImageMode::Buffered;
     uint32_t  rx_bytes_ = 0, tx_bytes_ = 0, size_ = 0;
@@ -565,6 +710,12 @@ private:
     // master's loop via shared futex.
     std::atomic<uint32_t>  send_seq_{0};
     std::atomic<uint32_t>  send_waiters_{0};
+    std::atomic<uint64_t>  send_stamp_ns_{0};   ///< mono stamp of last trigger
+    std::atomic<uint32_t>  send_epoch_{0};      ///< local waiters generation
+    std::atomic<uint32_t>  prod_triggers_[8];   ///< per-producer counts (Q26)
+    std::atomic<uint32_t>  prod_claims_{1};     ///< slot bitmap (bit0 = anon)
+    std::atomic<uint8_t>   send_consumer_{0};   ///< SendConsumer (Q27 warn)
+    std::atomic<bool>      cyclic_trigger_warned_{false};
     bool futex_shared_ = false;
 
     // shm export/attach state (all null/-1 when not backed)
@@ -573,12 +724,23 @@ private:
     int      shm_fd_      = -1;
     bool     shm_owner_   = false;    ///< this instance created the segment
     bool     shm_attached_ = false;   ///< this instance attached to one
+    bool     shm_ready_   = false;    ///< handshake verified (Q20)
+    uint32_t shm_flags_   = 0;
     char     shm_name_[64] = {};
     uint8_t* shm_out_ = nullptr;      ///< shm output region
     uint8_t* shm_in_  = nullptr;      ///< shm input region
     std::atomic<uint32_t>* shm_out_seq_ = nullptr;
     std::atomic<uint32_t>* shm_send_seq_ = nullptr;
     std::atomic<uint32_t>* shm_send_waiters_ = nullptr;
+    std::atomic<uint64_t>* shm_send_stamp_ = nullptr;
+    std::atomic<uint32_t>* shm_send_epoch_ = nullptr;
+    std::atomic<uint32_t>* shm_rx_lock_ = nullptr;
+    std::atomic<uint32_t>* shm_tx_lock_ = nullptr;
+    std::atomic<uint32_t>* shm_prod_triggers_ = nullptr;  ///< header array
+    std::atomic<uint32_t>* shm_prod_claims_ = nullptr;
+    ShmEntryDesc*          shm_entries_ = nullptr;   ///< exported table
+    uint32_t               shm_entry_count_ = 0;     ///< rows published
+    uint32_t               shm_entry_capacity_ = 0;  ///< rows reserved
 
     int32_t entry_off_[kMaxEntries] = {};
     size_t  entry_count_ = 0;

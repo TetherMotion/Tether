@@ -73,7 +73,7 @@ TEST_F(PDOMappingTest, InitialStateIsEmpty) {
 
 TEST_F(PDOMappingTest, AddRxPDOSuccess) {
     uint32_t buf = 0;
-    int idx = mapping.add_rxpdo(0, &buf, sizeof(buf));
+    int idx = mapping.add_rxpdo(0, sizeof(buf));
     ASSERT_GE(idx, 0);
     EXPECT_EQ(mapping.entry_count(), 1u);
     EXPECT_EQ(mapping.total_rxpdo_bytes(), sizeof(buf));
@@ -92,7 +92,7 @@ TEST_F(PDOMappingTest, AddRxPDOSuccess) {
 
 TEST_F(PDOMappingTest, AddTxPDOSuccess) {
     uint16_t buf = 0;
-    int idx = mapping.add_txpdo(1, &buf, sizeof(buf), 0x1A00, PDOAddressMode::ConfiguredAddress);
+    int idx = mapping.add_txpdo(1, sizeof(buf), 0x1A00, PDOAddressMode::ConfiguredAddress);
     ASSERT_GE(idx, 0);
     EXPECT_EQ(mapping.entry_count(), 1u);
     EXPECT_EQ(mapping.total_txpdo_bytes(), sizeof(buf));
@@ -104,37 +104,40 @@ TEST_F(PDOMappingTest, AddTxPDOSuccess) {
     EXPECT_EQ(e->slave_index, 1u);
 }
 
-TEST_F(PDOMappingTest, NullBufferReturnsError) {
-    EXPECT_EQ(mapping.add_rxpdo(0, nullptr, 4), -1);
-    EXPECT_EQ(mapping.add_txpdo(0, nullptr, 4), -1);
-    EXPECT_EQ(mapping.entry_count(), 0u);
+TEST_F(PDOMappingTest, ManagerOwnedStorageIsZeroed) {
+    // Q1: storage lives inside the entry — registration zero-initializes it.
+    int idx = mapping.add_rxpdo(0, 4);
+    ASSERT_GE(idx, 0);
+    const uint8_t* d = mapping.entryData(static_cast<size_t>(idx));
+    ASSERT_NE(d, nullptr);
+    for (int i = 0; i < 4; ++i) EXPECT_EQ(d[i], 0);
 }
 
 TEST_F(PDOMappingTest, ZeroSizeReturnsError) {
     uint8_t buf = 0;
-    EXPECT_EQ(mapping.add_rxpdo(0, &buf, 0), -1);
-    EXPECT_EQ(mapping.add_txpdo(0, &buf, 0), -1);
+    EXPECT_EQ(mapping.add_rxpdo(0, 0), -1);
+    EXPECT_EQ(mapping.add_txpdo(0, 0), -1);
 }
 
 TEST_F(PDOMappingTest, OversizedReturnsError) {
     uint8_t buf[1] = {0};
-    EXPECT_EQ(mapping.add_rxpdo(0, buf, static_cast<uint16_t>(kMaxPDOSize + 1)), -1);
+    EXPECT_EQ(mapping.add_rxpdo(0, static_cast<uint16_t>(kMaxPDOSize + 1)), -1);
 }
 
 TEST_F(PDOMappingTest, CapacityLimitEnforced) {
     uint8_t buf = 0;
     for (size_t i = 0; i < kMaxPDOEntries; i++) {
-        ASSERT_GE(mapping.add_rxpdo(0, &buf, 1), 0) << "Failed at entry " << i;
+        ASSERT_GE(mapping.add_rxpdo(0, 1), 0) << "Failed at entry " << i;
     }
     // Next add should fail
-    EXPECT_EQ(mapping.add_rxpdo(0, &buf, 1), -1);
+    EXPECT_EQ(mapping.add_rxpdo(0, 1), -1);
     EXPECT_EQ(mapping.entry_count(), kMaxPDOEntries);
 }
 
 TEST_F(PDOMappingTest, ClearResetsState) {
     uint8_t buf = 0;
-    mapping.add_rxpdo(0, &buf, 1);
-    mapping.add_txpdo(0, &buf, 1);
+    mapping.add_rxpdo(0, 1);
+    mapping.add_txpdo(0, 1);
     ASSERT_GT(mapping.entry_count(), 0u);
 
     mapping.clear();
@@ -145,7 +148,7 @@ TEST_F(PDOMappingTest, ClearResetsState) {
 
 TEST_F(PDOMappingTest, BroadcastEntries) {
     uint32_t buf = 0;
-    int rx_idx = mapping.add_broadcast_rxpdo(&buf, sizeof(buf), 0x1000);
+    int rx_idx = mapping.add_broadcast_rxpdo(sizeof(buf), 0x1000);
     ASSERT_GE(rx_idx, 0);
     const PDOEntry* e = mapping.get_entry(static_cast<size_t>(rx_idx));
     ASSERT_NE(e, nullptr);
@@ -153,14 +156,14 @@ TEST_F(PDOMappingTest, BroadcastEntries) {
     EXPECT_EQ(e->physical_offset, 0x1000u);
     EXPECT_EQ(e->slave_index, 0xFFFFu);
 
-    int tx_idx = mapping.add_broadcast_txpdo(&buf, sizeof(buf), 0x1100);
+    int tx_idx = mapping.add_broadcast_txpdo(sizeof(buf), 0x1100);
     ASSERT_GE(tx_idx, 0);
     EXPECT_EQ(mapping.entry_count(), 2u);
 }
 
 TEST_F(PDOMappingTest, SetSlaveConfiguredAddressUpdatesExisting) {
     uint32_t buf = 0;
-    mapping.add_rxpdo(2, &buf, sizeof(buf));
+    mapping.add_rxpdo(2, sizeof(buf));
     mapping.set_slave_configured_address(2, 0x1002);
 
     const PDOEntry* e = mapping.get_entry(0);
@@ -170,7 +173,7 @@ TEST_F(PDOMappingTest, SetSlaveConfiguredAddressUpdatesExisting) {
 
 TEST_F(PDOMappingTest, GetEntryMutable) {
     uint8_t buf = 0;
-    mapping.add_rxpdo(0, &buf, 1);
+    mapping.add_rxpdo(0, 1);
     PDOEntry* mut = mapping.get_entry_mut(0);
     ASSERT_NE(mut, nullptr);
     mut->enabled = false;
@@ -214,7 +217,7 @@ TEST_F(PDOManagerTest, InitAndDeinit) {
 TEST_F(PDOManagerTest, MappingAccess) {
     mgr.init();
     uint32_t buf = 0;
-    mgr.mapping().add_rxpdo(0, &buf, sizeof(buf));
+    mgr.mapping().add_rxpdo(0, sizeof(buf));
     EXPECT_EQ(mgr.mapping().entry_count(), 1u);
 }
 
@@ -380,8 +383,8 @@ TEST_F(PDOManagerTest, FinalizeMappingSetsPhysicalOffsets) {
     cfg->sm[3] = SyncManagerConfig::process_input(0x1180, 0);
 
     uint32_t rxbuf = 0, txbuf = 0;
-    mgr.mapping().add_rxpdo(0, &rxbuf, sizeof(rxbuf));
-    mgr.mapping().add_txpdo(0, &txbuf, sizeof(txbuf));
+    mgr.mapping().add_rxpdo(0, sizeof(rxbuf));
+    mgr.mapping().add_txpdo(0, sizeof(txbuf));
 
     EXPECT_TRUE(mgr.finalizeMapping(0));
 
@@ -414,7 +417,7 @@ TEST_F(PDOManagerTest, SendRxPDOPositionMode) {
     mgr.init();
 
     uint32_t buf = 0xDEADBEEF;
-    int idx = mgr.mapping().add_rxpdo(0, &buf, sizeof(buf), 0x1600, PDOAddressMode::Position);
+    int idx = mgr.mapping().add_rxpdo(0, sizeof(buf), 0x1600, PDOAddressMode::Position);
     ASSERT_GE(idx, 0);
 
     // Position mode uses sendSingleDatagram with APWR
@@ -429,7 +432,7 @@ TEST_F(PDOManagerTest, ReceiveTxPDOPositionMode) {
     mgr.init();
 
     uint32_t buf = 0;
-    int idx = mgr.mapping().add_txpdo(0, &buf, sizeof(buf), 0x1A00, PDOAddressMode::Position);
+    int idx = mgr.mapping().add_txpdo(0, sizeof(buf), 0x1A00, PDOAddressMode::Position);
     ASSERT_GE(idx, 0);
 
     EXPECT_CALL(transport, sendSingleDatagram(Command::APRD, _, _, _, _, sizeof(buf), true))
@@ -443,7 +446,7 @@ TEST_F(PDOManagerTest, SendRxPDOConfiguredMode) {
     mgr.init();
 
     uint32_t buf = 0xAA;
-    int idx = mgr.mapping().add_rxpdo(0, &buf, sizeof(buf), 0x1600, PDOAddressMode::ConfiguredAddress);
+    int idx = mgr.mapping().add_rxpdo(0, sizeof(buf), 0x1600, PDOAddressMode::ConfiguredAddress);
     ASSERT_GE(idx, 0);
 
     // ConfiguredAddress mode uses sendSingleDatagram(FPWR) then waitForResponseIdx
@@ -460,8 +463,7 @@ TEST_F(PDOManagerTest, SendRxPDOConfiguredMode) {
 TEST_F(PDOManagerTest, ReceiveTxPDOConfiguredMode) {
     mgr.init();
 
-    uint32_t buf = 0;
-    int idx = mgr.mapping().add_txpdo(0, &buf, sizeof(buf), 0x1A00, PDOAddressMode::ConfiguredAddress);
+    int idx = mgr.mapping().add_txpdo(0, sizeof(uint32_t), 0x1A00, PDOAddressMode::ConfiguredAddress);
     ASSERT_GE(idx, 0);
 
     EXPECT_CALL(transport, sendSingleDatagram(Command::FPRD, _, _, _, _, _, true))
@@ -469,21 +471,22 @@ TEST_F(PDOManagerTest, ReceiveTxPDOConfiguredMode) {
 
     RxDatagram resp{};
     resp.wkc = 1;
-    resp.datalen = sizeof(buf);
+    resp.datalen = sizeof(uint32_t);
     uint32_t response_data = 0x12345678;
     std::memcpy(resp.data, &response_data, sizeof(response_data));
     EXPECT_CALL(transport, waitForResponseIdx(_, _, _))
         .WillOnce(::testing::DoAll(::testing::SetArgReferee<2>(resp), Return(true)));
 
     EXPECT_TRUE(mgr.receiveTxPDO(static_cast<size_t>(idx)));
-    EXPECT_EQ(buf, 0x12345678u);
+    EXPECT_EQ(*mgr.mapping().entryDataAs<uint32_t>(static_cast<size_t>(idx)),
+              0x12345678u);
 }
 
 TEST_F(PDOManagerTest, SendRxPDOBroadcastMode) {
     mgr.init();
 
     uint32_t buf = 0xBB;
-    int idx = mgr.mapping().add_broadcast_rxpdo(&buf, sizeof(buf), 0x2000);
+    int idx = mgr.mapping().add_broadcast_rxpdo(sizeof(buf), 0x2000);
     ASSERT_GE(idx, 0);
 
     EXPECT_CALL(transport, sendSingleDatagram(Command::BWR, _, _, _, _, _, true))
@@ -499,8 +502,7 @@ TEST_F(PDOManagerTest, SendRxPDOBroadcastMode) {
 TEST_F(PDOManagerTest, ReceiveTxPDOBroadcastMode) {
     mgr.init();
 
-    uint32_t buf = 0;
-    int idx = mgr.mapping().add_broadcast_txpdo(&buf, sizeof(buf), 0x2100);
+    int idx = mgr.mapping().add_broadcast_txpdo(sizeof(uint32_t), 0x2100);
     ASSERT_GE(idx, 0);
 
     EXPECT_CALL(transport, sendSingleDatagram(Command::BRD, _, _, _, _, _, true))
@@ -508,21 +510,22 @@ TEST_F(PDOManagerTest, ReceiveTxPDOBroadcastMode) {
 
     RxDatagram resp{};
     resp.wkc = 1;
-    resp.datalen = sizeof(buf);
+    resp.datalen = sizeof(uint32_t);
     uint32_t resp_data = 0xCAFEBABE;
     std::memcpy(resp.data, &resp_data, sizeof(resp_data));
     EXPECT_CALL(transport, waitForResponseIdx(_, _, _))
         .WillOnce(::testing::DoAll(::testing::SetArgReferee<2>(resp), Return(true)));
 
     EXPECT_TRUE(mgr.receiveTxPDO(static_cast<size_t>(idx)));
-    EXPECT_EQ(buf, 0xCAFEBABEu);
+    EXPECT_EQ(*mgr.mapping().entryDataAs<uint32_t>(static_cast<size_t>(idx)),
+              0xCAFEBABEu);
 }
 
 TEST_F(PDOManagerTest, SendRxPDOLogicalModeNotImplemented) {
     mgr.init();
 
     uint32_t buf = 0;
-    int idx = mgr.mapping().add_rxpdo(0, &buf, sizeof(buf), 0x1600, PDOAddressMode::Logical);
+    int idx = mgr.mapping().add_rxpdo(0, sizeof(buf), 0x1600, PDOAddressMode::Logical);
     ASSERT_GE(idx, 0);
 
     // Logical mode returns false (not yet implemented)
@@ -538,7 +541,7 @@ TEST_F(PDOManagerTest, SendRxPDOInvalidIndex) {
 TEST_F(PDOManagerTest, SendRxPDOWrongDirection) {
     mgr.init();
     uint32_t buf = 0;
-    int idx = mgr.mapping().add_txpdo(0, &buf, sizeof(buf));
+    int idx = mgr.mapping().add_txpdo(0, sizeof(buf));
     ASSERT_GE(idx, 0);
     EXPECT_FALSE(mgr.sendRxPDO(static_cast<size_t>(idx)));
 }
@@ -546,7 +549,7 @@ TEST_F(PDOManagerTest, SendRxPDOWrongDirection) {
 TEST_F(PDOManagerTest, ReceiveTxPDOWrongDirection) {
     mgr.init();
     uint32_t buf = 0;
-    int idx = mgr.mapping().add_rxpdo(0, &buf, sizeof(buf));
+    int idx = mgr.mapping().add_rxpdo(0, sizeof(buf));
     ASSERT_GE(idx, 0);
     EXPECT_FALSE(mgr.receiveTxPDO(static_cast<size_t>(idx)));
 }
@@ -559,8 +562,8 @@ TEST_F(PDOManagerTest, ExchangeAllSendsAndReceives) {
     mgr.init();
 
     uint32_t tx_buf = 0xAA, rx_buf = 0;
-    mgr.mapping().add_rxpdo(0, &tx_buf, sizeof(tx_buf), 0x1600, PDOAddressMode::Position);
-    mgr.mapping().add_txpdo(0, &rx_buf, sizeof(rx_buf), 0x1A00, PDOAddressMode::Position);
+    mgr.mapping().add_rxpdo(0, sizeof(tx_buf), 0x1600, PDOAddressMode::Position);
+    mgr.mapping().add_txpdo(0, sizeof(rx_buf), 0x1A00, PDOAddressMode::Position);
 
     // Position mode uses fire-and-forget, batched into frames via sendMultiDatagram
     // Called twice: once for RxPDO batch, once for TxPDO batch
@@ -580,7 +583,7 @@ TEST_F(PDOManagerTest, ExchangeAllWithDisabledEntry) {
     mgr.init();
 
     uint32_t buf = 0;
-    int idx = mgr.mapping().add_rxpdo(0, &buf, sizeof(buf));
+    int idx = mgr.mapping().add_rxpdo(0, sizeof(buf));
     ASSERT_GE(idx, 0);
     mgr.mapping().get_entry_mut(static_cast<size_t>(idx))->enabled = false;
 
@@ -607,9 +610,10 @@ TEST_F(PDOManagerTest, ExchangePhysicalSendsAndReceives) {
     cfg->sm[2] = SyncManagerConfig::process_output(0x1100, 4);
     cfg->sm[3] = SyncManagerConfig::process_input(0x1180, 4);
 
-    uint32_t out_buf = 0xBBCC, in_buf = 0;
-    mgr.mapping().add_rxpdo(0, &out_buf, sizeof(out_buf));
-    mgr.mapping().add_txpdo(0, &in_buf, sizeof(in_buf));
+    int rx_i = mgr.mapping().add_rxpdo(0, sizeof(uint32_t));
+    int tx_i = mgr.mapping().add_txpdo(0, sizeof(uint32_t));
+    ASSERT_GE(rx_i, 0); ASSERT_GE(tx_i, 0);
+    *mgr.mapping().entryDataAs<uint32_t>(static_cast<size_t>(rx_i)) = 0xBBCC;
 
     // exchangePhysical pre-registers response slots before sending
     static uint8_t slot_counter = 0;
@@ -640,7 +644,8 @@ TEST_F(PDOManagerTest, ExchangePhysicalSendsAndReceives) {
     EXPECT_EQ(ps.fpwr_success, 1u);
     EXPECT_EQ(ps.fprd_success, 1u);
 
-    EXPECT_EQ(in_buf, 0x55AA55AAu);
+    EXPECT_EQ(*mgr.mapping().entryDataAs<uint32_t>(static_cast<size_t>(tx_i)),
+              0x55AA55AAu);
 }
 
 // ============================================================================
@@ -671,7 +676,7 @@ TEST(PDOManagerIndependence, TwoInstancesAreIsolated) {
     m2.init();
 
     uint32_t b1 = 0, b2 = 0;
-    m1.mapping().add_rxpdo(0, &b1, sizeof(b1));
+    m1.mapping().add_rxpdo(0, sizeof(b1));
     EXPECT_EQ(m1.mapping().entry_count(), 1u);
     EXPECT_EQ(m2.mapping().entry_count(), 0u);
 
@@ -743,7 +748,7 @@ TEST(PDOFreeFunctions, DelegateCorrectly) {
 
     auto& mapping = pdo_get_mapping(m);
     uint32_t buf = 0;
-    mapping.add_rxpdo(0, &buf, sizeof(buf));
+    mapping.add_rxpdo(0, sizeof(buf));
     EXPECT_EQ(mapping.entry_count(), 1u);
 
     auto* configs = pdo_get_slave_configs(m);
@@ -861,7 +866,7 @@ TEST_F(PDOManagerTest, TransferErrorsIncrementStats) {
     mgr.init();
 
     uint32_t buf = 0;
-    int idx = mgr.mapping().add_rxpdo(0, &buf, sizeof(buf), 0x1600, PDOAddressMode::ConfiguredAddress);
+    int idx = mgr.mapping().add_rxpdo(0, sizeof(buf), 0x1600, PDOAddressMode::ConfiguredAddress);
     ASSERT_GE(idx, 0);
 
     // Fail the send

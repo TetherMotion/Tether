@@ -75,13 +75,6 @@ bool RP20Device::scanModules() {
             mod.slot = slot;
             mod.descriptor = desc;
 
-            if (desc->has_txpdo && desc->txpdo) {
-                mod.tx_buffer.assign(desc->txpdo->size, 0);
-            }
-            if (desc->has_rxpdo && desc->rxpdo) {
-                mod.rx_buffer.assign(desc->rxpdo->size, 0);
-            }
-
             modules_.push_back(std::move(mod));
         }
     }
@@ -246,9 +239,9 @@ bool RP20Device::registerPDOs() {
         uint16_t txpdo_idx = slotPDOIndex(Reg::kTxPDOBaseIndex, mod.slot);
         uint16_t rxpdo_idx = slotPDOIndex(Reg::kRxPDOBaseIndex, mod.slot);
 
-        if (desc->has_txpdo && desc->txpdo && !mod.tx_buffer.empty()) {
+        if (desc->has_txpdo && desc->txpdo) {
             mod.tx_pdo_entry = mapping.add_txpdo(
-                mod.slave_index, mod.tx_buffer.data(),
+                mod.slave_index,
                 desc->txpdo->size, txpdo_idx,
                 PDO::PDOAddressMode::Position);
             if (mod.tx_pdo_entry < 0) {
@@ -256,14 +249,16 @@ bool RP20Device::registerPDOs() {
                             mod.slave_index, mod.slot, txpdo_idx);
                 return false;
             }
+            mod.tx_buffer = { mapping.entryData(mod.tx_pdo_entry),
+                              desc->txpdo->size };
             TETHER_LOGI(TAG, "Slave {} slot {}: registered TxPDO 0x{:04X} ({} bytes, entry {})",
                         mod.slave_index, mod.slot, txpdo_idx,
                         desc->txpdo->size, mod.tx_pdo_entry);
         }
 
-        if (desc->has_rxpdo && desc->rxpdo && !mod.rx_buffer.empty()) {
+        if (desc->has_rxpdo && desc->rxpdo) {
             mod.rx_pdo_entry = mapping.add_rxpdo(
-                mod.slave_index, mod.rx_buffer.data(),
+                mod.slave_index,
                 desc->rxpdo->size, rxpdo_idx,
                 PDO::PDOAddressMode::Position);
             if (mod.rx_pdo_entry < 0) {
@@ -271,6 +266,8 @@ bool RP20Device::registerPDOs() {
                             mod.slave_index, mod.slot, rxpdo_idx);
                 return false;
             }
+            mod.rx_buffer = { mapping.entryDataMut(mod.rx_pdo_entry),
+                              desc->rxpdo->size };
             TETHER_LOGI(TAG, "Slave {} slot {}: registered RxPDO 0x{:04X} ({} bytes, entry {})",
                         mod.slave_index, mod.slot, rxpdo_idx,
                         desc->rxpdo->size, mod.rx_pdo_entry);

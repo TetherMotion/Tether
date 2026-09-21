@@ -132,17 +132,17 @@ bool PDORegionManager::popRxData(int region_id, std::span<uint8_t> data) {
 uint8_t* PDORegionManager::getTxBuffer(int region_id) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto* re = findRegion(region_id);
-    if (!re || !re->pdo_entry || !re->pdo_entry->app_buffer) return nullptr;
+    if (!re || !re->pdo_entry || re->pdo_entry->data_size == 0) return nullptr;
     if (re->region.direction != PDO::PDODirection::RxPDO) return nullptr;
-    return static_cast<uint8_t*>(re->pdo_entry->app_buffer) + re->region.offset;
+    return re->pdo_entry->storage + re->region.offset;
 }
 
 const uint8_t* PDORegionManager::getRxBuffer(int region_id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto* re = findRegion(region_id);
-    if (!re || !re->pdo_entry || !re->pdo_entry->app_buffer) return nullptr;
+    if (!re || !re->pdo_entry || re->pdo_entry->data_size == 0) return nullptr;
     if (re->region.direction != PDO::PDODirection::TxPDO) return nullptr;
-    return static_cast<const uint8_t*>(re->pdo_entry->app_buffer) + re->region.offset;
+    return re->pdo_entry->storage + re->region.offset;
 }
 
 void PDORegionManager::prepareExchange() {
@@ -154,9 +154,9 @@ void PDORegionManager::prepareExchange() {
 
     for (auto& re : regions_) {
         if (re.region.direction != PDO::PDODirection::RxPDO) continue;
-        if (!re.pdo_entry || !re.pdo_entry->app_buffer) continue;
+        if (!re.pdo_entry || re.pdo_entry->data_size == 0) continue;
 
-        uint8_t* dest = static_cast<uint8_t*>(re.pdo_entry->app_buffer) + re.region.offset;
+        uint8_t* dest = re.pdo_entry->storage + re.region.offset;
 
         if (re.provider) {
             // Mode A: callback
@@ -175,9 +175,9 @@ void PDORegionManager::processExchange() {
 
     for (auto& re : regions_) {
         if (re.region.direction != PDO::PDODirection::TxPDO) continue;
-        if (!re.pdo_entry || !re.pdo_entry->app_buffer) continue;
+        if (!re.pdo_entry || re.pdo_entry->data_size == 0) continue;
 
-        const uint8_t* src = static_cast<const uint8_t*>(re.pdo_entry->app_buffer) + re.region.offset;
+        const uint8_t* src = re.pdo_entry->storage + re.region.offset;
 
         if (re.provider) {
             // Mode A: callback

@@ -812,12 +812,21 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
         return;
 
     const auto* eth = reinterpret_cast<const EtherCAT::EthernetHeader*>(frame);
-    const uint16_t ether_type = bswap16(eth->etherType_be);
+    uint16_t ether_type = bswap16(eth->etherType_be);
 
     // The EtherCAT frame header and datagrams start right after the Ethernet
     // header for direct EtherCAT (EtherType 0x88A4).  For EtherCAT-over-UDP,
     // we need to skip the IPv4 + UDP headers first.
     size_t ecat_offset = sizeof(EtherCAT::EthernetHeader);
+
+    // Q15: 802.1Q tag — the inner EtherType and payload sit 4 bytes deeper.
+    // (Only reachable when NIC VLAN offload didn't strip the tag.)
+    if (ether_type == 0x8100) {
+        if (length < ecat_offset + 4 + sizeof(EtherCAT::FrameHeader)) return;
+        ether_type = bswap16(*reinterpret_cast<const uint16_t*>(
+            frame + ecat_offset + 2));
+        ecat_offset += 4;
+    }
 
     if (ether_type == EtherCAT::kEtherTypeEtherCAT) {
         // Direct EtherCAT — nothing extra to skip.
@@ -970,8 +979,11 @@ void Master::depositCyclicSlot(uint8_t slot_idx, Command cmd,
         std::memcpy(s.data, payload,
                     std::min<size_t>(datalen, sizeof(s.data)));
     }
-    // release: payload fields must be visible before the seq bump.
-    s.seq.fetch_add(1, std::memory_order_release);
+    // seq_cst publish (Q13): the waiter's token compare must see a total
+    // order with this bump — acquire/release leaves an S-store-buffer
+    // window where a waiter can observe the new seq before the payload
+    // fields on weak memory.
+    s.seq.fetch_add(1, std::memory_order_seq_cst);
 
 #ifdef __linux__
     // Wake a cyclic thread blocked in ppoll() — needed when the poll thread
@@ -1008,7 +1020,7 @@ void Master::publishCyclicSlotView(uint8_t slot_idx, Command cmd,
     // The channel's kernel stamp when present, else stamp at deposit.
     s.stamp_ns = stamp_ns ? stamp_ns
         : Tether::Platform::Clock::instance().getMicroseconds() * 1000;
-    s.seq.fetch_add(1, std::memory_order_release);
+    s.seq.fetch_add(1, std::memory_order_seq_cst);   // see depositCyclicSlot
 
 #ifdef __linux__
     if (cyclic_notify_fd_ >= 0 &&
@@ -1023,7 +1035,7 @@ void Master::publishCyclicSlotView(uint8_t slot_idx, Command cmd,
 uint64_t Master::cyclicSlotToken(uint8_t slot) const
 {
     if (slot >= IPDOTransport::kNumCyclicSlots) return 0;
-    return cyclic_slots_[slot].seq.load(std::memory_order_acquire);
+    return cyclic_slots_[slot].seq.load(std::memory_order_seq_cst);
 }
 
 namespace {
@@ -1157,14 +1169,21 @@ void Master::dispatchChannelFrame(const CyclicFrameView& v)
     const size_t   flen = v.frame_len;
     constexpr size_t kEcatHdr = sizeof(EtherCAT::EthernetHeader);       // 14
     constexpr size_t kDgHdr   = sizeof(EtherCAT::DatagramHeader);       // 10
-    if (flen < kEcatHdr + sizeof(EtherCAT::FrameHeader)) return;
+    // Q15: with the VLAN-aware demux a 0x8100-tagged frame can arrive on
+    // the cyclic socket — the EtherCAT header sits 4 bytes deeper.
+    size_t base = kEcatHdr;
+    if (flen >= kEcatHdr + 4 &&
+        f[12] == 0x81 && f[13] == 0x00) {
+        base += 4;
+    }
+    if (flen < base + sizeof(EtherCAT::FrameHeader)) return;
 
     const uint16_t ec_len = le16_to_host(
-        *reinterpret_cast<const uint16_t*>(f + kEcatHdr)) & 0x07FFu;
-    if (flen < kEcatHdr + sizeof(EtherCAT::FrameHeader) + ec_len) return;
+        *reinterpret_cast<const uint16_t*>(f + base)) & 0x07FFu;
+    if (flen < base + sizeof(EtherCAT::FrameHeader) + ec_len) return;
 
     // Classify pass: any non-cyclic idx → whole frame to the parser.
-    size_t off = kEcatHdr + sizeof(EtherCAT::FrameHeader);
+    size_t off = base + sizeof(EtherCAT::FrameHeader);
     size_t rem = ec_len;
     bool   all_cyclic = true;
     while (rem >= kDgHdr + sizeof(uint16_t) && off + kDgHdr <= flen) {
@@ -1191,7 +1210,7 @@ void Master::dispatchChannelFrame(const CyclicFrameView& v)
     }
 
     // Publish pass — every datagram is cyclic; hand payload views to slots.
-    off = kEcatHdr + sizeof(EtherCAT::FrameHeader);
+    off = base + sizeof(EtherCAT::FrameHeader);
     rem = ec_len;
     while (rem >= kDgHdr + sizeof(uint16_t) && off + kDgHdr <= flen) {
         const uint8_t  idx       = f[off + 1];
@@ -1250,8 +1269,9 @@ bool Master::waitCyclicSlotView(uint8_t slot, uint64_t token,
     const int64_t deadline_ns =
         clock.getMicroseconds() * 1000 + static_cast<int64_t>(timeout_ns);
 
-    // Fast path: response already deposited.
-    if (s.seq.load(std::memory_order_acquire) != token) {
+    // Fast path: response already deposited.  seq_cst pairs with the
+    // deposit's publish bump (Q13).
+    if (s.seq.load(std::memory_order_seq_cst) != token) {
         return read_slot();
     }
 
@@ -1292,7 +1312,7 @@ bool Master::waitCyclicSlotView(uint8_t slot, uint64_t token,
 #endif
 
     while (true) {
-        if (s.seq.load(std::memory_order_acquire) != token) {
+        if (s.seq.load(std::memory_order_seq_cst) != token) {
             return read_slot();
         }
         if (cancel_requested_.load(std::memory_order_acquire)) return false;
@@ -1304,13 +1324,15 @@ bool Master::waitCyclicSlotView(uint8_t slot, uint64_t token,
             // Spin phase: the ring backend's rxPending() is pure memory
             // reads — a NIC DMA write becomes visible before the kernel
             // could ever wake a ppoll() sleeper.  Shares the deadline
-            // budget; skipped entirely when rx_spin_ns_ == 0.
-            const uint32_t spin_ns = rx_spin_ns_;
+            // budget; skipped entirely when slot_spin_ns_ == 0.  (This is
+            // the *slot-wait* spin — rx_spin_ns_ is the channel's own
+            // rxPoll busy-poll, a separate knob, Q11.)
+            const uint32_t spin_ns = slot_spin_ns_;
             if (spin_ns > 0) {
                 const int64_t spin_end = now_ns +
                     std::min<int64_t>(remain, spin_ns);
                 while (clock.getMicroseconds() * 1000 < spin_end) {
-                    if (s.seq.load(std::memory_order_acquire) != token) {
+                    if (s.seq.load(std::memory_order_seq_cst) != token) {
                         return read_slot();
                     }
                     if (cyclic_channel_->rxPending()) break;
@@ -1368,8 +1390,188 @@ bool Master::waitCyclicSlotView(uint8_t slot, uint64_t token,
         // No fd wake-up path (non-Linux / no eventfd / no wire fd): loop —
         // a bounded spin on the sequence counter plus channel drain, with
         // the seq/cancel/deadline checks at the top bounding it so a dead
-        // link cannot wedge the cyclic thread.
+        // link cannot wedge the cyclic thread.  Q22: the fallback policy
+        // is user-configurable — Yield (default) drops the thread's time
+        // slice each pass; Spin keeps the tightest re-check cadence at
+        // full CPU burn.
+        if (slot_wait_fallback_ ==
+            CyclicLoopConfig::SlotWaitFallback::Yield) {
+            std::this_thread::yield();
+        }
     }
+}
+
+uint32_t Master::waitCyclicSlotMask(uint32_t slot_mask,
+                                    const uint64_t* tokens,
+                                    uint32_t timeout_ns,
+                                    CyclicSlotView* views)
+{
+    // Q3: one wake for the whole mask — a sliced collect pays a single
+    // ppoll registration instead of one sleep per slice.  Each wake
+    // re-scans all outstanding bits; a deposit on ANY slot is progress.
+    slot_mask &= (1u << IPDOTransport::kNumCyclicSlots) - 1u;
+    if (!slot_mask || !tokens || !views) return 0;
+
+    auto& clock = Tether::Platform::Clock::instance();
+    const int64_t deadline_ns =
+        clock.getMicroseconds() * 1000 + static_cast<int64_t>(timeout_ns);
+
+    // Outstanding bits → arrived so far; fill views for arrived slots.
+    auto scan = [&]() -> uint32_t {
+        uint32_t outstanding = 0;
+        for (uint8_t s = 0; s < IPDOTransport::kNumCyclicSlots; ++s) {
+            if (!(slot_mask & (1u << s))) continue;
+            if (cyclic_slots_[s].seq.load(std::memory_order_seq_cst)
+                != tokens[s]) continue;
+            outstanding |= 1u << s;
+        }
+        return outstanding;
+    };
+    auto fill = [&](uint32_t arrived) {
+        for (uint8_t s = 0; s < IPDOTransport::kNumCyclicSlots; ++s) {
+            if (!(arrived & (1u << s))) continue;
+            auto& slot = cyclic_slots_[s];
+            for (int tries = 0; tries < 8; ++tries) {
+                const uint64_t s0 = slot.seq.load(std::memory_order_acquire);
+                views[s].cmd     = slot.cmd;
+                views[s].adp     = slot.adp;
+                views[s].ado     = slot.ado;
+                views[s].datalen = slot.datalen;
+                views[s].wkc     = slot.wkc;
+                views[s].stamp_ns = slot.stamp_ns;
+                views[s].payload = slot.payload ? slot.payload : slot.data;
+                const int64_t cookie = slot.cookie;
+                views[s].cookie  = cookie >= 0
+                    ? static_cast<uint32_t>(cookie) : 0;
+                views[s].channel = cookie >= 0 ? cyclic_channel_.get()
+                                               : nullptr;
+                if (slot.seq.load(std::memory_order_acquire) == s0) break;
+            }
+        }
+    };
+
+    uint32_t outstanding = scan();
+    if (!outstanding) { fill(slot_mask); return slot_mask; }
+
+    struct WaiterGuard {
+        std::atomic<int>& c;
+        ~WaiterGuard() { c.fetch_sub(1, std::memory_order_acq_rel); }
+    } waiter_guard{cyclic_waiters_};
+    cyclic_waiters_.fetch_add(1, std::memory_order_acq_rel);
+
+#ifdef __linux__
+    struct pollfd fds[2];
+    nfds_t nfds = 0;
+    int efd_pos = -1, wire_pos = -1;
+    if (cyclic_notify_fd_ >= 0) {
+        efd_pos = static_cast<int>(nfds);
+        fds[nfds++] = { cyclic_notify_fd_, POLLIN, 0 };
+    }
+    int wire_fd = -1;
+    if (cyclic_channel_) {
+        wire_fd = cyclic_channel_->fd();
+    } else if (iface_.receive) {
+        wire_fd = static_cast<int>(
+            reinterpret_cast<intptr_t>(iface_.native_handle));
+    }
+    if (wire_fd >= 0) {
+        wire_pos = static_cast<int>(nfds);
+        fds[nfds++] = { wire_fd, POLLIN, 0 };
+    }
+#endif
+
+    while (true) {
+        outstanding = scan();
+        if (!outstanding) { fill(slot_mask); return slot_mask; }
+        if (cancel_requested_.load(std::memory_order_acquire)) {
+            const uint32_t arrived = slot_mask & ~outstanding;
+            fill(arrived);
+            return arrived;
+        }
+        const int64_t now_ns = clock.getMicroseconds() * 1000;
+        if (deadline_ns - now_ns <= 0) {
+            const uint32_t arrived = slot_mask & ~outstanding;
+            fill(arrived);
+            return arrived;
+        }
+
+        if (cyclic_channel_) {
+            const uint32_t spin_ns = slot_spin_ns_;
+            if (spin_ns > 0) {
+                const int64_t spin_end = now_ns +
+                    std::min<int64_t>(deadline_ns - now_ns, spin_ns);
+                while (clock.getMicroseconds() * 1000 < spin_end) {
+                    bool any = false;
+                    for (uint8_t s = 0; s < IPDOTransport::kNumCyclicSlots;
+                         ++s) {
+                        if (!(slot_mask & (1u << s))) continue;
+                        if (cyclic_slots_[s].seq.load(
+                                std::memory_order_seq_cst) != tokens[s]) {
+                            any = true; break;
+                        }
+                    }
+                    if (any || cyclic_channel_->rxPending()) break;
+                }
+            }
+            CyclicFrameView fviews[8];
+            const int n = cyclic_channel_->rxPoll(fviews, 8, 0);
+            for (int i = 0; i < n; ++i) dispatchChannelFrame(fviews[i]);
+            if (n > 0) continue;
+        }
+
+#ifdef __linux__
+        if (nfds > 0) {
+            const int64_t remain2 = deadline_ns -
+                                    clock.getMicroseconds() * 1000;
+            if (remain2 <= 0) continue;
+            struct timespec ts;
+            ts.tv_sec  = remain2 / 1'000'000'000LL;
+            ts.tv_nsec = remain2 % 1'000'000'000LL;
+            const int ret = ppoll(fds, nfds, &ts, nullptr);
+            if (ret < 0) {
+                if (errno == EINTR) continue;
+                outstanding = scan();
+                const uint32_t arrived = slot_mask & ~outstanding;
+                fill(arrived);
+                return arrived;
+            }
+            if (ret == 0) break;   // deadline reached — final scan below
+
+            if (wire_pos >= 0 && (fds[wire_pos].revents & POLLIN)) {
+                if (cyclic_channel_) {
+                    CyclicFrameView fviews[8];
+                    const int n = cyclic_channel_->rxPoll(fviews, 8, 0);
+                    for (int i = 0; i < n; ++i)
+                        dispatchChannelFrame(fviews[i]);
+                } else {
+                    uint8_t buf[1600];
+                    for (int i = 0; i < 8; ++i) {
+                        size_t n = 0;
+                        if (!iface_.receive(buf, sizeof(buf), &n) || n == 0)
+                            break;
+                        handleRxFrame(buf, n);
+                    }
+                }
+            }
+            if (efd_pos >= 0 && (fds[efd_pos].revents & POLLIN)) {
+                uint64_t v;
+                ssize_t r = ::read(cyclic_notify_fd_, &v, sizeof(v));
+                (void)r;
+            }
+            continue;
+        }
+#endif
+
+        if (slot_wait_fallback_ ==
+            CyclicLoopConfig::SlotWaitFallback::Yield) {
+            std::this_thread::yield();
+        }
+    }
+    // ppoll deadline expired — one last scan, then report what arrived.
+    outstanding = scan();
+    const uint32_t arrived = slot_mask & ~outstanding;
+    fill(arrived);
+    return arrived;
 }
 
 bool Master::waitCyclicSlot(uint8_t slot, uint64_t token,

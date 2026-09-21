@@ -35,8 +35,8 @@ TEST(PDOApiTest, SendAndReceiveLogicalEntriesFailGracefullyAndUpdateStats) {
     uint32_t out_buf = 0xAABBCCDD;
     uint32_t in_buf = 0;
 
-    const int rx_idx = mapping.add_rxpdo(0, &out_buf, sizeof(out_buf), 0x1600, PDOAddressMode::Logical);
-    const int tx_idx = mapping.add_txpdo(0, &in_buf, sizeof(in_buf), 0x1A00, PDOAddressMode::Logical);
+    const int rx_idx = mapping.add_rxpdo(0, sizeof(out_buf), 0x1600, PDOAddressMode::Logical);
+    const int tx_idx = mapping.add_txpdo(0, sizeof(in_buf), 0x1A00, PDOAddressMode::Logical);
     ASSERT_GE(rx_idx, 0);
     ASSERT_GE(tx_idx, 0);
 
@@ -73,12 +73,12 @@ TEST(PDOApiTest, InvalidEntryIndexOrDirectionReturnsFalse) {
 
     // Add a TxPDO and ensure sendRxPDO rejects wrong direction.
     uint16_t buf = 0;
-    const int tx_idx = mapping.add_txpdo(0, &buf, sizeof(buf), 0x1A00, PDOAddressMode::Logical);
+    const int tx_idx = mapping.add_txpdo(0, sizeof(buf), 0x1A00, PDOAddressMode::Logical);
     ASSERT_GE(tx_idx, 0);
     EXPECT_FALSE(mgr.sendRxPDO(static_cast<size_t>(tx_idx)));
 
     // Add an RxPDO and ensure receiveTxPDO rejects wrong direction.
-    const int rx_idx = mapping.add_rxpdo(0, &buf, sizeof(buf), 0x1600, PDOAddressMode::Logical);
+    const int rx_idx = mapping.add_rxpdo(0, sizeof(buf), 0x1600, PDOAddressMode::Logical);
     ASSERT_GE(rx_idx, 0);
     EXPECT_FALSE(mgr.receiveTxPDO(static_cast<size_t>(rx_idx)));
 

@@ -336,6 +336,12 @@ public:
                             CyclicSlotView& out) override {
         return master_.waitCyclicSlotView(slot, token, timeout_ns, out);
     }
+    uint32_t waitCyclicSlotMask(uint32_t slot_mask, const uint64_t* tokens,
+                                uint32_t timeout_ns,
+                                CyclicSlotView* views) override {
+        return master_.waitCyclicSlotMask(slot_mask, tokens, timeout_ns,
+                                          views);
+    }
     uint8_t* acquireCyclicTxFrame() override {
         return master_.acquireCyclicTxFrame();
     }
@@ -703,7 +709,9 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     CyclicExecutive::Config exec_cfg = config.exec;
     exec_cfg.cycle_period_us    = config.cycle_period_us;
     exec_cfg.dc_interval_cycles = config.sync_interval_cycles;
-    rx_spin_ns_ = config.rx_spin_ns;
+    rx_spin_ns_         = config.rx_spin_ns;
+    slot_spin_ns_       = config.slot_spin_ns;
+    slot_wait_fallback_ = config.slot_wait_fallback;
 
     // ---- Runtime CPU isolation (opt-in) --------------------------------
     // Claim CPUs for the RT threads before computing affinities.  Claims
@@ -713,6 +721,8 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
         Tether::Platform::CpuIsolation::Spec spec;
         spec.prefer_isolated = config.cpu_isolation.prefer_isolated;
         spec.avoid_cpu0      = config.cpu_isolation.avoid_cpu0;
+        spec.create_cpuset   = config.cpu_isolation.create_cpuset;
+        spec.steer_irqs      = config.cpu_isolation.steer_irqs;
 
         spec.requested_cpu = config.cpu_isolation.cyclic_cpu;
         auto c = iso.claim(spec);
@@ -823,6 +833,7 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     // ---- Cyclic channel + process image + lockable sections ------------
     setupCyclicDatapath(config.wire_mode, config.image_mode,
                         config.shm_image_name, config.rx_spin_ns,
+                        config.slot_spin_ns, config.slot_wait_fallback,
                         config.strict_wkc, config.memory_lock);
 
     cyclic_loop_ = std::make_unique<CyclicExecutive>(
@@ -842,16 +853,31 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
 
     // Split-phase collect task — the send half already ran at Exchange;
     // collect lands at the configured placement so the wire round-trip
-    // overlaps the phases in between.
+    // overlaps the phases in between.  Split honors the user-supplied
+    // collect_phase (Q2); SplitLate pins Diagnostics.
     if (collect_fn) {
-        const TaskPhase collect_phase =
+        TaskPhase collect_phase =
             (config.exchange_placement == ExchangePlacement::SplitLate)
                 ? TaskPhase::Diagnostics
-                : TaskPhase::PostExchange;
+                : config.collect_phase;
+        if (collect_phase == TaskPhase::PreExchange ||
+            collect_phase == TaskPhase::Exchange) {
+            TETHER_LOGW(TAG, "collect_phase must run after Exchange — "
+                             "clamping to PostExchange");
+            collect_phase = TaskPhase::PostExchange;
+        }
         cyclic_loop_->addTask(collect_phase, std::move(collect_fn));
     }
 
-    return cyclic_loop_->start();
+    // The cyclic loop consumes the wire on its own deadline — a
+    // triggerSend() here bumps an unconsumed counter; mark the consumer
+    // so the producer gets a one-shot warning (Q27).
+    process_image_.setSendConsumer(ProcessImage::SendConsumer::Cyclic);
+    if (!cyclic_loop_->start()) {
+        process_image_.setSendConsumer(ProcessImage::SendConsumer::None);
+        return false;
+    }
+    return true;
 }
 
 void Master::stopCyclicLoop()
@@ -862,6 +888,7 @@ void Master::stopCyclicLoop()
     if (cyclic_loop_) {
         cyclic_loop_->stop();
         cyclic_loop_.reset();
+        process_image_.setSendConsumer(ProcessImage::SendConsumer::None);
     }
     // Release runtime CPU claims before the threads' affinity becomes
     // meaningless — claims are also auto-released at process exit.
@@ -905,14 +932,20 @@ bool Master::startAsyncLoop(const AsyncLoopConfig& config)
     ecfg.collect_period_us    = config.collect_period_us;
     ecfg.min_send_interval_ns = config.min_send_interval_ns;
     ecfg.max_idle_ns          = config.max_idle_ns;
-    rx_spin_ns_ = config.rx_spin_ns;
+    ecfg.dc_interval_us       = config.enable_dc_synchronization
+                                ? config.dc_interval_us : 0;
+    rx_spin_ns_         = config.rx_spin_ns;
+    slot_spin_ns_       = config.slot_spin_ns;
+    slot_wait_fallback_ = config.slot_wait_fallback;
 
-    // ---- Runtime CPU isolation (opt-in; single async thread) -----------
+    // ---- Runtime CPU isolation (opt-in; async thread + optional DC) ---
     if (config.cpu_isolation.enabled) {
         auto& iso = Tether::Platform::CpuIsolation::instance();
         Tether::Platform::CpuIsolation::Spec spec;
         spec.prefer_isolated = config.cpu_isolation.prefer_isolated;
         spec.avoid_cpu0      = config.cpu_isolation.avoid_cpu0;
+        spec.create_cpuset   = config.cpu_isolation.create_cpuset;
+        spec.steer_irqs      = config.cpu_isolation.steer_irqs;
         spec.requested_cpu   = config.cpu_isolation.cyclic_cpu;
         auto c = iso.claim(spec);
         if (c.valid()) {
@@ -922,6 +955,17 @@ bool Master::startAsyncLoop(const AsyncLoopConfig& config)
             TETHER_LOGW(TAG, "CPU isolation: async CPU {} claim denied — "
                              "running unpinned",
                         config.cpu_isolation.cyclic_cpu);
+        }
+        if (ecfg.dc_interval_us > 0) {
+            spec.requested_cpu = config.cpu_isolation.dc_cpu;
+            auto d = iso.claim(spec);
+            if (d.valid()) {
+                dc_cpu_claim_          = d.cpu;
+                ecfg.dc_cpu_affinity   = d.cpu;
+            } else if (config.cpu_isolation.dc_cpu >= 0) {
+                TETHER_LOGW(TAG, "CPU isolation: async DC CPU {} claim "
+                                 "denied", config.cpu_isolation.dc_cpu);
+            }
         }
     }
 
@@ -940,6 +984,7 @@ bool Master::startAsyncLoop(const AsyncLoopConfig& config)
     // ---- Cyclic channel + process image + lockable sections ------------
     setupCyclicDatapath(config.wire_mode, config.image_mode,
                         config.shm_image_name, config.rx_spin_ns,
+                        config.slot_spin_ns, config.slot_wait_fallback,
                         config.strict_wkc, config.memory_lock);
 
     // Send: one RxPDO shot per trigger.  cyclicSend() falls back to the
@@ -962,11 +1007,26 @@ bool Master::startAsyncLoop(const AsyncLoopConfig& config)
     AsyncCyclicLoop::TaskFn collect_fn = [this]() -> bool {
         return !pdo_ || pdo_->cyclicCollect(&process_image_);
     };
+    AsyncCyclicLoop::TaskFn dc_fn;
+    if (ecfg.dc_interval_us > 0) {
+        dc_fn = [this]() -> bool {
+            if (!dc_ || dc_->getState() == DC::DCState::Disabled) return true;
+            EtherCATDC* dc = dc_->get();
+            return dc ? dc->sendSyncFrame() : true;
+        };
+    }
 
     async_loop_ = std::make_unique<AsyncCyclicLoop>(
         process_image_, std::move(send_fn), std::move(collect_fn),
-        AsyncCyclicLoop::TimeFunc{}, ecfg);
-    return async_loop_->start();
+        std::move(dc_fn), AsyncCyclicLoop::TimeFunc{}, ecfg);
+    // Mark the trigger word's consumer BEFORE start() so a triggerSend()
+    // under the wrong loop model warns instead of silently dropping (Q27).
+    process_image_.setSendConsumer(ProcessImage::SendConsumer::Async);
+    if (!async_loop_->start()) {
+        process_image_.setSendConsumer(ProcessImage::SendConsumer::None);
+        return false;
+    }
+    return true;
 }
 
 void Master::stopAsyncLoop()
@@ -976,11 +1036,16 @@ void Master::stopAsyncLoop()
     if (async_loop_) {
         async_loop_->stop();
         async_loop_.reset();
+        process_image_.setSendConsumer(ProcessImage::SendConsumer::None);
         teardownCyclicDatapath();
     }
     if (async_cpu_claim_ >= 0) {
         Tether::Platform::CpuIsolation::instance().release(async_cpu_claim_);
         async_cpu_claim_ = -1;
+    }
+    if (dc_cpu_claim_ >= 0) {
+        Tether::Platform::CpuIsolation::instance().release(dc_cpu_claim_);
+        dc_cpu_claim_ = -1;
     }
 }
 
@@ -1002,9 +1067,15 @@ void Master::setupCyclicDatapath(CyclicWireMode wire_mode,
                                  ImageMode image_mode,
                                  const std::string& shm_image_name,
                                  uint32_t rx_spin_ns,
+                                 uint32_t slot_spin_ns,
+                                 CyclicLoopConfig::SlotWaitFallback
+                                     slot_fallback,
                                  bool strict_wkc,
                                  const MemoryLockConfig& memlock)
 {
+    rx_spin_ns_         = rx_spin_ns;
+    slot_spin_ns_       = slot_spin_ns;
+    slot_wait_fallback_ = slot_fallback;
     // The channel needs a raw AF_PACKET fd — only the direct-EtherCAT path
     // exposes one (iface_.receive/native_handle are stripped for VLAN and
     // absent under UDP encapsulation or polling transports).

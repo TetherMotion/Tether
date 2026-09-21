@@ -10,6 +10,13 @@
 #include <cstring>
 #include <thread>
 
+#ifdef __linux__
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/ProcessImage.hpp"
@@ -162,8 +169,8 @@ protected:
     FakePDOTransport transport;
     LogicalAddressManager mgr{transport};
     PDOMapping mapping;
-    uint8_t rx_app[8] = {};
-    uint8_t tx_app[8] = {};
+    uint8_t* rx_app = nullptr;   ///< views into entry storage (Q1)
+    uint8_t* tx_app = nullptr;
 
     void SetUp() override {
         mgr.init();
@@ -175,8 +182,10 @@ protected:
         configs[0].txpdo_size = 8;
         ASSERT_TRUE(mgr.buildAddressMap(configs, 1));
 
-        mapping.add_rxpdo(0, rx_app, 8);
-        mapping.add_txpdo(0, tx_app, 8);
+        mapping.add_rxpdo(0, 8);
+        mapping.add_txpdo(0, 8);
+        rx_app = mapping.entryDataMut(0);
+        tx_app = mapping.entryDataMut(1);
     }
 };
 
@@ -458,7 +467,7 @@ TEST_F(ProcessImageTest, BufferedExchangeUsesAppBuffers) {
     // Response must carry the full image + nonzero WKC.
     transport.resp_view.payload = transport.resp_data;
     transport.resp_view.datalen = 16;
-    transport.resp_view.wkc     = 1;
+    transport.resp_view.wkc     = 3;
     ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
     EXPECT_EQ(transport.last_sent_frame[0], 0xAA);   // gathered from app_buffer
 }
@@ -481,7 +490,7 @@ TEST_F(ProcessImageTest, DirectModeSendsImageInPlace) {
 
     transport.resp_view.payload = transport.resp_data;
     transport.resp_view.datalen = 16;
-    transport.resp_view.wkc     = 1;
+    transport.resp_view.wkc     = 3;
     transport.resp_data[8] = 0x99;                // TxPDO byte at offset 8
 
     ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
@@ -516,7 +525,7 @@ TEST_F(ProcessImageTest, TripleBufferedExchangeCarriesCommittedData) {
 
     transport.resp_view.payload = transport.resp_data;
     transport.resp_view.datalen = 16;
-    transport.resp_view.wkc     = 1;
+    transport.resp_view.wkc     = 3;
 
     ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
     EXPECT_EQ(transport.last_sent_frame[0], 0x33);
@@ -536,7 +545,7 @@ TEST_F(ProcessImageTest, RotatingModeSendsInPlaceFrame) {
 
     transport.resp_view.payload = transport.resp_data;
     transport.resp_view.datalen = 16;
-    transport.resp_view.wkc     = 1;
+    transport.resp_view.wkc     = 3;
 
     // First exchange: no frame attached → exchange acquires + attaches.
     // The app wrote nothing, so the payload is whatever was in the fake
@@ -552,7 +561,7 @@ TEST_F(ProcessImageTest, RotatingModeSendsInPlaceFrame) {
     uint8_t* w = img.outputWrite();
     ASSERT_NE(w, nullptr);
     w[0] = 0x77;
-    transport.resp_view.wkc = 1;
+    transport.resp_view.wkc = 3;
     ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
     EXPECT_EQ(transport.fake_tx_frame[26], 0x77);     // payload sent in place
 }
@@ -576,7 +585,7 @@ TEST_F(ProcessImageTest, ForcedBufferedEntriesStillGathered) {
     rx_app[0] = 0x5B;   // app writes its buffer — not the image
     transport.resp_view.payload = transport.resp_data;
     transport.resp_view.datalen = 16;
-    transport.resp_view.wkc     = 1;
+    transport.resp_view.wkc     = 3;
 
     ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
     EXPECT_EQ(transport.last_sent_frame[0], 0x5B);   // gathered despite image mode
@@ -617,13 +626,16 @@ TEST_F(ProcessImageTest, MultiSliceSplitsImageAcrossSlots) {
     for (int i = 0; i < 8; ++i) out[i] = 0xA0 + i;
 
     transport.per_slot_resp = true;
+    // Derived WKC per slice (Q6): slice 0 covers the RxPDO region (+1),
+    // slice 1 the TxPDO region (+2).
+    const uint16_t slice_wkc[2] = {1, 2};
     for (int s = 0; s < 2; ++s) {
         for (int i = 0; i < 8; ++i)
             transport.resp_slot_data[s][i] = 0x10 * s + i;
         transport.resp_slot_data[s][8] = 0xEE;
         transport.resp_slots[s].payload = transport.resp_slot_data[s];
         transport.resp_slots[s].datalen = 8;
-        transport.resp_slots[s].wkc     = 2;
+        transport.resp_slots[s].wkc     = slice_wkc[s];
     }
 
     ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
@@ -656,7 +668,7 @@ TEST_F(ProcessImageTest, SplitPhaseSendDoesNotWaitThenCollect) {
 
     transport.resp_view.payload = transport.resp_data;
     transport.resp_view.datalen = 16;
-    transport.resp_view.wkc     = 1;
+    transport.resp_view.wkc     = 3;
 
     ASSERT_TRUE(mgr.cyclicSend(mapping, &img, 200'000));
     EXPECT_TRUE(mgr.cyclicExchangePending());
@@ -886,5 +898,169 @@ TEST_F(ProcessImageTest, ShmExportAndAttachShareRegions) {
 TEST_F(ProcessImageTest, AttachSharedBadNameFails) {
     ProcessImage img;
     EXPECT_FALSE(img.attachShared("tether-nonexistent-image-xyz"));
+}
+
+// ---- Q20: attach refuses a half-written/poisoned export -------------
+
+TEST_F(ProcessImageTest, ShmHandshakeRejectsIncompleteExport) {
+    const char* path = "/tether-test-shm-half";
+    // Craft a segment with valid magic/version but no ready/checksum —
+    // the exporter "died" mid-export.  Attach must refuse.
+    int fd = ::shm_open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(::ftruncate(fd, ShmImageLayout::kHeaderPadded), 0);
+    void* map = ::mmap(nullptr, ShmImageLayout::kHeaderPadded,
+                       PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    ASSERT_NE(map, MAP_FAILED);
+    auto* hdr = static_cast<ShmImageHeader*>(map);
+    std::memset(map, 0, ShmImageLayout::kHeaderPadded);
+    hdr->magic = kShmMagic;
+    hdr->version = kShmVersion;
+    hdr->rx_bytes = 8; hdr->tx_bytes = 8;
+    hdr->header_bytes = sizeof(ShmImageHeader);
+    // ready stays 0 — incomplete export.
+
+    ProcessImage img;
+    EXPECT_FALSE(img.attachShared("tether-test-shm-half"));
+    ::munmap(map, ShmImageLayout::kHeaderPadded);
+    ::close(fd);
+    ::shm_unlink(path);
+}
+
+TEST_F(ProcessImageTest, ShmHandshakeRejectsBadChecksum) {
+    const char* path = "/tether-test-shm-badcksum";
+    int fd = ::shm_open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(::ftruncate(fd, ShmImageLayout::kHeaderPadded), 0);
+    void* map = ::mmap(nullptr, ShmImageLayout::kHeaderPadded,
+                       PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    ASSERT_NE(map, MAP_FAILED);
+    auto* hdr = static_cast<ShmImageHeader*>(map);
+    std::memset(map, 0, ShmImageLayout::kHeaderPadded);
+    hdr->magic = kShmMagic;
+    hdr->version = kShmVersion;
+    hdr->rx_bytes = 8; hdr->tx_bytes = 8;
+    hdr->header_bytes = sizeof(ShmImageHeader);
+    hdr->checksum.store(0xDEADBEEF);       // garbage
+    hdr->ready.store(1);                   // claims ready — checksum lies
+    ProcessImage img;
+    EXPECT_FALSE(img.attachShared("tether-test-shm-badcksum"));
+    ::munmap(map, ShmImageLayout::kHeaderPadded);
+    ::close(fd);
+    ::shm_unlink(path);
+}
+
+// ---- Q4: exported entry table ----------------------------------------
+
+TEST_F(ProcessImageTest, ShmEntryTableExportedToAttacher) {
+    const char* name = "tether-test-entrytbl";
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 16; cfg.tx_bytes = 8;
+    cfg.shm_name = name;
+    const int32_t offs[2] = {0, 8};        // two rx entries
+    cfg.entry_offsets = offs;
+    cfg.entry_count = 2;
+
+    ProcessImage server;
+    ASSERT_TRUE(server.configure(cfg));
+
+    ShmEntryDesc rows[2]{};
+    rows[0].index = 0; rows[0].slave_index = 2;
+    rows[0].pdo_index = 0x1600; rows[0].direction = 1; // RxPDO
+    rows[0].offset = 0; rows[0].size = 8;
+    std::snprintf(rows[0].label, sizeof(rows[0].label), "rx:s2:0x1600");
+    rows[1].index = 1; rows[1].slave_index = 2;
+    rows[1].pdo_index = 0x1601; rows[1].direction = 1;
+    rows[1].offset = 8; rows[1].size = 8;
+    server.exportEntryTable(rows, 2);
+    EXPECT_TRUE(server.shmFlags() & kShmFlagEntryTable);
+
+    ProcessImage client;
+    ASSERT_TRUE(client.attachShared(name));
+    EXPECT_TRUE(client.shmFlags() & kShmFlagEntryTable);
+    ASSERT_EQ(client.shmEntryCount(), 2u);
+    const ShmEntryDesc* tbl = client.shmEntryTable();
+    ASSERT_NE(tbl, nullptr);
+    EXPECT_EQ(tbl[0].pdo_index, 0x1600u);
+    EXPECT_EQ(tbl[1].offset, 8);
+    EXPECT_STREQ(tbl[0].label, "rx:s2:0x1600");
+    // And the offsets feed entryHandle() — typed access without hardcoding.
+    EXPECT_EQ(client.entryOffset(0), 0);
+    EXPECT_EQ(client.entryOffset(1), 8);
+    ::shm_unlink("/tether-test-entrytbl");
+}
+
+// ---- Q5: optional region seqlocks ------------------------------------
+
+TEST_F(ProcessImageTest, ShmSeqlockDetectsWriterMidBurst) {
+    const char* name = "tether-test-seqlock";
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 16; cfg.tx_bytes = 8;
+    cfg.shm_name = name;
+    cfg.shm_seqlock = true;
+
+    ProcessImage server;
+    ASSERT_TRUE(server.configure(cfg));
+    EXPECT_TRUE(server.shmFlags() & kShmFlagSeqlock);
+
+    ProcessImage client;
+    ASSERT_TRUE(client.attachShared(name));
+    EXPECT_TRUE(client.shmFlags() & kShmFlagSeqlock);
+
+    // Quiescent read: begin/end agree.
+    const uint32_t s0 = client.shmReadBegin(ProcessImage::ShmRegion::Output);
+    EXPECT_TRUE(client.shmReadEnd(ProcessImage::ShmRegion::Output, s0));
+
+    // Writer mid-burst → reader's stamp goes stale.
+    server.shmWriteBegin(ProcessImage::ShmRegion::Output);
+    EXPECT_FALSE(client.shmReadEnd(ProcessImage::ShmRegion::Output, s0));
+    server.shmWriteEnd(ProcessImage::ShmRegion::Output);
+    const uint32_t s1 = client.shmReadBegin(ProcessImage::ShmRegion::Output);
+    EXPECT_TRUE(client.shmReadEnd(ProcessImage::ShmRegion::Output, s1));
+    EXPECT_NE(s0, s1);                     // seq advanced by the write burst
+    ::shm_unlink("/tether-test-seqlock");
+}
+
+TEST_F(ProcessImageTest, ShmSeqlockDisabledIsNoOp) {
+    const char* name = "tether-test-seqlock-off";
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 16; cfg.tx_bytes = 8;
+    cfg.shm_name = name;                   // shm_seqlock unset → flag off
+    ProcessImage server;
+    ASSERT_TRUE(server.configure(cfg));
+    EXPECT_FALSE(server.shmFlags() & kShmFlagSeqlock);
+    // No-op API: reads always "consistent", writes free.
+    EXPECT_TRUE(server.shmReadEnd(ProcessImage::ShmRegion::Output, 0));
+    server.shmWriteBegin(ProcessImage::ShmRegion::Output);
+    server.shmWriteEnd(ProcessImage::ShmRegion::Output);
+    ::shm_unlink("/tether-test-seqlock-off");
+}
+
+// ---- Q26: cross-process producer stats --------------------------------
+
+TEST_F(ProcessImageTest, ShmProducerStatsCrossProcess) {
+    const char* name = "tether-test-prodstats";
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    cfg.shm_name = name;
+    ProcessImage server;
+    ASSERT_TRUE(server.configure(cfg));
+
+    ProcessImage client;
+    ASSERT_TRUE(client.attachShared(name));
+    const int slot = client.claimProducerSlot();
+    ASSERT_GE(slot, 1);
+    client.triggerSend(static_cast<uint32_t>(slot));
+    client.triggerSend(static_cast<uint32_t>(slot));
+    client.triggerSend();                  // anonymous
+    // The exporter sees both buckets on the shared words.
+    EXPECT_EQ(server.producerTriggerCount(static_cast<uint32_t>(slot)), 2u);
+    EXPECT_EQ(server.producerTriggerCount(0), 1u);
+    EXPECT_EQ(server.sendSeq(), 3u);
+    ::shm_unlink("/tether-test-prodstats");
 }
 #endif

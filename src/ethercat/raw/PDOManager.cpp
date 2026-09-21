@@ -65,7 +65,7 @@ static inline uint16_t host_to_le16(uint16_t v) { return v; }
 
 namespace PDO {
 
-int PDOMapping::add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
+int PDOMapping::add_rxpdo(uint16_t slave_index, uint16_t size,
                           uint16_t pdo_index, PDOAddressMode mode) {
     if (m_entry_count >= kMaxPDOEntries) {
         TETHER_LOGE(TAG,
@@ -74,21 +74,21 @@ int PDOMapping::add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
             kMaxPDOEntries);
         return -1;
     }
-    if (!buffer || size == 0 || size > kMaxPDOSize) {
+    if (size == 0 || size > kMaxPDOSize) {
         TETHER_LOGE(TAG,
-            "Invalid PDO buffer or size (size={}). {}",
+            "Invalid PDO size ({}). {}",
             size,
             (size > kMaxPDOSize)
                 ? "This is a Tether limit, not a slave limit. "
                   "Increase ECAT_PDO_MAX_BUFFER_SIZE in EtherCATConfig.hpp."
-                : "Buffer is null or size is zero.");
+                : "Size is zero.");
         return -1;
     }
     PDOEntry& e   = m_entries[m_entry_count];
     e.slave_index  = slave_index;
     e.direction    = PDODirection::RxPDO;
     e.address_mode = mode;
-    e.app_buffer   = buffer;
+    std::memset(e.storage, 0, sizeof(e.storage));
     e.data_size    = size;
     e.pdo_index    = pdo_index;
     e.enabled      = true;
@@ -102,7 +102,7 @@ int PDOMapping::add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
     return static_cast<int>(m_entry_count++);
 }
 
-int PDOMapping::add_txpdo(uint16_t slave_index, void* buffer, uint16_t size,
+int PDOMapping::add_txpdo(uint16_t slave_index, uint16_t size,
                           uint16_t pdo_index, PDOAddressMode mode) {
     if (m_entry_count >= kMaxPDOEntries) {
         TETHER_LOGE(TAG,
@@ -111,21 +111,21 @@ int PDOMapping::add_txpdo(uint16_t slave_index, void* buffer, uint16_t size,
             kMaxPDOEntries);
         return -1;
     }
-    if (!buffer || size == 0 || size > kMaxPDOSize) {
+    if (size == 0 || size > kMaxPDOSize) {
         TETHER_LOGE(TAG,
-            "Invalid PDO buffer or size (size={}). {}",
+            "Invalid PDO size ({}). {}",
             size,
             (size > kMaxPDOSize)
                 ? "This is a Tether limit, not a slave limit. "
                   "Increase ECAT_PDO_MAX_BUFFER_SIZE in EtherCATConfig.hpp."
-                : "Buffer is null or size is zero.");
+                : "Size is zero.");
         return -1;
     }
     PDOEntry& e   = m_entries[m_entry_count];
     e.slave_index  = slave_index;
     e.direction    = PDODirection::TxPDO;
     e.address_mode = mode;
-    e.app_buffer   = buffer;
+    std::memset(e.storage, 0, sizeof(e.storage));
     e.data_size    = size;
     e.pdo_index    = pdo_index;
     e.enabled      = true;
@@ -139,14 +139,14 @@ int PDOMapping::add_txpdo(uint16_t slave_index, void* buffer, uint16_t size,
     return static_cast<int>(m_entry_count++);
 }
 
-int PDOMapping::add_broadcast_rxpdo(void* buffer, uint16_t size, uint16_t physical_offset) {
+int PDOMapping::add_broadcast_rxpdo(uint16_t size, uint16_t physical_offset) {
     if (m_entry_count >= kMaxPDOEntries) return -1;
     PDOEntry& e = m_entries[m_entry_count];
     e.slave_index     = 0xFFFF;
     e.direction       = PDODirection::RxPDO;
     e.address_mode    = PDOAddressMode::Broadcast;
     e.physical_offset = physical_offset;
-    e.app_buffer      = buffer;
+    std::memset(e.storage, 0, sizeof(e.storage));
     e.data_size       = size;
     e.enabled         = true;
     e.error_count     = 0;
@@ -155,14 +155,14 @@ int PDOMapping::add_broadcast_rxpdo(void* buffer, uint16_t size, uint16_t physic
     return static_cast<int>(m_entry_count++);
 }
 
-int PDOMapping::add_broadcast_txpdo(void* buffer, uint16_t size, uint16_t physical_offset) {
+int PDOMapping::add_broadcast_txpdo(uint16_t size, uint16_t physical_offset) {
     if (m_entry_count >= kMaxPDOEntries) return -1;
     PDOEntry& e = m_entries[m_entry_count];
     e.slave_index     = 0xFFFF;
     e.direction       = PDODirection::TxPDO;
     e.address_mode    = PDOAddressMode::Broadcast;
     e.physical_offset = physical_offset;
-    e.app_buffer      = buffer;
+    std::memset(e.storage, 0, sizeof(e.storage));
     e.data_size       = size;
     e.enabled         = true;
     e.error_count     = 0;
@@ -191,6 +191,7 @@ PDOEntry* PDOMapping::get_entry_mut(size_t index) {
 
 void PDOMapping::clear() {
     m_entry_count = 0;
+    ++m_epoch;   // invalidate outstanding entryHandle()s
     std::memset(m_entries, 0, sizeof(m_entries));
 }
 
@@ -209,6 +210,7 @@ void PDOMapping::remove_entries_for_slave(uint16_t slave_index) {
         std::memset(&m_entries[i], 0, sizeof(PDOEntry));
     }
     m_entry_count = write;
+    ++m_epoch;   // indices may have compacted — invalidate handles
 }
 
 size_t PDOMapping::total_rxpdo_bytes() const {
@@ -549,7 +551,7 @@ bool PDOManager::finalizeMapping(uint16_t slave_index) {
             if (rxPDODebug(slave_index)) {
                 TETHER_LOGI(TAG, "  [RxPDO-DEBUG] Entry {}: slave={} offset=0x{:04x} size={} buf={:p} pdo=0x{:04x}",
                             i, slave_index, entry->physical_offset, entry->data_size,
-                            entry->app_buffer, entry->pdo_index);
+                            static_cast<const void*>(entry->storage), entry->pdo_index);
             }
         } else {
             entry->physical_offset = sm3_addr + total_txpdo_size;
@@ -558,7 +560,7 @@ bool PDOManager::finalizeMapping(uint16_t slave_index) {
             if (txPDODebug(slave_index)) {
                 TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Entry {}: slave={} offset=0x{:04x} size={} buf={:p} pdo=0x{:04x}",
                             i, slave_index, entry->physical_offset, entry->data_size,
-                            entry->app_buffer, entry->pdo_index);
+                            static_cast<const void*>(entry->storage), entry->pdo_index);
             }
         }
     }
@@ -591,7 +593,7 @@ bool PDOManager::sendRxPDOPosition(const PDO::PDOEntry& entry) {
         const uint8_t idx = transport_.allocIdx();
         bool ok = transport_.sendSingleDatagram(
             Command::APWR, idx, adp, entry.physical_offset,
-            entry.app_buffer, entry.data_size, true);
+            entry.storage, entry.data_size, true);
         if (ok) {
             RxDatagram resp;
             bool got = transport_.waitForResponseIdx(idx, 10, resp);
@@ -607,7 +609,7 @@ bool PDOManager::sendRxPDOPosition(const PDO::PDOEntry& entry) {
         if (!transport_.sendSingleDatagram(
                 Command::APWR, IPDOTransport::kFireAndForgetIdx,
                 adp, entry.physical_offset,
-                entry.app_buffer, entry.data_size, false)) {
+                entry.storage, entry.data_size, false)) {
             transfer_stats_.rxpdo_debug_count++;
             return false;
         }
@@ -633,7 +635,7 @@ bool PDOManager::sendRxPDOConfigured(const PDO::PDOEntry& entry) {
     const uint8_t idx = transport_.allocIdx();
     if (!transport_.sendSingleDatagram(
             Command::FPWR, idx, entry.configured_address,
-            entry.physical_offset, entry.app_buffer, entry.data_size, true)) {
+            entry.physical_offset, entry.storage, entry.data_size, true)) {
         return false;
     }
     RxDatagram resp;
@@ -650,7 +652,7 @@ bool PDOManager::recvTxPDOConfigured(PDO::PDOEntry& entry) {
     RxDatagram resp;
     if (!transport_.waitForResponseIdx(idx, 5, resp)) return false;
     if (resp.wkc == 0 || resp.datalen < entry.data_size) return false;
-    std::memcpy(entry.app_buffer, resp.data, entry.data_size);
+    std::memcpy(entry.storage, resp.data, entry.data_size);
     return true;
 }
 
@@ -658,7 +660,7 @@ bool PDOManager::sendRxPDOBroadcast(const PDO::PDOEntry& entry, uint16_t /*expec
     const uint8_t idx = transport_.allocIdx();
     if (!transport_.sendSingleDatagram(
             Command::BWR, idx, 0, entry.physical_offset,
-            entry.app_buffer, entry.data_size, true)) {
+            entry.storage, entry.data_size, true)) {
         return false;
     }
     RxDatagram resp;
@@ -676,7 +678,7 @@ bool PDOManager::recvTxPDOBroadcast(PDO::PDOEntry& entry, uint16_t /*expected_wk
     RxDatagram resp;
     if (!transport_.waitForResponseIdx(idx, 5, resp)) return false;
     if (resp.datalen < entry.data_size) return false;
-    std::memcpy(entry.app_buffer, resp.data, entry.data_size);
+    std::memcpy(entry.storage, resp.data, entry.data_size);
     return resp.wkc > 0;
 }
 
@@ -699,7 +701,7 @@ bool PDOManager::sendRxPDO(size_t entry_index) {
         if (entry->data_size <= 32) {
             char hex[128] = {0};
             size_t pos = 0;
-            const uint8_t* buf = static_cast<const uint8_t*>(entry->app_buffer);
+            const uint8_t* buf = entry->storage;
             for (uint16_t b = 0; b < entry->data_size && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", buf[b]));
             }
@@ -781,7 +783,7 @@ bool PDOManager::receiveTxPDO(size_t entry_index) {
         if (success && entry->data_size <= 32) {
             char hex[128] = {0};
             size_t pos = 0;
-            const uint8_t* buf = static_cast<const uint8_t*>(entry->app_buffer);
+            const uint8_t* buf = entry->storage;
             for (uint16_t b = 0; b < entry->data_size && pos + 3 < sizeof(hex); b++) {
                 pos += static_cast<size_t>(std::snprintf(hex + pos, sizeof(hex) - pos, "%02X ", buf[b]));
             }
@@ -884,7 +886,7 @@ bool PDOManager::queueCycle() {
         if (tx_queues_[i] && tx_queues_[i]->try_pop(frame)) {
             // Got new TX data — copy into app buffer
             if (frame->data.size() <= e->data_size) {
-                std::memcpy(e->app_buffer, frame->data.data(), frame->data.size());
+                std::memcpy(e->storage, frame->data.data(), frame->data.size());
             }
             last_tx_frames_[i] = frame;
         } else {
@@ -906,13 +908,13 @@ bool PDOManager::queueCycle() {
             switch (queue_config_.underrun_policy) {
                 case UnderrunPolicy::RepeatLastFrame:
                     if (last_tx_frames_[i] && last_tx_frames_[i]->data.size() <= e->data_size) {
-                        std::memcpy(e->app_buffer, last_tx_frames_[i]->data.data(),
+                        std::memcpy(e->storage, last_tx_frames_[i]->data.data(),
                                     last_tx_frames_[i]->data.size());
                     }
                     break;
                 case UnderrunPolicy::SafeState:
                     if (queue_config_.safe_state_buffer.size() <= e->data_size) {
-                        std::memcpy(e->app_buffer, queue_config_.safe_state_buffer.data(),
+                        std::memcpy(e->storage, queue_config_.safe_state_buffer.data(),
                                     queue_config_.safe_state_buffer.size());
                     }
                     break;
@@ -953,7 +955,7 @@ bool PDOManager::queueCycle() {
         // Create RX frame
         auto frame = std::make_shared<PDOFrame>();
         frame->data.resize(e->data_size);
-        std::memcpy(frame->data.data(), e->app_buffer, e->data_size);
+        std::memcpy(frame->data.data(), e->storage, e->data_size);
         frame->timestamp_ns =
             static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL;
         frame->cycle_count = stats_.total_cycles;
@@ -1105,7 +1107,7 @@ bool PDOManager::sendAll() {
         }
 
         rx_specs.push_back({cmd, idx, adp, e->physical_offset,
-                           e->app_buffer, e->data_size, roundtrip});
+                           e->storage, e->data_size, roundtrip});
         rx_entry_idx.push_back(i);
         if (roundtrip) {
             split_state_.rx_confirmed_idxs.push_back(idx);
@@ -1319,7 +1321,7 @@ bool PDOManager::receiveAll() {
                     // (data not actually received for fire-and-forget, but callback signals cycle completion)
                     if (mode_ == PDOMode::Callback && callback_config_.fire_on_rx_received &&
                         tx_entry_idx[j] < callbacks_.size() && callbacks_[tx_entry_idx[j]].rx_received) {
-                        callbacks_[tx_entry_idx[j]].rx_received(e->slave_index, static_cast<const uint8_t*>(e->app_buffer), e->data_size,
+                        callbacks_[tx_entry_idx[j]].rx_received(e->slave_index, e->storage, e->data_size,
                             stats_.total_cycles,
                             static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL);
                     }
@@ -1338,7 +1340,7 @@ bool PDOManager::receiveAll() {
                 }
                 if (got &&
                     resp.wkc > 0 && resp.datalen >= e->data_size) {
-                    std::memcpy(e->app_buffer, resp.data, e->data_size);
+                    std::memcpy(e->storage, resp.data, e->data_size);
                     e->success_count++;
                     stats_.txpdo_frames_recv++;
                     if (e->slave_index < PDO::kMaxPDOSlaves)
@@ -1346,7 +1348,7 @@ bool PDOManager::receiveAll() {
                     // Callback mode: fire RxReceived callback for confirmed entries
                     if (mode_ == PDOMode::Callback && callback_config_.fire_on_rx_received &&
                         entry_i < callbacks_.size() && callbacks_[entry_i].rx_received) {
-                        callbacks_[entry_i].rx_received(e->slave_index, static_cast<const uint8_t*>(e->app_buffer), e->data_size,
+                        callbacks_[entry_i].rx_received(e->slave_index, e->storage, e->data_size,
                             stats_.total_cycles,
                             static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL);
                     }
@@ -1547,8 +1549,8 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
         for (size_t i = 0; i < mapping_.entry_count(); i++) {
             const PDO::PDOEntry* e = mapping_.get_entry(i);
             if (e && e->enabled && e->direction == PDO::PDODirection::RxPDO
-                && e->app_buffer && e->data_size <= sm2.length) {
-                std::memcpy(out_buf, e->app_buffer, e->data_size);
+                && e->data_size > 0 && e->data_size <= sm2.length) {
+                std::memcpy(out_buf, e->storage, e->data_size);
             }
         }
         // Periodic wire log: log interpreted RxPDO output every 1000 cycles
@@ -1654,12 +1656,12 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             for (size_t i = 0; i < mapping_.entry_count(); i++) {
                 PDO::PDOEntry* e = mapping_.get_entry_mut(i);
                 if (e && e->enabled && e->direction == PDO::PDODirection::TxPDO
-                    && e->app_buffer && e->data_size <= sm3.length) {
-                    std::memcpy(e->app_buffer, read_resp.data, e->data_size);
+                    && e->data_size > 0 && e->data_size <= sm3.length) {
+                    std::memcpy(e->storage, read_resp.data, e->data_size);
                     e->success_count++;
                     if (txPDODebug(e->slave_index)) {
                         TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Copied {} bytes to entry {} buf={:p}",
-                                    e->data_size, i, e->app_buffer);
+                                    e->data_size, i, static_cast<const void*>(e->storage));
                     }
                 }
             }
@@ -1781,12 +1783,12 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             for (size_t i = 0; i < mapping_.entry_count(); i++) {
                 PDO::PDOEntry* e = mapping_.get_entry_mut(i);
                 if (e && e->enabled && e->direction == PDO::PDODirection::TxPDO
-                    && e->app_buffer && e->data_size <= sm3.length) {
-                    std::memcpy(e->app_buffer, in_buf, e->data_size);
+                    && e->data_size > 0 && e->data_size <= sm3.length) {
+                    std::memcpy(e->storage, in_buf, e->data_size);
                     e->success_count++;
                     if (txPDODebug(e->slave_index)) {
                         TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Copied {} bytes to entry {} buf={:p}",
-                                    e->data_size, i, e->app_buffer);
+                                    e->data_size, i, static_cast<const void*>(e->storage));
                     }
                 }
             }

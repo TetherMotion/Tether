@@ -6,6 +6,7 @@
 #include "tether/platform/CpuIsolation.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -13,7 +14,9 @@
 #include <string>
 
 #ifdef __linux__
+#include <dirent.h>
 #include <sched.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -168,7 +171,7 @@ CpuIsolation::Claim CpuIsolation::claim(const Spec& spec) {
             return {};
         }
         --free_cnt;
-        return do_claim(c);
+        return finishClaim(do_claim(c), spec);
     }
 
     // 2) Auto-pick: kernel-isolated & unclaimed first
@@ -176,7 +179,7 @@ CpuIsolation::Claim CpuIsolation::claim(const Spec& spec) {
         for (int c : isolated_) {
             if (!claimed(c) && listContains(online_, c) && room()) {
                 --free_cnt;
-                return do_claim(c);
+                return finishClaim(do_claim(c), spec);
             }
         }
     }
@@ -185,14 +188,14 @@ CpuIsolation::Claim CpuIsolation::claim(const Spec& spec) {
         if (spec.avoid_cpu0 && c == 0) continue;
         if (!claimed(c) && room()) {
             --free_cnt;
-            return do_claim(c);
+            return finishClaim(do_claim(c), spec);
         }
     }
     // 4) Last resort: CPU0 itself
     for (int c : online_) {
         if (!claimed(c) && room()) {
             --free_cnt;
-            return do_claim(c);
+            return finishClaim(do_claim(c), spec);
         }
     }
 
@@ -200,6 +203,170 @@ CpuIsolation::Claim CpuIsolation::claim(const Spec& spec) {
                      "— thread runs unpinned", online_.size(),
                 online_.size() - free_cnt);
     return {};
+}
+
+// ============================================================================
+// Q8/Q9 — root opt-in hardening: cgroup2 cpuset partitions + IRQ steering
+// ============================================================================
+
+bool CpuIsolation::writeFile(const char* path, const std::string& val) {
+    std::ofstream f(path, std::ios::trunc);
+    if (!f) return false;
+    f << val;
+    return f.good();
+}
+
+bool CpuIsolation::readFile(const char* path, std::string& out) {
+    std::ifstream f(path);
+    if (!f) return false;
+    std::getline(f, out);
+    return true;
+}
+
+bool CpuIsolation::createCpusetPartition(int cpu) {
+#ifdef __linux__
+    if (geteuid() != 0) return false;    // cpuset ops need CAP_SYS_ADMIN
+    if (!cgroup_v2_probed_) {
+        cgroup_v2_probed_ = true;
+        struct stat st{};
+        cgroup_v2_ok_ =
+            ::stat("/sys/fs/cgroup/cgroup.controllers", &st) == 0;
+        if (!cgroup_v2_ok_)
+            TETHER_LOGW(TAG, "cgroup v2 not detected — cpuset partitions "
+                             "unavailable");
+    }
+    if (!cgroup_v2_ok_) return false;
+
+    // Enable cpuset delegation on the root (idempotent; EBUSY-ish failures
+    // when already enabled still report write success on most kernels).
+    writeFile("/sys/fs/cgroup/cgroup.subtree_control", "+cpuset");
+
+    const std::string dir = "/sys/fs/cgroup/tether_rt";
+    if (::mkdir(dir.c_str(), 0755) != 0 && errno != EEXIST) {
+        TETHER_LOGW(TAG, "cpuset: mkdir {} failed ({})", dir,
+                    strerror(errno));
+        return false;
+    }
+    // The partition covers EVERY claimed CPU — a second claim extends the
+    // group's cpuset rather than competing for the same name.
+    std::string cpus;
+    for (int c : online_) {
+        if (!(claimed_[c >> 6] & (1ULL << (c & 63)))) continue;
+        if (!cpus.empty()) cpus += ',';
+        cpus += std::to_string(c);
+    }
+    if (!writeFile((dir + "/cpuset.cpus").c_str(), cpus)) {
+        TETHER_LOGW(TAG, "cpuset: cannot assign CPUs [{}] to {}", cpus, dir);
+        return false;
+    }
+    writeFile((dir + "/cpuset.mems").c_str(), "0");
+    if (!writeFile((dir + "/cpuset.cpus.partition").c_str(), "isolated")) {
+        TETHER_LOGW(TAG, "cpuset: partition=isolated rejected for CPU {} "
+                         "(CPU may still be root-domain)", cpu);
+        return false;
+    }
+    if (!listContains(cpuset_cpus_, cpu)) cpuset_cpus_.push_back(cpu);
+    TETHER_LOGI(TAG, "cgroup2 cpuset partition 'tether_rt' isolates [{}]",
+                cpus);
+    return true;
+#else
+    (void)cpu;
+    return false;
+#endif
+}
+
+/// Post-grant hardening — the claim is already recorded; failures degrade
+/// to the affinity-only claim with a warning (never deny the claim).
+CpuIsolation::Claim CpuIsolation::finishClaim(Claim cl, const Spec& spec) {
+    if (!cl.valid()) return cl;
+    if (spec.create_cpuset) {
+        cl.cpuset_isolated = createCpusetPartition(cl.cpu);
+        if (cl.cpuset_isolated) {
+            TETHER_LOGI(TAG, "CPU {} hard-isolated via cgroup2 partition",
+                        cl.cpu);
+        } else {
+            TETHER_LOGW(TAG, "CPU {}: cpuset partition unavailable — "
+                             "affinity pin only", cl.cpu);
+        }
+    }
+    if (spec.steer_irqs) {
+        steerIrqsOffClaims();
+        cl.irqs_steered = irq_steering_active_;
+    }
+    return cl;
+}
+
+void CpuIsolation::steerIrqsOffClaims() {
+#ifdef __linux__
+    if (geteuid() != 0) {
+        TETHER_LOGW(TAG, "IRQ steering needs root — skipped");
+        return;
+    }
+    // Complement mask: every online CPU that is NOT claimed.
+    std::string mask;
+    bool first = true;
+    for (int c : online_) {
+        if (claimed_[c >> 6] & (1ULL << (c & 63))) continue;
+        if (!first) mask += ',';
+        mask += std::to_string(c);
+        first = false;
+    }
+    if (mask.empty()) return;
+
+    DIR* d = ::opendir("/proc/irq");
+    if (!d) return;
+    struct dirent* de;
+    int steered = 0, failed = 0;
+    while ((de = ::readdir(d))) {
+        if (de->d_name[0] < '0' || de->d_name[0] > '9') continue;
+        const int irq = std::atoi(de->d_name);
+        const std::string path =
+            std::string("/proc/irq/") + de->d_name + "/smp_affinity_list";
+        std::string orig;
+        if (!readFile(path.c_str(), orig)) continue;
+        // Save the original mask once per IRQ so releaseAll() can restore.
+        bool known = false;
+        for (const auto& p : irq_orig_masks_)
+            if (p.first == irq) { known = true; break; }
+        if (!known) irq_orig_masks_.emplace_back(irq, orig);
+        if (writeFile(path.c_str(), mask)) ++steered;
+        else ++failed;   // per-IRQ restrictions — best-effort
+    }
+    ::closedir(d);
+    irq_steering_active_ = steered > 0;
+    TETHER_LOGI(TAG, "IRQ steering: {} IRQ(s) pinned to [{}], {} rejected",
+                steered, mask, failed);
+#endif
+}
+
+void CpuIsolation::teardownPartitions() {
+#ifdef __linux__
+    for (int cpu : cpuset_cpus_) {
+        const std::string dir = "/sys/fs/cgroup/tether_rt";
+        writeFile((dir + "/cpuset.cpus.partition").c_str(), "member");
+        if (::rmdir(dir.c_str()) != 0)
+            TETHER_LOGW(TAG, "cpuset: cleanup of {} for CPU {} failed ({})",
+                        dir, cpu, strerror(errno));
+        else
+            TETHER_LOGI(TAG, "cpuset partition for CPU {} removed", cpu);
+    }
+    cpuset_cpus_.clear();
+#endif
+}
+
+void CpuIsolation::restoreIrqMasks() {
+#ifdef __linux__
+    for (const auto& [irq, mask] : irq_orig_masks_) {
+        const std::string path =
+            "/proc/irq/" + std::to_string(irq) + "/smp_affinity_list";
+        writeFile(path.c_str(), mask);
+    }
+    if (!irq_orig_masks_.empty())
+        TETHER_LOGI(TAG, "restored {} IRQ affinity mask(s)",
+                    irq_orig_masks_.size());
+    irq_orig_masks_.clear();
+    irq_steering_active_ = false;
+#endif
 }
 
 void CpuIsolation::release(int cpu) {
@@ -222,6 +389,8 @@ void CpuIsolation::releaseAll() {
     }
     if (released > 0)
         TETHER_LOGI(TAG, "released {} CPU claim(s) on exit", released);
+    teardownPartitions();   // cgroup2 partition is pointless with no claims
+    restoreIrqMasks();      // IRQs go back to their original affinities
 }
 
 } // namespace Platform

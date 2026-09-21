@@ -362,7 +362,13 @@ private:
     /// field into it.  Heap-allocated so the pointer stays valid when the
     /// driver object is moved (e.g. returned from findFirst()).
     /// Bit N maps to input N (little-endian byte order).
-    std::unique_ptr<std::atomic<uint64_t>> state_;
+    /// PDO state word — points at the mapping entry's storage after
+    /// prepare(), or at *state_local_ before registration (Q1).
+    /// unique_ptr keeps the terminal movable.  Same lifetime rule as
+    /// TerminalBase::in_buf_: entry removal invalidates it.
+    std::unique_ptr<std::atomic<uint64_t>> state_local_ =
+        std::make_unique<std::atomic<uint64_t>>(0);
+    std::atomic<uint64_t>* state_ = state_local_.get();
 
     size_t   num_inputs_    = 0;    // resolved bit width
     uint8_t  sm_channel_    = 0;

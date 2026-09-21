@@ -72,25 +72,38 @@ namespace {
 // VLAN-tagged frames show EtherType 0x8100 and land on the async socket
 // (documented fast-path exclusion).
 
-constexpr int  kIdxByteOffset = 17;
-constexpr uint16_t kEtherCatType = 0x88A4;
+constexpr int  kIdxByteOffset     = 17;   // untagged: first dg idx
+constexpr int  kVlanIdxByteOffset = 21;   // 802.1Q-tagged: +4 tag bytes
+constexpr int  kVlanInnerEthOff   = 16;   // inner EtherType offset
+constexpr uint16_t kEtherCatType  = 0x88A4;
+constexpr uint16_t kVlanType      = 0x8100;
 
 static_assert(sizeof(CyclicBpfInsn) == sizeof(struct sock_filter),
               "CyclicBpfInsn must be layout-compatible with sock_filter");
 
 // Socket A / socket B demux program — see cyclicChannelBpfProgram().
+// Q15: VLAN-aware — a 0x8100 tag shifts the frame by 4 bytes; the inner
+// EtherType lives at [16:18] and the first idx at byte 21.  Non-ECAT and
+// VLAN-non-ECAT traffic falls through to the B verdict so socket A can be
+// bound to ETH_P_ALL and still see only cyclic EtherCAT.
 size_t buildFilterProg(bool accept_cyclic, struct sock_filter* p) {
     const uint32_t lo = kCyclicSlotBaseIdx;
     const uint32_t hi = kCyclicSlotBaseIdx + kNumCyclicSlots - 1;
     const struct sock_filter prog[] = {
         /* 0 */ BPF_STMT(BPF_LD | BPF_H | BPF_ABS, 12),              // EtherType
-        /* 1 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kEtherCatType, 0, 4),
+        /* 1 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kEtherCatType, 0, 2),
         /* 2 */ BPF_STMT(BPF_LD | BPF_B | BPF_ABS, kIdxByteOffset),  // idx
-        /* 3 */ BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, lo, 0, 2),       // <lo → #6
-        /* 4 */ BPF_JUMP(BPF_JMP | BPF_JGT | BPF_K, hi, 1, 0),       // >hi → #6
-        /* 5 */ BPF_STMT(BPF_RET | BPF_K,
+        /* 3 */ BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0, 5, 0),        // → #9
+        /* 4 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kVlanType, 0, 7),
+        /* 5 */ BPF_STMT(BPF_LD | BPF_H | BPF_ABS, kVlanInnerEthOff),
+        /* 6 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kEtherCatType, 0, 5),
+        /* 7 */ BPF_STMT(BPF_LD | BPF_B | BPF_ABS, kVlanIdxByteOffset),
+        /* 8 */ BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0, 0, 0),        // → #9
+        /* 9 */ BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, lo, 0, 2),       // <lo → #12
+        /*10 */ BPF_JUMP(BPF_JMP | BPF_JGT | BPF_K, hi, 1, 0),       // >hi → #12
+        /*11 */ BPF_STMT(BPF_RET | BPF_K,
                         accept_cyclic ? 0xFFFFFFFFu : 0u),           // A: accept
-        /* 6 */ BPF_STMT(BPF_RET | BPF_K,
+        /*12 */ BPF_STMT(BPF_RET | BPF_K,
                         accept_cyclic ? 0u : 0xFFFFFFFFu),           // B: accept
     };
     std::memcpy(p, prog, sizeof(prog));
@@ -116,22 +129,32 @@ int openCyclicSocket(int ifindex) {
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
     int one = 1;
-    setsockopt(fd, SOL_PACKET, PACKET_IGNORE_OUTGOING, &one, sizeof(one));
+    // Q18: PACKET_IGNORE_OUTGOING drops own-TX echoes upstream of the BPF.
+    // Probe the sockopt result — a kernel that lacks it leaves the async
+    // socket seeing its own cyclic frames (correctness unaffected, wakeup
+    // cost) — warn so the operator knows.
+    if (setsockopt(fd, SOL_PACKET, PACKET_IGNORE_OUTGOING,
+                   &one, sizeof(one)) < 0) {
+        TETHER_LOGW(TAG, "PACKET_IGNORE_OUTGOING unsupported ({}) — own "
+                    "transmits will echo on the RX path", strerror(errno));
+    }
     setsockopt(fd, SOL_PACKET, PACKET_TIMESTAMP, &one, sizeof(one));
     // Kernel RX timestamps arrive via recvmsg SCM_TIMESTAMPNS cmsgs.
     setsockopt(fd, SOL_SOCKET, SO_TIMESTAMPNS, &one, sizeof(one));
 
-    // Receive only EtherCAT frames — keeps non-ECAT noise out entirely.
+    // ETH_P_ALL + the extended demux program: VLAN-tagged EtherCAT frames
+    // (0x8100 outer) reach the socket and are filtered by inner ethertype;
+    // the program rejects everything non-cyclic kernel-side.
     struct sockaddr_ll sll{};
     sll.sll_family   = AF_PACKET;
-    sll.sll_protocol = htons(kEtherCatType);
+    sll.sll_protocol = htons(ETH_P_ALL);
     sll.sll_ifindex  = ifindex;
     if (::bind(fd, reinterpret_cast<struct sockaddr*>(&sll), sizeof(sll)) < 0) {
         ::close(fd);
         return -1;
     }
 
-    struct sock_filter prog[7];
+    struct sock_filter prog[kCyclicBpfInsnCount];
     const size_t n = buildFilterProg(true, prog);
     if (!attachFilter(fd, prog, n)) {
         // Soft failure — the channel still works; crosstalk determinism is
@@ -332,6 +355,8 @@ public:
         uint32_t rx_blocks  = 128;
         uint32_t tx_blocks  = 16;
         uint32_t rx_spin_ns = 0;   ///< busy-poll window inside rxPoll()
+        bool     rx_v3      = false;
+        uint32_t rx_v3_retire_us = 10'000;   ///< tp_retire_blk_tov
     };
 
     LinuxRingChannel(int fd, int ifindex, const Config& cfg)
@@ -343,13 +368,14 @@ public:
         // PACKET_VERSION must be set once, before any ring exists — calling
         // it again after a ring is configured returns EBUSY and wedges the
         // subsequent ring setup.
-        const int ver = TPACKET_V2;
+        const int ver = cfg_.rx_v3 ? TPACKET_V3 : TPACKET_V2;
         if (setsockopt(fd_, SOL_PACKET, PACKET_VERSION, &ver, sizeof(ver)) < 0)
             return false;
 
         // The kernel allocates RX and TX rings as ONE contiguous pg_vec
         // ([RX blocks | TX blocks]); they must be mapped by a single mmap of
         // the combined size at offset 0 — a second mmap for TX is EINVAL.
+        // V3 is RX-only: the TX ring keeps the V2 per-frame tpacket_req.
         struct tpacket_req rx_req{}, tx_req{};
         if (!configRxRing(&rx_req)) return false;
         const bool have_tx = configTxRing(&tx_req);   // optional — sendto works
@@ -373,10 +399,16 @@ public:
 
         rx_ring_       = static_cast<uint8_t*>(base);
         rx_ring_len_   = rx_len + tx_len;         // combined mapping length
-        rx_frame_size_ = rx_req.tp_frame_size;
-        rx_frames_     = rx_req.tp_frame_nr;
+        // V3: rx_frames_ indexes BLOCKS (tp_frame_nr is 0 under req3).
+        rx_frame_size_ = cfg_.rx_v3 ? rx_req.tp_block_size
+                                    : rx_req.tp_frame_size;
+        rx_frames_     = cfg_.rx_v3 ? rx_req.tp_block_nr
+                                    : rx_req.tp_frame_nr;
         rx_holds_      = std::make_unique<std::atomic<int>[]>(rx_frames_);
         rx_consumed_   = std::make_unique<std::atomic<bool>[]>(rx_frames_);
+        if (cfg_.rx_v3)
+            v3_emitted_ = std::make_unique<std::atomic<uint32_t>[]>(
+                              rx_frames_);
         if (have_tx) {
             tx_ring_       = rx_ring_ + rx_len;   // TX region follows RX
             tx_ring_len_   = tx_len;
@@ -401,6 +433,23 @@ public:
         tx_ring_ = tx;  tx_ring_len_ = 0;
         tx_frame_size_ = tx_frame_size;  tx_frames_ = tx_frames;
         rings_borrowed_ = true;
+    }
+
+    /// V3 test seam: adopt a caller-provided block-mode RX ring
+    /// (tpacket_block_desc array).  `rx` holds `blocks` blocks of
+    /// `block_size` bytes each; TX is disabled.
+    void adoptV3RingForTest(uint8_t* rx, uint32_t block_size,
+                            uint32_t blocks) {
+        cfg_.rx_v3       = true;
+        rx_ring_         = rx;  rx_ring_len_ = 0;
+        rx_frame_size_   = block_size;   // V3: stride is the block
+        rx_frames_       = blocks;       // V3: rx_frames_ counts blocks
+        rx_holds_        = std::make_unique<std::atomic<int>[]>(blocks);
+        rx_consumed_     = std::make_unique<std::atomic<bool>[]>(blocks);
+        v3_emitted_      = std::make_unique<std::atomic<uint32_t>[]>(blocks);
+        tx_ring_         = nullptr;  tx_ring_len_ = 0;
+        tx_frame_size_   = 0;  tx_frames_ = 0;
+        rings_borrowed_  = true;
     }
 
     // ---- TX (ring) ----
@@ -473,7 +522,8 @@ public:
     // ---- RX (ring) ----
     int rxPoll(CyclicFrameView* views, int max_views,
                uint32_t timeout_ns) override {
-        int n = walkRing(views, max_views);
+        int n = cfg_.rx_v3 ? walkRingV3(views, max_views)
+                           : walkRing(views, max_views);
         if (n > 0 || timeout_ns == 0) return n;
 
         // Optional spin phase: poll slot memory directly — a DMA write is
@@ -487,7 +537,8 @@ public:
                 std::min(deadline, monoNowNs() + cfg_.rx_spin_ns);
             while (monoNowNs() < stop) {
                 if (rxPending())
-                    return walkRing(views, max_views);
+                    return cfg_.rx_v3 ? walkRingV3(views, max_views)
+                                      : walkRing(views, max_views);
             }
         }
         const uint64_t now = monoNowNs();
@@ -496,12 +547,22 @@ public:
         const int r = waitReadable(fd_,
             static_cast<uint32_t>(deadline - now));
         if (r <= 0) return r < 0 ? -errno : 0;
-        return walkRing(views, max_views);
+        return cfg_.rx_v3 ? walkRingV3(views, max_views)
+                          : walkRing(views, max_views);
     }
 
     /// Any surfaced-but-unconsumed slot?  Pure memory reads — spin-safe.
     bool rxPending() const override {
         if (!rx_ring_) return false;
+        if (cfg_.rx_v3) {
+            for (uint32_t i = 0; i < rx_frames_; ++i) {
+                const auto* bd = v3Block(i);
+                if ((bd->hdr.bh1.block_status & TP_STATUS_USER) &&
+                    !rx_consumed_[i].load(std::memory_order_acquire))
+                    return true;
+            }
+            return false;
+        }
         for (uint32_t i = 0; i < rx_frames_; ++i) {
             const auto* hdr = reinterpret_cast<const struct tpacket2_hdr*>(
                 rx_ring_ + static_cast<size_t>(i) * rx_frame_size_);
@@ -513,18 +574,25 @@ public:
     }
 
     void rxHold(uint32_t cookie) override {
-        if (cookie < rx_frames_)
-            rx_holds_[cookie].fetch_add(1, std::memory_order_relaxed);
+        // V3 cookies are (block << 16 | pkt): the hold granularity is the
+        // whole block — one held frame pins every frame sharing its block.
+        const uint32_t idx = cfg_.rx_v3 ? (cookie >> 16) : cookie;
+        if (idx < rx_frames_)
+            rx_holds_[idx].fetch_add(1, std::memory_order_relaxed);
     }
     void rxRelease(uint32_t cookie) override {
-        if (cookie >= rx_frames_) return;
+        const uint32_t idx = cfg_.rx_v3 ? (cookie >> 16) : cookie;
+        if (idx >= rx_frames_) return;
         // Clamp at 0 — a double-release must not drive the count negative
         // and pin the ring slot forever.
-        if (rx_holds_[cookie].load(std::memory_order_acquire) <= 0) return;
-        if (rx_holds_[cookie].fetch_sub(1, std::memory_order_acq_rel) == 1 &&
-            rx_consumed_[cookie]) {
+        if (rx_holds_[idx].load(std::memory_order_acquire) <= 0) return;
+        if (rx_holds_[idx].fetch_sub(1, std::memory_order_acq_rel) == 1 &&
+            rx_consumed_[idx]) {
             __sync_synchronize();
-            rxSlot(cookie)->tp_status = TP_STATUS_KERNEL;
+            if (cfg_.rx_v3)
+                v3Retire(idx);
+            else
+                rxSlot(idx)->tp_status = TP_STATUS_KERNEL;
         }
     }
 
@@ -541,6 +609,29 @@ private:
     // frame_size) frames into each page-sized block.
     bool configRxRing(struct tpacket_req* req) {
         const uint32_t page = (uint32_t)::sysconf(_SC_PAGESIZE);
+        if (cfg_.rx_v3) {
+            // TPACKET_V3: the ring is an array of tp_block_size blocks;
+            // the kernel packs each received frame into the current block
+            // and hands the block to userspace (TP_STATUS_USER on the
+            // block header) when full or when tp_retire_blk_tov elapses.
+            // No fixed frame slots — tp_frame_size/nr stay 0.
+            struct tpacket_req3 r3{};
+            r3.tp_block_size        = page;
+            r3.tp_block_nr          = cfg_.rx_blocks;
+            r3.tp_frame_size        = 0;
+            r3.tp_frame_nr          = 0;
+            r3.tp_retire_blk_tov    = cfg_.rx_v3_retire_us;
+            r3.tp_sizeof_priv       = 0;
+            r3.tp_feature_req_word  = 0;
+            if (setsockopt(fd_, SOL_PACKET, PACKET_RX_RING, &r3,
+                           sizeof(r3)) != 0)
+                return false;
+            // Mirror the sizing fields into *req so init()'s mmap math is
+            // version-agnostic.
+            req->tp_block_size = r3.tp_block_size;
+            req->tp_block_nr   = r3.tp_block_nr;
+            return true;
+        }
         const uint32_t frame_size = TPACKET_ALIGN(TPACKET2_HDRLEN + 1600);
         const uint32_t fpb = frame_size <= page ? page / frame_size : 1;
         req->tp_block_size = fpb * frame_size;
@@ -574,12 +665,20 @@ private:
             return;
         }
         struct tpacket_req req{};
+        struct tpacket_req3 req3{};
         if (tx_ring_) {
             setsockopt(fd_, SOL_PACKET, PACKET_TX_RING, &req, sizeof(req));
             tx_ring_ = nullptr;   // TX region shares the single RX mapping
         }
         if (rx_ring_) {
-            setsockopt(fd_, SOL_PACKET, PACKET_RX_RING, &req, sizeof(req));
+            // The clear must use the same req layout the ring was created
+            // with — packet_set_ring selects the V3 parser on optlen.
+            if (cfg_.rx_v3)
+                setsockopt(fd_, SOL_PACKET, PACKET_RX_RING,
+                           &req3, sizeof(req3));
+            else
+                setsockopt(fd_, SOL_PACKET, PACKET_RX_RING,
+                           &req, sizeof(req));
             munmap(rx_ring_, rx_ring_len_);   // rx_ring_len_ is the combined size
             rx_ring_ = nullptr;
         }
@@ -641,7 +740,94 @@ private:
         return n;
     }
 
+    // ---- TPACKET_V3 (block-mode RX prototype, Q17) ----
+    // Ring = array of tp_block_size blocks; each block begins with a
+    // tpacket_block_desc whose bh1 header carries block_status/num_pkts/
+    // offset_to_first_pkt.  Frames inside a block are tpacket3_hdr chained
+    // by tp_next_offset.  Cookie = (block << 16) | pkt_index — holds are
+    // block-granular; a block is retired (one write) only when every frame
+    // has been emitted AND all its holds are released.
+
+    struct tpacket_block_desc* v3Block(uint32_t b) const {
+        return reinterpret_cast<struct tpacket_block_desc*>(
+            rx_ring_ + static_cast<size_t>(b) * rx_frame_size_);
+    }
+
+    void v3Retire(uint32_t b) {
+        auto* bd = v3Block(b);
+        rx_consumed_[b].store(false, std::memory_order_release);
+        v3_emitted_[b].store(0, std::memory_order_release);
+        __sync_synchronize();
+        bd->hdr.bh1.block_status = TP_STATUS_KERNEL;
+    }
+
+    int walkRingV3(CyclicFrameView* views, int max_views) {
+        int n = 0;
+        uint32_t last_done = rx_cursor_;
+        uint32_t cut_block = rx_cursor_;
+        bool resume_cut = false;
+        for (uint32_t k = 0; k < rx_frames_ && n < max_views; ++k) {
+            const uint32_t b = (rx_cursor_ + k) % rx_frames_;
+            auto* bd = v3Block(b);
+            if (!(bd->hdr.bh1.block_status & TP_STATUS_USER)) continue;
+
+            if (rx_consumed_[b].load(std::memory_order_acquire)) {
+                if (rx_holds_[b].load(std::memory_order_acquire) == 0)
+                    v3Retire(b);
+                continue;
+            }
+
+            // Walk the pkt chain, resuming past frames already emitted.
+            const uint32_t num_pkts = bd->hdr.bh1.num_pkts;
+            uint32_t emitted = v3_emitted_[b].load(std::memory_order_acquire);
+            auto* hdr = reinterpret_cast<struct tpacket3_hdr*>(
+                reinterpret_cast<uint8_t*>(bd) +
+                bd->hdr.bh1.offset_to_first_pkt);
+            for (uint32_t skip = emitted; skip > 0 && hdr; --skip)
+                hdr = hdr->tp_next_offset
+                    ? reinterpret_cast<struct tpacket3_hdr*>(
+                          reinterpret_cast<uint8_t*>(hdr) +
+                          hdr->tp_next_offset)
+                    : nullptr;
+            for (; emitted < num_pkts && hdr && n < max_views; ++emitted) {
+                views[n].frame     = reinterpret_cast<const uint8_t*>(hdr) +
+                                     hdr->tp_mac;
+                views[n].frame_len = hdr->tp_snaplen;
+                views[n].stamp_ns  =
+                    static_cast<uint64_t>(hdr->tp_sec) * 1'000'000'000ULL +
+                    hdr->tp_nsec;
+                views[n].cookie    = (b << 16) | emitted;
+                ++n;
+                hdr = hdr->tp_next_offset
+                    ? reinterpret_cast<struct tpacket3_hdr*>(
+                          reinterpret_cast<uint8_t*>(hdr) +
+                          hdr->tp_next_offset)
+                    : nullptr;
+            }
+            v3_emitted_[b].store(emitted, std::memory_order_release);
+            if (emitted >= num_pkts) {
+                // Whole block drained — consumed; the block itself retires
+                // once every emitted frame's hold is released.  The resume
+                // cursor advances past it AFTER the sweep (mutating it
+                // mid-loop would corrupt the (cursor + k) iteration).
+                rx_consumed_[b].store(true, std::memory_order_release);
+                last_done = b;
+            } else {
+                // max_views cut mid-block — resume the same block next pass.
+                resume_cut = true;
+                cut_block  = b;
+                break;
+            }
+        }
+        if (n > 0)
+            rx_cursor_ = resume_cut ? cut_block
+                                    : (last_done + 1) % rx_frames_;
+        return n;
+    }
+
     Config cfg_;
+
+    std::unique_ptr<std::atomic<uint32_t>[]> v3_emitted_;
 
     uint8_t* rx_ring_ = nullptr;
     size_t   rx_ring_len_ = 0;
@@ -668,19 +854,19 @@ private:
 // ============================================================================
 
 bool cyclicChannelAttachCyclicFilter(int fd) {
-    struct sock_filter prog[7];
+    struct sock_filter prog[kCyclicBpfInsnCount];
     return attachFilter(fd, prog, buildFilterProg(true, prog));
 }
 
 bool cyclicChannelAttachAsyncFilter(int fd) {
-    struct sock_filter prog[7];
+    struct sock_filter prog[kCyclicBpfInsnCount];
     return attachFilter(fd, prog, buildFilterProg(false, prog));
 }
 
 size_t cyclicChannelBpfProgram(bool accept_cyclic,
                                CyclicBpfInsn* out, size_t cap) {
     if (!out || cap < kCyclicBpfInsnCount) return 0;
-    struct sock_filter prog[7];
+    struct sock_filter prog[kCyclicBpfInsnCount];
     const size_t n = buildFilterProg(accept_cyclic, prog);
     static_assert(sizeof(prog) == kCyclicBpfInsnCount * sizeof(CyclicBpfInsn));
     std::memcpy(out, prog, sizeof(prog));
@@ -717,14 +903,18 @@ std::unique_ptr<ICyclicChannel> createCyclicChannel(
         if (fd >= 0) {
             LinuxRingChannel::Config rcfg{cfg.rx_ring_blocks,
                                           cfg.tx_ring_blocks,
-                                          cfg.rx_spin_ns};
+                                          cfg.rx_spin_ns,
+                                          cfg.rx_tpacket_v3,
+                                          cfg.rx_v3_retire_us};
             auto ring = std::make_unique<LinuxRingChannel>(fd, cfg.ifindex,
                                                            rcfg);
             if (ring->init()) {
                 TETHER_LOGI(TAG,
                     "cyclic channel: PACKET_MMAP rings active "
-                    "(rx x{} blocks, tx x{} blocks, ifindex {})",
-                    cfg.rx_ring_blocks, cfg.tx_ring_blocks, cfg.ifindex);
+                    "(rx x{} blocks{}, tx x{} blocks, ifindex {})",
+                    cfg.rx_ring_blocks,
+                    cfg.rx_tpacket_v3 ? " [TPACKET_V3]" : "",
+                    cfg.tx_ring_blocks, cfg.ifindex);
                 return ring;
             }
             // ring dtor closes fd
@@ -786,6 +976,20 @@ std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
     return ring;
 }
 
+std::unique_ptr<ICyclicChannel> createCyclicRingChannelV3ForMemory(
+    int fd, int ifindex,
+    void* rx_ring, uint32_t block_size, uint32_t blocks)
+{
+    if (fd < 0 || !rx_ring || block_size == 0 || blocks == 0)
+        return nullptr;
+    LinuxRingChannel::Config rcfg{};
+    rcfg.rx_v3 = true;
+    auto ring = std::make_unique<LinuxRingChannel>(fd, ifindex, rcfg);
+    ring->adoptV3RingForTest(static_cast<uint8_t*>(rx_ring), block_size,
+                             blocks);
+    return ring;
+}
+
 } // namespace EtherCAT
 
 #else  // !__linux__
@@ -811,6 +1015,9 @@ std::unique_ptr<ICyclicChannel> createCyclicSocketChannelForFd(
 
 std::unique_ptr<ICyclicChannel> createCyclicRingChannelForFd(
     int, int, uint32_t, uint32_t, uint32_t) { return nullptr; }
+
+std::unique_ptr<ICyclicChannel> createCyclicRingChannelV3ForMemory(
+    int, int, void*, uint32_t, uint32_t) { return nullptr; }
 
 std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
     int, int, void*, uint32_t, uint32_t, void*, uint32_t, uint32_t,

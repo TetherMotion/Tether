@@ -198,15 +198,17 @@ protected:
         configs[0].txpdo_size = 8;
         mgr.buildAddressMap(configs, 1);
 
-        // Add PDO entries to mapping
-        rx_buf = 0xAABBCCDD;
-        tx_buf = 0;
-        mapping.add_rxpdo(0, &rx_buf, 4, 0x1600, PDOAddressMode::Logical);
-        mapping.add_txpdo(0, &tx_buf, 8, 0x1A00, PDOAddressMode::Logical);
+        // Add PDO entries to mapping — bind views into entry storage.
+        int rxi = mapping.add_rxpdo(0, 4, 0x1600, PDOAddressMode::Logical);
+        int txi = mapping.add_txpdo(0, 8, 0x1A00, PDOAddressMode::Logical);
+        rx_buf = mapping.entryDataAs<uint32_t>(static_cast<size_t>(rxi));
+        tx_buf = mapping.entryDataAs<uint64_t>(static_cast<size_t>(txi));
+        *rx_buf = 0xAABBCCDD;
+        *tx_buf = 0;
     }
 
-    uint32_t rx_buf;
-    uint64_t tx_buf;
+    uint32_t* rx_buf = nullptr;   ///< into entry storage
+    uint64_t* tx_buf = nullptr;
     uint8_t last_idx_ = 0;
 };
 
@@ -244,7 +246,7 @@ TEST_F(LRWExchangeTest, ExchangeAllLRWSuccess) {
     EXPECT_EQ(captured_payload[3], 0xAA);
 
     // Verify TxPDO data was copied back
-    uint8_t* tx_bytes = reinterpret_cast<uint8_t*>(&tx_buf);
+    uint8_t* tx_bytes = reinterpret_cast<uint8_t*>(tx_buf);
     EXPECT_EQ(tx_bytes[0], 0x11);
     EXPECT_EQ(tx_bytes[1], 0x22);
     EXPECT_EQ(tx_bytes[2], 0x33);
@@ -351,12 +353,16 @@ TEST_F(LRWExchangeTest, ExchangeLRWForSlaves) {
     mgr.buildAddressMap(configs, 2);
 
     PDOMapping multi_mapping;
-    uint32_t rx0 = 0x11111111, rx1 = 0x22222222;
-    uint64_t tx0 = 0, tx1 = 0;
-    multi_mapping.add_rxpdo(0, &rx0, 4, 0x1600, PDOAddressMode::Logical);
-    multi_mapping.add_txpdo(0, &tx0, 8, 0x1A00, PDOAddressMode::Logical);
-    multi_mapping.add_rxpdo(1, &rx1, 4, 0x1600, PDOAddressMode::Logical);
-    multi_mapping.add_txpdo(1, &tx1, 8, 0x1A00, PDOAddressMode::Logical);
+    int r0 = multi_mapping.add_rxpdo(0, 4, 0x1600, PDOAddressMode::Logical);
+    int t0 = multi_mapping.add_txpdo(0, 8, 0x1A00, PDOAddressMode::Logical);
+    int r1 = multi_mapping.add_rxpdo(1, 4, 0x1600, PDOAddressMode::Logical);
+    int t1 = multi_mapping.add_txpdo(1, 8, 0x1A00, PDOAddressMode::Logical);
+    auto& rx0 = *multi_mapping.entryDataAs<uint32_t>(static_cast<size_t>(r0));
+    auto& rx1 = *multi_mapping.entryDataAs<uint32_t>(static_cast<size_t>(r1));
+    auto& tx0 = *multi_mapping.entryDataAs<uint64_t>(static_cast<size_t>(t0));
+    auto& tx1 = *multi_mapping.entryDataAs<uint64_t>(static_cast<size_t>(t1));
+    rx0 = 0x11111111; rx1 = 0x22222222;
+    tx0 = 0; tx1 = 0;
 
     EXPECT_CALL(transport, allocIdx()).WillOnce(Return(42));
     EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 42, 0, 1, _, 12, true))
@@ -397,10 +403,12 @@ TEST_F(LRWExchangeTest, MultipleTxPDOEntriesSameSlave) {
     mgr.buildAddressMap(configs, 1);
 
     PDOMapping multi_mapping;
-    uint64_t tx0 = 0, tx1 = 0, tx2 = 0;
-    multi_mapping.add_txpdo(0, &tx0, 8, 0x1A00, PDOAddressMode::Logical);
-    multi_mapping.add_txpdo(0, &tx1, 8, 0x1A01, PDOAddressMode::Logical);
-    multi_mapping.add_txpdo(0, &tx2, 8, 0x1A02, PDOAddressMode::Logical);
+    int t0 = multi_mapping.add_txpdo(0, 8, 0x1A00, PDOAddressMode::Logical);
+    int t1 = multi_mapping.add_txpdo(0, 8, 0x1A01, PDOAddressMode::Logical);
+    int t2 = multi_mapping.add_txpdo(0, 8, 0x1A02, PDOAddressMode::Logical);
+    auto& tx0 = *multi_mapping.entryDataAs<uint64_t>(static_cast<size_t>(t0));
+    auto& tx1 = *multi_mapping.entryDataAs<uint64_t>(static_cast<size_t>(t1));
+    auto& tx2 = *multi_mapping.entryDataAs<uint64_t>(static_cast<size_t>(t2));
 
     EXPECT_CALL(transport, allocIdx()).WillOnce(Return(42));
     EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 42, 0, 1, _, 24, true))
@@ -500,8 +508,8 @@ TEST_F(LRWExchangeTest, ExchangeLRWSliceTxOnly) {
 
     EXPECT_EQ(captured_len, 8u);
     // RxPDO entry lies outside the slice and must be untouched.
-    EXPECT_EQ(rx_buf, 0xAABBCCDDu);
-    uint8_t* tb = reinterpret_cast<uint8_t*>(&tx_buf);
+    EXPECT_EQ(*rx_buf, 0xAABBCCDDu);
+    uint8_t* tb = reinterpret_cast<uint8_t*>(tx_buf);
     EXPECT_EQ(tb[0], 0x11);
     EXPECT_EQ(tb[7], 0x88);
 }
@@ -532,7 +540,7 @@ TEST_F(LRWExchangeTest, ExchangeLRWSliceRxOnly) {
     EXPECT_EQ(captured_len, 4u);
     EXPECT_EQ(captured[0], 0xDD);  // rx_buf 0xAABBCCDD little-endian
     // TxPDO entry lies outside the slice and must be untouched.
-    EXPECT_EQ(tx_buf, 0u);
+    EXPECT_EQ(*tx_buf, 0u);
 }
 
 TEST_F(LRWExchangeTest, ExchangeLRWSliceRejectsTooLarge) {
@@ -566,7 +574,7 @@ TEST_F(LRWExchangeTest, ExchangeLRWSliceComposesWholeImage) {
     EXPECT_TRUE(mgr.exchangeLRWSlice(mapping, 0, 4));
     EXPECT_TRUE(mgr.exchangeLRWSlice(mapping, 4, 8));
 
-    uint8_t* tb = reinterpret_cast<uint8_t*>(&tx_buf);
+    uint8_t* tb = reinterpret_cast<uint8_t*>(tx_buf);
     for (int i = 0; i < 8; i++) EXPECT_EQ(tb[i], 0xCD);
 }
 
@@ -592,4 +600,187 @@ TEST_F(LogicalAddressManagerTest, OutOfRangeQueries) {
     EXPECT_EQ(mgr.getTxPDOLogicalAddr(99), 0u);
     EXPECT_EQ(mgr.getTxPDOLength(99), 0u);
     EXPECT_FALSE(mgr.hasSlavePDOs(99));
+}
+
+// ============================================================================
+// Cyclic split-path tests — Q3 mask wait, Q6/Q7 WKC derive/sentinel/reset
+// ============================================================================
+
+/// Hand-rolled fast-path transport: records slice sends, serves scripted
+/// slot responses through the single-wake mask wait.
+class CyclicStubTransport : public IPDOTransport {
+public:
+    // ---- fast-path surface ----
+    bool supportsCyclicFastPath() const override { return true; }
+    size_t maxEtherCATPayloadPerFrame() const override { return payload_; }
+    uint64_t cyclicSlotToken(uint8_t slot) override {
+        return slot < 8 ? tokens_[slot] : 0;
+    }
+    bool sendCyclicDatagram(Command, uint8_t slot, uint16_t, uint16_t,
+                            const void*, uint16_t, bool) override {
+        ++send_calls;
+        tokens_[slot]++;                  // deposits bump the seq token
+        return send_ok_;
+    }
+    uint32_t waitCyclicSlotMask(uint32_t mask, const uint64_t*,
+                                uint32_t, CyclicSlotView* views) override {
+        ++mask_calls;
+        uint32_t arrived = 0;
+        for (uint8_t s = 0; s < kNumCyclicSlots && s < 8; ++s) {
+            if (!(mask & (1u << s)) || !respond_[s]) continue;
+            views[s].payload = resp_buf_[s];
+            views[s].datalen = resp_len_[s];
+            views[s].wkc     = resp_wkc_[s];
+            arrived |= 1u << s;
+        }
+        return arrived;
+    }
+
+    // ---- unused surface ----
+    bool writeRegister(uint16_t, uint16_t, const void*, uint16_t,
+                       unsigned int) override { return false; }
+    bool readRegister(uint16_t, uint16_t, void*, uint16_t,
+                      unsigned int) override { return false; }
+    bool sendSingleDatagram(Command, uint8_t, uint16_t, uint16_t,
+                            const void*, uint16_t, bool) override {
+        return false;
+    }
+    size_t sendMultiDatagram(const MultiDatagramSpec*, size_t) override {
+        return 0;
+    }
+    bool waitForResponseIdx(uint8_t, unsigned int,
+                            RxDatagram&) override { return false; }
+    size_t preRegisterResponseWaiter(uint8_t, uint8_t*,
+                                     size_t) override { return 0; }
+    bool waitForPreRegistered(size_t, unsigned int,
+                              RxDatagram&) override { return false; }
+    uint8_t  allocIdx() override { return 0x30; }
+    uint16_t adpForSlaveIndex(uint16_t) override { return 0; }
+
+    // ---- script ----
+    size_t   payload_ = 1498;
+    uint64_t tokens_[8]{};
+    bool     respond_[8] = {true, true, true, true, true, true, true, true};
+    uint8_t  resp_buf_[8][64]{};
+    uint16_t resp_len_[8]{};
+    uint16_t resp_wkc_[8]{};
+    bool     send_ok_ = true;
+    int      send_calls = 0;
+    int      mask_calls = 0;
+};
+
+class CyclicWkcTest : public ::testing::Test {
+protected:
+    CyclicStubTransport transport;
+    LogicalAddressManager mgr{transport};
+    PDOMapping mapping;
+
+    /// Two slaves: s0 = Rx4B+Tx8B (wkc +3/slice), s1 = Rx4B only (+1).
+    void buildTwoSlaveMap() {
+        SlaveConfig configs[kMaxPDOSlaves] = {};
+        configs[0].configured = true;
+        configs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 4);
+        configs[0].rxpdo_size = 4;
+        configs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 8);
+        configs[0].txpdo_size = 8;
+        configs[1].configured = true;
+        configs[1].sm[2] = SyncManagerConfig::process_output(0x1801, 4);
+        configs[1].rxpdo_size = 4;
+        configs[1].sm[3] = SyncManagerConfig::process_input(0x1C01, 0);
+        configs[1].txpdo_size = 0;
+        ASSERT_TRUE(mgr.buildAddressMap(configs, 2));
+        mapping.add_rxpdo(0, 4, 0x1600, PDOAddressMode::Logical);
+        mapping.add_txpdo(0, 8, 0x1A00, PDOAddressMode::Logical);
+        mapping.add_rxpdo(1, 4, 0x1601, PDOAddressMode::Logical);
+    }
+
+    void SetUp() override { mgr.init(); }
+};
+
+TEST_F(CyclicWkcTest, DeriveWkcCountsSlavesPerDirection) {
+    buildTwoSlaveMap();
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    // Single slice (16 B < 1486): s0 writes Rx +1, reads Tx +2; s1 writes
+    // Rx +1 → expected WKC = 1 + 2 + 1 = 4.
+    EXPECT_EQ(mgr.expectedWkc(0), 4u);
+    EXPECT_EQ(mgr.expectedWkc(1), LogicalAddressManager::kWkcUnknown);
+}
+
+TEST_F(CyclicWkcTest, StrictWkcMismatchFailsCollect) {
+    buildTwoSlaveMap();
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    transport.resp_wkc_[0] = 2;   // expected 4
+    transport.resp_len_[0] = 16;
+    EXPECT_FALSE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.getStats().wkc_errors, 1u);
+}
+
+TEST_F(CyclicWkcTest, CorrectWkcPassesCollect) {
+    buildTwoSlaveMap();
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    transport.resp_wkc_[0] = 4;
+    transport.resp_len_[0] = 16;
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(transport.mask_calls, 1);   // single-wake mask wait used
+    EXPECT_EQ(mgr.getStats().wkc_errors, 0u);
+}
+
+TEST_F(CyclicWkcTest, SentinelLearnsFromFirstResponse) {
+    buildTwoSlaveMap();
+    mgr.resetExpectedWkc();                    // all slices → learn mode
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    // cyclicSend re-derives — force learn mode again post-send to prove
+    // the sentinel path in collect.
+    mgr.resetExpectedWkc();
+    ASSERT_EQ(mgr.expectedWkc(0), LogicalAddressManager::kWkcUnknown);
+    transport.resp_wkc_[0] = 4;
+    transport.resp_len_[0] = 16;
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.expectedWkc(0), 4u);    // learned
+    // Next cycle with a different WKC now fails strict.
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    transport.resp_wkc_[0] = 9;
+    EXPECT_FALSE(mgr.cyclicCollect(mapping, nullptr));
+}
+
+TEST_F(CyclicWkcTest, ResetReturnsToLearnMode) {
+    buildTwoSlaveMap();
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    ASSERT_EQ(mgr.expectedWkc(0), 4u);
+    mgr.resetExpectedWkc();
+    EXPECT_EQ(mgr.expectedWkc(0), LogicalAddressManager::kWkcUnknown);
+    mgr.setExpectedWkc(0, 7);
+    EXPECT_EQ(mgr.expectedWkc(0), 7u);
+    mgr.resetExpectedWkc();
+    EXPECT_EQ(mgr.expectedWkc(0), LogicalAddressManager::kWkcUnknown);
+}
+
+TEST_F(CyclicWkcTest, MultiSliceDerivationPerSlice) {
+    // Force 2 slices: payload 18 → max_slice = 6; image is 16 B → 3 slices
+    // actually ([0,6) [6,12) [12,16)) — compute expectations per slice.
+    transport.payload_ = 18;   // maxSliceLength = 18 - 12 = 6
+    buildTwoSlaveMap();
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_EQ(mgr.cyclicSliceCount(), 3u);
+    // Layout: s0 Rx [0,4), s1 Rx [4,8), s0 Tx [8,16).
+    // slice0 [0,6):  s0 Rx + s1 Rx → 1+1 = 2
+    EXPECT_EQ(mgr.expectedWkc(0), 2u);
+    // slice1 [6,12): s1 Rx [4,8) ∩ + s0 Tx [8,16) ∩ → 1 + 2 = 3
+    EXPECT_EQ(mgr.expectedWkc(1), 3u);
+    // slice2 [12,16): s0 Tx only → 2
+    EXPECT_EQ(mgr.expectedWkc(2), 2u);
+    EXPECT_EQ(transport.send_calls, 3);   // one LRW per slice
+}
+
+TEST_F(CyclicWkcTest, PartialMaskTimeoutCountsPerSlot) {
+    transport.payload_ = 18;
+    buildTwoSlaveMap();
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    transport.respond_[2] = false;         // slice 2 never arrives
+    transport.resp_wkc_[0] = 2;
+    transport.resp_wkc_[1] = 3;
+    transport.resp_len_[0] = 6;
+    transport.resp_len_[1] = 6;
+    EXPECT_FALSE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.getStats().timeout_errors, 1u);
 }

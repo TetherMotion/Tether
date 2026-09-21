@@ -25,9 +25,16 @@
 #include <memory>
 #include <thread>
 
+#ifdef __linux__
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#endif
+
 #include "tether/ethercat/AsyncCyclicLoop.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/ProcessImage.hpp"
+#include "logging/Logger.hpp"
 
 using namespace EtherCAT;
 using namespace std::chrono_literals;
@@ -198,7 +205,7 @@ TEST(AsyncCyclicLoop, OnSendSendsAndCollectsPerTrigger) {
     AsyncCyclicLoop loop(img,
         [&] { ++sends; return true; },
         [&] { ++collects; return true; },
-        nullptr, loopCfg());
+        nullptr, nullptr, loopCfg());
     ASSERT_TRUE(loop.start());
     ASSERT_TRUE(loop.isRunning());
 
@@ -229,7 +236,7 @@ TEST(AsyncCyclicLoop, OnSendIsSilentWithoutTriggers) {
     ProcessImage& img = *imgp;
     std::atomic<int> sends{0};
     AsyncCyclicLoop loop(img, [&] { ++sends; return true; }, nullptr,
-                         nullptr, loopCfg());
+                         nullptr, nullptr, loopCfg());
     ASSERT_TRUE(loop.start());
     std::this_thread::sleep_for(50ms);
     EXPECT_EQ(sends.load(), 0);
@@ -246,7 +253,7 @@ TEST(AsyncCyclicLoop, PeriodicCollectsWithoutTriggers) {
     AsyncCyclicLoop loop(img,
         [&] { ++sends; return true; },
         [&] { ++collects; return true; },
-        nullptr, c);
+        nullptr, nullptr, c);
     ASSERT_TRUE(loop.start());
     // Collects accumulate on the tick with no triggers at all.
     ASSERT_TRUE(waitFor([&] { return collects.load() >= 3; }));
@@ -270,7 +277,7 @@ TEST(AsyncCyclicLoop, RateLimiterCoalescesBursts) {
     auto c = loopCfg();
     c.min_send_interval_ns = 30'000'000;             // 30 ms window
     AsyncCyclicLoop loop(img, [&] { ++sends; return true; }, nullptr,
-                         nullptr, c);
+                         nullptr, nullptr, c);
     ASSERT_TRUE(loop.start());
 
     img.triggerSend();                               // send #1 fires now
@@ -303,7 +310,7 @@ TEST(AsyncCyclicLoop, BackToBackTriggersCoalesceToLatest) {
             }
             ++sends; return true;
         },
-        nullptr, nullptr, loopCfg());
+        nullptr, nullptr, nullptr, loopCfg());
     ASSERT_TRUE(loop.start());
 
     img.triggerSend();                   // wake 1 → send_ fires 2 more
@@ -324,7 +331,7 @@ TEST(AsyncCyclicLoop, IdleKeepAliveCollectsWhenSilent) {
     c.max_idle_ns = 20'000'000;                      // 20 ms keep-alive
     AsyncCyclicLoop loop(img, [&] { return true; },
                          [&] { ++collects; return true; },
-                         nullptr, c);
+                         nullptr, nullptr, c);
     ASSERT_TRUE(loop.start());
     ASSERT_TRUE(waitFor([&] { return collects.load() >= 2; }, 2'000ms));
     const auto st = loop.getStats();
@@ -334,22 +341,33 @@ TEST(AsyncCyclicLoop, IdleKeepAliveCollectsWhenSilent) {
 
 TEST(AsyncCyclicLoop, ActivityResetsIdleDeadline) {
     // Triggered sends push the idle deadline out — no keep-alive collects
-    // while the producer is active.
+    // while the producer is active; idle collects resume once it stops.
     auto imgp = makeImage();
     ProcessImage& img = *imgp;
     std::atomic<int> sends{0}, collects{0};
     auto c = loopCfg();
-    c.max_idle_ns = 40'000'000;                      // 40 ms
+    c.max_idle_ns = 100'000'000;                     // 100 ms
     AsyncCyclicLoop loop(img,
         [&] { ++sends; return true; },
         [&] { ++collects; return true; },
-        nullptr, c);
+        nullptr, nullptr, c);
     ASSERT_TRUE(loop.start());
-    img.triggerSend();
-    ASSERT_TRUE(waitFor([&] { return sends.load() >= 1; }));
-    const auto st0 = loop.getStats();
-    // Send's paired collect isn't an idle collect.
-    EXPECT_EQ(st0.idle_collects, 0u);
+    // A producer thread triggers every ~5 ms — 20× below the idle
+    // deadline, so even a starved loop thread keeps resetting it.
+    std::atomic<bool> run{true};
+    std::thread prod([&] {
+        while (run.load()) {
+            img.triggerSend();
+            std::this_thread::sleep_for(5ms);
+        }
+    });
+    ASSERT_TRUE(waitFor([&] { return sends.load() >= 6; }, 5'000ms));
+    EXPECT_EQ(loop.getStats().idle_collects, 0u);
+    run = false;
+    prod.join();
+    // Quiesce → the keep-alive collect must fire (~idle period).
+    ASSERT_TRUE(waitFor([&] {
+        return loop.getStats().idle_collects >= 1; }, 5'000ms));
     loop.stop();
 }
 
@@ -359,7 +377,7 @@ TEST(AsyncCyclicLoop, SendErrorCountedAndLoopContinues) {
     std::atomic<int> sends{0};
     AsyncCyclicLoop loop(img,
         [&] { ++sends; return false; },              // always fail
-        nullptr, nullptr, loopCfg());
+        nullptr, nullptr, nullptr, loopCfg());
     ASSERT_TRUE(loop.start());
     // Space the triggers so each is a distinct wake — back-to-back ones
     // would coalesce into a single send (and a single error).
@@ -380,7 +398,7 @@ TEST(AsyncCyclicLoop, StopFromUnboundedWait) {
     auto imgp = makeImage();
     ProcessImage& img = *imgp;
     AsyncCyclicLoop loop(img, [&] { return true; }, nullptr,
-                         nullptr, loopCfg());
+                         nullptr, nullptr, loopCfg());
     ASSERT_TRUE(loop.start());
     std::this_thread::sleep_for(10ms);               // let it reach the wait
     const auto t0 = std::chrono::steady_clock::now();
@@ -393,7 +411,7 @@ TEST(AsyncCyclicLoop, DoubleStartRejected) {
     auto imgp = makeImage();
     ProcessImage& img = *imgp;
     AsyncCyclicLoop loop(img, [&] { return true; }, nullptr,
-                         nullptr, loopCfg());
+                         nullptr, nullptr, loopCfg());
     ASSERT_TRUE(loop.start());
     EXPECT_FALSE(loop.start());
     loop.stop();
@@ -506,5 +524,173 @@ TEST(MasterAsyncLoop, StopCyclicLoopLeavesAsyncDatapathAlive) {
     }));
     master.stop();
 }
+
+// ============================================================================
+// Q24 — trigger stamp + trigger→send latency stat
+// ============================================================================
+
+TEST(ProcessImageSendTrigger, SendStampRecorded) {
+    auto imgp = makeImage();
+    ProcessImage& img = *imgp;
+    EXPECT_EQ(img.sendStampNs(), 0u);
+    const uint64_t before = monoNs();
+    img.triggerSend();
+    const uint64_t stamp = img.sendStampNs();
+    EXPECT_GE(stamp, before);
+    EXPECT_LE(stamp, monoNs());
+}
+
+TEST(AsyncCyclicLoop, SendLatencyStatTracked) {
+    auto imgp = makeImage();
+    ProcessImage& img = *imgp;
+    AsyncCyclicLoop loop(img, [&] { return true; },
+                         [&] { return true; }, nullptr, nullptr, loopCfg());
+    ASSERT_TRUE(loop.start());
+    img.triggerSend();
+    ASSERT_TRUE(waitFor([&] { return loop.getStats().sends >= 1; }));
+    // Latency measured: trigger stamp → send wake, strictly positive.
+    EXPECT_GT(loop.getStats().max_send_latency_ns, 0u);
+    loop.stop();
+}
+
+// ============================================================================
+// Q26 — per-producer trigger accounting
+// ============================================================================
+
+TEST(ProcessImageSendTrigger, ProducerSlotClaimAndCount) {
+    auto imgp = makeImage();
+    ProcessImage& img = *imgp;
+    const int slot = img.claimProducerSlot();
+    EXPECT_GE(slot, 1);                    // 0 is the anonymous bucket
+    EXPECT_LE(slot, 7);
+    img.triggerSend();                     // anonymous
+    img.triggerSend();
+    img.triggerSend(static_cast<uint32_t>(slot));
+    EXPECT_EQ(img.producerTriggerCount(0), 2u);
+    EXPECT_EQ(img.producerTriggerCount(static_cast<uint32_t>(slot)), 1u);
+    // An out-of-range id is ignored.
+    img.triggerSend(77);
+    EXPECT_EQ(img.sendSeq(), 4u);          // still bumps the shared seq
+}
+
+TEST(ProcessImageSendTrigger, ProducerSlotsExhaustToAnonymous) {
+    auto imgp = makeImage();
+    ProcessImage& img = *imgp;
+    int seen = 0;
+    for (int i = 0; i < 7; ++i) {
+        const int s = img.claimProducerSlot();
+        ASSERT_GE(s, 1);
+        ++seen;
+    }
+    EXPECT_EQ(seen, 7);                    // slots 1..7
+    EXPECT_EQ(img.claimProducerSlot(), -1);// exhausted → caller falls back to 0
+}
+
+// ============================================================================
+// Q27 — one-shot warning when a cyclic loop owns the wire
+// ============================================================================
+
+TEST(ProcessImageSendTrigger, TriggerUnderCyclicWarnsOnce) {
+    auto imgp = makeImage();
+    ProcessImage& img = *imgp;
+    std::atomic<int> warns{0};
+    auto& logger = Tether::Platform::Logger::instance();
+    const auto hid = logger.addHandler(
+        [&](Tether::Platform::LogLevel lvl, const char* tag,
+            const char* msg) {
+            if (lvl == Tether::Platform::LogLevel::Warn &&
+                std::string_view(tag) == "process_image" &&
+                std::string_view(msg).find("cyclic loop") !=
+                    std::string_view::npos)
+                ++warns;
+        });
+    img.setSendConsumer(ProcessImage::SendConsumer::Cyclic);
+    img.triggerSend();
+    img.triggerSend();
+    img.triggerSend();
+    logger.removeHandler(hid);
+    EXPECT_EQ(warns.load(), 1);            // one-shot, not per-call
+    // Async consumer → no warning.
+    warns = 0;
+    const auto hid2 = logger.addHandler(
+        [&](Tether::Platform::LogLevel lvl, const char* tag, const char*) {
+            if (lvl == Tether::Platform::LogLevel::Warn &&
+                std::string_view(tag) == "process_image")
+                ++warns;
+        });
+    img.setSendConsumer(ProcessImage::SendConsumer::Async);
+    img.triggerSend();
+    logger.removeHandler(hid2);
+    EXPECT_EQ(warns.load(), 0);
+}
+
+// ============================================================================
+// Q23 — independent DC thread alongside the async loop
+// ============================================================================
+
+TEST(AsyncCyclicLoop, DedicatedDcThreadTicks) {
+    auto imgp = makeImage();
+    ProcessImage& img = *imgp;
+    std::atomic<int> dc_ticks{0};
+    auto c = loopCfg();
+    c.dc_interval_us = 5'000;              // 5 ms DC tick
+    AsyncCyclicLoop loop(img,
+        [&] { return true; }, [&] { return true; },
+        [&] { ++dc_ticks; return true; },
+        nullptr, c);
+    ASSERT_TRUE(loop.start());
+    ASSERT_TRUE(waitFor([&] { return dc_ticks.load() >= 2; }));
+    EXPECT_GE(loop.getStats().dc_sync_count, 2u);
+    // Triggers still drive sends — DC is independent of them.
+    img.triggerSend();
+    ASSERT_TRUE(waitFor([&] { return loop.getStats().sends >= 1; }));
+    loop.stop();
+}
+
+TEST(AsyncCyclicLoop, DcIntervalWithoutTaskWarnsButRuns) {
+    auto imgp = makeImage();
+    ProcessImage& img = *imgp;
+    std::atomic<int> sends{0};
+    auto c = loopCfg();
+    c.dc_interval_us = 5'000;              // set but no dc_sync task
+    AsyncCyclicLoop loop(img, [&] { ++sends; return true; },
+                         nullptr, nullptr, nullptr, c);
+    ASSERT_TRUE(loop.start());             // warns, still runs
+    img.triggerSend();
+    ASSERT_TRUE(waitFor([&] { return sends.load() >= 1; }));
+    EXPECT_EQ(loop.getStats().dc_sync_count, 0u);
+    loop.stop();
+}
+
+// ============================================================================
+// Q25 — shm waiter-epoch reclaim (Linux shm only)
+// ============================================================================
+
+#ifdef __linux__
+TEST(ProcessImageSendTrigger, ShmWaiterEpochReclaimsStaleCount) {
+    const char* name = "tether-test-epoch-reclaim";
+    ProcessImage::Config cfg;
+    cfg.mode = ImageMode::Direct;
+    cfg.rx_bytes = 8; cfg.tx_bytes = 8;
+    cfg.shm_name = name;
+    ProcessImage server;
+    ASSERT_TRUE(server.configure(cfg));
+
+    // Simulate a crashed waiter: a registered count that never unregisters.
+    auto* hdr = reinterpret_cast<ShmImageHeader*>(
+        const_cast<uint8_t*>(server.acquireSendImage())
+            - ShmImageLayout::outputOff());
+    hdr->send_waiters.fetch_add(1, std::memory_order_acq_rel);
+    const uint32_t gen0 = hdr->send_epoch.load();
+    ASSERT_GT(hdr->send_waiters.load() & 0xFFFFFFu, 0u);
+
+    // A fresh attach reclaims the stale count into a new generation.
+    ProcessImage client;
+    ASSERT_TRUE(client.attachShared(name));
+    EXPECT_EQ(hdr->send_waiters.load() & 0xFFFFFFu, 0u);
+    EXPECT_GT(hdr->send_epoch.load(), gen0);
+    ::shm_unlink("/tether-test-epoch-reclaim");
+}
+#endif
 
 } // namespace

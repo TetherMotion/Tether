@@ -35,7 +35,7 @@ real jitter sources were structural:
   so the cyclic response frequently took a detour through the poll thread
   (deposit → eventfd → wake).
 * **API friction** — an external motion source had to bounce setpoints
-  through per-entry `app_buffer` pointers rather than writing a process
+  through per-entry application buffers rather than writing a process
   image directly.
 
 The redesign removes copies where they are cheap to remove, removes the
@@ -68,9 +68,16 @@ Everything builds on one invariant about the EtherCAT datagram index byte.
 ```
 idx 0x00..0xF7   asynchronous traffic  (allocIdx() pool, router-routed)
 idx 0xF8..0xFD   cyclic slots          (kCyclicSlotBaseIdx, kNumCyclicSlots=6)
-idx 0xFE         fire-and-forget       (kFireAndForgetIdx)
+idx 0xFE         fire-and-forget / piggyback (kFireAndForgetIdx = kPiggybackIdx)
 idx 0xFF         unused
 ```
+
+`kPiggybackIdx` (0xFE, shared with `kFireAndForgetIdx`) is the reserved
+index for datagrams piggybacked *inside* a cyclic frame — mailbox/async
+traffic riding the cyclic wire slot.  The demux keys on the *first*
+datagram's idx, so the invariant is: **LRW first, piggybacks after** —
+the trailing non-cyclic datagrams fall out of the slot range at dispatch
+and are forwarded to the regular parser.
 
 `kCyclicSlotBaseIdx`/`kNumCyclicSlots` are defined in `Types.hpp`; the same
 values are re-exported as `IPDOTransport::kCyclicSlotBase` /
@@ -278,11 +285,13 @@ kick is benign (deferred to the next commit).
 If the TX ring fails to initialize the channel keeps running: TX falls back
 to the socket path (`sendto`/`sendmsg`) while RX stays zero-copy.
 
-**Why TPACKET_V2 and not V3:** V3 packs variable-size frames into blocks,
-which is a memory-density optimisation for mixed-size capture traffic.  It
-complicates per-frame hold/release for no benefit at our frame sizes — V2's
-"one frame per slot, status flag flip" model maps exactly onto the cookie
-refcount contract.
+**TPACKET_V3 RX prototype:** `CyclicChannelConfig::rx_tpacket_v3` switches
+the RX ring to V3 block mode (`TP_STATUS_USER` block descriptors instead
+of per-frame slots; cookies encode `block<<16|pkt`, blocks retire in
+batch after the sweep).  V3's block packing optimises memory for
+mixed-size capture traffic — irrelevant at fixed 1600 B slots — so V2
+remains the default; the prototype exists to measure burst-retire cost
+if profiling ever shows slot-scan overhead.  TX stays V2 in both modes.
 
 ### 5.3 Two sockets, kernel-enforced separation
 
@@ -292,15 +301,25 @@ BPF filter (`SO_ATTACH_FILTER` + `SO_LOCK_FILTER`) that runs in softirq
 **before** the kernel copies the frame into that socket's queue or ring:
 
 ```c
-/* socket A program — mirror program on socket B */
+/* socket A program — mirror program on socket B (13 insns) */
 ldh  [12]              ; EtherType
-jeq  0x88A4, +0, ->rej ; non-ECAT → reject on A (accept on B)
-ldb  [17]              ; first datagram idx
-jge  0xF8, +0, ->rej   ; below cyclic range → reject on A
-jgt  0xFD, ->rej, +0   ; above cyclic range → reject on A
+jeq  0x88A4, +0, +2    ; untagged ECAT → idx at [17]
+ldh  [12]              ; (reload) EtherType
+jeq  0x8100, +0, ->B   ; not VLAN → B verdict
+ldh  [16]              ; VLAN inner EtherType
+jeq  0x88A4, +0, ->B   ; VLAN-non-ECAT → B verdict
+ldb  [21]              ; tagged: first datagram idx
+jge  0, ->chk, ->chk   ; join: idx in A → range check
+chk: jge 0xF8, +0, ->B ; below cyclic range → B
+     jgt 0xFD, ->B, +0 ; above cyclic range → B
 ret  ACCEPT            ; A: accept / B: reject
 ret  REJECT            ; A: reject / B: accept
 ```
+
+Socket A binds `ETH_P_ALL` (not `0x88A4`) so VLAN-tagged EtherCAT frames
+reach the filter at all — the program itself does the full demux
+(`frame[17]` untagged, `frame[21]` on `0x8100`), and `PACKET_IGNORE_OUTGOING`
+is probed so own-TX echoes never reach either socket where supported.
 
 Consequences:
 
@@ -327,10 +346,9 @@ Edge semantics (verified by tests):
   dropped entirely — desirable.
 * **Non-EtherCAT EtherTypes**: socket B accepts them (the EtherType branch
   bypasses the index load), socket A rejects.
-* **VLAN-tagged frames** (EtherType 0x8100): fail the EtherType check →
-  async path.  Consistent with the existing "no fast path over VLAN" rule;
-  the filter could be extended to check byte 21 on 0x8100 if that ever
-  changes.
+* **VLAN-tagged frames** (EtherType 0x8100): the extended program checks
+  the inner EtherType at [16:18] and the idx at byte 21 — tagged cyclic
+  traffic gets the same fast path as untagged.
 * **Ordering between sockets is not synchronized** — an async TX can
   overtake a cyclic TX sent µs earlier on the other socket.  Benign for
   EtherCAT (protocols are per-slave ordered by arrival), but documented.
@@ -342,13 +360,13 @@ Edge semantics (verified by tests):
 The LRW datagram payload *is* a fixed-layout process image: RxPDO region
 `[0, rx_bytes)` (master→slave setpoints), TxPDO region `[rx_bytes,
 rx_bytes+tx_bytes)` (slave→master inputs).  `ProcessImage` exposes it
-directly instead of bouncing through per-entry `app_buffer` pointers.
+directly instead of bouncing through per-entry buffers.
 
 ### 6.1 Mode hierarchy (safe → unsafe)
 
 | Mode | Writer contract | Copies/cycle | Tearing | Pointer stability |
 |---|---|---|---|---|
-| `Buffered` | legacy `app_buffer` gather/scatter | 2 + per-entry loops | n/a | n/a |
+| `Buffered` | per-entry `storage[]` gather/scatter | 2 + per-entry loops | n/a | n/a |
 | `DoubleBuffered` | **partial writes OK** — call `commitOutputs()` after a burst | 1 hidden memcpy (W→S under seqlock) | none for any field size when burst markers used; aligned ≤4 B fields never tear regardless | `outputWrite()` stable |
 | `Direct` | writer in-loop, or only aligned ≤4 B fields | 0 | possible on >4 B fields from a foreign thread | stable |
 | `TripleBuffered` | **full refresh per commit** | 0 | impossible (buffer rotation) | `outputWrite()` rotates |
@@ -427,9 +445,9 @@ at `[rx_bytes, size)` — matching what the wire returns.
 `entryOffset(i)` is entry *i*'s byte offset in the image, computed by
 `LogicalAddressManager::computeImageOffsets()` using the same layout walk as
 `describeEntries()` (per-slave running offsets from the FMMU base).  Entries
-marked `-1` stay on the `app_buffer` path even in image modes — the gather/
-scatter loops in `exchangeAllLRWCyclic` skip only entries with `entryOffset
->= 0`.
+marked `-1` stay on the per-entry storage path even in image modes — the
+gather/scatter loops in `exchangeAllLRWCyclic` skip only entries with
+`entryOffset >= 0`.
 
 Marked `-1`:
 
@@ -452,6 +470,16 @@ for unmapped entries, and resolving a handle whose `epoch` no longer
 matches `image.epoch()` returns `nullptr` instead of a dangling pointer.
 This is the safe replacement for caching `outputPtr`/`inputPtr` results
 across a remap — the pointer itself can move, the handle cannot lie.
+
+**Manager-owned storage (Q1):** `PDOEntry` carries inline
+`storage[kMaxPDOSize]` — registration (`add_rxpdo`/`add_txpdo`/broadcast
+variants) takes a *size*, not a caller buffer.  Buffered-path entries
+gather/scatter through `entryData()`/`entryDataMut()`/`entryDataAs<T>()`;
+`entryHandle()` + `resolve()`/`resolveMut()` give the epoch-checked form.
+The mapping `epoch()` bumps on `clear()` and `remove_entries_for_slave()`,
+so a stale handle fails resolve instead of pointing at a recycled slot.
+No allocation happens after registration: entry storage is fixed inline
+and image offsets are precomputed.
 
 ### 6.5 `waitInput` — cycle-tick for external motion threads
 
@@ -478,17 +506,26 @@ separate motion process owns setpoints.
 
 | | |
 |---|---|
-| Magic / version | `0x54494D47` (`TIMG`) / `1` — attach validates both |
+| Magic / version | `0x54494D47` (`TIMG`) / `2` — attach validates both |
 | Owner | `configure` creates + owns; destructor `shm_unlink`s when the last owner detaches |
 | Attacher | `attachProcessImage(shm_name)` — maps the same layout; `detach()` only unmaps |
-| Sync | header carries `in_seq`/`out_seq` (futex words) + `in_waiters`/`out_waiters` |
+| Sync | header carries `in_seq`/`out_seq`/`send_seq` (futex words) + packed waiter words |
+| Handshake | `ready` flag + `checksum` over the fixed geometry fields — a half-written header never attaches with wrong sizes |
+| Entry table | `[header][outputs][inputs][ShmEntryDesc table]` — `exportEntryTable()` publishes `slave_index`/`pdo_index`/`direction`/`offset`/`size` per entry; `entry_count` is the release-store publication word |
+| Seqlock | `kShmFlagSeqlock` regions: `shmWriteBegin/End` wrap external writes, `shmReadBegin/End` give bounded-retry consistent snapshots — opt-in, single-writer users pay nothing |
+| Producers | `send_seq`/`send_waiters` + `producer_claims`/`producer_triggers[]` — `triggerSend(producer_id)` is attributed per slot (`claimProducerSlot`/`producerTriggerCount`); `send_waiters` packs `{epoch:8|count:24}` so a crashed waiter's count is reclaimed race-free |
+
+Layout: `[ShmImageHeader][output region][input region][entry table]` —
+attachers `fstat` the segment for total size, so a table appended by a
+newer owner is discovered, and an older attacher on a table-less segment
+simply sees `entry_count == 0`.
 
 Limitations: the shm mode serves the `Buffered`-style accessor contract
 (flat output/input regions); multi-buffered modes are in-process only.
 An attacher that outlives the exporter keeps a valid map but a dead
 sequence counter — attachers should treat stalled `in_seq` as link-down.
 Owner-unlink races with a *new* attacher arriving between unlink checks
-are a documented edge — see QUESTIONS.md.
+are a documented edge.
 
 ---
 
@@ -511,8 +548,13 @@ default.  `CyclicLoopConfig::exchange_placement` selects the overlap:
 | `ExchangePlacement` | send | collect | use when |
 |---|---|---|---|
 | `Atomic` | Exchange phase | Exchange phase | default; in-loop motion reading fresh inputs |
-| `Split` | Exchange | PostExchange | wire RTT overlaps intermediate phases |
+| `Split` | Exchange | PostExchange (or `collect_phase`) | wire RTT overlaps intermediate phases |
 | `SplitLate` | Exchange | Diagnostics | maximum overlap; inputs one phase staler |
+
+`CyclicLoopConfig::collect_phase` (Q2) overrides the collect task's phase
+for `Split` — any phase after Exchange is valid (MotionControl,
+Diagnostics); `Atomic` ignores it and out-of-range/pre-exchange values
+clamp to PostExchange with a warning.
 
 With `motion_in_loop = false` (external motion source) `Split` is pure
 win: the ~10–30 µs wire round-trip stops consuming the wait budget.
@@ -525,7 +567,7 @@ win: the ~10–30 µs wire round-trip stops consuming the wait budget.
    * `Direct`/`Double`/`TripleBuffered` → `image->acquireSendImage()`
      (multi-slice sends disjoint `[off, off+len)` windows of it).
    * Buffered/fallback → the persistent `cyclic_payload_` staging buffer.
-2. Gather RxPDO `app_buffer` bytes for **forced-buffered entries
+2. Gather RxPDO entry-storage bytes for **forced-buffered entries
    intersecting each slice** only.
 3. Send slice *k* on reserved slot *k*: `sendCyclicDatagram` → channel
    `txSendParts` (socket: `sendmsg` iovec; ring: zero-copy TX slot), or
@@ -533,14 +575,20 @@ win: the ~10–30 µs wire round-trip stops consuming the wait budget.
 
 #### Collect half
 
-4. `waitCyclicSlotView(k, token_k, deadline)` per slice — one absolute
-   deadline anchored at send time covers the whole frame's flight.
-5. **WKC validation**: WKC == 0 is always a failure.  On the first
-   successful exchange each slice *learns* its expected WKC; with
-   `strict_wkc` enabled, later mismatches are counted as errors (a dead
-   slave or dropped slice shows up immediately instead of silently
-   shipping stale inputs).  `setCyclicStrictWkc(false)` disables the
-   mismatch check for systems where WKC legitimately varies.
+4. `waitCyclicSlotMask(mask, tokens, deadline)` (Q3) — **one** wake for
+   all in-flight slices against the send-anchored deadline; returns the
+   arrived-bitmask so per-slot timeouts are attributed.  Transports
+   without a mask wait fall back to sequential `waitCyclicSlotView` per
+   slot (`IPDOTransport` default) — same deadline, more loop overhead.
+5. **WKC validation** (Q6/Q7): WKC == 0 is always a failure.  The
+   expected WKC is **derived** from the mapped slave/direction sets
+   intersecting each slice (RxPDO +1, TxPDO +2 per entry —
+   `deriveExpectedWkc`), so a degraded first exchange can never poison
+   the baseline.  Slices whose set can't be derived keep the `0xFFFF`
+   sentinel and learn the first successful response; `strict_wkc`
+   enforces the derived/learned value, `setCyclicStrictWkc(false)`
+   disables mismatch counting for systems where WKC legitimately varies,
+   and `resetCyclicWkc()` re-derives/re-learns after a re-OP cycle.
 6. Publish the input image **once** from all slices
    (`publishInputParts` — view references where the channel holds them,
    copy-bank staging otherwise), then scatter forced-buffered TxPDO
@@ -583,14 +631,19 @@ different mechanisms:
 1. **Fast path** — `seq != token` already → seqlock-read the slot (bounded
    8-try re-check; a second publish mid-read is detected and retried).
 2. **Waiter registration** — `cyclic_waiters_` is incremented *before* any
-   blocking point, so a deposit landing between the fast-path check and
-   the sleep still wakes us: deposit paths write the eventfd **only while
-   a waiter is registered** — idle operation pays zero wakeup syscalls.
+   blocking point, and the deposit path's waiter check + slot `seq` store
+   are `seq_cst` (Q13): a deposit either observes the registered waiter or
+   the waiter's re-check observes the bumped seq — the register-then-sleep
+   window is closed by ordering, not by luck.  Deposit paths write the
+   eventfd **only while a waiter is registered** — idle operation pays
+   zero wakeup syscalls.
 3. **RX spin window** (channel + `rx_spin_ns` configured) — busy-poll
    `rxPending()` for up to the spin budget.  On the ring backend this is
    pure memory reads: a NIC DMA write is visible *before* the kernel could
    schedule a `ppoll` wake — the lowest-latency receive path, and what
    makes a fully syscall-free cycle possible on a dedicated core.
+   `slot_spin_ns` (Q11) is the *separate* budget for spinning on the
+   deposit seq word — channel ring vs slot seq are independent knobs.
 4. **Channel drain** — `rxPoll(views, 8, 0)` each iteration; dispatched
    frames deposit inline.  The cyclic thread receives its own response —
    zero hops.
@@ -601,7 +654,11 @@ different mechanisms:
    frames per wake** so an async burst cannot burn the cyclic thread's
    RX budget; `POLLIN` stays asserted for the rest).
 6. **Portable fallback** — no fds at all (non-Linux, no eventfd): a
-   bounded seq-counter spin until the deadline.
+   bounded seq-counter spin until the deadline, paced by
+   `CyclicLoopConfig::slot_wait_fallback` (Q22) — `Yield` (default)
+   `sched_yield`s between re-checks so a dead link can't wedge a loaded
+   non-RT system; `Spin` restores the pure busy loop where yield latency
+   exceeds the budget (MCU-class targets).
 
 Cancellation (`cancel_requested_`) and the absolute deadline are checked
 at the top of every iteration — a dead link or shutdown can never wedge
@@ -616,12 +673,21 @@ copies the view out — legacy callers keep working.
 
 1. **CPU claims** (`cpu_isolation.enabled`, opt-in): the runtime allocator
    claims `cyclic_cpu`/`dc_cpu` (explicit or auto-selected, preferring
-   kernel-isolated CPUs and never taking the last CPU).  Selected CPUs
-   become the executive/DC affinities — see §8.
+   kernel-isolated CPUs and never taking the last CPU).  With root +
+   `create_cpuset`, a shared cgroup2 partition (`/sys/fs/cgroup/tether_rt`)
+   is extended to cover every claimed CPU — real isolation without
+   `isolcpus=`; `steer_irqs` rewrites `/proc/irq/*/smp_affinity_list` away
+   from claimed CPUs (originals restored on release).  Both are best
+   effort: failure degrades to affinity-only with a warning — claims are
+   never denied.  Selected CPUs become the executive/DC affinities — §8.
 2. **Realtime scheduling**: `SchedClass::Deadline` → `sched_setattr`
-   `SCHED_DEADLINE` (runtime = period/2, deadline = period when
-   unspecified); failure logs and falls back to `SCHED_FIFO`; FIFO failure
-   logs and runs unprivileged — never silent.
+   `SCHED_DEADLINE`.  With `dl_runtime_ns == 0` and `dl_auto_measure`
+   (default) the thread first runs `dl_measure_cycles` (512) on
+   SCHED_FIFO, takes the **P99 work duration × (1 + dl_margin_pct/100)**
+   as the CBS runtime (clamped below the deadline), then switches —
+   stats report `deadline_active` + the applied `dl_runtime_ns`.  Any
+   failure logs and falls back to `SCHED_FIFO`; FIFO failure logs and
+   runs unprivileged — never silent.
 3. **Memory hardening** (`memory_lock` opt-outs, all independent):
    `lock_all_process` → `mlockall(MCL_CURRENT|FUTURE)`;
    `prefault_stack` → the cyclic thread pre-touches its stack;
@@ -638,7 +704,8 @@ copies the view out — legacy callers keep working.
    `shm_name` non-empty exports the image (§6.6).
 6. **Exchange wiring** — `Atomic` → one exchange closure;
    `Split`/`SplitLate` → send in Exchange phase + a collect task in
-   PostExchange/Diagnostics.  `strict_wkc` forwarded to the LAM.
+   PostExchange/Diagnostics (or the user-selected `collect_phase`).
+   `strict_wkc` forwarded to the LAM.
    The exchange closure calls `exchangeAllLRWCyclic(200 µs, &process_image_)`.
 
 `stopCyclicLoop`: stops the executive, `process_image_.configure({})`
@@ -721,7 +788,7 @@ remaining jitter sources — all degrade loudly, never silently.
 | `sleep_mode = Nanosleep` | `clock_nanosleep(TIMER_ABSTIME)` to the next tick — baseline |
 | `sleep_mode = HybridSpin` | sleep until `spin_window_us` before the tick, then busy-poll — wake jitter ≈ 0 at the cost of the spin window's CPU |
 | `sched_class = Fifo` | `SCHED_FIFO` at `priority`; failure logged, thread runs on |
-| `sched_class = Deadline` | `sched_setattr(SCHED_DEADLINE)`: period = cycle, runtime = `dl_runtime_ns` (default period/2), deadline = `dl_deadline_ns` (default period).  Failure → FIFO fallback (logged) |
+| `sched_class = Deadline` | `sched_setattr(SCHED_DEADLINE)`: period = cycle, deadline = `dl_deadline_ns` (default period), runtime = `dl_runtime_ns` — or **auto-measured** (`dl_auto_measure`, default on): N=`dl_measure_cycles` cycles on FIFO, runtime = P99_work × (1 + `dl_margin_pct`/100), clamped below deadline.  Failure → FIFO fallback (logged); `deadline_active` in stats |
 | `low_timer_slack` | `PR_SET_TIMERSLACK=1ns` — removes the ~50 µs default slack on `nanosleep`/`ppoll` timeouts that dominates 250 µs cycles under non-RT scheduling |
 | `stack_prefault_bytes` | per-thread stack pre-touch before the loop starts |
 
@@ -769,11 +836,19 @@ claiming** for systems without boot-time `isolcpus`:
   system always keeps capacity.
 * Claims are process-local reservations: `sched_setaffinity` pins the
   thread, and the allocator tracks its own claims to avoid
-  double-assigning.  It detects *kernel* isolation but cannot create it —
-  a claimed CPU still runs other tasks' spillover; true isolation needs
-  `isolcpus=` or cpusets at boot.  Degraded claims are logged as such.
-* `stopCyclicLoop` releases claims; an `atexit` handler releases
-  everything the process still holds on abnormal exit.
+  double-assigning.  It detects *kernel* isolation; without it a claimed
+  CPU still runs other tasks' spillover unless the opt-in hardening
+  below is used.  Degraded claims are logged as such.
+* **cgroup2 cpuset** (`create_cpuset`, root only): creates one
+  `/sys/fs/cgroup/tether_rt` partition covering *all* claimed CPUs —
+  later claims extend the same group rather than competing partitions —
+  and moves the cyclic threads in.  Real isolation without a reboot.
+* **IRQ steering** (`steer_irqs`, root only): rewrites
+  `/proc/irq/*/smp_affinity_list` to exclude claimed CPUs; the original
+  masks are saved and restored on release.
+* `stopCyclicLoop` releases claims (plus cpuset teardown + IRQ restore);
+  an `atexit` handler releases everything the process still holds on
+  abnormal exit.
 
 ```cpp
 cfg.cpu_isolation.enabled       = true;
@@ -781,6 +856,8 @@ cfg.cpu_isolation.cyclic_cpu    = 3;      // or -1 → auto
 cfg.cpu_isolation.dc_cpu        = -1;     // auto, prefer isolated
 cfg.cpu_isolation.prefer_isolated = true;
 cfg.cpu_isolation.avoid_cpu0    = true;
+cfg.cpu_isolation.create_cpuset = true;   // root: cgroup2 partition
+cfg.cpu_isolation.steer_irqs    = true;   // root: IRQ affinity away
 ```
 
 ### 8.4 What this buys at 4 kHz
@@ -812,7 +889,7 @@ ring backend      ──setup fail──▶  socket backend
 channel exists?   ──no CAP_NET_RAW▶ software deposit path (inline copies)
 BPF attached?     ──fail─────────▶ unfiltered sockets + parser deposit
 Rotating mode     ──no channel───▶ Direct mode
-image mode        ──configure fail▶ Buffered (app_buffer) exchange
+image mode        ──configure fail▶ Buffered (entry-storage) exchange
 cyclic fast path  ──no transport──▶ exchangeAllLRW (router path)
 ```
 
@@ -843,9 +920,9 @@ Invariants that hold on *every* level:
   follow-ups behind the same interface — the `ICyclicChannel` contract was
   shaped for them (e.g. `rxRelease` returning driver-owned buffers to a DMA
   pool).
-* **VLAN-tagged networks** get no fast path: tagged frames route to the
-  async socket and through `VLANRouter`.  Both the fast path and the
-  channel stay non-VLAN.
+* **VLAN-tagged cyclic traffic** takes the fast path — socket A binds
+  `ETH_P_ALL` and the extended BPF demuxes `frame[21]` on `0x8100` tags.
+  Non-EtherCAT VLAN traffic still routes to the async socket.
 * **UDP encapsulation** and transports without `receive`/`native_handle`
   (pure polling transports) never get a channel.
 * **Two sockets** means two AF_PACKET fds and two binds; on systems where
@@ -873,9 +950,12 @@ Invariants that hold on *every* level:
   enabled).
 * **Slice ceiling.**  At most `kNumCyclicSlots` (6) LRW datagrams per
   cycle ⇒ ~8.6 KiB of process image; `configureProcessImage` refuses
-  larger images at startup.  Multi-slice frames also multiply wire time:
-  N near-MTU datagrams at 100 Mbit/s can exceed a 250 µs budget — see
-  QUESTIONS.md.
+  larger images at startup.  **Sizing rule (Q16):** at 100 Mbit/s one
+  max-size frame ≈ 120 µs on the wire — at 4 kHz (250 µs) an image past
+  ~2 frames is physically infeasible regardless of slicing.  Plan the
+  image to fit one frame where possible; two slices leave ~10 µs of
+  slack for turnaround, and beyond two the wire time alone exceeds the
+  cycle.
 * **Rotating can't span slices** — a rotating image maps one frame, so
   multi-slice images fall back to a staged send (logged at configure).
 * **Deferred TX is counted, not hidden.**  A ring `txCommitFrame` whose
@@ -912,12 +992,13 @@ Invariants that hold on *every* level:
 
 ### 10.4 Realtime platform limits
 
-* **CPU claims are reservations, not isolation.**  `CpuIsolation` pins
-  threads via affinity and tracks process-local claims — it cannot stop
-  the rest of the system from running on a claimed CPU.  True isolation
-  needs `isolcpus=`/`rcu_nocbs=` or cpuset cgroups at boot; the allocator
-  detects and prefers such CPUs when they exist.  Every degraded claim
-  is logged.
+* **CPU claims are reservations unless hardened.**  `CpuIsolation` pins
+  threads via affinity and tracks process-local claims; with
+  `create_cpuset`/`steer_irqs` + root it *creates* real isolation
+  (cgroup2 partition + IRQ steering, torn down on release).  Without
+  root those opt-ins degrade to affinity-only with a warning — the
+  allocator always detects and prefers kernel-isolated CPUs when they
+  exist.  Every degraded claim is logged.
 * **`SCHED_DEADLINE` needs kernel support** (`CONFIG_SCHED_DEADLINE`,
   and admission control must accept the runtime/period — a `runtime`
   near `period` on a busy CPU fails `sched_setattr` with `EBUSY`).
@@ -930,11 +1011,12 @@ Invariants that hold on *every* level:
   *this* cycle's inputs must use `Atomic` (or accept one-phase-stale
   data).  `SplitLate` collects in Diagnostics — freshest for the *next*
   cycle only.
-* **Strict WKC learns on the first good frame.**  The learn happens on
-  the first successful exchange, so a mismatch is only detectable after
-  that baseline exists — a slave dead from power-on still surfaces as
-  WKC == 0, but a wrong-but-nonzero first WKC would be learned as
-  expected.  Reconfigure resets the learned values.
+* **Strict WKC is derived, with a learned fallback.**  Expected values
+  come from the mapped slave/direction sets per slice
+  (`deriveExpectedWkc`), so the baseline exists before the first
+  exchange and a degraded first frame can't poison it.  Only slices
+  whose set can't be derived fall back to learning the first good WKC;
+  `resetCyclicWkc()` invalidates learned values on a re-OP cycle.
 * **shm image is Buffered-contract only** and survives its exporter in a
   degraded state (§6.6): a live map with a dead sequence counter.
   `waitInput` timeouts are the attach-side detection path.
@@ -964,7 +1046,9 @@ lines of filter code, keep the poll thread's code unchanged, and fail soft.
 **Why TPACKET_V2 over V3?**  Per-frame slots map 1:1 onto the cookie
 hold/release contract; V3's block packing optimises memory for mixed-size
 capture traffic — irrelevant at 1600 B fixed slots — and complicates
-per-frame holds.
+per-frame holds.  A V3 RX prototype exists behind
+`CyclicChannelConfig::rx_tpacket_v3` (Q17) — measured if slot-scan cost
+ever shows up in profiles.
 
 **Why the persistent-write-buffer DoubleBuffered instead of rotating
 ping-pong?**  A rotating pair breaks partial writers: the rotated-in buffer
@@ -980,10 +1064,16 @@ on the index byte.  Keeping correctness off the filter means `SO_ATTACH_FILTER`
 failure, a kernel without cBPF, or a future mixed-index frame are all
 performance events, never protocol bugs.
 
-**Why keep `app_buffer` at all?**  Per-entry granularity.  FSoE-managed PDOs
-must stay staged for CRC computation, bit-packed entries can't be written
-in place, and Buffered mode remains the semantic reference implementation —
-the image modes are opt-in per `CyclicLoopConfig::image_mode`.
+**Why manager-owned entry storage instead of caller buffers (Q1)?**
+`PDOEntry::storage[kMaxPDOSize]` replaces `void* app_buffer`: the caller
+never owns a pointer the exchange path dereferences, so registration can't
+hand in a stack/temporary buffer, storage is inline (no per-entry
+allocation, cache-adjacent), and `EntryHandle` + epoch gives a checked
+access form that survives remapping.  Per-entry granularity is preserved:
+FSoE-managed PDOs stay staged for CRC computation, bit-packed entries
+can't be written in place, and Buffered mode remains the semantic
+reference implementation — image modes are opt-in per
+`CyclicLoopConfig::image_mode`.
 
 **Why eventfd + ppoll instead of the condvar?**
 `ppoll` on real fds gives kernel-scheduled wakeup with nanosecond deadlines
@@ -1013,17 +1103,18 @@ Tests live in `tests/ethercat/test_cyclic_channel.cpp`,
 
 | Layer | Method | Coverage |
 |---|---|---|
-| BPF program correctness | userspace cBPF interpreter over the exact exported instruction bytes (`cyclicChannelBpfProgram`) | accept/reject at boundary indexes 0xF7/0xF8/0xFD/0xFE, non-ECAT EtherTypes, short frames |
+| BPF program correctness | userspace cBPF interpreter over the exact exported instruction bytes (`cyclicChannelBpfProgram`) | accept/reject at boundary indexes 0xF7/0xF8/0xFD/0xFE, non-ECAT EtherTypes, short frames, **VLAN-tagged ECAT demux on `frame[21]`** |
 | BPF **kernel execution** | same bytes attached via `SO_ATTACH_FILTER` to an `AF_UNIX` datagram socketpair — the real kernel verifier+interpreter, no privileges needed | accept/reject behaviour in-kernel |
 | Socket channel | `createCyclicSocketChannelForFd` over `AF_UNIX` sockets | rxPoll delivery/timeout/nonblock, bank exhaustion + `droppedRx`, hold/release lifecycle, invalid cookies, TX failure paths, `txSendParts` staging + oversize + null-payload, `recvmsg`/`SCM_TIMESTAMPNS` stamps |
-| Ring channel | `createCyclicRingChannelForMemory` — synthetic `tpacket2_hdr` layout on caller memory, socketpair fd for kick/poll | slot emit + kernel stamps, consume→recycle, hold pins/release frees, double-release clamp, resume cursor, `rxPending` semantics, TX acquire/commit/pad/exhaustion, EAGAIN → `txDeferred`, poll deadline, spin-window late delivery |
-| Wait path | `MasterCyclicTestAccess` + scriptable channel/`iface_.receive` | seq fast path, eventfd waiter wake, no-missed-deposit race, bounded 8-frame drain, channel spin phase + deadline + cancel, `stamp_ns` propagation |
+| Ring channel | `createCyclicRingChannelForMemory` — synthetic `tpacket2_hdr`/`tpacket3` block layout on caller memory, socketpair fd for kick/poll | V2: slot emit + kernel stamps, consume→recycle, hold pins/release frees, double-release clamp, resume cursor, `rxPending` semantics, TX acquire/commit/pad/exhaustion, EAGAIN → `txDeferred`, poll deadline, spin-window late delivery.  V3 prototype (`rx_tpacket_v3`): block walk, per-pkt holds, batched retire, cursor-advance-after-sweep |
+| Wait path | `MasterCyclicTestAccess` + scriptable channel/`iface_.receive` | seq fast path, eventfd waiter wake, no-missed-deposit race, bounded 8-frame drain, channel spin phase + deadline + cancel, `stamp_ns` propagation, `waitCyclicSlotMask` single-wake + arrived-bitmask, no-fd `slot_wait_fallback` Yield/Spin, VLAN dispatch |
 | Master fast path | `MasterCyclicTestAccess` + scripted channel | software deposit copy path, view publish + cookie release, mixed-frame → parser routing, short-frame ignore, `txSendParts` composition, header layout |
-| ProcessImage / LAM | `configure()` + fake `IPDOTransport` | all 5 modes, carry-forward, commit gating, rotating attach/detach, publish view/copy/parts + seq, entry offsets + exclusions, `EntryHandle` epoch invalidation, `waitInput` wake/timeout/reconfigure, shm export + attach lifecycle, multi-slice send/collect, strict-WKC learn + mismatch, forced-buffered gather/scatter |
-| Rt platform | `test_rt_platform.cpp` | `CpuIsolation` claim/release/auto-select/leave-one-free/explicit + conflict, `RtMemory` lock/prefault/slack best-effort paths |
-| Async send-on-change | `test_async_loop.cpp` + `RtVethTest.AsyncLoopTriggerDrivesWireExchange` | `triggerSend`/`waitSend`/`sendSeq` (in-process atomic wait + shm futex), OnSend send+collect per edge, Periodic independent tick, rate-limit + burst coalescing, idle keep-alive, stop-from-wait, double-start, Master lifecycle + cyclic/async mutual exclusion, **real wire**: trigger → ring TX → veth echo → RX collect |
-| **Live kernel demux + rings** | `LivePacketTest` on loopback: two real AF_PACKET sockets with opposite filters, real ring RX/TX, factory `Auto` | **auto-skipped without `CAP_NET_RAW`** — runs in privileged CI |
-| **Privileged end-to-end** | `test_rt_privileged.cpp` under `runec` — see below | real veth wire, kernel rings, SCHED_FIFO/DEADLINE, CPU claims |
+| ProcessImage / LAM | `configure()` + fake `IPDOTransport` | all 5 modes, carry-forward, commit gating, rotating attach/detach, publish view/copy/parts + seq, entry offsets + exclusions, `EntryHandle` epoch invalidation, `waitInput`/`waitSend` wake/timeout/reconfigure, shm export + attach lifecycle + **ready/checksum handshake + entry table + seqlock regions**, multi-slice send/collect, **derived-WKC + sentinel learn + `resetCyclicWkc`**, forced-buffered gather/scatter, producer slots/trigger stats |
+| PDO storage (Q1) | `test_pdo_*.cpp` | manager-owned `storage[]`, `entryData*`/`resolve` access, epoch bump on `clear`/`remove_entries_for_slave`, broadcast registration, typed access bounds |
+| Rt platform | `test_rt_platform.cpp` | `CpuIsolation` claim/release/auto-select/leave-one-free/explicit + conflict + cpuset/IRQ best-effort paths, `RtMemory` lock/prefault/slack best-effort paths |
+| Async send-on-change | `test_async_loop.cpp` + `RtVethTest.AsyncLoopTriggerDrivesWireExchange` | `triggerSend`/`waitSend`/`sendSeq` (in-process atomic wait + shm futex), OnSend send+collect per edge, Periodic independent tick, dedicated DC thread (`enable_dc_synchronization`), `max_send_latency_ns` trigger→TX stat, rate-limit + burst coalescing, idle keep-alive, stop-from-wait, double-start, Master lifecycle + cyclic/async mutual exclusion, **real wire**: trigger → ring TX → veth echo → RX collect |
+| **Live kernel demux + rings** | `LivePacketTest` on loopback: two real AF_PACKET sockets with opposite filters, real ring RX/TX, factory `Auto` | **auto-skipped without `CAP_NET_RAW`** — runs in the `privileged-tests` CI job |
+| **Privileged end-to-end** | `test_rt_privileged.cpp` under `runec` / `unshare -rn` / `sudo` — see below + the `privileged-tests` CI job | real veth wire, kernel rings, SCHED_FIFO/DEADLINE, CPU claims |
 | Factory validation | `CyclicChannelFactory.InvalidIfindexFails` — fails before socket creation | unconditional |
 
 ### The privilege seam
@@ -1093,14 +1184,20 @@ cfg.cycle_period_us = 250;                       // 4 kHz
 cfg.wire_mode  = CyclicWireMode::Auto;           // ring → socket → software
 cfg.image_mode = ImageMode::DoubleBuffered;      // or Rotating / Triple / Direct
 cfg.motion_in_loop = false;                      // external motion source
-cfg.rx_spin_ns = 30'000;                         // ring busy-poll window
+cfg.rx_spin_ns   = 30'000;                       // ring busy-poll window
+cfg.slot_spin_ns = 10'000;                       // deposit-seq spin (indep.)
+cfg.slot_wait_fallback = Master::CyclicLoopConfig::SlotWaitFallback::Yield;
 cfg.exchange_placement = Master::ExchangePlacement::Split;
-cfg.strict_wkc = true;                           // verify learned WKC
+cfg.collect_phase = TaskPhase::PostExchange;     // Split collect override
+cfg.strict_wkc = true;                           // verify derived/learned WKC
 cfg.sched_class = Master::SchedClass::Deadline;  // or Fifo
+cfg.dl_auto_measure = true;                      // runtime = P99_work×margin
 cfg.shm_image_name = "printer0";                 // export to motion proc
 
 cfg.cpu_isolation.enabled   = true;              // opt-in CPU claiming
 cfg.cpu_isolation.cyclic_cpu = -1;               // auto-select
+cfg.cpu_isolation.create_cpuset = true;          // root: cgroup2 partition
+cfg.cpu_isolation.steer_irqs    = true;          // root: IRQ steering
 cfg.memory_lock.lock_image  = true;              // per-section opt-out
 cfg.memory_lock.lock_all_process = false;        // heaviest, off default
 master.startCyclicLoop(cfg);
@@ -1129,7 +1226,7 @@ ProcessImage remote;
 remote.attachProcessImage("printer0");           // same accessors + waitInput
 
 // --- Entry offsets (stable within an epoch) -----------------------------
-const int32_t off = img.entryOffset(entry_idx);  // -1 = app_buffer path
+const int32_t off = img.entryOffset(entry_idx);  // -1 = entry-storage path
 const uint32_t ep = img.epoch();                 // changes on reconfigure
 auto h = img.entryHandle(entry_idx);             // epoch-checked reference
 // ...later, even across a remap:
@@ -1173,11 +1270,11 @@ channel for diagnostics (`backendName()`, `zeroCopy()`, `droppedRx()`,
 | `src/ethercat/raw/CyclicChannel_linux.cpp` | BPF programs, `LinuxSocketChannel`, `LinuxRingChannel`, `recvmsg` stamps, ring cursors/holds, `txDeferred`, factories, test seams, non-Linux stubs |
 | `include/tether/ethercat/ProcessImage.hpp` / `src/ethercat/ProcessImage.cpp` | image modes, buffers, publish/hold/parts, `EntryHandle`, `waitInput` futex, `triggerSend`/`waitSend`/`sendSeq` trigger words, shm export/attach, entry offsets |
 | `include/tether/ethercat/AsyncCyclicLoop.hpp` / `src/ethercat/AsyncCyclicLoop.cpp` | event-driven send-on-change loop: `CollectMode` (OnSend/Periodic), rate-limit coalescing, idle keep-alive, RT plumbing |
-| `src/ethercat/raw/Master_transport.cpp` | `depositCyclicSlot`, `publishCyclicSlotView`, `dispatchChannelFrame`, unified `waitCyclicSlotView`, `sendCyclicDatagram`/`sendCyclicFrame`/`composeCyclicHeader` |
+| `src/ethercat/raw/Master_transport.cpp` | `depositCyclicSlot`, `publishCyclicSlotView`, `dispatchChannelFrame` (VLAN-aware), unified `waitCyclicSlotView` + `waitCyclicSlotMask`, `sendCyclicDatagram`/`sendCyclicFrame`/`composeCyclicHeader` |
 | `src/ethercat/raw/Master.cpp` | `startCyclicLoop`/`stopCyclicLoop` + `startAsyncLoop`/`stopAsyncLoop` wiring: CPU claims, mlock sections, sched class, split placement, shm name, mutual exclusion, `MasterPDOTransport` forwards |
-| `src/ethercat/raw/LogicalAddressManager.cpp` | `computeImageOffsets`, `cyclicSend`/`cyclicCollect` (multi-slice), expected-WKC learn/verify, `maxSliceLength` |
+| `src/ethercat/raw/LogicalAddressManager.cpp` | `computeImageOffsets`, `cyclicSend`/`cyclicCollect` (multi-slice, mask wait), `deriveExpectedWkc` + sentinel learn/`resetCyclicWkc`, `maxSliceLength` |
 | `include/tether/platform/RtMemory.hpp` / `src/platform/RtMemory.cpp` | `lockAllMemory`, `lockMemory`, `prefault*`, timer slack — best-effort RT hardening |
-| `include/tether/platform/CpuIsolation.hpp` / `src/platform/CpuIsolation.cpp` | runtime CPU claim allocator, RAII `Claim`, `atexit` release |
+| `include/tether/platform/CpuIsolation.hpp` / `src/platform/CpuIsolation.cpp` | runtime CPU claim allocator, RAII `Claim`, `atexit` release, cgroup2 `tether_rt` cpuset, IRQ affinity steering |
 | `include/tether/platform/Platform.hpp` / `src/platform/Platform.cpp` | `setCurrentThreadDeadline` (`SCHED_DEADLINE` via `sched_setattr`) |
 | `include/tether/ethercat/CyclicExecutive.hpp` / `src/ethercat/CyclicExecutive.cpp` | `SleepMode`, `SchedClass`, phase tasks, prefault + slack at thread start |
 | `include/tether/ethercat/PDOManager.hpp` | `PDOEntry::image_exclude`, `IPDOTransport` cyclic API |
@@ -1187,4 +1284,4 @@ channel for diagnostics (`backendName()`, `zeroCopy()`, `droppedRx()`,
 | `tests/ethercat/test_process_image.cpp` | image modes + LAM exchange + handles + waitInput + shm |
 | `tests/ethercat/test_async_loop.cpp` | trigger/wait/coalesce, both collect modes, idle keep-alive, shm cross-process trigger, Master async lifecycle |
 | `tests/platform/test_rt_platform.cpp` | `CpuIsolation` claims + `RtMemory` best-effort paths |
-| `QUESTIONS.md` | open design questions deferred from the FastLoop review |
+| `QUESTIONS.md` | design decisions + rationale for all FastLoop review items |

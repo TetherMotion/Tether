@@ -78,6 +78,16 @@ public:
         /// Scheduling class for the cyclic thread (DC thread always uses
         /// SCHED_FIFO — its budget is a single short frame).
         SchedClass sched_class = SchedClass::Fifo;
+
+        /// SCHED_DEADLINE auto-measure (Q10): when sched_class==Deadline
+        /// and dl_runtime_ns==0, the cyclic thread runs its first
+        /// dl_measure_cycles on SCHED_FIFO while recording per-cycle work,
+        /// then switches to CBS with runtime = P99 × (100+margin_pct)/100.
+        /// Turn off to get the legacy period/2 default immediately.
+        bool     dl_auto_measure   = true;
+        uint32_t dl_measure_cycles = 512;
+        /// Headroom over the measured P99 — 100 ⇒ runtime = P99 × 2.
+        uint32_t dl_margin_pct     = 100;
         /// SCHED_DEADLINE parameters (ns).  0 → runtime = period/2,
         /// deadline = period.  Only used when sched_class == Deadline.
         uint64_t dl_runtime_ns  = 0;
@@ -122,6 +132,8 @@ public:
         uint64_t task_errors        = 0;
         uint64_t missed_deadlines   = 0;   ///< skipped deadline count (overruns)
         uint32_t max_cycle_work_us  = 0;   ///< longest in-cycle work burst
+        bool     deadline_active    = false; ///< SCHED_DEADLINE engaged
+        uint64_t dl_runtime_ns      = 0;   ///< CBS runtime actually applied
         JitterStats jitter;                ///< wake-up period jitter (cyclic)
 
         uint64_t   dc_sync_count    = 0;
@@ -159,6 +171,11 @@ public:
     void setExchangeEnabled(bool en) { exchange_enabled_.store(en, std::memory_order_release); }
 
     Stats getStats() const;
+
+    /// Tasks registered for a phase (introspection/tests).
+    size_t taskCount(TaskPhase p) const {
+        return phase_tasks_[phaseIndex(p)].size();
+    }
 
 private:
     void cyclicMain();
@@ -200,6 +217,7 @@ private:
     std::atomic<uint32_t> max_cycle_work_us_{0};
     std::atomic<uint64_t> dc_sync_count_{0};
     std::atomic<uint64_t> dc_sync_errors_{0};
+    std::atomic<uint64_t> dl_applied_runtime_ns_{0};
 };
 
 } // namespace EtherCAT
