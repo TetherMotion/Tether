@@ -142,8 +142,6 @@ now records **what was decided and where it lives**.  Items marked
     still routes correctly, socket B pays the wakeup).  Mirror-filter
     correctness is unaffected.
 
-## Verification gaps
-
 19. **Privileged CI job added.**  `.github/workflows/ci.yml` gained a
     `privileged-tests` job: prefers rootless `unshare -rn` (real
     CAP_NET_RAW/CAP_NET_ADMIN in a fresh netns — veth, AF_PACKET, cBPF,
@@ -205,6 +203,16 @@ now records **what was decided and where it lives**.  Items marked
     `SendConsumer::Cyclic` owns the wire logs once
     ("async trigger while cyclic loop owns the wire") — the seq bump
     is still a harmless no-op, but the warning catches the API misuse.
+
+28. **NIC RX/TX error monitoring via sysfs.**  Packet sockets cannot
+    observe NIC-level drops (bad CRC, FIFO overrun), so HAL software
+    counters can never see them.  `LinuxRawSocketEthernet` instead polls
+    `/sys/class/net/<if>/statistics/` every 500 ms on a non-RT thread —
+    zero per-frame cost — and logs significant deltas
+    (≥4 errors/drops or ≥0.1 % of packets) with the loss percentage.
+    Opt-out via `EthernetConfig::nicErrorMonitor` (default on).
+    `rx_errors` is an aggregate on most drivers; subtype counters
+    (crc/fifo/missed) are included in the log totals for diagnosis.
 
 ## Remaining deferred items
 
