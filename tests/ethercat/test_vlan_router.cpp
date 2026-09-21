@@ -280,6 +280,49 @@ TEST_F(VLANRouterTest, RxTaggedFrameRoutedToMatchingMaster) {
     EXPECT_EQ(std::memcmp(caps[0].data.data() + 14, payload.data(), payload.size()), 0);
 }
 
+TEST_F(VLANRouterTest, RxStrippedTagRoutedByAuxVlanId) {
+    // Kernel RX path: the 802.1Q tag is stripped before packet sockets see
+    // the frame — the data shows the inner EtherType at [12] and the VID
+    // arrives only via PACKET_AUXDATA → processRxFrame's aux_vlan_id.
+    auto master = std::make_shared<Master>();
+    router_->addMaster(master, 100, std::nullopt);
+
+    std::vector<uint8_t> payload(12, 0x42);
+    auto untagged_looking = buildFrame(0x88A4, payload);   // no tag in data
+    router_->processRxFrame(untagged_looking.data(),
+                            untagged_looking.size(),
+                            /*aux_vlan_id=*/100);
+
+    auto caps = captured();
+    ASSERT_EQ(caps.size(), 1u);
+    EXPECT_EQ(caps[0].master, master.get());
+    // Delivered as-is — a stripped frame is already decapsulated.
+    EXPECT_EQ(caps[0].data.size(), untagged_looking.size());
+    EXPECT_EQ(caps[0].data[12], 0x88);
+    EXPECT_EQ(caps[0].data[13], 0xA4);
+}
+
+TEST_F(VLANRouterTest, RxStrippedTagDroppedOnVidMismatch) {
+    auto master = std::make_shared<Master>();
+    router_->addMaster(master, 100, std::nullopt);
+
+    auto untagged_looking = buildFrame(0x88A4, {0x42});
+    router_->processRxFrame(untagged_looking.data(),
+                            untagged_looking.size(),
+                            /*aux_vlan_id=*/200);          // wrong VID
+    EXPECT_TRUE(captured().empty());
+
+    // And a genuinely untagged frame (no auxdata) still only reaches
+    // untagged masters — the VID-less path is unchanged.
+    auto untagged_master = std::make_shared<Master>();
+    router_->addMaster(untagged_master, std::nullopt, std::nullopt);
+    router_->processRxFrame(untagged_looking.data(),
+                            untagged_looking.size());
+    auto caps = captured();
+    ASSERT_EQ(caps.size(), 1u);
+    EXPECT_EQ(caps[0].master, untagged_master.get());
+}
+
 TEST_F(VLANRouterTest, RxTaggedFrameDroppedWhenNoMatch) {
     auto master = std::make_shared<Master>();
     router_->addMaster(master, 100, std::nullopt);

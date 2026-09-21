@@ -546,8 +546,15 @@ EtherCAT::NetworkInterface* setupEncapsulation(
         auto* router = routerStorage.get();
         eth.setRxCallback(
             [router](const uint8_t* frame, size_t len,
-                     const EtherCAT::HAL::RxFrameInfo&, void*) {
-                router->processRxFrame(frame, len);
+                     const EtherCAT::HAL::RxFrameInfo& info, void*) {
+                // When the kernel stripped the tag (rx-vlan-offload), the
+                // VID arrives only via metadata — pass it out-of-band so
+                // the router needs no reinserted tag bytes.
+                std::optional<uint16_t> aux_vlan;
+                if (info.vlanTagPresent && len >= 14 &&
+                    !(frame[12] == 0x81 && frame[13] == 0x00))
+                    aux_vlan = info.vlanId;
+                router->processRxFrame(frame, len, aux_vlan);
             },
             nullptr);
 

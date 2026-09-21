@@ -146,10 +146,14 @@ master.start(*master_iface, src_mac);
   `CAP_NET_RAW` the socket already holds; if the kernel rejects the
   program the code logs a warning and continues — userspace parsing
   still drops non-EtherCAT traffic, only the wake-up savings are lost.
-- **NIC VLAN offload**: some NICs strip the VLAN tag in hardware.  The
-  `VLANRouter` still tags TX correctly, but RX frames may arrive
-  untagged depending on the driver — check `ethtool -k <iface>` for
-  `rx-vlan-offload` if tagged traffic mysteriously disappears.
+- **Kernel VLAN untagging**: inbound 802.1Q tags are removed by the
+  kernel before packet sockets see the data (rx-vlan-offload in the NIC,
+  or the generic untag path on all modern kernels).  Tether handles both
+  representations: the generated cBPF programs validate stripped tags via
+  `SKF_AD_VLAN_*` ancillary loads, and `LinuxEthernet` reports the tag
+  through `RxFrameInfo` metadata (`PACKET_AUXDATA`) so `VLANRouter`
+  routes on it without any tag reinsertion.  See "Kernel VLAN
+  untagging" in [EtherCATBPFFiltering](EtherCATBPFFiltering.md).
 - **`vlan:any` and the undefined target**: frames with *any* VID are
   delivered to the master (after tag-stripping).  This is the catch-all
   mode — e.g. for `ethercat_dump_sii` on a trunk port.

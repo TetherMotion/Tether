@@ -23,6 +23,11 @@
  *    kernel RX stamps and the sendmsg scatter-gather TX path.
  *  - Kernel cBPF demux between the cyclic and async sockets on a real wire
  *    (a veth pair — frames actually traverse a kernel link).
+ *  - CBPFProgramFactory encapsulation filters on a real wire: untagged /
+ *    VLAN-tagged / VLAN-range / catch-all / EtherCAT-over-UDP accept-reject
+ *    matrices, kernel-inserted tags from a peer-side 802.1Q sub-interface,
+ *    and the full HAL poll → VLANRouter strip/deliver + router TX-tag path
+ *    (when tether_hal is linked — TETHER_TEST_HAVE_HAL).
  *  - Master::startCyclicLoop() channel creation + waitCyclicSlotView() over
  *    a real wire (ppoll → rxPoll → dispatch → slot publish).
  *  - Platform: setCurrentThreadRealtime (SCHED_FIFO), setCurrentThreadDeadline
@@ -80,14 +85,20 @@ struct sched_attr_local {
     uint64_t sched_period;
 };
 
+#include "tether/ethercat/CBPFProgramFactory.hpp"
 #include "tether/ethercat/CyclicChannel.hpp"
 #include "tether/ethercat/CyclicExecutive.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Types.hpp"
+#include "tether/ethercat/VLANRouter.hpp"
 #include "tether/platform/CpuIsolation.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/platform/RtMemory.hpp"
 #include "ethercat/raw/CyclicDatapath.hpp"
+
+#if defined(TETHER_TEST_HAVE_HAL)
+#include "hal/IEthernet.hpp"
+#endif
 
 using namespace EtherCAT;
 using namespace std::chrono_literals;
@@ -174,11 +185,16 @@ ssize_t recvOne(int fd, uint8_t* buf, size_t cap, int timeout_ms) {
 }
 
 /// Send one raw frame out ifindex via an open AF_PACKET socket.
-bool sendRaw(int fd, int ifindex, const uint8_t* f, size_t len) {
+/// proto (host order) sets sll_protocol; 0 keeps the socket's bound
+/// protocol.  Pass the inner EtherType when transmitting through an
+/// 802.1Q sub-interface so the kernel tagger sees the right protocol.
+bool sendRaw(int fd, int ifindex, const uint8_t* f, size_t len,
+             uint16_t proto = 0) {
     struct sockaddr_ll sll {};
-    sll.sll_family  = AF_PACKET;
-    sll.sll_ifindex = ifindex;
-    sll.sll_halen   = 6;
+    sll.sll_family   = AF_PACKET;
+    sll.sll_ifindex  = ifindex;
+    sll.sll_protocol = htons(proto);
+    sll.sll_halen    = 6;
     std::memset(sll.sll_addr, 0xFF, 6);
     return ::sendto(fd, f, len, 0, reinterpret_cast<sockaddr*>(&sll),
                     sizeof(sll)) == (ssize_t)len;
@@ -288,6 +304,218 @@ bool waitFor(F&& pred, std::chrono::milliseconds budget = 3'000ms) {
     }
     return pred();
 }
+
+// ============================================================================
+// Encapsulation helpers — 802.1Q insertion, IPv4/UDP frames, windowed RX
+// ============================================================================
+
+/// Insert an 802.1Q tag (vid, pcp) between the Ethernet header and the
+/// payload of a frame built by buildEcatFrame/buildIp4UdpFrame.  The
+/// original EtherType moves to [16..17] (inner EtherType).  `f` needs
+/// >= 4 bytes of tail room beyond len.  Returns the new frame length.
+size_t vlanTagInsert(uint8_t* f, size_t len, uint16_t vid, uint8_t pcp = 0) {
+    std::memmove(f + 16, f + 12, len - 12);  // ethertype + payload shift +4
+    f[12] = 0x81; f[13] = 0x00;
+    const uint16_t tci = static_cast<uint16_t>(((pcp & 0x7) << 13) |
+                                               (vid & 0x0FFF));
+    f[14] = static_cast<uint8_t>(tci >> 8);
+    f[15] = static_cast<uint8_t>(tci & 0xFF);
+    return len + 4;
+}
+
+/// Build an IPv4 frame carrying `payload` inside a UDP datagram.
+/// `proto`/`ihl`/`frag_off` are overridable for negative cases; ihl >= 6
+/// exercises the filter's IP-options (MSH/IND) addressing path.
+size_t buildIp4UdpFrame(uint8_t* f, uint16_t sport, uint16_t dport,
+                        const uint8_t* payload, size_t plen,
+                        uint8_t proto = 17, uint8_t ihl = 5,
+                        uint16_t frag_off = 0) {
+    std::memset(f, 0xAA, 6);                     // dst (unicast)
+    std::memset(f + 6, 0x55, 6);                 // src
+    f[12] = 0x08; f[13] = 0x00;                  // EtherType IPv4
+    uint8_t* ip = f + 14;
+    ip[0] = static_cast<uint8_t>((4 << 4) | (ihl & 0x0F));
+    const uint16_t udp_len = static_cast<uint16_t>(8 + plen);
+    const uint16_t tot = static_cast<uint16_t>(ihl * 4 + udp_len);
+    ip[2] = static_cast<uint8_t>(tot >> 8);
+    ip[3] = static_cast<uint8_t>(tot & 0xFF);
+    ip[6] = static_cast<uint8_t>(frag_off >> 8); // flags+frag offset field
+    ip[7] = static_cast<uint8_t>(frag_off & 0xFF);
+    ip[8] = 64;                                  // ttl
+    ip[9] = proto;
+    std::memset(ip + 12, 10, 4);                 // src addr
+    std::memset(ip + 16, 20, 4);                 // dst addr
+    uint8_t* udp = ip + ihl * 4;
+    udp[0] = static_cast<uint8_t>(sport >> 8);
+    udp[1] = static_cast<uint8_t>(sport & 0xFF);
+    udp[2] = static_cast<uint8_t>(dport >> 8);
+    udp[3] = static_cast<uint8_t>(dport & 0xFF);
+    udp[4] = static_cast<uint8_t>(udp_len >> 8);
+    udp[5] = static_cast<uint8_t>(udp_len & 0xFF);
+    if (plen) std::memcpy(udp + 8, payload, plen);
+    const size_t len = 14 + ihl * 4 + udp_len;
+    return len < 60 ? 60 : len;
+}
+
+/// Drain every frame arriving on fd during window_ms.
+std::vector<std::vector<uint8_t>> recvAllWindow(int fd, int window_ms) {
+    std::vector<std::vector<uint8_t>> out;
+    const auto end = std::chrono::steady_clock::now() +
+                     std::chrono::milliseconds(window_ms);
+    while (std::chrono::steady_clock::now() < end) {
+        struct pollfd p { fd, POLLIN, 0 };
+        if (::poll(&p, 1, 20) <= 0) continue;
+        uint8_t b[2048];
+        const ssize_t n = ::recv(fd, b, sizeof(b), 0);
+        if (n > 0) out.emplace_back(b, b + n);
+    }
+    return out;
+}
+
+/// A received frame plus the VLAN tag the kernel stripped into PACKET_
+/// AUXDATA — inbound tagged frames NEVER show the 0x8100 tag in the data
+/// buffer on RX (the generic untag path removes it before taps run), so
+/// this is the only way to verify which tag a frame actually carried.
+struct AuxFrame {
+    std::vector<uint8_t> data;
+    int vlan_tci  = -1;   // TCI (PCP<<13 | VID), or -1 when untagged
+    int vlan_tpid = -1;
+};
+
+/// recvAllWindow variant that enables PACKET_AUXDATA on fd and reports
+/// the stripped tag for each received frame.
+std::vector<AuxFrame> recvAllWindowAux(int fd, int window_ms) {
+    int one = 1;
+    ::setsockopt(fd, SOL_PACKET, PACKET_AUXDATA, &one, sizeof(one));
+    std::vector<AuxFrame> out;
+    const auto end = std::chrono::steady_clock::now() +
+                     std::chrono::milliseconds(window_ms);
+    while (std::chrono::steady_clock::now() < end) {
+        struct pollfd p { fd, POLLIN, 0 };
+        if (::poll(&p, 1, 20) <= 0) continue;
+        uint8_t b[2048];
+        iovec iov{ b, sizeof(b) };
+        alignas(cmsghdr) char cbuf[CMSG_SPACE(sizeof(tpacket_auxdata))];
+        msghdr msg{};
+        msg.msg_iov        = &iov;
+        msg.msg_iovlen     = 1;
+        msg.msg_control    = cbuf;
+        msg.msg_controllen = sizeof(cbuf);
+        const ssize_t n = ::recvmsg(fd, &msg, MSG_DONTWAIT);
+        if (n <= 0) continue;
+        AuxFrame af;
+        af.data.assign(b, b + n);
+        for (cmsghdr* c = CMSG_FIRSTHDR(&msg); c; c = CMSG_NXTHDR(&msg, c)) {
+            if (c->cmsg_level == SOL_PACKET &&
+                c->cmsg_type == PACKET_AUXDATA) {
+                const auto* a =
+                    reinterpret_cast<const tpacket_auxdata*>(CMSG_DATA(c));
+                if (a->tp_status & TP_STATUS_VLAN_VALID) {
+                    af.vlan_tci = a->tp_vlan_tci;
+#ifdef TP_STATUS_VLAN_TPID_VALID
+                    af.vlan_tpid = (a->tp_status & TP_STATUS_VLAN_TPID_VALID)
+                                       ? a->tp_vlan_tpid : ETH_P_8021Q;
+#else
+                    af.vlan_tpid = ETH_P_8021Q;
+#endif
+                }
+            }
+        }
+        out.push_back(std::move(af));
+    }
+    return out;
+}
+
+/// True when some frame both carries marker id and arrived tagged with
+/// vid (via auxdata — the inline tag is never visible on inbound frames).
+bool hasAuxVlanMarker(const std::vector<AuxFrame>& frames, uint8_t id,
+                      int vid) {
+    const uint8_t m[4] = {0xEC, 0xA7, id, 0x5A};
+    for (const auto& f : frames)
+        if ((f.vlan_tci & 0x0FFF) == vid &&
+            std::search(f.data.begin(), f.data.end(), m, m + 4) !=
+                f.data.end())
+            return true;
+    return false;
+}
+
+/// Every injected test frame carries a unique {0xEC,0xA7,id,0x5A} marker in
+/// its payload — robust against encapsulation offset shifts and the IPv6/
+/// ARP control noise a fresh veth emits.
+bool hasMarker(const std::vector<std::vector<uint8_t>>& frames, uint8_t id) {
+    const uint8_t m[4] = {0xEC, 0xA7, id, 0x5A};
+    for (const auto& f : frames)
+        if (std::search(f.begin(), f.end(), m, m + 4) != f.end())
+            return true;
+    return false;
+}
+
+/// Inject an EtherCAT frame on txfd; vid >= 0 wraps it in an 802.1Q tag.
+void injectEcat(int txfd, int ifindex, uint8_t id, int vid, int pcp = 0) {
+    uint8_t f[128];
+    const uint8_t pay[4] = {0xEC, 0xA7, id, 0x5A};
+    size_t n = buildEcatFrame(f, 0x07, 0x40, 0, 0x0130, pay, 4, 0);
+    if (vid >= 0)
+        n = vlanTagInsert(f, n, static_cast<uint16_t>(vid),
+                          static_cast<uint8_t>(pcp));
+    ASSERT_TRUE(sendRaw(txfd, ifindex, f, n));
+}
+
+/// Inject an IPv4/UDP frame (EtherCAT-over-UDP shape) on txfd.
+void injectUdp(int txfd, int ifindex, uint8_t id, uint16_t dport,
+               int vid = -1, uint8_t proto = 17, uint8_t ihl = 5,
+               uint16_t frag_off = 0) {
+    uint8_t f[128];
+    const uint8_t pay[4] = {0xEC, 0xA7, id, 0x5A};
+    size_t n = buildIp4UdpFrame(f, 1111, dport, pay, 4, proto, ihl, frag_off);
+    if (vid >= 0) n = vlanTagInsert(f, n, static_cast<uint16_t>(vid));
+    ASSERT_TRUE(sendRaw(txfd, ifindex, f, n));
+}
+
+/// Assert the kernel filter delivered the frame to the socket.
+void expectAccepted(int rx, uint8_t id) {
+    EXPECT_TRUE(hasMarker(recvAllWindow(rx, 400), id))
+        << "injected frame id " << static_cast<int>(id) << " was dropped";
+}
+
+/// Assert the kernel filter dropped the frame — verified against an
+/// unfiltered monitor socket so "rejected" is never confused with
+/// "never arrived on the wire".
+void expectRejected(int rx, int mon, uint8_t id) {
+    EXPECT_FALSE(hasMarker(recvAllWindow(rx, 250), id))
+        << "injected frame id " << static_cast<int>(id) << " leaked through";
+    EXPECT_TRUE(hasMarker(recvAllWindow(mon, 30), id))
+        << "injected frame id " << static_cast<int>(id)
+        << " never reached the interface";
+}
+
+/// RAII 802.1Q sub-interface — the kernel itself pushes the tag on egress,
+/// the closest in-test emulation of a switch trunk port.
+struct VlanSubIf {
+    std::string name;
+    int ifindex = 0;
+    bool ok = false;
+
+    VlanSubIf(const std::string& parent, uint16_t vid) {
+        name = parent + "." + std::to_string(vid);
+        if (name.size() >= IFNAMSIZ) return;
+        const std::string mk = "ip link add link " + parent + " name " + name +
+                               " type vlan id " + std::to_string(vid) +
+                               " 2>/dev/null";
+        if (::system(mk.c_str()) != 0) return;
+        runCmd("ip link set " + name + " up 2>/dev/null");
+        for (int i = 0; i < 500; ++i) {
+            ifindex = static_cast<int>(::if_nametoindex(name.c_str()));
+            if (ifindex > 0) { ok = true; break; }
+            std::this_thread::sleep_for(2ms);
+        }
+    }
+    VlanSubIf(const VlanSubIf&) = delete;
+    VlanSubIf& operator=(const VlanSubIf&) = delete;
+    ~VlanSubIf() {
+        if (ok) runCmd("ip link del " + name + " 2>/dev/null");
+    }
+};
 
 // ============================================================================
 // Fixture: needs CAP_NET_RAW (AF_PACKET).  Uses loopback — always present.
@@ -1231,6 +1459,352 @@ TEST_F(RtVethTest, AsyncLoopTriggerDrivesWireExchange) {
     EXPECT_GE(echoes.load(), 1);           // a real echo came back via RX
     ::close(peer);
 }
+
+// ============================================================================
+// 11. Encapsulation filters end-to-end on a veth wire
+//
+// CBPFProgramFactory programs attached to real AF_PACKET sockets on vethA;
+// frames injected on vethB traverse the kernel link.  Rejections are always
+// double-checked against an unfiltered monitor socket so a "drop" can never
+// be confused with a frame that never arrived.
+// ============================================================================
+
+TEST_F(RtVethTest, BpfEthercatFilterWireMatrix) {
+    int rx  = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int mon = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int tx  = openBoundPacketSocket(veth_.ifB, ETH_P_ALL);
+    ASSERT_GE(rx, 0);
+    ASSERT_GE(mon, 0);
+    ASSERT_GE(tx, 0);
+    ASSERT_TRUE(CBPFProgramFactory::attach(
+        rx, CBPFProgramFactory::ethercatFilter()));
+    recvAllWindow(rx, 150);
+    recvAllWindow(mon, 150);
+
+    injectEcat(tx, veth_.ifB, 0x01, -1);     // untagged EtherCAT
+    expectAccepted(rx, 0x01);
+    injectEcat(tx, veth_.ifB, 0x02, 7);      // tagged EtherCAT — any VID
+    expectAccepted(rx, 0x02);
+    injectEcat(tx, veth_.ifB, 0x03, 4094);   // tagged, VID boundary
+    expectAccepted(rx, 0x03);
+
+    // IPv4/UDP on the EtherCAT port — the plain filter has no UDP leg.
+    injectUdp(tx, veth_.ifB, 0x04, kEtherCATUdpPort);
+    expectRejected(rx, mon, 0x04);
+
+    // ARP — unrelated ethertype.
+    uint8_t f[64];
+    const uint8_t p5[4] = {0xEC, 0xA7, 0x05, 0x5A};
+    std::memset(f, 0xFF, 6);
+    std::memset(f + 6, 0x66, 6);
+    f[12] = 0x08; f[13] = 0x06;
+    std::memcpy(f + 14, p5, 4);
+    ASSERT_TRUE(sendRaw(tx, veth_.ifB, f, 60));
+    expectRejected(rx, mon, 0x05);
+
+    ::close(tx); ::close(mon); ::close(rx);
+}
+
+TEST_F(RtVethTest, BpfVlanFilterWireMatrix) {
+    int rx  = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int mon = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int tx  = openBoundPacketSocket(veth_.ifB, ETH_P_ALL);
+    ASSERT_GE(rx, 0);
+    ASSERT_GE(mon, 0);
+    ASSERT_GE(tx, 0);
+    ASSERT_TRUE(CBPFProgramFactory::attach(
+        rx, CBPFProgramFactory::vlanFilter(1999)));
+    recvAllWindow(rx, 150);
+    recvAllWindow(mon, 150);
+
+    // Inbound tagged frames arrive STRIPPED: [12] shows the inner EtherType
+    // and the tag lives in skb auxdata.  These accepts exercise the
+    // SKF_AD_VLAN_TAG leg of the filter — the only path real traffic takes.
+    injectEcat(tx, veth_.ifB, 0x10, 1999);        // matching VID
+    expectAccepted(rx, 0x10);
+    EXPECT_TRUE(hasAuxVlanMarker(recvAllWindowAux(mon, 30), 0x10, 1999))
+        << "accepted frame did not actually carry VID 1999";
+    injectEcat(tx, veth_.ifB, 0x11, 1999, 5);     // PCP set — VID still masked
+    expectAccepted(rx, 0x11);
+
+    injectEcat(tx, veth_.ifB, 0x12, 2000);        // wrong VID
+    expectRejected(rx, mon, 0x12);
+    injectEcat(tx, veth_.ifB, 0x13, 0);           // VID 0 (priority tag)
+    expectRejected(rx, mon, 0x13);
+    injectEcat(tx, veth_.ifB, 0x14, -1);          // untagged EtherCAT — VLAN
+    expectRejected(rx, mon, 0x14);                // mode rejects it by design
+
+    // Tagged IPv4/UDP — VLAN mode has no UDP leg.
+    injectUdp(tx, veth_.ifB, 0x15, kEtherCATUdpPort, 1999);
+    expectRejected(rx, mon, 0x15);
+
+    // Self-copy: a frame transmitted on ifA is delivered to rx as a
+    // PACKET_OUTGOING copy with the tag still INLINE — the only path that
+    // exercises the filter's [12]==0x8100 leg against the real kernel.
+    int txA = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    ASSERT_GE(txA, 0);
+    injectEcat(txA, veth_.ifA, 0x16, 1999);       // inline tag on self-copy
+    {
+        const auto frames = recvAllWindow(rx, 400);
+        const uint8_t m[4] = {0xEC, 0xA7, 0x16, 0x5A};
+        bool inline_tagged = false;
+        for (const auto& f : frames)
+            if (f.size() > 18 && f[12] == 0x81 && f[13] == 0x00 &&
+                (((f[14] & 0x0F) << 8) | f[15]) == 1999 &&
+                std::search(f.begin(), f.end(), m, m + 4) != f.end())
+                inline_tagged = true;
+        EXPECT_TRUE(inline_tagged)
+            << "inline-tag leg never saw an accepted VID-1999 self-copy";
+    }
+    injectEcat(txA, veth_.ifA, 0x17, 2000);       // inline tag, wrong VID
+    expectRejected(rx, mon, 0x17);
+    ::close(txA);
+
+    ::close(tx); ::close(mon); ::close(rx);
+}
+
+TEST_F(RtVethTest, BpfVlanRangeFilterWireMatrix) {
+    int rx  = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int mon = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int tx  = openBoundPacketSocket(veth_.ifB, ETH_P_ALL);
+    ASSERT_GE(rx, 0);
+    ASSERT_GE(mon, 0);
+    ASSERT_GE(tx, 0);
+    ASSERT_TRUE(CBPFProgramFactory::attach(
+        rx, CBPFProgramFactory::vlanRangeFilter(100, 200)));
+    recvAllWindow(rx, 150);
+    recvAllWindow(mon, 150);
+
+    injectEcat(tx, veth_.ifB, 0x20, 100);    // lower boundary
+    expectAccepted(rx, 0x20);
+    injectEcat(tx, veth_.ifB, 0x21, 150);    // interior
+    expectAccepted(rx, 0x21);
+    injectEcat(tx, veth_.ifB, 0x22, 200);    // upper boundary
+    expectAccepted(rx, 0x22);
+
+    injectEcat(tx, veth_.ifB, 0x23, 99);     // just below
+    expectRejected(rx, mon, 0x23);
+    injectEcat(tx, veth_.ifB, 0x24, 201);    // just above
+    expectRejected(rx, mon, 0x24);
+    injectEcat(tx, veth_.ifB, 0x25, -1);     // untagged
+    expectRejected(rx, mon, 0x25);
+
+    ::close(tx); ::close(mon); ::close(rx);
+}
+
+TEST_F(RtVethTest, BpfVlanCatchAllSpecWire) {
+    // The spec vlan:any maps to: tagged EtherCAT of ANY VID accepted,
+    // untagged rejected — verified here at kernel level.
+    CBPFSpec spec{};
+    spec.untagged_ethercat = false;
+    spec.tagged_ethercat   = true;           // no vlan_range → any VID
+    const auto prog = CBPFProgramFactory::build(spec);
+    ASSERT_FALSE(prog.empty());
+
+    int rx  = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int mon = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int tx  = openBoundPacketSocket(veth_.ifB, ETH_P_ALL);
+    ASSERT_GE(rx, 0);
+    ASSERT_GE(mon, 0);
+    ASSERT_GE(tx, 0);
+    ASSERT_TRUE(CBPFProgramFactory::attach(rx, prog));
+    recvAllWindow(rx, 150);
+    recvAllWindow(mon, 150);
+
+    injectEcat(tx, veth_.ifB, 0x30, 1);
+    expectAccepted(rx, 0x30);
+    injectEcat(tx, veth_.ifB, 0x31, 4094);
+    expectAccepted(rx, 0x31);
+
+    injectEcat(tx, veth_.ifB, 0x32, -1);     // untagged still rejected
+    expectRejected(rx, mon, 0x32);
+
+    ::close(tx); ::close(mon); ::close(rx);
+}
+
+TEST_F(RtVethTest, BpfUdpFilterWireMatrix) {
+    int rx  = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int mon = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int tx  = openBoundPacketSocket(veth_.ifB, ETH_P_ALL);
+    ASSERT_GE(rx, 0);
+    ASSERT_GE(mon, 0);
+    ASSERT_GE(tx, 0);
+    ASSERT_TRUE(CBPFProgramFactory::attach(
+        rx, CBPFProgramFactory::ethercatFilterWithUdp()));   // port 34980
+    recvAllWindow(rx, 150);
+    recvAllWindow(mon, 150);
+
+    injectUdp(tx, veth_.ifB, 0x40, kEtherCATUdpPort);            // untagged UDP
+    expectAccepted(rx, 0x40);
+    injectUdp(tx, veth_.ifB, 0x41, kEtherCATUdpPort, 1999);      // tagged UDP
+    expectAccepted(rx, 0x41);
+    injectUdp(tx, veth_.ifB, 0x42, kEtherCATUdpPort, -1, 17, 6); // IHL=6 options
+    expectAccepted(rx, 0x42);
+    injectEcat(tx, veth_.ifB, 0x43, -1);          // plain EtherCAT still works
+    expectAccepted(rx, 0x43);
+    injectEcat(tx, veth_.ifB, 0x44, 77);          // tagged EtherCAT too
+    expectAccepted(rx, 0x44);
+
+    injectUdp(tx, veth_.ifB, 0x45, 9999);         // wrong dst port
+    expectRejected(rx, mon, 0x45);
+    injectUdp(tx, veth_.ifB, 0x46, kEtherCATUdpPort, -1, 6);   // TCP not UDP
+    expectRejected(rx, mon, 0x46);
+    injectUdp(tx, veth_.ifB, 0x47, kEtherCATUdpPort, -1, 17, 5,
+              /*frag_off=*/1);                  // non-first fragment
+    expectRejected(rx, mon, 0x47);
+    injectUdp(tx, veth_.ifB, 0x48, 9999, 1999);   // wrong port, tagged
+    expectRejected(rx, mon, 0x48);
+
+    ::close(tx); ::close(mon); ::close(rx);
+}
+
+TEST_F(RtVethTest, BpfVlanFilterKernelTaggedWire) {
+    // A VLAN sub-interface on the PEER makes the kernel itself insert the
+    // tag — the closest emulation of a switch trunk port tagging frames.
+    VlanSubIf sub(veth_.b, 1999);
+    if (!sub.ok) GTEST_SKIP() << "802.1Q sub-interface unavailable";
+
+    int rx  = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int mon = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int txB = openBoundPacketSocket(veth_.ifB, ETH_P_ALL);
+    int txS = openBoundPacketSocket(sub.ifindex, ETH_P_ALL);
+    ASSERT_GE(rx, 0);
+    ASSERT_GE(mon, 0);
+    ASSERT_GE(txB, 0);
+    ASSERT_GE(txS, 0);
+    ASSERT_TRUE(CBPFProgramFactory::attach(
+        rx, CBPFProgramFactory::vlanFilter(1999)));
+    recvAllWindow(rx, 150);
+    recvAllWindow(mon, 150);
+
+    // Untagged EtherCAT into the sub-interface: kernel pushes VID 1999 on
+    // egress → arrives at vethA where the RX path strips the tag back into
+    // auxdata → the filter's SKF_AD_VLAN_TAG leg accepts it.
+    {
+        uint8_t f[96];
+        const uint8_t pay[4] = {0xEC, 0xA7, 0x50, 0x5A};
+        const size_t n = buildEcatFrame(f, 0x07, 0x40, 0, 0x0130, pay, 4, 0);
+        ASSERT_TRUE(sendRaw(txS, sub.ifindex, f, n, kEtherCat));
+    }
+    expectAccepted(rx, 0x50);
+    // The monitor confirms the tag was on the wire: inbound frames arrive
+    // stripped, so the proof is in the auxdata TCI, not inline bytes.
+    EXPECT_TRUE(hasAuxVlanMarker(recvAllWindowAux(mon, 30), 0x50, 1999))
+        << "kernel did not deliver the frame tagged with VID 1999";
+
+    // Control: the same frame sent untagged on vethB is rejected.
+    injectEcat(txB, veth_.ifB, 0x51, -1);
+    expectRejected(rx, mon, 0x51);
+
+    ::close(txS); ::close(txB); ::close(mon); ::close(rx);
+}
+
+#if defined(TETHER_TEST_HAVE_HAL)
+// The full production RX chain for --encapsulation vlan:1999:
+//   kernel cBPF (vlanFilter) → LinuxEthernet::poll (PACKET_OUTGOING skip +
+//   inner-EtherType software filter) → RxCallback → VLANRouter strip →
+//   master delivery hook.  Plus the TX side: the router's per-master
+//   NetworkInterface must tag egress with VID 1999.
+TEST_F(RtVethTest, HalPollThroughKernelVlanFilterToRouter) {
+    auto eth = HAL::createDefaultEthernet();
+    ASSERT_NE(eth, nullptr);
+    HAL::EthernetConfig ec{};
+    ec.interfaceName    = veth_.a.c_str();
+    ec.ethertypeFilter  = kEtherCat;          // same as initHostEthernet()
+    ASSERT_EQ(eth->init(ec), HAL::Error::OK);
+    ASSERT_TRUE(eth->isInitialized());
+
+    const int fd = static_cast<int>(
+        reinterpret_cast<intptr_t>(eth->nativeHandle()));
+    ASSERT_GT(fd, 0);
+    const auto prog = CBPFProgramFactory::vlanFilter(1999);
+    ASSERT_FALSE(prog.empty());
+    ASSERT_TRUE(CBPFProgramFactory::attach(fd, prog));
+
+    int txfd = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    int peer = openBoundPacketSocket(veth_.ifB, ETH_P_ALL);
+    int mon  = openBoundPacketSocket(veth_.ifA, ETH_P_ALL);
+    ASSERT_GE(txfd, 0);
+    ASSERT_GE(peer, 0);
+    ASSERT_GE(mon, 0);
+
+    Master master;                            // deliver hook bypasses start()
+    auto msp = std::shared_ptr<Master>(&master, [](Master*) {});
+    VLANRouter router;
+    NetworkInterface backend{};
+    backend.send = [&](const uint8_t* f, size_t l) {
+        return sendRaw(txfd, veth_.ifA, f, l);
+    };
+    router.setBackend(&backend);
+    router.addMaster(msp, VLANRouter::VLANRange{1999, 1999}, 1999);
+
+    std::vector<std::vector<uint8_t>> delivered;
+    router.setDeliverFunction(
+        [&](Master*, const uint8_t* d, size_t l) {
+            delivered.emplace_back(d, d + l);
+        });
+    eth->setRxCallback(
+        [&](const uint8_t* f, size_t l, const HAL::RxFrameInfo& info,
+            void*) {
+            // Mirror setupEncapsulation(): a kernel-stripped tag arrives
+            // only via metadata — forward it out-of-band.
+            std::optional<uint16_t> aux_vlan;
+            if (info.vlanTagPresent && l >= 14 &&
+                !(f[12] == 0x81 && f[13] == 0x00))
+                aux_vlan = info.vlanId;
+            router.processRxFrame(f, l, aux_vlan);
+        },
+        nullptr);
+
+    eth->poll(100);                           // drain boot noise
+    recvAllWindow(mon, 100);
+
+    // 1. Tagged VID-1999 EtherCAT → kernel accepts → HAL passes (inner
+    //    EtherType matches the software filter) → router strips the tag.
+    injectEcat(peer, veth_.ifB, 0x60, 1999);
+    ASSERT_TRUE(waitFor([&] {
+        eth->poll(20);
+        return !delivered.empty();
+    }, 1'000ms));
+    ASSERT_EQ(delivered.size(), 1u);
+    ASSERT_GT(delivered[0].size(), 14u);
+    EXPECT_EQ(delivered[0][12], 0x88);        // tag stripped before delivery
+    EXPECT_EQ(delivered[0][13], 0xA4);
+    EXPECT_TRUE(hasMarker(delivered, 0x60));
+
+    // 2. Tagged VID-2000 EtherCAT → kernel filter drops it; the monitor
+    //    confirms the frame did reach vethA.
+    delivered.clear();
+    injectEcat(peer, veth_.ifB, 0x61, 2000);
+    eth->poll(250);
+    EXPECT_TRUE(delivered.empty());
+    EXPECT_TRUE(hasMarker(recvAllWindow(mon, 30), 0x61))
+        << "VID-2000 frame never reached the interface";
+
+    // 3. Untagged EtherCAT → dropped by the kernel filter (VLAN mode).
+    injectEcat(peer, veth_.ifB, 0x62, -1);
+    eth->poll(250);
+    EXPECT_TRUE(delivered.empty());
+    EXPECT_TRUE(hasMarker(recvAllWindow(mon, 30), 0x62));
+
+    // 4. TX: the router's per-master interface tags egress with VID 1999.
+    //    The peer receives on the RX path where the tag is stripped into
+    //    auxdata — verify via PACKET_AUXDATA that VID 1999 hit the wire.
+    NetworkInterface* ni = router.networkInterfaceFor(&master);
+    ASSERT_NE(ni, nullptr);
+    {
+        uint8_t f[96];
+        const uint8_t pay[4] = {0xEC, 0xA7, 0x63, 0x5A};
+        const size_t n = buildEcatFrame(f, 0x07, 0x40, 0, 0x0130, pay, 4, 0);
+        ASSERT_TRUE(ni->send(f, n));
+    }
+    EXPECT_TRUE(hasAuxVlanMarker(recvAllWindowAux(peer, 500), 0x63, 1999))
+        << "router TX path did not emit a VID-1999 tagged EtherCAT frame";
+
+    ::close(mon); ::close(peer); ::close(txfd);
+    eth->shutdown();
+}
+#endif // TETHER_TEST_HAVE_HAL
 
 } // namespace
 

@@ -69,9 +69,15 @@ struct EthernetStats {
  */
 struct RxFrameInfo {
     Timestamp timestamp = 0;           ///< Receive timestamp (microseconds)
-    uint16_t vlanId = 0;               ///< VLAN ID (0 = no VLAN or stripped)
+    uint16_t vlanId = 0;               ///< VLAN ID (valid when vlanTagPresent)
     uint8_t vlanPriority = 0;          ///< VLAN priority
-    bool vlanTagPresent = false;       ///< VLAN tag was present
+    /// VLAN tag was present on the wire.  Note the tag bytes may NOT be
+    /// in the frame buffer: the kernel strips inbound tags before packet
+    /// sockets see them (rx-vlan-offload / generic untag), and the tag is
+    /// then reported only via this metadata (PACKET_AUXDATA internally).
+    /// When vlanTagPresent is set but data[12..13] is not 0x8100, the tag
+    /// was stripped and the frame data starts with the inner EtherType.
+    bool vlanTagPresent = false;
     bool checksumValid = false;        ///< Hardware checksum validated
     uint32_t hwTimestampNs = 0;        ///< Hardware timestamp (if available)
 };

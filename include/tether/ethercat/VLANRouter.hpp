@@ -211,23 +211,31 @@ public:
      * frame.
      *
      * The function:
-     * 1. Inspects the EtherType after the Ethernet header.
-     * 2. If the EtherType is 0x8100 (802.1Q), extracts the 12-bit VID
-     *    from the TCI, strips the 4-byte tag, and routes the
-     *    decapsulated frame to every master whose rx_vlan_range
-     *    contains the extracted VID.
+     * 1. Determines the VLAN tag — either inline (EtherType 0x8100 at
+     *    offset 12) or supplied out-of-band via @p aux_vlan_id when the
+     *    kernel stripped the tag before delivery (RX VLAN offload /
+     *    PACKET_AUXDATA).
+     * 2. For tagged frames, routes to every master whose rx_vlan_range
+     *    contains the VID.  The inline tag is decapsulated; a
+     *    kernel-stripped frame is already decapsulated and is delivered
+     *    without any copying.
      * 3. If no range matches and a dedicated undefined target has been
      *    set, the frame is delivered to that target.
-     * 4. If the EtherType is not 0x8100, routes the raw frame to every
-     *    master whose rx_vlan_range is std::nullopt.
-     * 5. If no master matches and no undefined target exists, the frame
-     *    is dropped after logging a warning with the VID and inner
-     *    EtherType.
+     * 4. If the frame is untagged, routes it to every master whose
+     *    rx_vlan_range is std::nullopt.
+     * 5. If no master matches and no undefined target exists, a tagged
+     *    frame is dropped after logging a warning with the VID and
+     *    inner EtherType.
      *
-     * @param data Pointer to the raw Ethernet frame.
-     * @param len  Length of the frame in bytes.
+     * @param data         Pointer to the raw Ethernet frame.
+     * @param len          Length of the frame in bytes.
+     * @param aux_vlan_id  VID the kernel reports for a frame whose tag
+     *                     is NOT inline (RxFrameInfo::vlanId when
+     *                     vlanTagPresent is set and the data does not
+     *                     start with 0x8100 at offset 12).
      */
-    void processRxFrame(const uint8_t* data, size_t len);
+    void processRxFrame(const uint8_t* data, size_t len,
+                        std::optional<uint16_t> aux_vlan_id = std::nullopt);
 
     /**
      * @brief Return all masters whose rx_vlan_range contains @p vlan_id.

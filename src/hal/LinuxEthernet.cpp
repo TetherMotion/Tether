@@ -111,6 +111,19 @@ public:
         }
 #endif
 
+#ifdef PACKET_AUXDATA
+        // The kernel strips inbound 802.1Q tags into skb metadata before
+        // packet sockets see the frame (rx-vlan-offload / the generic RX
+        // untag in __netif_receive_skb_core).  Request PACKET_AUXDATA so
+        // poll()/recvFrame() can surface the stripped VID/PCP through
+        // RxFrameInfo so the VLAN router routes on the metadata directly.
+        {
+            int one = 1;
+            setsockopt(m_socket, SOL_PACKET, PACKET_AUXDATA,
+                       &one, sizeof(one));
+        }
+#endif
+
         // Mark initialized before performing operations that require initialized state
         m_initialized = true;
 
@@ -277,11 +290,10 @@ public:
         // Read all available frames
         while (true) {
             struct sockaddr_ll sll;
-            socklen_t sll_len = sizeof(sll);
-            
-            ssize_t len = recvfrom(m_socket, buffer, sizeof(buffer), MSG_DONTWAIT,
-                                   (struct sockaddr*)&sll, &sll_len);
-            
+            struct tpacket_auxdata aux;
+
+            ssize_t len = recvPacketAux(buffer, sizeof(buffer), &sll, &aux);
+
             if (len <= 0) break;
 
             // Check packet direction - skip outgoing packets
@@ -291,27 +303,19 @@ public:
 
             // Apply EtherType filter
             if (len >= 14) {
-                uint16_t ethertype = (buffer[12] << 8) | buffer[13];
-                
-                // Handle VLAN-tagged frames
-                bool hasVlan = (ethertype == kEtherType8021Q);
-                uint16_t innerEthertype = ethertype;
+                bool hasVlan = false;
                 uint16_t vlanId = 0;
                 uint8_t vlanPriority = 0;
-                
-                if (hasVlan && len >= 18) {
-                    vlanId = ((buffer[14] & 0x0F) << 8) | buffer[15];
-                    vlanPriority = (buffer[14] >> 5) & 0x07;
-                    innerEthertype = (buffer[16] << 8) | buffer[17];
-                }
+                uint16_t checkType = 0;
+                fillVlanInfo(buffer, len, aux,
+                             hasVlan, vlanId, vlanPriority, checkType);
 
-                // Apply filter
-                if (m_ethertypeFilter != 0) {
-                    uint16_t checkType = hasVlan ? innerEthertype : ethertype;
-                    if (checkType != m_ethertypeFilter) {
-                        m_stats.rxFiltered++;
-                        continue;
-                    }
+                // Apply filter — checkType is always the inner EtherType,
+                // whether the tag was inline or kernel-stripped.
+                if (m_ethertypeFilter != 0 &&
+                    checkType != m_ethertypeFilter) {
+                    m_stats.rxFiltered++;
+                    continue;
                 }
 
                 m_stats.rxFrames++;
@@ -323,7 +327,7 @@ public:
                     info.vlanTagPresent = hasVlan;
                     info.vlanId = vlanId;
                     info.vlanPriority = vlanPriority;
-                    
+
                     m_rxCallback(buffer, len, info, m_rxUserData);
                 }
             }
@@ -343,20 +347,19 @@ public:
         // dropped" result that would prematurely end a drain loop.
         for (int guard = 0; guard < 64; ++guard) {
             struct sockaddr_ll sll;
-            socklen_t sll_len = sizeof(sll);
-            ssize_t len = recvfrom(m_socket, buffer, capacity, MSG_DONTWAIT,
-                                   (struct sockaddr*)&sll, &sll_len);
+            struct tpacket_auxdata aux;
+            ssize_t len = recvPacketAux(buffer, capacity, &sll, &aux);
             if (len <= 0) return 0;   // EAGAIN: queue empty
 
             if (sll.sll_pkttype == PACKET_OUTGOING) continue;
 
             if (len >= 14) {
-                uint16_t ethertype = (buffer[12] << 8) | buffer[13];
-                bool hasVlan = (ethertype == kEtherType8021Q);
-                uint16_t checkType = ethertype;
-                if (hasVlan && len >= 18) {
-                    checkType = (buffer[16] << 8) | buffer[17];
-                }
+                bool hasVlan = false;
+                uint16_t vlanId = 0;
+                uint8_t vlanPriority = 0;
+                uint16_t checkType = 0;
+                fillVlanInfo(buffer, len, aux,
+                             hasVlan, vlanId, vlanPriority, checkType);
                 if (m_ethertypeFilter != 0 && checkType != m_ethertypeFilter) {
                     m_stats.rxFiltered++;
                     continue;
@@ -364,12 +367,8 @@ public:
                 if (info) {
                     info->timestamp = getCurrentTimestamp();
                     info->vlanTagPresent = hasVlan;
-                    info->vlanId = (hasVlan && len >= 18)
-                        ? static_cast<uint16_t>(((buffer[14] & 0x0F) << 8) | buffer[15])
-                        : 0;
-                    info->vlanPriority = (hasVlan && len >= 18)
-                        ? static_cast<uint8_t>((buffer[14] >> 5) & 0x07)
-                        : 0;
+                    info->vlanId = vlanId;
+                    info->vlanPriority = vlanPriority;
                 }
             }
 
@@ -530,6 +529,74 @@ public:
     }
 
 private:
+    /**
+     * @brief recvmsg() wrapper that also collects PACKET_AUXDATA control
+     *        data describing a kernel-stripped 802.1Q tag.
+     *
+     * The kernel untags VLAN frames on RX before delivering them to
+     *        packet sockets: the data buffer then shows the inner
+     *        EtherType at [12] and the tag lives only in skb metadata
+     *        (tpacket_auxdata).  Rather than reinserting the tag (a
+     *        per-frame memmove), the metadata is surfaced through
+     *        RxFrameInfo so consumers such as VLANRouter can route on it
+     *        directly.
+     */
+    ssize_t recvPacketAux(uint8_t* buf, size_t cap, sockaddr_ll* sll,
+                          tpacket_auxdata* aux) {
+        iovec iov{buf, cap};
+        alignas(cmsghdr) char cbuf[CMSG_SPACE(sizeof(tpacket_auxdata))];
+        msghdr msg{};
+        msg.msg_name       = sll;
+        msg.msg_namelen    = sizeof(*sll);
+        msg.msg_iov        = &iov;
+        msg.msg_iovlen     = 1;
+        msg.msg_control    = cbuf;
+        msg.msg_controllen = sizeof(cbuf);
+
+        aux->tp_status   = 0;
+        aux->tp_vlan_tci = 0;
+        ssize_t len = ::recvmsg(m_socket, &msg, MSG_DONTWAIT);
+        if (len <= 0) return len;
+
+        for (cmsghdr* c = CMSG_FIRSTHDR(&msg); c; c = CMSG_NXTHDR(&msg, c)) {
+            if (c->cmsg_level == SOL_PACKET &&
+                c->cmsg_type == PACKET_AUXDATA) {
+                memcpy(aux, CMSG_DATA(c), sizeof(*aux));
+                break;
+            }
+        }
+        return len;
+    }
+
+    /// Fill VLAN fields of a RxFrameInfo from inline bytes or, when the
+    /// kernel stripped the tag, from PACKET_AUXDATA metadata.
+    static void fillVlanInfo(const uint8_t* buf, ssize_t len,
+                             const tpacket_auxdata& aux,
+                             bool& hasVlan, uint16_t& vlanId,
+                             uint8_t& vlanPriority, uint16_t& innerType) {
+        const uint16_t ethertype =
+            static_cast<uint16_t>((buf[12] << 8) | buf[13]);
+        innerType = ethertype;
+        if (ethertype == kEtherType8021Q && len >= 18) {
+            hasVlan = true;
+            vlanId = static_cast<uint16_t>(
+                ((buf[14] & 0x0F) << 8) | buf[15]);
+            vlanPriority = static_cast<uint8_t>((buf[14] >> 5) & 0x07);
+            innerType = static_cast<uint16_t>((buf[16] << 8) | buf[17]);
+            return;
+        }
+#ifdef TP_STATUS_VLAN_VALID
+        if (aux.tp_status & TP_STATUS_VLAN_VALID) {
+            // Kernel stripped the tag — auxdata carries the wire VID.
+            hasVlan = true;
+            vlanId = static_cast<uint16_t>(aux.tp_vlan_tci & 0x0FFF);
+            vlanPriority =
+                static_cast<uint8_t>((aux.tp_vlan_tci >> 13) & 0x07);
+            // innerType is already the (inner) EtherType at [12].
+        }
+#endif
+    }
+
     bool m_initialized = false;
     int m_socket = -1;
     int m_ifindex = 0;

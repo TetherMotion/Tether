@@ -33,14 +33,12 @@ still works, it just receives everything.
 ### VLAN mode rejects untagged traffic
 
 When a VLAN encapsulation is active (`--encapsulation vlan:<vid>`), the
-generated program accepts a frame **if and only if**:
-
-1. its outer EtherType is `0x8100` (802.1Q), **and**
-2. the VID field of the TCI matches the configured VLAN (PCP/DEI bits
-   are masked out), **and**
-3. the inner EtherType is `0x88A4` (EtherCAT) — or, when combined with
-   `udp` (`--encapsulation vlan:1999,udp`), an IPv4/UDP datagram whose
-   destination port is the configured EtherCAT UDP port.
+generated program accepts a frame **if and only if** it carries a
+matching 802.1Q tag (inline or kernel-stripped, see below) whose VID
+matches the configured VLAN (PCP/DEI bits are masked out) **and** its
+inner EtherType is `0x88A4` (EtherCAT) — or, when combined with `udp`
+(`--encapsulation vlan:1999,udp`), an IPv4/UDP datagram whose
+destination port is the configured EtherCAT UDP port.
 
 Consequently, in VLAN mode the socket rejects:
 
@@ -55,6 +53,35 @@ inside VLAN N", so untagged traffic is by definition not ours.
 Applications that need the untagged segment *and* a VLAN segment
 concurrently should use two sockets (or the `CBPFSpec` API, below)
 rather than the VLAN filter.
+
+### Kernel VLAN untagging (rx-vlan-offload)
+
+On RX, Linux removes the 802.1Q tag **before** packet sockets see the
+frame — either in the NIC (rx-vlan-offload) or in the generic
+`__netif_receive_skb_core` untag path, which runs unconditionally before
+packet taps on modern kernels. An inbound tagged frame therefore arrives
+at a socket with the *inner* EtherType at offset 12 and the tag only in
+skb metadata — `PACKET_AUXDATA`/`tpacket_auxdata` for `recvmsg`, and
+`SKF_AD_VLAN_TAG`/`SKF_AD_VLAN_TAG_PRESENT` ancillary loads for cBPF
+(the same mechanism libpcap's `vlan` primitive uses).
+
+The generated programs handle both representations:
+
+- `[12] == 0x8100` → inline tag (self-TX `PACKET_OUTGOING` copies still
+  carry the tag inline; useful for local loopback traffic).
+- `[12] == 0x88A4`/`0x0800` → consult `SKF_AD_VLAN_TAG_PRESENT`; when a
+  stripped tag is present, `SKF_AD_VLAN_TAG` supplies the TCI for the
+  VID/range check. When absent, the frame is genuinely untagged and the
+  untagged legs apply — so VLAN mode still rejects it.
+
+`LinuxEthernet` (`PACKET_AUXDATA` + `recvmsg`) mirrors this on the
+userspace side: instead of reinserting the tag into the frame buffer it
+surfaces the stripped TCI through `RxFrameInfo` (`vlanTagPresent`,
+`vlanId`, `vlanPriority`), and `VLANRouter::processRxFrame` accepts that
+VID out-of-band — a stripped frame is already decapsulated, so the whole
+path needs no copying at all. Note that tcpdump/libpcap *reconstruct*
+stripped tags for display — tcpdump output is not proof of the bytes a
+cBPF program sees.
 
 ## UDP encapsulation (ETG.1000.3)
 

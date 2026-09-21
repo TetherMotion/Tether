@@ -9,6 +9,13 @@
  *   untagged UDP      : [eth 14][EtherType 0x0800][IPv4 ihl][UDP][...]
  *   tagged UDP        : [eth 14][TPID][TCI][EtherType 0x0800][IPv4 ihl][UDP]
  *
+ * Note: on the RX path the kernel removes the 802.1Q tag before packet
+ * sockets see the frame (rx-vlan-offload / generic untag).  The data then
+ * shows the INNER EtherType at [12] and the tag is only in skb auxdata —
+ * programs generated for VLAN mode therefore also contain an
+ * SKF_AD_VLAN_TAG_PRESENT / SKF_AD_VLAN_TAG leg that validates the stripped
+ * tag.  Inline-tag legs remain for self-TX copies (PACKET_OUTGOING).
+ *
  * All loads that would run past the end of the packet fault in the kernel
  * interpreter and reject the packet — truncated frames need no explicit
  * length checks.
@@ -139,51 +146,69 @@ std::vector<CBPFInsn> CBPFProgramFactory::build(const CBPFSpec& spec) {
 
     Asm a;
     const int l_accept = a.label(), l_reject = a.label();
-    const int l_tag    = a.label();
-    const int l_udp    = a.label();   // untagged IPv4 base (14)
-    const int l_tudp   = a.label();   // tagged IPv4 base (18)
+    const int l_tag    = a.label();   // inline 802.1Q header at [12]
+    const int l_tag_inner = a.label();// VID ok — check inner EtherType
+    const int l_ecat   = a.label();   // EtherType 0x88A4 at [12]
+    const int l_udpw   = a.label();   // EtherType IPv4 at [12]
+    const int l_udp14  = a.label();   // IPv4/UDP check, IP base = 14
+    const int l_tudp   = a.label();   // IPv4/UDP check, IP base = 18
 
-    // --- EtherType dispatch ------------------------------------------------
-    a.stmt(cbpf::LD | cbpf::H | cbpf::ABS, kEthTypeOff);
     int c;
-    if (spec.untagged_ethercat) {
-        c = a.label();
-        a.jump(cbpf::JMP | cbpf::JEQ | cbpf::K, kEtherTypeEtherCAT,
-               l_accept, c);
-        a.mark(c);
-    }
+
+    // VID comparison for the current value in A (masked already by caller).
+    // Jumps to l_ok when A (a VID) lies in the spec's range.
+    auto emitVidRangeCheck = [&](int l_ok, int l_rej) {
+        if (spec.vlan_range) {
+            const auto& r = *spec.vlan_range;
+            if (r.start == r.end) {
+                int cc = a.label();
+                a.jump(cbpf::JMP | cbpf::JEQ | cbpf::K, r.start, cc, l_rej);
+                a.mark(cc);
+            } else {
+                int cc = a.label();
+                a.jump(cbpf::JMP | cbpf::JGE | cbpf::K, r.start, cc, l_rej);
+                a.mark(cc);
+                cc = a.label();
+                a.jump(cbpf::JMP | cbpf::JGT | cbpf::K, r.end, l_rej, cc);
+                a.mark(cc);
+            }
+        }
+        a.ja(l_ok);
+    };
+
+    // --- EtherType dispatch on [12] ----------------------------------------
+    //
+    // [12] carries the *visible* EtherType: the outer TPID when a tag is
+    // still inline (self-TX copies), otherwise the inner EtherType — both
+    // for genuinely untagged frames and for frames whose tag the kernel
+    // stripped into skb auxdata on RX.  The two wire legs below consult
+    // SKF_AD_VLAN_TAG_* to tell those apart.
+    a.stmt(cbpf::LD | cbpf::H | cbpf::ABS, kEthTypeOff);
     if (tagged) {
         c = a.label();
         a.jump(cbpf::JMP | cbpf::JEQ | cbpf::K, spec.vlan_tpid, l_tag, c);
         a.mark(c);
     }
-    if (spec.untagged_udp) {
+    if (spec.untagged_ethercat || spec.tagged_ethercat) {
         c = a.label();
-        a.jump(cbpf::JMP | cbpf::JEQ | cbpf::K, kEtherTypeIPv4, l_udp, c);
+        a.jump(cbpf::JMP | cbpf::JEQ | cbpf::K, kEtherTypeEtherCAT,
+               l_ecat, c);
+        a.mark(c);
+    }
+    if (spec.untagged_udp || spec.tagged_udp) {
+        c = a.label();
+        a.jump(cbpf::JMP | cbpf::JEQ | cbpf::K, kEtherTypeIPv4, l_udpw, c);
         a.mark(c);
     }
     a.ja(l_reject);
 
-    // --- 802.1Q tagged path -------------------------------------------------
+    // --- inline 802.1Q path -------------------------------------------------
     if (tagged) {
         a.mark(l_tag);
         a.stmt(cbpf::LD | cbpf::H | cbpf::ABS, kVlanTciOff);
         a.stmt(cbpf::ALU | cbpf::AND | cbpf::K, kVidMask);   // A = VID
-        if (spec.vlan_range) {
-            const auto& r = *spec.vlan_range;
-            if (r.start == r.end) {
-                c = a.label();
-                a.jump(cbpf::JMP | cbpf::JEQ | cbpf::K, r.start, c, l_reject);
-                a.mark(c);
-            } else {
-                c = a.label();
-                a.jump(cbpf::JMP | cbpf::JGE | cbpf::K, r.start, c, l_reject);
-                a.mark(c);
-                c = a.label();
-                a.jump(cbpf::JMP | cbpf::JGT | cbpf::K, r.end, l_reject, c);
-                a.mark(c);
-            }
-        }
+        emitVidRangeCheck(l_tag_inner, l_reject);
+        a.mark(l_tag_inner);
         a.stmt(cbpf::LD | cbpf::H | cbpf::ABS, kVlanInnerEthOff);
         if (spec.tagged_ethercat) {
             c = a.label();
@@ -199,9 +224,45 @@ std::vector<CBPFInsn> CBPFProgramFactory::build(const CBPFSpec& spec) {
         }
     }
 
-    // --- UDP paths ----------------------------------------------------------
-    if (spec.untagged_udp) {
-        a.mark(l_udp);
+    // --- wire legs: inner EtherType visible at [12] -------------------------
+    //
+    // emitWireLeg(l, unt_ok, tag_ok, l_handler): a frame showing the inner
+    // EtherType at [12] may be untagged or carry a kernel-stripped tag.
+    // Consult SKF_AD_VLAN_TAG_PRESENT / SKF_AD_VLAN_TAG (same mechanism as
+    // libpcap's `vlan` primitive) to decide which spec leg applies.
+    auto emitWireLeg = [&](int l_wire, bool unt_ok, bool tag_ok,
+                           int l_handler) {
+        a.mark(l_wire);
+        if (unt_ok && tag_ok && !spec.vlan_range) {
+            a.ja(l_handler);        // every tag state is acceptable
+            return;
+        }
+        const int l_notag = a.label();
+        a.stmt(cbpf::LD | cbpf::W | cbpf::ABS, kSkfAdVlanTagPresent);
+        c = a.label();
+        a.jump(cbpf::JMP | cbpf::JEQ | cbpf::K, 0, l_notag, c);
+        a.mark(c);
+        // Tag present (stripped): the tagged rules apply.
+        if (!tag_ok) {
+            a.ja(l_reject);
+        } else {
+            a.stmt(cbpf::LD | cbpf::W | cbpf::ABS, kSkfAdVlanTag);
+            a.stmt(cbpf::ALU | cbpf::AND | cbpf::K, kVidMask);
+            emitVidRangeCheck(l_handler, l_reject);
+        }
+        a.mark(l_notag);
+        a.ja(unt_ok ? l_handler : l_reject);
+    };
+
+    if (spec.untagged_ethercat || spec.tagged_ethercat)
+        emitWireLeg(l_ecat, spec.untagged_ethercat, spec.tagged_ethercat,
+                    l_accept);
+    if (spec.untagged_udp || spec.tagged_udp)
+        emitWireLeg(l_udpw, spec.untagged_udp, spec.tagged_udp, l_udp14);
+
+    // --- UDP payload checks --------------------------------------------------
+    if (spec.untagged_udp || spec.tagged_udp) {
+        a.mark(l_udp14);
         emitUdpCheck(a, 14, spec.udp_port, l_accept, l_reject);
     }
     if (tagged && spec.tagged_udp) {
@@ -274,7 +335,8 @@ bool CBPFProgramFactory::attach(int fd, const CBPFInsn* prog, size_t count) {
 // ============================================================================
 
 uint32_t cbpfExecute(const CBPFInsn* prog, size_t count,
-                     const uint8_t* data, size_t len) {
+                     const uint8_t* data, size_t len,
+                     const CBPFAuxData* aux) {
     uint32_t A = 0, X = 0;
     uint32_t M[16] = {};
     size_t pc = 0;
@@ -313,6 +375,21 @@ uint32_t cbpfExecute(const CBPFInsn* prog, size_t count,
             case cbpf::IMM: A = in.k; break;
             case cbpf::LEN: A = static_cast<uint32_t>(len); break;
             case cbpf::ABS:
+                if (in.k >= kSkfAdOff) {
+                    // SKF_AD_* ancillary data (kernel skb metadata).  Only
+                    // defined for LD|W|ABS; other sizes abort the program.
+                    if (size != cbpf::W) return 0;
+                    switch (in.k - kSkfAdOff) {
+                    case 44:    // SKF_AD_VLAN_TAG: TCI or 0
+                        A = (aux && aux->vlan_tci) ? *aux->vlan_tci : 0;
+                        break;
+                    case 48:    // SKF_AD_VLAN_TAG_PRESENT: 1 or 0
+                        A = (aux && aux->vlan_tci) ? 1 : 0;
+                        break;
+                    default: return 0;   // unsupported field — kernel aborts
+                    }
+                    break;   // falls to the shared ++pc below
+                }
                 if (!mem_read(in.k, size == cbpf::W ? 4 : size == cbpf::H ? 2 : 1, tmp))
                     return 0;
                 A = tmp; break;
