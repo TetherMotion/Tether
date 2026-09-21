@@ -217,17 +217,10 @@ int runSineMotion(EtherCAT::DS402Master& master,
     std::thread fault_monitor(faultMonitorLoop, std::ref(master),
                               slave_index, std::cref(monitor_stop));
 
-    // Deadline-driven fast loop (CyclicExecutive): lowLatency() picks the
-    // low-jitter profile — reserved-slot cyclic datapath (kernel ring when
-    // available), Split exchange placement, runtime CPU isolation.  Setting
-    // dc_config arms the slaves' sync units and enables the executive's
-    // dedicated DC sync task — no separate initializeDistributedClocks() or
-    // startDistributedClocks() call is needed (the latter must NOT be used
-    // alongside the cyclic loop: it would put a second PDO stream on the
-    // wire).
-    auto loop_config = EtherCAT::Master::CyclicLoopConfig::lowLatency(1000);
-    loop_config.sync_interval_cycles = 10;
-    loop_config.dc_config = EtherCAT::DC::DCConfig::defaults();
+    // The cyclic exchange is already running — it was started in main()
+    // before drive configuration because the CiA402 PRE_OP→SAFE_OP→OP
+    // transition requires live PDO exchange (the slave's PDI watchdog and
+    // the OP request itself both depend on process data flowing).
     // For CSP, set the current position as home before moving.
     if (target == CyclicTarget::Position) {
         auto* drive = master.driveBySlaveIndex(slave_index);
@@ -272,25 +265,15 @@ int runSineMotion(EtherCAT::DS402Master& master,
         return 4;
     }
 
-    // The scoped guard owns the running loop: on scope exit — including
-    // early returns — it stops the exchange, so a leaked realtime loop is
-    // impossible.  Controller add/remove is deferred to the loop thread
-    // while running, so both are safe at any point in the lifecycle.
-    auto loop = master.startCyclicLoopScoped(loop_config);
-    if (!loop) {
-        TETHER_LOGE(TAG, "Failed to start cyclic loop");
-        monitor_stop.store(true);
-        fault_monitor.join();
-        return 3;
-    }
-
+    // Controller add/remove is deferred to the loop thread while the loop
+    // runs, so adding here is safe — the controller picks up on the next
+    // MotionControl phase.
     Tether::Platform::Clock::instance().delayMilliseconds(
         static_cast<uint32_t>(args.duration * 1000.0));
     monitor_stop.store(true);
     fault_monitor.join();
 
-    loop.stop();                                     // stop the exchange first
-    (void)master.removeMotionController(slave_index);  // synchronous now
+    (void)master.removeMotionController(slave_index);  // deferred op, safe while running
     return 0;
 }
 
@@ -455,10 +438,25 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    // Distributed clocks are armed by the cyclic loop itself — the
-    // CyclicLoopConfig::dc_config set in runSineMotion() initializes DC
-    // during startup, and the executive's dedicated DC task emits the sync
-    // frames while the loop runs.
+    // Start the cyclic exchange BEFORE drive configuration.  The CiA402
+    // PRE_OP→SAFE_OP→OP transition requires live PDO exchange — under the
+    // cyclic-executive model the wire loop IS the exchange, so it must
+    // already run when enableDrive() requests OP (dc().setPDOEnabled()
+    // only feeds the legacy DC realtime loop).  DC is armed by the loop
+    // itself: CyclicLoopConfig::dc_config initializes DC during startup,
+    // and the executive's dedicated DC task emits the sync frames — no
+    // separate initializeDistributedClocks()/startDistributedClocks()
+    // (the latter must NOT be used alongside the cyclic loop: it would
+    // put a second PDO stream on the wire).
+    auto loop_config = EtherCAT::Master::CyclicLoopConfig::lowLatency(1000);
+    loop_config.sync_interval_cycles = 10;
+    loop_config.dc_config = EtherCAT::DC::DCConfig::defaults();
+    auto loop = master.startCyclicLoopScoped(loop_config);
+    if (!loop) {
+        TETHER_LOGE(TAG, "Failed to start cyclic loop");
+        Tether::Examples::stopHostMasterSession(master, session);
+        return 3;
+    }
 
     int rc = 0;
     if (!configureDrive(master, slave_index)) {
