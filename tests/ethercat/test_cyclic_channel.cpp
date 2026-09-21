@@ -36,6 +36,7 @@
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "ethercat/raw/CyclicDatapath.hpp"
+#include "ethercat/raw/SlaveRegistry.hpp"
 
 #ifdef __linux__
 #include <arpa/inet.h>

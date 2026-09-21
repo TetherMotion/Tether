@@ -29,7 +29,9 @@ namespace SII { class SIIManager; }
 
 class SlaveRegistry {
 public:
-    explicit SlaveRegistry(Master& master) : master_(master) {}
+    /// Out-of-line — members hold incomplete types (Slave, NonExistingSlave).
+    explicit SlaveRegistry(Master& master);
+    ~SlaveRegistry();
 
     /// Clear and resize for @p count slaves (names reset to empty).
     void reset(uint16_t count);

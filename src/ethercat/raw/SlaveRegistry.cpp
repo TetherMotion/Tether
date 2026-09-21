@@ -14,6 +14,9 @@
 
 namespace EtherCAT {
 
+SlaveRegistry::SlaveRegistry(Master& master) : master_(master) {}
+SlaveRegistry::~SlaveRegistry() = default;
+
 void SlaveRegistry::reset(uint16_t count)
 {
     entries_.clear();
