@@ -30,9 +30,9 @@
  *  sendRawFrame(frame)              routePacket(dgram)
  *       │                                 │
  *       ▼                            slot[dgram.idx].pending?
- *  slot[idx].cv.wait_for(...)             │ yes
+ *  atomicWait(slot[idx].seq,...)          │ yes
  *       │                                 ▼
- *       │◄────── cv.notify_one() ◄─ copy result, set completed
+ *       │◄────── seq++ + wake ◄──── copy result, set completed
  *       ▼
  *  return result
  * ```
@@ -43,7 +43,6 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -371,8 +370,12 @@ public:
 
 private:
     struct Slot {
+        /// Guards the registration/delivery handshake (pending, buffer,
+        /// response).  NOT held while waiting — waits are atomic-wait on
+        /// `seq`, bumped (release) after `completed` is set and also on
+        /// cancel/shutdown so every waiter wakes.
         std::mutex              mtx;
-        std::condition_variable cv;
+        std::atomic<uint32_t>   seq{0};
         std::atomic<bool>       pending{false};
         std::atomic<bool>       completed{false};
         uint8_t*                buffer{nullptr};
@@ -380,16 +383,18 @@ private:
         RxDatagram              response{};
     };
 
+    /// Timed wait for a slot's completion/cancel/shutdown via atomicWait()
+    /// on slot.seq.  Returns the extracted WaitResult and clears the slot.
+    WaitResult waitForSlotCompletion(Slot& slot, uint32_t timeout_ms);
+
     std::array<Slot, kNumSlots> slots_;
     std::atomic<bool>           initialized_{false};
     std::atomic<bool>           shutdown_{false};
     std::atomic<bool>           cancelled_{false};
 
-    // Shared notification for waitForAny() — notified when any slot
-    // completes.  Owned by the router, always valid (memory-safe).
-    std::mutex                  any_wait_mtx_;
-    std::condition_variable     any_wait_cv_;
-    std::atomic<uint64_t>       any_completion_gen_{0};  // bumped on each completion
+    // Shared wake word for waitForAny() — bumped on each slot completion
+    // and on cancel/shutdown; waiters block via atomicWait() on it.
+    std::atomic<uint32_t>       any_completion_gen_{0};
     // Atomic counters (accessed from RX thread and client threads concurrently)
     std::atomic<uint64_t>       stats_packets_routed_{0};
     std::atomic<uint64_t>       stats_packets_matched_{0};
