@@ -155,6 +155,17 @@ void Master::start(const NetworkInterface& iface, const uint8_t src_mac[6])
     transport_ = std::make_unique<EtherCATTransport>(&iface_);
 #endif
 
+    // Frame size ceiling (jumbo support).  Clamp into the supported range;
+    // a datagram payload still caps at kMaxDatagramDataSize (11-bit field).
+    const uint32_t frame_size = std::clamp<uint32_t>(
+        config_.max_frame_size, 1514,
+        static_cast<uint32_t>(kMaxJumboFrameSize));
+    if (frame_size != config_.max_frame_size) {
+        TETHER_LOGW(TAG, "max_frame_size {} out of range — clamped to {}",
+                    config_.max_frame_size, frame_size);
+    }
+    transport_->setMaxFrameSize(frame_size);
+
     ensureRxQueues();
 
     // Initialize per-slave CoEManagers

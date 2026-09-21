@@ -24,6 +24,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -67,10 +68,24 @@ public:
     size_t maxEtherCATPayloadPerFrame() const {
 #if TETHER_ENABLE_UDP_ENCAPSULATION
         if (udp_config_ && udp_config_->enabled) {
-            return kMaxEtherCATPayloadPerFrame_ - kUdpEncapOverhead_;
+            return max_payload_ - kUdpEncapOverhead_;
         }
 #endif
-        return kMaxEtherCATPayloadPerFrame_;
+        return max_payload_;
+    }
+
+    /// @brief Set the Ethernet frame size (excluding FCS) the transport
+    ///        may emit.  Default is the standard 1514; raise for jumbo
+    ///        links (requires NIC MTU and slave support).
+    void setMaxFrameSize(size_t frame_size) {
+        // 14 Ethernet + 2 EtherCAT header; the EtherCAT frame header's
+        // length field is 11 bits, so EtherCAT payload per frame can never
+        // exceed 2047 regardless of MTU (multi-EtherCAT-frame packing would
+        // be needed beyond that).
+        const size_t payload = frame_size > 16 ? frame_size - 16 : 0;
+        max_payload_ = payload > 0
+                     ? std::min<size_t>(payload, 2047)
+                     : kMaxEtherCATPayloadPerFrame_;
     }
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION
@@ -100,6 +115,8 @@ private:
 #endif
 
     static constexpr size_t kMaxEtherCATPayloadPerFrame_ = 1498;
+    /// Configured per-frame EtherCAT payload ceiling (jumbo support).
+    size_t max_payload_ = kMaxEtherCATPayloadPerFrame_;
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION
     static constexpr size_t kUdpEncapOverhead_ = 28; // IPv4 (20) + UDP (8)

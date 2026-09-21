@@ -786,8 +786,12 @@ uint32_t LogicalAddressManager::maxSliceLength() const {
     // (datagram header: cmd+idx+adp+ado+len/flags+irq = 10 B, plus WKC = 2 B).
     static constexpr uint32_t kDatagramOverhead = 12;
     const size_t frame = transport_.maxEtherCATPayloadPerFrame();
-    return frame > kDatagramOverhead
-         ? static_cast<uint32_t>(frame - kDatagramOverhead)
+    // The frame may allow more than a datagram's 11-bit length field can
+    // express — a single LRW slice is still capped at kMaxDatagramDataSize.
+    const size_t limit = std::min<size_t>(frame, kMaxDatagramDataSize
+                                                   + kDatagramOverhead);
+    return limit > kDatagramOverhead
+         ? static_cast<uint32_t>(limit - kDatagramOverhead)
          : 0u;
 }
 

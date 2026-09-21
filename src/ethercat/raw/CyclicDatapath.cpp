@@ -761,6 +761,7 @@ void CyclicDatapath::setup(CyclicWireMode wire_mode,
         cc.async_fd   = fd;
         cc.wire_mode  = wire_mode;
         cc.rx_spin_ns = rx_spin_ns;
+        cc.frame_size = master_.config_.max_frame_size;
         channel_ = createCyclicChannel(cc);
         if (!channel_) {
             TETHER_LOGW(TAG, "cyclic channel unavailable — using software "

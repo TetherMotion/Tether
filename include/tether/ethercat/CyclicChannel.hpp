@@ -210,6 +210,12 @@ struct CyclicChannelConfig {
     bool     rx_tpacket_v3 = false;
     uint32_t rx_v3_retire_us = 10'000;  ///< tp_retire_blk_tov (µs)
 
+    /// Max frame bytes the channel must carry (Ethernet header + payload,
+    /// excl. FCS).  Default 1600 covers standard frames; raise to match
+    /// Master::Config::max_frame_size on jumbo links so ring slots and the
+    /// socket staging buffer can hold a full frame.
+    uint32_t frame_size = 1600;
+
     int      async_fd = -1;            ///< async socket (socket B) — the mirror
                                        ///< BPF is attached here when >= 0
 };

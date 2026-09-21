@@ -19,6 +19,13 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <linux/futex.h>
+#elif defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <synchapi.h>
+#pragma comment(lib, "synchronization.lib")
 #else
 #include <thread>
 #endif
@@ -28,10 +35,18 @@ namespace EtherCAT {
 static const char* TAG = "process_image";
 
 static uint64_t monoNowNs() {
+#if defined(_WIN32)
+    LARGE_INTEGER f, c;
+    ::QueryPerformanceFrequency(&f);
+    ::QueryPerformanceCounter(&c);
+    return static_cast<uint64_t>(c.QuadPart) * 1'000'000'000ull /
+           static_cast<uint64_t>(f.QuadPart);
+#else
     timespec ts{};
     ::clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ull
          + static_cast<uint64_t>(ts.tv_nsec);
+#endif
 }
 
 // ============================================================================
@@ -486,6 +501,11 @@ void ProcessImage::futexWakeAllOn(std::atomic<uint32_t>* word) {
     ::syscall(SYS_futex,
               reinterpret_cast<uint32_t*>(word), op,
               INT32_MAX, nullptr, nullptr, 0);
+#elif defined(_WIN32)
+    // WaitOnAddress works on any process-local or mapped address, so
+    // futex_shared_ needs no separate op — same wake reaches waiters in
+    // other processes on a mapped view.
+    ::WakeByAddressAll(word);
 #else
     (void)word;
 #endif
@@ -510,6 +530,18 @@ bool ProcessImage::futexWaitOn(std::atomic<uint32_t>* word,
                              reinterpret_cast<uint32_t*>(word), op,
                              expected, tsp, nullptr, 0);
     return r == 0;
+#elif defined(_WIN32)
+    // WaitOnAddress semantics match FUTEX_WAIT: it sleeps only while the
+    // word still equals `expected` (re-checked under the same memory
+    // ordering as the caller's load).  Timeout granularity is ms — round
+    // up so a sub-ms budget still waits once.
+    DWORD ms = INFINITE;
+    if (timeout_ns >= 0) {
+        ms = static_cast<DWORD>((timeout_ns + 999'999) / 1'000'000);
+    }
+    const uint32_t cmp = expected;
+    return ::WaitOnAddress(word, const_cast<uint32_t*>(&cmp),
+                           sizeof(uint32_t), ms) != FALSE;
 #else
     (void)word; (void)expected; (void)timeout_ns;
     return false;

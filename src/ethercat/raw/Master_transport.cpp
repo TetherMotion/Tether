@@ -342,7 +342,18 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
 
     constexpr uint8_t dst_mac[6] = {0x01, 0x01, 0x05, 0x00, 0x00, 0x00};
     constexpr size_t kMinEthFrameNoFcs = 60;
-    constexpr size_t kMaxEthFrameNoFcs = 1514;
+    // Jumbo-aware ceiling — config_.max_frame_size is clamped in start(),
+    // but clamp here too for pre-start/fallback calls.
+    const size_t max_eth_frame = std::clamp<size_t>(
+        config_.max_frame_size, 1514, kMaxJumboFrameSize);
+
+    if (datalen > kMaxDatagramDataSize) {
+        TETHER_LOGE(TAG,
+            "Datagram exceeds the 11-bit protocol length limit (datalen={} "
+            "> {}); split it into multiple datagrams",
+            datalen, kMaxDatagramDataSize);
+        return false;
+    }
 
     const size_t required_len =
         sizeof(EtherCATSingleDgramFrameHeader) + datalen + sizeof(uint16_t);
@@ -352,18 +363,18 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
 #else
     constexpr size_t encap_overhead = 0;
 #endif
-    if (required_len + encap_overhead > kMaxEthFrameNoFcs) {
+    if (required_len + encap_overhead > max_eth_frame) {
         TETHER_LOGE(TAG,
-            "Datagram exceeds max Ethernet frame size (datalen={} required={} encap={}, "
-            "max_frame={}). This is a physical Ethernet frame size limit, not a Tether buffer.",
+            "Datagram exceeds configured Ethernet frame size (datalen={} required={} encap={}, "
+            "max_frame={}). Raise Config::max_frame_size for jumbo links.",
             datalen, static_cast<unsigned>(required_len),
-            static_cast<unsigned>(encap_overhead), kMaxEthFrameNoFcs);
+            static_cast<unsigned>(encap_overhead), max_eth_frame);
         return false;
     }
 
     const size_t frame_len =
         (required_len < kMinEthFrameNoFcs) ? kMinEthFrameNoFcs : required_len;
-    uint8_t txbuf[kMaxEthFrameNoFcs] = {0};
+    uint8_t txbuf[kMaxJumboFrameSize] = {0};
 
     auto* hdr = reinterpret_cast<EtherCATSingleDgramFrameHeader*>(txbuf);
     std::memcpy(hdr->eth.dst, dst_mac, 6);
@@ -469,19 +480,16 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
 
     constexpr uint8_t dst_mac[6] = {0x01, 0x01, 0x05, 0x00, 0x00, 0x00};
     constexpr size_t kMinEthFrameNoFcs = 60;
-    constexpr size_t kMaxEthFrameNoFcs = 1514;
     constexpr size_t kHeaderSize = sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader);
-#if TETHER_ENABLE_UDP_ENCAPSULATION
-    const size_t max_payload = maxEtherCATPayloadPerFrame();
-#else
-    constexpr size_t max_payload = kMaxEtherCATPayloadPerFrame;
-#endif
+    const size_t max_payload = transport_
+        ? transport_->maxEtherCATPayloadPerFrame()
+        : static_cast<size_t>(Raw::kMaxEtherCATPayloadPerFrame);
 
     size_t frames_sent = 0;
     size_t i = 0;
 
     while (i < count) {
-        uint8_t txbuf[kMaxEthFrameNoFcs] = {0};
+        uint8_t txbuf[kMaxJumboFrameSize] = {0};
 
         // Ethernet header
         auto* eth = reinterpret_cast<EtherCAT::EthernetHeader*>(txbuf);
@@ -496,6 +504,15 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
 
         while (i + dg_count_in_frame < count) {
             const auto& spec = specs[i + dg_count_in_frame];
+            if (spec.datalen > kMaxDatagramDataSize) {
+                TETHER_LOGE(TAG,
+                    "sendMultiDatagram: datagram {} exceeds the 11-bit "
+                    "protocol length limit (datalen={} > {}); split it into "
+                    "multiple datagrams",
+                    i + dg_count_in_frame, spec.datalen,
+                    kMaxDatagramDataSize);
+                return frames_sent;
+            }
             const size_t dg_size = kDatagramOverhead + spec.datalen;
 
             if (payload_bytes + dg_size > max_payload)

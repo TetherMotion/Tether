@@ -101,6 +101,8 @@ public:
 
         // Store filter
         m_ethertypeFilter = config.ethertypeFilter;
+        m_maxFrameSize = config.maxFrameSize
+                       ? config.maxFrameSize : kMaxFrameSize;
 
         // Set socket to non-blocking
         int flags = fcntl(m_socket, F_GETFL, 0);
@@ -206,7 +208,7 @@ public:
     Error transmit(const uint8_t* frame, size_t length) override {
         if (!m_initialized) return Error::NotInitialized;
         if (!frame || length < kMinFrameSize) return Error::InvalidArgument;
-        if (length > kMaxFrameSize) return Error::BufferTooSmall;
+        if (length > m_maxFrameSize) return Error::BufferTooSmall;
 
         struct sockaddr_ll sll;
         memset(&sll, 0, sizeof(sll));
@@ -236,10 +238,11 @@ public:
                        uint16_t vlanId, uint8_t priority) override {
         if (!m_initialized) return Error::NotInitialized;
         if (!frame || length < kMinFrameSize) return Error::InvalidArgument;
-        if (length + kVlanTagSize > kMaxFrameSizeVlan) return Error::BufferTooSmall;
+        if (length + kVlanTagSize > m_maxFrameSize + kVlanTagSize)
+            return Error::BufferTooSmall;
 
         // Build frame with VLAN tag
-        uint8_t vlanFrame[kMaxFrameSizeVlan];
+        uint8_t vlanFrame[kMaxJumboFrameSizeVlan];
         
         // Copy MAC addresses (12 bytes)
         memcpy(vlanFrame, frame, 12);
@@ -267,12 +270,12 @@ public:
             totalLen += iov[i].length;
         }
 
-        if (totalLen < kMinFrameSize || totalLen > kMaxFrameSize) {
+        if (totalLen < kMinFrameSize || totalLen > m_maxFrameSize) {
             return Error::InvalidArgument;
         }
 
         // Copy to contiguous buffer
-        uint8_t frame[kMaxFrameSize];
+        uint8_t frame[kMaxJumboFrameSize];
         size_t offset = 0;
         for (size_t i = 0; i < count; i++) {
             memcpy(frame + offset, iov[i].data, iov[i].length);
@@ -299,7 +302,7 @@ public:
         if (ret <= 0) return 0;
 
         int count = 0;
-        uint8_t buffer[kMaxFrameSizeVlan];
+        uint8_t buffer[kMaxJumboFrameSizeVlan];
 
         // Read all available frames
         while (true) {
@@ -730,6 +733,7 @@ private:
     MacAddress m_mac;
     bool m_promiscuous = false;
     uint16_t m_ethertypeFilter = 0;
+    size_t m_maxFrameSize = kMaxFrameSize;
     std::atomic<bool> m_running{false};
 
     RxCallback m_rxCallback = nullptr;

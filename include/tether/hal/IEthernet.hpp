@@ -37,6 +37,10 @@ struct EthernetConfig {
     /// Poll kernel NIC error counters (sysfs) on a low-priority thread and
     /// log significant error deltas.  Zero per-frame cost; set false to opt out.
     bool nicErrorMonitor = true;
+    /// Largest frame (excluding FCS) the interface will accept/carry.
+    /// 0 → standard kMaxFrameSize (1514).  Raise for jumbo links; the NIC
+    /// MTU must be raised separately (e.g. `ip link set mtu 9000`).
+    uint32_t maxFrameSize = 0;
 };
 
 /**
