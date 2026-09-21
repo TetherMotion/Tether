@@ -5,7 +5,7 @@
  * Usage (host build):
  *   ./ethercat_dump_sii -i eth0                      # dump slave 0
  *   ./ethercat_dump_sii -s 1 -i eth0                  # dump slave 1 (or use --interface)
- *   ./ethercat_dump_sii -i enp3s0.1999 --rx-vlan any  # VLAN catch-all mode
+ *   ./ethercat_dump_sii -i enp3s0.1999 --encapsulation vlan:any  # VLAN catch-all mode
  *   ./ethercat_dump_sii -i eth0 --debug rx-ethercat-packets,tx-ethercat-packets
  */
 
@@ -39,7 +39,6 @@ int main(int argc, char** argv) {
     argparse::ArgumentParser program("ethercat_dump_sii", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addSlaveArg(program);
-    Tether::Examples::addVlanArgs(program);
     Tether::Examples::addDebugArg(program);
     Tether::Examples::addMailboxSizeArg(program);
     Tether::Examples::addMailboxAddressArg(program);
@@ -79,11 +78,9 @@ int main(int argc, char** argv) {
     if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
 
-    Tether::Examples::VlanConfig vlan;
-    if (!Tether::Examples::parseVlanArgs(
-            program.get<std::string>("--rx-vlan"),
-            program.get<std::string>("--tx-vlan"),
-            vlan, TAG)) {
+    Tether::Examples::EncapConfig encap;
+    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+            encap, TAG)) {
         return 1;
     }
 
@@ -91,7 +88,7 @@ int main(int argc, char** argv) {
     if (!debug_flags.empty()) {
         TETHER_LOGI(TAG, "Debug flags: {}", debug_str.c_str());
     }
-    Tether::Examples::logVlanConfig(vlan, TAG);
+    Tether::Examples::logEncapConfig(encap, TAG);
 
     Tether::Examples::HostEtherNetSession session;
     if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
@@ -103,14 +100,14 @@ int main(int argc, char** argv) {
     EtherCAT::Master master(mcfg);
     Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupVlanAndRxCallback(session, master, vlan, TAG)) {
+    if (!Tether::Examples::setupEncapAndRxCallback(session, master, encap, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }
 
     Tether::Examples::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, vlan, TAG)) {
+    if (!Tether::Examples::startHostMaster(session, master, encap, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }

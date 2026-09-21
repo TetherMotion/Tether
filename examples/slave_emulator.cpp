@@ -68,7 +68,6 @@ int main(int argc, char* argv[]) {
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addDurationArg(program, 0.0);
     Tether::Examples::addDebugArg(program);
-    Tether::Examples::addVlanArgs(program);
 
     program.add_argument("--vendor-id")
         .default_value(std::string("0x1234"))
@@ -124,8 +123,7 @@ int main(int argc, char* argv[]) {
     const auto interfaceName = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), kTag);
     const auto durationSec = program.get<double>("--time");
     const auto debugStr = program.get<std::string>("--debug");
-    const auto rxVlanStr = program.get<std::string>("--rx-vlan");
-    const auto txVlanStr = program.get<std::string>("--tx-vlan");
+    const auto encapStr = program.get<std::string>("--encapsulation");
 
     const uint32_t vendorId = parseHex32(program.get<std::string>("--vendor-id"));
     const uint32_t productCode = parseHex32(program.get<std::string>("--product-code"));
@@ -144,11 +142,16 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    Tether::Examples::VlanConfig vlanCfg;
-    if (!Tether::Examples::parseVlanArgs(rxVlanStr, txVlanStr, vlanCfg, kTag)) {
+    Tether::Examples::EncapConfig encap;
+    if (!Tether::Examples::parseEncapsulationArg(encapStr, encap, kTag)) {
         return 1;
     }
-    Tether::Examples::logVlanConfig(vlanCfg, kTag);
+    Tether::Examples::logEncapConfig(encap, kTag);
+    if (encap.vlanActive() || encap.udp) {
+        TETHER_LOGW(kTag, "Note: the slave emulator does not decapsulate "
+                          "VLAN/UDP on the slave side — the filter only "
+                          "restricts which frames reach the emulator");
+    }
 
     std::cout << "EtherCAT Slave Emulator\n";
     std::cout << "=======================\n\n";
@@ -170,6 +173,7 @@ int main(int argc, char* argv[]) {
     if (!Tether::Examples::initHostEthernet(session, interfaceName, kTag)) {
         return 1;
     }
+    Tether::Examples::attachEncapBpfFilter(*session.eth, encap, kTag);
 
     // -----------------------------------------------------------------------
     // 2. Configure and create SlaveCore

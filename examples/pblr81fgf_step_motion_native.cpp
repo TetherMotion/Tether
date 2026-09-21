@@ -139,14 +139,12 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    Tether::Examples::VlanConfig vlan;
-    if (!Tether::Examples::parseVlanArgs(
-            program.get<std::string>("--rx-vlan"),
-            program.get<std::string>("--tx-vlan"),
-            vlan, TAG)) {
+    Tether::Examples::EncapConfig encap;
+    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+            encap, TAG)) {
         return 1;
     }
-    Tether::Examples::logVlanConfig(vlan, TAG);
+    Tether::Examples::logEncapConfig(encap, TAG);
 
     Tether::Platform::ensureRealtimeKernelOrExit();
 
@@ -154,7 +152,7 @@ int main(int argc, char** argv)
     Tether::Examples::HostMasterSession session;
     if (!Tether::Examples::startHostMasterSession(
             Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG),
-            master, session, TAG, vlan)) {
+            master, session, TAG, encap)) {
         return 2;
     }
 

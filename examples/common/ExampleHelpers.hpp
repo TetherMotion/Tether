@@ -5,10 +5,13 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
+#include "tether/ethercat/CBPFProgramFactory.hpp"
 #include "tether/ethercat/VLANRouter.hpp"
 
 namespace EtherCAT { class Slave; }
+namespace EtherCAT::HAL { class IEthernet; }
 
 namespace Tether::Examples {
 
@@ -64,12 +67,12 @@ bool printDebugHelpIfRequested(const std::string& debugStr);
 /// Print debug condition help and return true if @p startStr is "help".
 bool printDebugConditionHelpIfRequested(const std::string& startStr);
 
-/// Add `--rx-vlan` and `--tx-vlan` to an ArgumentParser.
+/// Add `--encapsulation` to an ArgumentParser.
 ///
-/// @deprecated These args are now added automatically by addInterfaceArg().
+/// @deprecated This arg is now added automatically by addInterfaceArg().
 /// This function is retained as a no-op for source compatibility; calling it
 /// has no effect.
-void addVlanArgs(argparse::ArgumentParser& program);
+void addEncapsulationArg(argparse::ArgumentParser& program);
 
 /// Add `-s` / `--slave` to an ArgumentParser.
 void addSlaveArg(argparse::ArgumentParser& program, int defaultValue = 0);
@@ -116,25 +119,59 @@ bool applyDebugGateConditions(const std::string& startCond,
                               const char* tag);
 
 // ============================================================================
-// VLAN helpers
+// Encapsulation helpers (802.1Q VLAN + EtherCAT-over-UDP)
 // ============================================================================
 
-struct VlanConfig {
-    bool enabled = false;
+/**
+ * @brief Frame encapsulation selected by `--encapsulation`.
+ *
+ * Grammar (comma-separated tokens):
+ *   raw | none                      — plain EtherCAT (default)
+ *   vlan:<vid>                      — RX filter + TX tag on <vid> (1-4095)
+ *   vlan:<lo>-<hi>                  — RX VID range; TX tag = <lo>
+ *   vlan:any                        — RX catch-all for tagged frames
+ *   vlantx:<vid|off>                — override/disable TX tag
+ *   udp[:<port>]                    — EtherCAT-over-UDP (ETG.1000.3, port 34980)
+ *
+ * Examples: "vlan:1999", "udp", "vlan:100,udp", "vlan:100-200,vlantx:off".
+ */
+struct EncapConfig {
+    /// VLAN mode is active (router needed) when any of these are set.
     std::optional<uint16_t> txVlan;
     bool rxAny = false;
     std::optional<EtherCAT::VLANRouter::VLANRange> rxRange;
+
+    /// EtherCAT-over-UDP encapsulation (ETG.1000.3).
+    bool     udp     = false;
+    uint16_t udpPort = EtherCAT::kEtherCATUdpPort;
+
+    /// VLAN routing/tagging is in use.
+    bool vlanActive() const {
+        return rxAny || rxRange.has_value() || txVlan.has_value();
+    }
+    /// Any encapsulation (VLAN or UDP) is in use.
+    bool enabled() const { return vlanActive() || udp; }
 };
 
-/// Parse `--rx-vlan` / `--tx-vlan` strings into a VlanConfig.
+/// Parse the `--encapsulation` value into an EncapConfig.
 /// Returns false and prints to stderr on invalid input.
-bool parseVlanArgs(const std::string& rxVlanStr,
-                   const std::string& txVlanStr,
-                   VlanConfig& out,
-                   const char* tag);
+bool parseEncapsulationArg(const std::string& spec,
+                           EncapConfig& out,
+                           const char* tag);
 
-/// Log the VLAN configuration via TETHER_LOGI.
-void logVlanConfig(const VlanConfig& config, const char* tag);
+/// Log the encapsulation configuration via TETHER_LOGI.
+void logEncapConfig(const EncapConfig& config, const char* tag);
+
+/// Build the kernel socket-filter program matching @p config — untagged
+/// EtherCAT (+any-VID tagged) for raw mode, VID-restricted for vlan mode,
+/// plus EtherCAT-over-UDP when enabled.  Empty program = attach nothing.
+std::vector<EtherCAT::CBPFInsn> buildEncapBpfProgram(const EncapConfig& config);
+
+/// Attach the encapsulation filter to the Ethernet device's native socket
+/// (SO_ATTACH_FILTER on Linux; soft-fails with a warning).
+void attachEncapBpfFilter(EtherCAT::HAL::IEthernet& eth,
+                          const EncapConfig& config,
+                          const char* tag);
 
 // ============================================================================
 // Mailbox helpers

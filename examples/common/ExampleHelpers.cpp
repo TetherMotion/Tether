@@ -9,6 +9,7 @@
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/DebugGate.hpp"
 #include "tether/ethercat/Master.hpp"
+#include "tether/hal/IEthernet.hpp"
 #include "tether/ethercat/SDOErrorDecoder.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/hal/NetworkInterfaceEnumerator.hpp"
@@ -26,14 +27,14 @@ void addInterfaceArg(argparse::ArgumentParser& program,
         .default_value(defaultValue)
         .help("Network interface name (e.g. eth0, enp3s0). "
               "If omitted, auto-selects the sole physical Ethernet interface.");
-    // VLAN args are folded in here so every example that uses addInterfaceArg()
-    // automatically gets --rx-vlan / --tx-vlan without a separate call.
-    program.add_argument("--rx-vlan")
+    // Encapsulation arg is folded in here so every example that uses
+    // addInterfaceArg() automatically gets --encapsulation.
+    program.add_argument("--encapsulation")
         .default_value(std::string(""))
-        .help("RX VLAN filter: single VID, range, or 'any'");
-    program.add_argument("--tx-vlan")
-        .default_value(std::string(""))
-        .help("TX VLAN encapsulation: single VID");
+        .help("Frame encapsulation, comma-separated tokens: "
+              "'raw' (default), 'vlan:<vid|lo-hi|any>' "
+              "[+ 'vlantx:<vid|off>'], 'udp[:<port>]'. "
+              "Examples: vlan:1999, udp, vlan:100,udp, vlan:100-200,vlantx:off");
 }
 
 std::string resolveInterface(const std::string& requested, const char* tag) {
@@ -188,9 +189,9 @@ bool applyDebugGateConditions(const std::string& startCond,
 #endif
 }
 
-void addVlanArgs(argparse::ArgumentParser& /*program*/) {
-    // Deprecated: --rx-vlan / --tx-vlan are now added by addInterfaceArg() so
-    // every example gets them automatically.  Kept as a no-op for source
+void addEncapsulationArg(argparse::ArgumentParser& /*program*/) {
+    // Deprecated: --encapsulation is now added by addInterfaceArg() so
+    // every example gets it automatically.  Kept as a no-op for source
     // compatibility with examples that still call it explicitly.
 }
 
@@ -274,81 +275,226 @@ void applyDebugFlags(const std::set<std::string>& flags,
 }
 
 // ============================================================================
-// VLAN helpers
+// Encapsulation helpers (802.1Q VLAN + EtherCAT-over-UDP)
 // ============================================================================
 
-bool parseVlanArgs(const std::string& rxVlanStr,
-                   const std::string& txVlanStr,
-                   VlanConfig& out,
-                   const char* /*tag*/) {
-    out.enabled = !rxVlanStr.empty() || !txVlanStr.empty();
-    out.txVlan = std::nullopt;
-    out.rxAny = false;
-    out.rxRange = std::nullopt;
+namespace {
 
-    if (!out.enabled) return true;
+bool parseVid(const std::string& s, uint16_t& out) {
+    try {
+        int v = std::stoi(s);
+        if (v < 1 || v > 4095) return false;
+        out = static_cast<uint16_t>(v);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
 
-    if (!txVlanStr.empty()) {
-        try {
-            int v = std::stoi(txVlanStr);
-            if (v < 1 || v > 4095) {
-                std::cerr << "--tx-vlan must be in range 1-4095\n";
+bool parseVidRange(const std::string& s,
+                   EtherCAT::VLANRouter::VLANRange& out) {
+    const size_t dash = s.find('-');
+    try {
+        if (dash == std::string::npos) {
+            uint16_t v;
+            if (!parseVid(s, v)) return false;
+            out = EtherCAT::VLANRouter::VLANRange{v, v};
+            return true;
+        }
+        uint16_t lo, hi;
+        if (!parseVid(s.substr(0, dash), lo) ||
+            !parseVid(s.substr(dash + 1), hi) || lo > hi) return false;
+        out = EtherCAT::VLANRouter::VLANRange{lo, hi};
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+} // namespace
+
+bool parseEncapsulationArg(const std::string& spec,
+                           EncapConfig& out,
+                           const char* /*tag*/) {
+    out = EncapConfig{};
+    if (spec.empty() || spec == "raw" || spec == "none")
+        return true;   // plain EtherCAT
+
+    std::optional<uint16_t> txVlanToken;   // explicit vlantx:
+    bool txVlanSeen  = false;
+    bool txVlanOff   = false;
+    bool vlanSeen    = false;
+    bool udpSeen     = false;
+
+    std::stringstream ss(spec);
+    std::string tok;
+    while (std::getline(ss, tok, ',')) {
+        tok.erase(0, tok.find_first_not_of(" \t"));
+        tok.erase(tok.find_last_not_of(" \t") + 1);
+        if (tok.empty()) continue;
+
+        if (tok == "raw" || tok == "none") {
+            if (spec.find(',') != std::string::npos) {
+                std::cerr << "--encapsulation: 'raw'/'none' cannot be combined "
+                             "with other tokens\n";
                 return false;
             }
-            out.txVlan = static_cast<uint16_t>(v);
-        } catch (...) {
-            std::cerr << "Invalid --tx-vlan value: " << txVlanStr << "\n";
-            return false;
+            continue;
         }
-    }
 
-    if (!rxVlanStr.empty()) {
-        if (rxVlanStr == "any") {
-            out.rxAny = true;
-        } else {
-            size_t dash = rxVlanStr.find('-');
-            try {
-                if (dash == std::string::npos) {
-                    int v = std::stoi(rxVlanStr);
-                    if (v < 1 || v > 4095) {
-                        std::cerr << "--rx-vlan must be in range 1-4095\n";
-                        return false;
-                    }
-                    out.rxRange = EtherCAT::VLANRouter::VLANRange{
-                        static_cast<uint16_t>(v), static_cast<uint16_t>(v)};
-                } else {
-                    int start = std::stoi(rxVlanStr.substr(0, dash));
-                    int end   = std::stoi(rxVlanStr.substr(dash + 1));
-                    if (start < 1 || end > 4095 || start > end) {
-                        std::cerr << "--rx-vlan range must be 1-4095 with start <= end\n";
-                        return false;
-                    }
-                    out.rxRange = EtherCAT::VLANRouter::VLANRange{
-                        static_cast<uint16_t>(start), static_cast<uint16_t>(end)};
+        if (tok.rfind("vlan:", 0) == 0) {
+            if (vlanSeen) {
+                std::cerr << "--encapsulation: duplicate 'vlan:' token\n";
+                return false;
+            }
+            vlanSeen = true;
+            const std::string arg = tok.substr(5);
+            if (arg == "any") {
+                out.rxAny = true;
+            } else {
+                EtherCAT::VLANRouter::VLANRange r{0, 0};
+                if (!parseVidRange(arg, r)) {
+                    std::cerr << "--encapsulation: invalid vlan value '" << arg
+                              << "' (expected vid 1-4095, lo-hi range, or 'any')\n";
+                    return false;
                 }
-            } catch (...) {
-                std::cerr << "Invalid --rx-vlan value: " << rxVlanStr << "\n";
+                out.rxRange = r;
+                out.txVlan  = r.start;   // TX tag defaults to first RX VID
+            }
+            continue;
+        }
+
+        if (tok.rfind("vlantx:", 0) == 0) {
+            if (txVlanSeen) {
+                std::cerr << "--encapsulation: duplicate 'vlantx:' token\n";
                 return false;
             }
+            txVlanSeen = true;
+            const std::string arg = tok.substr(7);
+            if (arg == "off" || arg == "none") {
+                txVlanOff = true;
+            } else {
+                uint16_t v;
+                if (!parseVid(arg, v)) {
+                    std::cerr << "--encapsulation: invalid vlantx value '"
+                              << arg << "' (expected vid 1-4095 or 'off')\n";
+                    return false;
+                }
+                txVlanToken = v;
+            }
+            continue;
         }
+
+        if (tok == "udp" || tok.rfind("udp:", 0) == 0) {
+            if (udpSeen) {
+                std::cerr << "--encapsulation: duplicate 'udp' token\n";
+                return false;
+            }
+            udpSeen = true;
+            out.udp = true;
+            if (tok.size() > 4) {
+                try {
+                    int p = std::stoi(tok.substr(4));
+                    if (p < 1 || p > 65535) throw std::out_of_range("port");
+                    out.udpPort = static_cast<uint16_t>(p);
+                } catch (...) {
+                    std::cerr << "--encapsulation: invalid udp port '"
+                              << tok.substr(4) << "' (expected 1-65535)\n";
+                    return false;
+                }
+            }
+            continue;
+        }
+
+        std::cerr << "--encapsulation: unknown token '" << tok
+                  << "' (expected vlan:<vid|lo-hi|any>, vlantx:<vid|off>, "
+                     "udp[:<port>], raw)\n";
+        return false;
     }
 
+    // An explicit vlantx: overrides the VID implied by vlan:<vid>.
+    if (txVlanOff) out.txVlan = std::nullopt;
+    else if (txVlanToken) out.txVlan = *txVlanToken;
+
+    if (txVlanSeen && !vlanSeen && !txVlanOff && !txVlanToken) {
+        // unreachable, but keep the invariant obvious
+        return false;
+    }
     return true;
 }
 
-void logVlanConfig(const VlanConfig& config, const char* tag) {
-    if (!config.enabled) return;
+void logEncapConfig(const EncapConfig& config, const char* tag) {
+    if (!config.enabled()) return;
 
     if (config.rxAny) {
-        TETHER_LOGI(tag, "VLAN mode: RX=any (undefined target), TX={}",
-                    config.txVlan ? std::to_string(*config.txVlan).c_str() : "none");
+        TETHER_LOGI(tag, "Encapsulation: VLAN RX=any (undefined target), TX={}",
+                    config.txVlan ? std::to_string(*config.txVlan).c_str()
+                                  : "untagged");
     } else if (config.rxRange) {
-        TETHER_LOGI(tag, "VLAN mode: RX={}-{}, TX={}",
+        TETHER_LOGI(tag, "Encapsulation: VLAN RX={}-{}, TX={}",
                     config.rxRange->start, config.rxRange->end,
-                    config.txVlan ? std::to_string(*config.txVlan).c_str() : "none");
+                    config.txVlan ? std::to_string(*config.txVlan).c_str()
+                                  : "untagged");
+    } else if (config.txVlan) {
+        TETHER_LOGI(tag, "Encapsulation: VLAN RX=untagged, TX={}",
+                    *config.txVlan);
+    }
+    if (config.udp) {
+        TETHER_LOGI(tag, "Encapsulation: EtherCAT-over-UDP dst port {}",
+                    config.udpPort);
+    }
+}
+
+std::vector<EtherCAT::CBPFInsn> buildEncapBpfProgram(const EncapConfig& config) {
+    using namespace EtherCAT;
+    CBPFSpec s;
+    s.udp_port = config.udpPort;
+
+    if (config.rxRange) {
+        // VLAN mode: reject everything except VID∈range + inner EtherCAT
+        // (and inner UDP-encapsulated EtherCAT when udp is on).
+        s.untagged_ethercat = false;
+        s.untagged_udp      = false;
+        s.tagged_ethercat   = true;
+        s.tagged_udp        = config.udp;
+        s.vlan_range        = CBPFVlanRange{config.rxRange->start,
+                                            config.rxRange->end};
+    } else if (config.rxAny) {
+        // Catch-all tagged traffic: no untagged, any-VID tagged EtherCAT.
+        s.untagged_ethercat = false;
+        s.untagged_udp      = false;
+        s.tagged_ethercat   = true;
+        s.tagged_udp        = config.udp;
     } else {
-        TETHER_LOGI(tag, "VLAN mode: RX=untagged, TX={}",
-                    config.txVlan ? std::to_string(*config.txVlan).c_str() : "none");
+        // Default / TX-tag-only: untagged + any-VID tagged EtherCAT (+UDP).
+        s.untagged_ethercat = true;
+        s.untagged_udp      = config.udp;
+        s.tagged_ethercat   = true;
+        s.tagged_udp        = config.udp;
+    }
+    return CBPFProgramFactory::build(s);
+}
+
+void attachEncapBpfFilter(EtherCAT::HAL::IEthernet& eth,
+                          const EncapConfig& config,
+                          const char* tag) {
+    const int fd = static_cast<int>(
+        reinterpret_cast<intptr_t>(eth.nativeHandle()));
+    if (fd < 0) return;   // backend without a socket fd — nothing to attach
+
+    const auto prog = buildEncapBpfProgram(config);
+    if (prog.empty()) {
+        TETHER_LOGW(tag, "Encapsulation produced an empty BPF program — "
+                         "no filter attached");
+        return;
+    }
+    if (!EtherCAT::CBPFProgramFactory::attach(fd, prog)) {
+        // Soft failure: userspace filtering keeps correctness; only the
+        // kernel-side wakeup savings are lost.
+        TETHER_LOGW(tag, "BPF socket filter attach failed — continuing "
+                         "without kernel filtering");
+    } else {
+        TETHER_LOGI(tag, "Kernel cBPF filter attached ({} insns)", prog.size());
     }
 }
 

@@ -45,7 +45,7 @@ struct SensorlessHomingArgs {
     double phase_timeout = 30.0;
     std::string pass_aggregation = "mean";
     bool apply_drive_homing = false;
-    Tether::Examples::VlanConfig vlan;
+    Tether::Examples::EncapConfig encap;
 };
 
 inline bool parseSensorlessHomingArgs(int argc, char** argv,
@@ -207,13 +207,11 @@ inline bool parseSensorlessHomingArgs(int argc, char** argv,
         return false;
     }
     out.apply_drive_homing = program.get<bool>("--apply-drive-homing");
-    if (!Tether::Examples::parseVlanArgs(
-            program.get<std::string>("--rx-vlan"),
-            program.get<std::string>("--tx-vlan"),
-            out.vlan, program_name)) {
+    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+            out.encap, program_name)) {
         return false;
     }
-    Tether::Examples::logVlanConfig(out.vlan, program_name);
+    Tether::Examples::logEncapConfig(out.encap, program_name);
     return true;
 }
 
@@ -274,7 +272,7 @@ int main(int argc, char** argv)
 
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
-    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.vlan)) {
+    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.encap)) {
         return 2;
     }
 
