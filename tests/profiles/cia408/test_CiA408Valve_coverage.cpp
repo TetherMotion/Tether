@@ -312,7 +312,7 @@ TEST(Valve408CovTest, ControllerConstruction) {
 }
 
 TEST(Valve408CovTest, ControllerConstruction_ConfigAddr) {
-    ValveController v(0x1001, true);
+    ValveController v(0x1001);
     EXPECT_FALSE(v.isInitialized());
 }
 

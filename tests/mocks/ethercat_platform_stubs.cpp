@@ -55,13 +55,3 @@ namespace Raw {
 #endif
 
 } // namespace EtherCAT
-
-#if 0
-extern "C" bool ecm_sdo_read(uint16_t /*slave_addr*/, uint16_t /*index*/, uint8_t /*subindex*/, void* /*data*/, size_t /*len*/, bool /*use_configured_addr*/) {
-    return false;
-}
-
-extern "C" bool ecm_sdo_write(uint16_t /*slave_addr*/, uint16_t /*index*/, uint8_t /*subindex*/, const void* /*data*/, size_t /*len*/, bool /*use_configured_addr*/) {
-    return false;
-}
-#endif // 0 - provided by host_stubs.cpp

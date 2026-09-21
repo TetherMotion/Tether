@@ -22,6 +22,8 @@
 #include <string>
 #include <functional>
 
+namespace EtherCAT { namespace CoE { class CoEManager; } }
+
 namespace CiA408 {
 
 // ============================================================================
@@ -171,10 +173,12 @@ public:
     
     /**
      * @brief Construct valve controller
-     * @param slave_addr Slave station address
-     * @param use_configured_addr Use configured vs auto-increment addressing
+     * @param slave_addr Slave station address (used for logging only)
+     * @param coe        CoE manager for this slave (e.g. &master.sdoManager(idx)).
+     *                   May be nullptr — SDO-based methods then return false.
      */
-    explicit ValveController(uint16_t slave_addr, bool use_configured_addr = false);
+    explicit ValveController(uint16_t slave_addr,
+                             EtherCAT::CoE::CoEManager* coe = nullptr);
     
     ~ValveController();
     
@@ -585,8 +589,8 @@ private:
     // Private Data
     // ========================================================================
     
+    EtherCAT::CoE::CoEManager* coe_;
     uint16_t slave_addr_;
-    bool use_configured_addr_;
     bool initialized_;
     
     ValveCapabilities capabilities_;

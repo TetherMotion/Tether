@@ -5,11 +5,6 @@
 #include <cstdint>
 #include <limits>
 
-extern "C" bool ecm_sdo_read(uint16_t slave_addr, uint16_t index, uint8_t subindex,
-                             void* data, size_t len, bool use_configured_addr);
-extern "C" bool ecm_sdo_write(uint16_t slave_addr, uint16_t index, uint8_t subindex,
-                              const void* data, size_t len, bool use_configured_addr);
-
 TEST(EtherCATHostStubs, PlatformFilesystemAPIsReturnSafeDefaults) {
     using namespace EtherCAT::Platform;
 
@@ -43,15 +38,4 @@ TEST(EtherCATHostStubs, PlatformNetifAndTimingAPIsAreCallable) {
 
     EXPECT_EQ(enter_critical(), 0u);
     exit_critical(0u);
-}
-
-TEST(EtherCATHostStubs, SDOSHelpersReturnFalseForAllInputs) {
-    uint8_t buffer[8] = {0};
-    EXPECT_FALSE(ecm_sdo_read(0, 0, 0, buffer, sizeof(buffer), false));
-    EXPECT_FALSE(ecm_sdo_read(std::numeric_limits<uint16_t>::max(), 0xFFFF, 0xFF,
-                              nullptr, 0, true));
-
-    EXPECT_FALSE(ecm_sdo_write(0, 0, 0, buffer, sizeof(buffer), false));
-    EXPECT_FALSE(ecm_sdo_write(std::numeric_limits<uint16_t>::max(), 0xFFFF, 0xFF,
-                               nullptr, 0, true));
 }

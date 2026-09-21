@@ -174,7 +174,7 @@ protected:
 };
 
 TEST_F(CiA410Test, Construction) {
-    InclinometerController c2(0x100, true);
+    InclinometerController c2(0x100);
     EXPECT_FALSE(c2.isInitialized());
 }
 

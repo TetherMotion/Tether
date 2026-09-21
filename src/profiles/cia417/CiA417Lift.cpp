@@ -4,6 +4,7 @@
  */
 
 #include "profiles/cia417/CiA417Lift.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include <cstring>
 
@@ -12,22 +13,15 @@
 #define LOGW(fmt, ...) TETHER_LOGW(LOG_TAG, fmt, ##__VA_ARGS__)
 #define LOGE(fmt, ...) TETHER_LOGE(LOG_TAG, fmt, ##__VA_ARGS__)
 
-extern "C" {
-    bool ecm_sdo_read(uint16_t slave_addr, uint16_t index, uint8_t subindex,
-                      void* data, size_t len, bool use_configured_addr);
-    bool ecm_sdo_write(uint16_t slave_addr, uint16_t index, uint8_t subindex,
-                       const void* data, size_t len, bool use_configured_addr);
-}
-
 namespace CiA417 {
 
 // ============================================================================
 // Construction
 // ============================================================================
 
-LiftController::LiftController(uint16_t slave_addr, bool use_configured_addr)
-    : slave_addr_(slave_addr)
-    , use_configured_addr_(use_configured_addr)
+LiftController::LiftController(uint16_t slave_addr, EtherCAT::CoE::CoEManager* coe)
+    : coe_(coe)
+    , slave_addr_(slave_addr)
     , initialized_(false)
     , prev_statusword_(0)
     , prev_floor_(0xFF)
@@ -739,11 +733,14 @@ void LiftController::setCallCallback(CallCallback callback) {
 // ============================================================================
 
 bool LiftController::readSDO(uint16_t index, uint8_t subindex, void* data, size_t len) {
-    return ecm_sdo_read(slave_addr_, index, subindex, data, len, use_configured_addr_);
+    if (!coe_) return false;
+    return coe_->readSync(index, subindex, data, len,
+                          EtherCAT::CoE::kDefaultTimeoutMs);
 }
 
 bool LiftController::writeSDO(uint16_t index, uint8_t subindex, const void* data, size_t len) {
-    return ecm_sdo_write(slave_addr_, index, subindex, data, len, use_configured_addr_);
+    if (!coe_) return false;
+    return coe_->writeSync(index, subindex, data, len).has_value();
 }
 
 } // namespace CiA417

@@ -9,22 +9,6 @@ using namespace EtherCAT;
 // Some host stubs only exist when building without the full EtherCAT backend
 // (i.e., !TETHER_ENABLE_ETHERCAT). Guard the tests so the suite compiles in
 // both host-stub and full-backend builds.
-#if !defined(TETHER_ENABLE_ETHERCAT)
-extern "C" bool ecm_sdo_read(uint16_t, uint16_t, uint8_t, void*, size_t, bool);
-extern "C" bool ecm_sdo_write(uint16_t, uint16_t, uint8_t, const void*, size_t, bool);
-#endif
-
-TEST(HostStubs_Basic, ReturnsDefaults) {
-#if !defined(TETHER_ENABLE_ETHERCAT)
-    // Only validate the SDO stubs here to avoid duplicate-symbol
-    // conflicts with the full EtherCAT implementation in other units.
-    char buf[4] = {0};
-    EXPECT_FALSE(ecm_sdo_read(1, 2, 3, buf, sizeof(buf), false));
-    EXPECT_FALSE(ecm_sdo_write(1, 2, 3, buf, sizeof(buf), false));
-#else
-    GTEST_SKIP() << "Host stubs not present in this build";
-#endif
-}
 
 TEST(PDOStubs_Basic, MappingNull) {
 #if !defined(TETHER_ENABLE_ETHERCAT)
