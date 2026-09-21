@@ -5,6 +5,7 @@
 
 #include "TransactionRouter.hpp"
 #include "tether/platform/EspCompat.hpp"
+#include "tether/platform/AtomicWait.hpp"
 
 #include <algorithm>
 
@@ -51,18 +52,17 @@ void TransactionRouter::shutdown()
 
     shutdown_.store(true, std::memory_order_release);
 
-    // Wake up every pending waiter so it can exit
+    // Wake every slot waiter — bump seq so atomicWait() returns and the
+    // waiter observes shutdown_ on re-check.  Pending or not is harmless:
+    // a bumped seq on an idle slot is just a stale token.
     for (auto& s : slots_) {
-        std::lock_guard<std::mutex> lock(s.mtx);
-        if (s.pending.load(std::memory_order_relaxed)) {
-            s.completed.store(true, std::memory_order_relaxed);
-            s.cv.notify_all();
-        }
+        s.seq.fetch_add(1, std::memory_order_release);
+        Tether::Platform::atomicWakeAll(&s.seq);
     }
 
     // Wake any waitForAny() waiters
     any_completion_gen_.fetch_add(1, std::memory_order_release);
-    any_wait_cv_.notify_all();
+    Tether::Platform::atomicWakeAll(&any_completion_gen_);
 
     initialized_.store(false, std::memory_order_release);
 }
@@ -71,15 +71,15 @@ void TransactionRouter::cancel()
 {
     cancelled_.store(true, std::memory_order_release);
 
-    // Wake all threads blocked on condition variables
+    // Wake all threads blocked in atomicWait()
     for (auto& s : slots_) {
-        std::lock_guard<std::mutex> lock(s.mtx);
-        s.cv.notify_all();
+        s.seq.fetch_add(1, std::memory_order_release);
+        Tether::Platform::atomicWakeAll(&s.seq);
     }
 
     // Wake any waitForAny() waiters
     any_completion_gen_.fetch_add(1, std::memory_order_release);
-    any_wait_cv_.notify_all();
+    Tether::Platform::atomicWakeAll(&any_completion_gen_);
 }
 
 void TransactionRouter::clearCancel()
@@ -116,13 +116,67 @@ size_t TransactionRouter::routePacket(const RxDatagram& dgram)
     slot.response = dgram;
     slot.completed.store(true, std::memory_order_relaxed);
     stats_packets_matched_.fetch_add(1, std::memory_order_relaxed);
-    slot.cv.notify_one();
+    // seq is the waiters' wake word: bumped (release) after all payload
+    // fields so a woken waiter sees a complete response.
+    slot.seq.fetch_add(1, std::memory_order_release);
+    Tether::Platform::atomicWakeOne(&slot.seq);
 
     // Notify any waitForAny() waiters that a slot completed.
     any_completion_gen_.fetch_add(1, std::memory_order_release);
-    any_wait_cv_.notify_all();
+    Tether::Platform::atomicWakeAll(&any_completion_gen_);
 
     return 1;
+}
+
+// ============================================================================
+// Timed slot wait — atomicWait() on slot.seq
+// ============================================================================
+//
+// The waiter loop below replaces the former cv.wait_for().  Wake order is
+// identical: routePacket() writes the response, sets completed, bumps seq,
+// then wakes; cancel()/shutdown() bump seq on every slot so all waiters
+// re-check the flags.  The mutex is only held for the bookkeeping around
+// the wait, never during it.
+
+WaitResult TransactionRouter::waitForSlotCompletion(Slot& slot,
+                                                    uint32_t timeout_ms)
+{
+    uint32_t expected = slot.seq.load(std::memory_order_acquire);
+    const auto deadline = std::chrono::steady_clock::now()
+                        + std::chrono::milliseconds(timeout_ms);
+
+    for (;;) {
+        if (slot.completed.load(std::memory_order_acquire) ||
+            cancelled_.load(std::memory_order_acquire) ||
+            shutdown_.load(std::memory_order_acquire)) {
+            break;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) break;
+        const int64_t remaining_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                deadline - now).count();
+        const uint32_t cur = slot.seq.load(std::memory_order_acquire);
+        if (cur != expected) { expected = cur; continue; }
+        Tether::Platform::atomicWait(&slot.seq, cur, remaining_ns);
+    }
+
+    WaitResult result = WaitResult::Timeout();
+    std::lock_guard<std::mutex> lock(slot.mtx);
+    if (slot.completed.load(std::memory_order_acquire) &&
+        !shutdown_.load(std::memory_order_acquire) &&
+        !cancelled_.load(std::memory_order_acquire)) {
+        auto& r = slot.response;
+        result = WaitResult::Success(
+            r.wkc, r.datalen, r.cmd, r.adp, r.ado, r.idx);
+    } else {
+        stats_timeouts_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    slot.pending.store(false, std::memory_order_relaxed);
+    slot.buffer     = nullptr;
+    slot.buffer_size = 0;
+    return result;
 }
 
 // ============================================================================
@@ -165,34 +219,7 @@ WaitResult TransactionRouter::sendAndWait(uint8_t idx,
     }
 
     // 3. Wait for the response
-    WaitResult result = WaitResult::Timeout();
-    {
-        std::unique_lock<std::mutex> lock(slot.mtx);
-        bool got_it = slot.cv.wait_for(
-            lock,
-            std::chrono::milliseconds(timeout_ms),
-            [&] { return slot.completed.load(std::memory_order_relaxed) || cancelled_.load(std::memory_order_acquire); });
-
-        if (got_it && !shutdown_.load(std::memory_order_acquire) &&
-            !cancelled_.load(std::memory_order_acquire)) {
-            auto& r = slot.response;
-            result = WaitResult::Success(
-                r.wkc,
-                r.datalen,
-                r.cmd,
-                r.adp,
-                r.ado,
-                r.idx);
-        } else {
-            stats_timeouts_.fetch_add(1, std::memory_order_relaxed);
-        }
-
-        slot.pending.store(false, std::memory_order_relaxed);
-        slot.buffer     = nullptr;
-        slot.buffer_size = 0;
-    }
-
-    return result;
+    return waitForSlotCompletion(slot, timeout_ms);
 }
 
 // ============================================================================
@@ -228,29 +255,7 @@ WaitResult TransactionRouter::waitForPacket(const PacketFilter& filter,
         }
 
         // Wait
-        WaitResult result = WaitResult::Timeout();
-        {
-            std::unique_lock<std::mutex> lock(slot.mtx);
-            bool got_it = slot.cv.wait_for(
-                lock,
-                std::chrono::milliseconds(timeout_ms),
-                [&] { return slot.completed.load(std::memory_order_relaxed) || cancelled_.load(std::memory_order_acquire); });
-
-            if (got_it && !shutdown_.load(std::memory_order_acquire) &&
-                !cancelled_.load(std::memory_order_acquire)) {
-                auto& r = slot.response;
-                result = WaitResult::Success(
-                    r.wkc, r.datalen, r.cmd, r.adp, r.ado, r.idx);
-            } else {
-                stats_timeouts_.fetch_add(1, std::memory_order_relaxed);
-            }
-
-            slot.pending.store(false, std::memory_order_relaxed);
-            slot.buffer     = nullptr;
-            slot.buffer_size = 0;
-        }
-
-        return result;
+        return waitForSlotCompletion(slot, timeout_ms);
     }
 
     // Fallback: if the filter doesn't match by idx, we can't use the
@@ -289,30 +294,7 @@ WaitResult TransactionRouter::waitForPreRegistered(size_t slot_idx, uint32_t tim
         return WaitResult::Timeout();
 
     auto& slot = slots_[slot_idx];
-
-    WaitResult result = WaitResult::Timeout();
-    {
-        std::unique_lock<std::mutex> lock(slot.mtx);
-        bool got_it = slot.cv.wait_for(
-            lock,
-            std::chrono::milliseconds(timeout_ms),
-            [&] { return slot.completed.load(std::memory_order_relaxed) || cancelled_.load(std::memory_order_acquire); });
-
-        if (got_it && !shutdown_.load(std::memory_order_acquire) &&
-            !cancelled_.load(std::memory_order_acquire)) {
-            auto& r = slot.response;
-            result = WaitResult::Success(
-                r.wkc, r.datalen, r.cmd, r.adp, r.ado, r.idx);
-        } else {
-            stats_timeouts_.fetch_add(1, std::memory_order_relaxed);
-        }
-
-        slot.pending.store(false, std::memory_order_relaxed);
-        slot.buffer     = nullptr;
-        slot.buffer_size = 0;
-    }
-
-    return result;
+    return waitForSlotCompletion(slot, timeout_ms);
 }
 
 void TransactionRouter::cancelPreRegistered(size_t slot_idx)
@@ -366,19 +348,27 @@ TransactionRouter::waitForAny(const size_t* slot_indices, size_t count,
         }
     }
 
-    // No slot has completed yet — wait on the shared CV.
-    uint64_t gen_before = any_completion_gen_.load(std::memory_order_acquire);
-    std::unique_lock<std::mutex> lock(any_wait_mtx_);
-    any_wait_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
-        [&] {
-            return any_completion_gen_.load(std::memory_order_acquire) != gen_before
-                || cancelled_.load(std::memory_order_acquire)
-                || shutdown_.load(std::memory_order_acquire);
-        });
+    // No slot has completed yet — block on the generation word.
+    // atomicWait() only returns early if gen changed between our load and
+    // the wait, so there is no missed wake; spurious wakes just re-loop.
+    uint32_t gen = any_completion_gen_.load(std::memory_order_acquire);
+    const auto deadline = std::chrono::steady_clock::now()
+                        + std::chrono::milliseconds(timeout_ms);
 
-    if (cancelled_.load(std::memory_order_acquire) ||
-        shutdown_.load(std::memory_order_acquire)) {
-        return result;  // timed_out = true
+    for (;;) {
+        if (cancelled_.load(std::memory_order_acquire) ||
+            shutdown_.load(std::memory_order_acquire)) {
+            return result;  // timed_out = true
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) break;
+        const int64_t remaining_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                deadline - now).count();
+        const uint32_t cur =
+            any_completion_gen_.load(std::memory_order_acquire);
+        if (cur != gen) break;  // something completed — rescan below
+        Tether::Platform::atomicWait(&any_completion_gen_, cur, remaining_ns);
     }
 
     // Check which slots have completed.
