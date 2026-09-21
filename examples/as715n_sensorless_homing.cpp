@@ -28,8 +28,6 @@ struct SensorlessHomingArgs {
     int direction = 1;
     double max_torque_percent = 10.0;
     bool use_csv_mode = true;
-    double kp = 0.05;
-    double ki = 0.005;
     std::string stall_detection = "position";
     double stall_velocity = 100.0;
     double stall_window = 0.1;
@@ -72,16 +70,8 @@ inline bool parseSensorlessHomingArgs(int argc, char** argv,
         .default_value(true)
         .implicit_value(true)
         .help("use drive-internal velocity loop (CSV mode) with torque limits "
-              "0x60E0/0x60E1 instead of the host-side CST velocity PI "
+              "0x60E0/0x60E1 instead of a bounded CST torque command "
               "(default: true, pass 0/false to disable)");
-    program.add_argument("--kp")
-        .scan<'g', double>()
-        .default_value(0.05)
-        .help("velocity loop proportional gain");
-    program.add_argument("--ki")
-        .scan<'g', double>()
-        .default_value(0.005)
-        .help("velocity loop integral gain");
     program.add_argument("--stall-detection")
         .default_value(std::string("position"))
         .help("stall detection method: 'position' (default), 'speed' or 'torque'");
@@ -167,8 +157,6 @@ inline bool parseSensorlessHomingArgs(int argc, char** argv,
         return false;
     }
     out.use_csv_mode = program.get<bool>("--csv");
-    out.kp = program.get<double>("--kp");
-    out.ki = program.get<double>("--ki");
     out.stall_detection = program.get<std::string>("--stall-detection");
     if (out.stall_detection != "position" && out.stall_detection != "speed" &&
         out.stall_detection != "torque") {
@@ -310,8 +298,6 @@ int main(int argc, char** argv)
         ctrl_cfg.direction = args.direction;
         ctrl_cfg.max_torque_percent = args.max_torque_percent;
         ctrl_cfg.use_csv_mode = args.use_csv_mode;
-        ctrl_cfg.kp = args.kp;
-        ctrl_cfg.ki = args.ki;
         if (args.stall_detection == "speed") {
             ctrl_cfg.stall_detection = HomingController::StallDetection::Speed;
         } else if (args.stall_detection == "torque") {
