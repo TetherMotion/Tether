@@ -878,7 +878,7 @@ struct Args {
     uint16_t watchdog_ms = EtherCAT::Drives::Synapticon::SafeMotion::Timing::kMinimumWatchdogTimeMs;
     uint32_t diag_interval_ms = 1000;
     std::string debug;
-    Tether::Examples::EncapConfig encap;
+    Tether::Examples::EncapsulationConfig encapsulation;
     ///< STO override: -1 = not set (use motionEnabled default), 0 = force STO off, 1 = force STO on
     int sto_override = -1;
     ///< SOS override: -1 = not set (defaults to STO value), 0 = force SOS off, 1 = force SOS on
@@ -1015,10 +1015,10 @@ bool parseArgs(int argc, char** argv, Args& out) {
         return false;
     }
     if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
-            out.encap, TAG)) {
+            out.encapsulation, TAG)) {
         return false;
     }
-    Tether::Examples::logEncapConfig(out.encap, TAG);
+    Tether::Examples::logEncapsulationConfig(out.encapsulation, TAG);
     return true;
 }
 
@@ -1078,7 +1078,7 @@ int main(int argc, char** argv) {
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
-    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.encap)) {
+    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.encapsulation)) {
         return 2;
     }
 

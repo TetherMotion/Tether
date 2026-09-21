@@ -39,7 +39,7 @@ inline bool startHostMasterSession(const std::string& interface_name,
                                    EtherCAT::DS402Master& master,
                                    HostMasterSession& session,
                                    const char* tag,
-                                   const EncapConfig& encap = EncapConfig{})
+                                   const EncapsulationConfig& encapsulation = EncapsulationConfig{})
 {
     session.ethernet = EtherCAT::HAL::createDefaultEthernet();
     if (!session.ethernet) {
@@ -92,49 +92,15 @@ inline bool startHostMasterSession(const std::string& interface_name,
 
     EtherCAT::Master& ecat = master.ethercatMaster();
 
-    // Kernel-side ingress filter matching the requested encapsulation.
-    attachEncapBpfFilter(*session.ethernet, encap, tag);
-
-    if (encap.udp) {
-        EtherCAT::UdpEncapsulationConfig uc;
-        uc.enabled          = true;
-        uc.destination_port = encap.udpPort;
-        ecat.setUdpEncapsulation(uc);
-        if (!ecat.isUdpEncapsulationEnabled()) {
-            TETHER_LOGE(tag, "--encapsulation udp requires a build with "
-                             "TETHER_ENABLE_UDP_ENCAPSULATION=ON");
-            return false;
-        }
-        session.ethernet->setEthertypeFilter(0);
-    }
-
-    if (encap.vlanActive()) {
-        session.router = std::make_unique<EtherCAT::VLANRouter>();
-        session.router->setBackend(session.network_interface.get());
-        // Alias shared_ptr: the DS402Master owns the EtherCAT::Master for the
-        // session lifetime, so a no-op deleter is safe.
-        auto master_sp = std::shared_ptr<EtherCAT::Master>(&ecat, [](auto*) {});
-        if (encap.rxAny) {
-            session.router->setUndefinedTarget(master_sp, encap.txVlan, true);
-        } else if (encap.rxRange) {
-            session.router->addMaster(master_sp, *encap.rxRange, encap.txVlan);
-        } else {
-            session.router->addMaster(master_sp, std::nullopt, encap.txVlan);
-        }
-
-        session.ethernet->setRxCallback(
-            [&router = session.router](const uint8_t* frame, size_t len,
-                                        const EtherCAT::HAL::RxFrameInfo&, void*) {
-                router->processRxFrame(frame, len);
-            },
-            nullptr);
-    } else {
-        session.ethernet->setRxCallback(
-            [&ecat](const uint8_t* frame, size_t len,
-                    const EtherCAT::HAL::RxFrameInfo&, void*) {
-                ecat.handleRxFrame(frame, len);
-            },
-            nullptr);
+    // One-call encapsulation setup: kernel cBPF filter, EtherCAT-over-UDP,
+    // VLAN router + RX callback.  Returns the interface the master runs on.
+    EtherCAT::NetworkInterface* master_iface = setupEncapsulation(
+        *session.ethernet, *session.network_interface, ecat, session.router,
+        encapsulation, tag);
+    if (!master_iface) {
+        session.ethernet->shutdown();
+        session.ethernet.reset();
+        return false;
     }
 
     session.poll_running.store(true);
@@ -147,18 +113,7 @@ inline bool startHostMasterSession(const std::string& interface_name,
         }
     });
 
-    if (encap.vlanActive() && session.router) {
-        EtherCAT::NetworkInterface* master_iface = encap.rxAny
-            ? session.router->undefinedNetworkInterface()
-            : session.router->networkInterfaceFor(&ecat);
-        if (!master_iface) {
-            TETHER_LOGE(tag, "Failed to obtain per-master NetworkInterface from VLAN router");
-            return false;
-        }
-        master.start(*master_iface, session.src_mac);
-    } else {
-        master.start(*session.network_interface, session.src_mac);
-    }
+    master.start(*master_iface, session.src_mac);
     return true;
 }
 
@@ -246,7 +201,7 @@ struct MotionNativeArgs {
     double torque_amplitude   = 1000.0;    // 0.1% of rated torque (CST)
     double frequency_hz       = 0.25;      // sine frequency
     std::string csv_path;                  // if non-empty, log PDOs to CSV
-    EncapConfig encap;
+    EncapsulationConfig encapsulation;
 };
 
 /// Parse the standard motion-native arguments (`-i`/`--interface`,
@@ -318,10 +273,10 @@ inline bool parseMotionNativeArgs(int argc, char** argv,
     out.frequency_hz = program.get<double>("--frequency");
     out.csv_path = program.get<std::string>("--csv");
     if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
-            out.encap, program_name)) {
+            out.encapsulation, program_name)) {
         return false;
     }
-    Tether::Examples::logEncapConfig(out.encap, program_name);
+    Tether::Examples::logEncapsulationConfig(out.encapsulation, program_name);
     return true;
 }
 

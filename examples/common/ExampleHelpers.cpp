@@ -189,12 +189,6 @@ bool applyDebugGateConditions(const std::string& startCond,
 #endif
 }
 
-void addEncapsulationArg(argparse::ArgumentParser& /*program*/) {
-    // Deprecated: --encapsulation is now added by addInterfaceArg() so
-    // every example gets it automatically.  Kept as a no-op for source
-    // compatibility with examples that still call it explicitly.
-}
-
 void addSlaveArg(argparse::ArgumentParser& program, int defaultValue) {
     program.add_argument("-s", "--slave")
         .scan<'i', int>()
@@ -314,9 +308,9 @@ bool parseVidRange(const std::string& s,
 } // namespace
 
 bool parseEncapsulationArg(const std::string& spec,
-                           EncapConfig& out,
+                           EncapsulationConfig& out,
                            const char* /*tag*/) {
-    out = EncapConfig{};
+    out = EncapsulationConfig{};
     if (spec.empty() || spec == "raw" || spec == "none")
         return true;   // plain EtherCAT
 
@@ -423,7 +417,7 @@ bool parseEncapsulationArg(const std::string& spec,
     return true;
 }
 
-void logEncapConfig(const EncapConfig& config, const char* tag) {
+void logEncapsulationConfig(const EncapsulationConfig& config, const char* tag) {
     if (!config.enabled()) return;
 
     if (config.rxAny) {
@@ -445,7 +439,7 @@ void logEncapConfig(const EncapConfig& config, const char* tag) {
     }
 }
 
-std::vector<EtherCAT::CBPFInsn> buildEncapBpfProgram(const EncapConfig& config) {
+std::vector<EtherCAT::CBPFInsn> buildEncapsulationBpfProgram(const EncapsulationConfig& config) {
     using namespace EtherCAT;
     CBPFSpec s;
     s.udp_port = config.udpPort;
@@ -475,14 +469,14 @@ std::vector<EtherCAT::CBPFInsn> buildEncapBpfProgram(const EncapConfig& config) 
     return CBPFProgramFactory::build(s);
 }
 
-void attachEncapBpfFilter(EtherCAT::HAL::IEthernet& eth,
-                          const EncapConfig& config,
+void attachEncapsulationBpfFilter(EtherCAT::HAL::IEthernet& eth,
+                          const EncapsulationConfig& config,
                           const char* tag) {
     const int fd = static_cast<int>(
         reinterpret_cast<intptr_t>(eth.nativeHandle()));
     if (fd < 0) return;   // backend without a socket fd — nothing to attach
 
-    const auto prog = buildEncapBpfProgram(config);
+    const auto prog = buildEncapsulationBpfProgram(config);
     if (prog.empty()) {
         TETHER_LOGW(tag, "Encapsulation produced an empty BPF program — "
                          "no filter attached");
@@ -496,6 +490,85 @@ void attachEncapBpfFilter(EtherCAT::HAL::IEthernet& eth,
     } else {
         TETHER_LOGI(tag, "Kernel cBPF filter attached ({} insns)", prog.size());
     }
+}
+
+EtherCAT::NetworkInterface* setupEncapsulation(
+    EtherCAT::HAL::IEthernet& eth,
+    EtherCAT::NetworkInterface& backend,
+    EtherCAT::Master& master,
+    std::unique_ptr<EtherCAT::VLANRouter>& routerStorage,
+    const EncapsulationConfig& encapsulation,
+    const char* tag) {
+    // 1. Kernel-side ingress filter.
+    attachEncapsulationBpfFilter(eth, encapsulation, tag);
+
+    // 2. EtherCAT-over-UDP.
+    if (encapsulation.udp) {
+        EtherCAT::UdpEncapsulationConfig uc;
+        uc.enabled          = true;
+        uc.destination_port = encapsulation.udpPort;
+        master.setUdpEncapsulation(uc);
+        if (!master.isUdpEncapsulationEnabled()) {
+            TETHER_LOGE(tag, "--encapsulation udp requires a build with "
+                             "TETHER_ENABLE_UDP_ENCAPSULATION=ON");
+            return nullptr;
+        }
+        // The HAL's software EtherType filter (0x88A4) would drop IPv4/UDP
+        // frames — disable it; the attached cBPF filter does the real work
+        // and the master parser rejects anything stray regardless.
+        eth.setEthertypeFilter(0);
+    }
+
+    // 3. VLAN router or direct RX callback.
+    if (encapsulation.vlanActive()) {
+        // VLAN-routed masters must not bypass the VLANRouter: drop the
+        // direct-receive fast path so the cyclic executive waits on the
+        // eventfd/slot while the poll thread keeps demuxing by VLAN tag.
+        backend.receive       = nullptr;
+        backend.native_handle = nullptr;
+
+        routerStorage = std::make_unique<EtherCAT::VLANRouter>();
+        routerStorage->setBackend(&backend);
+        // Alias shared_ptr: caller owns the master for the session lifetime.
+        auto master_sp =
+            std::shared_ptr<EtherCAT::Master>(&master, [](auto*) {});
+        if (encapsulation.rxAny) {
+            routerStorage->setUndefinedTarget(master_sp,
+                                              encapsulation.txVlan, true);
+        } else if (encapsulation.rxRange) {
+            routerStorage->addMaster(master_sp, *encapsulation.rxRange,
+                                     encapsulation.txVlan);
+        } else {
+            routerStorage->addMaster(master_sp, std::nullopt,
+                                     encapsulation.txVlan);
+        }
+
+        auto* router = routerStorage.get();
+        eth.setRxCallback(
+            [router](const uint8_t* frame, size_t len,
+                     const EtherCAT::HAL::RxFrameInfo&, void*) {
+                router->processRxFrame(frame, len);
+            },
+            nullptr);
+
+        EtherCAT::NetworkInterface* masterIface = encapsulation.rxAny
+            ? routerStorage->undefinedNetworkInterface()
+            : routerStorage->networkInterfaceFor(&master);
+        if (!masterIface) {
+            TETHER_LOGE(tag, "Failed to obtain per-master NetworkInterface "
+                             "from VLAN router");
+            return nullptr;
+        }
+        return masterIface;
+    }
+
+    eth.setRxCallback(
+        [&master](const uint8_t* frame, size_t len,
+                  const EtherCAT::HAL::RxFrameInfo&, void*) {
+            master.handleRxFrame(frame, len);
+        },
+        nullptr);
+    return &backend;
 }
 
 // ============================================================================

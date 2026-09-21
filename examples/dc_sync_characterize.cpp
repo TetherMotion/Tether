@@ -276,9 +276,9 @@ int main(int argc, char** argv) {
     }
     const uint16_t slave_idx = static_cast<uint16_t>(slave_idx_signed);
 
-    Tether::Examples::EncapConfig encap;
+    Tether::Examples::EncapsulationConfig encapsulation;
     if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
-            encap, TAG)) {
+            encapsulation, TAG)) {
         return 1;
     }
 
@@ -307,13 +307,13 @@ int main(int argc, char** argv) {
     EtherCAT::Master master;
     Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupEncapAndRxCallback(session, master, encap, TAG)) {
+    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }
     Tether::Examples::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, encap, TAG)) {
+    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }

@@ -114,93 +114,31 @@ void shutdownHostEthernet(HostEtherNetSession& session) {
     }
 }
 
-bool setupEncapAndRxCallback(HostEtherNetSession& session,
-                             EtherCAT::Master& master,
-                             const EncapConfig& encap,
-                             const char* tag) {
-    // Kernel-side ingress filter: drops non-EtherCAT traffic (and, in VLAN
-    // mode, everything outside the configured VID) before userspace sees it.
-    attachEncapBpfFilter(*session.eth, encap, tag);
-
-    if (encap.udp) {
-        EtherCAT::UdpEncapsulationConfig uc;
-        uc.enabled          = true;
-        uc.destination_port = encap.udpPort;
-        master.setUdpEncapsulation(uc);
-        if (!master.isUdpEncapsulationEnabled()) {
-            TETHER_LOGE(tag, "--encapsulation udp requires a build with "
-                             "TETHER_ENABLE_UDP_ENCAPSULATION=ON");
-            return false;
-        }
-        // The HAL's software EtherType filter (0x88A4) would drop IPv4/UDP
-        // frames — disable it; the attached cBPF filter does the real work
-        // and the master parser rejects anything stray regardless.
-        session.eth->setEthertypeFilter(0);
-    }
-
-    if (encap.vlanActive()) {
-        // VLAN-routed masters must not bypass the VLANRouter: drop the
-        // direct-receive fast path so the cyclic executive waits on the
-        // eventfd/slot while the poll thread keeps demuxing by VLAN tag.
-        session.ni->receive = nullptr;
-        session.ni->native_handle = nullptr;
-        session.router = std::make_unique<EtherCAT::VLANRouter>();
-        session.router->setBackend(session.ni.get());
-        if (encap.rxAny) {
-            session.router->setUndefinedTarget(
-                std::shared_ptr<EtherCAT::Master>(&master, [](auto*) {}),
-                encap.txVlan, true);
-        } else if (encap.rxRange) {
-            session.router->addMaster(
-                std::shared_ptr<EtherCAT::Master>(&master, [](auto*) {}),
-                *encap.rxRange, encap.txVlan);
-        } else {
-            session.router->addMaster(
-                std::shared_ptr<EtherCAT::Master>(&master, [](auto*) {}),
-                std::nullopt, encap.txVlan);
-        }
-
-        session.eth->setRxCallback(
-            [&router = session.router](const uint8_t* frame, size_t len,
-                                       const EtherCAT::HAL::RxFrameInfo&, void*) {
-                router->processRxFrame(frame, len);
-            },
-            nullptr);
-    } else {
-        session.eth->setRxCallback(
-            [&master](const uint8_t* frame, size_t len,
-                      const EtherCAT::HAL::RxFrameInfo&, void*) {
-                master.handleRxFrame(frame, len);
-            },
-            nullptr);
-    }
-    return true;
+bool setupEncapsulation(HostEtherNetSession& session,
+                        EtherCAT::Master& master,
+                        const EncapsulationConfig& encapsulation,
+                        const char* tag) {
+    session.masterInterface = setupEncapsulation(
+        *session.eth, *session.ni, master, session.router,
+        encapsulation, tag);
+    return session.masterInterface != nullptr;
 }
 
 bool startHostMaster(HostEtherNetSession& session,
                      EtherCAT::Master& master,
-                     const EncapConfig& encap,
                      const char* tag) {
-    if (encap.vlanActive() && session.router) {
-        EtherCAT::NetworkInterface* masterIface = encap.rxAny
-            ? session.router->undefinedNetworkInterface()
-            : session.router->networkInterfaceFor(&master);
-        if (!masterIface) {
-            TETHER_LOGE(tag, "Failed to obtain per-master NetworkInterface from VLAN router");
-            return false;
-        }
-        master.start(*masterIface, session.srcMac);
-    } else {
-        master.start(*session.ni, session.srcMac);
+    if (!session.masterInterface) {
+        TETHER_LOGE(tag, "setupEncapsulation() has not been called");
+        return false;
     }
+    master.start(*session.masterInterface, session.srcMac);
     return true;
 }
 
 bool startHostMasterAndDiscover(HostEtherNetSession& session,
                                 EtherCAT::Master& master,
-                                const EncapConfig& encap,
                                 const char* tag) {
-    if (!startHostMaster(session, master, encap, tag)) {
+    if (!startHostMaster(session, master, tag)) {
         return false;
     }
     auto slaves = master.discovery().discover();

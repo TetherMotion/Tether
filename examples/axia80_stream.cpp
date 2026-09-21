@@ -396,7 +396,7 @@ int main(int argc, char** argv) {
     int slave_idx = program.get<int>("--slave");
     double duration_sec = program.get<double>("--time");
     std::string debug_str = program.get<std::string>("--debug");
-    std::string encap_str = program.get<std::string>("--encapsulation");
+    std::string encapsulation_str = program.get<std::string>("--encapsulation");
     std::string dc_str = program.get<std::string>("--dc");
     bool dc_enabled = (dc_str == "on" || dc_str == "true" || dc_str == "1");
     std::string esi_xml_path = program.get<std::string>("--esi-xml");
@@ -432,8 +432,8 @@ int main(int argc, char** argv) {
     }
 
     // ---- Parse encapsulation ----
-    Tether::Examples::EncapConfig encap;
-    if (!Tether::Examples::parseEncapsulationArg(encap_str, encap, TAG)) {
+    Tether::Examples::EncapsulationConfig encapsulation;
+    if (!Tether::Examples::parseEncapsulationArg(encapsulation_str, encapsulation, TAG)) {
         return 1;
     }
 
@@ -442,7 +442,7 @@ int main(int argc, char** argv) {
     if (!debug_flags.empty()) {
         TETHER_LOGI(TAG, "Debug flags: {}", debug_str.c_str());
     }
-    Tether::Examples::logEncapConfig(encap, TAG);
+    Tether::Examples::logEncapsulationConfig(encapsulation, TAG);
 
     // ---- Parse and verify against ESI XML (intended settings) ----
     std::optional<ESI::DeviceInfo> esi_device;
@@ -515,53 +515,13 @@ int main(int argc, char** argv) {
     sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
     Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
 
-    // Kernel-side ingress filter matching the requested encapsulation.
-    Tether::Examples::attachEncapBpfFilter(*eth, encap, TAG);
-
-    if (encap.udp) {
-        EtherCAT::UdpEncapsulationConfig uc;
-        uc.enabled          = true;
-        uc.destination_port = encap.udpPort;
-        master.setUdpEncapsulation(uc);
-        if (!master.isUdpEncapsulationEnabled()) {
-            TETHER_LOGE(TAG, "--encapsulation udp requires a build with "
-                             "TETHER_ENABLE_UDP_ENCAPSULATION=ON");
-            return 1;
-        }
-        eth->setEthertypeFilter(0);
-    }
-
-    // ---- Optional VLAN router ----
+    // ---- Encapsulation: kernel filter + UDP + VLAN router + RX callback ----
     std::unique_ptr<EtherCAT::VLANRouter> router;
-    if (encap.vlanActive()) {
-        router = std::make_unique<EtherCAT::VLANRouter>();
-        router->setBackend(ni_ptr.get());
-        if (encap.rxAny) {
-            router->setUndefinedTarget(
-                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
-                encap.txVlan, true);
-        } else if (encap.rxRange) {
-            router->addMaster(
-                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
-                *encap.rxRange, encap.txVlan);
-        } else {
-            router->addMaster(
-                std::shared_ptr<EtherCAT::Master>(&master, [](auto*){}),
-                std::nullopt, encap.txVlan);
-        }
-    }
-
-    // Route RX frames
-    if (router) {
-        eth->setRxCallback([&router](const uint8_t* frame, size_t len,
-                                      const EtherCAT::HAL::RxFrameInfo&, void*) {
-            router->processRxFrame(frame, len);
-        }, nullptr);
-    } else {
-        eth->setRxCallback([&master](const uint8_t* frame, size_t len,
-                                      const EtherCAT::HAL::RxFrameInfo&, void*) {
-            master.handleRxFrame(frame, len);
-        }, nullptr);
+    EtherCAT::NetworkInterface* master_iface =
+        Tether::Examples::setupEncapsulation(*eth, *ni_ptr, master, router,
+                                             encapsulation, TAG);
+    if (!master_iface) {
+        return 5;
     }
 
     // ---- Poll thread ----
@@ -573,18 +533,7 @@ int main(int argc, char** argv) {
     });
 
     // ---- Start master ----
-    if (router) {
-        EtherCAT::NetworkInterface* master_iface = encap.rxAny
-            ? router->undefinedNetworkInterface()
-            : router->networkInterfaceFor(&master);
-        if (!master_iface) {
-            TETHER_LOGE(TAG, "Failed to obtain per-master NetworkInterface from VLAN router");
-            return 5;
-        }
-        master.start(*master_iface, src_mac);
-    } else {
-        master.start(*ni_ptr, src_mac);
-    }
+    master.start(*master_iface, src_mac);
 
     // ---- Discover slaves ----
     if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
