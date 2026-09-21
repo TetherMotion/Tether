@@ -113,7 +113,7 @@ add_tether_example(wss_velocity_plot
 # ---AS715N Sine Motion Native Example ---
 # Demonstrates EtherCAT master with CiA 402 drive control
 if(TETHER_DRIVE_AS715N)
-add_tether_example(as715n_sine_motion_native
+add_tether_example(as715n_sine_motion
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 
 endif()
