@@ -940,6 +940,23 @@ target_compile_definitions(tether_header_tests PRIVATE
 
 gtest_discover_tests(tether_header_tests PROPERTIES TIMEOUT 30)
 
+# Utility tests (header-only utilities, no EtherCAT dependencies)
+tether_add_test_executable(tether_utils_tests
+    utils/test_spsc_ring.cpp
+)
+
+target_include_directories(tether_utils_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+)
+
+target_link_libraries(tether_utils_tests
+    GTest::gtest_main
+)
+
+gtest_discover_tests(tether_utils_tests PROPERTIES TIMEOUT 30)
+
 # Helper to create ethercat test executables with common settings
 function(create_ethercat_test NAME)
     cmake_parse_arguments(ET "" "" "SOURCES;LIBS;DEFS" ${ARGN})
