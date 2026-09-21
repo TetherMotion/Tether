@@ -1401,4 +1401,3 @@ channel for diagnostics (`backendName()`, `zeroCopy()`, `droppedRx()`,
 | `tests/ethercat/test_process_image.cpp` | image modes + LAM exchange + handles + waitInput + shm |
 | `tests/ethercat/test_async_loop.cpp` | trigger/wait/coalesce, both collect modes, idle keep-alive, shm cross-process trigger, Master async lifecycle |
 | `tests/platform/test_rt_platform.cpp` | `CpuIsolation` claims + `RtMemory` best-effort paths |
-| `QUESTIONS.md` | design decisions + rationale for all FastLoop review items |
