@@ -17,6 +17,7 @@
 #include "tether/drives/AS715N/AS715NPDO.hpp"
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/CoETypes.hpp"
+#include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/platform/EspCompat.hpp"
 #include "tether/profiles/cia301/CiA402Defs.hpp"
 
@@ -273,6 +274,18 @@ int runSineMotion(EtherCAT::DS402Master& master,
     monitor_stop.store(true);
     fault_monitor.join();
 
+    // Diagnostic dump: did the cyclic exchange actually emit and collect?
+    {
+        const auto es = master.ethercatMaster().getCyclicLoopStats();
+        const auto ls = master.ethercatMaster()
+                            .logicalAddressManager().getStats();
+        TETHER_LOGI(TAG, "cyclic stats: cycles={} exchange_errors={} "
+                         "missed_deadlines={} | LRW ok={} wkc_err={} "
+                         "send_err={} timeout={} stale={}",
+                    es.cycle_count, es.exchange_errors, es.missed_deadlines,
+                    ls.success, ls.wkc_errors, ls.send_errors,
+                    ls.timeout_errors, ls.stale_responses);
+    }
     (void)master.removeMotionController(slave_index);  // deferred op, safe while running
     return 0;
 }
