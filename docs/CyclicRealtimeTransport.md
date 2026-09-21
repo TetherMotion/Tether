@@ -671,6 +671,16 @@ copies the view out — legacy callers keep working.
 
 `startCyclicLoop`, in order:
 
+0. **Mutual exclusion**: stops the async loop, any running cyclic loop, and
+   the motion-control loop.  A running **legacy DC realtime loop**
+   (`dc().start()` / `startDistributedClocks()`) is stopped too — its
+   `RealtimeLoop` drives `exchangePhysical` on its own cadence and must
+   never share the wire with the cyclic exchange.  DC sync under the
+   executive needs only `initializeDistributedClocks()`: the sync task
+   gates on `DCManager::isInitialized()` (the slave sync units are armed
+   by `initialize()`), so `enable_dc_synchronization` emits sync frames
+   from the dedicated DC task without a legacy loop.  `startAsyncLoop`
+   applies the same exclusion and gate.
 1. **CPU claims** (`cpu_isolation.enabled`, opt-in): the runtime allocator
    claims `cyclic_cpu`/`dc_cpu` (explicit or auto-selected, preferring
    kernel-isolated CPUs and never taking the last CPU).  With root +
