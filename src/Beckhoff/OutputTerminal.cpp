@@ -85,8 +85,8 @@ const char* errorToString(Error e) {
 
 OutputTerminal::OutputTerminal(Master& master, uint16_t slave_index,
                            const DeviceIdentity& identity)
-    : master_(&master), slave_index_(slave_index), identity_(identity),
-      state_(std::make_unique<std::atomic<uint64_t>>(0)) {
+    : master_(&master), slave_index_(slave_index), identity_(identity)
+{
     num_outputs_ = identity.num_bits;
 }
 
@@ -267,10 +267,14 @@ Result<> OutputTerminal::prepare(PDO::PDOAddressMode mode) {
     }
 
     int entry = pdo.mapping().add_rxpdo(
-        slave_index_, state_.get(), sm_len_, rxpdo_index_, mode);
+        slave_index_, sm_len_, rxpdo_index_, mode);
     if (entry < 0) {
         return std::unexpected(Error::PdoRegistrationFailed);
     }
+    // Bind the state word into the entry's storage — writes made through
+    // set()/setBit() go straight onto the wire on the next exchange.
+    state_ = new (pdo.mapping().entryDataMut(entry))
+             std::atomic<uint64_t>(state_local_->load(std::memory_order_relaxed));
     pdo.finalizeMapping(slave_index_);
 
     prepared_ = true;

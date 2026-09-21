@@ -183,6 +183,19 @@ inline constexpr uint8_t kCyclicSlotBaseIdx = 0xF8;
 inline constexpr size_t  kNumCyclicSlots    = 6;   ///< slots 0xF8..0xFD
 
 /**
+ * @brief Reserved index for datagrams piggybacked inside cyclic frames
+ *        (mailbox/async traffic riding the cyclic wire slot).
+ *
+ * The kernel BPF demux keys on the FIRST datagram's idx: a frame whose
+ * first datagram carries a cyclic idx is steered to the cyclic socket
+ * wholesale — piggybacked datagrams with this idx then fall out of the
+ * slot range and are forwarded to the regular parser, which routes them
+ * normally.  Keep LRW first; piggyback datagrams must use this idx (or
+ * any non-cyclic idx) so the demux stays exact (Q14).
+ */
+inline constexpr uint8_t kPiggybackIdx = 0xFE;
+
+/**
  * @brief Specification for a single datagram within a multi-datagram frame
  *
  * Used by Master::sendMultiDatagram() to pack multiple datagrams into one

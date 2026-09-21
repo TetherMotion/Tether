@@ -198,6 +198,18 @@ struct CyclicChannelConfig {
      */
     uint32_t rx_spin_ns = 0;
 
+    /**
+     * @brief Prototype: use TPACKET_V3 block-mode RX instead of V2
+     *        per-frame slots.  V3 retires whole blocks in one write —
+     *        fewer retire transactions under burst load, at the cost of
+     *        block-granular hold semantics (rxHold pins the frame's whole
+     *        block until released).  TX stays V2-format (V3 is RX-only).
+     *        Default off: V2 keeps finer per-slot recycling; V3 exists for
+     *        profiling comparison under high-RX-rate workloads (Q17).
+     */
+    bool     rx_tpacket_v3 = false;
+    uint32_t rx_v3_retire_us = 10'000;  ///< tp_retire_blk_tov (µs)
+
     int      async_fd = -1;            ///< async socket (socket B) — the mirror
                                        ///< BPF is attached here when >= 0
 };
@@ -240,8 +252,9 @@ struct CyclicBpfInsn {
 };
 static_assert(sizeof(CyclicBpfInsn) == 8, "must match struct sock_filter");
 
-/// Number of instructions in each demux filter program.
-inline constexpr size_t kCyclicBpfInsnCount = 7;
+/// Number of instructions in each demux filter program (VLAN-aware
+/// variant — see cyclicChannelBpfProgram).
+inline constexpr size_t kCyclicBpfInsnCount = 13;
 
 /**
  * @brief Build the kernel demux filter program.
@@ -292,6 +305,18 @@ std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
     void* rx_ring, uint32_t rx_frame_size, uint32_t rx_frames,
     void* tx_ring, uint32_t tx_frame_size, uint32_t tx_frames,
     uint32_t rx_spin_ns = 0);
+
+/**
+ * @brief Test seam: TPACKET_V3 block-mode RX over caller memory.
+ *
+ * `rx_ring` is `blocks` blocks of `block_size` bytes, each beginning with
+ * a `tpacket_block_desc` — tests synthesize block headers + tpacket3_hdr
+ * frame chains to exercise the V3 walk/retire path without CAP_NET_RAW.
+ * TX falls back to the socket path.  Returns nullptr off-Linux.
+ */
+std::unique_ptr<ICyclicChannel> createCyclicRingChannelV3ForMemory(
+    int fd, int ifindex,
+    void* rx_ring, uint32_t block_size, uint32_t blocks);
 
 /**
  * @brief Zero-copy view of a published cyclic-slot response payload.

@@ -311,6 +311,13 @@ public:
         int  dc_cpu       = -1;    ///< >=0: pin DC thread to this CPU
         bool prefer_isolated = true;  ///< prefer /sys-isolated CPUs
         bool avoid_cpu0      = true;  ///< CPU0 handles most default IRQs
+        /// Q8 (root, opt-in): create a cgroup2 cpuset partition covering
+        /// the claimed CPUs — real isolation without isolcpus=.  Best-
+        /// effort: failure degrades to the plain affinity pin + a warning.
+        bool create_cpuset = false;
+        /// Q9 (root, opt-in): steer /proc/irq/*/smp_affinity_list off the
+        /// claimed CPUs; original masks restored on releaseAll().
+        bool steer_irqs    = false;
     };
 
     /// Granular memory locking — each flag is an independent opt-out.
@@ -354,18 +361,38 @@ public:
         CyclicWireMode wire_mode{CyclicWireMode::Auto};
 
         /// Process-image exposure mode (see ProcessImage.hpp).
-        /// Buffered keeps the legacy per-entry app_buffer exchange.
+        /// Buffered keeps the per-entry storage[] exchange.
         ImageMode image_mode{ImageMode::Buffered};
 
         /// Exchange phase split — Split* overlaps the wire round-trip
         /// with intermediate phases (see ExchangePlacement).
         ExchangePlacement exchange_placement{ExchangePlacement::Atomic};
 
-        /// RX spin window (ns) inside the cyclic slot wait: polls the
-        /// slot seq + channel rxPending() (memory reads — ring DMA writes
-        /// are visible without a syscall) before blocking in ppoll.
-        /// Shares the response deadline budget.  0 disables.
+        /// RX spin window (ns) inside the channel's own rxPoll() — the
+        /// kernel-ring busy-poll.  0 disables.
         uint32_t rx_spin_ns{0};
+
+        /// Slot-wait spin window (ns): before blocking in ppoll, the
+        /// cyclic slot wait busy-polls the slot seq + channel rxPending()
+        /// (pure memory reads — ring DMA writes are visible without a
+        /// syscall).  Shares the response deadline budget.  0 disables.
+        uint32_t slot_spin_ns{0};
+
+        /// How the cyclic slot wait behaves when no fd wake-up path
+        /// exists (non-Linux / no eventfd / no wire fd): a tight seq
+        /// re-check loop (Spin — lowest wake latency, burns CPU) or a
+        /// sched_yield() per iteration (Yield — default; a dead link
+        /// can't wedge the scheduler).
+        enum class SlotWaitFallback : uint8_t { Yield, Spin };
+        SlotWaitFallback slot_wait_fallback{SlotWaitFallback::Yield};
+
+        /// Split-exchange collect phase (Split only): the user picks
+        /// where the collect half lands in the phase pipeline — any
+        /// phase after Exchange is valid (PostExchange default;
+        /// MotionControl/Diagnostics for deeper overlap).  SplitLate
+        /// still means Diagnostics.  PreExchange/Exchange are rejected
+        /// with a warning and clamped to PostExchange.
+        TaskPhase collect_phase{TaskPhase::PostExchange};
 
         /// Runtime CPU claims for the cyclic/DC threads (opt-in).
         CpuIsolationConfig cpu_isolation{};
@@ -411,6 +438,13 @@ public:
         /// Wire wait budget per send (ns).
         uint32_t rx_timeout_ns{200'000};
 
+        /// DC synchronisation as an independent RT thread (Q23): emits
+        /// sendSyncFrame() every dc_interval_us on its own deadline,
+        /// decoupled from the trigger/send path.  Requires the master to
+        /// be DC-enabled.
+        bool     enable_dc_synchronization{false};
+        uint32_t dc_interval_us{10'000};   ///< 10 ms default DC tick
+
         /// Threading/timing options — priority, affinity, sched class,
         /// stack prefault, timer slack.
         AsyncCyclicLoop::Config exec{};
@@ -419,6 +453,9 @@ public:
         CyclicWireMode wire_mode{CyclicWireMode::Auto};
         ImageMode      image_mode{ImageMode::Buffered};
         uint32_t       rx_spin_ns{0};
+        uint32_t       slot_spin_ns{0};
+        CyclicLoopConfig::SlotWaitFallback slot_wait_fallback{
+            CyclicLoopConfig::SlotWaitFallback::Yield};
         std::string    shm_image_name{};
         bool           strict_wkc{true};
 
@@ -1185,6 +1222,23 @@ public:
     /// buffer (copy path) or into channel ring/bank memory (view path).
     bool     waitCyclicSlotView(uint8_t slot, uint64_t token,
                                 uint32_t timeout_ns, CyclicSlotView& out);
+    /**
+     * @brief Multi-slot wait — single-wake variant for sliced exchanges.
+     *
+     * Waits until every slot in @p slot_mask has a deposit newer than its
+     * token (one ppoll registration for the whole mask — a per-slot loop
+     * pays a syscall per slice).
+     *
+     * @param slot_mask  Bitmask over slots [0, kNumCyclicSlots)
+     * @param tokens     Per-slot seq tokens, indexed by slot number
+     * @param timeout_ns Shared deadline budget across the whole mask
+     * @param views      Output array, indexed by slot number — filled
+     *                   only for arrived slots
+     * @return The subset of @p slot_mask that arrived before the
+     *         deadline; success iff the return == slot_mask.
+     */
+    uint32_t waitCyclicSlotMask(uint32_t slot_mask, const uint64_t* tokens,
+                                uint32_t timeout_ns, CyclicSlotView* views);
     /// Compose [eth][ecat][dg-hdr] into an acquired frame buffer
     /// (Rotating image mode).
     void     composeCyclicHeader(uint8_t* frame, Command cmd, uint8_t slot,
@@ -1334,11 +1388,17 @@ private:
     /// Number of threads currently inside a cyclic-slot wait — gates the
     /// eventfd write in the deposit/publish paths.
     std::atomic<int> cyclic_waiters_{0};
+    /// Busy-poll window handed to the channel's rxPoll() — the kernel-ring
+    /// spin inside the channel itself (CyclicLoopConfig::rx_spin_ns).
+    uint32_t rx_spin_ns_ = 0;
     /// Spin window applied in waitCyclicSlotView before blocking: polls
     /// the slot sequence word and channel rxPending() — pure memory reads,
     /// so a ring-slot DMA write is visible with zero syscalls.  From
-    /// CyclicLoopConfig::rx_spin_ns; 0 disables.
-    uint32_t rx_spin_ns_ = 0;
+    /// CyclicLoopConfig::slot_spin_ns; 0 disables.
+    uint32_t slot_spin_ns_ = 0;
+    /// No-fd wait policy for the cyclic slot wait (Q22).
+    CyclicLoopConfig::SlotWaitFallback slot_wait_fallback_ =
+        CyclicLoopConfig::SlotWaitFallback::Yield;
 
     /// CPU claims held while the cyclic loop runs (CpuIsolationConfig);
     /// -1 = no claim.  Released by stopCyclicLoop() / ~Master().
@@ -1352,6 +1412,8 @@ private:
     /// the lockable image/slot sections.
     void setupCyclicDatapath(CyclicWireMode wire_mode, ImageMode image_mode,
                              const std::string& shm_name, uint32_t rx_spin_ns,
+                             uint32_t slot_spin_ns,
+                             CyclicLoopConfig::SlotWaitFallback slot_fallback,
                              bool strict_wkc, const MemoryLockConfig& memlock);
     void teardownCyclicDatapath();
 

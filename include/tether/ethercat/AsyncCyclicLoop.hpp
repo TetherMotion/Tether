@@ -24,9 +24,14 @@
  *
  * Optional max_idle_ns keeps the wire alive in OnSend mode: when no
  * producer edge arrives for that long, a collect-only exchange ticks so
- * slaves' SyncManager/DC watchdogs don't starve.  Drives needing strict
- * periodic DC belong on CyclicExecutive — async + DC is a mismatch by
- * construction.
+ * slaves' SyncManager/DC watchdogs don't starve.
+ *
+ * DC synchronisation can run alongside the async loop as its own
+ * independent deadline-driven thread (dc_interval_us > 0) — DC is a
+ * periodic broadcast, not a per-exchange phase, so it doesn't collide
+ * with the event-driven send path.  The DC thread gets its own timer,
+ * priority and CPU affinity knobs, mirroring CyclicExecutive's
+ * DedicatedThread placement.
  */
 
 #include <atomic>
@@ -78,6 +83,14 @@ public:
         uint32_t   stack_prefault_bytes = 128 * 1024;
         bool       low_timer_slack = true;
         bool       continue_on_error = true;
+
+        // ---- DC synchronisation (independent thread — Q23) ----
+        /// DC sync frame period (µs).  0 = disabled.  When >0 a
+        /// dedicated thread emits EtherCATDC::sendSyncFrame() on its own
+        /// deadline — independent of the trigger/send loop.
+        uint32_t dc_interval_us = 0;
+        int      dc_priority    = 90;
+        int      dc_cpu_affinity = -1;
     };
 
     struct Stats {
@@ -90,6 +103,11 @@ public:
         uint64_t idle_collects    = 0;   ///< max_idle keep-alive collects
         uint32_t max_send_work_ns    = 0;///< longest send burst
         uint32_t max_collect_work_ns = 0;///< longest collect burst
+        /// Q24: triggerSend() → wire-send latency (worst observed).
+        /// Measures the newest trigger's queueing delay, incl. coalescing.
+        uint32_t max_send_latency_ns = 0;
+        uint64_t dc_sync_count    = 0;   ///< dedicated DC thread syncs
+        uint64_t dc_sync_errors   = 0;
     };
 
     /**
@@ -98,10 +116,13 @@ public:
      * @param send         One RxPDO send (e.g. PDOManager::cyclicSend).
      *                     May be empty → trigger wakes are counted only.
      * @param collect      One TxPDO collect (e.g. PDOManager::cyclicCollect).
+     * @param dc_sync      One DC sync emission (EtherCATDC::sendSyncFrame).
+     *                     Used only when Config::dc_interval_us > 0.
      * @param time_source  Monotonic ns (may be null → platform clock).
      */
     AsyncCyclicLoop(ProcessImage& image, TaskFn send, TaskFn collect,
-                    TimeFunc time_source, const Config& config);
+                    TaskFn dc_sync, TimeFunc time_source,
+                    const Config& config);
     ~AsyncCyclicLoop();
 
     AsyncCyclicLoop(const AsyncCyclicLoop&) = delete;
@@ -115,15 +136,18 @@ public:
 
 private:
     void main();
+    void dcMain();
     bool doSend();
     bool doCollect();
     uint64_t nowNs() const { return time_source_ ? time_source_()
                                                  : platformNowNs(); }
     static uint64_t platformNowNs();
+    static uint64_t monoNowNs();   ///< CLOCK_MONOTONIC — stamp domain
 
     ProcessImage& image_;
     TaskFn        send_;
     TaskFn        collect_;
+    TaskFn        dc_sync_;
     TimeFunc      time_source_;
     Config        config_;
 
@@ -133,6 +157,10 @@ private:
     /// compares against it so a trigger fired after start() returns is
     /// never absorbed into the initial snapshot (lost wakeup).
     uint32_t                      start_seq_ = 0;
+
+    // Dedicated DC thread (dc_interval_us > 0) — Q23
+    std::unique_ptr<Platform::IDeadlineTimer> dc_timer_;
+    std::unique_ptr<HAL::IThread>             dc_thread_;
 
     // Stats — written by the loop thread, read via getStats()
     std::atomic<uint64_t> wakes_{0};
@@ -144,6 +172,9 @@ private:
     std::atomic<uint64_t> idle_collects_{0};
     std::atomic<uint32_t> max_send_work_ns_{0};
     std::atomic<uint32_t> max_collect_work_ns_{0};
+    std::atomic<uint32_t> max_send_latency_ns_{0};
+    std::atomic<uint64_t> dc_sync_count_{0};
+    std::atomic<uint64_t> dc_sync_errors_{0};
 };
 
 } // namespace EtherCAT

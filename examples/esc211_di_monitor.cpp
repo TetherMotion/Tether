@@ -385,7 +385,7 @@ int main(int argc, char** argv) {
             const auto* entry = mapping.get_entry(i);
             if (entry && entry->slave_index == static_cast<uint16_t>(slave_idx) &&
                 entry->direction == dir && entry->pdo_index == pdo_index) {
-                return static_cast<uint8_t*>(entry->app_buffer);
+                return const_cast<uint8_t*>(entry->storage);
             }
         }
         return nullptr;

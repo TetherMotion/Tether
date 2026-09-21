@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstring>
 #include <ctime>
 
@@ -25,6 +26,7 @@ LogicalAddressManager::LogicalAddressManager(IPDOTransport& transport)
     : transport_(transport)
 {
     std::memset(addr_map_, 0, sizeof(addr_map_));
+    expected_wkc_.fill(kWkcUnknown);
 }
 
 bool LogicalAddressManager::init() {
@@ -421,6 +423,9 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
         return false;
     }
     cyclic_slice_count_ = static_cast<uint8_t>(nslices);
+    // Derive per-slice expected WKC from the slave set (Q6) — overrides
+    // any learned values; underivable slices keep the learn sentinel.
+    deriveExpectedWkc(mapping);
 
     const bool img_active = image && image->configured() &&
                             image->mode() != ImageMode::Buffered;
@@ -474,11 +479,11 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
         const uint32_t entry_off = addr.rxpdo_logical_addr - base_logical_addr_
                                  + rx_running[e->slave_index];
         rx_running[e->slave_index] += e->data_size;
-        if (!e->app_buffer || e->data_size == 0) continue;
+        if (e->data_size == 0) continue;
         if (entry_off + e->data_size > total_data) break;  // layout guard
         if (img_active && image->entryOffset(i) >= 0) continue; // in-image
 
-        std::memcpy(payload + entry_off, e->app_buffer, e->data_size);
+        std::memcpy(payload + entry_off, e->storage, e->data_size);
     }
 
     // ---- Emit slices -----------------------------------------------------
@@ -530,6 +535,38 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
     return true;
 }
 
+void LogicalAddressManager::deriveExpectedWkc(
+    const PDO::PDOMapping& mapping)
+{
+    // LRW WKC: +1 per slave that writes output bytes in the slice's
+    // logical range, +2 per slave that reads input bytes.  Distinct
+    // slaves per direction per slice — bitsets, then popcount.
+    const uint32_t nslices = cyclic_slice_count_;
+    const uint32_t max_slice = maxSliceLength();
+    std::array<uint64_t, kMaxCyclicSlices> rx_set{}, tx_set{};
+    for (const auto& e : describeEntries(mapping)) {
+        if (e.length == 0 || e.slave_index >= 64) continue;
+        for (uint32_t s = 0; s < nslices; ++s) {
+            const uint32_t off = s * max_slice;
+            const uint32_t end = off + max_slice;
+            if (e.offset >= end || e.offset + e.length <= off) continue;
+            if (e.direction == PDO::PDODirection::RxPDO)
+                rx_set[s] |= 1ull << e.slave_index;
+            else
+                tx_set[s] |= 1ull << e.slave_index;
+        }
+    }
+    for (uint32_t s = 0; s < nslices && s < kMaxCyclicSlices; ++s) {
+        const uint32_t wkc =
+            std::popcount(rx_set[s]) + 2u * std::popcount(tx_set[s]);
+        // A 0 derivation means "no entry mapped into this slice" — bogus
+        // for a live image slice, so keep the learn sentinel (Q7).
+        expected_wkc_[s] = wkc ? static_cast<uint16_t>(wkc) : kWkcUnknown;
+    }
+    for (uint32_t s = nslices; s < kMaxCyclicSlices; ++s)
+        expected_wkc_[s] = kWkcUnknown;
+}
+
 // ============================================================================
 // cyclicCollect — wait slices, verify WKC, publish + scatter
 // ============================================================================
@@ -547,36 +584,45 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
                             image->mode() != ImageMode::Buffered;
 
     bool ok = true;
-    bool wkc_learn = !expected_wkc_valid_;
     std::array<const CyclicSlotView*, kMaxCyclicSlices> resps{};
     std::array<CyclicSlotView, kMaxCyclicSlices> views{};
-
+    std::array<uint64_t, kMaxCyclicSlices> tokens{};
+    uint32_t mask = 0;
     for (uint8_t s = 0; s < nslices; ++s) {
-        const auto& pend = cyclic_pending_[s];
-        const uint64_t now = monoNowNs();
-        const uint32_t remaining = now < cyclic_deadline_ns_
-            ? static_cast<uint32_t>(cyclic_deadline_ns_ - now) : 0;
+        mask     |= 1u << s;
+        tokens[s] = cyclic_pending_[s].token;
+    }
+    const uint64_t now = monoNowNs();
+    const uint32_t remaining = now < cyclic_deadline_ns_
+        ? static_cast<uint32_t>(cyclic_deadline_ns_ - now) : 0;
 
-        if (!transport_.waitCyclicSlotView(s, pend.token, remaining,
-                                           views[s])) {
+    // One wake for the whole mask (Q3) — the transport's fallback still
+    // walks per-slot, so correctness never depends on the fast path.
+    const uint32_t arrived =
+        transport_.waitCyclicSlotMask(mask, tokens.data(), remaining,
+                                      views.data());
+    for (uint8_t s = 0; s < nslices; ++s) {
+        if (!(arrived & (1u << s))) {
             stats_.timeout_errors++;
             ok = false;
-            break;
-        }
-        const CyclicSlotView& resp = views[s];
-        if (resp.wkc == 0 ||
-            (!wkc_learn && strict_wkc_ && resp.wkc != expected_wkc_[s])) {
-            stats_.wkc_errors++;
-            ok = false;
-            // keep draining remaining slices so slots don't go stale
             continue;
         }
-        if (wkc_learn) expected_wkc_[s] = resp.wkc;
+        const CyclicSlotView& resp = views[s];
+        const uint16_t exp = expected_wkc_[s];
+        if (resp.wkc == 0 ||
+            (strict_wkc_ && exp != kWkcUnknown && resp.wkc != exp)) {
+            stats_.wkc_errors++;
+            ok = false;
+            continue;
+        }
+        // Sentinel fallback (Q7): a slice we couldn't derive learns its
+        // expectation from the first non-error response.
+        if (exp == kWkcUnknown && resp.wkc != 0)
+            expected_wkc_[s] = resp.wkc;
         resps[s] = &views[s];
     }
     cyclic_pending_count_ = 0;
     pending_image_ = nullptr;
-    if (wkc_learn && ok) expected_wkc_valid_ = true;
     if (!ok) return false;
 
     // ---- Publish the input image --------------------------------------
@@ -617,7 +663,7 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
         const uint32_t entry_off = addr.txpdo_logical_addr - base_logical_addr_
                                  + tx_running[e->slave_index];
         tx_running[e->slave_index] += e->data_size;
-        if (!e->app_buffer || e->data_size == 0) continue;
+        if (e->data_size == 0) continue;
         if (img_active && image->entryOffset(i) >= 0) continue;
 
         // Copy from whichever slice(s) cover the entry range.
@@ -630,7 +676,7 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
             if (e0 >= s1 || s0 >= e1) continue;
             const uint32_t lo = std::max(e0, s0);
             const uint32_t hi = std::min(e1, s1);
-            std::memcpy(static_cast<uint8_t*>(e->app_buffer) + (lo - e0),
+            std::memcpy(e->storage + (lo - e0),
                         resps[s]->payload + (lo - s0), hi - lo);
             done += hi - lo;
         }
@@ -749,13 +795,13 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
         const uint32_t entry_off = addr.rxpdo_logical_addr - base_logical_addr_
                                  + rx_running[e->slave_index];
         rx_running[e->slave_index] += e->data_size;
-        if (!e->app_buffer || e->data_size == 0) continue;
+        if (e->data_size == 0) continue;
 
         const uint32_t lo = std::max(entry_off, offset);
         const uint32_t hi = std::min(entry_off + e->data_size, slice_end);
         if (lo >= hi) continue;
         std::memcpy(payload + (lo - offset),
-                    static_cast<const uint8_t*>(e->app_buffer) + (lo - entry_off),
+                    e->storage + (lo - entry_off),
                     hi - lo);
     }
 
@@ -816,12 +862,12 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
             const uint32_t entry_off = addr.txpdo_logical_addr - base_logical_addr_
                                      + tx_running[e->slave_index];
             tx_running[e->slave_index] += e->data_size;
-            if (!e->app_buffer || e->data_size == 0) continue;
+            if (e->data_size == 0) continue;
 
             const uint32_t lo = std::max(entry_off, offset);
             const uint32_t hi = std::min(entry_off + e->data_size, slice_end);
             if (lo >= hi) continue;
-            std::memcpy(static_cast<uint8_t*>(e->app_buffer) + (lo - entry_off),
+            std::memcpy(e->storage + (lo - entry_off),
                         rx_data + (lo - offset), hi - lo);
         }
     }
@@ -873,9 +919,9 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
         if (!addr_map_[e->slave_index].active) continue;
 
         if (e->direction == PDO::PDODirection::RxPDO) {
-            if (e->app_buffer && e->data_size > 0 &&
+            if (e->data_size > 0 &&
                 rxpdo_off + e->data_size <= compact_rxpdo) {
-                std::memcpy(payload + rxpdo_off, e->app_buffer, e->data_size);
+                std::memcpy(payload + rxpdo_off, e->storage, e->data_size);
             }
             rxpdo_off += e->data_size;
         }
@@ -929,9 +975,9 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
             if (e->slave_index >= slave_count_) continue;
             if (!addr_map_[e->slave_index].active) continue;
 
-            if (e->app_buffer && e->data_size > 0 &&
+            if (e->data_size > 0 &&
                 tx_off + e->data_size <= compact_txpdo) {
-                std::memcpy(e->app_buffer, rx_data + tx_off, e->data_size);
+                std::memcpy(e->storage, rx_data + tx_off, e->data_size);
             }
             tx_off += e->data_size;
         }

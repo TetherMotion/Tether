@@ -191,10 +191,14 @@ protected:
     DeviceIdentity                 identity_;
     std::optional<DiscoveredSlave> info_;
 
-    /// Registered PDO buffers.  Heap-allocated so the pointers stay valid
-    /// when the driver object is moved.
-    std::vector<uint8_t> in_buf_;    ///< SM3 process image
-    std::vector<uint8_t> out_buf_;   ///< SM2 process image
+    /// Registered PDO regions — views over the PDOMapping's per-entry
+    /// storage (Q1).  Valid while the entry lives:
+    /// remove_entries_for_slave()/clear() compacts the entry array and
+    /// rebinds these to recycled slots — callers that tear down PDOs
+    /// must treat the terminal as un-prepared (re-run registerProcessData
+    /// before using rawInput()/rawOutput() again).
+    std::span<const uint8_t> in_buf_;   ///< SM3 process image
+    std::span<uint8_t>       out_buf_;  ///< SM2 process image
 
     SmRegion sm_in_;                 ///< process-input region (SM3 normally)
     SmRegion sm_out_;                ///< process-output region (SM2 normally)

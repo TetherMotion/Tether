@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <ctime>
 #include <atomic>
 #include <functional>
 #include <bit>
@@ -29,6 +30,8 @@
 #include <vector>
 
 #include "tether/platform/EspCompat.hpp"
+#include "tether/ethercat/CyclicChannel.hpp"
+#include "tether/ethercat/ProcessImage.hpp"
 #include "tether/ethercat/EtherCATConfig.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/Types.hpp"
@@ -43,14 +46,18 @@
 
 namespace EtherCAT {
 
+/// Monotonic nanoseconds for inline transport helpers (no Platform dep).
+inline uint64_t monoNowNsFallback() {
+    timespec ts{};
+    ::clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ull
+         + static_cast<uint64_t>(ts.tv_nsec);
+}
+
 // Forward declarations
 class IPDOTransport;
 class PDOManager;
 class LogicalAddressManager;
-class ICyclicChannel;             // defined in CyclicChannel.hpp
-struct CyclicSlotView;
-class ProcessImage;
-enum class ImageMode : uint8_t;   // defined in ProcessImage.hpp
 
 namespace PDO {
 
@@ -149,14 +156,27 @@ struct PDOEntry {
     uint32_t logical_address;
     uint16_t physical_offset;
 
-    void*    app_buffer;
+    /**
+     * @brief Manager-owned buffered-path storage (Q1: replaces the former
+     *        caller-supplied `void* app_buffer`).
+     *
+     * The exchange gathers/scatters directly in this array.  Applications
+     * reach it through PDOMapping::entryData()/entryDataMut()/
+     * entryDataAs<T>() or an epoch-checked entryHandle() + resolve().
+     * Fixed inline storage keeps PDOEntry trivially copyable and makes the
+     * buffered path allocation-free after registration.
+     */
+    /// `mutable`: the exchange writes wire data here through const
+    /// PDOMapping& — storage is I/O state, not mapping metadata (same
+    /// const-escape the old app_buffer pointee had).
+    alignas(8) mutable uint8_t storage[kMaxPDOSize];
     uint16_t data_size;
 
     uint16_t pdo_index;
 
     bool     enabled;
     /**
-     * @brief Force this entry onto the buffered (app_buffer) path even when
+     * @brief Force this entry onto the buffered (storage) path even when
      *        a ProcessImage mode is active.  Set for FSoE-managed PDOs —
      *        safe frames are staged and CRC'd by the FSoE layer and must
      *        not be written in place by the application.
@@ -185,16 +205,19 @@ struct LogicalEntrySlice {
 
 class PDOMapping {
 public:
-    int  add_rxpdo(uint16_t slave_index, void* buffer, uint16_t size,
+    /// Register an RxPDO (master→slave).  Storage is manager-owned — the
+    /// caller receives an entry index and accesses the bytes through
+    /// entryDataMut()/entryDataAs<T>() or an epoch-checked entryHandle().
+    int  add_rxpdo(uint16_t slave_index, uint16_t size,
                    uint16_t pdo_index = 0x1600,
                    PDOAddressMode mode = PDOAddressMode::Position);
 
-    int  add_txpdo(uint16_t slave_index, void* buffer, uint16_t size,
+    int  add_txpdo(uint16_t slave_index, uint16_t size,
                    uint16_t pdo_index = 0x1A00,
                    PDOAddressMode mode = PDOAddressMode::Position);
 
-    int  add_broadcast_rxpdo(void* buffer, uint16_t size, uint16_t physical_offset);
-    int  add_broadcast_txpdo(void* buffer, uint16_t size, uint16_t physical_offset);
+    int  add_broadcast_rxpdo(uint16_t size, uint16_t physical_offset);
+    int  add_broadcast_txpdo(uint16_t size, uint16_t physical_offset);
 
     void set_slave_configured_address(uint16_t slave_index, uint16_t configured_addr);
 
@@ -204,6 +227,46 @@ public:
     void            clear();
     void            remove_entries_for_slave(uint16_t slave_index);
 
+    // ---- Buffered-path data access (Q1) ---------------------------------
+    /// Epoch-checked handle for a buffered entry.  offset stays -1 — the
+    /// handle resolves to entry storage, not a process-image offset.
+    /// The epoch changes on clear()/remove_entries_for_slave(), making
+    /// stale handles fail resolve() instead of pointing at recycled slots.
+    EntryHandle entryHandle(size_t index) const {
+        EntryHandle h;
+        h.index  = static_cast<uint32_t>(index);
+        h.offset = -1;
+        h.epoch  = m_epoch;
+        return h;
+    }
+    /// Direct index access — the fast path for RT code that caches the
+    /// pointer once after registration.  nullptr on out-of-range.
+    uint8_t* entryDataMut(size_t index) {
+        return index < m_entry_count ? m_entries[index].storage : nullptr;
+    }
+    const uint8_t* entryData(size_t index) const {
+        return index < m_entry_count ? m_entries[index].storage : nullptr;
+    }
+    /// Typed access — nullptr when sizeof(T) exceeds the registered size.
+    template<typename T> T* entryDataAs(size_t index) {
+        return (index < m_entry_count && sizeof(T) <= m_entries[index].data_size)
+                   ? reinterpret_cast<T*>(m_entries[index].storage) : nullptr;
+    }
+    template<typename T> const T* entryDataAs(size_t index) const {
+        return (index < m_entry_count && sizeof(T) <= m_entries[index].data_size)
+                   ? reinterpret_cast<const T*>(m_entries[index].storage)
+                   : nullptr;
+    }
+    /// Epoch-checked resolve — nullptr when the handle is stale or the
+    /// entry is out of range.
+    uint8_t* resolveMut(const EntryHandle& h) {
+        return (h.epoch == m_epoch) ? entryDataMut(h.index) : nullptr;
+    }
+    const uint8_t* resolve(const EntryHandle& h) const {
+        return (h.epoch == m_epoch) ? entryData(h.index) : nullptr;
+    }
+    uint32_t epoch() const { return m_epoch; }
+
     size_t total_rxpdo_bytes() const;
     size_t total_txpdo_bytes() const;
 
@@ -211,6 +274,7 @@ private:
     PDOEntry m_entries[kMaxPDOEntries];
     size_t   m_entry_count = 0;
     uint16_t m_slave_configured_addrs[kMaxPDOSlaves] = {0};
+    uint32_t m_epoch = 0;   ///< bumped on clear()/remove_entries_for_slave()
 };
 
 // ============================================================================
@@ -381,6 +445,44 @@ public:
                                     CyclicSlotView& out) {
         (void)slot; (void)token; (void)timeout_ns; (void)out;
         return false;
+    }
+
+    /**
+     * @brief Wait until every slot in @p slot_mask has a deposit newer
+     *        than its token — one wait for a whole multi-slice exchange.
+     *
+     * Transports with a real wake path override this so a sliced collect
+     * pays ONE sleep instead of one per slice (Q3).  The default
+     * implementation degenerates to a per-slot waitCyclicSlotView() loop
+     * sharing the same deadline — correct on every transport, just
+     * syscall-heavier.
+     *
+     * @param slot_mask  Bitmask over slots [0, kNumCyclicSlots)
+     * @param tokens     Per-slot seq tokens, indexed by slot number
+     * @param timeout_ns Shared deadline budget across the whole mask
+     * @param views      Output array, indexed by slot number — filled
+     *                   only for slots that arrived
+     * @return The subset of @p slot_mask whose responses arrived before
+     *         the deadline — full success iff the return == slot_mask.
+     */
+    virtual uint32_t waitCyclicSlotMask(uint32_t slot_mask,
+                                        const uint64_t* tokens,
+                                        uint32_t timeout_ns,
+                                        CyclicSlotView* views) {
+        // Per-slot fallback: walk the mask, sharing one CLOCK_MONOTONIC
+        // deadline across slots.
+        uint32_t arrived = 0;
+        const uint64_t deadline = monoNowNsFallback() + timeout_ns;
+        for (uint8_t s = 0; s < kNumCyclicSlots; ++s) {
+            if (!(slot_mask & (1u << s))) continue;
+            const uint64_t now = monoNowNsFallback();
+            const uint32_t remain = now < deadline
+                ? static_cast<uint32_t>(deadline - now) : 0;
+            if (!waitCyclicSlotView(s, tokens[s], remain, views[s]))
+                break;   // deadline shared — later slots are worse off
+            arrived |= 1u << s;
+        }
+        return arrived;
     }
 
     /**

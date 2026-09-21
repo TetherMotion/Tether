@@ -120,7 +120,7 @@ public:
      *
      * Concatenates all RxPDO app buffers into the write portion and
      * all TxPDO space into the read portion.  After receiving the
-     * response, copies TxPDO data back into each entry's app_buffer.
+     * response, copies TxPDO data back into each entry's manager-owned storage.
      *
      * @param mapping  PDOMapping with all PDO entries
      * @return true if the LRW exchange succeeded (sent + response received)
@@ -176,13 +176,50 @@ public:
     /// wkc_errors.  Disable when slaves legitimately vary their WKC.
     void setStrictWkc(bool strict) { strict_wkc_ = strict; }
 
+    /// Sentinel per-slice expected WKC — "not derivable, learn from the
+    /// first successful response" (Q6/Q7).
+    static constexpr uint16_t kWkcUnknown = 0xFFFF;
+
+    /**
+     * @brief Derive the expected per-slice WKC from the slave set (Q6).
+     *
+     * LRW semantics: each slave increments the WKC by 1 when it writes
+     * output (RxPDO) bytes in the datagram's logical range and by 2 when
+     * it reads input (TxPDO) bytes.  For each slice this walks the
+     * mapping's logical placement and counts distinct contributing slaves
+     * per direction.  Slices that derive to 0 keep kWkcUnknown and fall
+     * back to learn-on-first-response — the strict check then applies
+     * from the second cycle on.
+     *
+     * Called automatically from cyclicSend() when a mapping is known;
+     * safe to call again after a slave-set change.
+     */
+    void deriveExpectedWkc(const PDO::PDOMapping& mapping);
+
+    /// Forget all derived/learned expectations — the next successful
+    /// responses relearn them (Q7).
+    void resetExpectedWkc() {
+        expected_wkc_.fill(kWkcUnknown);
+    }
+
+    /// Override one slice's expected WKC (0 = no slaves respond; use
+    /// kWkcUnknown to return that slice to learn mode).
+    void setExpectedWkc(uint8_t slice, uint16_t wkc) {
+        if (slice < kMaxCyclicSlices) expected_wkc_[slice] = wkc;
+    }
+
+    /// Current per-slice expectations (kWkcUnknown = still learning).
+    uint16_t expectedWkc(uint8_t slice) const {
+        return slice < kMaxCyclicSlices ? expected_wkc_[slice] : 0;
+    }
+
     /**
      * @brief Compute each mapping entry's byte offset in the LRW process
      *        image for ProcessImage::configure().
      *
      * Entries sharing a byte with a neighbour (bit-packed PDOs) or flagged
      * @c PDOEntry::image_exclude (FSoE-managed) are marked -1 — they stay
-     *        on the app_buffer path in image modes.
+     *        on the buffered-storage path in image modes.
      *
      * @return number of entries written (== mapping.entry_count(), clamped
      *         to @p cap)
@@ -328,9 +365,9 @@ private:
     uint64_t cyclic_deadline_ns_{0};     ///< collect deadline (mono ns)
     ProcessImage* pending_image_{nullptr};
 
-    /// Expected-WKC learn/verify (per slice; learned on first success).
+    /// Expected-WKC per slice — kWkcUnknown = learn from first success
+    /// (derived from the slave set by cyclicSend when a mapping is known).
     std::array<uint16_t, kMaxCyclicSlices> expected_wkc_{};
-    bool expected_wkc_valid_{false};
     bool strict_wkc_{true};
 
     /// Build the log prefix for a slave (uses prefix_provider_ if set, else default)

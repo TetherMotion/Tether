@@ -347,7 +347,14 @@ private:
     /// Registered PDO buffer.  Heap-allocated so the pointer stays valid
     /// when the driver object is moved (e.g. returned from findFirst()).
     /// Bit N maps to output N (little-endian byte order).
-    std::unique_ptr<std::atomic<uint64_t>> state_;
+    /// PDO state word — points at the mapping entry's storage after
+    /// prepare(), or at *state_local_ before registration (Q1).
+    /// Same lifetime rule as TerminalBase::out_buf_: entry removal
+    /// invalidates it.
+    /// unique_ptr keeps the terminal movable.
+    std::unique_ptr<std::atomic<uint64_t>> state_local_ =
+        std::make_unique<std::atomic<uint64_t>>(0);
+    std::atomic<uint64_t>* state_ = state_local_.get();
 
     size_t   num_outputs_   = 0;    // resolved bit width
     uint8_t  sm_channel_    = 0;

@@ -1190,7 +1190,7 @@ TEST_F(RtVethTest, AsyncLoopTriggerDrivesWireExchange) {
                 ++echoes;
             return true;
         },
-        nullptr, acfg);
+        nullptr, nullptr, acfg);
     ASSERT_TRUE(loop.start());
 
     // Each trigger → one wire frame → one echo.  Space them so each is a

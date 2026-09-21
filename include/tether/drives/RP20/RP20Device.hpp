@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <span>
 #include <vector>
 
 #include "tether/drives/RP20/RP20Module.hpp"
@@ -41,8 +42,10 @@ struct ModuleInstance {
     uint16_t slave_index = 0;
     uint8_t  slot = 0;
     const ModuleDescriptor* descriptor = nullptr;
-    std::vector<uint8_t> tx_buffer;
-    std::vector<uint8_t> rx_buffer;
+    /// Views over the PDOMapping entry storage — bound at registerPDOs()
+    /// (Q1).  Empty until then.
+    std::span<const uint8_t> tx_buffer;
+    std::span<uint8_t>       rx_buffer;
     int tx_pdo_entry = -1;
     int rx_pdo_entry = -1;
 

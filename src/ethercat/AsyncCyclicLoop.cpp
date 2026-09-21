@@ -16,17 +16,20 @@
 #include "logging/Logger.hpp"
 
 #include <algorithm>
+#include <ctime>
 
 namespace EtherCAT {
 
 static const char* TAG = "async_loop";
 
 AsyncCyclicLoop::AsyncCyclicLoop(ProcessImage& image, TaskFn send,
-                                 TaskFn collect, TimeFunc time_source,
+                                 TaskFn collect, TaskFn dc_sync,
+                                 TimeFunc time_source,
                                  const Config& config)
     : image_(image)
     , send_(std::move(send))
     , collect_(std::move(collect))
+    , dc_sync_(std::move(dc_sync))
     , time_source_(std::move(time_source))
     , config_(config)
 {
@@ -40,6 +43,13 @@ AsyncCyclicLoop::~AsyncCyclicLoop() {
 uint64_t AsyncCyclicLoop::platformNowNs() {
     return static_cast<uint64_t>(
         Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL;
+}
+
+uint64_t AsyncCyclicLoop::monoNowNs() {
+    timespec ts{};
+    ::clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ull
+         + static_cast<uint64_t>(ts.tv_nsec);
 }
 
 // ============================================================================
@@ -71,11 +81,36 @@ bool AsyncCyclicLoop::start() {
         return false;
     }
 
+    // Q23: DC sync runs as its own deadline-driven RT thread — periodic
+    // by nature, independent of the trigger/send loop.
+    if (config_.dc_interval_us > 0) {
+        if (!dc_sync_) {
+            TETHER_LOGW(TAG, "dc_interval_us set but no dc_sync task — "
+                             "DC thread disabled");
+        } else {
+            dc_timer_ = Platform::createDeadlineTimer();
+            HAL::ThreadConfig dcfg;
+            dcfg.name = "rt_async_dc";
+            dcfg.stackSize = config_.stack_size;
+            dcfg.priority = HAL::ThreadPriority::Realtime;
+            dcfg.useRealtimeScheduling = true;
+            dcfg.cpuAffinity = config_.dc_cpu_affinity;
+            dc_thread_ = HAL::getThreadingFactory().createThread(dcfg);
+            if (!dc_timer_ || !dc_thread_ ||
+                dc_thread_->start([this]() { dcMain(); }) != HAL::Error::OK) {
+                TETHER_LOGE(TAG, "Failed to start async DC thread");
+                stop();
+                return false;
+            }
+        }
+    }
+
     TETHER_LOGI(TAG, "AsyncCyclicLoop started: collect={}, min_send={}ns, "
-                "idle={}ns",
+                "idle={}ns, dc={}us",
                 config_.collect_mode == CollectMode::OnSend ? "on-send"
                     : "periodic",
-                config_.min_send_interval_ns, config_.max_idle_ns);
+                config_.min_send_interval_ns, config_.max_idle_ns,
+                config_.dc_interval_us);
     return true;
 }
 
@@ -85,6 +120,10 @@ void AsyncCyclicLoop::stop() {
     // abandons on its running_ re-check, no send fires.
     image_.triggerSend();
     if (thread_) { thread_->requestStop(); thread_->join(); thread_.reset(); }
+    if (dc_timer_)  dc_timer_->requestStop();
+    if (dc_thread_) { dc_thread_->requestStop(); dc_thread_->join();
+                      dc_thread_.reset(); }
+    dc_timer_.reset();
 }
 
 // ============================================================================
@@ -196,6 +235,19 @@ void AsyncCyclicLoop::main() {
             if (merged > 1)
                 sends_coalesced_.fetch_add(merged - 1,
                                            std::memory_order_relaxed);
+            // Q24: trigger→send latency.  The stamp is CLOCK_MONOTONIC —
+            // the newest coalesced trigger's queueing delay.
+            const uint64_t stamp = image_.sendStampNs();
+            if (stamp) {
+                const uint64_t lat = monoNowNs() - stamp;
+                uint32_t cur =
+                    max_send_latency_ns_.load(std::memory_order_relaxed);
+                while (lat > cur &&
+                       !max_send_latency_ns_.compare_exchange_weak(
+                           cur, static_cast<uint32_t>(
+                                    lat > UINT32_MAX ? UINT32_MAX : lat),
+                           std::memory_order_relaxed)) {}
+            }
             if (t >= send_allowed) {
                 send_allowed = t + min_send_ns;
                 activity |= doSend();
@@ -229,6 +281,34 @@ void AsyncCyclicLoop::main() {
     running_.store(false, std::memory_order_release);
 }
 
+// ============================================================================
+// DC thread — independent periodic sync emitter (Q23)
+// ============================================================================
+
+void AsyncCyclicLoop::dcMain() {
+    const bool rt =
+        Tether::Platform::setCurrentThreadRealtime(config_.dc_priority);
+    if (!rt) {
+        TETHER_LOGW(TAG, "Async DC thread could not acquire realtime "
+                         "scheduling; running with normal scheduling");
+    }
+    const uint64_t period_ns =
+        static_cast<uint64_t>(config_.dc_interval_us) * 1000ULL;
+    if (!dc_timer_->start(period_ns)) {
+        TETHER_LOGE(TAG, "Async DC deadline timer start failed");
+        return;
+    }
+    Platform::IDeadlineTimer::Tick tick{};
+    while (running_.load(std::memory_order_acquire)) {
+        if (!dc_timer_->waitNext(tick)) break;
+        if (dc_sync_ && dc_sync_()) {
+            dc_sync_count_.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            dc_sync_errors_.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+}
+
 AsyncCyclicLoop::Stats AsyncCyclicLoop::getStats() const {
     Stats s;
     s.wakes              = wakes_.load(std::memory_order_relaxed);
@@ -240,6 +320,9 @@ AsyncCyclicLoop::Stats AsyncCyclicLoop::getStats() const {
     s.idle_collects      = idle_collects_.load(std::memory_order_relaxed);
     s.max_send_work_ns    = max_send_work_ns_.load(std::memory_order_relaxed);
     s.max_collect_work_ns = max_collect_work_ns_.load(std::memory_order_relaxed);
+    s.max_send_latency_ns = max_send_latency_ns_.load(std::memory_order_relaxed);
+    s.dc_sync_count      = dc_sync_count_.load(std::memory_order_relaxed);
+    s.dc_sync_errors     = dc_sync_errors_.load(std::memory_order_relaxed);
     return s;
 }
 

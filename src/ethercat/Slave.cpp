@@ -982,8 +982,7 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
 
     if (rxpdo) {
         uint16_t size = static_cast<uint16_t>(rxpdo->totalBytes());
-        pdo_rx_buffer_.assign(size, 0);
-        int idx = mapping.add_rxpdo(index_, pdo_rx_buffer_.data(), size,
+        int idx = mapping.add_rxpdo(index_, size,
                                     rxpdo->pdo_index, PDO::PDOAddressMode::Position);
         if (idx < 0) {
             TETHER_LOGE(TAG, "{}: Failed to register RxPDO mapping entry", logPrefix().c_str());
@@ -998,8 +997,7 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
 
     if (txpdo) {
         uint16_t size = static_cast<uint16_t>(txpdo->totalBytes());
-        pdo_tx_buffer_.assign(size, 0);
-        int idx = mapping.add_txpdo(index_, pdo_tx_buffer_.data(), size,
+        int idx = mapping.add_txpdo(index_, size,
                                     txpdo->pdo_index, PDO::PDOAddressMode::Position);
         if (idx < 0) {
             TETHER_LOGE(TAG, "{}: Failed to register TxPDO mapping entry", logPrefix().c_str());
@@ -1073,8 +1071,7 @@ SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_conf
 
     if (rxpdo) {
         uint16_t size = pdoTotalBytes(*rxpdo);
-        pdo_rx_buffer_.assign(size, 0);
-        int idx = mapping.add_rxpdo(index_, pdo_rx_buffer_.data(), size,
+        int idx = mapping.add_rxpdo(index_, size,
                                     rxpdo->index, PDO::PDOAddressMode::Position);
         if (idx < 0) {
             TETHER_LOGE(TAG, "{}: Failed to register RxPDO mapping entry from ESI", logPrefix().c_str());
@@ -1089,8 +1086,7 @@ SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_conf
 
     if (txpdo) {
         uint16_t size = pdoTotalBytes(*txpdo);
-        pdo_tx_buffer_.assign(size, 0);
-        int idx = mapping.add_txpdo(index_, pdo_tx_buffer_.data(), size,
+        int idx = mapping.add_txpdo(index_, size,
                                     txpdo->index, PDO::PDOAddressMode::Position);
         if (idx < 0) {
             TETHER_LOGE(TAG, "{}: Failed to register TxPDO mapping entry from ESI", logPrefix().c_str());
@@ -1165,8 +1161,7 @@ SlaveError Slave::registerFixedPDOs(const SIIPDOConfig& config) {
     mapping.remove_entries_for_slave(index_);
 
     if (config.has_rxpdo) {
-        pdo_rx_buffer_.assign(config.rxpdo_size, 0);
-        int idx = mapping.add_rxpdo(index_, pdo_rx_buffer_.data(), config.rxpdo_size,
+        int idx = mapping.add_rxpdo(index_, config.rxpdo_size,
                                     config.rxpdo_index, PDO::PDOAddressMode::Position);
         if (idx < 0) {
             TETHER_LOGE(TAG, "{}: Failed to register fixed RxPDO 0x{:04X} mapping entry", logPrefix().c_str(), config.rxpdo_index);
@@ -1177,8 +1172,7 @@ SlaveError Slave::registerFixedPDOs(const SIIPDOConfig& config) {
     }
 
     if (config.has_txpdo) {
-        pdo_tx_buffer_.assign(config.txpdo_size, 0);
-        int idx = mapping.add_txpdo(index_, pdo_tx_buffer_.data(), config.txpdo_size,
+        int idx = mapping.add_txpdo(index_, config.txpdo_size,
                                     config.txpdo_index, PDO::PDOAddressMode::Position);
         if (idx < 0) {
             TETHER_LOGE(TAG, "{}: Failed to register fixed TxPDO 0x{:04X} mapping entry", logPrefix().c_str(), config.txpdo_index);
@@ -1447,17 +1441,16 @@ SlaveError Slave::applyCustomPDOs() {
     PDO::PDOMapping& mapping = master_->pdoForSlave(index_).mapping();
     mapping.remove_entries_for_slave(index_);
 
-    // Register each custom PDO
+    // Register each custom PDO — storage lives in the mapping entries.
     std::vector<uint16_t> rx_indices, tx_indices;
     for (auto& info : custom_pdo_infos_) {
-        info.buffer.assign(info.total_size, 0);
         int idx;
         if (info.direction == PDO::PDODirection::RxPDO) {
-            idx = mapping.add_rxpdo(index_, info.buffer.data(), info.total_size,
+            idx = mapping.add_rxpdo(index_, info.total_size,
                                     info.pdo_index, PDO::PDOAddressMode::Position);
             rx_indices.push_back(info.pdo_index);
         } else {
-            idx = mapping.add_txpdo(index_, info.buffer.data(), info.total_size,
+            idx = mapping.add_txpdo(index_, info.total_size,
                                     info.pdo_index, PDO::PDOAddressMode::Position);
             tx_indices.push_back(info.pdo_index);
         }
@@ -1819,9 +1812,13 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
 }
 
 const uint8_t* Slave::customPDOData(uint16_t pdo_index) const {
-    for (const auto& info : custom_pdo_infos_) {
-        if (info.pdo_index == pdo_index) {
-            return info.buffer.data();
+    // Data lives in mapping entry storage — resolve by (slave, pdo) so the
+    // result stays correct if remove_entries_for_slave() compacted indices.
+    const auto& mapping = master_->pdoForSlave(index_).mapping();
+    for (size_t i = 0; i < mapping.entry_count(); ++i) {
+        const auto* e = mapping.get_entry(i);
+        if (e && e->slave_index == index_ && e->pdo_index == pdo_index) {
+            return e->storage;
         }
     }
     return nullptr;
@@ -1840,7 +1837,8 @@ const uint8_t* Slave::customPDOFieldRaw(uint16_t pdo_index, size_t field_index) 
     for (const auto& info : custom_pdo_infos_) {
         if (info.pdo_index == pdo_index) {
             if (field_index >= info.fields.size()) return nullptr;
-            return info.buffer.data() + info.fields[field_index].offset;
+            const uint8_t* base = customPDOData(pdo_index);
+            return base ? base + info.fields[field_index].offset : nullptr;
         }
     }
     return nullptr;
@@ -1853,7 +1851,8 @@ const uint8_t* Slave::customPDOField(
         if (info.pdo_index == pdo_index) {
             for (const auto& f : info.fields) {
                 if (f.entry == entry) {
-                    return info.buffer.data() + f.offset;
+                    const uint8_t* base = customPDOData(pdo_index);
+                    return base ? base + f.offset : nullptr;
                 }
             }
         }

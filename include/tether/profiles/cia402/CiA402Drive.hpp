@@ -467,9 +467,13 @@ private:
     uint16_t m_txpdo_size{0};
     bool     m_pdo_configured{false};
 
-    // PDO buffers
-    uint8_t m_rxpdo_buffer[kMaxPDOBufferSize];
-    uint8_t m_txpdo_buffer[kMaxPDOBufferSize];
+    // PDO buffers — bound into the PDOMapping's per-entry storage at
+    // registerPDOBuffers() (Q1).  The scratch arrays back the pointers
+    // until then so accessors stay safe before registration.
+    uint8_t  m_rxpdo_scratch[kMaxPDOBufferSize] = {};
+    uint8_t  m_txpdo_scratch[kMaxPDOBufferSize] = {};
+    uint8_t* m_rxpdo_buffer = m_rxpdo_scratch;
+    uint8_t* m_txpdo_buffer = m_txpdo_scratch;
 
     // PDO registration tracking
     int  m_rxpdo_entry_index{-1};

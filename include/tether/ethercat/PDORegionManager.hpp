@@ -72,7 +72,7 @@ public:
 
     // --- Mode C: Raw buffer ---
     /// Get a direct pointer to the region's Tx backing buffer for memcpy.
-    /// The buffer is the PDO entry's app_buffer + offset.
+    /// The buffer is the PDO entry's storage + offset.
     uint8_t* getTxBuffer(int region_id);
     /// Get a direct pointer to the region's Rx backing buffer for reading.
     const uint8_t* getRxBuffer(int region_id) const;

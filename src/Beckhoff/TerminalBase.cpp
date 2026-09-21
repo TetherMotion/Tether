@@ -202,22 +202,20 @@ Result<> TerminalBase::enterPreOp() {
 Result<> TerminalBase::registerProcessData(PDO::PDOAddressMode mode) {
     auto& pdo = master_->pdoForSlave(slave_index_);
     if (sm_in_.enabled && sm_in_.length > 0) {
-        in_buf_.assign(sm_in_.length, 0);
-        int entry = pdo.mapping().add_txpdo(slave_index_, in_buf_.data(),
-                                            sm_in_.length,
+        int entry = pdo.mapping().add_txpdo(slave_index_, sm_in_.length,
                                             sm_in_.first_pdo, mode);
         if (entry < 0) {
             return std::unexpected(Error::PdoRegistrationFailed);
         }
+        in_buf_ = { pdo.mapping().entryData(entry), sm_in_.length };
     }
     if (sm_out_.enabled && sm_out_.length > 0) {
-        out_buf_.assign(sm_out_.length, 0);
-        int entry = pdo.mapping().add_rxpdo(slave_index_, out_buf_.data(),
-                                            sm_out_.length,
+        int entry = pdo.mapping().add_rxpdo(slave_index_, sm_out_.length,
                                             sm_out_.first_pdo, mode);
         if (entry < 0) {
             return std::unexpected(Error::PdoRegistrationFailed);
         }
+        out_buf_ = { pdo.mapping().entryDataMut(entry), sm_out_.length };
     }
     pdo.finalizeMapping(slave_index_);
     prepared_ = true;

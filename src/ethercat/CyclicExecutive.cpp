@@ -10,6 +10,9 @@
 #include "tether/platform/Platform.hpp"
 #include "tether/platform/RtMemory.hpp"
 
+#include <algorithm>
+#include <vector>
+
 namespace EtherCAT {
 
 static const char* TAG = "cyclic_exec";
@@ -173,17 +176,28 @@ void CyclicExecutive::cyclicMain() {
                                    - 16 * 1024));
     }
 
+    const uint64_t period_ns_cfg =
+        static_cast<uint64_t>(config_.cycle_period_us) * 1000ULL;
+
+    // Q10: SCHED_DEADLINE auto-measure — with no explicit dl_runtime_ns,
+    // the thread first runs on SCHED_FIFO for dl_measure_cycles while the
+    // loop records per-cycle work, then switches to CBS with
+    // runtime = P99 × (100 + dl_margin_pct)/100.
+    const bool dl_auto = config_.sched_class == SchedClass::Deadline &&
+                         config_.dl_runtime_ns == 0 &&
+                         config_.dl_auto_measure;
+
     bool rt = false;
-    if (config_.sched_class == SchedClass::Deadline) {
-        const uint64_t period_ns =
-            static_cast<uint64_t>(config_.cycle_period_us) * 1000ULL;
+    if (config_.sched_class == SchedClass::Deadline && !dl_auto) {
         const uint64_t runtime = config_.dl_runtime_ns
-            ? config_.dl_runtime_ns : period_ns / 2;
+            ? config_.dl_runtime_ns : period_ns_cfg / 2;
         const uint64_t deadline = config_.dl_deadline_ns
-            ? config_.dl_deadline_ns : period_ns;
+            ? config_.dl_deadline_ns : period_ns_cfg;
         rt = Tether::Platform::setCurrentThreadDeadline(runtime, deadline,
-                                                        period_ns);
-        if (!rt) {
+                                                        period_ns_cfg);
+        if (rt) {
+            dl_applied_runtime_ns_.store(runtime, std::memory_order_relaxed);
+        } else {
             TETHER_LOGW(TAG, "SCHED_DEADLINE unavailable — falling back "
                              "to SCHED_FIFO");
         }
@@ -196,10 +210,17 @@ void CyclicExecutive::cyclicMain() {
                          "scheduling; running with normal scheduling");
     }
 
-    const uint64_t period_ns =
-        static_cast<uint64_t>(config_.cycle_period_us) * 1000ULL;
+    // Measurement reservoir — allocated once at thread start, never in
+    // the steady-state hot path.
+    std::vector<uint32_t> dl_samples;
+    if (dl_auto) {
+        dl_samples.reserve(std::max<uint32_t>(config_.dl_measure_cycles, 64));
+        TETHER_LOGI(TAG, "SCHED_DEADLINE auto-measure: sampling {} cycles "
+                         "on SCHED_FIFO", config_.dl_measure_cycles);
+    }
+    bool dl_measuring = dl_auto;
 
-    if (!timer_->start(period_ns)) {
+    if (!timer_->start(period_ns_cfg)) {
         TETHER_LOGE(TAG, "Deadline timer start failed");
         running_.store(false, std::memory_order_release);
         return;
@@ -250,6 +271,36 @@ void CyclicExecutive::cyclicMain() {
         if (work_us > cur) {
             max_cycle_work_us_.store(static_cast<uint32_t>(work_us),
                                      std::memory_order_relaxed);
+        }
+
+        // Q10: collect work samples, then switch to CBS once measured.
+        if (dl_measuring) {
+            dl_samples.push_back(static_cast<uint32_t>(work_us));
+            if (dl_samples.size() >= config_.dl_measure_cycles) {
+                dl_measuring = false;
+                std::ranges::sort(dl_samples);
+                const size_t p99_idx =
+                    std::min(dl_samples.size() - 1,
+                             dl_samples.size() * 99 / 100);
+                const uint64_t p99_us = dl_samples[p99_idx];
+                uint64_t runtime = p99_us * 1000ULL *
+                                   (100ULL + config_.dl_margin_pct) / 100ULL;
+                const uint64_t deadline = config_.dl_deadline_ns
+                    ? config_.dl_deadline_ns : period_ns_cfg;
+                runtime = std::clamp<uint64_t>(runtime, 1000ULL,
+                                               deadline * 95 / 100);
+                if (Tether::Platform::setCurrentThreadDeadline(
+                        runtime, deadline, period_ns_cfg)) {
+                    dl_applied_runtime_ns_.store(runtime,
+                                                 std::memory_order_relaxed);
+                    TETHER_LOGI(TAG, "SCHED_DEADLINE engaged: runtime={} ns "
+                                     "(P99 work {} µs × (100+{})/100)",
+                                runtime, p99_us, config_.dl_margin_pct);
+                } else {
+                    TETHER_LOGW(TAG, "SCHED_DEADLINE auto-apply failed — "
+                                     "staying on SCHED_FIFO");
+                }
+            }
         }
 
         cycle_count_.store(cycle, std::memory_order_relaxed);
@@ -317,6 +368,8 @@ CyclicExecutive::Stats CyclicExecutive::getStats() const {
     s.max_cycle_work_us = max_cycle_work_us_.load(std::memory_order_relaxed);
     s.dc_sync_count     = dc_sync_count_.load(std::memory_order_relaxed);
     s.dc_sync_errors    = dc_sync_errors_.load(std::memory_order_relaxed);
+    s.dl_runtime_ns     = dl_applied_runtime_ns_.load(std::memory_order_relaxed);
+    s.deadline_active   = s.dl_runtime_ns != 0;
     if (jitter_monitor_)    s.jitter    = jitter_monitor_->getStats();
     if (dc_jitter_monitor_) s.dc_jitter = dc_jitter_monitor_->getStats();
     return s;

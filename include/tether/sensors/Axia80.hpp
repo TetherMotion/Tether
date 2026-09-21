@@ -280,9 +280,12 @@ private:
     Master& master_;
     uint16_t slave_index_;
 
-    // PDO buffers (owned by PDOManager mapping, not by this class)
-    alignas(8) uint8_t txpdo_buffer_[Axia80_pdo::TxPDO_1A00.size] = {};
-    alignas(8) uint8_t rxpdo_buffer_[Axia80_pdo::RxPDO_1601.size] = {};
+    // PDO buffers — rebound into the PDOMapping's entry storage at
+    // registerPDOs() (Q1); scratch arrays back the pointers before that.
+    alignas(8) uint8_t txpdo_scratch_[Axia80_pdo::TxPDO_1A00.size] = {};
+    alignas(8) uint8_t rxpdo_scratch_[Axia80_pdo::RxPDO_1601.size] = {};
+    uint8_t* txpdo_buffer_ = txpdo_scratch_;
+    uint8_t* rxpdo_buffer_ = rxpdo_scratch_;
 };
 
 // ============================================================================
@@ -333,12 +336,20 @@ inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level,
         pdo_mgr.init();
     }
 
-    pdo_mgr.mapping().add_rxpdo(slave_index_, rxPDOBuffer(), rxPDOSize(),
+    int rx_entry = pdo_mgr.mapping().add_rxpdo(slave_index_, rxPDOSize(),
                                  Axia80_pdo::RxPDO_1601.index,
                                  PDO::PDOAddressMode::Position);
-    pdo_mgr.mapping().add_txpdo(slave_index_, txPDOBuffer(), txPDOSize(),
+    int tx_entry = pdo_mgr.mapping().add_txpdo(slave_index_, txPDOSize(),
                                  Axia80_pdo::TxPDO_1A00.index,
                                  PDO::PDOAddressMode::Position);
+    if (rx_entry < 0 || tx_entry < 0) {
+        TETHER_LOGE("Axia80", "{}: PDO registration failed",
+                    master_.slaveLogPrefix(slave_index_).c_str());
+        return false;
+    }
+    // Rebind the typed PDO views into the mapping's entry storage (Q1).
+    rxpdo_buffer_ = pdo_mgr.mapping().entryDataMut(rx_entry);
+    txpdo_buffer_ = pdo_mgr.mapping().entryDataMut(tx_entry);
 
     if (!pdo_mgr.finalizeMapping(slave_index_)) {
         TETHER_LOGE("Axia80", "{}: PDO finalize failed", master_.slaveLogPrefix(slave_index_).c_str());
