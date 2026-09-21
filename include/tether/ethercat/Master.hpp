@@ -155,6 +155,15 @@ namespace Raw {
 }
 
 class IMotionControlLoop;
+class CyclicDatapath;
+class SlaveRegistry;
+
+class Master;
+
+/// Factory for the private Master::MasterSDOTransport adapter
+/// (defined in src/ethercat/raw/MasterTransports.cpp).  Friended below so
+/// it can name the private nested class.
+std::unique_ptr<SDO::ISDOTransport> makeMasterSDOTransport(Master& master);
 
 // ============================================================================
 // Master
@@ -542,8 +551,8 @@ public:
     /// Process image — valid once the cyclic loop is running with an
     /// image_mode other than Buffered.  Safe to cache the reference;
     /// epoch() changes on re-configuration.
-    ProcessImage&       processImage()       { return process_image_; }
-    const ProcessImage& processImage() const { return process_image_; }
+    ProcessImage&       processImage();
+    const ProcessImage& processImage() const;
     bool startCyclicLoop() { return startCyclicLoop(CyclicLoopConfig{}); }
     bool startCyclicLoop(const CyclicLoopConfig& config);
     /**
@@ -578,9 +587,7 @@ public:
     bool suspendCyclicExchange(uint32_t timeout_us = 20'000);
     void resumeCyclicExchange();
     /// True while the exchange is suspended by suspendCyclicExchange().
-    bool cyclicExchangeSuspended() const {
-        return exchange_suspended_.load(std::memory_order_acquire);
-    }
+    bool cyclicExchangeSuspended() const;
 
     /// Async send-on-change loop — see AsyncLoopConfig.  Explicitly
     /// separate from startCyclicLoop: the user chooses the loop model.
@@ -1357,7 +1364,7 @@ public:
                                  uint16_t adp, uint16_t ado, uint16_t datalen,
                                  bool roundtrip);
     /// Channel accessor for the process image / transport adapter.
-    ICyclicChannel* cyclicChannel() const { return cyclic_channel_.get(); }
+    ICyclicChannel* cyclicChannel() const;
 
     // ---- Frame capacity ----------------------------------------------------
 
@@ -1377,6 +1384,8 @@ private:
     /// Test seam — lets tests inject a cyclic channel and drive the
     /// private dispatch path without a live AF_PACKET socket.
     friend struct MasterCyclicTestAccess;
+    /// The cyclic datapath reaches back for iface_/router/cancel state.
+    friend class CyclicDatapath;
 
     // ---- Internal helpers --------------------------------------------------
     bool setPreopAndConfirm(uint16_t slave_index);
@@ -1456,79 +1465,16 @@ private:
     // Index allocator
     std::atomic<uint8_t> next_idx_{0};
 
-    // ---- Cyclic fast path state ----
-    // Fixed response slots for reserved idx range — written by whoever
-    // parses the RX frame (poll thread OR the cyclic thread itself via
-    // direct receive), read by the cyclic thread.  seq is bumped AFTER the
-    // payload fields are written (release) so a reader that observes a seq
-    // change sees a complete datagram.
-    struct CyclicRxSlot {
-        std::atomic<uint64_t> seq{0};
-        uint8_t  cmd{0};
-        uint16_t adp{0};
-        uint16_t ado{0};
-        uint16_t datalen{0};
-        uint16_t wkc{0};
-        /// View mode: points into channel memory (cookie holds the slot).
-        /// Copy mode: points at data[].  Never null after first publish.
-        const uint8_t* payload{nullptr};
-        /// Channel cookie of the held view; -1 = copy mode / none.
-        int64_t cookie{-1};
-        /// Frame arrival timestamp (kernel stamp when the channel provides
-        /// one, else monotonic now at deposit).
-        uint64_t stamp_ns{0};
-        /// Send-generation bit echoed from the datagram's lenFlags res-bit
-        /// 13 — collect rejects deposits of the previous generation.
-        uint8_t  gen{0};
-        uint8_t  data[1486];
-    };
-    std::array<CyclicRxSlot, kNumCyclicSlots> cyclic_slots_{};
+    // ---- Cyclic fast path ----
+    // All cyclic wire state (response slots, channel, process image, send
+    // generation, exchange suspension) lives on CyclicDatapath — see
+    // src/ethercat/raw/CyclicDatapath.hpp.  Master keeps forwarders so the
+    // public/test surface is unchanged.
+    std::unique_ptr<CyclicDatapath> datapath_;
+
     std::unique_ptr<CyclicExecutive> cyclic_loop_;
     /// Async send-on-change loop — mutually exclusive with cyclic_loop_.
     std::unique_ptr<AsyncCyclicLoop> async_loop_;
-    /// Datapath channel (Linux: socket or PACKET_MMAP ring backend).
-    /// Created by startCyclicLoop() when the transport exposes a raw fd;
-    /// nullptr → software deposit path (unchanged behaviour).
-    std::unique_ptr<ICyclicChannel> cyclic_channel_;
-    ProcessImage process_image_;
-    ImageMode    active_image_mode_ = ImageMode::Buffered;
-    /// Persistent cyclic TX frame buffer — avoids a 1514-byte zeroed stack
-    /// buffer per cycle.  Only the cyclic thread writes it.
-    uint8_t cyclic_tx_buf_[1514] = {};
-    /// Linux eventfd signalled on cyclic-slot deposits *while a waiter is
-    /// registered* (cyclic_waiters_ > 0) so a blocked cyclic waiter wakes
-    /// immediately even when the poll thread consumed the frame.  Writes
-    /// are suppressed when nobody can be sleeping on it — an idle cyclic
-    /// loop therefore pays no syscall per deposit.  -1 when unavailable.
-    int cyclic_notify_fd_ = -1;
-    /// Number of threads currently inside a cyclic-slot wait — gates the
-    /// eventfd write in the deposit/publish paths.
-    std::atomic<int> cyclic_waiters_{0};
-    /// Busy-poll window handed to the channel's rxPoll() — the kernel-ring
-    /// spin inside the channel itself (CyclicLoopConfig::rx_spin_ns).
-    uint32_t rx_spin_ns_ = 0;
-    /// Spin window applied in waitCyclicSlotView before blocking: polls
-    /// the slot sequence word and channel rxPending() — pure memory reads,
-    /// so a ring-slot DMA write is visible with zero syscalls.  From
-    /// CyclicLoopConfig::slot_spin_ns; 0 disables.
-    uint32_t slot_spin_ns_ = 0;
-    /// No-fd wait policy for the cyclic slot wait (Q22).
-    CyclicLoopConfig::SlotWaitFallback slot_wait_fallback_ =
-        CyclicLoopConfig::SlotWaitFallback::Yield;
-    /// Split-exchange collect-task invocations — diagnostic counter that
-    /// also lets tests observe collect-task ordering within a phase.
-    std::atomic<uint64_t> cyclic_collect_calls_{0};
-
-    /// Per-slot send generation (lenFlags res-bit 13), toggled on every
-    /// cyclic send — written/read on the cyclic thread only.
-    std::array<uint8_t, kNumCyclicSlots> cyclic_slot_gen_{};
-
-    /// Exchange suspension for mid-loop mapping mutation (slave
-    /// recovery): while set, the exchange/collect tasks skip their work
-    /// and bump exchange_quiesced_ — the suspender waits for a bump to
-    /// prove the loop thread passed a quiesce point.  NOT reentrant.
-    std::atomic<bool>     exchange_suspended_{false};
-    std::atomic<uint32_t> exchange_quiesced_{0};
 
     /// CPU claims held while the cyclic loop runs (CpuIsolationConfig);
     /// -1 = no claim.  Released by stopCyclicLoop() / ~Master().
@@ -1556,7 +1502,7 @@ private:
     std::atomic<bool>     running_{false};
     std::atomic<bool>     cancel_requested_{false};
     std::atomic<bool>     cancel_warn_logged_{false};  // log cancellation only once
-    std::atomic<uint16_t> discovered_slave_count_{0};
+    // (discovered slave count lives on slaves_ — SlaveRegistry::discovered_count)
     MotionControlCallback motion_control_callback_;
     std::unique_ptr<IMotionControlLoop> motion_control_loop_;
 
@@ -1605,6 +1551,8 @@ private:
 
     // Instance-based SDO manager (new approach)
     class MasterSDOTransport;
+    friend std::unique_ptr<::EtherCAT::SDO::ISDOTransport>
+        makeMasterSDOTransport(Master&);
     std::unique_ptr<::EtherCAT::SDO::ISDOTransport> sdo_transport_;
     std::vector<std::unique_ptr<::EtherCAT::CoE::CoEManager>> sdo_managers_;
     mutable std::mutex sdo_managers_mutex_;
@@ -1635,12 +1583,10 @@ private:
     std::vector<PdoGroup>          pdo_groups_;
     std::array<int, ECAT_PDO_MAX_SLAVES> pdo_group_idx_for_slave_;  ///< -1 = default group, else index into pdo_groups_
 
-    // Per-slave state machines
-    std::vector<std::unique_ptr<Slave>> slaves_;
-    std::unique_ptr<NonExistingSlave> non_existing_slave_;
-
-    // Per-slave human-readable names (for log messages)
-    std::vector<std::string> slave_names_;
+    // Per-slave state machines, names, invalid-index sentinel, and the
+    // discovered-slave count — owned by SlaveRegistry
+    // (src/ethercat/raw/SlaveRegistry.hpp).
+    std::unique_ptr<SlaveRegistry> slaves_;
 
     // Debug flags (master-level with per-slave filtering)
     EtherCATMasterDebugFlags debug_flags_;

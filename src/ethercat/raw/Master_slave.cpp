@@ -20,6 +20,7 @@
 #include "tether/sii/SIIParser.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "raw/internal.hpp"
+#include "raw/SlaveRegistry.hpp"
 #include "tether/platform/Platform.hpp"
 
 #include <thread>
@@ -58,10 +59,7 @@ static bool siiMailboxSM0IsWrite(Master& master, uint16_t slave_index)
 
 void Master::initSlaves(uint16_t count)
 {
-    slaves_.clear();
-    slaves_.reserve(count);
-    slave_names_.clear();
-    slave_names_.resize(count);
+    slaves_->reset(count);
 
     // Create Slave objects first. Each Slave owns a per-slave SIIManager;
     // binding it to this master and the correct slave index happens here.
@@ -70,7 +68,7 @@ void Master::initSlaves(uint16_t count)
 #if TETHER_ENABLE_SII
         s->sii().init(*this, i);
 #endif
-        slaves_.push_back(std::move(s));
+        slaves_->set(i, std::move(s));
     }
 
 #if TETHER_ENABLE_SII
@@ -81,8 +79,8 @@ void Master::initSlaves(uint16_t count)
     threads.reserve(count);
     for (uint16_t i = 0; i < count; ++i) {
         threads.emplace_back([this, i] {
-            if (i < slaves_.size()) {
-                (void)slaves_[i]->sii().prefetchWords(0, 128);
+            if (i < slaves_->size()) {
+                (void)(*slaves_)[i]->sii().prefetchWords(0, 128);
             }
         });
     }
@@ -95,24 +93,15 @@ void Master::initSlaves(uint16_t count)
 }
 
 void Master::setSlaveName(uint16_t idx, std::string name) {
-    if (idx >= slave_names_.size()) {
-        TETHER_LOGW("master", "setSlaveName: index {} out of range (slaves={})",
-                    idx, slave_names_.size());
-        return;
-    }
-    slave_names_[idx] = std::move(name);
+    slaves_->setName(idx, std::move(name));
 }
 
 std::string_view Master::slaveName(uint16_t idx) const {
-    if (idx >= slave_names_.size()) return {};
-    return slave_names_[idx];
+    return slaves_->name(idx);
 }
 
 std::string Master::slaveLogPrefix(uint16_t idx) const {
-    if (idx >= slave_names_.size()) return std::format("Slave {}", idx);
-    const auto& n = slave_names_[idx];
-    if (n.empty()) return std::format("Slave {}", idx);
-    return std::format("Slave {} (#{})", n, idx);
+    return slaves_->logPrefix(idx);
 }
 
 bool Master::drainSlaveMailbox(uint16_t slave_index, unsigned int max_drain)
@@ -290,12 +279,12 @@ bool Master::resetSlaveMailboxSM0(uint16_t slave_index)
 
 void Master::updateDebugFlags()
 {
-    const uint16_t count = static_cast<uint16_t>(slaves_.size());
+    const uint16_t count = static_cast<uint16_t>(slaves_->size());
     std::vector<EtherCATSlaveDebugFlags> per_slave_flags(count);
     for (uint16_t i = 0; i < count; ++i) {
         per_slave_flags[i] = debug_flags_.computeForSlave(i);
-        if (slaves_[i]) {
-            slaves_[i]->updateDebugFlags(per_slave_flags[i]);
+        if ((*slaves_)[i]) {
+            (*slaves_)[i]->updateDebugFlags(per_slave_flags[i]);
         }
     }
     {
@@ -322,31 +311,16 @@ void Master::updateDebugFlags()
 
 Slave& Master::slave(uint16_t slave_index)
 {
-    if (slave_index < slaves_.size() && slaves_[slave_index]) {
-        return *slaves_[slave_index];
-    }
-    // Return sentinel for invalid index (or null entry from a partially
-    // initialized/cleaned-up master).  This prevents SIGSEGV during
-    // shutdown if slave_count was corrupted (e.g. garbage WKC).
-    if (!non_existing_slave_) {
-        non_existing_slave_ = std::make_unique<NonExistingSlave>(*this, slave_index);
-    }
-    // Update the index so the error message is correct
-    non_existing_slave_ = std::make_unique<NonExistingSlave>(*this, slave_index);
-    return *non_existing_slave_;
+    // Sentinel fallback for invalid index (or null entry from a partially
+    // initialized/cleaned-up master) — prevents SIGSEGV during shutdown.
+    return slaves_->get(slave_index);
 }
 
 #if TETHER_ENABLE_SII
 
 SII::SIIManager& Master::sii(uint16_t slave_index)
 {
-    if (slave_index < slaves_.size()) {
-        return slaves_[slave_index]->sii();
-    }
-    // Out-of-range fallback: return the manager owned by the non-existing slave.
-    // Recreate with the requested index so log messages and the slave index match.
-    non_existing_slave_ = std::make_unique<NonExistingSlave>(*this, slave_index);
-    return non_existing_slave_->sii();
+    return slaves_->sii(slave_index);
 }
 
 #endif // TETHER_ENABLE_SII
@@ -377,7 +351,7 @@ void Master::handleRxFrame(const uint8_t* frame, size_t length)
 
 uint16_t Master::getDiscoveredSlaveCount() const
 {
-    return discovered_slave_count_.load(std::memory_order_acquire);
+    return slaves_->discovered_count.load(std::memory_order_acquire);
 }
 
 // ============================================================================

@@ -35,6 +35,7 @@
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/Types.hpp"
+#include "ethercat/raw/CyclicDatapath.hpp"
 
 #ifdef __linux__
 #include <arpa/inet.h>
@@ -576,35 +577,35 @@ namespace EtherCAT {
 /// dispatchChannelFrame for tests.
 struct MasterCyclicTestAccess {
     static void setChannel(Master& m, std::unique_ptr<ICyclicChannel> ch) {
-        m.cyclic_channel_ = std::move(ch);
+        m.datapath_->channel_ = std::move(ch);
     }
     static void dispatch(Master& m, const CyclicFrameView& v) {
         m.dispatchChannelFrame(v);
     }
     static void setRxSpinNs(Master& m, uint32_t ns) {
-        m.rx_spin_ns_ = ns;
+        m.datapath_->rx_spin_ns_ = ns;
     }
     static void setSlotSpinNs(Master& m, uint32_t ns) {
-        m.slot_spin_ns_ = ns;
+        m.datapath_->slot_spin_ns_ = ns;
     }
     static void setSlotWaitFallback(
         Master& m, Master::CyclicLoopConfig::SlotWaitFallback f) {
-        m.slot_wait_fallback_ = f;
+        m.datapath_->slot_wait_fallback_ = f;
     }
     static int cyclicWaiters(Master& m) {
-        return m.cyclic_waiters_.load(std::memory_order_acquire);
+        return m.datapath_->waiters_.load(std::memory_order_acquire);
     }
     static size_t cyclicTaskCount(Master& m, TaskPhase p) {
         return m.cyclic_loop_ ? m.cyclic_loop_->taskCount(p) : 0;
     }
     static uint64_t cyclicCollectCalls(Master& m) {
-        return m.cyclic_collect_calls_.load(std::memory_order_relaxed);
+        return m.datapath_->collect_calls_.load(std::memory_order_relaxed);
     }
     static uint32_t exchangeQuiesced(Master& m) {
-        return m.exchange_quiesced_.load(std::memory_order_relaxed);
+        return m.datapath_->exchange_quiesced_.load(std::memory_order_relaxed);
     }
     static void setDiscoveredSlaveCount(Master& m, uint16_t n) {
-        m.discovered_slave_count_.store(n, std::memory_order_release);
+        m.slaves_->discovered_count.store(n, std::memory_order_release);
     }
 };
 } // namespace EtherCAT
