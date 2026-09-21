@@ -9,6 +9,7 @@
 
 #include "hal/IEthernet.hpp"
 #include "hal/HALTypes.hpp"
+#include "logging/Logger.hpp"
 
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -22,7 +23,11 @@
 #include <poll.h>
 #include <cstring>
 #include <cerrno>
+#include <cstdio>
+#include <cstdlib>
 #include <atomic>
+#include <thread>
+#include <chrono>
 
 #ifndef SOL_PACKET
 #define SOL_PACKET 263
@@ -139,12 +144,21 @@ public:
             }
         }
 
+        // Start kernel error-counter monitor (opt-out via EthernetConfig).
+        // Runs on a non-realtime thread; polls sysfs only, so there is no
+        // per-frame cost on the cyclic path.
+        if (config.nicErrorMonitor) {
+            startErrorMonitor();
+        }
+
         return Error::OK;
     }
 
     void shutdown() override {
         m_running = false;
-        
+
+        stopErrorMonitor();
+
         if (m_socket >= 0) {
             // Remove promiscuous mode if we set it
             if (m_promiscuous) {
@@ -596,6 +610,118 @@ private:
         }
 #endif
     }
+
+    // ---- NIC kernel error-counter monitor (sysfs, non-RT thread) ---------
+
+    static constexpr auto kErrorMonInterval = std::chrono::milliseconds(500);
+    /// Log threshold: an interval is reported when the error delta reaches
+    /// this absolute count OR the error percentage exceeds kErrorMonWarnPct.
+    static constexpr uint64_t kErrorMonMinDelta = 4;
+    static constexpr double kErrorMonWarnPct = 0.1;
+
+    struct NicCounters {
+        uint64_t rxErrors = 0, txErrors = 0;
+        uint64_t rxDropped = 0, txDropped = 0;
+        uint64_t rxFifoErrors = 0, txFifoErrors = 0;
+        uint64_t rxCrcErrors = 0, rxMissedErrors = 0;
+        uint64_t rxPackets = 0, txPackets = 0;
+    };
+
+    static bool readSysfsCounter(const char* ifname, const char* name,
+                                 uint64_t& out) {
+        char path[160];
+        std::snprintf(path, sizeof(path),
+                      "/sys/class/net/%s/statistics/%s", ifname, name);
+        FILE* f = std::fopen(path, "r");
+        if (!f) return false;
+        char buf[64];
+        bool ok = std::fgets(buf, sizeof(buf), f) != nullptr;
+        std::fclose(f);
+        if (ok) out = std::strtoull(buf, nullptr, 10);
+        return ok;
+    }
+
+    static NicCounters readNicCounters(const char* ifname) {
+        NicCounters c;
+        readSysfsCounter(ifname, "rx_errors",        c.rxErrors);
+        readSysfsCounter(ifname, "tx_errors",        c.txErrors);
+        readSysfsCounter(ifname, "rx_dropped",       c.rxDropped);
+        readSysfsCounter(ifname, "tx_dropped",       c.txDropped);
+        readSysfsCounter(ifname, "rx_fifo_errors",   c.rxFifoErrors);
+        readSysfsCounter(ifname, "tx_fifo_errors",   c.txFifoErrors);
+        readSysfsCounter(ifname, "rx_crc_errors",    c.rxCrcErrors);
+        readSysfsCounter(ifname, "rx_missed_errors", c.rxMissedErrors);
+        readSysfsCounter(ifname, "rx_packets",       c.rxPackets);
+        readSysfsCounter(ifname, "tx_packets",       c.txPackets);
+        return c;
+    }
+
+    void startErrorMonitor() {
+        m_errorMonStop = false;
+        m_errorMonThread = std::thread([this] {
+            static constexpr const char* TAG = "nic-mon";
+            NicCounters prev = readNicCounters(m_ifname);
+
+            while (!m_errorMonStop.load(std::memory_order_relaxed)) {
+                // Sleep in slices for prompt shutdown.
+                for (int i = 0; i < 10 &&
+                               !m_errorMonStop.load(std::memory_order_relaxed);
+                     ++i) {
+                    std::this_thread::sleep_for(kErrorMonInterval / 10);
+                }
+                if (m_errorMonStop.load(std::memory_order_relaxed)) break;
+
+                const NicCounters cur = readNicCounters(m_ifname);
+                const uint64_t dRxErr = cur.rxErrors - prev.rxErrors;
+                const uint64_t dTxErr = cur.txErrors - prev.txErrors;
+                const uint64_t dRxDrop = cur.rxDropped - prev.rxDropped;
+                const uint64_t dTxDrop = cur.txDropped - prev.txDropped;
+                const uint64_t dRxPkt = cur.rxPackets - prev.rxPackets;
+                const uint64_t dTxPkt = cur.txPackets - prev.txPackets;
+                prev = cur;
+
+                auto pct = [](uint64_t errs, uint64_t pkts) {
+                    return pkts ? 100.0 * static_cast<double>(errs) /
+                                      static_cast<double>(pkts)
+                                : 0.0;
+                };
+                auto significant = [](uint64_t d, double p) {
+                    return d >= kErrorMonMinDelta || p >= kErrorMonWarnPct;
+                };
+
+                const double rxPct = pct(dRxErr + dRxDrop, dRxPkt);
+                const double txPct = pct(dTxErr + dTxDrop, dTxPkt);
+
+                if (significant(dRxErr + dRxDrop, rxPct)) {
+                    TETHER_LOGW(TAG,
+                        "{}: RX errors in last 500ms: +{} err, +{} dropped "
+                        "(rx_packets={}, {:.3f}% loss) | totals: rx_err={} "
+                        "rx_drop={} rx_crc={} rx_fifo={} rx_missed={}",
+                        m_ifname, dRxErr, dRxDrop, dRxPkt, rxPct,
+                        cur.rxErrors, cur.rxDropped, cur.rxCrcErrors,
+                        cur.rxFifoErrors, cur.rxMissedErrors);
+                }
+                if (significant(dTxErr + dTxDrop, txPct)) {
+                    TETHER_LOGW(TAG,
+                        "{}: TX errors in last 500ms: +{} err, +{} dropped "
+                        "(tx_packets={}, {:.3f}% loss) | totals: tx_err={} "
+                        "tx_drop={} tx_fifo={}",
+                        m_ifname, dTxErr, dTxDrop, dTxPkt, txPct,
+                        cur.txErrors, cur.txDropped, cur.txFifoErrors);
+                }
+            }
+        });
+    }
+
+    void stopErrorMonitor() {
+        m_errorMonStop = true;
+        if (m_errorMonThread.joinable()) {
+            m_errorMonThread.join();
+        }
+    }
+
+    std::thread m_errorMonThread;
+    std::atomic<bool> m_errorMonStop{false};
 
     bool m_initialized = false;
     int m_socket = -1;

@@ -34,6 +34,9 @@ struct EthernetConfig {
     size_t rxBufferSize = 32;              ///< Number of RX buffers
     size_t txBufferSize = 16;              ///< Number of TX buffers
     uint16_t ethertypeFilter = 0;          ///< Filter by EtherType (0 = all)
+    /// Poll kernel NIC error counters (sysfs) on a low-priority thread and
+    /// log significant error deltas.  Zero per-frame cost; set false to opt out.
+    bool nicErrorMonitor = true;
 };
 
 /**
