@@ -21,6 +21,7 @@
 #include "tether/sii/SIIParser.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
 #include "raw/internal.hpp"
+#include "raw/SlaveRegistry.hpp"
 #include "tether/platform/Platform.hpp"
 
 #include <thread>
@@ -116,7 +117,7 @@ bool Master::discoverSlaves()
             resp.datalen = result.data_length;
             resp.wkc = result.wkc;
 
-            discovered_slave_count_.store(resp.wkc, std::memory_order_release);
+            slaves_->discovered_count.store(resp.wkc, std::memory_order_release);
             TETHER_LOGI(TAG, "discovered {} slave(s)", resp.wkc);
             initSlaves(resp.wkc);
             if (faults_) {
@@ -182,7 +183,7 @@ uint16_t Master::discoverSlaveCount()
                 continue;
             }
 
-            discovered_slave_count_.store(result.wkc, std::memory_order_release);
+            slaves_->discovered_count.store(result.wkc, std::memory_order_release);
             TETHER_LOGI(TAG, "discoverSlaveCount: discovered {} slave(s)", result.wkc);
             return result.wkc;
         }

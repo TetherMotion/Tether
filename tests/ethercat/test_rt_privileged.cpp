@@ -87,6 +87,7 @@ struct sched_attr_local {
 #include "tether/platform/CpuIsolation.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/platform/RtMemory.hpp"
+#include "ethercat/raw/CyclicDatapath.hpp"
 
 using namespace EtherCAT;
 using namespace std::chrono_literals;
@@ -714,9 +715,9 @@ TEST_F(RtVethTest, KernelDemuxSeparatesCyclicFromAsync) {
 namespace EtherCAT {
 struct MasterCyclicTestAccess {
     static void setChannel(Master& m, std::unique_ptr<ICyclicChannel> ch) {
-        m.cyclic_channel_ = std::move(ch);
+        m.datapath_->channel_ = std::move(ch);
     }
-    static ICyclicChannel* channel(Master& m) { return m.cyclic_channel_.get(); }
+    static ICyclicChannel* channel(Master& m) { return m.datapath_->channel_.get(); }
 };
 } // namespace EtherCAT
 
