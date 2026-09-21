@@ -17,6 +17,8 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
    HAL_PORTING_GUIDE
    PDOModes
    CyclicRealtimeTransport
+   EtherCATEncapsulation
+   EtherCATBPFFiltering
    FSoECrcResync
    IOProtocol
    IOProtocolWireFormat

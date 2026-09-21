@@ -192,9 +192,9 @@ int main(int argc, char** argv) {
     std::string debug_stop = program.get<std::string>("--debug-stop");
     if (Tether::Examples::printDebugConditionHelpIfRequested(debug_start)) return 0;
 
-    Tether::Examples::EncapConfig encap;
+    Tether::Examples::EncapsulationConfig encapsulation;
     if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
-            encap, TAG)) {
+            encapsulation, TAG)) {
         return 1;
     }
 
@@ -222,14 +222,14 @@ int main(int argc, char** argv) {
     Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
     Tether::Examples::applyDebugGateConditions(debug_start, debug_stop, master, TAG);
 
-    if (!Tether::Examples::setupEncapAndRxCallback(session, master, encap, TAG)) {
+    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }
 
     Tether::Examples::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, encap, TAG)) {
+    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }

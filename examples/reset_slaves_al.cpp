@@ -172,9 +172,9 @@ int main(int argc, char** argv) {
     if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
 
-    Tether::Examples::EncapConfig encap;
+    Tether::Examples::EncapsulationConfig encapsulation;
     if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
-            encap, TAG)) {
+            encapsulation, TAG)) {
         return 1;
     }
 
@@ -191,7 +191,7 @@ int main(int argc, char** argv) {
     } else {
         TETHER_LOGI(TAG, "Selected slaves: all");
     }
-    Tether::Examples::logEncapConfig(encap, TAG);
+    Tether::Examples::logEncapsulationConfig(encapsulation, TAG);
 
     Tether::Examples::HostEtherNetSession session;
     if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
@@ -201,14 +201,14 @@ int main(int argc, char** argv) {
     EtherCAT::Master master;
     Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupEncapAndRxCallback(session, master, encap, TAG)) {
+    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }
 
     Tether::Examples::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, encap, TAG)) {
+    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }

@@ -439,7 +439,7 @@ int main(int argc, char** argv)
 
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
-    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.encap)) {
+    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.encapsulation)) {
         return 2;
     }
 

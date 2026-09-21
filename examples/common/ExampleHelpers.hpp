@@ -10,7 +10,7 @@
 #include "tether/ethercat/CBPFProgramFactory.hpp"
 #include "tether/ethercat/VLANRouter.hpp"
 
-namespace EtherCAT { class Slave; }
+namespace EtherCAT { class Slave; class Master; }
 namespace EtherCAT::HAL { class IEthernet; }
 
 namespace Tether::Examples {
@@ -66,13 +66,6 @@ bool printDebugHelpIfRequested(const std::string& debugStr);
 
 /// Print debug condition help and return true if @p startStr is "help".
 bool printDebugConditionHelpIfRequested(const std::string& startStr);
-
-/// Add `--encapsulation` to an ArgumentParser.
-///
-/// @deprecated This arg is now added automatically by addInterfaceArg().
-/// This function is retained as a no-op for source compatibility; calling it
-/// has no effect.
-void addEncapsulationArg(argparse::ArgumentParser& program);
 
 /// Add `-s` / `--slave` to an ArgumentParser.
 void addSlaveArg(argparse::ArgumentParser& program, int defaultValue = 0);
@@ -135,7 +128,7 @@ bool applyDebugGateConditions(const std::string& startCond,
  *
  * Examples: "vlan:1999", "udp", "vlan:100,udp", "vlan:100-200,vlantx:off".
  */
-struct EncapConfig {
+struct EncapsulationConfig {
     /// VLAN mode is active (router needed) when any of these are set.
     std::optional<uint16_t> txVlan;
     bool rxAny = false;
@@ -153,25 +146,59 @@ struct EncapConfig {
     bool enabled() const { return vlanActive() || udp; }
 };
 
-/// Parse the `--encapsulation` value into an EncapConfig.
+/// Parse the `--encapsulation` value into an EncapsulationConfig.
 /// Returns false and prints to stderr on invalid input.
 bool parseEncapsulationArg(const std::string& spec,
-                           EncapConfig& out,
+                           EncapsulationConfig& out,
                            const char* tag);
 
 /// Log the encapsulation configuration via TETHER_LOGI.
-void logEncapConfig(const EncapConfig& config, const char* tag);
+void logEncapsulationConfig(const EncapsulationConfig& config, const char* tag);
 
 /// Build the kernel socket-filter program matching @p config — untagged
 /// EtherCAT (+any-VID tagged) for raw mode, VID-restricted for vlan mode,
 /// plus EtherCAT-over-UDP when enabled.  Empty program = attach nothing.
-std::vector<EtherCAT::CBPFInsn> buildEncapBpfProgram(const EncapConfig& config);
+std::vector<EtherCAT::CBPFInsn> buildEncapsulationBpfProgram(const EncapsulationConfig& config);
 
 /// Attach the encapsulation filter to the Ethernet device's native socket
 /// (SO_ATTACH_FILTER on Linux; soft-fails with a warning).
-void attachEncapBpfFilter(EtherCAT::HAL::IEthernet& eth,
-                          const EncapConfig& config,
-                          const char* tag);
+void attachEncapsulationBpfFilter(EtherCAT::HAL::IEthernet& eth,
+                                  const EncapsulationConfig& config,
+                                  const char* tag);
+
+/**
+ * @brief One-call encapsulation setup for a host-side EtherCAT interface.
+ *
+ * Applies @p encapsulation end to end:
+ *   1. attaches a kernel cBPF ingress filter to `eth`'s native socket —
+ *      rejects non-EtherCAT traffic (and, in VLAN mode, frames outside the
+ *      configured VID) before userspace sees them;
+ *   2. enables EtherCAT-over-UDP on `master` when requested — fails if the
+ *      build lacks TETHER_ENABLE_UDP_ENCAPSULATION, and disables the HAL's
+ *      software EtherType filter so IPv4 frames reach the master;
+ *   3. when VLAN routing is active, creates a VLANRouter (stored into
+ *      `routerStorage`), registers `master` on it, and installs an RX
+ *      callback on `eth` that routes tagged frames by VID; otherwise
+ *      installs a direct RX callback to `master`.
+ *
+ * @param eth            initialized Ethernet device
+ * @param backend        NetworkInterface wrapping `eth` (its send lambda is
+ *                       used for TX; the receive fast-path is cleared when
+ *                       VLAN routing is active)
+ * @param master         master to wire up (RX callback + UDP config)
+ * @param routerStorage  receives the router when VLAN routing is active;
+ *                       caller keeps it alive for the session duration
+ * @return the NetworkInterface the master should start() on — the router's
+ *         per-master view under VLAN, or `&backend` otherwise; nullptr on
+ *         failure (e.g. UDP encapsulation not compiled in).
+ */
+EtherCAT::NetworkInterface* setupEncapsulation(
+    EtherCAT::HAL::IEthernet& eth,
+    EtherCAT::NetworkInterface& backend,
+    EtherCAT::Master& master,
+    std::unique_ptr<EtherCAT::VLANRouter>& routerStorage,
+    const EncapsulationConfig& encapsulation,
+    const char* tag);
 
 // ============================================================================
 // Mailbox helpers

@@ -32,13 +32,15 @@ still works, it just receives everything.
 
 ### VLAN mode rejects untagged traffic
 
-When a `--rx-vlan` filter is active, the generated program accepts a
-frame **if and only if**:
+When a VLAN encapsulation is active (`--encapsulation vlan:<vid>`), the
+generated program accepts a frame **if and only if**:
 
 1. its outer EtherType is `0x8100` (802.1Q), **and**
 2. the VID field of the TCI matches the configured VLAN (PCP/DEI bits
    are masked out), **and**
-3. the inner EtherType is `0x88A4` (EtherCAT).
+3. the inner EtherType is `0x88A4` (EtherCAT) — or, when combined with
+   `udp` (`--encapsulation vlan:1999,udp`), an IPv4/UDP datagram whose
+   destination port is the configured EtherCAT UDP port.
 
 Consequently, in VLAN mode the socket rejects:
 
@@ -46,13 +48,13 @@ Consequently, in VLAN mode the socket rejects:
   directly on the wire),
 - frames tagged with a different VID,
 - matching-VID frames carrying non-EtherCAT payloads (ARP, IPv4, …),
-- EtherCAT-over-UDP (even on the matching VLAN),
 - 802.1ad/QinQ frames (outer TPID `0x88A8`, or a second nested tag).
 
-This is intentional: `--rx-vlan N` means "the segment lives inside VLAN
-N", so untagged traffic is by definition not ours. Applications that
-need the untagged segment *and* a VLAN segment concurrently should use
-two sockets (or the `CBPFSpec` API, below) rather than the VLAN filter.
+This is intentional: `--encapsulation vlan:N` means "the segment lives
+inside VLAN N", so untagged traffic is by definition not ours.
+Applications that need the untagged segment *and* a VLAN segment
+concurrently should use two sockets (or the `CBPFSpec` API, below)
+rather than the VLAN filter.
 
 ## UDP encapsulation (ETG.1000.3)
 
@@ -85,8 +87,31 @@ auto prog = EtherCAT::CBPFProgramFactory::build(s);
 ```
 
 `build()` returns an empty vector for a spec that accepts nothing; pass
-`--rx-vlan` values through `vlanFilter()`/`vlanRangeFilter()` which
-validate `vid ≤ 4095` and `lo ≤ hi`.
+`--encapsulation vlan:…` values through `vlanFilter()`/
+`vlanRangeFilter()` which validate `vid ≤ 4095` and `lo ≤ hi`.
+
+## Examples
+
+All Linux host examples expose `--encapsulation` (see
+[EtherCATEncapsulation](EtherCATEncapsulation.md) for the full token
+grammar and the `setupEncapsulation()` API):
+
+```
+list_slaves -i eth0                             # raw EtherCAT
+list_slaves -i eth0 --encapsulation vlan:1999   # tagged VLAN 1999 only
+list_slaves -i eth0 --encapsulation vlan:100-200,vlantx:150
+list_slaves -i eth0 --encapsulation udp         # EtherCAT-over-UDP :34980
+list_slaves -i eth0 --encapsulation vlan:1999,udp
+```
+
+The token grammar is `raw|none`, `vlan:<vid>`, `vlan:<lo>-<hi>`,
+`vlan:any`, `vlantx:<vid|off>`, `udp[:<port>]`, comma-separated.
+`Tether::Examples::setupEncapsulation()`
+(`examples/common/ExampleHelpers.hpp`) applies a parsed
+`EncapsulationConfig` in one call: it attaches the matching cBPF
+program, enables EtherCAT-over-UDP on the master, and wires the
+`VLANRouter` + RX callback, returning the `NetworkInterface` the master
+should `start()` on.
 
 ## Testing
 

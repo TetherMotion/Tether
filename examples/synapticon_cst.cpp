@@ -450,7 +450,7 @@ struct Args {
     /// disabled.  Default keeps the brake engaged once stopped — the drive
     /// auto-engages it on disable, and phase 3 only ensures that state.
     bool     release_brake = false;
-    Tether::Examples::EncapConfig encap;
+    Tether::Examples::EncapsulationConfig encapsulation;
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -547,10 +547,10 @@ bool parseArgs(int argc, char** argv, Args& out) {
         return false;
     }
     if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
-            out.encap, TAG)) {
+            out.encapsulation, TAG)) {
         return false;
     }
-    Tether::Examples::logEncapConfig(out.encap, TAG);
+    Tether::Examples::logEncapsulationConfig(out.encapsulation, TAG);
     return true;
 }
 
@@ -643,7 +643,7 @@ int main(int argc, char** argv) {
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
-    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.encap)) {
+    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.encapsulation)) {
         return 2;
     }
 

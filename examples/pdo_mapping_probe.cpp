@@ -187,15 +187,14 @@ bool Probe::connect(const char* tag) {
         return false;
     }
     master_ = std::make_unique<EtherCAT::Master>();
-    if (!Tether::Examples::setupEncapAndRxCallback(session_, *master_,
-                                                  Tether::Examples::EncapConfig{},
+    if (!Tether::Examples::setupEncapsulation(session_, *master_,
+                                                  Tether::Examples::EncapsulationConfig{},
                                                   tag)) {
         Tether::Examples::shutdownHostEthernet(session_);
         return false;
     }
     Tether::Examples::startHostPollThread(session_, tag);
-    if (!Tether::Examples::startHostMaster(session_, *master_,
-                                           Tether::Examples::EncapConfig{}, tag)) {
+    if (!Tether::Examples::startHostMaster(session_, *master_, tag)) {
         Tether::Examples::shutdownHostEthernet(session_);
         return false;
     }

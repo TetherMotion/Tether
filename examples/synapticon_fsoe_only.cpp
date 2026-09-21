@@ -314,7 +314,7 @@ struct Args {
     int watchdog_ms = 15;
     int diag_interval_ms = 500;
     std::string debug;
-    Tether::Examples::EncapConfig encap;
+    Tether::Examples::EncapsulationConfig encapsulation;
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -352,10 +352,10 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.diag_interval_ms = program.get<int>("--diag-interval-ms");
     out.debug = program.get<std::string>("--debug");
     if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
-            out.encap, TAG)) {
+            out.encapsulation, TAG)) {
         return false;
     }
-    Tether::Examples::logEncapConfig(out.encap, TAG);
+    Tether::Examples::logEncapsulationConfig(out.encapsulation, TAG);
     return true;
 }
 
@@ -397,7 +397,7 @@ int main(int argc, char** argv) {
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
-    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.encap)) {
+    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.encapsulation)) {
         return 2;
     }
 
