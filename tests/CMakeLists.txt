@@ -354,6 +354,10 @@ set(SLAVE_EMULATION_PROFILES_SOURCES
 file(GLOB_RECURSE EXPORT_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/export/*.cpp")
 file(GLOB_RECURSE REPLANNER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/replanner/*.cpp")
 file(GLOB_RECURSE PLATFORM_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/platform/*.cpp")
+# Deadline-timer tests measure real time — under `ctest -jN` CPU contention
+# they flake.  They are built as tether_platform_serial_tests (RUN_SERIAL)
+# instead; keep them out of the parallel platform binary.
+list(FILTER PLATFORM_TEST_SOURCES EXCLUDE REGEX "test_deadline_timer\\.cpp$")
 file(GLOB_RECURSE MOCKS_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/mocks/*.cpp")
 
 # Per-profile test sources (split from monolithic PROFILES_TEST_SOURCES)
@@ -846,6 +850,34 @@ if(PLATFORM_TEST_SOURCES)
         ""
     )
 endif()
+
+# Timing-sensitive platform tests — RUN_SERIAL so ctest never runs them
+# concurrently with other suites (deadline assertions flake under -jN load).
+tether_add_test_executable(tether_platform_serial_tests
+    platform/test_deadline_timer.cpp
+)
+
+target_include_directories(tether_platform_serial_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+
+target_link_libraries(tether_platform_serial_tests
+    tether_common
+    tether_hal
+    GTest::gtest_main
+    GTest::gmock
+)
+
+target_compile_definitions(tether_platform_serial_tests PRIVATE
+    TETHER_ENABLE_ETHERCAT=1
+    TETHER_COMPILE_MASTER=1
+)
+
+gtest_discover_tests(tether_platform_serial_tests
+    PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
 
 if(MOCKS_TEST_SOURCES)
     create_module_test(mocks
