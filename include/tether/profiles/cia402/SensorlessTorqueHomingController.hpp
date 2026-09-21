@@ -10,7 +10,6 @@
 #include <type_traits>
 #include <vector>
 
-#include "tether/control/PIDControllers.hpp"
 #include "tether/profiles/cia301/CiA402Defs.hpp"
 #include "tether/profiles/cia402/CiA402Drive.hpp"
 #include "tether/profiles/cia402/DS402Master.hpp"
@@ -91,9 +90,7 @@ public:
         int direction = 1;                 // +1 or -1
         double max_torque_percent = 1.0;   // % of rated
         bool use_csv_mode = false;         // true: drive-internal velocity loop (CSV),
-                                           // false: host-side PI in CST mode
-        double kp = 0.05;
-        double ki = 0.005;
+                                           // false: bounded CST torque command
         StallDetection stall_detection = StallDetection::Position;
         double stall_velocity = 100.0;     // counts/s (StallDetection::Speed)
         double stall_window = 0.1;         // s, position-delta window (Position)
@@ -157,20 +154,6 @@ public:
             return false;
         }
 
-        pi_.setGains(config_.kp, config_.ki);
-        pi_.setIntegralLimits(-max_permille_, max_permille_);
-        pi_.setSaturationLimits({
-            -max_permille_,
-            max_permille_,
-            -max_permille_,
-            max_permille_,
-            -std::numeric_limits<double>::max(),
-            std::numeric_limits<double>::max(),
-            std::numeric_limits<double>::max(),
-        });
-        pi_.setAntiWindup(tether::control::AntiWindupMethod::Clamping, 0.0);
-        pi_.reset();
-
         homed_.store(false, std::memory_order_release);
         failed_.store(false, std::memory_order_release);
         failure_message_.store("", std::memory_order_release);
@@ -211,7 +194,7 @@ public:
             trace_file_ = std::fopen(trace_path, "w");
             if (trace_file_ != nullptr) {
                 std::setvbuf(trace_file_, nullptr, _IOFBF, 1 << 20);
-                std::fputs("t_s,state,ref,speed,position,torque_actual,pi_out,cmd,integral\n",
+                std::fputs("t_s,state,ref,speed,position,torque_actual,cmd\n",
                            trace_file_);
                 trace_.reserve(kTraceChunkSize);
             }
@@ -407,22 +390,14 @@ public:
             if constexpr (requires(RxPDO& p) { p.target_torque; }) {
                 rx->target_torque = 0;
             }
-            traceSample(tx, rx->target_torque, current_reference_,
-                        pi_.getIntegral(), speed);
+            traceSample(tx, rx->target_torque, speed);
             return true;
         }
 
-        tether::control::ControllerInput input;
-        input.reference = current_reference_;
-        input.measured = speed;
-        input.dt = dt_seconds;
-        input.enable = true;
+        rx->target_torque = static_cast<int16_t>(std::llround(
+            std::copysign(max_permille_, current_reference_)));
 
-        const auto output = pi_.compute(input);
-        rx->target_torque = static_cast<int16_t>(std::llround(std::clamp(
-            output.control, -max_permille_, max_permille_)));
-
-        traceSample(tx, rx->target_torque, output.control, pi_.getIntegral(), speed);
+        traceSample(tx, rx->target_torque, speed);
         return true;
     }
 
@@ -456,16 +431,13 @@ private:
         double speed;
         int32_t position;
         int16_t torque_actual;
-        int16_t pi_out;
         int16_t cmd;
-        int16_t integral;
         int8_t state;
     };
 
     static constexpr size_t kTraceChunkSize = 2048;
 
-    void traceSample(const TxPDO* tx, int16_t cmd, double pi_out,
-                     double integral, double speed)
+    void traceSample(const TxPDO* tx, int16_t cmd, double speed)
     {
         if (trace_file_ == nullptr) {
             return;
@@ -475,10 +447,6 @@ private:
         s.ref = current_reference_;
         s.speed = speed;
         s.cmd = cmd;
-        s.pi_out = static_cast<int16_t>(std::clamp(
-            std::llround(pi_out), -32768LL, 32767LL));
-        s.integral = static_cast<int16_t>(std::clamp(
-            std::llround(integral), -32768LL, 32767LL));
         s.state = static_cast<int8_t>(state_);
         if constexpr (requires(TxPDO& p) { p.position_actual; }) {
             s.position = tx->position_actual;
@@ -498,11 +466,10 @@ private:
             return;
         }
         for (const TraceSample& s : trace_) {
-            std::fprintf(trace_file_, "%.3f,%d,%.1f,%.1f,%d,%d,%d,%d,%d\n",
+            std::fprintf(trace_file_, "%.3f,%d,%.1f,%.1f,%d,%d,%d\n",
                          s.t, static_cast<int>(s.state), s.ref, s.speed,
                          s.position, static_cast<int>(s.torque_actual),
-                         static_cast<int>(s.pi_out), static_cast<int>(s.cmd),
-                         static_cast<int>(s.integral));
+                         static_cast<int>(s.cmd));
         }
         trace_.clear();
         std::fflush(trace_file_);
@@ -634,7 +601,6 @@ private:
         stall_timer_ = 0.0;
         phase_timer_ = 0.0;
         clearPositionHistory();
-        pi_.reset();
 
         if constexpr (requires(TxPDO& p) { p.position_actual; }) {
             backoff_has_position_ = true;
@@ -673,7 +639,6 @@ private:
         stall_timer_ = 0.0;
         phase_timer_ = 0.0;
         clearPositionHistory();
-        pi_.reset();
     }
 
     void finishHoming(CiA402Drive& drive, RxPDO* rx)
@@ -711,9 +676,8 @@ private:
     double fine_magnitude_;       // magnitude used for back-off and re-approach
     double fine_reference_;       // re-approach reference (passes 2..N)
     double backoff_reference_;    // back-off reference (-fine_reference_)
-    double current_reference_;    // active PI setpoint for the current phase
+    double current_reference_;    // active setpoint for the current phase
     double max_permille_;
-    tether::control::PIController pi_;
     std::atomic<bool> homed_{false};
     std::atomic<bool> failed_{false};
     std::atomic<const char*> failure_message_{""};
