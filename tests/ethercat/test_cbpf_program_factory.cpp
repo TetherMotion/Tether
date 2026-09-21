@@ -426,6 +426,108 @@ TEST(VlanRangeFilterTest, InvalidRangeRejected) {
 }
 
 // ============================================================================
+// Stripped-tag (SKF_AD_VLAN_*) legs — models kernel RX VLAN untagging
+//
+// On the real RX path the kernel removes the 802.1Q tag before packet
+// sockets see the data: [12] then shows the INNER EtherType and the TCI
+// is only in skb auxdata.  These tests feed the interpreter an untagged-
+// looking buffer plus the auxdata the kernel would have reported.
+// ============================================================================
+
+namespace {
+
+bool acceptedAux(const std::vector<CBPFInsn>& prog,
+                 const std::vector<uint8_t>& pkt, int tci = -1) {
+    CBPFAuxData aux;
+    if (tci >= 0) aux.vlan_tci = static_cast<uint16_t>(tci);
+    return cbpfExecute(prog, pkt.data(), pkt.size(), &aux) != 0;
+}
+
+} // namespace
+
+TEST(VlanStrippedTagTest, ProgramEmitsAuxLoads) {
+    const auto prog = CBPFProgramFactory::vlanFilter(1999);
+    bool has_present = false, has_tag = false;
+    for (const auto& i : prog) {
+        if (i.code == (cbpf::LD | cbpf::W | cbpf::ABS)) {
+            if (i.k == kSkfAdVlanTagPresent) has_present = true;
+            if (i.k == kSkfAdVlanTag)        has_tag = true;
+        }
+    }
+    EXPECT_TRUE(has_present);
+    EXPECT_TRUE(has_tag);
+}
+
+TEST(VlanStrippedTagTest, FilterAcceptsStrippedMatchingTag) {
+    const auto prog = CBPFProgramFactory::vlanFilter(1999);
+    const auto pkt  = ethFrame(kEtherTypeEtherCAT, ecatPayload());
+    EXPECT_TRUE(acceptedAux(prog, pkt, 0x07CF));       // TCI = VID 1999
+    EXPECT_TRUE(acceptedAux(prog, pkt, 0x07CF | 0xE000)); // PCP 7 + VID
+}
+
+TEST(VlanStrippedTagTest, FilterRejectsStrippedWrongVidAndUntagged) {
+    const auto prog = CBPFProgramFactory::vlanFilter(1999);
+    const auto pkt  = ethFrame(kEtherTypeEtherCAT, ecatPayload());
+    EXPECT_FALSE(acceptedAux(prog, pkt, 2000));        // wrong VID
+    EXPECT_FALSE(acceptedAux(prog, pkt, 0));           // VID 0
+    EXPECT_FALSE(acceptedAux(prog, pkt));              // genuinely untagged
+    EXPECT_FALSE(acceptedAux(prog, ethFrame(0x0806), 0x07CF)); // ARP+tag
+}
+
+TEST(VlanStrippedTagTest, RangeFilterHonorsStrippedTci) {
+    const auto prog = CBPFProgramFactory::vlanRangeFilter(100, 200);
+    const auto pkt  = ethFrame(kEtherTypeEtherCAT, ecatPayload());
+    EXPECT_TRUE(acceptedAux(prog, pkt, 100));
+    EXPECT_TRUE(acceptedAux(prog, pkt, 200));
+    EXPECT_FALSE(acceptedAux(prog, pkt, 99));
+    EXPECT_FALSE(acceptedAux(prog, pkt, 201));
+    EXPECT_FALSE(acceptedAux(prog, pkt));              // untagged → reject
+}
+
+TEST(VlanStrippedTagTest, CatchAllSpecAcceptsAnyStrippedTag) {
+    CBPFSpec s{};
+    s.untagged_ethercat = false;
+    s.tagged_ethercat   = true;                    // vlan:any — no range
+    const auto prog = CBPFProgramFactory::build(s);
+    ASSERT_FALSE(prog.empty());
+    const auto pkt = ethFrame(kEtherTypeEtherCAT, ecatPayload());
+    EXPECT_TRUE(acceptedAux(prog, pkt, 1));
+    EXPECT_TRUE(acceptedAux(prog, pkt, 4095));
+    EXPECT_FALSE(acceptedAux(prog, pkt));          // still rejects untagged
+}
+
+TEST(VlanStrippedTagTest, VlanUdpSpecAcceptsStrippedTaggedUdp) {
+    // vlan:1999 + udp → stripped IPv4 frame + auxdata must reach the
+    // UDP check (base 14, since the data shows the inner EtherType).
+    CBPFSpec s{};
+    s.untagged_ethercat = false;
+    s.tagged_ethercat   = true;
+    s.tagged_udp        = true;
+    s.untagged_udp      = false;
+    s.vlan_range        = CBPFVlanRange{1999, 1999};
+    const auto prog = CBPFProgramFactory::build(s);
+    ASSERT_FALSE(prog.empty());
+
+    EXPECT_TRUE(acceptedAux(prog, udpFrame(UdpOpts{}, ecatPayload()), 1999));
+    UdpOpts wrong; wrong.dst_port = 9999;
+    EXPECT_FALSE(acceptedAux(prog, udpFrame(wrong, ecatPayload()), 1999));
+    EXPECT_FALSE(acceptedAux(prog, udpFrame(UdpOpts{}, ecatPayload()), 2000));
+    EXPECT_FALSE(acceptedAux(prog, udpFrame(UdpOpts{}, ecatPayload())));
+}
+
+TEST(VlanStrippedTagTest, DefaultFilterIgnoresAuxData) {
+    // ethercatFilter() accepts both states anyway — no aux loads needed
+    // and none emitted (the wire leg jumps straight to accept).
+    const auto prog = CBPFProgramFactory::ethercatFilter();
+    for (const auto& i : prog)
+        EXPECT_NE(i.code, static_cast<uint16_t>(cbpf::LD | cbpf::W | cbpf::ABS))
+            << "unexpected SKF_AD load in the default program";
+    const auto pkt = ethFrame(kEtherTypeEtherCAT, ecatPayload());
+    EXPECT_TRUE(acceptedAux(prog, pkt, 77));       // tagged-but-stripped: ok
+    EXPECT_TRUE(acceptedAux(prog, pkt));           // untagged: ok
+}
+
+// ============================================================================
 // ethercatFilterWithUdp() — adds IPv4/UDP dst-port matching
 // ============================================================================
 

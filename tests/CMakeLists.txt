@@ -1177,6 +1177,14 @@ target_link_libraries(tether_ethercat_rt_privileged_tests
     GTest::gmock
 )
 
+# HAL-level end-to-end coverage (LinuxEthernet::poll → kernel cBPF →
+# VLANRouter) is compiled in only when the HAL component exists.
+if(TARGET tether_hal)
+    target_link_libraries(tether_ethercat_rt_privileged_tests tether_hal)
+    target_compile_definitions(tether_ethercat_rt_privileged_tests PRIVATE
+        TETHER_TEST_HAVE_HAL=1)
+endif()
+
 target_compile_definitions(tether_ethercat_rt_privileged_tests PRIVATE
     TETHER_COMPILE_MASTER=1
 )

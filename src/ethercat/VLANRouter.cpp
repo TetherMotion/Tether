@@ -264,27 +264,30 @@ NetworkInterface* VLANRouter::undefinedNetworkInterface() const
 // RX processing
 // ============================================================================
 
-void VLANRouter::processRxFrame(const uint8_t* data, size_t len)
+void VLANRouter::processRxFrame(const uint8_t* data, size_t len,
+                                std::optional<uint16_t> aux_vlan_id)
 {
     if (!data || len < kEthernetHeaderSize) return;
 
     const uint16_t ether_type = be16_from_raw(data + 12);
+    const bool inline_tagged = (ether_type == kVlanEtherType);
+    // A kernel-stripped tag (PACKET_AUXDATA): the tag is not in the data —
+    // the frame is already decapsulated and aux_vlan_id is the wire VID.
+    const bool tagged = inline_tagged || aux_vlan_id.has_value();
+    if (inline_tagged && len < kEthernetHeaderSize + kVlanTagSize) return;
+    // aux_vlan_id is the wire-level tag — it wins over inline bytes
+    // (e.g. a QinQ inner tag still inline while the outer was stripped).
+    const uint16_t vid = aux_vlan_id.value_or(
+        inline_tagged ? be16_from_raw(data + 14) & 0x0FFFu : 0);
 
     std::vector<InternalEntry> targets;
     std::shared_ptr<Master> undefined_master;
-    bool has_undefined = false;
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
         targets.reserve(entries_.size());
 
-        if (ether_type == kVlanEtherType) {
-            // 802.1Q tagged frame: need at least TPID + TCI
-            if (len < kEthernetHeaderSize + kVlanTagSize) return;
-
-            const uint16_t tci = be16_from_raw(data + 14);
-            const uint16_t vid = tci & 0x0FFFu;
-
+        if (tagged) {
             // Collect all masters whose range contains this VID
             for (const auto& entry : entries_) {
                 if (entry.rx_vlan_range.has_value() &&
@@ -296,7 +299,6 @@ void VLANRouter::processRxFrame(const uint8_t* data, size_t len)
             // If no range matches, check the dedicated undefined target
             if (targets.empty() && undefined_target_.has_value()) {
                 undefined_master = undefined_target_->master;
-                has_undefined = true;
             }
         } else {
             // Untagged frame
@@ -308,46 +310,37 @@ void VLANRouter::processRxFrame(const uint8_t* data, size_t len)
         }
     }
 
-    // Decapsulate if needed and deliver outside the lock
-    if (ether_type == kVlanEtherType) {
-        if (len < kEthernetHeaderSize + kVlanTagSize) return;
-
-        constexpr size_t kMaxFrame = 1518;
-        uint8_t decap[kMaxFrame];
+    // Payload for delivery: decapsulate an inline tag; a kernel-stripped
+    // frame is already decapsulated, so it needs no copy at all.
+    const uint8_t* payload = data;
+    size_t payload_len = len;
+    uint8_t decap[1518];
+    if (inline_tagged) {
         if (len - kVlanTagSize > sizeof(decap)) return;
-
-        // Reconstruct original frame: copy MACs, then original EtherType + payload
         std::memcpy(decap, data, 12);
         std::memcpy(decap + 12, data + 16, len - 16);
-        const size_t decap_len = len - kVlanTagSize;
+        payload = decap;
+        payload_len = len - kVlanTagSize;
+    }
 
-        if (has_undefined && undefined_master && deliver_) {
-            deliver_(undefined_master.get(), decap, decap_len);
+    if (tagged && targets.empty()) {
+        if (undefined_master && deliver_) {
+            deliver_(undefined_master.get(), payload, payload_len);
             return;
         }
+        // Log warning for unhandled tagged frame
+        const uint16_t inner_et =
+            inline_tagged ? be16_from_raw(data + 16) : ether_type;
+        const char* et_name = etherTypeName(inner_et);
+        TETHER_LOGW("VLANRouter",
+                    "Received tagged frame with VID {}, inner EtherType 0x{:04X} ({}) — no matching master or undefined target",
+                    vid, inner_et, et_name ? et_name : "unknown");
+        return;
+    }
 
-        if (targets.empty()) {
-            // Log warning for unhandled tagged frame
-            const uint16_t inner_et = be16_from_raw(data + 16);
-            const char* et_name = etherTypeName(inner_et);
-            TETHER_LOGW("VLANRouter",
-                        "Received tagged frame with VID {}, inner EtherType 0x{:04X} ({}) — no matching master or undefined target",
-                        be16_from_raw(data + 14) & 0x0FFFu,
-                        inner_et,
-                        et_name ? et_name : "unknown");
-            return;
-        }
-
-        for (const auto& entry : targets) {
-            if (entry.master && deliver_) {
-                deliver_(entry.master.get(), decap, decap_len);
-            }
-        }
-    } else {
-        for (const auto& entry : targets) {
-            if (entry.master && deliver_) {
-                deliver_(entry.master.get(), data, len);
-            }
+    for (const auto& entry : targets) {
+        if (entry.master && deliver_) {
+            deliver_(entry.master.get(), payload, payload_len);
         }
     }
 }

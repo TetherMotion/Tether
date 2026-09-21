@@ -103,6 +103,32 @@ inline constexpr uint16_t kEtherType8021Q  = 0x8100;
 /// IPv4 EtherType (EtherCAT-over-UDP encapsulation).
 inline constexpr uint16_t kEtherTypeIPv4   = 0x0800;
 
+/**
+ * @brief Kernel socket-filter ancillary data offsets (linux/filter.h uapi).
+ *
+ * On the RX path the kernel removes 802.1Q tags *before* delivering a frame
+ * to packet sockets (rx-vlan-offload / the generic untag in
+ * __netif_receive_skb_core): the frame data then shows the INNER EtherType
+ * at [12] and the tag lives only in skb metadata.  cBPF programs read that
+ * metadata through "ancillary data" loads: LD|W|ABS with k = SKF_AD_OFF+id.
+ * This is the same mechanism libpcap generates for `vlan` expressions.
+ */
+inline constexpr uint32_t kSkfAdOff             = 0xFFFFF000u;  // SKF_AD_OFF
+inline constexpr uint32_t kSkfAdVlanTag        = kSkfAdOff + 44; // TCI
+inline constexpr uint32_t kSkfAdVlanTagPresent = kSkfAdOff + 48; // 0/1
+
+/**
+ * @brief Stripped-tag metadata for the user-space interpreter.
+ *
+ * Models what the kernel reports through SKF_AD_VLAN_* loads (equivalently
+ * PACKET_AUXDATA on recvmsg): a frame whose 802.1Q tag was removed from the
+ * data buffer before delivery.  Pass nullptr (default) for "no tag".
+ */
+struct CBPFAuxData {
+    std::optional<uint16_t> vlan_tci;   ///< stripped TCI (set = tag present)
+    uint16_t vlan_tpid = 0;             ///< TPID of the stripped tag
+};
+
 /// Inclusive VLAN-ID range for tagged-frame acceptance.
 struct CBPFVlanRange {
     uint16_t start = 0;
@@ -145,15 +171,19 @@ public:
         uint16_t port = kEtherCATUdpPort);
 
     /**
-     * @brief VLAN-filtered mode (--rx-vlan N): accept ONLY 802.1Q frames
-     *        with VID == @p vid whose inner EtherType is EtherCAT.
+     * @brief VLAN-filtered mode (--encapsulation vlan:N): accept ONLY
+     *        802.1Q frames with VID == @p vid whose inner EtherType is
+     *        EtherCAT — whether the tag arrives inline (self-TX copies) or
+     *        stripped to skb auxdata (the normal kernel RX path, where the
+     *        frame data shows the INNER EtherType at [12] and the tag is
+     *        only readable via SKF_AD_VLAN_* ancillary loads).
      *
      * Untagged frames — including untagged EtherCAT — and UDP-encapsulated
      * EtherCAT are rejected.  Returns an empty vector for vid > 4095.
      */
     static std::vector<CBPFInsn> vlanFilter(uint16_t vid);
 
-    /// Range variant of vlanFilter() (--rx-vlan "lo-hi").
+    /// Range variant of vlanFilter() (--encapsulation vlan:lo-hi).
     static std::vector<CBPFInsn> vlanRangeFilter(uint16_t lo, uint16_t hi);
 
     /**
@@ -176,13 +206,19 @@ public:
  * (the kernel interprets it as the accepted byte count).  Out-of-bounds
  * loads, division/modulo by zero, and unknown opcodes abort with 0 —
  * matching the kernel's classic-BPF interpreter.
+ *
+ * @param aux  Optional stripped-tag metadata — when set, SKF_AD_VLAN_*
+ *             loads report it; when nullptr they report "no tag present",
+ *             matching a socket that receives a genuinely untagged frame.
  */
 uint32_t cbpfExecute(const CBPFInsn* prog, size_t count,
-                     const uint8_t* data, size_t len);
+                     const uint8_t* data, size_t len,
+                     const CBPFAuxData* aux = nullptr);
 
 inline uint32_t cbpfExecute(const std::vector<CBPFInsn>& prog,
-                            const uint8_t* data, size_t len) {
-    return cbpfExecute(prog.data(), prog.size(), data, len);
+                            const uint8_t* data, size_t len,
+                            const CBPFAuxData* aux = nullptr) {
+    return cbpfExecute(prog.data(), prog.size(), data, len, aux);
 }
 
 } // namespace EtherCAT
