@@ -122,7 +122,7 @@ struct CyclicRxSlot {
     uint8_t  gen;                   // echoed send generation (lenFlags bit 13)
     const uint8_t* payload;         // view into channel memory, or data[]
     int64_t cookie{-1};             // channel cookie, -1 = inline copy
-    uint8_t  data[1486];            // inline buffer for the copy path
+    uint8_t  data[kMaxDatagramDataSize];  // inline buffer (2047 B, 11-bit max)
 };
 ```
 

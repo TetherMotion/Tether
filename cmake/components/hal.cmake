@@ -24,6 +24,12 @@ elseif(TETHER_PLATFORM_ESP32)
         ${TETHER_ROOT}/src/hal/ESP32Timer.cpp
         ${TETHER_ROOT}/src/hal/ESP32Threading.cpp
     )
+elseif(TETHER_PLATFORM_WINDOWS OR WIN32)
+    list(APPEND TETHER_HAL_SOURCES
+        ${TETHER_ROOT}/src/hal/WindowsEthernet.cpp
+    )
+    # Npcap (WinPcap-compatible) + adapter enumeration + sockets.
+    set(TETHER_HAL_PLATFORM_LIBS wpcap iphlpapi ws2_32 synchronization)
 elseif(TETHER_PLATFORM_STM32)
     list(APPEND TETHER_HAL_SOURCES
         ${TETHER_ROOT}/src/hal/STM32Clock.cpp

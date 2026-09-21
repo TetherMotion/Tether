@@ -124,7 +124,7 @@ public:
         /// Send-generation bit echoed from the datagram's lenFlags res-bit
         /// 13 — collect rejects deposits of the previous generation.
         uint8_t  gen{0};
-        uint8_t  data[1486];
+        uint8_t  data[kMaxDatagramDataSize];
     };
     std::array<RxSlot, kNumCyclicSlots> slots_{};
 
@@ -134,9 +134,10 @@ public:
     ProcessImage image_;
     ImageMode active_image_mode_ = ImageMode::Buffered;
 
-    /// Persistent cyclic TX frame buffer — avoids a 1514-byte zeroed stack
-    /// buffer per cycle.  Only the cyclic thread writes it.
-    uint8_t tx_buf_[1514] = {};
+    /// Persistent cyclic TX frame buffer — avoids a zeroed stack buffer
+    /// per cycle.  Only the cyclic thread writes it.  Jumbo-sized so a
+    /// raised Master::Config::max_frame_size can use the whole slice.
+    uint8_t tx_buf_[kMaxJumboFrameSize] = {};
 
     /// Linux eventfd signalled on cyclic-slot deposits *while a waiter is
     /// registered* (waiters_ > 0) so a blocked cyclic waiter wakes

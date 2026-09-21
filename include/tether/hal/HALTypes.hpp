@@ -47,6 +47,12 @@ constexpr size_t kVlanTagSize = 4;
 /// Maximum frame size with VLAN tag
 constexpr size_t kMaxFrameSizeVlan = kMaxFrameSize + kVlanTagSize;
 
+/// Maximum jumbo Ethernet frame size (9000-byte MTU + 14-byte header,
+/// excluding FCS).  Buffers that must hold the largest configurable frame
+/// use this ceiling.
+constexpr size_t kMaxJumboFrameSize = 9014;
+constexpr size_t kMaxJumboFrameSizeVlan = kMaxJumboFrameSize + kVlanTagSize;
+
 /// EtherType for EtherCAT
 constexpr uint16_t kEtherTypeEtherCAT = 0x88A4;
 

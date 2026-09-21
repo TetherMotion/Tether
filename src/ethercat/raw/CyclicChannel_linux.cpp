@@ -190,7 +190,11 @@ int waitReadable(int fd, uint32_t timeout_ns) {
 class LinuxSocketChannel : public ICyclicChannel {
 public:
     static constexpr int kBankSize   = 4;
-    static constexpr int kFrameBytes = 1600;
+    // Jumbo-sized: the socket backend stages/copies frames into these
+    // buffers, so size them to the compile-time ceiling rather than
+    // CyclicChannelConfig::frame_size (which sizes the ring backend slots).
+    static constexpr int kFrameBytes =
+        static_cast<int>(kMaxJumboFrameSize);
 
     LinuxSocketChannel(int fd, int ifindex) : fd_(fd), ifindex_(ifindex) {}
     ~LinuxSocketChannel() override { if (fd_ >= 0) ::close(fd_); }
@@ -357,6 +361,7 @@ public:
         uint32_t rx_spin_ns = 0;   ///< busy-poll window inside rxPoll()
         bool     rx_v3      = false;
         uint32_t rx_v3_retire_us = 10'000;   ///< tp_retire_blk_tov
+        uint32_t frame_size = 1600;          ///< per-slot frame bytes
     };
 
     LinuxRingChannel(int fd, int ifindex, const Config& cfg)
@@ -632,7 +637,8 @@ private:
             req->tp_block_nr   = r3.tp_block_nr;
             return true;
         }
-        const uint32_t frame_size = TPACKET_ALIGN(TPACKET2_HDRLEN + 1600);
+        const uint32_t frame_size =
+            TPACKET_ALIGN(TPACKET2_HDRLEN + cfg_.frame_size);
         const uint32_t fpb = frame_size <= page ? page / frame_size : 1;
         req->tp_block_size = fpb * frame_size;
         req->tp_block_size = (req->tp_block_size + page - 1) / page * page;
@@ -646,7 +652,8 @@ private:
 
     bool configTxRing(struct tpacket_req* req) {
         const uint32_t page = (uint32_t)::sysconf(_SC_PAGESIZE);
-        const uint32_t frame_size = TPACKET_ALIGN(TPACKET2_HDRLEN + 1600);
+        const uint32_t frame_size =
+            TPACKET_ALIGN(TPACKET2_HDRLEN + cfg_.frame_size);
         const uint32_t fpb = frame_size <= page ? page / frame_size : 1;
         req->tp_block_size = fpb * frame_size;
         req->tp_block_size = (req->tp_block_size + page - 1) / page * page;
@@ -905,7 +912,8 @@ std::unique_ptr<ICyclicChannel> createCyclicChannel(
                                           cfg.tx_ring_blocks,
                                           cfg.rx_spin_ns,
                                           cfg.rx_tpacket_v3,
-                                          cfg.rx_v3_retire_us};
+                                          cfg.rx_v3_retire_us,
+                                          cfg.frame_size};
             auto ring = std::make_unique<LinuxRingChannel>(fd, cfg.ifindex,
                                                            rcfg);
             if (ring->init()) {

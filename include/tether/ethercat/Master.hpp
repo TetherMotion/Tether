@@ -193,6 +193,13 @@ public:
         uint16_t preop_inner_sleep_ms = 20;  ///< Delay between AL_STATUS polls
         uint16_t preop_backoff_ms     = 200; ///< Base backoff before retry (scaled by attempt index)
 
+        /// Maximum Ethernet frame size excluding FCS (default 1514).
+        /// Raise for jumbo links to carry larger LRW slices per frame —
+        /// a single datagram still caps at 2047 B (11-bit length field),
+        /// but jumbo frames also pack more datagrams per frame.
+        /// Requires NIC MTU and slave support.  Clamped to [1514, 9014].
+        uint32_t max_frame_size = 1514;
+
 #if TETHER_ENABLE_UDP_ENCAPSULATION
         /// EtherCAT-over-UDP encapsulation settings (opt-in, default: disabled).
         /// When enabled, frames are encapsulated as Ethernet/IPv4/UDP(port 34980)
