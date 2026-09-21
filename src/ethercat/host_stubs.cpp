@@ -59,15 +59,6 @@ bool ReadWatchdogStatus(uint16_t slave_index, uint8_t& wd_status, uint8_t& pdi_c
 
 #endif // !TETHER_ENABLE_ETHERCAT && !defined(TETHER_COMPILE_MASTER)
 
-// SDO helpers often implemented on the raw layer - provide minimal stubs (always present)
-extern "C" bool ecm_sdo_read(uint16_t slave_addr, uint16_t index, uint8_t subindex, void* data, size_t len, bool use_configured_addr) {
-    (void)slave_addr; (void)index; (void)subindex; (void)data; (void)len; (void)use_configured_addr; return false;
-}
-
-extern "C" bool ecm_sdo_write(uint16_t slave_addr, uint16_t index, uint8_t subindex, const void* data, size_t len, bool use_configured_addr) {
-    (void)slave_addr; (void)index; (void)subindex; (void)data; (void)len; (void)use_configured_addr; return false;
-}
-
 // Minimal platform stubs
 namespace EtherCAT {
 namespace Platform {

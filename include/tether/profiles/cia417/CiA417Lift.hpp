@@ -22,6 +22,8 @@
 #include <functional>
 #include <vector>
 
+namespace EtherCAT { namespace CoE { class CoEManager; } }
+
 namespace CiA417 {
 
 // ============================================================================
@@ -153,7 +155,13 @@ enum class PDOMappingPreset {
 
 class LiftController {
 public:
-    explicit LiftController(uint16_t slave_addr, bool use_configured_addr = false);
+    /**
+     * @param slave_addr Slave station address (used for logging only)
+     * @param coe        CoE manager for this slave (e.g. &master.sdoManager(idx)).
+     *                   May be nullptr — SDO-based methods then return false.
+     */
+    explicit LiftController(uint16_t slave_addr,
+                            EtherCAT::CoE::CoEManager* coe = nullptr);
     ~LiftController();
     
     // ========================================================================
@@ -353,8 +361,8 @@ private:
     bool readSDO(uint16_t index, uint8_t subindex, void* data, size_t len);
     bool writeSDO(uint16_t index, uint8_t subindex, const void* data, size_t len);
     
+    EtherCAT::CoE::CoEManager* coe_;
     uint16_t slave_addr_;
-    bool use_configured_addr_;
     bool initialized_;
     
     LiftSpec spec_;

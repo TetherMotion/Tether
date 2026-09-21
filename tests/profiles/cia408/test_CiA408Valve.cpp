@@ -178,7 +178,7 @@ protected:
 };
 
 TEST_F(CiA408Test, Construction) {
-    ValveController v2(0x100, true);
+    ValveController v2(0x100);
     EXPECT_FALSE(v2.isEnabled());
     EXPECT_FALSE(v2.hasFault());
 }

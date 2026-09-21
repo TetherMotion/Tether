@@ -182,7 +182,7 @@ protected:
 };
 
 TEST_F(CiA417Test, Construction) {
-    LiftController l2(0x100, true);
+    LiftController l2(0x100);
     EXPECT_FALSE(l2.isInitialized());
 }
 
