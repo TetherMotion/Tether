@@ -13,6 +13,11 @@ DS402Master::DS402Master(const Master::Config& config)
 {
 }
 
+DS402Master::~DS402Master()
+{
+    drainControllerOps();
+}
+
 void DS402Master::start(const NetworkInterface& iface, const uint8_t src_mac[6])
 {
     ethercat_master_.start(iface, src_mac);
@@ -168,24 +173,13 @@ bool DS402Master::isManagedDrive(uint16_t slave_index) const
     return role == SlaveRole::DS402 || role == SlaveRole::DynaDrive;
 }
 
-bool DS402Master::addMotionController(uint16_t slave_index,
-                                      std::unique_ptr<IDriveMotionController> controller)
+bool DS402Master::realtimeLoopRunning() const
 {
-    if (!controller || !isManagedDrive(slave_index)) {
-        return false;
-    }
-
-    auto* drive = driveBySlaveIndex(slave_index);
-    if (drive == nullptr || !controller->start(*drive)) {
-        return false;
-    }
-
-    removeMotionController(slave_index);
-    motion_controllers_.emplace_back(slave_index, std::move(controller));
-    return true;
+    return ethercat_master_.isMotionControlLoopRunning() ||
+           ethercat_master_.isCyclicLoopRunning();
 }
 
-bool DS402Master::removeMotionController(uint16_t slave_index)
+bool DS402Master::eraseController(uint16_t slave_index)
 {
     auto it = std::find_if(
         motion_controllers_.begin(), motion_controllers_.end(),
@@ -201,8 +195,116 @@ bool DS402Master::removeMotionController(uint16_t slave_index)
     return true;
 }
 
+void DS402Master::drainControllerOps()
+{
+    std::vector<PendingControllerOp> ops;
+    std::vector<std::unique_ptr<ICyclicTask>> retired;
+    {
+        std::lock_guard<std::mutex> lock(motion_ctl_mutex_);
+        ops.swap(pending_controller_ops_);
+        retired.swap(retired_tasks_);
+        controller_ops_pending_.store(false, std::memory_order_release);
+        tasks_retired_.store(false, std::memory_order_release);
+    }
+
+    // Applied in enqueue order on this (the loop's, or a post-stop
+    // application) thread — never concurrently with the iteration below.
+    for (auto& op : ops) {
+        switch (op.kind) {
+        case PendingControllerOp::Kind::Add:
+            eraseController(op.slave_index);  // replace semantics
+            motion_controllers_.emplace_back(op.slave_index,
+                                             std::move(op.controller));
+            break;
+        case PendingControllerOp::Kind::Remove:
+            eraseController(op.slave_index);
+            break;
+        case PendingControllerOp::Kind::Clear:
+            for (auto& entry : motion_controllers_) {
+                if (entry.second) {
+                    if (auto* drive = driveBySlaveIndex(entry.first)) {
+                        entry.second->stop(*drive);
+                    }
+                }
+            }
+            motion_controllers_.clear();
+            break;
+        }
+    }
+    // `retired` destroys here: cyclic tasks removed via clearCyclicTasks()
+    // while a loop ran are only destructed once the scheduler's schedule
+    // snapshot is guaranteed rebuilt (its schedule_dirty_ flag) — i.e.
+    // this drain precedes the next executeAll().
+}
+
+bool DS402Master::addMotionController(uint16_t slave_index,
+                                      std::unique_ptr<IDriveMotionController> controller)
+{
+    if (!controller || !isManagedDrive(slave_index)) {
+        return false;
+    }
+
+    auto* drive = driveBySlaveIndex(slave_index);
+    if (drive == nullptr || !controller->start(*drive)) {
+        return false;
+    }
+
+    if (realtimeLoopRunning()) {
+        // The loop thread owns motion_controllers_ — hand the controller
+        // over; it joins at the next cycle boundary.
+        std::lock_guard<std::mutex> lock(motion_ctl_mutex_);
+        pending_controller_ops_.push_back(
+            {PendingControllerOp::Kind::Add, slave_index,
+             std::move(controller)});
+        controller_ops_pending_.store(true, std::memory_order_release);
+        return true;
+    }
+
+    eraseController(slave_index);  // replace an existing controller
+    motion_controllers_.emplace_back(slave_index, std::move(controller));
+    return true;
+}
+
+bool DS402Master::removeMotionController(uint16_t slave_index)
+{
+    if (realtimeLoopRunning()) {
+        std::lock_guard<std::mutex> lock(motion_ctl_mutex_);
+        // Registered (still active until the drain) or a pending Add?
+        bool known = std::any_of(
+            motion_controllers_.begin(), motion_controllers_.end(),
+            [slave_index](const auto& e) { return e.first == slave_index; });
+        if (!known) {
+            for (auto it = pending_controller_ops_.rbegin();
+                 it != pending_controller_ops_.rend(); ++it) {
+                if (it->kind == PendingControllerOp::Kind::Clear) break;
+                if (it->slave_index != slave_index) continue;
+                known = (it->kind == PendingControllerOp::Kind::Add);
+                break;
+            }
+        }
+        if (!known) {
+            return false;
+        }
+        pending_controller_ops_.push_back(
+            {PendingControllerOp::Kind::Remove, slave_index, {}});
+        controller_ops_pending_.store(true, std::memory_order_release);
+        return true;
+    }
+
+    return eraseController(slave_index);
+}
+
 void DS402Master::clearMotionControllers()
 {
+    if (realtimeLoopRunning()) {
+        std::lock_guard<std::mutex> lock(motion_ctl_mutex_);
+        pending_controller_ops_.push_back(
+            {PendingControllerOp::Kind::Clear, 0, {}});
+        controller_ops_pending_.store(true, std::memory_order_release);
+        return;
+    }
+
+    drainControllerOps();  // apply anything stranded by a prior run
     for (auto& entry : motion_controllers_) {
         if (entry.second) {
             if (auto* drive = driveBySlaveIndex(entry.first)) {
@@ -210,7 +312,6 @@ void DS402Master::clearMotionControllers()
             }
         }
     }
-
     motion_controllers_.clear();
 }
 
@@ -241,11 +342,29 @@ bool DS402Master::addCyclicTask(std::unique_ptr<ICyclicTask> task, TaskPhase pha
 void DS402Master::clearCyclicTasks()
 {
     cyclic_task_scheduler_.clear();
+    if (realtimeLoopRunning()) {
+        // Destruction deferred: the scheduler's current schedule snapshot
+        // may still hold these pointers until the next executeAll() rebuild.
+        std::lock_guard<std::mutex> lock(motion_ctl_mutex_);
+        for (auto& t : owned_tasks_) {
+            retired_tasks_.push_back(std::move(t));
+        }
+        owned_tasks_.clear();
+        tasks_retired_.store(true, std::memory_order_release);
+        return;
+    }
     owned_tasks_.clear();
 }
 
 bool DS402Master::updateMotionControllers(double dt_seconds)
 {
+    // Apply queued add/remove/clear on this thread — the only thread that
+    // iterates motion_controllers_ while a loop is running.
+    if (controller_ops_pending_.load(std::memory_order_acquire) ||
+        tasks_retired_.load(std::memory_order_acquire)) {
+        drainControllerOps();
+    }
+
     // Check if any slave is suspended by the supervisor.
     // Suspended slaves must not have their PDO data passed to motion
     // controllers — the slave is being re-initialized and its PDO buffers
@@ -293,6 +412,7 @@ bool DS402Master::startPollingMotionControlLoop(const Master::PollingMotionLoopC
 void DS402Master::stopMotionControlLoop()
 {
     ethercat_master_.stopMotionControlLoop();
+    drainControllerOps();  // no more updates — apply leftovers on this thread
 }
 
 bool DS402Master::startCyclicLoop(const Master::CyclicLoopConfig& config)
@@ -302,9 +422,18 @@ bool DS402Master::startCyclicLoop(const Master::CyclicLoopConfig& config)
     return ethercat_master_.startCyclicLoop(config);
 }
 
+Master::CyclicLoopGuard DS402Master::startCyclicLoopScoped(
+    const Master::CyclicLoopConfig& config)
+{
+    ethercat_master_.setMotionControlCallback(
+        [this](double dt_seconds) { return updateMotionControllers(dt_seconds); });
+    return ethercat_master_.startCyclicLoopScoped(config);
+}
+
 void DS402Master::stopCyclicLoop()
 {
     ethercat_master_.stopCyclicLoop();
+    drainControllerOps();  // no more updates — apply leftovers on this thread
 }
 
 CiA402Drive* DS402Master::driveAt(size_t index)

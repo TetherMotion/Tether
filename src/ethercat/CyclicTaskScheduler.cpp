@@ -40,7 +40,10 @@ TaskHandle CyclicTaskScheduler::addTask(ICyclicTask* task, TaskPhase phase, uint
 
     entries_.push_back({task, phase, priority, id});
     std::sort(entries_.begin(), entries_.end(), entryLess);
-    rebuildSchedule();
+    // Do NOT rebuild schedule_ here: executeAll() iterates it without the
+    // lock — only the executing thread may write it.  The dirty flag makes
+    // the next executeAll() pick the change up.
+    schedule_dirty_.store(true, std::memory_order_release);
 
     return {id};
 }
@@ -54,14 +57,17 @@ bool CyclicTaskScheduler::removeTask(TaskHandle handle) {
     if (it == entries_.end()) return false;
 
     entries_.erase(it);
-    rebuildSchedule();
+    schedule_dirty_.store(true, std::memory_order_release);
     return true;
 }
 
 void CyclicTaskScheduler::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     entries_.clear();
-    schedule_.clear();
+    // Leave schedule_ intact — executeAll() checks the dirty flag before
+    // iterating, so the stale snapshot is never dereferenced.  Callers
+    // must not destroy the tasks until the next executeAll() has run
+    // (DS402Master defers destruction through its retired-task list).
     schedule_dirty_.store(true, std::memory_order_release);
 }
 
