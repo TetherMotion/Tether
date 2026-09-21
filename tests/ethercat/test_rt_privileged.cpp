@@ -41,6 +41,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -54,7 +55,6 @@
 #include <linux/filter.h>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
-#include <linux/sched/types.h>
 #include <net/ethernet.h>
 #include <net/if.h>
 #include <poll.h>
@@ -65,6 +65,20 @@
 #include <sys/syscall.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+
+// struct sched_attr has no glibc wrapper and <linux/sched/types.h> clashes
+// with <sched.h> over struct sched_param on older kernel headers — define it
+// locally, matching the uapi layout (same approach as Platform.cpp).
+struct sched_attr_local {
+    uint32_t size;
+    uint32_t sched_policy;
+    uint64_t sched_flags;
+    int32_t  sched_nice;
+    uint32_t sched_priority;
+    uint64_t sched_runtime;
+    uint64_t sched_deadline;
+    uint64_t sched_period;
+};
 
 #include "tether/ethercat/CyclicChannel.hpp"
 #include "tether/ethercat/CyclicExecutive.hpp"
@@ -835,7 +849,8 @@ TEST_F(RtSchedTest, SetCurrentThreadDeadlineAcquiresDeadline) {
         // runtime/deadline/period in ns — must satisfy runtime<=deadline<=period.
         const bool ok = Tether::Platform::setCurrentThreadDeadline(
             50'000, 200'000, 200'000);
-        struct sched_attr attr{};
+        struct sched_attr_local attr{};
+        attr.size = sizeof(attr);
         ::syscall(SYS_sched_getattr, 0, &attr, sizeof(attr), 0);
         policy = (int)attr.sched_policy;
         EXPECT_TRUE(ok);
@@ -911,7 +926,8 @@ TEST_F(RtSchedTest, CyclicExecutiveRunsUnderDeadlineClass) {
         [&] { ++cycles; return true; }, nullptr, nullptr, cfg);
     ASSERT_TRUE(e.addTask(TaskPhase::Diagnostics, [&] {
         if (seen_policy < 0) {
-            struct sched_attr attr{};
+            struct sched_attr_local attr{};
+            attr.size = sizeof(attr);
             ::syscall(SYS_sched_getattr, 0, &attr, sizeof(attr), 0);
             seen_policy = (int)attr.sched_policy;
         }
