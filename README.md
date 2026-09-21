@@ -460,7 +460,7 @@ plus a Doxygen `Doxyfile`):
 
 - **EtherCAT** — `docs/PDOModes.md`, `docs/EXTRACT_ESI.md`, `docs/FSoECrcResync.md`
 - **Motion** — `docs/motion/` (architecture, blending, TOPPRA derivation,
-  profiler selection, ReNURBS), `KINEMATIC_MODELS.md`, `docs/SnapSpaceVelocityProfiler.md`
+  profiler selection, ReNURBS), `docs/KINEMATIC_MODELS.md`, `docs/SnapSpaceVelocityProfiler.md`
 - **Klipper** — `docs/KlipperArchitecture.md`, `KlipperProtocol.md`,
   `KlipperGcodeCommands.md`, `KlipperMoonrakerApi.md`, `KlipperPrinterObjects.md`,
   `KlipperTerminology.md`
