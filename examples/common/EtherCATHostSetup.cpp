@@ -114,11 +114,31 @@ void shutdownHostEthernet(HostEtherNetSession& session) {
     }
 }
 
-bool setupVlanAndRxCallback(HostEtherNetSession& session,
-                            EtherCAT::Master& master,
-                            const VlanConfig& vlan,
-                            const char* /*tag*/) {
-    if (vlan.enabled) {
+bool setupEncapAndRxCallback(HostEtherNetSession& session,
+                             EtherCAT::Master& master,
+                             const EncapConfig& encap,
+                             const char* tag) {
+    // Kernel-side ingress filter: drops non-EtherCAT traffic (and, in VLAN
+    // mode, everything outside the configured VID) before userspace sees it.
+    attachEncapBpfFilter(*session.eth, encap, tag);
+
+    if (encap.udp) {
+        EtherCAT::UdpEncapsulationConfig uc;
+        uc.enabled          = true;
+        uc.destination_port = encap.udpPort;
+        master.setUdpEncapsulation(uc);
+        if (!master.isUdpEncapsulationEnabled()) {
+            TETHER_LOGE(tag, "--encapsulation udp requires a build with "
+                             "TETHER_ENABLE_UDP_ENCAPSULATION=ON");
+            return false;
+        }
+        // The HAL's software EtherType filter (0x88A4) would drop IPv4/UDP
+        // frames — disable it; the attached cBPF filter does the real work
+        // and the master parser rejects anything stray regardless.
+        session.eth->setEthertypeFilter(0);
+    }
+
+    if (encap.vlanActive()) {
         // VLAN-routed masters must not bypass the VLANRouter: drop the
         // direct-receive fast path so the cyclic executive waits on the
         // eventfd/slot while the poll thread keeps demuxing by VLAN tag.
@@ -126,18 +146,18 @@ bool setupVlanAndRxCallback(HostEtherNetSession& session,
         session.ni->native_handle = nullptr;
         session.router = std::make_unique<EtherCAT::VLANRouter>();
         session.router->setBackend(session.ni.get());
-        if (vlan.rxAny) {
+        if (encap.rxAny) {
             session.router->setUndefinedTarget(
                 std::shared_ptr<EtherCAT::Master>(&master, [](auto*) {}),
-                vlan.txVlan, true);
-        } else if (vlan.rxRange) {
+                encap.txVlan, true);
+        } else if (encap.rxRange) {
             session.router->addMaster(
                 std::shared_ptr<EtherCAT::Master>(&master, [](auto*) {}),
-                *vlan.rxRange, vlan.txVlan);
+                *encap.rxRange, encap.txVlan);
         } else {
             session.router->addMaster(
                 std::shared_ptr<EtherCAT::Master>(&master, [](auto*) {}),
-                std::nullopt, vlan.txVlan);
+                std::nullopt, encap.txVlan);
         }
 
         session.eth->setRxCallback(
@@ -159,10 +179,10 @@ bool setupVlanAndRxCallback(HostEtherNetSession& session,
 
 bool startHostMaster(HostEtherNetSession& session,
                      EtherCAT::Master& master,
-                     const VlanConfig& vlan,
+                     const EncapConfig& encap,
                      const char* tag) {
-    if (vlan.enabled && session.router) {
-        EtherCAT::NetworkInterface* masterIface = vlan.rxAny
+    if (encap.vlanActive() && session.router) {
+        EtherCAT::NetworkInterface* masterIface = encap.rxAny
             ? session.router->undefinedNetworkInterface()
             : session.router->networkInterfaceFor(&master);
         if (!masterIface) {
@@ -178,9 +198,9 @@ bool startHostMaster(HostEtherNetSession& session,
 
 bool startHostMasterAndDiscover(HostEtherNetSession& session,
                                 EtherCAT::Master& master,
-                                const VlanConfig& vlan,
+                                const EncapConfig& encap,
                                 const char* tag) {
-    if (!startHostMaster(session, master, vlan, tag)) {
+    if (!startHostMaster(session, master, encap, tag)) {
         return false;
     }
     auto slaves = master.discovery().discover();

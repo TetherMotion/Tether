@@ -878,7 +878,7 @@ struct Args {
     uint16_t watchdog_ms = EtherCAT::Drives::Synapticon::SafeMotion::Timing::kMinimumWatchdogTimeMs;
     uint32_t diag_interval_ms = 1000;
     std::string debug;
-    Tether::Examples::VlanConfig vlan;
+    Tether::Examples::EncapConfig encap;
     ///< STO override: -1 = not set (use motionEnabled default), 0 = force STO off, 1 = force STO on
     int sto_override = -1;
     ///< SOS override: -1 = not set (defaults to STO value), 0 = force SOS off, 1 = force SOS on
@@ -1014,13 +1014,11 @@ bool parseArgs(int argc, char** argv, Args& out) {
         std::cerr << "--torque-nm must be >= 0\n";
         return false;
     }
-    if (!Tether::Examples::parseVlanArgs(
-            program.get<std::string>("--rx-vlan"),
-            program.get<std::string>("--tx-vlan"),
-            out.vlan, TAG)) {
+    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+            out.encap, TAG)) {
         return false;
     }
-    Tether::Examples::logVlanConfig(out.vlan, TAG);
+    Tether::Examples::logEncapConfig(out.encap, TAG);
     return true;
 }
 
@@ -1080,7 +1078,7 @@ int main(int argc, char** argv) {
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
-    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.vlan)) {
+    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.encap)) {
         return 2;
     }
 

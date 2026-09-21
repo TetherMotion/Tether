@@ -203,6 +203,22 @@ public:
     void setEnableMailboxFallback(bool enabled) { config_.enable_mailbox_fallback = enabled; }
     bool isMailboxFallbackEnabled() const { return config_.enable_mailbox_fallback; }
 
+    /**
+     * @brief Configure EtherCAT-over-UDP encapsulation (ETG.1000.3).
+     *
+     * Safe to call before start() — the transport reads the live config
+     * through a pointer captured at construction.  No-op when built with
+     * TETHER_ENABLE_UDP_ENCAPSULATION=0; verify with
+     * isUdpEncapsulationEnabled().
+     */
+    void setUdpEncapsulation(const UdpEncapsulationConfig& cfg) {
+#if TETHER_ENABLE_UDP_ENCAPSULATION
+        config_.udp_encapsulation = cfg;
+#else
+        (void)cfg;
+#endif
+    }
+
     /** Override the PRE_OP retry timing (useful for tests that emulate slaves). */
     void setPreopRetryConfig(uint16_t max_attempts, uint16_t inner_tries,
                              uint16_t inner_sleep_ms, uint16_t backoff_ms) {

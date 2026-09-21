@@ -164,7 +164,6 @@ int main(int argc, char** argv) {
     Tether::Examples::addDurationArg(program);
     Tether::Examples::addDebugArg(program);
     Tether::Examples::addDebugConditionArgs(program);
-    Tether::Examples::addVlanArgs(program);
     Tether::Examples::addMailboxSizeArg(program, 512);
     Tether::Examples::addMailboxAddressArg(program);
     program.add_argument("--stream")
@@ -193,11 +192,9 @@ int main(int argc, char** argv) {
     std::string debug_stop = program.get<std::string>("--debug-stop");
     if (Tether::Examples::printDebugConditionHelpIfRequested(debug_start)) return 0;
 
-    Tether::Examples::VlanConfig vlan;
-    if (!Tether::Examples::parseVlanArgs(
-            program.get<std::string>("--rx-vlan"),
-            program.get<std::string>("--tx-vlan"),
-            vlan, TAG)) {
+    Tether::Examples::EncapConfig encap;
+    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+            encap, TAG)) {
         return 1;
     }
 
@@ -225,14 +222,14 @@ int main(int argc, char** argv) {
     Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
     Tether::Examples::applyDebugGateConditions(debug_start, debug_stop, master, TAG);
 
-    if (!Tether::Examples::setupVlanAndRxCallback(session, master, vlan, TAG)) {
+    if (!Tether::Examples::setupEncapAndRxCallback(session, master, encap, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }
 
     Tether::Examples::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, vlan, TAG)) {
+    if (!Tether::Examples::startHostMaster(session, master, encap, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }

@@ -39,7 +39,7 @@ inline bool startHostMasterSession(const std::string& interface_name,
                                    EtherCAT::DS402Master& master,
                                    HostMasterSession& session,
                                    const char* tag,
-                                   const VlanConfig& vlan = VlanConfig{})
+                                   const EncapConfig& encap = EncapConfig{})
 {
     session.ethernet = EtherCAT::HAL::createDefaultEthernet();
     if (!session.ethernet) {
@@ -92,18 +92,34 @@ inline bool startHostMasterSession(const std::string& interface_name,
 
     EtherCAT::Master& ecat = master.ethercatMaster();
 
-    if (vlan.enabled) {
+    // Kernel-side ingress filter matching the requested encapsulation.
+    attachEncapBpfFilter(*session.ethernet, encap, tag);
+
+    if (encap.udp) {
+        EtherCAT::UdpEncapsulationConfig uc;
+        uc.enabled          = true;
+        uc.destination_port = encap.udpPort;
+        ecat.setUdpEncapsulation(uc);
+        if (!ecat.isUdpEncapsulationEnabled()) {
+            TETHER_LOGE(tag, "--encapsulation udp requires a build with "
+                             "TETHER_ENABLE_UDP_ENCAPSULATION=ON");
+            return false;
+        }
+        session.ethernet->setEthertypeFilter(0);
+    }
+
+    if (encap.vlanActive()) {
         session.router = std::make_unique<EtherCAT::VLANRouter>();
         session.router->setBackend(session.network_interface.get());
         // Alias shared_ptr: the DS402Master owns the EtherCAT::Master for the
         // session lifetime, so a no-op deleter is safe.
         auto master_sp = std::shared_ptr<EtherCAT::Master>(&ecat, [](auto*) {});
-        if (vlan.rxAny) {
-            session.router->setUndefinedTarget(master_sp, vlan.txVlan, true);
-        } else if (vlan.rxRange) {
-            session.router->addMaster(master_sp, *vlan.rxRange, vlan.txVlan);
+        if (encap.rxAny) {
+            session.router->setUndefinedTarget(master_sp, encap.txVlan, true);
+        } else if (encap.rxRange) {
+            session.router->addMaster(master_sp, *encap.rxRange, encap.txVlan);
         } else {
-            session.router->addMaster(master_sp, std::nullopt, vlan.txVlan);
+            session.router->addMaster(master_sp, std::nullopt, encap.txVlan);
         }
 
         session.ethernet->setRxCallback(
@@ -131,8 +147,8 @@ inline bool startHostMasterSession(const std::string& interface_name,
         }
     });
 
-    if (vlan.enabled && session.router) {
-        EtherCAT::NetworkInterface* master_iface = vlan.rxAny
+    if (encap.vlanActive() && session.router) {
+        EtherCAT::NetworkInterface* master_iface = encap.rxAny
             ? session.router->undefinedNetworkInterface()
             : session.router->networkInterfaceFor(&ecat);
         if (!master_iface) {
@@ -230,11 +246,11 @@ struct MotionNativeArgs {
     double torque_amplitude   = 1000.0;    // 0.1% of rated torque (CST)
     double frequency_hz       = 0.25;      // sine frequency
     std::string csv_path;                  // if non-empty, log PDOs to CSV
-    VlanConfig vlan;
+    EncapConfig encap;
 };
 
 /// Parse the standard motion-native arguments (`-i`/`--interface`,
-/// `-d`/`--duration`, and the `--rx-vlan`/`--tx-vlan` flags added
+/// `-d`/`--duration`, and the `--encapsulation` flag added
 /// automatically by addInterfaceArg()).  Prints usage to stderr and returns
 /// `false` on failure.  If no interface is given, auto-selects the sole
 /// physical Ethernet interface via the shared resolveInterface() helper.
@@ -301,13 +317,11 @@ inline bool parseMotionNativeArgs(int argc, char** argv,
     out.torque_amplitude = program.get<double>("--torque");
     out.frequency_hz = program.get<double>("--frequency");
     out.csv_path = program.get<std::string>("--csv");
-    if (!Tether::Examples::parseVlanArgs(
-            program.get<std::string>("--rx-vlan"),
-            program.get<std::string>("--tx-vlan"),
-            out.vlan, program_name)) {
+    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+            out.encap, program_name)) {
         return false;
     }
-    Tether::Examples::logVlanConfig(out.vlan, program_name);
+    Tether::Examples::logEncapConfig(out.encap, program_name);
     return true;
 }
 

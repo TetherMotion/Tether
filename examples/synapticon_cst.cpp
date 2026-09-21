@@ -450,7 +450,7 @@ struct Args {
     /// disabled.  Default keeps the brake engaged once stopped — the drive
     /// auto-engages it on disable, and phase 3 only ensures that state.
     bool     release_brake = false;
-    Tether::Examples::VlanConfig vlan;
+    Tether::Examples::EncapConfig encap;
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -546,13 +546,11 @@ bool parseArgs(int argc, char** argv, Args& out) {
         std::cerr << "--stop-mode=decel-limit requires --decel-limit > 0\n";
         return false;
     }
-    if (!Tether::Examples::parseVlanArgs(
-            program.get<std::string>("--rx-vlan"),
-            program.get<std::string>("--tx-vlan"),
-            out.vlan, TAG)) {
+    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+            out.encap, TAG)) {
         return false;
     }
-    Tether::Examples::logVlanConfig(out.vlan, TAG);
+    Tether::Examples::logEncapConfig(out.encap, TAG);
     return true;
 }
 
@@ -645,7 +643,7 @@ int main(int argc, char** argv) {
     // --- Start EtherCAT master ---
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
-    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.vlan)) {
+    if (!Tether::Examples::startHostMasterSession(args.interface, master, session, TAG, args.encap)) {
         return 2;
     }
 

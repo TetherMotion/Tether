@@ -39,7 +39,6 @@ int main(int argc, char** argv) {
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addListInterfacesArg(program);
     Tether::Examples::addDebugArg(program);
-    Tether::Examples::addVlanArgs(program);
     Tether::Examples::addMailboxSizeArg(program);
     Tether::Examples::addMailboxAddressArg(program);
     Tether::Examples::addEsiXmlArg(program);
@@ -85,11 +84,9 @@ int main(int argc, char** argv) {
     if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
 
-    Tether::Examples::VlanConfig vlan;
-    if (!Tether::Examples::parseVlanArgs(
-            program.get<std::string>("--rx-vlan"),
-            program.get<std::string>("--tx-vlan"),
-            vlan, TAG)) {
+    Tether::Examples::EncapConfig encap;
+    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+            encap, TAG)) {
         return 1;
     }
 
@@ -97,7 +94,7 @@ int main(int argc, char** argv) {
     if (!debug_flags.empty()) {
         TETHER_LOGI(TAG, "Debug flags: {}", debug_str.c_str());
     }
-    Tether::Examples::logVlanConfig(vlan, TAG);
+    Tether::Examples::logEncapConfig(encap, TAG);
     const bool verbose = program.get<bool>("--verbose");
 
     Tether::Examples::HostEtherNetSession session;
@@ -107,14 +104,14 @@ int main(int argc, char** argv) {
 
     EtherCAT::Master master;
     Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
-    if (!Tether::Examples::setupVlanAndRxCallback(session, master, vlan, TAG)) {
+    if (!Tether::Examples::setupEncapAndRxCallback(session, master, encap, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }
 
     Tether::Examples::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, vlan, TAG)) {
+    if (!Tether::Examples::startHostMaster(session, master, encap, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }

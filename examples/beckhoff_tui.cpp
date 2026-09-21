@@ -1112,7 +1112,6 @@ int main(int argc, char** argv) {
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addListInterfacesArg(program);
     Tether::Examples::addDebugArg(program);
-    Tether::Examples::addVlanArgs(program);
     Tether::Examples::addDurationArg(program, 0.0);
     program.add_argument("--interactive")
         .help("Force the interactive ncurses TUI")
@@ -1137,10 +1136,8 @@ int main(int argc, char** argv) {
     if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
     auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
 
-    Tether::Examples::VlanConfig vlan;
-    if (!Tether::Examples::parseVlanArgs(
-            program.get<std::string>("--rx-vlan"),
-            program.get<std::string>("--tx-vlan"), vlan, TAG)) {
+    Tether::Examples::EncapConfig encap;
+    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"), encap, TAG)) {
         return 1;
     }
 
@@ -1176,12 +1173,12 @@ int main(int argc, char** argv) {
     sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
     Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupVlanAndRxCallback(session, master, vlan, TAG)) {
+    if (!Tether::Examples::setupEncapAndRxCallback(session, master, encap, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }
     Tether::Examples::startHostPollThread(session, TAG);
-    if (!Tether::Examples::startHostMaster(session, master, vlan, TAG)) {
+    if (!Tether::Examples::startHostMaster(session, master, encap, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }

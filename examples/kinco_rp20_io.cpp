@@ -989,7 +989,6 @@ int main(int argc, char** argv) {
     argparse::ArgumentParser program("kinco_rp20_io", "1.0", argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
     Tether::Examples::addDebugArg(program);
-    Tether::Examples::addVlanArgs(program);
     Tether::Examples::addMailboxSizeArg(program);
     Tether::Examples::addMailboxAddressArg(program);
     Tether::Examples::addEsiXmlArg(program);
@@ -1037,11 +1036,9 @@ int main(int argc, char** argv) {
 
     Tether::Platform::ensureRealtimeKernelOrExit();
 
-    Tether::Examples::VlanConfig vlan;
-    if (!Tether::Examples::parseVlanArgs(
-            program.get<std::string>("--rx-vlan"),
-            program.get<std::string>("--tx-vlan"),
-            vlan, TAG)) {
+    Tether::Examples::EncapConfig encap;
+    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+            encap, TAG)) {
         return 1;
     }
 
@@ -1080,7 +1077,7 @@ int main(int argc, char** argv) {
 
     TETHER_LOGI(TAG, "kinco_rp20_io  —  interface: {}, duration: {:.1f} s",
                 iface.c_str(), duration_sec);
-    Tether::Examples::logVlanConfig(vlan, TAG);
+    Tether::Examples::logEncapConfig(encap, TAG);
     Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
 
     // ---- Signal handlers ----
@@ -1097,14 +1094,14 @@ int main(int argc, char** argv) {
     sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
     Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupVlanAndRxCallback(session, master, vlan, TAG)) {
+    if (!Tether::Examples::setupEncapAndRxCallback(session, master, encap, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }
 
     Tether::Examples::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, vlan, TAG)) {
+    if (!Tether::Examples::startHostMaster(session, master, encap, TAG)) {
         Tether::Examples::shutdownHostEthernet(session);
         return 5;
     }

@@ -52,27 +52,30 @@ void startHostPollThread(HostEtherNetSession& session, const char* tag);
 /// Stop the poll thread and shut down the Ethernet HAL.
 void shutdownHostEthernet(HostEtherNetSession& session);
 
-/// If @p vlan.enabled is true, create a VLANRouter, wire it to the master,
-/// and install an RX callback that routes through the router.
-/// If disabled, install a direct RX callback to the master.
-bool setupVlanAndRxCallback(HostEtherNetSession& session,
-                            EtherCAT::Master& master,
-                            const VlanConfig& vlan,
-                            const char* tag);
+/// Apply the encapsulation config: attach the kernel cBPF filter to the
+/// Ethernet socket, enable EtherCAT-over-UDP on the master when requested
+/// (fails the call if the build lacks TETHER_ENABLE_UDP_ENCAPSULATION),
+/// and — when VLAN routing is active — create a VLANRouter wired to the
+/// master with an RX callback that routes through the router.
+/// Otherwise install a direct RX callback to the master.
+bool setupEncapAndRxCallback(HostEtherNetSession& session,
+                             EtherCAT::Master& master,
+                             const EncapConfig& encap,
+                             const char* tag);
 
-/// Start the EtherCAT master.  If VLAN is enabled the master is started via
-/// the per-master NetworkInterface from the router, otherwise via the
-/// session's own NetworkInterface.
+/// Start the EtherCAT master.  If VLAN routing is active the master is
+/// started via the per-master NetworkInterface from the router, otherwise
+/// via the session's own NetworkInterface.
 bool startHostMaster(HostEtherNetSession& session,
                      EtherCAT::Master& master,
-                     const VlanConfig& vlan,
+                     const EncapConfig& encap,
                      const char* tag);
 
 /// Convenience: perform full master startup (discover + summary logging).
 /// Returns false if no slaves are found or the master fails to start.
 bool startHostMasterAndDiscover(HostEtherNetSession& session,
                                 EtherCAT::Master& master,
-                                const VlanConfig& vlan,
+                                const EncapConfig& encap,
                                 const char* tag);
 
 } // namespace Tether::Examples
