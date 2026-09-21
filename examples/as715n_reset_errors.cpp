@@ -13,7 +13,8 @@
  * The slave is only brought to PRE_OP — no PDO mapping, no OP, no motion.
  *
  * Usage:
- *   ./as715n_reset_errors -i eth0                 # reset active fault
+ *   ./as715n_reset_errors -i eth0                 # reset active fault on slave 0
+ *   ./as715n_reset_errors -i eth0 -s 2            # reset active fault on slave 2
  *   ./as715n_reset_errors -i eth0 --force         # reset even if no fault is reported
  *   ./as715n_reset_errors -i eth0 --software-reset # full drive software reset
  */
@@ -30,14 +31,13 @@
 namespace {
 
 constexpr const char* TAG = "as715n_reset";
-constexpr uint16_t kSlaveIndex = 0;
-
 using EtherCAT::Drives::AS715NFaultHandler;
 using EtherCAT::Drives::AS715NError;
 
-int resetErrors(EtherCAT::DS402Master& master, bool software_reset, bool force)
+int resetErrors(EtherCAT::DS402Master& master, uint16_t slave_index,
+                bool software_reset, bool force)
 {
-    auto& sdo = master.ethercatMaster().sdoManager(kSlaveIndex);
+    auto& sdo = master.ethercatMaster().sdoManager(slave_index);
 
     if (software_reset) {
         constexpr auto& SwReg =
@@ -55,15 +55,15 @@ int resetErrors(EtherCAT::DS402Master& master, bool software_reset, bool force)
 
     uint16_t mfr_error = 0, cia402_error = 0;
     const bool has_fault =
-        AS715NFaultHandler::checkFault(sdo, kSlaveIndex, &mfr_error, &cia402_error);
+        AS715NFaultHandler::checkFault(sdo, slave_index, &mfr_error, &cia402_error);
 
     if (!has_fault) {
         if (!force) {
-            TETHER_LOGI(TAG, "Slave {} reports no fault — nothing to reset", kSlaveIndex);
+            TETHER_LOGI(TAG, "Slave {} reports no fault — nothing to reset", slave_index);
             return 0;
         }
         TETHER_LOGI(TAG, "Slave {} reports no fault — forcing reset anyway",
-                    kSlaveIndex);
+                    slave_index);
     }
 
     // The A6-EC manual requires S-ON (controlword bit 0) to be off before
@@ -97,7 +97,7 @@ int resetErrors(EtherCAT::DS402Master& master, bool software_reset, bool force)
     bool reset_ok;
     if (has_mfr_error && err.isDCSyncError()) {
         TETHER_LOGI(TAG, "DC sync error {} — using handleNoSyncError()", err.name);
-        reset_ok = AS715NFaultHandler::handleNoSyncError(sdo, kSlaveIndex, 3);
+        reset_ok = AS715NFaultHandler::handleNoSyncError(sdo, slave_index, 3);
     } else if (has_mfr_error && !err.is_recoverable && !force) {
         TETHER_LOGE(TAG, "Error {} is marked non-recoverable — refusing reset "
                          "(use --force to override)", err.name);
@@ -110,7 +110,7 @@ int resetErrors(EtherCAT::DS402Master& master, bool software_reset, bool force)
             TETHER_LOGI(TAG, "Fault bit set but no manufacturer error "
                              "(0x603F=0x{:04X}) — plain reset", cia402_error);
         }
-        reset_ok = AS715NFaultHandler::resetFault(sdo, kSlaveIndex);
+        reset_ok = AS715NFaultHandler::resetFault(sdo, slave_index);
     }
 
     if (!reset_ok) {
@@ -118,7 +118,7 @@ int resetErrors(EtherCAT::DS402Master& master, bool software_reset, bool force)
         return 5;
     }
 
-    TETHER_LOGI(TAG, "Slave {} fault reset OK", kSlaveIndex);
+    TETHER_LOGI(TAG, "Slave {} fault reset OK", slave_index);
     return 0;
 }
 
@@ -129,6 +129,7 @@ int main(int argc, char** argv)
     argparse::ArgumentParser program("as715n_reset_errors", "1.0",
                                      argparse::default_arguments::help);
     Tether::Examples::addInterfaceArg(program);
+    Tether::Examples::addSlaveArg(program, 0);
     program.add_argument("--software-reset")
         .default_value(false)
         .implicit_value(true)
@@ -152,6 +153,12 @@ int main(int argc, char** argv)
     if (iface.empty()) {
         return 1;
     }
+    const int slave = program.get<int>("--slave");
+    if (slave < 0 || slave > 0xFFFF) {
+        TETHER_LOGE(TAG, "--slave must be in [0, 65535]");
+        return 1;
+    }
+    const uint16_t slave_index = static_cast<uint16_t>(slave);
     const bool software_reset = program.get<bool>("--software-reset");
     const bool force = program.get<bool>("--force");
 
@@ -167,27 +174,27 @@ int main(int argc, char** argv)
         TETHER_LOGW(TAG, "No slaves discovered");
     }
 
-    if (!master.waitForDriveCount(kSlaveIndex + 1, 2000)) {
-        TETHER_LOGE(TAG, "Timed out waiting for drive at index {}", kSlaveIndex);
+    if (!master.waitForDriveCount(slave_index + 1, 2000)) {
+        TETHER_LOGE(TAG, "Timed out waiting for drive at index {}", slave_index);
         Tether::Examples::stopHostMasterSession(master, session);
         return 2;
     }
 
     // SDO access only needs the mailbox configured and the slave in PRE_OP —
     // no PDO mapping and no OP transition.
-    if (!master.ethercatMaster().autoConfigureMailbox(kSlaveIndex,
+    if (!master.ethercatMaster().autoConfigureMailbox(slave_index,
             Tether::Platform::LogLevel::Info)) {
-        TETHER_LOGE(TAG, "Mailbox configuration failed for slave {}", kSlaveIndex);
+        TETHER_LOGE(TAG, "Mailbox configuration failed for slave {}", slave_index);
         Tether::Examples::stopHostMasterSession(master, session);
         return 3;
     }
-    if (!master.ethercatMaster().transitionSlaveToPreOperational(kSlaveIndex)) {
-        TETHER_LOGE(TAG, "Failed to bring slave {} to PRE_OP", kSlaveIndex);
+    if (!master.ethercatMaster().transitionSlaveToPreOperational(slave_index)) {
+        TETHER_LOGE(TAG, "Failed to bring slave {} to PRE_OP", slave_index);
         Tether::Examples::stopHostMasterSession(master, session);
         return 3;
     }
 
-    const int rc = resetErrors(master, software_reset, force);
+    const int rc = resetErrors(master, slave_index, software_reset, force);
 
     Tether::Examples::stopHostMasterSession(master, session);
     return rc;
