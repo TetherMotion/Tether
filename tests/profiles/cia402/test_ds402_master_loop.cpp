@@ -196,4 +196,27 @@ TEST_F(DS402LoopTest, PendingOpsAppliedByExplicitStop) {
     EXPECT_GE(st.stops.load(), 1);
 }
 
+TEST_F(DS402LoopTest, RoleChangeWhileRunningDefersDriveErase) {
+    // setSlaveAsNonDS402() flips the role synchronously but must not
+    // erase the drive object under the iterating loop thread — the erase
+    // is queued and applied by the next drain on the loop thread.
+    ControllerStats st;
+    ASSERT_TRUE(ds402_.addMotionController(
+        0, std::make_unique<MockController>(st)));
+
+    auto guard = ds402_.startCyclicLoopScoped(loopCfg());
+    ASSERT_TRUE(static_cast<bool>(guard));
+    ASSERT_TRUE(waitFor([&] { return st.updates.load() > 0; }));
+
+    ds402_.setSlaveAsNonDS402(0);
+    EXPECT_FALSE(ds402_.isManagedDrive(0));           // role flips now
+    // The controller's stop() runs on the loop thread inside the deferred
+    // EraseDrive op — even though the role gate already hides the drive,
+    // stop() must still receive the drive object.
+    ASSERT_TRUE(waitFor([&] { return st.stops.load() > 0; }));
+
+    ds402_.stopCyclicLoop();   // drains any leftovers synchronously
+    EXPECT_EQ(ds402_.driveAt(0), nullptr);  // drive erased by the drain
+}
+
 } // namespace

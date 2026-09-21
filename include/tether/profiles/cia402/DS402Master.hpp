@@ -320,6 +320,9 @@ private:
 
     /// True while a realtime loop thread may be iterating controllers/tasks.
     bool realtimeLoopRunning() const;
+    /// Scan drives_ WITHOUT the role gate — teardown paths must reach a
+    /// drive whose role was already flipped by a pending EraseDrive.
+    CiA402Drive* findDriveRaw(uint16_t slave_index);
     /// Stop and erase a controller by slave index.  Caller thread only —
     /// must not run concurrently with updateMotionControllers().
     bool eraseController(uint16_t slave_index);
@@ -329,13 +332,21 @@ private:
     void drainControllerOps();
 
     struct PendingControllerOp {
-        enum class Kind : uint8_t { Add, Remove, Clear } kind;
+        enum class Kind : uint8_t { Add, Remove, Clear, EraseDrive } kind;
         uint16_t slave_index{0};
         std::unique_ptr<IDriveMotionController> controller;
     };
 
     Master ethercat_master_;
+    // drives_ is iterated by driveBySlaveIndex() on the loop thread while
+    // the application may append via ensureDrive()/configureDrive().  The
+    // vector is pre-reserved to kMaxPDOSlaves so push_back never
+    // reallocates (elements stay put); erasure while a loop runs is
+    // deferred through pending_controller_ops_ (Kind::EraseDrive).
     std::vector<std::unique_ptr<CiA402Drive>> drives_;
+    // Pre-sized to kMaxPDOSlaves at construction — slaveRole() reads it
+    // from the loop thread while setSlaveRole() may write on the
+    // application thread; fixed size keeps every element slot stable.
     std::vector<SlaveRole> slave_roles_;
     // Iterated by updateMotionControllers().  While a loop runs it is only
     // mutated by drainControllerOps() on the loop thread; when idle it is

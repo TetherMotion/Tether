@@ -1468,6 +1468,9 @@ private:
     /// No-fd wait policy for the cyclic slot wait (Q22).
     CyclicLoopConfig::SlotWaitFallback slot_wait_fallback_ =
         CyclicLoopConfig::SlotWaitFallback::Yield;
+    /// Split-exchange collect-task invocations — diagnostic counter that
+    /// also lets tests observe collect-task ordering within a phase.
+    std::atomic<uint64_t> cyclic_collect_calls_{0};
 
     /// CPU claims held while the cyclic loop runs (CpuIsolationConfig);
     /// -1 = no claim.  Released by stopCyclicLoop() / ~Master().

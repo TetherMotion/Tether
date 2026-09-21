@@ -462,6 +462,19 @@ Typed accessors `outputPtr<T>(entry_idx)` / `inputPtr<T>(entry_idx)` combine
 offset lookup + bounds check; `epoch()` bumps on every `configure()` so
 cached offsets/pointers can be validated across re-mapping.
 
+**Device-layer caveat (storage-bound accessors):** CiA402 drives,
+Beckhoff terminals, RP20 and Axia80 bind their PDO accessors to
+`PDOEntry::storage` (`PDOMapping::entryDataMut`) at registration time —
+before `configureProcessImage` assigns offsets.  In non-`Buffered` modes
+the wire payload is the image, so those accessors read/write storage the
+exchange no longer consults (and vice-versa for collected inputs).
+`startCyclicLoop` warns when `image_mode != Buffered` meets
+`motion_in_loop` for exactly this reason: use `Buffered` with
+storage-bound device APIs, or drive the image through
+`outputWrite()`/`inputRead()`/`EntryHandle` directly.  Rebinding device
+buffers into the image post-configuration is a tracked open item
+(QUESTIONS.md — audit findings).
+
 ### 6.4 `EntryHandle` — epoch-checked entry references
 
 `entryHandle(i)` returns a small value object `{index, offset, epoch}`
@@ -554,7 +567,10 @@ default.  `CyclicLoopConfig::exchange_placement` selects the overlap:
 `CyclicLoopConfig::collect_phase` (Q2) overrides the collect task's phase
 for `Split` — any phase after Exchange is valid (MotionControl,
 Diagnostics); `Atomic` ignores it and out-of-range/pre-exchange values
-clamp to PostExchange with a warning.
+clamp to PostExchange with a warning.  When `collect_phase` resolves to
+`MotionControl`, the collect task is registered **before** the in-loop
+motion task so the controller sees this cycle's inputs rather than
+one-cycle-stale ones (in-phase execution order is registration order).
 
 With `motion_in_loop = false` (external motion source) `Split` is pure
 win: the ~10–30 µs wire round-trip stops consuming the wait budget.
@@ -593,6 +609,17 @@ win: the ~10–30 µs wire round-trip stops consuming the wait budget.
    (`publishInputParts` — view references where the channel holds them,
    copy-bank staging otherwise), then scatter forced-buffered TxPDO
    entries.
+
+**Mapping-epoch guard (mid-exchange recovery):** both halves snapshot
+`mapping.epoch()` at entry.  `cyclicSend` re-checks after the gather —
+a `clear()`/`remove_entries_for_slave()` racing the gather (slave
+recovery re-registration) makes the cycle return false without emitting
+a frame built from torn offsets.  `cyclicCollect` re-checks after the
+slot wait — a mutation landing while responses were in flight skips the
+scatter into now-stale entries (logged once per occurrence) but still
+consumes the responses.  The race degrades to a skipped cycle, never
+to torn data; `stop_loop_during_recovery` remains the hard-serialization
+option for legacy loops.
 
 #### Multi-slice images
 

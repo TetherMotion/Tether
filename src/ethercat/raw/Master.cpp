@@ -744,6 +744,21 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
                          "never initialized — the DC task will idle (set "
                          "dc_config or call dc().init() first)");
     }
+    // In image modes the wire payload IS the process image — mapped entries
+    // bypass PDOEntry::storage entirely (gather and scatter).  The device
+    // layers (CiA402Drive::rxPDO<T>()/txPDO<T>(), terminals, klipper mapping
+    // writes) all go through entry storage, so in-loop motion combined with
+    // a non-Buffered image silently sends stale/zero outputs and feeds stale
+    // inputs.  Image modes are for producers/consumers that use
+    // processImage().outputWrite()/inputRead() directly.
+    if (config.motion_in_loop &&
+        config.image_mode != ImageMode::Buffered) {
+        TETHER_LOGW(TAG, "cyclic loop: motion_in_loop with image_mode != "
+                         "Buffered — drive-level PDO accessors write entry "
+                         "storage which image modes bypass; mapped entries "
+                         "will exchange image bytes instead (use Buffered or "
+                         "write the process image directly)");
+    }
 
     clearCancel();
 
@@ -850,6 +865,7 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     CyclicExecutive::TaskFn collect_fn;
     if (split_exchange) {
         collect_fn = [this]() -> bool {
+            cyclic_collect_calls_.fetch_add(1, std::memory_order_relaxed);
             return !pdo_ || pdo_->cyclicCollect(&process_image_);
         };
     }
@@ -885,6 +901,25 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     cyclic_loop_ = std::make_unique<CyclicExecutive>(
         std::move(exchange_fn), std::move(dc_fn), std::move(time_fn), exec_cfg);
 
+    // Split-phase collect placement — resolved before task registration so
+    // that a MotionControl collect registers BEFORE the motion callback:
+    // in-phase order is registration order, and collect-then-motion is what
+    // makes the motion update see this cycle's inputs.  Split honors the
+    // user-supplied collect_phase (Q2); SplitLate pins Diagnostics.
+    TaskPhase collect_phase = config.collect_phase;
+    if (config.exchange_placement == ExchangePlacement::SplitLate) {
+        collect_phase = TaskPhase::Diagnostics;
+    }
+    if (collect_phase == TaskPhase::PreExchange ||
+        collect_phase == TaskPhase::Exchange) {
+        TETHER_LOGW(TAG, "collect_phase must run after Exchange — "
+                         "clamping to PostExchange");
+        collect_phase = TaskPhase::PostExchange;
+    }
+    if (collect_fn && collect_phase == TaskPhase::MotionControl) {
+        cyclic_loop_->addTask(TaskPhase::MotionControl, std::move(collect_fn));
+    }
+
     if (config.motion_in_loop && motion_control_callback_) {
         const double dt = static_cast<double>(config.cycle_period_us) / 1e6;
         auto cb = motion_control_callback_;
@@ -897,21 +932,7 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
             });
     }
 
-    // Split-phase collect task — the send half already ran at Exchange;
-    // collect lands at the configured placement so the wire round-trip
-    // overlaps the phases in between.  Split honors the user-supplied
-    // collect_phase (Q2); SplitLate pins Diagnostics.
-    if (collect_fn) {
-        TaskPhase collect_phase =
-            (config.exchange_placement == ExchangePlacement::SplitLate)
-                ? TaskPhase::Diagnostics
-                : config.collect_phase;
-        if (collect_phase == TaskPhase::PreExchange ||
-            collect_phase == TaskPhase::Exchange) {
-            TETHER_LOGW(TAG, "collect_phase must run after Exchange — "
-                             "clamping to PostExchange");
-            collect_phase = TaskPhase::PostExchange;
-        }
+    if (collect_fn && collect_phase != TaskPhase::MotionControl) {
         cyclic_loop_->addTask(collect_phase, std::move(collect_fn));
     }
 
