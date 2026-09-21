@@ -811,8 +811,10 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
     // Get the base logical address from the LogicalAddressManager if available
     uint32_t base_log = 0;
     auto* lam = pdo.logicalAddressManager();
-    if (lam && lam->isInitialized()) {
-        // Use the existing address map — our SM lengths are already set
+    if (lam) {
+        // buildAddressMap self-initializes the LAM — no isInitialized()
+        // gate (that would deadlock the cyclic exchange: no map → the
+        // exchange emits nothing → the slave never reaches OP).
         lam->buildAddressMap(cfgs, master_->getDiscoveredSlaveCount());
         if (lam->hasSlavePDOs(index_)) {
             base_log = lam->getRxPDOLogicalAddr(index_);
