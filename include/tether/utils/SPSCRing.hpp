@@ -61,6 +61,25 @@ public:
     }
 
     /**
+     * Consumer side: invoke consume(const T&) for up to maxRecords published
+     * records, oldest first, then release the consumed slots.
+     * @return number of records consumed.
+     * Single consumer thread only.
+     */
+    template <typename F>
+    size_t drain(F&& consume, size_t maxRecords) {
+        const uint64_t head = head_.load(std::memory_order_acquire);
+        uint64_t tail = tail_.load(std::memory_order_relaxed);
+        const uint64_t limit =
+            (head - tail < maxRecords) ? head : tail + maxRecords;
+        size_t n = 0;
+        for (; tail < limit; ++tail, ++n)
+            consume(buf_[tail % Capacity]);
+        tail_.store(tail, std::memory_order_release);
+        return n;
+    }
+
+    /**
      * Consumer side: invoke consume(const T&) for every published record,
      * oldest first, then release the consumed slots.
      * @return number of records consumed.
@@ -68,13 +87,7 @@ public:
      */
     template <typename F>
     size_t drain(F&& consume) {
-        const uint64_t head = head_.load(std::memory_order_acquire);
-        uint64_t tail = tail_.load(std::memory_order_relaxed);
-        size_t n = 0;
-        for (; tail < head; ++tail, ++n)
-            consume(buf_[tail % Capacity]);
-        tail_.store(tail, std::memory_order_release);
-        return n;
+        return drain(std::forward<F>(consume), UINT64_MAX);
     }
 
     /// Records dropped because the ring was full (producer side).

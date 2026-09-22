@@ -68,6 +68,7 @@ namespace ModuleId {
     inline constexpr uint64_t Kinematics       = 0x000F;
     inline constexpr uint64_t Identification   = 0x0010;
     inline constexpr uint64_t SlaveEmulation   = 0x0011;
+    inline constexpr uint64_t AS715NDrive      = 0x0012;
     inline constexpr uint64_t User             = 0x1000;  ///< User-defined modules start here
 } // namespace ModuleId
 
