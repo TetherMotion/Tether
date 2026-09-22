@@ -31,6 +31,7 @@
 #include "tether/io/RingStreamSource.hpp"
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/ObjectDictionary.hpp"
+#include "tether/profiles/cia402/CiA402StateUtils.hpp"
 #include "tether/drives/AS715N/AS715NPDO.hpp"
 
 #include "tether/drives/AS715N/Registers/C00-Parameters.hpp"
@@ -57,6 +58,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -224,6 +226,87 @@ inline const char* effectiveTimeName(OD::EffectiveTime e) {
 /// SDO transaction timeout for IO-triggered reads/writes (session thread).
 inline constexpr uint32_t kSdoTimeoutMs = 500;
 
+// ---------------------------------------------------------------------------
+// Standard CoE communication objects (CiA 301 / ETG.1000)
+//
+// The AS715N register-group kRegisterList collections only cover the vendor
+// parameter range 0x2000+.  These are the generic objects every CoE slave
+// implements — identity, PDO assignment and sync-manager communication
+// parameters.  All are marked ReadOnly: PDO assignment and sync settings
+// are owned by the master's configuration sequence and must not be mutated
+// through the IO channel.
+// ---------------------------------------------------------------------------
+
+using RegMod  = ::EtherCAT::ObjectDictionary::ModificationMode;
+using RegEff  = ::EtherCAT::ObjectDictionary::EffectiveTime;
+using OdType  = ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType;
+
+#define AS715N_COE_RO(idx, sub, nm, dt)                                     \
+    OD::ObjectDictionaryEntry{                                              \
+        .index = idx, .subindex = sub, .name = nm, .data_type = dt,         \
+        .default_value = 0, .min_value = 0, .max_value = 0,                 \
+        .modification_mode = RegMod::ReadOnly,                              \
+        .effective_time = RegEff::Immediately}
+
+/// Standard CoE objects reachable via SDO on any CoE slave.
+inline const OD::ObjectDictionaryEntry kCoeObjects[] = {
+    AS715N_COE_RO(0x1000, 0x00, "Device type",                    OdType::Unsigned32),
+    AS715N_COE_RO(0x1008, 0x00, "Manufacturer device name",       OdType::VisibleString),
+    AS715N_COE_RO(0x1009, 0x00, "Manufacturer hardware version",  OdType::VisibleString),
+    AS715N_COE_RO(0x100A, 0x00, "Manufacturer software version",  OdType::VisibleString),
+    // 0x1018 Identity
+    AS715N_COE_RO(0x1018, 0x00, "Identity: highest subindex",     OdType::Unsigned8),
+    AS715N_COE_RO(0x1018, 0x01, "Identity: vendor ID",            OdType::Unsigned32),
+    AS715N_COE_RO(0x1018, 0x02, "Identity: product code",         OdType::Unsigned32),
+    AS715N_COE_RO(0x1018, 0x03, "Identity: revision number",      OdType::Unsigned32),
+    AS715N_COE_RO(0x1018, 0x04, "Identity: serial number",        OdType::Unsigned32),
+    // 0x1C00 Sync manager communication types
+    AS715N_COE_RO(0x1C00, 0x00, "SM types: highest subindex",     OdType::Unsigned8),
+    AS715N_COE_RO(0x1C00, 0x01, "SM0 type (1=rx,2=tx,3=rx,4=tx)", OdType::Unsigned8),
+    AS715N_COE_RO(0x1C00, 0x02, "SM1 type",                       OdType::Unsigned8),
+    AS715N_COE_RO(0x1C00, 0x03, "SM2 type",                       OdType::Unsigned8),
+    AS715N_COE_RO(0x1C00, 0x04, "SM3 type",                       OdType::Unsigned8),
+    // 0x1C12 RxPDO assignment (SM2)
+    AS715N_COE_RO(0x1C12, 0x00, "RxPDO assign: count",            OdType::Unsigned8),
+    AS715N_COE_RO(0x1C12, 0x01, "RxPDO assign: PDO 1",            OdType::Unsigned16),
+    AS715N_COE_RO(0x1C12, 0x02, "RxPDO assign: PDO 2",            OdType::Unsigned16),
+    // 0x1C13 TxPDO assignment (SM3)
+    AS715N_COE_RO(0x1C13, 0x00, "TxPDO assign: count",            OdType::Unsigned8),
+    AS715N_COE_RO(0x1C13, 0x01, "TxPDO assign: PDO 1",            OdType::Unsigned16),
+    AS715N_COE_RO(0x1C13, 0x02, "TxPDO assign: PDO 2",            OdType::Unsigned16),
+    // 0x1C32 SM2 (output) synchronization parameters
+    AS715N_COE_RO(0x1C32, 0x00, "SM2 sync: highest subindex",     OdType::Unsigned8),
+    AS715N_COE_RO(0x1C32, 0x01, "SM2 sync: sync mode",            OdType::Unsigned16),
+    AS715N_COE_RO(0x1C32, 0x02, "SM2 sync: cycle time ns",        OdType::Unsigned32),
+    AS715N_COE_RO(0x1C32, 0x04, "SM2 sync: modes supported",      OdType::Unsigned16),
+    AS715N_COE_RO(0x1C32, 0x05, "SM2 sync: min cycle time ns",    OdType::Unsigned32),
+    AS715N_COE_RO(0x1C32, 0x0B, "SM2 sync: SM event missed",      OdType::Unsigned16),
+    AS715N_COE_RO(0x1C32, 0x0C, "SM2 sync: cycle exceeded ctr",   OdType::Unsigned16),
+    // 0x1C33 SM3 (input) synchronization parameters
+    AS715N_COE_RO(0x1C33, 0x00, "SM3 sync: highest subindex",     OdType::Unsigned8),
+    AS715N_COE_RO(0x1C33, 0x01, "SM3 sync: sync mode",            OdType::Unsigned16),
+    AS715N_COE_RO(0x1C33, 0x02, "SM3 sync: cycle time ns",        OdType::Unsigned32),
+    AS715N_COE_RO(0x1C33, 0x04, "SM3 sync: modes supported",      OdType::Unsigned16),
+    AS715N_COE_RO(0x1C33, 0x05, "SM3 sync: min cycle time ns",    OdType::Unsigned32),
+    AS715N_COE_RO(0x1C33, 0x0B, "SM3 sync: SM event missed",      OdType::Unsigned16),
+    AS715N_COE_RO(0x1C33, 0x0C, "SM3 sync: cycle exceeded ctr",   OdType::Unsigned16),
+};
+
+#undef AS715N_COE_RO
+
+/// RegisterList view of kCoeObjects so exposeSdoCatalog can treat the
+/// standard objects exactly like a vendor register group.
+inline const ::EtherCAT::Drives::Registers::RegisterList&
+    kCoeObjectList() {
+    static const ::EtherCAT::Drives::Registers::RegisterList list = [] {
+        ::EtherCAT::Drives::Registers::RegisterList l;
+        l.reserve(std::size(kCoeObjects));
+        for (const auto& e : kCoeObjects) l.push_back(&e);
+        return l;
+    }();
+    return list;
+}
+
 } // namespace detail
 
 /**
@@ -268,6 +351,7 @@ public:
         const std::string group = "as715n." + prefix_;
 
         exposePdoSignals(registry, idBase, group);
+        exposeDecodedSignals(registry, idBase, group);
         exposeSdoCatalog(registry, idBase, group);
     }
 
@@ -294,33 +378,144 @@ private:
             });
         }
 
-        // Full raw PDO images (variable-length Binary signals).
-        registry.addSignal({
-            makeId(idBase, 0x0100), prefix_ + ".pdo.rx_image",
-            "RxPDO 0x1704 raw image (23 bytes)", group + ".pdo",
-            ValueType::Binary, nullptr,
-            [this](void* d, size_t maxLen) -> size_t {
-                AS715N_pdo::AS715N_RxPDO_1704 img{};
-                if (maxLen < sizeof(img) || !pdo_.readRxPDO1704(img)) return 0;
-                std::memcpy(d, &img, sizeof(img));
-                return sizeof(img);
-            },
-            sizeof(AS715N_pdo::AS715N_RxPDO_1704), {}
-        });
-        registry.addSignal({
-            makeId(idBase, 0x0101), prefix_ + ".pdo.tx_image",
-            "TxPDO 0x1B04 raw image (24 bytes)", group + ".pdo",
-            ValueType::Binary, nullptr,
-            [this](void* d, size_t maxLen) -> size_t {
-                AS715N_pdo::AS715N_TxPDO_1B04 img{};
-                if (maxLen < sizeof(img) || !pdo_.readTxPDO1B04(img)) return 0;
-                std::memcpy(d, &img, sizeof(img));
-                return sizeof(img);
-            },
-            sizeof(AS715N_pdo::AS715N_TxPDO_1B04), {}
-        });
+        // Full raw PDO images (variable-length Binary signals) with
+        // StructDescriptors built from kPdoFields — clients can decode the
+        // packed images via DescribeStruct without an external schema.
+        const uint64_t rxImageId = makeId(idBase, 0x0100);
+        const uint64_t txImageId = makeId(idBase, 0x0101);
+        rxImageDesc_ = buildImageDescriptor(rxImageId, "AS715N_RxPDO_1704",
+                                            sizeof(AS715N_pdo::AS715N_RxPDO_1704),
+                                            /*rx=*/true);
+        txImageDesc_ = buildImageDescriptor(txImageId, "AS715N_TxPDO_1B04",
+                                            sizeof(AS715N_pdo::AS715N_TxPDO_1B04),
+                                            /*rx=*/false);
+
+        SignalEntry rxImg;
+        rxImg.id          = rxImageId;
+        rxImg.name        = prefix_ + ".pdo.rx_image";
+        rxImg.description = "RxPDO 0x1704 raw image (23 bytes)";
+        rxImg.group       = group + ".pdo";
+        rxImg.valueType   = ValueType::Binary;
+        rxImg.maxValueSize = sizeof(AS715N_pdo::AS715N_RxPDO_1704);
+        rxImg.structDesc  = &rxImageDesc_;
+        rxImg.varReadFn   = [this](void* d, size_t maxLen) -> size_t {
+            AS715N_pdo::AS715N_RxPDO_1704 img{};
+            if (maxLen < sizeof(img) || !pdo_.readRxPDO1704(img)) return 0;
+            std::memcpy(d, &img, sizeof(img));
+            return sizeof(img);
+        };
+        registry.addSignal(std::move(rxImg));
+
+        SignalEntry txImg;
+        txImg.id          = txImageId;
+        txImg.name        = prefix_ + ".pdo.tx_image";
+        txImg.description = "TxPDO 0x1B04 raw image (24 bytes)";
+        txImg.group       = group + ".pdo";
+        txImg.valueType   = ValueType::Binary;
+        txImg.maxValueSize = sizeof(AS715N_pdo::AS715N_TxPDO_1B04);
+        txImg.structDesc  = &txImageDesc_;
+        txImg.varReadFn   = [this](void* d, size_t maxLen) -> size_t {
+            AS715N_pdo::AS715N_TxPDO_1B04 img{};
+            if (maxLen < sizeof(img) || !pdo_.readTxPDO1B04(img)) return 0;
+            std::memcpy(d, &img, sizeof(img));
+            return sizeof(img);
+        };
+        registry.addSignal(std::move(txImg));
 
         ringSource_.setSchema(std::move(ids), std::move(sizes));
+    }
+
+    // ---- Decoded CiA 402 state (from the PDO statusword — never blocks) ----
+
+    void exposeDecodedSignals(Registry& registry, uint64_t idBase,
+                              const std::string& group) {
+        const std::string g = group + ".cia402";
+
+        SignalEntry st;
+        st.id          = makeId(idBase, 0x0200);
+        st.name        = prefix_ + ".cia402.drive_state";
+        st.description = "CiA 402 drive state decoded from TxPDO statusword";
+        st.group       = g;
+        st.valueType   = ValueType::U8;
+        st.metadata    = {
+            {"enum.0", "NotReadyToSwitchOn"}, {"enum.1", "SwitchOnDisabled"},
+            {"enum.2", "ReadyToSwitchOn"},    {"enum.3", "SwitchedOn"},
+            {"enum.4", "OperationEnabled"},   {"enum.5", "QuickStopActive"},
+            {"enum.6", "FaultReactionActive"},{"enum.7", "Fault"},
+            {"enum.8", "Unknown"},
+        };
+        st.readFn = [this](void* d) {
+            uint8_t v = static_cast<uint8_t>(EtherCAT::DriveState::Unknown);
+            AS715N_pdo::AS715N_TxPDO_1B04 img{};
+            if (pdo_.readTxPDO1B04(img))
+                v = static_cast<uint8_t>(
+                    EtherCAT::decodeDriveState(img.statusword));
+            std::memcpy(d, &v, 1);
+        };
+        registry.addSignal(std::move(st));
+
+        auto addBitSignal = [&](uint32_t local, const char* suffix,
+                                const char* desc,
+                                bool (*pred)(EtherCAT::DriveState,
+                                             uint16_t)) {
+            SignalEntry s;
+            s.id          = makeId(idBase, local);
+            s.name        = prefix_ + ".cia402." + suffix;
+            s.description = desc;
+            s.group       = g;
+            s.valueType   = ValueType::Bool;
+            s.readFn      = [this, pred](void* d) {
+                uint8_t v = 0;
+                AS715N_pdo::AS715N_TxPDO_1B04 img{};
+                if (pdo_.readTxPDO1B04(img))
+                    v = pred(EtherCAT::decodeDriveState(img.statusword),
+                             img.statusword) ? 1 : 0;
+                std::memcpy(d, &v, 1);
+            };
+            registry.addSignal(std::move(s));
+        };
+
+        using DS = EtherCAT::DriveState;
+        addBitSignal(0x0201, "is_enabled", "Drive state == OperationEnabled",
+                     [](DS s, uint16_t) { return s == DS::OperationEnabled; });
+        addBitSignal(0x0202, "is_faulted",
+                     "Drive state is Fault or FaultReactionActive",
+                     [](DS s, uint16_t) {
+                         return s == DS::Fault || s == DS::FaultReactionActive;
+                     });
+        addBitSignal(0x0203, "target_reached",
+                     "Statusword bit 10 (target reached)",
+                     [](DS, uint16_t sw) { return (sw & 0x0400u) != 0; });
+
+        // Ring self-health: rows dropped because no session drained fast
+        // enough (or the ring was full).
+        SignalEntry rd;
+        rd.id          = makeId(idBase, 0x0204);
+        rd.name        = prefix_ + ".io.ring_dropped";
+        rd.description = "PDO stream rows dropped (ring full / not consumed)";
+        rd.group       = group + ".io";
+        rd.valueType   = ValueType::U64;
+        rd.readFn      = [this](void* d) {
+            uint64_t v = ringSource_.dropped();
+            std::memcpy(d, &v, sizeof(v));
+        };
+        registry.addSignal(std::move(rd));
+    }
+
+    /// Build a StructDescriptor for one PDO image from kPdoFields.
+    StructDescriptor buildImageDescriptor(uint64_t entryId,
+                                          const char* typeName,
+                                          uint32_t totalSize, bool rx) {
+        StructDescriptor sd;
+        sd.entryId   = entryId;
+        sd.name      = typeName;
+        sd.totalSize = totalSize;
+        for (const auto& f : detail::kPdoFields) {
+            if (f.rx != rx) continue;
+            const char* nm = f.name + 3;  // strip "rx_"/"tx_" prefix
+            sd.fields.push_back({nm, f.type, f.offset, f.size, ""});
+        }
+        return sd;
     }
 
     void readPdoField(const detail::AS715NPdoField& f, void* d) {
@@ -365,6 +560,8 @@ private:
             &RegAS715N::U40::kRegisterList,
             &RegAS715N::U41::kRegisterList,
             &RegAS715N::U42::kRegisterList,
+            // Standard CoE objects: identity, PDO assignment, SM sync params.
+            &detail::kCoeObjectList(),
         };
 
         for (const auto* list : groups) {
@@ -471,6 +668,9 @@ private:
     uint16_t    driveIndex_;
     std::string prefix_;
     SpscRingStreamSource<AS715NPdoRow, RingCapacity> ringSource_;
+    // StructDescriptors for the raw PDO image signals (members — stable).
+    StructDescriptor rxImageDesc_;
+    StructDescriptor txImageDesc_;
 };
 
 } // namespace exposers
