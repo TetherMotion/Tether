@@ -24,6 +24,7 @@
 #include "tether/io/ThresholdFilter.hpp"
 #include "tether/io/FeatureExchange.hpp"
 #include "tether/io/Datalogging.hpp"
+#include "tether/io/RingStreamSource.hpp"
 #include <cstdint>
 #include <cstddef>
 #include <functional>
@@ -87,7 +88,8 @@ public:
             InputStreamDataFn inputStreamDataFn = nullptr,
             ReceiveBufferFactory encodedBufferFactory = nullptr,
             ReceiveBufferFactory decodedBufferFactory = nullptr,
-            Framing framing = Framing::Slip);
+            Framing framing = Framing::Slip,
+            const std::vector<IRingStreamSource*>* ringSources = nullptr);
     ~Session();
 
     /// Run event loop (blocking).
@@ -161,6 +163,19 @@ private:
     void handleStreamingCycle();
     void sendStreamData();
 
+    // ---- Ring-buffered streaming ----
+    /// Try to bind a ring stream source whose schema covers all configured
+    /// entries.  Returns true if a source was bound (ringSource_ set) or no
+    /// source matched (ringSource_ null) — false only when a matching source
+    /// was found but is already bound to another session.
+    bool bindRingSource();
+    /// Drain pending rows from ringSource_ into chunkBuf_, projecting each
+    /// schema row onto the configured field subset.
+    void collectRingRows();
+    /// Stop production and release the bound source (stream stop, reconfigure,
+    /// session end).
+    void releaseRingSource();
+
     // ---- Logging ----
     void log(const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 
@@ -216,6 +231,19 @@ private:
     };
     std::vector<InputStreamState> inputStreams_;
     uint32_t nextInputStreamId_ = 1;
+
+    // ==== Ring-buffered streaming ====
+    /// Sources registered by the server; consulted in bindRingSource().
+    const std::vector<IRingStreamSource*>* ringSources_ = nullptr;
+    /// Timestamp (getTimestampUs_) of the last ring drain that produced rows.
+    /// Used to flush a partial chunk when the producer goes quiet.
+    uint64_t lastRingRowUs_ = 0;
+    /// Bound source (owned elsewhere) while a ring-backed stream is active.
+    IRingStreamSource* ringSource_ = nullptr;
+    /// Per collectPlan_ slot: byte offset of the field inside a schema row.
+    std::vector<uint32_t> ringFieldOffsets_;
+    /// Scratch for drained schema rows (sized to chunkSize_ * src rowSize).
+    std::vector<uint8_t> ringScratch_;
 
     // ==== OnChange trigger state ====
     std::vector<uint8_t> lastTriggerValue_;

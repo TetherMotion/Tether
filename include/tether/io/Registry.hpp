@@ -68,13 +68,14 @@ struct ParamEntry {
     uint16_t    maxValueSize = 0;   ///< 0 for fixed-size; max bytes for variable-length
     std::map<std::string, std::string> metadata;
     const StructDescriptor* structDesc = nullptr;  ///< Optional struct layout
+    uint8_t     extraFlags = 0;     ///< Additional EntryFlags bits (e.g. NoStream)
 
     uint8_t valueSize() const { return valueTypeSize(valueType); }
     bool isVariableLength() const { return tether::io::isVariableLength(valueType) || valueType == ValueType::Struct; }
     bool writable() const { return static_cast<bool>(writeFn) || static_cast<bool>(varWriteFn); }
 
     uint8_t flags() const {
-        uint8_t f = EntryFlags::Readable;
+        uint8_t f = EntryFlags::Readable | extraFlags;
         if (writable()) f |= EntryFlags::Writable;
         if (isVariableLength()) f |= EntryFlags::VariableLen;
         if (structDesc) f |= EntryFlags::HasStruct;
@@ -98,12 +99,13 @@ struct SignalEntry {
     uint16_t    maxValueSize = 0;
     std::map<std::string, std::string> metadata;
     const StructDescriptor* structDesc = nullptr;
+    uint8_t     extraFlags = 0;     ///< Additional EntryFlags bits (e.g. NoStream)
 
     uint8_t valueSize() const { return valueTypeSize(valueType); }
     bool isVariableLength() const { return tether::io::isVariableLength(valueType) || valueType == ValueType::Struct; }
 
     uint8_t flags() const {
-        uint8_t f = EntryFlags::Readable;
+        uint8_t f = EntryFlags::Readable | extraFlags;
         if (isVariableLength()) f |= EntryFlags::VariableLen;
         if (structDesc) f |= EntryFlags::HasStruct;
         return f;
@@ -255,6 +257,15 @@ public:
 
     /// Get a monotonically increasing revision counter (incremented on each add).
     uint32_t revision() const { return revision_; }
+
+    /**
+     * Remove all params, signals, and functions and notify listeners.
+     *
+     * WARNING: callers must guarantee no session is executing an entry
+     * callback (e.g. stop the io::Server first) — clear() does not wait for
+     * in-flight entry reads/writes.
+     */
+    void clear();
 
     /// Configure the declarative stream-filter properties supported by this registry.
     void defineStreamFilterProperty(FilterPropertyDef definition);

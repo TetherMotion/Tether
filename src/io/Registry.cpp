@@ -45,6 +45,18 @@ bool Registry::addFunction(FunctionEntry entry) {
     return true;
 }
 
+void Registry::clear() {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        params_.clear();
+        signals_.clear();
+        functions_.clear();
+        idMap_.clear();
+        ++revision_;
+    }
+    notifyChange();
+}
+
 uint32_t Registry::paramCount() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return static_cast<uint32_t>(params_.size());

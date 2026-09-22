@@ -237,6 +237,7 @@ set(IO_TRANSPORT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_tcp_transport.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_serial_transport.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_pipe_transport.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_ring_stream.cpp"
 )
 set(IO_SERVICES_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_registry.cpp"
@@ -532,6 +533,11 @@ if(TETHER_BUILD_IO_PROTOCOL)
     create_module_test(io_protocol "${IO_PROTOCOL_SOURCES}" "tether_common;tether_io_protocol" "")
     create_module_test(io_transport "${IO_TRANSPORT_SOURCES}" "tether_common;tether_io_protocol" "")
     create_module_test(io_services "${IO_SERVICES_SOURCES}" "tether_common;tether_io_protocol" "")
+    if(TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_DEVICE_DRIVERS)
+        create_module_test(io_exposers
+            "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_as715n_exposer.cpp"
+            "tether_common;tether_io_protocol;tether_ethercat_master;tether_device_drivers" "")
+    endif()
 endif()
 
 if(MOTION_TEST_SOURCES)
@@ -939,6 +945,23 @@ target_compile_definitions(tether_header_tests PRIVATE
 )
 
 gtest_discover_tests(tether_header_tests PROPERTIES TIMEOUT 30)
+
+# Utility tests (header-only utilities, no EtherCAT dependencies)
+tether_add_test_executable(tether_utils_tests
+    utils/test_spsc_ring.cpp
+)
+
+target_include_directories(tether_utils_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+)
+
+target_link_libraries(tether_utils_tests
+    GTest::gtest_main
+)
+
+gtest_discover_tests(tether_utils_tests PROPERTIES TIMEOUT 30)
 
 # Helper to create ethercat test executables with common settings
 function(create_ethercat_test NAME)
