@@ -134,6 +134,7 @@ protected:
             &RegAS715N::F31::kRegisterList, &RegAS715N::R20::kRegisterList,
             &RegAS715N::R22::kRegisterList, &RegAS715N::U40::kRegisterList,
             &RegAS715N::U41::kRegisterList, &RegAS715N::U42::kRegisterList,
+            &detail::kCoeObjectList(),
         };
         return g;
     }
@@ -155,8 +156,8 @@ protected:
 // ---------------------------------------------------------------------------
 
 TEST_F(AS715NExposerTest, AllPdoFieldsRegisteredAsSignals) {
-    // 19 fields + 2 raw images.
-    EXPECT_EQ(registry_.signalCount(), detail::kPdoFieldCount + 2);
+    // 19 fields + 2 raw images + 4 decoded CiA 402 signals + ring_dropped.
+    EXPECT_EQ(registry_.signalCount(), detail::kPdoFieldCount + 7);
 
     for (size_t i = 0; i < detail::kPdoFieldCount; ++i) {
         const auto& f = detail::kPdoFields[i];
@@ -370,6 +371,115 @@ TEST_F(AS715NExposerTest, RingProduceDrainRoundtrip) {
 TEST_F(AS715NExposerTest, RingProduceGatedWhileInactive) {
     // No acquire/start: produce must be a no-op.
     EXPECT_FALSE(exposer_->produceRow([](AS715NPdoRow&) {}));
+}
+
+// ---------------------------------------------------------------------------
+// Struct descriptors on the raw PDO images
+// ---------------------------------------------------------------------------
+
+TEST_F(AS715NExposerTest, PdoImagesCarryStructDescriptors) {
+    EntryView rxImg = registry_.findSignal(makeId(kBase, 0x0100));
+    EntryView txImg = registry_.findSignal(makeId(kBase, 0x0101));
+    ASSERT_TRUE(static_cast<bool>(rxImg));
+    ASSERT_TRUE(static_cast<bool>(txImg));
+    EXPECT_TRUE(rxImg.flags() & EntryFlags::HasStruct);
+    EXPECT_TRUE(txImg.flags() & EntryFlags::HasStruct);
+
+    const StructDescriptor* rx = rxImg.structDesc();
+    const StructDescriptor* tx = txImg.structDesc();
+    ASSERT_NE(rx, nullptr);
+    ASSERT_NE(tx, nullptr);
+    EXPECT_EQ(rx->entryId, makeId(kBase, 0x0100));
+    EXPECT_EQ(rx->totalSize, sizeof(AS715N_pdo::AS715N_RxPDO_1704));
+    EXPECT_EQ(tx->totalSize, sizeof(AS715N_pdo::AS715N_TxPDO_1B04));
+
+    // The descriptor covers every field of the respective image — field
+    // names are the PDO member names (rx_/tx_ prefix stripped).
+    size_t rxFields = 0, txFields = 0;
+    for (const auto& f : detail::kPdoFields) (f.rx ? rxFields : txFields)++;
+    EXPECT_EQ(rx->fields.size(), rxFields);
+    EXPECT_EQ(tx->fields.size(), txFields);
+    EXPECT_EQ(rx->fields[0].name, "controlword");
+    EXPECT_EQ(rx->fields[0].offset,
+              offsetof(AS715N_pdo::AS715N_RxPDO_1704, controlword));
+    EXPECT_EQ(tx->fields[0].name, "error_code");
+}
+
+// ---------------------------------------------------------------------------
+// Decoded CiA 402 signals (non-blocking, PDO-derived)
+// ---------------------------------------------------------------------------
+
+TEST_F(AS715NExposerTest, DecodedDriveStateFromStatusword) {
+    // 0x0637: OperationEnabled bits + bit10 target-reached.
+    pdo_.tx_.statusword = 0x0637;
+
+    uint8_t state = 0xFF;
+    registry_.findSignal(makeId(kBase, 0x0200)).read(&state);
+    EXPECT_EQ(state,
+              static_cast<uint8_t>(::EtherCAT::DriveState::OperationEnabled));
+
+    uint8_t v = 0;
+    registry_.findSignal(makeId(kBase, 0x0201)).read(&v);   // is_enabled
+    EXPECT_EQ(v, 1);
+    registry_.findSignal(makeId(kBase, 0x0202)).read(&v);   // is_faulted
+    EXPECT_EQ(v, 0);
+    registry_.findSignal(makeId(kBase, 0x0203)).read(&v);   // target_reached
+    EXPECT_EQ(v, 1);
+}
+
+TEST_F(AS715NExposerTest, DecodedFaultStateFromStatusword) {
+    pdo_.tx_.statusword = 0x0008;   // CiA 402 Fault pattern
+
+    uint8_t state = 0xFF;
+    registry_.findSignal(makeId(kBase, 0x0200)).read(&state);
+    EXPECT_EQ(state, static_cast<uint8_t>(::EtherCAT::DriveState::Fault));
+
+    uint8_t v = 1;
+    registry_.findSignal(makeId(kBase, 0x0201)).read(&v);   // is_enabled
+    EXPECT_EQ(v, 0);
+    registry_.findSignal(makeId(kBase, 0x0202)).read(&v);   // is_faulted
+    EXPECT_EQ(v, 1);
+}
+
+TEST_F(AS715NExposerTest, DecodedSignalsReadZeroWhenDriveAbsent) {
+    pdo_.available_ = false;
+    pdo_.tx_.statusword = 0x0637;
+
+    uint8_t v = 0xFF;
+    registry_.findSignal(makeId(kBase, 0x0200)).read(&v);
+    EXPECT_EQ(v, static_cast<uint8_t>(::EtherCAT::DriveState::Unknown));
+    registry_.findSignal(makeId(kBase, 0x0201)).read(&v);
+    EXPECT_EQ(v, 0);
+}
+
+TEST_F(AS715NExposerTest, RingDroppedSignalReflectsSource) {
+    uint64_t v = 0xFF;
+    registry_.findSignal(makeId(kBase, 0x0204)).read(&v);
+    EXPECT_EQ(v, 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Standard CoE objects (0x10xx identity, 0x1Cxx PDO/sync-manager config)
+// ---------------------------------------------------------------------------
+
+TEST_F(AS715NExposerTest, StandardCoeObjectsExposedReadOnly) {
+    const uint16_t indices[] = {0x1000, 0x1008, 0x1009, 0x100A,
+                                0x1018, 0x1C00, 0x1C12, 0x1C13,
+                                0x1C32, 0x1C33};
+    for (uint16_t idx : indices) {
+        EntryView v = registry_.findParam(sdoId(idx, 0x00));
+        ASSERT_TRUE(static_cast<bool>(v)) << "missing CoE param 0x"
+                                          << std::hex << idx;
+        EXPECT_TRUE(v.flags() & EntryFlags::NoStream);
+        EXPECT_TRUE(v.flags() & EntryFlags::Readable);
+        EXPECT_FALSE(v.flags() & EntryFlags::Writable)
+            << "CoE object 0x" << std::hex << idx << " must be read-only";
+    }
+
+    // Identity sub-entries resolve individually.
+    EXPECT_TRUE(static_cast<bool>(registry_.findParam(sdoId(0x1018, 0x01))));
+    EXPECT_TRUE(static_cast<bool>(registry_.findParam(sdoId(0x1018, 0x04))));
+    EXPECT_TRUE(static_cast<bool>(registry_.findParam(sdoId(0x1C32, 0x02))));
 }
 
 TEST_F(AS715NExposerTest, SecondDriveGetsUniqueIds) {
