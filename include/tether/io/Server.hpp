@@ -14,6 +14,7 @@
 #include "tether/io/Transport.hpp"
 #include "tether/io/FeatureExchange.hpp"
 #include "tether/io/Datalogging.hpp"
+#include "tether/io/RingStreamSource.hpp"
 #include "logging/Logger.hpp"
 #include <cstdint>
 #include <cstddef>
@@ -37,6 +38,11 @@ struct ServerConfig {
     ReceiveBufferFactory encodedBufferFactory;
     ReceiveBufferFactory decodedBufferFactory;
     Framing     framing      = Framing::Slip; ///< Message framing mode
+    /// Ring-buffered stream sources (producer-driven).  A configured stream
+    /// whose entries are all covered by a source's schema drains that source
+    /// instead of polling entry read functions.  Sources are owned by the
+    /// caller and must outlive the Server.
+    std::vector<IRingStreamSource*> ringSources;
 };
 
 /**

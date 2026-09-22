@@ -316,6 +316,7 @@ enum class ErrorCode : uint32_t {
     DatalogError        = 11,
     ThresholdError      = 12,
     FunctionInvocationError = 13,
+    ResourceBusy        = 14,
 };
 
 // ---------------------------------------------------------------------------
@@ -327,6 +328,10 @@ namespace EntryFlags {
     inline constexpr uint8_t VariableLen   = 0x04;
     inline constexpr uint8_t HasStruct     = 0x08;
     inline constexpr uint8_t HasEnum       = 0x10;
+    /// Entry must not be polled by a configured stream (e.g. SDO-backed
+    /// reads whose cost is a mailbox round-trip, not a memory read).
+    /// buildCollectPlan resolves such entries out of the collect plan.
+    inline constexpr uint8_t NoStream      = 0x20;
 } // namespace EntryFlags
 
 // ---------------------------------------------------------------------------

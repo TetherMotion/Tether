@@ -29,7 +29,8 @@ Session::Session(std::unique_ptr<ITransport> transport,
                  InputStreamDataFn inputStreamDataFn,
                  ReceiveBufferFactory encodedBufferFactory,
                  ReceiveBufferFactory decodedBufferFactory,
-                 Framing framing)
+                 Framing framing,
+                 const std::vector<IRingStreamSource*>* ringSources)
     : transport_(std::move(transport))
     , registry_(registry)
     , getTimestampUs_(tsFn)
@@ -39,6 +40,7 @@ Session::Session(std::unique_ptr<ITransport> transport,
     , inputStreamCreateFn_(std::move(inputStreamCreateFn))
     , inputStreamDataFn_(std::move(inputStreamDataFn))
     , framing_(framing)
+    , ringSources_(ringSources)
     , slipRxBuf_(encodedBufferFactory ? encodedBufferFactory()
                                       : std::make_unique<DynamicReceiveBuffer>(
                                             DEFAULT_RECEIVE_BUFFER_CAPACITY,
@@ -135,6 +137,7 @@ void Session::run() {
         }
     }
 
+    releaseRingSource();
     streaming_ = false;
     running_ = false;
     log("Session ended");
@@ -540,7 +543,14 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
     streamFilters_ = std::move(streamFilters);
     specId_++;
 
+    releaseRingSource();
     buildCollectPlan();
+    if (!bindRingSource()) {
+        configured_ = false;
+        sendError(ErrorCode::ResourceBusy,
+                  "Stream source already bound to another session");
+        return;
+    }
     configured_ = true;
     skipCounter_ = 0;
     rowsInChunk_ = 0;
@@ -579,6 +589,10 @@ void Session::handleStartStream() {
     lastTriggerValue_.clear();
     lastValues_.clear();
     lastValues_.resize(collectPlan_.size());
+    if (ringSource_) {
+        ringSource_->start();
+        lastRingRowUs_ = lastSampleTimeUs_;
+    }
     if (logFn_) logFn_("TetherIO", "StartStream: streaming started (interval=%uus, chunk=%u, %zu entries)",
                         intervalUs_, chunkSize_, collectPlan_.size());
 }
@@ -587,6 +601,7 @@ void Session::handleStopStream() {
     if (!streaming_) { sendError(ErrorCode::NotStreaming, "Not streaming"); return; }
     if (rowsInChunk_ > 0) sendStreamData();
     streaming_ = false;
+    releaseRingSource();
     if (logFn_) logFn_("TetherIO", "StopStream: streaming stopped");
 }
 
@@ -1540,6 +1555,7 @@ void Session::buildCollectPlan() {
     for (uint64_t eid : configuredEntryIds_) {
         EntryView entry = registry_.find(eid);
         if (!entry) continue;
+        if (entry.flags() & EntryFlags::NoStream) continue;
         CollectSlot slot;
         slot.paramId    = eid;
         slot.entry      = entry;
@@ -1702,6 +1718,25 @@ bool Session::shouldTrigger() {
 }
 
 void Session::handleStreamingCycle() {
+    if (ringSource_) {
+        // Ring-backed stream: the producer timestamps and buffers rows; the
+        // interval is the drain cadence.  Trigger/skip are evaluated per row
+        // inside collectRingRows().
+        collectRingRows();
+        if (rowsInChunk_ >= chunkSize_) {
+            sendStreamData();
+        } else if (rowsInChunk_ > 0) {
+            // A ring producer may pause mid-chunk; without a flush the pending
+            // rows would stall indefinitely.  Flush once they've waited as
+            // long as a polled chunk would take to fill (interval x chunk).
+            const uint64_t now = getTimestampUs_();
+            const uint64_t budget =
+                static_cast<uint64_t>(intervalUs_) * chunkSize_;
+            if (now - lastRingRowUs_ >= budget) sendStreamData();
+        }
+        return;
+    }
+
     if (!shouldTrigger()) return;
 
     if (skipCounter_ > 0) {
@@ -1745,6 +1780,137 @@ void Session::sendStreamData() {
     }
     rowsInChunk_ = 0;
     chunkWritePos_ = 0;
+}
+
+// --------------------------------------------------------------------------
+// Ring-buffered streaming
+// --------------------------------------------------------------------------
+
+bool Session::bindRingSource() {
+    ringSource_ = nullptr;
+    ringFieldOffsets_.clear();
+    if (!ringSources_ || collectPlan_.empty() || hasVariableEntries_)
+        return true;  // no sources registered / nothing streamable / var-len
+                      // entries can't come from a fixed-size ring
+
+    for (IRingStreamSource* src : *ringSources_) {
+        if (!src) continue;
+        auto ids   = src->schemaEntryIds();
+        auto sizes = src->schemaFieldSizes();
+
+        // The source must cover every configured entry.
+        ringFieldOffsets_.assign(collectPlan_.size(), 0);
+        bool all = true;
+        for (size_t i = 0; i < collectPlan_.size() && all; ++i) {
+            const auto& slot = collectPlan_[i];
+            uint32_t offset = 8;  // leading u64 producer timestamp
+            bool found = false;
+            for (size_t j = 0; j < ids.size(); ++j) {
+                if (ids[j] == slot.paramId) {
+                    // Schema field size must match the registry value size.
+                    if (sizes[j] != slot.valueSize) { all = false; break; }
+                    ringFieldOffsets_[i] = offset;
+                    found = true;
+                    break;
+                }
+                offset += sizes[j];
+            }
+            if (!found) all = false;
+        }
+        if (!all) { ringFieldOffsets_.clear(); continue; }
+
+        if (!src->tryAcquire()) return false;  // schema matches but in use
+        ringSource_ = src;
+        ringScratch_.assign(
+            static_cast<size_t>(chunkSize_) * src->rowSize(), 0);
+        if (logFn_)
+            logFn_("TetherIO",
+                   "Stream bound to ring source: %zu fields, rowSize=%zu, dropped=%llu",
+                   collectPlan_.size(), src->rowSize(),
+                   static_cast<unsigned long long>(src->dropped()));
+        return true;
+    }
+    return true;  // no source covers this configuration: fall back to polling
+}
+
+void Session::collectRingRows() {
+    const size_t srcRowSize = ringSource_->rowSize();
+    const size_t space = chunkSize_ - rowsInChunk_;
+    if (space == 0) return;
+    if (ringScratch_.size() < space * srcRowSize)
+        ringScratch_.resize(space * srcRowSize);
+
+    std::vector<std::vector<uint8_t>> currentValues;
+    if (!streamFilters_.empty()) currentValues.resize(collectPlan_.size());
+
+    const size_t got = ringSource_->drainRows(ringScratch_.data(), space);
+    if (got > 0) lastRingRowUs_ = getTimestampUs_();
+    for (size_t n = 0; n < got; ++n) {
+        const uint8_t* srow = ringScratch_.data() + n * srcRowSize;
+
+        // OnChange trigger: emit a row only if a field differs from the
+        // last emitted values.
+        if (triggerMode_ == TriggerMode::OnChange) {
+            bool changed = false;
+            for (size_t i = 0; i < collectPlan_.size() && !changed; ++i) {
+                const auto& slot = collectPlan_[i];
+                const uint8_t* f = srow + ringFieldOffsets_[i];
+                if (lastValues_[i].size() != slot.valueSize ||
+                    std::memcmp(f, lastValues_[i].data(), slot.valueSize) != 0)
+                    changed = true;
+            }
+            if (!changed) continue;
+        }
+
+        if (skipCounter_ > 0) { skipCounter_--; continue; }
+        skipCounter_ = skipCount_;
+
+        // Stream filters evaluate the producer's raw field values (same
+        // inputs as the polled path's currentValues).
+        if (!currentValues.empty()) {
+            for (size_t i = 0; i < collectPlan_.size(); ++i) {
+                const auto& slot = collectPlan_[i];
+                const uint8_t* f = srow + ringFieldOffsets_[i];
+                currentValues[i].assign(f, f + slot.valueSize);
+            }
+            if (!passesStreamFilters(currentValues)) continue;
+        }
+
+        uint8_t* row = chunkBuf_.data() +
+                       static_cast<size_t>(rowsInChunk_) * fullRowSize_;
+        std::memcpy(row, srow, 8);  // producer timestamp
+        row += 8;
+
+        for (size_t i = 0; i < collectPlan_.size(); ++i) {
+            const auto& slot = collectPlan_[i];
+            const uint8_t* f = srow + ringFieldOffsets_[i];
+            // Threshold compression mirrors collectOneRow(): fields that
+            // didn't pass the filter are sent as their last value.
+            if (!lastValues_[i].empty() &&
+                !thresholdFilter_.passes(slot.paramId, lastValues_[i].data(),
+                                         f, slot.valueSize)) {
+                std::memcpy(row, lastValues_[i].data(), slot.valueSize);
+            } else {
+                std::memcpy(row, f, slot.valueSize);
+            }
+            if (lastValues_[i].size() != slot.valueSize)
+                lastValues_[i].resize(slot.valueSize);
+            std::memcpy(lastValues_[i].data(), row, slot.valueSize);
+            row += slot.valueSize;
+        }
+        rowsInChunk_++;
+    }
+}
+
+void Session::releaseRingSource() {
+    if (!ringSource_) return;
+    ringSource_->stop();
+    ringSource_->release();
+    if (logFn_)
+        logFn_("TetherIO", "Ring source released (dropped=%llu)",
+               static_cast<unsigned long long>(ringSource_->dropped()));
+    ringSource_ = nullptr;
+    ringFieldOffsets_.clear();
 }
 
 }} // namespace tether::io
