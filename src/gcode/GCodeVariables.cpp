@@ -702,6 +702,13 @@ Error ExpressionEvaluator::parseTernary(double& result) {
     return Error{};
 }
 
+// AND/OR/XOR: bitwise on integral operands (Fanuc semantics), logical
+// on fractional operands (RS274 logical operators). Both coincide for
+// 0/1 inputs.
+static bool isIntegral(double v) {
+    return v == std::trunc(v) && std::abs(v) < 9.0e15;
+}
+
 Error ExpressionEvaluator::parseLogicalOr(double& result) {
     Error err = parseLogicalXor(result);
     if (err) return err;
@@ -711,7 +718,11 @@ Error ExpressionEvaluator::parseLogicalOr(double& result) {
         double rhs = 0.0;
         err = parseLogicalXor(rhs);
         if (err) return err;
-        result = ((result != 0.0) || (rhs != 0.0)) ? 1.0 : 0.0;
+        if (isIntegral(result) && isIntegral(rhs))
+            result = static_cast<double>(
+                static_cast<int64_t>(result) | static_cast<int64_t>(rhs));
+        else
+            result = ((result != 0.0) || (rhs != 0.0)) ? 1.0 : 0.0;
     }
 
     return Error{};
@@ -726,9 +737,14 @@ Error ExpressionEvaluator::parseLogicalXor(double& result) {
         double rhs = 0.0;
         err = parseLogicalAnd(rhs);
         if (err) return err;
-        const bool a = (result != 0.0);
-        const bool b = (rhs != 0.0);
-        result = (a ^ b) ? 1.0 : 0.0;
+        if (isIntegral(result) && isIntegral(rhs))
+            result = static_cast<double>(
+                static_cast<int64_t>(result) ^ static_cast<int64_t>(rhs));
+        else {
+            const bool a = (result != 0.0);
+            const bool b = (rhs != 0.0);
+            result = (a ^ b) ? 1.0 : 0.0;
+        }
     }
 
     return Error{};
@@ -743,7 +759,11 @@ Error ExpressionEvaluator::parseLogicalAnd(double& result) {
         double rhs = 0.0;
         err = parseComparison(rhs);
         if (err) return err;
-        result = ((result != 0.0) && (rhs != 0.0)) ? 1.0 : 0.0;
+        if (isIntegral(result) && isIntegral(rhs))
+            result = static_cast<double>(
+                static_cast<int64_t>(result) & static_cast<int64_t>(rhs));
+        else
+            result = ((result != 0.0) && (rhs != 0.0)) ? 1.0 : 0.0;
     }
 
     return Error{};

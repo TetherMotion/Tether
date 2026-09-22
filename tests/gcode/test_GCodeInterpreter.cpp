@@ -1059,3 +1059,24 @@ TEST_F(InterpreterTestBase, GrblCheckModeAndStartupLines) {
     EXPECT_TRUE(interp.systemCommand("$N0=G21").ok());
     EXPECT_EQ(interp.getStartupLines()[0], "G21");
 }
+
+TEST_F(InterpreterTestBase, ExtendedWCS_G541) {
+    // G10 L2 P10 sets extended WCS 10 (i.e. G54.1 P1)
+    EXPECT_TRUE(interp.executeLine("G10 L2 P10 X100").ok());
+    EXPECT_TRUE(interp.executeLine("G54.1 P1").ok());
+    EXPECT_TRUE(interp.executeLine("G0 X0").ok());
+    EXPECT_NEAR(segments.back().endPosition.x(), 100.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, BitwiseOperators) {
+    // Integral operands → Fanuc bitwise semantics
+    EXPECT_TRUE(interp.executeLine("#1 = [6 AND 3]").ok());   // 6&3=2
+    EXPECT_NEAR(interp.getVariables().get(1), 2.0, 0.001);
+    EXPECT_TRUE(interp.executeLine("#1 = [6 OR 3]").ok());    // 6|3=7
+    EXPECT_NEAR(interp.getVariables().get(1), 7.0, 0.001);
+    EXPECT_TRUE(interp.executeLine("#1 = [6 XOR 3]").ok());   // 6^3=5
+    EXPECT_NEAR(interp.getVariables().get(1), 5.0, 0.001);
+    // Fractional operands stay logical
+    EXPECT_TRUE(interp.executeLine("#1 = [0.5 AND 0.5]").ok());
+    EXPECT_NEAR(interp.getVariables().get(1), 1.0, 0.001);
+}

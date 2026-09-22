@@ -741,7 +741,15 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
 
         case ModalGroup::COORD_SYSTEM: {
             int32_t wcsNum = 1;
-            if (gnum >= 54 && gnum <= 59) wcsNum = gnum - 53;
+            if (gi == 541) {
+                // G54.1 Pn (Haas/Fanuc ENS) — extended WCS 10+
+                const int p = static_cast<int>(
+                    block.getWord(WordLetter::P, 0));
+                if (p < 1)
+                    return makeError(ErrorCode::INVALID_MOTION,
+                                     "G54.1 requires P word");
+                wcsNum = 9 + p;
+            } else if (gnum >= 54 && gnum <= 59) wcsNum = gnum - 53;
             else if (gi == 591) wcsNum = 7; // G59.1
             else if (gi == 592) wcsNum = 8; // G59.2
             else if (gi == 593) wcsNum = 9; // G59.3

@@ -69,22 +69,44 @@ Error CoordinateSystemManager::selectWCS(double gcode) {
 }
 
 Error CoordinateSystemManager::selectWCS(int32_t number) {
-    if (number < 1 || number > 9)
+    if (number < 1)
         return makeError(ErrorCode::INVALID_MOTION, "WCS number out of range");
     m_activeWCS = number;
+    if (number >= 10) {
+        // Materialize the extended entry so getActiveWCS() is always valid.
+        auto& w = m_extWcs[number];
+        w.number = number;
+    }
     return Error{};
 }
 
+const WorkCoordinateSystem& CoordinateSystemManager::resolveWCS(
+    int32_t number) const {
+    if (number >= 1 && number <= 9)
+        return m_wcs[wcsIndex(number)];
+    static const WorkCoordinateSystem fallback{};
+    auto it = m_extWcs.find(number);
+    return (it != m_extWcs.end()) ? it->second : fallback;
+}
+
+WorkCoordinateSystem& CoordinateSystemManager::resolveWCS(int32_t number) {
+    if (number >= 1 && number <= 9)
+        return m_wcs[wcsIndex(number)];
+    auto& w = m_extWcs[number];
+    w.number = number;
+    return w;
+}
+
 const WorkCoordinateSystem& CoordinateSystemManager::getActiveWCS() const {
-    return m_wcs[wcsIndex(m_activeWCS)];
+    return resolveWCS(m_activeWCS);
 }
 
 const WorkCoordinateSystem& CoordinateSystemManager::getWCS(int32_t number) const {
-    return m_wcs[wcsIndex(number)];
+    return resolveWCS(number);
 }
 
 WorkCoordinateSystem& CoordinateSystemManager::getWCS(int32_t number) {
-    return m_wcs[wcsIndex(number)];
+    return resolveWCS(number);
 }
 
 // ============================================================================
@@ -103,7 +125,7 @@ Error CoordinateSystemManager::processG92(
     // The current machine position is machinePos. The WCS offset is
     // m_wcs[active].offset. So:
     //   g92_axis = machinePos_axis - wcs_axis - specified_program_axis
-    const Position& wcsOff = m_wcs[wcsIndex(m_activeWCS)].offset;
+    const Position& wcsOff = resolveWCS(m_activeWCS).offset;
     if (block.hasWord(WordLetter::X))
         m_g92Offset.x() = machinePos.x() - wcsOff.x() - block.getWord(WordLetter::X);
     if (block.hasWord(WordLetter::Y))
@@ -328,9 +350,9 @@ Error CoordinateSystemManager::processG50(MachineState& state) {
 
 Error CoordinateSystemManager::processG10L2(
     int32_t pWord, const Block& block, VariableSystem& vars) {
-    if (pWord < 1 || pWord > 9)
+    if (pWord < 1)
         return makeError(ErrorCode::INVALID_MOTION, "G10 P word out of range");
-    WorkCoordinateSystem& wcs = m_wcs[wcsIndex(pWord)];
+    WorkCoordinateSystem& wcs = resolveWCS(pWord);
     if (block.hasWord(WordLetter::X)) wcs.offset.x() = block.getWord(WordLetter::X);
     if (block.hasWord(WordLetter::Y)) wcs.offset.y() = block.getWord(WordLetter::Y);
     if (block.hasWord(WordLetter::Z)) wcs.offset.z() = block.getWord(WordLetter::Z);
@@ -347,9 +369,9 @@ Error CoordinateSystemManager::processG10L2(
 Error CoordinateSystemManager::processG10L20(
     int32_t pWord, const Block& block,
     const Position& machinePos, VariableSystem& vars) {
-    if (pWord < 1 || pWord > 9)
+    if (pWord < 1)
         return makeError(ErrorCode::INVALID_MOTION, "G10 P word out of range");
-    WorkCoordinateSystem& wcs = m_wcs[wcsIndex(pWord)];
+    WorkCoordinateSystem& wcs = resolveWCS(pWord);
     // L20: set WCS so that current machine position becomes the specified
     // program coordinate. wcs_offset = machine - program.
     if (block.hasWord(WordLetter::X)) wcs.offset.x() = machinePos.x() - block.getWord(WordLetter::X);
@@ -413,7 +435,7 @@ const Position& CoordinateSystemManager::getG30Reference(int32_t point) const {
 
 void CoordinateSystemManager::syncTransform(const MachineState& state) {
     // WCS offset
-    const Position& wcsOff = m_wcs[wcsIndex(m_activeWCS)].offset;
+    const Position& wcsOff = resolveWCS(m_activeWCS).offset;
     m_transform.setWCSOffset({wcsOff.x(), wcsOff.y(), wcsOff.z()});
 
     // G92 offset (only if active)
@@ -443,7 +465,7 @@ void CoordinateSystemManager::syncTransform(const MachineState& state) {
 
     // Rotation (G68). G68 overrides any WCS rotation (G10 L2 R).
     // If G68 is not active but the active WCS has a rotation, apply it.
-    double wcsRotation = m_wcs[wcsIndex(m_activeWCS)].rotation;
+    double wcsRotation = resolveWCS(m_activeWCS).rotation;
     if (state.g68Active) {
         switch (state.g68Mode) {
             case 0: {
@@ -491,7 +513,7 @@ Position CoordinateSystemManager::toProgramCoords(const Position& machinePos) co
 }
 
 Position CoordinateSystemManager::getTotalOffset() const {
-    const Position& wcsOff = m_wcs[wcsIndex(m_activeWCS)].offset;
+    const Position& wcsOff = resolveWCS(m_activeWCS).offset;
     Position total;
     for (size_t i = 0; i < MAX_AXES; ++i)
         total[i] = wcsOff[i] + (m_g92Active ? m_g92Offset[i] : 0.0) + 0.0;

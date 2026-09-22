@@ -61,7 +61,7 @@ No Haas handler class exists (only `MarlinMCodeHandler`).
 | **M19** (spindle orient) | DONE | P1 | Handled in `dispatchMCode`; forwards angle to spindle callback. |
 | **M41–M44** (spindle gear range) | DONE | P2 | Forwarded to user M-code hook. |
 | **M60** (pallet change) | DONE | P2 | Forwarded to user M-code hook. |
-| **`G54.1 Pxx`** (additional work offsets, Haas ENS) | MISSING | P1 | `CoordSystem` enum stops at G59.3 (9 systems); no `P`-word extension for additional offsets. |
+| **`G54.1 Pxx`** (additional work offsets, Haas ENS) | DONE | P1 | `Pn` selects extended WCS `9+n`; `G10 L2 P10+` writes them; stored in `m_extWcs`. |
 
 ---
 
@@ -71,7 +71,7 @@ Only the G-code text subset is parsed; GRBL's real-time protocol is absent.
 
 | Feature | Status | Priority | Notes |
 |---|---|---|---|
-| **`$` settings commands** | PARTIAL | P1 | `Interpreter::systemCommand` handles `$G`, `$#`, `$I`, `$X`, `$H`, `$J=`; `$N=`/`$n=` setting writes not implemented. |
+| **`$` settings commands** | PARTIAL | P1 | `systemCommand` handles `$G`, `$#`, `$I`, `$X`, `$H`, `$J=`, `$C`, `$N0=`/`$N1=`; `$n=` settings writes not implemented. |
 | **`$I`** (info), **`$G`** (parser state), **`$#`** (gcode parameters) | DONE | P1 | `systemCommand` emits reports via the message callback. |
 | **`$H`** (home), **`$X`** (unlock), **`$C`** (check mode) | DONE | P1 | `$X` unlocks; `$C` toggles check mode; `$H`/`$J=` deferred to the realtime callback (host performs motion). |
 | **`~`** (cycle resume), **`!`** (feed hold), **`?`** (status report) | DONE | P0 | `feedHold()`/`cycleResume()`/`statusReport()` + `processRealtimeChar`. |
@@ -93,8 +93,8 @@ Only the G-code text subset is parsed; GRBL's real-time protocol is absent.
 | **G20 / G21** (units) | RECOGNIZED | — | OK. |
 | **G28** (homing) | DONE | P0 | Rapids to stored reference point (`getG28Reference`). |
 | **G29** (auto bed leveling) | DONE | P0 | Forwarded to `UserGCodeCallback` (host performs probing). |
-| **G30** (Z probe point) | STUB | P1 | Recognized as reference code; no probe handler. |
-| **G80** (cancel bed leveling) | PARTIAL | P1 | Recognized only as canned-cycle cancel (RS274); RepRap ABL-cancel meaning not handled. |
+| **G30** (Z probe point) | PARTIAL | P1 | RS274 reference-point move implemented; Marlin Z-probe meaning needs dialect switch. |
+| **G80** (cancel bed leveling) | PARTIAL | P1 | RS274 canned-cycle cancel; RepRap ABL-cancel meaning needs dialect switch. |
 | **G90 / G91** (absolute/relative) | RECOGNIZED | — | OK for motion; extrusion absolute/relative is via M82/M83 only. |
 | **G92** (set position) | DONE | P0 | `processG92` sets offsets; G92.1/.2/.3 reset/restore. |
 
@@ -166,7 +166,7 @@ wired into `Interpreter::executeBlock`.
 | **Parameter assignment** (`#<foo> = expr`) | DONE | P0 | `PARAM_ASSIGN` token carries RHS text; `executeBlock` evaluates and assigns at runtime (named + numbered). |
 | **Ternary `? :`** | DONE | P1 | `parseTernary` evaluates `cond ? true : false` (right-associative). |
 | **`ATAN[x]`** (single-arg, returns degrees) | DONE | P2 | Single-arg `atan` and two-arg `atan2` both handled. |
-| **Bitwise operators** (`AND`/`OR`/`XOR` on integers) | PARTIAL | P2 | Logical AND/OR/XOR exist; bitwise variants not distinguished. |
+| **Bitwise operators** (`AND`/`OR`/`XOR` on integers) | DONE | P2 | Bitwise on integral operands (Fanuc), logical on fractional — identical for 0/1. |
 
 ---
 
@@ -230,7 +230,7 @@ M5. These well-known M-codes are **accepted but have no handler**:
 | **`G61 / G61.1 / G64` path control** | DONE | P2 | Sets `pathMode`/`blendTolerance`/`naiveCamTolerance`. |
 | **`G53` (machine coordinates, non-modal)** | DONE | P1 | Non-modal machine-coord rapid. |
 | **`G92.1 / G92.2 / G92.3`** (reset G92) | DONE | P1 | `processG92_1/2/3` wired in NON_MODAL dispatch. |
-| **Block skip `/` beyond first column** | PARTIAL | P2 | `LexerConfig::skipBlockDelete` only handles start-of-line. |
+| **Block skip `/` beyond first column** | DONE | P2 | `/` emits BLOCK_DELETE anywhere; with `skipBlockDelete` the rest of the line is skipped. |
 | **Multiple `M` words on one line** | RECOGNIZED | — | OK (up to `mCodes.size()`). |
 | **`P` / `Q` / `L` words for canned cycles** | DONE | — | Consumed by `executeCannedCycle` (dwell / peck / repeat). |
 
