@@ -1007,3 +1007,55 @@ TEST_F(InterpreterTestBase, HaasG12CircularPocket) {
 TEST_F(InterpreterTestBase, HaasG150NotSupported) {
     EXPECT_FALSE(interp.executeLine("G150 P1").ok());
 }
+
+// --- O-word messages / planes / overrides / dialect forwarding ---
+
+TEST_F(InterpreterTestBase, OCodeDebugPrints) {
+    std::vector<std::string> msgs;
+    interp.setMessageCallback([&](const std::string& m){ msgs.push_back(m); });
+    interp.executeLine("#1 = 42");
+    EXPECT_TRUE(interp.executeLine("o100 debug, [#1]").ok());
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_NE(msgs.back().find("42"), std::string::npos);
+}
+
+TEST_F(InterpreterTestBase, PolarPlaneG171) {
+    EXPECT_TRUE(interp.executeLine("G17.1").ok());
+    EXPECT_EQ(interp.getMachineState().plane, Plane::UV);
+    EXPECT_TRUE(interp.executeLine("G17").ok());
+    EXPECT_EQ(interp.getMachineState().plane, Plane::XY);
+}
+
+TEST_F(InterpreterTestBase, OverridesM48M50) {
+    EXPECT_TRUE(interp.executeLine("M50 P0.8").ok());
+    EXPECT_NEAR(interp.getMachineState().feedOverride, 0.8, 0.001);
+    EXPECT_TRUE(interp.executeLine("M49").ok());
+    EXPECT_FALSE(interp.getMachineState().feedOverrideEnabled);
+    EXPECT_TRUE(interp.executeLine("M53").ok());
+    EXPECT_NEAR(interp.getMachineState().feedOverride, 1.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, MarlinG10RetractForwarded) {
+    int seen = -1;
+    interp.setUserGCodeCallback([&](int32_t g, const Block&){
+        seen = g; return Error{};
+    });
+    EXPECT_TRUE(interp.executeLine("G10").ok());
+    EXPECT_EQ(seen, 10);
+    EXPECT_TRUE(interp.executeLine("G11").ok());
+    EXPECT_EQ(seen, 11);
+    EXPECT_TRUE(interp.executeLine("G29").ok());
+    EXPECT_EQ(seen, 29);
+    // G10 with L word stays RS274 coordinate-set
+    EXPECT_TRUE(interp.executeLine("G10 L2 P1 X5").ok());
+    EXPECT_EQ(seen, 29); // unchanged — not forwarded
+}
+
+TEST_F(InterpreterTestBase, GrblCheckModeAndStartupLines) {
+    EXPECT_TRUE(interp.systemCommand("$C").ok());
+    EXPECT_TRUE(interp.isDryRun());
+    EXPECT_TRUE(interp.systemCommand("$C").ok());
+    EXPECT_FALSE(interp.isDryRun());
+    EXPECT_TRUE(interp.systemCommand("$N0=G21").ok());
+    EXPECT_EQ(interp.getStartupLines()[0], "G21");
+}

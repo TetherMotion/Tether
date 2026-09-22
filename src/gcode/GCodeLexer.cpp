@@ -619,6 +619,9 @@ OCodeType Lexer::stringToOKeyword(const std::string& s) const {
     if (u == "RETURN") return OCodeType::RETURN;
     if (u == "BREAK") return OCodeType::BREAK;
     if (u == "CONTINUE") return OCodeType::CONTINUE;
+    if (u == "DEBUG") return OCodeType::DEBUG;
+    if (u == "LOG") return OCodeType::LOG;
+    if (u == "PRINT") return OCodeType::PRINT;
 
     return OCodeType::SUB;
 }

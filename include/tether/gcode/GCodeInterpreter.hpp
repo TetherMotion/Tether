@@ -238,6 +238,19 @@ using MCodeCallback = std::function<Error(
 )>;
 
 /**
+ * @brief User/dialect G-code callback
+ *
+ * Invoked for G-codes that are dialect-specific and not modeled by the
+ * core interpreter (e.g. RepRap G10/G11 firmware retract, G29 auto bed
+ * leveling). The handler receives the decoded G-number (G10 → 10,
+ * G29.1 → 291) and the full block for word access.
+ */
+using UserGCodeCallback = std::function<Error(
+    int32_t gcode,
+    const Block& block
+)>;
+
+/**
  * @brief Spindle callback
  */
 using SpindleCallback = std::function<Error(
@@ -492,6 +505,10 @@ public:
     Error systemCommand(const std::string& command);
     /// Dispatch a single real-time character ('!', '~', '?', 0x18, 0x85)
     Error processRealtimeChar(char command);
+    /// Startup blocks set via `$N0=`/`$N1=` (GRBL)
+    const std::vector<std::string>& getStartupLines() const {
+        return m_startupLines;
+    }
     /// Text replies from systemCommand()/status queries
     void setRealtimeCallback(RealtimeCallback callback) {
         m_realtimeCallback = std::move(callback);
@@ -536,6 +553,14 @@ public:
     void setProgramControlCallback(ProgramControlCallback callback);
     void setToolChangeCallback(ToolChangeCallback callback);
     void setProbeCallback(ProbeMotionCallback callback);
+
+    /**
+     * @brief Set handler for dialect-specific G-codes (G10/G11 retract,
+     *        G29 bed leveling, etc.)
+     */
+    void setUserGCodeCallback(UserGCodeCallback callback) {
+        m_userGCodeCallback = std::move(callback);
+    }
     
     // ========================================================================
     // Component Access
@@ -699,6 +724,8 @@ private:
     ToolChangeCallback m_toolChangeCallback;
     ProbeMotionCallback m_probeCallback;
     RealtimeCallback m_realtimeCallback;
+    UserGCodeCallback m_userGCodeCallback;
+    std::vector<std::string> m_startupLines{2};  // $N0 / $N1
     
     // Statistics
     Statistics m_stats;

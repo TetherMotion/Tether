@@ -59,8 +59,8 @@ No Haas handler class exists (only `MarlinMCodeHandler`).
 | **G12 / G13** (circular pocket milling) | DONE | P1 | Emits plunge + lead-in + full-circle arc per radius pass (I/K/Q/Z/L). |
 | **G70 / G71** (Haas lathe rough/finish) | MISSING | P1 | See §1. |
 | **M19** (spindle orient) | DONE | P1 | Handled in `dispatchMCode`; forwards angle to spindle callback. |
-| **M41–M44** (spindle gear range) | MISSING | P2 | Not in enum. |
-| **M60** (pallet change) | MISSING | P2 | Not in enum. |
+| **M41–M44** (spindle gear range) | DONE | P2 | Forwarded to user M-code hook. |
+| **M60** (pallet change) | DONE | P2 | Forwarded to user M-code hook. |
 | **`G54.1 Pxx`** (additional work offsets, Haas ENS) | MISSING | P1 | `CoordSystem` enum stops at G59.3 (9 systems); no `P`-word extension for additional offsets. |
 
 ---
@@ -73,10 +73,10 @@ Only the G-code text subset is parsed; GRBL's real-time protocol is absent.
 |---|---|---|---|
 | **`$` settings commands** | PARTIAL | P1 | `Interpreter::systemCommand` handles `$G`, `$#`, `$I`, `$X`, `$H`, `$J=`; `$N=`/`$n=` setting writes not implemented. |
 | **`$I`** (info), **`$G`** (parser state), **`$#`** (gcode parameters) | DONE | P1 | `systemCommand` emits reports via the message callback. |
-| **`$H`** (home), **`$X`** (unlock), **`$C`** (check mode) | PARTIAL | P1 | `$X` unlocks; `$H`/`$J=` deferred to the realtime callback (host performs motion). `$C` not implemented. |
+| **`$H`** (home), **`$X`** (unlock), **`$C`** (check mode) | DONE | P1 | `$X` unlocks; `$C` toggles check mode; `$H`/`$J=` deferred to the realtime callback (host performs motion). |
 | **`~`** (cycle resume), **`!`** (feed hold), **`?`** (status report) | DONE | P0 | `feedHold()`/`cycleResume()`/`statusReport()` + `processRealtimeChar`. |
 | **`Ctrl-X`** (soft reset) | DONE | P1 | `softReset()` via `processRealtimeChar(0x18)`. |
-| **`$N=`** startup lines, **`$I=`** info | MISSING | P2 | Not implemented. |
+| **`$N=`** startup lines | DONE | P2 | `$N0=`/`$N1=` stored; `$N` reports. |
 
 ---
 
@@ -89,10 +89,10 @@ Only the G-code text subset is parsed; GRBL's real-time protocol is absent.
 
 | Feature | Status | Priority | Notes |
 |---|---|---|---|
-| **G10 / G11** (retract / unretract) | MISSING | P0 | G10 is parsed as RS274 coordinate-set (L2/L20); RepRap tool-temperature/retraction meaning not handled. |
+| **G10 / G11** (retract / unretract) | DONE | P0 | `G10` without L word and `G11` forward to `UserGCodeCallback`; `G10 L2/L20` stays RS274 WCS-set. |
 | **G20 / G21** (units) | RECOGNIZED | — | OK. |
 | **G28** (homing) | DONE | P0 | Rapids to stored reference point (`getG28Reference`). |
-| **G29** (auto bed leveling) | MISSING | P0 | Not recognized. |
+| **G29** (auto bed leveling) | DONE | P0 | Forwarded to `UserGCodeCallback` (host performs probing). |
 | **G30** (Z probe point) | STUB | P1 | Recognized as reference code; no probe handler. |
 | **G80** (cancel bed leveling) | PARTIAL | P1 | Recognized only as canned-cycle cancel (RS274); RepRap ABL-cancel meaning not handled. |
 | **G90 / G91** (absolute/relative) | RECOGNIZED | — | OK for motion; extrusion absolute/relative is via M82/M83 only. |
@@ -103,37 +103,37 @@ Only the G-code text subset is parsed; GRBL's real-time protocol is absent.
 | M-code | Meaning | Priority |
 |---|---|---|
 | ~~**M84**~~ | Disable motors — **DONE** | P1 |
-| **M85** | Inactivity timeout | P2 |
-| **M92** | Steps/mm | P1 |
-| **M206** | Home offset | P1 |
-| **M208** | Software endstops | P2 |
-| **M210 / M211** | Software endstop enable | P2 |
-| **M218** | Tool offset | P1 |
-| **M226** | Wait for pin | P2 |
-| **M240** | Trigger camera | P2 |
-| **M250** | LCD contrast | P2 |
-| **M280** | Servo | P1 |
-| **M300** | Beep | P2 |
-| **M301** | Hotend PID | P1 |
-| **M304** | Bed PID | P1 |
-| **M305** | Thermistor | P2 |
-| **M350 / M351** | Microstepping | P2 |
-| **M355** | Case light | P2 |
+| ~~**M85**~~ | Inactivity timeout — forwarded to user hook | P2 |
+| ~~**M92**~~ | Steps/mm — forwarded to user hook | P1 |
+| ~~**M206**~~ | Home offset — forwarded to user hook | P1 |
+| ~~**M208**~~ | Software endstops — forwarded to user hook | P2 |
+| ~~**M210 / M211**~~ | Software endstop enable — forwarded to user hook | P2 |
+| ~~**M218**~~ | Tool offset — forwarded to user hook | P1 |
+| ~~**M226**~~ | Wait for pin — forwarded to user hook | P2 |
+| ~~**M240**~~ | Trigger camera — forwarded to user hook | P2 |
+| ~~**M250**~~ | LCD contrast — forwarded to user hook | P2 |
+| ~~**M280**~~ | Servo — forwarded to user hook | P1 |
+| ~~**M300**~~ | Beep — forwarded to user hook | P2 |
+| ~~**M301**~~ | Hotend PID — forwarded to user hook | P1 |
+| ~~**M304**~~ | Bed PID — forwarded to user hook | P1 |
+| ~~**M305**~~ | Thermistor — forwarded to user hook | P2 |
+| ~~**M350 / M351**~~ | Microstepping — forwarded to user hook | P2 |
+| ~~**M355**~~ | Case light — forwarded to user hook | P2 |
 | **M360–M378** | Various config | P2 |
 | ~~**M400**~~ | Wait for queue — **DONE** | P0 |
-| **M401 / M402** | Deploy/stow probe | P1 |
-| **M420** | ABL state | P1 |
-| **M421** | Set mesh point | P1 |
+| ~~**M401 / M402**~~ | Deploy/stow probe — forwarded to user hook | P1 |
+| ~~**M420**~~ | ABL state — forwarded to user hook | P1 |
+| ~~**M421**~~ | Set mesh point — forwarded to user hook | P1 |
 | ~~**M500 / M501 / M502 / M503**~~ | EEPROM save/load/reset/report — **DONE** | P1 |
-| **M540** | SD card | P2 |
+| ~~**M540**~~ | SD card — forwarded to user hook | P2 |
 | ~~**M600**~~ | Filament change — **DONE** | P1 |
-| **M605** | Multi-nozzle | P2 |
-| **M665** | Delta config | P2 |
-| **M666** | Delta endstop | P2 |
-| **M851** | Probe offset | P1 |
+| ~~**M605**~~ | Multi-nozzle — forwarded to user hook | P2 |
+| ~~**M665**~~ | Delta config — forwarded to user hook | P2 |
+| ~~**M666**~~ | Delta endstop — forwarded to user hook | P2 |
+| ~~**M851**~~ | Probe offset — forwarded to user hook | P1 |
 | ~~**M900**~~ | Linear advance — **DONE** | P1 |
-| **M911 / M912** | Power loss | P2 |
-| **M913 / M914** | Stepper bump | P2 |
+| ~~**M911 / M912**~~ | Power loss — forwarded to user hook | P2 |
+| ~~**M913 / M914**~~ | Stepper bump — forwarded to user hook | P2 |
 
 ---
 
@@ -153,7 +153,7 @@ wired into `Interpreter::executeBlock`.
 | **`O<name> REPEAT … ENDREPEAT`** | DONE | P1 | Executed. |
 | **`BREAK` / `CONTINUE`** | DONE | P1 | Executed via resolved jumps. |
 | **`RETURN`** | DONE | P1 | Executed; pops call stack. |
-| **`debug` / `print` / `log`** | MISSING | P2 | Not in `stringToOKeyword()`. |
+| **`debug` / `print` / `log`** | DONE | P2 | `OCodeType::DEBUG/LOG/PRINT`; `o<n> debug, [expr]` emits via message callback. |
 
 ---
 
@@ -165,7 +165,7 @@ wired into `Interpreter::executeBlock`.
 |---|---|---|---|
 | **Parameter assignment** (`#<foo> = expr`) | DONE | P0 | `PARAM_ASSIGN` token carries RHS text; `executeBlock` evaluates and assigns at runtime (named + numbered). |
 | **Ternary `? :`** | DONE | P1 | `parseTernary` evaluates `cond ? true : false` (right-associative). |
-| **`ATAN[x]`** (single-arg, returns degrees) | MISSING | P2 | Only the two-arg `ATAN[y]/[x]` form is handled. |
+| **`ATAN[x]`** (single-arg, returns degrees) | DONE | P2 | Single-arg `atan` and two-arg `atan2` both handled. |
 | **Bitwise operators** (`AND`/`OR`/`XOR` on integers) | PARTIAL | P2 | Logical AND/OR/XOR exist; bitwise variants not distinguished. |
 
 ---
@@ -188,7 +188,7 @@ These are accepted by the lexer/parser and have full header APIs but **no
 | G54–G59.3 / G52 / G92 / G28 / G30 / G10 L2/L20 | `GCodeCoordinates.hpp` | `CoordinateSystemManager` class + `GCodeCoordinates.cpp`. Full implementation with `CoordinateTransform` (Eigen). |
 | O-code control flow | `GCodeOCodes.hpp` | **DONE** — `GCodeOCodes.cpp` implements and is wired into `executeBlock`. |
 | M98/M99 Fanuc subroutines | `GCodeOCodes.hpp` | **DONE** — see §1. |
-| Feed/spindle/rapid override M48–M53 | `GCodeTypes.hpp` | Enum + `MachineState` fields only; no handler. |
+| Feed/spindle/rapid override M48–M53 | `GCodeTypes.hpp` | **DONE** — M48/M49 toggle override enables; M50/M51 set P-word scales; M52/M53 hold/reset. |
 
 ---
 
@@ -198,7 +198,7 @@ These are accepted by the lexer/parser and have full header APIs but **no
 |---|---|---|---|
 | **G41.1 / G42.1** (cutter comp with dynamic D) | DONE | P1 | In modal group 7; D word sets radius directly. |
 | **G43.1 / G43.2** (tool length, dynamic / additional) | DONE | P1 | Handled in `TOOL_LENGTH` dispatch. |
-| **G17.1 / G18.1 / G19.1** (polar planes) | PARTIAL | P2 | In `Plane` enum; fall through to `NON_MODAL` unless `decimal` arg is passed. |
+| **G17.1 / G18.1 / G19.1** (polar planes) | DONE | P2 | Dispatched in `PLANE` group → `Plane::UV/WU/VW`. |
 | **R-word arc mode** | DONE | P1 | `handleArc` computes center from R (negative R = major arc). |
 | **Helical arcs** | DONE | P1 | Third axis interpolates linearly across arc tessellation; `helixDelta` populated in arc-segment mode. |
 
@@ -216,7 +216,7 @@ M5. These well-known M-codes are **accepted but have no handler**:
 | M7 / M8 / M9 | Coolant mist/flood/off | P1 |
 | ~~M19~~ | Spindle orient — **DONE** | — |
 | M30 | Program end + rewind | P1 |
-| M48 / M49 | Override enable/disable | P2 |
+| ~~M48 / M49~~ | Override enable/disable — **DONE** | — |
 | M99 | Subroutine return (Fanuc) | P0 |
 | M100–M199 | User-defined | P2 |
 
@@ -227,12 +227,12 @@ M5. These well-known M-codes are **accepted but have no handler**:
 | Feature | Status | Priority | Notes |
 |---|---|---|---|
 | **`G4` dwell execution** | DONE | P1 | Emits DWELL segment (P ms or S s). |
-| **`G61 / G61.1 / G64` path control** | RECOGNIZED | P2 | Modal group 13 classified; no state effect. |
+| **`G61 / G61.1 / G64` path control** | DONE | P2 | Sets `pathMode`/`blendTolerance`/`naiveCamTolerance`. |
 | **`G53` (machine coordinates, non-modal)** | DONE | P1 | Non-modal machine-coord rapid. |
 | **`G92.1 / G92.2 / G92.3`** (reset G92) | DONE | P1 | `processG92_1/2/3` wired in NON_MODAL dispatch. |
 | **Block skip `/` beyond first column** | PARTIAL | P2 | `LexerConfig::skipBlockDelete` only handles start-of-line. |
 | **Multiple `M` words on one line** | RECOGNIZED | — | OK (up to `mCodes.size()`). |
-| **`P` / `Q` / `L` words for canned cycles** | RECOGNIZED | — | Parsed as words; not consumed by any cycle handler. |
+| **`P` / `Q` / `L` words for canned cycles** | DONE | — | Consumed by `executeCannedCycle` (dwell / peck / repeat). |
 
 ---
 
