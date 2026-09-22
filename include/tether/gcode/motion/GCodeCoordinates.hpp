@@ -323,6 +323,7 @@
 #include "../GCodeConfig.hpp"
 #include "CoordinateTransform.hpp"
 #include <array>
+#include <unordered_map>
 #include <vector>
 
 namespace GCode {
@@ -751,9 +752,16 @@ public:
 private:
     // Work coordinate systems (index 0-8 = WCS 1-9)
     std::array<WorkCoordinateSystem, NUM_WORK_COORD_SYSTEMS> m_wcs;
-    
-    // Active WCS number (1-9)
+
+    // Extended work coordinate systems (G54.1 Pn / G154 Pn → WCS 10+)
+    std::unordered_map<int32_t, WorkCoordinateSystem> m_extWcs;
+
+    // Active WCS number (1-9 standard, 10+ extended)
     int32_t m_activeWCS{1};
+
+    // Resolve a WCS number to an entry (array for 1-9, map for 10+)
+    const WorkCoordinateSystem& resolveWCS(int32_t number) const;
+    WorkCoordinateSystem& resolveWCS(int32_t number);
     
     // G92 offset
     Position m_g92Offset;

@@ -277,8 +277,8 @@ LexerToken Lexer::nextToken() {
         return tok;
     }
 
-    // Block delete at line start
-    if (m_atLineStart && c0 == '/') {
+    // Block delete — at line start or mid-block (Haas-style `/` anywhere)
+    if (c0 == '/') {
         m_afterOCode = false;
         LexerToken tok;
         tok.type = LexerTokenType::BLOCK_DELETE;
@@ -505,9 +505,16 @@ std::vector<LexerToken> Lexer::tokenizeLine() {
         if (t.type == LexerTokenType::ERROR) {
             break;
         }
-        if (t.type == LexerTokenType::BLOCK_DELETE && m_config.skipBlockDelete) {
-            skipToEndOfLine();
-            break;
+        if (t.type == LexerTokenType::BLOCK_DELETE) {
+            // `/` ends the block. When block-delete is enabled the rest of
+            // the line is skipped; otherwise the remainder continues and
+            // the token still marks `blockDelete` on the Block.
+            if (m_config.skipBlockDelete) {
+                skipToEndOfLine();
+                break;
+            }
+            tokens.push_back(std::move(t));
+            continue;
         }
         tokens.push_back(std::move(t));
     }
