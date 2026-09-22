@@ -422,6 +422,9 @@ enum class OCodeType : uint8_t {
     ENDREPEAT,  ///< o<num> endrepeat
     BREAK,      ///< o<num> break
     CONTINUE,   ///< o<num> continue
+    DEBUG,      ///< o<num> debug, [expr] - Debug message
+    LOG,        ///< o<num> log, [expr] - Log message
+    PRINT,      ///< o<num> print, [expr] - Print message
 };
 
 // ============================================================================

@@ -342,6 +342,26 @@ Error Interpreter::systemCommand(const std::string& command) {
             return m_realtimeCallback('J');
         return Error{};
     }
+    if (cmd == "C") {  // Toggle check mode (dry run)
+        m_dryRun = !m_dryRun;
+        if (m_messageCallback)
+            m_messageCallback(m_dryRun ? "[Check mode enabled]"
+                                       : "[Check mode disabled]");
+        return Error{};
+    }
+    if (cmd == "N") {  // Report startup lines
+        if (m_messageCallback) {
+            for (size_t i = 0; i < m_startupLines.size(); ++i)
+                m_messageCallback("[N" + std::to_string(i) + "=" +
+                                  m_startupLines[i] + "]");
+        }
+        return Error{};
+    }
+    if (cmd.size() >= 3 && cmd[0] == 'N' && (cmd[1] == '0' || cmd[1] == '1')
+        && cmd[2] == '=') {
+        m_startupLines[cmd[1] - '0'] = cmd.substr(3);
+        return Error{};
+    }
     return makeError(ErrorCode::UNKNOWN_GCODE, "Unknown $ command");
 }
 
@@ -532,6 +552,30 @@ Error Interpreter::executeBlock(const Block& block) {
     // O-code flow control runs before everything else — it may redirect
     // execution (subroutine call/return, loop, conditional branch).
     if (block.hasOCode) {
+        // `o<n> debug/log/print, [expr]` — emit a message and continue.
+        if (block.oCodeType == OCodeType::DEBUG ||
+            block.oCodeType == OCodeType::LOG ||
+            block.oCodeType == OCodeType::PRINT) {
+            const char* tag = (block.oCodeType == OCodeType::DEBUG)
+                ? "DEBUG" : (block.oCodeType == OCodeType::LOG)
+                ? "LOG" : "PRINT";
+            std::string msg = tag;
+            msg += ": ";
+            if (block.oCodeCondition[0] != '\0') {
+                double val = 0.0;
+                ExpressionEvaluator eval(m_variables);
+                if (eval.evaluate(block.oCodeCondition.data(), val).ok()) {
+                    char buf[64];
+                    std::snprintf(buf, sizeof(buf), "%g", val);
+                    msg += buf;
+                } else {
+                    msg += block.oCodeCondition.data();
+                }
+            }
+            if (m_messageCallback)
+                m_messageCallback(msg);
+            return Error{};
+        }
         OCodeExecutor::NextAction action =
             OCodeExecutor::NextAction::CONTINUE;
         Error err = m_oCodeExecutor->execute(block, action);
@@ -649,10 +693,13 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
             return handleMotion(block, segments);
 
         case ModalGroup::PLANE: {
-            switch (gnum) {
-                case 17: m_machineState.plane = Plane::XY; break;
-                case 18: m_machineState.plane = Plane::ZX; break;
-                case 19: m_machineState.plane = Plane::YZ; break;
+            switch (gi) {
+                case 170: m_machineState.plane = Plane::XY; break;
+                case 180: m_machineState.plane = Plane::ZX; break;
+                case 190: m_machineState.plane = Plane::YZ; break;
+                case 171: m_machineState.plane = Plane::UV; break;
+                case 181: m_machineState.plane = Plane::WU; break;
+                case 191: m_machineState.plane = Plane::VW; break;
                 default: break;
             }
             return Error{};
@@ -879,6 +926,12 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                     return Error{};
                 }
                 case 10: {
+                    if (!block.hasWord(WordLetter::L)) {
+                        // RepRap/Marlin G10 — firmware retract
+                        if (m_userGCodeCallback)
+                            return m_userGCodeCallback(10, block);
+                        return Error{};
+                    }
                     // G10 L2/L20 — set WCS data
                     int l = static_cast<int>(block.getWord(WordLetter::L, 2));
                     int p = static_cast<int>(block.getWord(WordLetter::P, 1));
@@ -889,6 +942,14 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                             p, block, m_machineState.machinePosition, m_variables);
                     return makeError(ErrorCode::INVALID_MOTION, "G10 L not supported");
                 }
+                case 11: // RepRap/Marlin G11 — firmware unretract
+                    if (m_userGCodeCallback)
+                        return m_userGCodeCallback(11, block);
+                    return Error{};
+                case 29: // RepRap/Marlin G29 — auto bed leveling
+                    if (m_userGCodeCallback)
+                        return m_userGCodeCallback(29, block);
+                    return Error{};
                 case 28: {
                     // G28 — Go to reference point 1
                     // Store current position, then rapid to reference
@@ -1208,6 +1269,37 @@ Error Interpreter::dispatchMCode(int32_t mcode, const Block& block) {
             if (m_mcodeCallback)
                 return m_mcodeCallback(mcode, std::nullopt, std::nullopt);
             return Error{};
+        case 41:  // M41-M44 — Spindle gear range select (Haas)
+        case 42:
+        case 43:
+        case 44:
+        case 48:  // M48 — Enable feed/spindle overrides
+            m_machineState.feedOverrideEnabled = true;
+            m_machineState.spindleOverrideEnabled = true;
+            return Error{};
+        case 49:  // M49 — Disable overrides
+            m_machineState.feedOverrideEnabled = false;
+            m_machineState.spindleOverrideEnabled = false;
+            return Error{};
+        case 50:  // M50 — Feed override (P = scale, e.g. P1.1)
+            if (block.hasWord(WordLetter::P))
+                m_machineState.feedOverride =
+                    block.getWord(WordLetter::P);
+            return Error{};
+        case 51:  // M51 — Spindle override (P = scale)
+            if (block.hasWord(WordLetter::P))
+                m_machineState.spindleOverride =
+                    block.getWord(WordLetter::P);
+            return Error{};
+        case 52:  // M52 — Hold override (P0 = off, else on)
+            m_machineState.feedHold =
+                block.getWord(WordLetter::P, 1.0) == 0.0;
+            return Error{};
+        case 53:  // M53 — Feed/spindle override reset
+            m_machineState.feedOverride = 1.0;
+            m_machineState.spindleOverride = 1.0;
+            return Error{};
+        case 60:  // M60 — Pallet change
         case 17:  // M17 — Enable motors
         case 18:  // M18 — Disable motors
         case 84:  // M84 — Idle motors off
