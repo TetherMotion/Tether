@@ -200,6 +200,21 @@ struct LoopFrame {
 };
 
 /**
+ * @brief Fanuc M98 call stack frame (subprogram call via M98 or G65/G66)
+ */
+struct M98Frame {
+    /// Source offset of the subprogram body start (first line after label)
+    size_t subStart{0};
+    uint32_t subLine{0};
+
+    /// Source offset to jump back to (line after the M98/G65 call)
+    size_t returnAddress{0};
+
+    /// Remaining L-word repetitions (first run already executing)
+    int32_t remaining{0};
+};
+
+/**
  * @brief Conditional (if/else) stack frame
  */
 struct ConditionalFrame {
@@ -391,6 +406,15 @@ public:
      */
     Error callSubroutine(const std::string& name,
                          const std::vector<double>& args = {});
+
+    /**
+     * @brief Call a numbered subprogram for G65/G66 (Fanuc macro call)
+     *
+     * Like callSubroutine() but also accepts bare `O<num>` program labels
+     * (Fanuc-style subprograms terminated by M99). Arguments are bound to
+     * local parameters #1..#30 via VariableSystem::pushFrame.
+     */
+    Error callSubprogram(int32_t oNumber, const std::vector<double>& args);
     
     /**
      * @brief Return from current subroutine
@@ -592,14 +616,27 @@ private:
     // Error
     Error m_error;
     
-    // M98/M99 state
-    int32_t m_m98RepeatRemaining{0};
-    size_t m_m98ReturnAddress{0};
+    // M98/M99 state (Fanuc subprogram calls)
+    std::vector<M98Frame> m_m98Stack;
     
     // Helpers
     Error evaluateCondition(const std::string& condition, bool& result);
     Error findEndOfBlock(int32_t oNumber, OCodeType blockType, 
                          size_t& address, uint32_t& line);
+    /// Scan forward (opener already consumed) for the matching block closer
+    /// at depth 0 — `if`→`endif`, `while`→`endwhile`, `do`→`while`,
+    /// `repeat`→`endrepeat`, `sub`→`endsub`. On return, getLastBlockStart/
+    /// End describe the closer's line.
+    Error scanForEnder(int32_t oNumber, OCodeType opener, Block& endBlock);
+    /// Scan forward to the next same-depth ELSEIF/ELSE/ENDIF for oNumber and
+    /// set the jump target to that block's start (it re-executes normally).
+    Error scanToBranchPoint(int32_t oNumber);
+    /// Scan forward to the matching ENDIF and jump to its start.
+    Error scanToEndif(int32_t oNumber);
+    /// Find the matching block closer and jump past it.
+    Error jumpPastEnder(int32_t oNumber, OCodeType opener);
+    /// Find the matching block closer and jump to its start (re-executes it).
+    Error jumpToEnder(int32_t oNumber, OCodeType opener);
     Error loadExternalSubroutine(const std::string& name);
     std::string findSubroutineFile(const std::string& name);
     

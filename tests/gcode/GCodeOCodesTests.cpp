@@ -258,8 +258,13 @@ TEST_F(OCodeExecutorTest, IfFalseCondition) {
     OCodeExecutor::NextAction action;
     Error err = executor->execute(block, action);
     EXPECT_FALSE(err);
-    // Condition is false, so we skip to else/endif
-    EXPECT_EQ(action, OCodeExecutor::NextAction::SKIP_TO_ELSE);
+    // Condition is false — the executor jumps to the else/elseif/endif line.
+    EXPECT_EQ(action, OCodeExecutor::NextAction::JUMP);
+    // The jump target should be the endif line (re-executed to pop the frame).
+    parser->getLexer().seek(executor->getJumpAddress());
+    Block endifBlock;
+    ASSERT_FALSE(parser->parseNextBlock(endifBlock));
+    EXPECT_EQ(endifBlock.oCodeType, OCodeType::ENDIF);
 }
 
 TEST_F(OCodeExecutorTest, EndIf) {

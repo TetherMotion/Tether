@@ -443,6 +443,32 @@ public:
      * @return Error if not found
      */
     Error findSubroutine(const std::string& name, Block& block);
+
+    /**
+     * @brief Find a bare Fanuc-style program label (`O<num>` with no keyword)
+     *
+     * Fanuc subprograms are delimited by a bare `O<num>` label and terminated
+     * by `M99` — they have no `sub`/`endsub` keywords. Used by M98 and G65.
+     *
+     * @param oNumber Program number
+     * @param block Output: label block
+     * @return Error if not found
+     */
+    Error findSubprogramLabel(int32_t oNumber, Block& block);
+
+    /**
+     * @brief Source offset of the most recently parsed block's line start
+     *
+     * After parseNextBlock() or findMatchingOCode()/findSubroutine() returns,
+     * this is the offset where that block's line begins. Useful for jumping
+     * *to* a block (re-execute it) as opposed to past it.
+     */
+    size_t getLastBlockStart() const { return m_lastBlockStart; }
+
+    /**
+     * @brief Source offset just past the most recently parsed block's line
+     */
+    size_t getLastBlockEnd() const { return m_lastBlockEnd; }
     
     // ========================================================================
     // Validation
@@ -495,6 +521,10 @@ private:
     // Statistics
     uint32_t m_totalBlocks{0};
     uint32_t m_currentBlockNum{0};
+
+    // Source offsets of the most recently parsed block
+    size_t m_lastBlockStart{0};
+    size_t m_lastBlockEnd{0};
 
     // Error state
     Error m_error;

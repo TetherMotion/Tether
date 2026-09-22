@@ -512,8 +512,19 @@ struct Block {
     int32_t oCodeNumber{-1};
     std::array<char, 64> oCodeName{};  // Named subroutine
     bool oCodeIsNamed{false};
+    /// True when an explicit O-code keyword (sub/if/while/...) was present.
+    /// A bare `O100` line (no keyword) is a Fanuc-style program label.
+    bool oCodeHasKeyword{false};
     std::array<char, 128> oCodeCondition{};  // Condition expression for if/while/repeat
-    
+
+    /// Parameter assignment (`#1 = expr` / `#<name> = expr`), deferred to
+    /// execution so parse-time scans have no side effects.
+    bool hasParamAssign{false};
+    bool paramAssignNamed{false};
+    int32_t paramAssignNumber{-1};
+    std::array<char, 64> paramAssignName{};
+    std::array<char, 128> paramAssignExpr{};
+
     /// Comment text
     std::array<char, 128> comment{};
     bool hasComment{false};

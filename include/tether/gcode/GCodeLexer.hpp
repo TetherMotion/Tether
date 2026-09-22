@@ -101,6 +101,7 @@ enum class LexerTokenType : uint8_t {
     OCODE_NAME,     ///< O<name>
     OCODE_KEYWORD,  ///< sub, endsub, call, if, etc.
     PARAMETER,      ///< #number or #<name>
+    PARAM_ASSIGN,   ///< #number = expr or #<name> = expr
     EXPRESSION,     ///< [...] bracketed expression
     COMMENT,        ///< ( ) or ; comment
     BLOCK_DELETE,   ///< / at line start

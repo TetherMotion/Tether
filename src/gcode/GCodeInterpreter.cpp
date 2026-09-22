@@ -39,6 +39,36 @@ Error makeError(ErrorCode code, const char* msg) {
     return err;
 }
 
+/**
+ * @brief Collect Fanuc macro arguments (G65/G66) into a #1..#30 slot vector
+ *
+ * Fanuc letter→parameter mapping:
+ *   A=1 B=2 C=3 I=4 J=5 K=6 D=7 E=8 F=9 H=11 M=13
+ *   Q=17 R=18 S=19 T=20 U=21 V=22 W=23 X=24 Y=25 Z=26
+ * (G, L, N, O, P are control words and not passed.)
+ */
+std::vector<double> collectMacroArgs(const Block& block) {
+    static constexpr struct { WordLetter w; int param; } kMap[] = {
+        {WordLetter::A, 1},  {WordLetter::B, 2},  {WordLetter::C, 3},
+        {WordLetter::I, 4},  {WordLetter::J, 5},  {WordLetter::K, 6},
+        {WordLetter::D, 7},  {WordLetter::E, 8},  {WordLetter::F, 9},
+        {WordLetter::H, 11}, {WordLetter::M, 13}, {WordLetter::Q, 17},
+        {WordLetter::R, 18}, {WordLetter::S, 19}, {WordLetter::T, 20},
+        {WordLetter::U, 21}, {WordLetter::V, 22}, {WordLetter::W, 23},
+        {WordLetter::X, 24}, {WordLetter::Y, 25}, {WordLetter::Z, 26},
+    };
+    std::vector<double> args(PARAM_LOCAL_END, 0.0);
+    size_t used = 0;
+    for (const auto& m : kMap) {
+        if (block.hasWord(m.w)) {
+            args[static_cast<size_t>(m.param) - 1] = block.getWord(m.w);
+            used = std::max(used, static_cast<size_t>(m.param));
+        }
+    }
+    args.resize(used);
+    return args;
+}
+
 } // anonymous namespace
 
 // ============================================================================
@@ -64,6 +94,8 @@ Interpreter::~Interpreter() = default;
 
 void Interpreter::initializeDefaults() {
     m_machineState = MachineState{};
+    m_g66Active = false;
+    m_oCodeExecutor->reset();
     m_coordinates.syncToVariables(m_variables);
 }
 
@@ -190,7 +222,143 @@ void Interpreter::reset() {
     m_errors.clear();
     m_lastError = Error{};
     m_stats = Statistics{};
+    m_nurbsActive = false;
+    m_cannedActive = false;
+    m_g66Active = false;
     initializeDefaults();
+}
+
+// ============================================================================
+// Real-time commands (GRBL-style)
+// ============================================================================
+
+Error Interpreter::feedHold() {
+    pause();
+    m_machineState.feedHold = true;
+    if (m_realtimeCallback) {
+        Error err = m_realtimeCallback('!');
+        if (!err.ok()) return err;
+    }
+    return Error{};
+}
+
+Error Interpreter::cycleResume() {
+    m_machineState.feedHold = false;
+    if (m_realtimeCallback) {
+        Error err = m_realtimeCallback('~');
+        if (!err.ok()) return err;
+    }
+    if (m_state == InterpreterState::PAUSED)
+        return resume();
+    return Error{};
+}
+
+Error Interpreter::softReset() {
+    if (m_realtimeCallback)
+        m_realtimeCallback('\x18');
+    reset();
+    return Error{};
+}
+
+Error Interpreter::jogCancel() {
+    if (m_realtimeCallback)
+        return m_realtimeCallback('\x85');
+    return Error{};
+}
+
+std::string Interpreter::statusReport() const {
+    const char* st = "Idle";
+    switch (m_state) {
+        case InterpreterState::RUNNING:  st = m_machineState.feedHold ? "Hold:0" : "Run"; break;
+        case InterpreterState::PAUSED:   st = "Hold:0"; break;
+        case InterpreterState::READY:    st = "Ready"; break;
+        case InterpreterState::FINISHED: st = "Idle"; break;
+        case InterpreterState::ERROR:    st = "Alarm"; break;
+        case InterpreterState::STOPPED:  st = "Alarm"; break;
+        default: break;
+    }
+    const Position& mp = m_machineState.machinePosition;
+    std::ostringstream os;
+    os << '<' << st << "|MPos:";
+    os.precision(3);
+    os << std::fixed << mp.x() << ',' << mp.y() << ',' << mp.z();
+    os << "|FS:" << m_machineState.feedRate << ','
+       << m_machineState.spindleSpeed << '>';
+    return os.str();
+}
+
+Error Interpreter::systemCommand(const std::string& command) {
+    // Strip leading '$'
+    const std::string cmd = (!command.empty() && command[0] == '$')
+        ? command.substr(1) : command;
+
+    if (cmd == "G") {  // Modal group report
+        std::ostringstream os;
+        os << "[GC:";
+        // Motion mode
+        os << "G" << (static_cast<int>(m_machineState.motionMode) / 10);
+        os << " G" << static_cast<int>(m_machineState.plane);
+        os << " G" << static_cast<int>(m_machineState.distanceMode);
+        os << " G" << static_cast<int>(m_machineState.feedMode);
+        os << " G" << static_cast<int>(m_machineState.units);
+        os << " G" << static_cast<int>(m_machineState.cutterComp);
+        os << " G" << static_cast<int>(m_machineState.toolLengthMode);
+        os << " T" << m_toolTable.getCurrentTool();
+        os << " F" << m_machineState.feedRate;
+        os << " S" << m_machineState.spindleSpeed << ']';
+        if (m_messageCallback) m_messageCallback(os.str());
+        return Error{};
+    }
+    if (cmd == "#") {  // Coordinate offset report
+        const int wcs = m_coordinates.getActiveWCSNumber();
+        const Position& off = m_coordinates.getWCS(wcs).offset;
+        std::ostringstream os;
+        os << "[G" << (53 + wcs) << ":" << off.x() << ',' << off.y()
+           << ',' << off.z() << ']';
+        if (m_messageCallback) m_messageCallback(os.str());
+        return Error{};
+    }
+    if (cmd == "I") {  // Build info
+        if (m_messageCallback)
+            m_messageCallback("[Tether GCode Interpreter]");
+        return Error{};
+    }
+    if (cmd == "X") {  // Unlock / clear alarm
+        if (m_state == InterpreterState::ERROR ||
+            m_state == InterpreterState::STOPPED) {
+            m_state = InterpreterState::IDLE;
+            m_lastError = Error{};
+            m_errors.clear();
+        }
+        return Error{};
+    }
+    if (cmd == "H") {  // Home — host must supply homing motion
+        if (m_realtimeCallback)
+            return m_realtimeCallback('$');
+        return Error{};
+    }
+    if (cmd.rfind("J=", 0) == 0) {  // Jog — defer to host
+        if (m_realtimeCallback)
+            return m_realtimeCallback('J');
+        return Error{};
+    }
+    return makeError(ErrorCode::UNKNOWN_GCODE, "Unknown $ command");
+}
+
+Error Interpreter::processRealtimeChar(char command) {
+    switch (command) {
+        case '!':    return feedHold();
+        case '~':    return cycleResume();
+        case '\x18': return softReset();
+        case '\x85': return jogCancel();
+        case '?': {
+            if (m_messageCallback) m_messageCallback(statusReport());
+            return Error{};
+        }
+        default:
+            return makeError(ErrorCode::UNKNOWN_GCODE,
+                             "Unknown real-time command");
+    }
 }
 
 Error Interpreter::executeLine(const std::string& line) {
@@ -292,8 +460,7 @@ void Interpreter::setDwellCallback(DwellCallback callback) { m_dwellCallback = c
 void Interpreter::setProgramControlCallback(ProgramControlCallback callback) { m_programCallback = callback; }
 void Interpreter::setToolChangeCallback(ToolChangeCallback callback) { m_toolChangeCallback = callback; }
 void Interpreter::setProbeCallback(ProbeMotionCallback callback) {
-    // Probe callback is stored in the probe handler
-    (void)callback;
+    m_probeCallback = std::move(callback);
 }
 
 // ============================================================================
@@ -344,6 +511,40 @@ Error Interpreter::executeBlock(const Block& block) {
     if (block.blockDelete && m_config.skipOptionalBlocks)
         return Error{};
 
+    // Parameter assignment executes before everything else (order of
+    // execution: assignments, then O-code flow control, then G/M words).
+    if (block.hasParamAssign) {
+        ExpressionEvaluator eval(m_variables);
+        std::string expr = block.paramAssignExpr.data();
+        if (expr.empty() || expr.front() != '[')
+            expr = "[" + expr + "]";
+        double value = 0.0;
+        Error err = eval.evaluate(expr.c_str(), value);
+        if (!err.ok())
+            return err;
+        err = block.paramAssignNamed
+            ? m_variables.setNamed(block.paramAssignName.data(), value)
+            : m_variables.set(block.paramAssignNumber, value);
+        if (!err.ok())
+            return err;
+    }
+
+    // O-code flow control runs before everything else — it may redirect
+    // execution (subroutine call/return, loop, conditional branch).
+    if (block.hasOCode) {
+        OCodeExecutor::NextAction action =
+            OCodeExecutor::NextAction::CONTINUE;
+        Error err = m_oCodeExecutor->execute(block, action);
+        if (!err.ok())
+            return err;
+        if (action == OCodeExecutor::NextAction::JUMP)
+            m_parser->getLexer().seek(m_oCodeExecutor->getJumpAddress());
+        else if (action == OCodeExecutor::NextAction::EXIT_PROGRAM)
+            m_state = InterpreterState::FINISHED;
+        // O-code lines carry no G/M words.
+        return Error{};
+    }
+
     // Update modal state from non-motion G-codes
     updateModalState(block);
 
@@ -361,6 +562,25 @@ Error Interpreter::executeBlock(const Block& block) {
     // Output motion segments
     if (!segments.empty())
         err = outputSegments(segments);
+
+    // G66 modal macro: re-invoke the subprogram on each block that carries
+    // axis words (skipping blocks that set/cancel the modal call).
+    if (err.ok() && m_g66Active && hasMotionWords(block)) {
+        bool setsModalMacro = false;
+        for (uint8_t i = 0; i < block.gCodeCount; ++i) {
+            if (block.gCodes[i] == 660 || block.gCodes[i] == 670) {
+                setsModalMacro = true;
+                break;
+            }
+        }
+        if (!setsModalMacro) {
+            Error callErr = m_oCodeExecutor->callSubprogram(
+                m_g66Program, collectMacroArgs(block));
+            if (!callErr.ok())
+                return callErr;
+            m_parser->getLexer().seek(m_oCodeExecutor->getJumpAddress());
+        }
+    }
 
     // Update position variables
     updatePositionVariables();
@@ -521,28 +741,101 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
             return Error{};
         }
 
+        case ModalGroup::CUTTER_COMP: {
+            switch (gi) {
+                case 400: // G40: cancel cutter compensation
+                    m_machineState.cutterComp = CutterCompMode::OFF;
+                    m_machineState.cutterRadius = 0.0;
+                    return Error{};
+                case 410:
+                case 420: { // G41/G42 D<tool>: comp from tool table diameter
+                    const int tool =
+                        static_cast<int>(block.getWord(WordLetter::D, 0));
+                    const ToolEntry* entry =
+                        (tool > 0) ? m_toolTable.getTool(tool)
+                                   : m_toolTable.getCurrentToolEntry();
+                    if (!entry) {
+                        Error err;
+                        err.code = ErrorCode::TOOL_ERROR;
+                        std::snprintf(err.message.data(), err.message.size(),
+                                      "G%d: no tool entry for D%d",
+                                      gnum, tool);
+                        return err;
+                    }
+                    m_machineState.cutterComp = (gnum == 41)
+                        ? CutterCompMode::LEFT : CutterCompMode::RIGHT;
+                    m_machineState.cutterRadius =
+                        entry->getEffectiveRadius();
+                    return Error{};
+                }
+                case 411:
+                case 421: { // G41.1/G42.1 D<diameter>: dynamic comp
+                    m_machineState.cutterComp = (gi == 411)
+                        ? CutterCompMode::LEFT_DYNAMIC
+                        : CutterCompMode::RIGHT_DYNAMIC;
+                    m_machineState.cutterRadius =
+                        block.getWord(WordLetter::D, 0.0) / 2.0;
+                    return Error{};
+                }
+                default:
+                    return Error{};
+            }
+        }
+
         case ModalGroup::TOOL_LENGTH: {
-            switch (gnum) {
-                case 43: {
-                    // G43 H<tool>: apply tool length offset from tool table
-                    int tool = static_cast<int>(block.getWord(WordLetter::H, 0));
+            switch (gi) {
+                case 430: { // G43 H<tool>: apply offset from tool table
+                    const int tool =
+                        static_cast<int>(block.getWord(WordLetter::H, 0));
+                    const ToolEntry* entry =
+                        (tool > 0) ? m_toolTable.getTool(tool)
+                                   : m_toolTable.getCurrentToolEntry();
+                    if (!entry) {
+                        Error err;
+                        err.code = ErrorCode::TOOL_ERROR;
+                        std::snprintf(err.message.data(), err.message.size(),
+                                      "G43: no tool entry for H%d", tool);
+                        return err;
+                    }
                     m_machineState.toolLengthMode = ToolLengthMode::POSITIVE;
-                    // Look up tool offset from tool table
-                    // For now, use the Z offset from the tool entry
-                    m_machineState.toolOffset.z() = 0.0; // Placeholder: tool table lookup
+                    m_machineState.toolOffset.x() = entry->xOffset + entry->xWear;
+                    m_machineState.toolOffset.y() = entry->yOffset + entry->yWear;
+                    m_machineState.toolOffset.z() = entry->getEffectiveZOffset();
                     m_coordinates.syncTransform(m_machineState);
                     return Error{};
                 }
                 case 431: { // G43.1: dynamic tool length offset
                     m_machineState.toolLengthMode = ToolLengthMode::DYNAMIC;
+                    if (block.hasWord(WordLetter::X))
+                        m_machineState.toolOffset.x() = block.getWord(WordLetter::X);
+                    if (block.hasWord(WordLetter::Y))
+                        m_machineState.toolOffset.y() = block.getWord(WordLetter::Y);
                     if (block.hasWord(WordLetter::Z))
                         m_machineState.toolOffset.z() = block.getWord(WordLetter::Z);
                     m_coordinates.syncTransform(m_machineState);
                     return Error{};
                 }
-                case 49: { // G49: cancel tool length offset
+                case 432: { // G43.2 H<tool>: add another tool's offset
+                    const int tool =
+                        static_cast<int>(block.getWord(WordLetter::H, 0));
+                    const ToolEntry* entry = m_toolTable.getTool(tool);
+                    if (!entry) {
+                        Error err;
+                        err.code = ErrorCode::TOOL_ERROR;
+                        std::snprintf(err.message.data(), err.message.size(),
+                                      "G43.2: no tool entry for H%d", tool);
+                        return err;
+                    }
+                    m_machineState.toolLengthMode = ToolLengthMode::ADDITIONAL;
+                    m_machineState.toolOffset.x() += entry->xOffset + entry->xWear;
+                    m_machineState.toolOffset.y() += entry->yOffset + entry->yWear;
+                    m_machineState.toolOffset.z() += entry->getEffectiveZOffset();
+                    m_coordinates.syncTransform(m_machineState);
+                    return Error{};
+                }
+                case 490: { // G49: cancel tool length offset
                     m_machineState.toolLengthMode = ToolLengthMode::OFF;
-                    m_machineState.toolOffset.z() = 0.0;
+                    m_machineState.toolOffset = Position{};
                     m_coordinates.syncTransform(m_machineState);
                     return Error{};
                 }
@@ -648,6 +941,133 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                         block, m_machineState.machinePosition,
                         m_machineState, m_variables);
                 }
+                case 65: { // G65 P<n> — Macro call (non-modal)
+                    if (!block.hasWord(WordLetter::P))
+                        return makeError(ErrorCode::UNKNOWN_GCODE,
+                                         "G65 requires P word");
+                    int32_t p = static_cast<int32_t>(
+                        block.getWord(WordLetter::P));
+                    Error err = m_oCodeExecutor->callSubprogram(
+                        p, collectMacroArgs(block));
+                    if (!err.ok())
+                        return err;
+                    m_parser->getLexer().seek(
+                        m_oCodeExecutor->getJumpAddress());
+                    return Error{};
+                }
+                case 66: { // G66 P<n> — Modal macro call
+                    if (!block.hasWord(WordLetter::P))
+                        return makeError(ErrorCode::UNKNOWN_GCODE,
+                                         "G66 requires P word");
+                    m_g66Program = static_cast<int32_t>(
+                        block.getWord(WordLetter::P));
+                    m_g66Active = true;
+                    Error err = m_oCodeExecutor->callSubprogram(
+                        m_g66Program, collectMacroArgs(block));
+                    if (!err.ok())
+                        return err;
+                    m_parser->getLexer().seek(
+                        m_oCodeExecutor->getJumpAddress());
+                    return Error{};
+                }
+                case 67: // G67 — Cancel modal macro call
+                    m_g66Active = false;
+                    return Error{};
+                case 187: { // G187 — Haas accuracy/smoothing mode
+                    // E<tolerance> sets blend tolerance; P1-P3 selects level.
+                    m_machineState.pathMode = PathMode::BLEND;
+                    if (block.hasWord(WordLetter::E))
+                        m_machineState.blendTolerance =
+                            block.getWord(WordLetter::E);
+                    return Error{};
+                }
+                case 12:
+                case 13: { // G12/G13 — Haas circular pocket mill (CW/CCW)
+                    // I = circle radius; optional K = finished radius with
+                    // Q stepover between passes; Z = depth; L = repeats.
+                    const bool cw = (gnum == 12);
+                    const double i0 = block.getWord(WordLetter::I, 0.0);
+                    const double rk = block.getWord(WordLetter::K, 0.0);
+                    const double q = block.getWord(WordLetter::Q, 0.0);
+                    const int repeats = static_cast<int>(
+                        block.getWord(WordLetter::L, 1.0));
+                    if (i0 <= 0.0)
+                        return makeError(ErrorCode::INVALID_MOTION,
+                                         "G12/G13 requires positive I radius");
+                    const Position center = m_machineState.workPosition;
+
+                    // Optional plunge to Z depth at feed rate
+                    if (block.hasWord(WordLetter::Z)) {
+                        Position zt = center;
+                        zt.z() = block.getWord(WordLetter::Z);
+                        MotionSegment seg;
+                        seg.type = MotionSegment::Type::LINEAR;
+                        seg.endPosition = m_coordinates.toMachineCoords(zt);
+                        seg.feedRate = m_machineState.feedRate;
+                        seg.lineNumber = block.sourceLineNumber;
+                        segments.push_back(seg);
+                        ++m_stats.motionSegments;
+                        m_machineState.workPosition = zt;
+                    }
+
+                    // Radius passes: I, then step by Q up to K if given
+                    for (double r = i0; r <= (rk > 0 ? rk : i0) + 1e-9;
+                         r += (q > 0 ? q : rk + 1)) {
+                        for (int rep = 0; rep < repeats; ++rep) {
+                            // Lead-in: feed from center to circle edge
+                            Position edge = m_machineState.workPosition;
+                            edge.x() = center.x() + r;
+                            edge.y() = center.y();
+                            MotionSegment lead;
+                            lead.type = MotionSegment::Type::LINEAR;
+                            lead.endPosition =
+                                m_coordinates.toMachineCoords(edge);
+                            lead.feedRate = m_machineState.feedRate;
+                            lead.lineNumber = block.sourceLineNumber;
+                            segments.push_back(lead);
+
+                            // Full circle about center
+                            MotionSegment arc;
+                            arc.type = cw ? MotionSegment::Type::ARC_CW
+                                          : MotionSegment::Type::ARC_CCW;
+                            arc.endPosition = lead.endPosition;
+                            arc.feedRate = m_machineState.feedRate;
+                            arc.lineNumber = block.sourceLineNumber;
+                            arc.centerOffset.x() = -r;
+                            arc.centerOffset.y() = 0.0;
+                            arc.arc.center = center;
+                            arc.arc.startPoint = edge;
+                            arc.arc.endPoint = edge;
+                            arc.arc.radius = r;
+                            arc.arc.startAngle = 0.0;
+                            arc.arc.endAngle = cw ? -2.0 * M_PI : 2.0 * M_PI;
+                            arc.arc.sweepAngle = arc.arc.endAngle;
+                            arc.arc.clockwise = cw;
+                            arc.arc.plane = m_machineState.plane;
+                            arc.arc.valid = true;
+                            segments.push_back(arc);
+                            m_stats.motionSegments += 2;
+                            m_machineState.workPosition = edge;
+                        }
+                        if (q <= 0.0) break;
+                    }
+                    // Return to center
+                    MotionSegment ret;
+                    ret.type = MotionSegment::Type::LINEAR;
+                    Position cc = m_machineState.workPosition;
+                    cc.x() = center.x(); cc.y() = center.y();
+                    ret.endPosition = m_coordinates.toMachineCoords(cc);
+                    ret.feedRate = m_machineState.feedRate;
+                    ret.lineNumber = block.sourceLineNumber;
+                    segments.push_back(ret);
+                    ++m_stats.motionSegments;
+                    m_machineState.workPosition = cc;
+                    m_machineState.machinePosition = ret.endPosition;
+                    return Error{};
+                }
+                case 150: // G150 — Haas generic pocket milling
+                    return makeError(ErrorCode::UNKNOWN_GCODE,
+                                     "G150 pocket milling not supported");
                 case 921: // G92.1 — Reset G92, zero position
                     return m_coordinates.processG92_1(m_machineState, m_variables);
                 case 922: // G92.2 — Reset G92, keep position
@@ -738,6 +1158,84 @@ Error Interpreter::dispatchMCode(int32_t mcode, const Block& block) {
             m_machineState.currentTool = tool;
             return Error{};
         }
+        case 70: // M70 — Save modal state
+            return m_oCodeExecutor->saveModalState(m_machineState);
+        case 71: // M71 — Invalidate stored modal state
+            return m_oCodeExecutor->invalidateModalState();
+        case 72: // M72 — Restore modal state
+            return m_oCodeExecutor->restoreModalState(m_machineState);
+        case 73: // M73 — Save modal state, auto-restore on sub return
+            return m_oCodeExecutor->autoRestoreModalState(m_machineState);
+        case 98: { // M98 P<num> L<count> — Call subprogram
+            if (!block.hasWord(WordLetter::P))
+                return makeError(ErrorCode::UNKNOWN_MCODE,
+                                 "M98 requires P word");
+            int32_t p = static_cast<int32_t>(block.getWord(WordLetter::P));
+            int32_t l = static_cast<int32_t>(
+                block.getWord(WordLetter::L, 1));
+            Error err = m_oCodeExecutor->executeM98(p, l);
+            if (!err.ok())
+                return err;
+            m_parser->getLexer().seek(m_oCodeExecutor->getJumpAddress());
+            return Error{};
+        }
+        case 99: { // M99 — Return from subprogram (or repeat)
+            OCodeExecutor::NextAction action =
+                OCodeExecutor::NextAction::CONTINUE;
+            Error err = m_oCodeExecutor->executeM99(action);
+            if (!err.ok())
+                return err;
+            if (action == OCodeExecutor::NextAction::JUMP)
+                m_parser->getLexer().seek(m_oCodeExecutor->getJumpAddress());
+            return Error{};
+        }
+        case 19: { // M19 — Spindle orient (Haas)
+            m_machineState.spindleOn = true;
+            if (m_spindleCallback)
+                return m_spindleCallback(true, m_machineState.spindleCW,
+                                         block.getWord(WordLetter::S, 0.0));
+            return Error{};
+        }
+        // --- Marlin M-codes (3D-printer dialect) ---
+        case 400: // M400 — Wait for all queued moves to finish
+            // Barrier: downstream consumers see all prior segments first;
+            // nothing to emit at interpreter level.
+            if (m_mcodeCallback)
+                return m_mcodeCallback(mcode, std::nullopt, std::nullopt);
+            return Error{};
+        case 600: // M600 — Filament change (pause + user hook)
+            if (m_programCallback) m_programCallback(0);
+            if (m_mcodeCallback)
+                return m_mcodeCallback(mcode, std::nullopt, std::nullopt);
+            return Error{};
+        case 17:  // M17 — Enable motors
+        case 18:  // M18 — Disable motors
+        case 84:  // M84 — Idle motors off
+        case 104: // M104 — Set hotend temp (S)
+        case 109: // M109 — Set hotend temp and wait
+        case 140: // M140 — Set bed temp
+        case 190: // M190 — Set bed temp and wait
+        case 141: // M141 — Set chamber temp
+        case 191: // M191 — Set chamber temp and wait
+        case 106: // M106 — Fan on (S)
+        case 107: // M107 — Fan off
+        case 500: // M500 — Save settings to EEPROM
+        case 501: // M501 — Load settings
+        case 502: // M502 — Factory reset
+        case 503: // M503 — Report settings
+        case 900: { // M900 — Linear advance (K factor)
+            // Printer-domain commands: forward to the user M-code hook when
+            // registered, otherwise accept silently.
+            if (m_mcodeCallback) {
+                std::optional<double> p, q;
+                if (block.hasWord(WordLetter::P))
+                    p = block.getWord(WordLetter::P);
+                if (block.hasWord(WordLetter::Q))
+                    q = block.getWord(WordLetter::Q);
+                return m_mcodeCallback(mcode, p, q);
+            }
+            return Error{};
+        }
         default:
             // Forward to user M-code callback
             if (m_mcodeCallback) {
@@ -777,7 +1275,29 @@ Error Interpreter::handleMotion(const Block& block,
                 case 2: mode = MotionMode::CW_ARC; break;
                 case 3: mode = MotionMode::CCW_ARC; break;
                 case 4: mode = MotionMode::DWELL; break;
+                case 5: mode = MotionMode::CUBIC_SPLINE; break;
+                case 51: mode = MotionMode::QUADRATIC_SPLINE; break;
+                case 52:
+                case 53: mode = MotionMode::NURBS; break;
+                case 33: mode = MotionMode::THREADING; break;
+                case 331: mode = MotionMode::RIGID_TAP; break;
+                case 382: mode = MotionMode::PROBE_TOWARD; break;
+                case 383: mode = MotionMode::PROBE_TOWARD_NE; break;
+                case 384: mode = MotionMode::PROBE_AWAY; break;
+                case 385: mode = MotionMode::PROBE_AWAY_NE; break;
+                case 73: mode = MotionMode::DRILL_PECK_BREAK; break;
+                case 74: mode = MotionMode::TAP_LH; break;
+                case 76: mode = MotionMode::THREAD_CYCLE; break;
                 case 80: mode = MotionMode::CANNED_OFF; break;
+                case 81: mode = MotionMode::DRILL; break;
+                case 82: mode = MotionMode::DRILL_DWELL; break;
+                case 83: mode = MotionMode::DRILL_PECK; break;
+                case 84: mode = MotionMode::TAP_RH; break;
+                case 85: mode = MotionMode::BORE_FEED_OUT; break;
+                case 86: mode = MotionMode::BORE_STOP_RAPID; break;
+                case 87: mode = MotionMode::BORE_BACK; break;
+                case 88: mode = MotionMode::BORE_MANUAL; break;
+                case 89: mode = MotionMode::BORE_DWELL; break;
                 default: break;
             }
             m_machineState.motionMode = mode;
@@ -789,9 +1309,16 @@ Error Interpreter::handleMotion(const Block& block,
     if (block.hasWord(WordLetter::F))
         m_machineState.feedRate = block.getWord(WordLetter::F);
 
+    // Canned/probe modes act on R/Z/Q/P words, not just axis words — they
+    // are handled below even when no axis words are present.
+    const bool cycleOrProbe = isCannedCycle(mode) || isProbeMode(mode) ||
+                              mode == MotionMode::CANNED_OFF ||
+                              mode == MotionMode::NURBS;
+
     // If no motion words are present, don't generate a segment.
     // The G-code only updates the modal motion mode and/or feed rate.
-    if (!hasMotionWords(block) &&
+    if (!cycleOrProbe &&
+        !hasMotionWords(block) &&
         !block.hasWord(WordLetter::I) &&
         !block.hasWord(WordLetter::J) &&
         !block.hasWord(WordLetter::K) &&
@@ -830,6 +1357,42 @@ Error Interpreter::handleMotion(const Block& block,
         if (block.hasWord(WordLetter::C))
             target[Axis::C] += block.getWord(WordLetter::C);
     }
+
+    // Canned cycle cancel: G80 clears the modal cycle, emits no motion.
+    if (mode == MotionMode::CANNED_OFF) {
+        m_cannedActive = false;
+        m_cannedParams = CannedParams{};
+        return Error{};
+    }
+
+    // Probe moves (G38.2–G38.5)
+    if (isProbeMode(mode)) {
+        return executeProbe(mode, block, target, unitScale, segments);
+    }
+
+    // Canned cycles (G73/G74/G76/G81–G89), including modal repeats
+    if (isCannedCycle(mode)) {
+        return executeCannedCycle(mode, block, target, unitScale, segments);
+    }
+
+    // Splines: G5 cubic, G5.1 quadratic, G5.2/G5.3 NURBS
+    if (mode == MotionMode::CUBIC_SPLINE ||
+        mode == MotionMode::QUADRATIC_SPLINE) {
+        return executeSpline(mode, block, target, unitScale, segments);
+    }
+    if (mode == MotionMode::NURBS) {
+        // Determine if this block is a G5.2/G5.3 command or a bare
+        // control-point block.
+        int nurbsG = 0;
+        for (uint8_t i = 0; i < block.gCodeCount; ++i) {
+            if (block.gCodes[i] == 52 || block.gCodes[i] == 53)
+                nurbsG = block.gCodes[i];
+        }
+        return executeNurbs(nurbsG, block, target, unitScale, segments);
+    }
+
+    // Any non-NURBS motion abandons an unfinished NURBS block.
+    m_nurbsActive = false;
 
     // Create motion segment
     MotionSegment seg;
@@ -1104,6 +1667,500 @@ void Interpreter::updatePositionVariables() {
     for (size_t i = 0; i < MAX_AXES; ++i)
         m_variables.set(CURRENT_POS_PARAM_BASE + static_cast<int32_t>(i),
                         m_machineState.workPosition[i]);
+}
+
+// ============================================================================
+// Canned Cycles (G73/G74/G76/G80–G89)
+// ============================================================================
+
+bool Interpreter::isCannedCycle(MotionMode m) {
+    switch (m) {
+        case MotionMode::DRILL_PECK_BREAK:
+        case MotionMode::TAP_LH:
+        case MotionMode::THREAD_CYCLE:
+        case MotionMode::DRILL:
+        case MotionMode::DRILL_DWELL:
+        case MotionMode::DRILL_PECK:
+        case MotionMode::TAP_RH:
+        case MotionMode::BORE_FEED_OUT:
+        case MotionMode::BORE_STOP_RAPID:
+        case MotionMode::BORE_BACK:
+        case MotionMode::BORE_MANUAL:
+        case MotionMode::BORE_DWELL:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool Interpreter::isProbeMode(MotionMode m) {
+    return m == MotionMode::PROBE_TOWARD || m == MotionMode::PROBE_TOWARD_NE ||
+           m == MotionMode::PROBE_AWAY || m == MotionMode::PROBE_AWAY_NE;
+}
+
+Error Interpreter::executeCannedCycle(MotionMode cycle, const Block& block,
+                                      const Position& target, double unitScale,
+                                      std::vector<MotionSegment>& segments) {
+    // Plane axes: a1/a2 = hole position, ah = drill axis.
+    int a1, a2, ah;
+    switch (m_machineState.plane) {
+        case Plane::ZX: a1 = 2; a2 = 0; ah = 1; break;
+        case Plane::YZ: a1 = 1; a2 = 2; ah = 0; break;
+        default:        a1 = 0; a2 = 1; ah = 2; break;
+    }
+    static const WordLetter axisWord[3] = {
+        WordLetter::X, WordLetter::Y, WordLetter::Z};
+
+    // Merge words into modal cycle parameters (missing words keep the
+    // previous values so bare `X20 Y30` lines repeat the cycle).
+    CannedParams& p = m_cannedParams;
+    if (block.hasWord(axisWord[ah])) {
+        p.z = target[ah];
+        p.zSet = true;
+    }
+    const double initialAH = m_machineState.workPosition[ah];
+    if (block.hasWord(WordLetter::R)) {
+        p.r = block.getWord(WordLetter::R) * unitScale;
+        if (m_machineState.distanceMode == DistanceMode::INCREMENTAL)
+            p.r += initialAH;
+        p.rSet = true;
+    }
+    if (block.hasWord(WordLetter::Q)) {
+        p.q = std::fabs(block.getWord(WordLetter::Q)) * unitScale;
+    }
+    if (block.hasWord(WordLetter::P)) {
+        p.dwell = block.getWord(WordLetter::P);  // seconds (LinuxCNC)
+    }
+    if (block.hasWord(WordLetter::I))
+        p.shiftI = block.getWord(WordLetter::I) * unitScale;
+    if (block.hasWord(WordLetter::J))
+        p.shiftJ = block.getWord(WordLetter::J) * unitScale;
+    p.repeat = static_cast<int32_t>(block.getWord(WordLetter::L, 1));
+    if (p.repeat < 1) p.repeat = 1;
+
+    if (!p.zSet) {
+        return makeError(ErrorCode::INVALID_MOTION,
+                         "Canned cycle requires a depth word (Z)");
+    }
+    // Default R plane: current drill-axis position.
+    if (!p.rSet)
+        p.r = initialAH;
+
+    m_cannedActive = true;
+
+    const double retractAH =
+        (m_machineState.cannedReturn == CannedReturnMode::INITIAL)
+            ? initialAH : p.r;
+    const double clearance = 0.5 * unitScale;  // peck re-approach clearance
+    const double feed = m_machineState.feedRate;
+
+    // Emit helpers — positions are in work coordinates; each segment
+    // transforms to machine coords and advances machine state.
+    auto emitMove = [&](MotionSegment::Type type, const Position& prog,
+                        double fr) {
+        MotionSegment s;
+        s.type = type;
+        s.endPosition = m_coordinates.toMachineCoords(prog);
+        s.feedRate = fr;
+        s.lineNumber = block.sourceLineNumber;
+        segments.push_back(s);
+        m_machineState.workPosition = prog;
+        m_machineState.machinePosition = s.endPosition;
+        ++m_stats.motionSegments;
+    };
+    auto emitDwell = [&](double seconds) {
+        MotionSegment s;
+        s.type = MotionSegment::Type::DWELL;
+        s.duration = seconds;
+        s.endPosition = m_coordinates.toMachineCoords(m_machineState.workPosition);
+        s.lineNumber = block.sourceLineNumber;
+        segments.push_back(s);
+        if (m_dwellCallback) m_dwellCallback(seconds);
+    };
+    auto spindle = [&](bool on, bool cw) {
+        if (m_spindleCallback)
+            m_spindleCallback(on, cw, m_machineState.spindleSpeed);
+        m_machineState.spindleOn = on;
+        m_machineState.spindleCW = cw;
+    };
+
+    for (int32_t rep = 0; rep < p.repeat; ++rep) {
+        Position pos = m_machineState.workPosition;
+        // 1. Rapid to hole XY
+        pos[a1] = target[a1];
+        pos[a2] = target[a2];
+        emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+        // 2. Rapid to R plane
+        pos[ah] = p.r;
+        emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+
+        switch (cycle) {
+            case MotionMode::DRILL:  // G81
+                pos[ah] = p.z;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                pos[ah] = retractAH;
+                emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                break;
+
+            case MotionMode::DRILL_DWELL:  // G82
+                pos[ah] = p.z;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                if (p.dwell > 0.0) emitDwell(p.dwell);
+                pos[ah] = retractAH;
+                emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                break;
+
+            case MotionMode::DRILL_PECK: {  // G83 — full retract per peck
+                double depth = p.r;
+                const double step = (p.q > 0.0) ? p.q
+                                                : std::fabs(p.z - p.r);
+                while (depth - step > p.z) {
+                    depth -= step;
+                    pos[ah] = depth;
+                    emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                    pos[ah] = p.r;
+                    emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                    pos[ah] = depth + clearance;
+                    emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                }
+                pos[ah] = p.z;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                pos[ah] = retractAH;
+                emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                break;
+            }
+
+            case MotionMode::DRILL_PECK_BREAK: {  // G73 — chip break
+                double depth = p.r;
+                const double step = (p.q > 0.0) ? p.q
+                                                : std::fabs(p.z - p.r);
+                while (depth - step > p.z) {
+                    depth -= step;
+                    pos[ah] = depth;
+                    emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                    pos[ah] = depth + clearance;
+                    emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                    pos[ah] = depth;
+                    emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                }
+                pos[ah] = p.z;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                pos[ah] = retractAH;
+                emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                break;
+            }
+
+            case MotionMode::TAP_RH:   // G84 — feed in CW, reverse out
+            case MotionMode::TAP_LH: { // G74 — feed in CCW, reverse out
+                const bool inCW = (cycle == MotionMode::TAP_RH);
+                spindle(true, inCW);
+                pos[ah] = p.z;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                spindle(true, !inCW);
+                pos[ah] = p.r;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                spindle(true, inCW);
+                if (retractAH > p.r) {
+                    pos[ah] = retractAH;
+                    emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                }
+                break;
+            }
+
+            case MotionMode::BORE_FEED_OUT:  // G85
+                pos[ah] = p.z;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                pos[ah] = p.r;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                if (retractAH > p.r) {
+                    pos[ah] = retractAH;
+                    emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                }
+                break;
+
+            case MotionMode::BORE_STOP_RAPID:  // G86
+                pos[ah] = p.z;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                spindle(false, true);
+                pos[ah] = retractAH;
+                emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                spindle(true, true);
+                break;
+
+            case MotionMode::BORE_MANUAL:  // G88 — dwell + stop, rapid out
+                pos[ah] = p.z;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                if (p.dwell > 0.0) emitDwell(p.dwell);
+                spindle(false, true);
+                pos[ah] = retractAH;
+                emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                break;
+
+            case MotionMode::BORE_DWELL:  // G89 — dwell, feed out
+                pos[ah] = p.z;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                if (p.dwell > 0.0) emitDwell(p.dwell);
+                pos[ah] = p.r;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                if (retractAH > p.r) {
+                    pos[ah] = retractAH;
+                    emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                }
+                break;
+
+            case MotionMode::THREAD_CYCLE:  // G76 — fine boring
+            case MotionMode::BORE_BACK: {   // G87 — back boring
+                // Approximation: bore to bottom, orient + shift off the wall,
+                // rapid out, unshift, restart spindle.
+                pos[ah] = p.z;
+                emitMove(MotionSegment::Type::LINEAR, pos, feed);
+                spindle(false, true);
+                pos[a1] -= p.shiftI;
+                pos[a2] -= p.shiftJ;
+                emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                pos[ah] = retractAH;
+                emitMove(MotionSegment::Type::RAPID, pos, 0.0);
+                pos[a1] += p.shiftI;
+                pos[a2] += p.shiftJ;
+                spindle(true, true);
+                break;
+            }
+
+            default:
+                break;
+        }
+    }
+    return Error{};
+}
+
+// ============================================================================
+// Probing (G38.2–G38.5)
+// ============================================================================
+
+Error Interpreter::executeProbe(MotionMode probeType, const Block& block,
+                                const Position& target, double unitScale,
+                                std::vector<MotionSegment>& segments) {
+    const bool errorOnMiss = (probeType == MotionMode::PROBE_TOWARD ||
+                              probeType == MotionMode::PROBE_AWAY);
+    ProbeType pt = (probeType == MotionMode::PROBE_TOWARD ||
+                    probeType == MotionMode::PROBE_TOWARD_NE)
+                       ? ProbeType::TOWARD_WITH_ERROR
+                       : ProbeType::AWAY_WITH_ERROR;
+
+    ProbeResult result;
+    if (m_probeCallback) {
+        Error err = m_probeCallback(target, m_machineState.feedRate, pt,
+                                    result);
+        if (!err.ok())
+            return err;
+    } else {
+        // No hardware probe attached — assume the probe trips at the
+        // programmed target (dry-run / simulation semantics).
+        result.tripped = true;
+        result.tripPosition = m_coordinates.toMachineCoords(target);
+        result.tripWorkPosition = target;
+        const Position d = result.tripPosition -
+                           m_machineState.machinePosition;
+        result.travelDistance = std::sqrt(d.dot(d));
+    }
+    result.success = result.tripped;
+
+    if (!result.tripped && errorOnMiss) {
+        return makeError(ErrorCode::PROBE_ERROR,
+                         "Probe move finished without contact");
+    }
+
+    // Emit the probe segment to the trip point (or programmed target on a
+    // no-error miss).
+    const Position progEnd =
+        result.tripped ? result.tripWorkPosition : target;
+    MotionSegment seg;
+    seg.type = MotionSegment::Type::PROBE;
+    seg.endPosition = m_coordinates.toMachineCoords(progEnd);
+    seg.feedRate = m_machineState.feedRate;
+    seg.lineNumber = block.sourceLineNumber;
+    segments.push_back(seg);
+    ++m_stats.motionSegments;
+
+    m_machineState.workPosition = progEnd;
+    m_machineState.machinePosition = seg.endPosition;
+
+    // Publish probe results: #5061-#5068 trip position, #5070 success flag.
+    m_variables.setProbeResult(result);
+    (void)unitScale;
+    return Error{};
+}
+
+Error Interpreter::executeSpline(MotionMode mode, const Block& block,
+                                 const Position& target, double unitScale,
+                                 std::vector<MotionSegment>& segments) {
+    const Position& start = m_machineState.workPosition;
+
+    // Plane axes (same convention as arcs): XY → I,J / ZX → K,I / YZ → J,K
+    int a1, a2;
+    switch (m_machineState.plane) {
+        case Plane::ZX: a1 = 2; a2 = 0; break;
+        case Plane::YZ: a1 = 1; a2 = 2; break;
+        default:        a1 = 0; a2 = 1; break;
+    }
+    const WordLetter w1 = (m_machineState.plane == Plane::ZX)
+        ? WordLetter::K : (m_machineState.plane == Plane::YZ)
+        ? WordLetter::J : WordLetter::I;
+    const WordLetter w2 = (m_machineState.plane == Plane::ZX)
+        ? WordLetter::I : (m_machineState.plane == Plane::YZ)
+        ? WordLetter::K : WordLetter::J;
+
+    Position p1 = start;
+    Position p2 = target;
+    if (block.hasWord(w1))
+        p1[a1] += block.getWord(w1) * unitScale;
+    if (block.hasWord(w2))
+        p1[a2] += block.getWord(w2) * unitScale;
+
+    MotionSegment seg;
+    seg.type = MotionSegment::Type::SPLINE;
+    seg.lineNumber = block.sourceLineNumber;
+    seg.feedRate = m_machineState.feedRate;
+
+    if (mode == MotionMode::CUBIC_SPLINE) {
+        // P/Q offset the second control point from the end point.
+        if (block.hasWord(WordLetter::P))
+            p2[a1] += block.getWord(WordLetter::P) * unitScale;
+        if (block.hasWord(WordLetter::Q))
+            p2[a2] += block.getWord(WordLetter::Q) * unitScale;
+    }
+
+    seg.splinePoints[0] = m_coordinates.toMachineCoords(start);
+    seg.splinePoints[1] = m_coordinates.toMachineCoords(p1);
+    seg.splinePoints[2] = (mode == MotionMode::CUBIC_SPLINE)
+        ? m_coordinates.toMachineCoords(p2)
+        : m_coordinates.toMachineCoords(target);
+    seg.splinePoints[3] = m_coordinates.toMachineCoords(target);
+    seg.endPosition = seg.splinePoints[3];
+
+    segments.push_back(seg);
+    ++m_stats.motionSegments;
+    m_machineState.workPosition = target;
+    m_machineState.machinePosition = seg.endPosition;
+    return Error{};
+}
+
+Error Interpreter::executeNurbs(int nurbsG, const Block& block,
+                                const Position& target, double unitScale,
+                                std::vector<MotionSegment>& segments) {
+    (void)unitScale;
+    if (nurbsG == 52) {  // G5.2: begin NURBS block
+        m_nurbsActive = true;
+        m_nurbsPoints.clear();
+        m_nurbsOrder = static_cast<int32_t>(block.getWord(WordLetter::L, 3));
+        if (m_nurbsOrder < 2) m_nurbsOrder = 2;
+        if (m_nurbsOrder > 8) m_nurbsOrder = 8;
+        // Optional first control point on the same line (P = weight)
+        if (block.hasWord(WordLetter::X) || block.hasWord(WordLetter::Y)) {
+            NurbsControlPoint cp;
+            cp.point = target;
+            cp.weight = block.getWord(WordLetter::P, 1.0);
+            m_nurbsPoints.push_back(cp);
+        }
+        m_machineState.motionMode = MotionMode::NURBS;
+        return Error{};
+    }
+
+    if (nurbsG == 53) {  // G5.3: end block, tessellate
+        if (!m_nurbsActive) {
+            m_machineState.motionMode = MotionMode::LINEAR;
+            return Error{};
+        }
+        m_nurbsActive = false;
+        m_machineState.motionMode = MotionMode::LINEAR;
+
+        const size_t n = m_nurbsPoints.size();
+        const int order = m_nurbsOrder;
+        if (n < static_cast<size_t>(order)) {
+            return makeError(ErrorCode::INVALID_MOTION,
+                             "NURBS: fewer control points than order");
+        }
+
+        // Clamped uniform knot vector: N + p + 1 knots for N points,
+        // degree p. First p+1 knots are 0, last p+1 are 1, interior
+        // knots evenly spaced.
+        const int N = static_cast<int>(n);
+        const int p = order - 1;
+        const int knotCount = N + p + 1;
+        std::vector<double> knots(knotCount);
+        for (int i = 0; i < knotCount; ++i) {
+            if (i <= p) knots[i] = 0.0;
+            else if (i >= N) knots[i] = 1.0;
+            else knots[i] = static_cast<double>(i - p) /
+                            static_cast<double>(N - p);
+        }
+        const int degree = p;
+
+        // de Boor evaluation in homogeneous coordinates (9 axes + weight)
+        const int samples =
+            std::max(16, static_cast<int>(n) * 8);
+        for (int s = 1; s <= samples; ++s) {
+            const double u = static_cast<double>(s) / samples;
+
+            // Knot span: knots[k] <= u < knots[k+1]
+            int k = degree;
+            for (int i = degree; i < static_cast<int>(n); ++i) {
+                if (u >= knots[i] && u < knots[i + 1]) { k = i; break; }
+            }
+            if (u >= 1.0) k = static_cast<int>(n) - 1;
+
+            std::array<std::array<double, 10>, 9> d{};
+            for (int j = 0; j <= degree; ++j) {
+                const auto& cp = m_nurbsPoints[k - degree + j];
+                for (int ax = 0; ax < 9; ++ax)
+                    d[j][ax] = cp.weight * cp.point[ax];
+                d[j][9] = cp.weight;
+            }
+            for (int r = 1; r <= degree; ++r) {
+                for (int j = degree; j >= r; --j) {
+                    const int i = k - degree + j;
+                    const double denom =
+                        knots[i + degree + 1 - r] - knots[i];
+                    const double alpha =
+                        (denom > 0.0) ? (u - knots[i]) / denom : 0.0;
+                    for (int ax = 0; ax < 10; ++ax)
+                        d[j][ax] = (1.0 - alpha) * d[j - 1][ax] +
+                                   alpha * d[j][ax];
+                }
+            }
+
+            Position pt{};
+            const double w = d[degree][9];
+            if (w > 1e-12)
+                for (int ax = 0; ax < 9; ++ax) pt[ax] = d[degree][ax] / w;
+
+            MotionSegment seg;
+            seg.type = MotionSegment::Type::LINEAR;
+            seg.endPosition = m_coordinates.toMachineCoords(pt);
+            seg.feedRate = m_machineState.feedRate;
+            seg.lineNumber = block.sourceLineNumber;
+            segments.push_back(seg);
+            ++m_stats.motionSegments;
+        }
+
+        if (!m_nurbsPoints.empty()) {
+            const Position& last = m_nurbsPoints.back().point;
+            m_machineState.workPosition = last;
+            m_machineState.machinePosition =
+                m_coordinates.toMachineCoords(last);
+        }
+        return Error{};
+    }
+
+    // Bare axis block while collecting: add a control point (P = weight).
+    if (m_nurbsActive &&
+        (block.hasWord(WordLetter::X) || block.hasWord(WordLetter::Y))) {
+        NurbsControlPoint cp;
+        cp.point = target;
+        cp.weight = block.getWord(WordLetter::P, 1.0);
+        m_nurbsPoints.push_back(cp);
+    }
+    return Error{};
 }
 
 } // namespace GCode

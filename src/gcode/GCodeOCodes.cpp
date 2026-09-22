@@ -111,7 +111,7 @@ Error SubroutineRegistry::scanSource(Parser& parser) {
             if (e.code == ErrorCode::END) break;
             continue;  // skip parse errors
         }
-        if (b.hasOCode && b.oCodeType == OCodeType::SUB) {
+        if (b.hasOCode && b.oCodeType == OCodeType::SUB && b.oCodeHasKeyword) {
             SubroutineInfo info;
             info.oNumber = b.oCodeNumber;
             info.isNamed = b.oCodeIsNamed;
@@ -121,18 +121,31 @@ Error SubroutineRegistry::scanSource(Parser& parser) {
             info.startAddress = parser.getLexer().getPosition();
             info.startLine = b.sourceLineNumber;
 
-            // Find matching endsub
-            Block endB;
-            Error endErr = parser.findMatchingOCode(
-                b.oCodeIsNamed ? b.oCodeNumber : b.oCodeNumber,
-                OCodeType::SUB, endB);
-            if (!endErr) {
-                info.endAddress = parser.getLexer().getPosition();
-                info.endLine = endB.sourceLineNumber;
+            // Find matching endsub — the opener line was just consumed, so
+            // scan forward for the endsub at depth 0.
+            {
+                int depth = 0;
+                Block endB;
+                while (true) {
+                    Error pe = parser.parseNextBlock(endB);
+                    if (pe) break;
+                    if (!endB.hasOCode ||
+                        endB.oCodeNumber != b.oCodeNumber) continue;
+                    if (endB.oCodeType == OCodeType::SUB) {
+                        ++depth;
+                    } else if (endB.oCodeType == OCodeType::ENDSUB) {
+                        if (depth == 0) {
+                            info.endAddress = parser.getLastBlockEnd();
+                            info.endLine = endB.sourceLineNumber;
+                            break;
+                        }
+                        --depth;
+                    }
+                }
             }
 
             if (b.oCodeIsNamed) {
-                err = registerSubroutine(info.name, info);
+                err = registerSubroutine(to_lower(info.name), info);
             } else {
                 err = registerSubroutine(info.oNumber, info);
             }
@@ -141,6 +154,15 @@ Error SubroutineRegistry::scanSource(Parser& parser) {
                 parser.setCurrentBlockNumber(savedBlockNum);
                 return err;
             }
+        } else if (b.hasOCode && !b.oCodeIsNamed && !b.oCodeHasKeyword) {
+            // Bare `O<num>` label — Fanuc-style subprogram (ends at M99).
+            // Body starts on the line after the label.
+            SubroutineInfo info;
+            info.oNumber = b.oCodeNumber;
+            info.isFanucStyle = true;
+            info.startAddress = parser.getLastBlockEnd();
+            info.startLine = b.sourceLineNumber;
+            m_numbered.try_emplace(b.oCodeNumber, info);
         }
     }
 
@@ -189,25 +211,32 @@ Error OCodeExecutor::execute(const Block& block, NextAction& nextAction) {
 
     switch (block.oCodeType) {
         case OCodeType::SUB:
+            if (!block.oCodeHasKeyword) {
+                // Bare `O<num>` label — Fanuc-style program marker / label.
+                // No-op at runtime; M98/G65 calls jump past it to the body.
+                return Error{};
+            }
             // Subroutine definition — skip over the body when encountered
             // directly (the body is executed via callSubroutine).
             {
                 Block endB;
-                Error e = m_parser.findMatchingOCode(
+                Error e = scanForEnder(
                     block.oCodeNumber, OCodeType::SUB, endB);
                 if (e) {
-                    set_error(err, ErrorCode::INVALID_OCODE, block.sourceLineNumber,
-                              "sub without matching endsub");
                     return e;
                 }
-                m_jumpAddress = m_parser.getLexer().getPosition();
+                m_jumpAddress = m_parser.getLastBlockEnd();
                 m_jumpLine = endB.sourceLineNumber;
                 nextAction = NextAction::JUMP;
             }
             return Error{};
 
-        case OCodeType::ENDSUB:
-            return returnFromSub(std::nullopt);
+        case OCodeType::ENDSUB: {
+            Error e = returnFromSub(std::nullopt);
+            if (e) return e;
+            nextAction = NextAction::JUMP;
+            return Error{};
+        }
 
         case OCodeType::CALL: {
             std::vector<double> args;
@@ -222,10 +251,15 @@ Error OCodeExecutor::execute(const Block& block, NextAction& nextAction) {
                     args.push_back(val);
                 }
             }
+            Error e;
             if (block.oCodeIsNamed) {
-                return callSubroutine(std::string(block.oCodeName.data()), args);
+                e = callSubroutine(std::string(block.oCodeName.data()), args);
+            } else {
+                e = callSubroutine(block.oCodeNumber, args);
             }
-            return callSubroutine(block.oCodeNumber, args);
+            if (e) return e;
+            nextAction = NextAction::JUMP;
+            return Error{};
         }
 
         case OCodeType::RETURN: {
@@ -237,7 +271,10 @@ Error OCodeExecutor::execute(const Block& block, NextAction& nextAction) {
                     retVal = val;
                 }
             }
-            return returnFromSub(retVal);
+            Error e = returnFromSub(retVal);
+            if (e) return e;
+            nextAction = NextAction::JUMP;
+            return Error{};
         }
 
         case OCodeType::IF:
@@ -256,9 +293,30 @@ Error OCodeExecutor::execute(const Block& block, NextAction& nextAction) {
         case OCodeType::ENDIF:
             return endIf(block.oCodeNumber);
 
-        case OCodeType::WHILE:
+        case OCodeType::WHILE: {
+            // `O<n> while` doubles as the terminator of `O<n> do ... while`.
+            if (!m_loopStack.empty() &&
+                m_loopStack.back().oNumber == block.oCodeNumber &&
+                m_loopStack.back().type == LoopFrame::Type::DO_WHILE) {
+                return doWhile(block.oCodeNumber,
+                               std::string(block.oCodeCondition.data()),
+                               nextAction);
+            }
+            // Evaluate the entry condition; if false, skip past endwhile
+            // without pushing a loop frame.
+            bool cond = false;
+            Error e = evaluateCondition(
+                std::string(block.oCodeCondition.data()), cond);
+            if (e) return e;
+            if (!cond) {
+                Error skip = jumpPastEnder(block.oCodeNumber, OCodeType::WHILE);
+                if (skip) return skip;
+                nextAction = NextAction::JUMP;
+                return Error{};
+            }
             return beginWhile(block.oCodeNumber,
                               std::string(block.oCodeCondition.data()));
+        }
 
         case OCodeType::ENDWHILE:
             return endWhile(block.oCodeNumber, nextAction);
@@ -326,11 +384,11 @@ Error OCodeExecutor::callSubroutine(int32_t oNumber,
                       "Undefined subroutine");
             return err;
         }
-        // Register it
+        // Register it — body starts on the line after `O<n> sub`.
         SubroutineInfo newInfo;
         newInfo.oNumber = oNumber;
         newInfo.isNamed = false;
-        newInfo.startAddress = m_parser.getLexer().getPosition();
+        newInfo.startAddress = m_parser.getLastBlockEnd();
         newInfo.startLine = subBlock.sourceLineNumber;
         m_registry.registerSubroutine(oNumber, newInfo);
         info = m_registry.find(oNumber);
@@ -350,8 +408,62 @@ Error OCodeExecutor::callSubroutine(int32_t oNumber,
     // Jump to subroutine start
     m_jumpAddress = info->startAddress;
     m_jumpLine = info->startLine;
-    // The caller should use NextAction::JUMP — but execute() already returned.
-    // For direct calls, we set the jump address and the caller checks it.
+    return Error{};
+}
+
+Error OCodeExecutor::callSubprogram(int32_t oNumber,
+                                    const std::vector<double>& args) {
+    Error err;
+
+    if (m_callStack.size() >= m_config.maxCallDepth) {
+        set_error(err, ErrorCode::NESTED_TOO_DEEP, 0,
+                  "Maximum call depth exceeded");
+        return err;
+    }
+
+    // Registry first, then a `sub/endsub` definition, then a bare Fanuc
+    // `O<num>` label.
+    const SubroutineInfo* info = m_registry.find(oNumber);
+    if (!info) {
+        Block subBlock;
+        if (!m_parser.findSubroutine(oNumber, subBlock)) {
+            SubroutineInfo newInfo;
+            newInfo.oNumber = oNumber;
+            newInfo.startAddress = m_parser.getLastBlockEnd();
+            newInfo.startLine = subBlock.sourceLineNumber;
+            m_registry.registerSubroutine(oNumber, newInfo);
+            info = m_registry.find(oNumber);
+        }
+    }
+    if (!info) {
+        Block labelBlock;
+        if (!m_parser.findSubprogramLabel(oNumber, labelBlock)) {
+            SubroutineInfo newInfo;
+            newInfo.oNumber = oNumber;
+            newInfo.isFanucStyle = true;
+            newInfo.startAddress = m_parser.getLastBlockEnd();
+            newInfo.startLine = labelBlock.sourceLineNumber;
+            m_registry.registerSubroutine(oNumber, newInfo);
+            info = m_registry.find(oNumber);
+        }
+    }
+    if (!info) {
+        set_error(err, ErrorCode::UNDEFINED_SUBROUTINE, 0,
+                  "Undefined subprogram");
+        return err;
+    }
+
+    CallFrame frame;
+    frame.oNumber = oNumber;
+    frame.isNamed = false;
+    frame.returnAddress = m_parser.getLexer().getPosition();
+    frame.returnLine = m_parser.getCurrentBlockNumber();
+    m_callStack.push_back(std::move(frame));
+
+    m_vars.pushFrame(args);
+
+    m_jumpAddress = info->startAddress;
+    m_jumpLine = info->startLine;
     return Error{};
 }
 
@@ -379,7 +491,7 @@ Error OCodeExecutor::callSubroutine(const std::string& name,
         newInfo.oNumber = subBlock.oCodeNumber;
         newInfo.isNamed = true;
         newInfo.name = name;
-        newInfo.startAddress = m_parser.getLexer().getPosition();
+        newInfo.startAddress = m_parser.getLastBlockEnd();
         newInfo.startLine = subBlock.sourceLineNumber;
         m_registry.registerSubroutine(key, newInfo);
         info = m_registry.find(key);
@@ -586,18 +698,24 @@ Error OCodeExecutor::breakLoop(int32_t oNumber, NextAction& nextAction) {
 
     // Find the loop with matching oNumber
     // (break can target an outer loop by number)
+    OCodeType opener = OCodeType::WHILE;
     while (!m_loopStack.empty()) {
         LoopFrame& frame = m_loopStack.back();
         if (frame.oNumber == oNumber) {
-            // Find matching end and jump past it
+            switch (frame.type) {
+                case LoopFrame::Type::WHILE:    opener = OCodeType::WHILE; break;
+                case LoopFrame::Type::DO_WHILE: opener = OCodeType::DO; break;
+                case LoopFrame::Type::REPEAT:   opener = OCodeType::REPEAT; break;
+            }
             m_loopStack.pop_back();
             break;
         }
         m_loopStack.pop_back();
     }
 
-    // The caller should skip to the matching end keyword.
-    // For simplicity, we set JUMP and the caller finds the end.
+    // Jump past the matching loop ender.
+    Error e = jumpPastEnder(oNumber, opener);
+    if (e) return e;
     nextAction = NextAction::JUMP;
     return Error{};
 }
@@ -627,21 +745,17 @@ Error OCodeExecutor::continueLoop(int32_t oNumber, NextAction& nextAction) {
         return err;
     }
 
-    if (target->type == LoopFrame::Type::REPEAT) {
-        ++target->currentIteration;
-        if (target->currentIteration >= target->maxIterations) {
-            // Exit loop
-            while (!m_loopStack.empty() &&
-                   m_loopStack.back().oNumber != oNumber) {
-                m_loopStack.pop_back();
-            }
-            if (!m_loopStack.empty()) m_loopStack.pop_back();
-            return Error{};
-        }
+    // Jump to the matching loop ender so it re-executes: `endwhile`/`while`
+    // re-evaluates the condition, `endrepeat` performs the count.
+    OCodeType opener;
+    switch (target->type) {
+        case LoopFrame::Type::WHILE:    opener = OCodeType::WHILE; break;
+        case LoopFrame::Type::DO_WHILE: opener = OCodeType::DO; break;
+        case LoopFrame::Type::REPEAT:   opener = OCodeType::REPEAT; break;
+        default:                        opener = OCodeType::WHILE; break;
     }
-
-    m_jumpAddress = target->startAddress;
-    m_jumpLine = target->startLine;
+    Error e = jumpToEnder(oNumber, opener);
+    if (e) return e;
     nextAction = NextAction::JUMP;
     return Error{};
 }
@@ -669,12 +783,15 @@ Error OCodeExecutor::beginIf(int32_t oNumber, const std::string& condition,
     frame.branchTaken = result;
     frame.inElse = false;
 
-    if (!result) {
-        // Skip to elseif/else/endif
-        nextAction = NextAction::SKIP_TO_ELSE;
-    }
-
     m_condStack.push_back(frame);
+
+    if (!result) {
+        // Jump to the next same-depth elseif/else/endif; it re-executes
+        // and sees the pushed frame.
+        Error e = scanToBranchPoint(oNumber);
+        if (e) return e;
+        nextAction = NextAction::JUMP;
+    }
     return Error{};
 }
 
@@ -693,7 +810,9 @@ Error OCodeExecutor::handleElseIf(int32_t oNumber, const std::string& condition,
 
     if (frame.branchTaken) {
         // A previous branch was taken — skip to endif
-        nextAction = NextAction::SKIP_TO_ENDIF;
+        Error e = scanToEndif(oNumber);
+        if (e) return e;
+        nextAction = NextAction::JUMP;
     } else {
         bool result = false;
         Error e = evaluateCondition(condition, result);
@@ -704,7 +823,9 @@ Error OCodeExecutor::handleElseIf(int32_t oNumber, const std::string& condition,
             // Execute this branch
         } else {
             // Skip to next elseif/else/endif
-            nextAction = NextAction::SKIP_TO_ELSE;
+            Error e2 = scanToBranchPoint(oNumber);
+            if (e2) return e2;
+            nextAction = NextAction::JUMP;
         }
     }
 
@@ -726,7 +847,9 @@ Error OCodeExecutor::handleElse(int32_t oNumber, NextAction& nextAction) {
 
     if (frame.branchTaken) {
         // A previous branch was taken — skip to endif
-        nextAction = NextAction::SKIP_TO_ENDIF;
+        Error e = scanToEndif(oNumber);
+        if (e) return e;
+        nextAction = NextAction::JUMP;
     }
     // else: execute the else branch
 
@@ -753,16 +876,44 @@ Error OCodeExecutor::endIf(int32_t oNumber) {
 Error OCodeExecutor::executeM98(int32_t pWord, int32_t lWord) {
     Error err;
     if (lWord < 1) lWord = 1;
-    m_m98RepeatRemaining = lWord - 1;  // First call happens now
-    m_m98ReturnAddress = m_parser.getLexer().getPosition();
 
-    // Find subroutine P
+    // Resolve P: registry, `sub/endsub` definition, or bare `O<num>` label.
     const SubroutineInfo* info = m_registry.find(pWord);
+    if (!info) {
+        Block subBlock;
+        if (!m_parser.findSubroutine(pWord, subBlock)) {
+            SubroutineInfo newInfo;
+            newInfo.oNumber = pWord;
+            newInfo.startAddress = m_parser.getLastBlockEnd();
+            newInfo.startLine = subBlock.sourceLineNumber;
+            m_registry.registerSubroutine(pWord, newInfo);
+            info = m_registry.find(pWord);
+        }
+    }
+    if (!info) {
+        Block labelBlock;
+        if (!m_parser.findSubprogramLabel(pWord, labelBlock)) {
+            SubroutineInfo newInfo;
+            newInfo.oNumber = pWord;
+            newInfo.isFanucStyle = true;
+            newInfo.startAddress = m_parser.getLastBlockEnd();
+            newInfo.startLine = labelBlock.sourceLineNumber;
+            m_registry.registerSubroutine(pWord, newInfo);
+            info = m_registry.find(pWord);
+        }
+    }
     if (!info) {
         set_error(err, ErrorCode::UNDEFINED_SUBROUTINE, 0,
                   "M98: undefined subprogram");
         return err;
     }
+
+    M98Frame frame;
+    frame.subStart = info->startAddress;
+    frame.subLine = info->startLine;
+    frame.returnAddress = m_parser.getLexer().getPosition();
+    frame.remaining = lWord - 1;  // First pass runs now
+    m_m98Stack.push_back(frame);
 
     m_jumpAddress = info->startAddress;
     m_jumpLine = info->startLine;
@@ -773,17 +924,31 @@ Error OCodeExecutor::executeM99(NextAction& nextAction) {
     Error err;
     nextAction = NextAction::CONTINUE;
 
-    if (m_m98RepeatRemaining > 0) {
-        // Repeat the subprogram
-        --m_m98RepeatRemaining;
-        // Jump back to sub start (need to track it)
+    if (!m_m98Stack.empty()) {
+        M98Frame& frame = m_m98Stack.back();
+        if (frame.remaining > 0) {
+            // Repeat the subprogram from the top.
+            --frame.remaining;
+            m_jumpAddress = frame.subStart;
+            m_jumpLine = frame.subLine;
+        } else {
+            // Return to the line after the M98 call.
+            m_jumpAddress = frame.returnAddress;
+            m_m98Stack.pop_back();
+        }
         nextAction = NextAction::JUMP;
-    } else {
-        // Return to caller
-        m_jumpAddress = m_m98ReturnAddress;
-        nextAction = NextAction::JUMP;
+        return Error{};
     }
 
+    // Inside a LinuxCNC-style `O sub` call, M99 acts as a return.
+    if (!m_callStack.empty()) {
+        Error e = returnFromSub(std::nullopt);
+        if (e) return e;
+        nextAction = NextAction::JUMP;
+        return Error{};
+    }
+
+    // Top-level M99 — nothing to return to; no-op.
     return Error{};
 }
 
@@ -843,8 +1008,7 @@ void OCodeExecutor::reset() {
     m_jumpAddress = 0;
     m_jumpLine = 0;
     m_returnValue.reset();
-    m_m98RepeatRemaining = 0;
-    m_m98ReturnAddress = 0;
+    m_m98Stack.clear();
     m_registry.clear();
 }
 
@@ -874,14 +1038,126 @@ Error OCodeExecutor::findEndOfBlock(int32_t oNumber, OCodeType blockType,
                                     size_t& address, uint32_t& line) {
     Error err;
     Block endB;
-    Error e = m_parser.findMatchingOCode(oNumber, blockType, endB);
+    Error e = scanForEnder(oNumber, blockType, endB);
     if (e) {
         set_error(err, ErrorCode::INVALID_OCODE, 0,
                   "Cannot find end of O-code block");
         return e;
     }
-    address = m_parser.getLexer().getPosition();
+    // Position after the ender line — execution continues there.
+    address = m_parser.getLastBlockEnd();
     line = endB.sourceLineNumber;
+    return Error{};
+}
+
+Error OCodeExecutor::scanForEnder(int32_t oNumber, OCodeType opener,
+                                  Block& endBlock) {
+    Error err;
+    OCodeType targetType;
+    switch (opener) {
+        case OCodeType::IF:     targetType = OCodeType::ENDIF; break;
+        case OCodeType::WHILE:  targetType = OCodeType::ENDWHILE; break;
+        case OCodeType::DO:     targetType = OCodeType::WHILE; break;
+        case OCodeType::REPEAT: targetType = OCodeType::ENDREPEAT; break;
+        case OCodeType::SUB:    targetType = OCodeType::ENDSUB; break;
+        default:
+            set_error(err, ErrorCode::INVALID_OCODE, 0,
+                      "Unknown O-code block type for matching");
+            return err;
+    }
+
+    int depth = 0;
+    Block b;
+    for (;;) {
+        Error e = m_parser.parseNextBlock(b);
+        if (e) {
+            set_error(err, ErrorCode::INVALID_OCODE, 0,
+                      "O-code block without matching end");
+            return err;
+        }
+        if (!b.hasOCode || b.oCodeNumber != oNumber) continue;
+        if (b.oCodeType == opener) {
+            ++depth;
+        } else if (b.oCodeType == targetType) {
+            if (depth == 0) {
+                endBlock = b;
+                return Error{};
+            }
+            --depth;
+        }
+    }
+}
+
+Error OCodeExecutor::scanToBranchPoint(int32_t oNumber) {
+    Error err;
+    int32_t depth = 0;
+    Block b;
+    for (;;) {
+        Error e = m_parser.parseNextBlock(b);
+        if (e) {
+            set_error(err, ErrorCode::INVALID_OCODE, 0,
+                      "if without matching endif");
+            return err;
+        }
+        if (!b.hasOCode || b.oCodeNumber != oNumber) continue;
+        switch (b.oCodeType) {
+            case OCodeType::IF:      ++depth; break;
+            case OCodeType::ENDIF:
+                if (depth == 0) goto found;
+                --depth;
+                break;
+            case OCodeType::ELSEIF:
+            case OCodeType::ELSE:
+                if (depth == 0) goto found;
+                break;
+            default: break;
+        }
+    }
+found:
+    m_jumpAddress = m_parser.getLastBlockStart();
+    m_jumpLine = b.sourceLineNumber;
+    return Error{};
+}
+
+Error OCodeExecutor::scanToEndif(int32_t oNumber) {
+    Error err;
+    Block b;
+    Error e = scanForEnder(oNumber, OCodeType::IF, b);
+    if (e) {
+        set_error(err, ErrorCode::INVALID_OCODE, 0,
+                  "if without matching endif");
+        return err;
+    }
+    m_jumpAddress = m_parser.getLastBlockStart();
+    m_jumpLine = b.sourceLineNumber;
+    return Error{};
+}
+
+Error OCodeExecutor::jumpPastEnder(int32_t oNumber, OCodeType opener) {
+    Error err;
+    Block b;
+    Error e = scanForEnder(oNumber, opener, b);
+    if (e) {
+        set_error(err, ErrorCode::INVALID_OCODE, 0,
+                  "O-code block without matching end");
+        return err;
+    }
+    m_jumpAddress = m_parser.getLastBlockEnd();
+    m_jumpLine = b.sourceLineNumber;
+    return Error{};
+}
+
+Error OCodeExecutor::jumpToEnder(int32_t oNumber, OCodeType opener) {
+    Error err;
+    Block b;
+    Error e = scanForEnder(oNumber, opener, b);
+    if (e) {
+        set_error(err, ErrorCode::INVALID_OCODE, 0,
+                  "O-code block without matching end");
+        return err;
+    }
+    m_jumpAddress = m_parser.getLastBlockStart();
+    m_jumpLine = b.sourceLineNumber;
     return Error{};
 }
 

@@ -48,8 +48,72 @@ ProbeHandler::ProbeHandler(const ProbeConfig& config)
     : m_config(config) {}
 
 // --- ToolTable ---
-ToolTable::ToolTable(size_t maxTools)
-    : m_tools(maxTools) {}
+ToolTable::ToolTable(size_t maxTools) {
+    m_tools.reserve(maxTools);
+}
+
+const ToolEntry* ToolTable::getTool(int32_t toolNumber) const {
+    for (const auto& t : m_tools) {
+        if (t.toolNumber == toolNumber) return &t;
+    }
+    return nullptr;
+}
+
+ToolEntry* ToolTable::getTool(int32_t toolNumber) {
+    for (auto& t : m_tools) {
+        if (t.toolNumber == toolNumber) return &t;
+    }
+    return nullptr;
+}
+
+Error ToolTable::setTool(int32_t toolNumber, const ToolEntry& entry) {
+    if (toolNumber < 0) {
+        Error err;
+        err.code = ErrorCode::TOOL_ERROR;
+        std::snprintf(err.message.data(), err.message.size(), "%s",
+                      "Invalid tool number");
+        return err;
+    }
+    if (ToolEntry* t = getTool(toolNumber)) {
+        *t = entry;
+        t->toolNumber = toolNumber;
+        return Error{};
+    }
+    if (m_tools.size() >= MAX_TOOLS) {
+        Error err;
+        err.code = ErrorCode::TOOL_ERROR;
+        std::snprintf(err.message.data(), err.message.size(), "%s",
+                      "Tool table full");
+        return err;
+    }
+    ToolEntry e = entry;
+    e.toolNumber = toolNumber;
+    m_tools.push_back(e);
+    return Error{};
+}
+
+const ToolEntry* ToolTable::getToolByPocket(int32_t pocket) const {
+    for (const auto& t : m_tools) {
+        if (t.pocketNumber == pocket) return &t;
+    }
+    return nullptr;
+}
+
+void ToolTable::setCurrentTool(int32_t toolNumber) {
+    m_currentTool = toolNumber;
+}
+
+const ToolEntry* ToolTable::getCurrentToolEntry() const {
+    return getTool(m_currentTool);
+}
+
+size_t ToolTable::getToolCount() const {
+    return m_tools.size();
+}
+
+void ToolTable::clear() {
+    m_tools.clear();
+}
 
 // --- ToolLengthComp ---
 ToolLengthComp::ToolLengthComp(ToolTable& toolTable)
