@@ -324,7 +324,36 @@ LexerToken Lexer::nextToken() {
     // Parameter
     if (c0 == '#') {
         m_afterOCode = false;
-        return scanParameter();
+        LexerToken tok = scanParameter();
+        if (tok.type == LexerTokenType::ERROR) {
+            return tok;
+        }
+        // Parameter assignment: `#1 = expr` / `#<name> = expr`.
+        // The RHS runs to end of line (stopping at ';' or '(' comments).
+        const size_t savePos = m_pos;
+        while (m_pos < m_len && is_space(current()) && current() != '\n') {
+            advance();
+        }
+        if (m_pos < m_len && current() == '=') {
+            advance();
+            while (m_pos < m_len && is_space(current()) && current() != '\n') {
+                advance();
+            }
+            const size_t rhsStart = m_pos;
+            while (m_pos < m_len && current() != '\n' &&
+                   current() != ';' && current() != '(') {
+                advance();
+            }
+            tok.type = LexerTokenType::PARAM_ASSIGN;
+            tok.expression.assign(m_source + rhsStart, m_pos - rhsStart);
+            while (!tok.expression.empty() && is_space(tok.expression.back())) {
+                tok.expression.pop_back();
+            }
+            tok.length = m_pos - tok.offset;
+            return tok;
+        }
+        m_pos = savePos;
+        return tok;
     }
 
     // Word, O-code or KEY=VALUE (multi-letter key)

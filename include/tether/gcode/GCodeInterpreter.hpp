@@ -266,6 +266,16 @@ using ProgramControlCallback = std::function<void(
     int32_t mcode  // 0=stop, 1=optional stop, 2=end, 30=end/rewind
 )>;
 
+/**
+ * @brief Real-time command callback (GRBL-style)
+ *
+ * Invoked when a real-time command is received so the motion/hardware
+ * layer can react (pause feeds, flush buffers, reset). The character is
+ * the command byte: '!' feed hold, '~' cycle resume, '?' status query,
+ * 0x18 soft reset, 0x85 jog cancel.
+ */
+using RealtimeCallback = std::function<Error(char command)>;
+
 // ============================================================================
 // Interpreter Configuration
 // ============================================================================
@@ -461,6 +471,32 @@ public:
     void setDryRun(bool dryRun) { m_dryRun = dryRun; }
     bool isDryRun() const { return m_dryRun; }
 
+    // ========================================================================
+    // Real-time commands (GRBL-style)
+    //
+    // These are stream-level commands processed out-of-band — they are not
+    // G-code blocks and may be invoked while a program is executing.
+    // ========================================================================
+
+    /// '!' — pause motion after the current segment
+    Error feedHold();
+    /// '~' — resume after feed hold
+    Error cycleResume();
+    /// Ctrl-X (0x18) — soft reset: abort program, clear errors
+    Error softReset();
+    /// 0x85 — cancel an in-progress jog
+    Error jogCancel();
+    /// '?' — GRBL-style status line, e.g. "<Run|MPos:1.0,2.0,3.0|FS:500,1000>"
+    std::string statusReport() const;
+    /// '$...' — GRBL system command ($G, $#, $I, $X, $H, $N, $J=, $$)
+    Error systemCommand(const std::string& command);
+    /// Dispatch a single real-time character ('!', '~', '?', 0x18, 0x85)
+    Error processRealtimeChar(char command);
+    /// Text replies from systemCommand()/status queries
+    void setRealtimeCallback(RealtimeCallback callback) {
+        m_realtimeCallback = std::move(callback);
+    }
+
     /**
      * @brief Set emit-arc-segments mode.
      *
@@ -619,6 +655,32 @@ private:
     MachineState m_machineState;
     bool m_dryRun{false};
     bool m_emitArcSegments{false};
+
+    // Fanuc modal macro call (G66/G67): when active, every block with
+    // axis words re-invokes subprogram m_g66Program.
+    bool m_g66Active{false};
+    int32_t m_g66Program{0};
+
+    // Stored canned-cycle parameters (modal — a subsequent block with only
+    // axis words repeats the cycle at the new location).
+    struct CannedParams {
+        double z{0};            ///< Bottom position (drill axis, work coords)
+        bool zSet{false};
+        double r{0};            ///< R plane (drill axis, work coords)
+        bool rSet{false};
+        double q{0};            ///< Peck depth / bore shift magnitude
+        double dwell{0};        ///< P word dwell (seconds)
+        double shiftI{0};       ///< G76/G87 shift
+        double shiftJ{0};
+        int32_t repeat{1};      ///< L word
+    };
+    CannedParams m_cannedParams;
+    bool m_cannedActive{false};
+
+    // NURBS collection state (G5.2 ... G5.3)
+    bool m_nurbsActive{false};
+    int32_t m_nurbsOrder{3};
+    std::vector<NurbsControlPoint> m_nurbsPoints;
     std::string m_filename;
     std::string m_programSource;
     
@@ -635,6 +697,8 @@ private:
     DwellCallback m_dwellCallback;
     ProgramControlCallback m_programCallback;
     ToolChangeCallback m_toolChangeCallback;
+    ProbeMotionCallback m_probeCallback;
+    RealtimeCallback m_realtimeCallback;
     
     // Statistics
     Statistics m_stats;
@@ -647,6 +711,25 @@ private:
     Error handleArc(const Block& block, const Position& target,
                     MotionMode mode, double unitScale,
                     std::vector<MotionSegment>& segments);
+    /// Expand a canned cycle (G73/G74/G76/G81–G89) into motion segments.
+    Error executeCannedCycle(MotionMode cycle, const Block& block,
+                             const Position& target, double unitScale,
+                             std::vector<MotionSegment>& segments);
+    /// Execute a probe move (G38.2–G38.5); fills probe result parameters.
+    Error executeProbe(MotionMode probeType, const Block& block,
+                       const Position& target, double unitScale,
+                       std::vector<MotionSegment>& segments);
+    /// Execute a cubic (G5) or quadratic (G5.1) spline segment.
+    Error executeSpline(MotionMode mode, const Block& block,
+                        const Position& target, double unitScale,
+                        std::vector<MotionSegment>& segments);
+    /// Handle NURBS blocks: G5.2 starts collection, plain axis blocks add
+    /// control points, G5.3 tessellates into linear segments.
+    Error executeNurbs(int nurbsG, const Block& block,
+                       const Position& target, double unitScale,
+                       std::vector<MotionSegment>& segments);
+    static bool isCannedCycle(MotionMode mode);
+    static bool isProbeMode(MotionMode mode);
     Error outputSegments(const std::vector<MotionSegment>& segments);
     
     // G-code dispatch

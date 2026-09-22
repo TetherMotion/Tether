@@ -558,3 +558,452 @@ TEST_F(InterpreterTestBase, ToolLengthOffsetWithWCS) {
     // Machine = WCS (300) + TLO (50) + program (10) = 360
     EXPECT_NEAR(segments[0].endPosition.z(), 360.0, 0.001);
 }
+
+// ============================================================================
+// O-code flow control (interpreter-level)
+// ============================================================================
+
+TEST_F(InterpreterTestBase, OCodeSubCall) {
+    const char* program =
+        "G1 X1 F100\n"
+        "O100 sub\n"
+        "G1 X10\n"
+        "O100 endsub\n"
+        "O100 call\n"
+        "G1 X20\n"
+        "M2\n";
+    EXPECT_TRUE(interp.loadString(program).ok());
+    EXPECT_TRUE(interp.run().ok());
+    // Definition is skipped inline; call executes body once, then resumes.
+    ASSERT_EQ(segments.size(), 3u);
+    EXPECT_NEAR(segments[0].endPosition.x(), 1.0, 0.001);
+    EXPECT_NEAR(segments[1].endPosition.x(), 10.0, 0.001);
+    EXPECT_NEAR(segments[2].endPosition.x(), 20.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, OCodeNamedSubCall) {
+    const char* program =
+        "G1 X1 F100\n"
+        "O<mysub> sub\n"
+        "G1 X10\n"
+        "O<mysub> endsub\n"
+        "O<mysub> call\n"
+        "G1 X20\n"
+        "M2\n";
+    EXPECT_TRUE(interp.loadString(program).ok());
+    EXPECT_TRUE(interp.run().ok());
+    ASSERT_EQ(segments.size(), 3u);
+    EXPECT_NEAR(segments[1].endPosition.x(), 10.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, OCodeIfElseFalse) {
+    const char* program =
+        "#1 = 0\n"
+        "O100 if [#1 GT 0]\n"
+        "G1 X10\n"
+        "O100 else\n"
+        "G1 X20\n"
+        "O100 endif\n"
+        "G1 X30 F100\n"
+        "M2\n";
+    EXPECT_TRUE(interp.loadString(program).ok());
+    EXPECT_TRUE(interp.run().ok());
+    // False branch skipped: else body runs, then endif continues.
+    ASSERT_EQ(segments.size(), 2u);
+    EXPECT_NEAR(segments[0].endPosition.x(), 20.0, 0.001);
+    EXPECT_NEAR(segments[1].endPosition.x(), 30.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, OCodeIfTrue) {
+    const char* program =
+        "#1 = 1\n"
+        "O100 if [#1 GT 0]\n"
+        "G1 X10 F100\n"
+        "O100 else\n"
+        "G1 X20\n"
+        "O100 endif\n"
+        "G1 X30\n"
+        "M2\n";
+    EXPECT_TRUE(interp.loadString(program).ok());
+    EXPECT_TRUE(interp.run().ok());
+    ASSERT_EQ(segments.size(), 2u);
+    EXPECT_NEAR(segments[0].endPosition.x(), 10.0, 0.001);
+    EXPECT_NEAR(segments[1].endPosition.x(), 30.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, OCodeWhileLoop) {
+    const char* program =
+        "#1 = 0\n"
+        "O100 while [#1 LT 3]\n"
+        "#1 = [#1 + 1]\n"
+        "G1 X10 F100\n"
+        "O100 endwhile\n"
+        "G1 X99\n"
+        "M2\n";
+    EXPECT_TRUE(interp.loadString(program).ok());
+    EXPECT_TRUE(interp.run().ok());
+    ASSERT_EQ(segments.size(), 4u);
+    EXPECT_NEAR(segments[3].endPosition.x(), 99.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, OCodeRepeatLoop) {
+    const char* program =
+        "G1 X0 F100\n"
+        "O100 repeat [3]\n"
+        "G1 X10\n"
+        "O100 endrepeat\n"
+        "G1 X99\n"
+        "M2\n";
+    EXPECT_TRUE(interp.loadString(program).ok());
+    EXPECT_TRUE(interp.run().ok());
+    ASSERT_EQ(segments.size(), 5u);
+    EXPECT_NEAR(segments[4].endPosition.x(), 99.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, OCodeWhileBreak) {
+    const char* program =
+        "#1 = 0\n"
+        "O100 while [#1 LT 10]\n"
+        "#1 = [#1 + 1]\n"
+        "O101 if [#1 GE 2]\n"
+        "O100 break\n"
+        "O101 endif\n"
+        "G1 X10 F100\n"
+        "O100 endwhile\n"
+        "G1 X99\n"
+        "M2\n";
+    EXPECT_TRUE(interp.loadString(program).ok());
+    EXPECT_TRUE(interp.run().ok());
+    // Loop body ran once (X10), broke on iteration 2 before G1.
+    ASSERT_EQ(segments.size(), 2u);
+    EXPECT_NEAR(segments[1].endPosition.x(), 99.0, 0.001);
+}
+
+// ============================================================================
+// Fanuc M98/M99 subprograms (bare O<num> labels)
+// ============================================================================
+
+TEST_F(InterpreterTestBase, M98M99Subprogram) {
+    const char* program =
+        "G1 X1 F100\n"
+        "M98 P100\n"
+        "G1 X99\n"
+        "M2\n"
+        "O100\n"
+        "G1 X10\n"
+        "M99\n";
+    EXPECT_TRUE(interp.loadString(program).ok());
+    EXPECT_TRUE(interp.run().ok());
+    ASSERT_EQ(segments.size(), 3u);
+    EXPECT_NEAR(segments[0].endPosition.x(), 1.0, 0.001);
+    EXPECT_NEAR(segments[1].endPosition.x(), 10.0, 0.001);
+    EXPECT_NEAR(segments[2].endPosition.x(), 99.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, M98RepeatCount) {
+    const char* program =
+        "G1 X1 F100\n"
+        "M98 P100 L3\n"
+        "G1 X99\n"
+        "M2\n"
+        "O100\n"
+        "G1 X10\n"
+        "M99\n";
+    EXPECT_TRUE(interp.loadString(program).ok());
+    EXPECT_TRUE(interp.run().ok());
+    // Subprogram runs 3 times.
+    ASSERT_EQ(segments.size(), 5u);
+    EXPECT_NEAR(segments[4].endPosition.x(), 99.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, G65MacroCall) {
+    const char* program =
+        "G1 X1 F100\n"
+        "G65 P100 A5\n"
+        "G1 X99\n"
+        "M2\n"
+        "O100\n"
+        "G1 X[#1]\n"
+        "M99\n";
+    EXPECT_TRUE(interp.loadString(program).ok());
+    EXPECT_TRUE(interp.run().ok());
+    ASSERT_EQ(segments.size(), 3u);
+    // A5 maps to local #1 inside the macro.
+    EXPECT_NEAR(segments[1].endPosition.x(), 5.0, 0.001);
+    EXPECT_NEAR(segments[2].endPosition.x(), 99.0, 0.001);
+}
+
+// ============================================================================
+// Canned cycles
+// ============================================================================
+
+TEST_F(InterpreterTestBase, CannedCycleG81) {
+    EXPECT_TRUE(interp.executeLine("G0 X0 Y0 Z10").ok());
+    segments.clear();
+    EXPECT_TRUE(interp.executeLine("G81 X5 Y5 Z-2 R2 F100").ok());
+    // rapid XY, rapid to R, feed to Z, rapid retract to initial Z (G98)
+    ASSERT_EQ(segments.size(), 4u);
+    EXPECT_EQ(segments[0].type, MotionSegment::Type::RAPID);
+    EXPECT_NEAR(segments[0].endPosition.x(), 5.0, 0.001);
+    EXPECT_EQ(segments[1].type, MotionSegment::Type::RAPID);
+    EXPECT_NEAR(segments[1].endPosition.z(), 2.0, 0.001);
+    EXPECT_EQ(segments[2].type, MotionSegment::Type::LINEAR);
+    EXPECT_NEAR(segments[2].endPosition.z(), -2.0, 0.001);
+    EXPECT_EQ(segments[3].type, MotionSegment::Type::RAPID);
+    EXPECT_NEAR(segments[3].endPosition.z(), 10.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, CannedCycleG81_G99RetractToR) {
+    EXPECT_TRUE(interp.executeLine("G0 X0 Y0 Z10").ok());
+    EXPECT_TRUE(interp.executeLine("G99").ok());
+    segments.clear();
+    EXPECT_TRUE(interp.executeLine("G81 X5 Y5 Z-2 R2 F100").ok());
+    ASSERT_EQ(segments.size(), 4u);
+    // G99: retract to R plane, not initial Z
+    EXPECT_NEAR(segments[3].endPosition.z(), 2.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, CannedCycleG82Dwell) {
+    EXPECT_TRUE(interp.executeLine("G0 X0 Y0 Z10").ok());
+    segments.clear();
+    EXPECT_TRUE(interp.executeLine("G82 X5 Y5 Z-2 R2 P1.5 F100").ok());
+    // rapid XY, rapid R, feed Z, dwell, rapid retract
+    ASSERT_EQ(segments.size(), 5u);
+    EXPECT_EQ(segments[3].type, MotionSegment::Type::DWELL);
+    EXPECT_NEAR(segments[3].duration, 1.5, 0.001);
+}
+
+TEST_F(InterpreterTestBase, CannedCycleModalRepeat) {
+    EXPECT_TRUE(interp.executeLine("G0 X0 Y0 Z10").ok());
+    segments.clear();
+    EXPECT_TRUE(interp.executeLine("G81 X5 Y5 Z-2 R2 F100").ok());
+    EXPECT_TRUE(interp.executeLine("X10 Y10").ok());   // repeat at new hole
+    EXPECT_TRUE(interp.executeLine("G80").ok());       // cancel
+    EXPECT_TRUE(interp.executeLine("G0 X20 Y20").ok()); // plain move, no cycle
+    // 4 segs per hole + 1 rapid for the last X move
+    ASSERT_EQ(segments.size(), 9u);
+    EXPECT_NEAR(segments[4].endPosition.x(), 10.0, 0.001);
+    EXPECT_EQ(segments[8].type, MotionSegment::Type::RAPID);
+    EXPECT_NEAR(segments[8].endPosition.x(), 20.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, CannedCycleG83Peck) {
+    EXPECT_TRUE(interp.executeLine("G0 X0 Y0 Z10").ok());
+    segments.clear();
+    EXPECT_TRUE(interp.executeLine("G83 X5 Y5 Z-3 R0 Q1 F100").ok());
+    // rapid XY, rapid R=0, then pecks at -1, -2, -3 with retracts
+    // Verify at least one feed reaches each peck depth and final Z=-3
+    bool sawPeck1 = false, sawPeck2 = false, sawBottom = false;
+    for (const auto& s : segments) {
+        if (s.type == MotionSegment::Type::LINEAR) {
+            if (std::abs(s.endPosition.z() + 1.0) < 0.001) sawPeck1 = true;
+            if (std::abs(s.endPosition.z() + 2.0) < 0.001) sawPeck2 = true;
+            if (std::abs(s.endPosition.z() + 3.0) < 0.001) sawBottom = true;
+        }
+    }
+    EXPECT_TRUE(sawPeck1 && sawPeck2 && sawBottom);
+}
+
+// ============================================================================
+// Probing (G38.x)
+// ============================================================================
+
+TEST_F(InterpreterTestBase, ProbeG38_2) {
+    // No probe callback -> simulated trip at target
+    EXPECT_TRUE(interp.executeLine("G38.2 Z-5 F100").ok());
+    ASSERT_EQ(segments.size(), 1u);
+    EXPECT_EQ(segments[0].type, MotionSegment::Type::PROBE);
+    EXPECT_NEAR(segments[0].endPosition.z(), -5.0, 0.001);
+    // #5070 probe success flag
+    EXPECT_NEAR(interp.getVariables().get(5070), 1.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, ProbeG38_2MissErrors) {
+    interp.setProbeCallback([](const Position&, double, ProbeType,
+                               ProbeResult& r) {
+        r.tripped = false;
+        return Error{};
+    });
+    EXPECT_FALSE(interp.executeLine("G38.2 Z-5 F100").ok());
+}
+
+TEST_F(InterpreterTestBase, ProbeG38_3MissNoError) {
+    interp.setProbeCallback([](const Position&, double, ProbeType,
+                               ProbeResult& r) {
+        r.tripped = false;
+        return Error{};
+    });
+    EXPECT_TRUE(interp.executeLine("G38.3 Z-5 F100").ok());
+    EXPECT_NEAR(interp.getVariables().get(5070), 0.0, 0.001);
+}
+
+// --- Tool compensation ---
+
+TEST_F(InterpreterTestBase, ToolLengthG43FromTable) {
+    ToolEntry e;
+    e.toolNumber = 3;
+    e.zOffset = 12.5;
+    e.diameter = 6.0;
+    ASSERT_TRUE(interp.getToolTable().setTool(3, e).ok());
+
+    EXPECT_TRUE(interp.executeLine("G43 H3").ok());
+    EXPECT_EQ(interp.getMachineState().toolLengthMode, ToolLengthMode::POSITIVE);
+    EXPECT_NEAR(interp.getMachineState().toolOffset.z(), 12.5, 0.001);
+}
+
+TEST_F(InterpreterTestBase, ToolLengthG43UnknownToolErrors) {
+    EXPECT_FALSE(interp.executeLine("G43 H77").ok());
+}
+
+TEST_F(InterpreterTestBase, ToolLengthG432Stacks) {
+    ToolEntry a; a.toolNumber = 1; a.zOffset = 10.0;
+    ToolEntry b; b.toolNumber = 2; b.zOffset = 0.5;
+    ASSERT_TRUE(interp.getToolTable().setTool(1, a).ok());
+    ASSERT_TRUE(interp.getToolTable().setTool(2, b).ok());
+    EXPECT_TRUE(interp.executeLine("G43 H1").ok());
+    EXPECT_TRUE(interp.executeLine("G43.2 H2").ok());
+    EXPECT_NEAR(interp.getMachineState().toolOffset.z(), 10.5, 0.001);
+    EXPECT_TRUE(interp.executeLine("G49").ok());
+    EXPECT_NEAR(interp.getMachineState().toolOffset.z(), 0.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, CutterCompG41UsesToolDiameter) {
+    ToolEntry e; e.toolNumber = 4; e.diameter = 8.0;
+    ASSERT_TRUE(interp.getToolTable().setTool(4, e).ok());
+    EXPECT_TRUE(interp.executeLine("G41 D4").ok());
+    EXPECT_EQ(interp.getMachineState().cutterComp, CutterCompMode::LEFT);
+    EXPECT_NEAR(interp.getMachineState().cutterRadius, 4.0, 0.001);
+    EXPECT_TRUE(interp.executeLine("G40").ok());
+    EXPECT_EQ(interp.getMachineState().cutterComp, CutterCompMode::OFF);
+}
+
+TEST_F(InterpreterTestBase, CutterCompG421Dynamic) {
+    EXPECT_TRUE(interp.executeLine("G42.1 D10").ok());
+    EXPECT_EQ(interp.getMachineState().cutterComp, CutterCompMode::RIGHT_DYNAMIC);
+    EXPECT_NEAR(interp.getMachineState().cutterRadius, 5.0, 0.001);
+}
+
+// --- Splines ---
+
+TEST_F(InterpreterTestBase, SplineG5Cubic) {
+    EXPECT_TRUE(interp.executeLine("G0 X0 Y0").ok());
+    EXPECT_TRUE(interp.executeLine("G5 X10 Y0 I3 J3 P-3 Q3").ok());
+    ASSERT_EQ(segments.size(), 2u);
+    EXPECT_EQ(segments[1].type, MotionSegment::Type::SPLINE);
+    EXPECT_NEAR(segments[1].splinePoints[0].x(), 0.0, 0.001);
+    EXPECT_NEAR(segments[1].splinePoints[1].x(), 3.0, 0.001);
+    EXPECT_NEAR(segments[1].splinePoints[1].y(), 3.0, 0.001);
+    EXPECT_NEAR(segments[1].splinePoints[3].x(), 10.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, SplineG51Quadratic) {
+    EXPECT_TRUE(interp.executeLine("G0 X0 Y0").ok());
+    EXPECT_TRUE(interp.executeLine("G5.1 X10 Y0 I5 J5").ok());
+    ASSERT_EQ(segments.size(), 2u);
+    EXPECT_EQ(segments[1].type, MotionSegment::Type::SPLINE);
+    EXPECT_NEAR(segments[1].splinePoints[1].x(), 5.0, 0.001);
+    EXPECT_NEAR(segments[1].splinePoints[1].y(), 5.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, NurbsG52G53) {
+    EXPECT_TRUE(interp.executeLine("G0 X0 Y0").ok());
+    EXPECT_TRUE(interp.executeLine("G5.2 L3").ok());
+    EXPECT_TRUE(interp.executeLine("X0 Y0").ok());
+    EXPECT_TRUE(interp.executeLine("X5 Y5").ok());
+    EXPECT_TRUE(interp.executeLine("X10 Y0").ok());
+    segments.clear();
+    EXPECT_TRUE(interp.executeLine("G5.3").ok());
+    ASSERT_GT(segments.size(), 8u);
+    // Curve must end at last control point (clamped knots)
+    EXPECT_NEAR(segments.back().endPosition.x(), 10.0, 0.01);
+    EXPECT_NEAR(segments.back().endPosition.y(), 0.0, 0.01);
+}
+
+// --- GRBL real-time protocol ---
+
+TEST_F(InterpreterTestBase, GrblFeedHoldResume) {
+    EXPECT_TRUE(interp.executeLine("G1 X10 F100").ok());
+    interp.getMachineState(); // touch
+    EXPECT_TRUE(interp.processRealtimeChar('!').ok());
+    EXPECT_TRUE(interp.getMachineState().feedHold);
+    EXPECT_TRUE(interp.processRealtimeChar('~').ok());
+    EXPECT_FALSE(interp.getMachineState().feedHold);
+}
+
+TEST_F(InterpreterTestBase, GrblStatusReport) {
+    interp.executeLine("G1 X1.5 Y2 Z-3 F500");
+    std::string r = interp.statusReport();
+    EXPECT_NE(r.find("MPos:1.500,2.000,-3.000"), std::string::npos);
+    EXPECT_NE(r.find("FS:500"), std::string::npos);
+}
+
+TEST_F(InterpreterTestBase, GrblSoftReset) {
+    interp.executeLine("G1 X5");
+    EXPECT_TRUE(interp.processRealtimeChar('\x18').ok());
+    EXPECT_EQ(interp.getState(), InterpreterState::IDLE);
+    EXPECT_NEAR(interp.getMachineState().machinePosition.x(), 0.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, GrblSystemCommands) {
+    std::vector<std::string> msgs;
+    interp.setMessageCallback([&](const std::string& m){ msgs.push_back(m); });
+    EXPECT_TRUE(interp.systemCommand("$G").ok());
+    ASSERT_FALSE(msgs.empty());
+    EXPECT_NE(msgs[0].find("[GC:"), std::string::npos);
+    EXPECT_TRUE(interp.systemCommand("$#").ok());
+    EXPECT_TRUE(interp.systemCommand("$X").ok());
+    EXPECT_FALSE(interp.systemCommand("$ZZ").ok());
+}
+
+// --- Marlin M-codes ---
+
+TEST_F(InterpreterTestBase, MarlinMCodesAccepted) {
+    for (const char* line : {"M400", "M104 S200", "M140 S60", "M106 S255",
+                             "M107", "M17", "M84", "M500", "M501", "M503",
+                             "M900 K0.2"}) {
+        EXPECT_TRUE(interp.executeLine(line).ok()) << line;
+    }
+}
+
+TEST_F(InterpreterTestBase, MarlinM600PausesAndForwards) {
+    bool paused = false;
+    int seen = -1;
+    interp.setProgramControlCallback([&](int32_t){ paused = true; });
+    interp.setMCodeCallback([&](int32_t m, std::optional<double>,
+                                std::optional<double>) {
+        seen = m; return Error{};
+    });
+    EXPECT_TRUE(interp.executeLine("M600").ok());
+    EXPECT_TRUE(paused);
+    EXPECT_EQ(seen, 600);
+}
+
+// --- Haas extensions ---
+
+TEST_F(InterpreterTestBase, HaasM19SpindleOrient) {
+    EXPECT_TRUE(interp.executeLine("M19 S90").ok());
+    EXPECT_TRUE(interp.getMachineState().spindleOn);
+}
+
+TEST_F(InterpreterTestBase, HaasG187BlendMode) {
+    EXPECT_TRUE(interp.executeLine("G187 E0.05").ok());
+    EXPECT_EQ(interp.getMachineState().pathMode, PathMode::BLEND);
+    EXPECT_NEAR(interp.getMachineState().blendTolerance, 0.05, 0.001);
+}
+
+TEST_F(InterpreterTestBase, HaasG12CircularPocket) {
+    EXPECT_TRUE(interp.executeLine("G0 X5 Y5 Z2").ok());
+    segments.clear();
+    EXPECT_TRUE(interp.executeLine("G12 I3 Z-2").ok());
+    // plunge + lead-in + full circle + return = 4
+    ASSERT_EQ(segments.size(), 4u);
+    EXPECT_EQ(segments[2].type, MotionSegment::Type::ARC_CW);
+    EXPECT_NEAR(segments[2].arc.radius, 3.0, 0.001);
+    // Ends back at center
+    EXPECT_NEAR(segments.back().endPosition.x(), 5.0, 0.001);
+    EXPECT_NEAR(segments.back().endPosition.y(), 5.0, 0.001);
+}
+
+TEST_F(InterpreterTestBase, HaasG150NotSupported) {
+    EXPECT_FALSE(interp.executeLine("G150 P1").ok());
+}

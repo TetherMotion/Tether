@@ -44,6 +44,7 @@ ModalGroup getModalGroup(int gcode) {
         case 1:
         case 2:
         case 3:
+        case 5:
         case 33:
         case 38:
         case 73:
@@ -348,9 +349,11 @@ Error Parser::parseNextBlock(Block& block) {
     }
 
     // Get current line slice
+    m_lastBlockStart = m_lexer.getPosition();
     const std::string lineText = m_lexer.getCurrentLineText();
     const uint32_t sourceLine = m_lexer.getLine();
     m_lexer.skipLine();
+    m_lastBlockEnd = m_lexer.getPosition();
 
     err = parseLine(lineText.c_str(), block);
     block.sourceLineNumber = sourceLine;
@@ -555,7 +558,7 @@ Error Parser::findSubroutine(int32_t oNumber, Block& block) {
         }
         if (b.hasOCode && !b.oCodeIsNamed &&
             b.oCodeNumber == oNumber &&
-            b.oCodeType == OCodeType::SUB) {
+            b.oCodeType == OCodeType::SUB && b.oCodeHasKeyword) {
             block = b;
             m_lexer.seek(savedPos);
             m_currentBlockNum = savedBlockNum;
@@ -589,7 +592,7 @@ Error Parser::findSubroutine(const std::string& name, Block& block) {
         }
         if (b.hasOCode && b.oCodeIsNamed &&
             name == b.oCodeName.data() &&
-            b.oCodeType == OCodeType::SUB) {
+            b.oCodeType == OCodeType::SUB && b.oCodeHasKeyword) {
             block = b;
             m_lexer.seek(savedPos);
             m_currentBlockNum = savedBlockNum;
@@ -603,6 +606,41 @@ Error Parser::findSubroutine(const std::string& name, Block& block) {
     m_error = savedError;
     set_error(err, ErrorCode::UNDEFINED_SUBROUTINE, getCurrentLine(),
               "Named subroutine not found");
+    return err;
+}
+
+Error Parser::findSubprogramLabel(int32_t oNumber, Block& block) {
+    // Fanuc-style subprogram: a bare `O<num>` label (no keyword) terminated
+    // by M99. Distinct from `O<num> sub ... endsub` definitions.
+    Error err;
+    const size_t savedPos = m_lexer.getPosition();
+    const size_t savedBlockNum = m_currentBlockNum;
+    const Error savedError = m_error;
+
+    m_lexer.seekToStart();
+    m_currentBlockNum = 0;
+    Block b;
+    while (true) {
+        Error e = parseNextBlock(b);
+        if (e) {
+            if (e.code == ErrorCode::END) break;
+            continue;  // skip parse errors
+        }
+        if (b.hasOCode && !b.oCodeIsNamed &&
+            b.oCodeNumber == oNumber && !b.oCodeHasKeyword) {
+            block = b;
+            m_lexer.seek(savedPos);
+            m_currentBlockNum = savedBlockNum;
+            m_error = savedError;
+            return Error{};
+        }
+    }
+
+    m_lexer.seek(savedPos);
+    m_currentBlockNum = savedBlockNum;
+    m_error = savedError;
+    set_error(err, ErrorCode::UNDEFINED_SUBROUTINE, getCurrentLine(),
+              "Subprogram label not found");
     return err;
 }
 
@@ -667,6 +705,7 @@ Error Parser::parseBlockFromTokens(const std::vector<LexerToken>& tokens, Block&
             case LexerTokenType::OCODE_KEYWORD:
                 block.hasOCode = true;
                 block.oCodeType = tok.oKeyword;
+                block.oCodeHasKeyword = true;
                 break;
             case LexerTokenType::KEYVALUE:
                 // store key/value string pair (kvValue contains raw value including brackets/quotes when present)
@@ -682,6 +721,19 @@ Error Parser::parseBlockFromTokens(const std::vector<LexerToken>& tokens, Block&
             case LexerTokenType::WORD:
                 err = parseWord(tok, block);
                 if (err) return err;
+                break;
+            case LexerTokenType::PARAM_ASSIGN:
+                // Deferred assignment — recorded on the block; the
+                // interpreter evaluates and applies it at run time.
+                block.hasParamAssign = true;
+                block.paramAssignNamed = tok.isNamedParam;
+                block.paramAssignNumber = tok.paramNumber;
+                std::snprintf(block.paramAssignName.data(),
+                              block.paramAssignName.size(), "%s",
+                              tok.paramName.c_str());
+                std::snprintf(block.paramAssignExpr.data(),
+                              block.paramAssignExpr.size(), "%s",
+                              tok.expression.c_str());
                 break;
             case LexerTokenType::PARAMETER:
             case LexerTokenType::EXPRESSION:
