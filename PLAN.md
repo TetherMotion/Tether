@@ -42,7 +42,7 @@ Priority tags (for future implementation work):
 | **G68 / G69** (coordinate system rotation) | DONE | P1 | Full 2D plane rotation + 3D Euler XYZ + axis-angle via `CoordinateTransform`. G69 cancels. |
 | **G51.1 / G50.1** (mirror image) | DONE | P2 | Per-axis reflection `p' = 2c - p` composed into `CoordinateTransform` (innermost, program space); flips arc CW/CCW and center offsets; G50.1 cancels per-axis or all. |
 | **G70 / G71 / G72 / G73** (Fanuc lathe roughing/finishing) | DONE | P1 | Single-line form; contour from block range `N<P>..N<Q>` (G2/G3 arcs tessellated). G71/G72 raster-clear the contour+stock-boundary polygon (levels spaced by `D`, U/W finish allowances); G73 pattern-repeats the contour with `R` relief divisions; G70 traces the finish pass. G73 stays RS274 peck-drill unless `P`+`Q` present. |
-| **G70 / G71** (Imperial/Metric in some Fanuc lathe dialects) | MISSING | P2 | Only G20/G21 are supported for units. |
+| **G70 / G71** (Imperial/Metric in some Fanuc lathe dialects) | DONE | P2 | `Feature::G70_G71_UNITS` maps G70→inch, G71→metric; off by default so G20/G21 and the lathe cycles are unaffected. |
 | **M98 / M99** (Fanuc sub call/return) | DONE | P0 | `executeM98`/`executeM99` implemented; M98 call-stack frames with repeat counts; bare `O<num>` labels serve as subprogram targets. |
 | **G65 with `#<name> = expr` argument binding** | DONE | P0 | `PARAM_ASSIGN` lexer token + deferred assignment in `executeBlock`; G65 args mapped to `#1`-`#30` local frame. |
 
