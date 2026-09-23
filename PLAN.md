@@ -97,8 +97,8 @@ firmware exposes 80+. Below are the notable gaps.
 | **G20 / G21** (units) | RECOGNIZED | — | OK. |
 | **G28** (homing) | DONE | P0 | Rapids to stored reference point (`getG28Reference`). |
 | **G29** (auto bed leveling) | DONE | P0 | Forwarded to `UserGCodeCallback` (host performs probing). |
-| **G30** (Z probe point) | PARTIAL | P1 | RS274 reference-point move implemented; Marlin Z-probe meaning needs dialect switch. |
-| **G80** (cancel bed leveling) | PARTIAL | P1 | RS274 canned-cycle cancel; RepRap ABL-cancel meaning needs dialect switch. |
+| **G30** (Z probe point) | DONE | P1 | RS274 reference-point move by default; `Feature::G30_PROBE` switches to Marlin single-point probing (optional XY, Z probe, `Bed X:..` report). |
+| **G80** (cancel bed leveling) | DONE | P1 | RS274 canned-cycle cancel by default; `Feature::G80_CANCEL_LEVELING` also clears `MarlinMachineState::bedLevelingEnabled`. |
 | **G90 / G91** (absolute/relative) | RECOGNIZED | — | OK for motion; extrusion absolute/relative is via M82/M83 only. |
 | **G92** (set position) | DONE | P0 | `processG92` sets offsets; G92.1/.2/.3 reset/restore. |
 

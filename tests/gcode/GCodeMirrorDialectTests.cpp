@@ -287,6 +287,7 @@ class LatheCycleTest : public ::testing::Test {
 protected:
     Interpreter interp;
     std::vector<MotionSegment> segments;
+    std::vector<std::string> messages;
     std::vector<std::pair<bool, double>> spindleCommands;
 
     LatheCycleTest() {
@@ -294,6 +295,8 @@ protected:
             segments.push_back(seg);
             return Error{};
         });
+        interp.setMessageCallback(
+            [this](const std::string& m) { messages.push_back(m); });
         interp.setSpindleCallback([this](bool enable, bool cw, double rpm) {
             if (enable) spindleCommands.emplace_back(cw, rpm);
             return Error{};
@@ -511,4 +514,75 @@ TEST_F(LatheCycleTest, G33_1_RigidTapInAndOut) {
 
 TEST_F(LatheCycleTest, G33_1_MissingK_Errors) {
     EXPECT_FALSE(run("M3 S300\nG0 Z5\nG33.1 Z-10\n"));
+}
+
+// ============================================================================
+// Feature flags — G30_PROBE, G80_CANCEL_LEVELING, G76_LATHE_THREADING
+// ============================================================================
+
+TEST_F(LatheCycleTest, FeatureG30Probe_ProbesAndReports) {
+    interp.enableFeature(Feature::G30_PROBE);
+    ASSERT_TRUE(run("G0 X0 Y0 Z10\nG30 X5 Y7 Z-2 F100\n"));
+    bool probed = false;
+    for (const auto& s : segments)
+        if (s.type == MotionSegment::Type::PROBE) probed = true;
+    EXPECT_TRUE(probed);
+    bool reported = false;
+    for (const auto& m : messages)
+        if (m.find("Bed X:") != std::string::npos) reported = true;
+    EXPECT_TRUE(reported);
+}
+
+TEST_F(LatheCycleTest, FeatureG30Probe_OffByDefault) {
+    // Without the feature, G30 rapids to the stored reference point.
+    ASSERT_TRUE(run("G0 X1 Y2 Z3\nG30\n"));
+    for (const auto& s : segments)
+        EXPECT_NE(s.type, MotionSegment::Type::PROBE);
+}
+
+TEST_F(LatheCycleTest, FeatureG80CancelLeveling) {
+    interp.enableFeature(Feature::G80_CANCEL_LEVELING);
+    ASSERT_TRUE(run("M420 S1\nG80\n"));
+    EXPECT_FALSE(interp.marlinState().bedLevelingEnabled);
+}
+
+TEST_F(LatheCycleTest, FeatureG80_StillCancelsCannedCycle) {
+    interp.enableFeature(Feature::G80_CANCEL_LEVELING);
+    // G81 then G80: a following bare XY line must not repeat the cycle.
+    ASSERT_TRUE(run("G0 Z10\nG81 X0 Y0 Z-5 R2 F100\nG80\nX10 Y10\n"));
+    int drills = 0;
+    for (const auto& s : segments)
+        if (s.type == MotionSegment::Type::LINEAR &&
+            s.endPosition.z() < 0.0)
+            ++drills;
+    EXPECT_EQ(drills, 1);  // only the G81 hole itself
+}
+
+TEST_F(LatheCycleTest, FeatureG76_ThreadingPasses) {
+    interp.enableFeature(Feature::G76_LATHE_THREADING);
+    ASSERT_TRUE(run("M3 S500\nG0 X30 Z2\nG76 X28 Z-10 D1 F2\n"));
+    std::vector<const MotionSegment*> cuts;
+    for (const auto& s : segments)
+        if (s.type == MotionSegment::Type::THREADING) cuts.push_back(&s);
+    // Constant-area passes: d = sqrt(i) until total 2mm -> 4 passes.
+    ASSERT_EQ(cuts.size(), 4u);
+    EXPECT_NEAR(cuts[0]->endPosition.x(), 29.0, 1e-6);   // 30 - 1*sqrt(1)
+    EXPECT_NEAR(cuts[3]->endPosition.x(), 28.0, 1e-6);   // full depth
+    for (const auto* s : cuts) {
+        EXPECT_DOUBLE_EQ(s->pitch, 2.0);
+        EXPECT_DOUBLE_EQ(s->feedRate, 1000.0);
+        EXPECT_DOUBLE_EQ(s->endPosition.z(), -10.0);
+    }
+}
+
+TEST_F(LatheCycleTest, FeatureG76_OffByDefault_StaysFineBore) {
+    // Without the feature G76 is the RS274 fine-boring canned cycle.
+    ASSERT_TRUE(run("G0 X0 Y0 Z10\nG76 Z-5 R2 Q0.5 F100\n"));
+    for (const auto& s : segments)
+        EXPECT_NE(s.type, MotionSegment::Type::THREADING);
+}
+
+TEST_F(LatheCycleTest, FeatureG76_NoSpindle_Errors) {
+    interp.enableFeature(Feature::G76_LATHE_THREADING);
+    EXPECT_FALSE(run("G0 X30 Z2\nG76 X28 Z-10 D1 F2\n"));
 }
