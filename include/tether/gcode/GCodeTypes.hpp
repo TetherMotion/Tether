@@ -1020,7 +1020,8 @@ struct MotionSegment {
         SPLINE,
         NURBS,
         DWELL,
-        PROBE
+        PROBE,
+        THREADING              ///< G33/G33.1 — spindle-synchronized feed
     };
     
     Type type{Type::LINEAR};
@@ -1030,6 +1031,9 @@ struct MotionSegment {
     double duration{0.0};        // For dwells
     double acceleration{0.0};
     int32_t lineNumber{0};
+    /// Thread pitch for THREADING segments (distance/rev; negative on the
+    /// G33.1 retract stroke signals spindle reversal to the consumer).
+    double pitch{0.0};
     
     // Spline data
     std::array<Position, 4> splinePoints{};

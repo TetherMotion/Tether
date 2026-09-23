@@ -882,6 +882,18 @@ private:
                               double unitScale,
                               std::vector<std::pair<double, double>>& pts);
 
+    /// @brief G33 spindle-synchronized threading move. K = pitch along Z
+    ///        (I = X pitch for tapered threads); feed = pitch * RPM.
+    Error executeThreading(const Block& block, const Position& target,
+                           double unitScale,
+                           std::vector<MotionSegment>& segments);
+    /// @brief G33.1 rigid tapping: synchronized feed to the target, then a
+    ///        synchronized retract to the start point (spindle reversal
+    ///        signaled via negative pitch on the retract segment).
+    Error executeRigidTap(const Block& block, const Position& target,
+                          double unitScale,
+                          std::vector<MotionSegment>& segments);
+
     /// @brief Transform a program-space position to machine coordinates
     /// using the composed coordinate transform (WCS + G52 + G92 + G68 + G51).
     Position toMachine(const Position& programPos) const {

@@ -2044,6 +2044,76 @@ Error Interpreter::dispatchG73Lathe(const Block& block,
 }
 
 // ============================================================================
+// Spindle-synchronized moves (G33 threading, G33.1 rigid tapping)
+// ============================================================================
+
+Error Interpreter::executeThreading(const Block& block,
+                                    const Position& target,
+                                    double unitScale,
+                                    std::vector<MotionSegment>& segments) {
+    // K = pitch along Z; I = pitch along X (tapered threads).
+    double pitch = 0.0;
+    if (block.hasWord(WordLetter::K))
+        pitch = block.getWord(WordLetter::K) * unitScale;
+    else if (block.hasWord(WordLetter::I))
+        pitch = block.getWord(WordLetter::I) * unitScale;
+    if (pitch == 0.0)
+        return makeError(ErrorCode::PARAMETER_ERROR,
+                         "G33 requires a thread pitch (K, or I for tapered)");
+    if (!m_machineState.spindleOn || m_machineState.spindleSpeed <= 0.0)
+        return makeError(ErrorCode::INVALID_MOTION,
+                         "G33 requires the spindle to be running");
+
+    MotionSegment seg;
+    seg.type = MotionSegment::Type::THREADING;
+    seg.endPosition = m_coordinates.toMachineCoords(target);
+    seg.pitch = pitch;
+    seg.feedRate = std::abs(pitch) * m_machineState.spindleSpeed;
+    seg.lineNumber = block.sourceLineNumber;
+    segments.push_back(seg);
+    m_machineState.workPosition = target;
+    m_machineState.machinePosition = seg.endPosition;
+    ++m_stats.motionSegments;
+    return Error{};
+}
+
+Error Interpreter::executeRigidTap(const Block& block,
+                                   const Position& target,
+                                   double unitScale,
+                                   std::vector<MotionSegment>& segments) {
+    if (!block.hasWord(WordLetter::K))
+        return makeError(ErrorCode::PARAMETER_ERROR,
+                         "G33.1 requires a thread pitch (K)");
+    const double pitch = block.getWord(WordLetter::K) * unitScale;
+    if (pitch == 0.0)
+        return makeError(ErrorCode::PARAMETER_ERROR,
+                         "G33.1 thread pitch must be non-zero");
+    if (!m_machineState.spindleOn || m_machineState.spindleSpeed <= 0.0)
+        return makeError(ErrorCode::INVALID_MOTION,
+                         "G33.1 requires the spindle to be running");
+
+    const Position start = m_machineState.workPosition;
+    const double feed = std::abs(pitch) * m_machineState.spindleSpeed;
+    auto emit = [&](const Position& p, double pc) {
+        MotionSegment seg;
+        seg.type = MotionSegment::Type::THREADING;
+        seg.endPosition = m_coordinates.toMachineCoords(p);
+        seg.pitch = pc;
+        seg.feedRate = feed;
+        seg.lineNumber = block.sourceLineNumber;
+        segments.push_back(seg);
+        m_machineState.workPosition = p;
+        m_machineState.machinePosition = seg.endPosition;
+        ++m_stats.motionSegments;
+    };
+
+    // Tap down at pitch, spindle reverses, retract at pitch back to start.
+    emit(target, pitch);
+    emit(start, -pitch);
+    return Error{};
+}
+
+// ============================================================================
 // Motion Handling
 // ============================================================================
 
@@ -2192,6 +2262,12 @@ Error Interpreter::handleMotion(const Block& block,
 
     // Any non-NURBS motion abandons an unfinished NURBS block.
     m_nurbsActive = false;
+
+    // Spindle-synchronized moves (G33 threading, G33.1 rigid tap)
+    if (mode == MotionMode::THREADING)
+        return executeThreading(block, target, unitScale, segments);
+    if (mode == MotionMode::RIGID_TAP)
+        return executeRigidTap(block, target, unitScale, segments);
 
     // Create motion segment
     MotionSegment seg;
