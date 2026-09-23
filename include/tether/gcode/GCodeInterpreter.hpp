@@ -747,6 +747,13 @@ private:
         int32_t repeat{1};      ///< L word
     };
     CannedParams m_cannedParams;
+    // Cutter compensation (G41/G42) tracking
+    bool m_compHasOffset{false};    ///< A compensated move was emitted
+    double m_compLastX{0.0};        ///< Last offset endpoint (work coords)
+    double m_compLastY{0.0};
+    double m_compLastDX{1.0};       ///< Last move direction (unit)
+    double m_compLastDY{0.0};
+
     bool m_cannedActive{false};
 
     // NURBS collection state (G5.2 ... G5.3)
@@ -932,6 +939,19 @@ private:
     Error executeRigidTap(const Block& block, const Position& target,
                           double unitScale,
                           std::vector<MotionSegment>& segments);
+
+    /// @brief Emit one cutter-compensated linear move (G41/G42). Offsets
+    ///        the chord by cutterRadius perpendicular to travel, inserts a
+    ///        lead-in move on the first compensated move, and joins
+    ///        consecutive offsets with a corner arc (convex) or offset-line
+    ///        intersection (concave). XY plane only.
+    Error emitCompMove(const Position& target, int32_t line,
+                       std::vector<MotionSegment>& segments);
+    bool cutterCompActive() const {
+        return m_machineState.cutterComp != CutterCompMode::OFF &&
+               m_machineState.cutterRadius > 0.0 &&
+               m_machineState.plane == Plane::XY;
+    }
 
     /// @brief Transform a program-space position to machine coordinates
     /// using the composed coordinate transform (WCS + G52 + G92 + G68 + G51).

@@ -224,6 +224,7 @@ void Interpreter::reset() {
     m_stats = Statistics{};
     m_nurbsActive = false;
     m_cannedActive = false;
+    m_compHasOffset = false;
     m_g66Active = false;
     initializeDefaults();
 }
@@ -821,10 +822,25 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
 
         case ModalGroup::CUTTER_COMP: {
             switch (gi) {
-                case 400: // G40: cancel cutter compensation
+                case 400: { // G40: cancel cutter compensation
+                    // Lead-out: return from the offset point to the
+                    // programmed position.
+                    if (m_compHasOffset) {
+                        MotionSegment seg;
+                        seg.type = MotionSegment::Type::LINEAR;
+                        seg.endPosition = m_coordinates.toMachineCoords(
+                            m_machineState.workPosition);
+                        seg.feedRate = m_machineState.feedRate;
+                        seg.lineNumber = block.sourceLineNumber;
+                        segments.push_back(seg);
+                        m_machineState.machinePosition = seg.endPosition;
+                        ++m_stats.motionSegments;
+                    }
                     m_machineState.cutterComp = CutterCompMode::OFF;
                     m_machineState.cutterRadius = 0.0;
+                    m_compHasOffset = false;
                     return Error{};
+                }
                 case 410:
                 case 420: { // G41/G42 D<tool>: comp from tool table diameter
                     const int tool =
@@ -844,6 +860,7 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                         ? CutterCompMode::LEFT : CutterCompMode::RIGHT;
                     m_machineState.cutterRadius =
                         entry->getEffectiveRadius();
+                    m_compHasOffset = false;
                     return Error{};
                 }
                 case 411:
@@ -853,6 +870,7 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                         : CutterCompMode::RIGHT_DYNAMIC;
                     m_machineState.cutterRadius =
                         block.getWord(WordLetter::D, 0.0) / 2.0;
+                    m_compHasOffset = false;
                     return Error{};
                 }
                 default:
@@ -2230,6 +2248,97 @@ Error Interpreter::executeRigidTap(const Block& block,
 }
 
 // ============================================================================
+// Cutter compensation (G41/G42 geometric offset, XY plane)
+// ============================================================================
+
+Error Interpreter::emitCompMove(const Position& target, int32_t line,
+                                std::vector<MotionSegment>& segments) {
+    const double r = m_machineState.cutterRadius;
+    const bool left = (m_machineState.cutterComp == CutterCompMode::LEFT ||
+                       m_machineState.cutterComp ==
+                           CutterCompMode::LEFT_DYNAMIC);
+    const Position& start = m_machineState.workPosition;
+
+    const double dx = target.x() - start.x();
+    const double dy = target.y() - start.y();
+    const double len = std::hypot(dx, dy);
+    if (len < 1e-9)
+        return Error{};  // no in-plane motion — nothing to offset
+
+    const double ux = dx / len, uy = dy / len;
+    // Left comp offsets along the left normal (-uy, ux).
+    const double nx = left ? -uy : uy;
+    const double ny = left ? ux : -ux;
+    const double ox0 = start.x() + nx * r, oy0 = start.y() + ny * r;
+    const double ox1 = target.x() + nx * r, oy1 = target.y() + ny * r;
+
+    auto emitXY = [&](double x, double y, MotionSegment::Type type,
+                      double fr) {
+        Position t = target;
+        t.x() = x;
+        t.y() = y;
+        MotionSegment seg;
+        seg.type = type;
+        seg.endPosition = m_coordinates.toMachineCoords(t);
+        seg.feedRate = fr;
+        seg.lineNumber = line;
+        segments.push_back(seg);
+        m_machineState.machinePosition = seg.endPosition;
+        ++m_stats.motionSegments;
+    };
+    const double feed = m_machineState.feedRate;
+
+    if (!m_compHasOffset) {
+        // Lead-in: move from the uncompensated point to the offset start.
+        emitXY(ox0, oy0, MotionSegment::Type::LINEAR, feed);
+    } else if (std::hypot(ox0 - m_compLastX, oy0 - m_compLastY) > 1e-9) {
+        const double cross =
+            m_compLastDX * uy - m_compLastDY * ux;  // d1 x d2
+        const bool convex = left ? (cross < 0.0) : (cross > 0.0);
+        if (std::abs(cross) < 1e-9) {
+            // Parallel offsets — just join them.
+            emitXY(ox0, oy0, MotionSegment::Type::LINEAR, feed);
+        } else if (convex) {
+            // Outside corner: roll an r-arc around the programmed vertex
+            // from the previous offset end to the new offset start.
+            const double a0 = std::atan2(m_compLastY - start.y(),
+                                         m_compLastX - start.x());
+            const double a1 = std::atan2(oy0 - start.y(), ox0 - start.x());
+            double sweep = (cross < 0.0) ? a0 - a1 : a1 - a0;
+            while (sweep <= 0.0) sweep += 2.0 * M_PI;
+            const int n = std::max(2, static_cast<int>(
+                std::ceil(sweep / (M_PI / 8.0))));
+            for (int i = 1; i <= n; ++i) {
+                const double a =
+                    a0 + (cross < 0.0 ? -1.0 : 1.0) * sweep * i / n;
+                emitXY(start.x() + r * std::cos(a),
+                       start.y() + r * std::sin(a),
+                       MotionSegment::Type::LINEAR, feed);
+            }
+        } else {
+            // Inside corner: the offset lines intersect — cut to the
+            // intersection point instead of rolling around the vertex.
+            // Solve last + t*d1 = offStart + s*d2.
+            const double den = m_compLastDX * uy - m_compLastDY * ux;
+            const double t =
+                ((ox0 - m_compLastX) * uy - (oy0 - m_compLastY) * ux) / den;
+            emitXY(m_compLastX + t * m_compLastDX,
+                   m_compLastY + t * m_compLastDY,
+                   MotionSegment::Type::LINEAR, feed);
+        }
+    }
+
+    emitXY(ox1, oy1, MotionSegment::Type::LINEAR, feed);
+    m_compHasOffset = true;
+    m_compLastX = ox1;
+    m_compLastY = oy1;
+    m_compLastDX = ux;
+    m_compLastDY = uy;
+    m_machineState.workPosition = target;
+    return Error{};
+}
+
+// ============================================================================
 // Motion Handling
 // ============================================================================
 
@@ -2395,6 +2504,10 @@ Error Interpreter::handleMotion(const Block& block,
     if (mode == MotionMode::RIGID_TAP)
         return executeRigidTap(block, target, unitScale, segments);
 
+    // Cutter-compensated linear move (G41/G42)
+    if (mode == MotionMode::LINEAR && cutterCompActive())
+        return emitCompMove(target, block.sourceLineNumber, segments);
+
     // Create motion segment
     MotionSegment seg;
     seg.lineNumber = block.sourceLineNumber;
@@ -2532,6 +2645,28 @@ Error Interpreter::handleArc(const Block& block, const Position& target,
     if (planeDist < 1e-12 && (hasOffset1 || hasOffset2)) {
         // Full circle
         sweep = (mode == MotionMode::CW_ARC) ? -2.0 * M_PI : 2.0 * M_PI;
+    }
+
+    // Cutter compensation (G41/G42): tessellate the programmed arc and
+    // offset each chord through emitCompMove, so entry moves and corner
+    // transitions compose with adjacent linear moves.
+    if (cutterCompActive()) {  // implies Plane::XY
+        const double hStart = start[ah], hEnd = end[ah];
+        const int n = std::max(4, static_cast<int>(
+            std::ceil(std::abs(sweep) / (M_PI / 16.0))));
+        for (int i = 1; i <= n; ++i) {
+            const double ang = startAngle + sweep * i / n;
+            Position pt = end;
+            pt[a1] = center1 + radius * std::cos(ang);
+            pt[a2] = center2 + radius * std::sin(ang);
+            pt[ah] = hStart + (hEnd - hStart) * i / n;
+            Error e = emitCompMove(pt, block.sourceLineNumber, segments);
+            if (!e.ok()) return e;
+        }
+        m_machineState.workPosition = end;
+        m_machineState.machinePosition =
+            m_coordinates.toMachineCoords(end);
+        return Error{};
     }
 
     // Programmable mirror (G51.1): reflection flips handedness, so an odd

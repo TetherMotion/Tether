@@ -586,3 +586,129 @@ TEST_F(LatheCycleTest, FeatureG76_NoSpindle_Errors) {
     interp.enableFeature(Feature::G76_LATHE_THREADING);
     EXPECT_FALSE(run("G0 X30 Z2\nG76 X28 Z-10 D1 F2\n"));
 }
+
+// ============================================================================
+// G41/G42 cutter compensation — geometric offset
+// ============================================================================
+
+class CutterCompTest : public ::testing::Test {
+protected:
+    Interpreter interp;
+    std::vector<MotionSegment> segments;
+
+    CutterCompTest() {
+        interp.setMotionCallback([this](const MotionSegment& s) {
+            segments.push_back(s);
+            return Error{};
+        });
+    }
+
+    bool run(const std::string& program) {
+        if (!interp.loadString(program).ok()) return false;
+        return interp.run().ok();
+    }
+};
+
+// CCW square 10x10 with G41.1 D4 (r=2, left comp = inside offsets).
+static const char* kCompSquare =
+    "G41.1 D4\n"
+    "G1 X10 F100\n"
+    "G1 Y10\n"
+    "G1 X0\n"
+    "G1 Y0\n"
+    "G40\n";
+
+TEST_F(CutterCompTest, G41_OffsetsInsideCCWSquare) {
+    ASSERT_TRUE(run(kCompSquare));
+    // Inside offsets: nothing leaves the 10x10 stock, and the inside
+    // corner joins land on the shrunken square (8,2) and (2,8).
+    for (const auto& s : segments) {
+        EXPECT_GE(s.endPosition.x(), -1e-6);
+        EXPECT_LE(s.endPosition.x(), 10.0 + 1e-6);
+        EXPECT_GE(s.endPosition.y(), -1e-6);
+        EXPECT_LE(s.endPosition.y(), 10.0 + 1e-6);
+    }
+    auto near = [&](double x, double y) {
+        for (const auto& s : segments)
+            if (std::abs(s.endPosition.x() - x) < 1e-6 &&
+                std::abs(s.endPosition.y() - y) < 1e-6)
+                return true;
+        return false;
+    };
+    EXPECT_TRUE(near(8.0, 2.0));
+    EXPECT_TRUE(near(2.0, 8.0));
+}
+
+TEST_F(CutterCompTest, G41_LeadInMove) {
+    ASSERT_TRUE(run(kCompSquare));
+    // First emitted move is the lead-in to the offset start (0,2).
+    ASSERT_FALSE(segments.empty());
+    EXPECT_NEAR(segments.front().endPosition.x(), 0.0, 1e-6);
+    EXPECT_NEAR(segments.front().endPosition.y(), 2.0, 1e-6);
+}
+
+TEST_F(CutterCompTest, G42_OffsetsOutsideCCWSquare) {
+    // Right comp on a CCW square = outside offsets (radius grows).
+    ASSERT_TRUE(run(
+        "G42.1 D4\n"
+        "G1 X10 F100\n"
+        "G1 Y10\n"
+        "G1 X0\n"
+        "G1 Y0\n"
+        "G40\n"));
+    bool outside = false;
+    for (const auto& s : segments)
+        if (s.endPosition.y() < -1.9 || s.endPosition.x() > 11.9)
+            outside = true;
+    EXPECT_TRUE(outside);
+}
+
+TEST_F(CutterCompTest, G40_LeadOut) {
+    ASSERT_TRUE(run(kCompSquare));
+    // G40 emits a lead-out back to the programmed point (0,0).
+    EXPECT_NEAR(segments.back().endPosition.x(), 0.0, 1e-6);
+    EXPECT_NEAR(segments.back().endPosition.y(), 0.0, 1e-6);
+}
+
+TEST_F(CutterCompTest, G41_ConvexCornerRollsArc) {
+    // CW square with left comp = outside corners -> arc roll at vertices.
+    ASSERT_TRUE(run(
+        "G41.1 D4\n"
+        "G1 X10 F100\n"
+        "G1 Y-10\n"
+        "G1 X0\n"
+        "G1 Y0\n"
+        "G40\n"));
+    // At the (10,0) outside corner the tool rolls around: some emitted
+    // point should have both x>10 and y>0 (arc bulge past the corner).
+    bool bulge = false;
+    for (const auto& s : segments)
+        if (s.endPosition.x() > 10.0 + 1e-6 &&
+            s.endPosition.y() > 1e-6)
+            bulge = true;
+    EXPECT_TRUE(bulge);
+}
+
+TEST_F(CutterCompTest, G41_ArcCompensated) {
+    // CCW arc about (0,0) r=10 under left comp -> inside, offset radius 8.
+    ASSERT_TRUE(run(
+        "G0 X10 Y0\n"
+        "G41.1 D4\n"
+        "G3 X-10 Y0 I-10 J0 F100\n"
+        "G40\n"));
+    int count = 0;
+    for (const auto& s : segments) {
+        if (s.type != MotionSegment::Type::LINEAR) continue;
+        const double r = std::hypot(s.endPosition.x(), s.endPosition.y());
+        if (r > 9.0) continue;  // lead-in / lead-out moves
+        ++count;
+        EXPECT_NEAR(r, 8.0, 0.15);  // tessellation chord sag tolerance
+    }
+    EXPECT_GT(count, 4);
+}
+
+TEST_F(CutterCompTest, CompOff_NoOffset) {
+    ASSERT_TRUE(run("G1 X5 F100\nG1 Y5\n"));
+    EXPECT_DOUBLE_EQ(segments.back().endPosition.x(), 5.0);
+    EXPECT_DOUBLE_EQ(segments.back().endPosition.y(), 5.0);
+}
