@@ -190,7 +190,7 @@ These are accepted by the lexer/parser and have full header APIs but **no
 | G38.2–G38.5 probing | `GCodeProbing.hpp` | **DONE** — `executeProbe` emits PROBE segments, calls `setProbeCallback` handler (simulated trip otherwise), fills `#5061`-`#5070`. |
 | G73–G89 canned cycles | `GCodeCannedCycles.hpp` | **DONE** — `executeCannedCycle` expands G73/G74/G76/G81–G89 (peck, dwell, tap, bore) incl. G98/G99, L repeats, modal re-invocation; G80 cancels. |
 | G5 / G5.1 / G5.2 / G5.3 splines + NURBS | `GCodeSplines.hpp` | **DONE** — `executeSpline` emits SPLINE segments (cubic I,J/P,Q; quadratic I,J); `executeNurbs` collects G5.2 control points (P weights, L order) and tessellates via de Boor on G5.3. |
-| G41/G42/G41.1/G42.1 cutter comp | `GCodeToolComp.hpp` | **PARTIAL** — modal state + `cutterRadius` set from tool table (D) or literal (G41.1/G42.1); geometric path offsetting is a downstream planner concern. |
+| G41/G42/G41.1/G42.1 cutter comp | `GCodeToolComp.hpp` | **DONE** — geometric XY offset in `emitCompMove`: lead-in/out moves, convex corners roll an r-arc around the vertex, concave corners cut to the offset-line intersection, arcs tessellate then offset per chord. |
 | G43/G43.1/G43.2/G49 tool length comp | `GCodeToolComp.hpp` | **DONE** — G43 applies H-word tool-table offsets (X/Y/Z + wear), G43.1 dynamic, G43.2 additive, G49 cancels. `ToolTable` implemented. |
 | G54–G59.3 / G52 / G92 / G28 / G30 / G10 L2/L20 | `GCodeCoordinates.hpp` | `CoordinateSystemManager` class + `GCodeCoordinates.cpp`. Full implementation with `CoordinateTransform` (Eigen). |
 | O-code control flow | `GCodeOCodes.hpp` | **DONE** — `GCodeOCodes.cpp` implements and is wired into `executeBlock`. |
