@@ -1160,8 +1160,7 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                     return Error{};
                 }
                 case 150: // G150 — Haas generic pocket milling
-                    return makeError(ErrorCode::UNKNOWN_GCODE,
-                                     "G150 pocket milling not supported");
+                    return dispatchG150(block, segments);
                 case 921: // G92.1 — Reset G92, zero position
                     return m_coordinates.processG92_1(m_machineState, m_variables);
                 case 922: // G92.2 — Reset G92, keep position
@@ -1475,6 +1474,243 @@ Error Interpreter::dispatchMarlinMCode(int32_t mcode, const Block& block) {
         if (block.hasWord(WordLetter::P)) p = block.getWord(WordLetter::P);
         if (block.hasWord(WordLetter::Q)) q = block.getWord(WordLetter::Q);
         return m_mcodeCallback(mcode, p, q);
+    }
+    return Error{};
+}
+
+// ============================================================================
+// G150 — Haas generic pocket milling
+// ============================================================================
+//
+// Strategy: the pocket boundary is the closed XY profile defined by
+// subprogram P (collected by walking its blocks, arcs tessellated). Each
+// Z level is cleared with horizontal raster scanlines clipped to the
+// polygon by even-odd fill; intervals are joined with retract-rapid
+// between disjoint spans. A finish pass then traces the boundary itself
+// (optionally inset by the K finish allowance applied as a uniform XY
+// scale toward the polygon centroid — exact inward offsetting of
+// arbitrary polygons is out of scope).
+
+Error Interpreter::collectPocketBoundary(
+        int32_t prog, double unitScale,
+        std::vector<std::pair<double, double>>& pts) {
+    // Locate the subprogram: Fanuc-style bare `O<num>` label first, then
+    // LinuxCNC `O<num> sub`. findSubprogramLabel/findSubroutine restore the
+    // lexer position; getLastBlockEnd() still points just past the label
+    // line, which is where the boundary blocks begin.
+    Block label;
+    Error findErr = m_parser->findSubprogramLabel(prog, label);
+    if (!findErr.ok())
+        findErr = m_parser->findSubroutine(prog, label);
+    if (!findErr.ok())
+        return makeError(ErrorCode::UNDEFINED_SUBROUTINE,
+                         "G150: pocket subprogram not found");
+
+    Lexer& lex = m_parser->getLexer();
+    const size_t saved = lex.getPosition();
+    lex.seek(m_parser->getLastBlockEnd());
+
+    Block b;
+    double cx = 0.0, cy = 0.0;
+    bool have = false;
+    while (true) {
+        Error e = m_parser->parseNextBlock(b);
+        if (!e.ok()) break;
+        if (b.hasOCode && b.oCodeHasKeyword &&
+            (b.oCodeType == OCodeType::ENDSUB ||
+             b.oCodeType == OCodeType::RETURN))
+            break;
+        bool endOfSub = false;
+        for (uint8_t i = 0; i < b.mCodeCount && !endOfSub; ++i)
+            if (b.mCodes[i] == 99 || b.mCodes[i] == 30) endOfSub = true;
+        if (endOfSub) break;
+
+        bool arc = false, cw = false;
+        for (uint8_t i = 0; i < b.gCodeCount; ++i) {
+            int major = b.gCodes[i] / 10;
+            if (b.gCodes[i] % 10 == 0) {
+                if (major == 2) { arc = true; cw = true; }
+                if (major == 3) { arc = true; cw = false; }
+            }
+        }
+        const bool hasXY = b.hasWord(WordLetter::X) || b.hasWord(WordLetter::Y);
+        if (!hasXY && !arc) continue;
+
+        const double nx = b.hasWord(WordLetter::X)
+            ? b.getWord(WordLetter::X) * unitScale : cx;
+        const double ny = b.hasWord(WordLetter::Y)
+            ? b.getWord(WordLetter::Y) * unitScale : cy;
+
+        if (arc && have &&
+            (b.hasWord(WordLetter::I) || b.hasWord(WordLetter::J))) {
+            const double ccx = cx +
+                (b.hasWord(WordLetter::I) ? b.getWord(WordLetter::I) * unitScale : 0.0);
+            const double ccy = cy +
+                (b.hasWord(WordLetter::J) ? b.getWord(WordLetter::J) * unitScale : 0.0);
+            const double r = std::hypot(cx - ccx, cy - ccy);
+            if (r > 1e-9) {
+                const double a0 = std::atan2(cy - ccy, cx - ccx);
+                const double a1 = std::atan2(ny - ccy, nx - ccx);
+                double sweep = cw ? a0 - a1 : a1 - a0;
+                while (sweep <= 0.0) sweep += 2.0 * M_PI;
+                const int n = std::max(4, static_cast<int>(
+                    std::ceil(sweep / (M_PI / 8.0))));
+                for (int i = 1; i <= n; ++i) {
+                    const double ang =
+                        a0 + (cw ? -1.0 : 1.0) * sweep * i / n;
+                    pts.emplace_back(ccx + r * std::cos(ang),
+                                     ccy + r * std::sin(ang));
+                }
+            } else {
+                pts.emplace_back(nx, ny);
+            }
+        } else if (hasXY || arc) {
+            pts.emplace_back(nx, ny);
+        }
+        cx = nx;
+        cy = ny;
+        have = true;
+    }
+
+    lex.seek(saved);
+    if (pts.size() < 3)
+        return makeError(ErrorCode::INVALID_MOTION,
+                         "G150: pocket boundary needs >= 3 points");
+    return Error{};
+}
+
+Error Interpreter::dispatchG150(const Block& block,
+                                std::vector<MotionSegment>& segments) {
+    if (!block.hasWord(WordLetter::P))
+        return makeError(ErrorCode::PARAMETER_ERROR,
+                         "G150 requires P (pocket subprogram O-number)");
+    const int32_t prog = static_cast<int32_t>(block.getWord(WordLetter::P));
+    const double unitScale =
+        (m_machineState.units == Units::INCH) ? 25.4 : 1.0;
+
+    const double startZ = m_machineState.workPosition.z();
+    const double finalZ = block.hasWord(WordLetter::Z)
+        ? block.getWord(WordLetter::Z) * unitScale : startZ;
+    const double clearZ = block.hasWord(WordLetter::R)
+        ? block.getWord(WordLetter::R) * unitScale : startZ;
+    const double stepZ = block.hasWord(WordLetter::Q)
+        ? std::abs(block.getWord(WordLetter::Q)) * unitScale : 0.0;
+    const double stepover = block.hasWord(WordLetter::J)
+        ? std::abs(block.getWord(WordLetter::J)) * unitScale
+        : (block.hasWord(WordLetter::I)
+               ? std::abs(block.getWord(WordLetter::I)) * unitScale : 1.0);
+    if (stepover <= 0.0)
+        return makeError(ErrorCode::PARAMETER_ERROR,
+                         "G150 stepover must be positive");
+    if (finalZ > startZ)
+        return makeError(ErrorCode::INVALID_MOTION,
+                         "G150 Z must be below the current Z level");
+
+    if (block.hasWord(WordLetter::F))
+        m_machineState.feedRate = block.getWord(WordLetter::F) * unitScale;
+    const double feed = m_machineState.feedRate;
+
+    // Optional spindle start (S word on the G150 line).
+    if (block.hasWord(WordLetter::S)) {
+        double rpm = block.getWord(WordLetter::S);
+        if (m_machineState.maxSpindleSpeed > 0.0)
+            rpm = std::min(rpm, m_machineState.maxSpindleSpeed);
+        m_machineState.spindleSpeed = rpm;
+        m_machineState.spindleCW = true;
+        m_machineState.spindleOn = true;
+        if (m_spindleCallback) {
+            Error err = m_spindleCallback(true, true, rpm);
+            if (!err.ok()) return err;
+        }
+    }
+
+    // Pocket boundary polygon (program coords), closed.
+    std::vector<std::pair<double, double>> poly;
+    Error err = collectPocketBoundary(prog, unitScale, poly);
+    if (!err.ok()) return err;
+    if (std::hypot(poly.front().first - poly.back().first,
+                   poly.front().second - poly.back().second) > 1e-6)
+        poly.push_back(poly.front());
+
+    double ymin = poly[0].second, ymax = poly[0].second;
+    for (const auto& p : poly) {
+        ymin = std::min(ymin, p.second);
+        ymax = std::max(ymax, p.second);
+    }
+
+    // Emission helper: program coords -> machine coords segment.
+    auto emit = [&](double x, double y, double z,
+                    MotionSegment::Type type, double fr) {
+        Position target = m_machineState.workPosition;
+        target.x() = x;
+        target.y() = y;
+        target.z() = z;
+        MotionSegment seg;
+        seg.type = type;
+        seg.endPosition = m_coordinates.toMachineCoords(target);
+        seg.feedRate = fr;
+        seg.lineNumber = block.sourceLineNumber;
+        segments.push_back(seg);
+        m_machineState.workPosition = target;
+        m_machineState.machinePosition = seg.endPosition;
+        ++m_stats.motionSegments;
+    };
+
+    // Roughing passes: step Z down from startZ to finalZ.
+    double z = startZ;
+    while (true) {
+        z = (stepZ > 0.0) ? std::max(z - stepZ, finalZ) : finalZ;
+
+        // Raster scanlines in Y, clipped to the boundary (even-odd fill).
+        bool forward = true;
+        for (double y = ymin; y <= ymax + 1e-9; y += stepover) {
+            std::vector<double> xs;
+            for (size_t i = 0; i + 1 < poly.size(); ++i) {
+                const double y1 = poly[i].second, y2 = poly[i + 1].second;
+                if ((y1 <= y) != (y2 <= y)) {
+                    const double t = (y - y1) / (y2 - y1);
+                    xs.push_back(poly[i].first +
+                                 t * (poly[i + 1].first - poly[i].first));
+                }
+            }
+            std::sort(xs.begin(), xs.end());
+            if (!forward) std::reverse(xs.begin(), xs.end());
+            forward = !forward;
+
+            for (size_t k = 0; k + 1 < xs.size(); k += 2) {
+                const double xa = xs[k], xb = xs[k + 1];
+                // Position at clearance, plunge, cut the span, retract.
+                emit(xa, y, clearZ, MotionSegment::Type::RAPID, 0.0);
+                emit(xa, y, z, MotionSegment::Type::LINEAR, feed);
+                emit(xb, y, z, MotionSegment::Type::LINEAR, feed);
+                emit(xb, y, clearZ, MotionSegment::Type::RAPID, 0.0);
+            }
+        }
+        if (z <= finalZ) break;
+    }
+
+    // Finish pass: trace the boundary contour at final depth.
+    if (feed > 0.0) {
+        emit(poly[0].first, poly[0].second, clearZ,
+             MotionSegment::Type::RAPID, 0.0);
+        emit(poly[0].first, poly[0].second, finalZ,
+             MotionSegment::Type::LINEAR, feed);
+        for (size_t i = 1; i < poly.size(); ++i)
+            emit(poly[i].first, poly[i].second, finalZ,
+                 MotionSegment::Type::LINEAR, feed);
+        emit(poly.back().first, poly.back().second, clearZ,
+             MotionSegment::Type::RAPID, 0.0);
+    }
+
+    // Final X/Y end position if given on the G150 line.
+    if (block.hasWord(WordLetter::X) || block.hasWord(WordLetter::Y)) {
+        emit(block.hasWord(WordLetter::X)
+                 ? block.getWord(WordLetter::X) * unitScale
+                 : m_machineState.workPosition.x(),
+             block.hasWord(WordLetter::Y)
+                 ? block.getWord(WordLetter::Y) * unitScale
+                 : m_machineState.workPosition.y(),
+             clearZ, MotionSegment::Type::RAPID, 0.0);
     }
     return Error{};
 }

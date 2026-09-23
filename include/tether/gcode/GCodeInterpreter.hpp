@@ -849,6 +849,16 @@ private:
         return m_coordinates.processG50_1(block, m_machineState);
     }
 
+    /// @brief Haas G150 generic pocket milling: raster-clear the pocket
+    ///        bounded by the XY profile of subprogram P.
+    ///        Words: P<sub O-num>, Z<depth>, R<clearance>, I/J<stepover>,
+    ///        Q<Z increment>, K<finish allowance>, F<feed>, S<rpm>.
+    Error dispatchG150(const Block& block, std::vector<MotionSegment>& segments);
+    /// @brief Collect the closed XY boundary polygon from subprogram
+    ///        @p prog (G0/G1 endpoints; G2/G3 tessellated).
+    Error collectPocketBoundary(int32_t prog, double unitScale,
+                                std::vector<std::pair<double, double>>& pts);
+
     /// @brief Transform a program-space position to machine coordinates
     /// using the composed coordinate transform (WCS + G52 + G92 + G68 + G51).
     Position toMachine(const Position& programPos) const {

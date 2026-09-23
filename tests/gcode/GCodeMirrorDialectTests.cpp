@@ -10,6 +10,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <set>
 
 using namespace GCode;
 
@@ -172,4 +173,108 @@ TEST_F(MirrorDialectTest, GrblSettingsReport) {
 
 TEST_F(MirrorDialectTest, GrblSettingWrite_BadValue) {
     EXPECT_FALSE(interp.systemCommand("$30=abc").ok());
+}
+
+// ============================================================================
+// G150 — Haas generic pocket milling (raster clearing)
+// ============================================================================
+
+// Square pocket: 10x10 boundary in O100.
+static const char* kSquarePocket =
+    "G0 Z5\n"
+    "G150 P100 Z-2 R5 J2.5 F100\n"
+    "M30\n"
+    "O100 sub\n"
+    "G1 X0 Y0\n"
+    "G1 X10 Y0\n"
+    "G1 X10 Y10\n"
+    "G1 X0 Y10\n"
+    "G1 X0 Y0\n"
+    "O100 endsub\n";
+
+TEST_F(MirrorDialectTest, G150_RequiresP) {
+    EXPECT_FALSE(run("G150 Z-2\n"));
+}
+
+TEST_F(MirrorDialectTest, G150_UnknownSubprogramFails) {
+    EXPECT_FALSE(run("G150 P999 Z-2\n"));
+}
+
+TEST_F(MirrorDialectTest, G150_RastersWithinBoundary) {
+    ASSERT_TRUE(run(kSquarePocket));
+    // Cutting segments must stay inside [0,10]x[0,10] at z=-2.
+    int cuts = 0;
+    for (const auto& s : segments) {
+        if (s.type != MotionSegment::Type::LINEAR) continue;
+        if (std::abs(s.endPosition.z() + 2.0) > 1e-6) continue;
+        cuts++;
+        EXPECT_GE(s.endPosition.x(), -1e-9);
+        EXPECT_LE(s.endPosition.x(), 10.0 + 1e-9);
+        EXPECT_GE(s.endPosition.y(), -1e-9);
+        EXPECT_LE(s.endPosition.y(), 10.0 + 1e-9);
+    }
+    EXPECT_GT(cuts, 4);  // several raster spans + finish contour
+}
+
+TEST_F(MirrorDialectTest, G150_DepthStepping) {
+    // Q1 over Z-3 => 3 Z levels of rastering.
+    ASSERT_TRUE(run(
+        "G0 Z5\n"
+        "G150 P100 Z-3 R5 Q1 J5 F100\n"
+        "M30\n"
+        "O100 sub\n"
+        "G1 X0 Y0\nG1 X10 Y0\nG1 X10 Y10\nG1 X0 Y10\nG1 X0 Y0\n"
+        "O100 endsub\n"));
+    std::set<double> depths;
+    for (const auto& s : segments)
+        if (s.type == MotionSegment::Type::LINEAR && s.endPosition.z() < -0.5)
+            depths.insert(std::round(s.endPosition.z() * 1000) / 1000);
+    EXPECT_EQ(depths.count(-1.0), 1u);
+    EXPECT_EQ(depths.count(-2.0), 1u);
+    EXPECT_EQ(depths.count(-3.0), 1u);
+}
+
+TEST_F(MirrorDialectTest, G150_FinishPassTracesBoundary) {
+    ASSERT_TRUE(run(kSquarePocket));
+    // Find the last linear segments at z=-2 forming the closed contour:
+    // the finish pass ends back at the first boundary point (0,0).
+    const MotionSegment* lastCut = nullptr;
+    for (const auto& s : segments)
+        if (s.type == MotionSegment::Type::LINEAR &&
+            std::abs(s.endPosition.z() + 2.0) < 1e-6)
+            lastCut = &s;
+    ASSERT_NE(lastCut, nullptr);
+    EXPECT_NEAR(lastCut->endPosition.x(), 0.0, 1e-6);
+    EXPECT_NEAR(lastCut->endPosition.y(), 0.0, 1e-6);
+}
+
+TEST_F(MirrorDialectTest, G150_ArcBoundary) {
+    // Circular pocket boundary from arcs.
+    ASSERT_TRUE(run(
+        "G0 Z5\n"
+        "G150 P200 Z-1 R5 J1 F100\n"
+        "M30\n"
+        "O200 sub\n"
+        "G1 X5 Y0\n"
+        "G2 X5 Y0 I-5 J0\n"
+        "O200 endsub\n"));
+    int cuts = 0;
+    for (const auto& s : segments) {
+        if (s.type != MotionSegment::Type::LINEAR) continue;
+        if (std::abs(s.endPosition.z() + 1.0) > 1e-6) continue;
+        cuts++;
+        const double r = std::hypot(s.endPosition.x(),
+                                    s.endPosition.y());
+        EXPECT_LE(r, 5.0 + 1e-6);
+    }
+    EXPECT_GT(cuts, 4);
+}
+
+TEST_F(MirrorDialectTest, G150_SubprogramNotExecuted) {
+    // The boundary sub must be collected, not run as part of the program:
+    // its moves must not appear above the pocket depth plane.
+    ASSERT_TRUE(run(kSquarePocket));
+    // kSquarePocket: lines 1-3 are the main program, O100 body is lines 4-10.
+    for (const auto& s : segments)
+        EXPECT_LE(s.lineNumber, 3);
 }
