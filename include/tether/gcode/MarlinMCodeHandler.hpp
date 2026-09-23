@@ -59,6 +59,8 @@
 #include <memory>
 #include <optional>
 #include <mutex>
+#include <sstream>
+#include <array>
 
 namespace GCode {
 
@@ -76,6 +78,7 @@ struct MCodeParameters {
     std::optional<double> R;                ///< R parameter
     std::optional<double> F;                ///< F parameter (feedrate)
     std::optional<double> T;                ///< T parameter (tool number)
+    std::optional<double> D;                ///< D parameter (PID derivative, etc.)
     std::optional<double> I;                ///< I parameter
     std::optional<double> J;                ///< J parameter
     std::optional<double> K;                ///< K parameter
@@ -168,6 +171,31 @@ struct MarlinMachineState {
 
     // Motion settings
     KinematicLimits kinematicLimits;
+    double travelAcceleration = 0.0;        ///< M204 T — travel accel (mm/s²)
+    double retractAcceleration = 0.0;       ///< M204 R — retract accel (mm/s²)
+    double extruderMaxAcceleration = 0.0;   ///< M201 E (mm/s²)
+    double extruderMaxVelocity = 0.0;       ///< M203 E (mm/s)
+    double extruderMaxJerk = 0.0;           ///< M205 E (mm/s)
+    double junctionDeviation = 0.0;         ///< M205 J (mm)
+    double minFeedrate = 0.0;               ///< M205 S (mm/s)
+    double minTravelFeedrate = 0.0;         ///< M205 T (mm/s)
+    double minSegmentTime = 0.0;            ///< M205 B (ms)
+    std::array<double, 4> stepsPerMm{80.0, 80.0, 400.0, 95.0}; ///< M92 X Y Z E
+
+    // Overrides (percent)
+    double feedOverridePercent = 100.0;     ///< M220 S
+    double flowOverridePercent = 100.0;     ///< M221 S
+
+    // Calibration / offsets
+    Position homeOffset{};                  ///< M206 X Y Z
+    std::array<Position, 8> toolOffsets{};  ///< M218 T<n> X Y Z
+    Position probeOffset{};                 ///< M851 X Y Z
+    std::array<double, 3> hotendPid{0.0, 0.0, 0.0}; ///< M301 P I D
+    std::array<double, 3> bedPid{0.0, 0.0, 0.0};    ///< M304 P I D
+    std::array<double, 8> servoAngles{};    ///< M280 P<n> S<angle>
+    bool probeDeployed = false;             ///< M401 / M402
+    bool bedLevelingEnabled = false;        ///< M420 S
+    std::unordered_map<uint32_t, double> bedMesh; ///< M421 (key: i*1024+j)
 
     // User-defined state storage
     std::unordered_map<std::string, double> userVariables;
@@ -180,7 +208,7 @@ struct MarlinMachineState {
  * @param state Current machine state (may be modified)
  * @return MCodeResult indicating success/failure and any actions
  */
-using MCodeCallback = std::function<MCodeResult(const MCodeParameters& params,
+using MarlinMCodeCallback = std::function<MCodeResult(const MCodeParameters& params,
                                                  MarlinMachineState& state)>;
 
 // ============================================================================
@@ -220,7 +248,7 @@ public:
      *
      * If a callback is already registered for this M-code, it will be replaced.
      */
-    bool registerCallback(int mCode, MCodeCallback callback,
+    bool registerCallback(int mCode, MarlinMCodeCallback callback,
                           const std::string& description = "");
 
     /**
@@ -308,9 +336,20 @@ private:
     static MCodeResult handleM220(const MCodeParameters& params, MarlinMachineState& state);    // Feed override
     static MCodeResult handleM221(const MCodeParameters& params, MarlinMachineState& state);    // Flow override
     static MCodeResult handleM503(const MCodeParameters& params, MarlinMachineState& state);    // Report settings
+    static MCodeResult handleM92(const MCodeParameters& params, MarlinMachineState& state);     // Steps/mm
+    static MCodeResult handleM206(const MCodeParameters& params, MarlinMachineState& state);    // Home offset
+    static MCodeResult handleM218(const MCodeParameters& params, MarlinMachineState& state);    // Tool offset
+    static MCodeResult handleM280(const MCodeParameters& params, MarlinMachineState& state);    // Servo
+    static MCodeResult handleM301(const MCodeParameters& params, MarlinMachineState& state);    // Hotend PID
+    static MCodeResult handleM304(const MCodeParameters& params, MarlinMachineState& state);    // Bed PID
+    static MCodeResult handleM401(const MCodeParameters& params, MarlinMachineState& state);    // Deploy probe
+    static MCodeResult handleM402(const MCodeParameters& params, MarlinMachineState& state);    // Stow probe
+    static MCodeResult handleM420(const MCodeParameters& params, MarlinMachineState& state);    // Bed leveling
+    static MCodeResult handleM421(const MCodeParameters& params, MarlinMachineState& state);    // Set mesh point
+    static MCodeResult handleM851(const MCodeParameters& params, MarlinMachineState& state);    // Probe offset
 
     struct CallbackEntry {
-        MCodeCallback callback;
+        MarlinMCodeCallback callback;
         std::string description;
     };
 
@@ -331,7 +370,7 @@ inline MarlinMCodeHandler::MarlinMCodeHandler(const Config& config)
     }
 }
 
-inline bool MarlinMCodeHandler::registerCallback(int mCode, MCodeCallback callback,
+inline bool MarlinMCodeHandler::registerCallback(int mCode, MarlinMCodeCallback callback,
                                                   const std::string& description) {
     std::lock_guard<std::mutex> lock(mutex_);
     callbacks_[mCode] = CallbackEntry{std::move(callback), description};
@@ -530,6 +569,19 @@ inline void MarlinMCodeHandler::registerMarlinDefaults() {
     // Overrides
     registerCallback(220, handleM220, "M220 - Set feedrate percentage");
     registerCallback(221, handleM221, "M221 - Set flow percentage");
+
+    // Calibration and probing (3D printer)
+    registerCallback(92,  handleM92,  "M92 - Set axis steps per mm");
+    registerCallback(206, handleM206, "M206 - Set home offset");
+    registerCallback(218, handleM218, "M218 - Set hotend/tool offset");
+    registerCallback(280, handleM280, "M280 - Servo position");
+    registerCallback(301, handleM301, "M301 - Set hotend PID");
+    registerCallback(304, handleM304, "M304 - Set bed PID");
+    registerCallback(401, handleM401, "M401 - Deploy probe");
+    registerCallback(402, handleM402, "M402 - Stow probe");
+    registerCallback(420, handleM420, "M420 - Bed leveling state");
+    registerCallback(421, handleM421, "M421 - Set mesh point");
+    registerCallback(851, handleM851, "M851 - Set probe offset");
 }
 
 // ============================================================================
@@ -720,9 +772,7 @@ inline MCodeResult MarlinMCodeHandler::handleM201(const MCodeParameters& params,
     if (params.X.has_value()) limits.axisMaxAcceleration[0] = params.X.value();
     if (params.Y.has_value()) limits.axisMaxAcceleration[1] = params.Y.value();
     if (params.Z.has_value()) limits.axisMaxAcceleration[2] = params.Z.value();
-    if (params.E.has_value()) {
-        // E axis mapped to axis 3 or handled separately
-    }
+    if (params.E.has_value()) state.extruderMaxAcceleration = params.E.value();
 
     result.message = "Set max acceleration";
     return result;
@@ -737,9 +787,7 @@ inline MCodeResult MarlinMCodeHandler::handleM203(const MCodeParameters& params,
     if (params.X.has_value()) limits.axisMaxVelocity[0] = params.X.value() * 60.0;  // Convert to mm/min
     if (params.Y.has_value()) limits.axisMaxVelocity[1] = params.Y.value() * 60.0;
     if (params.Z.has_value()) limits.axisMaxVelocity[2] = params.Z.value() * 60.0;
-    if (params.E.has_value()) {
-        // E axis
-    }
+    if (params.E.has_value()) state.extruderMaxVelocity = params.E.value();
 
     result.message = "Set max feedrate";
     return result;
@@ -755,14 +803,15 @@ inline MCodeResult MarlinMCodeHandler::handleM204(const MCodeParameters& params,
         limits.maxAcceleration = params.P.value();
     }
     if (params.T.has_value()) {
-        // Travel acceleration could be stored separately
+        state.travelAcceleration = params.T.value();
     }
     if (params.R.has_value()) {
-        // Retract acceleration
+        state.retractAcceleration = params.R.value();
     }
     // Legacy: S = both print and travel
     if (params.S.has_value()) {
         limits.maxAcceleration = params.S.value();
+        state.travelAcceleration = params.S.value();
     }
 
     result.message = "Set default acceleration";
@@ -782,16 +831,18 @@ inline MCodeResult MarlinMCodeHandler::handleM205(const MCodeParameters& params,
 
     if (params.J.has_value()) {
         // Junction deviation mode (newer Marlin)
-        // Store or convert to jerk equivalent
+        state.junctionDeviation = params.J.value();
     }
 
     // Per-axis jerk (mm/s)
     if (params.X.has_value()) limits.axisMaxJerk[0] = params.X.value();
     if (params.Y.has_value()) limits.axisMaxJerk[1] = params.Y.value();
     if (params.Z.has_value()) limits.axisMaxJerk[2] = params.Z.value();
-    if (params.E.has_value()) {
-        // E jerk
-    }
+    if (params.E.has_value()) state.extruderMaxJerk = params.E.value();
+
+    if (params.S.has_value()) state.minFeedrate = params.S.value();
+    if (params.T.has_value()) state.minTravelFeedrate = params.T.value();
+    if (params.B.has_value()) state.minSegmentTime = params.B.value();
 
     result.message = "Set advanced motion settings";
     return result;
@@ -801,12 +852,10 @@ inline MCodeResult MarlinMCodeHandler::handleM220(const MCodeParameters& params,
                                                    MarlinMachineState& state) {
     MCodeResult result;
     if (params.S.has_value()) {
-        // Feed rate override percentage
-        double percentage = params.S.value();
-        // Apply to current feedrate
-        // state.feedOverridePercent = percentage;
+        state.feedOverridePercent = params.S.value();
     }
-    result.message = "Feed rate override";
+    result.message = "Feed rate override " +
+                     std::to_string(state.feedOverridePercent) + "%";
     return result;
 }
 
@@ -814,10 +863,10 @@ inline MCodeResult MarlinMCodeHandler::handleM221(const MCodeParameters& params,
                                                    MarlinMachineState& state) {
     MCodeResult result;
     if (params.S.has_value()) {
-        // Extrusion flow rate override percentage
-        // state.flowOverridePercent = params.S.value();
+        state.flowOverridePercent = params.S.value();
     }
-    result.message = "Flow rate override";
+    result.message = "Flow rate override " +
+                     std::to_string(state.flowOverridePercent) + "%";
     return result;
 }
 
@@ -836,10 +885,171 @@ inline MCodeResult MarlinMCodeHandler::handleM503(const MCodeParameters& params,
     oss << "echo:M204 P" << limits.maxAcceleration << "\n";
     oss << "echo:M205 X" << limits.axisMaxJerk[0]
         << " Y" << limits.axisMaxJerk[1]
-        << " Z" << limits.axisMaxJerk[2] << "\n";
+        << " Z" << limits.axisMaxJerk[2]
+        << " E" << state.extruderMaxJerk << "\n";
+    oss << "echo:M92 X" << state.stepsPerMm[0]
+        << " Y" << state.stepsPerMm[1]
+        << " Z" << state.stepsPerMm[2]
+        << " E" << state.stepsPerMm[3] << "\n";
+    oss << "echo:M220 S" << state.feedOverridePercent
+        << " M221 S" << state.flowOverridePercent << "\n";
+    oss << "echo:M301 P" << state.hotendPid[0]
+        << " I" << state.hotendPid[1]
+        << " D" << state.hotendPid[2] << "\n";
+    oss << "echo:M304 P" << state.bedPid[0]
+        << " I" << state.bedPid[1]
+        << " D" << state.bedPid[2] << "\n";
+    oss << "echo:M851 X" << state.probeOffset[0]
+        << " Y" << state.probeOffset[1]
+        << " Z" << state.probeOffset[2] << "\n";
 
     result.response = oss.str();
     result.message = "Report settings";
+    return result;
+}
+
+inline MCodeResult MarlinMCodeHandler::handleM92(const MCodeParameters& params,
+                                                   MarlinMachineState& state) {
+    MCodeResult result;
+    if (params.X.has_value()) state.stepsPerMm[0] = params.X.value();
+    if (params.Y.has_value()) state.stepsPerMm[1] = params.Y.value();
+    if (params.Z.has_value()) state.stepsPerMm[2] = params.Z.value();
+    if (params.E.has_value()) state.stepsPerMm[3] = params.E.value();
+    result.message = "Set steps/mm";
+    return result;
+}
+
+inline MCodeResult MarlinMCodeHandler::handleM206(const MCodeParameters& params,
+                                                    MarlinMachineState& state) {
+    MCodeResult result;
+    if (params.X.has_value()) state.homeOffset[0] = params.X.value();
+    if (params.Y.has_value()) state.homeOffset[1] = params.Y.value();
+    if (params.Z.has_value()) state.homeOffset[2] = params.Z.value();
+    result.message = "Set home offset";
+    return result;
+}
+
+inline MCodeResult MarlinMCodeHandler::handleM218(const MCodeParameters& params,
+                                                    MarlinMachineState& state) {
+    MCodeResult result;
+    size_t tool = params.T.has_value()
+                      ? static_cast<size_t>(params.T.value())
+                      : static_cast<size_t>(state.currentTool);
+    if (tool >= state.toolOffsets.size()) {
+        result.success = false;
+        result.message = "M218: tool index out of range";
+        return result;
+    }
+    auto& off = state.toolOffsets[tool];
+    if (params.X.has_value()) off[0] = params.X.value();
+    if (params.Y.has_value()) off[1] = params.Y.value();
+    if (params.Z.has_value()) off[2] = params.Z.value();
+    result.message = "Set tool offset T" + std::to_string(tool);
+    return result;
+}
+
+inline MCodeResult MarlinMCodeHandler::handleM280(const MCodeParameters& params,
+                                                    MarlinMachineState& state) {
+    MCodeResult result;
+    if (!params.P.has_value() || !params.S.has_value()) {
+        result.success = false;
+        result.message = "M280 requires P<servo> S<angle>";
+        return result;
+    }
+    size_t idx = static_cast<size_t>(params.P.value());
+    if (idx >= state.servoAngles.size()) {
+        result.success = false;
+        result.message = "M280: servo index out of range";
+        return result;
+    }
+    state.servoAngles[idx] = params.S.value();
+    result.message = "Servo " + std::to_string(idx) +
+                     " angle " + std::to_string(params.S.value());
+    return result;
+}
+
+inline MCodeResult MarlinMCodeHandler::handleM301(const MCodeParameters& params,
+                                                    MarlinMachineState& state) {
+    MCodeResult result;
+    if (params.P.has_value()) state.hotendPid[0] = params.P.value();
+    if (params.I.has_value()) state.hotendPid[1] = params.I.value();
+    if (params.D.has_value()) state.hotendPid[2] = params.D.value();
+    result.message = "Set hotend PID";
+    return result;
+}
+
+inline MCodeResult MarlinMCodeHandler::handleM304(const MCodeParameters& params,
+                                                    MarlinMachineState& state) {
+    MCodeResult result;
+    if (params.P.has_value()) state.bedPid[0] = params.P.value();
+    if (params.I.has_value()) state.bedPid[1] = params.I.value();
+    if (params.D.has_value()) state.bedPid[2] = params.D.value();
+    result.message = "Set bed PID";
+    return result;
+}
+
+inline MCodeResult MarlinMCodeHandler::handleM401(const MCodeParameters& params,
+                                                    MarlinMachineState& state) {
+    (void)params;
+    MCodeResult result;
+    state.probeDeployed = true;
+    result.message = "Deploy probe";
+    return result;
+}
+
+inline MCodeResult MarlinMCodeHandler::handleM402(const MCodeParameters& params,
+                                                    MarlinMachineState& state) {
+    (void)params;
+    MCodeResult result;
+    state.probeDeployed = false;
+    result.message = "Stow probe";
+    return result;
+}
+
+inline MCodeResult MarlinMCodeHandler::handleM420(const MCodeParameters& params,
+                                                    MarlinMachineState& state) {
+    MCodeResult result;
+    if (params.S.has_value()) {
+        state.bedLevelingEnabled = params.S.value() != 0.0;
+    }
+    result.message = std::string("Bed leveling ") +
+                     (state.bedLevelingEnabled ? "enabled" : "disabled");
+    return result;
+}
+
+inline MCodeResult MarlinMCodeHandler::handleM421(const MCodeParameters& params,
+                                                    MarlinMachineState& state) {
+    MCodeResult result;
+    if (!params.I.has_value() || !params.J.has_value() ||
+        !params.Z.has_value()) {
+        result.success = false;
+        result.message = "M421 requires I<col> J<row> Z<height>";
+        return result;
+    }
+    int i = static_cast<int>(params.I.value());
+    int j = static_cast<int>(params.J.value());
+    if (i < 0 || j < 0 || i >= 64 || j >= 64) {
+        result.success = false;
+        result.message = "M421: mesh index out of range";
+        return result;
+    }
+    state.bedMesh[static_cast<uint32_t>(i * 1024 + j)] = params.Z.value();
+    result.message = "Set mesh point";
+    return result;
+}
+
+inline MCodeResult MarlinMCodeHandler::handleM851(const MCodeParameters& params,
+                                                    MarlinMachineState& state) {
+    MCodeResult result;
+    if (params.X.has_value()) state.probeOffset[0] = params.X.value();
+    if (params.Y.has_value()) state.probeOffset[1] = params.Y.value();
+    if (params.Z.has_value()) state.probeOffset[2] = params.Z.value();
+    std::ostringstream oss;
+    oss << "echo:Probe Offset X" << state.probeOffset[0]
+        << " Y" << state.probeOffset[1]
+        << " Z" << state.probeOffset[2];
+    result.response = oss.str();
+    result.message = "Set probe offset";
     return result;
 }
 

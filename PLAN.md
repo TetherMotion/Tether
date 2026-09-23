@@ -38,9 +38,9 @@ Priority tags (for future implementation work):
 | **G66** (modal macro call) | DONE | P0 | Modal macro re-invokes on axis-word blocks; G67 cancels. G66.1 not implemented. |
 | **G67** (modal macro cancel) | DONE | P0 | Clears modal macro state. |
 | **G51** (scaling) | DONE | P1 | Implemented via `CoordinateTransform` (Eigen). Per-axis and uniform scaling. G50 cancels. |
-| **G50** (max RPM clamp, Fanuc lathe) | MISSING | P1 | Collides with RS274 G50 (cancel scaling); Fanuc lathe max RPM not handled. |
+| **G50** (max RPM clamp, Fanuc lathe) | DONE | P1 | `G50 S<rpm>` sets `MachineState::maxSpindleSpeed` (clamped in M3/M4); bare G50 still cancels scaling. |
 | **G68 / G69** (coordinate system rotation) | DONE | P1 | Full 2D plane rotation + 3D Euler XYZ + axis-angle via `CoordinateTransform`. G69 cancels. |
-| **G51.1 / G50.1** (mirror image) | MISSING | P2 | Not handled. |
+| **G51.1 / G50.1** (mirror image) | DONE | P2 | Per-axis reflection `p' = 2c - p` composed into `CoordinateTransform` (innermost, program space); flips arc CW/CCW and center offsets; G50.1 cancels per-axis or all. |
 | **G70 / G71 / G72 / G73** (Fanuc lathe roughing/finishing) | MISSING | P1 | G73 collides with RS274 peck-drill; parser treats G73 as peck-drill only. No lathe roughing path. |
 | **G70 / G71** (Imperial/Metric in some Fanuc lathe dialects) | MISSING | P2 | Only G20/G21 are supported for units. |
 | **M98 / M99** (Fanuc sub call/return) | DONE | P0 | `executeM98`/`executeM99` implemented; M98 call-stack frames with repeat counts; bare `O<num>` labels serve as subprogram targets. |
@@ -71,7 +71,7 @@ Only the G-code text subset is parsed; GRBL's real-time protocol is absent.
 
 | Feature | Status | Priority | Notes |
 |---|---|---|---|
-| **`$` settings commands** | PARTIAL | P1 | `systemCommand` handles `$G`, `$#`, `$I`, `$X`, `$H`, `$J=`, `$C`, `$N0=`/`$N1=`; `$n=` settings writes not implemented. |
+| **`$` settings commands** | DONE | P1 | `systemCommand` handles `$G`, `$#`, `$I`, `$X`, `$H`, `$J=`, `$C`, `$N0=`/`$N1=`; `$n=` writes stored in `grblSettings`, `$$` reports all. |
 | **`$I`** (info), **`$G`** (parser state), **`$#`** (gcode parameters) | DONE | P1 | `systemCommand` emits reports via the message callback. |
 | **`$H`** (home), **`$X`** (unlock), **`$C`** (check mode) | DONE | P1 | `$X` unlocks; `$C` toggles check mode; `$H`/`$J=` deferred to the realtime callback (host performs motion). |
 | **`~`** (cycle resume), **`!`** (feed hold), **`?`** (status report) | DONE | P0 | `feedHold()`/`cycleResume()`/`statusReport()` + `processRealtimeChar`. |
@@ -82,8 +82,12 @@ Only the G-code text subset is parsed; GRBL's real-time protocol is absent.
 
 ## 4. RepRap / Marlin / 3D-printer G-codes
 
-`MarlinMCodeHandler.hpp` registers ~24 M-codes. A full Marlin firmware exposes
-80+. Below are the notable gaps.
+`MarlinMCodeHandler.hpp` registers ~35 M-codes and is wired into
+`Interpreter::dispatchMarlinMCode` — Marlin-domain M-codes update
+`Interpreter::marlinState()` (kinematic limits, steps/mm, offsets, PID,
+servo, probe/ABL state, feed/flow overrides), emit report messages via the
+message callback, and still reach the user M-code hook. A full Marlin
+firmware exposes 80+. Below are the notable gaps.
 
 ### G-codes
 
@@ -104,33 +108,36 @@ Only the G-code text subset is parsed; GRBL's real-time protocol is absent.
 |---|---|---|
 | ~~**M84**~~ | Disable motors — **DONE** | P1 |
 | ~~**M85**~~ | Inactivity timeout — forwarded to user hook | P2 |
-| ~~**M92**~~ | Steps/mm — forwarded to user hook | P1 |
-| ~~**M206**~~ | Home offset — forwarded to user hook | P1 |
+| ~~**M92**~~ | Steps/mm — **DONE** (`stepsPerMm`) | P1 |
+| ~~**M114**~~ | Report position — **DONE** (message callback) | P1 |
+| ~~**M204 / M205**~~ | Accel/jerk settings — **DONE** (`kinematicLimits` + state fields) | P1 |
+| ~~**M206**~~ | Home offset — **DONE** (`homeOffset`) | P1 |
 | ~~**M208**~~ | Software endstops — forwarded to user hook | P2 |
 | ~~**M210 / M211**~~ | Software endstop enable — forwarded to user hook | P2 |
-| ~~**M218**~~ | Tool offset — forwarded to user hook | P1 |
+| ~~**M218**~~ | Tool offset — **DONE** (`toolOffsets[T]`) | P1 |
+| ~~**M220 / M221**~~ | Feed/flow override — **DONE** (M220 drives `MachineState::feedOverride`) | P1 |
 | ~~**M226**~~ | Wait for pin — forwarded to user hook | P2 |
 | ~~**M240**~~ | Trigger camera — forwarded to user hook | P2 |
 | ~~**M250**~~ | LCD contrast — forwarded to user hook | P2 |
-| ~~**M280**~~ | Servo — forwarded to user hook | P1 |
+| ~~**M280**~~ | Servo — **DONE** (`servoAngles[P]`) | P1 |
 | ~~**M300**~~ | Beep — forwarded to user hook | P2 |
-| ~~**M301**~~ | Hotend PID — forwarded to user hook | P1 |
-| ~~**M304**~~ | Bed PID — forwarded to user hook | P1 |
+| ~~**M301**~~ | Hotend PID — **DONE** (`hotendPid`) | P1 |
+| ~~**M304**~~ | Bed PID — **DONE** (`bedPid`) | P1 |
 | ~~**M305**~~ | Thermistor — forwarded to user hook | P2 |
 | ~~**M350 / M351**~~ | Microstepping — forwarded to user hook | P2 |
 | ~~**M355**~~ | Case light — forwarded to user hook | P2 |
 | **M360–M378** | Various config | P2 |
 | ~~**M400**~~ | Wait for queue — **DONE** | P0 |
-| ~~**M401 / M402**~~ | Deploy/stow probe — forwarded to user hook | P1 |
-| ~~**M420**~~ | ABL state — forwarded to user hook | P1 |
-| ~~**M421**~~ | Set mesh point — forwarded to user hook | P1 |
+| ~~**M401 / M402**~~ | Deploy/stow probe — **DONE** (`probeDeployed`) | P1 |
+| ~~**M420**~~ | ABL state — **DONE** (`bedLevelingEnabled`) | P1 |
+| ~~**M421**~~ | Set mesh point — **DONE** (`bedMesh`) | P1 |
 | ~~**M500 / M501 / M502 / M503**~~ | EEPROM save/load/reset/report — **DONE** | P1 |
 | ~~**M540**~~ | SD card — forwarded to user hook | P2 |
 | ~~**M600**~~ | Filament change — **DONE** | P1 |
 | ~~**M605**~~ | Multi-nozzle — forwarded to user hook | P2 |
 | ~~**M665**~~ | Delta config — forwarded to user hook | P2 |
 | ~~**M666**~~ | Delta endstop — forwarded to user hook | P2 |
-| ~~**M851**~~ | Probe offset — forwarded to user hook | P1 |
+| ~~**M851**~~ | Probe offset — **DONE** (`probeOffset`, echoes report) | P1 |
 | ~~**M900**~~ | Linear advance — **DONE** | P1 |
 | ~~**M911 / M912**~~ | Power loss — forwarded to user hook | P2 |
 | ~~**M913 / M914**~~ | Stepper bump — forwarded to user hook | P2 |
@@ -252,7 +259,9 @@ M5. These well-known M-codes are **accepted but have no handler**:
    (P1)
 10. **Splines / NURBS G5.x** (§7). (P1)
 11. **GRBL real-time protocol** (§3) — `$`, `~`, `!`, `?`, `Ctrl-X`. (P1)
-12. **RepRap/Marlin M-code coverage** (§4) — fill the ~30 missing M-codes.
+12. **RepRap/Marlin M-code coverage** (§4) — **DONE**: all P0/P1 codes now
+    update `MarlinMachineState` via the wired `MarlinMCodeHandler`; only P2
+    config codes remain forwarded to the user hook.
     (P1)
 13. **Ternary `? :`** (§6). (P1)
 14. **Coordinate rotation G68/G69, scaling G51** (§1). (P1) — **DONE**

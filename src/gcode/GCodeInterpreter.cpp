@@ -362,6 +362,29 @@ Error Interpreter::systemCommand(const std::string& command) {
         m_startupLines[cmd[1] - '0'] = cmd.substr(3);
         return Error{};
     }
+    if (cmd == "$") {  // $$ — list all settings
+        if (m_messageCallback) {
+            for (const auto& [n, v] : m_grblSettings)
+                m_messageCallback("$" + std::to_string(n) + "=" +
+                                  std::to_string(v));
+        }
+        return Error{};
+    }
+    if (const auto eq = cmd.find('='); eq != std::string::npos && eq > 0 &&
+        std::all_of(cmd.begin(), cmd.begin() + static_cast<long>(eq),
+                    [](char c) { return std::isdigit(
+                        static_cast<unsigned char>(c)); })) {
+        // $n=value — settings write
+        char* end = nullptr;
+        const double value =
+            std::strtod(cmd.c_str() + eq + 1, &end);
+        if (end == cmd.c_str() + eq + 1 || *end != '\0')
+            return makeError(ErrorCode::PARAMETER_ERROR,
+                             "Invalid $ setting value");
+        m_grblSettings[std::atoi(cmd.c_str())] = value;
+        if (m_messageCallback) m_messageCallback("ok");
+        return Error{};
+    }
     return makeError(ErrorCode::UNKNOWN_GCODE, "Unknown $ command");
 }
 
@@ -909,7 +932,9 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
 
         case ModalGroup::SCALING:
             if (gnum == 51) return dispatchG51(block);
-            if (gnum == 50) return dispatchG50();
+            if (gnum == 50) return dispatchG50(block);
+            if (gnum == 511) return dispatchG51_1(block);  // G51.1 mirror on
+            if (gnum == 501) return dispatchG50_1(block);  // G50.1 mirror off
             return Error{};
 
         case ModalGroup::NON_MODAL: {
@@ -1189,6 +1214,8 @@ Error Interpreter::dispatchMCode(int32_t mcode, const Block& block) {
         case 3: case 4: { // M3/M4 — Spindle on
             bool cw = (mcode == 3);
             double rpm = block.getWord(WordLetter::S, m_machineState.spindleSpeed);
+            if (m_machineState.maxSpindleSpeed > 0.0)
+                rpm = std::min(rpm, m_machineState.maxSpindleSpeed);
             m_machineState.spindleSpeed = rpm;
             m_machineState.spindleCW = cw;
             m_machineState.spindleOn = true;
@@ -1322,7 +1349,6 @@ Error Interpreter::dispatchMCode(int32_t mcode, const Block& block) {
         case 500: // M500 — Save settings to EEPROM
         case 501: // M501 — Load settings
         case 502: // M502 — Factory reset
-        case 503: // M503 — Report settings
         case 900: { // M900 — Linear advance (K factor)
             // Printer-domain commands: forward to the user M-code hook when
             // registered, otherwise accept silently.
@@ -1336,6 +1362,31 @@ Error Interpreter::dispatchMCode(int32_t mcode, const Block& block) {
             }
             return Error{};
         }
+        // --- Marlin/RepRap M-codes with interpreter-level state ---
+        case 82:  // M82 — Extruder absolute mode
+        case 83:  // M83 — Extruder relative mode
+        case 92:  // M92 — Steps per mm (X Y Z E)
+        case 114: // M114 — Report position
+        case 115: // M115 — Report firmware info
+        case 117: // M117 — Display message
+        case 201: // M201 — Max acceleration per axis
+        case 203: // M203 — Max feedrate per axis
+        case 204: // M204 — Acceleration (P/T/R/S)
+        case 205: // M205 — Advanced motion settings (jerk/JD)
+        case 206: // M206 — Home offset
+        case 218: // M218 — Hotend/tool offset
+        case 220: // M220 — Feedrate override percent
+        case 221: // M221 — Flow override percent
+        case 280: // M280 — Servo position (P<n> S<angle>)
+        case 301: // M301 — Hotend PID
+        case 304: // M304 — Bed PID
+        case 401: // M401 — Deploy probe
+        case 402: // M402 — Stow probe
+        case 420: // M420 — Bed leveling state
+        case 421: // M421 — Set mesh point
+        case 503: // M503 — Report settings
+        case 851: // M851 — Probe offset
+            return dispatchMarlinMCode(mcode, block);
         default:
             // Forward to user M-code callback
             if (m_mcodeCallback) {
@@ -1348,6 +1399,84 @@ Error Interpreter::dispatchMCode(int32_t mcode, const Block& block) {
             }
             return Error{};
     }
+}
+
+Error Interpreter::dispatchMarlinMCode(int32_t mcode, const Block& block) {
+    // Sync the Marlin-side state snapshot from the core machine state.
+    m_marlinState.currentPosition = m_machineState.machinePosition;
+    m_marlinState.currentFeedrate = m_machineState.feedRate;
+    m_marlinState.currentSpindleSpeed = m_machineState.spindleSpeed;
+    m_marlinState.spindleOn = m_machineState.spindleOn;
+    m_marlinState.spindleCW = m_machineState.spindleCW;
+    m_marlinState.currentTool = m_machineState.currentTool;
+    m_marlinState.coolantMist = m_machineState.coolantMist;
+    m_marlinState.coolantFlood = m_machineState.coolantFlood;
+    m_marlinState.isMetric = (m_machineState.units == Units::MM);
+    m_marlinState.absoluteMode =
+        (m_machineState.distanceMode == DistanceMode::ABSOLUTE);
+
+    MCodeParameters params;
+    params.mCode = mcode;
+    auto grab = [&block](WordLetter w, std::optional<double>& out) {
+        if (block.hasWord(w)) out = block.getWord(w);
+    };
+    grab(WordLetter::P, params.P);
+    grab(WordLetter::S, params.S);
+    grab(WordLetter::R, params.R);
+    grab(WordLetter::F, params.F);
+    grab(WordLetter::T, params.T);
+    grab(WordLetter::D, params.D);
+    grab(WordLetter::I, params.I);
+    grab(WordLetter::J, params.J);
+    grab(WordLetter::K, params.K);
+    grab(WordLetter::X, params.X);
+    grab(WordLetter::Y, params.Y);
+    grab(WordLetter::Z, params.Z);
+    grab(WordLetter::A, params.A);
+    grab(WordLetter::B, params.B);
+    grab(WordLetter::C, params.C);
+    grab(WordLetter::U, params.U);
+    grab(WordLetter::V, params.V);
+    grab(WordLetter::W, params.W);
+    grab(WordLetter::E, params.E);
+    params.lineNumber = block.lineNumber;
+    params.rawLine = std::string(block.originalText.data());
+
+    if (mcode == 117) {
+        // The parser stashes the free text after M117 in block.comment.
+        if (block.hasComment)
+            params.message = block.comment.data();
+    }
+
+    MCodeResult result = m_marlinHandler.execute(params, m_marlinState);
+    if (!result.success) {
+        return makeError(ErrorCode::PARAMETER_ERROR, result.message.c_str());
+    }
+
+    // Report: prefer response text, fall back to message.
+    if (m_messageCallback) {
+        if (!result.response.empty())
+            m_messageCallback(result.response);
+        else if (!result.message.empty())
+            m_messageCallback(result.message);
+    }
+
+    // Apply interpreter-visible results.
+    if (mcode == 220 && m_machineState.feedOverrideEnabled)
+        m_machineState.feedOverride = m_marlinState.feedOverridePercent / 100.0;
+    if (result.pauseExecution)
+        m_state = InterpreterState::PAUSED;
+    if (result.stopExecution)
+        m_state = InterpreterState::FINISHED;
+
+    // Still forward to the user M-code hook for hardware side effects.
+    if (m_mcodeCallback) {
+        std::optional<double> p, q;
+        if (block.hasWord(WordLetter::P)) p = block.getWord(WordLetter::P);
+        if (block.hasWord(WordLetter::Q)) q = block.getWord(WordLetter::Q);
+        return m_mcodeCallback(mcode, p, q);
+    }
+    return Error{};
 }
 
 // ============================================================================
@@ -1633,13 +1762,18 @@ Error Interpreter::handleArc(const Block& block, const Position& target,
         sweep = (mode == MotionMode::CW_ARC) ? -2.0 * M_PI : 2.0 * M_PI;
     }
 
+    // Programmable mirror (G51.1): reflection flips handedness, so an odd
+    // number of mirrored in-plane axes swaps CW<->CCW.
+    const bool mirrorFlip =
+        m_machineState.axisMirror[a1] != m_machineState.axisMirror[a2];
+
     // When emit-arc-segments mode is active, emit a single arc MotionSegment
     // with full ArcParams instead of tessellating into line segments.
     if (m_emitArcSegments) {
+        const bool cw = (mode == MotionMode::CW_ARC) != mirrorFlip;
         MotionSegment seg;
-        seg.type = (mode == MotionMode::CW_ARC)
-                       ? MotionSegment::Type::ARC_CW
-                       : MotionSegment::Type::ARC_CCW;
+        seg.type = cw ? MotionSegment::Type::ARC_CW
+                      : MotionSegment::Type::ARC_CCW;
         seg.endPosition = m_coordinates.toMachineCoords(end);
         seg.feedRate = m_machineState.feedRate;
         seg.lineNumber = block.sourceLineNumber;
@@ -1649,6 +1783,11 @@ Error Interpreter::handleArc(const Block& block, const Position& target,
         centerPos[a1] = center1;
         centerPos[a2] = center2;
         seg.centerOffset = centerPos - start;
+        // Mirror negates the offset component along mirrored axes.
+        if (m_machineState.axisMirror[a1])
+            seg.centerOffset[a1] = -seg.centerOffset[a1];
+        if (m_machineState.axisMirror[a2])
+            seg.centerOffset[a2] = -seg.centerOffset[a2];
 
         // Populate ArcParams
         seg.arc.center = centerPos;
@@ -1657,8 +1796,8 @@ Error Interpreter::handleArc(const Block& block, const Position& target,
         seg.arc.radius = radius;
         seg.arc.startAngle = startAngle;
         seg.arc.endAngle = endAngle;
-        seg.arc.sweepAngle = sweep;
-        seg.arc.clockwise = (mode == MotionMode::CW_ARC);
+        seg.arc.sweepAngle = mirrorFlip ? -sweep : sweep;
+        seg.arc.clockwise = cw;
         seg.arc.plane = m_machineState.plane;
         seg.arc.helixDelta = end[ah] - start[ah];
         seg.arc.valid = true;

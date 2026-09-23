@@ -589,6 +589,15 @@ public:
      */
     Error processG50(MachineState& state);
 
+    /// @brief Process G51.1 — programmable mirror image. Each axis word
+    ///        present (X<c>, Y<c>, Z<c>, ...) enables mirroring of that axis
+    ///        about program coordinate <c>.
+    Error processG51_1(const Block& block, MachineState& state);
+
+    /// @brief Process G50.1 — cancel mirror image. Axis words disable
+    ///        mirroring on those axes; no words disables all axes.
+    Error processG50_1(const Block& block, MachineState& state);
+
     // ========================================================================
     // G10 - Set Coordinate Data
     // ========================================================================

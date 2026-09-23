@@ -213,6 +213,8 @@ set(GCODE_TYPES_VARIABLES_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_CoordinateTransform.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_CoordinateSystemManager.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_GCodeInterpreter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gcode/GCodeMarlinMCodeTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gcode/GCodeMirrorDialectTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_PlanningSegmentBuilder.cpp"
 )
 set(GCODE_EXPORT_SOURCES
