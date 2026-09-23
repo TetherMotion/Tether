@@ -46,6 +46,7 @@
 #include <Eigen/Dense>
 #include <unsupported/Eigen/MatrixFunctions>
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -103,37 +104,35 @@ public:
         double duration = 0.0;   ///< Arc duration
         StateVec stateStart;     ///< State at arc start
         StateMat expA;           ///< exp(A_arc · Δt)
-        StateVec steadyState;    ///< A_arc⁻¹ · b_arc (steady-state offset)
+        StateVec phi;            ///< ∫₀^Δt exp(A·s)·b ds (particular solution)
+        StateVec b;              ///< Arc input vector (for mid-arc evaluation)
         double Qbar = 0.0;       ///< Average flow for this arc
 
         /**
          * @brief Evaluate the thermal state at local time tau ∈ [0, duration].
          *
-         * T(τ) = exp(A·τ) · T₀ + A⁻¹·(exp(A·τ) - I) · b
+         * T(τ) = exp(A·τ) · T₀ + ∫₀^τ exp(A·s)·b ds
          *
-         * We precompute exp(A·Δt) and use the property:
-         *   exp(A·τ) = exp(A·Δt)^(τ/Δt)
-         * But for arbitrary τ, we compute exp(A·τ) directly via scaling.
-         * For efficiency, we use the interpolation:
-         *   T(τ) ≈ (1-α)·T₀ + α·T_end  (linear in state, valid for short arcs)
-         * where α = τ/Δt and T_end = expA·T₀ + (expA - I)·steadyState.
-         *
-         * For higher accuracy, we compute exp(A·τ) via Eigen.
+         * The integral term is computed via the augmented matrix
+         * exponential of [[A, b], [0, 0]] — the classical form
+         * A⁻¹·(exp(A·τ) - I)·b breaks down when A is singular, which
+         * happens on zero-flow arcs with the heater on (no finite steady
+         * state exists).
          */
         StateVec stateAt(double tau, const StateMat& A_arc) const {
             if (tau <= 0.0) return stateStart;
             if (tau >= duration) return stateAtEnd();
 
-            // Compute exp(A·τ) — for short arcs, linear interpolation suffices
-            // For accuracy, use the matrix exponential
-            StateMat expAtau = (A_arc * tau).exp();
-            return expAtau * stateStart + (expAtau - StateMat::Identity())
-                   * steadyState;
+            Eigen::Matrix4d M = Eigen::Matrix4d::Zero();
+            M.topLeftCorner<3, 3>() = A_arc;
+            M.topRightCorner<3, 1>() = b;
+            const Eigen::Matrix4d expM = (M * tau).exp();
+            return expM.topLeftCorner<3, 3>() * stateStart
+                   + expM.topRightCorner<3, 1>();
         }
 
         StateVec stateAtEnd() const {
-            return expA * stateStart + (expA - StateMat::Identity())
-                   * steadyState;
+            return expA * stateStart + phi;
         }
     };
 
@@ -309,27 +308,37 @@ private:
 
         StateVec currentState = state_;
         for (const auto& a : arcs) {
-            // Compute average flow for this arc
+            // Compute average flow for this arc.  Clamp to >= 0: retraction
+            // (negative extruder velocity) does not pump cold filament into
+            // the melt zone — matches the discrete MeltZoneThermalObserver
+            // and keeps A_arc stable (a negative Q flips the sign of the
+            // (2,2) entry and produces unphysical sub-inlet temperatures).
             double avgVE = a.avgExtruderVelocity();
-            double Qbar = avgVE * filamentAreaMm2_;
+            double Qbar = std::max(0.0, avgVE * filamentAreaMm2_);
 
             StateMat A;
             StateVec b;
             buildArcSystem(Qbar, A, b);
 
-            // Compute exp(A·Δt) and steady-state = A⁻¹·b
+            // Compute exp(A·Δt) and the particular solution
+            //   phi = ∫₀^Δt exp(A·s)·b ds
+            // via the augmented matrix exponential [[A, b], [0, 0]].
+            // Unlike A⁻¹·(exp(A·Δt) - I)·b, this is well-defined even
+            // when A is singular (e.g. zero-flow arcs with the heater
+            // enabled have no finite steady state).
             double dt = a.duration;
-            StateMat expAdt = (A * dt).exp();
-
-            // Steady state: A⁻¹·b (if A is invertible)
-            StateVec steadyState = A.colPivHouseholderQr().solve(b);
+            Eigen::Matrix4d M = Eigen::Matrix4d::Zero();
+            M.topLeftCorner<3, 3>() = A;
+            M.topRightCorner<3, 1>() = b;
+            const Eigen::Matrix4d expM = (M * dt).exp();
 
             ArcThermalSolution sol;
             sol.t0 = a.t0;
             sol.duration = dt;
             sol.stateStart = currentState;
-            sol.expA = expAdt;
-            sol.steadyState = steadyState;
+            sol.expA = expM.topLeftCorner<3, 3>();
+            sol.phi = expM.topRightCorner<3, 1>();
+            sol.b = b;
             sol.Qbar = Qbar;
             solutions_.push_back(sol);
             arcMatrices_.push_back(A);

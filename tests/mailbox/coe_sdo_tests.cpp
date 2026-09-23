@@ -223,7 +223,10 @@ TEST(CoeSDO, Upload_RejectsStaleResponse_WrongCounter) {
     mock.expected_sub = 0;
     mock.response_data = 0xDEADBEEF;
     mock.stale_cnt = 7;        // Different counter
-    mock.stale_index = 0x1000;  // Same index — isolate counter check
+    // A response with a foreign counter that DOES echo the request index is
+    // adopted (persistent-counter slaves like SOMANET) — a genuinely stale
+    // leftover must not echo, so use a different index here.
+    mock.stale_index = 0x2000;
     mock.stale_sub = 0;
     mock.install(master);
 
@@ -240,6 +243,38 @@ TEST(CoeSDO, Upload_RejectsStaleResponse_WrongCounter) {
     // Should succeed — stale response skipped, correct response accepted
     EXPECT_TRUE(ok);
     EXPECT_GE(mock.mailbox_data_reads, 2) << "Should have read at least twice (stale + correct)";
+
+    mock.remove();
+}
+
+// A wrong-counter response that echoes the request index is not stale — it
+// comes from a slave with a persistent response counter (e.g. Synapticon
+// SOMANET keeps counting across master restarts).  The master adopts the
+// slave's counter and accepts the response immediately.
+TEST(CoeSDO, Upload_AdoptsForeignCounter_WhenResponseEchoesIndex) {
+    EtherCAT::Master master;
+    StaleResponseMock mock;
+    mock.expected_cnt = 1;
+    mock.expected_index = 0x1000;
+    mock.expected_sub = 0;
+    mock.response_data = 0xDEADBEEF;
+    mock.stale_cnt = 7;         // Foreign counter, same index -> adopted
+    mock.stale_index = 0x1000;
+    mock.stale_sub = 0;
+    mock.install(master);
+
+    uint8_t mbx_cnt = 1;
+    uint8_t outbuf[256] = {0};
+    size_t out_len = 0;
+
+    bool ok = master.coeSdoUpload(0x0000, &mbx_cnt,
+                             StaleResponseMock::MBX_WRITE_ADDR, StaleResponseMock::MBX_LEN,
+                             StaleResponseMock::MBX_READ_ADDR, StaleResponseMock::MBX_LEN,
+                             0x1000, 0, outbuf, sizeof(outbuf), &out_len,
+                             false, 5, 200);
+
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Echoing response should be adopted without re-send";
 
     mock.remove();
 }
@@ -460,7 +495,9 @@ TEST(CoeSDO, Download_RejectsStaleResponse_WrongCounter) {
     StaleResponseMockExt mock;
     mock.num_stale_responses = 1;
     mock.stale_cnt = 7;
-    mock.stale_index = 0x1000;
+    // Non-echoing index — a same-index echo with a foreign counter is
+    // adopted as a persistent-counter slave, not treated as stale.
+    mock.stale_index = 0x2000;
     mock.stale_sub = 0;
     mock.final_cnt = 1;
     mock.final_index = 0x1000;
@@ -573,7 +610,7 @@ TEST(CoeSDO, Upload_StaleThenAbort_ReturnsFalse) {
     StaleResponseMockExt mock;
     mock.num_stale_responses = 1;
     mock.stale_cnt = 7;
-    mock.stale_index = 0x1000;
+    mock.stale_index = 0x2000;
     mock.stale_sub = 0;
     mock.final_cnt = 1;
     mock.final_index = 0x1000;
@@ -610,7 +647,7 @@ TEST(CoeSDO, Upload_MultipleStaleResponses_ClearsAndResendsUntilSuccess) {
     StaleResponseMockExt mock;
     mock.num_stale_responses = 5;   // 5 stale responses before the correct one
     mock.stale_cnt = 7;
-    mock.stale_index = 0x1000;
+    mock.stale_index = 0x2000;
     mock.stale_sub = 0;
     mock.final_cnt = 1;
     mock.final_index = 0x1000;
@@ -645,7 +682,7 @@ TEST(CoeSDO, Download_MultipleStaleResponses_ClearsAndResendsUntilSuccess) {
     StaleResponseMockExt mock;
     mock.num_stale_responses = 3;
     mock.stale_cnt = 7;
-    mock.stale_index = 0x1000;
+    mock.stale_index = 0x2000;
     mock.stale_sub = 0;
     mock.final_cnt = 1;
     mock.final_index = 0x1000;
