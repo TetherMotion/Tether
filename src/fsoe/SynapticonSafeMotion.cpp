@@ -156,19 +156,22 @@ void Codec::encodeSlaveToMain(const Status& status,
     uint16_t status_word0 = 0;
     uint16_t status_word1 = 0;
 
-    status_word0 = setOneActive(status_word0, kStatusStoBit, status.sto_active);
-    status_word0 = setOneActive(status_word0, kStatusSosBit, status.sos_active);
+    // The function-state bits are verbatim echoes of the zero-active
+    // command bits (see Codec::kStatusBitMirrors): 0 = function active.
+    status_word0 = setZeroActive(status_word0, kStatusStoBit, status.sto_active);
+    status_word0 = setZeroActive(status_word0, kStatusSosBit, status.sos_active);
     status_word0 = setOneActive(status_word0, kStatusErrorBit, status.error_active);
-    status_word0 = setOneActive(status_word0, kStatusSs1Bit, status.ss1_active);
-    status_word0 = setOneActive(status_word0, kStatusSs2Bit, status.ss2_active);
-    status_word0 = setOneActive(status_word0, kStatusSls1Bit, status.sls_active[0]);
-    status_word0 = setOneActive(status_word0, kStatusSls2Bit, status.sls_active[1]);
-    status_word0 = setOneActive(status_word0, kStatusSls3Bit, status.sls_active[2]);
-    status_word0 = setOneActive(status_word0, kStatusSls4Bit, status.sls_active[3]);
+    status_word0 = setZeroActive(status_word0, kStatusSs1Bit, status.ss1_active);
+    status_word0 = setZeroActive(status_word0, kStatusSs2Bit, status.ss2_active);
+    status_word0 = setZeroActive(status_word0, kStatusSls1Bit, status.sls_active[0]);
+    status_word0 = setZeroActive(status_word0, kStatusSls2Bit, status.sls_active[1]);
+    status_word0 = setZeroActive(status_word0, kStatusSls3Bit, status.sls_active[2]);
+    status_word0 = setZeroActive(status_word0, kStatusSls4Bit, status.sls_active[3]);
 
     status_word1 = setOneActive(status_word1, kStatusRestartRequiredBit,
                                 status.restart_acknowledge_required);
-    status_word1 = setOneActive(status_word1, kStatusSbcBit, status.brake_engaged);
+    // SBC state is a verbatim echo of the zero-active SBC command bit.
+    status_word1 = setZeroActive(status_word1, kStatusSbcBit, status.brake_engaged);
     status_word1 = setOneActive(status_word1, kStatusTemperatureOkBit, status.temperature_ok);
     status_word1 = setOneActive(status_word1, kStatusPositionValidBit, status.safe_position_valid);
     status_word1 = setOneActive(status_word1, kStatusVelocityValidBit, status.safe_velocity_valid);
@@ -208,17 +211,19 @@ std::optional<Status> Codec::decodeSlaveToMain(
     const uint32_t velocity = static_cast<uint32_t>(readWord(bytes.data() + 8)) |
                               (static_cast<uint32_t>(readWord(bytes.data() + 10)) << 16);
 
-    status.sto_active = getOneActive(status_word0, kStatusStoBit);
-    status.sos_active = getOneActive(status_word0, kStatusSosBit);
+    // Function-state bits echo the zero-active command bits on the wire:
+    // 0 = function active (see Codec::kStatusBitMirrors).
+    status.sto_active = getZeroActive(status_word0, kStatusStoBit);
+    status.sos_active = getZeroActive(status_word0, kStatusSosBit);
     status.error_active = getOneActive(status_word0, kStatusErrorBit);
-    status.ss1_active = getOneActive(status_word0, kStatusSs1Bit);
-    status.ss2_active = getOneActive(status_word0, kStatusSs2Bit);
-    status.sls_active[0] = getOneActive(status_word0, kStatusSls1Bit);
-    status.sls_active[1] = getOneActive(status_word0, kStatusSls2Bit);
-    status.sls_active[2] = getOneActive(status_word0, kStatusSls3Bit);
-    status.sls_active[3] = getOneActive(status_word0, kStatusSls4Bit);
+    status.ss1_active = getZeroActive(status_word0, kStatusSs1Bit);
+    status.ss2_active = getZeroActive(status_word0, kStatusSs2Bit);
+    status.sls_active[0] = getZeroActive(status_word0, kStatusSls1Bit);
+    status.sls_active[1] = getZeroActive(status_word0, kStatusSls2Bit);
+    status.sls_active[2] = getZeroActive(status_word0, kStatusSls3Bit);
+    status.sls_active[3] = getZeroActive(status_word0, kStatusSls4Bit);
     status.restart_acknowledge_required = getOneActive(status_word1, kStatusRestartRequiredBit);
-    status.brake_engaged = getOneActive(status_word1, kStatusSbcBit);
+    status.brake_engaged = getZeroActive(status_word1, kStatusSbcBit);
     status.temperature_ok = getOneActive(status_word1, kStatusTemperatureOkBit);
     status.safe_position_valid = getOneActive(status_word1, kStatusPositionValidBit);
     status.safe_velocity_valid = getOneActive(status_word1, kStatusVelocityValidBit);
