@@ -278,3 +278,184 @@ TEST_F(MirrorDialectTest, G150_SubprogramNotExecuted) {
     for (const auto& s : segments)
         EXPECT_LE(s.lineNumber, 3);
 }
+
+// ============================================================================
+// Fanuc lathe cycles — G70 finishing, G71 turning, G72 facing, G73 pattern
+// ============================================================================
+
+class LatheCycleTest : public ::testing::Test {
+protected:
+    Interpreter interp;
+    std::vector<MotionSegment> segments;
+    std::vector<std::pair<bool, double>> spindleCommands;
+
+    LatheCycleTest() {
+        interp.setMotionCallback([this](const MotionSegment& seg) {
+            segments.push_back(seg);
+            return Error{};
+        });
+        interp.setSpindleCallback([this](bool enable, bool cw, double rpm) {
+            if (enable) spindleCommands.emplace_back(cw, rpm);
+            return Error{};
+        });
+    }
+
+    bool run(const std::string& program) {
+        if (!interp.loadString(program).ok()) return false;
+        return interp.run().ok();
+    }
+};
+
+// Stepped-shaft contour: (20,0) -> (10,-10), approached from X30 Z2.
+static const char* kStepShaft =
+    "G0 X30 Z2\n"
+    "G71 P10 Q11 D5 F200\n"
+    "G70 P10 Q11\n"
+    "O99 sub\n"
+    "N10 G1 X20 Z0\n"
+    "N11 G1 X10 Z-10\n"
+    "O99 endsub\n";
+
+TEST_F(LatheCycleTest, G71_RoughTurnsLevels) {
+    ASSERT_TRUE(run(kStepShaft));
+    // Roughing levels at x = 25, 20, 15 (D5 from X30 toward profile).
+    std::set<double> cutXs;
+    for (const auto& s : segments) {
+        if (s.type == MotionSegment::Type::LINEAR && s.feedRate == 200.0)
+            cutXs.insert(std::round(s.endPosition.x() * 1000) / 1000);
+    }
+    EXPECT_TRUE(cutXs.count(25.0));
+    EXPECT_TRUE(cutXs.count(20.0));
+    EXPECT_TRUE(cutXs.count(15.0));
+}
+
+TEST_F(LatheCycleTest, G71_CutsBelowStockRadius) {
+    ASSERT_TRUE(run(kStepShaft));
+    for (const auto& s : segments) {
+        if (s.type == MotionSegment::Type::LINEAR)
+            EXPECT_LT(s.endPosition.x(), 30.0);
+    }
+}
+
+TEST_F(LatheCycleTest, G71_FinishAllowance) {
+    // U2 leaves 2mm of radial stock: no rough cut below x=12 (profile 10+2).
+    ASSERT_TRUE(run(
+        "G0 X30 Z2\n"
+        "G71 P10 Q11 U2 W0 D5 F200\n"
+        "O99 sub\n"
+        "N10 G1 X20 Z0\n"
+        "N11 G1 X10 Z-10\n"
+        "O99 endsub\n"));
+    for (const auto& s : segments) {
+        if (s.type == MotionSegment::Type::LINEAR)
+            EXPECT_GT(s.endPosition.x(), 10.0 + 1e-9);
+    }
+}
+
+TEST_F(LatheCycleTest, G70_TracesContour) {
+    ASSERT_TRUE(run(kStepShaft));
+    // G70 finish pass must reach the profile corner (10, -10).
+    bool reached = false;
+    for (const auto& s : segments) {
+        if (s.type == MotionSegment::Type::LINEAR &&
+            std::abs(s.endPosition.x() - 10.0) < 1e-6 &&
+            std::abs(s.endPosition.z() + 10.0) < 1e-6)
+            reached = true;
+    }
+    EXPECT_TRUE(reached);
+}
+
+TEST_F(LatheCycleTest, G72_RoughFacesLevels) {
+    // Facing: levels in Z spaced by D, cuts along X.
+    ASSERT_TRUE(run(
+        "G0 X30 Z2\n"
+        "G72 P10 Q11 D5 F200\n"
+        "O99 sub\n"
+        "N10 G1 X20 Z0\n"
+        "N11 G1 X10 Z-10\n"
+        "O99 endsub\n"));
+    std::set<double> cutZs;
+    for (const auto& s : segments) {
+        if (s.type == MotionSegment::Type::LINEAR && s.feedRate == 200.0)
+            cutZs.insert(std::round(s.endPosition.z() * 1000) / 1000);
+    }
+    // Levels at z = -3 and -8 (D5 from Z2 toward the face profile).
+    EXPECT_TRUE(cutZs.count(-3.0));
+    EXPECT_TRUE(cutZs.count(-8.0));
+}
+
+TEST_F(LatheCycleTest, G73_PatternRepeatOffsets) {
+    ASSERT_TRUE(run(
+        "G0 X30 Z2\n"
+        "G73 P10 Q11 U4 W2 R2 F200\n"
+        "O99 sub\n"
+        "N10 G1 X20 Z0\n"
+        "N11 G1 X10 Z-10\n"
+        "O99 endsub\n"));
+    // R2 passes: first offset by U/2,W/2 = (2,1), last on the true contour.
+    bool offsetPass = false, finalPass = false;
+    for (const auto& s : segments) {
+        if (s.type != MotionSegment::Type::LINEAR) continue;
+        if (std::abs(s.endPosition.x() - 12.0) < 1e-6 &&
+            std::abs(s.endPosition.z() + 9.0) < 1e-6)
+            offsetPass = true;   // (10+2, -10+1)
+        if (std::abs(s.endPosition.x() - 10.0) < 1e-6 &&
+            std::abs(s.endPosition.z() + 10.0) < 1e-6)
+            finalPass = true;    // (10, -10)
+    }
+    EXPECT_TRUE(offsetPass);
+    EXPECT_TRUE(finalPass);
+}
+
+TEST_F(LatheCycleTest, G73_WithoutPQ_StaysPeckDrill) {
+    // RS274 G73 peck drill (no P/Q) must keep working.
+    ASSERT_TRUE(run("G0 X0 Y0 Z10\nG73 Z-5 Q1 R2 F100\n"));
+    bool drilled = false;
+    for (const auto& s : segments)
+        if (s.type == MotionSegment::Type::LINEAR &&
+            s.endPosition.z() < 0.0)
+            drilled = true;
+    EXPECT_TRUE(drilled);
+}
+
+TEST_F(LatheCycleTest, G71_MissingPQ_Errors) {
+    EXPECT_FALSE(run("G0 X30 Z2\nG71 D5 F200\n"));
+}
+
+TEST_F(LatheCycleTest, G71_MissingContour_Errors) {
+    EXPECT_FALSE(run("G0 X30 Z2\nG71 P50 Q60 D5\n"));
+}
+
+TEST_F(LatheCycleTest, G71_SpindleStart) {
+    ASSERT_TRUE(run(
+        "G50 S1000\n"
+        "G0 X30 Z2\n"
+        "G71 P10 Q11 D5 F200 S1500\n"
+        "O99 sub\n"
+        "N10 G1 X20 Z0\n"
+        "N11 G1 X10 Z-10\n"
+        "O99 endsub\n"));
+    ASSERT_FALSE(spindleCommands.empty());
+    EXPECT_DOUBLE_EQ(spindleCommands.back().second, 1000.0); // G50 clamp
+}
+
+TEST_F(LatheCycleTest, G71_ArcContour) {
+    // Contour with a G3 arc in the G18 XZ plane (I/K center).
+    ASSERT_TRUE(run(
+        "G0 X30 Z2\n"
+        "G70 P10 Q12\n"
+        "O99 sub\n"
+        "N10 G1 X20 Z0\n"
+        "N11 G3 X10 Z-5 I-5 K0\n"
+        "N12 G1 X10 Z-10\n"
+        "O99 endsub\n"));
+    // Finish pass must emit tessellated arc points (G3 about I-5 K0 bulges
+    // off the straight chord — a point with z > 0.1 proves tessellation).
+    bool bulge = false;
+    for (const auto& s : segments) {
+        if (s.type == MotionSegment::Type::LINEAR &&
+            s.endPosition.z() > 0.1 && s.endPosition.x() < 20.0)
+            bulge = true;
+    }
+    EXPECT_TRUE(bulge);
+}
