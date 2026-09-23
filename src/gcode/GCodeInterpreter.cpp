@@ -1161,6 +1161,12 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                 }
                 case 150: // G150 — Haas generic pocket milling
                     return dispatchG150(block, segments);
+                case 70: // G70 — Fanuc lathe finishing cycle
+                    return dispatchG70(block, segments);
+                case 71: // G71 — Fanuc lathe rough turning cycle
+                    return dispatchG71(block, segments);
+                case 72: // G72 — Fanuc lathe rough facing cycle
+                    return dispatchG72(block, segments);
                 case 921: // G92.1 — Reset G92, zero position
                     return m_coordinates.processG92_1(m_machineState, m_variables);
                 case 922: // G92.2 — Reset G92, keep position
@@ -1716,6 +1722,328 @@ Error Interpreter::dispatchG150(const Block& block,
 }
 
 // ============================================================================
+// Fanuc lathe cycles (G70/G71/G72/G73)
+// ============================================================================
+
+Error Interpreter::collectLatheContour(
+        int32_t seqStart, int32_t seqEnd, double unitScale,
+        std::vector<std::pair<double, double>>& pts) {
+    Lexer& lex = m_parser->getLexer();
+    const size_t saved = lex.getPosition();
+    lex.seekToStart();
+
+    Block b;
+    bool inRange = false, found = false;
+    double cx = 0.0, cz = 0.0;
+    bool have = false;
+    while (true) {
+        Error e = m_parser->parseNextBlock(b);
+        if (!e.ok()) break;
+        if (!inRange) {
+            if (b.lineNumber == seqStart) {
+                inRange = true;
+                found = true;
+            } else {
+                continue;
+            }
+        }
+
+        bool hasXZ =
+            b.hasWord(WordLetter::X) || b.hasWord(WordLetter::Z);
+        bool arc = false, cw = false;
+        for (uint8_t i = 0; i < b.gCodeCount; ++i) {
+            const int g = b.gCodes[i] / 10;
+            if (g == 2 || g == 3) { arc = true; cw = (g == 2); }
+        }
+
+        const double nx = b.hasWord(WordLetter::X)
+            ? b.getWord(WordLetter::X) * unitScale : cx;
+        const double nz = b.hasWord(WordLetter::Z)
+            ? b.getWord(WordLetter::Z) * unitScale : cz;
+
+        if (arc && have &&
+            (b.hasWord(WordLetter::I) || b.hasWord(WordLetter::K))) {
+            const double ccx = cx +
+                (b.hasWord(WordLetter::I) ? b.getWord(WordLetter::I) * unitScale : 0.0);
+            const double ccz = cz +
+                (b.hasWord(WordLetter::K) ? b.getWord(WordLetter::K) * unitScale : 0.0);
+            const double r = std::hypot(cx - ccx, cz - ccz);
+            if (r > 1e-9) {
+                const double a0 = std::atan2(cz - ccz, cx - ccx);
+                const double a1 = std::atan2(nz - ccz, nx - ccx);
+                double sweep = cw ? a0 - a1 : a1 - a0;
+                while (sweep <= 0.0) sweep += 2.0 * M_PI;
+                const int n = std::max(4, static_cast<int>(
+                    std::ceil(sweep / (M_PI / 8.0))));
+                for (int i = 1; i <= n; ++i) {
+                    const double ang =
+                        a0 + (cw ? -1.0 : 1.0) * sweep * i / n;
+                    pts.emplace_back(ccx + r * std::cos(ang),
+                                     ccz + r * std::sin(ang));
+                }
+            } else {
+                pts.emplace_back(nx, nz);
+            }
+        } else if (hasXZ || arc) {
+            pts.emplace_back(nx, nz);
+        }
+        cx = nx;
+        cz = nz;
+        have = true;
+
+        if (b.lineNumber == seqEnd) break;
+    }
+
+    lex.seek(saved);
+    if (!found || pts.size() < 2)
+        return makeError(ErrorCode::PARAMETER_ERROR,
+                         "G70-73: contour block range P..Q not found");
+    return Error{};
+}
+
+Error Interpreter::dispatchG70(const Block& block,
+                               std::vector<MotionSegment>& segments) {
+    if (!block.hasWord(WordLetter::P) || !block.hasWord(WordLetter::Q))
+        return makeError(ErrorCode::PARAMETER_ERROR,
+                         "G70 requires P/Q contour block range");
+    const double unitScale =
+        (m_machineState.units == Units::INCH) ? 25.4 : 1.0;
+    if (block.hasWord(WordLetter::F))
+        m_machineState.feedRate = block.getWord(WordLetter::F) * unitScale;
+
+    std::vector<std::pair<double, double>> pts;
+    Error err = collectLatheContour(
+        static_cast<int32_t>(block.getWord(WordLetter::P)),
+        static_cast<int32_t>(block.getWord(WordLetter::Q)), unitScale, pts);
+    if (!err.ok()) return err;
+
+    const double feed = m_machineState.feedRate;
+    const double zStart = m_machineState.workPosition.z();
+    auto emit = [&](double x, double z, MotionSegment::Type type, double fr) {
+        Position target = m_machineState.workPosition;
+        target.x() = x;
+        target.z() = z;
+        MotionSegment seg;
+        seg.type = type;
+        seg.endPosition = m_coordinates.toMachineCoords(target);
+        seg.feedRate = fr;
+        seg.lineNumber = block.sourceLineNumber;
+        segments.push_back(seg);
+        m_machineState.workPosition = target;
+        m_machineState.machinePosition = seg.endPosition;
+        ++m_stats.motionSegments;
+    };
+
+    emit(pts[0].first, pts[0].second, MotionSegment::Type::RAPID, 0.0);
+    for (size_t i = 1; i < pts.size(); ++i)
+        emit(pts[i].first, pts[i].second, MotionSegment::Type::LINEAR, feed);
+    emit(pts.back().first, zStart, MotionSegment::Type::RAPID, 0.0);
+    return Error{};
+}
+
+// Roughing engine shared by G71 (turning: levels in X, cuts along Z) and
+// G72 (facing: levels in Z, cuts along X). The material region is the
+// contour closed by the approach-side edges; each level is a scanline
+// clipped to the polygon by even-odd fill, cut from the approach side.
+static Error latheRoughing(const Block& block,
+                           std::vector<MotionSegment>& segments,
+                           MachineState& state, CoordinateSystemManager& coords,
+                           uint32_t& segCount, bool turning,
+                           const std::vector<std::pair<double, double>>& contour,
+                           double depthOfCut, double allowU, double allowW,
+                           double feed, int lineNo) {
+    // Working axes: u = level axis (X for G71, Z for G72),
+    //               v = cut axis  (Z for G71, X for G72).
+    auto cu = [&](const std::pair<double, double>& p) {
+        return turning ? p.first : p.second;
+    };
+    auto cv = [&](const std::pair<double, double>& p) {
+        return turning ? p.second : p.first;
+    };
+    const double uStart = turning ? state.workPosition.x()
+                                  : state.workPosition.z();
+    const double vStart = turning ? state.workPosition.z()
+                                  : state.workPosition.x();
+
+    // Polygon: contour + closing edge along u = uStart (stock boundary on
+    // the approach side of the level axis).
+    std::vector<std::pair<double, double>> poly;
+    poly.reserve(contour.size() + 2);
+    for (const auto& p : contour) poly.emplace_back(cu(p), cv(p));
+    poly.emplace_back(uStart, cv(contour.back()));
+    poly.emplace_back(uStart, cv(contour.front()));
+    poly.push_back(poly.front());  // close the polygon
+
+    double umin = poly[0].first, umax = poly[0].first;
+    for (const auto& p : poly) {
+        umin = std::min(umin, p.first);
+        umax = std::max(umax, p.first);
+    }
+    // Cut direction: from uStart toward the polygon interior.
+    const double dir = (uStart >= (umin + umax) * 0.5) ? -1.0 : 1.0;
+    // Finish allowances shift the profile away from the cut direction.
+    const double allowLevel = turning ? allowU : allowW;
+    const double uLimit = (dir < 0.0) ? umin + allowLevel
+                                      : umax - allowLevel;
+
+    auto emit = [&](double u, double v, MotionSegment::Type type,
+                    double fr) {
+        Position target = state.workPosition;
+        if (turning) { target.x() = u; target.z() = v; }
+        else         { target.z() = u; target.x() = v; }
+        MotionSegment seg;
+        seg.type = type;
+        seg.endPosition = coords.toMachineCoords(target);
+        seg.feedRate = fr;
+        seg.lineNumber = lineNo;
+        segments.push_back(seg);
+        state.workPosition = target;
+        state.machinePosition = seg.endPosition;
+        ++segCount;
+    };
+
+    emit(uStart, vStart, MotionSegment::Type::RAPID, 0.0);
+    for (int level = 0; level < 10000; ++level) {
+        const double u = uStart + dir * depthOfCut * (level + 1);
+        if ((dir < 0.0 && u <= uLimit) || (dir > 0.0 && u >= uLimit))
+            break;
+
+        // Intersect the scanline u = const with the polygon (even-odd).
+        std::vector<double> vs;
+        for (size_t i = 0; i + 1 < poly.size(); ++i) {
+            const double u1 = poly[i].first, u2 = poly[i + 1].first;
+            if ((u1 <= u) != (u2 <= u))
+                vs.push_back(poly[i].second +
+                             (u - u1) * (poly[i + 1].second - poly[i].second)
+                                 / (u2 - u1));
+        }
+        if (vs.empty()) break;
+        std::sort(vs.begin(), vs.end());
+
+        for (size_t k = 0; k + 1 < vs.size(); k += 2) {
+            const double va = vs[k], vb = vs[k + 1];
+            // Enter at the approach side, cut to the far end, retract.
+            emit(u, vStart, MotionSegment::Type::RAPID, 0.0);
+            const double vNear = std::abs(va - vStart) < std::abs(vb - vStart)
+                                     ? va : vb;
+            const double vFar = (vNear == va) ? vb : va;
+            emit(u, vFar, MotionSegment::Type::LINEAR, feed);
+            emit(u, vStart, MotionSegment::Type::RAPID, 0.0);
+        }
+    }
+    return Error{};
+}
+
+Error Interpreter::dispatchG71(const Block& block,
+                               std::vector<MotionSegment>& segments) {
+    return dispatchG71_G72Impl(block, segments, true);
+}
+
+Error Interpreter::dispatchG72(const Block& block,
+                               std::vector<MotionSegment>& segments) {
+    return dispatchG71_G72Impl(block, segments, false);
+}
+
+Error Interpreter::dispatchG71_G72Impl(
+        const Block& block, std::vector<MotionSegment>& segments,
+        bool turning) {
+    if (!block.hasWord(WordLetter::P) || !block.hasWord(WordLetter::Q))
+        return makeError(ErrorCode::PARAMETER_ERROR,
+                         turning ? "G71 requires P/Q contour block range"
+                                 : "G72 requires P/Q contour block range");
+    const double unitScale =
+        (m_machineState.units == Units::INCH) ? 25.4 : 1.0;
+    const double depth = block.hasWord(WordLetter::D)
+        ? std::abs(block.getWord(WordLetter::D)) * unitScale : 1.0;
+    if (depth <= 0.0)
+        return makeError(ErrorCode::PARAMETER_ERROR,
+                         "G71/G72 depth of cut must be positive");
+    const double allowU = block.hasWord(WordLetter::U)
+        ? block.getWord(WordLetter::U) * unitScale : 0.0;
+    const double allowW = block.hasWord(WordLetter::W)
+        ? block.getWord(WordLetter::W) * unitScale : 0.0;
+
+    if (block.hasWord(WordLetter::F))
+        m_machineState.feedRate = block.getWord(WordLetter::F) * unitScale;
+    if (block.hasWord(WordLetter::S)) {
+        double rpm = block.getWord(WordLetter::S);
+        if (m_machineState.maxSpindleSpeed > 0.0)
+            rpm = std::min(rpm, m_machineState.maxSpindleSpeed);
+        m_machineState.spindleSpeed = rpm;
+        m_machineState.spindleCW = true;
+        m_machineState.spindleOn = true;
+        if (m_spindleCallback) {
+            Error e = m_spindleCallback(true, true, rpm);
+            if (!e.ok()) return e;
+        }
+    }
+
+    std::vector<std::pair<double, double>> pts;
+    Error err = collectLatheContour(
+        static_cast<int32_t>(block.getWord(WordLetter::P)),
+        static_cast<int32_t>(block.getWord(WordLetter::Q)), unitScale, pts);
+    if (!err.ok()) return err;
+
+    return latheRoughing(block, segments, m_machineState, m_coordinates,
+                         m_stats.motionSegments, turning, pts, depth,
+                         allowU, allowW, m_machineState.feedRate,
+                         block.sourceLineNumber);
+}
+
+Error Interpreter::dispatchG73Lathe(const Block& block,
+                                    std::vector<MotionSegment>& segments) {
+    const double unitScale =
+        (m_machineState.units == Units::INCH) ? 25.4 : 1.0;
+    const double allowU = block.hasWord(WordLetter::U)
+        ? block.getWord(WordLetter::U) * unitScale : 0.0;
+    const double allowW = block.hasWord(WordLetter::W)
+        ? block.getWord(WordLetter::W) * unitScale : 0.0;
+    const int divs = block.hasWord(WordLetter::R)
+        ? std::max(1, static_cast<int>(block.getWord(WordLetter::R))) : 1;
+    if (block.hasWord(WordLetter::F))
+        m_machineState.feedRate = block.getWord(WordLetter::F) * unitScale;
+    const double feed = m_machineState.feedRate;
+
+    std::vector<std::pair<double, double>> pts;
+    Error err = collectLatheContour(
+        static_cast<int32_t>(block.getWord(WordLetter::P)),
+        static_cast<int32_t>(block.getWord(WordLetter::Q)), unitScale, pts);
+    if (!err.ok()) return err;
+
+    const double x0 = m_machineState.workPosition.x();
+    const double z0 = m_machineState.workPosition.z();
+    auto emit = [&](double x, double z, MotionSegment::Type type,
+                    double fr) {
+        Position target = m_machineState.workPosition;
+        target.x() = x;
+        target.z() = z;
+        MotionSegment seg;
+        seg.type = type;
+        seg.endPosition = m_coordinates.toMachineCoords(target);
+        seg.feedRate = fr;
+        seg.lineNumber = block.sourceLineNumber;
+        segments.push_back(seg);
+        m_machineState.workPosition = target;
+        m_machineState.machinePosition = seg.endPosition;
+        ++m_stats.motionSegments;
+    };
+
+    // Pass i traces the contour offset by the remaining relief share
+    // (Fanuc: total U/W relief divided evenly across R passes).
+    for (int i = 0; i < divs; ++i) {
+        const double s = static_cast<double>(divs - 1 - i) / divs;
+        const double ox = allowU * s, oz = allowW * s;
+        emit(pts[0].first + ox, pts[0].second + oz,
+             MotionSegment::Type::RAPID, 0.0);
+        for (size_t k = 1; k < pts.size(); ++k)
+            emit(pts[k].first + ox, pts[k].second + oz,
+                 MotionSegment::Type::LINEAR, feed);
+        emit(x0, z0, MotionSegment::Type::RAPID, 0.0);
+    }
+    return Error{};
+}
+
+// ============================================================================
 // Motion Handling
 // ============================================================================
 
@@ -1769,6 +2097,12 @@ Error Interpreter::handleMotion(const Block& block,
             break;
         }
     }
+
+    // Fanuc lathe G73 (pattern repeat) shares the code number with the
+    // RS274 peck-drill cycle — disambiguate by the P/Q contour range.
+    if (mode == MotionMode::DRILL_PECK_BREAK &&
+        block.hasWord(WordLetter::P) && block.hasWord(WordLetter::Q))
+        return dispatchG73Lathe(block, segments);
 
     // Update feed rate if F word is present
     if (block.hasWord(WordLetter::F))

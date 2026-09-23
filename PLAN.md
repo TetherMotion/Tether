@@ -41,7 +41,7 @@ Priority tags (for future implementation work):
 | **G50** (max RPM clamp, Fanuc lathe) | DONE | P1 | `G50 S<rpm>` sets `MachineState::maxSpindleSpeed` (clamped in M3/M4); bare G50 still cancels scaling. |
 | **G68 / G69** (coordinate system rotation) | DONE | P1 | Full 2D plane rotation + 3D Euler XYZ + axis-angle via `CoordinateTransform`. G69 cancels. |
 | **G51.1 / G50.1** (mirror image) | DONE | P2 | Per-axis reflection `p' = 2c - p` composed into `CoordinateTransform` (innermost, program space); flips arc CW/CCW and center offsets; G50.1 cancels per-axis or all. |
-| **G70 / G71 / G72 / G73** (Fanuc lathe roughing/finishing) | MISSING | P1 | G73 collides with RS274 peck-drill; parser treats G73 as peck-drill only. No lathe roughing path. |
+| **G70 / G71 / G72 / G73** (Fanuc lathe roughing/finishing) | DONE | P1 | Single-line form; contour from block range `N<P>..N<Q>` (G2/G3 arcs tessellated). G71/G72 raster-clear the contour+stock-boundary polygon (levels spaced by `D`, U/W finish allowances); G73 pattern-repeats the contour with `R` relief divisions; G70 traces the finish pass. G73 stays RS274 peck-drill unless `P`+`Q` present. |
 | **G70 / G71** (Imperial/Metric in some Fanuc lathe dialects) | MISSING | P2 | Only G20/G21 are supported for units. |
 | **M98 / M99** (Fanuc sub call/return) | DONE | P0 | `executeM98`/`executeM99` implemented; M98 call-stack frames with repeat counts; bare `O<num>` labels serve as subprogram targets. |
 | **G65 with `#<name> = expr` argument binding** | DONE | P0 | `PARAM_ASSIGN` lexer token + deferred assignment in `executeBlock`; G65 args mapped to `#1`-`#30` local frame. |
@@ -57,7 +57,7 @@ No Haas handler class exists (only `MarlinMCodeHandler`).
 | **G150** (generic pocket milling) | DONE | P1 | Raster-clears the closed boundary from subprogram `P` (arcs tessellated, even-odd scanline clipping, retract between spans), Z-stepped by `Q`, optional boundary finish pass, `I/J` stepover, `F`/`S` applied. |
 | **G187** (smoothing / high-speed machining) | DONE | P1 | Sets `PathMode::BLEND`; `E` word sets `blendTolerance`. |
 | **G12 / G13** (circular pocket milling) | DONE | P1 | Emits plunge + lead-in + full-circle arc per radius pass (I/K/Q/Z/L). |
-| **G70 / G71** (Haas lathe rough/finish) | MISSING | P1 | See §1. |
+| **G70 / G71** (Haas lathe rough/finish) | DONE | P1 | See §1 — shared Fanuc lathe implementation. |
 | **M19** (spindle orient) | DONE | P1 | Handled in `dispatchMCode`; forwards angle to spindle callback. |
 | **M41–M44** (spindle gear range) | DONE | P2 | Forwarded to user M-code hook. |
 | **M60** (pallet change) | DONE | P2 | Forwarded to user M-code hook. |

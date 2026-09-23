@@ -859,6 +859,29 @@ private:
     Error collectPocketBoundary(int32_t prog, double unitScale,
                                 std::vector<std::pair<double, double>>& pts);
 
+    /// @brief Fanuc lathe cycles (single-line form). The finish contour is
+    ///        the block range N<P>..N<Q> in the current program.
+    ///        G71 rough turning: cuts along Z, levels spaced in X by D.
+    ///        G72 rough facing: cuts along X, levels spaced in Z by D.
+    ///        G73 pattern repeat: traces the contour R times with the
+    ///        U/W relief divided across passes.
+    ///        G70 finishing: traces the contour once at feed rate.
+    ///        Words: P/Q<block range>, U<X allowance>, W<Z allowance>,
+    ///        D<depth of cut>, R<divisions> (G73), F<feed>, S<rpm>.
+    Error dispatchG70(const Block& block, std::vector<MotionSegment>& segments);
+    Error dispatchG71(const Block& block, std::vector<MotionSegment>& segments);
+    Error dispatchG72(const Block& block, std::vector<MotionSegment>& segments);
+    Error dispatchG73Lathe(const Block& block, std::vector<MotionSegment>& segments);
+    /// @brief Shared G71/G72 roughing driver (@p turning selects the axis roles).
+    Error dispatchG71_G72Impl(const Block& block,
+                              std::vector<MotionSegment>& segments,
+                              bool turning);
+    /// @brief Collect the open XZ finish contour from blocks N<P>..N<Q>
+    ///        (X/Z endpoints; G2/G3 tessellated via I/K centers).
+    Error collectLatheContour(int32_t seqStart, int32_t seqEnd,
+                              double unitScale,
+                              std::vector<std::pair<double, double>>& pts);
+
     /// @brief Transform a program-space position to machine coordinates
     /// using the composed coordinate transform (WCS + G52 + G92 + G68 + G51).
     Position toMachine(const Position& programPos) const {
