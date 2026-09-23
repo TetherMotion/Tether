@@ -136,6 +136,43 @@ public:
         // No 4x4 recompute needed — extended scale is applied separately.
     }
 
+    /// @brief Enable mirror on a program-space axis (G51.1): p' = 2c - p.
+    /// @param axis   Axis index 0-8 (X,Y,Z,A,B,C,U,V,W).
+    /// @param center Mirror plane position in program coordinates.
+    void setMirror(size_t axis, double center) {
+        if (axis < 3) {
+            m_mirror[axis] = true;
+            m_mirrorC[axis] = center;
+            recompute();
+        } else if (axis < 9) {
+            m_extMirror[axis - 3] = true;
+            m_extMirrorC[axis - 3] = center;
+        }
+    }
+
+    /// @brief Disable mirror on one axis, or all axes when @p axis >= 9.
+    void clearMirror(size_t axis = 9) {
+        if (axis >= 9) {
+            m_mirror = {false, false, false};
+            m_mirrorC = {0.0, 0.0, 0.0};
+            m_extMirror.fill(false);
+            m_extMirrorC.fill(0.0);
+            recompute();
+        } else if (axis < 3) {
+            m_mirror[axis] = false;
+            m_mirrorC[axis] = 0.0;
+            recompute();
+        } else {
+            m_extMirror[axis - 3] = false;
+            m_extMirrorC[axis - 3] = 0.0;
+        }
+    }
+
+    /// @brief True if axis @p i (0-8) is mirrored.
+    bool mirrored(size_t i) const {
+        return i < 3 ? m_mirror[i] : (i < 9 && m_extMirror[i - 3]);
+    }
+
     /// @brief Clear the scale (reset to unity).
     void clearScale() {
         m_scale = {1.0, 1.0, 1.0};
@@ -207,6 +244,10 @@ public:
         m_toolLengthOffset = 0.0;
         m_scale = {1.0, 1.0, 1.0};
         m_extScale = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+        m_mirror = {false, false, false};
+        m_mirrorC = {0.0, 0.0, 0.0};
+        m_extMirror.fill(false);
+        m_extMirrorC.fill(0.0);
         m_rotationMode = RotationMode::NONE;
         m_angleDeg = 0.0;
         m_eulerDeg = {0.0, 0.0, 0.0};
@@ -227,6 +268,8 @@ public:
             && m_toolLengthOffset == 0.0
             && m_scale == std::array<double,3>{1,1,1}
             && m_extScale == std::array<double,6>{1,1,1,1,1,1}
+            && m_mirror == std::array<bool,3>{false,false,false}
+            && m_extMirror == std::array<bool,6>{}
             && m_rotationMode == RotationMode::NONE;
     }
 
@@ -265,12 +308,16 @@ public:
         out.x() = xyz[0];
         out.y() = xyz[1];
         out.z() = xyz[2];
-        // ABC (3-5): scale only
+        // ABC (3-5): mirror about center, then scale only
         for (size_t i = 0; i < 3; ++i)
-            out[3 + i] = programPos[3 + i] * m_extScale[i];
+            out[3 + i] = (m_extMirror[i]
+                ? 2.0 * m_extMirrorC[i] - programPos[3 + i]
+                : programPos[3 + i]) * m_extScale[i];
         // UVW (6-8): scale only (2D mode) or follow XYZ rotation (3D mode)
         for (size_t i = 0; i < 3; ++i)
-            out[6 + i] = programPos[6 + i] * m_extScale[3 + i];
+            out[6 + i] = (m_extMirror[3 + i]
+                ? 2.0 * m_extMirrorC[3 + i] - programPos[6 + i]
+                : programPos[6 + i]) * m_extScale[3 + i];
         return out;
     }
 
@@ -292,14 +339,18 @@ public:
         out.x() = xyz[0];
         out.y() = xyz[1];
         out.z() = xyz[2];
-        for (size_t i = 0; i < 3; ++i)
-            out[3 + i] = (m_extScale[i] != 0.0)
+        for (size_t i = 0; i < 3; ++i) {
+            const double p = (m_extScale[i] != 0.0)
                          ? machinePos[3 + i] / m_extScale[i]
                          : machinePos[3 + i];
-        for (size_t i = 0; i < 3; ++i)
-            out[6 + i] = (m_extScale[3 + i] != 0.0)
+            out[3 + i] = m_extMirror[i] ? 2.0 * m_extMirrorC[i] - p : p;
+        }
+        for (size_t i = 0; i < 3; ++i) {
+            const double p = (m_extScale[3 + i] != 0.0)
                          ? machinePos[6 + i] / m_extScale[3 + i]
                          : machinePos[6 + i];
+            out[6 + i] = m_extMirror[3 + i] ? 2.0 * m_extMirrorC[3 + i] - p : p;
+        }
         return out;
     }
 
@@ -335,6 +386,12 @@ private:
     std::array<double, 3> m_scale{1, 1, 1};
     std::array<double, 6> m_extScale{1, 1, 1, 1, 1, 1};
 
+    // G51.1 mirror: flag + mirror-plane center per axis (program coords).
+    std::array<bool, 3> m_mirror{false, false, false};
+    std::array<double, 3> m_mirrorC{0.0, 0.0, 0.0};
+    std::array<bool, 6> m_extMirror{};
+    std::array<double, 6> m_extMirrorC{};
+
     RotationMode m_rotationMode{RotationMode::NONE};
     Plane m_plane{Plane::XY};
     double m_angleDeg{0.0};
@@ -361,10 +418,18 @@ private:
 
         namespace Eg = Eigen;
 
-        // Start with identity and compose from innermost (g92) outward.
-        Eg::Affine3d m = Eg::Affine3d::Identity();
+        // Innermost: G51.1 mirror — reflect program coords about the
+        // mirror planes before any offset/scale/rotation: p' = 2c - p.
+        Eg::Affine3d m =
+            Eg::Translation3d(
+                m_mirror[0] ? 2.0 * m_mirrorC[0] : 0.0,
+                m_mirror[1] ? 2.0 * m_mirrorC[1] : 0.0,
+                m_mirror[2] ? 2.0 * m_mirrorC[2] : 0.0) *
+            Eg::Scaling(m_mirror[0] ? -1.0 : 1.0,
+                        m_mirror[1] ? -1.0 : 1.0,
+                        m_mirror[2] ? -1.0 : 1.0);
 
-        // Innermost: T(g92) — translate in program space.
+        // T(g92) — translate in program space.
         m = Eg::Translation3d(
             m_g92Offset[0], m_g92Offset[1], m_g92Offset[2]) * m;
 

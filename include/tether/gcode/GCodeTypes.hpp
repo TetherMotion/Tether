@@ -868,7 +868,7 @@ struct MachineState {
     double spindleSpeed{0.0};    ///< S word value
     bool spindleCW{true};        ///< Spindle direction
     bool spindleOn{false};       ///< Spindle running
-    double maxSpindleSpeed{0.0}; ///< D word for CSS
+    double maxSpindleSpeed{0.0}; ///< D word for CSS / Fanuc G50 S<rpm> clamp (0 = unbounded)
     
     // Tool
     int32_t currentTool{0};      ///< Active tool number
@@ -893,6 +893,10 @@ struct MachineState {
     // G51 scaling
     bool g51Active{false};               ///< G51 scaling active
     Position scaleFactors{Position::ones()}; ///< Per-axis scale (default 1.0 each)
+
+    // Programmable mirror (Fanuc G51.1 / G50.1)
+    std::array<bool, MAX_AXES> axisMirror{}; ///< Per-axis mirror flags
+    Position mirrorCenter{};                 ///< Mirror plane centers (program coords)
     
     // Canned cycle state
     CannedCycleParams cannedCycle{};

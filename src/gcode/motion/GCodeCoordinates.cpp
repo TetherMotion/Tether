@@ -345,6 +345,47 @@ Error CoordinateSystemManager::processG50(MachineState& state) {
 }
 
 // ============================================================================
+// G51.1 / G50.1 (programmable mirror image)
+// ============================================================================
+
+Error CoordinateSystemManager::processG51_1(const Block& block,
+                                            MachineState& state) {
+    static constexpr WordLetter axes[] = {
+        WordLetter::X, WordLetter::Y, WordLetter::Z,
+        WordLetter::A, WordLetter::B, WordLetter::C,
+        WordLetter::U, WordLetter::V, WordLetter::W,
+    };
+    for (size_t i = 0; i < MAX_AXES; ++i) {
+        if (block.hasWord(axes[i])) {
+            state.axisMirror[i] = true;
+            state.mirrorCenter[i] = block.getWord(axes[i]);
+        }
+    }
+    syncTransform(state);
+    return Error{};
+}
+
+Error CoordinateSystemManager::processG50_1(const Block& block,
+                                            MachineState& state) {
+    static constexpr WordLetter axes[] = {
+        WordLetter::X, WordLetter::Y, WordLetter::Z,
+        WordLetter::A, WordLetter::B, WordLetter::C,
+        WordLetter::U, WordLetter::V, WordLetter::W,
+    };
+    bool any = false;
+    for (size_t i = 0; i < MAX_AXES; ++i) {
+        if (block.hasWord(axes[i])) {
+            state.axisMirror[i] = false;
+            any = true;
+        }
+    }
+    if (!any)
+        state.axisMirror.fill(false);  // G50.1 alone cancels all mirrors
+    syncTransform(state);
+    return Error{};
+}
+
+// ============================================================================
 // G10 (set coordinate data)
 // ============================================================================
 
@@ -461,6 +502,13 @@ void CoordinateSystemManager::syncTransform(const MachineState& state) {
         m_transform.setExtendedScale(ext);
     } else {
         m_transform.clearScale();
+    }
+
+    // Mirror (G51.1/G50.1)
+    m_transform.clearMirror();
+    for (size_t i = 0; i < MAX_AXES; ++i) {
+        if (state.axisMirror[i])
+            m_transform.setMirror(i, state.mirrorCenter[i]);
     }
 
     // Rotation (G68). G68 overrides any WCS rotation (G10 L2 R).

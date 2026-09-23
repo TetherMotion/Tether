@@ -324,16 +324,60 @@ Error Parser::parseLine(const char* line, Block& block) {
         std::snprintf(block.originalText.data(), block.originalText.size(), "%s", line);
     }
 
+    // Marlin M117 takes free text after the M-code. Truncate the line for
+    // word tokenizing so the message text isn't mistaken for word letters;
+    // the interpreter recovers the message from originalText/comment.
+    std::string m117Text;
+    std::string lexLine = line;
+    {
+        std::string upper = lexLine;
+        for (auto& c : upper) c = static_cast<char>(
+            std::toupper(static_cast<unsigned char>(c)));
+        size_t p = upper.find("M117");
+        if (p != std::string::npos) {
+            char after = (p + 4 < upper.size()) ? upper[p + 4] : '\0';
+            bool boundaryBefore = (p == 0) ||
+                !(std::isalnum(static_cast<unsigned char>(upper[p - 1])) ||
+                  upper[p - 1] == '.');
+            bool boundaryAfter = !(std::isdigit(
+                static_cast<unsigned char>(after)) || after == '.');
+            if (boundaryBefore && boundaryAfter) {
+                m117Text = lexLine.substr(p + 4);
+                auto semi = m117Text.find(';');
+                if (semi != std::string::npos)
+                    m117Text = m117Text.substr(0, semi);
+                auto paren = m117Text.find('(');
+                if (paren != std::string::npos)
+                    m117Text = m117Text.substr(0, paren);
+                while (!m117Text.empty() && m117Text.front() == ' ')
+                    m117Text.erase(m117Text.begin());
+                while (!m117Text.empty() &&
+                       (m117Text.back() == ' ' || m117Text.back() == '\r' ||
+                        m117Text.back() == '\n'))
+                    m117Text.pop_back();
+                lexLine = lexLine.substr(0, p + 4);
+            }
+        }
+    }
+
     // Tokenize using a reusable member lexer (configured from ParserConfig)
     // so Parser::setInput/parseNextBlock don't interfere with this line's lex.
-    m_lineLexer.setInput(line);
+    m_lineLexer.setInput(lexLine.c_str());
 
     const auto tokens = m_lineLexer.tokenizeLine();
     if (m_lineLexer.hasError()) {
         return m_lineLexer.getError();
     }
 
-    return parseBlockFromTokens(tokens, block);
+    err = parseBlockFromTokens(tokens, block);
+    if (err) return err;
+
+    if (!m117Text.empty()) {
+        block.hasComment = true;
+        std::snprintf(block.comment.data(), block.comment.size(), "%s",
+                      m117Text.c_str());
+    }
+    return err;
 }
 
 Error Parser::parseNextBlock(Block& block) {

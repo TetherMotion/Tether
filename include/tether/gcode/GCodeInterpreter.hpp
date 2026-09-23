@@ -169,6 +169,7 @@
 #include "motion/GCodeToolComp.hpp"
 #include "motion/GCodeCoordinates.hpp"
 #include "motion/GCodeAdvancedMotion.hpp"
+#include "MarlinMCodeHandler.hpp"
 
 #include <string>
 #include <memory>
@@ -644,6 +645,20 @@ public:
     
     const Statistics& getStatistics() const { return m_stats; }
     void resetStatistics();
+
+    /**
+     * @brief Marlin/RepRap-domain state (M82/83, M92, M114, M204/205,
+     *        M206, M218, M220/221, M280, M301/304, M401/402, M420/421, M851)
+     */
+    const MarlinMachineState& marlinState() const { return m_marlinState; }
+    MarlinMCodeHandler& marlinHandler() { return m_marlinHandler; }
+
+    /// @brief GRBL `$n=` setting value, or nullopt if unset.
+    std::optional<double> grblSetting(int n) const {
+        auto it = m_grblSettings.find(n);
+        return it != m_grblSettings.end() ? std::optional{it->second}
+                                          : std::nullopt;
+    }
     
 private:
     // Configuration
@@ -726,6 +741,11 @@ private:
     RealtimeCallback m_realtimeCallback;
     UserGCodeCallback m_userGCodeCallback;
     std::vector<std::string> m_startupLines{2};  // $N0 / $N1
+    std::map<int, double> m_grblSettings;        // $n= setting storage
+
+    // Marlin/RepRap M-code support
+    MarlinMCodeHandler m_marlinHandler;
+    MarlinMachineState m_marlinState;
     
     // Statistics
     Statistics m_stats;
@@ -765,6 +785,9 @@ private:
     
     // M-code dispatch
     Error dispatchMCode(int32_t mcode, const Block& block);
+    /// Route a Marlin/RepRap-domain M-code through MarlinMCodeHandler,
+    /// then still invoke the user M-code hook (hardware side effects).
+    Error dispatchMarlinMCode(int32_t mcode, const Block& block);
     
     // State management
     void updateModalState(const Block& block);
@@ -806,9 +829,24 @@ private:
         return m_coordinates.processG51(block, m_machineState);
     }
 
-    /// @brief Dispatch G50 (cancel scaling) to the coordinate manager.
-    Error dispatchG50() {
+    /// @brief Dispatch G50. Fanuc lathe dialect: `G50 S<rpm>` sets the
+    ///        spindle-speed clamp; bare G50 cancels scaling (RS274).
+    Error dispatchG50(const Block& block) {
+        if (block.hasWord(WordLetter::S)) {
+            m_machineState.maxSpindleSpeed = block.getWord(WordLetter::S);
+            return Error{};
+        }
         return m_coordinates.processG50(m_machineState);
+    }
+
+    /// @brief Dispatch G51.1 (programmable mirror image).
+    Error dispatchG51_1(const Block& block) {
+        return m_coordinates.processG51_1(block, m_machineState);
+    }
+
+    /// @brief Dispatch G50.1 (cancel mirror image).
+    Error dispatchG50_1(const Block& block) {
+        return m_coordinates.processG50_1(block, m_machineState);
     }
 
     /// @brief Transform a program-space position to machine coordinates
