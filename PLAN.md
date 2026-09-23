@@ -54,7 +54,7 @@ No Haas handler class exists (only `MarlinMCodeHandler`).
 
 | Feature | Status | Priority | Notes |
 |---|---|---|---|
-| **G150** (generic pocket milling) | PARTIAL | P1 | Recognized; returns an explicit not-supported error (no pocket-geometry engine). |
+| **G150** (generic pocket milling) | DONE | P1 | Raster-clears the closed boundary from subprogram `P` (arcs tessellated, even-odd scanline clipping, retract between spans), Z-stepped by `Q`, optional boundary finish pass, `I/J` stepover, `F`/`S` applied. |
 | **G187** (smoothing / high-speed machining) | DONE | P1 | Sets `PathMode::BLEND`; `E` word sets `blendTolerance`. |
 | **G12 / G13** (circular pocket milling) | DONE | P1 | Emits plunge + lead-in + full-circle arc per radius pass (I/K/Q/Z/L). |
 | **G70 / G71** (Haas lathe rough/finish) | MISSING | P1 | See §1. |
