@@ -459,3 +459,56 @@ TEST_F(LatheCycleTest, G71_ArcContour) {
     }
     EXPECT_TRUE(bulge);
 }
+
+// ============================================================================
+// G33 threading / G33.1 rigid tapping
+// ============================================================================
+
+TEST_F(LatheCycleTest, G33_ThreadingEmitsSyncSegment) {
+    ASSERT_TRUE(run("M3 S500\nG0 X20 Z5\nG33 Z-15 K2\n"));
+    bool found = false;
+    for (const auto& s : segments) {
+        if (s.type != MotionSegment::Type::THREADING) continue;
+        found = true;
+        EXPECT_DOUBLE_EQ(s.pitch, 2.0);
+        EXPECT_DOUBLE_EQ(s.feedRate, 1000.0);  // pitch * rpm
+        EXPECT_DOUBLE_EQ(s.endPosition.z(), -15.0);
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(LatheCycleTest, G33_TaperedThreadUsesIPitch) {
+    ASSERT_TRUE(run("M3 S600\nG0 X20 Z5\nG33 X15 Z-15 I1.5\n"));
+    bool found = false;
+    for (const auto& s : segments)
+        if (s.type == MotionSegment::Type::THREADING) {
+            found = true;
+            EXPECT_DOUBLE_EQ(s.pitch, 1.5);
+        }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(LatheCycleTest, G33_NoSpindle_Errors) {
+    EXPECT_FALSE(run("G0 X20 Z5\nG33 Z-15 K2\n"));
+}
+
+TEST_F(LatheCycleTest, G33_NoPitch_Errors) {
+    EXPECT_FALSE(run("M3 S500\nG0 X20 Z5\nG33 Z-15\n"));
+}
+
+TEST_F(LatheCycleTest, G33_1_RigidTapInAndOut) {
+    ASSERT_TRUE(run("M3 S300\nG0 X0 Z5\nG33.1 Z-10 K1.25\n"));
+    std::vector<const MotionSegment*> taps;
+    for (const auto& s : segments)
+        if (s.type == MotionSegment::Type::THREADING) taps.push_back(&s);
+    ASSERT_EQ(taps.size(), 2u);
+    EXPECT_DOUBLE_EQ(taps[0]->endPosition.z(), -10.0);
+    EXPECT_DOUBLE_EQ(taps[0]->pitch, 1.25);
+    EXPECT_DOUBLE_EQ(taps[1]->endPosition.z(), 5.0);
+    EXPECT_DOUBLE_EQ(taps[1]->pitch, -1.25);  // reverse stroke
+    EXPECT_DOUBLE_EQ(taps[0]->feedRate, 375.0);
+}
+
+TEST_F(LatheCycleTest, G33_1_MissingK_Errors) {
+    EXPECT_FALSE(run("M3 S300\nG0 Z5\nG33.1 Z-10\n"));
+}
