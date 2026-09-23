@@ -998,6 +998,50 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                     return Error{};
                 }
                 case 30: {
+                    // Feature::G30_PROBE — Marlin/RepRap single-point probe.
+                    if (featureEnabled(Feature::G30_PROBE)) {
+                        const double unitScale =
+                            (m_machineState.units == Units::INCH) ? 25.4 : 1.0;
+                        // Optional XY position first (rapid).
+                        if (block.hasWord(WordLetter::X) ||
+                            block.hasWord(WordLetter::Y)) {
+                            Position xy = m_machineState.workPosition;
+                            if (block.hasWord(WordLetter::X))
+                                xy.x() = block.getWord(WordLetter::X) * unitScale;
+                            if (block.hasWord(WordLetter::Y))
+                                xy.y() = block.getWord(WordLetter::Y) * unitScale;
+                            MotionSegment mv;
+                            mv.type = MotionSegment::Type::RAPID;
+                            mv.endPosition =
+                                m_coordinates.toMachineCoords(xy);
+                            mv.lineNumber = block.sourceLineNumber;
+                            segments.push_back(mv);
+                            m_machineState.workPosition = xy;
+                            m_machineState.machinePosition = mv.endPosition;
+                            ++m_stats.motionSegments;
+                        }
+                        // Probe toward Z (word value or bed plane z=0).
+                        Position target = m_machineState.workPosition;
+                        target.z() = block.hasWord(WordLetter::Z)
+                            ? block.getWord(WordLetter::Z) * unitScale : 0.0;
+                        if (block.hasWord(WordLetter::F))
+                            m_machineState.feedRate =
+                                block.getWord(WordLetter::F) * unitScale;
+                        Error e = executeProbe(MotionMode::PROBE_TOWARD_NE,
+                                               block, target, unitScale,
+                                               segments);
+                        if (!e.ok()) return e;
+                        if (m_messageCallback) {
+                            char buf[96];
+                            std::snprintf(buf, sizeof(buf),
+                                          "Bed X: %.3f Y: %.3f Z: %.3f",
+                                          m_machineState.workPosition.x(),
+                                          m_machineState.workPosition.y(),
+                                          m_machineState.workPosition.z());
+                            m_messageCallback(buf);
+                        }
+                        return Error{};
+                    }
                     // G30 — Go to reference point 2
                     Position target = m_coordinates.getG30Reference(1);
                     MotionSegment seg;
@@ -2077,6 +2121,78 @@ Error Interpreter::executeThreading(const Block& block,
     return Error{};
 }
 
+Error Interpreter::dispatchG76Threading(const Block& block,
+                                        const Position& target,
+                                        double unitScale,
+                                        std::vector<MotionSegment>& segments) {
+    // Single-line Fanuc form: X/Z thread end (X travel sets the total
+    // depth), I taper, D first-cut depth, F pitch, Q minimum pass depth.
+    if (!block.hasWord(WordLetter::F))
+        return makeError(ErrorCode::PARAMETER_ERROR,
+                         "G76 requires a thread pitch (F)");
+    const double pitch = block.getWord(WordLetter::F) * unitScale;
+    if (pitch == 0.0)
+        return makeError(ErrorCode::PARAMETER_ERROR,
+                         "G76 thread pitch must be non-zero");
+    if (!m_machineState.spindleOn || m_machineState.spindleSpeed <= 0.0)
+        return makeError(ErrorCode::INVALID_MOTION,
+                         "G76 requires the spindle to be running");
+
+    const Position start = m_machineState.workPosition;
+    const double totalDepth = std::abs(target.x() - start.x());
+    if (totalDepth < 1e-9)
+        return makeError(ErrorCode::PARAMETER_ERROR,
+                         "G76 thread depth (X travel) must be non-zero");
+    const double dirX = (target.x() < start.x()) ? -1.0 : 1.0;
+    const double taper = block.hasWord(WordLetter::I)
+        ? block.getWord(WordLetter::I) * unitScale : 0.0;
+    double firstCut = block.hasWord(WordLetter::D)
+        ? std::abs(block.getWord(WordLetter::D)) * unitScale : totalDepth;
+    const double minCut = block.hasWord(WordLetter::Q)
+        ? std::abs(block.getWord(WordLetter::Q)) * unitScale : 0.0;
+    if (firstCut <= 0.0) firstCut = totalDepth;
+
+    const double feed = pitch * m_machineState.spindleSpeed;
+    auto emit = [&](double x, double z, MotionSegment::Type type,
+                    double fr, double pc = 0.0) {
+        Position t = start;
+        t.x() = x;
+        t.z() = z;
+        MotionSegment seg;
+        seg.type = type;
+        seg.endPosition = m_coordinates.toMachineCoords(t);
+        seg.feedRate = fr;
+        seg.pitch = pc;
+        seg.lineNumber = block.sourceLineNumber;
+        segments.push_back(seg);
+        m_machineState.workPosition = t;
+        m_machineState.machinePosition = seg.endPosition;
+        ++m_stats.motionSegments;
+    };
+
+    // Pass depths follow the constant-area rule: cumulative depth
+    // d_i = D*sqrt(i), pass increment clamped to >= Q, until full depth.
+    double prev = 0.0;
+    for (int i = 1; i <= 1000; ++i) {
+        double d = firstCut * std::sqrt(static_cast<double>(i));
+        if (minCut > 0.0 && d - prev < minCut) d = prev + minCut;
+        if (d >= totalDepth) d = totalDepth;
+
+        const double x = start.x() + dirX * d;
+        // Infeed to this pass depth, synchronized cut along Z (I tapers
+        // the end radius), retract in X, return in Z.
+        emit(x, start.z(), MotionSegment::Type::RAPID, 0.0);
+        emit(x + taper, target.z(), MotionSegment::Type::THREADING,
+             feed, pitch);
+        emit(start.x(), target.z(), MotionSegment::Type::RAPID, 0.0);
+        emit(start.x(), start.z(), MotionSegment::Type::RAPID, 0.0);
+
+        if (d >= totalDepth) break;
+        prev = d;
+    }
+    return Error{};
+}
+
 Error Interpreter::executeRigidTap(const Block& block,
                                    const Position& target,
                                    double unitScale,
@@ -2231,6 +2347,10 @@ Error Interpreter::handleMotion(const Block& block,
     if (mode == MotionMode::CANNED_OFF) {
         m_cannedActive = false;
         m_cannedParams = CannedParams{};
+        // Feature::G80_CANCEL_LEVELING — Marlin/RepRap also cancels bed
+        // leveling / mesh compensation.
+        if (featureEnabled(Feature::G80_CANCEL_LEVELING))
+            m_marlinState.bedLevelingEnabled = false;
         return Error{};
     }
 
@@ -2238,6 +2358,12 @@ Error Interpreter::handleMotion(const Block& block,
     if (isProbeMode(mode)) {
         return executeProbe(mode, block, target, unitScale, segments);
     }
+
+    // Feature::G76_LATHE_THREADING — Fanuc threading cycle replaces the
+    // RS274 fine-boring canned cycle.
+    if (mode == MotionMode::THREAD_CYCLE &&
+        featureEnabled(Feature::G76_LATHE_THREADING))
+        return dispatchG76Threading(block, target, unitScale, segments);
 
     // Canned cycles (G73/G74/G76/G81–G89), including modal repeats
     if (isCannedCycle(mode)) {

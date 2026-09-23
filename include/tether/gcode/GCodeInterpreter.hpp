@@ -176,6 +176,7 @@
 #include <functional>
 #include <queue>
 #include <optional>
+#include <unordered_map>
 
 namespace GCode {
 
@@ -204,6 +205,26 @@ enum class InterpreterState {
     FINISHED,       ///< Program completed (M30/M2)
     ERROR,          ///< Error occurred
     STOPPED         ///< Emergency stop
+};
+
+/**
+ * @brief Opt-in features that change the meaning of ambiguous G-codes.
+ *
+ * RS274/NGC semantics are the default; enabling a feature switches the
+ * affected codes to their dialect-specific meaning. Features compose —
+ * pick exactly the behavior a target machine needs rather than a whole
+ * dialect.
+ */
+enum class Feature {
+    /// G30 = single-point Z probe at current/optional XY (Marlin/RepRap)
+    /// instead of the RS274 move to the stored reference point.
+    G30_PROBE,
+    /// G80 = cancel bed leveling / mesh compensation (Marlin/RepRap)
+    /// instead of cancelling the modal canned cycle.
+    G80_CANCEL_LEVELING,
+    /// G76 = Fanuc lathe threading cycle (contour params) instead of the
+    /// RS274 fine-boring canned cycle.
+    G76_LATHE_THREADING
 };
 
 // ============================================================================
@@ -562,7 +583,17 @@ public:
     void setUserGCodeCallback(UserGCodeCallback callback) {
         m_userGCodeCallback = std::move(callback);
     }
-    
+
+    /**
+     * @brief Enable/disable an opt-in feature (see `Feature`). All
+     *        features default to off (pure RS274/NGC semantics).
+     */
+    void enableFeature(Feature f, bool on = true) { m_features[f] = on; }
+    bool featureEnabled(Feature f) const {
+        auto it = m_features.find(f);
+        return it != m_features.end() && it->second;
+    }
+
     // ========================================================================
     // Component Access
     // ========================================================================
@@ -663,6 +694,7 @@ public:
 private:
     // Configuration
     InterpreterConfig m_config;
+    std::unordered_map<Feature, bool> m_features;
     
     // Core components
     std::unique_ptr<Lexer> m_lexer;
@@ -887,6 +919,13 @@ private:
     Error executeThreading(const Block& block, const Position& target,
                            double unitScale,
                            std::vector<MotionSegment>& segments);
+    /// @brief G76 Fanuc lathe threading cycle (Feature::G76_LATHE_THREADING).
+    ///        Single-line form: X/Z thread end (X travel sets the total
+    ///        depth), I taper, D first-cut depth, Q minimum depth, F pitch.
+    ///        Pass depths follow the constant-area rule d_i = D*sqrt(i).
+    Error dispatchG76Threading(const Block& block, const Position& target,
+                               double unitScale,
+                               std::vector<MotionSegment>& segments);
     /// @brief G33.1 rigid tapping: synchronized feed to the target, then a
     ///        synchronized retract to the start point (spindle reversal
     ///        signaled via negative pitch on the retract segment).
