@@ -1223,9 +1223,17 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                 }
                 case 150: // G150 — Haas generic pocket milling
                     return dispatchG150(block, segments);
-                case 70: // G70 — Fanuc lathe finishing cycle
+                case 70: // G70 — Fanuc lathe finishing cycle, or inch units
+                    if (featureEnabled(Feature::G70_G71_UNITS)) {
+                        m_machineState.units = Units::INCH;
+                        return Error{};
+                    }
                     return dispatchG70(block, segments);
-                case 71: // G71 — Fanuc lathe rough turning cycle
+                case 71: // G71 — Fanuc lathe rough turning, or metric units
+                    if (featureEnabled(Feature::G70_G71_UNITS)) {
+                        m_machineState.units = Units::MM;
+                        return Error{};
+                    }
                     return dispatchG71(block, segments);
                 case 72: // G72 — Fanuc lathe rough facing cycle
                     return dispatchG72(block, segments);

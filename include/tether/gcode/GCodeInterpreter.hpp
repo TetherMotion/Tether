@@ -224,7 +224,10 @@ enum class Feature {
     G80_CANCEL_LEVELING,
     /// G76 = Fanuc lathe threading cycle (contour params) instead of the
     /// RS274 fine-boring canned cycle.
-    G76_LATHE_THREADING
+    G76_LATHE_THREADING,
+    /// G70/G71 = inch/metric units (Fanuc lathe dialects) instead of the
+    /// lathe finishing/rough-turning cycles.
+    G70_G71_UNITS
 };
 
 // ============================================================================

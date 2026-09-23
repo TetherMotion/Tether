@@ -712,3 +712,15 @@ TEST_F(CutterCompTest, CompOff_NoOffset) {
     EXPECT_DOUBLE_EQ(segments.back().endPosition.x(), 5.0);
     EXPECT_DOUBLE_EQ(segments.back().endPosition.y(), 5.0);
 }
+
+TEST_F(LatheCycleTest, FeatureG70G71Units) {
+    interp.enableFeature(Feature::G70_G71_UNITS);
+    // G70 selects inch: a following G1 X1 moves 25.4mm in machine coords.
+    ASSERT_TRUE(run("G70\nG1 X1 F100\n"));
+    EXPECT_NEAR(segments.back().endPosition.x(), 25.4, 1e-6);
+    // G71 selects metric.
+    ASSERT_TRUE(interp.loadString("G71\nG1 X1 F100\n").ok());
+    segments.clear();
+    ASSERT_TRUE(interp.run().ok());
+    EXPECT_NEAR(segments.back().endPosition.x(), 1.0, 1e-6);
+}
