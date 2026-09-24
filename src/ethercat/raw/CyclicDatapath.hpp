@@ -36,37 +36,57 @@ public:
 
     // ---- Response slots ------------------------------------------------
     /// Copy-mode deposit (software path — poll thread or socket-B parse).
-    void deposit(uint8_t slot_idx, Command cmd, uint16_t adp, uint16_t ado,
+    /// `idx` is the wire datagram index in the fastpath range [0xE0..0xFD]:
+    /// PDO slices land in slots [0..15], cyclic datagrams in [16..21].
+    void deposit(uint8_t idx, Command cmd, uint16_t adp, uint16_t ado,
                  const uint8_t* payload, uint16_t datalen, uint16_t wkc,
                  uint8_t gen);
     /// View-mode deposit: payload points into channel memory held by
     /// `cookie`; the previous held cookie (if any) is released.
     /// `stamp_ns` carries the frame's kernel timestamp (0 → deposit-time).
-    void publishView(uint8_t slot_idx, Command cmd, uint16_t adp, uint16_t ado,
+    void publishView(uint8_t idx, Command cmd, uint16_t adp, uint16_t ado,
                      const uint8_t* payload, uint16_t datalen, uint16_t wkc,
                      uint32_t cookie, uint64_t stamp_ns = 0, uint8_t gen = 0);
     uint64_t slotToken(uint8_t slot) const;
     uint8_t  slotGen(uint8_t slot) const;
+    /// PDO-slice slot variants — `slice` in [0, kNumSliceSlots).
+    uint64_t sliceSlotToken(uint8_t slice) const;
+    uint8_t  sliceSlotGen(uint8_t slice) const;
 
     // ---- Wire send path ------------------------------------------------
     bool sendDatagram(Command cmd, uint8_t slot, uint16_t adp, uint16_t ado,
                       const void* data, uint16_t datalen, bool roundtrip);
+    /// Send on a dedicated PDO-slice index (wire idx 0xE0 + slice_slot).
+    bool sendSliceDatagram(Command cmd, uint8_t slice_slot,
+                           uint16_t adp, uint16_t ado,
+                           const void* data, uint16_t datalen,
+                           bool roundtrip);
     /// Persistent TX frame buffer for the ring backend (nullptr w/o channel).
     uint8_t* acquireTxFrame();
-    /// Stamp the next send generation + compose the 26-byte frame header.
+    /// Stamp the next send generation + compose the frame header — one
+    /// memcpy of the baked per-(idx,gen) template (see ensureTemplate()).
     void composeHeader(uint8_t* frame, Command cmd, uint8_t slot,
                        uint16_t adp, uint16_t ado, uint16_t datalen,
                        bool roundtrip);
+    /// Byte offset of the datagram payload inside a composed TX frame —
+    /// 26 untagged, 30 when a TX VLAN tag is baked into the templates.
+    uint32_t payloadOffset() const { return tx_prefix_len_; }
     bool sendFrame(uint32_t frame_len);
 
     // ---- Receive path ----------------------------------------------------
-    /// Route a frame received on the cyclic channel: pure-cyclic frames
-    /// publish slot views, mixed/async frames go to the master's parser.
+    /// Route a frame received on the cyclic channel: pure-fastpath frames
+    /// (every datagram idx in [0xE0..0xFD]) publish slot views, mixed/async
+    /// frames go to the master's parser.
     void dispatchFrame(const CyclicFrameView& view);
     bool waitView(uint8_t slot, uint64_t token, uint32_t timeout_ns,
                   CyclicSlotView& out);
+    bool waitSliceView(uint8_t slice, uint64_t token, uint32_t timeout_ns,
+                       CyclicSlotView& out);
     uint32_t waitMask(uint32_t slot_mask, const uint64_t* tokens,
                       uint32_t timeout_ns, CyclicSlotView* views);
+    /// Masked wait over PDO-slice slots [0, kNumSliceSlots).
+    uint32_t waitSliceMask(uint32_t slice_mask, const uint64_t* tokens,
+                           uint32_t timeout_ns, CyclicSlotView* views);
     bool wait(uint8_t slot, uint64_t token, uint32_t timeout_ns,
               RxDatagram& out);
 
@@ -126,7 +146,33 @@ public:
         uint8_t  gen{0};
         uint8_t  data[kMaxDatagramDataSize];
     };
-    std::array<RxSlot, kNumCyclicSlots> slots_{};
+    /// Unified fastpath slot bank, indexed by `idx - kFastSlotBaseIdx`:
+    ///   [0..15]  PDO-slice slots   (wire idx 0xE0..0xEF)
+    ///   [16..21] cyclic image slots (wire idx 0xF8..0xFD)
+    /// Slice slot t and cyclic slot s therefore never share a mailbox —
+    /// a sliced full-image collect and a custom slice collect can be
+    /// in flight at once.
+    /// Wire idx → array index.  The two wire ranges are contiguous on
+    /// the wire but not in the array: slice 0xE0..0xEF → [0..15],
+    /// cyclic 0xF8..0xFD → [16..21] (the 0xF0..0xF7 gap has no slot).
+    /// Callers must gate on isSlotIdx() — gap indices have no mapping.
+    static constexpr uint8_t fastIndex(uint8_t idx) {
+        return isSliceIdx(idx)
+            ? static_cast<uint8_t>(idx - kSliceSlotBaseIdx)
+            : static_cast<uint8_t>(kNumSliceSlots +
+                                   (idx - kCyclicSlotBaseIdx));
+    }
+    static constexpr uint8_t cyclicFastIndex(uint8_t slot) {
+        return static_cast<uint8_t>(kNumSliceSlots + slot);
+    }
+    /// Array index → wire idx (inverse of fastIndex).
+    static constexpr uint8_t wireIndex(uint8_t fast_idx) {
+        return fast_idx < kNumSliceSlots
+            ? static_cast<uint8_t>(kSliceSlotBaseIdx + fast_idx)
+            : static_cast<uint8_t>(kCyclicSlotBaseIdx +
+                                   (fast_idx - kNumSliceSlots));
+    }
+    std::array<RxSlot, kNumFastSlots> slots_{};
 
     /// Datapath channel (Linux: socket or PACKET_MMAP ring backend).
     /// nullptr → software deposit path (unchanged behaviour).
@@ -166,8 +212,58 @@ public:
     std::atomic<uint64_t> collect_calls_{0};
 
     /// Per-slot send generation (lenFlags res-bit 13), toggled on every
-    /// cyclic send — written/read on the cyclic thread only.
-    std::array<uint8_t, kNumCyclicSlots> slot_gen_{};
+    /// send on that index — written/read on the cyclic thread only.
+    std::array<uint8_t, kNumFastSlots> slot_gen_{};
+
+    /**
+     * @brief Baked wire-header templates, [fast_idx][send_gen].
+     *
+     * Everything in a cyclic frame header except the generation bit is
+     * invariant while the PDO layout is stable — destination/source MAC,
+     * EtherType (or the inline 802.1Q tag under VLAN encapsulation), the
+     * EtherCAT frame header, and the datagram header incl. the reserved
+     * idx.  The two gen variants are baked together the first time an
+     * index is used with a given (cmd, adp, ado, len, roundtrip) key, so
+     * the hot path is a bounds check + one contiguous ≤32-byte copy —
+     * no field-by-field assembly, no per-cycle VID/MAC gathering.
+     * ensureTemplate() re-bakes on a key mismatch (mapping re-registration,
+     * a different command borrowing the index) — rare and still correct.
+     */
+    struct HdrTemplate {
+        uint8_t  bytes[32];   // eth(14) + vlan(4) + ecat(2) + dg-hdr(10)
+        uint16_t len{0};      // bytes used == TX payload offset
+        uint8_t  cmd{0};
+        uint16_t adp{0}, ado{0}, datalen{0};
+        bool     roundtrip{false}, valid{false};
+    };
+    std::array<std::array<HdrTemplate, 2>, kNumFastSlots> hdr_tmpl_{};
+
+    /// Fetch the baked template for (index, gen), re-baking both gen
+    /// variants when the key changed.  Cyclic thread only.
+    const HdrTemplate& ensureTemplate(uint8_t fast_idx, uint8_t gen,
+                                      Command cmd, uint16_t adp,
+                                      uint16_t ado, uint16_t datalen,
+                                      bool roundtrip);
+    /// VID inserted into TX headers when the channel carries tagged
+    /// traffic (0 = untagged).  Decided at setup(): the tag is baked into
+    /// templates only when the channel is active — the no-channel fallback
+    /// still routes through sendWithEncapsulation() which tags itself.
+    uint16_t tx_vlan_ = 0;
+    /// == hdr_tmpl_ prefix length on the active path (26 or 30).
+    uint16_t tx_prefix_len_ = kCyclicFramePayloadOff;
+    /// Common send body for cyclic and slice datagrams.
+    bool sendFastDatagram(Command cmd, uint8_t fast_idx,
+                          uint16_t adp, uint16_t ado,
+                          const void* data, uint16_t datalen,
+                          bool roundtrip);
+    /// Masked wait shared by waitMask()/waitSliceMask() — `slot_base`
+    /// translates mask bits into slots_ indexes.
+    uint32_t waitMaskImpl(uint32_t slot_mask, const uint64_t* tokens,
+                          uint32_t timeout_ns, CyclicSlotView* views,
+                          uint8_t slot_base, uint8_t slot_count);
+    /// Single-slot wait shared by waitView()/waitSliceView().
+    bool waitViewImpl(uint8_t fast_idx, uint64_t token, uint32_t timeout_ns,
+                      CyclicSlotView& out);
 
     /// Exchange suspension for mid-loop mapping mutation (slave
     /// recovery): while set, the exchange/collect tasks skip their work

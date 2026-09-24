@@ -161,33 +161,38 @@ TEST(CyclicBpf, InsnLayoutMatchesSockFilter) {
     EXPECT_EQ(offsetof(CyclicBpfInsn, k),    offsetof(sock_filter, k));
 }
 
-TEST(CyclicBpf, CyclicFilterAcceptsOnlyCyclicIdx) {
+TEST(CyclicBpf, CyclicFilterAcceptsOnlyFastpathIdx) {
+    // The accept range is the union fastpath pool: PDO-slice idxes
+    // (0xE0..0xEF) AND cyclic slots (0xF8..0xFD).  Async allocIdx()
+    // never reaches 0xE0, so first-idx demux stays exact.
     CyclicBpfInsn prog[16];
     ASSERT_EQ(cyclicChannelBpfProgram(true, prog, 16), kCyclicBpfInsnCount);
     const auto* f = reinterpret_cast<const sock_filter*>(prog);
 
-    for (uint8_t idx : {0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD}) {
+    for (uint8_t idx : {0xE0, 0xE1, 0xE7, 0xEF,
+                        0xF0, 0xF7,          // reserved gap — filter-accepted
+                        0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD}) {
         auto frame = makeEcatFrame(idx);
         EXPECT_NE(runBpf(f, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
             << "idx 0x" << std::hex << (int)idx;
     }
-    for (uint8_t idx : {0x00, 0x01, 0x7F, 0xF7, 0xFE, 0xFF}) {
+    for (uint8_t idx : {0x00, 0x01, 0x7F, 0xDF, 0xFE, 0xFF}) {
         auto frame = makeEcatFrame(idx);
         EXPECT_EQ(runBpf(f, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
             << "idx 0x" << std::hex << (int)idx;
     }
 }
 
-TEST(CyclicBpf, AsyncFilterRejectsOnlyCyclicIdx) {
+TEST(CyclicBpf, AsyncFilterRejectsOnlyFastpathIdx) {
     CyclicBpfInsn prog[16];
     ASSERT_EQ(cyclicChannelBpfProgram(false, prog, 16), kCyclicBpfInsnCount);
     const auto* f = reinterpret_cast<const sock_filter*>(prog);
 
-    for (uint8_t idx : {0xF8, 0xFA, 0xFD}) {
+    for (uint8_t idx : {0xE0, 0xE7, 0xEF, 0xF0, 0xF7, 0xF8, 0xFA, 0xFD}) {
         auto frame = makeEcatFrame(idx);
         EXPECT_EQ(runBpf(f, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u);
     }
-    for (uint8_t idx : {0x00, 0x42, 0xF7, 0xFE, 0xFF}) {
+    for (uint8_t idx : {0x00, 0x42, 0xDF, 0xFE, 0xFF}) {
         auto frame = makeEcatFrame(idx);
         EXPECT_NE(runBpf(f, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u);
     }
@@ -245,16 +250,16 @@ TEST(CyclicBpf, VlanTaggedCyclicIdxDemux) {
     cyclicChannelBpfProgram(false, progB, 16);
     const auto* asy = reinterpret_cast<const sock_filter*>(progB);
 
-    for (uint8_t idx : {0xF8, 0xFA, 0xFD}) {
+    for (uint8_t idx : {0xE0, 0xE7, 0xEF, 0xF0, 0xF7, 0xF8, 0xFA, 0xFD}) {
         auto frame = makeVlanEcatFrame(idx);
         EXPECT_NE(runBpf(cyc, kCyclicBpfInsnCount, frame.data(),
                          frame.size()), 0u)
-            << "vlan cyclic idx 0x" << std::hex << (int)idx;
+            << "vlan fastpath idx 0x" << std::hex << (int)idx;
         EXPECT_EQ(runBpf(asy, kCyclicBpfInsnCount, frame.data(),
                          frame.size()), 0u)
-            << "vlan cyclic idx 0x" << std::hex << (int)idx;
+            << "vlan fastpath idx 0x" << std::hex << (int)idx;
     }
-    for (uint8_t idx : {0x00, 0x42, 0xF7, 0xFE, 0xFF}) {
+    for (uint8_t idx : {0x00, 0x42, 0xDF, 0xFE, 0xFF}) {
         auto frame = makeVlanEcatFrame(idx);
         EXPECT_EQ(runBpf(cyc, kCyclicBpfInsnCount, frame.data(),
                          frame.size()), 0u)
@@ -309,7 +314,11 @@ TEST(CyclicBpfKernel, UnixSocketpairRunsCyclicProgramInKernel) {
 
     sendDgram(0x88A4, 0xF8);  EXPECT_TRUE(received());
     sendDgram(0x88A4, 0xFD);  EXPECT_TRUE(received());
-    sendDgram(0x88A4, 0xF7);  EXPECT_FALSE(received());
+    sendDgram(0x88A4, 0xE0);  EXPECT_TRUE(received());   // slice pool
+    sendDgram(0x88A4, 0xEF);  EXPECT_TRUE(received());
+    sendDgram(0x88A4, 0xF0);  EXPECT_TRUE(received());   // reserved gap
+    sendDgram(0x88A4, 0xF7);  EXPECT_TRUE(received());   // (in filter range)
+    sendDgram(0x88A4, 0xDF);  EXPECT_FALSE(received());  // async ceiling
     sendDgram(0x88A4, 0xFE);  EXPECT_FALSE(received());
     sendDgram(0x88A4, 0x00);  EXPECT_FALSE(received());
     sendDgram(0x88A4, 0xFF);  EXPECT_FALSE(received());
@@ -344,6 +353,10 @@ TEST(CyclicBpfKernel, UnixSocketpairRunsAsyncProgramInKernel) {
     };
 
     sendDgram(0x88A4, 0xF8);  EXPECT_FALSE(received());
+    sendDgram(0x88A4, 0xE0);  EXPECT_FALSE(received());  // slice pool
+    sendDgram(0x88A4, 0xEF);  EXPECT_FALSE(received());
+    sendDgram(0x88A4, 0xF7);  EXPECT_FALSE(received());  // gap — still fastpath
+    sendDgram(0x88A4, 0xDF);  EXPECT_TRUE(received());
     sendDgram(0x88A4, 0x42);  EXPECT_TRUE(received());
     sendDgram(0x88A4, 0xFE);  EXPECT_TRUE(received());
     sendDgram(0x88A4, 0xFF);  EXPECT_TRUE(received());
@@ -607,6 +620,15 @@ struct MasterCyclicTestAccess {
     }
     static void setDiscoveredSlaveCount(Master& m, uint16_t n) {
         m.slaves_->discovered_count.store(n, std::memory_order_release);
+    }
+    /// Bake a TX VLAN tag into subsequently-built header templates —
+    /// mirrors what CyclicDatapath::setup() does under VLAN encapsulation.
+    static void setTxVlan(Master& m, uint16_t vid) {
+        m.datapath_->tx_vlan_       = vid;
+        m.datapath_->tx_prefix_len_ = vid ? 30 : 26;
+    }
+    static uint32_t payloadOffset(Master& m) {
+        return m.datapath_->payloadOffset();
     }
 };
 } // namespace EtherCAT
@@ -927,6 +949,185 @@ TEST_F(MasterCyclicTest, ComposeCyclicHeaderLayout) {
     std::memcpy(&ado, frame + 20, 2);
     EXPECT_EQ(adp, 0x1111);
     EXPECT_EQ(ado, 0x2222);
+}
+
+// ============================================================================
+// PDO-slice slot bank — separate pipeline from the cyclic slots
+// ============================================================================
+
+TEST_F(MasterCyclicTest, SliceIdxDepositsToSliceSlot) {
+    // idx 0xE0 → slice slot 0; a cyclic-slot wait must NOT see it.
+    uint8_t frame[128];
+    const uint8_t pay[4] = {0x11, 0x22, 0x33, 0x44};
+    const size_t n = buildEcatFrame(frame, 0x0C, 0xE0, 0x1234, 0x5678,
+                                    pay, 4, 3);
+    master_.handleRxFrame(frame, n);
+
+    CyclicSlotView view{};
+    ASSERT_TRUE(master_.waitSliceSlotView(0, /*token=*/0, 0, view));
+    EXPECT_EQ(view.datalen, 4u);
+    EXPECT_EQ(view.wkc, 3u);
+    EXPECT_EQ(view.adp, 0x1234u);
+    EXPECT_EQ(view.payload[0], 0x11);
+    EXPECT_EQ(view.payload[3], 0x44);
+
+    // Cyclic slot 0 stayed empty — independent mailbox.
+    EXPECT_EQ(master_.cyclicSlotToken(0), 0u);
+}
+
+TEST_F(MasterCyclicTest, SliceAndCyclicSlotsAreIndependent) {
+    uint8_t frame[128];
+    const uint8_t pay[2] = {0xAA, 0xBB};
+
+    // Deposit on slice slot 5 (0xE5) and cyclic slot 2 (0xFA).
+    size_t n = buildEcatFrame(frame, 0x0C, 0xE5, 1, 2, pay, 2, 1);
+    master_.handleRxFrame(frame, n);
+    n = buildEcatFrame(frame, 0x0C, 0xFA, 3, 4, pay, 2, 2);
+    master_.handleRxFrame(frame, n);
+
+    // Slice wait sees only the 0xE5 deposit; cyclic wait only 0xFA.
+    CyclicSlotView v{};
+    ASSERT_TRUE(master_.waitSliceSlotView(5, 0, 0, v));
+    EXPECT_EQ(v.adp, 1u);
+    ASSERT_TRUE(master_.waitCyclicSlotView(2, 0, 0, v));
+    EXPECT_EQ(v.adp, 3u);
+    // Tokens moved independently.
+    EXPECT_GT(master_.sliceSlotToken(5), 0u);
+    EXPECT_EQ(master_.sliceSlotToken(0), 0u);
+    EXPECT_GT(master_.cyclicSlotToken(2), 0u);
+    EXPECT_EQ(master_.cyclicSlotToken(0), 0u);
+}
+
+TEST_F(MasterCyclicTest, SliceIdxOutOfRangeWaitsFail) {
+    CyclicSlotView v{};
+    EXPECT_FALSE(master_.waitSliceSlotView(16, 0, 0, v));   // > last slice
+    EXPECT_EQ(master_.sliceSlotToken(16), 0u);
+}
+
+TEST_F(MasterCyclicTest, SendSliceDatagramUsesReservedIdx) {
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    const uint8_t pay[4] = {0x01};
+    ASSERT_TRUE(master_.sendSliceDatagram(Command::LRW, /*slice_slot=*/3,
+                                          0x0042, 0x0001, pay, 4, true));
+    EXPECT_EQ(stubp->tx_send_parts_calls, 1);
+    EXPECT_EQ(stubp->last_parts.header_len, 26u);
+    // Wire idx = 0xE0 + slot → 0xE3 at byte 17.
+    EXPECT_EQ(stubp->last_parts.header[17], 0xE3);
+    // Out-of-range slice slot refuses.
+    EXPECT_FALSE(master_.sendSliceDatagram(Command::LRW, 16, 0, 0,
+                                           pay, 4, true));
+}
+
+// ============================================================================
+// Baked header templates — one key-checked bake, then a ≤32 B copy per send
+// ============================================================================
+
+TEST_F(MasterCyclicTest, HeaderTemplateContentUntagged) {
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    const uint8_t pay[8] = {0xAB};
+    ASSERT_TRUE(master_.sendCyclicDatagram(Command::LRW, 0, 0x1234, 0x5678,
+                                           pay, 8, true));
+    const uint8_t* h = stubp->hdr_copy;
+    EXPECT_EQ(stubp->last_parts.header_len, 26u);
+    // dst MAC (EtherCAT broadcast) + src MAC.
+    EXPECT_EQ(h[0], 0x01); EXPECT_EQ(h[1], 0x01); EXPECT_EQ(h[2], 0x05);
+    EXPECT_EQ(h[6], 0x02); EXPECT_EQ(h[11], 0x01);
+    // EtherType + ECAT frame header.
+    EXPECT_EQ(h[12], 0x88); EXPECT_EQ(h[13], 0xA4);
+    EXPECT_EQ(h[15] & 0xF0, 0x10);                   // type = 1
+    // Datagram header: cmd, wire idx, adp/ado, lenFlags.
+    EXPECT_EQ(h[16], 0x0C);                          // LRW
+    EXPECT_EQ(h[17], 0xF8);                          // cyclic slot 0
+    EXPECT_EQ(h[18], 0x34); EXPECT_EQ(h[19], 0x12);  // adp le
+    EXPECT_EQ(h[20], 0x78); EXPECT_EQ(h[21], 0x56);  // ado le
+    uint16_t lf;
+    std::memcpy(&lf, h + 22, 2);
+    EXPECT_EQ(lf & 0x07FFu, 8u);                     // datalen
+    EXPECT_TRUE(lf & 0x4000u);                       // roundtrip (circ.)
+    EXPECT_FALSE(lf & 0x8000u);                      // no more-datagrams
+}
+
+TEST_F(MasterCyclicTest, HeaderTemplateTogglesOnlyGenBit) {
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    const uint8_t pay[4] = {0x5A};
+    ASSERT_TRUE(master_.sendCyclicDatagram(Command::LRW, 0, 0, 0x0001,
+                                           pay, 4, true));
+    uint8_t first[26];
+    std::memcpy(first, stubp->hdr_copy, 26);
+
+    ASSERT_TRUE(master_.sendCyclicDatagram(Command::LRW, 0, 0, 0x0001,
+                                           pay, 4, true));
+    // Byte-identical except lenFlags bit 13 (send generation).
+    for (int i = 0; i < 26; ++i) {
+        if (i == 22 || i == 23) continue;
+        EXPECT_EQ(first[i], stubp->hdr_copy[i]) << "byte " << i;
+    }
+    uint16_t lf0, lf1;
+    std::memcpy(&lf0, first + 22, 2);
+    std::memcpy(&lf1, stubp->hdr_copy + 22, 2);
+    EXPECT_NE((lf0 >> 13) & 1u, (lf1 >> 13) & 1u) << "gen must toggle";
+    EXPECT_EQ(lf0 & ~0x2000u, lf1 & ~0x2000u);
+
+    // Third send toggles back — the two baked variants alternate.
+    ASSERT_TRUE(master_.sendCyclicDatagram(Command::LRW, 0, 0, 0x0001,
+                                           pay, 4, true));
+    EXPECT_EQ(std::memcmp(first, stubp->hdr_copy, 26), 0);
+}
+
+TEST_F(MasterCyclicTest, HeaderTemplateRebakesOnKeyChange) {
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    const uint8_t pay[4] = {0x5A};
+    ASSERT_TRUE(master_.sendCyclicDatagram(Command::LRW, 0, 0, 0x0001,
+                                           pay, 4, true));
+    EXPECT_EQ(stubp->hdr_copy[20], 0x01);   // ado = 0x0001
+
+    // Same slot, different ado → the template re-bakes (still correct).
+    ASSERT_TRUE(master_.sendCyclicDatagram(Command::LRW, 0, 0, 0x0002,
+                                           pay, 4, true));
+    EXPECT_EQ(stubp->hdr_copy[20], 0x02);
+}
+
+TEST_F(MasterCyclicTest, HeaderTemplateBakesVlanTag) {
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+    MasterCyclicTestAccess::setTxVlan(master_, 1999);
+
+    const uint8_t pay[4] = {0x5A};
+    ASSERT_TRUE(master_.sendCyclicDatagram(Command::LRW, 0, 0, 0x0001,
+                                           pay, 4, true));
+    const uint8_t* h = stubp->hdr_copy;
+    EXPECT_EQ(stubp->last_parts.header_len, 30u);
+    // Inline 802.1Q tag: TPID, TCI=1999 (0x07CF), inner EtherType.
+    EXPECT_EQ(h[12], 0x81); EXPECT_EQ(h[13], 0x00);
+    EXPECT_EQ(h[14], 0x07); EXPECT_EQ(h[15], 0xCF);
+    EXPECT_EQ(h[16], 0x88); EXPECT_EQ(h[17], 0xA4);
+    // Datagram header shifted +4: cmd@20, idx@21.
+    EXPECT_EQ(h[20], 0x0C);
+    EXPECT_EQ(h[21], 0xF8);
+    EXPECT_EQ(MasterCyclicTestAccess::payloadOffset(master_), 30u);
+}
+
+TEST_F(MasterCyclicTest, ComposeHeaderBakesVlanTagToo) {
+    MasterCyclicTestAccess::setTxVlan(master_, 100);
+    uint8_t frame[64] = {};
+    master_.composeCyclicHeader(frame, Command::LRW, 1, 0, 0, 4, true);
+    EXPECT_EQ(frame[12], 0x81); EXPECT_EQ(frame[13], 0x00);
+    EXPECT_EQ(frame[14], 0x00); EXPECT_EQ(frame[15], 0x64);   // VID 100
+    EXPECT_EQ(frame[16], 0x88); EXPECT_EQ(frame[17], 0xA4);
+    EXPECT_EQ(frame[21], 0xF9);   // cyclic slot 1
 }
 
 // ============================================================================

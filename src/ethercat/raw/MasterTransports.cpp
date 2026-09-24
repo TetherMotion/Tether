@@ -134,6 +134,35 @@ public:
         return master_.cyclicChannel();
     }
 
+    // ---- PDO-slice fast path ----
+    uint64_t sliceSlotToken(uint8_t slice) override {
+        return master_.sliceSlotToken(slice);
+    }
+    uint8_t sliceSlotGen(uint8_t slice) override {
+        return master_.sliceSlotGen(slice);
+    }
+    bool sendSliceDatagram(Command cmd, uint8_t slice_slot,
+                           uint16_t adp, uint16_t ado,
+                           const void* data, uint16_t datalen,
+                           bool roundtrip) override {
+        return master_.sendSliceDatagram(cmd, slice_slot, adp, ado,
+                                         data, datalen, roundtrip);
+    }
+    bool waitSliceSlotView(uint8_t slice, uint64_t token,
+                           uint32_t timeout_ns,
+                           CyclicSlotView& out) override {
+        return master_.waitSliceSlotView(slice, token, timeout_ns, out);
+    }
+    uint32_t waitSliceSlotMask(uint32_t slice_mask, const uint64_t* tokens,
+                               uint32_t timeout_ns,
+                               CyclicSlotView* views) override {
+        return master_.waitSliceSlotMask(slice_mask, tokens, timeout_ns,
+                                         views);
+    }
+    uint32_t cyclicPayloadOffset() const override {
+        return master_.cyclicPayloadOffset();
+    }
+
 private:
     Master& master_;
 };

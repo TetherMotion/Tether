@@ -249,12 +249,13 @@ WaitResult Master::waitForPreRegistered(size_t slot, uint32_t timeout_ms)
 
 uint8_t Master::allocIdx()
 {
-    // Skip the entire reserved cyclic-slot range (0xF8..0xFD) plus the
-    // fire-and-forget index (0xFE) — i.e. everything >= kCyclicSlotBase.
-    // This also skips 0xFF, leaving 0..0xF7 for regular traffic.
+    // Skip the entire fastpath reservation — PDO-slice slots (0xE0..0xEF),
+    // cyclic slots (0xF8..0xFD) — plus the fire-and-forget index (0xFE),
+    // i.e. everything >= kSliceSlotBaseIdx.  This also skips 0xFF,
+    // leaving 0..0xDF for regular traffic.
     uint8_t idx;
     do { idx = next_idx_.fetch_add(1, std::memory_order_relaxed); }
-    while (idx >= IPDOTransport::kCyclicSlotBase);
+    while (idx >= kSliceSlotBaseIdx);
     return idx;
 }
 
@@ -733,14 +734,12 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
         const uint16_t wkc =
             le16_to_host(*reinterpret_cast<const uint16_t*>(frame + wkc_offset));
 
-        if (dg->idx >= IPDOTransport::kCyclicSlotBase &&
-            dg->idx <  IPDOTransport::kCyclicSlotBase + IPDOTransport::kNumCyclicSlots) {
-            // Cyclic fast path: deposit into the fixed slot without building
-            // an RxDatagram or touching the router.  The cyclic thread waits
-            // on the slot's sequence counter.
-            depositCyclicSlot(dg->idx - IPDOTransport::kCyclicSlotBase,
-                              dg->cmd, adp, ado, frame + data_offset,
-                              datalen, wkc,
+        if (isFastPathIdx(dg->idx)) {
+            // Fastpath deposit (cyclic slot or PDO slice): fixed slot
+            // keyed on the wire idx — no RxDatagram, no router.  The
+            // cyclic thread waits on the slot's sequence counter.
+            depositCyclicSlot(dg->idx, dg->cmd, adp, ado,
+                              frame + data_offset, datalen, wkc,
                               static_cast<uint8_t>((len_flags >> 13) & 0x1u));
         } else {
         RxDatagram msg{};

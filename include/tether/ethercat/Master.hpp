@@ -200,6 +200,17 @@ public:
         /// Requires NIC MTU and slave support.  Clamped to [1514, 9014].
         uint32_t max_frame_size = 1514;
 
+        /// Wire encapsulation the cyclic datapath must honour — see
+        /// setWireEncap().  Read once by CyclicDatapath::setup().
+        EtherCAT::WireEncap wire_encap;
+
+        /// Raw AF_PACKET fd of the wire socket, used to create the cyclic
+        /// channel when iface_ cannot expose one — under VLAN routing
+        /// iface_ is the router stub and this is the only fd available.
+        /// Also the async-socket mirror-filter target.  -1 = use
+        /// iface_.native_handle (direct EtherCAT path).
+        int wire_fd = -1;
+
 #if TETHER_ENABLE_UDP_ENCAPSULATION
         /// EtherCAT-over-UDP encapsulation settings (opt-in, default: disabled).
         /// When enabled, frames are encapsulated as Ethernet/IPv4/UDP(port 34980)
@@ -250,6 +261,29 @@ public:
 #else
     bool isUdpEncapsulationEnabled() const { return false; }
 #endif
+
+    /**
+     * @brief Tell the cyclic datapath which wire encapsulation is active.
+     *
+     * Call before start()/startCyclicLoop() — CyclicDatapath::setup()
+     * reads it once: `tx_vlan` is baked into the per-index header
+     * templates (tagged cyclic sends go straight to the channel socket,
+     * no router pass) and the VID range is composed into the socket
+     * demux filters together with the fastpath-idx clause.
+     */
+    void setWireEncap(const EtherCAT::WireEncap& encap) {
+        config_.wire_encap = encap;
+    }
+    const EtherCAT::WireEncap& wireEncap() const { return config_.wire_encap; }
+
+    /**
+     * @brief Hand the wire socket's raw fd to the cyclic datapath.
+     *
+     * Needed under VLAN encapsulation where iface_ is the router stub
+     * without a native handle; on the direct path iface_.native_handle
+     * is used instead and this may stay -1.  Call before startCyclicLoop().
+     */
+    void setWireFd(int fd) { config_.wire_fd = fd; }
 
     /** Set a callback invoked when the master attempts the mailbox fallback for a slave. */
     void setMailboxFallbackCallback(std::function<void(uint16_t)> cb) { mailbox_fallback_cb_ = std::move(cb); }
@@ -1370,8 +1404,32 @@ public:
     void     composeCyclicHeader(uint8_t* frame, Command cmd, uint8_t slot,
                                  uint16_t adp, uint16_t ado, uint16_t datalen,
                                  bool roundtrip);
+    /// Byte offset of the first datagram's payload in a composed cyclic
+    /// frame — 26 untagged, 30 when a TX VLAN tag is baked into headers.
+    uint32_t cyclicPayloadOffset() const;
     /// Channel accessor for the process image / transport adapter.
     ICyclicChannel* cyclicChannel() const;
+
+    // ---- PDO-slice fast path ------------------------------------------
+    // Dedicated idx pool [kSliceSlotBaseIdx, +kNumSliceSlots): user-defined
+    // PDO slices exchange on their own slots — a different pipeline from
+    // the cyclic image slots, demultiplexed by the same socket filter.
+    uint64_t sliceSlotToken(uint8_t slice) const;
+    uint8_t  sliceSlotGen(uint8_t slice) const;
+    bool     sendSliceDatagram(Command cmd, uint8_t slice_slot,
+                               uint16_t adp, uint16_t ado,
+                               const void* data, uint16_t datalen,
+                               bool roundtrip);
+    bool     waitSliceSlotView(uint8_t slice, uint64_t token,
+                               uint32_t timeout_ns, CyclicSlotView& out);
+    /**
+     * @brief Multi-slot wait over slice slots — one wake for a whole
+     *        multi-run slice exchange.  Same semantics as
+     *        waitCyclicSlotMask() over the slice index space
+     *        [0, kNumSliceSlots).
+     */
+    uint32_t waitSliceSlotMask(uint32_t slice_mask, const uint64_t* tokens,
+                               uint32_t timeout_ns, CyclicSlotView* views);
 
     // ---- Frame capacity ----------------------------------------------------
 
@@ -1411,7 +1469,9 @@ private:
     void ensureRxQueues();
     void flushRxQueue();
     void parseEtherCATFrame(const uint8_t* frame, size_t length);
-    void depositCyclicSlot(uint8_t slot_idx, Command cmd,
+    /// Deposit a fastpath response (cyclic slot OR PDO-slice idx) into
+    /// its fixed slot — `idx` is the wire datagram index [0xE0..0xFD].
+    void depositCyclicSlot(uint8_t idx, Command cmd,
                            uint16_t adp, uint16_t ado,
                            const uint8_t* payload, uint16_t datalen,
                            uint16_t wkc, uint8_t gen);
@@ -1419,7 +1479,7 @@ private:
     /// `cookie`.  The previous held cookie (if any) is released.
     /// `stamp_ns` carries the frame's kernel timestamp (0 → deposit-time).
     /// `gen` is the echoed send-generation bit (lenFlags res-bit 13).
-    void publishCyclicSlotView(uint8_t slot_idx, Command cmd,
+    void publishCyclicSlotView(uint8_t idx, Command cmd,
                                uint16_t adp, uint16_t ado,
                                const uint8_t* payload, uint16_t datalen,
                                uint16_t wkc, uint32_t cookie,

@@ -110,6 +110,31 @@ constexpr uint32_t kAccept          = 0xFFFFFFFFu;
  * Emit the IPv4/UDP check for an IP header at absolute offset `base`:
  * proto==UDP, IHL>=5, first fragment, dst port == `port`.
  */
+/// Wire offsets of the first datagram's idx byte.
+constexpr uint32_t kFirstIdxOff       = 17;  // untagged EtherCAT
+constexpr uint32_t kFirstIdxOffTagged = 21;  // inline 802.1Q tag
+
+/**
+ * Emit a first-datagram-idx range check for a frame whose datagram idx
+ * sits at absolute offset `off`.  Accepts the frame when the idx is
+ * inside/outside the spec range per `exclude`.
+ */
+void emitIdxCheck(Asm& a, const CBPFSpec& spec, uint32_t off,
+                  bool exclude, int l_accept, int l_reject) {
+    const auto& r = *spec.first_idx_range;
+    int c;
+    a.stmt(cbpf::LD | cbpf::B | cbpf::ABS, off);
+    c = a.label();
+    a.jump(cbpf::JMP | cbpf::JGE | cbpf::K, r.start, c,
+           exclude ? l_accept : l_reject);   // idx < lo
+    a.mark(c);
+    c = a.label();
+    a.jump(cbpf::JMP | cbpf::JGT | cbpf::K, r.end,
+           exclude ? l_accept : l_reject, c); // idx > hi
+    a.mark(c);
+    a.ja(exclude ? l_reject : l_accept);
+}
+
 void emitUdpCheck(Asm& a, uint32_t base, uint32_t port,
                   int l_accept, int l_reject) {
     int c;
@@ -152,6 +177,9 @@ std::vector<CBPFInsn> CBPFProgramFactory::build(const CBPFSpec& spec) {
     const int l_udpw   = a.label();   // EtherType IPv4 at [12]
     const int l_udp14  = a.label();   // IPv4/UDP check, IP base = 14
     const int l_tudp   = a.label();   // IPv4/UDP check, IP base = 18
+    const int l_ecat_idx  = a.label();// untagged EtherCAT + first-idx check
+    const int l_tecat_idx = a.label();// tagged EtherCAT + first-idx check
+    const bool idx_check = spec.first_idx_range.has_value();
 
     int c;
 
@@ -213,7 +241,7 @@ std::vector<CBPFInsn> CBPFProgramFactory::build(const CBPFSpec& spec) {
         if (spec.tagged_ethercat) {
             c = a.label();
             a.jump(cbpf::JMP | cbpf::JEQ | cbpf::K, kEtherTypeEtherCAT,
-                   l_accept, c);
+                   idx_check ? l_tecat_idx : l_accept, c);
             a.mark(c);
         }
         if (spec.tagged_udp) {
@@ -256,9 +284,27 @@ std::vector<CBPFInsn> CBPFProgramFactory::build(const CBPFSpec& spec) {
 
     if (spec.untagged_ethercat || spec.tagged_ethercat)
         emitWireLeg(l_ecat, spec.untagged_ethercat, spec.tagged_ethercat,
-                    l_accept);
+                    idx_check ? l_ecat_idx : l_accept);
     if (spec.untagged_udp || spec.tagged_udp)
         emitWireLeg(l_udpw, spec.untagged_udp, spec.tagged_udp, l_udp14);
+
+    // --- first-datagram-idx legs (direct EtherCAT only) -------------------
+    //
+    // A stripped-tag frame carries the untagged layout in the data buffer,
+    // so the wire leg's EtherType accept funnels into the offset-17 check;
+    // an inline tag reaches the offset-21 check instead.
+    if (idx_check) {
+        if (spec.untagged_ethercat || spec.tagged_ethercat) {
+            a.mark(l_ecat_idx);
+            emitIdxCheck(a, spec, kFirstIdxOff, spec.first_idx_exclude,
+                         l_accept, l_reject);
+        }
+        if (tagged && spec.tagged_ethercat) {
+            a.mark(l_tecat_idx);
+            emitIdxCheck(a, spec, kFirstIdxOffTagged,
+                         spec.first_idx_exclude, l_accept, l_reject);
+        }
+    }
 
     // --- UDP payload checks --------------------------------------------------
     if (spec.untagged_udp || spec.tagged_udp) {

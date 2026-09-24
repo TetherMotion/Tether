@@ -1465,6 +1465,31 @@ bool PDOManager::cyclicExchangePending() const {
     return logical_addr_mgr_ && logical_addr_mgr_->cyclicExchangePending();
 }
 
+uint32_t PDOManager::definePDOSlice(const PDOSliceSpec& spec) {
+    if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized())
+        return 0xFFFFFFFFu;
+    return logical_addr_mgr_->definePDOSlice(mapping_, spec);
+}
+
+bool PDOManager::clearPDOSlices() {
+    return logical_addr_mgr_ && logical_addr_mgr_->clearPDOSlices();
+}
+
+size_t PDOManager::pdoSliceCount() const {
+    return logical_addr_mgr_ ? logical_addr_mgr_->pdoSliceCount() : 0;
+}
+
+bool PDOManager::exchangePDOSlice(const PDOSliceSpec& spec) {
+    if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized())
+        return false;
+    return logical_addr_mgr_->exchangePDOSlice(mapping_, spec);
+}
+
+void PDOManager::setImageExchangeDecimation(uint32_t every_n) {
+    if (logical_addr_mgr_)
+        logical_addr_mgr_->setImageExchangeDecimation(every_n);
+}
+
 uint8_t PDOManager::cyclicSliceCount() const {
     return logical_addr_mgr_ ? logical_addr_mgr_->cyclicSliceCount() : 0;
 }
