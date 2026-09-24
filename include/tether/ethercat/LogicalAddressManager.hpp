@@ -166,7 +166,13 @@ public:
     bool cyclicSend(const PDO::PDOMapping& mapping, ProcessImage* image,
                     uint32_t rx_timeout_ns);
     bool cyclicCollect(const PDO::PDOMapping& mapping, ProcessImage* image);
-    bool cyclicExchangePending() const { return cyclic_pending_count_ > 0; }
+    /// True while responses are in flight — image slices OR user PDO
+    /// slices (a decimated image can leave only slice runs pending).
+    bool cyclicExchangePending() const {
+        if (cyclic_pending_count_ > 0) return true;
+        for (const auto& s : slices_) if (s.pending) return true;
+        return false;
+    }
 
     /// Slices the current image occupies (1 = single-frame exchange).
     uint8_t cyclicSliceCount() const { return cyclic_slice_count_; }
@@ -270,6 +276,60 @@ public:
     /// address map.
     std::vector<EntrySlice> describeEntries(const PDO::PDOMapping& mapping) const;
 
+    // ----- User-defined PDO slices (dedicated wire idx, own pipeline) -----
+
+    /// Runs a slice resolves to at plan time — one LRW datagram each.
+    static constexpr size_t kMaxSliceRuns = 8;
+
+    /// Slice configuration type — defined at namespace scope in
+    /// PDOManager.hpp (LAM is forward-declared there, so the spec cannot
+    /// live as a nested type here).
+    using PDOSliceSpec = ::EtherCAT::PDOSliceSpec;
+
+    /**
+     * @brief Define a custom PDO slice exchanged alongside the cyclic
+     *        image exchange.
+     *
+     * Each contiguous run the spec resolves to claims one dedicated slice
+     * slot (wire idx 0xE0+slot) — the kernel demux steers its responses
+     * into that slot, so a slice exchange never touches the cyclic
+     * image's slots.  Runs are re-planned automatically when the PDO
+     * mapping epoch changes (recovery re-registration).
+     *
+     * @param mapping  The mapping the entry indices refer to
+     * @param spec     Entries/ranges, decimation, optional callback
+     * @return slice handle (index), or UINT32_MAX on failure — spec
+     *         resolving to zero runs, a run > maxSliceLength(), or the
+     *         slice-slot pool (16) exhausted.
+     */
+    uint32_t definePDOSlice(const PDO::PDOMapping& mapping,
+                            const PDOSliceSpec& spec);
+    /// Drop all defined slices (pending responses are abandoned).
+    bool clearPDOSlices();
+    size_t pdoSliceCount() const { return slices_.size(); }
+
+    /**
+     * @brief Exchange a spec's bytes once, on the blocking async path.
+     *
+     * The "one-off" counterpart of definePDOSlice(): resolves the spec to
+     * runs and exchanges each via exchangeLRWSlice() — no reserved index,
+     * no fast path, TransactionRouter round-trip per run.  For ad-hoc
+     * reads/writes (commissioning, diagnostics), not the cyclic loop.
+     */
+    bool exchangePDOSlice(const PDO::PDOMapping& mapping,
+                          const PDOSliceSpec& spec);
+
+    /**
+     * @brief Run the whole-image exchange every Nth cycle (default 1).
+     *
+     * Pair with a fast PDO slice: e.g. every_n=10 gives a full exchange
+     * at 1/10 rate while the slice's hot bytes run every cycle.
+     */
+    void setImageExchangeDecimation(uint32_t every_n) {
+        image_every_n_ = every_n ? every_n : 1;
+    }
+    uint32_t imageExchangeDecimation() const { return image_every_n_; }
+
     // ----- Statistics -----
 
     struct Stats {
@@ -372,6 +432,56 @@ private:
     /// (derived from the slave set by cyclicSend when a mapping is known).
     std::array<uint16_t, kMaxCyclicSlices> expected_wkc_{};
     bool strict_wkc_{true};
+
+    // ---- User PDO slices (cyclic thread only) ---------------------------
+    struct PDOSliceRun {
+        uint32_t off{0};                    ///< image-space offset
+        uint32_t len{0};                    ///< bytes (<= maxSliceLength)
+        uint8_t  slot{0};                   ///< slice slot (idx 0xE0+slot)
+        uint64_t token{0};                  ///< pending seq token
+        uint8_t  gen{0};                    ///< send generation expected
+        uint8_t  sent{0};                   ///< datagram emitted this cycle
+        uint16_t expected_wkc{kWkcUnknown}; ///< derived/learned WKC
+    };
+    struct PDOSlice {
+        std::array<PDOSliceRun, kMaxSliceRuns> runs{};
+        uint8_t  run_count{0};
+        /// Spec for replanning on mapping-epoch change (config data only —
+        /// never touched on the RT path except during a replan).
+        PDOSliceSpec spec;
+        uint32_t every_n{1};
+        uint32_t cycle_mod{0};              ///< decimation phase counter
+        uint64_t deadline_ns{0};            ///< collect deadline this emit
+        bool     pending{false};            ///< runs in flight
+    };
+    std::vector<PDOSlice> slices_;
+    /// Mapping epoch the runs were planned on.  UINT32_MAX = "never
+    /// planned" — a define/clear stamps it so the next emitSlices()
+    /// replans even when the mapping's epoch is still 0 (add_*pdo()
+    /// doesn't bump the epoch, only clear()/remove_* do).
+    uint32_t slice_epoch_{0xFFFFFFFFu};
+    uint64_t exchange_cycle_{0};  ///< cyclicSend invocation counter
+    uint32_t image_every_n_{1};   ///< whole-image decimation
+    /// Staging for non-image-mode slice payloads (gather per run).
+    std::unique_ptr<uint8_t[]> slice_payload_;
+    uint32_t slice_payload_size_{0};
+
+    /// Re-plan every slice's runs against the current mapping — assigns
+    /// slice slots in define-order and derives per-run expected WKC.
+    /// Runs on epoch change or first send after define.
+    bool replanSlices(const PDO::PDOMapping& mapping);
+    /// Resolve a spec to contiguous runs (no slot assignment).
+    size_t resolveSpecRuns(const PDO::PDOMapping& mapping,
+                           const PDOSliceSpec& spec,
+                           std::array<std::pair<uint32_t,uint32_t>,
+                                      kMaxSliceRuns>& out) const;
+    /// cyclicSend() helper — emit due slices onto their slice slots.
+    void emitSlices(const PDO::PDOMapping& mapping, ProcessImage* image,
+                    uint32_t rx_timeout_ns);
+    /// cyclicCollect() helper — wait/scatter/publish pending slices.
+    /// Shares the image input bank with the full-image publish so later
+    /// (fresher) slice data lands on top.  Returns false on any miss.
+    bool collectSlices(const PDO::PDOMapping& mapping, ProcessImage* image);
 
     /// Build the log prefix for a slave (uses prefix_provider_ if set, else default)
     std::string slavePrefix(uint16_t idx) const {

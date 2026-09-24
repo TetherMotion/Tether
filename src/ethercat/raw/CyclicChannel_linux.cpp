@@ -6,7 +6,7 @@
  * Two sockets share the interface:
  *   - socket A (this channel): bound to the EtherCAT ethertype + BPF
  *     accepting only frames whose first datagram idx lies in the reserved
- *     cyclic range (kCyclicSlotBaseIdx .. +kNumCyclicSlots-1).
+ *     fastpath range (PDO slices 0xE0..0xEF + cyclic slots 0xF8..0xFD).
  *   - socket B (async, owned by the app's poll thread): gets the mirror
  *     filter attached via CyclicChannelConfig::async_fd so it never wakes
  *     for cyclic traffic.
@@ -69,8 +69,9 @@ namespace {
 // — so first-idx demux is exact.  Frames shorter than 18 bytes make the idx
 // load fault out-of-bounds — kernel cBPF semantics then reject the packet on
 // BOTH sockets (malformed traffic is dropped entirely, which is desirable).
-// VLAN-tagged frames show EtherType 0x8100 and land on the async socket
-// (documented fast-path exclusion).
+// VLAN-tagged frames show EtherType 0x8100: the program unwraps them
+// (inner EtherType at [16:18], idx at 21) so tagged fastpath traffic
+// reaches socket A too.
 
 constexpr int  kIdxByteOffset     = 17;   // untagged: first dg idx
 constexpr int  kVlanIdxByteOffset = 21;   // 802.1Q-tagged: +4 tag bytes
@@ -87,8 +88,11 @@ static_assert(sizeof(CyclicBpfInsn) == sizeof(struct sock_filter),
 // VLAN-non-ECAT traffic falls through to the B verdict so socket A can be
 // bound to ETH_P_ALL and still see only cyclic EtherCAT.
 size_t buildFilterProg(bool accept_cyclic, struct sock_filter* p) {
-    const uint32_t lo = kCyclicSlotBaseIdx;
-    const uint32_t hi = kCyclicSlotBaseIdx + kNumCyclicSlots - 1;
+    // The accept range covers BOTH fastpath pools: user PDO slices
+    // (0xE0..0xEF) and cyclic slots (0xF8..0xFD).  Async allocIdx()
+    // never reaches 0xE0, so first-idx demux stays exact.
+    const uint32_t lo = kSliceSlotBaseIdx;
+    const uint32_t hi = kFastSlotEndIdx;
     const struct sock_filter prog[] = {
         /* 0 */ BPF_STMT(BPF_LD | BPF_H | BPF_ABS, 12),              // EtherType
         /* 1 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kEtherCatType, 0, 2),
@@ -121,7 +125,9 @@ bool attachFilter(int fd, struct sock_filter* prog, size_t n) {
     return true;
 }
 
-int openCyclicSocket(int ifindex) {
+int openCyclicSocket(int ifindex,
+                     const CBPFInsn* accept_prog = nullptr,
+                     size_t accept_prog_len = 0) {
     int fd = ::socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     if (fd < 0) return -1;
 
@@ -154,12 +160,21 @@ int openCyclicSocket(int ifindex) {
         return -1;
     }
 
-    struct sock_filter prog[kCyclicBpfInsnCount];
-    const size_t n = buildFilterProg(true, prog);
-    if (!attachFilter(fd, prog, n)) {
-        // Soft failure — the channel still works; crosstalk determinism is
-        // lost but correctness is not (parser keys on idx either way).
-        TETHER_LOGW(TAG, "cyclic BPF attach failed: {}", strerror(errno));
+    if (accept_prog && accept_prog_len) {
+        // Caller-composed program (encap ∧ idx∈fastpath) — replaces the
+        // built-in demux so an encapsulation clause isn't dropped.
+        if (!CBPFProgramFactory::attach(fd, accept_prog, accept_prog_len)) {
+            TETHER_LOGW(TAG, "cyclic composed BPF attach failed: {}",
+                        strerror(errno));
+        }
+    } else {
+        struct sock_filter prog[kCyclicBpfInsnCount];
+        const size_t n = buildFilterProg(true, prog);
+        if (!attachFilter(fd, prog, n)) {
+            // Soft failure — the channel still works; crosstalk determinism
+            // is lost but correctness is not (parser keys on idx either way).
+            TETHER_LOGW(TAG, "cyclic BPF attach failed: {}", strerror(errno));
+        }
     }
     return fd;
 }
@@ -904,9 +919,18 @@ std::unique_ptr<ICyclicChannel> createCyclicChannel(
     }
 
     // Mirror filter on the async socket — optional and independent of the
-    // backend we end up running.
+    // backend we end up running.  A caller-composed program (encap ∧
+    // idx∉fastpath) replaces the built-in mirror so the encapsulation
+    // clause survives — SO_ATTACH_FILTER swaps the whole program.
     if (cfg.async_fd >= 0) {
-        if (cyclicChannelAttachAsyncFilter(cfg.async_fd)) {
+        bool attached;
+        if (cfg.async_prog && cfg.async_prog_len) {
+            attached = CBPFProgramFactory::attach(
+                cfg.async_fd, cfg.async_prog, cfg.async_prog_len);
+        } else {
+            attached = cyclicChannelAttachAsyncFilter(cfg.async_fd);
+        }
+        if (attached) {
             TETHER_LOGI(TAG, "async socket: cyclic-idx exclusion BPF attached");
         } else {
             TETHER_LOGW(TAG,
@@ -917,7 +941,8 @@ std::unique_ptr<ICyclicChannel> createCyclicChannel(
     }
 
     if (cfg.wire_mode != CyclicWireMode::SocketIO) {
-        const int fd = openCyclicSocket(cfg.ifindex);
+        const int fd = openCyclicSocket(cfg.ifindex, cfg.accept_prog,
+                                        cfg.accept_prog_len);
         if (fd >= 0) {
             LinuxRingChannel::Config rcfg{cfg.rx_ring_blocks,
                                           cfg.tx_ring_blocks,
@@ -948,7 +973,8 @@ std::unique_ptr<ICyclicChannel> createCyclicChannel(
             "falling back to socket mode", strerror(errno));
     }
 
-    const int fd = openCyclicSocket(cfg.ifindex);
+    const int fd = openCyclicSocket(cfg.ifindex, cfg.accept_prog,
+                                    cfg.accept_prog_len);
     if (fd < 0) {
         TETHER_LOGW(TAG, "createCyclicChannel: cannot open cyclic socket "
                     "on ifindex {} ({})", cfg.ifindex, strerror(errno));

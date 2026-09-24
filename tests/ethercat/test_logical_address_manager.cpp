@@ -641,21 +641,75 @@ public:
                        unsigned int) override { return false; }
     bool readRegister(uint16_t, uint16_t, void*, uint16_t,
                       unsigned int) override { return false; }
-    bool sendSingleDatagram(Command, uint8_t, uint16_t, uint16_t,
-                            const void*, uint16_t, bool) override {
-        return false;
+    bool sendSingleDatagram(Command cmd, uint8_t idx, uint16_t, uint16_t,
+                            const void*, uint16_t len, bool) override {
+        ++single_send_calls;
+        last_single_cmd_ = cmd;
+        last_single_idx_ = idx;
+        last_single_len_ = len;
+        return single_send_ok_;
     }
     size_t sendMultiDatagram(const MultiDatagramSpec*, size_t) override {
         return 0;
     }
     bool waitForResponseIdx(uint8_t, unsigned int,
-                            RxDatagram&) override { return false; }
+                            RxDatagram& out) override {
+        if (!single_respond_) return false;
+        out.wkc     = single_resp_wkc_;
+        out.datalen = single_resp_len_;
+        std::memcpy(out.data, single_resp_buf_, single_resp_len_);
+        return true;
+    }
     size_t preRegisterResponseWaiter(uint8_t, uint8_t*,
-                                     size_t) override { return 0; }
+                                     size_t) override {
+        return IPDOTransport::kPreRegInvalid;   // fall back to waitForResponseIdx
+    }
     bool waitForPreRegistered(size_t, unsigned int,
                               RxDatagram&) override { return false; }
     uint8_t  allocIdx() override { return 0x30; }
     uint16_t adpForSlaveIndex(uint16_t) override { return 0; }
+
+    // ---- PDO-slice fast-path surface (idx pool 0xE0..0xEF) ----
+    uint64_t sliceSlotToken(uint8_t slice) override {
+        return slice < 16 ? slice_tokens_[slice] : 0;
+    }
+    uint8_t sliceSlotGen(uint8_t slice) override {
+        return slice < 16 ? slice_gen_[slice] : 0;
+    }
+    bool sendSliceDatagram(Command, uint8_t slice, uint16_t adp,
+                           uint16_t ado, const void* data,
+                           uint16_t datalen, bool) override {
+        ++slice_send_calls;
+        slice_tokens_[slice]++;              // deposits bump the token
+        slice_gen_[slice] ^= 1;              // send gen toggles
+        last_slice_slot_ = slice;
+        last_slice_adp_  = adp;
+        last_slice_ado_  = ado;
+        if (data && datalen)
+            std::memcpy(slice_sent_[slice], data,
+                        std::min<size_t>(datalen, sizeof(slice_sent_[0])));
+        slice_sent_len_[slice] = datalen;
+        return send_ok_;
+    }
+    uint32_t waitSliceSlotMask(uint32_t mask, const uint64_t*,
+                               uint32_t, CyclicSlotView* views) override {
+        ++slice_mask_calls;
+        uint32_t arrived = 0;
+        for (uint8_t s = 0; s < 16; ++s) {
+            if (!(mask & (1u << s)) || !slice_respond_[s]) continue;
+            views[s].payload = slice_resp_buf_[s];
+            views[s].datalen = slice_resp_len_[s];
+            views[s].wkc     = slice_resp_wkc_[s];
+            // Echo the send gen; a scripted stale response echoes the
+            // previous generation once then recovers.
+            views[s].gen = slice_stale_[s]
+                ? static_cast<uint8_t>(slice_gen_[s] ^ 1)
+                : slice_gen_[s];
+            slice_stale_[s] = false;
+            arrived |= 1u << s;
+        }
+        return arrived;
+    }
 
     // ---- script ----
     size_t   payload_ = 1498;
@@ -667,6 +721,34 @@ public:
     bool     send_ok_ = true;
     int      send_calls = 0;
     int      mask_calls = 0;
+
+    // slice script
+    uint64_t slice_tokens_[16]{};
+    uint8_t  slice_gen_[16]{};
+    bool     slice_respond_[16] = {true, true, true, true, true, true,
+                                   true, true, true, true, true, true,
+                                   true, true, true, true};
+    bool     slice_stale_[16]{};
+    uint8_t  slice_resp_buf_[16][64]{};
+    uint16_t slice_resp_len_[16]{};
+    uint16_t slice_resp_wkc_[16]{};
+    uint8_t  slice_sent_[16][64]{};
+    uint16_t slice_sent_len_[16]{};
+    uint8_t  last_slice_slot_ = 0xFF;
+    uint16_t last_slice_adp_ = 0, last_slice_ado_ = 0;
+    int      slice_send_calls = 0;
+    int      slice_mask_calls = 0;
+
+    // async-path script (exchangePDOSlice / exchangeLRWSlice)
+    bool     single_send_ok_ = true;
+    bool     single_respond_ = true;
+    Command  last_single_cmd_ = Command::NOP;
+    uint8_t  last_single_idx_ = 0;
+    uint16_t last_single_len_ = 0;
+    uint16_t single_resp_wkc_ = 1;
+    uint16_t single_resp_len_ = 0;
+    uint8_t  single_resp_buf_[64]{};
+    int      single_send_calls = 0;
 };
 
 class CyclicWkcTest : public ::testing::Test {
@@ -783,4 +865,339 @@ TEST_F(CyclicWkcTest, PartialMaskTimeoutCountsPerSlot) {
     transport.resp_len_[1] = 6;
     EXPECT_FALSE(mgr.cyclicCollect(mapping, nullptr));
     EXPECT_EQ(mgr.getStats().timeout_errors, 1u);
+}
+
+// ============================================================================
+// PDO slices — user-declared image subsets on dedicated wire idx 0xE0..0xEF
+// ============================================================================
+
+class PdoSliceTest : public ::testing::Test {
+protected:
+    static constexpr uint32_t kInvalid = 0xFFFFFFFFu;
+    CyclicStubTransport transport;
+    LogicalAddressManager mgr{transport};
+    PDOMapping mapping;
+
+    /// Same two-slave layout as CyclicWkcTest: s0 Rx[0,4) Tx[8,16),
+    /// s1 Rx[4,8) — 16 B image.  describeEntries order: 0=s0 Rx,
+    /// 1=s0 Tx, 2=s1 Rx.
+    void buildMap() {
+        SlaveConfig configs[kMaxPDOSlaves] = {};
+        configs[0].configured = true;
+        configs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 4);
+        configs[0].rxpdo_size = 4;
+        configs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 8);
+        configs[0].txpdo_size = 8;
+        configs[1].configured = true;
+        configs[1].sm[2] = SyncManagerConfig::process_output(0x1801, 4);
+        configs[1].rxpdo_size = 4;
+        configs[1].sm[3] = SyncManagerConfig::process_input(0x1C01, 0);
+        configs[1].txpdo_size = 0;
+        ASSERT_TRUE(mgr.buildAddressMap(configs, 2));
+        mapping.add_rxpdo(0, 4, 0x1600, PDOAddressMode::Logical);
+        mapping.add_txpdo(0, 8, 0x1A00, PDOAddressMode::Logical);
+        mapping.add_rxpdo(1, 4, 0x1601, PDOAddressMode::Logical);
+    }
+
+    void SetUp() override {
+        mgr.init();
+        buildMap();
+    }
+
+    /// Burn the cycle-0 image exchange — `cycle % every_n == 0` always
+    /// fires on the first cycle, so tests wanting "only slice traffic"
+    /// run this first (image response scripted for a clean collect).
+    void burnImageCycle() {
+        transport.resp_len_[0] = 16;
+        transport.resp_wkc_[0] = 4;
+        mgr.cyclicSend(mapping, nullptr, 1'000'000);
+        mgr.cyclicCollect(mapping, nullptr);
+        transport.send_calls = 0;
+        transport.mask_calls = 0;
+    }
+};
+
+TEST_F(PdoSliceTest, EntrySpecSendsOnDedicatedSliceSlot) {
+    burnImageCycle();
+    PDOSliceSpec spec;
+    spec.entries = {2};                    // s1 Rx → run [4,8)
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    EXPECT_EQ(mgr.pdoSliceCount(), 1u);
+    mgr.setImageExchangeDecimation(1000);  // image exchange out of the way
+
+    // Gathered payload must carry the entry's app-side output bytes.
+    std::memset(mapping.get_entry(2)->storage, 0x5A, 4);
+    transport.slice_resp_len_[0] = 4;
+    transport.slice_resp_wkc_[0] = 1;      // derived: s1 writes → +1
+
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_EQ(transport.slice_send_calls, 1);
+    EXPECT_EQ(transport.last_slice_slot_, 0);   // wire idx 0xE0
+    EXPECT_EQ(transport.send_calls, 0);         // no image datagrams
+    EXPECT_EQ(transport.slice_sent_len_[0], 4u);
+    EXPECT_EQ(transport.slice_sent_[0][0], 0x5A);
+    // Only the slice is in flight — pending still reports it.
+    EXPECT_TRUE(mgr.cyclicExchangePending());
+
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_FALSE(mgr.cyclicExchangePending());
+    EXPECT_EQ(transport.slice_mask_calls, 1);   // single-wake mask wait
+    EXPECT_EQ(mgr.getStats().wkc_errors, 0u);
+}
+
+TEST_F(PdoSliceTest, AdjacentEntriesMergeIntoOneRun) {
+    burnImageCycle();
+    PDOSliceSpec spec;
+    spec.entries = {0, 2};                 // [0,4)+[4,8) → one run [0,8)
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    mgr.setImageExchangeDecimation(1000);
+    transport.slice_resp_len_[0] = 8;
+    transport.slice_resp_wkc_[0] = 2;      // s0 +1, s1 +1
+
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_EQ(transport.slice_send_calls, 1);   // merged — one datagram
+    EXPECT_EQ(transport.slice_sent_len_[0], 8u);
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.getStats().wkc_errors, 0u);
+}
+
+TEST_F(PdoSliceTest, DisjointEntriesConsumeOneSlotEach) {
+    burnImageCycle();
+    PDOSliceSpec spec;
+    spec.entries = {0, 1};                 // [0,4) and [8,16) → 2 runs
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    mgr.setImageExchangeDecimation(1000);
+    transport.slice_resp_len_[0] = 4;
+    transport.slice_resp_wkc_[0] = 1;
+    transport.slice_resp_len_[1] = 8;
+    transport.slice_resp_wkc_[1] = 2;      // s0 reads TxPDO → +2
+
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_EQ(transport.slice_send_calls, 2);   // slots 0 and 1
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.getStats().wkc_errors, 0u);
+}
+
+TEST_F(PdoSliceTest, EveryNDecimatesSliceExchange) {
+    burnImageCycle();
+    PDOSliceSpec spec;
+    spec.entries = {2};
+    spec.every_n = 3;
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    mgr.setImageExchangeDecimation(1000);
+    transport.slice_resp_len_[0] = 4;
+    transport.slice_resp_wkc_[0] = 1;
+
+    for (int c = 0; c < 6; ++c) {
+        ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+        mgr.cyclicCollect(mapping, nullptr);
+    }
+    // cycle_mod: skip, skip, fire — 2 emits in 6 cycles.
+    EXPECT_EQ(transport.slice_send_calls, 2);
+}
+
+TEST_F(PdoSliceTest, OnExchangeCallbackFiresPerRun) {
+    burnImageCycle();
+    PDOSliceSpec spec;
+    spec.entries = {0, 1};                 // two runs
+    int calls = 0;
+    uint8_t  last_run = 0xFF;
+    uint16_t last_len = 0, last_wkc = 0;
+    spec.on_exchange = [&](uint8_t r, const uint8_t*, uint16_t len,
+                           uint16_t w) {
+        ++calls; last_run = r; last_len = len; last_wkc = w;
+    };
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    mgr.setImageExchangeDecimation(1000);
+    transport.slice_resp_len_[0] = 4;  transport.slice_resp_wkc_[0] = 1;
+    transport.slice_resp_len_[1] = 8;  transport.slice_resp_wkc_[1] = 2;
+
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(calls, 2);
+    EXPECT_EQ(last_run, 1);
+    EXPECT_EQ(last_len, 8u);
+    EXPECT_EQ(last_wkc, 2u);
+}
+
+TEST_F(PdoSliceTest, StaleGenDroppedThenRetrySucceeds) {
+    burnImageCycle();
+    PDOSliceSpec spec;
+    spec.entries = {2};
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    mgr.setImageExchangeDecimation(1000);
+    transport.slice_resp_len_[0] = 4;
+    transport.slice_resp_wkc_[0] = 1;
+    transport.slice_stale_[0] = true;      // first view echoes prev gen
+
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.getStats().stale_responses, 1u);
+    EXPECT_EQ(transport.slice_mask_calls, 2);   // one retry wait
+    EXPECT_EQ(mgr.getStats().timeout_errors, 0u);
+}
+
+TEST_F(PdoSliceTest, MissingSliceResponseCountsTimeout) {
+    burnImageCycle();
+    PDOSliceSpec spec;
+    spec.entries = {2};
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    mgr.setImageExchangeDecimation(1000);
+    transport.slice_respond_[0] = false;   // deposit never arrives
+
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_FALSE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.getStats().timeout_errors, 1u);
+}
+
+TEST_F(PdoSliceTest, WkcMismatchCountsError) {
+    burnImageCycle();
+    PDOSliceSpec spec;
+    spec.entries = {2};
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    mgr.setImageExchangeDecimation(1000);
+    transport.slice_resp_len_[0] = 4;
+    transport.slice_resp_wkc_[0] = 9;      // derived expectation is 1
+
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_FALSE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.getStats().wkc_errors, 1u);
+}
+
+TEST_F(PdoSliceTest, SliceResponseScattersToEntryStorage) {
+    burnImageCycle();
+    PDOSliceSpec spec;
+    spec.entries = {1};                    // s0 Tx [8,16)
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    mgr.setImageExchangeDecimation(1000);
+    transport.slice_resp_len_[0] = 8;
+    transport.slice_resp_wkc_[0] = 2;      // TxPDO read → +2
+    std::memset(transport.slice_resp_buf_[0], 0xCD, 8);
+
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    const auto* e1 = mapping.get_entry(1);
+    for (int i = 0; i < 8; ++i) EXPECT_EQ(e1->storage[i], 0xCD);
+}
+
+TEST_F(PdoSliceTest, RejectsEmptySpecAndOutOfImageRange) {
+    PDOSliceSpec empty;
+    EXPECT_EQ(mgr.definePDOSlice(mapping, empty), kInvalid);
+
+    PDOSliceSpec r;
+    r.ranges = {{8, 9}};                   // [8,17) exceeds the 16 B image
+    EXPECT_EQ(mgr.definePDOSlice(mapping, r), kInvalid);
+    r.ranges = {{8, 8}};                   // exactly to the end — ok
+    EXPECT_NE(mgr.definePDOSlice(mapping, r), kInvalid);
+}
+
+TEST_F(PdoSliceTest, RejectsRunExceedingOneDatagram) {
+    transport.payload_ = 18;               // maxSliceLength() = 6
+    PDOSliceSpec r;
+    r.ranges = {{0, 8}};
+    EXPECT_EQ(mgr.definePDOSlice(mapping, r), kInvalid);
+    r.ranges = {{0, 6}};
+    EXPECT_NE(mgr.definePDOSlice(mapping, r), kInvalid);
+}
+
+TEST_F(PdoSliceTest, SliceSlotPoolExhaustionFailsDefine) {
+    // A 24 B single-slave image → 16 one-byte ranges fit the pool,
+    // the 17th define must fail.
+    LogicalAddressManager mgr2{transport};
+    mgr2.init();
+    SlaveConfig configs[kMaxPDOSlaves] = {};
+    configs[0].configured = true;
+    configs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 24);
+    configs[0].rxpdo_size = 24;
+    ASSERT_TRUE(mgr2.buildAddressMap(configs, 1));
+    PDOMapping m2;
+    m2.add_rxpdo(0, 24, 0x1600, PDOAddressMode::Logical);
+
+    for (uint32_t i = 0; i < 16; ++i) {
+        PDOSliceSpec s;
+        s.ranges = {{i, 1}};
+        ASSERT_NE(mgr2.definePDOSlice(m2, s), kInvalid) << "define " << i;
+    }
+    EXPECT_EQ(mgr2.pdoSliceCount(), 16u);
+    PDOSliceSpec one_too_many;
+    one_too_many.ranges = {{16, 1}};
+    EXPECT_EQ(mgr2.definePDOSlice(m2, one_too_many), kInvalid);
+    EXPECT_EQ(mgr2.pdoSliceCount(), 16u);
+}
+
+TEST_F(PdoSliceTest, MappingEpochChangeReplans) {
+    burnImageCycle();
+    PDOSliceSpec spec;
+    spec.entries = {2};                    // s1 Rx
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    mgr.setImageExchangeDecimation(1000);
+    transport.slice_resp_len_[0] = 4;
+    transport.slice_resp_wkc_[0] = 1;
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    mgr.cyclicCollect(mapping, nullptr);
+    EXPECT_EQ(transport.slice_send_calls, 1);
+
+    // Removing slave 1's entries bumps the mapping epoch — the next
+    // send re-resolves the spec (zero runs → slice goes dormant, no
+    // stale-offset datagram on the wire).
+    mapping.remove_entries_for_slave(1);
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    mgr.cyclicCollect(mapping, nullptr);
+    EXPECT_EQ(transport.slice_send_calls, 1);   // no new send
+}
+
+TEST_F(PdoSliceTest, ClearDropsSlicesAndPending) {
+    burnImageCycle();
+    PDOSliceSpec spec;
+    spec.entries = {2};
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    mgr.setImageExchangeDecimation(1000);
+    transport.slice_respond_[0] = false;
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_TRUE(mgr.cyclicExchangePending());
+
+    EXPECT_TRUE(mgr.clearPDOSlices());
+    EXPECT_EQ(mgr.pdoSliceCount(), 0u);
+    EXPECT_FALSE(mgr.cyclicExchangePending());
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));   // nothing pending
+}
+
+TEST_F(PdoSliceTest, OneOffExchangeUsesAsyncPath) {
+    PDOSliceSpec spec;
+    spec.entries = {2};                    // resolves to [4,8)
+    transport.single_resp_len_ = 4;
+    transport.single_resp_wkc_ = 1;
+
+    EXPECT_TRUE(mgr.exchangePDOSlice(mapping, spec));
+    // One classic single-datagram round trip — no slice slots consumed,
+    // nothing defined for the cyclic loop.
+    EXPECT_EQ(transport.single_send_calls, 1);
+    EXPECT_EQ(transport.last_single_cmd_, Command::LRW);
+    EXPECT_EQ(transport.last_single_len_, 4u);
+    EXPECT_EQ(transport.slice_send_calls, 0);
+    EXPECT_EQ(mgr.pdoSliceCount(), 0u);
+}
+
+TEST_F(PdoSliceTest, SliceOverlayBeatsDecimatedImageData) {
+    // Image runs every 3rd cycle; the slice covers the same bytes every
+    // cycle — collect order must leave the slice's newer data on top.
+    PDOSliceSpec spec;
+    spec.ranges = {{0, 4}};                // overlaps s0 Rx [0,4)
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    mgr.setImageExchangeDecimation(3);
+    transport.slice_resp_len_[0] = 4;
+    transport.slice_resp_wkc_[0] = 1;
+
+    // Cycle 0: image + slice both emit; both collect.
+    transport.resp_len_[0] = 16;
+    transport.resp_wkc_[0] = 4;
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_EQ(transport.send_calls, 1);        // image slice on slot 0
+    EXPECT_EQ(transport.slice_send_calls, 1);  // slice on idx 0xE0
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    // Cycles 1,2: only the slice emits.
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_EQ(transport.send_calls, 1);
+    EXPECT_EQ(transport.slice_send_calls, 2);
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
 }

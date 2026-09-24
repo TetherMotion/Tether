@@ -533,6 +533,138 @@ TEST(VlanStrippedTagTest, DefaultFilterIgnoresAuxData) {
 }
 
 // ============================================================================
+// CBPFSpec::first_idx_range — composed encap ∧ first-datagram-idx demux
+//
+// The cyclic datapath's socket pair replaces SO_ATTACH_FILTER wholesale,
+// so VLAN acceptance and the fastpath-idx check must live in ONE program:
+// socket A gets include-mode (encap ∧ idx∈range), socket B exclude-mode
+// (encap ∧ idx∉range).  First idx sits at byte 17 untagged, 21 tagged.
+// ============================================================================
+
+namespace {
+
+/// EtherCAT frame whose first datagram idx is `idx` (payload[3] =
+/// ecat-hdr(2) + cmd(1) offset into the payload).
+std::vector<uint8_t> ecatIdxFrame(uint8_t idx) {
+    auto payload = ecatPayload(32);
+    payload[3] = idx;
+    return ethFrame(kEtherTypeEtherCAT, std::move(payload));
+}
+
+/// 802.1Q-tagged EtherCAT frame, first idx at absolute offset 21.
+std::vector<uint8_t> vlanIdxFrame(uint16_t vid, uint8_t idx) {
+    auto payload = ecatPayload(32);
+    payload[3] = idx;
+    return vlanFrame(vid, kEtherTypeEtherCAT, std::move(payload));
+}
+
+CBPFSpec fastpathVlanSpec() {
+    CBPFSpec s{};
+    s.untagged_ethercat = false;
+    s.tagged_ethercat   = true;
+    s.vlan_range        = CBPFVlanRange{1999, 1999};
+    s.first_idx_range   = CBPFIdxRange{kSliceSlotBaseIdx, kFastSlotEndIdx};
+    return s;
+}
+
+} // namespace
+
+TEST(FirstIdxRangeTest, UntaggedIncludeDemuxesFastpath) {
+    CBPFSpec s{};
+    s.first_idx_range = CBPFIdxRange{kSliceSlotBaseIdx, kFastSlotEndIdx};
+    const auto prog = CBPFProgramFactory::build(s);
+    ASSERT_FALSE(prog.empty());
+
+    for (uint8_t idx : {0xE0, 0xE7, 0xEF, 0xF0, 0xF7, 0xF8, 0xFD})
+        EXPECT_TRUE(accepted(prog, ecatIdxFrame(idx)))
+            << "idx 0x" << std::hex << (int)idx;
+    for (uint8_t idx : {0x00, 0x42, 0xDF, 0xFE, 0xFF})
+        EXPECT_FALSE(accepted(prog, ecatIdxFrame(idx)))
+            << "idx 0x" << std::hex << (int)idx;
+}
+
+TEST(FirstIdxRangeTest, UntaggedExcludeMirrorsDemux) {
+    CBPFSpec s{};
+    s.first_idx_range   = CBPFIdxRange{kSliceSlotBaseIdx, kFastSlotEndIdx};
+    s.first_idx_exclude = true;
+    const auto prog = CBPFProgramFactory::build(s);
+    ASSERT_FALSE(prog.empty());
+
+    // Exclude mode: everything the include program accepts is rejected —
+    // including the 0xF0..0xF7 reserved gap (in-range, but slotless).
+    for (uint8_t idx : {0xE0, 0xEF, 0xF0, 0xF7, 0xF8, 0xFD})
+        EXPECT_FALSE(accepted(prog, ecatIdxFrame(idx)))
+            << "idx 0x" << std::hex << (int)idx;
+    for (uint8_t idx : {0x00, 0x42, 0xDF, 0xFE, 0xFF})
+        EXPECT_TRUE(accepted(prog, ecatIdxFrame(idx)))
+            << "idx 0x" << std::hex << (int)idx;
+}
+
+TEST(FirstIdxRangeTest, TaggedIncludeReadsIdxAtOffset21) {
+    const auto prog = CBPFProgramFactory::build(fastpathVlanSpec());
+    ASSERT_FALSE(prog.empty());
+
+    // VID 1999 + fastpath idx → accepted (idx at byte 21, not 17).
+    EXPECT_TRUE(accepted(prog, vlanIdxFrame(1999, 0xE0)));
+    EXPECT_TRUE(accepted(prog, vlanIdxFrame(1999, 0xFD)));
+    // VID ok but async idx → rejected.
+    EXPECT_FALSE(accepted(prog, vlanIdxFrame(1999, 0x42)));
+    EXPECT_FALSE(accepted(prog, vlanIdxFrame(1999, 0xFE)));
+    // Fastpath idx but wrong VID → rejected (encap clause dominates).
+    EXPECT_FALSE(accepted(prog, vlanIdxFrame(2000, 0xE0)));
+    // Untagged fastpath → rejected (untagged_ethercat=false).
+    EXPECT_FALSE(accepted(prog, ecatIdxFrame(0xE0)));
+    // Non-EtherCAT inner type → rejected regardless of bytes.
+    EXPECT_FALSE(accepted(prog, vlanFrame(1999, 0x0806, ecatPayload(32))));
+}
+
+TEST(FirstIdxRangeTest, TaggedExcludeKeepsAsyncOnly) {
+    auto s = fastpathVlanSpec();
+    s.first_idx_exclude = true;
+    const auto prog = CBPFProgramFactory::build(s);
+    ASSERT_FALSE(prog.empty());
+
+    EXPECT_FALSE(accepted(prog, vlanIdxFrame(1999, 0xE0)));
+    EXPECT_FALSE(accepted(prog, vlanIdxFrame(1999, 0xFD)));
+    EXPECT_TRUE(accepted(prog, vlanIdxFrame(1999, 0x42)));
+    EXPECT_TRUE(accepted(prog, vlanIdxFrame(1999, 0xFE)));
+    EXPECT_FALSE(accepted(prog, vlanIdxFrame(2000, 0x42)));  // wrong VID
+}
+
+TEST(FirstIdxRangeTest, StrippedTagLegUsesUntaggedOffset) {
+    // A kernel-stripped VLAN frame presents the untagged layout in the
+    // data buffer (idx at 17) plus the TCI in auxdata — the wire leg's
+    // EtherType accept must funnel into the offset-17 idx check.
+    const auto prog = CBPFProgramFactory::build(fastpathVlanSpec());
+    ASSERT_FALSE(prog.empty());
+
+    EXPECT_TRUE(acceptedAux(prog, ecatIdxFrame(0xE0), 1999));
+    EXPECT_TRUE(acceptedAux(prog, ecatIdxFrame(0xFD), 1999));
+    EXPECT_FALSE(acceptedAux(prog, ecatIdxFrame(0x42), 1999)); // async idx
+    EXPECT_FALSE(acceptedAux(prog, ecatIdxFrame(0xE0), 2000)); // wrong VID
+    EXPECT_FALSE(acceptedAux(prog, ecatIdxFrame(0xE0)));       // no tag
+}
+
+TEST(FirstIdxRangeTest, IncludeCoversSliceAndCyclicPoolsDisjointly) {
+    // Mirror of the socket-pair split: build both programs from one spec
+    // and prove every idx in 0..255 lands on exactly one side.
+    auto spec = fastpathVlanSpec();
+    const auto acc  = CBPFProgramFactory::build(spec);
+    spec.first_idx_exclude = true;
+    const auto asy  = CBPFProgramFactory::build(spec);
+    ASSERT_FALSE(acc.empty());
+    ASSERT_FALSE(asy.empty());
+
+    for (int idx = 0; idx < 256; ++idx) {
+        const auto frame = vlanIdxFrame(1999, static_cast<uint8_t>(idx));
+        const bool a = accepted(acc, frame);
+        const bool b = accepted(asy, frame);
+        EXPECT_TRUE(a != b) << "idx 0x" << std::hex << idx
+                            << " double-delivered or dropped";
+    }
+}
+
+// ============================================================================
 // ethercatFilterWithUdp() — adds IPv4/UDP dst-port matching
 // ============================================================================
 

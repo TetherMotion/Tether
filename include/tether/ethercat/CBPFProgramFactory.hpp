@@ -143,6 +143,13 @@ struct CBPFVlanRange {
  * UDP) to frames whose 802.1Q VID lies in the range.  Untagged acceptance
  * is independent.
  */
+/// Inclusive datagram-index range (first datagram of a frame).
+struct CBPFIdxRange {
+    uint8_t start = 0;
+    uint8_t end   = 0;
+    bool contains(uint8_t idx) const { return idx >= start && idx <= end; }
+};
+
 struct CBPFSpec {
     bool untagged_ethercat = true;   ///< EtherType 0x88A4 directly
     bool untagged_udp      = false;  ///< IPv4/UDP dst `udp_port`, untagged
@@ -151,6 +158,23 @@ struct CBPFSpec {
     std::optional<CBPFVlanRange> vlan_range;  ///< restrict tagged VIDs
     uint16_t udp_port  = kEtherCATUdpPort;
     uint16_t vlan_tpid = kEtherType8021Q;
+
+    /**
+     * @brief Optional constraint on the FIRST datagram's idx, applied to
+     *        the direct-EtherCAT legs only (UDP-encapsulated frames are
+     *        exempt — their datagrams sit behind the IP/UDP headers).
+     *
+     * When set, an EtherCAT frame is accepted only if its first idx
+     *   - lies inside `first_idx_range`        (first_idx_exclude=false)
+     *   - lies outside `first_idx_range`       (first_idx_exclude=true)
+     *
+     * Used to compose the cyclic demux with an encapsulation filter:
+     * the cyclic socket accepts encap ∧ idx∈fastpath while the async
+     * socket accepts encap ∧ idx∉fastpath — SO_ATTACH_FILTER replaces
+     * rather than stacks, so both must be generated as one program.
+     */
+    std::optional<CBPFIdxRange> first_idx_range;
+    bool first_idx_exclude = false;
 };
 
 class CBPFProgramFactory {

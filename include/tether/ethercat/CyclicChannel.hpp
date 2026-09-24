@@ -39,6 +39,8 @@
 #include <cstring>
 #include <memory>
 
+#include "tether/ethercat/CBPFProgramFactory.hpp"   // CBPFInsn
+
 namespace EtherCAT {
 
 /// Wire offset of the first datagram's payload in a single-datagram cyclic
@@ -218,6 +220,21 @@ struct CyclicChannelConfig {
 
     int      async_fd = -1;            ///< async socket (socket B) — the mirror
                                        ///< BPF is attached here when >= 0
+
+    /**
+     * @brief Optional caller-built demux programs, replacing the built-in
+     *        VLAN-aware accept/mirror programs.
+     *
+     * Needed when an encapsulation filter (VID range, UDP) must compose
+     * with the cyclic-idx demux: SO_ATTACH_FILTER replaces rather than
+     * stacks, so the encap clause and the idx clause must live in ONE
+     * generated program (see CBPFSpec::first_idx_range).  Pointers need
+     * only outlive the createCyclicChannel() call.
+     */
+    const CBPFInsn* accept_prog = nullptr;  ///< cyclic socket's program
+    size_t          accept_prog_len = 0;
+    const CBPFInsn* async_prog  = nullptr;  ///< async socket's program
+    size_t          async_prog_len  = 0;
 };
 
 /**

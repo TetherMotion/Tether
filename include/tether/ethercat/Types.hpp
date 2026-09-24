@@ -183,11 +183,81 @@ struct RxDatagram {
  * kNumCyclicSlots) are deposited into fixed per-slot mailboxes by the RX
  * parser instead of going through TransactionRouter — no mutex, no
  * condition variable on the cyclic hot path.  allocIdx() never returns an
- * index >= kCyclicSlotBaseIdx (which also reserves 0xFE fire-and-forget).
+ * index >= kSliceSlotBaseIdx (which also reserves 0xFE fire-and-forget).
  * (IPDOTransport exposes the same values as kCyclicSlotBase/kNumCyclicSlots.)
  */
 inline constexpr uint8_t kCyclicSlotBaseIdx = 0xF8;
 inline constexpr size_t  kNumCyclicSlots    = 6;   ///< slots 0xF8..0xFD
+
+/**
+ * @brief Reserved datagram-index range for user-defined PDO slices.
+ *
+ * Each configured PDO slice (LogicalAddressManager::definePDOSlice*) owns
+ * dedicated indices from this pool — one per contiguous logical-address
+ * run — so its responses land in their own deposit slots, demultiplexed
+ * by the same kernel BPF fastpath filter as the cyclic slots.  The
+ * slice pool and the cyclic pool are disjoint pipelines: a sliced
+ * full-image exchange and a custom slice exchange can be in flight at
+ * the same time without sharing mailboxes.
+ */
+inline constexpr uint8_t kSliceSlotBaseIdx  = 0xE0;
+inline constexpr size_t  kNumSliceSlots     = 16;  ///< slots 0xE0..0xEF
+
+/**
+ * @brief The union fastpath range accepted by the cyclic socket's
+ *        demux filter and deposited into fixed slots: [0xE0, 0xFD].
+ */
+inline constexpr uint8_t kFastSlotBaseIdx   = kSliceSlotBaseIdx;
+inline constexpr uint8_t kFastSlotEndIdx    =
+    kCyclicSlotBaseIdx + static_cast<uint8_t>(kNumCyclicSlots) - 1;  ///< 0xFD
+inline constexpr size_t  kNumFastSlots      =
+    kNumSliceSlots + kNumCyclicSlots;
+
+/// True when @p idx lies in the reserved fastpath range [0xE0, 0xFD].
+inline constexpr bool isFastPathIdx(uint8_t idx) {
+    return idx >= kFastSlotBaseIdx && idx <= kFastSlotEndIdx;
+}
+/// True when @p idx is a user-slice index (0xE0..0xEF).
+inline constexpr bool isSliceIdx(uint8_t idx) {
+    return idx >= kSliceSlotBaseIdx &&
+           idx <  kSliceSlotBaseIdx + static_cast<uint8_t>(kNumSliceSlots);
+}
+/// True when @p idx is a cyclic image-slot index (0xF8..0xFD).
+/// The 0xF0..0xF7 gap between the pools is filter-reserved but maps to
+/// no slot — deposits there must be rejected, not banked.
+inline constexpr bool isCyclicIdx(uint8_t idx) {
+    return idx >= kCyclicSlotBaseIdx &&
+           idx <  kCyclicSlotBaseIdx + static_cast<uint8_t>(kNumCyclicSlots);
+}
+/// True when @p idx maps to a real fastpath slot (slice OR cyclic).
+inline constexpr bool isSlotIdx(uint8_t idx) {
+    return isSliceIdx(idx) || isCyclicIdx(idx);
+}
+
+/**
+ * @brief Wire encapsulation descriptor for the cyclic datapath.
+ *
+ * A distilled copy of the application's encapsulation settings (the
+ * example-layer EncapsulationConfig is not visible to the master):
+ * which VLAN tag — if any — cyclic TX headers must carry inline, and
+ * which VID range the socket-level demux filter must accept.  The
+ * datapath bakes the TX tag into its per-index header templates so a
+ * tagged cyclic send is one contiguous header memcpy + sendmsg — the
+ * router's per-frame rebuild never runs on the cyclic path.
+ */
+struct WireEncap {
+    uint16_t tx_vlan     = 0;     ///< VID to insert on TX (0 = untagged)
+    uint16_t rx_vlan_lo  = 0;     ///< Accepted RX VID range; 0/0 = untagged
+    uint16_t rx_vlan_hi  = 0;
+    bool     rx_vlan_any = false; ///< Accept any tagged EtherCAT frame
+
+    /// True when tagged frames are part of the RX filter.
+    bool tagged()   const { return rx_vlan_any || rx_vlan_lo != 0; }
+    /// True when the link is untagged EtherCAT (no VLAN filtering).
+    bool untagged() const { return !tagged(); }
+    /// Wire prefix length of a composed cyclic TX frame on the channel.
+    uint16_t prefixLen() const { return tx_vlan ? 30 : 26; }
+};
 
 /**
  * @brief Reserved index for datagrams piggybacked inside cyclic frames

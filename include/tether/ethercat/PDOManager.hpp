@@ -27,6 +27,7 @@
 #include <functional>
 #include <bit>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "tether/platform/EspCompat.hpp"
@@ -58,6 +59,37 @@ inline uint64_t monoNowNsFallback() {
 class IPDOTransport;
 class PDOManager;
 class LogicalAddressManager;
+
+/**
+ * @brief Declarative specification of a custom PDO slice.
+ *
+ * A slice is a named subset of the process image exchanged on its own
+ * reserved datagram index — its own deposit slot, its own decimation
+ * cadence, its own stale-deposit guard — fully independent of the
+ * cyclic image exchange.  Users who never call definePDOSlice() get
+ * exactly the whole-image behaviour; no slice machinery activates.
+ *
+ * Two ways to select the exchanged bytes (entries take precedence):
+ *   - `entries`: mapping entry indices — the planner resolves them to
+ *     contiguous logical runs automatically, one LRW datagram per run.
+ *   - `ranges`: explicit [offset,length) pairs in image space.
+ */
+struct PDOSliceSpec {
+    /// Mapping entry indices (LogicalAddressManager::describeEntries order).
+    std::vector<uint16_t> entries;
+    /// Explicit image-space ranges, used when `entries` is empty.
+    std::vector<std::pair<uint32_t, uint32_t>> ranges;
+    /// Exchange every Nth cyclic cycle (1 = every cycle).
+    uint32_t every_n = 1;
+    /**
+     * @brief Optional per-run completion callback — invoked on the
+     *        cyclic thread after the run's response validated and
+     *        scattered: (run_index, payload, payload_len, wkc).
+     *        Keep it real-time safe: no allocation, no blocking.
+     */
+    std::function<void(uint8_t run, const uint8_t* payload,
+                       uint16_t len, uint16_t wkc)> on_exchange;
+};
 
 namespace PDO {
 
@@ -540,6 +572,70 @@ public:
     /// @return the cyclic channel, or nullptr on the software path.
     virtual ICyclicChannel* cyclicChannel() { return nullptr; }
 
+    // ------------------------------------------------------------------
+    // PDO-slice fast path: dedicated idx pool [kSliceSlotBase, +kNumSliceSlots)
+    //
+    // User-defined PDO slices exchange on their own reserved indices —
+    // a different pipeline from the cyclic image slots: responses land
+    // in per-slice deposit slots, demultiplexed by the same socket
+    // filter.  A slice's datagrams and the cyclic image's datagrams can
+    // be in flight at once without sharing mailboxes.
+    // ------------------------------------------------------------------
+    static constexpr uint8_t kSliceSlotBase = ::EtherCAT::kSliceSlotBaseIdx;
+    static constexpr size_t  kNumSliceSlots = ::EtherCAT::kNumSliceSlots;
+
+    /// Seq token of a slice slot — call BEFORE sendSliceDatagram().
+    virtual uint64_t sliceSlotToken(uint8_t slice) {
+        (void)slice; return 0;
+    }
+    /// Generation bit of the last datagram sent on @p slice (stale guard).
+    virtual uint8_t sliceSlotGen(uint8_t slice) {
+        (void)slice; return 0;
+    }
+    /// Send a datagram on a dedicated slice index (wire idx = base + slot).
+    virtual bool sendSliceDatagram(Command cmd, uint8_t slice_slot,
+                                   uint16_t adp, uint16_t ado,
+                                   const void* data, uint16_t datalen,
+                                   bool roundtrip) {
+        (void)cmd; (void)slice_slot; (void)adp; (void)ado;
+        (void)data; (void)datalen; (void)roundtrip;
+        return false;
+    }
+    /// Single-slot view wait over a slice index — same semantics as
+    /// waitCyclicSlotView().
+    virtual bool waitSliceSlotView(uint8_t slice, uint64_t token,
+                                   uint32_t timeout_ns,
+                                   CyclicSlotView& out) {
+        (void)slice; (void)token; (void)timeout_ns; (void)out;
+        return false;
+    }
+    /**
+     * @brief One wake for a whole multi-run slice exchange — same
+     *        semantics as waitCyclicSlotMask() over the slice index
+     *        space [0, kNumSliceSlots).  The default degenerates to a
+     *        per-slot wait loop sharing the deadline.
+     */
+    virtual uint32_t waitSliceSlotMask(uint32_t slice_mask,
+                                       const uint64_t* tokens,
+                                       uint32_t timeout_ns,
+                                       CyclicSlotView* views) {
+        uint32_t arrived = 0;
+        const uint64_t deadline = monoNowNsFallback() + timeout_ns;
+        for (uint8_t s = 0; s < kNumSliceSlots; ++s) {
+            if (!(slice_mask & (1u << s))) continue;
+            const uint64_t now = monoNowNsFallback();
+            const uint32_t remain = now < deadline
+                ? static_cast<uint32_t>(deadline - now) : 0;
+            if (!waitSliceSlotView(s, tokens[s], remain, views[s]))
+                break;
+            arrived |= 1u << s;
+        }
+        return arrived;
+    }
+    /// Byte offset of the datagram payload in a composed cyclic TX frame
+    /// (26 untagged, 30 with a baked TX VLAN tag).
+    virtual uint32_t cyclicPayloadOffset() const { return 26; }
+
     virtual bool writeRegister(uint16_t adp, uint16_t ado,
                                const void* data, uint16_t len,
                                unsigned int timeout_ms) = 0;
@@ -699,6 +795,18 @@ public:
     bool cyclicSend(ProcessImage* image, uint32_t rx_timeout_ns = 200'000);
     bool cyclicCollect(ProcessImage* image);
     bool cyclicExchangePending() const;
+
+    // ---- User-defined PDO slices --------------------------------------
+    // Declarative custom slices exchanged on dedicated wire indices —
+    // see PDOSliceSpec / LogicalAddressManager::definePDOSlice().  All
+    // no-ops returning failure when no logical address manager exists.
+    uint32_t definePDOSlice(const PDOSliceSpec& spec);
+    bool     clearPDOSlices();
+    size_t   pdoSliceCount() const;
+    /// Blocking one-off slice exchange on the async path (no fast path).
+    bool     exchangePDOSlice(const PDOSliceSpec& spec);
+    /// Run the whole-image exchange every Nth cycle (default 1).
+    void     setImageExchangeDecimation(uint32_t every_n);
 
     /// Slices the current image occupies on the wire (1 = single frame).
     uint8_t cyclicSliceCount() const;
