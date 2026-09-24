@@ -365,8 +365,8 @@ void verifySyncManagers(EtherCAT::Slave& slave,
         TETHER_LOGI(tag,
             "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(tag,
-            "║  SM Verification: Slave {}  SM{}–SM{}                           ║",
-            idx, static_cast<unsigned>(sm_start), static_cast<unsigned>(sm_end));
+            "║  SM Verification: {}  SM{}–SM{}                           ║",
+            slave.logPrefix().c_str(), static_cast<unsigned>(sm_start), static_cast<unsigned>(sm_end));
         TETHER_LOGI(tag,
             "╚══════════════════════════════════════════════════════════════╝");
     }
@@ -420,7 +420,7 @@ SlaveError Slave::transitionToInit() {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  State Machine Transition: Slave {}                          ║", index_);
+        TETHER_LOGI(TAG, "║  State Machine Transition: {}                          ║", logPrefix().c_str());
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
         TETHER_LOGI(TAG, "║  Transition: {} => INIT", slaveStateToString(current_state));
         TETHER_LOGI(TAG, "║  Reason:    Requested by user/application");
@@ -440,7 +440,7 @@ SlaveError Slave::transitionToInit() {
     
     if (slave_debug_flags_.stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  Transition Result: Slave {} => INIT SUCCESS                  ║", index_);
+        TETHER_LOGI(TAG, "║  Transition Result: {} => INIT SUCCESS                  ║", logPrefix().c_str());
         TETHER_LOGI(TAG, "║  Configuration flags reset: mailbox=false, pdo=false          ║");
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
     }
@@ -453,7 +453,7 @@ SlaveError Slave::transitionToPreOp() {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  State Machine Transition: Slave {}                          ║", index_);
+        TETHER_LOGI(TAG, "║  State Machine Transition: {}                          ║", logPrefix().c_str());
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
         TETHER_LOGI(TAG, "║  Transition: {} => PRE_OP", slaveStateToString(current_state));
         TETHER_LOGI(TAG, "║  Reason:    Mailbox operations (SDO, FoE, etc.) require PRE_OP");
@@ -491,7 +491,7 @@ SlaveError Slave::transitionToPreOp() {
 
     if (slave_debug_flags_.stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  Transition Result: Slave {} => PRE_OP SUCCESS                ║", index_);
+        TETHER_LOGI(TAG, "║  Transition Result: {} => PRE_OP SUCCESS                ║", logPrefix().c_str());
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
     }
 
@@ -503,7 +503,7 @@ SlaveError Slave::transitionToSafeOp() {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  State Machine Transition: Slave {}                          ║", index_);
+        TETHER_LOGI(TAG, "║  State Machine Transition: {}                          ║", logPrefix().c_str());
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
         TETHER_LOGI(TAG, "║  Transition: {} => SAFE_OP", slaveStateToString(current_state));
         TETHER_LOGI(TAG, "║  Reason:    Process data exchange requires SAFE_OP");
@@ -541,7 +541,7 @@ SlaveError Slave::transitionToSafeOp() {
             if (state == static_cast<uint8_t>(SlaveState::SAFE_OP)) {
                 if (slave_debug_flags_.stateMachine) {
                     TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-                    TETHER_LOGI(TAG, "║  Transition Result: Slave {} => SAFE_OP SUCCESS               ║", index_);
+                    TETHER_LOGI(TAG, "║  Transition Result: {} => SAFE_OP SUCCESS               ║", logPrefix().c_str());
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                 }
                 // Debug gate checkpoint: SAFE_OP confirmed
@@ -588,7 +588,7 @@ SlaveError Slave::transitionToOp() {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  State Machine Transition: Slave {}                          ║", index_);
+        TETHER_LOGI(TAG, "║  State Machine Transition: {}                          ║", logPrefix().c_str());
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
         TETHER_LOGI(TAG, "║  Transition: {} => OP", slaveStateToString(current_state));
         TETHER_LOGI(TAG, "║  Reason:    Full operational mode for process data exchange");
@@ -657,7 +657,7 @@ SlaveError Slave::transitionToOp() {
             if (state == static_cast<uint8_t>(SlaveState::OP)) {
                 if (slave_debug_flags_.stateMachine) {
                     TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-                    TETHER_LOGI(TAG, "║  Transition Result: Slave {} => OP SUCCESS                    ║", index_);
+                    TETHER_LOGI(TAG, "║  Transition Result: {} => OP SUCCESS                    ║", logPrefix().c_str());
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
                 }
                 // Debug gate checkpoint: OP confirmed
@@ -687,7 +687,7 @@ SlaveError Slave::transitionToBoot() {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  State Machine Transition: Slave {}                          ║", index_);
+        TETHER_LOGI(TAG, "║  State Machine Transition: {}                          ║", logPrefix().c_str());
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
         TETHER_LOGI(TAG, "║  Transition: {} => BOOT", slaveStateToString(current_state));
         TETHER_LOGI(TAG, "║  Reason:    Firmware update or bootstrap mode");
@@ -704,7 +704,7 @@ SlaveError Slave::transitionToBoot() {
     
     if (slave_debug_flags_.stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  Transition Result: Slave {} => BOOT SUCCESS                  ║", index_);
+        TETHER_LOGI(TAG, "║  Transition Result: {} => BOOT SUCCESS                  ║", logPrefix().c_str());
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
     }
     

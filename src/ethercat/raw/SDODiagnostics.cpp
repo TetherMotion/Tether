@@ -99,8 +99,8 @@ void SDODiagnostics::dumpSlaveState(Master& master, uint16_t adp,
     char sm0_sa_act_desc[16];  smActivateStr(sm0_stat_act[1], sm0_sa_act_desc, sizeof(sm0_sa_act_desc));
     char sm1_sa_act_desc[16];  smActivateStr(sm1_stat_act[1], sm1_sa_act_desc, sizeof(sm1_sa_act_desc));
 
-    TETHER_LOGE(TAG, "[SDO_DIAG] Slave {}: AL_STATUS=0x{:04X} state={}{} | AL status code: {} (0x{:04X})\n[SDO_DIAG] MBX cfg: wr=0x{:04X} rd=0x{:04X} | SM0(start=0x{:04X} len={} ctrl=0x{:02X} [{}] stat=0x{:02X} act=0x{:02X}) SM1(start=0x{:04X} len={} ctrl=0x{:02X} [{}] stat=0x{:02X} act=0x{:02X})\n[SDO_DIAG] SM0 status=0x{:02X} [{}] act=0x{:02X} [{}] | SM1 status=0x{:02X} [{}] act=0x{:02X} [{}]",
-               slaveIndexFromADP(adp),
+    TETHER_LOGE(TAG, "[SDO_DIAG] {}: AL_STATUS=0x{:04X} state={}{} | AL status code: {} (0x{:04X})\n[SDO_DIAG] MBX cfg: wr=0x{:04X} rd=0x{:04X} | SM0(start=0x{:04X} len={} ctrl=0x{:02X} [{}] stat=0x{:02X} act=0x{:02X}) SM1(start=0x{:04X} len={} ctrl=0x{:02X} [{}] stat=0x{:02X} act=0x{:02X})\n[SDO_DIAG] SM0 status=0x{:02X} [{}] act=0x{:02X} [{}] | SM1 status=0x{:02X} [{}] act=0x{:02X} [{}]",
+               master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(),
                al_s,
                EtherCAT::al_status_get_state_name(al_s),
                EtherCAT::al_status_has_error(al_s) ? " ERROR" : "",

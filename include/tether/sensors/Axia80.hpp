@@ -374,7 +374,7 @@ inline bool Axia80Sensor::init(Tether::Platform::LogLevel log_level,
         }
     }
 
-    TETHER_LOGI("Axia80", "Slave {} initialised successfully{}", slave_index_,
+    TETHER_LOGI("Axia80", "{} initialised successfully{}", master_.slaveLogPrefix(slave_index_).c_str(),
                 transition_to_op ? "" : " (SAFE-OP only)");
     return true;
 }

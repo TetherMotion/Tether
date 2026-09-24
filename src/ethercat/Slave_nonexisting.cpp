@@ -36,10 +36,10 @@ NonExistingSlave::NonExistingSlave(Master& master, uint16_t index)
 
 void NonExistingSlave::logCritical(const char* method) const {
     TETHER_LOGE( TAG,
-        "CRITICAL: {}() called on non-existing slave {}. "
+        "CRITICAL: {}() called on non-existing {}. "
         "Check getDiscoveredSlaveCount() before accessing slaves. "
         "Valid range: 0 to {}.",
-        method, index_, master_->getDiscoveredSlaveCount() > 0
+        method, logPrefix().c_str(), master_->getDiscoveredSlaveCount() > 0
             ? static_cast<unsigned>(master_->getDiscoveredSlaveCount() - 1) : 0u);
 }
 

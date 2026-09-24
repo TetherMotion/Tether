@@ -71,7 +71,7 @@ bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::
         TETHER_LOGD(local_tag, "======================================================================\n  AUTO-CONFIGURING MAILBOX FOR SLAVE {} (ADP=0x{:04X})\n======================================================================",
                     (unsigned)slave_index, adp);
     } else {
-        TETHER_LOGI(local_tag, "Auto-configuring mailbox for slave {}...", (unsigned)slave_index);
+        TETHER_LOGI(local_tag, "Auto-configuring mailbox for {}...", slaveLogPrefix(slave_index).c_str());
     }
     
     // Step 1: Read mailbox configuration from SII
@@ -84,8 +84,8 @@ bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::
     bool sii_ok = configureMailboxFromSii(slave_index, &wr_addr, &wr_len, &rd_addr, &rd_len, &proto);
     
     if (!sii_ok) {
-        TETHER_LOGE(local_tag, "Failed to read SII mailbox configuration for slave {}", 
-                    (unsigned)slave_index);
+        TETHER_LOGE(local_tag, "Failed to read SII mailbox configuration for {}", 
+                    slaveLogPrefix(slave_index).c_str());
         // Note: configureMailboxFromSii already sets defaults on failure, so we can continue
     }
     
@@ -152,7 +152,7 @@ bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::
                 TETHER_LOGW(local_tag, "Failed to read back SM0/SM1 control registers after configuration");
             }
         } else {
-            TETHER_LOGE(local_tag, "Failed to write mailbox SM registers to slave {}", (unsigned)slave_index);
+            TETHER_LOGE(local_tag, "Failed to write mailbox SM registers to {}", slaveLogPrefix(slave_index).c_str());
             return false;
         }
     }
@@ -189,8 +189,8 @@ bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::
         TETHER_LOGD(local_tag, "======================================================================\n  ✓ MAILBOX AUTO-CONFIGURATION COMPLETE FOR SLAVE {}\n======================================================================",
                     (unsigned)slave_index);
     } else {
-        TETHER_LOGI(local_tag, "✓ Mailbox auto-configured for slave {}: Receive(SM0)=0x{:04X}/{} Send(SM1)=0x{:04X}/{}",
-                    (unsigned)slave_index, wr_addr, (unsigned)wr_len, rd_addr, (unsigned)rd_len);
+        TETHER_LOGI(local_tag, "✓ Mailbox auto-configured for {}: Receive(SM0)=0x{:04X}/{} Send(SM1)=0x{:04X}/{}",
+                    slaveLogPrefix(slave_index).c_str(), wr_addr, (unsigned)wr_len, rd_addr, (unsigned)rd_len);
     }
     
     return true;
@@ -309,13 +309,13 @@ bool Master::autoConfigureMailbox(const ESIFile& esi, SlaveAddress slave_address
         if (pdoForSlave(slave_index).configureSlavesSMs(slave_index)) {
             (void)drainSlaveMailbox(slave_index);
         } else {
-            TETHER_LOGE(local_tag, "Failed to write mailbox SM registers to slave {}", (unsigned)slave_index);
+            TETHER_LOGE(local_tag, "Failed to write mailbox SM registers to {}", slaveLogPrefix(slave_index).c_str());
             return false;
         }
     }
 
-    TETHER_LOGI(local_tag, "Mailbox auto-configured from ESI for slave {}",
-                (unsigned)slave_index);
+    TETHER_LOGI(local_tag, "Mailbox auto-configured from ESI for {}",
+                slaveLogPrefix(slave_index).c_str());
     return true;
 }
 
@@ -406,8 +406,8 @@ void Master::logDiscoveredSlavesSummary(const char* tag)
                         id.vendor_id, id.product_code,
                         proto_name);
         } else {
-            TETHER_LOGW(tag, "Slave {} @ ADP=0x{:04X}: unable to read SII/identity",
-                        i, adpForSlaveIndex(i));
+            TETHER_LOGW(tag, "{} @ ADP=0x{:04X}: unable to read SII/identity",
+                        slaveLogPrefix(i).c_str(), adpForSlaveIndex(i));
         }
     }
 }
@@ -430,26 +430,26 @@ bool Master::verifySlaveIdentity(uint16_t slave_index,
     bool ok = true;
 
     if (expected.vendor_id.has_value() && id.vendor_id != expected.vendor_id.value()) {
-        TETHER_LOGE(tag, "Slave {} Vendor ID mismatch: expected 0x{:08X}, got 0x{:08X}",
-                    slave_index, expected.vendor_id.value(), id.vendor_id);
+        TETHER_LOGE(tag, "{} Vendor ID mismatch: expected 0x{:08X}, got 0x{:08X}",
+                    slaveLogPrefix(slave_index).c_str(), expected.vendor_id.value(), id.vendor_id);
         ok = false;
     }
 
     if (expected.product_code.has_value() && id.product_code != expected.product_code.value()) {
-        TETHER_LOGE(tag, "Slave {} Product Code mismatch: expected 0x{:08X}, got 0x{:08X}",
-                    slave_index, expected.product_code.value(), id.product_code);
+        TETHER_LOGE(tag, "{} Product Code mismatch: expected 0x{:08X}, got 0x{:08X}",
+                    slaveLogPrefix(slave_index).c_str(), expected.product_code.value(), id.product_code);
         ok = false;
     }
 
     if (expected.revision_number.has_value() && id.revision_number != expected.revision_number.value()) {
-        TETHER_LOGE(tag, "Slave {} Revision Number mismatch: expected 0x{:08X}, got 0x{:08X}",
-                    slave_index, expected.revision_number.value(), id.revision_number);
+        TETHER_LOGE(tag, "{} Revision Number mismatch: expected 0x{:08X}, got 0x{:08X}",
+                    slaveLogPrefix(slave_index).c_str(), expected.revision_number.value(), id.revision_number);
         ok = false;
     }
 
     if (expected.serial_number.has_value() && id.serial_number != expected.serial_number.value()) {
-        TETHER_LOGE(tag, "Slave {} Serial Number mismatch: expected 0x{:08X}, got 0x{:08X}",
-                    slave_index, expected.serial_number.value(), id.serial_number);
+        TETHER_LOGE(tag, "{} Serial Number mismatch: expected 0x{:08X}, got 0x{:08X}",
+                    slaveLogPrefix(slave_index).c_str(), expected.serial_number.value(), id.serial_number);
         ok = false;
     }
 

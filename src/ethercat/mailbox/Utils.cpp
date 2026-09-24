@@ -85,7 +85,7 @@ void dumpHeaderAndStatus(Master& master,
             TETHER_LOGW(tag, "[DEBUG] Mailbox RD read FAILED (addr=0x{:04X})", mbx_rd_addr);
         }
     } else {
-        TETHER_LOGW(tag, "SDO mailbox configuration unavailable for slave {}", slave_idx);
+        TETHER_LOGW(tag, "SDO mailbox configuration unavailable for {}", master.slaveLogPrefix(slave_idx).c_str());
     }
 }
 

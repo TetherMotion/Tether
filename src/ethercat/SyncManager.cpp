@@ -361,7 +361,7 @@ void SyncManagerAccessor::dumpPDOAssignments(const char* tag) const {
 // ============================================================================
 
 void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char* tag) {
-    TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  Mailbox Hardware Configuration Debug (Slave {})            ║\n╚══════════════════════════════════════════════════════════════╝\n", (unsigned)slave_index);
+    TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  Mailbox Hardware Configuration Debug ({})            ║\n╚══════════════════════════════════════════════════════════════╝\n", master.slaveLogPrefix(slave_index).c_str());
 
     auto& slave = master.slave(slave_index);
 
@@ -461,7 +461,7 @@ void debugMailboxConfiguration(Master& master, uint16_t slave_index, const char*
 // ============================================================================
 
 void debugPDOSyncManagerConfiguration(Master& master, uint16_t slave_index, const char* tag) {
-    TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  PDO Sync Manager Configuration Debug (Slave {})             ║\n╚══════════════════════════════════════════════════════════════╝\n", (unsigned)slave_index);
+    TETHER_LOGI(tag, "\n╔══════════════════════════════════════════════════════════════╗\n║  PDO Sync Manager Configuration Debug ({})             ║\n╚══════════════════════════════════════════════════════════════╝\n", master.slaveLogPrefix(slave_index).c_str());
 
     auto& slave = master.slave(slave_index);
 
