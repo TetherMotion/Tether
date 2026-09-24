@@ -1653,7 +1653,7 @@ public:
         double vf,
         double sTotal) const {
 
-        return buildPulsePlan(vLimFn, v0, vf, sTotal,
+        return buildPulsePlan(globalBounds(vLimFn, sTotal), v0, vf, sTotal,
                               std::max(0.0, jStar), 1.0);
 
     #if 0
@@ -2128,6 +2128,10 @@ private:
         const std::function<double(double)>& vLimit,
         double sTotal) const {
         PlanningBounds bounds;
+        if (!(sTotal > 0.0)) {
+            bounds.failureReason = "Path has non-positive length";
+            return bounds;
+        }
         if (limits_.axis.snapLimitEnabled) {
             bounds.failureReason =
                 "Per-axis snap limits require fourth-order path derivatives";
@@ -2172,6 +2176,32 @@ private:
             return bounds;
         }
 
+        // When the sample grid coincides with the constraint cache grid,
+        // reuse the precomputed geometric coefficients. Evaluating the
+        // NURBS path at every sample dominates solve time on curved paths.
+        const bool useCache =
+            samples == constraintCacheSize_ &&
+            gridCoeffs_.size() == constraintCacheSize_ + 1 &&
+            sTotal == sTotal_;
+        const auto accelBoundsAt = [&](size_t i, double velocity) {
+            if (useCache) return accelBoundsFromCache(i, velocity);
+            const T s = static_cast<T>(sTotal * static_cast<double>(i) /
+                                        static_cast<double>(samples));
+            const auto b = evaluator_.accelerationBounds(
+                s, static_cast<T>(velocity), path_);
+            return std::pair<double, double>{
+                static_cast<double>(b.first),
+                static_cast<double>(b.second)};
+        };
+        const auto etaBoundsAt = [&](size_t i, double velocity,
+                                     double accel) -> EtaBounds {
+            if (useCache) return etaBoundsFromCache(i, velocity, accel);
+            const T s = static_cast<T>(sTotal * static_cast<double>(i) /
+                                        static_cast<double>(samples));
+            return evaluator_.etaBounds(s, static_cast<T>(velocity),
+                                        static_cast<T>(accel), path_);
+        };
+
         // Acceleration constraints depend on speed. A velocity ceiling due
         // solely to centripetal acceleration can leave zero room for
         // tangential acceleration, even though a strictly lower speed is
@@ -2180,12 +2210,8 @@ private:
         const auto accelerationAtVelocity = [&](double velocity) {
             double available = static_cast<double>(limits_.path.maxPathAcceleration);
             for (size_t i = 0; i <= samples; ++i) {
-                const T s = static_cast<T>(sTotal * static_cast<double>(i) /
-                                            static_cast<double>(samples));
-                const auto [aMin, aMax] = evaluator_.accelerationBounds(
-                    s, static_cast<T>(velocity), path_);
-                available = std::min(available, std::min(
-                    static_cast<double>(aMax), -static_cast<double>(aMin)));
+                const auto [aMin, aMax] = accelBoundsAt(i, velocity);
+                available = std::min(available, std::min(aMax, -aMin));
             }
             return available;
         };
@@ -2224,8 +2250,7 @@ private:
                 bounds.velocity, static_cast<double>(vLimit(s)));
             for (const double a : {-bounds.acceleration, 0.0,
                                    bounds.acceleration}) {
-                const auto interval = evaluator_.etaBounds(
-                    s, static_cast<T>(vLocal), static_cast<T>(a), path_);
+                const auto interval = etaBoundsAt(i, vLocal, a);
                 double symmetric = std::min(interval.eta_max,
                                             -interval.eta_min);
                 // At sharp corners the centripetal jerk can consume all
@@ -2384,7 +2409,7 @@ private:
     }
 
     ForwardPassResult buildPulsePlan(
-        const std::function<double(double)>& vLimit,
+        PlanningBounds bounds,
         double startVelocity, double endVelocity, double length,
         double requestedJerk, double limitScale) const {
         ForwardPassResult result;
@@ -2397,7 +2422,6 @@ private:
             return result;
         }
 
-        auto bounds = globalBounds(vLimit, length);
         bounds.acceleration *= limitScale;
         bounds.jerk *= limitScale;
         bounds.snap *= limitScale;
@@ -2521,13 +2545,18 @@ private:
         // The candidate family is deterministic and spans two decades of
         // smoothness. Every member is exactly propagated and independently
         // feasible; the selected point minimizes the stated weighted cost.
+        //
+        // The envelope computation depends only on (vLimit, sTotal_), not on
+        // the per-candidate limit scale — compute it once instead of inside
+        // every buildPulsePlan call.
+        const auto baseBounds = globalBounds(vLimit, sTotal_);
         constexpr size_t kCandidates = 41;
         for (size_t i = 0; i < kCandidates; ++i) {
             const double fraction = static_cast<double>(i) /
                                     static_cast<double>(kCandidates - 1);
             const double scale = std::pow(0.01, fraction);
-            auto candidate = buildPulsePlan(vLimit, startVelocity, endVelocity,
-                                            sTotal_, 0.0, scale);
+            auto candidate = buildPulsePlan(baseBounds, startVelocity,
+                                            endVelocity, sTotal_, 0.0, scale);
             if (candidate.feasible && candidate.cost < bestCost) {
                 bestCost = candidate.cost;
                 best = std::move(candidate);

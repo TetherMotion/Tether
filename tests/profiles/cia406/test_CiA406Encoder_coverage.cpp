@@ -291,9 +291,9 @@ protected:
         // Default: writes succeed, reads return zero
         ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
             .WillByDefault(Return(true));
-        uint32_t zero = 0;
         ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
-            .WillByDefault(UploadVal(&zero, sizeof(zero)));
+            .WillByDefault(UploadVal(&default_upload_value_,
+                                    sizeof(default_upload_value_)));
 
         coe_ = std::make_unique<CoEManager>(0, transport_);
         coe_->configureMailbox(0x1000, 128, 0x1400, 128);
@@ -305,6 +305,10 @@ protected:
 
     NiceMock<MockSDOTransportRaw> transport_;
     std::unique_ptr<CoEManager> coe_;
+    // Backing store for the default upload — the ON_CALL lambda captures it
+    // by address and the CoE worker thread reads it for the whole test, so
+    // it must outlive SetUp() (a SetUp-local variable would dangle).
+    uint32_t default_upload_value_ = 0;
 };
 
 TEST_F(Enc406MockCovTest, Initialize_Profile406) {

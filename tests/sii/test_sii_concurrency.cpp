@@ -313,7 +313,9 @@ TEST_F(SiiConcurrencyTest, ConcurrentParseFull) {
     const int num_threads = 4;
     std::vector<std::thread> threads;
     std::vector<SIIData> results(num_threads);
-    std::vector<bool> success(num_threads, false);
+    // vector<bool> packs bits into shared words — concurrent writes to
+    // different elements would still race on the same word.
+    std::vector<std::atomic<bool>> success(num_threads);
 
     for (int t = 0; t < num_threads; ++t) {
         threads.emplace_back([this, &sii, &results, &success, t]() {

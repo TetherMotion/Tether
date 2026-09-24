@@ -79,8 +79,8 @@ void Master::initSlaves(uint16_t count)
     threads.reserve(count);
     for (uint16_t i = 0; i < count; ++i) {
         threads.emplace_back([this, i] {
-            if (i < slaves_->size()) {
-                (void)(*slaves_)[i]->sii().prefetchWords(0, 128);
+            if (Slave* s = slaves_->slaveAt(i)) {
+                s->sii().prefetchWords(0, 128);
             }
         });
     }
@@ -283,8 +283,8 @@ void Master::updateDebugFlags()
     std::vector<EtherCATSlaveDebugFlags> per_slave_flags(count);
     for (uint16_t i = 0; i < count; ++i) {
         per_slave_flags[i] = debug_flags_.computeForSlave(i);
-        if ((*slaves_)[i]) {
-            (*slaves_)[i]->updateDebugFlags(per_slave_flags[i]);
+        if (Slave* s = slaves_->slaveAt(i)) {
+            s->updateDebugFlags(per_slave_flags[i]);
         }
     }
     {

@@ -1171,7 +1171,7 @@ protected:
         std::memcpy(reinterpret_cast<uint8_t*>(h) + TPACKET2_HDRLEN,
                     frame, len);
         __sync_synchronize();          // payload before status, like the NIC
-        h->tp_status = TP_STATUS_USER;
+        __atomic_store_n(&h->tp_status, TP_STATUS_USER, __ATOMIC_RELEASE);
     }
 
     void SetUp() override {
@@ -1305,7 +1305,8 @@ TEST_F(RingChannelMemoryTest, TxRingExhaustionReturnsNull) {
     p.header = h; p.header_len = sizeof(h);
     EXPECT_FALSE(ch_->txSendParts(p));
     // Kernel drains the ring → slot reusable, cursor resumes past it.
-    txSlot(kTxN - 1)->tp_status = TP_STATUS_AVAILABLE;
+    __atomic_store_n(&txSlot(kTxN - 1)->tp_status, TP_STATUS_AVAILABLE,
+                     __ATOMIC_RELEASE);
     EXPECT_NE(ch_->txAcquire(), nullptr);
 }
 
@@ -1987,7 +1988,8 @@ protected:
             TPACKET_ALIGN(sizeof(tpacket_block_desc));
         bd->hdr.bh1.blk_len             = kBlockSize;
         __sync_synchronize();
-        bd->hdr.bh1.block_status = TP_STATUS_USER;
+        __atomic_store_n(&bd->hdr.bh1.block_status, TP_STATUS_USER,
+                         __ATOMIC_RELEASE);
     }
 
     tpacket_block_desc* block(uint32_t b) {

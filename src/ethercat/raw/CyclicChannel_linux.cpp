@@ -463,7 +463,8 @@ public:
         for (uint32_t i = 0; i < tx_frames_; ++i) {
             const uint32_t idx = (tx_cursor_ + i) % tx_frames_;
             auto* hdr = txSlot(idx);
-            if (hdr->tp_status == TP_STATUS_AVAILABLE) {
+            if (__atomic_load_n(&hdr->tp_status, __ATOMIC_ACQUIRE) ==
+                TP_STATUS_AVAILABLE) {
                 tx_acquired_ = static_cast<int64_t>(idx);
                 tx_cursor_   = (idx + 1) % tx_frames_;   // resume past it
                 return txData(hdr);
@@ -491,8 +492,9 @@ public:
         hdr->tp_net     = hdr->tp_mac + 14;
         hdr->tp_len     = frame_len;
         hdr->tp_snaplen = frame_len;
-        __sync_synchronize();                 // payload visible before status
-        hdr->tp_status  = TP_STATUS_SEND_REQUEST;
+        // Release store: payload visible before status.
+        __atomic_store_n(&hdr->tp_status, TP_STATUS_SEND_REQUEST,
+                         __ATOMIC_RELEASE);
         // One kick flushes every queued SEND_REQUEST slot.
         const ssize_t s = ::sendto(fd_, nullptr, 0, MSG_DONTWAIT,
                                    nullptr, 0);
@@ -562,7 +564,8 @@ public:
         if (cfg_.rx_v3) {
             for (uint32_t i = 0; i < rx_frames_; ++i) {
                 const auto* bd = v3Block(i);
-                if ((bd->hdr.bh1.block_status & TP_STATUS_USER) &&
+                if ((__atomic_load_n(&bd->hdr.bh1.block_status,
+                                     __ATOMIC_ACQUIRE) & TP_STATUS_USER) &&
                     !rx_consumed_[i].load(std::memory_order_acquire))
                     return true;
             }
@@ -571,7 +574,8 @@ public:
         for (uint32_t i = 0; i < rx_frames_; ++i) {
             const auto* hdr = reinterpret_cast<const struct tpacket2_hdr*>(
                 rx_ring_ + static_cast<size_t>(i) * rx_frame_size_);
-            if ((hdr->tp_status & TP_STATUS_USER) &&
+            if ((__atomic_load_n(&hdr->tp_status, __ATOMIC_ACQUIRE) &
+                 TP_STATUS_USER) &&
                 !rx_consumed_[i].load(std::memory_order_acquire))
                 return true;
         }
@@ -597,7 +601,8 @@ public:
             if (cfg_.rx_v3)
                 v3Retire(idx);
             else
-                rxSlot(idx)->tp_status = TP_STATUS_KERNEL;
+                __atomic_store_n(&rxSlot(idx)->tp_status, TP_STATUS_KERNEL,
+                                 __ATOMIC_RELEASE);
         }
     }
 
@@ -718,12 +723,15 @@ private:
         for (uint32_t k = 0; k < rx_frames_; ++k) {
             const uint32_t idx = (rx_cursor_ + k) % rx_frames_;
             auto* hdr = rxSlot(idx);
-            if (!(hdr->tp_status & TP_STATUS_USER)) continue;
+            if (!(__atomic_load_n(&hdr->tp_status, __ATOMIC_ACQUIRE) &
+                  TP_STATUS_USER))
+                continue;
             if (rx_consumed_[idx].load(std::memory_order_acquire)) {
                 if (rx_holds_[idx].load(std::memory_order_acquire) == 0) {
                     rx_consumed_[idx].store(false, std::memory_order_release);
                     __sync_synchronize();
-                    hdr->tp_status = TP_STATUS_KERNEL;
+                    __atomic_store_n(&hdr->tp_status, TP_STATUS_KERNEL,
+                                     __ATOMIC_RELEASE);
                 }
                 continue;
             }
@@ -765,7 +773,8 @@ private:
         rx_consumed_[b].store(false, std::memory_order_release);
         v3_emitted_[b].store(0, std::memory_order_release);
         __sync_synchronize();
-        bd->hdr.bh1.block_status = TP_STATUS_KERNEL;
+        __atomic_store_n(&bd->hdr.bh1.block_status, TP_STATUS_KERNEL,
+                         __ATOMIC_RELEASE);
     }
 
     int walkRingV3(CyclicFrameView* views, int max_views) {
@@ -776,7 +785,9 @@ private:
         for (uint32_t k = 0; k < rx_frames_ && n < max_views; ++k) {
             const uint32_t b = (rx_cursor_ + k) % rx_frames_;
             auto* bd = v3Block(b);
-            if (!(bd->hdr.bh1.block_status & TP_STATUS_USER)) continue;
+            if (!(__atomic_load_n(&bd->hdr.bh1.block_status,
+                                  __ATOMIC_ACQUIRE) & TP_STATUS_USER))
+                continue;
 
             if (rx_consumed_[b].load(std::memory_order_acquire)) {
                 if (rx_holds_[b].load(std::memory_order_acquire) == 0)
