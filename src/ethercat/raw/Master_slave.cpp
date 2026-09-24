@@ -370,7 +370,7 @@ bool Master::requestSlaveApplicationLayerState(SlaveAddress slave_address, uint8
         const char* target_state_name = getECStateName(state_code);
         
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
-        TETHER_LOGI(TAG, "║  AL State Request: Slave {}                                  ║", slave_address.slavePosition());
+        TETHER_LOGI(TAG, "║  AL State Request: {}                                  ║", slaveLogPrefix(slave_address.slavePosition()).c_str());
         TETHER_LOGI(TAG, "╠══════════════════════════════════════════════════════════════╣");
         TETHER_LOGI(TAG, "║  Current State: {} (0x{:02X})", current_state_name, current_state_code);
         TETHER_LOGI(TAG, "║  Target State:  {} (0x{:02X})", target_state_name, state_code);
@@ -421,7 +421,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
     EtherCAT::SII::SIIData sii;
     bool sii_valid = EtherCAT::SII::readSII(*this, slave_index, sii);
     if (!sii_valid) {
-        TETHER_LOGW(TAG, "configureProcessDataSyncManagersFromSii: SII read failed for slave {}, using fallback", slave_index);
+        TETHER_LOGW(TAG, "configureProcessDataSyncManagersFromSii: SII read failed for {}, using fallback", slaveLogPrefix(slave_index).c_str());
     }
 
     auto& pdo = pdoForSlave(slave_index);
@@ -450,7 +450,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
     }
 
     if (!configured_any) {
-        TETHER_LOGW(TAG, "SII has no SM2/SM3 data for slave {}, trying HW registers", slave_index);
+        TETHER_LOGW(TAG, "SII has no SM2/SM3 data for {}, trying HW registers", slaveLogPrefix(slave_index).c_str());
 
         for (uint8_t sm = 2; sm < 4; sm++) {
             uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
@@ -512,8 +512,8 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
             uint8_t ctrl_byte = std::bit_cast<uint8_t>(cfg.control);
             writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
 
-            TETHER_LOGI(TAG, "Wrote SM{} to slave {}: Addr=0x{:04X} Len={} Ctrl=0x{:02X} Act=0x00 (disabled)",
-                     sm, slave_index, cfg.phys_start_addr, cfg.length, ctrl_byte);
+            TETHER_LOGI(TAG, "Wrote SM{} to {}: Addr=0x{:04X} Len={} Ctrl=0x{:02X} Act=0x00 (disabled)",
+                     sm, slaveLogPrefix(slave_index).c_str(), cfg.phys_start_addr, cfg.length, ctrl_byte);
         }
     }
 
@@ -559,8 +559,8 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
             uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
             uint8_t activate = 0x01;
             writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 6), &activate, 1, 200);
-            TETHER_LOGI(TAG, "Enabled SM{} on slave {}: Act=0x{:01X}",
-                     sm, slave_index, activate);
+            TETHER_LOGI(TAG, "Enabled SM{} on {}: Act=0x{:01X}",
+                     sm, slaveLogPrefix(slave_index).c_str(), activate);
         }
     }
 

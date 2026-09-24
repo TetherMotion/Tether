@@ -422,7 +422,7 @@ inline bool initEsc211ToSafeOp(EtherCAT::Master& master,
     // 0. Force slave to INIT before any configuration.  Ensures a clean
     //    starting state regardless of what the slave firmware was doing
     //    before (stale mailbox data, error state after a failed init).
-    TETHER_LOGI(tag, "Forcing slave {} to INIT before configuration...", slave_index);
+    TETHER_LOGI(tag, "Forcing {} to INIT before configuration...", master.slaveLogPrefix(slave_index).c_str());
     {
         auto g = lock();
         EtherCAT::ALResetController reset_ctrl(master);
@@ -434,7 +434,7 @@ inline bool initEsc211ToSafeOp(EtherCAT::Master& master,
     }
 
     // 1. Mailbox configuration
-    TETHER_LOGI(tag, "Configuring mailbox for slave {}...", slave_index);
+    TETHER_LOGI(tag, "Configuring mailbox for {}...", master.slaveLogPrefix(slave_index).c_str());
     {
         auto g = lock();
         auto mb_err = s.configureMailbox(cfg.mailbox_out, cfg.mailbox_in,
@@ -456,7 +456,7 @@ inline bool initEsc211ToSafeOp(EtherCAT::Master& master,
             return false;
         }
     }
-    TETHER_LOGI(tag, "Slave {} in PRE-OP", slave_index);
+    TETHER_LOGI(tag, "{} in PRE-OP", master.slaveLogPrefix(slave_index).c_str());
 
     // 3. Drain stale mailbox data (blackchannel does this; session tools
     //    configure a fresh mailbox so it is optional).
@@ -488,9 +488,9 @@ inline bool initEsc211ToSafeOp(EtherCAT::Master& master,
     }
 
     // 5./6. PDO assignment per ESI v0.9.
-    TETHER_LOGI(tag, "Slave {}: Configuring ESI PDO assignment "
+    TETHER_LOGI(tag, "{}: Configuring ESI PDO assignment "
                 "(flat_fsoe_maps={}, {} channel PDOs)...",
-                slave_index, cfg.flat_fsoe_maps, cfg.fsoe_channels);
+                master.slaveLogPrefix(slave_index).c_str(), cfg.flat_fsoe_maps, cfg.fsoe_channels);
     {
         auto g = lock();
         if (!configureEsc211PdoAssignment(s, tag, cfg.flat_fsoe_maps,
@@ -531,7 +531,7 @@ inline bool initEsc211ToSafeOp(EtherCAT::Master& master,
             return false;
         }
     }
-    TETHER_LOGI(tag, "Slave {} in SAFE-OP", slave_index);
+    TETHER_LOGI(tag, "{} in SAFE-OP", master.slaveLogPrefix(slave_index).c_str());
 
     // 9. Prime PDO exchange (raises the PDO request/reply counters the
     //    OP transition check requires).
@@ -570,7 +570,7 @@ inline bool esc211TransitionToOp(EtherCAT::Slave& s,
     };
 
     if (cfg.exchange_thread_priming) {
-        TETHER_LOGI(tag, "Slave {}: priming PDO exchange before OP transition...", slave_index);
+        TETHER_LOGI(tag, "{}: priming PDO exchange before OP transition...", s.logPrefix().c_str());
         for (int i = 0; i < cfg.prime_cycles; ++i) {
             if (cfg.bump_counters) bumpOutputCounter(pdo, slave_index);
             pdo.exchangeAll();
@@ -579,7 +579,7 @@ inline bool esc211TransitionToOp(EtherCAT::Slave& s,
             }
         }
     } else {
-        TETHER_LOGI(tag, "Slave {}: waiting for exchange thread to prime PDO counters...", slave_index);
+        TETHER_LOGI(tag, "{}: waiting for exchange thread to prime PDO counters...", s.logPrefix().c_str());
         std::this_thread::sleep_for(cfg.prime_delay * cfg.prime_cycles);
     }
 
@@ -592,7 +592,7 @@ inline bool esc211TransitionToOp(EtherCAT::Slave& s,
             return false;
         }
     }
-    TETHER_LOGI(tag, "Slave {} in OP", slave_index);
+    TETHER_LOGI(tag, "{} in OP", s.logPrefix().c_str());
     return true;
 }
 

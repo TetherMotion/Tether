@@ -201,8 +201,8 @@ public:
         }
 
         TETHER_LOGI("sensorless_homing",
-                    "Started on slave {}: reference={} counts/s, max_torque={}%, passes={}",
-                    drive.slaveIndex(), reference_velocity_, config_.max_torque_percent,
+                    "Started on {}: reference={} counts/s, max_torque={}%, passes={}",
+                    drive.logPrefix().c_str(), reference_velocity_, config_.max_torque_percent,
                     config_.fine_homing_passes);
         return true;
     }
@@ -335,8 +335,8 @@ public:
                 if (moved) {
                     started_moving_ = true;
                     TETHER_LOGI("sensorless_homing",
-                                "Slave {} started moving: speed={} counts/s",
-                                drive.slaveIndex(), speed);
+                                "{} started moving: speed={} counts/s",
+                                drive.logPrefix().c_str(), speed);
                 }
             }
 
@@ -579,8 +579,8 @@ private:
 
         pass_positions_.push_back(position);
         TETHER_LOGI("sensorless_homing",
-                    "Slave {} pass {}/{} recorded at {}",
-                    drive.slaveIndex(), pass_positions_.size(),
+                    "{} pass {}/{} recorded at {}",
+                    drive.logPrefix().c_str(), pass_positions_.size(),
                     config_.fine_homing_passes, position);
 
         stall_timer_ = 0.0;
@@ -611,8 +611,8 @@ private:
         }
 
         TETHER_LOGI("sensorless_homing",
-                    "Slave {} backing off for next pass",
-                    drive.slaveIndex());
+                    "{} backing off for next pass",
+                    drive.logPrefix().c_str());
     }
 
     bool backoffDone(const TxPDO* tx, double dt_seconds)
@@ -666,8 +666,8 @@ private:
         zeroCommand(rx);
 
         TETHER_LOGI("sensorless_homing",
-                    "Slave {} homed at {} ({} passes, aggregation={})",
-                    drive.slaveIndex(), result, pass_positions_.size(),
+                    "{} homed at {} ({} passes, aggregation={})",
+                    drive.logPrefix().c_str(), result, pass_positions_.size(),
                     config_.pass_aggregation == PassAggregation::Mean ? "mean" : "sum");
     }
 

@@ -798,8 +798,22 @@ public:
     void setLogicalAddressManager(LogicalAddressManager* mgr) { logical_addr_mgr_ = mgr; }
     LogicalAddressManager* logicalAddressManager() const { return logical_addr_mgr_; }
 
+    // ----- Log Prefix (set by Master from per-slave name) -----
+
+    /// @brief Set a function that returns the log prefix for a given slave index.
+    void setPrefixProvider(std::function<std::string(uint16_t)> provider) {
+        prefix_provider_ = std::move(provider);
+    }
+
 private:
+    /// Build the log prefix for a slave (uses prefix_provider_ if set, else default)
+    std::string slavePrefix(uint16_t idx) const {
+        if (prefix_provider_) return prefix_provider_(idx);
+        return std::format("Slave {}", idx);
+    }
+
     IPDOTransport& transport_;
+    std::function<std::string(uint16_t)> prefix_provider_;
 
     // Owned state (formerly globals)
     PDO::SlaveConfig slave_configs_[PDO::kMaxPDOSlaves];

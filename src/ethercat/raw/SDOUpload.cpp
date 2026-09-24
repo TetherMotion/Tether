@@ -121,8 +121,8 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 
         mbx_write_count_++;
         if ((mbx_write_count_ % 1000) == 1) {
-            TETHER_LOGI(TAG, "Slave {}: SDO upload (read) request: index=0x{:04X}:{} [mailbox #{} -> 0x{:04X}, len={}, SM0=0x{:02X}, AL=0x{:04X}]",
-                     slaveIndexFromADP(adp), index, sub, (unsigned long)mbx_write_count_, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
+            TETHER_LOGI(TAG, "{}: SDO upload (read) request: index=0x{:04X}:{} [mailbox #{} -> 0x{:04X}, len={}, SM0=0x{:02X}, AL=0x{:04X}]",
+                     master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), index, sub, (unsigned long)mbx_write_count_, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
         }
 
 #ifdef TETHER_DIAG_SDO_IO
@@ -155,8 +155,8 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 
         if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
             if (!master.isCancelRequested()) {
-                TETHER_LOGE(TAG, "Slave {}: SDO upload: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{} timeout={}ms)",
-                            slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+                TETHER_LOGE(TAG, "{}: SDO upload: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{} timeout={}ms)",
+                            master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
                 diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
             }
             return false;
@@ -530,8 +530,8 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
 
             if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
                 if (!master.isCancelRequested()) {
-                    TETHER_LOGE(TAG, "Slave {}: SDO upload segment: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{} timeout={}ms)",
-                                slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+                    TETHER_LOGE(TAG, "{}: SDO upload segment: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{} timeout={}ms)",
+                                master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
                     diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
                 }
                 return false;

@@ -177,8 +177,8 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
 
         mbx_write_count_++;
         if ((mbx_write_count_ % 1000) == 1) {
-            TETHER_LOGI(TAG, "Slave {}: SDO download (write) request: index=0x{:04X}:{} [mailbox #{} -> 0x{:04X}, len={}, SM0=0x{:02X}, AL=0x{:04X}]",
-                     slaveIndexFromADP(adp), index, sub, (unsigned long)mbx_write_count_, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
+            TETHER_LOGI(TAG, "{}: SDO download (write) request: index=0x{:04X}:{} [mailbox #{} -> 0x{:04X}, len={}, SM0=0x{:02X}, AL=0x{:04X}]",
+                     master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), index, sub, (unsigned long)mbx_write_count_, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
         }
 
 #ifdef TETHER_DIAG_SDO_IO
@@ -196,8 +196,8 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                                           mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                           500, &used_alt)) {
             if (!master.isCancelRequested()) {
-                TETHER_LOGE(TAG, "Slave {}: SDO download: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
-                            slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
+                TETHER_LOGE(TAG, "{}: SDO download: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
+                            master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), mbxWriteAddr, mbxReadAddr);
             }
             return false;
         }
@@ -209,8 +209,8 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
 
     if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
         if (!master.isCancelRequested()) {
-            TETHER_LOGE(TAG, "Slave {}: SDO download: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
-                        slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+            TETHER_LOGE(TAG, "{}: SDO download: SM1 mailbox never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
+                        master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
             diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
         }
         return false;
@@ -358,8 +358,8 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
         break;
     }
 
-    TETHER_LOGE(TAG, "Slave {}: SDO download timeout: index=0x{:04x}:{:02x} (wr=0x{:04X} rd=0x{:04X})",
-                slaveIndexFromADP(adp), index, sub, mbxWriteAddr, mbxReadAddr);
+    TETHER_LOGE(TAG, "{}: SDO download timeout: index=0x{:04x}:{:02x} (wr=0x{:04X} rd=0x{:04X})",
+                master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), index, sub, mbxWriteAddr, mbxReadAddr);
     diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
     return false;
 }
@@ -450,8 +450,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                                      mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                      500, &used_alt)) {
         if (!master.isCancelRequested()) {
-            TETHER_LOGE(TAG, "Slave {}: SDO normal download: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
-                        slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
+            TETHER_LOGE(TAG, "{}: SDO normal download: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
+                        master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), mbxWriteAddr, mbxReadAddr);
         }
         return false;
     }
@@ -462,8 +462,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
 
     if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
         if (!master.isCancelRequested()) {
-            TETHER_LOGE(TAG, "Slave {}: SDO normal download: SM1 never became full (index=0x{:04X}:{} timeout={}ms)",
-                        slaveIndexFromADP(adp), index, sub, transactionTimeoutMs);
+            TETHER_LOGE(TAG, "{}: SDO normal download: SM1 never became full (index=0x{:04X}:{} timeout={}ms)",
+                        master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), index, sub, transactionTimeoutMs);
             diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
         }
         return false;
@@ -596,8 +596,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
         break;
     }
 
-    TETHER_LOGE(TAG, "Slave {}: SDO normal download timeout: index=0x{:04x}:{:02x} (wr=0x{:04X} rd=0x{:04X})",
-                slaveIndexFromADP(adp), index, sub, mbxWriteAddr, mbxReadAddr);
+    TETHER_LOGE(TAG, "{}: SDO normal download timeout: index=0x{:04x}:{:02x} (wr=0x{:04X} rd=0x{:04X})",
+                master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), index, sub, mbxWriteAddr, mbxReadAddr);
     diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
     return false;
 }
@@ -708,8 +708,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                                           mbxbuf, static_cast<uint16_t>(mbxWriteLen),
                                           500, &used_alt)) {
             if (!master.isCancelRequested()) {
-                TETHER_LOGE(TAG, "Slave {}: SDO segmented download init: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
-                            slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr);
+                TETHER_LOGE(TAG, "{}: SDO segmented download init: Mailbox write failed (wr=0x{:04X} rd=0x{:04X})",
+                            master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), mbxWriteAddr, mbxReadAddr);
             }
             return false;
         }
@@ -720,8 +720,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
 
         if (!mailboxIO_.pollSm1Full(master, adp, transactionTimeoutMs, pollIntervalMs)) {
             if (!master.isCancelRequested()) {
-                TETHER_LOGE(TAG, "Slave {}: SDO segmented download init: SM1 never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
-                            slaveIndexFromADP(adp), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
+                TETHER_LOGE(TAG, "{}: SDO segmented download init: SM1 never became full (wr=0x{:04X} rd=0x{:04X} index=0x{:04X}:{:02x} timeout={}ms)",
+                            master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), mbxWriteAddr, mbxReadAddr, index, sub, transactionTimeoutMs);
                 diagnostics_.dumpSlaveState(master, adp, mbxWriteAddr, mbxReadAddr);
             }
             return false;

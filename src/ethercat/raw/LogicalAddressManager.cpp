@@ -209,8 +209,8 @@ bool LogicalAddressManager::buildAddressMapFromMultiPDO(
                 pdo_offset += pdo.size_bytes;
                 entry.pdo_entry_count++;
 
-                TETHER_LOGI(TAG, "Slave {} PDO 0x{:04X}: log=0x{:08X} len={} SM{} ({})",
-                            s, pdo.pdo_index, (unsigned long)pe.logical_addr,
+                TETHER_LOGI(TAG, "{} PDO 0x{:04X}: log=0x{:08X} len={} SM{} ({})",
+                            slavePrefix(s).c_str(), pdo.pdo_index, (unsigned long)pe.logical_addr,
                             pe.length, pe.sm_index, is_output ? "RxPDO" : "TxPDO");
             }
 

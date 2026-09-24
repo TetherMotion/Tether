@@ -116,6 +116,8 @@ Master::Master(const Config& config)
     logical_addr_mgr_->setPrefixProvider(
         [this](uint16_t i) { return slaveLogPrefix(i); });
     logical_addr_mgr_->setDebugFlags(&debug_flags_);
+    pdo_->setPrefixProvider(
+        [this](uint16_t i) { return slaveLogPrefix(i); });
     pdo_->setLogicalAddressManager(logical_addr_mgr_.get());
     pdo_->setDebugGate(debug_gate_.get());
     dc_     = std::make_unique<DCManager>(*this);
@@ -171,7 +173,7 @@ void Master::start(const NetworkInterface& iface, const uint8_t src_mac[6])
     // Initialize per-slave CoEManagers
     for (size_t i = 0; i < sdo_managers_.size(); ++i) {
         if (!sdo_managers_[i]->init()) {
-            TETHER_LOGW(TAG, "SDO subsystem failed to initialize for slave {}", i);
+            TETHER_LOGW(TAG, "SDO subsystem failed to initialize for {}", slaveLogPrefix(i).c_str());
         }
     }
     if (!sdo_managers_.empty()) {
@@ -356,14 +358,17 @@ PDOManager& Master::createPdoGroup(const std::vector<uint16_t>& slave_indices,
     group.lam->setPrefixProvider([this](uint16_t idx) {
         return slaveLogPrefix(idx);
     });
+    group.pdo->setPrefixProvider([this](uint16_t idx) {
+        return slaveLogPrefix(idx);
+    });
 
     // Assign slaves to this group
     const int group_idx = static_cast<int>(pdo_groups_.size() - 1);
     for (uint16_t idx : slave_indices) {
         if (idx < PDO::kMaxPDOSlaves) {
             pdo_group_idx_for_slave_[idx] = group_idx;
-            TETHER_LOGI("ec_master", "Slave {} assigned to PDO group {} (base_log=0x{:08X})",
-                        idx, group_idx, base_logical_addr);
+            TETHER_LOGI("ec_master", "{} assigned to PDO group {} (base_log=0x{:08X})",
+                        slaveLogPrefix(idx).c_str(), group_idx, base_logical_addr);
         }
     }
 

@@ -78,8 +78,8 @@ bool SDOMailboxIO::waitSm0NotFull(Master& master, uint16_t adp,
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
     }
-    TETHER_LOGE(TAG, "Slave {}: SM0 mailbox stayed full after {}ms timeout — slave PDI not draining mailbox",
-                slaveIndexFromADP(adp), timeoutMs);
+    TETHER_LOGE(TAG, "{}: SM0 mailbox stayed full after {}ms timeout — slave PDI not draining mailbox",
+                master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), timeoutMs);
 
     // Last-resort recovery: cycle SM0 activate register to flush the stuck
     // write buffer.  This clears the mailbox-full flag so the next SDO attempt
@@ -87,7 +87,7 @@ bool SDOMailboxIO::waitSm0NotFull(Master& master, uint16_t adp,
     // no valid response is lost.
     const uint16_t slave_index = Master::slaveAddressFromADP(adp).slavePosition();
     if (master.resetSlaveMailboxSM0(slave_index)) {
-        TETHER_LOGI(TAG, "Slave {}: SM0 reset succeeded — mailbox ready for next write", slave_index);
+        TETHER_LOGI(TAG, "{}: SM0 reset succeeded — mailbox ready for next write", master.slaveLogPrefix(slave_index).c_str());
         return true;
     }
     return false;
@@ -119,7 +119,7 @@ bool SDOMailboxIO::apwrWithWkcProbe(Master& master, uint16_t adp,
     }
 
     if (master.lastWkc() == 0) {
-        TETHER_LOGE(TAG, "Slave {}: mailbox transaction failed: Working counter is 0 (addr=0x{:04X})", slaveIndexFromADP(adp), primaryAddr);
+        TETHER_LOGE(TAG, "{}: mailbox transaction failed: Working counter is 0 (addr=0x{:04X})", master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), primaryAddr);
         return false;
     }
 

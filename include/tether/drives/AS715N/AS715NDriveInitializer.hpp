@@ -73,36 +73,36 @@ public:
     bool resetToInit() {
         uint8_t current_state = 0;
         if (!master_.ethercatMaster().readSlaveApplicationLayerState(slave_idx_, current_state)) {
-            TETHER_LOGW(tag_, "Could not read AL state for slave {} -- continuing anyway",
-                        slave_idx_);
+            TETHER_LOGW(tag_, "Could not read AL state for {} -- continuing anyway",
+                        master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
             return true;  // non-fatal
         }
 
-        TETHER_LOGI(tag_, "Slave {} current AL state: 0x{:02X} ({})",
-                    slave_idx_, current_state,
+        TETHER_LOGI(tag_, "{} current AL state: 0x{:02X} ({})",
+                    master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str(), current_state,
                     slaveStateToString(static_cast<SlaveState>(current_state)));
 
         if (current_state == static_cast<uint8_t>(SlaveState::INIT)) {
             return true;
         }
 
-        TETHER_LOGI(tag_, "Slave {} is not in INIT -- resetting to INIT before configuration",
-                    slave_idx_);
+        TETHER_LOGI(tag_, "{} is not in INIT -- resetting to INIT before configuration",
+                    master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
 
         ALResetController reset_ctrl(master_.ethercatMaster());
         const auto result = reset_ctrl.resetSlave(
             slave_idx_, static_cast<uint8_t>(SlaveState::INIT));
 
         if (!result.success) {
-            TETHER_LOGE(tag_, "Slave {} reset to INIT FAILED ({}, {} iterations, "
+            TETHER_LOGE(tag_, "{} reset to INIT FAILED ({}, {} iterations, "
                               "final AL_STATUS=0x{:04X}, AL_STATUS_CODE=0x{:04X})",
-                        slave_idx_, result.message.c_str(), result.iterations_used,
+                        master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str(), result.message.c_str(), result.iterations_used,
                         result.final_al_status, result.final_al_status_code);
             return false;
         }
 
-        TETHER_LOGI(tag_, "Slave {} reset to INIT OK ({}, {} iterations)",
-                    slave_idx_, result.message.c_str(), result.iterations_used);
+        TETHER_LOGI(tag_, "{} reset to INIT OK ({}, {} iterations)",
+                    master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str(), result.message.c_str(), result.iterations_used);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         return true;
@@ -110,7 +110,7 @@ public:
 
     /// @brief Configure the mailbox (SM0/SM1) from SII automatically.
     bool configureMailbox() {
-        TETHER_LOGI(tag_, "Configuring mailbox for slave {}...", slave_idx_);
+        TETHER_LOGI(tag_, "Configuring mailbox for {}...", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
 
         auto& slave = master_.ethercatMaster().slave(slave_idx_);
         const auto err = slave.configureMailbox(Tether::Platform::LogLevel::Info);
@@ -119,7 +119,7 @@ public:
             return false;
         }
 
-        TETHER_LOGI(tag_, "Mailbox configured for slave {}", slave_idx_);
+        TETHER_LOGI(tag_, "Mailbox configured for {}", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
         return true;
     }
 
@@ -131,7 +131,7 @@ public:
             TETHER_LOGE(tag_, "PRE-OP transition failed: {}", slaveErrorToString(err));
             return false;
         }
-        TETHER_LOGI(tag_, "Slave {} transitioned to PRE_OP", slave_idx_);
+        TETHER_LOGI(tag_, "{} transitioned to PRE_OP", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         return true;
     }
@@ -152,23 +152,23 @@ public:
         drive.setSDOTimeout(3000);
 
         if (!drive.transitionToOp(assignment)) {
-            TETHER_LOGE(tag_, "PDO config / OP transition failed for slave {}", slave_idx_);
+            TETHER_LOGE(tag_, "PDO config / OP transition failed for {}", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
             return false;
         }
 
         const int opmode_offset = AS715N_pdo::opmodeOffsetFor(drive.getRxPDOIndex());
         if (opmode_offset >= 0) {
             drive.setOpmodePDOOffset(opmode_offset);
-            TETHER_LOGI(tag_, "Slave {}: opmode offset set to {}", slave_idx_, opmode_offset);
+            TETHER_LOGI(tag_, "{}: opmode offset set to {}", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str(), opmode_offset);
         }
 
         const int statusword_offset = AS715N_pdo::statuswordOffsetFor(drive.getTxPDOIndex());
         if (statusword_offset >= 0) {
             drive.setStatuswordPDOOffset(statusword_offset);
-            TETHER_LOGI(tag_, "Slave {}: statusword offset set to {}", slave_idx_, statusword_offset);
+            TETHER_LOGI(tag_, "{}: statusword offset set to {}", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str(), statusword_offset);
         }
 
-        TETHER_LOGI(tag_, "Slave {} configured PDOs and transitioned to OP", slave_idx_);
+        TETHER_LOGI(tag_, "{} configured PDOs and transitioned to OP", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
         return true;
     }
 
@@ -230,10 +230,10 @@ public:
             return as715nFaultReset(d);
         });
         if (!master_.enableDrive(slave_idx_, timeout_ms)) {
-            TETHER_LOGE(tag_, "Drive enable failed for slave {}", slave_idx_);
+            TETHER_LOGE(tag_, "Drive enable failed for {}", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
             return false;
         }
-        TETHER_LOGI(tag_, "Slave {} drive enabled", slave_idx_);
+        TETHER_LOGI(tag_, "{} drive enabled", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
         return true;
     }
 
@@ -241,7 +241,7 @@ public:
     /// @return true on success
     bool disableDrive() {
         if (!master_.disableDrive(slave_idx_)) {
-            TETHER_LOGW(tag_, "Drive disable failed for slave {}", slave_idx_);
+            TETHER_LOGW(tag_, "Drive disable failed for {}", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
             return false;
         }
         return true;
@@ -320,9 +320,9 @@ private:
              fault_reset_attempts_ >= fault_reset_policy_.stuck_after_attempts);
 
         if (stuck) {
-            TETHER_LOGW(tag_, "Slave {}: phantom fault stuck (state={} "
+            TETHER_LOGW(tag_, "{}: phantom fault stuck (state={} "
                               "sw=0x{:04X} cw=0x{:04X} attempts={})",
-                        slave_idx_, static_cast<int>(st),
+                        master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str(), static_cast<int>(st),
                         drive.getStatusword(), drive.getControlword(),
                         fault_reset_attempts_);
             return runFaultResetAction(fault_reset_policy_.stuck_action,

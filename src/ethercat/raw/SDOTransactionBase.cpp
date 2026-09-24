@@ -189,8 +189,8 @@ bool SDOTransactionBase::checkStaleCounter(Master& master, uint16_t adp,
                                            int& staleRetryCount,
                                            uint16_t index_, uint8_t sub_,
                                            const char* phaseLabel) {
-    TETHER_LOGW(TAG, "Slave {}: Stale mailbox response ({}): cnt={} expected={} (index=0x{:04X}:{}) — clearing and re-sending",
-                slaveIndexFromADP(adp), phaseLabel, hdr.cnt, inOutExpectedCnt, index_, sub_);
+    TETHER_LOGW(TAG, "{}: Stale mailbox response ({}): cnt={} expected={} (index=0x{:04X}:{}) — clearing and re-sending",
+                master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), phaseLabel, hdr.cnt, inOutExpectedCnt, index_, sub_);
     // This response is genuinely stale — the caller already checked
     // adoptCounterOnEcho() so it neither echoes our index nor matches the
     // expected counter.  Drain it and re-send the request.
@@ -235,9 +235,9 @@ MbxResyncResult SDOTransactionBase::resyncMailboxCounter(
     if (pollIntervalMs == 0) pollIntervalMs = 1;
 
     TETHER_LOGW(TAG,
-        "Slave {}: mailbox counter mismatch ({}): slave retained its counter "
+        "{}: mailbox counter mismatch ({}): slave retained its counter "
         "across restart — probing counter space to resync (index=0x{:04X}:{})",
-        slaveIndexFromADP(adp), phaseLabel, index, sub);
+        master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), phaseLabel, index, sub);
 
     const size_t sdo_offset = sizeof(MbxHeader) + sizeof(CoeHeader);
     uint8_t cand = static_cast<uint8_t>((reqbuf[5] >> 4) & 0x07u);
@@ -315,17 +315,17 @@ MbxResyncResult SDOTransactionBase::resyncMailboxCounter(
             expectedCnt = hdr.cnt;
             outHdr = hdr;
             TETHER_LOGI(TAG,
-                "Slave {}: mailbox counter resynced (request cnt={}, "
+                "{}: mailbox counter resynced (request cnt={}, "
                 "response cnt={}, {})",
-                slaveIndexFromADP(adp), cand, hdr.cnt, phaseLabel);
+                master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), cand, hdr.cnt, phaseLabel);
             return MbxResyncResult::Recovered;
         }
         // Probe produced no usable response — try the next counter.
     }
 
     TETHER_LOGE(TAG,
-        "Slave {}: mailbox counter resync failed — no counter accepted ({})",
-        slaveIndexFromADP(adp), phaseLabel);
+        "{}: mailbox counter resync failed — no counter accepted ({})",
+        master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), phaseLabel);
     return MbxResyncResult::Failed;
 }
 
