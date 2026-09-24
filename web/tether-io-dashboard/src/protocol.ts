@@ -432,6 +432,122 @@ export function makeGetRequest(type: number, id: bigint): Uint8Array {
   return new BinaryWriter(9).u8(type).u64(id).finish();
 }
 
+/**
+ * One positional function argument for a CallFunctionReq.
+ *
+ * `value` is the raw little-endian payload (e.g. 8 bytes for F64, 4 for
+ * U32, 1 for Bool — see {@link encodeScalarArgument}).
+ */
+export interface FunctionCallArg {
+  /** Zero-based parameter position. */
+  position: number;
+  type: ValueType;
+  value: Uint8Array;
+}
+
+/**
+ * Build a CallFunctionReq message.
+ *
+ * Body layout: `functionId(u64) + argCount(u32)`
+ *   + argCount × [position(u32) + type(u8) + length(u32) + value].
+ */
+export function makeCallFunctionRequest(functionId: bigint, args: FunctionCallArg[]): Uint8Array {
+  const total = args.reduce((sum, a) => sum + a.value.length, 0);
+  const w = new BinaryWriter(1 + 8 + 4 + args.length * 9 + total);
+  w.u8(MessageType.callFunctionReq).u64(functionId).u32(args.length);
+  for (const a of args) {
+    w.u32(a.position).u8(a.type).u32(a.value.length).bytes(a.value);
+  }
+  return w.finish();
+}
+
+/** Decode a scalar JS number into its little-endian argument payload. */
+export function encodeScalarArgument(type: ValueType, value: number): Uint8Array {
+  const size =
+    type === ValueType.F64 || type === ValueType.I64 || type === ValueType.U64
+      ? 8
+      : type === ValueType.F32 || type === ValueType.I32 || type === ValueType.U32
+        ? 4
+        : type === ValueType.I16 || type === ValueType.U16
+          ? 2
+          : 1;
+  const out = new Uint8Array(size);
+  const view = new DataView(out.buffer);
+  switch (type) {
+    case ValueType.F64:
+      view.setFloat64(0, value, true);
+      break;
+    case ValueType.F32:
+      view.setFloat32(0, value, true);
+      break;
+    case ValueType.U64:
+      view.setBigUint64(0, BigInt(value), true);
+      break;
+    case ValueType.I64:
+      view.setBigInt64(0, BigInt(value), true);
+      break;
+    case ValueType.U32:
+      view.setUint32(0, value, true);
+      break;
+    case ValueType.I32:
+      view.setInt32(0, value, true);
+      break;
+    case ValueType.U16:
+      view.setUint16(0, value, true);
+      break;
+    case ValueType.I16:
+      view.setInt16(0, value, true);
+      break;
+    case ValueType.Bool:
+    case ValueType.U8:
+      view.setUint8(0, value);
+      break;
+    case ValueType.I8:
+      view.setInt8(0, value);
+      break;
+    default:
+      throw new Error(`unsupported scalar argument type ${ValueType[type] ?? type}`);
+  }
+  return out;
+}
+
+/** Decoded result of a CallFunctionResp. */
+export interface FunctionCallResponse {
+  functionId: bigint;
+  success: boolean;
+  /** Server error code when `success` is false (0 on success). */
+  error: number;
+  errorMessage: string;
+  /** Raw return-value bytes (empty when the function returns nothing). */
+  returnValue: Uint8Array;
+}
+
+/**
+ * Parse a CallFunctionResp payload.
+ *
+ * Wire layout:
+ *   type(u8) + functionId(u64) + success(u8)
+ *   + error(u32) + errorMessage(string16)
+ *   + [if success && hasReturn] returnTLV(position u32 + type u8
+ *       + length u32 + value).
+ */
+export function readCallFunctionResponse(payload: Uint8Array): FunctionCallResponse {
+  const reader = new BinaryReader(payload);
+  reader.u8(); // type
+  const functionId = reader.u64();
+  const success = reader.u8() === 0;
+  const error = reader.u32();
+  const errorMessage = reader.string16();
+  let returnValue: Uint8Array = new Uint8Array();
+  if (success && reader.remaining > 0) {
+    reader.u32(); // position (always 0 — single return)
+    reader.u8(); // type
+    returnValue = reader.bytesOf(reader.u32());
+  }
+  reader.assertEnd();
+  return { functionId, success, error, errorMessage, returnValue };
+}
+
 // ---------------------------------------------------------------------------
 // Value decoding
 // ---------------------------------------------------------------------------
