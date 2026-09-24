@@ -829,3 +829,322 @@ footer {
     align-self: center;
   }
 }
+
+/* ===========================================================================
+   Jogging panel (<tether-jog-panel>)
+   =========================================================================== */
+
+.jog-panel {
+  display: block;
+}
+
+.jog-panel.jog-hidden {
+  display: none;
+}
+
+.jog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.jog-head h2 {
+  margin: 0;
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.jog-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.jog-lease-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  border: 1px dashed var(--glass-border);
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  white-space: pre-line;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.jog-stop-all {
+  background: linear-gradient(160deg, #e14b4b, #b02e2e);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 0.6rem 1.1rem;
+  font-weight: 700;
+  font-family: 'Space Grotesk', sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(214, 85, 85, 0.35);
+  transition: transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.jog-stop-all:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(214, 85, 85, 0.45);
+}
+
+.jog-stop-all:active {
+  transform: translateY(0);
+}
+
+.jog-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.jog-group {
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 0.9rem;
+  background: var(--glass-2);
+}
+
+.jog-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.jog-group-head h3 {
+  margin: 0;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.jog-group-presets {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.jog-presets {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.jog-preset-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-right: 0.15rem;
+}
+
+.jog-presets small {
+  color: var(--text-muted);
+  margin-left: 0.15rem;
+}
+
+.jog-chip {
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.jog-chip:hover {
+  border-color: var(--blue);
+}
+
+.jog-chip-active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+}
+
+.jog-axes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.85rem;
+}
+
+.jog-axis {
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: var(--glass-1);
+  box-shadow: 0 4px 14px var(--glass-shadow-deep);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.jog-axis-active {
+  border-color: var(--mint);
+  box-shadow: 0 0 0 1px var(--mint), 0 4px 18px var(--accent-glow);
+}
+
+.jog-axis-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.jog-axis-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.05rem;
+  letter-spacing: 0.05em;
+}
+
+.jog-badge {
+  margin-left: auto;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--row-hover);
+  color: var(--text-muted);
+}
+
+.jog-badge-active {
+  background: var(--mint);
+  color: var(--accent-text-on);
+}
+
+.jog-axis-stop {
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--status-offline);
+  border-radius: 8px;
+  width: 1.7rem;
+  height: 1.7rem;
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+.jog-axis-stop:hover {
+  border-color: var(--status-offline);
+}
+
+.jog-readouts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.jog-readouts > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.3rem 0.2rem;
+  border-radius: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+}
+
+.jog-readouts small {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.jog-readouts span {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 600;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.jog-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.jog-btn {
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--text);
+  border-radius: 12px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  padding: 0.65rem 0;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  transition: all 0.1s ease;
+}
+
+.jog-btn:hover {
+  border-color: var(--blue);
+}
+
+.jog-btn.jog-held {
+  background: var(--mint);
+  border-color: var(--mint);
+  color: var(--accent-text-on);
+  transform: scale(0.97);
+}
+
+.jog-inc-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.jog-inc {
+  border: 1px solid var(--input-border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 0.35rem 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.jog-inc:hover {
+  color: var(--text);
+  border-color: var(--blue);
+}
+
+.jog-axis-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+}
+
+.jog-limits {
+  margin-top: 0.5rem;
+  text-align: center;
+}
+
+.jog-limits small {
+  color: var(--text-muted);
+  font-size: 0.65rem;
+}
+
+.jog-panel.jog-offline .jog-axis,
+.jog-panel.jog-offline .jog-btn,
+.jog-panel.jog-offline .jog-inc,
+.jog-panel.jog-offline .jog-chip {
+  opacity: 0.45;
+  pointer-events: none;
+}

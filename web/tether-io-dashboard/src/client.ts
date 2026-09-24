@@ -14,14 +14,18 @@
 import {
   BinaryReader,
   CatalogEntry,
+  FunctionCallArg,
+  FunctionCallResponse,
   FunctionEntry,
   MessageType,
   StreamLayoutEntry,
   StreamRow,
   ValueType,
   decodeStreamData,
+  makeCallFunctionRequest,
   makeGetRequest,
   makeListRequest,
+  readCallFunctionResponse,
   readConfigureAck,
   readEntryCatalog,
   readFunctionCatalog,
@@ -217,6 +221,37 @@ export class TetherIOClient extends EventTarget {
     );
     console.log(`[TetherIO] listFunctions → ${entries.length} entries`);
     return entries;
+  }
+
+  /**
+   * Invoke a remote function.
+   *
+   * @param id   Function identifier from the catalog.
+   * @param args Positional arguments (see {@link FunctionCallArg} /
+   *             `encodeScalarArgument`).
+   * @returns    The decoded call result; `success === false` carries the
+   *             server-side error code/message.  Transport-level failures
+   *             reject the promise.
+   */
+  async callFunction(id: bigint, args: FunctionCallArg[] = []): Promise<FunctionCallResponse> {
+    const payload = await this.request(
+      makeCallFunctionRequest(id, args),
+      MessageType.callFunctionResp,
+    );
+    return readCallFunctionResponse(payload);
+  }
+
+  /**
+   * Invoke a remote function, throwing on server-side failure.
+   *
+   * Convenience wrapper around {@link callFunction} for UI code that only
+   * cares about the return value.
+   */
+  async callFunctionOrThrow(id: bigint, args: FunctionCallArg[] = []): Promise<Uint8Array> {
+    const result = await this.callFunction(id, args);
+    if (!result.success)
+      throw new Error(result.errorMessage || `function call failed (${result.error})`);
+    return result.returnValue;
   }
 
   // ---- Read / write values ---------------------------------------------

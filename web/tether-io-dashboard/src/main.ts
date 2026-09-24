@@ -13,6 +13,7 @@
  */
 
 import './components';
+import './jog';
 import { TetherIOClient } from './client';
 import {
   CatalogEntry,
@@ -184,6 +185,10 @@ class TetherApp extends HTMLElement {
               <tether-webgpu-scope id="scope"></tether-webgpu-scope>
             </section>
 
+            <section class="panel jog-section">
+              <tether-jog-panel id="jog-panel"></tether-jog-panel>
+            </section>
+
             <section class="panel param-panel" id="param-panel">
               <tether-param-panel id="params-editor"></tether-param-panel>
             </section>
@@ -261,8 +266,20 @@ class TetherApp extends HTMLElement {
     });
 
     // Client lifecycle events
-    this.client.addEventListener('connected', () => this.setStatus('Online', true));
-    this.client.addEventListener('disconnected', () => this.setStatus('Offline', false));
+    this.client.addEventListener('connected', () => {
+      this.setStatus('Online', true);
+      this.jogPanel()?.setOnline(true);
+    });
+    this.client.addEventListener('disconnected', () => {
+      this.setStatus('Offline', false);
+      this.jogPanel()?.setOnline(false);
+    });
+
+    // Jog panel surfaces rejected commands (e.g. move while jogging).
+    this.querySelector('tether-jog-panel')?.addEventListener('jog-error', (event: Event) => {
+      const message = (event as CustomEvent<string>).detail;
+      if (message) this.showToast(message, 'error');
+    });
     this.client.addEventListener('error-message', (event: Event) => {
       const message =
         (event as CustomEvent<{ message?: string }>).detail.message ?? 'Protocol error';
@@ -314,14 +331,20 @@ class TetherApp extends HTMLElement {
    */
   private async loadAll(): Promise<void> {
     try {
-      const [params, signals] = await Promise.all([
+      const [params, signals, functions] = await Promise.all([
         this.client.list('params'),
         this.client.list('signals'),
+        this.client.listFunctions(),
       ]);
       this.params = params;
       this.signals = signals;
+      this.functions = functions;
       this.renderCatalog([...params, ...signals]);
       this.renderParamPanel();
+      // Jog panel discovers itself from the catalogs; it hides when the
+      // server exposes no `jog.*` surface.
+      const jog = this.jogPanel();
+      if (jog) jog.model = { client: this.client, functions, signals };
     } catch (error) {
       this.setStatus(error instanceof Error ? error.message : 'Catalog failed', false);
     }
@@ -390,6 +413,20 @@ class TetherApp extends HTMLElement {
     };
     catalog.items = entries;
     this.querySelector('#catalog-count')!.textContent = String(entries.length);
+  }
+
+  /** The `<tether-jog-panel>` element (typed for its public interface). */
+  private jogPanel():
+    | (HTMLElement & {
+        model: {
+          client: TetherIOClient;
+          functions: FunctionEntry[];
+          signals: CatalogEntry[];
+        };
+        setOnline: (online: boolean) => void;
+      })
+    | null {
+    return this.querySelector('#jog-panel');
   }
 
   /**

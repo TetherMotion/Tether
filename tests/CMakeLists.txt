@@ -153,6 +153,7 @@ set(CONTROL_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/MatrixUtilsTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_controllers.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_scurve_ramper.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/test_jog_controller.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_classical_tuning_factory.cpp"
 )
 set(CONTROL_EXTRUSION_SOURCES
@@ -249,6 +250,7 @@ set(IO_SERVICES_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_datalogging_extra.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_threshold_filter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_threshold_filter_extra.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_jog_exposer.cpp"
 )
 set(IO_TEST_SOURCES ${IO_PROTOCOL_SOURCES} ${IO_TRANSPORT_SOURCES} ${IO_SERVICES_SOURCES})
 file(GLOB_RECURSE MOTION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion/*.cpp")
