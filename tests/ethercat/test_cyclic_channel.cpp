@@ -1004,6 +1004,45 @@ TEST_F(MasterCyclicTest, SliceIdxOutOfRangeWaitsFail) {
     EXPECT_EQ(master_.sliceSlotToken(16), 0u);
 }
 
+TEST_F(MasterCyclicTest, MaskWaitPropagatesDepositGen) {
+    // Regression: waitMaskImpl's fill path must copy slot.gen — without
+    // it a gen-1 response looks stale and is retried/dropped every other
+    // cycle.
+    uint8_t frame[128];
+    const uint8_t pay[4] = {0x77};
+    size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 4, 1,
+                              /*more=*/false, /*gen=*/1);
+    master_.handleRxFrame(frame, n);
+    CyclicSlotView views[8]{};
+    const uint64_t tokens[8] = {};
+    const uint32_t arrived =
+        master_.waitCyclicSlotMask(0x1, tokens, 0, views);
+    EXPECT_EQ(arrived, 0x1u);
+    EXPECT_EQ(views[0].gen, 1u);
+
+    // Same through the slice-slot mask — gen must survive there too.
+    n = buildEcatFrame(frame, 0x0C, 0xE4, 0, 0, pay, 4, 1,
+                       /*more=*/false, /*gen=*/1);
+    master_.handleRxFrame(frame, n);
+    CyclicSlotView sviews[16]{};
+    const uint64_t stokens[16] = {};
+    const uint32_t sarrived =
+        master_.waitSliceSlotMask(1u << 4, stokens, 0, sviews);
+    EXPECT_EQ(sarrived, 1u << 4);
+    EXPECT_EQ(sviews[4].gen, 1u);
+}
+
+TEST_F(MasterCyclicTest, GapIdxDepositIsDropped) {
+    // 0xF0..0xF7 are inside the BPF accept range but map to no slot —
+    // deposits must be rejected, not banked into a neighbour's mailbox.
+    uint8_t frame[128];
+    const uint8_t pay[4] = {0x99};
+    const size_t n = buildEcatFrame(frame, 0x0C, 0xF4, 0, 0, pay, 4, 1);
+    master_.handleRxFrame(frame, n);
+    for (int s = 0; s < 16; ++s) EXPECT_EQ(master_.sliceSlotToken(s), 0u);
+    for (int s = 0; s < 6; ++s) EXPECT_EQ(master_.cyclicSlotToken(s), 0u);
+}
+
 TEST_F(MasterCyclicTest, SendSliceDatagramUsesReservedIdx) {
     auto stub = std::make_unique<StubChannel>();
     StubChannel* stubp = stub.get();
