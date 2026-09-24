@@ -68,7 +68,11 @@ struct UdpOpts {
 
 /// IPv4 header bytes (ihl*4), no Ethernet.
 std::vector<uint8_t> ipv4Header(const UdpOpts& o, uint16_t payload_len) {
-    std::vector<uint8_t> ip(o.ihl * 4, 0);
+    // Build a full 20-byte header first, then size it to ihl*4 bytes.
+    // IHL < 5 produces a deliberately truncated header (fields past the
+    // truncation point are absent from the wire packet); IHL > 5 appends
+    // zeroed option bytes.
+    std::vector<uint8_t> ip(20, 0);
     ip[0] = static_cast<uint8_t>(0x40 | (o.ihl & 0x0F));
     put16(ip, 2, static_cast<uint16_t>(o.ihl * 4 + 8 + payload_len));
     put16(ip, 6, o.frag);
@@ -76,6 +80,7 @@ std::vector<uint8_t> ipv4Header(const UdpOpts& o, uint16_t payload_len) {
     ip[9] = o.proto;
     ip[12] = 192; ip[13] = 168; ip[14] = 0; ip[15] = 1;
     ip[16] = 192; ip[17] = 168; ip[18] = 0; ip[19] = 2;
+    ip.resize(static_cast<size_t>(o.ihl) * 4);
     return ip;
 }
 

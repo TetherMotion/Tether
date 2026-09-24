@@ -19,6 +19,7 @@ SlaveRegistry::~SlaveRegistry() = default;
 
 void SlaveRegistry::reset(uint16_t count)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     entries_.clear();
     entries_.reserve(count);
     names_.clear();
@@ -28,6 +29,7 @@ void SlaveRegistry::reset(uint16_t count)
 
 void SlaveRegistry::set(uint16_t i, std::unique_ptr<Slave> slave)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (i < entries_.size()) {
         entries_[i] = std::move(slave);
     } else {
@@ -36,15 +38,29 @@ void SlaveRegistry::set(uint16_t i, std::unique_ptr<Slave> slave)
     }
 }
 
+Slave* SlaveRegistry::slaveAt(size_t i)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return i < entries_.size() ? entries_[i].get() : nullptr;
+}
+
+size_t SlaveRegistry::size() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return entries_.size();
+}
+
 NonExistingSlave& SlaveRegistry::sentinel(uint16_t i)
 {
-    // Recreate so the embedded index (and its error messages) match.
+    // mutex_ is held by the caller.  Recreate so the embedded index (and
+    // its error messages) match.
     sentinel_ = std::make_unique<NonExistingSlave>(master_, i);
     return *sentinel_;
 }
 
 Slave& SlaveRegistry::get(uint16_t i)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (i < entries_.size() && entries_[i]) {
         return *entries_[i];
     }
@@ -55,6 +71,7 @@ Slave& SlaveRegistry::get(uint16_t i)
 
 SII::SIIManager& SlaveRegistry::sii(uint16_t i)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (i < entries_.size() && entries_[i]) {
         return entries_[i]->sii();
     }
@@ -65,6 +82,7 @@ SII::SIIManager& SlaveRegistry::sii(uint16_t i)
 
 void SlaveRegistry::setName(uint16_t i, std::string name)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (i >= names_.size()) {
         TETHER_LOGW("master", "setSlaveName: index {} out of range (slaves={})",
                     i, names_.size());
@@ -75,12 +93,14 @@ void SlaveRegistry::setName(uint16_t i, std::string name)
 
 std::string_view SlaveRegistry::name(uint16_t i) const
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (i >= names_.size()) return {};
     return names_[i];
 }
 
 std::string SlaveRegistry::logPrefix(uint16_t i) const
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (i >= names_.size()) return std::format("Slave {}", i);
     const auto& n = names_[i];
     if (n.empty()) return std::format("Slave {}", i);

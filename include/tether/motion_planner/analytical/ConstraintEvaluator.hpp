@@ -115,8 +115,12 @@ public:
         T segLimit = static_cast<T>(path.maxVelocityAtArcLength(s));
         limit = std::min(limit, segLimit);
 
+        // Single path evaluation supplies both the curvature (centripetal)
+        // limit and the tangent for per-axis limits.
+        auto eval = path.evaluateAtArcLength(s);
+
         // Curvature (centripetal) limit
-        T kappa = path.curvatureAtArcLength(s);
+        T kappa = eval.curvature;
         if (kappa > MathConstants::EPSILON &&
             limits_.path.maxCentripetalAcceleration > T(0)) {
             T curvatureLimit = std::sqrt(
@@ -125,7 +129,6 @@ public:
         }
 
         // Per-axis velocity limits
-        auto eval = path.evaluateAtArcLength(s);
         limit = std::min(limit, limits_.maxVelocityForDirection(eval.tangent));
 
         return std::max(limit, T(0));

@@ -242,7 +242,13 @@ TEST(CyclicExecutive, DedicatedDcThreadRuns) {
     Exec e([&] { ++exch; return true; },
            [&] { ++dc;   return true; }, nullptr, cfg);
     ASSERT_TRUE(e.start());
-    ASSERT_TRUE(waitFor([&] { return dc.load() >= 2; }));
+    // Wait for the asserted state itself: two DC fires AND four completed
+    // cyclic iterations.  Waiting only on dc then racing stop() against the
+    // exchange loop is flaky under slow/unprivileged scheduling — the loop
+    // may simply not have ticked four times yet.
+    ASSERT_TRUE(waitFor([&] {
+        return dc.load() >= 2 && e.getStats().cycle_count >= 4;
+    }));
     e.stop();
     const auto s = e.getStats();
     EXPECT_GE(s.dc_sync_count, 2u);
