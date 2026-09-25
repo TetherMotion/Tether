@@ -570,12 +570,14 @@ jobs:
       # Exhale executes Doxygen automatically during the Sphinx build
       # (exhaleExecutesDoxygen in docs/conf.py) and generates the full
       # API .rst tree under docs/api/ — no separate doxygen step needed.
-      # -j auto parallelizes reading/writing across the runner's cores
-      # (ubuntu-latest: 4 vCPUs), which matters at ~13k generated pages.
+      # -j 1 keeps the build serial: parallel readers each carry a divergent
+      # copy of the growing Sphinx environment (fork CoW is defeated by
+      # CPython refcounting), which OOM-killed the 16 GB ubuntu-latest
+      # runner at ~47% of "reading sources" on every run. Serial peaks ~4 GB.
       # -W --keep-going: treat Sphinx/Breathe warnings (missing toctree
       # entries, unresolved doxygenclass targets, dead myst xrefs) as
       # errors so the docs can't silently rot again.
-      run: sphinx-build -W --keep-going -j auto -b html docs build/docs/html
+      run: sphinx-build -W --keep-going -j 1 -b html docs build/docs/html
 
     - name: Upload documentation artifact
       uses: actions/upload-artifact@v7

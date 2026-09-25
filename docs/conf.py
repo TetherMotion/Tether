@@ -106,7 +106,18 @@ exhale_args = {
         INPUT                  = ../include/tether
         FILE_PATTERNS          = *.h *.hpp *.c *.cpp
         RECURSIVE              = YES
-        EXCLUDE_PATTERNS       = */tests/* */test_* *_test.cpp *_test.h
+        # Machine-generated constant tables (object-dictionary defs, register
+        # maps, PDO wire layouts) — each constant gets its own stub page, which
+        # is most of the ~11k generated pages and the reason the build OOMs /
+        # runs for hours.  The constants stay in the headers; they are just
+        # not rendered into the Sphinx API tree for now.
+        EXCLUDE_PATTERNS       = */tests/* */test_* *_test.cpp *_test.h \
+                                 */CiA*Defs.hpp */ETG*Defs.hpp */FSoEDefs.hpp \
+                                 */Registers */Registers/* */*Registers.hpp \
+                                 */drives/*/*PDO.hpp */sensors/*/*PDO.hpp \
+                                 */drives/*/PdoSetup.hpp */drives/*Errors.hpp \
+                                 */profiles/*/*Parameters.hpp \
+                                 */ethercat/PDO.hpp
         EXTRACT_ALL            = NO
         EXTRACT_PRIVATE        = NO
         EXTRACT_STATIC         = NO
@@ -180,5 +191,103 @@ texinfo_documents = [
      author, 'Tether', 'Modular C++ Library for EtherCAT Motion Control.',
      'Miscellaneous'),
 ]
+
+# -- Warning policy (CI builds with -W) ----------------------------------------
+
+# Warnings that are pure generated-docs noise and cannot be fixed at the
+# source (they live in exhale-generated api/ stubs, not in .md files):
+# - duplicate_declaration: every nested class/struct is declared both on its
+#   parent's page and on its own page — inherent to the unabridged API tree.
+# - toc.not_included: unabridged-orphan stubs are intentionally not toctree'd.
+# - docutils: unbalanced * / ` markup inside Doxygen comments leaks into the
+#   generated .rst (hundreds of sites, cosmetic).
+suppress_warnings = [
+    'duplicate_declaration',
+    'toc.not_included',
+    'docutils',
+    # fallback-parser notices on Doxygen-rendered signatures Sphinx's C++
+    # grammar can't handle (digit separators, brace initializers, ...)
+    'source_code_parser.cpp',
+    # Pygments can't lex the box-drawing/arrow chars used in ASCII diagrams
+    # inside doc comments and .md code blocks; it retries in relaxed mode
+    # and renders them fine — the warning is noise.
+    'misc.highlighting_failure',
+    # untyped warnings tagged by the filter in setup() below
+    'doxygen_artifact',
+]
+
+import logging
+import re
+
+
+def setup(app):
+    """Tag untyped warnings emitted for Doxygen-rendering artifacts.
+
+    Sphinx emits some warnings *without* a type/subtype, which makes them
+    impossible to list in ``suppress_warnings``.  The generated API pages
+    produce such warnings when Sphinx's C++ parser cannot parse a signature
+    string that Doxygen rendered — e.g. doubled specifiers
+    (``constexpr constexpr``), digit separators (``200 '000``), or brace
+    initializers (``= {.x = 1}``) — or when Exhale generates two namespace
+    pages whose labels differ only in case.  These are rendering artifacts,
+    not doc bugs: the declaration still renders via the fallback path.
+
+    This filter stamps a ``doxygen_artifact`` type on those records so the
+    ``suppress_warnings`` entry above silences exactly them — everything
+    else still trips ``-W``.
+    """
+
+    class TagDoxygenArtifacts(logging.Filter):
+        _pattern = re.compile(
+            r'Error when parsing function declaration'
+            r'|Error in postfix expression'
+            r'|Parsing of expression failed'
+            r'|duplicate label'
+        )
+
+        def filter(self, record):
+            if (record.levelno == logging.WARNING
+                    and getattr(record, 'type', None) is None
+                    and self._pattern.search(record.getMessage())):
+                record.type = 'doxygen_artifact'
+            return True
+
+    # Must run *before* Sphinx's WarningSuppressor (which counts warnings
+    # for -W), so insert at the front of the warning handler's filter chain.
+    for handler in logging.getLogger('sphinx').handlers:
+        handler.filters.insert(0, TagDoxygenArtifacts())
+
+    # Furo renders the site navigation by calling the per-page ``toctree``
+    # context callable with ``collapse=False, maxdepth=-1`` — i.e. the *full*
+    # document tree — inside its own ``html-page-context`` handler (default
+    # priority 500).  With ~10k generated api pages in the unabridged toctree
+    # that is O(N) per page, O(N^2) overall — the write phase alone took
+    # ~10 s/page (projected > 20 h).  Registering at a lower priority lets us
+    # stub the callable for generated api pages before Furo sees it: the API
+    # pages get an empty nav sidebar (a 10k-entry expanded tree is useless
+    # there anyway) and hand-written pages keep the real tree.
+    def _skip_global_nav_for_api_pages(app, pagename, templatename,
+                                       context, doctree):
+        if pagename.startswith('api/'):
+            context['toctree'] = lambda **kwargs: ''
+
+    app.connect('html-page-context', _skip_global_nav_for_api_pages,
+                priority=400)
+
+    # Breathe renders Doxygen's internal <ref> links as :ref: targets of the
+    # form ``exhale_<kind>_<hash>``, but Exhale only emits labels for entities
+    # that got their own page (documented members).  Links to undocumented
+    # enum values / hidden members therefore dangle and emit ``ref.ref``
+    # warnings on every generated file_* page.  Real ``:ref:`` targets in
+    # hand-written docs never start with ``exhale_``, so resolving only those
+    # to their display text (unlinked) keeps genuine broken references fatal
+    # under -W.
+    def _resolve_dangling_exhale_refs(app, env, node, contnode):
+        if node.get('reftarget', '').startswith('exhale_'):
+            return contnode
+        return None
+
+    app.connect('missing-reference', _resolve_dangling_exhale_refs)
+
 
 # -- Extension configuration -------------------------------------------------
