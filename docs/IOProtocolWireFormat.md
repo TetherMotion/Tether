@@ -153,18 +153,20 @@ Each entry:
 Offset  Size  Field
 0       8     id (U64)
 8       1     valueType (ValueType enum)
-9       1     flags (EntryFlags bitfield)
-10      2     nameLen (U16)
-12      N     name (UTF-8 bytes, N = nameLen)
-12+N    2     descLen (U16)
-14+N    M     description (UTF-8 bytes, M = descLen)
-14+N+M  2     groupLen (U16)
-16+N+M  G     group (UTF-8 bytes, G = groupLen)
+9       1     valueSize (U8) — fixed value size in bytes, 0 = variable
+10      1     flags (EntryFlags bitfield)
+11      2     nameLen (U16)
+13      N     name (UTF-8 bytes, N = nameLen)
+13+N    2     descLen (U16)
+15+N    M     description (UTF-8 bytes, M = descLen)
+15+N+M  2     groupLen (U16)
+17+N+M  G     group (UTF-8 bytes, G = groupLen)
 ```
 
-### 0x03 — ListSignalsReq
+### 0x20 — ListSignalsReq / 0x21 — ListSignalsResp
 
-Same format as ListParamsReq with MessageType = 0x03.
+Same request format as ListParamsReq and same response format as
+ListParamsResp, with MessageTypes `0x20`/`0x21`.
 
 ### 0x03 — ConfigureStream
 
