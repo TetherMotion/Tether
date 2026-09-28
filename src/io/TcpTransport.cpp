@@ -126,6 +126,9 @@ bool TcpTransportServer::start() {
 void TcpTransportServer::stop() {
     listening_ = false;
     if (listenFd_ >= 0) {
+        // shutdown() wakes a thread blocked in accept() — close() alone leaves
+        // it parked on the still-open file description.
+        ::shutdown(listenFd_, SHUT_RDWR);
         ::close(listenFd_);
         listenFd_ = -1;
     }
