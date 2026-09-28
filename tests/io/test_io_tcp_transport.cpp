@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <future>
 #include <thread>
@@ -271,4 +272,20 @@ TEST(TcpTransportServer, StopWithoutStartIsSafe) {
     TcpTransportServer server(0);
     server.stop();
     EXPECT_FALSE(server.isListening());
+}
+
+TEST(TcpTransportServer, StopWakesBlockedAccept) {
+    uint16_t port = reserveLoopbackPort();
+    TcpTransportServer server(port);
+    ASSERT_TRUE(server.start());
+
+    auto acceptFuture = std::async(std::launch::async, [&server]() {
+        return server.accept();
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    server.stop();
+    EXPECT_EQ(acceptFuture.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_EQ(acceptFuture.get(), nullptr);
 }
