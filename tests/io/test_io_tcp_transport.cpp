@@ -6,6 +6,7 @@
 #include "tether/io/TcpTransport.hpp"
 
 #include <arpa/inet.h>
+#include <ifaddrs.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -201,6 +202,64 @@ TEST(TcpTransportServer, BindFailureReturnsFalse) {
     ASSERT_TRUE(first.start());
     EXPECT_FALSE(second.start());
     first.stop();
+}
+
+TEST(TcpTransportServer, LoopbackBindAcceptsLoopback) {
+    uint16_t port = reserveLoopbackPort();
+    TcpTransportServer server(port, "127.0.0.1");
+    ASSERT_TRUE(server.start());
+
+    auto acceptFuture = std::async(std::launch::async, [&server]() {
+        return server.accept();
+    });
+
+    ScopedFd clientFd = connectLoopback(port);
+    auto accepted = acceptFuture.get();
+    ASSERT_NE(accepted, nullptr);
+    EXPECT_TRUE(accepted->isConnected());
+    server.stop();
+}
+
+TEST(TcpTransportServer, LoopbackBindRejectsExternalAddress) {
+    uint16_t port = reserveLoopbackPort();
+    TcpTransportServer server(port, "127.0.0.1");
+    ASSERT_TRUE(server.start());
+
+    // Find a non-loopback local address; skip when the host has none.
+    ifaddrs* list = nullptr;
+    ASSERT_EQ(::getifaddrs(&list), 0);
+    in_addr external{};
+    bool found = false;
+    for (ifaddrs* it = list; it != nullptr && !found; it = it->ifa_next) {
+        if (it->ifa_addr == nullptr || it->ifa_addr->sa_family != AF_INET) continue;
+        const auto* sin = reinterpret_cast<const sockaddr_in*>(it->ifa_addr);
+        if (sin->sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
+            external = sin->sin_addr;
+            found = true;
+        }
+    }
+    ::freeifaddrs(list);
+    if (!found) {
+        GTEST_SKIP() << "no non-loopback address available";
+    }
+
+    ScopedFd client(::socket(AF_INET, SOCK_STREAM, 0));
+    ASSERT_GE(client.get(), 0);
+    sockaddr_in target{};
+    target.sin_family = AF_INET;
+    target.sin_addr = external;
+    target.sin_port = htons(port);
+    EXPECT_NE(::connect(client.get(), reinterpret_cast<sockaddr*>(&target),
+                        sizeof(target)),
+              0);
+    server.stop();
+}
+
+TEST(TcpTransportServer, InvalidBindAddressFailsStart) {
+    uint16_t port = reserveLoopbackPort();
+    TcpTransportServer server(port, "not.an.address");
+    EXPECT_FALSE(server.start());
+    EXPECT_FALSE(server.isListening());
 }
 
 TEST(TcpTransportServer, AcceptWithoutStartReturnsNull) {

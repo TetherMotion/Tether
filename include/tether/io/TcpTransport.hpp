@@ -12,6 +12,7 @@
 #include "tether/io/Transport.hpp"
 #include <cstdint>
 #include <atomic>
+#include <string>
 
 namespace tether { namespace io {
 
@@ -44,8 +45,11 @@ private:
 class TcpTransportServer : public ITransportServer {
 public:
     /// @param port TCP port to listen on.
+    /// @param bindAddress IPv4 address to listen on (e.g. "127.0.0.1" for
+    ///        loopback only).  Empty or "0.0.0.0" binds all interfaces.
     /// @param backlog Listen backlog (default 4).
-    explicit TcpTransportServer(uint16_t port, int backlog = 4);
+    explicit TcpTransportServer(uint16_t port, std::string bindAddress = {},
+                                int backlog = 4);
     ~TcpTransportServer() override;
 
     bool start() override;
@@ -55,6 +59,7 @@ public:
 
 private:
     uint16_t port_;
+    std::string bindAddress_;
     int backlog_;
     int listenFd_ = -1;
     std::atomic<bool> listening_{false};

@@ -79,8 +79,9 @@ bool TcpTransport::isConnected() const {
 // TcpTransportServer
 // ---------------------------------------------------------------------------
 
-TcpTransportServer::TcpTransportServer(uint16_t port, int backlog)
-    : port_(port), backlog_(backlog) {}
+TcpTransportServer::TcpTransportServer(uint16_t port, std::string bindAddress,
+                                       int backlog)
+    : port_(port), bindAddress_(std::move(bindAddress)), backlog_(backlog) {}
 
 TcpTransportServer::~TcpTransportServer() {
     stop();
@@ -96,9 +97,15 @@ bool TcpTransportServer::start() {
     ::setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     struct sockaddr_in addr{};
-    addr.sin_family      = AF_INET;
-    addr.sin_port        = htons(port_);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_family = AF_INET;
+    addr.sin_port   = htons(port_);
+    if (bindAddress_.empty() || bindAddress_ == "0.0.0.0") {
+        addr.sin_addr.s_addr = INADDR_ANY;
+    } else if (::inet_pton(AF_INET, bindAddress_.c_str(), &addr.sin_addr) != 1) {
+        ::close(listenFd_);
+        listenFd_ = -1;
+        return false;
+    }
 
     if (::bind(listenFd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
         ::close(listenFd_);
