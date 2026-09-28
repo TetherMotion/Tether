@@ -80,6 +80,23 @@ public:
     void publishLog(LogSeverity severity, std::string_view component,
                     std::string_view message, std::string_view location = {});
 
+    // ---- Peer function invocation ----
+
+    /// Invoke a function hosted by a connected client.  Routes to the
+    /// session whose RegisterFunctionsReq catalog contains
+    /// `functionName`.  `deadlineUs` bounds the response wait (see
+    /// Session::callPeer).  Returns false when no connected peer hosts
+    /// that function or the call could not be queued.  The callback runs
+    /// on the session worker thread.
+    bool callPeerFunction(std::string_view functionName,
+                          const std::vector<FunctionArgument>& arguments,
+                          uint64_t deadlineUs,
+                          Session::InvokeResultFn callback);
+
+    /// (name, id) of every function currently registered by connected
+    /// clients, across all sessions.
+    std::vector<std::pair<std::string, uint64_t>> peerFunctions() const;
+
 private:
     void acceptLoop();
     void cleanupFinishedSessions();

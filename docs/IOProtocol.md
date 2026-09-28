@@ -304,6 +304,73 @@ Each record is: `[8-byte timestamp] [field1 bytes] [field2 bytes] ...`
 
 The `DatalogRecorder` class handles configuration, sampling, and writing. The sink callback receives raw binary record data.
 
+## Function invocation
+
+Functions are typed, schema-described request/response calls. Two request
+forms exist; both share the same argument validation, optional-default
+materialization, and return-value checking (`invokeFunctionChecked` in
+`Function.hpp`).
+
+| Message | Direction | Purpose |
+|---|---|---|
+| `CallFunctionReq/Resp` (`0x37/0x38`) | client → server | Classic call; serialized, no request id |
+| `InvokeExReq/Resp` (`0x3E/0x3F`) | both | Correlated call with `request_id` and `deadline_us` |
+| `RegisterFunctionsReq/Resp` (`0x40/0x41`) | client → server | Publish the client's own function catalog |
+
+### Server-hosted functions
+
+Register `FunctionEntry` entries in the `Registry`; the client calls them by
+id (`callFunction` / `invokeEx`) or discovers them via `ListFunctions`.
+
+### Client-hosted (peer) functions
+
+The client publishes its catalog once per connection:
+
+```cpp
+client->registerFunctions({entry});   // replaces the whole catalog
+```
+
+Each entry needs a unique nonzero id and a `validSignature()`. On the server,
+each `Session` stores the peer catalog (`session->peerFunctions()`,
+`findPeerFunctionId(name)`); the catalog dies with the connection.
+
+An application initiates a reverse call on any thread:
+
+```cpp
+// From the application, not the session thread:
+session->callPeer(functionId, args, deadlineUs,
+                  [](const Session::InvokeResult& r) { /* ... */ });
+
+// Or by name across all sessions:
+server->callPeerFunction("filter", args, deadlineUs, callback);
+```
+
+Contract:
+
+- `request_id` correlates calls; up to `MAX_PENDING_INVOKES` (256) may be
+  outstanding per session — reverse calls pipeline freely and interleave
+  with streaming/log traffic on the same connection.
+- `deadlineUs` is enforced locally by the initiator on a dedicated sweep
+  thread, independent of wire traffic. Expiry delivers
+  `InvokeResult{timedOut=true, error=ErrorCode::Timeout}`; a late response
+  is dropped. `deadlineUs == 0` waits without a deadline.
+- Wire responses run the callback on the session worker thread; deadline
+  expiries run it on the sweep thread.
+- On the client, inbound `InvokeExReq` is dispatched inside
+  `receiveMessage()` to the registered `FunctionEntry` callback, then to
+  the optional `setInvokeHandler` catch-all — so a client must keep a
+  receive pump (or make synchronous calls, which pump reentrantly) to
+  answer reverse calls. Handlers run on the caller's transport wait:
+  delegate heavy work instead of blocking it.
+
+### Consumer-side freshness
+
+`DeadlineLatch<T>` (`DeadlineLatch.hpp`) is the reusable consumer half of
+the deadline contract: the invoke callback `offer()`s sequenced responses;
+the real-time loop `consume()`s the newest sample and checks `fresh`
+against its deadline — applying filtered output or its own fallback (hold
+last, zero, unfiltered input) without ever blocking on the peer.
+
 ## Feature exchange
 
 Clients and servers exchange capability sets at connection start:

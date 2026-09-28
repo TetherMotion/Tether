@@ -362,7 +362,11 @@ TEST_F(SessionIntegrationTest, CallFunctionRejectsOutOfRangeTlvPosition) {
     ASSERT_TRUE(encodeFunctionTlv(writer, 99, ValueType::U32, value, sizeof(value)));
     auto response = roundtrip(*ctx, call, writer.pos);
     BufReader reader(response.data(), response.size());
-    EXPECT_EQ(reader.getU8(), static_cast<uint8_t>(MessageType::Error));
+    // Argument errors are reported as a correlated CallFunctionResp
+    // (status=1 + error code), not an orphaned Error message.
+    EXPECT_EQ(reader.getU8(), static_cast<uint8_t>(MessageType::CallFunctionResp));
+    EXPECT_EQ(reader.getU64(), 100u);
+    EXPECT_EQ(reader.getU8(), 1u);
     EXPECT_EQ(reader.getU32(), static_cast<uint32_t>(ErrorCode::FunctionInvocationError));
     EXPECT_EQ(functionCalls_.load(), 0);
 }

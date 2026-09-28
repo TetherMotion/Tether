@@ -121,6 +121,16 @@ enum class MessageType : uint8_t {
     InputStreamData       = 0x3B,
     CloseInputStreamReq   = 0x3C,
     CloseInputStreamResp  = 0x3D,
+    /// Correlated function invocation carrying a request id and deadline.
+    /// Unlike CallFunctionReq it is valid in both directions: a client may
+    /// invoke server functions and the server may invoke functions the
+    /// client published via RegisterFunctionsReq.
+    InvokeExReq           = 0x3E,
+    InvokeExResp          = 0x3F,
+    /// Client pushes the catalog of functions it hosts (peer functions).
+    /// Session-scoped: the catalog dies with the connection.
+    RegisterFunctionsReq  = 0x40,
+    RegisterFunctionsResp = 0x41,
 
     // Source-compatible Tether names for the canonical v4 operations.
     ConfigureStreamReq  = ConfigureStream,
@@ -317,6 +327,7 @@ enum class ErrorCode : uint32_t {
     ThresholdError      = 12,
     FunctionInvocationError = 13,
     ResourceBusy        = 14,
+    Timeout             = 15,   ///< Locally generated when an InvokeEx deadline expires
 };
 
 // ---------------------------------------------------------------------------
@@ -343,6 +354,8 @@ inline constexpr size_t MAX_MESSAGE_SIZE = 1024 * 1024;
 inline constexpr size_t MAX_STRING_SIZE = UINT16_MAX;
 inline constexpr size_t MAX_VARIABLE_VALUE_SIZE = 1024 * 1024;
 inline constexpr uint32_t MAX_COLLECTION_COUNT = 1'000'000;
+/// Bound on outstanding InvokeEx calls per session; callPeer fails past it.
+inline constexpr size_t MAX_PENDING_INVOKES = 256;
 
 inline uint32_t zigzagEncode32(int32_t value) {
     return (static_cast<uint32_t>(value) << 1) ^

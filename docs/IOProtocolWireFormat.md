@@ -264,6 +264,43 @@ arguments must be a suffix of the parameter list.
 `CallFunctionResp` contains the function ID, status, error code and error string;
 successful responses additionally carry a return-value TLV tuple at position 0.
 
+### Symmetric invocation (InvokeEx)
+
+`InvokeExReq` (`0x3E`) and `InvokeExResp` (`0x3F`) carry the same invocation
+semantics as CallFunction but are valid in **both directions** and correlate
+concurrent requests with an explicit `request_id`. A client may invoke server
+functions; a server may invoke functions the client published via
+`RegisterFunctionsReq`.
+
+`InvokeExReq` is
+`[type][request_id U64][function_id U64][deadline_us U64][argument_count U32]`
+followed by the same positional argument TLVs as `CallFunctionReq`.
+`deadline_us` is a relative deadline hint in the initiator's clock domain:
+the initiator enforces it locally; a responder that sees it may use it to
+bound its own work. `0` means no deadline.
+
+`InvokeExResp` is
+`[type][request_id U64][status U8][error_code U32][error str16]`, followed by
+an optional return-value TLV tuple at position 0 when `status` is 0 and the
+function declares a return value. `request_id` echoes the request, so any
+number of calls may be outstanding on one connection, interleaved with all
+other message types. A response that arrives after its deadline or with an
+unknown `request_id` is discarded. A locally expired deadline is reported to
+the initiator's application as `ErrorCode::Timeout` (`15`) — it is never a
+wire message.
+
+`RegisterFunctionsReq` (`0x40`) publishes the catalog of functions the
+*client* hosts. Its body is `[type][count U32]` followed by `count` function
+descriptors in the same format as `ListFunctionsResp` entries. The catalog
+is session-scoped and replaced wholesale by each request; it disappears when
+the connection ends. `RegisterFunctionsResp` (`0x41`) is
+`[type][count U32][status U8]` with status 0 on success.
+
+Outstanding `InvokeEx` calls are bounded per session
+(`MAX_PENDING_INVOKES` = 256); calls beyond the bound are refused before
+sending. Argument validation, default materialization, and return-value
+checking are identical to `CallFunctionReq`.
+
 ### Input streams
 
 `CreateInputStreamReq` (`0x39`) is encoded as

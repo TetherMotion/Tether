@@ -178,13 +178,17 @@ ClientError TetherIOClient::parseError(const std::vector<uint8_t>& frame) {
 // ---- Low-level ----
 
 bool TetherIOClient::sendRaw(const uint8_t* data, size_t len) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!transport_ || !transport_->isConnected()) return false;
     return transport_->send(data, len);
 }
 
 std::expected<std::vector<uint8_t>, ClientError>
 TetherIOClient::receiveMessage(uint32_t timeoutMs) {
+    // Serialize demux: the transport is single-consumer — concurrent
+    // request()/receiveMessage() callers queue behind the current wait
+    // rather than racing on transport_->receiveMessage().
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!transport_ || !transport_->isConnected()) {
         return std::unexpected(makeError(ErrorCode::InternalError, "Not connected"));
     }
@@ -237,6 +241,12 @@ TetherIOClient::receiveMessage(uint32_t timeoutMs) {
         }
         return receiveMessage(timeoutMs);
     }
+    // A server-originated call: dispatch to the local catalog and answer,
+    // then keep waiting for the pending response.
+    if (type == static_cast<uint8_t>(MessageType::InvokeExReq)) {
+        handleInvokeExReq(msg);
+        return receiveMessage(timeoutMs);
+    }
     return msg;
 }
 
@@ -244,7 +254,7 @@ std::expected<std::vector<uint8_t>, ClientError>
 TetherIOClient::request(const std::vector<uint8_t>& payload,
                         MessageType expectedResponseType,
                         uint32_t timeoutMs) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!transport_ || !transport_->isConnected()) {
         return std::unexpected(makeError(ErrorCode::InternalError, "Not connected"));
     }
@@ -256,12 +266,14 @@ TetherIOClient::request(const std::vector<uint8_t>& payload,
     auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(to);
 
     while (true) {
-        uint32_t remain = static_cast<uint32_t>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                deadline - std::chrono::steady_clock::now()).count());
-        if (remain == 0) remain = 1;
+        const auto remainMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now()).count();
+        if (remainMs <= 0) {
+            return std::unexpected(makeError(ErrorCode::Timeout,
+                                             "Request timed out"));
+        }
 
-        auto result = receiveMessage(remain);
+        auto result = receiveMessage(static_cast<uint32_t>(remainMs));
         if (!result) return std::unexpected(result.error());
 
         const auto& frame = *result;
@@ -975,6 +987,188 @@ TetherIOClient::closeInputStream(uint32_t streamId) {
     bool success = r.getU8() != 0;
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed CloseInputStreamResp"));
     return std::make_pair(respId, success);
+}
+
+// ---- Peer functions + correlated invocation ----
+
+void TetherIOClient::setInvokeHandler(InvokeHandler cb) {
+    invokeHandler_ = std::move(cb);
+}
+
+std::expected<uint32_t, ClientError>
+TetherIOClient::registerFunctions(const std::vector<FunctionEntry>& functions) {
+    for (const auto& function : functions) {
+        if (!function.validSignature() || function.id == 0) {
+            return std::unexpected(makeError(
+                ErrorCode::InvalidMessage, "Invalid function signature"));
+        }
+    }
+
+    std::vector<uint8_t> buf(MAX_MESSAGE_SIZE);
+    BufWriter w(buf.data(), buf.size());
+    w.putU8(static_cast<uint8_t>(MessageType::RegisterFunctionsReq));
+    w.putU32(static_cast<uint32_t>(functions.size()));
+    for (const auto& function : functions) {
+        if (!encodeFunctionDescriptor(w, FunctionView(&function))) {
+            return std::unexpected(makeError(
+                ErrorCode::TooManyEntries, "Function catalog too large"));
+        }
+    }
+    buf.resize(w.pos);
+
+    auto result = request(buf, MessageType::RegisterFunctionsResp);
+    if (!result) return std::unexpected(result.error());
+
+    ClientBufReader r(result->data(), result->size());
+    r.getU8(); // type
+    uint32_t count = r.getU32();
+    uint8_t status = r.getU8();
+    if (!r.ok() || status != 0) {
+        return std::unexpected(makeError(ErrorCode::InternalError,
+                                         "Function registration rejected"));
+    }
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        localFunctions_ = functions;
+    }
+    return count;
+}
+
+std::expected<ClientCallResult, ClientError>
+TetherIOClient::invokeEx(uint64_t functionId, const std::vector<FunctionArg>& args,
+                         uint64_t deadlineUs, uint32_t timeoutMs) {
+    size_t argBytes = 0;
+    for (const auto& a : args) argBytes += FUNCTION_TLV_HEADER_SIZE + a.value.size();
+    std::vector<uint8_t> buf(1 + 8 + 8 + 8 + 4 + argBytes);
+    BufWriter w(buf.data(), buf.size());
+    const uint64_t requestId = nextRequestId_++;
+    w.putU8(static_cast<uint8_t>(MessageType::InvokeExReq));
+    w.putU64(requestId);
+    w.putU64(functionId);
+    w.putU64(deadlineUs);
+    w.putU32(static_cast<uint32_t>(args.size()));
+    for (const auto& a : args) {
+        encodeFunctionTlv(w, a.position, a.type, a.value.data(), a.value.size());
+    }
+    if (!w.ok()) {
+        return std::unexpected(makeError(ErrorCode::InvalidMessage,
+                                         "InvokeEx request too large"));
+    }
+    buf.resize(w.pos);
+
+    auto result = request(buf, MessageType::InvokeExResp, timeoutMs);
+    if (!result) return std::unexpected(result.error());
+
+    BufReader r(result->data(), result->size());
+    r.getU8(); // type
+    const uint64_t responseId = r.getU64();
+    ClientCallResult cr;
+    cr.functionId = functionId;
+    cr.success = r.getU8() == 0;
+    cr.errorCode = r.getU32();
+    const uint16_t errorLength = r.getU16();
+    const uint8_t* errorBytes = r.getBytes(errorLength);
+    if (r.ok() && errorLength > 0) {
+        cr.errorMessage.assign(reinterpret_cast<const char*>(errorBytes), errorLength);
+    }
+    if (cr.success && r.remaining() >= FUNCTION_TLV_HEADER_SIZE) {
+        FunctionArgument returnTlv;
+        if (decodeFunctionTlv(r, returnTlv)) {
+            cr.hasReturnValue = true;
+            cr.returnType = returnTlv.type;
+            cr.returnValue = std::move(returnTlv.value);
+        }
+    }
+    if (!r.ok() || r.remaining() != 0) {
+        return std::unexpected(makeError(ErrorCode::InvalidMessage,
+                                         "Malformed InvokeExResp"));
+    }
+    if (responseId != requestId) {
+        return std::unexpected(makeError(ErrorCode::InvalidMessage,
+                                         "Mismatched InvokeEx response id"));
+    }
+    return cr;
+}
+
+void TetherIOClient::handleInvokeExReq(const std::vector<uint8_t>& msg) {
+    BufReader r(msg.data(), msg.size());
+    r.getU8(); // type
+    const uint64_t requestId = r.getU64();
+    const uint64_t functionId = r.getU64();
+    r.getU64();  // deadline hint: enforced by the caller
+    const uint32_t argumentCount = r.getU32();
+    if (!r.ok() || argumentCount > MAX_COLLECTION_COUNT) {
+        sendInvokeExResponse(requestId, false,
+                             static_cast<uint32_t>(ErrorCode::InvalidMessage),
+                             "Malformed InvokeEx request", false,
+                             ValueType::Binary, {});
+        return;
+    }
+
+    const FunctionEntry* entry = nullptr;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        for (const auto& function : localFunctions_) {
+            if (function.id == functionId) { entry = &function; break; }
+        }
+    }
+    if (entry) {
+        FunctionCallResult result =
+            invokeFunctionChecked(FunctionView(entry), argumentCount, r);
+        sendInvokeExResponse(requestId, result.success,
+                             static_cast<uint32_t>(result.error), result.errorMessage,
+                             result.success && entry->returnValue.present,
+                             entry->returnValue.type, result.returnValue);
+        return;
+    }
+    if (invokeHandler_) {
+        std::vector<FunctionArg> args;
+        args.reserve(argumentCount);
+        bool malformed = false;
+        for (uint32_t i = 0; i < argumentCount; ++i) {
+            FunctionArgument tlv;
+            if (!decodeFunctionTlv(r, tlv)) { malformed = true; break; }
+            args.push_back({tlv.position, tlv.type, std::move(tlv.value)});
+        }
+        if (malformed || !r.ok() || r.remaining() != 0) {
+            sendInvokeExResponse(requestId, false,
+                                 static_cast<uint32_t>(ErrorCode::InvalidMessage),
+                                 "Malformed InvokeEx arguments", false,
+                                 ValueType::Binary, {});
+            return;
+        }
+        ClientCallResult result = invokeHandler_(functionId, args);
+        sendInvokeExResponse(requestId, result.success, result.errorCode,
+                             result.errorMessage,
+                             result.success && result.hasReturnValue,
+                             result.returnType, result.returnValue);
+        return;
+    }
+    sendInvokeExResponse(requestId, false,
+                         static_cast<uint32_t>(ErrorCode::InvalidId),
+                         "Function not found", false, ValueType::Binary, {});
+}
+
+void TetherIOClient::sendInvokeExResponse(uint64_t requestId, bool success,
+                                          uint32_t errorCode,
+                                          std::string_view errorMessage,
+                                          bool hasReturn, ValueType returnType,
+                                          const std::vector<uint8_t>& returnValue) {
+    const size_t messageSize = std::min(errorMessage.size(), MAX_STRING_SIZE);
+    const size_t valueSize = std::min(returnValue.size(), MAX_VARIABLE_VALUE_SIZE);
+    const bool emitReturn = success && hasReturn;
+    std::vector<uint8_t> buf(1 + 8 + 1 + 4 + 2 + messageSize +
+                             (emitReturn ? FUNCTION_TLV_HEADER_SIZE + valueSize : 0));
+    BufWriter w(buf.data(), buf.size());
+    w.putU8(static_cast<uint8_t>(MessageType::InvokeExResp));
+    w.putU64(requestId);
+    w.putU8(success ? 0 : 1);
+    w.putU32(success ? 0 : errorCode);
+    w.putStr16(errorMessage.data(), messageSize);
+    if (emitReturn) {
+        encodeFunctionTlv(w, 0, returnType, returnValue.data(), valueSize);
+    }
+    if (w.ok()) sendRaw(buf.data(), w.pos);
 }
 
 }} // namespace tether::io

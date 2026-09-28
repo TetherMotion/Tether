@@ -23,6 +23,7 @@
 #include "tether/io/Registry.hpp"
 #include "tether/io/Function.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -221,6 +222,32 @@ public:
     std::expected<ClientCallResult, ClientError>
     callFunction(uint64_t functionId, const std::vector<FunctionArg>& args = {});
 
+    // ---- Peer functions + correlated invocation ----
+
+    /// Host local functions and publish their catalog to the server
+    /// (RegisterFunctionsReq).  Entries are stored for the lifetime of the
+    /// connection and dispatched when InvokeExReq arrives; each entry must
+    /// satisfy FunctionEntry::validSignature().  Returns the registered
+    /// count.  Repeat calls replace the whole catalog.
+    std::expected<uint32_t, ClientError>
+    registerFunctions(const std::vector<FunctionEntry>& functions);
+
+    /// Correlated function call (InvokeEx).  Unlike callFunction() the
+    /// request carries an explicit request id and a `deadlineUs` hint
+    /// (0 = none), so calls compose with a pipelined reverse direction on
+    /// the same connection.  Functionally identical invocation semantics
+    /// to callFunction().
+    std::expected<ClientCallResult, ClientError>
+    invokeEx(uint64_t functionId, const std::vector<FunctionArg>& args = {},
+             uint64_t deadlineUs = 0, uint32_t timeoutMs = 0);
+
+    /// Optional catch-all for InvokeExReq functions not found among the
+    /// registered localFunctions_.  Runs inside a request()/receiveMessage()
+    /// wait — keep it non-blocking or delegate.
+    using InvokeHandler = std::function<ClientCallResult(
+        uint64_t functionId, const std::vector<FunctionArg>& args)>;
+    void setInvokeHandler(InvokeHandler cb);
+
     // ---- Streaming ----
 
     /// Configure a stream. Returns {specId, layout}.
@@ -325,8 +352,11 @@ public:
     /// Send a raw protocol message (no framing).
     bool sendRaw(const uint8_t* data, size_t len);
 
-    /// Receive the next message, dispatching StreamData/LogData to callbacks.
-    /// Returns the message type and payload, or an error.
+    /// Receive the next message, dispatching StreamData/LogData and
+    /// answering incoming InvokeExReq messages.  Returns the frame for
+    /// anything else.  Safe to call from a dedicated pump thread; it
+    /// serializes with request() so a synchronous call never starves —
+    /// but one caller at a time holds the receive wait.
     std::expected<std::vector<uint8_t>, ClientError>
     receiveMessage(uint32_t timeoutMs = 0);
 
@@ -342,12 +372,22 @@ private:
     uint32_t defaultTimeoutMs_;
     StreamDataCallback streamCallback_;
     LogDataCallback logCallback_;
+    InvokeHandler invokeHandler_;
+    std::vector<FunctionEntry> localFunctions_;
     std::vector<ClientStreamLayoutEntry> streamLayout_;
-    std::mutex mutex_;
+    /// Recursive: request() holds it while receiveMessage() dispatches an
+    /// InvokeExReq whose handler sends the InvokeExResp.
+    std::recursive_mutex mutex_;
+    std::atomic<uint64_t> nextRequestId_{1};
 
     // Internal helpers
     ClientError makeError(ErrorCode code, std::string msg);
     ClientError parseError(const std::vector<uint8_t>& frame);
+    void handleInvokeExReq(const std::vector<uint8_t>& msg);
+    void sendInvokeExResponse(uint64_t requestId, bool success, uint32_t errorCode,
+                              std::string_view errorMessage, bool hasReturn,
+                              ValueType returnType,
+                              const std::vector<uint8_t>& returnValue);
     std::vector<uint8_t> encodeVarint(uint32_t value);
     uint32_t decodeVarint(const uint8_t* data, size_t len, size_t& consumed);
     std::string readString16(const uint8_t* data, size_t len, size_t& offset);
