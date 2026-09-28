@@ -86,6 +86,11 @@ void Session::run() {
 
     log("Session started");
 
+    // Deadline enforcement for outbound peer calls runs on its own
+    // thread: expiry must not depend on wire traffic waking this loop.
+    sweepStop_.store(false, std::memory_order_relaxed);
+    invokeSweepThread_ = std::thread([this] { invokeSweepLoop(); });
+
     while (!stopRequested_.load(std::memory_order_relaxed)) {
         // Check for catalog changes
         if (catalogDirty_.exchange(false, std::memory_order_relaxed)) {
@@ -139,6 +144,10 @@ void Session::run() {
 
     releaseRingSource();
     streaming_ = false;
+    sweepStop_.store(true, std::memory_order_relaxed);
+    invokeSweepCv_.notify_all();
+    if (invokeSweepThread_.joinable()) invokeSweepThread_.join();
+    finishPendingInvokes();
     running_ = false;
     log("Session ended");
 }
@@ -220,6 +229,9 @@ void Session::onMessage(const uint8_t* data, size_t len) {
             case 0x35: name = "ListFunctionsReq"; break;
             case 0x36: name = "ListFunctionsResp"; break;
             case 0x37: name = "CallFunctionReq"; break;
+            case 0x3E: name = "InvokeExReq"; break;
+            case 0x3F: name = "InvokeExResp"; break;
+            case 0x40: name = "RegisterFunctionsReq"; break;
             default: break;
         }
         logFn_("TetherIO", "dispatch %s (bodyLen=%zu)", name, bodyLen);
@@ -250,6 +262,9 @@ void Session::onMessage(const uint8_t* data, size_t len) {
         case MessageType::CreateInputStreamReq: handleCreateInputStreamReq(body, bodyLen); break;
         case MessageType::InputStreamData:      handleInputStreamData(body, bodyLen); break;
         case MessageType::CloseInputStreamReq:  handleCloseInputStreamReq(body, bodyLen); break;
+        case MessageType::InvokeExReq:          handleInvokeExReq(body, bodyLen); break;
+        case MessageType::InvokeExResp:         handleInvokeExResp(body, bodyLen); break;
+        case MessageType::RegisterFunctionsReq: handleRegisterFunctionsReq(body, bodyLen); break;
         default:
             sendError(ErrorCode::UnknownMessageType, "Unknown message type");
             break;
@@ -1186,100 +1201,258 @@ void Session::handleCallFunctionReq(const uint8_t* body, size_t len) {
         sendError(ErrorCode::InvalidId, "Function not found");
         return;
     }
-    if (argumentCount > function.parameterCount()) {
-        sendError(ErrorCode::FunctionInvocationError, "Too many function arguments");
+    FunctionCallResult result = invokeFunctionChecked(function, argumentCount, r);
+    sendFunctionCallResponse(functionId, function.returnValue(), result);
+}
+
+void Session::handleInvokeExReq(const uint8_t* body, size_t len) {
+    BufReader r(body, len);
+    const uint64_t requestId = r.getU64();
+    const uint64_t functionId = r.getU64();
+    r.getU64();  // deadline hint: enforced by the initiator
+    const uint32_t argumentCount = r.getU32();
+    const auto reject = [this, requestId](const char* message) {
+        FunctionCallResult result;
+        result.errorMessage = message;
+        sendInvokeExResponse(requestId, FunctionReturn{}, result);
+    };
+    if (len < 28 || !r.ok() || argumentCount > MAX_COLLECTION_COUNT) {
+        reject("Invalid InvokeEx request");
+        return;
+    }
+    const FunctionView function = registry_.findFunction(functionId);
+    if (!function) {
+        FunctionCallResult result;
+        result.error = ErrorCode::InvalidId;
+        result.errorMessage = "Function not found";
+        sendInvokeExResponse(requestId, FunctionReturn{}, result);
+        return;
+    }
+    FunctionCallResult result = invokeFunctionChecked(function, argumentCount, r);
+    sendInvokeExResponse(requestId, function.returnValue(), result);
+}
+
+void Session::handleInvokeExResp(const uint8_t* body, size_t len) {
+    BufReader r(body, len);
+    const uint64_t requestId = r.getU64();
+    const uint8_t status = r.getU8();
+    const uint32_t errorCode = r.getU32();
+    const uint16_t errorLength = r.getU16();
+    const uint8_t* errorBytes = r.getBytes(errorLength);
+    if (!r.ok()) {
+        log("Malformed InvokeExResp");
         return;
     }
 
-    std::vector<FunctionArgument> supplied(function.parameterCount());
-    std::vector<bool> seen(function.parameterCount(), false);
-    for (uint32_t index = 0; index < argumentCount; ++index) {
-        FunctionArgument argument;
-        if (!decodeFunctionTlv(r, argument) || argument.position >= function.parameterCount()) {
-            sendError(ErrorCode::FunctionInvocationError, "Invalid function argument TLV");
+    PendingInvoke pending;
+    {
+        std::lock_guard<std::mutex> lock(invokeMutex_);
+        auto it = pendingInvokes_.find(requestId);
+        if (it == pendingInvokes_.end()) {
+            // Late response after deadline expiry, or foreign request id.
             return;
         }
-        const auto position = static_cast<size_t>(argument.position);
-        const auto& parameter = function.parameters()[position];
-        if (seen[position] || argument.type != parameter.type) {
-            sendError(ErrorCode::FunctionInvocationError, "Wrong or duplicate function argument");
-            return;
-        }
-        if (parameter.valueDescriptor &&
-            !validateValuePayload(*parameter.valueDescriptor, argument.value.data(),
-                                  argument.value.size())) {
-            sendError(ErrorCode::FunctionInvocationError, "Invalid aggregate function argument");
-            return;
-        }
-        if (parameter.maxValueSize != 0 && argument.value.size() > parameter.maxValueSize) {
-            sendError(ErrorCode::FunctionInvocationError, "Invalid function argument size");
-            return;
-        }
-        const auto fixedSize = valueTypeSize(parameter.type);
-        if ((fixedSize != 0 && argument.value.size() != fixedSize) ||
-            argument.value.size() > parameter.maxValueSize && parameter.maxValueSize != 0) {
-            sendError(ErrorCode::FunctionInvocationError, "Invalid function argument size");
-            return;
-        }
-        supplied[position] = std::move(argument);
-        seen[position] = true;
+        pending = std::move(it->second);
+        pendingInvokes_.erase(it);
     }
-    if (!r.ok() || r.remaining() != 0) {
-        sendError(ErrorCode::FunctionInvocationError, "Trailing function call data");
+
+    InvokeResult result;
+    result.requestId = requestId;
+    result.functionId = pending.functionId;
+    const uint64_t now = getTimestampUs_();
+    result.rttUs = now - pending.sentAtUs;
+    if (pending.deadlineAtUs != 0 && now > pending.deadlineAtUs) {
+        // The response crossed the wire after its deadline — same
+        // outcome as a locally expired wait; the payload is dropped.
+        result.timedOut = true;
+        result.error = ErrorCode::Timeout;
+        result.errorMessage = "InvokeEx deadline exceeded";
+        pending.callback(result);
         return;
     }
-
-    for (size_t position = 0; position < function.parameterCount(); ++position) {
-        const auto& parameter = function.parameters()[position];
-        if (!seen[position]) {
-            if (!parameter.optional || !parameter.hasDefault) {
-                sendError(ErrorCode::FunctionInvocationError, "Missing required function argument");
-                return;
-            }
-            supplied[position].position = static_cast<uint32_t>(position);
-            supplied[position].type = parameter.type;
-            supplied[position].value = parameter.defaultValue;
-            supplied[position].provided = false;
-            if (parameter.valueDescriptor &&
-                !validateValuePayload(*parameter.valueDescriptor, supplied[position].value.data(),
-                                      supplied[position].value.size())) {
-                sendError(ErrorCode::FunctionInvocationError, "Invalid default function argument");
-                return;
-            }
-            if (parameter.maxValueSize != 0 &&
-                supplied[position].value.size() > parameter.maxValueSize) {
-                sendError(ErrorCode::FunctionInvocationError, "Invalid default function argument");
-                return;
-            }
-        }
-    }
-
-    FunctionCallResult result = function.invoke(supplied);
-    const auto& returnValue = function.returnValue();
-    if (result.success) {
-        const size_t fixedSize = returnValue.present ? valueTypeSize(returnValue.type) : 0;
-        const bool validReturn =
-            (returnValue.present && fixedSize != 0 &&
-             result.returnValue.size() == fixedSize) ||
-            (returnValue.present && fixedSize == 0 &&
-             result.returnValue.size() <=
-                 (returnValue.maxValueSize != 0 ? returnValue.maxValueSize
-                                                : MAX_VARIABLE_VALUE_SIZE)) ||
-            (!returnValue.present && result.returnValue.empty());
-        const bool validAggregateReturn =
-            !returnValue.valueDescriptor ||
-            validateValuePayload(*returnValue.valueDescriptor, result.returnValue.data(),
-                                 result.returnValue.size());
-        const bool withinReturnLimit =
-            returnValue.maxValueSize == 0 || result.returnValue.size() <= returnValue.maxValueSize;
-        if (!validReturn || !validAggregateReturn || !withinReturnLimit) {
+    result.success = (status == 0);
+    result.error = static_cast<ErrorCode>(errorCode);
+    result.errorMessage.assign(reinterpret_cast<const char*>(errorBytes), errorLength);
+    if (result.success && r.remaining() >= FUNCTION_TLV_HEADER_SIZE) {
+        FunctionArgument returnTlv;
+        if (decodeFunctionTlv(r, returnTlv)) {
+            result.hasReturnValue = true;
+            result.returnType = returnTlv.type;
+            result.returnValue = std::move(returnTlv.value);
+        } else {
             result.success = false;
             result.error = ErrorCode::FunctionInvocationError;
-            result.errorMessage = "Invalid function return value";
-            result.returnValue.clear();
+            result.errorMessage = "Malformed function return";
         }
     }
-    sendFunctionCallResponse(functionId, returnValue, result);
+    if (!r.ok() || r.remaining() != 0) {
+        result.success = false;
+        result.error = ErrorCode::InvalidMessage;
+        result.errorMessage = "Malformed InvokeEx response";
+        result.hasReturnValue = false;
+        result.returnValue.clear();
+    }
+    pending.callback(result);
+}
+
+void Session::handleRegisterFunctionsReq(const uint8_t* body, size_t len) {
+    BufReader r(body, len);
+    const uint32_t count = r.getU32();
+    if (!r.ok() || count > MAX_COLLECTION_COUNT) {
+        sendError(ErrorCode::InvalidMessage, "Invalid RegisterFunctions request");
+        return;
+    }
+    std::vector<FunctionDescriptor> catalog;
+    catalog.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        FunctionDescriptor descriptor;
+        if (!decodeFunctionDescriptor(r, descriptor) ||
+            descriptor.id == 0 || descriptor.name.empty()) {
+            sendError(ErrorCode::InvalidMessage, "Invalid function descriptor");
+            return;
+        }
+        catalog.push_back(std::move(descriptor));
+    }
+    if (r.remaining() != 0) {
+        sendError(ErrorCode::InvalidMessage, "Trailing RegisterFunctions data");
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(peerFunctionsMutex_);
+        peerFunctions_ = std::move(catalog);
+    }
+    log("Client registered %u peer functions", count);
+    sendRegisterFunctionsResp(count, true);
+}
+
+// --------------------------------------------------------------------------
+// Peer (client-hosted) function invocation
+// --------------------------------------------------------------------------
+
+bool Session::callPeer(uint64_t functionId,
+                       const std::vector<FunctionArgument>& arguments,
+                       uint64_t deadlineUs,
+                       InvokeResultFn callback) {
+    if (!callback) return false;
+    size_t size = 1 + 8 + 8 + 8 + 4;
+    for (const auto& argument : arguments) {
+        size += FUNCTION_TLV_HEADER_SIZE + argument.value.size();
+        if (size > MAX_MESSAGE_SIZE) return false;
+    }
+    const uint64_t now = getTimestampUs_();
+    const uint64_t deadlineAtUs =
+        (deadlineUs == 0 || deadlineUs > UINT64_MAX - now) ? 0 : now + deadlineUs;
+
+    std::vector<uint8_t> message(size);
+    BufWriter w(message.data(), message.size());
+    std::lock_guard<std::mutex> lock(invokeMutex_);
+    if (pendingInvokes_.size() >= MAX_PENDING_INVOKES) return false;
+    const uint64_t requestId = nextInvokeRequestId_++;
+    w.putU8(static_cast<uint8_t>(MessageType::InvokeExReq));
+    w.putU64(requestId);
+    w.putU64(functionId);
+    w.putU64(deadlineUs);
+    w.putU32(static_cast<uint32_t>(arguments.size()));
+    for (const auto& argument : arguments) {
+        if (!encodeFunctionTlv(w, argument.position, argument.type,
+                               argument.value.data(), argument.value.size())) {
+            return false;
+        }
+    }
+    if (!w.ok() || !sendRaw(message.data(), w.pos)) return false;
+    pendingInvokes_.emplace(requestId,
+                            PendingInvoke{functionId, now, deadlineAtUs, std::move(callback)});
+    invokeSweepCv_.notify_one();
+    return true;
+}
+
+std::vector<FunctionDescriptor> Session::peerFunctions() const {
+    std::lock_guard<std::mutex> lock(peerFunctionsMutex_);
+    return peerFunctions_;
+}
+
+std::optional<uint64_t> Session::findPeerFunctionId(std::string_view name) const {
+    std::lock_guard<std::mutex> lock(peerFunctionsMutex_);
+    for (const auto& descriptor : peerFunctions_) {
+        if (descriptor.name == name) return descriptor.id;
+    }
+    return std::nullopt;
+}
+
+size_t Session::pendingInvokeCount() const {
+    std::lock_guard<std::mutex> lock(invokeMutex_);
+    return pendingInvokes_.size();
+}
+
+void Session::invokeSweepLoop() {
+    while (!sweepStop_.load(std::memory_order_relaxed)) {
+        uint64_t waitUs = UINT64_MAX;
+        {
+            std::unique_lock<std::mutex> lock(invokeMutex_);
+            const uint64_t now = getTimestampUs_();
+            for (const auto& [id, pending] : pendingInvokes_) {
+                (void)id;
+                if (pending.deadlineAtUs == 0) continue;
+                if (pending.deadlineAtUs <= now) { waitUs = 0; break; }
+                waitUs = std::min(waitUs, pending.deadlineAtUs - now);
+            }
+            if (sweepStop_.load(std::memory_order_relaxed)) return;
+            if (waitUs == UINT64_MAX) {
+                invokeSweepCv_.wait(lock, [this] {
+                    return sweepStop_.load(std::memory_order_relaxed) ||
+                           !pendingInvokes_.empty();
+                });
+            } else if (waitUs > 0) {
+                invokeSweepCv_.wait_for(lock, std::chrono::microseconds(waitUs));
+            }
+        }
+        if (sweepStop_.load(std::memory_order_relaxed)) return;
+        sweepInvokeDeadlines();
+    }
+}
+
+void Session::sweepInvokeDeadlines() {
+    const uint64_t now = getTimestampUs_();
+    std::vector<std::pair<InvokeResultFn, InvokeResult>> expired;
+    {
+        std::lock_guard<std::mutex> lock(invokeMutex_);
+        for (auto it = pendingInvokes_.begin(); it != pendingInvokes_.end();) {
+            const PendingInvoke& pending = it->second;
+            if (pending.deadlineAtUs == 0 || now < pending.deadlineAtUs) {
+                ++it;
+                continue;
+            }
+            InvokeResult result;
+            result.requestId = it->first;
+            result.functionId = pending.functionId;
+            result.timedOut = true;
+            result.error = ErrorCode::Timeout;
+            result.errorMessage = "InvokeEx deadline exceeded";
+            result.rttUs = now - pending.sentAtUs;
+            expired.emplace_back(std::move(it->second.callback), std::move(result));
+            it = pendingInvokes_.erase(it);
+        }
+    }
+    // Callbacks run on the sweep thread, outside the lock — a callback may
+    // re-enter callPeer() without deadlocking.
+    for (auto& [callback, result] : expired) callback(result);
+}
+
+void Session::finishPendingInvokes() {
+    std::vector<std::pair<InvokeResultFn, InvokeResult>> drained;
+    {
+        std::lock_guard<std::mutex> lock(invokeMutex_);
+        for (auto& [requestId, pending] : pendingInvokes_) {
+            InvokeResult result;
+            result.requestId = requestId;
+            result.functionId = pending.functionId;
+            result.error = ErrorCode::InternalError;
+            result.errorMessage = "Session ended";
+            drained.emplace_back(std::move(pending.callback), std::move(result));
+        }
+        pendingInvokes_.clear();
+    }
+    for (auto& [callback, result] : drained) callback(result);
 }
 
 void Session::handleCreateInputStreamReq(const uint8_t* body, size_t len) {
@@ -1484,6 +1657,41 @@ void Session::sendFunctionCallResponse(uint64_t functionId,
         }
     }
     if (writer.ok()) sendRaw(raw.data(), writer.pos);
+}
+
+void Session::sendInvokeExResponse(uint64_t requestId,
+                                   const FunctionReturn& returnValue,
+                                   const FunctionCallResult& result) {
+    const size_t messageSize = std::min(result.errorMessage.size(), MAX_STRING_SIZE);
+    const size_t valueSize = std::min(result.returnValue.size(), MAX_VARIABLE_VALUE_SIZE);
+    const bool hasReturnValue = result.success && returnValue.present;
+    const size_t totalSize = 1 + 8 + 1 + 4 + 2 + messageSize +
+                             (hasReturnValue ? FUNCTION_TLV_HEADER_SIZE + valueSize : 0);
+    if (totalSize > MAX_MESSAGE_SIZE) {
+        sendError(ErrorCode::InternalError, "InvokeEx response too large");
+        return;
+    }
+    std::vector<uint8_t> raw(totalSize);
+    BufWriter writer(raw.data(), raw.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::InvokeExResp));
+    writer.putU64(requestId);
+    writer.putU8(result.success ? 0 : 1);
+    writer.putU32(result.success ? 0 : static_cast<uint32_t>(result.error));
+    writer.putStr16(result.errorMessage.data(), messageSize);
+    if (hasReturnValue) {
+        encodeFunctionTlv(writer, 0, returnValue.type,
+                          result.returnValue.data(), valueSize);
+    }
+    if (writer.ok()) sendRaw(raw.data(), writer.pos);
+}
+
+void Session::sendRegisterFunctionsResp(uint32_t count, bool success) {
+    uint8_t buffer[1 + 4 + 1];
+    BufWriter writer(buffer, sizeof(buffer));
+    writer.putU8(static_cast<uint8_t>(MessageType::RegisterFunctionsResp));
+    writer.putU32(count);
+    writer.putU8(success ? 0 : 1);
+    if (writer.ok()) sendRaw(buffer, writer.pos);
 }
 
 void Session::sendInputStreamResponse(MessageType type, uint32_t streamId, bool success) {

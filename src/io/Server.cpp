@@ -118,6 +118,38 @@ void Server::publishLog(LogSeverity severity, std::string_view component,
     }
 }
 
+bool Server::callPeerFunction(std::string_view functionName,
+                              const std::vector<FunctionArgument>& arguments,
+                              uint64_t deadlineUs,
+                              Session::InvokeResultFn callback) {
+    std::shared_ptr<Session> target;
+    uint64_t functionId = 0;
+    {
+        std::lock_guard<std::mutex> lock(sessionsMutex_);
+        for (const auto& info : sessions_) {
+            if (!info.session->isRunning()) continue;
+            if (auto id = info.session->findPeerFunctionId(functionName)) {
+                target = info.session;
+                functionId = *id;
+                break;
+            }
+        }
+    }
+    return target &&
+           target->callPeer(functionId, arguments, deadlineUs, std::move(callback));
+}
+
+std::vector<std::pair<std::string, uint64_t>> Server::peerFunctions() const {
+    std::vector<std::pair<std::string, uint64_t>> out;
+    std::lock_guard<std::mutex> lock(sessionsMutex_);
+    for (const auto& info : sessions_) {
+        for (const auto& descriptor : info.session->peerFunctions()) {
+            out.emplace_back(descriptor.name, descriptor.id);
+        }
+    }
+    return out;
+}
+
 void Server::acceptLoop() {
     while (running_.load(std::memory_order_relaxed)) {
         cleanupFinishedSessions();

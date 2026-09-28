@@ -27,11 +27,17 @@
 #include "tether/io/RingStreamSource.hpp"
 #include <cstdint>
 #include <cstddef>
+#include <condition_variable>
 #include <functional>
 #include <vector>
 #include <atomic>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <thread>
 
 namespace tether { namespace io {
 
@@ -109,6 +115,49 @@ public:
     void publishLog(LogSeverity severity, std::string_view component,
                     std::string_view message, std::string_view location = {});
 
+    // ---- Peer (client-hosted) function invocation ----
+
+    /// Outcome of a callPeer() invocation.  Wire results are delivered on
+    /// the session worker thread; deadline expiries on the sweep thread.
+    /// `timedOut` distinguishes a locally expired deadline from a
+    /// peer-reported failure; a late InvokeExResp arriving after expiry
+    /// is dropped without invoking the callback twice.
+    struct InvokeResult {
+        uint64_t   requestId  = 0;
+        uint64_t   functionId = 0;
+        bool       success    = false;
+        bool       timedOut   = false;
+        ErrorCode  error      = ErrorCode::None;
+        std::string errorMessage;
+        bool       hasReturnValue = false;
+        ValueType  returnType = ValueType::Binary;
+        std::vector<uint8_t> returnValue;
+        /// Send-to-completion time; includes timeout value for timedOut.
+        uint64_t   rttUs      = 0;
+    };
+    using InvokeResultFn = std::function<void(const InvokeResult&)>;
+
+    /// Invoke a function the client published via RegisterFunctionsReq.
+    /// `deadlineUs` bounds the wait in getTimestampUs_() units; 0 waits
+    /// forever.  Returns false when the pending table is full
+    /// (MAX_PENDING_INVOKES) or the transport send fails.  Safe to call
+    /// from any thread; multiple calls may be outstanding concurrently
+    /// (pipelining).
+    bool callPeer(uint64_t functionId,
+                  const std::vector<FunctionArgument>& arguments,
+                  uint64_t deadlineUs,
+                  InvokeResultFn callback);
+
+    /// Copy of the catalog the client published via RegisterFunctionsReq.
+    /// Safe to call from any thread.
+    std::vector<FunctionDescriptor> peerFunctions() const;
+
+    /// Registered id for `name`, or nullopt when no peer function matches.
+    std::optional<uint64_t> findPeerFunctionId(std::string_view name) const;
+
+    /// Number of InvokeEx calls currently awaiting a response.
+    size_t pendingInvokeCount() const;
+
 private:
     // ---- Message deframing ----
     void feedSlipData(const uint8_t* data, size_t len);
@@ -139,6 +188,9 @@ private:
     void handleCreateInputStreamReq(const uint8_t* body, size_t len);
     void handleInputStreamData(const uint8_t* body, size_t len);
     void handleCloseInputStreamReq(const uint8_t* body, size_t len);
+    void handleInvokeExReq(const uint8_t* body, size_t len);
+    void handleInvokeExResp(const uint8_t* body, size_t len);
+    void handleRegisterFunctionsReq(const uint8_t* body, size_t len);
 
     // ---- Response senders ----
     bool sendRaw(const uint8_t* data, size_t len);
@@ -153,7 +205,21 @@ private:
     void sendLogData(const LogRecord& record);
     void sendFunctionCallResponse(uint64_t functionId, const FunctionReturn& returnValue,
                                   const FunctionCallResult& result);
+    void sendInvokeExResponse(uint64_t requestId, const FunctionReturn& returnValue,
+                              const FunctionCallResult& result);
     void sendInputStreamResponse(MessageType type, uint32_t streamId, bool success);
+    void sendRegisterFunctionsResp(uint32_t count, bool success);
+
+    // ---- Peer invocation internals ----
+    /// Deadline-enforcement thread: sleeps until the earliest pending
+    /// deadline (or a catalog/pending change), then sweeps.  Required
+    /// because expiry must not depend on wire traffic waking run().
+    void invokeSweepLoop();
+    /// Fail and remove all pending InvokeEx calls whose deadline passed.
+    /// Callbacks fire outside invokeMutex_.
+    void sweepInvokeDeadlines();
+    /// Complete every pending call with an error (session teardown).
+    void finishPendingInvokes();
 
     // ---- Streaming internals ----
     void buildCollectPlan();
@@ -231,6 +297,30 @@ private:
     };
     std::vector<InputStreamState> inputStreams_;
     uint32_t nextInputStreamId_ = 1;
+
+    // ==== Peer (client-registered) function catalog ====
+    /// Written by the session worker on RegisterFunctionsReq; read by
+    /// applications through peerFunctions()/findPeerFunctionId() from
+    /// other threads.
+    std::vector<FunctionDescriptor> peerFunctions_;
+    mutable std::mutex peerFunctionsMutex_;
+
+    // ==== Outbound peer invocation ====
+    struct PendingInvoke {
+        uint64_t functionId   = 0;
+        uint64_t sentAtUs     = 0;
+        uint64_t deadlineAtUs = 0;    ///< 0 = no deadline
+        InvokeResultFn callback;
+    };
+    /// request_id → pending call.  Written by callPeer() on application
+    /// threads and by the worker in handleInvokeExResp/sweeps.
+    std::map<uint64_t, PendingInvoke> pendingInvokes_;
+    mutable std::mutex invokeMutex_;
+    uint64_t nextInvokeRequestId_ = 1;
+    /// Deadline enforcement thread + wakeup for newly inserted pendings.
+    std::thread invokeSweepThread_;
+    std::condition_variable invokeSweepCv_;
+    std::atomic<bool> sweepStop_{false};
 
     // ==== Ring-buffered streaming ====
     /// Sources registered by the server; consulted in bindRingSource().

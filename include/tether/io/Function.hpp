@@ -362,4 +362,299 @@ private:
     const FunctionEntry* function_ = nullptr;
 };
 
+// ---------------------------------------------------------------------------
+// Peer function descriptors + symmetric invocation
+// ---------------------------------------------------------------------------
+
+/// A function signature as carried on the wire — the unit of
+/// RegisterFunctionsReq and the entry format of ListFunctionsResp.
+/// Unlike FunctionEntry it has no callback: invoking a peer function is a
+/// remote call, not a local one.
+struct FunctionDescriptor {
+    uint64_t id = 0;
+    std::string name;
+    std::string description;
+    std::string group;
+    std::vector<FunctionParameter> parameters;
+    FunctionReturn returnValue;
+    std::map<std::string, std::string> metadata;
+};
+
+/// Parse `argumentCount` positional argument TLVs from `reader`, validate
+/// them against the signature, materialize defaults for omitted optional
+/// arguments, invoke the callback, and validate the return value.
+/// Shared by the CallFunctionReq and InvokeExReq handlers on both ends so
+/// request semantics stay identical; the caller picks the wire-level
+/// error representation for result.success == false.
+inline FunctionCallResult invokeFunctionChecked(const FunctionView& function,
+                                                uint32_t argumentCount,
+                                                BufReader& reader) {
+    FunctionCallResult result;
+    const auto fail = [&result](const char* message) {
+        result.error = ErrorCode::FunctionInvocationError;
+        result.errorMessage = message;
+        return result;
+    };
+    if (argumentCount > function.parameterCount()) {
+        return fail("Too many function arguments");
+    }
+
+    std::vector<FunctionArgument> supplied(function.parameterCount());
+    std::vector<bool> seen(function.parameterCount(), false);
+    for (uint32_t index = 0; index < argumentCount; ++index) {
+        FunctionArgument argument;
+        if (!decodeFunctionTlv(reader, argument) ||
+            argument.position >= function.parameterCount()) {
+            return fail("Invalid function argument TLV");
+        }
+        const auto position = static_cast<size_t>(argument.position);
+        const auto& parameter = function.parameters()[position];
+        if (seen[position] || argument.type != parameter.type) {
+            return fail("Wrong or duplicate function argument");
+        }
+        if (parameter.valueDescriptor &&
+            !validateValuePayload(*parameter.valueDescriptor, argument.value.data(),
+                                  argument.value.size())) {
+            return fail("Invalid aggregate function argument");
+        }
+        const auto fixedSize = valueTypeSize(parameter.type);
+        if ((fixedSize != 0 && argument.value.size() != fixedSize) ||
+            (parameter.maxValueSize != 0 && argument.value.size() > parameter.maxValueSize)) {
+            return fail("Invalid function argument size");
+        }
+        supplied[position] = std::move(argument);
+        seen[position] = true;
+    }
+    if (!reader.ok() || reader.remaining() != 0) {
+        return fail("Trailing function call data");
+    }
+
+    for (size_t position = 0; position < function.parameterCount(); ++position) {
+        const auto& parameter = function.parameters()[position];
+        if (seen[position]) continue;
+        if (!parameter.optional || !parameter.hasDefault) {
+            return fail("Missing required function argument");
+        }
+        auto& argument = supplied[position];
+        argument.position = static_cast<uint32_t>(position);
+        argument.type = parameter.type;
+        argument.value = parameter.defaultValue;
+        argument.provided = false;
+        if (parameter.valueDescriptor &&
+            !validateValuePayload(*parameter.valueDescriptor, argument.value.data(),
+                                  argument.value.size())) {
+            return fail("Invalid default function argument");
+        }
+        if (parameter.maxValueSize != 0 && argument.value.size() > parameter.maxValueSize) {
+            return fail("Invalid default function argument");
+        }
+    }
+
+    result = function.invoke(supplied);
+    if (!result.success) return result;
+
+    const auto& returnValue = function.returnValue();
+    const size_t fixedSize = returnValue.present ? valueTypeSize(returnValue.type) : 0;
+    const bool validReturn =
+        (returnValue.present && fixedSize != 0 &&
+         result.returnValue.size() == fixedSize) ||
+        (returnValue.present && fixedSize == 0 &&
+         result.returnValue.size() <=
+             (returnValue.maxValueSize != 0 ? returnValue.maxValueSize
+                                            : MAX_VARIABLE_VALUE_SIZE)) ||
+        (!returnValue.present && result.returnValue.empty());
+    const bool validAggregateReturn =
+        !returnValue.valueDescriptor ||
+        validateValuePayload(*returnValue.valueDescriptor, result.returnValue.data(),
+                             result.returnValue.size());
+    const bool withinReturnLimit =
+        returnValue.maxValueSize == 0 ||
+        result.returnValue.size() <= returnValue.maxValueSize;
+    if (!validReturn || !validAggregateReturn || !withinReturnLimit) {
+        result.success = false;
+        result.error = ErrorCode::FunctionInvocationError;
+        result.errorMessage = "Invalid function return value";
+        result.returnValue.clear();
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Function descriptor wire codec
+// ---------------------------------------------------------------------------
+//
+// Layout (identical to one ListFunctionsResp entry):
+//   [id U64][name str16][description str16][group str16]
+//   [param_count U32] × {
+//     [name str16][description str16][type U8][flags U8]
+//     [enum_ref U64][struct_ref U64][max_value_size U32]
+//     [has_descriptor U8]([descriptor_len U32][descriptor])
+//     [default_len varint][default]                      — if flags&HasDefault
+//     [metadata_count U32]([key str16][value str16])*
+//   }
+//   [has_return U8](same field set as a parameter, minus defaults)
+//   [metadata_count U32]([key str16][value str16])*
+
+namespace detail {
+
+inline bool encodeWireValueDescriptor(BufWriter& w,
+                                      const std::shared_ptr<const ValueDescriptor>& descriptor) {
+    if (!descriptor) {
+        w.putU8(0);
+        return w.ok();
+    }
+    w.putU8(1);
+    size_t size = 0;
+    if (!valueDescriptorWireSize(*descriptor, size) || size > UINT32_MAX) return false;
+    w.putU32(static_cast<uint32_t>(size));
+    return encodeValueDescriptor(w, *descriptor);
+}
+
+inline bool decodeWireValueDescriptor(BufReader& r,
+                                      std::shared_ptr<const ValueDescriptor>& descriptor) {
+    descriptor.reset();
+    if (r.getU8() == 0) return r.ok();
+    const uint32_t size = r.getU32();
+    const uint8_t* bytes = r.getBytes(size);
+    if (!r.ok()) return false;
+    BufReader sub(bytes, size);
+    auto parsed = std::make_shared<ValueDescriptor>();
+    if (!decodeValueDescriptor(sub, *parsed) || sub.remaining() != 0) return false;
+    descriptor = std::move(parsed);
+    return true;
+}
+
+inline bool encodeWireMetadata(BufWriter& w,
+                               const std::map<std::string, std::string>& metadata) {
+    if (metadata.size() > MAX_COLLECTION_COUNT) return false;
+    w.putU32(static_cast<uint32_t>(metadata.size()));
+    for (const auto& [key, value] : metadata) {
+        if (key.size() > MAX_STRING_SIZE || value.size() > MAX_STRING_SIZE) return false;
+        w.putStr16(key.c_str(), key.size());
+        w.putStr16(value.c_str(), value.size());
+    }
+    return w.ok();
+}
+
+inline bool decodeWireMetadata(BufReader& r,
+                               std::map<std::string, std::string>& metadata) {
+    metadata.clear();
+    const uint32_t count = r.getU32();
+    if (!r.ok() || count > MAX_COLLECTION_COUNT) return false;
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint16_t keyLen = r.getU16();
+        const uint8_t* key = r.getBytes(keyLen);
+        const uint16_t valueLen = r.getU16();
+        const uint8_t* value = r.getBytes(valueLen);
+        if (!r.ok()) return false;
+        metadata.emplace(
+            std::string(reinterpret_cast<const char*>(key), keyLen),
+            std::string(reinterpret_cast<const char*>(value), valueLen));
+    }
+    return true;
+}
+
+inline bool encodeWireString(BufWriter& w, std::string_view value) {
+    if (value.size() > MAX_STRING_SIZE) return false;
+    w.putStr16(value.data(), value.size());
+    return w.ok();
+}
+
+inline bool decodeWireString(BufReader& r, std::string& out) {
+    const uint16_t len = r.getU16();
+    const uint8_t* bytes = r.getBytes(len);
+    if (!r.ok()) return false;
+    out.assign(reinterpret_cast<const char*>(bytes), len);
+    return true;
+}
+
+} // namespace detail
+
+/// Encode a function descriptor in the ListFunctionsResp entry format.
+inline bool encodeFunctionDescriptor(BufWriter& w, const FunctionView& function) {
+    if (function.parameterCount() > MAX_COLLECTION_COUNT) return false;
+    w.putU64(function.id());
+    detail::encodeWireString(w, function.name());
+    detail::encodeWireString(w, function.description());
+    detail::encodeWireString(w, function.group());
+    w.putU32(static_cast<uint32_t>(function.parameterCount()));
+    for (const auto& parameter : function.parameters()) {
+        detail::encodeWireString(w, parameter.name);
+        detail::encodeWireString(w, parameter.description);
+        w.putU8(static_cast<uint8_t>(parameter.type));
+        w.putU8(parameter.flags());
+        w.putU64(parameter.enumReference);
+        w.putU64(parameter.structReference);
+        w.putU32(parameter.maxValueSize);
+        if (!detail::encodeWireValueDescriptor(w, parameter.valueDescriptor)) return false;
+        if (parameter.hasDefault) {
+            w.putVarint(static_cast<uint32_t>(parameter.defaultValue.size()));
+            w.putBytes(parameter.defaultValue.data(), parameter.defaultValue.size());
+        }
+        if (!detail::encodeWireMetadata(w, parameter.metadata)) return false;
+    }
+    const auto& result = function.returnValue();
+    w.putU8(result.present ? 1 : 0);
+    if (result.present) {
+        detail::encodeWireString(w, result.name);
+        detail::encodeWireString(w, result.description);
+        w.putU8(static_cast<uint8_t>(result.type));
+        w.putU8((result.enumReference != 0 ? FunctionParameterFlags::HasEnum : 0) |
+                (result.structReference != 0 ? FunctionParameterFlags::HasStruct : 0));
+        w.putU64(result.enumReference);
+        w.putU64(result.structReference);
+        w.putU32(result.maxValueSize);
+        if (!detail::encodeWireValueDescriptor(w, result.valueDescriptor)) return false;
+        if (!detail::encodeWireMetadata(w, result.metadata)) return false;
+    }
+    return detail::encodeWireMetadata(w, function.metadata()) && w.ok();
+}
+
+/// Decode a descriptor produced by encodeFunctionDescriptor.
+inline bool decodeFunctionDescriptor(BufReader& r, FunctionDescriptor& out) {
+    out = {};
+    out.id = r.getU64();
+    if (!detail::decodeWireString(r, out.name) ||
+        !detail::decodeWireString(r, out.description) ||
+        !detail::decodeWireString(r, out.group)) return false;
+    const uint32_t parameterCount = r.getU32();
+    if (!r.ok() || parameterCount > MAX_COLLECTION_COUNT) return false;
+    out.parameters.resize(parameterCount);
+    for (auto& parameter : out.parameters) {
+        if (!detail::decodeWireString(r, parameter.name) ||
+            !detail::decodeWireString(r, parameter.description)) return false;
+        parameter.type = static_cast<ValueType>(r.getU8());
+        const uint8_t flags = r.getU8();
+        parameter.optional = (flags & FunctionParameterFlags::Optional) != 0;
+        parameter.hasDefault = (flags & FunctionParameterFlags::HasDefault) != 0;
+        parameter.enumReference = r.getU64();
+        parameter.structReference = r.getU64();
+        parameter.maxValueSize = r.getU32();
+        if (!r.ok() ||
+            !detail::decodeWireValueDescriptor(r, parameter.valueDescriptor)) return false;
+        if (parameter.hasDefault) {
+            const uint32_t length = r.getVarint();
+            const uint8_t* bytes = r.getBytes(length);
+            if (!r.ok() || length > MAX_VARIABLE_VALUE_SIZE) return false;
+            parameter.defaultValue.assign(bytes, bytes + length);
+        }
+        if (!detail::decodeWireMetadata(r, parameter.metadata)) return false;
+    }
+    out.returnValue.present = r.getU8() != 0;
+    if (out.returnValue.present) {
+        auto& result = out.returnValue;
+        if (!detail::decodeWireString(r, result.name) ||
+            !detail::decodeWireString(r, result.description)) return false;
+        result.type = static_cast<ValueType>(r.getU8());
+        r.getU8();  // flags are derived from the decoded fields
+        result.enumReference = r.getU64();
+        result.structReference = r.getU64();
+        result.maxValueSize = r.getU32();
+        if (!r.ok() ||
+            !detail::decodeWireValueDescriptor(r, result.valueDescriptor)) return false;
+        if (!detail::decodeWireMetadata(r, result.metadata)) return false;
+    }
+    return detail::decodeWireMetadata(r, out.metadata) && r.ok();
+}
+
 } // namespace tether::io
