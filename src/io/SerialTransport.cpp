@@ -142,7 +142,9 @@ size_t PosixSerialDriver::write(const uint8_t* data, size_t len) {
 size_t PosixSerialDriver::read(uint8_t* buf, size_t maxLen, uint32_t timeoutMs) {
     if (fd_ < 0) return 0;
 
-    if (timeoutMs > 0) {
+    // timeoutMs == 0 is a non-blocking poll per the Transport contract;
+    // select() with a zero timeval implements both cases.
+    {
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(fd_, &readfds);
