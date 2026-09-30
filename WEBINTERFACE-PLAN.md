@@ -29,9 +29,9 @@ starting point:
   dynamically discovered jog panel.
 - The jog panel already uses an important safety pattern: continuous motion is
   lease based and stops server-side when the lease expires.
-- `tether::io::Protocol` already defines much more than the browser consumes:
-  metadata, logs, snapshots, feature exchange, catalog updates, datalogging,
-  thresholds, structured values, streams, and correlated invocation.
+- The V6 protocol now supplies a mandatory schema bootstrap, catalog epochs and
+  slots, recursive typed values, streams, snapshots, logs, datalogging,
+  thresholds, and correlated function invocation.
 - Tether already has useful backend building blocks: EtherCAT slave state and
   AL-status access in `tether::UI::MasterEntityProvider`, SDO access through
   `SdoRegisterReader`, `SlaveSupervisor` recovery, CiA 402 drive state and
@@ -278,98 +278,55 @@ server must decide whether a role can preempt an owner and record the reason.
 
 ### Protocol-first decision
 
-Do **not** begin by adding a large set of `Machine*` message types. The
-existing Tether IO primitives are sufficient for a first, useful CiA 402 web
-profile:
+Do **not** add a large family of `Machine*` messages or a second JSON control
+plane. V6 already provides the missing generic contract: every application
+value is bound to a schema key, digest, and epoch-local catalog slot.
 
-- `FeatureExchange` advertises support and profile/schema versions.
-- The catalog, metadata, `Struct`/`Array` values, and `DescribeStruct` describe
-  known resources and their fixed semantic data types.
-- `Get`, snapshots, and configured streams carry descriptor/state/telemetry
-  values.
-- `InvokeEx` gives a correlated, deadline-bounded request/response path for
-  commands. A command UUID included in its typed argument supplies
-  application-level idempotency across reconnects.
-- Functions return typed receipts; a long-running action returns an operation
-  ID, whose progress is exposed as a normal signal or snapshot field.
-- `SubscribeLog`, datalogging, and thresholds support generic diagnostics and
-  capture immediately.
+The browser must first complete `ClientHello`, `ServerHello`,
+`SchemaRequest`, `SchemaDefinition`, and `SchemaCommit`. It then validates the
+schema graph and uses catalog slots to decode parameters, signals, stream
+rows, snapshots, and function arguments/returns. A stale epoch, unknown slot,
+digest mismatch, or invalid payload is a visible data-integrity failure, never
+a cue to guess a layout.
 
-Accordingly, the first deliverable is a **documented IO profile** named
-`machine.cia402.v1`, plus C++ and TypeScript codecs/adapters for its fixed
-types. It uses well-known catalog entries and functions, but it remains fully
-negotiated through the existing `FeatureExchange` message. For example, a
-server advertises:
+`machine.cia402.v1` is now documented in `docs/IOProtocolMachineProfile.md`.
+Its availability is discovered from the negotiated catalog: required profile
+entries and schema roots must be present. Optional surfaces are available only
+when their typed catalog entries are present. This eliminates V5 feature flags,
+`DescribeStruct`, raw `Binary` layouts, and per-type TypeScript wire codecs.
 
-| Feature | Type | Meaning |
+#### Initial profile surface
+
+| Profile member | V6 representation | UI purpose |
 | --- | --- | --- |
-| `profile.machine.cia402.v1` | `Bool` | This session supplies the required profile surface |
-| `profile.machine.cia402.version` | `U32` | Highest compatible profile schema version |
-| `profile.machine.cia402.motion` | `Bool` | Motion command surface is present |
-| `profile.machine.cia402.authority` | `Bool` | Control-authority lease surface is present |
-| `profile.machine.cia402.events` | `Bool` | Event journal/query surface is present |
-| `profile.machine.cia402.capture` | `Bool` | Server-side capture surface is present |
+| `machine.descriptor` | Negotiated schema signal | Machine, topology, axes, groups, units, capabilities, and limits. |
+| `machine.snapshot` | Negotiated schema signal/stream | Coherent machine state for Overview and fleet health. |
+| `drive.<stable-id>.snapshot` | `DriveSnapshotV1` packed schema signal/stream | Drive row and detail drawer. |
+| `machine.events.cursor`, `.read` | `U64` signal and typed function | Bounded event-history pagination. |
+| `machine.command` | Typed function request/receipt | Validated, correlated command dispatch. |
+| `machine.operation.<id>.snapshot` | Negotiated schema signal | Long-running command progress and outcome. |
+| `machine.authority.*` | Typed functions and schema signal | Server-owned control lease. |
+| `machine.config.*`, `machine.capture.*` | Typed functions, parameters, and signals | Commissioning and evidence workflows. |
 
-The profile defines stable names, metadata keys, binary layout/schema names,
-units, lifecycle rules, and UI semantics. Those definitions are the contract;
-the catalog is the delivery mechanism. A server that only supplies a subset
-advertises only the corresponding features, and the UI omits or makes those
-capabilities read-only.
+The descriptor and snapshots are application-owned coherent copies, not
+browser-side joins of scalar values. The cyclic task publishes them through a
+bounded handoff. High-rate plots use individually streamed schema-backed
+signals so an operator view does not carry unnecessary fleet payloads.
 
-#### Initial profile surface using existing primitives
+#### Profile schemas
 
-| Profile member | Existing primitive | Fixed meaning and UI primitive |
-| --- | --- | --- |
-| `machine.descriptor` | Readable variable `Struct` or `Binary` signal | Versioned machine/topology/axis/group descriptor; initializes navigation, labels, units, and fleet ordering |
-| `machine.snapshot` | Readable `Struct` signal plus stream/snapshot | Coherent aggregate machine state: source timestamp, topology revision, snapshot sequence, EtherCAT health, safety/interlock summary, and per-drive snapshots; drives Overview and fleet table |
-| `drive.<stable-id>.snapshot` | Readable/streamable `Struct` signal | Coherent drive state: AL/DS402 state, mode, status/fault bits, target/demand/actual values, following error, quality, and `state_generation`; drives a row and detail drawer |
-| `machine.events.cursor` and `machine.events.read` | Scalar signal plus typed function | Monotonic event cursor plus paged event journal; drives alarms/timeline with polling or on-change refresh initially |
-| `machine.command` | `InvokeEx` function with typed request/receipt | Validates a named action against targets, authority, expected generation, bounds, and interlocks; drives command sheet/result timeline |
-| `machine.operation.<id>.snapshot` | Signal or aggregate snapshot field | Long-running homing/move/recovery progress, outcome, timestamps, blockers, and audit ID; drives progress UI |
-| `machine.authority.acquire`, `.renew`, `.release`, `.snapshot` | Typed functions plus signal | Server-owned control lease; drives the ownership banner and command enablement |
-| `machine.config.*` | Typed functions and parameters | Stage/validate/diff/apply/readback/rollback of configuration; drives commissioning workflow |
-| `machine.capture.*` | Typed functions plus current datalog messages | Capture profile/configuration/status/artifact metadata; drives trends and support bundles |
+Use V6 schema graphs for `MachineDescriptorV1`, `MachineSnapshotV1`,
+`DriveSnapshotV1`, `CommandRequestV1`, `CommandReceiptV1`,
+`OperationSnapshotV1`, `EventRecordV1`, `AuthoritySnapshotV1`, and
+`ConfigurationChangeSetV1`. Their keys, digests, revisions, field keys,
+restrictions, and optionality are the wire contract; names and metadata are
+annotations only.
 
-The descriptor and snapshots should be application-owned coherent copies, not
-UI-side joins of many independently read scalar entries. The cyclic task
-publishes snapshots through a bounded handoff; the IO session reads that copy.
-High-rate plotting remains on individually streamed scalar signals so an
-operator view does not carry unnecessary fleet payloads.
-
-#### Fixed types to specify first
-
-Define these in a shared C++ header and TypeScript codec module before adding
-screens. They can be registered as `Struct` values with a schema name/version
-in metadata, or as an explicitly versioned compact `Binary` codec where a
-variable-length nested collection is impractical. Do not use ad-hoc JSON in
-the real-time state path.
-
-1. `MachineDescriptorV1`: machine identity, descriptor revision, axes, drive
-  stable IDs, EtherCAT locations, group/kinematic membership, units,
-  capabilities, limits, and profile feature flags.
-2. `MachineSnapshotV1`: source time, `snapshot_sequence`, descriptor revision,
-  cyclic/DC/WKC health, safety/interlock summary, authority summary, alarm
-  summary, and references to per-drive state.
-3. `DriveSnapshotV1`: AL state/code, DS402 state, decoded status flags,
-  requested/displayed mode, target/demand/actual position/velocity/torque,
-  following error, fault/warning data, homing state, quality flags, and
-  `state_generation`.
-4. `CommandRequestV1`: command UUID, command kind, target stable IDs,
-  authority lease ID/epoch, expected state generation(s), deadline, bounded
-  motion/configuration arguments, and optional confirmation context.
-5. `CommandReceiptV1`: accepted/rejected/completed state, structured blocker
-  list, operation ID, accepted time, outcome, current generations, audit ID,
-  and a human-readable summary. A rejected business command is a valid typed
-  receipt, not a transport failure.
-6. `OperationSnapshotV1`: operation ID/kind, targets, lifecycle state,
-  progress, cancellability, stop reason, result, and audit correlation.
-7. `EventRecordV1`: monotonic event ID, source timestamp, severity, lifecycle,
-  resource IDs, typed cause/code, actor, command/operation/audit references,
-  and display text.
-8. `AuthoritySnapshotV1`: scope, owner identity/role display name, lease ID,
-  epoch, expiry, policy, and transfer/preemption state.
-9. `ConfigurationChangeSetV1`: base revision, individual typed edits,
-  validation results, apply/readback/rollback status, and provenance.
+`DriveSnapshotV1` is already implemented as a negotiated 64-byte packed
+schema in `CiA402Profile.hpp`. The TypeScript client should use one generic V6
+schema-value decoder plus a profile adapter that maps validated field keys to
+domain view models. Add a hand-written decoder only when a measured hot path
+needs it, and keep its schema-root/digest verification in front of that path.
 
 #### Metadata vocabulary to specify first
 
@@ -415,33 +372,30 @@ without polling, ambiguity, or unbounded overhead:
   and an operation that was already terminal.
 4. **Authenticated raw IO sessions.** Add a protocol authentication handshake
   only if Tether IO must be safely exposed over raw TCP/serial without an
-  authenticated WebSocket/transport boundary. Keep credentials out of generic
-  feature metadata and document replay protection and session binding.
+  authenticated WebSocket/transport boundary. Keep credentials out of catalog
+  metadata and document replay protection and session binding.
 
-### Required implementation and documentation before UI expansion
+### Required implementation before UI expansion
 
-1. Add `docs/IOProtocolMachineProfile.md` describing the `machine.cia402.v1`
-  catalog contract, feature keys, fixed type schemas, metadata vocabulary,
-  state/command/event lifecycle, compatibility, and error/blocker rules.
-2. Update `docs/IOProtocolWireFormat.md` with current feature exchange,
-  metadata, struct, snapshot, stream, log, datalog, and `InvokeEx` behavior;
-  explicitly state that an `InvokeEx` deadline is presently an initiator-side
-  bound, not a server-side cancellation guarantee.
-3. Add shared C++ codecs/types for the fixed profile values and matching strict
-  TypeScript codecs, including size/version validation and unknown-field
-  compatibility behavior.
+1. Keep `docs/IOProtocolMachineProfile.md` aligned with the published profile
+   schemas and catalog entries.
+2. Complete the TypeScript V6 bootstrap, manifest cache, schema-graph
+   validation, slot resolution, and generic recursive value decoder.
+3. Add a profile adapter that validates required `machine.cia402.v1` schemas
+   and maps their stable field keys into UI domain values.
 4. Add an application adapter that publishes a simulated multi-axis CiA 402
-  descriptor/snapshot/event/command surface through the existing `Registry`.
-5. Extend `TetherIOClient` to negotiate features, preserve metadata, decode
-  structs, send `InvokeEx`, and surface logs/snapshots/catalog changes.
-6. Test the profile in C++ and TypeScript for malformed data, schema mismatch,
-  stale generation rejection, duplicate command UUID, lease expiry, event
-  cursor gap, and reconnect/resynchronization.
+   descriptor/snapshot/event/command surface through the `Registry` and its
+   installed `SchemaCatalog`.
+5. Extend the browser client with metadata retention, functions, snapshots,
+   logs, and catalog/schema-update resynchronization.
+6. Test malformed bootstrap/schema/value data, stale epochs, digest mismatch,
+   stale generation rejection, duplicate command UUID, lease expiry, event
+   cursor gaps, and reconnect resynchronization.
 
 ### Contract strategy
 
-Retain the binary Tether IO WebSocket transport. Complete support for its
-existing generic messages, then deliver `machine.cia402.v1` as the negotiated
+Retain the binary Tether IO WebSocket transport. Complete V6 schema negotiation
+and generic decoding, then deliver `machine.cia402.v1` as the schema-negotiated
 profile defined above. Do not create a second, competing REST or ad-hoc JSON
 control plane for live operation.
 
@@ -450,8 +404,8 @@ state and commands use the authenticated Tether IO session.
 
 Use a small typed domain profile instead of encoding every action as a
 stringly named registry function. The first implementation maps these
-contracts onto catalog entries, structs, streams, and `InvokeEx`; it does not
-require new message IDs:
+contracts onto schema-backed catalog entries, streams, and typed functions; it
+does not require new message IDs:
 
 | Capability | Required contract |
 | --- | --- |
@@ -493,25 +447,20 @@ commands to the appropriate non-real-time executor with explicit deadlines.
 
 ### Generic IO completion
 
-The following is valuable even before `machine.fleet.v1` is deployed:
+The browser foundation is now smaller and more reusable:
 
-1. Decode and retain catalog metadata, value descriptors, enum/struct
-   descriptors, units, ranges, scale, precision, access policy, display hints,
-   and danger classification.
-2. Implement `GetMetadata`, snapshot requests, `FeatureExchange`, and
-   `CatalogChanged` handling in `TetherIOClient`.
-3. Implement log subscribe/unsubscribe with severity/component/text filters and
-   sequence/timestamp handling.
-4. Implement datalog configure/status and threshold configuration with server
-   validation feedback.
-5. Add structured/array/enum/binary inspectors and editors where descriptors
-   make the edit safe; remove the current F64-only parameter limitation.
-6. Provide function invocation only from a typed form generated from parameter
-   descriptors, with return-value display, timeout, error, confirmation, and
-   role metadata. Never expose an opaque universal "run" button for hazardous
-   functions.
-7. Add request correlation, cancellation/deadline display, reconnect policy,
-   sequence gap detection, and visible data freshness.
+1. Cache V6 manifests and validated schema graphs by key/digest; invalidate
+  epoch-bound slots on a schema update or reconnect.
+2. Retain catalog metadata alongside the resolved schema reference, units,
+  ranges, precision, access policy, display hints, and danger classification.
+3. Generate generic viewers/editors from schema kinds and field restrictions;
+  use `AllowedValues`, `LengthRange`, `NumericRange`, and enum/oneof keys
+  rather than local layout assumptions.
+4. Invoke functions from their schema-backed parameters and returns, with
+  confirmation, timeout, error, and role metadata. Never expose an opaque
+  universal "run" button for hazardous functions.
+5. Implement logs, snapshots, datalogging, thresholds, correlation, visible
+  freshness, reconnect, and catalog/schema-update resynchronization.
 
 ## Frontend Architecture Plan
 
@@ -521,8 +470,8 @@ Keep TypeScript and web components unless a later implementation spike proves
 that component composition, state synchronization, or testing materially needs
 a framework. First remove the single `main.ts` orchestration bottleneck:
 
-- `transport/`: binary protocol, authentication/session, reconnect,
-  subscriptions, correlation, feature negotiation.
+- `transport/`: binary protocol, authentication/session, V6 bootstrap,
+  manifest/schema cache, reconnect, subscriptions, and correlation.
 - `domain/`: typed DTOs, units, value formatting, machine/drive command
   clients, permission and freshness helpers.
 - `stores/`: connection/session, machine snapshot, authority, alarms, command
@@ -668,20 +617,23 @@ action, including the server-side preconditions and failure response.
 
 ### Phase 1 - Protocol and domain foundation
 
-13. Add existing protocol capability negotiation to the TypeScript client.
-14. Decode and expose all catalog metadata and value descriptors.
-15. Add typed TypeScript representations for units, ranges, enum values,
-    quality, timestamps, descriptors, and error envelopes.
+13. Implement the V6 bootstrap, manifest cache, schema-definition validation,
+  epoch/slot resolution, and schema-update invalidation in the TypeScript
+  client.
+14. Decode and expose catalog metadata plus recursive schema values and field
+  restrictions.
+15. Add typed TypeScript representations for schema nodes, units, ranges, enum
+  and oneof keys, quality, timestamps, and error envelopes.
 16. Implement generic metadata, snapshot, log, datalog, threshold, and
-    catalog-change protocol paths with unit tests.
+  catalog/schema-update paths with unit tests.
 17. Add correlation IDs, deadline propagation, request cancellation, and
     idempotent retry semantics to the browser client.
 18. Implement reconnect with explicit stale/fresh transitions rather than
     silently reconnecting in the background.
-19. Define and document the `machine.cia402.v1` profile mapping on existing
-  entries, structs, streams, functions, and feature keys.
-20. Add profile-schema, protocol-version, and feature-version compatibility
-  tests.
+19. Implement the documented `machine.cia402.v1` profile adapter over
+    negotiated catalog entries, schemas, streams, and typed functions.
+20. Add schema-digest, profile-schema, protocol-version, and catalog-epoch
+    compatibility tests.
 21. Define stable resource identifiers independent of EtherCAT position.
 22. Define descriptor, snapshot, delta, event, command, command-progress,
     authority, capture, and configuration DTOs.
@@ -691,9 +643,9 @@ action, including the server-side preconditions and failure response.
   queues, and backpressure behavior; defer new message IDs until the
   vertical-slice measurements prove them necessary.
 
-**Exit gate:** a test client can discover a simulated machine, subscribe to a
-fleet snapshot stream, detect a gap, and resynchronize without raw registry
-name knowledge.
+**Exit gate:** a test client completes V6 negotiation, discovers a simulated
+machine from the profile catalog, subscribes to schema-validated fleet state,
+detects a gap, and resynchronizes without raw registry-layout knowledge.
 
 ### Phase 2 - Backend services and simulated fleet
 
@@ -916,12 +868,13 @@ Track outcomes instead of screen count:
 
 1. Select the first representative multi-axis CiA 402 machine and write the
    Phase 0 command/safety matrix with its controls owner.
-2. Implement a small `machine.fleet.v1` protocol and simulated four-axis
-   backend spike, including read-only snapshots and a deliberately rejected
-   command with structured blockers.
+2. Implement the existing `machine.cia402.v1` profile on a simulated four-axis
+  backend, including V6 schema installation, read-only snapshots, and a
+  deliberately rejected command with structured blockers.
 3. Build only the Overview, fleet table, and drive detail drawer against that
    spike. Validate the data model and workflow with operators before styling or
    adding a layout builder.
-4. In parallel, finish metadata/feature/log handling in the generic Tether IO
-   browser client so current applications gain value immediately and the new
-   domain UI has a robust transport foundation.
+4. In parallel, finish V6 schema negotiation, metadata/log handling, and
+  generic schema-value rendering in the browser client so current
+  applications gain value immediately and the new domain UI has a robust
+  transport foundation.
