@@ -351,7 +351,11 @@ void Session::handleSchemaRequest(const uint8_t* body, size_t len) {
         const auto slot = schemaCatalog_->slotFor(requested);
         const auto* entry = slot ? schemaCatalog_->describe(*slot) : nullptr;
         const auto* node = slot ? schemaCatalog_->resolve(schemaEpoch_, *slot) : nullptr;
-        if (!entry || !node || entry->ref != requested) {
+        if (!node && schemaCatalog_->graph()) {
+            node = schemaCatalog_->graph()->find(requested.key);
+            if (node && computeSchemaDigest(*node) != requested.digest) node = nullptr;
+        }
+        if ((!node) || (entry && entry->ref != requested)) {
             uint8_t buffer[128]{};
             BufWriter writer(buffer, sizeof(buffer));
             writer.putU8(static_cast<uint8_t>(MessageType::SchemaReject));
