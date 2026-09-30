@@ -761,11 +761,16 @@ TetherIOClient::configureStream(const std::vector<uint64_t>& entryIds,
     cr.specId = r.getU32();
     uint32_t count = r.getU32();
     uint32_t rowSize = r.getU32();
+    const uint64_t epoch = r.getU64();
+    if (epoch != schemaEpoch_) {
+        return std::unexpected(makeError(ErrorCode::InvalidMessage, "Stale stream schema epoch"));
+    }
     (void)rowSize;
     for (uint32_t i = 0; i < count && r.ok(); ++i) {
         ClientStreamLayoutEntry e;
         e.id = r.getU64();
-        e.type = static_cast<ValueType>(r.getU8());
+        e.schemaEpoch = epoch;
+        e.schemaSlot = r.getU32();
         e.valueSize = r.getU8();
         cr.layout.push_back(std::move(e));
     }
