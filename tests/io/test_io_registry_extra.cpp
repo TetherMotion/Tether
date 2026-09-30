@@ -99,6 +99,25 @@ TEST(IORegistryExtra, DefaultEntryViewIsFalse) {
     EXPECT_FALSE(static_cast<bool>(v));
 }
 
+TEST(IORegistryExtra, EntryViewExposesSchemaReferenceAndSlot) {
+    Registry registry;
+    ParamEntry entry;
+    entry.id = 77;
+    entry.name = "schema_param";
+    entry.schema.key[0] = 7;
+    entry.schema.digest[0] = 9;
+    entry.schemaSlot = 12;
+    entry.valueType = ValueType::U32;
+    entry.readFn = [](void* value) { *static_cast<uint32_t*>(value) = 1; };
+    ASSERT_TRUE(registry.addParam(std::move(entry)));
+
+    const auto view = registry.find(77);
+    ASSERT_TRUE(static_cast<bool>(view));
+    EXPECT_EQ(view.schemaRef().key[0], 7);
+    EXPECT_EQ(view.schemaRef().digest[0], 9);
+    EXPECT_EQ(view.schemaSlot(), 12U);
+}
+
 TEST(IORegistryExtra, EntryViewAsParamAsSignal) {
     Registry reg;
     uint32_t val = 42;

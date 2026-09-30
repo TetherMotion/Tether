@@ -22,6 +22,7 @@
 #pragma once
 
 #include "tether/io/Protocol.hpp"
+#include "tether/io/Schema.hpp"
 #include "tether/io/BinaryStruct.hpp"
 #include "tether/io/Function.hpp"
 #include <cstdint>
@@ -69,6 +70,8 @@ struct ParamEntry {
     std::map<std::string, std::string> metadata;
     const StructDescriptor* structDesc = nullptr;  ///< Optional struct layout
     uint8_t     extraFlags = 0;     ///< Additional EntryFlags bits (e.g. NoStream)
+    SchemaRef   schema;
+    uint32_t    schemaSlot = 0;
 
     uint8_t valueSize() const { return valueTypeSize(valueType); }
     bool isVariableLength() const { return tether::io::isVariableLength(valueType) || valueType == ValueType::Struct; }
@@ -100,6 +103,8 @@ struct SignalEntry {
     std::map<std::string, std::string> metadata;
     const StructDescriptor* structDesc = nullptr;
     uint8_t     extraFlags = 0;     ///< Additional EntryFlags bits (e.g. NoStream)
+    SchemaRef   schema;
+    uint32_t    schemaSlot = 0;
 
     uint8_t valueSize() const { return valueTypeSize(valueType); }
     bool isVariableLength() const { return tether::io::isVariableLength(valueType) || valueType == ValueType::Struct; }
@@ -128,6 +133,8 @@ public:
     uint64_t id() const { return param_ ? param_->id : signal_->id; }
     ValueType valueType() const { return param_ ? param_->valueType : signal_->valueType; }
     uint8_t valueSize() const { return param_ ? param_->valueSize() : signal_->valueSize(); }
+    const SchemaRef& schemaRef() const { return param_ ? param_->schema : signal_->schema; }
+    uint32_t schemaSlot() const { return param_ ? param_->schemaSlot : signal_->schemaSlot; }
     bool writable() const { return param_ ? param_->writable() : false; }
     uint8_t flags() const { return param_ ? param_->flags() : signal_->flags(); }
     bool isVariableLength() const { return param_ ? param_->isVariableLength() : signal_->isVariableLength(); }
