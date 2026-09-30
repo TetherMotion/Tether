@@ -40,8 +40,9 @@ enum class SchemaKind : uint8_t {
     FixedArray = 6,
     DynamicArray = 7,
     Optional = 8,
-    Variant = 9,
-    Alias = 10,
+    Map = 9,
+    OneOf = 10,
+    Alias = 11,
 };
 
 enum class StructEncoding : uint8_t {
@@ -50,11 +51,35 @@ enum class StructEncoding : uint8_t {
 };
 
 namespace SchemaFieldFlags {
-inline constexpr uint32_t Required = 1U << 0;
+inline constexpr uint32_t Required = 0U;
 inline constexpr uint32_t ReadOnly = 1U << 1;
 inline constexpr uint32_t Deprecated = 1U << 2;
 inline constexpr uint32_t Secret = 1U << 3;
+inline constexpr uint32_t WriteOnly = 1U << 4;
+inline constexpr uint32_t NoStream = 1U << 5;
 }
+
+enum class FieldPresence : uint8_t {
+    Required = 1,
+    Optional = 2,
+};
+
+enum class RestrictionKind : uint8_t {
+    NumericRange = 1,
+    MultipleOf = 2,
+    Finite = 3,
+    LengthRange = 4,
+    AllowedValues = 5,
+    AllowedMembers = 6,
+    UniqueElements = 7,
+};
+
+struct SchemaRestriction {
+    RestrictionKind kind = RestrictionKind::LengthRange;
+    std::vector<uint8_t> payload;
+
+    friend bool operator==(const SchemaRestriction&, const SchemaRestriction&) = default;
+};
 
 struct SchemaLimits {
     uint32_t maxGraphNodes = 1024;
@@ -68,9 +93,18 @@ struct SchemaLimits {
 struct SchemaField {
     uint32_t key = 0;
     uint32_t flags = 0;
+    FieldPresence presence = FieldPresence::Required;
     SchemaRef schema;
     std::string name;
     std::string description;
+    std::vector<SchemaRestriction> restrictions;
+    std::vector<uint8_t> defaultValue;
+
+        SchemaField() = default;
+        SchemaField(uint32_t fieldKey, uint32_t fieldFlags, SchemaRef fieldSchema,
+                                std::string fieldName, std::string fieldDescription)
+                : key(fieldKey), flags(fieldFlags), schema(std::move(fieldSchema)),
+                    name(std::move(fieldName)), description(std::move(fieldDescription)) {}
 };
 
 struct SchemaNode {
@@ -89,9 +123,11 @@ struct SchemaNode {
     uint32_t maxCount = 0;
     StructEncoding structEncoding = StructEncoding::Tagged;
     std::optional<SchemaRef> element;
+    std::optional<SchemaRef> mapKey;
+    std::optional<SchemaRef> mapValue;
     std::optional<SchemaRef> target;
     std::vector<SchemaField> fields;
-    std::vector<std::pair<uint32_t, SchemaRef>> variants;
+    std::vector<std::pair<uint32_t, SchemaRef>> oneOfMembers;
 
     SchemaRef ref() const { return SchemaRef{key, {}}; }
 };
@@ -163,6 +199,10 @@ inline std::vector<uint8_t> canonicalDescriptor(const SchemaNode& node) {
     detail::appendU8(out, static_cast<uint8_t>(node.structEncoding));
     detail::appendU8(out, node.element.has_value());
     if (node.element) detail::appendRef(out, *node.element);
+    detail::appendU8(out, node.mapKey.has_value());
+    if (node.mapKey) detail::appendRef(out, *node.mapKey);
+    detail::appendU8(out, node.mapValue.has_value());
+    if (node.mapValue) detail::appendRef(out, *node.mapValue);
     detail::appendU8(out, node.target.has_value());
     if (node.target) detail::appendRef(out, *node.target);
 
@@ -170,13 +210,22 @@ inline std::vector<uint8_t> canonicalDescriptor(const SchemaNode& node) {
     for (const auto& field : node.fields) {
         detail::appendU32(out, field.key);
         detail::appendU32(out, field.flags);
+        detail::appendU8(out, static_cast<uint8_t>(field.presence));
         detail::appendRef(out, field.schema);
         detail::appendString(out, field.name);
         detail::appendString(out, field.description);
+        detail::appendU32(out, static_cast<uint32_t>(field.restrictions.size()));
+        for (const auto& restriction : field.restrictions) {
+            detail::appendU8(out, static_cast<uint8_t>(restriction.kind));
+            detail::appendU32(out, static_cast<uint32_t>(restriction.payload.size()));
+            detail::appendBytes(out, restriction.payload.data(), restriction.payload.size());
+        }
+        detail::appendU32(out, static_cast<uint32_t>(field.defaultValue.size()));
+        detail::appendBytes(out, field.defaultValue.data(), field.defaultValue.size());
     }
 
-    detail::appendU32(out, static_cast<uint32_t>(node.variants.size()));
-    for (const auto& [key, ref] : node.variants) {
+    detail::appendU32(out, static_cast<uint32_t>(node.oneOfMembers.size()));
+    for (const auto& [key, ref] : node.oneOfMembers) {
         detail::appendU32(out, key);
         detail::appendRef(out, ref);
     }
@@ -188,38 +237,60 @@ inline bool isFixedScalar(ValueType type) {
     return valueTypeSize(type) != 0;
 }
 
+inline bool isMapKeyKind(SchemaKind kind) {
+    return kind == SchemaKind::Scalar || kind == SchemaKind::String ||
+           kind == SchemaKind::Bytes || kind == SchemaKind::Enum || kind == SchemaKind::Alias;
+}
+
+inline bool isKnownRestriction(RestrictionKind kind) {
+    return static_cast<uint8_t>(kind) >= static_cast<uint8_t>(RestrictionKind::NumericRange) &&
+           static_cast<uint8_t>(kind) <= static_cast<uint8_t>(RestrictionKind::UniqueElements);
+}
+
 inline SchemaValidationResult validateNodeShape(const SchemaNode& node, const SchemaLimits& limits) {
     if (node.key == SchemaKey{}) return SchemaValidationResult::failure("schema key must not be zero");
     if (node.kind == SchemaKind::Struct && node.fields.size() > limits.maxFields)
         return SchemaValidationResult::failure("too many struct fields");
-    if ((node.kind == SchemaKind::String || node.kind == SchemaKind::Bytes) && node.maxBytes > limits.maxStringBytes)
-        return SchemaValidationResult::failure("variable value exceeds byte limit");
     if (node.kind == SchemaKind::FixedArray && node.fixedCount > limits.maxArrayElements)
         return SchemaValidationResult::failure("fixed array exceeds element limit");
-    if (node.kind == SchemaKind::DynamicArray &&
-        (node.minCount > node.maxCount || node.maxCount > limits.maxArrayElements))
+    if ((node.kind == SchemaKind::DynamicArray || node.kind == SchemaKind::Map) &&
+        (node.maxCount != 0 && (node.minCount > node.maxCount || node.maxCount > limits.maxArrayElements)))
         return SchemaValidationResult::failure("invalid dynamic array bounds");
+    if (node.kind == SchemaKind::Map && (!node.mapKey || !node.mapValue))
+        return SchemaValidationResult::failure("map requires key and value schemas");
+    if (node.kind == SchemaKind::OneOf && node.oneOfMembers.empty())
+        return SchemaValidationResult::failure("oneof requires at least one member");
     if (node.kind == SchemaKind::Struct) {
         uint32_t previous = 0;
         for (const auto& field : node.fields) {
             if (field.key == 0 || field.key <= previous)
                 return SchemaValidationResult::failure("struct fields must have increasing non-zero keys");
             previous = field.key;
-            if ((field.flags & SchemaFieldFlags::Required) && field.schema.key == SchemaKey{})
-                return SchemaValidationResult::failure("required field has no schema");
+            if (field.schema.key == SchemaKey{} ||
+                (field.presence != FieldPresence::Required && field.presence != FieldPresence::Optional))
+                return SchemaValidationResult::failure("field has invalid presence or schema");
+            uint8_t previousRestriction = 0;
+            for (const auto& restriction : field.restrictions) {
+                const auto kind = static_cast<uint8_t>(restriction.kind);
+                if (!isKnownRestriction(restriction.kind) || kind <= previousRestriction)
+                    return SchemaValidationResult::failure("field restrictions must be known and sorted");
+                previousRestriction = kind;
+            }
+            if (field.presence == FieldPresence::Required && !field.defaultValue.empty())
+                return SchemaValidationResult::failure("required field cannot have a default");
         }
         if (node.structEncoding == StructEncoding::Packed) {
             for (const auto& field : node.fields) {
-                if (!(field.flags & SchemaFieldFlags::Required))
+                if (field.presence != FieldPresence::Required || !field.defaultValue.empty())
                     return SchemaValidationResult::failure("packed struct fields must be required");
             }
         }
     }
-    uint32_t previousVariant = 0;
-    for (const auto& [key, ref] : node.variants) {
-        if (key == 0 || key <= previousVariant || ref.key == SchemaKey{})
-            return SchemaValidationResult::failure("variant arms must have increasing non-zero keys");
-        previousVariant = key;
+    uint32_t previousMember = 0;
+    for (const auto& [key, ref] : node.oneOfMembers) {
+        if (key == 0 || key <= previousMember || ref.key == SchemaKey{})
+            return SchemaValidationResult::failure("oneof members must have increasing non-zero keys");
+        previousMember = key;
     }
     return SchemaValidationResult::success();
 }
@@ -229,12 +300,17 @@ inline SchemaValidationResult validateReferences(const SchemaGraph& graph, const
         return graph.find(ref.key) != nullptr;
     };
     if (node.element && !require(*node.element)) return SchemaValidationResult::failure("missing element schema");
+    if (node.mapKey && !require(*node.mapKey)) return SchemaValidationResult::failure("missing map key schema");
+    if (node.mapValue && !require(*node.mapValue)) return SchemaValidationResult::failure("missing map value schema");
+    if (node.kind == SchemaKind::Map && node.mapKey &&
+        !isMapKeyKind(graph.find(node.mapKey->key)->kind))
+        return SchemaValidationResult::failure("map key schema is not map-key eligible");
     if (node.target && !require(*node.target)) return SchemaValidationResult::failure("missing target schema");
     for (const auto& field : node.fields) {
         if (!require(field.schema)) return SchemaValidationResult::failure("missing field schema", {field.key});
     }
-    for (const auto& [key, ref] : node.variants) {
-        if (!require(ref)) return SchemaValidationResult::failure("missing variant schema", {key});
+    for (const auto& [key, ref] : node.oneOfMembers) {
+        if (!require(ref)) return SchemaValidationResult::failure("missing oneof member schema", {key});
     }
     return SchemaValidationResult::success();
 }
@@ -279,7 +355,7 @@ inline SchemaValidationResult validateSchemaGraph(const SchemaGraph& graph,
             auto result = visitRef(field.schema);
             if (!result) return result;
         }
-        for (const auto& [key, ref] : node.variants) {
+        for (const auto& [key, ref] : node.oneOfMembers) {
             (void)key;
             auto result = visitRef(ref);
             if (!result) return result;
@@ -326,7 +402,7 @@ inline std::optional<size_t> fixedSchemaSize(const SchemaGraph& graph,
                     size_t total = 0;
                     result = total;
                     for (const auto& field : node->fields) {
-                        if (!(field.flags & SchemaFieldFlags::Required)) {
+                        if (field.presence != FieldPresence::Required) {
                             result = std::nullopt;
                             break;
                         }

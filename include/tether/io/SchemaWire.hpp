@@ -71,18 +71,31 @@ inline void encodeSchemaDefinition(BufWriter& writer, const SchemaNode& node) {
     writer.putU8(static_cast<uint8_t>(node.structEncoding));
     writer.putU8(node.element.has_value() ? 1 : 0);
     if (node.element) putRef(writer, *node.element);
+    writer.putU8(node.mapKey.has_value() ? 1 : 0);
+    if (node.mapKey) putRef(writer, *node.mapKey);
+    writer.putU8(node.mapValue.has_value() ? 1 : 0);
+    if (node.mapValue) putRef(writer, *node.mapValue);
     writer.putU8(node.target.has_value() ? 1 : 0);
     if (node.target) putRef(writer, *node.target);
     writer.putU32(static_cast<uint32_t>(node.fields.size()));
     for (const auto& field : node.fields) {
         writer.putU32(field.key);
         writer.putU32(field.flags);
+        writer.putU8(static_cast<uint8_t>(field.presence));
         putRef(writer, field.schema);
         putString(writer, field.name);
         putString(writer, field.description);
+        writer.putU32(static_cast<uint32_t>(field.restrictions.size()));
+        for (const auto& restriction : field.restrictions) {
+            writer.putU8(static_cast<uint8_t>(restriction.kind));
+            writer.putU32(static_cast<uint32_t>(restriction.payload.size()));
+            writer.putBytes(restriction.payload.data(), restriction.payload.size());
+        }
+        writer.putU32(static_cast<uint32_t>(field.defaultValue.size()));
+        writer.putBytes(field.defaultValue.data(), field.defaultValue.size());
     }
-    writer.putU32(static_cast<uint32_t>(node.variants.size()));
-    for (const auto& [key, ref] : node.variants) {
+    writer.putU32(static_cast<uint32_t>(node.oneOfMembers.size()));
+    for (const auto& [key, ref] : node.oneOfMembers) {
         writer.putU32(key);
         putRef(writer, ref);
     }
@@ -120,6 +133,20 @@ inline bool decodeSchemaDefinition(BufReader& reader, SchemaNode& node,
         if (!getRef(reader, value)) return false;
         decoded.element = value;
     }
+    const uint8_t hasMapKey = reader.getU8();
+    if (hasMapKey > 1) return false;
+    if (hasMapKey) {
+        SchemaRef value;
+        if (!getRef(reader, value)) return false;
+        decoded.mapKey = value;
+    }
+    const uint8_t hasMapValue = reader.getU8();
+    if (hasMapValue > 1) return false;
+    if (hasMapValue) {
+        SchemaRef value;
+        if (!getRef(reader, value)) return false;
+        decoded.mapValue = value;
+    }
     const uint8_t hasTarget = reader.getU8();
     if (hasTarget > 1) return false;
     if (hasTarget) {
@@ -134,19 +161,36 @@ inline bool decodeSchemaDefinition(BufReader& reader, SchemaNode& node,
         SchemaField field;
         field.key = reader.getU32();
         field.flags = reader.getU32();
+        field.presence = static_cast<FieldPresence>(reader.getU8());
         if (!getRef(reader, field.schema) ||
             !getString(reader, field.name, limits.maxStringBytes) ||
             !getString(reader, field.description, limits.maxStringBytes)) return false;
+        const uint32_t restrictionCount = reader.getU32();
+        if (!reader.ok() || restrictionCount > limits.maxFields) return false;
+        field.restrictions.reserve(restrictionCount);
+        for (uint32_t restrictionIndex = 0; restrictionIndex < restrictionCount; ++restrictionIndex) {
+            SchemaRestriction restriction;
+            restriction.kind = static_cast<RestrictionKind>(reader.getU8());
+            const uint32_t payloadSize = reader.getU32();
+            if (!reader.ok() || payloadSize > reader.remaining()) return false;
+            const auto* payload = reader.getBytes(payloadSize);
+            restriction.payload.assign(payload, payload + payloadSize);
+            field.restrictions.push_back(std::move(restriction));
+        }
+        const uint32_t defaultSize = reader.getU32();
+        if (!reader.ok() || defaultSize > reader.remaining()) return false;
+        const auto* defaultValue = reader.getBytes(defaultSize);
+        field.defaultValue.assign(defaultValue, defaultValue + defaultSize);
         decoded.fields.push_back(std::move(field));
     }
     const uint32_t variantCount = reader.getU32();
     if (!reader.ok() || variantCount > limits.maxFields) return false;
-    decoded.variants.reserve(variantCount);
+    decoded.oneOfMembers.reserve(variantCount);
     for (uint32_t index = 0; index < variantCount; ++index) {
         const uint32_t key = reader.getU32();
         SchemaRef value;
         if (!getRef(reader, value)) return false;
-        decoded.variants.emplace_back(key, value);
+        decoded.oneOfMembers.emplace_back(key, value);
     }
     if (!reader.ok()) return false;
     node = std::move(decoded);
