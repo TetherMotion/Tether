@@ -45,6 +45,8 @@ class IOClientIntegrationTest : public ::testing::Test {
 protected:
     Registry registry_;
     FeatureSet features_;
+    SchemaGraph schemaGraph_;
+    SchemaCatalog schemaCatalog_;
     std::unique_ptr<Session> session_;
     std::unique_ptr<TetherIOClient> client_;
     std::thread sessionThread_;
@@ -172,6 +174,19 @@ protected:
             };
             registry_.addFunction(std::move(fn));
         }
+
+        SchemaNode scalar;
+        scalar.key[0] = 1;
+        scalar.kind = SchemaKind::Scalar;
+        scalar.scalarType = ValueType::U32;
+        SchemaNode record;
+        record.key[0] = 2;
+        record.kind = SchemaKind::Struct;
+        record.fields.push_back({1, 0, SchemaRef{scalar.key, computeSchemaDigest(scalar)},
+                                 "value", "Nested value"});
+        schemaGraph_ = SchemaGraph{{scalar, record}};
+        ASSERT_TRUE(schemaCatalog_.install(
+            schemaGraph_, {{SchemaRef{record.key, computeSchemaDigest(record)}, record.revision}}));
         // Function: no-op (no args, no return)
         {
             FunctionEntry fn;
@@ -216,7 +231,7 @@ protected:
                         std::chrono::steady_clock::now().time_since_epoch()).count());
             },
             noopLogFn, &features_, nullptr, nullptr, nullptr, nullptr, nullptr,
-            Framing::None);
+            Framing::None, nullptr, &schemaCatalog_);
 
         sessionThread_ = std::thread([this] { session_->run(); });
 
