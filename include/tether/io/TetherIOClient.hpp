@@ -54,7 +54,8 @@ struct ClientFunctionParam {
     std::string name;
     std::string description;
     ValueType type = ValueType::F64;
-    uint8_t flags = 0;
+    uint32_t schemaSlot = 0;
+    uint32_t flags = 0;
     uint32_t maxValueSize = 0;
     bool hasDefault = false;
     std::vector<uint8_t> defaultValue;
@@ -63,12 +64,14 @@ struct ClientFunctionParam {
 /// Function entry returned by listFunctions.
 struct ClientFunctionEntry {
     uint64_t id = 0;
+    uint64_t schemaEpoch = 0;
     std::string name;
     std::string description;
     std::string group;
     std::vector<ClientFunctionParam> parameters;
     bool hasReturnValue = false;
     ValueType returnType = ValueType::F64;
+    uint32_t returnSchemaSlot = 0;
 };
 
 /// Stream layout entry from ConfigureStreamAck.
