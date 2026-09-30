@@ -415,9 +415,9 @@ void Session::handleListParamsReq(const uint8_t* body, size_t len) {
     auto entries = registry_.paramPage(offset, maxCount);
     uint32_t total = registry_.paramCount();
 
-    size_t sz = 1 + 4 + 4 + 4;
+    size_t sz = 1 + 4 + 4 + 4 + 8;
     for (const auto& e : entries) {
-        sz += 8 + 1 + 1 + 1 + 2 + e.name().size() + 2 + e.description().size() + 2 + e.group().size();
+        sz += 8 + 4 + 4 + 2 + e.name().size() + 2 + e.description().size() + 2 + e.group().size();
     }
     if (txRawBuf_.size() < sz) txRawBuf_.resize(sz);
 
@@ -426,11 +426,11 @@ void Session::handleListParamsReq(const uint8_t* body, size_t len) {
     w.putU32(total);
     w.putU32(offset);
     w.putU32(static_cast<uint32_t>(entries.size()));
+    w.putU64(schemaEpoch_);
     for (const auto& e : entries) {
         w.putU64(e.id());
-        w.putU8(static_cast<uint8_t>(e.valueType()));
-        w.putU8(e.valueSize());
-        w.putU8(e.flags());
+        w.putU32(e.schemaSlot());
+        w.putU32(e.flags());
         w.putStr16(e.name().data(), e.name().size());
         w.putStr16(e.description().data(), e.description().size());
         w.putStr16(e.group().data(), e.group().size());
@@ -448,9 +448,9 @@ void Session::handleListSignalsReq(const uint8_t* body, size_t len) {
     auto entries = registry_.signalPage(offset, maxCount);
     uint32_t total = registry_.signalCount();
 
-    size_t sz = 1 + 4 + 4 + 4;
+    size_t sz = 1 + 4 + 4 + 4 + 8;
     for (const auto& e : entries) {
-        sz += 8 + 1 + 1 + 1 + 2 + e.name().size() + 2 + e.description().size() + 2 + e.group().size();
+        sz += 8 + 4 + 4 + 2 + e.name().size() + 2 + e.description().size() + 2 + e.group().size();
     }
     if (txRawBuf_.size() < sz) txRawBuf_.resize(sz);
 
@@ -459,11 +459,11 @@ void Session::handleListSignalsReq(const uint8_t* body, size_t len) {
     w.putU32(total);
     w.putU32(offset);
     w.putU32(static_cast<uint32_t>(entries.size()));
+    w.putU64(schemaEpoch_);
     for (const auto& e : entries) {
         w.putU64(e.id());
-        w.putU8(static_cast<uint8_t>(e.valueType()));
-        w.putU8(e.valueSize());
-        w.putU8(e.flags());
+        w.putU32(e.schemaSlot());
+        w.putU32(e.flags());
         w.putStr16(e.name().data(), e.name().size());
         w.putStr16(e.description().data(), e.description().size());
         w.putStr16(e.group().data(), e.group().size());

@@ -165,6 +165,7 @@ TetherIOClient::TetherIOClient(std::unique_ptr<ITransport> transport,
         transport_->close();
         return;
     }
+    schemaEpoch_ = serverHello.epoch;
 
     if (!serverHello.schemas.empty()) {
         SchemaGraph graph;
@@ -429,6 +430,10 @@ TetherIOClient::listParams(uint32_t offset, uint32_t maxCount) {
     uint32_t total = r.getU32();
     uint32_t returnedOffset = r.getU32();
     uint32_t count = r.getU32();
+    const uint64_t epoch = r.getU64();
+    if (epoch != schemaEpoch_) {
+        return std::unexpected(makeError(ErrorCode::InvalidMessage, "Stale catalog epoch"));
+    }
     (void)total; (void)returnedOffset;
 
     std::vector<ClientCatalogEntry> entries;
@@ -436,9 +441,9 @@ TetherIOClient::listParams(uint32_t offset, uint32_t maxCount) {
     for (uint32_t i = 0; i < count && r.ok(); ++i) {
         ClientCatalogEntry e;
         e.id = r.getU64();
-        e.type = static_cast<ValueType>(r.getU8());
-        e.valueSize = r.getU8();
-        e.flags = r.getU8();
+        e.schemaEpoch = epoch;
+        e.schemaSlot = r.getU32();
+        e.flags = r.getU32();
         e.name = r.getString16();
         e.description = r.getString16();
         e.group = r.getString16();
@@ -523,6 +528,10 @@ TetherIOClient::listSignals(uint32_t offset, uint32_t maxCount) {
     uint32_t total = r.getU32();
     uint32_t returnedOffset = r.getU32();
     uint32_t count = r.getU32();
+    const uint64_t epoch = r.getU64();
+    if (epoch != schemaEpoch_) {
+        return std::unexpected(makeError(ErrorCode::InvalidMessage, "Stale catalog epoch"));
+    }
     (void)total; (void)returnedOffset;
 
     std::vector<ClientCatalogEntry> entries;
@@ -530,9 +539,9 @@ TetherIOClient::listSignals(uint32_t offset, uint32_t maxCount) {
     for (uint32_t i = 0; i < count && r.ok(); ++i) {
         ClientCatalogEntry e;
         e.id = r.getU64();
-        e.type = static_cast<ValueType>(r.getU8());
-        e.valueSize = r.getU8();
-        e.flags = r.getU8();
+        e.schemaEpoch = epoch;
+        e.schemaSlot = r.getU32();
+        e.flags = r.getU32();
         e.name = r.getString16();
         e.description = r.getString16();
         e.group = r.getString16();
