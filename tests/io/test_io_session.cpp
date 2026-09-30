@@ -189,17 +189,18 @@ TEST_F(SessionTest, GetParam) {
     BufReader r(resp.data(), resp.size());
     EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::GetParamResp));
     EXPECT_EQ(r.getU64(), 1u);
-    uint8_t vs = r.getU8();
-    EXPECT_EQ(vs, 8u);
+    uint32_t valueSize = r.getVarint();
+    EXPECT_EQ(valueSize, 8u);
     double val = r.getF64();
     EXPECT_DOUBLE_EQ(val, 3.14);
 }
 
 TEST_F(SessionTest, SetParam) {
-    uint8_t msg[17];
+    uint8_t msg[18];
     BufWriter w(msg, sizeof(msg));
     w.putU8(static_cast<uint8_t>(MessageType::SetParamReq));
     w.putU64(1);
+    w.putVarint(8);
     w.putF64(99.5);
 
     auto resp = sendAndReceive(msg, w.pos);
@@ -225,8 +226,8 @@ TEST_F(SessionTest, GetSignal) {
     BufReader r(resp.data(), resp.size());
     EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::GetSignalResp));
     EXPECT_EQ(r.getU64(), 2u);
-    uint8_t vs = r.getU8();
-    EXPECT_EQ(vs, 4u);
+    uint32_t valueSize = r.getVarint();
+    EXPECT_EQ(valueSize, 4u);
     uint32_t val;
     std::memcpy(&val, r.getBytes(4), 4);
     EXPECT_EQ(val, 42u);

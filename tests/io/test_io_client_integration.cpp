@@ -590,9 +590,10 @@ TEST_F(IOClientIntegrationTest, ListFunctionFields) {
     EXPECT_EQ(addFn->parameters.size(), 2u);
     EXPECT_EQ(addFn->parameters[0].name, "a");
     EXPECT_EQ(addFn->parameters[1].name, "b");
-    EXPECT_EQ(addFn->parameters[0].type, ValueType::U32);
+    EXPECT_EQ(addFn->schemaEpoch, 1u);
+    EXPECT_EQ(addFn->parameters[0].schemaSlot, 0u);
     EXPECT_TRUE(addFn->hasReturnValue);
-    EXPECT_EQ(addFn->returnType, ValueType::U32);
+    EXPECT_EQ(addFn->returnSchemaSlot, 0u);
 }
 
 TEST_F(IOClientIntegrationTest, ListFunctionWithDefaultParam) {

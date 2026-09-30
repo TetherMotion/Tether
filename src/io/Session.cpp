@@ -482,16 +482,16 @@ void Session::handleGetParamReq(const uint8_t* body, size_t len) {
 
     std::vector<uint8_t> value;
     uint8_t vs = entry.valueSize();
-    size_t sz = 1 + 8 + 1;
+    size_t sz = 1 + 8 + MAX_VARINT_SIZE;
     if (entry.isVariableLength()) {
         value.resize(entry.maxValueSize());
         const size_t actual = entry.readVar(value.data(), value.size());
         value.resize(actual);
-        sz += MAX_VARINT_SIZE + actual;
+        sz += actual;
     } else {
         value.resize(vs);
         entry.read(value.data());
-        sz += vs;
+        sz += value.size();
     }
     if (!validateCatalogValue(schemaCatalog_, entry, value.data(), value.size())) {
         sendError(ErrorCode::InternalError, "Registry produced an invalid schema value");
@@ -502,10 +502,7 @@ void Session::handleGetParamReq(const uint8_t* body, size_t len) {
     BufWriter w(txRawBuf_.data(), sz);
     w.putU8(static_cast<uint8_t>(MessageType::GetParamResp));
     w.putU64(id);
-    w.putU8(vs);
-    if (entry.isVariableLength()) {
-        w.putVarint(static_cast<uint32_t>(value.size()));
-    }
+    w.putVarint(static_cast<uint32_t>(value.size()));
     w.putBytes(value.data(), value.size());
 
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
@@ -521,28 +518,21 @@ void Session::handleSetParamReq(const uint8_t* body, size_t len) {
     if (!entry) { sendError(ErrorCode::InvalidId, "Parameter not found"); return; }
     if (!entry.writable()) { sendError(ErrorCode::NotWritable, "Not writable"); return; }
 
-    if (entry.isVariableLength()) {
-        uint32_t dataLen = r.getVarint();
-        if (!r.ok() || dataLen > entry.maxValueSize()) {
-            sendError(ErrorCode::InvalidMessage, "Invalid variable length"); return;
-        }
-        const uint8_t* data = r.getBytes(dataLen);
-        if (!r.ok()) { sendError(ErrorCode::InvalidMessage, "Value too short"); return; }
-        if (!validateCatalogValue(schemaCatalog_, entry, data, dataLen)) {
-            sendError(ErrorCode::InvalidMessage, "Value does not match schema");
-            return;
-        }
-        entry.writeVar(data, dataLen);
-    } else {
-        uint8_t vs = entry.valueSize();
-        const uint8_t* data = r.getBytes(vs);
-        if (!r.ok()) { sendError(ErrorCode::InvalidMessage, "Value too short"); return; }
-        if (!validateCatalogValue(schemaCatalog_, entry, data, vs)) {
-            sendError(ErrorCode::InvalidMessage, "Value does not match schema");
-            return;
-        }
-        entry.write(data);
+    const uint32_t dataLen = r.getVarint();
+    const uint32_t expectedSize = entry.valueSize();
+    if (!r.ok() || dataLen > MAX_VARIABLE_VALUE_SIZE ||
+        (entry.isVariableLength() && dataLen > entry.maxValueSize()) ||
+        (!entry.isVariableLength() && dataLen != expectedSize)) {
+        sendError(ErrorCode::InvalidMessage, "Invalid value length"); return;
     }
+    const uint8_t* data = r.getBytes(dataLen);
+    if (!r.ok() || r.remaining() != 0) { sendError(ErrorCode::InvalidMessage, "Value too short"); return; }
+    if (!validateCatalogValue(schemaCatalog_, entry, data, dataLen)) {
+        sendError(ErrorCode::InvalidMessage, "Value does not match schema");
+        return;
+    }
+    if (entry.isVariableLength()) entry.writeVar(data, dataLen);
+    else entry.write(data);
 
     uint8_t buf[9];
     BufWriter w(buf, sizeof(buf));
@@ -562,16 +552,16 @@ void Session::handleGetSignalReq(const uint8_t* body, size_t len) {
 
     std::vector<uint8_t> value;
     uint8_t vs = entry.valueSize();
-    size_t sz = 1 + 8 + 1;
+    size_t sz = 1 + 8 + MAX_VARINT_SIZE;
     if (entry.isVariableLength()) {
         value.resize(entry.maxValueSize());
         const size_t actual = entry.readVar(value.data(), value.size());
         value.resize(actual);
-        sz += MAX_VARINT_SIZE + actual;
+        sz += actual;
     } else {
         value.resize(vs);
         entry.read(value.data());
-        sz += vs;
+        sz += value.size();
     }
     if (!validateCatalogValue(schemaCatalog_, entry, value.data(), value.size())) {
         sendError(ErrorCode::InternalError, "Registry produced an invalid schema value");
@@ -582,10 +572,7 @@ void Session::handleGetSignalReq(const uint8_t* body, size_t len) {
     BufWriter w(txRawBuf_.data(), sz);
     w.putU8(static_cast<uint8_t>(MessageType::GetSignalResp));
     w.putU64(id);
-    w.putU8(vs);
-    if (entry.isVariableLength()) {
-        w.putVarint(static_cast<uint32_t>(value.size()));
-    }
+    w.putVarint(static_cast<uint32_t>(value.size()));
     w.putBytes(value.data(), value.size());
 
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);

@@ -469,11 +469,7 @@ TetherIOClient::getParam(uint64_t id) {
     r.getU8(); // type
     uint64_t respId = r.getU64();
     (void)respId;
-    uint8_t valueSize = r.getU8();
-    size_t actualSize = valueSize;
-    if (valueSize == 0) {
-        actualSize = r.getVarint();
-    }
+    size_t actualSize = r.getVarint();
     auto value = r.getBytes(actualSize);
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed GetParamResp"));
     return value;
@@ -486,6 +482,7 @@ TetherIOClient::setParam(uint64_t id, const void* value, uint8_t valueSize) {
     ClientBufWriter w(10 + valueSize);
     w.putU8(static_cast<uint8_t>(MessageType::SetParamReq));
     w.putU64(id);
+    w.putVarint(valueSize);
     w.putBytes(value, valueSize);
     auto payload = w.finish();
 
@@ -567,11 +564,7 @@ TetherIOClient::getSignal(uint64_t id) {
     r.getU8(); // type
     uint64_t respId = r.getU64();
     (void)respId;
-    uint8_t valueSize = r.getU8();
-    size_t actualSize = valueSize;
-    if (valueSize == 0) {
-        actualSize = r.getVarint();
-    }
+    size_t actualSize = r.getVarint();
     auto value = r.getBytes(actualSize);
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed GetSignalResp"));
     return value;
