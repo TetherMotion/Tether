@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tether/io/Protocol.hpp"
+#include "tether/io/Schema.hpp"
 #include "tether/io/BinaryStruct.hpp"
 
 #include <cstdint>
@@ -224,6 +225,17 @@ struct FunctionParameter {
     std::shared_ptr<const ValueDescriptor> valueDescriptor;
     uint32_t maxValueSize = 0;
     std::map<std::string, std::string> metadata;
+    SchemaRef schema;
+    uint32_t schemaSlot = 0;
+
+        FunctionParameter() = default;
+        FunctionParameter(std::string parameterName, std::string parameterDescription,
+                                            ValueType parameterType, bool parameterOptional = false,
+                                            bool parameterHasDefault = false,
+                                            std::vector<uint8_t> parameterDefaultValue = {})
+                : name(std::move(parameterName)), description(std::move(parameterDescription)),
+                    type(parameterType), optional(parameterOptional), hasDefault(parameterHasDefault),
+                    defaultValue(std::move(parameterDefaultValue)) {}
 
     uint8_t flags() const {
         uint8_t result = 0;
@@ -252,6 +264,8 @@ struct FunctionReturn {
     std::shared_ptr<const ValueDescriptor> valueDescriptor;
     uint32_t maxValueSize = 0;
     std::map<std::string, std::string> metadata;
+    SchemaRef schema;
+    uint32_t schemaSlot = 0;
 };
 
 struct FunctionArgument {
@@ -259,6 +273,8 @@ struct FunctionArgument {
     ValueType type = ValueType::Binary;
     std::vector<uint8_t> value;
     bool provided = false;
+    SchemaRef schema;
+    uint32_t schemaSlot = 0;
 };
 
 inline bool decodeFunctionTlv(BufReader& reader, FunctionArgument& argument) {
