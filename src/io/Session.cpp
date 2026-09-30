@@ -30,7 +30,8 @@ Session::Session(std::unique_ptr<ITransport> transport,
                  ReceiveBufferFactory encodedBufferFactory,
                  ReceiveBufferFactory decodedBufferFactory,
                  Framing framing,
-                 const std::vector<IRingStreamSource*>* ringSources)
+                 const std::vector<IRingStreamSource*>* ringSources,
+                 const SchemaCatalog* schemaCatalog)
     : transport_(std::move(transport))
     , registry_(registry)
     , getTimestampUs_(tsFn)
@@ -41,6 +42,7 @@ Session::Session(std::unique_ptr<ITransport> transport,
     , inputStreamDataFn_(std::move(inputStreamDataFn))
     , framing_(framing)
     , ringSources_(ringSources)
+    , schemaCatalog_(schemaCatalog)
     , slipRxBuf_(encodedBufferFactory ? encodedBufferFactory()
                                       : std::make_unique<DynamicReceiveBuffer>(
                                             DEFAULT_RECEIVE_BUFFER_CAPACITY,
@@ -268,6 +270,7 @@ void Session::onMessage(const uint8_t* data, size_t len) {
         case MessageType::SnapshotSignalsReq:  handleSnapshotSignalsReq(body, bodyLen); break;
         case MessageType::FeatureExchangeReq:  handleFeatureExchangeReq(body, bodyLen); break;
         case MessageType::ClientHello:         handleClientHello(body, bodyLen); break;
+        case MessageType::SchemaRequest:       handleSchemaRequest(body, bodyLen); break;
         case MessageType::SchemaCommit:        handleSchemaCommit(body, bodyLen); break;
         case MessageType::ConfigureDatalogReq: handleConfigureDatalogReq(body, bodyLen); break;
         case MessageType::DatalogStatusReq:    handleDatalogStatusReq(); break;
@@ -306,7 +309,9 @@ void Session::handleClientHello(const uint8_t* body, size_t len) {
 
     ServerHelloV6 response;
     response.selectedVersion = SCHEMA_PROTOCOL_VERSION;
-    response.epoch = 1;
+    response.epoch = schemaCatalog_ && schemaCatalog_->epoch() != 0
+        ? schemaCatalog_->epoch() : 1;
+    if (schemaCatalog_) response.schemas = schemaCatalog_->manifest();
     schemaEpoch_ = response.epoch;
     schemaHelloReceived_ = true;
     schemaCommitted_ = false;
@@ -316,6 +321,52 @@ void Session::handleClientHello(const uint8_t* body, size_t len) {
     writer.putU8(static_cast<uint8_t>(MessageType::ServerHello));
     encodeServerHelloV6(writer, response);
     if (writer.ok()) sendRaw(txRawBuf_.data(), writer.pos);
+}
+
+void Session::handleSchemaRequest(const uint8_t* body, size_t len) {
+    if (!schemaHelloReceived_) {
+        sendError(ErrorCode::InvalidMessage, "SchemaRequest before ClientHello");
+        return;
+    }
+    BufReader reader(body, len);
+    SchemaRequestV6 request;
+    if (!decodeSchemaRequestV6(reader, request) || reader.remaining() != 0 ||
+        request.epoch != schemaEpoch_) {
+        sendError(ErrorCode::InvalidMessage, "Invalid V6 SchemaRequest");
+        return;
+    }
+    if (!schemaCatalog_) {
+        if (!request.definitions.empty()) {
+            uint8_t buffer[128]{};
+            BufWriter writer(buffer, sizeof(buffer));
+            writer.putU8(static_cast<uint8_t>(MessageType::SchemaReject));
+            encodeSchemaRejectV6(writer, {SchemaRejectCode::MissingDependency,
+                                          "No schema catalog is available"});
+            if (writer.ok()) sendRaw(buffer, writer.pos);
+        }
+        return;
+    }
+
+    for (const auto& requested : request.definitions) {
+        const auto slot = schemaCatalog_->slotFor(requested);
+        const auto* entry = slot ? schemaCatalog_->describe(*slot) : nullptr;
+        const auto* node = slot ? schemaCatalog_->resolve(schemaEpoch_, *slot) : nullptr;
+        if (!entry || !node || entry->ref != requested) {
+            uint8_t buffer[128]{};
+            BufWriter writer(buffer, sizeof(buffer));
+            writer.putU8(static_cast<uint8_t>(MessageType::SchemaReject));
+            encodeSchemaRejectV6(writer, {SchemaRejectCode::MissingDependency,
+                                          "Requested schema is not in the catalog"});
+            if (writer.ok()) sendRaw(buffer, writer.pos);
+            continue;
+        }
+
+        if (txRawBuf_.size() < MAX_MESSAGE_SIZE) txRawBuf_.resize(MAX_MESSAGE_SIZE);
+        BufWriter writer(txRawBuf_.data(), txRawBuf_.size());
+        writer.putU8(static_cast<uint8_t>(MessageType::SchemaDefinition));
+        encodeSchemaDefinitionV6(writer, {schemaEpoch_, *node});
+        if (writer.ok()) sendRaw(txRawBuf_.data(), writer.pos);
+    }
 }
 
 void Session::handleSchemaCommit(const uint8_t* body, size_t len) {
