@@ -86,5 +86,39 @@ TEST(IOSchemaNegotiation, ManifestLimitIsEnforced) {
     EXPECT_FALSE(decodeClientHelloV6(reader, decoded, 1));
 }
 
+TEST(IOSchemaNegotiation, DefinitionAndUpdateRoundTrip) {
+    SchemaDefinitionV6 definition;
+    definition.epoch = 7;
+    definition.node.key[0] = 3;
+    definition.node.revision = 2;
+    definition.node.kind = SchemaKind::Bytes;
+    definition.node.maxBytes = 4096;
+
+    std::array<uint8_t, 512> bytes{};
+    BufWriter writer(bytes.data(), bytes.size());
+    encodeSchemaDefinitionV6(writer, definition);
+    ASSERT_TRUE(writer.ok());
+    BufReader reader(bytes.data(), writer.pos);
+    SchemaDefinitionV6 decoded;
+    ASSERT_TRUE(decodeSchemaDefinitionV6(reader, decoded));
+    EXPECT_EQ(decoded.epoch, definition.epoch);
+    EXPECT_EQ(decoded.node.key, definition.node.key);
+    EXPECT_EQ(decoded.node.kind, definition.node.kind);
+    EXPECT_EQ(decoded.node.maxBytes, definition.node.maxBytes);
+
+    SchemaUpdateV6 update;
+    update.epoch = 8;
+    update.schemas.push_back({SchemaRef{definition.node.key, {}}, definition.node.revision});
+    BufWriter updateWriter(bytes.data(), bytes.size());
+    encodeSchemaUpdateV6(updateWriter, update);
+    ASSERT_TRUE(updateWriter.ok());
+    BufReader updateReader(bytes.data(), updateWriter.pos);
+    SchemaUpdateV6 decodedUpdate;
+    ASSERT_TRUE(decodeSchemaUpdateV6(updateReader, decodedUpdate));
+    EXPECT_EQ(decodedUpdate.epoch, 8U);
+    ASSERT_EQ(decodedUpdate.schemas.size(), 1U);
+    EXPECT_EQ(decodedUpdate.schemas[0].revision, definition.node.revision);
+}
+
 } // namespace
 } // namespace tether::io
