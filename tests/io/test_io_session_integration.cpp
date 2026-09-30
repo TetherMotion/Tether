@@ -401,16 +401,17 @@ TEST_F(SessionIntegrationTest, GetParamF64) {
     BufReader r(resp.data(), resp.size());
     EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::GetParamResp));
     EXPECT_EQ(r.getU64(), 1u);
-    EXPECT_EQ(r.getU8(), 8u);
+    EXPECT_EQ(r.getVarint(), 8u);
     EXPECT_DOUBLE_EQ(r.getF64(), 3.14);
 }
 
 TEST_F(SessionIntegrationTest, SetParamF64) {
     auto ctx = createSession();
-    uint8_t msg[17];
+    uint8_t msg[18];
     BufWriter w(msg, sizeof(msg));
     w.putU8(static_cast<uint8_t>(MessageType::SetParamReq));
     w.putU64(1);
+    w.putVarint(8);
     w.putF64(99.5);
 
     auto resp = roundtrip(*ctx, msg, w.pos);
