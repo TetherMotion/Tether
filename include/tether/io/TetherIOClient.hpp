@@ -77,6 +77,8 @@ struct ClientFunctionEntry {
 /// Stream layout entry from ConfigureStreamAck.
 struct ClientStreamLayoutEntry {
     uint64_t id = 0;
+    uint64_t schemaEpoch = 0;
+    uint32_t schemaSlot = 0;
     ValueType type = ValueType::F64;
     uint8_t valueSize = 0;
 };

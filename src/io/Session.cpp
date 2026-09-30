@@ -720,7 +720,7 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
 
     // Send ParameterStream ConfigureAck. Tether deliberately retains 32-bit
     // resolved-count and row-size fields to support larger catalogs/chunks.
-    size_t sz = 1 + 4 + 4 + 4 + collectPlan_.size() * 10;
+    size_t sz = 1 + 4 + 4 + 4 + 8 + collectPlan_.size() * 13;
     if (txRawBuf_.size() < sz) txRawBuf_.resize(sz);
 
     BufWriter w(txRawBuf_.data(), sz);
@@ -728,9 +728,10 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
     w.putU32(specId_);
     w.putU32(static_cast<uint32_t>(collectPlan_.size()));
     w.putU32(rowSize_);
+    w.putU64(schemaEpoch_);
     for (const auto& slot : collectPlan_) {
         w.putU64(slot.paramId);
-        w.putU8(static_cast<uint8_t>(slot.entry.valueType()));
+        w.putU32(slot.entry.schemaSlot());
         w.putU8(slot.valueSize);
     }
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
