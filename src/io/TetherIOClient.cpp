@@ -3,8 +3,10 @@
  * @brief C++ client implementation for the Tether IO binary protocol (Framing::None).
  */
 #include "tether/io/TetherIOClient.hpp"
+#include "tether/io/SchemaNegotiation.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 
 namespace tether { namespace io {
@@ -138,7 +140,40 @@ private:
 TetherIOClient::TetherIOClient(std::unique_ptr<ITransport> transport,
                                uint32_t defaultTimeoutMs)
     : transport_(std::move(transport))
-    , defaultTimeoutMs_(defaultTimeoutMs) {}
+    , defaultTimeoutMs_(defaultTimeoutMs) {
+    if (!transport_ || !transport_->isConnected()) return;
+
+    std::array<uint8_t, 1024> helloBuffer{};
+    BufWriter helloWriter(helloBuffer.data(), helloBuffer.size());
+    helloWriter.putU8(static_cast<uint8_t>(MessageType::ClientHello));
+    encodeClientHelloV6(helloWriter, {});
+    if (!helloWriter.ok() || !transport_->send(helloBuffer.data(), helloWriter.pos)) {
+        transport_->close();
+        return;
+    }
+
+    std::vector<uint8_t> response;
+    if (!transport_->receiveMessage(response, defaultTimeoutMs_) || response.empty() ||
+        response[0] != static_cast<uint8_t>(MessageType::ServerHello)) {
+        transport_->close();
+        return;
+    }
+    BufReader helloReader(response.data() + 1, response.size() - 1);
+    ServerHelloV6 serverHello;
+    if (!decodeServerHelloV6(helloReader, serverHello) || helloReader.remaining() != 0 ||
+        serverHello.selectedVersion != SCHEMA_PROTOCOL_VERSION) {
+        transport_->close();
+        return;
+    }
+
+    std::array<uint8_t, 32> commitBuffer{};
+    BufWriter commitWriter(commitBuffer.data(), commitBuffer.size());
+    commitWriter.putU8(static_cast<uint8_t>(MessageType::SchemaCommit));
+    encodeSchemaCommitV6(commitWriter, {serverHello.epoch});
+    if (!commitWriter.ok() || !transport_->send(commitBuffer.data(), commitWriter.pos)) {
+        transport_->close();
+    }
+}
 
 TetherIOClient::~TetherIOClient() {
     close();

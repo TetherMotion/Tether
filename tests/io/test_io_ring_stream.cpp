@@ -6,6 +6,7 @@
  */
 #include <gtest/gtest.h>
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <cstring>
 #include <mutex>
@@ -84,6 +85,20 @@ private:
     std::vector<uint8_t> rxData_;
     std::vector<uint8_t> txData_;
 };
+
+static void injectV6Handshake(MockTransport& transport) {
+    std::array<uint8_t, 512> hello{};
+    BufWriter helloWriter(hello.data(), hello.size());
+    helloWriter.putU8(static_cast<uint8_t>(MessageType::ClientHello));
+    encodeClientHelloV6(helloWriter, {});
+    transport.injectSlipMessage(hello.data(), helloWriter.pos);
+
+    std::array<uint8_t, 32> commit{};
+    BufWriter commitWriter(commit.data(), commit.size());
+    commitWriter.putU8(static_cast<uint8_t>(MessageType::SchemaCommit));
+    encodeSchemaCommitV6(commitWriter, {1});
+    transport.injectSlipMessage(commit.data(), commitWriter.pos);
+}
 
 // ---------------------------------------------------------------------------
 // Test ring source: 3 fields (u16, u32, i8) over a small ring
@@ -257,6 +272,7 @@ TEST_F(RingStreamTest, SessionStreamsRingRows) {
 
     auto cfg = configureStreamMsg({kIdA, kIdB}, /*intervalMs*/1, /*chunk*/2);
     auto start = startStreamMsg();
+    injectV6Handshake(*tp);
     tp->injectSlipMessage(cfg.data(), cfg.size());
     tp->injectSlipMessage(start.data(), start.size());
 
@@ -331,6 +347,7 @@ TEST_F(RingStreamTest, SessionFallsBackToPollingForUncoveredEntries) {
     // kIdOther is not in the ring schema -> normal polling path.
     auto cfgMsg = configureStreamMsg({kIdOther});
     auto startMsg = startStreamMsg();
+    injectV6Handshake(*tp);
     tp->injectSlipMessage(cfgMsg.data(), cfgMsg.size());
     tp->injectSlipMessage(startMsg.data(), startMsg.size());
 
@@ -370,6 +387,7 @@ TEST_F(RingStreamTest, NoStreamEntriesAreExcludedFromCollectPlan) {
     // the SDO entry resolves out of the collect plan entirely.
     auto cfgMsg = configureStreamMsg({kIdSdo, kIdA});
     auto startMsg = startStreamMsg();
+    injectV6Handshake(*tp);
     tp->injectSlipMessage(cfgMsg.data(), cfgMsg.size());
     tp->injectSlipMessage(startMsg.data(), startMsg.size());
 
