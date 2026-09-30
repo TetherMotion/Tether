@@ -25,8 +25,8 @@ render an unknown application value.
 
 1. A peer automatically learns every schema required by values the other peer
    advertises or sends.
-2. Schemas represent scalars, enums, fixed arrays, bounded variable arrays,
-   structs, optionals, variants, aliases, and arbitrary finite nesting.
+2. Schemas represent scalars, enums, fixed arrays, variable arrays, maps,
+   structs, optionals, numbered oneofs, aliases, and arbitrary finite nesting.
 3. Semantic types and fields use stable machine keys, not labels or positions.
 4. Peers exchange manifests and canonical digests, transferring only missing
    or changed schema definitions.
@@ -89,10 +89,10 @@ type; the key and digest remain authoritative.
 Keys are allocated from an approved UUID/128-bit registry and checked for
 duplicates in CI. They must not be hashes of C++ type names.
 
-### Stable field and variant keys
+### Stable field and oneof member keys
 
-Every struct field has a non-zero U32 `FieldKey`. Every enum value and variant
-arm has a non-zero U32 key. Keys are unique within their immediate owner and
+Every struct field has a non-zero U32 `FieldKey`. Every enum value and `OneOf`
+member has a non-zero U32 key. Keys are unique within their immediate owner and
 never renumbered. Labels, units, descriptions, order, and UI hints are
 annotations that may change without changing a key.
 
@@ -127,34 +127,53 @@ kind_payload        [canonical kind-specific bytes]
 The peer recomputes `BLAKE3-256` over the complete canonical descriptor,
 including sorted annotations, before installing it. A claimed digest is never
 trusted without local recomputation. Strings are valid UTF-8; annotation keys
-are ASCII dot-separated identifiers.
+are ASCII dot-separated identifiers. Unless a grammar explicitly says
+otherwise, every wire `string`, including descriptor labels and annotations,
+uses the zero-terminated `String` encoding defined below.
 
 ### Schema kinds
 
 | Kind | Descriptor data | Payload behavior |
 | --- | --- | --- |
-| `Scalar` | Wire scalar and optional numeric bounds | Exact scalar encoding |
-| `String` | Maximum UTF-8 bytes | Bounded length-prefixed UTF-8 |
-| `Bytes` | Maximum bytes | Bounded length-prefixed bytes |
+| `Scalar` | Wire scalar | Exact scalar encoding |
+| `String` | UTF-8 text | Arbitrary-length, zero-terminated UTF-8 |
+| `Bytes` | No schema-local size limit | Arbitrary-length, length-delimited bytes |
 | `Enum` | Unsigned scalar and keyed labels | Exact underlying scalar |
 | `Struct` | Encoding mode and keyed fields | Packed or tagged fields |
 | `FixedArray` | Element `SchemaRef` and exact count | Exactly declared count |
-| `DynamicArray` | Element `SchemaRef`, min and max count | Bounded counted elements |
+| `DynamicArray` | Element `SchemaRef` and optional count restrictions | Counted elements |
+| `Map` | Uniform key/value `SchemaRef`s and optional entry-count restrictions | Ordered unique key/value entries |
 | `Optional` | Element `SchemaRef` | Presence byte and optional payload |
-| `Variant` | Discriminant and keyed arm `SchemaRef`s | One selected typed payload |
+| `OneOf` | Predefined numbered members and member `SchemaRef`s | Exactly one selected typed member |
 | `Alias` | Target `SchemaRef` | Target payload with semantic annotations |
 
 `Scalar` covers existing numeric, boolean, IPv4, IPv6, MAC, and canonical
 signed/unsigned varint forms. It never means native enum, C++ struct, pointer,
-or unbounded blob.
+or native object representation.
 
-Fixed and dynamic arrays can contain any schema kind, including arrays and
-structs. No array special cases are allowed in an application profile.
+`String` values contain valid UTF-8 bytes followed by exactly one `0x00`
+terminator. A string contains no interior `0x00`; its terminator is part of the
+value encoding but not the logical value. `Bytes` values use a canonical U64
+varuint byte count followed by that many arbitrary bytes. Neither type has a
+schema-local maximum: their actual size is limited only by negotiated and local
+resource budgets, or by an explicit field restriction.
+
+Fixed and dynamic arrays can contain any schema kind, including arrays, maps,
+and structs. A map has one predeclared key schema and one predeclared value
+schema, analogous to `std::map<Key, Value>`: every entry has those exact types.
+Map keys must be map-key eligible (`String`, `Bytes`, non-floating scalar,
+`Enum`, or an `Alias` of one of those). Their order is the schema-defined
+logical order: numeric values compare numerically, booleans use `false < true`,
+network/address values and bytes compare unsigned lexicographically, and
+strings compare their UTF-8 bytes lexicographically. Floating-point and
+composite schemas cannot be map keys. No array or map special cases are
+allowed in an application profile.
 
 ### Struct fields and nested names
 
-A nested struct is referenced by `SchemaRef` exactly like an array element or
-variant arm. It is not an inline anonymous layout hidden inside its parent.
+A nested struct is referenced by `SchemaRef` exactly like an array element,
+map key/value, or oneof member. It is not an inline anonymous layout hidden
+inside its parent.
 Consequently, a recursive decoder can expose both the parent struct name and
 the name of each nested struct when those optional annotations are present.
 The field that points to the nested struct separately has its own stable
@@ -164,24 +183,89 @@ Each descriptor field is:
 
 ```
 field_key           [u32, non-zero]
-flags               [u32: required, read-only, deprecated, secret, ...]
+presence             [u8: required or optional]
+flags               [u32: read-only, write-only, deprecated, secret, no-stream, ...]
 schema_ref          [schema key + digest]
 name                [string]
 description         [string]
 annotations         [typed annotation map]
+restrictions        [canonical restriction list]
 default_value       [optional schema-directed payload]
 ```
 
-Fields are sorted by `FieldKey`. A required field has no default and is
-mandatory in tagged values. An optional/deprecated field may be absent. The
-`secret` flag is only a display/export hint; the server still enforces access.
+Fields are sorted by `FieldKey`. A required field is mandatory in tagged values
+and has no default. An optional field may be absent and may declare a default.
+Field optionality controls whether the field itself is present; a present field
+whose schema is `Optional` may independently carry a null value. `read-only`,
+`write-only`, `deprecated`, `secret`, and `no-stream` are independent flags.
+The `secret` flag is only a display/export hint; the server still enforces
+access.
+
+### Field restrictions
+
+Every field may carry zero or more machine-validated restrictions. Restrictions
+are scoped to that field, so one reusable schema can be unrestricted in one
+field and constrained in another. Each restriction has a `RestrictionKind`,
+canonical payload, and no display-only semantics. The list is sorted by kind
+and duplicate kinds are rejected. Unknown or inapplicable restrictions are
+protocol errors, not hints a receiver may ignore.
+
+The canonical field descriptor encodes `restriction_count [u64 varuint]`, then
+each restriction as `[restriction_kind u8][restriction_payload_length u64
+varuint][restriction_payload]`. `AllowedValues` are sorted and deduplicated by
+their complete canonical encoded value bytes. All restriction payloads are
+fully consumed and are included in the enclosing schema digest.
+
+The initial restriction kinds are:
+
+| Restriction | Applies to | Canonical data |
+| --- | --- | --- |
+| `NumericRange` | Numeric scalar, enum, or alias | Optional inclusive lower and upper values encoded with the field schema |
+| `MultipleOf` | Integer scalar, enum, or alias | Non-zero scalar divisor encoded with the field schema |
+| `Finite` | `F32`, `F64`, or alias | Requires the value not to be NaN or infinity |
+| `LengthRange` | `String`, `Bytes`, arrays, or map | Optional inclusive minimum and maximum logical byte/element/entry count |
+| `AllowedValues` | Any schema | Sorted, duplicate-free schema-directed values allowed for this field |
+| `AllowedMembers` | `Enum` or `OneOf` | Sorted, non-zero allowed member keys |
+| `UniqueElements` | `DynamicArray` | Requires pairwise distinct canonical element values |
+
+`LengthRange` measures UTF-8 bytes excluding a string terminator, raw bytes for
+`Bytes`, element count for arrays, and entry count for maps. Restrictions are
+checked after decoding a complete field value and before application code sees
+it; defaults must also satisfy them. A restriction never changes the encoding
+or fixed-size eligibility of the referenced schema.
+
+### Maps and oneof members
+
+A `Map` descriptor contains its key and value `SchemaRef`, followed by any
+schema-wide entry count policy. Its values are encoded as:
+
+```
+entry_count          [u64 varuint]
+repeat entry_count times, keys strictly increasing:
+   key_payload_length [u64 varuint]
+   key_payload        [key_payload_length bytes]
+   value_payload_length [u64 varuint]
+   value_payload      [value_payload_length bytes]
+```
+
+Receivers decode every key/value using the declared schemas, require the keys
+to be strictly increasing in the map-key order, and reject duplicate keys,
+invalid lengths, or incomplete consumption. Maps are semantically variable
+length even if a field restricts them to a fixed number of entries. A map's
+key/value schemas, entry policy, and canonical ordering are all part of its
+descriptor digest.
+
+`OneOf` is the V6 discriminated-union type. Its descriptor contains a sorted
+set of predefined members, each with a non-zero `member_key`, `SchemaRef`, and
+optional annotation/description. Exactly one numbered member is selected in a
+value; there are no implicit, anonymous, or receiver-defined members.
 
 ### Fixed-size eligibility
 
 A schema is fixed-size only when it is a fixed scalar, fixed alias,
 `FixedArray` of a fixed-size element, or packed struct of only required,
-fixed-size fields. It must contain no string, bytes, dynamic array, optional,
-variant, tagged struct, or variable scalar. The descriptor contains its
+fixed-size fields. It must contain no string, bytes, dynamic array, map,
+optional, oneof, tagged struct, or variable scalar. The descriptor contains its
 computed fixed size; every receiver recomputes it and rejects a mismatch.
 
 ## Value Encoding
@@ -189,7 +273,7 @@ computed fixed size; every receiver recomputes it and rejects a mismatch.
 ### General rules
 
 - Fixed-width values are little-endian.
-- Lengths and counts are canonical unsigned varints.
+- Counts and delimited-payload lengths are canonical U64 unsigned varints.
 - Decoding is bounded by negotiated value bytes, element count, field count,
   graph depth, value depth, and aggregate allocation budgets.
 - C/C++ padding, alignment, ABI, and native object representations never occur
@@ -224,7 +308,7 @@ Unknown fields are permitted only when the descriptor permits unknown optional
 fields. `value_length` lets a newer client skip a permitted unknown field
 without guessing its nested type.
 
-### Arrays
+### Arrays and maps
 
 `FixedArray` has no count. It contains exactly the declared number of elements.
 Fixed-size elements are concatenated; variable-size elements are each
@@ -241,23 +325,31 @@ repeat count times:
 
 The decoder validates count range, element length, exact payload consumption,
 and aggregate byte/depth budgets. Elements can recursively be arrays or
-structs at any negotiated finite depth.
+maps or structs at any negotiated finite depth. Map encoding and validation are
+defined in [Maps and oneof members](#maps-and-oneof-members).
 
-### Optional, variant, and typed envelopes
+### Optional, oneof, strings, and typed envelopes
 
 `Optional` is `[present u8]`, where `0` has no payload and `1` is followed by
 the element payload. Other values are invalid.
 
-`Variant` is `[arm_key varuint][payload_length varuint][payload]`. The arm key
-must occur in the descriptor. Unknown arms are rejected unless an explicit
-opaque-unknown-arm policy is present.
+`OneOf` is `[member_key u64-varuint][payload_length u64-varuint][payload]`.
+The member key must occur in the descriptor and must satisfy any
+`AllowedMembers` restriction on its containing field. Unknown members are
+always rejected.
+
+`String` is its UTF-8 content followed by `0x00`, with no length prefix.
+Containers whose grammar needs a boundary use their existing payload length;
+otherwise the terminator supplies the boundary. `Bytes` is
+`[byte_length u64-varuint][bytes]`. Both forms reject truncated, oversized,
+or non-canonical values before allocation.
 
 Catalog entries and function fields already have a schema slot, so their values
 carry no redundant type identity. An otherwise untyped attachment uses:
 
 ```
 schema_slot           [u32]
-payload_length        [varuint]
+   payload_length        [u64 varuint]
 payload               [payload_length bytes]
 ```
 
@@ -269,8 +361,10 @@ A missing or stale slot is a protocol error, never a best-effort binary decode.
 
 Each peer offers and the server selects conservative limits for message bytes,
 schema descriptor bytes, definitions per epoch, graph nodes/depth, value depth,
-dynamic-array elements/bytes, string/bytes length, and cache entries/bytes.
-The selected limit cannot exceed either offer. Local hard limits always apply.
+collection entries, individual string/bytes payload bytes, aggregate allocation,
+and cache entries/bytes. The selected limit cannot exceed either offer. Local
+hard limits always apply. The arbitrary-length `String` and `Bytes` types have
+no schema-local cap; these negotiated limits remain mandatory for safe parsing.
 
 ### Bootstrap messages
 
@@ -357,12 +451,14 @@ Input streams declare a schema slot and validate every batch value against it.
 
 Reject a descriptor containing duplicate/invalid keys, digest mismatch,
 non-canonical order, missing/mismatched/cyclic dependency, limit violation,
-variable or optional packed field, invalid default payload, invalid UTF-8, or
-duplicate annotation key.
+invalid map-key schema, malformed/duplicate oneof member, variable or optional
+packed field, invalid default payload, invalid field restriction, invalid
+UTF-8 or string termination, or duplicate annotation key.
 
 Reject a value with unknown/stale slot, incomplete consumption, bound violation,
-invalid tagged field order/duplication/requirement, or aggregate budget breach.
-Never truncate/coerce a value to make it decode.
+invalid tagged field order/duplication/requirement, invalid restriction,
+invalid map ordering/duplicate key, unknown oneof member, or aggregate budget
+breach. Never truncate/coerce a value to make it decode.
 
 Schema/value input is untrusted. Parse lengths before allocation, enforce
 cumulative budgets, cache only validated definitions, LRU-evict under hard
@@ -376,8 +472,9 @@ metadata.
    negotiation, catalog, function, stream, and value encoding rules.
 2. Add `docs/IOSchemaAuthoring.md` for key allocation, annotations,
    compatibility, code-generation guidance, and authoring examples.
-3. Add `docs/IOSchemaExamples.md` with nested fixed/variable arrays, CiA 402
-   status, motion command, event record, and input-stream schemas.
+3. Add `docs/IOSchemaExamples.md` with nested fixed/variable arrays, maps,
+   numbered oneofs, unrestricted string/bytes fields, field restrictions,
+   CiA 402 status, motion command, event record, and input-stream schemas.
 4. Update public registry documentation to use `SchemaRef`/schema roots rather
    than `ValueType` and flat descriptors.
 5. Document the resource-limit policy and mandatory fuzz corpus.
@@ -397,12 +494,15 @@ metadata.
 
 6. Replace `BinaryStruct.hpp` with `Schema.hpp` types for keys, refs, nodes,
    descriptors, manifests, slots, and validation errors.
-7. Implement canonical descriptor encoding/decoding and digest computation.
-8. Implement graph assembly, acyclicity, fixed-size computation, and canonical
-   order validation.
+7. Implement canonical descriptor encoding/decoding and digest computation,
+   including maps, numbered oneofs, field presence, and restrictions.
+8. Implement graph assembly, acyclicity, fixed-size computation, canonical
+   order validation, map-key eligibility, and restriction validation.
 9. Implement bounded persistent schema cache and session schema table.
-10. Implement schema-directed value encode/decode for every V6 schema kind.
-11. Add unit, property, and fuzz tests for descriptors and nested values.
+10. Implement schema-directed value encode/decode for every V6 schema kind,
+   including zero-terminated strings, arbitrary bytes, maps, and oneofs.
+11. Add unit, property, and fuzz tests for descriptors, restrictions, and
+   nested values.
 
 ### Step 3: Session and registry migration
 
@@ -418,9 +518,11 @@ metadata.
 ### Step 4: TypeScript and UI
 
 18. Replace the V5 TypeScript protocol decoder with V6 bootstrap/schema sync.
-19. Implement strict bounded recursive TypeScript value codec and cache.
-20. Build generic scalar, enum, struct, fixed/dynamic array, optional, and
-    variant UI primitives from schemas and annotations.
+19. Implement strict bounded recursive TypeScript value codec and cache,
+    including zero-terminated strings, arbitrary bytes, maps, oneofs, and
+    field restrictions.
+20. Build generic scalar, enum, struct, fixed/dynamic array, map, optional,
+   and numbered-oneof UI primitives from schemas and annotations.
 21. Ensure browser rendering never exceeds negotiated limits.
 22. Migrate dashboard catalog, scope, jog, and function UIs to schema slots.
 
@@ -429,9 +531,11 @@ metadata.
 23. Express CiA 402 entirely through negotiated schemas and retire its
     hand-written codec when generic decoding is ready.
 24. Add a simulated server exporting deeply nested fixed/dynamic values.
-25. Add C++ <-> TypeScript golden vectors for every schema kind/nesting form.
-26. Fuzz malformed manifests, chunks, cycles, digests, depth, stale slots, and
-    schema-update races.
+25. Add C++ <-> TypeScript golden vectors for every schema kind/nesting form,
+   map ordering, oneof members, zero-terminated strings, arbitrary bytes, and
+   restrictions.
+26. Fuzz malformed manifests, chunks, cycles, digests, depth, stale slots,
+   maps, oneofs, restrictions, and schema-update races.
 27. Load-test cache handshakes, high-rate packed streams, catalog updates, many
     clients, and bounded memory.
 28. Remove all V5 code/tests/docs only after V6 migration coverage is complete.
@@ -439,7 +543,12 @@ metadata.
 ## Acceptance Criteria
 
 - A generic client discovers, validates, caches, and renders a server schema
-  such as `Array<Struct<Array<Optional<Variant>>>>` without custom code.
+   such as `Map<String, Array<Struct<Optional<OneOf>>>>` without custom code.
+- Maps reject out-of-order or duplicate keys; oneofs reject undefined member
+   keys; zero-terminated strings and arbitrary bytes round-trip without a
+   schema-local size cap.
+- Field presence, defaults, and every applicable restriction are validated
+   before values reach application code.
 - A reconnect reuses cached definitions only after key/digest validation.
 - Invalid/cyclic/oversized schema or value input fails deterministically with
   bounded recursion/allocation and no cyclic-thread impact.
