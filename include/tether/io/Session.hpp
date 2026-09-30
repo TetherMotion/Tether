@@ -96,7 +96,8 @@ public:
             ReceiveBufferFactory encodedBufferFactory = nullptr,
             ReceiveBufferFactory decodedBufferFactory = nullptr,
             Framing framing = Framing::Slip,
-            const std::vector<IRingStreamSource*>* ringSources = nullptr);
+            const std::vector<IRingStreamSource*>* ringSources = nullptr,
+            const SchemaCatalog* schemaCatalog = nullptr);
     ~Session();
 
     /// Run event loop (blocking).
@@ -181,6 +182,7 @@ private:
     void handleSnapshotSignalsReq(const uint8_t* body, size_t len);
     void handleFeatureExchangeReq(const uint8_t* body, size_t len);
     void handleClientHello(const uint8_t* body, size_t len);
+    void handleSchemaRequest(const uint8_t* body, size_t len);
     void handleSchemaCommit(const uint8_t* body, size_t len);
     void handleConfigureDatalogReq(const uint8_t* body, size_t len);
     void handleDatalogStatusReq();
@@ -328,6 +330,7 @@ private:
     // ==== Ring-buffered streaming ====
     /// Sources registered by the server; consulted in bindRingSource().
     const std::vector<IRingStreamSource*>* ringSources_ = nullptr;
+    const SchemaCatalog* schemaCatalog_ = nullptr;
     /// Timestamp (getTimestampUs_) of the last ring drain that produced rows.
     /// Used to flush a partial chunk when the producer goes quiet.
     uint64_t lastRingRowUs_ = 0;

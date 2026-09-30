@@ -124,7 +124,8 @@ protected:
 
     /// Run the session in a thread, inject a message, collect the response.
     std::vector<uint8_t> sendAndReceive(const uint8_t* msg, size_t msgLen,
-                                        bool bootstrap = true) {
+                                        bool bootstrap = true,
+                                        const SchemaCatalog* schemaCatalog = nullptr) {
         auto transport = std::make_unique<MockTransport>();
         MockTransport* tp = transport.get();
 
@@ -148,7 +149,9 @@ protected:
         uint64_t fakeTs = 1000;
         auto tsFn = [&fakeTs]() -> uint64_t { return fakeTs++; };
 
-        Session session(std::move(transport), registry_, tsFn, nullptr, nullptr, nullptr);
+        Session session(std::move(transport), registry_, tsFn, nullptr, nullptr, nullptr,
+                nullptr, nullptr, nullptr, nullptr, Framing::Slip, nullptr,
+                schemaCatalog);
 
         // Run in a thread, let it process the message, then stop
         std::thread t([&session]() { session.run(); });
@@ -344,4 +347,32 @@ TEST_F(SessionTest, RejectsRegularTrafficBeforeSchemaCommit) {
     BufReader reader(response.data(), response.size());
     EXPECT_EQ(reader.getU8(), static_cast<uint8_t>(MessageType::Error));
     EXPECT_EQ(reader.getU32(), static_cast<uint32_t>(ErrorCode::InvalidMessage));
+}
+
+TEST_F(SessionTest, SchemaRequestReturnsCatalogDefinition) {
+    SchemaNode node;
+    node.key[0] = 9;
+    node.kind = SchemaKind::Bytes;
+    node.maxBytes = 256;
+    SchemaGraph graph{{node}};
+    SchemaCatalog catalog;
+    SchemaRef ref{node.key, computeSchemaDigest(node)};
+    ASSERT_TRUE(catalog.install(graph, {{ref, node.revision}}));
+
+    SchemaRequestV6 request;
+    request.epoch = catalog.epoch();
+    request.definitions.push_back(ref);
+    std::array<uint8_t, 512> message{};
+    BufWriter writer(message.data(), message.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::SchemaRequest));
+    encodeSchemaRequestV6(writer, request);
+
+    const auto response = sendAndReceive(message.data(), writer.pos, true, &catalog);
+    ASSERT_EQ(response[0], static_cast<uint8_t>(MessageType::SchemaDefinition));
+    BufReader reader(response.data() + 1, response.size() - 1);
+    SchemaDefinitionV6 definition;
+    ASSERT_TRUE(decodeSchemaDefinitionV6(reader, definition));
+    EXPECT_EQ(definition.epoch, catalog.epoch());
+    EXPECT_EQ(definition.node.key, node.key);
+    EXPECT_EQ(computeSchemaDigest(definition.node), ref.digest);
 }
