@@ -1,5 +1,10 @@
 # Tether IO Protocol — Wire Contract
 
+The typed CiA 402 application profile built on these primitives is documented
+in [IOProtocolMachineProfile.md](IOProtocolMachineProfile.md). It defines the
+fixed `DriveSnapshotV1` value, catalog conventions, and command lifecycle
+without adding a new message type for each drive operation.
+
 **Protocol Version:** 5
 
 Version 5 is the direct merged Tether/ParameterStream contract. It adopts
