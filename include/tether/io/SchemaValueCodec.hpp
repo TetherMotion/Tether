@@ -156,7 +156,10 @@ inline bool validateNode(const SchemaGraph& graph, const SchemaNode& node,
                 const auto* keyPayload = reader.getBytes(static_cast<size_t>(keyLength));
                 if (!reader.ok()) return false;
                 std::vector<uint8_t> keyBytes(keyPayload, keyPayload + keyLength);
-                if (!previousKey.empty() && !(previousKey < keyBytes)) return fail(reader);
+                if (!previousKey.empty() && !std::lexicographical_compare(
+                        previousKey.begin(), previousKey.end(), keyBytes.begin(), keyBytes.end())) {
+                    return fail(reader);
+                }
                 BufReader keyReader(keyBytes.data(), keyBytes.size());
                 if (!validateRef(graph, *node.mapKey, keyReader, limits, depth) ||
                     keyReader.remaining() != 0) return fail(reader);

@@ -5,6 +5,7 @@
  * @copyright Copyright (C) 2025-2026 Tether Authors
  */
 #include "tether/io/Session.hpp"
+#include "tether/io/SchemaValueCodec.hpp"
 #include "SLIPStream/Buffer.hpp"
 
 #include <cstdarg>
@@ -14,6 +15,18 @@
 #include <limits>
 
 namespace tether { namespace io {
+
+namespace {
+
+bool validateCatalogValue(const SchemaCatalog* catalog, const EntryView& entry,
+                 const uint8_t* data, size_t size) {
+    if (!catalog || entry.schemaRef().key == SchemaKey{} || !catalog->graph()) return true;
+    BufReader reader(data, size);
+    return validateSchemaValue(*catalog->graph(), entry.schemaRef().key, reader) &&
+        reader.remaining() == 0;
+}
+
+} // namespace
 
 // --------------------------------------------------------------------------
 // Construction / Destruction
@@ -480,6 +493,10 @@ void Session::handleGetParamReq(const uint8_t* body, size_t len) {
         entry.read(value.data());
         sz += vs;
     }
+    if (!validateCatalogValue(schemaCatalog_, entry, value.data(), value.size())) {
+        sendError(ErrorCode::InternalError, "Registry produced an invalid schema value");
+        return;
+    }
     if (txRawBuf_.size() < sz) txRawBuf_.resize(sz);
 
     BufWriter w(txRawBuf_.data(), sz);
@@ -511,11 +528,19 @@ void Session::handleSetParamReq(const uint8_t* body, size_t len) {
         }
         const uint8_t* data = r.getBytes(dataLen);
         if (!r.ok()) { sendError(ErrorCode::InvalidMessage, "Value too short"); return; }
+        if (!validateCatalogValue(schemaCatalog_, entry, data, dataLen)) {
+            sendError(ErrorCode::InvalidMessage, "Value does not match schema");
+            return;
+        }
         entry.writeVar(data, dataLen);
     } else {
         uint8_t vs = entry.valueSize();
         const uint8_t* data = r.getBytes(vs);
         if (!r.ok()) { sendError(ErrorCode::InvalidMessage, "Value too short"); return; }
+        if (!validateCatalogValue(schemaCatalog_, entry, data, vs)) {
+            sendError(ErrorCode::InvalidMessage, "Value does not match schema");
+            return;
+        }
         entry.write(data);
     }
 
@@ -547,6 +572,10 @@ void Session::handleGetSignalReq(const uint8_t* body, size_t len) {
         value.resize(vs);
         entry.read(value.data());
         sz += vs;
+    }
+    if (!validateCatalogValue(schemaCatalog_, entry, value.data(), value.size())) {
+        sendError(ErrorCode::InternalError, "Registry produced an invalid schema value");
+        return;
     }
     if (txRawBuf_.size() < sz) txRawBuf_.resize(sz);
 
