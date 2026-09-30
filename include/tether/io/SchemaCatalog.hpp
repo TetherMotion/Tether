@@ -15,6 +15,8 @@ using SchemaEpoch = uint32_t;
 struct SchemaManifestEntry {
     SchemaRef ref;
     uint32_t revision = 0;
+
+    friend bool operator==(const SchemaManifestEntry&, const SchemaManifestEntry&) = default;
 };
 
 struct SchemaSlotEntry {

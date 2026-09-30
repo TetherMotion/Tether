@@ -233,6 +233,7 @@ set(IO_PROTOCOL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_wire.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_catalog.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_value_wire.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_negotiation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_cia402_profile.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_wire_contract.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_malformed.cpp"
