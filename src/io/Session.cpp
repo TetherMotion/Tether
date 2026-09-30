@@ -232,6 +232,13 @@ void Session::onMessage(const uint8_t* data, size_t len) {
             case 0x3E: name = "InvokeExReq"; break;
             case 0x3F: name = "InvokeExResp"; break;
             case 0x40: name = "RegisterFunctionsReq"; break;
+            case 0x50: name = "ClientHello"; break;
+            case 0x51: name = "ServerHello"; break;
+            case 0x52: name = "SchemaRequest"; break;
+            case 0x53: name = "SchemaDefinition"; break;
+            case 0x54: name = "SchemaCommit"; break;
+            case 0x55: name = "SchemaReject"; break;
+            case 0x56: name = "SchemaUpdate"; break;
             default: break;
         }
         logFn_("TetherIO", "dispatch %s (bodyLen=%zu)", name, bodyLen);
@@ -253,6 +260,8 @@ void Session::onMessage(const uint8_t* data, size_t len) {
         case MessageType::SnapshotParamsReq:   handleSnapshotParamsReq(body, bodyLen); break;
         case MessageType::SnapshotSignalsReq:  handleSnapshotSignalsReq(body, bodyLen); break;
         case MessageType::FeatureExchangeReq:  handleFeatureExchangeReq(body, bodyLen); break;
+        case MessageType::ClientHello:         handleClientHello(body, bodyLen); break;
+        case MessageType::SchemaCommit:        handleSchemaCommit(body, bodyLen); break;
         case MessageType::ConfigureDatalogReq: handleConfigureDatalogReq(body, bodyLen); break;
         case MessageType::DatalogStatusReq:    handleDatalogStatusReq(); break;
         case MessageType::ConfigureThresholdReq: handleConfigureThresholdReq(body, bodyLen); break;
@@ -269,6 +278,52 @@ void Session::onMessage(const uint8_t* data, size_t len) {
             sendError(ErrorCode::UnknownMessageType, "Unknown message type");
             break;
     }
+}
+
+void Session::handleClientHello(const uint8_t* body, size_t len) {
+    BufReader reader(body, len);
+    ClientHelloV6 hello;
+    if (!decodeClientHelloV6(reader, hello) || reader.remaining() != 0) {
+        sendError(ErrorCode::InvalidMessage, "Invalid V6 ClientHello");
+        return;
+    }
+    if (hello.minVersion > SCHEMA_PROTOCOL_VERSION || hello.maxVersion < SCHEMA_PROTOCOL_VERSION) {
+        uint8_t buffer[128]{};
+        BufWriter writer(buffer, sizeof(buffer));
+        writer.putU8(static_cast<uint8_t>(MessageType::SchemaReject));
+        encodeSchemaRejectV6(writer, {SchemaRejectCode::UnsupportedVersion,
+                                      "V6 is not in the offered version range"});
+        if (writer.ok()) sendRaw(buffer, writer.pos);
+        return;
+    }
+
+    ServerHelloV6 response;
+    response.selectedVersion = SCHEMA_PROTOCOL_VERSION;
+    response.epoch = 1;
+    schemaEpoch_ = response.epoch;
+    schemaHelloReceived_ = true;
+    schemaCommitted_ = false;
+
+    if (txRawBuf_.size() < 256) txRawBuf_.resize(256);
+    BufWriter writer(txRawBuf_.data(), txRawBuf_.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::ServerHello));
+    encodeServerHelloV6(writer, response);
+    if (writer.ok()) sendRaw(txRawBuf_.data(), writer.pos);
+}
+
+void Session::handleSchemaCommit(const uint8_t* body, size_t len) {
+    if (!schemaHelloReceived_) {
+        sendError(ErrorCode::InvalidMessage, "SchemaCommit before ClientHello");
+        return;
+    }
+    BufReader reader(body, len);
+    SchemaCommitV6 commit;
+    if (!decodeSchemaCommitV6(reader, commit) || reader.remaining() != 0 ||
+        commit.epoch != schemaEpoch_) {
+        sendError(ErrorCode::InvalidMessage, "Invalid V6 SchemaCommit");
+        return;
+    }
+    schemaCommitted_ = true;
 }
 
 // --------------------------------------------------------------------------
