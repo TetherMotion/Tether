@@ -39,9 +39,11 @@ namespace tether { namespace io {
 /// Catalog entry returned by listParams / listSignals.
 struct ClientCatalogEntry {
     uint64_t id = 0;
+    uint64_t schemaEpoch = 0;
+    uint32_t schemaSlot = 0;
     ValueType type = ValueType::F64;
     uint8_t valueSize = 0;
-    uint8_t flags = 0;
+    uint32_t flags = 0;
     std::string name;
     std::string description;
     std::string group;
@@ -379,6 +381,7 @@ private:
     /// InvokeExReq whose handler sends the InvokeExResp.
     std::recursive_mutex mutex_;
     std::atomic<uint64_t> nextRequestId_{1};
+    uint64_t schemaEpoch_ = 0;
 
     // Internal helpers
     ClientError makeError(ErrorCode code, std::string msg);

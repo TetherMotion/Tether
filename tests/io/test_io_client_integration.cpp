@@ -349,8 +349,8 @@ TEST_F(IOClientIntegrationTest, ListParamsFields) {
     EXPECT_EQ(p.name, "position");
     EXPECT_EQ(p.description, "Current position");
     EXPECT_EQ(p.group, "motion");
-    EXPECT_EQ(p.type, ValueType::F64);
-    EXPECT_EQ(p.valueSize, 8u);
+    EXPECT_EQ(p.schemaEpoch, 1u);
+    EXPECT_EQ(p.schemaSlot, 0u);
     // flags: readable | writable
     EXPECT_TRUE(p.flags & 0x01); // readable
     EXPECT_TRUE(p.flags & 0x02); // writable
@@ -379,8 +379,8 @@ TEST_F(IOClientIntegrationTest, ListParamsVariableLengthFlags) {
 
     for (const auto& p : *result) {
         if (p.id == 4) { // device_name
-            EXPECT_EQ(p.type, ValueType::String);
-            EXPECT_EQ(p.valueSize, 0u); // variable-length
+            EXPECT_EQ(p.schemaEpoch, 1u);
+            EXPECT_EQ(p.schemaSlot, 0u);
             EXPECT_TRUE(p.flags & 0x04); // variable-length flag
             return;
         }
@@ -491,8 +491,8 @@ TEST_F(IOClientIntegrationTest, ListSignalsFields) {
     EXPECT_EQ(s.name, "encoder");
     EXPECT_EQ(s.description, "Encoder count");
     EXPECT_EQ(s.group, "motion");
-    EXPECT_EQ(s.type, ValueType::U32);
-    EXPECT_EQ(s.valueSize, 4u);
+    EXPECT_EQ(s.schemaEpoch, 1u);
+    EXPECT_EQ(s.schemaSlot, 0u);
     // Signals are read-only
     EXPECT_TRUE(s.flags & 0x01);  // readable
     EXPECT_FALSE(s.flags & 0x02); // NOT writable
