@@ -49,6 +49,11 @@ struct SchemaRequestV6 {
     std::vector<SchemaRef> definitions;
 };
 
+struct SchemaDefinitionV6 {
+    SchemaEpoch epoch = 0;
+    SchemaNode node;
+};
+
 struct SchemaCommitV6 {
     SchemaEpoch epoch = 0;
 };
@@ -56,6 +61,11 @@ struct SchemaCommitV6 {
 struct SchemaRejectV6 {
     SchemaRejectCode code = SchemaRejectCode::InvalidDefinition;
     std::string message;
+};
+
+struct SchemaUpdateV6 {
+    SchemaEpoch epoch = 0;
+    std::vector<SchemaManifestEntry> schemas;
 };
 
 namespace schema_negotiation_detail {
@@ -168,6 +178,22 @@ inline bool decodeSchemaRequestV6(BufReader& reader, SchemaRequestV6& request,
     return reader.ok();
 }
 
+inline void encodeSchemaDefinitionV6(BufWriter& writer,
+                                     const SchemaDefinitionV6& definition) {
+    writer.putU32(definition.epoch);
+    encodeSchemaDefinition(writer, definition.node);
+}
+
+inline bool decodeSchemaDefinitionV6(BufReader& reader,
+                                     SchemaDefinitionV6& definition,
+                                     const SchemaLimits& limits = {}) {
+    SchemaDefinitionV6 decoded;
+    decoded.epoch = reader.getU32();
+    if (!reader.ok() || !decodeSchemaDefinition(reader, decoded.node, limits)) return false;
+    definition = std::move(decoded);
+    return reader.ok();
+}
+
 inline void encodeSchemaCommitV6(BufWriter& writer, const SchemaCommitV6& commit) {
     writer.putU32(commit.epoch);
 }
@@ -177,6 +203,23 @@ inline bool decodeSchemaCommitV6(BufReader& reader, SchemaCommitV6& commit) {
     if (!reader.ok()) return false;
     commit = decoded;
     return true;
+}
+
+inline void encodeSchemaUpdateV6(BufWriter& writer, const SchemaUpdateV6& update) {
+    writer.putU32(update.epoch);
+    schema_negotiation_detail::putManifest(writer, update.schemas);
+}
+
+inline bool decodeSchemaUpdateV6(BufReader& reader, SchemaUpdateV6& update,
+                                 uint32_t maxManifestEntries = 1024) {
+    SchemaUpdateV6 decoded;
+    decoded.epoch = reader.getU32();
+    if (!reader.ok() ||
+        !schema_negotiation_detail::getManifest(reader, decoded.schemas, maxManifestEntries)) {
+        return false;
+    }
+    update = std::move(decoded);
+    return reader.ok();
 }
 
 inline void encodeSchemaRejectV6(BufWriter& writer, const SchemaRejectV6& reject) {
