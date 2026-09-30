@@ -272,6 +272,6 @@ TEST(IOProtocolExtra, Str16LongString) {
 // ===========================================================================
 
 TEST(IOProtocolExtra, ProtocolVersionAndPort) {
-    EXPECT_EQ(PROTOCOL_VERSION, 5);
+    EXPECT_EQ(PROTOCOL_VERSION, 6);
     EXPECT_EQ(DEFAULT_PORT, 4000);
 }
