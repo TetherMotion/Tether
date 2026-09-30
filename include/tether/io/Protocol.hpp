@@ -57,10 +57,9 @@ enum class Framing : uint8_t {
 // ---------------------------------------------------------------------------
 // Protocol version
 // ---------------------------------------------------------------------------
-// Version 5 is the Tether merge revision. It uses ParameterStreamProtocol's
-// message/value IDs but intentionally widens its count fields to uint32_t and
-// retains Tether catalog extensions.
-inline constexpr uint8_t PROTOCOL_VERSION = 5;
+// V6 is the schema-negotiated protocol. Application messages are valid only
+// after the ClientHello/SchemaCommit bootstrap phase.
+inline constexpr uint8_t PROTOCOL_VERSION = 6;
 
 /// Default TCP port for the tether IO protocol server
 inline constexpr uint16_t DEFAULT_PORT = 4000;
