@@ -166,6 +166,49 @@ TetherIOClient::TetherIOClient(std::unique_ptr<ITransport> transport,
         return;
     }
 
+    if (!serverHello.schemas.empty()) {
+        SchemaRequestV6 request;
+        request.epoch = serverHello.epoch;
+        for (const auto& schema : serverHello.schemas) request.definitions.push_back(schema.ref);
+
+        std::vector<uint8_t> requestBuffer(MAX_MESSAGE_SIZE);
+        BufWriter requestWriter(requestBuffer.data(), requestBuffer.size());
+        requestWriter.putU8(static_cast<uint8_t>(MessageType::SchemaRequest));
+        encodeSchemaRequestV6(requestWriter, request);
+        if (!requestWriter.ok() || !transport_->send(requestBuffer.data(), requestWriter.pos)) {
+            transport_->close();
+            return;
+        }
+
+        SchemaGraph graph;
+        graph.nodes.reserve(serverHello.schemas.size());
+        for (size_t index = 0; index < serverHello.schemas.size(); ++index) {
+            std::vector<uint8_t> definitionFrame;
+            if (!transport_->receiveMessage(definitionFrame, defaultTimeoutMs_) ||
+                definitionFrame.empty() ||
+                definitionFrame[0] != static_cast<uint8_t>(MessageType::SchemaDefinition)) {
+                transport_->close();
+                return;
+            }
+            BufReader definitionReader(definitionFrame.data() + 1, definitionFrame.size() - 1);
+            SchemaDefinitionV6 definition;
+            if (!decodeSchemaDefinitionV6(definitionReader, definition) ||
+                definitionReader.remaining() != 0 || definition.epoch != serverHello.epoch ||
+                index >= serverHello.schemas.size() ||
+                definition.node.key != serverHello.schemas[index].ref.key ||
+                definition.node.revision != serverHello.schemas[index].revision ||
+                computeSchemaDigest(definition.node) != serverHello.schemas[index].ref.digest) {
+                transport_->close();
+                return;
+            }
+            graph.nodes.push_back(std::move(definition.node));
+        }
+        if (!validateSchemaGraph(graph)) {
+            transport_->close();
+            return;
+        }
+    }
+
     std::array<uint8_t, 32> commitBuffer{};
     BufWriter commitWriter(commitBuffer.data(), commitBuffer.size());
     commitWriter.putU8(static_cast<uint8_t>(MessageType::SchemaCommit));
