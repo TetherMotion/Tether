@@ -5,8 +5,7 @@
  * @brief Fixed wire types for the machine.cia402.v1 IO profile.
  */
 
-#include "tether/io/BinaryStruct.hpp"
-#include "tether/io/Protocol.hpp"
+#include "tether/io/SchemaDigest.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,8 +15,14 @@ namespace tether::io::cia402 {
 
 inline constexpr std::string_view kProfileName = "machine.cia402.v1";
 inline constexpr uint32_t kProfileVersion = 1;
-inline constexpr std::string_view kDriveSnapshotSchema =
+inline constexpr std::string_view kDriveSnapshotSchemaName =
     "tether.machine.cia402.DriveSnapshotV1";
+
+inline SchemaKey driveSnapshotSchemaKey(uint8_t id) {
+    SchemaKey key{};
+    key[15] = id;
+    return key;
+}
 
 /// Quality flags carried by DriveSnapshotV1::qualityFlags.
 enum class DriveQuality : uint32_t {
@@ -121,37 +126,59 @@ struct DriveSnapshotV1 {
 
 static_assert(DriveSnapshotV1::kEncodedSize == 64);
 
-/// Return the fixed field descriptor used by DescribeStruct.
-inline StructDescriptor driveSnapshotDescriptor(uint64_t entryId) {
-    StructDescriptor descriptor;
-    descriptor.entryId = entryId;
-    descriptor.name = std::string{kDriveSnapshotSchema};
-    descriptor.totalSize = DriveSnapshotV1::kEncodedSize;
-    descriptor.fields = {
-        {"timestamp_us", ValueType::U64, 0, 8, "us"},
-        {"state_generation", ValueType::U64, 8, 8, ""},
-        {"slave_index", ValueType::U16, 16, 2, ""},
-        {"al_status_code", ValueType::U16, 18, 2, ""},
-        {"status_word", ValueType::U16, 20, 2, ""},
-        {"control_word", ValueType::U16, 22, 2, ""},
-        {"fault_code", ValueType::U16, 24, 2, ""},
-        {"quality_flags", ValueType::U32, 26, 4, "bitmask"},
-        {"al_state", ValueType::U8, 30, 1, "enum"},
-        {"ds402_state", ValueType::U8, 31, 1, "enum"},
-        {"target_mode", ValueType::I8, 32, 1, "mode"},
-        {"display_mode", ValueType::I8, 33, 1, "mode"},
-        {"target_position", ValueType::I32, 34, 4, "drive-units"},
-        {"demand_position", ValueType::I32, 38, 4, "drive-units"},
-        {"actual_position", ValueType::I32, 42, 4, "drive-units"},
-        {"following_error", ValueType::I32, 46, 4, "drive-units"},
-        {"target_velocity", ValueType::I32, 50, 4, "drive-units/s"},
-        {"actual_velocity", ValueType::I32, 54, 4, "drive-units/s"},
-        {"target_torque", ValueType::I16, 58, 2, "drive-units"},
-        {"actual_torque", ValueType::I16, 60, 2, "drive-units"},
-        {"homing_state", ValueType::U8, 62, 1, "enum"},
-        {"reserved", ValueType::U8, 63, 1, ""},
+/// Returns the dependency-closed V6 graph for the packed DriveSnapshotV1.
+/// Its final node is the snapshot root; all prior nodes are reusable scalars.
+inline SchemaGraph driveSnapshotSchemaGraph() {
+    const auto makeScalar = [](uint8_t id, ValueType type) {
+        SchemaNode node;
+        node.key = driveSnapshotSchemaKey(id);
+        node.kind = SchemaKind::Scalar;
+        node.scalarType = type;
+        return node;
     };
-    return descriptor;
+    SchemaNode u8 = makeScalar(1, ValueType::U8);
+    SchemaNode u16 = makeScalar(2, ValueType::U16);
+    SchemaNode u32 = makeScalar(3, ValueType::U32);
+    SchemaNode u64 = makeScalar(4, ValueType::U64);
+    SchemaNode i8 = makeScalar(5, ValueType::I8);
+    SchemaNode i16 = makeScalar(6, ValueType::I16);
+    SchemaNode i32 = makeScalar(7, ValueType::I32);
+
+    const auto ref = [](const SchemaNode& node) {
+        return SchemaRef{node.key, computeSchemaDigest(node)};
+    };
+    SchemaNode snapshot;
+    snapshot.key = driveSnapshotSchemaKey(8);
+    snapshot.kind = SchemaKind::Struct;
+    snapshot.structEncoding = StructEncoding::Packed;
+    snapshot.name = std::string{kDriveSnapshotSchemaName};
+    snapshot.description = "Coherent CiA 402 drive status snapshot";
+    snapshot.fields = {
+        {1, 0, ref(u64), "timestamp_us", "Source timestamp in microseconds"},
+        {2, 0, ref(u64), "state_generation", "Safety-relevant state generation"},
+        {3, 0, ref(u16), "slave_index", "EtherCAT slave index"},
+        {4, 0, ref(u16), "al_status_code", "EtherCAT AL status code"},
+        {5, 0, ref(u16), "status_word", "CiA 402 statusword"},
+        {6, 0, ref(u16), "control_word", "Applied controlword"},
+        {7, 0, ref(u16), "fault_code", "CiA 402 fault code"},
+        {8, 0, ref(u32), "quality_flags", "Drive quality bitmask"},
+        {9, 0, ref(u8), "al_state", "EtherCAT AL state"},
+        {10, 0, ref(u8), "ds402_state", "CiA 402 state"},
+        {11, 0, ref(i8), "target_mode", "Requested operation mode"},
+        {12, 0, ref(i8), "display_mode", "Displayed operation mode"},
+        {13, 0, ref(i32), "target_position", "Target position in drive units"},
+        {14, 0, ref(i32), "demand_position", "Demand position in drive units"},
+        {15, 0, ref(i32), "actual_position", "Actual position in drive units"},
+        {16, 0, ref(i32), "following_error", "Following error in drive units"},
+        {17, 0, ref(i32), "target_velocity", "Target velocity in drive units/s"},
+        {18, 0, ref(i32), "actual_velocity", "Actual velocity in drive units/s"},
+        {19, 0, ref(i16), "target_torque", "Target torque in drive units"},
+        {20, 0, ref(i16), "actual_torque", "Actual torque in drive units"},
+        {21, 0, ref(u8), "homing_state", "Profile-defined homing state"},
+        {22, 0, ref(u8), "reserved", "Reserved and zero in version 1"},
+    };
+    return {{std::move(u8), std::move(u16), std::move(u32), std::move(u64),
+             std::move(i8), std::move(i16), std::move(i32), std::move(snapshot)}};
 }
 
 } // namespace tether::io::cia402

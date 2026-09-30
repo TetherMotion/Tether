@@ -305,7 +305,6 @@ TEST(IORegistry, ParamFlags) {
     EXPECT_TRUE(f & EntryFlags::Readable);
     EXPECT_TRUE(f & EntryFlags::Writable);
     EXPECT_FALSE(f & EntryFlags::VariableLen);
-    EXPECT_FALSE(f & EntryFlags::HasStruct);
 }
 
 TEST(IORegistry, SignalFlags) {

@@ -272,7 +272,6 @@ TEST(IOProtocol, EntryFlagBits) {
     EXPECT_EQ(EntryFlags::Readable, 0x01);
     EXPECT_EQ(EntryFlags::Writable, 0x02);
     EXPECT_EQ(EntryFlags::VariableLen, 0x04);
-    EXPECT_EQ(EntryFlags::HasStruct, 0x08);
     EXPECT_EQ(EntryFlags::HasEnum, 0x10);
 }
 

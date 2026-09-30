@@ -12,7 +12,6 @@
 #include <gtest/gtest.h>
 #include "tether/io/TetherIOClient.hpp"
 #include "tether/io/Session.hpp"
-#include "tether/io/FeatureExchange.hpp"
 #include "tether/io/DeadlineLatch.hpp"
 #include "PipeTransport.hpp"
 #include <cstdarg>
@@ -49,7 +48,6 @@ static uint64_t nowUs() {
 class IOPeerCallsTest : public ::testing::Test {
 protected:
     Registry registry_;
-    FeatureSet features_;
     std::unique_ptr<Session> session_;
     std::unique_ptr<TetherIOClient> client_;
     std::thread sessionThread_;
@@ -88,7 +86,7 @@ protected:
         auto [clientEnd, serverEnd] = MessagePipeTransport::create();
         session_ = std::make_unique<Session>(
             std::move(serverEnd), registry_, nowUs, noopLogFn,
-            &features_, nullptr, nullptr, nullptr, nullptr, nullptr,
+            nullptr, nullptr, nullptr, nullptr, nullptr,
             Framing::None);
         sessionThread_ = std::thread([this] { session_->run(); });
         client_ = std::make_unique<TetherIOClient>(std::move(clientEnd), 5000);
@@ -187,6 +185,7 @@ TEST(FunctionDescriptorCodec, RoundTrip) {
     fn.metadata["role"] = "blackbox";
 
     FunctionParameter state;
+    state.key = 7;
     state.name = "state";
     state.description = "Robot state";
     state.type = ValueType::Struct;
@@ -196,6 +195,7 @@ TEST(FunctionDescriptorCodec, RoundTrip) {
             {"seq",  ValueDescriptor::scalar(ValueType::U64)},
         }));
     FunctionParameter scale;
+    scale.key = 9;
     scale.name = "scale";
     scale.type = ValueType::F64;
     scale.optional = true;
@@ -225,9 +225,9 @@ TEST(FunctionDescriptorCodec, RoundTrip) {
     EXPECT_EQ(d.group, "control");
     ASSERT_EQ(d.parameters.size(), 2u);
     EXPECT_EQ(d.parameters[0].name, "state");
-    EXPECT_TRUE(d.parameters[0].valueDescriptor &&
-                d.parameters[0].valueDescriptor->type == ValueType::Struct);
-    EXPECT_EQ(d.parameters[0].valueDescriptor->fields.size(), 2u);
+    EXPECT_EQ(d.parameters[0].key, 7u);
+    EXPECT_EQ(d.parameters[1].key, 9u);
+    EXPECT_EQ(d.parameters[0].schemaSlot, 0u);
     EXPECT_TRUE(d.parameters[1].optional);
     EXPECT_TRUE(d.parameters[1].hasDefault);
     ASSERT_EQ(d.parameters[1].defaultValue.size(), 8u);
@@ -235,10 +235,7 @@ TEST(FunctionDescriptorCodec, RoundTrip) {
     std::memcpy(&decodedDefault, d.parameters[1].defaultValue.data(), 8);
     EXPECT_DOUBLE_EQ(decodedDefault, 1.5);
     EXPECT_TRUE(d.returnValue.present);
-    EXPECT_EQ(d.returnValue.type, ValueType::Array);
-    ASSERT_TRUE(d.returnValue.valueDescriptor &&
-                d.returnValue.valueDescriptor->element);
-    EXPECT_EQ(d.returnValue.valueDescriptor->element->type, ValueType::F64);
+    EXPECT_EQ(d.returnValue.schemaSlot, 0u);
     EXPECT_EQ(d.metadata.at("role"), "blackbox");
 }
 

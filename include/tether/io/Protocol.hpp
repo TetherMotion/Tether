@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <array>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -100,8 +101,6 @@ enum class MessageType : uint8_t {
     SnapshotParamsResp  = 0x27,
     SnapshotSignalsReq  = 0x28,
     SnapshotSignalsResp = 0x29,
-    FeatureExchangeReq  = 0x2A,
-    FeatureExchangeResp = 0x2B,
     CatalogChanged      = 0x2C,
     ConfigureDatalogReq = 0x2D,
     ConfigureDatalogResp= 0x2E,
@@ -109,8 +108,6 @@ enum class MessageType : uint8_t {
     DatalogStatusResp   = 0x30,
     ConfigureThresholdReq  = 0x31,
     ConfigureThresholdResp = 0x32,
-    DescribeStructReq   = 0x33,
-    DescribeStructResp  = 0x34,
     ListFunctionsReq    = 0x35,
     ListFunctionsResp   = 0x36,
     CallFunctionReq     = 0x37,
@@ -259,7 +256,9 @@ enum class FilterPropertyErrorType : uint8_t {
 };
 
 struct FilterPropertyValue {
-    ValueType type = ValueType::Binary;
+    uint32_t schemaEpoch = 0;
+    uint32_t schemaSlot = 0;
+    std::array<uint8_t, 16> schemaKey{};
     std::vector<uint8_t> data;
 };
 
@@ -270,11 +269,8 @@ struct FilterProperty {
 
 struct FilterPropertyDef {
     std::string name;
-    ValueType valueType = ValueType::Binary;
+    std::array<uint8_t, 16> schemaKey{};
     bool implemented = true;
-    bool hasRange = false;
-    double minValue = 0.0;
-    double maxValue = 0.0;
 };
 
 class StreamFilterSchema {
@@ -345,7 +341,6 @@ namespace EntryFlags {
     inline constexpr uint8_t Readable      = 0x01;
     inline constexpr uint8_t Writable      = 0x02;
     inline constexpr uint8_t VariableLen   = 0x04;
-    inline constexpr uint8_t HasStruct     = 0x08;
     inline constexpr uint8_t HasEnum       = 0x10;
     /// Entry must not be polled by a configured stream (e.g. SDO-backed
     /// reads whose cost is a mailbox round-trip, not a memory read).

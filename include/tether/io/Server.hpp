@@ -12,7 +12,6 @@
 #include "tether/io/Registry.hpp"
 #include "tether/io/Session.hpp"
 #include "tether/io/Transport.hpp"
-#include "tether/io/FeatureExchange.hpp"
 #include "tether/io/Datalogging.hpp"
 #include "tether/io/RingStreamSource.hpp"
 #include "logging/Logger.hpp"
@@ -32,7 +31,6 @@ struct ServerConfig {
     size_t      maxClients   = 4;       ///< Max concurrent sessions
     TimestampFn timestampFn  = nullptr; ///< Required: µs timestamp
     LogFn       logFn        = nullptr; ///< Optional logging callback
-    FeatureSet  serverFeatures;         ///< Features to advertise
     InputStreamCreateFn inputStreamCreateFn;
     InputStreamDataFn inputStreamDataFn;
     ReceiveBufferFactory encodedBufferFactory;
@@ -43,6 +41,9 @@ struct ServerConfig {
     /// instead of polling entry read functions.  Sources are owned by the
     /// caller and must outlive the Server.
     std::vector<IRingStreamSource*> ringSources;
+    /// Active V6 schemas shared by every session. Entries, functions, and
+    /// input streams resolve their session-local slots against this catalog.
+    const SchemaCatalog* schemaCatalog = nullptr;
 };
 
 /**

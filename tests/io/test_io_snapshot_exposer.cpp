@@ -52,7 +52,7 @@ protected:
     std::unique_ptr<SnapshotExposer> exposer_;
 };
 
-TEST_F(SnapshotExposerTest, BinarySnapshotCarriesDescriptorAndPayload) {
+TEST_F(SnapshotExposerTest, BinarySnapshotCarriesPayload) {
     stats_.cycles       = 0x1122334455667788;
     stats_.max_work_us  = 4242;
     stats_.count        = 7;
@@ -62,21 +62,9 @@ TEST_F(SnapshotExposerTest, BinarySnapshotCarriesDescriptorAndPayload) {
     EntryView snap = registry_.findSignal(makeId(kBase, 0x0001));
     ASSERT_TRUE(static_cast<bool>(snap));
     EXPECT_EQ(snap.valueType(), ValueType::Binary);
-    EXPECT_TRUE(snap.flags() & EntryFlags::HasStruct);
     EXPECT_TRUE(snap.isVariableLength());
     EXPECT_EQ(snap.name(), "demo.stats");
     EXPECT_EQ(snap.group(), "demo");
-
-    // Descriptor decodes the image without external schema.
-    const StructDescriptor* sd = snap.structDesc();
-    ASSERT_NE(sd, nullptr);
-    EXPECT_EQ(sd->entryId, makeId(kBase, 0x0001));
-    EXPECT_EQ(sd->totalSize, sizeof(DemoStats));
-    ASSERT_EQ(sd->fields.size(), 5u);
-    EXPECT_EQ(sd->fields[0].name, "cycles");
-    EXPECT_EQ(sd->fields[0].type, ValueType::U64);
-    EXPECT_EQ(sd->fields[0].offset, offsetof(DemoStats, cycles));
-    EXPECT_EQ(sd->fields[0].size, 8u);
 
     uint8_t buf[sizeof(DemoStats)];
     ASSERT_EQ(snap.readVar(buf, sizeof(buf)), sizeof(DemoStats));

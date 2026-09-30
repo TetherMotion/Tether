@@ -17,7 +17,7 @@
  *                                            lease is the real failsafe)
  *
  *   Signals (per axis)
- *     jog.<axis>.state            Binary snapshot (StructDescriptor attached)
+ *     jog.<axis>.state            Binary snapshot
  *     jog.<axis>.state.<field>    scalar: mode, active, rate, position,
  *                                 remaining, leaseLeftMs
  *
@@ -212,10 +212,6 @@ private:
     void exposeState(Registry& registry, uint64_t idBase, uint32_t lid,
                      size_t axis, const std::string& base,
                      const std::string& grp) {
-        descriptors_.push_back(buildStateDescriptor(makeId(idBase, lid + kStateSnap),
-                                                    base + ".state"));
-        const StructDescriptor* sd = &descriptors_.back();
-
         auto snap = [this, axis](void* dest) {
             jog_.fillSnapshot(axis, *static_cast<Snapshot*>(dest), nowMs_());
         };
@@ -228,7 +224,6 @@ private:
         s.group = grp;
         s.valueType = ValueType::Binary;
         s.maxValueSize = sizeof(Snapshot);
-        s.structDesc = sd;
         s.varReadFn = [snap](void* d, size_t maxLen) -> size_t {
             if (maxLen < sizeof(Snapshot)) return 0;
             snap(d);
@@ -272,30 +267,9 @@ private:
         }
     }
 
-    static StructDescriptor buildStateDescriptor(uint64_t id,
-                                                 const std::string& name) {
-        StructDescriptor sd;
-        sd.entryId = id;
-        sd.name = name;
-        sd.totalSize = sizeof(Snapshot);
-        sd.fields = {
-            {"mode",        ValueType::U8,  offsetof(Snapshot, mode),        1, ""},
-            {"active",      ValueType::U8,  offsetof(Snapshot, active),      1, ""},
-            {"rate",        ValueType::F64, offsetof(Snapshot, rate),        8, "units/s"},
-            {"position",    ValueType::F64, offsetof(Snapshot, position),    8, "units"},
-            {"remaining",   ValueType::F64, offsetof(Snapshot, remaining),   8, "units"},
-            {"leaseLeftMs", ValueType::U32, offsetof(Snapshot, leaseLeftMs), 4, "ms"},
-            {"maxLeaseMs",  ValueType::U32, offsetof(Snapshot, maxLeaseMs),  4, "ms"},
-            {"maxRate",     ValueType::F64, offsetof(Snapshot, maxRate),     8, "units/s"},
-            {"maxIncrement",ValueType::F64, offsetof(Snapshot, maxIncrement),8, "units"},
-        };
-        return sd;
-    }
-
     tether::control::JogController& jog_;
     NowFn nowMs_;
     std::string prefix_;
-    std::deque<StructDescriptor> descriptors_;  ///< Stable descriptor storage
 };
 
 } // namespace tether::io::exposers

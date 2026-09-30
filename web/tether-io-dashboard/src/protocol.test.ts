@@ -39,39 +39,37 @@ describe('Tether IO protocol', () => {
     expect(encodeScalarArgument(ValueType.Bool, 1)).toEqual(Uint8Array.from([1]));
   });
 
-  it('builds CallFunctionReq with positional TLVs', () => {
+  it('builds CallFunctionReq with keyed schema payloads', () => {
     const req = makeCallFunctionRequest(0x1122334455667788n, [
-      { position: 0, type: ValueType.F64, value: encodeScalarArgument(ValueType.F64, 2.5) },
-      { position: 1, type: ValueType.U32, value: encodeScalarArgument(ValueType.U32, 300) },
+      { key: 1, value: encodeScalarArgument(ValueType.F64, 2.5) },
+      { key: 2, value: encodeScalarArgument(ValueType.U32, 300) },
     ]);
     const view = new DataView(req.buffer, req.byteOffset, req.byteLength);
     expect(view.getUint8(0)).toBe(MessageType.callFunctionReq);
     expect(view.getBigUint64(1, true)).toBe(0x1122334455667788n);
     expect(view.getUint32(9, true)).toBe(2);
-    // First TLV: pos 0, F64, len 8, payload.
-    expect(view.getUint32(13, true)).toBe(0);
-    expect(view.getUint8(17)).toBe(ValueType.F64);
-    expect(view.getUint32(18, true)).toBe(8);
-    expect(view.getFloat64(22, true)).toBe(2.5);
-    // Second TLV: pos 1, U32, len 4.
-    expect(view.getUint32(30, true)).toBe(1);
-    expect(view.getUint8(34)).toBe(ValueType.U32);
-    expect(view.getUint32(35, true)).toBe(4);
-    expect(view.getUint32(39, true)).toBe(300);
-    expect(req.length).toBe(43);
+    // First value: key 1, length 8, payload.
+    expect(view.getUint8(13)).toBe(1);
+    expect(view.getUint8(14)).toBe(8);
+    expect(view.getFloat64(15, true)).toBe(2.5);
+    // Second value: key 2, length 4, payload.
+    expect(view.getUint8(23)).toBe(2);
+    expect(view.getUint8(24)).toBe(4);
+    expect(view.getUint32(25, true)).toBe(300);
+    expect(req.length).toBe(29);
   });
 
-  it('parses CallFunctionResp success with return TLV', () => {
-    // type + id + success(0) + error(0) + msg("") + TLV(pos=0,F64,len=8,42.0)
-    const w = new BinaryWriter(1 + 8 + 1 + 4 + 2 + 9 + 8);
+  it('parses CallFunctionResp success with keyed return payload', () => {
+    // type + id + success(0) + error(0) + msg("") + hasReturn + key + len + value
+    const w = new BinaryWriter(1 + 8 + 1 + 4 + 2 + 1 + 1 + 1 + 8);
     w.u8(MessageType.callFunctionResp)
       .u64(0xdeadbeefn)
       .u8(0)
       .u32(0)
       .u16(0)
-      .u32(0)
-      .u8(ValueType.F64)
-      .u32(8)
+      .u8(1)
+      .varint(1)
+      .varint(8)
       .bytes(encodeScalarArgument(ValueType.F64, 42.0));
     const resp = readCallFunctionResponse(w.finish());
     expect(resp.success).toBe(true);

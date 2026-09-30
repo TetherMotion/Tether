@@ -278,7 +278,7 @@ TEST_F(RingStreamTest, SessionStreamsRingRows) {
 
     auto session = std::make_unique<Session>(
         std::move(transport), registry_, realNowUs, nullptr, nullptr,
-        nullptr, nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, nullptr,
         Framing::Slip, &ringSources_);
     SessionRunner runner;
     runner.session = session.get();
@@ -355,7 +355,7 @@ TEST_F(RingStreamTest, SessionFallsBackToPollingForUncoveredEntries) {
         std::move(transport), registry_,
         realNowUs,
         nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-        nullptr, Framing::Slip, &ringSources_);
+        Framing::Slip, &ringSources_);
     SessionRunner runner;
     runner.session = session.get();
     runner.thread = std::thread([&] { session->run(); });
@@ -395,7 +395,7 @@ TEST_F(RingStreamTest, NoStreamEntriesAreExcludedFromCollectPlan) {
         std::move(transport), registry_,
         realNowUs,
         nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-        nullptr, Framing::Slip, &ringSources_);
+        Framing::Slip, &ringSources_);
     SessionRunner runner;
     runner.session = session.get();
     runner.thread = std::thread([&] { session->run(); });

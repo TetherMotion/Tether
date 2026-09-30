@@ -378,18 +378,9 @@ private:
             });
         }
 
-        // Full raw PDO images (variable-length Binary signals) with
-        // StructDescriptors built from kPdoFields — clients can decode the
-        // packed images via DescribeStruct without an external schema.
+        // Full raw PDO images as variable-length Binary signals.
         const uint64_t rxImageId = makeId(idBase, 0x0100);
         const uint64_t txImageId = makeId(idBase, 0x0101);
-        rxImageDesc_ = buildImageDescriptor(rxImageId, "AS715N_RxPDO_1704",
-                                            sizeof(AS715N_pdo::AS715N_RxPDO_1704),
-                                            /*rx=*/true);
-        txImageDesc_ = buildImageDescriptor(txImageId, "AS715N_TxPDO_1B04",
-                                            sizeof(AS715N_pdo::AS715N_TxPDO_1B04),
-                                            /*rx=*/false);
-
         SignalEntry rxImg;
         rxImg.id          = rxImageId;
         rxImg.name        = prefix_ + ".pdo.rx_image";
@@ -397,7 +388,6 @@ private:
         rxImg.group       = group + ".pdo";
         rxImg.valueType   = ValueType::Binary;
         rxImg.maxValueSize = sizeof(AS715N_pdo::AS715N_RxPDO_1704);
-        rxImg.structDesc  = &rxImageDesc_;
         rxImg.varReadFn   = [this](void* d, size_t maxLen) -> size_t {
             AS715N_pdo::AS715N_RxPDO_1704 img{};
             if (maxLen < sizeof(img) || !pdo_.readRxPDO1704(img)) return 0;
@@ -413,7 +403,6 @@ private:
         txImg.group       = group + ".pdo";
         txImg.valueType   = ValueType::Binary;
         txImg.maxValueSize = sizeof(AS715N_pdo::AS715N_TxPDO_1B04);
-        txImg.structDesc  = &txImageDesc_;
         txImg.varReadFn   = [this](void* d, size_t maxLen) -> size_t {
             AS715N_pdo::AS715N_TxPDO_1B04 img{};
             if (maxLen < sizeof(img) || !pdo_.readTxPDO1B04(img)) return 0;
@@ -500,22 +489,6 @@ private:
             std::memcpy(d, &v, sizeof(v));
         };
         registry.addSignal(std::move(rd));
-    }
-
-    /// Build a StructDescriptor for one PDO image from kPdoFields.
-    StructDescriptor buildImageDescriptor(uint64_t entryId,
-                                          const char* typeName,
-                                          uint32_t totalSize, bool rx) {
-        StructDescriptor sd;
-        sd.entryId   = entryId;
-        sd.name      = typeName;
-        sd.totalSize = totalSize;
-        for (const auto& f : detail::kPdoFields) {
-            if (f.rx != rx) continue;
-            const char* nm = f.name + 3;  // strip "rx_"/"tx_" prefix
-            sd.fields.push_back({nm, f.type, f.offset, f.size, ""});
-        }
-        return sd;
     }
 
     void readPdoField(const detail::AS715NPdoField& f, void* d) {
@@ -668,9 +641,6 @@ private:
     uint16_t    driveIndex_;
     std::string prefix_;
     SpscRingStreamSource<AS715NPdoRow, RingCapacity> ringSource_;
-    // StructDescriptors for the raw PDO image signals (members — stable).
-    StructDescriptor rxImageDesc_;
-    StructDescriptor txImageDesc_;
 };
 
 } // namespace exposers

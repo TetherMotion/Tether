@@ -11,9 +11,9 @@ The Tether IO Protocol provides **real-time parameter and signal streaming** ove
 - **High-speed streaming** — periodic or change-based with configurable chunking and skip filtering
 - **Datalogging** — binary recording of sampled entries to a configurable sink
 - **Threshold filtering** — absolute, relative, or custom change detection per entry
-- **Feature exchange** — client/server capability negotiation
+- **Schema negotiation** — V6 catalog, definitions, and epoch-bound slots
 - **Snapshots** — bulk read of params or signals in one atomic request
-- **Binary struct descriptions** — composite value layouts with named fields
+- **Recursive schema values** — validated packed/tagged structs, collections, and variants
 - **Catalog change notifications** — server pushes when new params/signals are registered
 
 ## Architecture
@@ -57,9 +57,10 @@ The Tether IO Protocol provides **real-time parameter and signal streaming** ove
 | TcpTransport | `TcpTransport.hpp` | POSIX TCP transport implementation |
 | SerialTransport | `SerialTransport.hpp` | Serial transport with abstract driver (POSIX impl included) |
 | ThresholdFilter | `ThresholdFilter.hpp` | Change detection with absolute/relative/custom thresholds |
-| FeatureExchange | `FeatureExchange.hpp` | Client/server feature negotiation |
+| SchemaNegotiation | `SchemaNegotiation.hpp` | V6 bootstrap messages and negotiated limits |
+| SchemaCatalog | `SchemaCatalog.hpp` | Manifest, epoch, and schema-slot resolution |
+| SchemaValueCodec | `SchemaValueCodec.hpp` | Recursive schema-value validation |
 | Datalogging | `Datalogging.hpp` | Binary datalogging subsystem |
-| BinaryStruct | `BinaryStruct.hpp` | Composite struct field descriptions |
 | ParameterExposer | `ParameterExposer.hpp` | Interface for modules to expose their params/signals |
 
 ## Namespace
@@ -107,11 +108,13 @@ server.start();
 
 The wire protocol is transport-agnostic. A client:
 1. Connects via TCP to port 4000
-2. Sends `FeatureExchangeReq` to negotiate capabilities
-3. Sends `ListParamsReq` / `ListSignalsReq` to discover the catalog
-4. Sends `ConfigureStreamReq` with desired entry IDs and trigger mode
-5. Sends `StartStream` to begin receiving `StreamData` packets
-6. Sends `StopStream` to stop
+2. Sends `ClientHello` and validates `ServerHello`
+3. Requests missing definitions with `SchemaRequest` and validates each `SchemaDefinition`
+4. Sends `SchemaCommit` for the advertised epoch
+5. Sends `ListParamsReq` / `ListSignalsReq` to discover the catalog
+6. Sends `ConfigureStreamReq` with desired entry IDs and trigger mode
+7. Sends `StartStream` to begin receiving `StreamData` packets
+8. Sends `StopStream` to stop
 
 ## Exposer pattern
 
@@ -371,22 +374,19 @@ the real-time loop `consume()`s the newest sample and checks `fresh`
 against its deadline — applying filtered output or its own fallback (hold
 last, zero, unfiltered input) without ever blocking on the peer.
 
-## Feature exchange
+## Schema negotiation
 
-Clients and servers exchange capability sets at connection start:
+V6 sessions must complete `ClientHello`, `ServerHello`, optional
+`SchemaRequest` / `SchemaDefinition` exchanges, and `SchemaCommit` before any
+catalog, stream, snapshot, function, or input-stream traffic. `ServerHello`
+advertises a schema manifest and epoch; compact schema slots used in catalog,
+function, stream-filter, and input-stream payloads are valid only in that
+epoch.
 
-```
-Client → FeatureExchangeReq { client_name: "MyTool", ... }
-Server → FeatureExchangeResp { protocol_version: 1, max_stream_entries: 256, ... }
-```
-
-Standard feature names:
-- `protocol_version` (U32) — always present
-- `client_name` / `server_name` (String)
-- `max_stream_entries` (U32)
-- `supports_datalogging` (Bool)
-- `supports_threshold` (Bool)
-- `supports_binary_struct` (Bool)
+Clients cache definitions by key and digest, independently validate requested
+definitions, and reject stale epochs or slots. See
+[IOProtocolWireFormat.md](IOProtocolWireFormat.md) for the byte-level
+bootstrap, value encoding, and rejection rules.
 
 ## Serial transport
 

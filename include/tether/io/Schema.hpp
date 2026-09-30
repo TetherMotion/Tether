@@ -237,9 +237,19 @@ inline bool isFixedScalar(ValueType type) {
     return valueTypeSize(type) != 0;
 }
 
-inline bool isMapKeyKind(SchemaKind kind) {
-    return kind == SchemaKind::Scalar || kind == SchemaKind::String ||
-           kind == SchemaKind::Bytes || kind == SchemaKind::Enum || kind == SchemaKind::Alias;
+inline bool isMapKeySchema(const SchemaGraph& graph, const SchemaRef& ref) {
+    const SchemaNode* node = graph.find(ref.key);
+    while (node && node->kind == SchemaKind::Alias) {
+        if (!node->target) return false;
+        node = graph.find(node->target->key);
+    }
+    if (!node) return false;
+    if (node->kind == SchemaKind::String || node->kind == SchemaKind::Bytes ||
+        node->kind == SchemaKind::Enum) {
+        return true;
+    }
+    return node->kind == SchemaKind::Scalar && node->scalarType != ValueType::F32 &&
+           node->scalarType != ValueType::F64;
 }
 
 inline bool isKnownRestriction(RestrictionKind kind) {
@@ -303,7 +313,7 @@ inline SchemaValidationResult validateReferences(const SchemaGraph& graph, const
     if (node.mapKey && !require(*node.mapKey)) return SchemaValidationResult::failure("missing map key schema");
     if (node.mapValue && !require(*node.mapValue)) return SchemaValidationResult::failure("missing map value schema");
     if (node.kind == SchemaKind::Map && node.mapKey &&
-        !isMapKeyKind(graph.find(node.mapKey->key)->kind))
+        !isMapKeySchema(graph, *node.mapKey))
         return SchemaValidationResult::failure("map key schema is not map-key eligible");
     if (node.target && !require(*node.target)) return SchemaValidationResult::failure("missing target schema");
     for (const auto& field : node.fields) {

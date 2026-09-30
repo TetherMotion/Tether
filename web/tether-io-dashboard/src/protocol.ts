@@ -116,6 +116,7 @@ export interface CatalogEntry {
  * One parameter of a remotely callable function.
  */
 export interface FunctionParameter {
+  key: number;
   name: string;
   description: string;
   schemaSlot: number;
@@ -433,15 +434,14 @@ export function makeGetRequest(type: number, id: bigint): Uint8Array {
 }
 
 /**
- * One positional function argument for a CallFunctionReq.
+ * One keyed schema-directed function argument for a CallFunctionReq.
  *
  * `value` is the raw little-endian payload (e.g. 8 bytes for F64, 4 for
  * U32, 1 for Bool — see {@link encodeScalarArgument}).
  */
 export interface FunctionCallArg {
-  /** Zero-based parameter position. */
-  position: number;
-  type: ValueType;
+  /** Stable, non-zero parameter key from the function catalog. */
+  key: number;
   value: Uint8Array;
 }
 
@@ -449,14 +449,15 @@ export interface FunctionCallArg {
  * Build a CallFunctionReq message.
  *
  * Body layout: `functionId(u64) + argCount(u32)`
- *   + argCount × [position(u32) + type(u8) + length(u32) + value].
+ *   + argCount × [parameterKey(varint) + length(varint) + value].
  */
 export function makeCallFunctionRequest(functionId: bigint, args: FunctionCallArg[]): Uint8Array {
-  const total = args.reduce((sum, a) => sum + a.value.length, 0);
-  const w = new BinaryWriter(1 + 8 + 4 + args.length * 9 + total);
+  const total = args.reduce((sum, a) => sum + a.value.length + 10, 0);
+  const w = new BinaryWriter(1 + 8 + 4 + total);
   w.u8(MessageType.callFunctionReq).u64(functionId).u32(args.length);
   for (const a of args) {
-    w.u32(a.position).u8(a.type).u32(a.value.length).bytes(a.value);
+    if (a.key <= 0) throw new Error('function parameter key must be non-zero');
+    w.varint(a.key).varint(a.value.length).bytes(a.value);
   }
   return w.finish();
 }
@@ -528,8 +529,8 @@ export interface FunctionCallResponse {
  * Wire layout:
  *   type(u8) + functionId(u64) + success(u8)
  *   + error(u32) + errorMessage(string16)
- *   + [if success && hasReturn] returnTLV(position u32 + type u8
- *       + length u32 + value).
+ *   + [if success] hasReturn(u8)
+ *   + [if hasReturn] returnKey(varint = 1) + length(varint) + value.
  */
 export function readCallFunctionResponse(payload: Uint8Array): FunctionCallResponse {
   const reader = new BinaryReader(payload);
@@ -539,10 +540,12 @@ export function readCallFunctionResponse(payload: Uint8Array): FunctionCallRespo
   const error = reader.u32();
   const errorMessage = reader.string16();
   let returnValue: Uint8Array = new Uint8Array();
-  if (success && reader.remaining > 0) {
-    reader.u32(); // position (always 0 — single return)
-    reader.u8(); // type
-    returnValue = reader.bytesOf(reader.u32());
+  if (success) {
+    const hasReturn = reader.u8() !== 0;
+    if (hasReturn) {
+      if (reader.varint() !== 1) throw new Error('invalid function return key');
+      returnValue = reader.bytesOf(reader.varint());
+    }
   }
   reader.assertEnd();
   return { functionId, success, error, errorMessage, returnValue };
@@ -649,7 +652,7 @@ export function readEntryCatalog(payload: Uint8Array): CatalogEntry[] {
  *
  * Wire layout (per function):
  *   id(u64) + name(string16) + description(string16) + group(string16)
- *   + paramCount(u32) + paramCount × [name + description + schemaSlot(u32) + flags(u32)
+ *   + paramCount(u32) + paramCount × [parameterKey(u32) + name + description + schemaSlot(u32) + flags(u32)
  *       + [if flags & 2] defaultValue(varint-length-prefixed)
  *       + metadataCount(u32) + metadataCount × [key(string16) + value(string16)]]
  *   + hasReturn(u8) + [if hasReturn] [name + description + schemaSlot(u32) + flags(u32)
@@ -671,6 +674,7 @@ export function readFunctionCatalog(payload: Uint8Array): FunctionEntry[] {
     const parameters: FunctionParameter[] = [];
     for (let p = 0, total = reader.u32(); p < total; p += 1) {
       const parameter = {
+        key: reader.u32(),
         name: reader.string16(),
         description: reader.string16(),
         schemaSlot: reader.u32(),

@@ -245,38 +245,6 @@ TEST(IORegistryExtra, WriteVarOnSignalNoOp) {
 }
 
 // ===========================================================================
-// Struct entry with descriptor
-// ===========================================================================
-
-TEST(IORegistryExtra, ParamWithStructDescriptor) {
-    Registry reg;
-
-    StructDescriptor sd;
-    sd.entryId = 1;
-    sd.name = "MyStruct";
-    sd.totalSize = 8;
-    sd.fields = {
-        {"x", ValueType::F32, 0, 4, "m"},
-        {"y", ValueType::F32, 4, 4, "m"},
-    };
-
-    ParamEntry p;
-    p.id = 1;
-    p.name = "struct_param";
-    p.valueType = ValueType::Struct;
-    p.readFn = [](void*) {};
-    p.structDesc = &sd;
-    reg.addParam(std::move(p));
-
-    EntryView v = reg.findParam(1);
-    ASSERT_TRUE(static_cast<bool>(v));
-    EXPECT_NE(v.structDesc(), nullptr);
-    EXPECT_EQ(v.structDesc()->name, "MyStruct");
-    EXPECT_TRUE(v.flags() & EntryFlags::HasStruct);
-    EXPECT_TRUE(v.isVariableLength());  // Struct is variable
-}
-
-// ===========================================================================
 // FindParam returns nothing for signals and vice versa
 // ===========================================================================
 
@@ -385,26 +353,6 @@ TEST(IORegistryExtra, NoMetadata) {
     int count = 0;
     v.forEachMetadata([&count](std::string_view, std::string_view) { ++count; });
     EXPECT_EQ(count, 0);
-}
-
-// ===========================================================================
-// SignalEntry flags with structDesc
-// ===========================================================================
-
-TEST(IORegistryExtra, SignalWithStructDescFlags) {
-    StructDescriptor sd;
-    sd.entryId = 1;
-    sd.name = "S";
-
-    SignalEntry s;
-    s.id = 1;
-    s.name = "sig";
-    s.valueType = ValueType::Struct;
-    s.readFn = [](void*) {};
-    s.structDesc = &sd;
-
-    EXPECT_TRUE(s.flags() & EntryFlags::HasStruct);
-    EXPECT_TRUE(s.isVariableLength());
 }
 
 // ===========================================================================

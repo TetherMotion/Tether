@@ -36,7 +36,6 @@ Session::Session(std::unique_ptr<ITransport> transport,
                  Registry& registry,
                  TimestampFn tsFn,
                  LogFn logFn,
-                 const FeatureSet* serverFeatures,
                  DatalogRecorder* datalogRecorder,
                  InputStreamCreateFn inputStreamCreateFn,
                  InputStreamDataFn inputStreamDataFn,
@@ -49,7 +48,6 @@ Session::Session(std::unique_ptr<ITransport> transport,
     , registry_(registry)
     , getTimestampUs_(tsFn)
     , logFn_(logFn)
-    , serverFeatures_(serverFeatures)
     , datalogRecorder_(datalogRecorder)
     , inputStreamCreateFn_(std::move(inputStreamCreateFn))
     , inputStreamDataFn_(std::move(inputStreamDataFn))
@@ -634,37 +632,32 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
             sendError(ErrorCode::InvalidMessage, "Invalid stream filter name");
             return;
         }
-        ValueType filterType = static_cast<ValueType>(r.getU8());
-        if (!r.ok()) {
-            sendError(ErrorCode::InvalidMessage, "Truncated stream filter type");
-            return;
-        }
-        const uint8_t fixedSize = valueTypeSize(filterType);
         FilterProperty property;
         property.name.assign(reinterpret_cast<const char*>(name), nameLen);
-        property.value.type = filterType;
-        if (fixedSize != 0) {
-            const uint8_t* value = r.getBytes(fixedSize);
-            if (!r.ok()) {
-                sendError(ErrorCode::InvalidMessage, "Truncated stream filter value");
-                return;
-            }
-            property.value.data.assign(value, value + fixedSize);
-        } else if (!isVariableLength(filterType)) {
-            sendError(ErrorCode::InvalidMessage, "Unknown stream filter type");
+        property.value.schemaEpoch = r.getU32();
+        property.value.schemaSlot = r.getU32();
+        const uint32_t valueLen = r.getVarint();
+        const auto* node = schemaCatalog_ ? schemaCatalog_->resolve(
+            property.value.schemaEpoch, property.value.schemaSlot) : nullptr;
+        const auto* manifest = schemaCatalog_ ? schemaCatalog_->describe(
+            property.value.schemaSlot) : nullptr;
+        if (!r.ok() || !node || !manifest || valueLen > MAX_VARIABLE_VALUE_SIZE ||
+            valueLen > r.remaining()) {
+            sendError(ErrorCode::InvalidMessage, "Invalid stream filter schema");
             return;
-        } else {
-            const uint32_t valueLen = r.getVarint();
-            if (!r.ok() || valueLen > MAX_VARIABLE_VALUE_SIZE) {
-                sendError(ErrorCode::InvalidMessage, "Invalid stream filter value length");
-                return;
-            }
-            const uint8_t* value = r.getBytes(valueLen);
-            if (!r.ok()) {
-                sendError(ErrorCode::InvalidMessage, "Truncated stream filter value");
-                return;
-            }
-            property.value.data.assign(value, value + valueLen);
+        }
+        const uint8_t* value = r.getBytes(valueLen);
+        if (!r.ok()) {
+            sendError(ErrorCode::InvalidMessage, "Truncated stream filter value");
+            return;
+        }
+        property.value.schemaKey = manifest->ref.key;
+        property.value.data.assign(value, value + valueLen);
+        BufReader valueReader(property.value.data.data(), property.value.data.size());
+        if (!validateSchemaValue(*schemaCatalog_->graph(), manifest->ref.key, valueReader) ||
+            valueReader.remaining() != 0) {
+            sendError(ErrorCode::InvalidMessage, "Invalid stream filter value");
+            return;
         }
         const auto validation = registry_.validateStreamFilter(property);
         if (!validation.ok) {
@@ -1095,7 +1088,7 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
                 sendError(ErrorCode::TooManyEntries, "Function catalog response too large");
                 return;
             }
-            size += 4 + 4;
+            size += 4 + 4 + 4;
             if (parameter.hasDefault) {
                 if (parameter.defaultValue.size() > MAX_VARIABLE_VALUE_SIZE ||
                     size > MAX_MESSAGE_SIZE - MAX_VARINT_SIZE - parameter.defaultValue.size()) {
@@ -1170,9 +1163,11 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
         writeString(function.description());
         writeString(function.group());
         w.putU32(static_cast<uint32_t>(function.parameterCount()));
-        for (const auto& parameter : function.parameters()) {
+        for (size_t position = 0; position < function.parameterCount(); ++position) {
+            const auto& parameter = function.parameters()[position];
             writeString(parameter.name);
             writeString(parameter.description);
+            w.putU32(functionParameterKey(parameter, position));
             w.putU32(parameter.schemaSlot);
             w.putU32(parameter.flags());
             if (parameter.hasDefault) {
@@ -1191,8 +1186,7 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
             writeString(result.name);
             writeString(result.description);
             w.putU32(result.schemaSlot);
-            w.putU32((result.enumReference != 0 ? FunctionParameterFlags::HasEnum : 0) |
-                     (result.structReference != 0 ? FunctionParameterFlags::HasStruct : 0));
+            w.putU32(result.enumReference != 0 ? FunctionParameterFlags::HasEnum : 0);
             w.putU32(static_cast<uint32_t>(result.metadata.size()));
             for (const auto& [key, value] : result.metadata) {
                 writeString(key);
@@ -1297,12 +1291,12 @@ void Session::handleInvokeExResp(const uint8_t* body, size_t len) {
     result.success = (status == 0);
     result.error = static_cast<ErrorCode>(errorCode);
     result.errorMessage.assign(reinterpret_cast<const char*>(errorBytes), errorLength);
-    if (result.success && r.remaining() >= FUNCTION_TLV_HEADER_SIZE) {
-        FunctionArgument returnTlv;
-        if (decodeFunctionTlv(r, returnTlv)) {
+    const bool hasReturnValue = result.success && r.getU8() != 0;
+    if (result.success && hasReturnValue) {
+        FunctionArgument returnValue;
+        if (decodeFunctionValue(r, returnValue) && returnValue.key == 1) {
             result.hasReturnValue = true;
-            result.returnType = returnTlv.type;
-            result.returnValue = std::move(returnTlv.value);
+            result.returnValue = std::move(returnValue.value);
         } else {
             result.success = false;
             result.error = ErrorCode::FunctionInvocationError;
@@ -1360,7 +1354,7 @@ bool Session::callPeer(uint64_t functionId,
     if (!callback) return false;
     size_t size = 1 + 8 + 8 + 8 + 4;
     for (const auto& argument : arguments) {
-        size += FUNCTION_TLV_HEADER_SIZE + argument.value.size();
+        size += FUNCTION_VALUE_HEADER_MAX_SIZE + argument.value.size();
         if (size > MAX_MESSAGE_SIZE) return false;
     }
     const uint64_t now = getTimestampUs_();
@@ -1378,8 +1372,8 @@ bool Session::callPeer(uint64_t functionId,
     w.putU64(deadlineUs);
     w.putU32(static_cast<uint32_t>(arguments.size()));
     for (const auto& argument : arguments) {
-        if (!encodeFunctionTlv(w, argument.position, argument.type,
-                               argument.value.data(), argument.value.size())) {
+        const uint32_t key = argument.key != 0 ? argument.key : argument.position + 1;
+        if (!encodeFunctionValue(w, key, argument.value.data(), argument.value.size())) {
             return false;
         }
     }
@@ -1486,11 +1480,14 @@ void Session::handleCreateInputStreamReq(const uint8_t* body, size_t len) {
     }
 
     BufReader reader(body, len);
-    ValueDescriptor descriptor;
+    const SchemaEpoch epoch = reader.getU32();
+    const SchemaSlot slot = reader.getU32();
     const uint32_t maxValueSize = reader.getU32();
     const uint32_t maxBatchSize = reader.getU32();
-    if (!reader.ok() || !decodeValueDescriptor(reader, descriptor) ||
-        reader.remaining() != 0 || maxValueSize == 0 || maxValueSize > MAX_VARIABLE_VALUE_SIZE ||
+    const auto* node = schemaCatalog_ ? schemaCatalog_->resolve(epoch, slot) : nullptr;
+    const auto* manifest = schemaCatalog_ ? schemaCatalog_->describe(slot) : nullptr;
+    if (!reader.ok() || reader.remaining() != 0 || !node || !manifest ||
+        maxValueSize == 0 || maxValueSize > MAX_VARIABLE_VALUE_SIZE ||
         maxBatchSize == 0 || maxBatchSize > MAX_AGGREGATE_ELEMENTS) {
         sendError(ErrorCode::InvalidMessage, "Invalid input stream descriptor");
         return;
@@ -1498,11 +1495,13 @@ void Session::handleCreateInputStreamReq(const uint8_t* body, size_t len) {
 
     if (nextInputStreamId_ == 0) nextInputStreamId_ = 1;
     const uint32_t streamId = nextInputStreamId_++;
-    if (!inputStreamCreateFn_(streamId, descriptor, maxValueSize, maxBatchSize)) {
+    if (!inputStreamCreateFn_(streamId, manifest->ref, epoch, slot,
+                              maxValueSize, maxBatchSize)) {
         sendError(ErrorCode::InternalError, "Input stream rejected");
         return;
     }
-    inputStreams_.push_back({streamId, std::move(descriptor), maxValueSize, maxBatchSize});
+    inputStreams_.push_back({streamId, manifest->ref, epoch, slot,
+                             maxValueSize, maxBatchSize});
     sendInputStreamResponse(MessageType::CreateInputStreamResp, streamId, true);
 }
 
@@ -1532,7 +1531,13 @@ void Session::handleInputStreamData(const uint8_t* body, size_t len) {
         const uint32_t valueLength = reader.getU32();
         const uint8_t* value = reader.getBytes(valueLength);
         if (!reader.ok() || valueLength > stream->maxValueSize ||
-            !validateValuePayload(stream->value, value, valueLength)) {
+            !schemaCatalog_ || !schemaCatalog_->graph()) {
+            sendError(ErrorCode::InvalidMessage, "Invalid input stream value");
+            return;
+        }
+        BufReader valueReader(value, valueLength);
+        if (!validateSchemaValue(*schemaCatalog_->graph(), stream->schema.key, valueReader) ||
+            valueReader.remaining() != 0) {
             sendError(ErrorCode::InvalidMessage, "Invalid input stream value");
             return;
         }
@@ -1659,7 +1664,8 @@ void Session::sendFunctionCallResponse(uint64_t functionId,
     const size_t valueSize = std::min(result.returnValue.size(), MAX_VARIABLE_VALUE_SIZE);
     const bool hasReturnValue = result.success && returnValue.present;
     const size_t totalSize = 1 + 8 + 1 + 4 + 2 + messageSize +
-                             (hasReturnValue ? FUNCTION_TLV_HEADER_SIZE + valueSize : 0);
+                             (result.success ? 1 : 0) +
+                             (hasReturnValue ? FUNCTION_VALUE_HEADER_MAX_SIZE + valueSize : 0);
     if (totalSize > MAX_MESSAGE_SIZE) {
         sendError(ErrorCode::InternalError, "Function response too large");
         return;
@@ -1675,9 +1681,9 @@ void Session::sendFunctionCallResponse(uint64_t functionId,
     } else {
         writer.putU32(0);
         writer.putU16(0);
+        writer.putU8(hasReturnValue ? 1 : 0);
         if (hasReturnValue) {
-            encodeFunctionTlv(writer, 0, returnValue.type,
-                              result.returnValue.data(), valueSize);
+            encodeFunctionValue(writer, 1, result.returnValue.data(), valueSize);
         }
     }
     if (writer.ok()) sendRaw(raw.data(), writer.pos);
@@ -1690,7 +1696,7 @@ void Session::sendInvokeExResponse(uint64_t requestId,
     const size_t valueSize = std::min(result.returnValue.size(), MAX_VARIABLE_VALUE_SIZE);
     const bool hasReturnValue = result.success && returnValue.present;
     const size_t totalSize = 1 + 8 + 1 + 4 + 2 + messageSize +
-                             (hasReturnValue ? FUNCTION_TLV_HEADER_SIZE + valueSize : 0);
+                             1 + (hasReturnValue ? FUNCTION_VALUE_HEADER_MAX_SIZE + valueSize : 0);
     if (totalSize > MAX_MESSAGE_SIZE) {
         sendError(ErrorCode::InternalError, "InvokeEx response too large");
         return;
@@ -1702,9 +1708,11 @@ void Session::sendInvokeExResponse(uint64_t requestId,
     writer.putU8(result.success ? 0 : 1);
     writer.putU32(result.success ? 0 : static_cast<uint32_t>(result.error));
     writer.putStr16(result.errorMessage.data(), messageSize);
-    if (hasReturnValue) {
-        encodeFunctionTlv(writer, 0, returnValue.type,
-                          result.returnValue.data(), valueSize);
+    if (result.success) {
+        writer.putU8(hasReturnValue ? 1 : 0);
+        if (hasReturnValue) {
+            encodeFunctionValue(writer, 1, result.returnValue.data(), valueSize);
+        }
     }
     if (writer.ok()) sendRaw(raw.data(), writer.pos);
 }

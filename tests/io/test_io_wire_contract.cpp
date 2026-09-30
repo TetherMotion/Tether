@@ -36,59 +36,53 @@ TEST(IOWireContract, ZigzagVectors) {
     EXPECT_EQ(zigzagDecode64(1), -1);
 }
 
-TEST(IOWireContract, FilterSchemaValidatesTypeAndRange) {
+TEST(IOWireContract, FilterSchemaValidatesSchemaKey) {
     StreamFilterSchema schema;
-    schema.defineProperty({"threshold", ValueType::F32, true, true, 0.0, 100.0});
+    std::array<uint8_t, 16> expected{};
+    expected[0] = 7;
+    schema.defineProperty({"threshold", expected, true});
 
     FilterProperty valid;
     valid.name = "threshold";
-    valid.value.type = ValueType::F32;
-    uint8_t encoded[4];
-    BufWriter writer(encoded, sizeof(encoded));
-    writer.putF32(42.0f);
-    valid.value.data.assign(encoded, encoded + sizeof(encoded));
+    valid.value.schemaKey = expected;
+    valid.value.data = {42, 0, 0, 0};
     EXPECT_TRUE(schema.validate(valid).ok);
 
-    valid.value.type = ValueType::U32;
+    valid.value.schemaKey[0] = 8;
     EXPECT_EQ(schema.validate(valid).errorType, FilterPropertyErrorType::WrongDataType);
 }
 
-TEST(IOWireContract, FunctionTlvLittleEndianVector) {
-    uint8_t bytes[13] = {};
+TEST(IOWireContract, FunctionValueVarintVector) {
+    uint8_t bytes[10] = {};
     const uint8_t value[] = {0xAA, 0xBB, 0xCC, 0xDD};
     BufWriter writer(bytes, sizeof(bytes));
-    ASSERT_TRUE(encodeFunctionTlv(writer, 0x78563412, ValueType::U32,
-                                  value, sizeof(value)));
+    ASSERT_TRUE(encodeFunctionValue(writer, 0x12, value, sizeof(value)));
     const uint8_t expected[] = {
-        0x12, 0x34, 0x56, 0x78, 0x03, 0x04, 0x00, 0x00, 0x00,
-        0xAA, 0xBB, 0xCC, 0xDD};
-    EXPECT_EQ(std::vector<uint8_t>(bytes, bytes + sizeof(bytes)),
+        0x12, 0x04, 0xAA, 0xBB, 0xCC, 0xDD};
+    EXPECT_EQ(std::vector<uint8_t>(bytes, bytes + writer.pos),
               std::vector<uint8_t>(expected, expected + sizeof(expected)));
 
-    BufReader reader(bytes, sizeof(bytes));
+    BufReader reader(bytes, writer.pos);
     FunctionArgument argument;
-    ASSERT_TRUE(decodeFunctionTlv(reader, argument));
-    EXPECT_EQ(argument.position, 0x78563412u);
-    EXPECT_EQ(argument.type, ValueType::U32);
+    ASSERT_TRUE(decodeFunctionValue(reader, argument));
+    EXPECT_EQ(argument.key, 0x12u);
     EXPECT_EQ(argument.value, std::vector<uint8_t>(value, value + sizeof(value)));
     EXPECT_EQ(reader.remaining(), 0u);
 }
 
-TEST(IOWireContract, FunctionTlvRejectsTruncatedAndOversizedValues) {
-    const uint8_t truncated[] = {0, 0, 0, 0, static_cast<uint8_t>(ValueType::Binary),
-                                 4, 0, 0, 0, 1, 2};
+TEST(IOWireContract, FunctionValueRejectsTruncatedAndOversizedValues) {
+    const uint8_t truncated[] = {1, 4, 1, 2};
     BufReader truncatedReader(truncated, sizeof(truncated));
     FunctionArgument argument;
-    EXPECT_FALSE(decodeFunctionTlv(truncatedReader, argument));
+    EXPECT_FALSE(decodeFunctionValue(truncatedReader, argument));
     EXPECT_FALSE(truncatedReader.ok());
 
-    uint8_t oversized[FUNCTION_TLV_HEADER_SIZE] = {};
+    uint8_t oversized[FUNCTION_VALUE_HEADER_MAX_SIZE] = {};
     BufWriter oversizedWriter(oversized, sizeof(oversized));
-    oversizedWriter.putU32(0);
-    oversizedWriter.putU8(static_cast<uint8_t>(ValueType::Binary));
-    oversizedWriter.putU32(static_cast<uint32_t>(MAX_VARIABLE_VALUE_SIZE + 1));
+    oversizedWriter.putVarint(1);
+    oversizedWriter.putVarint(static_cast<uint32_t>(MAX_VARIABLE_VALUE_SIZE + 1));
     ASSERT_TRUE(oversizedWriter.ok());
-    BufReader oversizedReader(oversized, sizeof(oversized));
-    EXPECT_FALSE(decodeFunctionTlv(oversizedReader, argument));
+    BufReader oversizedReader(oversized, oversizedWriter.pos);
+    EXPECT_FALSE(decodeFunctionValue(oversizedReader, argument));
     EXPECT_FALSE(oversizedReader.ok());
 }

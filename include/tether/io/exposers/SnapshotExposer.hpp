@@ -9,9 +9,8 @@
  * solves both with a single table-driven idiom:
  *
  * For every registered snapshot it emits:
- *  - "<name>"         — a Binary signal of `totalSize` bytes carrying a
- *                       StructDescriptor, so clients can DescribeStruct()
- *                       and decode every field without out-of-band schema.
+ *  - "<name>"         — a Binary signal of `totalSize` bytes carrying the
+ *                       snapshot payload.
  *  - "<name>.<field>" — one scalar signal per field, suitable for
  *                       individual polling and for ring-backed streaming.
  *
@@ -32,7 +31,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <deque>
 #include <string>
 #include <vector>
 
@@ -50,14 +48,9 @@ struct SnapshotField {
 
 /**
  * @class SnapshotExposer
- * @brief Registers POD snapshots as self-describing Binary signals plus
+ * @brief Registers POD snapshots as Binary signals plus
  *        per-field scalar signals.
  *
- * Descriptor storage is owned by the exposer (std::deque — stable
- * addresses), so StructDescriptor pointers handed to the registry stay
- * valid for the exposer's lifetime.  As with all exposers, callers must
- * ensure the registry is cleared (and the server stopped) before the
- * exposer is destroyed.
  */
 class SnapshotExposer : public IParameterExposer {
 public:
@@ -104,8 +97,6 @@ public:
     void expose(Registry& registry, uint64_t idBase) override {
         for (const auto& spec : specs_) {
             const uint64_t snapId = makeId(idBase, spec.localId);
-            descriptors_.push_back(buildDescriptor(spec, snapId));
-            const StructDescriptor* sd = &descriptors_.back();
             ReadFn snap = spec.snapshot;
             const uint16_t ts = spec.totalSize;
 
@@ -116,7 +107,6 @@ public:
             s.group       = spec.group;
             s.valueType   = ValueType::Binary;
             s.maxValueSize = ts;
-            s.structDesc  = sd;
             s.varReadFn   = [snap, ts](void* d, size_t maxLen) -> size_t {
                 if (maxLen < ts) return 0;
                 snap(d);
@@ -159,19 +149,6 @@ private:
         bool                      exposeScalarFields;
     };
 
-    static StructDescriptor buildDescriptor(const Spec& spec, uint64_t id) {
-        StructDescriptor sd;
-        sd.entryId   = id;
-        sd.name      = spec.name;
-        sd.totalSize = spec.totalSize;
-        sd.fields.reserve(spec.fields.size());
-        for (const auto& f : spec.fields) {
-            sd.fields.push_back({f.name, f.type, f.offset, f.size,
-                                 f.unit ? f.unit : ""});
-        }
-        return sd;
-    }
-
     /// "0=Init,1=PreOp,4=SafeOp" -> metadata["enum.0"]="Init", ...
     static void addEnumLabels(const char* labels,
                               std::map<std::string, std::string>& md) {
@@ -193,7 +170,6 @@ private:
 
     std::string                  moduleName_;
     std::vector<Spec>            specs_;
-    std::deque<StructDescriptor> descriptors_;
 };
 
 }}} // namespace tether::io::exposers

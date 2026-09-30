@@ -1,327 +1,211 @@
-# Tether IO Protocol — Wire Contract
+# Tether IO Protocol - Wire Contract
 
 The typed CiA 402 application profile built on these primitives is documented
-in [IOProtocolMachineProfile.md](IOProtocolMachineProfile.md). It defines the
-fixed `DriveSnapshotV1` value, catalog conventions, and command lifecycle
-without adding a new message type for each drive operation.
+in [IOProtocolMachineProfile.md](IOProtocolMachineProfile.md).
 
-**Protocol Version:** 5
+**Protocol Version:** 6
 
-Version 5 is the direct merged Tether/ParameterStream contract. It adopts
-ParameterStream message IDs `0x01`–`0x13`, retains Tether extensions
-`0x20`–`0x34`, and intentionally widens protocol counts to `uint32_t`.
-Compatibility with the unused Tether v1 wire ABI is not required.
+V6 is schema negotiated. A value is interpreted only through a committed
+schema catalog, not through a raw `ValueType`, a C++ object layout, or an
+application-defined discriminator.
 
-## Transport & Framing
+## Transport and framing
 
-All messages are framed using [SLIP (RFC 1055)](https://tools.ietf.org/html/rfc1055):
+All fixed-width multi-byte integers are little-endian. Every message begins
+with its one-byte `MessageType` discriminator.
 
-| Byte | Meaning |
-|---|---|
-| `0xC0` | END — packet delimiter |
-| `0xDB 0xDC` | Escaped END byte (data byte 0xC0) |
-| `0xDB 0xDD` | Escaped ESC byte (data byte 0xDB) |
+Byte-stream transports use [SLIP (RFC 1055)](https://tools.ietf.org/html/rfc1055):
 
-Each SLIP packet contains exactly **one** protocol message. The first byte of the decoded payload is the `MessageType` discriminator.
+| Bytes | Meaning |
+| --- | --- |
+| `0xC0` | Packet delimiter (`END`) |
+| `0xDB 0xDC` | Escaped `0xC0` |
+| `0xDB 0xDD` | Escaped `0xDB` |
 
-Malformed escape sequences and packets larger than the implementation maximum
-are discarded. Literal `0xC0` and `0xDB` are escaped as shown above.
+Each decoded SLIP packet contains exactly one message. A malformed escape or
+buffer overflow discards the current frame through its next `END` delimiter.
+Message-oriented transports may carry the same unframed message bytes.
 
-### Receive-buffer ownership and limits
+`Session` owns bounded encoded and decoded receive buffers. Dynamic buffers
+start at 8 KiB and do not grow beyond `MAX_ENCODED_MESSAGE_SIZE` and
+`MAX_MESSAGE_SIZE`, respectively.
 
-`Session` uses separate bounded buffers for the encoded SLIP accumulator and
-the decoded message. Applications may provide a fresh `IReceiveBuffer` from
-`ServerConfig::encodedBufferFactory` and `decodedBufferFactory` for every
-accepted connection. `StaticReceiveBuffer<N>` never allocates; users should
-choose `N` large enough for the largest encoded frame. `DynamicReceiveBuffer`
-starts at an initial capacity and grows geometrically, but never beyond its
-configured maximum. The default dynamic limits are an 8 KiB initial capacity,
-`MAX_ENCODED_MESSAGE_SIZE` for encoded data, and `MAX_MESSAGE_SIZE` for decoded
-data. Overflow discards the current frame until the next SLIP END delimiter.
+## Mandatory bootstrap
 
-### Drogon binary WebSocket example
+Before sending application traffic, a client must:
 
-When Drogon is available, the `tether_io_drogon_websocket` example exposes
-`ws://127.0.0.1:8080/tether-io`. WebSocket binary messages are treated as
-arbitrary transport chunks, queued into an `ITransport`, and processed by the
-same `Session` used by TCP and serial transports. Responses are sent as binary
-WebSocket messages containing SLIP-framed protocol packets. Build with
-`cmake -S . -B build` followed by `cmake --build build --target
-tether_io_drogon_websocket`, then run `build/bin/tether_io_drogon_websocket`.
+1. Send `ClientHello` (`0x50`).
+2. Receive `ServerHello` (`0x51`) with the selected version, limits, schema
+   epoch, and manifest.
+3. Request any missing definitions using `SchemaRequest` (`0x52`) and receive
+   one `SchemaDefinition` (`0x53`) for each requested schema.
+4. Validate the definitions and send `SchemaCommit` (`0x54`) for that epoch.
 
-## Byte order
-
-All multi-byte integers are **little-endian**.
-
-## Value types
-
-| ID | Name | Size (bytes) | Description |
-|---|---|---|---|
-| 1 | U8 | 1 | Unsigned 8-bit integer |
-| 2 | U16 | 2 | Unsigned 16-bit integer |
-| 3 | U32 | 4 | Unsigned 32-bit integer |
-| 4 | U64 | 8 | Unsigned 64-bit integer |
-| 5 | I8 | 1 | Signed 8-bit integer |
-| 6 | I16 | 2 | Signed 16-bit integer |
-| 7 | I32 | 4 | Signed 32-bit integer |
-| 8 | I64 | 8 | Signed 64-bit integer |
-| 9 | F32 | 4 | IEEE 754 single-precision float |
-| 10 | F64 | 8 | IEEE 754 double-precision float |
-| 11 | Bool | 1 | 0 = false, nonzero = true |
-| 12 | String | variable | Length-prefixed UTF-8 string (varint length + bytes) |
-| 13 | Binary | variable | Length-prefixed raw bytes (varint length + bytes) |
-| 14 | IPv4 | 4 | IPv4 address bytes |
-| 15 | IPv6 | 16 | IPv6 address bytes |
-| 16 | MAC | 6 | MAC address bytes |
-| 17 | Enum | variable | Named enum value, varint encoded |
-| 18 | UVarint | variable | Unsigned varint |
-| 19 | IVarint | variable | Zigzag signed varint |
-| 20 | Struct | variable | Composite binary struct |
-| 21 | Array | variable | U32 count followed by U32-length-delimited element payloads |
-| 22 | Stream | 4 | U32 input-stream handle |
-
-### Variable-length encoding
-
-Variable-length values (String, Binary) are encoded as:
-```
-[varint length] [length bytes of data]
-```
-
-## Varint encoding
-
-Protobuf-style variable-length unsigned 32-bit integer:
-- 7 bits per byte, MSB set if more bytes follow
-- LSB first (little-endian byte order)
-- Maximum 5 bytes (for values up to 2^32 - 1)
-- A fifth byte may contain only payload bit 0x0f; other encodings are rejected.
-
-The implementation limits messages and variable values to 1 MiB and catalog,
-stream, metadata, and filter counts to 1,000,000.
+Before commit, bootstrap traffic is limited to `ClientHello`, `ServerHello`,
+`SchemaRequest`, `SchemaDefinition`, `SchemaCommit`, and `SchemaReject` in
+their defined directions. Other inbound application messages are rejected with
+`Error(InvalidMessage, "Schema negotiation is not committed")`.
 
 ```
-Value 0-127:    [0xxxxxxx]
-Value 128-16383: [1xxxxxxx] [0xxxxxxx]
-...etc
+ClientHello := min_version U8 max_version U8 encoding_features U32 limits
+               cached_manifest
+ServerHello := selected_version U8 encoding_features U32 limits epoch U32 manifest
+
+limits := max_message_bytes U32 max_descriptor_bytes U32 max_definitions U32
+          max_value_bytes U32 max_value_depth U32 max_collection_entries U32
+manifest := count U32 * (schema_key[16] schema_digest[32] revision U32)
+
+SchemaRequest    := epoch U32 count U32 * schema_ref
+SchemaDefinition := epoch U32 schema_node
+SchemaCommit     := epoch U32
+SchemaReject     := code U8 message str16
+SchemaUpdate     := epoch U32 manifest
+schema_ref       := schema_key[16] schema_digest[32]
 ```
 
-## String encoding
+The current V6 implementation uses encoding features zero and defaults to a
+1 MiB message/value limit, 64 KiB descriptor limit, 1,024 definitions, value
+depth 32, and 1,000,000 collection entries. A server supports V6 only. If V6
+is not in the client range, it sends `SchemaReject(UnsupportedVersion)`.
 
-Strings in message fields (names, descriptions, etc.) are encoded as:
-```
-[U16 length] [length bytes of UTF-8 data]
-```
+`SchemaReject` codes are `UnsupportedVersion` (1), `LimitMismatch` (2),
+`InvalidManifest` (3), `InvalidDefinition` (4), `MissingDependency` (5), and
+`DigestMismatch` (6). Invalid bootstrap payloads and stale bootstrap epochs
+produce `Error(InvalidMessage)`.
 
-Note: this is distinct from Value encoding which uses varint-prefixed strings.
+## Catalog epochs and slots
 
-## Entry flags
+A `SchemaCatalog` installs a validated graph and manifest as a single epoch.
+Every manifest reference must identify a graph node with the matching revision
+and descriptor digest; missing nodes, duplicate entries, and digest mismatches
+are rejected. Each successful installation increments the nonzero epoch.
 
-Bitfield (U8):
+Slots are assigned by ascending schema key, starting at zero. A slot is valid
+only in its catalog epoch; resolving a stale epoch or an out-of-range slot
+fails. The server advertises the sorted manifest in `ServerHello` and may
+provide requested definitions from its graph before the client commits.
 
-| Bit | Name | Description |
-|---|---|---|
-| 0 | Readable | Entry can be read |
-| 1 | Writable | Entry can be written (parameters only) |
-| 2 | VariableLen | Value is variable-length |
-| 3 | HasStruct | Entry has a struct descriptor |
-| 4 | HasEnum | Entry has enum label metadata |
+A `SchemaRef` carries a 16-byte key and a 32-byte digest. A slot is merely its
+compact, epoch-bound catalog reference; it is never a globally stable type ID.
 
----
+## Schema definition wire form
 
-## Messages
-
-### 0x01 — ListParamsReq
-
-Client requests a page of the parameter catalog.
-
-```
-Offset  Size  Field
-0       1     MessageType = 0x01
-1       4     offset (U32) — starting index in catalog
-5       4     maxCount (U32) — max entries to return
-```
-
-### 0x02 — ListParamsResp
-
-Server responds with a page of parameter descriptors.
+Schema metadata strings use `[length U32][bytes]`; this is distinct from a
+schema `String` value.
 
 ```
-Offset  Size  Field
-0       1     MessageType = 0x02
-1       4     totalCount (U32) — total params in catalog
-5       4     offset (U32) — starting index of this page
-9       4     count (U32) — number of entries in this page
-13      ...   entry[0..count-1]
+schema_node := key[16] revision U32 kind U8 flags U32
+               name descriptor_string description descriptor_string
+               annotation_count U32 * (descriptor_string descriptor_string)
+               scalar_type U8 max_bytes U32 fixed_count U32
+               min_count U32 max_count U32 struct_encoding U8
+               has_element U8 [schema_ref]
+               has_map_key U8 [schema_ref]
+               has_map_value U8 [schema_ref]
+               has_target U8 [schema_ref]
+               field_count U32 * field
+               oneof_count U32 * (member_key U32 schema_ref)
+
+field := key U32 flags U32 presence U8 schema_ref
+         name descriptor_string description descriptor_string
+         restriction_count U32 * (kind U8 payload_length U32 payload)
+         default_length U32 default_value
 ```
 
-Each entry:
+Presence markers are exactly zero or one. Fields and `OneOf` members have
+strictly increasing nonzero keys. A graph must be dependency-complete,
+acyclic, and within the configured limits. Packed structs allow only required
+fields without defaults. Map keys may be strings, bytes, enums, or
+non-floating scalar schemas.
+
+Kinds are `Scalar`, `String`, `Bytes`, `Enum`, `Struct`, `FixedArray`,
+`DynamicArray`, `Optional`, `Map`, `OneOf`, and `Alias`. An alias encodes its
+target exactly. Scalars and enums use their `ValueType` representation.
+
+## Schema value encoding
+
+V6 schema lengths and counts use canonical 64-bit LSB-first base-128
+`varuint`s. They use at most ten bytes, byte ten may contain only bit zero,
+and nonminimal encodings are invalid.
+
+* `String`: UTF-8 bytes followed by a zero terminator. Embedded zeroes are
+  invalid; there is no length prefix.
+* `Bytes`: `[byte_length varuint][bytes]`.
+* Fixed scalars: their fixed-width little-endian representation. `UVarint`,
+  `IVarint`, and `Enum` use `varuint`.
+* Packed struct: concatenated required field values in declared key order.
+* Tagged struct: `[field_count varuint]`, then sorted unique
+  `[field_key varuint][payload_length varuint][payload]` values. Each required
+  field occurs once; optional fields may be omitted.
+* Fixed array: exactly `fixed_count` consecutive element values.
+* Dynamic array: `[count varuint]`, then
+  `[element_length varuint][element_payload]` for each element. The count
+  satisfies the schema bounds.
+* Map: `[count varuint]`, then
+  `[key_length varuint][key_payload][value_length varuint][value_payload]`.
+  Keys are valid map keys and strictly increasing in canonical key order.
+* Optional: `[present U8]`, where zero has no payload and one is followed by
+  the element value.
+* OneOf: `[member_key varuint][payload_length varuint][payload]`; the nonzero
+  member key must be declared by the schema.
+
+Lengths are bounded by the value-byte limit and remaining message bytes.
+Validation also enforces recursion depth, collection bounds, and exact
+consumption of each nested payload.
+
+## Schema-slot application behavior
+
+The retained parameter, signal, stream, function, and input-stream message
+IDs are usable only after V6 commit. Application values must validate against
+their catalog schema.
+
+`ConfigureAck` identifies its layout with an epoch and slots:
+
 ```
-Offset  Size  Field
-0       8     id (U64)
-8       1     valueType (ValueType enum)
-9       1     valueSize (U8) — fixed value size in bytes, 0 = variable
-10      1     flags (EntryFlags bitfield)
-11      2     nameLen (U16)
-13      N     name (UTF-8 bytes, N = nameLen)
-13+N    2     descLen (U16)
-15+N    M     description (UTF-8 bytes, M = descLen)
-15+N+M  2     groupLen (U16)
-17+N+M  G     group (UTF-8 bytes, G = groupLen)
+[type][spec_id U32][resolved_count U32][row_size U32][schema_epoch U64]
+  * [entry_id U64][schema_slot U32][value_size U8]
 ```
 
-### 0x20 — ListSignalsReq / 0x21 — ListSignalsResp
+Each configured stream filter is:
 
-Same request format as ListParamsReq and same response format as
-ListParamsResp, with MessageTypes `0x20`/`0x21`.
+```
+[name_length U8][name bytes][schema_epoch U32][schema_slot U32]
+[value_length varint32][value bytes]
+```
 
-### 0x03 — ConfigureStream
+Its slot must resolve in the supplied epoch, its value must validate against
+the referenced schema, and the registry must accept the named property.
+Unknown, unsupported, malformed, incorrectly typed, out-of-range,
+invalid-schema, or trailing filter data is rejected.
 
-`0x03` is the ParameterStream ConfigureStream request. Tether's stream layout
-uses `[trigger U8][interval_ms U32][chunk U32][skip U32][trigger_id U64]`
-`[entry_count U32][entry IDs U64...][filter_count U32]`, followed by filter
-properties. Each filter property is `[name length U8][name bytes][value type U8]`
-`[value]`. Filters are schema-validated and applied to rows; unknown,
-unsupported, wrong-type, malformed, out-of-range, or trailing properties are
-rejected.
+`ListFunctionsResp` carries its schema epoch and gives every parameter and
+return value a schema slot. Function calls carry
+`[field_key varint32][value_length varint32][value]`; the signature maps each
+nonzero key to its schema-backed parameter. Duplicate, unknown,
+missing-required, malformed, or schema-invalid fields are rejected. Omitted
+optional fields may use their declared defaults.
 
-### 0x04 — ConfigureAck
+`CreateInputStreamReq` carries a schema epoch/slot and maximum value and batch
+sizes. The slot must resolve in the committed epoch, and the creation callback
+may refuse it. Input batches contain a stream ID, bounded count, and
+length-delimited values. Every value must be within the configured size and
+validate against the stream schema before delivery. Unknown or closed stream
+IDs, malformed batches, invalid values, and trailing bytes are rejected.
 
-The response is `[type][spec_id U32][resolved_count U32][row_size U32]`,
-followed by resolved `[entry_id U64][value type U8][value size U8]` descriptors.
+## Staleness and rejection
 
-### 0x05 — StartStream
+Clients must discard a definition whose computed descriptor digest differs
+from its advertised `SchemaRef`. They must not commit an epoch until required
+definitions validate, and must not reuse a slot from a prior epoch.
 
-### 0x06 — StopStream
+Servers reject ordinary traffic before commit, requests or commits with the
+wrong epoch, unknown slots, values that do not consume their payload, and
+catalog values that do not match their installed schema. A client rejects a
+`ConfigureAck` whose schema epoch is stale; the resulting stream layout is
+valid only for the epoch it carries.
 
-### 0x07 — StreamData
+## Removed V5 facilities
 
-The response is `[type][spec_id U32][row_count U32]`, followed by timestamped
-rows. Timestamps are U64 microseconds and variable values are length-prefixed.
-
-### 0x09 — GetMetadataReq
-
-### 0x0A — GetMetadataResp
-
-### 0x0B — SetParameterReq
-
-### 0x0C — SetParameterResp
-
-### 0x0D — PingReq / 0x0E — PongResp
-
-### 0x0F — SubscribeLogReq / 0x10 — SubscribeLogResp
-
-### 0x11 — UnsubscribeLogReq / 0x12 — UnsubscribeLogResp
-
-### 0x13 — LogData
-
-Log subscriptions use minimum severity plus component, message, and location
-U16 string filters. LogData contains timestamp, severity, and those same three
-strings. Platform logger levels map Error/Warn/Info/Debug/Verbose to
-Error/Warn/Info/Debug/Trace. Delivery is asynchronous and does not replace the
-application's primary logger handler.
-
-### 0x20–0x34 — Tether extensions
-
-Tether extensions provide separate signal catalog operations, direct parameter
-and signal reads, snapshots, feature exchange, catalog notifications,
-datalogging, threshold configuration, and struct descriptions. `ListParams`
-always contains parameters only; signals are never merged into that response.
-
-Function RPC extensions are `0x35` ListFunctionsReq, `0x36` ListFunctionsResp,
-`0x37` CallFunctionReq, and `0x38` CallFunctionResp.
-
-### Recursive function value descriptors
-
-Function parameters and returns may carry a recursive descriptor. A descriptor
-is encoded as a type byte. An `Array` descriptor is followed by one element
-descriptor. A `Struct` descriptor is followed by a U32 field count and ordered
-fields, each encoded as `[name U16][name bytes][descriptor]`. Descriptor names
-are annotations; struct payloads use the corresponding field positions.
-
-Aggregate payloads are encoded as follows:
-
-* `Array`: `[count U32]`, then `count` repetitions of `[length U32][payload]`.
-* `Struct`: `[field_count U32]`, then positional TLVs of
-	`[position U32][value_type U8][length U32][payload]`. Each declared field
-	occurs exactly once, and positions may be sent in any order.
-
-Nested descriptors and payloads are bounded by the implementation's aggregate
-depth, field, element, message, and value-size limits. Scalar fixed-size values
-must have their exact size; varints must be canonical bounded varints.
-The descriptor is advertised in `ListFunctionsResp` as a presence byte,
-descriptor length U32, and descriptor bytes after each value's maximum-size
-field. Existing scalar clients can ignore the descriptor when its presence byte
-is zero.
-
-## Function RPC
-
-`ListFunctionsReq` is `[type][offset U32][max_count U32]`. Its response is
-`[type][total U32][offset U32][count U32]`, followed by function descriptors.
-Each descriptor contains an ID, name, description, group, ordered parameter
-annotations, an optional return annotation, and function metadata. Each
-parameter annotation contains its name, description, type, flags, optional enum
-and struct references, maximum value size, optional default value, and metadata.
-
-`CallFunctionReq` is `[type][function_id U64][argument_count U32]` followed by
-bounded TLV tuples. Every tuple is `[position U32][value_type U8][length U32]`
-`[value bytes]`. Names are descriptive; calls use positions. The server validates
-position, type, length, uniqueness, and maximum size before invoking a callback.
-Missing optional arguments are filled with their annotated defaults. Optional
-arguments must be a suffix of the parameter list.
-
-`CallFunctionResp` contains the function ID, status, error code and error string;
-successful responses additionally carry a return-value TLV tuple at position 0.
-
-### Symmetric invocation (InvokeEx)
-
-`InvokeExReq` (`0x3E`) and `InvokeExResp` (`0x3F`) carry the same invocation
-semantics as CallFunction but are valid in **both directions** and correlate
-concurrent requests with an explicit `request_id`. A client may invoke server
-functions; a server may invoke functions the client published via
-`RegisterFunctionsReq`.
-
-`InvokeExReq` is
-`[type][request_id U64][function_id U64][deadline_us U64][argument_count U32]`
-followed by the same positional argument TLVs as `CallFunctionReq`.
-`deadline_us` is a relative deadline hint in the initiator's clock domain:
-the initiator enforces it locally; a responder that sees it may use it to
-bound its own work. `0` means no deadline.
-
-`InvokeExResp` is
-`[type][request_id U64][status U8][error_code U32][error str16]`, followed by
-an optional return-value TLV tuple at position 0 when `status` is 0 and the
-function declares a return value. `request_id` echoes the request, so any
-number of calls may be outstanding on one connection, interleaved with all
-other message types. A response that arrives after its deadline or with an
-unknown `request_id` is discarded. A locally expired deadline is reported to
-the initiator's application as `ErrorCode::Timeout` (`15`) — it is never a
-wire message.
-
-`RegisterFunctionsReq` (`0x40`) publishes the catalog of functions the
-*client* hosts. Its body is `[type][count U32]` followed by `count` function
-descriptors in the same format as `ListFunctionsResp` entries. The catalog
-is session-scoped and replaced wholesale by each request; it disappears when
-the connection ends. `RegisterFunctionsResp` (`0x41`) is
-`[type][count U32][status U8]` with status 0 on success.
-
-Outstanding `InvokeEx` calls are bounded per session
-(`MAX_PENDING_INVOKES` = 256); calls beyond the bound are refused before
-sending. Argument validation, default materialization, and return-value
-checking are identical to `CallFunctionReq`.
-
-### Input streams
-
-`CreateInputStreamReq` (`0x39`) is encoded as
-`[max_value_size U32][max_batch_size U32][value descriptor]`. The server returns
-`CreateInputStreamResp` (`0x3A`) as `[stream_id U32][status U8]`, where status
-zero means success. The stream ID is a handle and may be passed as a `Stream`
-function argument or returned as a `Stream` function value; streamed values do
-not use function TLVs.
-
-`InputStreamData` (`0x3B`) is
-`[stream_id U32][count U32]` followed by `count` repetitions of
-`[value_length U32][value payload]`. Every value is validated against the
-stream's descriptor and configured size/count limits before delivery to the
-application callback. `CloseInputStreamReq` (`0x3C`) is `[stream_id U32]` and
-its response (`0x3D`) has the same `[stream_id U32][status U8]` body. Unknown
-or closed stream IDs, malformed batches, invalid values, and trailing bytes
-are rejected with an Error message.
+V6 does not use `FeatureExchange`, `DescribeStruct`, `StructDescriptor`, or
+raw V5 layout contracts for schema discovery. Retained message IDs do not
+replace the mandatory V6 bootstrap and catalog.
