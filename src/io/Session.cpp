@@ -205,6 +205,13 @@ void Session::onMessage(const uint8_t* data, size_t len) {
     const uint8_t* body = data + 1;
     size_t bodyLen = len - 1;
 
+    if (schemaHelloReceived_ && !schemaCommitted_ &&
+        type != MessageType::ClientHello && type != MessageType::SchemaRequest &&
+        type != MessageType::SchemaDefinition && type != MessageType::SchemaCommit) {
+        sendError(ErrorCode::InvalidMessage, "Schema negotiation is not committed");
+        return;
+    }
+
     if (logFn_) {
         const char* name = "Unknown";
         switch (static_cast<uint8_t>(type)) {
