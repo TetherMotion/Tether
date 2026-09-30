@@ -132,6 +132,15 @@ enum class MessageType : uint8_t {
     RegisterFunctionsReq  = 0x40,
     RegisterFunctionsResp = 0x41,
 
+    // V6 schema negotiation bootstrap messages.
+    ClientHello            = 0x50,
+    ServerHello            = 0x51,
+    SchemaRequest          = 0x52,
+    SchemaDefinition       = 0x53,
+    SchemaCommit            = 0x54,
+    SchemaReject            = 0x55,
+    SchemaUpdate            = 0x56,
+
     // Source-compatible Tether names for the canonical v4 operations.
     ConfigureStreamReq  = ConfigureStream,
     ConfigureStreamAck  = ConfigureAck,

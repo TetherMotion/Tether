@@ -12,6 +12,7 @@
 #include <cstring>
 #include <thread>
 #include <chrono>
+#include <array>
 
 using namespace tether::io;
 
@@ -282,4 +283,24 @@ TEST_F(SessionTest, FeatureExchange) {
     const Feature* pv = serverFeatures.find("protocol_version");
     ASSERT_NE(pv, nullptr);
     EXPECT_EQ(pv->getU32(), PROTOCOL_VERSION);
+}
+
+TEST_F(SessionTest, V6ClientHelloReturnsServerHello) {
+    ClientHelloV6 hello;
+    std::array<uint8_t, 512> msg{};
+    BufWriter writer(msg.data(), msg.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::ClientHello));
+    encodeClientHelloV6(writer, hello);
+    ASSERT_TRUE(writer.ok());
+
+    const auto response = sendAndReceive(msg.data(), writer.pos);
+    ASSERT_GE(response.size(), 1U);
+    ASSERT_EQ(response[0], static_cast<uint8_t>(MessageType::ServerHello));
+
+    BufReader reader(response.data() + 1, response.size() - 1);
+    ServerHelloV6 serverHello;
+    ASSERT_TRUE(decodeServerHelloV6(reader, serverHello));
+    EXPECT_EQ(serverHello.selectedVersion, SCHEMA_PROTOCOL_VERSION);
+    EXPECT_EQ(serverHello.epoch, 1U);
+    EXPECT_TRUE(serverHello.schemas.empty());
 }

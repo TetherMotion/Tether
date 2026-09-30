@@ -18,6 +18,7 @@
 #pragma once
 
 #include "tether/io/Protocol.hpp"
+#include "tether/io/SchemaNegotiation.hpp"
 #include "tether/io/Registry.hpp"
 #include "tether/io/Transport.hpp"
 #include "tether/io/ReceiveBuffer.hpp"
@@ -179,6 +180,8 @@ private:
     void handleSnapshotParamsReq(const uint8_t* body, size_t len);
     void handleSnapshotSignalsReq(const uint8_t* body, size_t len);
     void handleFeatureExchangeReq(const uint8_t* body, size_t len);
+    void handleClientHello(const uint8_t* body, size_t len);
+    void handleSchemaCommit(const uint8_t* body, size_t len);
     void handleConfigureDatalogReq(const uint8_t* body, size_t len);
     void handleDatalogStatusReq();
     void handleConfigureThresholdReq(const uint8_t* body, size_t len);
@@ -344,6 +347,11 @@ private:
 
     // ==== Client features (received via FeatureExchangeReq) ====
     FeatureSet clientFeatures_;
+
+    // ==== V6 schema negotiation state ====
+    bool schemaHelloReceived_ = false;
+    bool schemaCommitted_ = false;
+    SchemaEpoch schemaEpoch_ = 0;
 
     // ==== Log subscriptions ====
     std::vector<LogSubscription> logSubscriptions_;
