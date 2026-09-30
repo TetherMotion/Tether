@@ -1,4 +1,5 @@
 #include "tether/io/Schema.hpp"
+#include "tether/io/SchemaDigest.hpp"
 
 #include <gtest/gtest.h>
 
@@ -171,6 +172,21 @@ TEST(IOSchema, ValidatesMapsOneOfAndFieldRestrictions) {
 
     map.mapKey = ref(4);
     EXPECT_FALSE(validateSchemaGraph(SchemaGraph{{string, scalar, map, oneOf, record}}));
+}
+
+TEST(IOSchema, ComputesStableBlake3DigestFromCanonicalDescriptor) {
+    SchemaNode node;
+    node.key = key(7);
+    node.kind = SchemaKind::String;
+    node.name = "machine.label";
+
+    const auto first = computeSchemaDigest(node);
+    const auto second = computeSchemaDigest(node);
+    EXPECT_EQ(first, second);
+    EXPECT_NE(first, SchemaDigest{});
+
+    node.name = "machine.other_label";
+    EXPECT_NE(computeSchemaDigest(node), first);
 }
 
 } // namespace
