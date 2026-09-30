@@ -24,7 +24,7 @@ TEST(IOSchemaWire, DefinitionRoundTrips) {
     source.annotations["ui.unit"] = "mm";
     source.fields.push_back({11, SchemaFieldFlags::Required, wireRef(2), "position", "Actual position"});
     source.fields.push_back({12, 0, wireRef(3), "label", "Optional label"});
-    source.variants.emplace_back(21, wireRef(4));
+    source.oneOfMembers.emplace_back(21, wireRef(4));
 
     std::array<uint8_t, 2048> bytes{};
     BufWriter writer(bytes.data(), bytes.size());
@@ -41,7 +41,7 @@ TEST(IOSchemaWire, DefinitionRoundTrips) {
     EXPECT_EQ(decoded.annotations, source.annotations);
     EXPECT_EQ(decoded.fields.size(), source.fields.size());
     EXPECT_EQ(decoded.fields[0].schema.key, source.fields[0].schema.key);
-    EXPECT_EQ(decoded.variants, source.variants);
+    EXPECT_EQ(decoded.oneOfMembers, source.oneOfMembers);
 }
 
 TEST(IOSchemaWire, RejectsTruncatedAndOversizedDefinitions) {

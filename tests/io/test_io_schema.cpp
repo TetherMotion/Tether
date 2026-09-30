@@ -133,5 +133,45 @@ TEST(IOSchema, ComputesPackedFixedSizeAndRejectsVariableSchemas) {
     EXPECT_FALSE(fixedSchemaSize(variableGraph, key(4)));
 }
 
+TEST(IOSchema, ValidatesMapsOneOfAndFieldRestrictions) {
+    SchemaNode string;
+    string.key = key(1);
+    string.kind = SchemaKind::String;
+
+    SchemaNode scalar;
+    scalar.key = key(2);
+    scalar.kind = SchemaKind::Scalar;
+    scalar.scalarType = ValueType::U32;
+
+    SchemaNode map;
+    map.key = key(3);
+    map.kind = SchemaKind::Map;
+    map.mapKey = ref(1);
+    map.mapValue = ref(2);
+    map.minCount = 1;
+    map.maxCount = 8;
+
+    SchemaNode oneOf;
+    oneOf.key = key(4);
+    oneOf.kind = SchemaKind::OneOf;
+    oneOf.oneOfMembers = {{10, ref(1)}, {20, ref(2)}};
+
+    SchemaNode record;
+    record.key = key(5);
+    record.kind = SchemaKind::Struct;
+    SchemaField mapField{1, 0, ref(3), "values", ""};
+    mapField.presence = FieldPresence::Optional;
+    mapField.restrictions = {{RestrictionKind::LengthRange, {1, 8}}};
+    SchemaField choiceField{2, 0, ref(4), "choice", ""};
+    choiceField.restrictions = {{RestrictionKind::AllowedMembers, {10, 20}}};
+    record.fields = {mapField, choiceField};
+
+    const auto result = validateSchemaGraph(SchemaGraph{{string, scalar, map, oneOf, record}});
+    EXPECT_TRUE(result) << result.message;
+
+    map.mapKey = ref(4);
+    EXPECT_FALSE(validateSchemaGraph(SchemaGraph{{string, scalar, map, oneOf, record}}));
+}
+
 } // namespace
 } // namespace tether::io
