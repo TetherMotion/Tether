@@ -217,8 +217,8 @@ export class TetherJogPanel extends HTMLElement {
     if (id === undefined || !this.client) return;
     try {
       await this.client.callFunction(id, [
-        { position: 0, type: ValueType.F64, value: encodeScalarArgument(ValueType.F64, rate) },
-        { position: 1, type: ValueType.U32, value: encodeScalarArgument(ValueType.U32, leaseMs) },
+        { key: 1, value: encodeScalarArgument(ValueType.F64, rate) },
+        { key: 2, value: encodeScalarArgument(ValueType.U32, leaseMs) },
       ]);
     } catch {
       // Transport-level failure — the server-side lease will expire and
@@ -231,7 +231,7 @@ export class TetherJogPanel extends HTMLElement {
     if (id === undefined || !this.client) return;
     const result = await this.client
       .callFunction(id, [
-        { position: 0, type: ValueType.F64, value: encodeScalarArgument(ValueType.F64, distance) },
+        { key: 1, value: encodeScalarArgument(ValueType.F64, distance) },
       ])
       .catch(() => undefined);
     if (result && !result.success)

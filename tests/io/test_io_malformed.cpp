@@ -1,8 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "tether/io/BinaryStruct.hpp"
 #include "tether/io/Datalogging.hpp"
-#include "tether/io/FeatureExchange.hpp"
 #include "tether/io/Function.hpp"
 #include "tether/io/ThresholdFilter.hpp"
 
@@ -18,15 +16,6 @@ template <typename DecodeFn>
 bool decodeFrom(const std::vector<uint8_t>& bytes, DecodeFn&& decode) {
     BufReader reader(bytes.data(), bytes.size());
     return decode(reader);
-}
-
-std::vector<uint8_t> encodeStruct(const StructDescriptor& descriptor) {
-    std::vector<uint8_t> bytes(1024);
-    BufWriter writer(bytes.data(), bytes.size());
-    descriptor.encode(writer);
-    EXPECT_TRUE(writer.ok());
-    bytes.resize(writer.pos);
-    return bytes;
 }
 
 } // namespace
@@ -95,82 +84,6 @@ TEST(IOMalformed, ZigzagRoundTripsBoundaries) {
              std::numeric_limits<int64_t>::max()}) {
         EXPECT_EQ(zigzagDecode64(zigzagEncode64(value)), value);
     }
-}
-
-TEST(IOMalformed, FeatureDecodeRejectsHugeCount) {
-    std::array<uint8_t, 4> bytes{};
-    BufWriter writer(bytes.data(), bytes.size());
-    writer.putU32(1025);
-    FeatureSet output;
-    EXPECT_FALSE(decodeFrom(std::vector<uint8_t>(bytes.begin(), bytes.end()),
-                            [&output](BufReader& reader) {
-                                return FeatureSet::decode(reader, output);
-                            }));
-}
-
-TEST(IOMalformed, FeatureDecodeRejectsTruncatedValue) {
-    std::array<uint8_t, 32> bytes{};
-    BufWriter writer(bytes.data(), bytes.size());
-    writer.putU32(1);
-    writer.putStr16("x", 1);
-    writer.putU8(static_cast<uint8_t>(ValueType::Binary));
-    writer.putU32(4);
-    writer.putBytes("ab", 2);
-    ASSERT_TRUE(writer.ok());
-
-    FeatureSet output;
-    std::vector<uint8_t> encoded(bytes.begin(), bytes.begin() + writer.pos);
-    EXPECT_FALSE(decodeFrom(encoded, [&output](BufReader& reader) {
-        return FeatureSet::decode(reader, output);
-    }));
-}
-
-TEST(IOMalformed, FeatureDecodeRejectsTruncatedName) {
-    const uint8_t bytes[] = {1, 0, 0, 0, 4, 0, 'a'};
-    FeatureSet output;
-    EXPECT_FALSE(decodeFrom(std::vector<uint8_t>(std::begin(bytes), std::end(bytes)),
-                            [&output](BufReader& reader) {
-                                return FeatureSet::decode(reader, output);
-                            }));
-}
-
-TEST(IOMalformed, FeatureDecodeRejectsTruncatedTypeAndLength) {
-    const uint8_t bytes[] = {1, 0, 0, 0, 0, 0};
-    FeatureSet output;
-    EXPECT_FALSE(decodeFrom(std::vector<uint8_t>(std::begin(bytes), std::end(bytes)),
-                            [&output](BufReader& reader) {
-                                return FeatureSet::decode(reader, output);
-                            }));
-}
-
-TEST(IOMalformed, StructDecodeRejectsHugeFieldCount) {
-    std::array<uint8_t, 32> bytes{};
-    BufWriter writer(bytes.data(), bytes.size());
-    writer.putU64(1);
-    writer.putStr16("S", 1);
-    writer.putU32(0);
-    writer.putU32(MAX_COLLECTION_COUNT + 1);
-    ASSERT_TRUE(writer.ok());
-
-    StructDescriptor output;
-    std::vector<uint8_t> encoded(bytes.begin(), bytes.begin() + writer.pos);
-    EXPECT_FALSE(decodeFrom(encoded, [&output](BufReader& reader) {
-        return StructDescriptor::decode(reader, output);
-    }));
-}
-
-TEST(IOMalformed, StructDecodeRejectsTruncatedField) {
-    StructDescriptor source;
-    source.entryId = 1;
-    source.name = "S";
-    source.fields.push_back({"x", ValueType::U32, 0, 4, ""});
-    auto encoded = encodeStruct(source);
-    encoded.pop_back();
-
-    StructDescriptor output;
-    EXPECT_FALSE(decodeFrom(encoded, [&output](BufReader& reader) {
-        return StructDescriptor::decode(reader, output);
-    }));
 }
 
 TEST(IOMalformed, DatalogConfigDecodeRejectsHugeEntryCount) {
@@ -263,40 +176,36 @@ TEST(IOMalformed, FunctionSignatureRejectsOptionalWithoutDefault) {
     EXPECT_FALSE(function.validSignature());
 }
 
-TEST(IOMalformed, FunctionTlvRejectsNullPayloadWithNonzeroLength) {
-    std::array<uint8_t, FUNCTION_TLV_HEADER_SIZE> bytes{};
+TEST(IOMalformed, FunctionValueRejectsNullPayloadWithNonzeroLength) {
+    std::array<uint8_t, FUNCTION_VALUE_HEADER_MAX_SIZE> bytes{};
     BufWriter writer(bytes.data(), bytes.size());
-    EXPECT_FALSE(encodeFunctionTlv(writer, 0, ValueType::Binary, nullptr, 1));
+    EXPECT_FALSE(encodeFunctionValue(writer, 1, nullptr, 1));
     EXPECT_FALSE(writer.ok());
 }
 
-TEST(IOMalformed, FunctionTlvAcceptsZeroLengthPayload) {
-    std::array<uint8_t, FUNCTION_TLV_HEADER_SIZE> bytes{};
+TEST(IOMalformed, FunctionValueAcceptsZeroLengthPayload) {
+    std::array<uint8_t, FUNCTION_VALUE_HEADER_MAX_SIZE> bytes{};
     BufWriter writer(bytes.data(), bytes.size());
-    ASSERT_TRUE(encodeFunctionTlv(writer, 7, ValueType::Binary, nullptr, 0));
+    ASSERT_TRUE(encodeFunctionValue(writer, 7, nullptr, 0));
     FunctionArgument argument;
-    BufReader reader(bytes.data(), bytes.size());
-    ASSERT_TRUE(decodeFunctionTlv(reader, argument));
-    EXPECT_EQ(argument.position, 7u);
+    BufReader reader(bytes.data(), writer.pos);
+    ASSERT_TRUE(decodeFunctionValue(reader, argument));
+    EXPECT_EQ(argument.key, 7u);
     EXPECT_TRUE(argument.value.empty());
 }
 
-TEST(IOMalformed, FunctionTlvRejectsUnknownTypeOnlyAtCallValidation) {
-    std::array<uint8_t, FUNCTION_TLV_HEADER_SIZE> bytes{};
+TEST(IOMalformed, FunctionValueRejectsZeroKey) {
+    std::array<uint8_t, FUNCTION_VALUE_HEADER_MAX_SIZE> bytes{};
     BufWriter writer(bytes.data(), bytes.size());
-    ASSERT_TRUE(encodeFunctionTlv(writer, 0, static_cast<ValueType>(0xFF), nullptr, 0));
-
-    FunctionArgument argument;
-    BufReader reader(bytes.data(), bytes.size());
-    ASSERT_TRUE(decodeFunctionTlv(reader, argument));
-    EXPECT_EQ(argument.type, static_cast<ValueType>(0xFF));
+    EXPECT_FALSE(encodeFunctionValue(writer, 0, nullptr, 0));
+    EXPECT_FALSE(writer.ok());
 }
 
-TEST(IOMalformed, FunctionTlvRejectsTruncatedHeader) {
-    const std::array<uint8_t, FUNCTION_TLV_HEADER_SIZE - 1> bytes{};
+TEST(IOMalformed, FunctionValueRejectsTruncatedHeader) {
+    const std::array<uint8_t, 1> bytes{1};
     FunctionArgument argument;
     BufReader reader(bytes.data(), bytes.size());
-    EXPECT_FALSE(decodeFunctionTlv(reader, argument));
+    EXPECT_FALSE(decodeFunctionValue(reader, argument));
 }
 
 TEST(IOMalformed, RecursiveValueDescriptorRoundTrips) {

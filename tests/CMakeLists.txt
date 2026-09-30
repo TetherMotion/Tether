@@ -227,8 +227,6 @@ file(GLOB_RECURSE PCAP_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/pcap/*.cpp")
 set(IO_PROTOCOL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_protocol.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_protocol_extra.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_feature_exchange.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_binary_struct.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_wire.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_catalog.cpp"

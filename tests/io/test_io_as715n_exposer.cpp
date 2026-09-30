@@ -134,7 +134,7 @@ protected:
             &RegAS715N::F31::kRegisterList, &RegAS715N::R20::kRegisterList,
             &RegAS715N::R22::kRegisterList, &RegAS715N::U40::kRegisterList,
             &RegAS715N::U41::kRegisterList, &RegAS715N::U42::kRegisterList,
-            &detail::kCoeObjectList(),
+            &tether::io::exposers::detail::kCoeObjectList(),
         };
         return g;
     }
@@ -157,10 +157,10 @@ protected:
 
 TEST_F(AS715NExposerTest, AllPdoFieldsRegisteredAsSignals) {
     // 19 fields + 2 raw images + 4 decoded CiA 402 signals + ring_dropped.
-    EXPECT_EQ(registry_.signalCount(), detail::kPdoFieldCount + 7);
+    EXPECT_EQ(registry_.signalCount(), tether::io::exposers::detail::kPdoFieldCount + 7);
 
-    for (size_t i = 0; i < detail::kPdoFieldCount; ++i) {
-        const auto& f = detail::kPdoFields[i];
+    for (size_t i = 0; i < tether::io::exposers::detail::kPdoFieldCount; ++i) {
+        const auto& f = tether::io::exposers::detail::kPdoFields[i];
         EntryView v = registry_.findSignal(makeId(kBase, i + 1));
         ASSERT_TRUE(static_cast<bool>(v)) << "missing signal for field " << f.name;
         const std::string expectName = std::string("drive0.pdo.") + f.name;
@@ -266,7 +266,7 @@ TEST_F(AS715NExposerTest, SdoReadGoesThroughCoE) {
     const OD::ObjectDictionaryEntry* target = nullptr;
     for (const auto* list : allGroups()) {
         for (const auto* e : *list) {
-            if (e && detail::odFixedSize(e->data_type) > 0) {
+            if (e && tether::io::exposers::detail::odFixedSize(e->data_type) > 0) {
                 target = e;
                 break;
             }
@@ -277,7 +277,7 @@ TEST_F(AS715NExposerTest, SdoReadGoesThroughCoE) {
 
     EntryView v = registry_.findParam(sdoId(target->index, target->subindex));
     ASSERT_TRUE(static_cast<bool>(v));
-    const uint8_t sz = detail::odFixedSize(target->data_type);
+    const uint8_t sz = tether::io::exposers::detail::odFixedSize(target->data_type);
     uint8_t buf[8] = {};
     v.read(buf);
     for (uint8_t i = 0; i < sz; ++i)
@@ -290,7 +290,7 @@ TEST_F(AS715NExposerTest, WritableSdoWritesThroughCoE) {
     for (const auto* list : allGroups()) {
         for (const auto* e : *list) {
             if (e && e->modification_mode != OD::ModificationMode::ReadOnly &&
-                detail::odFixedSize(e->data_type) > 0) {
+                tether::io::exposers::detail::odFixedSize(e->data_type) > 0) {
                 target = e;
                 break;
             }
@@ -309,7 +309,7 @@ TEST_F(AS715NExposerTest, WritableSdoWritesThroughCoE) {
     EXPECT_EQ(transport_.lastWriteIndex_, target->index);
     EXPECT_EQ(transport_.lastWriteSub_, target->subindex);
     EXPECT_EQ(transport_.lastWriteData_.size(),
-              detail::odFixedSize(target->data_type));
+              tether::io::exposers::detail::odFixedSize(target->data_type));
     EXPECT_EQ(std::memcmp(transport_.lastWriteData_.data(), payload,
                           transport_.lastWriteData_.size()), 0);
 }
@@ -338,11 +338,11 @@ TEST_F(AS715NExposerTest, ReadOnlySdoHasNoWriteCallback) {
 
 TEST_F(AS715NExposerTest, RingSchemaCoversAllPdoFields) {
     auto& src = exposer_->ringSource();
-    ASSERT_EQ(src.schemaEntryIds().size(), detail::kPdoFieldCount);
+    ASSERT_EQ(src.schemaEntryIds().size(), tether::io::exposers::detail::kPdoFieldCount);
     EXPECT_EQ(src.rowSize(), sizeof(AS715NPdoRow));
-    for (size_t i = 0; i < detail::kPdoFieldCount; ++i) {
+    for (size_t i = 0; i < tether::io::exposers::detail::kPdoFieldCount; ++i) {
         EXPECT_EQ(src.schemaEntryIds()[i], makeId(kBase, i + 1));
-        EXPECT_EQ(src.schemaFieldSizes()[i], detail::kPdoFields[i].size);
+        EXPECT_EQ(src.schemaFieldSizes()[i], tether::io::exposers::detail::kPdoFields[i].size);
     }
 }
 
@@ -371,38 +371,6 @@ TEST_F(AS715NExposerTest, RingProduceDrainRoundtrip) {
 TEST_F(AS715NExposerTest, RingProduceGatedWhileInactive) {
     // No acquire/start: produce must be a no-op.
     EXPECT_FALSE(exposer_->produceRow([](AS715NPdoRow&) {}));
-}
-
-// ---------------------------------------------------------------------------
-// Struct descriptors on the raw PDO images
-// ---------------------------------------------------------------------------
-
-TEST_F(AS715NExposerTest, PdoImagesCarryStructDescriptors) {
-    EntryView rxImg = registry_.findSignal(makeId(kBase, 0x0100));
-    EntryView txImg = registry_.findSignal(makeId(kBase, 0x0101));
-    ASSERT_TRUE(static_cast<bool>(rxImg));
-    ASSERT_TRUE(static_cast<bool>(txImg));
-    EXPECT_TRUE(rxImg.flags() & EntryFlags::HasStruct);
-    EXPECT_TRUE(txImg.flags() & EntryFlags::HasStruct);
-
-    const StructDescriptor* rx = rxImg.structDesc();
-    const StructDescriptor* tx = txImg.structDesc();
-    ASSERT_NE(rx, nullptr);
-    ASSERT_NE(tx, nullptr);
-    EXPECT_EQ(rx->entryId, makeId(kBase, 0x0100));
-    EXPECT_EQ(rx->totalSize, sizeof(AS715N_pdo::AS715N_RxPDO_1704));
-    EXPECT_EQ(tx->totalSize, sizeof(AS715N_pdo::AS715N_TxPDO_1B04));
-
-    // The descriptor covers every field of the respective image — field
-    // names are the PDO member names (rx_/tx_ prefix stripped).
-    size_t rxFields = 0, txFields = 0;
-    for (const auto& f : detail::kPdoFields) (f.rx ? rxFields : txFields)++;
-    EXPECT_EQ(rx->fields.size(), rxFields);
-    EXPECT_EQ(tx->fields.size(), txFields);
-    EXPECT_EQ(rx->fields[0].name, "controlword");
-    EXPECT_EQ(rx->fields[0].offset,
-              offsetof(AS715N_pdo::AS715N_RxPDO_1704, controlword));
-    EXPECT_EQ(tx->fields[0].name, "error_code");
 }
 
 // ---------------------------------------------------------------------------

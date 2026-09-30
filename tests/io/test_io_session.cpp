@@ -4,7 +4,6 @@
  */
 #include <gtest/gtest.h>
 #include "tether/io/Session.hpp"
-#include "tether/io/FeatureExchange.hpp"
 #include "SLIPStream/Buffer.hpp"
 #include <atomic>
 #include <queue>
@@ -149,8 +148,8 @@ protected:
         uint64_t fakeTs = 1000;
         auto tsFn = [&fakeTs]() -> uint64_t { return fakeTs++; };
 
-        Session session(std::move(transport), registry_, tsFn, nullptr, nullptr, nullptr,
-                nullptr, nullptr, nullptr, nullptr, Framing::Slip, nullptr,
+        Session session(std::move(transport), registry_, tsFn, nullptr, nullptr,
+            nullptr, nullptr, nullptr, nullptr, Framing::Slip, nullptr,
                 schemaCatalog);
 
         // Run in a thread, let it process the message, then stop
@@ -293,23 +292,6 @@ TEST_F(SessionTest, UnknownMessage) {
     EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
     uint32_t code = r.getU32();
     EXPECT_EQ(code, static_cast<uint32_t>(ErrorCode::UnknownMessageType));
-}
-
-TEST_F(SessionTest, FeatureExchange) {
-    FeatureSet clientFeatures;
-    clientFeatures.features.push_back(Feature::makeString("client_name", "TestClient"));
-
-    uint8_t msg[256];
-    BufWriter w(msg, sizeof(msg));
-    w.putU8(static_cast<uint8_t>(MessageType::FeatureExchangeReq));
-    clientFeatures.encode(w);
-
-    auto resp = sendAndReceive(msg, w.pos);
-    ASSERT_GE(resp.size(), 5u);
-
-    BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
-    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
 }
 
 TEST_F(SessionTest, V6ClientHelloReturnsServerHello) {

@@ -23,7 +23,6 @@
 #include "tether/io/Transport.hpp"
 #include "tether/io/ReceiveBuffer.hpp"
 #include "tether/io/ThresholdFilter.hpp"
-#include "tether/io/FeatureExchange.hpp"
 #include "tether/io/Datalogging.hpp"
 #include "tether/io/RingStreamSource.hpp"
 #include <cstdint>
@@ -57,11 +56,11 @@ using TimestampFn = std::function<uint64_t()>;
 /// Optional printf-style log callback.
 using LogFn = void(*)(const char* tag, const char* fmt, ...);
 
-/// Called when a client creates an input stream. The descriptor describes each
-/// value in the stream; the callback may reject the requested stream.
+/// Called when a client creates an input stream. The schema reference identifies
+/// each value in the committed session schema epoch; the callback may reject it.
 using InputStreamCreateFn = std::function<bool(
-    uint32_t streamId, const ValueDescriptor& value, uint32_t maxValueSize,
-    uint32_t maxBatchSize)>;
+    uint32_t streamId, const SchemaRef& schema, SchemaEpoch epoch,
+    SchemaSlot slot, uint32_t maxValueSize, uint32_t maxBatchSize)>;
 
 /// Called on the session worker after a validated input batch is received.
 using InputStreamDataFn = std::function<void(
@@ -89,7 +88,6 @@ public:
             Registry& registry,
             TimestampFn tsFn,
             LogFn logFn = nullptr,
-            const FeatureSet* serverFeatures = nullptr,
             DatalogRecorder* datalogRecorder = nullptr,
             InputStreamCreateFn inputStreamCreateFn = nullptr,
             InputStreamDataFn inputStreamDataFn = nullptr,
@@ -253,7 +251,6 @@ private:
     Registry&        registry_;
     TimestampFn      getTimestampUs_;
     LogFn            logFn_;
-    const FeatureSet* serverFeatures_;
     DatalogRecorder* datalogRecorder_;
     InputStreamCreateFn inputStreamCreateFn_;
     InputStreamDataFn inputStreamDataFn_;
@@ -294,7 +291,9 @@ private:
 
     struct InputStreamState {
         uint32_t id = 0;
-        ValueDescriptor value;
+        SchemaRef schema;
+        SchemaEpoch epoch = 0;
+        SchemaSlot slot = 0;
         uint32_t maxValueSize = 0;
         uint32_t maxBatchSize = 0;
     };
@@ -345,9 +344,6 @@ private:
     // ==== Catalog change listener ====
     size_t catalogListenerHandle_ = 0;
     std::atomic<bool> catalogDirty_{false};
-
-    // ==== Client features (received via FeatureExchangeReq) ====
-    FeatureSet clientFeatures_;
 
     // ==== V6 schema negotiation state ====
     bool schemaHelloReceived_ = false;

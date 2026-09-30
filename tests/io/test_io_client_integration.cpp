@@ -13,7 +13,6 @@
  *   - ListFunctions, CallFunction
  *   - ConfigureStream, StartStream, StopStream (with data reception)
  *   - SnapshotParams, SnapshotSignals
- *   - FeatureExchange
  *   - SubscribeLog, UnsubscribeLog (with log data reception)
  *   - Error handling (invalid IDs, not writable, malformed messages)
  *   - CatalogChanged notification
@@ -21,8 +20,6 @@
 #include <gtest/gtest.h>
 #include "tether/io/TetherIOClient.hpp"
 #include "tether/io/Session.hpp"
-#include "tether/io/FeatureExchange.hpp"
-#include "tether/io/BinaryStruct.hpp"
 #include "tether/io/Datalogging.hpp"
 #include "tether/io/ThresholdFilter.hpp"
 #include "PipeTransport.hpp"
@@ -44,7 +41,6 @@ static void noopLogFn(const char* /*tag*/, const char* /*fmt*/, ...) {}
 class IOClientIntegrationTest : public ::testing::Test {
 protected:
     Registry registry_;
-    FeatureSet features_;
     SchemaGraph schemaGraph_;
     SchemaCatalog schemaCatalog_;
     std::unique_ptr<Session> session_;
@@ -222,7 +218,6 @@ protected:
         auto [clientEnd, serverEnd] = MessagePipeTransport::create();
 
         // Create Session with Framing::None
-        features_.features.push_back(Feature::makeBool("test_feature", true));
         session_ = std::make_unique<Session>(
             std::move(serverEnd), registry_,
             [] {
@@ -230,7 +225,7 @@ protected:
                     std::chrono::duration_cast<std::chrono::microseconds>(
                         std::chrono::steady_clock::now().time_since_epoch()).count());
             },
-            noopLogFn, &features_, nullptr, nullptr, nullptr, nullptr, nullptr,
+            noopLogFn, nullptr, nullptr, nullptr, nullptr, nullptr,
             Framing::None, nullptr, &schemaCatalog_);
 
         sessionThread_ = std::thread([this] { session_->run(); });
@@ -840,27 +835,6 @@ TEST_F(IOClientIntegrationTest, SnapshotSpecificSignals) {
     ASSERT_EQ(values.size(), 1u);
     EXPECT_EQ(values[0].id, 10u);
     EXPECT_EQ(decodeU32(values[0].value), 12345u);
-}
-
-// ===========================================================================
-// Feature Exchange
-// ===========================================================================
-
-TEST_F(IOClientIntegrationTest, FeatureExchange) {
-    auto result = client_->featureExchange({});
-    EXPECT_FALSE(result.has_value());
-}
-
-TEST_F(IOClientIntegrationTest, FeatureExchangeWithClientFeatures) {
-    std::vector<ClientFeature> clientFeatures;
-    ClientFeature cf;
-    cf.name = "client_supports_x";
-    cf.type = static_cast<uint8_t>(ValueType::Bool);
-    cf.value = {1};
-    clientFeatures.push_back(cf);
-
-    auto result = client_->featureExchange(clientFeatures);
-    EXPECT_FALSE(result.has_value());
 }
 
 // ===========================================================================

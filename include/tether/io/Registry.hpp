@@ -23,7 +23,6 @@
 
 #include "tether/io/Protocol.hpp"
 #include "tether/io/Schema.hpp"
-#include "tether/io/BinaryStruct.hpp"
 #include "tether/io/Function.hpp"
 #include <cstdint>
 #include <cstddef>
@@ -68,7 +67,6 @@ struct ParamEntry {
     VarWriteFn  varWriteFn;         ///< For String/Binary
     uint16_t    maxValueSize = 0;   ///< 0 for fixed-size; max bytes for variable-length
     std::map<std::string, std::string> metadata;
-    const StructDescriptor* structDesc = nullptr;  ///< Optional struct layout
     uint8_t     extraFlags = 0;     ///< Additional EntryFlags bits (e.g. NoStream)
     SchemaRef   schema;
     uint32_t    schemaSlot = 0;
@@ -81,7 +79,6 @@ struct ParamEntry {
         uint8_t f = EntryFlags::Readable | extraFlags;
         if (writable()) f |= EntryFlags::Writable;
         if (isVariableLength()) f |= EntryFlags::VariableLen;
-        if (structDesc) f |= EntryFlags::HasStruct;
         return f;
     }
 };
@@ -101,7 +98,6 @@ struct SignalEntry {
     VarReadFn   varReadFn;
     uint16_t    maxValueSize = 0;
     std::map<std::string, std::string> metadata;
-    const StructDescriptor* structDesc = nullptr;
     uint8_t     extraFlags = 0;     ///< Additional EntryFlags bits (e.g. NoStream)
     SchemaRef   schema;
     uint32_t    schemaSlot = 0;
@@ -112,7 +108,6 @@ struct SignalEntry {
     uint8_t flags() const {
         uint8_t f = EntryFlags::Readable | extraFlags;
         if (isVariableLength()) f |= EntryFlags::VariableLen;
-        if (structDesc) f |= EntryFlags::HasStruct;
         return f;
     }
 };
@@ -139,7 +134,6 @@ public:
     uint8_t flags() const { return param_ ? param_->flags() : signal_->flags(); }
     bool isVariableLength() const { return param_ ? param_->isVariableLength() : signal_->isVariableLength(); }
     uint16_t maxValueSize() const { return param_ ? param_->maxValueSize : signal_->maxValueSize; }
-    const StructDescriptor* structDesc() const { return param_ ? param_->structDesc : signal_->structDesc; }
 
     std::string_view name() const {
         return param_ ? std::string_view(param_->name) : std::string_view(signal_->name);

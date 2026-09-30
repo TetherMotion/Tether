@@ -638,6 +638,7 @@ TetherIOClient::listFunctions(uint32_t offset, uint32_t maxCount) {
             ClientFunctionParam param;
             param.name = r.getString16();
             param.description = r.getString16();
+            param.key = r.getU32();
             param.schemaSlot = r.getU32();
             param.flags = r.getU32();
             if (param.flags & 2) { // hasDefault
@@ -680,15 +681,15 @@ TetherIOClient::listFunctions(uint32_t offset, uint32_t maxCount) {
 std::expected<ClientCallResult, ClientError>
 TetherIOClient::callFunction(uint64_t functionId, const std::vector<FunctionArg>& args) {
     size_t argSize = 4;
-    for (const auto& a : args) argSize += 4 + 1 + 4 + a.value.size();
+    for (const auto& a : args) argSize += FUNCTION_VALUE_HEADER_MAX_SIZE + a.value.size();
     ClientBufWriter w(14 + argSize);
     w.putU8(static_cast<uint8_t>(MessageType::CallFunctionReq));
     w.putU64(functionId);
     w.putU32(static_cast<uint32_t>(args.size()));
     for (const auto& a : args) {
-        w.putU32(a.position);
-        w.putU8(static_cast<uint8_t>(a.type));
-        w.putU32(static_cast<uint32_t>(a.value.size()));
+        const uint32_t key = a.key != 0 ? a.key : a.position + 1;
+        w.putVarint(key);
+        w.putVarint(static_cast<uint32_t>(a.value.size()));
         w.putBytes(a.value.data(), a.value.size());
     }
     auto payload = w.finish();
@@ -706,16 +707,15 @@ TetherIOClient::callFunction(uint64_t functionId, const std::vector<FunctionArg>
         cr.errorCode = r.getU32();
         cr.errorMessage = r.getString16();
     } else {
-        // Success path: putU32(0) + putU16(0) + optional TLV
+        // Success path: putU32(0) + putU16(0) + optional keyed payload.
         r.getU32(); // reserved (0)
         r.getU16(); // reserved (0)
-        // Check for optional return value TLV: [position(4) + type(1) + length(4) + value]
-        if (r.remaining() >= 9) {
-            uint32_t pos = r.getU32();
-            (void)pos;
+        if (r.getU8() != 0) {
+            const uint32_t key = r.getVarint();
+            const uint32_t len = r.getVarint();
+            if (key != 1) return std::unexpected(makeError(
+                ErrorCode::InvalidMessage, "Invalid function return key"));
             cr.hasReturnValue = true;
-            cr.returnType = static_cast<ValueType>(r.getU8());
-            uint32_t len = r.getU32();
             cr.returnValue = r.getBytes(len);
         }
     }
@@ -865,15 +865,6 @@ TetherIOClient::snapshotSignals(const std::vector<uint64_t>& ids) {
     return std::make_pair(ts, std::move(values));
 }
 
-// ---- Feature Exchange ----
-
-std::expected<std::vector<ClientFeature>, ClientError>
-TetherIOClient::featureExchange(const std::vector<ClientFeature>& clientFeatures) {
-    (void)clientFeatures;
-    return std::unexpected(makeError(ErrorCode::FeatureNotSupported,
-                                     "V5 FeatureExchange was replaced by V6 schema negotiation"));
-}
-
 // ---- Log Subscription ----
 
 std::expected<ClientLogSubscription, ClientError>
@@ -973,49 +964,17 @@ TetherIOClient::configureThreshold(const std::string& name,
     return success;
 }
 
-// ---- Describe Struct ----
-
-std::expected<TetherIOClient::StructDescriptor, ClientError>
-TetherIOClient::describeStruct(uint64_t id) {
-    ClientBufWriter w(9);
-    w.putU8(static_cast<uint8_t>(MessageType::DescribeStructReq));
-    w.putU64(id);
-    auto payload = w.finish();
-
-    auto result = request(payload, MessageType::DescribeStructResp);
-    if (!result) return std::unexpected(result.error());
-
-    ClientBufReader r(result->data(), result->size());
-    r.getU8(); // type
-    StructDescriptor sd;
-    sd.entryId = r.getU64();
-    sd.structName = r.getString16();
-    sd.totalSize = r.getU32();
-    uint32_t fieldCount = r.getU32();
-    for (uint32_t i = 0; i < fieldCount && r.ok(); ++i) {
-        StructField f;
-        f.name = r.getString16();
-        f.type = static_cast<ValueType>(r.getU8());
-        f.offset = r.getU16();
-        f.size = r.getU16();
-        f.unit = r.getString16();
-        sd.fields.push_back(std::move(f));
-    }
-    if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed DescribeStructResp"));
-    return sd;
-}
-
 // ---- Input Streams ----
 
 std::expected<TetherIOClient::CreateInputStreamResult, ClientError>
-TetherIOClient::createInputStream(uint32_t maxValueSize,
-                                  uint32_t maxBatchSize,
-                                  const std::vector<uint8_t>& encodedValueDescriptor) {
-    ClientBufWriter w(14 + encodedValueDescriptor.size());
+TetherIOClient::createInputStream(uint32_t schemaSlot, uint32_t maxValueSize,
+                                  uint32_t maxBatchSize) {
+    ClientBufWriter w(17);
     w.putU8(static_cast<uint8_t>(MessageType::CreateInputStreamReq));
+    w.putU32(static_cast<uint32_t>(schemaEpoch_));
+    w.putU32(schemaSlot);
     w.putU32(maxValueSize);
     w.putU32(maxBatchSize);
-    w.putBytes(encodedValueDescriptor.data(), encodedValueDescriptor.size());
     auto payload = w.finish();
 
     auto result = request(payload, MessageType::CreateInputStreamResp);
@@ -1119,7 +1078,7 @@ std::expected<ClientCallResult, ClientError>
 TetherIOClient::invokeEx(uint64_t functionId, const std::vector<FunctionArg>& args,
                          uint64_t deadlineUs, uint32_t timeoutMs) {
     size_t argBytes = 0;
-    for (const auto& a : args) argBytes += FUNCTION_TLV_HEADER_SIZE + a.value.size();
+    for (const auto& a : args) argBytes += FUNCTION_VALUE_HEADER_MAX_SIZE + a.value.size();
     std::vector<uint8_t> buf(1 + 8 + 8 + 8 + 4 + argBytes);
     BufWriter w(buf.data(), buf.size());
     const uint64_t requestId = nextRequestId_++;
@@ -1129,7 +1088,8 @@ TetherIOClient::invokeEx(uint64_t functionId, const std::vector<FunctionArg>& ar
     w.putU64(deadlineUs);
     w.putU32(static_cast<uint32_t>(args.size()));
     for (const auto& a : args) {
-        encodeFunctionTlv(w, a.position, a.type, a.value.data(), a.value.size());
+        const uint32_t key = a.key != 0 ? a.key : a.position + 1;
+        encodeFunctionValue(w, key, a.value.data(), a.value.size());
     }
     if (!w.ok()) {
         return std::unexpected(makeError(ErrorCode::InvalidMessage,
@@ -1152,12 +1112,15 @@ TetherIOClient::invokeEx(uint64_t functionId, const std::vector<FunctionArg>& ar
     if (r.ok() && errorLength > 0) {
         cr.errorMessage.assign(reinterpret_cast<const char*>(errorBytes), errorLength);
     }
-    if (cr.success && r.remaining() >= FUNCTION_TLV_HEADER_SIZE) {
-        FunctionArgument returnTlv;
-        if (decodeFunctionTlv(r, returnTlv)) {
+    const bool hasReturnValue = cr.success && r.getU8() != 0;
+    if (hasReturnValue) {
+        FunctionArgument returnValue;
+        if (decodeFunctionValue(r, returnValue) && returnValue.key == 1) {
             cr.hasReturnValue = true;
-            cr.returnType = returnTlv.type;
-            cr.returnValue = std::move(returnTlv.value);
+            cr.returnValue = std::move(returnValue.value);
+        } else {
+            return std::unexpected(makeError(ErrorCode::InvalidMessage,
+                                             "Malformed InvokeEx return value"));
         }
     }
     if (!r.ok() || r.remaining() != 0) {
@@ -1181,8 +1144,7 @@ void TetherIOClient::handleInvokeExReq(const std::vector<uint8_t>& msg) {
     if (!r.ok() || argumentCount > MAX_COLLECTION_COUNT) {
         sendInvokeExResponse(requestId, false,
                              static_cast<uint32_t>(ErrorCode::InvalidMessage),
-                             "Malformed InvokeEx request", false,
-                             ValueType::Binary, {});
+                             "Malformed InvokeEx request", false, {});
         return;
     }
 
@@ -1199,7 +1161,7 @@ void TetherIOClient::handleInvokeExReq(const std::vector<uint8_t>& msg) {
         sendInvokeExResponse(requestId, result.success,
                              static_cast<uint32_t>(result.error), result.errorMessage,
                              result.success && entry->returnValue.present,
-                             entry->returnValue.type, result.returnValue);
+                             result.returnValue);
         return;
     }
     if (invokeHandler_) {
@@ -1207,47 +1169,53 @@ void TetherIOClient::handleInvokeExReq(const std::vector<uint8_t>& msg) {
         args.reserve(argumentCount);
         bool malformed = false;
         for (uint32_t i = 0; i < argumentCount; ++i) {
-            FunctionArgument tlv;
-            if (!decodeFunctionTlv(r, tlv)) { malformed = true; break; }
-            args.push_back({tlv.position, tlv.type, std::move(tlv.value)});
+            FunctionArgument value;
+            if (!decodeFunctionValue(r, value)) { malformed = true; break; }
+            FunctionArg argument;
+            argument.key = value.key;
+            argument.value = std::move(value.value);
+            args.push_back(std::move(argument));
         }
         if (malformed || !r.ok() || r.remaining() != 0) {
             sendInvokeExResponse(requestId, false,
                                  static_cast<uint32_t>(ErrorCode::InvalidMessage),
-                                 "Malformed InvokeEx arguments", false,
-                                 ValueType::Binary, {});
+                                 "Malformed InvokeEx arguments", false, {});
             return;
         }
         ClientCallResult result = invokeHandler_(functionId, args);
         sendInvokeExResponse(requestId, result.success, result.errorCode,
                              result.errorMessage,
                              result.success && result.hasReturnValue,
-                             result.returnType, result.returnValue);
+                             result.returnValue);
         return;
     }
     sendInvokeExResponse(requestId, false,
                          static_cast<uint32_t>(ErrorCode::InvalidId),
-                         "Function not found", false, ValueType::Binary, {});
+                         "Function not found", false, {});
 }
 
 void TetherIOClient::sendInvokeExResponse(uint64_t requestId, bool success,
                                           uint32_t errorCode,
                                           std::string_view errorMessage,
-                                          bool hasReturn, ValueType returnType,
+                                          bool hasReturn,
                                           const std::vector<uint8_t>& returnValue) {
     const size_t messageSize = std::min(errorMessage.size(), MAX_STRING_SIZE);
     const size_t valueSize = std::min(returnValue.size(), MAX_VARIABLE_VALUE_SIZE);
     const bool emitReturn = success && hasReturn;
     std::vector<uint8_t> buf(1 + 8 + 1 + 4 + 2 + messageSize +
-                             (emitReturn ? FUNCTION_TLV_HEADER_SIZE + valueSize : 0));
+                             (success ? 1 : 0) +
+                             (emitReturn ? FUNCTION_VALUE_HEADER_MAX_SIZE + valueSize : 0));
     BufWriter w(buf.data(), buf.size());
     w.putU8(static_cast<uint8_t>(MessageType::InvokeExResp));
     w.putU64(requestId);
     w.putU8(success ? 0 : 1);
     w.putU32(success ? 0 : errorCode);
     w.putStr16(errorMessage.data(), messageSize);
-    if (emitReturn) {
-        encodeFunctionTlv(w, 0, returnType, returnValue.data(), valueSize);
+    if (success) {
+        w.putU8(emitReturn ? 1 : 0);
+        if (emitReturn) {
+            encodeFunctionValue(w, 1, returnValue.data(), valueSize);
+        }
     }
     if (w.ok()) sendRaw(buf.data(), w.pos);
 }

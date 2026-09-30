@@ -7,8 +7,6 @@
  */
 #include <gtest/gtest.h>
 #include "tether/io/Session.hpp"
-#include "tether/io/FeatureExchange.hpp"
-#include "tether/io/BinaryStruct.hpp"
 #include "tether/io/Datalogging.hpp"
 #include "tether/io/ThresholdFilter.hpp"
 #include "PipeTransport.hpp"
@@ -208,28 +206,6 @@ protected:
             p.maxValueSize = 128;
             registry_.addParam(std::move(p));
         }
-        // F32 param with struct descriptor
-        {
-            structDesc_.entryId = 5;
-            structDesc_.name = "Vec3";
-            structDesc_.totalSize = 12;
-            structDesc_.fields = {
-                {"x", ValueType::F32, 0, 4, "mm"},
-                {"y", ValueType::F32, 4, 4, "mm"},
-                {"z", ValueType::F32, 8, 4, "mm"},
-            };
-
-            ParamEntry p;
-            p.id = 5;
-            p.name = "vec3_param";
-            p.description = "A 3D vector";
-            p.group = "motion";
-            p.valueType = ValueType::Struct;
-            p.readFn = [this](void* d) { std::memcpy(d, vec3_, 12); };
-            p.structDesc = &structDesc_;
-            p.maxValueSize = 12;
-            registry_.addParam(std::move(p));
-        }
         // F32 param for streaming
         {
             ParamEntry p;
@@ -261,7 +237,6 @@ protected:
 
     /// Create a Session on the server end, return the client end.
     std::unique_ptr<SessionContext> createSession(
-        const FeatureSet* features = nullptr,
         DatalogRecorder* recorder = nullptr,
         ReceiveBufferFactory encodedBufferFactory = nullptr,
         ReceiveBufferFactory decodedBufferFactory = nullptr)
@@ -271,7 +246,7 @@ protected:
         ctx->client = std::move(client);
 
         auto sess = std::make_unique<Session>(
-            std::move(server), registry_, tsFn_, logFn_, features, recorder,
+            std::move(server), registry_, tsFn_, logFn_, recorder,
             nullptr, nullptr, std::move(encodedBufferFactory),
             std::move(decodedBufferFactory));
         ctx->session = sess.get();
@@ -314,8 +289,6 @@ protected:
     uint32_t encoder_ = 42;
     float readonlyVal_ = 1.23f;
     std::string deviceName_ = "TestDevice";
-    StructDescriptor structDesc_;
-    float vec3_[3] = {1.0f, 2.0f, 3.0f};
     std::atomic<float> temperature_{25.0f};
     std::atomic<int> functionCalls_{0};
 
@@ -352,8 +325,7 @@ TEST_F(SessionIntegrationTest, ListAndCallFunctionWithDefault) {
     callWriter.putU64(100);
     callWriter.putU32(1);
     const uint8_t left[] = {3, 0, 0, 0};
-    ASSERT_TRUE(encodeFunctionTlv(callWriter, 0, ValueType::U32,
-                                  left, sizeof(left)));
+    ASSERT_TRUE(encodeFunctionValue(callWriter, 1, left, sizeof(left)));
     auto response = roundtrip(*ctx, call, callWriter.pos);
     BufReader responseReader(response.data(), response.size());
     EXPECT_EQ(responseReader.getU8(), static_cast<uint8_t>(MessageType::CallFunctionResp));
@@ -361,15 +333,15 @@ TEST_F(SessionIntegrationTest, ListAndCallFunctionWithDefault) {
     EXPECT_EQ(responseReader.getU8(), 0u);
     EXPECT_EQ(responseReader.getU32(), 0u);
     EXPECT_EQ(responseReader.getU16(), 0u);
+    ASSERT_TRUE(responseReader.getU8() != 0);
     FunctionArgument returned;
-    ASSERT_TRUE(decodeFunctionTlv(responseReader, returned));
-    EXPECT_EQ(returned.position, 0u);
-    EXPECT_EQ(returned.type, ValueType::U32);
+    ASSERT_TRUE(decodeFunctionValue(responseReader, returned));
+    EXPECT_EQ(returned.key, 1u);
     ASSERT_EQ(returned.value.size(), 4u);
     EXPECT_EQ(returned.value[0], 5u);
 }
 
-TEST_F(SessionIntegrationTest, CallFunctionRejectsOutOfRangeTlvPosition) {
+TEST_F(SessionIntegrationTest, CallFunctionRejectsUnknownArgumentKey) {
     auto ctx = createSession();
     uint8_t call[64];
     BufWriter writer(call, sizeof(call));
@@ -377,7 +349,7 @@ TEST_F(SessionIntegrationTest, CallFunctionRejectsOutOfRangeTlvPosition) {
     writer.putU64(100);
     writer.putU32(1);
     const uint8_t value[] = {1, 0, 0, 0};
-    ASSERT_TRUE(encodeFunctionTlv(writer, 99, ValueType::U32, value, sizeof(value)));
+    ASSERT_TRUE(encodeFunctionValue(writer, 99, value, sizeof(value)));
     auto response = roundtrip(*ctx, call, writer.pos);
     BufReader reader(response.data(), response.size());
     // Argument errors are reported as a correlated CallFunctionResp
@@ -785,119 +757,6 @@ TEST_F(SessionIntegrationTest, SnapshotSignalsSpecific) {
 }
 
 // ===========================================================================
-// FeatureExchange
-// ===========================================================================
-
-TEST_F(SessionIntegrationTest, FeatureExchangeWithServerFeatures) {
-    FeatureSet serverFeatures;
-    serverFeatures.features.push_back(Feature::makeBool("supports_datalogging", true));
-    serverFeatures.features.push_back(Feature::makeString("server_name", "TestServer"));
-
-    auto ctx = createSession(&serverFeatures);
-
-    FeatureSet clientFeatures;
-    clientFeatures.features.push_back(Feature::makeString("client_name", "TestClient"));
-
-    uint8_t msg[256];
-    BufWriter w(msg, sizeof(msg));
-    w.putU8(static_cast<uint8_t>(MessageType::FeatureExchangeReq));
-    clientFeatures.encode(w);
-
-    auto resp = roundtrip(*ctx, msg, w.pos);
-    BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
-    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
-}
-
-TEST_F(SessionIntegrationTest, FeatureExchangeNoServerFeatures) {
-    auto ctx = createSession();
-
-    FeatureSet clientFeatures;
-    uint8_t msg[256];
-    BufWriter w(msg, sizeof(msg));
-    w.putU8(static_cast<uint8_t>(MessageType::FeatureExchangeReq));
-    clientFeatures.encode(w);
-
-    auto resp = roundtrip(*ctx, msg, w.pos);
-    BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
-    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
-}
-
-TEST_F(SessionIntegrationTest, FeatureExchangeServerAlreadyHasVersion) {
-    FeatureSet serverFeatures;
-    serverFeatures.features.push_back(Feature::makeU32("protocol_version", 99));
-
-    auto ctx = createSession(&serverFeatures);
-
-    FeatureSet clientFeatures;
-    uint8_t msg[256];
-    BufWriter w(msg, sizeof(msg));
-    w.putU8(static_cast<uint8_t>(MessageType::FeatureExchangeReq));
-    clientFeatures.encode(w);
-
-    auto resp = roundtrip(*ctx, msg, w.pos);
-    BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
-    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
-}
-
-// ===========================================================================
-// DescribeStruct
-// ===========================================================================
-
-TEST_F(SessionIntegrationTest, DescribeStruct) {
-    auto ctx = createSession();
-    uint8_t msg[9];
-    BufWriter w(msg, sizeof(msg));
-    w.putU8(static_cast<uint8_t>(MessageType::DescribeStructReq));
-    w.putU64(5);  // vec3_param has structDesc
-
-    auto resp = roundtrip(*ctx, msg, w.pos);
-    BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
-    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
-}
-
-TEST_F(SessionIntegrationTest, DescribeStructInvalidId) {
-    auto ctx = createSession();
-    uint8_t msg[9];
-    BufWriter w(msg, sizeof(msg));
-    w.putU8(static_cast<uint8_t>(MessageType::DescribeStructReq));
-    w.putU64(9999);
-
-    auto resp = roundtrip(*ctx, msg, w.pos);
-    BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
-    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
-}
-
-TEST_F(SessionIntegrationTest, DescribeStructNoDescriptor) {
-    auto ctx = createSession();
-    uint8_t msg[9];
-    BufWriter w(msg, sizeof(msg));
-    w.putU8(static_cast<uint8_t>(MessageType::DescribeStructReq));
-    w.putU64(1);  // position param — no struct
-
-    auto resp = roundtrip(*ctx, msg, w.pos);
-    BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
-    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
-}
-
-TEST_F(SessionIntegrationTest, DescribeStructTooShort) {
-    auto ctx = createSession();
-    uint8_t msg[5];
-    BufWriter w(msg, sizeof(msg));
-    w.putU8(static_cast<uint8_t>(MessageType::DescribeStructReq));
-    w.putU32(1);
-
-    auto resp = roundtrip(*ctx, msg, w.pos);
-    BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
-}
-
-// ===========================================================================
 // Streaming: ConfigureStream, StartStream, StopStream, StreamData
 // ===========================================================================
 
@@ -1281,7 +1140,7 @@ TEST_F(SessionIntegrationTest, DatalogWithoutRecorderFails) {
 
 TEST_F(SessionIntegrationTest, ConfigureDatalog) {
     DatalogRecorder recorder;
-    auto ctx = createSession(nullptr, &recorder);
+    auto ctx = createSession(&recorder);
 
     DatalogConfig cfg;
     cfg.logName = "test";
@@ -1303,7 +1162,7 @@ TEST_F(SessionIntegrationTest, ConfigureDatalog) {
 
 TEST_F(SessionIntegrationTest, ConfigureDatalogDisabled) {
     DatalogRecorder recorder;
-    auto ctx = createSession(nullptr, &recorder);
+    auto ctx = createSession(&recorder);
 
     DatalogConfig cfg;
     cfg.logName = "test";
@@ -1322,7 +1181,7 @@ TEST_F(SessionIntegrationTest, ConfigureDatalogDisabled) {
 
 TEST_F(SessionIntegrationTest, ConfigureDatalogInvalidConfigFails) {
     DatalogRecorder recorder;
-    auto ctx = createSession(nullptr, &recorder);
+    auto ctx = createSession(&recorder);
 
     uint8_t msg[3];
     BufWriter w(msg, sizeof(msg));
@@ -1338,7 +1197,7 @@ TEST_F(SessionIntegrationTest, ConfigureDatalogInvalidConfigFails) {
 
 TEST_F(SessionIntegrationTest, DatalogStatusWithRecorder) {
     DatalogRecorder recorder;
-    auto ctx = createSession(nullptr, &recorder);
+    auto ctx = createSession(&recorder);
 
     uint8_t msg[1] = {static_cast<uint8_t>(MessageType::DatalogStatusReq)};
     auto resp = roundtrip(*ctx, msg, 1);

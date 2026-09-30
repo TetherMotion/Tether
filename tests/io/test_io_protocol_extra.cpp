@@ -212,7 +212,6 @@ TEST(IOProtocolExtra, MessageTypeValues) {
     EXPECT_EQ(static_cast<uint8_t>(MessageType::ListParamsReq), 0x01);
     EXPECT_EQ(static_cast<uint8_t>(MessageType::ConfigureStream), 0x03);
     EXPECT_EQ(static_cast<uint8_t>(MessageType::LogData), 0x13);
-    EXPECT_EQ(static_cast<uint8_t>(MessageType::DescribeStructResp), 0x34);
     EXPECT_EQ(static_cast<uint8_t>(MessageType::CatalogChanged), 0x2C);
     EXPECT_EQ(static_cast<uint8_t>(MessageType::Error), 0x08);
 }

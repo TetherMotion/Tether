@@ -1,4 +1,5 @@
 #include "tether/io/CiA402Profile.hpp"
+#include "tether/io/SchemaValueCodec.hpp"
 
 #include <gtest/gtest.h>
 
@@ -62,17 +63,21 @@ TEST(CiA402ProfileTest, DriveSnapshotRoundTripsWithExplicitWireLayout) {
     EXPECT_EQ(decoded.actualTorque, source.actualTorque);
 }
 
-TEST(CiA402ProfileTest, DescriptorMatchesEncodedOffsetsAndSchema) {
-    const auto descriptor = driveSnapshotDescriptor(0x1234);
+TEST(CiA402ProfileTest, SchemaMatchesPackedSnapshotPayload) {
+    const auto graph = driveSnapshotSchemaGraph();
+    ASSERT_TRUE(validateSchemaGraph(graph));
+    ASSERT_EQ(graph.nodes.size(), 8U);
+    const auto& snapshot = graph.nodes.back();
+    EXPECT_EQ(snapshot.name, kDriveSnapshotSchemaName);
+    ASSERT_EQ(snapshot.fields.size(), 22U);
+    EXPECT_EQ(snapshot.fields.front().name, "timestamp_us");
+    EXPECT_EQ(snapshot.fields.back().name, "reserved");
+    ASSERT_EQ(fixedSchemaSize(graph, snapshot.key), DriveSnapshotV1::kEncodedSize);
 
-    EXPECT_EQ(descriptor.entryId, 0x1234U);
-    EXPECT_EQ(descriptor.name, kDriveSnapshotSchema);
-    EXPECT_EQ(descriptor.totalSize, DriveSnapshotV1::kEncodedSize);
-    ASSERT_EQ(descriptor.fields.size(), 22U);
-    EXPECT_EQ(descriptor.fields.front().name, "timestamp_us");
-    EXPECT_EQ(descriptor.fields.front().offset, 0U);
-    EXPECT_EQ(descriptor.fields.back().name, "reserved");
-    EXPECT_EQ(descriptor.fields.back().offset, 63U);
+    std::array<uint8_t, DriveSnapshotV1::kEncodedSize> bytes{};
+    BufReader reader(bytes.data(), bytes.size());
+    EXPECT_TRUE(validateSchemaValue(graph, snapshot.key, reader));
+    EXPECT_EQ(reader.remaining(), 0U);
 }
 
 TEST(CiA402ProfileTest, TruncatedSnapshotIsRejected) {

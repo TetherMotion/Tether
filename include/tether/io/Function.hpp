@@ -2,8 +2,8 @@
 
 #include "tether/io/Protocol.hpp"
 #include "tether/io/Schema.hpp"
-#include "tether/io/BinaryStruct.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -14,7 +14,7 @@
 
 namespace tether::io {
 
-inline constexpr size_t FUNCTION_TLV_HEADER_SIZE = 4 + 1 + 4;
+inline constexpr size_t FUNCTION_VALUE_HEADER_MAX_SIZE = MAX_VARINT_SIZE * 2;
 
 inline constexpr uint32_t MAX_AGGREGATE_ELEMENTS = 65536;
 inline constexpr uint32_t MAX_AGGREGATE_FIELDS = 65536;
@@ -190,15 +190,18 @@ inline bool validateValuePayload(const ValueDescriptor& descriptor,
     return reader.ok() && reader.remaining() == 0;
 }
 
-/// Encodes one function argument as [position U32][type U8][length U32][value].
-inline bool encodeFunctionTlv(BufWriter& writer, uint32_t position,
-                              ValueType type, const uint8_t* value, size_t length) {
+/// Encodes one V6 function field as [field_key varuint][length varuint][value].
+inline bool encodeFunctionValue(BufWriter& writer, uint32_t key,
+                                const uint8_t* value, size_t length) {
+    if (key == 0 || (length != 0 && value == nullptr)) {
+        writer.overflow = true;
+        return false;
+    }
     if (length > MAX_VARIABLE_VALUE_SIZE || length > UINT32_MAX) {
         return false;
     }
-    writer.putU32(position);
-    writer.putU8(static_cast<uint8_t>(type));
-    writer.putU32(static_cast<uint32_t>(length));
+    writer.putVarint(key);
+    writer.putVarint(static_cast<uint32_t>(length));
     writer.putBytes(value, length);
     return writer.ok();
 }
@@ -208,7 +211,6 @@ namespace FunctionParameterFlags {
 inline constexpr uint8_t Optional = 0x01;
 inline constexpr uint8_t HasDefault = 0x02;
 inline constexpr uint8_t HasEnum = 0x04;
-inline constexpr uint8_t HasStruct = 0x08;
 inline constexpr uint8_t HasAggregate = 0x10;
 } // namespace FunctionParameterFlags
 
@@ -220,13 +222,12 @@ struct FunctionParameter {
     bool hasDefault = false;
     std::vector<uint8_t> defaultValue;
     uint64_t enumReference = 0;
-    uint64_t structReference = 0;
-    const StructDescriptor* structDescriptor = nullptr;
     std::shared_ptr<const ValueDescriptor> valueDescriptor;
     uint32_t maxValueSize = 0;
     std::map<std::string, std::string> metadata;
     SchemaRef schema;
     uint32_t schemaSlot = 0;
+    uint32_t key = 0;
 
         FunctionParameter() = default;
         FunctionParameter(std::string parameterName, std::string parameterDescription,
@@ -245,13 +246,13 @@ struct FunctionParameter {
         }
         if (hasDefault) result |= FunctionParameterFlags::HasDefault;
         if (enumReference != 0) result |= FunctionParameterFlags::HasEnum;
-        if (structDescriptor != nullptr || structReference != 0 ||
-            (valueDescriptor && descriptorContains(*valueDescriptor, ValueType::Struct))) {
-            result |= FunctionParameterFlags::HasStruct;
-        }
         return result;
     }
 };
+
+inline uint32_t functionParameterKey(const FunctionParameter& parameter, size_t position) {
+    return parameter.key != 0 ? parameter.key : static_cast<uint32_t>(position + 1);
+}
 
 struct FunctionReturn {
     bool present = false;
@@ -259,8 +260,6 @@ struct FunctionReturn {
     std::string description;
     ValueType type = ValueType::Binary;
     uint64_t enumReference = 0;
-    uint64_t structReference = 0;
-    const StructDescriptor* structDescriptor = nullptr;
     std::shared_ptr<const ValueDescriptor> valueDescriptor;
     uint32_t maxValueSize = 0;
     std::map<std::string, std::string> metadata;
@@ -275,12 +274,13 @@ struct FunctionArgument {
     bool provided = false;
     SchemaRef schema;
     uint32_t schemaSlot = 0;
+    uint32_t key = 0;
 };
 
-inline bool decodeFunctionTlv(BufReader& reader, FunctionArgument& argument) {
-    argument.position = reader.getU32();
-    argument.type = static_cast<ValueType>(reader.getU8());
-    const uint32_t length = reader.getU32();
+inline bool decodeFunctionValue(BufReader& reader, FunctionArgument& argument) {
+    argument = {};
+    argument.key = reader.getVarint();
+    const uint32_t length = reader.getVarint();
     if (!reader.ok() || length > MAX_VARIABLE_VALUE_SIZE || length > reader.remaining()) {
         reader.error = true;
         return false;
@@ -419,15 +419,27 @@ inline FunctionCallResult invokeFunctionChecked(const FunctionView& function,
     std::vector<bool> seen(function.parameterCount(), false);
     for (uint32_t index = 0; index < argumentCount; ++index) {
         FunctionArgument argument;
-        if (!decodeFunctionTlv(reader, argument) ||
-            argument.position >= function.parameterCount()) {
-            return fail("Invalid function argument TLV");
+        if (!decodeFunctionValue(reader, argument)) {
+            return fail("Invalid function argument value");
         }
-        const auto position = static_cast<size_t>(argument.position);
+        const auto parameterIt = std::find_if(
+            function.parameters().begin(), function.parameters().end(),
+            [&function, &argument](const FunctionParameter& parameter) {
+                return functionParameterKey(parameter, &parameter - function.parameters().data()) ==
+                       argument.key;
+            });
+        if (parameterIt == function.parameters().end()) {
+            return fail("Unknown function argument key");
+        }
+        const auto position = static_cast<size_t>(parameterIt - function.parameters().begin());
         const auto& parameter = function.parameters()[position];
-        if (seen[position] || argument.type != parameter.type) {
-            return fail("Wrong or duplicate function argument");
+        if (seen[position]) {
+            return fail("Duplicate function argument");
         }
+        argument.position = static_cast<uint32_t>(position);
+        argument.type = parameter.type;
+        argument.schema = parameter.schema;
+        argument.schemaSlot = parameter.schemaSlot;
         if (parameter.valueDescriptor &&
             !validateValuePayload(*parameter.valueDescriptor, argument.value.data(),
                                   argument.value.size())) {
@@ -453,7 +465,10 @@ inline FunctionCallResult invokeFunctionChecked(const FunctionView& function,
         }
         auto& argument = supplied[position];
         argument.position = static_cast<uint32_t>(position);
+        argument.key = functionParameterKey(parameter, position);
         argument.type = parameter.type;
+        argument.schema = parameter.schema;
+        argument.schemaSlot = parameter.schemaSlot;
         argument.value = parameter.defaultValue;
         argument.provided = false;
         if (parameter.valueDescriptor &&
@@ -502,13 +517,12 @@ inline FunctionCallResult invokeFunctionChecked(const FunctionView& function,
 // Layout (identical to one ListFunctionsResp entry):
 //   [id U64][name str16][description str16][group str16]
 //   [param_count U32] × {
-//     [name str16][description str16][type U8][flags U8]
-//     [enum_ref U64][struct_ref U64][max_value_size U32]
-//     [has_descriptor U8]([descriptor_len U32][descriptor])
+//     [field_key U32][name str16][description str16][schema_slot U32][flags U8]
 //     [default_len varint][default]                      — if flags&HasDefault
 //     [metadata_count U32]([key str16][value str16])*
 //   }
-//   [has_return U8](same field set as a parameter, minus defaults)
+//   [has_return U8]([name str16][description str16][schema_slot U32]
+//                    [metadata_count U32]([key str16][value str16])*)
 //   [metadata_count U32]([key str16][value str16])*
 
 namespace detail {
@@ -594,15 +608,13 @@ inline bool encodeFunctionDescriptor(BufWriter& w, const FunctionView& function)
     detail::encodeWireString(w, function.description());
     detail::encodeWireString(w, function.group());
     w.putU32(static_cast<uint32_t>(function.parameterCount()));
-    for (const auto& parameter : function.parameters()) {
+    for (size_t position = 0; position < function.parameterCount(); ++position) {
+        const auto& parameter = function.parameters()[position];
+        w.putU32(functionParameterKey(parameter, position));
         detail::encodeWireString(w, parameter.name);
         detail::encodeWireString(w, parameter.description);
-        w.putU8(static_cast<uint8_t>(parameter.type));
         w.putU8(parameter.flags());
-        w.putU64(parameter.enumReference);
-        w.putU64(parameter.structReference);
-        w.putU32(parameter.maxValueSize);
-        if (!detail::encodeWireValueDescriptor(w, parameter.valueDescriptor)) return false;
+        w.putU32(parameter.schemaSlot);
         if (parameter.hasDefault) {
             w.putVarint(static_cast<uint32_t>(parameter.defaultValue.size()));
             w.putBytes(parameter.defaultValue.data(), parameter.defaultValue.size());
@@ -614,13 +626,7 @@ inline bool encodeFunctionDescriptor(BufWriter& w, const FunctionView& function)
     if (result.present) {
         detail::encodeWireString(w, result.name);
         detail::encodeWireString(w, result.description);
-        w.putU8(static_cast<uint8_t>(result.type));
-        w.putU8((result.enumReference != 0 ? FunctionParameterFlags::HasEnum : 0) |
-                (result.structReference != 0 ? FunctionParameterFlags::HasStruct : 0));
-        w.putU64(result.enumReference);
-        w.putU64(result.structReference);
-        w.putU32(result.maxValueSize);
-        if (!detail::encodeWireValueDescriptor(w, result.valueDescriptor)) return false;
+        w.putU32(result.schemaSlot);
         if (!detail::encodeWireMetadata(w, result.metadata)) return false;
     }
     return detail::encodeWireMetadata(w, function.metadata()) && w.ok();
@@ -637,17 +643,14 @@ inline bool decodeFunctionDescriptor(BufReader& r, FunctionDescriptor& out) {
     if (!r.ok() || parameterCount > MAX_COLLECTION_COUNT) return false;
     out.parameters.resize(parameterCount);
     for (auto& parameter : out.parameters) {
-        if (!detail::decodeWireString(r, parameter.name) ||
+        parameter.key = r.getU32();
+        if (parameter.key == 0 || !detail::decodeWireString(r, parameter.name) ||
             !detail::decodeWireString(r, parameter.description)) return false;
-        parameter.type = static_cast<ValueType>(r.getU8());
         const uint8_t flags = r.getU8();
         parameter.optional = (flags & FunctionParameterFlags::Optional) != 0;
         parameter.hasDefault = (flags & FunctionParameterFlags::HasDefault) != 0;
-        parameter.enumReference = r.getU64();
-        parameter.structReference = r.getU64();
-        parameter.maxValueSize = r.getU32();
-        if (!r.ok() ||
-            !detail::decodeWireValueDescriptor(r, parameter.valueDescriptor)) return false;
+        parameter.schemaSlot = r.getU32();
+        if (!r.ok()) return false;
         if (parameter.hasDefault) {
             const uint32_t length = r.getVarint();
             const uint8_t* bytes = r.getBytes(length);
@@ -661,13 +664,8 @@ inline bool decodeFunctionDescriptor(BufReader& r, FunctionDescriptor& out) {
         auto& result = out.returnValue;
         if (!detail::decodeWireString(r, result.name) ||
             !detail::decodeWireString(r, result.description)) return false;
-        result.type = static_cast<ValueType>(r.getU8());
-        r.getU8();  // flags are derived from the decoded fields
-        result.enumReference = r.getU64();
-        result.structReference = r.getU64();
-        result.maxValueSize = r.getU32();
-        if (!r.ok() ||
-            !detail::decodeWireValueDescriptor(r, result.valueDescriptor)) return false;
+        result.schemaSlot = r.getU32();
+        if (!r.ok()) return false;
         if (!detail::decodeWireMetadata(r, result.metadata)) return false;
     }
     return detail::decodeWireMetadata(r, out.metadata) && r.ok();

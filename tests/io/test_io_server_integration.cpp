@@ -377,43 +377,6 @@ TEST_F(ServerIntegrationTest, MaxClientsLoggingPath) {
     server.stop();
 }
 
-TEST_F(ServerIntegrationTest, ServerWithFeatures) {
-    auto pipeServer = std::make_unique<PipeTransportServer>();
-    PipeTransportServer* ps = pipeServer.get();
-
-    ServerConfig config;
-    config.maxClients = 2;
-    config.timestampFn = [this]() -> uint64_t { return fakeTs_++; };
-    config.serverFeatures.features.push_back(
-        Feature::makeString("server_name", "TestServer"));
-
-    Server server(registry_, std::move(pipeServer), config);
-    server.start();
-
-    auto client = ps->addPendingConnection();
-
-    // Verify the session is alive before sending feature exchange
-    ASSERT_TRUE(waitForSessionAlive(client.get()));
-
-    // Feature exchange
-    FeatureSet clientFeatures;
-    uint8_t msg[256];
-    BufWriter w(msg, sizeof(msg));
-    w.putU8(static_cast<uint8_t>(MessageType::FeatureExchangeReq));
-    clientFeatures.encode(w);
-    slipSend(client.get(), msg, w.pos);
-
-    auto resp = slipReceive(client.get());
-    ASSERT_FALSE(resp.empty());
-    BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
-    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
-
-    client->close();
-    waitSessionCount(server, 0);
-    server.stop();
-}
-
 TEST_F(ServerIntegrationTest, DatalogRecorderAccessible) {
     auto pipeServer = std::make_unique<PipeTransportServer>();
 

@@ -4,32 +4,29 @@ This document defines the first typed application profile for a Tether IO
 session that controls or observes a fleet of CiA 402 / DS402 drives.
 
 The profile deliberately uses existing Tether IO primitives. It does not add a
-new message type for every drive operation. A server advertises the profile
-through `FeatureExchange`, exposes fixed typed values through the parameter and
-signal catalogs, streams telemetry with `ConfigureStream`, and invokes
-commands through `InvokeEx`.
+new message type for every drive operation. A server exposes V6 schemas through
+the negotiated catalog, publishes typed values through the parameter and signal
+catalogs, streams telemetry with `ConfigureStream`, and invokes commands
+through `InvokeEx`.
 
 This profile is an application contract. The generic IO protocol remains
 usable by applications that do not implement it.
 
 ## Negotiation
 
-A server implementing the profile advertises these features in its
-`FeatureExchangeResp`:
+A client completes the V6 `ClientHello` / `ServerHello` /
+`SchemaRequest` / `SchemaDefinition` / `SchemaCommit` bootstrap before
+discovering this profile. Profile values and function arguments identify their
+types by schema slot in the committed catalog epoch. A client must resolve that
+slot to a manifest entry, validate its key, digest, revision, and schema shape,
+and reject an unknown or stale epoch rather than guessing field meaning.
 
-| Name | Type | Meaning |
-| --- | --- | --- |
-| `profile.machine.cia402.v1` | `Bool` | The required profile surface is available. |
-| `profile.machine.cia402.version` | `U32` | Highest compatible profile schema version. |
-| `profile.machine.cia402.motion` | `Bool` | Motion commands are available. |
-| `profile.machine.cia402.authority` | `Bool` | Control-authority leases are available. |
-| `profile.machine.cia402.events` | `Bool` | Event cursor/query support is available. |
-| `profile.machine.cia402.capture` | `Bool` | Server-side capture support is available. |
-
-A client must check the feature set before enabling controls. A missing
-optional feature means that the related view is hidden or read-only. A client
-must reject a profile version it cannot decode rather than guessing field
-meaning.
+The profile name is `machine.cia402.v1`. Its availability is determined by the
+presence of its advertised schemas and catalog entries, not by an application
+message discriminator or a feature-exchange flag. Optional application
+surfaces, such as motion, authority, events, and capture, are represented by
+the catalog entries the server publishes; absent entries make the related view
+unavailable or read-only.
 
 ## Catalog conventions
 
@@ -39,9 +36,9 @@ state and commands.
 
 | Entry | Kind | Value | Purpose |
 | --- | --- | --- | --- |
-| `machine.descriptor` | Signal | `Struct` or `Binary` | Machine, topology, axes, groups, units, capabilities, and limits. |
-| `machine.snapshot` | Signal | `Struct` or `Binary` | Coherent machine-wide state. |
-| `drive.<stable-id>.snapshot` | Signal | `Struct` or `Binary` | Coherent state for one drive. |
+| `machine.descriptor` | Signal | Negotiated V6 schema value | Machine, topology, axes, groups, units, capabilities, and limits. |
+| `machine.snapshot` | Signal | Negotiated V6 schema value | Coherent machine-wide state. |
+| `drive.<stable-id>.snapshot` | Signal | `DriveSnapshotV1` packed V6 schema | Coherent state for one drive. |
 | `machine.events.cursor` | Signal | `U64` | Highest event ID retained for this session/profile. |
 | `machine.events.read` | Function | Typed args/return | Read events after a cursor with bounded pagination. |
 | `machine.command` | Function | `CommandRequestV1` / `CommandReceiptV1` | Validate and dispatch a command. |
@@ -52,13 +49,22 @@ state and commands.
 | `machine.authority.release` | Function | Typed args/return | Release a lease. |
 
 The server may expose additional profile entries. Their metadata must identify
-the schema, version, stable resource, unit, and access policy.
+the schema, stable resource, unit, and access policy. The schema reference is
+the key/digest selected through the catalog slot, not a raw layout claim.
 
-## Fixed `DriveSnapshotV1` value
+## Packed `DriveSnapshotV1` schema
 
-The C++ definition and codec are in
-`include/tether/io/CiA402Profile.hpp`. The value is exactly 64 bytes and is
-encoded little-endian. C++ object alignment is not part of the wire format.
+The C++ schema graph and codec are in `include/tether/io/CiA402Profile.hpp`.
+`tether.machine.cia402.DriveSnapshotV1` is the root node of a dependency-closed
+V6 graph: seven reusable scalar nodes (`U8`, `U16`, `U32`, `U64`, `I8`, `I16`,
+and `I32`) followed by a 22-field `Struct` node with `Packed` encoding. The
+server advertises the root's key, digest, and revision in its manifest and a
+catalog entry refers to its epoch-bound slot.
+
+Once the root schema is negotiated, its packed payload is exactly 64 bytes,
+with fields concatenated in ascending field-key order as below. Fixed-width
+fields are little-endian. C++ object alignment is not part of the value
+encoding, and the name is schema metadata, not an application discriminator.
 
 | Offset | Size | Field | Type | Meaning |
 | ---: | ---: | --- | --- | --- |
@@ -85,9 +91,10 @@ encoded little-endian. C++ object alignment is not part of the wire format.
 | 62 | 1 | `homing_state` | U8 | Profile-defined homing state enum. |
 | 63 | 1 | `reserved` | U8 | Must be zero in version 1. |
 
-The `StructDescriptor` returned for this value is named
-`tether.machine.cia402.DriveSnapshotV1`. A client must validate the schema name,
-version, total size, and field bounds before decoding it.
+A client must resolve the schema slot in the payload's epoch and verify the
+manifest digest plus the packed root shape, field keys, scalar dependencies,
+and 64-byte fixed size before decoding it. It must reject a stale slot, an
+unknown schema, or a payload that does not exactly satisfy that schema.
 
 ### Quality flags
 
@@ -126,9 +133,10 @@ application idempotency.
 
 ## Compatibility
 
-Version 1 uses append-free fixed layouts. A future incompatible layout gets a
-new schema name/version; clients must not infer new meanings from reserved
-bytes. New optional profile entries and feature flags are backward compatible.
+`DriveSnapshotV1` is a specific packed schema revision. A future incompatible
+layout requires a new negotiated schema identity and digest; clients must not
+infer new meanings from the `reserved` byte. New optional profile entries are
+backward compatible when their schemas and slots are independently negotiated.
 Unknown catalog entries and unknown event codes must be ignored safely while
 preserving their IDs for diagnostics.
 

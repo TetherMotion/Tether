@@ -51,6 +51,7 @@ struct ClientCatalogEntry {
 
 /// Function parameter descriptor.
 struct ClientFunctionParam {
+    uint32_t key = 0;
     std::string name;
     std::string description;
     ValueType type = ValueType::F64;
@@ -105,13 +106,6 @@ struct ClientSnapshotValue {
     std::vector<uint8_t> value;
 };
 
-/// Feature entry from feature exchange.
-struct ClientFeature {
-    std::string name;
-    uint8_t type = 0;
-    std::vector<uint8_t> value;
-};
-
 /// Error from the server or client.
 struct ClientError {
     ErrorCode code = ErrorCode::None;
@@ -125,7 +119,6 @@ struct ClientCallResult {
     uint32_t errorCode = 0;
     std::string errorMessage;
     bool hasReturnValue = false;
-    ValueType returnType = ValueType::F64;
     std::vector<uint8_t> returnValue;
 };
 
@@ -221,12 +214,12 @@ public:
     std::expected<std::vector<ClientFunctionEntry>, ClientError>
     listFunctions(uint32_t offset = 0, uint32_t maxCount = 1000);
 
-    /// Call a function by ID with typed arguments.
-    /// Each argument is {position, type, valueBytes}.
+    /// Call a function by ID with keyed, schema-directed arguments.
     struct FunctionArg {
         uint32_t position = 0;
         ValueType type = ValueType::F64;
         std::vector<uint8_t> value;
+        uint32_t key = 0;
     };
     std::expected<ClientCallResult, ClientError>
     callFunction(uint64_t functionId, const std::vector<FunctionArg>& args = {});
@@ -289,11 +282,6 @@ public:
     std::expected<std::pair<uint64_t, std::vector<ClientSnapshotValue>>, ClientError>
     snapshotSignals(const std::vector<uint64_t>& ids = {});
 
-    // ---- Feature Exchange ----
-
-    std::expected<std::vector<ClientFeature>, ClientError>
-    featureExchange(const std::vector<ClientFeature>& clientFeatures = {});
-
     // ---- Log Subscription ----
 
     std::expected<ClientLogSubscription, ClientError>
@@ -320,24 +308,6 @@ public:
                        bool isWhitelist,
                        const std::vector<uint8_t>& encodedRules);
 
-    // ---- Describe Struct ----
-
-    struct StructField {
-        std::string name;
-        ValueType type = ValueType::F64;
-        uint16_t offset = 0;
-        uint16_t size = 0;
-        std::string unit;
-    };
-    struct StructDescriptor {
-        uint64_t entryId = 0;
-        std::string structName;
-        uint32_t totalSize = 0;
-        std::vector<StructField> fields;
-    };
-    std::expected<StructDescriptor, ClientError>
-    describeStruct(uint64_t id);
-
     // ---- Input Streams ----
 
     struct CreateInputStreamResult {
@@ -345,9 +315,8 @@ public:
         bool success = false;
     };
     std::expected<CreateInputStreamResult, ClientError>
-    createInputStream(uint32_t maxValueSize,
-                      uint32_t maxBatchSize,
-                      const std::vector<uint8_t>& encodedValueDescriptor);
+    createInputStream(uint32_t schemaSlot, uint32_t maxValueSize,
+                      uint32_t maxBatchSize);
 
     std::expected<void, ClientError>
     inputStreamData(uint32_t streamId,
@@ -396,7 +365,6 @@ private:
     void handleInvokeExReq(const std::vector<uint8_t>& msg);
     void sendInvokeExResponse(uint64_t requestId, bool success, uint32_t errorCode,
                               std::string_view errorMessage, bool hasReturn,
-                              ValueType returnType,
                               const std::vector<uint8_t>& returnValue);
     std::vector<uint8_t> encodeVarint(uint32_t value);
     uint32_t decodeVarint(const uint8_t* data, size_t len, size_t& consumed);
