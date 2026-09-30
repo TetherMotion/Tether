@@ -869,37 +869,9 @@ TetherIOClient::snapshotSignals(const std::vector<uint64_t>& ids) {
 
 std::expected<std::vector<ClientFeature>, ClientError>
 TetherIOClient::featureExchange(const std::vector<ClientFeature>& clientFeatures) {
-    size_t cap = 6;
-    for (const auto& f : clientFeatures) cap += 2 + f.name.size() + 1 + 4 + f.value.size();
-    ClientBufWriter w(cap);
-    w.putU8(static_cast<uint8_t>(MessageType::FeatureExchangeReq));
-    w.putU32(static_cast<uint32_t>(clientFeatures.size()));
-    for (const auto& f : clientFeatures) {
-        w.putString16(f.name);
-        w.putU8(f.type);
-        w.putU32(static_cast<uint32_t>(f.value.size()));
-        w.putBytes(f.value.data(), f.value.size());
-    }
-    auto payload = w.finish();
-
-    auto result = request(payload, MessageType::FeatureExchangeResp);
-    if (!result) return std::unexpected(result.error());
-
-    ClientBufReader r(result->data(), result->size());
-    r.getU8(); // type
-    uint32_t count = r.getU32();
-    std::vector<ClientFeature> features;
-    features.reserve(count);
-    for (uint32_t i = 0; i < count && r.ok(); ++i) {
-        ClientFeature f;
-        f.name = r.getString16();
-        f.type = r.getU8();
-        uint32_t valueLen = r.getU32();
-        f.value = r.getBytes(valueLen);
-        features.push_back(std::move(f));
-    }
-    if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed FeatureExchangeResp"));
-    return features;
+    (void)clientFeatures;
+    return std::unexpected(makeError(ErrorCode::FeatureNotSupported,
+                                     "V5 FeatureExchange was replaced by V6 schema negotiation"));
 }
 
 // ---- Log Subscription ----

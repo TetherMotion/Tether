@@ -4,6 +4,7 @@
  */
 #include <gtest/gtest.h>
 #include "tether/io/Server.hpp"
+#include "tether/io/SchemaNegotiation.hpp"
 #include "PipeTransport.hpp"
 #include "SLIPStream/Buffer.hpp"
 #include <thread>
@@ -63,6 +64,27 @@ static std::vector<uint8_t> slipReceive(ITransport* tp, uint32_t timeoutMs = 500
 }
 
 /// Send a GetParam request and expect a response — proves the session is alive.
+static bool bootstrapSession(ITransport* client, uint32_t timeoutMs = 2000) {
+    uint8_t hello[64];
+    BufWriter helloWriter(hello, sizeof(hello));
+    helloWriter.putU8(static_cast<uint8_t>(MessageType::ClientHello));
+    encodeClientHelloV6(helloWriter, {});
+    slipSend(client, hello, helloWriter.pos);
+    auto response = slipReceive(client, timeoutMs);
+    if (response.empty() || response[0] != static_cast<uint8_t>(MessageType::ServerHello)) return false;
+
+    BufReader reader(response.data() + 1, response.size() - 1);
+    ServerHelloV6 serverHello;
+    if (!decodeServerHelloV6(reader, serverHello) || reader.remaining() != 0) return false;
+
+    uint8_t commit[32];
+    BufWriter commitWriter(commit, sizeof(commit));
+    commitWriter.putU8(static_cast<uint8_t>(MessageType::SchemaCommit));
+    encodeSchemaCommitV6(commitWriter, {serverHello.epoch});
+    slipSend(client, commit, commitWriter.pos);
+    return true;
+}
+
 static bool verifySessionAlive(ITransport* client, uint64_t paramId = 1,
                                uint32_t timeoutMs = 2000) {
     uint8_t msg[9];
@@ -77,6 +99,7 @@ static bool verifySessionAlive(ITransport* client, uint64_t paramId = 1,
 
 static bool waitForSessionAlive(ITransport* client, uint64_t timeoutMs = 3000,
                                 uint64_t paramId = 1) {
+    if (!bootstrapSession(client, timeoutMs)) return false;
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::milliseconds(timeoutMs);
     while (std::chrono::steady_clock::now() < deadline) {
@@ -383,11 +406,8 @@ TEST_F(ServerIntegrationTest, ServerWithFeatures) {
     auto resp = slipReceive(client.get());
     ASSERT_FALSE(resp.empty());
     BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::FeatureExchangeResp));
-
-    FeatureSet respFeatures;
-    EXPECT_TRUE(FeatureSet::decode(r, respFeatures));
-    EXPECT_NE(respFeatures.find("server_name"), nullptr);
+    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
 
     client->close();
     waitSessionCount(server, 0);

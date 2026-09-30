@@ -805,17 +805,8 @@ TEST_F(SessionIntegrationTest, FeatureExchangeWithServerFeatures) {
 
     auto resp = roundtrip(*ctx, msg, w.pos);
     BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::FeatureExchangeResp));
-
-    FeatureSet respFeatures;
-    EXPECT_TRUE(FeatureSet::decode(r, respFeatures));
-
-    // Should include server features + auto-added protocol_version
-    EXPECT_NE(respFeatures.find("supports_datalogging"), nullptr);
-    EXPECT_NE(respFeatures.find("server_name"), nullptr);
-    const Feature* pv = respFeatures.find("protocol_version");
-    ASSERT_NE(pv, nullptr);
-    EXPECT_EQ(pv->getU32(), PROTOCOL_VERSION);
+    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
 }
 
 TEST_F(SessionIntegrationTest, FeatureExchangeNoServerFeatures) {
@@ -829,11 +820,8 @@ TEST_F(SessionIntegrationTest, FeatureExchangeNoServerFeatures) {
 
     auto resp = roundtrip(*ctx, msg, w.pos);
     BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::FeatureExchangeResp));
-
-    FeatureSet respFeatures;
-    EXPECT_TRUE(FeatureSet::decode(r, respFeatures));
-    EXPECT_NE(respFeatures.find("protocol_version"), nullptr);
+    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
 }
 
 TEST_F(SessionIntegrationTest, FeatureExchangeServerAlreadyHasVersion) {
@@ -850,14 +838,8 @@ TEST_F(SessionIntegrationTest, FeatureExchangeServerAlreadyHasVersion) {
 
     auto resp = roundtrip(*ctx, msg, w.pos);
     BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::FeatureExchangeResp));
-
-    FeatureSet respFeatures;
-    EXPECT_TRUE(FeatureSet::decode(r, respFeatures));
-    const Feature* pv = respFeatures.find("protocol_version");
-    ASSERT_NE(pv, nullptr);
-    // Should keep the server's version (99), not add another
-    EXPECT_EQ(pv->getU32(), 99u);
+    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
 }
 
 // ===========================================================================
@@ -872,14 +854,9 @@ TEST_F(SessionIntegrationTest, DescribeStruct) {
     w.putU64(5);  // vec3_param has structDesc
 
     auto resp = roundtrip(*ctx, msg, w.pos);
-    ASSERT_GE(resp.size(), 10u);
     BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::DescribeStructResp));
-
-    StructDescriptor decoded;
-    EXPECT_TRUE(StructDescriptor::decode(r, decoded));
-    EXPECT_EQ(decoded.name, "Vec3");
-    EXPECT_EQ(decoded.fields.size(), 3u);
+    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
 }
 
 TEST_F(SessionIntegrationTest, DescribeStructInvalidId) {
@@ -892,7 +869,7 @@ TEST_F(SessionIntegrationTest, DescribeStructInvalidId) {
     auto resp = roundtrip(*ctx, msg, w.pos);
     BufReader r(resp.data(), resp.size());
     EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
-    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::InvalidId));
+    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
 }
 
 TEST_F(SessionIntegrationTest, DescribeStructNoDescriptor) {
@@ -905,7 +882,7 @@ TEST_F(SessionIntegrationTest, DescribeStructNoDescriptor) {
     auto resp = roundtrip(*ctx, msg, w.pos);
     BufReader r(resp.data(), resp.size());
     EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
-    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::InvalidMessage));
+    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
 }
 
 TEST_F(SessionIntegrationTest, DescribeStructTooShort) {

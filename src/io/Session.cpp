@@ -281,14 +281,12 @@ void Session::onMessage(const uint8_t* data, size_t len) {
         case MessageType::UnsubscribeLogReq:    handleUnsubscribeLogReq(body, bodyLen); break;
         case MessageType::SnapshotParamsReq:   handleSnapshotParamsReq(body, bodyLen); break;
         case MessageType::SnapshotSignalsReq:  handleSnapshotSignalsReq(body, bodyLen); break;
-        case MessageType::FeatureExchangeReq:  handleFeatureExchangeReq(body, bodyLen); break;
         case MessageType::ClientHello:         handleClientHello(body, bodyLen); break;
         case MessageType::SchemaRequest:       handleSchemaRequest(body, bodyLen); break;
         case MessageType::SchemaCommit:        handleSchemaCommit(body, bodyLen); break;
         case MessageType::ConfigureDatalogReq: handleConfigureDatalogReq(body, bodyLen); break;
         case MessageType::DatalogStatusReq:    handleDatalogStatusReq(); break;
         case MessageType::ConfigureThresholdReq: handleConfigureThresholdReq(body, bodyLen); break;
-        case MessageType::DescribeStructReq:   handleDescribeStructReq(body, bodyLen); break;
         case MessageType::ListFunctionsReq:    handleListFunctionsReq(body, bodyLen); break;
         case MessageType::CallFunctionReq:     handleCallFunctionReq(body, bodyLen); break;
         case MessageType::CreateInputStreamReq: handleCreateInputStreamReq(body, bodyLen); break;
@@ -989,48 +987,6 @@ void Session::handleSnapshotSignalsReq(const uint8_t* body, size_t len) {
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
 }
 
-void Session::handleFeatureExchangeReq(const uint8_t* body, size_t len) {
-    BufReader r(body, len);
-    if (!FeatureSet::decode(r, clientFeatures_) || r.remaining() != 0) {
-        sendError(ErrorCode::InvalidMessage, "Invalid feature exchange");
-        return;
-    }
-
-    // Build response with server features
-    FeatureSet response;
-    if (serverFeatures_) {
-        response = *serverFeatures_;
-    }
-    // Always include protocol version
-    bool hasVersion = false;
-    for (const auto& f : response.features) {
-        if (f.name == "protocol_version") { hasVersion = true; break; }
-    }
-    if (!hasVersion) {
-        response.features.push_back(Feature::makeU32("protocol_version", PROTOCOL_VERSION));
-    }
-    const auto advertise = [&response](std::string_view name) {
-        if (!response.find(std::string(name))) {
-            response.features.push_back(Feature::makeBool(std::string(name), true));
-        }
-    };
-    advertise("supports_ping");
-    advertise("supports_log_subscriptions");
-    advertise("supports_extended_value_types");
-    advertise("supports_large_counts");
-    advertise("supports_signals");
-    advertise("supports_functions");
-    if (registry_.supportsStreamFilters()) advertise("supports_stream_filters");
-
-    size_t sz = 1 + 4 + response.features.size() * 64;
-    if (txRawBuf_.size() < sz) txRawBuf_.resize(sz);
-
-    BufWriter w(txRawBuf_.data(), sz);
-    w.putU8(static_cast<uint8_t>(MessageType::FeatureExchangeResp));
-    response.encode(w);
-    if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
-}
-
 void Session::handleConfigureDatalogReq(const uint8_t* body, size_t len) {
     if (!datalogRecorder_) {
         sendError(ErrorCode::FeatureNotSupported, "Datalogging not available");
@@ -1096,27 +1052,6 @@ void Session::handleConfigureThresholdReq(const uint8_t* body, size_t len) {
     w.putU8(static_cast<uint8_t>(MessageType::ConfigureThresholdResp));
     w.putU8(1);  // success
     if (w.ok()) sendRaw(buf, w.pos);
-}
-
-void Session::handleDescribeStructReq(const uint8_t* body, size_t len) {
-    if (len < 8) { sendError(ErrorCode::InvalidMessage, "too short"); return; }
-    BufReader r(body, len);
-    uint64_t id = r.getU64();
-    if (!r.ok()) { sendError(ErrorCode::InvalidMessage, "parse error"); return; }
-
-    EntryView entry = registry_.find(id);
-    if (!entry) { sendError(ErrorCode::InvalidId, "Not found"); return; }
-
-    const StructDescriptor* sd = entry.structDesc();
-    if (!sd) { sendError(ErrorCode::InvalidMessage, "No struct descriptor"); return; }
-
-    size_t sz = 1 + 8 + 2 + sd->name.size() + 4 + 4 + sd->fields.size() * 64;
-    if (txRawBuf_.size() < sz) txRawBuf_.resize(sz);
-
-    BufWriter w(txRawBuf_.data(), sz);
-    w.putU8(static_cast<uint8_t>(MessageType::DescribeStructResp));
-    sd->encode(w);
-    if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
 }
 
 void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {

@@ -308,13 +308,8 @@ TEST_F(SessionTest, FeatureExchange) {
     ASSERT_GE(resp.size(), 5u);
 
     BufReader r(resp.data(), resp.size());
-    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::FeatureExchangeResp));
-    FeatureSet serverFeatures;
-    EXPECT_TRUE(FeatureSet::decode(r, serverFeatures));
-    // Should have protocol_version at minimum
-    const Feature* pv = serverFeatures.find("protocol_version");
-    ASSERT_NE(pv, nullptr);
-    EXPECT_EQ(pv->getU32(), PROTOCOL_VERSION);
+    EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(r.getU32(), static_cast<uint32_t>(ErrorCode::UnknownMessageType));
 }
 
 TEST_F(SessionTest, V6ClientHelloReturnsServerHello) {

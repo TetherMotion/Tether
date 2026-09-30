@@ -15,14 +15,15 @@
  * with the parent `<tether-app>` via properties and `CustomEvent`s.
  */
 
-import { CatalogEntry, FunctionEntry, ValueType, decodeValueBytes, formatValue } from './protocol';
+import { CatalogEntry, FunctionEntry, formatValue } from './protocol';
 import { TetherIOClient } from './client';
 
 // Re-export the WebGPU oscilloscope so importing 'components' registers it.
 export { WebGPUScope } from './webgpu-scope';
 
-/** Human-readable name for a ValueType enum value (e.g. `F64` → `"F64"`). */
-const typeName = (type: number): string => ValueType[type] ?? `type ${type}`;
+/** Display the negotiated schema slot until the generic schema UI is loaded. */
+const typeName = (entry: Pick<CatalogEntry, 'schemaEpoch' | 'schemaSlot'>): string =>
+  `schema ${entry.schemaEpoch.toString()}/${entry.schemaSlot}`;
 
 // ===========================================================================
 // TetherCatalog — filterable entry list with checkboxes
@@ -83,7 +84,7 @@ export class TetherCatalog extends HTMLElement {
           `<label class="catalog-row">` +
           `<input type="checkbox" data-id="${entry.id}" ${this.selected.has(entry.id) ? 'checked' : ''}>` +
           `<span><strong>${entry.name}</strong>` +
-          `<small>${entry.kind} · ${entry.group} · ${typeName(entry.type)}</small></span>` +
+          `<small>${entry.kind} · ${entry.group} · ${typeName(entry)}</small></span>` +
           `<button data-read="${entry.id}" title="Read now" type="button">↗</button>` +
           `</label>`,
       )
@@ -145,7 +146,7 @@ export class TetherValueCard extends HTMLElement {
       `<div class="value-card-head"><span>${this.entry.name}</span>` +
       `<button class="read-button">Read</button></div>` +
       `<strong class="value">${this.value}</strong>` +
-      `<small>${this.entry.group} · ${typeName(this.entry.type)}</small>`;
+      `<small>${this.entry.group} · ${typeName(this.entry)}</small>`;
     this.querySelector('button')?.addEventListener('click', () => void this.read());
   }
 
@@ -157,7 +158,7 @@ export class TetherValueCard extends HTMLElement {
     if (!this.entry || !this.client) return;
     try {
       const bytes = await this.client.get(this.entry.kind, this.entry.id);
-      this.value = formatValue(decodeValueBytes(bytes, this.entry.type));
+      this.value = formatValue(bytes);
       this.render();
     } catch (error) {
       this.value = error instanceof Error ? error.message : 'Read failed';
@@ -214,8 +215,8 @@ export class TetherParamPanel extends HTMLElement {
         .map(
           (p) =>
             `<label class="param-row" data-id="${p.id}">` +
-            `<span><strong>${p.name}</strong><small>${p.group} · ${typeName(p.type)}</small></span>` +
-            `<input type="number" step="any" value="" ${p.type === ValueType.F64 ? '' : 'disabled'}>` +
+            `<span><strong>${p.name}</strong><small>${p.group} · ${typeName(p)}</small></span>` +
+            `<input type="number" step="any" value="" disabled>` +
             `</label>`,
         )
         .join('');
@@ -241,7 +242,9 @@ export class TetherParamPanel extends HTMLElement {
     if (!this.client) return;
     try {
       const bytes = await this.client.get('param', entry.id);
-      const decoded = decodeValueBytes(bytes, entry.type);
+      const decoded = bytes.length === 8
+        ? new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat64(0, true)
+        : undefined;
       const input = this.querySelector<HTMLInputElement>(`.param-row[data-id="${entry.id}"] input`);
       if (input && typeof decoded === 'number') input.value = String(decoded);
     } catch {

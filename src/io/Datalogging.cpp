@@ -27,7 +27,8 @@ void DatalogRecorder::configure(const DatalogConfig& config,
         DatalogField field;
         field.entryId = id;
         field.name = "";  // Will be filled if registry is available
-        field.type = ValueType::U8;  // Placeholder
+        field.schemaEpoch = 0;
+        field.schemaSlot = 0;
         field.offset = offset;
         field.size = 0;
         field.kind = EntryKind::Signal;

@@ -180,14 +180,12 @@ private:
     void handleGetMetadataReq(const uint8_t* body, size_t len);
     void handleSnapshotParamsReq(const uint8_t* body, size_t len);
     void handleSnapshotSignalsReq(const uint8_t* body, size_t len);
-    void handleFeatureExchangeReq(const uint8_t* body, size_t len);
     void handleClientHello(const uint8_t* body, size_t len);
     void handleSchemaRequest(const uint8_t* body, size_t len);
     void handleSchemaCommit(const uint8_t* body, size_t len);
     void handleConfigureDatalogReq(const uint8_t* body, size_t len);
     void handleDatalogStatusReq();
     void handleConfigureThresholdReq(const uint8_t* body, size_t len);
-    void handleDescribeStructReq(const uint8_t* body, size_t len);
     void handleListFunctionsReq(const uint8_t* body, size_t len);
     void handleCallFunctionReq(const uint8_t* body, size_t len);
     void handleCreateInputStreamReq(const uint8_t* body, size_t len);

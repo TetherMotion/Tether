@@ -192,7 +192,7 @@ TEST(IOMalformed, DatalogConfigDecodeRejectsHugeEntryCount) {
 TEST(IOMalformed, DatalogMetadataDecodeRejectsTruncatedField) {
     DatalogMetadata source;
     source.logName = "log";
-    source.fields.push_back({1, "field", ValueType::U32, 0, 4, EntryKind::Parameter});
+    source.fields.push_back({1, "field", 1, 1, 0, 4, EntryKind::Parameter});
     std::vector<uint8_t> bytes(256);
     BufWriter writer(bytes.data(), bytes.size());
     source.encode(writer);
