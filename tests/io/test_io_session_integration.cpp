@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstring>
 #include <atomic>
+#include <array>
 #include <limits>
 
 using namespace tether::io;
@@ -281,6 +282,23 @@ protected:
 
         // Give session time to start
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+        std::array<uint8_t, 512> hello{};
+        BufWriter helloWriter(hello.data(), hello.size());
+        helloWriter.putU8(static_cast<uint8_t>(MessageType::ClientHello));
+        encodeClientHelloV6(helloWriter, {});
+        slipSend(ctx->client.get(), hello.data(), helloWriter.pos);
+        const auto serverHello = slipReceive(ctx->client.get());
+        EXPECT_FALSE(serverHello.empty());
+        if (!serverHello.empty()) {
+            EXPECT_EQ(serverHello[0], static_cast<uint8_t>(MessageType::ServerHello));
+        }
+
+        std::array<uint8_t, 32> commit{};
+        BufWriter commitWriter(commit.data(), commit.size());
+        commitWriter.putU8(static_cast<uint8_t>(MessageType::SchemaCommit));
+        encodeSchemaCommitV6(commitWriter, {1});
+        slipSend(ctx->client.get(), commit.data(), commitWriter.pos);
         return ctx;
     }
 
