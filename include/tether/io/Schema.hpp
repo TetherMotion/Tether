@@ -294,4 +294,59 @@ inline SchemaValidationResult validateSchemaGraph(const SchemaGraph& graph,
     return SchemaValidationResult::success();
 }
 
+inline std::optional<size_t> fixedSchemaSize(const SchemaGraph& graph,
+                                             const SchemaKey& root,
+                                             const SchemaLimits& limits = {}) {
+    if (!validateSchemaGraph(graph, limits)) return std::nullopt;
+    std::unordered_map<SchemaKey, std::optional<size_t>, SchemaKeyHash> sizes;
+    std::function<std::optional<size_t>(const SchemaKey&)> sizeOf = [&](const SchemaKey& key) {
+        if (const auto cached = sizes.find(key); cached != sizes.end()) return cached->second;
+        const auto* node = graph.find(key);
+        if (!node) return std::optional<size_t>{};
+        std::optional<size_t> result;
+        switch (node->kind) {
+            case SchemaKind::Scalar:
+                if (detail::isFixedScalar(node->scalarType)) result = valueTypeSize(node->scalarType);
+                break;
+            case SchemaKind::Enum:
+                if (detail::isFixedScalar(node->scalarType)) result = valueTypeSize(node->scalarType);
+                break;
+            case SchemaKind::Alias:
+                result = node->target ? sizeOf(node->target->key) : std::nullopt;
+                break;
+            case SchemaKind::FixedArray:
+                if (node->element) {
+                    const auto elementSize = sizeOf(node->element->key);
+                    if (elementSize && node->fixedCount <= limits.maxFixedSize / *elementSize)
+                        result = *elementSize * node->fixedCount;
+                }
+                break;
+            case SchemaKind::Struct:
+                if (node->structEncoding == StructEncoding::Packed) {
+                    size_t total = 0;
+                    result = total;
+                    for (const auto& field : node->fields) {
+                        if (!(field.flags & SchemaFieldFlags::Required)) {
+                            result = std::nullopt;
+                            break;
+                        }
+                        const auto fieldSize = sizeOf(field.schema.key);
+                        if (!fieldSize || total > limits.maxFixedSize - *fieldSize) {
+                            result = std::nullopt;
+                            break;
+                        }
+                        total += *fieldSize;
+                        result = total;
+                    }
+                }
+                break;
+            default:
+                break;
+        }
+        sizes.emplace(key, result);
+        return result;
+    };
+    return sizeOf(root);
+}
+
 } // namespace tether::io

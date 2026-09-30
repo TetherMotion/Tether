@@ -101,5 +101,37 @@ TEST(IOSchema, RejectsInvalidArrayBoundsAndMissingReferences) {
     EXPECT_EQ(result.message, "invalid dynamic array bounds");
 }
 
+TEST(IOSchema, ComputesPackedFixedSizeAndRejectsVariableSchemas) {
+    SchemaNode scalar;
+    scalar.key = key(1);
+    scalar.kind = SchemaKind::Scalar;
+    scalar.scalarType = ValueType::U32;
+
+    SchemaNode inner;
+    inner.key = key(2);
+    inner.kind = SchemaKind::Struct;
+    inner.structEncoding = StructEncoding::Packed;
+    inner.fields.push_back({1, SchemaFieldFlags::Required, ref(1), "value", ""});
+
+    SchemaNode outer;
+    outer.key = key(3);
+    outer.kind = SchemaKind::Struct;
+    outer.structEncoding = StructEncoding::Packed;
+    outer.fields.push_back({1, SchemaFieldFlags::Required, ref(2), "inner", ""});
+    outer.fields.push_back({2, SchemaFieldFlags::Required, ref(1), "tail", ""});
+
+    const SchemaGraph graph{{scalar, inner, outer}};
+    ASSERT_TRUE(validateSchemaGraph(graph));
+    ASSERT_TRUE(fixedSchemaSize(graph, key(3)));
+    EXPECT_EQ(*fixedSchemaSize(graph, key(3)), 8U);
+
+    SchemaNode variable;
+    variable.key = key(4);
+    variable.kind = SchemaKind::String;
+    variable.maxBytes = 32;
+    const SchemaGraph variableGraph{{variable}};
+    EXPECT_FALSE(fixedSchemaSize(variableGraph, key(4)));
+}
+
 } // namespace
 } // namespace tether::io
