@@ -99,6 +99,8 @@ struct ClientMetadata {
 /// Snapshot value entry.
 struct ClientSnapshotValue {
     uint64_t id = 0;
+    uint64_t schemaEpoch = 0;
+    uint32_t schemaSlot = 0;
     uint8_t valueSize = 0;
     std::vector<uint8_t> value;
 };

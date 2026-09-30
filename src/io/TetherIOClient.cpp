@@ -815,11 +815,17 @@ TetherIOClient::snapshotParams(const std::vector<uint64_t>& ids) {
     r.getU8(); // type
     uint64_t ts = r.getU64();
     uint32_t count = r.getU32();
+    const uint64_t epoch = r.getU64();
+    if (epoch != schemaEpoch_) {
+        return std::unexpected(makeError(ErrorCode::InvalidMessage, "Stale snapshot schema epoch"));
+    }
     std::vector<ClientSnapshotValue> values;
     values.reserve(count);
     for (uint32_t i = 0; i < count && r.ok(); ++i) {
         ClientSnapshotValue v;
         v.id = r.getU64();
+        v.schemaEpoch = epoch;
+        v.schemaSlot = r.getU32();
         v.valueSize = r.getU8();
         size_t actualSize = v.valueSize;
         if (v.valueSize == 0) actualSize = r.getVarint();
@@ -845,11 +851,17 @@ TetherIOClient::snapshotSignals(const std::vector<uint64_t>& ids) {
     r.getU8(); // type
     uint64_t ts = r.getU64();
     uint32_t count = r.getU32();
+    const uint64_t epoch = r.getU64();
+    if (epoch != schemaEpoch_) {
+        return std::unexpected(makeError(ErrorCode::InvalidMessage, "Stale snapshot schema epoch"));
+    }
     std::vector<ClientSnapshotValue> values;
     values.reserve(count);
     for (uint32_t i = 0; i < count && r.ok(); ++i) {
         ClientSnapshotValue v;
         v.id = r.getU64();
+        v.schemaEpoch = epoch;
+        v.schemaSlot = r.getU32();
         v.valueSize = r.getU8();
         size_t actualSize = v.valueSize;
         if (v.valueSize == 0) actualSize = r.getVarint();
