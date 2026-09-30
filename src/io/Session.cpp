@@ -846,7 +846,7 @@ void Session::handleGetMetadataReq(const uint8_t* body, size_t len) {
     EntryView entry = registry_.find(id);
     if (!entry) { sendError(ErrorCode::InvalidId, "Not found"); return; }
 
-    size_t sz = 1 + 8 + 4;
+    size_t sz = 1 + 8 + 4 + 8;
     entry.forEachMetadata([&sz](std::string_view k, std::string_view v) {
         sz += 2 + k.size() + 2 + v.size();
     });
@@ -885,6 +885,7 @@ void Session::handleSnapshotParamsReq(const uint8_t* body, size_t len) {
 
     struct SnapshotValue {
         uint64_t id;
+        uint32_t schemaSlot;
         uint8_t valueSize;
         std::vector<uint8_t> bytes;
         bool variable = false;
@@ -892,23 +893,24 @@ void Session::handleSnapshotParamsReq(const uint8_t* body, size_t len) {
     std::vector<SnapshotValue> values;
     values.reserve(ids.size());
 
-    size_t sz = 1 + 8 + 4;
+    size_t sz = 1 + 8 + 4 + 8;
     for (uint64_t id : ids) {
         EntryView e = registry_.findParam(id);
         if (!e) continue;
         SnapshotValue value{};
         value.id = id;
+        value.schemaSlot = e.schemaSlot();
         value.valueSize = e.valueSize();
         value.variable = e.isVariableLength();
         if (value.variable) {
             value.bytes.resize(e.maxValueSize());
             const size_t actual = e.readVar(value.bytes.data(), value.bytes.size());
             value.bytes.resize(actual);
-            sz += 8 + 1 + MAX_VARINT_SIZE + actual;
+            sz += 8 + 4 + 1 + MAX_VARINT_SIZE + actual;
         } else {
             value.bytes.resize(value.valueSize);
             e.read(value.bytes.data());
-            sz += 8 + 1 + value.valueSize;
+            sz += 8 + 4 + 1 + value.valueSize;
         }
         values.push_back(std::move(value));
     }
@@ -918,8 +920,10 @@ void Session::handleSnapshotParamsReq(const uint8_t* body, size_t len) {
     w.putU8(static_cast<uint8_t>(MessageType::SnapshotParamsResp));
     w.putU64(ts);
     w.putU32(static_cast<uint32_t>(values.size()));
+    w.putU64(schemaEpoch_);
     for (const auto& value : values) {
         w.putU64(value.id);
+        w.putU32(value.schemaSlot);
         w.putU8(value.valueSize);
         if (value.variable) {
             w.putVarint(static_cast<uint32_t>(value.bytes.size()));
@@ -950,6 +954,7 @@ void Session::handleSnapshotSignalsReq(const uint8_t* body, size_t len) {
 
     struct SnapshotValue {
         uint64_t id;
+        uint32_t schemaSlot;
         uint8_t valueSize;
         std::vector<uint8_t> bytes;
         bool variable = false;
@@ -957,23 +962,24 @@ void Session::handleSnapshotSignalsReq(const uint8_t* body, size_t len) {
     std::vector<SnapshotValue> values;
     values.reserve(ids.size());
 
-    size_t sz = 1 + 8 + 4;
+    size_t sz = 1 + 8 + 4 + 8;
     for (uint64_t id : ids) {
         EntryView e = registry_.findSignal(id);
         if (!e) continue;
         SnapshotValue value{};
         value.id = id;
         value.valueSize = e.valueSize();
+        value.schemaSlot = e.schemaSlot();
         value.variable = e.isVariableLength();
         if (value.variable) {
             value.bytes.resize(e.maxValueSize());
             const size_t actual = e.readVar(value.bytes.data(), value.bytes.size());
             value.bytes.resize(actual);
-            sz += 8 + 1 + MAX_VARINT_SIZE + actual;
+            sz += 8 + 4 + 1 + MAX_VARINT_SIZE + actual;
         } else {
             value.bytes.resize(value.valueSize);
             e.read(value.bytes.data());
-            sz += 8 + 1 + value.valueSize;
+            sz += 8 + 4 + 1 + value.valueSize;
         }
         values.push_back(std::move(value));
     }
@@ -983,8 +989,10 @@ void Session::handleSnapshotSignalsReq(const uint8_t* body, size_t len) {
     w.putU8(static_cast<uint8_t>(MessageType::SnapshotSignalsResp));
     w.putU64(ts);
     w.putU32(static_cast<uint32_t>(values.size()));
+    w.putU64(schemaEpoch_);
     for (const auto& value : values) {
         w.putU64(value.id);
+        w.putU32(value.schemaSlot);
         w.putU8(value.valueSize);
         if (value.variable) {
             w.putVarint(static_cast<uint32_t>(value.bytes.size()));
