@@ -13,6 +13,8 @@
 #include <thread>
 #include <chrono>
 #include <array>
+#include <algorithm>
+#include <iterator>
 
 using namespace tether::io;
 
@@ -63,8 +65,14 @@ public:
 
     /// Decode the first SLIP packet from txData, return the decoded payload.
     std::vector<uint8_t> decodeTxPacket() {
-        auto raw = consumeTx();
-        if (raw.empty()) return {};
+        std::vector<uint8_t> raw;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            auto end = std::find(txData_.begin(), txData_.end(), uint8_t{0xC0});
+            if (end == txData_.end()) return {};
+            raw.assign(txData_.begin(), std::next(end));
+            txData_.erase(txData_.begin(), std::next(end));
+        }
         size_t decLen = SLIPStream::decoded_length(raw.data(), raw.size());
         if (decLen == SLIPStream::DECODE_ERROR || decLen == 0) return {};
         std::vector<uint8_t> decoded(decLen);
@@ -115,9 +123,24 @@ protected:
     }
 
     /// Run the session in a thread, inject a message, collect the response.
-    std::vector<uint8_t> sendAndReceive(const uint8_t* msg, size_t msgLen) {
+    std::vector<uint8_t> sendAndReceive(const uint8_t* msg, size_t msgLen,
+                                        bool bootstrap = true) {
         auto transport = std::make_unique<MockTransport>();
         MockTransport* tp = transport.get();
+
+        if (bootstrap) {
+            std::array<uint8_t, 256> hello{};
+            BufWriter helloWriter(hello.data(), hello.size());
+            helloWriter.putU8(static_cast<uint8_t>(MessageType::ClientHello));
+            encodeClientHelloV6(helloWriter, {});
+            tp->injectSlipMessage(hello.data(), helloWriter.pos);
+
+            std::array<uint8_t, 32> commit{};
+            BufWriter commitWriter(commit.data(), commit.size());
+            commitWriter.putU8(static_cast<uint8_t>(MessageType::SchemaCommit));
+            encodeSchemaCommitV6(commitWriter, {1});
+            tp->injectSlipMessage(commit.data(), commitWriter.pos);
+        }
 
         // Inject the request
         tp->injectSlipMessage(msg, msgLen);
@@ -134,7 +157,12 @@ protected:
         session.requestStop();
         t.join();
 
-        return tp->decodeTxPacket();
+        auto response = tp->decodeTxPacket();
+        if (bootstrap && !response.empty() &&
+            response[0] == static_cast<uint8_t>(MessageType::ServerHello)) {
+            response = tp->decodeTxPacket();
+        }
+        return response;
     }
 
     Registry registry_;
@@ -293,7 +321,7 @@ TEST_F(SessionTest, V6ClientHelloReturnsServerHello) {
     encodeClientHelloV6(writer, hello);
     ASSERT_TRUE(writer.ok());
 
-    const auto response = sendAndReceive(msg.data(), writer.pos);
+    const auto response = sendAndReceive(msg.data(), writer.pos, false);
     ASSERT_GE(response.size(), 1U);
     ASSERT_EQ(response[0], static_cast<uint8_t>(MessageType::ServerHello));
 
@@ -303,4 +331,17 @@ TEST_F(SessionTest, V6ClientHelloReturnsServerHello) {
     EXPECT_EQ(serverHello.selectedVersion, SCHEMA_PROTOCOL_VERSION);
     EXPECT_EQ(serverHello.epoch, 1U);
     EXPECT_TRUE(serverHello.schemas.empty());
+}
+
+TEST_F(SessionTest, RejectsRegularTrafficBeforeSchemaCommit) {
+    uint8_t msg[9];
+    BufWriter writer(msg, sizeof(msg));
+    writer.putU8(static_cast<uint8_t>(MessageType::GetParamReq));
+    writer.putU64(1);
+
+    const auto response = sendAndReceive(msg, writer.pos, false);
+    ASSERT_GE(response.size(), 5U);
+    BufReader reader(response.data(), response.size());
+    EXPECT_EQ(reader.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(reader.getU32(), static_cast<uint32_t>(ErrorCode::InvalidMessage));
 }
