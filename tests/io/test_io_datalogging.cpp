@@ -18,9 +18,9 @@ TEST(IODatalog, MetadataRoundtrip) {
     meta.recordSize = 24;
     meta.sampleRateHz = 1000;
     meta.fields = {
-        {0x01, "timestamp", ValueType::U64, 0, 8, EntryKind::Signal},
-        {0x02, "position", ValueType::F64, 8, 8, EntryKind::Signal},
-        {0x03, "velocity", ValueType::F64, 16, 8, EntryKind::Signal},
+        {0x01, "timestamp", 1, 10, 0, 8, EntryKind::Signal},
+        {0x02, "position", 1, 11, 8, 8, EntryKind::Signal},
+        {0x03, "velocity", 1, 12, 16, 8, EntryKind::Signal},
     };
 
     uint8_t buf[1024];
@@ -37,7 +37,7 @@ TEST(IODatalog, MetadataRoundtrip) {
     EXPECT_EQ(decoded.sampleRateHz, 1000u);
     ASSERT_EQ(decoded.fields.size(), 3u);
     EXPECT_EQ(decoded.fields[0].name, "timestamp");
-    EXPECT_EQ(decoded.fields[1].type, ValueType::F64);
+    EXPECT_EQ(decoded.fields[1].schemaSlot, 11u);
     EXPECT_EQ(decoded.fields[2].offset, 16u);
 }
 

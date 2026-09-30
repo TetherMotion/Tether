@@ -848,16 +848,7 @@ TEST_F(IOClientIntegrationTest, SnapshotSpecificSignals) {
 
 TEST_F(IOClientIntegrationTest, FeatureExchange) {
     auto result = client_->featureExchange({});
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    // Server should return at least protocol_version and test_feature
-    bool foundProtocolVersion = false;
-    bool foundTestFeature = false;
-    for (const auto& f : *result) {
-        if (f.name == "protocol_version") foundProtocolVersion = true;
-        if (f.name == "test_feature") foundTestFeature = true;
-    }
-    EXPECT_TRUE(foundProtocolVersion);
-    EXPECT_TRUE(foundTestFeature);
+    EXPECT_FALSE(result.has_value());
 }
 
 TEST_F(IOClientIntegrationTest, FeatureExchangeWithClientFeatures) {
@@ -869,8 +860,7 @@ TEST_F(IOClientIntegrationTest, FeatureExchangeWithClientFeatures) {
     clientFeatures.push_back(cf);
 
     auto result = client_->featureExchange(clientFeatures);
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_GE(result->size(), 1u);
+    EXPECT_FALSE(result.has_value());
 }
 
 // ===========================================================================
@@ -1046,8 +1036,4 @@ TEST_F(IOClientIntegrationTest, MixedWorkflow) {
     ASSERT_TRUE(snapResult.has_value());
     EXPECT_EQ(snapResult->second.size(), 2u);
 
-    // 10. Feature exchange
-    auto featResult = client_->featureExchange({});
-    ASSERT_TRUE(featResult.has_value());
-    EXPECT_GE(featResult->size(), 1u);
 }

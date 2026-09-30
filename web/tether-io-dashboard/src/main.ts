@@ -20,8 +20,6 @@ import {
   FunctionEntry,
   StreamLayoutEntry,
   StreamRow,
-  ValueType,
-  decodeValueBytes,
 } from './protocol';
 import './style.css';
 
@@ -293,13 +291,14 @@ class TetherApp extends HTMLElement {
       const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
       if (scope && this.streamLayout.length > 0) {
         // Decode each channel's value from the raw bytes.
-        const values = row.values.map((bytes, i) => {
-          const type = this.streamLayout[i]?.type ?? ValueType.F32;
-          const decoded = decodeValueBytes(bytes, type);
-          if (typeof decoded === 'number') return decoded;
-          if (typeof decoded === 'bigint') return Number(decoded);
-          if (typeof decoded === 'boolean') return decoded ? 1 : 0;
-          return 0;
+        const values = row.values.map((bytes) => {
+          if (bytes.length === 8) {
+            return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat64(0, true);
+          }
+          if (bytes.length === 4) {
+            return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat32(0, true);
+          }
+          return bytes.length > 0 ? (bytes[0] ?? 0) : 0;
         });
         scope.push(row.timestampUs, values);
       }

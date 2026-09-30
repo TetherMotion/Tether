@@ -35,7 +35,8 @@ namespace tether { namespace io {
 struct DatalogField {
     uint64_t    entryId;    ///< Parameter or signal ID
     std::string name;       ///< Human-readable name
-    ValueType   type;       ///< Data type
+    uint64_t    schemaEpoch;///< Schema epoch for this field
+    uint32_t    schemaSlot; ///< Session-local schema slot
     uint16_t    offset;     ///< Byte offset in the record
     uint16_t    size;       ///< Byte size of this field in the record
     EntryKind   kind;       ///< Parameter or Signal
@@ -57,7 +58,8 @@ struct DatalogMetadata {
         for (const auto& f : fields) {
             w.putU64(f.entryId);
             w.putStr16(f.name.c_str(), f.name.size());
-            w.putU8(static_cast<uint8_t>(f.type));
+            w.putU64(f.schemaEpoch);
+            w.putU32(f.schemaSlot);
             w.putU16(f.offset);
             w.putU16(f.size);
             w.putU8(static_cast<uint8_t>(f.kind));
@@ -81,7 +83,8 @@ struct DatalogMetadata {
             auto* fnb = r.getBytes(fnl);
             if (!r.ok()) return false;
             out.fields[i].name.assign(reinterpret_cast<const char*>(fnb), fnl);
-            out.fields[i].type = static_cast<ValueType>(r.getU8());
+            out.fields[i].schemaEpoch = r.getU64();
+            out.fields[i].schemaSlot = r.getU32();
             out.fields[i].offset = r.getU16();
             out.fields[i].size = r.getU16();
             out.fields[i].kind = static_cast<EntryKind>(r.getU8());

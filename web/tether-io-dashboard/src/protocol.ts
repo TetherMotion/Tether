@@ -96,11 +96,11 @@ export enum ValueType {
 export interface CatalogEntry {
   /** Unique 64-bit identifier assigned by the server. */
   id: bigint;
-  /** Value type (F64, U32, String, …). */
-  type: ValueType;
-  /** Fixed payload size in bytes, or 0 for variable-length entries. */
-  valueSize: number;
-  /** Bitmask: bit 0 = readable, bit 1 = writable, bit 2 = variable-length. */
+  /** Schema epoch selected during V6 negotiation. */
+  schemaEpoch: bigint;
+  /** Session-local schema slot for this entry. */
+  schemaSlot: number;
+  /** V6 catalog flags; size and variability come from the schema. */
   flags: number;
   /** Human-readable name (e.g. "amplitude"). */
   name: string;
@@ -118,9 +118,8 @@ export interface CatalogEntry {
 export interface FunctionParameter {
   name: string;
   description: string;
-  type: ValueType;
+  schemaSlot: number;
   flags: number;
-  maxValueSize: number;
   /** Present when the parameter has a default value (flag bit 1). */
   defaultValue?: Uint8Array;
   /** Optional structured value descriptor (not yet decoded by the UI). */
@@ -139,7 +138,7 @@ export interface FunctionEntry {
   /** Whether the function returns a value. */
   returnPresent: boolean;
   /** Type of the return value, if `returnPresent` is true. */
-  returnType?: ValueType;
+  returnSchemaSlot?: number;
 }
 
 /**
@@ -147,7 +146,8 @@ export interface FunctionEntry {
  */
 export interface StreamLayoutEntry {
   id: bigint;
-  type: ValueType;
+  schemaEpoch: bigint;
+  schemaSlot: number;
   valueSize: number;
 }
 
@@ -617,8 +617,8 @@ export function formatValue(value: ReturnType<typeof decodeValueBytes>): string 
  * (`TetherIOClient.list`) when the request was for parameters.
  *
  * Wire layout:
- *   type(u8) + total(u32) + returnedOffset(u32) + count(u32)
- *   + count × [id(u64) + type(u8) + valueSize(u8) + flags(u8)
+ *   type(u8) + total(u32) + returnedOffset(u32) + count(u32) + schemaEpoch(u64)
+ *   + count × [id(u64) + schemaSlot(u32) + flags(u32)
  *               + name(string16) + description(string16) + group(string16)]
  */
 export function readEntryCatalog(payload: Uint8Array): CatalogEntry[] {
@@ -627,13 +627,14 @@ export function readEntryCatalog(payload: Uint8Array): CatalogEntry[] {
   reader.u32(); // total
   reader.u32(); // returnedOffset
   const count = reader.u32();
+  const schemaEpoch = reader.u64();
   const entries: CatalogEntry[] = [];
   for (let i = 0; i < count; i += 1)
     entries.push({
       id: reader.u64(),
-      type: reader.u8() as ValueType,
-      valueSize: reader.u8(),
-      flags: reader.u8(),
+      schemaEpoch,
+      schemaSlot: reader.u32(),
+      flags: reader.u32(),
       name: reader.string16(),
       description: reader.string16(),
       group: reader.string16(),
@@ -648,14 +649,11 @@ export function readEntryCatalog(payload: Uint8Array): CatalogEntry[] {
  *
  * Wire layout (per function):
  *   id(u64) + name(string16) + description(string16) + group(string16)
- *   + paramCount(u32) + paramCount × [name + description + type(u8) + flags(u8)
- *       + enumRef(u64) + structRef(u64) + maxValueSize(u32)
- *       + hasDescriptor(u8) + [descriptor(u32-length-prefixed)]
+ *   + paramCount(u32) + paramCount × [name + description + schemaSlot(u32) + flags(u32)
  *       + [if flags & 2] defaultValue(varint-length-prefixed)
  *       + metadataCount(u32) + metadataCount × [key(string16) + value(string16)]]
- *   + hasReturn(u8) + [if hasReturn] [name + description + type(u8) + flags(u8)
- *       + enumRef(u64) + structRef(u64) + maxValueSize(u32)
- *       + hasDescriptor(u8) + [descriptor] + metadataCount × [key + value]]
+ *   + hasReturn(u8) + [if hasReturn] [name + description + schemaSlot(u32) + flags(u32)
+ *       + metadataCount × [key + value]]
  *   + metadataCount(u32) + metadataCount × [key(string16) + value(string16)]
  */
 export function readFunctionCatalog(payload: Uint8Array): FunctionEntry[] {
@@ -675,14 +673,9 @@ export function readFunctionCatalog(payload: Uint8Array): FunctionEntry[] {
       const parameter = {
         name: reader.string16(),
         description: reader.string16(),
-        type: reader.u8() as ValueType,
-        flags: reader.u8(),
-        maxValueSize: 0,
+        schemaSlot: reader.u32(),
+        flags: reader.u32(),
       } as FunctionParameter;
-      reader.u64(); // enumReference (unused by UI)
-      reader.u64(); // structReference (unused by UI)
-      parameter.maxValueSize = reader.u32();
-      if (reader.u8()) reader.bytesOf(reader.u32()); // skip value descriptor
       if (parameter.flags & 2) parameter.defaultValue = reader.bytesOf(reader.varint());
       // Skip per-parameter metadata
       for (let m = 0, metadata = reader.u32(); m < metadata; m += 1) {
@@ -692,16 +685,12 @@ export function readFunctionCatalog(payload: Uint8Array): FunctionEntry[] {
       parameters.push(parameter);
     }
     const returnPresent = reader.u8() !== 0;
-    let returnType: ValueType | undefined;
+    let returnSchemaSlot: number | undefined;
     if (returnPresent) {
       reader.string16(); // return name
       reader.string16(); // return description
-      returnType = reader.u8() as ValueType;
-      reader.u8(); // return flags
-      reader.u64(); // enumReference
-      reader.u64(); // structReference
-      reader.u32(); // maxValueSize
-      if (reader.u8()) reader.bytesOf(reader.u32()); // skip descriptor
+      returnSchemaSlot = reader.u32();
+      reader.u32(); // return flags
       // Skip return-value metadata
       for (let m = 0, metadata = reader.u32(); m < metadata; m += 1) {
         reader.string16();
@@ -713,7 +702,7 @@ export function readFunctionCatalog(payload: Uint8Array): FunctionEntry[] {
       reader.string16();
       reader.string16();
     }
-    functions.push({ id, name, description, group, parameters, returnPresent, returnType });
+    functions.push({ id, name, description, group, parameters, returnPresent, returnSchemaSlot });
   }
   reader.assertEnd();
   return functions;
@@ -723,8 +712,8 @@ export function readFunctionCatalog(payload: Uint8Array): FunctionEntry[] {
  * Parse a ConfigureStreamAck payload.
  *
  * Wire layout:
- *   type(u8) + specId(u32) + count(u32) + rowSize(u32)
- *   + count × [id(u64) + type(u8) + valueSize(u8)]
+ *   type(u8) + specId(u32) + count(u32) + rowSize(u32) + schemaEpoch(u64)
+ *   + count × [id(u64) + schemaSlot(u32) + valueSize(u8)]
  *
  * @returns The stream spec ID, the row size in bytes, and the layout
  *          (one entry per streamed value).
@@ -739,9 +728,10 @@ export function readConfigureAck(payload: Uint8Array): {
   const specId = reader.u32();
   const count = reader.u32();
   const rowSize = reader.u32();
+  const schemaEpoch = reader.u64();
   const layout: StreamLayoutEntry[] = [];
   for (let i = 0; i < count; i += 1)
-    layout.push({ id: reader.u64(), type: reader.u8() as ValueType, valueSize: reader.u8() });
+    layout.push({ id: reader.u64(), schemaEpoch, schemaSlot: reader.u32(), valueSize: reader.u8() });
   reader.assertEnd();
   return { specId, rowSize, layout };
 }
