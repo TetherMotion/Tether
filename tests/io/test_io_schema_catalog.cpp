@@ -13,6 +13,10 @@ SchemaKey catalogKey(uint8_t value) {
 
 SchemaRef catalogRef(uint8_t value) { return SchemaRef{catalogKey(value), {}}; }
 
+SchemaRef catalogRefFor(const SchemaNode& node) {
+    return SchemaRef{node.key, computeSchemaDigest(node)};
+}
+
 TEST(IOSchemaCatalog, AssignsStableSortedSlotsWithinAnEpoch) {
     SchemaNode first;
     first.key = catalogKey(1);
@@ -23,11 +27,13 @@ TEST(IOSchemaCatalog, AssignsStableSortedSlotsWithinAnEpoch) {
     SchemaGraph graph{{first, second}};
 
     SchemaCatalog catalog;
-    ASSERT_TRUE(catalog.install(graph, {{catalogRef(2), 4}, {catalogRef(1), 3}}));
+    const auto firstRef = catalogRefFor(first);
+    const auto secondRef = catalogRefFor(second);
+    ASSERT_TRUE(catalog.install(graph, {{secondRef, 4}, {firstRef, 3}}));
     const auto epoch = catalog.epoch();
     ASSERT_TRUE(epoch != 0);
-    ASSERT_EQ(catalog.slotFor(catalogRef(1)), 0U);
-    ASSERT_EQ(catalog.slotFor(catalogRef(2)), 1U);
+    ASSERT_EQ(catalog.slotFor(firstRef), 0U);
+    ASSERT_EQ(catalog.slotFor(secondRef), 1U);
     EXPECT_EQ(catalog.resolve(epoch, 0)->key, catalogKey(1));
     EXPECT_EQ(catalog.resolve(epoch, 1)->key, catalogKey(2));
     EXPECT_EQ(catalog.resolve(epoch + 1, 0), nullptr);
@@ -40,8 +46,19 @@ TEST(IOSchemaCatalog, RejectsUnknownOrDuplicateManifestEntries) {
     SchemaCatalog catalog;
 
     EXPECT_FALSE(catalog.install(graph, {{catalogRef(9), 1}}));
-    EXPECT_FALSE(catalog.install(graph, {{catalogRef(1), 1}, {catalogRef(1), 1}}));
-    EXPECT_FALSE(catalog.install(graph, {{catalogRef(1), 2}}));
+    EXPECT_FALSE(catalog.install(graph, {{catalogRefFor(node), 1}, {catalogRefFor(node), 1}}));
+    EXPECT_FALSE(catalog.install(graph, {{catalogRefFor(node), 2}}));
+}
+
+TEST(IOSchemaCatalog, RejectsDigestMismatch) {
+    SchemaNode node;
+    node.key = catalogKey(1);
+    SchemaGraph graph{{node}};
+    auto ref = catalogRefFor(node);
+    ref.digest[0] ^= 0xff;
+
+    SchemaCatalog catalog;
+    EXPECT_FALSE(catalog.install(graph, {{ref, node.revision}}));
 }
 
 } // namespace
