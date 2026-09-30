@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tether/io/Schema.hpp"
+#include "tether/io/SchemaDigest.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -36,6 +37,7 @@ public:
         for (const auto& entry : manifest) {
             const auto* node = graph.find(entry.ref.key);
             if (!node || node->revision != entry.revision) return false;
+            if (computeSchemaDigest(*node) != entry.ref.digest) return false;
             if (std::any_of(next.begin(), next.end(), [&](const auto& existing) {
                     return existing.manifest.ref == entry.ref;
                 })) return false;
