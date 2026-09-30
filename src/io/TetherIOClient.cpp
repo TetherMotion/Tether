@@ -625,6 +625,10 @@ TetherIOClient::listFunctions(uint32_t offset, uint32_t maxCount) {
     uint32_t total = r.getU32();
     uint32_t returnedOffset = r.getU32();
     uint32_t count = r.getU32();
+    const uint64_t epoch = r.getU64();
+    if (epoch != schemaEpoch_) {
+        return std::unexpected(makeError(ErrorCode::InvalidMessage, "Stale function catalog epoch"));
+    }
     (void)total; (void)returnedOffset;
 
     std::vector<ClientFunctionEntry> functions;
@@ -632,6 +636,7 @@ TetherIOClient::listFunctions(uint32_t offset, uint32_t maxCount) {
     for (uint32_t i = 0; i < count && r.ok(); ++i) {
         ClientFunctionEntry f;
         f.id = r.getU64();
+        f.schemaEpoch = epoch;
         f.name = r.getString16();
         f.description = r.getString16();
         f.group = r.getString16();
@@ -640,16 +645,8 @@ TetherIOClient::listFunctions(uint32_t offset, uint32_t maxCount) {
             ClientFunctionParam param;
             param.name = r.getString16();
             param.description = r.getString16();
-            param.type = static_cast<ValueType>(r.getU8());
-            param.flags = r.getU8();
-            r.getU64(); // enumReference
-            r.getU64(); // structReference
-            param.maxValueSize = r.getU32();
-            uint8_t hasDesc = r.getU8();
-            if (hasDesc) {
-                uint32_t descSize = r.getU32();
-                r.getBytes(descSize); // skip value descriptor
-            }
+            param.schemaSlot = r.getU32();
+            param.flags = r.getU32();
             if (param.flags & 2) { // hasDefault
                 uint32_t defaultLen = r.getVarint();
                 param.hasDefault = true;
@@ -666,16 +663,8 @@ TetherIOClient::listFunctions(uint32_t offset, uint32_t maxCount) {
         if (f.hasReturnValue) {
             r.getString16(); // return name
             r.getString16(); // return description
-            f.returnType = static_cast<ValueType>(r.getU8());
-            r.getU8();    // return flags
-            r.getU64();   // enumReference
-            r.getU64();   // structReference
-            r.getU32();   // maxValueSize
-            uint8_t hasDesc = r.getU8();
-            if (hasDesc) {
-                uint32_t descSize = r.getU32();
-                r.getBytes(descSize);
-            }
+            f.returnSchemaSlot = r.getU32();
+            r.getU32();   // return flags
             uint32_t metaCount = r.getU32();
             for (uint32_t m = 0; m < metaCount && r.ok(); ++m) {
                 r.getString16();

@@ -1138,7 +1138,7 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
 
     const auto functions = registry_.functionPage(offset, maxCount);
     const uint32_t total = registry_.functionCount();
-    size_t size = 1 + 4 + 4 + 4;
+    size_t size = 1 + 4 + 4 + 4 + 8;
     const auto addStringSize = [&size](std::string_view value) {
         if (value.size() > MAX_STRING_SIZE || size > MAX_MESSAGE_SIZE - 2 - value.size()) {
             return false;
@@ -1164,17 +1164,7 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
                 sendError(ErrorCode::TooManyEntries, "Function catalog response too large");
                 return;
             }
-            size += 1 + 1 + 8 + 8 + 4;
-            if (parameter.valueDescriptor) {
-                size += 1 + 4;
-                size_t descriptorSize = 0;
-                if (!valueDescriptorWireSize(*parameter.valueDescriptor, descriptorSize) ||
-                    descriptorSize > UINT32_MAX || size > MAX_MESSAGE_SIZE - descriptorSize) {
-                    sendError(ErrorCode::TooManyEntries, "Invalid function descriptor");
-                    return;
-                }
-                size += descriptorSize;
-            }
+            size += 4 + 4;
             if (parameter.hasDefault) {
                 if (parameter.defaultValue.size() > MAX_VARIABLE_VALUE_SIZE ||
                     size > MAX_MESSAGE_SIZE - MAX_VARINT_SIZE - parameter.defaultValue.size()) {
@@ -1207,17 +1197,7 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
                 sendError(ErrorCode::TooManyEntries, "Function catalog response too large");
                 return;
             }
-            size += 1 + 1 + 8 + 8 + 4;
-            if (result.valueDescriptor) {
-                size += 1 + 4;
-                size_t descriptorSize = 0;
-                if (!valueDescriptorWireSize(*result.valueDescriptor, descriptorSize) ||
-                    descriptorSize > UINT32_MAX || size > MAX_MESSAGE_SIZE - descriptorSize) {
-                    sendError(ErrorCode::TooManyEntries, "Invalid function descriptor");
-                    return;
-                }
-                size += descriptorSize;
-            }
+            size += 4 + 4;
             if (result.metadata.size() > MAX_COLLECTION_COUNT) {
                 sendError(ErrorCode::TooManyEntries, "Function metadata too large");
                 return;
@@ -1249,6 +1229,7 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
     w.putU32(total);
     w.putU32(offset);
     w.putU32(static_cast<uint32_t>(functions.size()));
+    w.putU64(schemaEpoch_);
     for (const auto& function : functions) {
         const auto writeString = [&w](std::string_view value) {
             w.putStr16(value.data(), value.size());
@@ -1261,25 +1242,8 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
         for (const auto& parameter : function.parameters()) {
             writeString(parameter.name);
             writeString(parameter.description);
-            w.putU8(static_cast<uint8_t>(parameter.type));
-            w.putU8(parameter.flags());
-            w.putU64(parameter.enumReference);
-            w.putU64(parameter.structReference);
-            w.putU32(parameter.maxValueSize);
-            w.putU8(parameter.valueDescriptor ? 1 : 0);
-            if (parameter.valueDescriptor) {
-                const size_t descriptorStart = w.pos;
-                w.putU32(0);
-                const size_t payloadStart = w.pos;
-                encodeValueDescriptor(w, *parameter.valueDescriptor);
-                const uint32_t descriptorSize = static_cast<uint32_t>(w.pos - payloadStart);
-                if (w.ok()) {
-                    txRawBuf_[descriptorStart] = static_cast<uint8_t>(descriptorSize);
-                    txRawBuf_[descriptorStart + 1] = static_cast<uint8_t>(descriptorSize >> 8);
-                    txRawBuf_[descriptorStart + 2] = static_cast<uint8_t>(descriptorSize >> 16);
-                    txRawBuf_[descriptorStart + 3] = static_cast<uint8_t>(descriptorSize >> 24);
-                }
-            }
+            w.putU32(parameter.schemaSlot);
+            w.putU32(parameter.flags());
             if (parameter.hasDefault) {
                 w.putVarint(static_cast<uint32_t>(parameter.defaultValue.size()));
                 w.putBytes(parameter.defaultValue.data(), parameter.defaultValue.size());
@@ -1295,26 +1259,9 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
         if (result.present) {
             writeString(result.name);
             writeString(result.description);
-            w.putU8(static_cast<uint8_t>(result.type));
-            w.putU8((result.enumReference != 0 ? FunctionParameterFlags::HasEnum : 0) |
-                    (result.structReference != 0 ? FunctionParameterFlags::HasStruct : 0));
-            w.putU64(result.enumReference);
-            w.putU64(result.structReference);
-            w.putU32(result.maxValueSize);
-            w.putU8(result.valueDescriptor ? 1 : 0);
-            if (result.valueDescriptor) {
-                const size_t descriptorStart = w.pos;
-                w.putU32(0);
-                const size_t payloadStart = w.pos;
-                encodeValueDescriptor(w, *result.valueDescriptor);
-                const uint32_t descriptorSize = static_cast<uint32_t>(w.pos - payloadStart);
-                if (w.ok()) {
-                    txRawBuf_[descriptorStart] = static_cast<uint8_t>(descriptorSize);
-                    txRawBuf_[descriptorStart + 1] = static_cast<uint8_t>(descriptorSize >> 8);
-                    txRawBuf_[descriptorStart + 2] = static_cast<uint8_t>(descriptorSize >> 16);
-                    txRawBuf_[descriptorStart + 3] = static_cast<uint8_t>(descriptorSize >> 24);
-                }
-            }
+            w.putU32(result.schemaSlot);
+            w.putU32((result.enumReference != 0 ? FunctionParameterFlags::HasEnum : 0) |
+                     (result.structReference != 0 ? FunctionParameterFlags::HasStruct : 0));
             w.putU32(static_cast<uint32_t>(result.metadata.size()));
             for (const auto& [key, value] : result.metadata) {
                 writeString(key);
