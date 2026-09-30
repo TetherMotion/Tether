@@ -52,6 +52,10 @@ endif()
 # ---------------------------------------------------------------------------
 set(TETHER_IO_PROTOCOL_SOURCES
     ${TETHER_ROOT}/src/io/Protocol.cpp
+    ${TETHER_ROOT}/src/io/SchemaDigest.cpp
+    ${TETHER_ROOT}/dependencies/blake3/c/blake3.c
+    ${TETHER_ROOT}/dependencies/blake3/c/blake3_dispatch.c
+    ${TETHER_ROOT}/dependencies/blake3/c/blake3_portable.c
     ${TETHER_ROOT}/src/io/Registry.cpp
     ${TETHER_ROOT}/src/io/ThresholdFilter.cpp
     ${TETHER_ROOT}/src/io/Datalogging.cpp
@@ -89,6 +93,7 @@ foreach(_tgt IN LISTS _variants)
         PUBLIC
             $<BUILD_INTERFACE:${TETHER_ROOT}/include>
             $<BUILD_INTERFACE:${TETHER_ROOT}/include/tether>
+            $<BUILD_INTERFACE:${TETHER_ROOT}/dependencies/blake3/c>
             $<INSTALL_INTERFACE:include>
             $<INSTALL_INTERFACE:include/tether>
         PRIVATE
@@ -96,8 +101,14 @@ foreach(_tgt IN LISTS _variants)
     )
 
     target_link_libraries(${_tgt} PUBLIC tether_common slipspeed)
+    target_compile_definitions(${_tgt}
+        PRIVATE
+            BLAKE3_NO_SSE2
+            BLAKE3_NO_SSE41
+            BLAKE3_NO_AVX2
+            BLAKE3_NO_AVX512
+    )
 endforeach()
-
 # Pthreads for Server/Session threading
 find_package(Threads REQUIRED)
 foreach(_tgt IN LISTS _variants)
