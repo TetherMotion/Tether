@@ -27,6 +27,11 @@
  *   Functions:
  *     - reset_params   -  restore all parameters to defaults
  *
+ * The same registry also contains a schema-backed simulated four-axis CiA 402
+ * profile and a bounded read-only event journal. It is not an EtherCAT
+ * connection and does not expose machine-motion functions. This unauthenticated
+ * development example binds to 127.0.0.1 only.
+ *
  * Usage:
  *   web_dashboard_example [--port PORT] [--web-root PATH]
  *
@@ -34,6 +39,7 @@
  */
 
 #include "TetherIOWebSocketController.hpp"
+#include <tether/io/SimulatedCiA402Fleet.hpp>
 
 #include <drogon/drogon.h>
 
@@ -236,6 +242,21 @@ int main(int argc, char** argv) {
     };
     registry.addFunction(std::move(resetFn));
 
+    // Publish a deterministic, read-only machine profile for the console.
+    // This is a simulator fixture only; it is not connected to EtherCAT and
+    // does not expose machine-control functions.
+    auto machineSchemaGraph = cia402::machineProfileSchemaGraph();
+    SchemaCatalog machineSchemaCatalog;
+    if (!cia402::SimulatedCiA402Fleet::installSchemas(machineSchemaGraph, machineSchemaCatalog)) {
+        std::cerr << "Failed to install simulated machine profile schemas" << std::endl;
+        return 1;
+    }
+    cia402::SimulatedCiA402Fleet simulatedFleet;
+    if (!simulatedFleet.registerSignals(registry, machineSchemaCatalog)) {
+        std::cerr << "Failed to register simulated machine profile signals" << std::endl;
+        return 1;
+    }
+
     // -----------------------------------------------------------------------
     // Drogon setup: static files + WebSocket
     // -----------------------------------------------------------------------
@@ -244,7 +265,8 @@ int main(int argc, char** argv) {
     drogon::app().registerWebSocketController(
         "/tether-io", "tether::io::example::TetherIOWebSocketController", {});
     drogon::DrClassMap::setSingleInstance(
-        std::make_shared<TetherIOWebSocketController>(registry, g_verbose ? verboseLog : nullptr));
+        std::make_shared<TetherIOWebSocketController>(registry,
+            g_verbose ? verboseLog : nullptr, &machineSchemaCatalog));
 
     // Serve the pre-built dashboard from the web root directory
     drogon::app().setDocumentRoot(webRoot);
@@ -269,7 +291,8 @@ int main(int argc, char** argv) {
         "║  WebSocket:  ws://127.0.0.1:" << port << "/tether-io               ║\n"
         "║  Static:     " << webRoot << "\n"
         "╠══════════════════════════════════════════════════════════╣\n"
-        "║  Signals:    sine_wave, cosine_wave, elapsed_time        ║\n"
+        "║  Profile:    simulated 4-axis CiA 402 fleet (read-only)  ║\n"
+        "║  Signals:    machine + drives + sine/cosine waves        ║\n"
         "║  Params:     amplitude, frequency, sample_rate,          ║\n"
         "║              phase_offset, dc_offset                     ║\n"
         "║  Function:   reset_params                                ║\n"
@@ -278,7 +301,8 @@ int main(int argc, char** argv) {
         "╚══════════════════════════════════════════════════════════╝\n"
         << std::endl;
 
-    drogon::app().addListener("0.0.0.0", port);
+    // The sample has no authentication boundary; keep it local by default.
+    drogon::app().addListener("127.0.0.1", port);
 
     // Run Drogon in a jthread so the destructor will join automatically.
     std::jthread drogonThread([](std::stop_token) {

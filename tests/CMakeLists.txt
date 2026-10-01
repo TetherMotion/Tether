@@ -248,6 +248,7 @@ set(IO_TRANSPORT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_ring_stream.cpp"
 )
 set(IO_SERVICES_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_event_journal.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_registry.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_registry_extra.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_server_integration.cpp"
@@ -256,6 +257,7 @@ set(IO_SERVICES_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_threshold_filter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_threshold_filter_extra.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_jog_exposer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_machine_control.cpp"
 )
 set(IO_TEST_SOURCES ${IO_PROTOCOL_SOURCES} ${IO_TRANSPORT_SOURCES} ${IO_SERVICES_SOURCES})
 file(GLOB_RECURSE MOTION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion/*.cpp")

@@ -19,6 +19,25 @@
  * @license CC0-1.0 (original source by Uli Köhler, TechOverflow.net)
  */
 
+import {
+  BUFFER_SAMPLES,
+  ChannelInfo,
+  dimColor,
+  finiteValueRange,
+  legendChannelAtPoint,
+  MAX_CHANNELS,
+  MARGIN_BOTTOM,
+  MARGIN_LEFT,
+  MARGIN_RIGHT,
+  MARGIN_TOP,
+  MSAA_SAMPLE_COUNTS,
+  niceStep,
+  TARGET_MSAA,
+  WINDOW_SAMPLES,
+  WINDOW_SEC,
+} from './scope/config';
+import { drawScopeOverlay } from './scope/overlay';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -31,67 +50,7 @@ interface ScopeRow {
   values: number[];
 }
 
-/** Per-channel metadata for rendering. */
-interface ChannelInfo {
-  /** Display name (e.g. the signal/param name). */
-  name: string;
-  /** RGB color in [0, 1]. */
-  color: [number, number, number];
-}
 
-// ---------------------------------------------------------------------------
-// Configuration constants
-// ---------------------------------------------------------------------------
-
-/** Visible time window in seconds (auto-scroll width). */
-const WINDOW_SEC = 5.0;
-
-/** Maximum sample rate the buffer can hold (used to size the ring buffer). */
-const MAX_SAMPLE_RATE = 1000; // 1 kHz
-
-/** Number of samples in the visible window. */
-const WINDOW_SAMPLES = MAX_SAMPLE_RATE * WINDOW_SEC; // 5000
-
-/** Extra slots beyond the window for chunk alignment headroom. */
-const BUFFER_PADDING = 100;
-
-/** Total ring buffer capacity in sample slots. */
-const BUFFER_SAMPLES = WINDOW_SAMPLES + BUFFER_PADDING;
-
-/** MSAA sample counts to probe (highest supported is used). */
-const MSAA_SAMPLE_COUNTS = [1, 2, 4, 8, 16];
-
-/** Target MSAA sample count (prefers 4× to balance quality/performance). */
-const TARGET_MSAA = 4;
-
-/** Plot margins in CSS pixels. */
-const MARGIN_LEFT = 64;
-const MARGIN_RIGHT = 100; // extra for legend
-const MARGIN_TOP = 16;
-const MARGIN_BOTTOM = 48;
-
-/** Maximum channels supported (ring buffer is pre-allocated for this). */
-const MAX_CHANNELS = 16;
-
-/** Default ggplot-like color palette. */
-const DEFAULT_COLORS: [number, number, number][] = [
-  [0.0, 0.45, 0.75], // blue
-  [0.85, 0.33, 0.1], // orange
-  [0.0, 0.62, 0.45], // green
-  [0.8, 0.1, 0.2], // red
-  [0.58, 0.4, 0.74], // purple
-  [0.91, 0.59, 0.09], // brown
-  [0.75, 0.31, 0.5], // pink
-  [0.4, 0.4, 0.4], // gray
-  [0.0, 0.0, 0.0], // black
-  [0.2, 0.6, 0.8], // light blue
-  [0.55, 0.23, 0.12], // dark brown
-  [0.34, 0.71, 0.91], // sky blue
-  [0.62, 0.85, 0.34], // lime
-  [0.89, 0.47, 0.76], // magenta
-  [0.5, 0.5, 0.0], // olive
-  [0.0, 0.5, 0.5], // teal
-];
 
 // ---------------------------------------------------------------------------
 // WGSL shader
@@ -377,32 +336,6 @@ const SHADER = /* wgsl */ `
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Nice tick step algorithm: picks a "round" step (1, 2, 5 × 10^n) that
- * produces approximately `targetCount` ticks across `range`.
- */
-function niceStep(range: number, targetCount: number): number {
-  const raw = range / targetCount;
-  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const norm = raw / mag;
-  let step: number;
-  if (norm <= 1.5) step = 1;
-  else if (norm <= 3) step = 2;
-  else if (norm <= 7) step = 5;
-  else step = 10;
-  return step * mag;
-}
-
-/** Format a tick value for display (strips trailing zeros). */
-function formatTick(v: number): string {
-  const abs = Math.abs(v);
-  if (abs === 0) return '0';
-  if (abs >= 1000 || abs < 1e-3) return v.toExponential(1);
-  let s = v.toFixed(3);
-  s = s.replace(/0+$/, '').replace(/\.$/, '');
-  return s;
-}
-
 // ---------------------------------------------------------------------------
 // WebGPUScope
 // ---------------------------------------------------------------------------
@@ -620,7 +553,7 @@ export class WebGPUScope extends HTMLElement {
     // Use relative timestamps to stay within f32 precision range.
     // Absolute timestamps (~6×10⁵ s) overflow f32 mantissa and cause
     // consecutive 1 ms samples to collapse to the same X position.
-    if (this.referenceTimeUs === null) this.referenceTimeUs = timestampUs;
+    this.referenceTimeUs ??= timestampUs;
     const t = Number(timestampUs - this.referenceTimeUs) / 1e6;
     this.pendingRows.push({ t, values });
     this.currentTime = t;
@@ -708,39 +641,46 @@ export class WebGPUScope extends HTMLElement {
     const gridPipelines: GPURenderPipeline[] = [];
     const pointPipelines: GPURenderPipeline[] = [];
     const layout = device.createPipelineLayout({ bindGroupLayouts: [renderLayout] });
-
-    for (const sc of MSAA_SAMPLE_COUNTS) {
-      try {
-        const [linePipe, gridPipe, pointPipe] = await Promise.all([
+    const format = this.format!;
+    const pipelineResults = await Promise.all(
+      MSAA_SAMPLE_COUNTS.map(async (sampleCount) => {
+        try {
+          const pipelines = await Promise.all([
           device.createRenderPipelineAsync({
             layout,
             vertex: { module, entryPoint: 'vs_line' },
-            fragment: { module, entryPoint: 'fs_line', targets: [{ format: this.format }] },
+            fragment: { module, entryPoint: 'fs_line', targets: [{ format }] },
             primitive: { topology: 'triangle-strip' },
-            multisample: { count: sc },
+            multisample: { count: sampleCount },
           }),
           device.createRenderPipelineAsync({
             layout,
             vertex: { module, entryPoint: 'vs_grid' },
-            fragment: { module, entryPoint: 'fs_grid', targets: [{ format: this.format }] },
+            fragment: { module, entryPoint: 'fs_grid', targets: [{ format }] },
             primitive: { topology: 'triangle-list' },
-            multisample: { count: sc },
+            multisample: { count: sampleCount },
           }),
           device.createRenderPipelineAsync({
             layout,
             vertex: { module, entryPoint: 'vs_point' },
-            fragment: { module, entryPoint: 'fs_point', targets: [{ format: this.format }] },
+            fragment: { module, entryPoint: 'fs_point', targets: [{ format }] },
             primitive: { topology: 'triangle-list' },
-            multisample: { count: sc },
+            multisample: { count: sampleCount },
           }),
-        ]);
-        supportedSC.push(sc);
-        linePipelines.push(linePipe);
-        gridPipelines.push(gridPipe);
-        pointPipelines.push(pointPipe);
-      } catch {
-        // Unsupported sample count — skip.
-      }
+          ]);
+          return { sampleCount, pipelines };
+        } catch {
+          // Unsupported sample count — skip.
+          return null;
+        }
+      }),
+    );
+    for (const result of pipelineResults) {
+      if (!result) continue;
+      supportedSC.push(result.sampleCount);
+      linePipelines.push(result.pipelines[0]);
+      gridPipelines.push(result.pipelines[1]);
+      pointPipelines.push(result.pipelines[2]);
     }
 
     // Prefer 4× MSAA; fall back to highest available.
@@ -969,21 +909,6 @@ export class WebGPUScope extends HTMLElement {
     }
   }
 
-  /**
-   * Desaturate and lighten a color towards the plot background (0.97 gray).
-   * `factor` = 0 → original color, 1 → fully background color.
-   */
-  private dimColor(c: [number, number, number], factor: number): [number, number, number] {
-    const bg = 0.97;
-    // Convert to grayscale (luminance), then lerp towards background.
-    const gray = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
-    const desat = 0.5 * c[0] + 0.5 * gray;
-    const r = desat + (bg - desat) * factor;
-    const g = 0.5 * c[1] + 0.5 * gray + (bg - (0.5 * c[1] + 0.5 * gray)) * factor;
-    const b = 0.5 * c[2] + 0.5 * gray + (bg - (0.5 * c[2] + 0.5 * gray)) * factor;
-    return [r, g, b];
-  }
-
   /** Write channel colors to the GPU color buffer. */
   private writeColors(): void {
     if (!this.device || !this.colorBuffer) return;
@@ -993,7 +918,7 @@ export class WebGPUScope extends HTMLElement {
         ch < this.channels.length ? this.channels[ch]!.color : [0.5, 0.5, 0.5];
       // Dim non-highlighted channels when one is highlighted.
       if (this.highlightedChannel !== null && ch !== this.highlightedChannel) {
-        color = this.dimColor(color, 0.7);
+        color = dimColor(color, 0.7);
       }
       colorData[ch * 4] = color[0]!;
       colorData[ch * 4 + 1] = color[1]!;
@@ -1015,6 +940,11 @@ export class WebGPUScope extends HTMLElement {
     if (!this.device || !this.ringBuffer) return;
     const count = this.pendingRows.length;
     if (count === 0) return;
+
+    // Update the scale while the batch is still available. The upload then
+    // clears pendingRows, so doing this in the render loop afterward loses
+    // every sample before the autoscaler can inspect it.
+    this.updateYScale();
 
     // Build one contiguous upload buffer for all pending rows, then write it
     // in at most two pieces (before/after the ring wraparound).  This avoids
@@ -1058,31 +988,15 @@ export class WebGPUScope extends HTMLElement {
    * Called each frame to auto-scale the Y axis.
    */
   private updateYScale(): void {
-    if (this.numChannels === 0 || this.sampleCounter === 0) return;
-    // For simplicity, use a fixed Y range based on all pushed data.
-    // A more sophisticated approach would scan only the visible window.
-    // For now, we use a rolling estimate.
-    let min = Infinity;
-    let max = -Infinity;
-    for (const row of this.pendingRows) {
-      for (let ch = 0; ch < this.numChannels; ch++) {
-        const v = row.values[ch];
-        if (v !== undefined && Number.isFinite(v)) {
-          if (v < min) min = v;
-          if (v > max) max = v;
-        }
-      }
-    }
-    if (Number.isFinite(min) && Number.isFinite(max)) {
-      // Smoothly update the rolling min/max.
-      const range = max - min || 1;
-      const padding = range * 0.1;
-      const targetMin = min - padding;
-      const targetMax = max + padding;
-      // Lerp towards the target for smooth scaling.
-      this.yMin = this.yMin + (targetMin - this.yMin) * 0.1;
-      this.yMax = this.yMax + (targetMax - this.yMax) * 0.1;
-    }
+    if (this.numChannels === 0 || this.pendingRows.length === 0) return;
+    const bounds = finiteValueRange(this.pendingRows, this.numChannels);
+    if (!bounds) return;
+    const range = bounds.max - bounds.min || 1;
+    const padding = range * 0.1;
+    const targetMin = bounds.min - padding;
+    const targetMax = bounds.max + padding;
+    this.yMin += (targetMin - this.yMin) * 0.1;
+    this.yMax += (targetMax - this.yMax) * 0.1;
   }
 
   // =========================================================================
@@ -1123,7 +1037,6 @@ export class WebGPUScope extends HTMLElement {
   private startRenderLoop(): void {
     const frame = () => {
       this.flushPending();
-      this.updateYScale();
       this.render();
       this.rafId = requestAnimationFrame(frame);
     };
@@ -1277,142 +1190,31 @@ export class WebGPUScope extends HTMLElement {
   // Axis labels & legend (2D canvas overlay)
   // =========================================================================
 
-  /** Draw axis tick labels, axis titles, and channel legend on the overlay. */
+  /** Draw axis labels, channel legend, and drag selection on the overlay. */
   private drawAxes(cssW: number, cssH: number, dpr: number, activeCurrentTime: number): void {
     if (!this.overlayEl || !this.octx || !this.canvasEl) return;
-    const canvas = this.canvasEl;
-    const overlay = this.overlayEl;
-    const octx = this.octx;
-    const cw = canvas.width;
-    const ch = canvas.height;
-    if (overlay.width !== cw || overlay.height !== ch) {
-      overlay.width = cw;
-      overlay.height = ch;
-    }
-    octx.clearRect(0, 0, cw, ch);
-    octx.save();
-    octx.scale(dpr, dpr);
-
-    // Read theme-aware text/axis colors from CSS variables.
-    const styles = getComputedStyle(this);
-    const textColor = styles.getPropertyValue('--text').trim() || '#1a2a3a';
-    const textMuted = styles.getPropertyValue('--text-muted').trim() || '#5a7088';
-
-    const ml = MARGIN_LEFT;
-    const mr = MARGIN_RIGHT;
-    const mt = MARGIN_TOP;
-    const mb = MARGIN_BOTTOM;
-    const px = ml;
-    const py = mt;
-    const pw = cssW - ml - mr;
-    const ph = cssH - mt - mb;
-
-    // Effective view bounds (may be zoomed or paused).
-    const viewMin = this.viewTimeMin ?? activeCurrentTime - WINDOW_SEC;
-    const viewSpan = this.viewTimeSpan;
-    const effYMin = this.zoomYMin ?? this.yMin;
-    const effYMax = this.zoomYMax ?? this.yMax;
-
-    // Plot axes (ggplot style: only bottom and left axis lines).
-    octx.strokeStyle = textColor;
-    octx.lineWidth = 1;
-    octx.beginPath();
-    octx.moveTo(px, py);
-    octx.lineTo(px, py + ph);
-    octx.lineTo(px + pw, py + ph);
-    octx.stroke();
-
-    octx.font = '11px sans-serif';
-    octx.fillStyle = textMuted;
-
-    // X axis: relative time labels (relative to viewMin).
-    const xStep = niceStep(viewSpan, 8);
-    const xStart = Math.ceil(viewMin / xStep) * xStep;
-    octx.textAlign = 'center';
-    octx.textBaseline = 'top';
-    for (let x = xStart; x <= viewMin + viewSpan + xStep * 0.001; x += xStep) {
-      const sx = px + ((x - viewMin) / viewSpan) * pw;
-      if (sx < px - 1 || sx > px + pw + 1) continue;
-      octx.beginPath();
-      octx.moveTo(sx, py + ph);
-      octx.lineTo(sx, py + ph + 4);
-      octx.stroke();
-      const label = (x - viewMin).toFixed(2) + 's';
-      octx.fillText(label, sx, py + ph + 8);
-    }
-
-    // Y axis.
-    const yStep = niceStep(effYMax - effYMin, 6);
-    const yStart = Math.ceil(effYMin / yStep) * yStep;
-    octx.textAlign = 'right';
-    octx.textBaseline = 'middle';
-    for (let y = yStart; y <= effYMax + yStep * 0.001; y += yStep) {
-      const sy = py + ((effYMax - y) / (effYMax - effYMin)) * ph;
-      if (sy < py - 1 || sy > py + ph + 1) continue;
-      octx.beginPath();
-      octx.moveTo(px, sy);
-      octx.lineTo(px - 4, sy);
-      octx.stroke();
-      octx.fillText(formatTick(y), px - 8, sy);
-    }
-
-    // Axis titles.
-    octx.font = '13px sans-serif';
-    octx.fillStyle = textColor;
-    octx.textAlign = 'center';
-    octx.textBaseline = 'bottom';
-    octx.fillText('t (s, relative)', ml + pw / 2, cssH - 4);
-    octx.save();
-    octx.translate(12, mt + ph / 2);
-    octx.rotate(-Math.PI / 2);
-    octx.textAlign = 'center';
-    octx.textBaseline = 'top';
-    octx.fillText('value', 0, 0);
-    octx.restore();
-
-    // Legend (right margin).  Highlighted channel is drawn at full
-    // saturation; others are dimmed to match the GPU-side dimming.
-    const legendX = ml + pw + 8;
-    const legendY = mt + 4;
-    octx.font = '11px sans-serif';
-    octx.textAlign = 'left';
-    octx.textBaseline = 'middle';
-    for (let i = 0; i < this.numChannels; i++) {
-      let [r, g, b] = this.channels[i]!.color;
-      const isHighlighted = this.highlightedChannel === i;
-      const isDimmed = this.highlightedChannel !== null && !isHighlighted;
-      if (isDimmed) {
-        const dimmed = this.dimColor([r, g, b], 0.7);
-        [r, g, b] = dimmed;
-      }
-      const ly = legendY + i * 18;
-      // Highlighted legend row gets a subtle background.
-      if (isHighlighted) {
-        octx.fillStyle = 'rgba(0,0,0,0.06)';
-        octx.fillRect(legendX - 4, ly - 9, pw + 12 - (legendX - ml), 18);
-      }
-      octx.fillStyle = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
-      octx.fillRect(legendX, ly - 5, 12, 10);
-      octx.fillStyle = isDimmed ? textMuted : textColor;
-      octx.font = isHighlighted ? 'bold 11px sans-serif' : '11px sans-serif';
-      const name = this.channels[i]!.name;
-      octx.fillText(name, legendX + 16, ly);
-    }
-
-    // Drag-rectangle zoom selection.
-    if (this.dragActive) {
-      const x0 = Math.min(this.dragStartX, this.dragCurX);
-      const x1 = Math.max(this.dragStartX, this.dragCurX);
-      const y0 = Math.min(this.dragStartY, this.dragCurY);
-      const y1 = Math.max(this.dragStartY, this.dragCurY);
-      octx.fillStyle = 'rgba(0, 100, 200, 0.15)';
-      octx.fillRect(x0, y0, x1 - x0, y1 - y0);
-      octx.strokeStyle = 'rgba(0, 100, 200, 0.8)';
-      octx.lineWidth = 1;
-      octx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-    }
-
-    octx.restore();
+    drawScopeOverlay({
+      canvas: this.canvasEl,
+      overlay: this.overlayEl,
+      context: this.octx,
+      cssWidth: cssW,
+      cssHeight: cssH,
+      pixelRatio: dpr,
+      activeCurrentTime,
+      viewTimeMin: this.viewTimeMin,
+      viewTimeSpan: this.viewTimeSpan,
+      yMin: this.yMin,
+      yMax: this.yMax,
+      zoomYMin: this.zoomYMin,
+      zoomYMax: this.zoomYMax,
+      channels: this.channels,
+      highlightedChannel: this.highlightedChannel,
+      dragActive: this.dragActive,
+      dragStartX: this.dragStartX,
+      dragStartY: this.dragStartY,
+      dragCurrentX: this.dragCurX,
+      dragCurrentY: this.dragCurY,
+    });
   }
 
   /**
@@ -1421,28 +1223,12 @@ export class WebGPUScope extends HTMLElement {
    */
   private updateLegendHover(mouseX: number, mouseY: number): void {
     if (!this.canvasEl || !this.overlayEl) return;
-    const cssW = this.canvasEl.clientWidth;
-    const cssH = this.canvasEl.clientHeight;
-    const ml = MARGIN_LEFT;
-    const pw = cssW - MARGIN_LEFT - MARGIN_RIGHT;
-    const mt = MARGIN_TOP;
-    const legendX = ml + pw + 8;
-    const legendY = mt + 4;
-    // Legend item width: swatch (12) + gap (4) + text (~80) = ~96px.
-    const itemWidth = 96;
-    let newHighlight: number | null = null;
-    for (let i = 0; i < this.numChannels; i++) {
-      const ly = legendY + i * 18;
-      if (
-        mouseX >= legendX - 4 &&
-        mouseX <= legendX + itemWidth &&
-        mouseY >= ly - 9 &&
-        mouseY <= ly + 9
-      ) {
-        newHighlight = i;
-        break;
-      }
-    }
+    const newHighlight = legendChannelAtPoint(
+      mouseX,
+      mouseY,
+      this.canvasEl.clientWidth,
+      this.numChannels,
+    );
     if (newHighlight !== this.highlightedChannel) {
       this.highlightedChannel = newHighlight;
       this.writeColors();

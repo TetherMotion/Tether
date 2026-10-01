@@ -24,9 +24,10 @@ and reject an unknown or stale epoch rather than guessing field meaning.
 The profile name is `machine.cia402.v1`. Its availability is determined by the
 presence of its advertised schemas and catalog entries, not by an application
 message discriminator or a feature-exchange flag. Optional application
-surfaces, such as motion, authority, events, and capture, are represented by
-the catalog entries the server publishes; absent entries make the related view
-unavailable or read-only.
+surfaces, such as motion, authority, and capture, are represented by the
+catalog entries the server publishes; absent entries make the related view
+unavailable or read-only. The simulator advertises read-only event history,
+but not an active-alarm lifecycle or acknowledgement service.
 
 ## Catalog conventions
 
@@ -95,6 +96,53 @@ A client must resolve the schema slot in the payload's epoch and verify the
 manifest digest plus the packed root shape, field keys, scalar dependencies,
 and 64-byte fixed size before decoding it. It must reject a stale slot, an
 unknown schema, or a payload that does not exactly satisfy that schema.
+
+## Machine descriptor and aggregate snapshot
+
+The V1 machine roots are `MachineDescriptorV1` and `MachineSnapshotV1`; their
+schema graphs are built by `machineProfileSchemaGraph()` in
+`include/tether/io/CiA402MachineProfile.hpp`. Both use tagged structs so new
+optional fields can be introduced in a future compatible revision without
+changing the packed drive payload.
+
+`MachineDescriptorV1` contains `profile_version`, stable `machine_id`,
+`display_name`, `timezone`, `unit_system`, and a bounded `axes` array (1–16
+entries). Each axis describes its stable ID, display name, slave index, display
+order, group ID, position/velocity units and scale factors, and whether
+homing is configured. Position and velocity conversions are
+`application_value = drive_native_value * scale`; a zero or non-finite scale
+is invalid. The descriptor is static application configuration, not a live
+read of EtherCAT state.
+
+`MachineSnapshotV1` is a coherent aggregate containing source timestamp,
+state generation, an explicit simulated flag, axis/enabled/fault/warning/stale
+counts, aggregate AL state, expected/actual WKC, link state, and DC lock state.
+It reports telemetry observations only; it does not declare a safety state or
+machine readiness. The example `SimulatedCiA402Fleet` registers descriptor,
+aggregate, per-drive, and event-cursor signals plus a typed event-read
+function. It has no parameters or motion-control functions and is not
+connected to an EtherCAT master or motion dispatcher.
+
+## Bounded event history
+
+`EventRecordV1` and `EventPageV1` are tagged roots in the same negotiated
+machine-profile graph. The server exposes `machine.events.cursor` as the
+latest retained `U64` cursor and `machine.events.read` as a read-only typed
+function with `(after_cursor: U64, limit: U32)` arguments. The limit is bounded
+to 1–100 events. Event IDs are strictly increasing within a journal lifetime;
+records include source timestamp, state generation, event type, stable source
+ID, severity (`0` info, `1` warning, `2` fault, `3` critical), code, and a
+bounded description. Unknown event types remain ordinary strings and must be
+preserved by clients.
+
+The page reports `oldest_cursor`, `latest_cursor`, `next_cursor`, an explicit
+`gap` flag, and ordered records. Reads are exclusive of `after_cursor`. If the
+requested cursor predates retained history, `gap` is true and the page starts
+with the oldest retained record; clients should show the gap rather than
+silently presenting the result as complete. The bounded simulator journal is
+read-only and produces events for simulated startup and drive state/fault/
+warning transitions. It does not implement alarm acknowledgement, clearing,
+or production retention policy.
 
 ### Quality flags
 

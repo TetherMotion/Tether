@@ -1,5 +1,8 @@
 #include "tether/io/CiA402Profile.hpp"
+#include "tether/io/CiA402MachineProfile.hpp"
+#include "tether/io/Registry.hpp"
 #include "tether/io/SchemaValueCodec.hpp"
+#include "tether/io/SimulatedCiA402Fleet.hpp"
 
 #include <gtest/gtest.h>
 
@@ -87,6 +90,90 @@ TEST(CiA402ProfileTest, TruncatedSnapshotIsRejected) {
 
     EXPECT_FALSE(DriveSnapshotV1::decode(reader, decoded));
     EXPECT_TRUE(reader.ok());
+}
+
+TEST(CiA402MachineProfileTest, SimulatedFleetPublishesSchemaValidatedReadOnlySignals) {
+    const auto graph = machineProfileSchemaGraph();
+    ASSERT_TRUE(validateSchemaGraph(graph));
+    const auto manifest = machineProfileManifest(graph);
+    ASSERT_EQ(manifest.size(), 4U);
+
+    SchemaCatalog catalog;
+    ASSERT_TRUE(SimulatedCiA402Fleet::installSchemas(graph, catalog));
+    SimulatedCiA402Fleet fleet;
+    Registry registry;
+    ASSERT_TRUE(fleet.registerSignals(registry, catalog));
+    ASSERT_EQ(fleet.axisCount(), 4U);
+    ASSERT_EQ(registry.signalCount(), 7U);
+    EXPECT_EQ(registry.paramCount(), 0U);
+    ASSERT_EQ(registry.functionCount(), 1U);
+
+    for (uint32_t offset = 0; offset < registry.signalCount(); ++offset) {
+        const auto page = registry.signalPage(offset, 1);
+        ASSERT_EQ(page.size(), 1U);
+        const auto entry = page.front();
+        if (entry.valueType() == ValueType::U64) {
+            EXPECT_EQ(entry.name(), "machine.events.cursor");
+            uint64_t cursor = 0;
+            entry.read(&cursor);
+            EXPECT_EQ(cursor, 1U);
+            continue;
+        }
+        ASSERT_EQ(entry.valueType(), ValueType::Struct);
+        ASSERT_FALSE(entry.writable());
+        const auto* schema = catalog.resolve(catalog.epoch(), entry.schemaSlot());
+        ASSERT_NE(schema, nullptr);
+        EXPECT_EQ(schema->name, entry.name() == "machine.descriptor"
+            ? kMachineDescriptorSchemaName
+            : entry.name() == "machine.snapshot" ? kMachineSnapshotSchemaName
+            : entry.name() == "machine.events.read" ? "tether.machine.cia402.EventPageV1"
+                                                       : kDriveSnapshotSchemaName);
+
+        std::vector<uint8_t> value(entry.maxValueSize());
+        const size_t size = entry.readVar(value.data(), value.size());
+        ASSERT_GT(size, 0U);
+        value.resize(size);
+        BufReader reader(value.data(), value.size());
+        EXPECT_TRUE(validateSchemaValue(graph, schema->key, reader));
+        EXPECT_EQ(reader.remaining(), 0U);
+    }
+
+    const auto drive = registry.findSignal(SimulatedCiA402Fleet::kDriveSignalIdBase + 1);
+    ASSERT_TRUE(drive);
+    std::array<uint8_t, DriveSnapshotV1::kEncodedSize> driveBytes{};
+    const size_t driveSize = drive.readVar(driveBytes.data(), driveBytes.size());
+    ASSERT_EQ(driveSize, DriveSnapshotV1::kEncodedSize);
+    BufReader driveReader(driveBytes.data(), driveSize);
+    DriveSnapshotV1 snapshot;
+    ASSERT_TRUE(DriveSnapshotV1::decode(driveReader, snapshot));
+    EXPECT_EQ(snapshot.slaveIndex, 0U);
+    EXPECT_NE(snapshot.qualityFlags & static_cast<uint32_t>(DriveQuality::Simulated), 0U);
+
+    snapshot.qualityFlags |= static_cast<uint32_t>(DriveQuality::Stale);
+    ASSERT_TRUE(fleet.updateDriveSnapshot("sim-axis-x", snapshot));
+    EXPECT_FALSE(fleet.updateDriveSnapshot("unknown-axis", snapshot));
+
+    fleet.appendSimulationEvent("OperatorNote", "simulated-cia402-machine",
+                                EventSeverity::Info, 0, "Test event");
+    const auto readEvents = registry.findFunction(SimulatedCiA402Fleet::kEventReadFunctionId);
+    ASSERT_TRUE(readEvents);
+    ASSERT_EQ(readEvents.returnValue().schemaSlot,
+              *catalog.slotFor(SchemaRef{eventPageSchemaKey(), computeSchemaDigest(
+                  *graph.find(eventPageSchemaKey()))}));
+    std::vector<FunctionArgument> arguments(2);
+    arguments[0].position = 0;
+    arguments[0].type = ValueType::U64;
+    arguments[0].value = std::vector<uint8_t>(8, 0);
+    arguments[1].position = 1;
+    arguments[1].type = ValueType::U32;
+    arguments[1].value = {100, 0, 0, 0};
+    const auto eventPage = readEvents.invoke(arguments);
+    ASSERT_TRUE(eventPage.success) << eventPage.errorMessage;
+    const auto* eventPageSchema = graph.find(eventPageSchemaKey());
+    ASSERT_NE(eventPageSchema, nullptr);
+    BufReader eventPageReader(eventPage.returnValue.data(), eventPage.returnValue.size());
+    EXPECT_TRUE(validateSchemaValue(graph, eventPageSchema->key, eventPageReader));
+    EXPECT_EQ(eventPageReader.remaining(), 0U);
 }
 
 } // namespace

@@ -17,19 +17,30 @@ import {
   FunctionCallArg,
   FunctionCallResponse,
   FunctionEntry,
+  InvokeExResponse,
   MessageType,
   StreamLayoutEntry,
   StreamRow,
-  ValueType,
   decodeStreamData,
-  makeCallFunctionRequest,
   makeGetRequest,
+  makeInvokeExRequest,
   makeListRequest,
-  readCallFunctionResponse,
   readConfigureAck,
   readEntryCatalog,
   readFunctionCatalog,
+  readInvokeExResponse,
 } from './protocol';
+import {
+  SchemaCatalogV6,
+  SchemaMessage,
+  decodeSchemaDefinitionV6,
+  decodeServerHelloV6,
+  makeClientHelloV6,
+  makeSchemaCommitV6,
+  makeSchemaRequestV6,
+  decodeSchemaValue,
+  verifyAndBuildCatalog,
+} from './schema-v6';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -42,6 +53,16 @@ type Pending = {
   resolve: (payload: Uint8Array) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  correlationId?: bigint;
+};
+
+type BootstrapWaiter = {
+  expected: Set<number>;
+  count: number;
+  frames: Uint8Array[];
+  resolve: (frames: Uint8Array[]) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 };
 
 /** Coarse connection state for UI display. */
@@ -51,6 +72,12 @@ export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 export interface TetherError {
   code: number;
   message: string;
+}
+
+export interface SnapshotFrame {
+  timestampUs: bigint;
+  schemaEpoch: bigint;
+  values: Map<bigint, { schemaSlot: number; bytes: Uint8Array }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +135,8 @@ export class TetherIOClient extends EventTarget {
   private socket?: WebSocket;
   /** Queue of requests awaiting their matching response frame. */
   private pending: Pending[] = [];
+  private bootstrapWaiters: BootstrapWaiter[] = [];
+  private verifiedCatalog?: SchemaCatalogV6;
   /** Layout of the currently configured stream (set by configureStream). */
   private streamLayout: StreamLayoutEntry[] = [];
 
@@ -115,10 +144,15 @@ export class TetherIOClient extends EventTarget {
   get currentStreamLayout(): StreamLayoutEntry[] {
     return this.streamLayout;
   }
+  /** V6 schemas verified for the current server epoch, if available. */
+  get schemaCatalog(): SchemaCatalogV6 | undefined {
+    return this.verifiedCatalog;
+  }
   /** Whether a stream is currently active (set by startStream/stopStream). */
   private streamActive = false;
   /** Monotonic counter for log correlation. */
   private msgCounter = 0;
+  private invokeRequestId = 1n;
 
   /** Current connection state (readable by the UI). */
   state: ConnectionState = 'disconnected';
@@ -141,11 +175,20 @@ export class TetherIOClient extends EventTarget {
       this.socket = socket;
       socket.binaryType = 'arraybuffer';
 
-      socket.onopen = () => {
-        this.state = 'connected';
-        console.log('[TetherIO] WebSocket opened');
-        this.dispatchEvent(new Event('connected'));
-        resolve();
+      socket.onopen = async () => {
+        try {
+          console.log('[TetherIO] WebSocket opened; negotiating V6 schemas');
+          await this.negotiateV6();
+          this.state = 'connected';
+          this.dispatchEvent(new Event('connected'));
+          resolve();
+        } catch (error) {
+          const failure = error instanceof Error ? error : new Error('V6 schema negotiation failed');
+          this.state = 'disconnected';
+          this.rejectPending(failure);
+          socket.close(1002, 'V6 schema negotiation failed');
+          reject(failure);
+        }
       };
 
       socket.onerror = (e) => {
@@ -183,6 +226,7 @@ export class TetherIOClient extends EventTarget {
     this.socket = undefined;
     this.state = 'disconnected';
     this.streamActive = false;
+    this.verifiedCatalog = undefined;
   }
 
   // ---- Catalog: parameters & signals -----------------------------------
@@ -223,6 +267,24 @@ export class TetherIOClient extends EventTarget {
     return entries;
   }
 
+  /** Load annotations for a catalog entry through the V6 metadata service. */
+  async getMetadata(id: bigint): Promise<Record<string, string>> {
+    const request = new Uint8Array(9);
+    const view = new DataView(request.buffer);
+    view.setUint8(0, MessageType.getMetadataReq);
+    view.setBigUint64(1, id, true);
+    const payload = await this.request(request, MessageType.getMetadataResp);
+    const reader = new BinaryReader(payload);
+    reader.u8();
+    reader.u64();
+    const count = reader.u32();
+    if (count > 4096) throw new Error('metadata count exceeds limit');
+    const metadata: Record<string, string> = {};
+    for (let i = 0; i < count; i += 1) metadata[reader.string16()] = reader.string16();
+    reader.assertEnd();
+    return metadata;
+  }
+
   /**
    * Invoke a remote function.
    *
@@ -234,11 +296,15 @@ export class TetherIOClient extends EventTarget {
    *             reject the promise.
    */
   async callFunction(id: bigint, args: FunctionCallArg[] = []): Promise<FunctionCallResponse> {
+    const requestId = this.invokeRequestId++;
     const payload = await this.request(
-      makeCallFunctionRequest(id, args),
-      MessageType.callFunctionResp,
+      makeInvokeExRequest(requestId, id, args),
+      MessageType.invokeExResp,
+      requestId,
     );
-    return readCallFunctionResponse(payload);
+    const response: InvokeExResponse = readInvokeExResponse(payload);
+    if (response.requestId !== requestId) throw new Error('mismatched InvokeEx response request ID');
+    return { ...response, functionId: id };
   }
 
   /**
@@ -272,6 +338,47 @@ export class TetherIOClient extends EventTarget {
     );
   }
 
+  /** Read and decode a catalog value only when its negotiated epoch and slot are current. */
+  async getTyped(entry: CatalogEntry): Promise<unknown> {
+    const catalog = this.verifiedCatalog;
+    if (!catalog) throw new Error('schema catalog is not negotiated');
+    if (entry.schemaEpoch !== BigInt(catalog.epoch)) throw new Error('catalog entry belongs to a stale schema epoch');
+    const bytes = await this.get(entry.kind, entry.id);
+    if (this.verifiedCatalog !== catalog) throw new Error('schema catalog changed during value read');
+    return decodeSchemaValue(catalog, entry.schemaSlot, bytes);
+  }
+
+  /** Read a coherent server-side snapshot for selected catalog entries. */
+  async snapshot(kind: 'params' | 'signals', ids: bigint[] = []): Promise<SnapshotFrame> {
+    const messageType = kind === 'params' ? MessageType.snapshotParamsReq : MessageType.snapshotSignalsReq;
+    const responseType = kind === 'params' ? MessageType.snapshotParamsResp : MessageType.snapshotSignalsResp;
+    const writer = new Uint8Array(5 + ids.length * 8);
+    const view = new DataView(writer.buffer);
+    view.setUint8(0, messageType);
+    view.setUint32(1, ids.length, true);
+    ids.forEach((id, index) => view.setBigUint64(5 + index * 8, id, true));
+    const payload = await this.request(writer, responseType);
+    const reader = new BinaryReader(payload);
+    reader.u8();
+    const timestampUs = reader.u64();
+    const count = reader.u32();
+    const schemaEpoch = reader.u64();
+    if (count > 65536) throw new Error('snapshot contains too many values');
+    const values = new Map<bigint, { schemaSlot: number; bytes: Uint8Array }>();
+    for (let index = 0; index < count; index += 1) {
+      const id = reader.u64();
+      const schemaSlot = reader.u32();
+      const valueSize = reader.u8();
+      const length = valueSize === 0 ? reader.varint() : valueSize;
+      if (length > reader.remaining) throw new Error('truncated snapshot value');
+      values.set(id, { schemaSlot, bytes: reader.bytesOf(length) });
+    }
+    reader.assertEnd();
+    const catalog = this.verifiedCatalog;
+    if (!catalog || schemaEpoch !== BigInt(catalog.epoch)) throw new Error('snapshot belongs to a stale schema epoch');
+    return { timestampUs, schemaEpoch, values };
+  }
+
   /**
    * Write a new value to a parameter.
    *
@@ -282,19 +389,24 @@ export class TetherIOClient extends EventTarget {
    */
   async setParameter(id: bigint, value: Uint8Array, variable = false): Promise<void> {
     console.log(`[TetherIO] setParameter(id=${id}, ${value.length} bytes)`);
-    const bytes = new Uint8Array(1 + 8 + (variable ? 5 : 0) + value.length);
+    void variable; // The V6 framing prefixes all schema values, fixed or variable.
+    let length = value.length;
+    let lengthSize = 1;
+    while (length >= 0x80) {
+      length = Math.floor(length / 128);
+      lengthSize += 1;
+    }
+    const bytes = new Uint8Array(1 + 8 + lengthSize + value.length);
     const view = new DataView(bytes.buffer);
     view.setUint8(0, MessageType.setParameterReq);
     view.setBigUint64(1, id, true);
     let offset = 9;
-    if (variable) {
-      let length = value.length;
-      while (length >= 0x80) {
-        bytes[offset++] = (length & 0x7f) | 0x80;
-        length >>>= 7;
-      }
-      bytes[offset++] = length;
+    length = value.length;
+    while (length >= 0x80) {
+      bytes[offset++] = (length % 128) | 0x80;
+      length = Math.floor(length / 128);
     }
+    bytes[offset++] = length;
     bytes.set(value, offset);
     await this.request(bytes, MessageType.setParameterResp);
   }
@@ -377,7 +489,7 @@ export class TetherIOClient extends EventTarget {
    * @returns            The response payload, or an empty array for
    *                     fire-and-forget messages.
    */
-  private request(payload: Uint8Array, responseType: number): Promise<Uint8Array> {
+  private request(payload: Uint8Array, responseType: number, correlationId?: bigint): Promise<Uint8Array> {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN)
       return Promise.reject(new Error('Not connected'));
 
@@ -400,7 +512,7 @@ export class TetherIOClient extends EventTarget {
           console.error(`[TetherIO] ✗ #${seq} timeout`);
           reject(err);
         }, timeoutMs);
-        this.pending.push({ type: responseType, resolve, reject, timer });
+        this.pending.push({ type: responseType, resolve, reject, timer, correlationId });
       } else {
         // Fire-and-forget: resolve immediately after the send completes.
         resolve(new Uint8Array());
@@ -425,6 +537,14 @@ export class TetherIOClient extends EventTarget {
     if (frame.length === 0) return;
     const type = frame[0]!;
 
+    if (this.resolveBootstrapFrame(type, frame)) return;
+
+    if (type === MessageType.catalogChanged || type === SchemaMessage.update) {
+      this.verifiedCatalog = undefined;
+      this.dispatchEvent(new CustomEvent('catalog-changed', { detail: { type, frame } }));
+      return;
+    }
+
     // Stream data is dispatched out-of-band (not matched to a pending request).
     if (type === MessageType.streamData) {
       try {
@@ -443,7 +563,11 @@ export class TetherIOClient extends EventTarget {
     console.log(`[TetherIO] ← ${msgTypeName(type)} (${frame.length} bytes)`);
 
     // Match against the first pending request expecting this response type.
-    const index = this.pending.findIndex((item) => item.type === type);
+    const responseId = type === MessageType.invokeExResp && frame.length >= 9
+      ? new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getBigUint64(1, true)
+      : undefined;
+    const index = this.pending.findIndex((item) => item.type === type &&
+      (item.correlationId === undefined || item.correlationId === responseId));
     if (index >= 0) {
       const item = this.pending.splice(index, 1)[0];
       if (item) {
@@ -469,20 +593,88 @@ export class TetherIOClient extends EventTarget {
     }
   }
 
+  private async negotiateV6(): Promise<void> {
+    this.verifiedCatalog = undefined;
+    const helloPromise = this.waitForBootstrapFrames(
+      new Set([SchemaMessage.serverHello, SchemaMessage.reject]),
+      1,
+    );
+    this.sendRaw(makeClientHelloV6());
+    const [helloFrame] = await helloPromise;
+    if (!helloFrame) throw new Error('missing V6 ServerHello');
+    if (helloFrame[0] === SchemaMessage.reject) {
+      const reader = new BinaryReader(helloFrame);
+      reader.u8();
+      const code = reader.u8();
+      const message = reader.string32();
+      throw new Error(`V6 schema negotiation rejected (${code}): ${message}`);
+    }
+    const hello = decodeServerHelloV6(helloFrame);
+    const definitionsPromise = hello.manifest.length
+      ? this.waitForBootstrapFrames(
+          new Set([SchemaMessage.definition, SchemaMessage.reject]),
+          hello.manifest.length,
+        )
+      : Promise.resolve([] as Uint8Array[]);
+    if (hello.manifest.length) this.sendRaw(makeSchemaRequestV6(hello.epoch, hello.manifest));
+    const definitionFrames = await definitionsPromise;
+    const definitions = definitionFrames.map((frame) => {
+      if (frame[0] === SchemaMessage.reject) {
+        const reader = new BinaryReader(frame);
+        reader.u8();
+        const code = reader.u8();
+        throw new Error(`Schema definition rejected (${code}): ${reader.string32()}`);
+      }
+      return decodeSchemaDefinitionV6(frame);
+    });
+    const catalog = await verifyAndBuildCatalog(hello, definitions);
+    this.sendRaw(makeSchemaCommitV6(hello.epoch));
+    this.verifiedCatalog = catalog;
+    console.log(`[TetherIO] V6 schema epoch ${hello.epoch} committed (${catalog.manifest.length} schemas)`);
+  }
+
+  private sendRaw(payload: Uint8Array): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) throw new Error('Not connected');
+    this.socket.send(payload);
+  }
+
+  private waitForBootstrapFrames(expected: Set<number>, count: number): Promise<Uint8Array[]> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.bootstrapWaiters = this.bootstrapWaiters.filter((waiter) => waiter.timer !== timer);
+        reject(new Error('V6 schema negotiation timed out'));
+      }, 10000);
+      this.bootstrapWaiters.push({ expected, count, frames: [], resolve, reject, timer });
+    });
+  }
+
+  private resolveBootstrapFrame(type: number, frame: Uint8Array): boolean {
+    const index = this.bootstrapWaiters.findIndex((waiter) => waiter.expected.has(type));
+    if (index < 0) return false;
+    const waiter = this.bootstrapWaiters[index]!;
+    waiter.frames.push(frame);
+    if (type === SchemaMessage.reject || waiter.frames.length >= waiter.count) {
+      this.bootstrapWaiters.splice(index, 1);
+      clearTimeout(waiter.timer);
+      waiter.resolve(waiter.frames);
+    }
+    return true;
+  }
+
   /**
    * Extract the value bytes from a GetParamResp / GetSignalResp payload.
    *
-   * Wire layout: `type(u8) + id(u64) + valueSize(u8) + [varint length] + value`.
-   * For fixed-size entries, `valueSize` is the byte count.
-   * For variable-length entries, `valueSize` is 0 and a varint length follows.
+  * Wire layout: `type(u8) + id(u64) + varint length + value`.
    */
   private extractValue(payload: Uint8Array): Uint8Array {
     const reader = new BinaryReader(payload);
     reader.u8(); // type
     reader.u64(); // id
-    const size = reader.u8();
-    if (size === 0) reader.varint(); // variable-length prefix
-    return reader.bytesOf(reader.remaining);
+    const length = reader.varint();
+    if (length > reader.remaining) throw new Error('truncated value response');
+    const value = reader.bytesOf(length);
+    reader.assertEnd();
+    return value;
   }
 
   /** Reject all pending requests with the given error (used on disconnect). */
@@ -493,6 +685,10 @@ export class TetherIOClient extends EventTarget {
       item.reject(error);
     });
     if (count > 0) console.log(`[TetherIO] rejected ${count} pending request(s)`);
+    this.bootstrapWaiters.splice(0).forEach((waiter) => {
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    });
   }
 
   /**

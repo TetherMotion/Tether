@@ -22,9 +22,12 @@
 #include "tether/io/Session.hpp"
 #include "tether/io/Datalogging.hpp"
 #include "tether/io/ThresholdFilter.hpp"
+#include "tether/io/SimulatedCiA402Fleet.hpp"
+#include "tether/io/SchemaValueCodec.hpp"
 #include "PipeTransport.hpp"
 #include <thread>
 #include <chrono>
+#include <algorithm>
 #include <cstring>
 #include <atomic>
 #include <cmath>
@@ -33,6 +36,104 @@ using namespace tether::io;
 using namespace tether::io::testing;
 
 static void noopLogFn(const char* /*tag*/, const char* /*fmt*/, ...) {}
+
+class SimulatedCiA402ProfileIntegrationTest : public ::testing::Test {
+protected:
+    Registry registry_;
+    SchemaGraph graph_;
+    SchemaCatalog catalog_;
+    cia402::SimulatedCiA402Fleet fleet_;
+    std::unique_ptr<Session> session_;
+    std::unique_ptr<TetherIOClient> client_;
+    std::thread sessionThread_;
+
+    void SetUp() override {
+        graph_ = cia402::machineProfileSchemaGraph();
+        ASSERT_TRUE(cia402::SimulatedCiA402Fleet::installSchemas(graph_, catalog_));
+        ASSERT_TRUE(fleet_.registerSignals(registry_, catalog_));
+        auto [clientEnd, serverEnd] = MessagePipeTransport::create();
+        session_ = std::make_unique<Session>(
+            std::move(serverEnd), registry_, [] { return cia402::simulated_fleet_detail::monotonicTimestampUs(); },
+            noopLogFn, nullptr, nullptr, nullptr, nullptr, nullptr,
+            Framing::None, nullptr, &catalog_);
+        sessionThread_ = std::thread([this] { session_->run(); });
+        client_ = std::make_unique<TetherIOClient>(std::move(clientEnd), 5000);
+        bool connected = false;
+        for (int attempt = 0; attempt < 50; ++attempt) {
+            auto result = client_->ping(42);
+            if (result && *result == 42) {
+                connected = true;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        ASSERT_TRUE(connected) << "V6 profile test client failed to connect";
+    }
+
+    void TearDown() override {
+        if (client_) client_->close();
+        if (session_) session_->requestStop();
+        if (sessionThread_.joinable()) sessionThread_.join();
+    }
+};
+
+TEST_F(SimulatedCiA402ProfileIntegrationTest, NegotiatesAndReadsMachineSnapshotsAndEventHistory) {
+    const auto signals = client_->listSignals();
+    ASSERT_TRUE(signals.has_value());
+    ASSERT_EQ(signals->size(), 7U);
+    EXPECT_EQ(registry_.paramCount(), 0U);
+    EXPECT_EQ(registry_.functionCount(), 1U);
+
+    for (const auto& signal : *signals) {
+        const auto value = client_->getSignal(signal.id);
+        ASSERT_TRUE(value.has_value()) << signal.name;
+        ASSERT_FALSE(value->empty()) << signal.name;
+        if (signal.name == "machine.events.cursor") {
+            ASSERT_EQ(value->size(), sizeof(uint64_t));
+            uint64_t cursor = 0;
+            std::memcpy(&cursor, value->data(), sizeof(cursor));
+            EXPECT_GE(cursor, 1U);
+            continue;
+        }
+        const auto* schema = catalog_.resolve(static_cast<SchemaEpoch>(signal.schemaEpoch), signal.schemaSlot);
+        ASSERT_NE(schema, nullptr) << signal.name;
+        BufReader reader(value->data(), value->size());
+        EXPECT_TRUE(validateSchemaValue(graph_, schema->key, reader)) << signal.name;
+        EXPECT_EQ(reader.remaining(), 0U) << signal.name;
+    }
+
+    const auto params = client_->listParams();
+    ASSERT_TRUE(params.has_value());
+    EXPECT_TRUE(params->empty());
+    const auto functions = client_->listFunctions();
+    ASSERT_TRUE(functions.has_value());
+    ASSERT_EQ(functions->size(), 1U);
+    const auto readEvents = std::find_if(functions->begin(), functions->end(),
+        [](const ClientFunctionEntry& function) { return function.name == "machine.events.read"; });
+    ASSERT_NE(readEvents, functions->end());
+    const auto* eventPageNode = graph_.find(cia402::eventPageSchemaKey());
+    ASSERT_NE(eventPageNode, nullptr);
+    const auto expectedSlot = catalog_.slotFor(
+        SchemaRef{cia402::eventPageSchemaKey(), computeSchemaDigest(*eventPageNode)});
+    ASSERT_TRUE(expectedSlot.has_value());
+    EXPECT_EQ(readEvents->returnSchemaSlot, *expectedSlot);
+
+    std::vector<TetherIOClient::FunctionArg> arguments(2);
+    arguments[0].position = 0;
+    arguments[0].type = ValueType::U64;
+    arguments[0].value.assign(8, 0);
+    arguments[1].position = 1;
+    arguments[1].type = ValueType::U32;
+    arguments[1].value = {100, 0, 0, 0};
+    const auto page = client_->callFunction(readEvents->id, arguments);
+    ASSERT_TRUE(page.has_value());
+    ASSERT_TRUE(page->success) << page->errorMessage;
+    const auto* pageSchema = catalog_.resolve(catalog_.epoch(), readEvents->returnSchemaSlot);
+    ASSERT_NE(pageSchema, nullptr);
+    BufReader pageReader(page->returnValue.data(), page->returnValue.size());
+    EXPECT_TRUE(validateSchemaValue(graph_, pageSchema->key, pageReader));
+    EXPECT_EQ(pageReader.remaining(), 0U);
+}
 
 // ===========================================================================
 // Test fixture: Registry with diverse entries + Session + Client
