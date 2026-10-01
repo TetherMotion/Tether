@@ -1,544 +1,468 @@
-/**
- * @file main.ts
- * @brief Top-level application component for the Tether IO dashboard.
- *
- * `<tether-app>` is the root custom element that orchestrates the entire
- * dashboard: it owns the {@link TetherIOClient} instance, renders the
- * static HTML shell, wires up event handlers, and manages tab switching
- * and stream lifecycle.
- *
- * On connection it fetches both the parameter and signal catalogs in
- * parallel and displays them combined under the "All" tab.  The user can
- * then filter to just signals, just parameters, or view the function list.
- */
-
+/** Machine-oriented shell for the browser Tether IO client. */
 import './components';
-import './jog';
 import { TetherIOClient } from './client';
+import { discoverEventService, EventServiceAvailability, MachineEvent, readEventCursor, readEventPage } from './domain/event-history';
+import { EventStore } from './stores/event-store';
 import {
-  CatalogEntry,
-  FunctionEntry,
-  StreamLayoutEntry,
-  StreamRow,
-} from './protocol';
+  MachineDescriptorView,
+  MachineProfileAvailability,
+  MachineSnapshotView,
+  discoverMachineProfile,
+  readDriveSnapshot,
+  readMachineDescriptor,
+  readMachineSnapshot,
+} from './domain/machine-profile';
+import { CatalogEntry, FunctionEntry, StreamRow } from './protocol';
+import { NavigationItem, machineShellTemplate } from './views/machine-shell';
+import { DriveSnapshotRecord, openDriveDetail, renderDriveViews } from './views/drives';
 import './style.css';
 
-/** Type alias for the `<tether-webgpu-scope>` element's public interface. */
-type TetherScope = HTMLElement & {
-  setChannels: (channels: { name: string; color: [number, number, number] }[]) => void;
-  push: (timestampUs: bigint, values: number[]) => void;
-  clear: () => void;
-  togglePause: () => boolean;
-  resetView: () => void;
+type ScopeElement = HTMLElement & {
+  setChannels(channels: { name: string; color: [number, number, number] }[]): void;
+  push(timestampUs: bigint, values: number[]): void;
+  clear(): void;
+  togglePause(): boolean;
+  resetView(): void;
 };
 
-/** Tab identifiers for the catalog navigation. */
-type Tab = 'all' | 'signals' | 'params' | 'functions';
+type ViewId = 'overview' | 'drives' | 'motion' | 'trends' | 'alarms' | 'diagnostics' | 'commissioning' | 'recipes' | 'explore' | 'settings';
+type CatalogTab = 'all' | 'signals' | 'params' | 'functions';
 
-/** Default color palette for stream channels (ggplot-like). */
-const STREAM_COLORS: [number, number, number][] = [
-  [0.0, 0.45, 0.75], // blue
-  [0.85, 0.33, 0.1], // orange
-  [0.0, 0.62, 0.45], // green
-  [0.8, 0.1, 0.2], // red
-  [0.58, 0.4, 0.74], // purple
-  [0.91, 0.59, 0.09], // brown
-  [0.75, 0.31, 0.5], // pink
-  [0.4, 0.4, 0.4], // gray
+const views: NavigationItem[] = [
+  { id: 'overview', label: 'Overview' }, { id: 'drives', label: 'Drives' },
+  { id: 'motion', label: 'Motion' }, { id: 'trends', label: 'Trends' },
+  { id: 'alarms', label: 'Alarms & events' }, { id: 'diagnostics', label: 'Diagnostics' },
+  { id: 'commissioning', label: 'Commissioning' }, { id: 'recipes', label: 'Recipes' },
+  { id: 'explore', label: 'Explore' }, { id: 'settings', label: 'Settings' },
 ];
-
-/**
- * Root dashboard component.
- *
- * @customElement tether-app
- */
+const colors: [number, number, number][] = [
+  [0, 0.45, 0.75], [0.85, 0.33, 0.1], [0, 0.62, 0.45], [0.8, 0.1, 0.2],
+  [0.58, 0.4, 0.74], [0.91, 0.59, 0.09], [0.75, 0.31, 0.5], [0.4, 0.4, 0.4],
+];
 class TetherApp extends HTMLElement {
-  /** WebSocket protocol client (owned by this element). */
   private readonly client = new TetherIOClient();
-  /** Cached signal catalog entries. */
-  private signals: CatalogEntry[] = [];
-  /** Cached parameter catalog entries. */
   private params: CatalogEntry[] = [];
-  /** Cached function catalog entries. */
+  private signals: CatalogEntry[] = [];
   private functions: FunctionEntry[] = [];
-  /** Layout of the currently configured stream (set by configureStream). */
-  private streamLayout: StreamLayoutEntry[] = [];
-  /** Whether a stream is currently active. */
+  private eventService: EventServiceAvailability = { available: false };
+  private readonly eventStore = new EventStore(200);
+  private profile: MachineProfileAvailability = {
+    profile: 'unavailable', descriptor: false, machineSnapshot: false, driveSnapshots: [],
+    controlsAvailable: false, explanation: 'Connect to a V6 server to discover available typed machine services.',
+  };
+  private readonly driveData = new Map<bigint, DriveSnapshotRecord>();
+  private machineDescriptor?: MachineDescriptorView;
+  private machineSnapshot?: MachineSnapshotView;
+  private machineSnapshotReceivedAt?: number;
+  private streamLayout: { id: bigint }[] = [];
   private streamActive = false;
+  private polling = false;
+  private pollingEvents = false;
+  private drivePollTimer?: number;
+  private activeView: ViewId = 'overview';
 
-  // ---- Lifecycle --------------------------------------------------------
-
-  /** Lifecycle: element inserted into the DOM — render, bind, auto-connect. */
   connectedCallback(): void {
-    // Default to light mode unless the user previously chose dark.
-    const saved = localStorage.getItem('tether-theme');
-    if (saved === 'dark' || saved === 'light') {
-      document.documentElement.dataset.theme = saved;
-    } else {
-      document.documentElement.dataset.theme = 'light';
-    }
-    this.render();
-    this.bind();
+    const savedTheme = localStorage.getItem('tether-theme');
+    document.documentElement.dataset.theme = savedTheme === 'dark' ? 'dark' : 'light';
+    this.renderShell();
+    this.bindEvents();
     void this.connect();
   }
 
-  // ---- Rendering --------------------------------------------------------
-
-  /**
-   * Render the static HTML shell of the dashboard.
-   *
-   * The WebSocket URL is derived from `window.location` so the dashboard
-   * works regardless of the host/port it is served from.
-   */
-  private render(): void {
-    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProto}//${window.location.host}/tether-io`;
-
-    this.innerHTML = `
-      <main class="shell">
-        <header class="topbar">
-          <div class="brand">
-            <span class="brand-mark">T</span>
-            <div>
-              <strong>Tether IO</strong>
-              <small>Realtime control cockpit</small>
-            </div>
-          </div>
-          <div class="connection">
-            <input id="url" value="${wsUrl}" aria-label="WebSocket URL">
-            <button id="connect">Connect</button>
-            <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme" title="Toggle light/dark">
-              ${document.documentElement.dataset.theme === 'dark' ? '\u2600\ufe0f' : '\u{1F319}'}
-            </button>
-            <span id="status" class="status">Offline</span>
-          </div>
-        </header>
-
-        <section class="hero">
-          <div>
-            <p class="eyebrow">EtherCAT observability</p>
-            <h1>See the machine breathe.</h1>
-            <p class="lede">
-              Explore live parameters, signals, functions and PDO telemetry
-              through one calm, glassy control surface.
-            </p>
-          </div>
-          <div class="hero-orb">
-            <span>1 kHz</span>
-            <small>stream-ready</small>
-          </div>
-        </section>
-
-        <section class="workspace">
-          <!-- Left panel: catalog with tabs -->
-          <aside class="panel catalog-panel">
-            <div class="panel-title">
-              <div>
-                <span class="eyebrow">Catalog</span>
-                <h2>Everything at hand</h2>
-              </div>
-              <span id="catalog-count" class="badge">0</span>
-            </div>
-            <nav class="tabs">
-              <button class="tab active" data-tab="all">All</button>
-              <button class="tab" data-tab="signals">Signals</button>
-              <button class="tab" data-tab="params">Parameters</button>
-              <button class="tab" data-tab="functions">Functions</button>
-            </nav>
-            <tether-catalog id="catalog"></tether-catalog>
-          </aside>
-
-          <!-- Right panel: scope + params + functions -->
-          <section class="content">
-            <div class="metrics">
-              <article class="metric panel">
-                <small>Connection</small>
-                <strong id="metric-connection">Offline</strong>
-                <span>WebSocket binary</span>
-              </article>
-              <article class="metric panel">
-                <small>Selected points</small>
-                <strong id="metric-points">0</strong>
-                <span>ring-buffered locally</span>
-              </article>
-              <article class="metric panel">
-                <small>Transport</small>
-                <strong>SLIP / IO v5</strong>
-                <span>bounded frames</span>
-              </article>
-            </div>
-
-            <section class="scope panel">
-              <div class="scope-head">
-                <div>
-                  <span class="eyebrow">Oscilloscope</span>
-                  <h2>Signal trace</h2>
-                </div>
-                <div class="scope-actions">
-                  <span class="live-dot" id="live-dot">● LIVE</span>
-                  <button id="pause-btn" class="secondary">Pause</button>
-                  <button id="reset-zoom-btn" class="secondary" hidden>Reset zoom</button>
-                </div>
-              </div>
-              <tether-webgpu-scope id="scope"></tether-webgpu-scope>
-            </section>
-
-            <section class="panel jog-section">
-              <tether-jog-panel id="jog-panel"></tether-jog-panel>
-            </section>
-
-            <section class="panel param-panel" id="param-panel">
-              <tether-param-panel id="params-editor"></tether-param-panel>
-            </section>
-
-            <section class="panel function-panel">
-              <div class="panel-title">
-                <div>
-                  <span class="eyebrow">RPC surface</span>
-                  <h2>Functions</h2>
-                </div>
-              </div>
-              <tether-function-list id="functions"></tether-function-list>
-            </section>
-          </section>
-        </section>
-
-        <footer>
-          <span>Static TypeScript web components</span>
-          <span>Designed for loss-tolerant realtime telemetry</span>
-        </footer>
-
-        <div id="toast-host" class="toast-host" aria-live="polite"></div>
-      </main>
-    `;
+  disconnectedCallback(): void {
+    if (this.drivePollTimer !== undefined) window.clearInterval(this.drivePollTimer);
+    this.client.disconnect();
   }
 
-  // ---- Event binding ----------------------------------------------------
+  private renderShell(): void {
+    this.innerHTML = machineShellTemplate(views);
+    const url = this.querySelector<HTMLInputElement>('#url');
+    if (url) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      url.value = `${protocol}//${window.location.host}/tether-io`;
+    }
+    this.renderPage();
+  }
 
-  /**
-   * Wire up all event listeners: buttons, tabs, catalog events, and
-   * client events (connected/disconnected/stream/error).
-   */
-  private bind(): void {
-    // Connect button
-    this.querySelector<HTMLButtonElement>('#connect')!.addEventListener(
-      'click',
-      () => void this.connect(),
-    );
-
-    // Theme toggle (light/dark)
-    this.querySelector<HTMLButtonElement>('#theme-toggle')!.addEventListener('click', () =>
-      this.toggleTheme(),
-    );
-
-    // Pause / Reset zoom buttons.
-    this.querySelector<HTMLButtonElement>('#pause-btn')!.addEventListener('click', () => {
-      const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
-      if (!scope) return;
-      const paused = scope.togglePause();
-      const btn = this.querySelector<HTMLButtonElement>('#pause-btn')!;
-      btn.textContent = paused ? 'Resume' : 'Pause';
-      const dot = this.querySelector('#live-dot')!;
-      dot.textContent = paused ? '⏸ PAUSED' : '● LIVE';
-      dot.classList.toggle('paused', paused);
-      // Reset zoom button is only relevant while paused.
-      this.querySelector<HTMLButtonElement>('#reset-zoom-btn')!.hidden = !paused;
-    });
-    this.querySelector<HTMLButtonElement>('#reset-zoom-btn')!.addEventListener('click', () => {
-      const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
-      if (!scope) return;
-      // Only reset zoom — do NOT resume.  The view stays paused at the
-      // full 5-second window.
-      scope.resetView();
-    });
-
-    // Tab buttons
-    this.querySelectorAll<HTMLButtonElement>('.tab').forEach((tab) =>
-      tab.addEventListener('click', () => void this.switchTab(tab.dataset.tab as Tab)),
-    );
-
-    // Catalog selection changes → auto-(re)start stream with the new
-    // selection of signals.  No manual start/stop buttons.
-    this.querySelector('tether-catalog')?.addEventListener('selection-change', () => {
-      void this.onSelectionChange();
-    });
-
-    // Client lifecycle events
+  private bindEvents(): void {
+    this.querySelector<HTMLButtonElement>('#connect')?.addEventListener('click', () => void this.connect());
+    this.querySelector<HTMLButtonElement>('#theme-toggle')?.addEventListener('click', () => this.toggleTheme());
+    this.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => button.addEventListener('click', () => {
+      const view = button.dataset.view as ViewId | undefined;
+      if (view) this.openView(view);
+    }));
+    this.querySelectorAll<HTMLButtonElement>('[data-open-view]').forEach((button) => button.addEventListener('click', () => this.openView('drives')));
+    this.querySelectorAll<HTMLButtonElement>('.tab').forEach((button) => button.addEventListener('click', () => this.switchCatalogTab(button.dataset.tab as CatalogTab)));
+    this.querySelector('tether-catalog')?.addEventListener('selection-change', () => void this.onSelectionChange());
+    this.querySelector<HTMLButtonElement>('#pause-btn')?.addEventListener('click', () => this.toggleScopePause());
+    this.querySelector<HTMLButtonElement>('#reset-zoom-btn')?.addEventListener('click', () => this.querySelector<ScopeElement>('#scope')?.resetView());
     this.client.addEventListener('connected', () => {
-      this.setStatus('Online', true);
-      this.jogPanel()?.setOnline(true);
+      this.setStatus('Connected · V6 schemas verified', true);
+      this.querySelector('#role-label')!.textContent = 'Role: unverified';
+      this.querySelector('#freshness-label')!.textContent = 'Data: waiting for snapshots';
     });
     this.client.addEventListener('disconnected', () => {
-      this.setStatus('Offline', false);
-      this.jogPanel()?.setOnline(false);
+      this.setStatus('Disconnected', false);
+      this.querySelector('#freshness-label')!.textContent = 'Data: stale / connection lost';
+      if (this.drivePollTimer !== undefined) window.clearInterval(this.drivePollTimer);
+      this.drivePollTimer = undefined;
+      this.renderDriveViews();
     });
-
-    // Jog panel surfaces rejected commands (e.g. move while jogging).
-    this.querySelector('tether-jog-panel')?.addEventListener('jog-error', (event: Event) => {
-      const message = (event as CustomEvent<string>).detail;
-      if (message) this.showToast(message, 'error');
+    this.client.addEventListener('catalog-changed', () => {
+      this.profile = discoverMachineProfile(undefined, []);
+      this.eventService = { available: false };
+      this.eventStore.reset();
+      this.driveData.clear();
+      this.machineDescriptor = undefined;
+      this.machineSnapshot = undefined;
+      this.machineSnapshotReceivedAt = undefined;
+      this.setStatus('Schema changed · reconnect required', false);
+      this.querySelector('#freshness-label')!.textContent = 'Data: invalidated';
+      this.renderMachineSummary();
+      this.showToast('The schema epoch changed. Data was invalidated; reconnect to renegotiate before reading again.', 'error');
     });
     this.client.addEventListener('error-message', (event: Event) => {
-      const message =
-        (event as CustomEvent<{ message?: string }>).detail.message ?? 'Protocol error';
-      this.setStatus(message, false);
-      this.showToast(message, 'error');
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      this.showToast(detail.message ?? 'Protocol error', 'error');
     });
-
-    // Stream data → decode all channels and push into the WebGPU oscilloscope
-    this.client.addEventListener('stream', (event: Event) => {
-      const row = (event as CustomEvent<StreamRow>).detail;
-      const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
-      if (scope && this.streamLayout.length > 0) {
-        // Decode each channel's value from the raw bytes.
-        const values = row.values.map((bytes) => {
-          if (bytes.length === 8) {
-            return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat64(0, true);
-          }
-          if (bytes.length === 4) {
-            return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat32(0, true);
-          }
-          return bytes.length > 0 ? (bytes[0] ?? 0) : 0;
-        });
-        scope.push(row.timestampUs, values);
-      }
-      this.querySelector('#metric-points')!.textContent = String(row.values.length);
-    });
+    this.client.addEventListener('stream', (event: Event) => this.onStream((event as CustomEvent<StreamRow>).detail));
   }
 
-  // ---- Connection & catalog loading -------------------------------------
-
-  /**
-   * Connect to the WebSocket server and load the initial catalog.
-   *
-   * Reads the URL from the `#url` input field, connects, then fetches
-   * both params and signals in parallel.
-   */
   private async connect(): Promise<void> {
-    const url = this.querySelector<HTMLInputElement>('#url')!.value;
+    const url = this.querySelector<HTMLInputElement>('#url')?.value ?? '';
+    this.setStatus('Connecting…', false);
     try {
       await this.client.connect(url);
-      await this.loadAll();
+      await this.loadCatalogs();
+      await this.refreshProfile();
+      this.drivePollTimer = window.setInterval(() => {
+        void this.pollDrives();
+        void this.pollEvents();
+      }, 1000);
     } catch (error) {
       this.setStatus(error instanceof Error ? error.message : 'Connection failed', false);
+      this.showToast(error instanceof Error ? error.message : 'Connection failed', 'error');
     }
   }
 
-  /**
-   * Fetch parameters and signals in parallel and render the combined
-   * catalog under the "All" tab.
-   */
-  private async loadAll(): Promise<void> {
-    try {
-      const [params, signals, functions] = await Promise.all([
-        this.client.list('params'),
-        this.client.list('signals'),
-        this.client.listFunctions(),
-      ]);
-      this.params = params;
-      this.signals = signals;
-      this.functions = functions;
-      this.renderCatalog([...params, ...signals]);
-      this.renderParamPanel();
-      // Jog panel discovers itself from the catalogs; it hides when the
-      // server exposes no `jog.*` surface.
-      const jog = this.jogPanel();
-      if (jog) jog.model = { client: this.client, functions, signals };
-    } catch (error) {
-      this.setStatus(error instanceof Error ? error.message : 'Catalog failed', false);
-    }
+  private async loadCatalogs(): Promise<void> {
+    [this.params, this.signals, this.functions] = await Promise.all([
+      this.client.list('params'), this.client.list('signals'), this.client.listFunctions(),
+    ]);
+    await this.loadEntryMetadata([...this.params, ...this.signals]);
+    this.renderCatalog([...this.params, ...this.signals]);
+    const functionList = this.querySelector<HTMLElement & { items: FunctionEntry[] }>('#functions');
+    if (functionList) functionList.items = this.functions;
   }
 
-  // ---- Tab switching ----------------------------------------------------
-
-  /**
-   * Switch the catalog view to the given tab.
-   *
-   * - `'all'`       — Show cached params + signals (no refetch).
-   * - `'signals'`   — Fetch and show only signals.
-   * - `'params'`    — Fetch and show only parameters.
-   * - `'functions'` — Fetch and show the function list.
-   */
-  private async switchTab(tab: Tab): Promise<void> {
-    // Update active-tab styling
-    this.querySelectorAll('.tab').forEach((item) =>
-      item.classList.toggle('active', (item as HTMLElement).dataset.tab === tab),
+  private async loadEntryMetadata(entries: CatalogEntry[]): Promise<void> {
+    const batchSize = 24;
+    const batches: CatalogEntry[][] = [];
+    for (let offset = 0; offset < entries.length; offset += batchSize) {
+      batches.push(entries.slice(offset, offset + batchSize));
+    }
+    await batches.reduce<Promise<void>>(
+      (previous, batch) => previous.then(async () => {
+        await Promise.allSettled(batch.map(async (entry) => {
+          entry.metadata = await this.client.getMetadata(entry.id);
+        }));
+      }),
+      Promise.resolve(),
     );
+  }
 
-    // Functions tab: fetch function catalog
-    if (tab === 'functions') {
+  private async refreshProfile(): Promise<void> {
+    this.profile = discoverMachineProfile(this.client.schemaCatalog, this.signals);
+    this.eventService = discoverEventService(this.client.schemaCatalog, this.signals, this.functions);
+    this.eventStore.reset();
+    this.machineDescriptor = undefined;
+    this.machineSnapshot = undefined;
+    if (this.profile.descriptorEntry) {
       try {
-        this.functions = await this.client.listFunctions();
-        (
-          this.querySelector('#functions') as HTMLElement & {
-            items: FunctionEntry[];
-          }
-        ).items = this.functions;
+        this.machineDescriptor = await readMachineDescriptor(this.client, this.profile.descriptorEntry);
       } catch (error) {
-        this.setStatus(error instanceof Error ? error.message : 'Function catalog failed', false);
+        this.showToast(error instanceof Error ? `Machine descriptor rejected: ${error.message}` : 'Machine descriptor rejected', 'error');
       }
-      return;
     }
+    this.renderMachineSummary();
+    await this.pollDrives();
+    await this.pollEvents();
+  }
 
-    // All tab: show cached data (no refetch)
-    if (tab === 'all') {
-      this.renderCatalog([...this.params, ...this.signals]);
-      this.renderParamPanel();
-      return;
-    }
-
-    // Signals / Params tab: fetch (or refetch) and display
+  private async pollEvents(): Promise<void> {
+    const catalog = this.client.schemaCatalog;
+    const service = this.eventService;
+    if (this.client.state !== 'connected' || !catalog || !service.available ||
+        !service.cursorEntry || this.pollingEvents) return;
+    this.pollingEvents = true;
     try {
-      const entries = await this.client.list(tab);
-      if (tab === 'signals') this.signals = entries;
-      else this.params = entries;
-      this.renderCatalog(entries);
-      this.renderParamPanel();
+      const latest = await readEventCursor(this.client, catalog, service.cursorEntry);
+      if (latest !== this.eventStore.cursor || this.eventStore.cursor > latest) {
+        const page = await readEventPage(this.client, catalog, service, this.eventStore.cursor, 50);
+        this.eventStore.apply(page);
+        this.renderEventTimeline();
+      }
+      const label = this.querySelector<HTMLElement>('#alarm-label');
+      if (label) label.textContent = `Events: ${this.eventStore.events.length} retained${this.eventStore.gapDetected ? ' · gap detected' : ''}`;
     } catch (error) {
-      this.setStatus(error instanceof Error ? error.message : 'Catalog failed', false);
+      const label = this.querySelector<HTMLElement>('#alarm-label');
+      if (label) label.textContent = 'Events: service read failed';
+      console.warn('[TetherIO] event history poll failed', error);
+    } finally {
+      this.pollingEvents = false;
     }
   }
 
-  // ---- Catalog rendering ------------------------------------------------
+  private renderEventTimeline(): void {
+    const timeline = this.querySelector<HTMLElement & { model: { events: readonly MachineEvent[]; gapDetected: boolean; available: boolean } }>('#event-timeline');
+    if (timeline) timeline.model = {
+      events: this.eventStore.events,
+      gapDetected: this.eventStore.gapDetected,
+      available: this.eventService.available,
+    };
+    const count = this.querySelector<HTMLElement>('#event-count-summary');
+    if (count) count.textContent = this.eventService.available ? String(this.eventStore.events.length) : 'Unavailable';
+    const copy = this.querySelector<HTMLElement>('#event-summary-copy');
+    if (copy) {
+      if (!this.eventService.available) copy.textContent = 'Typed event history service not advertised';
+      else {
+        const historyState = this.eventStore.gapDetected ? 'history gap detected' : 'read-only history';
+        copy.textContent = `${this.eventStore.events.length} retained · ${historyState}`;
+      }
+    }
+  }
 
-  /**
-   * Render the given entries into the `<tether-catalog>` element and
-   * update the count badge.
-   */
+  private async pollDrives(): Promise<void> {
+    const entries = this.profile.driveSnapshots;
+    if (this.client.state !== 'connected' || this.polling ||
+        (!entries.length && !this.profile.machineSnapshotEntry)) return;
+    this.polling = true;
+    const tasks: Promise<{ kind: 'machine'; snapshot: MachineSnapshotView } | { kind: 'drive'; id: bigint; snapshot: DriveSnapshotRecord['snapshot'] }>[] = [];
+    if (this.profile.machineSnapshotEntry) {
+      tasks.push(readMachineSnapshot(this.client, this.profile.machineSnapshotEntry)
+        .then((snapshot) => ({ kind: 'machine' as const, snapshot })));
+    }
+    for (const entry of entries) {
+      tasks.push(readDriveSnapshot(this.client, entry)
+        .then((snapshot) => ({ kind: 'drive' as const, id: entry.id, snapshot })));
+    }
+    const results = await Promise.allSettled(tasks);
+    let machineReceived = false;
+    for (const result of results) {
+      if (result.status !== 'fulfilled') continue;
+      if (result.value.kind === 'machine') {
+        this.machineSnapshot = result.value.snapshot;
+        this.machineSnapshotReceivedAt = Date.now();
+        machineReceived = true;
+      } else {
+        this.driveData.set(result.value.id, { snapshot: result.value.snapshot, receivedAt: Date.now() });
+      }
+    }
+    const failedCount = results.filter((result) => result.status === 'rejected').length;
+    let freshness = 'Data: live drive snapshots';
+    if (machineReceived) freshness = 'Data: live · coherent machine snapshot';
+    if (failedCount > 0) {
+      const noun = failedCount === 1 ? 'read' : 'reads';
+      freshness = `Data: partial · ${failedCount} ${noun} failed`;
+    }
+    this.querySelector('#freshness-label')!.textContent = freshness;
+    this.renderMachineSummary();
+    this.renderDriveViews();
+    this.polling = false;
+  }
+
+  private renderMachineSummary(): void {
+    this.renderProfileSummary();
+    this.renderTelemetrySummary();
+    this.renderEventTimeline();
+    this.renderDriveViews();
+  }
+
+  private renderProfileSummary(): void {
+    const badge = this.querySelector<HTMLElement>('#profile-badge');
+    if (badge) badge.textContent = this.profile.profile === 'machine.cia402.v1' ? 'CiA 402 profile' : 'Profile incomplete';
+    const explanation = this.querySelector<HTMLElement>('#profile-explanation');
+    if (explanation) explanation.textContent = this.profile.explanation;
+    const count = this.querySelector<HTMLElement>('#drive-count');
+    if (count) count.textContent = String(this.machineDescriptor?.axes.length ?? this.profile.driveSnapshots.length);
+    const summary = this.querySelector<HTMLElement>('#drive-summary');
+    if (summary) summary.textContent = this.profile.driveSnapshots.length > 0
+      ? `${this.driveData.size} current · ${this.profile.driveSnapshots.length} discovered`
+      : 'No schema-backed drive snapshots';
+  }
+
+  private renderTelemetrySummary(): void {
+    const message = this.querySelector<HTMLElement>('#overview-message');
+    const machineName = this.querySelector<HTMLElement>('#machine-display-name');
+    if (machineName && this.machineDescriptor) machineName.textContent = this.machineDescriptor.displayName;
+    const health = this.querySelector<HTMLElement>('#machine-health');
+    const healthCopy = this.querySelector<HTMLElement>('#machine-health-copy');
+    this.renderMasterWidget();
+    if (!this.machineSnapshot) {
+      this.renderUnavailableTelemetry(health, healthCopy, message);
+      return;
+    }
+    const state = this.machineSnapshot;
+    const snapshotAgeMs = this.machineSnapshotReceivedAt === undefined ? Infinity : Date.now() - this.machineSnapshotReceivedAt;
+    const degraded = !state.linkUp || state.actualWkc !== state.expectedWkc || state.staleCount > 0 ||
+      state.faultCount > 0 || snapshotAgeMs > 3000;
+    if (health) health.textContent = degraded ? 'Degraded telemetry' : 'Telemetry nominal';
+    if (healthCopy) healthCopy.textContent = this.formatMachineSnapshot(state, snapshotAgeMs);
+    if (message) message.textContent = `${this.machineDescriptor?.displayName ?? 'Machine'} · generation ${state.stateGeneration.toString()}. Telemetry summary only; it does not assert safety or motion readiness.`;
+  }
+
+  private renderMasterWidget(): void {
+    const widget = this.querySelector<HTMLElement & { model: { snapshot: MachineSnapshotView; ageMs: number } | undefined }>('#machine-state-widget');
+    if (!widget) return;
+    widget.model = this.machineSnapshot
+      ? { snapshot: this.machineSnapshot, ageMs: Math.max(0, Date.now() - (this.machineSnapshotReceivedAt ?? Date.now())) }
+      : undefined;
+  }
+
+  private renderUnavailableTelemetry(
+    health: HTMLElement | null,
+    healthCopy: HTMLElement | null,
+    message: HTMLElement | null,
+  ): void {
+    if (health) health.textContent = 'Unknown';
+    if (healthCopy) healthCopy.textContent = 'No coherent machine snapshot received.';
+    if (message) message.textContent = this.profile.explanation;
+  }
+
+  private formatMachineSnapshot(state: MachineSnapshotView, ageMs: number): string {
+    const source = state.simulated ? 'Simulated' : 'Live';
+    const freshness = Number.isFinite(ageMs) ? `${Math.max(0, Math.round(ageMs))} ms old` : 'stale';
+    return `${source} · ${state.enabledCount}/${state.axisCount} enabled · ${state.faultCount} faults · ${state.warningCount} warnings · ${state.staleCount} stale · WKC ${state.actualWkc}/${state.expectedWkc} · ${freshness}`;
+  }
+
+  private renderDriveViews(): void {
+    const axesByStableId = new Map((this.machineDescriptor?.axes ?? []).map((axis) => [axis.stableId, axis]));
+    renderDriveViews(this, this.profile.driveSnapshots, this.driveData, (entry, snapshot, ageMs) => {
+      this.openView('drives');
+      openDriveDetail(this, entry, snapshot, ageMs, () => undefined,
+        axesByStableId.get(entry.metadata?.['resource.stable_id'] ?? ''));
+    }, axesByStableId);
+  }
+
+  private openView(view: ViewId): void {
+    this.activeView = view;
+    this.querySelectorAll<HTMLElement>('.app-nav-item').forEach((button) => button.classList.toggle('active', button.dataset.view === view));
+    this.renderPage();
+  }
+
+  private renderPage(): void {
+    const nav = views.find((candidate) => candidate.id === this.activeView)!;
+    this.querySelector('#view-title')!.textContent = nav.label;
+    this.querySelector('#view-kicker')!.textContent = this.activeView === 'overview' ? 'Machine overview' : 'Machine console';
+    const known: Partial<Record<ViewId, string>> = {
+      overview: 'overview-page', drives: 'drives-page', motion: 'motion-page', trends: 'trends-page',
+      alarms: 'alarms-page', explore: 'explore-page',
+    };
+    const pageId = known[this.activeView];
+    this.querySelectorAll<HTMLElement>('.machine-page').forEach((page) => { page.hidden = page.id !== pageId; });
+    if (!pageId) {
+      const placeholder = this.querySelector<HTMLElement>('#placeholder-page')!;
+      placeholder.hidden = false;
+      this.querySelector('#placeholder-title')!.textContent = `${nav.label} service not advertised`;
+      this.querySelector('#placeholder-copy')!.textContent = this.activeView === 'settings'
+        ? 'Identity, roles, connection profiles, retention, and export policy must be provided by the authenticated deployment.'
+        : `${nav.label} requires typed server-side event, diagnostic, capture, configuration, or recipe services. Generic registry names are not treated as an authoritative contract.`;
+    } else {
+      const placeholder = this.querySelector<HTMLElement>('#placeholder-page');
+      if (placeholder) placeholder.hidden = true;
+    }
+    if (pageId === 'explore-page') this.renderCatalog([...this.params, ...this.signals]);
+  }
+
   private renderCatalog(entries: CatalogEntry[]): void {
-    const catalog = this.querySelector('tether-catalog') as HTMLElement & {
-      items: CatalogEntry[];
-      selectedIds: bigint[];
-    };
-    catalog.items = entries;
-    this.querySelector('#catalog-count')!.textContent = String(entries.length);
+    const catalog = this.querySelector<HTMLElement & { items: CatalogEntry[] }>('#catalog');
+    if (catalog) catalog.items = entries;
+    const count = this.querySelector<HTMLElement>('#catalog-count');
+    if (count) count.textContent = String(entries.length);
   }
 
-  /** The `<tether-jog-panel>` element (typed for its public interface). */
-  private jogPanel():
-    | (HTMLElement & {
-        model: {
-          client: TetherIOClient;
-          functions: FunctionEntry[];
-          signals: CatalogEntry[];
-        };
-        setOnline: (online: boolean) => void;
-      })
-    | null {
-    return this.querySelector('#jog-panel');
+  private switchCatalogTab(tab: CatalogTab): void {
+    this.querySelectorAll<HTMLButtonElement>('.tab').forEach((button) => button.classList.toggle('active', button.dataset.tab === tab));
+    if (tab === 'functions') {
+      const list = this.querySelector<HTMLElement & { items: FunctionEntry[] }>('#functions');
+      if (list) list.items = this.functions;
+      return;
+    }
+    let entries: CatalogEntry[];
+    if (tab === 'all') entries = [...this.params, ...this.signals];
+    else if (tab === 'signals') entries = this.signals;
+    else entries = this.params;
+    this.renderCatalog(entries);
   }
 
-  /**
-   * Render the editable parameter panel below the value card.
-   */
-  private renderParamPanel(): void {
-    const panel = this.querySelector('tether-param-panel') as HTMLElement & {
-      model: { params: CatalogEntry[]; client: TetherIOClient };
-    };
-    panel.model = { params: this.params, client: this.client };
-  }
-
-  /**
-   * Handle catalog selection changes: automatically (re)start the stream
-   * with the currently selected signals.  If no signals are selected, any
-   * active stream is stopped.
-   */
   private async onSelectionChange(): Promise<void> {
-    const catalog = this.querySelector('tether-catalog') as HTMLElement & {
-      selectedIds: bigint[];
-    };
-    const selectedIds = catalog.selectedIds;
-
-    // Filter to just signal IDs — parameters cannot be streamed.
-    const signalIds = new Set(this.signals.map((s) => s.id));
-    const selectedSignalIds = selectedIds.filter((id) => signalIds.has(id));
-
-    // Stop any active stream first.
+    const catalog = this.querySelector<HTMLElement & { selectedIds: bigint[] }>('#catalog');
+    const signalIds = new Set(this.signals.map((signal) => signal.id));
+    const selected = (catalog?.selectedIds ?? []).filter((id) => signalIds.has(id));
     if (this.streamActive) {
       await this.client.stopStream();
       this.streamActive = false;
     }
-
-    if (selectedSignalIds.length === 0) {
-      // Nothing to stream — clear the scope.
-      const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
-      if (scope) scope.setChannels([]);
+    if (!selected.length) {
+      this.querySelectorAll<ScopeElement>('tether-webgpu-scope').forEach((scope) => scope.setChannels([]));
       return;
     }
-
-    // Configure + start a new stream over the selected signals.
-    // 1 kHz (1 ms interval), chunks of 20 rows for smooth throughput.
-    await this.client.configureStream(selectedSignalIds, 1, 20);
-    this.streamLayout = this.client.currentStreamLayout;
-    const scope = this.querySelector<TetherScope>('tether-webgpu-scope');
-    if (scope) {
-      const allEntries = [...this.signals, ...this.params];
-      const channels = this.streamLayout.map((entry, i) => {
-        const catalogEntry = allEntries.find((e) => e.id === entry.id);
-        const name = catalogEntry?.name ?? `ch${i}`;
-        const color = STREAM_COLORS[i % STREAM_COLORS.length] ?? ([0.5, 0.5, 0.5] as const);
-        return { name, color };
-      });
-      scope.setChannels(channels);
+    await this.client.configureStream(selected, 10, 20);
+    this.streamLayout = this.client.currentStreamLayout.map(({ id }) => ({ id }));
+    this.querySelectorAll<ScopeElement>('tether-webgpu-scope').forEach((scope) => {
+      scope.setChannels(this.streamLayout.map(({ id }, index) => ({
+        name: this.signals.find((signal) => signal.id === id)?.name ?? `ch${index}`,
+        color: colors[index % colors.length] ?? [0.5, 0.5, 0.5],
+      })));
       scope.clear();
-    }
+    });
     await this.client.startStream();
     this.streamActive = true;
   }
 
-  // ---- Theme ---------------------------------------------------------------
+  private onStream(row: StreamRow): void {
+    const values = row.values.map((bytes) => {
+      if (bytes.length === 8) return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat64(0, true);
+      if (bytes.length === 4) return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat32(0, true);
+      return bytes.length ? bytes[0]! : 0;
+    });
+    this.querySelectorAll<ScopeElement>('tether-webgpu-scope').forEach((scope) => scope.push(row.timestampUs, values));
+  }
 
-  /**
-   * Toggle between light and dark themes.
-   *
-   * Persists the choice to `localStorage` and updates the toggle button icon.
-   * The WebGPU oscilloscope reads CSS variables on its next frame, so no
-   * explicit re-render is needed.
-   */
+  private toggleScopePause(): void {
+    const scope = this.querySelector<ScopeElement>('#scope');
+    if (!scope) return;
+    const paused = scope.togglePause();
+    this.querySelector('#pause-btn')!.textContent = paused ? 'Resume' : 'Pause';
+    const live = this.querySelector<HTMLElement>('#live-dot')!;
+    live.textContent = paused ? 'Ⅱ PAUSED' : '● LIVE';
+    live.classList.toggle('paused', paused);
+    this.querySelector<HTMLButtonElement>('#reset-zoom-btn')!.hidden = !paused;
+  }
+
   private toggleTheme(): void {
-    const current = document.documentElement.dataset.theme ?? 'light';
-    const next = current === 'dark' ? 'light' : 'dark';
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
     localStorage.setItem('tether-theme', next);
-    const btn = this.querySelector<HTMLButtonElement>('#theme-toggle');
-    if (btn) btn.textContent = next === 'dark' ? '\u2600\ufe0f' : '\u{1F319}';
   }
 
-  // ---- Status display ---------------------------------------------------
-
-  /**
-   * Update the connection status text and styling in both the top bar
-   * and the metrics panel.
-   */
   private setStatus(text: string, online: boolean): void {
-    this.querySelector('#status')!.textContent = text;
-    this.querySelector('#metric-connection')!.textContent = text;
-    this.querySelector('#status')!.classList.toggle('online', online);
+    const status = this.querySelector<HTMLElement>('#status');
+    if (status) status.textContent = text;
+    status?.classList.toggle('online', online);
+    const age = this.querySelector<HTMLElement>('#freshness-label');
+    if (!online && age && !age.textContent?.includes('invalidated')) age.textContent = 'Data: stale / offline';
   }
 
-  // ---- Toast notifications ---------------------------------------------
-
-  /**
-   * Show a transient toast notification in the bottom-right corner.
-   *
-   * @param message  Text to display.
-   * @param kind     `'error'` (red) or `'info'` (neutral).  Errors stay
-   *                 visible longer than info toasts.
-   */
   private showToast(message: string, kind: 'error' | 'info' = 'info'): void {
     const host = this.querySelector<HTMLElement>('#toast-host');
     if (!host) return;
     const toast = document.createElement('div');
     toast.className = `toast toast-${kind}`;
     toast.textContent = message;
-    host.appendChild(toast);
-    // Animate in on the next frame.
+    host.append(toast);
     requestAnimationFrame(() => toast.classList.add('toast-visible'));
-    const ttl = kind === 'error' ? 6000 : 3000;
-    window.setTimeout(() => {
-      toast.classList.remove('toast-visible');
-      window.setTimeout(() => toast.remove(), 300);
-    }, ttl);
+    window.setTimeout(() => { toast.classList.remove('toast-visible'); window.setTimeout(() => toast.remove(), 300); }, kind === 'error' ? 6000 : 3000);
   }
 }
 

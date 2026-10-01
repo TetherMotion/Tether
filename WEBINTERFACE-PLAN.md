@@ -1,5 +1,49 @@
 # Tether Web Interface Plan
 
+## Implementation Status
+
+This document remains the target roadmap; it is **not complete**. The current
+workspace contains an initial, read-only implementation slice:
+
+- The browser negotiates V6 schemas, verifies BLAKE3 descriptor digests,
+  decodes schema-directed values, retains catalog metadata, reads snapshots,
+  and invokes correlated `InvokeEx` functions. Field restrictions are checked
+  for decoded struct values. The client does not yet persist schema manifests,
+  fully validate every restriction/encoding combination, or have verified
+  cross-language digest fixtures against a live C++ server.
+- A machine-console shell provides Overview, Drives, a drive detail drawer,
+  Motion-unavailable messaging, Trends, a read-only event-history view, and
+  generic Explore. Active-alarm lifecycle/acknowledgement, diagnostics,
+  commissioning, recipes, authority, and configuration views remain
+  unavailable placeholders.
+- The read-only Overview and Drives views consume negotiated machine descriptor,
+  aggregate snapshot, and drive snapshot signals when advertised. Axis labels
+  and position-unit scaling come from the descriptor; the aggregate view is
+  explicitly telemetry health, not machine or safety readiness.
+- C++ provides the packed `DriveSnapshotV1`, tagged `MachineDescriptorV1` and
+  `MachineSnapshotV1` schema graphs, and a deterministic four-axis simulator
+  that installs those roots and registers read-only signals. It also provides
+  a bounded cursor-paginated `EventJournal`, `EventRecordV1`/`EventPageV1`, and
+  a typed read-only event function. V6 client/session integration tests
+  validate snapshot reads and event-page returns. The Drogon dashboard example
+  wires the simulator and binds to loopback. This remains a demo fixture, not a
+  native machine adapter or production event/alarm service; capture and
+  configuration schemas are still absent.
+- C++ also provides a standalone fail-closed command/authority gate with unit
+  tests. The gate is not wired to authenticated `Session` identities, durable
+  audit storage, a DS402 dispatcher, or the WebSocket controller.
+- The Drogon dashboard example now installs and passes the machine-profile
+  catalog to V6 sessions and publishes the four-axis simulator, so the browser
+  can discover it end to end. The controller still has no authentication
+  boundary; the example binds to loopback only and must not be exposed to an
+  untrusted network or used for machine control.
+
+The browser must remain read-only until the server has authenticated identity,
+role enforcement, authority leases, live interlock/state-generation
+preflight, durable audit, bounded native dispatch, disconnect/expiry stop
+semantics, and simulation/HIL/security review. A browser control surface is
+not a functional-safety feature and must not imply or replace E-stop or STO.
+
 ## Purpose
 
 Turn the current Tether IO dashboard into a useful browser-based operator,

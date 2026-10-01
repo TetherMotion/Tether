@@ -126,7 +126,8 @@ struct TetherIOWebSocketController::Client {
     std::thread worker;
     tether::io::LogFn logFn;
 
-    Client(drogon::WebSocketConnectionPtr connection, Registry& registry, tether::io::LogFn logFn)
+        Client(drogon::WebSocketConnectionPtr connection, Registry& registry,
+            tether::io::LogFn logFn, SchemaCatalog* schemaCatalog)
         : transport(std::make_unique<WebSocketTransport>(std::move(connection)))
         , logFn(logFn) {
         transportPtr = transport.get();
@@ -138,8 +139,8 @@ struct TetherIOWebSocketController::Client {
                         std::chrono::steady_clock::now().time_since_epoch()).count());
             },
             logFn, nullptr, nullptr, nullptr, nullptr,
-            nullptr, nullptr,
-            Framing::None);
+            nullptr,
+            Framing::None, nullptr, schemaCatalog);
         worker = std::thread([this] { session->run(); });
     }
 
@@ -150,12 +151,13 @@ struct TetherIOWebSocketController::Client {
     }
 };
 
-TetherIOWebSocketController::TetherIOWebSocketController(Registry& registry, tether::io::LogFn logFn)
-    : registry_(registry), logFn_(logFn) {}
+TetherIOWebSocketController::TetherIOWebSocketController(
+    Registry& registry, tether::io::LogFn logFn, SchemaCatalog* schemaCatalog)
+    : registry_(registry), logFn_(logFn), schemaCatalog_(schemaCatalog) {}
 
 void TetherIOWebSocketController::handleNewConnection(
     const drogon::HttpRequestPtr&, const drogon::WebSocketConnectionPtr& connection) {
-    auto client = std::make_shared<Client>(connection, registry_, logFn_);
+    auto client = std::make_shared<Client>(connection, registry_, logFn_, schemaCatalog_);
     std::lock_guard<std::mutex> lock(mutex_);
     clients_.emplace(connection.get(), std::move(client));
     if (logFn_) logFn_("TetherIO", "WebSocket client connected (total=%zu)",

@@ -3,6 +3,7 @@
 #include <drogon/WebSocketController.h>
 #include <drogon/WebSocketConnection.h>
 #include <tether/io/Registry.hpp>
+#include <tether/io/SchemaCatalog.hpp>
 #include <tether/io/Session.hpp>
 
 #include <memory>
@@ -16,7 +17,9 @@ class TetherIOWebSocketController
 public:
     static void initPathRouting() {}
 
-    explicit TetherIOWebSocketController(Registry& registry, tether::io::LogFn logFn = nullptr);
+    explicit TetherIOWebSocketController(Registry& registry,
+                                         tether::io::LogFn logFn = nullptr,
+                                         SchemaCatalog* schemaCatalog = nullptr);
 
     void handleNewMessage(const drogon::WebSocketConnectionPtr& connection,
                           std::string&& message,
@@ -29,6 +32,7 @@ private:
     struct Client;
     Registry& registry_;
     tether::io::LogFn logFn_;
+    SchemaCatalog* schemaCatalog_;
     std::mutex mutex_;
     std::unordered_map<const drogon::WebSocketConnection*, std::shared_ptr<Client>> clients_;
 };

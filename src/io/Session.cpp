@@ -26,6 +26,28 @@ bool validateCatalogValue(const SchemaCatalog* catalog, const EntryView& entry,
         reader.remaining() == 0;
 }
 
+void validateFunctionReturn(const SchemaCatalog* catalog, const FunctionReturn& signature,
+                            FunctionCallResult& result) {
+    if (!result.success || !signature.present || signature.schema.key == SchemaKey{}) return;
+    const auto* graph = catalog ? catalog->graph() : nullptr;
+    const auto* node = graph ? graph->find(signature.schema.key) : nullptr;
+    const auto slot = catalog ? catalog->slotFor(signature.schema) : std::nullopt;
+    if (!node || !slot || computeSchemaDigest(*node) != signature.schema.digest) {
+        result.success = false;
+        result.error = ErrorCode::FunctionInvocationError;
+        result.errorMessage = "Function return schema is not installed";
+        result.returnValue.clear();
+        return;
+    }
+    BufReader reader(result.returnValue.data(), result.returnValue.size());
+    if (!validateSchemaValue(*graph, signature.schema.key, reader) || reader.remaining() != 0) {
+        result.success = false;
+        result.error = ErrorCode::FunctionInvocationError;
+        result.errorMessage = "Function return value does not match its schema";
+        result.returnValue.clear();
+    }
+}
+
 } // namespace
 
 // --------------------------------------------------------------------------
@@ -1220,6 +1242,7 @@ void Session::handleCallFunctionReq(const uint8_t* body, size_t len) {
         return;
     }
     FunctionCallResult result = invokeFunctionChecked(function, argumentCount, r);
+    validateFunctionReturn(schemaCatalog_, function.returnValue(), result);
     sendFunctionCallResponse(functionId, function.returnValue(), result);
 }
 
@@ -1247,6 +1270,7 @@ void Session::handleInvokeExReq(const uint8_t* body, size_t len) {
         return;
     }
     FunctionCallResult result = invokeFunctionChecked(function, argumentCount, r);
+    validateFunctionReturn(schemaCatalog_, function.returnValue(), result);
     sendInvokeExResponse(requestId, function.returnValue(), result);
 }
 
