@@ -1,5 +1,6 @@
 #pragma once
 
+#include "tether/io/MachineControl.hpp"
 #include "tether/io/Protocol.hpp"
 #include "tether/io/Schema.hpp"
 
@@ -299,8 +300,24 @@ struct FunctionCallResult {
     std::vector<uint8_t> returnValue;
 };
 
+/// Invocation context supplied by the serving Session. `identity` is the
+/// transport-authenticated caller (unauthenticated observer when the
+/// transport did not prove one); `requestId`/`deadlineUs` are the InvokeEx
+/// correlation fields (zero for CallFunctionReq).
+struct FunctionInvokeContext {
+    machine::SessionIdentity identity;
+    uint64_t requestId = 0;
+    uint64_t deadlineUs = 0;
+};
+
 using FunctionCallback = std::function<FunctionCallResult(
     const std::vector<FunctionArgument>& arguments)>;
+
+/// Callback variant that additionally receives the caller's session context.
+/// Preferred over `callback` whenever set.
+using ContextualFunctionCallback = std::function<FunctionCallResult(
+    const std::vector<FunctionArgument>& arguments,
+    const FunctionInvokeContext& context)>;
 
 /// A fully annotated callable function in the IO registry.
 struct FunctionEntry {
@@ -312,6 +329,10 @@ struct FunctionEntry {
     FunctionReturn returnValue;
     std::map<std::string, std::string> metadata;
     FunctionCallback callback;
+    /// When set, invoked with the caller's session context instead of
+    /// `callback`. Contextual functions receive the transport-authenticated
+    /// identity and must enforce their own role/authority checks.
+    ContextualFunctionCallback contextualCallback;
 
     /// Functions use positional calls. Once an optional argument appears,
     /// every subsequent argument must also be optional. Optional arguments
@@ -333,7 +354,7 @@ struct FunctionEntry {
         if (returnValue.present && returnValue.valueDescriptor &&
             (returnValue.valueDescriptor->type != returnValue.type ||
              !returnValue.valueDescriptor->valid())) return false;
-        return !name.empty() && static_cast<bool>(callback);
+        return !name.empty() && (static_cast<bool>(callback) || static_cast<bool>(contextualCallback));
     }
 
     size_t requiredParameterCount() const {
@@ -370,7 +391,10 @@ public:
         }
     }
 
-    FunctionCallResult invoke(const std::vector<FunctionArgument>& arguments) const {
+    FunctionCallResult invoke(const std::vector<FunctionArgument>& arguments,
+                              const FunctionInvokeContext& context = {}) const {
+        if (function_->contextualCallback)
+            return function_->contextualCallback(arguments, context);
         return function_->callback(arguments);
     }
 
@@ -404,7 +428,8 @@ struct FunctionDescriptor {
 /// error representation for result.success == false.
 inline FunctionCallResult invokeFunctionChecked(const FunctionView& function,
                                                 uint32_t argumentCount,
-                                                BufReader& reader) {
+                                                BufReader& reader,
+                                                const FunctionInvokeContext* context = nullptr) {
     FunctionCallResult result;
     const auto fail = [&result](const char* message) {
         result.error = ErrorCode::FunctionInvocationError;
@@ -481,7 +506,7 @@ inline FunctionCallResult invokeFunctionChecked(const FunctionView& function,
         }
     }
 
-    result = function.invoke(supplied);
+    result = function.invoke(supplied, context ? *context : FunctionInvokeContext{});
     if (!result.success) return result;
 
     const auto& returnValue = function.returnValue();

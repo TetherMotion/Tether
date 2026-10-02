@@ -39,7 +39,10 @@
  */
 
 #include "TetherIOWebSocketController.hpp"
+#include <tether/io/EventJournal.hpp>
+#include <tether/io/MachineAuth.hpp>
 #include <tether/io/SimulatedCiA402Fleet.hpp>
+#include <tether/io/SimulatedMachineService.hpp>
 
 #include <drogon/drogon.h>
 
@@ -49,7 +52,9 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <thread>
@@ -105,6 +110,8 @@ void verboseLog(const char* tag, const char* fmt, ...) {
 int main(int argc, char** argv) {
     uint16_t port = 8080;
     std::string webRoot = WEB_DASHBOARD_DIST_DIR;
+    std::string authFile;
+    std::string auditLogPath;
 
     // Parse simple command-line flags
     for (int i = 1; i < argc; ++i) {
@@ -113,6 +120,10 @@ int main(int argc, char** argv) {
             port = static_cast<uint16_t>(std::stoi(argv[++i]));
         } else if ((arg == "--web-root" || arg == "-w") && i + 1 < argc) {
             webRoot = argv[++i];
+        } else if (arg == "--auth-file" && i + 1 < argc) {
+            authFile = argv[++i];
+        } else if (arg == "--audit-log" && i + 1 < argc) {
+            auditLogPath = argv[++i];
         } else if (arg == "--verbose") {
             g_verbose = true;
         } else if (arg == "--help" || arg == "-h") {
@@ -123,6 +134,11 @@ int main(int argc, char** argv) {
                 "  --port <N>, -p <N>       HTTP/WebSocket port (default 8080)\n"
                 "  --web-root <PATH>, -w <PATH>  Dashboard static file directory\n"
                 "                             (default: built-in dist)\n"
+                "  --auth-file <PATH>       Bearer token file (token<TAB>actor<TAB>role\n"
+                "                             per line); enables Authorization: Bearer\n"
+                "                             authentication on the WebSocket upgrade\n"
+                "  --audit-log <PATH>       Append the machine event/audit journal to\n"
+                "                             this TSV file (durable, one line per record)\n"
                 "  --verbose                Enable verbose protocol logging\n"
                 "  --help, -h               Show this help\n\n"
                 "Open http://127.0.0.1:<port>/ in a browser to view the dashboard.\n";
@@ -242,19 +258,58 @@ int main(int argc, char** argv) {
     };
     registry.addFunction(std::move(resetFn));
 
-    // Publish a deterministic, read-only machine profile for the console.
-    // This is a simulator fixture only; it is not connected to EtherCAT and
-    // does not expose machine-control functions.
+    // Publish a deterministic simulated machine profile for the console.
+    // The stack adds the typed authority/command/operation/alarm surface on
+    // top of the read-only fleet. Commands are validated by the fail-closed
+    // MachineCommandGate; the dispatcher only mutates simulator state.
+    // This is a simulator fixture only; it is not connected to EtherCAT.
     auto machineSchemaGraph = cia402::machineProfileSchemaGraph();
     SchemaCatalog machineSchemaCatalog;
     if (!cia402::SimulatedCiA402Fleet::installSchemas(machineSchemaGraph, machineSchemaCatalog)) {
         std::cerr << "Failed to install simulated machine profile schemas" << std::endl;
         return 1;
     }
-    cia402::SimulatedCiA402Fleet simulatedFleet;
-    if (!simulatedFleet.registerSignals(registry, machineSchemaCatalog)) {
+    machine::SimulatedMachineStack machineStack;
+    if (!machineStack.fleet.registerSignals(registry, machineSchemaCatalog)) {
         std::cerr << "Failed to register simulated machine profile signals" << std::endl;
         return 1;
+    }
+    if (!machineStack.install(registry, machineSchemaCatalog)) {
+        std::cerr << "Failed to register simulated machine service" << std::endl;
+        return 1;
+    }
+
+    // External alarm notification hook (plan item 90): a deployment would
+    // implement IAlarmNotifier against a pager/webhook; this example logs to
+    // stderr. Every emitted notification is also journaled as
+    // `alarm.notify.*` — durable audit for escalation/ack delivery attempts.
+    static struct StderrAlarmNotifier final : machine::IAlarmNotifier {
+        void notify(const machine::AlarmRecordV1& alarm,
+                    machine::AlarmNotification kind) override {
+            static const char* kinds[] = {"raised", "escalated",
+                                          "acknowledged", "cleared"};
+            std::cerr << "[alarm " << kinds[static_cast<uint8_t>(kind)] << "] "
+                      << alarm.sourceId << " code=" << alarm.code << " "
+                      << alarm.description << std::endl;
+        }
+    } alarmNotifier;
+    machineStack.alarms.setNotifier(&alarmNotifier, {},
+                                    &machineStack.fleet.eventJournal());
+    // Seed the demo recipe store (created by install) with named parameter
+    // sets over the wave params above. Applying stages a config transaction;
+    // validate + commit stay on the Commissioning page.
+    if (machineStack.recipes) {
+        const auto f64 = [](double v) {
+            std::vector<uint8_t> bytes(8);
+            std::memcpy(bytes.data(), &v, 8);
+            return bytes;
+        };
+        machineStack.recipes->add("default-wave", "1 Hz sine, unit amplitude",
+                                  {{1, f64(1.0)}, {2, f64(1.0)}, {3, f64(10.0)},
+                                   {4, f64(0.0)}, {5, f64(0.0)}});
+        machineStack.recipes->add("slow-low", "0.1 Hz sine, half amplitude",
+                                  {{1, f64(0.5)}, {2, f64(0.1)}, {4, f64(0.0)},
+                                   {5, f64(0.0)}});
     }
 
     // -----------------------------------------------------------------------
@@ -264,13 +319,45 @@ int main(int argc, char** argv) {
     // Register the binary WebSocket controller for the Tether IO protocol
     drogon::app().registerWebSocketController(
         "/tether-io", "tether::io::example::TetherIOWebSocketController", {});
+    // Development build: the `role` query parameter on the WebSocket upgrade
+    // selects a session role (observer default, e.g. ?role=operator). Real
+    // deployments bind identity from the authenticated transport instead.
+    // Optional production auth + durable audit.
+    std::optional<machine::StaticTokenAuthProvider> authProvider;
+    if (!authFile.empty()) {
+        authProvider = machine::StaticTokenAuthProvider::fromFile(authFile);
+        std::cerr << "Bearer token authentication enabled (" << authFile << ")" << std::endl;
+    }
+    std::shared_ptr<FileEventJournalSink> auditSink;
+    if (!auditLogPath.empty()) {
+        auditSink = std::make_shared<FileEventJournalSink>(auditLogPath);
+        auto sink = auditSink;
+        machineStack.fleet.eventJournal().setListener(
+            [sink](const EventRecordV1& record) { sink->write(record); });
+        std::cerr << "Audit journal appending to " << auditLogPath << std::endl;
+    }
     drogon::DrClassMap::setSingleInstance(
         std::make_shared<TetherIOWebSocketController>(registry,
-            g_verbose ? verboseLog : nullptr, &machineSchemaCatalog));
+            g_verbose ? verboseLog : nullptr, &machineSchemaCatalog,
+            &machineStack.service, "role", authProvider ? &*authProvider : nullptr));
 
     // Serve the pre-built dashboard from the web root directory
     drogon::app().setDocumentRoot(webRoot);
     drogon::app().setHomePage("index.html");
+
+    // Cache-safe upgrades: vite emits hashed asset filenames that can be
+    // cached immutably, while index.html and version.json must always be
+    // revalidated so a new deploy takes effect immediately.
+    drogon::app().registerPostHandlingAdvice(
+        [](const drogon::HttpRequestPtr& req, const drogon::HttpResponsePtr& resp) {
+            const auto path = req->path();
+            if (path.starts_with("/assets/"))
+                resp->addHeader("Cache-Control",
+                                "public, max-age=31536000, immutable");
+            else if (path.empty() || path == "/" || path == "/index.html" ||
+                     path == "/version.json")
+                resp->addHeader("Cache-Control", "no-cache");
+        });
 
     // SPA fallback: serve index.html for any unmatched GET route so that
     // the dashboard works even if the user navigates to /signals etc.
@@ -291,7 +378,8 @@ int main(int argc, char** argv) {
         "║  WebSocket:  ws://127.0.0.1:" << port << "/tether-io               ║\n"
         "║  Static:     " << webRoot << "\n"
         "╠══════════════════════════════════════════════════════════╣\n"
-        "║  Profile:    simulated 4-axis CiA 402 fleet (read-only)  ║\n"
+        "║  Profile:    simulated 4-axis CiA 402 fleet             ║\n"
+        "║  Authority:  ws://...?role=operator (dev only)           ║\n"
         "║  Signals:    machine + drives + sine/cosine waves        ║\n"
         "║  Params:     amplitude, frequency, sample_rate,          ║\n"
         "║              phase_offset, dc_offset                     ║\n"

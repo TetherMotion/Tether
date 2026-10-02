@@ -180,6 +180,54 @@ public:
         return released;
     }
 
+    /// Force-take a scope lease from its current owner. Restricted to
+    /// ControlsEngineer and Administrator — an operator must wait for expiry
+    /// or a cooperative release. The evicted owner is recorded in the audit
+    /// event reason so takeovers are attributable.
+    AuthorityResult takeover(const std::string& scope, const SessionIdentity& identity,
+                             Duration requested, TimePoint now = SteadyClock::now()) {
+        AuthorityResult result;
+        AuthorityEvent event{"takeover", scope, identity.actor, identity.sessionId, {}, 0, now};
+        std::string previousOwner;
+        {
+            std::lock_guard lock(mutex_);
+            expireLocked(scope, now);
+            if (scope.empty()) result.blocker = "A machine or motion-group scope is required";
+            else if (!identity.authenticated || identity.sessionId.empty())
+                result.blocker = "An authenticated session is required";
+            else if (identity.role < Role::ControlsEngineer)
+                result.blocker = "Takeover requires a controls-engineer or administrator role";
+            else if (requested <= Duration::zero() || requested > maximumLease_)
+                result.blocker = "Requested lease duration is outside server policy";
+            else {
+                const auto found = leases_.find(scope);
+                if (found != leases_.end()) previousOwner = found->second.ownerActor;
+                auto& lease = leases_[scope];
+                lease.token = nextToken_++;
+                lease.scope = scope;
+                lease.ownerSession = identity.sessionId;
+                lease.ownerActor = identity.actor;
+                lease.ownerRole = identity.role;
+                lease.expiresAt = now + requested;
+                result.lease = lease;
+                event.token = lease.token;
+                if (!previousOwner.empty())
+                    event.reason = "Evicted previous owner: " + previousOwner;
+            }
+        }
+        if (result.lease && !record(event)) {
+            std::lock_guard lock(mutex_);
+            if (const auto found = leases_.find(scope);
+                found != leases_.end() && found->second.token == result.lease->token)
+                leases_.erase(found);
+            result.lease.reset();
+            result.blocker = "Authority audit service is unavailable; takeover was rejected";
+        } else if (!result.blocker.empty()) {
+            (void)record(event);
+        }
+        return result;
+    }
+
     std::optional<AuthorityLease> current(const std::string& scope,
                                           TimePoint now = SteadyClock::now()) {
         std::lock_guard lock(mutex_);
@@ -194,6 +242,40 @@ public:
         const auto lease = current(scope, now);
         return lease && identity.authenticated && eligibleRoles_.contains(identity.role) && lease->token == token &&
                lease->ownerSession == identity.sessionId;
+    }
+
+    /// Snapshot of every active lease, ordered by scope (for the
+    /// machine.authority snapshot signal).
+    std::vector<AuthorityLease> leases(TimePoint now = SteadyClock::now()) {
+        std::lock_guard lock(mutex_);
+        std::vector<AuthorityLease> out;
+        for (auto it = leases_.begin(); it != leases_.end();) {
+            if (it->second.expiresAt <= now) it = leases_.erase(it);
+            else { out.push_back(it->second); ++it; }
+        }
+        std::sort(out.begin(), out.end(),
+                  [](const AuthorityLease& a, const AuthorityLease& b) { return a.scope < b.scope; });
+        return out;
+    }
+
+    /// Force-release every lease owned by a session (disconnect/expiry stop
+    /// semantics). Returns the number released; each emits an audit event.
+    size_t releaseAll(const std::string& sessionId, TimePoint now = SteadyClock::now()) {
+        std::vector<AuthorityEvent> events;
+        size_t released = 0;
+        {
+            std::lock_guard lock(mutex_);
+            for (auto it = leases_.begin(); it != leases_.end();) {
+                if (it->second.ownerSession == sessionId) {
+                    events.push_back({"release", it->first, it->second.ownerActor, sessionId,
+                                      "Session ended; lease force-released", it->second.token, now});
+                    it = leases_.erase(it);
+                    ++released;
+                } else ++it;
+            }
+        }
+        for (const auto& event : events) (void)record(event);
+        return released;
     }
 
 private:

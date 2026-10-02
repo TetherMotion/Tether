@@ -30,6 +30,15 @@ export interface ScopeOverlayState {
   dragStartY: number;
   dragCurrentX: number;
   dragCurrentY: number;
+  /** Hover crosshair position in CSS pixels, or null when outside the plot. */
+  crosshairX: number | null;
+  crosshairY: number | null;
+  /** Readout lines for the hover crosshair (time + per-channel values). */
+  crosshairLines: string[];
+  /** Pinned measurement cursors: CSS-pixel X plus a short label (A/B). */
+  cursors: { x: number; label: string }[];
+  /** Delta-measurement lines shown when two cursors are pinned. */
+  measureLines: string[];
 }
 
 export function drawScopeOverlay(state: ScopeOverlayState): void {
@@ -109,7 +118,89 @@ export function drawScopeOverlay(state: ScopeOverlayState): void {
 
   drawLegend(context, state, plotX + plotWidth + 8, plotY + 4, plotWidth, textColor, mutedColor);
   drawDragSelection(context, state);
+  drawCursors(context, state, plotY, plotHeight, textColor, mutedColor);
+  drawCrosshair(context, state, plotX, plotY, plotWidth, plotHeight, textColor, mutedColor);
   context.restore();
+}
+
+function drawCrosshair(
+  context: CanvasRenderingContext2D,
+  state: ScopeOverlayState,
+  plotX: number,
+  plotY: number,
+  plotWidth: number,
+  plotHeight: number,
+  textColor: string,
+  mutedColor: string,
+): void {
+  if (state.crosshairX === null || state.crosshairY === null) return;
+  const x = state.crosshairX;
+  const y = state.crosshairY;
+  context.save();
+  context.strokeStyle = 'rgba(90, 112, 136, 0.6)';
+  context.setLineDash([4, 3]);
+  context.lineWidth = 1;
+  context.beginPath();
+  context.moveTo(x, plotY);
+  context.lineTo(x, plotY + plotHeight);
+  context.moveTo(plotX, y);
+  context.lineTo(plotX + plotWidth, y);
+  context.stroke();
+  context.restore();
+  if (state.crosshairLines.length)
+    drawReadoutBox(context, state.crosshairLines, x + 10, plotY + 6, textColor, mutedColor);
+}
+
+function drawCursors(
+  context: CanvasRenderingContext2D,
+  state: ScopeOverlayState,
+  plotY: number,
+  plotHeight: number,
+  textColor: string,
+  mutedColor: string,
+): void {
+  for (const cursor of state.cursors) {
+    context.strokeStyle = 'rgba(200, 90, 30, 0.85)';
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(cursor.x, plotY);
+    context.lineTo(cursor.x, plotY + plotHeight);
+    context.stroke();
+    context.font = 'bold 10px sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'top';
+    context.fillStyle = 'rgba(200, 90, 30, 0.95)';
+    context.fillText(cursor.label, cursor.x, plotY + 2);
+  }
+  if (state.cursors.length >= 2 && state.measureLines.length) {
+    const x = Math.max(state.cursors[0]!.x, state.cursors[1]!.x) + 10;
+    drawReadoutBox(context, state.measureLines, x, plotY + 6, textColor, mutedColor);
+  }
+}
+
+function drawReadoutBox(
+  context: CanvasRenderingContext2D,
+  lines: string[],
+  x: number,
+  y: number,
+  textColor: string,
+  mutedColor: string,
+): void {
+  context.font = '11px sans-serif';
+  context.textAlign = 'left';
+  context.textBaseline = 'top';
+  const padding = 6;
+  const lineHeight = 15;
+  const width = Math.max(...lines.map((line) => context.measureText(line).width)) + padding * 2;
+  const height = lines.length * lineHeight + padding * 2;
+  const maxX = context.canvas.width / context.getTransform().a - 4;
+  if (x + width > maxX) x = Math.max(4, maxX - width);
+  context.fillStyle = 'rgba(255, 255, 255, 0.9)';
+  context.strokeStyle = mutedColor;
+  context.fillRect(x, y, width, height);
+  context.strokeRect(x, y, width, height);
+  context.fillStyle = textColor;
+  lines.forEach((line, i) => context.fillText(line, x + padding, y + padding + i * lineHeight));
 }
 
 function drawLegend(

@@ -111,10 +111,10 @@ TEST_F(SimulatedCiA402ProfileIntegrationTest, NegotiatesAndReadsMachineSnapshots
     const auto readEvents = std::find_if(functions->begin(), functions->end(),
         [](const ClientFunctionEntry& function) { return function.name == "machine.events.read"; });
     ASSERT_NE(readEvents, functions->end());
-    const auto* eventPageNode = graph_.find(cia402::eventPageSchemaKey());
+    const auto* eventPageNode = graph_.find(cia402::schemaKey(cia402::MachineSchemaId::EventPage));
     ASSERT_NE(eventPageNode, nullptr);
     const auto expectedSlot = catalog_.slotFor(
-        SchemaRef{cia402::eventPageSchemaKey(), computeSchemaDigest(*eventPageNode)});
+        SchemaRef{cia402::schemaKey(cia402::MachineSchemaId::EventPage), computeSchemaDigest(*eventPageNode)});
     ASSERT_TRUE(expectedSlot.has_value());
     EXPECT_EQ(readEvents->returnSchemaSlot, *expectedSlot);
 

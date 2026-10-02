@@ -59,12 +59,12 @@ function writeManifest(writer: BinaryWriter, manifest: SchemaManifestEntryV6[]):
   }
 }
 
-export function makeClientHelloV6(): Uint8Array {
-  const writer = new BinaryWriter(1 + 2 + 4 + 24 + 4);
+export function makeClientHelloV6(cached: SchemaManifestEntryV6[] = []): Uint8Array {
+  const writer = new BinaryWriter(1 + 2 + 4 + 24 + 4 + cached.length * 52);
   writer.u8(SchemaMessage.clientHello).u8(SCHEMA_PROTOCOL_VERSION).u8(SCHEMA_PROTOCOL_VERSION);
   writer.u32(0);
   writer.u32(1 << 20).u32(1 << 16).u32(MAX_ITEMS).u32(1 << 20).u32(32).u32(1_000_000);
-  writeManifest(writer, []);
+  writeManifest(writer, cached);
   return writer.finish();
 }
 
@@ -212,26 +212,36 @@ export async function verifyAndBuildCatalog(
   hello: ServerHelloV6,
   definitions: { epoch: number; node: SchemaNodeV6 }[],
 ): Promise<SchemaCatalogV6> {
-  if (definitions.length !== hello.manifest.length) throw new Error('schema definition count mismatch');
   const nodesByKey = new Map<string, SchemaNodeV6>();
   const manifestByKey = new Map(hello.manifest.map((entry) => [keyString(entry.ref.key), entry]));
   if (manifestByKey.size !== hello.manifest.length) throw new Error('duplicate schema manifest key');
   if (hello.manifest.length > 1024) throw new Error('schema manifest exceeds negotiated definition limit');
+  // Digests of fetched nodes verified during the dependency walk.
+  const verifiedDigest = new Map<string, Uint8Array>();
   for (const { epoch, node } of definitions) {
     if (epoch !== hello.epoch) throw new Error('schema definition belongs to a stale epoch');
     const key = keyString(node.key);
+    if (node.key.every((byte) => byte === 0)) throw new Error('invalid schema identity');
     const entry = manifestByKey.get(key);
-    if (!entry || entry.revision !== node.revision) throw new Error('schema is absent from manifest or revision mismatched');
-    if (node.revision === 0 || node.key.every((byte) => byte === 0)) throw new Error('invalid schema identity');
     const digest = computeSchemaDigestV6(node);
-    if (!digest.every((value, index) => value === entry.ref.digest[index])) throw new Error(`schema digest mismatch for ${node.name || key}`);
+    if (entry) {
+      if (entry.revision !== node.revision) throw new Error('schema revision mismatches the manifest');
+      if (!digest.every((value, index) => value === entry.ref.digest[index])) {
+        throw new Error(`schema digest mismatch for ${node.name || key}`);
+      }
+    }
+    verifiedDigest.set(key, digest);
     if (nodesByKey.has(key)) throw new Error('duplicate schema definition');
     nodesByKey.set(key, node);
   }
+  for (const entry of hello.manifest) {
+    if (!nodesByKey.has(keyString(entry.ref.key))) throw new Error('manifest root schema is missing');
+  }
   const hasRef = (ref?: SchemaRefV6): boolean => {
     if (!ref) return true;
-    const entry = manifestByKey.get(keyString(ref.key));
-    return !!entry && entry.ref.digest.every((byte, index) => byte === ref.digest[index]);
+    const node = nodesByKey.get(keyString(ref.key));
+    const digest = verifiedDigest.get(keyString(ref.key));
+    return !!node && !!digest && digest.every((byte, index) => byte === ref.digest[index]);
   };
   for (const node of nodesByKey.values()) {
     if (![node.element, node.mapKey, node.mapValue, node.target].every(hasRef) ||

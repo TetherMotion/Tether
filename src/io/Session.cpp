@@ -13,6 +13,7 @@
 #include <cstring>
 #include <algorithm>
 #include <limits>
+#include <random>
 
 namespace tether { namespace io {
 
@@ -84,7 +85,21 @@ Session::Session(std::unique_ptr<ITransport> transport,
                                       : std::make_unique<DynamicReceiveBuffer>(
                                             DEFAULT_RECEIVE_BUFFER_CAPACITY,
                                             MAX_MESSAGE_SIZE))
-{}
+{
+    // Stable random session identifier used by authority leases, audit
+    // records, and disconnect cleanup.
+    std::random_device rd;
+    std::uniform_int_distribution<uint64_t> dist;
+    sessionId_ = "sess-" + [&] {
+        char buffer[17];
+        std::snprintf(buffer, sizeof(buffer), "%016llx",
+                      static_cast<unsigned long long>(dist(rd)));
+        return std::string(buffer);
+    }();
+    identity_.sessionId = sessionId_;
+    identity_.role = machine::Role::Observer;
+    identity_.authenticated = false;
+}
 
 Session::~Session() {
     if (catalogListenerHandle_ != 0) {
@@ -105,6 +120,17 @@ void Session::log(const char* fmt, ...) {
     va_end(ap);
     if (logFn_) logFn_("TetherIOSession", "%s", buf);
     publishLog(LogSeverity::Info, "TetherIOSession", buf);
+}
+
+void Session::setIdentity(machine::SessionIdentity identity) {
+    std::lock_guard lock(identityMutex_);
+    identity.sessionId = sessionId_;
+    identity_ = std::move(identity);
+}
+
+machine::SessionIdentity Session::identity() const {
+    std::lock_guard lock(identityMutex_);
+    return identity_;
 }
 
 // --------------------------------------------------------------------------
@@ -347,7 +373,9 @@ void Session::handleClientHello(const uint8_t* body, size_t len) {
     schemaHelloReceived_ = true;
     schemaCommitted_ = false;
 
-    if (txRawBuf_.size() < 256) txRawBuf_.resize(256);
+    const size_t needed = 1 + 1 + 4 + 24 + 4 + 4 +
+        response.schemas.size() * (16 + 32 + 4);
+    if (txRawBuf_.size() < needed) txRawBuf_.resize(needed);
     BufWriter writer(txRawBuf_.data(), txRawBuf_.size());
     writer.putU8(static_cast<uint8_t>(MessageType::ServerHello));
     encodeServerHelloV6(writer, response);
@@ -620,6 +648,10 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
 
     if (trigMode > 1) { sendError(ErrorCode::InvalidMessage, "Invalid trigger mode"); return; }
     if (chunk == 0) chunk = 1;
+    // Bound the chunk so a single StreamData frame and its backing buffer stay
+    // reasonable regardless of what the client asked for (plan item 24).
+    constexpr uint32_t MAX_STREAM_CHUNK = 4096;
+    if (chunk > MAX_STREAM_CHUNK) chunk = MAX_STREAM_CHUNK;
     if (intervalMs == 0) intervalMs = 1;
     constexpr uint32_t MAX_STREAM_ENTRIES = 65536;
     if (entryCount > MAX_STREAM_ENTRIES) {
@@ -1241,7 +1273,9 @@ void Session::handleCallFunctionReq(const uint8_t* body, size_t len) {
         sendError(ErrorCode::InvalidId, "Function not found");
         return;
     }
-    FunctionCallResult result = invokeFunctionChecked(function, argumentCount, r);
+    FunctionInvokeContext context;
+    context.identity = identity();
+    FunctionCallResult result = invokeFunctionChecked(function, argumentCount, r, &context);
     validateFunctionReturn(schemaCatalog_, function.returnValue(), result);
     sendFunctionCallResponse(functionId, function.returnValue(), result);
 }
@@ -1250,7 +1284,7 @@ void Session::handleInvokeExReq(const uint8_t* body, size_t len) {
     BufReader r(body, len);
     const uint64_t requestId = r.getU64();
     const uint64_t functionId = r.getU64();
-    r.getU64();  // deadline hint: enforced by the initiator
+    const uint64_t deadlineUs = r.getU64();  // deadline hint: enforced by the initiator
     const uint32_t argumentCount = r.getU32();
     const auto reject = [this, requestId](const char* message) {
         FunctionCallResult result;
@@ -1269,7 +1303,11 @@ void Session::handleInvokeExReq(const uint8_t* body, size_t len) {
         sendInvokeExResponse(requestId, FunctionReturn{}, result);
         return;
     }
-    FunctionCallResult result = invokeFunctionChecked(function, argumentCount, r);
+    FunctionInvokeContext context;
+    context.identity = identity();
+    context.requestId = requestId;
+    context.deadlineUs = deadlineUs;
+    FunctionCallResult result = invokeFunctionChecked(function, argumentCount, r, &context);
     validateFunctionReturn(schemaCatalog_, function.returnValue(), result);
     sendInvokeExResponse(requestId, function.returnValue(), result);
 }

@@ -13,14 +13,20 @@
 
 import {
   BinaryReader,
+  BinaryWriter,
   CatalogEntry,
+  DatalogStatus,
   FunctionCallArg,
   FunctionCallResponse,
   FunctionEntry,
   InvokeExResponse,
+  LogRecord,
+  LogSeverity,
   MessageType,
   StreamLayoutEntry,
   StreamRow,
+  ThresholdConfig,
+  ValueType,
   decodeStreamData,
   makeGetRequest,
   makeInvokeExRequest,
@@ -33,6 +39,8 @@ import {
 import {
   SchemaCatalogV6,
   SchemaMessage,
+  SchemaNodeV6,
+  SchemaRefV6,
   decodeSchemaDefinitionV6,
   decodeServerHelloV6,
   makeClientHelloV6,
@@ -41,6 +49,7 @@ import {
   decodeSchemaValue,
   verifyAndBuildCatalog,
 } from './schema-v6';
+import { clearCatalog, loadCachedManifest, loadCatalog, storeCatalog } from './schema-v6/cache';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,7 +75,22 @@ type BootstrapWaiter = {
 };
 
 /** Coarse connection state for UI display. */
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+
+/** Options controlling automatic reconnect with resynchronization. */
+export interface ReconnectOptions {
+  enabled: boolean;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+}
+
+/** Options for a correlated InvokeEx call. */
+export interface InvokeOptions {
+  /** Relative deadline budget in microseconds sent on the wire (0 = none). */
+  deadlineUs?: bigint;
+  /** Client-side abort; rejects the pending call immediately. */
+  signal?: AbortSignal;
+}
 
 /** A decoded protocol error frame. */
 export interface TetherError {
@@ -88,6 +112,12 @@ export interface SnapshotFrame {
  * Map a numeric MessageType to a human-readable name for console logging.
  * Falls back to a hex representation for unknown types.
  */
+function f64Bytes(value: number): Uint8Array {
+  const out = new Uint8Array(8);
+  new DataView(out.buffer).setFloat64(0, value, true);
+  return out;
+}
+
 function msgTypeName(type: number): string {
   const names: Record<number, string> = {
     0x01: 'ListParamsReq',
@@ -115,6 +145,13 @@ function msgTypeName(type: number): string {
   };
   return names[type] ?? `0x${type.toString(16).padStart(2, '0')}`;
 }
+
+/** Per-frame size limit, matching the negotiated V6 maxMessageBytes (1 MiB). */
+const MAX_FRAME_BYTES = 1 << 20;
+/** Upper bound on unanswered requests — a stalled server must not grow this queue. */
+const MAX_PENDING_REQUESTS = 512;
+/** Upper bound on streamed entry IDs per stream configuration. */
+const MAX_STREAM_ENTRIES = 256;
 
 // ---------------------------------------------------------------------------
 // TetherIOClient
@@ -153,6 +190,12 @@ export class TetherIOClient extends EventTarget {
   /** Monotonic counter for log correlation. */
   private msgCounter = 0;
   private invokeRequestId = 1n;
+  /** URL of the current/last connection (cache key for the schema catalog). */
+  private url?: string;
+  private reconnect?: ReconnectOptions;
+  private reconnectAttempt = 0;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
+  private manualDisconnect = false;
 
   /** Current connection state (readable by the UI). */
   state: ConnectionState = 'disconnected';
@@ -163,13 +206,27 @@ export class TetherIOClient extends EventTarget {
    * Open a WebSocket connection to the Tether IO server.
    *
    * @param url WebSocket URL, e.g. `ws://127.0.0.1:8080/tether-io`.
-   * @resolves When the WebSocket is open.
-   * @rejects  On connection error.
+   * @param reconnect Optional automatic reconnect with exponential backoff.
+   *                  While enabled, unexpected closes dispatch `stale` and
+   *                  `reconnecting` events, re-negotiate the schema catalog,
+   *                  then dispatch `connected` again. Subscriptions and
+   *                  streams are NOT restored implicitly — callers must
+   *                  re-establish them on `connected`.
+   * @resolves When the WebSocket is open and schemas are committed.
+   * @rejects  On connection error (before the reconnect loop takes over).
    */
-  connect(url: string): Promise<void> {
+  connect(url: string, reconnect?: ReconnectOptions): Promise<void> {
     this.disconnect();
+    this.url = url;
+    this.reconnect = reconnect;
+    this.reconnectAttempt = 0;
+    this.manualDisconnect = false;
     this.state = 'connecting';
     console.log(`[TetherIO] connect → ${url}`);
+    return this.open(url);
+  }
+
+  private open(url: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(url);
       this.socket = socket;
@@ -179,31 +236,43 @@ export class TetherIOClient extends EventTarget {
         try {
           console.log('[TetherIO] WebSocket opened; negotiating V6 schemas');
           await this.negotiateV6();
+          const resynced = this.reconnectAttempt > 0;
+          this.reconnectAttempt = 0;
           this.state = 'connected';
           this.dispatchEvent(new Event('connected'));
+          if (resynced) this.dispatchEvent(new Event('resynchronized'));
           resolve();
         } catch (error) {
-          const failure = error instanceof Error ? error : new Error('V6 schema negotiation failed');
+          const failure =
+            error instanceof Error ? error : new Error('V6 schema negotiation failed');
           this.state = 'disconnected';
           this.rejectPending(failure);
-          socket.close(1002, 'V6 schema negotiation failed');
+          socket.close(4000, 'V6 schema negotiation failed');
           reject(failure);
         }
       };
 
       socket.onerror = (e) => {
-        this.state = 'disconnected';
         const err = new Error('WebSocket connection failed');
         console.error('[TetherIO] WebSocket error:', e);
         this.rejectPending(err);
+        if (this.state !== 'reconnecting') this.state = 'disconnected';
         reject(err);
       };
 
       socket.onclose = (e) => {
-        this.state = 'disconnected';
         console.log(`[TetherIO] WebSocket closed (code=${e.code}, reason=${e.reason || '(none)'})`);
         this.rejectPending(new Error('WebSocket closed'));
+        this.streamActive = false;
+        this.streamLayout = [];
         this.dispatchEvent(new Event('disconnected'));
+        // Everything read from the last session is now stale.
+        this.dispatchEvent(new Event('stale'));
+        if (this.reconnect?.enabled && !this.manualDisconnect) {
+          this.scheduleReconnect();
+        } else {
+          this.state = 'disconnected';
+        }
       };
 
       socket.onmessage = async (event) => {
@@ -212,13 +281,42 @@ export class TetherIOClient extends EventTarget {
             ? new Uint8Array(event.data)
             : new Uint8Array(await (event.data as Blob).arrayBuffer());
         // Framing::None — each WebSocket binary message is one protocol message.
+        if (bytes.length > MAX_FRAME_BYTES) {
+          console.error(`[TetherIO] dropping oversized frame (${bytes.length} bytes)`);
+          return;
+        }
         this.handleFrame(bytes);
       };
     });
   }
 
-  /** Close the WebSocket and cancel all pending requests. */
+  private scheduleReconnect(): void {
+    const initial = this.reconnect?.initialDelayMs ?? 500;
+    const maximum = this.reconnect?.maxDelayMs ?? 10_000;
+    const delay = Math.min(maximum, initial * 2 ** this.reconnectAttempt);
+    this.reconnectAttempt += 1;
+    this.state = 'reconnecting';
+    this.dispatchEvent(
+      new CustomEvent('reconnecting', {
+        detail: { attempt: this.reconnectAttempt, delayMs: delay },
+      }),
+    );
+    this.reconnectTimer = setTimeout(() => {
+      const url = this.url;
+      if (!url || this.manualDisconnect) return;
+      this.open(url).catch(() => {
+        // onclose schedules the next attempt
+      });
+    }, delay);
+  }
+
+  /** Close the WebSocket, cancel pending requests, and stop reconnecting. */
   disconnect(): void {
+    this.manualDisconnect = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
     if (this.socket) {
       console.log('[TetherIO] disconnect');
       this.socket.close();
@@ -295,15 +393,21 @@ export class TetherIOClient extends EventTarget {
    *             server-side error code/message.  Transport-level failures
    *             reject the promise.
    */
-  async callFunction(id: bigint, args: FunctionCallArg[] = []): Promise<FunctionCallResponse> {
+  async callFunction(
+    id: bigint,
+    args: FunctionCallArg[] = [],
+    options: InvokeOptions = {},
+  ): Promise<FunctionCallResponse> {
     const requestId = this.invokeRequestId++;
     const payload = await this.request(
-      makeInvokeExRequest(requestId, id, args),
+      makeInvokeExRequest(requestId, id, args, options.deadlineUs ?? 0n),
       MessageType.invokeExResp,
       requestId,
+      options.signal,
     );
     const response: InvokeExResponse = readInvokeExResponse(payload);
-    if (response.requestId !== requestId) throw new Error('mismatched InvokeEx response request ID');
+    if (response.requestId !== requestId)
+      throw new Error('mismatched InvokeEx response request ID');
     return { ...response, functionId: id };
   }
 
@@ -313,8 +417,12 @@ export class TetherIOClient extends EventTarget {
    * Convenience wrapper around {@link callFunction} for UI code that only
    * cares about the return value.
    */
-  async callFunctionOrThrow(id: bigint, args: FunctionCallArg[] = []): Promise<Uint8Array> {
-    const result = await this.callFunction(id, args);
+  async callFunctionOrThrow(
+    id: bigint,
+    args: FunctionCallArg[] = [],
+    options: InvokeOptions = {},
+  ): Promise<Uint8Array> {
+    const result = await this.callFunction(id, args, options);
     if (!result.success)
       throw new Error(result.errorMessage || `function call failed (${result.error})`);
     return result.returnValue;
@@ -342,16 +450,20 @@ export class TetherIOClient extends EventTarget {
   async getTyped(entry: CatalogEntry): Promise<unknown> {
     const catalog = this.verifiedCatalog;
     if (!catalog) throw new Error('schema catalog is not negotiated');
-    if (entry.schemaEpoch !== BigInt(catalog.epoch)) throw new Error('catalog entry belongs to a stale schema epoch');
+    if (entry.schemaEpoch !== BigInt(catalog.epoch))
+      throw new Error('catalog entry belongs to a stale schema epoch');
     const bytes = await this.get(entry.kind, entry.id);
-    if (this.verifiedCatalog !== catalog) throw new Error('schema catalog changed during value read');
+    if (this.verifiedCatalog !== catalog)
+      throw new Error('schema catalog changed during value read');
     return decodeSchemaValue(catalog, entry.schemaSlot, bytes);
   }
 
   /** Read a coherent server-side snapshot for selected catalog entries. */
   async snapshot(kind: 'params' | 'signals', ids: bigint[] = []): Promise<SnapshotFrame> {
-    const messageType = kind === 'params' ? MessageType.snapshotParamsReq : MessageType.snapshotSignalsReq;
-    const responseType = kind === 'params' ? MessageType.snapshotParamsResp : MessageType.snapshotSignalsResp;
+    const messageType =
+      kind === 'params' ? MessageType.snapshotParamsReq : MessageType.snapshotSignalsReq;
+    const responseType =
+      kind === 'params' ? MessageType.snapshotParamsResp : MessageType.snapshotSignalsResp;
     const writer = new Uint8Array(5 + ids.length * 8);
     const view = new DataView(writer.buffer);
     view.setUint8(0, messageType);
@@ -375,7 +487,8 @@ export class TetherIOClient extends EventTarget {
     }
     reader.assertEnd();
     const catalog = this.verifiedCatalog;
-    if (!catalog || schemaEpoch !== BigInt(catalog.epoch)) throw new Error('snapshot belongs to a stale schema epoch');
+    if (!catalog || schemaEpoch !== BigInt(catalog.epoch))
+      throw new Error('snapshot belongs to a stale schema epoch');
     return { timestampUs, schemaEpoch, values };
   }
 
@@ -422,6 +535,10 @@ export class TetherIOClient extends EventTarget {
    * @returns          The stream spec ID assigned by the server.
    */
   configureStream(ids: bigint[], intervalMs = 1, chunkSize = 20): Promise<number> {
+    if (ids.length > MAX_STREAM_ENTRIES)
+      return Promise.reject(new Error(`Stream exceeds ${MAX_STREAM_ENTRIES} entries`));
+    intervalMs = Math.min(Math.max(Math.trunc(intervalMs), 1), 10_000);
+    chunkSize = Math.min(Math.max(Math.trunc(chunkSize), 1), 1_000);
     console.log(
       `[TetherIO] configureStream(ids=[${ids.map((id) => id.toString()).join(', ')}], intervalMs=${intervalMs}, chunkSize=${chunkSize})`,
     );
@@ -478,6 +595,160 @@ export class TetherIOClient extends EventTarget {
     return this.request(Uint8Array.from([MessageType.stopStream]), -1).then(() => undefined);
   }
 
+  // ---- Logging ------------------------------------------------------------
+
+  /**
+   * Subscribe to server log records.
+   *
+   * Matching records are dispatched as `'log'` events with a
+   * {@link LogRecord} detail.  Empty filters match everything.
+   *
+   * @returns The server-assigned subscription ID for {@link unsubscribeLog}.
+   */
+  async subscribeLog(
+    minSeverity: LogSeverity = LogSeverity.Debug,
+    componentFilter = '',
+    messageFilter = '',
+    locationFilter = '',
+  ): Promise<number> {
+    const enc = new TextEncoder();
+    const filters = [componentFilter, messageFilter, locationFilter].map((f) => enc.encode(f));
+    const size = 1 + 1 + filters.reduce((sum, f) => sum + 2 + f.length, 0);
+    const writer = new BinaryWriter(size);
+    writer.u8(MessageType.subscribeLogReq).u8(minSeverity);
+    for (const filter of filters) writer.u16(filter.length).bytes(filter);
+    const payload = await this.request(writer.finish(), MessageType.subscribeLogResp);
+    const reader = new BinaryReader(payload);
+    const subscriptionId = reader.varint();
+    const status = reader.u8();
+    if (status !== 0) {
+      const error = reader.string16();
+      throw new Error(`log subscription failed: ${error}`);
+    }
+    return subscriptionId;
+  }
+
+  /** Remove a log subscription created by {@link subscribeLog}. */
+  async unsubscribeLog(subscriptionId: number): Promise<void> {
+    const writer = new BinaryWriter(1 + 5);
+    writer.u8(MessageType.unsubscribeLogReq).varint(subscriptionId);
+    const payload = await this.request(writer.finish(), MessageType.unsubscribeLogResp);
+    const reader = new BinaryReader(payload);
+    reader.varint();
+    if (reader.u8() !== 0) throw new Error(`log subscription ${subscriptionId} not found`);
+  }
+
+  // ---- Datalogging --------------------------------------------------------
+
+  /**
+   * Configure the server-side datalog recorder.
+   *
+   * @param entryIds IDs to log (empty = all fixed-size entries).
+   */
+  async configureDatalog(
+    logName: string,
+    sampleRateHz: number,
+    enabled: boolean,
+    entryIds: bigint[] = [],
+  ): Promise<void> {
+    const nameBytes = new TextEncoder().encode(logName);
+    const writer = new BinaryWriter(1 + 2 + nameBytes.length + 4 + 1 + 4 + entryIds.length * 8);
+    writer
+      .u8(MessageType.configureDatalogReq)
+      .u16(nameBytes.length)
+      .bytes(nameBytes)
+      .u32(sampleRateHz)
+      .u8(enabled ? 1 : 0)
+      .u32(entryIds.length);
+    for (const id of entryIds) writer.u64(id);
+    const payload = await this.request(writer.finish(), MessageType.configureDatalogResp);
+    if (new BinaryReader(payload).u8() !== 1) throw new Error('datalog configuration failed');
+  }
+
+  /** Query the datalog recorder's status and record layout metadata. */
+  async datalogStatus(): Promise<DatalogStatus> {
+    const payload = await this.request(
+      Uint8Array.from([MessageType.datalogStatusReq]),
+      MessageType.datalogStatusResp,
+    );
+    const reader = new BinaryReader(payload);
+    const state = reader.u8();
+    const recordsWritten = reader.u64();
+    const bytesWritten = reader.u64();
+    const logName = reader.string16();
+    const recordSize = reader.u32();
+    const sampleRateHz = reader.u32();
+    const fieldCount = reader.u32();
+    const fields = [];
+    for (let i = 0; i < fieldCount; i++) {
+      fields.push({
+        entryId: reader.u64(),
+        name: reader.string16(),
+        schemaEpoch: reader.u64(),
+        schemaSlot: reader.u32(),
+        offset: reader.u16(),
+        size: reader.u16(),
+        kind: reader.u8() === 0 ? ('param' as const) : ('signal' as const),
+      });
+    }
+    return {
+      state,
+      recordsWritten,
+      bytesWritten,
+      metadata: { logName, recordSize, sampleRateHz, fields },
+    };
+  }
+
+  // ---- Threshold filtering -------------------------------------------------
+
+  /**
+   * Install a named threshold configuration for stream change filtering.
+   *
+   * @param config See {@link ThresholdConfig}; `entryId = 0` marks a default
+   *               rule applying to all streamed entries.
+   */
+  async configureThreshold(config: ThresholdConfig): Promise<void> {
+    const enc = new TextEncoder();
+    const name = enc.encode(config.name);
+    const rules = config.rules.map((rule) => ({
+      rule,
+      customName: enc.encode(rule.customName),
+      prims: rule.customConfig.map((prim) => ({ prim, name: enc.encode(prim.name) })),
+    }));
+    let size = 1 + 2 + name.length + 1 + 4;
+    for (const { rule, customName, prims } of rules) {
+      size += 8 + 1 + 8 + 2 + customName.length + 4;
+      for (const { prim, name: primName } of prims)
+        size += 2 + primName.length + 1 + 4 + prim.value.length;
+    }
+    const writer = new BinaryWriter(size);
+    writer
+      .u8(MessageType.configureThresholdReq)
+      .u16(name.length)
+      .bytes(name)
+      .u8(config.isWhitelist ? 1 : 0)
+      .u32(rules.length);
+    for (const { rule, customName, prims } of rules) {
+      writer
+        .u64(rule.entryId)
+        .u8(rule.type)
+        .bytes(f64Bytes(rule.threshold))
+        .u16(customName.length)
+        .bytes(customName)
+        .u32(prims.length);
+      for (const { prim, name: primName } of prims) {
+        writer
+          .u16(primName.length)
+          .bytes(primName)
+          .u8(prim.type)
+          .u32(prim.value.length)
+          .bytes(prim.value);
+      }
+    }
+    const payload = await this.request(writer.finish(), MessageType.configureThresholdResp);
+    if (new BinaryReader(payload).u8() !== 1) throw new Error('threshold configuration failed');
+  }
+
   // ---- Internal: request/response plumbing ------------------------------
 
   /**
@@ -489,9 +760,19 @@ export class TetherIOClient extends EventTarget {
    * @returns            The response payload, or an empty array for
    *                     fire-and-forget messages.
    */
-  private request(payload: Uint8Array, responseType: number, correlationId?: bigint): Promise<Uint8Array> {
+  private request(
+    payload: Uint8Array,
+    responseType: number,
+    correlationId?: bigint,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN)
       return Promise.reject(new Error('Not connected'));
+    if (payload.length > MAX_FRAME_BYTES)
+      return Promise.reject(new Error(`Request exceeds the ${MAX_FRAME_BYTES}-byte frame limit`));
+    if (responseType >= 0 && this.pending.length >= MAX_PENDING_REQUESTS)
+      return Promise.reject(new Error(`Too many pending requests (>${MAX_PENDING_REQUESTS})`));
+    if (signal?.aborted) return Promise.reject(new DOMException('Request aborted', 'AbortError'));
 
     const seq = ++this.msgCounter;
     const timeoutMs = 10000;
@@ -512,7 +793,26 @@ export class TetherIOClient extends EventTarget {
           console.error(`[TetherIO] ✗ #${seq} timeout`);
           reject(err);
         }, timeoutMs);
-        this.pending.push({ type: responseType, resolve, reject, timer, correlationId });
+        const entry = {
+          type: responseType,
+          resolve: (p: Uint8Array) => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve(p);
+          },
+          reject: (e: Error) => {
+            signal?.removeEventListener('abort', onAbort);
+            reject(e);
+          },
+          timer,
+          correlationId,
+        };
+        const onAbort = () => {
+          const index = this.pending.findIndex((item) => item.timer === timer);
+          if (index >= 0) this.pending.splice(index, 1);
+          entry.reject(new DOMException('Request aborted', 'AbortError'));
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
+        this.pending.push(entry);
       } else {
         // Fire-and-forget: resolve immediately after the send completes.
         resolve(new Uint8Array());
@@ -545,6 +845,25 @@ export class TetherIOClient extends EventTarget {
       return;
     }
 
+    // Log records are pushed out-of-band to 'log' event listeners.
+    if (type === MessageType.logData) {
+      try {
+        const reader = new BinaryReader(frame);
+        reader.u8();
+        const record: LogRecord = {
+          timestampUs: reader.u64(),
+          severity: reader.u8() as LogSeverity,
+          component: reader.string16(),
+          message: reader.string16(),
+          location: reader.string16(),
+        };
+        this.dispatchEvent(new CustomEvent<LogRecord>('log', { detail: record }));
+      } catch (err) {
+        console.warn('[TetherIO] dropped malformed LogData frame', err);
+      }
+      return;
+    }
+
     // Stream data is dispatched out-of-band (not matched to a pending request).
     if (type === MessageType.streamData) {
       try {
@@ -563,11 +882,15 @@ export class TetherIOClient extends EventTarget {
     console.log(`[TetherIO] ← ${msgTypeName(type)} (${frame.length} bytes)`);
 
     // Match against the first pending request expecting this response type.
-    const responseId = type === MessageType.invokeExResp && frame.length >= 9
-      ? new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getBigUint64(1, true)
-      : undefined;
-    const index = this.pending.findIndex((item) => item.type === type &&
-      (item.correlationId === undefined || item.correlationId === responseId));
+    const responseId =
+      type === MessageType.invokeExResp && frame.length >= 9
+        ? new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getBigUint64(1, true)
+        : undefined;
+    const index = this.pending.findIndex(
+      (item) =>
+        item.type === type &&
+        (item.correlationId === undefined || item.correlationId === responseId),
+    );
     if (index >= 0) {
       const item = this.pending.splice(index, 1)[0];
       if (item) {
@@ -593,13 +916,26 @@ export class TetherIOClient extends EventTarget {
     }
   }
 
+  /** Connection URL minus credentials — the schema-cache key must not persist tokens. */
+  private get cacheKey(): string {
+    try {
+      const parsed = new URL(this.url ?? '');
+      parsed.searchParams.delete('token');
+      return parsed.toString();
+    } catch {
+      return this.url ?? '';
+    }
+  }
+
   private async negotiateV6(): Promise<void> {
     this.verifiedCatalog = undefined;
+    const url = this.cacheKey;
+    const cachedManifest = loadCachedManifest(url) ?? [];
     const helloPromise = this.waitForBootstrapFrames(
       new Set([SchemaMessage.serverHello, SchemaMessage.reject]),
       1,
     );
-    this.sendRaw(makeClientHelloV6());
+    this.sendRaw(makeClientHelloV6(cachedManifest));
     const [helloFrame] = await helloPromise;
     if (!helloFrame) throw new Error('missing V6 ServerHello');
     if (helloFrame[0] === SchemaMessage.reject) {
@@ -610,27 +946,84 @@ export class TetherIOClient extends EventTarget {
       throw new Error(`V6 schema negotiation rejected (${code}): ${message}`);
     }
     const hello = decodeServerHelloV6(helloFrame);
-    const definitionsPromise = hello.manifest.length
-      ? this.waitForBootstrapFrames(
-          new Set([SchemaMessage.definition, SchemaMessage.reject]),
-          hello.manifest.length,
-        )
-      : Promise.resolve([] as Uint8Array[]);
-    if (hello.manifest.length) this.sendRaw(makeSchemaRequestV6(hello.epoch, hello.manifest));
-    const definitionFrames = await definitionsPromise;
-    const definitions = definitionFrames.map((frame) => {
+
+    // Fast path: the advertised manifest is identical to a previously
+    // verified catalog — reuse it without re-fetching definitions.
+    let catalog = url ? loadCatalog(url, hello.manifest) : undefined;
+    if (!catalog) {
+      // Fetch manifest roots, then iteratively request every referenced
+      // schema until the graph is closed (dependencies are not manifest
+      // entries and must be pulled transitively).
+      const definitions: { epoch: number; node: SchemaNodeV6 }[] = [];
+      const known = new Set<string>();
+      let pending = hello.manifest.map((entry) => entry.ref);
+      while (pending.length) {
+        const nodes = await this.requestDefinitions(hello.epoch, pending);
+        const next: SchemaRefV6[] = [];
+        for (const node of nodes) {
+          const key = [...node.key].map((b) => b.toString(16).padStart(2, '0')).join('');
+          if (known.has(key)) continue;
+          known.add(key);
+          definitions.push({ epoch: hello.epoch, node });
+          const deps = [
+            node.element,
+            node.mapKey,
+            node.mapValue,
+            node.target,
+            ...node.fields.map((field) => field.schema),
+            ...node.oneOfMembers.map((member) => member.schema),
+          ];
+          for (const dep of deps) {
+            if (!dep) continue;
+            const depKey = [...dep.key].map((b) => b.toString(16).padStart(2, '0')).join('');
+            if (
+              !known.has(depKey) &&
+              !next.some((ref) => ref.key.every((byte, i) => byte === dep.key[i]))
+            ) {
+              next.push(dep);
+            }
+          }
+        }
+        pending = next;
+      }
+      catalog = await verifyAndBuildCatalog(hello, definitions);
+      if (url) storeCatalog(url, catalog);
+    }
+    catalog.epoch = hello.epoch;
+    this.sendRaw(makeSchemaCommitV6(hello.epoch));
+    this.verifiedCatalog = catalog;
+    console.log(
+      `[TetherIO] V6 schema epoch ${hello.epoch} committed (${catalog.manifest.length} schemas)`,
+    );
+  }
+
+  /** Issue one SchemaRequest and return every definition in request order. */
+  private async requestDefinitions(epoch: number, refs: SchemaRefV6[]): Promise<SchemaNodeV6[]> {
+    const promise = this.waitForBootstrapFrames(
+      new Set([SchemaMessage.definition, SchemaMessage.reject]),
+      refs.length,
+    );
+    this.sendRaw(
+      makeSchemaRequestV6(
+        epoch,
+        refs.map((ref) => ({ ref, revision: 0 })),
+      ),
+    );
+    const frames = await promise;
+    return frames.map((frame, index) => {
       if (frame[0] === SchemaMessage.reject) {
         const reader = new BinaryReader(frame);
         reader.u8();
         const code = reader.u8();
         throw new Error(`Schema definition rejected (${code}): ${reader.string32()}`);
       }
-      return decodeSchemaDefinitionV6(frame);
+      const { epoch: defEpoch, node } = decodeSchemaDefinitionV6(frame);
+      if (defEpoch !== epoch) throw new Error('schema definition belongs to a stale epoch');
+      const requested = refs[index];
+      if (!requested || !node.key.every((byte, i) => byte === requested.key[i]))
+        throw new Error('schema definition does not match the requested key');
+      return node;
     });
-    const catalog = await verifyAndBuildCatalog(hello, definitions);
-    this.sendRaw(makeSchemaCommitV6(hello.epoch));
-    this.verifiedCatalog = catalog;
-    console.log(`[TetherIO] V6 schema epoch ${hello.epoch} committed (${catalog.manifest.length} schemas)`);
   }
 
   private sendRaw(payload: Uint8Array): void {
@@ -664,7 +1057,7 @@ export class TetherIOClient extends EventTarget {
   /**
    * Extract the value bytes from a GetParamResp / GetSignalResp payload.
    *
-  * Wire layout: `type(u8) + id(u64) + varint length + value`.
+   * Wire layout: `type(u8) + id(u64) + varint length + value`.
    */
   private extractValue(payload: Uint8Array): Uint8Array {
     const reader = new BinaryReader(payload);

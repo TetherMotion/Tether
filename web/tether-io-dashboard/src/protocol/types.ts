@@ -33,6 +33,12 @@ export const MessageType = {
   unsubscribeLogReq: 0x11,
   unsubscribeLogResp: 0x12,
   logData: 0x13,
+  configureDatalogReq: 0x2d,
+  configureDatalogResp: 0x2e,
+  datalogStatusReq: 0x2f,
+  datalogStatusResp: 0x30,
+  configureThresholdReq: 0x31,
+  configureThresholdResp: 0x32,
   invokeExReq: 0x3e,
   invokeExResp: 0x3f,
   clientHello: 0x50,
@@ -115,4 +121,84 @@ export interface StreamRow {
   specId: number;
   timestampUs: bigint;
   values: Uint8Array[];
+}
+
+export enum LogSeverity {
+  Debug = 0,
+  Info = 1,
+  Warning = 2,
+  Error = 3,
+  Critical = 4,
+}
+
+export interface LogRecord {
+  timestampUs: bigint;
+  severity: LogSeverity;
+  component: string;
+  message: string;
+  location: string;
+}
+
+export enum DatalogState {
+  Idle = 0,
+  Recording = 1,
+  Stopped = 2,
+  Error = 3,
+}
+
+export interface DatalogField {
+  entryId: bigint;
+  name: string;
+  schemaEpoch: bigint;
+  schemaSlot: number;
+  offset: number;
+  size: number;
+  kind: 'param' | 'signal';
+}
+
+export interface DatalogMetadata {
+  logName: string;
+  recordSize: number;
+  sampleRateHz: number;
+  fields: DatalogField[];
+}
+
+export interface DatalogStatus {
+  state: DatalogState;
+  recordsWritten: bigint;
+  bytesWritten: bigint;
+  metadata: DatalogMetadata;
+}
+
+export enum ThresholdType {
+  /** No threshold — always send. */
+  None = 0,
+  /** Send when |new − old| > threshold. */
+  Absolute = 1,
+  /** Send when |new − old| / |old| > threshold. */
+  Relative = 2,
+  /** Implementation-defined logic (customName + customConfig primitives). */
+  Custom = 3,
+}
+
+export interface ConfigPrimitive {
+  name: string;
+  type: ValueType;
+  value: Uint8Array;
+}
+
+export interface ThresholdRule {
+  /** 0 = default rule applying to all entries. */
+  entryId: bigint;
+  type: ThresholdType;
+  threshold: number;
+  customName: string;
+  customConfig: ConfigPrimitive[];
+}
+
+export interface ThresholdConfig {
+  name: string;
+  /** true = only entries matching rules are streamed; false = matches excluded. */
+  isWhitelist: boolean;
+  rules: ThresholdRule[];
 }

@@ -2,47 +2,102 @@
 
 ## Implementation Status
 
-This document remains the target roadmap; it is **not complete**. The current
-workspace contains an initial, read-only implementation slice:
+This document remains the target roadmap; it is **not complete**. Large parts
+of the protocol foundation, backend services, and console UI are implemented;
+the remaining work is concentrated in Phase 0 (safety contract), the
+extension/profile trust layer, and Phase 8 hardening.
 
-- The browser negotiates V6 schemas, verifies BLAKE3 descriptor digests,
-  decodes schema-directed values, retains catalog metadata, reads snapshots,
-  and invokes correlated `InvokeEx` functions. Field restrictions are checked
-  for decoded struct values. The client does not yet persist schema manifests,
-  fully validate every restriction/encoding combination, or have verified
-  cross-language digest fixtures against a live C++ server.
-- A machine-console shell provides Overview, Drives, a drive detail drawer,
-  Motion-unavailable messaging, Trends, a read-only event-history view, and
-  generic Explore. Active-alarm lifecycle/acknowledgement, diagnostics,
-  commissioning, recipes, authority, and configuration views remain
-  unavailable placeholders.
-- The read-only Overview and Drives views consume negotiated machine descriptor,
-  aggregate snapshot, and drive snapshot signals when advertised. Axis labels
-  and position-unit scaling come from the descriptor; the aggregate view is
-  explicitly telemetry health, not machine or safety readiness.
-- C++ provides the packed `DriveSnapshotV1`, tagged `MachineDescriptorV1` and
-  `MachineSnapshotV1` schema graphs, and a deterministic four-axis simulator
-  that installs those roots and registers read-only signals. It also provides
-  a bounded cursor-paginated `EventJournal`, `EventRecordV1`/`EventPageV1`, and
-  a typed read-only event function. V6 client/session integration tests
-  validate snapshot reads and event-page returns. The Drogon dashboard example
-  wires the simulator and binds to loopback. This remains a demo fixture, not a
-  native machine adapter or production event/alarm service; capture and
-  configuration schemas are still absent.
-- C++ also provides a standalone fail-closed command/authority gate with unit
-  tests. The gate is not wired to authenticated `Session` identities, durable
-  audit storage, a DS402 dispatcher, or the WebSocket controller.
-- The Drogon dashboard example now installs and passes the machine-profile
-  catalog to V6 sessions and publishes the four-axis simulator, so the browser
-  can discover it end to end. The controller still has no authentication
-  boundary; the example binds to loopback only and must not be exposed to an
-  untrusted network or used for machine control.
+### Implemented
 
-The browser must remain read-only until the server has authenticated identity,
-role enforcement, authority leases, live interlock/state-generation
-preflight, durable audit, bounded native dispatch, disconnect/expiry stop
-semantics, and simulation/HIL/security review. A browser control surface is
-not a functional-safety feature and must not imply or replace E-stop or STO.
+**Protocol and client foundation**
+
+- Full V6 bootstrap in the TypeScript client: `ClientHello`/`ServerHello`,
+  manifest-cache fast path (`schema-v6/cache`, keyed by connection URL,
+  credentials stripped), schema-graph fetch-to-closure, epoch commit, digest
+  verification, slot resolution, and stale-epoch rejection.
+- Generic recursive schema-value decoding with field-restriction checks,
+  retained catalog metadata, snapshots, datalog configuration/status,
+  thresholds, correlated `InvokeEx`, and reconnect with explicit
+  `stale`/`resynchronized` transitions.
+
+**Backend (`tether::io::machine`, `MachineService.hpp`)**
+
+- Versioned `machine.cia402.v1` schemas: `MachineDescriptorV1`,
+  `MachineSnapshotV1`, `DriveSnapshotV1`, `CommandRequestV1`,
+  `CommandReceiptV1`, `OperationSnapshotV1`, `EventRecordV1`,
+  `AuthoritySnapshotV1`, `ConfigEntryV1` graphs.
+- Fail-closed `MachineCommandGate`: role, authority token, state-generation,
+  deadline, interlock, and idempotent request-UUID handling; audit IDs on
+  receipts.
+- Typed catalog functions: `machine.command`, `machine.command.cancel`,
+  `machine.authority.{acquire,renew,release,takeover}` +
+  `authority.snapshot`, `machine.alarms.{read,acknowledge,clear}`,
+  `machine.capture.{configure,status,cancel,export}`,
+  `machine.config.{export,diff,import,stage,validate,commit,rollback}`,
+  `machine.sdo.{list,read,write}` (policy-gated, rate-limited, audited),
+  `machine.supervisor.{status,retry}`, `machine.pdo.map`,
+  `machine.recipe.{list,apply}`, `machine.checklist.{list,report}`,
+  `machine.metrics`, and the bounded cursor-paginated event journal.
+- Command actions include enable/disable, quick-stop, fault reset, mode
+  change, jog start/renew/stop, step move, move-to-position, group move,
+  recovery, configuration transactions, and home prepare/start/cancel.
+- `EventJournal` supports a durable sink callback for audit persistence; the
+  in-memory journal may evict while the sink remains the durable record.
+- `DS402MachineAdapter` adapts real CiA 402/EtherCAT state alongside the
+  deterministic `SimulatedMachineService` four-axis fixture.
+- Authentication boundary: `StaticTokenAuthProvider` (constant-time bearer
+  tokens from a `token<TAB>actor<TAB>role` file); the Drogon WebSocket
+  controller maps `Authorization: Bearer` on the upgrade to
+  `Session::setIdentity`. Unauthenticated sessions fail closed to observer.
+
+**Frontend (`web/tether-io-dashboard`)**
+
+- Modular layout: `transport/`/`protocol`, `domain/`, `stores/`, `views/`,
+  `components/`, schema-v6, and scope modules replacing the `main.ts`
+  monolith.
+- Machine shell with connection state, access-token login, role, authority
+  owner, data freshness, alarm count, and persistent safety notice.
+- Views: zero-config Overview, dense Drives table + detail drawer, Motion
+  (authority lease panel, hold-to-jog buttons, step/position moves, and a
+  guided homing panel with per-axis Prepare → Start → verify/cancel over the
+  `Home*` command actions), Trends (two synchronized panes, presets, freeze,
+  derived channels, FFT, annotations, capture replay), Diagnostics
+  (topology, PDO map, supervisor), Commissioning (capture config, SDO
+  inspector, staged config), Recipes, event history, and Explore.
+- Domain clients: `machine-control.ts` (authority + command + operation
+  decoding), `machine-profile.ts`, `app-profile.ts`, `event-history.ts`,
+  `analysis.ts` (capture decode, derived channels, FFT, redacted support
+  bundle).
+- Tests: vitest unit tests across client/domain/views plus an env-gated live
+  e2e test (`TETHER_E2E_URL`) against `web_dashboard_example`.
+
+### Not yet implemented / verified
+
+- **Phase 0**: the command/safety matrix is drafted
+  (`docs/CommandSafetyMatrix.md`); user stories, state safety
+  classification, audit-retention requirements, budgets, and the formal
+  safety review/sign-off remain open process work.
+- **Transport hardening under load**: bounded frame sizes, per-session
+  inbound queues, and rate clamps are now enforced; behavior under real load
+  (load testing) remains a Phase 8 activity.
+- **Audit-sink rollout**: `FileEventJournalSink` (append-only TSV, flushed per
+  record) exists and `web_dashboard_example --audit-log` wires it to the
+  event journal. Rotation/retention policy and a deployment default are not
+  defined.
+- **Extension trust layer**: application profiles exist
+  (`app-profile.ts`) with keyed-BLAKE3 signing, server-side MAC verification
+  and document-contract validation (`docs/AppProfileTrust.md`); remaining
+  gaps are kinematic-scene visualization (89) and external alarm
+  notification hooks (90).
+- **Phase 8 hardening**: HIL runs on real drives, security testing, load
+  testing, formal accessibility/usability testing, and build-metadata
+  packaging remain. Deployment and operator/commissioning/diagnostic guides
+  are written (`docs/WebInterfaceDeployment.md`,
+  `docs/WebInterfaceOperatorGuide.md`).
+
+The browser control surface is not a functional-safety feature and must not
+imply or replace E-stop or STO. Deployments must keep the authenticated
+endpoint off untrusted networks until Phase 8 security review is complete.
 
 ## Purpose
 
@@ -633,9 +688,20 @@ The following work packages are ordered so every release leaves a usable,
 testable product increment. A release gate is a behavior and safety decision,
 not merely a collection of screens.
 
+> Numbering preserves the original plan — items already verified as
+> implemented have been removed (see *Implementation Status* above), so the
+> remaining item numbers are not contiguous. Tests and docs may still cite
+> the original numbers.
+
 ### Phase 0 - Product and safety contract
 
-1. Name the first target machine class and its operating environment.
+Done: the first target machine class is the representative multi-axis CiA 402
+fleet (currently `SimulatedCiA402Fleet`); the command authority boundary,
+browser-invoked actions, role permissions, and safe-state behavior are drafted
+in `docs/CommandSafetyMatrix.md` from the implemented gate; the deployed
+identity source is the bearer-token file (`--auth-file`); initial transport
+budgets are the bounds shipped under item 24. Remaining:
+
 2. Write user stories for operator, technician, controls engineer, and remote
    observer during normal operation, drive fault, communication loss, homing,
    and commissioning.
@@ -643,196 +709,123 @@ not merely a collection of screens.
    report machine, safety, and motion state.
 4. Identify which state is safety related, safety relevant, diagnostic, or
    merely informational.
-5. Define the server-side command authority boundary and all browser-invoked
-   actions.
-6. Document safe-state behavior for WebSocket loss, server restart, EtherCAT
-   loss, control-owner expiry, and UI crash.
-7. Decide the authentication identity source for deployed systems.
-8. Define role permissions and approval/preemption policy.
 9. Define audit retention, export, privacy, and redaction requirements.
 10. Perform a formal safety review; obtain sign-off that UI features do not
-    claim a safety function they do not implement.
+    claim a safety function they do not implement, and approve the
+    `docs/CommandSafetyMatrix.md` draft.
 11. Set data-rate, latency, capture-retention, and concurrent-viewer budgets.
 12. Define acceptance criteria for the initial fleet: supported drives, axes,
     modes, homing, alarms, and diagnostic depth.
 
 **Exit gate:** an approved command/safety matrix exists for every intended web
 action, including the server-side preconditions and failure response.
+A code-derived draft now exists in `docs/CommandSafetyMatrix.md` (per-action
+roles, DS402-state preconditions, parameters, and OPEN decisions); it still
+needs controls-owner review and the real-drive limits it flags.
 
-### Phase 1 - Protocol and domain foundation
+### Phase 1 - Protocol and domain foundation — complete
 
-13. Implement the V6 bootstrap, manifest cache, schema-definition validation,
-  epoch/slot resolution, and schema-update invalidation in the TypeScript
-  client.
-14. Decode and expose catalog metadata plus recursive schema values and field
-  restrictions.
-15. Add typed TypeScript representations for schema nodes, units, ranges, enum
-  and oneof keys, quality, timestamps, and error envelopes.
-16. Implement generic metadata, snapshot, log, datalog, threshold, and
-  catalog/schema-update paths with unit tests.
-17. Add correlation IDs, deadline propagation, request cancellation, and
-    idempotent retry semantics to the browser client.
-18. Implement reconnect with explicit stale/fresh transitions rather than
-    silently reconnecting in the background.
-19. Implement the documented `machine.cia402.v1` profile adapter over
-    negotiated catalog entries, schemas, streams, and typed functions.
-20. Add schema-digest, profile-schema, protocol-version, and catalog-epoch
-    compatibility tests.
-21. Define stable resource identifiers independent of EtherCAT position.
-22. Define descriptor, snapshot, delta, event, command, command-progress,
-    authority, capture, and configuration DTOs.
-23. Define sequence, timestamp, state-generation, event-cursor gap, and
-  resynchronization rules using existing streams/functions.
-24. Establish bounded message sizes, polling/subscription rates, per-session
-  queues, and backpressure behavior; defer new message IDs until the
-  vertical-slice measurements prove them necessary.
+Items 13–24 are implemented: V6 bootstrap, manifest cache, typed schema
+representations, metadata/snapshot/datalog/threshold paths, correlation and
+deadline propagation, `machine.command.cancel`, stale/resynchronized
+reconnect, the `machine.cia402.v1` profile adapter, compatibility tests,
+stable resource IDs, DTOs, cursor-gap/resync rules, exhaustive
+restriction/encoding validation tests (`value-codec.test.ts` covers all seven
+restriction kinds plus both struct encodings and varint/depth/canonicity
+edge cases), shared cross-language digest vectors
+(`test-fixtures/schema-digest-vectors.json` verified independently by the
+TypeScript client and `test_io_schema.cpp`), and bounded transport behavior:
+1 MiB frame limits on both sides, per-session inbound queue bounds with
+fail-closed disconnect (256 messages / 4 MiB), bounded pending-request and
+stream-entry counts, and clamped stream interval/chunk parameters.
 
 **Exit gate:** a test client completes V6 negotiation, discovers a simulated
 machine from the profile catalog, subscribes to schema-validated fleet state,
 detects a gap, and resynchronizes without raw registry-layout knowledge.
+(Met.)
 
-### Phase 2 - Backend services and simulated fleet
+### Phase 2 - Backend services and simulated fleet — complete
 
-25. Create the application-facing `MachineService` interfaces.
-26. Implement a DS402 adapter that produces `DriveSnapshot` from the existing
-    CiA 402 and EtherCAT state.
-27. Adapt master/slave AL-state, AL-code, supervisor, DC, WKC, and link-health
-    information into the machine snapshot.
-28. Adapt application motion groups and coordinate transforms into the
-    descriptor.
-29. Adapt existing jog controller state and limits without duplicating its
-    lease logic.
-30. Add a server-side control-authority lease manager.
-31. Add a command dispatcher that validates role, authority, state generation,
-    mode, interlock, bounds, and deadline before queueing work.
-32. Add command idempotency storage and structured results.
-33. Emit command lifecycle events and immutable audit records.
-34. Add typed alarm/event aggregation with DS402 and AL state transitions.
-35. Add capture-session management backed by existing stream/datalog support.
-36. Build a deterministic simulated multi-drive fixture with normal, stale,
-    warning, fault, disabled, mode-mismatch, homing, recovery, and network-gap
-    scenarios.
+Items 25–36 are implemented: `MachineService`, `DS402MachineAdapter`,
+machine/drive snapshots, the authority lease manager, the validating command
+gate, idempotency storage, audit records, alarm aggregation, capture-session
+management, and the deterministic `SimulatedMachineService` fixture.
+Validation of `DS402MachineAdapter` against real drives is tracked under
+Phase 8 item 97.
 
 **Exit gate:** integration tests drive a simulated four-axis fleet through
 discovery, authority, enable, bounded jog, stop, fault, reset/recovery, and
-audit verification without a browser.
+audit verification without a browser. (Met.)
 
-### Phase 3 - Read-only operator console
+### Phase 3 - Read-only operator console — complete
 
-37. Split the frontend into transport, domain, state, view, and reusable
-component modules.
-38. Add an application shell with global connection, data-freshness, role,
-authority, and alarm status.
-39. Implement zero-configuration Overview using the machine descriptor.
-40. Implement the dense sortable Drives fleet table.
-41. Implement the per-drive drawer with DS402 state machine, decoded words,
-    target/demand/actual/error values, units, timestamps, and quality.
-42. Implement motion-group summary and ownership presentation.
-43. Implement topology/network-health summary and deep link to a drive.
-44. Implement alarm/event list with active and historical states.
-45. Implement command/event timeline for a drive or group.
-46. Implement explicit stale/gap/offline banners and recovery instructions.
-47. Keep Explore as the generic catalog/stream view and add structured value
-    inspection there.
-48. Add basic per-user table-column, filter, and trend-preset persistence.
+Items 37–48 are implemented: the modular frontend, machine shell with global
+status, zero-config Overview, Drives fleet table and detail drawer,
+motion-group/ownership display, topology summary, alarm/event views,
+command/event timeline, stale/offline banners, Explore, and per-user
+preference persistence.
 
 **Exit gate:** a technician can determine from one browser session which drive
 is blocking production, whether the cause is AL/DS402/application state, when
-it changed, and which evidence to inspect next.
+it changed, and which evidence to inspect next. (Met.)
 
-### Phase 4 - Authority and controlled motion
+### Phase 4 - Authority and controlled motion — complete
 
-49. Add authenticated session and role display to the live session.
-50. Implement acquire, renew, release, expiry, conflict, transfer, and forced
-    release flows for control ownership.
-51. Add server-provided precondition/blocker display for every command.
-52. Implement a command sheet showing targets, state, limits, interlocks,
-    deadline, confirmation text, and outcome.
-53. Connect the existing lease-based jog implementation to authority and the
-    new command/audit pipeline.
-54. Add bounded incremental move and move-to-named-position for one axis.
-55. Add coordinated group move through the native planner, including an atomic
-    preflight response identifying blocked members.
-56. Add software stop actions with accurate scope/semantics and a clear
-    distinction from hardware safety functions.
-57. Add enable/disable, mode request, fault reset request, and guarded recovery
-    commands where the application policy permits them.
-58. Add guided homing with prerequisite checks, progress, timeout, cancel,
-    result, and post-home validity state.
-59. Implement client disconnect and ownership-expiry test cases for all motion
-    actions.
-60. Add keyboard, pointer, focus-loss, visibility-change, and repeat-rate tests
-    for hold-to-run jog behavior.
+Items 49–60 are implemented: authenticated sessions with role display, the
+full authority lease lifecycle (acquire/renew/release/takeover), server
+blocker/precondition display, command dispatch through the audited gate,
+lease-based hold-to-run jog, bounded step and move-to-position, group move,
+scoped software stop, enable/disable/mode/fault-reset/recovery commands, the
+guided homing UI (Prepare → Start → verify, per-axis cancel), and
+disconnect/expiry plus hold-to-run test coverage (`SessionEnded*` /
+`ExpiredLease*` / `CommandsWithReleasedToken*` C++ tests and the jsdom
+`bindHoldToRunJog` suite covering pointer, keyboard-repeat, blur, and
+visibility-loss paths).
 
 **Exit gate:** no browser action can cause a motion command after its authority,
 lease, state generation, or interlock validity has expired; the simulated
 fleet tests prove this.
 
-### Phase 5 - Trends, capture, and evidence
+### Phase 5 - Trends, capture, and evidence — complete
 
-61. Upgrade the single scope into a reusable multi-pane trend workspace.
-62. Add channel search by machine resource and semantic signal category.
-63. Attach units, quality, timebase, decimation, and scale policy to every
-    trace.
-64. Add crosshair, cursor delta, statistics, freeze, zoom, and synchronized
-    panes.
-65. Add reusable following-error, position, velocity, torque, and network-health
-    presets.
-66. Add trigger rules and pre/post-trigger server capture profiles.
-67. Implement capture status, cancellation, retention, download, and access
-    control.
-68. Add annotation of commands, alarms, state transitions, and configuration
-    changes onto trends.
-69. Add derived trace and FFT support after validating sampling assumptions.
-70. Add support-bundle generation and policy-driven export/redaction.
-71. Add capture playback/replay for recorded data, clearly labeled as replay.
-72. Persist named trend/capture layouts with resource-ID migration checks.
+Items 61–72 are implemented: the multi-pane trend workspace, channel search,
+trace metadata, presets, server capture configure/status/cancel/export,
+trend annotations, derived traces and FFT, the redacted support bundle,
+capture replay, per-channel statistics, zoom/pan/reset, the hover crosshair
+with per-channel readout, pinned A/B measurement cursors with Δt/Δv, and
+versioned named-layout persistence that reports resource IDs that no longer
+exist instead of silently dropping them.
 
 **Exit gate:** a faulted axis can produce a single support artifact containing
 its trend evidence, event timeline, logs, descriptor/configuration revision,
 and audit slice.
 
-### Phase 6 - Diagnostics and commissioning
+### Phase 6 - Diagnostics and commissioning — complete against the simulator
 
-73. Implement the detailed EtherCAT topology page.
-74. Add DC synchronization, WKC, link, cyclic-loop, and mailbox diagnostics.
-75. Add a typed SDO/object-dictionary reader with ESI/schema metadata and
-    decoded abort errors.
-76. Add a policy-gated expert SDO write workflow with preview, confirm,
-    readback, rate limit, and audit.
-77. Display PDO mapping and logical-address placement, including read/write
-    direction and expected payload size.
-78. Add slave-supervisor state, recovery history, and controlled retry action.
-79. Implement versioned configuration baselines and comparison views.
-80. Implement staged parameter/tuning changes with validation, apply, readback,
-    commit, and rollback.
-81. Add drive capability/mode/limit validation before commissioning writes.
-82. Build the guided commissioning checklist and a signed/recorded acceptance
-    report.
-83. Add a service diagnostic capture template for common DS402 faults.
-84. Add configuration import/export with schema validation, diff preview,
-    authorization, and rollback plan.
+Items 73–84 are implemented: topology view, supervisor status/retry, typed
+SDO list/read and policy-gated write, PDO map display, configuration
+export/diff/import plus stage/validate/commit/rollback, commissioning
+checklist and acceptance report, and capture templates. Remaining work is
+validation against real hardware (item 97) rather than new code.
 
 **Exit gate:** an authorized technician can diagnose an AL or DS402 fault,
 capture evidence, execute an approved recovery, and leave an auditable record
-without terminal-only tools.
+without terminal-only tools. (Met on the simulator; pending HIL.)
 
-### Phase 7 - Application profile and extension layer
+### Phase 7 - Application profile and extension layer — partially complete
 
-85. Define a declarative application-profile schema for resource naming,
-    navigation, overview cards, allowed commands, trend presets, recipes,
-    commissioning checklist, and custom diagnostic hints.
-86. Version and validate profiles server-side at startup.
-87. Let application code contribute typed adapters and declarative widgets.
-88. Add named recipes/programs with input validation, dry-run capability,
-    server-side execution, progress, stop policy, and result history.
+Items 85–88 and 90–92 are implemented: `app-profile.ts` typed adapters,
+`machine.recipe.{list,apply}`, the constrained widget/panel contract,
+keyed-BLAKE3 signing with server-side MAC verification, document-contract
+validation at attach time (`validateAppProfileDocument` in
+`ApplicationProfile.hpp`, fail-closed without Glaze), the
+signing/trust/loading rules in `docs/AppProfileTrust.md`, and external
+alarm notification hooks (`IAlarmNotifier` on `AlarmService` — inherent
+dedup, severity floor, bounded escalation, journalled `alarm.notify.*`
+audit; `web_dashboard_example` wires a stderr notifier). Remaining:
+
 89. Add optional machine visualization through a profile-provided kinematic
     scene, with actual/target overlays and no control implication by default.
-90. Add external notification hooks for alarms with deduplication, escalation,
-    acknowledgement policy, and audit.
-91. Add a constrained custom-panel contract only after core views cover the
-    identified application needs.
-92. Define signing/trust/loading rules for application profiles and extensions.
 
 **Exit gate:** a second machine application can deliver a useful operator
 experience by providing an adapter and profile, without forking the dashboard
@@ -840,14 +833,14 @@ or relying on convention-only registry names.
 
 ### Phase 8 - Hardening, deployment, and release
 
-93. Add C++ unit tests for every state-to-snapshot and command-precondition
-    mapping.
-94. Add protocol fuzz/property tests for malformed, oversized, reordered,
-    duplicated, and gap-containing messages.
-95. Add frontend unit tests for stores, unit conversion, command blockers,
-    freshness, and descriptor rendering.
-96. Add browser end-to-end tests against the simulated fleet for read-only,
-    authority, motion, fault, capture, role, reconnect, and replay workflows.
+Items 93–96, 101, and 103–105 are implemented: C++ unit/fuzz coverage,
+frontend unit tests, the env-gated live e2e test (`TETHER_E2E_URL`),
+`machine.metrics`, deployment guidance for local/LAN/reverse-proxy-TLS with
+secure defaults (`docs/WebInterfaceDeployment.md`), per-capability
+schema-versioning/rollback/feature-flag strategy (same document §6), and the
+operator/commissioning/diagnostic guide including the safety boundary
+statement (`docs/WebInterfaceOperatorGuide.md`). Remaining:
+
 97. Run hardware-in-the-loop tests with actual representative DS402 drives in a
     guarded test cell before enabling new write paths.
 98. Load-test multiple observers, one controller, high-rate streams, long
@@ -856,14 +849,14 @@ or relying on convention-only registry names.
     command replay, authorization bypass, download path traversal, and audit
     tampering.
 100. Perform accessibility and operational usability testing with target roles.
-101. Add metrics for command latency/outcome, stream gaps, stale time, queue
-    depth, browser render rate, capture failures, and UI error rate.
-102. Package static assets with version/build metadata and cache-safe upgrades.
-103. Document deployment for local-only, LAN, and reverse-proxy/TLS setups;
-    forbid exposing an unauthenticated control endpoint to untrusted networks.
-104. Provide migration, rollback, and feature-flag strategy per capability.
-105. Publish an operator guide, commissioning guide, diagnostic guide, and
-    security/safety boundary statement.
+    (Smoke coverage exists — `views/a11y.test.ts` checks labelling and live
+    regions under jsdom; a real assisted-technology pass remains.)
+
+Item 102 is implemented: `vite.config.ts` stamps `version.json`
+(`{version, gitSha, buildTime}`) into `dist/`, the same values are baked
+into the bundle and shown on the Settings page (`build-info.ts`), and
+`web_dashboard_example` serves hashed `assets/` as immutable with
+`index.html`/`version.json` as `no-cache`.
 
 **Exit gate:** release readiness requires passed simulation, HIL, security,
 performance, accessibility, and rollback criteria, plus safety-owner approval
@@ -871,19 +864,19 @@ for any newly enabled command.
 
 ## Prioritization
 
-### First usable release
+### First usable release — scope already built
 
-Deliver Phases 0 through 3, then the authority and lease portions of Phase 4.
-This yields a real fleet console: immediate read-only observability, causal
-diagnosis, controlled ownership, and safe bounded jog. It is more useful than
-a large configurable dashboard because it answers the operational questions
-that arise first.
+Phases 1–4 are implemented, yielding the real fleet console: read-only
+observability, causal diagnosis, controlled ownership, safe bounded jog, and
+guided homing. What stands between this and a deployable release is not more
+features but Phase 0's safety contract and Phase 8's hardening gates (HIL,
+security, load).
 
 ### Next highest value
 
-Deliver Phase 5 and Phase 6 next. Server-side captures and commissioning/
-diagnostics turn the interface from a live display into a practical support
-and engineering tool.
+Phases 1–6 are implemented, including the Phase 1 residual verification
+gaps (14, 24). Complete Phase 0 so the command/safety matrix is signed off
+before the write paths ship.
 
 ### Later expansion
 
@@ -911,14 +904,10 @@ Track outcomes instead of screen count:
 ## Immediate Next Actions
 
 1. Select the first representative multi-axis CiA 402 machine and write the
-   Phase 0 command/safety matrix with its controls owner.
-2. Implement the existing `machine.cia402.v1` profile on a simulated four-axis
-  backend, including V6 schema installation, read-only snapshots, and a
-  deliberately rejected command with structured blockers.
-3. Build only the Overview, fleet table, and drive detail drawer against that
-   spike. Validate the data model and workflow with operators before styling or
-   adding a layout builder.
-4. In parallel, finish V6 schema negotiation, metadata/log handling, and
-  generic schema-value rendering in the browser client so current
-  applications gain value immediately and the new domain UI has a robust
-  transport foundation.
+   Phase 0 command/safety matrix with its controls owner — this gates every
+   remaining write path.
+2. Close out Phase 7: only kinematic-scene visualization (89) remains —
+   profile validation (86), trust/loading rules (92), and external alarm
+   notification hooks (90, `IAlarmNotifier`) are done.
+3. Plan the Phase 8 hardening program (HIL cell, security review, load
+   testing) against the now-working simulated fleet.

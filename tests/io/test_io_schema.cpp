@@ -189,5 +189,194 @@ TEST(IOSchema, ComputesStableBlake3DigestFromCanonicalDescriptor) {
     EXPECT_NE(computeSchemaDigest(node), first);
 }
 
+// ---------------------------------------------------------------------------
+// Cross-language digest vectors
+//
+// These graphs mirror web/tether-io-dashboard/test-fixtures/
+// schema-digest-vectors.json.  The TypeScript client reconstructs the same
+// nodes and asserts identical BLAKE3 digests, so a drift between the two
+// canonical-descriptor encodings fails on both sides.
+// ---------------------------------------------------------------------------
+
+SchemaKey lastByteKey(uint8_t value) {
+    SchemaKey result{};
+    result[15] = value;
+    return result;
+}
+
+std::string hexDigest(const SchemaNode& node) {
+    const auto digest = computeSchemaDigest(node);
+    static constexpr char digits[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(digest.size() * 2);
+    for (uint8_t byte : digest) {
+        out += digits[byte >> 4];
+        out += digits[byte & 0x0f];
+    }
+    return out;
+}
+
+SchemaNode scalarNode(uint8_t keyByte, ValueType type, std::string name = {},
+                    uint32_t revision = 1) {
+    SchemaNode node;
+    node.key = lastByteKey(keyByte);
+    node.revision = revision;
+    node.kind = SchemaKind::Scalar;
+    node.name = std::move(name);
+    node.scalarType = type;
+    node.structEncoding = StructEncoding::Packed;
+    return node;
+}
+
+TEST(IOSchema, DigestVectorScalarU32) {
+    const auto node = scalarNode(0x01, ValueType::U32, "Counter");
+    EXPECT_EQ(hexDigest(node),
+              "30a0601a31662c4c2475fd6f379dd015e242fb1b4d1801c164928ed05015c01a");
+}
+
+TEST(IOSchema, DigestVectorAnnotatedUtf8String) {
+    SchemaNode node;
+    node.key = lastByteKey(0x02);
+    node.revision = 3;
+    node.kind = SchemaKind::String;
+    node.name = "Label \xce\xb1"; // "Label α"
+    node.description = "UTF-8 annotation ordering";
+    node.annotations = {{"Z-last", "1"}, {"a-first", "2"}, {"unit", "mm"}};
+    node.maxBytes = 64;
+    node.structEncoding = StructEncoding::Packed;
+    EXPECT_EQ(hexDigest(node),
+              "8552872e497106262afbf1b6ce4fc4eeed8dfdb067238c7ab07ce53f82c74347");
+}
+
+TEST(IOSchema, DigestVectorBoundedDynArray) {
+    auto i16 = scalarNode(0x10, ValueType::I16);
+
+    SchemaNode samples;
+    samples.key = lastByteKey(0x11);
+    samples.kind = SchemaKind::DynamicArray;
+    samples.name = "Samples";
+    samples.minCount = 1;
+    samples.maxCount = 64;
+    samples.structEncoding = StructEncoding::Packed;
+    samples.element = i16.ref();
+
+    SchemaGraph graph{{i16, samples}};
+    ASSERT_TRUE(resolveSchemaDigests(graph));
+    EXPECT_EQ(hexDigest(graph.nodes[1]),
+              "c7d65db615f35021f3a808e697e636a0e527ec369f0360eeb03df69489017e12");
+}
+
+TEST(IOSchema, DigestVectorMapStringToU32) {
+    SchemaNode keyStr;
+    keyStr.key = lastByteKey(0x20);
+    keyStr.kind = SchemaKind::String;
+    keyStr.maxBytes = 32;
+    keyStr.structEncoding = StructEncoding::Packed;
+    auto valU32 = scalarNode(0x21, ValueType::U32);
+
+    SchemaNode lookup;
+    lookup.key = lastByteKey(0x22);
+    lookup.kind = SchemaKind::Map;
+    lookup.name = "Lookup";
+    lookup.maxCount = 128;
+    lookup.structEncoding = StructEncoding::Packed;
+    lookup.mapKey = keyStr.ref();
+    lookup.mapValue = valU32.ref();
+
+    SchemaGraph graph{{keyStr, valU32, lookup}};
+    ASSERT_TRUE(resolveSchemaDigests(graph));
+    EXPECT_EQ(hexDigest(graph.nodes[2]),
+              "95696de9b778b1a4a4afefeb501f8d8c7b6fbbf9f15143a78c349ee31197ef08");
+}
+
+TEST(IOSchema, DigestVectorTaggedStructWithRestrictions) {
+    auto u32 = scalarNode(0x30, ValueType::U32);
+    SchemaNode nameNode;
+    nameNode.key = lastByteKey(0x31);
+    nameNode.kind = SchemaKind::String;
+    nameNode.maxBytes = 48;
+    nameNode.structEncoding = StructEncoding::Packed;
+
+    SchemaNode config;
+    config.key = lastByteKey(0x32);
+    config.revision = 2;
+    config.kind = SchemaKind::Struct;
+    config.name = "Config";
+    config.annotations = {{"machine.profile", "test"}};
+    config.structEncoding = StructEncoding::Tagged;
+
+    SchemaField rate{1, 0, u32.ref(), "rate", ""};
+    rate.restrictions = {{RestrictionKind::NumericRange,
+                          {0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x10, 0x27, 0x00, 0x00}}};
+    SchemaField label{2, 0, nameNode.ref(), "label", ""};
+    label.presence = FieldPresence::Optional;
+    label.defaultValue = {0x6e, 0x61, 0x6d, 0x65, 0x00}; // "name\0"
+    config.fields = {rate, label};
+
+    SchemaGraph graph{{u32, nameNode, config}};
+    ASSERT_TRUE(resolveSchemaDigests(graph));
+    EXPECT_EQ(hexDigest(graph.nodes[2]),
+              "9cf8cb945fa4b034896e3601645f827dd521e1aad4e4334de6659d8dea7a5037");
+}
+
+TEST(IOSchema, DigestVectorOneOfAndAlias) {
+    auto u32 = scalarNode(0x40, ValueType::U32);
+    auto f64 = scalarNode(0x41, ValueType::F64);
+
+    SchemaNode alias;
+    alias.key = lastByteKey(0x42);
+    alias.kind = SchemaKind::Alias;
+    alias.name = "AliasU32";
+    alias.structEncoding = StructEncoding::Packed;
+    alias.target = u32.ref();
+
+    SchemaNode root;
+    root.key = lastByteKey(0x43);
+    root.kind = SchemaKind::OneOf;
+    root.name = "Choice";
+    root.structEncoding = StructEncoding::Packed;
+    root.oneOfMembers = {{1, alias.ref()}, {5, f64.ref()}};
+
+    SchemaGraph graph{{u32, f64, alias, root}};
+    ASSERT_TRUE(resolveSchemaDigests(graph));
+    EXPECT_EQ(hexDigest(graph.nodes[3]),
+              "fce3b894dfec724b080d742b12d07277d58a8689aae56b11a8371d44e7e0643c");
+}
+
+TEST(IOSchema, DigestVectorPackedStructOptionalAndArray) {
+    auto u8 = scalarNode(0x50, ValueType::U8);
+
+    SchemaNode vec4;
+    vec4.key = lastByteKey(0x51);
+    vec4.kind = SchemaKind::FixedArray;
+    vec4.fixedCount = 4;
+    vec4.structEncoding = StructEncoding::Packed;
+    vec4.element = u8.ref();
+
+    SchemaNode maybeVec;
+    maybeVec.key = lastByteKey(0x52);
+    maybeVec.kind = SchemaKind::Optional;
+    maybeVec.structEncoding = StructEncoding::Packed;
+    maybeVec.element = vec4.ref();
+
+    SchemaNode snapshot;
+    snapshot.key = lastByteKey(0x53);
+    snapshot.revision = 7;
+    snapshot.kind = SchemaKind::Struct;
+    snapshot.name = "Snapshot";
+    snapshot.structEncoding = StructEncoding::Packed;
+
+    SchemaField vec{1, 0, maybeVec.ref(), "vec", ""};
+    SchemaField state{2, 0, u8.ref(), "state", ""};
+    state.restrictions = {{RestrictionKind::MultipleOf, {0x04}},
+                          {RestrictionKind::AllowedValues, {0x02, 0x01, 0x01, 0x01, 0x02}}};
+    snapshot.fields = {vec, state};
+
+    SchemaGraph graph{{u8, vec4, maybeVec, snapshot}};
+    ASSERT_TRUE(resolveSchemaDigests(graph));
+    EXPECT_EQ(hexDigest(graph.nodes[3]),
+              "69964085564112dc1a8f28c1476e914df3492a5f57b354c6fe1c883424142610");
+}
+
 } // namespace
 } // namespace tether::io
