@@ -60,10 +60,7 @@ function thresholdClass(widget: AppProfileWidget, value: number | string | undef
   return '';
 }
 
-function renderWidget(
-  widget: AppProfileWidget,
-  model: PanelsModel,
-): string {
+function renderWidget(widget: AppProfileWidget, model: PanelsModel): string {
   const key = widgetKey(widget);
   const value = widget.entry !== undefined ? model.values.get(key) : undefined;
   const shown = shownValue(widget, value);
@@ -99,13 +96,77 @@ function renderWidget(
       const max = widget.max ?? Math.max(...samples, 1);
       const span = max > min ? max - min : 1;
       const points = samples
-        .map((v, i) => `${((i / Math.max(1, samples.length - 1)) * 100).toFixed(1)},${(30 - ((v - min) / span) * 28 - 1).toFixed(1)}`)
+        .map(
+          (v, i) =>
+            `${((i / Math.max(1, samples.length - 1)) * 100).toFixed(1)},${(30 - ((v - min) / span) * 28 - 1).toFixed(1)}`,
+        )
         .join(' ');
       return `<div class="${cls}">${label}
         <svg class="widget-spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
           ${samples.length > 1 ? `<polyline points="${points}" fill="none"/>` : ''}
         </svg>
         <span class="widget-value">${shown}${unit}</span></div>`;
+    }
+    case 'scene': {
+      // Read-only kinematic scene (plan item 89): top-down XY view of actual
+      // (filled) vs target (hollow) positions; a third axis renders as a Z bar.
+      const axes = widget.axes ?? [];
+      const norm = (i: number) => {
+        const a = axes[i];
+        if (!a) return undefined;
+        const v = model.values.get(`${a.entry}.${a.field}`);
+        if (typeof v !== 'number') return undefined;
+        const min = a.min ?? 0;
+        const max = a.max ?? 1;
+        return max > min ? Math.min(1, Math.max(0, (v - min) / (max - min))) : 0;
+      };
+      const normTarget = (i: number) => {
+        const a = axes[i];
+        if (!a?.targetField) return undefined;
+        const v = model.values.get(`${a.entry}.${a.targetField}`);
+        if (typeof v !== 'number') return undefined;
+        const min = a.min ?? 0;
+        const max = a.max ?? 1;
+        return max > min ? Math.min(1, Math.max(0, (v - min) / (max - min))) : 0;
+      };
+      const xa = norm(0);
+      const ya = norm(1);
+      const xt = normTarget(0);
+      const yt = normTarget(1);
+      const za = norm(2);
+      const zt = normTarget(2);
+      const px = (f: number) => (8 + f * 84).toFixed(1);
+      const py = (f: number) => (92 - f * 84).toFixed(1);
+      const nameOf = (i: number) => esc(axes[i]?.name ?? 'xyz'[i] ?? `a${i}`);
+      const actual =
+        xa !== undefined && ya !== undefined
+          ? `<circle class="scene-actual" cx="${px(xa)}" cy="${py(ya)}" r="4"/>`
+          : '';
+      const target =
+        xt !== undefined && yt !== undefined
+          ? `<circle class="scene-target" cx="${px(xt)}" cy="${py(yt)}" r="4"/>`
+          : '';
+      const zBar =
+        axes.length > 2
+          ? `<rect x="104" y="8" width="6" height="84" class="scene-frame"/>
+             ${za !== undefined ? `<rect x="104" y="${(92 - za * 84).toFixed(1)}" width="6" height="${(za * 84).toFixed(1)}" class="scene-actual"/>` : ''}
+             ${zt !== undefined ? `<line x1="102" y1="${(92 - zt * 84).toFixed(1)}" x2="112" y2="${(92 - zt * 84).toFixed(1)}" class="scene-target"/>` : ''}
+             <text x="107" y="98" class="scene-axis-label" text-anchor="middle">${nameOf(2)}</text>`
+          : '';
+      const summary = axes
+        .map(
+          (a, i) =>
+            `${a.name ?? 'xyz'[i]}=${esc(shownValue({ ...widget, decimals: widget.decimals ?? 0 }, model.values.get(`${a.entry}.${a.field}`)))}`,
+        )
+        .join(' ');
+      return `<div class="${cls}">${label}
+        <svg class="widget-scene" viewBox="0 0 ${axes.length > 2 ? 114 : 100} 100" role="img" aria-label="${esc(widget.label)}: ${esc(summary)}">
+          <rect x="8" y="8" width="84" height="84" class="scene-frame"/>
+          ${target}${actual}${zBar}
+          <text x="50" y="4" class="scene-axis-label" text-anchor="middle">${nameOf(1) ?? ''}</text>
+          <text x="96" y="98" class="scene-axis-label" text-anchor="end">${nameOf(0)}</text>
+        </svg>
+        <span class="widget-value">${esc(summary)}${unit}</span></div>`;
     }
     case 'state':
     case 'lamp': {
@@ -173,7 +234,9 @@ export function renderPanels(root: HTMLElement, model: PanelsModel): void {
       : '';
   const panels = model.profile.panels
     .map(
-      (p) => `<article class="machine-card panel-card"><div class="panel-title"><div><span class="eyebrow">${esc(p.id)}</span><h3>${esc(p.title)}</h3></div></div>
+      (
+        p,
+      ) => `<article class="machine-card panel-card"><div class="panel-title"><div><span class="eyebrow">${esc(p.id)}</span><h3>${esc(p.title)}</h3></div></div>
       <div class="panel-widgets">${p.widgets.map((w) => renderWidget(w, model)).join('')}</div></article>`,
     )
     .join('');

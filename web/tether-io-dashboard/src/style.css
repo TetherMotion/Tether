@@ -2276,6 +2276,31 @@ tr.diag-row-fault td {
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
+
+/* Kinematic scene widget (profile-provided machine view, item 89) */
+.widget-scene {
+  width: 100%;
+  max-width: 220px;
+  display: block;
+}
+.widget-scene .scene-frame {
+  fill: none;
+  stroke: var(--border, #444);
+  stroke-width: 1;
+}
+.widget-scene .scene-actual {
+  fill: #58a6ff;
+  stroke: none;
+}
+.widget-scene .scene-target {
+  fill: none;
+  stroke: #d29922;
+  stroke-width: 1.5;
+}
+.widget-scene .scene-axis-label {
+  fill: var(--fg-dim, #8b949e);
+  font-size: 8px;
+}
 .widget-gauge {
   position: relative;
   width: 100%;

@@ -1453,6 +1453,13 @@ TEST(SimulatedMachineServiceStatic, AppProfileSourceValidatesDocumentContract) {
     EXPECT_FALSE(installs(bytes(R"JSON({"format":"tether.app.profile.v1","panels":[{
         "id": "p", "title": "P",
         "widgets": [{"kind": "unknown", "label": "U"}]}]})JSON")));
+    EXPECT_FALSE(installs(bytes(R"JSON({"format":"tether.app.profile.v1","panels":[{
+        "id": "p", "title": "P",
+        "widgets": [{"kind": "scene", "label": "S"}]}]})JSON")));  // missing axes
+    EXPECT_FALSE(installs(bytes(R"JSON({"format":"tether.app.profile.v1","panels":[{
+        "id": "p", "title": "P",
+        "widgets": [{"kind": "scene", "label": "S",
+                     "axes": [{"entry": "sig"}]}]}]})JSON")));  // missing field
     EXPECT_FALSE(installs(bytes(R"JSON({"format":"tether.app.profile.v1","panels":[
         {"id": "p", "title": "A"}, {"id": "p", "title": "B"}]})JSON")));  // dup ids
     EXPECT_FALSE(installs(
@@ -1466,7 +1473,10 @@ TEST(SimulatedMachineServiceStatic, AppProfileSourceValidatesDocumentContract) {
             {"kind": "gauge", "label": "G", "entry": "sine_wave", "min": -1, "max": 1},
             {"kind": "jog", "label": "J", "axis": "sim-axis-x"},
             {"kind": "command", "label": "E", "axis": "sim-axis-x", "action": 0},
-            {"kind": "button", "label": "B", "fn": "machine.checklist.report"}]}]})JSON")));
+            {"kind": "button", "label": "B", "fn": "machine.checklist.report"},
+            {"kind": "scene", "label": "S", "axes": [
+                {"name": "x", "entry": "drive.x.snapshot", "field": "actual_position",
+                 "targetField": "target_position", "min": -100, "max": 100}]}]}]})JSON")));
 }
 
 TEST_F(SimulatedMachineServiceTest, RecipeApplyStagesTransactionAndIsAudited) {

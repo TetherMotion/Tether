@@ -84,11 +84,10 @@ extension/profile trust layer, and Phase 8 hardening.
   record) exists and `web_dashboard_example --audit-log` wires it to the
   event journal. Rotation/retention policy and a deployment default are not
   defined.
-- **Extension trust layer**: application profiles exist
-  (`app-profile.ts`) with keyed-BLAKE3 signing, server-side MAC verification
-  and document-contract validation (`docs/AppProfileTrust.md`); remaining
-  gaps are kinematic-scene visualization (89) and external alarm
-  notification hooks (90).
+- **Extension trust layer**: complete — signed profiles with server-side
+  MAC verification and document-contract validation
+  (`docs/AppProfileTrust.md`), external alarm notification hooks
+  (`IAlarmNotifier`), and the kinematic `scene` widget.
 - **Phase 8 hardening**: HIL runs on real drives, security testing, load
   testing, formal accessibility/usability testing, and build-metadata
   packaging remain. Deployment and operator/commissioning/diagnostic guides
@@ -812,24 +811,24 @@ validation against real hardware (item 97) rather than new code.
 capture evidence, execute an approved recovery, and leave an auditable record
 without terminal-only tools. (Met on the simulator; pending HIL.)
 
-### Phase 7 - Application profile and extension layer — partially complete
+### Phase 7 - Application profile and extension layer — complete
 
-Items 85–88 and 90–92 are implemented: `app-profile.ts` typed adapters,
+Items 85–92 are implemented: `app-profile.ts` typed adapters,
 `machine.recipe.{list,apply}`, the constrained widget/panel contract,
 keyed-BLAKE3 signing with server-side MAC verification, document-contract
 validation at attach time (`validateAppProfileDocument` in
 `ApplicationProfile.hpp`, fail-closed without Glaze), the
-signing/trust/loading rules in `docs/AppProfileTrust.md`, and external
-alarm notification hooks (`IAlarmNotifier` on `AlarmService` — inherent
-dedup, severity floor, bounded escalation, journalled `alarm.notify.*`
-audit; `web_dashboard_example` wires a stderr notifier). Remaining:
-
-89. Add optional machine visualization through a profile-provided kinematic
-    scene, with actual/target overlays and no control implication by default.
+signing/trust/loading rules in `docs/AppProfileTrust.md`, external alarm
+notification hooks (`IAlarmNotifier` on `AlarmService` — inherent dedup,
+severity floor, bounded escalation, journalled `alarm.notify.*` audit), and
+the profile-provided kinematic `scene` widget — a read-only top-down view of
+actual (filled) vs target (hollow) positions over 1–3 axis bindings, with no
+control implication.
 
 **Exit gate:** a second machine application can deliver a useful operator
 experience by providing an adapter and profile, without forking the dashboard
-or relying on convention-only registry names.
+or relying on convention-only registry names. (Met: profiles drive panels,
+scenes, recipes, and control widgets through the signed-document surface.)
 
 ### Phase 8 - Hardening, deployment, and release
 
@@ -906,8 +905,8 @@ Track outcomes instead of screen count:
 1. Select the first representative multi-axis CiA 402 machine and write the
    Phase 0 command/safety matrix with its controls owner — this gates every
    remaining write path.
-2. Close out Phase 7: only kinematic-scene visualization (89) remains —
-   profile validation (86), trust/loading rules (92), and external alarm
-   notification hooks (90, `IAlarmNotifier`) are done.
+2. Phase 7 is complete — the kinematic `scene` widget (89) closed the last
+   gap alongside profile validation (86), trust/loading rules (92), and
+   alarm notification hooks (90).
 3. Plan the Phase 8 hardening program (HIL cell, security review, load
    testing) against the now-working simulated fleet.

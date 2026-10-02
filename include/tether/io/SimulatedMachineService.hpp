@@ -730,6 +730,15 @@ struct SimulatedMachineStack {
                         {"kind": "command", "label": "Fault reset X", "axis": "sim-axis-x", "action": 3},
                         {"kind": "button", "label": "Acceptance report", "fn": "machine.checklist.report"}
                     ]
+                }, {
+                    "id": "gantry",
+                    "title": "Machine view (read-only)",
+                    "widgets": [
+                        {"kind": "scene", "label": "XY position", "axes": [
+                            {"name": "x", "entry": "drive.sim-axis-x.snapshot", "field": "actual_position", "targetField": "target_position", "min": -10000, "max": 10000},
+                            {"name": "y", "entry": "drive.sim-axis-y.snapshot", "field": "actual_position", "targetField": "target_position", "min": -10000, "max": 10000}
+                        ]}
+                    ]
                 }]
             })PROFILE";
             appProfile.emplace(key);

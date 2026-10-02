@@ -15,9 +15,32 @@ export const APP_PROFILE_FORMAT = 'tether.app.profile.v1';
 
 export type AppProfileWidgetKind =
   // display
-  | 'value' | 'bar' | 'gauge' | 'state' | 'lamp' | 'dro' | 'sparkline'
+  | 'value'
+  | 'bar'
+  | 'gauge'
+  | 'state'
+  | 'lamp'
+  | 'dro'
+  | 'sparkline'
+  | 'scene'
   // interactive — routed through the normal command/function surface
-  | 'jog' | 'command' | 'button';
+  | 'jog'
+  | 'command'
+  | 'button';
+
+/** One axis binding inside a `scene` widget (plan item 89). */
+export interface AppProfileAxisBinding {
+  /** Axis label shown in the scene (defaults to x/y/z by position). */
+  name?: string;
+  /** Catalog signal name holding the axis position record. */
+  entry: string;
+  /** Struct field with the actual position. */
+  field: string;
+  /** Optional struct field with the target position (drawn hollow). */
+  targetField?: string;
+  min?: number;
+  max?: number;
+}
 
 export interface AppProfileWidget {
   kind: AppProfileWidgetKind;
@@ -43,6 +66,8 @@ export interface AppProfileWidget {
   action?: number;
   /** button: zero-argument machine function name to invoke. */
   fn?: string;
+  /** scene: 1–3 axis bindings (x, y, optional z) for a top-down position view. */
+  axes?: AppProfileAxisBinding[];
 }
 
 export interface AppProfilePanel {
@@ -59,13 +84,31 @@ export interface AppProfile {
 }
 
 const WIDGET_KINDS = new Set<AppProfileWidgetKind>([
-  'value', 'bar', 'gauge', 'state', 'lamp', 'dro', 'sparkline',
-  'jog', 'command', 'button',
+  'value',
+  'bar',
+  'gauge',
+  'state',
+  'lamp',
+  'dro',
+  'sparkline',
+  'scene',
+  'jog',
+  'command',
+  'button',
 ]);
 
 /** Kinds that read a signal — all others are pure controls. */
 export const READING_WIDGET_KINDS = new Set<AppProfileWidgetKind>([
-  'value', 'bar', 'gauge', 'state', 'lamp', 'dro', 'sparkline', 'jog', 'command',
+  'value',
+  'bar',
+  'gauge',
+  'state',
+  'lamp',
+  'dro',
+  'sparkline',
+  'scene',
+  'jog',
+  'command',
 ]);
 
 function asWidget(value: unknown): AppProfileWidget | undefined {
@@ -80,9 +123,11 @@ function asWidget(value: unknown): AppProfileWidget | undefined {
   const kind = raw.kind as AppProfileWidgetKind;
   const reads = READING_WIDGET_KINDS.has(kind);
   const entry = typeof raw.entry === 'string' && raw.entry.length ? raw.entry : undefined;
-  if (reads && kind !== 'jog' && kind !== 'command' && !entry) return undefined;
+  if (reads && kind !== 'jog' && kind !== 'command' && kind !== 'scene' && !entry) return undefined;
   const axis = typeof raw.axis === 'string' && raw.axis.length ? raw.axis : undefined;
   if (kind === 'jog' && !axis) return undefined;
+  const axes = asAxisBindings(raw.axes);
+  if (kind === 'scene' && (!axes || axes.length === 0)) return undefined;
   const action =
     typeof raw.action === 'number' && Number.isInteger(raw.action) && raw.action >= 0
       ? raw.action
@@ -112,7 +157,71 @@ function asWidget(value: unknown): AppProfileWidget | undefined {
     axis,
     action,
     fn,
+    axes,
   };
+}
+
+const AXIS_NAMES = ['x', 'y', 'z'];
+
+function asAxisBindings(value: unknown): AppProfileAxisBinding[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 3) return undefined;
+  const bindings: AppProfileAxisBinding[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const a = raw as Record<string, unknown>;
+    if (
+      typeof a.entry !== 'string' ||
+      !a.entry.length ||
+      typeof a.field !== 'string' ||
+      !a.field.length
+    )
+      return undefined;
+    const num = (key: string) =>
+      typeof a[key] === 'number' && Number.isFinite(a[key] as number)
+        ? (a[key] as number)
+        : undefined;
+    bindings.push({
+      name: typeof a.name === 'string' && a.name.length ? a.name : undefined,
+      entry: a.entry,
+      field: a.field,
+      targetField:
+        typeof a.targetField === 'string' && a.targetField.length ? a.targetField : undefined,
+      min: num('min'),
+      max: num('max'),
+    });
+  }
+  return bindings;
+}
+
+/** Every signal binding a widget reads, as {entry, field, key} tuples. */
+export function* widgetSignalBindings(
+  widget: AppProfileWidget,
+): Generator<{ entry: string; field?: string; key: string }> {
+  if (widget.kind === 'scene' && widget.axes) {
+    for (const axis of widget.axes) {
+      yield { entry: axis.entry, field: axis.field, key: `${axis.entry}.${axis.field}` };
+      if (axis.targetField)
+        yield {
+          entry: axis.entry,
+          field: axis.targetField,
+          key: `${axis.entry}.${axis.targetField}`,
+        };
+    }
+    return;
+  }
+  if (widget.entry) {
+    const field = widget.field;
+    yield {
+      entry: widget.entry,
+      field,
+      key: field ? `${widget.entry}.${field}` : widget.entry,
+    };
+  }
+}
+
+/** Default axis label for a scene binding index (x, y, z). */
+export function axisNameAt(index: number): string {
+  return AXIS_NAMES[index] ?? `a${index}`;
 }
 
 /** Parse a profile document; returns undefined on malformed input. */

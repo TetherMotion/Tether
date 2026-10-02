@@ -76,7 +76,12 @@ import {
   splitCaptureRecords,
 } from './domain/analysis';
 import { DriveSnapshotRecord, openDriveDetail, renderDriveViews } from './views/drives';
-import { AppProfile, findAppProfileEntry, readAppProfile } from './domain/app-profile';
+import {
+  AppProfile,
+  findAppProfileEntry,
+  readAppProfile,
+  widgetSignalBindings,
+} from './domain/app-profile';
 import { renderPanels } from './views/panels';
 import { renderRecipes } from './views/recipes';
 import './style.css';
@@ -1206,9 +1211,14 @@ class TetherApp extends HTMLElement {
       this.appProfile = await readAppProfile(this.client, this.appProfileEntry);
       if (this.appProfile) {
         const known = new Set(this.signals.map((s) => s.name));
-        this.panelUnresolved = this.appProfile.panels
-          .flatMap((p) => p.widgets.map((w) => w.entry))
-          .filter((name): name is string => !!name && !known.has(name));
+        this.panelUnresolved = [
+          ...new Set(
+            this.appProfile.panels
+              .flatMap((p) => p.widgets.flatMap((w) => [...widgetSignalBindings(w)]))
+              .map((binding) => binding.entry)
+              .filter((name) => !known.has(name)),
+          ),
+        ];
       }
     } catch {
       this.appProfile = undefined;
@@ -1238,42 +1248,43 @@ class TetherApp extends HTMLElement {
     let changed = false;
     for (const panel of this.appProfile.panels) {
       for (const widget of panel.widgets) {
-        if (!widget.entry) continue;
-        const entry = byName.get(widget.entry);
-        if (!entry) continue;
-        const key = widget.field ? `${widget.entry}.${widget.field}` : widget.entry;
-        try {
-          let value = await this.client.getTyped(entry);
-          if (
-            widget.field &&
-            value &&
-            typeof value === 'object' &&
-            !Array.isArray(value) &&
-            !(value instanceof Uint8Array)
-          ) {
-            value = (value as Record<string, unknown>)[widget.field] as never;
-          }
-          const normalized =
-            typeof value === 'bigint'
-              ? Number(value)
-              : typeof value === 'number' || typeof value === 'boolean'
+        for (const binding of widgetSignalBindings(widget)) {
+          const entry = byName.get(binding.entry);
+          if (!entry) continue;
+          const key = binding.key;
+          try {
+            let value = await this.client.getTyped(entry);
+            if (
+              binding.field &&
+              value &&
+              typeof value === 'object' &&
+              !Array.isArray(value) &&
+              !(value instanceof Uint8Array)
+            ) {
+              value = (value as Record<string, unknown>)[binding.field] as never;
+            }
+            const normalized =
+              typeof value === 'bigint'
                 ? Number(value)
-                : typeof value === 'string'
-                  ? value
-                  : undefined;
-          if (normalized === undefined) continue;
-          if (this.panelValues.get(key) !== normalized) {
-            this.panelValues.set(key, normalized);
-            changed = true;
+                : typeof value === 'number' || typeof value === 'boolean'
+                  ? Number(value)
+                  : typeof value === 'string'
+                    ? value
+                    : undefined;
+            if (normalized === undefined) continue;
+            if (this.panelValues.get(key) !== normalized) {
+              this.panelValues.set(key, normalized);
+              changed = true;
+            }
+            if (typeof normalized === 'number') {
+              const history = this.panelHistory.get(key) ?? [];
+              history.push(normalized);
+              if (history.length > 120) history.shift();
+              this.panelHistory.set(key, history);
+            }
+          } catch {
+            /* single-entry read failure leaves the last value in place */
           }
-          if (typeof normalized === 'number') {
-            const history = this.panelHistory.get(key) ?? [];
-            history.push(normalized);
-            if (history.length > 120) history.shift();
-            this.panelHistory.set(key, history);
-          }
-        } catch {
-          /* single-entry read failure leaves the last value in place */
         }
       }
     }
