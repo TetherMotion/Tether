@@ -93,6 +93,30 @@ inline bool profileWidgetValid(const glz::generic& widget) {
         std::string_view ignored;
         return value && profileString(*value, ignored, kMaxProfileString);
     };
+    if (kind == "scene") {
+        // Kinematic scene (item 89): 1–3 axis bindings, each a signal entry
+        // plus the field holding the actual (and optional target) position.
+        const auto* axes = find("axes");
+        if (!axes) return false;
+        const auto* list = axes->get_if<glz::generic::array_t>();
+        if (!list || list->empty() || list->size() > 3) return false;
+        for (const auto& axis : *list) {
+            const auto* object = axis.get_if<glz::generic::object_t>();
+            if (!object) return false;
+            const auto entry = object->find("entry");
+            const auto field = object->find("field");
+            std::string_view ignored;
+            if (entry == object->end() || field == object->end() ||
+                !profileString(entry->second, ignored, kMaxProfileString) ||
+                !profileString(field->second, ignored, kMaxProfileString))
+                return false;
+            const auto target = object->find("targetField");
+            if (target != object->end() &&
+                !profileString(target->second, ignored, kMaxProfileString))
+                return false;
+        }
+        return true;
+    }
     if (reading.contains(kind)) return hasString("entry");
     if (kind == "jog") return hasString("axis");
     if (kind == "command") {
