@@ -46,6 +46,15 @@ const char* msgTypeName(uint8_t type) {
     }
 }
 
+/// Inbound per-session queue bounds (plan item 24): a client that floods
+/// faster than the session loop drains would otherwise grow memory without
+/// limit.  Exceeding either bound fails closed — the transport is closed and
+/// the session ends.
+constexpr size_t kMaxInboundQueueMessages = 256;
+constexpr size_t kMaxInboundQueueBytes = 4 * 1024 * 1024;
+/// Single-message bound, matching the negotiated V6 maxMessageBytes.
+constexpr size_t kMaxMessageBytes = 1 * 1024 * 1024;
+
 } // namespace
 
 class WebSocketTransport final : public ITransport {
@@ -73,6 +82,7 @@ public:
         std::copy_n(msg.data() + msgOffset_, count, data);
         msgOffset_ += count;
         if (msgOffset_ >= msg.size()) {
+            queuedBytes_ -= msg.size();
             messages_.pop_front();
             msgOffset_ = 0;
         }
@@ -86,17 +96,28 @@ public:
                                  [this] { return !messages_.empty() || !connected_; });
         }
         if (messages_.empty()) return false;
+        queuedBytes_ -= messages_.front().size();
         out = std::move(messages_.front());
         messages_.pop_front();
         msgOffset_ = 0;
         return true;
     }
 
-    void push(std::string_view bytes) {
+    /// Queue one inbound message; returns false when the per-session queue
+    /// bounds were exceeded and the transport was closed (fail closed).
+    bool push(std::string_view bytes) {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!connected_) return;
+        if (!connected_) return false;
+        if (messages_.size() >= kMaxInboundQueueMessages ||
+            queuedBytes_ + bytes.size() > kMaxInboundQueueBytes) {
+            connected_ = false;
+            inputReady_.notify_all();
+            return false;
+        }
+        queuedBytes_ += bytes.size();
         messages_.emplace_back(bytes.begin(), bytes.end());
         inputReady_.notify_one();
+        return true;
     }
 
     void close() override {
@@ -115,9 +136,18 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable inputReady_;
     std::deque<std::vector<uint8_t>> messages_;
+    size_t queuedBytes_ = 0;
     size_t msgOffset_ = 0;
     bool connected_ = true;
 };
+
+machine::Role parseRole(std::string_view name) {
+    if (name == "operator") return machine::Role::Operator;
+    if (name == "technician") return machine::Role::Technician;
+    if (name == "engineer") return machine::Role::ControlsEngineer;
+    if (name == "admin") return machine::Role::Administrator;
+    return machine::Role::Observer;
+}
 
 struct TetherIOWebSocketController::Client {
     std::unique_ptr<WebSocketTransport> transport;
@@ -127,7 +157,9 @@ struct TetherIOWebSocketController::Client {
     tether::io::LogFn logFn;
 
         Client(drogon::WebSocketConnectionPtr connection, Registry& registry,
-            tether::io::LogFn logFn, SchemaCatalog* schemaCatalog)
+            tether::io::LogFn logFn, SchemaCatalog* schemaCatalog,
+            const drogon::HttpRequestPtr& request, std::string_view roleQueryParam,
+            const machine::IMachineAuthProvider* authProvider)
         : transport(std::make_unique<WebSocketTransport>(std::move(connection)))
         , logFn(logFn) {
         transportPtr = transport.get();
@@ -141,6 +173,41 @@ struct TetherIOWebSocketController::Client {
             logFn, nullptr, nullptr, nullptr, nullptr,
             nullptr,
             Framing::None, nullptr, schemaCatalog);
+        // Production identity binding: the auth provider maps the Bearer
+        // credential on the upgrade request to an authenticated identity.
+        // No provider/no match leaves the session unauthenticated (observer
+        // reads still work; every mutation path fails closed).
+        if (authProvider && request) {
+            auto credential =
+                machine::bearerCredential(request->getHeader("Authorization"));
+            // Browsers cannot set headers on a WebSocket upgrade; accept the
+            // credential as a `token` query parameter instead. Treat this as
+            // Bearer over TLS/loopback — never log the value.
+            if (!credential) {
+                const auto tokenParam = request->getParameter("token");
+                if (!tokenParam.empty()) credential = tokenParam;
+            }
+            if (credential) {
+                if (auto identity = authProvider->authenticate(*credential))
+                    session->setIdentity(std::move(*identity));
+                else if (logFn)
+                    logFn("TetherIO", "Rejected credential for new session");
+            }
+        }
+        // Development identity binding: a production deployment derives the
+        // role/actor from the authenticated transport (mTLS, proxy identity,
+        // session cookie) and never from a client-supplied query parameter.
+        if (!roleQueryParam.empty() && request) {
+            const auto roleName = request->getParameter(std::string(roleQueryParam));
+            if (!roleName.empty()) {
+                machine::SessionIdentity identity;
+                identity.actor = "dev-" + roleName;
+                identity.source = "websocket-query";
+                identity.role = parseRole(roleName);
+                identity.authenticated = true;
+                session->setIdentity(std::move(identity));
+            }
+        }
         worker = std::thread([this] { session->run(); });
     }
 
@@ -152,12 +219,17 @@ struct TetherIOWebSocketController::Client {
 };
 
 TetherIOWebSocketController::TetherIOWebSocketController(
-    Registry& registry, tether::io::LogFn logFn, SchemaCatalog* schemaCatalog)
-    : registry_(registry), logFn_(logFn), schemaCatalog_(schemaCatalog) {}
+    Registry& registry, tether::io::LogFn logFn, SchemaCatalog* schemaCatalog,
+    machine::MachineService* machineService, std::string roleQueryParam,
+    const machine::IMachineAuthProvider* authProvider)
+    : registry_(registry), logFn_(logFn), schemaCatalog_(schemaCatalog),
+      machineService_(machineService), roleQueryParam_(std::move(roleQueryParam)),
+      authProvider_(authProvider) {}
 
 void TetherIOWebSocketController::handleNewConnection(
-    const drogon::HttpRequestPtr&, const drogon::WebSocketConnectionPtr& connection) {
-    auto client = std::make_shared<Client>(connection, registry_, logFn_, schemaCatalog_);
+    const drogon::HttpRequestPtr& request, const drogon::WebSocketConnectionPtr& connection) {
+    auto client = std::make_shared<Client>(connection, registry_, logFn_, schemaCatalog_,
+                                           request, roleQueryParam_, authProvider_);
     std::lock_guard<std::mutex> lock(mutex_);
     clients_.emplace(connection.get(), std::move(client));
     if (logFn_) logFn_("TetherIO", "WebSocket client connected (total=%zu)",
@@ -172,6 +244,14 @@ void TetherIOWebSocketController::handleNewMessage(
                             static_cast<int>(type));
         return;
     }
+    // A message larger than the negotiated maximum violates the protocol —
+    // drop the connection rather than trying to recover stream sync.
+    if (message.size() > kMaxMessageBytes) {
+        if (logFn_) logFn_("TetherIO", "Dropping oversized message (%zu bytes), closing session",
+                            message.size());
+        connection->forceClose();
+        return;
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     const auto it = clients_.find(connection.get());
     if (it != clients_.end()) {
@@ -180,7 +260,10 @@ void TetherIOWebSocketController::handleNewMessage(
         if (len > 0 && logFn_) {
             logFn_("TetherIO", "→ RX %s (%zu bytes)", msgTypeName(data[0]), len);
         }
-        it->second->transportPtr->push(message);
+        if (!it->second->transportPtr->push(message)) {
+            if (logFn_) logFn_("TetherIO", "Inbound queue overflow — closing session");
+            connection->forceClose();
+        }
     }
 }
 
@@ -197,6 +280,9 @@ void TetherIOWebSocketController::handleConnectionClosed(
                             clients_.size());
     }
     client->session->requestStop();
+    // Disconnect/expiry stop semantics: release the session's authority
+    // leases and cancel its in-flight operations.
+    if (machineService_) machineService_->sessionEnded(client->session->sessionId());
 }
 
 } // namespace tether::io::example

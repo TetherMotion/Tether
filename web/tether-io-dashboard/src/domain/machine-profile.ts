@@ -1,10 +1,12 @@
-import { CatalogEntry } from '../protocol';
+import { CatalogEntry, FunctionEntry } from '../protocol';
 import { SchemaCatalogV6 } from '../schema-v6';
 import { TetherIOClient } from '../client';
+import { MACHINE_FUNCTION_NAMES } from './machine-control';
 
 export const DRIVE_SNAPSHOT_ROOT = 'tether.machine.cia402.DriveSnapshotV1';
 export const MACHINE_DESCRIPTOR_ROOT = 'tether.machine.cia402.MachineDescriptorV1';
 export const MACHINE_SNAPSHOT_ROOT = 'tether.machine.cia402.MachineSnapshotV1';
+export const MACHINE_DIAGNOSTICS_ROOT = 'tether.machine.cia402.MachineDiagnosticsV1';
 
 export interface DriveSnapshotView {
   timestampUs: bigint;
@@ -36,8 +38,9 @@ export interface MachineProfileAvailability {
   machineSnapshot: boolean;
   descriptorEntry?: CatalogEntry;
   machineSnapshotEntry?: CatalogEntry;
+  diagnosticsEntry?: CatalogEntry;
   driveSnapshots: CatalogEntry[];
-  controlsAvailable: false;
+  controlsAvailable: boolean;
   explanation: string;
 }
 
@@ -123,7 +126,14 @@ function readBoolean(record: Record<string, unknown>, key: string): boolean {
 export function discoverMachineProfile(
   catalog: SchemaCatalogV6 | undefined,
   signals: CatalogEntry[],
+  functions: FunctionEntry[] = [],
 ): MachineProfileAvailability {
+  const functionNames = new Set(functions.map((entry) => entry.name));
+  const controls =
+    functionNames.has(MACHINE_FUNCTION_NAMES.authorityAcquire) &&
+    functionNames.has(MACHINE_FUNCTION_NAMES.authorityRelease) &&
+    functionNames.has(MACHINE_FUNCTION_NAMES.command) &&
+    functionNames.has(MACHINE_FUNCTION_NAMES.alarmsRead);
   if (!catalog) {
     return {
       profile: 'unavailable', descriptor: false, machineSnapshot: false,
@@ -140,6 +150,11 @@ export function discoverMachineProfile(
   const machineSnapshotEntry = signals.find((entry) =>
     entry.schemaEpoch === BigInt(catalog.epoch) && catalog.slotToNode[entry.schemaSlot]?.name === MACHINE_SNAPSHOT_ROOT,
   );
+  // Optional surface: present only when the server attached a diagnostics
+  // source. Absent is normal — the view renders "not available".
+  const diagnosticsEntry = signals.find((entry) =>
+    entry.schemaEpoch === BigInt(catalog.epoch) && catalog.slotToNode[entry.schemaSlot]?.name === MACHINE_DIAGNOSTICS_ROOT,
+  );
   const driveSnapshots = signals.filter((entry) =>
     entry.schemaEpoch === BigInt(catalog.epoch) && catalog.slotToNode[entry.schemaSlot]?.name === DRIVE_SNAPSHOT_ROOT,
   );
@@ -150,10 +165,13 @@ export function discoverMachineProfile(
     machineSnapshot,
     descriptorEntry,
     machineSnapshotEntry,
+    diagnosticsEntry,
     driveSnapshots,
-    controlsAvailable: false,
+    controlsAvailable: controls,
     explanation: complete
-      ? 'Profile state is schema-negotiated. Motion remains read-only until the server advertises authenticated authority and validated command services.'
+      ? controls
+        ? 'Profile state is schema-negotiated and the server advertises validated command services. Commands require an authenticated operator lease and are bounded by deadline and state-generation checks; they do not replace functional safety systems.'
+        : 'Profile state is schema-negotiated. Motion remains read-only until the server advertises authenticated authority and validated command services.'
       : 'This server does not expose the complete machine.cia402.v1 descriptor/snapshot contract. Generic IO is available in Explore; browser motion controls are disabled.',
   };
 }
@@ -258,6 +276,78 @@ export async function readDriveSnapshot(client: TetherIOClient, entry: CatalogEn
     targetTorque: readNumber(record, 'target_torque'),
     actualTorque: readNumber(record, 'actual_torque'),
     homingState: readNumber(record, 'homing_state'),
+  };
+}
+
+export interface MachineDiagnosticsView {
+  timestampUs: bigint;
+  cycleCount: bigint;
+  missedDeadlines: bigint;
+  maxCycleWorkUs: number;
+  jitterMaxUs: number;
+  jitterAvgUs: number;
+  dcSyncCount: bigint;
+  dcSyncErrors: bigint;
+  dcJitterMaxUs: number;
+  mbxSends: bigint;
+  mbxSendErrors: bigint;
+  mbxCollects: bigint;
+  mbxCollectErrors: bigint;
+  maxSendLatencyNs: number;
+  txRetries: number;
+  txFailures: number;
+  rxFrames: number;
+  slavesDetected: number;
+  slavesOperational: number;
+  lastWkc: number;
+}
+
+function optionalNumber(record: Record<string, unknown>, key: string): number {
+  const value = record[key];
+  if (value === undefined) return 0;
+  if (typeof value === 'bigint' && value <= BigInt(Number.MAX_SAFE_INTEGER)) return Number(value);
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  return 0;
+}
+
+function optionalBigInt(record: Record<string, unknown>, key: string): bigint {
+  const value = record[key];
+  if (value === undefined) return 0n;
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return BigInt(value);
+  return 0n;
+}
+
+/**
+ * Read the optional machine.diagnostics signal. Field decoding is tolerant —
+ * a server implementing an older/different revision may omit counters.
+ */
+export async function readMachineDiagnostics(
+  client: TetherIOClient,
+  entry: CatalogEntry,
+): Promise<MachineDiagnosticsView> {
+  const record = await readRecord(client, entry, 'MachineDiagnosticsV1');
+  return {
+    timestampUs: optionalBigInt(record, 'timestamp_us'),
+    cycleCount: optionalBigInt(record, 'cycle_count'),
+    missedDeadlines: optionalBigInt(record, 'missed_deadlines'),
+    maxCycleWorkUs: optionalNumber(record, 'max_cycle_work_us'),
+    jitterMaxUs: optionalNumber(record, 'jitter_max_us'),
+    jitterAvgUs: optionalNumber(record, 'jitter_avg_us'),
+    dcSyncCount: optionalBigInt(record, 'dc_sync_count'),
+    dcSyncErrors: optionalBigInt(record, 'dc_sync_errors'),
+    dcJitterMaxUs: optionalNumber(record, 'dc_jitter_max_us'),
+    mbxSends: optionalBigInt(record, 'mbx_sends'),
+    mbxSendErrors: optionalBigInt(record, 'mbx_send_errors'),
+    mbxCollects: optionalBigInt(record, 'mbx_collects'),
+    mbxCollectErrors: optionalBigInt(record, 'mbx_collect_errors'),
+    maxSendLatencyNs: optionalNumber(record, 'max_send_latency_ns'),
+    txRetries: optionalNumber(record, 'tx_retries'),
+    txFailures: optionalNumber(record, 'tx_failures'),
+    rxFrames: optionalNumber(record, 'rx_frames'),
+    slavesDetected: optionalNumber(record, 'slaves_detected'),
+    slavesOperational: optionalNumber(record, 'slaves_operational'),
+    lastWkc: optionalNumber(record, 'last_wkc'),
   };
 }
 

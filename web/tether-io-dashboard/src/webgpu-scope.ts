@@ -37,6 +37,7 @@ import {
   WINDOW_SEC,
 } from './scope/config';
 import { drawScopeOverlay } from './scope/overlay';
+import { describeCursor, describeDelta, nearestRowIndex } from './scope/cursor';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,8 +50,6 @@ interface ScopeRow {
   /** One numeric value per channel. */
   values: number[];
 }
-
-
 
 // ---------------------------------------------------------------------------
 // WGSL shader
@@ -447,6 +446,21 @@ export class WebGPUScope extends HTMLElement {
   private panStartYMin = 0;
   private panStartYMax = 0;
 
+  // ---- Measurement cursor state ----
+  /**
+   * CPU-side copy of the most recent rows for cursor measurement.  The GPU
+   * ring buffer cannot be read back cheaply, so push() mirrors rows here,
+   * capped at the visible window size.
+   */
+  private recentRows: ScopeRow[] = [];
+  /** Hover crosshair position in CSS pixels, or null outside the plot. */
+  private cursorHover: { x: number; y: number } | null = null;
+  /**
+   * Pinned measurement cursors (snapshot at pin time so the readout stays
+   * stable while streaming).  At most two; a third click restarts at A.
+   */
+  private measureCursors: { t: number; values: number[] }[] = [];
+
   // =========================================================================
   // Lifecycle
   // =========================================================================
@@ -515,6 +529,11 @@ export class WebGPUScope extends HTMLElement {
     return this.paused;
   }
 
+  /** Whether the display is paused (frozen at pause time). */
+  isPaused(): boolean {
+    return this.paused;
+  }
+
   /**
    * Copy the live ring buffer into the frozen buffer via the GPU
    * copy queue.  This is a GPU-side memcpy — no CPU readback.
@@ -555,13 +574,21 @@ export class WebGPUScope extends HTMLElement {
     // consecutive 1 ms samples to collapse to the same X position.
     this.referenceTimeUs ??= timestampUs;
     const t = Number(timestampUs - this.referenceTimeUs) / 1e6;
-    this.pendingRows.push({ t, values });
+    const row = { t, values };
+    this.pendingRows.push(row);
+    this.recentRows.push(row);
+    if (this.recentRows.length > BUFFER_SAMPLES) {
+      this.recentRows.splice(0, this.recentRows.length - BUFFER_SAMPLES);
+    }
     this.currentTime = t;
   }
 
   /** Clear all data from the oscilloscope. */
   clear(): void {
     this.pendingRows = [];
+    this.recentRows = [];
+    this.cursorHover = null;
+    this.measureCursors = [];
     this.writeIndex = 0;
     this.currentTime = 0.0;
     this.sampleCounter = 0;
@@ -646,27 +673,27 @@ export class WebGPUScope extends HTMLElement {
       MSAA_SAMPLE_COUNTS.map(async (sampleCount) => {
         try {
           const pipelines = await Promise.all([
-          device.createRenderPipelineAsync({
-            layout,
-            vertex: { module, entryPoint: 'vs_line' },
-            fragment: { module, entryPoint: 'fs_line', targets: [{ format }] },
-            primitive: { topology: 'triangle-strip' },
-            multisample: { count: sampleCount },
-          }),
-          device.createRenderPipelineAsync({
-            layout,
-            vertex: { module, entryPoint: 'vs_grid' },
-            fragment: { module, entryPoint: 'fs_grid', targets: [{ format }] },
-            primitive: { topology: 'triangle-list' },
-            multisample: { count: sampleCount },
-          }),
-          device.createRenderPipelineAsync({
-            layout,
-            vertex: { module, entryPoint: 'vs_point' },
-            fragment: { module, entryPoint: 'fs_point', targets: [{ format }] },
-            primitive: { topology: 'triangle-list' },
-            multisample: { count: sampleCount },
-          }),
+            device.createRenderPipelineAsync({
+              layout,
+              vertex: { module, entryPoint: 'vs_line' },
+              fragment: { module, entryPoint: 'fs_line', targets: [{ format }] },
+              primitive: { topology: 'triangle-strip' },
+              multisample: { count: sampleCount },
+            }),
+            device.createRenderPipelineAsync({
+              layout,
+              vertex: { module, entryPoint: 'vs_grid' },
+              fragment: { module, entryPoint: 'fs_grid', targets: [{ format }] },
+              primitive: { topology: 'triangle-list' },
+              multisample: { count: sampleCount },
+            }),
+            device.createRenderPipelineAsync({
+              layout,
+              vertex: { module, entryPoint: 'vs_point' },
+              fragment: { module, entryPoint: 'fs_point', targets: [{ format }] },
+              primitive: { topology: 'triangle-list' },
+              multisample: { count: sampleCount },
+            }),
           ]);
           return { sampleCount, pipelines };
         } catch {
@@ -833,6 +860,7 @@ export class WebGPUScope extends HTMLElement {
         this.dragCurY = y;
       } else {
         this.updateLegendHover(x, y);
+        this.updateCursorHover(x, y, rect);
       }
     });
     this.addEventListener('mouseup', (e: MouseEvent) => {
@@ -841,10 +869,13 @@ export class WebGPUScope extends HTMLElement {
       }
       if (e.button === 0 && this.dragActive) {
         this.dragActive = false;
-        this.applyDragZoom();
+        const moved = Math.hypot(this.dragCurX - this.dragStartX, this.dragCurY - this.dragStartY);
+        if (moved < 4) this.pinCursor(this.dragStartX);
+        else this.applyDragZoom();
       }
     });
     this.addEventListener('mouseleave', () => {
+      this.cursorHover = null;
       if (this.dragActive) {
         this.dragActive = false;
       }
@@ -1214,7 +1245,94 @@ export class WebGPUScope extends HTMLElement {
       dragStartY: this.dragStartY,
       dragCurrentX: this.dragCurX,
       dragCurrentY: this.dragCurY,
+      ...this.cursorOverlayState(),
     });
+  }
+
+  /**
+   * Build the crosshair/pinned-cursor overlay state: hover readout at the
+   * nearest sample, pinned cursor positions, and the A↔B delta block.
+   */
+  private cursorOverlayState(): {
+    crosshairX: number | null;
+    crosshairY: number | null;
+    crosshairLines: string[];
+    cursors: { x: number; label: string }[];
+    measureLines: string[];
+  } {
+    const names = this.channels.map((c) => c.name);
+    let crosshairX: number | null = null;
+    let crosshairY: number | null = null;
+    let crosshairLines: string[] = [];
+    if (this.cursorHover) {
+      crosshairX = this.cursorHover.x;
+      crosshairY = this.cursorHover.y;
+      const t = this.timeAtCssX(this.cursorHover.x);
+      if (t !== null) {
+        const idx = nearestRowIndex(this.recentRows, t);
+        if (idx >= 0) crosshairLines = describeCursor(this.recentRows[idx]!, names);
+      }
+    }
+    const cursors: { x: number; label: string }[] = [];
+    for (const [i, cursor] of this.measureCursors.entries()) {
+      const x = this.cssXAtTime(cursor.t);
+      if (x !== null) cursors.push({ x, label: i === 0 ? 'A' : 'B' });
+    }
+    const measureLines =
+      this.measureCursors.length >= 2
+        ? describeDelta(this.measureCursors[0]!, this.measureCursors[1]!, names)
+        : [];
+    return { crosshairX, crosshairY, crosshairLines, cursors, measureLines };
+  }
+
+  /**
+   * Track the hover crosshair while the pointer is inside the plot area.
+   * Hidden when panning, dragging, or outside the plot.
+   */
+  private updateCursorHover(x: number, y: number, rect: DOMRect): void {
+    const pw = rect.width - MARGIN_LEFT - MARGIN_RIGHT;
+    const ph = rect.height - MARGIN_TOP - MARGIN_BOTTOM;
+    if (x >= MARGIN_LEFT && x < MARGIN_LEFT + pw && y >= MARGIN_TOP && y < MARGIN_TOP + ph) {
+      this.cursorHover = { x, y };
+    } else {
+      this.cursorHover = null;
+    }
+  }
+
+  /**
+   * Left-click (non-drag) pins a measurement cursor at the nearest sample.
+   * First click sets A, second sets B, a third clears both and restarts at A.
+   * Snapshot values are captured now so the readout stays stable while live
+   * data scrolls the pinned timestamp off-screen.
+   */
+  private pinCursor(cssX: number): void {
+    const t = this.timeAtCssX(cssX);
+    if (t === null) return;
+    const idx = nearestRowIndex(this.recentRows, t);
+    const row = idx >= 0 ? this.recentRows[idx]! : null;
+    if (this.measureCursors.length >= 2) this.measureCursors = [];
+    this.measureCursors.push({ t: row?.t ?? t, values: row?.values ?? [] });
+    this.measureCursors.sort((a, b) => a.t - b.t);
+  }
+
+  /** Convert a CSS-pixel X position to the relative timestamp shown there. */
+  private timeAtCssX(cssX: number): number | null {
+    const w = this.canvasEl?.clientWidth ?? 0;
+    const pw = w - MARGIN_LEFT - MARGIN_RIGHT;
+    if (pw <= 0) return null;
+    const now = this.paused ? this.frozenCurrentTime : this.currentTime;
+    const viewMin = this.viewTimeMin ?? now - WINDOW_SEC;
+    return viewMin + ((cssX - MARGIN_LEFT) / pw) * this.viewTimeSpan;
+  }
+
+  /** Inverse of {@link timeAtCssX} — pixel X for a timestamp, or null. */
+  private cssXAtTime(t: number): number | null {
+    const w = this.canvasEl?.clientWidth ?? 0;
+    const pw = w - MARGIN_LEFT - MARGIN_RIGHT;
+    if (pw <= 0) return null;
+    const now = this.paused ? this.frozenCurrentTime : this.currentTime;
+    const viewMin = this.viewTimeMin ?? now - WINDOW_SEC;
+    return MARGIN_LEFT + ((t - viewMin) / this.viewTimeSpan) * pw;
   }
 
   /**

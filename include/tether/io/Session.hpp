@@ -17,6 +17,7 @@
  */
 #pragma once
 
+#include "tether/io/MachineControl.hpp"
 #include "tether/io/Protocol.hpp"
 #include "tether/io/SchemaNegotiation.hpp"
 #include "tether/io/Registry.hpp"
@@ -157,6 +158,20 @@ public:
 
     /// Number of InvokeEx calls currently awaiting a response.
     size_t pendingInvokeCount() const;
+
+    // ---- Session identity (transport-authenticated caller) ----
+
+    /// Stable identifier for this session, generated at construction.
+    /// Authority leases and audit records reference it.
+    const std::string& sessionId() const { return sessionId_; }
+
+    /// Assign the transport-authenticated identity (e.g. from a WebSocket
+    /// upgrade's TLS/mTLS credential or an authenticated session cookie).
+    /// Until called, the session is an unauthenticated observer.
+    void setIdentity(machine::SessionIdentity identity);
+
+    /// Current session identity as seen by function invocation contexts.
+    machine::SessionIdentity identity() const;
 
 private:
     // ---- Message deframing ----
@@ -344,6 +359,11 @@ private:
     // ==== Catalog change listener ====
     size_t catalogListenerHandle_ = 0;
     std::atomic<bool> catalogDirty_{false};
+
+    // ==== Session identity ====
+    std::string sessionId_;
+    machine::SessionIdentity identity_;
+    mutable std::mutex identityMutex_;
 
     // ==== V6 schema negotiation state ====
     bool schemaHelloReceived_ = false;

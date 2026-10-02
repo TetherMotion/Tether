@@ -399,6 +399,10 @@ if(NOT TETHER_KLIPPER_HAS_GLAZE)
     message(STATUS "Glaze not usable with this toolchain; disabling Klipper JSON and HTTP layers.")
     set(TETHER_ENABLE_KLIPPER_JSON OFF CACHE BOOL "Enable Glaze-based JSON I/O for tether_klipper" FORCE)
     set(TETHER_ENABLE_KLIPPER_HTTP OFF CACHE BOOL "Build native HTTP/WebSocket server for Mainsail/Fluidd" FORCE)
+else()
+    # Glaze compiles with this toolchain: also enable JSON-based server-side
+    # application-profile document validation (tether/io/ApplicationProfile.hpp).
+    add_compile_definitions(TETHER_IO_HAS_GLAZE=1)
 endif()
 
 # Native HTTP/WebSocket server for Mainsail/Fluidd (requires Drogon).

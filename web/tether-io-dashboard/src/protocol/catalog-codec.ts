@@ -36,9 +36,9 @@ export function readFunctionCatalog(payload: Uint8Array): FunctionEntry[] {
     const parameterCount = reader.u32();
     for (let parameterIndex = 0; parameterIndex < parameterCount; parameterIndex += 1) {
       const parameter: FunctionParameter = {
-        key: reader.u32(),
         name: reader.string16(),
         description: reader.string16(),
+        key: reader.u32(),
         schemaSlot: reader.u32(),
         flags: reader.u32(),
         metadata: {},

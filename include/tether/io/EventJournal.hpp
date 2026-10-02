@@ -9,6 +9,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <fstream>
+#include <functional>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -65,7 +67,18 @@ public:
         latestCursor_ = event.eventId;
         events_.push_back(std::move(event));
         if (events_.size() > capacity_) events_.pop_front();
+        // Durable audit sink, if configured. Invoked while the lock is held
+        // so file order matches cursor order; sinks must not throw.
+        if (listener_) listener_(events_.back());
         return events_.back().eventId;
+    }
+
+    /// Register a durable sink called once per appended record (under the
+    /// journal lock). Used for audit persistence; the in-memory journal
+    /// remains bounded regardless of sink behavior.
+    void setListener(std::function<void(const EventRecordV1&)> listener) {
+        std::lock_guard lock(mutex_);
+        listener_ = std::move(listener);
     }
 
     EventPageV1 readAfter(uint64_t cursor, size_t limit) const {
@@ -122,6 +135,46 @@ private:
     std::deque<EventRecordV1> events_;
     uint64_t nextEventId_ = 1;
     uint64_t latestCursor_ = 0;
+    std::function<void(const EventRecordV1&)> listener_;
+};
+
+/// Escape \t, \n, and \\ so one record is always exactly one TSV line.
+inline std::string escapeAuditField(std::string_view value) {
+    std::string out;
+    out.reserve(value.size());
+    for (const char c : value) {
+        if (c == '\t') out += "\\t";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\\') out += "\\\\";
+        else out += c;
+    }
+    return out;
+}
+
+/**
+ * Append-only audit sink: every record is written and flushed as one TSV
+ * line `id ts generation severity code type source description`. The file
+ * is the durable record; the in-memory journal may evict freely.
+ */
+class FileEventJournalSink final {
+public:
+    explicit FileEventJournalSink(std::string path)
+        : output_(path, std::ios::app | std::ios::binary) {
+        if (!output_) throw std::runtime_error("cannot open audit log: " + path);
+    }
+
+    void write(const EventRecordV1& event) {
+        output_ << event.eventId << '\t' << event.timestampUs << '\t'
+                << event.stateGeneration << '\t'
+                << static_cast<unsigned>(event.severity) << '\t' << event.code << '\t'
+                << escapeAuditField(event.eventType) << '\t'
+                << escapeAuditField(event.sourceId) << '\t'
+                << escapeAuditField(event.description) << '\n';
+        output_.flush();
+    }
+
+private:
+    std::ofstream output_;
 };
 
 } // namespace tether::io

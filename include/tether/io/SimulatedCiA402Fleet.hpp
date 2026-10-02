@@ -268,7 +268,7 @@ public:
 
     static bool installSchemas(const SchemaGraph& graph, SchemaCatalog& catalog) {
         const auto manifest = machineProfileManifest(graph);
-        return manifest.size() == 4 && catalog.install(graph, manifest);
+        return manifest.size() == 31 && catalog.install(graph, manifest);
     }
 
     bool registerSignals(Registry& registry, const SchemaCatalog& catalog) {
@@ -278,10 +278,10 @@ public:
             const auto* node = graph->find(key);
             return node ? SchemaRef{node->key, computeSchemaDigest(*node)} : SchemaRef{};
         };
-        const auto descriptorRef = makeRef(machineDescriptorSchemaKey());
-        const auto snapshotRef = makeRef(machineSnapshotSchemaKey());
+        const auto descriptorRef = makeRef(schemaKey(MachineSchemaId::MachineDescriptor));
+        const auto snapshotRef = makeRef(schemaKey(MachineSchemaId::MachineSnapshot));
         const auto driveRef = makeRef(driveSnapshotSchemaKey(8));
-        const auto eventPageRef = makeRef(eventPageSchemaKey());
+        const auto eventPageRef = makeRef(schemaKey(MachineSchemaId::EventPage));
         const auto descriptorSlot = catalog.slotFor(descriptorRef);
         const auto snapshotSlot = catalog.slotFor(snapshotRef);
         const auto driveSlot = catalog.slotFor(driveRef);
@@ -368,6 +368,15 @@ public:
     size_t axisCount() const { return descriptor_.axes.size(); }
     const MachineDescriptorV1& descriptor() const { return descriptor_; }
 
+    /// Current coherent snapshot for one axis, or nullopt for unknown ids.
+    std::optional<DriveSnapshotV1> driveSnapshot(std::string_view stableId) const {
+        std::lock_guard lock(mutex_);
+        const auto axis = std::find_if(descriptor_.axes.begin(), descriptor_.axes.end(),
+            [stableId](const AxisDescriptorV1& candidate) { return candidate.stableId == stableId; });
+        if (axis == descriptor_.axes.end()) return std::nullopt;
+        return snapshots_[static_cast<size_t>(axis - descriptor_.axes.begin())];
+    }
+
     bool updateDriveSnapshot(std::string_view stableId, DriveSnapshotV1 snapshot) {
         DriveSnapshotV1 previous;
         size_t index = 0;
@@ -402,6 +411,7 @@ public:
     }
 
     const EventJournal& eventJournal() const noexcept { return journal_; }
+    EventJournal& eventJournal() noexcept { return journal_; }
 
 private:
     void appendDriveEvents(const AxisDescriptorV1& axis,

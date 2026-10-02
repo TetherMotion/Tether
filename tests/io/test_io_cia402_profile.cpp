@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstdio>
 #include <cstdint>
 
 namespace tether::io::cia402 {
@@ -96,7 +97,7 @@ TEST(CiA402MachineProfileTest, SimulatedFleetPublishesSchemaValidatedReadOnlySig
     const auto graph = machineProfileSchemaGraph();
     ASSERT_TRUE(validateSchemaGraph(graph));
     const auto manifest = machineProfileManifest(graph);
-    ASSERT_EQ(manifest.size(), 4U);
+    ASSERT_EQ(manifest.size(), 31U);
 
     SchemaCatalog catalog;
     ASSERT_TRUE(SimulatedCiA402Fleet::installSchemas(graph, catalog));
@@ -158,8 +159,8 @@ TEST(CiA402MachineProfileTest, SimulatedFleetPublishesSchemaValidatedReadOnlySig
     const auto readEvents = registry.findFunction(SimulatedCiA402Fleet::kEventReadFunctionId);
     ASSERT_TRUE(readEvents);
     ASSERT_EQ(readEvents.returnValue().schemaSlot,
-              *catalog.slotFor(SchemaRef{eventPageSchemaKey(), computeSchemaDigest(
-                  *graph.find(eventPageSchemaKey()))}));
+              *catalog.slotFor(SchemaRef{schemaKey(MachineSchemaId::EventPage), computeSchemaDigest(
+                  *graph.find(schemaKey(MachineSchemaId::EventPage)))}));
     std::vector<FunctionArgument> arguments(2);
     arguments[0].position = 0;
     arguments[0].type = ValueType::U64;
@@ -169,11 +170,40 @@ TEST(CiA402MachineProfileTest, SimulatedFleetPublishesSchemaValidatedReadOnlySig
     arguments[1].value = {100, 0, 0, 0};
     const auto eventPage = readEvents.invoke(arguments);
     ASSERT_TRUE(eventPage.success) << eventPage.errorMessage;
-    const auto* eventPageSchema = graph.find(eventPageSchemaKey());
+    const auto* eventPageSchema = graph.find(schemaKey(MachineSchemaId::EventPage));
     ASSERT_NE(eventPageSchema, nullptr);
     BufReader eventPageReader(eventPage.returnValue.data(), eventPage.returnValue.size());
     EXPECT_TRUE(validateSchemaValue(graph, eventPageSchema->key, eventPageReader));
     EXPECT_EQ(eventPageReader.remaining(), 0U);
+}
+
+/// Cross-language digest fixtures: the browser client recomputes the same
+/// canonical descriptor + BLAKE3 digests (schema-v6/handshake.ts). These
+/// constants are mirrored in web/tether-io-dashboard/src/schema-v6/
+/// handshake.test.ts — a change here must change there, or catalogs
+/// negotiated between the implementations will reject each other.
+TEST(CiA402MachineProfileTest, DigestFixturesMatchBrowserClient) {
+    const auto graph = machineProfileSchemaGraph();
+    const auto hex = [](const SchemaDigest& digest) {
+        std::string out;
+        for (const auto byte : digest) {
+            char buf[3];
+            std::snprintf(buf, sizeof(buf), "%02x", byte);
+            out += buf;
+        }
+        return out;
+    };
+    // Scalar nodes: stable, dependency-free fixtures.
+    EXPECT_EQ(hex(computeSchemaDigest(*graph.find(schemaKey(MachineSchemaId::Bool)))),
+              "d41be435b890f0b0053c078844c3ad08b5ac355d6ec4bb209e58fb677df55fa1");
+    EXPECT_EQ(hex(computeSchemaDigest(*graph.find(schemaKey(MachineSchemaId::F64)))),
+              "b16d032d88099a23ae8358d9b42247e5f15ee9749f84b009807d9a6ebeda7b25");
+    // String node exercises the String kind + maxBytes path.
+    EXPECT_EQ(hex(computeSchemaDigest(*graph.find(schemaKey(MachineSchemaId::String128)))),
+              "fff72e569203f9a95998a207598a2804d3c5cb84e94568f0f1b90ddac3a0cea5");
+    // A struct with field refs exercises the full descriptor path.
+    EXPECT_EQ(hex(computeSchemaDigest(*graph.find(schemaKey(MachineSchemaId::AuthorityLease)))),
+              "4f29338832c015926f717cc39d5f0a37c4101417dcc3dcf04ee9cfa35027def4");
 }
 
 } // namespace

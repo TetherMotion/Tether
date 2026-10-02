@@ -22,6 +22,10 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
    FSoECrcResync
    IOProtocol
    IOProtocolWireFormat
+   IOProtocolMachineProfile
+   WebInterfaceContract
+   WebInterfaceDeployment
+   WebInterfaceOperatorGuide
    CrossCompiling
    ModelIdentification
 
