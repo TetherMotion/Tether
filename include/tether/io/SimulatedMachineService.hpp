@@ -17,6 +17,7 @@
 #include "tether/io/SimulatedCiA402Fleet.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <optional>
 #include <map>
@@ -686,6 +687,7 @@ struct SimulatedMachineStack {
             sdo.emplace(*sdoAccess, &fleet.eventJournal());
             sdoAccess->seed(0, 0x6041, 0, {0x50, 0x02});  // statusword sample
             service.setSdoService(&*sdo);
+            registerObjectDictionary(registry);
         }
         if (enableDiagnostics) {
             diagnostics.emplace(fleet);
@@ -750,6 +752,144 @@ struct SimulatedMachineStack {
             service.setRecipeStore(&*recipes);
         }
         return service.install(registry, catalog);
+    }
+
+    /// CiA 301 data type code → Tether value type + fixed byte size (0 for
+    /// variable-length types).
+    static std::pair<ValueType, size_t> odTypeInfo(uint16_t dataType) {
+        switch (dataType) {
+            case 0x0001: return {ValueType::Bool, 1};
+            case 0x0002: return {ValueType::I8, 1};
+            case 0x0003: return {ValueType::I16, 2};
+            case 0x0004: return {ValueType::I32, 4};
+            case 0x0005: return {ValueType::U8, 1};
+            case 0x0006: return {ValueType::U16, 2};
+            case 0x0007: return {ValueType::U32, 4};
+            case 0x0008: return {ValueType::F32, 4};
+            case 0x000B: return {ValueType::U64, 8};
+            case 0x0010: return {ValueType::I64, 8};
+            case 0x0011: return {ValueType::F64, 8};
+            case 0x0009: return {ValueType::String, 0};
+            default: return {ValueType::Binary, 0};
+        }
+    }
+
+    /// Live snapshot fields surfaced as OD objects: measured objects read the
+    /// current snapshot; writable command objects also mirror writes back.
+    static bool liveObjectValue(const cia402::DriveSnapshotV1& s, uint16_t index,
+                                int64_t& value) {
+        switch (index) {
+            case 0x6040: value = s.controlWord; return true;
+            case 0x6041: value = s.statusWord; return true;
+            case 0x6060: value = s.targetMode; return true;
+            case 0x6061: value = s.displayMode; return true;
+            case 0x6064: value = s.actualPosition; return true;
+            case 0x606C: value = s.actualVelocity; return true;
+            case 0x607A: value = s.targetPosition; return true;
+            case 0x60FF: value = s.targetVelocity; return true;
+            default: return false;
+        }
+    }
+
+    static bool applyLiveObjectWrite(cia402::DriveSnapshotV1& s, uint16_t index,
+                                     int64_t value) {
+        switch (index) {
+            case 0x6040: s.controlWord = static_cast<uint16_t>(value); return true;
+            case 0x6060: s.targetMode = static_cast<int8_t>(value); return true;
+            case 0x607A: s.targetPosition = static_cast<int32_t>(value); return true;
+            case 0x60FF: s.targetVelocity = static_cast<int32_t>(value); return true;
+            default: return false;
+        }
+    }
+
+    /// Expose every axis' object dictionary as browsable catalog parameters
+    /// (`sdo.<axis>.<index>_<sub>`) so the generic Explore view shows the
+    /// CiA 402 parameter surface. Read-only objects read live from the drive
+    /// snapshot where a mapping exists; writable objects update both the OD
+    /// store and the snapshot (which journals a DriveStateChanged event).
+    void registerObjectDictionary(Registry& registry) {
+        static constexpr uint64_t kIdBase = 0x5400'0000'0000'0000ULL;
+        const auto table = simulatedObjectTable();
+        const auto& axes = fleet.descriptor().axes;
+        for (size_t a = 0; a < axes.size(); ++a) {
+            const std::string stableId = axes[a].stableId;
+            const uint16_t slave = axes[a].slaveIndex;
+            // Defaults for objects without a live snapshot mapping.
+            sdoAccess->seed(slave, 0x1000, 0, {0x92, 0x01, 0x02, 0x00});
+            {
+                const std::string name = "Tether simulated CiA 402 drive";
+                sdoAccess->seed(slave, 0x1008, 0, {name.begin(), name.end()});
+            }
+            sdoAccess->seed(slave, 0x6502, 0, {0xE5, 0x03, 0x00, 0x00});
+            for (const auto& obj : table) {
+                const auto [valueType, size] = odTypeInfo(obj.dataType);
+                char suffix[8];
+                std::snprintf(suffix, sizeof(suffix), "%04X_%02X", obj.index,
+                              obj.subindex);
+                ParamEntry p;
+                p.id = kIdBase | (static_cast<uint64_t>(a) << 24) |
+                       (static_cast<uint64_t>(obj.index) << 8) | obj.subindex;
+                p.name = "sdo." + stableId + "." + suffix;
+                p.description = obj.name +
+                    (obj.description.empty() ? std::string{} : " — " + obj.description);
+                p.group = "machine.cia402.sdo";
+                p.valueType = valueType;
+                p.extraFlags = EntryFlags::NoStream;
+                char hex[8];
+                std::snprintf(hex, sizeof(hex), "0x%04X", obj.index);
+                p.metadata["index"] = hex;
+                std::snprintf(hex, sizeof(hex), "0x%02X", obj.subindex);
+                p.metadata["subindex"] = hex;
+                std::snprintf(hex, sizeof(hex), "0x%04X", obj.dataType);
+                p.metadata["od_type"] = hex;
+                p.metadata["access"] = obj.access == 3 ? "rw" : "ro";
+                if (std::isfinite(obj.minValue))
+                    p.metadata["min"] = std::to_string(obj.minValue);
+                if (std::isfinite(obj.maxValue))
+                    p.metadata["max"] = std::to_string(obj.maxValue);
+
+                const uint16_t index = obj.index;
+                const uint8_t sub = obj.subindex;
+                if (size == 0) {
+                    p.maxValueSize = 128;
+                    p.varReadFn = [this, slave, index, sub](void* dst, size_t cap) {
+                        auto r = sdoAccess->read(slave, index, sub, cap);
+                        if (!r.ok || r.data.empty()) return size_t{0};
+                        std::memcpy(dst, r.data.data(), r.data.size());
+                        return r.data.size();
+                    };
+                } else {
+                    p.readFn = [this, slave, stableId, index, sub, size](void* dst) {
+                        int64_t live = 0;
+                        const auto snap = fleet.driveSnapshot(stableId);
+                        if (snap && liveObjectValue(*snap, index, live)) {
+                            std::memcpy(dst, &live, size);
+                            return;
+                        }
+                        auto r = sdoAccess->read(slave, index, sub, size);
+                        std::memset(dst, 0, size);
+                        if (r.ok) std::memcpy(dst, r.data.data(),
+                                              std::min(r.data.size(), size));
+                    };
+                    if (obj.access == 3) {
+                        p.writeFn = [this, slave, stableId, index, sub, size](const void* src) {
+                            std::vector<uint8_t> bytes(size);
+                            std::memcpy(bytes.data(), src, size);
+                            sdoAccess->write(slave, index, sub, bytes);
+                            int64_t raw = 0;
+                            std::memcpy(&raw, src, size);
+                            const auto snap = fleet.driveSnapshot(stableId);
+                            if (snap) {
+                                auto updated = *snap;
+                                if (applyLiveObjectWrite(updated, index, raw))
+                                    fleet.updateDriveSnapshot(stableId, updated);
+                            }
+                        };
+                    }
+                }
+                registry.addParam(std::move(p));
+            }
+        }
     }
 
     /// Common CiA 402 object table shown by machine.sdo.list in simulation.
