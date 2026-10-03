@@ -287,8 +287,8 @@ describe('PDO + supervisor decoders', () => {
         [2, fieldScalar(0x1a00, 2)],
         [3, fieldScalar(1, 1)],
         [4, fieldScalar(48, 4)],
-        [5, fieldScalar(8, 4)],
-        [6, fieldScalar(3, 4)],
+        [5, fieldScalar(8, 2)],
+        [6, fieldScalar(3, 2)],
       ]),
     );
     expect(entry).toEqual({
@@ -308,7 +308,7 @@ describe('PDO + supervisor decoders', () => {
         [2, fieldScalar(4, 1)],
         [3, fieldScalar(1, 1)],
         [4, fieldScalar(0, 1)],
-        [5, fieldScalar(3, 4)],
+        [5, fieldScalar(3, 2)],
       ]),
     );
     expect(entry.state).toBe(4);
@@ -317,12 +317,12 @@ describe('PDO + supervisor decoders', () => {
     expect(entry.attemptCount).toBe(3);
     expect(SUPERVISOR_STATE_LABELS[entry.state]).toBe('failed');
 
+    // Server layout (MachineService.hpp): {1: ok u8, 2: state u8, 3: error string}.
     const result = decodeSupervisorResult(
       encodeTagged([
         [1, fieldScalar(0, 1)],
-        [2, fieldScalar(1, 2)],
-        [3, fieldScalar(4, 1)],
-        [4, fieldString('recovery already in progress')],
+        [2, fieldScalar(1, 1)],
+        [3, fieldString('recovery already in progress')],
       ]),
     );
     expect(result.ok).toBe(false);
@@ -344,9 +344,7 @@ describe('config baseline + checklist decoders', () => {
       ]),
     );
     expect(view.revision).toBe(7n);
-    expect(view.entries).toEqual([
-      { entryId: 0xf001n, value: Uint8Array.of(42, 0, 0, 0) },
-    ]);
+    expect(view.entries).toEqual([{ entryId: 0xf001n, value: Uint8Array.of(42, 0, 0, 0) }]);
   });
 
   it('decodes a ConfigDiffV1 mismatch', () => {

@@ -175,9 +175,21 @@ class TetherApp extends HTMLElement {
   private captureStatus?: CaptureStatusView;
   private configStatus?: ConfigStatusView;
   private sdoSlave = 0;
+  /**
+   * Explicit-index transfer form values. The commissioning view re-renders
+   * whenever a config/SDO call settles, so anything typed into the form must
+   * survive that — otherwise an in-flight refresh silently clears the input.
+   */
+  private readonly sdoForm = { index: '', subindex: '', data: '', maxBytes: '256' };
   private sdoEntries?: SdoEntryView[];
   private sdoResult?: SdoResultView;
   private sdoPendingWrite?: CommissioningModel['sdoPendingWrite'];
+  /**
+   * Command-target ticks. The motion view rebuilds its checkboxes on every
+   * poll, so the selection has to live here or the operator's ticks vanish
+   * mid-task (and `Submit` silently finds no target).
+   */
+  private readonly selectedTargets = new Set<string>();
   /** Axes currently being jogged by this session: stableId → direction. */
   private readonly heldJogs = new Map<string, number>();
   /** Guided-homing progress per axis (local UI state; server validates). */
@@ -305,6 +317,11 @@ class TetherApp extends HTMLElement {
       this.sdoEntries = undefined;
       this.sdoResult = undefined;
       this.sdoPendingWrite = undefined;
+      this.sdoForm.index = '';
+      this.sdoForm.subindex = '';
+      this.sdoForm.data = '';
+      this.sdoForm.maxBytes = '256';
+      this.selectedTargets.clear();
       this.heldJogs.clear();
       this.homingStages.clear();
       this.eventService = { available: false };
@@ -409,6 +426,15 @@ class TetherApp extends HTMLElement {
     this.querySelector('#commissioning-page')?.addEventListener('change', (event) => {
       const input = event.target as HTMLInputElement;
       if (input.id === 'baseline-file' && input.files?.length) this.onBaselineFile(input.files[0]!);
+    });
+    // Command targets are ticked checkboxes rebuilt on every poll — record
+    // the selection in state so a re-render cannot drop it.
+    this.querySelector('#motion-page')?.addEventListener('change', (event) => {
+      const input = event.target as HTMLInputElement;
+      const target = input.dataset?.target;
+      if (!target) return;
+      if (input.checked) this.selectedTargets.add(target);
+      else this.selectedTargets.delete(target);
     });
     // Hold-to-run jog: press starts a bounded JogStart; release/blur/
     // visibility-loss sends JogStop. Pointer capture keeps the release event
@@ -694,6 +720,7 @@ class TetherApp extends HTMLElement {
       await this.loadCatalogs();
       this.control = new MachineControlClient(this.client, this.functions);
       await this.refreshProfile();
+      if (this.drivePollTimer !== undefined) window.clearInterval(this.drivePollTimer);
       this.drivePollTimer = window.setInterval(() => {
         void this.pollDrives();
         void this.pollEvents();
@@ -1108,6 +1135,10 @@ class TetherApp extends HTMLElement {
         });
       }
     }
+    for (const result of results) {
+      if (result.status === 'rejected')
+        console.warn('[TetherIO] drive poll failed:', result.reason);
+    }
     const failedCount = results.filter((result) => result.status === 'rejected').length;
     let freshness = 'Data: live drive snapshots';
     if (machineReceived) freshness = 'Data: live · coherent machine snapshot';
@@ -1171,11 +1202,11 @@ class TetherApp extends HTMLElement {
       const result = await this.control.supervisorRetry(slave);
       const label = SUPERVISOR_STATE_LABELS[result.state] ?? `state ${result.state}`;
       this.supervisorResultText = result.ok
-        ? `Retry accepted for slave ${result.slaveIndex} — supervisor state: ${label}.`
-        : `Retry rejected for slave ${result.slaveIndex}: ${result.error || label}.`;
+        ? `Retry accepted for slave ${slave} — supervisor state: ${label}.`
+        : `Retry rejected for slave ${slave}: ${result.error || label}.`;
       this.showToast(
         result.ok
-          ? `Recovery retry requested for slave ${result.slaveIndex}`
+          ? `Recovery retry requested for slave ${slave}`
           : result.error || 'Retry rejected',
         result.ok ? 'info' : 'error',
       );
@@ -1191,6 +1222,16 @@ class TetherApp extends HTMLElement {
   // ---- Commissioning: capture + staged configuration ----------------------
 
   private renderCommissioningView(): void {
+    // Preserve whatever the operator has typed: this render replaces the SDO
+    // form's DOM, and an async refresh landing mid-entry must not clear it.
+    const readInput = (id: string) => this.querySelector<HTMLInputElement>(id)?.value;
+    this.sdoForm.index = readInput('#sdo-index') ?? this.sdoForm.index;
+    this.sdoForm.subindex = readInput('#sdo-subindex') ?? this.sdoForm.subindex;
+    this.sdoForm.data = readInput('#sdo-data') ?? this.sdoForm.data;
+    this.sdoForm.maxBytes = readInput('#sdo-max-bytes') ?? this.sdoForm.maxBytes;
+    const slave = readInput('#sdo-slave');
+    if (slave !== undefined && slave !== '')
+      this.sdoSlave = Math.min(65535, Math.max(0, Number(slave) || 0));
     renderCommissioning(this, {
       captureAvailable: this.control?.captureAvailable ?? false,
       configAvailable: this.control?.configAvailable ?? false,
@@ -1200,6 +1241,10 @@ class TetherApp extends HTMLElement {
       triggerSignals: this.signals,
       sdoAvailable: this.control?.sdoAvailable ?? false,
       sdoSlave: this.sdoSlave,
+      sdoIndex: this.sdoForm.index,
+      sdoSubindex: this.sdoForm.subindex,
+      sdoData: this.sdoForm.data,
+      sdoMaxBytes: this.sdoForm.maxBytes,
       sdoEntries: this.sdoEntries,
       sdoResult: this.sdoResult,
       sdoPendingWrite: this.sdoPendingWrite,
@@ -1940,6 +1985,7 @@ class TetherApp extends HTMLElement {
         : undefined,
       axes: this.commandAxes(),
       lastReceipt: this.lastReceipt,
+      selectedTargets: [...this.selectedTargets],
       busy: this.controlBusy,
     };
   }
@@ -2178,10 +2224,7 @@ class TetherApp extends HTMLElement {
     const deadlineMs = Number(
       this.querySelector<HTMLInputElement>('#command-deadline-ms')?.value ?? 5000,
     );
-    const axes = this.commandAxes();
-    const selected = axes.filter(
-      (axis) => this.querySelector<HTMLInputElement>(`[data-target="${axis.stableId}"]`)?.checked,
-    );
+    const selected = this.commandAxes().filter((axis) => this.selectedTargets.has(axis.stableId));
     if (!selected.length) {
       this.showToast('Select at least one axis target', 'error');
       return;

@@ -68,8 +68,14 @@ extension/profile trust layer, and Phase 8 hardening.
   decoding), `machine-profile.ts`, `app-profile.ts`, `event-history.ts`,
   `analysis.ts` (capture decode, derived channels, FFT, redacted support
   bundle).
-- Tests: vitest unit tests across client/domain/views plus an env-gated live
-  e2e test (`TETHER_E2E_URL`) against `web_dashboard_example`.
+- Tests: vitest unit tests across client/domain/views, an env-gated live e2e
+  test (`TETHER_E2E_URL`) against `web_dashboard_example` that exercises every
+  typed decoder over a real WebSocket, and a Playwright browser suite
+  (`npm run test:e2e`, `web/tether-io-dashboard/e2e/machine.spec.ts`) that
+  drives the running example end to end: interpreted drive cards and their
+  expansion, the full CiA 402 object dictionary in Explore, lease acquisition
+  with disable/enable dispatch, hold-to-run jog, guided homing through to a
+  referenced axis, and the SDO inspector (read + object enumeration).
 
 ### Not yet implemented / verified
 
@@ -833,7 +839,8 @@ scenes, recipes, and control widgets through the signed-document surface.)
 ### Phase 8 - Hardening, deployment, and release
 
 Items 93–96, 101, and 103–105 are implemented: C++ unit/fuzz coverage,
-frontend unit tests, the env-gated live e2e test (`TETHER_E2E_URL`),
+frontend unit tests, the env-gated live e2e test (`TETHER_E2E_URL`), the
+Playwright browser suite against the running example,
 `machine.metrics`, deployment guidance for local/LAN/reverse-proxy-TLS with
 secure defaults (`docs/WebInterfaceDeployment.md`), per-capability
 schema-versioning/rollback/feature-flag strategy (same document §6), and the

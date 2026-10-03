@@ -25,6 +25,11 @@ export interface CommissioningModel {
   sdoAvailable: boolean;
   /** Slave index the OD listing and transfers apply to. */
   sdoSlave: number;
+  /** Explicit-index transfer form values, preserved across re-renders. */
+  sdoIndex?: string;
+  sdoSubindex?: string;
+  sdoData?: string;
+  sdoMaxBytes?: string;
   /** Known-object table for sdoSlave, undefined until enumerated. */
   sdoEntries?: SdoEntryView[];
   /** Last explicit-index transfer result. */
@@ -218,10 +223,10 @@ function renderSdo(model: CommissioningModel): string {
     </form>
     ${table}
     <form id="sdo-transfer-form" class="config-form">
-      <label>Index (hex) <input id="sdo-index" placeholder="6040" pattern="[0-9a-fA-F]{1,4}" required></label>
-      <label>Subindex (hex) <input id="sdo-subindex" placeholder="00" pattern="[0-9a-fA-F]{1,2}" required></label>
-      <label>Max bytes <input id="sdo-max-bytes" type="number" min="1" max="512" value="256"></label>
-      <label>Write data (hex bytes) <input id="sdo-data" placeholder="leave empty for read" pattern="[0-9a-fA-F ]*"></label>
+      <label>Index (hex) <input id="sdo-index" placeholder="6040" pattern="[0-9a-fA-F]{1,4}" value="${esc(model.sdoIndex ?? '')}" required></label>
+      <label>Subindex (hex) <input id="sdo-subindex" placeholder="00" pattern="[0-9a-fA-F]{1,2}" value="${esc(model.sdoSubindex ?? '')}" required></label>
+      <label>Max bytes <input id="sdo-max-bytes" type="number" min="1" max="512" value="${esc(model.sdoMaxBytes ?? '256')}"></label>
+      <label>Write data (hex bytes) <input id="sdo-data" placeholder="leave empty for read" pattern="[0-9a-fA-F ]*" value="${esc(model.sdoData ?? '')}"></label>
       <div class="config-actions">
         <button type="button" id="sdo-read" ${model.busy ? 'disabled' : ''}>Read</button>
         <button type="button" id="sdo-write" ${model.busy ? 'disabled' : ''}>Preview write</button>

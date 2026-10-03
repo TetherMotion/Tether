@@ -384,3 +384,40 @@ misses a master's chain-reset at a state transition):
 affine solve and verifies the remaining segment CRCs; `(startCrc, seqNo)`
 is not identifiable so resync is per-frame.  Off by default — see
 `docs/FSoECrcResync.md`.
+
+## Web dashboard (`web/tether-io-dashboard`)
+
+Vite + TypeScript frontend served by `examples/web_dashboard_example.cpp`
+(a Drogon server backed entirely by the simulated CiA 402 fleet).
+
+```bash
+# Build the frontend (tsc --noEmit + vite build) — output goes to dist/
+cd web/tether-io-dashboard && npm run build
+
+# Frontend unit tests (vitest)
+npm test
+
+# Live protocol test against a running example server
+TETHER_E2E_URL=ws://127.0.0.1:8080/tether-io npm test
+
+# Browser end-to-end suite (Playwright); needs the example server running
+# (playwright.config.ts starts its own on port 8099 unless one is already up)
+npm run test:e2e
+
+# Build and run the example server
+cmake --build build --target web_dashboard_example -j8
+./build/bin/examples/web_dashboard_example --verbose
+```
+
+Notes:
+
+- The example keeps machine state across sessions, so browser tests must put
+  the machine into the state they need (e.g. enable an axis before jogging)
+  instead of assuming the power-on default.
+- `?role=operator|technician|admin` on the WebSocket URL is a development-only
+  role selector; production identity comes from `--auth-file` bearer tokens.
+- Client decoders in `src/domain/machine-control.ts` mirror the C++ tagged
+  struct field widths by hand. `src/e2e.test.ts` exercises every decoder
+  against a live server — run it after any schema width change.
+- UI state that must survive the polling re-render (SDO form fields, command
+  target ticks) lives in the component state, not only in the DOM.
