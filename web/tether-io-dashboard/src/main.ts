@@ -75,7 +75,7 @@ import {
   fftMagnitudes,
   splitCaptureRecords,
 } from './domain/analysis';
-import { DriveSnapshotRecord, openDriveDetail, renderDriveViews } from './views/drives';
+import { DriveSnapshotRecord, renderDriveViews } from './views/drives';
 import {
   AppProfile,
   findAppProfileEntry,
@@ -83,6 +83,7 @@ import {
   widgetSignalBindings,
 } from './domain/app-profile';
 import { renderPanels } from './views/panels';
+import { loadVolcanoPlot, VolcanoPlotCanvas } from './vendor/volcanoplot';
 import { renderRecipes } from './views/recipes';
 import './style.css';
 
@@ -195,6 +196,7 @@ class TetherApp extends HTMLElement {
   private prefs = { url: '', pollMs: 1000, streamMs: 10 };
   private polling = false;
   private pollingEvents = false;
+  private trendPlot?: VolcanoPlotCanvas;
   private drivePollTimer?: number;
   private activeView: ViewId = 'overview';
 
@@ -474,9 +476,15 @@ class TetherApp extends HTMLElement {
       );
       this.querySelector<HTMLButtonElement>(`.trend-fft[data-pane="${pane}"]`)?.addEventListener(
         'click',
-        () => this.renderFft(pane),
+        () => void this.renderFft(pane),
       );
     }
+    this.querySelector('#trend-plot-close')?.addEventListener('click', () => {
+      this.trendPlot?.destroy();
+      this.trendPlot = undefined;
+      const overlay = this.querySelector<HTMLElement>('#trend-plot-overlay');
+      if (overlay) overlay.hidden = true;
+    });
     // Synchronized freeze: pauses both panes at the same instant so their
     // time windows remain comparable.
     this.querySelector('#trend-freeze-all')?.addEventListener('click', () => {
@@ -808,7 +816,7 @@ class TetherApp extends HTMLElement {
   }
 
   /** Magnitude spectrum of a pane's first channel over retained history. */
-  private renderFft(pane: 0 | 1): void {
+  private async renderFft(pane: 0 | 1): Promise<void> {
     const scope = this.querySelector<ScopeElement>(`#trend-scope-${pane}`);
     const output = this.querySelector<HTMLOutputElement>(`#trend-stats-${pane}`);
     const history = scope ? this.scopeHistory.get(scope) : undefined;
@@ -830,6 +838,26 @@ class TetherApp extends HTMLElement {
       .map(({ bin, m }) => `bin ${bin}=${formatStat(m)}`)
       .join('  ·  ');
     output.textContent = `FFT (${channel.length}→${(magnitudes.length - 1) * 2} samples): peak bin ${peak} — ${top}`;
+    // VolcanoPlot renders the actual spectrum figure (WebGPU, Canvas2D
+    // fallback) in the overlay — the stats line stays as the text summary.
+    const bundle = await loadVolcanoPlot();
+    const overlay = this.querySelector<HTMLElement>('#trend-plot-overlay');
+    const canvas = this.querySelector<HTMLCanvasElement>('#trend-plot-canvas');
+    const title = this.querySelector<HTMLElement>('#trend-plot-title');
+    if (!bundle || !overlay || !canvas) return;
+    this.trendPlot?.destroy();
+    this.trendPlot = undefined;
+    overlay.hidden = false;
+    const vp = await bundle.createCanvas(canvas);
+    this.trendPlot = vp;
+    vp.spectrum(channel, 1000 / this.prefs.streamMs);
+    vp.title(`Magnitude spectrum — pane ${pane === 0 ? 'A' : 'B'}`);
+    vp.xlabel('Frequency (Hz)');
+    vp.ylabel('Magnitude');
+    vp.grid(true);
+    vp.enableInteraction(true);
+    vp.render();
+    if (title) title.textContent = 'Frequency spectrum (VolcanoPlot)';
   }
 
   /** Load an exported .bin capture into pane A using the server's layout. */
@@ -1869,17 +1897,7 @@ class TetherApp extends HTMLElement {
       this,
       this.profile.driveSnapshots,
       this.driveData,
-      (entry, snapshot, ageMs) => {
-        this.openView('drives');
-        openDriveDetail(
-          this,
-          entry,
-          snapshot,
-          ageMs,
-          () => undefined,
-          axesByStableId.get(entry.metadata?.['resource.stable_id'] ?? ''),
-        );
-      },
+      () => this.openView('drives'),
       axesByStableId,
     );
   }

@@ -344,6 +344,13 @@ int main(int argc, char** argv) {
     // Serve the pre-built dashboard from the web root directory
     drogon::app().setDocumentRoot(webRoot);
     drogon::app().setHomePage("index.html");
+    // Drogon only serves whitelisted extensions; the vendored VolcanoPlot
+    // WebGPU bundle adds .mjs/.wasm/.data assets.
+    drogon::app().setFileTypes({"html", "css", "js", "mjs", "wasm", "data",
+                                "json", "map", "svg", "png", "ico", "txt"});
+    drogon::app().registerCustomExtensionMime("mjs", "text/javascript");
+    drogon::app().registerCustomExtensionMime("wasm", "application/wasm");
+    drogon::app().registerCustomExtensionMime("data", "application/octet-stream");
 
     // Cache-safe upgrades: vite emits hashed asset filenames that can be
     // cached immutably, while index.html and version.json must always be
