@@ -84,7 +84,12 @@ export interface MachineSnapshotView {
 
 function readNumber(record: Record<string, unknown>, key: string): number {
   const value = record[key];
-  if (typeof value === 'bigint' && value <= BigInt(Number.MAX_SAFE_INTEGER) && value >= BigInt(Number.MIN_SAFE_INTEGER)) return Number(value);
+  if (
+    typeof value === 'bigint' &&
+    value <= BigInt(Number.MAX_SAFE_INTEGER) &&
+    value >= BigInt(Number.MIN_SAFE_INTEGER)
+  )
+    return Number(value);
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   throw new Error(`DriveSnapshotV1 field ${key} has an invalid value`);
 }
@@ -96,7 +101,11 @@ function readBigInt(record: Record<string, unknown>, key: string): bigint {
   throw new Error(`DriveSnapshotV1 field ${key} has an invalid value`);
 }
 
-async function readRecord(client: TetherIOClient, entry: CatalogEntry, schemaName: string): Promise<Record<string, unknown>> {
+async function readRecord(
+  client: TetherIOClient,
+  entry: CatalogEntry,
+  schemaName: string,
+): Promise<Record<string, unknown>> {
   const decoded = await client.getTyped(entry);
   if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
     throw new Error(`${schemaName} did not decode to a structured value`);
@@ -113,7 +122,8 @@ function asRecord(value: unknown, schemaName: string): Record<string, unknown> {
 
 function readString(record: Record<string, unknown>, key: string): string {
   const value = record[key];
-  if (typeof value !== 'string' || value.length === 0) throw new Error(`Machine profile field ${key} is invalid`);
+  if (typeof value !== 'string' || value.length === 0)
+    throw new Error(`Machine profile field ${key} is invalid`);
   return value;
 }
 
@@ -136,29 +146,37 @@ export function discoverMachineProfile(
     functionNames.has(MACHINE_FUNCTION_NAMES.alarmsRead);
   if (!catalog) {
     return {
-      profile: 'unavailable', descriptor: false, machineSnapshot: false,
-      driveSnapshots: [], controlsAvailable: false,
-      explanation: 'V6 schema negotiation is not complete; machine data and actions remain unavailable.',
+      profile: 'unavailable',
+      descriptor: false,
+      machineSnapshot: false,
+      driveSnapshots: [],
+      controlsAvailable: false,
+      explanation:
+        'V6 schema negotiation is not complete; machine data and actions remain unavailable.',
     };
   }
   const names = new Set(catalog.slotToNode.map((node) => node.name));
   const descriptor = names.has(MACHINE_DESCRIPTOR_ROOT);
   const machineSnapshot = names.has(MACHINE_SNAPSHOT_ROOT);
-  const descriptorEntry = signals.find((entry) =>
-    entry.schemaEpoch === BigInt(catalog.epoch) && catalog.slotToNode[entry.schemaSlot]?.name === MACHINE_DESCRIPTOR_ROOT,
-  );
-  const machineSnapshotEntry = signals.find((entry) =>
-    entry.schemaEpoch === BigInt(catalog.epoch) && catalog.slotToNode[entry.schemaSlot]?.name === MACHINE_SNAPSHOT_ROOT,
-  );
+  // A schema-less entry wires schemaSlot=0, which resolves to whatever node
+  // happens to occupy slot 0 — require the server's explicit `schema.name`
+  // metadata marker so untyped scalar signals are never misclassified.
+  const typedAs = (entry: CatalogEntry, root: string) =>
+    entry.schemaEpoch === BigInt(catalog.epoch) &&
+    catalog.slotToNode[entry.schemaSlot]?.name === root &&
+    entry.metadata?.['schema.name'] === root;
+  const descriptorEntry = signals.find((entry) => typedAs(entry, MACHINE_DESCRIPTOR_ROOT));
+  const machineSnapshotEntry = signals.find((entry) => typedAs(entry, MACHINE_SNAPSHOT_ROOT));
   // Optional surface: present only when the server attached a diagnostics
   // source. Absent is normal — the view renders "not available".
-  const diagnosticsEntry = signals.find((entry) =>
-    entry.schemaEpoch === BigInt(catalog.epoch) && catalog.slotToNode[entry.schemaSlot]?.name === MACHINE_DIAGNOSTICS_ROOT,
-  );
-  const driveSnapshots = signals.filter((entry) =>
-    entry.schemaEpoch === BigInt(catalog.epoch) && catalog.slotToNode[entry.schemaSlot]?.name === DRIVE_SNAPSHOT_ROOT,
-  );
-  const complete = descriptor && machineSnapshot && !!descriptorEntry && !!machineSnapshotEntry && driveSnapshots.length > 0;
+  const diagnosticsEntry = signals.find((entry) => typedAs(entry, MACHINE_DIAGNOSTICS_ROOT));
+  const driveSnapshots = signals.filter((entry) => typedAs(entry, DRIVE_SNAPSHOT_ROOT));
+  const complete =
+    descriptor &&
+    machineSnapshot &&
+    !!descriptorEntry &&
+    !!machineSnapshotEntry &&
+    driveSnapshots.length > 0;
   return {
     profile: complete ? 'machine.cia402.v1' : 'unavailable',
     descriptor,
@@ -197,21 +215,30 @@ export async function readMachineDescriptor(
       supportsHoming: readBoolean(axis, 'supports_homing'),
     };
   });
-  if (axes.length === 0 || axes.length > 16) throw new Error('MachineDescriptorV1 axis count is outside profile bounds');
+  if (axes.length === 0 || axes.length > 16)
+    throw new Error('MachineDescriptorV1 axis count is outside profile bounds');
   const ids = new Set<string>();
   const orders = new Set<number>();
   for (const axis of axes) {
-    if (!axis.stableId || ids.has(axis.stableId) || !axis.name ||
-        !Number.isInteger(axis.displayOrder) || orders.has(axis.displayOrder) ||
-        !Number.isFinite(axis.positionScale) || axis.positionScale === 0 ||
-        !Number.isFinite(axis.velocityScale) || axis.velocityScale === 0) {
+    if (
+      !axis.stableId ||
+      ids.has(axis.stableId) ||
+      !axis.name ||
+      !Number.isInteger(axis.displayOrder) ||
+      orders.has(axis.displayOrder) ||
+      !Number.isFinite(axis.positionScale) ||
+      axis.positionScale === 0 ||
+      !Number.isFinite(axis.velocityScale) ||
+      axis.velocityScale === 0
+    ) {
       throw new Error('MachineDescriptorV1 contains an invalid or duplicate axis identity');
     }
     ids.add(axis.stableId);
     orders.add(axis.displayOrder);
   }
   const profileVersion = readNumber(record, 'profile_version');
-  if (profileVersion !== 1) throw new Error(`Unsupported machine profile version ${profileVersion}`);
+  if (profileVersion !== 1)
+    throw new Error(`Unsupported machine profile version ${profileVersion}`);
   const orderedAxes = [...axes];
   orderedAxes.sort((left, right) => left.displayOrder - right.displayOrder);
   return {
@@ -244,15 +271,22 @@ export async function readMachineSnapshot(
     linkUp: readBoolean(record, 'link_up'),
     dcLocked: readBoolean(record, 'dc_locked'),
   };
-  if (snapshot.axisCount === 0 || snapshot.enabledCount > snapshot.axisCount ||
-      snapshot.faultCount > snapshot.axisCount || snapshot.warningCount > snapshot.axisCount ||
-      snapshot.staleCount > snapshot.axisCount) {
+  if (
+    snapshot.axisCount === 0 ||
+    snapshot.enabledCount > snapshot.axisCount ||
+    snapshot.faultCount > snapshot.axisCount ||
+    snapshot.warningCount > snapshot.axisCount ||
+    snapshot.staleCount > snapshot.axisCount
+  ) {
     throw new Error('MachineSnapshotV1 contains inconsistent fleet counts');
   }
   return snapshot;
 }
 
-export async function readDriveSnapshot(client: TetherIOClient, entry: CatalogEntry): Promise<DriveSnapshotView> {
+export async function readDriveSnapshot(
+  client: TetherIOClient,
+  entry: CatalogEntry,
+): Promise<DriveSnapshotView> {
   const record = await readRecord(client, entry, 'DriveSnapshotV1');
   return {
     timestampUs: readBigInt(record, 'timestamp_us'),
@@ -352,13 +386,25 @@ export async function readMachineDiagnostics(
 }
 
 export function alStateLabel(state: number): string {
-  return ({ 1: 'INIT', 2: 'PRE-OP', 4: 'SAFE-OP', 8: 'OP' } as Record<number, string>)[state] ?? `Unknown (${state})`;
+  return (
+    ({ 1: 'INIT', 2: 'PRE-OP', 4: 'SAFE-OP', 8: 'OP' } as Record<number, string>)[state] ??
+    `Unknown (${state})`
+  );
 }
 
 export function ds402StateLabel(state: number): string {
-  return ({
-    0: 'Not ready', 1: 'Switch-on disabled', 2: 'Ready to switch on',
-    3: 'Switched on', 4: 'Operation enabled', 5: 'Quick stop active',
-    6: 'Fault reaction active', 7: 'Fault',
-  } as Record<number, string>)[state] ?? `Unknown (${state})`;
+  return (
+    (
+      {
+        0: 'Not ready',
+        1: 'Switch-on disabled',
+        2: 'Ready to switch on',
+        3: 'Switched on',
+        4: 'Operation enabled',
+        5: 'Quick stop active',
+        6: 'Fault reaction active',
+        7: 'Fault',
+      } as Record<number, string>
+    )[state] ?? `Unknown (${state})`
+  );
 }

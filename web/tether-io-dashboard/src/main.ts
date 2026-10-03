@@ -1253,7 +1253,27 @@ class TetherApp extends HTMLElement {
           if (!entry) continue;
           const key = binding.key;
           try {
-            let value = await this.client.getTyped(entry);
+            // Schema-typed entries (marked by the server's `schema.name`
+            // metadata) decode through the negotiated catalog; plain scalar
+            // entries carry no type on the wire, so decode by byte length
+            // using the dashboard's F64-first convention.
+            let value: unknown;
+            if (entry.metadata?.['schema.name']) {
+              value = await this.client.getTyped(entry);
+            } else {
+              const bytes = await this.client.get(entry.kind, entry.id);
+              const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+              value =
+                bytes.length === 8
+                  ? view.getFloat64(0, true)
+                  : bytes.length === 4
+                    ? view.getFloat32(0, true)
+                    : bytes.length === 2
+                      ? view.getUint16(0, true)
+                      : bytes.length === 1
+                        ? view.getUint8(0)
+                        : bytes;
+            }
             if (
               binding.field &&
               value &&
