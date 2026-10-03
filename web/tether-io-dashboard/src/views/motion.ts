@@ -46,6 +46,8 @@ export interface MotionModel {
   lease?: LeaseView;
   axes: CommandAxisOption[];
   lastReceipt?: CommandReceiptView;
+  /** Stable IDs currently ticked as command targets (survives re-renders). */
+  selectedTargets?: string[];
   busy: boolean;
 }
 
@@ -110,11 +112,12 @@ export function renderCommandPanel(host: HTMLElement, model: MotionModel): void 
     host.innerHTML = '';
     return;
   }
+  const selected = new Set(model.selectedTargets ?? []);
   const axes = model.axes
     .map(
       (axis) => `
       <label class="command-target">
-        <input type="checkbox" data-target="${esc(axis.stableId)}" ${axis.stale ? 'disabled' : ''}>
+        <input type="checkbox" data-target="${esc(axis.stableId)}" ${selected.has(axis.stableId) ? 'checked' : ''} ${axis.stale ? 'disabled' : ''}>
         <span>${esc(axis.name)} <small>${esc(axis.stableId)} · ${ds402StateLabel(axis.ds402State)}${axis.stale ? ' · stale' : ''}</small></span>
       </label>`,
     )

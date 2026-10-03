@@ -231,11 +231,20 @@ export class TetherIOClient extends EventTarget {
       const socket = new WebSocket(url);
       this.socket = socket;
       socket.binaryType = 'arraybuffer';
+      // Events from a superseded socket (disconnect() followed by a new
+      // connect()) must not touch shared state — a stale close would reject
+      // the new connection's pending requests and schedule a rogue reconnect
+      // whose negotiation races with the live one.
+      const isCurrent = () => this.socket === socket;
 
       socket.onopen = async () => {
         try {
           console.log('[TetherIO] WebSocket opened; negotiating V6 schemas');
           await this.negotiateV6();
+          if (!isCurrent()) {
+            socket.close();
+            return;
+          }
           const resynced = this.reconnectAttempt > 0;
           this.reconnectAttempt = 0;
           this.state = 'connected';
@@ -245,14 +254,17 @@ export class TetherIOClient extends EventTarget {
         } catch (error) {
           const failure =
             error instanceof Error ? error : new Error('V6 schema negotiation failed');
-          this.state = 'disconnected';
-          this.rejectPending(failure);
+          if (isCurrent()) {
+            this.state = 'disconnected';
+            this.rejectPending(failure);
+          }
           socket.close(4000, 'V6 schema negotiation failed');
           reject(failure);
         }
       };
 
       socket.onerror = (e) => {
+        if (!isCurrent()) return;
         const err = new Error('WebSocket connection failed');
         console.error('[TetherIO] WebSocket error:', e);
         this.rejectPending(err);
@@ -261,7 +273,12 @@ export class TetherIOClient extends EventTarget {
       };
 
       socket.onclose = (e) => {
+        if (!isCurrent()) return;
         console.log(`[TetherIO] WebSocket closed (code=${e.code}, reason=${e.reason || '(none)'})`);
+        // Drop the reference first: the reconnect timer only opens a socket
+        // when none is live, so leaving a closed socket here would silently
+        // disable every automatic reconnect.
+        this.socket = undefined;
         this.rejectPending(new Error('WebSocket closed'));
         this.streamActive = false;
         this.streamLayout = [];
@@ -276,6 +293,7 @@ export class TetherIOClient extends EventTarget {
       };
 
       socket.onmessage = async (event) => {
+        if (!isCurrent()) return;
         const bytes =
           event.data instanceof ArrayBuffer
             ? new Uint8Array(event.data)
@@ -303,7 +321,7 @@ export class TetherIOClient extends EventTarget {
     );
     this.reconnectTimer = setTimeout(() => {
       const url = this.url;
-      if (!url || this.manualDisconnect) return;
+      if (!url || this.manualDisconnect || this.socket) return;
       this.open(url).catch(() => {
         // onclose schedules the next attempt
       });
@@ -325,6 +343,11 @@ export class TetherIOClient extends EventTarget {
     this.state = 'disconnected';
     this.streamActive = false;
     this.verifiedCatalog = undefined;
+    // A superseded socket's in-flight negotiation must not leave its
+    // bootstrap waiters/pending requests in the shared queues — the next
+    // connection's frames would resolve the stale waiters (or vice versa)
+    // and corrupt the catalog non-deterministically.
+    this.rejectPending(new Error('Disconnected'));
   }
 
   // ---- Catalog: parameters & signals -----------------------------------

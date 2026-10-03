@@ -654,9 +654,9 @@ function decodeConfigStatus(bytes: Uint8Array): ConfigStatusView {
 function decodeSdoEntry(bytes: Uint8Array): SdoEntryView {
   const fields = parseTagged(bytes);
   return {
-    index: getTaggedU32(fields, 1),
+    index: getTaggedU16(fields, 1),
     subindex: getTaggedU8(fields, 2),
-    dataType: getTaggedU32(fields, 3),
+    dataType: getTaggedU16(fields, 3),
     access: getTaggedU8(fields, 4),
     name: getTaggedString(fields, 5),
     description: fields.has(6) ? getTaggedString(fields, 6) : undefined,
@@ -824,8 +824,8 @@ export function decodePdoEntry(bytes: Uint8Array): PdoEntryView {
     pdoIndex: getTaggedU16(f, 2),
     direction: getTaggedU8(f, 3),
     logicalOffset: getTaggedU32(f, 4),
-    length: getTaggedU32(f, 5),
-    entryIndex: getTaggedU32(f, 6),
+    length: getTaggedU16(f, 5),
+    entryIndex: getTaggedU16(f, 6),
   };
 }
 
@@ -853,13 +853,12 @@ export function decodeSupervisorEntry(bytes: Uint8Array): SupervisorEntryView {
     state: getTaggedU8(f, 2),
     suspended: getTaggedBool(f, 3),
     recovering: getTaggedBool(f, 4),
-    attemptCount: getTaggedU32(f, 5),
+    attemptCount: getTaggedU16(f, 5),
   };
 }
 
 export interface SupervisorResultView {
   ok: boolean;
-  slaveIndex: number;
   state: number;
   error: string;
 }
@@ -868,9 +867,8 @@ export function decodeSupervisorResult(bytes: Uint8Array): SupervisorResultView 
   const f = parseTagged(bytes);
   return {
     ok: getTaggedBool(f, 1),
-    slaveIndex: getTaggedU16(f, 2),
-    state: getTaggedU8(f, 3),
-    error: f.has(4) ? getTaggedString(f, 4) : '',
+    state: getTaggedU8(f, 2),
+    error: f.has(3) ? getTaggedString(f, 3) : '',
   };
 }
 
