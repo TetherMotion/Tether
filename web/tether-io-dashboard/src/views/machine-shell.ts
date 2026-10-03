@@ -30,7 +30,7 @@ export function machineShellTemplate(views: NavigationItem[]): string {
             <article class="machine-card overview-callout"><h2>System status</h2><p id="overview-message">Connect to a schema-negotiated machine application to load coherent fleet state.</p></article>
             <article class="machine-card"><div class="panel-title"><div><span class="eyebrow">Fleet health</span><h2>Drive summary</h2></div><button class="secondary" data-open-view="drives">Open drives</button></div><div id="overview-drive-list" class="overview-drive-list"></div></article>
           </section>
-          <section id="drives-page" class="machine-page" hidden><div class="table-wrap"><table class="drive-table"><thead><tr><th>Axis / resource</th><th>EtherCAT</th><th>CiA 402</th><th>Mode</th><th>Enabled</th><th>Fault / warning</th><th>Target</th><th>Actual</th><th>Following error</th><th>Owner</th><th>Data age</th><th>Recovery</th></tr></thead><tbody id="drive-table-body"></tbody></table></div><aside id="drive-drawer" class="drive-drawer" hidden></aside></section>
+          <section id="drives-page" class="machine-page" hidden><div id="drive-card-list" class="drive-card-list"><p class="widget-empty">No drive snapshots discovered.</p></div></section>
           <section id="alarms-page" class="machine-page" hidden>
             <article class="machine-card"><div class="panel-title"><div><span class="eyebrow">Alarm lifecycle</span><h2>Active alarms</h2></div><span id="alarm-service-state" class="widget-source">Service not discovered</span></div><p class="event-history-note">Acknowledge and clear require an authenticated operator role on the server. Acknowledgement never clears a machine fault cause; clear the underlying condition first.</p><div id="alarm-table-wrap" class="table-wrap"><table class="drive-table"><thead><tr><th>Alarm</th><th>Severity</th><th>Source</th><th>Description</th><th>State</th><th>Raised</th><th>Actor</th><th>Actions</th></tr></thead><tbody id="alarm-table-body"><tr><td colspan="8" class="widget-empty">No alarm service data.</td></tr></tbody></table></div></article>
             <article class="machine-card"><div class="panel-title"><div><span class="eyebrow">Read-only journal</span><h2>Event history</h2></div><span class="widget-source">Server cursor · bounded history</span></div><p class="event-history-note">This is an immutable event history view. It does not acknowledge, clear, or suppress alarms.</p><tether-event-timeline id="event-timeline"></tether-event-timeline></article>
@@ -118,6 +118,15 @@ export function machineShellTemplate(views: NavigationItem[]): string {
                   </div>
                   <tether-webgpu-scope id="trend-scope-1"></tether-webgpu-scope>
                   <output id="trend-stats-1" class="trend-stats" aria-live="off"></output>
+                </div>
+              </div>
+              <div id="trend-plot-overlay" class="trend-plot-overlay" hidden>
+                <div class="trend-plot-dialog" role="dialog" aria-label="Frequency plot">
+                  <div class="trend-plot-head">
+                    <h3 id="trend-plot-title">Plot</h3>
+                    <button id="trend-plot-close" class="secondary">Close</button>
+                  </div>
+                  <canvas id="trend-plot-canvas"></canvas>
                 </div>
               </div>
             </article>

@@ -25,3 +25,6 @@
 [submodule "dependencies/blake3"]
 	path = dependencies/blake3
 	url = https://github.com/BLAKE3-team/BLAKE3.git
+[submodule "dependencies/VolcanoPlot"]
+	path = dependencies/VolcanoPlot
+	url = https://github.com/ulikoehler/VolcanoPlot.git
