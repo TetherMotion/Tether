@@ -687,6 +687,17 @@ SlaveError Slave::transitionToOp() {
             TETHER_LOGI(TAG, "{}: OP confirm poll: read={} state=0x{:02X} "
                              "(attempt {})",
                         logPrefix().c_str(), ok, last_state, attempt + 1);
+        // Re-issue the OP request every ~500 ms.  If the output SM watchdog
+        // was expired when the request first arrived, the slave declines OP
+        // and never re-evaluates the request on its own — a fresh write lets
+        // it transition as soon as the watchdog recovers.
+        if (ok && state != static_cast<uint8_t>(SlaveState::OP) &&
+            (attempt % 50) == 49) {
+            TETHER_LOGI(TAG, "{}: Re-issuing OP request (still 0x{:02X})",
+                        logPrefix().c_str(), state);
+            master_->requestSlaveApplicationLayerState(
+                index_, static_cast<uint8_t>(SlaveState::OP) | 0x10);
+        }
         if (ok) {
             if (state == static_cast<uint8_t>(SlaveState::OP)) {
                 if (slave_debug_flags_.stateMachine) {
