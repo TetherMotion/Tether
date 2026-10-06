@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <vector>
 
+namespace EtherCAT { namespace CoE { class CoEManager; } }
+
 // Register groups extracted from vendor PDF (generated)
 #include "tether/drives/AS715N/Registers/C00-Parameters.hpp"
 #include "tether/drives/AS715N/Registers/C01-BasicGainParameters.hpp"
@@ -82,6 +84,19 @@ struct AS715NDevice {
     static inline const auto& kAllRegisterLists = AS715NRegisters::kAllRegisterLists;
 };
 
+
+struct AS715NConfig {
+    /// Configure the bleeder (brake) resistor parameters (group C00 at
+    /// object 0x2000): selection (0x10), power (0x11, W) and resistance
+    /// (0x12, ohm).  All three are AtStop parameters — call while the
+    /// drive is disabled (e.g. before CiA402 enable).
+    /// @return true if all three SDO writes succeeded.
+    static bool configureBleederResistor(
+        EtherCAT::CoE::CoEManager& sdo,
+        Registers::AS715N::C00::BleederResistorSelectionOptions selection,
+        uint16_t power_w, uint16_t resistance_ohm,
+        uint32_t timeout_ms = 3000);
+};
 
 struct AS715NManufacturerFault203F {
     uint16_t internal_code = 0;

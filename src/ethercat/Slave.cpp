@@ -16,6 +16,7 @@
 #include "tether/sii/SIIReader.hpp"
 #include "tether/ethercat/FaultDetection.hpp"
 #include "SlaveESIHelpers.hpp"
+#include "raw/RawConstants.hpp"
 #include "tether/platform/Platform.hpp"
 
 #include <cstdio>
@@ -645,7 +646,31 @@ SlaveError Slave::transitionToOp() {
         return SlaveError::TransportError;
     }
 
+    // Diagnostic: read back AL_CONTROL to prove the OP request landed, plus
+    // watchdog/DL/SM2 status so we can tell "slave declined" from "write lost".
+    {
+        uint16_t al_ctrl = 0, wd = 0, dl = 0;
+        const bool c_ok = master_->readRegister(index_, Raw::EC_REG_AL_CONTROL, al_ctrl, 200);
+        const bool w_ok = master_->readRegister(index_, Raw::EC_REG_WD_STATUS, wd, 200);
+        const bool d_ok = master_->readRegister(index_, 0x0110, dl, 200);
+        uint8_t sm2[8] = {};
+        const bool s_ok = master_->readRegister(index_, 0x0810, sm2, sizeof(sm2), 200);
+        TETHER_LOGI(TAG, "{}: OP request readback: AL_CTRL={}0x{:04X} "
+                         "WD={}0x{:04X} DL={}0x{:04X} "
+                         "SM2[{}] addr=0x{:02X}{:02X} len={} ctrl=0x{:02X} "
+                         "stat=0x{:02X} act=0x{:02X} pdi=0x{:02X}",
+                    logPrefix().c_str(),
+                    c_ok ? "" : "? ", al_ctrl,
+                    w_ok ? "" : "? ", wd,
+                    d_ok ? "" : "? ", dl,
+                    s_ok ? "ok" : "rd-fail",
+                    sm2[1], sm2[0],
+                    sm2[2] | (sm2[3] << 8), sm2[4], sm2[5], sm2[6], sm2[7]);
+    }
+
     // Confirm OP (up to 5 s).  The slave may need continuous process data.
+    uint8_t last_state = 0;
+    int last_read_ok = 0;
     for (int attempt = 0; attempt < 500; attempt++) {
         if (master_->isCancelRequested()) {
             TETHER_LOGI(TAG, "{}: OP confirmation cancelled", logPrefix().c_str());
@@ -653,7 +678,41 @@ SlaveError Slave::transitionToOp() {
         }
         Tether::Platform::Clock::instance().delayMilliseconds(10);
         uint8_t state = 0;
-        if (master_->readSlaveApplicationLayerState(index_, state)) {
+        const bool ok = master_->readSlaveApplicationLayerState(index_, state);
+        const bool changed = ok && (state != last_state);
+        last_read_ok = ok;
+        if (ok)
+            last_state = state;
+        if ((attempt % 100) == 99 || changed)
+            TETHER_LOGI(TAG, "{}: OP confirm poll: read={} state=0x{:02X} "
+                             "(attempt {})",
+                        logPrefix().c_str(), ok, last_state, attempt + 1);
+        // Re-issue the OP request every ~500 ms.  If the output SM watchdog
+        // was expired when the request first arrived, the slave declines OP
+        // and never re-evaluates the request on its own — a fresh write lets
+        // it transition as soon as the watchdog recovers.
+        if (ok && state != static_cast<uint8_t>(SlaveState::OP) &&
+            (attempt % 50) == 49) {
+            TETHER_LOGI(TAG, "{}: Re-issuing OP request (still 0x{:02X})",
+                        logPrefix().c_str(), state);
+            master_->requestSlaveApplicationLayerState(
+                index_, static_cast<uint8_t>(SlaveState::OP) | 0x10);
+
+            // Diagnostic: read SM2's process-data buffer (phys 0x1800) to
+            // prove cyclic output data is actually reaching the slave.
+            // If this stays all-zero the LRW/FMMU write side is broken.
+            uint8_t sm2_data[8] = {};
+            const bool b_ok = master_->readRegister(index_, 0x1800,
+                                                    sm2_data, sizeof(sm2_data), 200);
+            uint16_t wd2 = 0;
+            master_->readRegister(index_, Raw::EC_REG_WD_STATUS, wd2, 200);
+            TETHER_LOGI(TAG, "{}: SM2 buf[{}] {:02X} {:02X} {:02X} {:02X} "
+                             "{:02X} {:02X} {:02X} {:02X} WD=0x{:04X}",
+                        logPrefix().c_str(), b_ok ? "ok" : "rd-fail",
+                        sm2_data[0], sm2_data[1], sm2_data[2], sm2_data[3],
+                        sm2_data[4], sm2_data[5], sm2_data[6], sm2_data[7], wd2);
+        }
+        if (ok) {
             if (state == static_cast<uint8_t>(SlaveState::OP)) {
                 if (slave_debug_flags_.stateMachine) {
                     TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -678,7 +737,10 @@ SlaveError Slave::transitionToOp() {
 
     uint16_t al_code = 0;
     readALStatusCode(al_code);
-    TETHER_LOGE(TAG, "{}: OP not confirmed after 5s (AL status code: {} (0x{:04X}))", logPrefix().c_str(), getALStatusCodeName(al_code), al_code);
+    TETHER_LOGE(TAG, "{}: OP not confirmed after 5s (last AL state=0x{:02X} "
+                     "read_ok={} AL status code: {} (0x{:04X}))",
+                logPrefix().c_str(), last_state, last_read_ok,
+                getALStatusCodeName(al_code), al_code);
     return SlaveError::TransportError;
 }
 

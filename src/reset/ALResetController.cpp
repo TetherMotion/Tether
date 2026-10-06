@@ -10,6 +10,7 @@
 #include "tether/platform/EspCompat.hpp"
 
 #include <chrono>
+#include <cstdio>
 #include <thread>
 
 namespace EtherCAT {
@@ -132,8 +133,12 @@ ALResetResult ALResetController::resetSlave(uint16_t slave_index,
         result.message = "Target state reached after " +
                          std::to_string(result.iterations_used) + " iteration(s)";
     } else {
+        char tail[96];
+        std::snprintf(tail, sizeof(tail), " (last AL=0x%04X, AL code=0x%04X)",
+                      last_al, last_code);
         result.message = "Failed to reach target state after " +
-                         std::to_string(max_iterations) + " iteration(s)";
+                         std::to_string(max_iterations) + " iteration(s)" +
+                         tail;
     }
 
     return result;
