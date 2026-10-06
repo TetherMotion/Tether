@@ -646,6 +646,8 @@ SlaveError Slave::transitionToOp() {
     }
 
     // Confirm OP (up to 5 s).  The slave may need continuous process data.
+    uint8_t last_state = 0;
+    int last_read_ok = 0;
     for (int attempt = 0; attempt < 500; attempt++) {
         if (master_->isCancelRequested()) {
             TETHER_LOGI(TAG, "{}: OP confirmation cancelled", logPrefix().c_str());
@@ -653,7 +655,16 @@ SlaveError Slave::transitionToOp() {
         }
         Tether::Platform::Clock::instance().delayMilliseconds(10);
         uint8_t state = 0;
-        if (master_->readSlaveApplicationLayerState(index_, state)) {
+        const bool ok = master_->readSlaveApplicationLayerState(index_, state);
+        const bool changed = ok && (state != last_state);
+        last_read_ok = ok;
+        if (ok)
+            last_state = state;
+        if ((attempt % 100) == 99 || changed)
+            TETHER_LOGI(TAG, "{}: OP confirm poll: read={} state=0x{:02X} "
+                             "(attempt {})",
+                        logPrefix().c_str(), ok, last_state, attempt + 1);
+        if (ok) {
             if (state == static_cast<uint8_t>(SlaveState::OP)) {
                 if (slave_debug_flags_.stateMachine) {
                     TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -678,7 +689,10 @@ SlaveError Slave::transitionToOp() {
 
     uint16_t al_code = 0;
     readALStatusCode(al_code);
-    TETHER_LOGE(TAG, "{}: OP not confirmed after 5s (AL status code: {} (0x{:04X}))", logPrefix().c_str(), getALStatusCodeName(al_code), al_code);
+    TETHER_LOGE(TAG, "{}: OP not confirmed after 5s (last AL state=0x{:02X} "
+                     "read_ok={} AL status code: {} (0x{:04X}))",
+                logPrefix().c_str(), last_state, last_read_ok,
+                getALStatusCodeName(al_code), al_code);
     return SlaveError::TransportError;
 }
 
