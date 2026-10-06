@@ -39,10 +39,13 @@ if(Drogon_FOUND AND TARGET tether_io_protocol AND TARGET Drogon::Drogon)
     target_compile_features(tether_io_drogon_websocket PRIVATE cxx_std_20)
 
     # --- Web dashboard example ---
-    # Serves the pre-built Tether IO dashboard (web/tether-io-dashboard/dist/)
-    # as static files alongside the binary WebSocket endpoint, so a single
-    # process provides both the UI and the data backend.
-    set(WEB_DASHBOARD_DIST_DIR "${PROJECT_SOURCE_DIR}/web/tether-io-dashboard/dist")
+    # Serves the pre-built TetherWebUI dashboard (built in the separate
+    # TetherWebUI repository) as static files alongside the binary WebSocket
+    # endpoint, so a single process provides both the UI and the data backend.
+    # Default assumes TetherWebUI is checked out next to this repo; override
+    # with -DWEB_DASHBOARD_DIST_DIR=/path/to/dist or --web-root at runtime.
+    set(WEB_DASHBOARD_DIST_DIR "${PROJECT_SOURCE_DIR}/../TetherWebUI/dist"
+        CACHE PATH "Path to the built TetherWebUI dashboard (dist/)")
     add_executable(web_dashboard_example
         web_dashboard_example.cpp
         TetherIOWebSocketController.cpp)

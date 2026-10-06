@@ -179,7 +179,7 @@ TEST(CiA402MachineProfileTest, SimulatedFleetPublishesSchemaValidatedReadOnlySig
 
 /// Cross-language digest fixtures: the browser client recomputes the same
 /// canonical descriptor + BLAKE3 digests (schema-v6/handshake.ts). These
-/// constants are mirrored in web/tether-io-dashboard/src/schema-v6/
+/// constants are mirrored in src/schema-v6/ of the TetherWebUI repo
 /// handshake.test.ts — a change here must change there, or catalogs
 /// negotiated between the implementations will reject each other.
 TEST(CiA402MachineProfileTest, DigestFixturesMatchBrowserClient) {
