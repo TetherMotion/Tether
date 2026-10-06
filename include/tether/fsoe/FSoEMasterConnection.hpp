@@ -19,6 +19,7 @@
 
 #include "fsoe/FSoEDefs.hpp"
 #include "fsoe/FSoECRC.hpp"
+#include "fsoe/FSoESafetyAddressResolver.hpp"
 #include "tether/utils/EventSource.hpp"
 #include <cstdint>
 #include <string>
@@ -389,6 +390,22 @@ private:
     uint16_t rx_seq_no_ = 1;      ///< Kept for diagnostics (expected slave TX seq = last_tx_seq_no_)
     uint16_t last_tx_seq_no_ = 0; ///< Seq used in the last TX (expected slave TX seq for RX)
     uint16_t last_rx_seq_no_ = 0; ///< Seq used by slave in its last TX (for diagnostics)
+
+    // Background connID recovery: on a CRC error, the rejected frame is
+    // handed to addr_resolver_ which brute-forces the connID under which
+    // the frame's CRCs validate, on a worker thread.  The recovered
+    // address is cached in addr_hint_ (keyed by the exact frame bytes);
+    // every subsequent CRC error on the same frame immediately emits a
+    // second error-callback line asking whether the recovered address is
+    // the intended --connection-id/--safety-address.
+    struct CrcAddrHint {
+        std::mutex m;
+        bool ready = false;
+        SafetyAddressResolver::Result result;
+        std::vector<uint8_t> frame;
+    };
+    SafetyAddressResolver addr_resolver_;
+    std::shared_ptr<CrcAddrHint> addr_hint_ = std::make_shared<CrcAddrHint>();
 
     // Legacy sequence tracking (kept for API compatibility, no longer used
     // for actual sequence validation — see tx_seq_no_ / rx_seq_no_ above)
