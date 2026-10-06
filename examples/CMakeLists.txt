@@ -357,7 +357,7 @@ add_tether_example(realtime_diagnostics
 # Sends unreachable datagrams (bogus LRW ranges, slave 999) and reports which
 # socket filter configuration receives the returning frames.
 add_tether_example(ec_filter_probe
-    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common)
+    LIBRARIES tether_ethercat_master tether_ethercat_common tether_hal tether_common tether_examples_common)
 
 # ---ATI Axia80 F/T Sensor streaming example ---
 # Streams 6-DOF force/torque data with engineering-unit conversion.
