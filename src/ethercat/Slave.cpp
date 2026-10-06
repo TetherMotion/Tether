@@ -697,6 +697,20 @@ SlaveError Slave::transitionToOp() {
                         logPrefix().c_str(), state);
             master_->requestSlaveApplicationLayerState(
                 index_, static_cast<uint8_t>(SlaveState::OP) | 0x10);
+
+            // Diagnostic: read SM2's process-data buffer (phys 0x1800) to
+            // prove cyclic output data is actually reaching the slave.
+            // If this stays all-zero the LRW/FMMU write side is broken.
+            uint8_t sm2_data[8] = {};
+            const bool b_ok = master_->readRegister(index_, 0x1800,
+                                                    sm2_data, sizeof(sm2_data), 200);
+            uint16_t wd2 = 0;
+            master_->readRegister(index_, Raw::EC_REG_WD_STATUS, wd2, 200);
+            TETHER_LOGI(TAG, "{}: SM2 buf[{}] {:02X} {:02X} {:02X} {:02X} "
+                             "{:02X} {:02X} {:02X} {:02X} WD=0x{:04X}",
+                        logPrefix().c_str(), b_ok ? "ok" : "rd-fail",
+                        sm2_data[0], sm2_data[1], sm2_data[2], sm2_data[3],
+                        sm2_data[4], sm2_data[5], sm2_data[6], sm2_data[7], wd2);
         }
         if (ok) {
             if (state == static_cast<uint8_t>(SlaveState::OP)) {
