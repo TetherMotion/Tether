@@ -313,43 +313,9 @@ static constexpr PDO TxPDO_1B04 = makePDO(0x1B04u, 29u,
 
 static_assert(TxPDO_1B04.field_count == TxPDO_1B04_Fields.size(), "TxPDO1B04 field count mismatch");
 
-// ---------------------------------------------------------------------------
-// AS715N — custom-mapped TxPDO 0x1A00 (33 bytes)
-// Same layout as the slave-defined 0x1B04 plus DigitalInputs (0x60FD)
-// appended.  The mapping must be written to object 0x1A00 via SDO in
-// PRE_OP (see TxPDO_1A00_Mapping / Slave::configureCustomTxPDO) and the
-// PDO assigned to SM3 via 0x1C13.
-// ---------------------------------------------------------------------------
-
-static constexpr std::array<PDOField,11> TxPDO_1A00_Fields = {{
-    { &CiA402::Parameters60xx::ErrorCode,  0u, 2,  "ErrorCode" },
-    { &CiA402::Parameters60xx::StatusWord,  2u, 2,  "Statusword" },
-    { &CiA402::Parameters60xx::PositionFeedback,  4u, 4,  "PositionActualValue" },
-    { &CiA402::Parameters60xx::ActualTorque,  8u, 2,  "TorqueActualValue" },
-    { &CiA402::Parameters60xx::ModeDisplay, 10u, 1,  "ModesOfOperationDisp" },
-    { &CiA402::Parameters60xx::FollowingErrorActual, 11u, 4,  "PositionDeviation" },
-    { &CiA402::Parameters60xx::TouchProbeStatus, 15u, 2,  "TouchProbeStatus" },
-    { &CiA402::Parameters60xx::TouchProbe1PosEdge, 17u, 4,  "TouchProbe1PosEdge" },
-    { &CiA402::Parameters60xx::TouchProbe2PosEdge, 21u, 4,  "TouchProbe2PosEdge" },
-    { &CiA402::Parameters60xx::ActualSpeed, 25u, 4,  "SpeedFeedback" },
-    { &CiA402::Parameters60xx::DIStatus,   29u, 4,  "DigitalInputs" },
-}};
-
-static constexpr PDO TxPDO_1A00 = makePDO(0x1A00u, 33u,
-                                          TxPDO_1A00_Fields.data(),
-                                          TxPDO_1A00_Fields.size());
-
-static_assert(TxPDO_1A00.field_count == TxPDO_1A00_Fields.size(), "TxPDO1A00 field count mismatch");
-
-/// Mapping entries for Slave::configureCustomTxPDO(0x1A00, ...) — the
-/// field list expressed as CustomPDOMappingEntry (register pointers).
-inline std::vector<::EtherCAT::CustomPDOMappingEntry> makeTxPDO1A00Mapping() {
-    std::vector<::EtherCAT::CustomPDOMappingEntry> out;
-    out.reserve(TxPDO_1A00_Fields.size());
-    for (const auto& f : TxPDO_1A00_Fields)
-        out.emplace_back(f.entry);
-    return out;
-}
+// NOTE: the AS715N's PDO mapping object 0x1A00 is read-only (subindex 0
+// reports 0 entries), so TxPDOs cannot be remapped — use one of the fixed
+// slave-defined TxPDOs (0x1B01/0x1B02/0x1B03 carry 0x60FD Digital Inputs).
 
 // ---------------------------------------------------------------------------
 // Utility helpers
@@ -503,18 +469,27 @@ static_assert(sizeof(AS715N_TxPDO_1B04) == TxPDO_1B04.size,
               "AS715N_TxPDO_1B04 struct size must match PDO 0x1B04 size");
 
 /**
- * @brief TxPDO 0x1A00 struct (slave → master, 33 bytes)
+ * @brief TxPDO 0x1B03 struct (slave → master, 29 bytes)
  *
- * Custom-mapped PDO: the 0x1B04 layout plus Digital Inputs appended.
- * Inherits AS715N_TxPDO_1B04 so code written against the fixed layout
- * keeps working (base subobject occupies the leading 29 bytes).
+ * Same field set as 0x1B04 but the last field is Digital Inputs (0x60FD)
+ * instead of Speed Feedback (0x606C), and Position Deviation precedes
+ * Modes of Operation Display.
  */
-struct AS715N_TxPDO_1A00 : AS715N_TxPDO_1B04 {
+struct AS715N_TxPDO_1B03 {
+    uint16_t error_code;                 ///< 0x603F Error Code
+    uint16_t statusword;                 ///< 0x6041 Statusword
+    int32_t  position_actual;            ///< 0x6064 Position Actual Value
+    int16_t  torque_actual;              ///< 0x6077 Torque Actual Value (‰ of rated)
+    int32_t  position_deviation;         ///< 0x60F4 Following Error / Position Deviation
+    int8_t   modes_of_operation_display; ///< 0x6061 Modes of Operation Display
+    uint16_t touch_probe_status;         ///< Touch Probe Status
+    int32_t  touch_probe_pos1;           ///< 0x60BA Touch Probe 1 Pos Edge
+    int32_t  touch_probe_pos2;           ///< 0x60BC Touch Probe 2 Pos Edge
     uint32_t digital_inputs;             ///< 0x60FD Digital Inputs
 } __attribute__((packed));
 
-static_assert(sizeof(AS715N_TxPDO_1A00) == TxPDO_1A00.size,
-              "AS715N_TxPDO_1A00 struct size must match PDO 0x1A00 size");
+static_assert(sizeof(AS715N_TxPDO_1B03) == TxPDO_1B03.size,
+              "AS715N_TxPDO_1B03 struct size must match PDO 0x1B03 size");
 
 /**
  * @brief RxPDO 0x1702 struct (master → slave, 19 bytes)
@@ -629,7 +604,6 @@ constexpr int opmodeOffsetFor(uint16_t rxpdo_index) {
 /// @return Byte offset, or -1 if the TxPDO has no statusword.
 constexpr int statuswordOffsetFor(uint16_t txpdo_index) {
     switch (txpdo_index) {
-        case 0x1A00u:
         case 0x1B01u:
         case 0x1B02u:
         case 0x1B03u:
