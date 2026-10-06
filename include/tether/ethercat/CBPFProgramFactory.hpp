@@ -214,12 +214,18 @@ public:
      * @brief Attach a program to a socket fd via SO_ATTACH_FILTER (Linux).
      *
      * Also applies SO_LOCK_FILTER (best effort) so the filter cannot be
-     * detached or weakened later.
+     * detached or weakened later — pass lock=false when a later stage is
+     * expected to replace the program (e.g. the cyclic datapath swapping
+     * the encapsulation filter on the wire socket for its composed
+     * encap ∧ idx∉fastpath async program; a locked filter makes that
+     * SO_ATTACH_FILTER fail with EPERM).
      * @return false on unsupported platform or setsockopt failure.
      */
-    static bool attach(int fd, const CBPFInsn* prog, size_t count);
-    static bool attach(int fd, const std::vector<CBPFInsn>& prog) {
-        return attach(fd, prog.data(), prog.size());
+    static bool attach(int fd, const CBPFInsn* prog, size_t count,
+                       bool lock = true);
+    static bool attach(int fd, const std::vector<CBPFInsn>& prog,
+                       bool lock = true) {
+        return attach(fd, prog.data(), prog.size(), lock);
     }
 };
 
