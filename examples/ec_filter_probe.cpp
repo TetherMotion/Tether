@@ -268,7 +268,11 @@ const char* rxRingTest(int ifindex, const EtherCAT::CBPFInsn* prog,
             reinterpret_cast<uint8_t*>(bd) +
             bd->hdr.bh1.offset_to_first_pkt);
         const uint8_t* pkt = reinterpret_cast<uint8_t*>(ph) + ph->tp_mac;
-        if (ph->tp_snaplen > idx_off && pkt[idx_off] == want_idx)
+        // Ring frames have the tag stripped → idx at 17; inline tag → 21.
+        const size_t off =
+            (ph->tp_snaplen > 14 && pkt[12] == 0x81 && pkt[13] == 0x00)
+                ? 21 : 17;
+        if (ph->tp_snaplen > off && pkt[off] == want_idx)
             result = "reply delivered to ring";
         else
             result = "ring has frames but wrong idx";
@@ -277,6 +281,64 @@ const char* rxRingTest(int ifindex, const EtherCAT::CBPFInsn* prog,
     ::munmap(map, map_len);
     ::close(fd);
     return result;
+}
+
+/**
+ * VLAN auxdata probe: does the kernel strip the 802.1Q tag into
+ * tpacket_auxdata (recvmsg cmsg), or leave it inline in the frame bytes?
+ * This decides which leg of the composed cBPF (offset-21 inline vs
+ * offset-17 stripped + SKF_AD_VLAN_*) the replies actually exercise.
+ */
+const char* auxdataTest(int ifindex, int tx_fd, const uint8_t* frame,
+                        size_t flen, char* detail, size_t dlen) {
+    int fd = openBoundRaw(ifindex);
+    if (fd < 0) return "socket/bind failed";
+    int one = 1;
+    ::setsockopt(fd, SOL_PACKET, PACKET_IGNORE_OUTGOING, &one, sizeof(one));
+    if (::setsockopt(fd, SOL_PACKET, PACKET_AUXDATA, &one, sizeof(one)) < 0) {
+        ::close(fd); return "PACKET_AUXDATA unsupported";
+    }
+
+    struct sockaddr_ll dst{};
+    dst.sll_family  = AF_PACKET;
+    dst.sll_ifindex = ifindex;
+    if (::sendto(tx_fd, frame, flen, 0, reinterpret_cast<sockaddr*>(&dst),
+                 sizeof(dst)) < 0) { ::close(fd); return "probe sendto failed"; }
+
+    struct pollfd pfd{fd, POLLIN, 0};
+    if (::poll(&pfd, 1, 30) <= 0) { ::close(fd); return "no reply received"; }
+
+    uint8_t buf[2048];
+    uint8_t cbuf[256];
+    struct iovec iov{buf, sizeof(buf)};
+    struct msghdr msg{};
+    msg.msg_iov = &iov; msg.msg_iovlen = 1;
+    msg.msg_control = cbuf; msg.msg_controllen = sizeof(cbuf);
+    ssize_t n = ::recvmsg(fd, &msg, 0);
+    ::close(fd);
+    if (n <= 0) return "recvmsg failed";
+
+    const bool inline_tag = (n > 14 && buf[12] == 0x81 && buf[13] == 0x00);
+    int aux_vid = -1, aux_status = -1;
+    for (struct cmsghdr* c = CMSG_FIRSTHDR(&msg); c;
+         c = CMSG_NXTHDR(&msg, c)) {
+        if (c->cmsg_level == SOL_PACKET && c->cmsg_type == PACKET_AUXDATA) {
+            const auto* aux =
+                reinterpret_cast<const struct tpacket_auxdata*>(CMSG_DATA(c));
+            aux_status = aux->tp_status;
+            if (aux->tp_status & TP_STATUS_VLAN_VALID)
+                aux_vid = aux->tp_vlan_tci & 0x0FFF;
+        }
+    }
+    snprintf(detail, dlen,
+             "%s tag in data; auxdata status=0x%x vlan_vid=%d "
+             "(vlan_valid=%d) — %s",
+             inline_tag ? "inline 0x8100" : "stripped (0x88A4 at [12])",
+             aux_status, aux_vid,
+             (aux_status >= 0 && (aux_status & TP_STATUS_VLAN_VALID)) ? 1 : 0,
+             inline_tag ? "BPF must parse inline tag (idx@21)"
+                        : "BPF auxdata leg applies (idx@17)");
+    return "ok";
 }
 
 } // namespace
@@ -367,8 +429,11 @@ int main(int argc, char** argv) {
         for (size_t si = 0; si < 4; ++si) {
             ssize_t n;
             while ((n = ::recv(socks[si].fd, buf, sizeof(buf), 0)) > 0) {
-                // idx byte: offset 17 untagged, 21 with inline tag.
-                const size_t ioff = vlan ? 21 : 17;
+                // Replies arrive with the VLAN tag stripped into auxdata
+                // (rx-vlan-offload) → idx at 17.  Inline-tag copies (self-TX
+                // echo) → idx at 21.  Auto-detect on the wire ethertype.
+                const size_t ioff =
+                    (n > 14 && buf[12] == 0x81 && buf[13] == 0x00) ? 21 : 17;
                 if (static_cast<size_t>(n) > ioff && buf[ioff] == pr.idx) {
                     auto& h = hits[si][pi];
                     h.count++;
@@ -410,6 +475,11 @@ int main(int argc, char** argv) {
         const size_t idx_off = vlan ? 21 : 17;
 
         printf("\n=== kernel packet-ring matrix ===\n");
+        char aux_detail[256] = {};
+        const char* aux_res = auxdataTest(ifindex, tx, frame, flen,
+                                          aux_detail, sizeof(aux_detail));
+        printf("VLAN tag delivery (PACKET_AUXDATA):                 %s%s%s\n",
+               aux_res, aux_detail[0] ? " — " : "", aux_detail);
         printf("TX ring, no PACKET_VERSION/RX ring (plain v2 socket): %s\n",
                txRingTest(ifindex, 0, false, frame, flen));
         printf("TX ring on TPACKET_V3 socket, no RX ring:           %s\n",
