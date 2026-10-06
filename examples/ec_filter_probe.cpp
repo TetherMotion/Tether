@@ -19,15 +19,25 @@
  * Usage (requires root / CAP_NET_RAW):
  *   sudo ./ec_filter_probe -i enp1s0f0              # untagged
  *   sudo ./ec_filter_probe -i enp1s0f0 -v 1999      # VLAN 1999
+ *   sudo ./ec_filter_probe                          # auto-select interface
+ *   ./ec_filter_probe --list-interfaces             # show candidates
  */
 
+#include <argparse/argparse.hpp>
+
+#include "common/ExampleHelpers.hpp"
+#include "logging/Logger.hpp"
 #include "tether/ethercat/CBPFProgramFactory.hpp"
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <string>
 #include <vector>
+
+static const char* kTag = "ec_filter_probe";
 
 #ifdef __linux__
 #include <arpa/inet.h>
@@ -49,6 +59,105 @@ constexpr uint8_t  kCmdFPRD      = 0x04;
 constexpr uint8_t  kCmdLRW       = 0x0C;
 constexpr uint8_t  kFastIdxLo    = 0xE0;
 constexpr uint8_t  kFastIdxHi    = 0xFD;
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+struct ProbeConfig {
+    std::string ifname;
+    int         ifindex = 0;
+    uint16_t    vlan    = 0;
+    uint8_t     srcMac[6] = {};
+};
+
+/// Probe datagrams sent on the wire.  First-idx values are chosen to land
+/// on both sides of the fastpath range.
+struct Probe {
+    const char* name;
+    uint8_t  cmd;
+    uint8_t  idx;
+    uint32_t addr;
+    uint16_t dlen;
+};
+
+const Probe kProbes[] = {
+    {"LRW  bogus-logical idx=0xF8", kCmdLRW,  0xF8, 0xDEADBEEFu,                  32},
+    {"LRW  bogus-logical idx=0xE0", kCmdLRW,  0xE0, 0x00010000u,                  16},
+    {"APRD position -999 idx=0xFE", kCmdAPRD, 0xFE, (0xFC19u) | (0x0130u << 16),   2},
+    {"FPRD station  999  idx=0x55", kCmdFPRD, 0x55, 999u | (0x0130u << 16),        2},
+    {"LRW  bogus-logical idx=0x10", kCmdLRW,  0x10, 0xABCDEF00u,                  16},
+};
+constexpr size_t kProbeCount = sizeof(kProbes) / sizeof(kProbes[0]);
+
+// ============================================================================
+// Argument parsing / interface resolution
+// ============================================================================
+
+/// Parse CLI arguments and resolve the interface (auto-select when omitted).
+/// Exits the process on error, on --help, or on --list-interfaces.
+ProbeConfig parseArgs(int argc, char** argv) {
+    argparse::ArgumentParser program("ec_filter_probe", "1.0",
+                                     argparse::default_arguments::help);
+    Tether::Examples::addInterfaceArg(program);
+    Tether::Examples::addListInterfacesArg(program);
+    program.add_argument("-v", "--vlan")
+        .scan<'i', int>()
+        .default_value(0)
+        .help("802.1Q VLAN id for probe frames (0 = untagged, default)");
+
+    try { program.parse_args(argc, argv); }
+    catch (const std::runtime_error& err) {
+        std::cerr << err.what() << "\n" << program;
+        std::exit(2);
+    }
+
+    if (program.get<bool>("--list-interfaces")) {
+        Tether::Examples::listPhysicalInterfaces(kTag);
+        std::exit(0);
+    }
+
+    // --encapsulation comes along with addInterfaceArg() but does not apply
+    // here: the probe controls the VLAN tag itself via -v/--vlan.
+    if (!program.get<std::string>("--encapsulation").empty()) {
+        fprintf(stderr, "--encapsulation is not supported by this probe; "
+                        "use -v/--vlan to tag probe frames\n");
+        std::exit(2);
+    }
+
+    ProbeConfig cfg;
+    cfg.ifname = Tether::Examples::resolveInterface(
+        program.get<std::string>("--interface"), kTag);
+
+    const int vlanArg = program.get<int>("--vlan");
+    if (vlanArg < 0 || vlanArg > 4094) {
+        fprintf(stderr, "--vlan must be 0 (untagged) or 1-4094\n");
+        std::exit(2);
+    }
+    cfg.vlan = static_cast<uint16_t>(vlanArg);
+
+    cfg.ifindex = static_cast<int>(if_nametoindex(cfg.ifname.c_str()));
+    if (!cfg.ifindex) {
+        fprintf(stderr, "unknown interface %s\n", cfg.ifname.c_str());
+        std::exit(1);
+    }
+    return cfg;
+}
+
+/// Read the source MAC of @p ifname into @p cfg.srcMac.
+void querySourceMac(ProbeConfig& cfg) {
+    int s = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) return;
+    struct ifreq ifr{};
+    std::strncpy(ifr.ifr_name, cfg.ifname.c_str(), IFNAMSIZ - 1);
+    if (::ioctl(s, SIOCGIFHWADDR, &ifr) == 0)
+        std::memcpy(cfg.srcMac, ifr.ifr_hwaddr.sa_data, 6);
+    ::close(s);
+}
+
+// ============================================================================
+// Socket helpers
+// ============================================================================
 
 struct ProbeSocket {
     const char* name;
@@ -78,6 +187,58 @@ int openRx(int ifindex, const EtherCAT::CBPFInsn* prog = nullptr,
     }
     return fd;
 }
+
+int openBoundRaw(int ifindex) {
+    int fd = ::socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    if (fd < 0) return -1;
+    struct sockaddr_ll sll{};
+    sll.sll_family   = AF_PACKET;
+    sll.sll_protocol = htons(ETH_P_ALL);
+    sll.sll_ifindex  = ifindex;
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&sll), sizeof(sll)) < 0) {
+        ::close(fd); return -1;
+    }
+    return fd;
+}
+
+/// Open the helper TX socket used to inject probe frames.
+int openTx() {
+    int fd = ::socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    if (fd < 0) perror("tx socket");
+    return fd;
+}
+
+// ============================================================================
+// Filter programs
+// ============================================================================
+
+/// The three candidate cBPF programs under test.
+struct FilterPrograms {
+    std::vector<EtherCAT::CBPFInsn> encap;
+    std::vector<EtherCAT::CBPFInsn> cyclic;
+    std::vector<EtherCAT::CBPFInsn> async;
+};
+
+FilterPrograms buildFilterPrograms(uint16_t vlan) {
+    EtherCAT::CBPFSpec spec;
+    spec.untagged_ethercat = (vlan == 0);
+    spec.tagged_ethercat   = (vlan != 0);
+    if (vlan)
+        spec.vlan_range = EtherCAT::CBPFVlanRange{vlan, vlan};
+
+    FilterPrograms progs;
+    progs.encap = EtherCAT::CBPFProgramFactory::build(spec);
+    spec.first_idx_range   = EtherCAT::CBPFIdxRange{kFastIdxLo, kFastIdxHi};
+    spec.first_idx_exclude = false;
+    progs.cyclic = EtherCAT::CBPFProgramFactory::build(spec);
+    spec.first_idx_exclude = true;
+    progs.async = EtherCAT::CBPFProgramFactory::build(spec);
+    return progs;
+}
+
+// ============================================================================
+// Frame construction
+// ============================================================================
 
 size_t buildFrame(uint8_t* out, const uint8_t src[6], uint16_t vlan,
                   uint8_t cmd, uint8_t idx, uint32_t addr,
@@ -116,27 +277,117 @@ size_t buildFrame(uint8_t* out, const uint8_t src[6], uint16_t vlan,
     return total;
 }
 
+// ============================================================================
+// Reply-matrix probe: plain RX sockets with/without cBPF filters
+// ============================================================================
+
 struct RxHit { int count = 0; uint16_t last_wkc = 0; size_t last_len = 0; };
 
-// --- kernel packet-ring probe --------------------------------------------
+/// Open the four candidate RX sockets (bare/encap/cyclic/async).
+/// Returns false if any socket failed.
+bool openProbeSockets(int ifindex, const FilterPrograms& progs,
+                      ProbeSocket (&socks)[4]) {
+    socks[0] = {"bare",   openRx(ifindex)};
+    socks[1] = {"encap",  openRx(ifindex, progs.encap.data(),  progs.encap.size())};
+    socks[2] = {"cyclic", openRx(ifindex, progs.cyclic.data(), progs.cyclic.size())};
+    socks[3] = {"async",  openRx(ifindex, progs.async.data(),  progs.async.size())};
+    for (const auto& s : socks)
+        if (s.fd < 0) return false;
+    return true;
+}
+
+/// Send one probe frame, wait ~20 ms for the reply to traverse the segment,
+/// then drain all RX sockets and record hits carrying the probe's idx.
+void sendAndCollect(int tx, const sockaddr_ll& dst,
+                    const uint8_t* frame, size_t flen, const Probe& pr,
+                    const ProbeSocket (&socks)[4], RxHit (*hits)[kProbeCount],
+                    size_t pi) {
+    if (::sendto(tx, frame, flen, 0,
+                 reinterpret_cast<const sockaddr*>(&dst), sizeof(dst)) < 0) {
+        perror("sendto");
+        return;
+    }
+    struct pollfd pfds[4];
+    for (size_t si = 0; si < 4; ++si) {
+        pfds[si].fd = socks[si].fd;
+        pfds[si].events = POLLIN;
+    }
+    ::poll(pfds, 4, 20);
+    uint8_t buf[2048];
+    for (size_t si = 0; si < 4; ++si) {
+        ssize_t n;
+        while ((n = ::recv(socks[si].fd, buf, sizeof(buf), 0)) > 0) {
+            // Replies arrive with the VLAN tag stripped into auxdata
+            // (rx-vlan-offload) → idx at 17.  Inline-tag copies (self-TX
+            // echo) → idx at 21.  Auto-detect on the wire ethertype.
+            const size_t ioff =
+                (n > 14 && buf[12] == 0x81 && buf[13] == 0x00) ? 21 : 17;
+            if (static_cast<size_t>(n) > ioff && buf[ioff] == pr.idx) {
+                auto& h = hits[si][pi];
+                h.count++;
+                h.last_len = n;
+                if (static_cast<size_t>(n) > ioff + 10 + pr.dlen + 1)
+                    h.last_wkc = buf[ioff + 10 + pr.dlen] |
+                                 (buf[ioff + 10 + pr.dlen + 1] << 8);
+            }
+        }
+    }
+}
+
+/// Print the per-probe × per-socket hit table.
+void printReplyMatrix(uint16_t vlan, const ProbeSocket (&socks)[4],
+                      const RxHit (*hits)[kProbeCount]) {
+    printf("\n=== reply matrix (vlan=%u) ===\n", vlan);
+    printf("%-34s | %-16s | %-16s | %-16s | %-16s\n",
+           "probe", socks[0].name, socks[1].name, socks[2].name, socks[3].name);
+    for (size_t pi = 0; pi < kProbeCount; ++pi) {
+        printf("%-34s |", kProbes[pi].name);
+        for (size_t si = 0; si < 4; ++si) {
+            const auto& h = hits[si][pi];
+            if (h.count)
+                printf(" %d reply wkc=%-4u |", h.count, h.last_wkc);
+            else
+                printf(" %-16s |", "-");
+        }
+        printf("\n");
+    }
+    printf("\nExpected: every probe lands on 'bare' and 'encap' (WKC=0 — "
+           "bogus targets), fastpath idx (E0-FD) only on 'cyclic', "
+           "others only on 'async'.\n");
+}
+
+/// Run the reply matrix: send every probe, collect per-socket replies,
+/// print the result table.
+void runReplyMatrix(const ProbeConfig& cfg, const FilterPrograms& progs,
+                    int tx, const sockaddr_ll& dst) {
+    ProbeSocket socks[4];
+    if (!openProbeSockets(cfg.ifindex, progs, socks))
+        return;   // error already printed by openRx
+
+    RxHit hits[4][kProbeCount] = {};
+    uint8_t frame[1600];
+
+    for (size_t pi = 0; pi < kProbeCount; ++pi) {
+        const Probe& pr = kProbes[pi];
+        uint8_t payload[64] = {};
+        const size_t flen = buildFrame(frame, cfg.srcMac, cfg.vlan, pr.cmd,
+                                       pr.idx, pr.addr, payload, pr.dlen);
+        sendAndCollect(tx, dst, frame, flen, pr, socks, hits, pi);
+    }
+
+    printReplyMatrix(cfg.vlan, socks, hits);
+
+    for (auto& s : socks) ::close(s.fd);
+}
+
+// ============================================================================
+// Kernel packet-ring probes
+// ============================================================================
 //
 // Reproduces the production cyclic channel's PACKET_MMAP usage in isolation
 // and reports whether the kernel actually drains a TX ring / fills an RX
 // ring under each configuration.  The failure we are hunting: every TX slot
 // stuck in TP_STATUS_SEND_REQUEST (kernel never transmits).
-
-int openBoundRaw(int ifindex) {
-    int fd = ::socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
-    if (fd < 0) return -1;
-    struct sockaddr_ll sll{};
-    sll.sll_family   = AF_PACKET;
-    sll.sll_protocol = htons(ETH_P_ALL);
-    sll.sll_ifindex  = ifindex;
-    if (::bind(fd, reinterpret_cast<sockaddr*>(&sll), sizeof(sll)) < 0) {
-        ::close(fd); return -1;
-    }
-    return fd;
-}
 
 /**
  * Put one frame into a PACKET_TX_RING slot, kick with sendto(), then check
@@ -220,8 +471,7 @@ const char* txRingTest(int ifindex, int packet_version, bool rx_v3,
  */
 const char* rxRingTest(int ifindex, const EtherCAT::CBPFInsn* prog,
                        size_t prog_len, int tx_fd,
-                       const uint8_t* frame, size_t flen, uint8_t want_idx,
-                       size_t idx_off) {
+                       const uint8_t* frame, size_t flen, uint8_t want_idx) {
     int fd = openBoundRaw(ifindex);
     if (fd < 0) return "socket/bind failed";
     int one = 1;
@@ -341,159 +591,55 @@ const char* auxdataTest(int ifindex, int tx_fd, const uint8_t* frame,
     return "ok";
 }
 
+/// Run the kernel packet-ring matrix: TX-ring drain, VLAN auxdata delivery,
+/// and composed-filter RX-ring tests.
+void runRingMatrix(const ProbeConfig& cfg, const FilterPrograms& progs,
+                   int tx) {
+    uint8_t frame[1600];
+    uint8_t payload[8] = {};
+    const size_t flen = buildFrame(frame, cfg.srcMac, cfg.vlan, kCmdLRW, 0xF8,
+                                   0xDEADBEEFu, payload, sizeof(payload));
+
+    printf("\n=== kernel packet-ring matrix ===\n");
+    char aux_detail[256] = {};
+    const char* aux_res = auxdataTest(cfg.ifindex, tx, frame, flen,
+                                      aux_detail, sizeof(aux_detail));
+    printf("VLAN tag delivery (PACKET_AUXDATA):                 %s%s%s\n",
+           aux_res, aux_detail[0] ? " — " : "", aux_detail);
+    printf("TX ring, no PACKET_VERSION/RX ring (plain v2 socket): %s\n",
+           txRingTest(cfg.ifindex, 0, false, frame, flen));
+    printf("TX ring on TPACKET_V3 socket, no RX ring:           %s\n",
+           txRingTest(cfg.ifindex, TPACKET_V3, false, frame, flen));
+    printf("TX ring + TPACKET_V3 RX ring (production layout):   %s\n",
+           txRingTest(cfg.ifindex, TPACKET_V3, true, frame, flen));
+
+    printf("V3 RX ring + composed cyclic filter, idx 0xF8:      %s\n",
+           rxRingTest(cfg.ifindex, progs.cyclic.data(), progs.cyclic.size(),
+                      tx, frame, flen, 0xF8));
+    printf("V3 RX ring + composed async filter,  idx 0xF8:      %s\n",
+           rxRingTest(cfg.ifindex, progs.async.data(), progs.async.size(),
+                      tx, frame, flen, 0xF8));
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
-    std::string ifname;
-    uint16_t vlan = 0;
-    for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i];
-        if ((a == "-i" || a == "--interface") && i + 1 < argc) ifname = argv[++i];
-        else if ((a == "-v" || a == "--vlan") && i + 1 < argc)
-            vlan = static_cast<uint16_t>(atoi(argv[++i]));
-        else { fprintf(stderr, "usage: %s -i <iface> [-v <vlan>]\n", argv[0]); return 2; }
-    }
-    if (ifname.empty()) { fprintf(stderr, "usage: %s -i <iface> [-v <vlan>]\n", argv[0]); return 2; }
+    ProbeConfig cfg = parseArgs(argc, argv);
+    querySourceMac(cfg);
 
-    const int ifindex = if_nametoindex(ifname.c_str());
-    if (!ifindex) { fprintf(stderr, "unknown interface %s\n", ifname.c_str()); return 1; }
+    const FilterPrograms progs = buildFilterPrograms(cfg.vlan);
 
-    // Source MAC of the interface.
-    uint8_t src[6] = {};
-    {
-        int s = ::socket(AF_INET, SOCK_DGRAM, 0);
-        struct ifreq ifr{}; std::strncpy(ifr.ifr_name, ifname.c_str(), IFNAMSIZ - 1);
-        if (::ioctl(s, SIOCGIFHWADDR, &ifr) == 0)
-            std::memcpy(src, ifr.ifr_hwaddr.sa_data, 6);
-        ::close(s);
-    }
-
-    // --- RX sockets -----------------------------------------------------
-    EtherCAT::CBPFSpec spec;
-    spec.untagged_ethercat = (vlan == 0);
-    spec.tagged_ethercat   = (vlan != 0);
-    if (vlan)
-        spec.vlan_range = EtherCAT::CBPFVlanRange{vlan, vlan};
-
-    std::vector<EtherCAT::CBPFInsn> encap_prog, cyc_prog, async_prog;
-    encap_prog = EtherCAT::CBPFProgramFactory::build(spec);
-    spec.first_idx_range   = EtherCAT::CBPFIdxRange{kFastIdxLo, kFastIdxHi};
-    spec.first_idx_exclude = false;
-    cyc_prog = EtherCAT::CBPFProgramFactory::build(spec);
-    spec.first_idx_exclude = true;
-    async_prog = EtherCAT::CBPFProgramFactory::build(spec);
-
-    ProbeSocket socks[] = {
-        {"bare",   openRx(ifindex)},
-        {"encap",  openRx(ifindex, encap_prog.data(), encap_prog.size())},
-        {"cyclic", openRx(ifindex, cyc_prog.data(),   cyc_prog.size())},
-        {"async",  openRx(ifindex, async_prog.data(), async_prog.size())},
-    };
-    for (auto& s : socks) if (s.fd < 0) return 1;
-
-    int tx = ::socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
-    if (tx < 0) { perror("tx socket"); return 1; }
+    int tx = openTx();
+    if (tx < 0) return 1;
     struct sockaddr_ll dst{};
     dst.sll_family   = AF_PACKET;
     dst.sll_protocol = htons(ETH_P_ALL);
-    dst.sll_ifindex  = ifindex;
+    dst.sll_ifindex  = cfg.ifindex;
 
-    // --- probe frames ----------------------------------------------------
-    // First-idx values chosen to land on both sides of the fastpath range.
-    struct Probe { const char* name; uint8_t cmd; uint8_t idx; uint32_t addr; uint16_t dlen; };
-    const Probe probes[] = {
-        {"LRW  bogus-logical idx=0xF8", kCmdLRW,  0xF8, 0xDEADBEEFu,        32},
-        {"LRW  bogus-logical idx=0xE0", kCmdLRW,  0xE0, 0x00010000u,        16},
-        {"APRD position -999 idx=0xFE", kCmdAPRD, 0xFE, (0xFC19u) | (0x0130u << 16), 2},
-        {"FPRD station  999  idx=0x55", kCmdFPRD, 0x55, 999u | (0x0130u << 16),      2},
-        {"LRW  bogus-logical idx=0x10", kCmdLRW,  0x10, 0xABCDEF00u,        16},
-    };
+    runReplyMatrix(cfg, progs, tx, dst);
+    runRingMatrix(cfg, progs, tx);
 
-    uint8_t frame[1600];
-    RxHit hits[sizeof(socks) / sizeof(socks[0])][sizeof(probes) / sizeof(probes[0])] = {};
-
-    for (size_t pi = 0; pi < sizeof(probes) / sizeof(probes[0]); ++pi) {
-        const Probe& pr = probes[pi];
-        uint8_t payload[64] = {};
-        const size_t flen = buildFrame(frame, src, vlan, pr.cmd, pr.idx,
-                                       pr.addr, payload, pr.dlen);
-        if (::sendto(tx, frame, flen, 0, reinterpret_cast<sockaddr*>(&dst),
-                     sizeof(dst)) < 0) {
-            perror("sendto"); continue;
-        }
-        // ~20 ms for the frame to traverse the segment and return.
-        struct pollfd pfds[4];
-        for (size_t si = 0; si < 4; ++si) { pfds[si].fd = socks[si].fd; pfds[si].events = POLLIN; }
-        ::poll(pfds, 4, 20);
-        uint8_t buf[2048];
-        for (size_t si = 0; si < 4; ++si) {
-            ssize_t n;
-            while ((n = ::recv(socks[si].fd, buf, sizeof(buf), 0)) > 0) {
-                // Replies arrive with the VLAN tag stripped into auxdata
-                // (rx-vlan-offload) → idx at 17.  Inline-tag copies (self-TX
-                // echo) → idx at 21.  Auto-detect on the wire ethertype.
-                const size_t ioff =
-                    (n > 14 && buf[12] == 0x81 && buf[13] == 0x00) ? 21 : 17;
-                if (static_cast<size_t>(n) > ioff && buf[ioff] == pr.idx) {
-                    auto& h = hits[si][pi];
-                    h.count++;
-                    h.last_len = n;
-                    if (static_cast<size_t>(n) > ioff + 10 + pr.dlen + 1)
-                        h.last_wkc = buf[ioff + 10 + pr.dlen] |
-                                     (buf[ioff + 10 + pr.dlen + 1] << 8);
-                }
-            }
-        }
-    }
-
-    printf("\n=== reply matrix (vlan=%u) ===\n", vlan);
-    printf("%-34s | %-16s | %-16s | %-16s | %-16s\n",
-           "probe", socks[0].name, socks[1].name, socks[2].name, socks[3].name);
-    for (size_t pi = 0; pi < sizeof(probes) / sizeof(probes[0]); ++pi) {
-        printf("%-34s |", probes[pi].name);
-        for (size_t si = 0; si < 4; ++si) {
-            const auto& h = hits[si][pi];
-            if (h.count)
-                printf(" %d reply wkc=%-4u |", h.count, h.last_wkc);
-            else
-                printf(" %-16s |", "-");
-        }
-        printf("\n");
-    }
-    printf("\nExpected: every probe lands on 'bare' and 'encap' (WKC=0 — "
-           "bogus targets), fastpath idx (E0-FD) only on 'cyclic', "
-           "others only on 'async'.\n");
-
-    // --- kernel packet-ring matrix --------------------------------------
-    // Reproduce the production cyclic channel's PACKET_MMAP usage: does the
-    // kernel drain a TX ring (slots return from SEND_REQUEST to AVAILABLE)
-    // and does a composed filter + TPACKET_V3 RX ring deliver replies?
-    {
-        uint8_t payload[8] = {};
-        const size_t flen = buildFrame(frame, src, vlan, kCmdLRW, 0xF8,
-                                       0xDEADBEEFu, payload, sizeof(payload));
-        const size_t idx_off = vlan ? 21 : 17;
-
-        printf("\n=== kernel packet-ring matrix ===\n");
-        char aux_detail[256] = {};
-        const char* aux_res = auxdataTest(ifindex, tx, frame, flen,
-                                          aux_detail, sizeof(aux_detail));
-        printf("VLAN tag delivery (PACKET_AUXDATA):                 %s%s%s\n",
-               aux_res, aux_detail[0] ? " — " : "", aux_detail);
-        printf("TX ring, no PACKET_VERSION/RX ring (plain v2 socket): %s\n",
-               txRingTest(ifindex, 0, false, frame, flen));
-        printf("TX ring on TPACKET_V3 socket, no RX ring:           %s\n",
-               txRingTest(ifindex, TPACKET_V3, false, frame, flen));
-        printf("TX ring + TPACKET_V3 RX ring (production layout):   %s\n",
-               txRingTest(ifindex, TPACKET_V3, true, frame, flen));
-
-        printf("V3 RX ring + composed cyclic filter, idx 0xF8:      %s\n",
-               rxRingTest(ifindex, cyc_prog.data(), cyc_prog.size(),
-                          tx, frame, flen, 0xF8, idx_off));
-        printf("V3 RX ring + composed async filter,  idx 0xF8:      %s\n",
-               rxRingTest(ifindex, async_prog.data(), async_prog.size(),
-                          tx, frame, flen, 0xF8, idx_off));
-    }
+    ::close(tx);
     return 0;
 }
 
