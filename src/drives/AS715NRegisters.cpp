@@ -14,13 +14,19 @@ uint16_t AS715NFaultHandler::readManufacturerFault(EtherCAT::CoE::CoEManager& sd
 }
 
 AS715NManufacturerFault203F AS715NFaultHandler::readManufacturerFaultExtended(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx) {
-    auto result = sdo.readU32(AS715NDevice::kManufacturerFaultIndex, 0x00, {.timeout_ms = 3000});
-    if (!result.has_value()) {
+    // Read raw: some AS715N firmware exposes 0x203F as U16 (external code
+    // only) instead of the documented U32 — a typed readU32 fails on the
+    // size mismatch even though the transfer succeeded.
+    uint32_t raw = 0;
+    size_t actual = 0;
+    if (!sdo.readSync(AS715NDevice::kManufacturerFaultIndex, 0x00,
+                      &raw, sizeof(raw), 3000, &actual)
+        || (actual != sizeof(uint16_t) && actual != sizeof(uint32_t))) {
         TETHER_LOGW(TAG, "Failed to read manufacturer fault (0x{:04X}) from slave {}",
                     AS715NDevice::kManufacturerFaultIndex, slave_idx);
         return AS715NManufacturerFault203F{};
     }
-    return AS715NManufacturerFault203F::fromU32(result.value());
+    return AS715NManufacturerFault203F::fromU32(raw);
 }
 
 bool AS715NConfig::configureBleederResistor(
