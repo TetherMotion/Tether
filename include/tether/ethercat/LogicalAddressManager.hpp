@@ -109,6 +109,22 @@ public:
     /// Get all per-PDO logical address entries for a slave.
     std::vector<PDOLogicalAddrEntry> getSlavePDOLogicalAddrs(uint16_t slave_index) const;
 
+    /// Logical window of one slave relative to base_logical_addr_ —
+    /// i.e. the [offset, offset+length) slice that covers all of that
+    /// slave's PDO regions and can be exchanged with a single datagram.
+    /// Returns false when the slave has no assigned window.
+    bool getSlaveLogicalWindow(uint16_t slave_index,
+                               uint32_t& offset, uint32_t& length) const {
+        if (slave_index >= PDO::kMaxPDOSlaves ||
+            slave_log_base_[slave_index] == kUnassigned ||
+            slave_log_size_[slave_index] == 0) {
+            return false;
+        }
+        offset = slave_log_base_[slave_index];
+        length = slave_log_size_[slave_index];
+        return true;
+    }
+
     uint32_t totalRxPDOBytes() const { return total_rxpdo_bytes_; }
     uint32_t totalTxPDOBytes() const { return total_txpdo_bytes_; }
     uint32_t totalLogicalSize()  const { return total_rxpdo_bytes_ + total_txpdo_bytes_; }
@@ -398,6 +414,18 @@ private:
     uint32_t total_rxpdo_bytes_{0};
     uint32_t total_txpdo_bytes_{0};
     uint32_t base_logical_addr_{0x10000};  ///< Base logical address (default 0x10000)
+
+    // Sticky per-slave logical window assignment.  A slave's FMMUs are
+    // programmed once during its PDO configuration using the addresses in
+    // effect at that time; if a later slave's configuration rebuilt the
+    // map and moved an earlier slave's window, that slave's FMMU would
+    // silently point at the wrong logical region (watchdog trips, PDO
+    // data never exchanged).  Windows are therefore assigned append-only
+    // in configuration order and never relocated until deinit().
+    static constexpr uint32_t kUnassigned = 0xFFFFFFFFu;
+    std::array<uint32_t, PDO::kMaxPDOSlaves> slave_log_base_{};
+    std::array<uint32_t, PDO::kMaxPDOSlaves> slave_log_size_{};
+    uint32_t next_free_log_{0};  ///< next free logical offset (rel. to base)
     Stats    stats_{};
     bool     initialized_{false};
     std::function<std::string(uint16_t)> prefix_provider_;

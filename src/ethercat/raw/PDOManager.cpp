@@ -1395,6 +1395,67 @@ bool PDOManager::exchangeAll() {
     return receiveAll();
 }
 
+// ============================================================================
+// PDOKeepAlive — background exchange that keeps already-configured slaves
+// fed while another slave runs its slow INIT→OP configuration.
+// ============================================================================
+
+PDOKeepAlive::PDOKeepAlive(PDOManager& manager,
+                           std::chrono::milliseconds period)
+    : manager_(manager)
+    , period_(period)
+    , worker_([this] { run(); })
+{}
+
+PDOKeepAlive::~PDOKeepAlive() {
+    stop();
+}
+
+void PDOKeepAlive::stop() {
+    const bool was = stop_.exchange(true, std::memory_order_acq_rel);
+    if (!was && worker_.joinable()) {
+        worker_.join();
+    }
+}
+
+void PDOKeepAlive::run() {
+    while (!stop_.load(std::memory_order_acquire)) {
+        // One datagram per configured slave — a slave still being
+        // initialized has no logical window yet and is skipped until its
+        // configuration assigns one.
+        manager_.exchangeConfiguredSlaveWindows();
+        // Sleep in small slices so stop() reacts promptly.
+        auto remaining = period_;
+        while (remaining.count() > 0 &&
+               !stop_.load(std::memory_order_acquire)) {
+            const auto slice = std::min(remaining,
+                                        std::chrono::milliseconds{1});
+            std::this_thread::sleep_for(slice);
+            remaining -= slice;
+        }
+    }
+}
+
+std::unique_ptr<PDOKeepAlive> PDOManager::startKeepAlive(
+    std::chrono::milliseconds period) {
+    return std::make_unique<PDOKeepAlive>(*this, period);
+}
+
+bool PDOManager::exchangeConfiguredSlaveWindows() {
+    if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
+        return exchangeAll();
+    }
+    bool ok = true;
+    for (uint16_t s = 0; s < PDO::kMaxPDOSlaves; ++s) {
+        uint32_t offset = 0, length = 0;
+        if (!logical_addr_mgr_->getSlaveLogicalWindow(s, offset, length)) {
+            continue;
+        }
+        ok = exchangeLRWSlice(offset, length) && ok;
+    }
+    return ok;
+}
+
 bool PDOManager::exchangeLRWSlice(uint32_t offset, uint32_t length) {
     if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
         TETHER_LOGW(TAG, "exchangeLRWSlice: no logical address manager");

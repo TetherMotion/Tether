@@ -32,6 +32,9 @@ LogicalAddressManager::LogicalAddressManager(IPDOTransport& transport)
 bool LogicalAddressManager::init() {
     if (initialized_) return true;
     std::memset(addr_map_, 0, sizeof(addr_map_));
+    slave_log_base_.fill(kUnassigned);
+    slave_log_size_.fill(0);
+    next_free_log_ = 0;
     slave_count_ = 0;
     total_rxpdo_bytes_ = 0;
     total_txpdo_bytes_ = 0;
@@ -43,6 +46,9 @@ bool LogicalAddressManager::init() {
 
 void LogicalAddressManager::deinit() {
     std::memset(addr_map_, 0, sizeof(addr_map_));
+    slave_log_base_.fill(kUnassigned);
+    slave_log_size_.fill(0);
+    next_free_log_ = 0;
     slave_count_ = 0;
     total_rxpdo_bytes_ = 0;
     total_txpdo_bytes_ = 0;
@@ -90,10 +96,12 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
         }
     }
 
-    // Pass 2: assign logical addresses
-    uint32_t rxpdo_offset = base_logical_addr_;
-    uint32_t txpdo_offset = base_logical_addr_ + total_rxpdo_bytes_;
-
+    // Pass 2: assign logical addresses — each slave's [RxPDO][TxPDO]
+    // region is laid out contiguously.  The window base is STICKY: once a
+    // slave has been assigned a window its FMMU has been (or is being)
+    // programmed against it, so rebuilds must append new slaves at the
+    // end rather than re-pack the image — otherwise an earlier slave's
+    // already-programmed FMMU points at the wrong logical region.
     for (uint16_t i = 0; i < slave_count; i++) {
         const auto& cfg = configs[i];
         bool has_rxpdo = (cfg.sm[2].type == PDO::SyncManagerType::ProcessOutput && cfg.rxpdo_size > 0);
@@ -101,19 +109,32 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
 
         if (!has_rxpdo && !has_txpdo) continue;
 
+        const uint32_t window = (has_rxpdo ? cfg.rxpdo_size : 0)
+                              + (has_txpdo ? cfg.txpdo_size : 0);
+        if (slave_log_base_[i] == kUnassigned ||
+            slave_log_size_[i] != window) {
+            // New slave, or a re-configured slave whose window size
+            // changed — allocate a fresh window at the end (its FMMU is
+            // reprogrammed against the new base in the same call).
+            slave_log_base_[i] = next_free_log_;
+            slave_log_size_[i] = window;
+            next_free_log_    += window;
+        }
+        uint32_t offset = base_logical_addr_ + slave_log_base_[i];
+
         auto& entry = addr_map_[i];
         entry.active = true;
 
         if (has_rxpdo) {
-            entry.rxpdo_logical_addr = rxpdo_offset;
+            entry.rxpdo_logical_addr = offset;
             entry.rxpdo_length = cfg.rxpdo_size;
-            rxpdo_offset += cfg.rxpdo_size;
+            offset += cfg.rxpdo_size;
         }
 
         if (has_txpdo) {
-            entry.txpdo_logical_addr = txpdo_offset;
+            entry.txpdo_logical_addr = offset;
             entry.txpdo_length = cfg.txpdo_size;
-            txpdo_offset += cfg.txpdo_size;
+            offset += cfg.txpdo_size;
         }
 
         TETHER_LOGI(TAG, "{}: RxPDO log=0x{:08X} len={}  TxPDO log=0x{:08X} len={}",
@@ -168,14 +189,34 @@ bool LogicalAddressManager::buildAddressMapFromMultiPDO(
         }
     }
 
-    // Pass 2: assign logical addresses and per-PDO entries
-    uint32_t rxpdo_offset = base_logical_addr_;
-    uint32_t txpdo_offset = base_logical_addr_ + total_rxpdo_bytes_;
-
+    // Pass 2: assign logical addresses and per-PDO entries — each slave's
+    // SM regions are laid out contiguously in config order, matching the
+    // order FMMUManager::configureFromMultiPDO packs them on the slave.
+    // The window base is STICKY (see buildAddressMap): slaves configured
+    // earlier keep the window their FMMU was programmed with; later
+    // slaves are appended at the end.
     for (uint16_t s = 0; s < slave_count; s++) {
         const auto& configs = sm_configs[s];
         auto& entry = addr_map_[s];
         bool has_any = false;
+
+        uint32_t window = 0;
+        for (const auto& sm_cfg : configs) {
+            if (sm_cfg.pdo_mappings.empty()) continue;
+            if (sm_cfg.type == PDO::SyncManagerType::ProcessOutput ||
+                sm_cfg.type == PDO::SyncManagerType::ProcessInput) {
+                window += sm_cfg.totalLength();
+            }
+        }
+        if (window > 0 &&
+            (slave_log_base_[s] == kUnassigned ||
+             slave_log_size_[s] != window)) {
+            slave_log_base_[s] = next_free_log_;
+            slave_log_size_[s] = window;
+            next_free_log_    += window;
+        }
+        uint32_t offset = base_logical_addr_ + slave_log_base_[s];
+        if (slave_log_base_[s] == kUnassigned) offset = base_logical_addr_;
 
         for (const auto& sm_cfg : configs) {
             if (sm_cfg.pdo_mappings.empty()) continue;
@@ -186,7 +227,7 @@ bool LogicalAddressManager::buildAddressMapFromMultiPDO(
 
             has_any = true;
             uint16_t sm_total = sm_cfg.totalLength();
-            uint32_t base_addr = is_output ? rxpdo_offset : txpdo_offset;
+            uint32_t base_addr = offset;
             uint16_t pdo_offset = 0;
 
             if (is_output) {
@@ -214,11 +255,7 @@ bool LogicalAddressManager::buildAddressMapFromMultiPDO(
                             pe.length, pe.sm_index, is_output ? "RxPDO" : "TxPDO");
             }
 
-            if (is_output) {
-                rxpdo_offset += sm_total;
-            } else {
-                txpdo_offset += sm_total;
-            }
+            offset += sm_total;
         }
 
         entry.active = has_any;
