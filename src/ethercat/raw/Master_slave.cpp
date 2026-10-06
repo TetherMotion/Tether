@@ -440,6 +440,9 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
         dst.phys_start_addr = src.phys_start_address;
         dst.length = src.length;
         dst.control = src.control_register;
+        // Never run a watchdog on process-data SMs — a latched SM watchdog
+        // leaves the slave stuck in SAFE_OP refusing OP (AL code 0).
+        dst.control.watchdog = false;
         dst.enable = src.isEnabled();
         dst.type = static_cast<PDO::SyncManagerType>(src.sm_type);
 
@@ -466,6 +469,7 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
                     dst.phys_start_addr = addr;
                     dst.length = len;
                     dst.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(ctrl);
+                    dst.control.watchdog = false;
                     dst.enable = (act & 0x01) != 0;
                     dst.type = (sm == 2) ? PDO::SyncManagerType::ProcessOutput
                                          : PDO::SyncManagerType::ProcessInput;

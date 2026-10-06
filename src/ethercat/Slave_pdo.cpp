@@ -714,6 +714,7 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         sm.phys_start_addr = mc.phys_start_addr;
         sm.length = mc.totalLength();
         sm.control = mc.control;
+        sm.control.watchdog = false;  // latched SM watchdog blocks OP
         sm.enable = false;  // Will be enabled after FMMU config
         sm.type = mc.type;
     }
