@@ -356,7 +356,8 @@ std::vector<CBPFInsn> CBPFProgramFactory::vlanRangeFilter(uint16_t lo,
 // Kernel attachment (Linux)
 // ============================================================================
 
-bool CBPFProgramFactory::attach(int fd, const CBPFInsn* prog, size_t count) {
+bool CBPFProgramFactory::attach(int fd, const CBPFInsn* prog, size_t count,
+                                bool lock) {
 #if defined(__linux__)
     if (!prog || count == 0 || count > 0xFFFF) return false;
     static_assert(sizeof(CBPFInsn) == sizeof(struct sock_filter),
@@ -367,11 +368,13 @@ bool CBPFProgramFactory::attach(int fd, const CBPFInsn* prog, size_t count) {
                     const_cast<CBPFInsn*>(prog));
     if (::setsockopt(fd, SOL_SOCKET, SO_ATTACH_FILTER, &fp, sizeof(fp)) < 0)
         return false;
-    int one = 1;
-    ::setsockopt(fd, SOL_SOCKET, SO_LOCK_FILTER, &one, sizeof(one));
+    if (lock) {
+        int one = 1;
+        ::setsockopt(fd, SOL_SOCKET, SO_LOCK_FILTER, &one, sizeof(one));
+    }
     return true;
 #else
-    (void)fd; (void)prog; (void)count;
+    (void)fd; (void)prog; (void)count; (void)lock;
     return false;
 #endif
 }

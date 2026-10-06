@@ -213,13 +213,20 @@ public:
     /**
      * @brief Attach a program to a socket fd via SO_ATTACH_FILTER (Linux).
      *
-     * Also applies SO_LOCK_FILTER (best effort) so the filter cannot be
-     * detached or weakened later.
+     * Locking is off by default: SO_LOCK_FILTER would prevent any later
+     * SO_ATTACH_FILTER on the same socket (EPERM), and Tether rewrites
+     * socket filters in normal operation — e.g. the cyclic datapath
+     * replacing the encapsulation filter on the wire socket with its
+     * composed encap ∧ idx∉fastpath async program, or re-attaching on
+     * recovery restarts.  Pass lock=true only for a filter that must
+     * never be replaced.
      * @return false on unsupported platform or setsockopt failure.
      */
-    static bool attach(int fd, const CBPFInsn* prog, size_t count);
-    static bool attach(int fd, const std::vector<CBPFInsn>& prog) {
-        return attach(fd, prog.data(), prog.size());
+    static bool attach(int fd, const CBPFInsn* prog, size_t count,
+                       bool lock = false);
+    static bool attach(int fd, const std::vector<CBPFInsn>& prog,
+                       bool lock = false) {
+        return attach(fd, prog.data(), prog.size(), lock);
     }
 };
 

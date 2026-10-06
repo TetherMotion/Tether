@@ -114,14 +114,17 @@ size_t buildFilterProg(bool accept_cyclic, struct sock_filter* p) {
     return sizeof(prog) / sizeof(prog[0]);
 }
 
-bool attachFilter(int fd, struct sock_filter* prog, size_t n) {
+bool attachFilter(int fd, struct sock_filter* prog, size_t n,
+                  bool lock = false) {
     struct sock_fprog fp;
     fp.len    = static_cast<unsigned short>(n);
     fp.filter = prog;
     if (setsockopt(fd, SOL_SOCKET, SO_ATTACH_FILTER, &fp, sizeof(fp)) < 0)
         return false;
-    int one = 1;
-    setsockopt(fd, SOL_SOCKET, SO_LOCK_FILTER, &one, sizeof(one)); // best effort
+    if (lock) {
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_LOCK_FILTER, &one, sizeof(one));
+    }
     return true;
 }
 

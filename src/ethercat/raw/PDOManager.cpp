@@ -412,8 +412,12 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
         return false;
     }
 
-    // Step 4: Control
+    // Step 4: Control — clear the watchdog-enable bit on process-data SMs
+    // (mailbox SMs keep theirs): a latched SM watchdog blocks SAFE_OP->OP.
     uint8_t ctrl_byte = std::bit_cast<uint8_t>(config.control);
+    if (config.type == PDO::SyncManagerType::ProcessOutput ||
+        config.type == PDO::SyncManagerType::ProcessInput)
+        ctrl_byte &= ~0x20u;
     if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_CONTROL),
                                   &ctrl_byte, sizeof(ctrl_byte), 200)) {
         TETHER_LOGE(TAG, "SM{}: failed to write control=0x{:02x}", sm_index, ctrl_byte);

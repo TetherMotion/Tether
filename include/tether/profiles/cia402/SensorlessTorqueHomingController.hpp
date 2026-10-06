@@ -38,9 +38,11 @@ namespace EtherCAT {
  *
  * The class is templated on the drive-specific packed RxPDO/TxPDO structs.
  * The RxPDO must expose controlword, modes_of_operation and target_torque;
- * the TxPDO must expose statusword, modes_of_operation_display and
- * speed_feedback. position_actual is optional, but required for multi-pass
- * fine homing and for homePosition(). This is verified at compile time.
+ * the TxPDO must expose statusword, modes_of_operation_display and either
+ * speed_feedback or position_actual (speed is derived from position deltas
+ * when the PDO has no speed field). position_actual is also required for
+ * multi-pass fine homing and for homePosition(). This is verified at
+ * compile time.
  *
  * Mode of operation is verified both at startup (after a short delay to let
  * the slave switch to CST) and continuously while the controller is running.
@@ -82,8 +84,11 @@ public:
     static_assert(requires(TxPDO& p) {
         p.statusword;
         p.modes_of_operation_display;
-        p.speed_feedback;
-    }, "TxPDO must provide statusword, modes_of_operation_display and speed_feedback");
+    }, "TxPDO must provide statusword and modes_of_operation_display");
+
+    static_assert(requires(TxPDO& p) { p.speed_feedback; } ||
+                  requires(TxPDO& p) { p.position_actual; },
+                  "TxPDO must provide speed_feedback or position_actual");
 
     struct Config {
         double target_velocity = 2000.0;   // counts/s (magnitude), first pass
@@ -175,6 +180,7 @@ public:
         backoff_has_position_ = false;
         backoff_start_position_ = 0;
         backoff_timer_ = 0.0;
+        speed_prev_valid_ = false;
 
         const size_t hist_cap = static_cast<size_t>(
             std::clamp(config_.stall_window, 0.001, 10.0) * 10000.0) + 2;
@@ -299,7 +305,7 @@ public:
             }
         }
 
-        const double speed = static_cast<double>(tx->speed_feedback);
+        const double speed = speedOf(tx, dt_seconds);
 
         double windowed_dpos = 0.0;
         if constexpr (requires(TxPDO& p) { p.position_actual; }) {
@@ -425,6 +431,24 @@ public:
     ~SensorlessTorqueHomingController() override { flushTrace(); }
 
 private:
+    /// Current axis speed in counts/s.  Uses the PDO's speed_feedback when
+    /// present; otherwise differentiates position_actual over dt.
+    double speedOf(const TxPDO* tx, double dt_seconds)
+    {
+        if constexpr (requires(TxPDO& p) { p.speed_feedback; }) {
+            return static_cast<double>(tx->speed_feedback);
+        } else {
+            double v = 0.0;
+            if (speed_prev_valid_ && dt_seconds > 0.0) {
+                v = static_cast<double>(static_cast<int64_t>(tx->position_actual) -
+                                        speed_prev_position_) / dt_seconds;
+            }
+            speed_prev_position_ = tx->position_actual;
+            speed_prev_valid_ = true;
+            return v;
+        }
+    }
+
     struct TraceSample {
         double t;
         double ref;
@@ -697,6 +721,9 @@ private:
     bool backoff_has_position_ = false;
     int32_t backoff_start_position_ = 0;
     double backoff_timer_ = 0.0;
+    // Position-delta speed fallback for TxPDOs without speed_feedback.
+    int32_t speed_prev_position_ = 0;
+    bool    speed_prev_valid_ = false;
     std::vector<PosSample> pos_hist_;
     size_t pos_hist_head_ = 0;
     size_t pos_hist_tail_ = 0;

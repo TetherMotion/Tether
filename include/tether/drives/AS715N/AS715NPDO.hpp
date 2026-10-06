@@ -313,6 +313,10 @@ static constexpr PDO TxPDO_1B04 = makePDO(0x1B04u, 29u,
 
 static_assert(TxPDO_1B04.field_count == TxPDO_1B04_Fields.size(), "TxPDO1B04 field count mismatch");
 
+// NOTE: the AS715N's PDO mapping object 0x1A00 is read-only (subindex 0
+// reports 0 entries), so TxPDOs cannot be remapped — use one of the fixed
+// slave-defined TxPDOs (0x1B01/0x1B02/0x1B03 carry 0x60FD Digital Inputs).
+
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
@@ -463,6 +467,29 @@ struct AS715N_TxPDO_1B04 {
 
 static_assert(sizeof(AS715N_TxPDO_1B04) == TxPDO_1B04.size,
               "AS715N_TxPDO_1B04 struct size must match PDO 0x1B04 size");
+
+/**
+ * @brief TxPDO 0x1B03 struct (slave → master, 29 bytes)
+ *
+ * Same field set as 0x1B04 but the last field is Digital Inputs (0x60FD)
+ * instead of Speed Feedback (0x606C), and Position Deviation precedes
+ * Modes of Operation Display.
+ */
+struct AS715N_TxPDO_1B03 {
+    uint16_t error_code;                 ///< 0x603F Error Code
+    uint16_t statusword;                 ///< 0x6041 Statusword
+    int32_t  position_actual;            ///< 0x6064 Position Actual Value
+    int16_t  torque_actual;              ///< 0x6077 Torque Actual Value (‰ of rated)
+    int32_t  position_deviation;         ///< 0x60F4 Following Error / Position Deviation
+    int8_t   modes_of_operation_display; ///< 0x6061 Modes of Operation Display
+    uint16_t touch_probe_status;         ///< Touch Probe Status
+    int32_t  touch_probe_pos1;           ///< 0x60BA Touch Probe 1 Pos Edge
+    int32_t  touch_probe_pos2;           ///< 0x60BC Touch Probe 2 Pos Edge
+    uint32_t digital_inputs;             ///< 0x60FD Digital Inputs
+} __attribute__((packed));
+
+static_assert(sizeof(AS715N_TxPDO_1B03) == TxPDO_1B03.size,
+              "AS715N_TxPDO_1B03 struct size must match PDO 0x1B03 size");
 
 /**
  * @brief RxPDO 0x1702 struct (master → slave, 19 bytes)
