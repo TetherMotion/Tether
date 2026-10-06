@@ -24,9 +24,11 @@
 #include <cstring>
 #include <ctime>
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <bit>
 #include <memory>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -58,6 +60,48 @@ inline uint64_t monoNowNsFallback() {
 // Forward declarations
 class IPDOTransport;
 class PDOManager;
+
+/**
+ * @brief RAII background PDO keep-alive.
+ *
+ * While alive, a worker thread sends one LRW datagram per configured
+ * slave (covering that slave's logical window) every @ref period — i.e.
+ * the process image of the already-configured slaves (the "old" size; a
+ * slave still being initialized has no assigned window yet and is
+ * skipped until its own configuration adds one).
+ *
+ * Intended to keep already-initialized slaves' SM process-data
+ * watchdogs fed while another slave runs its slow INIT→OP
+ * configuration sequence (mailbox setup, PRE_OP SDO writes, PDO
+ * assignment, SAFE_OP/OP transition) on the calling thread.
+ *
+ * Obtain via PDOManager::startKeepAlive(); destruction stops the
+ * thread.  The keep-alive must be stopped (or allowed to destruct)
+ * before exchanging PDOs from the calling thread again if the
+ * transport does not tolerate concurrent exchanges.
+ */
+class PDOKeepAlive {
+public:
+    PDOKeepAlive(PDOManager& manager, std::chrono::milliseconds period);
+    ~PDOKeepAlive();
+
+    PDOKeepAlive(const PDOKeepAlive&)            = delete;
+    PDOKeepAlive& operator=(const PDOKeepAlive&) = delete;
+    PDOKeepAlive(PDOKeepAlive&&)                 = delete;
+    PDOKeepAlive& operator=(PDOKeepAlive&&)      = delete;
+
+    /// Stop the worker thread (idempotent; also runs on destruction).
+    void stop();
+    bool running() const { return !stop_.load(std::memory_order_acquire); }
+
+private:
+    void run();
+
+    PDOManager&                manager_;
+    std::chrono::milliseconds  period_;
+    std::atomic<bool>          stop_{false};
+    std::thread                worker_;
+};
 class LogicalAddressManager;
 
 /**
@@ -747,6 +791,36 @@ public:
     bool sendRxPDO(size_t entry_index);
     bool receiveTxPDO(size_t entry_index);
     bool exchangeAll();
+
+    /**
+     * @brief Start a background keep-alive exchange (see PDOKeepAlive).
+     *
+     * Call before configuring additional slaves so the slaves that are
+     * already in OP keep receiving their process data (the keep-alive
+     * exchanges the mapping as it exists — the "old" image — until the
+     * new slave's entries are registered and it joins the image).
+     *
+     * @param period  Exchange period (default 1 ms).
+     * @return RAII guard; destroying it stops the keep-alive.
+     */
+    std::unique_ptr<PDOKeepAlive> startKeepAlive(
+        std::chrono::milliseconds period = std::chrono::milliseconds{1});
+
+    /**
+     * @brief Exchange each configured slave's logical window — one LRW
+     *        datagram per slave.
+     *
+     * Lightweight keep-alive exchange used by PDOKeepAlive: for every
+     * slave that already has an assigned logical window (i.e. finished
+     * its PDO/FMMU configuration) a single LRW datagram covering exactly
+     * that window is emitted.  Slaves still being initialized have no
+     * window yet and are skipped — they join automatically once their
+     * configuration assigns one.
+     *
+     * Falls back to a full exchangeAll() when no logical address
+     * manager is configured.
+     */
+    bool exchangeConfiguredSlaveWindows();
 
     // ----- Split send/receive (Mode 1: direct, user-driven) -----
     // sendAll() sends all RxPDO datagrams and returns immediately.
