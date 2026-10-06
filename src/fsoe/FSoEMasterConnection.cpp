@@ -509,11 +509,81 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
         }
 
         handleError(ErrorCode::CRCError, detail);
+
+        // ConnID recovery: if this identical frame was already resolved,
+        // emit the recovered safety address as a question right away;
+        // otherwise hand it to the background resolver.
+        if (crc_error_detail.valid) {
+            bool emitted_cached = false;
+            {
+                std::lock_guard<std::mutex> g(addr_hint_->m);
+                if (addr_hint_->ready && error_callback_ &&
+                    addr_hint_->frame.size() == len &&
+                    std::memcmp(addr_hint_->frame.data(), data, len) == 0) {
+                    FSoEErrorDetail d{};
+                    const auto& r = addr_hint_->result;
+                    if (r.found) {
+                        snprintf(d.message, sizeof(d.message),
+                                 "safety address 0x%04X would lead to a "
+                                 "correct CRC — are you sure that safety "
+                                 "address 0x%04X is correct?",
+                                 r.conn_id, config_.connection_id);
+                    } else {
+                        snprintf(d.message, sizeof(d.message),
+                                 "no connID validates frame (trailer "
+                                 "0x%04X) — corrupt or seq desync?",
+                                 r.frame_conn_id);
+                    }
+                    error_callback_(ErrorCode::CRCError, d);
+                    emitted_cached = true;
+                }
+            }
+            if (!emitted_cached) {
+                SafetyAddressResolver::Job job;
+                job.frame.assign(data, data + len);
+                job.start_crc = parse_start_crc;
+                job.seq_no = parse_seq_no;
+                auto hint = addr_hint_;
+                const auto frame_copy = job.frame;
+                const auto expected_conn_id = config_.connection_id;
+                const ErrorCallback report = error_callback_;
+                addr_resolver_.submit(std::move(job),
+                    [hint, report, frame_copy, expected_conn_id]
+                    (const SafetyAddressResolver::Result& r) {
+                        {
+                            std::lock_guard<std::mutex> g(hint->m);
+                            hint->ready = true;
+                            hint->result = r;
+                            hint->frame = frame_copy;
+                        }
+                        if (!report) return;
+                        FSoEErrorDetail d{};
+                        if (r.found) {
+                            snprintf(d.message, sizeof(d.message),
+                                     "safety address 0x%04X would lead to a "
+                                     "correct CRC — are you sure that "
+                                     "safety address 0x%04X is correct?",
+                                     r.conn_id, expected_conn_id);
+                        } else {
+                            snprintf(d.message, sizeof(d.message),
+                                     "no connID validates frame (trailer "
+                                     "0x%04X) — corrupt or seq desync?",
+                                     r.frame_conn_id);
+                        }
+                        report(ErrorCode::CRCError, d);
+                    });
+            }
+        }
         return false;
     }
 
     // Frame verified with the expected seq — reset the fallback counter.
     consecutive_seq_fallback_ = 0;
+    {
+        std::lock_guard<std::mutex> g(addr_hint_->m);
+        addr_hint_->ready = false;
+        addr_hint_->frame.clear();
+    }
     crc_trace_ok = true;
     crc_trace_crc0 = last_rx_crc0_;
 
