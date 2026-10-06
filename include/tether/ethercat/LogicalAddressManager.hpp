@@ -7,13 +7,17 @@
  *
  * ## Logical Address Layout
  *
- *   RxPDO Region (write: master -> slaves):
- *     slave0_RxPDO | slave1_RxPDO | ... | slaveN_RxPDO
+ * Each slave owns one contiguous logical window holding its output region
+ * followed by its input region, appended in configuration order:
  *
- *   TxPDO Region (read: slaves -> master):
- *     slave0_TxPDO | slave1_TxPDO | ... | slaveN_TxPDO
+ *   slave0: [RxPDO][TxPDO] | slave1: [RxPDO][TxPDO] | ... | slaveN: [RxPDO][TxPDO]
  *
- * A single LRW datagram covers both regions.  Each slave's FMMU is
+ * Windows are sticky — once assigned they are never relocated, because a
+ * slave's FMMUs are programmed against the addresses in effect at its
+ * configuration time.  Re-configured or late-joining slaves get a fresh
+ * window appended at the end (see docs/PDOAddressSpace.md).
+ *
+ * A single LRW datagram can cover the whole image.  Each slave's FMMU is
  * configured with the appropriate logical address range and type
  * (Write for RxPDO, Read for TxPDO).
  */
