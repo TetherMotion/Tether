@@ -482,10 +482,7 @@ void attachEncapsulationBpfFilter(EtherCAT::HAL::IEthernet& eth,
                          "no filter attached");
         return;
     }
-    // lock=false: the cyclic datapath later replaces this program on the
-    // same socket with its composed encap ∧ idx∉fastpath async filter —
-    // SO_LOCK_FILTER would make that SO_ATTACH_FILTER fail with EPERM.
-    if (!EtherCAT::CBPFProgramFactory::attach(fd, prog, /*lock=*/false)) {
+    if (!EtherCAT::CBPFProgramFactory::attach(fd, prog)) {
         // Soft failure: userspace filtering keeps correctness; only the
         // kernel-side wakeup savings are lost.
         TETHER_LOGW(tag, "BPF socket filter attach failed — continuing "

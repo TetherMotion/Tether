@@ -15,7 +15,7 @@ performance difference.
 
 ```cpp
 auto prog = EtherCAT::CBPFProgramFactory::ethercatFilter();
-CBPFProgramFactory::attach(fd, prog);          // SO_ATTACH_FILTER + SO_LOCK_FILTER
+CBPFProgramFactory::attach(fd, prog);          // SO_ATTACH_FILTER (SO_LOCK_FILTER opt-in)
 ```
 
 `attach()` returns `false` on non-Linux platforms or when the kernel
