@@ -115,7 +115,7 @@ size_t buildFilterProg(bool accept_cyclic, struct sock_filter* p) {
 }
 
 bool attachFilter(int fd, struct sock_filter* prog, size_t n,
-                  bool lock = true) {
+                  bool lock = false) {
     struct sock_fprog fp;
     fp.len    = static_cast<unsigned short>(n);
     fp.filter = prog;
@@ -896,10 +896,7 @@ bool cyclicChannelAttachCyclicFilter(int fd) {
 
 bool cyclicChannelAttachAsyncFilter(int fd) {
     struct sock_filter prog[kCyclicBpfInsnCount];
-    // lock=false — the channel re-attaches this mirror on the same wire fd
-    // at every cyclic restart (see createCyclicChannel).
-    return attachFilter(fd, prog, buildFilterProg(false, prog),
-                        /*lock=*/false);
+    return attachFilter(fd, prog, buildFilterProg(false, prog));
 }
 
 size_t cyclicChannelBpfProgram(bool accept_cyclic,
@@ -929,14 +926,10 @@ std::unique_ptr<ICyclicChannel> createCyclicChannel(
     // idx∉fastpath) replaces the built-in mirror so the encapsulation
     // clause survives — SO_ATTACH_FILTER swaps the whole program.
     if (cfg.async_fd >= 0) {
-        // lock=false: the channel is recreated on every recovery/cyclic
-        // restart and re-attaches on the same wire fd — a locked filter
-        // would make the next SO_ATTACH_FILTER fail with EPERM.
         bool attached;
         if (cfg.async_prog && cfg.async_prog_len) {
             attached = CBPFProgramFactory::attach(
-                cfg.async_fd, cfg.async_prog, cfg.async_prog_len,
-                /*lock=*/false);
+                cfg.async_fd, cfg.async_prog, cfg.async_prog_len);
         } else {
             attached = cyclicChannelAttachAsyncFilter(cfg.async_fd);
         }

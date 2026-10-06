@@ -313,7 +313,7 @@ if profiling ever shows slot-scan overhead.  TX stays V2 in both modes.
 
 Socket A (the channel) and socket B (the existing async socket) are two
 independent AF_PACKET taps on the same interface.  Each carries a classic
-BPF filter (`SO_ATTACH_FILTER` + `SO_LOCK_FILTER`) that runs in softirq
+BPF filter (`SO_ATTACH_FILTER`) that runs in softirq
 **before** the kernel copies the frame into that socket's queue or ring:
 
 ```c
