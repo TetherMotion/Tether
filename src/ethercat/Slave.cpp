@@ -16,6 +16,7 @@
 #include "tether/sii/SIIReader.hpp"
 #include "tether/ethercat/FaultDetection.hpp"
 #include "SlaveESIHelpers.hpp"
+#include "raw/RawConstants.hpp"
 #include "tether/platform/Platform.hpp"
 
 #include <cstdio>
@@ -643,6 +644,28 @@ SlaveError Slave::transitionToOp() {
         TETHER_LOGE( TAG,
             "{}: Failed to transition to OP (transport error)", logPrefix().c_str());
         return SlaveError::TransportError;
+    }
+
+    // Diagnostic: read back AL_CONTROL to prove the OP request landed, plus
+    // watchdog/DL/SM2 status so we can tell "slave declined" from "write lost".
+    {
+        uint16_t al_ctrl = 0, wd = 0, dl = 0;
+        const bool c_ok = master_->readRegister(index_, Raw::EC_REG_AL_CONTROL, al_ctrl, 200);
+        const bool w_ok = master_->readRegister(index_, Raw::EC_REG_WD_STATUS, wd, 200);
+        const bool d_ok = master_->readRegister(index_, 0x0110, dl, 200);
+        uint8_t sm2[8] = {};
+        const bool s_ok = master_->readRegister(index_, 0x0810, sm2, sizeof(sm2), 200);
+        TETHER_LOGI(TAG, "{}: OP request readback: AL_CTRL={}0x{:04X} "
+                         "WD={}0x{:04X} DL={}0x{:04X} "
+                         "SM2[{}] addr=0x{:02X}{:02X} len={} ctrl=0x{:02X} "
+                         "stat=0x{:02X} act=0x{:02X} pdi=0x{:02X}",
+                    logPrefix().c_str(),
+                    c_ok ? "" : "? ", al_ctrl,
+                    w_ok ? "" : "? ", wd,
+                    d_ok ? "" : "? ", dl,
+                    s_ok ? "ok" : "rd-fail",
+                    sm2[1], sm2[0],
+                    sm2[2] | (sm2[3] << 8), sm2[4], sm2[5], sm2[6], sm2[7]);
     }
 
     // Confirm OP (up to 5 s).  The slave may need continuous process data.
