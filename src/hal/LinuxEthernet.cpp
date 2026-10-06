@@ -15,6 +15,7 @@
 #include <sys/ioctl.h>
 #include <linux/if_packet.h>
 #include <linux/if_ether.h>
+#include <linux/filter.h>
 #include <net/if.h>
 #include <net/if_arp.h>
 #include <netinet/in.h>
@@ -28,6 +29,9 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <mutex>
+#include <vector>
+#include <string>
 
 #ifndef SOL_PACKET
 #define SOL_PACKET 263
@@ -35,6 +39,58 @@
 
 namespace EtherCAT {
 namespace HAL {
+
+// --- AF_PACKET socket drop diagnostics -------------------------------------
+// Sockets registered via registerDiagPacketSocket() get a PACKET_STATISTICS
+// dump from the NIC error monitor whenever the interface's rx_dropped
+// counter grows.  tp_drops counts ring/receive-queue overflow (frames that
+// PASSED the socket filter but couldn't be queued); a filter reject costs
+// nothing and never reaches this counter.
+namespace {
+std::mutex g_diagMtx;
+std::vector<std::pair<int, std::string>> g_diagSockets;
+
+void dumpDiagPacketSockets() {
+    std::vector<std::pair<int, std::string>> socks;
+    {
+        std::lock_guard<std::mutex> lk(g_diagMtx);
+        socks = g_diagSockets;
+    }
+    for (const auto& [fd, name] : socks) {
+        struct tpacket_stats st {};
+        socklen_t slen = sizeof(st);
+        if (getsockopt(fd, SOL_PACKET, PACKET_STATISTICS, &st, &slen) < 0) {
+            if (errno == EBADF || errno == ENOTSOCK) {
+                std::lock_guard<std::mutex> lk(g_diagMtx);
+                std::erase_if(g_diagSockets,
+                              [fd](const auto& e) { return e.first == fd; });
+            }
+            continue;
+        }
+        // PACKET_STATISTICS resets the kernel counters after each read,
+        // so these are deltas since the last dump.
+        struct sock_fprog fp {};
+        socklen_t flen = sizeof(fp);
+        int prog_len = -1;
+        if (getsockopt(fd, SOL_SOCKET, SO_GET_FILTER, &fp, &flen) == 0)
+            prog_len = fp.len;
+        TETHER_LOGW("nic-mon",
+                    "  sock '{}' fd={}: +{} pkts, +{} drops, bpf_len={}",
+                    name, fd, st.tp_packets, st.tp_drops, prog_len);
+    }
+}
+} // namespace
+
+void registerDiagPacketSocket(int fd, const char* name) {
+    std::lock_guard<std::mutex> lk(g_diagMtx);
+    g_diagSockets.emplace_back(fd, name ? name : "?");
+}
+
+void unregisterDiagPacketSocket(int fd) {
+    std::lock_guard<std::mutex> lk(g_diagMtx);
+    std::erase_if(g_diagSockets,
+                  [fd](const auto& e) { return e.first == fd; });
+}
 
 /**
  * @brief Linux raw socket Ethernet implementation
@@ -98,6 +154,7 @@ public:
             m_socket = -1;
             return Error::InternalError;
         }
+        registerDiagPacketSocket(m_socket, "wire");
 
         // Store filter
         m_ethertypeFilter = config.ethertypeFilter;
@@ -162,6 +219,7 @@ public:
         stopErrorMonitor();
 
         if (m_socket >= 0) {
+            unregisterDiagPacketSocket(m_socket);
             // Remove promiscuous mode if we set it
             if (m_promiscuous) {
                 setPromiscuous(false);
@@ -703,6 +761,7 @@ private:
                         m_ifname, dRxErr, dRxDrop, dRxPkt, rxPct,
                         cur.rxErrors, cur.rxDropped, cur.rxCrcErrors,
                         cur.rxFifoErrors, cur.rxMissedErrors);
+                    dumpDiagPacketSockets();
                 }
                 if (significant(dTxErr + dTxDrop, txPct)) {
                     TETHER_LOGW(TAG,

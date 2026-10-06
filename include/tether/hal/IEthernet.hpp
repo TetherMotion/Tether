@@ -538,6 +538,17 @@ std::unique_ptr<IEthernet> createESP32Ethernet();
  */
 #ifdef HAL_PLATFORM_LINUX
 std::unique_ptr<IEthernet> createLinuxRawSocketEthernet();
+
+/**
+ * @brief Register an AF_PACKET socket for drop diagnostics.
+ *
+ * Registered sockets get a PACKET_STATISTICS + SO_GET_FILTER dump in the
+ * NIC error monitor whenever rx_dropped grows — this distinguishes
+ * "kernel filter rejected the frame" (no drop count) from "ring/queue
+ * overflow" (tp_drops grows).  Stale fds are pruned automatically.
+ */
+void registerDiagPacketSocket(int fd, const char* name);
+void unregisterDiagPacketSocket(int fd);
 #endif
 
 /**
