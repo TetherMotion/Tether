@@ -114,14 +114,17 @@ size_t buildFilterProg(bool accept_cyclic, struct sock_filter* p) {
     return sizeof(prog) / sizeof(prog[0]);
 }
 
-bool attachFilter(int fd, struct sock_filter* prog, size_t n) {
+bool attachFilter(int fd, struct sock_filter* prog, size_t n,
+                  bool lock = true) {
     struct sock_fprog fp;
     fp.len    = static_cast<unsigned short>(n);
     fp.filter = prog;
     if (setsockopt(fd, SOL_SOCKET, SO_ATTACH_FILTER, &fp, sizeof(fp)) < 0)
         return false;
-    int one = 1;
-    setsockopt(fd, SOL_SOCKET, SO_LOCK_FILTER, &one, sizeof(one)); // best effort
+    if (lock) {
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_LOCK_FILTER, &one, sizeof(one));
+    }
     return true;
 }
 
@@ -893,7 +896,10 @@ bool cyclicChannelAttachCyclicFilter(int fd) {
 
 bool cyclicChannelAttachAsyncFilter(int fd) {
     struct sock_filter prog[kCyclicBpfInsnCount];
-    return attachFilter(fd, prog, buildFilterProg(false, prog));
+    // lock=false — the channel re-attaches this mirror on the same wire fd
+    // at every cyclic restart (see createCyclicChannel).
+    return attachFilter(fd, prog, buildFilterProg(false, prog),
+                        /*lock=*/false);
 }
 
 size_t cyclicChannelBpfProgram(bool accept_cyclic,
@@ -923,10 +929,14 @@ std::unique_ptr<ICyclicChannel> createCyclicChannel(
     // idx∉fastpath) replaces the built-in mirror so the encapsulation
     // clause survives — SO_ATTACH_FILTER swaps the whole program.
     if (cfg.async_fd >= 0) {
+        // lock=false: the channel is recreated on every recovery/cyclic
+        // restart and re-attaches on the same wire fd — a locked filter
+        // would make the next SO_ATTACH_FILTER fail with EPERM.
         bool attached;
         if (cfg.async_prog && cfg.async_prog_len) {
             attached = CBPFProgramFactory::attach(
-                cfg.async_fd, cfg.async_prog, cfg.async_prog_len);
+                cfg.async_fd, cfg.async_prog, cfg.async_prog_len,
+                /*lock=*/false);
         } else {
             attached = cyclicChannelAttachAsyncFilter(cfg.async_fd);
         }
