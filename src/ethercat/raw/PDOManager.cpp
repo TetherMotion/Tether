@@ -1779,36 +1779,79 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             const std::span<const Utils::BitLabel> kCwSpan(kCwLabels);
             Utils::ColoredBitsetFormatter cw_fmt(kCwSpan);
             const uint32_t known_cw = Utils::ColoredBitsetFormatter::labelCoverage(kCwSpan);
-            const uint16_t cw = static_cast<uint16_t>(out_buf[0] | (out_buf[1] << 8));
+
+            // Resolve the PDO indices actually assigned to this slave so the
+            // decode matches the configured mapping (AS715N slave-defined
+            // set: Rx 0x1701-0x1705, Tx 0x1B01-0x1B04).
+            uint16_t rxpdo_index = 0;
+            uint16_t txpdo_index = 0;
+            for (size_t i = 0; i < mapping_.entry_count(); i++) {
+                const PDO::PDOEntry* e = mapping_.get_entry(i);
+                if (!e || !e->enabled || e->slave_index != si) continue;
+                if (e->direction == PDO::PDODirection::RxPDO) rxpdo_index = e->pdo_index;
+                else                                        txpdo_index = e->pdo_index;
+            }
+
+            // AS715N RxPDO layouts: 0x6071 TargetTorque and 0x6060
+            // ModesOfOperation sit at different offsets (or are absent)
+            // depending on the assigned PDO.  -1 = field not present.
+            int tq_off = -1, opmode_off = -1;
+            bool has_tv = true;
+            switch (rxpdo_index) {
+                case 0x1701: has_tv = false; break;                // CW,TP,TPF,DO
+                case 0x1702:
+                case 0x1704: tq_off = 10; opmode_off = 12; break;  // +TT,Mode,TPF,...
+                case 0x1703:
+                case 0x1705: opmode_off = 10; break;               // Mode,TPF,+/-TqLim,...
+                default: break;
+            }
+
+            // Bounds-checked little-endian field readers.
+            auto rd8 = [](const uint8_t* b, uint16_t len, int off) -> int8_t {
+                return (off >= 0 && static_cast<uint16_t>(off) < len)
+                    ? static_cast<int8_t>(b[off]) : static_cast<int8_t>(0);
+            };
+            auto rd16 = [](const uint8_t* b, uint16_t len, int off) -> uint16_t {
+                return (off >= 0 && static_cast<uint16_t>(off) + 2 <= len)
+                    ? static_cast<uint16_t>(b[off] | (b[off + 1] << 8))
+                    : static_cast<uint16_t>(0);
+            };
+            auto rd32 = [](const uint8_t* b, uint16_t len, int off) -> int32_t {
+                return (off >= 0 && static_cast<uint16_t>(off) + 4 <= len)
+                    ? static_cast<int32_t>(b[off] | (b[off + 1] << 8) |
+                                           (b[off + 2] << 16) | (b[off + 3] << 24))
+                    : static_cast<int32_t>(0);
+            };
+
+            const uint16_t cw = rd16(out_buf, sm2.length, 0);
             const std::string cw_state = cw_fmt.format(cw, " ", known_cw);
 
-            const int32_t tp = static_cast<int32_t>(out_buf[2] | (out_buf[3] << 8) | (out_buf[4] << 16) | (out_buf[5] << 24));
-            const int32_t tv = static_cast<int32_t>(out_buf[6] | (out_buf[7] << 8) | (out_buf[8] << 16) | (out_buf[9] << 24));
-            const int16_t tq = (sm2.length >= 12)
-                ? static_cast<int16_t>(out_buf[10] | (out_buf[11] << 8))
-                : static_cast<int16_t>(0);
-            const int8_t opmode = (sm2.length >= 13)
-                ? static_cast<int8_t>(out_buf[12])
-                : static_cast<int8_t>(0);
+            const int32_t tp = rd32(out_buf, sm2.length, 2);
+            const int32_t tv = has_tv ? rd32(out_buf, sm2.length, 6) : 0;
+            const int16_t tq = static_cast<int16_t>(rd16(out_buf, sm2.length, tq_off));
+            const int8_t opmode = rd8(out_buf, sm2.length, opmode_off);
 
-            TETHER_LOGI(TAG, "[RxPDO] {} Cycle {}:", slavePrefix(si).c_str(), wire_cycle);
+            TETHER_LOGI(TAG, "[RxPDO 0x{:04X}] {} Cycle {}:", rxpdo_index, slavePrefix(si).c_str(), wire_cycle);
             TETHER_LOGI(TAG, "  Controlword: {} (0x{:04X})", cw_state, cw);
 
-            // AS715N 0x1704 RxPDO layout: target position/velocity/torque and
-            // mode-of-operation are at fixed offsets.  Print the demand value
-            // that matches the active operating mode, plus the raw setpoints.
-            if (opmode == 8) {
+            // Print the demand value matching the active operating mode plus
+            // the raw setpoints.  PDOs without a mode field (e.g. 0x1701)
+            // print the raw targets only.
+            if (opmode_off >= 0 && opmode == 8) {
                 TETHER_LOGI(TAG, "  Mode=CSP(8) DemandPosition={:>10} | TargetPosition={:>10} TargetVelocity={:>10} TargetTorque={:>6}",
                             tp, tp, tv, tq);
-            } else if (opmode == 9) {
+            } else if (opmode_off >= 0 && opmode == 9) {
                 TETHER_LOGI(TAG, "  Mode=CSV(9) DemandVelocity={:>10} | TargetPosition={:>10} TargetVelocity={:>10} TargetTorque={:>6}",
                             tv, tp, tv, tq);
-            } else if (opmode == 10) {
+            } else if (opmode_off >= 0 && opmode == 10) {
                 TETHER_LOGI(TAG, "  Mode=CST(10) DemandTorque={:>6} | TargetPosition={:>10} TargetVelocity={:>10} TargetTorque={:>6}",
                             tq, tp, tv, tq);
-            } else {
+            } else if (opmode_off >= 0) {
                 TETHER_LOGI(TAG, "  Mode={} | TargetPosition={:>10} TargetVelocity={:>10} TargetTorque={:>6}",
                             opmode, tp, tv, tq);
+            } else {
+                TETHER_LOGI(TAG, "  TargetPosition={:>10} TargetVelocity={:>10} TargetTorque={:>6}",
+                            tp, tv, tq);
             }
 
             static const Utils::BitLabel kSwLabels[] = {
@@ -1829,21 +1872,28 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             const std::span<const Utils::BitLabel> kSwSpan(kSwLabels);
             Utils::ColoredBitsetFormatter sw_fmt(kSwSpan);
             const uint32_t known_sw = Utils::ColoredBitsetFormatter::labelCoverage(kSwSpan);
-            const uint16_t sw = static_cast<uint16_t>(read_resp.data[2] | (read_resp.data[3] << 8));
+            const uint16_t sw = rd16(read_resp.data, sm3.length, 2);
             const std::string sw_state = sw_fmt.format(sw, " ", known_sw);
 
-            const int32_t ap = static_cast<int32_t>(read_resp.data[4] | (read_resp.data[5] << 8) | (read_resp.data[6] << 16) | (read_resp.data[7] << 24));
-            const int16_t at = (sm3.length >= 10)
-                ? static_cast<int16_t>(read_resp.data[8] | (read_resp.data[9] << 8))
-                : static_cast<int16_t>(0);
-            const int32_t av = (sm3.length >= 28)
-                ? static_cast<int32_t>(read_resp.data[25] | (read_resp.data[26] << 8) | (read_resp.data[27] << 16) | (read_resp.data[28] << 24))
-                : static_cast<int32_t>(0);
+            const int32_t ap = rd32(read_resp.data, sm3.length, 4);
+            const int16_t at = static_cast<int16_t>(rd16(read_resp.data, sm3.length, 8));
+            // The trailing 4-byte slot is 0x606C speed feedback on 0x1B04
+            // and 0x60FD digital inputs on 0x1B01/0x1B02/0x1B03.
+            const bool last_is_di = (txpdo_index == 0x1B01 ||
+                                     txpdo_index == 0x1B02 ||
+                                     txpdo_index == 0x1B03);
+            const int32_t last_field = rd32(read_resp.data, sm3.length,
+                                            static_cast<int>(sm3.length) - 4);
 
-            TETHER_LOGI(TAG, "[TxPDO] {} Cycle {}:", slavePrefix(si).c_str(), wire_cycle);
+            TETHER_LOGI(TAG, "[TxPDO 0x{:04X}] {} Cycle {}:", txpdo_index, slavePrefix(si).c_str(), wire_cycle);
             TETHER_LOGI(TAG, "  Statusword: {} (0x{:04X})", sw_state, sw);
-            TETHER_LOGI(TAG, "  ActualPosition={:>10} ActualVelocity={:>10} ActualTorque={:>6}",
-                        ap, av, at);
+            if (last_is_di) {
+                TETHER_LOGI(TAG, "  ActualPosition={:>10} DigitalInputs=0x{:08X} ActualTorque={:>6}",
+                            ap, static_cast<uint32_t>(last_field), at);
+            } else {
+                TETHER_LOGI(TAG, "  ActualPosition={:>10} ActualVelocity={:>10} ActualTorque={:>6}",
+                            ap, last_field, at);
+            }
         }
     } else if (have_write) {
         // Write only — uses APWR via writeRegister (position-based addressing)

@@ -1,8 +1,9 @@
 /**
  * @file AS715NPDO.hpp
- * @brief Compile-time PDO layout descriptors for ANCTL AS715N (0x1702 / 0x1B02)
+ * @brief Compile-time PDO layout descriptors for ANCTL AS715N
+ *        (RxPDO 0x1701–0x1705, TxPDO 0x1B01–0x1B04)
  *
- * Provides a small, generic `PDODescriptor` and two constexpr descriptor lists
+ * Provides a small, generic `PDODescriptor` and constexpr descriptor lists
  * describing the fixed slave-defined PDOs used by the AS715N drive.  All
  * offsets/sizes/indices are expressed as `constexpr` so they can be used in
  * static_asserts, tests and compile-time buffer layout calculations.
@@ -172,7 +173,7 @@ static constexpr std::array<PDOField,9> TxPDO_1B01_Fields = {{
     { &CiA402::Parameters60xx::PositionFeedback,        4u, 4,  "PositionActualValue" },
     { &CiA402::Parameters60xx::ActualTorque,            8u, 2,  "TorqueActualValue" },
     { &CiA402::Parameters60xx::FollowingErrorActual,   10u, 4,  "FollowingError" },
-    { &CiA402::Parameters60xx::TouchProbeFunction,     14u, 2,  "TouchProbeStatus" },
+    { &CiA402::Parameters60xx::TouchProbeStatus,       14u, 2,  "TouchProbeStatus" },
     { &CiA402::Parameters60xx::TouchProbe1PosEdge,     16u, 4,  "TouchProbe1PosEdge" },
     { &CiA402::Parameters60xx::TouchProbe2PosEdge,     20u, 4,  "TouchProbe2PosEdge" },
     { &CiA402::Parameters60xx::DIStatus,               24u, 4,  "DigitalInputs" },
@@ -189,18 +190,18 @@ static_assert(TxPDO_1B01.field_count == TxPDO_1B01_Fields.size(), "TxPDO1B01 fie
 // ---------------------------------------------------------------------------
 // AS715N — alternative RxPDO 0x1703 (7 entries, 17 bytes)
 // RxPDO 0x1703: Controlword(2) + TargetPosition(4) + TargetVelocity(4)
-//               + TargetTorque(2) + Mode(1) + TouchProbeFunction(2)
-//               + PositiveTorqueLimit (60E0, 2)
+//               + Mode selection(1) + TouchProbeFunction(2)
+//               + PositiveTorqueLimit(2) + NegativeTorqueLimit(2)
 // ---------------------------------------------------------------------------
 
 static constexpr std::array<PDOField,7> RxPDO_1703_Fields = {{
     { &CiA402::Parameters60xx::ControlWord,             0u, 2,  "Controlword" },
     { &CiA402::Parameters60xx::TargetPosition,          2u, 4,  "TargetPosition" },
     { &CiA402::Parameters60xx::TargetVelocity,          6u, 4,  "TargetVelocity" },
-    { &CiA402::Parameters60xx::TargetTorque,           10u, 2,  "TargetTorque" },
-    { &CiA402::Parameters60xx::OperationMode,          12u, 1,  "ModesOfOperation" },
-    { &CiA402::Parameters60xx::TouchProbeFunction,     13u, 2,  "TouchProbeFunction" },
-    { &CiA402::Parameters60xx::PositiveTorqueLimit,    15u, 2,  "PositiveTorqueLimit" },
+    { &CiA402::Parameters60xx::OperationMode,          10u, 1,  "ModesOfOperation" },
+    { &CiA402::Parameters60xx::TouchProbeFunction,     11u, 2,  "TouchProbeFunction" },
+    { &CiA402::Parameters60xx::PositiveTorqueLimit,    13u, 2,  "PositiveTorqueLimit" },
+    { &CiA402::Parameters60xx::NegativeTorqueLimit,    15u, 2,  "NegativeTorqueLimit" },
 }};
 
 static constexpr PDO RxPDO_1703 = makePDO(0x1703u, 17u,
@@ -223,7 +224,7 @@ static constexpr std::array<PDOField,10> TxPDO_1B03_Fields = {{
     { &CiA402::Parameters60xx::ActualTorque,  8u, 2,  "TorqueActualValue" },
     { &CiA402::Parameters60xx::FollowingErrorActual, 10u, 4,  "PositionDeviation" },
     { &CiA402::Parameters60xx::ModeDisplay,          14u, 1,  "ModeDisplay" },
-    { &CiA402::Parameters60xx::TouchProbeFunction,   15u, 2,  "TouchProbeStatus" },
+    { &CiA402::Parameters60xx::TouchProbeStatus,     15u, 2,  "TouchProbeStatus" },
     { &CiA402::Parameters60xx::TouchProbe1PosEdge,   17u, 4,  "TouchProbe1PosEdge" },
     { &CiA402::Parameters60xx::TouchProbe2PosEdge,   21u, 4,  "TouchProbe2PosEdge" },
     { &CiA402::Parameters60xx::DIStatus,             25u, 4,  "DigitalInputs" },
@@ -492,6 +493,25 @@ static_assert(sizeof(AS715N_TxPDO_1B03) == TxPDO_1B03.size,
               "AS715N_TxPDO_1B03 struct size must match PDO 0x1B03 size");
 
 /**
+ * @brief RxPDO 0x1703 struct (master → slave, 17 bytes)
+ *
+ * Fields exactly match the slave-defined PDO 0x1703 layout: the same field
+ * set as 0x1705 but without the trailing Torque Offset (0x60B2).
+ */
+struct AS715N_RxPDO_1703 {
+    uint16_t controlword;           ///< 0x6040 Controlword
+    int32_t  target_position;       ///< 0x607A Target Position (encoder counts)
+    int32_t  target_velocity;       ///< 0x60FF Target Velocity (counts/s)
+    int8_t   modes_of_operation;    ///< 0x6060 Modes of Operation (8 = CSP)
+    uint16_t touch_probe_function;  ///< 0x60B8 Touch Probe Function
+    uint16_t positive_torque_limit; ///< 0x60E0 Positive Torque Limit (‰ of rated)
+    uint16_t negative_torque_limit; ///< 0x60E1 Negative Torque Limit (‰ of rated)
+} __attribute__((packed));
+
+static_assert(sizeof(AS715N_RxPDO_1703) == RxPDO_1703.size,
+              "AS715N_RxPDO_1703 struct size must match PDO 0x1703 size");
+
+/**
  * @brief RxPDO 0x1702 struct (master → slave, 19 bytes)
  */
 struct AS715N_RxPDO_1702 {
@@ -593,7 +613,7 @@ inline ::EtherCAT::Slave::MultiPDOAssignment makeDefaultPDOAssignment()
 constexpr int opmodeOffsetFor(uint16_t rxpdo_index) {
     switch (rxpdo_index) {
         case 0x1702u: return 12;
-        case 0x1703u: return 12;
+        case 0x1703u: return 10;
         case 0x1704u: return 12;
         case 0x1705u: return 10;
         default:      return -1;
