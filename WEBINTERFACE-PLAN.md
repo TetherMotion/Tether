@@ -50,7 +50,7 @@ extension/profile trust layer, and Phase 8 hardening.
   controller maps `Authorization: Bearer` on the upgrade to
   `Session::setIdentity`. Unauthenticated sessions fail closed to observer.
 
-**Frontend (`web/tether-io-dashboard`)**
+**Frontend (`TetherWebUI`)**
 
 - Modular layout: `transport/`/`protocol`, `domain/`, `stores/`, `views/`,
   `components/`, schema-v6, and scope modules replacing the `main.ts`
@@ -71,7 +71,7 @@ extension/profile trust layer, and Phase 8 hardening.
 - Tests: vitest unit tests across client/domain/views, an env-gated live e2e
   test (`TETHER_E2E_URL`) against `web_dashboard_example` that exercises every
   typed decoder over a real WebSocket, and a Playwright browser suite
-  (`npm run test:e2e`, `web/tether-io-dashboard/e2e/machine.spec.ts`) that
+  (`npm run test:e2e`, `TetherWebUI e2e/machine.spec.ts`) that
   drives the running example end to end: interpreted drive cards and their
   expansion, the full CiA 402 object dictionary in Explore, lease acquisition
   with disable/enable dispatch, hold-to-run jog, guided homing through to a
@@ -121,7 +121,7 @@ model.
 
 ### Tether today
 
-The existing dashboard at `web/tether-io-dashboard/` provides a good technical
+The existing dashboard at `TetherWebUI/` provides a good technical
 starting point:
 
 - A Vite/TypeScript web-component client over the binary Tether IO WebSocket

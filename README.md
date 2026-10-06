@@ -248,7 +248,7 @@ python_bindings/    pybind11 bindings + `tether` Python package
 tools/extract_esi/  ESI XML extraction utility
 dependencies/       Vendored header-only deps (git submodules)
 cmake/              CMake helpers (incl. Drogon compat find-modules)
-web/                Web dashboard assets
+web/                (moved) Web dashboard now lives in the TetherWebUI repo
 scripts/            Helper scripts
 ```
 

@@ -5,8 +5,9 @@
  * @details
  * This example starts a single Drogon HTTP + WebSocket server that:
  *
- *   1. Serves the pre-built Tether IO dashboard (HTML/CSS/JS) from
- *      web/tether-io-dashboard/dist/ as static files.
+ *   1. Serves the pre-built TetherWebUI dashboard (HTML/CSS/JS) — built in
+ *      the separate TetherWebUI repository — as static files (see
+ *      WEB_DASHBOARD_DIST_DIR / --web-root).
  *   2. Exposes a binary WebSocket endpoint at /tether-io that speaks
  *      the Tether IO protocol.
  *

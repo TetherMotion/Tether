@@ -385,14 +385,17 @@ affine solve and verifies the remaining segment CRCs; `(startCrc, seqNo)`
 is not identifiable so resync is per-frame.  Off by default — see
 `docs/FSoECrcResync.md`.
 
-## Web dashboard (`web/tether-io-dashboard`)
+## Web dashboard (TetherWebUI repo)
 
-Vite + TypeScript frontend served by `examples/web_dashboard_example.cpp`
-(a Drogon server backed entirely by the simulated CiA 402 fleet).
+The Vite + TypeScript frontend lives in the **TetherWebUI** repository
+(https://github.com/TetherMotion/TetherWebUI), expected checked out as a
+sibling directory (`../TetherWebUI`). It is served by
+`examples/web_dashboard_example.cpp` (a Drogon server backed entirely by the
+simulated CiA 402 fleet) from its `dist/` build output.
 
 ```bash
 # Build the frontend (tsc --noEmit + vite build) — output goes to dist/
-cd web/tether-io-dashboard && npm run build
+cd ../TetherWebUI && npm run build
 
 # Frontend unit tests (vitest)
 npm test
@@ -404,9 +407,9 @@ TETHER_E2E_URL=ws://127.0.0.1:8080/tether-io npm test
 # (playwright.config.ts starts its own on port 8099 unless one is already up)
 npm run test:e2e
 
-# Build and run the example server
+# Build and run the example server (in this repo)
 cmake --build build --target web_dashboard_example -j8
-./build/bin/examples/web_dashboard_example --verbose
+./build/bin/web_dashboard_example --web-root ../TetherWebUI/dist --verbose
 ```
 
 Notes:

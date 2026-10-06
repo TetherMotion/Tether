@@ -13,10 +13,12 @@ web interface (`web_dashboard_example` / any host embedding
 ```bash
 cmake -B build
 cmake --build build --target web_dashboard_example -j8
-cd web/tether-io-dashboard && npm ci && npm run build   # produces dist/
+cd ../TetherWebUI && npm ci && npm run build   # produces dist/
 ```
 
-Serve `web/tether-io-dashboard/dist` as the static root. Any HTTP+WS
+The dashboard lives in the **TetherWebUI** repository
+(https://github.com/TetherMotion/TetherWebUI), expected checked out as a
+sibling directory. Serve `TetherWebUI/dist` as the static root. Any HTTP+WS
 server embedding `TetherIOWebSocketController` works; the example
 binary is the reference.
 
@@ -32,7 +34,7 @@ via a post-handling advice.
 ```bash
 web_dashboard_example \
     --port 8080 \
-    --web-root web/tether-io-dashboard/dist \
+    --web-root ../TetherWebUI/dist \
     --auth-file /etc/tether/web-tokens.tsv \
     --audit-log /var/log/tether/machine-journal.log
 ```

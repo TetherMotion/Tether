@@ -192,7 +192,7 @@ TEST(IOSchema, ComputesStableBlake3DigestFromCanonicalDescriptor) {
 // ---------------------------------------------------------------------------
 // Cross-language digest vectors
 //
-// These graphs mirror web/tether-io-dashboard/test-fixtures/
+// These graphs mirror test-fixtures/ in the TetherWebUI repo
 // schema-digest-vectors.json.  The TypeScript client reconstructs the same
 // nodes and asserts identical BLAKE3 digests, so a drift between the two
 // canonical-descriptor encodings fails on both sides.
