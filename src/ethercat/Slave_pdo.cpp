@@ -752,8 +752,9 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         master_->writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 2), &len_le, 2, 200);
 
-        // Control
-        uint8_t ctrl_byte = std::bit_cast<uint8_t>(mc.control);
+        // Control — clear the watchdog-enable bit on process-data SMs
+        // (see Master_slave.cpp: a latched SM watchdog blocks OP).
+        uint8_t ctrl_byte = std::bit_cast<uint8_t>(mc.control) & ~0x20u;
         master_->writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
 

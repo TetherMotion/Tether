@@ -509,7 +509,10 @@ bool Master::configureProcessDataSyncManagersFromSii(SlaveAddress slave_address)
             uint16_t len_le = Raw::host_to_le16(cfg.length);
             writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 2), &len_le, 2, 200);
 
-            uint8_t ctrl_byte = std::bit_cast<uint8_t>(cfg.control);
+            // Clear the watchdog-enable bit on process-data SMs: a tripped SM
+            // watchdog latches on the ESC and the slave then refuses
+            // SAFE_OP->OP forever (stays SAFE_OP with AL code 0).
+            uint8_t ctrl_byte = std::bit_cast<uint8_t>(cfg.control) & ~0x20u;
             writeRegister(SlaveAddress(slave_index), static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
 
             TETHER_LOGI(TAG, "Wrote SM{} to {}: Addr=0x{:04X} Len={} Ctrl=0x{:02X} Act=0x00 (disabled)",
