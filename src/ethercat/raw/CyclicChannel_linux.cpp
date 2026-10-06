@@ -27,6 +27,7 @@
 
 #if defined(__linux__)
 
+#include "hal/IEthernet.hpp"
 #include "logging/Logger.hpp"
 #include "raw/RawWireFormat.hpp"
 
@@ -162,6 +163,9 @@ int openCyclicSocket(int ifindex,
         ::close(fd);
         return -1;
     }
+    // Register for nic-mon's PACKET_STATISTICS dump on rx_dropped spikes;
+    // dead fds are pruned automatically when the channel closes.
+    HAL::registerDiagPacketSocket(fd, "cyclic");
 
     if (accept_prog && accept_prog_len) {
         // Caller-composed program (encap ∧ idx∈fastpath) — replaces the
@@ -399,11 +403,22 @@ public:
         // ([RX blocks | TX blocks]); they must be mapped by a single mmap of
         // the combined size at offset 0 — a second mmap for TX is EINVAL.
         // V3 is RX-only: the TX ring keeps the V2 per-frame tpacket_req.
+        // TX ring is opt-in (TETHER_CYCLIC_TX_RING): it wedged on some
+        // kernels — slots stayed TP_STATUS_SEND_REQUEST forever and cyclic
+        // TX died.  Plain sendmsg/sendto on the same socket is unaffected
+        // by the RX filter and is the default classical TX path.
         struct tpacket_req rx_req{}, tx_req{};
         if (!configRxRing(&rx_req)) return false;
+#if TETHER_CYCLIC_TX_RING
         const bool have_tx = configTxRing(&tx_req);   // optional — sendto works
         if (!have_tx)
             TETHER_LOGW(TAG, "TX ring unavailable — cyclic TX uses sendto");
+#else
+        const bool have_tx = false;
+        (void)tx_req;
+        TETHER_LOGI(TAG, "TX ring disabled (TETHER_CYCLIC_TX_RING=0) — "
+                         "cyclic TX uses classical sendmsg/sendto");
+#endif
 
         const size_t rx_len =
             static_cast<size_t>(rx_req.tp_block_size) * rx_req.tp_block_nr;
@@ -488,8 +503,23 @@ public:
                 return txData(hdr);
             }
         }
+        // All TX slots in-flight: kernel never drained the ring — the last
+        // sendto kick errored or TX is wedged.  Rate-limited diag.
+        if ((++tx_exhausted_ & 0x3FF) == 1) {
+            uint32_t st[kNumTxStates]{};
+            for (uint32_t i = 0; i < tx_frames_; ++i) {
+                const uint32_t s =
+                    __atomic_load_n(&txSlot(i)->tp_status, __ATOMIC_ACQUIRE);
+                st[s < kNumTxStates ? s : kNumTxStates - 1]++;
+            }
+            TETHER_LOGW(TAG,
+                "TX ring exhausted ({} slots): status histogram "
+                "avail={} send_req={} sending={} err={} other={}",
+                tx_frames_, st[0], st[1], st[2], st[3], st[kNumTxStates - 1]);
+        }
         return nullptr;
     }
+    static constexpr uint32_t kNumTxStates = 8;
 
     size_t txCapacity() const override {
         return tx_ring_ ? tx_frame_size_ - kTxDataOff
@@ -516,6 +546,10 @@ public:
         // One kick flushes every queued SEND_REQUEST slot.
         const ssize_t s = ::sendto(fd_, nullptr, 0, MSG_DONTWAIT,
                                    nullptr, 0);
+        if (s < 0 && errno != EAGAIN && (tx_kick_errs_++ & 0xFF) == 0) {
+            TETHER_LOGE(TAG, "TX ring kick failed: errno={} ({})",
+                        errno, strerror(errno));
+        }
         if (s < 0 && errno == EAGAIN) {
             // Frame stays queued — kernel TX queue is full, it flushes on
             // the next kick.  That is a *late* cyclic frame: count it so
@@ -881,6 +915,8 @@ private:
     uint32_t rx_cursor_ = 0;
     bool     rings_borrowed_ = false;   // adoptRingsForTest() seam
     std::atomic<uint64_t> tx_deferred_{0};
+    uint32_t tx_exhausted_  = 0;
+    uint32_t tx_kick_errs_  = 0;
 };
 
 } // namespace
