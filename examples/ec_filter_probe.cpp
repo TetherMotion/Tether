@@ -815,6 +815,14 @@ void runCyclicExecutiveTest(const ProbeConfig& cfg) {
         verdict = "WARN no replies — segment silent? ring RX unverified";
     else if (ok >= cycles * 9 / 10 && tp_drops == 0 && bank_drops == 0)
         verdict = "PASS";
+    else if (dispatched >= cycles * 9 / 10 && tp_drops == 0 &&
+             bank_drops == 0 && wkc_err > 0)
+        // Replies return on time but no slave claims the logical
+        // addresses — the probe never configures slave FMMUs, so wkc=0
+        // on an unconfigured segment is expected.  Wire path verified;
+        // protocol health needs a configured PDO segment.
+        verdict = "WARN replies return but WKC=0 — slaves not mapped "
+                  "for this LRW (unconfigured FMMU?) — ring datapath OK";
     else
         verdict = "FAIL — cyclic datapath unhealthy (see counters above)";
     printf("verdict: %s\n", verdict);
