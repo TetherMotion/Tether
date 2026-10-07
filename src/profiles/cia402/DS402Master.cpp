@@ -76,6 +76,12 @@ bool DS402Master::startDistributedClocks()
     return ethercat_master_.dc().start();
 }
 
+bool DS402Master::startDistributedClocks(const DC::DCConfig& config, uint16_t slave_count)
+{
+    return initializeDistributedClocks(config, slave_count) &&
+           startDistributedClocks();
+}
+
 void DS402Master::stopDistributedClocks()
 {
     ethercat_master_.dc().stop();

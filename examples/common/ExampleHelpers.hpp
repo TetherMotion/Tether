@@ -2,9 +2,11 @@
 
 #include <argparse/argparse.hpp>
 #include <cstdint>
+#include <initializer_list>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "tether/ethercat/CBPFProgramFactory.hpp"
@@ -72,6 +74,23 @@ void addSlaveArg(argparse::ArgumentParser& program, int defaultValue = 0);
 
 /// Add `-t` / `--time` to an ArgumentParser.
 void addDurationArg(argparse::ArgumentParser& program, double defaultValue = 0.0);
+
+/**
+ * @brief Resolve a chain of slave-index arguments (e.g. "--slave",
+ *        "--slave2", ...) into validated uint16 indices.
+ *
+ * Each argument after the first defaults to the previous index + 1 when
+ * the parser produced a negative value (matching the
+ * `.default_value(-1)` convention for extra --slaveN args).  The first
+ * argument must resolve to a non-negative value.  All indices must fit
+ * uint16 and be distinct.
+ *
+ * @return the index vector in argument order, or std::nullopt after
+ *         printing an error to stderr.
+ */
+std::optional<std::vector<uint16_t>> resolveSlaveIndices(
+    const argparse::ArgumentParser& program,
+    std::initializer_list<std::string_view> arg_names);
 
 // ============================================================================
 // Debug-flag helpers

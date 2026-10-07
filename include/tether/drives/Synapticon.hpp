@@ -21,8 +21,12 @@
 #pragma once
 
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
+#include <vector>
 
 #include "tether/ethercat/SlaveDiscoveryManager.hpp"
 
@@ -130,6 +134,62 @@ inline SomanetIdentityCheck verifySomanetIdentity(
             *slave.product_code);
     }
     return SomanetIdentityCheck::Verified;
+}
+
+/**
+ * @brief Discover the bus and verify that each index in @p drive_indices
+ *        is a SOMANET.
+ *
+ * Runs a discovery with VendorId + ProductCode + DeviceNames, logs the
+ * resulting slave list, range-checks every index, and calls
+ * verifySomanetIdentity() on each.  A VendorMismatch is fatal.
+ *
+ * @return The full discovery result, or std::nullopt when the bus is
+ *         empty, an index is out of range, or a listed slave is not a
+ *         Synapticon drive.
+ */
+inline std::optional<std::vector<EtherCAT::DiscoveredSlave>> discoverDrives(
+    EtherCAT::SlaveDiscoveryManager& discovery,
+    std::span<const uint16_t> drive_indices,
+    const char* log_tag)
+{
+    const auto discovered = discovery.discover(
+        {EtherCAT::DiscoveryOption::VendorId,
+         EtherCAT::DiscoveryOption::ProductCode,
+         EtherCAT::DiscoveryOption::DeviceNames});
+    if (discovered.empty()) {
+        TETHER_LOGE(log_tag, "No slaves discovered on the bus");
+        return std::nullopt;
+    }
+    for (const auto& s : discovered) {
+        TETHER_LOGI(log_tag,
+            "  slave {}: vendor=0x{:08X} product=0x{:08X} name='{}'",
+            s.index, s.vendor_id.value_or(0), s.product_code.value_or(0),
+            s.device_name.value_or("<unreadable>").c_str());
+    }
+    for (const uint16_t idx : drive_indices) {
+        if (idx >= discovered.size()) {
+            TETHER_LOGE(log_tag,
+                "Slave index {} out of range — only {} slave(s) on the bus",
+                idx, discovered.size());
+            return std::nullopt;
+        }
+        if (verifySomanetIdentity(discovered[idx], log_tag) ==
+            SomanetIdentityCheck::VendorMismatch) {
+            TETHER_LOGE(log_tag,
+                "Pass the correct bus positions for the drive indices "
+                "(see list above)");
+            return std::nullopt;
+        }
+    }
+    return discovered;
+}
+
+/// Convert a shaft angle in degrees to encoder increments.
+inline int32_t degreesToIncrements(double degrees,
+                                   uint32_t increments_per_rev) {
+    return static_cast<int32_t>(std::lround(
+        degrees / 360.0 * static_cast<double>(increments_per_rev)));
 }
 
 // Mailbox configuration (from ESI Sm elements)

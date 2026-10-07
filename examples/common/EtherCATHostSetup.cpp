@@ -3,6 +3,8 @@
 #include <cstring>
 #include <iostream>
 
+#include "tether/utils/SignalHandler.hpp"
+
 #include "tether/hal/NetworkInterfaceEnumerator.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/ethercat/SlaveDiscoveryManager.hpp"
@@ -162,6 +164,51 @@ bool startHostMasterAndDiscover(HostEtherNetSession& session,
                     name);
     }
     return true;
+}
+
+bool bringUpHost(HostEtherNetSession& session,
+                 EtherCAT::Master& master,
+                 const std::string& interfaceName,
+                 const EncapsulationConfig& encapsulation,
+                 const char* tag,
+                 Utils::SignalHandler* sig,
+                 bool enable_mailbox_fallback) {
+    if (!initHostEthernet(session, interfaceName, tag)) {
+        return false;
+    }
+    if (!setupEncapsulation(session, master, encapsulation, tag)) {
+        shutdownHostEthernet(session);
+        return false;
+    }
+    startHostPollThread(session, tag);
+    if (!startHostMaster(session, master, tag)) {
+        shutdownHostEthernet(session);
+        return false;
+    }
+    if (sig) {
+        sig->setCancelCallback([&master] { master.requestCancel(); });
+    }
+    master.setEnableMailboxFallback(enable_mailbox_fallback);
+    return true;
+}
+
+HostSessionGuard::HostSessionGuard(HostEtherNetSession& session,
+                                   std::function<void()> on_exit)
+    : session_(session), on_exit_(std::move(on_exit)) {}
+
+HostSessionGuard::~HostSessionGuard() {
+    if (on_exit_) {
+        on_exit_();
+    }
+    shutdownHostEthernet(session_);
+}
+
+void HostSessionGuard::setOnExit(std::function<void()> on_exit) {
+    on_exit_ = std::move(on_exit);
+}
+
+void HostSessionGuard::dismiss() {
+    on_exit_ = nullptr;
 }
 
 } // namespace Tether::Examples

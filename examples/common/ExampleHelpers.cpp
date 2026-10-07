@@ -1,9 +1,11 @@
 #include "ExampleHelpers.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
 #include <iostream>
+#include <limits>
 #include <sstream>
 
 #include "tether/ethercat/DebugFlags.hpp"
@@ -202,6 +204,36 @@ void addDurationArg(argparse::ArgumentParser& program, double defaultValue) {
         .scan<'g', double>()
         .default_value(defaultValue)
         .help("Duration in seconds (0 = infinite until Ctrl-C)");
+}
+
+std::optional<std::vector<uint16_t>> resolveSlaveIndices(
+    const argparse::ArgumentParser& program,
+    std::initializer_list<std::string_view> arg_names) {
+    std::vector<uint16_t> indices;
+    indices.reserve(arg_names.size());
+    for (std::string_view name : arg_names) {
+        int raw = program.get<int>(std::string(name));
+        if (raw < 0) {
+            if (indices.empty()) {
+                std::cerr << std::format("{} must be >= 0\n", name);
+                return std::nullopt;
+            }
+            raw = indices.back() + 1;
+        }
+        if (raw > std::numeric_limits<uint16_t>::max() - 1) {
+            std::cerr << std::format("Invalid slave index {} from {}\n",
+                                     raw, name);
+            return std::nullopt;
+        }
+        const auto idx = static_cast<uint16_t>(raw);
+        if (std::find(indices.begin(), indices.end(), idx) != indices.end()) {
+            std::cerr << std::format("{} resolves to slave {} — indices "
+                                     "must be distinct\n", name, idx);
+            return std::nullopt;
+        }
+        indices.push_back(idx);
+    }
+    return indices;
 }
 
 // ============================================================================

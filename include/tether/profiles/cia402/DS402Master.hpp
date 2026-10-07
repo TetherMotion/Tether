@@ -164,6 +164,8 @@ public:
 
     bool initializeDistributedClocks(const DC::DCConfig& config, uint16_t slave_count = 0);
     bool startDistributedClocks();
+    /// Convenience: initializeDistributedClocks(config, slave_count) + start().
+    bool startDistributedClocks(const DC::DCConfig& config, uint16_t slave_count = 0);
     void stopDistributedClocks();
 
     bool configureDrive(const DriveConfiguration& config);
