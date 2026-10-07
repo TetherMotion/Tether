@@ -24,6 +24,33 @@ namespace Synapticon {
 using ODDataType = ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType;
 
 // ============================================================================
+// 0x2205 Gear ratio — UDINT, ro (firmware-configured)
+// ============================================================================
+namespace Obj2205 {
+
+static constexpr uint16_t ObjectIndex = 0x2205;
+
+constexpr RegisterEntry GearRatio = {
+    .index = ObjectIndex,
+    .subindex = 0x01,
+    .name = "Gear ratio",
+    .data_type = ODDataType::Unsigned32,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0xFFFFFFFF,
+    .modification_mode = ModificationMode::ReadOnly,
+    .effective_time = EffectiveTime::Immediately,
+};
+
+inline const RegisterList kRegisterList = {
+    &GearRatio,
+};
+
+} // namespace Obj2205
+
+// ============================================================================
 // 0x2210 GPIO pin configuration — DT2210, rw
 // ============================================================================
 namespace Obj2210 {

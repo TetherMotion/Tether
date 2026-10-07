@@ -193,6 +193,24 @@ public:
     bool gotoOp();
 
     /**
+     * @brief Issue the AL_CONTROL SAFE_OP request without waiting.
+     *
+     * For a synchronised multi-drive SAFE_OP transition prefer
+     * EtherCAT::SlaveGroup::requestState(SlaveState::SAFE_OP) — one packet
+     * requests SAFE_OP on the whole group — then confirm with
+     * waitForSafeOp() or SlaveGroup::waitForState().
+     */
+    bool requestSafeOp();
+
+    /**
+     * @brief Wait for the slave to reach SAFE_OP after requestSafeOp().
+     *
+     * Same confirmation loop gotoSafeOp() runs internally: polls AL_STATUS,
+     * reports the AL status code on timeout.
+     */
+    bool waitForSafeOp(uint32_t timeout_ms = 2000);
+
+    /**
      * @brief Issue the AL_CONTROL OP request without waiting for OP.
      *
      * Writes OP | Error-Acknowledge (0x18) to the slave's AL_CONTROL
@@ -222,6 +240,23 @@ public:
      * EtherCAT::SlaveGroup.
      */
     bool prepareForOp(const Slave::MultiPDOAssignment& assignment);
+
+    /**
+     * @brief The PRE_OP-side part of prepareForOp(): PRE_OP check,
+     *        configureMultiPDOs, PDO buffer registration.  Leaves the slave
+     *        in PRE_OP so the SAFE_OP request can be issued for a whole
+     *        group simultaneously (EtherCAT::SlaveGroup::requestState),
+     *        after which postSafeOpForOp() completes the per-slave setup.
+     */
+    bool prepareForSafeOp(const Slave::MultiPDOAssignment& assignment);
+
+    /**
+     * @brief The post-SAFE_OP part of the OP preparation: DC SYNC reconfig,
+     *        PDO exchange enable, SM readback diagnostics, error-ack.
+     *        Call once the slave has reached SAFE_OP (via gotoSafeOp() or a
+     *        group requestState + waitForState), before requesting OP.
+     */
+    bool postSafeOpForOp();
 
     /**
      * @brief Full state sequence: INIT -> PRE_OP -> SAFE_OP -> OP

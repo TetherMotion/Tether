@@ -203,6 +203,40 @@ public:
         return true;
     }
 
+    /// @brief Configure PDOs while staying in PRE_OP (no SAFE_OP request).
+    ///
+    /// Everything configurePDOsAndSafeOp() does before the SAFE_OP request:
+    /// configureMultiPDOs (SM/FMMU + 0x1C12/0x1C13) and PDO buffer
+    /// registration.  Used for synchronised multi-drive bring-up: run this
+    /// per slave, issue the SAFE_OP request for the whole group in one
+    /// packet (EtherCAT::SlaveGroup::requestState), then run
+    /// postSafeOpPrepare() per slave before the group OP request.
+    bool configurePDOsInPreOp(const Slave::MultiPDOAssignment& assignment) {
+        auto& drive = master_.ensureDrive(slave_idx_);
+        drive.setSDOTimeout(kSdoTimeoutMs);
+
+        if (!drive.prepareForSafeOp(assignment)) {
+            TETHER_LOGE(tag_, "PDO config failed for {}", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
+            return false;
+        }
+
+        TETHER_LOGI(tag_, "{} configured PDOs (staying in PRE_OP, awaiting group SAFE_OP request)", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
+        return true;
+    }
+
+    /// @brief Post-SAFE_OP OP preparation — DC reconfig, PDO exchange
+    ///        enable, diagnostics, error-ack.  Call once the slave has
+    ///        reached SAFE_OP (e.g. after a group requestState +
+    ///        waitForState), before the (group) OP request.
+    bool postSafeOpPrepare() {
+        auto& drive = master_.ensureDrive(slave_idx_);
+        if (!drive.postSafeOpForOp()) {
+            TETHER_LOGE(tag_, "post-SAFE_OP preparation failed for {}", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
+            return false;
+        }
+        return true;
+    }
+
     /// @brief Configure PDOs and transition to OP.
     ///
     /// Creates a CiA402Drive via ensureDrive(), sets the SDO timeout,

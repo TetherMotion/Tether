@@ -923,6 +923,130 @@ SlaveError Slave::sdoWriteU32(uint16_t index, uint8_t sub, uint32_t val) {
     return SlaveError::Ok;
 }
 
+// -- Object-dictionary entry access -----------------------------------------
+
+// Dispatch goes through the virtual sdoReadUx/sdoWriteUx/sdoRead/sdoWrite
+// calls so NonExistingSlave and test doubles keep their overridden behaviour.
+
+SlaveError Slave::sdoReadEntry(
+    const ObjectDictionary::ObjectDictionaryEntry& entry, uint64_t& out) {
+    using D = ObjectDictionary::ObjectDictionaryDataType;
+    out = 0;
+
+    switch (entry.data_type) {
+        case D::Boolean:
+        case D::Unsigned8: {
+            uint8_t v = 0;
+            const auto e = sdoReadU8(entry.index, entry.subindex, v);
+            if (e != SlaveError::Ok) return e;
+            out = v;
+            return SlaveError::Ok;
+        }
+        case D::Unsigned16: {
+            uint16_t v = 0;
+            const auto e = sdoReadU16(entry.index, entry.subindex, v);
+            if (e != SlaveError::Ok) return e;
+            out = v;
+            return SlaveError::Ok;
+        }
+        case D::Unsigned32:
+        case D::Real32: {
+            uint32_t v = 0;
+            const auto e = sdoReadU32(entry.index, entry.subindex, v);
+            if (e != SlaveError::Ok) return e;
+            out = v;
+            return SlaveError::Ok;
+        }
+        case D::Integer8: {
+            uint8_t v = 0;
+            const auto e = sdoReadU8(entry.index, entry.subindex, v);
+            if (e != SlaveError::Ok) return e;
+            out = static_cast<uint64_t>(
+                static_cast<int64_t>(static_cast<int8_t>(v)));
+            return SlaveError::Ok;
+        }
+        case D::Integer16: {
+            uint16_t v = 0;
+            const auto e = sdoReadU16(entry.index, entry.subindex, v);
+            if (e != SlaveError::Ok) return e;
+            out = static_cast<uint64_t>(
+                static_cast<int64_t>(static_cast<int16_t>(v)));
+            return SlaveError::Ok;
+        }
+        case D::Integer32: {
+            uint32_t v = 0;
+            const auto e = sdoReadU32(entry.index, entry.subindex, v);
+            if (e != SlaveError::Ok) return e;
+            out = static_cast<uint64_t>(
+                static_cast<int64_t>(static_cast<int32_t>(v)));
+            return SlaveError::Ok;
+        }
+        default: {
+            // 5-8 byte types (Integer40..64, Unsigned24..64, Real64, ...):
+            // raw little-endian read, assembled into the result.
+            const uint8_t width = inferByteSize(entry.data_type);
+            if (width == 0) return SlaveError::SDOError;
+            uint8_t buf[8] = {};
+            size_t size = width;
+            const auto e = sdoRead(entry.index, entry.subindex, buf, size);
+            if (e != SlaveError::Ok || size != width) {
+                return (e != SlaveError::Ok) ? e : SlaveError::SDOError;
+            }
+            for (size_t i = 0; i < width; ++i) {
+                out |= static_cast<uint64_t>(buf[i]) << (i * 8);
+            }
+            return SlaveError::Ok;
+        }
+    }
+}
+
+SlaveError Slave::sdoWriteEntry(
+    const ObjectDictionary::ObjectDictionaryEntry& entry, uint64_t value) {
+    using D = ObjectDictionary::ObjectDictionaryDataType;
+
+    switch (entry.data_type) {
+        case D::Boolean:
+        case D::Unsigned8:
+        case D::Integer8:
+            return sdoWriteU8(entry.index, entry.subindex,
+                              static_cast<uint8_t>(value));
+        case D::Unsigned16:
+        case D::Integer16:
+            return sdoWriteU16(entry.index, entry.subindex,
+                               static_cast<uint16_t>(value));
+        case D::Unsigned32:
+        case D::Real32:
+        case D::Integer32:
+            return sdoWriteU32(entry.index, entry.subindex,
+                               static_cast<uint32_t>(value));
+        default: {
+            const uint8_t width = inferByteSize(entry.data_type);
+            if (width == 0) return SlaveError::SDOError;
+            uint8_t buf[8] = {};
+            for (size_t i = 0; i < width; ++i) {
+                buf[i] = static_cast<uint8_t>(value >> (i * 8));
+            }
+            return sdoWrite(entry.index, entry.subindex, buf, width);
+        }
+    }
+}
+
+SlaveError Slave::sdoReadEntry(
+    const ObjectDictionary::ObjectDictionaryEntry& entry,
+    uint8_t subindex, uint64_t& out) {
+    ObjectDictionary::ObjectDictionaryEntry e = entry;
+    e.subindex = subindex;
+    return sdoReadEntry(e, out);
+}
+
+SlaveError Slave::sdoWriteEntry(
+    const ObjectDictionary::ObjectDictionaryEntry& entry,
+    uint8_t subindex, uint64_t value) {
+    ObjectDictionary::ObjectDictionaryEntry e = entry;
+    e.subindex = subindex;
+    return sdoWriteEntry(e, value);
+}
+
 uint32_t Slave::lastSdoAbortCode() const {
     return master_->sdoManager(index_).lastSdoAbortCode();
 }

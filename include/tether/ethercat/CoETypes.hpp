@@ -23,6 +23,7 @@
 #include <chrono>
 
 #include "tether/ethercat/SDOAbortCodes.hpp"
+#include "tether/ethercat/ObjectDictionary.hpp"
 
 namespace EtherCAT {
 namespace CoE {
@@ -133,6 +134,19 @@ struct CoETransactionBase {
 template<typename T>
 struct CoEReadTransaction : CoETransactionBase {
     std::promise<std::expected<T, CoEError>> promise;
+};
+
+/**
+ * @brief Read transaction driven by an object-dictionary entry.
+ *
+ * The worker uploads the raw payload and decodes it against `data_type`
+ * (width + signedness) into the raw-bit uint64_t result of
+ * CoEManager::readEntry()/readEntryAsync().
+ */
+struct CoEEntryReadTransaction : CoETransactionBase {
+    ObjectDictionary::ObjectDictionaryDataType data_type =
+        ObjectDictionary::ObjectDictionaryDataType::Unsigned8;
+    std::promise<std::expected<uint64_t, CoEError>> promise;
 };
 
 // ============================================================================

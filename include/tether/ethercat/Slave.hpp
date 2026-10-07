@@ -717,6 +717,39 @@ public:
     virtual SlaveError sdoWriteU32(uint16_t index, uint8_t sub, uint32_t val);
 
     /**
+     * @brief Read using the width declared by an ObjectDictionaryEntry's
+     *        data_type (e.g. a device RegisterEntry from a Registers table).
+     *
+     * Index, subindex and transfer width all come from the entry — no
+     * sizes or indices are hard-coded at the call site. The value is
+     * returned as raw bits (signed Integer types sign-extended).
+     * Variable-length types (VisibleString, OctetString, Domain, ...)
+     * are unsupported and return SlaveError::SDOError.
+     */
+    SlaveError sdoReadEntry(
+        const ObjectDictionary::ObjectDictionaryEntry& entry, uint64_t& out);
+
+    /**
+     * @brief Write using the width declared by an ObjectDictionaryEntry's
+     *        data_type. `value` carries the raw bits (as returned by
+     *        sdoReadEntry); it is truncated to the declared width.
+     */
+    SlaveError sdoWriteEntry(
+        const ObjectDictionary::ObjectDictionaryEntry& entry, uint64_t value);
+
+    /**
+     * @brief Record-member variants — `subindex` overrides entry.subindex,
+     *        so a record object whose members share one type needs only a
+     *        single register definition for all of its subindices.
+     */
+    SlaveError sdoReadEntry(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        uint8_t subindex, uint64_t& out);
+    SlaveError sdoWriteEntry(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        uint8_t subindex, uint64_t value);
+
+    /**
      * @brief Return the CoE SDO abort code reported by the slave on the most
      * recent sdoRead/sdoWrite call. 0 means no abort (success or a non-abort
      * failure such as a transport/timeout error). Read this immediately after

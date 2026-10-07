@@ -7,6 +7,8 @@
  */
 
 #include "tether/profiles/cia402/CiA402Drive.hpp"
+#include "tether/profiles/cia402/60xx-Parameters.hpp"
+#include "tether/profiles/cia301/CiA301Parameters.hpp"
 #include "tether/profiles/cia402/CiA402Config.hpp"
 #include "tether/profiles/cia402/CiA402StateUtils.hpp"
 #include "tether/profiles/cia402/DynaDriveController.hpp"
@@ -54,14 +56,17 @@ bool CiA402Drive::gotoPreOp() {
     return m_master->transitionSlaveToPreOperational(m_slave_index);
 }
 
-bool CiA402Drive::gotoSafeOp() {
-    TETHER_LOGI(TAG, "{}: Requesting SAFE_OP state", logPrefix().c_str());
+bool CiA402Drive::requestSafeOp() {
     if (!m_master) return false;
-    if (!m_master->requestSlaveApplicationLayerState(m_slave_index, static_cast<uint8_t>(ECState::SafeOp)))
-        return false;
-    
-    // Wait for slave to reach SAFE_OP (up to 2 seconds)
-    for (int attempt = 0; attempt < 200; attempt++) {
+    return m_master->requestSlaveApplicationLayerState(
+        m_slave_index, static_cast<uint8_t>(ECState::SafeOp));
+}
+
+bool CiA402Drive::waitForSafeOp(uint32_t timeout_ms) {
+    if (!m_master) return false;
+    // Wait for slave to reach SAFE_OP
+    const int max_attempts = static_cast<int>((timeout_ms + 9) / 10);
+    for (int attempt = 0; attempt < max_attempts; attempt++) {
         Tether::Platform::Clock::instance().delayMilliseconds(10);
         uint8_t state = 0;
         if (m_master->readSlaveApplicationLayerState(m_slave_index, state)) {
@@ -71,16 +76,22 @@ bool CiA402Drive::gotoSafeOp() {
             }
         }
     }
-    
+
     // Read final state and error for diagnostics
     uint8_t final_state = 0;
     m_master->readSlaveApplicationLayerState(m_slave_index, final_state);
     uint8_t asc[2] = {0};
     m_master->readRegister(SlaveAddress(m_slave_index), 0x0134, asc, 2, 200);
     uint16_t al_code = asc[0] | (asc[1] << 8);
-    TETHER_LOGE(TAG, "{}: SAFE_OP not confirmed after 2s, state=0x{:02X} (AL status code: {} (0x{:04X}))",
-             logPrefix().c_str(), final_state, getALStatusCodeName(al_code), al_code);
+    TETHER_LOGE(TAG, "{}: SAFE_OP not confirmed after {} ms, state=0x{:02X} (AL status code: {} (0x{:04X}))",
+             logPrefix().c_str(), timeout_ms, final_state, getALStatusCodeName(al_code), al_code);
     return false;
+}
+
+bool CiA402Drive::gotoSafeOp() {
+    TETHER_LOGI(TAG, "{}: Requesting SAFE_OP state", logPrefix().c_str());
+    if (!requestSafeOp()) return false;
+    return waitForSafeOp(2000);
 }
 
 bool CiA402Drive::requestOp() {
@@ -308,7 +319,10 @@ bool CiA402Drive::prepareSafeOpForOp() {
         TETHER_LOGE(TAG, "{}: Failed to reach SAFE_OP", logPrefix().c_str());
         return false;
     }
+    return postSafeOpForOp();
+}
 
+bool CiA402Drive::postSafeOpForOp() {
     // CRITICAL: Reconfigure DC SYNC signals AFTER SM configuration
     // The initial DC config during slave discovery may have failed because
     // the slave wasn't ready. Now that we're in SAFE_OP with SM configured,
@@ -407,8 +421,8 @@ bool CiA402Drive::transitionSafeOpToOp() {
 // transitionToOp — multi-PDO-per-SM variant
 // ============================================================================
 
-bool CiA402Drive::prepareForOp(const Slave::MultiPDOAssignment& assignment) {
-    TETHER_LOGI(TAG, "{}: Preparing OP transition (multi-PDO, {} SM configs)",
+bool CiA402Drive::prepareForSafeOp(const Slave::MultiPDOAssignment& assignment) {
+    TETHER_LOGI(TAG, "{}: Preparing SAFE_OP transition (multi-PDO, {} SM configs)",
                 logPrefix().c_str(), assignment.sm_configs.size());
 
     // Check if slave is already in PRE_OP. If so, skip gotoPreOp() to avoid
@@ -481,9 +495,16 @@ bool CiA402Drive::prepareForOp(const Slave::MultiPDOAssignment& assignment) {
 
     // Do NOT call configureProcessDataSyncManagersFromSii() or re-write SM
     // registers here — configureMultiPDOs() already configured SMs and FMMUs
-    // correctly.  Proceed to SAFE_OP + PDO-enable only; the caller decides
-    // when/how to issue the OP request (per-slave gotoOp() or a
-    // group-synchronised EtherCAT::SlaveGroup::requestState()).
+    // correctly.  The slave stays in PRE_OP; the caller issues the SAFE_OP
+    // request (per-slave gotoSafeOp() or a group-synchronised
+    // EtherCAT::SlaveGroup::requestState) and then runs postSafeOpForOp().
+    return true;
+}
+
+bool CiA402Drive::prepareForOp(const Slave::MultiPDOAssignment& assignment) {
+    if (!prepareForSafeOp(assignment)) {
+        return false;
+    }
     return prepareSafeOpForOp();
 }
 
@@ -549,8 +570,8 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
         // Actively read the CiA 402 error code so the log records which
         // fault is being reset, not just that a fault exists.  Re-report
         // if the code changes between attempts.
-        auto fault_code = m_master->sdoManager(m_slave_index).readU16(
-            static_cast<uint16_t>(CiA402::Register::ErrorCode), 0,
+        auto fault_code = m_master->sdoManager(m_slave_index).readEntry(
+            CiA402::Parameters60xx::ErrorCode,
             {.timeout_ms = m_sdo_timeout_ms});
         if (fault_code.has_value()) {
             if (*fault_code != last_fault_code) {
@@ -593,8 +614,8 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
             }
             if (cur == DriveState::Fault ||
                 cur == DriveState::FaultReactionActive) {
-                auto fault_code = m_master->sdoManager(m_slave_index).readU16(
-                    static_cast<uint16_t>(CiA402::Register::ErrorCode), 0,
+                auto fault_code = m_master->sdoManager(m_slave_index).readEntry(
+                    CiA402::Parameters60xx::ErrorCode,
                     {.timeout_ms = m_sdo_timeout_ms});
                 TETHER_LOGE(TAG, "{}: Fault during state transition (0x603F={})",
                             logPrefix().c_str(),
@@ -670,8 +691,8 @@ bool CiA402Drive::enable(uint32_t timeout_ms) {
                          "(state={} sw=0x{:04X})",
                     logPrefix().c_str(), static_cast<int>(state), getStatusword());
         if ((getStatusword() & CiA402::StatuswordBits::Fault) != 0) {
-            auto fault_code = m_master->sdoManager(m_slave_index).readU16(
-                static_cast<uint16_t>(CiA402::Register::ErrorCode), 0,
+            auto fault_code = m_master->sdoManager(m_slave_index).readEntry(
+                CiA402::Parameters60xx::ErrorCode,
                 {.timeout_ms = m_sdo_timeout_ms});
             if (fault_code.has_value()) {
                 TETHER_LOGE(TAG, "{}: Fault code (0x603F) = 0x{:04X}: {}",
@@ -770,9 +791,8 @@ bool CiA402Drive::controlledShutdown(const ControlledShutdownConfig& cfg) {
                             &v, sizeof(v));
                 return true;
             }
-            return sdo.writeU32(
-                static_cast<uint16_t>(CiA402::Register::TargetVelocity), 0,
-                static_cast<uint32_t>(v), sdo_opts).has_value();
+            return sdo.writeEntry(CiA402::Parameters60xx::TargetVelocity,
+                static_cast<uint64_t>(static_cast<int64_t>(v)), sdo_opts).has_value();
         };
 
         // Current velocity — the ramp start.  Prefer the live TxPDO
@@ -787,9 +807,7 @@ bool CiA402Drive::controlledShutdown(const ControlledShutdownConfig& cfg) {
                         sizeof(v0));
             have_v0 = true;
         } else {
-            auto res = sdo.readU32(
-                static_cast<uint16_t>(CiA402::Register::VelocityActualValue),
-                0, sdo_opts);
+            auto res = sdo.readEntry(CiA402::Parameters60xx::ActualSpeed, sdo_opts);
             if (res.has_value()) {
                 v0 = static_cast<int32_t>(*res);
                 have_v0 = true;
@@ -989,8 +1007,8 @@ bool CiA402Drive::writeControlword(uint16_t controlword) {
         std::memcpy(m_rxpdo_buffer + m_controlword_pdo_offset, &controlword, sizeof(controlword));
         return true;
     }
-    auto result = m_master->sdoManager(m_slave_index).writeU16(
-        static_cast<uint16_t>(CiA402::Register::Controlword), 0, controlword,
+    auto result = m_master->sdoManager(m_slave_index).writeEntry(
+        CiA402::Parameters60xx::ControlWord, controlword,
         {.timeout_ms = m_sdo_timeout_ms});
     return result.has_value();
 }
@@ -1008,8 +1026,8 @@ bool CiA402Drive::sendControlwordSDO(uint16_t controlword) {
     }
     TETHER_LOGI(TAG, "{}: Sending controlword 0x{:04X} over SDO",
                 logPrefix().c_str(), controlword);
-    auto result = m_master->sdoManager(m_slave_index).writeU16(
-        static_cast<uint16_t>(CiA402::Register::Controlword), 0, controlword,
+    auto result = m_master->sdoManager(m_slave_index).writeEntry(
+        CiA402::Parameters60xx::ControlWord, controlword,
         {.timeout_ms = m_sdo_timeout_ms});
     if (!result.has_value()) {
         TETHER_LOGE(TAG, "{}: controlword 0x{:04X} SDO write failed",
@@ -1030,8 +1048,8 @@ bool CiA402Drive::readStatusword(uint16_t& statusword) {
         m_statusword = statusword;
         return true;
     }
-    auto result = m_master->sdoManager(m_slave_index).readU16(
-        static_cast<uint16_t>(CiA402::Register::Statusword), 0,
+    auto result = m_master->sdoManager(m_slave_index).readEntry(
+        CiA402::Parameters60xx::StatusWord,
         {.timeout_ms = m_sdo_timeout_ms});
     if (!result.has_value()) return false;
     statusword = result.value();
@@ -1073,18 +1091,18 @@ bool CiA402Drive::setOperatingModePDO(int8_t mode) {
 
 bool CiA402Drive::setOperatingModeSDO(int8_t mode) {
     uint8_t umode = static_cast<uint8_t>(mode);
-    auto write_res = m_master->sdoManager(m_slave_index).writeU8(
-        static_cast<uint16_t>(CiA402::Register::ModesOfOperation), 0, umode,
+    auto write_res = m_master->sdoManager(m_slave_index).writeEntry(
+        CiA402::Parameters60xx::OperationMode, umode,
         {.timeout_ms = m_sdo_timeout_ms});
     if (write_res.has_value()) {
         // Read back mode display to verify
         uint8_t mode_display = 0;
         Tether::Platform::Clock::instance().delayMilliseconds(50); // Give drive time to process
-        auto read_res = m_master->sdoManager(m_slave_index).readU8(
-            static_cast<uint16_t>(CiA402::Register::ModesOfOperationDisplay), 0,
+        auto read_res = m_master->sdoManager(m_slave_index).readEntry(
+            CiA402::Parameters60xx::ModeDisplay,
             {.timeout_ms = m_sdo_timeout_ms});
         if (read_res.has_value()) {
-            mode_display = read_res.value();
+            mode_display = static_cast<uint8_t>(read_res.value());
             if (static_cast<int8_t>(mode_display) == mode) {
                 TETHER_LOGI(TAG, "{}: Operating mode set to {} ({}), readback successful",
                          logPrefix().c_str(), CiA402::getOperatingModeName(mode), mode);
@@ -1104,8 +1122,8 @@ bool CiA402Drive::setOperatingModeSDO(int8_t mode) {
     // Diagnostic: SDO write failed. Try to read error registers (0x1001, 0x1003) to get more info
     TETHER_LOGE(TAG, "{}: Failed to set operating mode via SDO (index 0x6060)", logPrefix().c_str());
 
-    auto err_reg_res = m_master->sdoManager(m_slave_index).readU8(
-        static_cast<uint16_t>(0x1001), 0,
+    auto err_reg_res = m_master->sdoManager(m_slave_index).readEntry(
+        CiA301::Objects::Obj1001::ErrorRegister,
         {.timeout_ms = m_sdo_timeout_ms});
     if (err_reg_res.has_value()) {
         TETHER_LOGW(TAG, "{}: Error register (0x1001) = 0x{:02X}", logPrefix().c_str(), err_reg_res.value());
@@ -1114,15 +1132,15 @@ bool CiA402Drive::setOperatingModeSDO(int8_t mode) {
     }
 
     // Manufacturer error log (0x1003) - subindex 0 = number of errors
-    auto mfr_count_res = m_master->sdoManager(m_slave_index).readU8(
-        static_cast<uint16_t>(0x1003), 0,
+    auto mfr_count_res = m_master->sdoManager(m_slave_index).readEntry(
+        CiA301::Objects::Obj1003::Count,
         {.timeout_ms = m_sdo_timeout_ms});
     if (mfr_count_res.has_value()) {
         uint8_t mfr_err_count = mfr_count_res.value();
         TETHER_LOGW(TAG, "{}: Manufacturer Error count (0x1003) = {}", logPrefix().c_str(), (unsigned)mfr_err_count);
         for (uint8_t i = 1; i <= mfr_err_count && i < 16; ++i) {
-            auto err_res = m_master->sdoManager(m_slave_index).readU32(
-                static_cast<uint16_t>(0x1003), i,
+            auto err_res = m_master->sdoManager(m_slave_index).readEntry(
+                CiA301::Objects::Obj1003::Error, i,
                 {.timeout_ms = m_sdo_timeout_ms});
             if (err_res.has_value()) {
                 TETHER_LOGW(TAG, "{}: Manufacturer Error[{}] = 0x{:08X}", logPrefix().c_str(), (unsigned)i, err_res.value());
@@ -1200,8 +1218,8 @@ bool CiA402Drive::setOperatingModeSDO(int8_t mode) {
 }
 
 int8_t CiA402Drive::getOperatingMode() {
-    auto result = m_master->sdoManager(m_slave_index).readU8(
-        static_cast<uint16_t>(CiA402::Register::ModesOfOperationDisplay), 0,
+    auto result = m_master->sdoManager(m_slave_index).readEntry(
+        CiA402::Parameters60xx::ModeDisplay,
         {.timeout_ms = m_sdo_timeout_ms});
     if (result.has_value()) {
         return static_cast<int8_t>(result.value());
@@ -1215,8 +1233,8 @@ int8_t CiA402Drive::getOperatingMode() {
 
 bool CiA402Drive::setHomingMethod(int8_t method) {
     uint8_t umethod = static_cast<uint8_t>(method);
-    auto result = m_master->sdoManager(m_slave_index).writeU8(
-        static_cast<uint16_t>(CiA402::Register::HomingMethod), 0, umethod,
+    auto result = m_master->sdoManager(m_slave_index).writeEntry(
+        CiA402::Parameters60xx::HomingMethod, umethod,
         {.timeout_ms = m_sdo_timeout_ms});
     return result.has_value();
 }
