@@ -28,6 +28,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -89,6 +90,34 @@ public:
 
     ~AS715NErC11SlaveResponder() {
         pair_.setRxCallbackB(nullptr);
+    }
+
+    // ---- Test hooks --------------------------------------------------------
+
+    struct SdoWrite {
+        uint16_t index;
+        uint8_t  subindex;
+        uint16_t value;
+    };
+
+    /// Override the emulated fault/object state (call before startMaster()).
+    void setFaultState(uint32_t mfr_fault, uint16_t statusword,
+                       uint16_t controlword) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        mfr_fault_   = mfr_fault;
+        statusword_  = statusword;
+        controlword_ = controlword;
+    }
+
+    /// When false, the drive ignores the F31.00 pulse (stuck fault).
+    void setF31Active(bool active) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        f31_active_ = active;
+    }
+
+    std::vector<SdoWrite> writeLog() const {
+        std::lock_guard<std::mutex> lk(mutex_);
+        return write_log_;
     }
 
 private:
@@ -355,7 +384,11 @@ private:
             // SDO Upload Initiate (read) request
             buildUploadResponse(coe_number, mbx_cnt, idx, sub);
         } else if ((cmd & 0xE0u) == 0x20u) {
-            // SDO Download Initiate (write) request — acknowledge only
+            // SDO Download Initiate (write) request — apply the expedited
+            // value, then acknowledge
+            uint16_t value;
+            std::memcpy(&value, sdo + 4, 2);
+            applySdoWrite(idx, sub, le16_to_host(value));
             buildDownloadAck(coe_number, mbx_cnt, idx, sub);
         }
         // Other commands (segmented transfers etc.) not needed for this test
@@ -378,17 +411,31 @@ private:
         uint8_t n_unused   = 2;   // default: U16 (2 unused bytes in 4-byte field)
         bool    known      = true;
 
+        uint16_t statusword, controlword;
+        uint32_t mfr_fault;
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            statusword  = statusword_;
+            controlword = controlword_;
+            mfr_fault   = mfr_fault_;
+        }
+
         if (idx == 0x6041u && sub == 0x00u) {
             // StatusWord U16 = 0x1638
-            data4[0] = static_cast<uint8_t>(kStatusWord & 0xFF);
-            data4[1] = static_cast<uint8_t>((kStatusWord >> 8) & 0xFF);
+            data4[0] = static_cast<uint8_t>(statusword & 0xFF);
+            data4[1] = static_cast<uint8_t>((statusword >> 8) & 0xFF);
+            n_unused = 2;
+        } else if (idx == 0x6040u && sub == 0x00u) {
+            // ControlWord U16 — reflects the last download
+            data4[0] = static_cast<uint8_t>(controlword & 0xFF);
+            data4[1] = static_cast<uint8_t>((controlword >> 8) & 0xFF);
             n_unused = 2;
         } else if (idx == 0x203Fu && sub == 0x00u) {
             // Manufacturer fault U32 = 0x00000C11
-            data4[0] = static_cast<uint8_t>(kMfrFault203F & 0xFF);
-            data4[1] = static_cast<uint8_t>((kMfrFault203F >> 8) & 0xFF);
-            data4[2] = static_cast<uint8_t>((kMfrFault203F >> 16) & 0xFF);
-            data4[3] = static_cast<uint8_t>((kMfrFault203F >> 24) & 0xFF);
+            data4[0] = static_cast<uint8_t>(mfr_fault & 0xFF);
+            data4[1] = static_cast<uint8_t>((mfr_fault >> 8) & 0xFF);
+            data4[2] = static_cast<uint8_t>((mfr_fault >> 16) & 0xFF);
+            data4[3] = static_cast<uint8_t>((mfr_fault >> 24) & 0xFF);
             n_unused = 0;  // U32 — all 4 bytes carry data
         } else if (idx == 0x603Fu && sub == 0x00u) {
             // CiA402 error U16 = 0x8700
@@ -409,6 +456,27 @@ private:
         const uint8_t sdo_cmd =
             static_cast<uint8_t>(0x40u | ((n_unused & 0x03u) << 2u) | 0x03u);
         buildMbxResponse(coe_number, mbx_cnt, EC_COES_SDORES, sdo_cmd, idx, sub, data4);
+    }
+
+    /**
+     * @brief Apply an expedited SDO download to the emulated object dictionary.
+     *
+     * Models the AS715N semantics the fault-reset path depends on:
+     *  - 0x6040:00 ControlWord — stored verbatim.
+     *  - 0x2031:01 F31.00 — writing 1 (the rising edge of the 0→1→0 pulse)
+     *    clears the fault: StatusWord bit 3 drops and 0x203F goes to 0.
+     */
+    void applySdoWrite(uint16_t idx, uint8_t sub, uint16_t value) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        write_log_.push_back({idx, sub, value});
+
+        if (idx == 0x6040u && sub == 0x00u) {
+            controlword_ = value;
+        } else if (idx == 0x2031u && sub == 0x01u && value == 1u &&
+                   f31_active_) {
+            statusword_ &= static_cast<uint16_t>(~0x0008u);  // FAULT bit
+            mfr_fault_ = 0;
+        }
     }
 
     /// Build a download (write) acknowledgement response (cmd = 0x60).
@@ -520,8 +588,21 @@ private:
 
     LinuxPairedNetworkInterface& pair_;
 
+    mutable std::mutex mutex_;
+
     /// Current AL state (written via 0x0120, read via 0x0130)
     uint16_t al_state_ = 0x0001;  // INIT at startup
+
+    /// Emulated CiA-402 / manufacturer objects (mutable for fault-reset tests)
+    uint16_t statusword_  = kStatusWord;    ///< 0x6041:0
+    uint16_t controlword_ = 0x000F;         ///< 0x6040:0 — S-ON asserted
+    uint32_t mfr_fault_   = kMfrFault203F;  ///< 0x203F:0
+
+    /// Whether the F31.00 pulse clears the fault (false = stuck fault)
+    bool f31_active_ = true;
+
+    /// Every SDO download, in order (index, subindex, value)
+    std::vector<SdoWrite> write_log_;
 
     /// Last SII word address set by the EEPROM read command embedded in 0x0502
     uint16_t sii_addr_ = 0x0000;
@@ -675,4 +756,160 @@ TEST_F(AS715NErC11IntegrationTest, ErrorParsedCorrectly) {
     // Also verify the CiA402 error is as observed on hardware
     EXPECT_EQ(cia402_error, 0x8700u)
         << "CiA402 Bus Fault Code 0x8700 per fault table column '603F'";
+}
+
+/**
+ * @test AS715NErC11IntegrationTest/ResetFaultClearsSonBeforeF31
+ *
+ * With S-ON asserted (ControlWord bit 0 = 1), resetFault() must first write
+ * 0x6040 with bit 0 cleared *before* the F31.00 (0x2031:01) 0→1→0 pulse —
+ * the drive ignores the pulse while S-ON is latched.
+ */
+TEST_F(AS715NErC11IntegrationTest, ResetFaultClearsSonBeforeF31) {
+    AS715NErC11SlaveResponder responder(*pair_);
+    responder.setFaultState(0x00000C11u, 0x1638u, /*controlword=*/0x000Fu);
+    auto& master = startMaster();
+
+    ASSERT_TRUE(waitForDiscovery(master));
+    master.autoConfigureMailbox(0);
+    ASSERT_TRUE(master.transitionSlaveToPreOperational(0));
+
+    EXPECT_TRUE(AS715NFaultHandler::resetFault(master.sdoManager(0), 0));
+
+    const auto log = responder.writeLog();
+    ASSERT_GE(log.size(), 4u) << "expected 0x6040 write + 3x 0x2031:01 writes";
+    EXPECT_EQ(log[0].index, 0x6040u);
+    EXPECT_EQ(log[0].value & 0x0001u, 0u) << "S-ON bit must be cleared";
+    EXPECT_EQ(log[0].value, 0x000Eu) << "other controlword bits preserved";
+    EXPECT_EQ(log[1].index, 0x2031u); EXPECT_EQ(log[1].subindex, 0x01u);
+    EXPECT_EQ(log[1].value, 0u);
+    EXPECT_EQ(log[2].index, 0x2031u); EXPECT_EQ(log[2].value, 1u);
+    EXPECT_EQ(log[3].index, 0x2031u); EXPECT_EQ(log[3].value, 0u);
+}
+
+/**
+ * @test AS715NErC11IntegrationTest/ResetFaultSonAlreadyClearSkipsControlword
+ *
+ * With S-ON already deasserted, no 0x6040 download should be emitted —
+ * the F31.00 pulse goes out directly.
+ */
+TEST_F(AS715NErC11IntegrationTest, ResetFaultSonAlreadyClearSkipsControlword) {
+    AS715NErC11SlaveResponder responder(*pair_);
+    responder.setFaultState(0x00000C11u, 0x1638u, /*controlword=*/0x000Eu);
+    auto& master = startMaster();
+
+    ASSERT_TRUE(waitForDiscovery(master));
+    master.autoConfigureMailbox(0);
+    ASSERT_TRUE(master.transitionSlaveToPreOperational(0));
+
+    EXPECT_TRUE(AS715NFaultHandler::resetFault(master.sdoManager(0), 0));
+
+    const auto log = responder.writeLog();
+    ASSERT_EQ(log.size(), 3u) << "only the F31.00 0->1->0 pulse is expected";
+    for (size_t i = 0; i < log.size(); ++i) {
+        EXPECT_EQ(log[i].index, 0x2031u);
+        EXPECT_EQ(log[i].subindex, 0x01u);
+    }
+}
+
+/**
+ * @test AS715NErC11IntegrationTest/ResetFaultReportsStuckFault
+ *
+ * A drive that ignores the F31.00 pulse keeps the FAULT bit set —
+ * resetFault() must report failure via the StatusWord verification.
+ */
+TEST_F(AS715NErC11IntegrationTest, ResetFaultReportsStuckFault) {
+    AS715NErC11SlaveResponder responder(*pair_);
+    responder.setFaultState(0x00000C11u, 0x1638u, 0x000Fu);
+    responder.setF31Active(false);
+    auto& master = startMaster();
+
+    ASSERT_TRUE(waitForDiscovery(master));
+    master.autoConfigureMailbox(0);
+    ASSERT_TRUE(master.transitionSlaveToPreOperational(0));
+
+    EXPECT_FALSE(AS715NFaultHandler::resetFault(master.sdoManager(0), 0));
+
+    const auto log = responder.writeLog();
+    bool saw_f31_high = false;
+    for (const auto& w : log) {
+        if (w.index == 0x2031u && w.subindex == 0x01u && w.value == 1u)
+            saw_f31_high = true;
+    }
+    EXPECT_TRUE(saw_f31_high) << "reset must still emit the pulse";
+}
+
+/**
+ * @test AS715NErC11IntegrationTest/ResetAllFaultsNoFaultNoWrites
+ *
+ * With a healthy statusword and no manufacturer error, resetAllFaults()
+ * returns true without emitting any SDO download.
+ */
+TEST_F(AS715NErC11IntegrationTest, ResetAllFaultsNoFaultNoWrites) {
+    AS715NErC11SlaveResponder responder(*pair_);
+    responder.setFaultState(0u, /*statusword=*/0x0606u, 0x000Fu);
+    auto& master = startMaster();
+
+    ASSERT_TRUE(waitForDiscovery(master));
+    master.autoConfigureMailbox(0);
+    ASSERT_TRUE(master.transitionSlaveToPreOperational(0));
+
+    EXPECT_TRUE(AS715NFaultHandler::resetAllFaults(master.sdoManager(0), 0));
+    EXPECT_TRUE(responder.writeLog().empty())
+        << "no fault → no reset sequence should be emitted";
+}
+
+/**
+ * @test AS715NErC11IntegrationTest/ResetAllFaultsRoutesNonDCSyncToF31
+ *
+ * A non-DC-sync manufacturer fault (0x7500 — not in the 0x0Cxx/0x07xx sync
+ * classes) must go through the plain resetFault() path: S-ON pre-clear plus
+ * the F31.00 pulse, not the multi-attempt handleNoSyncError() loop.
+ */
+TEST_F(AS715NErC11IntegrationTest, ResetAllFaultsRoutesNonDCSyncToF31) {
+    AS715NErC11SlaveResponder responder(*pair_);
+    responder.setFaultState(0x7500u, 0x1638u, 0x000Fu);
+    auto& master = startMaster();
+
+    ASSERT_TRUE(waitForDiscovery(master));
+    master.autoConfigureMailbox(0);
+    ASSERT_TRUE(master.transitionSlaveToPreOperational(0));
+
+    EXPECT_TRUE(AS715NFaultHandler::resetAllFaults(master.sdoManager(0), 0));
+
+    const auto log = responder.writeLog();
+    ASSERT_GE(log.size(), 4u);
+    EXPECT_EQ(log[0].index, 0x6040u) << "S-ON pre-clear comes first";
+    EXPECT_EQ(log[1].index, 0x2031u);
+    EXPECT_EQ(log[1].value, 0u);
+    EXPECT_EQ(log[2].value, 1u);
+}
+
+/**
+ * @test AS715NErC11IntegrationTest/ResetAllFaultsRoutesDCSyncToSyncRecovery
+ *
+ * ErC1.1 (0x0C11) is a DC-sync error: resetAllFaults() must route it through
+ * handleNoSyncError(), which still drives resetFault() underneath — the
+ * observable contract is that the fault ends up cleared and the F31.00
+ * pulse reached the drive.
+ */
+TEST_F(AS715NErC11IntegrationTest, ResetAllFaultsRoutesDCSyncToSyncRecovery) {
+    AS715NErC11SlaveResponder responder(*pair_);
+    responder.setFaultState(0x00000C11u, 0x1638u, 0x000Fu);
+    auto& master = startMaster();
+
+    ASSERT_TRUE(waitForDiscovery(master));
+    master.autoConfigureMailbox(0);
+    ASSERT_TRUE(master.transitionSlaveToPreOperational(0));
+
+    EXPECT_TRUE(AS715NFaultHandler::resetAllFaults(master.sdoManager(0), 0));
+
+    const auto log = responder.writeLog();
+    bool saw_f31_pulse = false;
+    for (const auto& w : log) {
+        if (w.index == 0x2031u && w.subindex == 0x01u && w.value == 1u)
+            saw_f31_pulse = true;
+    }
+    EXPECT_TRUE(saw_f31_pulse)
+        << "DC-sync recovery must pulse F31.00 via resetFault()";
 }

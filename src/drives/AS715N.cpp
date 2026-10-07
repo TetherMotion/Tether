@@ -9,6 +9,7 @@
  */
 #include "tether/drives/AS715N.hpp"
 #include "tether/ethercat/CoEManager.hpp"
+#include "tether/profiles/cia402/CiA402Drive.hpp"
 #include "tether/platform/Platform.hpp"
 #include <cstdio>
 #include <cstring>
@@ -96,7 +97,24 @@ bool AS715NFaultHandler::checkFault(EtherCAT::CoE::CoEManager& sdo, uint16_t sla
 // Fault Reset
 // ============================================================================
 
-bool AS715NFaultHandler::resetFault(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx) {
+bool AS715NFaultHandler::resetFault(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx,
+                                    CiA402Drive* drive) {
+    // Per the A6-EC manual the F31.00 pulse is only accepted with S-ON
+    // (Controlword bit 0) cleared — a drive still switched on keeps the
+    // fault latched and the reset silently does nothing.
+    if (auto cw = sdo.readU16(0x6040, 0x00, {.timeout_ms = 3000});
+        cw.has_value() && (*cw & 0x0001u)) {
+        const uint16_t son_off = static_cast<uint16_t>(*cw & ~0x0001u);
+        if (!sdo.writeU16(0x6040, 0x00, son_off, {.timeout_ms = 3000})
+                 .has_value()) {
+            TETHER_LOGE(TAG, "{}: failed to clear S-ON before F31 fault reset",
+                        sdo.logPrefix().c_str());
+            return false;
+        }
+        if (drive) drive->setControlword(son_off);
+        Tether::Platform::Clock::instance().delayMilliseconds(50);
+    }
+
     TETHER_LOGI(TAG, "{}: Attempting fault reset via 0x2031:01 (F31.00)...", sdo.logPrefix().c_str());
 
     // 0 -> 1 -> 0 sequence
@@ -137,6 +155,34 @@ bool AS715NFaultHandler::resetFault(EtherCAT::CoE::CoEManager& sdo, uint16_t sla
         TETHER_LOGW(TAG, "{}: Fault may persist (0x203F external=0x{:04X})", sdo.logPrefix().c_str(), mfr_after);
     }
     return cleared;
+}
+
+bool AS715NFaultHandler::resetAllFaults(EtherCAT::CoE::CoEManager& sdo,
+                                        uint16_t slave_idx) {
+    uint16_t mfr_error = 0, cia402_error = 0;
+    if (!checkFault(sdo, slave_idx, &mfr_error, &cia402_error)) {
+        TETHER_LOGI(TAG, "{}: no fault — nothing to reset",
+                    sdo.logPrefix().c_str());
+        return true;
+    }
+
+    const AS715NError err = AS715NError::parse(mfr_error);
+    if (mfr_error != 0 && err.isDCSyncError()) {
+        TETHER_LOGI(TAG, "{}: DC sync error {} — using handleNoSyncError()",
+                    sdo.logPrefix().c_str(), err.name);
+        return handleNoSyncError(sdo, slave_idx, 3);
+    }
+    if (mfr_error != 0 && !err.is_recoverable) {
+        TETHER_LOGW(TAG, "{}: error {} is marked non-recoverable — "
+                         "attempting reset anyway",
+                    sdo.logPrefix().c_str(), err.name);
+    } else if (mfr_error == 0) {
+        TETHER_LOGI(TAG, "{}: fault bit set but no manufacturer error "
+                         "(0x603F=0x{:04X}) — plain reset",
+                    sdo.logPrefix().c_str(), cia402_error);
+    }
+
+    return resetFault(sdo, slave_idx);
 }
 
 // ============================================================================

@@ -342,18 +342,10 @@ private:
             case FaultResetAction::FltrStandard:
                 return drive.resetFault();
             case FaultResetAction::F31Sequence:
-                // Per the A6-EC manual the S-ON bit must be cleared before
-                // the F31.00 0->1->0 sequence is accepted.
-                if (auto cw = sdo_mgr.readU16(0x6040, 0x00, {.timeout_ms = 3000});
-                    cw.has_value() && (*cw & 0x0001u)) {
-                    (void)sdo_mgr.writeU16(
-                        0x6040, 0x00,
-                        static_cast<uint16_t>(*cw & ~0x0001u),
-                        {.timeout_ms = 3000});
-                    drive.setControlword(static_cast<uint16_t>(*cw & ~0x0001u));
-                    Tether::Platform::Clock::instance().delayMilliseconds(50);
-                }
-                return AS715NFaultHandler::resetFault(sdo_mgr, slave_idx_);
+                // resetFault() clears S-ON first (per the A6-EC manual)
+                // and syncs the drive's cached controlword via `drive`.
+                return AS715NFaultHandler::resetFault(sdo_mgr, slave_idx_,
+                                                      &drive);
         }
         return false;
     }
