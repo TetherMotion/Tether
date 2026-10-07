@@ -481,18 +481,20 @@ public:
                            uint32_t rx_frames,
                            uint8_t* tx, uint32_t tx_frame_size,
                            uint32_t tx_frames,
-                           uint32_t rx_block_size = 0, uint32_t rx_fpb = 0) {
+                           uint32_t rx_block_size = 0, uint32_t rx_fpb = 0,
+                           uint32_t tx_block_size = 0, uint32_t tx_fpb = 0) {
         rx_ring_ = rx;  rx_ring_len_ = 0;
         rx_frame_size_ = rx_frame_size;  rx_frames_ = rx_frames;
-        // Test rings adopt a flat layout unless the blocked variant asked
-        // for a padded per-block stride.
+        // Test rings adopt a flat layout unless the caller asked for a
+        // padded per-block stride (the real kernel geometry).
         rx_block_size_ = rx_block_size ? rx_block_size : rx_frame_size;
         rx_fpb_        = rx_fpb ? rx_fpb : 1;
         rx_holds_    = std::make_unique<std::atomic<int>[]>(rx_frames_);
         rx_consumed_ = std::make_unique<std::atomic<bool>[]>(rx_frames_);
         tx_ring_ = tx;  tx_ring_len_ = 0;
         tx_frame_size_ = tx_frame_size;  tx_frames_ = tx_frames;
-        tx_block_size_ = tx_frame_size;  tx_fpb_ = 1;
+        tx_block_size_ = tx_block_size ? tx_block_size : tx_frame_size;
+        tx_fpb_        = tx_fpb ? tx_fpb : 1;
         rings_borrowed_ = true;
     }
 
@@ -1086,7 +1088,9 @@ std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
     int fd, int ifindex,
     void* rx_ring, uint32_t rx_frame_size, uint32_t rx_frames,
     void* tx_ring, uint32_t tx_frame_size, uint32_t tx_frames,
-    uint32_t rx_spin_ns)
+    uint32_t rx_spin_ns,
+    uint32_t rx_block_size, uint32_t rx_fpb,
+    uint32_t tx_block_size, uint32_t tx_fpb)
 {
     if (fd < 0 || !rx_ring || rx_frame_size == 0 || rx_frames == 0)
         return nullptr;
@@ -1095,23 +1099,8 @@ std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
     ring->adoptRingsForTest(static_cast<uint8_t*>(rx_ring), rx_frame_size,
                             rx_frames,
                             static_cast<uint8_t*>(tx_ring), tx_frame_size,
-                            tx_frames);
-    return ring;
-}
-
-std::unique_ptr<ICyclicChannel> createCyclicRingChannelBlockedForMemory(
-    int fd, int ifindex,
-    void* rx_ring, uint32_t rx_frame_size, uint32_t rx_block_size,
-    uint32_t rx_fpb, uint32_t rx_blocks)
-{
-    if (fd < 0 || !rx_ring || rx_frame_size == 0 || rx_fpb == 0 ||
-        rx_blocks == 0)
-        return nullptr;
-    LinuxRingChannel::Config rcfg{};
-    auto ring = std::make_unique<LinuxRingChannel>(fd, ifindex, rcfg);
-    ring->adoptRingsForTest(static_cast<uint8_t*>(rx_ring), rx_frame_size,
-                            rx_fpb * rx_blocks, nullptr, 0, 0,
-                            rx_block_size, rx_fpb);
+                            tx_frames, rx_block_size, rx_fpb,
+                            tx_block_size, tx_fpb);
     return ring;
 }
 
@@ -1160,11 +1149,7 @@ std::unique_ptr<ICyclicChannel> createCyclicRingChannelV3ForMemory(
 
 std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
     int, int, void*, uint32_t, uint32_t, void*, uint32_t, uint32_t,
-    uint32_t) { return nullptr; }
-
-std::unique_ptr<ICyclicChannel> createCyclicRingChannelBlockedForMemory(
-    int, int, void*, uint32_t, uint32_t, uint32_t, uint32_t)
-    { return nullptr; }
+    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t) { return nullptr; }
 
 } // namespace EtherCAT
 
