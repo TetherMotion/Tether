@@ -659,6 +659,11 @@ public:
         // --- transport level (informational — correctly discarded strays) ---
         uint64_t unrouted_datagrams = 0;
         uint64_t rx_queue_overflow  = 0;
+        // --- datapath liveness (diagnose "is the collect running?") ---
+        uint64_t collect_calls      = 0;  ///< split-collect task invocations
+        uint64_t wait_calls         = 0;  ///< datapath wait invocations
+        uint64_t dispatch_frames    = 0;  ///< frames consumed from the ring
+        uint64_t dispatch_unrouted  = 0;  ///< consumed frames with no slot
         // --- per-slice detail ---
         /// Slices whose last outcome was Stale for many consecutive
         /// cycles — the reply RTT exceeds one whole period (each cycle
