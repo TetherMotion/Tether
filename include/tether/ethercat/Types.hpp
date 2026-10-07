@@ -288,6 +288,19 @@ struct CyclicSliceHealth {
     }
 };
 
+/// Short stable names for logs — same style as toString(VlanTagDelivery).
+inline const char* toString(CyclicSliceStatus s) {
+    switch (s) {
+    case CyclicSliceStatus::Ok:        return "ok";
+    case CyclicSliceStatus::Timeout:   return "timeout";
+    case CyclicSliceStatus::WkcError:  return "wkc-err";
+    case CyclicSliceStatus::Stale:     return "stale";
+    case CyclicSliceStatus::SendError: return "send-err";
+    case CyclicSliceStatus::None:
+    default:                           return "none";
+    }
+}
+
 /**
  * @brief How the kernel delivers 802.1Q tags to packet sockets on this
  *        NIC/driver — detected at startup by probeVlanTagDelivery().

@@ -503,55 +503,75 @@ EtherCAT::NetworkInterface* setupEncapsulation(
     std::unique_ptr<EtherCAT::VLANRouter>& routerStorage,
     const EncapsulationConfig& encapsulation,
     const char* tag) {
-    // 0. VLAN delivery probe — before any filter is attached and before
-    //    the poll thread is running.  A bogus-logical-address LRW is
-    //    forwarded around the whole segment unchanged, so a missing reply
-    //    means the bus is not a closed loop or the VID never reaches the
-    //    slaves — fail startup instead of spinning silently.  The detected
-    //    delivery mode prunes the dead leg out of every generated filter.
+    // 0. Wire probe — before any filter is attached and before the poll
+    //    thread is running.  A bogus-logical-address LRW is forwarded
+    //    around the whole segment unchanged, so the reply measures the
+    //    real round-trip — startCyclicLoop() sizes the collect deadline
+    //    from it.  Under VLAN encapsulation it additionally detects how
+    //    the kernel delivers the tag, which prunes the dead leg out of
+    //    every generated filter; a missing reply means the bus is not a
+    //    closed loop or the VID never reaches the slaves — fail startup
+    //    instead of spinning silently.  Untagged links only warn: the
+    //    probe may be refused on bare segments and RTT autosizing is a
+    //    convenience, not a correctness gate there.
     EtherCAT::VlanDeliveryHint delivery = EtherCAT::VlanDeliveryHint::Auto;
-    if (encapsulation.vlanActive()) {
-        const uint16_t probe_vid =
-            encapsulation.txVlan.value_or(
-                encapsulation.rxRange ? encapsulation.rxRange->start : 0);
+    int64_t probe_rtt_us = -1;
+    {
+        const uint16_t probe_vid = encapsulation.vlanActive()
+            ? encapsulation.txVlan.value_or(
+                  encapsulation.rxRange ? encapsulation.rxRange->start : 0)
+            : 0;
         const auto probe = EtherCAT::probeVlanTagDelivery(eth, probe_vid);
-        if (!probe || probe->delivery == EtherCAT::VlanTagDelivery::NoReply) {
-            TETHER_LOGE(tag, "VLAN probe: no reply to bogus-LRW within 10 ms "
-                             "(vid={}) — segment not a closed loop or VID "
-                             "never reaches the bus", probe_vid);
-            return nullptr;
+        const bool answered =
+            probe && probe->delivery != EtherCAT::VlanTagDelivery::NoReply;
+        if (answered) {
+            probe_rtt_us = probe->rtt_us;
+            TETHER_LOGI(tag, "wire probe: reply in {} us (vid={}, "
+                             "tag delivery = {}, tpid=0x{:04X})",
+                        probe->rtt_us, probe->vid,
+                        EtherCAT::toString(probe->delivery), probe->tpid);
         }
-        TETHER_LOGI(tag, "VLAN probe: reply in {} us, tag delivery = {} "
-                         "(vid={}, tpid=0x{:04X})",
-                    probe->rtt_us, EtherCAT::toString(probe->delivery),
-                    probe->vid, probe->tpid);
-        if (encapsulation.rxRange &&
-            !encapsulation.rxRange->contains(probe->vid)) {
-            TETHER_LOGW(tag, "VLAN probe: replies carry VID {} outside the "
-                             "configured RX range {}-{}",
-                        probe->vid, encapsulation.rxRange->start,
-                        encapsulation.rxRange->end);
+        if (encapsulation.vlanActive()) {
+            if (!answered) {
+                TETHER_LOGE(tag, "VLAN probe: no reply to bogus-LRW within "
+                                 "10 ms (vid={}) — segment not a closed "
+                                 "loop or VID never reaches the bus",
+                            probe_vid);
+                return nullptr;
+            }
+            if (encapsulation.rxRange &&
+                !encapsulation.rxRange->contains(probe->vid)) {
+                TETHER_LOGW(tag, "VLAN probe: replies carry VID {} outside "
+                                 "the configured RX range {}-{}",
+                            probe->vid, encapsulation.rxRange->start,
+                            encapsulation.rxRange->end);
+            }
+            delivery = EtherCAT::vlanDeliveryHint(probe->delivery);
+            if (delivery != EtherCAT::VlanDeliveryHint::Auto)
+                TETHER_LOGI(tag, "Generating filters for delivery mode '{}'",
+                            EtherCAT::toString(probe->delivery));
+        } else if (!answered) {
+            TETHER_LOGW(tag, "wire probe: no reply to bogus-LRW — cyclic "
+                             "RX budget falls back to the cycle-period "
+                             "default (segment not a closed loop?)");
         }
-        delivery = EtherCAT::vlanDeliveryHint(probe->delivery);
-        if (delivery != EtherCAT::VlanDeliveryHint::Auto)
-            TETHER_LOGI(tag, "Generating filters for delivery mode '{}'",
-                        EtherCAT::toString(probe->delivery));
 
-        // Feed encap + hint into the master's WireEncap so the cyclic
-        // datapath composes its socket-pair demux programs with the same
-        // knowledge (and bakes the TX tag into cyclic header templates).
+        // Feed encap + hint + measured RTT into the master's WireEncap:
+        // the cyclic datapath composes its socket-pair demux programs
+        // with the same knowledge, bakes the TX tag into cyclic header
+        // templates, and the loop sizes rx_budget_ns from the RTT.
         EtherCAT::WireEncap we;
-        we.tx_vlan       = encapsulation.txVlan.value_or(0);
-        we.rx_vlan_any   = encapsulation.rxAny;
-        if (encapsulation.rxRange) {
-            we.rx_vlan_lo = encapsulation.rxRange->start;
-            we.rx_vlan_hi = encapsulation.rxRange->end;
+        if (encapsulation.vlanActive()) {
+            we.tx_vlan     = encapsulation.txVlan.value_or(0);
+            we.rx_vlan_any = encapsulation.rxAny;
+            if (encapsulation.rxRange) {
+                we.rx_vlan_lo = encapsulation.rxRange->start;
+                we.rx_vlan_hi = encapsulation.rxRange->end;
+            }
         }
         we.delivery_hint = delivery;
-        // Feed the measured RTT through so startCyclicLoop() can size the
-        // collect deadline against reality instead of a fixed cap.
-        if (probe->rtt_us > 0)
-            we.wire_rtt_ns = static_cast<uint32_t>(probe->rtt_us) * 1000u;
+        if (probe_rtt_us > 0)
+            we.wire_rtt_ns = static_cast<uint32_t>(probe_rtt_us) * 1000u;
         master.setWireEncap(we);
     }
 
