@@ -1583,52 +1583,140 @@ TEST_F(RingChannelMemoryTest, DoubleReleaseClampedAtZero) {
     EXPECT_EQ(rxSlot(0)->tp_status & TP_STATUS_USER, 0u);
 }
 
-// Regression: the kernel pads each rx block to tp_block_size (a page
-// multiple) — when fpb*frame_size < block_size the tail of every block is
-// dead space.  Frames live at (i/fpb)*block_size + (i%fpb)*frame_size,
-// NOT i*frame_size.  A flat-indexed walk only ever sees the first block's
-// frames; the ring wedges full and every subsequent packet is dropped
-// (the "tp_drops climbs at the send rate" field failure).
-TEST(RingBlockedLayoutTest, FramesPastBlockPaddingAreFound) {
-    constexpr uint32_t kFrameSize = 1536, kBlockSize = 4096,
-                       kFpb = 2, kBlocks = 4, kN = kFpb * kBlocks;
-    std::vector<uint8_t> mem(kBlockSize * kBlocks, 0);
-    int sv[2];
-    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
-    auto ch = createCyclicRingChannelBlockedForMemory(
-        sv[0], 1, mem.data(), kFrameSize, kBlockSize, kFpb, kBlocks);
-    ASSERT_TRUE(ch);
+// ============================================================================
+// Blocked (padded) ring layout — the real kernel geometry
+// ============================================================================
+//
+// The kernel rounds tp_block_size up to a page multiple, so when
+// fpb*frame_size < block_size every block ends in dead padding and frame i
+// sits at (i/fpb)*block_size + (i%fpb)*frame_size.  A flat i*frame_size
+// walk only ever sees the first block's frames: the ring wedges full and
+// the kernel drops every subsequent packet — the field failure where
+// tp_drops climbed at exactly the cyclic send rate while rxPoll emitted
+// nothing.
 
-    auto kslot = [&](uint32_t i) -> tpacket2_hdr* {
+class RingChannelBlockedTest : public ::testing::Test {
+protected:
+    static constexpr uint32_t kFrameSize = 1536, kBlockSize = 4096,
+                              kFpb = 2, kRxBlocks = 4, kRxN = kFpb * kRxBlocks,
+                              kTxBlocks = 2, kTxN = kFpb * kTxBlocks;
+
+    static tpacket2_hdr* slotAt(uint8_t* mem, uint32_t i,
+                                uint32_t block_size = kBlockSize,
+                                uint32_t frame_size = kFrameSize) {
         return reinterpret_cast<tpacket2_hdr*>(
-            mem.data() + (i / kFpb) * kBlockSize + (i % kFpb) * kFrameSize);
-    };
-    const uint8_t payload[64] = {0x77};
-    for (uint32_t i = 0; i < kN; ++i) {
-        auto* h = kslot(i);
-        h->tp_mac = TPACKET2_HDRLEN;
-        h->tp_len = h->tp_snaplen = sizeof(payload);
+            mem + (i / kFpb) * block_size + (i % kFpb) * frame_size);
+    }
+
+    static void emitOn(tpacket2_hdr* h, const uint8_t* frame, uint16_t len) {
+        h->tp_mac     = TPACKET2_HDRLEN;
+        h->tp_net     = static_cast<uint16_t>(h->tp_mac + 14);
+        h->tp_len     = len;
+        h->tp_snaplen = len;
         std::memcpy(reinterpret_cast<uint8_t*>(h) + TPACKET2_HDRLEN,
-                    payload, sizeof(payload));
+                    frame, len);
         __sync_synchronize();
         __atomic_store_n(&h->tp_status, TP_STATUS_USER, __ATOMIC_RELEASE);
     }
 
-    CyclicFrameView v[kN];
-    ASSERT_EQ(ch->rxPoll(v, kN, 0), static_cast<int>(kN));
-    for (uint32_t i = 0; i < kN; ++i) {
+    tpacket2_hdr* rxSlot(uint32_t i) { return slotAt(rx_mem_.get(), i); }
+    tpacket2_hdr* txSlot(uint32_t i) { return slotAt(tx_mem_.get(), i); }
+    void emitRx(uint32_t i, const uint8_t* f, uint16_t len) {
+        emitOn(rxSlot(i), f, len);
+    }
+
+    void SetUp() override {
+        ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv_), 0);
+        rx_mem_ = std::make_unique<uint8_t[]>(kBlockSize * kRxBlocks);
+        tx_mem_ = std::make_unique<uint8_t[]>(kBlockSize * kTxBlocks);
+        std::memset(rx_mem_.get(), 0, kBlockSize * kRxBlocks);
+        std::memset(tx_mem_.get(), 0, kBlockSize * kTxBlocks);
+        ch_ = createCyclicRingChannelForMemory(
+            sv_[0], 1,
+            rx_mem_.get(), kFrameSize, kRxN,
+            tx_mem_.get(), kFrameSize, kTxN, 0,
+            kBlockSize, kFpb, kBlockSize, kFpb);
+        ASSERT_TRUE(ch_);
+    }
+    void TearDown() override {
+        ch_.reset();
+        ::close(sv_[0]); ::close(sv_[1]);
+    }
+
+    int sv_[2] = {-1, -1};
+    std::unique_ptr<uint8_t[]> rx_mem_, tx_mem_;
+    std::unique_ptr<EtherCAT::ICyclicChannel> ch_;
+};
+
+TEST_F(RingChannelBlockedTest, FramesPastBlockPaddingAreFound) {
+    const uint8_t payload[64] = {0x77};
+    for (uint32_t i = 0; i < kRxN; ++i)
+        emitRx(i, payload, sizeof(payload));
+
+    CyclicFrameView v[kRxN];
+    ASSERT_EQ(ch_->rxPoll(v, kRxN, 0), static_cast<int>(kRxN));
+    for (uint32_t i = 0; i < kRxN; ++i) {
         EXPECT_EQ(v[i].cookie, i);
         EXPECT_EQ(v[i].frame_len, sizeof(payload));
         EXPECT_EQ(v[i].frame[0], 0x77);
     }
     // Second walk retires the consumed slots back to the kernel.
-    EXPECT_EQ(ch->rxPoll(v, kN, 0), 0);
-    for (uint32_t i = 0; i < kN; ++i)
-        EXPECT_EQ(kslot(i)->tp_status & TP_STATUS_USER, 0u) << "slot " << i;
-    EXPECT_FALSE(ch->rxPending());
+    EXPECT_EQ(ch_->rxPoll(v, kRxN, 0), 0);
+    for (uint32_t i = 0; i < kRxN; ++i)
+        EXPECT_EQ(rxSlot(i)->tp_status & TP_STATUS_USER, 0u) << "slot " << i;
+    EXPECT_FALSE(ch_->rxPending());
+}
 
-    ch.reset();
-    ::close(sv[0]); ::close(sv[1]);
+TEST_F(RingChannelBlockedTest, PendingSeesFrameInLaterBlock) {
+    const uint8_t payload[64] = {0x55};
+    emitRx(6, payload, sizeof(payload));   // block 3, second frame
+    EXPECT_TRUE(ch_->rxPending());
+    CyclicFrameView v[4];
+    ASSERT_EQ(ch_->rxPoll(v, 4, 0), 1);
+    EXPECT_EQ(v[0].cookie, 6u);
+}
+
+TEST_F(RingChannelBlockedTest, HoldPinsFrameInLaterBlock) {
+    const uint8_t payload[64] = {0x42};
+    for (uint32_t i = 0; i < kRxN; ++i)
+        emitRx(i, payload, sizeof(payload));
+    CyclicFrameView v[kRxN];
+    ASSERT_EQ(ch_->rxPoll(v, kRxN, 0), static_cast<int>(kRxN));
+    ch_->rxHold(5);                        // cookie 5 → block 2, frame 1
+    EXPECT_EQ(ch_->rxPoll(v, kRxN, 0), 0); // retire sweep
+    for (uint32_t i = 0; i < kRxN; ++i) {
+        const bool user = (rxSlot(i)->tp_status & TP_STATUS_USER) != 0;
+        EXPECT_EQ(user, i == 5) << "slot " << i;
+    }
+    ch_->rxRelease(5);
+    EXPECT_EQ(ch_->rxPoll(v, kRxN, 0), 0); // retires on next walk
+    EXPECT_EQ(rxSlot(5)->tp_status & TP_STATUS_USER, 0u);
+}
+
+TEST_F(RingChannelBlockedTest, TxAcquireFindsSlotsPastPadding) {
+    constexpr uint32_t kTxOff = TPACKET2_HDRLEN - sizeof(struct sockaddr_ll);
+    for (uint32_t i = 0; i < kTxN; ++i) {
+        uint8_t* dst = ch_->txAcquire();
+        ASSERT_NE(dst, nullptr) << "slot " << i;
+        EXPECT_EQ(dst, reinterpret_cast<uint8_t*>(txSlot(i)) + kTxOff);
+        ASSERT_TRUE(ch_->txCommitFrame(60));
+        EXPECT_EQ(txSlot(i)->tp_status,
+                  static_cast<uint32_t>(TP_STATUS_SEND_REQUEST));
+    }
+    EXPECT_EQ(ch_->txAcquire(), nullptr);  // ring full
+}
+
+// Fill→drain cycles across several blocks: the walk must keep finding
+// frames after wraparound, not just on the first pass.
+TEST_F(RingChannelBlockedTest, RepeatedFillDrainCycles) {
+    const uint8_t payload[64] = {0x99};
+    CyclicFrameView v[4];
+    for (int round = 0; round < 6; ++round) {
+        emitRx(round % kRxN, payload, sizeof(payload));
+        ASSERT_EQ(ch_->rxPoll(v, 4, 0), 1) << "round " << round;
+        EXPECT_EQ(v[0].cookie, static_cast<uint32_t>(round % kRxN));
+        EXPECT_EQ(ch_->rxPoll(v, 4, 0), 0);   // retire consumed slot
+    }
 }
 
 TEST_F(RingChannelMemoryTest, CursorResumesAfterLastEmitted) {

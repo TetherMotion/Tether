@@ -28,6 +28,7 @@
 #include "common/ExampleHelpers.hpp"
 #include "logging/Logger.hpp"
 #include "tether/ethercat/CBPFProgramFactory.hpp"
+#include "tether/ethercat/CyclicChannel.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -591,6 +592,113 @@ const char* auxdataTest(int ifindex, int tx_fd, const uint8_t* frame,
     return "ok";
 }
 
+/**
+ * Cyclic channel functional test — exercises the PRODUCTION RX/TX ring
+ * path end-to-end: createCyclicChannel() sets up the real TPACKET rings +
+ * composed cyclic filter, probes go out via txSendParts() and replies are
+ * collected via rxPoll() — the same walk that runs in the cyclic
+ * executive, including per-block padding.
+ *
+ * Sends a burst larger than one RX block's frame capacity so replies span
+ * many blocks: a flat-indexed walk (the field bug) would only ever see the
+ * first block's slots, wedge the ring, and let tp_drops climb.  The test
+ * therefore FAILS if replies are missing or kernelRxDrops() reports drops.
+ */
+void runCyclicChannelTest(const ProbeConfig& cfg,
+                          const FilterPrograms& progs) {
+    printf("\n=== cyclic channel functional test (production RX/TX) ===\n");
+
+    EtherCAT::CyclicChannelConfig cc;
+    cc.ifindex    = cfg.ifindex;
+    cc.wire_mode  = EtherCAT::CyclicWireMode::PacketRing;   // fail loudly
+    cc.accept_prog     = progs.cyclic.data();
+    cc.accept_prog_len = progs.cyclic.size();
+    auto ch = EtherCAT::createCyclicChannel(cc);
+    if (!ch) {
+        printf("createCyclicChannel failed (ring mode unavailable? "
+               "missing CAP_NET_RAW?)\n");
+        return;
+    }
+    printf("backend=%s zero-copy=%s fd=%d\n",
+           ch->backendName(), ch->zeroCopy() ? "yes" : "no", ch->fd());
+
+    // Bogus-LRW probe at cyclic idx 0xF8 — split into the parts form the
+    // channel expects: header = eth(+vlan) + ecat + datagram hdr, payload
+    // and WKC appended by txSendParts.
+    uint8_t  frame[1600];
+    uint8_t  payload[32] = {};
+    const uint16_t dlen    = sizeof(payload);
+    const uint16_t hdr_len = static_cast<uint16_t>(
+        (cfg.vlan ? 18 : 14) + 2 + 10);
+    buildFrame(frame, cfg.srcMac, cfg.vlan, kCmdLRW, 0xF8, 0xDEADBEEFu,
+               payload, dlen);
+    EtherCAT::CyclicTxParts parts{frame, hdr_len,
+                                  frame + hdr_len, dlen, 0};
+
+    const auto idx_of = [](const EtherCAT::CyclicFrameView& v) -> int {
+        // Stripped-tag reply → idx at 17; inline tag (self-echo) → 21.
+        const size_t off =
+            (v.frame_len > 14 && v.frame[12] == 0x81 &&
+             v.frame[13] == 0x00) ? 21 : 17;
+        return v.frame_len > off ? v.frame[off] : -1;
+    };
+
+    // Burst: replies arrive after ~0.5 ms RTT while we keep sending, so
+    // they pile into the ring across multiple blocks before we drain.
+    constexpr int kBurst = 64;   // fpb=2 → spans ~32 ring blocks
+    int sent = 0, replies = 0, other_idx = 0;
+    for (int i = 0; i < kBurst; ++i)
+        if (ch->txSendParts(parts)) ++sent; else break;
+    if (sent < kBurst)
+        printf("txSendParts failed after %d/%d sends\n", sent, kBurst);
+
+    // Drain until the ring stays empty for ~30 ms.
+    EtherCAT::CyclicFrameView views[32];
+    for (int quiet = 0; quiet < 3; ) {
+        const int n = ch->rxPoll(views, 32, 10'000'000);  // 10 ms
+        if (n <= 0) { ++quiet; continue; }
+        quiet = 0;
+        for (int i = 0; i < n; ++i)
+            if (idx_of(views[i]) == 0xF8) ++replies; else ++other_idx;
+    }
+    const uint64_t tp_drops   = ch->kernelRxDrops();
+    const uint64_t bank_drops = ch->droppedRx();
+
+    printf("burst=%d sent=%d replies=%d other_idx=%d "
+           "tp_drops=%llu bank_drops=%llu\n",
+           kBurst, sent, replies, other_idx,
+           static_cast<unsigned long long>(tp_drops),
+           static_cast<unsigned long long>(bank_drops));
+
+    // Hold/release on the live path: pin one reply, confirm a subsequent
+    // poll doesn't re-emit it, then release.
+    bool hold_ok = true;
+    if (ch->txSendParts(parts)) {
+        EtherCAT::CyclicFrameView v[4];
+        const int n = ch->rxPoll(v, 4, 50'000'000);       // 50 ms
+        if (n > 0) {
+            ch->rxHold(v[0].cookie);
+            // Walk must skip the held slot (no spurious re-emit, no wedge).
+            if (ch->rxPoll(v, 4, 20'000'000) < 0) hold_ok = false;
+            ch->rxRelease(v[0].cookie);
+        } else {
+            hold_ok = false;   // expected one more reply
+        }
+    }
+
+    // Verdict: every probe must come back exactly once with WKC=0 through
+    // the ring; drops mean slots were never walked (the indexing bug).
+    const char* verdict;
+    if (replies == 0 && sent == kBurst)
+        verdict = "WARN no replies — segment silent? ring RX unverified";
+    else if (replies == sent && tp_drops == 0 && hold_ok)
+        verdict = "PASS";
+    else
+        verdict = "FAIL replies/drop mismatch — ring walk suspect";
+    printf("hold/release: %s\nverdict: %s\n",
+           hold_ok ? "ok" : "FAILED", verdict);
+}
+
 /// Run the kernel packet-ring matrix: TX-ring drain, VLAN auxdata delivery,
 /// and composed-filter RX-ring tests.
 void runRingMatrix(const ProbeConfig& cfg, const FilterPrograms& progs,
@@ -638,6 +746,7 @@ int main(int argc, char** argv) {
 
     runReplyMatrix(cfg, progs, tx, dst);
     runRingMatrix(cfg, progs, tx);
+    runCyclicChannelTest(cfg, progs);
 
     ::close(tx);
     return 0;
