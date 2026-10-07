@@ -252,8 +252,10 @@ public:
      * real loss.
      */
     CyclicSliceHealth sliceHealth(uint8_t slice) const {
-        return slice < kMaxCyclicSlices ? slice_health_[slice]
-                                        : CyclicSliceHealth{};
+        return slice < kMaxCyclicSlices
+                   ? CyclicSliceHealth::unpack(__atomic_load_n(
+                         &slice_health_[slice], __ATOMIC_ACQUIRE))
+                   : CyclicSliceHealth{};
     }
 
     /// Health of every user-defined PDO-slice run, in (slice, run) order.
@@ -262,7 +264,8 @@ public:
         std::vector<CyclicSliceHealth> out;
         for (const auto& s : slices_)
             for (uint8_t r = 0; r < s.run_count; ++r)
-                out.push_back(s.runs[r].health);
+                out.push_back(CyclicSliceHealth::unpack(__atomic_load_n(
+                    &s.runs[r].health_packed, __ATOMIC_ACQUIRE)));
         return out;
     }
 
@@ -490,8 +493,9 @@ private:
     /// Expected-WKC per slice — kWkcUnknown = learn from first success
     /// (derived from the slave set by cyclicSend when a mapping is known).
     std::array<uint16_t, kMaxCyclicSlices> expected_wkc_{};
-    /// Last collect outcome per image slice — diagnostic snapshot.
-    std::array<CyclicSliceHealth, kMaxCyclicSlices> slice_health_{};
+    /// Last collect outcome per image slice — packed CyclicSliceHealth
+    /// words (single atomic load/store, never torn for readers).
+    std::array<uint64_t, kMaxCyclicSlices> slice_health_{};
     bool strict_wkc_{true};
 
     // ---- User PDO slices (cyclic thread only) ---------------------------
@@ -503,7 +507,7 @@ private:
         uint8_t  gen{0};                    ///< send generation expected
         uint8_t  sent{0};                   ///< datagram emitted this cycle
         uint16_t expected_wkc{kWkcUnknown}; ///< derived/learned WKC
-        CyclicSliceHealth health{};         ///< last collect outcome
+        uint64_t health_packed{0};          ///< packed CyclicSliceHealth
     };
     struct PDOSlice {
         std::array<PDOSliceRun, kMaxSliceRuns> runs{};

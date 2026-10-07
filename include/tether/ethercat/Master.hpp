@@ -650,11 +650,21 @@ public:
         uint32_t stale_responses    = 0;
         uint32_t send_errors        = 0;
         // --- channel level (real local loss) ---
-        uint64_t rx_bank_drops      = 0;
+        uint64_t rx_bank_drops      = 0;  ///< rxPoll couldn't emit (banks held)
+        /// Kernel-side drops on the cyclic socket (tp_drops share seen by
+        /// this caller) — frames that passed the filter but found no free
+        /// ring slot.  Rising while rx_bank_drops stays 0 = the ring
+        /// wasn't drained; rising together with wire_loss = real loss.
+        uint64_t kernel_rx_drops    = 0;
         // --- transport level (informational — correctly discarded strays) ---
         uint64_t unrouted_datagrams = 0;
         uint64_t rx_queue_overflow  = 0;
         // --- per-slice detail ---
+        /// Slices whose last outcome was Stale for many consecutive
+        /// cycles — the reply RTT exceeds one whole period (each cycle
+        /// only ever sees the previous cycle's echo).  Distinct from a
+        /// transient stale, which the gen-guard retry absorbs.
+        uint8_t slices_stuck_stale  = 0;
         uint8_t image_slice_count   = 0;
         std::array<CyclicSliceHealth, kNumCyclicSlots> image_slices{};
         std::vector<CyclicSliceHealth> pdo_slice_health;

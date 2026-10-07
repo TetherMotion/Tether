@@ -254,7 +254,9 @@ enum class CyclicSliceStatus : uint8_t {
 };
 
 /// Per-slice cyclic health snapshot — written by the cyclic thread during
-/// collect, read (possibly torn but plausible) by diagnostic callers.
+/// collect, read by diagnostic callers.  The runtime stores it packed in
+/// a single atomic word (pack()/unpack()) so readers never see torn
+/// fields.
 struct CyclicSliceHealth {
     uint16_t expected_wkc = 0xFFFF;  ///< LogicalAddressManager::kWkcUnknown
     uint16_t last_wkc     = 0;       ///< WKC of the last reply that arrived
@@ -262,6 +264,28 @@ struct CyclicSliceHealth {
     /// Consecutive non-Ok cycles on this slice — a slowly flapping slave
     /// shows up here even when cumulative counters look fine.
     uint32_t consecutive_failures = 0;
+
+    /// Pack the whole snapshot into a single word so the cyclic thread
+    /// can publish it with one atomic store and readers never see a torn
+    /// mix of fields.  Layout: expected[0:16) last[16:32) status[32:40)
+    /// failures[40:64) — failures saturate at 2^24-1.
+    uint64_t pack() const {
+        const uint64_t f = consecutive_failures > 0xFFFFFFu
+                               ? 0xFFFFFFu : consecutive_failures;
+        return uint64_t(expected_wkc) |
+               (uint64_t(last_wkc) << 16) |
+               (uint64_t(static_cast<uint8_t>(last_status)) << 32) |
+               (f << 40);
+    }
+    static CyclicSliceHealth unpack(uint64_t v) {
+        CyclicSliceHealth h;
+        h.expected_wkc = static_cast<uint16_t>(v);
+        h.last_wkc     = static_cast<uint16_t>(v >> 16);
+        h.last_status  = static_cast<CyclicSliceStatus>(
+                             static_cast<uint8_t>(v >> 32));
+        h.consecutive_failures = static_cast<uint32_t>(v >> 40);
+        return h;
+    }
 };
 
 /**
@@ -300,6 +324,12 @@ struct WireEncap {
     /// Shrinks the composed cyclic/async demux programs by dropping the
     /// leg that can never execute.
     VlanDeliveryHint delivery_hint = VlanDeliveryHint::Auto;
+
+    /// Measured wire round-trip (ns) from the startup probe — 0 when
+    /// unmeasured.  startCyclicLoop() auto-sizes the collect deadline
+    /// (CyclicLoopConfig::rx_budget_ns == 0) from this with headroom, and
+    /// warns when it cannot fit the configured cycle period.
+    uint32_t wire_rtt_ns = 0;
 
     /// True when tagged frames are part of the RX filter.
     bool tagged()   const { return rx_vlan_any || rx_vlan_lo != 0; }
