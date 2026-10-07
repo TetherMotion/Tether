@@ -668,6 +668,12 @@ public:
         uint8_t image_slice_count   = 0;
         std::array<CyclicSliceHealth, kNumCyclicSlots> image_slices{};
         std::vector<CyclicSliceHealth> pdo_slice_health;
+
+        /// Multi-line human-readable dump for failure logging: one
+        /// counters line, a stuck-stale warning line when any slice only
+        /// ever sees the previous cycle's echo, then one line per slice
+        /// whose last outcome was not Ok.  Allocation — non-RT callers.
+        std::string describe() const;
     };
     CyclicHealth cyclicHealth() const;
 

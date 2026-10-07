@@ -26,6 +26,7 @@
 #include <chrono>
 #include <algorithm>
 #include <cstring>
+#include <format>
 #include <inttypes.h>
 #ifdef __linux__
 #include <sys/eventfd.h>
@@ -468,6 +469,37 @@ Master::CyclicHealth Master::cyclicHealth() const
     h.unrouted_datagrams = unrouted_datagrams_.load(std::memory_order_relaxed);
     h.rx_queue_overflow  = rx_queue_overflow_.load(std::memory_order_relaxed);
     return h;
+}
+
+std::string Master::CyclicHealth::describe() const
+{
+    std::string out = std::format(
+        "cycles={} ok={} wire_loss={} wkc_err={} stale={} send_err={} "
+        "rx_bank_drops={} tp_drops={} unrouted={} rxq_overflow={} "
+        "missed_deadlines={}",
+        cycles, exchanges_ok, wire_loss, wkc_errors, stale_responses,
+        send_errors, rx_bank_drops, kernel_rx_drops, unrouted_datagrams,
+        rx_queue_overflow, missed_deadlines);
+    if (slices_stuck_stale)
+        out += std::format(
+            "\n  {} slice(s) stuck Stale — wire RTT exceeds a full "
+            "cycle period; every cycle only sees the previous echo",
+            slices_stuck_stale);
+    auto slice_line = [&out](const char* kind, uint32_t i,
+                             const CyclicSliceHealth& s) {
+        if (s.last_status == CyclicSliceStatus::Ok &&
+            s.consecutive_failures == 0)
+            return;
+        out += std::format("\n  {} slice {}: status={} wkc={}/{} "
+                           "consec_fail={}",
+                           kind, i, toString(s.last_status), s.last_wkc,
+                           s.expected_wkc, s.consecutive_failures);
+    };
+    for (uint8_t i = 0; i < image_slice_count; ++i)
+        slice_line("image", i, image_slices[i]);
+    for (uint32_t i = 0; i < pdo_slice_health.size(); ++i)
+        slice_line("pdo", i, pdo_slice_health[i]);
+    return out;
 }
 
 bool Master::suspendCyclicExchange(uint32_t timeout_us)
