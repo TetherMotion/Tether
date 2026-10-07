@@ -695,6 +695,31 @@ SlaveError Slave::transitionToOp() {
             (attempt % 50) == 49) {
             TETHER_LOGI(TAG, "{}: Re-issuing OP request (still 0x{:02X})",
                         logPrefix().c_str(), state);
+
+            // A latched SM watchdog trigger (status bit5) blocks the
+            // SAFE_OP->OP transition with AL code 0 — it may have expired
+            // in the window between SM activation and the first cyclic
+            // frame.  Toggling the SM activate bit re-arms the channel
+            // and clears the trigger so the slave accepts OP.
+            for (uint8_t sm = 2; sm < 4; ++sm) {
+                const uint16_t base =
+                    static_cast<uint16_t>(0x0800 + sm * 8);
+                uint8_t stat = 0;
+                if (master_->readRegister(index_, base + 5, &stat, 1, 200) &&
+                    (stat & 0x20u)) {
+                    TETHER_LOGW(TAG, "{}: SM{} watchdog trigger latched "
+                                     "(stat=0x{:02X}) — resetting channel",
+                                logPrefix().c_str(), sm, stat);
+                    const uint8_t off = 0x00, on = 0x01;
+                    master_->writeRegister(SlaveAddress(index_),
+                                           static_cast<uint16_t>(base + 6),
+                                           &off, 1, 200);
+                    master_->writeRegister(SlaveAddress(index_),
+                                           static_cast<uint16_t>(base + 6),
+                                           &on, 1, 200);
+                }
+            }
+
             master_->requestSlaveApplicationLayerState(
                 index_, static_cast<uint8_t>(SlaveState::OP) | 0x10);
 
