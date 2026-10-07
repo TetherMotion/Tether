@@ -211,6 +211,15 @@ public:
     /// also lets tests observe collect-task ordering within a phase.
     std::atomic<uint64_t> collect_calls_{0};
 
+    /// Masked/single wait invocations — proves the cyclic thread is
+    /// actually reaching the datapath wait paths.
+    std::atomic<uint64_t> wait_calls_{0};
+    /// Frames dispatched from rxPoll (drain + in-wait polls) — proves the
+    /// ring is being consumed and at what rate.
+    std::atomic<uint64_t> dispatch_frames_{0};
+    /// Frames dropped by dispatch because their idx maps to no slot.
+    std::atomic<uint64_t> dispatch_unrouted_{0};
+
     /// Per-slot send generation (lenFlags res-bit 13), toggled on every
     /// send on that index — written/read on the cyclic thread only.
     std::array<uint8_t, kNumFastSlots> slot_gen_{};

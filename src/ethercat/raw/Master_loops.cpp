@@ -462,9 +462,15 @@ Master::CyclicHealth Master::cyclicHealth() const
                 stuck > 0xFF ? 0xFF : static_cast<uint8_t>(stuck);
         }
     }
-    if (datapath_ && datapath_->channel_) {
-        h.rx_bank_drops   = datapath_->channel_->droppedRx();
-        h.kernel_rx_drops = datapath_->channel_->kernelRxDrops();
+    if (datapath_) {
+        h.collect_calls     = datapath_->collect_calls_.load(std::memory_order_relaxed);
+        h.wait_calls        = datapath_->wait_calls_.load(std::memory_order_relaxed);
+        h.dispatch_frames   = datapath_->dispatch_frames_.load(std::memory_order_relaxed);
+        h.dispatch_unrouted = datapath_->dispatch_unrouted_.load(std::memory_order_relaxed);
+        if (datapath_->channel_) {
+            h.rx_bank_drops   = datapath_->channel_->droppedRx();
+            h.kernel_rx_drops = datapath_->channel_->kernelRxDrops();
+        }
     }
     h.unrouted_datagrams = unrouted_datagrams_.load(std::memory_order_relaxed);
     h.rx_queue_overflow  = rx_queue_overflow_.load(std::memory_order_relaxed);
@@ -476,10 +482,12 @@ std::string Master::CyclicHealth::describe() const
     std::string out = std::format(
         "cycles={} ok={} wire_loss={} wkc_err={} stale={} send_err={} "
         "rx_bank_drops={} tp_drops={} unrouted={} rxq_overflow={} "
-        "missed_deadlines={}",
+        "missed_deadlines={} collect_calls={} wait_calls={} "
+        "dispatched={} disp_unrouted={}",
         cycles, exchanges_ok, wire_loss, wkc_errors, stale_responses,
         send_errors, rx_bank_drops, kernel_rx_drops, unrouted_datagrams,
-        rx_queue_overflow, missed_deadlines);
+        rx_queue_overflow, missed_deadlines, collect_calls, wait_calls,
+        dispatch_frames, dispatch_unrouted);
     if (slices_stuck_stale)
         out += std::format(
             "\n  {} slice(s) stuck Stale — wire RTT exceeds a full "

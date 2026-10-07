@@ -352,6 +352,7 @@ void CyclicDatapath::composeHeader(uint8_t* frame, Command cmd, uint8_t slot,
 void CyclicDatapath::dispatchFrame(const CyclicFrameView& v)
 {
     using namespace Raw;
+    dispatch_frames_.fetch_add(1, std::memory_order_relaxed);
     const uint8_t* f    = v.frame;
     const size_t   flen = v.frame_len;
     constexpr size_t kEcatHdr = sizeof(EtherCAT::EthernetHeader);       // 14
@@ -414,10 +415,16 @@ void CyclicDatapath::dispatchFrame(const CyclicFrameView& v)
         const uint16_t wkc = le16_to_host(
             *reinterpret_cast<const uint16_t*>(f + data_off + dl));
 
-        channel_->rxHold(v.cookie);
-        publishView(idx, static_cast<Command>(cmd), adp, ado,
-                              f + data_off, dl, wkc, v.cookie, v.stamp_ns,
-                              static_cast<uint8_t>((len_flags >> 13) & 0x1u));
+        // Hold only slots we can publish — an idx in the 0xF0..0xF7 gap
+        // (fastpath but no slot) would leak the block pin forever.
+        if (isSlotIdx(idx)) {
+            channel_->rxHold(v.cookie);
+            publishView(idx, static_cast<Command>(cmd), adp, ado,
+                                  f + data_off, dl, wkc, v.cookie, v.stamp_ns,
+                                  static_cast<uint8_t>((len_flags >> 13) & 0x1u));
+        } else {
+            dispatch_unrouted_.fetch_add(1, std::memory_order_relaxed);
+        }
         rem -= dgt; off += dgt;
         if (!more) break;
     }
@@ -478,6 +485,8 @@ bool CyclicDatapath::waitViewImpl(uint8_t fast_idx, uint64_t token,
     auto& clock = Tether::Platform::Clock::instance();
     const int64_t deadline_ns =
         clock.getMicroseconds() * 1000 + static_cast<int64_t>(timeout_ns);
+
+    wait_calls_.fetch_add(1, std::memory_order_relaxed);
 
     // Drain any ring-resident frames BEFORE the fast-path check: the
     // deposit only happens here, so a frame sitting in the ring would
@@ -703,6 +712,8 @@ uint32_t CyclicDatapath::waitMaskImpl(uint32_t slot_mask,
             }
         }
     };
+
+    wait_calls_.fetch_add(1, std::memory_order_relaxed);
 
     // Deposit any ring-resident frames first — replies that landed past
     // an earlier deadline become visible here instead of wedging the ring.
