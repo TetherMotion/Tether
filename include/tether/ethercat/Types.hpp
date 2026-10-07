@@ -235,6 +235,51 @@ inline constexpr bool isSlotIdx(uint8_t idx) {
 }
 
 /**
+ * @brief Outcome of the most recent collect of one cyclic datagram.
+ *
+ * Distinguishes the failure classes a "cycle failed" bool cannot carry:
+ * a datagram that never came back (Timeout — wire loss / dead slave /
+ * filter killed the reply) is a different fault from one that returned
+ * with a bad working counter (WkcError — slave dropped out of OP, FMMU
+ * hole, partial processing) or from only a previous-generation echo
+ * arriving (Stale — a reply that survived its own cycle's deadline).
+ */
+enum class CyclicSliceStatus : uint8_t {
+    None,      ///< No collect has run yet
+    Ok,        ///< Reply in time, WKC valid
+    Timeout,   ///< No reply before the cycle deadline — packet didn't circulate
+    WkcError,  ///< Reply arrived but WKC == 0 or != expected
+    Stale,     ///< Only a previous-generation echo arrived this cycle
+    SendError, ///< The datagram could not be sent this cycle
+};
+
+/// Per-slice cyclic health snapshot — written by the cyclic thread during
+/// collect, read (possibly torn but plausible) by diagnostic callers.
+struct CyclicSliceHealth {
+    uint16_t expected_wkc = 0xFFFF;  ///< LogicalAddressManager::kWkcUnknown
+    uint16_t last_wkc     = 0;       ///< WKC of the last reply that arrived
+    CyclicSliceStatus last_status = CyclicSliceStatus::None;
+    /// Consecutive non-Ok cycles on this slice — a slowly flapping slave
+    /// shows up here even when cumulative counters look fine.
+    uint32_t consecutive_failures = 0;
+};
+
+/**
+ * @brief How the kernel delivers 802.1Q tags to packet sockets on this
+ *        NIC/driver — detected at startup by probeVlanTagDelivery().
+ *
+ * Used to prune dead legs from generated cBPF programs: a NIC that always
+ * strips the tag into skb auxdata never produces the inline layout (and
+ * vice versa), so half the generated program is unreachable on any given
+ * machine.
+ */
+enum class VlanDeliveryHint : uint8_t {
+    Auto,         ///< delivery unknown — emit legs for both (default, safe)
+    StrippedOnly, ///< kernel strips tags into auxdata — no inline-tag leg
+    InlineOnly,   ///< kernel keeps tags inline — no SKF_AD_VLAN_* loads
+};
+
+/**
  * @brief Wire encapsulation descriptor for the cyclic datapath.
  *
  * A distilled copy of the application's encapsulation settings (the
@@ -250,6 +295,11 @@ struct WireEncap {
     uint16_t rx_vlan_lo  = 0;     ///< Accepted RX VID range; 0/0 = untagged
     uint16_t rx_vlan_hi  = 0;
     bool     rx_vlan_any = false; ///< Accept any tagged EtherCAT frame
+
+    /// Detected tag delivery for this NIC — set from probeVlanTagDelivery.
+    /// Shrinks the composed cyclic/async demux programs by dropping the
+    /// leg that can never execute.
+    VlanDeliveryHint delivery_hint = VlanDeliveryHint::Auto;
 
     /// True when tagged frames are part of the RX filter.
     bool tagged()   const { return rx_vlan_any || rx_vlan_lo != 0; }

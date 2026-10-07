@@ -158,13 +158,19 @@ void logEncapsulationConfig(const EncapsulationConfig& config, const char* tag);
 /// Build the kernel socket-filter program matching @p config — untagged
 /// EtherCAT (+any-VID tagged) for raw mode, VID-restricted for vlan mode,
 /// plus EtherCAT-over-UDP when enabled.  Empty program = attach nothing.
-std::vector<EtherCAT::CBPFInsn> buildEncapsulationBpfProgram(const EncapsulationConfig& config);
+/// @p delivery prunes the unreachable VLAN leg when probeVlanTagDelivery()
+/// determined how this NIC presents tags (Auto = emit both legs).
+std::vector<EtherCAT::CBPFInsn> buildEncapsulationBpfProgram(
+    const EncapsulationConfig& config,
+    EtherCAT::VlanDeliveryHint delivery = EtherCAT::VlanDeliveryHint::Auto);
 
 /// Attach the encapsulation filter to the Ethernet device's native socket
 /// (SO_ATTACH_FILTER on Linux; soft-fails with a warning).
 void attachEncapsulationBpfFilter(EtherCAT::HAL::IEthernet& eth,
                                   const EncapsulationConfig& config,
-                                  const char* tag);
+                                  const char* tag,
+                                  EtherCAT::VlanDeliveryHint delivery =
+                                      EtherCAT::VlanDeliveryHint::Auto);
 
 /**
  * @brief One-call encapsulation setup for a host-side EtherCAT interface.

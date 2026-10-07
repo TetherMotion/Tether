@@ -169,6 +169,14 @@ std::vector<CBPFInsn> CBPFProgramFactory::build(const CBPFSpec& spec) {
     if (!spec.untagged_ethercat && !spec.untagged_udp && !tagged)
         return {};   // spec accepts nothing
 
+    // Delivery hint: prune the legs that cannot execute on this NIC.
+    //   inline_leg  — [12] ever carries a tag TPID (no kernel stripping)
+    //   auxdata_leg — SKF_AD_VLAN_* loads can ever report a stripped tag
+    const bool inline_leg =
+        tagged && spec.vlan_delivery != VlanDeliveryHint::StrippedOnly;
+    const bool auxdata_leg =
+        tagged && spec.vlan_delivery != VlanDeliveryHint::InlineOnly;
+
     Asm a;
     const int l_accept = a.label(), l_reject = a.label();
     const int l_tag    = a.label();   // inline 802.1Q header at [12]
@@ -212,7 +220,7 @@ std::vector<CBPFInsn> CBPFProgramFactory::build(const CBPFSpec& spec) {
     // stripped into skb auxdata on RX.  The two wire legs below consult
     // SKF_AD_VLAN_TAG_* to tell those apart.
     a.stmt(cbpf::LD | cbpf::H | cbpf::ABS, kEthTypeOff);
-    if (tagged) {
+    if (inline_leg) {
         c = a.label();
         a.jump(cbpf::JMP | cbpf::JEQ | cbpf::K, spec.vlan_tpid, l_tag, c);
         a.mark(c);
@@ -231,7 +239,7 @@ std::vector<CBPFInsn> CBPFProgramFactory::build(const CBPFSpec& spec) {
     a.ja(l_reject);
 
     // --- inline 802.1Q path -------------------------------------------------
-    if (tagged) {
+    if (inline_leg) {
         a.mark(l_tag);
         a.stmt(cbpf::LD | cbpf::H | cbpf::ABS, kVlanTciOff);
         a.stmt(cbpf::ALU | cbpf::AND | cbpf::K, kVidMask);   // A = VID
@@ -263,6 +271,11 @@ std::vector<CBPFInsn> CBPFProgramFactory::build(const CBPFSpec& spec) {
         a.mark(l_wire);
         if (unt_ok && tag_ok && !spec.vlan_range) {
             a.ja(l_handler);        // every tag state is acceptable
+            return;
+        }
+        if (!auxdata_leg) {
+            // Kernel never strips: a wire leg frame is genuinely untagged.
+            a.ja(unt_ok ? l_handler : l_reject);
             return;
         }
         const int l_notag = a.label();
@@ -299,7 +312,7 @@ std::vector<CBPFInsn> CBPFProgramFactory::build(const CBPFSpec& spec) {
             emitIdxCheck(a, spec, kFirstIdxOff, spec.first_idx_exclude,
                          l_accept, l_reject);
         }
-        if (tagged && spec.tagged_ethercat) {
+        if (inline_leg && spec.tagged_ethercat) {
             a.mark(l_tecat_idx);
             emitIdxCheck(a, spec, kFirstIdxOffTagged,
                          spec.first_idx_exclude, l_accept, l_reject);
@@ -311,7 +324,7 @@ std::vector<CBPFInsn> CBPFProgramFactory::build(const CBPFSpec& spec) {
         a.mark(l_udp14);
         emitUdpCheck(a, 14, spec.udp_port, l_accept, l_reject);
     }
-    if (tagged && spec.tagged_udp) {
+    if (inline_leg && spec.tagged_udp) {
         a.mark(l_tudp);
         emitUdpCheck(a, 18, spec.udp_port, l_accept, l_reject);
     }

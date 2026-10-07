@@ -645,6 +645,100 @@ TEST(FirstIdxRangeTest, StrippedTagLegUsesUntaggedOffset) {
     EXPECT_FALSE(acceptedAux(prog, ecatIdxFrame(0xE0)));       // no tag
 }
 
+// ============================================================================
+// CBPFSpec::vlan_delivery — prune the leg that can never execute
+//
+// probeVlanTagDelivery() determines at startup whether the NIC delivers
+// VLAN tags inline in the frame bytes or stripped into skb auxdata.  The
+// hint drops the unreachable half of the generated program.
+// ============================================================================
+
+namespace {
+
+bool hasAuxLoad(const std::vector<CBPFInsn>& prog) {
+    for (const auto& i : prog)
+        if (i.code == (cbpf::LD | cbpf::W | cbpf::ABS) && i.k >= kSkfAdOff)
+            return true;
+    return false;
+}
+
+CBPFSpec vlanOnlySpec(VlanDeliveryHint hint) {
+    CBPFSpec s{};
+    s.untagged_ethercat = false;
+    s.tagged_ethercat   = true;
+    s.vlan_range        = CBPFVlanRange{1999, 1999};
+    s.vlan_delivery     = hint;
+    return s;
+}
+
+} // namespace
+
+TEST(VlanDeliveryHintTest, StrippedOnlyRejectsInlineTag) {
+    const auto prog = CBPFProgramFactory::build(
+        vlanOnlySpec(VlanDeliveryHint::StrippedOnly));
+    ASSERT_FALSE(prog.empty());
+
+    // Inline-tag frames can never appear on this NIC — reject them.
+    EXPECT_FALSE(accepted(prog, vlanFrame(1999, kEtherTypeEtherCAT)));
+    // Stripped-tag frames still pass through the auxdata leg.
+    const auto pkt = ethFrame(kEtherTypeEtherCAT, ecatPayload());
+    EXPECT_TRUE(acceptedAux(prog, pkt, 1999));
+    EXPECT_FALSE(acceptedAux(prog, pkt, 2000));      // wrong VID
+    EXPECT_FALSE(acceptedAux(prog, pkt));            // untagged
+    // Smaller than the both-legs program.
+    EXPECT_LT(prog.size(),
+              CBPFProgramFactory::build(vlanOnlySpec(VlanDeliveryHint::Auto))
+                  .size());
+}
+
+TEST(VlanDeliveryHintTest, InlineOnlyEmitsNoAuxLoads) {
+    const auto prog = CBPFProgramFactory::build(
+        vlanOnlySpec(VlanDeliveryHint::InlineOnly));
+    ASSERT_FALSE(prog.empty());
+    EXPECT_FALSE(hasAuxLoad(prog));
+
+    EXPECT_TRUE(accepted(prog, vlanFrame(1999, kEtherTypeEtherCAT)));
+    EXPECT_FALSE(accepted(prog, vlanFrame(2000, kEtherTypeEtherCAT)));
+    EXPECT_FALSE(accepted(prog, ethFrame(kEtherTypeEtherCAT)));
+    // A stripped frame is impossible on this NIC; if one showed up the
+    // wire leg treats it as untagged and rejects (unt_ok == false).
+    EXPECT_FALSE(acceptedAux(prog, ethFrame(kEtherTypeEtherCAT), 1999));
+}
+
+TEST(VlanDeliveryHintTest, AutoKeepsBothLegs) {
+    const auto prog = CBPFProgramFactory::build(
+        vlanOnlySpec(VlanDeliveryHint::Auto));
+    ASSERT_FALSE(prog.empty());
+    EXPECT_TRUE(hasAuxLoad(prog));
+    EXPECT_TRUE(accepted(prog, vlanFrame(1999, kEtherTypeEtherCAT)));
+    EXPECT_TRUE(acceptedAux(prog, ethFrame(kEtherTypeEtherCAT), 1999));
+}
+
+TEST(VlanDeliveryHintTest, HintsComposeWithIdxDemux) {
+    // The production VLAN cyclic/async programs with a delivery hint:
+    // accept/reject semantics are unchanged, only the dead leg is gone.
+    for (auto hint : {VlanDeliveryHint::StrippedOnly,
+                      VlanDeliveryHint::InlineOnly}) {
+        auto s = fastpathVlanSpec();
+        s.vlan_delivery = hint;
+        const auto prog = CBPFProgramFactory::build(s);
+        ASSERT_FALSE(prog.empty());
+        const auto aux_frame = ecatIdxFrame(0xE0);   // untagged layout + aux
+
+        if (hint == VlanDeliveryHint::StrippedOnly) {
+            EXPECT_TRUE(acceptedAux(prog, aux_frame, 1999));
+            EXPECT_FALSE(acceptedAux(prog, aux_frame, 2000));
+            EXPECT_FALSE(accepted(prog, vlanIdxFrame(1999, 0xE0)));
+        } else {
+            EXPECT_TRUE(accepted(prog, vlanIdxFrame(1999, 0xE0)));
+            EXPECT_FALSE(accepted(prog, vlanIdxFrame(1999, 0x42)));
+            // A stripped fastpath frame is impossible; treated as untagged
+            // → rejected (unt_ok == false).
+            EXPECT_FALSE(acceptedAux(prog, aux_frame, 1999));
+        }
+    }
+}
+
 TEST(FirstIdxRangeTest, IncludeCoversSliceAndCyclicPoolsDisjointly) {
     // Mirror of the socket-pair split: build both programs from one spec
     // and prove every idx in 0..255 lands on exactly one side.
