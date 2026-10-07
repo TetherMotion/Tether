@@ -83,20 +83,30 @@ bool CiA402Drive::gotoSafeOp() {
     return false;
 }
 
-bool CiA402Drive::gotoOp() {
-    TETHER_LOGI(TAG, "{}: Requesting OP state", logPrefix().c_str());
+bool CiA402Drive::requestOp() {
     if (!m_master) return false;
     // Request OP with Error Acknowledge bit (0x08 | 0x10 = 0x18)
     // Some slaves require the ACK bit to clear internal error latches.
-    if (!m_master->requestSlaveApplicationLayerState(m_slave_index, static_cast<uint8_t>(ECState::Op) | 0x10))
-        return false;
-    
-    // Wait for slave to actually reach OP (up to 5 seconds).
+    return m_master->requestSlaveApplicationLayerState(
+        m_slave_index, static_cast<uint8_t>(ECState::Op) | 0x10);
+}
+
+bool CiA402Drive::gotoOp() {
+    TETHER_LOGI(TAG, "{}: Requesting OP state", logPrefix().c_str());
+    if (!requestOp()) return false;
+    return waitForOp(5000);
+}
+
+bool CiA402Drive::waitForOp(uint32_t timeout_ms) {
+    if (!m_master) return false;
+    // Wait for slave to actually reach OP (default up to 5 seconds).
     // The DC realtime task drives PDO exchange when pdo_enabled_ is set,
     // which was done by transitionToOp() before calling this method.
     // The slave needs continuous PDO data on SM2 to accept the OP transition.
+    const int max_attempts = static_cast<int>((timeout_ms + 9) / 10);
     const uint8_t* src_mac = m_master->getSrcMac();
-    for (int attempt = 0; attempt < 500; attempt++) {
+    (void)src_mac;
+    for (int attempt = 0; attempt < max_attempts; attempt++) {
         Tether::Platform::Clock::instance().delayMilliseconds(10);
         
         uint8_t state = 0;
@@ -117,7 +127,7 @@ bool CiA402Drive::gotoOp() {
             }
             // Re-request OP every second - some slaves need repeated requests
             if ((attempt % 100) == 99) {
-                m_master->requestSlaveApplicationLayerState(m_slave_index, static_cast<uint8_t>(ECState::Op) | 0x10);
+                requestOp();
                 // Read raw AL_STATUS (16-bit, including error bit)
                 uint16_t al_raw = 0;
                 m_master->readRegister(SlaveAddress(m_slave_index), 0x0130, al_raw, 200);
@@ -167,10 +177,10 @@ bool CiA402Drive::gotoOp() {
     // Read PDO exchange stats to diagnose if PDO was ever active
     auto pstats = m_master->pdoForSlave(m_slave_index).getPhysicalStats();
     
-    TETHER_LOGW(TAG, "{}: OP not confirmed after 5s, current state=0x{:02X} (AL status code: {} (0x{:04X}))\n"
+    TETHER_LOGW(TAG, "{}: OP not confirmed after {} ms, current state=0x{:02X} (AL status code: {} (0x{:04X}))\n"
              "  AL_STATUS=0x{:04X}{}\n"
              "  PDO stats: fpwr_ok={} fpwr_err={} fprd_ok={} fprd_err={}",
-             logPrefix().c_str(), final_state, getALStatusCodeName(al_code), al_code,
+             logPrefix().c_str(), timeout_ms, final_state, getALStatusCodeName(al_code), al_code,
              al_status, (al_status & 0x10) ? " (ERROR)" : "",
              pstats.fpwr_success, pstats.fpwr_wkc_errors,
              pstats.fprd_success, pstats.fprd_wkc_errors);
@@ -289,10 +299,10 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
 }
 
 // ============================================================================
-// transitionSafeOpToOp — common SAFE_OP → OP tail
+// prepareSafeOpForOp / transitionSafeOpToOp — common SAFE_OP → OP tail
 // ============================================================================
 
-bool CiA402Drive::transitionSafeOpToOp() {
+bool CiA402Drive::prepareSafeOpForOp() {
     // PRE_OP -> SAFE_OP
     if (!gotoSafeOp()) {
         TETHER_LOGE(TAG, "{}: Failed to reach SAFE_OP", logPrefix().c_str());
@@ -368,6 +378,16 @@ bool CiA402Drive::transitionSafeOpToOp() {
         Tether::Platform::Clock::instance().delayMilliseconds(50);
     }
 
+    // The slave is now in SAFE_OP with PDO exchange enabled — ready for the
+    // (possibly group-synchronised) OP request issued by the caller.
+    return true;
+}
+
+bool CiA402Drive::transitionSafeOpToOp() {
+    if (!prepareSafeOpForOp()) {
+        return false;
+    }
+
     // SAFE_OP -> OP
     if (!gotoOp()) {
         TETHER_LOGE(TAG, "{}: Failed to reach OP", logPrefix().c_str());
@@ -387,8 +407,8 @@ bool CiA402Drive::transitionSafeOpToOp() {
 // transitionToOp — multi-PDO-per-SM variant
 // ============================================================================
 
-bool CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment& assignment) {
-    TETHER_LOGI(TAG, "{}: Beginning transition to OP (multi-PDO, {} SM configs)",
+bool CiA402Drive::prepareForOp(const Slave::MultiPDOAssignment& assignment) {
+    TETHER_LOGI(TAG, "{}: Preparing OP transition (multi-PDO, {} SM configs)",
                 logPrefix().c_str(), assignment.sm_configs.size());
 
     // Check if slave is already in PRE_OP. If so, skip gotoPreOp() to avoid
@@ -461,8 +481,33 @@ bool CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment& assignment) {
 
     // Do NOT call configureProcessDataSyncManagersFromSii() or re-write SM
     // registers here — configureMultiPDOs() already configured SMs and FMMUs
-    // correctly.  Proceed directly to SAFE_OP → OP.
-    return transitionSafeOpToOp();
+    // correctly.  Proceed to SAFE_OP + PDO-enable only; the caller decides
+    // when/how to issue the OP request (per-slave gotoOp() or a
+    // group-synchronised EtherCAT::SlaveGroup::requestState()).
+    return prepareSafeOpForOp();
+}
+
+bool CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment& assignment) {
+    TETHER_LOGI(TAG, "{}: Beginning transition to OP (multi-PDO, {} SM configs)",
+                logPrefix().c_str(), assignment.sm_configs.size());
+
+    if (!prepareForOp(assignment)) {
+        return false;
+    }
+
+    // SAFE_OP -> OP
+    if (!gotoOp()) {
+        TETHER_LOGE(TAG, "{}: Failed to reach OP", logPrefix().c_str());
+        // Disable PDO on failure
+        if (m_master) {
+            m_master->dc().setPDOEnabled(false);
+        }
+        return false;
+    }
+    Tether::Platform::Clock::instance().delayMilliseconds(100);
+
+    TETHER_LOGI(TAG, "{}: Successfully transitioned to OP", logPrefix().c_str());
+    return true;
 }
 
 // ============================================================================
