@@ -1201,3 +1201,82 @@ TEST_F(PdoSliceTest, SliceOverlayBeatsDecimatedImageData) {
     EXPECT_EQ(transport.slice_send_calls, 2);
     EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
 }
+
+// ============================================================================
+// CyclicSliceHealth — per-slice protocol liveness (wire loss vs WKC vs stale)
+// ============================================================================
+
+TEST_F(CyclicWkcTest, SliceHealthReportsOkWithWkc) {
+    buildTwoSlaveMap();
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    transport.resp_wkc_[0] = 4;
+    transport.resp_len_[0] = 16;
+    ASSERT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    const auto h = mgr.sliceHealth(0);
+    EXPECT_EQ(h.last_status, CyclicSliceStatus::Ok);
+    EXPECT_EQ(h.expected_wkc, 4u);
+    EXPECT_EQ(h.last_wkc, 4u);
+    EXPECT_EQ(h.consecutive_failures, 0u);
+}
+
+TEST_F(CyclicWkcTest, SliceHealthTimeoutTracksStreak) {
+    buildTwoSlaveMap();
+    transport.respond_[0] = false;         // datagram never circulates back
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_FALSE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.sliceHealth(0).last_status, CyclicSliceStatus::Timeout);
+    EXPECT_EQ(mgr.sliceHealth(0).consecutive_failures, 1u);
+
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_FALSE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.sliceHealth(0).consecutive_failures, 2u);
+
+    transport.respond_[0] = true;
+    transport.resp_wkc_[0] = 4;
+    transport.resp_len_[0] = 16;
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.sliceHealth(0).last_status, CyclicSliceStatus::Ok);
+    EXPECT_EQ(mgr.sliceHealth(0).consecutive_failures, 0u);
+}
+
+TEST_F(CyclicWkcTest, SliceHealthWkcErrorKeepsLastWkc) {
+    buildTwoSlaveMap();
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    transport.resp_wkc_[0] = 2;            // expected 4 — slave dropped work
+    transport.resp_len_[0] = 16;
+    EXPECT_FALSE(mgr.cyclicCollect(mapping, nullptr));
+    const auto h = mgr.sliceHealth(0);
+    EXPECT_EQ(h.last_status, CyclicSliceStatus::WkcError);
+    EXPECT_EQ(h.expected_wkc, 4u);
+    EXPECT_EQ(h.last_wkc, 2u);             // "arrived but short" is visible
+    EXPECT_EQ(h.consecutive_failures, 1u);
+}
+
+TEST_F(PdoSliceTest, SliceRunHealthReportsTimeoutThenRecovery) {
+    burnImageCycle();
+    PDOSliceSpec spec;
+    spec.entries = {2};
+    ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
+    mgr.setImageExchangeDecimation(1000);
+    transport.slice_respond_[0] = false;
+
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_FALSE(mgr.cyclicCollect(mapping, nullptr));
+    auto ph = mgr.pdoSliceHealth();
+    ASSERT_EQ(ph.size(), 1u);
+    EXPECT_EQ(ph[0].last_status, CyclicSliceStatus::Timeout);
+    EXPECT_EQ(ph[0].consecutive_failures, 1u);
+
+    transport.slice_respond_[0] = true;
+    transport.slice_resp_len_[0] = 4;
+    transport.slice_resp_wkc_[0] = 1;
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    ph = mgr.pdoSliceHealth();
+    ASSERT_EQ(ph.size(), 1u);
+    EXPECT_EQ(ph[0].last_status, CyclicSliceStatus::Ok);
+    EXPECT_EQ(ph[0].expected_wkc, 1u);
+    EXPECT_EQ(ph[0].last_wkc, 1u);
+    EXPECT_EQ(ph[0].consecutive_failures, 0u);
+}

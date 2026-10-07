@@ -755,21 +755,30 @@ void Master::parseEtherCATFrame(const uint8_t* frame, size_t length)
         } else {
             size_t routed = packet_router_.routePacket(msg);
             if (routed == 0) {
-                if (unrouted_log_count_ < 10 &&
+                // No registered waiter claimed this datagram — a stray
+                // reply (timed-out transaction, unsolicited broadcast,
+                // foreign traffic).  Discarding it is correct behaviour,
+                // so this is an informational counter, not an error.
+                const uint64_t un = unrouted_datagrams_.fetch_add(
+                    1, std::memory_order_relaxed) + 1;
+                if (un <= 10 &&
                     !cancel_requested_.load(std::memory_order_acquire)) {
                     TETHER_LOGW("ec_rx", "Unrouted pkt dg={} idx=0x{:02X} cmd=0x{:02X} ado=0x{:04X} adp=0x{:04X} wkc={}",
                              dg_idx, dg->idx, (unsigned)dg->cmd, ado, adp, wkc);
                 }
-                unrouted_log_count_++;
                 if (rx_queue_ && rx_queue_->send(msg, 0)) {
 #if TETHER_ENABLE_ETHERCAT_STATS
                     rx_queue_sent_.fetch_add(1, std::memory_order_relaxed);
 #endif
                 } else {
-                    rx_drop_log_count_++;
-                    if (rx_drop_log_count_ <= 10 || (rx_drop_log_count_ % 500 == 0)) {
-                        TETHER_LOGW("ec_rx", "RX queue full! Dropped dg={} idx=0x{:02X} cmd=0x{:02X} ado=0x{:04X} adp=0x{:04X} wkc={} (total dropped: {})",
-                                 dg_idx, dg->idx, (unsigned)dg->cmd, ado, adp, wkc, rx_drop_log_count_);
+                    // Catch-all overflow — still only stray traffic (a
+                    // routed reply never reaches this queue), so this is
+                    // NOT packet loss; cyclic_health() reports it as such.
+                    const uint64_t dropped = rx_queue_overflow_.fetch_add(
+                        1, std::memory_order_relaxed) + 1;
+                    if (dropped <= 10 || (dropped % 500 == 0)) {
+                        TETHER_LOGD("ec_rx", "Unrouted queue full — discarded stray dg={} idx=0x{:02X} cmd=0x{:02X} ado=0x{:04X} adp=0x{:04X} wkc={} (total discarded: {})",
+                                 dg_idx, dg->idx, (unsigned)dg->cmd, ado, adp, wkc, dropped);
                     }
                 }
             }
