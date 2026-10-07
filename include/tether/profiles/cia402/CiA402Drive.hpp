@@ -193,6 +193,37 @@ public:
     bool gotoOp();
 
     /**
+     * @brief Issue the AL_CONTROL OP request without waiting for OP.
+     *
+     * Writes OP | Error-Acknowledge (0x18) to the slave's AL_CONTROL
+     * register.  For a synchronised multi-drive OP transition prefer
+     * EtherCAT::SlaveGroup::requestState() — one packet requests OP on
+     * the whole group — then confirm with waitForOp() or
+     * SlaveGroup::waitForState().
+     */
+    bool requestOp();
+
+    /**
+     * @brief Wait for the slave to reach OP after requestOp().
+     *
+     * Same confirmation loop gotoOp() runs internally: polls AL_STATUS,
+     * re-issues the request every second, aborts on unexpected states or
+     * cancellation.
+     */
+    bool waitForOp(uint32_t timeout_ms = 5000);
+
+    /**
+     * @brief Everything transitionToOp(assignment) does except the OP request.
+     *
+     * PRE_OP check, configureMultiPDOs (SM/FMMU + 0x1C12/0x1C13), PDO
+     * buffer registration, SAFE_OP transition, DC reconfig, PDO exchange
+     * enable.  Leaves the slave in SAFE_OP ready for a (possibly
+     * group-synchronised) OP request via requestOp() or
+     * EtherCAT::SlaveGroup.
+     */
+    bool prepareForOp(const Slave::MultiPDOAssignment& assignment);
+
+    /**
      * @brief Full state sequence: INIT -> PRE_OP -> SAFE_OP -> OP
      * @param configure_sm  If true, configure SM2/SM3 from SII and
      *                      update lengths to match assigned PDO sizes.
@@ -455,6 +486,10 @@ private:
     /// Common SAFE_OP → OP tail: DC reconfig, PDO enable, diagnostics, OP request.
     /// Called by both transitionToOp() variants after SM/FMMU configuration.
     bool transitionSafeOpToOp();
+
+    /// SAFE_OP transition + PDO-enable part of transitionSafeOpToOp()
+    /// (everything except the final OP request) — used by prepareForOp().
+    bool prepareSafeOpForOp();
 
     uint16_t       m_slave_index;
     Master* m_master{nullptr};

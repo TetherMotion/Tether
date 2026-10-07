@@ -179,6 +179,30 @@ public:
         return true;
     }
 
+    /// @brief Configure PDOs and bring the slave to SAFE_OP (no OP request).
+    ///
+    /// Same work as configurePDOsAndOp() — configureMultiPDOs (SM/FMMU +
+    /// 0x1C12/0x1C13), PDO buffer registration, SAFE_OP transition, DC
+    /// reconfig, PDO exchange enable — but stops short of requesting OP.
+    /// Used for synchronised multi-drive bring-up: prepare every drive to
+    /// SAFE_OP first, then issue a single group OP request (e.g. via
+    /// EtherCAT::SlaveGroup).
+    ///
+    /// @param assignment  Multi-PDO assignment
+    /// @return true on success.
+    bool configurePDOsAndSafeOp(const Slave::MultiPDOAssignment& assignment) {
+        auto& drive = master_.ensureDrive(slave_idx_);
+        drive.setSDOTimeout(kSdoTimeoutMs);
+
+        if (!drive.prepareForOp(assignment)) {
+            TETHER_LOGE(tag_, "PDO config / SAFE_OP transition failed for {}", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
+            return false;
+        }
+
+        TETHER_LOGI(tag_, "{} configured PDOs and reached SAFE_OP (awaiting group OP request)", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
+        return true;
+    }
+
     /// @brief Configure PDOs and transition to OP.
     ///
     /// Creates a CiA402Drive via ensureDrive(), sets the SDO timeout,
