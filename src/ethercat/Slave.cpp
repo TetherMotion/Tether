@@ -728,15 +728,23 @@ SlaveError Slave::transitionToOp() {
             // SAFE_OP deadlock.  Disarm both watchdogs so the transition
             // can complete.
             if (wd_latched && ++wd_latch_count_ >= 2) {
-                TETHER_LOGW(TAG, "{}: SM watchdog re-latching with "
-                                 "cyclic data flowing — disabling "
-                                 "PDI/process-data watchdogs",
-                            logPrefix().c_str());
                 const uint16_t zero = 0;
                 master_->writeRegister(SlaveAddress(index_),
                                        Raw::EC_REG_WD_TIME_PDATA, zero);
                 master_->writeRegister(SlaveAddress(index_),
                                        Raw::EC_REG_WD_TIME_PDI, zero);
+                // wkc=0 makes every write report failure on this slave —
+                // read back the timer registers to prove disarm stuck.
+                uint16_t tpd = 0, tpi = 0;
+                const bool rd = master_->readRegister(
+                    index_, Raw::EC_REG_WD_TIME_PDATA, tpd, 200) &&
+                    master_->readRegister(
+                        index_, Raw::EC_REG_WD_TIME_PDI, tpi, 200);
+                TETHER_LOGW(TAG, "{}: SM watchdog re-latching with cyclic "
+                                 "data flowing — disabling PDI/process-data "
+                                 "watchdogs (readback {}: pdata={} pdi={})",
+                            logPrefix().c_str(), rd ? "ok" : "failed",
+                            tpd, tpi);
             }
 
             master_->requestSlaveApplicationLayerState(
@@ -783,7 +791,7 @@ SlaveError Slave::transitionToOp() {
                         sm2_data[0], sm2_data[1], sm2_data[2], sm2_data[3],
                         sm2_data[4], sm2_data[5], sm2_data[6], sm2_data[7], wd2);
 
-            // Liveness probe: issue one SDO upload (0x1018:0 identity).
+            // Liveness probe: issue one SDO upload (0x1018:1 vendor ID).
             // The mailbox is serviced by the slave's application CPU — if the
             // SDO answers, the firmware is alive and OP is gated by the ESM;
             // if it times out, the firmware is wedged and only a slave
@@ -792,9 +800,9 @@ SlaveError Slave::transitionToOp() {
                 CoE::CoETransactionOptions sdo_opts{};
                 sdo_opts.timeout_ms = 300;
                 auto sdo_res = master_->sdoManager(index_)
-                                   .template readSync<uint32_t>(0x1018, 0,
+                                   .template readSync<uint32_t>(0x1018, 1,
                                                                 sdo_opts);
-                TETHER_LOGW(TAG, "{}: SDO liveness probe (0x1018:0): {}",
+                TETHER_LOGW(TAG, "{}: SDO liveness probe (0x1018:1): {}",
                             logPrefix().c_str(),
                             sdo_res.has_value()
                                 ? "firmware ALIVE — ESM gating OP"
