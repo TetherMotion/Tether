@@ -16,7 +16,7 @@
 #include "tether/drives/AS715NErrors.hpp"
 #include "tether/drives/AS715N/AS715NPDO.hpp"
 
-namespace EtherCAT { namespace CoE { class CoEManager; } }
+namespace EtherCAT { namespace CoE { class CoEManager; } class CiA402Drive; }
 
 namespace EtherCAT {
 namespace Drives {
@@ -30,8 +30,20 @@ class AS715NFaultHandler {
 public:
     static bool checkFault(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx, uint16_t* mfr_error, uint16_t* cia402_error);
 
-    // Fault reset via 0x2031:01 (F31.00). Returns true if fault appears cleared.
-    static bool resetFault(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx);
+    // Fault reset via 0x2031:01 (F31.00).  Per the A6-EC manual the
+    // drive ignores the pulse while S-ON (Controlword bit 0) is
+    // asserted, so the sequence first clears it via SDO.  When `drive`
+    // is given its cached controlword is kept in sync.  Returns true if
+    // the fault appears cleared (StatusWord bit 3, else 0x203F).
+    static bool resetFault(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx,
+                           CiA402Drive* drive = nullptr);
+
+    // One-shot startup/idle fault recovery: checkFault(), route DC sync
+    // errors (ErC1.x family) to handleNoSyncError(), reset everything
+    // else via the F31.00 sequence — including non-recoverable codes,
+    // which are attempted anyway and verified.  True when no fault was
+    // pending or the reset cleared it.
+    static bool resetAllFaults(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx);
 
     static bool handleNoSyncError(EtherCAT::CoE::CoEManager& sdo, uint16_t slave_idx, uint8_t max_attempts = 3);
 
