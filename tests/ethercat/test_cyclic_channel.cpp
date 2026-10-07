@@ -1583,6 +1583,54 @@ TEST_F(RingChannelMemoryTest, DoubleReleaseClampedAtZero) {
     EXPECT_EQ(rxSlot(0)->tp_status & TP_STATUS_USER, 0u);
 }
 
+// Regression: the kernel pads each rx block to tp_block_size (a page
+// multiple) — when fpb*frame_size < block_size the tail of every block is
+// dead space.  Frames live at (i/fpb)*block_size + (i%fpb)*frame_size,
+// NOT i*frame_size.  A flat-indexed walk only ever sees the first block's
+// frames; the ring wedges full and every subsequent packet is dropped
+// (the "tp_drops climbs at the send rate" field failure).
+TEST(RingBlockedLayoutTest, FramesPastBlockPaddingAreFound) {
+    constexpr uint32_t kFrameSize = 1536, kBlockSize = 4096,
+                       kFpb = 2, kBlocks = 4, kN = kFpb * kBlocks;
+    std::vector<uint8_t> mem(kBlockSize * kBlocks, 0);
+    int sv[2];
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+    auto ch = createCyclicRingChannelBlockedForMemory(
+        sv[0], 1, mem.data(), kFrameSize, kBlockSize, kFpb, kBlocks);
+    ASSERT_TRUE(ch);
+
+    auto kslot = [&](uint32_t i) -> tpacket2_hdr* {
+        return reinterpret_cast<tpacket2_hdr*>(
+            mem.data() + (i / kFpb) * kBlockSize + (i % kFpb) * kFrameSize);
+    };
+    const uint8_t payload[64] = {0x77};
+    for (uint32_t i = 0; i < kN; ++i) {
+        auto* h = kslot(i);
+        h->tp_mac = TPACKET2_HDRLEN;
+        h->tp_len = h->tp_snaplen = sizeof(payload);
+        std::memcpy(reinterpret_cast<uint8_t*>(h) + TPACKET2_HDRLEN,
+                    payload, sizeof(payload));
+        __sync_synchronize();
+        __atomic_store_n(&h->tp_status, TP_STATUS_USER, __ATOMIC_RELEASE);
+    }
+
+    CyclicFrameView v[kN];
+    ASSERT_EQ(ch->rxPoll(v, kN, 0), static_cast<int>(kN));
+    for (uint32_t i = 0; i < kN; ++i) {
+        EXPECT_EQ(v[i].cookie, i);
+        EXPECT_EQ(v[i].frame_len, sizeof(payload));
+        EXPECT_EQ(v[i].frame[0], 0x77);
+    }
+    // Second walk retires the consumed slots back to the kernel.
+    EXPECT_EQ(ch->rxPoll(v, kN, 0), 0);
+    for (uint32_t i = 0; i < kN; ++i)
+        EXPECT_EQ(kslot(i)->tp_status & TP_STATUS_USER, 0u) << "slot " << i;
+    EXPECT_FALSE(ch->rxPending());
+
+    ch.reset();
+    ::close(sv[0]); ::close(sv[1]);
+}
+
 TEST_F(RingChannelMemoryTest, CursorResumesAfterLastEmitted) {
     const uint8_t payload[64] = {0x44};
     for (uint32_t i = 0; i < 4; ++i) emitRx(i, payload, sizeof(payload));

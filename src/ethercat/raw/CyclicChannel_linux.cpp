@@ -454,6 +454,9 @@ public:
                                     : rx_req.tp_frame_size;
         rx_frames_     = cfg_.rx_v3 ? rx_req.tp_block_nr
                                     : rx_req.tp_frame_nr;
+        rx_block_size_ = rx_req.tp_block_size;
+        rx_fpb_        = cfg_.rx_v3
+            ? 1u : (rx_req.tp_frame_nr / cfg_.rx_blocks);
         rx_holds_      = std::make_unique<std::atomic<int>[]>(rx_frames_);
         rx_consumed_   = std::make_unique<std::atomic<bool>[]>(rx_frames_);
         if (cfg_.rx_v3)
@@ -464,6 +467,8 @@ public:
             tx_ring_len_   = tx_len;
             tx_frame_size_ = tx_req.tp_frame_size;
             tx_frames_     = tx_req.tp_frame_nr;
+            tx_block_size_ = tx_req.tp_block_size;
+            tx_fpb_        = tx_req.tp_frame_nr / cfg_.tx_blocks;
         }
         return true;
     }
@@ -475,13 +480,19 @@ public:
     void adoptRingsForTest(uint8_t* rx, uint32_t rx_frame_size,
                            uint32_t rx_frames,
                            uint8_t* tx, uint32_t tx_frame_size,
-                           uint32_t tx_frames) {
+                           uint32_t tx_frames,
+                           uint32_t rx_block_size = 0, uint32_t rx_fpb = 0) {
         rx_ring_ = rx;  rx_ring_len_ = 0;
         rx_frame_size_ = rx_frame_size;  rx_frames_ = rx_frames;
+        // Test rings adopt a flat layout unless the blocked variant asked
+        // for a padded per-block stride.
+        rx_block_size_ = rx_block_size ? rx_block_size : rx_frame_size;
+        rx_fpb_        = rx_fpb ? rx_fpb : 1;
         rx_holds_    = std::make_unique<std::atomic<int>[]>(rx_frames_);
         rx_consumed_ = std::make_unique<std::atomic<bool>[]>(rx_frames_);
         tx_ring_ = tx;  tx_ring_len_ = 0;
         tx_frame_size_ = tx_frame_size;  tx_frames_ = tx_frames;
+        tx_block_size_ = tx_frame_size;  tx_fpb_ = 1;
         rings_borrowed_ = true;
     }
 
@@ -636,8 +647,7 @@ public:
             return false;
         }
         for (uint32_t i = 0; i < rx_frames_; ++i) {
-            const auto* hdr = reinterpret_cast<const struct tpacket2_hdr*>(
-                rx_ring_ + static_cast<size_t>(i) * rx_frame_size_);
+            const auto* hdr = rxSlot(i);
             if ((__atomic_load_n(&hdr->tp_status, __ATOMIC_ACQUIRE) &
                  TP_STATUS_USER) &&
                 !rx_consumed_[i].load(std::memory_order_acquire))
@@ -760,13 +770,26 @@ private:
         }
     }
 
+    // V2 ring layout is [block][block]... with tp_block_size rounded up to
+    // a page multiple — when frames_per_block*frame_size < block_size the
+    // tail of each block is padding, so frame i lives at
+    // (i/fpb)*block_size + (i%fpb)*frame_size, NOT i*frame_size.  Flat
+    // indexing reads padding for every frame past the first block and the
+    // ring wedges full forever.
     struct tpacket2_hdr* rxSlot(uint32_t i) {
         return reinterpret_cast<struct tpacket2_hdr*>(
-            rx_ring_ + static_cast<size_t>(i) * rx_frame_size_);
+            rx_ring_ + static_cast<size_t>(i / rx_fpb_) * rx_block_size_
+                     + static_cast<size_t>(i % rx_fpb_) * rx_frame_size_);
+    }
+    const struct tpacket2_hdr* rxSlot(uint32_t i) const {
+        return reinterpret_cast<const struct tpacket2_hdr*>(
+            rx_ring_ + static_cast<size_t>(i / rx_fpb_) * rx_block_size_
+                     + static_cast<size_t>(i % rx_fpb_) * rx_frame_size_);
     }
     struct tpacket2_hdr* txSlot(uint32_t i) {
         return reinterpret_cast<struct tpacket2_hdr*>(
-            tx_ring_ + static_cast<size_t>(i) * tx_frame_size_);
+            tx_ring_ + static_cast<size_t>(i / tx_fpb_) * tx_block_size_
+                     + static_cast<size_t>(i % tx_fpb_) * tx_frame_size_);
     }
     // TX frame data lives at tp_hdrlen - sizeof(sockaddr_ll) from the slot
     // start (the kernel's fixed offset for SOCK_RAW when PACKET_TX_HAS_OFF
@@ -915,6 +938,8 @@ private:
     size_t   rx_ring_len_ = 0;
     uint32_t rx_frame_size_ = 0;
     uint32_t rx_frames_ = 0;
+    uint32_t rx_block_size_ = 0;  ///< V2: page-rounded block stride
+    uint32_t rx_fpb_        = 1;  ///< V2: frames per block
     std::unique_ptr<std::atomic<int>[]>  rx_holds_;
     std::unique_ptr<std::atomic<bool>[]> rx_consumed_;
 
@@ -922,6 +947,8 @@ private:
     size_t   tx_ring_len_ = 0;
     uint32_t tx_frame_size_ = 0;
     uint32_t tx_frames_ = 0;
+    uint32_t tx_block_size_ = 0;
+    uint32_t tx_fpb_        = 1;
     int64_t  tx_acquired_ = -1;   // index of the last txAcquire() slot
     uint32_t tx_cursor_ = 0;
     uint32_t rx_cursor_ = 0;
@@ -1072,6 +1099,22 @@ std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
     return ring;
 }
 
+std::unique_ptr<ICyclicChannel> createCyclicRingChannelBlockedForMemory(
+    int fd, int ifindex,
+    void* rx_ring, uint32_t rx_frame_size, uint32_t rx_block_size,
+    uint32_t rx_fpb, uint32_t rx_blocks)
+{
+    if (fd < 0 || !rx_ring || rx_frame_size == 0 || rx_fpb == 0 ||
+        rx_blocks == 0)
+        return nullptr;
+    LinuxRingChannel::Config rcfg{};
+    auto ring = std::make_unique<LinuxRingChannel>(fd, ifindex, rcfg);
+    ring->adoptRingsForTest(static_cast<uint8_t*>(rx_ring), rx_frame_size,
+                            rx_fpb * rx_blocks, nullptr, 0, 0,
+                            rx_block_size, rx_fpb);
+    return ring;
+}
+
 std::unique_ptr<ICyclicChannel> createCyclicRingChannelV3ForMemory(
     int fd, int ifindex,
     void* rx_ring, uint32_t block_size, uint32_t blocks)
@@ -1118,6 +1161,10 @@ std::unique_ptr<ICyclicChannel> createCyclicRingChannelV3ForMemory(
 std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
     int, int, void*, uint32_t, uint32_t, void*, uint32_t, uint32_t,
     uint32_t) { return nullptr; }
+
+std::unique_ptr<ICyclicChannel> createCyclicRingChannelBlockedForMemory(
+    int, int, void*, uint32_t, uint32_t, uint32_t, uint32_t)
+    { return nullptr; }
 
 } // namespace EtherCAT
 
