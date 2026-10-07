@@ -35,6 +35,7 @@
 #include <atomic>
 #include <cerrno>
 #include <cstring>
+#include <format>
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -662,8 +663,10 @@ public:
         // V3 cookies are (block << 16 | pkt): the hold granularity is the
         // whole block — one held frame pins every frame sharing its block.
         const uint32_t idx = cfg_.rx_v3 ? (cookie >> 16) : cookie;
-        if (idx < rx_frames_)
+        if (idx < rx_frames_) {
+            dbg_holds_.fetch_add(1, std::memory_order_relaxed);
             rx_holds_[idx].fetch_add(1, std::memory_order_relaxed);
+        }
     }
     void rxRelease(uint32_t cookie) override {
         const uint32_t idx = cfg_.rx_v3 ? (cookie >> 16) : cookie;
@@ -671,14 +674,23 @@ public:
         // Clamp at 0 — a double-release must not drive the count negative
         // and pin the ring slot forever.
         if (rx_holds_[idx].load(std::memory_order_acquire) <= 0) return;
+        dbg_releases_.fetch_add(1, std::memory_order_relaxed);
         if (rx_holds_[idx].fetch_sub(1, std::memory_order_acq_rel) == 1 &&
             rx_consumed_[idx]) {
             __sync_synchronize();
-            if (cfg_.rx_v3)
+            dbg_freed_.fetch_add(1, std::memory_order_relaxed);
+            if (cfg_.rx_v3) {
                 v3Retire(idx);
-            else
+            } else {
+                // KERNEL first, THEN clear consumed — the reverse order
+                // lets a racing walk re-emit the stale frame while the
+                // slot still reads USER.  (v3Retire already clears it;
+                // omitting this here wedged the ring: every slot was
+                // emitted exactly once, then skipped forever.)
                 __atomic_store_n(&rxSlot(idx)->tp_status, TP_STATUS_KERNEL,
                                  __ATOMIC_RELEASE);
+                rx_consumed_[idx].store(false, std::memory_order_release);
+            }
         }
     }
 
@@ -821,6 +833,7 @@ private:
                     __sync_synchronize();
                     __atomic_store_n(&hdr->tp_status, TP_STATUS_KERNEL,
                                      __ATOMIC_RELEASE);
+                    dbg_freed_.fetch_add(1, std::memory_order_relaxed);
                 }
                 continue;
             }
@@ -834,6 +847,7 @@ private:
                 hdr->tp_nsec;
             views[n].cookie    = idx;
             ++n;
+            dbg_emitted_.fetch_add(1, std::memory_order_relaxed);
             last_emitted = idx;
             // Do NOT clear tp_status here — the consumer may rxHold() this
             // cookie after rxPoll returns.  Consumed-and-unheld slots are
@@ -866,6 +880,23 @@ private:
                          __ATOMIC_RELEASE);
     }
 
+    std::string rxRingDebug() const override {
+        uint32_t held = 0, consumed_unfreed = 0;
+        for (uint32_t i = 0; i < rx_frames_; ++i) {
+            if (rx_holds_[i].load(std::memory_order_acquire) > 0) ++held;
+            if (rx_consumed_[i].load(std::memory_order_acquire))
+                ++consumed_unfreed;
+        }
+        return std::format(
+            "emitted={} freed={} holds={} releases={} "
+            "held_now={} consumed_unfreed={} frames={}",
+            dbg_emitted_.load(std::memory_order_relaxed),
+            dbg_freed_.load(std::memory_order_relaxed),
+            dbg_holds_.load(std::memory_order_relaxed),
+            dbg_releases_.load(std::memory_order_relaxed),
+            held, consumed_unfreed, rx_frames_);
+    }
+
     int walkRingV3(CyclicFrameView* views, int max_views) {
         int n = 0;
         uint32_t last_done = rx_cursor_;
@@ -879,8 +910,10 @@ private:
                 continue;
 
             if (rx_consumed_[b].load(std::memory_order_acquire)) {
-                if (rx_holds_[b].load(std::memory_order_acquire) == 0)
+                if (rx_holds_[b].load(std::memory_order_acquire) == 0) {
                     v3Retire(b);
+                    dbg_freed_.fetch_add(1, std::memory_order_relaxed);
+                }
                 continue;
             }
 
@@ -905,6 +938,7 @@ private:
                     hdr->tp_nsec;
                 views[n].cookie    = (b << 16) | emitted;
                 ++n;
+                dbg_emitted_.fetch_add(1, std::memory_order_relaxed);
                 hdr = hdr->tp_next_offset
                     ? reinterpret_cast<struct tpacket3_hdr*>(
                           reinterpret_cast<uint8_t*>(hdr) +
@@ -958,6 +992,12 @@ private:
     std::atomic<uint64_t> tx_deferred_{0};
     uint32_t tx_exhausted_  = 0;
     uint32_t tx_kick_errs_  = 0;
+    // RX lifecycle counters surfaced by rxRingDebug() — emit/free/hold/
+    // release totals catch pin leaks that static inspection can't.
+    std::atomic<uint64_t> dbg_emitted_{0};
+    std::atomic<uint64_t> dbg_freed_{0};
+    std::atomic<uint64_t> dbg_holds_{0};
+    std::atomic<uint64_t> dbg_releases_{0};
 };
 
 } // namespace
