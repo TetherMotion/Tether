@@ -423,6 +423,17 @@ void CyclicDatapath::dispatchFrame(const CyclicFrameView& v)
     }
 }
 
+void CyclicDatapath::drainChannel(int max_sweeps)
+{
+    if (!channel_) return;
+    CyclicFrameView views[8];
+    for (int sweep = 0; sweep < max_sweeps; ++sweep) {
+        const int n = channel_->rxPoll(views, 8, 0);
+        if (n <= 0) return;
+        for (int i = 0; i < n; ++i) dispatchFrame(views[i]);
+    }
+}
+
 bool CyclicDatapath::waitView(uint8_t slot, uint64_t token,
                                 uint32_t timeout_ns, CyclicSlotView& out)
 {
@@ -467,6 +478,11 @@ bool CyclicDatapath::waitViewImpl(uint8_t fast_idx, uint64_t token,
     auto& clock = Tether::Platform::Clock::instance();
     const int64_t deadline_ns =
         clock.getMicroseconds() * 1000 + static_cast<int64_t>(timeout_ns);
+
+    // Drain any ring-resident frames BEFORE the fast-path check: the
+    // deposit only happens here, so a frame sitting in the ring would
+    // otherwise be invisible (and the ring is never left full).
+    drainChannel();
 
     // Fast path: response already deposited.  seq_cst pairs with the
     // deposit's publish bump (Q13).
@@ -517,7 +533,15 @@ bool CyclicDatapath::waitViewImpl(uint8_t fast_idx, uint64_t token,
         if (master_.cancel_requested_.load(std::memory_order_acquire)) return false;
         const int64_t now_ns = clock.getMicroseconds() * 1000;
         int64_t remain = deadline_ns - now_ns;
-        if (remain <= 0) return false;
+        if (remain <= 0) {
+            // Deadline expired — still drain: a reply that arrived just
+            // past its deadline is deposited (the caller's gen guard
+            // rejects it) and, critically, the ring slot is freed.
+            drainChannel();
+            if (s.seq.load(std::memory_order_seq_cst) != token)
+                return read_slot();
+            return false;
+        }
 
         if (channel_) {
             // Spin phase: the ring backend's rxPending() is pure memory
@@ -556,7 +580,14 @@ bool CyclicDatapath::waitViewImpl(uint8_t fast_idx, uint64_t token,
                 if (errno == EINTR) continue;
                 return false;
             }
-            if (ret == 0) return false;  // deadline reached
+            if (ret == 0) {
+                // ppoll deadline — drain before declaring a miss (the
+                // frame may have landed in the ring just past expiry).
+                drainChannel();
+                if (s.seq.load(std::memory_order_seq_cst) != token)
+                    return read_slot();
+                return false;
+            }
 
             if (wire_pos >= 0 && (fds[wire_pos].revents & POLLIN)) {
                 if (channel_) {
@@ -670,6 +701,10 @@ uint32_t CyclicDatapath::waitMaskImpl(uint32_t slot_mask,
         }
     };
 
+    // Deposit any ring-resident frames first — replies that landed past
+    // an earlier deadline become visible here instead of wedging the ring.
+    drainChannel();
+
     uint32_t outstanding = scan();
     if (!outstanding) { fill(slot_mask); return slot_mask; }
 
@@ -710,6 +745,10 @@ uint32_t CyclicDatapath::waitMaskImpl(uint32_t slot_mask,
         }
         const int64_t now_ns = clock.getMicroseconds() * 1000;
         if (deadline_ns - now_ns <= 0) {
+            // Expired — drain anyway: stragglers get deposited (the gen
+            // guard classifies them stale) and the ring is freed.
+            drainChannel();
+            outstanding = scan();
             const uint32_t arrived = slot_mask & ~outstanding;
             fill(arrived);
             return arrived;
@@ -786,7 +825,9 @@ uint32_t CyclicDatapath::waitMaskImpl(uint32_t slot_mask,
             std::this_thread::yield();
         }
     }
-    // ppoll deadline expired — one last scan, then report what arrived.
+    // ppoll deadline expired — drain + one last scan, then report what
+    // arrived.
+    drainChannel();
     outstanding = scan();
     const uint32_t arrived = slot_mask & ~outstanding;
     fill(arrived);

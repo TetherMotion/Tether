@@ -936,6 +936,93 @@ TEST_F(MasterCyclicTest, WaitCyclicSlotOutOfRange) {
     EXPECT_FALSE(master_.waitCyclicSlotView(0xFF, 0, 0, view));
 }
 
+TEST_F(MasterCyclicTest, ExpiredWaitStillDrainsChannel) {
+    // A frame sitting in the ring past its deadline must still be
+    // drained and deposited — otherwise late replies wedge the ring
+    // (tp_drops → 100%) on links whose RTT exceeds the RX budget.
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    uint8_t frame[128];
+    const uint8_t pay[4] = {1, 2, 3, 4};
+    const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 4, 2);
+    StubChannel::RxFrame rx{};
+    rx.len = n;
+    std::memcpy(rx.data.data(), frame, n);
+    rx.cookie = 42;
+    stubp->rxq.push_back(rx);
+
+    CyclicSlotView view{};
+    // timeout_ns = 0 — deadline already expired on entry.
+    EXPECT_TRUE(master_.waitCyclicSlotView(0, /*token=*/0, 0, view));
+    EXPECT_TRUE(stubp->rxq.empty());          // ring slot released
+    EXPECT_GT(stubp->rx_poll_calls, 0);
+    EXPECT_EQ(view.wkc, 2u);
+    EXPECT_EQ(view.datalen, 4u);
+}
+
+TEST_F(MasterCyclicTest, ExpiredMaskWaitDrainsUnmatchedFrames) {
+    // Waiting on slot 0 while a frame for slot 3 is ring-resident and the
+    // deadline is already expired: the wait must return 0 (nothing for
+    // slot 0) but still drain the ring and deposit the stray frame.
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    uint8_t frame[128];
+    const uint8_t pay[2] = {0xAA, 0xBB};
+    const size_t n = buildEcatFrame(frame, 0x0C, 0xFB, 0, 0, pay, 2, 1);
+    StubChannel::RxFrame rx{};
+    rx.len = n;
+    std::memcpy(rx.data.data(), frame, n);
+    rx.cookie = 7;
+    stubp->rxq.push_back(rx);
+
+    const uint64_t tok = master_.cyclicSlotToken(0);
+    const uint64_t tok3 = master_.cyclicSlotToken(3);
+    CyclicSlotView views[1];
+    const uint32_t arrived =
+        master_.waitCyclicSlotMask(0x1, &tok, 0, views);
+    EXPECT_EQ(arrived, 0u);                   // no reply for slot 0
+    EXPECT_TRUE(stubp->rxq.empty());          // ring still drained
+    EXPECT_GT(master_.cyclicSlotToken(3), tok3);           // deposit done
+}
+
+TEST_F(MasterCyclicTest, SatisfiedMaskWaitStillDrainsChannel) {
+    // Slot already satisfied before the wait — the entry drain must still
+    // consume unrelated ring-resident frames instead of early-returning
+    // and leaving them to fill the ring.
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    // Pre-deposit slot 0 via the public frame entry — the wait token is
+    // the pre-send seq, so capture it BEFORE the deposit.
+    const uint64_t tok = master_.cyclicSlotToken(0);
+    uint8_t frame[128];
+    const uint8_t pay[4] = {9, 9, 9, 9};
+    const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 4, 1);
+    master_.handleRxFrame(frame, n);
+
+    // Queue an unrelated cyclic frame (slot 1) in the stub ring.
+    uint8_t frame2[128];
+    const size_t n2 = buildEcatFrame(frame2, 0x0C, 0xF9, 0, 0, pay, 4, 1);
+    StubChannel::RxFrame rx{};
+    rx.len = n2;
+    std::memcpy(rx.data.data(), frame2, n2);
+    rx.cookie = 9;
+    stubp->rxq.push_back(rx);
+
+    const uint64_t tok1 = master_.cyclicSlotToken(1);
+    CyclicSlotView views[1];
+    const uint32_t arrived =
+        master_.waitCyclicSlotMask(0x1, &tok, 1'000'000, views);
+    EXPECT_EQ(arrived, 0x1u);
+    EXPECT_TRUE(stubp->rxq.empty());                     // drained anyway
+    EXPECT_GT(master_.cyclicSlotToken(1), tok1);         // deposited
+}
+
 TEST_F(MasterCyclicTest, ComposeCyclicHeaderLayout) {
     uint8_t frame[64] = {};
     master_.composeCyclicHeader(frame, Command::LRW, 2, 0x1111, 0x2222,
