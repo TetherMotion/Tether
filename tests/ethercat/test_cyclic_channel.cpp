@@ -1572,6 +1572,25 @@ TEST_F(RingChannelMemoryTest, HoldPinsSlotUntilRelease) {
     EXPECT_FALSE(ch_->rxPending());
 }
 
+TEST_F(RingChannelMemoryTest, ReleasedSlotReemittedAfterRefill) {
+    // Regression: rxRelease used to set tp_status=KERNEL but leave
+    // rx_consumed_ set — walkRing then skipped the slot forever, so every
+    // ring frame was emitted exactly once and the ring wedged at capacity
+    // (dispatched == ring size, tp_drops climbing at send rate).
+    const uint8_t p1[64] = {0x44}, p2[64] = {0x55};
+    emitRx(0, p1, sizeof(p1));
+    CyclicFrameView v[4];
+    ASSERT_EQ(ch_->rxPoll(v, 4, 0), 1);
+    ch_->rxHold(v[0].cookie);
+    ch_->rxRelease(v[0].cookie);          // free path via rxRelease
+    EXPECT_EQ(rxSlot(0)->tp_status & TP_STATUS_USER, 0u);
+
+    emitRx(0, p2, sizeof(p2), 2, 700);    // kernel refills the same slot
+    ASSERT_EQ(ch_->rxPoll(v, 4, 0), 1);   // must re-emit, not skip
+    EXPECT_EQ(v[0].frame[0], 0x55);
+    EXPECT_EQ(v[0].stamp_ns, 2'000'000'000ull + 700ull);
+}
+
 TEST_F(RingChannelMemoryTest, DoubleReleaseClampedAtZero) {
     const uint8_t payload[64] = {0x33};
     emitRx(0, payload, sizeof(payload));

@@ -26,16 +26,22 @@
 #include <argparse/argparse.hpp>
 
 #include "common/ExampleHelpers.hpp"
+#include "common/EtherCATHostSetup.hpp"
 #include "logging/Logger.hpp"
 #include "tether/ethercat/CBPFProgramFactory.hpp"
 #include "tether/ethercat/CyclicChannel.hpp"
+#include "tether/ethercat/LogicalAddressManager.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 static const char* kTag = "ec_filter_probe";
@@ -695,8 +701,126 @@ void runCyclicChannelTest(const ProbeConfig& cfg,
         verdict = "PASS";
     else
         verdict = "FAIL replies/drop mismatch — ring walk suspect";
-    printf("hold/release: %s\nverdict: %s\n",
-           hold_ok ? "ok" : "FAILED", verdict);
+    printf("hold/release: %s\nring: %s\nverdict: %s\n",
+           hold_ok ? "ok" : "FAILED", ch->rxRingDebug().c_str(), verdict);
+}
+
+/**
+ * Cyclic executive test — the ACTUAL production loop, not a channel-level
+ * reproduction: IEthernet HAL -> NetworkInterface -> Master::start() ->
+ * setupEncapsulation() (VLAN router + wire probe + composed cBPF) ->
+ * Master::startCyclicLoop(CyclicLoopConfig::lowLatency(1000)) with a
+ * synthetic one-slave PDO image (23 B RxPDO / 29 B TxPDO, the AS715N
+ * layout).  The CyclicExecutive then runs the real per-cycle
+ * cyclicSend/cyclicCollect -> CyclicDatapath -> ring RX/TX path at 1 kHz
+ * for ~3 s and reports cyclicHealth() — the same counters the field
+ * supervisor dumps (cycles/exchanges_ok/wire_loss/tp_drops/dispatched).
+ *
+ * The echoer/slave ring returns each LRW slice with WKC=0, so a healthy
+ * wire shows ~all cycles ok with zero kernel drops; the field failure
+ * (ring never drained) shows dispatched << cycles and tp_drops climbing.
+ */
+void runCyclicExecutiveTest(const ProbeConfig& cfg) {
+    printf("\n=== cyclic executive test (Master::startCyclicLoop) ===\n");
+
+    Tether::Examples::HostEtherNetSession session;
+    if (!Tether::Examples::initHostEthernet(session, cfg.ifname, kTag))
+        return;   // error already logged
+
+    EtherCAT::Master master;
+    Tether::Examples::EncapsulationConfig encap;
+    if (cfg.vlan) {
+        encap.txVlan  = cfg.vlan;
+        encap.rxRange = EtherCAT::VLANRouter::VLANRange{cfg.vlan, cfg.vlan};
+    }
+    if (!Tether::Examples::setupEncapsulation(session, master, encap, kTag)) {
+        Tether::Examples::shutdownHostEthernet(session);
+        return;
+    }
+    // Under VLAN routing master_iface is the router stub without a
+    // native handle — the cyclic channel takes the wire socket fd
+    // instead (same as the production bridge).
+    if (encap.vlanActive())
+        master.setWireFd(static_cast<int>(reinterpret_cast<intptr_t>(
+            session.eth->nativeHandle())));
+    Tether::Examples::startHostPollThread(session, kTag);
+    if (!Tether::Examples::startHostMaster(session, master, kTag)) {
+        Tether::Examples::shutdownHostEthernet(session);
+        return;
+    }
+
+    // Synthetic image: one slave, one 23-byte output + one 29-byte input
+    // window.  No slave answers the LRW — the segment echo returns it
+    // unchanged with WKC=0, which is exactly what strict_wkc learns.
+    auto& mapping = master.pdo().mapping();
+    mapping.add_rxpdo(0, 23);
+    mapping.add_txpdo(0, 29);
+    EtherCAT::PDO::SlaveConfig sc{};
+    sc.slave_index = 0;
+    sc.rxpdo_size  = 23;
+    sc.txpdo_size  = 29;
+    sc.sm[2].type  = EtherCAT::PDO::SyncManagerType::ProcessOutput;
+    sc.sm[3].type  = EtherCAT::PDO::SyncManagerType::ProcessInput;
+    if (!master.logicalAddressManager().buildAddressMap(&sc, 1)) {
+        fprintf(stderr, "buildAddressMap failed\n");
+        master.stop();
+        Tether::Examples::shutdownHostEthernet(session);
+        return;
+    }
+
+    auto loop_cfg = EtherCAT::Master::CyclicLoopConfig::lowLatency(1000);
+    loop_cfg.motion_in_loop = false;      // no motion callback registered
+    loop_cfg.slot_spin_ns   = 100'000;    // match the production bridge
+    if (!master.startCyclicLoop(loop_cfg)) {
+        fprintf(stderr, "startCyclicLoop failed\n");
+        master.stop();
+        Tether::Examples::shutdownHostEthernet(session);
+        return;
+    }
+
+    const auto h0 = master.cyclicHealth();
+    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+    const auto h1 = master.cyclicHealth();
+    std::string ring_dbg;
+    if (auto* ch = master.cyclicChannel())
+        ring_dbg = ch->rxRingDebug();
+    master.stopCyclicLoop();
+
+    const uint64_t cycles     = h1.cycles          - h0.cycles;
+    const uint64_t ok         = h1.exchanges_ok    - h0.exchanges_ok;
+    const uint64_t wire_loss  = h1.wire_loss       - h0.wire_loss;
+    const uint64_t wkc_err    = h1.wkc_errors      - h0.wkc_errors;
+    const uint64_t tp_drops   = h1.kernel_rx_drops - h0.kernel_rx_drops;
+    const uint64_t bank_drops = h1.rx_bank_drops   - h0.rx_bank_drops;
+    const uint64_t dispatched = h1.dispatch_frames - h0.dispatch_frames;
+    const uint64_t unrouted   = h1.dispatch_unrouted - h0.dispatch_unrouted;
+
+    printf("3s @1kHz: cycles=%llu ok=%llu wire_loss=%llu wkc_err=%llu "
+           "tp_drops=%llu bank_drops=%llu dispatched=%llu unrouted=%llu\n",
+           (unsigned long long)cycles, (unsigned long long)ok,
+           (unsigned long long)wire_loss, (unsigned long long)wkc_err,
+           (unsigned long long)tp_drops, (unsigned long long)bank_drops,
+           (unsigned long long)dispatched, (unsigned long long)unrouted);
+    printf("%s\n", master.cyclicHealth().describe().c_str());
+    if (!ring_dbg.empty())
+        printf("ring: %s\n", ring_dbg.c_str());
+
+    // Verdict: replies must be dispatched at ~1/cycle with no kernel
+    // drops.  dispatched << cycles while tp_drops climbs is the field
+    // signature of the ring-walk bug.
+    const char* verdict;
+    if (cycles == 0)
+        verdict = "FAIL cyclic loop did not run";
+    else if (dispatched == 0 && tp_drops == 0 && wire_loss == cycles)
+        verdict = "WARN no replies — segment silent? ring RX unverified";
+    else if (ok >= cycles * 9 / 10 && tp_drops == 0 && bank_drops == 0)
+        verdict = "PASS";
+    else
+        verdict = "FAIL — cyclic datapath unhealthy (see counters above)";
+    printf("verdict: %s\n", verdict);
+
+    master.stop();
+    Tether::Examples::shutdownHostEthernet(session);
 }
 
 /// Run the kernel packet-ring matrix: TX-ring drain, VLAN auxdata delivery,
@@ -747,6 +871,7 @@ int main(int argc, char** argv) {
     runReplyMatrix(cfg, progs, tx, dst);
     runRingMatrix(cfg, progs, tx);
     runCyclicChannelTest(cfg, progs);
+    runCyclicExecutiveTest(cfg);
 
     ::close(tx);
     return 0;

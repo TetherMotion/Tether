@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <string>
 
 #include "tether/ethercat/CBPFProgramFactory.hpp"   // CBPFInsn
 
@@ -191,6 +192,13 @@ public:
      * 0 on backends without a packet socket.
      */
     virtual uint64_t kernelRxDrops() { return 0; }
+    /**
+     * @brief One-line RX ring lifecycle snapshot for diagnostics:
+     *        emitted/freed/hold/release totals plus live held and
+     *        consumed-but-unfreed slot counts.  Empty on backends
+     *        without a packet ring.
+     */
+    virtual std::string rxRingDebug() const { return {}; }
 };
 
 // ============================================================================
