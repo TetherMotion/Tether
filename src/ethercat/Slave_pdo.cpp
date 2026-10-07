@@ -620,27 +620,10 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
 
     const bool dbg_pdo_cfg = slave_debug_flags_.pdoConfiguration;
 
-    // Read the slave's configured station address (register 0x0010) so
-    // FPWR/FPRD in exchangePhysical() uses the correct address.
-    // The slave's configured station address is assigned during INIT (from
-    // SII/EEPROM or by the master).  Without this, exchangePhysical() falls
-    // back to the auto-increment position address, which FPWR/FPRD don't
-    // respond to after INIT.
-    {
-        uint16_t cfg_addr = 0;
-        const auto slave_addr = EtherCAT::Master::slaveAddressFromADP(
-            EtherCAT::Master::adpForSlaveIndex(index_));
-        if (master_->readRegister(slave_addr, 0x0010, &cfg_addr, 2, 200)) {
-            cfgs[index_].configured_address = cfg_addr;
-            // Also set it in the PDO mapping entries
-            pdo.mapping().set_slave_configured_address(index_, cfg_addr);
-            TETHER_LOGI(TAG, "{}: Configured station address (reg 0x0010) = 0x{:04X}",
-                        logPrefix().c_str(), cfg_addr);
-        } else {
-            TETHER_LOGW(TAG, "{}: Failed to read configured station address (reg 0x0010), "
-                        "FPWR/FPRD will use auto-increment fallback", logPrefix().c_str());
-        }
-    }
+    // Ensure the slave's configured station address (register 0x0010) is
+    // known to the mapping so FPWR/FPRD in exchangePhysical() uses the
+    // correct address.
+    pdo.ensureConfiguredAddress(index_);
 
     // Build MultiPDOSyncManagerConfig vector for FMMU and LogicalAddressManager
     std::vector<PDO::MultiPDOSyncManagerConfig> multi_configs;

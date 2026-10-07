@@ -48,6 +48,8 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <span>
 #include <thread>
 
 #include "tether/drives/Synapticon.hpp"
@@ -57,6 +59,7 @@
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
+#include "tether/ethercat/SlaveGroup.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/profiles/cia402/CiA402Drive.hpp"
 #include "tether/profiles/cia402/DS402Master.hpp"
@@ -134,6 +137,19 @@ public:
                     master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str(), result.message.c_str(), result.iterations_used);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        return true;
+    }
+
+    /// @brief Reset a set of initializers to INIT, one slave at a time.
+    ///
+    /// Per-slave fallback used when a group INIT request
+    /// (EtherCAT::SlaveGroup::requestState) could not be confirmed —
+    /// e.g. a member slave stuck with a latched AL error.
+    /// @return true when every initializer's slave is in INIT.
+    static bool resetAllToInit(std::span<SynapticonDriveInitializer> inits) {
+        for (auto& ini : inits) {
+            if (!ini.resetToInit()) return false;
+        }
         return true;
     }
 
@@ -308,6 +324,130 @@ public:
         auto& sdo = master_.ethercatMaster().sdoManager(slave_idx_);
         if (!BrakeControl::engageBrake(sdo, timeout_ms)) {
             TETHER_LOGW(tag_, "Brake engage failed or unverified");
+            return false;
+        }
+        return true;
+    }
+
+    // ------------------------------------------------------------------
+    // Group bring-up — all AL transitions as single-packet group requests
+    // ------------------------------------------------------------------
+
+    /**
+     * @brief INIT + mailbox + PRE_OP for a whole drive group.
+     *
+     *   1. Group INIT request (one packet) with resetAllToInit() fallback.
+     *   2. Per-slave mailbox configuration (ESC register writes).
+     *   3. Group PRE_OP request (one packet).
+     *   4. SlaveGroup::waitForMailboxReady() — no blind settle delay.
+     *
+     * Also prepares each drive's CiA402Drive handle with the SOMANET PDO
+     * field offsets (controlword=0, statusword=0, opmode=2).  SDO
+     * configuration should be applied next (e.g. via SlaveGroup
+     * writeEntryAll) before bringGroupToSafeOp().
+     *
+     * @return true when every slave reached PRE_OP with a working mailbox.
+     */
+    static bool initGroupToPreOp(std::span<SynapticonDriveInitializer> inits,
+                                 EtherCAT::SlaveGroup& group) {
+        const char* tag = "SynapticonInit";
+
+        if (group.requestState(SlaveState::INIT, /*ack_error=*/true) == 0 ||
+            !group.waitForState(SlaveState::INIT, /*timeout_ms=*/3000,
+                                /*poll_ms=*/10, /*resend_ms=*/500)) {
+            TETHER_LOGW(tag, "Group INIT request failed — falling back to "
+                             "per-slave reset");
+            if (!resetAllToInit(inits)) return false;
+        }
+
+        for (auto& ini : inits) {
+            if (!ini.configureMailbox()) return false;
+        }
+
+        if (group.requestState(SlaveState::PRE_OP, /*ack_error=*/true) == 0 ||
+            !group.waitForState(SlaveState::PRE_OP, /*timeout_ms=*/3000,
+                                /*poll_ms=*/10, /*resend_ms=*/500)) {
+            TETHER_LOGE(tag, "Group PRE_OP transition failed");
+            return false;
+        }
+        if (!group.waitForMailboxReady(2000, 25)) {
+            TETHER_LOGE(tag, "Mailbox did not come up on all group members");
+            return false;
+        }
+
+        // SOMANET standard PDO layout: controlword@0, statusword@0,
+        // opmode@2 — applies to both the 0x1600/0x1A00 motion PDOs and the
+        // combined FSoE assignment (motion region at offset 0 there).
+        for (auto& ini : inits) {
+            auto& drive = ini.drive();
+            drive.setSDOTimeout(kSdoTimeoutMs);
+            drive.setControlwordPDOOffset(0);
+            drive.setStatuswordPDOOffset(0);
+            drive.setOpmodePDOOffset(2);
+        }
+        return true;
+    }
+
+    /**
+     * @brief PDO config + group SAFE_OP + post-SAFE_OP prep.
+     *
+     *   1. configurePDOsInPreOp(assignment) per slave (SM/FMMU + 0x1C12/
+     *      0x1C13 + PDO buffer registration — slaves stay in PRE_OP).
+     *   2. Group SAFE_OP request (one packet — the slaves validate the
+     *      PDO assignment at the same instant).
+     *   3. postSafeOpPrepare() per slave (DC SYNC reconfig, PDO exchange
+     *      enable, SM readback, error-ack).
+     *
+     * Afterwards: register application PDO buffers (the entries replace the
+     * CiA402Drive's own), then request OP via requestGroupOp().  A PDO
+     * keep-alive exchange should be running from SAFE_OP onward — pass it
+     * via @p on_safe_op, which is invoked immediately after the group
+     * reaches SAFE_OP and before postSafeOpPrepare().
+     *
+     * @return true when every slave is ready for the OP request.
+     */
+    static bool bringGroupToSafeOp(
+        std::span<SynapticonDriveInitializer> inits,
+        const Slave::MultiPDOAssignment& assignment,
+        EtherCAT::SlaveGroup& group,
+        std::function<void()> on_safe_op = {}) {
+        const char* tag = "SynapticonInit";
+
+        for (auto& ini : inits) {
+            if (!ini.configurePDOsInPreOp(assignment)) return false;
+        }
+
+        if (group.requestState(SlaveState::SAFE_OP, /*ack_error=*/true) == 0 ||
+            !group.waitForState(SlaveState::SAFE_OP, /*timeout_ms=*/5000,
+                                /*poll_ms=*/10, /*resend_ms=*/1000)) {
+            TETHER_LOGE(tag, "Group SAFE_OP transition failed");
+            return false;
+        }
+
+        if (on_safe_op) on_safe_op();
+
+        for (auto& ini : inits) {
+            if (!ini.postSafeOpPrepare()) return false;
+        }
+        return true;
+    }
+
+    /**
+     * @brief OP request + confirmation for a group — ONE EtherCAT packet.
+     * @return true when every member reached OP.
+     */
+    static bool requestGroupOp(EtherCAT::SlaveGroup& group,
+                               const char* tag = "SynapticonInit",
+                               uint32_t timeout_ms = 5000) {
+        TETHER_LOGI(tag, "Requesting OP on {} slave(s) with a single "
+                         "EtherCAT packet", group.size());
+        if (group.requestState(SlaveState::OP, /*ack_error=*/true) == 0) {
+            TETHER_LOGE(tag, "Group OP request failed");
+            return false;
+        }
+        if (!group.waitForState(SlaveState::OP, timeout_ms,
+                                /*poll_ms=*/10, /*resend_ms=*/1000)) {
+            TETHER_LOGE(tag, "Group OP transition timed out");
             return false;
         }
         return true;

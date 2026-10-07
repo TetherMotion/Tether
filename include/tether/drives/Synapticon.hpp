@@ -22,6 +22,11 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
+
+#include "tether/ethercat/SlaveDiscoveryManager.hpp"
+
+#include "logging/Logger.hpp"
 
 #include "tether/drives/Synapticon/SynapticonPDO.hpp"
 #include "tether/drives/Synapticon/SafetyDiagnostics.hpp"
@@ -64,6 +69,69 @@ inline constexpr bool isKnownProductCode(uint32_t product_code) {
     return false;
 }
 
+/// Outcome of verifySomanetIdentity().
+enum class SomanetIdentityCheck {
+    Verified,            ///< Vendor + known SOMANET product code
+    VendorUnreadable,    ///< SII identity could not be read
+    VendorMismatch,      ///< Not a Synapticon device
+    UnknownProductCode,  ///< Synapticon vendor, unfamiliar product code
+};
+
+/**
+ * @brief Verify a discovered slave's SII identity as a Synapticon SOMANET.
+ *
+ * Logs a per-outcome diagnostic when @p log_tag is non-null:
+ * VendorMismatch → error (fatal for drive applications),
+ * VendorUnreadable / UnknownProductCode → warning, Verified → info.
+ *
+ * @param slave     DiscoveredSlave entry (request DiscoveryOption::VendorId
+ *                  and ProductCode during discovery for a reliable check).
+ * @param log_tag   Log tag, or nullptr to suppress logging.
+ */
+inline SomanetIdentityCheck verifySomanetIdentity(
+    const EtherCAT::DiscoveredSlave& slave,
+    const char* log_tag = nullptr)
+{
+    const std::string name = slave.device_name.value_or("<unreadable>");
+    if (!slave.vendor_id.has_value()) {
+        if (log_tag) {
+            TETHER_LOGW(log_tag,
+                "Slave {}: could not read vendor ID from SII (name='{}') — "
+                "cannot verify this is a Synapticon drive",
+                slave.index, name.c_str());
+        }
+        return SomanetIdentityCheck::VendorUnreadable;
+    }
+    if (!slave.hasVendorId(kVendorId)) {
+        if (log_tag) {
+            TETHER_LOGE(log_tag,
+                "Slave {} is not a Synapticon drive: vendor=0x{:08X} "
+                "(expected 0x{:08X}) product=0x{:08X} name='{}'",
+                slave.index, *slave.vendor_id, kVendorId,
+                slave.product_code.value_or(0), name.c_str());
+        }
+        return SomanetIdentityCheck::VendorMismatch;
+    }
+    if (!slave.product_code.has_value() ||
+        !isKnownProductCode(*slave.product_code)) {
+        if (log_tag) {
+            TETHER_LOGW(log_tag,
+                "Slave {}: Synapticon vendor OK but product=0x{:08X} is not "
+                "a known SOMANET code (name='{}')",
+                slave.index, slave.product_code.value_or(0), name.c_str());
+        }
+        return SomanetIdentityCheck::UnknownProductCode;
+    }
+    if (log_tag) {
+        TETHER_LOGI(log_tag,
+            "Slave {}: verified Synapticon drive '{}' "
+            "(vendor=0x{:08X} product=0x{:08X})",
+            slave.index, name.c_str(), *slave.vendor_id,
+            *slave.product_code);
+    }
+    return SomanetIdentityCheck::Verified;
+}
+
 // Mailbox configuration (from ESI Sm elements)
 // The SOMANET ESI advertises 1024-byte mailbox buffers, but the firmware
 // only accepts 512 bytes.  Configuring 1024 causes AL_STATUS_CODE 0x0016
@@ -87,6 +155,10 @@ static constexpr uint8_t kInputsSmControlByte  = 0x20;  // SM3: Buffered|Read|Wa
 // Total PDO sizes (from ESI Sm DefaultSize attributes)
 static constexpr uint16_t kOutputsSmSize = 35;  // SM2: 19+8+8 bytes
 static constexpr uint16_t kInputsSmSize  = 47;  // SM3: 13+12+4+18 bytes
+
+// SOMANET-typical encoder resolution (increments/revolution) — used as the
+// fallback when the 0x608F encoder-resolution read fails.
+static constexpr uint32_t kDefaultEncoderResolution = 524288;
 
 } // namespace Synapticon
 

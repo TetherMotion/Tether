@@ -41,6 +41,8 @@
 #include "tether/ethercat/ObjectDictionary.hpp"
 #include "tether/ethercat/Types.hpp"
 
+#include "logging/Logger.hpp"
+
 namespace EtherCAT {
 
 class Master;
@@ -228,6 +230,102 @@ public:
         const ObjectDictionary::ObjectDictionaryEntry& entry,
         std::span<const uint64_t> values,
         CoE::CoETransactionOptions opts = {});
+
+    // ---- Result helpers ---------------------------------------------------
+
+    /// True when every member result carries a value.
+    template<typename T>
+    static bool allOk(const std::vector<SlaveGroupSdoResult<T>>& results) {
+        for (const auto& r : results)
+            if (!r.result.has_value()) return false;
+        return true;
+    }
+
+    /**
+     * @brief Log one error line per failed member result.
+     * @return allOk(results)
+     */
+    template<typename T>
+    static bool logErrors(
+        const std::vector<SlaveGroupSdoResult<T>>& results,
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        const char* log_tag = "SlaveGroup") {
+        bool ok = true;
+        for (const auto& r : results) {
+            if (!r.result.has_value()) {
+                TETHER_LOGE(log_tag,
+                    "Slave {} SDO access '{}' (0x{:04X}:{}) failed",
+                    r.slave_index,
+                    entry.name ? entry.name : "?",
+                    entry.index, entry.subindex);
+                ok = false;
+            }
+        }
+        return ok;
+    }
+
+    /**
+     * @brief writeEntry() + per-member error logging.
+     * @return true when every member acknowledged the write.
+     */
+    bool writeEntryAll(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        uint64_t value, CoE::CoETransactionOptions opts = {},
+        const char* log_tag = "SlaveGroup") {
+        return logErrors(writeEntry(entry, value, opts), entry, log_tag);
+    }
+    /// Per-member-values variant of writeEntryAll().
+    bool writeEntryAll(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        std::span<const uint64_t> values,
+        CoE::CoETransactionOptions opts = {},
+        const char* log_tag = "SlaveGroup") {
+        return logErrors(writeEntry(entry, values, opts), entry, log_tag);
+    }
+
+    /**
+     * @brief Read `entry` on all members and compare against `expected`.
+     *        Logs one warning per mismatching/failing member.
+     * @return true when every member read successfully and matches.
+     */
+    bool verifyEntry(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        uint64_t expected, CoE::CoETransactionOptions opts = {},
+        const char* log_tag = "SlaveGroup");
+
+    /**
+     * @brief Read a list of register definitions on all members and log
+     *        one line per entry: `0x2004:3 'Pull time': s0=50 s1=50`.
+     *        Members that fail a read show `s<idx>=<err>`.
+     */
+    void dumpEntries(
+        std::span<const ObjectDictionary::ObjectDictionaryEntry* const> entries,
+        const char* log_tag,
+        CoE::CoETransactionOptions opts = {});
+
+    /// Braced-list convenience overload.
+    void dumpEntries(
+        std::initializer_list<const ObjectDictionary::ObjectDictionaryEntry*> entries,
+        const char* log_tag,
+        CoE::CoETransactionOptions opts = {}) {
+        dumpEntries(std::span<const ObjectDictionary::ObjectDictionaryEntry* const>(
+                        entries.begin(), entries.size()),
+                    log_tag, opts);
+    }
+
+    // ---- Mailbox readiness -------------------------------------------------
+
+    /**
+     * @brief Poll until every member has activated its mailbox sync
+     *        managers (SM0/SM1 activation registers 0x0806/0x080E bit 0).
+     *
+     * Replaces the fixed settle delay after the PRE_OP transition — the
+     * slave enables the mailbox channels asynchronously once its firmware
+     * has brought them up.  One Ethernet frame per poll (two APRD
+     * datagrams per member).
+     */
+    bool waitForMailboxReady(uint32_t timeout_ms,
+                             uint32_t poll_interval_ms = 10);
 
 private:
     /// Member slave indices — the explicit set, or every discovered slave
