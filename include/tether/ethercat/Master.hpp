@@ -610,6 +610,51 @@ public:
     CyclicExecutive::Stats getCyclicLoopStats() const;
 
     /**
+     * @brief Protocol-level cyclic health snapshot.
+     *
+     * One authoritative view of whether cyclic traffic is actually making
+     * it around the bus — deliberately NOT derived from kernel packet-drop
+     * counters, which cannot distinguish intentional BPF filtering or
+     * correctly discarded stray replies from real wire loss:
+     *
+     *   - wire_loss      — datagrams that did not return before their
+     *                      cycle deadline (packet didn't circulate)
+     *   - wkc_errors     — replies that returned with a bad working
+     *                      counter (slave dropped out of OP, FMMU hole)
+     *   - rx_bank_drops  — frames that PASSED the socket filter but found
+     *                      no free receive bank (real local exhaustion)
+     *   - unrouted_datagrams / rx_queue_overflow — stray replies with no
+     *                      waiter, correctly discarded: informational,
+     *                      never a fault by themselves
+     *
+     * image_slices[] carries per-slice expected-vs-last WKC and the last
+     * collect outcome; pdo_slice_health does the same for user-defined
+     * PDO slices.
+     */
+    struct CyclicHealth {
+        // --- executor level ---
+        uint64_t cycles             = 0;  ///< cyclic_loop_ cycle_count
+        uint64_t exchange_errors    = 0;  ///< cycles whose exchange returned false
+        uint64_t missed_deadlines   = 0;
+        // --- protocol level (LogicalAddressManager) ---
+        uint32_t exchanges_ok       = 0;
+        uint32_t wire_loss          = 0;  ///< replies that never came back
+        uint32_t wkc_errors         = 0;
+        uint32_t stale_responses    = 0;
+        uint32_t send_errors        = 0;
+        // --- channel level (real local loss) ---
+        uint64_t rx_bank_drops      = 0;
+        // --- transport level (informational — correctly discarded strays) ---
+        uint64_t unrouted_datagrams = 0;
+        uint64_t rx_queue_overflow  = 0;
+        // --- per-slice detail ---
+        uint8_t image_slice_count   = 0;
+        std::array<CyclicSliceHealth, kNumCyclicSlots> image_slices{};
+        std::vector<CyclicSliceHealth> pdo_slice_health;
+    };
+    CyclicHealth cyclicHealth() const;
+
+    /**
      * @brief Quiesce the wire exchange for mid-loop mapping mutation.
      *
      * Slave recovery re-registers PDO entries while a cyclic or async
@@ -1607,10 +1652,12 @@ private:
         Tether::Logging::DedupLogConfig{2, 10'000, true, Tether::Platform::LogLevel::Info}
     };
 
-    // RX-path unrouted/dropped-packet log throttling counters (per-instance;
-    // formerly function-local statics shared across all Master instances).
-    uint32_t unrouted_log_count_ = 0;
-    uint32_t rx_drop_log_count_  = 0;
+    // RX-path stray-traffic counters (per-instance; formerly function-local
+    // statics shared across all Master instances).  Neither counts real
+    // loss: unrouted datagrams have no registered waiter by definition, so
+    // discarding them is correct — see cyclicHealth().
+    std::atomic<uint64_t> unrouted_datagrams_{0};
+    std::atomic<uint64_t> rx_queue_overflow_{0};
 
     // Diagnostics: one-time per-slave fault diagnostic tracker
     mutable std::mutex m_diag_mutex_;

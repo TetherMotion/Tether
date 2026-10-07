@@ -393,6 +393,38 @@ CyclicExecutive::Stats Master::getCyclicLoopStats() const
     return cyclic_loop_ ? cyclic_loop_->getStats() : CyclicExecutive::Stats{};
 }
 
+Master::CyclicHealth Master::cyclicHealth() const
+{
+    CyclicHealth h{};
+    if (cyclic_loop_) {
+        const auto st = cyclic_loop_->getStats();
+        h.cycles            = st.cycle_count;
+        h.exchange_errors   = st.exchange_errors;
+        h.missed_deadlines  = st.missed_deadlines;
+    }
+    if (pdo_) {
+        if (LogicalAddressManager* lam = pdo_->logicalAddressManager()) {
+            const auto s = lam->getStats();
+            h.exchanges_ok    = s.success;
+            h.wire_loss       = s.timeout_errors;
+            h.wkc_errors      = s.wkc_errors;
+            h.stale_responses = s.stale_responses;
+            h.send_errors     = s.send_errors;
+            const uint8_t n = lam->cyclicSliceCount();
+            h.image_slice_count =
+                n > kNumCyclicSlots ? kNumCyclicSlots : n;
+            for (uint8_t i = 0; i < h.image_slice_count; ++i)
+                h.image_slices[i] = lam->sliceHealth(i);
+            h.pdo_slice_health = lam->pdoSliceHealth();
+        }
+    }
+    if (datapath_ && datapath_->channel_)
+        h.rx_bank_drops = datapath_->channel_->droppedRx();
+    h.unrouted_datagrams = unrouted_datagrams_.load(std::memory_order_relaxed);
+    h.rx_queue_overflow  = rx_queue_overflow_.load(std::memory_order_relaxed);
+    return h;
+}
+
 bool Master::suspendCyclicExchange(uint32_t timeout_us)
 {
     const bool any_loop = isCyclicLoopRunning() || isAsyncLoopRunning();

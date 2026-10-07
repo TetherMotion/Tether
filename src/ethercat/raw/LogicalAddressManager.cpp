@@ -605,6 +605,9 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
         }
         if (!sent) {
             stats_.send_errors++;
+            auto& h = slice_health_[s];
+            h.last_status = CyclicSliceStatus::SendError;
+            ++h.consecutive_failures;
             cyclic_pending_count_ = 0;
             pending_image_ = nullptr;
             return false;
@@ -728,21 +731,30 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
                 views[s].gen != cyclic_pending_[s].gen) {
                 arrived &= ~(1u << s);
                 stats_.stale_responses++;
+                slice_health_[s].last_status = CyclicSliceStatus::Stale;
             }
         }
     }
 
     for (uint8_t s = 0; s < nslices; ++s) {
+        auto& h = slice_health_[s];
+        h.expected_wkc = expected_wkc_[s];
         if (!(arrived & (1u << s))) {
             stats_.timeout_errors++;
+            if (h.last_status != CyclicSliceStatus::Stale)
+                h.last_status = CyclicSliceStatus::Timeout;
+            ++h.consecutive_failures;
             ok = false;
             continue;
         }
         const CyclicSlotView& resp = views[s];
+        h.last_wkc = resp.wkc;
         const uint16_t exp = expected_wkc_[s];
         if (resp.wkc == 0 ||
             (strict_wkc_ && exp != kWkcUnknown && resp.wkc != exp)) {
             stats_.wkc_errors++;
+            h.last_status = CyclicSliceStatus::WkcError;
+            ++h.consecutive_failures;
             ok = false;
             continue;
         }
@@ -750,6 +762,9 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
         // expectation from the first non-error response.
         if (exp == kWkcUnknown && resp.wkc != 0)
             expected_wkc_[s] = resp.wkc;
+        h.expected_wkc = expected_wkc_[s];
+        h.last_status = CyclicSliceStatus::Ok;
+        h.consecutive_failures = 0;
         resps[s] = &views[s];
     }
     cyclic_pending_count_ = 0;
@@ -1090,12 +1105,23 @@ void LogicalAddressManager::emitSlices(const PDO::PDOMapping& mapping,
                 static_cast<uint16_t>(run.len), true) ? 1 : 0;
             if (!run.sent) {
                 stats_.send_errors++;
+                run.health.last_status = CyclicSliceStatus::SendError;
+                ++run.health.consecutive_failures;
                 continue;
             }
             run.gen = transport_.sliceSlotGen(run.slot);
         }
         slice.pending = true;
     }
+}
+
+static void markRunStatus(CyclicSliceHealth& h, CyclicSliceStatus st,
+                        uint16_t wkc = 0, uint16_t expected = 0xFFFF) {
+    h.last_status     = st;
+    h.last_wkc        = wkc;
+    h.expected_wkc    = expected;
+    h.consecutive_failures = (st == CyclicSliceStatus::Ok)
+                                 ? 0 : h.consecutive_failures + 1;
 }
 
 bool LogicalAddressManager::collectSlices(const PDO::PDOMapping& mapping,
@@ -1157,11 +1183,12 @@ bool LogicalAddressManager::collectSlices(const PDO::PDOMapping& mapping,
                 : 0;
             arrived = (arrived & ~stale) | (arrived2 & stale);
             for (uint8_t r = 0; r < slice.run_count; ++r) {
-                const auto& run = slice.runs[r];
+                auto& run = slice.runs[r];
                 if ((arrived2 & (1u << run.slot)) &&
                     views[run.slot].gen != run.gen) {
                     arrived &= ~(1u << run.slot);
                     stats_.stale_responses++;
+                    run.health.last_status = CyclicSliceStatus::Stale;
                 }
             }
         }
@@ -1171,6 +1198,11 @@ bool LogicalAddressManager::collectSlices(const PDO::PDOMapping& mapping,
             if (!run.sent) continue;
             if (!(arrived & (1u << run.slot))) {
                 stats_.timeout_errors++;
+                if (run.health.last_status != CyclicSliceStatus::Stale)
+                    markRunStatus(run.health, CyclicSliceStatus::Timeout,
+                                  0, run.expected_wkc);
+                else
+                    ++run.health.consecutive_failures;
                 ok = false;
                 continue;
             }
@@ -1179,11 +1211,15 @@ bool LogicalAddressManager::collectSlices(const PDO::PDOMapping& mapping,
                 (strict_wkc_ && run.expected_wkc != kWkcUnknown &&
                  resp.wkc != run.expected_wkc)) {
                 stats_.wkc_errors++;
+                markRunStatus(run.health, CyclicSliceStatus::WkcError,
+                              resp.wkc, run.expected_wkc);
                 ok = false;
                 continue;
             }
             if (run.expected_wkc == kWkcUnknown && resp.wkc != 0)
                 run.expected_wkc = resp.wkc;
+            markRunStatus(run.health, CyclicSliceStatus::Ok,
+                          resp.wkc, run.expected_wkc);
             // A mid-flight mapping change leaves run offsets stale — the
             // datagram executed; skip scatter/publish, replan next send.
             if (!epoch_ok) continue;

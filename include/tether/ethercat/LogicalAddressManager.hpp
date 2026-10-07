@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "tether/ethercat/DebugFlags.hpp"
+#include "tether/ethercat/Types.hpp"
 
 #include "tether/platform/EspCompat.hpp"
 #include "tether/ethercat/PDOManager.hpp"
@@ -237,6 +238,32 @@ public:
     /// Current per-slice expectations (kWkcUnknown = still learning).
     uint16_t expectedWkc(uint8_t slice) const {
         return slice < kMaxCyclicSlices ? expected_wkc_[slice] : 0;
+    }
+
+    /**
+     * @brief Per-image-slice health — expected/last WKC, last collect
+     *        outcome, and a consecutive-failure streak.
+     *
+     * Written by the cyclic thread during cyclicCollect(); readers get a
+     * snapshot.  This is the protocol-level liveness signal: Timeout means
+     * the datagram did not circulate back, WkcError means it did but its
+     * working counter is wrong — neither is derived from packet-drop
+     * counters, which cannot distinguish intentional BPF filtering from
+     * real loss.
+     */
+    CyclicSliceHealth sliceHealth(uint8_t slice) const {
+        return slice < kMaxCyclicSlices ? slice_health_[slice]
+                                        : CyclicSliceHealth{};
+    }
+
+    /// Health of every user-defined PDO-slice run, in (slice, run) order.
+    /// Empty when no slices are defined.
+    std::vector<CyclicSliceHealth> pdoSliceHealth() const {
+        std::vector<CyclicSliceHealth> out;
+        for (const auto& s : slices_)
+            for (uint8_t r = 0; r < s.run_count; ++r)
+                out.push_back(s.runs[r].health);
+        return out;
     }
 
     /**
@@ -463,6 +490,8 @@ private:
     /// Expected-WKC per slice — kWkcUnknown = learn from first success
     /// (derived from the slave set by cyclicSend when a mapping is known).
     std::array<uint16_t, kMaxCyclicSlices> expected_wkc_{};
+    /// Last collect outcome per image slice — diagnostic snapshot.
+    std::array<CyclicSliceHealth, kMaxCyclicSlices> slice_health_{};
     bool strict_wkc_{true};
 
     // ---- User PDO slices (cyclic thread only) ---------------------------
@@ -474,6 +503,7 @@ private:
         uint8_t  gen{0};                    ///< send generation expected
         uint8_t  sent{0};                   ///< datagram emitted this cycle
         uint16_t expected_wkc{kWkcUnknown}; ///< derived/learned WKC
+        CyclicSliceHealth health{};         ///< last collect outcome
     };
     struct PDOSlice {
         std::array<PDOSliceRun, kMaxSliceRuns> runs{};
