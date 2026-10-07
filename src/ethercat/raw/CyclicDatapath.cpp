@@ -871,6 +871,7 @@ void CyclicDatapath::setup(CyclicWireMode wire_mode,
             CBPFSpec spec;
             spec.untagged_ethercat = false;
             spec.tagged_ethercat   = true;
+            spec.vlan_delivery     = we.delivery_hint;
             if (!we.rx_vlan_any) {
                 // A range clause only when a VID set was configured —
                 // rx_any must accept every TCI like the main filter.

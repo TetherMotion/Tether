@@ -12,6 +12,7 @@
 #include "tether/hal/IEthernet.hpp"
 #include "tether/ethercat/SDOErrorDecoder.hpp"
 #include "tether/ethercat/Slave.hpp"
+#include "tether/ethercat/VlanProbe.hpp"
 #include "tether/hal/NetworkInterfaceEnumerator.hpp"
 #include "tether/platform/Platform.hpp"
 
@@ -439,10 +440,12 @@ void logEncapsulationConfig(const EncapsulationConfig& config, const char* tag) 
     }
 }
 
-std::vector<EtherCAT::CBPFInsn> buildEncapsulationBpfProgram(const EncapsulationConfig& config) {
+std::vector<EtherCAT::CBPFInsn> buildEncapsulationBpfProgram(
+    const EncapsulationConfig& config, EtherCAT::VlanDeliveryHint delivery) {
     using namespace EtherCAT;
     CBPFSpec s;
-    s.udp_port = config.udpPort;
+    s.udp_port      = config.udpPort;
+    s.vlan_delivery = delivery;
 
     if (config.rxRange) {
         // VLAN mode: reject everything except VID∈range + inner EtherCAT
@@ -471,12 +474,13 @@ std::vector<EtherCAT::CBPFInsn> buildEncapsulationBpfProgram(const Encapsulation
 
 void attachEncapsulationBpfFilter(EtherCAT::HAL::IEthernet& eth,
                           const EncapsulationConfig& config,
-                          const char* tag) {
+                          const char* tag,
+                          EtherCAT::VlanDeliveryHint delivery) {
     const int fd = static_cast<int>(
         reinterpret_cast<intptr_t>(eth.nativeHandle()));
     if (fd < 0) return;   // backend without a socket fd — nothing to attach
 
-    const auto prog = buildEncapsulationBpfProgram(config);
+    const auto prog = buildEncapsulationBpfProgram(config, delivery);
     if (prog.empty()) {
         TETHER_LOGW(tag, "Encapsulation produced an empty BPF program — "
                          "no filter attached");
@@ -499,8 +503,56 @@ EtherCAT::NetworkInterface* setupEncapsulation(
     std::unique_ptr<EtherCAT::VLANRouter>& routerStorage,
     const EncapsulationConfig& encapsulation,
     const char* tag) {
+    // 0. VLAN delivery probe — before any filter is attached and before
+    //    the poll thread is running.  A bogus-logical-address LRW is
+    //    forwarded around the whole segment unchanged, so a missing reply
+    //    means the bus is not a closed loop or the VID never reaches the
+    //    slaves — fail startup instead of spinning silently.  The detected
+    //    delivery mode prunes the dead leg out of every generated filter.
+    EtherCAT::VlanDeliveryHint delivery = EtherCAT::VlanDeliveryHint::Auto;
+    if (encapsulation.vlanActive()) {
+        const uint16_t probe_vid =
+            encapsulation.txVlan.value_or(
+                encapsulation.rxRange ? encapsulation.rxRange->start : 0);
+        const auto probe = EtherCAT::probeVlanTagDelivery(eth, probe_vid);
+        if (!probe || probe->delivery == EtherCAT::VlanTagDelivery::NoReply) {
+            TETHER_LOGE(tag, "VLAN probe: no reply to bogus-LRW within 10 ms "
+                             "(vid={}) — segment not a closed loop or VID "
+                             "never reaches the bus", probe_vid);
+            return nullptr;
+        }
+        TETHER_LOGI(tag, "VLAN probe: reply in {} us, tag delivery = {} "
+                         "(vid={}, tpid=0x{:04X})",
+                    probe->rtt_us, EtherCAT::toString(probe->delivery),
+                    probe->vid, probe->tpid);
+        if (encapsulation.rxRange &&
+            !encapsulation.rxRange->contains(probe->vid)) {
+            TETHER_LOGW(tag, "VLAN probe: replies carry VID {} outside the "
+                             "configured RX range {}-{}",
+                        probe->vid, encapsulation.rxRange->start,
+                        encapsulation.rxRange->end);
+        }
+        delivery = EtherCAT::vlanDeliveryHint(probe->delivery);
+        if (delivery != EtherCAT::VlanDeliveryHint::Auto)
+            TETHER_LOGI(tag, "Generating filters for delivery mode '{}'",
+                        EtherCAT::toString(probe->delivery));
+
+        // Feed encap + hint into the master's WireEncap so the cyclic
+        // datapath composes its socket-pair demux programs with the same
+        // knowledge (and bakes the TX tag into cyclic header templates).
+        EtherCAT::WireEncap we;
+        we.tx_vlan       = encapsulation.txVlan.value_or(0);
+        we.rx_vlan_any   = encapsulation.rxAny;
+        if (encapsulation.rxRange) {
+            we.rx_vlan_lo = encapsulation.rxRange->start;
+            we.rx_vlan_hi = encapsulation.rxRange->end;
+        }
+        we.delivery_hint = delivery;
+        master.setWireEncap(we);
+    }
+
     // 1. Kernel-side ingress filter.
-    attachEncapsulationBpfFilter(eth, encapsulation, tag);
+    attachEncapsulationBpfFilter(eth, encapsulation, tag, delivery);
 
     // 2. EtherCAT-over-UDP.
     if (encapsulation.udp) {

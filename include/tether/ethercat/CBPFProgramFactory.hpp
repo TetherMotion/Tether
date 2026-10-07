@@ -175,6 +175,20 @@ struct CBPFSpec {
      */
     std::optional<CBPFIdxRange> first_idx_range;
     bool first_idx_exclude = false;
+
+    /**
+     * @brief Detected tag-delivery mode for the socket this program will
+     *        be attached to (see probeVlanTagDelivery()).
+     *
+     *   - Auto (default): emit both the inline-tag leg and the
+     *     SKF_AD_VLAN_* auxdata leg — correct regardless of NIC offload.
+     *   - StrippedOnly: the kernel always strips tags into auxdata —
+     *     drops the inline-tag dispatch, TCI/inner-EtherType loads and
+     *     the offset-21 idx check.
+     *   - InlineOnly: the kernel never strips — drops every auxdata load;
+     *     the wire legs reduce to untagged accept/reject.
+     */
+    VlanDeliveryHint vlan_delivery = VlanDeliveryHint::Auto;
 };
 
 class CBPFProgramFactory {
