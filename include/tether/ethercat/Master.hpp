@@ -439,6 +439,13 @@ public:
         /// kernel-ring busy-poll.  0 disables.
         uint32_t rx_spin_ns{0};
 
+        /// Wire round-trip budget (ns) shared by a send's collect
+        /// deadline — a reply must arrive within this of the send or the
+        /// cycle counts wire_loss.  Must exceed the actual bus round-trip
+        /// (probe it — e.g. a VLAN hop can push RTT well past 500 µs).
+        /// 0 = auto: 80% of cycle_period_us.
+        uint32_t rx_budget_ns{0};
+
         /// Slot-wait spin window (ns): before blocking in ppoll, the
         /// cyclic slot wait busy-polls the slot seq + channel rxPending()
         /// (pure memory reads — ring DMA writes are visible without a

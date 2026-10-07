@@ -256,6 +256,13 @@ public:
                           uint16_t adp, uint16_t ado,
                           const void* data, uint16_t datalen,
                           bool roundtrip);
+    /// Drain every pending channel frame into the slot bank, bounded so a
+    /// flooded socket cannot starve the caller.  Called on wait entry and
+    /// before each early return: the ring is only consumed here, so a
+    /// reply that arrives past its cycle's deadline must still be drained
+    /// (deposited for the gen guard to reject) — otherwise the ring fills
+    /// permanently and every subsequent packet is kernel-dropped.
+    void drainChannel(int max_sweeps = 64);
     /// Masked wait shared by waitMask()/waitSliceMask() — `slot_base`
     /// translates mask bits into slots_ indexes.
     uint32_t waitMaskImpl(uint32_t slot_mask, const uint64_t* tokens,

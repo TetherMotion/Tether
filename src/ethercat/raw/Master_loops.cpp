@@ -239,8 +239,12 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     // in a later phase — the wire round-trip overlaps the work between.
     const bool split_exchange =
         config.exchange_placement != ExchangePlacement::Atomic;
+    // Wire round-trip budget for the collect deadline.  An explicit
+    // rx_budget_ns wins; otherwise 80% of the cycle — the old 200 µs cap
+    // silently broke links whose RTT exceeds it (VLAN hops, busy slaves).
     const uint32_t cyclic_rx_budget_ns =
-        std::min<uint32_t>(200'000, config.cycle_period_us * 900);
+        config.rx_budget_ns ? config.rx_budget_ns
+                            : config.cycle_period_us * 800;
 
     CyclicExecutive::TaskFn exchange_fn = [this, split_exchange,
                                            cyclic_rx_budget_ns]() -> bool {
