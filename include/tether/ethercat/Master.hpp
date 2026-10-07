@@ -1061,6 +1061,21 @@ public:
      */
     uint16_t lastWkc() const { return last_wkc_; }
 
+    /**
+     * @brief Send AL_CONTROL state requests as a combined frame:
+     *        APWR(AL_CONTROL) immediately followed by APRD(AL_STATUS).
+     *
+     * Firmware-driven ESCs (e.g. AS715N) only process pending register
+     * work while servicing frame traffic and answer writes with WKC=0,
+     * so the piggybacked read both "kicks" the slave's state machine
+     * and confirms the request's effect in a single round-trip.
+     * Default: off.
+     */
+    void setAlControlStatusKick(bool enabled) {
+        al_control_status_kick_ = enabled;
+    }
+    bool alControlStatusKick() const { return al_control_status_kick_; }
+
     // ---- Index allocation --------------------------------------------------
 
     static constexpr uint8_t kFireAndForgetIdx = 0xFE;
@@ -1648,6 +1663,10 @@ private:
 
     // Last working counter from a real bus transaction
     std::atomic<uint16_t> last_wkc_{0};
+
+    // Piggyback an APRD(AL_STATUS) after every AL_CONTROL write in one
+    // frame (see setAlControlStatusKick).
+    std::atomic<bool> al_control_status_kick_{false};
 
     // Test hooks
     AprdTestCb aprd_cb_;
