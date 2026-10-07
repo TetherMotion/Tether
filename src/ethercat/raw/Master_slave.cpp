@@ -379,7 +379,26 @@ bool Master::requestSlaveApplicationLayerState(SlaveAddress slave_address, uint8
     }
     
     bool result = writeRegister(slave_address, RegisterAddress(Raw::EC_REG_AL_CONTROL), static_cast<uint16_t>(state_code));
-    
+
+    // Some firmware-driven ESCs (e.g. AS715N) execute the AL_CONTROL write
+    // but report WKC=0 (or drop the write reply), making writeRegister()
+    // return false even though the request landed.  When the write reports
+    // failure, verify the slave is still reachable via AL_STATUS — if the
+    // read succeeds, treat the request as issued and let the caller's
+    // state-confirmation poll be the authoritative check.
+    if (!result) {
+        uint16_t al_status = 0;
+        if (readRegister(slave_address, RegisterAddress(Raw::EC_REG_AL_STATUS),
+                         al_status, 200)) {
+            TETHER_LOGW(TAG, "{}: AL_CONTROL=0x{:02X} write unacknowledged "
+                             "(wkc=0) but slave reachable (AL_STATUS=0x{:04X}) "
+                             "— treating request as issued",
+                        slaveLogPrefix(slave_address.slavePosition()).c_str(),
+                        state_code, al_status);
+            result = true;
+        }
+    }
+
     if (debug_flags_.stateMachine && debug_flags_.stateMachineFilt.allows(slave_index)) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  AL State Request Result: {}                                 ║", result ? "SUCCESS" : "FAILED");

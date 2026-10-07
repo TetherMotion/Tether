@@ -782,6 +782,24 @@ SlaveError Slave::transitionToOp() {
                         logPrefix().c_str(), b_ok ? "ok" : "rd-fail",
                         sm2_data[0], sm2_data[1], sm2_data[2], sm2_data[3],
                         sm2_data[4], sm2_data[5], sm2_data[6], sm2_data[7], wd2);
+
+            // Liveness probe: issue one SDO upload (0x1018:0 identity).
+            // The mailbox is serviced by the slave's application CPU — if the
+            // SDO answers, the firmware is alive and OP is gated by the ESM;
+            // if it times out, the firmware is wedged and only a slave
+            // reset/power-cycle is likely to recover it.
+            {
+                CoE::CoETransactionOptions sdo_opts{};
+                sdo_opts.timeout_ms = 300;
+                auto sdo_res = master_->sdoManager(index_)
+                                   .template readSync<uint32_t>(0x1018, 0,
+                                                                sdo_opts);
+                TETHER_LOGW(TAG, "{}: SDO liveness probe (0x1018:0): {}",
+                            logPrefix().c_str(),
+                            sdo_res.has_value()
+                                ? "firmware ALIVE — ESM gating OP"
+                                : "NO RESPONSE — slave firmware wedged");
+            }
         }
         if (ok) {
             if (state == static_cast<uint8_t>(SlaveState::OP)) {
