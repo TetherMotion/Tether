@@ -10,9 +10,13 @@
 
 #include "tether/profiles/cia402/CiA402StateUtils.hpp"
 #include "tether/profiles/cia402/CiA402Config.hpp"
+#include "tether/profiles/cia402/60xx-Parameters.hpp"
+#include "tether/ethercat/SlaveGroup.hpp"
 
 #include <cstdio>
 #include <algorithm>
+#include <thread>
+#include <chrono>
 
 namespace EtherCAT {
 
@@ -203,6 +207,29 @@ const char* errorToString(uint16_t errorCode) {
         case ErrorCode::HomingError:           return "Homing Error";
         default:                               return "Unknown Error";
     }
+}
+
+bool setOperatingModeVerified(
+    EtherCAT::SlaveGroup& group,
+    OperatingMode mode,
+    const EtherCAT::CoE::CoETransactionOptions& opts,
+    uint32_t settle_ms,
+    const char* tag) {
+    const uint64_t raw = static_cast<uint64_t>(static_cast<int8_t>(mode));
+    if (!group.writeEntryAll(CiA402::Parameters60xx::OperationMode,
+                             raw, opts, tag)) {
+        return false;
+    }
+    if (settle_ms > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(settle_ms));
+    }
+    // The drive mirrors the applied mode into 0x6061 ModeDisplay.
+    EtherCAT::CoE::CoETransactionOptions verify_opts = opts;
+    if (verify_opts.timeout_ms == 0) {
+        verify_opts.timeout_ms = 2000;
+    }
+    return group.verifyEntry(CiA402::Parameters60xx::ModeDisplay,
+                             raw, verify_opts, tag);
 }
 
 } // namespace CiA402

@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
@@ -11,6 +12,8 @@
 #include "tether/hal/IEthernet.hpp"
 
 #include "ExampleHelpers.hpp"
+
+namespace Tether::Utils { class SignalHandler; }
 
 namespace Tether::Examples {
 
@@ -78,5 +81,42 @@ bool startHostMaster(HostEtherNetSession& session,
 bool startHostMasterAndDiscover(HostEtherNetSession& session,
                                 EtherCAT::Master& master,
                                 const char* tag);
+
+/// One-call host bring-up: initHostEthernet() + setupEncapsulation() +
+/// startHostPollThread() + startHostMaster() + mailbox-fallback enable.
+/// When @p sig is given, wires its cancel callback to
+/// master.requestCancel() so Ctrl-C wakes SDO/mailbox waiters.
+/// On failure the session is already shut down.
+bool bringUpHost(HostEtherNetSession& session,
+                 EtherCAT::Master& master,
+                 const std::string& interfaceName,
+                 const EncapsulationConfig& encapsulation,
+                 const char* tag,
+                 Utils::SignalHandler* sig = nullptr,
+                 bool enable_mailbox_fallback = true);
+
+/// RAII cleanup for a host session: on destruction runs the registered
+/// exit action (typically `master.stopDistributedClocks(); master.stop();`)
+/// and then shutdownHostEthernet().  Declare it right after bringUpHost()
+/// and *before* any resource that must be released ahead of the master
+/// (per-slave interfaces, PDO keep-alives) — C++ destroys in reverse
+/// declaration order, so those release first and every early `return`
+/// then performs the full graceful shutdown automatically.
+class HostSessionGuard {
+public:
+    explicit HostSessionGuard(HostEtherNetSession& session,
+                              std::function<void()> on_exit = {});
+    ~HostSessionGuard();
+
+    HostSessionGuard(const HostSessionGuard&)            = delete;
+    HostSessionGuard& operator=(const HostSessionGuard&) = delete;
+
+    void setOnExit(std::function<void()> on_exit);
+    void dismiss();
+
+private:
+    HostEtherNetSession&    session_;
+    std::function<void()>   on_exit_;
+};
 
 } // namespace Tether::Examples
