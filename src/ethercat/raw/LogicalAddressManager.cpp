@@ -417,6 +417,56 @@ static uint64_t monoNowNs() {
          + static_cast<uint64_t>(ts.tv_nsec);
 }
 
+// ---- Packed per-slice health ---------------------------------------------
+// Slice health is a single 64-bit word (CyclicSliceHealth::pack) written
+// by the cyclic thread and read lock-free by diagnostic callers — no
+// torn fields, no seqlock retry.  Single writer, so a plain
+// load-modify-store is sufficient.
+
+static CyclicSliceHealth healthLoad(const uint64_t& p) {
+    return CyclicSliceHealth::unpack(
+        __atomic_load_n(&p, __ATOMIC_ACQUIRE));
+}
+static void healthStore(uint64_t& p, const CyclicSliceHealth& h) {
+    __atomic_store_n(&p, h.pack(), __ATOMIC_RELEASE);
+}
+/// Change last_status only (Stale marking keeps wkc/consec for the
+/// following timeout classification).
+static void healthMarkStatus(uint64_t& p, CyclicSliceStatus st) {
+    auto h = healthLoad(p);
+    h.last_status = st;
+    healthStore(p, h);
+}
+/// Unconditional failure: set status and bump the failure streak.
+static void healthFail(uint64_t& p, CyclicSliceStatus st) {
+    auto h = healthLoad(p);
+    h.last_status = st;
+    ++h.consecutive_failures;
+    healthStore(p, h);
+}
+/// Timeout: keeps a Stale classification (the late echo IS the story)
+/// but still bumps the consecutive-failure streak.  `expected` refreshes
+/// the published expectation so diagnostics stay current.
+static void healthTimeout(uint64_t& p, uint16_t expected) {
+    auto h = healthLoad(p);
+    if (h.last_status != CyclicSliceStatus::Stale)
+        h.last_status = CyclicSliceStatus::Timeout;
+    h.expected_wkc = expected;
+    ++h.consecutive_failures;
+    healthStore(p, h);
+}
+/// Full outcome write: status + WKC pair + failure-streak bookkeeping.
+static void markRunStatus(uint64_t& p, CyclicSliceStatus st,
+                          uint16_t wkc = 0, uint16_t expected = 0xFFFF) {
+    auto h = healthLoad(p);
+    h.last_status  = st;
+    h.last_wkc     = wkc;
+    h.expected_wkc = expected;
+    h.consecutive_failures = (st == CyclicSliceStatus::Ok)
+                                 ? 0 : h.consecutive_failures + 1;
+    healthStore(p, h);
+}
+
 bool LogicalAddressManager::exchangeAllLRWCyclic(const PDO::PDOMapping& mapping,
                                                  uint32_t rx_timeout_ns,
                                                  ProcessImage* image) {
@@ -605,9 +655,7 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
         }
         if (!sent) {
             stats_.send_errors++;
-            auto& h = slice_health_[s];
-            h.last_status = CyclicSliceStatus::SendError;
-            ++h.consecutive_failures;
+            healthFail(slice_health_[s], CyclicSliceStatus::SendError);
             cyclic_pending_count_ = 0;
             pending_image_ = nullptr;
             return false;
@@ -731,30 +779,26 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
                 views[s].gen != cyclic_pending_[s].gen) {
                 arrived &= ~(1u << s);
                 stats_.stale_responses++;
-                slice_health_[s].last_status = CyclicSliceStatus::Stale;
+                healthMarkStatus(slice_health_[s],
+                                 CyclicSliceStatus::Stale);
             }
         }
     }
 
     for (uint8_t s = 0; s < nslices; ++s) {
-        auto& h = slice_health_[s];
-        h.expected_wkc = expected_wkc_[s];
+        uint64_t& hw = slice_health_[s];
         if (!(arrived & (1u << s))) {
             stats_.timeout_errors++;
-            if (h.last_status != CyclicSliceStatus::Stale)
-                h.last_status = CyclicSliceStatus::Timeout;
-            ++h.consecutive_failures;
+            healthTimeout(hw, expected_wkc_[s]);
             ok = false;
             continue;
         }
         const CyclicSlotView& resp = views[s];
-        h.last_wkc = resp.wkc;
         const uint16_t exp = expected_wkc_[s];
         if (resp.wkc == 0 ||
             (strict_wkc_ && exp != kWkcUnknown && resp.wkc != exp)) {
             stats_.wkc_errors++;
-            h.last_status = CyclicSliceStatus::WkcError;
-            ++h.consecutive_failures;
+            markRunStatus(hw, CyclicSliceStatus::WkcError, resp.wkc, exp);
             ok = false;
             continue;
         }
@@ -762,9 +806,8 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
         // expectation from the first non-error response.
         if (exp == kWkcUnknown && resp.wkc != 0)
             expected_wkc_[s] = resp.wkc;
-        h.expected_wkc = expected_wkc_[s];
-        h.last_status = CyclicSliceStatus::Ok;
-        h.consecutive_failures = 0;
+        markRunStatus(hw, CyclicSliceStatus::Ok, resp.wkc,
+                      expected_wkc_[s]);
         resps[s] = &views[s];
     }
     cyclic_pending_count_ = 0;
@@ -1105,23 +1148,13 @@ void LogicalAddressManager::emitSlices(const PDO::PDOMapping& mapping,
                 static_cast<uint16_t>(run.len), true) ? 1 : 0;
             if (!run.sent) {
                 stats_.send_errors++;
-                run.health.last_status = CyclicSliceStatus::SendError;
-                ++run.health.consecutive_failures;
+                healthFail(run.health_packed, CyclicSliceStatus::SendError);
                 continue;
             }
             run.gen = transport_.sliceSlotGen(run.slot);
         }
         slice.pending = true;
     }
-}
-
-static void markRunStatus(CyclicSliceHealth& h, CyclicSliceStatus st,
-                        uint16_t wkc = 0, uint16_t expected = 0xFFFF) {
-    h.last_status     = st;
-    h.last_wkc        = wkc;
-    h.expected_wkc    = expected;
-    h.consecutive_failures = (st == CyclicSliceStatus::Ok)
-                                 ? 0 : h.consecutive_failures + 1;
 }
 
 bool LogicalAddressManager::collectSlices(const PDO::PDOMapping& mapping,
@@ -1188,7 +1221,8 @@ bool LogicalAddressManager::collectSlices(const PDO::PDOMapping& mapping,
                     views[run.slot].gen != run.gen) {
                     arrived &= ~(1u << run.slot);
                     stats_.stale_responses++;
-                    run.health.last_status = CyclicSliceStatus::Stale;
+                    healthMarkStatus(run.health_packed,
+                                     CyclicSliceStatus::Stale);
                 }
             }
         }
@@ -1198,11 +1232,7 @@ bool LogicalAddressManager::collectSlices(const PDO::PDOMapping& mapping,
             if (!run.sent) continue;
             if (!(arrived & (1u << run.slot))) {
                 stats_.timeout_errors++;
-                if (run.health.last_status != CyclicSliceStatus::Stale)
-                    markRunStatus(run.health, CyclicSliceStatus::Timeout,
-                                  0, run.expected_wkc);
-                else
-                    ++run.health.consecutive_failures;
+                healthTimeout(run.health_packed, run.expected_wkc);
                 ok = false;
                 continue;
             }
@@ -1211,14 +1241,14 @@ bool LogicalAddressManager::collectSlices(const PDO::PDOMapping& mapping,
                 (strict_wkc_ && run.expected_wkc != kWkcUnknown &&
                  resp.wkc != run.expected_wkc)) {
                 stats_.wkc_errors++;
-                markRunStatus(run.health, CyclicSliceStatus::WkcError,
+                markRunStatus(run.health_packed, CyclicSliceStatus::WkcError,
                               resp.wkc, run.expected_wkc);
                 ok = false;
                 continue;
             }
             if (run.expected_wkc == kWkcUnknown && resp.wkc != 0)
                 run.expected_wkc = resp.wkc;
-            markRunStatus(run.health, CyclicSliceStatus::Ok,
+            markRunStatus(run.health_packed, CyclicSliceStatus::Ok,
                           resp.wkc, run.expected_wkc);
             // A mid-flight mapping change leaves run offsets stale — the
             // datagram executed; skip scatter/publish, replan next send.

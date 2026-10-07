@@ -530,7 +530,10 @@ bool CyclicDatapath::waitViewImpl(uint8_t fast_idx, uint64_t token,
         if (s.seq.load(std::memory_order_seq_cst) != token) {
             return read_slot();
         }
-        if (master_.cancel_requested_.load(std::memory_order_acquire)) return false;
+        if (master_.cancel_requested_.load(std::memory_order_acquire)) {
+            drainChannel();   // leave the ring empty for the next run
+            return false;
+        }
         const int64_t now_ns = clock.getMicroseconds() * 1000;
         int64_t remain = deadline_ns - now_ns;
         if (remain <= 0) {
@@ -739,6 +742,7 @@ uint32_t CyclicDatapath::waitMaskImpl(uint32_t slot_mask,
         outstanding = scan();
         if (!outstanding) { fill(slot_mask); return slot_mask; }
         if (master_.cancel_requested_.load(std::memory_order_acquire)) {
+            drainChannel();   // leave the ring empty for the next run
             const uint32_t arrived = slot_mask & ~outstanding;
             fill(arrived);
             return arrived;

@@ -548,6 +548,10 @@ EtherCAT::NetworkInterface* setupEncapsulation(
             we.rx_vlan_hi = encapsulation.rxRange->end;
         }
         we.delivery_hint = delivery;
+        // Feed the measured RTT through so startCyclicLoop() can size the
+        // collect deadline against reality instead of a fixed cap.
+        if (probe->rtt_us > 0)
+            we.wire_rtt_ns = static_cast<uint32_t>(probe->rtt_us) * 1000u;
         master.setWireEncap(we);
     }
 

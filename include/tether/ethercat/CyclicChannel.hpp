@@ -177,6 +177,20 @@ public:
      *        deadline-relevant event worth surfacing in stats.
      */
     virtual uint64_t txDeferred() const { return 0; }
+    /**
+     * @brief Cumulative kernel-side drops (tp_drops) seen by this caller —
+     *        frames that PASSED the socket filter but found no ring slot
+     *        or socket buffer.  This is the ring-starvation signal that
+     *        complements droppedRx() (local bank exhaustion): tp_drops
+     *        rising while droppedRx stays 0 means the ring wasn't drained,
+     *        not that banks ran out.
+     *
+     * PACKET_STATISTICS is read-and-reset per socket — each reader
+     * (nic-mon, this) observes only the delta since the last read, so the
+     * returned value is the share accumulated *here*, not a global total.
+     * 0 on backends without a packet socket.
+     */
+    virtual uint64_t kernelRxDrops() { return 0; }
 };
 
 // ============================================================================

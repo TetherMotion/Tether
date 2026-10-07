@@ -309,6 +309,17 @@ public:
     const char* backendName() const override { return "socket"; }
     uint64_t droppedRx() const override { return dropped_rx_; }
 
+    uint64_t kernelRxDrops() override {
+        // PACKET_STATISTICS resets on read — accumulate the observed
+        // deltas so callers get a monotonic share of the true total.
+        struct tpacket_stats st{};
+        socklen_t len = sizeof(st);
+        if (::getsockopt(fd_, SOL_PACKET, PACKET_STATISTICS,
+                         &st, &len) == 0)
+            kernel_rx_drops_ += st.tp_drops;
+        return kernel_rx_drops_;
+    }
+
 protected:
     struct Bank {
         uint8_t buf[kFrameBytes];
@@ -369,6 +380,7 @@ protected:
     uint8_t tx_buf_[kFrameBytes]{};
     Bank bank_[kBankSize];
     uint64_t dropped_rx_ = 0;
+    uint64_t kernel_rx_drops_ = 0;   // accumulated PACKET_STATISTICS deltas
 };
 
 // ============================================================================

@@ -240,11 +240,37 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     const bool split_exchange =
         config.exchange_placement != ExchangePlacement::Atomic;
     // Wire round-trip budget for the collect deadline.  An explicit
-    // rx_budget_ns wins; otherwise 80% of the cycle — the old 200 µs cap
-    // silently broke links whose RTT exceeds it (VLAN hops, busy slaves).
+    // rx_budget_ns wins; otherwise derive it from the startup probe's
+    // measured RTT (50% headroom, floored at 200 us) — the old fixed
+    // 200 us cap silently broke links whose RTT exceeds it (VLAN hops,
+    // busy slaves).  Cap is 80% of the cycle period; a link that needs
+    // more than that physically cannot do a round-trip per cycle.
+    const uint32_t measured_rtt_ns = config_.wire_encap.wire_rtt_ns;
+    const uint32_t budget_cap_ns   = config.cycle_period_us * 800;
     const uint32_t cyclic_rx_budget_ns =
-        config.rx_budget_ns ? config.rx_budget_ns
-                            : config.cycle_period_us * 800;
+        config.rx_budget_ns
+            ? config.rx_budget_ns
+            : measured_rtt_ns
+                  ? std::clamp(measured_rtt_ns + measured_rtt_ns / 2,
+                               200'000u, budget_cap_ns)
+                  : budget_cap_ns;
+    if (measured_rtt_ns > 0 &&
+        cyclic_rx_budget_ns < measured_rtt_ns + measured_rtt_ns / 5) {
+        // Budget below RTT+20%: every reply lands past the deadline and
+        // shows up as stale/wire_loss.  The gen guard keeps this safe —
+        // but cyclic operation at this period is not viable.
+        TETHER_LOGE(TAG, "cyclic loop: RX budget {} ns cannot cover "
+                         "measured wire RTT {} ns +headroom within a {} us "
+                         "cycle — replies will always arrive late; raise "
+                         "the cycle period or fix the link",
+                    cyclic_rx_budget_ns, measured_rtt_ns,
+                    config.cycle_period_us);
+    } else if (cyclic_rx_budget_ns >= config.cycle_period_us * 900) {
+        TETHER_LOGW(TAG, "cyclic loop: RX budget {} ns consumes >=90% of "
+                         "the {} us cycle — a lost reply always misses "
+                         "the deadline",
+                    cyclic_rx_budget_ns, config.cycle_period_us);
+    }
 
     CyclicExecutive::TaskFn exchange_fn = [this, split_exchange,
                                            cyclic_rx_budget_ns]() -> bool {
@@ -417,13 +443,28 @@ Master::CyclicHealth Master::cyclicHealth() const
             const uint8_t n = lam->cyclicSliceCount();
             h.image_slice_count =
                 n > kNumCyclicSlots ? kNumCyclicSlots : n;
-            for (uint8_t i = 0; i < h.image_slice_count; ++i)
+            uint32_t stuck = 0;
+            const auto count_stuck = [&stuck](const CyclicSliceHealth& s) {
+                // >=8 consecutive Stale outcomes: the wire RTT exceeds a
+                // full period — every cycle only sees the previous echo.
+                if (s.last_status == CyclicSliceStatus::Stale &&
+                    s.consecutive_failures >= 8)
+                    ++stuck;
+            };
+            for (uint8_t i = 0; i < h.image_slice_count; ++i) {
                 h.image_slices[i] = lam->sliceHealth(i);
+                count_stuck(h.image_slices[i]);
+            }
             h.pdo_slice_health = lam->pdoSliceHealth();
+            for (const auto& s : h.pdo_slice_health) count_stuck(s);
+            h.slices_stuck_stale =
+                stuck > 0xFF ? 0xFF : static_cast<uint8_t>(stuck);
         }
     }
-    if (datapath_ && datapath_->channel_)
-        h.rx_bank_drops = datapath_->channel_->droppedRx();
+    if (datapath_ && datapath_->channel_) {
+        h.rx_bank_drops   = datapath_->channel_->droppedRx();
+        h.kernel_rx_drops = datapath_->channel_->kernelRxDrops();
+    }
     h.unrouted_datagrams = unrouted_datagrams_.load(std::memory_order_relaxed);
     h.rx_queue_overflow  = rx_queue_overflow_.load(std::memory_order_relaxed);
     return h;
