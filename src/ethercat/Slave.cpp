@@ -701,12 +701,14 @@ SlaveError Slave::transitionToOp() {
             // in the window between SM activation and the first cyclic
             // frame.  Toggling the SM activate bit re-arms the channel
             // and clears the trigger so the slave accepts OP.
+            bool wd_latched = false;
             for (uint8_t sm = 2; sm < 4; ++sm) {
                 const uint16_t base =
                     static_cast<uint16_t>(0x0800 + sm * 8);
                 uint8_t stat = 0;
                 if (master_->readRegister(index_, base + 5, &stat, 1, 200) &&
                     (stat & 0x20u)) {
+                    wd_latched = true;
                     TETHER_LOGW(TAG, "{}: SM{} watchdog trigger latched "
                                      "(stat=0x{:02X}) — resetting channel",
                                 logPrefix().c_str(), sm, stat);
@@ -718,6 +720,23 @@ SlaveError Slave::transitionToOp() {
                                            static_cast<uint16_t>(base + 6),
                                            &on, 1, 200);
                 }
+            }
+
+            // If the trigger re-latches while cyclic data is flowing and
+            // the FMMU map is correct, the watchdog is measuring PDI-side
+            // service that only runs once the slave reaches OP — a
+            // SAFE_OP deadlock.  Disarm both watchdogs so the transition
+            // can complete.
+            if (wd_latched && ++wd_latch_count_ >= 2) {
+                TETHER_LOGW(TAG, "{}: SM watchdog re-latching with "
+                                 "cyclic data flowing — disabling "
+                                 "PDI/process-data watchdogs",
+                            logPrefix().c_str());
+                const uint16_t zero = 0;
+                master_->writeRegister(SlaveAddress(index_),
+                                       Raw::EC_REG_WD_TIME_PDATA, zero);
+                master_->writeRegister(SlaveAddress(index_),
+                                       Raw::EC_REG_WD_TIME_PDI, zero);
             }
 
             master_->requestSlaveApplicationLayerState(
