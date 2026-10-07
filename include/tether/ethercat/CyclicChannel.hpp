@@ -344,6 +344,21 @@ std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
     uint32_t rx_spin_ns = 0);
 
 /**
+ * @brief Test seam: ring backend over caller memory with the real V2
+ *        blocked layout.
+ *
+ * Same as createCyclicRingChannelForMemory() but the RX ring is laid out
+ * as `rx_blocks` blocks of `rx_block_size` bytes holding `rx_fpb` frames
+ * each — matching the kernel layout when tp_block_size rounds up past
+ * rx_fpb*frame_size (per-block tail padding).  Catches flat-indexing
+ * regressions in the walk path.  TX falls back to the socket path.
+ */
+std::unique_ptr<ICyclicChannel> createCyclicRingChannelBlockedForMemory(
+    int fd, int ifindex,
+    void* rx_ring, uint32_t rx_frame_size, uint32_t rx_block_size,
+    uint32_t rx_fpb, uint32_t rx_blocks);
+
+/**
  * @brief Test seam: TPACKET_V3 block-mode RX over caller memory.
  *
  * `rx_ring` is `blocks` blocks of `block_size` bytes, each beginning with
