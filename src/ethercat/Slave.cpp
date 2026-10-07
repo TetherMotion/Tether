@@ -723,6 +723,33 @@ SlaveError Slave::transitionToOp() {
             master_->requestSlaveApplicationLayerState(
                 index_, static_cast<uint8_t>(SlaveState::OP) | 0x10);
 
+            // Diagnostic: read back the first two FMMU register blocks
+            // (0x0600+0x10) so a missing or wrong logical->physical map
+            // shows up directly instead of hiding behind WKC totals.
+            uint8_t fmmu_raw[32] = {};
+            if (master_->readRegister(index_, 0x0600, fmmu_raw,
+                                      sizeof(fmmu_raw), 200)) {
+                for (int f = 0; f < 2; ++f) {
+                    const uint8_t* r = fmmu_raw + f * 16;
+                    const uint32_t log =
+                        static_cast<uint32_t>(r[0]) |
+                        (static_cast<uint32_t>(r[1]) << 8) |
+                        (static_cast<uint32_t>(r[2]) << 16) |
+                        (static_cast<uint32_t>(r[3]) << 24);
+                    const uint16_t len =
+                        static_cast<uint16_t>(r[4] | (r[5] << 8));
+                    const uint16_t phys =
+                        static_cast<uint16_t>(r[8] | (r[9] << 8));
+                    TETHER_LOGI(TAG, "{}: FMMU{}: log=0x{:08X} len={} "
+                                     "phys=0x{:04X} type=0x{:02X} act=0x{:02X}",
+                                logPrefix().c_str(), f, log, len, phys,
+                                r[11], r[12]);
+                }
+            } else {
+                TETHER_LOGW(TAG, "{}: FMMU register readback failed",
+                            logPrefix().c_str());
+            }
+
             // Diagnostic: read SM2's process-data buffer (phys 0x1800) to
             // prove cyclic output data is actually reaching the slave.
             // If this stays all-zero the LRW/FMMU write side is broken.
