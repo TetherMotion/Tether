@@ -32,10 +32,13 @@
 #pragma once
 
 #include <cstdint>
+#include <future>
 #include <initializer_list>
 #include <span>
 #include <vector>
 
+#include "tether/ethercat/CoETypes.hpp"
+#include "tether/ethercat/ObjectDictionary.hpp"
 #include "tether/ethercat/Types.hpp"
 
 namespace EtherCAT {
@@ -152,7 +155,85 @@ public:
                       uint32_t poll_interval_ms = 10,
                       uint32_t resend_interval_ms = 0);
 
+    // ---- CoE/SDO group access (one mailbox transaction per member) ---------
+    //
+    // SDO is a per-slave mailbox protocol — there is no broadcast SDO — so
+    // "group" here means: enqueue the transfer on every member's CoEManager
+    // and collect the per-slave results.  For broadcast groups (all()) the
+    // member set resolves to every discovered slave, same as readStates().
+
+    /// Per-member outcome of a group SDO read/write.
+    template<typename T>
+    struct SlaveGroupSdoResult {
+        uint16_t          slave_index = 0;
+        CoE::CoEResult<T> result;
+    };
+
+    using SlaveGroupReadResult  = SlaveGroupSdoResult<uint64_t>;
+    using SlaveGroupWriteResult = SlaveGroupSdoResult<void>;
+
+    /**
+     * @brief Read `entry` on every group member, synchronously.
+     *
+     * Enqueues an entry-driven upload (width taken from entry.data_type) on
+     * each member's CoEManager, then waits for all of them until
+     * opts.timeout_ms.  Members that do not answer in time get
+     * CoEErrorCode::Timeout in their result slot.
+     *
+     * @return One SlaveGroupReadResult per member, in indices() order
+     *         (discovery order for broadcast groups).
+     */
+    std::vector<SlaveGroupReadResult> readEntry(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        CoE::CoETransactionOptions opts = {});
+
+    /**
+     * @brief Async variant: enqueue the read on every member and return one
+     *        std::future per member (aligned with indices() order).
+     *        The caller waits on the futures itself.
+     */
+    std::vector<std::future<CoE::CoEResult<uint64_t>>> readEntryAsync(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        CoE::CoETransactionOptions opts = {});
+
+    /**
+     * @brief Write `value` to `entry` on every group member, synchronously.
+     *        Same semantics as readEntry(); the value is truncated to the
+     *        width declared by entry.data_type.
+     */
+    std::vector<SlaveGroupWriteResult> writeEntry(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        uint64_t value, CoE::CoETransactionOptions opts = {});
+
+    /**
+     * @brief Async variant of writeEntry — one std::future per member.
+     */
+    std::vector<std::future<CoE::CoEResult<void>>> writeEntryAsync(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        uint64_t value, CoE::CoETransactionOptions opts = {});
+
+    /**
+     * @brief Write per-member values to `entry` — values[i] goes to
+     *        member i (indices() order).  values.size() must equal the
+     *        member count; on mismatch nothing is written and every member
+     *        gets CoEErrorCode::NotConfigured.
+     */
+    std::vector<SlaveGroupWriteResult> writeEntry(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        std::span<const uint64_t> values,
+        CoE::CoETransactionOptions opts = {});
+
+    /// Async variant of the per-member writeEntry.
+    std::vector<std::future<CoE::CoEResult<void>>> writeEntryAsync(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        std::span<const uint64_t> values,
+        CoE::CoETransactionOptions opts = {});
+
 private:
+    /// Member slave indices — the explicit set, or every discovered slave
+    /// for broadcast groups (SDO has no broadcast primitive).
+    std::vector<uint16_t> memberIndices() const;
+
     Master& master_;
     std::vector<uint16_t> indices_;
     bool broadcast_ = false;

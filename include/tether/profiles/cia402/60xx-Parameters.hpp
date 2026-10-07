@@ -753,9 +753,64 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry MaxMotorSpeed = {
     .effective_time = ::EtherCAT::ObjectDictionary::EffectiveTime::Immediately,
 };
 
+// 0x608F Position encoder resolution — record, U32 per subindex.
+// Sub 1/2 are the CiA 402 encoder-increments / motor-revolutions pair;
+// sub 3/4 are the (Synapticon) second-encoder pair.
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry EncoderIncrements = {
+    .index = 0x608F,
+    .subindex = 0x01,
+    .name = "Encoder increments",
+    .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 0,
+    .modification_mode = ::EtherCAT::ObjectDictionary::ModificationMode::DuringOperation,
+    .effective_time = ::EtherCAT::ObjectDictionary::EffectiveTime::Immediately,
+};
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry MotorRevolutions = {
+    .index = 0x608F,
+    .subindex = 0x02,
+    .name = "Motor revolutions",
+    .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 0,
+    .modification_mode = ::EtherCAT::ObjectDictionary::ModificationMode::DuringOperation,
+    .effective_time = ::EtherCAT::ObjectDictionary::EffectiveTime::Immediately,
+};
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry EncoderIncrements2 = {
+    .index = 0x608F,
+    .subindex = 0x03,
+    .name = "Encoder increments (second encoder)",
+    .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 0,
+    .modification_mode = ::EtherCAT::ObjectDictionary::ModificationMode::DuringOperation,
+    .effective_time = ::EtherCAT::ObjectDictionary::EffectiveTime::Immediately,
+};
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry MotorRevolutions2 = {
+    .index = 0x608F,
+    .subindex = 0x04,
+    .name = "Motor revolutions (second encoder)",
+    .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 0,
+    .modification_mode = ::EtherCAT::ObjectDictionary::ModificationMode::DuringOperation,
+    .effective_time = ::EtherCAT::ObjectDictionary::EffectiveTime::Immediately,
+};
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry HomingMethod = {
+    .index = 0x6098,
+    .subindex = 0x00,
+    .name = "Homing method",
+    .data_type = EtherCAT::slave::ObjectDictionaryDataType::Integer8,
+    .default_value = 0,
+    .min_value = -128,
+    .max_value = 127,
+    .modification_mode = ::EtherCAT::ObjectDictionary::ModificationMode::DuringOperation,
+    .effective_time = ::EtherCAT::ObjectDictionary::EffectiveTime::Immediately,
+};
+
 // more profile-specific definitions could be appended similarly...
 
-constexpr std::array<const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry*, 49> kRegisterList = {
+constexpr std::array<const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry*, 54> kRegisterList = {
     &DIFunction4,                    // 0x2004 sub0
     &DIFunction5,                    // 0x2004 sub11
     &MechanicalLimitPosition,        // 0x2006.08
@@ -780,6 +835,11 @@ constexpr std::array<const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry*,
     &ReferencePolarity,              // 0x607E
     &MaxSpeed,                       // 0x607F
     &MaxMotorSpeed,                  // 0x6080
+    &EncoderIncrements,              // 0x608F.01
+    &MotorRevolutions,               // 0x608F.02
+    &EncoderIncrements2,             // 0x608F.03
+    &MotorRevolutions2,              // 0x608F.04
+    &HomingMethod,                   // 0x6098
     &SpeedDeviation,                 // 0x60B1
     &TorqueOffset,                   // 0x60B2
     &TouchProbeFunction,             // 0x60B8

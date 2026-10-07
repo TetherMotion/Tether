@@ -5,6 +5,7 @@
 
 #include "tether/ethercat/SlaveGroup.hpp"
 
+#include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/TransactionRouter.hpp"
 #include "tether/ethercat/FaultDetection.hpp"
@@ -225,6 +226,137 @@ bool SlaveGroup::waitForState(SlaveState target, uint32_t timeout_ms,
         }
     }
     return false;
+}
+
+// ============================================================================
+// CoE/SDO group access — one mailbox transaction per member
+// ============================================================================
+
+std::vector<uint16_t> SlaveGroup::memberIndices() const
+{
+    if (!broadcast_) return indices_;
+    const uint16_t n = master_.getDiscoveredSlaveCount();
+    std::vector<uint16_t> v(n);
+    for (uint16_t i = 0; i < n; ++i) v[i] = i;
+    return v;
+}
+
+std::vector<std::future<CoE::CoEResult<uint64_t>>>
+SlaveGroup::readEntryAsync(
+    const ObjectDictionary::ObjectDictionaryEntry& entry,
+    CoE::CoETransactionOptions opts)
+{
+    const auto members = memberIndices();
+    std::vector<std::future<CoE::CoEResult<uint64_t>>> futures;
+    futures.reserve(members.size());
+    for (const uint16_t idx : members) {
+        futures.push_back(
+            master_.sdoManager(idx).readEntryAsync(entry, opts));
+    }
+    return futures;
+}
+
+std::vector<std::future<CoE::CoEResult<void>>>
+SlaveGroup::writeEntryAsync(
+    const ObjectDictionary::ObjectDictionaryEntry& entry,
+    uint64_t value, CoE::CoETransactionOptions opts)
+{
+    const auto members = memberIndices();
+    std::vector<std::future<CoE::CoEResult<void>>> futures;
+    futures.reserve(members.size());
+    for (const uint16_t idx : members) {
+        futures.push_back(
+            master_.sdoManager(idx).writeEntryAsync(entry, value, opts));
+    }
+    return futures;
+}
+
+std::vector<std::future<CoE::CoEResult<void>>>
+SlaveGroup::writeEntryAsync(
+    const ObjectDictionary::ObjectDictionaryEntry& entry,
+    std::span<const uint64_t> values, CoE::CoETransactionOptions opts)
+{
+    const auto members = memberIndices();
+    std::vector<std::future<CoE::CoEResult<void>>> futures;
+    futures.reserve(members.size());
+    if (values.size() != members.size()) {
+        TETHER_LOGE(TAG, "writeEntry: {} values for {} members — refusing",
+                    values.size(), members.size());
+        for (size_t i = 0; i < members.size(); ++i) {
+            CoE::CoEWriteTransaction t;
+            t.promise.set_value(
+                std::unexpected(CoE::CoEErrorCode::NotConfigured));
+            futures.push_back(t.promise.get_future());
+        }
+        return futures;
+    }
+    for (size_t i = 0; i < members.size(); ++i) {
+        futures.push_back(
+            master_.sdoManager(members[i])
+                .writeEntryAsync(entry, values[i], opts));
+    }
+    return futures;
+}
+
+// Wait on all per-member futures against a shared deadline; members that
+// miss it get CoEErrorCode::Timeout in their result slot.
+template<typename T>
+static std::vector<SlaveGroup::SlaveGroupSdoResult<T>>
+collectGroupFutures(const std::vector<uint16_t>& members,
+                    std::vector<std::future<CoE::CoEResult<T>>>& futures,
+                    uint32_t timeout_ms)
+{
+    std::vector<SlaveGroup::SlaveGroupSdoResult<T>> out(members.size());
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    for (size_t i = 0; i < members.size(); ++i) {
+        out[i].slave_index = members[i];
+        const auto remaining = deadline - std::chrono::steady_clock::now();
+        if (remaining > std::chrono::steady_clock::duration::zero() &&
+            futures[i].wait_for(remaining) == std::future_status::ready) {
+            out[i].result = futures[i].get();
+        } else {
+            out[i].result = std::unexpected(CoE::CoEErrorCode::Timeout);
+        }
+    }
+    return out;
+}
+
+std::vector<SlaveGroup::SlaveGroupReadResult>
+SlaveGroup::readEntry(
+    const ObjectDictionary::ObjectDictionaryEntry& entry,
+    CoE::CoETransactionOptions opts)
+{
+    const auto members = memberIndices();
+    const uint32_t timeout_ms =
+        (opts.timeout_ms > 0) ? opts.timeout_ms : CoE::kDefaultTimeoutMs;
+    auto futures = readEntryAsync(entry, opts);
+    return collectGroupFutures<uint64_t>(members, futures, timeout_ms);
+}
+
+std::vector<SlaveGroup::SlaveGroupWriteResult>
+SlaveGroup::writeEntry(
+    const ObjectDictionary::ObjectDictionaryEntry& entry,
+    uint64_t value, CoE::CoETransactionOptions opts)
+{
+    const auto members = memberIndices();
+    const uint32_t timeout_ms =
+        (opts.timeout_ms > 0) ? opts.timeout_ms : CoE::kDefaultTimeoutMs;
+    auto futures = writeEntryAsync(entry, value, opts);
+    return collectGroupFutures<void>(members, futures, timeout_ms);
+}
+
+std::vector<SlaveGroup::SlaveGroupWriteResult>
+SlaveGroup::writeEntry(
+    const ObjectDictionary::ObjectDictionaryEntry& entry,
+    std::span<const uint64_t> values,
+    CoE::CoETransactionOptions opts)
+{
+    const auto members = memberIndices();
+    const uint32_t timeout_ms =
+        (opts.timeout_ms > 0) ? opts.timeout_ms : CoE::kDefaultTimeoutMs;
+    auto futures = writeEntryAsync(entry, values, opts);
+    return collectGroupFutures<void>(members, futures, timeout_ms);
 }
 
 } // namespace EtherCAT

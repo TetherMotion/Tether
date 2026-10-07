@@ -13,6 +13,7 @@
 #include "tether/ethercat/CoETypes.hpp"
 #include "tether/ethercat/EtherCATConfig.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
+#include "tether/ethercat/ObjectDictionary.hpp"
 #include "tether/ethercat/SDOManager.hpp" // ISDOTransport, SDORequest, SDOResponse
 #include "logging/Logger.hpp"
 
@@ -156,6 +157,55 @@ public:
                                  uint32_t val, CoETransactionOptions opts = {});
     CoEResult<void>     writeI32(uint16_t idx, uint8_t sub,
                                  int32_t val, CoETransactionOptions opts = {});
+
+    // ----- Object-Dictionary Entry API -----
+
+    /// Synchronous read/write driven by a register definition
+    /// (ObjectDictionaryEntry / device RegisterEntry): index, subindex and
+    /// transfer width all come from entry.data_type, so no sizes or indices
+    /// are hard-coded at the call site.
+    ///
+    /// Values are passed as raw bits in a uint64_t — signed Integer types are
+    /// sign-extended, so `static_cast<int64_t>` recovers the signed value and
+    /// unsigned values are used as-is. Real32/Real64 return their bit pattern.
+    /// Variable-length types (VisibleString, OctetString, Domain, ...) are
+    /// unsupported here and fail with CoEErrorCode::NotConfigured.
+    CoEResult<uint64_t> readEntry(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        CoETransactionOptions opts = {});
+    CoEResult<void> writeEntry(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        uint64_t value, CoETransactionOptions opts = {});
+
+    /// Record-member variants: `subindex` overrides entry.subindex, so a
+    /// record object (e.g. a list whose members all share the same type)
+    /// needs only one register definition for all of its subindices.
+    CoEResult<uint64_t> readEntry(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        uint8_t subindex,
+        CoETransactionOptions opts = {});
+    CoEResult<void> writeEntry(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        uint8_t subindex, uint64_t value,
+        CoETransactionOptions opts = {});
+
+    /// Async (queued) variants of readEntry/writeEntry — the upload is
+    /// executed on the CoE worker thread and decoded against
+    /// entry.data_type; the caller waits on the returned future.
+    std::future<CoEResult<uint64_t>> readEntryAsync(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        CoETransactionOptions opts = {});
+    std::future<CoEResult<uint64_t>> readEntryAsync(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        uint8_t subindex,
+        CoETransactionOptions opts = {});
+    std::future<CoEResult<void>> writeEntryAsync(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        uint64_t value, CoETransactionOptions opts = {});
+    std::future<CoEResult<void>> writeEntryAsync(
+        const ObjectDictionary::ObjectDictionaryEntry& entry,
+        uint8_t subindex, uint64_t value,
+        CoETransactionOptions opts = {});
 
     // ----- Queue Status -----
 

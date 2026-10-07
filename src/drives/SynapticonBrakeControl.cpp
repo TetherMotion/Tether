@@ -47,9 +47,9 @@ bool BrakeControl::disengageBrake(EtherCAT::CoE::CoEManager& sdo,
     TETHER_LOGI(TAG, "{}: Disengaging brake (0x2004:7 <- 2)...",
                 sdo.logPrefix().c_str());
 
-    const auto wr = sdo.writeU8(ObjectIndex, kSubBrakeStatus,
-                                static_cast<uint8_t>(BrakeStatusValue::Disengaged),
-                                {.timeout_ms = to});
+    const auto wr = sdo.writeEntry(BrakeStatus,
+                                   static_cast<uint64_t>(BrakeStatusValue::Disengaged),
+                                   {.timeout_ms = to});
     if (!wr.has_value()) {
         TETHER_LOGE(TAG, "{}: Failed to write 0x2004:7=2 (disengage)",
                     sdo.logPrefix().c_str());
@@ -93,9 +93,9 @@ bool BrakeControl::engageBrake(EtherCAT::CoE::CoEManager& sdo,
     TETHER_LOGI(TAG, "{}: Engaging brake (0x2004:7 <- 1)...",
                 sdo.logPrefix().c_str());
 
-    const auto wr = sdo.writeU8(ObjectIndex, kSubBrakeStatus,
-                                static_cast<uint8_t>(BrakeStatusValue::Engaged),
-                                {.timeout_ms = to});
+    const auto wr = sdo.writeEntry(BrakeStatus,
+                                   static_cast<uint64_t>(BrakeStatusValue::Engaged),
+                                   {.timeout_ms = to});
     if (!wr.has_value()) {
         TETHER_LOGE(TAG, "{}: Failed to write 0x2004:7=1 (engage)",
                     sdo.logPrefix().c_str());
@@ -135,13 +135,13 @@ std::optional<BrakeStatusValue> BrakeControl::readBrakeStatus(
     EtherCAT::CoE::CoEManager& sdo,
     uint32_t timeout_ms) {
     const uint32_t to = resolveTimeout(timeout_ms);
-    const auto res = sdo.readU8(ObjectIndex, kSubBrakeStatus, {.timeout_ms = to});
+    const auto res = sdo.readEntry(BrakeStatus, {.timeout_ms = to});
     if (!res.has_value()) {
         TETHER_LOGW(TAG, "{}: Failed to read 0x2004:7 (brake status)",
                     sdo.logPrefix().c_str());
         return std::nullopt;
     }
-    const uint8_t raw = res.value();
+    const uint8_t raw = static_cast<uint8_t>(res.value());
     if (raw > static_cast<uint8_t>(BrakeStatusValue::Disengaged)) {
         TETHER_LOGW(TAG, "{}: Unexpected brake status value 0x{:02X}",
                     sdo.logPrefix().c_str(), raw);
@@ -176,9 +176,9 @@ bool BrakeControl::setReleaseStrategy(
     TETHER_LOGI(TAG, "{}: Setting brake release strategy (0x2004:4 <- {})...",
                 sdo.logPrefix().c_str(), static_cast<unsigned>(strategy));
 
-    const auto wr = sdo.writeU8(ObjectIndex, kSubReleaseStrategy,
-                                static_cast<uint8_t>(strategy),
-                                {.timeout_ms = to});
+    const auto wr = sdo.writeEntry(ReleaseStrategy,
+                                   static_cast<uint64_t>(strategy),
+                                   {.timeout_ms = to});
     if (!wr.has_value()) {
         TETHER_LOGE(TAG, "{}: Failed to write 0x2004:4 (release strategy)",
                     sdo.logPrefix().c_str());

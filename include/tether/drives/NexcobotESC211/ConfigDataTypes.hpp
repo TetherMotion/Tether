@@ -27,6 +27,8 @@ struct ConfigDataTypeInfo {
     uint16_t inputIndex;     // SDO index for writing (temp/input to device)
     uint16_t outputIndex;    // SDO index for reading (active/output from device)
     uint16_t crcIndex;       // SDO index for CRC register
+    /// Register definition for the CRC object — access via sdoReadEntry.
+    const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry* crcEntry;
     uint16_t maxSections;    // Maximum number of 256-byte sections
     EtherCAT::Drives::Registers::NexcobotESC211::UserSystem::ControlCommandCode activateCmd;
     EtherCAT::Drives::Registers::NexcobotESC211::UserSystem::ControlCommandCode saveFlashCmd;
@@ -40,16 +42,19 @@ namespace UserSystem = EtherCAT::Drives::Registers::NexcobotESC211::UserSystem;
 inline constexpr ConfigDataTypeInfo kConfigDataTypes[] = {
     {ConfigDataType::FNI, "fni",
      BulkData::TempFNIDataIndex, BulkData::ActiveFNIDataIndex, BulkData::ActiveFNIDataCRCIndex,
+     &BulkData::ActiveFNIDataCRC,
      8, UserSystem::ControlCommandCode::UpdateFNIFromObject,
      UserSystem::ControlCommandCode::SaveFNIToFlash,
      UserSystem::ControlCommandCode::LoadFNIFromFlash},
     {ConfigDataType::RSP, "rsp",
      BulkData::RSPDataInputIndex, BulkData::RSPDataOutputIndex, BulkData::RSPDataCRCIndex,
+     &BulkData::RSPDataCRC,
      48, UserSystem::ControlCommandCode::DownloadRSPAndSDDByObject,
      UserSystem::ControlCommandCode::SaveRSPAndSDDToFlash,
      UserSystem::ControlCommandCode::LoadRSPAndSDDFromFlash},
     {ConfigDataType::SDD, "sdd",
      BulkData::SDDDataInputIndex, BulkData::SDDDataOutputIndex, BulkData::SDDDataCRCIndex,
+     &BulkData::SDDDataCRC,
      25, UserSystem::ControlCommandCode::DownloadRSPAndSDDByObject,
      UserSystem::ControlCommandCode::SaveRSPAndSDDToFlash,
      UserSystem::ControlCommandCode::LoadRSPAndSDDFromFlash},
