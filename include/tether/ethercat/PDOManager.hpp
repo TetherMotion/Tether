@@ -376,6 +376,9 @@ private:
 struct SlaveConfig {
     uint16_t slave_index;
     uint16_t configured_address;
+    /// True once configured_address has been read from the slave (reg
+    /// 0x0010) or set explicitly — finalizeMapping() resolves it lazily.
+    bool     configured_address_known = false;
     uint32_t vendor_id;
     uint32_t product_code;
 
@@ -775,6 +778,11 @@ public:
     void           resetStats();
     PDO::PDOStats& statsRef();
 
+    /// Log the transfer statistics block (FMMU/LRW cycle counters plus
+    /// physical FPWR/FPRD counters) — reveals WKC errors where a slave
+    /// stopped acknowledging frames.
+    void dumpStats(const char* tag) const;
+
     // ----- Per-slave PDO counter accessors -----
     bool     hasSlavePDOEntries(uint16_t slave_index) const;
     uint32_t getSlavePDORequestCount(uint16_t slave_index) const;
@@ -785,6 +793,22 @@ public:
     uint16_t configureAllSlaveSMs(uint16_t slave_count);
 
     // ----- Mapping Finalization -----
+
+    /**
+     * @brief Ensure the slave's configured station address (reg 0x0010) is
+     *        known to the PDO mapping.
+     *
+     * Entries registered through add_rxpdo()/add_txpdo() take their
+     * `configured_address` (used by FPWR/FPRD transfers) from the mapping's
+     * per-slave table.  When that table is still empty for @p slave_index
+     * this issues a single APRD of register 0x0010 and installs the result
+     * in both the SlaveConfig and the mapping.  Called automatically by
+     * finalizeMapping(), so callers never need to read 0x0010 themselves.
+     *
+     * @return true when the address is known (cached or freshly read).
+     */
+    bool ensureConfiguredAddress(uint16_t slave_index);
+
     bool finalizeMapping(uint16_t slave_index);
 
     // ----- PDO Transfer (single entry) -----

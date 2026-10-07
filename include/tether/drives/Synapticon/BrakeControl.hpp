@@ -30,10 +30,12 @@
  */
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 
 #include "tether/drives/Synapticon/Registers/DriveConfig2000.hpp"
+#include "tether/ethercat/ObjectDictionary.hpp"
 
 namespace EtherCAT { namespace CoE { class CoEManager; } }
 
@@ -101,6 +103,55 @@ public:
         EtherCAT::CoE::CoEManager& sdo,
         Registers::Synapticon::Obj2004::ReleaseStrategyOptions strategy,
         uint32_t timeout_ms = 0);
+
+    // ------------------------------------------------------------------
+    // Diagnostics
+    // ------------------------------------------------------------------
+
+    /// All fixed-width 0x2004 entries, in display order — suitable for
+    /// SlaveGroup::dumpEntries() or per-slave dumps.
+    static constexpr std::array<
+        const EtherCAT::ObjectDictionary::ObjectDictionaryEntry*, 6>
+    kConfigEntries = {
+        &Registers::Synapticon::Obj2004::ReleaseStrategy,
+        &Registers::Synapticon::Obj2004::PullVoltage,
+        &Registers::Synapticon::Obj2004::HoldVoltage,
+        &Registers::Synapticon::Obj2004::PullTime,
+        &Registers::Synapticon::Obj2004::BrakeStatus,
+        &Registers::Synapticon::Obj2004::OutputVoltage,
+    };
+
+    /// Snapshot of the full 0x2004 brake configuration.  Fields that could
+    /// not be read stay std::nullopt (best-effort read).
+    struct Config {
+        std::optional<uint8_t>          release_strategy;   ///< 0x2004:4
+        std::optional<uint32_t>         pull_voltage;       ///< 0x2004:1
+        std::optional<uint32_t>         hold_voltage;       ///< 0x2004:2
+        std::optional<uint16_t>         pull_time;          ///< 0x2004:3
+        std::optional<BrakeStatusValue> status;             ///< 0x2004:7
+        std::optional<uint16_t>         output_voltage;     ///< 0x2004:0A
+    };
+
+    /// Read every kConfigEntries object into a Config snapshot.
+    /// Transfer widths come from the register definitions — firmware that
+    /// declares the U16 subs rejects oversized reads.
+    static Config readConfig(EtherCAT::CoE::CoEManager& sdo,
+                             uint32_t timeout_ms = 0);
+
+    /// Log the full 0x2004 configuration, one line per object.
+    static void dumpConfig(EtherCAT::CoE::CoEManager& sdo,
+                           const char* tag, uint32_t timeout_ms = 0);
+
+    /// Cross-check the authoritative brake status (0x2004:7) against the
+    /// statusword brake bit (SOMANET TxPDO statusword bit 15, 1=disengaged)
+    /// and log one combined diagnostic line.
+    /// @param statusword_disengaged  bit-15 decode from the cyclic
+    ///        statusword, or std::nullopt when no PDO sample is available.
+    /// @return true when 0x2004:7 reports Disengaged.
+    static bool verifyDisengaged(
+        EtherCAT::CoE::CoEManager& sdo,
+        std::optional<bool> statusword_disengaged,
+        const char* tag, uint32_t timeout_ms = 0);
 };
 
 } // namespace Synapticon

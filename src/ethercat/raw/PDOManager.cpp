@@ -336,6 +336,22 @@ PDO::PDOStats  PDOManager::getStats() const  { return stats_; }
 void           PDOManager::resetStats()      { std::memset(&stats_, 0, sizeof(stats_)); }
 PDO::PDOStats& PDOManager::statsRef()        { return stats_; }
 
+void PDOManager::dumpStats(const char* tag) const {
+    TETHER_LOGI(tag, "=== PDO Transfer Statistics ===");
+    TETHER_LOGI(tag, "  [FMMU] total_cycles={} rx_sent={} tx_recv={}",
+        static_cast<unsigned long long>(stats_.total_cycles),
+        static_cast<unsigned long long>(stats_.rxpdo_frames_sent),
+        static_cast<unsigned long long>(stats_.txpdo_frames_recv));
+    TETHER_LOGI(tag, "  [FMMU] rx_errors={} tx_errors={} wkc_errors={}",
+        stats_.rxpdo_errors, stats_.txpdo_errors, stats_.wkc_errors);
+    TETHER_LOGI(tag,
+        "  [PHYS] fpwr_ok={} fpwr_wkc_err={} fprd_ok={} fprd_wkc_err={}",
+        physical_stats_.fpwr_success, physical_stats_.fpwr_wkc_errors,
+        physical_stats_.fprd_success, physical_stats_.fprd_wkc_errors);
+    TETHER_LOGI(tag, "  [PHYS] send_err={} timeout_err={}",
+        physical_stats_.send_errors, physical_stats_.timeout_errors);
+}
+
 // ----- Per-slave PDO counter accessors -----
 
 bool PDOManager::hasSlavePDOEntries(uint16_t slave_index) const {
@@ -527,11 +543,56 @@ uint16_t PDOManager::configureAllSlaveSMs(uint16_t slave_count) {
 // Mapping Finalization
 // ============================================================================
 
+bool PDOManager::ensureConfiguredAddress(uint16_t slave_index) {
+    if (slave_index >= PDO::kMaxPDOSlaves) return false;
+    PDO::SlaveConfig& cfg = slave_configs_[slave_index];
+    if (cfg.configured_address_known) return true;
+
+    // Single APRD of the Configured Station Address register (0x0010).
+    // The slave's configured station address is assigned during INIT (from
+    // SII/EEPROM or by the master).  Without it, FPWR/FPRD transfers would
+    // fall back to the auto-increment position address, which addressed
+    // commands don't respond to after INIT.
+    constexpr uint16_t kRegConfiguredStationAddress = 0x0010;
+    const uint16_t adp = transport_.adpForSlaveIndex(slave_index);
+    const uint8_t idx = transport_.allocIdx();
+    if (!transport_.sendSingleDatagram(
+            Command::APRD, idx, adp, kRegConfiguredStationAddress,
+            nullptr, 2, /*roundtrip=*/true)) {
+        TETHER_LOGW(TAG,
+            "{}: failed to read configured station address (reg 0x0010) — "
+            "FPWR/FPRD will use auto-increment fallback",
+            slavePrefix(slave_index).c_str());
+        return false;
+    }
+    RxDatagram resp;
+    if (!transport_.waitForResponseIdx(idx, 200, resp) ||
+        resp.wkc == 0 || resp.datalen < 2) {
+        TETHER_LOGW(TAG,
+            "{}: no response reading configured station address "
+            "(reg 0x0010) — FPWR/FPRD will use auto-increment fallback",
+            slavePrefix(slave_index).c_str());
+        return false;
+    }
+    uint16_t cfg_addr;
+    std::memcpy(&cfg_addr, resp.data, 2);
+    cfg.configured_address       = cfg_addr;
+    cfg.configured_address_known = true;
+    mapping_.set_slave_configured_address(slave_index, cfg_addr);
+    TETHER_LOGI(TAG, "{}: configured station address (reg 0x0010) = 0x{:04X}",
+                slavePrefix(slave_index).c_str(), cfg_addr);
+    return true;
+}
+
 bool PDOManager::finalizeMapping(uint16_t slave_index) {
     if (slave_index >= PDO::kMaxPDOSlaves) {
         TETHER_LOGE(TAG, "Invalid slave index {}", slave_index);
         return false;
     }
+    // Make sure FPWR/FPRD transfers address the slave by its configured
+    // station address — resolve it from reg 0x0010 when nobody set it.
+    ensureConfiguredAddress(slave_index);
+
     PDO::SlaveConfig& cfg = slave_configs_[slave_index];
     const uint16_t sm2_addr = cfg.sm[2].phys_start_addr;
     const uint16_t sm3_addr = cfg.sm[3].phys_start_addr;

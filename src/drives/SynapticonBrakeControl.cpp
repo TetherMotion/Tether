@@ -14,6 +14,9 @@
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/platform/Platform.hpp"
 
+#include <format>
+#include <string>
+
 namespace EtherCAT {
 namespace Drives {
 namespace Synapticon {
@@ -185,6 +188,74 @@ bool BrakeControl::setReleaseStrategy(
         return false;
     }
     return true;
+}
+
+// ============================================================================
+// readConfig — best-effort snapshot of all 0x2004 entries
+// ============================================================================
+BrakeControl::Config BrakeControl::readConfig(EtherCAT::CoE::CoEManager& sdo,
+                                              uint32_t timeout_ms) {
+    const uint32_t to = resolveTimeout(timeout_ms);
+    Config cfg;
+    const auto rd = [&](const ObjectDictionary::ObjectDictionaryEntry& e)
+            -> std::optional<uint64_t> {
+        const auto r = sdo.readEntry(e, {.timeout_ms = to});
+        if (!r.has_value()) return std::nullopt;
+        return *r;
+    };
+    if (const auto v = rd(ReleaseStrategy))
+        cfg.release_strategy = static_cast<uint8_t>(*v);
+    if (const auto v = rd(PullVoltage))
+        cfg.pull_voltage = static_cast<uint32_t>(*v);
+    if (const auto v = rd(HoldVoltage))
+        cfg.hold_voltage = static_cast<uint32_t>(*v);
+    if (const auto v = rd(PullTime))
+        cfg.pull_time = static_cast<uint16_t>(*v);
+    if (const auto v = rd(BrakeStatus)) {
+        const uint8_t raw = static_cast<uint8_t>(*v);
+        if (raw <= static_cast<uint8_t>(BrakeStatusValue::Disengaged))
+            cfg.status = static_cast<BrakeStatusValue>(raw);
+    }
+    if (const auto v = rd(OutputVoltage))
+        cfg.output_voltage = static_cast<uint16_t>(*v);
+    return cfg;
+}
+
+void BrakeControl::dumpConfig(EtherCAT::CoE::CoEManager& sdo,
+                              const char* tag, uint32_t timeout_ms) {
+    const Config cfg = readConfig(sdo, timeout_ms);
+    const std::string prefix = sdo.logPrefix();
+    const auto fmt = [](const auto& opt) -> std::string {
+        if (opt.has_value()) return std::format("{}", *opt);
+        return "<read failed>";
+    };
+    TETHER_LOGI(tag, "{}: brake cfg 0x2004:1 Pull voltage      = {}",
+                prefix.c_str(), fmt(cfg.pull_voltage));
+    TETHER_LOGI(tag, "{}: brake cfg 0x2004:2 Hold voltage      = {}",
+                prefix.c_str(), fmt(cfg.hold_voltage));
+    TETHER_LOGI(tag, "{}: brake cfg 0x2004:3 Pull time         = {}",
+                prefix.c_str(), fmt(cfg.pull_time));
+    TETHER_LOGI(tag, "{}: brake cfg 0x2004:4 Release strategy  = {}",
+                prefix.c_str(), fmt(cfg.release_strategy));
+    TETHER_LOGI(tag, "{}: brake cfg 0x2004:7 Brake status      = {}",
+                prefix.c_str(),
+                cfg.status ? brakeStatusName(*cfg.status) : "<read failed>");
+    TETHER_LOGI(tag, "{}: brake cfg 0x2004:A Output voltage    = {}",
+                prefix.c_str(), fmt(cfg.output_voltage));
+}
+
+bool BrakeControl::verifyDisengaged(
+    EtherCAT::CoE::CoEManager& sdo,
+    std::optional<bool> statusword_disengaged,
+    const char* tag, uint32_t timeout_ms) {
+    const auto status = readBrakeStatus(sdo, timeout_ms);
+    const char* sw_str = statusword_disengaged.has_value()
+        ? (*statusword_disengaged ? "DISENGAGED" : "engaged")
+        : "n/a";
+    TETHER_LOGI(tag, "{}: brake check: statusword bit15={} | 0x2004:7={}",
+                sdo.logPrefix().c_str(), sw_str,
+                status ? brakeStatusName(*status) : "read-failed");
+    return status.has_value() && *status == BrakeStatusValue::Disengaged;
 }
 
 } // namespace Synapticon
