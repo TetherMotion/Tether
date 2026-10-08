@@ -482,6 +482,11 @@ int main(int argc, char* argv[])
         *v <= 60000) {
         brake_hold_mv = static_cast<uint16_t>(*v);
     }
+    // Snapshot the original release strategy so it can be restored on
+    // exit — leaving Manual behind breaks tools that release the brake
+    // via the 0x2004:7 command object (ignored under Manual).
+    const uint8_t orig_strategy = sdo.readU8(0x2004, 4, sdo_opts)
+                                      .value_or(1);
     if (!sdo.writeU8(0x2004, 4, 0, sdo_opts).has_value()) {
         TETHER_LOGE(TAG, "Failed to set 0x2004:4 release strategy = Manual");
         return 6;
@@ -492,6 +497,12 @@ int main(int argc, char* argv[])
     // ---- Remap RxPDO 0x1602 to carry 0x2004:10 Output voltage ----
     // ETG.1000 mapping sequence: disable (sub0=0), write entries, enable.
     // 0x20040A10 = index 0x2004, subindex 10, 16 bits.
+    // Snapshot the original 0x1602 mapping for restore on exit.
+    const uint8_t orig_map_cnt =
+        sdo.readU8(0x1602, 0, sdo_opts).value_or(0);
+    uint32_t orig_map[8] = {};
+    for (uint8_t i = 0; i < orig_map_cnt && i < 8; ++i)
+        orig_map[i] = sdo.readU32(0x1602, i + 1, sdo_opts).value_or(0);
     {
         bool ok = sdo.writeU8(0x1602, 0, 0, sdo_opts).has_value()
                && sdo.writeU32(0x1602, 1, 0x20040A10, sdo_opts).has_value()
@@ -610,8 +621,8 @@ int main(int argc, char* argv[])
     master.ethercatMaster().clearCancel();
     {
         EtherCAT::CiA402Drive::ControlledShutdownConfig scfg;
-        // All brake interaction goes through the PDO-mapped command byte —
-        // write Engage into 0x2004:7 and let the cyclic exchange deliver it.
+        // Brake interaction goes through the PDO image only — drop the
+        // 0x60FE output bit and the spring clamps the brake.
         scfg.brake_action = [drv] {
             auto* buf = static_cast<uint8_t*>(drv->getRxPDOBuffer());
             if (!buf) return false;
@@ -624,6 +635,35 @@ int main(int argc, char* argv[])
         if (drv && !drv->controlledShutdown(scfg)) {
             TETHER_LOGW(TAG, "Slave {}: controlled shutdown reported errors",
                         slave_idx);
+        }
+    }
+    // ---- Restore the previous brake/PDO settings ----
+    // Leaving Manual strategy behind breaks other tools: their 0x2004:7
+    // command writes are ignored while the strategy is Manual, so the
+    // brake would stay physically clamped for the next application.
+    if (sdo.writeU8(0x2004, 4, orig_strategy, sdo_opts)) {
+        TETHER_LOGI(TAG, "Brake release strategy restored ({})",
+                    orig_strategy);
+    } else {
+        TETHER_LOGW(TAG, "Failed to restore brake release strategy");
+    }
+    // Restore the original 0x1602 mapping (best-effort — some firmware
+    // only accepts PDO-map writes in PRE_OP; the mapping is not stored
+    // to flash, so a drive restart also recovers it).
+    {
+        bool ok = sdo.writeU8(0x1602, 0, 0, sdo_opts).has_value();
+        for (uint8_t i = 0; ok && i < orig_map_cnt; ++i)
+            ok = sdo.writeU32(0x1602, i + 1, orig_map[i], sdo_opts)
+                     .has_value();
+        if (ok)
+            ok = sdo.writeU8(0x1602, 0, orig_map_cnt, sdo_opts)
+                     .has_value();
+        if (ok) {
+            TETHER_LOGI(TAG, "RxPDO 0x1602 mapping restored ({} entries)",
+                        orig_map_cnt);
+        } else {
+            TETHER_LOGW(TAG, "Could not restore 0x1602 mapping in OP — "
+                             "drive power-cycle restores it");
         }
     }
     master.stopMotionControlLoop();
