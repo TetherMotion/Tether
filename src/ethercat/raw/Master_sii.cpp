@@ -136,11 +136,15 @@ bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::
             // first SDO exchange.
             (void)drainSlaveMailbox(slave_index);
 
-            uint8_t sm0_ctrl = 0, sm1_ctrl = 0;
-            bool sm0_ok = readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(Raw::EC_REG_SM0 + 0x04), sm0_ctrl, 200);
-            bool sm1_ok = readRegister(SlaveAddress(slave_index), static_cast<uint16_t>(Raw::EC_REG_SM1 + 0x04), sm1_ctrl, 200);
+            // SM0 (0x0800) and SM1 (0x0808) blocks are adjacent — verify
+            // both control bytes with a single 16-byte read.
+            uint8_t sm_blocks[16] = {};
+            const bool sm_rd = readRegister(SlaveAddress(slave_index),
+                                            static_cast<uint16_t>(Raw::EC_REG_SM0),
+                                            sm_blocks, sizeof(sm_blocks), 200);
+            const uint8_t sm0_ctrl = sm_blocks[4], sm1_ctrl = sm_blocks[12];
 
-            if (sm0_ok && sm1_ok) {
+            if (sm_rd) {
                 if (sm0_ctrl == 0x26 && sm1_ctrl == 0x22) {
                     if (log_level >= Tether::Platform::LogLevel::Debug) {
                         TETHER_LOGD(local_tag, "[4/4] SM registers verified: SM0=0x{:02X} SM1=0x{:02X}", sm0_ctrl, sm1_ctrl);

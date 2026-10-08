@@ -343,7 +343,40 @@ bool FMMUManager::writeToSlave(bool fmmu_debug) {
 
     bool all_ok = true;
 
-    for (size_t i = 0; i < config_.fmmu_count; i++) {
+    // Fast path: all configured FMMUs in a single multi-datagram frame.
+    // On failure fall through to the per-FMMU loop which carries the
+    // detailed write/probe diagnostics.
+    bool batch_ok = false;
+    {
+        std::vector<FMMURegBlock> blocks(config_.fmmu_count);
+        std::vector<uint16_t> ados(config_.fmmu_count);
+        std::vector<const void*> datas(config_.fmmu_count);
+        std::vector<uint16_t> lens(config_.fmmu_count,
+                                   sizeof(FMMURegBlock));
+        for (size_t i = 0; i < config_.fmmu_count; i++) {
+            const FMMUConfig& fmmu = config_.fmmus[i];
+            std::memset(&blocks[i], 0, sizeof(blocks[i]));
+            blocks[i].logical_start_le   = fmmu.logical_start_addr;
+            blocks[i].length_le          = fmmu.length;
+            blocks[i].logical_start_bit  = fmmu.logical_start_bit;
+            blocks[i].logical_end_bit    = fmmu.logical_end_bit;
+            blocks[i].physical_start_le  = fmmu.physical_start_addr;
+            blocks[i].physical_start_bit = fmmu.physical_start_bit;
+            blocks[i].type     = std::bit_cast<uint8_t>(fmmu.type);
+            blocks[i].activate = std::bit_cast<uint8_t>(fmmu.activate);
+            ados[i]  = kFMMURegBase +
+                       (static_cast<uint16_t>(i) * kFMMURegSize);
+            datas[i] = &blocks[i];
+        }
+        batch_ok = transport_.apwrBatch(ados.data(), datas.data(),
+                                        lens.data(), config_.fmmu_count, 100);
+        if (!batch_ok) {
+            TETHER_LOGW(TAG, "Batched FMMU write failed — falling back to "
+                             "per-FMMU writes");
+        }
+    }
+
+    for (size_t i = 0; !batch_ok && i < config_.fmmu_count; i++) {
         const FMMUConfig& fmmu = config_.fmmus[i];
 
         FMMURegBlock regs;
@@ -402,9 +435,19 @@ bool FMMUManager::writeToSlave(bool fmmu_debug) {
     FMMURegBlock zero_regs;
     std::memset(&zero_regs, 0, sizeof(zero_regs));
 
-    for (size_t i = config_.fmmu_count; i < kMaxFMMUs; i++) {
-        uint16_t reg_addr = kFMMURegBase + (static_cast<uint16_t>(i) * kFMMURegSize);
-        (void)transport_.apwr(static_cast<uint16_t>(reg_addr + 0x0C), &zero_regs.activate, 1, 50);
+    {
+        const size_t n_unused = kMaxFMMUs - config_.fmmu_count;
+        std::vector<uint16_t> zados(n_unused);
+        std::vector<const void*> zdatas(n_unused);
+        std::vector<uint16_t> zlens(n_unused, 1);
+        for (size_t i = 0; i < n_unused; ++i) {
+            zados[i] = kFMMURegBase +
+                (static_cast<uint16_t>(config_.fmmu_count + i) *
+                 kFMMURegSize) + 0x0C;
+            zdatas[i] = &zero_regs.activate;
+        }
+        (void)transport_.apwrBatch(zados.data(), zdatas.data(),
+                                   zlens.data(), n_unused, 50);
     }
 
     config_.configured = all_ok;

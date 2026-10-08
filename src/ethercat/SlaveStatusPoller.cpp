@@ -173,11 +173,15 @@ void SlaveStatusPoller::pollLoop() {
 }
 
 void SlaveStatusPoller::pollSlave(uint16_t slave_index) {
-    // Read AL_STATUS (register 0x0130, 2 bytes)
-    uint16_t al_status_val = 0;
-    if (!transport_.readRegister(slave_index, 0x0130, &al_status_val, 2)) {
+    // AL_STATUS (0x0130) and AL_STATUS_CODE (0x0134) are contiguous —
+    // fetch both in a single 6-byte read.
+    uint8_t buf[6] = {};
+    if (!transport_.readRegister(slave_index, 0x0130, buf, sizeof(buf))) {
         return;
     }
+    uint16_t al_status_val = 0, al_code = 0;
+    std::memcpy(&al_status_val, buf, 2);
+    std::memcpy(&al_code, buf + 4, 2);
 
     const uint8_t state_bits = static_cast<uint8_t>(al_status_val & 0x000F);
     const bool error_flag = (al_status_val & 0x0010) != 0;
@@ -194,12 +198,7 @@ void SlaveStatusPoller::pollSlave(uint16_t slave_index) {
         cached.al_status = al_status_val;
         return;
     }
-
-    // Read AL_STATUS_CODE if error bit is set
-    uint16_t al_code = 0;
-    if (error_flag) {
-        transport_.readRegister(slave_index, 0x0134, &al_code, 2);
-    }
+    if (!error_flag) al_code = 0;
 
     // Build event
     SlaveStatusEvent event;
