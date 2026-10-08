@@ -35,8 +35,11 @@ struct EthernetConfig {
     size_t txBufferSize = 16;              ///< Number of TX buffers
     uint16_t ethertypeFilter = 0;          ///< Filter by EtherType (0 = all)
     /// Poll kernel NIC error counters (sysfs) on a low-priority thread and
-    /// log significant error deltas.  Zero per-frame cost; set false to opt out.
-    bool nicErrorMonitor = true;
+    /// log significant error deltas.  Zero per-frame cost; opt-in only —
+    /// on filtered/ancillary-delivery setups the counters include packets
+    /// the kernel deliberately dropped or stripped, so the deltas are
+    /// diagnostic noise unless actively debugging.
+    bool nicErrorMonitor = false;
     /// Largest frame (excluding FCS) the interface will accept/carry.
     /// 0 → standard kMaxFrameSize (1514).  Raise for jumbo links; the NIC
     /// MTU must be raised separately (e.g. `ip link set mtu 9000`).
