@@ -162,11 +162,19 @@ int main(int argc, char** argv)
     const bool software_reset = program.get<bool>("--software-reset");
     const bool force = program.get<bool>("--force");
 
+    Tether::Examples::EncapsulationConfig encapsulation;
+    if (!Tether::Examples::parseEncapsulationArg(
+            program.get<std::string>("--encapsulation"), encapsulation,
+            TAG)) {
+        return 1;
+    }
+
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
-    if (!Tether::Examples::startHostMasterSession(iface, master, session, TAG)) {
+    if (!Tether::Examples::startHostMasterSession(iface, master, session, TAG,
+                                                encapsulation)) {
         return 2;
     }
 

@@ -220,6 +220,15 @@ int main(int argc, char** argv) {
     }
 
     std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    if (iface.empty()) {
+        return 1;
+    }
+    Tether::Examples::EncapsulationConfig encapsulation;
+    if (!Tether::Examples::parseEncapsulationArg(
+            program.get<std::string>("--encapsulation"), encapsulation,
+            TAG)) {
+        return 1;
+    }
     bool do_reset = program.get<bool>("--reset");
     bool do_sw_reset = program.get<bool>("--software-reset");
     std::string esi_xml = program.get<std::string>("--esi-xml");
@@ -254,14 +263,17 @@ int main(int argc, char** argv) {
     mcfg.enable_mailbox_fallback = true;
     EtherCAT::Master master(mcfg);
 
-    session.eth->setRxCallback([&master](const uint8_t* frame, size_t len,
-                                           const EtherCAT::HAL::RxFrameInfo& info, void*){
-        (void)info; master.handleRxFrame(frame, len);
-    }, nullptr);
+    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
+        Tether::Examples::shutdownHostEthernet(session);
+        return 5;
+    }
 
     Tether::Examples::startHostPollThread(session, TAG);
 
-    master.start(*session.ni, session.srcMac);
+    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
+        Tether::Examples::shutdownHostEthernet(session);
+        return 5;
+    }
 
     if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGW(TAG, "No slaves discovered");
