@@ -72,6 +72,59 @@ uint16_t SlaveGroup::requestAlControl(uint8_t al_control,
     const size_t count = indices_.size();
     if (count == 0) return 0;
 
+    // Kick mode: piggyback an APRD(AL_STATUS) after each APWR(AL_CONTROL)
+    // in the same frame — firmware-driven ESCs that only process register
+    // work while servicing traffic get an immediate evaluation + reply.
+    if (master_.alControlStatusKick()) {
+        std::vector<uint16_t> vals_le(count);
+        std::vector<MultiDatagramSpec> specs(count * 2);
+        std::vector<RxDatagram> resps(count * 2);
+        std::vector<size_t> slots(count * 2, TransactionRouter::kNumSlots);
+        size_t n = 0;
+        for (size_t i = 0; i < count; ++i) {
+            vals_le[i] = Raw::host_to_le16(
+                static_cast<uint16_t>(al_control));
+            const uint16_t adp =
+                SlaveAddress(indices_[i]).raw();
+            const uint8_t idx_w = master_.allocIdx();
+            const uint8_t idx_r = master_.allocIdx();
+            slots[n] = master_.preRegisterResponseWaiter(
+                idx_w, resps[n].data, sizeof(resps[n].data));
+            ++n;
+            slots[n] = master_.preRegisterResponseWaiter(
+                idx_r, resps[n].data, sizeof(resps[n].data));
+            ++n;
+            if (slots[n - 2] >= TransactionRouter::kNumSlots ||
+                slots[n - 1] >= TransactionRouter::kNumSlots) {
+                for (size_t s = 0; s < n; ++s)
+                    if (slots[s] < TransactionRouter::kNumSlots)
+                        master_.packetRouter().cancelPreRegistered(slots[s]);
+                return 0;
+            }
+            specs[n - 2] = {Command::APWR, idx_w, adp, reg::AL_CONTROL,
+                            &vals_le[i], 2, true};
+            specs[n - 1] = {Command::APRD, idx_r, adp, reg::AL_STATUS,
+                            nullptr, 2, true};
+        }
+        if (master_.sendMultiDatagram(specs.data(), specs.size()) == 0)
+            return 0;
+        uint16_t acked = 0;
+        for (size_t i = 0; i < count; ++i) {
+            const WaitResult wr = master_.waitForPreRegistered(
+                slots[2 * i], timeout_ms);
+            const WaitResult rd = master_.waitForPreRegistered(
+                slots[2 * i + 1], timeout_ms);
+            if (rd.success) {
+                ++acked;
+            } else {
+                TETHER_LOGW(TAG, "Slave {} AL_CONTROL=0x{:02X} kick: "
+                                 "no status reply (write ok={} wkc={})",
+                            indices_[i], al_control, wr.success, wr.wkc);
+            }
+        }
+        return acked;
+    }
+
     std::vector<SlaveAddress> addrs;
     addrs.reserve(count);
     std::vector<uint16_t>     regs(count, reg::AL_CONTROL);

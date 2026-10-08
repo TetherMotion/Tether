@@ -405,51 +405,33 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
 {
     const uint16_t base = sm_base_address(sm_index);
 
-    // Step 1: Disable SM
-    uint8_t disable = 0x00;
-    if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_ACTIVATE),
-                                  &disable, sizeof(disable), 200)) {
-        TETHER_LOGW(TAG, "SM{}: failed to disable", sm_index);
-    }
-
-    // Step 2: Physical address
-    uint16_t addr_le = host_to_le16(config.phys_start_addr);
-    if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_PHYS_ADDR),
-                                  &addr_le, sizeof(addr_le), 200)) {
-        TETHER_LOGE(TAG, "SM{}: failed to write phys_addr=0x{:04x}", sm_index, config.phys_start_addr);
-        return false;
-    }
-
-    // Step 3: Length
-    uint16_t len_le = host_to_le16(config.length);
-    if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_LENGTH),
-                                  &len_le, sizeof(len_le), 200)) {
-        TETHER_LOGE(TAG, "SM{}: failed to write length={}", sm_index, config.length);
-        return false;
-    }
-
-    // Step 4: Control — clear the watchdog-enable bit on process-data SMs
+    // Control — clear the watchdog-enable bit on process-data SMs
     // (mailbox SMs keep theirs): a latched SM watchdog blocks SAFE_OP->OP.
     uint8_t ctrl_byte = std::bit_cast<uint8_t>(config.control);
     if (config.type == PDO::SyncManagerType::ProcessOutput ||
         config.type == PDO::SyncManagerType::ProcessInput)
         ctrl_byte &= ~0x20u;
-    if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_CONTROL),
-                                  &ctrl_byte, sizeof(ctrl_byte), 200)) {
-        TETHER_LOGE(TAG, "SM{}: failed to write control=0x{:02x}", sm_index, ctrl_byte);
-        return false;
-    }
 
-    // Step 5: Activate
-    uint8_t activate = config.enable ? SM_ACT_ENABLE : 0x00;
-    if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_ACTIVATE),
-                                  &activate, sizeof(activate), 200)) {
-        TETHER_LOGE(TAG, "SM{}: failed to write activate=0x{:02x}", sm_index, activate);
+    // Write the whole 8-byte SM register block in one datagram with
+    // activate=0 — replaces the previous disable/addr/len/ctrl
+    // sequence (4 round-trips).  Activation happens separately so the
+    // channel comes up with a fully-programmed block.
+    uint8_t block[8] = {};
+    const uint16_t addr_le = host_to_le16(config.phys_start_addr);
+    const uint16_t len_le  = host_to_le16(config.length);
+    std::memcpy(block + 0, &addr_le, sizeof(addr_le));
+    std::memcpy(block + 2, &len_le, sizeof(len_le));
+    block[4] = ctrl_byte;
+    if (!transport_.writeRegister(adp, base, block, sizeof(block), 200)) {
+        TETHER_LOGE(TAG, "SM{}: failed to write register block "
+                         "(addr=0x{:04x} len={} ctrl=0x{:02x})",
+                    sm_index, config.phys_start_addr, config.length, ctrl_byte);
         return false;
     }
 
     TETHER_LOGI(TAG, "{}: SM{}: configured addr=0x{:04x} len={} ctrl=0x{:02x} act=0x{:02x}",
-                slavePrefix(slave_index).c_str(), sm_index, config.phys_start_addr, config.length, ctrl_byte, activate);
+                slavePrefix(slave_index).c_str(), sm_index, config.phys_start_addr, config.length, ctrl_byte,
+                config.enable ? SM_ACT_ENABLE : 0x00);
 
     if ((rxPDODebug() && config.type == PDO::SyncManagerType::ProcessOutput) ||
         (txPDODebug() && config.type == PDO::SyncManagerType::ProcessInput)) {
@@ -525,6 +507,62 @@ bool PDOManager::configureSlavesSMs(uint16_t slave_index) {
             }
         }
     }
+
+    // Activate all enabled SMs in a single frame — one 1-byte APWR per
+    // SM with pre-registered waiters, instead of one round-trip each.
+    {
+        uint8_t act_vals[4];
+        MultiDatagramSpec specs[4];
+        RxDatagram resps[4];
+        size_t slots[4];
+        size_t n = 0;
+        bool prereg_ok = true;
+        for (int sm = 0; sm < 4; ++sm) {
+            if (cfg.sm[sm].type == PDO::SyncManagerType::Unused) continue;
+            act_vals[sm] = cfg.sm[sm].enable ? SM_ACT_ENABLE : 0x00;
+            const uint8_t idx = transport_.allocIdx();
+            const size_t slot = transport_.preRegisterResponseWaiter(
+                idx, resps[n].data, sizeof(resps[n].data));
+            if (slot == IPDOTransport::kPreRegInvalid) { prereg_ok = false; break; }
+            slots[n] = slot;
+            specs[n] = {Command::APWR, idx, adp,
+                        static_cast<uint16_t>(
+                            sm_base_address(static_cast<uint8_t>(sm)) +
+                            SM_OFF_ACTIVATE),
+                        &act_vals[sm], 1, true};
+            ++n;
+        }
+        if (prereg_ok && n > 0) {
+            if (transport_.sendMultiDatagram(specs, n) == 0) {
+                TETHER_LOGE(TAG, "SM activate frame send failed for {}",
+                            slavePrefix(slave_index).c_str());
+                return false;
+            }
+            for (size_t i = 0; i < n; ++i) {
+                if (!transport_.waitForPreRegistered(slots[i], 200, resps[i])) {
+                    TETHER_LOGE(TAG, "SM{}: activate not confirmed for {}",
+                                i, slavePrefix(slave_index).c_str());
+                    return false;
+                }
+            }
+        } else if (!prereg_ok) {
+            // Fallback: sequential activate writes.
+            for (int sm = 0; sm < 4; ++sm) {
+                if (cfg.sm[sm].type == PDO::SyncManagerType::Unused) continue;
+                if (!transport_.writeRegister(
+                        adp,
+                        static_cast<uint16_t>(
+                            sm_base_address(static_cast<uint8_t>(sm)) +
+                            SM_OFF_ACTIVATE),
+                        &act_vals[sm], 1, 200)) {
+                    TETHER_LOGE(TAG, "SM{}: failed to activate for {}",
+                                sm, slavePrefix(slave_index).c_str());
+                    return false;
+                }
+            }
+        }
+    }
+
     cfg.configured = true;
     return true;
 }

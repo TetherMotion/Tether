@@ -204,6 +204,10 @@ public:
 
     bool apwr(uint16_t ado, const void* data, uint16_t len, unsigned int timeout_ms) override;
     bool aprd(uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms) override;
+    /// Packs all writes into a single multi-datagram frame.
+    bool apwrBatch(const uint16_t* ados, const void* const* datas,
+                   const uint16_t* lens, size_t count,
+                   unsigned int timeout_ms) override;
 
     // -- SII access ---------------------------------------------------------
 

@@ -166,6 +166,18 @@ public:
                       uint16_t len, unsigned int timeout_ms) = 0;
     virtual bool aprd(uint16_t ado, void* out,
                       uint16_t len, unsigned int timeout_ms) = 0;
+
+    /// Write several register blocks — transports that can pack multiple
+    /// datagrams per frame should override to send them in one shot.
+    /// Default: sequential apwr calls.
+    virtual bool apwrBatch(const uint16_t* ados, const void* const* datas,
+                           const uint16_t* lens, size_t count,
+                           unsigned int timeout_ms) {
+        for (size_t i = 0; i < count; ++i) {
+            if (!apwr(ados[i], datas[i], lens[i], timeout_ms)) return false;
+        }
+        return true;
+    }
 };
 
 class FMMUManager {

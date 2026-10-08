@@ -67,6 +67,21 @@ bool Slave::aprd(uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms)
     return master_->readRegister(SlaveAddress(index_), ado, out, len, timeout_ms);
 }
 
+bool Slave::apwrBatch(const uint16_t* ados, const void* const* datas,
+                      const uint16_t* lens, size_t count,
+                      unsigned int timeout_ms) {
+    std::vector<SlaveAddress> addrs(count, SlaveAddress(index_));
+    auto batch = master_->writeRegistersBatch(addrs.data(), ados, datas,
+                                              lens, count);
+    if (batch.count() != count) return false;
+    std::vector<BatchReadResult> results;
+    batch.waitAll(timeout_ms, results);
+    for (const auto& r : results) {
+        if (!r.success) return false;
+    }
+    return true;
+}
+
 // -- Mailbox configuration ---------------------------------------------------
 
 SlaveError Slave::configureMailbox(Tether::Platform::LogLevel log_level) {
@@ -750,12 +765,25 @@ SlaveError Slave::transitionToOp() {
             master_->requestSlaveApplicationLayerState(
                 index_, static_cast<uint8_t>(SlaveState::OP) | 0x10);
 
-            // Diagnostic: read back the first two FMMU register blocks
-            // (0x0600+0x10) so a missing or wrong logical->physical map
-            // shows up directly instead of hiding behind WKC totals.
-            uint8_t fmmu_raw[32] = {};
-            if (master_->readRegister(index_, 0x0600, fmmu_raw,
-                                      sizeof(fmmu_raw), 200)) {
+            // Diagnostics in one frame: FMMU block readback (0x0600,
+            // 32B) + SM2 process-data buffer (0x1800, 8B) + watchdog
+            // status (0x0440, 2B).
+            const SlaveAddress diag_addrs[3] = {
+                SlaveAddress(index_), SlaveAddress(index_),
+                SlaveAddress(index_)};
+            const uint16_t diag_regs[3] = {0x0600, 0x1800,
+                                           Raw::EC_REG_WD_STATUS};
+            const uint16_t diag_lens[3] = {32, 8, 2};
+            auto diag_batch = master_->readRegistersBatch(
+                diag_addrs, diag_regs, diag_lens, 3);
+            std::vector<BatchReadResult> diag_res;
+            diag_batch.waitAll(200, diag_res);
+
+            // FMMU readback proves the logical->physical map directly
+            // instead of hiding behind WKC totals.
+            if (diag_res.size() > 0 && diag_res[0].success &&
+                diag_res[0].data && diag_res[0].datalen >= 32) {
+                const uint8_t* fmmu_raw = diag_res[0].data;
                 for (int f = 0; f < 2; ++f) {
                     const uint8_t* r = fmmu_raw + f * 16;
                     const uint32_t log =
@@ -777,14 +805,18 @@ SlaveError Slave::transitionToOp() {
                             logPrefix().c_str());
             }
 
-            // Diagnostic: read SM2's process-data buffer (phys 0x1800) to
-            // prove cyclic output data is actually reaching the slave.
-            // If this stays all-zero the LRW/FMMU write side is broken.
+            // SM2's process-data buffer proves cyclic output data is
+            // actually reaching the slave — all-zero would mean the
+            // LRW/FMMU write side is broken.
             uint8_t sm2_data[8] = {};
-            const bool b_ok = master_->readRegister(index_, 0x1800,
-                                                    sm2_data, sizeof(sm2_data), 200);
+            const bool b_ok = diag_res.size() > 1 && diag_res[1].success &&
+                diag_res[1].data && diag_res[1].datalen >= 8;
+            if (b_ok) std::memcpy(sm2_data, diag_res[1].data, 8);
             uint16_t wd2 = 0;
-            master_->readRegister(index_, Raw::EC_REG_WD_STATUS, wd2, 200);
+            if (diag_res.size() > 2 && diag_res[2].success &&
+                diag_res[2].data && diag_res[2].datalen >= 2) {
+                std::memcpy(&wd2, diag_res[2].data, 2);
+            }
             TETHER_LOGI(TAG, "{}: SM2 buf[{}] {:02X} {:02X} {:02X} {:02X} "
                              "{:02X} {:02X} {:02X} {:02X} WD=0x{:04X}",
                         logPrefix().c_str(), b_ok ? "ok" : "rd-fail",
