@@ -94,6 +94,49 @@ cmake --build build --target tether_klipper_http_tests -j8
 ./build/bin/tests/tether_klipper_tests
 ```
 
+## Cross compilation (Raspberry Pi)
+
+Optional toolchain files in `cmake/toolchains/` cross-compile Tether and the
+examples for Raspberry Pi targets. Configure via the matching presets
+(`build-rpi5` / `build-rpi1` output dirs) or the toolchain files directly:
+
+```bash
+# Raspberry Pi 5 (aarch64, Cortex-A76)
+cmake --preset rpi5
+cmake --build --preset rpi5
+# or: cmake -B build-rpi5 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/rpi5-aarch64.cmake
+
+# Raspberry Pi 1 B+ (ARM1176JZF-S, armv6 hard-float)
+cmake --preset rpi1
+cmake --build --preset rpi1
+```
+
+A Linux cross toolchain must be installed; the files look for
+`bin/<triple>-gcc` under `RPI_TOOLCHAIN_ROOT` (env var or `-D`) and fall back
+to `PATH`. Tether needs GCC >= 11 (>= 13 recommended for native `<format>`).
+
+- Pi 5: `apt install g++-aarch64-linux-gnu`, a Bootlin `aarch64--glibc`
+  toolchain, or a crosstool-NG `aarch64-linux-gnu` build.
+- Pi 1 B+: needs an **armv6** hard-float toolchain — Debian `armhf` is armv7
+  and will NOT run on a Pi 1. Use Bootlin `armv6-eabihf` (ships as
+  `arm-buildroot-linux-gnueabihf`) or a crosstool-NG armv6 build. The bundled
+  GCC in raspberrypi/tools arm-bcm2708 is too old for this codebase.
+
+Knobs (env or `-D`): `RPI_TOOLCHAIN_ROOT`, `RPI_TOOLCHAIN_TRIPLE` (override
+triple auto-probing), `RPI_SYSROOT` (target headers/libs; auto-detected via
+`<gcc> -print-sysroot`), `RPI_STATIC_RUNTIME` (default ON — links
+libstdc++/libgcc statically so binaries run on Pi OS images with an older
+libstdc++; auto-disabled with a note if the toolchain has no `libstdc++.a`),
+`RPI_FULL_STATIC` (`-static`, no runtime glibc dependency at all).
+
+Cross caveats: the presets disable tests/benchmarks/Python bindings. Optional
+deps (ncurses, Drogon, jsoncpp) are searched only inside the target sysroot —
+without a populated `RPI_SYSROOT` those examples are skipped silently, same as
+when the packages are missing natively. Binaries still dynamically need the
+target's glibc unless `RPI_FULL_STATIC=ON`, so the toolchain sysroot glibc
+must be <= the Pi's OS glibc. The same toolchain files work for the outer
+ESC211Controller build (`cmake --preset rpi5` from the repo root).
+
 ## Test Commands
 
 ```bash
