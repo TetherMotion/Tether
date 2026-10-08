@@ -787,6 +787,13 @@ SlaveError Slave::transitionToOp() {
     return SlaveError::TransportError;
 }
 
+bool Slave::mailboxAvailable() {
+    if (mailbox_serviced_in_safeop_) return true;
+    SlaveState state;
+    if (readState(state) != SlaveError::Ok) return true;  // unknown — let it try
+    return state != SlaveState::SAFE_OP;
+}
+
 void Slave::dumpOpDiagnostics() {
     // One frame: FMMU block (0x0600, 32B) + SM2 process-data buffer
     // (0x1800, 8B) + watchdog status/counters (0x0440, 4B: status u16,
@@ -878,7 +885,15 @@ void Slave::dumpOpDiagnostics() {
     // mailbox is serviced by the slave's application CPU — if the SDO
     // answers, the firmware is alive and OP is gated by the ESM; if it
     // times out, the firmware is wedged and only a slave
-    // reset/power-cycle is likely to recover it.
+    // reset/power-cycle is likely to recover it.  Firmware known to
+    // drop mailbox service in SAFE_OP (SOMANET >= 5.6.x) is skipped:
+    // a guaranteed timeout is noise, not diagnosis.
+    if (!mailboxAvailable()) {
+        TETHER_LOGW(TAG, "{}: SDO liveness probe skipped — mailbox not "
+                         "serviced in SAFE_OP on this firmware",
+                    logPrefix().c_str());
+        return;
+    }
     {
         CoE::CoETransactionOptions sdo_opts{};
         sdo_opts.timeout_ms = 300;
@@ -983,6 +998,8 @@ SlaveError Slave::readWatchdogStatus(uint8_t& wd_status,
 
 SlaveError Slave::sdoRead(uint16_t index, uint8_t subindex,
                                    void* data, size_t& size) {
+    if (!mailboxAvailable()) return SlaveError::MailboxNotConfigured;
+
     auto& sdo = master_->sdoManager(index_);
     size_t actual = 0;
     if (!sdo.readSync(index, subindex,
@@ -996,6 +1013,8 @@ SlaveError Slave::sdoRead(uint16_t index, uint8_t subindex,
 
 SlaveError Slave::sdoWrite(uint16_t index, uint8_t subindex,
                                     const void* data, size_t size) {
+    if (!mailboxAvailable()) return SlaveError::MailboxNotConfigured;
+
     auto& sdo = master_->sdoManager(index_);
     if (!sdo.writeSync(index, subindex,
                        data, size, {.timeout_ms = SDO::kDefaultSDOTimeoutMs})) {
@@ -1015,6 +1034,8 @@ static SlaveError sdoCoeErrorToSlaveError(CoE::CoEManager& sdo, CoE::CoEError er
 }
 
 SlaveError Slave::sdoReadU8(uint16_t index, uint8_t sub, uint8_t& out) {
+    if (!mailboxAvailable()) return SlaveError::MailboxNotConfigured;
+
     auto& sdo = master_->sdoManager(index_);
     auto result = sdo.readU8(index, sub);
     if (!result.has_value()) {
@@ -1025,6 +1046,8 @@ SlaveError Slave::sdoReadU8(uint16_t index, uint8_t sub, uint8_t& out) {
 }
 
 SlaveError Slave::sdoReadU16(uint16_t index, uint8_t sub, uint16_t& out) {
+    if (!mailboxAvailable()) return SlaveError::MailboxNotConfigured;
+
     auto& sdo = master_->sdoManager(index_);
     auto result = sdo.readU16(index, sub);
     if (!result.has_value()) {
@@ -1035,6 +1058,8 @@ SlaveError Slave::sdoReadU16(uint16_t index, uint8_t sub, uint16_t& out) {
 }
 
 SlaveError Slave::sdoReadU32(uint16_t index, uint8_t sub, uint32_t& out) {
+    if (!mailboxAvailable()) return SlaveError::MailboxNotConfigured;
+
     auto& sdo = master_->sdoManager(index_);
     auto result = sdo.readU32(index, sub);
     if (!result.has_value()) {
@@ -1045,6 +1070,8 @@ SlaveError Slave::sdoReadU32(uint16_t index, uint8_t sub, uint32_t& out) {
 }
 
 SlaveError Slave::sdoWriteU8(uint16_t index, uint8_t sub, uint8_t val) {
+    if (!mailboxAvailable()) return SlaveError::MailboxNotConfigured;
+
     auto& sdo = master_->sdoManager(index_);
     auto result = sdo.writeU8(index, sub, val);
     if (!result.has_value()) {
@@ -1054,6 +1081,8 @@ SlaveError Slave::sdoWriteU8(uint16_t index, uint8_t sub, uint8_t val) {
 }
 
 SlaveError Slave::sdoWriteU16(uint16_t index, uint8_t sub, uint16_t val) {
+    if (!mailboxAvailable()) return SlaveError::MailboxNotConfigured;
+
     auto& sdo = master_->sdoManager(index_);
     auto result = sdo.writeU16(index, sub, val);
     if (!result.has_value()) {
@@ -1063,6 +1092,8 @@ SlaveError Slave::sdoWriteU16(uint16_t index, uint8_t sub, uint16_t val) {
 }
 
 SlaveError Slave::sdoWriteU32(uint16_t index, uint8_t sub, uint32_t val) {
+    if (!mailboxAvailable()) return SlaveError::MailboxNotConfigured;
+
     auto& sdo = master_->sdoManager(index_);
     auto result = sdo.writeU32(index, sub, val);
     if (!result.has_value()) {

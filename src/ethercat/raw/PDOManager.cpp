@@ -1750,9 +1750,14 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
         have_write = true;
         for (size_t i = 0; i < mapping_.entry_count(); i++) {
             const PDO::PDOEntry* e = mapping_.get_entry(i);
-            if (e && e->enabled && e->direction == PDO::PDODirection::RxPDO
-                && e->data_size > 0 && e->data_size <= sm2.length) {
-                std::memcpy(out_buf, e->storage, e->data_size);
+            if (e && e->enabled && e->slave_index == si
+                && e->direction == PDO::PDODirection::RxPDO
+                && e->data_size > 0 && e->data_size <= sm2.length
+                && e->physical_offset >= sm2.phys_start_addr
+                && e->physical_offset - sm2.phys_start_addr + e->data_size
+                       <= sm2.length) {
+                std::memcpy(out_buf + (e->physical_offset - sm2.phys_start_addr),
+                            e->storage, e->data_size);
             }
         }
         // Periodic wire log: log interpreted RxPDO output every 1000 cycles
@@ -1857,9 +1862,15 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             }
             for (size_t i = 0; i < mapping_.entry_count(); i++) {
                 PDO::PDOEntry* e = mapping_.get_entry_mut(i);
-                if (e && e->enabled && e->direction == PDO::PDODirection::TxPDO
-                    && e->data_size > 0 && e->data_size <= sm3.length) {
-                    std::memcpy(e->storage, read_resp.data, e->data_size);
+                if (e && e->enabled && e->slave_index == si
+                    && e->direction == PDO::PDODirection::TxPDO
+                    && e->data_size > 0 && e->data_size <= sm3.length
+                    && e->physical_offset >= sm3.phys_start_addr
+                    && e->physical_offset - sm3.phys_start_addr + e->data_size
+                           <= sm3.length) {
+                    std::memcpy(e->storage,
+                                read_resp.data + (e->physical_offset - sm3.phys_start_addr),
+                                e->data_size);
                     e->success_count++;
                     if (txPDODebug(e->slave_index)) {
                         TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Copied {} bytes to entry {} buf={:p}",
@@ -2034,9 +2045,15 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
             }
             for (size_t i = 0; i < mapping_.entry_count(); i++) {
                 PDO::PDOEntry* e = mapping_.get_entry_mut(i);
-                if (e && e->enabled && e->direction == PDO::PDODirection::TxPDO
-                    && e->data_size > 0 && e->data_size <= sm3.length) {
-                    std::memcpy(e->storage, in_buf, e->data_size);
+                if (e && e->enabled && e->slave_index == si
+                    && e->direction == PDO::PDODirection::TxPDO
+                    && e->data_size > 0 && e->data_size <= sm3.length
+                    && e->physical_offset >= sm3.phys_start_addr
+                    && e->physical_offset - sm3.phys_start_addr + e->data_size
+                           <= sm3.length) {
+                    std::memcpy(e->storage,
+                                in_buf + (e->physical_offset - sm3.phys_start_addr),
+                                e->data_size);
                     e->success_count++;
                     if (txPDODebug(e->slave_index)) {
                         TETHER_LOGI(TAG, "  [TxPDO-DEBUG] Copied {} bytes to entry {} buf={:p}",

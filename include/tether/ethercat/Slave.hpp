@@ -639,6 +639,18 @@ public:
      */
     virtual SlaveError readALStatusCode(uint16_t& code);
 
+    /// Firmware hint: some firmware-driven ESCs (e.g. SOMANET >= 5.6.x)
+    /// stop servicing the mailbox while the slave is in SAFE_OP.  The
+    /// device driver sets this after reading the firmware version
+    /// (0x100A) in PRE_OP; mailbox-dependent diagnostics check
+    /// mailboxAvailable() before issuing SDO traffic.
+    void setMailboxServicedInSafeOp(bool v) { mailbox_serviced_in_safeop_ = v; }
+    bool mailboxServicedInSafeOp() const { return mailbox_serviced_in_safeop_; }
+
+    /// Whether an SDO transaction can be serviced right now — combines
+    /// the firmware hint above with the slave's current AL state.
+    bool mailboxAvailable();
+
     /**
      * @brief Convenience accessor that reads and returns the current AL state.
      *
@@ -835,6 +847,8 @@ protected:
     bool mailbox_configured_ = false;
     bool no_mailbox_ = false;
     bool pdo_configured_ = false;
+    bool mailbox_serviced_in_safeop_ = true;
+
     EtherCATSlaveDebugFlags slave_debug_flags_;
 
 #if TETHER_ENABLE_SII
