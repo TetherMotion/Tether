@@ -20,6 +20,8 @@
 #include <cstdio>
 #include <cstring>
 #include <bit>
+#include <chrono>
+#include <thread>
 
 #include "SlaveESIHelpers.hpp"
 
@@ -697,7 +699,6 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         sm.phys_start_addr = mc.phys_start_addr;
         sm.length = mc.totalLength();
         sm.control = mc.control;
-        sm.control.watchdog = false;  // latched SM watchdog blocks OP
         sm.enable = false;  // Will be enabled after FMMU config
         sm.type = mc.type;
     }
@@ -736,9 +737,11 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         master_->writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 2), &len_le, 2, 200);
 
-        // Control — clear the watchdog-enable bit on process-data SMs
-        // (see Master_slave.cpp: a latched SM watchdog blocks OP).
-        uint8_t ctrl_byte = std::bit_cast<uint8_t>(mc.control) & ~0x20u;
+        // Control — keep the ESI watchdog-enable bit: firmware-driven ESCs
+        // validate the SM control byte at SAFE_OP (0x0017 if watchdog is
+        // cleared).  The OP-path watchdog-disarm fallback lives in
+        // Slave::transitionToOp().
+        uint8_t ctrl_byte = std::bit_cast<uint8_t>(mc.control);
         master_->writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
 
@@ -824,6 +827,22 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         uint8_t activate = 0x01;
         master_->writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 6), &activate, 1, 200);
+
+        // Firmware-driven ESCs only apply register writes while servicing
+        // traffic — read the activate byte back until it sticks before the
+        // SAFE_OP request can race ahead and see a disabled SM (0x0017).
+        uint8_t rb = 0;
+        bool sm_on = false;
+        for (int i = 0; i < 50 && !sm_on; ++i) {
+            sm_on = master_->readRegister(EtherCAT::SlaveAddress(index_),
+                                         static_cast<uint16_t>(base + 6), &rb, 1, 50)
+                    && (rb & 0x01u);
+            if (!sm_on) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        if (!sm_on) {
+            TETHER_LOGW(TAG, "{}: SM{} activate not confirmed (rb=0x{:02X})",
+                        logPrefix().c_str(), mc.sm_index, rb);
+        }
         TETHER_LOGI(TAG, "{}: Enabled SM{}", logPrefix().c_str(), mc.sm_index);
 
         // Update SlaveConfig to reflect enabled state

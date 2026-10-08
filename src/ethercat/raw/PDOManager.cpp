@@ -405,18 +405,31 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
 {
     const uint16_t base = sm_base_address(sm_index);
 
-    // Control — clear the watchdog-enable bit on process-data SMs
-    // (mailbox SMs keep theirs): a latched SM watchdog blocks SAFE_OP->OP.
+    // Control — keep the ESI watchdog-enable bit verbatim: firmware-driven
+    // ESCs validate the SM control byte at the PRE_OP->SAFE_OP transition
+    // and reject a cleared watchdog bit with AL 0x0017 "Invalid Sync
+    // Manager configuration".  A latched SM watchdog at OP is handled by
+    // the disarm fallback in Slave::transitionToOp().
     uint8_t ctrl_byte = std::bit_cast<uint8_t>(config.control);
-    if (config.type == PDO::SyncManagerType::ProcessOutput ||
-        config.type == PDO::SyncManagerType::ProcessInput)
-        ctrl_byte &= ~0x20u;
 
-    // Write the whole 8-byte SM register block in one datagram with
-    // activate=0 — replaces the previous disable/addr/len/ctrl
-    // sequence (4 round-trips).  Activation happens separately so the
-    // channel comes up with a fully-programmed block.
-    uint8_t block[8] = {};
+    // Disable the SM first — the ESC rejects phys-addr/length writes on
+    // an active channel (mailbox SMs may already be running from the
+    // EEPROM bootstrap).
+    uint8_t disable = 0x00;
+    if (!transport_.writeRegister(adp, static_cast<uint16_t>(base + SM_OFF_ACTIVATE),
+                                  &disable, sizeof(disable), 200)) {
+        TETHER_LOGW(TAG, "SM{}: failed to disable", sm_index);
+    }
+
+    // Then write the configurable SM registers (phys addr + length +
+    // control, bytes 0-4) in a single datagram — replaces the previous
+    // per-field round-trips.  Byte 5 (status) is read-only and byte 7
+    // (PDI control) must NOT be written: zeroing it breaks the SM
+    // programming on firmware-driven ESCs (AL 0x0017 "Invalid Sync
+    // Manager configuration" on the SAFE_OP request).  Activation
+    // happens separately below so the channel comes up with a
+    // fully-programmed block.
+    uint8_t block[5] = {};
     const uint16_t addr_le = host_to_le16(config.phys_start_addr);
     const uint16_t len_le  = host_to_le16(config.length);
     std::memcpy(block + 0, &addr_le, sizeof(addr_le));
