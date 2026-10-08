@@ -21,6 +21,7 @@
 #pragma once
 
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -219,6 +220,58 @@ static constexpr uint16_t kInputsSmSize  = 47;  // SM3: 13+12+4+18 bytes
 // SOMANET-typical encoder resolution (increments/revolution) — used as the
 // fallback when the 0x608F encoder-resolution read fails.
 static constexpr uint32_t kDefaultEncoderResolution = 524288;
+
+// ============================================================================
+// Firmware version (0x100A "Manufacturer software version")
+// ============================================================================
+
+/// Parsed SOMANET firmware version ("v5.6.4", "5.6.x", …).
+struct FirmwareVersion {
+    uint16_t major = 0;
+    uint16_t minor = 0;
+    uint16_t patch = 0;
+    bool     valid = false;
+
+    constexpr bool operator>=(const FirmwareVersion& o) const {
+        return valid && o.valid &&
+               (major != o.major ? major > o.major
+               : minor != o.minor ? minor > o.minor
+                                  : patch >= o.patch);
+    }
+};
+
+/// Parse a SOMANET 0x100A string like "v5.6.4" / "5.6.4" /
+/// "SOMANET 5.6.4-rc1".  Extracts the first X.Y.Z digit run.
+inline FirmwareVersion parseFirmwareVersion(std::string_view s) {
+    FirmwareVersion v;
+    // Skip to the first digit
+    size_t i = 0;
+    while (i < s.size() && !std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+    auto num = [&](uint16_t& out) {
+        if (i >= s.size() || !std::isdigit(static_cast<unsigned char>(s[i])))
+            return false;
+        uint32_t n = 0;
+        while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i])))
+            n = n * 10 + static_cast<uint32_t>(s[i++] - '0');
+        out = static_cast<uint16_t>(n);
+        return true;
+    };
+    auto dot = [&] {
+        if (i < s.size() && s[i] == '.') { ++i; return true; }
+        return false;
+    };
+    v.valid = num(v.major) && dot() && num(v.minor);
+    if (v.valid && dot()) (void)num(v.patch);  // patch optional
+    return v;
+}
+
+/// SOMANET firmware >= 5.6.0 stops servicing the CoE mailbox while the
+/// slave sits in SAFE_OP — every SDO issued in that window times out.
+/// Returns true when the mailbox is expected to work in SAFE_OP (older
+/// firmware, or version unreadable — conservative default).
+inline bool mailboxServicedInSafeOp(FirmwareVersion v) {
+    return !(v >= FirmwareVersion{5, 6, 0, true});
+}
 
 } // namespace Synapticon
 

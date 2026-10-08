@@ -61,6 +61,7 @@
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/SlaveGroup.hpp"
 #include "tether/ethercat/Types.hpp"
+#include "tether/profiles/cia301/CiA301Defs.hpp"
 #include "tether/profiles/cia402/CiA402Drive.hpp"
 #include "tether/profiles/cia402/DS402Master.hpp"
 
@@ -385,6 +386,15 @@ public:
             drive.setStatuswordPDOOffset(0);
             drive.setOpmodePDOOffset(2);
         }
+
+        // Firmware version (0x100A) — read now while the mailbox is
+        // guaranteed to work (PRE_OP).  SOMANET >= 5.6 drops mailbox
+        // service in SAFE_OP; the flag makes every mailbox-dependent
+        // diagnostic (SDO liveness probe, updateIdentity, ...) skip the
+        // guaranteed-timeout window.
+        for (auto& ini : inits) {
+            ini.readAndApplyFirmwareVersion();
+        }
         return true;
     }
 
@@ -410,12 +420,19 @@ public:
         std::span<SynapticonDriveInitializer> inits,
         const Slave::MultiPDOAssignment& assignment,
         EtherCAT::SlaveGroup& group,
-        std::function<void()> on_safe_op = {}) {
+        std::function<void()> on_safe_op = {},
+        std::function<void()> pre_safe_op = {}) {
         const char* tag = "SynapticonInit";
 
         for (auto& ini : inits) {
             if (!ini.configurePDOsInPreOp(assignment)) return false;
         }
+
+        // Last window with a guaranteed-live mailbox: firmware >= 5.6
+        // stops servicing SDO in SAFE_OP, so anything mailbox-dependent
+        // (interface construction / updateIdentity, config reads) hooks
+        // in here, before the group request goes out.
+        if (pre_safe_op) pre_safe_op();
 
         if (group.requestState(SlaveState::SAFE_OP, /*ack_error=*/true) == 0 ||
             !group.waitForState(SlaveState::SAFE_OP, /*timeout_ms=*/5000,
@@ -507,10 +524,48 @@ public:
     /// @brief Get the slave index.
     uint16_t slaveIndex() const { return slave_idx_; }
 
+    /// @brief Read 0x100A firmware version, store it, and apply the
+    ///        mailbox-in-SAFE_OP policy to the slave object.
+    ///
+    /// Must run while the slave is in PRE_OP (mailbox up).  SOMANET
+    /// firmware >= 5.6 stops servicing the CoE mailbox in SAFE_OP —
+    /// Slave::setMailboxServicedInSafeOp() then makes every
+    /// mailbox-dependent diagnostic skip that window instead of
+    /// burning seconds in guaranteed timeouts.
+    FirmwareVersion readAndApplyFirmwareVersion() {
+        auto& slave = master_.ethercatMaster().slave(slave_idx_);
+        char buf[64] = {};
+        size_t len = sizeof(buf) - 1;
+        FirmwareVersion ver;
+        std::string raw;
+        if (slave.sdoRead(CiA301::ManufacturerSWVersion, 0, buf, len)
+                == SlaveError::Ok && len > 0) {
+            raw.assign(buf, len);
+            ver = parseFirmwareVersion(raw);
+        }
+
+        firmware_version_ = ver;
+        slave.setMailboxServicedInSafeOp(mailboxServicedInSafeOp(ver));
+
+        TETHER_LOGI(tag_, "{} firmware: '{}' (parsed {}.{}.{}"
+                    "{}) — mailbox in SAFE_OP: {}",
+                    master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str(),
+                    raw.empty() ? "unreadable" : raw.c_str(),
+                    ver.major, ver.minor, ver.patch,
+                    ver.valid ? "" : " [unparsed]",
+                    slave.mailboxServicedInSafeOp() ? "yes" : "NO (fw >= 5.6)");
+        return ver;
+    }
+
+    /// Parsed firmware version — valid only after
+    /// readAndApplyFirmwareVersion() ran (initGroupToPreOp does it).
+    FirmwareVersion firmwareVersion() const { return firmware_version_; }
+
 private:
     DS402Master& master_;
     uint16_t slave_idx_;
     const char* tag_;
+    FirmwareVersion firmware_version_{};
 };
 
 } // namespace Synapticon
