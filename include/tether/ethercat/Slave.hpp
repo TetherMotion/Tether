@@ -835,8 +835,6 @@ protected:
     bool mailbox_configured_ = false;
     bool no_mailbox_ = false;
     bool pdo_configured_ = false;
-    unsigned wd_latch_count_ = 0;
-
     EtherCATSlaveDebugFlags slave_debug_flags_;
 
 #if TETHER_ENABLE_SII
