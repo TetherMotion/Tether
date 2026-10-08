@@ -836,9 +836,9 @@ public:
                 result_ = std::unexpected(
                     CoEError::aborted(mgr.lastSdoAbortCode()));
             } else if (mgr.transport().isCancelRequested()) {
-                result_ = std::unexpected(CoEErrorCode::ShuttingDown);
+                result_ = std::unexpected(CoEError{CoEErrorCode::ShuttingDown});
             } else {
-                result_ = std::unexpected(CoEErrorCode::TransportError);
+                result_ = std::unexpected(CoEError{CoEErrorCode::TransportError});
             }
             return;
         }
@@ -851,7 +851,7 @@ public:
                 "expected {}. Update the register definition's data_type.",
                 mgr.logPrefix().c_str(), txn_.index, txn_.subindex,
                 out_len, expected);
-            result_ = std::unexpected(CoEErrorCode::InternalError);
+            result_ = std::unexpected(CoEError{CoEErrorCode::InternalError});
             return;
         }
         if (out_len > expected && !txn_.options.allow_trailing_bytes) {
