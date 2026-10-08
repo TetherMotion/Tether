@@ -868,6 +868,12 @@ protected:
 
     SlaveError registerExistingPDO(uint16_t pdo_index,
                                    PDO::PDODirection direction);
+
+    /// One-frame register snapshot for OP-transition diagnostics: FMMU
+    /// map, SM2 data buffer, watchdog status+counters, SM2/SM3 register
+    /// blocks, plus a mailbox liveness probe.  Called on each OP re-issue
+    /// and once on final transition failure.
+    void dumpOpDiagnostics();
 };
 
 // ============================================================================

@@ -649,6 +649,15 @@ public:
         uint32_t wkc_errors         = 0;
         uint32_t stale_responses    = 0;
         uint32_t send_errors        = 0;
+        /// Wire RTT of in-generation replies (emit -> kernel RX stamp),
+        /// in microseconds.  Splits "late" from "lost": stale_responses
+        /// counts deposits arriving after their deadline (late echo of a
+        /// previous send), so wire_loss - stale approximates true
+        /// non-return.
+        uint32_t rtt_us_min         = 0;
+        uint32_t rtt_us_avg         = 0;
+        uint32_t rtt_us_max         = 0;
+        uint32_t rtt_samples        = 0;
         // --- channel level (real local loss) ---
         uint64_t rx_bank_drops      = 0;  ///< rxPoll couldn't emit (banks held)
         /// Kernel-side drops on the cyclic socket (tp_drops share seen by

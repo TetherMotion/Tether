@@ -441,6 +441,13 @@ Master::CyclicHealth Master::cyclicHealth() const
             h.wkc_errors      = s.wkc_errors;
             h.stale_responses = s.stale_responses;
             h.send_errors     = s.send_errors;
+            if (s.rtt_samples) {
+                h.rtt_samples  = s.rtt_samples;
+                h.rtt_us_min   = s.rtt_ns_min / 1000;
+                h.rtt_us_max   = s.rtt_ns_max / 1000;
+                h.rtt_us_avg   = static_cast<uint32_t>(
+                    s.rtt_ns_sum / s.rtt_samples / 1000);
+            }
             const uint8_t n = lam->cyclicSliceCount();
             h.image_slice_count =
                 n > kNumCyclicSlots ? kNumCyclicSlots : n;
@@ -488,6 +495,19 @@ std::string Master::CyclicHealth::describe() const
         send_errors, rx_bank_drops, kernel_rx_drops, unrouted_datagrams,
         rx_queue_overflow, missed_deadlines, collect_calls, wait_calls,
         dispatch_frames, dispatch_unrouted);
+    // Late-vs-lost split: a stale deposit is a reply that arrived AFTER
+    // its cycle deadline (the send counted wire_loss, then the echo
+    // surfaced next cycle).  wire_loss - stale ≈ true non-return.
+    const uint32_t true_loss =
+        wire_loss > stale_responses ? wire_loss - stale_responses : 0;
+    out += std::format(
+        "\n  loss split: never_returned≈{} late_replies={}"
+        "{}",
+        true_loss, stale_responses,
+        rtt_samples
+            ? std::format("  rtt_us=min/{}/avg/{}/max/{} ({} samples)",
+                          rtt_us_min, rtt_us_avg, rtt_us_max, rtt_samples)
+            : std::string{});
     if (slices_stuck_stale)
         out += std::format(
             "\n  {} slice(s) stuck Stale — wire RTT exceeds a full "
