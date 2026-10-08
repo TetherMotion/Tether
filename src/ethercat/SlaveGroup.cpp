@@ -371,7 +371,8 @@ collectGroupFutures(const std::vector<uint16_t>& members,
             futures[i].wait_for(remaining) == std::future_status::ready) {
             out[i].result = futures[i].get();
         } else {
-            out[i].result = std::unexpected(CoE::CoEErrorCode::Timeout);
+            out[i].result =
+                std::unexpected(CoE::CoEError{CoE::CoEErrorCode::Timeout});
         }
     }
     return out;
