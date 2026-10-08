@@ -620,6 +620,65 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
     cyclic_deadline_ns_ = cyclic_send_ns_ + rx_timeout_ns;
     cyclic_pending_count_ = 0;
     pending_image_ = image;
+    cnt_pending_ = false;
+    dc_pending_  = false;
+
+    // Rotating pool: each LRW slice draws a fresh position (0..81) —
+    // responses are waited for on the very positions they were sent on,
+    // and a position is only re-armed when the allocator wraps back to
+    // it, i.e. a response up to ~82 sends late still lands in its own
+    // untouched mailbox instead of being dropped or aliasing a newer
+    // request.  Nothing else ever clears these slots: re-arming is the
+    // only invalidation, and it only touches the position being sent.
+    uint8_t lrw_pos[kMaxCyclicSlices];
+    for (uint32_t s = 0; s < nslices; ++s) lrw_pos[s] = allocPoolPos();
+
+    // The counter trailer rides a dedicated datagram (LRW over the first
+    // unmapped logical address — slaves pass it through verbatim, the
+    // echo proves the frame belongs to THIS send) plus, when configured,
+    // an APRD of the DC slave's System Time register.  Both trail the
+    // last LRW slice inside its frame whenever the bytes fit; otherwise
+    // they go in a second frame of the same send.
+    const uint64_t cnt_value = ++lrw_counter_;
+    cnt_value_ = cnt_value;
+    cnt_pos_   = allocPoolPos();
+    uint8_t cnt_bytes[8];
+    std::memcpy(cnt_bytes, &cnt_value, 8);   // little-endian per host ABI
+    const uint32_t cnt_addr = base_logical_addr_ + total_data;
+
+    CyclicDgramSpec cnt_spec{};
+    // LRD (not LRW): read-only — if the "unmapped" address were ever
+    // wrong, an LRW could write counter bytes into slave outputs.
+    cnt_spec.cmd      = Command::LRD;
+    cnt_spec.idx      = cyclicPoolWireIdx(cnt_pos_);
+    cnt_spec.adp      = static_cast<uint16_t>(cnt_addr & 0xFFFF);
+    cnt_spec.ado      = static_cast<uint16_t>((cnt_addr >> 16) & 0xFFFF);
+    cnt_spec.data     = cnt_bytes;
+    cnt_spec.datalen  = kLrwCounterTrailerBytes;
+    cnt_spec.roundtrip = true;
+    cnt_spec.stamp_gen = true;
+
+    CyclicDgramSpec dc_spec{};
+    const bool want_dc = dc_slave_pos_ >= 0;
+    if (want_dc) {
+        dc_spec.cmd      = Command::APRD;
+        dc_spec.idx      = kDcTimeIdx;
+        dc_spec.adp      = static_cast<uint16_t>(0 - dc_slave_pos_);
+        dc_spec.ado      = reg::DC_SYS_TIME;
+        dc_spec.data     = nullptr;   // reads send zeros
+        dc_spec.datalen  = 8;
+        dc_spec.roundtrip = true;
+        dc_spec.stamp_gen = true;
+    }
+    const uint8_t ntrailer = want_dc ? 2 : 1;
+
+    auto fail_send = [&](uint8_t s) {
+        stats_.send_errors++;
+        healthFail(slice_health_[s], CyclicSliceStatus::SendError);
+        cyclic_pending_count_ = 0;
+        pending_image_ = nullptr;
+        return false;
+    };
 
     for (uint32_t s = 0; s < nslices; ++s) {
         const uint32_t off = s * max_slice;
@@ -628,17 +687,56 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
         const uint16_t adp = static_cast<uint16_t>(logical_addr & 0xFFFF);
         const uint16_t ado = static_cast<uint16_t>((logical_addr >> 16)
                                                  & 0xFFFF);
-        const uint8_t slot = static_cast<uint8_t>(s);
+        const uint8_t pos = lrw_pos[s];
+        const bool last   = (s + 1 == nslices);
 
-        cyclic_pending_[s].token = transport_.cyclicSlotToken(slot);
+        cyclic_pending_[s].token = transport_.cyclicSlotToken(pos);
         cyclic_pending_[s].off   = off;
         cyclic_pending_[s].len   = len;
+        cyclic_pending_[s].pos   = pos;
 
-        bool sent;
-        if (rotating_send) {
+        bool sent = false;
+        if (last && !rotating_send) {
+            // Trail counter (+DC) in the same frame when it fits; the
+            // datagram bytes are ec-hdr-free math — 12 B wire cost each
+            // (10 hdr + 2 wkc) plus payload.
+            const uint32_t lrw_dgram  = 12 + len;
+            const uint32_t tail_bytes = 12 + 8 + (want_dc ? 12 + 8 : 0);
+            if (lrw_dgram + tail_bytes <=
+                transport_.maxEtherCATPayloadPerFrame() + 12) {
+                CyclicDgramSpec frame[3]{};
+                frame[0].cmd      = Command::LRW;
+                frame[0].idx      = cyclicPoolWireIdx(pos);
+                frame[0].adp      = adp;
+                frame[0].ado      = ado;
+                frame[0].data     = payload + off;
+                frame[0].datalen  = static_cast<uint16_t>(len);
+                frame[0].roundtrip = true;
+                frame[0].stamp_gen = true;
+                frame[1] = cnt_spec;
+                if (want_dc) frame[2] = dc_spec;
+                sent = transport_.sendPoolFrame(frame,
+                                                1u + ntrailer);
+                if (sent) {
+                    cnt_token_ = transport_.cyclicSlotToken(cnt_pos_);
+                    cnt_gen_   = transport_.cyclicSlotGen(cnt_pos_);
+                    cnt_pending_ = true;
+                    if (want_dc) {
+                        dc_token_ = transport_.cyclicSlotToken(
+                            kCyclicDcPoolPos);
+                        dc_gen_   = transport_.cyclicSlotGen(
+                            kCyclicDcPoolPos);
+                        dc_pending_ = true;
+                    }
+                }
+                // sendPoolFrame may be unimplemented (test transports) —
+                // fall back to single datagrams below.
+            }
+        }
+        if (!sent && rotating_send) {
             const uint32_t poff = transport_.cyclicPayloadOffset();
             transport_.composeCyclicHeader(rotating_frame, Command::LRW,
-                                           slot, adp, ado,
+                                           pos, adp, ado,
                                            static_cast<uint16_t>(len),
                                            true);
             *reinterpret_cast<uint16_t*>(
@@ -649,23 +747,56 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
             image->attachTxFrame(transport_.acquireCyclicTxFrame(),
                                  poff);
             rotating_send = false;   // single-slice path only
-        } else {
-            sent = transport_.sendCyclicDatagram(
-                Command::LRW, slot, adp, ado, payload + off,
-                static_cast<uint16_t>(len), true);
         }
         if (!sent) {
-            stats_.send_errors++;
-            healthFail(slice_health_[s], CyclicSliceStatus::SendError);
-            cyclic_pending_count_ = 0;
-            pending_image_ = nullptr;
-            return false;
+            sent = transport_.sendCyclicDatagram(
+                Command::LRW, pos, adp, ado, payload + off,
+                static_cast<uint16_t>(len), true);
         }
+        if (!sent) return fail_send(static_cast<uint8_t>(s));
         // Send-generation stamped by the transport — collect rejects
         // deposits echoing the previous generation (stale-deposit ABA).
-        cyclic_pending_[s].gen = transport_.cyclicSlotGen(slot);
+        cyclic_pending_[s].gen = transport_.cyclicSlotGen(pos);
         ++cyclic_pending_count_;
     }
+
+    // Counter/DC trailers not yet sent (the last frame had no room, or
+    // the transport cannot compose multi-datagram frames): emit them
+    // now — a second frame of the same send, still in-flight together.
+    if (!cnt_pending_) {
+        CyclicDgramSpec tail[2]{};
+        tail[0] = cnt_spec;
+        if (want_dc) tail[1] = dc_spec;
+        bool tail_sent = transport_.sendPoolFrame(tail, ntrailer);
+        if (!tail_sent) {
+            tail_sent = transport_.sendCyclicDatagram(
+                Command::LRD, cnt_pos_,
+                static_cast<uint16_t>(cnt_addr & 0xFFFF),
+                static_cast<uint16_t>((cnt_addr >> 16) & 0xFFFF),
+                cnt_bytes, kLrwCounterTrailerBytes, true);
+            if (tail_sent && want_dc) {
+                tail_sent = transport_.sendCyclicDatagram(
+                    Command::APRD, kCyclicDcPoolPos,
+                    static_cast<uint16_t>(0 - dc_slave_pos_),
+                    reg::DC_SYS_TIME, nullptr, 8, true);
+            }
+        }
+        if (tail_sent) {
+            cnt_token_ = transport_.cyclicSlotToken(cnt_pos_);
+            cnt_gen_   = transport_.cyclicSlotGen(cnt_pos_);
+            cnt_pending_ = true;
+            if (want_dc) {
+                dc_token_ = transport_.cyclicSlotToken(kCyclicDcPoolPos);
+                dc_gen_   = transport_.cyclicSlotGen(kCyclicDcPoolPos);
+                dc_pending_ = true;
+            }
+        } else {
+            // Trailer emit failed — the LRW slices are still live; the
+            // collect just can't prove frame identity this cycle.
+            stats_.send_errors++;
+        }
+    }
+
     emitSlices(mapping, image, rx_timeout_ns);
     return true;
 }
@@ -730,65 +861,103 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
 
     bool ok = true;
     std::array<const CyclicSlotView*, kMaxCyclicSlices> resps{};
-    std::array<CyclicSlotView, kMaxCyclicSlices> views{};
-    std::array<uint64_t, kMaxCyclicSlices> tokens{};
-    uint32_t mask = 0;
+
+    // Wait list: the nslices LRW positions, then the counter-trailer
+    // position, then the DC position (entries n_extra ≤ 2).
+    const uint8_t icnt = cnt_pending_ ? 1 : 0;
+    const uint8_t idc  = dc_pending_ ? 1 : 0;
+    const uint8_t nwait = static_cast<uint8_t>(nslices + icnt + idc);
+    const uint8_t i_cnt = nslices;          // wait-list index of counter
+    const uint8_t i_dc  = nslices + icnt;   // wait-list index of DC
+
+    std::array<uint8_t,  kMaxCyclicSlices + 2> positions{};
+    std::array<uint64_t, kMaxCyclicSlices + 2> tokens{};
+    std::array<CyclicSlotView, kMaxCyclicSlices + 2> views{};
+    std::array<bool,     kMaxCyclicSlices + 2> arrived{};
     for (uint8_t s = 0; s < nslices; ++s) {
-        mask     |= 1u << s;
-        tokens[s] = cyclic_pending_[s].token;
+        positions[s] = cyclic_pending_[s].pos;
+        tokens[s]    = cyclic_pending_[s].token;
+    }
+    if (icnt) {
+        positions[i_cnt] = cnt_pos_;
+        tokens[i_cnt]    = cnt_token_;
+    }
+    if (idc) {
+        positions[i_dc] = kCyclicDcPoolPos;
+        tokens[i_dc]    = dc_token_;
     }
     const uint64_t now = monoNowNs();
     const uint32_t remaining = now < cyclic_deadline_ns_
         ? static_cast<uint32_t>(cyclic_deadline_ns_ - now) : 0;
 
-    // One wake for the whole mask (Q3) — the transport's fallback still
-    // walks per-slot, so correctness never depends on the fast path.
-    uint32_t arrived =
-        transport_.waitCyclicSlotMask(mask, tokens.data(), remaining,
-                                      views.data());
+    // One wake for the whole list — the transport's fallback still
+    // walks per-position, so correctness never depends on the fast path.
+    transport_.waitCyclicPool(positions.data(), tokens.data(), nwait,
+                              remaining, views.data(), arrived.data());
 
     // Stale-deposit guard: a response deposited late — past its own
     // cycle's timeout — echoes the PREVIOUS send generation (lenFlags
     // res-bit 13).  Detect it, consume the deposit (refresh the token
     // baseline) and give the real response the remaining deadline once.
     // A second mismatch is pathological (two stales in flight) → miss.
-    uint32_t stale_mask = 0;
-    for (uint8_t s = 0; s < nslices; ++s) {
-        if ((arrived & (1u << s)) &&
-            views[s].gen != cyclic_pending_[s].gen) {
-            stale_mask |= 1u << s;
+    auto expected_gen = [&](uint8_t i) -> uint8_t {
+        if (i < nslices) return cyclic_pending_[i].gen;
+        if (i == i_cnt && icnt) return cnt_gen_;
+        return dc_gen_;
+    };
+    uint8_t nstale = 0;
+    for (uint8_t i = 0; i < nwait; ++i) {
+        if (arrived[i] && views[i].gen != expected_gen(i)) {
+            arrived[i] = false;
+            ++nstale;
             stats_.stale_responses++;
+            tokens[i] = transport_.cyclicSlotToken(positions[i]);
         }
     }
-    if (stale_mask) {
-        for (uint8_t s = 0; s < nslices; ++s) {
-            if (stale_mask & (1u << s))
-                tokens[s] = transport_.cyclicSlotToken(s);
+    if (nstale) {
+        std::array<uint8_t, kMaxCyclicSlices + 2> re_pos{};
+        std::array<uint64_t, kMaxCyclicSlices + 2> re_tok{};
+        std::array<CyclicSlotView, kMaxCyclicSlices + 2> re_views{};
+        std::array<bool, kMaxCyclicSlices + 2> re_arrived{};
+        uint8_t nre = 0;
+        for (uint8_t i = 0; i < nwait; ++i) {
+            if (arrived[i]) continue;
+            re_pos[nre] = positions[i];
+            re_tok[nre] = tokens[i];
+            ++nre;
         }
         const uint64_t now2 = monoNowNs();
         const uint32_t remain2 = now2 < cyclic_deadline_ns_
             ? static_cast<uint32_t>(cyclic_deadline_ns_ - now2) : 0;
-        const uint32_t arrived2 = remain2
-            ? transport_.waitCyclicSlotMask(stale_mask, tokens.data(),
-                                            remain2, views.data())
-            : 0;
-        // Retry winner must carry THIS send's generation; a second stale
-        // or a timeout both leave the slot un-arrived.
-        arrived = (arrived & ~stale_mask) | (arrived2 & stale_mask);
-        for (uint8_t s = 0; s < nslices; ++s) {
-            if ((arrived2 & (1u << s)) &&
-                views[s].gen != cyclic_pending_[s].gen) {
-                arrived &= ~(1u << s);
-                stats_.stale_responses++;
-                healthMarkStatus(slice_health_[s],
-                                 CyclicSliceStatus::Stale);
+        if (nre && remain2) {
+            transport_.waitCyclicPool(re_pos.data(), re_tok.data(), nre,
+                                      remain2, re_views.data(),
+                                      re_arrived.data());
+            uint8_t ri = 0;
+            for (uint8_t i = 0; i < nwait; ++i) {
+                if (arrived[i]) continue;
+                const bool got = re_arrived[ri];
+                const CyclicSlotView& rv = re_views[ri];
+                ++ri;
+                // The retry winner must carry THIS send's generation; a
+                // second stale or a timeout leaves the position missed.
+                if (!got) continue;
+                if (rv.gen != expected_gen(i)) {
+                    stats_.stale_responses++;
+                    if (i < nslices)
+                        healthMarkStatus(slice_health_[i],
+                                         CyclicSliceStatus::Stale);
+                    continue;
+                }
+                arrived[i] = true;
+                views[i]   = rv;
             }
         }
     }
 
     for (uint8_t s = 0; s < nslices; ++s) {
         uint64_t& hw = slice_health_[s];
-        if (!(arrived & (1u << s))) {
+        if (!arrived[s]) {
             stats_.timeout_errors++;
             healthTimeout(hw, expected_wkc_[s]);
             ok = false;
@@ -823,6 +992,49 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
                       expected_wkc_[s]);
         resps[s] = &views[s];
     }
+
+    // ---- Counter trailer: verify the frame belongs to THIS send -------
+    // The trailer datagram's payload IS the counter — an echo returning
+    // anything else (older send, corrupted frame) is rejected: the PDO
+    // data of the last frame is suspect and the exchange fails closed.
+    if (icnt) {
+        bool cnt_ok = false;
+        if (arrived[i_cnt] && views[i_cnt].payload &&
+            views[i_cnt].datalen >= kLrwCounterTrailerBytes) {
+            uint64_t echoed = 0;
+            std::memcpy(&echoed, views[i_cnt].payload, 8);
+            cnt_ok = (echoed == cnt_value_);
+        }
+        if (cnt_ok) {
+            lrw_counter_ok_ = cnt_value_;
+        } else {
+            ++stats_.counter_mismatches;
+            // The trailer protects the LAST frame — fail that slice's
+            // data rather than trust a frame of unproven provenance.
+            if (nslices > 0) {
+                resps[nslices - 1] = nullptr;
+                markRunStatus(slice_health_[nslices - 1],
+                              CyclicSliceStatus::Stale,
+                              arrived[i_cnt] ? views[i_cnt].wkc : 0,
+                              expected_wkc_[nslices - 1]);
+            }
+            ok = false;
+        }
+    }
+
+    // ---- DC timepoint: same-frame APRD of the configured slave --------
+    if (idc) {
+        if (arrived[i_dc] && views[i_dc].payload &&
+            views[i_dc].datalen >= 8 && views[i_dc].wkc >= 1) {
+            std::memcpy(&dc_time_ns_, views[i_dc].payload, 8);
+            dc_time_valid_ = true;
+        } else {
+            ++stats_.dc_timeouts;
+            dc_time_valid_ = false;
+        }
+    }
+    cnt_pending_ = false;
+    dc_pending_  = false;
     cyclic_pending_count_ = 0;
     pending_image_ = nullptr;
     if (!ok) {
@@ -1397,6 +1609,83 @@ LogicalAddressManager::describeEntries(const PDO::PDOMapping& mapping) const {
     return out;
 }
 
+// ---- Stall self-heal helpers (polled LRW path) -----------------------------
+//
+// Host stalls (thread preemption, logging bursts, non-RT scheduling) break
+// the polled exchange in two ways: (1) queued responses outlive their
+// request and can satisfy a NEW waiter on a reused idx — the 8-bit idx
+// wraps after 224 allocations — feeding stale PDO data to the caller, and
+// (2) frames lost at the kernel socket produce silent timeouts.  Neither
+// heals by itself: purge + drain resets both before the next send.
+
+void LogicalAddressManager::stallCheck()
+{
+    const int64_t now = static_cast<int64_t>(monoNowNs());
+    const int64_t gap = last_call_ns_ ? now - last_call_ns_ : 0;
+    last_call_ns_ = now;
+    if (stall_detect_us_ == 0 || gap <= 0 ||
+        gap <= static_cast<int64_t>(stall_detect_us_) * 1000) {
+        return;
+    }
+    ++stats_.stall_events;
+    // Free every pending waiter so late echoes become unrouted strays,
+    // then flush the kernel RX backlog through normal routing.
+    transport_.purgePendingResponses();
+    stats_.drained_frames +=
+        static_cast<uint32_t>(transport_.drainWire(512));
+    TETHER_LOGW(TAG,
+        "exchangeLRW: host stall ({:.1f} ms since last call) — purged "
+        "pending waits and drained wire backlog",
+        static_cast<double>(gap) / 1e6);
+}
+
+void LogicalAddressManager::onExchangeTimeout(const char* what)
+{
+    ++stats_.consecutive_timeouts;
+    // Rate-limit the timeout log to 4 Hz — a dead ring otherwise spams
+    // one line per exchange (and the logging itself worsens the stall).
+    const int64_t now = static_cast<int64_t>(monoNowNs());
+    if (now - last_timeout_log_ns_ >= 250'000'000) {
+        if (timeout_log_suppressed_ > 0) {
+            TETHER_LOGE(TAG,
+                "{}: response timeout ({} suppressed since last log)",
+                what, timeout_log_suppressed_);
+            timeout_log_suppressed_ = 0;
+        } else {
+            TETHER_LOGE(TAG, "{}: response timeout", what);
+        }
+        last_timeout_log_ns_ = now;
+    } else {
+        ++timeout_log_suppressed_;
+    }
+    // Pull whatever landed late off the wire — either it frees a stuck
+    // kernel-queue backlog or it confirms the ring is actually silent.
+    stats_.drained_frames +=
+        static_cast<uint32_t>(transport_.drainWire(64));
+    if (escalate_after_timeouts_ &&
+        stats_.consecutive_timeouts % escalate_after_timeouts_ == 0) {
+        // Ring probe: APRD of AL_STATUS (0x0130) on the first slave —
+        // distinguishes "host can't see replies" from "ring is broken".
+        uint16_t al_status = 0;
+        const bool alive = transport_.readRegister(0, 0x0130,
+                                                   &al_status, 2, 20);
+        TETHER_LOGE(TAG,
+            "exchangeLRW: {} consecutive timeouts — ring probe {}"
+            " (AL_STATUS=0x{:04X}). Check NIC drops / slave link state.",
+            stats_.consecutive_timeouts,
+            alive ? "ALIVE" : "FAILED — ring likely broken",
+            al_status);
+        escalate_logged_ = true;
+    }
+}
+
+void LogicalAddressManager::onExchangeSuccess()
+{
+    stats_.success++;
+    stats_.consecutive_timeouts = 0;
+    escalate_logged_ = false;
+}
+
 bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
                                             uint32_t offset, uint32_t length,
                                             bool enforce_slice_limit) {
@@ -1405,6 +1694,7 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
         stats_.send_errors++;
         return false;
     }
+    stallCheck();
 
     static constexpr size_t kMaxLRWPayload = PDO::kMaxPDOSize * PDO::kMaxPDOSlaves;
     const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
@@ -1491,11 +1781,11 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
 
     // Wait for response
     const bool got_resp = have_slot
-        ? transport_.waitForPreRegistered(slot, 10, resp)
-        : transport_.waitForResponseIdx(idx, 10, resp);
+        ? transport_.waitForPreRegistered(slot, response_timeout_ms_, resp)
+        : transport_.waitForResponseIdx(idx, response_timeout_ms_, resp);
     if (!got_resp) {
-        TETHER_LOGE(TAG, "exchangeLRW: response timeout");
         stats_.timeout_errors++;
+        onExchangeTimeout("exchangeLRW");
         return false;
     }
 
@@ -1531,7 +1821,7 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
         }
     }
 
-    stats_.success++;
+    onExchangeSuccess();
     return true;
 }
 
@@ -1546,6 +1836,7 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
         stats_.send_errors++;
         return false;
     }
+    stallCheck();
     if (slave_mask == 0) return true;
 
     // Pass 1: compute compacted sizes for included slaves
@@ -1609,11 +1900,11 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
     }
 
     const bool got_resp = have_slot
-        ? transport_.waitForPreRegistered(slot, 10, resp)
-        : transport_.waitForResponseIdx(idx, 10, resp);
+        ? transport_.waitForPreRegistered(slot, response_timeout_ms_, resp)
+        : transport_.waitForResponseIdx(idx, response_timeout_ms_, resp);
     if (!got_resp) {
-        TETHER_LOGE(TAG, "exchangeLRWForSlaves: response timeout");
         stats_.timeout_errors++;
+        onExchangeTimeout("exchangeLRWForSlaves");
         return false;
     }
 
@@ -1642,7 +1933,7 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
         }
     }
 
-    stats_.success++;
+    onExchangeSuccess();
     return true;
 }
 

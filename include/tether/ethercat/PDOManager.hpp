@@ -474,12 +474,12 @@ public:
     // ------------------------------------------------------------------
     // Cyclic fast path: reserved index range + fixed response slots.
     //
-    // Datagrams sent with idx in [kCyclicSlotBase, kCyclicSlotBase +
-    // kNumCyclicSlots) bypass TransactionRouter entirely: the RX parser
-    // deposits them into fixed preallocated slots that the cyclic thread
-    // polls on a sequence counter — no mutex, no condition variable, and
-    // no RxDatagram copy on the hot path.  allocIdx() never returns an
-    // index in this range.
+    // Datagrams sent with a fastpath idx (0x9C..0xFF minus 0xFE — the
+    // rotating pool, the PDO-slice band 0xE0..0xEF and the DC index 0xFF)
+    // bypass TransactionRouter entirely: the RX parser deposits them into
+    // fixed preallocated slots that the cyclic thread polls on a sequence
+    // counter — no mutex, no condition variable, and no RxDatagram copy on
+    // the hot path.  allocIdx() never returns an index in this range.
     // ------------------------------------------------------------------
     static constexpr uint8_t kCyclicSlotBase = ::EtherCAT::kCyclicSlotBaseIdx;
     static constexpr size_t  kNumCyclicSlots = ::EtherCAT::kNumCyclicSlots;
@@ -578,10 +578,12 @@ public:
                                         uint32_t timeout_ns,
                                         CyclicSlotView* views) {
         // Per-slot fallback: walk the mask, sharing one CLOCK_MONOTONIC
-        // deadline across slots.
+        // deadline across slots.  The mask is 32 bits — only positions
+        // 0..31 are reachable through this API (pooled exchanges use
+        // waitCyclicPool for the full 0..82 range).
         uint32_t arrived = 0;
         const uint64_t deadline = monoNowNsFallback() + timeout_ns;
-        for (uint8_t s = 0; s < kNumCyclicSlots; ++s) {
+        for (uint8_t s = 0; s < 32 && s < kNumCyclicSlots; ++s) {
             if (!(slot_mask & (1u << s))) continue;
             const uint64_t now = monoNowNsFallback();
             const uint32_t remain = now < deadline
@@ -683,6 +685,52 @@ public:
     /// (26 untagged, 30 with a baked TX VLAN tag).
     virtual uint32_t cyclicPayloadOffset() const { return 26; }
 
+    /**
+     * @brief Send one frame carrying several fastpath-band datagrams.
+     *
+     * All datagrams ride the same Ethernet frame (M-bit chaining) — the
+     * pooled LRW exchange uses it to append the 64-bit counter trailer
+     * and to read the configured slave's DC timepoint in the same frame
+     * as the PDO data.  Every `idx` must satisfy isSlotIdx().
+     * @return true if the frame was handed to the wire; false when the
+     *         transport cannot compose multi-datagram cyclic frames.
+     */
+    virtual bool sendPoolFrame(const CyclicDgramSpec* dgs, size_t count) {
+        (void)dgs; (void)count; return false;
+    }
+
+    /**
+     * @brief Wait for deposits on an arbitrary list of rotating-pool
+     *        positions — one wake re-scans the whole list.
+     *
+     * @param positions  Pool positions (0..kCyclicDcPoolPos)
+     * @param tokens     Per-position seq tokens taken at send time
+     * @param count      List length
+     * @param timeout_ns Shared deadline budget
+     * @param views      Output — filled for arrived positions only
+     * @param arrived    Output — set per arrived position
+     * @return Number of arrived positions.  The default degenerates to
+     *         a per-position waitCyclicSlotView() loop sharing the
+     *         deadline.
+     */
+    virtual uint8_t waitCyclicPool(const uint8_t* positions,
+                                   const uint64_t* tokens,
+                                   uint8_t count, uint32_t timeout_ns,
+                                   CyclicSlotView* views, bool* arrived) {
+        if (!positions || !tokens || !views || !arrived || !count) return 0;
+        const uint64_t deadline = monoNowNsFallback() + timeout_ns;
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < count; ++i) {
+            const uint64_t now = monoNowNsFallback();
+            const uint32_t remain = now < deadline
+                ? static_cast<uint32_t>(deadline - now) : 0;
+            arrived[i] = waitCyclicSlotView(positions[i], tokens[i],
+                                            remain, views[i]);
+            if (arrived[i]) ++n;
+        }
+        return n;
+    }
+
     virtual bool writeRegister(uint16_t adp, uint16_t ado,
                                const void* data, uint16_t len,
                                unsigned int timeout_ms) = 0;
@@ -723,6 +771,36 @@ public:
 
     virtual uint8_t  allocIdx() = 0;
     virtual uint16_t adpForSlaveIndex(uint16_t slave_index) = 0;
+
+    // ------------------------------------------------------------------
+    // Stall recovery hooks (used by LogicalAddressManager self-heal).
+    // ------------------------------------------------------------------
+
+    /**
+     * @brief Best-effort drain of already-received wire frames through
+     *        normal routing.
+     *
+     * Called by the LRW exchange after a host stall or response timeout:
+     * queued responses for still-pending slots are delivered (they ARE
+     * their legitimate replies) and everything else falls into the
+     * unrouted counter.  Draining the kernel backlog BEFORE the next
+     * send keeps a stale echo from outliving into a reused idx.
+     *
+     * @return frames drained (0 if unsupported — e.g. no direct-receive
+     *         path under VLAN encapsulation).
+     */
+    virtual int drainWire(int max_frames) {
+        (void)max_frames; return 0;
+    }
+
+    /**
+     * @brief Drop every pending response waiter.
+     *
+     * Post-stall cleanup: frees all TransactionRouter slots so a response
+     * that outlived its request cannot satisfy a NEW request on a reused
+     * datagram index.  Waiters wake into their timeout path.
+     */
+    virtual void purgePendingResponses() {}
 
     /// @return true if cancellation has been requested (e.g. during shutdown).
     /// Used by callers to suppress error logging when failures are expected.

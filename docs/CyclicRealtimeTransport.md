@@ -66,24 +66,38 @@ Everything builds on one invariant about the EtherCAT datagram index byte.
 ### 2.1 Reserved index range
 
 ```
-idx 0x00..0xF7   asynchronous traffic  (allocIdx() pool, router-routed)
-idx 0xF8..0xFD   cyclic slots          (kCyclicSlotBaseIdx, kNumCyclicSlots=6)
+idx 0x00..0x9B   asynchronous traffic  (allocIdx() pool, router-routed)
+idx 0x9C..0xDF   rotating cyclic pool positions 0..67
+idx 0xE0..0xEF   PDO-slice slots       (kSliceSlotBaseIdx, kNumSliceSlots=16)
+idx 0xF0..0xFD   rotating cyclic pool positions 68..81
 idx 0xFE         fire-and-forget / piggyback (kFireAndForgetIdx = kPiggybackIdx)
-idx 0xFF         unused
+idx 0xFF         dedicated DC-timepoint datagram (kDcTimeIdx, pool pos 82)
 ```
+
+The whole `0x9C..0xFF` band is reserved for cyclic execution — 100 wire
+indices.  The rotating image pool maps **pool positions**, not wire
+indices, so the slice band can stay fixed: positions 0..67 → `0x9C..0xDF`,
+positions 68..81 → `0xF0..0xFD` (`cyclicPoolWireIdx()`), and position 82
+is the dedicated DC-timepoint index `0xFF`.  Each cyclic send draws the
+next position; up to `kNumCyclicSlots` (82) requests can be in flight,
+and a position's pending request is only re-armed when that same
+position is sent on again — a late response always lands in its own
+mailbox instead of being dropped or aliasing a reused index.
 
 `kPiggybackIdx` (0xFE, shared with `kFireAndForgetIdx`) is the reserved
 index for datagrams piggybacked *inside* a cyclic frame — mailbox/async
-traffic riding the cyclic wire slot.  The demux keys on the *first*
-datagram's idx, so the invariant is: **LRW first, piggybacks after** —
-the trailing non-cyclic datagrams fall out of the slot range at dispatch
-and are forwarded to the regular parser.
+traffic riding the cyclic wire slot.  It numerically lies inside the
+band but owns no mailbox: the demux keys on the *first* datagram's idx,
+so the invariant is: **LRW first, piggybacks after** — the trailing
+non-cyclic datagrams fall out of the slot range at dispatch and are
+forwarded to the regular parser.  The socket-A filter treats `0xFE` as a
+hole in the accept range so its echoes always reach the async parser.
 
-`kCyclicSlotBaseIdx`/`kNumCyclicSlots` are defined in `Types.hpp`; the same
-values are re-exported as `IPDOTransport::kCyclicSlotBase` /
-`kNumCyclicSlots`.  `allocIdx()` never returns an index ≥ 0xF8, so **no async
-datagram can ever carry a cyclic index** — the separation is enforced by the
-allocator, not by convention.
+`kFastSlotBaseIdx`/`kFastSlotEndIdx`/`kNumCyclicSlots` are defined in
+`Types.hpp`; the same values are re-exported as
+`IPDOTransport::kCyclicSlotBase` / `kNumCyclicSlots`.  `allocIdx()` never
+returns an index ≥ 0x9C, so **no async datagram can ever carry a cyclic
+index** — the separation is enforced by the allocator, not by convention.
 
 ### 2.2 Why index-based demultiplexing is exact
 
@@ -146,6 +160,34 @@ self-disables.  Residual: a deposit exactly two cycles late aliases (the
 bit repeats); one-cycle-late — the only physically plausible case on an
 in-order ring — is covered.
 
+### 2.4 Counter trailer and DC timepoint
+
+Two more datagrams ride the last frame of every cyclic image exchange:
+
+* **64-bit LRW counter trailer** (`kLrwCounterTrailerBytes`) — an `LRD`
+  datagram on its own rotating-pool index carrying a monotonically
+  increasing per-exchange counter.  It is addressed past the end of the
+  mapped image, so slave FMMUs pass it through the ring unmodified and
+  the echo is verbatim.  Collect compares the echoed value to the sent
+  counter: a mismatch — or a missing echo — means the response cannot be
+  proven fresh, so the last image slice is invalidated rather than
+  trusted (`stats_.counter_mismatches`).  This is the residual-alias
+  backstop behind the 1-bit generation guard: an echo that survived
+  ≥82 in-flight sends and lands after position re-arm is still provably
+  stale.  The verified counter is published via `lastLrwCounter()`,
+  letting consumers detect dropped exchanges (counter gaps) instead of
+  trusting data age implicitly.
+* **DC timepoint** — when `setCyclicDcTimeSlave(position)` is set, an
+  `APRD` of DC System Time (`0x0910`, 8 B) on that slave rides the same
+  frame on the dedicated `0xFF` index.  The value is published via
+  `lastDcTimeNs()`/`dcTimeValid()`; a missing or invalid DC response is
+  informational only (`stats_.dc_timeouts`) and does not fail the
+  exchange.
+
+When the image's last slice plus both trailers fit one frame they are
+composed as a single multi-datagram `sendPoolFrame` (M-bit chaining);
+otherwise the trailers go out on a second frame.
+
 ---
 
 ## 3. Architecture
@@ -165,7 +207,8 @@ in-order ring — is covered.
               ┌──────────▼─────────┐   ┌─────────▼───────────┐
               │ Socket A (cyclic)  │   │ Socket B (async)    │
               │ AF_PACKET, 0x88A4  │   │ existing iface fd   │
-              │ BPF: idx∈[F8,FD]   │   │ BPF: idx∉[F8,FD]    │
+              │ BPF: idx∈[9C,FF]   │   │ BPF: idx∉[9C,FF]    │
+              │      minus 0xFE    │   │      incl. 0xFE     │
               │ ├ ring backend     │   │ poll thread, router │
               │ └ socket backend   │   │ (unchanged)         │
               └────────────────────┘   └─────────────────────┘
@@ -317,7 +360,7 @@ BPF filter (`SO_ATTACH_FILTER`) that runs in softirq
 **before** the kernel copies the frame into that socket's queue or ring:
 
 ```c
-/* socket A program — mirror program on socket B (13 insns) */
+/* socket A program — mirror program on socket B (14 insns) */
 ldh  [12]              ; EtherType
 jeq  0x88A4, +0, +2    ; untagged ECAT → idx at [17]
 ldh  [12]              ; (reload) EtherType
@@ -326,8 +369,9 @@ ldh  [16]              ; VLAN inner EtherType
 jeq  0x88A4, +0, ->B   ; VLAN-non-ECAT → B verdict
 ldb  [21]              ; tagged: first datagram idx
 jge  0, ->chk, ->chk   ; join: idx in A → range check
-chk: jge 0xF8, +0, ->B ; below cyclic range → B
-     jgt 0xFD, ->B, +0 ; above cyclic range → B
+chk: jge 0x9C, +0, ->B ; below cyclic range → B
+     jgt 0xFF, ->B, +0 ; above cyclic range → B (dead — kept for symmetry)
+     jeq 0xFE, ->B, +0 ; fire-and-forget hole → B (async parser owns it)
 ret  ACCEPT            ; A: accept / B: reject
 ret  REJECT            ; A: reject / B: accept
 ```
@@ -660,7 +704,7 @@ A slice is one LRW datagram on one reserved slot; slices of one frame
 travel together when they fit (multi-datagram cyclic frames dispatch to
 all their slots — §7.2).
 
-Limits: at most `kNumCyclicSlots` (6) slices ⇒ ~8.6 KiB of image;
+Limits: at most `kNumCyclicSlots` (82) slices ⇒ ~118 KiB of image;
 `configureProcessImage` fails loudly at startup when the image exceeds
 that instead of failing every cycle.  `Rotating` cannot span frames —
 multi-slice falls back to staged send (logged).  Each slice's WKC is
@@ -674,8 +718,8 @@ walks the datagram chain (honouring the `more` flag and bounds):
 * **All datagrams cyclic** → publish pass: each datagram's payload view is
   published to its slot (`rxHold` the frame cookie per published datagram;
   the slot releases the *previous* cookie it held).  Multi-datagram cyclic
-  frames — e.g. `[LRW 0xF8][ARMW DC-feedback 0xF9]` — fill all their slots
-  from one ring read.
+  frames — e.g. `[LRW 0x9C][LRD counter 0x9D][APRD DC 0xFF]` — fill all
+  their slots from one ring read.
 * **Anything else** (async or mixed — only possible when the BPF is absent
   or failed) → the whole frame goes to `handleRxFrame`, the normal parser,
   which deposits cyclic datagrams by copy and routes async ones.  Nothing
@@ -1049,8 +1093,8 @@ Invariants that hold on *every* level:
   a monotonic stamp taken at deposit.  `SIOCSHWTSTAMP`-grade *hardware*
   timestamps are a possible extension (V2 metadata carries them when
   enabled).
-* **Slice ceiling.**  At most `kNumCyclicSlots` (6) LRW datagrams per
-  cycle ⇒ ~8.6 KiB of process image; `configureProcessImage` refuses
+* **Slice ceiling.**  At most `kNumCyclicSlots` (82) LRW datagrams per
+  cycle ⇒ ~118 KiB of process image; `configureProcessImage` refuses
   larger images at startup.  **Sizing rule (Q16):** at 100 Mbit/s one
   max-size frame ≈ 120 µs on the wire — at 4 kHz (250 µs) an image past
   ~2 frames is physically infeasible regardless of slicing.  Plan the
@@ -1204,7 +1248,7 @@ Tests live in `tests/ethercat/test_cyclic_channel.cpp`,
 
 | Layer | Method | Coverage |
 |---|---|---|
-| BPF program correctness | userspace cBPF interpreter over the exact exported instruction bytes (`cyclicChannelBpfProgram`) | accept/reject at boundary indexes 0xF7/0xF8/0xFD/0xFE, non-ECAT EtherTypes, short frames, **VLAN-tagged ECAT demux on `frame[21]`** |
+| BPF program correctness | userspace cBPF interpreter over the exact exported instruction bytes (`cyclicChannelBpfProgram`) | accept/reject at boundary indexes 0x9B/0x9C/0xFD/0xFE/0xFF, the 0xFE hole, non-ECAT EtherTypes, short frames, **VLAN-tagged ECAT demux on `frame[21]`** |
 | BPF **kernel execution** | same bytes attached via `SO_ATTACH_FILTER` to an `AF_UNIX` datagram socketpair — the real kernel verifier+interpreter, no privileges needed | accept/reject behaviour in-kernel |
 | Socket channel | `createCyclicSocketChannelForFd` over `AF_UNIX` sockets | rxPoll delivery/timeout/nonblock, bank exhaustion + `droppedRx`, hold/release lifecycle, invalid cookies, TX failure paths, `txSendParts` staging + oversize + null-payload, `recvmsg`/`SCM_TIMESTAMPNS` stamps |
 | Ring channel | `createCyclicRingChannelForMemory` — synthetic `tpacket2_hdr`/`tpacket3` block layout on caller memory, socketpair fd for kick/poll | V2: slot emit + kernel stamps, consume→recycle, hold pins/release frees, double-release clamp, resume cursor, `rxPending` semantics, TX acquire/commit/pad/exhaustion, EAGAIN → `txDeferred`, poll deadline, spin-window late delivery.  V3 prototype (`rx_tpacket_v3`): block walk, per-pkt holds, batched retire, cursor-advance-after-sweep |
@@ -1262,8 +1306,9 @@ pair** (created and torn down by the test):
   TX-ring exhaustion, deferred-kick `txDeferred`.
 - The full TX→wire→RX path: a ring-committed frame crosses the veth to a
   peer socket and is echoed back into a slot.
-- Kernel cBPF demultiplexing: cyclic idx `0xF8–0xFD` reaches only the
-  cyclic socket, not the async socket, on a clean interface.
+- Kernel cBPF demultiplexing: cyclic idx `0x9C–0xFF` (minus `0xFE`)
+  reaches only the cyclic socket, not the async socket, on a clean
+  interface.
 - `Master::startCyclicLoop` on a real wire + `waitCyclicSlotView`
   success/timeout, and `CyclicExecutive` exchanging at `SCHED_FIFO`.
 - `CpuIsolation` runtime claims/release, `PR_SET_TIMERSLACK`,

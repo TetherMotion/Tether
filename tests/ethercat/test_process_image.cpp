@@ -105,16 +105,20 @@ public:
     uint64_t cyclicSlotToken(uint8_t slot) override { return slot; }
     // 0 unless echoing — transports without a stamped header disable the
     // check by reporting gen 0 (matching unmarked views).
-    uint8_t cyclicSlotGen(uint8_t) override { return echo_tx_gen ? tx_gen : 0; }
+    uint8_t cyclicSlotGen(uint8_t slot) override {
+        return echo_tx_gen && slot <= kCyclicDcPoolPos ? gen_[slot] : 0;
+    }
     size_t maxEtherCATPayloadPerFrame() const override {
         return fake_frame_payload ? fake_frame_payload : 1498;
     }
 
-    bool sendCyclicDatagram(Command, uint8_t slot, uint16_t adp,
+    bool sendCyclicDatagram(Command cmd, uint8_t slot, uint16_t adp,
                             uint16_t ado,
                             const void* data, uint16_t datalen,
                             bool) override {
         if (!send_ok) return false;
+        recordSent(slot, cmd, adp, ado, data, datalen);
+        if (cmd != Command::LRW) return true;   // counter/DC not image
         tx_gen ^= 1;   // per-slot in reality; single-slot fixture is fine
         std::memcpy(last_sent_frame, data, datalen);
         last_sent_len = datalen;
@@ -127,22 +131,122 @@ public:
         return true;
     }
 
-    bool waitCyclicSlotView(uint8_t slot, uint64_t, uint32_t,
-                            CyclicSlotView& out) override {
-        ++wait_calls;
-        if (on_wait) on_wait();
-        if (!resp_ok) return false;
-        out = per_slot_resp ? resp_slots[slot] : resp_view;
-        if (echo_tx_gen) {
-            if (serve_stale_once && !stale_served) {
-                stale_served = true;
-                out.gen = tx_gen ^ 1;   // previous generation — stale
-            } else {
-                out.gen = tx_gen;
+    bool sendPoolFrame(const CyclicDgramSpec* dgs,
+                       size_t count) override {
+        if (!send_ok || !pool_frames_ok_) return false;
+        ++pool_frame_calls;
+        for (size_t i = 0; i < count; ++i) {
+            const CyclicDgramSpec& d = dgs[i];
+            const uint8_t pos = cyclicWirePoolPos(d.idx);
+            recordSent(pos, d.cmd, d.adp, d.ado, d.data,
+                       static_cast<uint16_t>(d.datalen + d.tail_len));
+            if (d.cmd != Command::LRW) continue;
+            tx_gen ^= 1;
+            if (d.data) {
+                std::memcpy(last_sent_frame, d.data,
+                            std::min<size_t>(d.datalen,
+                                             sizeof(last_sent_frame)));
+                last_sent_len = d.datalen;
+            }
+            if (send_count < kSlots) {
+                const int j = send_count++;
+                sent_slot[j] = pos; sent_adp[j] = d.adp; sent_ado[j] = d.ado;
+                sent_len_[j] = d.datalen;
+                if (d.data)
+                    std::memcpy(sent_data[j], d.data,
+                                std::min<size_t>(d.datalen,
+                                                 sizeof(sent_data[0])));
             }
         }
         return true;
     }
+
+    /// Serve one position: LRD counter datagrams echo their payload
+    /// (unmapped logical space passes through verbatim), APRD serves the
+    /// DC script, LRW serves the scripted slice response keyed by the
+    /// datagram's logical slice index — positions rotate every send, so
+    /// resp_slots[]/resp_view must follow the slice, not the position.
+    bool serveOne(uint8_t slot, CyclicSlotView& out) {
+        if (on_wait) on_wait();
+        if (!resp_ok) return false;
+        const Command cmd =
+            slot <= kCyclicDcPoolPos ? sent_cmd_[slot] : Command::NOP;
+        if (cmd == Command::LRD) {              // counter trailer — echo
+            out.payload  = sent_echo_[slot];
+            out.datalen  = sent_len_by_pos_[slot];
+            out.wkc      = 0;
+        } else if (cmd == Command::APRD) {      // DC System Time
+            out.payload  = dc_resp_buf_;
+            out.datalen  = 8;
+            out.wkc      = dc_resp_wkc_;
+        } else {
+            if (!per_slot_resp) {
+                out = resp_view;
+            } else {
+                const uint32_t msl =
+                    maxEtherCATPayloadPerFrame() - 12;
+                const uint32_t slice = msl ? sent_off_[slot] / msl : 0;
+                out = slice < kSlots ? resp_slots[slice] : CyclicSlotView{};
+            }
+        }
+        if (echo_tx_gen) {
+            if (serve_stale_once && !stale_served) {
+                stale_served = true;
+                out.gen = static_cast<uint8_t>(gen_[slot] ^ 1u);
+            } else {
+                out.gen = gen_[slot];
+            }
+        }
+        return true;
+    }
+
+    bool waitCyclicSlotView(uint8_t slot, uint64_t, uint32_t,
+                            CyclicSlotView& out) override {
+        ++wait_calls;
+        return serveOne(slot, out);
+    }
+
+    /// Pool wait = ONE wake for the whole list (mirrors the Master's
+    /// waitCyclicPool) — wait_calls counts waits, not positions.
+    uint8_t waitCyclicPool(const uint8_t* positions, const uint64_t*,
+                           uint8_t count, uint32_t,
+                           CyclicSlotView* views, bool* arrived) override {
+        ++wait_calls;
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < count; ++i) {
+            arrived[i] = serveOne(positions[i], views[i]);
+            if (arrived[i]) ++n;
+        }
+        return n;
+    }
+
+private:
+    void recordSent(uint8_t pos, Command cmd, uint16_t adp, uint16_t ado,
+                    const void* data, uint16_t datalen) {
+        if (pos > kCyclicDcPoolPos) return;
+        gen_[pos] ^= 1;
+        sent_cmd_[pos] = cmd;
+        sent_off_[pos] =
+            ((static_cast<uint32_t>(ado) << 16) | adp) - base_;
+        sent_len_by_pos_[pos] = datalen;
+        if (data && datalen)
+            std::memcpy(sent_echo_[pos], data,
+                        std::min<size_t>(datalen, sizeof(sent_echo_[0])));
+    }
+
+public:
+    /// Per-position send record (positions rotate — keyed by position).
+    Command  sent_cmd_[kCyclicDcPoolPos + 1]{};
+    uint32_t sent_off_[kCyclicDcPoolPos + 1]{};
+    uint16_t sent_len_by_pos_[kCyclicDcPoolPos + 1]{};
+    uint8_t  sent_echo_[kCyclicDcPoolPos + 1][16]{};
+    uint8_t  gen_[kCyclicDcPoolPos + 1]{};
+    uint32_t base_ = 0x10000;
+    // DC-timepoint script + multi-datagram frame capture.
+    uint8_t  dc_resp_buf_[8]{};
+    uint16_t dc_resp_wkc_ = 1;
+    bool     pool_frames_ok_ = false;   // default: exercise the fallback
+    int      pool_frame_calls = 0;
 
     uint8_t* acquireCyclicTxFrame() override {
         tx_acquire_called = true;
@@ -154,7 +258,7 @@ public:
         // Minimal but checkable header: mark cmd/idx/adp/ado/len.
         frame[0]  = 0xEE;
         frame[16] = static_cast<uint8_t>(cmd);
-        frame[17] = static_cast<uint8_t>(kCyclicSlotBase + slot);
+        frame[17] = cyclicPoolWireIdx(slot);
         std::memcpy(frame + 18, &adp, 2);
         std::memcpy(frame + 20, &ado, 2);
         std::memcpy(frame + 22, &datalen, 2);
@@ -589,7 +693,7 @@ TEST_F(ProcessImageTest, RotatingModeSendsInPlaceFrame) {
     ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, &img));
     EXPECT_TRUE(transport.tx_acquire_called);
     // sendCyclicFrame captured a full frame: header at 0, payload at 26.
-    EXPECT_EQ(transport.last_sent_idx, 0xF8);         // reserved slot idx
+    EXPECT_EQ(transport.last_sent_idx, 0x9C);         // rotating pool pos 0
     EXPECT_EQ(transport.last_sent_frame[16], 0x0C);   // LRW command
     EXPECT_EQ(transport.last_sent_len, 26 + 16 + 2);
 
@@ -908,8 +1012,10 @@ TEST_F(ProcessImageTest, StrictWkcOffAcceptsVaryingWkc) {
 }
 
 TEST_F(ProcessImageTest, OversizedImageBeyondSlotCountFailsClean) {
-    // 16-byte image, 2-byte slices → 8 slices needed but kNumCyclicSlots=6.
-    transport.fake_frame_payload = 14;   // maxSlice = 2
+    // maxSliceLength() == 0 (12-byte fake frame payload — exactly the
+    // EtherCAT overhead, no room for PDO data) forces the slice count
+    // past kMaxCyclicSlices so the send is rejected before any datagram.
+    transport.fake_frame_payload = 12;   // maxSlice = 0
     EXPECT_FALSE(mgr.exchangeAllLRWCyclic(mapping, 200'000, nullptr));
     EXPECT_GE(mgr.getStats().send_errors, 1u);
 }

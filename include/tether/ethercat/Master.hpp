@@ -725,6 +725,25 @@ public:
     /** Route a received Ethernet frame to the internal parser. */
     void handleRxFrame(const uint8_t* frame, size_t length);
 
+    /**
+     * @brief Drain up to @p max_frames already-received wire frames through
+     *        normal datagram routing (post-stall recovery).
+     *
+     * Uses the interface's direct-receive path (`iface_.receive`); returns
+     * 0 when no receive hook is wired (e.g. VLAN-routed encapsulation).
+     * Intended to flush the kernel socket backlog after a host stall so a
+     * stale echo cannot satisfy a new request on a reused datagram index.
+     */
+    int drainWire(int max_frames);
+
+    /**
+     * @brief Drop every pending TransactionRouter response waiter.
+     *
+     * Post-stall cleanup: waiters wake into their timeout path and late
+     * echoes become unrouted strays instead of mis-satisfying new requests.
+     */
+    void purgePendingResponses();
+
     // ---- Discovery ---------------------------------------------------------
 
     /**
@@ -1447,9 +1466,13 @@ public:
     WaitResult waitForPreRegistered(size_t slot, uint32_t timeout_ms);
 
     // ---- Cyclic fast path (used by MasterPDOTransport) --------------------
-    // Reserved idx range [kCyclicSlotBase, +kNumCyclicSlots): responses are
-    // deposited into fixed slots by the RX parser and consumed by the cyclic
-    // thread without touching the TransactionRouter.
+    // Reserved idx band [kFastSlotBaseIdx, kFastSlotEndIdx] (100 wire
+    // indices): responses are deposited into fixed slots by the RX
+    // parser and consumed by the cyclic thread without touching the
+    // TransactionRouter.  The rotating pool (positions 0..kNumCyclicSlots-1
+    // mapped via cyclicPoolWireIdx()) is reserved for cyclic requests
+    // that may stay in flight across cycles; position kCyclicDcPoolPos
+    // maps to the dedicated DC-timepoint index 0xFF.
     bool     supportsCyclicFastPath() const { return static_cast<bool>(iface_.send); }
     uint64_t cyclicSlotToken(uint8_t slot) const;
     /// Generation bit of the last datagram sent on @p slot — the echo
@@ -1506,6 +1529,32 @@ public:
     uint32_t cyclicPayloadOffset() const;
     /// Channel accessor for the process image / transport adapter.
     ICyclicChannel* cyclicChannel() const;
+
+    /**
+     * @brief Send one frame carrying several fastpath-band datagrams.
+     *
+     * All datagrams ride the same Ethernet frame (M-bit chaining) — used
+     * by the pooled LRW exchange to append the 64-bit counter trailer
+     * and to read the DC timepoint of the configured slave in the same
+     * frame as the PDO data.  Every `idx` must satisfy isSlotIdx().
+     */
+    bool     sendCyclicPoolFrame(const CyclicDgramSpec* dgs, size_t count);
+    /**
+     * @brief Wait for deposits on an arbitrary list of rotating-pool
+     *        positions — one wake re-scans the whole list.
+     *
+     * @param positions  Pool positions (0..kCyclicDcPoolPos)
+     * @param tokens     Per-position seq tokens at send time
+     * @param count      List length (≤ kCyclicDcPoolPos + 1)
+     * @param timeout_ns Shared deadline budget
+     * @param views      Output — filled for arrived positions only
+     * @param arrived    Output — set per arrived position
+     * @return Number of arrived positions.
+     */
+    uint8_t  waitCyclicPool(const uint8_t* positions,
+                            const uint64_t* tokens,
+                            uint8_t count, uint32_t timeout_ns,
+                            CyclicSlotView* views, bool* arrived);
 
     // ---- PDO-slice fast path ------------------------------------------
     // Dedicated idx pool [kSliceSlotBaseIdx, +kNumSliceSlots): user-defined

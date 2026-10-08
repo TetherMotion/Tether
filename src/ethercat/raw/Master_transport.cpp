@@ -249,13 +249,12 @@ WaitResult Master::waitForPreRegistered(size_t slot, uint32_t timeout_ms)
 
 uint8_t Master::allocIdx()
 {
-    // Skip the entire fastpath reservation — PDO-slice slots (0xE0..0xEF),
-    // cyclic slots (0xF8..0xFD) — plus the fire-and-forget index (0xFE),
-    // i.e. everything >= kSliceSlotBaseIdx.  This also skips 0xFF,
-    // leaving 0..0xDF for regular traffic.
+    // Skip the entire cyclic band — the 100-index reservation at
+    // 0x9C..0xFF (rotating pool + PDO-slice slots + 0xFE fire-and-forget
+    // + 0xFF DC timepoint).  Async traffic keeps 0x00..0x9B.
     uint8_t idx;
     do { idx = next_idx_.fetch_add(1, std::memory_order_relaxed); }
-    while (idx >= kSliceSlotBaseIdx);
+    while (idx >= kFastSlotBaseIdx);
     return idx;
 }
 

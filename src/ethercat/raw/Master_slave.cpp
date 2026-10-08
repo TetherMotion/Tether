@@ -345,6 +345,25 @@ void Master::handleRxFrame(const uint8_t* frame, size_t length)
     parseEtherCATFrame(frame, length);
 }
 
+int Master::drainWire(int max_frames)
+{
+    if (!iface_.receive || max_frames <= 0) return 0;
+    int drained = 0;
+    uint8_t buf[kMaxJumboFrameSize];
+    while (drained < max_frames) {
+        size_t n = 0;
+        if (!iface_.receive(buf, sizeof(buf), &n) || n == 0) break;
+        handleRxFrame(buf, n);
+        ++drained;
+    }
+    return drained;
+}
+
+void Master::purgePendingResponses()
+{
+    packet_router_.purgeAllPending();
+}
+
 // ============================================================================
 // Discovery
 // ============================================================================

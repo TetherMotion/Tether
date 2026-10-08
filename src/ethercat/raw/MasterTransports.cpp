@@ -77,6 +77,13 @@ public:
         return Master::adpForSlaveIndex(slave_index);
     }
 
+    int drainWire(int max_frames) override {
+        return master_.drainWire(max_frames);
+    }
+    void purgePendingResponses() override {
+        master_.purgePendingResponses();
+    }
+
     bool isCancelRequested() const override {
         return master_.isCancelRequested();
     }
@@ -161,6 +168,16 @@ public:
     }
     uint32_t cyclicPayloadOffset() const override {
         return master_.cyclicPayloadOffset();
+    }
+    bool sendPoolFrame(const CyclicDgramSpec* dgs, size_t count) override {
+        return master_.sendCyclicPoolFrame(dgs, count);
+    }
+    uint8_t waitCyclicPool(const uint8_t* positions,
+                           const uint64_t* tokens,
+                           uint8_t count, uint32_t timeout_ns,
+                           CyclicSlotView* views, bool* arrived) override {
+        return master_.waitCyclicPool(positions, tokens, count,
+                                      timeout_ns, views, arrived);
     }
 
 private:
