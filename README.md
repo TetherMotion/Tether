@@ -348,6 +348,68 @@ cmake -B build -DTETHER_ENABLE_COVERAGE=ON
 
 See `CMakeLists.txt` for the full list (~50 options).
 
+### Cross-compiling for Raspberry Pi
+
+Optional toolchain files in `cmake/toolchains/` cross-compile Tether and the
+examples for Raspberry Pi 5 (`rpi5`, aarch64) and Raspberry Pi 1 B+ (`rpi1`,
+ARMv6 hard-float). A Linux cross toolchain must be installed first; GCC >= 11
+is required (>= 13 recommended for native `<format>`).
+
+**Install a toolchain:**
+
+```bash
+# Pi 5 — Debian/Ubuntu package (compiler ends up on PATH):
+sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+# Or Bootlin toolchains (no sudo, work for both targets):
+mkdir -p ~/x-tools && cd ~/x-tools
+curl -LO https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2025.08-1.tar.xz
+tar xf aarch64--glibc--stable-2025.08-1.tar.xz
+cd aarch64--glibc--stable-2025.08-1 && ./relocate-sdk.sh   # required
+export RPI_TOOLCHAIN_ROOT=~/x-tools/aarch64--glibc--stable-2025.08-1
+
+# Pi 1 B+ — needs an ARMv6 hard-float toolchain (Debian armhf is ARMv7 and
+# will NOT run on a Pi 1; raspberrypi/tools GCC is too old for C++23):
+curl -LO https://toolchains.bootlin.com/downloads/releases/toolchains/armv6-eabihf/tarballs/armv6-eabihf--glibc--stable-2025.08-1.tar.xz
+tar xf armv6-eabihf--glibc--stable-2025.08-1.tar.xz
+cd armv6-eabihf--glibc--stable-2025.08-1 && ./relocate-sdk.sh   # required
+export RPI_TOOLCHAIN_ROOT=~/x-tools/armv6-eabihf--glibc--stable-2025.08-1
+```
+
+**Configure and build:**
+
+```bash
+cmake --preset rpi5 && cmake --build --preset rpi5   # → build-rpi5/bin
+cmake --preset rpi1 && cmake --build --preset rpi1   # → build-rpi1/bin
+
+# or without presets:
+cmake -B build-rpi5 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/rpi5-aarch64.cmake
+cmake -B build-rpi1 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/rpi1-armv6.cmake
+
+# Verify the result:
+file build-rpi5/bin/g64_demo_export   # ELF 64-bit ... ARM aarch64
+file build-rpi1/bin/g64_demo_export   # ELF 32-bit ... ARM, EABI5
+```
+
+Toolchain discovery looks for `bin/<triple>-gcc` under `RPI_TOOLCHAIN_ROOT`
+(env var or `-D`) and falls back to `PATH`. Useful knobs:
+
+| Variable | Description |
+|----------|-------------|
+| `RPI_TOOLCHAIN_ROOT` | Cross toolchain prefix containing `bin/<triple>-gcc` |
+| `RPI_TOOLCHAIN_TRIPLE` | Force a specific GNU triple instead of probing |
+| `RPI_SYSROOT` | Target sysroot; auto-detected via `<gcc> -print-sysroot` |
+| `RPI_STATIC_RUNTIME` | ON: link libstdc++/libgcc statically (Pi OS libstdc++ is often older) |
+| `RPI_FULL_STATIC` | ON: `-static` — no runtime glibc/libstdc++ dependency at all |
+
+Caveats: the presets disable tests, benchmarks and Python bindings. Optional
+dependencies (ncurses, Drogon, jsoncpp) are searched only inside the target
+sysroot — without a populated `RPI_SYSROOT` the corresponding examples are
+skipped. Binaries still need a glibc >= the toolchain's sysroot glibc on the
+Pi unless `RPI_FULL_STATIC=ON` (check with `ldd --version` on the Pi; pick a
+Bootlin release whose sysroot glibc is old enough). The same presets/toolchain
+files also exist in the outer ESC211Controller build.
+
 ---
 
 ## Running Tests
