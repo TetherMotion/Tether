@@ -177,62 +177,117 @@ struct RxDatagram {
 };
 
 /**
- * @brief Reserved datagram-index range for the cyclic fast path.
+ * @brief Reserved datagram-index band for the cyclic fast path.
  *
- * Datagrams sent with an idx in [kCyclicSlotBaseIdx, kCyclicSlotBaseIdx +
- * kNumCyclicSlots) are deposited into fixed per-slot mailboxes by the RX
- * parser instead of going through TransactionRouter — no mutex, no
- * condition variable on the cyclic hot path.  allocIdx() never returns an
- * index >= kSliceSlotBaseIdx (which also reserves 0xFE fire-and-forget).
- * (IPDOTransport exposes the same values as kCyclicSlotBase/kNumCyclicSlots.)
+ * The whole band [kFastSlotBaseIdx, kFastSlotEndIdx] = 0x9C..0xFF (100
+ * indices) is reserved for cyclic execution: async allocIdx() never
+ * returns an index >= kFastSlotBaseIdx.  Datagrams sent on a band index
+ * are deposited into fixed per-index mailboxes by the RX parser instead
+ * of going through TransactionRouter — no mutex, no condition variable
+ * on the cyclic hot path.
+ *
+ * Band layout:
+ *   0x9C..0xDF  rotating cyclic-request pool, positions 0..67
+ *   0xE0..0xEF  user-defined PDO-slice slots (fixed per slice)
+ *   0xF0..0xFD  rotating cyclic-request pool, positions 68..81
+ *   0xFE        fire-and-forget (reserved — no mailbox)
+ *   0xFF        dedicated DC-timepoint datagram index (pool position 82)
+ *
+ * The rotating pool gives the cyclic LRW exchange up to
+ * kNumCyclicSlots (82) requests in flight: each send draws the next
+ * pool position, and a position's pending request is only cleared when
+ * that same position is re-armed — late responses always land in their
+ * own mailbox.  Combined with the 64-bit counter trailer on the last
+ * LRW datagram of a cycle, a stale echo can never silently satisfy a
+ * re-armed request.
  */
-inline constexpr uint8_t kCyclicSlotBaseIdx = 0xF8;
-inline constexpr size_t  kNumCyclicSlots    = 6;   ///< slots 0xF8..0xFD
+inline constexpr uint8_t kFastSlotBaseIdx   = 0x9C;
+inline constexpr uint8_t kFastSlotEndIdx    = 0xFF;
+inline constexpr size_t  kNumFastSlots      = 100;   ///< slots 0x9C..0xFF
 
-/**
- * @brief Reserved datagram-index range for user-defined PDO slices.
- *
- * Each configured PDO slice (LogicalAddressManager::definePDOSlice*) owns
- * dedicated indices from this pool — one per contiguous logical-address
- * run — so its responses land in their own deposit slots, demultiplexed
- * by the same kernel BPF fastpath filter as the cyclic slots.  The
- * slice pool and the cyclic pool are disjoint pipelines: a sliced
- * full-image exchange and a custom slice exchange can be in flight at
- * the same time without sharing mailboxes.
- */
 inline constexpr uint8_t kSliceSlotBaseIdx  = 0xE0;
-inline constexpr size_t  kNumSliceSlots     = 16;  ///< slots 0xE0..0xEF
+inline constexpr size_t  kNumSliceSlots     = 16;    ///< slots 0xE0..0xEF
 
-/**
- * @brief The union fastpath range accepted by the cyclic socket's
- *        demux filter and deposited into fixed slots: [0xE0, 0xFD].
- */
-inline constexpr uint8_t kFastSlotBaseIdx   = kSliceSlotBaseIdx;
-inline constexpr uint8_t kFastSlotEndIdx    =
-    kCyclicSlotBaseIdx + static_cast<uint8_t>(kNumCyclicSlots) - 1;  ///< 0xFD
-inline constexpr size_t  kNumFastSlots      =
-    kNumSliceSlots + kNumCyclicSlots;
+/// Wire index of the dedicated DC-timepoint datagram (pool pos 82).
+inline constexpr uint8_t kDcTimeIdx         = 0xFF;
+/// Fire-and-forget wire index — inside the band but owns no mailbox.
+inline constexpr uint8_t kFastSlotReservedIdx = 0xFE;
 
-/// True when @p idx lies in the reserved fastpath range [0xE0, 0xFD].
+/// Rotating cyclic-request pool depth (positions 0..81).
+inline constexpr size_t  kNumCyclicSlots    = 82;
+/// Pool position pinned for the DC-timepoint datagram (wire 0xFF).
+inline constexpr uint8_t kCyclicDcPoolPos   = 82;
+/// Back-compat alias: the cyclic band starts at the pool base.
+inline constexpr uint8_t kCyclicSlotBaseIdx = kFastSlotBaseIdx;
+
+/// Rotating pool position -> wire index (pos 82 = the DC index).
+inline constexpr uint8_t cyclicPoolWireIdx(uint8_t pos) {
+    if (pos < 68) return static_cast<uint8_t>(0x9C + pos);   // 0x9C..0xDF
+    if (pos < 82) return static_cast<uint8_t>(0xF0 + pos - 68); // 0xF0..0xFD
+    return kDcTimeIdx;                                       // pos 82
+}
+
+/// Wire index -> rotating pool position; kCyclicDcPoolPos for the DC
+/// index and 0xFF for slice/fire-and-forget indices (not pool members).
+inline constexpr uint8_t cyclicWirePoolPos(uint8_t idx) {
+    if (idx >= 0x9C && idx <= 0xDF) return static_cast<uint8_t>(idx - 0x9C);
+    if (idx >= 0xF0 && idx <= 0xFD)
+        return static_cast<uint8_t>(68 + (idx - 0xF0));
+    if (idx == kDcTimeIdx) return kCyclicDcPoolPos;
+    return 0xFF;
+}
+
+/// 8-byte monotonically increasing counter appended to the last LRW
+/// datagram of a cyclic exchange (lands on unmapped logical space past
+/// the image end, so slaves pass it through verbatim).  Verified on the
+/// response — a stale echo carries an older counter and is rejected.
+inline constexpr uint16_t kLrwCounterTrailerBytes = 8;
+
+/// True when @p idx lies in the reserved fastpath band [0x9C, 0xFF]
+/// minus the 0xFE fire-and-forget index (its echoes belong to the async
+/// parser path — txpdo_rx_queue_ consumers).
 inline constexpr bool isFastPathIdx(uint8_t idx) {
-    return idx >= kFastSlotBaseIdx && idx <= kFastSlotEndIdx;
+    return idx >= kFastSlotBaseIdx && idx <= kFastSlotEndIdx &&
+           idx != kFastSlotReservedIdx;
 }
 /// True when @p idx is a user-slice index (0xE0..0xEF).
 inline constexpr bool isSliceIdx(uint8_t idx) {
     return idx >= kSliceSlotBaseIdx &&
            idx <  kSliceSlotBaseIdx + static_cast<uint8_t>(kNumSliceSlots);
 }
-/// True when @p idx is a cyclic image-slot index (0xF8..0xFD).
-/// The 0xF0..0xF7 gap between the pools is filter-reserved but maps to
-/// no slot — deposits there must be rejected, not banked.
+/// True when @p idx is a cyclic-pool or DC index — everything in the
+/// band except the slice range and 0xFE.
 inline constexpr bool isCyclicIdx(uint8_t idx) {
-    return idx >= kCyclicSlotBaseIdx &&
-           idx <  kCyclicSlotBaseIdx + static_cast<uint8_t>(kNumCyclicSlots);
+    return isFastPathIdx(idx) && !isSliceIdx(idx);
 }
-/// True when @p idx maps to a real fastpath slot (slice OR cyclic).
+/// True when @p idx maps to a real fastpath mailbox slot.
 inline constexpr bool isSlotIdx(uint8_t idx) {
-    return isSliceIdx(idx) || isCyclicIdx(idx);
+    return isFastPathIdx(idx);
 }
+
+/**
+ * @brief One datagram in a multi-datagram cyclic fastpath frame.
+ *
+ * `idx` is the WIRE datagram index — a rotating-pool index via
+ * cyclicPoolWireIdx(), a PDO-slice index (0xE0+slot), or the dedicated
+ * kDcTimeIdx.  The datagram covers `datalen + tail_len` bytes: `data`
+ * followed by `tail` (e.g. the 64-bit LRW counter trailer — appended
+ * without requiring the source buffer to over-allocate).
+ */
+struct CyclicDgramSpec {
+    Command      cmd{Command::NOP};
+    uint8_t      idx{0};
+    uint16_t     adp{0};
+    uint16_t     ado{0};
+    const void*  data{nullptr};
+    uint16_t     datalen{0};
+    const void*  tail{nullptr};
+    uint16_t     tail_len{0};
+    bool         roundtrip{true};
+    /// Stamp the per-slot send-generation bit (lenFlags res-bit 13) —
+    /// the echoed bit lets collect reject deposits of an older send.
+    bool         stamp_gen{false};
+};
 
 /**
  * @brief Outcome of the most recent collect of one cyclic datagram.

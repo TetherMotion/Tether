@@ -558,12 +558,15 @@ std::vector<uint8_t> vlanIdxFrame(uint16_t vid, uint8_t idx) {
     return vlanFrame(vid, kEtherTypeEtherCAT, std::move(payload));
 }
 
+/// Mirrors the production socket-pair spec (CyclicDatapath): the whole
+/// reserved cyclic band 0x9C..0xFF minus the 0xFE fire-and-forget hole.
 CBPFSpec fastpathVlanSpec() {
     CBPFSpec s{};
     s.untagged_ethercat = false;
     s.tagged_ethercat   = true;
     s.vlan_range        = CBPFVlanRange{1999, 1999};
-    s.first_idx_range   = CBPFIdxRange{kSliceSlotBaseIdx, kFastSlotEndIdx};
+    s.first_idx_range   = CBPFIdxRange{kFastSlotBaseIdx, kFastSlotEndIdx,
+                                     kFastSlotReservedIdx};
     return s;
 }
 
@@ -571,31 +574,33 @@ CBPFSpec fastpathVlanSpec() {
 
 TEST(FirstIdxRangeTest, UntaggedIncludeDemuxesFastpath) {
     CBPFSpec s{};
-    s.first_idx_range = CBPFIdxRange{kSliceSlotBaseIdx, kFastSlotEndIdx};
+    s.first_idx_range = CBPFIdxRange{kFastSlotBaseIdx, kFastSlotEndIdx,
+                                     kFastSlotReservedIdx};
     const auto prog = CBPFProgramFactory::build(s);
     ASSERT_FALSE(prog.empty());
 
-    for (uint8_t idx : {0xE0, 0xE7, 0xEF, 0xF0, 0xF7, 0xF8, 0xFD})
+    for (uint8_t idx : {0x9C, 0xDF, 0xE0, 0xEF, 0xF0, 0xFD, 0xFF})
         EXPECT_TRUE(accepted(prog, ecatIdxFrame(idx)))
             << "idx 0x" << std::hex << (int)idx;
-    for (uint8_t idx : {0x00, 0x42, 0xDF, 0xFE, 0xFF})
+    for (uint8_t idx : {0x00, 0x42, 0x9B, 0xFE})
         EXPECT_FALSE(accepted(prog, ecatIdxFrame(idx)))
             << "idx 0x" << std::hex << (int)idx;
 }
 
 TEST(FirstIdxRangeTest, UntaggedExcludeMirrorsDemux) {
     CBPFSpec s{};
-    s.first_idx_range   = CBPFIdxRange{kSliceSlotBaseIdx, kFastSlotEndIdx};
+    s.first_idx_range   = CBPFIdxRange{kFastSlotBaseIdx, kFastSlotEndIdx,
+                                       kFastSlotReservedIdx};
     s.first_idx_exclude = true;
     const auto prog = CBPFProgramFactory::build(s);
     ASSERT_FALSE(prog.empty());
 
     // Exclude mode: everything the include program accepts is rejected —
-    // including the 0xF0..0xF7 reserved gap (in-range, but slotless).
-    for (uint8_t idx : {0xE0, 0xEF, 0xF0, 0xF7, 0xF8, 0xFD})
+    // the 0xFE hole flips sides and is accepted here (stays async).
+    for (uint8_t idx : {0x9C, 0xDF, 0xE0, 0xEF, 0xF0, 0xFD, 0xFF})
         EXPECT_FALSE(accepted(prog, ecatIdxFrame(idx)))
             << "idx 0x" << std::hex << (int)idx;
-    for (uint8_t idx : {0x00, 0x42, 0xDF, 0xFE, 0xFF})
+    for (uint8_t idx : {0x00, 0x42, 0x9B, 0xFE})
         EXPECT_TRUE(accepted(prog, ecatIdxFrame(idx)))
             << "idx 0x" << std::hex << (int)idx;
 }
@@ -605,15 +610,15 @@ TEST(FirstIdxRangeTest, TaggedIncludeReadsIdxAtOffset21) {
     ASSERT_FALSE(prog.empty());
 
     // VID 1999 + fastpath idx → accepted (idx at byte 21, not 17).
-    EXPECT_TRUE(accepted(prog, vlanIdxFrame(1999, 0xE0)));
-    EXPECT_TRUE(accepted(prog, vlanIdxFrame(1999, 0xFD)));
-    // VID ok but async idx → rejected.
+    EXPECT_TRUE(accepted(prog, vlanIdxFrame(1999, 0x9C)));
+    EXPECT_TRUE(accepted(prog, vlanIdxFrame(1999, 0xFF)));
+    // VID ok but async/hole idx → rejected.
     EXPECT_FALSE(accepted(prog, vlanIdxFrame(1999, 0x42)));
     EXPECT_FALSE(accepted(prog, vlanIdxFrame(1999, 0xFE)));
     // Fastpath idx but wrong VID → rejected (encap clause dominates).
-    EXPECT_FALSE(accepted(prog, vlanIdxFrame(2000, 0xE0)));
+    EXPECT_FALSE(accepted(prog, vlanIdxFrame(2000, 0x9C)));
     // Untagged fastpath → rejected (untagged_ethercat=false).
-    EXPECT_FALSE(accepted(prog, ecatIdxFrame(0xE0)));
+    EXPECT_FALSE(accepted(prog, ecatIdxFrame(0x9C)));
     // Non-EtherCAT inner type → rejected regardless of bytes.
     EXPECT_FALSE(accepted(prog, vlanFrame(1999, 0x0806, ecatPayload(32))));
 }
@@ -624,11 +629,11 @@ TEST(FirstIdxRangeTest, TaggedExcludeKeepsAsyncOnly) {
     const auto prog = CBPFProgramFactory::build(s);
     ASSERT_FALSE(prog.empty());
 
-    EXPECT_FALSE(accepted(prog, vlanIdxFrame(1999, 0xE0)));
-    EXPECT_FALSE(accepted(prog, vlanIdxFrame(1999, 0xFD)));
+    EXPECT_FALSE(accepted(prog, vlanIdxFrame(1999, 0x9C)));
+    EXPECT_FALSE(accepted(prog, vlanIdxFrame(1999, 0xFF)));
     EXPECT_TRUE(accepted(prog, vlanIdxFrame(1999, 0x42)));
-    EXPECT_TRUE(accepted(prog, vlanIdxFrame(1999, 0xFE)));
-    EXPECT_FALSE(accepted(prog, vlanIdxFrame(2000, 0x42)));  // wrong VID
+    EXPECT_TRUE(accepted(prog, vlanIdxFrame(1999, 0xFE)));  // hole → async
+    EXPECT_FALSE(accepted(prog, vlanIdxFrame(2000, 0x42))); // wrong VID
 }
 
 TEST(FirstIdxRangeTest, StrippedTagLegUsesUntaggedOffset) {
@@ -638,11 +643,11 @@ TEST(FirstIdxRangeTest, StrippedTagLegUsesUntaggedOffset) {
     const auto prog = CBPFProgramFactory::build(fastpathVlanSpec());
     ASSERT_FALSE(prog.empty());
 
-    EXPECT_TRUE(acceptedAux(prog, ecatIdxFrame(0xE0), 1999));
-    EXPECT_TRUE(acceptedAux(prog, ecatIdxFrame(0xFD), 1999));
+    EXPECT_TRUE(acceptedAux(prog, ecatIdxFrame(0x9C), 1999));
+    EXPECT_TRUE(acceptedAux(prog, ecatIdxFrame(0xFF), 1999));
     EXPECT_FALSE(acceptedAux(prog, ecatIdxFrame(0x42), 1999)); // async idx
-    EXPECT_FALSE(acceptedAux(prog, ecatIdxFrame(0xE0), 2000)); // wrong VID
-    EXPECT_FALSE(acceptedAux(prog, ecatIdxFrame(0xE0)));       // no tag
+    EXPECT_FALSE(acceptedAux(prog, ecatIdxFrame(0x9C), 2000)); // wrong VID
+    EXPECT_FALSE(acceptedAux(prog, ecatIdxFrame(0x9C)));       // no tag
 }
 
 // ============================================================================

@@ -1031,6 +1031,7 @@ create_ethercat_test(pdo
         ethercat/test_pdo_manager.cpp
         ethercat/test_pdo_modes.cpp
         ethercat/test_logical_address_manager.cpp
+        ethercat/test_lrw_selfheal.cpp
         ethercat/test_fmmu_manager.cpp
         ethercat/test_pdo_api.cpp
         ethercat/test_pdo_to_string.cpp
@@ -1163,6 +1164,8 @@ tether_add_test_executable(tether_ethercat_master_tests
     ethercat/test_slave_names.cpp
     ethercat/test_slave_discovery_manager.cpp
     ethercat/test_transaction_router_waitany.cpp
+    ethercat/test_transaction_router_purge.cpp
+    ethercat/test_lrw_stale_echo.cpp
     ethercat/test_cyclic_channel.cpp
     ethercat/test_cyclic_executive.cpp
     ethercat/test_async_loop.cpp

@@ -165,6 +165,20 @@ public:
         int flags = fcntl(m_socket, F_GETFL, 0);
         fcntl(m_socket, F_SETFL, flags | O_NONBLOCK);
 
+        // Enlarge the kernel RX queue: a stalled RX-drain thread (non-RT
+        // host, logging burst) must not drop frames — kernel tp_drops turn
+        // into silent LRW timeouts upstream.  SO_RCVBUFFORCE bypasses
+        // net.core.rmem_max (needs CAP_NET_ADMIN); fall back to the polite
+        // clamped version — best-effort either way.
+        {
+            int sz = 8 * 1024 * 1024;
+            if (setsockopt(m_socket, SOL_SOCKET, SO_RCVBUFFORCE,
+                           &sz, sizeof(sz)) < 0) {
+                setsockopt(m_socket, SOL_SOCKET, SO_RCVBUF,
+                           &sz, sizeof(sz));
+            }
+        }
+
 #ifdef PACKET_IGNORE_OUTGOING
         // Don't deliver our own transmitted frames back to us — removes one
         // wasted wake-up + copy per cyclic TX.  Non-fatal if unsupported.

@@ -6,7 +6,8 @@
  * Two sockets share the interface:
  *   - socket A (this channel): bound to the EtherCAT ethertype + BPF
  *     accepting only frames whose first datagram idx lies in the reserved
- *     fastpath range (PDO slices 0xE0..0xEF + cyclic slots 0xF8..0xFD).
+ *     fastpath band (0x9C..0xFF — rotating cyclic pool, PDO slices,
+ *     0xFE fire-and-forget, 0xFF DC timepoint).
  *   - socket B (async, owned by the app's poll thread): gets the mirror
  *     filter attached via CyclicChannelConfig::async_fd so it never wakes
  *     for cyclic traffic.
@@ -90,26 +91,30 @@ static_assert(sizeof(CyclicBpfInsn) == sizeof(struct sock_filter),
 // VLAN-non-ECAT traffic falls through to the B verdict so socket A can be
 // bound to ETH_P_ALL and still see only cyclic EtherCAT.
 size_t buildFilterProg(bool accept_cyclic, struct sock_filter* p) {
-    // The accept range covers BOTH fastpath pools: user PDO slices
-    // (0xE0..0xEF) and cyclic slots (0xF8..0xFD).  Async allocIdx()
-    // never reaches 0xE0, so first-idx demux stays exact.
-    const uint32_t lo = kSliceSlotBaseIdx;
+    // The accept range covers the fastpath band (0x9C..0xFF) EXCEPT the
+    // 0xFE fire-and-forget index — its echoes feed txpdo_rx_queue_
+    // consumers through the async parser, so #11 bounces them to the B
+    // verdict.  Async allocIdx() never reaches 0x9C, so first-idx demux
+    // stays exact.
+    const uint32_t lo = kFastSlotBaseIdx;
     const uint32_t hi = kFastSlotEndIdx;
     const struct sock_filter prog[] = {
         /* 0 */ BPF_STMT(BPF_LD | BPF_H | BPF_ABS, 12),              // EtherType
         /* 1 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kEtherCatType, 0, 2),
         /* 2 */ BPF_STMT(BPF_LD | BPF_B | BPF_ABS, kIdxByteOffset),  // idx
         /* 3 */ BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0, 5, 0),        // → #9
-        /* 4 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kVlanType, 0, 7),
+        /* 4 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kVlanType, 0, 8),
         /* 5 */ BPF_STMT(BPF_LD | BPF_H | BPF_ABS, kVlanInnerEthOff),
-        /* 6 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kEtherCatType, 0, 5),
+        /* 6 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kEtherCatType, 0, 6),
         /* 7 */ BPF_STMT(BPF_LD | BPF_B | BPF_ABS, kVlanIdxByteOffset),
         /* 8 */ BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0, 0, 0),        // → #9
-        /* 9 */ BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, lo, 0, 2),       // <lo → #12
-        /*10 */ BPF_JUMP(BPF_JMP | BPF_JGT | BPF_K, hi, 1, 0),       // >hi → #12
-        /*11 */ BPF_STMT(BPF_RET | BPF_K,
-                        accept_cyclic ? 0xFFFFFFFFu : 0u),           // A: accept
+        /* 9 */ BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, lo, 0, 3),       // <lo → #13
+        /*10 */ BPF_JUMP(BPF_JMP | BPF_JGT | BPF_K, hi, 2, 0),       // >hi → #13
+        /*11 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
+                        kFastSlotReservedIdx, 1, 0),                 // 0xFE → #13
         /*12 */ BPF_STMT(BPF_RET | BPF_K,
+                        accept_cyclic ? 0xFFFFFFFFu : 0u),           // A: accept
+        /*13 */ BPF_STMT(BPF_RET | BPF_K,
                         accept_cyclic ? 0u : 0xFFFFFFFFu),           // B: accept
     };
     std::memcpy(p, prog, sizeof(prog));
