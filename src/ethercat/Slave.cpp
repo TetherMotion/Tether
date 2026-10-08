@@ -737,30 +737,14 @@ SlaveError Slave::transitionToOp() {
                 }
             }
 
-            // If the trigger re-latches while cyclic data is flowing and
-            // the FMMU map is correct, the watchdog is measuring PDI-side
-            // service that only runs once the slave reaches OP — a
-            // SAFE_OP deadlock.  Disarm both watchdogs so the transition
-            // can complete.
-            if (wd_latched && ++wd_latch_count_ >= 2) {
-                const uint16_t zero = 0;
-                master_->writeRegister(SlaveAddress(index_),
-                                       Raw::EC_REG_WD_TIME_PDATA, zero);
-                master_->writeRegister(SlaveAddress(index_),
-                                       Raw::EC_REG_WD_TIME_PDI, zero);
-                // wkc=0 makes every write report failure on this slave —
-                // read back the timer registers to prove disarm stuck.
-                uint16_t tpd = 0, tpi = 0;
-                const bool rd = master_->readRegister(
-                    index_, Raw::EC_REG_WD_TIME_PDATA, tpd, 200) &&
-                    master_->readRegister(
-                        index_, Raw::EC_REG_WD_TIME_PDI, tpi, 200);
-                TETHER_LOGW(TAG, "{}: SM watchdog re-latching with cyclic "
-                                 "data flowing — disabling PDI/process-data "
-                                 "watchdogs (readback {}: pdata={} pdi={})",
-                            logPrefix().c_str(), rd ? "ok" : "failed",
-                            tpd, tpi);
-            }
+            // Do NOT disarm the watchdogs here.  Firmware-driven ESCs
+            // (e.g. AS715N) require the process-data watchdog armed to
+            // validate the cyclic window during SAFE_OP->OP — zeroing the
+            // timers makes the ESM refuse the transition outright.  If the
+            // latch re-appears, the watchdog genuinely fired on a late or
+            // missing frame; the correct fix is a clean cyclic window, not
+            // masking the detector.
+            (void)wd_latched;
 
             master_->requestSlaveApplicationLayerState(
                 index_, static_cast<uint8_t>(SlaveState::OP) | 0x10);
