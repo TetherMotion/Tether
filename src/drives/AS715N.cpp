@@ -168,9 +168,16 @@ bool AS715NFaultHandler::resetAllFaults(EtherCAT::CoE::CoEManager& sdo,
 
     const AS715NError err = AS715NError::parse(mfr_error);
     if (mfr_error != 0 && err.isDCSyncError()) {
-        TETHER_LOGI(TAG, "{}: DC sync error {} — using handleNoSyncError()",
+        // ErC1.x "Synchronization loss" latches whenever cyclic/DC sync
+        // stops (e.g. a previous session ended) and clears on its own once
+        // cyclic PDO exchange + DC lock are re-established — the F31.00
+        // reset cannot clear it while DC is not running and only wastes
+        // seconds of startup.  Defer to the OP-path; callers needing an
+        // explicit reset can still use handleNoSyncError().
+        TETHER_LOGI(TAG, "{}: DC sync error {} — stale latch, deferring "
+                         "(clears once DC lock is re-established)",
                     sdo.logPrefix().c_str(), err.name);
-        return handleNoSyncError(sdo, slave_idx, 3);
+        return true;
     }
     if (mfr_error != 0 && !err.is_recoverable) {
         TETHER_LOGW(TAG, "{}: error {} is marked non-recoverable — "
