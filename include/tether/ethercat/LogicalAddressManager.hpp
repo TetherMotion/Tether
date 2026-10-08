@@ -390,6 +390,13 @@ public:
         /// Responses whose echoed send-generation didn't match the pending
         /// send — a stale deposit surviving a timed-out cycle.
         uint32_t stale_responses{0};
+        /// Wire RTT of replies that arrived in-generation, measured from
+        /// slice emit to the deposit's stamp_ns (kernel RX stamp where
+        /// available).  min/avg/max in ns; rtt_samples counts arrivals.
+        uint64_t rtt_ns_sum{0};
+        uint32_t rtt_ns_min{0};
+        uint32_t rtt_ns_max{0};
+        uint32_t rtt_samples{0};
     };
     Stats getStats() const;
     void  resetStats();
@@ -488,6 +495,7 @@ private:
     uint8_t  cyclic_pending_count_{0};   ///< slices awaiting collect
     uint8_t  cyclic_slice_count_{1};     ///< slices needed for the image
     uint64_t cyclic_deadline_ns_{0};     ///< collect deadline (mono ns)
+    uint64_t cyclic_send_ns_{0};         ///< slice emit time (mono ns)
     ProcessImage* pending_image_{nullptr};
 
     /// Expected-WKC per slice — kWkcUnknown = learn from first success

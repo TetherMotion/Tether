@@ -616,7 +616,8 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
     // ---- Emit slices -----------------------------------------------------
     // Collect the response deadline once — the collect half shares it
     // regardless of when it runs (split-phase overlap).
-    cyclic_deadline_ns_ = monoNowNs() + rx_timeout_ns;
+    cyclic_send_ns_     = monoNowNs();
+    cyclic_deadline_ns_ = cyclic_send_ns_ + rx_timeout_ns;
     cyclic_pending_count_ = 0;
     pending_image_ = image;
 
@@ -794,6 +795,18 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
             continue;
         }
         const CyclicSlotView& resp = views[s];
+        // Wire RTT for diagnostics: emit -> kernel RX stamp.  Only
+        // in-generation deposits count (a stale echoes an older send).
+        if (resp.stamp_ns > cyclic_send_ns_) {
+            const uint64_t rtt = resp.stamp_ns - cyclic_send_ns_;
+            stats_.rtt_ns_sum += rtt;
+            const uint32_t r = static_cast<uint32_t>(
+                std::min<uint64_t>(rtt, UINT32_MAX));
+            if (stats_.rtt_samples == 0 || r < stats_.rtt_ns_min)
+                stats_.rtt_ns_min = r;
+            if (r > stats_.rtt_ns_max) stats_.rtt_ns_max = r;
+            ++stats_.rtt_samples;
+        }
         const uint16_t exp = expected_wkc_[s];
         if (resp.wkc == 0 ||
             (strict_wkc_ && exp != kWkcUnknown && resp.wkc != exp)) {
@@ -1237,6 +1250,16 @@ bool LogicalAddressManager::collectSlices(const PDO::PDOMapping& mapping,
                 continue;
             }
             const CyclicSlotView& resp = views[run.slot];
+            if (resp.stamp_ns > cyclic_send_ns_) {
+                const uint64_t rtt = resp.stamp_ns - cyclic_send_ns_;
+                stats_.rtt_ns_sum += rtt;
+                const uint32_t r = static_cast<uint32_t>(
+                    std::min<uint64_t>(rtt, UINT32_MAX));
+                if (stats_.rtt_samples == 0 || r < stats_.rtt_ns_min)
+                    stats_.rtt_ns_min = r;
+                if (r > stats_.rtt_ns_max) stats_.rtt_ns_max = r;
+                ++stats_.rtt_samples;
+            }
             if (resp.wkc == 0 ||
                 (strict_wkc_ && run.expected_wkc != kWkcUnknown &&
                  resp.wkc != run.expected_wkc)) {

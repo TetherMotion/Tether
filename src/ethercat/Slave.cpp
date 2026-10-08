@@ -765,81 +765,7 @@ SlaveError Slave::transitionToOp() {
             master_->requestSlaveApplicationLayerState(
                 index_, static_cast<uint8_t>(SlaveState::OP) | 0x10);
 
-            // Diagnostics in one frame: FMMU block readback (0x0600,
-            // 32B) + SM2 process-data buffer (0x1800, 8B) + watchdog
-            // status (0x0440, 2B).
-            const SlaveAddress diag_addrs[3] = {
-                SlaveAddress(index_), SlaveAddress(index_),
-                SlaveAddress(index_)};
-            const uint16_t diag_regs[3] = {0x0600, 0x1800,
-                                           Raw::EC_REG_WD_STATUS};
-            const uint16_t diag_lens[3] = {32, 8, 2};
-            auto diag_batch = master_->readRegistersBatch(
-                diag_addrs, diag_regs, diag_lens, 3);
-            std::vector<BatchReadResult> diag_res;
-            diag_batch.waitAll(200, diag_res);
-
-            // FMMU readback proves the logical->physical map directly
-            // instead of hiding behind WKC totals.
-            if (diag_res.size() > 0 && diag_res[0].success &&
-                diag_res[0].data && diag_res[0].datalen >= 32) {
-                const uint8_t* fmmu_raw = diag_res[0].data;
-                for (int f = 0; f < 2; ++f) {
-                    const uint8_t* r = fmmu_raw + f * 16;
-                    const uint32_t log =
-                        static_cast<uint32_t>(r[0]) |
-                        (static_cast<uint32_t>(r[1]) << 8) |
-                        (static_cast<uint32_t>(r[2]) << 16) |
-                        (static_cast<uint32_t>(r[3]) << 24);
-                    const uint16_t len =
-                        static_cast<uint16_t>(r[4] | (r[5] << 8));
-                    const uint16_t phys =
-                        static_cast<uint16_t>(r[8] | (r[9] << 8));
-                    TETHER_LOGI(TAG, "{}: FMMU{}: log=0x{:08X} len={} "
-                                     "phys=0x{:04X} type=0x{:02X} act=0x{:02X}",
-                                logPrefix().c_str(), f, log, len, phys,
-                                r[11], r[12]);
-                }
-            } else {
-                TETHER_LOGW(TAG, "{}: FMMU register readback failed",
-                            logPrefix().c_str());
-            }
-
-            // SM2's process-data buffer proves cyclic output data is
-            // actually reaching the slave — all-zero would mean the
-            // LRW/FMMU write side is broken.
-            uint8_t sm2_data[8] = {};
-            const bool b_ok = diag_res.size() > 1 && diag_res[1].success &&
-                diag_res[1].data && diag_res[1].datalen >= 8;
-            if (b_ok) std::memcpy(sm2_data, diag_res[1].data, 8);
-            uint16_t wd2 = 0;
-            if (diag_res.size() > 2 && diag_res[2].success &&
-                diag_res[2].data && diag_res[2].datalen >= 2) {
-                std::memcpy(&wd2, diag_res[2].data, 2);
-            }
-            TETHER_LOGI(TAG, "{}: SM2 buf[{}] {:02X} {:02X} {:02X} {:02X} "
-                             "{:02X} {:02X} {:02X} {:02X} WD=0x{:04X}",
-                        logPrefix().c_str(), b_ok ? "ok" : "rd-fail",
-                        sm2_data[0], sm2_data[1], sm2_data[2], sm2_data[3],
-                        sm2_data[4], sm2_data[5], sm2_data[6], sm2_data[7], wd2);
-
-            // Liveness probe: issue one SDO upload (0x1018:1 vendor ID).
-            // The mailbox is serviced by the slave's application CPU — if the
-            // SDO answers, the firmware is alive and OP is gated by the ESM;
-            // if it times out, the firmware is wedged and only a slave
-            // reset/power-cycle is likely to recover it.
-            {
-                CoE::CoETransactionOptions sdo_opts{};
-                sdo_opts.timeout_ms = 300;
-                auto sdo_res = master_->sdoManager(index_)
-                                   .template readSync<uint32_t>(0x1018, 1,
-                                                                sdo_opts);
-                TETHER_LOGW(TAG, "{}: SDO liveness probe (0x1018:1): {}",
-                            logPrefix().c_str(),
-                            sdo_res.has_value()
-                                ? "firmware ALIVE — ESM gating OP"
-                                : "NO RESPONSE — slave firmware wedged");
-            }
+            dumpOpDiagnostics();
         }
         if (ok) {
             if (state == static_cast<uint8_t>(SlaveState::OP)) {
@@ -870,7 +796,116 @@ SlaveError Slave::transitionToOp() {
                      "read_ok={} AL status code: {} (0x{:04X}))",
                 logPrefix().c_str(), last_state, last_read_ok,
                 getALStatusCodeName(al_code), al_code);
+    // Final snapshot before giving up — same register set the retry
+    // diagnostics dump, so the failure verdict includes which SM
+    // watchdog fired and whether it ever recovered.
+    dumpOpDiagnostics();
     return SlaveError::TransportError;
+}
+
+void Slave::dumpOpDiagnostics() {
+    // One frame: FMMU block (0x0600, 32B) + SM2 process-data buffer
+    // (0x1800, 8B) + watchdog status/counters (0x0440, 4B: status u16,
+    // SM-WD count u8, PDI-WD count u8) + SM2/SM3 register blocks
+    // (0x0810/0x0818, 8B each: addr, len, ctrl, stat, act, pdi).
+    const SlaveAddress addrs[5] = {
+        SlaveAddress(index_), SlaveAddress(index_), SlaveAddress(index_),
+        SlaveAddress(index_), SlaveAddress(index_)};
+    const uint16_t regs[5] = {0x0600, 0x1800, Raw::EC_REG_WD_STATUS,
+                              0x0810, 0x0818};
+    const uint16_t lens[5] = {32, 8, 4, 8, 8};
+    auto batch = master_->readRegistersBatch(addrs, regs, lens, 5);
+    std::vector<BatchReadResult> res;
+    batch.waitAll(200, res);
+
+    // FMMU readback proves the logical->physical map directly instead of
+    // hiding behind WKC totals.
+    if (res.size() > 0 && res[0].success &&
+        res[0].data && res[0].datalen >= 32) {
+        const uint8_t* fmmu_raw = res[0].data;
+        for (int f = 0; f < 2; ++f) {
+            const uint8_t* r = fmmu_raw + f * 16;
+            const uint32_t log =
+                static_cast<uint32_t>(r[0]) |
+                (static_cast<uint32_t>(r[1]) << 8) |
+                (static_cast<uint32_t>(r[2]) << 16) |
+                (static_cast<uint32_t>(r[3]) << 24);
+            const uint16_t len =
+                static_cast<uint16_t>(r[4] | (r[5] << 8));
+            const uint16_t phys =
+                static_cast<uint16_t>(r[8] | (r[9] << 8));
+            TETHER_LOGI(TAG, "{}: FMMU{}: log=0x{:08X} len={} "
+                             "phys=0x{:04X} type=0x{:02X} act=0x{:02X}",
+                        logPrefix().c_str(), f, log, len, phys,
+                        r[11], r[12]);
+        }
+    } else {
+        TETHER_LOGW(TAG, "{}: FMMU register readback failed",
+                    logPrefix().c_str());
+    }
+
+    // SM2's process-data buffer proves cyclic output data is actually
+    // reaching the slave — all-zero would mean the LRW/FMMU write side
+    // is broken.
+    uint8_t sm2_data[8] = {};
+    const bool b_ok = res.size() > 1 && res[1].success &&
+        res[1].data && res[1].datalen >= 8;
+    if (b_ok) std::memcpy(sm2_data, res[1].data, 8);
+
+    // Watchdog status + per-watchdog trigger counters.  The counters
+    // increment on each trigger event — rising counts across retries
+    // mean the watchdog keeps firing on new (late/missing) frames, not
+    // just a stale latch.
+    uint16_t wd_status = 0;
+    uint8_t wd_sm_count = 0, wd_pdi_count = 0;
+    if (res.size() > 2 && res[2].success &&
+        res[2].data && res[2].datalen >= 4) {
+        std::memcpy(&wd_status, res[2].data, 2);
+        wd_sm_count  = res[2].data[2];
+        wd_pdi_count = res[2].data[3];
+    }
+    TETHER_LOGI(TAG, "{}: SM2 buf[{}] {:02X} {:02X} {:02X} {:02X} "
+                     "{:02X} {:02X} {:02X} {:02X} WD=0x{:04X} "
+                     "wd_sm_cnt={} wd_pdi_cnt={}",
+                logPrefix().c_str(), b_ok ? "ok" : "rd-fail",
+                sm2_data[0], sm2_data[1], sm2_data[2], sm2_data[3],
+                sm2_data[4], sm2_data[5], sm2_data[6], sm2_data[7],
+                wd_status, wd_sm_count, wd_pdi_count);
+
+    // SM2/SM3 register blocks: addr, len, ctrl, stat (bit5 = watchdog
+    // trigger latched, bit0-4 status), act, pdi.
+    for (int i = 0; i < 2; ++i) {
+        const auto& r = res[3 + i];
+        if (res.size() > static_cast<size_t>(3 + i) && r.success &&
+            r.data && r.datalen >= 8) {
+            TETHER_LOGI(TAG, "{}: SM{} regs[{}]: addr=0x{:02X}{:02X} "
+                             "len={} ctrl=0x{:02X} stat=0x{:02X} "
+                             "act=0x{:02X} pdi=0x{:02X}{}",
+                        logPrefix().c_str(), 2 + i,
+                        r.success ? "ok" : "rd-fail",
+                        r.data[1], r.data[0],
+                        r.data[2] | (r.data[3] << 8), r.data[4],
+                        r.data[5], r.data[6], r.data[7],
+                        (r.data[5] & 0x20u) ? " WD-TRIGGERED" : "");
+        }
+    }
+
+    // Liveness probe: issue one SDO upload (0x1018:1 vendor ID).  The
+    // mailbox is serviced by the slave's application CPU — if the SDO
+    // answers, the firmware is alive and OP is gated by the ESM; if it
+    // times out, the firmware is wedged and only a slave
+    // reset/power-cycle is likely to recover it.
+    {
+        CoE::CoETransactionOptions sdo_opts{};
+        sdo_opts.timeout_ms = 300;
+        auto sdo_res = master_->sdoManager(index_)
+                           .template readSync<uint32_t>(0x1018, 1, sdo_opts);
+        TETHER_LOGW(TAG, "{}: SDO liveness probe (0x1018:1): {}",
+                    logPrefix().c_str(),
+                    sdo_res.has_value()
+                        ? "firmware ALIVE — ESM gating OP"
+                        : "NO RESPONSE — slave firmware wedged");
+    }
 }
 
 SlaveError Slave::transitionToBoot() {
