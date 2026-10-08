@@ -128,6 +128,12 @@ if(TETHER_DRIVE_SYNAPTICON)
 add_tether_example(synapticon_cst
     LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
 
+# ---Synapticon SOMANET 2-Motor CSP Example (no FSoE) ---
+# Two drives through synchronised group AL transitions (SlaveGroup),
+# identical CSP sine on both, motor 2 phase-shifted.
+add_tether_example(synapticon_csp_2motors
+    LIBRARIES tether_ethercat_master tether_cia_profiles tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common)
+
 # ---Synapticon SOMANET FSoE Example (no motion) ---
 # Runs ONLY the FSoE safe-motion protocol over the drive's safety PDOs
 # (RxPDO 0x1700 / TxPDO 0x1B00).  The CiA 402 drive is never enabled.

@@ -135,6 +135,10 @@ bool CiA402Drive::registerPDOBuffers() {
                  logPrefix().c_str(), m_txpdo_size, m_txpdo_entry_index);
     }
 
+    // Assign each entry's physical_offset inside SM2/SM3 — the physical
+    // exchange path composes the per-slave SM buffer from these offsets.
+    m_master->pdoForSlave(m_slave_index).finalizeMapping(m_slave_index);
+
     m_pdo_registered = true;
     return true;
 }
