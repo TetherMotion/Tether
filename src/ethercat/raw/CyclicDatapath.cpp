@@ -84,7 +84,12 @@ void CyclicDatapath::deposit(uint8_t idx, Command cmd,
     s.datalen = datalen;
     s.wkc     = wkc;
     s.gen     = gen;
-    s.stamp_ns = Tether::Platform::Clock::instance().getMicroseconds() * 1000;
+    // Boot-time monotonic — same domain as monoNowNs()/kernel stamps the
+    // channel emits; Clock::getMicroseconds() is process-relative and
+    // would make RTT math underflow.
+    s.stamp_ns = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
     if (datalen > 0) {
         std::memcpy(s.data, payload,
                     std::min<size_t>(datalen, sizeof(s.data)));
@@ -129,9 +134,11 @@ void CyclicDatapath::publishView(uint8_t idx, Command cmd,
     s.datalen = datalen;
     s.wkc     = wkc;
     s.gen     = gen;
-    // The channel's kernel stamp when present, else stamp at deposit.
-    s.stamp_ns = stamp_ns ? stamp_ns
-        : Tether::Platform::Clock::instance().getMicroseconds() * 1000;
+    // The channel's kernel stamp when present (already monotonic), else
+    // stamp at deposit — same boot-time monotonic domain as the channel.
+    s.stamp_ns = stamp_ns ? stamp_ns : static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
     s.seq.fetch_add(1, std::memory_order_seq_cst);   // see depositCyclicSlot
 
 #ifdef __linux__

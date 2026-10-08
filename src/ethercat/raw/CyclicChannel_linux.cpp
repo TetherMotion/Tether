@@ -194,6 +194,30 @@ uint64_t monoNowNs() {
            static_cast<uint64_t>(ts.tv_nsec);
 }
 
+// Kernel RX stamps (tp_sec/tp_nsec, SCM_TIMESTAMPNS) are CLOCK_REALTIME.
+// Consumers compare against CLOCK_MONOTONIC deadlines/send times — convert
+// once at the channel boundary so CyclicSlotView::stamp_ns is always
+// monotonic-domain regardless of which stamp path produced it.
+uint64_t rtStampToMonoNs(uint64_t rt_ns) {
+    static std::atomic<int64_t> rt_minus_mono_ns{INT64_MIN};
+    int64_t off = rt_minus_mono_ns.load(std::memory_order_relaxed);
+    if (off == INT64_MIN) {
+        struct timespec a, b;
+        clock_gettime(CLOCK_REALTIME, &a);
+        clock_gettime(CLOCK_MONOTONIC, &b);
+        off = static_cast<int64_t>(
+                  static_cast<uint64_t>(a.tv_sec) * 1'000'000'000ULL +
+                  static_cast<uint64_t>(a.tv_nsec)) -
+              static_cast<int64_t>(
+                  static_cast<uint64_t>(b.tv_sec) * 1'000'000'000ULL +
+                  static_cast<uint64_t>(b.tv_nsec));
+        rt_minus_mono_ns.store(off, std::memory_order_relaxed);
+    }
+    return (off > 0 && rt_ns > static_cast<uint64_t>(off))
+               ? rt_ns - static_cast<uint64_t>(off)
+               : rt_ns;
+}
+
 // ppoll on a single fd for POLLIN, timeout in ns → >0 ready, 0 timeout, <0 err
 int waitReadable(int fd, uint32_t timeout_ns) {
     struct pollfd pfd { fd, POLLIN, 0 };
@@ -369,7 +393,8 @@ protected:
             b->emitted = true;
             views[n].frame     = b->buf;
             views[n].frame_len = static_cast<uint32_t>(len);
-            views[n].stamp_ns  = stamp ? stamp : monoNowNs();
+            views[n].stamp_ns  = stamp ? rtStampToMonoNs(stamp)
+                                      : monoNowNs();
             views[n].cookie    = static_cast<uint32_t>(b - bank_);
             ++n;
         }
@@ -842,9 +867,9 @@ private:
             views[n].frame     = reinterpret_cast<const uint8_t*>(hdr) +
                                  hdr->tp_mac;
             views[n].frame_len = hdr->tp_snaplen;
-            views[n].stamp_ns  =
+            views[n].stamp_ns  = rtStampToMonoNs(
                 static_cast<uint64_t>(hdr->tp_sec) * 1'000'000'000ULL +
-                hdr->tp_nsec;
+                hdr->tp_nsec);
             views[n].cookie    = idx;
             ++n;
             dbg_emitted_.fetch_add(1, std::memory_order_relaxed);
@@ -933,9 +958,9 @@ private:
                 views[n].frame     = reinterpret_cast<const uint8_t*>(hdr) +
                                      hdr->tp_mac;
                 views[n].frame_len = hdr->tp_snaplen;
-                views[n].stamp_ns  =
+                views[n].stamp_ns  = rtStampToMonoNs(
                     static_cast<uint64_t>(hdr->tp_sec) * 1'000'000'000ULL +
-                    hdr->tp_nsec;
+                    hdr->tp_nsec);
                 views[n].cookie    = (b << 16) | emitted;
                 ++n;
                 dbg_emitted_.fetch_add(1, std::memory_order_relaxed);
