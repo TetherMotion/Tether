@@ -627,6 +627,28 @@ bool PDOManager::ensureConfiguredAddress(uint16_t slave_index) {
     }
     uint16_t cfg_addr;
     std::memcpy(&cfg_addr, resp.data, 2);
+    if (cfg_addr == 0) {
+        // Station address 0 is the unassigned default — with several slaves
+        // sharing it, every FPWR/FPRD to that address is answered by all of
+        // them (outputs collide, inputs mirror).  Assign a unique station
+        // address via APWR (position addressing always works, even in INIT).
+        const uint16_t assigned =
+            static_cast<uint16_t>(0x1000 + slave_index);
+        const uint8_t widx = transport_.allocIdx();
+        if (transport_.sendSingleDatagram(
+                Command::APWR, widx, adp, kRegConfiguredStationAddress,
+                reinterpret_cast<const uint8_t*>(&assigned), 2,
+                /*roundtrip=*/true)) {
+            RxDatagram wresp;
+            if (transport_.waitForResponseIdx(widx, 200, wresp) &&
+                wresp.wkc > 0) {
+                cfg_addr = assigned;
+                TETHER_LOGI(TAG,
+                    "{}: station address was 0 — assigned 0x{:04X}",
+                    slavePrefix(slave_index).c_str(), cfg_addr);
+            }
+        }
+    }
     cfg.configured_address       = cfg_addr;
     cfg.configured_address_known = true;
     mapping_.set_slave_configured_address(slave_index, cfg_addr);
