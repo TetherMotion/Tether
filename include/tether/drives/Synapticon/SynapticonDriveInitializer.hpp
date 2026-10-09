@@ -7,9 +7,10 @@
  *   1. Reset to INIT (if not already)
  *   2. Configure mailbox (ESI values: 512B, 0x1000/0x1400, CoE|FoE)
  *   3. Transition to PRE_OP
- *   4. Configure PDOs + transition to OP (via MultiPDOAssignment)
- *   5. Enable drive (CiA 402 state machine)
- *   6. Disengage/engage brake (0x2004:7)
+ *   4. Configure detected SMM module ident (0xF050:2 → 0xF030:2)
+ *   5. Configure PDOs + transition to OP (via MultiPDOAssignment)
+ *   6. Enable drive (CiA 402 state machine)
+ *   7. Disengage/engage brake (0x2004:7)
  *
  * FSoE-specific logic (MainInstance setup, Data state wait, STO/SBC-gated
  * brake release) is NOT included here — it belongs in the example because
@@ -193,6 +194,48 @@ public:
         }
         TETHER_LOGI(tag_, "{} transitioned to PRE_OP", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        return true;
+    }
+
+    /// @brief Configure the detected SMM module ident (0xF050:2 → 0xF030:2).
+    ///
+    /// Reads the detected module ident at list position 2 (0xF050:02) and
+    /// writes it into the configured module ident list (0xF030:02), so the
+    /// slave's PRE_OP → SAFE_OP module-ident validation passes.  Mirrors the
+    /// SOEM SoemEthercatManager::configureDetectedSmmModule() step.
+    ///
+    /// Must run while the slave is in PRE_OP (mailbox up — SOMANET >= 5.6
+    /// stops servicing the CoE mailbox in SAFE_OP).
+    ///
+    /// Non-fatal: failures are logged as warnings so drives without an SMM
+    /// at position 2 still initialise normally.
+    /// @return true when a detected module ident was read and written.
+    bool configureDetectedSmmModule() {
+        auto& slave = master_.ethercatMaster().slave(slave_idx_);
+
+        // 0xF050:02 — Detected module ident list / ident of the module
+        // detected at position 2.
+        uint32_t detected_module_ident2 = 0;
+        const auto rd_err = slave.sdoReadU32(kDetectedModuleIdentIndex, 0x02,
+                                             detected_module_ident2);
+        if (rd_err != SlaveError::Ok || detected_module_ident2 == 0) {
+            TETHER_LOGW(tag_, "{} no SMM module detected (0xF050:2 read {}"
+                              ", ident=0x{:08X})",
+                        master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str(),
+                        slaveErrorToString(rd_err), detected_module_ident2);
+            return false;
+        }
+
+        TETHER_LOGI(tag_, "{} detected SMM module ID 0x{:08X} — writing to 0xF030:2",
+                    master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str(),
+                    detected_module_ident2);
+
+        if (slave.sdoWriteU32(kConfiguredModuleIdentIndex, 0x02,
+                              detected_module_ident2) != SlaveError::Ok) {
+            TETHER_LOGW(tag_, "{} failed to write SMM module ID to 0xF030:2",
+                        master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
+            return false;
+        }
         return true;
     }
 
@@ -394,6 +437,7 @@ public:
         // guaranteed-timeout window.
         for (auto& ini : inits) {
             ini.readAndApplyFirmwareVersion();
+            ini.configureDetectedSmmModule();  // best-effort, warns on failure
         }
         return true;
     }
@@ -484,6 +528,7 @@ public:
         if (!resetToInit()) return false;
         if (!configureMailbox()) return false;
         if (!transitionToPreOp()) return false;
+        configureDetectedSmmModule();  // best-effort, warns on failure
         if (!configurePDOsAndOp(SynapticonPDO::makeStandardPDOAssignment())) return false;
         return true;
     }
@@ -503,6 +548,7 @@ public:
         if (!resetToInit()) return false;
         if (!configureMailbox()) return false;
         if (!transitionToPreOp()) return false;
+        configureDetectedSmmModule();  // best-effort, warns on failure
         if (!configurePDOsAndOp(
                 SynapticonPDO::makeCombinedPDOAssignment(fsoe_frame))) return false;
         return true;
