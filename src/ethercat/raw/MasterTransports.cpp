@@ -90,6 +90,12 @@ public:
     void purgePendingResponses() override {
         master_.purgePendingResponses();
     }
+    std::string txFailureDiagnostics() override {
+        return master_.txFailureDiagnostics();
+    }
+    int lastSendErrno() const override {
+        return master_.lastTxErrno();
+    }
 
     bool isCancelRequested() const override {
         return master_.isCancelRequested();

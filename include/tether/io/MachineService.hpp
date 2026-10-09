@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <format>
 #include <functional>
 #include <map>
 #include <mutex>

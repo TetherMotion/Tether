@@ -7,10 +7,13 @@
 #include "tether/ethercat/ProcessImage.hpp"
 #include "tether/ethercat/CyclicChannel.hpp"
 #include "tether/ethercat/Types.hpp"
+#include "raw/TxFailureDiagnostics.hpp"
+#include "raw/LogicalAddressManagerInternal.hpp"
 
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cstring>
 #include <ctime>
 
@@ -24,10 +27,14 @@ static const char* TAG = "ec_logaddr";
 
 LogicalAddressManager::LogicalAddressManager(IPDOTransport& transport)
     : transport_(transport)
+    , tx_diag_(std::make_unique<TxFailureDiagnostics>(
+          [this] { return transport_.txFailureDiagnostics(); }, TAG))
 {
     std::memset(addr_map_, 0, sizeof(addr_map_));
     expected_wkc_.fill(kWkcUnknown);
 }
+
+LogicalAddressManager::~LogicalAddressManager() = default;
 
 bool LogicalAddressManager::init() {
     if (initialized_) return true;
@@ -147,7 +154,7 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
                 slave_count, total_rxpdo_bytes_, total_txpdo_bytes_,
                 total_rxpdo_bytes_ + total_txpdo_bytes_);
 
-    ensureCyclicPayload(total_rxpdo_bytes_ + total_txpdo_bytes_);
+    ensureCyclicPayload(next_free_log_);
     return true;
 }
 
@@ -271,7 +278,7 @@ bool LogicalAddressManager::buildAddressMapFromMultiPDO(
                     return total;
                 }());
 
-    ensureCyclicPayload(total_rxpdo_bytes_ + total_txpdo_bytes_);
+    ensureCyclicPayload(next_free_log_);
     return true;
 }
 
@@ -336,7 +343,11 @@ LogicalAddressManager::getSlavePDOLogicalAddrs(uint16_t slave_index) const {
 // Statistics
 // ============================================================================
 
-LogicalAddressManager::Stats LogicalAddressManager::getStats() const { return stats_; }
+LogicalAddressManager::Stats LogicalAddressManager::getStats() const {
+    Stats s = stats_;
+    s.tx_diag_spawns = tx_diag_ ? tx_diag_->spawns() : 0;
+    return s;
+}
 void LogicalAddressManager::resetStats() { stats_ = Stats{}; }
 
 // ============================================================================
@@ -345,7 +356,7 @@ void LogicalAddressManager::resetStats() { stats_ = Stats{}; }
 
 bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
     return exchangeLRWImpl(mapping, 0,
-                           total_rxpdo_bytes_ + total_txpdo_bytes_,
+                           next_free_log_,
                            /*enforce_slice_limit=*/false);
 }
 
@@ -410,63 +421,6 @@ size_t LogicalAddressManager::computeImageOffsets(
     return n;
 }
 
-static uint64_t monoNowNs() {
-    timespec ts{};
-    ::clock_gettime(CLOCK_MONOTONIC, &ts);
-    return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ull
-         + static_cast<uint64_t>(ts.tv_nsec);
-}
-
-// ---- Packed per-slice health ---------------------------------------------
-// Slice health is a single 64-bit word (CyclicSliceHealth::pack) written
-// by the cyclic thread and read lock-free by diagnostic callers — no
-// torn fields, no seqlock retry.  Single writer, so a plain
-// load-modify-store is sufficient.
-
-static CyclicSliceHealth healthLoad(const uint64_t& p) {
-    return CyclicSliceHealth::unpack(
-        __atomic_load_n(&p, __ATOMIC_ACQUIRE));
-}
-static void healthStore(uint64_t& p, const CyclicSliceHealth& h) {
-    __atomic_store_n(&p, h.pack(), __ATOMIC_RELEASE);
-}
-/// Change last_status only (Stale marking keeps wkc/consec for the
-/// following timeout classification).
-static void healthMarkStatus(uint64_t& p, CyclicSliceStatus st) {
-    auto h = healthLoad(p);
-    h.last_status = st;
-    healthStore(p, h);
-}
-/// Unconditional failure: set status and bump the failure streak.
-static void healthFail(uint64_t& p, CyclicSliceStatus st) {
-    auto h = healthLoad(p);
-    h.last_status = st;
-    ++h.consecutive_failures;
-    healthStore(p, h);
-}
-/// Timeout: keeps a Stale classification (the late echo IS the story)
-/// but still bumps the consecutive-failure streak.  `expected` refreshes
-/// the published expectation so diagnostics stay current.
-static void healthTimeout(uint64_t& p, uint16_t expected) {
-    auto h = healthLoad(p);
-    if (h.last_status != CyclicSliceStatus::Stale)
-        h.last_status = CyclicSliceStatus::Timeout;
-    h.expected_wkc = expected;
-    ++h.consecutive_failures;
-    healthStore(p, h);
-}
-/// Full outcome write: status + WKC pair + failure-streak bookkeeping.
-static void markRunStatus(uint64_t& p, CyclicSliceStatus st,
-                          uint16_t wkc = 0, uint16_t expected = 0xFFFF) {
-    auto h = healthLoad(p);
-    h.last_status  = st;
-    h.last_wkc     = wkc;
-    h.expected_wkc = expected;
-    h.consecutive_failures = (st == CyclicSliceStatus::Ok)
-                                 ? 0 : h.consecutive_failures + 1;
-    healthStore(p, h);
-}
-
 bool LogicalAddressManager::exchangeAllLRWCyclic(const PDO::PDOMapping& mapping,
                                                  uint32_t rx_timeout_ns,
                                                  ProcessImage* image) {
@@ -489,7 +443,7 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
         stats_.send_errors++;
         return false;
     }
-    const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
+    const uint32_t total_data = next_free_log_;
     if (total_data == 0 && slices_.empty()) return true;
 
     // Whole-image decimation: with image_every_n_ > 1 the full exchange
@@ -842,7 +796,7 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
     if (!transport_.supportsCyclicFastPath()) {
         return true;   // cyclicSend already ran the atomic legacy exchange
     }
-    const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
+    const uint32_t total_data = next_free_log_;
     const uint8_t nslices = cyclic_pending_count_;
     // Nothing pending means the send half didn't emit (skipped, paused, or
     // failed — already counted there).  An empty collect is not an error —
@@ -1128,596 +1082,6 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
     return ok;
 }
 
-// ============================================================================
-// User-defined PDO slices — define/plan/emit/collect/one-off
-// ============================================================================
-
-size_t LogicalAddressManager::resolveSpecRuns(
-    const PDO::PDOMapping& mapping, const PDOSliceSpec& spec,
-    std::array<std::pair<uint32_t, uint32_t>, kMaxSliceRuns>& out) const
-{
-    size_t n = 0;
-    if (!spec.entries.empty()) {
-        // Resolve entry indices → logical placements → merge exact-adjacent
-        // placements into contiguous runs (one LRW datagram per run).
-        const auto all = describeEntries(mapping);
-        std::array<std::pair<uint32_t, uint32_t>, kMaxSliceRuns * 2> segs{};
-        size_t nseg = 0;
-        for (const uint16_t ei : spec.entries) {
-            if (ei >= all.size()) continue;
-            const EntrySlice& e = all[ei];
-            if (e.length == 0 || nseg >= segs.size()) continue;
-            segs[nseg++] = {e.offset, e.length};
-        }
-        std::sort(segs.begin(), segs.begin() + nseg);
-        for (size_t i = 0; i < nseg && n < out.size(); ++i) {
-            if (n > 0 && out[n - 1].first + out[n - 1].second
-                             == segs[i].first) {
-                out[n - 1].second += segs[i].second;   // contiguous — merge
-            } else {
-                out[n++] = segs[i];
-            }
-        }
-    } else {
-        for (const auto& r : spec.ranges) {
-            if (n >= out.size()) break;
-            if (r.second == 0) continue;
-            out[n++] = r;
-        }
-        std::sort(out.begin(), out.begin() + n);
-    }
-    return n;
-}
-
-uint32_t LogicalAddressManager::definePDOSlice(
-    const PDO::PDOMapping& mapping, const PDOSliceSpec& spec)
-{
-    constexpr uint32_t kInvalid = 0xFFFFFFFFu;
-    if (!initialized_ || slave_count_ == 0) {
-        TETHER_LOGW(TAG, "definePDOSlice: LAM not initialized");
-        return kInvalid;
-    }
-    if (spec.entries.empty() && spec.ranges.empty()) {
-        TETHER_LOGW(TAG, "definePDOSlice: spec selects no bytes "
-                         "(entries and ranges both empty)");
-        return kInvalid;
-    }
-
-    // Validate against the CURRENT mapping: resolve the new spec and every
-    // already-defined spec to count total runs against the slot pool.
-    std::array<std::pair<uint32_t, uint32_t>, kMaxSliceRuns> rr{};
-    const size_t n = resolveSpecRuns(mapping, spec, rr);
-    if (n == 0) {
-        TETHER_LOGW(TAG, "definePDOSlice: spec resolves to zero "
-                         "contiguous runs");
-        return kInvalid;
-    }
-    const uint32_t max_len = maxSliceLength();
-    const uint32_t img_len = total_rxpdo_bytes_ + total_txpdo_bytes_;
-    size_t total = n;
-    for (size_t i = 0; i < n; ++i) {
-        if (rr[i].second > max_len) {
-            TETHER_LOGE(TAG, "definePDOSlice: run [{}+{}B] exceeds one "
-                             "datagram ({}B) — split the spec",
-                        rr[i].first, rr[i].second, max_len);
-            return kInvalid;
-        }
-        if (rr[i].first + rr[i].second > img_len) {
-            TETHER_LOGE(TAG, "definePDOSlice: run [{}+{}B] exceeds the "
-                             "logical image ({}B)",
-                        rr[i].first, rr[i].second, img_len);
-            return kInvalid;
-        }
-    }
-    for (const auto& s : slices_) {
-        std::array<std::pair<uint32_t, uint32_t>, kMaxSliceRuns> other{};
-        total += resolveSpecRuns(mapping, s.spec, other);
-    }
-    if (total > IPDOTransport::kNumSliceSlots) {
-        TETHER_LOGE(TAG, "definePDOSlice: {} runs requested, {} slice "
-                         "slots available", total,
-                    IPDOTransport::kNumSliceSlots);
-        return kInvalid;
-    }
-
-    PDOSlice s;
-    s.spec     = spec;
-    s.every_n  = spec.every_n ? spec.every_n : 1;
-    s.run_count = static_cast<uint8_t>(n);
-    for (size_t i = 0; i < n; ++i) {
-        s.runs[i].off = rr[i].first;
-        s.runs[i].len = rr[i].second;
-    }
-    slices_.push_back(std::move(s));
-    // Sentinel, not 0: a fresh mapping's epoch IS 0 (add_*pdo() doesn't
-    // bump it), so 0 would falsely match and skip slot/WKC assignment.
-    slice_epoch_ = 0xFFFFFFFFu;   // force (re)plan next send
-    const uint32_t handle = static_cast<uint32_t>(slices_.size() - 1);
-    TETHER_LOGI(TAG, "PDO slice {} defined: {} run(s), every {} cycle(s)",
-                handle, n, s.every_n);
-    return handle;
-}
-
-bool LogicalAddressManager::clearPDOSlices()
-{
-    slices_.clear();
-    slice_epoch_ = 0xFFFFFFFFu;
-    return true;
-}
-
-bool LogicalAddressManager::replanSlices(const PDO::PDOMapping& mapping)
-{
-    // Re-resolve every slice's runs against the current mapping and
-    // re-assign slots in define-order — deterministic, so the same
-    // mapping always yields the same slot layout.
-    uint8_t next_slot = 0;
-    const uint32_t max_len = maxSliceLength();
-    const auto entries = describeEntries(mapping);   // WKC derivation
-    for (auto& slice : slices_) {
-        std::array<std::pair<uint32_t, uint32_t>, kMaxSliceRuns> rr{};
-        const size_t n = resolveSpecRuns(mapping, slice.spec, rr);
-        slice.run_count = static_cast<uint8_t>(n);
-        for (size_t i = 0; i < n; ++i) {
-            auto& run = slice.runs[i];
-            run.off = rr[i].first;
-            run.len = rr[i].second;
-            const uint32_t img_len =
-                total_rxpdo_bytes_ + total_txpdo_bytes_;
-            if (run.len > max_len || run.off + run.len > img_len) {
-                TETHER_LOGE(TAG, "PDO slice replan: run [{}+{}B] exceeds "
-                                 "one datagram or the image — slice "
-                                 "disabled", run.off, run.len);
-                slice.run_count = 0;
-                break;
-            }
-            if (next_slot >= IPDOTransport::kNumSliceSlots) {
-                TETHER_LOGE(TAG, "PDO slice replan: slice-slot pool "
-                                 "exhausted — slice disabled");
-                slice.run_count = 0;
-                break;
-            }
-            run.slot  = next_slot++;
-            run.sent  = 0;
-            // Derive the run's expected WKC: +1 per slave writing output
-            // bytes in range, +2 per slave reading input bytes.
-            uint64_t rx_set = 0, tx_set = 0;
-            for (const auto& e : entries) {
-                if (e.length == 0 || e.slave_index >= 64) continue;
-                if (e.offset >= run.off + run.len ||
-                    e.offset + e.length <= run.off) continue;
-                if (e.direction == PDO::PDODirection::RxPDO)
-                    rx_set |= 1ull << e.slave_index;
-                else
-                    tx_set |= 1ull << e.slave_index;
-            }
-            const uint32_t wkc =
-                std::popcount(rx_set) + 2u * std::popcount(tx_set);
-            run.expected_wkc = wkc ? static_cast<uint16_t>(wkc)
-                                   : kWkcUnknown;
-        }
-    }
-    slice_epoch_ = mapping.epoch();
-    return true;
-}
-
-void LogicalAddressManager::emitSlices(const PDO::PDOMapping& mapping,
-                                       ProcessImage* image,
-                                       uint32_t rx_timeout_ns)
-{
-    if (slices_.empty()) return;
-    if (slice_epoch_ != mapping.epoch()) replanSlices(mapping);
-    const bool img_active = image && image->configured() &&
-                            image->mode() != ImageMode::Buffered;
-    // Send-image source for slice payloads: acquireSendImage() covers
-    // Direct/Double/Triple (snapshot semantics).  Rotating returns
-    // nullptr there — its send image is the attached TX frame's payload
-    // region, reached via outputWrite().  Null → staging-buffer gather.
-    const uint8_t* send_img = nullptr;
-    if (img_active) {
-        send_img = (image->mode() == ImageMode::Rotating)
-            ? image->outputWrite()
-            : image->acquireSendImage();
-    }
-    for (auto& slice : slices_) {
-        if (slice.run_count == 0) continue;
-        if (slice.every_n > 1 && ++slice.cycle_mod < slice.every_n)
-            continue;
-        slice.cycle_mod = 0;
-        if (slice.pending) continue;   // last collect still open — skip
-        slice.deadline_ns = monoNowNs() + rx_timeout_ns;
-        for (uint8_t r = 0; r < slice.run_count; ++r) {
-            auto& run = slice.runs[r];
-            const uint32_t logical_addr = base_logical_addr_ + run.off;
-            const uint16_t adp = static_cast<uint16_t>(logical_addr & 0xFFFF);
-            const uint16_t ado = static_cast<uint16_t>(
-                (logical_addr >> 16) & 0xFFFF);
-
-            const uint8_t* data;
-            if (send_img) {
-                data = send_img + run.off;
-            } else {
-                // Gather RxPDO bytes intersecting the run into staging —
-                // the rest of the datagram reads as zeros (FMMU write
-                // regions only accept their own slave's bytes anyway).
-                if (run.len > slice_payload_size_) {
-                    slice_payload_.reset(new uint8_t[run.len]);
-                    slice_payload_size_ = run.len;
-                }
-                std::memset(slice_payload_.get(), 0, run.len);
-                std::array<uint32_t, PDO::kMaxPDOSlaves> rx_running{};
-                for (size_t i = 0; i < mapping.entry_count(); i++) {
-                    const PDO::PDOEntry* e = mapping.get_entry(i);
-                    if (!e || !e->enabled ||
-                        e->direction != PDO::PDODirection::RxPDO) continue;
-                    if (e->slave_index >= slave_count_ ||
-                        !addr_map_[e->slave_index].active) continue;
-                    const auto& addr = addr_map_[e->slave_index];
-                    const uint32_t e0 =
-                        addr.rxpdo_logical_addr - base_logical_addr_
-                        + rx_running[e->slave_index];
-                    rx_running[e->slave_index] += e->data_size;
-                    const uint32_t s0 = run.off, s1 = run.off + run.len;
-                    const uint32_t e1 = e0 + e->data_size;
-                    if (e->data_size == 0 || e0 >= s1 || s0 >= e1) continue;
-                    const uint32_t lo = std::max(e0, s0);
-                    const uint32_t hi = std::min(e1, s1);
-                    std::memcpy(slice_payload_.get() + (lo - s0),
-                                e->storage + (lo - e0), hi - lo);
-                }
-                data = slice_payload_.get();
-            }
-
-            run.token = transport_.sliceSlotToken(run.slot);
-            run.sent  = transport_.sendSliceDatagram(
-                Command::LRW, run.slot, adp, ado, data,
-                static_cast<uint16_t>(run.len), true) ? 1 : 0;
-            if (!run.sent) {
-                stats_.send_errors++;
-                healthFail(run.health_packed, CyclicSliceStatus::SendError);
-                continue;
-            }
-            run.gen = transport_.sliceSlotGen(run.slot);
-        }
-        slice.pending = true;
-    }
-}
-
-bool LogicalAddressManager::collectSlices(const PDO::PDOMapping& mapping,
-                                          ProcessImage* image)
-{
-    if (slices_.empty()) return true;
-    bool ok = true;
-    bool bank_touched = false;
-    const bool img_active = image && image->configured() &&
-                            image->mode() != ImageMode::Buffered;
-    const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
-    const bool epoch_ok = (slice_epoch_ == mapping.epoch());
-
-    for (auto& slice : slices_) {
-        if (!slice.pending) continue;
-        slice.pending = false;
-
-        uint32_t mask = 0;
-        std::array<uint64_t, IPDOTransport::kNumSliceSlots> tokens{};
-        std::array<CyclicSlotView, IPDOTransport::kNumSliceSlots> views{};
-        for (uint8_t r = 0; r < slice.run_count; ++r) {
-            const auto& run = slice.runs[r];
-            if (!run.sent) continue;
-            mask |= 1u << run.slot;
-            tokens[run.slot] = run.token;
-        }
-        if (!mask) continue;
-
-        const uint64_t now = monoNowNs();
-        const uint32_t remaining = now < slice.deadline_ns
-            ? static_cast<uint32_t>(slice.deadline_ns - now) : 0;
-        uint32_t arrived = transport_.waitSliceSlotMask(
-            mask, tokens.data(), remaining, views.data());
-
-        // Stale-generation retry — same guard as the image collect: a
-        // late response echoes the previous send generation.
-        uint32_t stale = 0;
-        for (uint8_t r = 0; r < slice.run_count; ++r) {
-            const auto& run = slice.runs[r];
-            if (!run.sent) continue;
-            if ((arrived & (1u << run.slot)) &&
-                views[run.slot].gen != run.gen) {
-                stale |= 1u << run.slot;
-                stats_.stale_responses++;
-            }
-        }
-        if (stale) {
-            for (uint8_t r = 0; r < slice.run_count; ++r) {
-                const auto& run = slice.runs[r];
-                if (stale & (1u << run.slot))
-                    tokens[run.slot] = transport_.sliceSlotToken(run.slot);
-            }
-            const uint64_t now2 = monoNowNs();
-            const uint32_t rem2 = now2 < slice.deadline_ns
-                ? static_cast<uint32_t>(slice.deadline_ns - now2) : 0;
-            const uint32_t arrived2 = rem2
-                ? transport_.waitSliceSlotMask(stale, tokens.data(),
-                                               rem2, views.data())
-                : 0;
-            arrived = (arrived & ~stale) | (arrived2 & stale);
-            for (uint8_t r = 0; r < slice.run_count; ++r) {
-                auto& run = slice.runs[r];
-                if ((arrived2 & (1u << run.slot)) &&
-                    views[run.slot].gen != run.gen) {
-                    arrived &= ~(1u << run.slot);
-                    stats_.stale_responses++;
-                    healthMarkStatus(run.health_packed,
-                                     CyclicSliceStatus::Stale);
-                }
-            }
-        }
-
-        for (uint8_t r = 0; r < slice.run_count; ++r) {
-            auto& run = slice.runs[r];
-            if (!run.sent) continue;
-            if (!(arrived & (1u << run.slot))) {
-                stats_.timeout_errors++;
-                healthTimeout(run.health_packed, run.expected_wkc);
-                ok = false;
-                continue;
-            }
-            const CyclicSlotView& resp = views[run.slot];
-            if (resp.stamp_ns > cyclic_send_ns_) {
-                const uint64_t rtt = resp.stamp_ns - cyclic_send_ns_;
-                stats_.rtt_ns_sum += rtt;
-                const uint32_t r = static_cast<uint32_t>(
-                    std::min<uint64_t>(rtt, UINT32_MAX));
-                if (stats_.rtt_samples == 0 || r < stats_.rtt_ns_min)
-                    stats_.rtt_ns_min = r;
-                if (r > stats_.rtt_ns_max) stats_.rtt_ns_max = r;
-                ++stats_.rtt_samples;
-            }
-            if (resp.wkc == 0 ||
-                (strict_wkc_ && run.expected_wkc != kWkcUnknown &&
-                 resp.wkc != run.expected_wkc)) {
-                stats_.wkc_errors++;
-                markRunStatus(run.health_packed, CyclicSliceStatus::WkcError,
-                              resp.wkc, run.expected_wkc);
-                ok = false;
-                continue;
-            }
-            if (run.expected_wkc == kWkcUnknown && resp.wkc != 0)
-                run.expected_wkc = resp.wkc;
-            markRunStatus(run.health_packed, CyclicSliceStatus::Ok,
-                          resp.wkc, run.expected_wkc);
-            // A mid-flight mapping change leaves run offsets stale — the
-            // datagram executed; skip scatter/publish, replan next send.
-            if (!epoch_ok) continue;
-
-            // Scatter TxPDO bytes to entry storage — mirror of the image
-            // collect's predicate (image-mapped entries live in the bank).
-            std::array<uint32_t, PDO::kMaxPDOSlaves> tx_running{};
-            for (size_t i = 0; i < mapping.entry_count(); i++) {
-                const PDO::PDOEntry* e = mapping.get_entry(i);
-                if (!e || !e->enabled ||
-                    e->direction != PDO::PDODirection::TxPDO) continue;
-                if (e->slave_index >= slave_count_ ||
-                    !addr_map_[e->slave_index].active) continue;
-                const auto& addr = addr_map_[e->slave_index];
-                const uint32_t e0 =
-                    addr.txpdo_logical_addr - base_logical_addr_
-                    + tx_running[e->slave_index];
-                tx_running[e->slave_index] += e->data_size;
-                const uint32_t s0 = run.off;
-                const uint32_t s1 = run.off + resp.datalen;
-                const uint32_t e1 = e0 + e->data_size;
-                if (e->data_size == 0 || e0 >= s1 || s0 >= e1) continue;
-                if (img_active && !e->storage_bound &&
-                    image->entryOffset(i) >= 0) continue;
-                if (!resp.payload) break;
-                const uint32_t lo = std::max(e0, s0);
-                const uint32_t hi = std::min(e1, s1);
-                std::memcpy(e->storage + (lo - e0),
-                            resp.payload + (lo - s0), hi - lo);
-            }
-            // Publish into the input bank — overlays the full image's
-            // data (this collect runs after the image publish).
-            if (img_active && resp.payload) {
-                uint8_t* bank = image->inputWriteBank();
-                if (bank) {
-                    const uint32_t ncp = std::min<uint32_t>(
-                        resp.datalen, total_data - run.off);
-                    std::memcpy(bank + run.off, resp.payload, ncp);
-                    bank_touched = true;
-                }
-            }
-            if (slice.spec.on_exchange && resp.payload) {
-                slice.spec.on_exchange(r, resp.payload, resp.datalen,
-                                       resp.wkc);
-            }
-        }
-    }
-    if (bank_touched) image->commitInput();
-    return ok;
-}
-
-bool LogicalAddressManager::exchangePDOSlice(const PDO::PDOMapping& mapping,
-                                             const PDOSliceSpec& spec)
-{
-    std::array<std::pair<uint32_t, uint32_t>, kMaxSliceRuns> rr{};
-    const size_t n = resolveSpecRuns(mapping, spec, rr);
-    if (n == 0) {
-        TETHER_LOGW(TAG, "exchangePDOSlice: spec resolves to zero runs");
-        return false;
-    }
-    bool ok = true;
-    for (size_t i = 0; i < n; ++i) {
-        if (!exchangeLRWSlice(mapping, rr[i].first, rr[i].second))
-            ok = false;
-    }
-    return ok;
-}
-
-bool LogicalAddressManager::exchangeLRWSlice(const PDO::PDOMapping& mapping,
-                                             uint32_t offset, uint32_t length) {
-    return exchangeLRWImpl(mapping, offset, length,
-                           /*enforce_slice_limit=*/true);
-}
-
-uint32_t LogicalAddressManager::maxSliceLength() const {
-    // One LRW datagram = frame payload minus the per-datagram wire overhead
-    // (datagram header: cmd+idx+adp+ado+len/flags+irq = 10 B, plus WKC = 2 B).
-    static constexpr uint32_t kDatagramOverhead = 12;
-    const size_t frame = transport_.maxEtherCATPayloadPerFrame();
-    // The frame may allow more than a datagram's 11-bit length field can
-    // express — a single LRW slice is still capped at kMaxDatagramDataSize.
-    const size_t limit = std::min<size_t>(frame, kMaxDatagramDataSize
-                                                   + kDatagramOverhead);
-    return limit > kDatagramOverhead
-         ? static_cast<uint32_t>(limit - kDatagramOverhead)
-         : 0u;
-}
-
-std::vector<LogicalAddressManager::EntrySlice>
-LogicalAddressManager::describeEntries(const PDO::PDOMapping& mapping) const {
-    std::vector<EntrySlice> out;
-    if (!initialized_ || slave_count_ == 0) return out;
-    out.reserve(mapping.entry_count());
-
-    std::array<uint32_t, PDO::kMaxPDOSlaves> rx_running{};
-    std::array<uint32_t, PDO::kMaxPDOSlaves> tx_running{};
-
-    for (size_t i = 0; i < mapping.entry_count(); i++) {
-        const PDO::PDOEntry* e = mapping.get_entry(i);
-        if (!e || !e->enabled) continue;
-        if (e->slave_index >= slave_count_) continue;
-        if (!addr_map_[e->slave_index].active) continue;
-
-        const auto& addr = addr_map_[e->slave_index];
-        EntrySlice s;
-        s.entry_index = i;
-        s.slave_index = e->slave_index;
-        s.pdo_index   = e->pdo_index;
-        s.direction   = e->direction;
-        s.length      = e->data_size;
-        if (e->direction == PDO::PDODirection::RxPDO) {
-            s.offset = addr.rxpdo_logical_addr - base_logical_addr_
-                     + rx_running[e->slave_index];
-            rx_running[e->slave_index] += e->data_size;
-        } else {
-            s.offset = addr.txpdo_logical_addr - base_logical_addr_
-                     + tx_running[e->slave_index];
-            tx_running[e->slave_index] += e->data_size;
-        }
-        out.push_back(s);
-    }
-    return out;
-}
-
-// ---- Stall self-heal helpers (polled LRW path) -----------------------------
-//
-// Host stalls (thread preemption, logging bursts, non-RT scheduling) break
-// the polled exchange in two ways: (1) queued responses outlive their
-// request and can satisfy a NEW waiter on a reused idx — the 8-bit idx
-// wraps after 156 allocations — feeding stale PDO data to the caller, and
-// (2) frames lost at the kernel socket produce silent timeouts.  Neither
-// heals by itself.  Recovery is deliberately NON-DESTRUCTIVE: the wire is
-// drained so queued replies still reach their live waiters, and each
-// exchange prunes only the one slot it transmits on (see
-// claimExchangeWaiter) — async slots are never purged.
-
-void LogicalAddressManager::stallCheck()
-{
-    const int64_t now = static_cast<int64_t>(monoNowNs());
-    const int64_t gap = last_call_ns_ ? now - last_call_ns_ : 0;
-    last_call_ns_ = now;
-    if (stall_detect_us_ == 0 || gap <= 0 ||
-        gap <= static_cast<int64_t>(stall_detect_us_) * 1000) {
-        return;
-    }
-    ++stats_.stall_events;
-    // Flush the kernel RX backlog through normal routing: frames whose
-    // waiters are still pending are delivered (they ARE legitimate late
-    // replies), frames for dead slots drop as unrouted strays.  No waiter
-    // is killed — independence of unrelated async slots is preserved.
-    stats_.drained_frames +=
-        static_cast<uint32_t>(transport_.drainWire(512));
-    TETHER_LOGW(TAG,
-        "exchangeLRW: host stall ({:.1f} ms since last call) — drained "
-        "wire backlog",
-        static_cast<double>(gap) / 1e6);
-}
-
-size_t LogicalAddressManager::claimExchangeWaiter(uint8_t& idx_out,
-                                                  RxDatagram& resp)
-{
-    // Prune the wire state for whatever idx we are about to send on —
-    // and nothing else.  Draining BEFORE registering routes backlog
-    // frames for other idx to their still-pending waiters (giving them
-    // their chance to complete) while a stale echo for the picked idx
-    // hits a dead slot and drops as an unrouted stray.
-    stats_.drained_frames +=
-        static_cast<uint32_t>(transport_.drainWire(64));
-
-    for (unsigned tries = 0; tries < kFastSlotBaseIdx; ++tries) {
-        const uint8_t idx = transport_.allocIdx();
-        const size_t slot = transport_.preRegisterResponseWaiter(
-            idx, resp.data, sizeof(resp.data));
-        if (slot == IPDOTransport::kPreRegInvalid) {
-            idx_out = idx;
-            return slot;   // no pre-registration — caller falls back
-        }
-        if (slot != IPDOTransport::kPreRegBusy) {
-            idx_out = idx;
-            return slot;   // claimed — the claim itself pruned the slot
-        }
-        // Busy: a live waiter owns this idx — leave it alone, try next.
-    }
-    return IPDOTransport::kPreRegBusy;
-}
-
-void LogicalAddressManager::onExchangeTimeout(const char* what)
-{
-    ++stats_.consecutive_timeouts;
-    // Rate-limit the timeout log to 4 Hz — a dead ring otherwise spams
-    // one line per exchange (and the logging itself worsens the stall).
-    const int64_t now = static_cast<int64_t>(monoNowNs());
-    if (now - last_timeout_log_ns_ >= 250'000'000) {
-        if (timeout_log_suppressed_ > 0) {
-            TETHER_LOGE(TAG,
-                "{}: response timeout ({} suppressed since last log)",
-                what, timeout_log_suppressed_);
-            timeout_log_suppressed_ = 0;
-        } else {
-            TETHER_LOGE(TAG, "{}: response timeout", what);
-        }
-        last_timeout_log_ns_ = now;
-    } else {
-        ++timeout_log_suppressed_;
-    }
-    // Pull whatever landed late off the wire — either it frees a stuck
-    // kernel-queue backlog or it confirms the ring is actually silent.
-    stats_.drained_frames +=
-        static_cast<uint32_t>(transport_.drainWire(64));
-    if (escalate_after_timeouts_ &&
-        stats_.consecutive_timeouts % escalate_after_timeouts_ == 0) {
-        // Ring probe: APRD of AL_STATUS (0x0130) on the first slave —
-        // distinguishes "host can't see replies" from "ring is broken".
-        uint16_t al_status = 0;
-        const bool alive = transport_.readRegister(0, 0x0130,
-                                                   &al_status, 2, 20);
-        TETHER_LOGE(TAG,
-            "exchangeLRW: {} consecutive timeouts — ring probe {}"
-            " (AL_STATUS=0x{:04X}). Check NIC drops / slave link state.",
-            stats_.consecutive_timeouts,
-            alive ? "ALIVE" : "FAILED — ring likely broken",
-            al_status);
-        escalate_logged_ = true;
-    }
-}
-
-void LogicalAddressManager::onExchangeSuccess()
-{
-    stats_.success++;
-    stats_.consecutive_timeouts = 0;
-    escalate_logged_ = false;
-}
-
 bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
                                             uint32_t offset, uint32_t length,
                                             bool enforce_slice_limit) {
@@ -1729,7 +1093,7 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
     stallCheck();
 
     static constexpr size_t kMaxLRWPayload = PDO::kMaxPDOSize * PDO::kMaxPDOSlaves;
-    const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
+    const uint32_t total_data = next_free_log_;
     if (length == 0) return true;
 
     if (total_data > kMaxLRWPayload) {
@@ -1793,8 +1157,8 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
     uint8_t idx = 0;
     const size_t slot = claimExchangeWaiter(idx, resp);
     if (slot == IPDOTransport::kPreRegBusy) {
-        TETHER_LOGE(TAG, "exchangeLRW: no free response slot — all async "
-                    "indices have live waiters");
+        onExchangeSendFailure("exchangeLRW: no free response slot — all async "
+                              "indices have live waiters");
         stats_.send_errors++;
         return false;
     }
@@ -1807,12 +1171,17 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
                                         payload, static_cast<uint16_t>(length),
                                         true)) {
         if (have_slot) transport_.waitForPreRegistered(slot, 0, resp);
+        noteTxSendFailure();
         if (!transport_.isCancelRequested()) {
-            TETHER_LOGE(TAG, "exchangeLRW: send failed");
+            const int err = transport_.lastSendErrno();
+            onExchangeSendFailure(std::format(
+                "exchangeLRW: send failed (errno={}: {})",
+                err, err ? std::strerror(err) : "n/a"));
         }
         stats_.send_errors++;
         return false;
     }
+    tx_diag_->noteSuccess();
 
     // Wait for response
     const bool got_resp = have_slot
@@ -1918,8 +1287,8 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
     uint8_t idx = 0;
     const size_t slot = claimExchangeWaiter(idx, resp);
     if (slot == IPDOTransport::kPreRegBusy) {
-        TETHER_LOGE(TAG, "exchangeLRWForSlaves: no free response slot — "
-                    "all async indices have live waiters");
+        onExchangeSendFailure("exchangeLRWForSlaves: no free response slot — "
+                              "all async indices have live waiters");
         stats_.send_errors++;
         return false;
     }
@@ -1932,11 +1301,16 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
                                         payload, static_cast<uint16_t>(total_data),
                                         true)) {
         if (have_slot) transport_.waitForPreRegistered(slot, 0, resp);
-        TETHER_LOGE(TAG, "exchangeLRWForSlaves: send failed (mask=0x{:08X})",
-                    static_cast<unsigned long>(slave_mask));
+        noteTxSendFailure();
+        const int err = transport_.lastSendErrno();
+        onExchangeSendFailure(std::format(
+            "exchangeLRWForSlaves: send failed (mask=0x{:08X}, errno={}: {})",
+            static_cast<unsigned long>(slave_mask),
+            err, err ? std::strerror(err) : "n/a"));
         stats_.send_errors++;
         return false;
     }
+    tx_diag_->noteSuccess();
 
     const bool got_resp = have_slot
         ? transport_.waitForPreRegistered(slot, response_timeout_ms_, resp)

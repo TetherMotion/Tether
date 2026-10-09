@@ -25,9 +25,11 @@
 #include <ctime>
 #include <atomic>
 #include <chrono>
+#include <format>
 #include <functional>
 #include <bit>
 #include <memory>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -811,6 +813,24 @@ public:
      * unrelated async waiters keep their chance to be fulfilled.
      */
     virtual void purgePendingResponses() {}
+
+    /**
+     * @brief Human-readable diagnosis of the TX path for the LAM's
+     *        send-failure escalation worker.
+     *
+     * Runs on a dedicated NON-RT diagnostic thread — safe to block,
+     * perform ioctls and read sysfs.  Should report link/carrier state,
+     * pending socket errors and NIC drop counters where available.
+     *
+     * @return diagnosis text; empty string = unsupported.
+     */
+    virtual std::string txFailureDiagnostics() { return {}; }
+
+    /// errno from the most recent failed TX send (0 = none/unsupported).
+    /// The kernel's own verdict for the failure-path log: ENOBUFS = TX
+    /// ring wedged / carrier lost, ENETDOWN = interface down, ENODEV =
+    /// interface gone, EPERM = filtered, EAGAIN = nonblocking queue full.
+    virtual int lastSendErrno() const { return 0; }
 
     /// @return true if cancellation has been requested (e.g. during shutdown).
     /// Used by callers to suppress error logging when failures are expected.

@@ -1012,9 +1012,16 @@ set(ETHERCAT_COMMON_SRC
     ../src/ethercat/FaultDetection.cpp
     ../src/ethercat/WriteVerify.cpp
     ../src/ethercat/CoEManager.cpp
+    ../src/ethercat/raw/CoEErrorStrings.cpp
+    ../src/ethercat/raw/CoEEntryTransactions.cpp
     ../src/ethercat/raw/SDOErrorDecoder.cpp
     ../src/ethercat/raw/PDOManager.cpp
+    ../src/ethercat/raw/PDOMapping.cpp
+    ../src/ethercat/raw/PDOKeepAlive.cpp
     ../src/ethercat/raw/LogicalAddressManager.cpp
+    ../src/ethercat/raw/TxFailureDiagnostics.cpp
+    ../src/ethercat/raw/LogicalAddressManager_slices.cpp
+    ../src/ethercat/raw/LogicalAddressManager_health.cpp
     ../src/ethercat/ProcessImage.cpp
     ../src/ethercat/DCClass.cpp
     ../src/ethercat/RealtimeLoop.cpp
@@ -1042,9 +1049,16 @@ create_ethercat_test(pdo
         ethercat/test_process_image.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/raw/PDOManager.cpp
+        ../src/ethercat/raw/PDOMapping.cpp
+        ../src/ethercat/raw/PDOKeepAlive.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
+        ../src/ethercat/raw/LogicalAddressManager_slices.cpp
+        ../src/ethercat/raw/LogicalAddressManager_health.cpp
+        ../src/ethercat/raw/TxFailureDiagnostics.cpp
         ../src/ethercat/ProcessImage.cpp
         ../src/ethercat/CoEManager.cpp
+        ../src/ethercat/raw/CoEErrorStrings.cpp
+        ../src/ethercat/raw/CoEEntryTransactions.cpp
         ../src/ethercat/raw/SDOErrorDecoder.cpp
         ../src/ethercat/FaultDetection.cpp
         ../src/ethercat/DebugGate.cpp
@@ -1077,9 +1091,16 @@ create_ethercat_test(protocol
         ../src/ethercat/SlaveStatusPoller.cpp
         ../src/ethercat/WriteVerify.cpp
         ../src/ethercat/CoEManager.cpp
+        ../src/ethercat/raw/CoEErrorStrings.cpp
+        ../src/ethercat/raw/CoEEntryTransactions.cpp
         ../src/ethercat/raw/SDOErrorDecoder.cpp
         ../src/ethercat/raw/PDOManager.cpp
+        ../src/ethercat/raw/PDOMapping.cpp
+        ../src/ethercat/raw/PDOKeepAlive.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
+        ../src/ethercat/raw/LogicalAddressManager_slices.cpp
+        ../src/ethercat/raw/LogicalAddressManager_health.cpp
+        ../src/ethercat/raw/TxFailureDiagnostics.cpp
         ../src/ethercat/ProcessImage.cpp
         ../src/ethercat/DebugGate.cpp
         ../src/ethercat/Retry.cpp

@@ -287,39 +287,6 @@ void Master::setMailboxOverride(SlaveAddress slave_address, uint16_t wr_addr, ui
     ov.rd_len = rd_len;
     ov.proto = proto;
 }
-// ============================================================================
-// EtherCAT-over-UDP encapsulation helpers
-// ============================================================================
-
-#if TETHER_ENABLE_UDP_ENCAPSULATION
-uint16_t Master::computeIpChecksum(const uint8_t* ip_header)
-{
-    return EtherCATTransport::computeIpChecksum(ip_header);
-}
-
-bool Master::encapsulateFrame(const uint8_t* in_frame, size_t in_len,
-                              uint8_t* out_buf, size_t out_cap, size_t* out_len) const
-{
-    if (!transport_) return false;
-    return transport_->encapsulateFrame(in_frame, in_len, out_buf, out_cap, out_len);
-}
-
-bool Master::sendWithEncapsulation(const uint8_t* frame, size_t len)
-{
-    std::lock_guard<std::mutex> lock(send_mutex_);
-    if (!transport_) {
-        // Fallback before start() — direct send without encapsulation
-        return iface_.send ? iface_.send(frame, len) : false;
-    }
-    return transport_->send(frame, len);
-}
-
-size_t Master::maxEtherCATPayloadPerFrame() const
-{
-    if (!transport_) return Raw::kMaxEtherCATPayloadPerFrame;
-    return transport_->maxEtherCATPayloadPerFrame();
-}
-#endif // TETHER_ENABLE_UDP_ENCAPSULATION
 
 // ============================================================================
 // Transport primitives
@@ -429,6 +396,7 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
                    static_cast<int64_t>(kTxRetryDelayUs)) {}
         }
 
+        last_tx_errno_.store(last_errno, std::memory_order_relaxed);
         char msg[256];
         if (last_errno != 0) {
             std::snprintf(msg, sizeof(msg),
@@ -477,6 +445,49 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
     using namespace Raw;
 
     if (count == 0 || !specs) return 0;
+
+    // Test seam: without a live interface, drive the batch through the
+    // register-level test callbacks — each datagram is answered by
+    // apwr_cb_/aprd_cb_ and the synthesized response routed to its
+    // pre-registered waiter.  A callback returning false aborts the
+    // "frame", matching a wire send failure (callers see done < count).
+    if (!iface_.send && (apwr_cb_ || aprd_cb_)) {
+        size_t done = 0;
+        for (size_t k = 0; k < count; ++k) {
+            const auto& sp = specs[k];
+            RxDatagram resp{};
+            resp.idx     = sp.idx;
+            resp.cmd     = sp.cmd;
+            resp.adp     = sp.adp;
+            resp.ado     = sp.ado;
+            resp.datalen = sp.datalen;
+            bool ok = false;
+            switch (sp.cmd) {
+                case Command::APWR:
+                case Command::FPWR:
+                    if (apwr_cb_)
+                        ok = apwr_cb_(sp.adp, sp.ado, sp.data, sp.datalen, 0);
+                    if (ok && sp.data && sp.datalen <= sizeof(resp.data))
+                        std::memcpy(resp.data, sp.data, sp.datalen);  // write echo
+                    break;
+                case Command::APRD:
+                case Command::FPRD:
+                    if (aprd_cb_)
+                        ok = aprd_cb_(sp.adp, sp.ado, resp.data,
+                                      std::min<uint16_t>(sp.datalen,
+                                                         sizeof(resp.data)),
+                                      0);
+                    break;
+                default:
+                    break;   // no test semantics for other commands
+            }
+            if (!ok) break;
+            resp.wkc = 1;
+            packet_router_.routePacket(resp);
+            ++done;
+        }
+        return done;
+    }
 
     constexpr uint8_t dst_mac[6] = {0x01, 0x01, 0x05, 0x00, 0x00, 0x00};
     constexpr size_t kMinEthFrameNoFcs = 60;
@@ -588,6 +599,7 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
             }
             auto& clock = Tether::Platform::Clock::instance();
             bool sent = false;
+            int last_errno = 0;
             for (int retry = 0; retry <= kMaxTxRetries; retry++) {
                 if (cancel_requested_.load(std::memory_order_acquire)) {
                     if (!cancel_warn_logged_.exchange(true, std::memory_order_acq_rel)) {
@@ -596,7 +608,9 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
                     }
                     return frames_sent;
                 }
+                errno = 0;
                 if (sendWithEncapsulation(txbuf, frame_len)) { sent = true; break; }
+                last_errno = errno;
 #if TETHER_ENABLE_ETHERCAT_STATS
                 tx_retry_count_.fetch_add(1, std::memory_order_relaxed);
 #endif
@@ -605,6 +619,7 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
                        static_cast<int64_t>(kTxRetryDelayUs)) {}
             }
             if (!sent) {
+                last_tx_errno_.store(last_errno, std::memory_order_relaxed);
                 send_fail_log_.logLegacy(1, TAG,
                     "sendMultiDatagram: send failed after retries");
 #if TETHER_ENABLE_ETHERCAT_STATS

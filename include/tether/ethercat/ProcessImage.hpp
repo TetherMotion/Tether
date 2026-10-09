@@ -173,6 +173,11 @@ public:
         ImageMode mode = ImageMode::Buffered;
         uint32_t  rx_bytes = 0;          ///< output region bytes (RxPDO)
         uint32_t  tx_bytes = 0;          ///< input region bytes (TxPDO)
+        /// Total logical-image extent.  With sticky per-slave windows a
+        /// reconfigured slave's window may be appended past rx+tx (dead
+        /// space stays allocated), so the image must span the extent, not
+        /// just the sum of live bytes.  0 → rx_bytes + tx_bytes.
+        uint32_t  image_bytes = 0;
         /// Byte offset of each mapping entry in the image; -1 = not image
         /// mapped (forced-buffered).  May be null → all entries buffered.
         const int32_t* entry_offsets = nullptr;
