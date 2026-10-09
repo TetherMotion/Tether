@@ -44,10 +44,12 @@ namespace EtherCAT {
 
 class IPDOTransport;
 class ProcessImage;    // defined in ProcessImage.hpp
+class TxFailureDiagnostics;
 
 class LogicalAddressManager {
 public:
     explicit LogicalAddressManager(IPDOTransport& transport);
+    ~LogicalAddressManager();
 
     LogicalAddressManager(const LogicalAddressManager&)            = delete;
     LogicalAddressManager& operator=(const LogicalAddressManager&) = delete;
@@ -132,7 +134,13 @@ public:
 
     uint32_t totalRxPDOBytes() const { return total_rxpdo_bytes_; }
     uint32_t totalTxPDOBytes() const { return total_txpdo_bytes_; }
-    uint32_t totalLogicalSize()  const { return total_rxpdo_bytes_ + total_txpdo_bytes_; }
+    /// Extent of the logical process image in bytes, relative to
+    /// base_logical_addr_ — i.e. the span an LRW covering every live slave
+    /// window must address.  This is the high-water mark of allocated
+    /// windows, NOT the sum of live PDO bytes: sticky windows never move,
+    /// so a slave whose window was reallocated to a larger size leaves
+    /// dead space behind and the extent exceeds Rx+Tx totals.
+    uint32_t totalLogicalSize()  const { return next_free_log_; }
 
     // ----- LRW Exchange -----
 
@@ -440,6 +448,10 @@ public:
         uint32_t counter_mismatches{0};
         /// Cyclic DC-timepoint datagrams that timed out or failed WKC.
         uint32_t dc_timeouts{0};
+        /// TX-diagnostic worker spawns — one per send-failure streak
+        /// episode (worker re-arms in place; respawn means it had
+        /// self-exited after 1 s without new failures).
+        uint32_t tx_diag_spawns{0};
     };
     Stats getStats() const;
     void  resetStats();
@@ -498,7 +510,15 @@ private:
     int64_t  last_call_ns_{0};
     int64_t  last_timeout_log_ns_{0};
     uint32_t timeout_log_suppressed_{0};
+    int64_t  last_send_fail_log_ns_{0};
+    uint32_t send_fail_log_suppressed_{0};
     bool     escalate_logged_{false};
+
+    // TX-failure diagnostics worker (non-RT).  Every 10th consecutive
+    // sendSingleDatagram failure re-arms it from the cyclic thread; the
+    // worker emits transport_.txFailureDiagnostics() and exits when no new
+    // failure arrives for 1 s.
+    std::unique_ptr<TxFailureDiagnostics> tx_diag_;
 
     /// Detect a host stall since the last exchange call; drain the wire
     /// backlog when one fired.  Pending waiters are NOT purged — backlog
@@ -526,6 +546,14 @@ private:
     /// count the streak, ring-probe after escalate_after_timeouts_
     /// consecutive failures.  `what` is the caller's function name.
     void onExchangeTimeout(const char* what);
+    /// Send-failure bookkeeping: rate-limited log (4 Hz) shared by the
+    /// "couldn't get on the wire" sites (send failed, no free slot) —
+    /// a dead NIC otherwise spams one line per exchange.
+    void onExchangeSendFailure(const std::string& what);
+    /// Count a sendSingleDatagram failure; every 10th consecutive
+    /// failure re-arms the non-RT TX diagnostic worker (spawned on
+    /// first trigger).  Reset by any successful send.
+    void noteTxSendFailure();
     /// Success bookkeeping: reset the consecutive-timeout streak.
     void onExchangeSuccess();
 

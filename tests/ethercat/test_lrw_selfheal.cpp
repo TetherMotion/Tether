@@ -15,10 +15,14 @@
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <functional>
+#include <mutex>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
@@ -69,6 +73,7 @@ public:
     MOCK_METHOD(uint16_t, adpForSlaveIndex, (uint16_t slave_index), (override));
     MOCK_METHOD(int, drainWire, (int max_frames), (override));
     MOCK_METHOD(void, purgePendingResponses, (), (override));
+    MOCK_METHOD(std::string, txFailureDiagnostics, (), (override));
 };
 
 // ============================================================================
@@ -383,4 +388,68 @@ TEST_F(LRWSelfHealTest, PreRegUnsupported_FallsBackToWaitForResponseIdx) {
         }));
 
     EXPECT_TRUE(exchange());
+}
+
+// ============================================================================
+// TX-failure diagnostics worker (non-RT escalation on send failure streak)
+// ============================================================================
+
+TEST_F(LRWSelfHealTest, TxDiagWorker_SpawnsAfterTenConsecutiveFailures) {
+    std::atomic<int> diag_calls{0};
+    ON_CALL(transport, txFailureDiagnostics())
+        .WillByDefault(Invoke([&diag_calls] {
+            ++diag_calls;
+            return std::string("TESTDIAG link=0");
+        }));
+    ON_CALL(transport, sendSingleDatagram(_, _, _, _, _, _, _))
+        .WillByDefault(Return(false));
+
+    for (int i = 0; i < 9; ++i) EXPECT_FALSE(exchange());
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(diag_calls.load(), 0);   // no worker before 10 failures
+
+    EXPECT_FALSE(exchange());          // failure #10 → spawn
+    for (int i = 0; i < 200 && diag_calls.load() == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_EQ(diag_calls.load(), 1);
+}
+
+TEST_F(LRWSelfHealTest, TxDiagWorker_ReArmsEveryTen_AndSelfExits) {
+    std::atomic<int> diag_calls{0};
+    std::mutex diag_mu;
+    std::vector<std::thread::id> diag_threads;
+    ON_CALL(transport, txFailureDiagnostics())
+        .WillByDefault(Invoke([&] {
+            ++diag_calls;
+            std::lock_guard lk(diag_mu);
+            diag_threads.push_back(std::this_thread::get_id());
+            return std::string("TESTDIAG");
+        }));
+    ON_CALL(transport, sendSingleDatagram(_, _, _, _, _, _, _))
+        .WillByDefault(Return(false));
+
+    auto waitDiagCalls = [&](int target) {
+        for (int i = 0; i < 200 && diag_calls.load() < target; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        return diag_calls.load();
+    };
+
+    for (int i = 0; i < 10; ++i) EXPECT_FALSE(exchange());
+    ASSERT_EQ(waitDiagCalls(1), 1);
+    EXPECT_EQ(mgr.getStats().tx_diag_spawns, 1u);
+
+    // 10 more failures within the 1 s window re-arm the SAME worker.
+    for (int i = 0; i < 10; ++i) EXPECT_FALSE(exchange());
+    ASSERT_EQ(waitDiagCalls(2), 2);
+    EXPECT_EQ(mgr.getStats().tx_diag_spawns, 1u);   // re-arm, no respawn
+
+    // Idle past the 1 s self-exit — the next streak spawns a NEW worker.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    for (int i = 0; i < 10; ++i) EXPECT_FALSE(exchange());
+    ASSERT_EQ(waitDiagCalls(3), 3);
+    EXPECT_EQ(mgr.getStats().tx_diag_spawns, 2u);   // self-exited → respawned
+
+    std::lock_guard lk(diag_mu);
+    ASSERT_EQ(diag_threads.size(), 3u);
+    EXPECT_EQ(diag_threads[0], diag_threads[1]);   // re-armed, same thread
 }

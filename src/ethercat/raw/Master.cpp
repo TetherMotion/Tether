@@ -28,6 +28,8 @@
 #include "raw/CyclicDatapath.hpp"
 #include "raw/SlaveRegistry.hpp"
 #include "raw/MotionLoops.hpp"
+#include "raw/WatchdogController.hpp"
+#include "raw/MailboxRecovery.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/platform/RtMemory.hpp"
 #include "tether/platform/CpuIsolation.hpp"
@@ -130,6 +132,8 @@ Master::Master(const Config& config)
         [this](uint16_t i) { return slaveLogPrefix(i); });
     status_poller_ = std::make_unique<SlaveStatusPoller>(*fault_transport_);
     slave_supervisor_ = std::make_unique<SlaveSupervisor>(*this);
+    watchdog_ = std::make_unique<WatchdogController>(*this);
+    mailbox_recovery_ = std::make_unique<MailboxRecovery>(*this);
 }
 
 Master::~Master()
