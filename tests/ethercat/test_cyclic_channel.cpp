@@ -19,6 +19,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -26,6 +27,8 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <initializer_list>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -2380,6 +2383,193 @@ TEST_F(MasterCyclicTest, ReArmDisturbsNoOtherMailbox) {
     ASSERT_NE(views[1].payload, nullptr);
     EXPECT_EQ(views[1].payload[0], 0x77);
 }
+
+// ============================================================================
+// drainWire / drainWireBatch — batched recvmmsg backlog dequeue
+//
+// AF_UNIX SOCK_DGRAM socketpairs give a real fd whose datagrams
+// recvmmsg dequeues one message boundary at a time — the same seam the
+// kernel-BPF tests use, no privileges required.  Each test owns a local
+// Master so iface_.receive/native_handle are set before start().
+// ============================================================================
+
+#ifdef __linux__
+namespace {
+
+struct DrainMaster {
+    int fds[2] = {-1, -1};
+    Master master;
+    NetworkInterface iface{};
+    uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+
+    void open() { ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, fds), 0); }
+    void start() { master.start(iface, mac); }
+
+    /// Queue @p count deposit frames (one per pool position, starting at
+    /// @p first_pos) on the socketpair's write end.
+    void inject(int first_pos, int count) {
+        for (int i = 0; i < count; ++i) {
+            uint8_t frame[128];
+            const uint8_t pay[2] = {static_cast<uint8_t>(first_pos + i),
+                                    0x5A};
+            const size_t n = buildEcatFrame(
+                frame, 0x0C, cyclicPoolWireIdx(first_pos + i),
+                0, 0, pay, 2, 1);
+            ASSERT_EQ(::send(fds[0], frame, n, 0),
+                      static_cast<ssize_t>(n));
+        }
+    }
+
+    /// Verify every position in [first_pos, first_pos+count) received
+    /// its deposit — proves each drained frame ran handleRxFrame().
+    void expectDeposited(int first_pos, int count) {
+        for (int i = 0; i < count; ++i) {
+            CyclicSlotView view{};
+            ASSERT_TRUE(master.waitCyclicSlotView(
+                            first_pos + i, /*token=*/0, 0, view))
+                << "pos " << first_pos + i;
+            ASSERT_NE(view.payload, nullptr);
+            EXPECT_EQ(view.payload[0], first_pos + i);
+        }
+    }
+
+    /// A scripted receive path: frames served one per call, then empty.
+    void scriptReceive(std::initializer_list<int> positions) {
+        auto scripted = std::make_shared<
+            std::deque<std::vector<uint8_t>>>();
+        for (int pos : positions) {
+            std::vector<uint8_t> f(128);
+            const uint8_t pay[2] = {static_cast<uint8_t>(pos), 0x5A};
+            const size_t n = buildEcatFrame(
+                f.data(), 0x0C, cyclicPoolWireIdx(pos), 0, 0, pay, 2, 1);
+            f.resize(n);
+            scripted->push_back(std::move(f));
+        }
+        iface.receive = [scripted](uint8_t* b, size_t m, size_t* n) {
+            if (scripted->empty()) return false;
+            *n = std::min(m, scripted->front().size());
+            std::memcpy(b, scripted->front().data(), *n);
+            scripted->pop_front();
+            return true;
+        };
+    }
+
+    ~DrainMaster() {
+        master.stop();
+        for (int fd : fds) if (fd >= 0) ::close(fd);
+    }
+};
+
+} // namespace
+
+/// recvmmsg fast path: a queued backlog is dequeued batched and every
+/// frame is parsed into its own pool mailbox.
+TEST_F(MasterCyclicTest, DrainWireBatchDrainsBacklog) {
+    DrainMaster d;
+    d.open();
+    d.iface.native_handle =
+        reinterpret_cast<void*>(static_cast<intptr_t>(d.fds[1]));
+    d.iface.receive =
+        [](uint8_t*, size_t, size_t*) { return false; };   // unused fast path
+    d.start();
+
+    d.inject(0, 5);
+    EXPECT_EQ(d.master.drainWire(64), 5);
+    d.expectDeposited(0, 5);
+}
+
+/// max_frames caps the drain — the remainder stays queued for the next
+/// call (each still lands in its own mailbox).
+TEST_F(MasterCyclicTest, DrainWireBatchRespectsMaxFrames) {
+    DrainMaster d;
+    d.open();
+    d.iface.native_handle =
+        reinterpret_cast<void*>(static_cast<intptr_t>(d.fds[1]));
+    d.iface.receive =
+        [](uint8_t*, size_t, size_t*) { return false; };
+    d.start();
+
+    d.inject(0, 10);
+    EXPECT_EQ(d.master.drainWire(4), 4);
+    d.expectDeposited(0, 4);
+    EXPECT_EQ(d.master.drainWire(64), 6);   // rest of the backlog
+    d.expectDeposited(4, 6);
+}
+
+/// A backlog larger than one kDrainBatch recvmmsg() call drains over
+/// several syscalls until the queue reports empty.
+TEST_F(MasterCyclicTest, DrainWireBatchSpansMultipleSyscalls) {
+    DrainMaster d;
+    d.open();
+    d.iface.native_handle =
+        reinterpret_cast<void*>(static_cast<intptr_t>(d.fds[1]));
+    d.iface.receive =
+        [](uint8_t*, size_t, size_t*) { return false; };
+    d.start();
+
+    d.inject(0, 40);   // > kDrainBatch (32) → at least two recvmmsg calls
+    EXPECT_EQ(d.master.drainWire(64), 40);
+    d.expectDeposited(0, 40);
+}
+
+/// An empty queue dequeues nothing and returns 0 (EAGAIN path).
+TEST_F(MasterCyclicTest, DrainWireBatchEmptyQueue) {
+    DrainMaster d;
+    d.open();
+    d.iface.native_handle =
+        reinterpret_cast<void*>(static_cast<intptr_t>(d.fds[1]));
+    d.iface.receive =
+        [](uint8_t*, size_t, size_t*) { return false; };
+    d.start();
+
+    EXPECT_EQ(d.master.drainWire(64), 0);
+}
+
+/// Without a receive hook drainWire is a no-op even when a socket fd is
+/// present — the guard precedes the batch path.
+TEST_F(MasterCyclicTest, DrainWireNoReceiveReturnsZero) {
+    DrainMaster d;
+    d.open();
+    d.iface.native_handle =
+        reinterpret_cast<void*>(static_cast<intptr_t>(d.fds[1]));
+    // no iface.receive
+    d.start();
+
+    d.inject(0, 3);
+    EXPECT_EQ(d.master.drainWire(64), 0);
+}
+
+/// A native handle that is not a usable socket fails recvmmsg and falls
+/// back to the per-frame receive path — no frames lost either way.
+TEST_F(MasterCyclicTest, DrainWireUnusableFdFallsBackToReceive) {
+    DrainMaster d;
+    d.open();
+    ::close(d.fds[0]);
+    d.fds[0] = -1;
+    d.iface.native_handle =
+        reinterpret_cast<void*>(static_cast<intptr_t>(d.fds[1]));
+    ::close(d.fds[1]);                     // now a stale (bad) fd
+    d.fds[1] = -1;
+    d.scriptReceive({0, 1, 2});
+    d.start();
+
+    EXPECT_EQ(d.master.drainWire(64), 3);
+    d.expectDeposited(0, 3);
+}
+
+/// No native handle at all → the per-frame receive path drains.
+TEST_F(MasterCyclicTest, DrainWireNoNativeHandleUsesReceive) {
+    DrainMaster d;
+    d.open();
+    ::close(d.fds[0]); d.fds[0] = -1;
+    ::close(d.fds[1]); d.fds[1] = -1;      // socketpair unused
+    d.scriptReceive({0, 1});
+    d.start();
+
+    EXPECT_EQ(d.master.drainWire(64), 2);
+    d.expectDeposited(0, 2);
+}
+#endif // __linux__
 
 // ============================================================================
 // Convenience API: lowLatency() preset, CyclicLoopGuard RAII, dc_config

@@ -158,6 +158,12 @@ int openCyclicSocket(int ifindex,
     // Kernel RX timestamps arrive via recvmsg SCM_TIMESTAMPNS cmsgs.
     setsockopt(fd, SOL_SOCKET, SO_TIMESTAMPNS, &one, sizeof(one));
 
+#ifdef PACKET_QDISC_BYPASS
+    // Cyclic TX bypasses the qdisc layer entirely — no dequeue
+    // scheduling on the latency-critical send path.
+    setsockopt(fd, SOL_PACKET, PACKET_QDISC_BYPASS, &one, sizeof(one));
+#endif
+
     // ETH_P_ALL + the extended demux program: VLAN-tagged EtherCAT frames
     // (0x8100 outer) reach the socket and are filtered by inner ethertype;
     // the program rejects everything non-cyclic kernel-side.

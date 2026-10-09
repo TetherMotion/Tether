@@ -733,6 +733,11 @@ public:
      * 0 when no receive hook is wired (e.g. VLAN-routed encapsulation).
      * Intended to flush the kernel socket backlog after a host stall so a
      * stale echo cannot satisfy a new request on a reused datagram index.
+     *
+     * Linux fast path: when `iface_.native_handle` is a socket fd,
+     * `recvmmsg()` dequeues a whole batch per syscall instead of one
+     * frame per recv — a stall backlog of hundreds of frames empties
+     * without paying a syscall each on the cyclic thread.
      */
     int drainWire(int max_frames);
 
@@ -1667,6 +1672,16 @@ private:
 
     // Frame transport (UDP encapsulation + raw sending)
     std::unique_ptr<EtherCATTransport> transport_;
+
+#ifdef __linux__
+    /// Batched backlog dequeue for drainWire() — see drainWireBatch().
+    /// Returns frames drained, or -1 when the fd cannot be drained this
+    /// way (caller falls back to the per-frame receive path).
+    int drainWireBatch(int fd, int max_frames);
+    /// Receive scratch for drainWireBatch — sized lazily on first use
+    /// (recovery path, not per-cycle).  kDrainBatch × kMaxJumboFrameSize.
+    std::vector<uint8_t> drain_buf_;
+#endif
 
     // Queues
     std::unique_ptr<Tether::Platform::MessageQueue<RxDatagram>> rx_queue_;

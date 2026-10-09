@@ -44,6 +44,17 @@ struct EthernetConfig {
     /// 0 → standard kMaxFrameSize (1514).  Raise for jumbo links; the NIC
     /// MTU must be raised separately (e.g. `ip link set mtu 9000`).
     uint32_t maxFrameSize = 0;
+    /// Probe the NIC for latency-hostile settings at init (EEE LPI, RX
+    /// interrupt coalescing) via ethtool ioctls — the ethtool binary is
+    /// NOT required.  One-time, zero per-frame cost, never fatal:
+    /// drivers without the ops are skipped silently.
+    bool nicLatencyCheck = true;
+    /// When the latency check finds Energy-Efficient Ethernet enabled,
+    /// attempt to turn it off (ETHTOOL_SEEE — needs CAP_NET_ADMIN;
+    /// failure degrades to a warning suggesting the ethtool command).
+    /// EEE's LPI exit latency is pure jitter on a dedicated motion bus,
+    /// so disabling is the right default here.
+    bool nicDisableEee = true;
 };
 
 /**
