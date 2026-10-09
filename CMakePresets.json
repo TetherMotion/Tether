@@ -5,6 +5,19 @@
             "name": "default",
             "displayName": "Default",
             "binaryDir": "${sourceDir}/build"
+        },
+        {
+            "name": "arm32v5",
+            "displayName": "ARMv5 musl static (EN7562CT/MikroTik containers)",
+            "binaryDir": "${sourceDir}/build-arm32v5",
+            "toolchainFile": "${sourceDir}/cmake/toolchain-armv5l-musl.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "TETHER_BUILD_SHARED_LIBS": "OFF",
+                "TETHER_BUILD_STATIC_LIBS": "ON",
+                "TETHER_BUILD_TESTS": "OFF",
+                "TETHER_BUILD_PYTHON_BINDINGS": "OFF"
+            }
         }
     ],
     "buildPresets": [
@@ -12,6 +25,11 @@
             "name": "default",
             "configurePreset": "default",
             "jobs": 4
+        },
+        {
+            "name": "arm32v5",
+            "configurePreset": "arm32v5",
+            "jobs": 8
         }
     ]
 }
