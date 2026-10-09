@@ -19,6 +19,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -26,6 +27,8 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <initializer_list>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -162,21 +165,24 @@ TEST(CyclicBpf, InsnLayoutMatchesSockFilter) {
 }
 
 TEST(CyclicBpf, CyclicFilterAcceptsOnlyFastpathIdx) {
-    // The accept range is the union fastpath pool: PDO-slice idxes
-    // (0xE0..0xEF) AND cyclic slots (0xF8..0xFD).  Async allocIdx()
-    // never reaches 0xE0, so first-idx demux stays exact.
+    // The accept range is the whole fastpath band 0x9C..0xFF — rotating
+    // pool (0x9C..0xDF, 0xF0..0xFD), PDO-slice idxes (0xE0..0xEF) and the
+    // DC-timepoint idx 0xFF — EXCEPT 0xFE fire-and-forget, whose echoes
+    // must stay on the async parser.  Async allocIdx() never reaches
+    // 0x9C, so first-idx demux stays exact.
     CyclicBpfInsn prog[16];
     ASSERT_EQ(cyclicChannelBpfProgram(true, prog, 16), kCyclicBpfInsnCount);
     const auto* f = reinterpret_cast<const sock_filter*>(prog);
 
-    for (uint8_t idx : {0xE0, 0xE1, 0xE7, 0xEF,
-                        0xF0, 0xF7,          // reserved gap — filter-accepted
-                        0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD}) {
+    for (uint8_t idx : {0x9C, 0x9D, 0xA0, 0xDF,
+                        0xE0, 0xE1, 0xE7, 0xEF,          // PDO-slice band
+                        0xF0, 0xF7, 0xF8, 0xFA, 0xFD,
+                        0xFF}) {                         // DC timepoint
         auto frame = makeEcatFrame(idx);
         EXPECT_NE(runBpf(f, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
             << "idx 0x" << std::hex << (int)idx;
     }
-    for (uint8_t idx : {0x00, 0x01, 0x7F, 0xDF, 0xFE, 0xFF}) {
+    for (uint8_t idx : {0x00, 0x01, 0x7F, 0x9B, 0xFE}) {
         auto frame = makeEcatFrame(idx);
         EXPECT_EQ(runBpf(f, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
             << "idx 0x" << std::hex << (int)idx;
@@ -188,11 +194,12 @@ TEST(CyclicBpf, AsyncFilterRejectsOnlyFastpathIdx) {
     ASSERT_EQ(cyclicChannelBpfProgram(false, prog, 16), kCyclicBpfInsnCount);
     const auto* f = reinterpret_cast<const sock_filter*>(prog);
 
-    for (uint8_t idx : {0xE0, 0xE7, 0xEF, 0xF0, 0xF7, 0xF8, 0xFA, 0xFD}) {
+    for (uint8_t idx : {0x9C, 0xB0, 0xDF, 0xE0, 0xE7, 0xEF,
+                        0xF0, 0xF7, 0xF8, 0xFD, 0xFF}) {
         auto frame = makeEcatFrame(idx);
         EXPECT_EQ(runBpf(f, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u);
     }
-    for (uint8_t idx : {0x00, 0x42, 0xDF, 0xFE, 0xFF}) {
+    for (uint8_t idx : {0x00, 0x42, 0x9B, 0xFE}) {
         auto frame = makeEcatFrame(idx);
         EXPECT_NE(runBpf(f, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u);
     }
@@ -206,7 +213,7 @@ TEST(CyclicBpf, NonEtherCatEtherTypes) {
     const auto* asy = reinterpret_cast<const sock_filter*>(progB);
 
     for (uint16_t et : {0x0800, 0x8100, 0x0001, 0xFFFF}) {
-        auto frame = makeEcatFrame(0xF8, et);
+        auto frame = makeEcatFrame(cyclicPoolWireIdx(0), et);
         EXPECT_EQ(runBpf(cyc, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
             << "et 0x" << std::hex << et;
         EXPECT_NE(runBpf(asy, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
@@ -225,7 +232,7 @@ TEST(CyclicBpf, ShortFramesRejectedOnBoth) {
     const auto* asy = reinterpret_cast<const sock_filter*>(progB);
 
     for (size_t len : {0u, 10u, 13u, 14u, 16u, 17u}) {
-        auto frame = makeEcatFrame(0xF8, 0x88A4, len);
+        auto frame = makeEcatFrame(cyclicPoolWireIdx(0), 0x88A4, len);
         EXPECT_EQ(runBpf(cyc, kCyclicBpfInsnCount, frame.data(), frame.size()), 0u)
             << "len " << len;
         // Async also drops ECAT-short frames; <14B drops before the
@@ -250,7 +257,8 @@ TEST(CyclicBpf, VlanTaggedCyclicIdxDemux) {
     cyclicChannelBpfProgram(false, progB, 16);
     const auto* asy = reinterpret_cast<const sock_filter*>(progB);
 
-    for (uint8_t idx : {0xE0, 0xE7, 0xEF, 0xF0, 0xF7, 0xF8, 0xFA, 0xFD}) {
+    for (uint8_t idx : {0x9C, 0xB0, 0xDF, 0xE0, 0xE7, 0xEF,
+                        0xF0, 0xF7, 0xF8, 0xFD, 0xFF}) {
         auto frame = makeVlanEcatFrame(idx);
         EXPECT_NE(runBpf(cyc, kCyclicBpfInsnCount, frame.data(),
                          frame.size()), 0u)
@@ -259,7 +267,7 @@ TEST(CyclicBpf, VlanTaggedCyclicIdxDemux) {
                          frame.size()), 0u)
             << "vlan fastpath idx 0x" << std::hex << (int)idx;
     }
-    for (uint8_t idx : {0x00, 0x42, 0xDF, 0xFE, 0xFF}) {
+    for (uint8_t idx : {0x00, 0x42, 0x9B, 0xFE}) {
         auto frame = makeVlanEcatFrame(idx);
         EXPECT_EQ(runBpf(cyc, kCyclicBpfInsnCount, frame.data(),
                          frame.size()), 0u)
@@ -269,13 +277,13 @@ TEST(CyclicBpf, VlanTaggedCyclicIdxDemux) {
             << "vlan async idx 0x" << std::hex << (int)idx;
     }
     // VLAN wrapper around a non-ECAT payload → socket B only.
-    auto nonEcat = makeVlanEcatFrame(0xF8, /*inner_et=*/0x0800);
+    auto nonEcat = makeVlanEcatFrame(cyclicPoolWireIdx(0), /*inner_et=*/0x0800);
     EXPECT_EQ(runBpf(cyc, kCyclicBpfInsnCount, nonEcat.data(),
                      nonEcat.size()), 0u);
     EXPECT_NE(runBpf(asy, kCyclicBpfInsnCount, nonEcat.data(),
                      nonEcat.size()), 0u);
     // Truncated VLAN frame (< 22 B) faults the idx load → rejected on A.
-    auto trunc = makeVlanEcatFrame(0xF8, 0x88A4, 21);
+    auto trunc = makeVlanEcatFrame(cyclicPoolWireIdx(0), 0x88A4, 21);
     EXPECT_EQ(runBpf(cyc, kCyclicBpfInsnCount, trunc.data(),
                      trunc.size()), 0u);
 }
@@ -312,18 +320,19 @@ TEST(CyclicBpfKernel, UnixSocketpairRunsCyclicProgramInKernel) {
         return recv(sv[1], buf, sizeof(buf), 0) > 0;
     };
 
-    sendDgram(0x88A4, 0xF8);  EXPECT_TRUE(received());
-    sendDgram(0x88A4, 0xFD);  EXPECT_TRUE(received());
+    sendDgram(0x88A4, cyclicPoolWireIdx(0));  EXPECT_TRUE(received());
+    sendDgram(0x88A4, cyclicPoolWireIdx(5));  EXPECT_TRUE(received());
     sendDgram(0x88A4, 0xE0);  EXPECT_TRUE(received());   // slice pool
     sendDgram(0x88A4, 0xEF);  EXPECT_TRUE(received());
-    sendDgram(0x88A4, 0xF0);  EXPECT_TRUE(received());   // reserved gap
-    sendDgram(0x88A4, 0xF7);  EXPECT_TRUE(received());   // (in filter range)
-    sendDgram(0x88A4, 0xDF);  EXPECT_FALSE(received());  // async ceiling
-    sendDgram(0x88A4, 0xFE);  EXPECT_FALSE(received());
+    sendDgram(0x88A4, 0xF0);  EXPECT_TRUE(received());   // pool band
+    sendDgram(0x88A4, 0xF7);  EXPECT_TRUE(received());
+    sendDgram(0x88A4, 0xDF);  EXPECT_TRUE(received());   // pool top of low band
+    sendDgram(0x88A4, 0x9B);  EXPECT_FALSE(received());  // async ceiling
+    sendDgram(0x88A4, 0xFE);  EXPECT_FALSE(received());  // fire-and-forget → async
     sendDgram(0x88A4, 0x00);  EXPECT_FALSE(received());
-    sendDgram(0x88A4, 0xFF);  EXPECT_FALSE(received());
-    sendDgram(0x0800, 0xF8);  EXPECT_FALSE(received());   // non-ECAT
-    sendDgram(0x88A4, 0xF8, 17); EXPECT_FALSE(received()); // ECAT-short → OOB
+    sendDgram(0x88A4, 0xFF);  EXPECT_TRUE(received());   // DC timepoint
+    sendDgram(0x0800, cyclicPoolWireIdx(0));  EXPECT_FALSE(received());   // non-ECAT
+    sendDgram(0x88A4, cyclicPoolWireIdx(0), 17); EXPECT_FALSE(received()); // ECAT-short → OOB
 
     close(sv[0]); close(sv[1]);
 }
@@ -352,17 +361,18 @@ TEST(CyclicBpfKernel, UnixSocketpairRunsAsyncProgramInKernel) {
         return recv(sv[1], buf, sizeof(buf), 0) > 0;
     };
 
-    sendDgram(0x88A4, 0xF8);  EXPECT_FALSE(received());
+    sendDgram(0x88A4, cyclicPoolWireIdx(0));  EXPECT_FALSE(received());
     sendDgram(0x88A4, 0xE0);  EXPECT_FALSE(received());  // slice pool
     sendDgram(0x88A4, 0xEF);  EXPECT_FALSE(received());
-    sendDgram(0x88A4, 0xF7);  EXPECT_FALSE(received());  // gap — still fastpath
-    sendDgram(0x88A4, 0xDF);  EXPECT_TRUE(received());
+    sendDgram(0x88A4, 0xF7);  EXPECT_FALSE(received());  // pool band
+    sendDgram(0x88A4, 0xDF);  EXPECT_FALSE(received());  // in-band now
+    sendDgram(0x88A4, 0x9B);  EXPECT_TRUE(received());   // async ceiling
     sendDgram(0x88A4, 0x42);  EXPECT_TRUE(received());
-    sendDgram(0x88A4, 0xFE);  EXPECT_TRUE(received());
-    sendDgram(0x88A4, 0xFF);  EXPECT_TRUE(received());
-    sendDgram(0x0800, 0xF8);  EXPECT_TRUE(received());    // non-ECAT
-    sendDgram(0x8100, 0xF8);  EXPECT_TRUE(received());    // VLAN → async
-    sendDgram(0x88A4, 0xF8, 17); EXPECT_FALSE(received()); // OOB → drop
+    sendDgram(0x88A4, 0xFE);  EXPECT_TRUE(received());   // fire-and-forget
+    sendDgram(0x88A4, 0xFF);  EXPECT_FALSE(received());  // DC → cyclic
+    sendDgram(0x0800, cyclicPoolWireIdx(0));  EXPECT_TRUE(received());    // non-ECAT
+    sendDgram(0x8100, cyclicPoolWireIdx(0));  EXPECT_TRUE(received());    // VLAN → async
+    sendDgram(0x88A4, cyclicPoolWireIdx(0), 17); EXPECT_FALSE(received()); // OOB → drop
 
     close(sv[0]); close(sv[1]);
 }
@@ -770,7 +780,7 @@ TEST_F(MasterCyclicTest, SoftwareDepositCopyPath) {
     // deposits into slot 0 by copy (no channel → channel=nullptr).
     uint8_t frame[128];
     const uint8_t pay[4] = {0x11, 0x22, 0x33, 0x44};
-    const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0x1234, 0x5678,
+    const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(0), 0x1234, 0x5678,
                                     pay, 4, 3);
     master_.handleRxFrame(frame, n);
 
@@ -791,7 +801,7 @@ TEST_F(MasterCyclicTest, LegacyWaitCyclicSlotAndToken) {
     // compatibility overload — same wait, materialized copy.
     uint8_t frame[128];
     const uint8_t pay[3] = {0xDE, 0xAD, 0xBEEF & 0xFF};
-    const size_t n = buildEcatFrame(frame, 0x0C, 0xF9, 0xAAAA, 0xBBBB,
+    const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(1), 0xAAAA, 0xBBBB,
                                     pay, 3, 5);
     master_.handleRxFrame(frame, n);
 
@@ -828,12 +838,12 @@ TEST_F(MasterCyclicTest, ChannelViewPublishPath) {
 
     uint8_t frame[128];
     const uint8_t pay[6] = {9, 8, 7, 6, 5, 4};
-    const size_t n = buildEcatFrame(frame, 0x0C, 0xFA, 1, 2, pay, 6, 2);
+    const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(2), 1, 2, pay, 6, 2);
     CyclicFrameView v{};
     v.frame = frame; v.frame_len = n; v.cookie = 7;
     MasterCyclicTestAccess::dispatch(master_, v);
 
-    // The datagram (idx 0xFA → slot 2) published as a view into `frame`.
+    // The datagram (idx 0x9E → pool pos 2) published as a view into `frame`.
     CyclicSlotView view{};
     ASSERT_TRUE(master_.waitCyclicSlotView(2, 0, 0, view));
     EXPECT_EQ(view.payload, frame + 26);        // zero-copy — same buffer
@@ -852,10 +862,10 @@ TEST_F(MasterCyclicTest, MixedFrameGoesToParser) {
     StubChannel* stubp = stub.get();
     MasterCyclicTestAccess::setChannel(master_, std::move(stub));
 
-    // Two datagrams in one frame: cyclic 0xF8 then async 0x42.
+    // Two datagrams in one frame: cyclic 0x9C then async 0x42.
     uint8_t frame[256];
     const uint8_t pay[4] = {1, 2, 3, 4};
-    size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 4, 1,
+    size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(0), 0, 0, pay, 4, 1,
                               /*more=*/true);
     // Append second datagram at offset 44 (26+4+2=32 → next dg at 32... wait
     // build: hdr 26 + data 4 + wkc 2 = 32; second dg hdr starts at 32).
@@ -910,8 +920,8 @@ TEST_F(MasterCyclicTest, SendCyclicDatagramUsesChannelParts) {
     EXPECT_EQ(stubp->last_parts.header_len, 26u);
     EXPECT_EQ(stubp->last_parts.payload_len, 8u);
     EXPECT_EQ(stubp->last_parts.payload, pay);
-    // The staged header must carry idx 0xF8 at offset 17.
-    EXPECT_EQ(stubp->last_parts.header[17], 0xF8);
+    // The staged header must carry idx 0x9C at offset 17.
+    EXPECT_EQ(stubp->last_parts.header[17], cyclicPoolWireIdx(0));
 }
 
 TEST_F(MasterCyclicTest, NoChannelAcquireAndFrameSendFail) {
@@ -946,7 +956,7 @@ TEST_F(MasterCyclicTest, ExpiredWaitStillDrainsChannel) {
 
     uint8_t frame[128];
     const uint8_t pay[4] = {1, 2, 3, 4};
-    const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 4, 2);
+    const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(0), 0, 0, pay, 4, 2);
     StubChannel::RxFrame rx{};
     rx.len = n;
     std::memcpy(rx.data.data(), frame, n);
@@ -972,7 +982,7 @@ TEST_F(MasterCyclicTest, ExpiredMaskWaitDrainsUnmatchedFrames) {
 
     uint8_t frame[128];
     const uint8_t pay[2] = {0xAA, 0xBB};
-    const size_t n = buildEcatFrame(frame, 0x0C, 0xFB, 0, 0, pay, 2, 1);
+    const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(3), 0, 0, pay, 2, 1);
     StubChannel::RxFrame rx{};
     rx.len = n;
     std::memcpy(rx.data.data(), frame, n);
@@ -1002,12 +1012,12 @@ TEST_F(MasterCyclicTest, SatisfiedMaskWaitStillDrainsChannel) {
     const uint64_t tok = master_.cyclicSlotToken(0);
     uint8_t frame[128];
     const uint8_t pay[4] = {9, 9, 9, 9};
-    const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 4, 1);
+    const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(0), 0, 0, pay, 4, 1);
     master_.handleRxFrame(frame, n);
 
     // Queue an unrelated cyclic frame (slot 1) in the stub ring.
     uint8_t frame2[128];
-    const size_t n2 = buildEcatFrame(frame2, 0x0C, 0xF9, 0, 0, pay, 4, 1);
+    const size_t n2 = buildEcatFrame(frame2, 0x0C, cyclicPoolWireIdx(1), 0, 0, pay, 4, 1);
     StubChannel::RxFrame rx{};
     rx.len = n2;
     std::memcpy(rx.data.data(), frame2, n2);
@@ -1030,7 +1040,7 @@ TEST_F(MasterCyclicTest, ComposeCyclicHeaderLayout) {
     EXPECT_EQ(frame[12], 0x88);
     EXPECT_EQ(frame[13], 0xA4);
     EXPECT_EQ(frame[16], 0x0C);          // LRW
-    EXPECT_EQ(frame[17], 0xFA);          // 0xF8 + slot 2
+    EXPECT_EQ(frame[17], cyclicPoolWireIdx(2));          // pos 2 → 0x9E
     uint16_t adp, ado;
     std::memcpy(&adp, frame + 18, 2);
     std::memcpy(&ado, frame + 20, 2);
@@ -1066,13 +1076,13 @@ TEST_F(MasterCyclicTest, SliceAndCyclicSlotsAreIndependent) {
     uint8_t frame[128];
     const uint8_t pay[2] = {0xAA, 0xBB};
 
-    // Deposit on slice slot 5 (0xE5) and cyclic slot 2 (0xFA).
+    // Deposit on slice slot 5 (0xE5) and cyclic pool pos 2 (0x9E).
     size_t n = buildEcatFrame(frame, 0x0C, 0xE5, 1, 2, pay, 2, 1);
     master_.handleRxFrame(frame, n);
-    n = buildEcatFrame(frame, 0x0C, 0xFA, 3, 4, pay, 2, 2);
+    n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(2), 3, 4, pay, 2, 2);
     master_.handleRxFrame(frame, n);
 
-    // Slice wait sees only the 0xE5 deposit; cyclic wait only 0xFA.
+    // Slice wait sees only the 0xE5 deposit; cyclic wait only 0x9E.
     CyclicSlotView v{};
     ASSERT_TRUE(master_.waitSliceSlotView(5, 0, 0, v));
     EXPECT_EQ(v.adp, 1u);
@@ -1097,7 +1107,7 @@ TEST_F(MasterCyclicTest, MaskWaitPropagatesDepositGen) {
     // cycle.
     uint8_t frame[128];
     const uint8_t pay[4] = {0x77};
-    size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 4, 1,
+    size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(0), 0, 0, pay, 4, 1,
                               /*more=*/false, /*gen=*/1);
     master_.handleRxFrame(frame, n);
     CyclicSlotView views[8]{};
@@ -1120,11 +1130,12 @@ TEST_F(MasterCyclicTest, MaskWaitPropagatesDepositGen) {
 }
 
 TEST_F(MasterCyclicTest, GapIdxDepositIsDropped) {
-    // 0xF0..0xF7 are inside the BPF accept range but map to no slot —
-    // deposits must be rejected, not banked into a neighbour's mailbox.
+    // 0xFE is inside the band numerically but excluded from the fastpath
+    // (fire-and-forget echoes belong to the async parser) — a deposit
+    // must be rejected, not banked into a neighbour's mailbox.
     uint8_t frame[128];
     const uint8_t pay[4] = {0x99};
-    const size_t n = buildEcatFrame(frame, 0x0C, 0xF4, 0, 0, pay, 4, 1);
+    const size_t n = buildEcatFrame(frame, 0x0C, 0xFE, 0, 0, pay, 4, 1);
     master_.handleRxFrame(frame, n);
     for (int s = 0; s < 16; ++s) EXPECT_EQ(master_.sliceSlotToken(s), 0u);
     for (int s = 0; s < 6; ++s) EXPECT_EQ(master_.cyclicSlotToken(s), 0u);
@@ -1169,7 +1180,7 @@ TEST_F(MasterCyclicTest, HeaderTemplateContentUntagged) {
     EXPECT_EQ(h[15] & 0xF0, 0x10);                   // type = 1
     // Datagram header: cmd, wire idx, adp/ado, lenFlags.
     EXPECT_EQ(h[16], 0x0C);                          // LRW
-    EXPECT_EQ(h[17], 0xF8);                          // cyclic slot 0
+    EXPECT_EQ(h[17], cyclicPoolWireIdx(0));            // pool pos 0 → 0x9C
     EXPECT_EQ(h[18], 0x34); EXPECT_EQ(h[19], 0x12);  // adp le
     EXPECT_EQ(h[20], 0x78); EXPECT_EQ(h[21], 0x56);  // ado le
     uint16_t lf;
@@ -1242,7 +1253,7 @@ TEST_F(MasterCyclicTest, HeaderTemplateBakesVlanTag) {
     EXPECT_EQ(h[16], 0x88); EXPECT_EQ(h[17], 0xA4);
     // Datagram header shifted +4: cmd@20, idx@21.
     EXPECT_EQ(h[20], 0x0C);
-    EXPECT_EQ(h[21], 0xF8);
+    EXPECT_EQ(h[21], cyclicPoolWireIdx(0));
     EXPECT_EQ(MasterCyclicTestAccess::payloadOffset(master_), 30u);
 }
 
@@ -1253,7 +1264,7 @@ TEST_F(MasterCyclicTest, ComposeHeaderBakesVlanTagToo) {
     EXPECT_EQ(frame[12], 0x81); EXPECT_EQ(frame[13], 0x00);
     EXPECT_EQ(frame[14], 0x00); EXPECT_EQ(frame[15], 0x64);   // VID 100
     EXPECT_EQ(frame[16], 0x88); EXPECT_EQ(frame[17], 0xA4);
-    EXPECT_EQ(frame[21], 0xF9);   // cyclic slot 1
+    EXPECT_EQ(frame[21], cyclicPoolWireIdx(1));   // pool pos 1 → 0x9D
 }
 
 // ============================================================================
@@ -1288,7 +1299,7 @@ TEST_F(MasterCyclicTest, DepositWakesBlockedWaiterViaEventfd) {
 
     const uint8_t pay[4] = {0xDE, 0xAD, 0xBE, 0xEF};
     uint8_t frame[128];
-    const size_t n = buildEcatFrame(frame, 0x0C, 0xFB, 1, 1, pay, 4, 2);
+    const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(3), 1, 1, pay, 4, 2);
     master_.handleRxFrame(frame, n);
 
     waiter.join();
@@ -1303,7 +1314,7 @@ TEST_F(MasterCyclicTest, WaiterRegisteredBeforeBlockingNoMissedDeposit) {
     // ever registering a waiter.
     const uint8_t pay[2] = {0x01};
     uint8_t frame[128];
-    const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 2, 1);
+    const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(0), 0, 0, pay, 2, 1);
     master_.handleRxFrame(frame, n);
 
     CyclicSlotView view{};
@@ -1376,7 +1387,7 @@ TEST_F(MasterCyclicTest, SpinPhaseDrainsChannelWithoutBlocking) {
     // phase exits early into rxPoll → dispatch → deposit → read.
     StubChannel::RxFrame f;
     const uint8_t pay[4] = {0xA5, 0xA5, 0xA5, 0xA5};
-    f.len = buildEcatFrame(f.data.data(), 0x0C, 0xF8, 0, 0, pay, 4, 1);
+    f.len = buildEcatFrame(f.data.data(), 0x0C, cyclicPoolWireIdx(0), 0, 0, pay, 4, 1);
     f.cookie = 9;
     stubp->rxq.push_back(f);
 
@@ -1432,7 +1443,7 @@ TEST_F(MasterCyclicTest, TimestampOnChannelFrameView) {
 
     const uint8_t pay[2] = {0x77};
     uint8_t frame[128];
-    const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 2, 1);
+    const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(0), 0, 0, pay, 2, 1);
     CyclicFrameView v{};
     v.frame = frame; v.frame_len = n; v.cookie = 1;
     v.stamp_ns = 123456789;   // pre-stamped channel frames keep their stamp
@@ -1863,7 +1874,7 @@ TEST_F(MasterCyclicTest, VlanTaggedCyclicFrameDepositsSlot) {
 
     uint8_t frame[128];
     const uint8_t pay[4] = {0x42, 0x43, 0x44, 0x45};
-    const size_t n = buildVlanEcatFrame(frame, 0x0C, 0xF8, 0x1111, 0x2222,
+    const size_t n = buildVlanEcatFrame(frame, 0x0C, cyclicPoolWireIdx(0), 0x1111, 0x2222,
                                         pay, 4, 7);
     master_.handleRxFrame(frame, n);
 
@@ -1884,7 +1895,7 @@ TEST_F(MasterCyclicTest, VlanTaggedChannelFrameDepositsSlot) {
 
     uint8_t frame[128];
     const uint8_t pay[3] = {0x9A, 0x9B, 0x9C};
-    const size_t n = buildVlanEcatFrame(frame, 0x0C, 0xF9, 0x3333, 0x4444,
+    const size_t n = buildVlanEcatFrame(frame, 0x0C, cyclicPoolWireIdx(1), 0x3333, 0x4444,
                                         pay, 3, 2);
     CyclicFrameView v{};
     v.frame = frame; v.frame_len = n; v.cookie = 11;
@@ -1924,8 +1935,8 @@ TEST_F(MasterCyclicTest, WaitCyclicSlotMaskAllArrive) {
     uint8_t f0[128], f2[128];
     const uint8_t p0[2] = {0xA0, 0x01};
     const uint8_t p2[2] = {0xA2, 0x03};
-    master_.handleRxFrame(f0, buildEcatFrame(f0, 0x0C, 0xF8, 1, 0, p0, 2, 1));
-    master_.handleRxFrame(f2, buildEcatFrame(f2, 0x0C, 0xFA, 2, 0, p2, 2, 2));
+    master_.handleRxFrame(f0, buildEcatFrame(f0, 0x0C, cyclicPoolWireIdx(0), 1, 0, p0, 2, 1));
+    master_.handleRxFrame(f2, buildEcatFrame(f2, 0x0C, cyclicPoolWireIdx(2), 2, 0, p2, 2, 2));
 
     CyclicSlotView views[6]{};
     uint64_t tokens[6]{};
@@ -1946,7 +1957,7 @@ TEST_F(MasterCyclicTest, WaitCyclicSlotMaskPartialOnTimeout) {
     // bits, and the shared deadline bounds the whole wait.
     uint8_t f0[128];
     const uint8_t p0[1] = {0x77};
-    master_.handleRxFrame(f0, buildEcatFrame(f0, 0x0C, 0xF8, 0, 0, p0, 1, 1));
+    master_.handleRxFrame(f0, buildEcatFrame(f0, 0x0C, cyclicPoolWireIdx(0), 0, 0, p0, 1, 1));
 
     CyclicSlotView views[6]{};
     uint64_t tokens[6]{};
@@ -1972,7 +1983,7 @@ TEST_F(MasterCyclicTest, NoFdYieldFallbackWakesOnDeposit) {
     std::thread pub([&] {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
         uint8_t frame[128];
-        const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 2, 3);
+        const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(0), 0, 0, pay, 2, 3);
         master_.handleRxFrame(frame, n);
     });
     CyclicSlotView view{};
@@ -1993,7 +2004,7 @@ TEST_F(MasterCyclicTest, NoFdSpinFallbackWakesOnDeposit) {
     std::thread pub([&] {
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
         uint8_t frame[128];
-        const size_t n = buildEcatFrame(frame, 0x0C, 0xF9, 0, 0, pay, 2, 4);
+        const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(1), 0, 0, pay, 2, 4);
         master_.handleRxFrame(frame, n);
     });
     CyclicSlotView view{};
@@ -2033,7 +2044,7 @@ TEST_F(MasterCyclicTest, SlotSpinPhaseObservesDeposit) {
     std::thread pub([&] {
         std::this_thread::sleep_for(std::chrono::milliseconds(4));
         uint8_t frame[128];
-        const size_t n = buildEcatFrame(frame, 0x0C, 0xF8, 0, 0, pay, 2, 1);
+        const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(0), 0, 0, pay, 2, 1);
         master_.handleRxFrame(frame, n);
     });
     CyclicSlotView view{};
@@ -2226,12 +2237,22 @@ TEST_F(MasterCyclicTest, GenBitRejectsStaleDepositEndToEnd) {
     pdo.mapping().add_rxpdo(0, 8);
     pdo.mapping().add_txpdo(0, 8);
 
-    // Capture the gen stamped into the outgoing datagram's lenFlags bit 13.
-    uint8_t sent_gen = 0xFF;
+    // Capture the gen stamped into the outgoing LRW datagram's lenFlags
+    // bit 13 plus the trailing LRD counter datagram's idx + payload —
+    // collect now waits on BOTH and fails if the counter echo is absent.
+    uint8_t  sent_gen = 0xFF;
+    uint8_t  sent_cnt_idx = 0xFF;
+    uint8_t  sent_cnt[8] = {};
     send_hook_ = [&](const uint8_t* f, size_t n) {
         if (n >= 24) {
             const uint16_t lf = static_cast<uint16_t>(f[22] | (f[23] << 8));
             sent_gen = static_cast<uint8_t>((lf >> 13) & 1u);
+            const size_t len1 = lf & 0x07FFu;
+            const size_t d2 = 16 + 10 + len1 + 2;   // next datagram hdr
+            if (n >= d2 + 18 && f[d2] == 0x0A) {    // LRD counter trailer
+                sent_cnt_idx = f[d2 + 1];
+                std::memcpy(sent_cnt, f + d2 + 10, 8);
+            }
         }
         return true;
     };
@@ -2247,7 +2268,7 @@ TEST_F(MasterCyclicTest, GenBitRejectsStaleDepositEndToEnd) {
     // response in the remaining deadline, and reports the miss honestly.
     uint8_t stale_frame[128];
     const uint8_t pay[16] = {};
-    const size_t ns = buildEcatFrame(stale_frame, 0x0C, 0xF8, 0, 0,
+    const size_t ns = buildEcatFrame(stale_frame, 0x0C, cyclicPoolWireIdx(0), 0, 0,
                                      pay, 16, 3, false, sent_gen ^ 1);
     master_.handleRxFrame(stale_frame, ns);
 
@@ -2255,18 +2276,300 @@ TEST_F(MasterCyclicTest, GenBitRejectsStaleDepositEndToEnd) {
     EXPECT_EQ(lam.getStats().stale_responses, 1u);
     EXPECT_EQ(lam.getStats().timeout_errors, 1u);
 
-    // Cycle 2: gen toggles again (sent_gen is refreshed by the hook); a
-    // deposit echoing the CURRENT gen is accepted — the stale deposit
-    // above must not have poisoned the slot.
+    // Cycle 2: pool positions rotate (LRW → pos 2, counter → pos 3); a
+    // deposit echoing the CURRENT gen on the new position is accepted —
+    // the stale deposit above must not have poisoned pos 0 either.
     ASSERT_TRUE(pdo.cyclicSend(nullptr, 5'000));
     uint8_t fresh_frame[128];
-    const size_t nf = buildEcatFrame(fresh_frame, 0x0C, 0xF8, 0, 0,
+    const size_t nf = buildEcatFrame(fresh_frame, 0x0C, cyclicPoolWireIdx(2), 0, 0,
                                      pay, 16, 3, false, sent_gen);
     master_.handleRxFrame(fresh_frame, nf);
+    // The trailing LRD counter datagram must be answered too — echo the
+    // counter bytes the send hook captured, on its own pool idx.
+    ASSERT_NE(sent_cnt_idx, 0xFF);
+    uint8_t cnt_frame[128];
+    const size_t nc = buildEcatFrame(cnt_frame, 0x0A, sent_cnt_idx, 0, 0,
+                                     sent_cnt, 8, 0, false, sent_gen);
+    master_.handleRxFrame(cnt_frame, nc);
     EXPECT_TRUE(pdo.cyclicCollect(nullptr));
     EXPECT_EQ(lam.getStats().stale_responses, 1u);   // unchanged
     EXPECT_EQ(lam.getStats().success, 1u);
 }
+
+/// A response that lands AFTER its own wait timed out is not dropped —
+/// it deposits into the position's own mailbox, where a later harvest
+/// (or the staleness checks against it) still sees it.
+TEST_F(MasterCyclicTest, LateDepositLandsInOwnMailbox) {
+    const uint64_t tok = master_.cyclicSlotToken(5);
+    CyclicSlotView view{};
+    EXPECT_FALSE(master_.waitCyclicSlotView(5, tok, 0, view));   // nothing
+
+    uint8_t frame[128];
+    const uint8_t pay[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+    const size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(5),
+                                    0, 0, pay, 4, 1);
+    master_.handleRxFrame(frame, n);
+
+    // The late deposit is retained and consumable with the same token.
+    ASSERT_TRUE(master_.waitCyclicSlotView(5, tok, 0, view));
+    ASSERT_NE(view.payload, nullptr);
+    EXPECT_EQ(view.payload[0], 0xDE);
+}
+
+/// One waitCyclicPool call harvests arrivals spread across the whole
+/// non-contiguous pool: the 0x9C..0xDF band, the 0xF0..0xFD band past
+/// the slice slots, and the dedicated DC position at 0xFF.
+TEST_F(MasterCyclicTest, PoolWaitSpansWholeRotatingRange) {
+    const uint8_t poses[4] = {0, 67, 81, kCyclicDcPoolPos};
+    uint64_t toks[4];
+    for (int i = 0; i < 4; ++i)
+        toks[i] = master_.cyclicSlotToken(poses[i]);
+
+    uint8_t frame[128];
+    for (int i = 0; i < 4; ++i) {
+        const uint8_t pay[1] = {static_cast<uint8_t>(0x40 + i)};
+        const size_t n = buildEcatFrame(frame, 0x0C,
+                                        cyclicPoolWireIdx(poses[i]),
+                                        0, 0, pay, 1,
+                                        static_cast<uint16_t>(i + 1));
+        master_.handleRxFrame(frame, n);
+    }
+
+    CyclicSlotView views[4]{};
+    bool arrived[4]{};
+    EXPECT_EQ(master_.waitCyclicPool(poses, toks, 4, 0, views, arrived),
+              4u);
+    for (int i = 0; i < 4; ++i) {
+        ASSERT_TRUE(arrived[i]) << "pos " << static_cast<int>(poses[i]);
+        ASSERT_NE(views[i].payload, nullptr);
+        EXPECT_EQ(views[i].payload[0], 0x40 + i);
+    }
+}
+
+/// Re-arming a position (sending on it) disturbs no other mailbox — the
+/// pool only invalidates the position currently being sent.
+TEST_F(MasterCyclicTest, ReArmDisturbsNoOtherMailbox) {
+    uint8_t frame[128];
+    const uint8_t p3[1] = {0x33};
+    const uint8_t p7[1] = {0x77};
+    const uint64_t tok3 = master_.cyclicSlotToken(3);
+    const uint64_t tok7 = master_.cyclicSlotToken(7);
+
+    // Consume a pos-3 deposit (its seq token advances past tok3).
+    size_t n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(3),
+                              0, 0, p3, 1, 1);
+    master_.handleRxFrame(frame, n);
+    CyclicSlotView view{};
+    ASSERT_TRUE(master_.waitCyclicSlotView(3, tok3, 0, view));
+    const uint64_t tok3_post = master_.cyclicSlotToken(3);
+
+    // Re-arm position 3 — position 7's seq token must not move.
+    ASSERT_TRUE(master_.sendCyclicDatagram(Command::LRW, 3, 0, 0,
+                                           p3, 1, true));
+    EXPECT_EQ(master_.cyclicSlotToken(3), tok3_post);
+    EXPECT_EQ(master_.cyclicSlotToken(7), tok7);
+
+    // A deposit on position 7 is still delivered independently.
+    n = buildEcatFrame(frame, 0x0C, cyclicPoolWireIdx(7), 0, 0, p7, 1, 1);
+    master_.handleRxFrame(frame, n);
+    const uint8_t poses[2] = {3, 7};
+    const uint64_t toks[2] = {tok3_post, tok7};
+    CyclicSlotView views[2]{};
+    bool arrived[2]{};
+    EXPECT_EQ(master_.waitCyclicPool(poses, toks, 2, 0, views, arrived),
+              1u);
+    EXPECT_FALSE(arrived[0]);     // pos-3 deposit already consumed
+    ASSERT_TRUE(arrived[1]);
+    ASSERT_NE(views[1].payload, nullptr);
+    EXPECT_EQ(views[1].payload[0], 0x77);
+}
+
+// ============================================================================
+// drainWire / drainWireBatch — batched recvmmsg backlog dequeue
+//
+// AF_UNIX SOCK_DGRAM socketpairs give a real fd whose datagrams
+// recvmmsg dequeues one message boundary at a time — the same seam the
+// kernel-BPF tests use, no privileges required.  Each test owns a local
+// Master so iface_.receive/native_handle are set before start().
+// ============================================================================
+
+#ifdef __linux__
+namespace {
+
+struct DrainMaster {
+    int fds[2] = {-1, -1};
+    Master master;
+    NetworkInterface iface{};
+    uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+
+    void open() { ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, fds), 0); }
+    void start() { master.start(iface, mac); }
+
+    /// Queue @p count deposit frames (one per pool position, starting at
+    /// @p first_pos) on the socketpair's write end.
+    void inject(int first_pos, int count) {
+        for (int i = 0; i < count; ++i) {
+            uint8_t frame[128];
+            const uint8_t pay[2] = {static_cast<uint8_t>(first_pos + i),
+                                    0x5A};
+            const size_t n = buildEcatFrame(
+                frame, 0x0C, cyclicPoolWireIdx(first_pos + i),
+                0, 0, pay, 2, 1);
+            ASSERT_EQ(::send(fds[0], frame, n, 0),
+                      static_cast<ssize_t>(n));
+        }
+    }
+
+    /// Verify every position in [first_pos, first_pos+count) received
+    /// its deposit — proves each drained frame ran handleRxFrame().
+    void expectDeposited(int first_pos, int count) {
+        for (int i = 0; i < count; ++i) {
+            CyclicSlotView view{};
+            ASSERT_TRUE(master.waitCyclicSlotView(
+                            first_pos + i, /*token=*/0, 0, view))
+                << "pos " << first_pos + i;
+            ASSERT_NE(view.payload, nullptr);
+            EXPECT_EQ(view.payload[0], first_pos + i);
+        }
+    }
+
+    /// A scripted receive path: frames served one per call, then empty.
+    void scriptReceive(std::initializer_list<int> positions) {
+        auto scripted = std::make_shared<
+            std::deque<std::vector<uint8_t>>>();
+        for (int pos : positions) {
+            std::vector<uint8_t> f(128);
+            const uint8_t pay[2] = {static_cast<uint8_t>(pos), 0x5A};
+            const size_t n = buildEcatFrame(
+                f.data(), 0x0C, cyclicPoolWireIdx(pos), 0, 0, pay, 2, 1);
+            f.resize(n);
+            scripted->push_back(std::move(f));
+        }
+        iface.receive = [scripted](uint8_t* b, size_t m, size_t* n) {
+            if (scripted->empty()) return false;
+            *n = std::min(m, scripted->front().size());
+            std::memcpy(b, scripted->front().data(), *n);
+            scripted->pop_front();
+            return true;
+        };
+    }
+
+    ~DrainMaster() {
+        master.stop();
+        for (int fd : fds) if (fd >= 0) ::close(fd);
+    }
+};
+
+} // namespace
+
+/// recvmmsg fast path: a queued backlog is dequeued batched and every
+/// frame is parsed into its own pool mailbox.
+TEST_F(MasterCyclicTest, DrainWireBatchDrainsBacklog) {
+    DrainMaster d;
+    d.open();
+    d.iface.native_handle =
+        reinterpret_cast<void*>(static_cast<intptr_t>(d.fds[1]));
+    d.iface.receive =
+        [](uint8_t*, size_t, size_t*) { return false; };   // unused fast path
+    d.start();
+
+    d.inject(0, 5);
+    EXPECT_EQ(d.master.drainWire(64), 5);
+    d.expectDeposited(0, 5);
+}
+
+/// max_frames caps the drain — the remainder stays queued for the next
+/// call (each still lands in its own mailbox).
+TEST_F(MasterCyclicTest, DrainWireBatchRespectsMaxFrames) {
+    DrainMaster d;
+    d.open();
+    d.iface.native_handle =
+        reinterpret_cast<void*>(static_cast<intptr_t>(d.fds[1]));
+    d.iface.receive =
+        [](uint8_t*, size_t, size_t*) { return false; };
+    d.start();
+
+    d.inject(0, 10);
+    EXPECT_EQ(d.master.drainWire(4), 4);
+    d.expectDeposited(0, 4);
+    EXPECT_EQ(d.master.drainWire(64), 6);   // rest of the backlog
+    d.expectDeposited(4, 6);
+}
+
+/// A backlog larger than one kDrainBatch recvmmsg() call drains over
+/// several syscalls until the queue reports empty.
+TEST_F(MasterCyclicTest, DrainWireBatchSpansMultipleSyscalls) {
+    DrainMaster d;
+    d.open();
+    d.iface.native_handle =
+        reinterpret_cast<void*>(static_cast<intptr_t>(d.fds[1]));
+    d.iface.receive =
+        [](uint8_t*, size_t, size_t*) { return false; };
+    d.start();
+
+    d.inject(0, 40);   // > kDrainBatch (32) → at least two recvmmsg calls
+    EXPECT_EQ(d.master.drainWire(64), 40);
+    d.expectDeposited(0, 40);
+}
+
+/// An empty queue dequeues nothing and returns 0 (EAGAIN path).
+TEST_F(MasterCyclicTest, DrainWireBatchEmptyQueue) {
+    DrainMaster d;
+    d.open();
+    d.iface.native_handle =
+        reinterpret_cast<void*>(static_cast<intptr_t>(d.fds[1]));
+    d.iface.receive =
+        [](uint8_t*, size_t, size_t*) { return false; };
+    d.start();
+
+    EXPECT_EQ(d.master.drainWire(64), 0);
+}
+
+/// Without a receive hook drainWire is a no-op even when a socket fd is
+/// present — the guard precedes the batch path.
+TEST_F(MasterCyclicTest, DrainWireNoReceiveReturnsZero) {
+    DrainMaster d;
+    d.open();
+    d.iface.native_handle =
+        reinterpret_cast<void*>(static_cast<intptr_t>(d.fds[1]));
+    // no iface.receive
+    d.start();
+
+    d.inject(0, 3);
+    EXPECT_EQ(d.master.drainWire(64), 0);
+}
+
+/// A native handle that is not a usable socket fails recvmmsg and falls
+/// back to the per-frame receive path — no frames lost either way.
+TEST_F(MasterCyclicTest, DrainWireUnusableFdFallsBackToReceive) {
+    DrainMaster d;
+    d.open();
+    ::close(d.fds[0]);
+    d.fds[0] = -1;
+    d.iface.native_handle =
+        reinterpret_cast<void*>(static_cast<intptr_t>(d.fds[1]));
+    ::close(d.fds[1]);                     // now a stale (bad) fd
+    d.fds[1] = -1;
+    d.scriptReceive({0, 1, 2});
+    d.start();
+
+    EXPECT_EQ(d.master.drainWire(64), 3);
+    d.expectDeposited(0, 3);
+}
+
+/// No native handle at all → the per-frame receive path drains.
+TEST_F(MasterCyclicTest, DrainWireNoNativeHandleUsesReceive) {
+    DrainMaster d;
+    d.open();
+    ::close(d.fds[0]); d.fds[0] = -1;
+    ::close(d.fds[1]); d.fds[1] = -1;      // socketpair unused
+    d.scriptReceive({0, 1});
+    d.start();
+
+    EXPECT_EQ(d.master.drainWire(64), 2);
+    d.expectDeposited(0, 2);
+}
+#endif // __linux__
 
 // ============================================================================
 // Convenience API: lowLatency() preset, CyclicLoopGuard RAII, dc_config
@@ -2636,7 +2939,7 @@ TEST_F(LivePacketTest, KernelDemuxOnLoopback) {
         return n;
     };
     // A received frame is a cyclic ECAT datagram iff ethertype 0x88A4 and
-    // idx in [0xF8,0xFD].
+    // idx in the fastpath band (0x9C..0xFF minus 0xFE).
     auto countCyclic = [&](int fd, int window_ms) {
         int n = 0;
         uint8_t b[2048];
@@ -2647,30 +2950,30 @@ TEST_F(LivePacketTest, KernelDemuxOnLoopback) {
             if (poll(&p, 1, 20) <= 0) continue;
             ssize_t len = recv(fd, b, sizeof(b), 0);
             if (len > 18 && b[12] == 0x88 && b[13] == 0xA4 &&
-                b[17] >= 0xF8 && b[17] <= 0xFD) ++n;
+                isFastPathIdx(b[17])) ++n;
         }
         return n;
     };
     // Drain ambient traffic so stale frames don't skew the assertions.
     countIdx(cyc, -1, 120); countIdx(asy, -1, 120);
 
-    sendFrame(0xF8);                          // cyclic → cyclic socket only
-    EXPECT_EQ(countIdx(cyc, 0xF8, 300), 1);
+    sendFrame(cyclicPoolWireIdx(0));            // pool bottom → cyclic socket only
+    EXPECT_EQ(countIdx(cyc, cyclicPoolWireIdx(0), 300), 1);
     EXPECT_EQ(countCyclic(asy, 300), 0);
 
     sendFrame(0x42);                          // async idx → async socket only
     EXPECT_EQ(countIdx(cyc, 0x42, 300), 0);
     EXPECT_EQ(countIdx(asy, 0x42, 300), 1);
 
-    sendFrame(0xFD);                          // top of cyclic range
-    EXPECT_EQ(countIdx(cyc, 0xFD, 300), 1);
+    sendFrame(kDcTimeIdx);                    // top of band → cyclic socket
+    EXPECT_EQ(countIdx(cyc, kDcTimeIdx, 300), 1);
     EXPECT_EQ(countCyclic(asy, 300), 0);
 
-    sendFrame(0xFE);                          // just above range → async
+    sendFrame(0xFE);        // fire-and-forget — in-band but → async parser
     EXPECT_EQ(countCyclic(cyc, 300), 0);
     EXPECT_EQ(countIdx(asy, 0xFE, 300), 1);
 
-    sendFrame(0xF8, 0x0800);                  // cyclic idx but non-ECAT type
+    sendFrame(cyclicPoolWireIdx(0), 0x0800);                  // cyclic idx but non-ECAT type
     EXPECT_EQ(countCyclic(cyc, 300), 0);
     EXPECT_EQ(countIdx(asy, -1, 300) >= 1, true);  // async sees non-ECAT frame
 
@@ -2700,7 +3003,7 @@ TEST_F(LivePacketTest, RingChannelRxAndTx) {
     EXPECT_GT(ch->txCapacity(), 60u);
     std::memset(f, 0, 60);
     std::memset(f, 0xFF, 6);
-    f[12] = 0x88; f[13] = 0xA4; f[16] = 0x0C; f[17] = 0xF8;
+    f[12] = 0x88; f[13] = 0xA4; f[16] = 0x0C; f[17] = cyclicPoolWireIdx(0);
     ASSERT_TRUE(ch->txCommitFrame(60));
 
     CyclicFrameView v[4];
@@ -2708,7 +3011,7 @@ TEST_F(LivePacketTest, RingChannelRxAndTx) {
     ASSERT_GE(n, 1);
     bool saw = false;
     for (int i = 0; i < n; ++i)
-        if (v[i].frame_len >= 18 && v[i].frame[17] == 0xF8) saw = true;
+        if (v[i].frame_len >= 18 && v[i].frame[17] == cyclicPoolWireIdx(0)) saw = true;
     EXPECT_TRUE(saw);
     ch->rxRelease(v[0].cookie);
 }
@@ -2838,7 +3141,7 @@ TEST_F(LivePacketTest, AsyncFilterAttachViaConfig) {
     ASSERT_NE(f, nullptr);
     std::memset(f, 0, 60);
     std::memset(f, 0xFF, 6);
-    f[12] = 0x88; f[13] = 0xA4; f[16] = 0x0C; f[17] = 0xF9;
+    f[12] = 0x88; f[13] = 0xA4; f[16] = 0x0C; f[17] = cyclicPoolWireIdx(1);
     ASSERT_TRUE(ch->txCommitFrame(60));
 
     // Cyclic socket receives; async (filtered) must not.
@@ -2849,7 +3152,7 @@ TEST_F(LivePacketTest, AsyncFilterAttachViaConfig) {
     if (poll(&p, 1, 300) > 0) {
         // Any frame arriving must not be the cyclic one.
         ssize_t n = recv(asy, b, sizeof(b), 0);
-        if (n >= 18) EXPECT_NE(b[17], 0xF9);
+        if (n >= 18) EXPECT_NE(b[17], cyclicPoolWireIdx(1));
     }
     close(asy);
 }

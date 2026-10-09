@@ -18,6 +18,32 @@
                 "TETHER_BUILD_TESTS": "OFF",
                 "TETHER_BUILD_PYTHON_BINDINGS": "OFF"
             }
+        },
+        {
+            "name": "rpi5",
+            "displayName": "Cross: Raspberry Pi 5 (aarch64)",
+            "description": "Cross-compile Tether + examples for Raspberry Pi 5. Requires an aarch64-linux-gnu toolchain on PATH or RPI_TOOLCHAIN_ROOT.",
+            "binaryDir": "${sourceDir}/build-rpi5",
+            "toolchainFile": "${sourceDir}/cmake/toolchains/rpi5-aarch64.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "TETHER_BUILD_TESTS": "OFF",
+                "TETHER_BUILD_BENCHMARKS": "OFF",
+                "TETHER_BUILD_PYTHON_BINDINGS": "OFF"
+            }
+        },
+        {
+            "name": "rpi1",
+            "displayName": "Cross: Raspberry Pi 1 B+ (armv6)",
+            "description": "Cross-compile Tether + examples for Raspberry Pi 1 B+. Requires an armv6 hard-float toolchain (RPI_TOOLCHAIN_ROOT); Debian armhf will NOT work.",
+            "binaryDir": "${sourceDir}/build-rpi1",
+            "toolchainFile": "${sourceDir}/cmake/toolchains/rpi1-armv6.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "TETHER_BUILD_TESTS": "OFF",
+                "TETHER_BUILD_BENCHMARKS": "OFF",
+                "TETHER_BUILD_PYTHON_BINDINGS": "OFF"
+            }
         }
     ],
     "buildPresets": [
@@ -30,6 +56,16 @@
             "name": "arm32v5",
             "configurePreset": "arm32v5",
             "jobs": 8
+        },
+        {
+            "name": "rpi5",
+            "configurePreset": "rpi5",
+            "jobs": 4
+        },
+        {
+            "name": "rpi1",
+            "configurePreset": "rpi1",
+            "jobs": 4
         }
     ]
 }

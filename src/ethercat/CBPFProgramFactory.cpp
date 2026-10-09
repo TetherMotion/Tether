@@ -132,6 +132,14 @@ void emitIdxCheck(Asm& a, const CBPFSpec& spec, uint32_t off,
     a.jump(cbpf::JMP | cbpf::JGT | cbpf::K, r.end,
            exclude ? l_accept : l_reject, c); // idx > hi
     a.mark(c);
+    if (r.hole) {
+        // In-range but hole → the out-of-range verdict (0xFE stays on
+        // the async socket under the socket-pair demux).
+        c = a.label();
+        a.jump(cbpf::JMP | cbpf::JEQ | cbpf::K, *r.hole,
+               exclude ? l_accept : l_reject, c);
+        a.mark(c);
+    }
     a.ja(exclude ? l_reject : l_accept);
 }
 

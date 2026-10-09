@@ -24,7 +24,6 @@
 
 #pragma once
 
-#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -45,10 +44,12 @@ namespace EtherCAT {
 
 class IPDOTransport;
 class ProcessImage;    // defined in ProcessImage.hpp
+class TxFailureDiagnostics;
 
 class LogicalAddressManager {
 public:
     explicit LogicalAddressManager(IPDOTransport& transport);
+    ~LogicalAddressManager();
 
     LogicalAddressManager(const LogicalAddressManager&)            = delete;
     LogicalAddressManager& operator=(const LogicalAddressManager&) = delete;
@@ -133,7 +134,13 @@ public:
 
     uint32_t totalRxPDOBytes() const { return total_rxpdo_bytes_; }
     uint32_t totalTxPDOBytes() const { return total_txpdo_bytes_; }
-    uint32_t totalLogicalSize()  const { return total_rxpdo_bytes_ + total_txpdo_bytes_; }
+    /// Extent of the logical process image in bytes, relative to
+    /// base_logical_addr_ — i.e. the span an LRW covering every live slave
+    /// window must address.  This is the high-water mark of allocated
+    /// windows, NOT the sum of live PDO bytes: sticky windows never move,
+    /// so a slave whose window was reallocated to a larger size leaves
+    /// dead space behind and the extent exceeds Rx+Tx totals.
+    uint32_t totalLogicalSize()  const { return next_free_log_; }
 
     // ----- LRW Exchange -----
 
@@ -188,6 +195,37 @@ public:
     bool cyclicSend(const PDO::PDOMapping& mapping, ProcessImage* image,
                     uint32_t rx_timeout_ns);
     bool cyclicCollect(const PDO::PDOMapping& mapping, ProcessImage* image);
+
+    // ----- Rotating index pool, LRW counter trailer, DC timepoint -----
+
+    /**
+     * @brief Select the slave whose DC System Time register (0x0910) is
+     *        read by an APRD datagram riding the same frame as the cyclic
+     *        LRW exchange (dedicated wire index 0xFF).
+     *
+     * @param position  Auto-increment position of the slave on the ring
+     *                  (0 = first slave), or -1 to disable (default).
+     */
+    void setCyclicDcTimeSlave(int32_t position) { dc_slave_pos_ = position; }
+    int32_t cyclicDcTimeSlave() const { return dc_slave_pos_; }
+
+    /**
+     * @brief The 64-bit LRW counter verified by the last successful
+     *        cyclic collect.
+     *
+     * Each cyclic send increments a counter and appends it as a trailing
+     * LRW datagram covering unmapped logical space (base + image size);
+     * the slaves pass those bytes through verbatim, so the echo returning
+     * the same value proves the frame — and its PDO data — belongs to
+     * THIS send and not to a late echo of a previous cycle.
+     */
+    uint64_t lastLrwCounter() const { return lrw_counter_ok_; }
+
+    /// DC System Time read in the last collect (nanoseconds since
+    /// 2000-01-01).  Meaningful only when dcTimeValid() is true.
+    uint64_t lastDcTimeNs() const { return dc_time_ns_; }
+    /// True when the last collect verified a fresh DC System Time.
+    bool dcTimeValid() const { return dc_time_valid_; }
     /// True while responses are in flight — image slices OR user PDO
     /// slices (a decimated image can leave only slice runs pending).
     bool cyclicExchangePending() const {
@@ -398,9 +436,45 @@ public:
         uint32_t rtt_ns_min{0};
         uint32_t rtt_ns_max{0};
         uint32_t rtt_samples{0};
+        /// Host stalls detected in the polled LRW path (gap between
+        /// exchangeLRW calls exceeded stall detection threshold).
+        uint32_t stall_events{0};
+        /// Frames pulled off the wire by post-stall/timeout drains.
+        uint32_t drained_frames{0};
+        /// Currently consecutive LRW timeouts (resets on success).
+        uint32_t consecutive_timeouts{0};
+        /// Cyclic counter-trailer datagrams whose echo did not match the
+        /// send — a late/stale frame, consumed and rejected.
+        uint32_t counter_mismatches{0};
+        /// Cyclic DC-timepoint datagrams that timed out or failed WKC.
+        uint32_t dc_timeouts{0};
+        /// Exchange-health monitor worker spawns — one per init() (the
+        /// worker is persistent for the manager's lifetime).
+        uint32_t tx_diag_spawns{0};
     };
     Stats getStats() const;
     void  resetStats();
+
+    // ----- Stall self-heal (polled LRW path) -----
+
+    /// Response wait budget per LRW datagram, ms (default 10).
+    void setLrwResponseTimeoutMs(uint32_t ms) { response_timeout_ms_ = ms ? ms : 1; }
+    uint32_t lrwResponseTimeoutMs() const { return response_timeout_ms_; }
+
+    /**
+     * @brief Gap between exchangeLRW calls that counts as a host stall,
+     *        in microseconds (default 5000; 0 disables).
+     *
+     * On a detected stall the manager purges pending response waiters and
+     * drains the wire backlog before sending, so a stale echo cannot
+     * satisfy a new request on a reused idx — then resumes exchanging.
+     */
+    void setStallDetectionGapUs(uint32_t us) { stall_detect_us_ = us; }
+    uint32_t stallDetectionGapUs() const { return stall_detect_us_; }
+
+    /// Consecutive-timeout count that triggers a ring probe + warning
+    /// (default 64; 0 disables).  Executed and logged by the monitor thread.
+    void setEscalateAfterTimeouts(uint32_t n);
 
     // ----- Log Prefix (set by Master from per-slave name) -----
 
@@ -428,6 +502,49 @@ public:
     }
 
 private:
+    // Stall self-heal state (polled LRW path).
+    uint32_t response_timeout_ms_{10};
+    uint32_t stall_detect_us_{5000};
+    int64_t  last_call_ns_{0};
+
+    // Exchange-health monitor (non-RT thread, started by init()).  The RT
+    // exchange paths NEVER log — they only bump its atomic counters via
+    // noteSendFailure/noteTimeout/noteStall/noteNoResponseSlot; the worker
+    // emits every category rate-limited to 4 Hz, runs the wire probe once
+    // the send-fail streak hits 10, and the ring probe on timeout-streak
+    // escalation.
+    std::unique_ptr<TxFailureDiagnostics> tx_diag_;
+
+    /// Detect a host stall since the last exchange call; drain the wire
+    /// backlog when one fired.  Pending waiters are NOT purged — backlog
+    /// frames are routed normally so late replies still reach them.
+    void stallCheck();
+    /**
+     * @brief Claim the response slot this polled exchange will send on.
+     *
+     * Drains the wire backlog first (stale echoes drop unrouted while
+     * frames for other live waiters are delivered), then walks allocIdx()
+     * until a slot is claimed.  A busy slot belongs to a live waiter and
+     * is skipped — the exchange only ever prunes the slot it transmits on.
+     *
+     * @param idx_out  datagram index to transmit on (also set when the
+     *                 transport lacks pre-registration).
+     * @param resp     response buffer bound to the claimed slot.
+     * @return claimed slot handle, IPDOTransport::kPreRegInvalid when the
+     *         transport does not support pre-registration (caller falls
+     *         back to waitForResponseIdx on idx_out), or
+     *         IPDOTransport::kPreRegBusy when every candidate slot was
+     *         owned by a live waiter.
+     */
+    size_t claimExchangeWaiter(uint8_t& idx_out, RxDatagram& resp);
+    /// Timeout bookkeeping: count the streak, notify the monitor (it
+    /// rate-limits the log and fires the ring probe at the escalation
+    /// threshold), drain the wire.  `what` is the caller's function name.
+    /// No logging happens on this (RT) thread.
+    void onExchangeTimeout(const char* what);
+    /// Success bookkeeping: reset the consecutive-timeout streak.
+    void onExchangeSuccess();
+
     IPDOTransport& transport_;
 
     struct SlaveLogicalAddr {
@@ -468,22 +585,6 @@ private:
     std::array<uint32_t, PDO::kMaxPDOSlaves> slave_log_base_{};
     std::array<uint32_t, PDO::kMaxPDOSlaves> slave_log_size_{};
     uint32_t next_free_log_{0};  ///< next free logical offset (rel. to base)
-    /// Image extent in bytes.  Sticky windows are append-only, so when a
-    /// slave's window is reallocated after a size change the old window is
-    /// dead space inside the image — the extent can exceed
-    /// total_rxpdo_bytes_ + total_txpdo_bytes_ and the exchange must
-    /// cover all of it.  Windows of slaves that are no longer active don't
-    /// count — their space is only exchanged when a later active slave's
-    /// window extends past it.
-    uint32_t imageBytes() const {
-        uint32_t end = 0;
-        for (uint16_t i = 0; i < slave_count_ && i < PDO::kMaxPDOSlaves; ++i) {
-            if (slave_log_base_[i] == kUnassigned || !addr_map_[i].active)
-                continue;
-            end = std::max(end, slave_log_base_[i] + slave_log_size_[i]);
-        }
-        return end;
-    }
     Stats    stats_{};
     bool     initialized_{false};
     std::function<std::string(uint16_t)> prefix_provider_;
@@ -507,13 +608,48 @@ private:
 
     // ---- Cyclic slice / split-phase state (cyclic thread only) ----
     static constexpr size_t kMaxCyclicSlices = IPDOTransport::kNumCyclicSlots;
-    struct PendingSlice { uint64_t token; uint32_t off; uint32_t len; uint8_t gen; };
+    /// One in-flight image slice.  `pos` is the ROTATING pool position
+    /// the datagram was sent on — slices no longer own fixed slots, so
+    /// a late response deposits into a mailbox nobody else will re-arm
+    /// until the pool wraps (82 sends), and the generation/counter
+    /// checks reject it if it outlives that window.
+    struct PendingSlice { uint64_t token; uint32_t off; uint32_t len;
+                          uint8_t gen; uint8_t pos; };
     std::array<PendingSlice, kMaxCyclicSlices> cyclic_pending_{};
     uint8_t  cyclic_pending_count_{0};   ///< slices awaiting collect
     uint8_t  cyclic_slice_count_{1};     ///< slices needed for the image
     uint64_t cyclic_deadline_ns_{0};     ///< collect deadline (mono ns)
     uint64_t cyclic_send_ns_{0};         ///< slice emit time (mono ns)
     ProcessImage* pending_image_{nullptr};
+
+    // ---- Rotating pool / counter trailer / DC timepoint ------------
+    uint8_t  pool_pos_next_{0};   ///< next free rotating-pool position
+    uint64_t lrw_counter_{0};     ///< counter stamped into the last send
+    uint64_t lrw_counter_ok_{0};  ///< counter verified by the last collect
+    /// Bookkeeping for the trailing counter datagram (one per send —
+    /// a dedicated pool position, payload = the counter bytes at the
+    /// first unmapped logical address, echoed verbatim).
+    uint8_t  cnt_pos_{0};
+    uint64_t cnt_token_{0};
+    uint8_t  cnt_gen_{0};
+    uint64_t cnt_value_{0};       ///< counter bytes as sent (LE64)
+    bool     cnt_pending_{false};
+    /// Bookkeeping for the DC-timepoint datagram (fixed idx 0xFF =
+    /// pool position kCyclicDcPoolPos).
+    uint64_t dc_token_{0};
+    uint8_t  dc_gen_{0};
+    bool     dc_pending_{false};
+    int32_t  dc_slave_pos_{-1};   ///< APRD position; <0 = disabled
+    uint64_t dc_time_ns_{0};      ///< last verified DC System Time
+    bool     dc_time_valid_{false};
+
+    /// Draw the next rotating-pool position (wraps 0..kNumCyclicSlots-1).
+    uint8_t allocPoolPos() {
+        const uint8_t p = pool_pos_next_;
+        pool_pos_next_ = static_cast<uint8_t>(
+            (p + 1) % kNumCyclicSlots);
+        return p;
+    }
 
     /// Expected-WKC per slice — kWkcUnknown = learn from first success
     /// (derived from the slave set by cyclicSend when a mapping is known).

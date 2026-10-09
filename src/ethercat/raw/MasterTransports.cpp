@@ -55,7 +55,14 @@ public:
 
     size_t preRegisterResponseWaiter(uint8_t idx,
                                      uint8_t* buffer, size_t buffer_size) override {
-        return master_.preRegisterResponseWaiter(idx, buffer, buffer_size);
+        const size_t slot =
+            master_.preRegisterResponseWaiter(idx, buffer, buffer_size);
+        // Normalize the router's "couldn't claim" sentinel to the
+        // IPDOTransport contract: a live waiter owns the slot — the caller
+        // must pick another idx rather than steal it.
+        if (slot >= TransactionRouter::kNumSlots)
+            return IPDOTransport::kPreRegBusy;
+        return slot;
     }
 
     bool waitForPreRegistered(size_t slot, unsigned int timeout_ms,
@@ -79,6 +86,19 @@ public:
 
     uint16_t adpForSlaveIndex(uint16_t slave_index) override {
         return Master::adpForSlaveIndex(slave_index);
+    }
+
+    int drainWire(int max_frames) override {
+        return master_.drainWire(max_frames);
+    }
+    void purgePendingResponses() override {
+        master_.purgePendingResponses();
+    }
+    std::string txFailureDiagnostics() override {
+        return master_.txFailureDiagnostics();
+    }
+    int lastSendErrno() const override {
+        return master_.lastTxErrno();
     }
 
     bool isCancelRequested() const override {
@@ -165,6 +185,16 @@ public:
     }
     uint32_t cyclicPayloadOffset() const override {
         return master_.cyclicPayloadOffset();
+    }
+    bool sendPoolFrame(const CyclicDgramSpec* dgs, size_t count) override {
+        return master_.sendCyclicPoolFrame(dgs, count);
+    }
+    uint8_t waitCyclicPool(const uint8_t* positions,
+                           const uint64_t* tokens,
+                           uint8_t count, uint32_t timeout_ns,
+                           CyclicSlotView* views, bool* arrived) override {
+        return master_.waitCyclicPool(positions, tokens, count,
+                                      timeout_ns, views, arrived);
     }
 
 private:

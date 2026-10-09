@@ -11,8 +11,9 @@
  *
  * Linux implementations demultiplex in the kernel: the cyclic socket carries
  * a classic-BPF filter accepting only EtherCAT frames whose first datagram
- * index lies in the reserved cyclic range (kCyclicSlotBaseIdx..+kNumCyclicSlots),
- * while the async socket gets the mirror filter.  Cross-traffic is therefore
+ * index lies in the reserved fastpath band 0x9C..0xFF minus 0xFE
+ * (fire-and-forget echoes belong to the async parser), while the async
+ * socket gets the mirror filter.  Cross-traffic is therefore
  * impossible, not merely unlikely — and a filter failure falls back to a
  * software deposit path without breaking correctness.
  *
@@ -299,12 +300,12 @@ static_assert(sizeof(CyclicBpfInsn) == 8, "must match struct sock_filter");
 
 /// Number of instructions in each demux filter program (VLAN-aware
 /// variant — see cyclicChannelBpfProgram).
-inline constexpr size_t kCyclicBpfInsnCount = 13;
+inline constexpr size_t kCyclicBpfInsnCount = 14;
 
 /**
  * @brief Build the kernel demux filter program.
  * @param accept_cyclic  true → socket-A program (accept iff first-datagram
- *        idx ∈ [0xF8,0xFD]); false → socket-B mirror.
+ *        idx ∈ [0x9C,0xFF] \ {0xFE}); false → socket-B mirror.
  * @return instructions written, or 0 if @p cap is too small.
  */
 size_t cyclicChannelBpfProgram(bool accept_cyclic,

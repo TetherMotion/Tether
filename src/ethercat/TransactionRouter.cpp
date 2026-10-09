@@ -141,6 +141,16 @@ size_t TransactionRouter::routePacket(const RxDatagram& dgram)
 WaitResult TransactionRouter::waitForSlotCompletion(Slot& slot,
                                                     uint32_t timeout_ms)
 {
+    // The registration this wait belongs to.  If a purge/cancel or a NEW
+    // registration bumped reg_gen before we even started waiting, the slot
+    // is dead to us — return timeout immediately rather than sleeping out
+    // the budget (or worse, clearing a successor's pending flag below).
+    const uint32_t my_gen = slot.reg_gen.load(std::memory_order_acquire);
+    if (!slot.pending.load(std::memory_order_acquire)) {
+        stats_timeouts_.fetch_add(1, std::memory_order_relaxed);
+        return WaitResult::Timeout();
+    }
+
     uint32_t expected = slot.seq.load(std::memory_order_acquire);
     const auto deadline = std::chrono::steady_clock::now()
                         + std::chrono::milliseconds(timeout_ms);
@@ -148,7 +158,8 @@ WaitResult TransactionRouter::waitForSlotCompletion(Slot& slot,
     for (;;) {
         if (slot.completed.load(std::memory_order_acquire) ||
             cancelled_.load(std::memory_order_acquire) ||
-            shutdown_.load(std::memory_order_acquire)) {
+            shutdown_.load(std::memory_order_acquire) ||
+            slot.reg_gen.load(std::memory_order_acquire) != my_gen) {
             break;
         }
         const auto now = std::chrono::steady_clock::now();
@@ -163,9 +174,11 @@ WaitResult TransactionRouter::waitForSlotCompletion(Slot& slot,
 
     WaitResult result = WaitResult::Timeout();
     std::lock_guard<std::mutex> lock(slot.mtx);
+    const bool mine =
+        slot.reg_gen.load(std::memory_order_relaxed) == my_gen;
     if (slot.completed.load(std::memory_order_acquire) &&
         !shutdown_.load(std::memory_order_acquire) &&
-        !cancelled_.load(std::memory_order_acquire)) {
+        !cancelled_.load(std::memory_order_acquire) && mine) {
         auto& r = slot.response;
         result = WaitResult::Success(
             r.wkc, r.datalen, r.cmd, r.adp, r.ado, r.idx);
@@ -173,9 +186,13 @@ WaitResult TransactionRouter::waitForSlotCompletion(Slot& slot,
         stats_timeouts_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    slot.pending.store(false, std::memory_order_relaxed);
-    slot.buffer     = nullptr;
-    slot.buffer_size = 0;
+    // Only tear down the slot if it's still OUR registration — a purge or
+    // re-registration in the meantime means a successor owns it now.
+    if (mine) {
+        slot.pending.store(false, std::memory_order_relaxed);
+        slot.buffer     = nullptr;
+        slot.buffer_size = 0;
+    }
     return result;
 }
 
@@ -202,6 +219,7 @@ WaitResult TransactionRouter::sendAndWait(uint8_t idx,
     // 1. Mark slot as pending (under lock)
     {
         std::lock_guard<std::mutex> lock(slot.mtx);
+        slot.reg_gen.fetch_add(1, std::memory_order_relaxed);
         slot.pending.store(true, std::memory_order_relaxed);
         slot.completed.store(false, std::memory_order_relaxed);
         slot.buffer     = buffer;
@@ -246,6 +264,7 @@ WaitResult TransactionRouter::waitForPacket(const PacketFilter& filter,
             std::lock_guard<std::mutex> lock(slot.mtx);
             // If not already pending, set it up
             if (!slot.pending.load(std::memory_order_relaxed)) {
+                slot.reg_gen.fetch_add(1, std::memory_order_relaxed);
                 slot.pending.store(true, std::memory_order_relaxed);
                 slot.completed.store(false, std::memory_order_relaxed);
                 slot.buffer     = buffer;
@@ -276,6 +295,7 @@ size_t TransactionRouter::preRegisterWaiter(const PacketFilter& filter,
     // Reject if slot is already in use (pending and not yet completed)
     if (slot.pending.load(std::memory_order_relaxed) && !slot.completed.load(std::memory_order_relaxed)) return kNumSlots;
 
+    slot.reg_gen.fetch_add(1, std::memory_order_relaxed);
     slot.pending.store(true, std::memory_order_relaxed);
     slot.completed.store(false, std::memory_order_relaxed);
     slot.buffer     = buffer;
@@ -303,10 +323,35 @@ void TransactionRouter::cancelPreRegistered(size_t slot_idx)
 
     auto& slot = slots_[slot_idx];
     std::lock_guard<std::mutex> lock(slot.mtx);
+    slot.reg_gen.fetch_add(1, std::memory_order_relaxed);
     slot.pending.store(false, std::memory_order_relaxed);
     slot.completed.store(false, std::memory_order_relaxed);
     slot.buffer     = nullptr;
     slot.buffer_size = 0;
+    // Wake any waiter so it takes the timeout path immediately instead of
+    // sleeping out its full budget on a dead registration.
+    slot.seq.fetch_add(1, std::memory_order_release);
+    Tether::Platform::atomicWakeAll(&slot.seq);
+}
+
+void TransactionRouter::purgeAllPending()
+{
+    for (auto& slot : slots_) {
+        std::lock_guard<std::mutex> lock(slot.mtx);
+        if (!slot.pending.load(std::memory_order_relaxed)) continue;
+        slot.reg_gen.fetch_add(1, std::memory_order_relaxed);
+        slot.pending.store(false, std::memory_order_relaxed);
+        slot.completed.store(false, std::memory_order_relaxed);
+        slot.buffer      = nullptr;
+        slot.buffer_size = 0;
+        // Wake any waiter so it takes the timeout path immediately
+        // instead of sleeping out its full budget.
+        slot.seq.fetch_add(1, std::memory_order_release);
+        Tether::Platform::atomicWakeAll(&slot.seq);
+    }
+    // Wake waitForAny() waiters so they rescan the (now empty) slots.
+    any_completion_gen_.fetch_add(1, std::memory_order_release);
+    Tether::Platform::atomicWakeAll(&any_completion_gen_);
 }
 
 // ============================================================================

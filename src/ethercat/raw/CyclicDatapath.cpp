@@ -153,26 +153,26 @@ void CyclicDatapath::publishView(uint8_t idx, Command cmd,
 
 uint64_t CyclicDatapath::slotToken(uint8_t slot) const
 {
-    if (slot >= IPDOTransport::kNumCyclicSlots) return 0;
+    if (slot > kCyclicDcPoolPos) return 0;
     return slots_[cyclicFastIndex(slot)].seq.load(std::memory_order_seq_cst);
 }
 
 uint8_t CyclicDatapath::slotGen(uint8_t slot) const
 {
-    if (slot >= IPDOTransport::kNumCyclicSlots) return 0;
+    if (slot > kCyclicDcPoolPos) return 0;
     return slot_gen_[cyclicFastIndex(slot)];
 }
 
 uint64_t CyclicDatapath::sliceSlotToken(uint8_t slice) const
 {
     if (slice >= kNumSliceSlots) return 0;
-    return slots_[slice].seq.load(std::memory_order_seq_cst);
+    return slots_[sliceFastIndex(slice)].seq.load(std::memory_order_seq_cst);
 }
 
 uint8_t CyclicDatapath::sliceSlotGen(uint8_t slice) const
 {
     if (slice >= kNumSliceSlots) return 0;
-    return slot_gen_[slice];
+    return slot_gen_[sliceFastIndex(slice)];
 }
 
 const CyclicDatapath::HdrTemplate& CyclicDatapath::ensureTemplate(
@@ -258,18 +258,21 @@ bool CyclicDatapath::sendFastDatagram(Command cmd, uint8_t fast_idx,
     // sendmsg(), zero payload copies, zero header assembly.  Ring backend
     // would copy once into a TX slot — callers in Rotating image mode use
     // sendCyclicFrame to avoid even that.
+    static const uint8_t kZeroPayload[kMaxDatagramDataSize] = {};
     if (channel_) {
+        const uint8_t* payload_src = static_cast<const uint8_t*>(data);
+        if (!payload_src) payload_src = kZeroPayload;   // read datagrams
         CyclicTxParts parts;
         parts.header      = hdr.bytes;
         parts.header_len  = hdr.len;
-        parts.payload     = static_cast<const uint8_t*>(data);
+        parts.payload     = payload_src;
         parts.payload_len = datalen;
         parts.wkc         = 0;
         if (master_.debug_flags_.txPackets) {
             // Compose into tx_buf_ purely for the debug dump.
             std::memcpy(tx_buf_, hdr.bytes, hdr.len);
             uint8_t* p = tx_buf_ + hdr.len;
-            if (datalen > 0) std::memcpy(p, data, datalen);
+            if (datalen > 0) std::memcpy(p, payload_src, datalen);
             *reinterpret_cast<uint16_t*>(p + datalen) = host_to_le16(0);
             PacketDebugger::printEtherCATFrame(tx_buf_,
                 hdr.len + datalen + sizeof(uint16_t), true, false);
@@ -308,7 +311,7 @@ bool CyclicDatapath::sendDatagram(Command cmd, uint8_t slot,
                                 const void* data, uint16_t datalen,
                                 bool roundtrip)
 {
-    if (slot >= IPDOTransport::kNumCyclicSlots) return false;
+    if (slot > kCyclicDcPoolPos) return false;
     return sendFastDatagram(cmd, cyclicFastIndex(slot), adp, ado,
                             data, datalen, roundtrip);
 }
@@ -319,8 +322,108 @@ bool CyclicDatapath::sendSliceDatagram(Command cmd, uint8_t slice_slot,
                                    bool roundtrip)
 {
     if (slice_slot >= kNumSliceSlots) return false;
-    return sendFastDatagram(cmd, slice_slot, adp, ado,
+    return sendFastDatagram(cmd, sliceFastIndex(slice_slot), adp, ado,
                             data, datalen, roundtrip);
+}
+
+bool CyclicDatapath::sendPoolFrame(const CyclicDgramSpec* dgs,
+                                       size_t count)
+{
+    using namespace Raw;
+    if (!dgs || count == 0) return false;
+    if (master_.cancel_requested_.load(std::memory_order_acquire))
+        return false;
+
+    // Compose [eth(+vlan) | ecat-hdr | dgram | wkc]×count into tx_buf_ —
+    // dynamic assembly rather than the per-(idx,gen) templates: rotating
+    // indices would blow the template bank up (82 positions × keys), and
+    // the second/third datagrams (counter trailer host byte order, DC
+    // read) are short enough that field-by-field writes cost ~nothing
+    // next to the payload memcpy.
+    uint32_t ec_len = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const uint32_t dl = dgs[i].datalen + dgs[i].tail_len;
+        if (dl > 0x07FFu) return false;
+        ec_len += sizeof(EtherCATDatagramHeader) + dl + sizeof(uint16_t);
+    }
+    if (ec_len > 0x07FFu) return false;
+
+    uint8_t* dst;
+    if (channel_) {
+        dst = channel_->txAcquire();
+        if (!dst) return false;
+    } else {
+        dst = tx_buf_;
+    }
+    uint8_t* p = dst;
+
+    constexpr uint8_t dst_mac[6] = {0x01, 0x01, 0x05, 0x00, 0x00, 0x00};
+    std::memcpy(p, dst_mac, 6);
+    std::memcpy(p + 6, master_.src_mac_, 6);
+    p += 12;
+    if (tx_vlan_) {
+        *reinterpret_cast<uint16_t*>(p) = host_to_be16(kEtherType8021Q);
+        p += 2;
+        *reinterpret_cast<uint16_t*>(p) = host_to_be16(tx_vlan_);
+        p += 2;
+    }
+    *reinterpret_cast<uint16_t*>(p) = host_to_be16(kEtherTypeEtherCAT);
+    p += 2;
+
+    *reinterpret_cast<uint16_t*>(p) = host_to_le16(
+        static_cast<uint16_t>((ec_len & 0x07FFu) | (0x1u << 12)));
+    p += 2;
+
+    for (size_t i = 0; i < count; ++i) {
+        const CyclicDgramSpec& dg = dgs[i];
+        const uint32_t dl = dg.datalen + dg.tail_len;
+        const bool last = (i + 1 == count);
+
+        // Generation bit for pool-index datagrams when requested —
+        // collect rejects deposits echoing the previous generation.
+        uint8_t gen = 0;
+        if (dg.stamp_gen && isSlotIdx(dg.idx)) {
+            const uint8_t fi = fastIndex(dg.idx);
+            gen = (slot_gen_[fi] = slot_gen_[fi] ^ 1u);
+        }
+
+        p[0] = static_cast<uint8_t>(dg.cmd);
+        p[1] = dg.idx;
+        *reinterpret_cast<uint16_t*>(p + 2) = host_to_le16(dg.adp);
+        *reinterpret_cast<uint16_t*>(p + 4) = host_to_le16(dg.ado);
+        const uint16_t flags =
+            (last ? 0u : (1u << 15)) |
+            (dg.roundtrip ? (1u << 14) : 0u) |
+            (static_cast<uint16_t>(gen) << 13);
+        *reinterpret_cast<uint16_t*>(p + 6) = host_to_le16(
+            static_cast<uint16_t>((dl & 0x07FFu) | flags));
+        *reinterpret_cast<uint16_t*>(p + 8) = host_to_le16(0);   // irq
+        p += 10;
+        if (dg.datalen > 0) {
+            if (dg.data) std::memcpy(p, dg.data, dg.datalen);
+            else         std::memset(p, 0, dg.datalen);
+            p += dg.datalen;
+        }
+        if (dg.tail_len > 0) {
+            if (dg.tail) std::memcpy(p, dg.tail, dg.tail_len);
+            else         std::memset(p, 0, dg.tail_len);
+            p += dg.tail_len;
+        }
+        *reinterpret_cast<uint16_t*>(p) = host_to_le16(0);   // wkc
+        p += 2;
+    }
+
+    const uint32_t frame_len = static_cast<uint32_t>(p - dst);
+    if (master_.debug_flags_.txPackets) {
+        PacketDebugger::printEtherCATFrame(dst, frame_len, true, false);
+    }
+    if (channel_) {
+        return channel_->txCommitFrame(frame_len);
+    }
+    constexpr size_t kMinEthFrameNoFcs = 60;
+    return master_.sendWithEncapsulation(
+        tx_buf_, frame_len < kMinEthFrameNoFcs ? kMinEthFrameNoFcs
+                                              : frame_len);
 }
 
 uint8_t* CyclicDatapath::acquireTxFrame()
@@ -338,7 +441,7 @@ void CyclicDatapath::composeHeader(uint8_t* frame, Command cmd, uint8_t slot,
                                  uint16_t adp, uint16_t ado, uint16_t datalen,
                                  bool roundtrip)
 {
-    if (slot >= IPDOTransport::kNumCyclicSlots) return;
+    if (slot > kCyclicDcPoolPos) return;
     const uint8_t fi = cyclicFastIndex(slot);
     const uint8_t gen =
         (slot_gen_[fi] = slot_gen_[fi] ^ 1u);
@@ -451,7 +554,7 @@ void CyclicDatapath::drainChannel(int max_sweeps)
 bool CyclicDatapath::waitView(uint8_t slot, uint64_t token,
                                 uint32_t timeout_ns, CyclicSlotView& out)
 {
-    if (slot >= IPDOTransport::kNumCyclicSlots) return false;
+    if (slot > kCyclicDcPoolPos) return false;
     return waitViewImpl(cyclicFastIndex(slot), token, timeout_ns, out);
 }
 
@@ -459,7 +562,7 @@ bool CyclicDatapath::waitSliceView(uint8_t slice, uint64_t token,
                                    uint32_t timeout_ns, CyclicSlotView& out)
 {
     if (slice >= kNumSliceSlots) return false;
-    return waitViewImpl(slice, token, timeout_ns, out);
+    return waitViewImpl(sliceFastIndex(slice), token, timeout_ns, out);
 }
 
 bool CyclicDatapath::waitViewImpl(uint8_t fast_idx, uint64_t token,
@@ -655,8 +758,34 @@ uint32_t CyclicDatapath::waitMask(uint32_t slot_mask,
                                     uint32_t timeout_ns,
                                     CyclicSlotView* views)
 {
-    return waitMaskImpl(slot_mask, tokens, timeout_ns, views,
-                        kNumSliceSlots, IPDOTransport::kNumCyclicSlots);
+    // Mask bits are rotating-pool positions → resolve each set bit to
+    // its slots_ index and defer to the list wait.  The 32-bit mask can
+    // only express positions 0..31; waitPool() covers the full range.
+    if (!tokens || !views) return 0;
+    uint8_t idxs[32];
+    uint8_t mask_slots[32];
+    bool    arrived[32];
+    CyclicSlotView vtmp[32];
+    uint8_t count = 0;
+    uint32_t m = slot_mask;
+    while (m && count < 32) {
+        const uint8_t bit = static_cast<uint8_t>(__builtin_ctz(m));
+        m &= m - 1;
+        mask_slots[count] = bit;
+        idxs[count]       = cyclicFastIndex(bit);
+        ++count;
+    }
+    if (!count) return 0;
+    uint64_t ttmp[32];
+    for (uint8_t i = 0; i < count; ++i) ttmp[i] = tokens[mask_slots[i]];
+    waitListImpl(idxs, ttmp, count, timeout_ns, vtmp, arrived);
+    uint32_t result = 0;
+    for (uint8_t i = 0; i < count; ++i) {
+        if (!arrived[i]) continue;
+        views[mask_slots[i]] = vtmp[i];
+        result |= 1u << mask_slots[i];
+    }
+    return result;
 }
 
 uint32_t CyclicDatapath::waitSliceMask(uint32_t slice_mask,
@@ -664,42 +793,87 @@ uint32_t CyclicDatapath::waitSliceMask(uint32_t slice_mask,
                                      uint32_t timeout_ns,
                                      CyclicSlotView* views)
 {
-    return waitMaskImpl(slice_mask, tokens, timeout_ns, views,
-                        0, kNumSliceSlots);
+    if (!tokens || !views) return 0;
+    uint8_t idxs[kNumSliceSlots];
+    uint8_t mask_slots[kNumSliceSlots];
+    bool    arrived[kNumSliceSlots];
+    CyclicSlotView vtmp[kNumSliceSlots];
+    uint64_t ttmp[kNumSliceSlots];
+    uint8_t count = 0;
+    uint32_t m = slice_mask;
+    while (m && count < kNumSliceSlots) {
+        const uint8_t bit = static_cast<uint8_t>(__builtin_ctz(m));
+        m &= m - 1;
+        if (bit >= kNumSliceSlots) break;
+        mask_slots[count] = bit;
+        idxs[count]       = sliceFastIndex(bit);
+        ttmp[count]       = tokens[bit];
+        ++count;
+    }
+    if (!count) return 0;
+    waitListImpl(idxs, ttmp, count, timeout_ns, vtmp, arrived);
+    uint32_t result = 0;
+    for (uint8_t i = 0; i < count; ++i) {
+        if (!arrived[i]) continue;
+        views[mask_slots[i]] = vtmp[i];
+        result |= 1u << mask_slots[i];
+    }
+    return result;
 }
 
-uint32_t CyclicDatapath::waitMaskImpl(uint32_t slot_mask,
-                                    const uint64_t* tokens,
-                                    uint32_t timeout_ns,
-                                    CyclicSlotView* views,
-                                    uint8_t slot_base, uint8_t slot_count)
+uint8_t CyclicDatapath::waitPool(const uint8_t* positions,
+                                 const uint64_t* tokens,
+                                 uint8_t count, uint32_t timeout_ns,
+                                 CyclicSlotView* views, bool* arrived)
 {
-    // Q3: one wake for the whole mask — a sliced collect pays a single
-    // ppoll registration instead of one sleep per slice.  Each wake
-    // re-scans all outstanding bits; a deposit on ANY slot is progress.
-    slot_mask &= (slot_count >= 32) ? 0xFFFFFFFFu
-                                  : ((1u << slot_count) - 1u);
-    if (!slot_mask || !tokens || !views) return 0;
+    if (!positions || !tokens || !views || !arrived || !count ||
+        count > kCyclicDcPoolPos + 1) return 0;
+    uint8_t idxs[kCyclicDcPoolPos + 1];
+    for (uint8_t i = 0; i < count; ++i) {
+        if (positions[i] > kCyclicDcPoolPos) return 0;
+        idxs[i] = cyclicFastIndex(positions[i]);
+    }
+    return waitListImpl(idxs, tokens, count, timeout_ns, views, arrived);
+}
+
+uint8_t CyclicDatapath::waitListImpl(const uint8_t* fast_idxs,
+                                     const uint64_t* tokens,
+                                     uint8_t count,
+                                     uint32_t timeout_ns,
+                                     CyclicSlotView* views,
+                                     bool* arrived)
+{
+    // Q3: one wake for the whole list — a pipelined collect pays a
+    // single ppoll registration instead of one sleep per request.  Each
+    // wake re-scans all outstanding entries; a deposit on ANY slot is
+    // progress.
+    if (!fast_idxs || !tokens || !views || !arrived || !count) return 0;
+    std::memset(arrived, 0, count);
+    bool filled[kCyclicDcPoolPos + 1];
+    std::memset(filled, 0, count);
 
     auto& clock = Tether::Platform::Clock::instance();
     const int64_t deadline_ns =
         clock.getMicroseconds() * 1000 + static_cast<int64_t>(timeout_ns);
 
-    // Outstanding bits → arrived so far; fill views for arrived slots.
-    auto scan = [&]() -> uint32_t {
-        uint32_t outstanding = 0;
-        for (uint8_t s = 0; s < slot_count; ++s) {
-            if (!(slot_mask & (1u << s))) continue;
-            if (slots_[slot_base + s].seq.load(std::memory_order_seq_cst)
-                != tokens[s]) continue;
-            outstanding |= 1u << s;
+    // Outstanding entries → arrived so far; fill views for arrived slots.
+    auto scan = [&]() -> uint8_t {
+        uint8_t n_out = 0;
+        for (uint8_t s = 0; s < count; ++s) {
+            if (arrived[s]) continue;
+            if (slots_[fast_idxs[s]].seq.load(std::memory_order_seq_cst)
+                == tokens[s]) {
+                ++n_out;
+            } else {
+                arrived[s] = true;
+            }
         }
-        return outstanding;
+        return n_out;
     };
-    auto fill = [&](uint32_t arrived) {
-        for (uint8_t s = 0; s < slot_count; ++s) {
-            if (!(arrived & (1u << s))) continue;
-            auto& slot = slots_[slot_base + s];
+    auto fill = [&]() {
+        for (uint8_t s = 0; s < count; ++s) {
+            if (!arrived[s] || filled[s]) continue;
+            auto& slot = slots_[fast_idxs[s]];
             for (int tries = 0; tries < 8; ++tries) {
                 const uint64_t s0 = slot.seq.load(std::memory_order_acquire);
                 views[s].cmd     = slot.cmd;
@@ -717,7 +891,13 @@ uint32_t CyclicDatapath::waitMaskImpl(uint32_t slot_mask,
                                                : nullptr;
                 if (slot.seq.load(std::memory_order_acquire) == s0) break;
             }
+            filled[s] = true;
         }
+    };
+    auto arrived_count = [&]() -> uint8_t {
+        uint8_t n = 0;
+        for (uint8_t s = 0; s < count; ++s) n += arrived[s] ? 1 : 0;
+        return n;
     };
 
     wait_calls_.fetch_add(1, std::memory_order_relaxed);
@@ -726,8 +906,8 @@ uint32_t CyclicDatapath::waitMaskImpl(uint32_t slot_mask,
     // an earlier deadline become visible here instead of wedging the ring.
     drainChannel();
 
-    uint32_t outstanding = scan();
-    if (!outstanding) { fill(slot_mask); return slot_mask; }
+    uint8_t outstanding = scan();
+    if (!outstanding) { fill(); return count; }
 
     struct WaiterGuard {
         std::atomic<int>& c;
@@ -758,22 +938,21 @@ uint32_t CyclicDatapath::waitMaskImpl(uint32_t slot_mask,
 
     while (true) {
         outstanding = scan();
-        if (!outstanding) { fill(slot_mask); return slot_mask; }
+        if (!outstanding) { fill(); return count; }
         if (master_.cancel_requested_.load(std::memory_order_acquire)) {
             drainChannel();   // leave the ring empty for the next run
-            const uint32_t arrived = slot_mask & ~outstanding;
-            fill(arrived);
-            return arrived;
+            scan();
+            fill();
+            return arrived_count();
         }
         const int64_t now_ns = clock.getMicroseconds() * 1000;
         if (deadline_ns - now_ns <= 0) {
             // Expired — drain anyway: stragglers get deposited (the gen
             // guard classifies them stale) and the ring is freed.
             drainChannel();
-            outstanding = scan();
-            const uint32_t arrived = slot_mask & ~outstanding;
-            fill(arrived);
-            return arrived;
+            scan();
+            fill();
+            return arrived_count();
         }
 
         if (channel_) {
@@ -783,9 +962,9 @@ uint32_t CyclicDatapath::waitMaskImpl(uint32_t slot_mask,
                     std::min<int64_t>(deadline_ns - now_ns, spin_ns);
                 while (clock.getMicroseconds() * 1000 < spin_end) {
                     bool any = false;
-                    for (uint8_t s = 0; s < slot_count; ++s) {
-                        if (!(slot_mask & (1u << s))) continue;
-                        if (slots_[slot_base + s].seq.load(
+                    for (uint8_t s = 0; s < count; ++s) {
+                        if (arrived[s]) continue;
+                        if (slots_[fast_idxs[s]].seq.load(
                                 std::memory_order_seq_cst) != tokens[s]) {
                             any = true; break;
                         }
@@ -810,10 +989,9 @@ uint32_t CyclicDatapath::waitMaskImpl(uint32_t slot_mask,
             const int ret = ppoll(fds, nfds, &ts, nullptr);
             if (ret < 0) {
                 if (errno == EINTR) continue;
-                outstanding = scan();
-                const uint32_t arrived = slot_mask & ~outstanding;
-                fill(arrived);
-                return arrived;
+                scan();
+                fill();
+                return arrived_count();
             }
             if (ret == 0) break;   // deadline reached — final scan below
 
@@ -850,10 +1028,9 @@ uint32_t CyclicDatapath::waitMaskImpl(uint32_t slot_mask,
     // ppoll deadline expired — drain + one last scan, then report what
     // arrived.
     drainChannel();
-    outstanding = scan();
-    const uint32_t arrived = slot_mask & ~outstanding;
-    fill(arrived);
-    return arrived;
+    scan();
+    fill();
+    return arrived_count();
 }
 
 bool CyclicDatapath::wait(uint8_t slot, uint64_t token,
@@ -861,7 +1038,7 @@ bool CyclicDatapath::wait(uint8_t slot, uint64_t token,
 {
     CyclicSlotView view{};
     if (!waitView(slot, token, timeout_ns, view)) return false;
-    out.idx     = IPDOTransport::kCyclicSlotBase + slot;
+    out.idx     = cyclicPoolWireIdx(slot);
     out.cmd     = static_cast<Command>(view.cmd);
     out.adp     = view.adp;
     out.ado     = view.ado;
@@ -924,8 +1101,8 @@ void CyclicDatapath::setup(CyclicWireMode wire_mode,
         // Under VLAN encapsulation the socket-A filter must keep the
         // VID clause AND add the fastpath-idx demux — SO_ATTACH_FILTER
         // replaces rather than stacks, so one composed program per
-        // socket is generated:  cyclic = encap ∧ idx∈[0xE0,0xFD],
-        // async = encap ∧ idx∉[0xE0,0xFD].  Without this the mirror
+        // socket is generated:  cyclic = encap ∧ idx∈[0x9C,0xFF]\{0xFE},
+        // async = encap ∧ its complement.  Without this the mirror
         // attach would strip the VID filter (accepting all traffic) and
         // tagged cyclic frames would double-deliver via the router.
         const auto& we = master_.config_.wire_encap;
@@ -942,8 +1119,9 @@ void CyclicDatapath::setup(CyclicWireMode wire_mode,
                     we.rx_vlan_lo,
                     we.rx_vlan_hi ? we.rx_vlan_hi : we.rx_vlan_lo};
             }
-            spec.first_idx_range =
-                CBPFIdxRange{kFastSlotBaseIdx, kFastSlotEndIdx};
+            spec.first_idx_range = CBPFIdxRange{
+                kFastSlotBaseIdx, kFastSlotEndIdx,
+                kFastSlotReservedIdx};   // 0xFE stays async
             accept_prog = CBPFProgramFactory::build(spec);
             spec.first_idx_exclude = true;
             async_prog = CBPFProgramFactory::build(spec);
@@ -1035,158 +1213,6 @@ void CyclicDatapath::teardown()
     }
     channel_.reset();
     active_image_mode_ = ImageMode::Buffered;
-}
-
-// ============================================================================
-
-// ============================================================================
-// Master forwarders — the public/test surface is unchanged; the state and
-// the work live on CyclicDatapath.
-// ============================================================================
-
-uint64_t Master::cyclicSlotToken(uint8_t slot) const
-{
-    return datapath_->slotToken(slot);
-}
-
-uint8_t Master::cyclicSlotGen(uint8_t slot) const
-{
-    return datapath_->slotGen(slot);
-}
-
-uint64_t Master::sliceSlotToken(uint8_t slice) const
-{
-    return datapath_->sliceSlotToken(slice);
-}
-
-uint8_t Master::sliceSlotGen(uint8_t slice) const
-{
-    return datapath_->sliceSlotGen(slice);
-}
-
-bool Master::sendSliceDatagram(Command cmd, uint8_t slice_slot,
-                               uint16_t adp, uint16_t ado,
-                               const void* data, uint16_t datalen,
-                               bool roundtrip)
-{
-    return datapath_->sendSliceDatagram(cmd, slice_slot, adp, ado,
-                                      data, datalen, roundtrip);
-}
-
-bool Master::waitSliceSlotView(uint8_t slice, uint64_t token,
-                               uint32_t timeout_ns, CyclicSlotView& out)
-{
-    return datapath_->waitSliceView(slice, token, timeout_ns, out);
-}
-
-uint32_t Master::waitSliceSlotMask(uint32_t slice_mask,
-                                   const uint64_t* tokens,
-                                   uint32_t timeout_ns,
-                                   CyclicSlotView* views)
-{
-    return datapath_->waitSliceMask(slice_mask, tokens, timeout_ns, views);
-}
-
-uint32_t Master::cyclicPayloadOffset() const
-{
-    return datapath_->payloadOffset();
-}
-
-bool Master::sendCyclicDatagram(Command cmd, uint8_t slot,
-                                uint16_t adp, uint16_t ado,
-                                const void* data, uint16_t datalen,
-                                bool roundtrip)
-{
-    return datapath_->sendDatagram(cmd, slot, adp, ado,
-                                   data, datalen, roundtrip);
-}
-
-uint8_t* Master::acquireCyclicTxFrame() { return datapath_->acquireTxFrame(); }
-
-void Master::composeCyclicHeader(uint8_t* frame, Command cmd, uint8_t slot,
-                                 uint16_t adp, uint16_t ado, uint16_t datalen,
-                                 bool roundtrip)
-{
-    datapath_->composeHeader(frame, cmd, slot, adp, ado, datalen, roundtrip);
-}
-
-bool Master::sendCyclicFrame(uint32_t frame_len)
-{
-    return datapath_->sendFrame(frame_len);
-}
-
-void Master::dispatchChannelFrame(const CyclicFrameView& v)
-{
-    datapath_->dispatchFrame(v);
-}
-
-bool Master::waitCyclicSlotView(uint8_t slot, uint64_t token,
-                                uint32_t timeout_ns, CyclicSlotView& out)
-{
-    return datapath_->waitView(slot, token, timeout_ns, out);
-}
-
-uint32_t Master::waitCyclicSlotMask(uint32_t slot_mask,
-                                    const uint64_t* tokens,
-                                    uint32_t timeout_ns,
-                                    CyclicSlotView* views)
-{
-    return datapath_->waitMask(slot_mask, tokens, timeout_ns, views);
-}
-
-bool Master::waitCyclicSlot(uint8_t slot, uint64_t token,
-                            uint32_t timeout_ns, RxDatagram& out)
-{
-    return datapath_->wait(slot, token, timeout_ns, out);
-}
-
-void Master::depositCyclicSlot(uint8_t idx, Command cmd,
-                               uint16_t adp, uint16_t ado,
-                               const uint8_t* payload, uint16_t datalen,
-                               uint16_t wkc, uint8_t gen)
-{
-    datapath_->deposit(idx, cmd, adp, ado, payload, datalen, wkc, gen);
-}
-
-void Master::publishCyclicSlotView(uint8_t idx, Command cmd,
-                                   uint16_t adp, uint16_t ado,
-                                   const uint8_t* payload, uint16_t datalen,
-                                   uint16_t wkc, uint32_t cookie,
-                                   uint64_t stamp_ns, uint8_t gen)
-{
-    datapath_->publishView(idx, cmd, adp, ado, payload, datalen,
-                           wkc, cookie, stamp_ns, gen);
-}
-
-void Master::setupCyclicDatapath(CyclicWireMode wire_mode,
-                                 ImageMode image_mode,
-                                 const std::string& shm_image_name,
-                                 uint32_t rx_spin_ns,
-                                 uint32_t slot_spin_ns,
-                                 CyclicLoopConfig::SlotWaitFallback slot_fallback,
-                                 bool strict_wkc,
-                                 const MemoryLockConfig& memlock)
-{
-    datapath_->setup(wire_mode, image_mode, shm_image_name, rx_spin_ns,
-                     slot_spin_ns, slot_fallback, strict_wkc, memlock);
-}
-
-void Master::teardownCyclicDatapath()
-{
-    datapath_->teardown();
-}
-
-ICyclicChannel* Master::cyclicChannel() const
-{
-    return datapath_->channel_.get();
-}
-
-ProcessImage& Master::processImage() { return datapath_->image_; }
-const ProcessImage& Master::processImage() const { return datapath_->image_; }
-
-bool Master::cyclicExchangeSuspended() const
-{
-    return datapath_->suspended();
 }
 
 } // namespace EtherCAT

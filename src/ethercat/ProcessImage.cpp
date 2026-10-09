@@ -8,6 +8,7 @@
 #include "tether/ethercat/CyclicChannel.hpp"
 #include "logging/Logger.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <ctime>
@@ -57,7 +58,8 @@ bool ProcessImage::configure(const Config& cfg) {
     releaseShm();
     rx_bytes_ = cfg.rx_bytes;
     tx_bytes_ = cfg.tx_bytes;
-    size_     = cfg.rx_bytes + cfg.tx_bytes;
+    size_     = std::max<uint32_t>(cfg.rx_bytes + cfg.tx_bytes,
+                                   cfg.image_bytes);
     mode_     = cfg.mode;
     entry_count_ = cfg.entry_count < kMaxEntries ? cfg.entry_count
                                                  : kMaxEntries;
@@ -107,7 +109,12 @@ bool ProcessImage::configure(const Config& cfg) {
     }
 
     // shm export forces Direct semantics — the regions are the segment.
-    if (cfg.shm_name && cfg.shm_name[0] != '\0') {
+    // The segment layout ([output rx][input tx][entries]) cannot express
+    // dead space left by reallocated slave windows (extent > rx+tx), so
+    // export is skipped for non-compact images rather than exporting a
+    // truncated view.
+    if (cfg.shm_name && cfg.shm_name[0] != '\0' &&
+        size_ == rx_bytes_ + tx_bytes_) {
         const uint32_t rows = cfg.shm_entry_capacity
             ? cfg.shm_entry_capacity
             : static_cast<uint32_t>(entry_count_);
