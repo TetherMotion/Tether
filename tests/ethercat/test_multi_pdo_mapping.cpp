@@ -463,14 +463,16 @@ TEST_F(LogicalAddrMultiPDOTest, BuildFromMultiPDOMultiSlave) {
     EXPECT_EQ(mgr_->totalRxPDOBytes(), 18u);  // 12 + 6
     EXPECT_EQ(mgr_->totalTxPDOBytes(), 24u);  // 16 + 8
 
-    // Slave 0 PDOs
+    // Per-slave contiguous windows: each slave's SM regions are laid out
+    // in config order, matching FMMUManager::configureFromMultiPDO.
+    // Slave 0 PDOs (window 12+16=28 @ 0x10000)
     EXPECT_EQ(mgr_->getPDOLogicalAddr(0, 0x1600), 0x10000u);
     EXPECT_EQ(mgr_->getPDOLogicalAddr(0, 0x1601), 0x10008u);
-    EXPECT_EQ(mgr_->getPDOLogicalAddr(0, 0x1A00), 0x10012u);  // 0x10000 + 18
+    EXPECT_EQ(mgr_->getPDOLogicalAddr(0, 0x1A00), 0x1000Cu);  // 0x10000 + 12
 
-    // Slave 1 PDOs
-    EXPECT_EQ(mgr_->getPDOLogicalAddr(1, 0x1600), 0x1000Cu);  // 0x10000 + 12
-    EXPECT_EQ(mgr_->getPDOLogicalAddr(1, 0x1A00), 0x10022u);  // 0x10012 + 16
+    // Slave 1 PDOs (window 6+8=14 @ 0x1001C)
+    EXPECT_EQ(mgr_->getPDOLogicalAddr(1, 0x1600), 0x1001Cu);  // 0x10000 + 28
+    EXPECT_EQ(mgr_->getPDOLogicalAddr(1, 0x1A00), 0x10022u);  // 0x1001C + 6
 }
 
 TEST_F(LogicalAddrMultiPDOTest, GetSlavePDOLogicalAddrs) {

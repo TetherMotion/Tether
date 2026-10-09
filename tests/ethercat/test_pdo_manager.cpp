@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <array>
 #include <cstring>
 #include <bit>
 
@@ -201,6 +202,11 @@ protected:
             .WillByDefault([](uint16_t idx) { return static_cast<uint16_t>(0u - idx); });
         ON_CALL(transport, allocIdx())
             .WillByDefault(Return(1));
+        // Default: no pre-registration support → SM activation and other
+        // batched paths fall back to sequential writeRegister calls, which
+        // is what the pre-batching tests exercise.
+        ON_CALL(transport, preRegisterResponseWaiter(_, _, _))
+            .WillByDefault(Return(IPDOTransport::kPreRegInvalid));
     }
 };
 
@@ -290,10 +296,12 @@ TEST_F(PDOManagerTest, ConfigureSlavesSMsCallsTransport) {
     cfg->sm[2] = SyncManagerConfig::process_output(0x1100, 8);
     cfg->sm[3] = SyncManagerConfig::process_input(0x1180, 4);
 
-    // Each SM write: disable(1) + phys_addr(1) + length(1) + control(1) + activate(1) = 5 calls per SM
-    // SM0 and SM1 are Unused, SM2 and SM3 are configured → 10 register writes
+    // Each SM write: 8-byte register-block write(1) + activate(1) = 2 calls
+    // per SM.  SM0 and SM1 are Unused, SM2 and SM3 are configured → 4
+    // register writes (activation uses the sequential fallback since the
+    // fixture's preRegisterResponseWaiter defaults to kPreRegInvalid).
     EXPECT_CALL(transport, writeRegister(_, _, _, _, _))
-        .Times(::testing::AtLeast(10))
+        .Times(::testing::AtLeast(4))
         .WillRepeatedly(Return(true));
 
     EXPECT_TRUE(mgr.configureSlavesSMs(0));
@@ -350,25 +358,37 @@ TEST_F(PDOManagerTest, WriteSMConfigUsesCorrectRegisters) {
     auto* cfg = &mgr.slaveConfigs()[0];
     cfg->sm[2] = SyncManagerConfig::process_output(0x1100, 8);
 
-    // SM2 base = 0x0810.  Expect writes to:
-    //   0x0816 (activate/disable), 0x0810 (phys_addr), 0x0812 (length),
-    //   0x0814 (control), 0x0816 (activate/enable)
+    // SM2 base = 0x0810.  Sequence: 1-byte disable at 0x0816, one 5-byte
+    // register-block write at 0x0810 (phys_addr@+0, length@+2, control@+4 —
+    // byte 5 is read-only status and byte 7 PDI control must not be
+    // written), then a 1-byte activate at 0x0816.
     std::vector<uint16_t> addresses_written;
+    std::vector<uint16_t> lengths_written;
+    std::array<uint8_t, 5> block_written{};
 
     ON_CALL(transport, writeRegister(_, _, _, _, _))
-        .WillByDefault([&addresses_written](uint16_t, uint16_t ado, const void*, uint16_t, unsigned) {
+        .WillByDefault([&](uint16_t, uint16_t ado, const void* data, uint16_t len, unsigned) {
             addresses_written.push_back(ado);
+            lengths_written.push_back(len);
+            if (ado == 0x0810 && data && len == 5)
+                std::memcpy(block_written.data(), data, 5);
             return true;
         });
 
     EXPECT_TRUE(mgr.configureSlavesSMs(0));
 
-    ASSERT_GE(addresses_written.size(), 5u);
+    ASSERT_GE(addresses_written.size(), 3u);
     EXPECT_EQ(addresses_written[0], 0x0816u);  // SM2 activate (disable)
-    EXPECT_EQ(addresses_written[1], 0x0810u);  // SM2 phys_addr
-    EXPECT_EQ(addresses_written[2], 0x0812u);  // SM2 length
-    EXPECT_EQ(addresses_written[3], 0x0814u);  // SM2 control
-    EXPECT_EQ(addresses_written[4], 0x0816u);  // SM2 activate (enable)
+    EXPECT_EQ(addresses_written[1], 0x0810u);  // SM2 register block
+    EXPECT_EQ(lengths_written[1], 5u);
+    EXPECT_EQ(addresses_written[2], 0x0816u);  // SM2 activate (enable)
+
+    // Block layout: phys_addr(0x1100)@0, length(8)@2, control@4
+    uint16_t block_addr, block_len;
+    std::memcpy(&block_addr, block_written.data() + 0, 2);
+    std::memcpy(&block_len,  block_written.data() + 2, 2);
+    EXPECT_EQ(block_addr, 0x1100u);
+    EXPECT_EQ(block_len, 8u);
 }
 
 // ============================================================================
@@ -613,6 +633,11 @@ TEST_F(PDOManagerTest, ExchangePhysicalSendsAndReceives) {
     int rx_i = mgr.mapping().add_rxpdo(0, sizeof(uint32_t));
     int tx_i = mgr.mapping().add_txpdo(0, sizeof(uint32_t));
     ASSERT_GE(rx_i, 0); ASSERT_GE(tx_i, 0);
+    // exchangePhysical only touches entries whose physical_offset lands in
+    // the slave's SM region (per-slave filtering).  finalizeMapping()
+    // normally assigns these; set them directly here.
+    mgr.mapping().get_entry_mut(static_cast<size_t>(rx_i))->physical_offset = 0x1100;
+    mgr.mapping().get_entry_mut(static_cast<size_t>(tx_i))->physical_offset = 0x1180;
     *mgr.mapping().entryDataAs<uint32_t>(static_cast<size_t>(rx_i)) = 0xBBCC;
 
     // exchangePhysical pre-registers response slots before sending

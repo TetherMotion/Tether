@@ -523,20 +523,23 @@ bool PDOManager::configureSlavesSMs(uint16_t slave_index) {
 
     // Activate all enabled SMs in a single frame — one 1-byte APWR per
     // SM with pre-registered waiters, instead of one round-trip each.
+    // Falls back to sequential activate writes when the transport can't
+    // pre-register waiters or the batched send/wait fails (activation
+    // writes are idempotent, so a partial batched send is safe to redo).
     {
         uint8_t act_vals[4];
         MultiDatagramSpec specs[4];
         RxDatagram resps[4];
         size_t slots[4];
         size_t n = 0;
-        bool prereg_ok = true;
+        bool batch_ok = true;
         for (int sm = 0; sm < 4; ++sm) {
             if (cfg.sm[sm].type == PDO::SyncManagerType::Unused) continue;
             act_vals[sm] = cfg.sm[sm].enable ? SM_ACT_ENABLE : 0x00;
             const uint8_t idx = transport_.allocIdx();
             const size_t slot = transport_.preRegisterResponseWaiter(
                 idx, resps[n].data, sizeof(resps[n].data));
-            if (slot == IPDOTransport::kPreRegInvalid) { prereg_ok = false; break; }
+            if (slot == IPDOTransport::kPreRegInvalid) { batch_ok = false; break; }
             slots[n] = slot;
             specs[n] = {Command::APWR, idx, adp,
                         static_cast<uint16_t>(
@@ -545,23 +548,32 @@ bool PDOManager::configureSlavesSMs(uint16_t slave_index) {
                         &act_vals[sm], 1, true};
             ++n;
         }
-        if (prereg_ok && n > 0) {
+        if (batch_ok && n > 0) {
             if (transport_.sendMultiDatagram(specs, n) == 0) {
-                TETHER_LOGE(TAG, "SM activate frame send failed for {}",
+                TETHER_LOGW(TAG, "SM activate frame send failed for {} — "
+                                 "falling back to sequential writes",
                             slavePrefix(slave_index).c_str());
-                return false;
-            }
-            for (size_t i = 0; i < n; ++i) {
-                if (!transport_.waitForPreRegistered(slots[i], 200, resps[i])) {
-                    TETHER_LOGE(TAG, "SM{}: activate not confirmed for {}",
-                                i, slavePrefix(slave_index).c_str());
-                    return false;
+                batch_ok = false;
+            } else {
+                for (size_t i = 0; i < n; ++i) {
+                    if (!transport_.waitForPreRegistered(slots[i], 200, resps[i])) {
+                        TETHER_LOGW(TAG, "SM{}: activate not confirmed for {} — "
+                                         "falling back to sequential writes",
+                                    i, slavePrefix(slave_index).c_str());
+                        batch_ok = false;
+                    }
                 }
             }
-        } else if (!prereg_ok) {
+        }
+        if (!batch_ok) {
+            // Release any pre-registered slots before their response
+            // buffers (resps[]) go out of scope.
+            for (size_t i = 0; i < n; ++i)
+                transport_.cancelPreRegistered(slots[i]);
             // Fallback: sequential activate writes.
             for (int sm = 0; sm < 4; ++sm) {
                 if (cfg.sm[sm].type == PDO::SyncManagerType::Unused) continue;
+                act_vals[sm] = cfg.sm[sm].enable ? SM_ACT_ENABLE : 0x00;
                 if (!transport_.writeRegister(
                         adp,
                         static_cast<uint16_t>(

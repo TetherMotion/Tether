@@ -116,16 +116,19 @@ TEST_F(LogicalAddressManagerTest, BuildAddressMapMultiSlave) {
     EXPECT_EQ(mgr.totalTxPDOBytes(), 18u);  // 12 + 6
     EXPECT_EQ(mgr.totalLogicalSize(), 30u);
 
-    // Slave 0 addresses
+    // Each slave's [RxPDO][TxPDO] region is laid out contiguously
+    // (sticky per-slave windows — the FMMU is programmed against the
+    // window base, so slaves are appended, not re-packed by direction).
+    // Slave 0 addresses: Rx@0x10000(8) + Tx@0x10008(12) = ends 0x10014
     EXPECT_EQ(mgr.getRxPDOLogicalAddr(0), 0x10000u);
     EXPECT_EQ(mgr.getRxPDOLength(0), 8u);
-    EXPECT_EQ(mgr.getTxPDOLogicalAddr(0), 0x1000Cu);  // 0x10000 + 12
+    EXPECT_EQ(mgr.getTxPDOLogicalAddr(0), 0x10008u);
     EXPECT_EQ(mgr.getTxPDOLength(0), 12u);
 
-    // Slave 1 addresses
-    EXPECT_EQ(mgr.getRxPDOLogicalAddr(1), 0x10008u);
+    // Slave 1 addresses: Rx@0x10014(4) + Tx@0x10018(6) = ends 0x1001E
+    EXPECT_EQ(mgr.getRxPDOLogicalAddr(1), 0x10014u);
     EXPECT_EQ(mgr.getRxPDOLength(1), 4u);
-    EXPECT_EQ(mgr.getTxPDOLogicalAddr(1), 0x10018u);  // 0x1000C + 12
+    EXPECT_EQ(mgr.getTxPDOLogicalAddr(1), 0x10018u);
     EXPECT_EQ(mgr.getTxPDOLength(1), 6u);
 }
 
@@ -393,14 +396,20 @@ TEST_F(LRWExchangeTest, MultipleTxPDOEntriesSameSlave) {
     // Previously, all entries for one slave used the same addr_map_ offset,
     // causing all modules on a slave to read identical data.
 
-    // Reconfigure: slave 0 with 24-byte TxPDO (3 × 8-byte entries)
+    // Fresh manager — slave windows are sticky/append-only, so a rebuild
+    // on `mgr` would append the resized window after the SetUp map rather
+    // than repacking it.
+    LogicalAddressManager mgr2{transport};
+    mgr2.init();
+
+    // Configure: slave 0 with 24-byte TxPDO (3 × 8-byte entries)
     SlaveConfig configs[kMaxPDOSlaves] = {};
     configs[0].configured = true;
     configs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 0);
     configs[0].rxpdo_size = 0;
     configs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 24);
     configs[0].txpdo_size = 24;
-    mgr.buildAddressMap(configs, 1);
+    mgr2.buildAddressMap(configs, 1);
 
     PDOMapping multi_mapping;
     int t0 = multi_mapping.add_txpdo(0, 8, 0x1A00, PDOAddressMode::Logical);
@@ -427,7 +436,7 @@ TEST_F(LRWExchangeTest, MultipleTxPDOEntriesSameSlave) {
             return true;
         }));
 
-    EXPECT_TRUE(mgr.exchangeAllLRW(multi_mapping));
+    EXPECT_TRUE(mgr2.exchangeAllLRW(multi_mapping));
 
     // Each entry should have received its own distinct data
     uint8_t* b0 = reinterpret_cast<uint8_t*>(&tx0);
@@ -844,13 +853,13 @@ TEST_F(CyclicWkcTest, MultiSliceDerivationPerSlice) {
     buildTwoSlaveMap();
     ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
     EXPECT_EQ(mgr.cyclicSliceCount(), 3u);
-    // Layout: s0 Rx [0,4), s1 Rx [4,8), s0 Tx [8,16).
-    // slice0 [0,6):  s0 Rx + s1 Rx → 1+1 = 2
-    EXPECT_EQ(mgr.expectedWkc(0), 2u);
-    // slice1 [6,12): s1 Rx [4,8) ∩ + s0 Tx [8,16) ∩ → 1 + 2 = 3
-    EXPECT_EQ(mgr.expectedWkc(1), 3u);
-    // slice2 [12,16): s0 Tx only → 2
-    EXPECT_EQ(mgr.expectedWkc(2), 2u);
+    // Per-slave contiguous layout: s0 Rx [0,4), s0 Tx [4,12), s1 Rx [12,16).
+    // slice0 [0,6):  s0 Rx + s0 Tx ∩ → 1+2 = 3
+    EXPECT_EQ(mgr.expectedWkc(0), 3u);
+    // slice1 [6,12): s0 Tx only → 2
+    EXPECT_EQ(mgr.expectedWkc(1), 2u);
+    // slice2 [12,16): s1 Rx only → 1
+    EXPECT_EQ(mgr.expectedWkc(2), 1u);
     EXPECT_EQ(transport.send_calls, 3);   // one LRW per slice
 }
 
@@ -878,9 +887,9 @@ protected:
     LogicalAddressManager mgr{transport};
     PDOMapping mapping;
 
-    /// Same two-slave layout as CyclicWkcTest: s0 Rx[0,4) Tx[8,16),
-    /// s1 Rx[4,8) — 16 B image.  describeEntries order: 0=s0 Rx,
-    /// 1=s0 Tx, 2=s1 Rx.
+    /// Same two slaves as CyclicWkcTest with per-slave contiguous
+    /// windows: s0 Rx[0,4) Tx[4,12), s1 Rx[12,16) — 16 B image.
+    /// describeEntries order: 0=s0 Rx, 1=s0 Tx, 2=s1 Rx.
     void buildMap() {
         SlaveConfig configs[kMaxPDOSlaves] = {};
         configs[0].configured = true;
@@ -948,15 +957,15 @@ TEST_F(PdoSliceTest, EntrySpecSendsOnDedicatedSliceSlot) {
 TEST_F(PdoSliceTest, AdjacentEntriesMergeIntoOneRun) {
     burnImageCycle();
     PDOSliceSpec spec;
-    spec.entries = {0, 2};                 // [0,4)+[4,8) → one run [0,8)
+    spec.entries = {0, 1};                 // s0 Rx[0,4)+s0 Tx[4,12) → one run [0,12)
     ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
     mgr.setImageExchangeDecimation(1000);
-    transport.slice_resp_len_[0] = 8;
-    transport.slice_resp_wkc_[0] = 2;      // s0 +1, s1 +1
+    transport.slice_resp_len_[0] = 12;
+    transport.slice_resp_wkc_[0] = 3;      // s0 Rx write +1, s0 Tx read +2
 
     ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
     EXPECT_EQ(transport.slice_send_calls, 1);   // merged — one datagram
-    EXPECT_EQ(transport.slice_sent_len_[0], 8u);
+    EXPECT_EQ(transport.slice_sent_len_[0], 12u);
     EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
     EXPECT_EQ(mgr.getStats().wkc_errors, 0u);
 }
@@ -964,13 +973,13 @@ TEST_F(PdoSliceTest, AdjacentEntriesMergeIntoOneRun) {
 TEST_F(PdoSliceTest, DisjointEntriesConsumeOneSlotEach) {
     burnImageCycle();
     PDOSliceSpec spec;
-    spec.entries = {0, 1};                 // [0,4) and [8,16) → 2 runs
+    spec.entries = {0, 2};                 // s0 Rx[0,4) and s1 Rx[12,16) → 2 runs
     ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
     mgr.setImageExchangeDecimation(1000);
     transport.slice_resp_len_[0] = 4;
     transport.slice_resp_wkc_[0] = 1;
-    transport.slice_resp_len_[1] = 8;
-    transport.slice_resp_wkc_[1] = 2;      // s0 reads TxPDO → +2
+    transport.slice_resp_len_[1] = 4;
+    transport.slice_resp_wkc_[1] = 1;      // s1 Rx write → +1
 
     ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
     EXPECT_EQ(transport.slice_send_calls, 2);   // slots 0 and 1
@@ -999,7 +1008,7 @@ TEST_F(PdoSliceTest, EveryNDecimatesSliceExchange) {
 TEST_F(PdoSliceTest, OnExchangeCallbackFiresPerRun) {
     burnImageCycle();
     PDOSliceSpec spec;
-    spec.entries = {0, 1};                 // two runs
+    spec.entries = {0, 2};                 // s0 Rx[0,4) + s1 Rx[12,16) → two runs
     int calls = 0;
     uint8_t  last_run = 0xFF;
     uint16_t last_len = 0, last_wkc = 0;
@@ -1010,14 +1019,14 @@ TEST_F(PdoSliceTest, OnExchangeCallbackFiresPerRun) {
     ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
     mgr.setImageExchangeDecimation(1000);
     transport.slice_resp_len_[0] = 4;  transport.slice_resp_wkc_[0] = 1;
-    transport.slice_resp_len_[1] = 8;  transport.slice_resp_wkc_[1] = 2;
+    transport.slice_resp_len_[1] = 4;  transport.slice_resp_wkc_[1] = 1;
 
     ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
     EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
     EXPECT_EQ(calls, 2);
     EXPECT_EQ(last_run, 1);
-    EXPECT_EQ(last_len, 8u);
-    EXPECT_EQ(last_wkc, 2u);
+    EXPECT_EQ(last_len, 4u);
+    EXPECT_EQ(last_wkc, 1u);
 }
 
 TEST_F(PdoSliceTest, StaleGenDroppedThenRetrySucceeds) {

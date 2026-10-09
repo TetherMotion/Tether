@@ -227,8 +227,15 @@ protected:
 
         ON_CALL(transport_, readRegister(0, REG_AL_STATUS, _, _))
             .WillByDefault(Invoke([this](uint16_t, uint16_t, void* data, uint16_t size) -> bool {
+                // The poller fetches AL_STATUS..AL_STATUS_CODE in one
+                // 6-byte read (0x0130..0x0135): status at +0, the error
+                // bit at +1, AL_STATUS_CODE at +4.
                 uint16_t val = slave0_al_status.load();
                 if (data && size >= 2) std::memcpy(data, &val, 2);
+                if (data && size >= 6) {
+                    uint16_t code = slave0_al_code.load();
+                    std::memcpy(static_cast<uint8_t*>(data) + 4, &code, 2);
+                }
                 return true;
             }));
         ON_CALL(transport_, readRegister(0, REG_AL_STATUS_CODE, _, _))

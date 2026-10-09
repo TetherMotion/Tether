@@ -888,10 +888,12 @@ TEST_F(AS715NErC11IntegrationTest, ResetAllFaultsRoutesNonDCSyncToF31) {
 /**
  * @test AS715NErC11IntegrationTest/ResetAllFaultsRoutesDCSyncToSyncRecovery
  *
- * ErC1.1 (0x0C11) is a DC-sync error: resetAllFaults() must route it through
- * handleNoSyncError(), which still drives resetFault() underneath — the
- * observable contract is that the fault ends up cleared and the F31.00
- * pulse reached the drive.
+ * ErC1.1 (0x0C11) is a DC-sync error: the F31.00 reset cannot clear it
+ * while DC is not running (the latch re-arms whenever cyclic exchange
+ * stops), so resetAllFaults() reports the fault, defers, and returns —
+ * the drive clears it on its own once cyclic PDO exchange + DC lock are
+ * re-established.  The observable contract is that no F31.00 pulse is
+ * sent.
  */
 TEST_F(AS715NErC11IntegrationTest, ResetAllFaultsRoutesDCSyncToSyncRecovery) {
     AS715NErC11SlaveResponder responder(*pair_);
@@ -910,6 +912,7 @@ TEST_F(AS715NErC11IntegrationTest, ResetAllFaultsRoutesDCSyncToSyncRecovery) {
         if (w.index == 0x2031u && w.subindex == 0x01u && w.value == 1u)
             saw_f31_pulse = true;
     }
-    EXPECT_TRUE(saw_f31_pulse)
-        << "DC-sync recovery must pulse F31.00 via resetFault()";
+    EXPECT_FALSE(saw_f31_pulse)
+        << "DC-sync stale latch must NOT pulse F31.00 — the drive clears it "
+           "itself once DC lock is re-established";
 }

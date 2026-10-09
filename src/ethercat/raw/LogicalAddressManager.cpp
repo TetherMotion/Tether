@@ -147,7 +147,7 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
                 slave_count, total_rxpdo_bytes_, total_txpdo_bytes_,
                 total_rxpdo_bytes_ + total_txpdo_bytes_);
 
-    ensureCyclicPayload(total_rxpdo_bytes_ + total_txpdo_bytes_);
+    ensureCyclicPayload(imageBytes());
     return true;
 }
 
@@ -271,7 +271,7 @@ bool LogicalAddressManager::buildAddressMapFromMultiPDO(
                     return total;
                 }());
 
-    ensureCyclicPayload(total_rxpdo_bytes_ + total_txpdo_bytes_);
+    ensureCyclicPayload(imageBytes());
     return true;
 }
 
@@ -345,7 +345,7 @@ void LogicalAddressManager::resetStats() { stats_ = Stats{}; }
 
 bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
     return exchangeLRWImpl(mapping, 0,
-                           total_rxpdo_bytes_ + total_txpdo_bytes_,
+                           imageBytes(),
                            /*enforce_slice_limit=*/false);
 }
 
@@ -489,7 +489,7 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
         stats_.send_errors++;
         return false;
     }
-    const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
+    const uint32_t total_data = imageBytes();
     if (total_data == 0 && slices_.empty()) return true;
 
     // Whole-image decimation: with image_every_n_ > 1 the full exchange
@@ -711,7 +711,7 @@ bool LogicalAddressManager::cyclicCollect(const PDO::PDOMapping& mapping,
     if (!transport_.supportsCyclicFastPath()) {
         return true;   // cyclicSend already ran the atomic legacy exchange
     }
-    const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
+    const uint32_t total_data = imageBytes();
     const uint8_t nslices = cyclic_pending_count_;
     // Nothing pending means the send half didn't emit (skipped, paused, or
     // failed — already counted there).  An empty collect is not an error —
@@ -981,7 +981,7 @@ uint32_t LogicalAddressManager::definePDOSlice(
         return kInvalid;
     }
     const uint32_t max_len = maxSliceLength();
-    const uint32_t img_len = total_rxpdo_bytes_ + total_txpdo_bytes_;
+    const uint32_t img_len = imageBytes();
     size_t total = n;
     for (size_t i = 0; i < n; ++i) {
         if (rr[i].second > max_len) {
@@ -1049,8 +1049,7 @@ bool LogicalAddressManager::replanSlices(const PDO::PDOMapping& mapping)
             auto& run = slice.runs[i];
             run.off = rr[i].first;
             run.len = rr[i].second;
-            const uint32_t img_len =
-                total_rxpdo_bytes_ + total_txpdo_bytes_;
+            const uint32_t img_len = imageBytes();
             if (run.len > max_len || run.off + run.len > img_len) {
                 TETHER_LOGE(TAG, "PDO slice replan: run [{}+{}B] exceeds "
                                  "one datagram or the image — slice "
@@ -1178,7 +1177,7 @@ bool LogicalAddressManager::collectSlices(const PDO::PDOMapping& mapping,
     bool bank_touched = false;
     const bool img_active = image && image->configured() &&
                             image->mode() != ImageMode::Buffered;
-    const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
+    const uint32_t total_data = imageBytes();
     const bool epoch_ok = (slice_epoch_ == mapping.epoch());
 
     for (auto& slice : slices_) {
@@ -1407,7 +1406,7 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
     }
 
     static constexpr size_t kMaxLRWPayload = PDO::kMaxPDOSize * PDO::kMaxPDOSlaves;
-    const uint32_t total_data = total_rxpdo_bytes_ + total_txpdo_bytes_;
+    const uint32_t total_data = imageBytes();
     if (length == 0) return true;
 
     if (total_data > kMaxLRWPayload) {
