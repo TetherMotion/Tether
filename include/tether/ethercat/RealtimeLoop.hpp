@@ -63,6 +63,14 @@ public:
         int pdo_priority = 80;   ///< PDO thread SCHED_FIFO priority
         int dc_priority  = 90;   ///< DC thread SCHED_FIFO priority (higher = more urgent)
 
+        /// CPU affinity for the RT threads (-1 = unpinned).  On the
+        /// managed cyclic path these come from Master::CpuIsolationConfig;
+        /// standalone users (e.g. EtherCATDC's internal loop) set them
+        /// directly — typically from a Tether::Platform::CpuIsolation
+        /// claim.
+        int pdo_cpu_affinity = -1;
+        int dc_cpu_affinity  = -1;
+
         /// Jitter thresholds for the PDO thread (auto-derived from cycle_period_us)
         JitterConfig pdo_jitter = JitterConfig::defaults(1000);
         /// Jitter thresholds for the DC thread (auto-derived from sync period)

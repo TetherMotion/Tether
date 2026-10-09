@@ -95,6 +95,11 @@ struct DCConfig {
     /// All other DC-capable slaves get SYNC signals as normal.
     /// Empty by default (all slaves enabled).
     std::vector<uint16_t> sync_disabled_slaves;
+    /// CPU affinity for the internal realtime loop's threads
+    /// (-1 = unpinned).  Typically filled from a
+    /// Tether::Platform::CpuIsolation claim.
+    int pdo_cpu_affinity = -1;
+    int dc_cpu_affinity  = -1;
 
     static DCConfig defaults() {
         return DCConfig{
