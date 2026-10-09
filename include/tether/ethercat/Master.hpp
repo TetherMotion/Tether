@@ -57,6 +57,7 @@
 #include "tether/ethercat/SlaveDiscoveryManager.hpp"
 #include "tether/ethercat/DC.hpp"
 #include "tether/ethercat/Types.hpp"
+#include "tether/ethercat/CyclicHealth.hpp"
 #include "tether/ethercat/TransactionRouter.hpp"
 #include "tether/ethercat/ESIFile.hpp"
 #include "tether/platform/MessageQueue.hpp"
@@ -136,6 +137,8 @@ class FaultDetector;
 class IFaultTransport;
 class SlaveStatusPoller;
 class SlaveSupervisor;
+class WatchdogController;
+class MailboxRecovery;
 class Slave;
 class NonExistingSlave;
 
@@ -638,57 +641,7 @@ public:
      * collect outcome; pdo_slice_health does the same for user-defined
      * PDO slices.
      */
-    struct CyclicHealth {
-        // --- executor level ---
-        uint64_t cycles             = 0;  ///< cyclic_loop_ cycle_count
-        uint64_t exchange_errors    = 0;  ///< cycles whose exchange returned false
-        uint64_t missed_deadlines   = 0;
-        // --- protocol level (LogicalAddressManager) ---
-        uint32_t exchanges_ok       = 0;
-        uint32_t wire_loss          = 0;  ///< replies that never came back
-        uint32_t wkc_errors         = 0;
-        uint32_t stale_responses    = 0;
-        uint32_t send_errors        = 0;
-        /// Wire RTT of in-generation replies (emit -> kernel RX stamp),
-        /// in microseconds.  Splits "late" from "lost": stale_responses
-        /// counts deposits arriving after their deadline (late echo of a
-        /// previous send), so wire_loss - stale approximates true
-        /// non-return.
-        uint32_t rtt_us_min         = 0;
-        uint32_t rtt_us_avg         = 0;
-        uint32_t rtt_us_max         = 0;
-        uint32_t rtt_samples        = 0;
-        // --- channel level (real local loss) ---
-        uint64_t rx_bank_drops      = 0;  ///< rxPoll couldn't emit (banks held)
-        /// Kernel-side drops on the cyclic socket (tp_drops share seen by
-        /// this caller) — frames that passed the filter but found no free
-        /// ring slot.  Rising while rx_bank_drops stays 0 = the ring
-        /// wasn't drained; rising together with wire_loss = real loss.
-        uint64_t kernel_rx_drops    = 0;
-        // --- transport level (informational — correctly discarded strays) ---
-        uint64_t unrouted_datagrams = 0;
-        uint64_t rx_queue_overflow  = 0;
-        // --- datapath liveness (diagnose "is the collect running?") ---
-        uint64_t collect_calls      = 0;  ///< split-collect task invocations
-        uint64_t wait_calls         = 0;  ///< datapath wait invocations
-        uint64_t dispatch_frames    = 0;  ///< frames consumed from the ring
-        uint64_t dispatch_unrouted  = 0;  ///< consumed frames with no slot
-        // --- per-slice detail ---
-        /// Slices whose last outcome was Stale for many consecutive
-        /// cycles — the reply RTT exceeds one whole period (each cycle
-        /// only ever sees the previous cycle's echo).  Distinct from a
-        /// transient stale, which the gen-guard retry absorbs.
-        uint8_t slices_stuck_stale  = 0;
-        uint8_t image_slice_count   = 0;
-        std::array<CyclicSliceHealth, kNumCyclicSlots> image_slices{};
-        std::vector<CyclicSliceHealth> pdo_slice_health;
-
-        /// Multi-line human-readable dump for failure logging: one
-        /// counters line, a stuck-stale warning line when any slice only
-        /// ever sees the previous cycle's echo, then one line per slice
-        /// whose last outcome was not Ok.  Allocation — non-RT callers.
-        std::string describe() const;
-    };
+    using CyclicHealth = ::EtherCAT::CyclicHealth;
     CyclicHealth cyclicHealth() const;
 
     /**
@@ -724,6 +677,48 @@ public:
 
     /** Route a received Ethernet frame to the internal parser. */
     void handleRxFrame(const uint8_t* frame, size_t length);
+
+    /**
+     * @brief Drain up to @p max_frames already-received wire frames through
+     *        normal datagram routing (post-stall recovery).
+     *
+     * Uses the interface's direct-receive path (`iface_.receive`); returns
+     * 0 when no receive hook is wired (e.g. VLAN-routed encapsulation).
+     * Intended to flush the kernel socket backlog after a host stall so a
+     * stale echo cannot satisfy a new request on a reused datagram index.
+     *
+     * Linux fast path: when `iface_.native_handle` is a socket fd,
+     * `recvmmsg()` dequeues a whole batch per syscall instead of one
+     * frame per recv — a stall backlog of hundreds of frames empties
+     * without paying a syscall each on the cyclic thread.
+     */
+    int drainWire(int max_frames);
+
+    /**
+     * @brief Human-readable diagnosis of the TX path for send-failure
+     *        escalation: link/carrier state, pending socket error and
+     *        NIC drop counters around the TX socket.
+     *
+     * Called by the LAM's non-RT diagnostic worker — safe to sleep,
+     * perform ioctls and read sysfs.  Empty string = no diagnosis
+     * available (non-Linux, or no resolvable TX fd).
+     */
+    std::string txFailureDiagnostics();
+
+    /// errno of the most recent failed TX send attempt (0 = none so far).
+    /// The kernel's own verdict: ENOBUFS = TX ring wedged / carrier lost,
+    /// ENETDOWN = interface down, ENODEV = interface gone.
+    int lastTxErrno() const {
+        return last_tx_errno_.load(std::memory_order_relaxed);
+    }
+
+    /**
+     * @brief Drop every pending TransactionRouter response waiter.
+     *
+     * Post-stall cleanup: waiters wake into their timeout path and late
+     * echoes become unrouted strays instead of mis-satisfying new requests.
+     */
+    void purgePendingResponses();
 
     // ---- Discovery ---------------------------------------------------------
 
@@ -1447,9 +1442,13 @@ public:
     WaitResult waitForPreRegistered(size_t slot, uint32_t timeout_ms);
 
     // ---- Cyclic fast path (used by MasterPDOTransport) --------------------
-    // Reserved idx range [kCyclicSlotBase, +kNumCyclicSlots): responses are
-    // deposited into fixed slots by the RX parser and consumed by the cyclic
-    // thread without touching the TransactionRouter.
+    // Reserved idx band [kFastSlotBaseIdx, kFastSlotEndIdx] (100 wire
+    // indices): responses are deposited into fixed slots by the RX
+    // parser and consumed by the cyclic thread without touching the
+    // TransactionRouter.  The rotating pool (positions 0..kNumCyclicSlots-1
+    // mapped via cyclicPoolWireIdx()) is reserved for cyclic requests
+    // that may stay in flight across cycles; position kCyclicDcPoolPos
+    // maps to the dedicated DC-timepoint index 0xFF.
     bool     supportsCyclicFastPath() const { return static_cast<bool>(iface_.send); }
     uint64_t cyclicSlotToken(uint8_t slot) const;
     /// Generation bit of the last datagram sent on @p slot — the echo
@@ -1506,6 +1505,32 @@ public:
     uint32_t cyclicPayloadOffset() const;
     /// Channel accessor for the process image / transport adapter.
     ICyclicChannel* cyclicChannel() const;
+
+    /**
+     * @brief Send one frame carrying several fastpath-band datagrams.
+     *
+     * All datagrams ride the same Ethernet frame (M-bit chaining) — used
+     * by the pooled LRW exchange to append the 64-bit counter trailer
+     * and to read the DC timepoint of the configured slave in the same
+     * frame as the PDO data.  Every `idx` must satisfy isSlotIdx().
+     */
+    bool     sendCyclicPoolFrame(const CyclicDgramSpec* dgs, size_t count);
+    /**
+     * @brief Wait for deposits on an arbitrary list of rotating-pool
+     *        positions — one wake re-scans the whole list.
+     *
+     * @param positions  Pool positions (0..kCyclicDcPoolPos)
+     * @param tokens     Per-position seq tokens at send time
+     * @param count      List length (≤ kCyclicDcPoolPos + 1)
+     * @param timeout_ns Shared deadline budget
+     * @param views      Output — filled for arrived positions only
+     * @param arrived    Output — set per arrived position
+     * @return Number of arrived positions.
+     */
+    uint8_t  waitCyclicPool(const uint8_t* positions,
+                            const uint64_t* tokens,
+                            uint8_t count, uint32_t timeout_ns,
+                            CyclicSlotView* views, bool* arrived);
 
     // ---- PDO-slice fast path ------------------------------------------
     // Dedicated idx pool [kSliceSlotBaseIdx, +kNumSliceSlots): user-defined
@@ -1619,6 +1644,16 @@ private:
     // Frame transport (UDP encapsulation + raw sending)
     std::unique_ptr<EtherCATTransport> transport_;
 
+#ifdef __linux__
+    /// Batched backlog dequeue for drainWire() — see drainWireBatch().
+    /// Returns frames drained, or -1 when the fd cannot be drained this
+    /// way (caller falls back to the per-frame receive path).
+    int drainWireBatch(int fd, int max_frames);
+    /// Receive scratch for drainWireBatch — sized lazily on first use
+    /// (recovery path, not per-cycle).  kDrainBatch × kMaxJumboFrameSize.
+    std::vector<uint8_t> drain_buf_;
+#endif
+
     // Queues
     std::unique_ptr<Tether::Platform::MessageQueue<RxDatagram>> rx_queue_;
     std::unique_ptr<Tether::Platform::MessageQueue<RxDatagram>> txpdo_rx_queue_;
@@ -1701,6 +1736,9 @@ private:
     std::atomic<uint32_t> total_flushed_{0};
     std::atomic<uint32_t> flush_calls_{0};
 #endif
+    /// errno of the last failed send — always tracked (cheap), drives
+    /// IPDOTransport::lastSendErrno() and the TX diagnostics report.
+    std::atomic<int> last_tx_errno_{0};
 
     // Log dedup / rate limiting
     Tether::Logging::DeduplicatingLogger send_fail_log_{
@@ -1745,6 +1783,12 @@ private:
     std::unique_ptr<FaultDetector>      faults_;
     std::unique_ptr<SlaveStatusPoller>  status_poller_;
     std::unique_ptr<SlaveSupervisor>    slave_supervisor_;
+
+    // Watchdog register access (WD_DIV / PDI / PDATA + status block)
+    std::unique_ptr<WatchdogController> watchdog_;
+
+    // Mailbox drain + SM activate-cycle recovery
+    std::unique_ptr<MailboxRecovery> mailbox_recovery_;
 
     // Additional PDO groups (for multi-PDOManager setups).
     // Each group owns its own PDOManager + LAM + transport, and covers

@@ -116,19 +116,17 @@ TEST_F(LogicalAddressManagerTest, BuildAddressMapMultiSlave) {
     EXPECT_EQ(mgr.totalTxPDOBytes(), 18u);  // 12 + 6
     EXPECT_EQ(mgr.totalLogicalSize(), 30u);
 
-    // Each slave's [RxPDO][TxPDO] region is laid out contiguously
-    // (sticky per-slave windows — the FMMU is programmed against the
-    // window base, so slaves are appended, not re-packed by direction).
-    // Slave 0 addresses: Rx@0x10000(8) + Tx@0x10008(12) = ends 0x10014
+    // Per-slave sticky windows: each slave gets [RxPDO][TxPDO] packed
+    // contiguously — slave 0's window is [0x10000, 0x10014), slave 1's
+    // starts right after it.
     EXPECT_EQ(mgr.getRxPDOLogicalAddr(0), 0x10000u);
     EXPECT_EQ(mgr.getRxPDOLength(0), 8u);
-    EXPECT_EQ(mgr.getTxPDOLogicalAddr(0), 0x10008u);
+    EXPECT_EQ(mgr.getTxPDOLogicalAddr(0), 0x10008u);  // 0x10000 + 8
     EXPECT_EQ(mgr.getTxPDOLength(0), 12u);
 
-    // Slave 1 addresses: Rx@0x10014(4) + Tx@0x10018(6) = ends 0x1001E
-    EXPECT_EQ(mgr.getRxPDOLogicalAddr(1), 0x10014u);
+    EXPECT_EQ(mgr.getRxPDOLogicalAddr(1), 0x10014u);  // 0x10000 + 20
     EXPECT_EQ(mgr.getRxPDOLength(1), 4u);
-    EXPECT_EQ(mgr.getTxPDOLogicalAddr(1), 0x10018u);
+    EXPECT_EQ(mgr.getTxPDOLogicalAddr(1), 0x10018u);  // 0x10014 + 4
     EXPECT_EQ(mgr.getTxPDOLength(1), 6u);
 }
 
@@ -157,13 +155,16 @@ TEST_F(LogicalAddressManagerTest, BuildAddressMapRebuild) {
     EXPECT_TRUE(mgr.buildAddressMap(configs, 1));
     EXPECT_EQ(mgr.totalLogicalSize(), 20u);
 
-    // Rebuild with different sizes
+    // Rebuild with different sizes — the first window stays allocated
+    // (sticky: its FMMU is already programmed), so the new 40-byte window
+    // is appended at offset 20 and the image extent grows to 60.
     configs[0].rxpdo_size = 16;
     configs[0].txpdo_size = 24;
     EXPECT_TRUE(mgr.buildAddressMap(configs, 1));
-    EXPECT_EQ(mgr.totalLogicalSize(), 40u);
+    EXPECT_EQ(mgr.totalLogicalSize(), 60u);
     EXPECT_EQ(mgr.getRxPDOLength(0), 16u);
     EXPECT_EQ(mgr.getTxPDOLength(0), 24u);
+    EXPECT_EQ(mgr.getRxPDOLogicalAddr(0), 0x10014u);  // appended, not repacked
 }
 
 // ============================================================================
@@ -396,20 +397,19 @@ TEST_F(LRWExchangeTest, MultipleTxPDOEntriesSameSlave) {
     // Previously, all entries for one slave used the same addr_map_ offset,
     // causing all modules on a slave to read identical data.
 
-    // Fresh manager — slave windows are sticky/append-only, so a rebuild
-    // on `mgr` would append the resized window after the SetUp map rather
-    // than repacking it.
-    LogicalAddressManager mgr2{transport};
-    mgr2.init();
-
-    // Configure: slave 0 with 24-byte TxPDO (3 × 8-byte entries)
+    // Reconfigure: slave 0 with 24-byte TxPDO (3 × 8-byte entries).
+    // Fresh manager — sticky windows keep the fixture map's first window
+    // allocated, so rebuilding `mgr` would append a second window instead
+    // of landing this one at the image base.
+    LogicalAddressManager fresh_mgr{transport};
+    fresh_mgr.init();
     SlaveConfig configs[kMaxPDOSlaves] = {};
     configs[0].configured = true;
     configs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 0);
     configs[0].rxpdo_size = 0;
     configs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 24);
     configs[0].txpdo_size = 24;
-    mgr2.buildAddressMap(configs, 1);
+    fresh_mgr.buildAddressMap(configs, 1);
 
     PDOMapping multi_mapping;
     int t0 = multi_mapping.add_txpdo(0, 8, 0x1A00, PDOAddressMode::Logical);
@@ -436,7 +436,7 @@ TEST_F(LRWExchangeTest, MultipleTxPDOEntriesSameSlave) {
             return true;
         }));
 
-    EXPECT_TRUE(mgr2.exchangeAllLRW(multi_mapping));
+    EXPECT_TRUE(fresh_mgr.exchangeAllLRW(multi_mapping));
 
     // Each entry should have received its own distinct data
     uint8_t* b0 = reinterpret_cast<uint8_t*>(&tx0);
@@ -454,6 +454,64 @@ TEST_F(LRWExchangeTest, MultipleTxPDOEntriesSameSlave) {
     EXPECT_NE(tx0, tx1);
     EXPECT_NE(tx1, tx2);
     EXPECT_NE(tx0, tx2);
+}
+
+TEST_F(LRWExchangeTest, ResizedSlaveWindowExtendsExchangeSpan) {
+    // Sticky windows: reconfiguring slave 0 to a larger window appends a
+    // fresh window at the end (the old window stays allocated — its FMMU
+    // is already programmed).  The exchange must span the image EXTENT
+    // (next_free_log_), not just the sum of live PDO bytes — otherwise
+    // entries in the appended window would silently never be exchanged.
+    //
+    // Fixture map: slave 0 Rx[0,4) Tx[4,12) → extent 12.  Rebuild with
+    // rxpdo=0 txpdo=24 → new window [12,36), extent grows to 36.
+    SlaveConfig configs[kMaxPDOSlaves] = {};
+    configs[0].configured = true;
+    configs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 0);
+    configs[0].rxpdo_size = 0;
+    configs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 24);
+    configs[0].txpdo_size = 24;
+    ASSERT_TRUE(mgr.buildAddressMap(configs, 1));
+    EXPECT_EQ(mgr.totalLogicalSize(), 36u);   // 12 dead + 24 live
+
+    PDOMapping multi_mapping;
+    int t0 = multi_mapping.add_txpdo(0, 8, 0x1A00, PDOAddressMode::Logical);
+    int t1 = multi_mapping.add_txpdo(0, 8, 0x1A01, PDOAddressMode::Logical);
+    int t2 = multi_mapping.add_txpdo(0, 8, 0x1A02, PDOAddressMode::Logical);
+    auto& tx0 = *multi_mapping.entryDataAs<uint64_t>(static_cast<size_t>(t0));
+    auto& tx1 = *multi_mapping.entryDataAs<uint64_t>(static_cast<size_t>(t1));
+    auto& tx2 = *multi_mapping.entryDataAs<uint64_t>(static_cast<size_t>(t2));
+
+    EXPECT_CALL(transport, allocIdx()).WillOnce(Return(42));
+    // Extent, not live-byte sum: the LRW must cover all 36 bytes.
+    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 42, 0, 1, _, 36, true))
+        .WillOnce(Return(true));
+    EXPECT_CALL(transport, waitForResponseIdx(_, _, _))
+        .WillOnce(Invoke([](uint8_t, unsigned int, RxDatagram& out) -> bool {
+            out.wkc = 1;
+            out.datalen = 36;
+            // Entry blocks sit at image offsets 12, 20, 28.
+            uint8_t resp[36] = {};
+            for (int i = 0; i < 8; ++i) {
+                resp[12 + i] = static_cast<uint8_t>(0x01 + i);  // entry 0
+                resp[20 + i] = static_cast<uint8_t>(0x11 + i);  // entry 1
+                resp[28 + i] = static_cast<uint8_t>(0x21 + i);  // entry 2
+            }
+            std::memcpy(out.data, resp, 36);
+            return true;
+        }));
+
+    EXPECT_TRUE(mgr.exchangeAllLRW(multi_mapping));
+
+    const uint8_t* b0 = reinterpret_cast<const uint8_t*>(&tx0);
+    const uint8_t* b1 = reinterpret_cast<const uint8_t*>(&tx1);
+    const uint8_t* b2 = reinterpret_cast<const uint8_t*>(&tx2);
+    EXPECT_EQ(b0[0], 0x01);
+    EXPECT_EQ(b0[7], 0x08);
+    EXPECT_EQ(b1[0], 0x11);
+    EXPECT_EQ(b1[7], 0x18);
+    EXPECT_EQ(b2[0], 0x21);
+    EXPECT_EQ(b2[7], 0x28);
 }
 
 TEST_F(LRWExchangeTest, EmptyMappingReturnsTrue) {
@@ -616,35 +674,133 @@ TEST_F(LogicalAddressManagerTest, OutOfRangeQueries) {
 // ============================================================================
 
 /// Hand-rolled fast-path transport: records slice sends, serves scripted
-/// slot responses through the single-wake mask wait.
+/// slot responses through the rotating-pool wait.  Response scripts are
+/// keyed by SLICE (logical offset order), not wire position — the LAM
+/// rotates pool positions every send, so the stub maps each LRW
+/// datagram's logical address back to its slice index:
+///   slice = ((ado<<16)|adp - base) / max_slice_len
+/// The LRD counter datagram lands above the image → echoed verbatim
+/// (slaves pass unmapped logical bytes through).  The APRD DC read
+/// serves the dedicated dc_resp_* script.
 class CyclicStubTransport : public IPDOTransport {
 public:
     // ---- fast-path surface ----
     bool supportsCyclicFastPath() const override { return true; }
     size_t maxEtherCATPayloadPerFrame() const override { return payload_; }
     uint64_t cyclicSlotToken(uint8_t slot) override {
-        return slot < 8 ? tokens_[slot] : 0;
+        return slot <= kCyclicDcPoolPos ? tokens_[slot] : 0;
     }
-    bool sendCyclicDatagram(Command, uint8_t slot, uint16_t, uint16_t,
-                            const void*, uint16_t, bool) override {
-        ++send_calls;
-        tokens_[slot]++;                  // deposits bump the seq token
+    uint8_t cyclicSlotGen(uint8_t slot) override {
+        return slot <= kCyclicDcPoolPos ? gens_[slot] : 0;
+    }
+    bool sendCyclicDatagram(Command cmd, uint8_t pos, uint16_t adp,
+                            uint16_t ado, const void* data,
+                            uint16_t datalen, bool) override {
+        ++send_calls_total_;
+        if (cmd == Command::LRW) ++send_calls;
+        recordSent(pos, cmd, adp, ado, data, datalen);
+        return send_ok_;
+    }
+    bool sendPoolFrame(const CyclicDgramSpec* dgs,
+                       size_t count) override {
+        if (!pool_frames_ok_) return false;
+        ++pool_frame_calls;
+        last_frame_dgrams_ = count;
+        last_frame_cmds_.clear();
+        last_frame_idx_.clear();
+        for (size_t i = 0; i < count; ++i) {
+            const uint8_t pos = cyclicWirePoolPos(dgs[i].idx);
+            last_frame_cmds_.push_back(dgs[i].cmd);
+            last_frame_idx_.push_back(dgs[i].idx);
+            if (dgs[i].cmd == Command::LRW) ++send_calls;
+            recordSent(pos, dgs[i].cmd, dgs[i].adp, dgs[i].ado,
+                       dgs[i].data,
+                       static_cast<uint16_t>(dgs[i].datalen +
+                                             dgs[i].tail_len));
+        }
         return send_ok_;
     }
     uint32_t waitCyclicSlotMask(uint32_t mask, const uint64_t*,
                                 uint32_t, CyclicSlotView* views) override {
         ++mask_calls;
         uint32_t arrived = 0;
-        for (uint8_t s = 0; s < kNumCyclicSlots && s < 8; ++s) {
-            if (!(mask & (1u << s)) || !respond_[s]) continue;
-            views[s].payload = resp_buf_[s];
-            views[s].datalen = resp_len_[s];
-            views[s].wkc     = resp_wkc_[s];
+        for (uint8_t s = 0; s < 32; ++s) {
+            if (!(mask & (1u << s))) continue;
+            CyclicSlotView v{};
+            bool ar = false;
+            serve(s, v, ar);
+            if (!ar) continue;
+            views[s] = v;
             arrived |= 1u << s;
         }
         return arrived;
     }
+    uint8_t waitCyclicPool(const uint8_t* positions, const uint64_t*,
+                           uint8_t count, uint32_t,
+                           CyclicSlotView* views, bool* arrived) override {
+        ++mask_calls;
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < count; ++i) {
+            serve(positions[i], views[i], arrived[i]);
+            if (arrived[i]) ++n;
+        }
+        return n;
+    }
 
+private:
+    void recordSent(uint8_t pos, Command cmd, uint16_t adp, uint16_t ado,
+                    const void* data, uint16_t datalen) {
+        if (pos > kCyclicDcPoolPos) return;
+        tokens_[pos]++;
+        gens_[pos] ^= 1;
+        sent_cmd_[pos] = cmd;
+        sent_off_[pos] =
+            (static_cast<uint32_t>(ado) << 16 | adp) - base_;
+        sent_len_[pos] = datalen;
+        if (data && datalen)
+            std::memcpy(sent_buf_[pos], data,
+                        std::min<size_t>(datalen, sizeof(sent_buf_[0])));
+    }
+
+    /// Resolve a sent LRW datagram's slice index from its logical offset
+    /// (the LAM sends slice s at s*max_slice; the counter LRD lands
+    /// above the image so it never collides with a scripted slice).
+    uint32_t sliceOf(uint8_t pos) const {
+        const uint32_t msl = payload_ >= 12 ? payload_ - 12 : 1;
+        return sent_off_[pos] / msl;
+    }
+
+    void serve(uint8_t pos, CyclicSlotView& v, bool& arrived) {
+        arrived = false;
+        if (pos > kCyclicDcPoolPos || sent_cmd_[pos] == Command::NOP)
+            return;
+        const Command cmd = sent_cmd_[pos];
+        v.gen = gens_[pos];
+        if (cmd == Command::LRD) {          // counter trailer — echo back
+            if (!cnt_respond_) return;
+            v.payload = cnt_corrupt_ ? corrupt_buf_ : sent_buf_[pos];
+            v.datalen = sent_len_[pos];
+            v.wkc     = 0;                  // unmapped — no slave counts
+        } else if (cmd == Command::APRD) {  // DC System Time read
+            if (!dc_respond_) return;
+            v.payload = dc_resp_buf_;
+            v.datalen = 8;
+            v.wkc     = dc_resp_wkc_;
+        } else {                            // LRW image slice
+            const uint32_t s = sliceOf(pos);
+            if (s >= kMaxScripted || !respond_[s]) return;
+            v.payload = resp_buf_[s];
+            v.datalen = resp_len_[s];
+            v.wkc     = resp_wkc_[s];
+            if (stale_[s]) {                // echo previous generation
+                v.gen ^= 1;
+                stale_[s] = false;
+            }
+        }
+        arrived = true;
+    }
+
+public:
     // ---- unused surface ----
     bool writeRegister(uint16_t, uint16_t, const void*, uint16_t,
                        unsigned int) override { return false; }
@@ -721,15 +877,43 @@ public:
     }
 
     // ---- script ----
+    static constexpr size_t kMaxScripted = 16;
     size_t   payload_ = 1498;
-    uint64_t tokens_[8]{};
-    bool     respond_[8] = {true, true, true, true, true, true, true, true};
-    uint8_t  resp_buf_[8][64]{};
-    uint16_t resp_len_[8]{};
-    uint16_t resp_wkc_[8]{};
+    uint32_t base_ = 0x10000;               // LAM default logical base
+    uint64_t tokens_[kCyclicDcPoolPos + 1]{};
+    uint8_t  gens_[kCyclicDcPoolPos + 1]{};
+    Command  sent_cmd_[kCyclicDcPoolPos + 1]{};
+    uint32_t sent_off_[kCyclicDcPoolPos + 1]{};
+    uint16_t sent_len_[kCyclicDcPoolPos + 1]{};
+    uint8_t  sent_buf_[kCyclicDcPoolPos + 1][64]{};
+    bool     respond_[kMaxScripted];
+    bool     stale_[kMaxScripted]{};
+    uint8_t  resp_buf_[kMaxScripted][64]{};
+    uint16_t resp_len_[kMaxScripted]{};
+    uint16_t resp_wkc_[kMaxScripted]{};
     bool     send_ok_ = true;
-    int      send_calls = 0;
+    int      send_calls = 0;        ///< image LRW datagrams only
+    int      send_calls_total_ = 0; ///< every datagram incl. counter/DC
     int      mask_calls = 0;
+    // counter-trailer + DC-timepoint scripts
+    bool     cnt_respond_ = true;
+    bool     cnt_corrupt_ = false;  ///< echo wrong bytes (stale frame)
+    uint8_t  corrupt_buf_[8] = {0xDE, 0xAD, 0xBE, 0xEF,
+                              0xDE, 0xAD, 0xBE, 0xEF};
+    bool     dc_respond_ = true;
+    uint8_t  dc_resp_buf_[8]{};
+    uint16_t dc_resp_wkc_ = 1;
+    bool     pool_frames_ok_ = true;
+    int      pool_frame_calls = 0;
+    size_t   last_frame_dgrams_ = 0;
+    std::vector<Command> last_frame_cmds_;
+    std::vector<uint8_t> last_frame_idx_;
+
+    CyclicStubTransport() {
+        std::fill(std::begin(respond_), std::end(respond_), true);
+        std::fill(std::begin(sent_cmd_), std::end(sent_cmd_),
+                  Command::NOP);
+    }
 
     // slice script
     uint64_t slice_tokens_[16]{};
@@ -853,10 +1037,10 @@ TEST_F(CyclicWkcTest, MultiSliceDerivationPerSlice) {
     buildTwoSlaveMap();
     ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
     EXPECT_EQ(mgr.cyclicSliceCount(), 3u);
-    // Per-slave contiguous layout: s0 Rx [0,4), s0 Tx [4,12), s1 Rx [12,16).
-    // slice0 [0,6):  s0 Rx + s0 Tx ∩ → 1+2 = 3
+    // Per-slave sticky layout: s0 Rx [0,4), s0 Tx [4,12), s1 Rx [12,16).
+    // slice0 [0,6):  s0 Rx + s0 Tx ∩ → 1 + 2 = 3
     EXPECT_EQ(mgr.expectedWkc(0), 3u);
-    // slice1 [6,12): s0 Tx only → 2
+    // slice1 [6,12): s0 Tx [4,12) ∩ only → 2
     EXPECT_EQ(mgr.expectedWkc(1), 2u);
     // slice2 [12,16): s1 Rx only → 1
     EXPECT_EQ(mgr.expectedWkc(2), 1u);
@@ -877,6 +1061,130 @@ TEST_F(CyclicWkcTest, PartialMaskTimeoutCountsPerSlot) {
 }
 
 // ============================================================================
+// Cyclic pool — rotating positions, 64-bit counter trailer, DC timepoint
+// ============================================================================
+
+static_assert(kNumFastSlots == 100);
+static_assert(kNumCyclicSlots == 82);          // rotating pool (excl. DC pos)
+static_assert(kCyclicDcPoolPos == 82);
+static_assert(cyclicPoolWireIdx(0) == 0x9C);
+static_assert(cyclicPoolWireIdx(67) == 0xDF);
+static_assert(cyclicPoolWireIdx(68) == 0xF0);  // wraps past slice band 0xE0..EF
+static_assert(cyclicPoolWireIdx(81) == 0xFD);  // 0xFE fire-and-forget skipped
+static_assert(cyclicPoolWireIdx(kCyclicDcPoolPos) == kDcTimeIdx);   // 0xFF
+
+class CyclicPoolTrailerTest : public ::testing::Test {
+protected:
+    CyclicStubTransport transport;
+    LogicalAddressManager mgr{transport};
+    PDOMapping mapping;
+
+    void SetUp() override {
+        mgr.init();
+        SlaveConfig configs[kMaxPDOSlaves] = {};
+        configs[0].configured = true;
+        configs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 8);
+        configs[0].rxpdo_size = 8;
+        configs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 8);
+        configs[0].txpdo_size = 8;
+        ASSERT_TRUE(mgr.buildAddressMap(configs, 1));
+        mapping.add_rxpdo(0, 8, 0x1600, PDOAddressMode::Logical);
+        mapping.add_txpdo(0, 8, 0x1A00, PDOAddressMode::Logical);
+        transport.resp_len_[0] = 16;
+        transport.resp_wkc_[0] = 3;
+    }
+};
+
+/// The last frame of a cycle is one multi-datagram frame carrying the
+/// image LRW, the LRD counter trailer, and — when configured — the APRD
+/// DC System Time read, each on its own dedicated pool idx.
+TEST_F(CyclicPoolTrailerTest, OneFrameCarriesLrwCounterAndDc) {
+    mgr.setCyclicDcTimeSlave(0);
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    ASSERT_EQ(transport.pool_frame_calls, 1);
+    ASSERT_EQ(transport.last_frame_dgrams_, 3u);
+    EXPECT_EQ(transport.last_frame_cmds_[0], Command::LRW);
+    EXPECT_EQ(transport.last_frame_cmds_[1], Command::LRD);
+    EXPECT_EQ(transport.last_frame_cmds_[2], Command::APRD);
+    EXPECT_EQ(transport.last_frame_idx_[2], kDcTimeIdx);
+
+    const uint64_t dc_expect = 0x1122334455667788ull;
+    std::memcpy(transport.dc_resp_buf_, &dc_expect, 8);
+    ASSERT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.lastLrwCounter(), 1u);
+    EXPECT_TRUE(mgr.dcTimeValid());
+    EXPECT_EQ(mgr.lastDcTimeNs(), dc_expect);
+}
+
+/// Without a configured DC slave the trailer frame is just LRW + counter.
+TEST_F(CyclicPoolTrailerTest, DcDisabledByDefaultLeavesItOut) {
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    ASSERT_EQ(transport.pool_frame_calls, 1);
+    ASSERT_EQ(transport.last_frame_dgrams_, 2u);
+    EXPECT_EQ(transport.last_frame_cmds_[0], Command::LRW);
+    EXPECT_EQ(transport.last_frame_cmds_[1], Command::LRD);
+    ASSERT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_FALSE(mgr.dcTimeValid());
+}
+
+/// An echoed counter that doesn't match what was sent is a stale echo —
+/// the exchange fails and the counter is NOT published.
+TEST_F(CyclicPoolTrailerTest, CorruptCounterEchoFailsExchange) {
+    transport.cnt_corrupt_ = true;
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_FALSE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.getStats().counter_mismatches, 1u);
+    EXPECT_EQ(mgr.lastLrwCounter(), 0u);
+}
+
+/// No counter response at all is likewise a stale/missed trailer.
+TEST_F(CyclicPoolTrailerTest, MissingCounterEchoFailsExchange) {
+    transport.cnt_respond_ = false;
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_FALSE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(mgr.getStats().counter_mismatches, 1u);
+}
+
+/// The verified counter is exposed to consumers and monotonically
+/// advances once per successful exchange.
+TEST_F(CyclicPoolTrailerTest, CounterAdvancesEveryCycle) {
+    for (int i = 1; i <= 3; ++i) {
+        ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+        ASSERT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+        EXPECT_EQ(mgr.lastLrwCounter(), static_cast<uint64_t>(i));
+    }
+}
+
+/// A missing DC response is informational only — the PDO data is still
+/// valid and the verified counter is still published.
+TEST_F(CyclicPoolTrailerTest, DcTimeoutDoesNotFailExchange) {
+    mgr.setCyclicDcTimeSlave(0);
+    transport.dc_respond_ = false;
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+    EXPECT_FALSE(mgr.dcTimeValid());
+    EXPECT_EQ(mgr.getStats().dc_timeouts, 1u);
+    EXPECT_EQ(mgr.lastLrwCounter(), 1u);
+}
+
+/// Each cycle draws fresh pool positions — an in-flight backlog of up
+/// to kNumCyclicSlots requests is supported before any wire idx is
+/// reused, and only the position being sent is re-armed.
+TEST_F(CyclicPoolTrailerTest, PositionsRotateAcrossCycles) {
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_EQ(transport.sent_cmd_[0], Command::LRW);
+    EXPECT_EQ(transport.sent_cmd_[1], Command::LRD);
+    ASSERT_TRUE(mgr.cyclicCollect(mapping, nullptr));
+
+    ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_EQ(transport.sent_cmd_[2], Command::LRW);
+    EXPECT_EQ(transport.sent_cmd_[3], Command::LRD);
+    // The cycle-1 positions were not re-armed by the second send.
+    EXPECT_EQ(transport.sent_cmd_[0], Command::LRW);
+    EXPECT_EQ(transport.sent_cmd_[1], Command::LRD);
+}
+
+// ============================================================================
 // PDO slices — user-declared image subsets on dedicated wire idx 0xE0..0xEF
 // ============================================================================
 
@@ -887,8 +1195,8 @@ protected:
     LogicalAddressManager mgr{transport};
     PDOMapping mapping;
 
-    /// Same two slaves as CyclicWkcTest with per-slave contiguous
-    /// windows: s0 Rx[0,4) Tx[4,12), s1 Rx[12,16) — 16 B image.
+    /// Same two-slave config as CyclicWkcTest — per-slave sticky layout:
+    /// s0 Rx[0,4) Tx[4,12), s1 Rx[12,16) — 16 B image.
     /// describeEntries order: 0=s0 Rx, 1=s0 Tx, 2=s1 Rx.
     void buildMap() {
         SlaveConfig configs[kMaxPDOSlaves] = {};
@@ -957,7 +1265,7 @@ TEST_F(PdoSliceTest, EntrySpecSendsOnDedicatedSliceSlot) {
 TEST_F(PdoSliceTest, AdjacentEntriesMergeIntoOneRun) {
     burnImageCycle();
     PDOSliceSpec spec;
-    spec.entries = {0, 1};                 // s0 Rx[0,4)+s0 Tx[4,12) → one run [0,12)
+    spec.entries = {0, 1};                 // [0,4)+[4,12) → one run [0,12)
     ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
     mgr.setImageExchangeDecimation(1000);
     transport.slice_resp_len_[0] = 12;
@@ -973,13 +1281,13 @@ TEST_F(PdoSliceTest, AdjacentEntriesMergeIntoOneRun) {
 TEST_F(PdoSliceTest, DisjointEntriesConsumeOneSlotEach) {
     burnImageCycle();
     PDOSliceSpec spec;
-    spec.entries = {0, 2};                 // s0 Rx[0,4) and s1 Rx[12,16) → 2 runs
+    spec.entries = {0, 2};                 // [0,4) and [12,16) → 2 runs
     ASSERT_NE(mgr.definePDOSlice(mapping, spec), kInvalid);
     mgr.setImageExchangeDecimation(1000);
     transport.slice_resp_len_[0] = 4;
-    transport.slice_resp_wkc_[0] = 1;
+    transport.slice_resp_wkc_[0] = 1;      // s0 writes RxPDO → +1
     transport.slice_resp_len_[1] = 4;
-    transport.slice_resp_wkc_[1] = 1;      // s1 Rx write → +1
+    transport.slice_resp_wkc_[1] = 1;      // s1 writes RxPDO → +1
 
     ASSERT_TRUE(mgr.cyclicSend(mapping, nullptr, 1'000'000));
     EXPECT_EQ(transport.slice_send_calls, 2);   // slots 0 and 1
@@ -1008,7 +1316,7 @@ TEST_F(PdoSliceTest, EveryNDecimatesSliceExchange) {
 TEST_F(PdoSliceTest, OnExchangeCallbackFiresPerRun) {
     burnImageCycle();
     PDOSliceSpec spec;
-    spec.entries = {0, 2};                 // s0 Rx[0,4) + s1 Rx[12,16) → two runs
+    spec.entries = {0, 2};                 // two disjoint runs
     int calls = 0;
     uint8_t  last_run = 0xFF;
     uint16_t last_len = 0, last_wkc = 0;

@@ -1012,9 +1012,16 @@ set(ETHERCAT_COMMON_SRC
     ../src/ethercat/FaultDetection.cpp
     ../src/ethercat/WriteVerify.cpp
     ../src/ethercat/CoEManager.cpp
+    ../src/ethercat/raw/CoEErrorStrings.cpp
+    ../src/ethercat/raw/CoEEntryTransactions.cpp
     ../src/ethercat/raw/SDOErrorDecoder.cpp
     ../src/ethercat/raw/PDOManager.cpp
+    ../src/ethercat/raw/PDOMapping.cpp
+    ../src/ethercat/raw/PDOKeepAlive.cpp
     ../src/ethercat/raw/LogicalAddressManager.cpp
+    ../src/ethercat/raw/TxFailureDiagnostics.cpp
+    ../src/ethercat/raw/LogicalAddressManager_slices.cpp
+    ../src/ethercat/raw/LogicalAddressManager_health.cpp
     ../src/ethercat/ProcessImage.cpp
     ../src/ethercat/DCClass.cpp
     ../src/ethercat/RealtimeLoop.cpp
@@ -1031,6 +1038,7 @@ create_ethercat_test(pdo
         ethercat/test_pdo_manager.cpp
         ethercat/test_pdo_modes.cpp
         ethercat/test_logical_address_manager.cpp
+        ethercat/test_lrw_selfheal.cpp
         ethercat/test_fmmu_manager.cpp
         ethercat/test_pdo_api.cpp
         ethercat/test_pdo_to_string.cpp
@@ -1041,9 +1049,16 @@ create_ethercat_test(pdo
         ethercat/test_process_image.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/raw/PDOManager.cpp
+        ../src/ethercat/raw/PDOMapping.cpp
+        ../src/ethercat/raw/PDOKeepAlive.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
+        ../src/ethercat/raw/LogicalAddressManager_slices.cpp
+        ../src/ethercat/raw/LogicalAddressManager_health.cpp
+        ../src/ethercat/raw/TxFailureDiagnostics.cpp
         ../src/ethercat/ProcessImage.cpp
         ../src/ethercat/CoEManager.cpp
+        ../src/ethercat/raw/CoEErrorStrings.cpp
+        ../src/ethercat/raw/CoEEntryTransactions.cpp
         ../src/ethercat/raw/SDOErrorDecoder.cpp
         ../src/ethercat/FaultDetection.cpp
         ../src/ethercat/DebugGate.cpp
@@ -1076,9 +1091,16 @@ create_ethercat_test(protocol
         ../src/ethercat/SlaveStatusPoller.cpp
         ../src/ethercat/WriteVerify.cpp
         ../src/ethercat/CoEManager.cpp
+        ../src/ethercat/raw/CoEErrorStrings.cpp
+        ../src/ethercat/raw/CoEEntryTransactions.cpp
         ../src/ethercat/raw/SDOErrorDecoder.cpp
         ../src/ethercat/raw/PDOManager.cpp
+        ../src/ethercat/raw/PDOMapping.cpp
+        ../src/ethercat/raw/PDOKeepAlive.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
+        ../src/ethercat/raw/LogicalAddressManager_slices.cpp
+        ../src/ethercat/raw/LogicalAddressManager_health.cpp
+        ../src/ethercat/raw/TxFailureDiagnostics.cpp
         ../src/ethercat/ProcessImage.cpp
         ../src/ethercat/DebugGate.cpp
         ../src/ethercat/Retry.cpp
@@ -1163,6 +1185,8 @@ tether_add_test_executable(tether_ethercat_master_tests
     ethercat/test_slave_names.cpp
     ethercat/test_slave_discovery_manager.cpp
     ethercat/test_transaction_router_waitany.cpp
+    ethercat/test_transaction_router_purge.cpp
+    ethercat/test_lrw_stale_echo.cpp
     ethercat/test_cyclic_channel.cpp
     ethercat/test_cyclic_executive.cpp
     ethercat/test_async_loop.cpp

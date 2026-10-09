@@ -144,10 +144,17 @@ struct CBPFVlanRange {
  * is independent.
  */
 /// Inclusive datagram-index range (first datagram of a frame).
+/// `hole`, when set, excludes a single index inside the range — used to
+/// keep the 0xFE fire-and-forget index on the async socket even though
+/// it numerically lies inside the reserved cyclic band.
 struct CBPFIdxRange {
     uint8_t start = 0;
     uint8_t end   = 0;
-    bool contains(uint8_t idx) const { return idx >= start && idx <= end; }
+    std::optional<uint8_t> hole;
+    bool contains(uint8_t idx) const {
+        return idx >= start && idx <= end &&
+               (!hole || idx != *hole);
+    }
 };
 
 struct CBPFSpec {

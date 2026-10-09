@@ -16,6 +16,8 @@
 #include <linux/if_packet.h>
 #include <linux/if_ether.h>
 #include <linux/filter.h>
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
 #include <net/if.h>
 #include <net/if_arp.h>
 #include <netinet/in.h>
@@ -165,6 +167,20 @@ public:
         int flags = fcntl(m_socket, F_GETFL, 0);
         fcntl(m_socket, F_SETFL, flags | O_NONBLOCK);
 
+        // Enlarge the kernel RX queue: a stalled RX-drain thread (non-RT
+        // host, logging burst) must not drop frames — kernel tp_drops turn
+        // into silent LRW timeouts upstream.  SO_RCVBUFFORCE bypasses
+        // net.core.rmem_max (needs CAP_NET_ADMIN); fall back to the polite
+        // clamped version — best-effort either way.
+        {
+            int sz = 8 * 1024 * 1024;
+            if (setsockopt(m_socket, SOL_SOCKET, SO_RCVBUFFORCE,
+                           &sz, sizeof(sz)) < 0) {
+                setsockopt(m_socket, SOL_SOCKET, SO_RCVBUF,
+                           &sz, sizeof(sz));
+            }
+        }
+
 #ifdef PACKET_IGNORE_OUTGOING
         // Don't deliver our own transmitted frames back to us — removes one
         // wasted wake-up + copy per cyclic TX.  Non-fatal if unsupported.
@@ -187,6 +203,30 @@ public:
                        &one, sizeof(one));
         }
 #endif
+
+#ifdef PACKET_QDISC_BYPASS
+        // Skip the qdisc layer on TX — removes dequeue scheduling and
+        // qdisc stats from every send (cyclic or not).  Non-fatal where
+        // unsupported (kernel < 3.14).
+        // NOTE: the qdisc also acts as a buffer that absorbs frames on a
+        // dead TX path and drops them silently while sendto() keeps
+        // "succeeding".  With bypass, a wedged driver TX ring (lost
+        // carrier, link down) surfaces IMMEDIATELY as sendto()=ENOBUFS —
+        // honest, but loud.  That errno is the detection path for the
+        // TX-diagnostics worker; the send loops treat ENOBUFS as
+        // non-retryable (see Master_transport.cpp).
+        {
+            int one = 1;
+            setsockopt(m_socket, SOL_PACKET, PACKET_QDISC_BYPASS,
+                       &one, sizeof(one));
+        }
+#endif
+
+        // NIC latency hygiene — one-time ethtool probes (no ethtool
+        // binary needed); strictly best-effort, never fails init.
+        if (config.nicLatencyCheck) {
+            checkNicLatencySettings(config.nicDisableEee);
+        }
 
         // Mark initialized before performing operations that require initialized state
         m_initialized = true;
@@ -604,6 +644,85 @@ public:
     }
 
 private:
+    /**
+     * @brief Probe NIC settings that add latency/jitter to the wire path,
+     *        via SIOCETHTOOL ioctls — works without the ethtool binary.
+     *
+     * Both probes are read-only GETs (unprivileged) and strictly
+     * best-effort: a driver without the op answers EOPNOTSUPP/EINVAL,
+     * an old kernel ENOSYS — either way there is nothing to act on and
+     * the probe is skipped silently.
+     *
+     * @param tryDisableEee  also issue ETHTOOL_SEEE to turn EEE off
+     *        when it is enabled (needs CAP_NET_ADMIN; failure just
+     *        logs the manual remediation).
+     */
+    void checkNicLatencySettings(bool tryDisableEee) {
+        static constexpr const char* TAG = "nic-check";
+        struct ifreq ifr {};
+        strncpy(ifr.ifr_name, m_ifname, IFNAMSIZ - 1);
+
+        // --- Energy-Efficient Ethernet ----------------------------------
+        // EEE sends the PHY into Low-Power Idle between bursts; the exit
+        // latency (tens of µs, PHY-dependent) lands inside the cyclic
+        // period as jitter/lost deadlines.  Most EtherCAT slave PHYs
+        // don't support EEE, but if the link partner does, the host NIC
+        // may negotiate it — warn (or disable) rather than discover it
+        // as a timing mystery.
+        struct ethtool_eee eee {};
+        eee.cmd = ETHTOOL_GEEE;
+        ifr.ifr_data = reinterpret_cast<char*>(&eee);
+        if (ioctl(m_socket, SIOCETHTOOL, &ifr) == 0) {
+            if (eee.eee_enabled || eee.eee_active) {
+                bool disabled = false;
+                if (tryDisableEee && eee.eee_enabled) {
+                    // Carry the driver's validated fields (esp.
+                    // tx_lpi_timer) and only flip the enable bits.
+                    struct ethtool_eee off = eee;
+                    off.cmd = ETHTOOL_SEEE;
+                    off.eee_enabled = 0;
+                    off.tx_lpi_enabled = 0;
+                    disabled = (ioctl(m_socket, SIOCETHTOOL, &ifr) == 0);
+                    if (disabled) {
+                        TETHER_LOGI(TAG,
+                            "{}: Energy-Efficient Ethernet disabled",
+                            m_ifname);
+                    }
+                }
+                if (!disabled) {
+                    TETHER_LOGW(TAG,
+                        "{}: EEE enabled (active={}) — LPI exit latency "
+                        "adds wire jitter; disable with "
+                        "`ethtool --set-eee {} eee off`",
+                        m_ifname, eee.eee_active, m_ifname);
+                }
+            }
+        }
+        // else EOPNOTSUPP/EINVAL/ENOSYS → no EEE on this NIC: nothing to do.
+
+        // --- RX interrupt coalescing ------------------------------------
+        // Batching RX interrupts means a cyclic response waits for the
+        // batch delay.  Warn only — coalescing policy is system config.
+        struct ethtool_coalesce coal {};
+        coal.cmd = ETHTOOL_GCOALESCE;
+        ifr.ifr_data = reinterpret_cast<char*>(&coal);
+        if (ioctl(m_socket, SIOCETHTOOL, &ifr) == 0) {
+            const bool rx_batched =
+                coal.rx_coalesce_usecs || coal.rx_max_coalesced_frames > 1 ||
+                coal.rx_coalesce_usecs_irq ||
+                coal.rx_max_coalesced_frames_irq > 1;
+            if (rx_batched) {
+                TETHER_LOGW(TAG,
+                    "{}: RX interrupt coalescing is on "
+                    "(usecs={}, frames={}) — responses inherit the batch "
+                    "delay; consider `ethtool -C {} rx-usecs 0 "
+                    "rx-frames 1`",
+                    m_ifname, coal.rx_coalesce_usecs,
+                    coal.rx_max_coalesced_frames, m_ifname);
+            }
+        }
+    }
+
     /**
      * @brief recvmsg() wrapper that also collects PACKET_AUXDATA control
      *        data describing a kernel-stripped 802.1Q tag.

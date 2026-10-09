@@ -295,6 +295,17 @@ public:
      */
     void cancelPreRegistered(size_t slot);
 
+    /**
+     * @brief Drop every pending waiter (post-stall cleanup).
+     *
+     * Wakes each blocked waiter into its timeout path and frees the slot,
+     * so a late echo arriving after a host stall can never satisfy a NEW
+     * request that reused the same datagram index (the 8-bit idx space
+     * wraps after 224 allocations).  Late datagrams then fall into the
+     * unrouted counter instead of feeding stale data to a caller.
+     */
+    void purgeAllPending();
+
     // ----- Multi-slot wait (reactor pattern) -------------------------------
 
     /**
@@ -376,6 +387,12 @@ private:
         /// cancel/shutdown so every waiter wakes.
         std::mutex              mtx;
         std::atomic<uint32_t>   seq{0};
+        /// Registration generation — bumped whenever the slot is (re)armed
+        /// and when it is purged/cancelled.  A waiter owns the registration
+        /// only while reg_gen matches the value captured at wait start; a
+        /// stale waiter neither wakes into success nor clears a NEW
+        /// registration's pending flag on its way out.
+        std::atomic<uint32_t>   reg_gen{0};
         std::atomic<bool>       pending{false};
         std::atomic<bool>       completed{false};
         uint8_t*                buffer{nullptr};

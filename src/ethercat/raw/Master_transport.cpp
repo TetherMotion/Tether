@@ -249,13 +249,12 @@ WaitResult Master::waitForPreRegistered(size_t slot, uint32_t timeout_ms)
 
 uint8_t Master::allocIdx()
 {
-    // Skip the entire fastpath reservation — PDO-slice slots (0xE0..0xEF),
-    // cyclic slots (0xF8..0xFD) — plus the fire-and-forget index (0xFE),
-    // i.e. everything >= kSliceSlotBaseIdx.  This also skips 0xFF,
-    // leaving 0..0xDF for regular traffic.
+    // Skip the entire cyclic band — the 100-index reservation at
+    // 0x9C..0xFF (rotating pool + PDO-slice slots + 0xFE fire-and-forget
+    // + 0xFF DC timepoint).  Async traffic keeps 0x00..0x9B.
     uint8_t idx;
     do { idx = next_idx_.fetch_add(1, std::memory_order_relaxed); }
-    while (idx >= kSliceSlotBaseIdx);
+    while (idx >= kFastSlotBaseIdx);
     return idx;
 }
 
@@ -288,39 +287,6 @@ void Master::setMailboxOverride(SlaveAddress slave_address, uint16_t wr_addr, ui
     ov.rd_len = rd_len;
     ov.proto = proto;
 }
-// ============================================================================
-// EtherCAT-over-UDP encapsulation helpers
-// ============================================================================
-
-#if TETHER_ENABLE_UDP_ENCAPSULATION
-uint16_t Master::computeIpChecksum(const uint8_t* ip_header)
-{
-    return EtherCATTransport::computeIpChecksum(ip_header);
-}
-
-bool Master::encapsulateFrame(const uint8_t* in_frame, size_t in_len,
-                              uint8_t* out_buf, size_t out_cap, size_t* out_len) const
-{
-    if (!transport_) return false;
-    return transport_->encapsulateFrame(in_frame, in_len, out_buf, out_cap, out_len);
-}
-
-bool Master::sendWithEncapsulation(const uint8_t* frame, size_t len)
-{
-    std::lock_guard<std::mutex> lock(send_mutex_);
-    if (!transport_) {
-        // Fallback before start() — direct send without encapsulation
-        return iface_.send ? iface_.send(frame, len) : false;
-    }
-    return transport_->send(frame, len);
-}
-
-size_t Master::maxEtherCATPayloadPerFrame() const
-{
-    if (!transport_) return Raw::kMaxEtherCATPayloadPerFrame;
-    return transport_->maxEtherCATPayloadPerFrame();
-}
-#endif // TETHER_ENABLE_UDP_ENCAPSULATION
 
 // ============================================================================
 // Transport primitives
@@ -425,11 +391,22 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
 #if TETHER_ENABLE_ETHERCAT_STATS
             tx_retry_count_.fetch_add(1, std::memory_order_relaxed);
 #endif
+            // ENOBUFS = TX ring full and not draining (e.g. carrier
+            // lost).  We only ever SEE this errno because the TX path
+            // sets PACKET_QDISC_BYPASS — without it the qdisc would
+            // silently absorb-and-drop frames and sendto() would keep
+            // reporting success on a dead link.  ENOBUFS cannot recover
+            // within microseconds — fail this cycle fast instead of
+            // burning the budget spinning sendto.  The next exchange
+            // cycle sends normally: no suppression state is kept, so
+            // recovery is automatic when the ring drains.
+            if (last_errno == ENOBUFS) break;
             const int64_t t0 = clock.getMicroseconds();
             while ((clock.getMicroseconds() - t0) <
                    static_cast<int64_t>(kTxRetryDelayUs)) {}
         }
 
+        last_tx_errno_.store(last_errno, std::memory_order_relaxed);
         char msg[256];
         if (last_errno != 0) {
             std::snprintf(msg, sizeof(msg),
@@ -479,39 +456,47 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
 
     if (count == 0 || !specs) return 0;
 
-    // Test hooks — mirror the writeRegister/readRegister short-circuits:
-    // when register-level test callbacks are installed (unit tests without
-    // a NIC), dispatch each datagram through them and deposit a
-    // synthesized response into the matching pre-registered slot so
-    // waitForPreRegistered completes.  Datagram types with no callback
-    // (LRW, ARMW, …) fall through to the real send path.
-    if (apwr_cb_ || aprd_cb_) {
-        for (size_t i = 0; i < count; ++i) {
-            const MultiDatagramSpec& s = specs[i];
-            const bool is_write = s.cmd == Command::APWR ||
-                                  s.cmd == Command::FPWR ||
-                                  s.cmd == Command::BWR;
-            const bool is_read  = s.cmd == Command::APRD ||
-                                  s.cmd == Command::FPRD ||
-                                  s.cmd == Command::BRD;
-            if ((is_write && !apwr_cb_) || (is_read && !aprd_cb_) ||
-                (!is_write && !is_read)) {
-                return 0;   // can't honor the batch via test callbacks
-            }
+    // Test seam: without a live interface, drive the batch through the
+    // register-level test callbacks — each datagram is answered by
+    // apwr_cb_/aprd_cb_ and the synthesized response routed to its
+    // pre-registered waiter.  A callback returning false aborts the
+    // "frame", matching a wire send failure (callers see done < count).
+    if (!iface_.send && (apwr_cb_ || aprd_cb_)) {
+        size_t done = 0;
+        for (size_t k = 0; k < count; ++k) {
+            const auto& sp = specs[k];
             RxDatagram resp{};
-            resp.idx     = s.idx;
-            resp.cmd     = s.cmd;
-            resp.adp     = s.adp;
-            resp.ado     = s.ado;
-            resp.datalen = s.datalen;
-            resp.wkc     = 1;
-            const bool ok = is_write
-                ? apwr_cb_(s.adp, s.ado, s.data, s.datalen, 200)
-                : aprd_cb_(s.adp, s.ado, resp.data, s.datalen, 200);
-            if (!ok) return 0;
+            resp.idx     = sp.idx;
+            resp.cmd     = sp.cmd;
+            resp.adp     = sp.adp;
+            resp.ado     = sp.ado;
+            resp.datalen = sp.datalen;
+            bool ok = false;
+            switch (sp.cmd) {
+                case Command::APWR:
+                case Command::FPWR:
+                    if (apwr_cb_)
+                        ok = apwr_cb_(sp.adp, sp.ado, sp.data, sp.datalen, 0);
+                    if (ok && sp.data && sp.datalen <= sizeof(resp.data))
+                        std::memcpy(resp.data, sp.data, sp.datalen);  // write echo
+                    break;
+                case Command::APRD:
+                case Command::FPRD:
+                    if (aprd_cb_)
+                        ok = aprd_cb_(sp.adp, sp.ado, resp.data,
+                                      std::min<uint16_t>(sp.datalen,
+                                                         sizeof(resp.data)),
+                                      0);
+                    break;
+                default:
+                    break;   // no test semantics for other commands
+            }
+            if (!ok) break;
+            resp.wkc = 1;
             packet_router_.routePacket(resp);
+            ++done;
         }
-        return count;
+        return done;
     }
 
     constexpr uint8_t dst_mac[6] = {0x01, 0x01, 0x05, 0x00, 0x00, 0x00};
@@ -624,6 +609,7 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
             }
             auto& clock = Tether::Platform::Clock::instance();
             bool sent = false;
+            int last_errno = 0;
             for (int retry = 0; retry <= kMaxTxRetries; retry++) {
                 if (cancel_requested_.load(std::memory_order_acquire)) {
                     if (!cancel_warn_logged_.exchange(true, std::memory_order_acq_rel)) {
@@ -632,15 +618,24 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
                     }
                     return frames_sent;
                 }
+                errno = 0;
                 if (sendWithEncapsulation(txbuf, frame_len)) { sent = true; break; }
+                last_errno = errno;
 #if TETHER_ENABLE_ETHERCAT_STATS
                 tx_retry_count_.fetch_add(1, std::memory_order_relaxed);
 #endif
+                // ENOBUFS cannot drain within the retry window — fail
+                // fast this cycle; next cycle transmits normally (no
+                // latch).  Note this errno only surfaces because TX uses
+                // PACKET_QDISC_BYPASS — the qdisc would otherwise absorb
+                // the frames and hide the dead link.
+                if (last_errno == ENOBUFS) break;
                 const int64_t t0 = clock.getMicroseconds();
                 while ((clock.getMicroseconds() - t0) <
                        static_cast<int64_t>(kTxRetryDelayUs)) {}
             }
             if (!sent) {
+                last_tx_errno_.store(last_errno, std::memory_order_relaxed);
                 send_fail_log_.logLegacy(1, TAG,
                     "sendMultiDatagram: send failed after retries");
 #if TETHER_ENABLE_ETHERCAT_STATS

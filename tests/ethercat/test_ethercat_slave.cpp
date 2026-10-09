@@ -315,12 +315,13 @@ TEST_F(EtherCATSlaveTest, OpTransportFailure) {
 }
 
 TEST_F(EtherCATSlaveTest, InitTransportFailure) {
+    // Both directions must fail — requestSlaveApplicationLayerState treats
+    // a failed APWR with a still-answering APRD as "issued" (the ESC may
+    // ack the write but drop the response), so a reachable slave is not a
+    // transport failure.
     master_.setApwrTestCallback([](uint16_t, uint16_t, const void*, uint16_t, unsigned int) {
         return false;
     });
-    // Reads must fail too — the state-request path verifies slave
-    // reachability via AL_STATUS and treats an unacknowledged write on a
-    // reachable slave as issued.
     master_.setAprdTestCallback([](uint16_t, uint16_t, void*, uint16_t, unsigned int) {
         return false;
     });

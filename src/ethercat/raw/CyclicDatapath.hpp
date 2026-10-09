@@ -36,8 +36,8 @@ public:
 
     // ---- Response slots ------------------------------------------------
     /// Copy-mode deposit (software path — poll thread or socket-B parse).
-    /// `idx` is the wire datagram index in the fastpath range [0xE0..0xFD]:
-    /// PDO slices land in slots [0..15], cyclic datagrams in [16..21].
+    /// `idx` is the wire datagram index in the fastpath band [0x9C..0xFF]
+    /// (minus 0xFE): deposits land in the mailbox at fastIndex(idx).
     void deposit(uint8_t idx, Command cmd, uint16_t adp, uint16_t ado,
                  const uint8_t* payload, uint16_t datalen, uint16_t wkc,
                  uint8_t gen);
@@ -61,6 +61,15 @@ public:
                            uint16_t adp, uint16_t ado,
                            const void* data, uint16_t datalen,
                            bool roundtrip);
+    /**
+     * @brief Send one frame carrying several datagrams on reserved
+     *        indices (rotating pool, slice, or the 0xFF DC index).
+     *
+     * Composes [eth(+vlan) | ecat-hdr | dgram…] — all but the last
+     * datagram carry the M bit.  Used by the pooled LRW exchange to ride
+     * the DC-timepoint read in the same frame as the PDO datagram.
+     */
+    bool sendPoolFrame(const CyclicDgramSpec* dgs, size_t count);
     /// Persistent TX frame buffer for the ring backend (nullptr w/o channel).
     uint8_t* acquireTxFrame();
     /// Stamp the next send generation + compose the frame header — one
@@ -75,8 +84,8 @@ public:
 
     // ---- Receive path ----------------------------------------------------
     /// Route a frame received on the cyclic channel: pure-fastpath frames
-    /// (every datagram idx in [0xE0..0xFD]) publish slot views, mixed/async
-    /// frames go to the master's parser.
+    /// (every datagram idx in [0x9C..0xFF] minus 0xFE) publish slot
+    /// views, mixed/async frames go to the master's parser.
     void dispatchFrame(const CyclicFrameView& view);
     bool waitView(uint8_t slot, uint64_t token, uint32_t timeout_ns,
                   CyclicSlotView& out);
@@ -87,6 +96,12 @@ public:
     /// Masked wait over PDO-slice slots [0, kNumSliceSlots).
     uint32_t waitSliceMask(uint32_t slice_mask, const uint64_t* tokens,
                            uint32_t timeout_ns, CyclicSlotView* views);
+    /// Wait over an arbitrary set of rotating-pool positions (0..82).
+    /// Returns the number of positions whose deposit arrived;
+    /// arrived[i] is set and views[i] filled for each of them.
+    uint8_t waitPool(const uint8_t* positions, const uint64_t* tokens,
+                     uint8_t count, uint32_t timeout_ns,
+                     CyclicSlotView* views, bool* arrived);
     bool wait(uint8_t slot, uint64_t token, uint32_t timeout_ns,
               RxDatagram& out);
 
@@ -146,31 +161,30 @@ public:
         uint8_t  gen{0};
         uint8_t  data[kMaxDatagramDataSize];
     };
-    /// Unified fastpath slot bank, indexed by `idx - kFastSlotBaseIdx`:
-    ///   [0..15]  PDO-slice slots   (wire idx 0xE0..0xEF)
-    ///   [16..21] cyclic image slots (wire idx 0xF8..0xFD)
-    /// Slice slot t and cyclic slot s therefore never share a mailbox —
-    /// a sliced full-image collect and a custom slice collect can be
-    /// in flight at once.
-    /// Wire idx → array index.  The two wire ranges are contiguous on
-    /// the wire but not in the array: slice 0xE0..0xEF → [0..15],
-    /// cyclic 0xF8..0xFD → [16..21] (the 0xF0..0xF7 gap has no slot).
-    /// Callers must gate on isSlotIdx() — gap indices have no mapping.
+    /// Unified fastpath slot bank, indexed by `idx - kFastSlotBaseIdx`
+    /// (0x9C): one mailbox per band index 0x9C..0xFF except 0xFE.
+    ///   [0..67]  rotating pool positions 0..67   (wire 0x9C..0xDF)
+    ///   [68..83] PDO-slice slots 0..15           (wire 0xE0..0xEF)
+    ///   [84..97] rotating pool positions 68..81  (wire 0xF0..0xFD)
+    ///   [98]     0xFE fire-and-forget — reserved, never deposits
+    ///   [99]     0xFF DC-timepoint index         (pool position 82)
+    /// Slice slot t and pool position p therefore never share a
+    /// mailbox — a sliced full-image collect and a custom slice collect
+    /// can be in flight at once, and up to kNumCyclicSlots (82) cyclic
+    /// requests can be outstanding across cycles.
     static constexpr uint8_t fastIndex(uint8_t idx) {
-        return isSliceIdx(idx)
-            ? static_cast<uint8_t>(idx - kSliceSlotBaseIdx)
-            : static_cast<uint8_t>(kNumSliceSlots +
-                                   (idx - kCyclicSlotBaseIdx));
+        return static_cast<uint8_t>(idx - kFastSlotBaseIdx);
     }
-    static constexpr uint8_t cyclicFastIndex(uint8_t slot) {
-        return static_cast<uint8_t>(kNumSliceSlots + slot);
+    static constexpr uint8_t cyclicFastIndex(uint8_t pos) {
+        return fastIndex(cyclicPoolWireIdx(pos));
+    }
+    /// PDO-slice slot number → array index (wire 0xE0+slice).
+    static constexpr uint8_t sliceFastIndex(uint8_t slice) {
+        return fastIndex(static_cast<uint8_t>(kSliceSlotBaseIdx + slice));
     }
     /// Array index → wire idx (inverse of fastIndex).
     static constexpr uint8_t wireIndex(uint8_t fast_idx) {
-        return fast_idx < kNumSliceSlots
-            ? static_cast<uint8_t>(kSliceSlotBaseIdx + fast_idx)
-            : static_cast<uint8_t>(kCyclicSlotBaseIdx +
-                                   (fast_idx - kNumSliceSlots));
+        return static_cast<uint8_t>(kFastSlotBaseIdx + fast_idx);
     }
     std::array<RxSlot, kNumFastSlots> slots_{};
 
@@ -272,11 +286,13 @@ public:
     /// (deposited for the gen guard to reject) — otherwise the ring fills
     /// permanently and every subsequent packet is kernel-dropped.
     void drainChannel(int max_sweeps = 64);
-    /// Masked wait shared by waitMask()/waitSliceMask() — `slot_base`
-    /// translates mask bits into slots_ indexes.
-    uint32_t waitMaskImpl(uint32_t slot_mask, const uint64_t* tokens,
-                          uint32_t timeout_ns, CyclicSlotView* views,
-                          uint8_t slot_base, uint8_t slot_count);
+    /// Core list wait shared by waitMask()/waitSliceMask()/waitPool() —
+    /// `fast_idxs` holds the slots_ index for each list entry; one wake
+    /// re-scans all outstanding entries and a deposit on ANY is
+    /// progress.  Returns the number of arrived entries.
+    uint8_t waitListImpl(const uint8_t* fast_idxs, const uint64_t* tokens,
+                         uint8_t count, uint32_t timeout_ns,
+                         CyclicSlotView* views, bool* arrived);
     /// Single-slot wait shared by waitView()/waitSliceView().
     bool waitViewImpl(uint8_t fast_idx, uint64_t token, uint32_t timeout_ns,
                       CyclicSlotView& out);
