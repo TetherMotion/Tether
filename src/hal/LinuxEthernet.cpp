@@ -208,6 +208,13 @@ public:
         // Skip the qdisc layer on TX — removes dequeue scheduling and
         // qdisc stats from every send (cyclic or not).  Non-fatal where
         // unsupported (kernel < 3.14).
+        // NOTE: the qdisc also acts as a buffer that absorbs frames on a
+        // dead TX path and drops them silently while sendto() keeps
+        // "succeeding".  With bypass, a wedged driver TX ring (lost
+        // carrier, link down) surfaces IMMEDIATELY as sendto()=ENOBUFS —
+        // honest, but loud.  That errno is the detection path for the
+        // TX-diagnostics worker; the send loops treat ENOBUFS as
+        // non-retryable (see Master_transport.cpp).
         {
             int one = 1;
             setsockopt(m_socket, SOL_PACKET, PACKET_QDISC_BYPASS,

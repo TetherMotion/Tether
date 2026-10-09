@@ -246,13 +246,25 @@ TEST_F(LRWSelfHealTest, TimeoutStreak_RingProbeAtThreshold) {
     mgr.setEscalateAfterTimeouts(3);
     responder = [](RxDatagram&) { return false; };
 
-    // Ring probe = APRD of AL_STATUS (0x0130) on slave 0.
-    EXPECT_CALL(transport, readRegister(0, 0x0130, _, 2, _)).Times(1);
+    // Ring probe = APRD of AL_STATUS (0x0130) on slave 0 — fired by the
+    // non-RT monitor thread, so poll for it.
+    std::atomic<int> probes{0};
+    EXPECT_CALL(transport, readRegister(0, 0x0130, _, 2, _))
+        .Times(1)
+        .WillOnce(Invoke([&](uint16_t, uint16_t, void* data, uint16_t,
+                             unsigned int) {
+            std::memset(data, 0x08, 2);
+            ++probes;
+            return true;
+        }));
 
     EXPECT_FALSE(exchange());  // 1
     EXPECT_FALSE(exchange());  // 2
-    EXPECT_FALSE(exchange());  // 3 → probe fires
+    EXPECT_FALSE(exchange());  // 3 → monitor fires probe
 
+    for (int i = 0; i < 200 && probes.load() == 0; ++i)
+        std::this_thread::sleep_for(10ms);
+    EXPECT_EQ(probes.load(), 1);
     EXPECT_EQ(mgr.getStats().consecutive_timeouts, 3u);
 }
 
@@ -394,7 +406,10 @@ TEST_F(LRWSelfHealTest, PreRegUnsupported_FallsBackToWaitForResponseIdx) {
 // TX-failure diagnostics worker (non-RT escalation on send failure streak)
 // ============================================================================
 
-TEST_F(LRWSelfHealTest, TxDiagWorker_SpawnsAfterTenConsecutiveFailures) {
+TEST_F(LRWSelfHealTest, TxDiagWorker_PersistentFromInit_ProbesAfterTenFailures) {
+    // The monitor thread is spawned by init() — not by failures.
+    EXPECT_EQ(mgr.getStats().tx_diag_spawns, 1u);
+
     std::atomic<int> diag_calls{0};
     ON_CALL(transport, txFailureDiagnostics())
         .WillByDefault(Invoke([&diag_calls] {
@@ -406,50 +421,53 @@ TEST_F(LRWSelfHealTest, TxDiagWorker_SpawnsAfterTenConsecutiveFailures) {
 
     for (int i = 0; i < 9; ++i) EXPECT_FALSE(exchange());
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    EXPECT_EQ(diag_calls.load(), 0);   // no worker before 10 failures
+    EXPECT_EQ(diag_calls.load(), 0);   // streak below 10 — no wire probe
 
-    EXPECT_FALSE(exchange());          // failure #10 → spawn
+    EXPECT_FALSE(exchange());          // failure #10 → probe fires
     for (int i = 0; i < 200 && diag_calls.load() == 0; ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     EXPECT_EQ(diag_calls.load(), 1);
 }
 
-TEST_F(LRWSelfHealTest, TxDiagWorker_ReArmsEveryTen_AndSelfExits) {
+TEST_F(LRWSelfHealTest, TxDiagWorker_HeartbeatAndNewStreakReEmit) {
     std::atomic<int> diag_calls{0};
-    std::mutex diag_mu;
-    std::vector<std::thread::id> diag_threads;
     ON_CALL(transport, txFailureDiagnostics())
         .WillByDefault(Invoke([&] {
             ++diag_calls;
-            std::lock_guard lk(diag_mu);
-            diag_threads.push_back(std::this_thread::get_id());
             return std::string("TESTDIAG");
         }));
+    std::atomic<bool> send_fails{true};
     ON_CALL(transport, sendSingleDatagram(_, _, _, _, _, _, _))
-        .WillByDefault(Return(false));
+        .WillByDefault(Invoke([&](Command, uint8_t, uint16_t, uint16_t,
+                                  const void*, uint16_t, bool) {
+            return !send_fails.load();
+        }));
 
     auto waitDiagCalls = [&](int target) {
-        for (int i = 0; i < 200 && diag_calls.load() < target; ++i)
+        for (int i = 0; i < 400 && diag_calls.load() < target; ++i)
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         return diag_calls.load();
     };
 
+    // Streak reaches 10 → first probe emit; spawns stay at 1 (persistent).
     for (int i = 0; i < 10; ++i) EXPECT_FALSE(exchange());
     ASSERT_EQ(waitDiagCalls(1), 1);
     EXPECT_EQ(mgr.getStats().tx_diag_spawns, 1u);
 
-    // 10 more failures within the 1 s window re-arm the SAME worker.
-    for (int i = 0; i < 10; ++i) EXPECT_FALSE(exchange());
+    // Streak persists >1 s → heartbeat re-probe (same verdict, time-based).
+    for (int i = 0; i < 70; ++i) {
+        EXPECT_FALSE(exchange());
+        std::this_thread::sleep_for(20ms);   // ~1.4 s of failures
+    }
     ASSERT_EQ(waitDiagCalls(2), 2);
-    EXPECT_EQ(mgr.getStats().tx_diag_spawns, 1u);   // re-arm, no respawn
+    EXPECT_EQ(mgr.getStats().tx_diag_spawns, 1u);
 
-    // Idle past the 1 s self-exit — the next streak spawns a NEW worker.
-    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    // Recovery resets the streak; a fresh streak re-emits even though the
+    // verdict is unchanged (new episode).
+    send_fails = false;
+    EXPECT_TRUE(exchange());
+    send_fails = true;
     for (int i = 0; i < 10; ++i) EXPECT_FALSE(exchange());
     ASSERT_EQ(waitDiagCalls(3), 3);
-    EXPECT_EQ(mgr.getStats().tx_diag_spawns, 2u);   // self-exited → respawned
-
-    std::lock_guard lk(diag_mu);
-    ASSERT_EQ(diag_threads.size(), 3u);
-    EXPECT_EQ(diag_threads[0], diag_threads[1]);   // re-armed, same thread
+    EXPECT_EQ(mgr.getStats().tx_diag_spawns, 1u);
 }
