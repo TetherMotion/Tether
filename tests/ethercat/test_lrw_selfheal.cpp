@@ -1,14 +1,16 @@
 /**
  * @file test_lrw_selfheal.cpp
  * @brief Fault-injection tests for LogicalAddressManager self-heal:
- *        host-stall detection, pending-waiter purge, wire drain, timeout
+ *        host-stall detection, wire drain, per-send slot prune, timeout
  *        streaks, ring probe escalation, and configurable response wait.
  *
  * These model the Raspberry Pi failure mode: a burst of host latency
  * (non-RT scheduling) makes LRW responses arrive late or get dropped in
  * the kernel queue, after which every subsequent exchange times out.
- * The self-heal path must detect the stall, purge stale waiter state,
- * drain the wire backlog, and resume cleanly.
+ * The self-heal path must detect the stall and drain the wire backlog —
+ * delivering queued replies to their live waiters — while the per-send
+ * prune touches only the slot the exchange transmits on.  Async slots
+ * are never purged.
  */
 
 #include <gtest/gtest.h>
@@ -135,8 +137,12 @@ protected:
 // ============================================================================
 
 TEST_F(LRWSelfHealTest, CleanExchange_NoSelfHealActivity) {
+    // No stall → no backlog flush, and async waiters are NEVER purged.
+    // The per-send drainWire(64) is the slot prune: it runs on every
+    // exchange (cheap — empty queue is one syscall).
     EXPECT_CALL(transport, purgePendingResponses()).Times(0);
-    EXPECT_CALL(transport, drainWire(_)).Times(0);
+    EXPECT_CALL(transport, drainWire(512)).Times(0);
+    EXPECT_CALL(transport, drainWire(64)).Times(2).WillRepeatedly(Return(0));
 
     ASSERT_TRUE(exchange());
     ASSERT_TRUE(exchange());   // back-to-back — no stall
@@ -153,22 +159,25 @@ TEST_F(LRWSelfHealTest, CleanExchange_NoSelfHealActivity) {
 // Host-stall detection (latency spike)
 // ============================================================================
 
-TEST_F(LRWSelfHealTest, LatencySpike_PurgesAndDrainsBeforeNextSend) {
+TEST_F(LRWSelfHealTest, LatencySpike_DrainsBeforeNextSend_NoPurge) {
     mgr.setStallDetectionGapUs(1000);  // 1 ms — a 5 ms sleep trips it
 
     ASSERT_TRUE(exchange());           // seeds last_call_ns_
 
     std::this_thread::sleep_for(5ms);  // the latency spike
 
-    // Order matters: purge + drain must happen BEFORE the next send, so a
-    // stale echo is flushed while no waiter is pending.
+    // Order matters: the stall flush (512) and the per-send prune drain
+    // (64) must happen BEFORE the send, so a stale echo is flushed while
+    // no waiter for the new idx is pending.  No waiter is ever purged —
+    // drained frames for live waiters are DELIVERED, not dropped.
     Sequence seq;
-    EXPECT_CALL(transport, purgePendingResponses()).InSequence(seq);
     EXPECT_CALL(transport, drainWire(512)).InSequence(seq)
         .WillOnce(Return(7));
+    EXPECT_CALL(transport, drainWire(64)).InSequence(seq);
     EXPECT_CALL(transport, sendSingleDatagram(_, _, _, _, _, _, _))
         .InSequence(seq)
         .WillOnce(Return(true));
+    EXPECT_CALL(transport, purgePendingResponses()).Times(0);
 
     ASSERT_TRUE(exchange());
 
@@ -186,6 +195,8 @@ TEST_F(LRWSelfHealTest, GapBelowThreshold_NoStallAction) {
     std::this_thread::sleep_for(5ms);
 
     EXPECT_CALL(transport, purgePendingResponses()).Times(0);
+    EXPECT_CALL(transport, drainWire(512)).Times(0);  // stall flush only
+    EXPECT_CALL(transport, drainWire(64)).WillRepeatedly(Return(0));
     ASSERT_TRUE(exchange());
 
     EXPECT_EQ(mgr.getStats().stall_events, 0u);
@@ -198,7 +209,8 @@ TEST_F(LRWSelfHealTest, StallDetectionDisabled_NoAction) {
     std::this_thread::sleep_for(5ms);
 
     EXPECT_CALL(transport, purgePendingResponses()).Times(0);
-    EXPECT_CALL(transport, drainWire(_)).Times(0);
+    EXPECT_CALL(transport, drainWire(512)).Times(0);  // no stall flush
+    EXPECT_CALL(transport, drainWire(64)).WillRepeatedly(Return(0));
     ASSERT_TRUE(exchange());
     EXPECT_EQ(mgr.getStats().stall_events, 0u);
 }
@@ -210,7 +222,12 @@ TEST_F(LRWSelfHealTest, StallDetectionDisabled_NoAction) {
 TEST_F(LRWSelfHealTest, Timeout_DrainsWireAndCountsStreak) {
     responder = [](RxDatagram&) { return false; };
 
-    EXPECT_CALL(transport, drainWire(64)).WillOnce(Return(3));
+    // drainWire(64) runs twice: once as the pre-claim slot prune and once
+    // as the post-timeout backlog flush.
+    EXPECT_CALL(transport, drainWire(64))
+        .Times(2)
+        .WillOnce(Return(3))
+        .WillOnce(Return(0));
 
     EXPECT_FALSE(exchange());
 
@@ -280,11 +297,14 @@ TEST_F(LRWSelfHealTest, LatencySpikeThenTimeoutThenRecovery) {
 
     std::this_thread::sleep_for(5ms);              // latency spike
 
-    // Next exchange: stall self-heal runs, then the (still failing) wire
-    // produces a timeout — which drains again and counts the streak.
-    EXPECT_CALL(transport, purgePendingResponses()).Times(1);
+    // Next exchange: stall self-heal drains the backlog (512), then the
+    // (still failing) wire produces a timeout — which drains again and
+    // counts the streak.  No waiter is ever purged.  drainWire(64) calls:
+    // 2 for the failing exchange (pre-claim prune + timeout flush) and 1
+    // for the recovering exchange's prune.
+    EXPECT_CALL(transport, purgePendingResponses()).Times(0);
     EXPECT_CALL(transport, drainWire(512)).Times(1).WillOnce(Return(4));
-    EXPECT_CALL(transport, drainWire(64)).Times(1);
+    EXPECT_CALL(transport, drainWire(64)).Times(3);
     EXPECT_FALSE(exchange());
 
     // Wire healed — normal exchange resumes.
@@ -316,4 +336,51 @@ TEST_F(LRWSelfHealTest, ConfiguredResponseTimeout_UsedInWait) {
 TEST_F(LRWSelfHealTest, ZeroTimeout_ClampedToOne) {
     mgr.setLrwResponseTimeoutMs(0);
     EXPECT_EQ(mgr.lrwResponseTimeoutMs(), 1u);
+}
+
+// ============================================================================
+// Selective slot prune — busy slots belong to live waiters
+// ============================================================================
+
+TEST_F(LRWSelfHealTest, BusySlot_SkipsToNextIdx) {
+    // idx 1's slot is owned by a live (async) waiter — the exchange must
+    // not steal it; it claims the next free idx instead.
+    EXPECT_CALL(transport, preRegisterResponseWaiter(1, _, _))
+        .WillOnce(Return(IPDOTransport::kPreRegBusy));
+    EXPECT_CALL(transport, preRegisterResponseWaiter(2, _, _))
+        .WillOnce(Return(0));
+
+    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 2, _, _, _, _, _))
+        .WillOnce(Return(true));
+
+    ASSERT_TRUE(exchange());
+    EXPECT_EQ(mgr.getStats().success, 1u);
+}
+
+TEST_F(LRWSelfHealTest, AllSlotsBusy_FailsWithoutSending) {
+    // Every candidate idx is owned by a live waiter — the exchange must
+    // fail WITHOUT sending rather than steal another request's slot.
+    ON_CALL(transport, preRegisterResponseWaiter(_, _, _))
+        .WillByDefault(Return(IPDOTransport::kPreRegBusy));
+
+    EXPECT_CALL(transport, sendSingleDatagram(_, _, _, _, _, _, _)).Times(0);
+    EXPECT_CALL(transport, waitForResponseIdx(_, _, _)).Times(0);
+
+    EXPECT_FALSE(exchange());
+    EXPECT_EQ(mgr.getStats().send_errors, 1u);
+}
+
+TEST_F(LRWSelfHealTest, PreRegUnsupported_FallsBackToWaitForResponseIdx) {
+    ON_CALL(transport, preRegisterResponseWaiter(_, _, _))
+        .WillByDefault(Return(IPDOTransport::kPreRegInvalid));
+
+    EXPECT_CALL(transport, sendSingleDatagram(Command::LRW, 1, _, _, _, _, _))
+        .WillOnce(Return(true));
+    // Fallback waits by idx — the unsupported transport's own mechanism.
+    EXPECT_CALL(transport, waitForResponseIdx(1, _, _))
+        .WillOnce(Invoke([](uint8_t, unsigned int, RxDatagram& out) {
+            out.wkc = 1; out.datalen = 12; return true;
+        }));
+
+    EXPECT_TRUE(exchange());
 }

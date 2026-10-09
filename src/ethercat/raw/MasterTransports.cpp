@@ -55,7 +55,14 @@ public:
 
     size_t preRegisterResponseWaiter(uint8_t idx,
                                      uint8_t* buffer, size_t buffer_size) override {
-        return master_.preRegisterResponseWaiter(idx, buffer, buffer_size);
+        const size_t slot =
+            master_.preRegisterResponseWaiter(idx, buffer, buffer_size);
+        // Normalize the router's "couldn't claim" sentinel to the
+        // IPDOTransport contract: a live waiter owns the slot — the caller
+        // must pick another idx rather than steal it.
+        if (slot >= TransactionRouter::kNumSlots)
+            return IPDOTransport::kPreRegBusy;
+        return slot;
     }
 
     bool waitForPreRegistered(size_t slot, unsigned int timeout_ms,

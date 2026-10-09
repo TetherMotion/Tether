@@ -751,8 +751,12 @@ public:
 
     /// Pre-register a response waiter slot for @p idx BEFORE sending the frame.
     /// This avoids the send-then-register race when multiple datagrams share
-    /// one frame.  Returns a slot handle; a value of kPreRegInvalid means
-    /// the transport does not support pre-registration.
+    /// one frame.  Returns a slot handle on success.  kPreRegInvalid means
+    /// the transport does not support pre-registration; kPreRegBusy means
+    /// a live waiter owns @p idx's slot — the caller must NOT steal it and
+    /// should retry with a different idx (or give up).  A successful claim
+    /// prunes the slot: it atomically invalidates any stale registration
+    /// state that belonged to an earlier request on the same idx.
     virtual size_t preRegisterResponseWaiter(uint8_t idx,
                                              uint8_t* buffer, size_t buffer_size) {
         (void)idx; (void)buffer; (void)buffer_size;
@@ -768,6 +772,9 @@ public:
 
     /// Sentinel returned by preRegisterResponseWaiter when unsupported.
     static constexpr size_t kPreRegInvalid = static_cast<size_t>(-1);
+    /// Sentinel returned by preRegisterResponseWaiter when @p idx's slot is
+    /// owned by a live waiter — pick another idx, never steal it.
+    static constexpr size_t kPreRegBusy = static_cast<size_t>(-2);
 
     virtual uint8_t  allocIdx() = 0;
     virtual uint16_t adpForSlaveIndex(uint16_t slave_index) = 0;
@@ -780,11 +787,13 @@ public:
      * @brief Best-effort drain of already-received wire frames through
      *        normal routing.
      *
-     * Called by the LRW exchange after a host stall or response timeout:
-     * queued responses for still-pending slots are delivered (they ARE
-     * their legitimate replies) and everything else falls into the
-     * unrouted counter.  Draining the kernel backlog BEFORE the next
-     * send keeps a stale echo from outliving into a reused idx.
+     * Called by the LRW exchange before claiming a response slot, after a
+     * host stall, and on response timeout: queued responses for
+     * still-pending slots are DELIVERED (they are legitimate late replies
+     * — draining gives in-flight requests their chance to complete) and
+     * frames for dead slots fall into the unrouted counter.  Draining the
+     * kernel backlog BEFORE the next registration keeps a stale echo from
+     * satisfying a NEW waiter on a reused idx.
      *
      * @return frames drained (0 if unsupported — e.g. no direct-receive
      *         path under VLAN encapsulation).
@@ -794,11 +803,12 @@ public:
     }
 
     /**
-     * @brief Drop every pending response waiter.
+     * @brief Drop every pending response waiter — explicit escape hatch.
      *
-     * Post-stall cleanup: frees all TransactionRouter slots so a response
-     * that outlived its request cannot satisfy a NEW request on a reused
-     * datagram index.  Waiters wake into their timeout path.
+     * Frees all TransactionRouter slots; waiters wake into their timeout
+     * path.  NOT called by the LRW exchange self-heal: polled exchanges
+     * only ever prune the slot they transmit on (claim + drain), so
+     * unrelated async waiters keep their chance to be fulfilled.
      */
     virtual void purgePendingResponses() {}
 
