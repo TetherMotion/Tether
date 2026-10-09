@@ -135,6 +135,7 @@ bool RealtimeLoop::startPDOThread() {
     cfg.stackSize = 4096;
     cfg.priority = HAL::ThreadPriority::Realtime;
     cfg.useRealtimeScheduling = true;
+    cfg.cpuAffinity = config_.pdo_cpu_affinity;
 
     pdo_thread_ = HAL::getThreadingFactory().createThread(cfg);
     if (!pdo_thread_) {
@@ -276,6 +277,7 @@ bool RealtimeLoop::startDCThread() {
     cfg.stackSize = 4096;
     cfg.priority = HAL::ThreadPriority::Realtime;
     cfg.useRealtimeScheduling = true;
+    cfg.cpuAffinity = config_.dc_cpu_affinity;
 
     dc_thread_ = HAL::getThreadingFactory().createThread(cfg);
     if (!dc_thread_) {

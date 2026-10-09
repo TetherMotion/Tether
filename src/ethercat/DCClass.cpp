@@ -91,6 +91,8 @@ bool EtherCATDC::start(std::function<bool()> pdo_exchange_fn) {
     RealtimeLoop::Config loop_cfg =
         RealtimeLoop::Config::defaults(config_.cycle_period_us,
                                                 config_.sync_interval_cycles);
+    loop_cfg.pdo_cpu_affinity = config_.pdo_cpu_affinity;
+    loop_cfg.dc_cpu_affinity  = config_.dc_cpu_affinity;
 
     auto sync_fn = [this]() { return sendSyncFrame(); };
     auto time_fn = [this]() { return getMasterTimeNs(); };
