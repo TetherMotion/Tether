@@ -32,6 +32,9 @@
 #include <bit>
 #include <vector>
 #include <format>
+#ifdef __linux__
+#include <sys/socket.h>
+#endif
 #include "sii/SIIReader.hpp"
 #include <inttypes.h>
 
@@ -348,6 +351,19 @@ void Master::handleRxFrame(const uint8_t* frame, size_t length)
 int Master::drainWire(int max_frames)
 {
     if (!iface_.receive || max_frames <= 0) return 0;
+#ifdef __linux__
+    // Fast path: the native handle is the wire socket fd — dequeue a
+    // batch per recvmmsg() call instead of a recv per frame.  A stall
+    // backlog of hundreds of frames otherwise costs a syscall each on
+    // the cyclic thread's deadline budget.
+    if (iface_.native_handle) {
+        const int fd = static_cast<int>(
+            reinterpret_cast<intptr_t>(iface_.native_handle));
+        const int n = drainWireBatch(fd, max_frames);
+        if (n >= 0) return n;
+        // Not a drainable socket — fall through to the per-frame path.
+    }
+#endif
     int drained = 0;
     uint8_t buf[kMaxJumboFrameSize];
     while (drained < max_frames) {
@@ -358,6 +374,50 @@ int Master::drainWire(int max_frames)
     }
     return drained;
 }
+
+#ifdef __linux__
+int Master::drainWireBatch(int fd, int max_frames)
+{
+    constexpr int kBatch = 32;
+    if (drain_buf_.size() <
+        static_cast<size_t>(kBatch) * kMaxJumboFrameSize) {
+        try {
+            drain_buf_.resize(static_cast<size_t>(kBatch) *
+                              kMaxJumboFrameSize);
+        } catch (...) {
+            return -1;   // allocation failed — per-frame path still works
+        }
+    }
+    int drained = 0;
+    while (drained < max_frames) {
+        const int want = std::min(kBatch, max_frames - drained);
+        mmsghdr msgs[kBatch]{};
+        iovec   iov[kBatch]{};
+        for (int i = 0; i < want; ++i) {
+            iov[i].iov_base = drain_buf_.data() +
+                              static_cast<size_t>(i) * kMaxJumboFrameSize;
+            iov[i].iov_len  = kMaxJumboFrameSize;
+            msgs[i].msg_hdr.msg_iov    = &iov[i];
+            msgs[i].msg_hdr.msg_iovlen = 1;
+        }
+        const int n = ::recvmmsg(fd, msgs, want, MSG_DONTWAIT, nullptr);
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK ||
+                errno == EINTR) {
+                break;   // queue empty (or interrupted) — done
+            }
+            return drained > 0 ? drained : -1;   // unusable fd → fallback
+        }
+        for (int i = 0; i < n; ++i) {
+            handleRxFrame(static_cast<const uint8_t*>(iov[i].iov_base),
+                          msgs[i].msg_len);
+        }
+        drained += n;
+        if (n < want) break;   // queue emptied mid-batch
+    }
+    return drained;
+}
+#endif
 
 void Master::purgePendingResponses()
 {
