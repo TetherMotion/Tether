@@ -106,7 +106,7 @@ public:
                                      size_t buffer_size) override {
         const size_t s = router_.preRegisterWaiter(
             PacketFilter::byIndex(idx), buffer, buffer_size);
-        return s == TransactionRouter::kNumSlots ? kPreRegInvalid : s;
+        return s == TransactionRouter::kNumSlots ? kPreRegBusy : s;
     }
 
     bool waitForPreRegistered(size_t slot, unsigned int timeout_ms,
@@ -201,27 +201,30 @@ protected:
 };
 
 // ============================================================================
-// THE BUG — a late echo aliases a NEW waiter on a reused idx.
+// THE BUG (historical) — a late echo aliased a NEW waiter on a reused idx.
 //
 // Sequence:
 //   exchange 1 (idx 1): echo lost → timeout.
 //   exchange 2 (idx 2): clean round-trip.
 //   (stall)             the stale echo 1 lands in the kernel backlog while
 //                       the host/RX thread is starved.
-//   exchange 3 (idx 1): no purge/drain ran → the wait pumps the backlog and
-//                       the STALE echo satisfies the new waiter.
+//   exchange 3 (idx 1): pre-selective-prune this wait pumped the backlog
+//                       and the STALE echo satisfied the new waiter.
 //
-// exchangeAllLRW() reports success but the process image now holds exchange
-// 1's payload — silent corruption, exactly what the self-heal prevents.
+// THE FIX — the exchange drains the wire BEFORE claiming its slot
+// (claimExchangeWaiter), so the stale echo is routed while idx 1 has no
+// pending waiter and drops as an unrouted stray.  Exchange 3 then times
+// out honestly instead of consuming stale data — and the backlog frame
+// was never a live waiter's to lose, so no pruning was needed anywhere.
 // ============================================================================
-TEST_F(LRWStaleEchoTest, StaleEcho_AliasesReusedIdx_SilentCorruption) {
-    mgr.setStallDetectionGapUs(0);   // pre-self-heal behavior
+TEST_F(LRWStaleEchoTest, StaleEcho_ClaimDrainBlocksAlias) {
+    mgr.setStallDetectionGapUs(0);   // fix does not depend on stall detect
 
     int sends = 0;
     transport.responder = [&](uint8_t idx) -> std::optional<RxDatagram> {
         ++sends;
         // Echoes 1 and 3 are late — request 3's response is still in flight
-        // when the stale backlog echo "answers" its waiter.
+        // when the stale backlog echo is flushed.
         if (sends == 1 || sends == 3) return std::nullopt;
         return WireSimTransport::mkEcho(idx, 0x11, 12);
     };
@@ -232,27 +235,27 @@ TEST_F(LRWStaleEchoTest, StaleEcho_AliasesReusedIdx_SilentCorruption) {
     // exchange 2's wait, before exchange 3's send.
     transport.wireArrive(WireSimTransport::mkEcho(1, 0xAA, 12));
 
-    // 3 (idx 1): "succeeds" — but request 3's echo was never sent; the wait
-    // was satisfied entirely by the STALE echo.
-    EXPECT_TRUE(exchange());
-
-    // The caller got exchange 1's payload: silent corruption.
-    for (int i = 0; i < 8; ++i) EXPECT_EQ(txByte(i), 0xAA)
+    // 3 (idx 1): the claim-time drain routes the stale echo to a dead slot
+    // (dropped as unrouted) BEFORE the new waiter registers — the exchange
+    // then honestly times out waiting for its own response.
+    EXPECT_FALSE(exchange());
+    for (int i = 0; i < 8; ++i) EXPECT_EQ(txByte(i), 0x11)
         << "stale echo aliased the reused idx — PDO data corrupted at byte " << i;
 
-    // And request 3's real echo, whenever it finally lands, is orphaned —
+    // Request 3's real echo, whenever it finally lands, is orphaned too —
     // its waiter is already gone.
     transport.wireArrive(WireSimTransport::mkEcho(1, 0x33, 12));
     ASSERT_TRUE(exchange());                       // 4 (idx 2): fresh
     for (int i = 0; i < 8; ++i) EXPECT_EQ(txByte(i), 0x11);
-    EXPECT_EQ(transport.router().getStats().packets_dropped, 1u); // echo 3
-    EXPECT_EQ(mgr.getStats().timeout_errors, 1u);
+    EXPECT_EQ(transport.router().getStats().packets_dropped, 2u); // stale + late
+    EXPECT_EQ(mgr.getStats().timeout_errors, 2u);
 }
 
 // ============================================================================
-// THE FIX — purge + drain before the next send flushes the stale echo while
-// no waiter is pending, so the reused idx only ever sees its own response.
-// Same sequence as above plus a host stall the manager can detect.
+// Companion FIX path — after a detected host stall, stallCheck drains the
+// backlog (live waiters are fulfilled, dead echoes dropped) BEFORE the
+// claim-time drain runs again.  Same sequence as above plus a host stall
+// the manager can detect; the exchange recovers instead of timing out.
 // ============================================================================
 TEST_F(LRWStaleEchoTest, SelfHeal_DrainBlocksStaleEcho) {
     // 3 ms threshold: above the ~1-2 ms a timed-out exchange takes (so the

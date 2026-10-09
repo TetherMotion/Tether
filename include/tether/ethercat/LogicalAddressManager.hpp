@@ -500,9 +500,28 @@ private:
     uint32_t timeout_log_suppressed_{0};
     bool     escalate_logged_{false};
 
-    /// Detect a host stall since the last exchange call; purge pending
-    /// response waiters and drain the wire backlog when one fired.
+    /// Detect a host stall since the last exchange call; drain the wire
+    /// backlog when one fired.  Pending waiters are NOT purged — backlog
+    /// frames are routed normally so late replies still reach them.
     void stallCheck();
+    /**
+     * @brief Claim the response slot this polled exchange will send on.
+     *
+     * Drains the wire backlog first (stale echoes drop unrouted while
+     * frames for other live waiters are delivered), then walks allocIdx()
+     * until a slot is claimed.  A busy slot belongs to a live waiter and
+     * is skipped — the exchange only ever prunes the slot it transmits on.
+     *
+     * @param idx_out  datagram index to transmit on (also set when the
+     *                 transport lacks pre-registration).
+     * @param resp     response buffer bound to the claimed slot.
+     * @return claimed slot handle, IPDOTransport::kPreRegInvalid when the
+     *         transport does not support pre-registration (caller falls
+     *         back to waitForResponseIdx on idx_out), or
+     *         IPDOTransport::kPreRegBusy when every candidate slot was
+     *         owned by a live waiter.
+     */
+    size_t claimExchangeWaiter(uint8_t& idx_out, RxDatagram& resp);
     /// Timeout bookkeeping: rate-limited log (4 Hz), drain the wire,
     /// count the streak, ring-probe after escalate_after_timeouts_
     /// consecutive failures.  `what` is the caller's function name.
