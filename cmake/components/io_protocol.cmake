@@ -60,6 +60,9 @@ set(TETHER_IO_PROTOCOL_SOURCES
     ${TETHER_ROOT}/src/io/ThresholdFilter.cpp
     ${TETHER_ROOT}/src/io/Datalogging.cpp
     ${TETHER_ROOT}/src/io/Session.cpp
+    ${TETHER_ROOT}/src/io/Session_handlers.cpp
+    ${TETHER_ROOT}/src/io/Session_peer.cpp
+    ${TETHER_ROOT}/src/io/Session_streaming.cpp
     ${TETHER_ROOT}/src/io/Server.cpp
     ${TETHER_ROOT}/src/io/TetherIOClient.cpp
 )

@@ -1008,21 +1008,36 @@ set(ETHERCAT_COMMON_STUBS
 )
 set(ETHERCAT_COMMON_SRC
     ../src/ethercat/SlaveEmulator.cpp
+    ../src/ethercat/SlaveEmulator_CiA402.cpp
+    ../src/ethercat/SlaveEmulator_Network.cpp
     ../src/ethercat/raw/FoE.cpp
     ../src/ethercat/FaultDetection.cpp
     ../src/ethercat/WriteVerify.cpp
     ../src/ethercat/CoEManager.cpp
+    ../src/ethercat/raw/CoEPendingFutures.cpp
+    ../src/ethercat/raw/CoEManager_retry.cpp
+    ../src/ethercat/raw/CoEManager_worker.cpp
     ../src/ethercat/raw/CoEErrorStrings.cpp
     ../src/ethercat/raw/CoEEntryTransactions.cpp
     ../src/ethercat/raw/SDOErrorDecoder.cpp
     ../src/ethercat/raw/PDOManager.cpp
+    ../src/ethercat/raw/PDOManager_smconfig.cpp
+    ../src/ethercat/raw/PDOManager_mapping.cpp
+    ../src/ethercat/raw/PDOManager_transfer.cpp
+    ../src/ethercat/raw/PDOManager_queue.cpp
+    ../src/ethercat/raw/PDOManager_bulk.cpp
+    ../src/ethercat/raw/PDOManager_cyclic.cpp
+    ../src/ethercat/raw/PDOManager_exchange.cpp
     ../src/ethercat/raw/PDOMapping.cpp
     ../src/ethercat/raw/PDOKeepAlive.cpp
     ../src/ethercat/raw/LogicalAddressManager.cpp
+    ../src/ethercat/raw/LogicalAddressManager_cyclic.cpp
+    ../src/ethercat/raw/LogicalAddressManager_polled.cpp
     ../src/ethercat/raw/TxFailureDiagnostics.cpp
     ../src/ethercat/raw/LogicalAddressManager_slices.cpp
     ../src/ethercat/raw/LogicalAddressManager_health.cpp
     ../src/ethercat/ProcessImage.cpp
+    ../src/ethercat/ProcessImage_shm.cpp
     ../src/ethercat/DCClass.cpp
     ../src/ethercat/RealtimeLoop.cpp
     ../src/ethercat/RealtimeJitterMonitor.cpp
@@ -1049,19 +1064,33 @@ create_ethercat_test(pdo
         ethercat/test_process_image.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/raw/PDOManager.cpp
+        ../src/ethercat/raw/PDOManager_smconfig.cpp
+        ../src/ethercat/raw/PDOManager_mapping.cpp
+        ../src/ethercat/raw/PDOManager_transfer.cpp
+        ../src/ethercat/raw/PDOManager_queue.cpp
+        ../src/ethercat/raw/PDOManager_bulk.cpp
+        ../src/ethercat/raw/PDOManager_cyclic.cpp
+        ../src/ethercat/raw/PDOManager_exchange.cpp
         ../src/ethercat/raw/PDOMapping.cpp
         ../src/ethercat/raw/PDOKeepAlive.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
+        ../src/ethercat/raw/LogicalAddressManager_cyclic.cpp
+        ../src/ethercat/raw/LogicalAddressManager_polled.cpp
         ../src/ethercat/raw/LogicalAddressManager_slices.cpp
         ../src/ethercat/raw/LogicalAddressManager_health.cpp
         ../src/ethercat/raw/TxFailureDiagnostics.cpp
         ../src/ethercat/ProcessImage.cpp
+        ../src/ethercat/ProcessImage_shm.cpp
         ../src/ethercat/CoEManager.cpp
+        ../src/ethercat/raw/CoEPendingFutures.cpp
+        ../src/ethercat/raw/CoEManager_retry.cpp
+        ../src/ethercat/raw/CoEManager_worker.cpp
         ../src/ethercat/raw/CoEErrorStrings.cpp
         ../src/ethercat/raw/CoEEntryTransactions.cpp
         ../src/ethercat/raw/SDOErrorDecoder.cpp
         ../src/ethercat/FaultDetection.cpp
         ../src/ethercat/DebugGate.cpp
+        ../src/ethercat/DebugConditions.cpp
         ../src/ethercat/utils/PDO.cpp
         ../src/ethercat/SyncManagerValidation.cpp
         ../src/fmmu/FMMUConfiguration.cpp
@@ -1086,23 +1115,39 @@ create_ethercat_test(protocol
         ethercat/test_slave_status_poller.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
+        ../src/ethercat/SlaveEmulator_CiA402.cpp
+        ../src/ethercat/SlaveEmulator_Network.cpp
         ../src/ethercat/raw/FoE.cpp
         ../src/ethercat/FaultDetection.cpp
         ../src/ethercat/SlaveStatusPoller.cpp
         ../src/ethercat/WriteVerify.cpp
         ../src/ethercat/CoEManager.cpp
+        ../src/ethercat/raw/CoEPendingFutures.cpp
+        ../src/ethercat/raw/CoEManager_retry.cpp
+        ../src/ethercat/raw/CoEManager_worker.cpp
         ../src/ethercat/raw/CoEErrorStrings.cpp
         ../src/ethercat/raw/CoEEntryTransactions.cpp
         ../src/ethercat/raw/SDOErrorDecoder.cpp
         ../src/ethercat/raw/PDOManager.cpp
+        ../src/ethercat/raw/PDOManager_smconfig.cpp
+        ../src/ethercat/raw/PDOManager_mapping.cpp
+        ../src/ethercat/raw/PDOManager_transfer.cpp
+        ../src/ethercat/raw/PDOManager_queue.cpp
+        ../src/ethercat/raw/PDOManager_bulk.cpp
+        ../src/ethercat/raw/PDOManager_cyclic.cpp
+        ../src/ethercat/raw/PDOManager_exchange.cpp
         ../src/ethercat/raw/PDOMapping.cpp
         ../src/ethercat/raw/PDOKeepAlive.cpp
         ../src/ethercat/raw/LogicalAddressManager.cpp
+        ../src/ethercat/raw/LogicalAddressManager_cyclic.cpp
+        ../src/ethercat/raw/LogicalAddressManager_polled.cpp
         ../src/ethercat/raw/LogicalAddressManager_slices.cpp
         ../src/ethercat/raw/LogicalAddressManager_health.cpp
         ../src/ethercat/raw/TxFailureDiagnostics.cpp
         ../src/ethercat/ProcessImage.cpp
+        ../src/ethercat/ProcessImage_shm.cpp
         ../src/ethercat/DebugGate.cpp
+        ../src/ethercat/DebugConditions.cpp
         ../src/ethercat/Retry.cpp
         ../src/ethercat/host_stubs.cpp
         ../src/ethercat/ConditionalPacketRouter.cpp
@@ -1141,6 +1186,8 @@ create_ethercat_test(coverage
         ethercat/test_sdo_polling.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
+        ../src/ethercat/SlaveEmulator_CiA402.cpp
+        ../src/ethercat/SlaveEmulator_Network.cpp
         ../src/ethercat/ConditionalPacketRouter.cpp
         ../src/ethercat/TransactionRouter.cpp
         ../src/ethercat/SdoCommandChannel.cpp
@@ -1155,6 +1202,8 @@ tether_add_test_executable(tether_ethercat_integration_tests
     ethercat/test_integration_paired.cpp
     ${ETHERCAT_COMMON_STUBS}
     ../src/ethercat/SlaveEmulator.cpp
+    ../src/ethercat/SlaveEmulator_CiA402.cpp
+    ../src/ethercat/SlaveEmulator_Network.cpp
     ../src/ethercat/ConditionalPacketRouter.cpp
     ../src/ethercat/TransactionRouter.cpp
 )

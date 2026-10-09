@@ -55,6 +55,7 @@
 #include "tether/platform/Platform.hpp"
 #include "tether/ethercat/CustomPDOMapping.hpp"
 #include "tether/ethercat/PDOMappingConfig.hpp"
+#include "tether/ethercat/SlavePdoTypes.hpp"
 
 namespace EtherCAT {
 
@@ -155,6 +156,11 @@ inline const char* slaveErrorToString(SlaveError e) {
  */
 class Slave : public fmmu::IFMMUTransport {
 public:
+    // PDO config value types moved to SlavePdoTypes.hpp.
+    using SIIPDOConfig       = ::EtherCAT::SIIPDOConfig;
+    using MultiPDOAssignment = ::EtherCAT::MultiPDOAssignment;
+    using CustomPDOInfo      = ::EtherCAT::CustomPDOInfo;
+
     /**
      * @brief Construct a slave bound to a master at a given position.
      * @param master  Owning Master instance
@@ -371,14 +377,6 @@ public:
     /**
      * @brief Description of a PDO configuration discovered from SII.
      */
-    struct SIIPDOConfig {
-        uint16_t rxpdo_index = 0;   ///< RxPDO object index (e.g. 0x1600)
-        uint16_t txpdo_index = 0;   ///< TxPDO object index (e.g. 0x1A00)
-        uint16_t rxpdo_size = 0;    ///< Total RxPDO size in bytes
-        uint16_t txpdo_size = 0;    ///< Total TxPDO size in bytes
-        bool has_rxpdo = false;     ///< True if an RxPDO was found in SII
-        bool has_txpdo = false;     ///< True if a TxPDO was found in SII
-    };
 
     /**
      * @brief Read PDO descriptions from the slave's SII and register mapping entries.
@@ -526,15 +524,6 @@ public:
      * Each entry describes one sync manager with its physical address,
      * control byte, and list of PDO mappings to assign to it.
      */
-    struct MultiPDOAssignment {
-        struct SMConfig {
-            uint8_t  sm_index;          ///< SM index (0-7)
-            uint16_t phys_start_addr;   ///< Physical start address in ESC memory
-            uint8_t  control_byte;      ///< Control register byte
-            std::vector<PDO::PDOMappingRegion> pdo_mappings;
-        };
-        std::vector<SMConfig> sm_configs;
-    };
 
     /**
      * @brief Configure multiple PDO mappings per sync manager with FMMU integration.
@@ -857,17 +846,6 @@ protected:
     fmmu::FMMUManager fmmu_mgr_{*this};
 
     // -- Custom PDO mapping state ----------------------------------------------
-    struct CustomPDOInfo {
-        uint16_t pdo_index = 0;
-        PDO::PDODirection direction = PDO::PDODirection::TxPDO;
-        uint16_t total_size = 0;
-        std::vector<CustomPDOFieldLayout> fields;
-        int mapping_entry_index = -1;
-        /// OD entries synthesized from the slave's own PDO mapping by
-        /// registerExistingPDO().  Owns the objects that fields[].entry
-        /// points at so they stay valid for the lifetime of this info.
-        std::vector<ObjectDictionary::ObjectDictionaryEntry> owned_entries;
-    };
     std::vector<CustomPDOInfo> custom_pdo_infos_;
 
     const uint8_t* customPDOFieldRaw(uint16_t pdo_index, size_t field_index) const;
@@ -898,77 +876,6 @@ protected:
  * Every method logs a CRITICAL error and returns `SlaveError::SlaveNotFound`.
  * The log message includes guidance on how to fix the problem.
  */
-class NonExistingSlave final : public Slave {
-public:
-    /**
-     * @brief Construct a NonExistingSlave.
-     * @param master   Reference back to the master
-     * @param index    The invalid index that was requested
-     */
-    NonExistingSlave(Master& master, uint16_t index);
-
-    SlaveError configureMailbox(Tether::Platform::LogLevel) override;
-    SlaveError configureMailbox(const MailboxSyncManagerConfig&,
-                                 const MailboxSyncManagerConfig&, uint16_t) override;
-    SlaveError configureMailbox(const ESIFile&,
-                                 Tether::Platform::LogLevel) override;
-    void assumeMailboxAlreadyConfigured() override;
-    void markNoMailbox() override;
-    bool drainMailbox(unsigned int) override;
-
-    SlaveError configurePDOSyncManagers() override;
-    SlaveError configurePDOSyncManagers(uint16_t, uint16_t, uint8_t,
-                                         uint16_t, uint16_t, uint8_t) override;
-    SlaveError configurePDOSyncManagers(const ESIFile&) override;
-    void assumePDOAlreadyConfigured() override;
-
-    SlaveError registerPDOsFromSII(SIIPDOConfig&) override;
-    SlaveError registerPDOsFromESI(const ESIFile&, SIIPDOConfig&) override;
-    SlaveError assignPDOs(const SIIPDOConfig&) override;
-    SlaveError registerFixedPDOs(const SIIPDOConfig&) override;
-
-    SlaveError configureCustomRxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) override;
-    SlaveError configureCustomTxPDO(uint16_t, std::initializer_list<CustomPDOMappingEntry>) override;
-    SlaveError configureCustomTxPDO(uint16_t, std::span<const CustomPDOMappingEntry>,
-                                    PDO::PDODirection) override;
-    SlaveError applyCustomPDOs() override;
-    void clearCustomPDOs() override;
-    SlaveError registerExistingRxPDO(uint16_t) override;
-    SlaveError registerExistingTxPDO(uint16_t) override;
-    SlaveError configureMultiPDOs(const MultiPDOAssignment&) override;
-
-    SlaveError transitionTo(SlaveState) override;
-    SlaveError transitionToInit() override;
-    SlaveError transitionToPreOp() override;
-    SlaveError transitionToSafeOp() override;
-    SlaveError transitionToOp() override;
-    SlaveError transitionToBoot() override;
-
-    SlaveError readState(SlaveState&) override;
-    SlaveError readALStatusCode(uint16_t&) override;
-
-    SlaveError configureWatchdogs(uint16_t, uint16_t) override;
-    SlaveError disableWatchdogs() override;
-    SlaveError readWatchdogStatus(uint8_t&, uint8_t&, uint8_t&) override;
-
-    SlaveError sdoRead(uint16_t, uint8_t, void*, size_t&) override;
-    SlaveError sdoWrite(uint16_t, uint8_t, const void*, size_t) override;
-    SlaveError sdoReadU8(uint16_t, uint8_t, uint8_t&) override;
-    SlaveError sdoReadU16(uint16_t, uint8_t, uint16_t&) override;
-    SlaveError sdoReadU32(uint16_t, uint8_t, uint32_t&) override;
-    SlaveError sdoWriteU8(uint16_t, uint8_t, uint8_t) override;
-    SlaveError sdoWriteU16(uint16_t, uint8_t, uint16_t) override;
-    SlaveError sdoWriteU32(uint16_t, uint8_t, uint32_t) override;
-
-#if TETHER_ENABLE_SII
-    SlaveError readSII(SII::SIIData&) override;
-    void logSIISummary(const char*) override;
-#endif
-
-    SyncManagerAccessor sm(uint8_t smIndex) override;
-
-private:
-    void logCritical(const char* method) const;
-};
 
 } // namespace EtherCAT
+#include "tether/ethercat/NonExistingSlave.hpp"
