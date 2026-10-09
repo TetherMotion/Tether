@@ -135,7 +135,11 @@ int openCyclicSocket(int ifindex,
 
 #ifdef PACKET_QDISC_BYPASS
     // Cyclic TX bypasses the qdisc layer entirely — no dequeue
-    // scheduling on the latency-critical send path.
+    // scheduling on the latency-critical send path.  Side effect: without
+    // the qdisc absorbing frames, a wedged TX ring (no carrier) fails
+    // sendto() with ENOBUFS immediately instead of dropping silently —
+    // the exchange's ENOBUFS fast-fail and the TX-diagnostics worker rely
+    // on this signal.
     setsockopt(fd, SOL_PACKET, PACKET_QDISC_BYPASS, &one, sizeof(one));
 #endif
 

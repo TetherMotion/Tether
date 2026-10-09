@@ -135,8 +135,11 @@ std::string TxFailureDiagnostics::probe(int fd)
 #endif
 }
 
-TxFailureDiagnostics::TxFailureDiagnostics(ProbeFn probe, const char* log_tag)
-    : probe_(std::move(probe)), log_tag_(log_tag)
+TxFailureDiagnostics::TxFailureDiagnostics(ProbeFn probe, ErrnoFn errno_fn,
+                                           EscalationFn escalation,
+                                           const char* log_tag)
+    : probe_(std::move(probe)), errno_fn_(std::move(errno_fn)),
+      escalation_fn_(std::move(escalation)), log_tag_(log_tag)
 {
 }
 
@@ -145,27 +148,16 @@ TxFailureDiagnostics::~TxFailureDiagnostics()
     stop();
 }
 
-void TxFailureDiagnostics::stop()
+void TxFailureDiagnostics::start()
 {
-    stop_.store(true, std::memory_order_release);
-    if (thread_.joinable()) thread_.join();
-}
-
-void TxFailureDiagnostics::noteSendFailure()
-{
-    // Re-arm the diagnostic worker every 10 consecutive failures.
-    const uint32_t streak =
-        send_fail_streak_.fetch_add(1, std::memory_order_relaxed) + 1;
-    if (streak < 10 || (streak % 10) != 0) return;
-
-    requested_.store(true, std::memory_order_release);
     bool expected = false;
     if (!running_.compare_exchange_strong(
             expected, true, std::memory_order_acq_rel)) {
-        return;  // worker alive — the flag is its re-trigger
+        return;  // already running
     }
-    if (thread_.joinable()) thread_.join();  // reap self-exited worker
+    if (thread_.joinable()) thread_.join();  // reap a stopped worker
     try {
+        stop_.store(false, std::memory_order_release);
         thread_ = std::thread(&TxFailureDiagnostics::workerMain, this);
         spawns_.fetch_add(1, std::memory_order_relaxed);
     } catch (const std::exception& e) {
@@ -175,29 +167,208 @@ void TxFailureDiagnostics::noteSendFailure()
     }
 }
 
+void TxFailureDiagnostics::stop()
+{
+    stop_.store(true, std::memory_order_release);
+    if (thread_.joinable()) thread_.join();
+    running_.store(false, std::memory_order_release);
+}
+
+void TxFailureDiagnostics::noteSendFailure(uint32_t mask)
+{
+    send_fails_.fetch_add(1, std::memory_order_relaxed);
+    consec_send_fails_.fetch_add(1, std::memory_order_relaxed);
+    last_send_fail_mask_.store(mask, std::memory_order_relaxed);
+}
+
+void TxFailureDiagnostics::noteNoResponseSlot()
+{
+    no_slot_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void TxFailureDiagnostics::noteTimeout(const char* what)
+{
+    timeouts_.fetch_add(1, std::memory_order_relaxed);
+    consec_timeouts_.fetch_add(1, std::memory_order_relaxed);
+    last_timeout_op_.store(what, std::memory_order_relaxed);
+}
+
+void TxFailureDiagnostics::noteWkcZero(const char* what)
+{
+    wkc_zero_.fetch_add(1, std::memory_order_relaxed);
+    last_wkc_op_.store(what, std::memory_order_relaxed);
+}
+
+void TxFailureDiagnostics::noteStall(int64_t gap_ns)
+{
+    stalls_.fetch_add(1, std::memory_order_relaxed);
+    last_stall_gap_ns_.store(gap_ns, std::memory_order_relaxed);
+}
+
+void TxFailureDiagnostics::noteSendOk()
+{
+    consec_send_fails_.store(0, std::memory_order_relaxed);
+}
+
+void TxFailureDiagnostics::noteSuccess()
+{
+    consec_send_fails_.store(0, std::memory_order_relaxed);
+    consec_timeouts_.store(0, std::memory_order_relaxed);
+}
+
 void TxFailureDiagnostics::workerMain()
 {
-    for (;;) {
-        requested_.store(false, std::memory_order_release);
-        const std::string report = probe_();
-        if (!report.empty()) {
-            TETHER_LOGE(log_tag_, "TX diagnostics — {}", report);
-        }
-        // The cyclic thread re-arms requested_ every 10 failed sends;
-        // exit when no new failure arrives for 1 s.  10 ms poll keeps
-        // destruction prompt via stop_.
-        bool retriggered = false;
-        for (int i = 0; i < 100 && !retriggered; ++i) {
-            if (stop_.load(std::memory_order_acquire)) break;
-            if (requested_.load(std::memory_order_acquire)) {
-                retriggered = true;
-                break;
+    using clock = std::chrono::steady_clock;
+    static constexpr auto kRateLimit = std::chrono::milliseconds(250);  // 4 Hz
+    const auto never = clock::time_point::min();
+
+    // Pending counts accumulate until the category's rate limit allows
+    // an emit — "(N suppressed)" reports everything in between.
+    uint32_t sf_pending = 0, ns_pending = 0, to_pending = 0, st_pending = 0;
+    uint32_t wk_pending = 0;
+    auto last_send_log = never, last_noslot_log = never;
+    auto last_timeo_log = never, last_stall_log = never, last_wkc_log = never;
+
+    // Wire probe: emitted once per streak, then on verdict change or
+    // once per second while the streak persists.
+    std::string last_verdict;
+    auto last_probe = never, last_probe_emit = never;
+    bool probed_this_streak = false;
+
+    // Ring-probe escalation: fires whenever the consecutive-timeout
+    // streak crosses a new multiple of escalate_after_ (comparing
+    // quotients survives the poll missing intermediate counts).
+    uint32_t last_escalated_ct = 0;
+
+    while (!stop_.load(std::memory_order_acquire)) {
+        const auto now = clock::now();
+        sf_pending += send_fails_.exchange(0, std::memory_order_relaxed);
+        ns_pending += no_slot_.exchange(0, std::memory_order_relaxed);
+        to_pending += timeouts_.exchange(0, std::memory_order_relaxed);
+        st_pending += stalls_.exchange(0, std::memory_order_relaxed);
+        wk_pending += wkc_zero_.exchange(0, std::memory_order_relaxed);
+        const int64_t stall_gap_ns =
+            last_stall_gap_ns_.load(std::memory_order_relaxed);
+        const uint32_t csf =
+            consec_send_fails_.load(std::memory_order_relaxed);
+        const uint32_t ct =
+            consec_timeouts_.load(std::memory_order_relaxed);
+
+        if (sf_pending && now - last_send_log >= kRateLimit) {
+            const int e = errno_fn_ ? errno_fn_() : 0;
+            const uint32_t mask =
+                last_send_fail_mask_.load(std::memory_order_relaxed);
+            const std::string msg = mask
+                ? std::format("exchangeLRWForSlaves: send failed "
+                              "(mask=0x{:08X}, errno={}: {})",
+                              mask, e, e ? strerror(e) : "n/a")
+                : std::format("exchangeLRW: send failed (errno={}: {})",
+                              e, e ? strerror(e) : "n/a");
+            if (sf_pending > 1) {
+                TETHER_LOGE(log_tag_, "{} ({} suppressed since last log)",
+                            msg, sf_pending - 1);
+            } else {
+                TETHER_LOGE(log_tag_, "{}", msg);
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            sf_pending = 0;
+            last_send_log = now;
         }
-        if (!retriggered) break;
+        if (ns_pending && now - last_noslot_log >= kRateLimit) {
+            TETHER_LOGE(log_tag_,
+                "exchangeLRW: no free response slot — all async waiters "
+                "busy{}{}",
+                ns_pending > 1 ? " (" : "",
+                ns_pending > 1
+                    ? std::format("{} suppressed since last log)",
+                                  ns_pending - 1)
+                    : "");
+            ns_pending = 0;
+            last_noslot_log = now;
+        }
+        if (to_pending && now - last_timeo_log >= kRateLimit) {
+            const char* what =
+                last_timeout_op_.load(std::memory_order_relaxed);
+            if (to_pending > 1) {
+                TETHER_LOGE(log_tag_,
+                    "{}: response timeout ({} suppressed since last log)",
+                    what, to_pending - 1);
+            } else {
+                TETHER_LOGE(log_tag_, "{}: response timeout", what);
+            }
+            to_pending = 0;
+            last_timeo_log = now;
+        }
+        if (wk_pending && now - last_wkc_log >= kRateLimit) {
+            const char* what = last_wkc_op_.load(std::memory_order_relaxed);
+            if (wk_pending > 1) {
+                TETHER_LOGW(log_tag_, "{}: WKC=0 ({} suppressed since last log)",
+                            what, wk_pending - 1);
+            } else {
+                TETHER_LOGW(log_tag_, "{}: WKC=0", what);
+            }
+            wk_pending = 0;
+            last_wkc_log = now;
+        }
+        if (st_pending && now - last_stall_log >= kRateLimit) {
+            if (st_pending > 1) {
+                TETHER_LOGW(log_tag_,
+                    "exchangeLRW: host stall ({:.1f} ms since last call) — "
+                    "drained wire backlog ({} suppressed since last log)",
+                    static_cast<double>(stall_gap_ns) / 1e6, st_pending - 1);
+            } else {
+                TETHER_LOGW(log_tag_,
+                    "exchangeLRW: host stall ({:.1f} ms since last call) — "
+                    "drained wire backlog",
+                    static_cast<double>(stall_gap_ns) / 1e6);
+            }
+            st_pending = 0;
+            last_stall_log = now;
+        }
+
+        // Ring-probe escalation at each multiple of the timeout streak.
+        const uint32_t esc = escalate_after_.load(std::memory_order_relaxed);
+        if (ct == 0) {
+            last_escalated_ct = 0;
+        } else if (esc && ct / esc > last_escalated_ct / esc) {
+            last_escalated_ct = ct;
+            if (escalation_fn_) {
+                const std::string verdict = escalation_fn_();
+                if (!verdict.empty()) {
+                    TETHER_LOGE(log_tag_,
+                        "exchangeLRW: {} consecutive timeouts — ring probe {}"
+                        ". Check NIC drops / slave link state.", ct, verdict);
+                }
+            }
+        }
+
+        // Wire probe once the send-failure streak hits 10 — first emit
+        // per streak, then verdict-change or 1 s heartbeat.
+        if (csf >= 10) {
+            if (!probed_this_streak || now - last_probe >=
+                    std::chrono::seconds(1)) {
+                const std::string report = probe_ ? probe_() : "";
+                last_probe = now;
+                probed_this_streak = true;
+                if (!report.empty()) {
+                    // Compare on the verdict only — the raw report embeds
+                    // live counters that change on every probe.
+                    const auto pos = report.find(" | DIAGNOSIS:");
+                    const std::string verdict =
+                        report.substr(pos != std::string::npos ? pos : 0);
+                    if (verdict != last_verdict ||
+                        now - last_probe_emit >= std::chrono::seconds(1)) {
+                        TETHER_LOGE(log_tag_, "TX diagnostics — {}", report);
+                        last_verdict = verdict;
+                        last_probe_emit = now;
+                    }
+                }
+            }
+        } else if (csf == 0) {
+            probed_this_streak = false;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    running_.store(false, std::memory_order_release);
 }
 
 } // namespace EtherCAT

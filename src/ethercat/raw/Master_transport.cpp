@@ -391,6 +391,16 @@ bool Master::sendSingleDatagram(Command cmd, uint8_t idx,
 #if TETHER_ENABLE_ETHERCAT_STATS
             tx_retry_count_.fetch_add(1, std::memory_order_relaxed);
 #endif
+            // ENOBUFS = TX ring full and not draining (e.g. carrier
+            // lost).  We only ever SEE this errno because the TX path
+            // sets PACKET_QDISC_BYPASS — without it the qdisc would
+            // silently absorb-and-drop frames and sendto() would keep
+            // reporting success on a dead link.  ENOBUFS cannot recover
+            // within microseconds — fail this cycle fast instead of
+            // burning the budget spinning sendto.  The next exchange
+            // cycle sends normally: no suppression state is kept, so
+            // recovery is automatic when the ring drains.
+            if (last_errno == ENOBUFS) break;
             const int64_t t0 = clock.getMicroseconds();
             while ((clock.getMicroseconds() - t0) <
                    static_cast<int64_t>(kTxRetryDelayUs)) {}
@@ -614,6 +624,12 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
 #if TETHER_ENABLE_ETHERCAT_STATS
                 tx_retry_count_.fetch_add(1, std::memory_order_relaxed);
 #endif
+                // ENOBUFS cannot drain within the retry window — fail
+                // fast this cycle; next cycle transmits normally (no
+                // latch).  Note this errno only surfaces because TX uses
+                // PACKET_QDISC_BYPASS — the qdisc would otherwise absorb
+                // the frames and hide the dead link.
+                if (last_errno == ENOBUFS) break;
                 const int64_t t0 = clock.getMicroseconds();
                 while ((clock.getMicroseconds() - t0) <
                        static_cast<int64_t>(kTxRetryDelayUs)) {}

@@ -28,7 +28,21 @@ static const char* TAG = "ec_logaddr";
 LogicalAddressManager::LogicalAddressManager(IPDOTransport& transport)
     : transport_(transport)
     , tx_diag_(std::make_unique<TxFailureDiagnostics>(
-          [this] { return transport_.txFailureDiagnostics(); }, TAG))
+          [this] { return transport_.txFailureDiagnostics(); },
+          [this] { return transport_.lastSendErrno(); },
+          [this]() -> std::string {
+              // Ring probe: APRD of AL_STATUS (0x0130) on the first slave —
+              // distinguishes "host can't see replies" from "ring is
+              // broken".  Runs on the monitor thread; async transport ops
+              // are legal concurrently with the cyclic path.
+              uint16_t al_status = 0;
+              const bool alive = transport_.readRegister(0, 0x0130,
+                                                         &al_status, 2, 20);
+              return std::format("{} (AL_STATUS=0x{:04X})",
+                      alive ? "ALIVE" : "FAILED — ring likely broken",
+                      al_status);
+          },
+          TAG))
 {
     std::memset(addr_map_, 0, sizeof(addr_map_));
     expected_wkc_.fill(kWkcUnknown);
@@ -47,11 +61,13 @@ bool LogicalAddressManager::init() {
     total_txpdo_bytes_ = 0;
     stats_ = Stats{};
     initialized_ = true;
+    tx_diag_->start();   // non-RT monitor: all exchange error logging lives there
     TETHER_LOGI(TAG, "Logical address manager initialized");
     return true;
 }
 
 void LogicalAddressManager::deinit() {
+    tx_diag_->stop();
     std::memset(addr_map_, 0, sizeof(addr_map_));
     slave_log_base_.fill(kUnassigned);
     slave_log_size_.fill(0);
@@ -355,6 +371,10 @@ void LogicalAddressManager::resetStats() { stats_ = Stats{}; }
 // ============================================================================
 
 bool LogicalAddressManager::exchangeAllLRW(const PDO::PDOMapping& mapping) {
+    // Early-out on zero LIVE bytes, not zero extent: with sticky windows a
+    // slave reconfigured to no PDOs leaves its old window allocated as
+    // dead space (next_free_log_ > 0), but there is nothing to exchange.
+    if (total_rxpdo_bytes_ + total_txpdo_bytes_ == 0) return true;
     return exchangeLRWImpl(mapping, 0,
                            next_free_log_,
                            /*enforce_slice_limit=*/false);
@@ -444,7 +464,11 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
         return false;
     }
     const uint32_t total_data = next_free_log_;
-    if (total_data == 0 && slices_.empty()) return true;
+    // Early-out on zero LIVE bytes, not zero extent: with sticky windows a
+    // slave reconfigured to no PDOs leaves its old window allocated as
+    // dead space (next_free_log_ > 0), but there is nothing to exchange.
+    if (total_rxpdo_bytes_ + total_txpdo_bytes_ == 0 &&
+        slices_.empty()) return true;
 
     // Whole-image decimation: with image_every_n_ > 1 the full exchange
     // runs only every Nth cycle — user PDO slices carry the hot bytes on
@@ -1157,8 +1181,7 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
     uint8_t idx = 0;
     const size_t slot = claimExchangeWaiter(idx, resp);
     if (slot == IPDOTransport::kPreRegBusy) {
-        onExchangeSendFailure("exchangeLRW: no free response slot — all async "
-                              "indices have live waiters");
+        tx_diag_->noteNoResponseSlot();   // logged rate-limited by the monitor
         stats_.send_errors++;
         return false;
     }
@@ -1171,17 +1194,13 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
                                         payload, static_cast<uint16_t>(length),
                                         true)) {
         if (have_slot) transport_.waitForPreRegistered(slot, 0, resp);
-        noteTxSendFailure();
         if (!transport_.isCancelRequested()) {
-            const int err = transport_.lastSendErrno();
-            onExchangeSendFailure(std::format(
-                "exchangeLRW: send failed (errno={}: {})",
-                err, err ? std::strerror(err) : "n/a"));
+            tx_diag_->noteSendFailure();   // logged rate-limited by the monitor
         }
         stats_.send_errors++;
         return false;
     }
-    tx_diag_->noteSuccess();
+    tx_diag_->noteSendOk();
 
     // Wait for response
     const bool got_resp = have_slot
@@ -1194,7 +1213,7 @@ bool LogicalAddressManager::exchangeLRWImpl(const PDO::PDOMapping& mapping,
     }
 
     if (resp.wkc == 0) {
-        TETHER_LOGW(TAG, "exchangeLRW: WKC=0");
+        tx_diag_->noteWkcZero("exchangeLRW");   // logged rate-limited by monitor
         stats_.wkc_errors++;
         return false;
     }
@@ -1287,8 +1306,7 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
     uint8_t idx = 0;
     const size_t slot = claimExchangeWaiter(idx, resp);
     if (slot == IPDOTransport::kPreRegBusy) {
-        onExchangeSendFailure("exchangeLRWForSlaves: no free response slot — "
-                              "all async indices have live waiters");
+        tx_diag_->noteNoResponseSlot();   // logged rate-limited by the monitor
         stats_.send_errors++;
         return false;
     }
@@ -1301,16 +1319,13 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
                                         payload, static_cast<uint16_t>(total_data),
                                         true)) {
         if (have_slot) transport_.waitForPreRegistered(slot, 0, resp);
-        noteTxSendFailure();
-        const int err = transport_.lastSendErrno();
-        onExchangeSendFailure(std::format(
-            "exchangeLRWForSlaves: send failed (mask=0x{:08X}, errno={}: {})",
-            static_cast<unsigned long>(slave_mask),
-            err, err ? std::strerror(err) : "n/a"));
+        if (!transport_.isCancelRequested()) {
+            tx_diag_->noteSendFailure(static_cast<uint32_t>(slave_mask));
+        }
         stats_.send_errors++;
         return false;
     }
-    tx_diag_->noteSuccess();
+    tx_diag_->noteSendOk();
 
     const bool got_resp = have_slot
         ? transport_.waitForPreRegistered(slot, response_timeout_ms_, resp)
@@ -1322,7 +1337,7 @@ bool LogicalAddressManager::exchangeLRWForSlaves(const PDO::PDOMapping& mapping,
     }
 
     if (resp.wkc == 0) {
-        TETHER_LOGW(TAG, "exchangeLRWForSlaves: WKC=0");
+        tx_diag_->noteWkcZero("exchangeLRWForSlaves");
         stats_.wkc_errors++;
         return false;
     }

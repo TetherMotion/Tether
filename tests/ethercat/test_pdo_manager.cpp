@@ -201,6 +201,10 @@ protected:
             .WillByDefault([](uint16_t idx) { return static_cast<uint16_t>(0u - idx); });
         ON_CALL(transport, allocIdx())
             .WillByDefault(Return(1));
+        // No waiter pre-registration on this mock → configureSlavesSMs
+        // takes its sequential writeRegister activate fallback.
+        ON_CALL(transport, preRegisterResponseWaiter(_, _, _))
+            .WillByDefault(Return(IPDOTransport::kPreRegInvalid));
     }
 };
 
@@ -290,10 +294,12 @@ TEST_F(PDOManagerTest, ConfigureSlavesSMsCallsTransport) {
     cfg->sm[2] = SyncManagerConfig::process_output(0x1100, 8);
     cfg->sm[3] = SyncManagerConfig::process_input(0x1180, 4);
 
-    // Each SM write: disable(1) + phys_addr(1) + length(1) + control(1) + activate(1) = 5 calls per SM
-    // SM0 and SM1 are Unused, SM2 and SM3 are configured → 10 register writes
+    // Each SM write: disable(1) + 5-byte config block(1) + activate(1) =
+    // 3 calls per SM.  SM0 and SM1 are Unused, SM2 and SM3 are configured
+    // → 6 register writes (activate via the sequential fallback since the
+    // mock does not pre-register waiters).
     EXPECT_CALL(transport, writeRegister(_, _, _, _, _))
-        .Times(::testing::AtLeast(10))
+        .Times(::testing::AtLeast(6))
         .WillRepeatedly(Return(true));
 
     EXPECT_TRUE(mgr.configureSlavesSMs(0));
@@ -351,24 +357,31 @@ TEST_F(PDOManagerTest, WriteSMConfigUsesCorrectRegisters) {
     cfg->sm[2] = SyncManagerConfig::process_output(0x1100, 8);
 
     // SM2 base = 0x0810.  Expect writes to:
-    //   0x0816 (activate/disable), 0x0810 (phys_addr), 0x0812 (length),
-    //   0x0814 (control), 0x0816 (activate/enable)
+    //   0x0816 (activate/disable), 0x0810 (5-byte block: phys_addr +
+    //   length + control), 0x0816 (activate/enable via fallback)
     std::vector<uint16_t> addresses_written;
+    uint8_t block[5] = {};
 
     ON_CALL(transport, writeRegister(_, _, _, _, _))
-        .WillByDefault([&addresses_written](uint16_t, uint16_t ado, const void*, uint16_t, unsigned) {
+        .WillByDefault([&](uint16_t, uint16_t ado, const void* data,
+                           uint16_t len, unsigned) {
             addresses_written.push_back(ado);
+            if (ado == 0x0810 && len == 5)
+                std::memcpy(block, data, sizeof(block));
             return true;
         });
 
     EXPECT_TRUE(mgr.configureSlavesSMs(0));
 
-    ASSERT_GE(addresses_written.size(), 5u);
+    ASSERT_GE(addresses_written.size(), 3u);
     EXPECT_EQ(addresses_written[0], 0x0816u);  // SM2 activate (disable)
-    EXPECT_EQ(addresses_written[1], 0x0810u);  // SM2 phys_addr
-    EXPECT_EQ(addresses_written[2], 0x0812u);  // SM2 length
-    EXPECT_EQ(addresses_written[3], 0x0814u);  // SM2 control
-    EXPECT_EQ(addresses_written[4], 0x0816u);  // SM2 activate (enable)
+    EXPECT_EQ(addresses_written[1], 0x0810u);  // SM2 config block
+    EXPECT_EQ(addresses_written[2], 0x0816u);  // SM2 activate (enable)
+
+    // Block content: [phys_addr le16][length le16][control]
+    EXPECT_EQ(block[0], 0x00u);  EXPECT_EQ(block[1], 0x11u);   // 0x1100
+    EXPECT_EQ(block[2], 0x08u);  EXPECT_EQ(block[3], 0x00u);   // len 8
+    EXPECT_EQ(block[4], 0x44u);  // process_output control byte
 }
 
 // ============================================================================
@@ -614,6 +627,10 @@ TEST_F(PDOManagerTest, ExchangePhysicalSendsAndReceives) {
     int tx_i = mgr.mapping().add_txpdo(0, sizeof(uint32_t));
     ASSERT_GE(rx_i, 0); ASSERT_GE(tx_i, 0);
     *mgr.mapping().entryDataAs<uint32_t>(static_cast<size_t>(rx_i)) = 0xBBCC;
+
+    // exchangePhysical copies via entry physical_offset — set only by
+    // finalizeMapping.
+    EXPECT_TRUE(mgr.finalizeMapping(0));
 
     // exchangePhysical pre-registers response slots before sending
     static uint8_t slot_counter = 0;

@@ -448,9 +448,8 @@ public:
         uint32_t counter_mismatches{0};
         /// Cyclic DC-timepoint datagrams that timed out or failed WKC.
         uint32_t dc_timeouts{0};
-        /// TX-diagnostic worker spawns — one per send-failure streak
-        /// episode (worker re-arms in place; respawn means it had
-        /// self-exited after 1 s without new failures).
+        /// Exchange-health monitor worker spawns — one per init() (the
+        /// worker is persistent for the manager's lifetime).
         uint32_t tx_diag_spawns{0};
     };
     Stats getStats() const;
@@ -474,8 +473,8 @@ public:
     uint32_t stallDetectionGapUs() const { return stall_detect_us_; }
 
     /// Consecutive-timeout count that triggers a ring probe + warning
-    /// (default 64; 0 disables).
-    void setEscalateAfterTimeouts(uint32_t n) { escalate_after_timeouts_ = n; }
+    /// (default 64; 0 disables).  Executed and logged by the monitor thread.
+    void setEscalateAfterTimeouts(uint32_t n);
 
     // ----- Log Prefix (set by Master from per-slave name) -----
 
@@ -506,18 +505,14 @@ private:
     // Stall self-heal state (polled LRW path).
     uint32_t response_timeout_ms_{10};
     uint32_t stall_detect_us_{5000};
-    uint32_t escalate_after_timeouts_{64};
     int64_t  last_call_ns_{0};
-    int64_t  last_timeout_log_ns_{0};
-    uint32_t timeout_log_suppressed_{0};
-    int64_t  last_send_fail_log_ns_{0};
-    uint32_t send_fail_log_suppressed_{0};
-    bool     escalate_logged_{false};
 
-    // TX-failure diagnostics worker (non-RT).  Every 10th consecutive
-    // sendSingleDatagram failure re-arms it from the cyclic thread; the
-    // worker emits transport_.txFailureDiagnostics() and exits when no new
-    // failure arrives for 1 s.
+    // Exchange-health monitor (non-RT thread, started by init()).  The RT
+    // exchange paths NEVER log — they only bump its atomic counters via
+    // noteSendFailure/noteTimeout/noteStall/noteNoResponseSlot; the worker
+    // emits every category rate-limited to 4 Hz, runs the wire probe once
+    // the send-fail streak hits 10, and the ring probe on timeout-streak
+    // escalation.
     std::unique_ptr<TxFailureDiagnostics> tx_diag_;
 
     /// Detect a host stall since the last exchange call; drain the wire
@@ -542,18 +537,11 @@ private:
      *         owned by a live waiter.
      */
     size_t claimExchangeWaiter(uint8_t& idx_out, RxDatagram& resp);
-    /// Timeout bookkeeping: rate-limited log (4 Hz), drain the wire,
-    /// count the streak, ring-probe after escalate_after_timeouts_
-    /// consecutive failures.  `what` is the caller's function name.
+    /// Timeout bookkeeping: count the streak, notify the monitor (it
+    /// rate-limits the log and fires the ring probe at the escalation
+    /// threshold), drain the wire.  `what` is the caller's function name.
+    /// No logging happens on this (RT) thread.
     void onExchangeTimeout(const char* what);
-    /// Send-failure bookkeeping: rate-limited log (4 Hz) shared by the
-    /// "couldn't get on the wire" sites (send failed, no free slot) —
-    /// a dead NIC otherwise spams one line per exchange.
-    void onExchangeSendFailure(const std::string& what);
-    /// Count a sendSingleDatagram failure; every 10th consecutive
-    /// failure re-arms the non-RT TX diagnostic worker (spawned on
-    /// first trigger).  Reset by any successful send.
-    void noteTxSendFailure();
     /// Success bookkeeping: reset the consecutive-timeout streak.
     void onExchangeSuccess();
 

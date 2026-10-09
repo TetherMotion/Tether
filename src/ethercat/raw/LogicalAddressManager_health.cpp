@@ -47,10 +47,7 @@ void LogicalAddressManager::stallCheck()
     // is killed — independence of unrelated async slots is preserved.
     stats_.drained_frames +=
         static_cast<uint32_t>(transport_.drainWire(512));
-    TETHER_LOGW(TAG,
-        "exchangeLRW: host stall ({:.1f} ms since last call) — drained "
-        "wire backlog",
-        static_cast<double>(gap) / 1e6);
+    tx_diag_->noteStall(gap);   // logged rate-limited by the monitor
 }
 
 size_t LogicalAddressManager::claimExchangeWaiter(uint8_t& idx_out,
@@ -84,72 +81,23 @@ size_t LogicalAddressManager::claimExchangeWaiter(uint8_t& idx_out,
 void LogicalAddressManager::onExchangeTimeout(const char* what)
 {
     ++stats_.consecutive_timeouts;
-    // Rate-limit the timeout log to 4 Hz — a dead ring otherwise spams
-    // one line per exchange (and the logging itself worsens the stall).
-    const int64_t now = static_cast<int64_t>(monoNowNs());
-    if (now - last_timeout_log_ns_ >= 250'000'000) {
-        if (timeout_log_suppressed_ > 0) {
-            TETHER_LOGE(TAG,
-                "{}: response timeout ({} suppressed since last log)",
-                what, timeout_log_suppressed_);
-            timeout_log_suppressed_ = 0;
-        } else {
-            TETHER_LOGE(TAG, "{}: response timeout", what);
-        }
-        last_timeout_log_ns_ = now;
-    } else {
-        ++timeout_log_suppressed_;
-    }
+    tx_diag_->noteTimeout(what);   // logged rate-limited by the monitor
     // Pull whatever landed late off the wire — either it frees a stuck
     // kernel-queue backlog or it confirms the ring is actually silent.
     stats_.drained_frames +=
         static_cast<uint32_t>(transport_.drainWire(64));
-    if (escalate_after_timeouts_ &&
-        stats_.consecutive_timeouts % escalate_after_timeouts_ == 0) {
-        // Ring probe: APRD of AL_STATUS (0x0130) on the first slave —
-        // distinguishes "host can't see replies" from "ring is broken".
-        uint16_t al_status = 0;
-        const bool alive = transport_.readRegister(0, 0x0130,
-                                                   &al_status, 2, 20);
-        TETHER_LOGE(TAG,
-            "exchangeLRW: {} consecutive timeouts — ring probe {}"
-            " (AL_STATUS=0x{:04X}). Check NIC drops / slave link state.",
-            stats_.consecutive_timeouts,
-            alive ? "ALIVE" : "FAILED — ring likely broken",
-            al_status);
-        escalate_logged_ = true;
-    }
 }
 
-void LogicalAddressManager::onExchangeSendFailure(const std::string& what)
+void LogicalAddressManager::setEscalateAfterTimeouts(uint32_t n)
 {
-    // Rate-limit to 4 Hz — a dead NIC or exhausted slot pool otherwise
-    // spams one line per exchange (and the logging itself worsens the stall).
-    const int64_t now = static_cast<int64_t>(monoNowNs());
-    if (now - last_send_fail_log_ns_ >= 250'000'000) {
-        if (send_fail_log_suppressed_ > 0) {
-            TETHER_LOGE(TAG, "{} ({} suppressed since last log)",
-                        what, send_fail_log_suppressed_);
-            send_fail_log_suppressed_ = 0;
-        } else {
-            TETHER_LOGE(TAG, "{}", what);
-        }
-        last_send_fail_log_ns_ = now;
-    } else {
-        ++send_fail_log_suppressed_;
-    }
-}
-
-void LogicalAddressManager::noteTxSendFailure()
-{
-    tx_diag_->noteSendFailure();
+    tx_diag_->setEscalateAfterTimeouts(n);
 }
 
 void LogicalAddressManager::onExchangeSuccess()
 {
     stats_.success++;
     stats_.consecutive_timeouts = 0;
-    escalate_logged_ = false;
+    tx_diag_->noteSuccess();
 }
 
 
