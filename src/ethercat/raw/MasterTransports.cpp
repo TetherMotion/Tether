@@ -69,6 +69,10 @@ public:
         return true;
     }
 
+    void cancelPreRegistered(size_t slot) override {
+        master_.packetRouter().cancelPreRegistered(slot);
+    }
+
     uint8_t allocIdx() override {
         return master_.allocIdx();
     }

@@ -318,12 +318,21 @@ TEST_F(EtherCATSlaveTest, InitTransportFailure) {
     master_.setApwrTestCallback([](uint16_t, uint16_t, const void*, uint16_t, unsigned int) {
         return false;
     });
+    // Reads must fail too — the state-request path verifies slave
+    // reachability via AL_STATUS and treats an unacknowledged write on a
+    // reachable slave as issued.
+    master_.setAprdTestCallback([](uint16_t, uint16_t, void*, uint16_t, unsigned int) {
+        return false;
+    });
     auto& s = master_.slave(0);
     EXPECT_EQ(s.transitionToInit(), SlaveError::TransportError);
 }
 
 TEST_F(EtherCATSlaveTest, BootTransportFailure) {
     master_.setApwrTestCallback([](uint16_t, uint16_t, const void*, uint16_t, unsigned int) {
+        return false;
+    });
+    master_.setAprdTestCallback([](uint16_t, uint16_t, void*, uint16_t, unsigned int) {
         return false;
     });
     auto& s = master_.slave(0);

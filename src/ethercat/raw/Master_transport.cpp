@@ -479,6 +479,41 @@ size_t Master::sendMultiDatagram(const MultiDatagramSpec* specs, size_t count)
 
     if (count == 0 || !specs) return 0;
 
+    // Test hooks — mirror the writeRegister/readRegister short-circuits:
+    // when register-level test callbacks are installed (unit tests without
+    // a NIC), dispatch each datagram through them and deposit a
+    // synthesized response into the matching pre-registered slot so
+    // waitForPreRegistered completes.  Datagram types with no callback
+    // (LRW, ARMW, …) fall through to the real send path.
+    if (apwr_cb_ || aprd_cb_) {
+        for (size_t i = 0; i < count; ++i) {
+            const MultiDatagramSpec& s = specs[i];
+            const bool is_write = s.cmd == Command::APWR ||
+                                  s.cmd == Command::FPWR ||
+                                  s.cmd == Command::BWR;
+            const bool is_read  = s.cmd == Command::APRD ||
+                                  s.cmd == Command::FPRD ||
+                                  s.cmd == Command::BRD;
+            if ((is_write && !apwr_cb_) || (is_read && !aprd_cb_) ||
+                (!is_write && !is_read)) {
+                return 0;   // can't honor the batch via test callbacks
+            }
+            RxDatagram resp{};
+            resp.idx     = s.idx;
+            resp.cmd     = s.cmd;
+            resp.adp     = s.adp;
+            resp.ado     = s.ado;
+            resp.datalen = s.datalen;
+            resp.wkc     = 1;
+            const bool ok = is_write
+                ? apwr_cb_(s.adp, s.ado, s.data, s.datalen, 200)
+                : aprd_cb_(s.adp, s.ado, resp.data, s.datalen, 200);
+            if (!ok) return 0;
+            packet_router_.routePacket(resp);
+        }
+        return count;
+    }
+
     constexpr uint8_t dst_mac[6] = {0x01, 0x01, 0x05, 0x00, 0x00, 0x00};
     constexpr size_t kMinEthFrameNoFcs = 60;
     constexpr size_t kHeaderSize = sizeof(EtherCAT::EthernetHeader) + sizeof(EtherCAT::FrameHeader);

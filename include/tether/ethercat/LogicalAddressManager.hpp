@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -467,6 +468,22 @@ private:
     std::array<uint32_t, PDO::kMaxPDOSlaves> slave_log_base_{};
     std::array<uint32_t, PDO::kMaxPDOSlaves> slave_log_size_{};
     uint32_t next_free_log_{0};  ///< next free logical offset (rel. to base)
+    /// Image extent in bytes.  Sticky windows are append-only, so when a
+    /// slave's window is reallocated after a size change the old window is
+    /// dead space inside the image — the extent can exceed
+    /// total_rxpdo_bytes_ + total_txpdo_bytes_ and the exchange must
+    /// cover all of it.  Windows of slaves that are no longer active don't
+    /// count — their space is only exchanged when a later active slave's
+    /// window extends past it.
+    uint32_t imageBytes() const {
+        uint32_t end = 0;
+        for (uint16_t i = 0; i < slave_count_ && i < PDO::kMaxPDOSlaves; ++i) {
+            if (slave_log_base_[i] == kUnassigned || !addr_map_[i].active)
+                continue;
+            end = std::max(end, slave_log_base_[i] + slave_log_size_[i]);
+        }
+        return end;
+    }
     Stats    stats_{};
     bool     initialized_{false};
     std::function<std::string(uint16_t)> prefix_provider_;

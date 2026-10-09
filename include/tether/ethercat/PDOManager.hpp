@@ -718,6 +718,11 @@ public:
         return false;
     }
 
+    /// Cancel a previously pre-registered waiter slot.  Called when the
+    /// batched send path is abandoned so the slot doesn't linger with a
+    /// dangling response buffer.
+    virtual void cancelPreRegistered(size_t slot) { (void)slot; }
+
     /// Sentinel returned by preRegisterResponseWaiter when unsupported.
     static constexpr size_t kPreRegInvalid = static_cast<size_t>(-1);
 
