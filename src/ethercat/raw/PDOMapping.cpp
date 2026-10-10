@@ -49,8 +49,10 @@ int PDOMapping::add_rxpdo(uint16_t slave_index, uint16_t size,
     e.physical_offset = 0;
     if (slave_index < kMaxPDOSlaves)
         e.configured_address = m_slave_configured_addrs[slave_index];
-    TETHER_LOGI(TAG, "Added RxPDO: slave={} size={} pdo=0x{:04x} mode={}",
-                slave_index, size, pdo_index, static_cast<int>(mode));
+    if (m_log_adds) {
+        TETHER_LOGI(TAG, "Added RxPDO: slave={} size={} pdo=0x{:04x} mode={}",
+                    slave_index, size, pdo_index, static_cast<int>(mode));
+    }
     return static_cast<int>(m_entry_count++);
 }
 
@@ -86,8 +88,10 @@ int PDOMapping::add_txpdo(uint16_t slave_index, uint16_t size,
     e.physical_offset = 0;
     if (slave_index < kMaxPDOSlaves)
         e.configured_address = m_slave_configured_addrs[slave_index];
-    TETHER_LOGI(TAG, "Added TxPDO: slave={} size={} pdo=0x{:04x} mode={}",
+    if (m_log_adds) {
+        TETHER_LOGI(TAG, "Added TxPDO: slave={} size={} pdo=0x{:04x} mode={}",
                 slave_index, size, pdo_index, static_cast<int>(mode));
+    }
     return static_cast<int>(m_entry_count++);
 }
 

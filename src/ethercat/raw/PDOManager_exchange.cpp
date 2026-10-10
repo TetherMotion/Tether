@@ -78,7 +78,8 @@ bool PDOManager::exchangePhysical(uint16_t slave_count) {
         // (skip cycle 0 — fpwr_success==0 makes 0%1000==0 which would
         //  fire every cycle until the first successful write)
         if (physical_stats_.fpwr_success > 0 &&
-            (physical_stats_.fpwr_success % 1000) == 0) {
+            (physical_stats_.fpwr_success % 1000) == 0 &&
+            (rxPDODebug(si) || txPDODebug(si))) {
             should_log_wire = true;
             wire_cycle = physical_stats_.fpwr_success;
         }

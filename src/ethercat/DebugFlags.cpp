@@ -70,6 +70,7 @@ bool EtherCATMasterDebugFlags::isEnabled(const std::string& name, uint16_t slave
     if (name == "dc")                return dc && dcFilt.allows(slave_index);
     if (name == "pdo-configuration") return pdoConfiguration && pdoConfigurationFilt.allows(slave_index);
     if (name == "shutdown")          return shutdown && shutdownFilt.allows(slave_index);
+    if (name == "mailbox-configuration") return mailboxConfiguration && mailboxConfigurationFilt.allows(slave_index);
 #if TETHER_ENABLE_FSOE
     if (name == "fsoe")              return fsoe && fsoeFilt.allows(slave_index);
     if (name == "fsoe-frame")        return fsoeFrame && fsoeFrameFilt.allows(slave_index);
@@ -101,6 +102,7 @@ void EtherCATMasterDebugFlags::setFlag(const std::string& name, bool enabled) {
     else if (name == "dc")             dc = enabled;
     else if (name == "pdo-configuration") pdoConfiguration = enabled;
     else if (name == "shutdown")         shutdown = enabled;
+    else if (name == "mailbox-configuration") mailboxConfiguration = enabled;
 #if TETHER_ENABLE_FSOE
     else if (name == "fsoe")           fsoe = enabled;
     else if (name == "fsoe-frame")     fsoeFrame = enabled;
@@ -131,6 +133,7 @@ void EtherCATMasterDebugFlags::setFilter(const std::string& name, const SlaveFil
     else if (name == "dc")             dcFilt = filter;
     else if (name == "pdo-configuration") pdoConfigurationFilt = filter;
     else if (name == "shutdown")         shutdownFilt = filter;
+    else if (name == "mailbox-configuration") mailboxConfigurationFilt = filter;
 #if TETHER_ENABLE_FSOE
     else if (name == "fsoe")           fsoeFilt = filter;
     else if (name == "fsoe-frame")     fsoeFrameFilt = filter;
@@ -216,6 +219,7 @@ void EtherCATMasterDebugFlags::resizeFilters(uint16_t slave_count) {
     dcFilt.resize(slave_count);
     pdoConfigurationFilt.resize(slave_count);
     shutdownFilt.resize(slave_count);
+    mailboxConfigurationFilt.resize(slave_count);
 #if TETHER_ENABLE_FSOE
     fsoeFilt.resize(slave_count);
     fsoeFrameFilt.resize(slave_count);

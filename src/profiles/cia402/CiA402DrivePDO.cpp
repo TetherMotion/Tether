@@ -81,8 +81,10 @@ void CiA402Drive::setPDOBufferSizes(uint16_t rxpdo_index, uint16_t txpdo_index,
     m_txpdo_size  = txpdo_size;
     m_pdo_configured = true;
 
-    TETHER_LOGI(TAG, "{}: setPDOBufferSizes RxPDO=0x{:04X}/{} bytes, TxPDO=0x{:04X}/{} bytes",
-             logPrefix().c_str(), rxpdo_index, rxpdo_size, txpdo_index, txpdo_size);
+    if (m_master->debugFlags().isEnabled("pdo-configuration", m_slave_index)) {
+        TETHER_LOGI(TAG, "{}: setPDOBufferSizes RxPDO=0x{:04X}/{} bytes, TxPDO=0x{:04X}/{} bytes",
+                 logPrefix().c_str(), rxpdo_index, rxpdo_size, txpdo_index, txpdo_size);
+    }
 }
 
 // ============================================================================
@@ -113,8 +115,10 @@ bool CiA402Drive::registerPDOBuffers() {
         uint8_t* dst = mapping->entryDataMut(m_rxpdo_entry_index);
         std::memcpy(dst, m_rxpdo_buffer, m_rxpdo_size);
         m_rxpdo_buffer = dst;
-        TETHER_LOGI(TAG, "{}: Registered RxPDO {} bytes (entry {})",
-                 logPrefix().c_str(), m_rxpdo_size, m_rxpdo_entry_index);
+        if (m_master->debugFlags().isEnabled("pdo-configuration", m_slave_index)) {
+            TETHER_LOGI(TAG, "{}: Registered RxPDO {} bytes (entry {})",
+                     logPrefix().c_str(), m_rxpdo_size, m_rxpdo_entry_index);
+        }
     }
 
     if (m_txpdo_size > 0) {
@@ -131,8 +135,10 @@ bool CiA402Drive::registerPDOBuffers() {
         uint8_t* dst = mapping->entryDataMut(m_txpdo_entry_index);
         std::memcpy(dst, m_txpdo_buffer, m_txpdo_size);
         m_txpdo_buffer = dst;
-        TETHER_LOGI(TAG, "{}: Registered TxPDO {} bytes (entry {})",
-                 logPrefix().c_str(), m_txpdo_size, m_txpdo_entry_index);
+        if (m_master->debugFlags().isEnabled("pdo-configuration", m_slave_index)) {
+            TETHER_LOGI(TAG, "{}: Registered TxPDO {} bytes (entry {})",
+                     logPrefix().c_str(), m_txpdo_size, m_txpdo_entry_index);
+        }
     }
 
     // Assign each entry's physical_offset inside SM2/SM3 — the physical

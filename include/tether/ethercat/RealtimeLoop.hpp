@@ -153,6 +153,10 @@ public:
     /// Enable / disable verbose shutdown logging for this loop
     void setShutdownDebug(bool enable) { shutdown_debug_ = enable; }
 
+    /// Enable / disable verbose startup logging (task started / loop
+    /// started) — driven by the 'dc' master debug flag.
+    void setVerbose(bool enable) { verbose_ = enable; }
+
     /// Check if PDO exchange is enabled
     bool isPDOEnabled() const { return pdo_enabled_.load(std::memory_order_acquire); }
 
@@ -197,6 +201,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> pdo_enabled_{false};
     std::atomic<bool> shutdown_debug_{false};
+    std::atomic<bool> verbose_{false};
 
     // Legacy stats (combined view for backward compatibility).
     // Atomic counters are used so the realtime PDO/DC threads can update them

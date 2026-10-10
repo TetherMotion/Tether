@@ -62,7 +62,12 @@ bool LogicalAddressManager::init() {
     stats_ = Stats{};
     initialized_ = true;
     tx_diag_->start();   // non-RT monitor: all exchange error logging lives there
-    TETHER_LOGI(TAG, "Logical address manager initialized");
+    {
+        const auto* df = debug_flags_.load(std::memory_order_relaxed);
+        if (df && df->fmmu) {
+            TETHER_LOGI(TAG, "Logical address manager initialized");
+        }
+    }
     return true;
 }
 
@@ -160,15 +165,23 @@ bool LogicalAddressManager::buildAddressMap(const PDO::SlaveConfig* configs,
             offset += cfg.txpdo_size;
         }
 
-        TETHER_LOGI(TAG, "{}: RxPDO log=0x{:08X} len={}  TxPDO log=0x{:08X} len={}",
-                    slavePrefix(i).c_str(),
-                    static_cast<unsigned long>(entry.rxpdo_logical_addr), entry.rxpdo_length,
-                    static_cast<unsigned long>(entry.txpdo_logical_addr), entry.txpdo_length);
+        const auto* df = debug_flags_.load(std::memory_order_relaxed);
+        if (df && df->fmmu && df->fmmuFilt.allows(i)) {
+            TETHER_LOGI(TAG, "{}: RxPDO log=0x{:08X} len={}  TxPDO log=0x{:08X} len={}",
+                        slavePrefix(i).c_str(),
+                        static_cast<unsigned long>(entry.rxpdo_logical_addr), entry.rxpdo_length,
+                        static_cast<unsigned long>(entry.txpdo_logical_addr), entry.txpdo_length);
+        }
     }
 
-    TETHER_LOGI(TAG, "Address map built: {} slaves, RxPDO={} bytes, TxPDO={} bytes, total={}",
-                slave_count, total_rxpdo_bytes_, total_txpdo_bytes_,
-                total_rxpdo_bytes_ + total_txpdo_bytes_);
+    {
+        const auto* df = debug_flags_.load(std::memory_order_relaxed);
+        if (df && df->fmmu) {
+            TETHER_LOGI(TAG, "Address map built: {} slaves, RxPDO={} bytes, TxPDO={} bytes, total={}",
+                        slave_count, total_rxpdo_bytes_, total_txpdo_bytes_,
+                        total_rxpdo_bytes_ + total_txpdo_bytes_);
+        }
+    }
 
     ensureCyclicPayload(next_free_log_);
     return true;

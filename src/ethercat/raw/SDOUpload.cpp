@@ -120,7 +120,9 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
         (void)master.readRegister(Master::slaveAddressFromADP(adp), 0x0130, al_status, 100);
 
         mbx_write_count_++;
-        if ((mbx_write_count_ % 1000) == 1) {
+        if ((mbx_write_count_ % 1000) == 1 &&
+            master.debugFlags().coeReads &&
+            master.debugFlags().coeReadsFilt.allows(slaveIndexFromADP(adp))) {
             TETHER_LOGI(TAG, "{}: SDO upload (read) request: index=0x{:04X}:{} [mailbox #{} -> 0x{:04X}, len={}, SM0=0x{:02X}, AL=0x{:04X}]",
                      master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), index, sub, (unsigned long)mbx_write_count_, mbxWriteAddr, mbxWriteLen, sm0_status, al_status);
         }
@@ -304,7 +306,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 break;
             }
             if (hdr.cnt != expected_mbx_cnt) {
-                if (!adoptCounterOnEcho(adp, mbxbuf, rspbuf, mbxReadLen, hdr,
+                if (!adoptCounterOnEcho(master, adp, mbxbuf, rspbuf, mbxReadLen, hdr,
                                       inoutMbxCnt, mbx_cnt, expected_mbx_cnt,
                                       index, sub, "upload") &&
                     !checkStaleCounter(master, adp, mbxWriteAddr, mbxWriteLen,

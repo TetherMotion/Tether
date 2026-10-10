@@ -213,8 +213,10 @@ bool CiA402Drive::transitionToOp(bool apply_pdo_mapping) {
     bool need_preop = true;
     if (m_master && m_master->readSlaveApplicationLayerState(m_slave_index, current_state)) {
         if (current_state == static_cast<uint8_t>(ECState::PreOp)) {
-            TETHER_LOGI(TAG, "{}: Already in PRE_OP (0x{:02X}), skipping gotoPreOp()", 
-                     logPrefix().c_str(), current_state);
+            if (m_master->debugFlags().isEnabled("al-state", m_slave_index)) {
+                TETHER_LOGI(TAG, "{}: Already in PRE_OP (0x{:02X}), skipping gotoPreOp()",
+                         logPrefix().c_str(), current_state);
+            }
             need_preop = false;
         } else {
             TETHER_LOGI(TAG, "{}: Current state=0x{:02X}, requesting PRE_OP", 
@@ -328,7 +330,9 @@ bool CiA402Drive::postSafeOpForOp() {
     // the slave wasn't ready. Now that we're in SAFE_OP with SM configured,
     // retry the DC SYNC configuration.
     if (m_master && m_master->dc().isInitialized()) {
-        TETHER_LOGI(TAG, "{}: Reconfiguring DC SYNC in SAFE_OP", logPrefix().c_str());
+        if (m_master->debugFlags().isEnabled("dc", m_slave_index)) {
+            TETHER_LOGI(TAG, "{}: Reconfiguring DC SYNC in SAFE_OP", logPrefix().c_str());
+        }
         if (!m_master->dc().reconfigureSync(m_slave_index))
             TETHER_LOGW(TAG, "{}: DC reconfiguration failed, continuing anyway", logPrefix().c_str());
     }
@@ -337,7 +341,9 @@ bool CiA402Drive::postSafeOpForOp() {
     // CRITICAL: Enable PDO exchange BEFORE requesting OP!
     // The slave's PDI watchdog starts in SAFE_OP and expects process data.
     // We must start sending PDO data now to prevent watchdog timeout.
-    TETHER_LOGI(TAG, "{}: Enabling PDO exchange in SAFE_OP (pre-OP)", logPrefix().c_str());
+    if (m_master->debugFlags().isEnabled("pdo-configuration", m_slave_index)) {
+        TETHER_LOGI(TAG, "{}: Enabling PDO exchange in SAFE_OP (pre-OP)", logPrefix().c_str());
+    }
     if (m_master) {
         m_master->pdoForSlave(m_slave_index).resetStats();
         // If the drive was already enabled via SDO in PRE_OP, mirror the
@@ -355,7 +361,8 @@ bool CiA402Drive::postSafeOpForOp() {
     Tether::Platform::Clock::instance().delayMilliseconds(200);
 
     // DIAGNOSTIC: Read back SM2/SM3 and verify they're correct before OP request
-    if (m_master) {
+    if (m_master &&
+        m_master->debugFlags().isEnabled("verify-safeop", m_slave_index)) {
         for (uint8_t sm = 2; sm <= 3; sm++) {
             uint16_t base = static_cast<uint16_t>(0x0800 + sm * 8);
             uint8_t sm_regs[8] = {0};
@@ -373,12 +380,10 @@ bool CiA402Drive::postSafeOpForOp() {
         uint16_t wdt_status = 0;
         m_master->readRegister(SlaveAddress(m_slave_index), 0x0440, wdt_status, 200);
         TETHER_LOGI(TAG, "{}: Watchdog Status=0x{:04X}", logPrefix().c_str(), wdt_status);
-    }
 
-    // DIAGNOSTIC: Skip the pre-OP PDO/mode SDO reads.
-    // On SOMANET drives the mailbox PDI stops responding once PDO exchange is
-    // enabled in SAFE_OP, so these reads deadlock and prevent the OP request.
-    if (m_master) {
+        // DIAGNOSTIC: Skip the pre-OP PDO/mode SDO reads.
+        // On SOMANET drives the mailbox PDI stops responding once PDO exchange is
+        // enabled in SAFE_OP, so these reads deadlock and prevent the OP request.
         TETHER_LOGI(TAG, "{}: Skipping pre-OP diagnostic SDO reads (mailbox/PDO conflict)",
                     logPrefix().c_str());
     }
@@ -422,8 +427,10 @@ bool CiA402Drive::transitionSafeOpToOp() {
 // ============================================================================
 
 bool CiA402Drive::prepareForSafeOp(const Slave::MultiPDOAssignment& assignment) {
-    TETHER_LOGI(TAG, "{}: Preparing SAFE_OP transition (multi-PDO, {} SM configs)",
-                logPrefix().c_str(), assignment.sm_configs.size());
+    if (m_master->debugFlags().isEnabled("al-state", m_slave_index)) {
+        TETHER_LOGI(TAG, "{}: Preparing SAFE_OP transition (multi-PDO, {} SM configs)",
+                    logPrefix().c_str(), assignment.sm_configs.size());
+    }
 
     // Check if slave is already in PRE_OP. If so, skip gotoPreOp() to avoid
     // re-initializing the slave which would reset all CoE objects.
@@ -431,8 +438,10 @@ bool CiA402Drive::prepareForSafeOp(const Slave::MultiPDOAssignment& assignment) 
     bool need_preop = true;
     if (m_master && m_master->readSlaveApplicationLayerState(m_slave_index, current_state)) {
         if (current_state == static_cast<uint8_t>(ECState::PreOp)) {
-            TETHER_LOGI(TAG, "{}: Already in PRE_OP (0x{:02X}), skipping gotoPreOp()",
-                     logPrefix().c_str(), current_state);
+            if (m_master->debugFlags().isEnabled("al-state", m_slave_index)) {
+                TETHER_LOGI(TAG, "{}: Already in PRE_OP (0x{:02X}), skipping gotoPreOp()",
+                         logPrefix().c_str(), current_state);
+            }
             need_preop = false;
         } else {
             TETHER_LOGI(TAG, "{}: Current state=0x{:02X}, requesting PRE_OP",
@@ -459,7 +468,9 @@ bool CiA402Drive::prepareForSafeOp(const Slave::MultiPDOAssignment& assignment) 
                     logPrefix().c_str(), slaveErrorToString(pdo_err));
         return false;
     }
-    TETHER_LOGI(TAG, "{}: Multi-PDO SM/FMMU configuration complete", logPrefix().c_str());
+    if (m_master->debugFlags().isEnabled("pdo-configuration", m_slave_index)) {
+        TETHER_LOGI(TAG, "{}: Multi-PDO SM/FMMU configuration complete", logPrefix().c_str());
+    }
 
     // Compute total Rx/Tx sizes from the assignment and set internal buffer
     // sizes.  We use setPDOBufferSizes() (not assignFixedPDOs()) because
@@ -489,8 +500,10 @@ bool CiA402Drive::prepareForSafeOp(const Slave::MultiPDOAssignment& assignment) 
             TETHER_LOGE(TAG, "{}: Failed to register PDO buffers", logPrefix().c_str());
             return false;
         }
-        TETHER_LOGI(TAG, "{}: PDO buffers registered: Rx={} bytes, Tx={} bytes",
-                    logPrefix().c_str(), total_rx, total_tx);
+        if (m_master->debugFlags().isEnabled("pdo-configuration", m_slave_index)) {
+            TETHER_LOGI(TAG, "{}: PDO buffers registered: Rx={} bytes, Tx={} bytes",
+                        logPrefix().c_str(), total_rx, total_tx);
+        }
     }
 
     // Do NOT call configureProcessDataSyncManagersFromSii() or re-write SM

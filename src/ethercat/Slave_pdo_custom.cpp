@@ -374,9 +374,10 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         return SlaveError::PDOConfigFailed;
     }
 
-    TETHER_LOGI(TAG, "{}: Configuring multi-PDO SMs ({} SM configs)", logPrefix().c_str(), config.sm_configs.size());
-
     const bool dbg_pdo_cfg = slave_debug_flags_.pdoConfiguration;
+    if (slave_debug_flags_.pdoSm) {
+        TETHER_LOGI(TAG, "{}: Configuring multi-PDO SMs ({} SM configs)", logPrefix().c_str(), config.sm_configs.size());
+    }
 
     // Ensure the slave's configured station address (register 0x0010) is
     // known to the mapping so FPWR/FPRD in exchangePhysical() uses the
@@ -501,8 +502,10 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         master_->writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
 
-        TETHER_LOGI(TAG, "{}: Wrote SM{} (disabled): addr=0x{:04X} len={} (total) ctrl=0x{:02X}",
-                    logPrefix().c_str(), mc.sm_index, mc.phys_start_addr, mc.totalLength(), ctrl_byte);
+        if (slave_debug_flags_.pdoSm) {
+            TETHER_LOGI(TAG, "{}: Wrote SM{} (disabled): addr=0x{:04X} len={} (total) ctrl=0x{:02X}",
+                        logPrefix().c_str(), mc.sm_index, mc.phys_start_addr, mc.totalLength(), ctrl_byte);
+        }
 
         if (dbg_pdo_cfg) {
             TETHER_LOGI(TAG, "{}: [pdo-cfg]   SM{} register writes: "
@@ -545,7 +548,7 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
             TETHER_LOGE(TAG, "{}: Failed to write PDO assignments for SM{}",
                         logPrefix().c_str(), mc.sm_index);
             // Don't return error — some slaves may not support PDO assignment writes
-        } else {
+        } else if (dbg_pdo_cfg) {
             TETHER_LOGI(TAG, "{}: Wrote {} PDO assignment(s) to SM{} (0x1C1{:X})",
                         logPrefix().c_str(), pdo_indices.size(), mc.sm_index, mc.sm_index);
         }
@@ -599,7 +602,9 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
             TETHER_LOGW(TAG, "{}: SM{} activate not confirmed (rb=0x{:02X})",
                         logPrefix().c_str(), mc.sm_index, rb);
         }
-        TETHER_LOGI(TAG, "{}: Enabled SM{}", logPrefix().c_str(), mc.sm_index);
+        if (slave_debug_flags_.pdoSm) {
+            TETHER_LOGI(TAG, "{}: Enabled SM{}", logPrefix().c_str(), mc.sm_index);
+        }
 
         // Update SlaveConfig to reflect enabled state
         if (mc.sm_index < 4) {
@@ -655,8 +660,10 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         }
     }
 
-    TETHER_LOGI(TAG, "{}: Multi-PDO configuration complete ({} SMs, {} RxPDOs, {} TxPDOs)",
-                logPrefix().c_str(), multi_configs.size(), rx_pdo_indices.size(), tx_pdo_indices.size());
+    if (dbg_pdo_cfg) {
+        TETHER_LOGI(TAG, "{}: Multi-PDO configuration complete ({} SMs, {} RxPDOs, {} TxPDOs)",
+                    logPrefix().c_str(), multi_configs.size(), rx_pdo_indices.size(), tx_pdo_indices.size());
+    }
 
     return SlaveError::Ok;
 }

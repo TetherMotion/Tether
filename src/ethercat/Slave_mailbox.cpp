@@ -42,8 +42,10 @@ SlaveError Slave::configureMailbox(Tether::Platform::LogLevel log_level) {
         return SlaveError::MailboxConfigFailed;
     }
     mailbox_configured_ = true;
-    TETHER_LOGI( TAG,
-        "{}: Mailbox configured from SII", logPrefix().c_str());
+    if (slave_debug_flags_.mailboxConfiguration) {
+        TETHER_LOGI( TAG,
+            "{}: Mailbox configured from SII", logPrefix().c_str());
+    }
     // Debug gate checkpoint: mailbox configured
     master_->debugGate().notifyCheckpoint("mailbox-configured", index_);
     return SlaveError::Ok;
@@ -89,10 +91,12 @@ SlaveError Slave::configureMailbox(
     }
 
     mailbox_configured_ = true;
-    TETHER_LOGI( TAG,
-        "{}: Mailbox configured (wr=0x{:04X}/{}, rd=0x{:04X}/{}, proto=0x{:04X})",
-        logPrefix().c_str(), mbox_in.address, mbox_in.length,
-        mbox_out.address, mbox_out.length, protocols);
+    if (slave_debug_flags_.mailboxConfiguration) {
+        TETHER_LOGI( TAG,
+            "{}: Mailbox configured (wr=0x{:04X}/{}, rd=0x{:04X}/{}, proto=0x{:04X})",
+            logPrefix().c_str(), mbox_in.address, mbox_in.length,
+            mbox_out.address, mbox_out.length, protocols);
+    }
     // Debug gate checkpoint: mailbox configured
     master_->debugGate().notifyCheckpoint("mailbox-configured", index_);
     return SlaveError::Ok;
@@ -152,17 +156,21 @@ SlaveError Slave::configureMailbox(
         protocols = *dev->mailbox.protocols;
     }
 
-    TETHER_LOGI(TAG, "{}: Configuring mailbox from ESI (out=0x{:04X}/{}, in=0x{:04X}/{}, proto=0x{:04X})",
-                logPrefix().c_str(), mbox_out.address, mbox_out.length,
-                mbox_in.address, mbox_in.length, protocols);
+    if (slave_debug_flags_.mailboxConfiguration) {
+        TETHER_LOGI(TAG, "{}: Configuring mailbox from ESI (out=0x{:04X}/{}, in=0x{:04X}/{}, proto=0x{:04X})",
+                    logPrefix().c_str(), mbox_out.address, mbox_out.length,
+                    mbox_in.address, mbox_in.length, protocols);
+    }
 
     return configureMailbox(mbox_out, mbox_in, protocols);
 }
 
 void Slave::assumeMailboxAlreadyConfigured() {
     mailbox_configured_ = true;
-    TETHER_LOGI( TAG,
-        "{}: Assuming mailbox already configured", logPrefix().c_str());
+    if (slave_debug_flags_.mailboxConfiguration) {
+        TETHER_LOGI( TAG,
+            "{}: Assuming mailbox already configured", logPrefix().c_str());
+    }
 
     // Best-effort drain: the slave firmware may have left stale data in SM1
     // from boot or a previous session.  If the CoE subsystem doesn't have
@@ -184,9 +192,11 @@ void Slave::markNoMailbox() {
     // The PRE_OP prerequisite is vacuously satisfied — there is no
     // mailbox to configure or drain.
     mailbox_configured_ = true;
-    TETHER_LOGI( TAG,
-        "{}: Declared mailbox-less — skipping all mailbox handling",
-        logPrefix().c_str());
+    if (slave_debug_flags_.mailboxConfiguration) {
+        TETHER_LOGI( TAG,
+            "{}: Declared mailbox-less — skipping all mailbox handling",
+            logPrefix().c_str());
+    }
     master_->debugGate().notifyCheckpoint("mailbox-configured", index_);
 }
 

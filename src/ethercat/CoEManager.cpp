@@ -70,7 +70,9 @@ bool CoEManager::init() {
     }
 
     initialized_.store(true);
-    TETHER_LOGI(TAG, "{}: CoEManager initialized", log_prefix_.c_str());
+    if (debug_flags_.mailboxConfiguration) {
+        TETHER_LOGI(TAG, "{}: CoEManager initialized", log_prefix_.c_str());
+    }
     return true;
 }
 
@@ -149,8 +151,10 @@ void CoEManager::configureMailbox(uint16_t mbx_write_addr, uint16_t mbx_write_le
     mbx_.mbx_counter = 1;
     mbx_.configured  = true;
 
-    TETHER_LOGI(TAG, "{}: mailbox: Receive(SM0/MbxIn)=0x{:04x}/{}, Send(SM1/MbxOut)=0x{:04x}/{}",
-             log_prefix_.c_str(), mbx_write_addr, mbx_write_len, mbx_read_addr, mbx_read_len);
+    if (debug_flags_.mailboxConfiguration) {
+        TETHER_LOGI(TAG, "{}: mailbox: Receive(SM0/MbxIn)=0x{:04x}/{}, Send(SM1/MbxOut)=0x{:04x}/{}",
+                 log_prefix_.c_str(), mbx_write_addr, mbx_write_len, mbx_read_addr, mbx_read_len);
+    }
 }
 
 bool CoEManager::getMailbox(uint16_t* mbx_write_addr, uint16_t* mbx_write_len,
