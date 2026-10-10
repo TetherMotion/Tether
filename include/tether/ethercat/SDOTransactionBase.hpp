@@ -110,7 +110,7 @@ public:
     // @return true if the response was adopted — the caller continues
     //         processing it normally; false if it is stale (caller should
     //         fall back to checkStaleCounter()).
-    bool adoptCounterOnEcho(uint16_t adp,
+    bool adoptCounterOnEcho(Master& master, uint16_t adp,
                             const uint8_t* reqbuf, const uint8_t* rspbuf,
                             uint16_t mbxReadLen, const MbxResponseHeader& hdr,
                             uint8_t* inoutMbxCnt, uint8_t& curCnt,

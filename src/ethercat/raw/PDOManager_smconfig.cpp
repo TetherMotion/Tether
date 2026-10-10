@@ -65,9 +65,17 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
         return false;
     }
 
-    TETHER_LOGI(TAG, "{}: SM{}: configured addr=0x{:04x} len={} ctrl=0x{:02x} act=0x{:02x}",
-                slavePrefix(slave_index).c_str(), sm_index, config.phys_start_addr, config.length, ctrl_byte,
-                config.enable ? SM_ACT_ENABLE : 0x00);
+    {
+        const bool is_mbx = (config.type == PDO::SyncManagerType::MailboxWrite ||
+                             config.type == PDO::SyncManagerType::MailboxRead);
+        const bool dbg = is_mbx ? mailboxCfgDebug(slave_index)
+                                : pdoSmDebug(slave_index);
+        if (dbg) {
+            TETHER_LOGI(TAG, "{}: SM{}: configured addr=0x{:04x} len={} ctrl=0x{:02x} act=0x{:02x}",
+                        slavePrefix(slave_index).c_str(), sm_index, config.phys_start_addr, config.length, ctrl_byte,
+                        config.enable ? SM_ACT_ENABLE : 0x00);
+        }
+    }
 
     if ((rxPDODebug() && config.type == PDO::SyncManagerType::ProcessOutput) ||
         (txPDODebug() && config.type == PDO::SyncManagerType::ProcessInput)) {
@@ -110,7 +118,9 @@ bool PDOManager::configureSlavesSMs(uint16_t slave_index) {
     PDO::SlaveConfig& cfg = slave_configs_[slave_index];
     const uint16_t adp = transport_.adpForSlaveIndex(slave_index);
 
-    TETHER_LOGI(TAG, "Configuring SMs for {} (adp=0x{:04x})", slavePrefix(slave_index).c_str(), adp);
+    if (pdoSmDebug(slave_index) || mailboxCfgDebug(slave_index)) {
+        TETHER_LOGI(TAG, "Configuring SMs for {} (adp=0x{:04x})", slavePrefix(slave_index).c_str(), adp);
+    }
 
     if (rxPDODebug(slave_index) || txPDODebug(slave_index)) {
         TETHER_LOGI(TAG, "  [PDO-DEBUG] {} config: vendor=0x{:08x} product=0x{:08x}",

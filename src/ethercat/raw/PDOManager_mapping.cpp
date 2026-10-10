@@ -80,8 +80,10 @@ bool PDOManager::ensureConfiguredAddress(uint16_t slave_index) {
     cfg.configured_address       = cfg_addr;
     cfg.configured_address_known = true;
     mapping_.set_slave_configured_address(slave_index, cfg_addr);
-    TETHER_LOGI(TAG, "{}: configured station address (reg 0x0010) = 0x{:04X}",
-                slavePrefix(slave_index).c_str(), cfg_addr);
+    if (pdoCfgDebug(slave_index)) {
+        TETHER_LOGI(TAG, "{}: configured station address (reg 0x0010) = 0x{:04X}",
+                    slavePrefix(slave_index).c_str(), cfg_addr);
+    }
     return true;
 }
 
@@ -98,8 +100,10 @@ bool PDOManager::finalizeMapping(uint16_t slave_index) {
     const uint16_t sm2_addr = cfg.sm[2].phys_start_addr;
     const uint16_t sm3_addr = cfg.sm[3].phys_start_addr;
 
-    TETHER_LOGI(TAG, "Finalizing PDO mapping for {} (SM2=0x{:04X} SM3=0x{:04X})",
-                slavePrefix(slave_index).c_str(), sm2_addr, sm3_addr);
+    if (pdoCfgDebug(slave_index)) {
+        TETHER_LOGI(TAG, "Finalizing PDO mapping for {} (SM2=0x{:04X} SM3=0x{:04X})",
+                    slavePrefix(slave_index).c_str(), sm2_addr, sm3_addr);
+    }
 
     uint16_t total_rxpdo_size = 0;
     uint16_t total_txpdo_size = 0;

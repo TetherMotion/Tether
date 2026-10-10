@@ -96,6 +96,7 @@ struct EtherCATSlaveDebugFlags {
     bool dc = false;
     bool pdoConfiguration = false;
     bool shutdown = false;
+    bool mailboxConfiguration = false;
 #if TETHER_ENABLE_FSOE
     bool fsoe = false;
     bool fsoeFrame = false;
@@ -134,6 +135,7 @@ public:
     bool dc = false;
     bool pdoConfiguration = false;
     bool shutdown = false;
+    bool mailboxConfiguration = false;
 
 #if TETHER_ENABLE_FSOE
     // FSoE-specific debug flags (per-slave filterable)
@@ -164,6 +166,7 @@ public:
     SlaveFilter dcFilt;
     SlaveFilter pdoConfigurationFilt;
     SlaveFilter shutdownFilt;
+    SlaveFilter mailboxConfigurationFilt;
 #if TETHER_ENABLE_FSOE
     SlaveFilter fsoeFilt;
     SlaveFilter fsoeFrameFilt;
@@ -186,7 +189,7 @@ public:
         return rxPDO || txPDO || stateMachine || txPackets || rxPackets ||
                fmmu || siiEeprom || eeprom || coeReads || coeWrites || coeRxPackets ||
                coeTxPackets || verifyPreOp || verifySafeOp || pdoSm || dc ||
-               pdoConfiguration || shutdown
+               pdoConfiguration || shutdown || mailboxConfiguration
 #if TETHER_ENABLE_FSOE
                || fsoe || fsoeFrame || fsoeRaw || fsoeWire || fsoeSequence || fsoeCrc
                || fsoeSlaveState
@@ -222,6 +225,7 @@ public:
         s.dc            = dc && dcFilt.allows(slave_index);
         s.pdoConfiguration = pdoConfiguration && pdoConfigurationFilt.allows(slave_index);
         s.shutdown      = shutdown && shutdownFilt.allows(slave_index);
+        s.mailboxConfiguration = mailboxConfiguration && mailboxConfigurationFilt.allows(slave_index);
 #if TETHER_ENABLE_FSOE
         s.fsoe          = fsoe && fsoeFilt.allows(slave_index);
         s.fsoeFrame     = fsoeFrame && fsoeFrameFilt.allows(slave_index);

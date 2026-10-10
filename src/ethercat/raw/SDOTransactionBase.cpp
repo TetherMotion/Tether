@@ -117,7 +117,7 @@ bool SDOTransactionBase::isCounterMismatchError(const uint8_t* mbxbuf, const Mbx
     return (err == 0x0001 && (detail == 0x0004 || detail == 0x0005));
 }
 
-bool SDOTransactionBase::adoptCounterOnEcho(uint16_t adp,
+bool SDOTransactionBase::adoptCounterOnEcho(Master& master, uint16_t adp,
                                            const uint8_t* reqbuf,
                                            const uint8_t* rspbuf,
                                            uint16_t mbxReadLen,
@@ -166,11 +166,14 @@ bool SDOTransactionBase::adoptCounterOnEcho(uint16_t adp,
         // duplicate detection would drop the next request as a retransmit.
         next_req = SDOMailboxIO::nextMbxCnt(next_req);
     }
-    TETHER_LOGI(TAG,
-        "Slave {}: adopting slave mailbox counter: response cnt={} "
-        "(expected {}) echoes index=0x{:04X}:{} ({}) — synced, next req cnt={}",
-        slaveIndexFromADP(adp), hdr.cnt, expectedCnt, index, sub,
-        phaseLabel, next_req);
+    if (master.debugFlags().coeReads &&
+        master.debugFlags().coeReadsFilt.allows(slaveIndexFromADP(adp))) {
+        TETHER_LOGI(TAG,
+            "Slave {}: adopting slave mailbox counter: response cnt={} "
+            "(expected {}) echoes index=0x{:04X}:{} ({}) — synced, next req cnt={}",
+            slaveIndexFromADP(adp), hdr.cnt, expectedCnt, index, sub,
+            phaseLabel, next_req);
+    }
     expectedCnt = hdr.cnt;
     curCnt = next_req;
     if (inoutMbxCnt != nullptr) {

@@ -106,7 +106,10 @@ public:
     bool isInitialized() const;
 
     // ----- Debug flags -----
-    void setDebugFlags(const EtherCATMasterDebugFlags* flags) { debug_flags_.store(flags, std::memory_order_relaxed); }
+    void setDebugFlags(const EtherCATMasterDebugFlags* flags) {
+        debug_flags_.store(flags, std::memory_order_relaxed);
+        mapping_.setAddLogging(flags && flags->pdoConfiguration);
+    }
 
     // ----- Debug gate (for conditional debugging checkpoints) -----
     void setDebugGate(DebugGate* gate) { debug_gate_ = gate; }
@@ -405,6 +408,24 @@ private:
         if (!df) return false;
         if (slave_index == 0xFFFF) return df->txPDO;
         return df->txPDO && df->txPDOFilt.allows(slave_index);
+    }
+    bool pdoSmDebug(uint16_t slave_index = 0xFFFF) const {
+        const auto* df = debug_flags_.load(std::memory_order_relaxed);
+        if (!df) return false;
+        if (slave_index == 0xFFFF) return df->pdoSm;
+        return df->pdoSm && df->pdoSmFilt.allows(slave_index);
+    }
+    bool pdoCfgDebug(uint16_t slave_index = 0xFFFF) const {
+        const auto* df = debug_flags_.load(std::memory_order_relaxed);
+        if (!df) return false;
+        if (slave_index == 0xFFFF) return df->pdoConfiguration;
+        return df->pdoConfiguration && df->pdoConfigurationFilt.allows(slave_index);
+    }
+    bool mailboxCfgDebug(uint16_t slave_index = 0xFFFF) const {
+        const auto* df = debug_flags_.load(std::memory_order_relaxed);
+        if (!df) return false;
+        if (slave_index == 0xFFFF) return df->mailboxConfiguration;
+        return df->mailboxConfiguration && df->mailboxConfigurationFilt.allows(slave_index);
     }
 
     bool writeSMConfig(uint16_t adp, uint8_t sm_index,

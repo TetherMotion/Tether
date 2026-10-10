@@ -68,8 +68,10 @@ bool RealtimeLoop::start() {
     }
 
     const uint32_t dc_period_us = config_.cycle_period_us * config_.sync_interval_cycles;
-    TETHER_LOGI(TAG, "Realtime loop started: PDO thread @ {} us, DC thread @ {} us",
-                config_.cycle_period_us, dc_period_us);
+    if (verbose_.load(std::memory_order_relaxed)) {
+        TETHER_LOGI(TAG, "Realtime loop started: PDO thread @ {} us, DC thread @ {} us",
+                    config_.cycle_period_us, dc_period_us);
+    }
     return true;
 }
 
@@ -216,7 +218,9 @@ void RealtimeLoop::pdoTaskEntry(void* param) {
     auto* loop = static_cast<RealtimeLoop*>(param);
     if (!loop) return;
 
-    TETHER_LOGI(TAG, "PDO realtime task started");
+    if (loop->verbose_.load(std::memory_order_relaxed)) {
+        TETHER_LOGI(TAG, "PDO realtime task started");
+    }
 
     if (!Tether::Platform::setCurrentThreadRealtime(loop->config_.pdo_priority)) {
         TETHER_LOGW(TAG, "PDO thread could not acquire SCHED_FIFO priority; running with normal scheduling");
@@ -358,7 +362,9 @@ void RealtimeLoop::dcTaskEntry(void* param) {
     auto* loop = static_cast<RealtimeLoop*>(param);
     if (!loop) return;
 
-    TETHER_LOGI(TAG, "DC realtime task started");
+    if (loop->verbose_.load(std::memory_order_relaxed)) {
+        TETHER_LOGI(TAG, "DC realtime task started");
+    }
 
     if (!Tether::Platform::setCurrentThreadRealtime(loop->config_.dc_priority)) {
         TETHER_LOGW(TAG, "DC thread could not acquire SCHED_FIFO priority; running with normal scheduling");

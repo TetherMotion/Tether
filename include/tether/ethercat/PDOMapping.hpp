@@ -35,6 +35,10 @@ public:
 
     void set_slave_configured_address(uint16_t slave_index, uint16_t configured_addr);
 
+    /// Enable/disable the "Added RxPDO/TxPDO" registration logs
+    /// (set by PDOManager from the pdo-configuration debug flag).
+    void setAddLogging(bool enabled) { m_log_adds = enabled; }
+
     size_t         entry_count() const { return m_entry_count; }
     const PDOEntry* get_entry(size_t index) const;
     PDOEntry*       get_entry_mut(size_t index);
@@ -94,6 +98,7 @@ private:
     size_t   m_entry_count = 0;
     uint16_t m_slave_configured_addrs[kMaxPDOSlaves] = {0};
     uint32_t m_epoch = 0;   ///< bumped on clear()/remove_entries_for_slave()
+    bool     m_log_adds = false;  ///< gate for the add_rxpdo/add_txpdo logs
 };
 
 } // namespace PDO

@@ -84,8 +84,10 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
         out_config.rxpdo_index = rxpdo->pdo_index;
         out_config.rxpdo_size  = size;
         out_config.has_rxpdo   = true;
-        TETHER_LOGI(TAG, "{}: Registered RxPDO 0x{:04X} ({} bytes) from SII", logPrefix().c_str(),
-                    rxpdo->pdo_index, size);
+        if (slave_debug_flags_.pdoConfiguration) {
+            TETHER_LOGI(TAG, "{}: Registered RxPDO 0x{:04X} ({} bytes) from SII", logPrefix().c_str(),
+                        rxpdo->pdo_index, size);
+        }
     }
 
     if (txpdo) {
@@ -99,8 +101,10 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
         out_config.txpdo_index = txpdo->pdo_index;
         out_config.txpdo_size  = size;
         out_config.has_txpdo   = true;
-        TETHER_LOGI(TAG, "{}: Registered TxPDO 0x{:04X} ({} bytes) from SII", logPrefix().c_str(),
-                    txpdo->pdo_index, size);
+        if (slave_debug_flags_.pdoConfiguration) {
+            TETHER_LOGI(TAG, "{}: Registered TxPDO 0x{:04X} ({} bytes) from SII", logPrefix().c_str(),
+                        txpdo->pdo_index, size);
+        }
     }
 
     // Finalize so SlaveConfig rxpdo_size / txpdo_size are updated
@@ -173,8 +177,10 @@ SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_conf
         out_config.rxpdo_index = rxpdo->index;
         out_config.rxpdo_size  = size;
         out_config.has_rxpdo   = true;
-        TETHER_LOGI(TAG, "{}: Registered RxPDO 0x{:04X} ({} bytes) from ESI", logPrefix().c_str(),
-                    rxpdo->index, size);
+        if (slave_debug_flags_.pdoConfiguration) {
+            TETHER_LOGI(TAG, "{}: Registered RxPDO 0x{:04X} ({} bytes) from ESI", logPrefix().c_str(),
+                        rxpdo->index, size);
+        }
     }
 
     if (txpdo) {
@@ -188,8 +194,10 @@ SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_conf
         out_config.txpdo_index = txpdo->index;
         out_config.txpdo_size  = size;
         out_config.has_txpdo   = true;
-        TETHER_LOGI(TAG, "{}: Registered TxPDO 0x{:04X} ({} bytes) from ESI", logPrefix().c_str(),
-                    txpdo->index, size);
+        if (slave_debug_flags_.pdoConfiguration) {
+            TETHER_LOGI(TAG, "{}: Registered TxPDO 0x{:04X} ({} bytes) from ESI", logPrefix().c_str(),
+                        txpdo->index, size);
+        }
     }
 
     master_->pdoForSlave(index_).finalizeMapping(index_);

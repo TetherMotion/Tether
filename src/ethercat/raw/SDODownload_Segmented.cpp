@@ -200,7 +200,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                 break;
             }
             if (hdr.cnt != expected_mbx_cnt) {
-                if (!adoptCounterOnEcho(adp, mbxbuf, rspbuf, mbxReadLen, hdr,
+                if (!adoptCounterOnEcho(master, adp, mbxbuf, rspbuf, mbxReadLen, hdr,
                                       inoutMbxCnt, mbx_cnt, expected_mbx_cnt,
                                       index, sub, "seg download init") &&
                     !checkStaleCounter(master, adp, mbxWriteAddr, mbxWriteLen,
