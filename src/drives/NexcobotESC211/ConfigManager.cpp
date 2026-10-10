@@ -309,13 +309,27 @@ bool ConfigManager::ensureLoaded() {
 
 namespace {
 
-/// Read 256-byte sections (subindex 1..maxSections) from an SDO data object.
-/// Stops at the first section the device does not provide.
+/// Read 256-byte sections (subindex 1..N) from an SDO data object.
+/// The section bound is the object's own subindex-0 (highest supported
+/// subindex) when readable — newer firmware exposes more sections than
+/// info.maxSections was sized for (e.g. SDD rev 0x1201 needs ~43, not
+/// 25) — otherwise info.maxSections.  Stops early on read error.
 std::vector<uint8_t> readConfigSections(EtherCAT::Slave& slave,
                                       const ConfigDataTypeInfo& info,
-                                      uint16_t index) {
+                                      uint16_t index,
+                                      const char* tag) {
+    uint16_t maxSub = info.maxSections;
+    uint8_t highest = 0;
+    if (slave.sdoReadU8(index, 0x00, highest) == EtherCAT::SlaveError::Ok &&
+        highest > 0) {
+        maxSub = highest;
+        if (highest > info.maxSections)
+            TETHER_LOGW(tag, "{} 0x{:04X} reports {} sections (table "
+                        "expects {}) — reading all", info.name, index,
+                        highest, info.maxSections);
+    }
     std::vector<uint8_t> rawData;
-    for (uint16_t i = 1; i <= info.maxSections; ++i) {
+    for (uint16_t i = 1; i <= maxSub; ++i) {
         std::vector<uint8_t> buf(256, 0);
         size_t actual = buf.size();
         auto err = slave.sdoRead(index, static_cast<uint8_t>(i),
@@ -331,12 +345,12 @@ std::vector<uint8_t> readConfigSections(EtherCAT::Slave& slave,
 
 std::vector<uint8_t> ConfigManager::readTempData(ConfigDataType type) {
     const auto& info = configDataTypeInfo(type);
-    return readConfigSections(slave_, info, info.inputIndex);
+    return readConfigSections(slave_, info, info.inputIndex, tag_);
 }
 
 std::vector<uint8_t> ConfigManager::readActiveData(ConfigDataType type) {
     const auto& info = configDataTypeInfo(type);
-    return readConfigSections(slave_, info, info.outputIndex);
+    return readConfigSections(slave_, info, info.outputIndex, tag_);
 }
 
 // --- Diagnostics ---
