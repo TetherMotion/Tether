@@ -17,6 +17,8 @@ struct CrcExpectation {
     uint16_t crcIndex;       // SDO index of the CRC register (e.g. 0xF202)
     uint32_t expectedCrc;    // Expected CRC32 value
     const char* name;        // Data type name for logging (e.g. "FNI")
+    uint32_t alternateCrc = 0;  // Optional second accepted value (e.g. the
+                              // other firmware generation's FNI buffer pad)
 };
 
 /// Polls device CRC registers until they match expected values or a timeout
