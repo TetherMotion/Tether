@@ -106,11 +106,17 @@ public:
     /// settle, then re-verify.  Returns false if any CRC is still 0x0000.
     bool ensureLoaded();
 
-    // --- Read temp data ---
+    // --- Read data ---
 
     /// Read all sections from the temp/input object for the given data type.
     /// Returns the concatenated raw data, or an empty vector on error.
     std::vector<uint8_t> readTempData(ConfigDataType type);
+
+    /// Read all sections from the active/output object for the given data
+    /// type (0xF201 FNI, 0xF211 RSP, 0xF221 SDD) — the configuration the
+    /// safety application is actually running with.
+    /// Returns the concatenated raw data, or an empty vector on error.
+    std::vector<uint8_t> readActiveData(ConfigDataType type);
 
     // --- Accessors ---
 

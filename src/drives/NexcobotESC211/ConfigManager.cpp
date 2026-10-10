@@ -305,23 +305,38 @@ bool ConfigManager::ensureLoaded() {
     return true;
 }
 
-// --- Read temp data ---
+// --- Read data ---
 
-std::vector<uint8_t> ConfigManager::readTempData(ConfigDataType type) {
-    const auto& info = configDataTypeInfo(type);
+namespace {
+
+/// Read 256-byte sections (subindex 1..maxSections) from an SDO data object.
+/// Stops at the first section the device does not provide.
+std::vector<uint8_t> readConfigSections(EtherCAT::Slave& slave,
+                                      const ConfigDataTypeInfo& info,
+                                      uint16_t index) {
     std::vector<uint8_t> rawData;
-
     for (uint16_t i = 1; i <= info.maxSections; ++i) {
         std::vector<uint8_t> buf(256, 0);
         size_t actual = buf.size();
-        auto err = slave_.sdoRead(info.inputIndex, static_cast<uint8_t>(i),
-                                  buf.data(), actual);
+        auto err = slave.sdoRead(index, static_cast<uint8_t>(i),
+                                 buf.data(), actual);
         if (err != EtherCAT::SlaveError::Ok) break;
         buf.resize(actual);
         rawData.insert(rawData.end(), buf.begin(), buf.end());
     }
-
     return rawData;
+}
+
+} // namespace
+
+std::vector<uint8_t> ConfigManager::readTempData(ConfigDataType type) {
+    const auto& info = configDataTypeInfo(type);
+    return readConfigSections(slave_, info, info.inputIndex);
+}
+
+std::vector<uint8_t> ConfigManager::readActiveData(ConfigDataType type) {
+    const auto& info = configDataTypeInfo(type);
+    return readConfigSections(slave_, info, info.outputIndex);
 }
 
 // --- Diagnostics ---
