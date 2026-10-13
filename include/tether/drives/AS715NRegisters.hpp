@@ -87,8 +87,8 @@ struct AS715NDevice {
 
 struct AS715NConfig {
     /// Configure the bleeder (brake) resistor parameters (group C00 at
-    /// object 0x2000): selection (0x10), power (0x11, W) and resistance
-    /// (0x12, ohm).  All three are AtStop parameters — call while the
+    /// object 0x2000): selection (0x11), power (0x12, W) and resistance
+    /// (0x13, ohm).  All three are AtStop parameters — call while the
     /// drive is disabled (e.g. before CiA402 enable).
     /// @return true if all three SDO writes succeeded.
     static bool configureBleederResistor(

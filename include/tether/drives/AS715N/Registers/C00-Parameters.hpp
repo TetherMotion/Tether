@@ -137,7 +137,7 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry AbsoluteMode = {
 
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry BleederResistorSelection = {
     .index = C00ObjectIndex,
-    .subindex = 0x10,
+    .subindex = 0x11,
     .name = "Bleeder resistor selection",
     .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned16,
     .default_value = 0,
@@ -150,7 +150,7 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry BleederResistorSel
 
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry BleederResistorPower = {
     .index = C00ObjectIndex,
-    .subindex = 0x11,
+    .subindex = 0x12,
     .name = "Bleeder resistor power",
     .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned16,
     .default_value = 50,
@@ -163,7 +163,7 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry BleederResistorPow
 
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry BleederResistorResistance = {
     .index = C00ObjectIndex,
-    .subindex = 0x12,
+    .subindex = 0x13,
     .name = "Bleeder resistor resistance",
     .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned16,
     .default_value = 50,
