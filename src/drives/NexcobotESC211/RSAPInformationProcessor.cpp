@@ -77,18 +77,113 @@ const char* stopCategoryName(uint8_t v) {
     return v < 5 ? names[v] : "Unknown";
 }
 
-// Value decoration for scalar objects (empty string when no decode known).
-std::string scalarValueName(uint16_t index, uint32_t v) {
+} // namespace
+
+// Error-code descriptions per the vendor manual's "Error Code" table.
+// Range entries (DI/DO diagnosis) are handled by range checks.
+const char* RSAPInformationProcessor::errorCodeName(int32_t code) {
+    if (code >= -310 && code <= -300) return "Safety DI diagnosis error";
+    if (code >= -330 && code <= -320) return "Safety DO diagnosis error";
+    switch (code) {
+        case 0:         return "success";
+        // RSAP
+        case -1:        return "operation not accepted in current state";
+        case -2:        return "unexpected exception";
+        case -3:        return "system not ready";
+        case -4:        return "invalid parameter number";
+        case -5:        return "invalid parameter value";
+        case -6:        return "access to invalid area";
+        case -7:
+        case -8:        return "input pointer is null";
+        case -9:        return "structure size incompatible";
+        case -10:       return "incompatible current state";
+        case -11:       return "RSAP CONFIG DIO enable invalid";
+        case -12:       return "RSAP function argument out of range";
+        case -13:       return "RSAP cannot execute command in current state";
+        case -14:       return "command out of range";
+        case -15:       return "operation mode out of range";
+        case -16:       return "stop-type state out of range";
+        case -17:       return "stop category out of range";
+        // CONFIG
+        case -101:      return "RSAP config info CRC invalid";
+        case -102:      return "RSAP config info header invalid";
+        case -103:      return "RSAP config info version invalid";
+        case -104:      return "RSAP config parameter index invalid";
+        case -105:      return "RSAP config parameter count invalid";
+        case -106:      return "RSAP config parameter length invalid";
+        case -107:      return "RSAP config parameter subindex invalid";
+        case -108:      return "RSAP config parameter datatype invalid";
+        case -109:      return "RSAP config parameter count invalid (2)";
+        case -110:      return "RSAP config command invalid";
+        case -111:      return "RSAP CONFIG access to invalid area";
+        case -112:      return "RSAP CONFIG DIO enable invalid (2)";
+        case -201:      return "drive switched to STO unexpectedly";
+        case -202:      return "drive did not switch to STO within time (CONFIG_STO_Timeout)";
+        // SYSMGR
+        case -10000001: return "fatal system error";
+        case -10000002: return "null pointer (SYSMGR)";
+        case -10000009: return "FlashMgr state unexpected";
+        case -10000010: return "FlashMgr FNI CRC error";
+        case -10000011: return "FlashMgr config CRC error";
+        case -10000100: return "system state denies command";
+        case -10000101: return "unknown control command";
+        case -10000102: return "control command timeout";
+        case -10000201: return "RSAP safety parameter verification failed";
+        case -10000301: return "dual-MPU sync data mismatch";
+        case -10000401: return "RSAP command timeout";
+        // FSoE
+        case -20001001: return "FSoE null pointer";
+        case -20001002: return "FSoE TPG info array full";
+        case -20001003: return "FSoE RX PDU queue full";
+        case -20001004: return "FSoE RX PDU queue empty";
+        case -20001005: return "FSoE TX PDU queue full";
+        case -20001006: return "FSoE TX PDU queue empty";
+        case -20001007: return "FSoE address unknown";
+        case -20002001: return "FSoE null pointer (2)";
+        case -20002004: return "FSoE CRC check failed";
+        case -20002005: return "FSoE connection count mismatch";
+        case -20002006: return "FSoE connection does not exist";
+        case -20002007: return "invalid communication parameter length";
+        case -20002008: return "invalid application parameter length";
+        case -20002009: return "FSoE address is zero";
+        case -20002010: return "duplicate FSoE address";
+        case -20002011: return "FSoE connection ID is zero";
+        case -20002012: return "duplicate FSoE connection ID";
+        case -20002013: return "FSoE watchdog value is zero";
+        case -20006002: return "invalid FSoE input parameter";
+        case -20006003: return "invalid FSoE data length";
+        case -20006004: return "FSoE null pointer (3)";
+        case -20007001: return "fatal FSoE error";
+        case -20007002: return "invalid FSoE pointer";
+        case -20007003: return "invalid FSoE operation";
+        case -20007004: return "FSoE initialization failed";
+        case -20007005: return "invalid or missing FSoE connection";
+        case -20007006: return "failed to retrieve FSoE state";
+        case -20007007: return "invalid FSoE index";
+        case -20007008: return "FSoE SAPL not initialized";
+        case -20007009: return "FSoE not initialized";
+        case -20007010: return "critical FSoE communication error";
+        case -20007011: return "FSoE communication error";
+        case -20007012: return "FSoE operation denied in current state";
+    }
+    return nullptr;
+}
+
+std::string RSAPInformationProcessor::scalarName(uint16_t index, uint32_t v) {
     switch (index) {
         case Reg::RSAPStateIndex:         return rsapStateName(static_cast<uint8_t>(v));
         case Reg::MonitoringSubStateIndex:return monitoringSubStateName(v);
+        case Reg::ErrorCodeIndex:
+            if (const char* n = errorCodeName(static_cast<int16_t>(v))) {
+                return n;
+            }
+            return {};
         case Reg::OperationModeIndex:     return operationModeName(static_cast<uint8_t>(v));
         case Reg::StopStateIndex:         return stopStateName(static_cast<uint8_t>(v));
         case Reg::StopCategoryIndex:      return stopCategoryName(static_cast<uint8_t>(v));
     }
     return {};
 }
-} // namespace
 
 const std::array<RSAPInformationProcessor::ObjectInfo,
                  RSAPInformationProcessor::kObjectCount>
@@ -224,7 +319,7 @@ RSAPInformationProcessor::decodeAll(const Snapshot& snap) {
             std::string detail = std::format("0x{:04X}:{} {} = {} (0x{:04X})",
                                              o.index, o.subindex, o.name,
                                              static_cast<int16_t>(v), v);
-            if (const std::string name = scalarValueName(o.index, v);
+            if (const std::string name = scalarName(o.index, v);
                 !name.empty()) {
                 detail += std::format(" [{}]", name);
             }

@@ -137,6 +137,17 @@ public:
      */
     static std::vector<std::string> decodeTriggered(const Snapshot& snap);
 
+    /// Value name for a scalar object per the vendor manual — e.g.
+    /// RSAP state 1 -> "MONITORING", op mode 0 -> "T1", error code
+    /// -202 -> "Drive does not switch to STO status within the
+    /// specified time".  Empty string when no decode exists.
+    static std::string scalarName(uint16_t index, uint32_t value);
+
+    /// Error-code description from the vendor manual's Error Code
+    /// table (covers the RSAP/CONFIG/SAFETY/SYSMGR/FSoE ranges).
+    /// nullptr for unknown codes.
+    static const char* errorCodeName(int32_t code);
+
 private:
     EtherCAT::Slave& slave_;
     mutable std::mutex mtx_;
