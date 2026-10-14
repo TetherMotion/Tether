@@ -114,11 +114,29 @@ struct NexcobotESC211 {
     static constexpr uint16_t kTCP0OrientationLimitStateIndex    = 0x4022;
     static constexpr uint16_t kTCP0RobotPowerLimitStateIndex     = 0x4023;
 
-    // RSAP monitoring (0x4100-0x4115, see RSAPMonitoring.hpp)
+    // RSAP monitoring (0x4100-0x4115, see RSAPMonitoring.hpp — records keep
+    // the verified device convention: sub0 = entry count, data at sub1..N)
     static constexpr uint16_t kTCP0PositionCalculatedIndex    = 0x4100;
     static constexpr uint16_t kTCPMonitoringSpeedLimitIndex   = 0x4101;
+    static constexpr uint16_t kTCP0SpeedCalculatedIndex       = 0x4102;
     static constexpr uint16_t kTCPMonitoringForceLimitIndex   = 0x4103;
+    static constexpr uint16_t kTCP0ForceCalculatedIndex       = 0x4104;
+    static constexpr uint16_t kTCP0ForceVectorCalculatedIndex = 0x4105;
     static constexpr uint16_t kTCPMonitoringPowerLimitIndex   = 0x4106;
+    static constexpr uint16_t kTCP0PowerCalculatedIndex       = 0x4107;
+    static constexpr uint16_t kEndpointsMonitoringSpeedLimitIndex = 0x4108;
+    static constexpr uint16_t kEndpointSpeedCalculatedIndex   = 0x4109;
+    static constexpr uint16_t kEndpointsMonitoringForceLimitIndex = 0x410A;
+    static constexpr uint16_t kEndpoint2ForceCalculatedIndex  = 0x410B;
+    static constexpr uint16_t kAxisPositionCalculatedIndex    = 0x410C;
+    static constexpr uint16_t kAxisMonitoringSpeedLimitIndex  = 0x410D;
+    static constexpr uint16_t kAxisSpeedCalculatedIndex       = 0x410E;
+    // 0x410F is not present in ESI v0.9
+    static constexpr uint16_t kAxisAccelerationCalculatedIndex = 0x4110;
+    static constexpr uint16_t kAxisMonitoringTorqueLimitIndex = 0x4111;
+    static constexpr uint16_t kAxisTorqueCalculatedIndex      = 0x4112;
+    static constexpr uint16_t kJointInverseDynamicsTorqueIndex = 0x4113;
+    static constexpr uint16_t kJointFrictionTorqueIndex       = 0x4114;
     static constexpr uint16_t kAxisLeverArmLengthTCP0Index    = 0x4115;
 
     // RSAP version build (ESI v0.9 removed the old 0x4200-0x4202 safety I/O

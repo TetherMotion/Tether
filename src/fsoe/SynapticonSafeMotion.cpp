@@ -449,6 +449,9 @@ void SafeMotionServoEmulator::onInitialize()
     const uint8_t sto_status_bit =
         ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSTOState);
     Base::setStatusBitMirrorInvert(sto_status_bit, config_.invert_sto);
+    const uint8_t sos_status_bit =
+        ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSOSState);
+    Base::setStatusBitMirrorInvert(sos_status_bit, config_.invert_sos);
 }
 
 void SafeMotionServoEmulator::onCommandConsumed(const Command& cmd)

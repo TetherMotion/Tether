@@ -136,6 +136,11 @@ struct ServoEmulatorConfig {
     // when the slave is in the Data/ProcessData state.
     bool invert_sto = false;
 
+    // Same as invert_sto for the SOS status bit — the slave→master
+    // SOS state bit becomes the logical NOT of the master→slave SOS
+    // command bit (one-active echo of the zero-active command).
+    bool invert_sos = false;
+
     ::FSoE::FSoESlaveConfig toSlaveConfig() const;
 };
 
