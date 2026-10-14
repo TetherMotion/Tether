@@ -25,13 +25,42 @@ const char* bitName(uint16_t index, uint32_t bit) {
     return nullptr;
 }
 
-// Enum decoders for the scalar state objects (value names carried over
-// from the pre-v0.9 packed RSAP Information object fields).
-const char* operationModeName(uint8_t v) {
+// Enum decoders for the scalar state objects — value names per the
+// "ESC CoE Object" manual (0x4000 tab).
+const char* rsapStateName(uint8_t v) {
     static const char* const names[] = {
-        "T1_or_Auto", "T2", "Auto", "Ext", "NotInCompliance"
+        "IDLE", "MONITORING", "CONFIGURED", "STOPPING", "ERROR"
     };
     return v < 5 ? names[v] : "Unknown";
+}
+
+// 0x4001 is a bitmask of MONITORING sub-states (Normal / Collaborative /
+// Recovery / Demand / Initial Reset / Calibration); decode it via the
+// bit labels instead of a plain enum.
+std::string monitoringSubStateName(uint32_t v) {
+    if (v == 0) {
+        return {};
+    }
+    std::string out;
+    for (uint32_t bit = 0; bit < 8; ++bit) {
+        if (!(v & (1u << bit))) {
+            continue;
+        }
+        if (!out.empty()) {
+            out += '|';
+        }
+        out += bitName(Reg::MonitoringSubStateIndex, bit)
+                 ? bitName(Reg::MonitoringSubStateIndex, bit)
+                 : "?";
+    }
+    return out;
+}
+
+const char* operationModeName(uint8_t v) {
+    static const char* const names[] = {
+        "T1", "T2", "Auto", "Ext"
+    };
+    return v < 4 ? names[v] : "Unknown";
 }
 
 const char* stopStateName(uint8_t v) {
@@ -43,19 +72,21 @@ const char* stopStateName(uint8_t v) {
 
 const char* stopCategoryName(uint8_t v) {
     static const char* const names[] = {
-        "Cat0", "Cat1", "Cat2", "CollaborativeInput", "NotTriggered"
+        "Cat0", "Cat1", "Cat2", "ReduceSpeed", "NotTriggered"
     };
     return v < 5 ? names[v] : "Unknown";
 }
 
-// Value decoration for scalar objects (nullptr when no decode is known).
-const char* scalarValueName(uint16_t index, uint32_t v) {
+// Value decoration for scalar objects (empty string when no decode known).
+std::string scalarValueName(uint16_t index, uint32_t v) {
     switch (index) {
-        case Reg::OperationModeIndex: return operationModeName(static_cast<uint8_t>(v));
-        case Reg::StopStateIndex:     return stopStateName(static_cast<uint8_t>(v));
-        case Reg::StopCategoryIndex:  return stopCategoryName(static_cast<uint8_t>(v));
+        case Reg::RSAPStateIndex:         return rsapStateName(static_cast<uint8_t>(v));
+        case Reg::MonitoringSubStateIndex:return monitoringSubStateName(v);
+        case Reg::OperationModeIndex:     return operationModeName(static_cast<uint8_t>(v));
+        case Reg::StopStateIndex:         return stopStateName(static_cast<uint8_t>(v));
+        case Reg::StopCategoryIndex:      return stopCategoryName(static_cast<uint8_t>(v));
     }
-    return nullptr;
+    return {};
 }
 } // namespace
 
@@ -76,8 +107,8 @@ RSAPInformationProcessor::kObjects = {{
     {0x4008, 0x01, "Drive Position Valid Status",       1, false},
     {0x4008, 0x02, "Drive Velocity Valid Status",       1, false},
     {0x4008, 0x03, "Drive Error Status",                1, false},
-    {0x4008, 0x04, "Drive STO Valid Status",            1, false},
-    {0x4008, 0x05, "Drive SOS Valid Status",            1, false},
+    {0x4008, 0x04, "Drive STO Status",                  1, false},
+    {0x4008, 0x05, "Drive SOS Status",                  1, false},
     // 0x4009 record: per-drive user defined bit status
     {0x4009, 0x01, "Drive 1 User Defined Bit Status",   1, false},
     {0x4009, 0x02, "Drive 2 User Defined Bit Status",   1, false},
@@ -193,7 +224,8 @@ RSAPInformationProcessor::decodeAll(const Snapshot& snap) {
             std::string detail = std::format("0x{:04X}:{} {} = {} (0x{:04X})",
                                              o.index, o.subindex, o.name,
                                              static_cast<int16_t>(v), v);
-            if (const char* name = scalarValueName(o.index, v)) {
+            if (const std::string name = scalarValueName(o.index, v);
+                !name.empty()) {
                 detail += std::format(" [{}]", name);
             }
             lines.push_back(std::move(detail));
