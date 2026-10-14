@@ -1,6 +1,7 @@
 #include "tether/drives/NexcobotESC211/RSAPInformationProcessor.hpp"
 
 #include <format>
+#include <optional>
 
 #include "logging/Logger.hpp"
 #include "tether/drives/NexcobotESC211/Registers/SafetyStatus.hpp"
@@ -390,6 +391,379 @@ RSAPInformationProcessor::decodeTriggered(const Snapshot& snap) {
         }
     }
     return lines;
+}
+
+// ---------------------------------------------------------------------------
+// Color-coded multi-panel display model
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using DisplayTone  = RSAPInformationProcessor::DisplayTone;
+using DisplayCell  = RSAPInformationProcessor::DisplayCell;
+using DisplayRow   = RSAPInformationProcessor::DisplayRow;
+using DisplayPanel = RSAPInformationProcessor::DisplayPanel;
+
+std::optional<uint32_t> snapValue(
+    const RSAPInformationProcessor::Snapshot& snap,
+    uint16_t index, uint8_t subindex) {
+    for (size_t i = 0; i < RSAPInformationProcessor::kObjectCount; ++i) {
+        const auto& o = RSAPInformationProcessor::kObjects[i];
+        if (o.index == index && o.subindex == subindex) {
+            return snap.ok[i] ? std::optional<uint32_t>(snap.value[i])
+                              : std::nullopt;
+        }
+    }
+    return std::nullopt;
+}
+
+DisplayRow labelRow(const char* name) {
+    return DisplayRow{{{name, DisplayTone::Muted}}};
+}
+
+// Chips for every labeled bit of an "expected-set" object: a set bit is
+// the present/safe state (green), a cleared labeled bit means that
+// element is absent (red).  shouldShow() is deliberately ignored so
+// missing elements are rendered instead of hidden.
+void pushExpectedSet(DisplayRow& row,
+                     const RSAPInformationProcessor::Snapshot& snap,
+                     uint16_t index) {
+    const auto v = snapValue(snap, index, 0);
+    if (!v) {
+        row.cells.push_back({"n/a", DisplayTone::Muted});
+        return;
+    }
+    bool any = false;
+    for (const auto& l : Reg::bitLabelsFor(index)) {
+        row.cells.push_back({l.name, l.isActive(*v)
+                                         ? DisplayTone::Ok
+                                         : DisplayTone::Missing});
+        any = true;
+    }
+    // Unknown set bits are still flagged.
+    for (uint32_t bit = 0; bit < 32; ++bit) {
+        if ((*v & (1u << bit)) && !bitName(index, bit)) {
+            row.cells.push_back({std::format("bit{}", bit),
+                                 DisplayTone::Info});
+        }
+    }
+    if (!any && *v == 0) {
+        row.cells.push_back({"none", DisplayTone::Missing});
+    }
+}
+
+// Chips for an "expected-clear" object (fault/limit/discrepancy): the
+// healthy state is value==0 -> green "none"; every set bit is a red
+// fault chip.
+void pushExpectedClear(DisplayRow& row,
+                       const RSAPInformationProcessor::Snapshot& snap,
+                       uint16_t index) {
+    const auto v = snapValue(snap, index, 0);
+    if (!v) {
+        row.cells.push_back({"n/a", DisplayTone::Muted});
+        return;
+    }
+    if (*v == 0) {
+        row.cells.push_back({"none", DisplayTone::Ok});
+        return;
+    }
+    for (const auto& l : Reg::bitLabelsFor(index)) {
+        if (l.isActive(*v)) {
+            row.cells.push_back({l.name, DisplayTone::Fault});
+        }
+    }
+    for (uint32_t bit = 0; bit < 32; ++bit) {
+        if ((*v & (1u << bit)) && !bitName(index, bit)) {
+            row.cells.push_back({std::format("bit{}", bit),
+                                 DisplayTone::Fault});
+        }
+    }
+}
+
+// Chips for a mode/state bitmask where "not active" is normal, not a
+// deficiency: active -> green, inactive -> dim.
+void pushModeChips(DisplayRow& row,
+                   const RSAPInformationProcessor::Snapshot& snap,
+                   uint16_t index) {
+    const auto v = snapValue(snap, index, 0);
+    if (!v) {
+        row.cells.push_back({"n/a", DisplayTone::Muted});
+        return;
+    }
+    for (const auto& l : Reg::bitLabelsFor(index)) {
+        row.cells.push_back({l.name, l.isActive(*v)
+                                         ? DisplayTone::Ok
+                                         : DisplayTone::Muted});
+    }
+}
+
+void pushScalar(DisplayRow& row, uint16_t index,
+                const RSAPInformationProcessor::Snapshot& snap,
+                DisplayTone tone) {
+    const auto v = snapValue(snap, index, 0);
+    if (!v) {
+        row.cells.push_back({"n/a", DisplayTone::Muted});
+        return;
+    }
+    std::string name = RSAPInformationProcessor::scalarName(index, *v);
+    if (name.empty()) {
+        name = std::format("{}", static_cast<int16_t>(*v));
+    }
+    row.cells.push_back({name, tone});
+}
+
+} // namespace
+
+std::vector<RSAPInformationProcessor::DisplayPanel>
+RSAPInformationProcessor::buildDisplayPanels(const Snapshot& snap,
+                                             size_t expected_drives) {
+    std::vector<DisplayPanel> panels;
+
+    if (expected_drives == 0) {
+        // Derive from the highest drive bit seen in the 0x4008 records.
+        size_t n = 1;
+        for (uint8_t sub = 1; sub <= 5; ++sub) {
+            if (const auto v = snapValue(snap, Reg::DriveValidStatusIndex,
+                                         sub)) {
+                while (n < 8 && (*v >> n)) {
+                    ++n;
+                }
+            }
+        }
+        expected_drives = n;
+    }
+    if (expected_drives > 7) {
+        expected_drives = 7;
+    }
+
+    // ---- Panel 1: RSAP scalar state + fault/discrepancy ----
+    {
+        DisplayPanel p;
+        p.title = std::format("RSAP state ({}/{} objects)",
+                              snap.read_ok, kObjectCount);
+
+        {
+            auto v = snapValue(snap, Reg::RSAPStateIndex, 0);
+            auto r = labelRow("State");
+            if (v) {
+                DisplayTone t = DisplayTone::Warn;
+                if (*v == 1)      t = DisplayTone::Ok;    // MONITORING
+                else if (*v == 4) t = DisplayTone::Fault; // ERROR
+                r.cells.push_back(
+                    {scalarName(Reg::RSAPStateIndex, *v), t});
+            } else {
+                r.cells.push_back({"n/a", DisplayTone::Muted});
+            }
+            p.rows.push_back(std::move(r));
+        }
+        {
+            auto r = labelRow("Sub");
+            pushModeChips(r, snap, Reg::MonitoringSubStateIndex);
+            p.rows.push_back(std::move(r));
+        }
+        {
+            auto r = labelRow("OpMode");
+            pushScalar(r, Reg::OperationModeIndex, snap, DisplayTone::Info);
+            p.rows.push_back(std::move(r));
+        }
+        {
+            // A stop state engaged is the safe state -> green.
+            const auto v = snapValue(snap, Reg::StopStateIndex, 0);
+            auto r = labelRow("Stop");
+            DisplayTone t = DisplayTone::Muted;
+            if (v && *v != 0)  t = DisplayTone::Ok;    // stop engaged
+            if (v && *v > 2)   t = DisplayTone::Warn;  // unknown value
+            pushScalar(r, Reg::StopStateIndex, snap, t);
+            p.rows.push_back(std::move(r));
+        }
+        {
+            const auto v = snapValue(snap, Reg::StopCategoryIndex, 0);
+            auto r = labelRow("Cat");
+            DisplayTone t = DisplayTone::Muted;
+            if (v && *v < 4) t = DisplayTone::Ok;      // Cat0/1/2/RedSpd
+            if (v && *v > 4) t = DisplayTone::Warn;
+            pushScalar(r, Reg::StopCategoryIndex, snap, t);
+            p.rows.push_back(std::move(r));
+        }
+        {
+            const auto v = snapValue(snap, Reg::ErrorCodeIndex, 0);
+            auto r = labelRow("Err");
+            if (!v) {
+                r.cells.push_back({"n/a", DisplayTone::Muted});
+            } else if (*v == 0) {
+                r.cells.push_back({"0 success", DisplayTone::Ok});
+            } else {
+                const int32_t code = static_cast<int16_t>(*v);
+                r.cells.push_back({std::format("{}", code),
+                                   DisplayTone::Fault});
+                if (const char* n = errorCodeName(code)) {
+                    r.cells.push_back({n, DisplayTone::Fault});
+                }
+            }
+            p.rows.push_back(std::move(r));
+        }
+        {
+            auto r = labelRow("Faults");
+            pushExpectedClear(r, snap, Reg::FaultAndViolationStatusIndex);
+            p.rows.push_back(std::move(r));
+        }
+        {
+            auto r = labelRow("InDisc");
+            pushExpectedClear(r, snap, Reg::InputDiscrepancyStatusIndex);
+            p.rows.push_back(std::move(r));
+        }
+        panels.push_back(std::move(p));
+    }
+
+    // ---- Panel 2: per-drive matrix + summary + user bits ----
+    {
+        DisplayPanel p;
+        p.title = "Drives";
+
+        {
+            DisplayRow r;
+            r.cells.push_back({"", DisplayTone::Muted});
+            for (size_t d = 0; d < expected_drives; ++d) {
+                r.cells.push_back({std::format("D{}", d + 1),
+                                   DisplayTone::Info});
+            }
+            p.rows.push_back(std::move(r));
+        }
+        static const struct {
+            const char* name;
+            uint8_t     sub;
+            bool        good_when_set;
+        } matrix[] = {
+            {"posV", 1, true},  {"velV", 2, true}, {"err", 3, false},
+            {"stoV", 4, true},  {"sosV", 5, true},
+        };
+        for (const auto& m : matrix) {
+            auto r = labelRow(m.name);
+            const auto v =
+                snapValue(snap, Reg::DriveValidStatusIndex, m.sub);
+            if (!v) {
+                r.cells.push_back({"n/a", DisplayTone::Muted});
+            } else {
+                for (size_t d = 0; d < expected_drives; ++d) {
+                    const bool set = *v & (1u << d);
+                    const DisplayTone t =
+                        m.good_when_set
+                            ? (set ? DisplayTone::Ok : DisplayTone::Missing)
+                            : (set ? DisplayTone::Fault : DisplayTone::Ok);
+                    r.cells.push_back({"█", t});
+                }
+            }
+            p.rows.push_back(std::move(r));
+        }
+        {
+            auto r = labelRow("sum");
+            pushModeChips(r, snap, Reg::DriveStatusIndex);
+            p.rows.push_back(std::move(r));
+        }
+        for (size_t d = 0; d < expected_drives; ++d) {
+            DisplayRow r;
+            r.cells.push_back({std::format("usr D{}", d + 1),
+                               DisplayTone::Muted});
+            const auto v =
+                snapValue(snap, Reg::DriveUserBitStatusIndex,
+                          static_cast<uint8_t>(d + 1));
+            if (!v) {
+                r.cells.push_back({"n/a", DisplayTone::Muted});
+            } else if (*v == 0) {
+                r.cells.push_back({"none", DisplayTone::Muted});
+            } else {
+                for (const auto& l :
+                     Reg::bitLabelsFor(Reg::DriveUserBitStatusIndex)) {
+                    if (l.isActive(*v)) {
+                        r.cells.push_back({l.name, DisplayTone::Info});
+                    }
+                }
+                // any set bit without a label
+                for (uint32_t b = 0; b < 8; ++b) {
+                    if ((*v & (1u << b)) &&
+                        !bitName(Reg::DriveUserBitStatusIndex, b)) {
+                        r.cells.push_back({std::format("bit{}", b),
+                                           DisplayTone::Info});
+                    }
+                }
+            }
+            p.rows.push_back(std::move(r));
+        }
+        panels.push_back(std::move(p));
+    }
+
+    // ---- Panel 3: safety input states (expected-set) ----
+    {
+        DisplayPanel p;
+        p.title = "Safety inputs";
+        static const struct { const char* name; uint16_t index; } in[] = {
+            {"EStop",  Reg::EmergencyStopInputStateIndex},
+            {"NStop",  Reg::NormalStopInputStateIndex},
+            {"PStop",  Reg::ProtectiveStopInputStateIndex},
+            {"EnaDev", Reg::EnablingDeviceInputStateIndex},
+            {"OpMode", Reg::OperationModeInputStateIndex},
+            {"Reset",  Reg::ResetInputStateIndex},
+            {"Collab", Reg::CollaborativeInputStateIndex},
+            {"HGC",    Reg::HGCInputStateIndex},
+            {"MonPos", Reg::MonitoredPositionInputStateIndex},
+            {"SSM",    Reg::SSMInputStateIndex},
+        };
+        for (const auto& i : in) {
+            auto r = labelRow(i.name);
+            pushExpectedSet(r, snap, i.index);
+            p.rows.push_back(std::move(r));
+        }
+        panels.push_back(std::move(p));
+    }
+
+    // ---- Panel 4: outputs & safety functions ----
+    {
+        DisplayPanel p;
+        p.title = "Outputs & functions";
+        {
+            auto r = labelRow("OutDisc");
+            pushExpectedClear(r, snap, Reg::OutputDiscrepancyStatusIndex);
+            p.rows.push_back(std::move(r));
+        }
+        {
+            auto r = labelRow("SafeOut");
+            pushExpectedSet(r, snap, Reg::SafetyOutputStateIndex);
+            p.rows.push_back(std::move(r));
+        }
+        {
+            auto r = labelRow("CtrlFunc");
+            pushExpectedSet(r, snap, Reg::SafetyControlFunctionStateIndex);
+            p.rows.push_back(std::move(r));
+        }
+        {
+            auto r = labelRow("LimFunc");
+            pushExpectedClear(r, snap, Reg::SafetyLimitFunctionStateIndex);
+            p.rows.push_back(std::move(r));
+        }
+        panels.push_back(std::move(p));
+    }
+
+    // ---- Panel 5: limit statuses (expected-clear) ----
+    {
+        DisplayPanel p;
+        p.title = "Limits";
+        static const struct { const char* name; uint16_t index; } lim[] = {
+            {"AxisPos",  0x4019}, {"TCPPos",   0x401A},
+            {"EndPos",   0x401B}, {"AxisSpd",  0x401C},
+            {"TCPSpd",   0x401D}, {"EndSpd",   0x401E},
+            {"AxisTrq",  0x401F}, {"TCPForce", 0x4020},
+            {"End2Frc",  0x4021}, {"Orient",   0x4022},
+            {"TCP0Pwr",  0x4023},
+        };
+        for (const auto& l : lim) {
+            auto r = labelRow(l.name);
+            pushExpectedClear(r, snap, l.index);
+            p.rows.push_back(std::move(r));
+        }
+        panels.push_back(std::move(p));
+    }
+
+    return panels;
 }
 
 } // namespace ESC211

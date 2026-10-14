@@ -148,6 +148,58 @@ public:
     /// nullptr for unknown codes.
     static const char* errorCodeName(int32_t code);
 
+    // ------------------------------------------------------------------
+    // Color-coded multi-panel display model
+    //
+    // buildDisplayPanels() turns a snapshot into a set of panels
+    // ("RSAP state", "Drives", "Safety inputs", "Outputs & functions",
+    // "Limits") made of rows of cells.  Each cell carries a DisplayTone;
+    // the UI layer maps tones to its own colors:
+    //
+    //   Ok      — enabled / present / safe state            (green)
+    //   Missing — expected but absent/inactive              (red)
+    //   Fault   — active fault / violation / error          (red+bold)
+    //   Warn    — transitional / needs attention            (yellow)
+    //   Info    — informational value                       (cyan/blue)
+    //   Muted   — inactive but acceptable / unknown         (dim)
+    //
+    // The tone assignment encodes the object semantics: bits that are
+    // expected to be set for a healthy configuration (drive valid
+    // flags, wired safety inputs, driven safety outputs, active control
+    // functions) render red when clear — that is what highlights
+    // "what is missing".  Fault/limit/discrepancy objects are the
+    // inverse: they show a green "none" when clear and red chips for
+    // every set bit.
+    // ------------------------------------------------------------------
+
+    /// Semantic tone for one display cell (see panel docs above).
+    enum class DisplayTone { Ok, Missing, Fault, Warn, Info, Muted };
+
+    struct DisplayCell {
+        std::string text;
+        DisplayTone tone = DisplayTone::Muted;
+    };
+    struct DisplayRow {
+        std::vector<DisplayCell> cells;
+    };
+    struct DisplayPanel {
+        std::string              title;
+        std::vector<DisplayRow>  rows;
+    };
+
+    /**
+     * @brief Build the color-coded multi-panel display model of a snapshot.
+     *
+     * @param expected_drives number of configured FSoE drives; bits for
+     *        these drives are expected set in the 0x4008 records and are
+     *        highlighted Missing when clear.  0 = derive the count from
+     *        the highest bit seen in the snapshot (min. 1).
+     * @return panels in display order; the UI renders them side by side
+     *         or stacked.
+     */
+    static std::vector<DisplayPanel>
+    buildDisplayPanels(const Snapshot& snap, size_t expected_drives = 0);
+
 private:
     EtherCAT::Slave& slave_;
     mutable std::mutex mtx_;
