@@ -912,3 +912,115 @@ jobs:
       with:
         name: documentation
         path: build/docs/html
+
+  static-analysis:
+    name: Clang-Tidy & Clang Static Analyzer
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Restore submodule object cache
+      id: submodule-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: .git/modules
+        key: submodules-${{ github.sha }}
+        restore-keys: submodules-
+
+    - name: Checkout code
+      uses: actions/checkout@v5
+      with:
+        submodules: recursive
+
+    - name: Save submodule object cache
+      uses: actions/cache/save@v4
+      if: steps.submodule-cache.outputs.cache-hit != 'true'
+      with:
+        path: .git/modules
+        key: submodules-${{ github.sha }}
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          clang \
+          clang-tidy \
+          clang-tools \
+          ninja-build \
+          ccache \
+          libboost-dev \
+          python3
+
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-${{ github.job }}-${{ github.sha }}
+        restore-keys: ccache-${{ github.job }}-
+
+    # compile_commands.json drives clang-tidy; tests/examples off — the
+    # analysis surface is the library itself (src/, include/ via headers).
+    - name: Configure with clang
+      run: |
+        cmake -S . -B build-sa -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_COMPILER=clang \
+          -DCMAKE_CXX_COMPILER=clang++ \
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DTETHER_BUILD_TESTS=OFF \
+          -DTETHER_BUILD_EXAMPLES=OFF \
+          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
+          -DTETHER_BUILD_EXTRACT_ESI=OFF
+        # The build also proves the tree compiles under clang (libstdc++).
+        cmake --build build-sa -j8
+      env:
+        CCACHE_DIR: ~/.cache/ccache
+
+    - name: Run clang-tidy
+      run: |
+        # One clang-tidy invocation per TU of the library itself, parallel
+        # via xargs. Warnings land in clang-tidy.log; the step never fails —
+        # this job reports findings, it does not gate merges yet.
+        grep -oE '"file": *"[^"]+\.(cpp|cc|cxx)"' build-sa/compile_commands.json \
+          | sed 's/.*"\(.*\)"/\1/' \
+          | grep -v '/_deps/\|/dependencies/\|/examples/' \
+          | sort -u > sa_files.txt
+        wc -l sa_files.txt
+        xargs -a sa_files.txt -P $(nproc) -I{} \
+          clang-tidy -p build-sa {} >> clang-tidy.log 2>&1 || true
+        # Summarize: check name -> count, file -> count.
+        { echo "## clang-tidy summary"; echo;
+          echo "- total diagnostics: $(grep -c 'warning:\|error:' clang-tidy.log || true)";
+          echo; echo "### By check"; echo '```';
+          grep -oE '\[[a-z0-9-]+\]' clang-tidy.log | sort | uniq -c | sort -rn | head -25;
+          echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Run Clang Static Analyzer (scan-build)
+      run: |
+        # scan-build wraps the compiler: configure inside it so the
+        # ccc-analyzer interposition applies to every TU.
+        rm -rf build-csa
+        scan-build -o scan-report \
+          cmake -S . -B build-csa -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DTETHER_BUILD_TESTS=OFF \
+            -DTETHER_BUILD_EXAMPLES=OFF \
+            -DTETHER_BUILD_PYTHON_BINDINGS=OFF
+        # --status-bugs makes scan-build exit nonzero on findings; report
+        # only for now — findings still land in the HTML artifact.
+        scan-build -o scan-report --status-bugs \
+          cmake --build build-csa -j8 || true
+
+    - name: Upload analysis reports
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: static-analysis-reports
+        path: |
+          clang-tidy.log
+          sa_files.txt
+          scan-report/
