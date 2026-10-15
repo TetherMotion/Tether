@@ -46,7 +46,8 @@ jobs:
           libc6-dev \
           libboost-dev \
           make \
-          ccache
+          ccache \
+          ninja-build
     
     - name: Cache googletest source
       uses: actions/cache@v4
@@ -78,6 +79,7 @@ jobs:
     - name: Configure and build
       run: |
         cmake -S . -B build \
+          -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -134,7 +136,8 @@ jobs:
           libc6-dev \
           libboost-dev \
           make \
-          ccache
+          ccache \
+          ninja-build
 
     - name: Cache googletest source
       uses: actions/cache@v4
@@ -166,6 +169,7 @@ jobs:
     - name: Configure and build (static only)
       run: |
         cmake -S . -B build-static \
+          -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -225,7 +229,8 @@ jobs:
           libc6-dev \
           libboost-dev \
           make \
-          ccache
+          ccache \
+          ninja-build
 
     - name: Show toolchain versions
       run: |
@@ -264,6 +269,7 @@ jobs:
     - name: Configure and build
       run: |
         cmake -S . -B build \
+          -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -476,7 +482,8 @@ jobs:
           make \
           lcov \
           gcovr \
-          ccache
+          ccache \
+          ninja-build
     
     - name: Cache googletest source
       uses: actions/cache@v4
@@ -508,6 +515,7 @@ jobs:
     - name: Configure and build with coverage
       run: |
         cmake -S . -B build-coverage \
+          -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -619,7 +627,8 @@ jobs:
           gcc \
           libc6-dev \
           make \
-          ccache
+          ccache \
+          ninja-build
     
     - name: Restore ccache
       uses: actions/cache@v4
@@ -653,6 +662,7 @@ jobs:
         SANITIZER_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g"
         
         cmake -S . -B build-asan \
+          -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -736,7 +746,8 @@ jobs:
           gcc \
           libc6-dev \
           make \
-          ccache
+          ccache \
+          ninja-build
     
     - name: Restore ccache
       uses: actions/cache@v4
@@ -770,6 +781,7 @@ jobs:
         SANITIZER_FLAGS="-fsanitize=thread -g"
         
         cmake -S . -B build-tsan \
+          -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
