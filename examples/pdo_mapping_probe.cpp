@@ -44,7 +44,7 @@
 
 #include <argparse/argparse.hpp>
 
-#include "common/EtherCATHostSetup.hpp"
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
 #include "logging/Logger.hpp"
 #include "tether/ethercat/ALResetController.hpp"
@@ -175,7 +175,7 @@ private:
         uint16_t index, uint8_t sub);
 
     ProbeConfig cfg_;
-    Tether::Examples::HostEtherNetSession session_;
+    EtherCAT::HostEtherNetSession session_;
     std::unique_ptr<EtherCAT::Master> master_;
     EtherCAT::Slave* slave_ = nullptr;
     std::deque<EtherCAT::ObjectDictionary::ObjectDictionaryEntry> od_store_;
@@ -183,19 +183,19 @@ private:
 };
 
 bool Probe::connect(const char* tag) {
-    if (!Tether::Examples::initHostEthernet(session_, cfg_.iface, tag)) {
+    if (!EtherCAT::initHostEthernet(session_, cfg_.iface, tag)) {
         return false;
     }
     master_ = std::make_unique<EtherCAT::Master>();
-    if (!Tether::Examples::setupEncapsulation(session_, *master_,
-                                                  Tether::Examples::EncapsulationConfig{},
+    if (!EtherCAT::setupEncapsulation(session_, *master_,
+                                                  EtherCAT::EncapsulationConfig{},
                                                   tag)) {
-        Tether::Examples::shutdownHostEthernet(session_);
+        EtherCAT::shutdownHostEthernet(session_);
         return false;
     }
-    Tether::Examples::startHostPollThread(session_, tag);
-    if (!Tether::Examples::startHostMaster(session_, *master_, tag)) {
-        Tether::Examples::shutdownHostEthernet(session_);
+    EtherCAT::startHostPollThread(session_, tag);
+    if (!EtherCAT::startHostMaster(session_, *master_, tag)) {
+        EtherCAT::shutdownHostEthernet(session_);
         return false;
     }
 
@@ -223,7 +223,7 @@ bool Probe::connect(const char* tag) {
 
 void Probe::shutdown() {
     if (master_) master_->stop();
-    Tether::Examples::shutdownHostEthernet(session_);
+    EtherCAT::shutdownHostEthernet(session_);
 }
 
 const EtherCAT::ObjectDictionary::ObjectDictionaryEntry* Probe::synthEntry(
@@ -523,19 +523,15 @@ int main(int argc, char** argv) {
         .help("Only run cases whose name matches this substring.")
         .default_value(std::string{});
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    if (Tether::Examples::printDebugHelpIfRequested(
+    if (EtherCAT::debug::printFlagsHelp(
             program.get<std::string>("--debug"))) {
         return 0;
     }
 
     std::string iface =
-        Tether::Examples::resolveInterface(program.get<std::string>("--interface"), kTag);
+        EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), kTag);
     if (iface.empty()) return 1;
 
     // ---- Build the case list --------------------------------------------
@@ -704,11 +700,11 @@ int main(int argc, char** argv) {
     pcfg.slave_idx = program.get<int>("--slave");
     // Mailbox args
     {
-        Tether::Examples::MailboxSizeConfig mb_size;
-        Tether::Examples::MailboxAddressConfig mb_addr;
-        if (!Tether::Examples::parseMailboxSize(
+        EtherCAT::MailboxSizeConfig mb_size;
+        EtherCAT::MailboxAddressConfig mb_addr;
+        if (!EtherCAT::parseMailboxSize(
                 program.get<std::string>("--mailbox-size"), mb_size) ||
-            !Tether::Examples::parseMailboxAddress(
+            !EtherCAT::parseMailboxAddress(
                 program.get<std::string>("--mailbox-address"), mb_addr)) {
             return 1;
         }

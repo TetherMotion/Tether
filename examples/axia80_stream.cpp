@@ -385,13 +385,9 @@ int main(int argc, char** argv) {
         .default_value(std::string(""))
         .help("Comma-separated TxPDO columns to display (e.g. fx,fy,fz or fx,fy,fz,tx,ty,tz,status,counter)");
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    std::string iface = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     bool raw_mode = program.get<bool>("--raw");
     int slave_idx = program.get<int>("--slave");
     double duration_sec = program.get<double>("--time");
@@ -402,8 +398,8 @@ int main(int argc, char** argv) {
     std::string esi_xml_path = program.get<std::string>("--esi-xml");
     std::string columns_str = program.get<std::string>("--columns");
 
-    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
-    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+    if (EtherCAT::debug::printFlagsHelp(debug_str)) return 0;
+    auto debug_flags = EtherCAT::debug::parseFlags(debug_str);
 
     Tether::Platform::ensureRealtimeKernelOrExit();
 
@@ -432,8 +428,8 @@ int main(int argc, char** argv) {
     }
 
     // ---- Parse encapsulation ----
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(encapsulation_str, encapsulation, TAG)) {
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(encapsulation_str, encapsulation, TAG)) {
         return 1;
     }
 
@@ -442,7 +438,7 @@ int main(int argc, char** argv) {
     if (!debug_flags.empty()) {
         TETHER_LOGI(TAG, "Debug flags: {}", debug_str.c_str());
     }
-    Tether::Examples::logEncapsulationConfig(encapsulation, TAG);
+    EtherCAT::logEncapsulationConfig(encapsulation, TAG);
 
     // ---- Parse and verify against ESI XML (intended settings) ----
     std::optional<ESI::DeviceInfo> esi_device;
@@ -480,7 +476,7 @@ int main(int argc, char** argv) {
             if (err == EtherCAT::HAL::Error::InterfaceNotFound)
                 TETHER_LOGE(TAG, "Interface '{}' not found", iface.c_str());
             else if (err == EtherCAT::HAL::Error::PermissionDenied)
-                Tether::Examples::logPermissionDeniedError(TAG);
+                EtherCAT::HAL::logPermissionDeniedError(TAG);
             else
                 TETHER_LOGE(TAG, "Critical error: Prerequisites for operation not fulfilled ({})",
                             magic_enum::enum_name(err).data());
@@ -513,12 +509,12 @@ int main(int argc, char** argv) {
     EtherCAT::Master master;
     g_master = &master;
     sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
-    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
+    EtherCAT::debug::applyFlags(debug_flags, master, TAG);
 
     // ---- Encapsulation: kernel filter + UDP + VLAN router + RX callback ----
     std::unique_ptr<EtherCAT::VLANRouter> router;
     EtherCAT::NetworkInterface* master_iface =
-        Tether::Examples::setupEncapsulation(*eth, *ni_ptr, master, router,
+        EtherCAT::setupEncapsulation(*eth, *ni_ptr, master, router,
                                              encapsulation, TAG);
     if (!master_iface) {
         return 5;

@@ -141,14 +141,9 @@ int main(int argc, char** argv)
         .help("Attempt the fault reset even when no fault is reported or the "
               "error is marked non-recoverable");
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::runtime_error& err) {
-        std::cerr << err.what() << '\n' << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    const std::string iface = Tether::Examples::resolveInterface(
+    const std::string iface = EtherCAT::HAL::resolveInterface(
         program.get<std::string>("--interface"), TAG);
     if (iface.empty()) {
         return 1;
@@ -162,8 +157,8 @@ int main(int argc, char** argv)
     const bool software_reset = program.get<bool>("--software-reset");
     const bool force = program.get<bool>("--force");
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(
             program.get<std::string>("--encapsulation"), encapsulation,
             TAG)) {
         return 1;

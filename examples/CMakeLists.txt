@@ -7,8 +7,7 @@ set(TETHER_EXAMPLE_TARGETS "")
 
 # Shared example utilities (argument parsing, debug flags, VLAN, host setup)
 add_library(tether_examples_common STATIC
-    common/ExampleHelpers.cpp
-    common/EtherCATHostSetup.cpp)
+    common/ExampleHelpers.cpp)
 target_link_libraries(tether_examples_common PRIVATE
     tether_ethercat_master
     tether_ethercat_common

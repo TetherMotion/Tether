@@ -79,11 +79,11 @@
 #ifdef TETHER_HAS_TERMINAL_UI
 #include "tether/terminal_ui/Session.hpp"
 #include "tether/terminal_ui/TreeScreen.hpp"
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/DeviceTree.hpp"
 #endif
 
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 // ncurses last: it #defines OK/ERR/timeout/... which collide with
 // identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
@@ -1106,27 +1106,23 @@ int main(int argc, char** argv) {
         .help("Force the interactive ncurses TUI")
         .flag();
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
     if (program.get<bool>("--list-interfaces")) {
-        Tether::Examples::listPhysicalInterfaces(TAG);
+        EtherCAT::HAL::listPhysicalInterfaces(TAG);
         return 0;
     }
 
-    std::string iface = Tether::Examples::resolveInterface(
+    std::string iface = EtherCAT::HAL::resolveInterface(
         program.get<std::string>("--interface"), TAG);
     if (iface.empty()) return 1;
 
     std::string debug_str = program.get<std::string>("--debug");
-    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
-    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+    if (EtherCAT::debug::printFlagsHelp(debug_str)) return 0;
+    auto debug_flags = EtherCAT::debug::parseFlags(debug_str);
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"), encapsulation, TAG)) {
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"), encapsulation, TAG)) {
         return 1;
     }
 
@@ -1155,20 +1151,20 @@ int main(int argc, char** argv) {
     Tether::Platform::ensureRealtimeKernelOrExit();
     Tether::Utils::SignalHandler sig_handler(g_cancel);
 
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) return 3;
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, iface, TAG)) return 3;
 
     EtherCAT::Master master;
     sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
-    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
+    EtherCAT::debug::applyFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::setupEncapsulation(session, master, encapsulation, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
-    Tether::Examples::startHostPollThread(session, TAG);
-    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::startHostPollThread(session, TAG);
+    if (!EtherCAT::startHostMaster(session, master, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
@@ -1176,7 +1172,7 @@ int main(int argc, char** argv) {
     if (slaves.empty()) {
         TETHER_LOGE(TAG, "No slaves discovered");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -1214,7 +1210,7 @@ int main(int argc, char** argv) {
     if (master.isMotionControlLoopRunning())
         master.stopMotionControlLoop();
     master.stop();
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
     TETHER_LOGI(TAG, "Done.");
     return 0;
 }

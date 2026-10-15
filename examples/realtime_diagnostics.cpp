@@ -14,8 +14,8 @@
  *   sudo ./realtime_diagnostics -i eth0 -s 64
  */
 
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 #include "tether/ethercat/Types.hpp"
 #include "tether/hal/HALTypes.hpp"
@@ -1307,14 +1307,9 @@ int main(int argc, char** argv) {
               "test stops the coarse sweep and refines the exact crossing point "
               "(default 0.01 = 1%).");
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    const std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    const std::string iface = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     int pdo_size = program.get<int>("--pdo-size");
     if (pdo_size < 1) pdo_size = 1;
     if (pdo_size > 1486) pdo_size = 1486;
@@ -1384,8 +1379,8 @@ int main(int argc, char** argv) {
         (kernel_info.realtime_class ==
          Tether::Platform::RealtimeClass::HardRealtime);
 
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, iface, TAG)) {
         return 2;
     }
 
@@ -1394,7 +1389,7 @@ int main(int argc, char** argv) {
         session.eth->nativeHandle()));
     if (sock < 0) {
         TETHER_LOGE(TAG, "Invalid native socket handle");
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 2;
     }
 
@@ -1403,7 +1398,7 @@ int main(int argc, char** argv) {
     if (ifindex == 0) {
         TETHER_LOGE(TAG, "Failed to resolve interface index for {}",
                     iface.c_str());
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 2;
     }
 
@@ -1662,7 +1657,7 @@ int main(int argc, char** argv) {
                 });
                 if (err != EtherCAT::HAL::Error::OK) {
                     TETHER_LOGE(TAG, "Failed to start realtime thread");
-                    Tether::Examples::shutdownHostEthernet(session);
+                    EtherCAT::shutdownHostEthernet(session);
                     return 3;
                 }
                 thread->join();
@@ -1765,7 +1760,7 @@ int main(int argc, char** argv) {
                           throughput_threshold);
     }
 
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
     return 0;
 #else
     (void)argc;

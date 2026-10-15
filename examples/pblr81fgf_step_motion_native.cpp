@@ -132,26 +132,21 @@ int main(int argc, char** argv)
     Tether::Examples::addInterfaceArg(program);
     program.add_argument("--dwell").scan<'g', double>().default_value(0.5);
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::runtime_error& err) {
-        std::cerr << err.what() << '\n' << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"),
             encapsulation, TAG)) {
         return 1;
     }
-    Tether::Examples::logEncapsulationConfig(encapsulation, TAG);
+    EtherCAT::logEncapsulationConfig(encapsulation, TAG);
 
     Tether::Platform::ensureRealtimeKernelOrExit();
 
     EtherCAT::DS402Master master;
     Tether::Examples::HostMasterSession session;
     if (!Tether::Examples::startHostMasterSession(
-            Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG),
+            EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG),
             master, session, TAG, encapsulation)) {
         return 2;
     }

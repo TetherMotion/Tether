@@ -43,7 +43,7 @@ struct SensorlessHomingArgs {
     double phase_timeout = 30.0;
     std::string pass_aggregation = "mean";
     bool apply_drive_homing = false;
-    Tether::Examples::EncapsulationConfig encapsulation;
+    EtherCAT::EncapsulationConfig encapsulation;
 };
 
 inline bool parseSensorlessHomingArgs(int argc, char** argv,
@@ -132,14 +132,9 @@ inline bool parseSensorlessHomingArgs(int argc, char** argv,
         .implicit_value(true)
         .help("opt-in: call CiA402Drive::homeToCurrentPosition(0) after stalling");
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::runtime_error& err) {
-        std::cerr << err.what() << '\n' << program;
-        return false;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return false;
 
-    out.interface = Tether::Examples::resolveInterface(
+    out.interface = EtherCAT::HAL::resolveInterface(
         program.get<std::string>("--interface"), program_name);
     if (out.interface.empty()) {
         return false;
@@ -195,11 +190,11 @@ inline bool parseSensorlessHomingArgs(int argc, char** argv,
         return false;
     }
     out.apply_drive_homing = program.get<bool>("--apply-drive-homing");
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"),
             out.encapsulation, program_name)) {
         return false;
     }
-    Tether::Examples::logEncapsulationConfig(out.encapsulation, program_name);
+    EtherCAT::logEncapsulationConfig(out.encapsulation, program_name);
     return true;
 }
 

@@ -35,8 +35,8 @@
 #include <string>
 #include <vector>
 
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 #include "tether/drives/Synapticon.hpp"
 #include "tether/drives/Synapticon/BrakeControl.hpp"
 #include "tether/drives/Synapticon/SynapticonDriveInitializer.hpp"
@@ -185,14 +185,9 @@ int main(int argc, char* argv[])
         .default_value(std::string(""))
         .help("Comma-separated Tether debug flags. '--debug help' lists them.");
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::exception& e) {
-        std::print(stderr, "{}\n{}\n", e.what(), program.help().str());
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    const std::string iface = Tether::Examples::resolveInterface(
+    const std::string iface = EtherCAT::HAL::resolveInterface(
         program.get<std::string>("--interface"), TAG);
     const auto slave_indices_opt =
         Tether::Examples::resolveSlaveIndices(program, {"--slave", "--slave2"});
@@ -214,8 +209,8 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    Tether::Examples::EncapsulationConfig encap;
-    if (!Tether::Examples::parseEncapsulationArg(
+    EtherCAT::EncapsulationConfig encap;
+    if (!EtherCAT::parseEncapsulationSpec(
             program.get<std::string>("--encapsulation"), encap, TAG)) {
         return 1;
     }
@@ -240,14 +235,14 @@ int main(int argc, char* argv[])
 
     // ---- Host Ethernet + master bring-up ----
     EtherCAT::DS402Master master;
-    Tether::Examples::HostEtherNetSession session;
+    EtherCAT::HostEtherNetSession session;
     Tether::Utils::SignalHandler sig;  // Ctrl-C → master.requestCancel()
-    if (!Tether::Examples::bringUpHost(session, master.ethercatMaster(),
+    if (!EtherCAT::bringUpHost(session, master.ethercatMaster(),
                                      iface, encap, TAG, &sig)) {
         return 5;
     }
     // Stops DCs + master + host session on every exit path from here on.
-    Tether::Examples::HostSessionGuard host_guard(session, [&master] {
+    EtherCAT::HostSessionGuard host_guard(session, [&master] {
         master.stopDistributedClocks();
         master.stop();
     });
@@ -263,8 +258,8 @@ int main(int argc, char* argv[])
         return 4;
     }
     {
-        const auto flags = Tether::Examples::parseDebugFlags(debug_str);
-        Tether::Examples::applyDebugFlags(flags, master.ethercatMaster(), TAG);
+        const auto flags = EtherCAT::debug::parseFlags(debug_str);
+        EtherCAT::debug::applyFlags(flags, master.ethercatMaster(), TAG);
     }
 
     if (!master.startDistributedClocks(EtherCAT::DC::DCConfig::defaults())) {

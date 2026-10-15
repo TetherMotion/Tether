@@ -27,8 +27,8 @@
 #include "tether/sii/SIIReader.hpp"
 #include "tether/sii/SIIParser.hpp"
 
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 static const char* TAG = "slave_read_identity";
 
@@ -40,13 +40,9 @@ int main(int argc, char** argv) {
     Tether::Examples::addMailboxAddressArg(program);
     Tether::Examples::addEsiXmlArg(program);
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    std::string iface = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     int slave_idx = program.get<int>("--slave");
 
     if (slave_idx < 0 || slave_idx > 65535) {
@@ -54,18 +50,18 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"),
             encapsulation, TAG)) {
         return 1;
     }
 
-    Tether::Examples::MailboxSizeConfig mbSize;
-    if (!Tether::Examples::parseMailboxSize(program.get<std::string>("--mailbox-size"), mbSize)) {
+    EtherCAT::MailboxSizeConfig mbSize;
+    if (!EtherCAT::parseMailboxSize(program.get<std::string>("--mailbox-size"), mbSize)) {
         return 1;
     }
-    Tether::Examples::MailboxAddressConfig mbAddr;
-    if (!Tether::Examples::parseMailboxAddress(program.get<std::string>("--mailbox-address"), mbAddr)) {
+    EtherCAT::MailboxAddressConfig mbAddr;
+    if (!EtherCAT::parseMailboxAddress(program.get<std::string>("--mailbox-address"), mbAddr)) {
         return 1;
     }
 
@@ -96,31 +92,31 @@ int main(int argc, char** argv) {
     TETHER_LOGI(TAG, "slave_read_identity  —  interface: {}, target slave: {}",
                 iface.c_str(), slave_idx);
     if (!use_esi) {
-        Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
+        EtherCAT::logMailboxConfig(mbSize, mbAddr, TAG);
     }
 
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, iface, TAG)) {
         return 2;
     }
 
     EtherCAT::Master master;
-    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::setupEncapsulation(session, master, encapsulation, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
-    Tether::Examples::startHostPollThread(session, TAG);
+    EtherCAT::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::startHostMaster(session, master, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
     if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGE(TAG, "No slaves discovered");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -131,7 +127,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "Slave index {} out of range (only {} slave(s) found)",
                     slave_idx, slaves);
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
@@ -154,7 +150,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "Mailbox configuration failed: {}",
                     EtherCAT::slaveErrorToString(mb_err));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 7;
     }
 
@@ -163,7 +159,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "PRE-OP transition failed: {}",
                     EtherCAT::slaveErrorToString(pre_err));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 8;
     }
     TETHER_LOGI(TAG, "Slave {} is in PRE-OP", slave_idx);
@@ -175,7 +171,7 @@ int main(int argc, char** argv) {
     if (err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "Failed to read subindex 0 of 0x{:04X}", kIdentityIndex);
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 9;
     }
 
@@ -211,7 +207,7 @@ int main(int argc, char** argv) {
     std::cout.flush();
 
     master.stop();
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
 
     return identity_ok ? 0 : 10;
 }

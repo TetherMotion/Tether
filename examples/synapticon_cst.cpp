@@ -450,7 +450,7 @@ struct Args {
     /// disabled.  Default keeps the brake engaged once stopped — the drive
     /// auto-engages it on disable, and phase 3 only ensures that state.
     bool     release_brake = false;
-    Tether::Examples::EncapsulationConfig encapsulation;
+    EtherCAT::EncapsulationConfig encapsulation;
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -513,14 +513,9 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .help("Release (disengage) the holding brake after disabling — by "
               "default phase 3 ensures the brake stays ENGAGED once stopped");
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return false;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return false;
 
-    out.interface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    out.interface = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     out.slave_index = program.get<int>("--slave");
     out.duration = program.get<double>("--duration");
     out.enable_dc_sync = program.get<bool>("--dc-sync");
@@ -546,11 +541,11 @@ bool parseArgs(int argc, char** argv, Args& out) {
         std::cerr << "--stop-mode=decel-limit requires --decel-limit > 0\n";
         return false;
     }
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"),
             out.encapsulation, TAG)) {
         return false;
     }
-    Tether::Examples::logEncapsulationConfig(out.encapsulation, TAG);
+    EtherCAT::logEncapsulationConfig(out.encapsulation, TAG);
     return true;
 }
 
@@ -751,8 +746,8 @@ int main(int argc, char** argv) {
         // which supports per-slave filter syntax.
         {
             const auto debug_flags =
-                Tether::Examples::parseDebugFlags(args.debug);
-            Tether::Examples::applyDebugFlags(
+                EtherCAT::debug::parseFlags(args.debug);
+            EtherCAT::debug::applyFlags(
                 debug_flags, master.ethercatMaster(), TAG);
         }
 

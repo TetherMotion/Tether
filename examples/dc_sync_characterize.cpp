@@ -53,8 +53,8 @@
 #include "tether/sii/SIIReader.hpp"
 #include "tether/sii/SIIParser.hpp"
 
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 static const char* TAG = "dc_sync_characterize";
 
@@ -243,13 +243,9 @@ int main(int argc, char** argv) {
         .help("SYNC1 cycle time in ns to use when probing SYNC1 support (default 0 = "
               "skip SYNC1 cycle-time configuration, just toggle the enable bit).");
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    const std::string iface     = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    const std::string iface     = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     const int slave_idx_signed  = program.get<int>("--slave");
     const std::string debug_str = program.get<std::string>("--debug");
 
@@ -276,52 +272,52 @@ int main(int argc, char** argv) {
     }
     const uint16_t slave_idx = static_cast<uint16_t>(slave_idx_signed);
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"),
             encapsulation, TAG)) {
         return 1;
     }
 
-    Tether::Examples::MailboxSizeConfig mbSize;
-    if (!Tether::Examples::parseMailboxSize(program.get<std::string>("--mailbox-size"), mbSize)) {
+    EtherCAT::MailboxSizeConfig mbSize;
+    if (!EtherCAT::parseMailboxSize(program.get<std::string>("--mailbox-size"), mbSize)) {
         return 1;
     }
-    Tether::Examples::MailboxAddressConfig mbAddr;
-    if (!Tether::Examples::parseMailboxAddress(program.get<std::string>("--mailbox-address"), mbAddr)) {
+    EtherCAT::MailboxAddressConfig mbAddr;
+    if (!EtherCAT::parseMailboxAddress(program.get<std::string>("--mailbox-address"), mbAddr)) {
         return 1;
     }
 
-    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
-    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+    if (EtherCAT::debug::printFlagsHelp(debug_str)) return 0;
+    auto debug_flags = EtherCAT::debug::parseFlags(debug_str);
 
     TETHER_LOGI(TAG, "dc_sync_characterize  —  interface: {}, slave: {}", iface.c_str(), slave_idx);
     TETHER_LOGI(TAG, "Sweep: start={} ns, stop={} ns, steps={}, dwell={} ms",
                 start_ns, stop_ns, steps, dwell_ms);
 
     // ---- Host Ethernet + Master startup ----
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, iface, TAG)) {
         return 2;
     }
 
     EtherCAT::Master master;
-    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
+    EtherCAT::debug::applyFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::setupEncapsulation(session, master, encapsulation, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
-    Tether::Examples::startHostPollThread(session, TAG);
+    EtherCAT::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::startHostMaster(session, master, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
     if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGE(TAG, "No slaves discovered");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -332,7 +328,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "Slave index {} out of range (only {} slave(s) found)",
                     slave_idx, slaves);
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
@@ -348,7 +344,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "Mailbox configuration failed: {}",
                     EtherCAT::slaveErrorToString(mb_err));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 7;
     }
 
@@ -357,7 +353,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "PRE-OP transition failed: {}",
                     EtherCAT::slaveErrorToString(pre_err));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 8;
     }
     TETHER_LOGI(TAG, "Slave {} is in PRE-OP", slave_idx);
@@ -412,7 +408,7 @@ int main(int argc, char** argv) {
                          "cannot proceed to SAFE-OP.",
                     EtherCAT::slaveErrorToString(pdo_err));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 9;
     }
 
@@ -436,7 +432,7 @@ int main(int argc, char** argv) {
     if (!master.dc().init(dc_config, slaves)) {
         TETHER_LOGE(TAG, "Failed to initialize Distributed Clocks");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 10;
     }
     TETHER_LOGI(TAG, "Distributed Clocks initialized (time sync, no SYNC signals yet)");
@@ -444,7 +440,7 @@ int main(int argc, char** argv) {
     if (!master.dc().start()) {
         TETHER_LOGE(TAG, "Failed to start Distributed Clocks RT loop");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 10;
     }
 
@@ -455,7 +451,7 @@ int main(int argc, char** argv) {
                     EtherCAT::DC::dc_state_name(dc_state));
         master.dc().stop();
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 10;
     }
     TETHER_LOGI(TAG, "DC realtime loop RUNNING  —  1 ms cycle (1 kHz), sync frames active");
@@ -467,7 +463,7 @@ int main(int argc, char** argv) {
                     EtherCAT::slaveErrorToString(safe_err));
         master.dc().stop();
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 11;
     }
     TETHER_LOGI(TAG, "Slave {} is in SAFE-OP", slave_idx);
@@ -481,7 +477,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "Failed to read baseline AL_STATUS");
         master.dc().stop();
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 12;
     }
     TETHER_LOGI(TAG, "Baseline AL_STATUS=0x{:04X} ({}), AL_STATUS_CODE=0x{:04X} ({})",
@@ -494,7 +490,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "Slave already in error state before SYNC probing  —  aborting");
         master.dc().stop();
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 12;
     }
 
@@ -723,7 +719,7 @@ int main(int argc, char** argv) {
     // ---- Shutdown ----
     master.dc().stop();
     master.stop();
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
 
     // Exit code: 0 = success, 1 = slave doesn't support SYNC0 at all,
     //            2 = sweep found an AL error (expected outcome)

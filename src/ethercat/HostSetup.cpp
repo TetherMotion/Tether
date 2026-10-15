@@ -1,15 +1,19 @@
-#include "EtherCATHostSetup.hpp"
+#include "tether/ethercat/HostSetup.hpp"
 
 #include <cstring>
 #include <iostream>
 
 #include "tether/utils/SignalHandler.hpp"
 
+#include "tether/hal/IEthernet.hpp"
+#include "tether/hal/InterfaceHelpers.hpp"
 #include "tether/hal/NetworkInterfaceEnumerator.hpp"
 #include "tether/platform/Platform.hpp"
+#include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/NetworkAbstraction.hpp"
 #include "tether/ethercat/SlaveDiscoveryManager.hpp"
 
-namespace Tether::Examples {
+namespace EtherCAT {
 
 HostEtherNetSession::~HostEtherNetSession() {
     if (pollRunning.load()) {
@@ -20,23 +24,23 @@ HostEtherNetSession::~HostEtherNetSession() {
 bool initHostEthernet(HostEtherNetSession& session,
                       const std::string& interfaceName,
                       const char* tag) {
-    session.eth = EtherCAT::HAL::createDefaultEthernet();
+    session.eth = HAL::createDefaultEthernet();
     if (!session.eth) {
         TETHER_LOGE(tag, "No Ethernet HAL available");
         return false;
     }
 
-    EtherCAT::HAL::EthernetConfig cfg;
+    HAL::EthernetConfig cfg;
     cfg.interfaceName = interfaceName.c_str();
     cfg.promiscuous = true;
-    cfg.ethertypeFilter = static_cast<uint16_t>(EtherCAT::kEtherTypeEtherCAT);
+    cfg.ethertypeFilter = static_cast<uint16_t>(kEtherTypeEtherCAT);
 
     auto err = session.eth->init(cfg);
-    if (err != EtherCAT::HAL::Error::OK) {
-        if (err == EtherCAT::HAL::Error::InterfaceNotFound) {
+    if (err != HAL::Error::OK) {
+        if (err == HAL::Error::InterfaceNotFound) {
             TETHER_LOGE(tag, "Interface '{}' not found", interfaceName.c_str());
             // List physical Ethernet interfaces to guide the user
-            auto physIfaces = EtherCAT::HAL::getPhysicalEthernetInterfaces();
+            auto physIfaces = HAL::getPhysicalEthernetInterfaces();
             if (!physIfaces.empty()) {
                 std::string names;
                 for (const auto& iface : physIfaces) {
@@ -48,8 +52,8 @@ bool initHostEthernet(HostEtherNetSession& session,
             } else {
                 TETHER_LOGI(tag, "No physical Ethernet interfaces found on this system");
             }
-        } else if (err == EtherCAT::HAL::Error::PermissionDenied) {
-            logPermissionDeniedError(tag);
+        } else if (err == HAL::Error::PermissionDenied) {
+            HAL::logPermissionDeniedError(tag);
         } else {
             TETHER_LOGE(tag, "Critical error: Prerequisites for operation not fulfilled ({})",
                         "unknown"); // magic_enum may not be available here
@@ -66,8 +70,8 @@ bool initHostEthernet(HostEtherNetSession& session,
         return false;
     }
 
-    EtherCAT::HAL::MacAddress mac;
-    if (session.eth->getMacAddress(mac) != EtherCAT::HAL::Error::OK) {
+    HAL::MacAddress mac;
+    if (session.eth->getMacAddress(mac) != HAL::Error::OK) {
         TETHER_LOGE(tag, "Failed to read MAC address");
         session.eth->shutdown();
         session.eth.reset();
@@ -75,9 +79,9 @@ bool initHostEthernet(HostEtherNetSession& session,
     }
     std::memcpy(session.srcMac, mac.bytes, 6);
 
-    session.ni = std::make_unique<EtherCAT::NetworkInterface>();
+    session.ni = std::make_unique<NetworkInterface>();
     session.ni->send = [eth = session.eth.get()](const uint8_t* data, size_t len) -> bool {
-        return eth->transmit(data, len) == EtherCAT::HAL::Error::OK;
+        return eth->transmit(data, len) == HAL::Error::OK;
     };
     // Direct-receive fast path: lets the cyclic executive drain the socket
     // itself inside its bounded response wait (ppoll on socket + eventfd).
@@ -117,7 +121,7 @@ void shutdownHostEthernet(HostEtherNetSession& session) {
 }
 
 bool setupEncapsulation(HostEtherNetSession& session,
-                        EtherCAT::Master& master,
+                        Master& master,
                         const EncapsulationConfig& encapsulation,
                         const char* tag) {
     session.masterInterface = setupEncapsulation(
@@ -127,7 +131,7 @@ bool setupEncapsulation(HostEtherNetSession& session,
 }
 
 bool startHostMaster(HostEtherNetSession& session,
-                     EtherCAT::Master& master,
+                     Master& master,
                      const char* tag) {
     if (!session.masterInterface) {
         TETHER_LOGE(tag, "setupEncapsulation() has not been called");
@@ -138,7 +142,7 @@ bool startHostMaster(HostEtherNetSession& session,
 }
 
 bool startHostMasterAndDiscover(HostEtherNetSession& session,
-                                EtherCAT::Master& master,
+                                Master& master,
                                 const char* tag) {
     if (!startHostMaster(session, master, tag)) {
         return false;
@@ -167,11 +171,11 @@ bool startHostMasterAndDiscover(HostEtherNetSession& session,
 }
 
 bool bringUpHost(HostEtherNetSession& session,
-                 EtherCAT::Master& master,
+                 Master& master,
                  const std::string& interfaceName,
                  const EncapsulationConfig& encapsulation,
                  const char* tag,
-                 Utils::SignalHandler* sig,
+                 Tether::Utils::SignalHandler* sig,
                  bool enable_mailbox_fallback) {
     if (!initHostEthernet(session, interfaceName, tag)) {
         return false;
@@ -211,4 +215,4 @@ void HostSessionGuard::dismiss() {
     on_exit_ = nullptr;
 }
 
-} // namespace Tether::Examples
+} // namespace EtherCAT

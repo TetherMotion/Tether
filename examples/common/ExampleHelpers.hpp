@@ -4,76 +4,103 @@
 #include <cstdint>
 #include <initializer_list>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "tether/ethercat/CBPFProgramFactory.hpp"
-#include "tether/ethercat/VLANRouter.hpp"
+#include "tether/ethercat/DebugHelpers.hpp"
+#include "tether/ethercat/Encapsulation.hpp"
+#include "tether/ethercat/HostSetup.hpp"
+#include "tether/ethercat/MailboxEndpointConfig.hpp"
+#include "tether/ethercat/SdoAbortReport.hpp"
+#include "tether/hal/InterfaceHelpers.hpp"
+#include "tether/platform/CancellableLoop.hpp"
+#include "tether/utils/StreamPrint.hpp"
 
-namespace EtherCAT { class Slave; class Master; }
-namespace EtherCAT::HAL { class IEthernet; }
+#include "ParseArgs.hpp"
+
+#ifdef TETHER_HAS_TERMINAL_UI
+#include "tether/terminal_ui/Session.hpp"
+#endif
 
 namespace Tether::Examples {
 
 // ============================================================================
 // Common argument-parsing helpers for EtherCAT host examples
+//
+// Only the argparse-bound CLI conventions live here; the generic
+// machinery they feed has moved into Tether proper:
+//   - EtherCAT::EncapsulationConfig/parseEncapsulationSpec/setupEncapsulation
+//     → tether/ethercat/Encapsulation.hpp
+//   - EtherCAT::HostEtherNetSession/initHostEthernet/bringUpHost/...
+//     → tether/ethercat/HostSetup.hpp
+//   - EtherCAT::debug::parseFlags/applyFlags/applyGateConditions
+//     → tether/ethercat/DebugHelpers.hpp
+//   - EtherCAT::HAL::resolveInterface/listPhysicalInterfaces/
+//     logPermissionDeniedError → tether/hal/InterfaceHelpers.hpp
+//   - EtherCAT::MailboxSizeConfig/MailboxAddressConfig/parseMailboxSize/
+//     parseMailboxAddress/logMailboxConfig
+//     → tether/ethercat/MailboxEndpointConfig.hpp
+//   - EtherCAT::reportSdoAbort → tether/ethercat/SdoAbortReport.hpp
+//   - Tether::Platform::runCancellableLoop
+//     → tether/platform/CancellableLoop.hpp
+//   - Tether::Utils::printTimestamped → tether/utils/StreamPrint.hpp
 // ============================================================================
 
-/// Add `-i` / `--interface` to an ArgumentParser.
-/// Default is empty  -  use resolveInterface() to auto-select when not given.
+/// Add `-i` / `--interface` (plus `--encapsulation`) to an ArgumentParser.
+/// Default is empty  -  use EtherCAT::HAL::resolveInterface() to
+/// auto-select when not given.
 void addInterfaceArg(argparse::ArgumentParser& program,
                      const std::string& defaultValue = "");
 
-/// Resolve the interface name after argument parsing.
-///
-/// If @p requested is non-empty, it is returned as-is (user explicitly
-/// specified -i/--interface).
-///
-/// If empty, the system is queried for physical Ethernet interfaces via
-/// getPhysicalEthernetInterfaces():
-///   - Exactly one found: auto-selected, logged, and returned.
-///   - Zero found: error logged, empty string returned.
-///   - More than one: error logged with the list, empty string returned.
-///
-/// @param requested  The raw value from program.get<std::string>("--interface")
-/// @param tag        Log tag for diagnostics
-/// @return           Interface name, or empty string on failure.
-std::string resolveInterface(const std::string& requested, const char* tag);
-
 /// Add `--list-interfaces` to an ArgumentParser.
+/// Pair with EtherCAT::HAL::listPhysicalInterfaces().
 void addListInterfacesArg(argparse::ArgumentParser& program);
 
-/// Enumerate and log all network interfaces to help the user pick `-i`.
-///
-/// Prints one line per physical Ethernet interface (name, type, state,
-/// MAC).  Designed to be called when an example is invoked with
-/// `--list-interfaces`.
-void listPhysicalInterfaces(const char* tag);
-
-/// Log a consistent "permission denied" error message advising the user to
-/// run via `runec` or `sudo`.  Call this when the Ethernet HAL returns
-/// Error::PermissionDenied.
-void logPermissionDeniedError(const char* tag);
-
 /// Add `--debug` to an ArgumentParser.
+/// Pair with EtherCAT::debug::printFlagsHelp()/parseFlags()/applyFlags().
 void addDebugArg(argparse::ArgumentParser& program);
 
 /// Add `--debug-start` and `--debug-stop` to an ArgumentParser.
+/// Pair with EtherCAT::debug::printConditionHelp()/applyGateConditions().
 void addDebugConditionArgs(argparse::ArgumentParser& program);
-
-/// Print detailed debug-flag help to stdout and return true if @p debugStr is "help".
-bool printDebugHelpIfRequested(const std::string& debugStr);
-
-/// Print debug condition help and return true if @p startStr is "help".
-bool printDebugConditionHelpIfRequested(const std::string& startStr);
 
 /// Add `-s` / `--slave` to an ArgumentParser.
 void addSlaveArg(argparse::ArgumentParser& program, int defaultValue = 0);
 
 /// Add `-t` / `--time` to an ArgumentParser.
 void addDurationArg(argparse::ArgumentParser& program, double defaultValue = 0.0);
+
+/// Add the `--interactive`/`--stream` output-mode flag pair used by every
+/// dual-mode example.  `streamHelp` documents what the plain-lines mode
+/// prints (e.g. "Print status as plain lines instead of the TUI").
+void addStreamArgs(argparse::ArgumentParser& program,
+                   std::string_view streamHelp);
+
+/// Resolve --stream/--interactive into the output mode: --stream wins;
+/// otherwise interactive unless the TUI can't run, in which case a
+/// forced --interactive logs `unavailable_reason` under `tag` and the
+/// result is stream.  Back-end for wantsInteractive().
+bool resolveInteractiveMode(const argparse::ArgumentParser& program,
+                            const char* tag, bool tui_available,
+                            const char* unavailable_reason);
+
+/// Output mode for the dual-mode examples: --stream wins, else
+/// interactive when a TUI session is usable (TUI::Session::available()
+/// when built with TETHER_HAS_TERMINAL_UI; never otherwise).  A forced
+/// --interactive that can't be honored logs the reason and falls back
+/// to stream — identical to the 16-line block this replaces.
+inline bool wantsInteractive(const argparse::ArgumentParser& program,
+                             const char* tag) {
+#ifdef TETHER_HAS_TERMINAL_UI
+    return resolveInteractiveMode(
+        program, tag, Tether::TUI::Session::available(),
+        "no usable terminal  —  falling back to --stream");
+#else
+    return resolveInteractiveMode(program, tag, false,
+                                  "built without ncurses  —  using --stream mode");
+#endif
+}
 
 /**
  * @brief Resolve a chain of slave-index arguments (e.g. "--slave",
@@ -93,176 +120,21 @@ std::optional<std::vector<uint16_t>> resolveSlaveIndices(
     std::initializer_list<std::string_view> arg_names);
 
 // ============================================================================
-// Debug-flag helpers
-// ============================================================================
-
-/// Parse a comma-separated debug-flags string into a set of trimmed tokens.
-std::set<std::string> parseDebugFlags(const std::string& debugStr);
-
-/**
- * @brief Apply debug flags parsed from CLI to a Master instance.
- *
- * Uses the new per-master/per-slave syntax, e.g.:
- *   --debug rx-pdo,stateMachine:(slaves:0,2,5),coe-reads:(slaves:1-3)
- *
- * @param flags   Set of flag strings from parseDebugFlags()
- * @param master  Target master to configure debug flags on
- * @param tag     ESP-style log tag for diagnostics
- */
-void applyDebugFlags(const std::set<std::string>& flags,
-                     EtherCAT::Master& master,
-                     const char* tag);
-
-/**
- * @brief Apply debug start/stop conditions from CLI to a Master's debug gate.
- *
- * Parses the --debug-start and --debug-stop condition strings and adds them
- * to the master's DebugGate as global start/stop conditions.
- *
- * @param startCond  Start condition string (e.g. "state:pre-op"), or empty
- * @param stopCond   Stop condition string (e.g. "state:op"), or empty
- * @param master     Target master
- * @param tag        Log tag for diagnostics
- * @return true if all conditions parsed successfully (or were empty)
- */
-bool applyDebugGateConditions(const std::string& startCond,
-                              const std::string& stopCond,
-                              EtherCAT::Master& master,
-                              const char* tag);
-
-// ============================================================================
-// Encapsulation helpers (802.1Q VLAN + EtherCAT-over-UDP)
-// ============================================================================
-
-/**
- * @brief Frame encapsulation selected by `--encapsulation`.
- *
- * Grammar (comma-separated tokens):
- *   raw | none                      — plain EtherCAT (default)
- *   vlan:<vid>                      — RX filter + TX tag on <vid> (1-4095)
- *   vlan:<lo>-<hi>                  — RX VID range; TX tag = <lo>
- *   vlan:any                        — RX catch-all for tagged frames
- *   vlantx:<vid|off>                — override/disable TX tag
- *   udp[:<port>]                    — EtherCAT-over-UDP (ETG.1000.3, port 34980)
- *
- * Examples: "vlan:1999", "udp", "vlan:100,udp", "vlan:100-200,vlantx:off".
- */
-struct EncapsulationConfig {
-    /// VLAN mode is active (router needed) when any of these are set.
-    std::optional<uint16_t> txVlan;
-    bool rxAny = false;
-    std::optional<EtherCAT::VLANRouter::VLANRange> rxRange;
-
-    /// EtherCAT-over-UDP encapsulation (ETG.1000.3).
-    bool     udp     = false;
-    uint16_t udpPort = EtherCAT::kEtherCATUdpPort;
-
-    /// VLAN routing/tagging is in use.
-    bool vlanActive() const {
-        return rxAny || rxRange.has_value() || txVlan.has_value();
-    }
-    /// Any encapsulation (VLAN or UDP) is in use.
-    bool enabled() const { return vlanActive() || udp; }
-};
-
-/// Parse the `--encapsulation` value into an EncapsulationConfig.
-/// Returns false and prints to stderr on invalid input.
-bool parseEncapsulationArg(const std::string& spec,
-                           EncapsulationConfig& out,
-                           const char* tag);
-
-/// Log the encapsulation configuration via TETHER_LOGI.
-void logEncapsulationConfig(const EncapsulationConfig& config, const char* tag);
-
-/// Build the kernel socket-filter program matching @p config — untagged
-/// EtherCAT (+any-VID tagged) for raw mode, VID-restricted for vlan mode,
-/// plus EtherCAT-over-UDP when enabled.  Empty program = attach nothing.
-/// @p delivery prunes the unreachable VLAN leg when probeVlanTagDelivery()
-/// determined how this NIC presents tags (Auto = emit both legs).
-std::vector<EtherCAT::CBPFInsn> buildEncapsulationBpfProgram(
-    const EncapsulationConfig& config,
-    EtherCAT::VlanDeliveryHint delivery = EtherCAT::VlanDeliveryHint::Auto);
-
-/// Attach the encapsulation filter to the Ethernet device's native socket
-/// (SO_ATTACH_FILTER on Linux; soft-fails with a warning).
-void attachEncapsulationBpfFilter(EtherCAT::HAL::IEthernet& eth,
-                                  const EncapsulationConfig& config,
-                                  const char* tag,
-                                  EtherCAT::VlanDeliveryHint delivery =
-                                      EtherCAT::VlanDeliveryHint::Auto);
-
-/**
- * @brief One-call encapsulation setup for a host-side EtherCAT interface.
- *
- * Applies @p encapsulation end to end:
- *   1. attaches a kernel cBPF ingress filter to `eth`'s native socket —
- *      rejects non-EtherCAT traffic (and, in VLAN mode, frames outside the
- *      configured VID) before userspace sees them;
- *   2. enables EtherCAT-over-UDP on `master` when requested — fails if the
- *      build lacks TETHER_ENABLE_UDP_ENCAPSULATION, and disables the HAL's
- *      software EtherType filter so IPv4 frames reach the master;
- *   3. when VLAN routing is active, creates a VLANRouter (stored into
- *      `routerStorage`), registers `master` on it, and installs an RX
- *      callback on `eth` that routes tagged frames by VID; otherwise
- *      installs a direct RX callback to `master`.
- *
- * @param eth            initialized Ethernet device
- * @param backend        NetworkInterface wrapping `eth` (its send lambda is
- *                       used for TX; the receive fast-path is cleared when
- *                       VLAN routing is active)
- * @param master         master to wire up (RX callback + UDP config)
- * @param routerStorage  receives the router when VLAN routing is active;
- *                       caller keeps it alive for the session duration
- * @return the NetworkInterface the master should start() on — the router's
- *         per-master view under VLAN, or `&backend` otherwise; nullptr on
- *         failure (e.g. UDP encapsulation not compiled in).
- */
-EtherCAT::NetworkInterface* setupEncapsulation(
-    EtherCAT::HAL::IEthernet& eth,
-    EtherCAT::NetworkInterface& backend,
-    EtherCAT::Master& master,
-    std::unique_ptr<EtherCAT::VLANRouter>& routerStorage,
-    const EncapsulationConfig& encapsulation,
-    const char* tag);
-
-// ============================================================================
 // Mailbox helpers
 // ============================================================================
-
-struct MailboxSizeConfig {
-    uint16_t inSize = 256;
-    uint16_t outSize = 256;
-};
-
-struct MailboxAddressConfig {
-    uint16_t inAddress = 0x1000;
-    uint16_t outAddress = 0x1200;
-};
 
 /// Add `-M` / `--mailbox-size` to an ArgumentParser.
 /// `default_size` sets the default mailbox size (bytes) for both MbxIn and
 /// MbxOut.  ESC211 demos should pass 512: the 256-byte FNI/RSP/SDD sections
 /// plus the SDO header do not fit into a 256-byte mailbox, which forces
 /// segmented downloads that the slave rejects.
+/// Pair with EtherCAT::parseMailboxSize().
 void addMailboxSizeArg(argparse::ArgumentParser& program,
                        uint16_t default_size = 256);
 
 /// Add `--mailbox-address` to an ArgumentParser.
+/// Pair with EtherCAT::parseMailboxAddress().
 void addMailboxAddressArg(argparse::ArgumentParser& program);
-
-/// Parse `--mailbox-size` value.  Single number sets both; `in:X,out:Y` sets independently.
-/// Returns false and prints to stderr on invalid input.
-bool parseMailboxSize(const std::string& str, MailboxSizeConfig& out);
-
-/// Parse `--mailbox-address` value.  Expected format: `in:<hex>,out:<hex>`.
-/// Validates that in-address != out-address.
-/// Returns false and prints to stderr on invalid input.
-bool parseMailboxAddress(const std::string& str, MailboxAddressConfig& out);
-
-/// Log the mailbox configuration via TETHER_LOGI.
-void logMailboxConfig(const MailboxSizeConfig& size,
-                      const MailboxAddressConfig& addr,
-                      const char* tag);
 
 // ============================================================================
 // ESI (EtherCAT Slave Information) XML helpers
@@ -273,34 +145,5 @@ void logMailboxConfig(const MailboxSizeConfig& size,
 /// drive mailbox/PDO configuration from the ESI XML instead of SII EEPROM.
 void addEsiXmlArg(argparse::ArgumentParser& program,
                   const std::string& defaultValue = "");
-
-// ============================================================================
-// SDO abort reporting helper
-// ============================================================================
-
-/**
- * @brief Print a clear, user-facing explanation of the last CoE SDO abort
- *        reported by the slave on @p slave.
- *
- * Call this immediately after a Slave::sdoRead/sdoWrite family call returns
- * SlaveError::SDOAborted. It reads Slave::lastSdoAbortCode(), decodes the
- * standard 32-bit CoE abort code into its human-readable meaning, and prints
- * the result to both the TETHER log and stderr so the user sees it on the
- * console regardless of log routing. It also reports the operation direction
- * (read vs. write) and the attempted payload length from
- * Slave::lastSdoAttemptedLength().
- *
- * For the length-mismatch family of abort codes (0x06070010 / 0x06070012 /
- * 0x06070013) it additionally prints a hint pointing the user at the object
- * dictionary / ESI file to find the correct payload size  -  this is the
- * signature of the original "slave rejects the write because the payload is
- * the wrong size" failure.
- *
- * @param slave  The slave whose last SDO call was aborted.
- * @param tag    ESP-style log tag for the TETHER_LOGE line.
- * @return The abort code (0 if no abort was recorded  -  in that case nothing
- *         is printed).
- */
-uint32_t reportSdoAbort(const EtherCAT::Slave& slave, const char* tag);
 
 } // namespace Tether::Examples

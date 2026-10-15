@@ -26,6 +26,8 @@
 
 #include <argparse/argparse.hpp>
 
+#include "common/ParseArgs.hpp"
+
 #include <tether/gcode/PlanningSegmentBuilder.hpp>
 #include <tether/gcode/GCodeInterpreter.hpp>
 #include <tether/motion_planner/geometry/PiecewiseNurbsPath.hpp>
@@ -180,12 +182,7 @@ int main(int argc, char** argv) {
         .flag()
         .help("G61 exact stop mode  —  no corner blending");
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
     std::string gcodeFile = program.get<std::string>("gcode_file");
     std::string outputFile = program.get<std::string>("--output");

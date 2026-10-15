@@ -30,8 +30,8 @@
 #include "tether/drives/RP20/RP20Module.hpp"
 #include "tether/utils/SignalHandler.hpp"
 
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 static const char* TAG = "kinco_rp20_list_modules";
 static EtherCAT::Master* g_master = nullptr;
@@ -144,31 +144,27 @@ int main(int argc, char** argv) {
         .default_value(100)
         .help("Delay in ms between PRE-OP and slot scan (default: 100)");
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    std::string iface = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     std::string debug_str = program.get<std::string>("--debug");
     int slot_scan_delay = program.get<int>("--slot-scan-delay");
 
-    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
-    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+    if (EtherCAT::debug::printFlagsHelp(debug_str)) return 0;
+    auto debug_flags = EtherCAT::debug::parseFlags(debug_str);
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"),
             encapsulation, TAG)) {
         return 1;
     }
 
-    Tether::Examples::MailboxSizeConfig mbSize;
-    if (!Tether::Examples::parseMailboxSize(program.get<std::string>("--mailbox-size"), mbSize)) {
+    EtherCAT::MailboxSizeConfig mbSize;
+    if (!EtherCAT::parseMailboxSize(program.get<std::string>("--mailbox-size"), mbSize)) {
         return 1;
     }
-    Tether::Examples::MailboxAddressConfig mbAddr;
-    if (!Tether::Examples::parseMailboxAddress(program.get<std::string>("--mailbox-address"), mbAddr)) {
+    EtherCAT::MailboxAddressConfig mbAddr;
+    if (!EtherCAT::parseMailboxAddress(program.get<std::string>("--mailbox-address"), mbAddr)) {
         return 1;
     }
 
@@ -197,32 +193,32 @@ int main(int argc, char** argv) {
 #endif
 
     TETHER_LOGI(TAG, "kinco_rp20_list_modules  —  interface: {}", iface.c_str());
-    Tether::Examples::logEncapsulationConfig(encapsulation, TAG);
-    Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
+    EtherCAT::logEncapsulationConfig(encapsulation, TAG);
+    EtherCAT::logMailboxConfig(mbSize, mbAddr, TAG);
 
     // ---- Signal handlers ----
     Tether::Utils::SignalHandler sig_handler(g_running, false);
 
     // ---- Host Ethernet setup ----
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, iface, TAG)) {
         return 2;
     }
 
     EtherCAT::Master master;
     g_master = &master;
     sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
-    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
+    EtherCAT::debug::applyFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::setupEncapsulation(session, master, encapsulation, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
-    Tether::Examples::startHostPollThread(session, TAG);
+    EtherCAT::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::startHostMaster(session, master, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
@@ -230,7 +226,7 @@ int main(int argc, char** argv) {
     if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGE(TAG, "No slaves discovered");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -260,7 +256,7 @@ int main(int argc, char** argv) {
             if (!master.autoConfigureMailbox(s, Tether::Platform::LogLevel::Info)) {
                 TETHER_LOGE(TAG, "{}: autoConfigureMailbox also failed", s);
                 master.stop();
-                Tether::Examples::shutdownHostEthernet(session);
+                EtherCAT::shutdownHostEthernet(session);
                 return 7;
             }
             sl.assumeMailboxAlreadyConfigured();
@@ -271,7 +267,7 @@ int main(int argc, char** argv) {
             TETHER_LOGE(TAG, "{}: PRE-OP transition failed: {}",
                         s, EtherCAT::slaveErrorToString(pre_err));
             master.stop();
-            Tether::Examples::shutdownHostEthernet(session);
+            EtherCAT::shutdownHostEthernet(session);
             return 8;
         }
         TETHER_LOGI(TAG, "{}: in PRE-OP", s);
@@ -290,7 +286,7 @@ int main(int argc, char** argv) {
     if (modules.empty()) {
         TETHER_LOGE(TAG, "No RP20 modules found on any slave");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 6;
     }
 
@@ -303,7 +299,7 @@ int main(int argc, char** argv) {
     TETHER_LOGI(TAG, "Shutting down...");
     master.stop();
     g_master = nullptr;
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
 
     TETHER_LOGI(TAG, "Done.");
     return 0;

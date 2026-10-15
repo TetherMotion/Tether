@@ -35,8 +35,8 @@
 #include "tether/platform/Platform.hpp"
 #include "tether/utils/SignalHandler.hpp"
 
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 namespace slave = EtherCAT::slave;
 namespace AL = EtherCAT::AL;
@@ -112,15 +112,9 @@ int main(int argc, char* argv[]) {
         .default_value(1000)
         .help("DC cycle time in microseconds");
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::exception& e) {
-        std::cerr << e.what() << "\n";
-        std::cerr << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    const auto interfaceName = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), kTag);
+    const auto interfaceName = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), kTag);
     const auto durationSec = program.get<double>("--time");
     const auto debugStr = program.get<std::string>("--debug");
     const auto encapsulationStr = program.get<std::string>("--encapsulation");
@@ -138,15 +132,15 @@ int main(int argc, char* argv[]) {
     const bool disableDc = program.get<bool>("--no-dc");
     const int cycleTimeUs = program.get<int>("--cycle-time");
 
-    if (Tether::Examples::printDebugHelpIfRequested(debugStr)) {
+    if (EtherCAT::debug::printFlagsHelp(debugStr)) {
         return 0;
     }
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(encapsulationStr, encapsulation, kTag)) {
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(encapsulationStr, encapsulation, kTag)) {
         return 1;
     }
-    Tether::Examples::logEncapsulationConfig(encapsulation, kTag);
+    EtherCAT::logEncapsulationConfig(encapsulation, kTag);
     if (encapsulation.vlanActive() || encapsulation.udp) {
         TETHER_LOGW(kTag, "Note: the slave emulator does not decapsulate "
                           "VLAN/UDP on the slave side — the filter only "
@@ -169,11 +163,11 @@ int main(int argc, char* argv[]) {
     // -----------------------------------------------------------------------
     // 1. Initialize Ethernet HAL
     // -----------------------------------------------------------------------
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, interfaceName, kTag)) {
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, interfaceName, kTag)) {
         return 1;
     }
-    Tether::Examples::attachEncapsulationBpfFilter(*session.eth, encapsulation, kTag);
+    EtherCAT::attachEncapsulationBpfFilter(*session.eth, encapsulation, kTag);
 
     // -----------------------------------------------------------------------
     // 2. Configure and create SlaveCore
@@ -314,7 +308,7 @@ int main(int argc, char* argv[]) {
     // -----------------------------------------------------------------------
     // 4. Start poll thread
     // -----------------------------------------------------------------------
-    Tether::Examples::startHostPollThread(session, kTag);
+    EtherCAT::startHostPollThread(session, kTag);
 
     // -----------------------------------------------------------------------
     // 5. Simulation thread (advances DC time and watchdog)
@@ -374,7 +368,7 @@ int main(int argc, char* argv[]) {
     }
 
     slaveCore->stop();
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
 
     std::cout << "Done. Processed " << frameCount.load() << " frames, "
               << responseCount.load() << " responses.\n";
