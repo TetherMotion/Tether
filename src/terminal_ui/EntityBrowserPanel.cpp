@@ -33,8 +33,15 @@ void EntityBrowserPanel::render(int top, int bottom) {
         first_render_ = false;
         last_refresh_ = now;
         b_.refresh();
-        if (b_.autoRead() && b_.registersStale())
+        // autoRead: read on first selection / entity change, and re-read
+        // every few seconds so live values (AL states, counters, motion
+        // feedback) stay fresh without a manual 'r'.
+        if (b_.autoRead() &&
+            (b_.registersUnread() ||
+             now - last_reg_read_ >= reg_reread_interval_)) {
             b_.refreshRegisters();
+            last_reg_read_ = now;
+        }
     }
 
     // Prompt line reserves the last body row.

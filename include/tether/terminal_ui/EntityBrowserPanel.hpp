@@ -84,6 +84,10 @@ private:
     std::string prompt_buf_;
     std::chrono::milliseconds refresh_ms_{1000};
     std::chrono::steady_clock::time_point last_refresh_{};
+    /// With autoRead on, registers re-read at this cadence so live
+    /// values refresh without a manual 'r'.
+    std::chrono::milliseconds reg_reread_interval_{5000};
+    std::chrono::steady_clock::time_point last_reg_read_{};
     bool first_render_ = true;
 };
 

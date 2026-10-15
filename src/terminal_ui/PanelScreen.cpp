@@ -9,12 +9,16 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <cstdlib>
 #include <string>
 
 #include <ncurses.h>
 
+#include "tether/terminal_ui/OverlayHost.hpp"
+
 namespace Tether {
 namespace TUI {
+
 
 PanelScreen::PanelScreen(std::string title, PanelScreenHooks hooks)
     : title_(std::move(title)), hooks_(std::move(hooks)) {
@@ -25,6 +29,10 @@ size_t PanelScreen::viewCount() const {
     // views.empty() → one implicit "Main" view driven by hooks_.renderBody.
     const size_t app_views = std::max<size_t>(hooks_.views.size(), 1);
     return app_views + (hooks_.showLogView ? 1 : 0);
+}
+
+void PanelScreen::pushOverlay(std::unique_ptr<UI::Overlay> overlay) {
+    overlays_.push(std::move(overlay));
 }
 
 void PanelScreen::selectView(size_t index) {
@@ -64,6 +72,51 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
         if (i < hooks_.views.size()) return hooks_.views[i].name.c_str();
         if (hooks_.views.empty() && i == 0) return "Main";
         return "Log";
+    };
+
+    // Active view's hint text — the same lookup the footer uses.
+    auto currentHints = [&]() -> std::string {
+        if (active_ < hooks_.views.size() &&
+            hooks_.views[active_].keyHintsFn) {
+            return hooks_.views[active_].keyHintsFn();
+        }
+        if (active_ < hooks_.views.size() &&
+            !hooks_.views[active_].keyHints.empty()) {
+            return hooks_.views[active_].keyHints;
+        }
+        return hooks_.keyHints;
+    };
+
+    OverlayHost overlay_host(overlays_);
+
+    // '?' — keys overlay for the active view.
+    auto pushKeysOverlay = [&]() {
+        std::vector<std::string> lines{
+            "Screen:",
+            "  q / Esc          quit",
+            "  1-9 / Tab        switch view",
+            "  PgUp / PgDn      scroll log",
+            "  End              latest log",
+            "  f                filter log lines",
+            "  ?                this help",
+        };
+        const std::string vh = currentHints();
+        lines.push_back("");
+        lines.push_back(std::string("View \"") + viewName(active_) + "\":");
+        if (vh.empty()) {
+            lines.push_back("  (no view-specific keys)");
+        } else {
+            lines.push_back("  " + vh);
+        }
+        if (hooks_.showLogView) {
+            lines.push_back("");
+            lines.push_back("Log view:");
+            lines.push_back("  arrows / PgUp / PgDn / Home / End   scroll");
+        }
+        auto ov = std::make_unique<UI::TextOverlay>(
+            std::string("Keys — ") + viewName(active_), std::move(lines));
+        ov->key_hints = "Esc:close";
+        overlays_.push(std::move(ov));
     };
 
     while (!cancel.load()) {
@@ -108,20 +161,12 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
                      "  | Enter: apply  Esc: cancel  empty: clear)",
                      filter_buf.c_str());
         } else {
-            const char* vh = "";
-            std::string dyn_hints;
-            if (active_ < hooks_.views.size() &&
-                hooks_.views[active_].keyHintsFn) {
-                dyn_hints = hooks_.views[active_].keyHintsFn();
-                vh = dyn_hints.c_str();
-            } else if (active_ < hooks_.views.size() &&
-                       !hooks_.views[active_].keyHints.empty())
-                vh = hooks_.views[active_].keyHints.c_str();
-            else if (!hooks_.keyHints.empty())
-                vh = hooks_.keyHints.c_str();
+            const std::string vh = overlays_.empty()
+                ? currentHints()
+                : overlay_host.keyHints();
             mvprintw(footerY, 0,
-                     " q: quit  Tab/1-9: views  PgUp/PgDn/End: log  f: filter%s%s",
-                     vh[0] ? "  " : "", vh);
+                     " q: quit  Tab/1-9: views  PgUp/PgDn/End: log  f: filter  ?: keys%s%s",
+                     vh.empty() ? "" : "  ", vh.c_str());
         }
         if (session_.colors()) attroff(COLOR_PAIR(PalHint));
 
@@ -138,7 +183,7 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
         const bool logViewActive =
             hooks_.showLogView && active_ == nViews - 1;
         if (logViewActive) {
-            log_.render(logFullWin);
+            log_.render(logFullWin, PalValue);
         } else {
             std::function<void(int,int)> rb;
             if (active_ < hooks_.views.size())
@@ -146,17 +191,21 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
             if (!rb) rb = hooks_.renderBody;
             if (rb) rb(1, sepY);
         }
+        overlay_host.render(1, sepY);
 
         // Push stdscr first, then the log subwindow, one physical update.
         wnoutrefresh(stdscr);
         if (logViewActive)
             wnoutrefresh(static_cast<WINDOW*>(logFullWin));
-        log_.render(logWin);
+        log_.render(logWin, PalValue);
         wnoutrefresh(static_cast<WINDOW*>(logWin));
         doupdate();
 
         // ---- Input ------------------------------------------------------
-        const int key = session_.pollKey(50);
+        // pollKeyDecoded resolves split CSI/SS3 escape sequences
+        // (arrows, Home/End, F-keys delivered byte-wise); a lone ESC
+        // still arrives as 27 → quit.
+        int key = session_.pollKeyDecoded(50);
         // Modal filter editor: 'f' opens it, every key goes to the
         // expression buffer until Enter (apply) or Esc (cancel).
         if (filter_editing) {
@@ -178,6 +227,15 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
             continue;
         }
         if (key == 'f') { filter_editing = true; filter_buf.clear(); continue; }
+
+        if (key < 0) continue;   // timeout / swallowed escape sequence
+
+        // Modal overlays consume every key (Esc pops the stack).
+        if (!overlays_.empty()) {
+            overlay_host.handleKey(key);
+            continue;
+        }
+        if (key == '?') { pushKeysOverlay(); continue; }
 
         // View switching: digits 1-9, F1-F12, Tab / Shift-Tab.
         if (key >= '1' && key <= '9') {
@@ -211,7 +269,7 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
             }
         }
 
-        if (key == 'q' || key == 'Q' || key == 27) {
+        if (key == 27 || key == 'q' || key == 'Q') {
             if (hooks_.quitGuard && hooks_.quitGuard()) {
                 if (hooks_.onKey) hooks_.onKey(key);
                 continue;

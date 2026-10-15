@@ -28,6 +28,7 @@
 
 #include "tether/terminal_ui/LogPane.hpp"
 #include "tether/terminal_ui/Session.hpp"
+#include "tether/ui/Overlay.hpp"
 
 namespace Tether {
 namespace TUI {
@@ -110,6 +111,15 @@ public:
     /// Total number of effective views (app views + optional log view).
     size_t viewCount() const;
 
+    /// Push a UI::Overlay on top of the screen (e.g. a TableOverlay
+    /// with details for the selected row).  While the stack is
+    /// non-empty the overlay is modal: it renders over the body and
+    /// consumes all keys (Esc pops).  '?' opens a built-in keys
+    /// overlay for the active view.
+    void pushOverlay(std::unique_ptr<UI::Overlay> overlay);
+    /// Whether a modal overlay is currently shown.
+    bool overlayOpen() const { return !overlays_.empty(); }
+
 private:
     Session         session_;
     LogPane         log_;
@@ -118,6 +128,9 @@ private:
     size_t          active_ = 0;
     /// Rows available to the log view in the last layout (for paging).
     int             bodyRows_ = 8;
+    /// Modal overlay stack — '?' pushes a keys overlay; apps may push
+    /// their own via pushOverlay().
+    UI::OverlayStack overlays_;
 };
 
 } // namespace TUI

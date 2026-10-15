@@ -199,7 +199,10 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
         doupdate();
 
         // ---- Input ------------------------------------------------------
-        const int key = session_.pollKey(50);
+        // pollKeyDecoded resolves split CSI/SS3 escape sequences so
+        // byte-wise delivered arrows/PgUp/PgDn/End still navigate; a
+        // lone ESC stays 27 → quit/cancel.
+        const int key = session_.pollKeyDecoded(50);
         if (key == KEY_RESIZE) { footerY = layout(); continue; }
         // An open line prompt is modal: every key goes to it — including
         // 'q'/'Q' (printable → appended) and Esc (cancels the prompt).
