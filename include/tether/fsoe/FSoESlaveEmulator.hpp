@@ -122,6 +122,12 @@ protected:
     /// Override to reset profile-specific internal state.
     virtual void onReset() {}
 
+    /// Called between decode and storing `last_command_` — profiles may
+    /// normalize wire-level encoding into the payload type's semantic
+    /// fields (e.g. flipping demanded-function bits when the channel's
+    /// command polarity is one-active).  Default: no normalization.
+    virtual void normalizeCommand(CommandT& /*cmd*/) {}
+
     /// Consume the latest decoded command from the FSoE frame.
     /// Updates last_command_ and calls onCommandConsumed().
     /// Protected so derived classes can call it independently of
@@ -133,7 +139,9 @@ protected:
         if (!decoded) {
             return;
         }
-        last_command_ = *decoded;
+        CommandT cmd = *decoded;
+        normalizeCommand(cmd);
+        last_command_ = cmd;
         onCommandConsumed(last_command_);
     }
 

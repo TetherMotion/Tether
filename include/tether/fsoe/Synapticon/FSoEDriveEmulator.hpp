@@ -53,10 +53,18 @@ struct FSoEDriveEmulatorConfig {
     /// command bit inverted so the status bit reads one-active.
     bool invert_sto = true;
     bool invert_sos = true;
+    /// Command polarity (SDD-derived): true → master→slave demanded-
+    /// function bits are one-active (bit=1 demands the function).
+    bool command_active_high = false;
     /// Emulated power stage ignores motion-gating FSoE demands — the
     /// wire/status path still reports demanded functions active (same
     /// end result as wire suppression applied to physical drives).
     bool suppress_demands = false;
+    /// Maximum CSP tracking velocity in counts/s.  Bounds the position
+    /// error divided by dt, so a target that kept advancing while a
+    /// demanded stop function held the axis produces a bounded
+    /// catch-up ramp on release instead of a one-cycle jump.
+    double tracking_velocity_limit = 200000.0;
 };
 
 class FSoEDriveEmulator {

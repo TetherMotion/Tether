@@ -1,5 +1,6 @@
 #include "tether/fsoe/Synapticon/FSoEDriveEmulator.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -43,6 +44,7 @@ bool FSoEDriveEmulator::initialize() {
     }
     ec.invert_sto = cfg_.invert_sto;
     ec.invert_sos = cfg_.invert_sos;
+    ec.command_active_high = cfg_.command_active_high;
     ec.suppress_motion_demands = cfg_.suppress_demands;
 
     emu_ = std::make_unique<SafeMotionServoEmulator>(ec);
@@ -145,11 +147,17 @@ void FSoEDriveEmulator::processMotion(
 
     // CSP tracking: while operation-enabled the drive follows the target
     // position.  step() integrates the safe position published in the
-    // FSoE frame, so the master observes the same motion as a real drive.
+    // FSoE frame, so the master observes the same motion as a real
+    // drive.  The tracking velocity is clamped: while a demanded stop
+    // function held the axis, the target kept advancing — releasing the
+    // stop must produce a bounded catch-up, not a one-cycle position
+    // jump.
     const bool enabled = (sw & 0x006F) == 0x0027;
-    const double vel =
+    double vel =
         enabled ? (cmd.target_position - emulated_position_) / dt_seconds
                 : 0.0;
+    vel = std::clamp(vel, -cfg_.tracking_velocity_limit,
+                     cfg_.tracking_velocity_limit);
     emulated_position_ += vel * dt_seconds;
     emu_->step(vel, dt_seconds);
 
