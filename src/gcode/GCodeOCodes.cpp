@@ -1208,6 +1208,9 @@ const char* oCodeTypeToKeyword(OCodeType type) {
         case OCodeType::ENDREPEAT:  return "endrepeat";
         case OCodeType::BREAK:      return "break";
         case OCodeType::CONTINUE:   return "continue";
+        case OCodeType::DEBUG:      return "debug";
+        case OCodeType::LOG:        return "log";
+        case OCodeType::PRINT:      return "print";
     }
     return "unknown";
 }
@@ -1232,6 +1235,9 @@ OCodeType keywordToOCodeType(const std::string& keyword) {
     if (u == "ENDREPEAT") return OCodeType::ENDREPEAT;
     if (u == "BREAK") return OCodeType::BREAK;
     if (u == "CONTINUE") return OCodeType::CONTINUE;
+    if (u == "DEBUG") return OCodeType::DEBUG;
+    if (u == "LOG") return OCodeType::LOG;
+    if (u == "PRINT") return OCodeType::PRINT;
     return OCodeType::SUB;
 }
 
