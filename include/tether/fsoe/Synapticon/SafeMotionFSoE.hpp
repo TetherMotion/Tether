@@ -97,6 +97,15 @@ struct ServoEmulatorConfig {
     bool temperature_ok = true;
     bool safe_input_1_high = false;
     bool safe_input_2_high = false;
+    /// When true, the emulated power stage ignores the master's
+    /// motion-gating demands (STO/SS1/SS2/SOS/SLS/SBC) for control — the
+    /// equivalent of the blackchannel's --override-safety wire rewrite on
+    /// a physical drive.  The published status still mirrors the raw
+    /// command, so the master sees the demanded functions active while
+    /// the emulated axis keeps moving (mirroring the real drive's
+    /// observable behaviour under suppression, including the resulting
+    /// StandstillViolation upstream).  Error/restart state still gates.
+    bool suppress_motion_demands = false;
     bool analog_input_diagnostic_active = true;
     bool analog_input_value_valid = true;
     int16_t analog_input_value = 0;
@@ -296,6 +305,16 @@ public:
     void resetToSafeState();
 
     bool motionAllowed() const { return published_status_.motionAllowed(); }
+
+    /// Motion gate for the emulated power stage.  With
+    /// suppress_motion_demands the master's gating demands are released
+    /// for control (they still report active in the published status);
+    /// error/restart conditions always gate.
+    bool controlMotionAllowed() const {
+        return config_.suppress_motion_demands
+                   ? (!error_active_ && !restart_required_)
+                   : published_status_.motionAllowed();
+    }
 
     /// Toggle one-active (bit=1) vs. zero-active (bit=0) interpretation
     /// of the master→slave STO bit.  Only affects the ProcessData state.

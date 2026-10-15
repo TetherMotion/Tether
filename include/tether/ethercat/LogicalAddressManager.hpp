@@ -249,11 +249,11 @@ public:
     /**
      * @brief Derive the expected per-slice WKC from the slave set (Q6).
      *
-     * LRW semantics: each slave increments the WKC by 1 when it writes
-     * output (RxPDO) bytes in the datagram's logical range and by 2 when
-     * it reads input (TxPDO) bytes.  For each slice this walks the
-     * mapping's logical placement and counts distinct contributing slaves
-     * per direction.  Slices that derive to 0 keep kWkcUnknown and fall
+     * LRW semantics: each slave increments the WKC by 2 when its output
+     * (RxPDO, master-write) FMMU range matches the datagram's logical
+     * range and by 1 when its input (TxPDO, master-read) range matches.
+     * For each slice this walks the mapping's logical placement and
+     * counts distinct contributing slaves per direction.  Slices that derive to 0 keep kWkcUnknown and fall
      * back to learn-on-first-response — the strict check then applies
      * from the second cycle on.
      *
@@ -664,6 +664,8 @@ private:
         uint32_t off{0};                    ///< image-space offset
         uint32_t len{0};                    ///< bytes (<= maxSliceLength)
         uint8_t  slot{0};                   ///< slice slot (idx 0xE0+slot)
+        bool     slot_owned{false};         ///< slot claimed from the
+                                            ///< transport's shared pool
         uint64_t token{0};                  ///< pending seq token
         uint8_t  gen{0};                    ///< send generation expected
         uint8_t  sent{0};                   ///< datagram emitted this cycle
@@ -693,10 +695,14 @@ private:
     std::unique_ptr<uint8_t[]> slice_payload_;
     uint32_t slice_payload_size_{0};
 
-    /// Re-plan every slice's runs against the current mapping — assigns
-    /// slice slots in define-order and derives per-run expected WKC.
-    /// Runs on epoch change or first send after define.
+    /// Re-plan every slice's runs against the current mapping — claims
+    /// slice slots from the transport's shared pool (the pool is shared
+    /// by every LAM bound to a datapath, so per-LAM counters would
+    /// collide on wire idx) and derives per-run expected WKC.  Runs on
+    /// epoch change or first send after define.
     bool replanSlices(const PDO::PDOMapping& mapping);
+    /// Release every slice slot this LAM claimed from the pool.
+    void releaseSliceSlots();
     /// Resolve a spec to contiguous runs (no slot assignment).
     size_t resolveSpecRuns(const PDO::PDOMapping& mapping,
                            const PDOSliceSpec& spec,

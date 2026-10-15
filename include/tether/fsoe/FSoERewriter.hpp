@@ -85,13 +85,20 @@ inline bool isFSoECommand(uint8_t cmd) {
 //   Reset      → (startCrc = 0, seq = 1); resets next_seq_ to 2
 //   non-Reset  → (startCrc = slave's last TX CRC0, seq = next_seq_++)
 //
-// The first non-Reset frame after a Reset is a protocol boundary: some
-// slaves expect it strictly chained from their Reset CRC0, others accept a
-// chain-reset (0, seq=1).  Since the slave's expectation cannot be known a
-// priori, the rewriter starts with the strict model and — while the slave
-// stays in Reset — alternates the two models every kStallCycles emitted
-// frames until the slave advances (detected via noteSlaveFrame seeing a
-// non-Reset command, which locks the model in place).
+// The first non-Reset frame after a Reset is a protocol boundary: ETG.5100
+// slave validation treats it as a state-transition chain-reset
+// (startCrc=0, seq=initial — the same model the Synapticon master uses for
+// its first Session).  Some slaves may instead expect it strictly chained
+// from their Reset CRC0.  The rewriter starts with the chain-reset model
+// and — while the slave stays in Reset — alternates the two models every
+// kStallCycles until the slave advances (detected via noteSlaveFrame
+// seeing a non-Reset command, which locks the model in place).
+//
+// Identical input frames are re-emitted byte-identically: the master holds
+// a state while waiting for the slave to advance, and the slave only
+// increments its expected sequence number for frames it ACCEPTS.  Burning
+// a sequence number per retransmission would desynchronize the chain
+// permanently once a single frame is rejected.
 class MasterFrameRewriter {
 public:
     /// Cycles to wait for slave progress before toggling the first-frame
@@ -102,9 +109,11 @@ public:
         slave_crc0_ = 0;
         next_seq_ = kInitialSeqNo;
         first_after_reset_ = true;
-        lenient_first_frame_ = false;
+        lenient_first_frame_ = true;
         model_locked_ = false;
         stall_cycles_ = 0;
+        last_in_len_ = 0;
+        last_out_len_ = 0;
     }
 
     /// Observe the slave's latest TX frame — captures its stored CRC0 and
@@ -120,6 +129,23 @@ public:
     /// recognizable FSoE frame (caller should emit nothing / zeros).
     size_t rewrite(const uint8_t* in, size_t in_len,
                    uint8_t* out, size_t out_cap) {
+        // Identical retransmission → identical output (see class comment).
+        // The stall timer still runs so the alternate chaining model gets
+        // a turn when the slave never advances on this frame.
+        if (last_in_len_ != 0 && in_len == last_in_len_ &&
+            std::memcmp(in, last_in_.data(), in_len) == 0) {
+            if (model_locked_ || ++stall_cycles_ < kStallCycles) {
+                if (last_out_len_ == 0 || last_out_len_ > out_cap) return 0;
+                std::memcpy(out, last_out_.data(), last_out_len_);
+                return last_out_len_;
+            }
+            // Stall: flip the chaining model and rebuild the same input.
+            lenient_first_frame_ = !lenient_first_frame_;
+            first_after_reset_ = true;
+            next_seq_ = kInitialSeqNo;
+            stall_cycles_ = 0;
+        }
+
         uint8_t cmd = 0;
         size_t data_len = 0;
         uint16_t conn_id = 0;
@@ -130,35 +156,43 @@ public:
         }
         if (CRC::fsoeFrameSize(data_len) > out_cap) return 0;
 
+        size_t n = 0;
         if (cmd == Command::Reset) {
             // Reset resets the CRC chain on both sides; the slave expects
             // (startCrc=0, seq=initial) and will expect seq=2 next.
             first_after_reset_ = true;
             stall_cycles_ = 0;
             next_seq_ = CRC::incrementSeqNo(kInitialSeqNo);
-            return CRC::buildFSoEFrame(out, cmd, data, data_len, conn_id,
-                                       /*start_crc=*/0, kInitialSeqNo);
+            n = CRC::buildFSoEFrame(out, cmd, data, data_len, conn_id,
+                                    /*start_crc=*/0, kInitialSeqNo);
+        } else {
+            const bool chain_reset = first_after_reset_ && lenient_first_frame_;
+            const uint16_t start_crc = chain_reset ? 0 : slave_crc0_;
+            const uint16_t seq = chain_reset ? kInitialSeqNo : next_seq_;
+
+            uint16_t seq_used = 0;
+            n = CRC::buildFSoEFrameWithCollisionAvoidance(
+                out, cmd, data, data_len, conn_id, start_crc, seq,
+                nullptr, &seq_used);
+            if (n == 0) return 0;
+            first_after_reset_ = false;
+            next_seq_ = CRC::incrementSeqNo(seq_used);
+
+            // If the slave stays in Reset the chaining model may be wrong —
+            // alternate strict/lenient for the next first-frame until it moves.
+            if (!model_locked_ && ++stall_cycles_ >= kStallCycles) {
+                lenient_first_frame_ = !lenient_first_frame_;
+                first_after_reset_ = true;
+                next_seq_ = kInitialSeqNo;
+                stall_cycles_ = 0;
+            }
         }
 
-        const bool chain_reset = first_after_reset_ && lenient_first_frame_;
-        const uint16_t start_crc = chain_reset ? 0 : slave_crc0_;
-        const uint16_t seq = chain_reset ? kInitialSeqNo : next_seq_;
-
-        uint16_t seq_used = 0;
-        const size_t n = CRC::buildFSoEFrameWithCollisionAvoidance(
-            out, cmd, data, data_len, conn_id, start_crc, seq,
-            nullptr, &seq_used);
-        if (n == 0) return 0;
-        first_after_reset_ = false;
-        next_seq_ = CRC::incrementSeqNo(seq_used);
-
-        // If the slave stays in Reset the chaining model may be wrong —
-        // alternate strict/lenient for the next first-frame until it moves.
-        if (!model_locked_ && ++stall_cycles_ >= kStallCycles) {
-            lenient_first_frame_ = !lenient_first_frame_;
-            first_after_reset_ = true;
-            next_seq_ = kInitialSeqNo;
-            stall_cycles_ = 0;
+        if (n != 0 && in_len <= last_in_.size() && n <= last_out_.size()) {
+            std::memcpy(last_in_.data(), in, in_len);
+            last_in_len_ = in_len;
+            std::memcpy(last_out_.data(), out, n);
+            last_out_len_ = n;
         }
         return n;
     }
@@ -167,9 +201,13 @@ private:
     uint16_t slave_crc0_ = 0;
     uint16_t next_seq_ = kInitialSeqNo;
     bool first_after_reset_ = true;
-    bool lenient_first_frame_ = false;
+    bool lenient_first_frame_ = true;
     bool model_locked_ = false;
     uint32_t stall_cycles_ = 0;
+    std::array<uint8_t, 64> last_in_{};
+    std::array<uint8_t, 64> last_out_{};
+    size_t last_in_len_ = 0;
+    size_t last_out_len_ = 0;
 };
 
 // ---------------------------------------------------------------------------

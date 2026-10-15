@@ -172,10 +172,25 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
         uint8_t sdo_cmd = 0;
         uint16_t r_len = 0;
 
-        for (int attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+        // Slaves like the ESC211 drain SM0 into an internal FIFO and answer
+        // each request ~25-30 ms late; responses queued ahead of ours must be
+        // drained, never re-sent.  Keep polling while the mailbox yields data
+        // and give up after transactionTimeoutMs of silence (hard-capped so a
+        // pathological slave cannot stall the caller forever).
+        const auto quiet_timeout = std::chrono::milliseconds(transactionTimeoutMs);
+        auto quiet_deadline = std::chrono::steady_clock::now() + quiet_timeout;
+        const auto hard_deadline = quiet_deadline + std::chrono::milliseconds(60000);
+        for (int attempt = 0; attempt < MAX_POLL_ATTEMPTS * 100; attempt++) {
+            const auto poll_now = std::chrono::steady_clock::now();
+            if (poll_now > quiet_deadline || poll_now > hard_deadline) {
+                break;
+            }
             MbxResponseHeader hdr;
             auto outcome = pollSm1AndRead(master, adp, mbxReadAddr, mbxReadLen,
                                           rspbuf, pollIntervalMs, hdr);
+            if (outcome == MbxPollOutcome::GotData) {
+                quiet_deadline = std::chrono::steady_clock::now() + quiet_timeout;
+            }
 
             if (outcome == MbxPollOutcome::Cancelled) {
                 TETHER_LOGW(TAG, "SDO upload cancelled");
@@ -230,7 +245,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                              r_len, hdr.type, hdr.cnt, hdr.priority, hdr.rawMbxType);
                     TETHER_LOGI(TAG, "{}", tmp);
                 }
-                break;
+                continue;  // foreign mailbox traffic — drain, keep polling
             }
             if (sizeof(MbxHeader) + r_len > mbxReadLen) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
@@ -253,11 +268,20 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 if (r_len >= sizeof(CoeHeader) + sizeof(SdoAbort)) {
                     const auto *ab = reinterpret_cast<const SdoAbort *>(r_sdo_bytes);
                     const uint32_t abort_code = le32_to_host(ab->abortCode_le);
+                    const uint16_t ab_index = le16_to_host(ab->index_le);
+                    if (ab_index != index || ab->sub != sub) {
+                        // Stale abort answering an earlier queued request —
+                        // drain it and keep waiting for ours.
+                        ++stale_retry_count;
+                        TETHER_LOGD(TAG, "Stale SDO abort (upload): idx=0x{:04x}:{} expected=0x{:04x}:{} — draining",
+                                 ab_index, ab->sub, index, sub);
+                        continue;
+                    }
                     // The abort code travels to the caller via outAbortCode →
                     // CoEError — keep this at debug level so the caller can
                     // print a single decoded line.
                     TETHER_LOGD(TAG, "SDO abort 0x{:04x}:{} code=0x{:08x} ({})",
-                             le16_to_host(ab->index_le), ab->sub,
+                             ab_index, ab->sub,
                              abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                     if (outAbortCode) *outAbortCode = abort_code;
                 }
@@ -303,7 +327,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                     }
 #endif
                 }
-                break;
+                continue;  // foreign CoE service (Emergency/mailbox-PDO/req) — drain, keep polling
             }
             if (hdr.cnt != expected_mbx_cnt) {
                 if (!adoptCounterOnEcho(master, adp, mbxbuf, rspbuf, mbxReadLen, hdr,
@@ -330,29 +354,15 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 const uint16_t r_index = le16_to_host(res->index_le);
                 const uint8_t r_sub = res->sub;
                 if (r_index != index || r_sub != sub) {
-                    TETHER_LOGW(TAG, "Stale SDO response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — clearing and re-sending",
-                                r_index, r_sub, index, sub, adp);
-                    // Do NOT adopt the stale response counter — it is a
-                    // leftover from a previous session.  But the re-send
-                    // MUST use a fresh counter: duplicate-detecting slaves
-                    // (SOMANET) silently drop a repeated request counter.
-                    if (++stale_retry_count <= MAX_STALE_RETRIES) {
-                        const uint8_t prev_req =
-                            static_cast<uint8_t>((mbxbuf[5] >> 4) & 0x07u);
-                        const uint8_t new_req = SDOMailboxIO::nextMbxCnt(prev_req);
-                        mbxbuf[5] = mbx_type_with_cnt(mbxbuf[5] & 0x0Fu, new_req);
-                        expected_mbx_cnt = new_req;
-                        if (inoutMbxCnt != nullptr) {
-                            *inoutMbxCnt = SDOMailboxIO::nextMbxCnt(new_req);
-                        }
-                        if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
-                                         mbxReadAddr, mbxReadLen, mbxbuf, 500,
-                                         pollIntervalMs, transactionTimeoutMs, "upload")) {
-                            return false;
-                        }
-                    } else {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    ++stale_retry_count;
+                    if (stale_retry_count <= 4 || (stale_retry_count % 32) == 0) {
+                        TETHER_LOGW(TAG, "Stale SDO response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — draining (#{}), NOT re-sending",
+                                    r_index, r_sub, index, sub, adp, stale_retry_count);
                     }
+                    // Stale answer to an earlier queued request — drain it and
+                    // keep waiting for ours.  Never re-send here: the slave's
+                    // FIFO queue would only grow (ESC211 faults with AL 0x0016).
+                    std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
                     continue;
                 }
             }
@@ -540,15 +550,29 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
             }
 
             bool got = false;
-            for (int attempt2 = 0; attempt2 < 50; attempt2++) {
+            const auto seg_quiet = std::chrono::milliseconds(transactionTimeoutMs);
+            auto seg_deadline = std::chrono::steady_clock::now() + seg_quiet;
+            const auto seg_hard_deadline = seg_deadline + std::chrono::milliseconds(60000);
+            for (int attempt2 = 0; attempt2 < 5000; attempt2++) {
+                const auto seg_now = std::chrono::steady_clock::now();
+                if (seg_now > seg_deadline || seg_now > seg_hard_deadline) {
+                    break;
+                }
                 if (master.isCancelRequested()) {
                     TETHER_LOGW(TAG, "SDO upload segment cancelled");
                     return false;
+                }
+                uint8_t seg_sm1 = 0;
+                if (!master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), seg_sm1, 100) ||
+                    (seg_sm1 & EC_SM_STATUS_MBXFULL) == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                    continue;
                 }
                 if (!master.readRegister(Master::slaveAddressFromADP(adp), mbxReadAddr, rspbuf, static_cast<uint16_t>(mbxReadLen), 200)) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     continue;
                 }
+                seg_deadline = std::chrono::steady_clock::now() + seg_quiet;
                 MbxHeader r2_mbx;
                 std::memcpy(&r2_mbx, rspbuf, sizeof(r2_mbx));
                 uint16_t r2_len = le16_to_host(r2_mbx.length_le);
@@ -602,6 +626,13 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                         SdoAbort abort{};
                         std::memcpy(&abort, seg_res, sizeof(abort));
                         const uint32_t abort_code = le32_to_host(abort.abortCode_le);
+                        const uint16_t ab_index = le16_to_host(abort.index_le);
+                        if (ab_index != index || abort.sub != sub) {
+                            // Stale abort for an earlier queued request —
+                            // drain and keep waiting for ours.
+                            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                            continue;
+                        }
                         TETHER_LOGD(TAG, "SDO upload segment abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                                  index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                         if (outAbortCode) *outAbortCode = abort_code;

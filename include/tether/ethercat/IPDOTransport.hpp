@@ -194,6 +194,19 @@ public:
     virtual uint8_t sliceSlotGen(uint8_t slice) {
         (void)slice; return 0;
     }
+    /**
+     * @brief Claim a slot from the shared slice-slot pool.
+     *
+     * Every LogicalAddressManager that exchanges over this transport
+     * (one per PDO group on a master) draws slice slots from the same
+     * wire-idx pool — claims must be coordinated at the transport or
+     * two managers collide on the same slot.  Returns a slot index in
+     * [0, kNumSliceSlots), or -1 when the pool is exhausted / the
+     * transport has no slice fast path.
+     */
+    virtual int acquireSliceSlot() { return -1; }
+    /// Release a slot claimed via acquireSliceSlot().
+    virtual void releaseSliceSlot(uint8_t slice) { (void)slice; }
     /// Send a datagram on a dedicated slice index (wire idx = base + slot).
     virtual bool sendSliceDatagram(Command cmd, uint8_t slice_slot,
                                    uint16_t adp, uint16_t ado,

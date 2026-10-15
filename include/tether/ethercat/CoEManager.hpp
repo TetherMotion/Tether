@@ -224,6 +224,15 @@ public:
     void setBehaviourOptions(const BehaviourOptions& opts) { behaviour_options_ = opts; }
     const BehaviourOptions& behaviourOptions() const { return behaviour_options_; }
 
+    /// Raise a caller-supplied transaction timeout to the behaviour floor
+    /// (min_transaction_timeout_ms).  Applied both where transactions are
+    /// enqueued (so the worker's transport sees it) and where synchronous
+    /// callers wait on the result future.
+    uint32_t effectiveTimeoutMs(uint32_t timeout_ms) const {
+        const uint32_t floor = behaviour_options_.min_transaction_timeout_ms;
+        return (floor != 0 && timeout_ms < floor) ? floor : timeout_ms;
+    }
+
     /// @brief Return the CoE SDO abort code reported by the slave on the most
     /// recent sdoUploadWithRetry/sdoDownloadWithRetry call. 0 means no abort
     /// (success or a non-abort failure such as a transport/timeout error).
@@ -374,6 +383,7 @@ std::future<CoEResult<T>> CoEManager::read(uint16_t index, uint8_t subindex,
         TETHER_LOGI("coe_mgr", "{}: CoE read START index=0x{:04X}:{}", log_prefix_.c_str(), index, subindex);
     }
 
+    options.timeout_ms = effectiveTimeoutMs(options.timeout_ms);
     CoEReadTransaction<T> txn;
     txn.index = index;
     txn.subindex = subindex;
@@ -427,7 +437,8 @@ template<typename T>
 CoEResult<T> CoEManager::readSync(uint16_t index, uint8_t subindex,
                                    CoETransactionOptions options) {
     auto future = read<T>(index, subindex, options);
-    const uint32_t timeout_ms = (options.timeout_ms > 0) ? options.timeout_ms : kDefaultTimeoutMs;
+    uint32_t timeout_ms = (options.timeout_ms > 0) ? options.timeout_ms : kDefaultTimeoutMs;
+    timeout_ms = effectiveTimeoutMs(timeout_ms);
     if (future.wait_for(std::chrono::milliseconds(timeout_ms)) != std::future_status::ready) {
         return std::unexpected(CoEErrorCode::Timeout);
     }

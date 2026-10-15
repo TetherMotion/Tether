@@ -159,10 +159,25 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
 
     int stale_retry_count = 0;
 
-    for (int attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+    // Slaves like the ESC211 drain SM0 into an internal FIFO and answer each
+    // request ~25-30 ms late; responses queued ahead of ours must be drained,
+    // never re-sent.  Keep polling while the mailbox yields data and give up
+    // after transactionTimeoutMs of silence (hard cap guards a pathological
+    // slave).
+    const auto quiet_timeout = std::chrono::milliseconds(transactionTimeoutMs);
+    auto quiet_deadline = std::chrono::steady_clock::now() + quiet_timeout;
+    const auto hard_deadline = quiet_deadline + std::chrono::milliseconds(60000);
+    for (int attempt = 0; attempt < MAX_POLL_ATTEMPTS * 100; attempt++) {
+        const auto poll_now = std::chrono::steady_clock::now();
+        if (poll_now > quiet_deadline || poll_now > hard_deadline) {
+            break;
+        }
         MbxResponseHeader hdr;
         auto outcome = pollSm1AndRead(master, adp, mbxReadAddr, mbxReadLen,
                                       rspbuf, pollIntervalMs, hdr);
+        if (outcome == MbxPollOutcome::GotData) {
+            quiet_deadline = std::chrono::steady_clock::now() + quiet_timeout;
+        }
 
         if (outcome == MbxPollOutcome::Cancelled) {
             TETHER_LOGW(TAG, "SDO download cancelled");
@@ -197,9 +212,9 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
             }
         }
         if (hdr.type != EC_MBXT_COE) {
-            TETHER_LOGW(TAG, "Non-CoE mailbox response (download): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
+            TETHER_LOGW(TAG, "Non-CoE mailbox response (download): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                         hdr.type, hdr.cnt, adp, index, sub);
-            break;
+            continue;  // foreign mailbox traffic — drain, keep polling
         }
         if (hdr.cnt != expected_mbx_cnt) {
             if (!adoptCounterOnEcho(master, adp, mbxbuf, rspbuf, mbxReadLen, hdr,
@@ -234,6 +249,15 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                 SdoAbort abort{};
                 std::memcpy(&abort, rspbuf + sdo_offset, sizeof(abort));
                 const uint32_t abort_code = le32_to_host(abort.abortCode_le);
+                const uint16_t ab_index = le16_to_host(abort.index_le);
+                if (ab_index != index || abort.sub != sub) {
+                    // Stale abort answering an earlier queued request —
+                    // drain it and keep waiting for ours.
+                    ++stale_retry_count;
+                    TETHER_LOGD(TAG, "Stale SDO abort (download): idx=0x{:04x}:{} expected=0x{:04x}:{} — draining",
+                             ab_index, abort.sub, index, sub);
+                    continue;
+                }
                 TETHER_LOGD(TAG, "SDO download abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                          index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                 if (outAbortCode) *outAbortCode = abort_code;
@@ -262,9 +286,9 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
         std::memcpy(&resp_coe, rspbuf + sizeof(MbxHeader), sizeof(resp_coe));
         const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
         if (resp_service != EC_COES_SDORES) {
-            TETHER_LOGW(TAG, "Unexpected CoE service (download): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
+            TETHER_LOGW(TAG, "Unexpected CoE service (download): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                         resp_service, adp, index, sub);
-            break;
+            continue;  // foreign CoE service — drain, keep polling
         }
 
         if ((sdo_cmd & 0xE0u) == 0x60u) {
@@ -277,26 +301,24 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                             master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
                     return true;
                 }
-                TETHER_LOGW(TAG, "Stale SDO download response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — clearing and re-sending",
-                            res_index, res.sub, index, sub, adp);
-                // Stale response from a previous operation — just drain and
-                // retry with the same counter.  Do NOT sync the counter.
-                if (++stale_retry_count <= MAX_STALE_RETRIES) {
-                    if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
-                                     mbxReadAddr, mbxReadLen, mbxbuf, 500,
-                                     pollIntervalMs, transactionTimeoutMs, "download")) {
-                        return false;
-                    }
-                } else {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
+                ++stale_retry_count;
+                if (stale_retry_count <= 4 || (stale_retry_count % 32) == 0) {
+                    TETHER_LOGW(TAG, "Stale SDO download response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — draining (#{}), NOT re-sending",
+                                res_index, res.sub, index, sub, adp, stale_retry_count);
                 }
+                // Stale answer to an earlier queued request — drain and keep
+                // waiting for ours; re-sending only grows the slave's queue.
+                std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
                 continue;
             }
         }
 
-        TETHER_LOGW(TAG, "Unexpected SDO command (download): cmd=0x{:02X} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
+        // Foreign SDO response (e.g. an upload response 0x4x arriving late) —
+        // drain and keep waiting for our download response.
+        TETHER_LOGW(TAG, "Unexpected SDO command (download): cmd=0x{:02X} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                     sdo_cmd, adp, index, sub);
-        break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
+        continue;
     }
 
     TETHER_LOGE(TAG, "{}: SDO download timeout: index=0x{:04x}:{:02x} (wr=0x{:04X} rd=0x{:04X})",

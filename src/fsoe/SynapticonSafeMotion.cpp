@@ -545,7 +545,7 @@ void SafeMotionServoEmulator::step(double requested_velocity_counts_per_second, 
 
     consumeLatestCommand();
 
-    const bool can_move = published_status_.motionAllowed();
+    const bool can_move = controlMotionAllowed();
     velocity_counts_per_second_ = can_move ? requested_velocity_counts_per_second : 0.0;
     position_counts_ += velocity_counts_per_second_ * dt_seconds;
 

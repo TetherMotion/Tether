@@ -796,6 +796,49 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry MotorRevolutions2 
     .effective_time = ::EtherCAT::ObjectDictionary::EffectiveTime::Immediately,
 };
 
+// 0x6091 Gear ratio — record, U32 per subindex.
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry GearRatioMotorRevolutions = {
+    .index = 0x6091,
+    .subindex = 0x01,
+    .name = "Gear ratio motor revolutions",
+    .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 1,
+    .modification_mode = ::EtherCAT::ObjectDictionary::ModificationMode::DuringOperation,
+    .effective_time = ::EtherCAT::ObjectDictionary::EffectiveTime::Immediately,
+};
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry GearRatioShaftRevolutions = {
+    .index = 0x6091,
+    .subindex = 0x02,
+    .name = "Gear ratio shaft revolutions",
+    .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 1,
+    .modification_mode = ::EtherCAT::ObjectDictionary::ModificationMode::DuringOperation,
+    .effective_time = ::EtherCAT::ObjectDictionary::EffectiveTime::Immediately,
+};
+
+// 0x6092 Feed constant — record, U32 per subindex (0xFFFFFFFF = "per
+// revolution", i.e. counts are already in shaft increments).
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FeedConstantFeed = {
+    .index = 0x6092,
+    .subindex = 0x01,
+    .name = "Feed constant feed",
+    .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 1,
+    .modification_mode = ::EtherCAT::ObjectDictionary::ModificationMode::DuringOperation,
+    .effective_time = ::EtherCAT::ObjectDictionary::EffectiveTime::Immediately,
+};
+
+constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry FeedConstantShaftRevolutions = {
+    .index = 0x6092,
+    .subindex = 0x02,
+    .name = "Feed constant shaft revolutions",
+    .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned32,
+    .default_value = 1,
+    .modification_mode = ::EtherCAT::ObjectDictionary::ModificationMode::DuringOperation,
+    .effective_time = ::EtherCAT::ObjectDictionary::EffectiveTime::Immediately,
+};
+
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry HomingMethod = {
     .index = 0x6098,
     .subindex = 0x00,
@@ -810,7 +853,7 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry HomingMethod = {
 
 // more profile-specific definitions could be appended similarly...
 
-constexpr std::array<const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry*, 54> kRegisterList = {
+constexpr std::array<const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry*, 58> kRegisterList = {
     &DIFunction4,                    // 0x2004 sub0
     &DIFunction5,                    // 0x2004 sub11
     &MechanicalLimitPosition,        // 0x2006.08
@@ -839,6 +882,10 @@ constexpr std::array<const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry*,
     &MotorRevolutions,               // 0x608F.02
     &EncoderIncrements2,             // 0x608F.03
     &MotorRevolutions2,              // 0x608F.04
+    &GearRatioMotorRevolutions,      // 0x6091.01
+    &GearRatioShaftRevolutions,      // 0x6091.02
+    &FeedConstantFeed,               // 0x6092.01
+    &FeedConstantShaftRevolutions,   // 0x6092.02
     &HomingMethod,                   // 0x6098
     &SpeedDeviation,                 // 0x60B1
     &TorqueOffset,                   // 0x60B2

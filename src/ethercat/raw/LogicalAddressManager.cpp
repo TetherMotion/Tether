@@ -48,7 +48,12 @@ LogicalAddressManager::LogicalAddressManager(IPDOTransport& transport)
     expected_wkc_.fill(kWkcUnknown);
 }
 
-LogicalAddressManager::~LogicalAddressManager() = default;
+LogicalAddressManager::~LogicalAddressManager()
+{
+    // Return claimed slice slots to the transport's shared pool —
+    // the transport outlives this LAM (member declaration order).
+    releaseSliceSlots();
+}
 
 bool LogicalAddressManager::init() {
     if (initialized_) return true;

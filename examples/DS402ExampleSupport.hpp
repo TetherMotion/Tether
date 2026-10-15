@@ -103,6 +103,22 @@ inline bool startHostMasterSession(const std::string& interface_name,
         return false;
     }
 
+    // Direct-receive fast path: lets the cyclic executive drain the socket
+    // itself inside its bounded response wait (ppoll on socket + eventfd).
+    // Without it the wait relies on the non-RT poll thread's 1 ms poll()
+    // cadence — every cyclic collect times out.  Only wired on the
+    // non-VLAN interface — VLAN-routed masters must not bypass the
+    // VLANRouter.
+    if (master_iface == session.network_interface.get()) {
+        master_iface->native_handle = session.ethernet->nativeHandle();
+        master_iface->receive = [eth = session.ethernet.get()](
+            uint8_t* buf, size_t cap, size_t* out) -> bool {
+            int r = eth->recvFrame(buf, cap, nullptr);
+            if (r > 0) { *out = static_cast<size_t>(r); return true; }
+            return false;
+        };
+    }
+
     session.poll_running.store(true);
     session.poll_thread = std::thread([&session, tag]() {
         if (!Tether::Platform::setCurrentThreadRealtime(-1)) {

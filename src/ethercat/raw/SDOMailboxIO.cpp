@@ -70,6 +70,10 @@ bool SDOMailboxIO::waitSm0NotFull(Master& master, uint16_t adp,
         if (master.isCancelRequested()) {
             return false;
         }
+        // Nudge the slave's mailbox task with an AL_STATUS read — the
+        // ESC211 only drains SM0 when the ESC sees an AL-register access.
+        uint16_t al_status = 0;
+        master.readRegister(Master::slaveAddressFromADP(adp), 0x0130, al_status, 100);
         uint8_t sm0_status = 0;
         if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(0), sm0_status, 100)) {
             if ((sm0_status & EC_SM_STATUS_MBXFULL) == 0) {
@@ -154,6 +158,14 @@ bool SDOMailboxIO::pollSm1Full(Master& master, uint16_t adp,
         if (master.isCancelRequested()) {
             return false;
         }
+        // The ESC211's PDI services its CoE mailbox lazily: it only drains
+        // SM0/fills SM1 when the ESC sees an AL-register access.  Poll
+        // AL_STATUS (0x0130) alongside the SM1 status register so each
+        // iteration also nudges the slave's mailbox task; without it the
+        // response can stall for seconds even though the request was
+        // accepted.
+        uint16_t al_status = 0;
+        master.readRegister(Master::slaveAddressFromADP(adp), 0x0130, al_status, 100);
         uint8_t sm1_status = 0;
         if (master.readRegister(Master::slaveAddressFromADP(adp), sm_status_address(1), sm1_status, 100)) {
             if ((sm1_status & EC_SM_STATUS_MBXFULL) != 0) {

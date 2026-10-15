@@ -117,11 +117,43 @@ bool MailboxRecovery::drain(uint16_t slave_index, unsigned int max_drain)
     return false;
 }
 
+// Cycle a mailbox SyncManager's activate register only when the slave is in
+// clean INIT.  On the ESC211, disabling SM0/SM1 while the slave is in PRE-OP
+// (or higher) invalidates the running mailbox configuration and the device
+// faults to INIT+ERR with AL status code 0x0016 — precisely the failure the
+// reset was meant to recover from.  When the AL state cannot be read, skip
+// the cycle too: register writes would face the same broken link, and
+// failing cleanly lets the supervisor perform a proper INIT + re-init.
+static bool slaveAllowsSMCycle(Master& master_, uint16_t slave_index,
+                             const char* local_tag, const char* sm_name)
+{
+    uint16_t al_status = 0;
+    if (!master_.readRegister(SlaveAddress(slave_index), RegisterAddress(0x0130),
+                             al_status, 100)) {
+        TETHER_LOGW(local_tag, "{}: cannot read AL_STATUS — skipping {} activate cycle",
+                    master_.slaveLogPrefix(slave_index).c_str(), sm_name);
+        return false;
+    }
+    const uint8_t al_state = static_cast<uint8_t>(al_status & 0x0Fu);
+    if (al_state != 0x01u /* INIT */ || (al_status & 0x10u) != 0) {
+        TETHER_LOGW(local_tag, "{}: slave is in AL state 0x{:04X}, not INIT — skipping {} "
+                    "activate cycle (cycling a mailbox SM in PRE-OP+ faults "
+                    "the slave with 0x0016)",
+                    master_.slaveLogPrefix(slave_index).c_str(), al_status, sm_name);
+        return false;
+    }
+    return true;
+}
+
 bool MailboxRecovery::resetSM1(uint16_t slave_index)
 {
     const char* local_tag = "mbox_reset";
     const uint16_t sm1_activate_addr = static_cast<uint16_t>(Raw::EC_REG_SM1 + 0x06u);
     const uint16_t sm1_status_addr = Raw::sm_status_address(1);
+
+    if (!slaveAllowsSMCycle(master_, slave_index, local_tag, "SM1")) {
+        return false;
+    }
 
     TETHER_LOGW(local_tag, "{}: cycling SM1 activate register (0x{:04X}) to clear stuck WRITE_BUF_FULL",
                 master_.slaveLogPrefix(slave_index).c_str(), sm1_activate_addr);
@@ -177,6 +209,10 @@ bool MailboxRecovery::resetSM0(uint16_t slave_index)
     const char* local_tag = "mbox_reset";
     const uint16_t sm0_activate_addr = static_cast<uint16_t>(Raw::EC_REG_SM0 + 0x06u);
     const uint16_t sm0_status_addr = Raw::sm_status_address(0);
+
+    if (!slaveAllowsSMCycle(master_, slave_index, local_tag, "SM0")) {
+        return false;
+    }
 
     TETHER_LOGW(local_tag, "{}: cycling SM0 activate register (0x{:04X}) to clear stuck mailbox-full",
                 master_.slaveLogPrefix(slave_index).c_str(), sm0_activate_addr);
