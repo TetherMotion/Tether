@@ -15,7 +15,7 @@
 	url = https://github.com/stephenberry/glaze.git
 [submodule "dependencies/eigen"]
 	path = dependencies/eigen
-	url = https://gitlab.com/libeigen/eigen.git
+	url = https://github.com/eigen-mirror/eigen.git
 [submodule "dependencies/fmt"]
 	path = dependencies/fmt
 	url = https://github.com/fmtlib/fmt.git
