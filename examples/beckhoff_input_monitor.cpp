@@ -51,9 +51,13 @@
 
 // ncurses last: it #defines OK/ERR/timeout/... which collide with
 // identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
 #ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
 #include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #endif
 
 static const char* TAG = "beckhoff_input_monitor";
@@ -110,56 +114,51 @@ static void runTui(Beckhoff::MultiEL1014<>& ins,
     };
     hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
         WINDOW* win = static_cast<WINDOW*>(w);
-        int h = 0, cols = 0;
-        getmaxyx(win, h, cols);
-        int row = 1;
+        TUI::RowWriter rw(win, 1, 1);
 
         // Managed input terminal → live channels + transition counts.
         for (size_t m = 0; m < ins.moduleCount(); ++m) {
             if (ins.slaveIndex(m) != static_cast<uint16_t>(node.tag)) continue;
             const auto& mod = ins.module(m);
-            mvwprintw(win, row++, 1, "%s  —  slave %d", mod.deviceName(),
-                      node.tag);
-            ++row;
-            mvwprintw(win, row++, 1, "channel :");
+            rw.text("%s  —  slave %d", mod.deviceName(), node.tag);
+            rw.blank();
+            rw.put(1, 0, "channel :");
             for (size_t k = 0; k < mod.bitCount(); ++k) {
-                mvwprintw(win, row - 1, 12 + k * 4, "%zu", k + 1);
+                rw.put(12 + k * 4, 0, "%zu", k + 1);
             }
-            mvwprintw(win, row++, 1, "input   :");
+            rw.advance();
+            rw.put(1, 0, "input   :");
             for (size_t k = 0; k < mod.bitCount(); ++k) {
-                const bool on = mod.bit(k);
-                wattron(win, on ? (COLOR_PAIR(TUI::PalValue) | A_BOLD) : A_DIM);
-                mvwprintw(win, row - 1, 12 + k * 4, "%s", on ? "*" : ".");
-                wattroff(win, on ? (COLOR_PAIR(TUI::PalValue) | A_BOLD) : A_DIM);
+                rw.putLamp(12 + k * 4,
+                           mod.bit(k) ? TUI::LampState::On
+                                      : TUI::LampState::Off,
+                           TUI::kLampBits);
             }
-            mvwprintw(win, row++, 1, "transit.:");
+            rw.advance();
+            rw.put(1, 0, "transit.:");
             for (size_t k = 0; k < mod.bitCount(); ++k) {
-                mvwprintw(win, row - 1, 12 + k * 4, "%u",
-                          transitions[ins.bitOffset(m) + k]);
+                rw.put(12 + k * 4, 0, "%u",
+                       transitions[ins.bitOffset(m) + k]);
             }
+            rw.advance();
             return;
         }
 
         // Coupler or unmanaged node → identity info.
         const auto* s = slaveByIndex(slaves, node.tag);
         if (s) {
-            mvwprintw(win, row++, 1, "%s",
-                      s->device_name ? s->device_name->c_str() : "?");
-            mvwprintw(win, row++, 1, "slave   : %u", s->index);
-            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
-                      s->vendor_id ? *s->vendor_id : 0);
-            mvwprintw(win, row++, 1, "product : 0x%08X",
-                      s->product_code ? *s->product_code : 0);
+            rw.text("%s", s->device_name ? s->device_name->c_str() : "?");
+            rw.text("slave   : %u", s->index);
+            rw.text("vendor  : 0x%08X", s->vendor_id ? *s->vendor_id : 0);
+            rw.text("product : 0x%08X",
+                    s->product_code ? *s->product_code : 0);
         }
         if (!node.children.empty()) {
-            ++row;
-            mvwprintw(win, row++, 1, "%zu terminal(s) below",
-                      node.children.size());
-        } else if (row < h) {
-            ++row;
-            wattron(win, A_DIM);
-            mvwprintw(win, row++, 1, "(not an EL1014  —  not managed by this demo)");
-            wattroff(win, A_DIM);
+            rw.blank();
+            rw.text("%zu terminal(s) below", node.children.size());
+        } else if (rw.fits()) {
+            rw.blank();
+            rw.styled(A_DIM, "(not an EL1014  —  not managed by this demo)");
         }
     };
 

@@ -41,9 +41,10 @@ namespace TUI {
 // Primitives
 // ---------------------------------------------------------------------------
 
-/// `┌─ title ────┐` top border (bold).  `title` is clipped to fit.
-inline void drawBoxTop(int y, int x, int w, std::string_view title = {},
-                       bool bold = true) {
+/// `┌─ title ────┐` top border (bold) in window `win`.  `title` is
+/// clipped to fit.
+inline void wdrawBoxTop(WINDOW* win, int y, int x, int w,
+                        std::string_view title = {}, bool bold = true) {
     if (w < 2) return;
     std::string top = "┌";
     int used = 0;
@@ -57,59 +58,86 @@ inline void drawBoxTop(int y, int x, int w, std::string_view title = {},
     }
     while (used < w - 2) { top += "─"; ++used; }
     top += "┐";
-    if (bold) attron(A_BOLD);
-    mvprintw(y, x, "%s", top.c_str());
-    if (bold) attroff(A_BOLD);
+    if (bold) wattron(win, A_BOLD);
+    mvwprintw(win, y, x, "%s", top.c_str());
+    if (bold) wattroff(win, A_BOLD);
+}
+/// stdscr convenience — same as wdrawBoxTop(stdscr, ...).
+inline void drawBoxTop(int y, int x, int w, std::string_view title = {},
+                       bool bold = true) {
+    wdrawBoxTop(stdscr, y, x, w, title, bold);
 }
 
 /// `├───┤` interior horizontal rule.
-inline void drawBoxRule(int y, int x, int w) {
+inline void wdrawBoxRule(WINDOW* win, int y, int x, int w) {
     if (w < 2) return;
     std::string r = "├";
     for (int i = 0; i < w - 2; ++i) r += "─";
     r += "┤";
-    mvprintw(y, x, "%s", r.c_str());
+    mvwprintw(win, y, x, "%s", r.c_str());
+}
+/// stdscr convenience — same as wdrawBoxRule(stdscr, ...).
+inline void drawBoxRule(int y, int x, int w) {
+    wdrawBoxRule(stdscr, y, x, w);
 }
 
 /// `└───┘` bottom border.
-inline void drawBoxBottom(int y, int x, int w) {
+inline void wdrawBoxBottom(WINDOW* win, int y, int x, int w) {
     if (w < 2) return;
     std::string r = "└";
     for (int i = 0; i < w - 2; ++i) r += "─";
     r += "┘";
-    mvprintw(y, x, "%s", r.c_str());
+    mvwprintw(win, y, x, "%s", r.c_str());
+}
+/// stdscr convenience — same as wdrawBoxBottom(stdscr, ...).
+inline void drawBoxBottom(int y, int x, int w) {
+    wdrawBoxBottom(stdscr, y, x, w);
 }
 
 /// `│<content padded to w-2>│` — one inner row with side borders.
 /// `content` is clipped/padded to exactly w-2 columns.
+inline void wdrawBoxInnerRow(WINDOW* win, int y, int x, int w,
+                             std::string_view content = {}) {
+    if (w < 2) return;
+    mvwprintw(win, y, x, "│%s│",
+              padToWidth(std::string(content),
+                         static_cast<size_t>(w - 2)).c_str());
+}
+/// stdscr convenience — same as wdrawBoxInnerRow(stdscr, ...).
 inline void drawBoxInnerRow(int y, int x, int w,
                             std::string_view content = {}) {
-    if (w < 2) return;
-    mvprintw(y, x, "│%s│",
-             padToWidth(std::string(content),
-                        static_cast<size_t>(w - 2)).c_str());
+    wdrawBoxInnerRow(stdscr, y, x, w, content);
 }
 
 /// Finish an inner row after `filled` columns of content were already
 /// drawn at x+1..x+filled: pads the rest with spaces and draws the
 /// right border.
-inline void padBoxRowEnd(int y, int x, int w, int filled) {
+inline void wpadBoxRowEnd(WINDOW* win, int y, int x, int w, int filled) {
     if (w < 2) return;
-    mvprintw(y, x, "│");
-    for (int i = filled; i < w - 2; ++i) mvprintw(y, x + 1 + i, " ");
-    mvprintw(y, x + w - 1, "│");
+    mvwprintw(win, y, x, "│");
+    for (int i = filled; i < w - 2; ++i) mvwprintw(win, y, x + 1 + i, " ");
+    mvwprintw(win, y, x + w - 1, "│");
+}
+/// stdscr convenience — same as wpadBoxRowEnd(stdscr, ...).
+inline void padBoxRowEnd(int y, int x, int w, int filled) {
+    wpadBoxRowEnd(stdscr, y, x, w, filled);
 }
 
 /// Full frame: top border (optional title), `h-2` blank inner rows,
 /// bottom border.  Returns the rows consumed (== h, or 0 when h<2 or
 /// w<4).
+inline int wdrawBoxFrame(WINDOW* win, int y, int x, int w, int h,
+                         std::string_view title = {}) {
+    if (h < 2 || w < 4) return 0;
+    wdrawBoxTop(win, y, x, w, title);
+    for (int i = 1; i < h - 1; ++i) wdrawBoxInnerRow(win, y + i, x, w);
+    wdrawBoxBottom(win, y + h - 1, x, w);
+    return h;
+}
+/// stdscr convenience — same as wdrawBoxFrame(stdscr, ...).
 inline int drawBoxFrame(int y, int x, int w, int h,
                         std::string_view title = {}) {
-    if (h < 2 || w < 4) return 0;
-    drawBoxTop(y, x, w, title);
-    for (int i = 1; i < h - 1; ++i) drawBoxInnerRow(y + i, x, w);
-    drawBoxBottom(y + h - 1, x, w);
-    return h;
+    return wdrawBoxFrame(stdscr, y, x, w, h, title);
 }
 
 // ---------------------------------------------------------------------------
@@ -138,11 +166,12 @@ struct KvRow {
  * non-empty — pass an empty header to skip the header row + rule.
  * Returns the rows consumed.
  */
-inline int drawKeyValueBox(int y, std::span<const KvRow> rows,
-                           std::string_view key_header = " Object ",
-                           std::string_view value_header = " Value ") {
-    if (COLS < 8) return 0;
-    const int w = COLS;
+inline int wdrawKeyValueBox(WINDOW* win, int y,
+                            std::span<const KvRow> rows,
+                            std::string_view key_header = " Object ",
+                            std::string_view value_header = " Value ") {
+    const int w = getmaxx(win);
+    if (w < 8) return 0;
     size_t max_key = 0;
     for (const auto& r : rows) max_key = std::max(max_key, r.key.size());
     max_key = std::max(max_key, key_header.size());
@@ -158,38 +187,38 @@ inline int drawKeyValueBox(int y, std::span<const KvRow> rows,
         top += "┬";
         for (int i = 0; i < vw; ++i) top += "─";
         top += "┐";
-        mvprintw(cy++, 0, "%s", top.c_str());
+        mvwprintw(win, cy++, 0, "%s", top.c_str());
     }
     const bool has_header = !key_header.empty() || !value_header.empty();
     if (has_header) {
-        attron(A_BOLD);
-        mvprintw(cy, 0, "│%s│%s│",
-                 padToWidth(std::string(key_header),
-                            static_cast<size_t>(kw)).c_str(),
-                 padToWidth(std::string(value_header),
-                            static_cast<size_t>(vw)).c_str());
-        attroff(A_BOLD);
+        wattron(win, A_BOLD);
+        mvwprintw(win, cy, 0, "│%s│%s│",
+                  padToWidth(std::string(key_header),
+                             static_cast<size_t>(kw)).c_str(),
+                  padToWidth(std::string(value_header),
+                             static_cast<size_t>(vw)).c_str());
+        wattroff(win, A_BOLD);
         ++cy;
         std::string sep = "├";
         for (int i = 0; i < kw; ++i) sep += "─";
         sep += "┼";
         for (int i = 0; i < vw; ++i) sep += "─";
         sep += "┤";
-        mvprintw(cy++, 0, "%s", sep.c_str());
+        mvwprintw(win, cy++, 0, "%s", sep.c_str());
     }
     for (const auto& r : rows) {
-        mvprintw(cy, 0, "│%s│",
-                 padToWidth(" " + r.key + " ",
-                            static_cast<size_t>(kw)).c_str());
+        mvwprintw(win, cy, 0, "│%s│",
+                  padToWidth(" " + r.key + " ",
+                             static_cast<size_t>(kw)).c_str());
         const short pair = r.value_tone ? chipTonePair(*r.value_tone)
                                         : PalNone;
-        if (r.value_tone) attron(COLOR_PAIR(pair));
-        if (r.value_tone == UI::DisplayTone::Fault) attron(A_BOLD);
-        mvprintw(cy, kw + 2, "%s│",
-                 padToWidth(" " + r.value + " ",
-                            static_cast<size_t>(vw)).c_str());
-        if (r.value_tone == UI::DisplayTone::Fault) attroff(A_BOLD);
-        if (r.value_tone) attroff(COLOR_PAIR(pair));
+        if (r.value_tone) wattron(win, COLOR_PAIR(pair));
+        if (r.value_tone == UI::DisplayTone::Fault) wattron(win, A_BOLD);
+        mvwprintw(win, cy, kw + 2, "%s│",
+                  padToWidth(" " + r.value + " ",
+                             static_cast<size_t>(vw)).c_str());
+        if (r.value_tone == UI::DisplayTone::Fault) wattroff(win, A_BOLD);
+        if (r.value_tone) wattroff(win, COLOR_PAIR(pair));
         ++cy;
     }
     // └─┴─┘
@@ -199,9 +228,16 @@ inline int drawKeyValueBox(int y, std::span<const KvRow> rows,
         bot += "┴";
         for (int i = 0; i < vw; ++i) bot += "─";
         bot += "┘";
-        mvprintw(cy++, 0, "%s", bot.c_str());
+        mvwprintw(win, cy++, 0, "%s", bot.c_str());
     }
     return cy - y;
+}
+
+/// stdscr convenience — same as wdrawKeyValueBox(stdscr, ...).
+inline int drawKeyValueBox(int y, std::span<const KvRow> rows,
+                           std::string_view key_header = " Object ",
+                           std::string_view value_header = " Value ") {
+    return wdrawKeyValueBox(stdscr, y, rows, key_header, value_header);
 }
 
 /**
@@ -216,22 +252,29 @@ inline int drawKeyValueBox(int y, std::span<const KvRow> rows,
  *
  * At most `max_lines` lines are drawn.  Returns the rows consumed.
  */
+inline int wdrawBoxedLines(WINDOW* win, int y, int max_lines,
+                           std::span<const std::string> lines,
+                           std::string_view title = {}) {
+    const int w = getmaxx(win);
+    if (w < 8 || max_lines < 0) return 0;
+    int cy = y;
+    wdrawBoxTop(win, cy++, 0, w, title, /*bold=*/false);
+    if (!title.empty()) wdrawBoxRule(win, cy++, 0, w);
+    int n = 0;
+    for (const auto& line : lines) {
+        if (n >= max_lines || cy >= getmaxy(win)) break;
+        wdrawBoxInnerRow(win, cy++, 0, w, " " + line + " ");
+        ++n;
+    }
+    wdrawBoxBottom(win, cy++, 0, w);
+    return cy - y;
+}
+
+/// stdscr convenience — same as wdrawBoxedLines(stdscr, ...).
 inline int drawBoxedLines(int y, int max_lines,
                           std::span<const std::string> lines,
                           std::string_view title = {}) {
-    if (COLS < 8 || max_lines < 0) return 0;
-    const int w = COLS;
-    int cy = y;
-    drawBoxTop(cy++, 0, w, title, /*bold=*/false);
-    if (!title.empty()) drawBoxRule(cy++, 0, w);
-    int n = 0;
-    for (const auto& line : lines) {
-        if (n >= max_lines || cy >= LINES) break;
-        drawBoxInnerRow(cy++, 0, w, " " + line + " ");
-        ++n;
-    }
-    drawBoxBottom(cy++, 0, w);
-    return cy - y;
+    return wdrawBoxedLines(stdscr, y, max_lines, lines, title);
 }
 
 } // namespace TUI

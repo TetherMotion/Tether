@@ -45,9 +45,15 @@
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
+// ncurses last: it #defines OK/ERR/timeout/... which collide with
+// identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
 #ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
 #include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #endif
 
 static const char* TAG = "beckhoff_stepper_jog";
@@ -95,33 +101,23 @@ static void runTui(Beckhoff::StepperTerminal& st,
     };
     hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
         WINDOW* win = static_cast<WINDOW*>(w);
-        int h = 0, cols = 0;
-        getmaxyx(win, h, cols);
-        int row = 1;
+        TUI::RowWriter rw(win, 1, 1);
 
         if (static_cast<uint16_t>(node.tag) == st.slaveIndex()) {
-            mvwprintw(win, row++, 1, "%s  —  slave %u",
-                      st.deviceName(), st.slaveIndex());
-            ++row;
-            mvwprintw(win, row++, 1, "enable   : %s",
-                      g_enabled.load() ? "ON" : "off");
-            mvwprintw(win, row++, 1, "velocity : %d (dir %+d)",
-                      g_speed.load(), g_direction.load());
-            mvwprintw(win, row++, 1, "position : %d",
-                      static_cast<int>(st.counterValue()));
-            mvwprintw(win, row++, 1, "latch    : %d",
-                      static_cast<int>(st.latchValue()));
-            ++row;
-            mvwprintw(win, row++, 1, "STM status : 0x%04X",
-                      st.stmStatusWord());
-            mvwprintw(win, row++, 1, "ENC status : 0x%04X",
-                      st.encStatusWord());
-            ++row;
+            rw.text("%s  —  slave %u", st.deviceName(), st.slaveIndex());
+            rw.blank();
+            rw.text("enable   : %s", g_enabled.load() ? "ON" : "off");
+            rw.text("velocity : %d (dir %+d)",
+                    g_speed.load(), g_direction.load());
+            rw.text("position : %d", static_cast<int>(st.counterValue()));
+            rw.text("latch    : %d", static_cast<int>(st.latchValue()));
+            rw.blank();
+            rw.text("STM status : 0x%04X", st.stmStatusWord());
+            rw.text("ENC status : 0x%04X", st.encStatusWord());
+            rw.blank();
             auto flag = [&](const char* label, bool v) {
-                wattron(win, v ? COLOR_PAIR(TUI::PalError) : A_DIM);
-                mvwprintw(win, row++, 1, "%-12s %s", label,
-                          v ? "true" : "false");
-                wattroff(win, v ? COLOR_PAIR(TUI::PalError) : A_DIM);
+                rw.styled(v ? TUI::pairAttrs(TUI::PalError) : A_DIM,
+                          "%-12s %s", label, v ? "true" : "false");
             };
             flag("ready",        st.ready());
             flag("ready-enable", st.readyToEnable());
@@ -134,24 +130,18 @@ static void runTui(Beckhoff::StepperTerminal& st,
 
         const auto* s = slaveByIndex(slaves, node.tag);
         if (s) {
-            mvwprintw(win, row++, 1, "%s",
-                      s->device_name ? s->device_name->c_str() : "?");
-            mvwprintw(win, row++, 1, "slave   : %u", s->index);
-            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
-                      s->vendor_id ? *s->vendor_id : 0);
-            mvwprintw(win, row++, 1, "product : 0x%08X",
-                      s->product_code ? *s->product_code : 0);
+            rw.text("%s", s->device_name ? s->device_name->c_str() : "?");
+            rw.text("slave   : %u", s->index);
+            rw.text("vendor  : 0x%08X", s->vendor_id ? *s->vendor_id : 0);
+            rw.text("product : 0x%08X",
+                    s->product_code ? *s->product_code : 0);
         }
         if (!node.children.empty()) {
-            ++row;
-            mvwprintw(win, row++, 1, "%zu terminal(s) below",
-                      node.children.size());
-        } else if (row < h) {
-            ++row;
-            wattron(win, A_DIM);
-            mvwprintw(win, row++, 1,
-                      "(not a stepper  —  not managed by this demo)");
-            wattroff(win, A_DIM);
+            rw.blank();
+            rw.text("%zu terminal(s) below", node.children.size());
+        } else if (rw.fits()) {
+            rw.blank();
+            rw.styled(A_DIM, "(not a stepper  —  not managed by this demo)");
         }
     };
 

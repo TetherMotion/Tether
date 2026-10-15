@@ -47,9 +47,15 @@
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
+// ncurses last: it #defines OK/ERR/timeout/... which collide with
+// identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
 #ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
 #include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #endif
 
 static const char* TAG = "beckhoff_safety_monitor";
@@ -99,61 +105,48 @@ static void runTui(Beckhoff::SafetyTerminal& s,
     };
     hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
         WINDOW* win = static_cast<WINDOW*>(w);
-        int h = 0, cols = 0;
-        getmaxyx(win, h, cols);
-        int row = 1;
+        TUI::RowWriter rw(win, 1, 1);
 
         if (static_cast<uint16_t>(node.tag) == s.slaveIndex()) {
-            mvwprintw(win, row++, 1, "%s  —  slave %u (TwinSAFE)",
-                      s.deviceName(), s.slaveIndex());
-            ++row;
+            rw.text("%s  —  slave %u (TwinSAFE)",
+                    s.deviceName(), s.slaveIndex());
+            rw.blank();
             const bool op = s.isOperational();
             const bool fs = s.isFailSafe();
-            wattron(win, op ? COLOR_PAIR(TUI::PalValue) | A_BOLD
-                            : COLOR_PAIR(TUI::PalError) | A_BOLD);
-            mvwprintw(win, row++, 1, "FSoE: %s%s  (state %u, err 0x%04X)",
-                      op ? "DATA" : "handshake",
-                      fs ? "  FAIL-SAFE" : "",
-                      s.fsoeState(), s.fsoeErrorCode());
-            wattroff(win, COLOR_PAIR(TUI::PalValue) |
-                          COLOR_PAIR(TUI::PalError) | A_BOLD);
-            ++row;
-            mvwprintw(win, row++, 1, "safe inputs:");
-            wmove(win, row, 3);
+            rw.styled(
+                TUI::pairAttrs(op ? TUI::PalValue : TUI::PalError) | A_BOLD,
+                "FSoE: %s%s  (state %u, err 0x%04X)",
+                op ? "DATA" : "handshake",
+                fs ? "  FAIL-SAFE" : "",
+                s.fsoeState(), s.fsoeErrorCode());
+            rw.blank();
+            rw.text("safe inputs:");
             for (uint8_t b = 0; b < s.channelCount() && b < 16; ++b) {
-                const bool v = s.safeInputBit(b);
-                wattron(win, v ? COLOR_PAIR(TUI::PalValue) | A_BOLD
-                               : A_DIM);
-                wprintw(win, "%d", v ? 1 : 0);
-                wattroff(win, COLOR_PAIR(TUI::PalValue) | A_BOLD | A_DIM);
-                if (b % 4 == 3) waddch(win, ' ');
+                rw.putLamp(3 + b + b / 4,
+                           s.safeInputBit(b) ? TUI::LampState::On
+                                             : TUI::LampState::Off,
+                           TUI::kLampDigits);
             }
-            row += 2;
-            mvwprintw(win, row++, 1, "safe output bit 0: %s",
-                      g_out0.load() ? "ON" : "off");
+            rw.advance(2);
+            rw.text("safe output bit 0: %s", g_out0.load() ? "ON" : "off");
             return;
         }
 
         const auto* sd = slaveByIndex(slaves, node.tag);
         if (sd) {
-            mvwprintw(win, row++, 1, "%s",
-                      sd->device_name ? sd->device_name->c_str() : "?");
-            mvwprintw(win, row++, 1, "slave   : %u", sd->index);
-            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
-                      sd->vendor_id ? *sd->vendor_id : 0);
-            mvwprintw(win, row++, 1, "product : 0x%08X",
-                      sd->product_code ? *sd->product_code : 0);
+            rw.text("%s", sd->device_name ? sd->device_name->c_str() : "?");
+            rw.text("slave   : %u", sd->index);
+            rw.text("vendor  : 0x%08X", sd->vendor_id ? *sd->vendor_id : 0);
+            rw.text("product : 0x%08X",
+                    sd->product_code ? *sd->product_code : 0);
         }
         if (!node.children.empty()) {
-            ++row;
-            mvwprintw(win, row++, 1, "%zu terminal(s) below",
-                      node.children.size());
-        } else if (row < h) {
-            ++row;
-            wattron(win, A_DIM);
-            mvwprintw(win, row++, 1,
+            rw.blank();
+            rw.text("%zu terminal(s) below", node.children.size());
+        } else if (rw.fits()) {
+            rw.blank();
+            rw.styled(A_DIM,
                       "(not a safety terminal  —  not managed by this demo)");
-            wattroff(win, A_DIM);
         }
     };
 

@@ -10,6 +10,7 @@
 
 #include <ncurses.h>
 
+#include "tether/terminal_ui/RowWriter.hpp"
 #include "tether/terminal_ui/TextWrap.hpp"
 
 namespace Tether {
@@ -53,12 +54,10 @@ void TreeScreen::renderPrompt(TermWindow* w) {
     mvwprintw(win, 0, 1, "%s: %.*s_%s", prompt_spec_.label.c_str(),
               static_cast<int>(cur), buf.c_str(), buf.c_str() + cur);
     wattroff(win, A_BOLD | COLOR_PAIR(PalHint));
-    wattron(win, A_DIM);
-    int row = 1;
+    RowWriter rw(win, 1, 1);
     for (const auto& hint : prompt_spec_.hint_lines) {
-        mvwprintw(win, row++, 1, "%s", hint.c_str());
+        rw.styled(A_DIM, "%s", hint.c_str());
     }
-    wattroff(win, A_DIM);
 }
 
 // ---------------------------------------------------------------------------

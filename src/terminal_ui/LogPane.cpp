@@ -13,6 +13,7 @@
 #include <ncurses.h>
 
 #include "tether/terminal_ui/AnsiLine.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 
 namespace Tether {
 namespace TUI {
@@ -259,10 +260,11 @@ void LogPane::render(TermWindow* w, short colorPair) {
     const size_t start = end > static_cast<size_t>(h)
                        ? end - static_cast<size_t>(h) : 0;
 
-    int row = 0;
-    for (size_t i = start; i < end && row < h; ++i, ++row) {
-        renderAnsiLine(win, row, 0, width - 1, copy[i].text,
+    RowWriter rw(win, 0, 0, h);
+    for (size_t i = start; i < end && rw.fits(); ++i) {
+        renderAnsiLine(win, rw.row(), 0, width - 1, copy[i].text,
                        levelColor(copy[i].level, colorPair));
+        rw.advance();
     }
     // Scroll/filter indicator on the last row.
     if (h > 0 && (scrollOffset_ > 0 || filtered())) {

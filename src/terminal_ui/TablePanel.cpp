@@ -3,12 +3,12 @@
  * @brief ncurses renderer for UI::TableModel.
  */
 
-#include <ncurses.h>
+#include "tether/terminal_ui/TablePanel.hpp"
 
 #include <algorithm>
 #include <string>
 
-#include "tether/terminal_ui/TablePanel.hpp"
+#include <ncurses.h>
 
 namespace Tether {
 namespace TUI {

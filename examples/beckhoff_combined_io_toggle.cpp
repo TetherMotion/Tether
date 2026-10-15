@@ -46,9 +46,15 @@
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
+// ncurses last: it #defines OK/ERR/timeout/... which collide with
+// identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
 #ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
 #include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #endif
 
 static const char* TAG = "beckhoff_combined_io_toggle";
@@ -107,53 +113,48 @@ static void runTui(Chain& io,
     };
     hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
         WINDOW* win = static_cast<WINDOW*>(w);
-        int row = 1;
+        TUI::RowWriter rw(win, 1, 1);
 
         for (size_t m = 0; m < io.moduleCount(); ++m) {
             if (io.slaveIndex(m) != static_cast<uint16_t>(node.tag))
                 continue;
             const auto& mod = io.module(m);
-            mvwprintw(win, row++, 1, "%s  —  slave %d", mod.deviceName(),
-                      node.tag);
-            ++row;
-            mvwprintw(win, row++, 1, "inputs  :");
+            rw.text("%s  —  slave %d", mod.deviceName(), node.tag);
+            rw.blank();
+            rw.put(1, 0, "inputs  :");
             for (size_t k = 0; k < mod.inputChannelCount(); ++k) {
-                const bool on = mod.input(k);
-                wattron(win, on ? COLOR_PAIR(TUI::PalValue) | A_BOLD
-                                : A_DIM);
-                mvwprintw(win, row - 1, 12 + k * 2, "%s", on ? "*" : ".");
-                wattroff(win, COLOR_PAIR(TUI::PalValue) | A_BOLD | A_DIM);
+                rw.putLamp(12 + k * 2,
+                           mod.input(k) ? TUI::LampState::On
+                                        : TUI::LampState::Off,
+                           TUI::kLampBits);
             }
-            mvwprintw(win, row++, 1, "outputs :");
+            rw.advance();
+            rw.put(1, 0, "outputs :");
             const size_t base = io.outputOffset(m);
             for (size_t k = 0; k < mod.outputChannelCount(); ++k) {
                 const bool on = mod.output(k);
                 const bool act = on && (base + k == active);
-                const int attrs = act
-                    ? (COLOR_PAIR(TUI::PalSelected) | A_BOLD)
-                    : (on ? (COLOR_PAIR(TUI::PalValue) | A_BOLD) : A_DIM);
-                wattron(win, attrs);
-                mvwprintw(win, row - 1, 12 + k * 2, "%s", on ? "*" : ".");
-                wattroff(win, attrs);
+                rw.put(12 + k * 2,
+                       act ? TUI::pairAttrs(TUI::PalSelected) | A_BOLD
+                           : (on ? TUI::pairAttrs(TUI::PalValue) | A_BOLD
+                                 : A_DIM),
+                       "%s", on ? "*" : ".");
             }
+            rw.advance();
             return;
         }
 
         const auto* s = slaveByIndex(slaves, node.tag);
         if (s) {
-            mvwprintw(win, row++, 1, "%s",
-                      s->device_name ? s->device_name->c_str() : "?");
-            mvwprintw(win, row++, 1, "slave   : %u", s->index);
-            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
-                      s->vendor_id ? *s->vendor_id : 0);
-            mvwprintw(win, row++, 1, "product : 0x%08X",
-                      s->product_code ? *s->product_code : 0);
+            rw.text("%s", s->device_name ? s->device_name->c_str() : "?");
+            rw.text("slave   : %u", s->index);
+            rw.text("vendor  : 0x%08X", s->vendor_id ? *s->vendor_id : 0);
+            rw.text("product : 0x%08X",
+                    s->product_code ? *s->product_code : 0);
         }
-        ++row;
-        wattron(win, A_DIM);
-        mvwprintw(win, row++, 1,
+        rw.blank();
+        rw.styled(A_DIM,
                   "(not a combined I/O device  —  not managed by this demo)");
-        wattroff(win, A_DIM);
     };
 
     TUI::TreeScreen screen(

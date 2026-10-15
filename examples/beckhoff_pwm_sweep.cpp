@@ -41,9 +41,15 @@
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
+// ncurses last: it #defines OK/ERR/timeout/... which collide with
+// identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
 #ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
 #include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #endif
 
 static const char* TAG = "beckhoff_pwm_sweep";
@@ -109,57 +115,50 @@ static void runTui(Beckhoff::PwmTerminal& pwm,
     };
     hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
         WINDOW* win = static_cast<WINDOW*>(w);
-        int h = 0, cols = 0;
-        getmaxyx(win, h, cols);
-        int row = 1;
+        TUI::RowWriter rw(win, 1, 1);
+        const int cols = getmaxx(win);
 
         if (static_cast<uint16_t>(node.tag) == pwm.slaveIndex()) {
-            mvwprintw(win, row++, 1, "%s  —  slave %u, %zu ch",
-                      pwm.deviceName(), pwm.slaveIndex(),
-                      pwm.channelCount());
-            mvwprintw(win, row++, 1, "sweep period: %d ms%s",
-                      g_period_ms.load(),
-                      g_paused.load() ? "  (paused)" : "");
-            ++row;
+            rw.text("%s  —  slave %u, %zu ch",
+                    pwm.deviceName(), pwm.slaveIndex(),
+                    pwm.channelCount());
+            rw.text("sweep period: %d ms%s",
+                    g_period_ms.load(),
+                    g_paused.load() ? "  (paused)" : "");
+            rw.blank();
             const int bar_w = std::max(10, cols - 22);
-            for (size_t k = 0; k < pwm.channelCount() && row < h - 1; ++k) {
+            for (size_t k = 0; k < pwm.channelCount() && rw.remaining() > 1;
+                 ++k) {
                 const int fill =
                     pwm.duty(k) * bar_w / Beckhoff::PwmTerminal::kDutyFullScale;
-                mvwprintw(win, row, 1, "ch%zu ", k + 1);
-                wattron(win, COLOR_PAIR(TUI::PalValue) | A_BOLD);
-                for (int i = 0; i < fill; ++i) waddch(win, '#');
-                wattroff(win, COLOR_PAIR(TUI::PalValue) | A_BOLD);
-                wattron(win, A_DIM);
-                for (int i = fill; i < bar_w; ++i) waddch(win, '-');
-                wattroff(win, A_DIM);
-                mvwprintw(win, row, 5 + bar_w, " %5.1f%%",
-                          100.0 * pwm.duty(k) /
-                              Beckhoff::PwmTerminal::kDutyFullScale);
-                ++row;
+                rw.put(1, 0, "ch%zu ", k + 1);
+                rw.put(5, TUI::pairAttrs(TUI::PalValue) | A_BOLD, "%s",
+                       std::string(fill, '#').c_str());
+                rw.put(5 + fill, A_DIM, "%s",
+                       std::string(bar_w - fill, '-').c_str());
+                rw.put(5 + bar_w, 0, " %5.1f%%",
+                       100.0 * pwm.duty(k) /
+                           Beckhoff::PwmTerminal::kDutyFullScale);
+                rw.advance();
             }
             return;
         }
 
         const auto* s = slaveByIndex(slaves, node.tag);
         if (s) {
-            mvwprintw(win, row++, 1, "%s",
-                      s->device_name ? s->device_name->c_str() : "?");
-            mvwprintw(win, row++, 1, "slave   : %u", s->index);
-            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
-                      s->vendor_id ? *s->vendor_id : 0);
-            mvwprintw(win, row++, 1, "product : 0x%08X",
-                      s->product_code ? *s->product_code : 0);
+            rw.text("%s", s->device_name ? s->device_name->c_str() : "?");
+            rw.text("slave   : %u", s->index);
+            rw.text("vendor  : 0x%08X", s->vendor_id ? *s->vendor_id : 0);
+            rw.text("product : 0x%08X",
+                    s->product_code ? *s->product_code : 0);
         }
         if (!node.children.empty()) {
-            ++row;
-            mvwprintw(win, row++, 1, "%zu terminal(s) below",
-                      node.children.size());
-        } else if (row < h) {
-            ++row;
-            wattron(win, A_DIM);
-            mvwprintw(win, row++, 1,
+            rw.blank();
+            rw.text("%zu terminal(s) below", node.children.size());
+        } else if (rw.fits()) {
+            rw.blank();
+            rw.styled(A_DIM,
                       "(not a PWM terminal  —  not managed by this demo)");
-            wattroff(win, A_DIM);
         }
     };
 

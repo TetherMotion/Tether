@@ -56,9 +56,13 @@
 
 // ncurses last: it #defines OK/ERR/timeout/... which collide with
 // identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
 #ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
 #include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #endif
 
 static const char* TAG = "beckhoff_analog_input_monitor";
@@ -107,36 +111,28 @@ static void runTui(Beckhoff::MultiAnalogInputTerminal<>& ins,
     hooks.keyHints = "";
     hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
         WINDOW* win = static_cast<WINDOW*>(w);
-        int h = 0, cols = 0;
-        getmaxyx(win, h, cols);
-        int row = 1;
+        TUI::RowWriter rw(win, 1, 1);
 
         // Managed input terminal → live channel values + status words.
         for (size_t m = 0; m < ins.moduleCount(); ++m) {
             if (ins.slaveIndex(m) != static_cast<uint16_t>(node.tag)) continue;
             const auto& mod = ins.module(m);
-            mvwprintw(win, row++, 1, "%s  —  slave %d", mod.deviceName(),
-                      node.tag);
-            ++row;
-            mvwprintw(win, row++, 1, "ch   value        status");
-            wattroff(win, A_BOLD);
-            for (size_t k = 0; k < mod.channelCount() && row < h - 1; ++k) {
+            rw.text("%s  —  slave %d", mod.deviceName(), node.tag);
+            rw.blank();
+            rw.styled(A_BOLD, "ch   value        status");
+            for (size_t k = 0; k < mod.channelCount() && rw.remaining() > 1;
+                 ++k) {
                 const int32_t v = mod.value(k);
-                wattron(win, COLOR_PAIR(TUI::PalValue) | A_BOLD);
-                mvwprintw(win, row, 4, "%+d", v);
-                wattroff(win, COLOR_PAIR(TUI::PalValue) | A_BOLD);
-                mvwprintw(win, row, 1, "%zu", k + 1);
+                rw.put(4, TUI::pairAttrs(TUI::PalValue) | A_BOLD, "%+d", v);
+                rw.put(1, 0, "%zu", k + 1);
                 if (mod.hasStatus(k)) {
                     const uint16_t st = mod.status(k);
-                    wattron(win, st ? COLOR_PAIR(TUI::PalError) : A_DIM);
-                    mvwprintw(win, row, 16, "0x%04X", st);
-                    wattroff(win, st ? COLOR_PAIR(TUI::PalError) : A_DIM);
+                    rw.put(16, st ? TUI::pairAttrs(TUI::PalError) : A_DIM,
+                           "0x%04X", st);
                 } else {
-                    wattron(win, A_DIM);
-                    mvwprintw(win, row, 16, "-");
-                    wattroff(win, A_DIM);
+                    rw.put(16, A_DIM, "-");
                 }
-                ++row;
+                rw.advance();
             }
             return;
         }
@@ -144,24 +140,19 @@ static void runTui(Beckhoff::MultiAnalogInputTerminal<>& ins,
         // Coupler or unmanaged node → identity info.
         const auto* s = slaveByIndex(slaves, node.tag);
         if (s) {
-            mvwprintw(win, row++, 1, "%s",
-                      s->device_name ? s->device_name->c_str() : "?");
-            mvwprintw(win, row++, 1, "slave   : %u", s->index);
-            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
-                      s->vendor_id ? *s->vendor_id : 0);
-            mvwprintw(win, row++, 1, "product : 0x%08X",
-                      s->product_code ? *s->product_code : 0);
+            rw.text("%s", s->device_name ? s->device_name->c_str() : "?");
+            rw.text("slave   : %u", s->index);
+            rw.text("vendor  : 0x%08X", s->vendor_id ? *s->vendor_id : 0);
+            rw.text("product : 0x%08X",
+                    s->product_code ? *s->product_code : 0);
         }
         if (!node.children.empty()) {
-            ++row;
-            mvwprintw(win, row++, 1, "%zu terminal(s) below",
-                      node.children.size());
-        } else if (row < h) {
-            ++row;
-            wattron(win, A_DIM);
-            mvwprintw(win, row++, 1,
+            rw.blank();
+            rw.text("%zu terminal(s) below", node.children.size());
+        } else if (rw.fits()) {
+            rw.blank();
+            rw.styled(A_DIM,
                       "(not an analog input  —  not managed by this demo)");
-            wattroff(win, A_DIM);
         }
     };
 

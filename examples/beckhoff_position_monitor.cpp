@@ -55,9 +55,13 @@
 
 // ncurses last: it #defines OK/ERR/timeout/... which collide with
 // identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
 #ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
 #include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #endif
 
 static const char* TAG = "beckhoff_position_monitor";
@@ -106,40 +110,32 @@ static void runTui(Beckhoff::MultiPositionInputTerminal<>& encs,
     hooks.keyHints = "";
     hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
         WINDOW* win = static_cast<WINDOW*>(w);
-        int h = 0, cols = 0;
-        getmaxyx(win, h, cols);
-        int row = 1;
+        TUI::RowWriter rw(win, 1, 1);
 
         // Managed position terminal → live channel values.
         for (size_t m = 0; m < encs.moduleCount(); ++m) {
             if (encs.slaveIndex(m) != static_cast<uint16_t>(node.tag))
                 continue;
             const auto& mod = encs.module(m);
-            mvwprintw(win, row++, 1, "%s  —  slave %d", mod.deviceName(),
-                      node.tag);
-            ++row;
-            mvwprintw(win, row++, 1, "ch   position           status");
-            for (size_t k = 0; k < mod.channelCount() && row < h - 1; ++k) {
-                mvwprintw(win, row, 1, "%zu", k + 1);
-                wattron(win, COLOR_PAIR(TUI::PalValue) | A_BOLD);
-                mvwprintw(win, row, 4, "%+lld",
-                          static_cast<long long>(mod.value(k, 0)));
-                wattroff(win, COLOR_PAIR(TUI::PalValue) | A_BOLD);
+            rw.text("%s  —  slave %d", mod.deviceName(), node.tag);
+            rw.blank();
+            rw.text("ch   position           status");
+            for (size_t k = 0; k < mod.channelCount() && rw.remaining() > 1;
+                 ++k) {
+                rw.put(1, 0, "%zu", k + 1);
+                rw.put(4, TUI::pairAttrs(TUI::PalValue) | A_BOLD, "%+lld",
+                       static_cast<long long>(mod.value(k, 0)));
                 // Additional value fields (latch, ...) in dim.
-                wattron(win, A_DIM);
-                for (size_t i = 1;
-                     i < mod.valueCount(k) && i < 4; ++i) {
-                    mvwprintw(win, row, 18 + 13 * int(i - 1), "%+lld",
-                              static_cast<long long>(mod.value(k, i)));
+                for (size_t i = 1; i < mod.valueCount(k) && i < 4; ++i) {
+                    rw.put(18 + 13 * int(i - 1), A_DIM, "%+lld",
+                           static_cast<long long>(mod.value(k, i)));
                 }
-                wattroff(win, A_DIM);
                 if (mod.hasStatus(k)) {
                     const uint16_t st = mod.status(k);
-                    wattron(win, st ? COLOR_PAIR(TUI::PalError) : A_DIM);
-                    mvwprintw(win, row, 56, "0x%04X", st);
-                    wattroff(win, st ? COLOR_PAIR(TUI::PalError) : A_DIM);
+                    rw.put(56, st ? TUI::pairAttrs(TUI::PalError) : A_DIM,
+                           "0x%04X", st);
                 }
-                ++row;
+                rw.advance();
             }
             if (encs.moduleCount() == 0) break;
             return;
@@ -148,24 +144,19 @@ static void runTui(Beckhoff::MultiPositionInputTerminal<>& encs,
         // Coupler or unmanaged node → identity info.
         const auto* s = slaveByIndex(slaves, node.tag);
         if (s) {
-            mvwprintw(win, row++, 1, "%s",
-                      s->device_name ? s->device_name->c_str() : "?");
-            mvwprintw(win, row++, 1, "slave   : %u", s->index);
-            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
-                      s->vendor_id ? *s->vendor_id : 0);
-            mvwprintw(win, row++, 1, "product : 0x%08X",
-                      s->product_code ? *s->product_code : 0);
+            rw.text("%s", s->device_name ? s->device_name->c_str() : "?");
+            rw.text("slave   : %u", s->index);
+            rw.text("vendor  : 0x%08X", s->vendor_id ? *s->vendor_id : 0);
+            rw.text("product : 0x%08X",
+                    s->product_code ? *s->product_code : 0);
         }
         if (!node.children.empty()) {
-            ++row;
-            mvwprintw(win, row++, 1, "%zu terminal(s) below",
-                      node.children.size());
-        } else if (row < h) {
-            ++row;
-            wattron(win, A_DIM);
-            mvwprintw(win, row++, 1,
+            rw.blank();
+            rw.text("%zu terminal(s) below", node.children.size());
+        } else if (rw.fits()) {
+            rw.blank();
+            rw.styled(A_DIM,
                       "(not a position input  —  not managed by this demo)");
-            wattroff(win, A_DIM);
         }
     };
 

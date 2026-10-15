@@ -19,10 +19,7 @@
  * for any value-versus-limit display.
  */
 
-// ncurses defines OK/ERR as macros; undefine them before Tether headers
 #include <ncurses.h>
-#undef OK
-#undef ERR
 
 #include <algorithm>
 #include <cmath>
@@ -44,11 +41,12 @@ inline short gaugeRatioPair(double ratio, bool violated) {
     return PalValue;
 }
 
-/// Draw one utilization bar `[###....]` of width w at (y, x).
-/// `ratio` 0..1 fills left to right; >1 clamps and draws a red `>`
-/// overflow marker after the bar; <0 renders an empty muted bar.
+/// Draw one utilization bar `[###....]` of width `w` at (y, x) in window
+/// `win`.  `ratio` 0..1 fills left to right; >1 clamps and draws a red
+/// `>` overflow marker after the bar; <0 renders an empty muted bar.
 /// `violated` forces the bar red+bold regardless of the ratio.
-inline void drawGauge(int y, int x, int w, double ratio, bool violated) {
+inline void wdrawGauge(WINDOW* win, int y, int x, int w,
+                       double ratio, bool violated) {
     if (w < 4) return;
     const int pair = gaugeRatioPair(ratio, violated);
     const int attrs = violated ? A_BOLD : 0;
@@ -57,40 +55,47 @@ inline void drawGauge(int y, int x, int w, double ratio, bool violated) {
         ? 0
         : std::clamp(static_cast<int>(std::lround(ratio * inner)),
                      0, inner);
-    attron(COLOR_PAIR(pair) | attrs);
-    mvprintw(y, x, "[");
-    for (int i = 0; i < filled; ++i) mvprintw(y, x + 1 + i, "#");
-    attroff(COLOR_PAIR(pair) | attrs);
-    attron(COLOR_PAIR(PalMuted));
-    for (int i = filled; i < inner; ++i) mvprintw(y, x + 1 + i, ".");
-    mvprintw(y, x + w - 1, "]");
-    attroff(COLOR_PAIR(PalMuted));
+    wattron(win, COLOR_PAIR(pair) | attrs);
+    mvwprintw(win, y, x, "[");
+    for (int i = 0; i < filled; ++i) mvwprintw(win, y, x + 1 + i, "#");
+    wattroff(win, COLOR_PAIR(pair) | attrs);
+    wattron(win, COLOR_PAIR(PalMuted));
+    for (int i = filled; i < inner; ++i) mvwprintw(win, y, x + 1 + i, ".");
+    mvwprintw(win, y, x + w - 1, "]");
+    wattroff(win, COLOR_PAIR(PalMuted));
     if (ratio > 1.0) {
-        attron(COLOR_PAIR(PalError) | A_BOLD);
-        mvprintw(y, x + w, ">");
-        attroff(COLOR_PAIR(PalError) | A_BOLD);
+        wattron(win, COLOR_PAIR(PalError) | A_BOLD);
+        mvwprintw(win, y, x + w, ">");
+        wattroff(win, COLOR_PAIR(PalError) | A_BOLD);
     }
 }
 
-/// Draw a range track `[-----#-----]` of width w at (y, x): the allowed
-/// span is [low, high] and `value` is drawn as a `#` marker at its
-/// position — clamped to the track ends when outside.  The marker is
-/// green inside (yellow within the outer 10 % of the span), red when
-/// outside or `violated`.  Without a value only the empty track shows.
-/// Falls back to printing "low/high" when the track does not fit.
-inline void drawRangeTrack(int y, int x, int w, int64_t low, int64_t high,
-                           std::optional<int64_t> value, bool violated) {
+/// stdscr convenience — same as wdrawGauge(stdscr, ...).
+inline void drawGauge(int y, int x, int w, double ratio, bool violated) {
+    wdrawGauge(stdscr, y, x, w, ratio, violated);
+}
+
+/// Draw a range track `[-----#-----]` of width `w` at (y, x) in window
+/// `win`: the allowed span is [low, high] and `value` is drawn as a `#`
+/// marker at its position — clamped to the track ends when outside.
+/// The marker is green inside (yellow within the outer 10 % of the
+/// span), red when outside or `violated`.  Without a value only the
+/// empty track shows.  Falls back to printing "low/high" when the track
+/// does not fit.
+inline void wdrawRangeTrack(WINDOW* win, int y, int x, int w,
+                            int64_t low, int64_t high,
+                            std::optional<int64_t> value, bool violated) {
     if (w < 6 || high <= low) {
-        mvprintw(y, x, "%lld/%lld", static_cast<long long>(low),
-                 static_cast<long long>(high));
+        mvwprintw(win, y, x, "%lld/%lld", static_cast<long long>(low),
+                  static_cast<long long>(high));
         return;
     }
     const int inner = w - 2;
-    attron(COLOR_PAIR(PalMuted));
-    mvprintw(y, x, "[");
-    for (int i = 0; i < inner; ++i) mvprintw(y, x + 1 + i, "-");
-    mvprintw(y, x + w - 1, "]");
-    attroff(COLOR_PAIR(PalMuted));
+    wattron(win, COLOR_PAIR(PalMuted));
+    mvwprintw(win, y, x, "[");
+    for (int i = 0; i < inner; ++i) mvwprintw(win, y, x + 1 + i, "-");
+    mvwprintw(win, y, x + w - 1, "]");
+    wattroff(win, COLOR_PAIR(PalMuted));
     if (!value) return;
     const double frac = static_cast<double>(*value - low) /
                         static_cast<double>(high - low);
@@ -105,9 +110,15 @@ inline void drawRangeTrack(int y, int x, int w, int64_t low, int64_t high,
     const int pos = std::clamp(static_cast<int>(std::lround(
                                    frac * (inner - 1))),
                                0, inner - 1);
-    attron(COLOR_PAIR(pair) | A_BOLD);
-    mvprintw(y, x + 1 + pos, "#");
-    attroff(COLOR_PAIR(pair) | A_BOLD);
+    wattron(win, COLOR_PAIR(pair) | A_BOLD);
+    mvwprintw(win, y, x + 1 + pos, "#");
+    wattroff(win, COLOR_PAIR(pair) | A_BOLD);
+}
+
+/// stdscr convenience — same as wdrawRangeTrack(stdscr, ...).
+inline void drawRangeTrack(int y, int x, int w, int64_t low, int64_t high,
+                           std::optional<int64_t> value, bool violated) {
+    wdrawRangeTrack(stdscr, y, x, w, low, high, value, violated);
 }
 
 } // namespace TUI
