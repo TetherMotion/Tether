@@ -1151,7 +1151,9 @@ static void buildNonCoeResponse(uint8_t* buf, uint8_t mbx_cnt, uint8_t mbx_type)
     }
 }
 
-// Test: Download receives non-CoE response (EoE type 0x02) — should abort, not loop
+// Test: Download receives non-CoE responses (EoE type 0x02) — the master
+// drains foreign mailbox traffic and keeps polling, then fails bounded by
+// the poll-attempt cap (no infinite loop, no spurious success).
 TEST(CoeSDO, Download_NonCoeResponse_AbortsCleanly) {
     EtherCAT::Master master;
     MailboxErrorMock mock;
@@ -1194,8 +1196,9 @@ TEST(CoeSDO, Download_NonCoeResponse_AbortsCleanly) {
                                0x1000, 0, data, 4,
                                false, 5, 200);
 
-    EXPECT_FALSE(ok) << "Non-CoE response should cause download to fail (timeout after break)";
-    EXPECT_EQ(mock.mailbox_data_reads, 1) << "Should read mailbox data exactly once, not loop on empty buffer";
+    EXPECT_FALSE(ok) << "Persistent non-CoE responses should fail the download";
+    EXPECT_GT(mock.mailbox_data_reads, 1) << "Foreign responses are drained and polling continues";
+    EXPECT_LT(mock.mailbox_data_reads, 10000) << "Drain loop must stay bounded (poll-attempt cap)";
 
     mock.remove();
 }

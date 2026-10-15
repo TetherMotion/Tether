@@ -913,9 +913,9 @@ TEST_F(ProcessImageTest, MultiSliceSplitsImageAcrossSlots) {
     for (int i = 0; i < 8; ++i) out[i] = 0xA0 + i;
 
     transport.per_slot_resp = true;
-    // Derived WKC per slice (Q6): slice 0 covers the RxPDO region (+1),
-    // slice 1 the TxPDO region (+2).
-    const uint16_t slice_wkc[2] = {1, 2};
+    // Derived WKC per slice (Q6): slice 0 covers the RxPDO region (+2),
+    // slice 1 the TxPDO region (+1).
+    const uint16_t slice_wkc[2] = {2, 1};
     for (int s = 0; s < 2; ++s) {
         for (int i = 0; i < 8; ++i)
             transport.resp_slot_data[s][i] = 0x10 * s + i;

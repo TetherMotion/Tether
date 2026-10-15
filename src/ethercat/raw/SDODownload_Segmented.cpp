@@ -156,6 +156,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
 
         bool got_init = false;
         int stale_retry_count = 0;
+        uint32_t foreign_drains = 0;
         // ESC211 answers queued SM0 requests FIFO, ~25-30 ms late — drain
         // stale responses, never re-send (see checkStaleCounter).  Give up
         // after transactionTimeoutMs of silence; hard-capped for safety.
@@ -208,7 +209,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                 }
             }
             if (hdr.type != EC_MBXT_COE) {
-                TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download init): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
+                if (drainWarnVisible(++foreign_drains))
+                    TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download init): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                             hdr.type, hdr.cnt, adp, index, sub);
                 continue;  // foreign mailbox traffic — drain, keep polling
             }
@@ -287,7 +289,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
             std::memcpy(&resp_coe, rspbuf + sizeof(MbxHeader), sizeof(resp_coe));
             const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
             if (resp_service != EC_COES_SDORES) {
-                TETHER_LOGW(TAG, "Unexpected CoE service (seg download init): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — draining",
+                if (drainWarnVisible(++foreign_drains))
+                    TETHER_LOGW(TAG, "Unexpected CoE service (seg download init): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                             resp_service, adp, index, sub);
                 continue;  // foreign CoE service — drain, keep polling
             }
@@ -303,16 +306,16 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                 }
 
                 ++stale_retry_count;
-                if (stale_retry_count <= 4 || (stale_retry_count % 32) == 0) {
+                if (drainWarnVisible(++foreign_drains))
                     TETHER_LOGW(TAG, "Stale SDO segmented download init response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — draining (#{}), NOT re-sending",
-                                res_index, res.sub, index, sub, adp, stale_retry_count);
-                }
+                            res_index, res.sub, index, sub, adp, stale_retry_count);
                 std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
                 continue;
             }
 
             // Foreign SDO response — drain and keep waiting for ours.
-            TETHER_LOGW(TAG, "Unexpected SDO command (seg download init): cmd=0x{:02X} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
+            if (drainWarnVisible(++foreign_drains))
+                TETHER_LOGW(TAG, "Unexpected SDO command (seg download init): cmd=0x{:02X} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                         sdo_cmd, adp, index, sub);
             std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
             continue;
@@ -394,6 +397,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
 
         bool got_seg = false;
         int stale_retry_count = 0;
+        uint32_t foreign_drains = 0;
         // Same drain-don't-resend policy as the init phase: the slave answers
         // FIFO from its internal queue; our segment response surfaces once
         // the backlog ahead of it drains.
@@ -446,7 +450,8 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                 }
             }
             if (hdr.type != EC_MBXT_COE) {
-                TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download seg {}): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
+                if (drainWarnVisible(++foreign_drains))
+                    TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download seg {}): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                             seg, hdr.type, hdr.cnt, adp, index, sub);
                 continue;  // foreign mailbox traffic — drain, keep polling
             }
@@ -495,14 +500,16 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
             const uint16_t r2_coe_raw = le16_to_host(r2_coe->raw_le);
             const uint8_t r2_service = (r2_coe_raw >> 12) & 0x0Fu;
             if (r2_service != EC_COES_SDORES) {
-                TETHER_LOGW(TAG, "Unexpected CoE service (seg download seg {}): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — draining",
+                if (drainWarnVisible(++foreign_drains))
+                    TETHER_LOGW(TAG, "Unexpected CoE service (seg download seg {}): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                             seg, r2_service, adp, index, sub);
                 continue;  // foreign CoE service — drain, keep polling
             }
 
             const uint8_t seg_ccs = (seg_res_cmd >> 5) & 0x07u;
             if (seg_ccs != 1) {
-                TETHER_LOGW(TAG, "Unexpected SDO command (seg download seg {}): cmd=0x{:02X} ccs={} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
+                if (drainWarnVisible(++foreign_drains))
+                    TETHER_LOGW(TAG, "Unexpected SDO command (seg download seg {}): cmd=0x{:02X} ccs={} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                             seg, seg_res_cmd, seg_ccs, adp, index, sub);
                 std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
                 continue;
@@ -511,10 +518,9 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
             const bool seg_toggle = (seg_res_cmd & 0x10u) != 0;
             if (seg_toggle != toggle) {
                 ++stale_retry_count;
-                if (stale_retry_count <= 4 || (stale_retry_count % 32) == 0) {
+                if (drainWarnVisible(++foreign_drains))
                     TETHER_LOGW(TAG, "SDO segmented download segment {} toggle mismatch: got={} expected={} (adp=0x{:04X} index=0x{:04X}:{}) — draining (#{}), NOT re-sending",
-                                seg, seg_toggle, toggle, adp, index, sub, stale_retry_count);
-                }
+                            seg, seg_toggle, toggle, adp, index, sub, stale_retry_count);
                 // Stale answer to an earlier queued request — drain and keep
                 // waiting for ours; re-sending only grows the slave's queue.
                 std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
