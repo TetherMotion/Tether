@@ -167,14 +167,7 @@ int main(int argc, char *argv[]) {
         .help("Output SVG base filename")
         .default_value(std::string("output"));
 
-    try {
-        program.parse_args(argc, argv);
-    }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << std::endl;
-        std::cerr << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
     std::string inputFile = program.get<std::string>("input_file");
     std::string outputBase = program.get<std::string>("--output");

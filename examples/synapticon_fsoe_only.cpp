@@ -314,7 +314,7 @@ struct Args {
     int watchdog_ms = 15;
     int diag_interval_ms = 500;
     std::string debug;
-    Tether::Examples::EncapsulationConfig encapsulation;
+    EtherCAT::EncapsulationConfig encapsulation;
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {
@@ -336,14 +336,9 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .default_value(std::string(""))
         .help("Comma-separated debug flags. Use '--debug help' for a list.");
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return false;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return false;
 
-    out.interface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    out.interface = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     out.slave_index = program.get<int>("--slave");
     out.duration = program.get<double>("--duration");
     out.enable_dc_sync = program.get<bool>("--dc-sync");
@@ -351,11 +346,11 @@ bool parseArgs(int argc, char** argv, Args& out) {
     out.watchdog_ms = program.get<int>("--watchdog-ms");
     out.diag_interval_ms = program.get<int>("--diag-interval-ms");
     out.debug = program.get<std::string>("--debug");
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"),
             out.encapsulation, TAG)) {
         return false;
     }
-    Tether::Examples::logEncapsulationConfig(out.encapsulation, TAG);
+    EtherCAT::logEncapsulationConfig(out.encapsulation, TAG);
     return true;
 }
 

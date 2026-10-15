@@ -35,11 +35,11 @@
 #ifdef TETHER_HAS_TERMINAL_UI
 #include "tether/terminal_ui/Session.hpp"
 #include "tether/terminal_ui/TreeScreen.hpp"
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/DeviceTree.hpp"
 #endif
 
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 // ncurses last: it #defines OK/ERR/timeout/... which collide with
 // identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
@@ -171,21 +171,14 @@ static void runTui(Beckhoff::PwmTerminal& pwm,
 #endif // TETHER_HAS_TERMINAL_UI
 
 static void runStream(Beckhoff::PwmTerminal& pwm, double duration_sec) {
-    const auto t0 = std::chrono::steady_clock::now();
-    auto ms = [&]() {
-        return std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - t0).count();
-    };
-    while (!g_cancel.load()) {
-        if (duration_sec > 0.0 && ms() / 1000.0 >= duration_sec) break;
-        for (size_t k = 0; k < pwm.channelCount(); ++k) {
-            pwm.setDuty(k, sweepDuty(k, ms()));
-        }
-        std::cout << std::format("t={:7.3f}  {}\n", ms() / 1000.0,
-                                 statusLine(pwm));
-        std::cout.flush();
-        Tether::Platform::Clock::instance().delayMilliseconds(50);
-    }
+    Tether::Platform::runCancellableLoop(
+        g_cancel, duration_sec, 50, [&](double t) {
+            const auto ms = static_cast<int64_t>(t * 1000.0);
+            for (size_t k = 0; k < pwm.channelCount(); ++k) {
+                pwm.setDuty(k, sweepDuty(k, ms));
+            }
+            Tether::Utils::printTimestamped(t, statusLine(pwm));
+        });
     pwm.allOff();
 }
 
@@ -196,75 +189,53 @@ int main(int argc, char** argv) {
     Tether::Examples::addListInterfacesArg(program);
     Tether::Examples::addDebugArg(program);
     Tether::Examples::addDurationArg(program, 0.0);
-    program.add_argument("--interactive")
-        .help("Force the interactive ncurses TUI")
-        .flag();
-    program.add_argument("--stream")
-        .help("Print duty values as plain lines instead of the TUI")
-        .flag();
+    Tether::Examples::addStreamArgs(
+        program, "Print duty values as plain lines instead of the TUI");
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
     if (program.get<bool>("--list-interfaces")) {
-        Tether::Examples::listPhysicalInterfaces(TAG);
+        EtherCAT::HAL::listPhysicalInterfaces(TAG);
         return 0;
     }
     std::string iface =
-        Tether::Examples::resolveInterface(
+        EtherCAT::HAL::resolveInterface(
             program.get<std::string>("--interface"), TAG);
     if (iface.empty()) return 1;
 
     std::string debug_str = program.get<std::string>("--debug");
-    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
-    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+    if (EtherCAT::debug::printFlagsHelp(debug_str)) return 0;
+    auto debug_flags = EtherCAT::debug::parseFlags(debug_str);
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"), encapsulation, TAG)) {
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"), encapsulation, TAG)) {
         return 1;
     }
 
     const double duration_sec = program.get<double>("--time");
 
-    bool interactive = !program.get<bool>("--stream");
-#ifdef TETHER_HAS_TERMINAL_UI
-    if (interactive && !Tether::TUI::Session::available()) {
-        if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal  —  falling back to --stream");
-        }
-        interactive = false;
-    }
-#else
-    if (interactive) {
-        if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "built without ncurses  —  using --stream mode");
-        }
-        interactive = false;
-    }
-#endif
+    const bool interactive =
+        Tether::Examples::wantsInteractive(program, TAG);
 
     Tether::Platform::ensureRealtimeKernelOrExit();
     Tether::Utils::SignalHandler sig_handler(g_cancel);
 
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, iface, TAG)) {
         return 2;
     }
 
     EtherCAT::Master master;
     sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
-    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
+    EtherCAT::debug::applyFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::setupEncapsulation(session, master, encapsulation, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
-    Tether::Examples::startHostPollThread(session, TAG);
-    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::startHostPollThread(session, TAG);
+    if (!EtherCAT::startHostMaster(session, master, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
@@ -272,7 +243,7 @@ int main(int argc, char** argv) {
     if (slaves.empty()) {
         TETHER_LOGE(TAG, "No slaves discovered");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -286,7 +257,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "No PWM terminal (EL2502/EL2535/EL2564) "
                     "found in the chain");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 6;
     }
     auto& pwm = *pwm_opt;
@@ -295,7 +266,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "PWM bring-up failed: {}",
                     Beckhoff::errorToString(r.error()));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 7;
     }
     TETHER_LOGI(TAG, "{} on slave {}: {} channel(s)",
@@ -313,7 +284,7 @@ int main(int argc, char** argv) {
     pwm.allOff();
     pwm.stop();
     master.stop();
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
 
     TETHER_LOGI(TAG, "Done.");
     return 0;

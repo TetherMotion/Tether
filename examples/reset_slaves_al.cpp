@@ -34,8 +34,8 @@
 #include "tether/ethercat/ESIParser.hpp"
 #include "tether/platform/EspCompat.hpp"
 
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 static const char* TAG = "reset_slaves_al";
 
@@ -92,13 +92,9 @@ int main(int argc, char** argv) {
         .default_value(std::string("1"))
         .help("Target ESM state as decimal or hex (default 1 = INIT). Prefix with 0x for hex.");
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    std::string iface       = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    std::string iface       = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     std::string debug_str   = program.get<std::string>("--debug");
     std::string esi_xml     = program.get<std::string>("--esi-xml");
 #if !TETHER_HAVE_ESI
@@ -169,11 +165,11 @@ int main(int argc, char** argv) {
         selected_slaves = parseSlaveIndices(program.get<std::vector<std::string>>("--slave"));
     }
 
-    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
-    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+    if (EtherCAT::debug::printFlagsHelp(debug_str)) return 0;
+    auto debug_flags = EtherCAT::debug::parseFlags(debug_str);
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"),
             encapsulation, TAG)) {
         return 1;
     }
@@ -191,32 +187,32 @@ int main(int argc, char** argv) {
     } else {
         TETHER_LOGI(TAG, "Selected slaves: all");
     }
-    Tether::Examples::logEncapsulationConfig(encapsulation, TAG);
+    EtherCAT::logEncapsulationConfig(encapsulation, TAG);
 
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, iface, TAG)) {
         return 2;
     }
 
     EtherCAT::Master master;
-    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
+    EtherCAT::debug::applyFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::setupEncapsulation(session, master, encapsulation, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
-    Tether::Examples::startHostPollThread(session, TAG);
+    EtherCAT::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::startHostMaster(session, master, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
     if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGW(TAG, "No slaves discovered");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -226,7 +222,7 @@ int main(int argc, char** argv) {
     if (slaves == 0) {
         TETHER_LOGW(TAG, "No slaves found  —  check wiring, power, and interface name");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -246,7 +242,7 @@ int main(int argc, char** argv) {
     if (targets.empty()) {
         TETHER_LOGW(TAG, "No valid slaves selected for reset");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -300,7 +296,7 @@ int main(int argc, char** argv) {
 #endif
 
     master.stop();
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
 
     if (fail_count == 0) {
         return 0;

@@ -25,8 +25,8 @@
 #include "tether/ethercat/ESIParser.hpp"
 #include "tether/platform/EspCompat.hpp"
 
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 static const char* TAG = "AS715N_CheckError";
 
@@ -212,19 +212,14 @@ int main(int argc, char** argv) {
     program.add_argument("--software-reset").default_value(false).implicit_value(true)
         .help("Perform a software reset via F31.02 (write 1 to 0x2031:02); does not require a fault to be present");
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << std::endl;
-        std::cerr << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    std::string iface = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     if (iface.empty()) {
         return 1;
     }
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(
             program.get<std::string>("--encapsulation"), encapsulation,
             TAG)) {
         return 1;
@@ -254,8 +249,8 @@ int main(int argc, char** argv) {
 
     TETHER_LOGI(TAG, "AS715N error-code inspector (host)\nNetwork interface: {}", iface.c_str());
 
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, iface, TAG)) {
         return 2;
     }
 
@@ -263,15 +258,15 @@ int main(int argc, char** argv) {
     mcfg.enable_mailbox_fallback = true;
     EtherCAT::Master master(mcfg);
 
-    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::setupEncapsulation(session, master, encapsulation, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
-    Tether::Examples::startHostPollThread(session, TAG);
+    EtherCAT::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::startHostMaster(session, master, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
@@ -282,7 +277,7 @@ int main(int argc, char** argv) {
     uint16_t slaves = master.getDiscoveredSlaveCount();
     TETHER_LOGI(TAG, "Discovered {} slave(s)", slaves);
     if (slaves == 0) {
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
@@ -299,7 +294,7 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
 
     return rc;
 }

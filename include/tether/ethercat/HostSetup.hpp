@@ -7,21 +7,21 @@
 #include <string>
 #include <thread>
 
+#include "tether/ethercat/Encapsulation.hpp"
 #include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/NetworkAbstraction.hpp"
 #include "tether/ethercat/VLANRouter.hpp"
 #include "tether/hal/IEthernet.hpp"
 
-#include "ExampleHelpers.hpp"
-
 namespace Tether::Utils { class SignalHandler; }
 
-namespace Tether::Examples {
+namespace EtherCAT {
 
 // ============================================================================
 // Host Ethernet + EtherCAT Master session helpers
 //
 // These functions encapsulate the repetitive boilerplate found in every
-// Linux host example:
+// Linux host application:
 //   1. createDefaultEthernet() + init() + link-check + getMacAddress()
 //   2. NetworkInterface wrapper held in the session (no process-global
 //      registration  -  the iface/src MAC are passed directly to Master::start)
@@ -32,12 +32,12 @@ namespace Tether::Examples {
 // ============================================================================
 
 struct HostEtherNetSession {
-    std::unique_ptr<EtherCAT::HAL::IEthernet> eth;
-    std::unique_ptr<EtherCAT::NetworkInterface> ni;
-    std::unique_ptr<EtherCAT::VLANRouter> router;
+    std::unique_ptr<HAL::IEthernet> eth;
+    std::unique_ptr<NetworkInterface> ni;
+    std::unique_ptr<VLANRouter> router;
     /// Interface the master runs on — set by setupEncapsulation()
     /// (router's per-master view under VLAN, `ni.get()` otherwise).
-    EtherCAT::NetworkInterface* masterInterface = nullptr;
+    NetworkInterface* masterInterface = nullptr;
     std::atomic<bool> pollRunning{false};
     std::thread pollThread;
     uint8_t srcMac[6]{};
@@ -63,9 +63,9 @@ void shutdownHostEthernet(HostEtherNetSession& session);
 /// build lacks TETHER_ENABLE_UDP_ENCAPSULATION), wires up VLAN routing and
 /// the RX callback, and stores the interface the master should start() on
 /// in `session.masterInterface`.  See the lower-level setupEncapsulation()
-/// in ExampleHelpers.hpp for the full behaviour.
+/// in Encapsulation.hpp for the full behaviour.
 bool setupEncapsulation(HostEtherNetSession& session,
-                        EtherCAT::Master& master,
+                        Master& master,
                         const EncapsulationConfig& encapsulation,
                         const char* tag);
 
@@ -73,13 +73,13 @@ bool setupEncapsulation(HostEtherNetSession& session,
 /// setupEncapsulation() (per-master VLAN-router interface under VLAN,
 /// otherwise the session's own NetworkInterface).
 bool startHostMaster(HostEtherNetSession& session,
-                     EtherCAT::Master& master,
+                     Master& master,
                      const char* tag);
 
 /// Convenience: perform full master startup (discover + summary logging).
 /// Returns false if no slaves are found or the master fails to start.
 bool startHostMasterAndDiscover(HostEtherNetSession& session,
-                                EtherCAT::Master& master,
+                                Master& master,
                                 const char* tag);
 
 /// One-call host bring-up: initHostEthernet() + setupEncapsulation() +
@@ -88,11 +88,11 @@ bool startHostMasterAndDiscover(HostEtherNetSession& session,
 /// master.requestCancel() so Ctrl-C wakes SDO/mailbox waiters.
 /// On failure the session is already shut down.
 bool bringUpHost(HostEtherNetSession& session,
-                 EtherCAT::Master& master,
+                 Master& master,
                  const std::string& interfaceName,
                  const EncapsulationConfig& encapsulation,
                  const char* tag,
-                 Utils::SignalHandler* sig = nullptr,
+                 Tether::Utils::SignalHandler* sig = nullptr,
                  bool enable_mailbox_fallback = true);
 
 /// RAII cleanup for a host session: on destruction runs the registered
@@ -119,4 +119,4 @@ private:
     std::function<void()>   on_exit_;
 };
 
-} // namespace Tether::Examples
+} // namespace EtherCAT

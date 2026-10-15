@@ -34,8 +34,8 @@
 #include "tether/platform/Platform.hpp"
 #include "tether/utils/SignalHandler.hpp"
 
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 static const char* TAG = "beckhoff_dcmotor_jog";
 
@@ -81,27 +81,23 @@ int main(int argc, char** argv) {
         .default_value<int>(-1)
         .scan<'i', int>();
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
     if (program.get<bool>("--list-interfaces")) {
-        Tether::Examples::listPhysicalInterfaces(TAG);
+        EtherCAT::HAL::listPhysicalInterfaces(TAG);
         return 0;
     }
 
-    std::string iface = Tether::Examples::resolveInterface(
+    std::string iface = EtherCAT::HAL::resolveInterface(
         program.get<std::string>("--interface"), TAG);
     if (iface.empty()) return 1;
 
     std::string debug_str = program.get<std::string>("--debug");
-    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
-    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+    if (EtherCAT::debug::printFlagsHelp(debug_str)) return 0;
+    auto debug_flags = EtherCAT::debug::parseFlags(debug_str);
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"), encapsulation, TAG)) {
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"), encapsulation, TAG)) {
         return 1;
     }
 
@@ -113,20 +109,20 @@ int main(int argc, char** argv) {
     Tether::Platform::ensureRealtimeKernelOrExit();
     Tether::Utils::SignalHandler sig_handler(g_cancel);
 
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) return 2;
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, iface, TAG)) return 2;
 
     EtherCAT::Master master;
     sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
-    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
+    EtherCAT::debug::applyFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::setupEncapsulation(session, master, encapsulation, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
-    Tether::Examples::startHostPollThread(session, TAG);
-    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::startHostPollThread(session, TAG);
+    if (!EtherCAT::startHostMaster(session, master, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
@@ -134,7 +130,7 @@ int main(int argc, char** argv) {
     if (slaves.empty()) {
         TETHER_LOGE(TAG, "No slaves discovered");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
     for (const auto& s : slaves) {
@@ -154,7 +150,7 @@ int main(int argc, char** argv) {
     if (!mot) {
         TETHER_LOGE(TAG, "No EL73xx DC-motor terminal found in the chain");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 6;
     }
     TETHER_LOGI(TAG, "{} at slave {}: {} axis(es)",
@@ -164,7 +160,7 @@ int main(int argc, char** argv) {
         TETHER_LOGE(TAG, "bring-up failed: {}",
                     Beckhoff::errorToString(r.error()));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 7;
     }
 
@@ -178,30 +174,23 @@ int main(int argc, char** argv) {
         mot->setEnable(a, true);
     }
 
-    const auto t0 = std::chrono::steady_clock::now();
-    auto elapsed = [&]() {
-        return std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - t0).count();
-    };
-
     int16_t vel = static_cast<int16_t>(velocity);
     TETHER_LOGI(TAG, "jogging at velocity {} (flip every {} s)",
                 vel, period);
-    while (!g_cancel.load()) {
-        if (duration_sec > 0.0 && elapsed() >= duration_sec) break;
-        const int16_t v =
-            (period > 0.0 &&
-             static_cast<long>(elapsed() / period) % 2 == 1) ? -vel : vel;
-        for (size_t a = 0; a < mot->axisCount(); ++a) {
-            if (only_axis < 0 || static_cast<size_t>(only_axis) == a) {
-                mot->setVelocity(a, v);
+    Tether::Platform::runCancellableLoop(
+        g_cancel, duration_sec, 200, [&](double t) {
+            const int16_t v =
+                (period > 0.0 &&
+                 static_cast<long>(t / period) % 2 == 1) ? -vel : vel;
+            for (size_t a = 0; a < mot->axisCount(); ++a) {
+                if (only_axis < 0 ||
+                    static_cast<size_t>(only_axis) == a) {
+                    mot->setVelocity(a, v);
+                }
             }
-        }
-        std::cout << std::format("t={:7.3f} vel={:>6}{}\n",
-                                 elapsed(), v, axisStates(*mot));
-        std::cout.flush();
-        Tether::Platform::Clock::instance().delayMilliseconds(200);
-    }
+            Tether::Utils::printTimestamped(
+                t, std::format("vel={:>6}{}", v, axisStates(*mot)));
+        });
 
     // Ramp down and disable before leaving OP.
     for (size_t a = 0; a < mot->axisCount(); ++a) {
@@ -210,7 +199,7 @@ int main(int argc, char** argv) {
     }
     Tether::Platform::Clock::instance().delayMilliseconds(100);
     master.stop();
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
     TETHER_LOGI(TAG, "Done.");
     return 0;
 }

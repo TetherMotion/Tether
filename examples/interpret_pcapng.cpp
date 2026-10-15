@@ -33,6 +33,8 @@
 #include "tether/packetloggers/pcap/PCAPNGReader.hpp"
 #include "tether/packetloggers/pcap/FrameFormatter.hpp"
 
+#include "common/ParseArgs.hpp"
+
 namespace {
 
 namespace PCP = Tether::PacketLoggers::PCAP;
@@ -1243,12 +1245,7 @@ int main(int argc, char** argv) {
         .implicit_value(true)
         .help("Skip non-EtherCAT frames");
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
     const std::string input = program.get<std::string>("input");
     const bool verbose = program.get<bool>("--verbose");

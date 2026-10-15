@@ -4,6 +4,7 @@
 set(TETHER_HAL_SOURCES
     ${TETHER_ROOT}/src/hal/HAL_Common.cpp
     ${TETHER_ROOT}/src/hal/EthernetHAL_Common.cpp
+    ${TETHER_ROOT}/src/hal/InterfaceHelpers.cpp
     ${TETHER_ROOT}/src/hal/StateMachineLogger.cpp
     # Note: FIFOHAL.cpp and LoopbackHAL.cpp excluded - outdated interface implementation
 )

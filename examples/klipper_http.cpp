@@ -44,6 +44,8 @@
 
 #include <argparse/argparse.hpp>
 
+#include "common/ParseArgs.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -670,12 +672,7 @@ int main(int argc, char* argv[]) {
         .default_value(100)
         .help("Simulation tick interval in ms (default: 100, min: 10)");
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::exception& e) {
-        std::cerr << e.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
     const auto port = static_cast<uint16_t>(program.get<int>("--port"));
     const bool withMoonraker = program.get<bool>("--with-moonraker");

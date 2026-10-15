@@ -39,7 +39,7 @@ inline bool startHostMasterSession(const std::string& interface_name,
                                    EtherCAT::DS402Master& master,
                                    HostMasterSession& session,
                                    const char* tag,
-                                   const EncapsulationConfig& encapsulation = EncapsulationConfig{})
+                                   const EtherCAT::EncapsulationConfig& encapsulation = EtherCAT::EncapsulationConfig{})
 {
     session.ethernet = EtherCAT::HAL::createDefaultEthernet();
     if (!session.ethernet) {
@@ -55,7 +55,7 @@ inline bool startHostMasterSession(const std::string& interface_name,
     const auto init_result = session.ethernet->init(config);
     if (init_result != EtherCAT::HAL::Error::OK) {
         if (init_result == EtherCAT::HAL::Error::PermissionDenied) {
-            logPermissionDeniedError(tag);
+            EtherCAT::HAL::logPermissionDeniedError(tag);
         } else {
             TETHER_LOGE(tag, "Critical error: Prerequisites for operation not fulfilled ({})",
                         magic_enum::enum_name(init_result).data());
@@ -94,7 +94,7 @@ inline bool startHostMasterSession(const std::string& interface_name,
 
     // One-call encapsulation setup: kernel cBPF filter, EtherCAT-over-UDP,
     // VLAN router + RX callback.  Returns the interface the master runs on.
-    EtherCAT::NetworkInterface* master_iface = setupEncapsulation(
+    EtherCAT::NetworkInterface* master_iface = EtherCAT::setupEncapsulation(
         *session.ethernet, *session.network_interface, ecat, session.router,
         encapsulation, tag);
     if (!master_iface) {
@@ -217,7 +217,7 @@ struct MotionNativeArgs {
     double torque_amplitude   = 1000.0;    // 0.1% of rated torque (CST)
     double frequency_hz       = 0.25;      // sine frequency
     std::string csv_path;                  // if non-empty, log PDOs to CSV
-    EncapsulationConfig encapsulation;
+    EtherCAT::EncapsulationConfig encapsulation;
 };
 
 /// Parse the standard motion-native arguments (`-i`/`--interface`,
@@ -271,7 +271,7 @@ inline bool parseMotionNativeArgs(int argc, char** argv,
         return false;
     }
 
-    out.interface = Tether::Examples::resolveInterface(
+    out.interface = EtherCAT::HAL::resolveInterface(
         program.get<std::string>("--interface"), program_name);
     if (out.interface.empty()) {
         return false;
@@ -288,11 +288,11 @@ inline bool parseMotionNativeArgs(int argc, char** argv,
     out.torque_amplitude = program.get<double>("--torque");
     out.frequency_hz = program.get<double>("--frequency");
     out.csv_path = program.get<std::string>("--csv");
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"),
             out.encapsulation, program_name)) {
         return false;
     }
-    Tether::Examples::logEncapsulationConfig(out.encapsulation, program_name);
+    EtherCAT::logEncapsulationConfig(out.encapsulation, program_name);
     return true;
 }
 

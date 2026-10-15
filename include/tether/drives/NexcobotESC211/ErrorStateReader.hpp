@@ -65,7 +65,7 @@ public:
      * Mirrors the order of operations in the reference Python
      * `get_esc_error_info`: state, error code, error message, diagnostic.
      * On a per-field SDO abort the exact abort code is reported via
-     * `Tether::Examples::reportSdoAbort` (when available) and the snapshot
+     * `EtherCAT::reportSdoAbort` (when available) and the snapshot
      * is marked invalid, but the remaining fields are still attempted so
      * the operator gets as much diagnostic context as possible.
      */

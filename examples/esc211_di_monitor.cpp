@@ -37,8 +37,8 @@
 
 #include "tether/drives/NexcobotESC211/PdoSetup.hpp"
 
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 // ncurses last: it #defines OK/ERR/timeout/... which collide with
 // identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
@@ -148,71 +148,64 @@ int main(int argc, char** argv) {
     Tether::Examples::addDebugConditionArgs(program);
     Tether::Examples::addMailboxSizeArg(program, 512);
     Tether::Examples::addMailboxAddressArg(program);
-    program.add_argument("--stream")
-        .default_value(false)
-        .implicit_value(true)
-        .help("Stream DI values to stdout instead of ncurses UI");
+    Tether::Examples::addStreamArgs(
+        program, "Stream DI values to stdout instead of ncurses UI");
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::ostringstream oss;
-        oss << program;
-        std::print(stderr, "{}\n{}", err.what(), oss.str());
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    std::string iface = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     int slave_idx = program.get<int>("--slave");
     double duration_sec = program.get<double>("--time");
     std::string debug_str = program.get<std::string>("--debug");
-    bool stream_mode = program.get<bool>("--stream");
+    const bool interactive =
+        Tether::Examples::wantsInteractive(program, TAG);
 
-    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
-    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+    if (EtherCAT::debug::printFlagsHelp(debug_str)) return 0;
+    auto debug_flags = EtherCAT::debug::parseFlags(debug_str);
 
     std::string debug_start = program.get<std::string>("--debug-start");
     std::string debug_stop = program.get<std::string>("--debug-stop");
-    if (Tether::Examples::printDebugConditionHelpIfRequested(debug_start)) return 0;
+    if (EtherCAT::debug::printConditionHelp(debug_start)) return 0;
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"),
             encapsulation, TAG)) {
         return 1;
     }
 
-    Tether::Examples::MailboxSizeConfig mbSize;
-    if (!Tether::Examples::parseMailboxSize(program.get<std::string>("--mailbox-size"), mbSize)) {
+    EtherCAT::MailboxSizeConfig mbSize;
+    if (!EtherCAT::parseMailboxSize(program.get<std::string>("--mailbox-size"), mbSize)) {
         return 1;
     }
-    Tether::Examples::MailboxAddressConfig mbAddr;
-    if (!Tether::Examples::parseMailboxAddress(program.get<std::string>("--mailbox-address"), mbAddr)) {
+    EtherCAT::MailboxAddressConfig mbAddr;
+    if (!EtherCAT::parseMailboxAddress(program.get<std::string>("--mailbox-address"), mbAddr)) {
         return 1;
     }
 
     TETHER_LOGI(TAG, "esc211_di_monitor — interface: {}, slave: {}",
                 iface.c_str(), slave_idx);
-    Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
+    EtherCAT::logMailboxConfig(mbSize, mbAddr, TAG);
 
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, iface, TAG)) {
         return 2;
     }
 
     EtherCAT::Master master;
     g_master = &master;
     sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
-    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
-    Tether::Examples::applyDebugGateConditions(debug_start, debug_stop, master, TAG);
+    EtherCAT::debug::applyFlags(debug_flags, master, TAG);
+    EtherCAT::debug::applyGateConditions(debug_start, debug_stop, master, TAG);
 
-    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::setupEncapsulation(session, master, encapsulation, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
-    Tether::Examples::startHostPollThread(session, TAG);
+    EtherCAT::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::startHostMaster(session, master, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
@@ -242,14 +235,14 @@ int main(int argc, char** argv) {
     if (slaves == 0) {
         TETHER_LOGE(TAG, "No slaves found — check wiring, power, and interface name");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
 
     if (slave_idx < 0 || static_cast<uint16_t>(slave_idx) >= slaves) {
         TETHER_LOGE(TAG, "Slave index {} out of range (0..{})", slave_idx, slaves - 1);
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -282,7 +275,7 @@ int main(int argc, char** argv) {
     if (mb_err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "Mailbox config failed: {}", EtherCAT::slaveErrorToString(mb_err));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 7;
     }
 
@@ -290,7 +283,7 @@ int main(int argc, char** argv) {
     if (pre_err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "PRE-OP transition failed: {}", EtherCAT::slaveErrorToString(pre_err));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 7;
     }
 
@@ -318,7 +311,7 @@ int main(int argc, char** argv) {
             /*fsoe_channels=*/0)) {
         TETHER_LOGE(TAG, "ESI PDO assignment failed");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 7;
     }
 
@@ -327,7 +320,7 @@ int main(int argc, char** argv) {
     if (apply_err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "Apply custom PDOs failed: {}", EtherCAT::slaveErrorToString(apply_err));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 7;
     }
 
@@ -335,7 +328,7 @@ int main(int argc, char** argv) {
     if (pdo_err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "PDO sync-manager config failed: {}", EtherCAT::slaveErrorToString(pdo_err));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 7;
     }
 
@@ -343,7 +336,7 @@ int main(int argc, char** argv) {
     if (safe_err != EtherCAT::SlaveError::Ok) {
         TETHER_LOGE(TAG, "SAFE-OP transition failed: {}", EtherCAT::slaveErrorToString(safe_err));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 7;
     }
 
@@ -379,7 +372,7 @@ int main(int argc, char** argv) {
             findPDOBuffer(0x1A01, EtherCAT::PDO::PDODirection::TxPDO));
     };
 
-    if (stream_mode) {
+    if (!interactive) {
         TETHER_LOGI(TAG, "Streaming TxPDO 0x1A01 (DI monitor)...");
         while (!sig_handler.stop_requested()) {
             const auto* tx = getTxPDO();
@@ -439,6 +432,6 @@ int main(int argc, char** argv) {
     }
 
     master.stop();
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
     return 0;
 }

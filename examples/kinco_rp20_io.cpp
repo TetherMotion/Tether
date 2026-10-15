@@ -55,8 +55,8 @@
 #include "tether/ui/KeyMap.hpp"
 #endif
 
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 // ncurses last: it #defines OK/ERR/timeout/... which collide with
 // identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
@@ -1043,13 +1043,9 @@ int main(int argc, char** argv) {
         .help("Use ncurses interactive UI for toggling outputs");
     addModuleArguments(program);
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
-    std::string iface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    std::string iface = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     std::string debug_str = program.get<std::string>("--debug");
     double duration_sec = program.get<double>("--time");
     int slot_scan_delay = program.get<int>("--slot-scan-delay");
@@ -1071,23 +1067,23 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
-    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+    if (EtherCAT::debug::printFlagsHelp(debug_str)) return 0;
+    auto debug_flags = EtherCAT::debug::parseFlags(debug_str);
 
     Tether::Platform::ensureRealtimeKernelOrExit();
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"),
             encapsulation, TAG)) {
         return 1;
     }
 
-    Tether::Examples::MailboxSizeConfig mbSize;
-    if (!Tether::Examples::parseMailboxSize(program.get<std::string>("--mailbox-size"), mbSize)) {
+    EtherCAT::MailboxSizeConfig mbSize;
+    if (!EtherCAT::parseMailboxSize(program.get<std::string>("--mailbox-size"), mbSize)) {
         return 1;
     }
-    Tether::Examples::MailboxAddressConfig mbAddr;
-    if (!Tether::Examples::parseMailboxAddress(program.get<std::string>("--mailbox-address"), mbAddr)) {
+    EtherCAT::MailboxAddressConfig mbAddr;
+    if (!EtherCAT::parseMailboxAddress(program.get<std::string>("--mailbox-address"), mbAddr)) {
         return 1;
     }
 
@@ -1117,32 +1113,32 @@ int main(int argc, char** argv) {
 
     TETHER_LOGI(TAG, "kinco_rp20_io  —  interface: {}, duration: {:.1f} s",
                 iface.c_str(), duration_sec);
-    Tether::Examples::logEncapsulationConfig(encapsulation, TAG);
-    Tether::Examples::logMailboxConfig(mbSize, mbAddr, TAG);
+    EtherCAT::logEncapsulationConfig(encapsulation, TAG);
+    EtherCAT::logMailboxConfig(mbSize, mbAddr, TAG);
 
     // ---- Signal handlers ----
     Tether::Utils::SignalHandler sig_handler(g_running, false);
 
     // ---- Host Ethernet setup ----
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, iface, TAG)) {
         return 2;
     }
 
     EtherCAT::Master master;
     g_master = &master;
     sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
-    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
+    EtherCAT::debug::applyFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::setupEncapsulation(session, master, encapsulation, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
-    Tether::Examples::startHostPollThread(session, TAG);
+    EtherCAT::startHostPollThread(session, TAG);
 
-    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::startHostMaster(session, master, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
@@ -1150,7 +1146,7 @@ int main(int argc, char** argv) {
     if (master.discovery().discover(EtherCAT::DiscoveryOptions()).empty()) {
         TETHER_LOGE(TAG, "No slaves discovered");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -1180,7 +1176,7 @@ int main(int argc, char** argv) {
             if (!master.autoConfigureMailbox(s, Tether::Platform::LogLevel::Info)) {
                 TETHER_LOGE(TAG, "{}: autoConfigureMailbox also failed", master.slaveLogPrefix(s).c_str());
                 master.stop();
-                Tether::Examples::shutdownHostEthernet(session);
+                EtherCAT::shutdownHostEthernet(session);
                 return 7;
             }
             sl.assumeMailboxAlreadyConfigured();
@@ -1191,7 +1187,7 @@ int main(int argc, char** argv) {
             TETHER_LOGE(TAG, "{}: PRE-OP transition failed: {}",
                         master.slaveLogPrefix(s).c_str(), EtherCAT::slaveErrorToString(pre_err));
             master.stop();
-            Tether::Examples::shutdownHostEthernet(session);
+            EtherCAT::shutdownHostEthernet(session);
             return 8;
         }
         TETHER_LOGI(TAG, "{}: in PRE-OP", master.slaveLogPrefix(s).c_str());
@@ -1210,7 +1206,7 @@ int main(int argc, char** argv) {
     if (modules.empty()) {
         TETHER_LOGE(TAG, "No RP20 modules found on any slave");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 6;
     }
 
@@ -1226,7 +1222,7 @@ int main(int argc, char** argv) {
     if (!registerPDOBuffers(master, modules)) {
         TETHER_LOGE(TAG, "Failed to register PDO buffers");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 9;
     }
 
@@ -1262,7 +1258,7 @@ int main(int argc, char** argv) {
             TETHER_LOGE(TAG, "{}: SAFE-OP transition failed: {}",
                         master.slaveLogPrefix(s).c_str(), EtherCAT::slaveErrorToString(safe_err));
             master.stop();
-            Tether::Examples::shutdownHostEthernet(session);
+            EtherCAT::shutdownHostEthernet(session);
             return 10;
         }
         TETHER_LOGI(TAG, "{}: in SAFE-OP", master.slaveLogPrefix(s).c_str());
@@ -1291,7 +1287,7 @@ int main(int argc, char** argv) {
     if (!master.startRealtimeMotionControlLoop(loop_config)) {
         TETHER_LOGE(TAG, "Failed to start realtime motion loop");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 11;
     }
 
@@ -1310,7 +1306,7 @@ int main(int argc, char** argv) {
                         master.slaveLogPrefix(s).c_str(), EtherCAT::slaveErrorToString(op_err));
             master.stopMotionControlLoop();
             master.stop();
-            Tether::Examples::shutdownHostEthernet(session);
+            EtherCAT::shutdownHostEthernet(session);
             return 12;
         }
         TETHER_LOGI(TAG, "{}: in OP", master.slaveLogPrefix(s).c_str());
@@ -1358,7 +1354,7 @@ int main(int argc, char** argv) {
     master.stopMotionControlLoop();
     master.stop();
     g_master = nullptr;
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
 
     TETHER_LOGI(TAG, "Done. Total cycles: {}",
                 static_cast<unsigned long long>(cycle_count.load()));

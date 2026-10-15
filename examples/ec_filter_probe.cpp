@@ -25,8 +25,8 @@
 
 #include <argparse/argparse.hpp>
 
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 #include "logging/Logger.hpp"
 #include "tether/ethercat/CBPFProgramFactory.hpp"
 #include "tether/ethercat/CyclicChannel.hpp"
@@ -113,14 +113,10 @@ ProbeConfig parseArgs(int argc, char** argv) {
         .default_value(0)
         .help("802.1Q VLAN id for probe frames (0 = untagged, default)");
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        std::exit(2);
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) std::exit(2);
 
     if (program.get<bool>("--list-interfaces")) {
-        Tether::Examples::listPhysicalInterfaces(kTag);
+        EtherCAT::HAL::listPhysicalInterfaces(kTag);
         std::exit(0);
     }
 
@@ -133,7 +129,7 @@ ProbeConfig parseArgs(int argc, char** argv) {
     }
 
     ProbeConfig cfg;
-    cfg.ifname = Tether::Examples::resolveInterface(
+    cfg.ifname = EtherCAT::HAL::resolveInterface(
         program.get<std::string>("--interface"), kTag);
 
     const int vlanArg = program.get<int>("--vlan");
@@ -723,18 +719,18 @@ void runCyclicChannelTest(const ProbeConfig& cfg,
 void runCyclicExecutiveTest(const ProbeConfig& cfg) {
     printf("\n=== cyclic executive test (Master::startCyclicLoop) ===\n");
 
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, cfg.ifname, kTag))
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, cfg.ifname, kTag))
         return;   // error already logged
 
     EtherCAT::Master master;
-    Tether::Examples::EncapsulationConfig encap;
+    EtherCAT::EncapsulationConfig encap;
     if (cfg.vlan) {
         encap.txVlan  = cfg.vlan;
         encap.rxRange = EtherCAT::VLANRouter::VLANRange{cfg.vlan, cfg.vlan};
     }
-    if (!Tether::Examples::setupEncapsulation(session, master, encap, kTag)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::setupEncapsulation(session, master, encap, kTag)) {
+        EtherCAT::shutdownHostEthernet(session);
         return;
     }
     // Under VLAN routing master_iface is the router stub without a
@@ -743,9 +739,9 @@ void runCyclicExecutiveTest(const ProbeConfig& cfg) {
     if (encap.vlanActive())
         master.setWireFd(static_cast<int>(reinterpret_cast<intptr_t>(
             session.eth->nativeHandle())));
-    Tether::Examples::startHostPollThread(session, kTag);
-    if (!Tether::Examples::startHostMaster(session, master, kTag)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::startHostPollThread(session, kTag);
+    if (!EtherCAT::startHostMaster(session, master, kTag)) {
+        EtherCAT::shutdownHostEthernet(session);
         return;
     }
 
@@ -764,7 +760,7 @@ void runCyclicExecutiveTest(const ProbeConfig& cfg) {
     if (!master.logicalAddressManager().buildAddressMap(&sc, 1)) {
         fprintf(stderr, "buildAddressMap failed\n");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return;
     }
 
@@ -774,7 +770,7 @@ void runCyclicExecutiveTest(const ProbeConfig& cfg) {
     if (!master.startCyclicLoop(loop_cfg)) {
         fprintf(stderr, "startCyclicLoop failed\n");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return;
     }
 
@@ -828,7 +824,7 @@ void runCyclicExecutiveTest(const ProbeConfig& cfg) {
     printf("verdict: %s\n", verdict);
 
     master.stop();
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
 }
 
 /// Run the kernel packet-ring matrix: TX-ring drain, VLAN auxdata delivery,

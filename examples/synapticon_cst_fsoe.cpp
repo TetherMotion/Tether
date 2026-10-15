@@ -878,7 +878,7 @@ struct Args {
     uint16_t watchdog_ms = EtherCAT::Drives::Synapticon::SafeMotion::Timing::kMinimumWatchdogTimeMs;
     uint32_t diag_interval_ms = 1000;
     std::string debug;
-    Tether::Examples::EncapsulationConfig encapsulation;
+    EtherCAT::EncapsulationConfig encapsulation;
     ///< STO override: -1 = not set (use motionEnabled default), 0 = force STO off, 1 = force STO on
     int sto_override = -1;
     ///< SOS override: -1 = not set (defaults to STO value), 0 = force SOS off, 1 = force SOS on
@@ -981,14 +981,9 @@ bool parseArgs(int argc, char** argv, Args& out) {
         .default_value(static_cast<int>(0))
         .help("Motor rated torque in mNm (0 = auto-detect from object 0x6076)");
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return false;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return false;
 
-    out.interface = Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+    out.interface = EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     out.slave_index = program.get<int>("--slave");
     out.duration = program.get<double>("--duration");
     out.enable_dc_sync = program.get<bool>("--dc-sync");
@@ -1014,11 +1009,11 @@ bool parseArgs(int argc, char** argv, Args& out) {
         std::cerr << "--torque-nm must be >= 0\n";
         return false;
     }
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"),
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"),
             out.encapsulation, TAG)) {
         return false;
     }
-    Tether::Examples::logEncapsulationConfig(out.encapsulation, TAG);
+    EtherCAT::logEncapsulationConfig(out.encapsulation, TAG);
     return true;
 }
 
@@ -1109,8 +1104,8 @@ int main(int argc, char** argv) {
         // ExampleHelpers parser, which supports per-slave filter syntax.
         {
             const auto debug_flags =
-                Tether::Examples::parseDebugFlags(args.debug);
-            Tether::Examples::applyDebugFlags(
+                EtherCAT::debug::parseFlags(args.debug);
+            EtherCAT::debug::applyFlags(
                 debug_flags, master.ethercatMaster(), TAG);
         }
 

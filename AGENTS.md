@@ -358,6 +358,39 @@ gauge Limits view, composite Entities view, LogPane).
   size constant must be a free `inline constexpr` — nested constants
   are not visible in the base-specifier.
 
+### Example helpers (`examples/common/`)
+
+Shared argparse-bound CLI machinery for the dual-mode (ncurses TUI +
+`--stream`) examples, in `ExampleHelpers.hpp/.cpp` (linked via
+`tether_examples_common`) and the header-only `ParseArgs.hpp` (usable
+without the lib):
+
+- `parseArgs(program, argc, argv)` — try/parse_args/catch+usage in one
+  call: `if (!parseArgs(program, argc, argv)) return 1;`
+- `addStreamArgs(program, streamHelp)` — the `--interactive`/`--stream`
+  flag pair.
+- `wantsInteractive(program, tag)` — resolves --stream (wins) vs
+  interactive, probing `TUI::Session::available()` under
+  `TETHER_HAS_TERMINAL_UI`; a forced `--interactive` that can't run
+  logs a fallback warning.  Replaces the per-file 16-line
+  stream/interactive dispatch block.
+- `add*Arg`/`resolveSlaveIndices` — the `--interface`/`--slave`/`--time`/
+  `--debug`/`--mailbox-*`/`--esi-xml` argument declarations.
+
+The generic machinery that used to live here has been promoted into the
+library proper — prefer those headers directly:
+
+| Library API | Header | Purpose |
+|---|---|---|
+| `Tether::Platform::runCancellableLoop` | `tether/platform/CancellableLoop.hpp` | `body(elapsed)` every `interval_ms` until cancel/duration — the `t0`/`stamp()`/`while(!g_cancel)`/`delayMilliseconds` skeleton |
+| `Tether::Utils::printTimestamped` | `tether/utils/StreamPrint.hpp` | `t={t:7.3f}  {line}` + flush — the stream-mode timestamp column |
+| `EtherCAT::HostEtherNetSession`, `initHostEthernet`, `setupEncapsulation`, `startHostMaster(AndDiscover)`, `startHostPollThread`, `shutdownHostEthernet`, `bringUpHost`, `HostSessionGuard` | `tether/ethercat/HostSetup.hpp` | host Ethernet + master lifecycle (HAL init → NetworkInterface → poll thread → Master::start → graceful shutdown) |
+| `EtherCAT::EncapsulationConfig`, `parseEncapsulationSpec`, `logEncapsulationConfig`, `buildEncapsulationBpfProgram`, `attachEncapsulationBpfFilter`, `setupEncapsulation` | `tether/ethercat/Encapsulation.hpp` | `--encapsulation` grammar, cBPF ingress filter, VLAN router + EtherCAT-over-UDP wiring |
+| `EtherCAT::debug::parseFlags`, `applyFlags`, `applyGateConditions`, `printFlagsHelp`, `printConditionHelp` | `tether/ethercat/DebugHelpers.hpp` | `--debug` flag-spec parsing and application to `Master`/`DebugGate` |
+| `EtherCAT::HAL::resolveInterface`, `listPhysicalInterfaces`, `logPermissionDeniedError` | `tether/hal/InterfaceHelpers.hpp` | NIC auto-selection, `--list-interfaces` output, CAP_NET_RAW error text |
+| `EtherCAT::MailboxSizeConfig`, `MailboxAddressConfig`, `parseMailboxSize`, `parseMailboxAddress`, `logMailboxConfig` | `tether/ethercat/MailboxEndpointConfig.hpp` | `in:X,out:Y` mailbox size/address spec parsing |
+| `EtherCAT::reportSdoAbort` | `tether/ethercat/SdoAbortReport.hpp` | user-facing CoE SDO-abort decode (call after `SlaveError::SDOAborted`) |
+
 ### Tether IO client (`tether_io_client`)
 
 `tools/tether_io_client/` is a standalone C++ client for the Tether IO V6

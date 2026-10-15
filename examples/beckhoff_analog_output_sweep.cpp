@@ -47,11 +47,11 @@
 #ifdef TETHER_HAS_TERMINAL_UI
 #include "tether/terminal_ui/Session.hpp"
 #include "tether/terminal_ui/TreeScreen.hpp"
+#include "tether/ethercat/HostSetup.hpp"
 #include "common/DeviceTree.hpp"
 #endif
 
 #include "common/ExampleHelpers.hpp"
-#include "common/EtherCATHostSetup.hpp"
 
 // ncurses last: it #defines OK/ERR/timeout/... which collide with
 // identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
@@ -229,33 +229,26 @@ static void runTui(Beckhoff::MultiAnalogOutputTerminal<>& outs,
 
 static void runStream(Beckhoff::MultiAnalogOutputTerminal<>& outs,
                       double duration_sec) {
-    const auto t0 = std::chrono::steady_clock::now();
-    auto stamp = [&]() {
-        return std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - t0).count();
-    };
-
     Sweep sweep;
-    std::cout << std::format("t={:7.3f} ch {:>3} {:+d}  {}\n",
-                             stamp(), sweep.channel, sweep.value,
-                             moduleStates(outs));
-    std::cout.flush();
+    Tether::Utils::printTimestamped(
+        0.0, std::format("ch {:>3} {:+d}  {}", sweep.channel,
+                         sweep.value, moduleStates(outs)));
 
     auto next_step = std::chrono::steady_clock::now();
-    while (!g_cancel.load()) {
-        if (duration_sec > 0.0 && stamp() >= duration_sec) break;
-        const auto now = std::chrono::steady_clock::now();
-        if (now >= next_step) {
-            next_step = now + std::chrono::milliseconds(5);  // ~1.3 s/ramp
-            if (sweep.tick(outs)) {
-                std::cout << std::format("t={:7.3f} ch {:>3} {:+d}  {}\n",
-                                         stamp(), sweep.channel, sweep.value,
-                                         moduleStates(outs));
-                std::cout.flush();
+    Tether::Platform::runCancellableLoop(
+        g_cancel, duration_sec, 2, [&](double t) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= next_step) {
+                next_step =
+                    now + std::chrono::milliseconds(5);  // ~1.3 s/ramp
+                if (sweep.tick(outs)) {
+                    Tether::Utils::printTimestamped(
+                        t, std::format("ch {:>3} {:+d}  {}",
+                                       sweep.channel, sweep.value,
+                                       moduleStates(outs)));
+                }
             }
-        }
-        Tether::Platform::Clock::instance().delayMilliseconds(2);
-    }
+        });
 }
 
 // ---------------------------------------------------------------------------
@@ -267,34 +260,26 @@ int main(int argc, char** argv) {
     Tether::Examples::addListInterfacesArg(program);
     Tether::Examples::addDebugArg(program);
     Tether::Examples::addDurationArg(program, 0.0);
-    program.add_argument("--interactive")
-        .help("Force the interactive ncurses TUI")
-        .flag();
-    program.add_argument("--stream")
-        .help("Print output state lines instead of the TUI")
-        .flag();
+    Tether::Examples::addStreamArgs(
+        program, "Print output state lines instead of the TUI");
 
-    try { program.parse_args(argc, argv); }
-    catch (const std::runtime_error& err) {
-        std::cerr << err.what() << "\n" << program;
-        return 1;
-    }
+    if (!Tether::Examples::parseArgs(program, argc, argv)) return 1;
 
     if (program.get<bool>("--list-interfaces")) {
-        Tether::Examples::listPhysicalInterfaces(TAG);
+        EtherCAT::HAL::listPhysicalInterfaces(TAG);
         return 0;
     }
 
     std::string iface =
-        Tether::Examples::resolveInterface(program.get<std::string>("--interface"), TAG);
+        EtherCAT::HAL::resolveInterface(program.get<std::string>("--interface"), TAG);
     if (iface.empty()) return 1;
 
     std::string debug_str = program.get<std::string>("--debug");
-    if (Tether::Examples::printDebugHelpIfRequested(debug_str)) return 0;
-    auto debug_flags = Tether::Examples::parseDebugFlags(debug_str);
+    if (EtherCAT::debug::printFlagsHelp(debug_str)) return 0;
+    auto debug_flags = EtherCAT::debug::parseFlags(debug_str);
 
-    Tether::Examples::EncapsulationConfig encapsulation;
-    if (!Tether::Examples::parseEncapsulationArg(program.get<std::string>("--encapsulation"), encapsulation, TAG)) {
+    EtherCAT::EncapsulationConfig encapsulation;
+    if (!EtherCAT::parseEncapsulationSpec(program.get<std::string>("--encapsulation"), encapsulation, TAG)) {
         return 1;
     }
 
@@ -302,43 +287,29 @@ int main(int argc, char** argv) {
 
     // --stream wins when both are given; otherwise interactive is the
     // default and falls back to stream when the terminal can't do a TUI.
-    bool interactive = !program.get<bool>("--stream");
-#ifdef TETHER_HAS_TERMINAL_UI
-    if (interactive && !Tether::TUI::Session::available()) {
-        if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "no usable terminal  —  falling back to --stream");
-        }
-        interactive = false;
-    }
-#else
-    if (interactive) {
-        if (program.get<bool>("--interactive")) {
-            TETHER_LOGW(TAG, "built without ncurses  —  using --stream mode");
-        }
-        interactive = false;
-    }
-#endif
+    const bool interactive =
+        Tether::Examples::wantsInteractive(program, TAG);
 
     Tether::Platform::ensureRealtimeKernelOrExit();
     Tether::Utils::SignalHandler sig_handler(g_cancel);
 
     // ---- Host Ethernet + master bring-up ----
-    Tether::Examples::HostEtherNetSession session;
-    if (!Tether::Examples::initHostEthernet(session, iface, TAG)) {
+    EtherCAT::HostEtherNetSession session;
+    if (!EtherCAT::initHostEthernet(session, iface, TAG)) {
         return 2;
     }
 
     EtherCAT::Master master;
     sig_handler.setCancelCallback([&master]() { master.requestCancel(); });
-    Tether::Examples::applyDebugFlags(debug_flags, master, TAG);
+    EtherCAT::debug::applyFlags(debug_flags, master, TAG);
 
-    if (!Tether::Examples::setupEncapsulation(session, master, encapsulation, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    if (!EtherCAT::setupEncapsulation(session, master, encapsulation, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
-    Tether::Examples::startHostPollThread(session, TAG);
-    if (!Tether::Examples::startHostMaster(session, master, TAG)) {
-        Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::startHostPollThread(session, TAG);
+    if (!EtherCAT::startHostMaster(session, master, TAG)) {
+        EtherCAT::shutdownHostEthernet(session);
         return 5;
     }
 
@@ -349,7 +320,7 @@ int main(int argc, char** argv) {
     if (slaves.empty()) {
         TETHER_LOGE(TAG, "No slaves discovered");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 4;
     }
 
@@ -367,7 +338,7 @@ int main(int argc, char** argv) {
     if (!found || *found == 0) {
         TETHER_LOGE(TAG, "No analog-output terminal found in the chain");
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 6;
     }
     TETHER_LOGI(TAG, "{} analog output terminal(s), {} channel(s) total",
@@ -384,7 +355,7 @@ int main(int argc, char** argv) {
                     outs.lastErrorModule(),
                     Beckhoff::errorToString(r.error()));
         master.stop();
-        Tether::Examples::shutdownHostEthernet(session);
+        EtherCAT::shutdownHostEthernet(session);
         return 7;
     }
 
@@ -401,7 +372,7 @@ int main(int argc, char** argv) {
     // ---- Shutdown: all outputs to 0, then stop ----
     outs.stop();
     master.stop();
-    Tether::Examples::shutdownHostEthernet(session);
+    EtherCAT::shutdownHostEthernet(session);
 
     TETHER_LOGI(TAG, "Done. All outputs zeroed.");
     return 0;
