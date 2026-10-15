@@ -35,7 +35,7 @@ static const char* TAG = "coe_mgr";
 // ============================================================================
 
 void CoEManager::workerLoop() {
-    if (debug_flags_.mailboxConfiguration) {
+    if (debugFlags().mailboxConfiguration) {
         TETHER_LOGI(TAG, "{}: CoE worker thread started", log_prefix_.c_str());
     }
 
@@ -128,7 +128,7 @@ void CoEManager::workerLoop() {
     }
 
     state_.worker_running.store(false);
-    if (debug_flags_.shutdown) {
+    if (debugFlags().shutdown) {
         TETHER_LOGI(TAG, "{}: CoE worker thread stopped", log_prefix_.c_str());
     }
 }

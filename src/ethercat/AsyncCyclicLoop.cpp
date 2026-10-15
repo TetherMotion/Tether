@@ -232,9 +232,6 @@ void AsyncCyclicLoop::main() {
             // merges.
             const uint32_t merged = seq - last;
             last = seq;
-            if (merged > 1)
-                sends_coalesced_.fetch_add(merged - 1,
-                                           std::memory_order_relaxed);
             // Q24: trigger→send latency.  The stamp is CLOCK_MONOTONIC —
             // the newest coalesced trigger's queueing delay.
             const uint64_t stamp = image_.sendStampNs();
@@ -249,11 +246,21 @@ void AsyncCyclicLoop::main() {
                            std::memory_order_relaxed)) {}
             }
             if (t >= send_allowed) {
+                // `merged` triggers collapsed into this one send.
+                if (merged > 1)
+                    sends_coalesced_.fetch_add(merged - 1,
+                                               std::memory_order_relaxed);
                 send_allowed = t + min_send_ns;
                 activity |= doSend();
                 if (config_.collect_mode == CollectMode::OnSend)
                     activity |= doCollect();
             } else {
+                // Rate-limited: this wake's triggers produce no send of their
+                // own — they merge into the trailing send.  When a pending
+                // send already exists, all `merged` fold into it; otherwise
+                // one leads the pending send and merged-1 are coalesced.
+                sends_coalesced_.fetch_add(pending_send ? merged : merged - 1,
+                                           std::memory_order_relaxed);
                 pending_send = true;
             }
         }

@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -195,10 +196,16 @@ public:
     // -- Debug flags --------------------------------------------------------
 
     /** @brief Update the per-slave debug flags distributed by the master. */
-    void updateDebugFlags(const EtherCATSlaveDebugFlags& flags) { slave_debug_flags_ = flags; }
+    void updateDebugFlags(const EtherCATSlaveDebugFlags& flags) {
+        std::lock_guard<std::mutex> lock(slave_debug_flags_mutex_);
+        slave_debug_flags_ = flags;
+    }
 
-    /** @brief Access the current per-slave debug flags. */
-    const EtherCATSlaveDebugFlags& debugFlags() const { return slave_debug_flags_; }
+    /** @brief Snapshot of the current per-slave debug flags (thread-safe). */
+    EtherCATSlaveDebugFlags debugFlags() const {
+        std::lock_guard<std::mutex> lock(slave_debug_flags_mutex_);
+        return slave_debug_flags_;
+    }
 
     // -- FMMU manager ---------------------------------------------------------
 
@@ -838,6 +845,7 @@ protected:
     bool pdo_configured_ = false;
     bool mailbox_serviced_in_safeop_ = true;
 
+    mutable std::mutex slave_debug_flags_mutex_;
     EtherCATSlaveDebugFlags slave_debug_flags_;
 
 #if TETHER_ENABLE_SII

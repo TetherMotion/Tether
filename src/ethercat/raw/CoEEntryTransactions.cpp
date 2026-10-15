@@ -140,7 +140,7 @@ std::future<CoEResult<uint64_t>> CoEManager::readEntryAsync(
         return failNow(CoEErrorCode::NotConfigured);
     }
 
-    if (debug_flags_.coeReads) {
+    if (debugFlags().coeReads) {
         TETHER_LOGI(TAG, "{}: CoE entry read START 0x{:04X}:{}",
                     log_prefix_.c_str(), entry.index, entry.subindex);
     }
