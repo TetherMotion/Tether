@@ -258,38 +258,9 @@ kSdoEntries = [] {
 }();
 
 RSAPInformationProcessor::RSAPInformationProcessor(EtherCAT::Slave& slave)
-    : slave_(slave) {}
-
-size_t RSAPInformationProcessor::poll() {
-    // Carry previous values forward so objects not attempted in a paused
-    // or partially-failed poll keep their last known state.
-    Snapshot next;
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        next = snap_;
-    }
-    next.generation++;
-
-    next.read_ok = EtherCAT::pollSdoObjects(
-        slave_, kSdoEntries, next.value, next.ok,
-        [this] { return paused_.load(std::memory_order_relaxed); },
-        [](size_t i, const EtherCAT::SdoObjectEntry& e,
-           EtherCAT::SlaveError err) {
-            TETHER_LOGD(TAG, "0x{:04X}:{} ({}): SDO read failed ({})",
-                        e.index, e.subindex,
-                        RSAPInformationProcessor::kObjects[i].name,
-                        static_cast<int>(err));
-        });
-
-    std::lock_guard<std::mutex> lock(mtx_);
-    snap_ = next;
-    return next.read_ok;
-}
-
-RSAPInformationProcessor::Snapshot RSAPInformationProcessor::snapshot() const {
-    std::lock_guard<std::mutex> lock(mtx_);
-    return snap_;
-}
+    : SdoObjectPoller(slave, kSdoEntries,
+                      +[](size_t i) { return kObjects[i].name; },
+                      TAG) {}
 
 bool RSAPInformationProcessor::anyTriggered(const Snapshot& snap) {
     for (size_t i = 0; i < kObjectCount; ++i) {

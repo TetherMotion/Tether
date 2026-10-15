@@ -1,18 +1,21 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstdint>
-#include <mutex>
 #include <string>
 #include <vector>
 
+#include "tether/ethercat/SdoObjectPoller.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ui/ChipPanels.hpp"
 
 namespace EtherCAT {
 namespace Drives {
 namespace ESC211 {
+
+/// Polled table size — every 0x4000-0x4023 (sub)object.
+/// Free-standing because the class needs it in its base-specifier.
+inline constexpr size_t kRSAPInformationPollObjects = 46;
 
 /**
  * @brief Reads the ESC211 RSAP information objects 0x4000-0x4023 via SDO.
@@ -58,8 +61,15 @@ namespace ESC211 {
  *       log(line);
  * @endcode
  */
-class RSAPInformationProcessor {
+class RSAPInformationProcessor
+    : public SdoObjectPoller<kRSAPInformationPollObjects> {
 public:
+    /// All RSAP information objects, in index order.
+    static constexpr size_t kObjectCount = kRSAPInformationPollObjects;
+
+    /// Copyable snapshot of one poll cycle — safe to share across threads.
+    using Snapshot = SdoPollSnapshot<kObjectCount>;
+
     /// Object dictionary metadata for one 0x40xx (sub)object.
     struct ObjectInfo {
         uint16_t    index;    ///< CoE index (0x4000..0x4023)
@@ -69,50 +79,15 @@ public:
         bool        scalar;   ///< true = plain value, false = bitfield
     };
 
-    /// All RSAP information objects, in index order.
-    static constexpr size_t kObjectCount = 46;
     static const std::array<ObjectInfo, kObjectCount> kObjects;
-
-    /// Copyable snapshot of one poll cycle — safe to share across threads.
-    struct Snapshot {
-        std::array<uint32_t, kObjectCount> value{};  ///< raw value per object
-        std::array<bool,     kObjectCount> ok{};     ///< SDO read succeeded
-        size_t   read_ok = 0;    ///< objects read successfully this poll
-        uint64_t generation = 0; ///< incremented on every poll()
-    };
 
     explicit RSAPInformationProcessor(EtherCAT::Slave& slave);
 
-    RSAPInformationProcessor(const RSAPInformationProcessor&) = delete;
-    RSAPInformationProcessor& operator=(const RSAPInformationProcessor&) = delete;
-
-    /**
-     * @brief Read all 46 RSAP information objects via SDO.
-     *
-     * Reads are best-effort: an object that fails is marked !ok and
-     * polling continues.  If pause() was called, the poll aborts between
-     * objects — objects not attempted keep their previous values and are
-     * not counted in read_ok.  Safe to call from any thread; may be
-     * called concurrently with snapshot()/decodeTriggered().
-     *
-     * @return number of objects read successfully (0..kObjectCount)
-     */
-    size_t poll();
-
-    /// Copy of the latest snapshot (empty generation until first poll).
-    Snapshot snapshot() const;
-
-    /**
-     * @brief Pause/resume polling.
-     *
-     * While paused, poll() still runs but aborts before issuing any
-     * (further) SDO reads.  Use during safety state machine command
-     * sequences (0xF100) to avoid SDO mailbox conflicts — same reason
-     * SystemErrorManager is stopped there.
-     */
-    void pause()  { paused_.store(true,  std::memory_order_relaxed); }
-    void resume() { paused_.store(false, std::memory_order_relaxed); }
-    bool isPaused() const { return paused_.load(std::memory_order_relaxed); }
+    // poll()/snapshot()/pause()/resume()/isPaused() are inherited from
+    // SdoObjectPoller — best-effort reads (failed objects marked !ok,
+    // polling continues; safe to call concurrently with snapshot()/
+    // decodeTriggered()), pause() aborts between objects so no SDO
+    // read overlaps safety state machine command sequences (0xF100).
 
     /// True if any bitfield object has a set bit or the error code != 0.
     static bool anyTriggered(const Snapshot& snap);
@@ -193,12 +168,6 @@ public:
      */
     static std::vector<DisplayPanel>
     buildDisplayPanels(const Snapshot& snap, size_t expected_drives = 0);
-
-private:
-    EtherCAT::Slave& slave_;
-    mutable std::mutex mtx_;
-    Snapshot snap_;
-    std::atomic<bool> paused_{false};
 };
 
 } // namespace ESC211
