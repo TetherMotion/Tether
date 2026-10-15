@@ -65,6 +65,8 @@ set(TETHER_IO_PROTOCOL_SOURCES
     ${TETHER_ROOT}/src/io/Session_streaming.cpp
     ${TETHER_ROOT}/src/io/Server.cpp
     ${TETHER_ROOT}/src/io/TetherIOClient.cpp
+    ${TETHER_ROOT}/src/io/SlipTransport.cpp
+    ${TETHER_ROOT}/src/io/WsTransport.cpp
 )
 
 # Transport: TCP is always available; serial only on non-ESP (or with own

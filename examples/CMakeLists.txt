@@ -529,4 +529,12 @@ if(TETHER_BUILD_KLIPPER)
     endif()
 endif()
 
+# --- Tether IO simulator server ---
+# Serves the simulated CiA 402 fleet + writable demo params over TCP/SLIP
+# (port 4000) for tether_io_client smoke tests without EtherCAT hardware.
+if(TARGET tether_io_protocol)
+add_tether_example(tether_io_sim
+    LIBRARIES tether_io_protocol tether_common)
+endif()
+
 add_custom_target(examples DEPENDS ${TETHER_EXAMPLE_TARGETS})

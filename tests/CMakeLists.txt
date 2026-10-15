@@ -232,6 +232,7 @@ set(IO_PROTOCOL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_catalog.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_value_wire.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_negotiation.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_value.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_cia402_profile.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_wire_contract.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_malformed.cpp"
@@ -244,6 +245,8 @@ set(IO_TRANSPORT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_peer_calls.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_tcp_transport.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_serial_transport.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_slip_transport.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_ws_transport.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_pipe_transport.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_ring_stream.cpp"
 )
@@ -546,6 +549,16 @@ if(TETHER_BUILD_IO_PROTOCOL)
     create_module_test(io_protocol "${IO_PROTOCOL_SOURCES}" "tether_common;tether_io_protocol" "")
     create_module_test(io_transport "${IO_TRANSPORT_SOURCES}" "tether_common;tether_io_protocol" "")
     create_module_test(io_services "${IO_SERVICES_SOURCES}" "tether_common;tether_io_protocol" "")
+
+    # tether_io_client dispatcher-level tests (IoSession + dispatch over an
+    # in-proc pipe vs a real Session) — links the tool's logic library.
+    if(TETHER_BUILD_IO_CLIENT)
+        create_module_test(io_client
+            "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_client_commands.cpp"
+            "tether_common;tether_io_protocol;tether_io_client_lib" "")
+        target_include_directories(tether_io_client_tests PRIVATE
+            ${CMAKE_SOURCE_DIR}/tools/tether_io_client)
+    endif()
     if(TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_DEVICE_DRIVERS)
         create_module_test(io_exposers
             "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_as715n_exposer.cpp;${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_snapshot_exposer.cpp"

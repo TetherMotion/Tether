@@ -22,6 +22,9 @@
 #include "tether/io/Transport.hpp"
 #include "tether/io/Registry.hpp"
 #include "tether/io/Function.hpp"
+#include "tether/io/SchemaCatalog.hpp"
+#include "tether/io/SchemaNegotiation.hpp"
+#include "tether/io/SchemaValue.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -142,6 +145,19 @@ using StreamDataCallback = std::function<void(const ClientStreamRow&)>;
 /// Log data callback.
 using LogDataCallback = std::function<void(const ClientLogRecord&)>;
 
+/// Fired when the server pushes CatalogChanged (0x2C) — the catalog is
+/// stale; call the list*/catalog APIs again to refresh.
+using CatalogChangedCallback = std::function<void()>;
+
+/// Fired when the server pushes SchemaUpdate (0x56) mid-session — the
+/// schema epoch changed; previously negotiated slots are stale.
+using SchemaUpdateCallback = std::function<void()>;
+
+/// Fired for any other unhandled unsolicited message type (async error
+/// frames, unknown pushes). Receives the raw type byte + body.
+using AsyncMessageCallback =
+    std::function<void(uint8_t type, const std::vector<uint8_t>& body)>;
+
 /**
  * @brief Synchronous C++ client for the Tether IO binary protocol.
  *
@@ -164,10 +180,53 @@ public:
     bool isConnected() const;
     void close();
 
+    // ---- Negotiated schema state (populated during construction) ----
+
+    /// Schema epoch committed during the V6 bootstrap (0 = not negotiated).
+    uint64_t schemaEpoch() const { return schemaEpoch_; }
+    /// Schema graph fetched during bootstrap; empty when the server
+    /// advertised no schemas. All V6 value decoding goes through this.
+    const SchemaGraph& schemaGraph() const { return schemaGraph_; }
+    /// Server-advertised manifest in slot order (slot == index).
+    const std::vector<SchemaManifestEntry>& schemaManifest() const {
+        return manifest_;
+    }
+    /// Negotiated protocol limits from ServerHello.
+    const SchemaNegotiationLimits& serverLimits() const { return serverLimits_; }
+    /// Negotiated encoding feature bits from ServerHello.
+    uint32_t negotiatedFeatures() const { return negotiatedFeatures_; }
+
+    /// Resolve a wire schema slot to a node in the negotiated graph.
+    /// Returns nullptr for out-of-range slots or missing definitions.
+    const SchemaNode* resolveSchemaSlot(uint32_t slot) const {
+        if (slot >= manifest_.size()) return nullptr;
+        return schemaGraph_.find(manifest_[slot].ref.key);
+    }
+
+    /// Convenience: decode a raw value against a schema slot.
+    /// Requires exact consumption of `len` bytes.
+    std::expected<SchemaValue, ClientError>
+    decodeValue(uint32_t schemaSlot, const uint8_t* data, size_t len) const {
+        const SchemaNode* node = resolveSchemaSlot(schemaSlot);
+        if (!node) {
+            return std::unexpected(
+                ClientError{ErrorCode::InvalidMessage, "unknown schema slot"});
+        }
+        auto v = decodeSchemaValue(schemaGraph_, *node, data, len);
+        if (!v) {
+            return std::unexpected(
+                ClientError{ErrorCode::InvalidMessage, v.error()});
+        }
+        return std::move(*v);
+    }
+
     // ---- Callbacks ----
 
     void setStreamDataCallback(StreamDataCallback cb);
     void setLogDataCallback(LogDataCallback cb);
+    void setCatalogChangedCallback(CatalogChangedCallback cb);
+    void setSchemaUpdateCallback(SchemaUpdateCallback cb);
+    void setAsyncMessageCallback(AsyncMessageCallback cb);
 
     // ---- Ping ----
 
@@ -350,6 +409,9 @@ private:
     uint32_t defaultTimeoutMs_;
     StreamDataCallback streamCallback_;
     LogDataCallback logCallback_;
+    CatalogChangedCallback catalogChangedCb_;
+    SchemaUpdateCallback schemaUpdateCb_;
+    AsyncMessageCallback asyncMessageCb_;
     InvokeHandler invokeHandler_;
     std::vector<FunctionEntry> localFunctions_;
     std::vector<ClientStreamLayoutEntry> streamLayout_;
@@ -358,6 +420,10 @@ private:
     std::recursive_mutex mutex_;
     std::atomic<uint64_t> nextRequestId_{1};
     uint64_t schemaEpoch_ = 0;
+    SchemaGraph schemaGraph_;
+    std::vector<SchemaManifestEntry> manifest_;
+    SchemaNegotiationLimits serverLimits_{};
+    uint32_t negotiatedFeatures_ = 0;
 
     // Internal helpers
     ClientError makeError(ErrorCode code, std::string msg);

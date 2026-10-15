@@ -39,6 +39,16 @@ private:
 };
 
 /**
+ * @brief Connect to a remote host and return a connected TcpTransport.
+ *
+ * Resolves `host` (name or IPv4/IPv6 literal) via getaddrinfo and tries
+ * each address in order with a per-attempt deadline bounded by
+ * `timeoutMs`.  Returns nullptr when no address connects in time.
+ */
+std::unique_ptr<TcpTransport> tcpConnect(const char* host, uint16_t port,
+                                         uint32_t timeoutMs = 5000);
+
+/**
  * @class TcpTransportServer
  * @brief TCP server that listens on a port and accepts connections.
  */

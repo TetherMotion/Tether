@@ -231,7 +231,14 @@ TetherIOClient::TetherIOClient(std::unique_ptr<ITransport> transport,
             transport_->close();
             return;
         }
+        schemaGraph_ = std::move(graph);
     }
+    // Retain the negotiated schema state: the manifest is advertised in
+    // slot order (slots are assigned by ascending schema key), so slot i
+    // resolves through manifest_[i].
+    manifest_ = serverHello.schemas;
+    serverLimits_ = serverHello.limits;
+    negotiatedFeatures_ = serverHello.encodingFeatures;
 
     std::array<uint8_t, 32> commitBuffer{};
     BufWriter commitWriter(commitBuffer.data(), commitBuffer.size());
@@ -260,6 +267,18 @@ void TetherIOClient::setStreamDataCallback(StreamDataCallback cb) {
 
 void TetherIOClient::setLogDataCallback(LogDataCallback cb) {
     logCallback_ = std::move(cb);
+}
+
+void TetherIOClient::setCatalogChangedCallback(CatalogChangedCallback cb) {
+    catalogChangedCb_ = std::move(cb);
+}
+
+void TetherIOClient::setSchemaUpdateCallback(SchemaUpdateCallback cb) {
+    schemaUpdateCb_ = std::move(cb);
+}
+
+void TetherIOClient::setAsyncMessageCallback(AsyncMessageCallback cb) {
+    asyncMessageCb_ = std::move(cb);
 }
 
 // ---- Error helpers ----
@@ -347,6 +366,26 @@ TetherIOClient::receiveMessage(uint32_t timeoutMs) {
     // then keep waiting for the pending response.
     if (type == static_cast<uint8_t>(MessageType::InvokeExReq)) {
         handleInvokeExReq(msg);
+        return receiveMessage(timeoutMs);
+    }
+    // Server push notifications — fire callbacks and keep waiting.
+    if (type == static_cast<uint8_t>(MessageType::CatalogChanged)) {
+        if (catalogChangedCb_) catalogChangedCb_();
+        return receiveMessage(timeoutMs);
+    }
+    if (type == static_cast<uint8_t>(MessageType::SchemaUpdate)) {
+        if (schemaUpdateCb_) schemaUpdateCb_();
+        return receiveMessage(timeoutMs);
+    }
+    // Any other unsolicited message: hand to the generic async hook if
+    // registered, then keep waiting (only when a callback consumed it —
+    // otherwise return so callers can still see unexpected frames).
+    if (asyncMessageCb_ &&
+        type != static_cast<uint8_t>(MessageType::StreamData) &&
+        type != static_cast<uint8_t>(MessageType::LogData)) {
+        // Only consume messages that aren't expected request responses —
+        // the caller's request() path filters those by type already.
+        asyncMessageCb_(type, msg);
         return receiveMessage(timeoutMs);
     }
     return msg;
