@@ -1,0 +1,26 @@
+# clang-tidy configuration for Tether — focused on correctness, logic and
+# memory issues rather than style.  Extend gradually; suppress noisy
+# checks with `-<glob>` entries as they prove unhelpful.
+Checks: >
+  bugprone-*,
+  clang-analyzer-*,
+  concurrency-*,
+  misc-*,
+  performance-*,
+  portability-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-suspicious-string-compare,
+  -misc-include-cleaner*,
+  -misc-header-include-cycle,
+  -misc-const-correctness,
+  -misc-no-recursion,
+  -performance-unnecessary-value-param,
+  -performance-inefficient-vector-operation,
+  -portability-template-virtual-member-function
+WarningsAsErrors: ''
+HeaderFilterRegex: '(src|include|tests)/tether/.*'
+HeaderFileExtensions: ['h', 'hh', 'hpp', 'hxx', 'inc']
+FormatStyle: none
+CheckOptions:
+  bugprone-argument-comment.StrictMode: 'true'
+  bugprone-suspicious-string-compare.WarnOnLogicalNotComparison: 'true'
