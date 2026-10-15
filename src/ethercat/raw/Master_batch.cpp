@@ -29,7 +29,7 @@ Master::BatchTransaction::BatchTransaction(TransactionRouter* router,
 {
 }
 
-Master::BatchTransaction::~BatchTransaction()
+BatchTransaction::~BatchTransaction()
 {
     // Clean up any unclaimed slots
     if (router_) {
