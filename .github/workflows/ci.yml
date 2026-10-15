@@ -47,6 +47,20 @@ jobs:
           libboost-dev \
           make
     
+    - name: Cache googletest source
+      uses: actions/cache@v4
+      with:
+        path: .deps-src/googletest
+        key: googletest-v1.14.0
+
+    - name: Provide googletest to FetchContent
+      run: |
+        if [ ! -d .deps-src/googletest ]; then
+          git clone --depth 1 --branch v1.14.0 \
+            https://github.com/google/googletest.git .deps-src/googletest
+        fi
+        echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
+
     - name: Configure and build
       run: |
         cmake -S . -B build \
@@ -104,6 +118,20 @@ jobs:
           libc6-dev \
           libboost-dev \
           make
+
+    - name: Cache googletest source
+      uses: actions/cache@v4
+      with:
+        path: .deps-src/googletest
+        key: googletest-v1.14.0
+
+    - name: Provide googletest to FetchContent
+      run: |
+        if [ ! -d .deps-src/googletest ]; then
+          git clone --depth 1 --branch v1.14.0 \
+            https://github.com/google/googletest.git .deps-src/googletest
+        fi
+        echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
 
     - name: Configure and build (static only)
       run: |
@@ -172,6 +200,20 @@ jobs:
         g++ --version | head -1
         echo "=== cmake ==="
         cmake --version | head -1
+
+    - name: Cache googletest source
+      uses: actions/cache@v4
+      with:
+        path: .deps-src/googletest
+        key: googletest-v1.14.0
+
+    - name: Provide googletest to FetchContent
+      run: |
+        if [ ! -d .deps-src/googletest ]; then
+          git clone --depth 1 --branch v1.14.0 \
+            https://github.com/google/googletest.git .deps-src/googletest
+        fi
+        echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
 
     - name: Configure and build
       run: |
@@ -387,6 +429,20 @@ jobs:
           lcov \
           gcovr
     
+    - name: Cache googletest source
+      uses: actions/cache@v4
+      with:
+        path: .deps-src/googletest
+        key: googletest-v1.14.0
+
+    - name: Provide googletest to FetchContent
+      run: |
+        if [ ! -d .deps-src/googletest ]; then
+          git clone --depth 1 --branch v1.14.0 \
+            https://github.com/google/googletest.git .deps-src/googletest
+        fi
+        echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
+
     - name: Configure and build with coverage
       run: |
         cmake -S . -B build-coverage \
@@ -501,12 +557,33 @@ jobs:
           make \
           ccache
     
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-${{ github.job }}-${{ github.sha }}
+        restore-keys: ccache-${{ github.job }}-
+
     - name: Configure ccache
       run: |
         echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
         ccache -M 5G
         ccache -s
     
+    - name: Cache googletest source
+      uses: actions/cache@v4
+      with:
+        path: .deps-src/googletest
+        key: googletest-v1.14.0
+
+    - name: Provide googletest to FetchContent
+      run: |
+        if [ ! -d .deps-src/googletest ]; then
+          git clone --depth 1 --branch v1.14.0 \
+            https://github.com/google/googletest.git .deps-src/googletest
+        fi
+        echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
+
     - name: Configure and build with ASAN
       run: |
         SANITIZER_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g"
@@ -595,12 +672,33 @@ jobs:
           make \
           ccache
     
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-${{ github.job }}-${{ github.sha }}
+        restore-keys: ccache-${{ github.job }}-
+
     - name: Configure ccache
       run: |
         echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
         ccache -M 5G
         ccache -s
     
+    - name: Cache googletest source
+      uses: actions/cache@v4
+      with:
+        path: .deps-src/googletest
+        key: googletest-v1.14.0
+
+    - name: Provide googletest to FetchContent
+      run: |
+        if [ ! -d .deps-src/googletest ]; then
+          git clone --depth 1 --branch v1.14.0 \
+            https://github.com/google/googletest.git .deps-src/googletest
+        fi
+        echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
+
     - name: Configure and build with TSAN
       run: |
         SANITIZER_FLAGS="-fsanitize=thread -g"
