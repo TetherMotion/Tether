@@ -29,18 +29,26 @@
  *
  * openLinePrompt() opens a modal one-line text prompt (see LinePrompt.hpp)
  * that takes over key input and the detail pane until Enter or Esc.
+ *
+ * pushOverlay() opens a modal UI::Overlay (TextOverlay, TableOverlay,
+ * Dialog, MenuOverlay, …) rendered by OverlayHost over the panes;
+ * overlays consume every key until they close — Esc pops the stack.
  */
 
 #pragma once
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 
 #include "tether/terminal_ui/LinePrompt.hpp"
 #include "tether/terminal_ui/LogPane.hpp"
+#include "tether/terminal_ui/OverlayHost.hpp"
 #include "tether/terminal_ui/Session.hpp"
 #include "tether/terminal_ui/TreeView.hpp"
+#include "tether/ui/LineInput.hpp"
+#include "tether/ui/Overlay.hpp"
 
 namespace Tether {
 namespace TUI {
@@ -99,7 +107,26 @@ public:
     /// True while a line prompt is open.
     bool promptActive() const { return prompt_active_; }
     /// Current prompt buffer (for live filtering while typing).
-    const std::string& promptText() const { return prompt_buf_; }
+    const std::string& promptText() const { return prompt_input_.buffer(); }
+
+    /// Push a modal overlay (message box, confirm dialog, menu, …).
+    /// Overlays consume all keys until closed.
+    void pushOverlay(std::unique_ptr<UI::Overlay> overlay) {
+        overlays_.push(std::move(overlay));
+    }
+    /// True while at least one overlay is open.
+    bool overlayOpen() const { return !overlays_.empty(); }
+
+    /// Show a transient notice in the footer for `seconds` (action
+    /// feedback like "saved 3 files" — the hint line returns after the
+    /// notice expires).  Same semantics as PanelScreen::flash.
+    void flash(std::string msg, double seconds = 3.0) {
+        flash_msg_ = std::move(msg);
+        flash_until_ = std::chrono::steady_clock::now() +
+            std::chrono::duration_cast<
+                std::chrono::steady_clock::duration>(
+                    std::chrono::duration<double>(seconds));
+    }
 
 private:
     void renderWrappedDetail(TermWindow* win, const TreeNode& node);
@@ -113,10 +140,18 @@ private:
     std::string  title_;
     TreeScreenHooks hooks_;
 
+    // Modal overlay stack — topmost overlay gets every key.
+    UI::OverlayStack overlays_;
+    OverlayHost      overlay_host_{overlays_};
+
     // Line prompt state (modal).
     bool           prompt_active_ = false;
     LinePromptSpec prompt_spec_;
-    std::string    prompt_buf_;
+    UI::LineInput  prompt_input_;
+
+    // Transient footer notice (flash()) — message + expiry.
+    std::string flash_msg_;
+    std::chrono::steady_clock::time_point flash_until_{};
 
     // Built-in detail renderer state — scroll offset + the node it was
     // last rendered for (scroll resets when the selection changes).

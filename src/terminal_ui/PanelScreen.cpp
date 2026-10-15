@@ -15,6 +15,7 @@
 #include <ncurses.h>
 
 #include "tether/terminal_ui/OverlayHost.hpp"
+#include "tether/ui/LineInput.hpp"
 
 namespace Tether {
 namespace TUI {
@@ -29,6 +30,14 @@ size_t PanelScreen::viewCount() const {
     // views.empty() → one implicit "Main" view driven by hooks_.renderBody.
     const size_t app_views = std::max<size_t>(hooks_.views.size(), 1);
     return app_views + (hooks_.showLogView ? 1 : 0);
+}
+
+void PanelScreen::flash(std::string msg, double seconds) {
+    flash_msg_ = std::move(msg);
+    flash_until_ = std::chrono::steady_clock::now() +
+                   std::chrono::duration_cast<
+                       std::chrono::steady_clock::duration>(
+                       std::chrono::duration<double>(seconds));
 }
 
 void PanelScreen::pushOverlay(std::unique_ptr<UI::Overlay> overlay) {
@@ -66,7 +75,14 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
 
     int footerY = layout();
     bool filter_editing = false;
-    std::string filter_buf;
+    UI::LineInput filter_input;
+    filter_input.on_commit = [&](const std::string& s) {
+        filter_editing = false;
+        if (s.empty()) log_.clearViewFilter();
+        else log_.setViewFilter(LogFilter::parse(s));
+        log_.scrollToEnd();
+    };
+    filter_input.on_cancel = [&] { filter_editing = false; };
 
     auto viewName = [&](size_t i) -> const char* {
         if (i < hooks_.views.size()) return hooks_.views[i].name.c_str();
@@ -156,10 +172,20 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
         // ---- Footer -----------------------------------------------------
         if (session_.colors()) attron(COLOR_PAIR(PalHint));
         if (filter_editing) {
+            const std::string& fb = filter_input.buffer();
             mvprintw(footerY, 0,
-                     " filter: %s_   (level>=warn  tag=x  !tag=y  text=z"
-                     "  | Enter: apply  Esc: cancel  empty: clear)",
-                     filter_buf.c_str());
+                     " filter: %.*s_%s   (level>=warn  tag=x  !tag=y"
+                     "  text=z  | Enter: apply  Esc: cancel  empty: clear)",
+                     static_cast<int>(filter_input.cursor()), fb.c_str(),
+                     fb.c_str() + filter_input.cursor());
+        } else if (!flash_msg_.empty() &&
+                   std::chrono::steady_clock::now() < flash_until_) {
+            // Transient action feedback replaces the hints.
+            attroff(COLOR_PAIR(PalHint));
+            attron(COLOR_PAIR(PalValue) | A_BOLD);
+            mvprintw(footerY, 0, " %s", flash_msg_.c_str());
+            attroff(COLOR_PAIR(PalValue) | A_BOLD);
+            attron(COLOR_PAIR(PalHint));
         } else {
             const std::string vh = overlays_.empty()
                 ? currentHints()
@@ -207,26 +233,13 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
         // still arrives as 27 → quit.
         int key = session_.pollKeyDecoded(50);
         // Modal filter editor: 'f' opens it, every key goes to the
-        // expression buffer until Enter (apply) or Esc (cancel).
-        if (filter_editing) {
-            if (key == 27) { filter_editing = false; continue; }
-            if (key == '\n' || key == '\r' || key == KEY_ENTER) {
-                filter_editing = false;
-                if (filter_buf.empty()) log_.clearViewFilter();
-                else log_.setViewFilter(LogFilter::parse(filter_buf));
-                log_.scrollToEnd();
-                continue;
-            }
-            if (key == KEY_BACKSPACE || key == 127 || key == '\b') {
-                if (!filter_buf.empty()) filter_buf.pop_back();
-                continue;
-            }
-            if (key >= 32 && key <= 126) {
-                filter_buf += static_cast<char>(key);
-            }
+        // shared LineInput until Enter (apply) or Esc (cancel).
+        if (filter_editing) { filter_input.handleKey(key); continue; }
+        if (key == 'f') {
+            filter_editing = true;
+            filter_input.reset();
             continue;
         }
-        if (key == 'f') { filter_editing = true; filter_buf.clear(); continue; }
 
         if (key < 0) continue;   // timeout / swallowed escape sequence
 
@@ -236,6 +249,15 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
             continue;
         }
         if (key == '?') { pushKeysOverlay(); continue; }
+
+        // Pre-dispatch: a view may claim keys before the screen's own
+        // handling (e.g. digits while its quicksearch is non-empty).
+        if (active_ < hooks_.views.size()) {
+            const auto& vw = hooks_.views[active_];
+            if (vw.wantsKey && vw.wantsKey(key) && vw.onKey &&
+                vw.onKey(key))
+                continue;
+        }
 
         // View switching: digits 1-9, F1-F12, Tab / Shift-Tab.
         if (key >= '1' && key <= '9') {

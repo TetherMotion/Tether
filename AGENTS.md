@@ -232,7 +232,15 @@ Two layers, split so application "views" can be built without ncurses:
   per-button `hotkey` (case-insensitive), Esc fires `cancel_index`
   (default: last button, -1 = close without result); factories
   `makeMessageBox` `[ OK ]` and `makeConfirmDialog` `[ Yes ] [ No ]`
-  with `kDialogOk/Yes/No/Cancel` result ids).
+  with `kDialogOk/Yes/No/Cancel` result ids), `LineInput.hpp`
+  (`LineInput` — single-line editing model shared by TreeScreen,
+  EntityBrowserPanel and PanelScreen prompts: buffer+cursor, Left/
+  Right/Home/End/Backspace/Delete, Enter→`on_commit`, Esc→`on_cancel`,
+  `on_change` for live type-ahead; modal — swallows all keys until
+  `done()`), `KeyMap.hpp` (`UI::KeyMap` — key→`{hint,description,
+  handler}` registry: one declaration drives dispatch
+  (`handleKey`), the footer (`keyHints`) and `?`-help
+  (`helpLines`); bindings with empty `keys` are hint-only rows).
 - **`tether/terminal_ui/*` — ncurses widgets**: `Session` (ncurses
   lifecycle + palette; `pollKeyDecoded` resolves split CSI/SS3 escape
   tails — lone ESC still returns 27), `PanelScreen` (titled multi-tab
@@ -287,10 +295,39 @@ row at the bottom interior (focused button `A_REVERSE|A_BOLD`),
 routes Esc to `Overlay::handleKey` first (unconsumed Esc pops), and
 pops overlays whose `wantsClose()` fired (dialog results propagate
 through the model's `onResult(id)` callback before closing).
+`TreeScreen` has the same overlay support (`pushOverlay`,
+`OverlayHost`-rendered).  `PanelView::wantsKey` is a pre-dispatch
+claim evaluated before the screen's own keys — a view can claim
+e.g. digits while its quicksearch is non-empty so "FSoE3" isn't
+split by the 1-9 tab shortcuts (claims must be state-conditional
+or navigation breaks).  `MenuOverlay` (in `Overlay.hpp`) is a
+vertical action menu on a `TableModel`: `addItem{label,id,invoke}`,
+Enter fires `invoke()` or `onResult(id)`, Esc/j/k navigate.
+`PanelScreen::flash(msg, secs)` shows a transient footer notice;
+`TreeScreen::flash` has the same semantics (hint line returns after
+expiry).
+`TUI::entityBrowserView(panel)` returns the standard Entities
+`PanelView` (render/onKey/keyHintsFn) for both monitoring apps.
 
 Consumers: `esc211_inspect_config` (TreeScreen), `esc211_fsoe_monitor` +
 `esc211_fsoe_blackchannel` (PanelScreen tabs — chip-panel RSAP grid,
 gauge Limits view, composite Entities view, LogPane).
+
+### EtherCAT support classes (selected)
+
+- `ethercat/SdoObjectPoller.hpp` — `SdoObjectPoller<N, SnapshotT>`:
+  the shared poll/snapshot/pause engine for SDO object-table pollers
+  (ESC211 `RSAPInformationProcessor` + `RSAPMonitoringProcessor` both
+  derive from it).  Callers supply a static
+  `std::array<SdoObjectEntry,N>` table + an optional name-lookup for
+  error logging; `poll()` carries previous values forward, delegates
+  reads to `pollSdoObjects` (best-effort, aborts between objects while
+  paused), and publishes a copyable `SdoPollSnapshot<N>` (`value`/
+  `ok`/`read_ok`/`generation` per entry).  Subclass the snapshot via
+  the `SnapshotT` parameter to add lookup accessors (see
+  `RSAPMonitoringSnapshot::get`/`getSigned`); the class's object-table
+  size constant must be a free `inline constexpr` — nested constants
+  are not visible in the base-specifier.
 
 ## Code Conventions
 
