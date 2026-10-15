@@ -243,6 +243,13 @@ inline const RegisterList kRegisterList = {
 // — they supersede the earlier labels inferred from the pre-v0.9 packed
 // RSAP Information object.  Unlabeled objects print "bit N".
 //
+// Labels are deliberately terse — every display path already names the
+// containing object (the RSAP panel's row label, or the "0xXXXX:sub
+// <object name>" prefix in decodeAll/decodeTriggered): input-state chips
+// are "In1".."In8" (the row says "EStop"/"PStop"/...), discrepancy/state
+// chips carry only the function abbreviation, and limit chips carry just
+// the element index ("Ax3", "TCP0", "EP2").
+//
 // Note on record objects: the manual lists record data entries starting at
 // "Sub 0"; on the device (verified) sub0 is the USINT entry count and data
 // lives at sub 1..N, e.g. 0x4008:0=5, 0x4009:0=7.
@@ -253,340 +260,340 @@ using ::EtherCAT::Utils::BitLabel;
 // 0x4001: Sub state in MONITORING state (bitmask; bits may combine —
 // Calibration State triggered means the ESC211 safety function is invalid)
 inline BitLabel kMonitoringSubStateBitLabels[] = {
-    BitLabel::bitIfOn("NormalState",        1u << 0),
-    BitLabel::bitIfOn("CollaborativeState", 1u << 1),
-    BitLabel::bitIfOn("RecoveryState",      1u << 2),
-    BitLabel::bitIfOn("DemandState",        1u << 3),
-    BitLabel::bitIfOn("InitialResetState",  1u << 4),
-    BitLabel::bitIfOn("CalibrationState",   1u << 5),
+    BitLabel::bitIfOn("Normal",        1u << 0),
+    BitLabel::bitIfOn("Collab", 1u << 1),
+    BitLabel::bitIfOn("Recover",      1u << 2),
+    BitLabel::bitIfOn("Demand",        1u << 3),
+    BitLabel::bitIfOn("InitRst",  1u << 4),
+    BitLabel::bitIfOn("Calib",   1u << 5),
 };
 
 // 0x4006: Fault and violation status
 // (manual: 0x4017 bits 1,2,3,4,6,7,8 causing demand state sets bit 4;
 //          0x4018 bits 0,1,2,3,4,5,6,7,9 causing demand state sets bit 5)
 inline BitLabel kFaultAndViolationStatusBitLabels[] = {
-    BitLabel::bitIfOn("FaultReset",                 1u << 0),
-    BitLabel::bitIfOn("DecelerationViolation",      1u << 1),
-    BitLabel::bitIfOn("StandstillViolation",        1u << 2),
-    BitLabel::bitIfOn("DIODiscrepancy",             1u << 3),
-    BitLabel::bitIfOn("ControlFunctionTriggered",   1u << 4),
-    BitLabel::bitIfOn("LimitingFunctionTriggered",  1u << 5),
-    BitLabel::bitIfOn("InitialResetTriggered",      1u << 6),
+    BitLabel::bitIfOn("FltRst",                 1u << 0),
+    BitLabel::bitIfOn("DecelViol",      1u << 1),
+    BitLabel::bitIfOn("Stndstill",        1u << 2),
+    BitLabel::bitIfOn("DioDisc",             1u << 3),
+    BitLabel::bitIfOn("CtrlFunc",   1u << 4),
+    BitLabel::bitIfOn("LimFunc",  1u << 5),
+    BitLabel::bitIfOn("InitRst",      1u << 6),
 };
 
 // 0x4007: Drive status — summary bitfield of the aggregated drive state
 // (NOT per-drive; per-drive detail is in the 0x4008 sub-indices)
 inline BitLabel kDriveStatusBitLabels[] = {
-    BitLabel::bitIfOn("DrivePositionValid", 1u << 0),
-    BitLabel::bitIfOn("DriveVelocityValid", 1u << 1),
-    BitLabel::bitIfOn("DriveErrorState",    1u << 2),
-    BitLabel::bitIfOn("DriveInSTOState",    1u << 3),
-    BitLabel::bitIfOn("DriveInSOSState",    1u << 4),
+    BitLabel::bitIfOn("PosValid", 1u << 0),
+    BitLabel::bitIfOn("VelValid", 1u << 1),
+    BitLabel::bitIfOn("Error",    1u << 2),
+    BitLabel::bitIfOn("STO",    1u << 3),
+    BitLabel::bitIfOn("SOS",    1u << 4),
 };
 
 // 0x4008:1-5: per-drive status bitfields — every sub-index uses the same
 // Drive1-7 bit layout (sub1 position valid, sub2 velocity valid,
 // sub3 error, sub4 STO, sub5 SOS)
 inline BitLabel kDriveValidStatusBitLabels[] = {
-    BitLabel::bitIfOn("Drive1", 1u << 0),
-    BitLabel::bitIfOn("Drive2", 1u << 1),
-    BitLabel::bitIfOn("Drive3", 1u << 2),
-    BitLabel::bitIfOn("Drive4", 1u << 3),
-    BitLabel::bitIfOn("Drive5", 1u << 4),
-    BitLabel::bitIfOn("Drive6", 1u << 5),
-    BitLabel::bitIfOn("Drive7", 1u << 6),
+    BitLabel::bitIfOn("D1", 1u << 0),
+    BitLabel::bitIfOn("D2", 1u << 1),
+    BitLabel::bitIfOn("D3", 1u << 2),
+    BitLabel::bitIfOn("D4", 1u << 3),
+    BitLabel::bitIfOn("D5", 1u << 4),
+    BitLabel::bitIfOn("D6", 1u << 5),
+    BitLabel::bitIfOn("D7", 1u << 6),
 };
 
 // 0x4009:1-7: Drive N user defined bit status — user defined bits 1-8
 inline BitLabel kDriveUserBitStatusBitLabels[] = {
-    BitLabel::bitIfOn("UserBit1", 1u << 0),
-    BitLabel::bitIfOn("UserBit2", 1u << 1),
-    BitLabel::bitIfOn("UserBit3", 1u << 2),
-    BitLabel::bitIfOn("UserBit4", 1u << 3),
-    BitLabel::bitIfOn("UserBit5", 1u << 4),
-    BitLabel::bitIfOn("UserBit6", 1u << 5),
-    BitLabel::bitIfOn("UserBit7", 1u << 6),
-    BitLabel::bitIfOn("UserBit8", 1u << 7),
+    BitLabel::bitIfOn("U1", 1u << 0),
+    BitLabel::bitIfOn("U2", 1u << 1),
+    BitLabel::bitIfOn("U3", 1u << 2),
+    BitLabel::bitIfOn("U4", 1u << 3),
+    BitLabel::bitIfOn("U5", 1u << 4),
+    BitLabel::bitIfOn("U6", 1u << 5),
+    BitLabel::bitIfOn("U7", 1u << 6),
+    BitLabel::bitIfOn("U8", 1u << 7),
 };
 
 // 0x400A: Input discrepancy status
 inline BitLabel kInputDiscrepancyStatusBitLabels[] = {
-    BitLabel::bitIfOn("EmergencyStopInputDiscrepancy",    1u << 0),
-    BitLabel::bitIfOn("NormalStopInputDiscrepancy",       1u << 1),
-    BitLabel::bitIfOn("ProtectiveStopInputDiscrepancy",   1u << 2),
-    BitLabel::bitIfOn("EnablingDeviceInputDiscrepancy",   1u << 3),
-    BitLabel::bitIfOn("OperationModeInputDiscrepancy",    1u << 4),
-    BitLabel::bitIfOn("ResetInputDiscrepancy",            1u << 5),
-    BitLabel::bitIfOn("CollaborativeInputDiscrepancy",    1u << 6),
-    BitLabel::bitIfOn("HGCInputDiscrepancy",              1u << 7),
-    BitLabel::bitIfOn("MonitoredPositionInputDiscrepancy",1u << 8),
-    BitLabel::bitIfOn("SSMInputDiscrepancy",              1u << 9),
+    BitLabel::bitIfOn("EStop",    1u << 0),
+    BitLabel::bitIfOn("NStop",       1u << 1),
+    BitLabel::bitIfOn("PStop",   1u << 2),
+    BitLabel::bitIfOn("EnaDev",   1u << 3),
+    BitLabel::bitIfOn("OpMode",    1u << 4),
+    BitLabel::bitIfOn("Reset",            1u << 5),
+    BitLabel::bitIfOn("Collab",    1u << 6),
+    BitLabel::bitIfOn("HGC",              1u << 7),
+    BitLabel::bitIfOn("MonPos",1u << 8),
+    BitLabel::bitIfOn("SSM",              1u << 9),
 };
 
 // 0x400B: Emergency stop input state (bit value 0: not triggered [high
 // signal] / 1: triggered [low signal])
 inline BitLabel kEmergencyStopInputStateBitLabels[] = {
-    BitLabel::bitIfOn("EmergencyStop1Input", 1u << 0),
-    BitLabel::bitIfOn("EmergencyStop2Input", 1u << 1),
-    BitLabel::bitIfOn("EmergencyStop3Input", 1u << 2),
-    BitLabel::bitIfOn("EmergencyStop4Input", 1u << 3),
-    BitLabel::bitIfOn("EmergencyStop5Input", 1u << 4),
-    BitLabel::bitIfOn("EmergencyStop6Input", 1u << 5),
-    BitLabel::bitIfOn("EmergencyStop7Input", 1u << 6),
-    BitLabel::bitIfOn("EmergencyStop8Input", 1u << 7),
+    BitLabel::bitIfOn("In1", 1u << 0),
+    BitLabel::bitIfOn("In2", 1u << 1),
+    BitLabel::bitIfOn("In3", 1u << 2),
+    BitLabel::bitIfOn("In4", 1u << 3),
+    BitLabel::bitIfOn("In5", 1u << 4),
+    BitLabel::bitIfOn("In6", 1u << 5),
+    BitLabel::bitIfOn("In7", 1u << 6),
+    BitLabel::bitIfOn("In8", 1u << 7),
 };
 
 // 0x400C: Normal stop input state (0: not triggered [high] / 1: triggered [low])
 inline BitLabel kNormalStopInputStateBitLabels[] = {
-    BitLabel::bitIfOn("NormalStopInput", 1u << 0),
+    BitLabel::bitIfOn("In", 1u << 0),
 };
 
 // 0x400D: Protective stop input state (bit value 0: not triggered [high]
 // signal] / 1: triggered [low signal])
 inline BitLabel kProtectiveStopInputStateBitLabels[] = {
-    BitLabel::bitIfOn("ProtectiveStop1Input", 1u << 0),
-    BitLabel::bitIfOn("ProtectiveStop2Input", 1u << 1),
-    BitLabel::bitIfOn("ProtectiveStop3Input", 1u << 2),
-    BitLabel::bitIfOn("ProtectiveStop4Input", 1u << 3),
-    BitLabel::bitIfOn("ProtectiveStop5Input", 1u << 4),
-    BitLabel::bitIfOn("ProtectiveStop6Input", 1u << 5),
-    BitLabel::bitIfOn("ProtectiveStop7Input", 1u << 6),
-    BitLabel::bitIfOn("ProtectiveStop8Input", 1u << 7),
+    BitLabel::bitIfOn("In1", 1u << 0),
+    BitLabel::bitIfOn("In2", 1u << 1),
+    BitLabel::bitIfOn("In3", 1u << 2),
+    BitLabel::bitIfOn("In4", 1u << 3),
+    BitLabel::bitIfOn("In5", 1u << 4),
+    BitLabel::bitIfOn("In6", 1u << 5),
+    BitLabel::bitIfOn("In7", 1u << 6),
+    BitLabel::bitIfOn("In8", 1u << 7),
 };
 
 // 0x400E: Enabling device input state (bit value 0: not triggered [OFF]
 // / 1: triggered [ON])
 inline BitLabel kEnablingDeviceInputStateBitLabels[] = {
-    BitLabel::bitIfOn("EnablingDevice1Input", 1u << 0),
-    BitLabel::bitIfOn("EnablingDevice2Input", 1u << 1),
-    BitLabel::bitIfOn("EnablingDevice3Input", 1u << 2),
-    BitLabel::bitIfOn("EnablingDevice4Input", 1u << 3),
+    BitLabel::bitIfOn("In1", 1u << 0),
+    BitLabel::bitIfOn("In2", 1u << 1),
+    BitLabel::bitIfOn("In3", 1u << 2),
+    BitLabel::bitIfOn("In4", 1u << 3),
 };
 
 // 0x400F: Operation mode input state (bit value 0: not triggered [low]
 // / 1: triggered [high])
 inline BitLabel kOperationModeInputStateBitLabels[] = {
-    BitLabel::bitIfOn("OperationMode1Input", 1u << 0),
-    BitLabel::bitIfOn("OperationMode2Input", 1u << 1),
+    BitLabel::bitIfOn("In1", 1u << 0),
+    BitLabel::bitIfOn("In2", 1u << 1),
 };
 
 // 0x4010: Reset input state (bit value 0: low signal / 1: high signal)
 inline BitLabel kResetInputStateBitLabels[] = {
-    BitLabel::bitIfOn("ResetSafetyInput",            1u << 0),
-    BitLabel::bitIfOn("ResetCommunicationDataInput", 1u << 1),
+    BitLabel::bitIfOn("Safe",            1u << 0),
+    BitLabel::bitIfOn("Comm", 1u << 1),
 };
 
 // 0x4011: Collaborative input state (bit value 0: not triggered [low]
 // / 1: triggered [high])
 inline BitLabel kCollaborativeInputStateBitLabels[] = {
-    BitLabel::bitIfOn("Collaborative1State", 1u << 0),
-    BitLabel::bitIfOn("Collaborative2State", 1u << 1),
-    BitLabel::bitIfOn("Collaborative3State", 1u << 2),
-    BitLabel::bitIfOn("Collaborative4State", 1u << 3),
-    BitLabel::bitIfOn("Collaborative5State", 1u << 4),
-    BitLabel::bitIfOn("Collaborative6State", 1u << 5),
-    BitLabel::bitIfOn("Collaborative7State", 1u << 6),
-    BitLabel::bitIfOn("Collaborative8State", 1u << 7),
+    BitLabel::bitIfOn("In1", 1u << 0),
+    BitLabel::bitIfOn("In2", 1u << 1),
+    BitLabel::bitIfOn("In3", 1u << 2),
+    BitLabel::bitIfOn("In4", 1u << 3),
+    BitLabel::bitIfOn("In5", 1u << 4),
+    BitLabel::bitIfOn("In6", 1u << 5),
+    BitLabel::bitIfOn("In7", 1u << 6),
+    BitLabel::bitIfOn("In8", 1u << 7),
 };
 
 // 0x4012: HGC (hand guiding) input state (bit value 0: not triggered [low]
 // / 1: triggered [high])
 inline BitLabel kHGCInputStateBitLabels[] = {
-    BitLabel::bitIfOn("HGC1Input", 1u << 0),
-    BitLabel::bitIfOn("HGC2Input", 1u << 1),
+    BitLabel::bitIfOn("In1", 1u << 0),
+    BitLabel::bitIfOn("In2", 1u << 1),
 };
 
 // 0x4013: Monitored position input state (bit value 0: not triggered [high]
 // / 1: triggered [low])
 inline BitLabel kMonitoredPositionInputStateBitLabels[] = {
-    BitLabel::bitIfOn("MonitoredPosition1Input", 1u << 0),
-    BitLabel::bitIfOn("MonitoredPosition2Input", 1u << 1),
+    BitLabel::bitIfOn("In1", 1u << 0),
+    BitLabel::bitIfOn("In2", 1u << 1),
 };
 
 // 0x4014: SSM (safe speed monitor) input state — reduce-speed and
 // protective-stop inputs interleaved per channel (bit value 0: not
 // triggered [high] / 1: triggered [low])
 inline BitLabel kSSMInputStateBitLabels[] = {
-    BitLabel::bitIfOn("SSMReduceSpeed1Input",    1u << 0),
-    BitLabel::bitIfOn("SSMProtectiveStop1Input", 1u << 1),
-    BitLabel::bitIfOn("SSMReduceSpeed2Input",    1u << 2),
-    BitLabel::bitIfOn("SSMProtectiveStop2Input", 1u << 3),
-    BitLabel::bitIfOn("SSMReduceSpeed3Input",    1u << 4),
-    BitLabel::bitIfOn("SSMProtectiveStop3Input", 1u << 5),
-    BitLabel::bitIfOn("SSMReduceSpeed4Input",    1u << 6),
-    BitLabel::bitIfOn("SSMProtectiveStop4Input", 1u << 7),
+    BitLabel::bitIfOn("RedSpd1",    1u << 0),
+    BitLabel::bitIfOn("PStop1", 1u << 1),
+    BitLabel::bitIfOn("RedSpd2",    1u << 2),
+    BitLabel::bitIfOn("PStop2", 1u << 3),
+    BitLabel::bitIfOn("RedSpd3",    1u << 4),
+    BitLabel::bitIfOn("PStop3", 1u << 5),
+    BitLabel::bitIfOn("RedSpd4",    1u << 6),
+    BitLabel::bitIfOn("PStop4", 1u << 7),
 };
 
 // 0x4015: Output discrepancy status
 inline BitLabel kOutputDiscrepancyStatusBitLabels[] = {
-    BitLabel::bitIfOn("EmergencyStopOutputDiscrepancy",          1u << 0),
-    BitLabel::bitIfOn("NormalStopOutputDiscrepancy",             1u << 1),
-    BitLabel::bitIfOn("ProtectiveStopOutputDiscrepancy",         1u << 2),
-    BitLabel::bitIfOn("EnablingDeviceOutputDiscrepancy",         1u << 3),
-    BitLabel::bitIfOn("OperationModeOutputDiscrepancy",          1u << 4),
-    BitLabel::bitIfOn("ResetOutputDiscrepancy",                  1u << 5),
-    BitLabel::bitIfOn("CollaborativeOutputDiscrepancy",          1u << 6),
-    BitLabel::bitIfOn("StandstillOutputDiscrepancy",             1u << 7),
-    BitLabel::bitIfOn("RobotMovingOutputDiscrepancy",            1u << 8),
-    BitLabel::bitIfOn("RecoveryStateOutputDiscrepancy",          1u << 9),
-    BitLabel::bitIfOn("InT2ModeOutputDiscrepancy",               1u << 10),
-    BitLabel::bitIfOn("InExtModeOutputDiscrepancy",              1u << 11),
-    BitLabel::bitIfOn("MonitoredPositionOutputDiscrepancy",      1u << 12),
-    BitLabel::bitIfOn("SSMInReduceSpeedZoneOutputDiscrepancy",   1u << 13),
-    BitLabel::bitIfOn("SSMInProtectiveStopZoneOutputDiscrepancy",1u << 14),
-    BitLabel::bitIfOn("SafeHomeOutputDiscrepancy",               1u << 15),
+    BitLabel::bitIfOn("EStop",          1u << 0),
+    BitLabel::bitIfOn("NStop",             1u << 1),
+    BitLabel::bitIfOn("PStop",         1u << 2),
+    BitLabel::bitIfOn("EnaDev",         1u << 3),
+    BitLabel::bitIfOn("OpMode",          1u << 4),
+    BitLabel::bitIfOn("Reset",                  1u << 5),
+    BitLabel::bitIfOn("Collab",          1u << 6),
+    BitLabel::bitIfOn("Stndstill",             1u << 7),
+    BitLabel::bitIfOn("Moving",            1u << 8),
+    BitLabel::bitIfOn("Recover",          1u << 9),
+    BitLabel::bitIfOn("T2",               1u << 10),
+    BitLabel::bitIfOn("Ext",              1u << 11),
+    BitLabel::bitIfOn("MonPos",      1u << 12),
+    BitLabel::bitIfOn("RedZone",   1u << 13),
+    BitLabel::bitIfOn("PStpZone",1u << 14),
+    BitLabel::bitIfOn("SafeHome",               1u << 15),
 };
 
 // 0x4016: Safety output state (bit value 0: not triggered / 1: triggered)
 inline BitLabel kSafetyOutputStateBitLabels[] = {
-    BitLabel::bitIfOn("EmergencyStopOutputState",          1u << 0),
-    BitLabel::bitIfOn("NormalStopOutputState",             1u << 1),
-    BitLabel::bitIfOn("ProtectiveStopOutputState",         1u << 2),
-    BitLabel::bitIfOn("EnablingDeviceOutputState",         1u << 3),
-    BitLabel::bitIfOn("OperationModeOutputState",          1u << 4),
-    BitLabel::bitIfOn("ResetOutputState",                  1u << 5),
-    BitLabel::bitIfOn("CollaborativeOutputState",          1u << 6),
-    BitLabel::bitIfOn("StandstillOutputState",             1u << 7),
-    BitLabel::bitIfOn("RobotMovingOutputState",            1u << 8),
-    BitLabel::bitIfOn("RecoveryStateOutputState",          1u << 9),
-    BitLabel::bitIfOn("InT2ModeOutputState",               1u << 10),
-    BitLabel::bitIfOn("InExtModeOutputState",              1u << 11),
-    BitLabel::bitIfOn("MonitoredPositionOutputState",      1u << 12),
-    BitLabel::bitIfOn("SSMInReduceSpeedZoneOutputState",   1u << 13),
-    BitLabel::bitIfOn("SSMInProtectiveStopZoneOutputState",1u << 14),
-    BitLabel::bitIfOn("SafeHomeOutputState",               1u << 15),
+    BitLabel::bitIfOn("EStop",          1u << 0),
+    BitLabel::bitIfOn("NStop",             1u << 1),
+    BitLabel::bitIfOn("PStop",         1u << 2),
+    BitLabel::bitIfOn("EnaDev",         1u << 3),
+    BitLabel::bitIfOn("OpMode",          1u << 4),
+    BitLabel::bitIfOn("Reset",                  1u << 5),
+    BitLabel::bitIfOn("Collab",          1u << 6),
+    BitLabel::bitIfOn("Stndstill",             1u << 7),
+    BitLabel::bitIfOn("Moving",            1u << 8),
+    BitLabel::bitIfOn("Recover",          1u << 9),
+    BitLabel::bitIfOn("T2",               1u << 10),
+    BitLabel::bitIfOn("Ext",              1u << 11),
+    BitLabel::bitIfOn("MonPos",      1u << 12),
+    BitLabel::bitIfOn("RedZone",   1u << 13),
+    BitLabel::bitIfOn("PStpZone",1u << 14),
+    BitLabel::bitIfOn("SafeHome",               1u << 15),
 };
 
 // 0x4017: Safety control function state (bit value 0: not triggered /
 // 1: triggered).  Manual: bits 1,2,3,4,6,7,8 causing demand state also set
 // 0x4006 bit 4 (Control function triggered).
 inline BitLabel kSafetyControlFunctionStateBitLabels[] = {
-    BitLabel::bitIfOn("ResetSafetyFunction",           1u << 0),
-    BitLabel::bitIfOn("EmergencyStopSafetyFunction",   1u << 1),
-    BitLabel::bitIfOn("ProtectiveStopSafetyFunction",  1u << 2),
-    BitLabel::bitIfOn("OperationModeSafetyFunction",   1u << 3),
-    BitLabel::bitIfOn("EnablingDeviceSafetyFunction",  1u << 4),
-    BitLabel::bitIfOn("CollaborativeSafetyFunction",   1u << 5),
-    BitLabel::bitIfOn("HGCSafetyFunction",             1u << 6),
-    BitLabel::bitIfOn("MonitoredPositionSafetyFunction",1u << 7),
-    BitLabel::bitIfOn("SafetyDriverSafetyFunction",    1u << 8),
+    BitLabel::bitIfOn("Reset",           1u << 0),
+    BitLabel::bitIfOn("EStop",   1u << 1),
+    BitLabel::bitIfOn("PStop",  1u << 2),
+    BitLabel::bitIfOn("OpMode",   1u << 3),
+    BitLabel::bitIfOn("EnaDev",  1u << 4),
+    BitLabel::bitIfOn("Collab",   1u << 5),
+    BitLabel::bitIfOn("HGC",             1u << 6),
+    BitLabel::bitIfOn("MonPos",1u << 7),
+    BitLabel::bitIfOn("SDrive",    1u << 8),
 };
 
 // 0x4018: Safety limit function state (bit value 0: not triggered /
 // 1: triggered).  Manual: bits 0,1,2,3,4,5,6,7,9,10 causing demand state
 // also set 0x4006 bit 5 (Limiting function triggered).
 inline BitLabel kSafetyLimitFunctionStateBitLabels[] = {
-    BitLabel::bitIfOn("AxisPositionLimitSafetyFunction",           1u << 0),
-    BitLabel::bitIfOn("TCPPositionLimitSafetyFunction",            1u << 1),
-    BitLabel::bitIfOn("TCPOrientationLimitSafetyFunction",         1u << 2),
-    BitLabel::bitIfOn("AxisSpeedLimitSafetyFunction",              1u << 3),
-    BitLabel::bitIfOn("TCPSpeedLimitSafetyFunction",               1u << 4),
-    BitLabel::bitIfOn("AxisTorqueLimitSafetyFunction",             1u << 5),
-    BitLabel::bitIfOn("TCPForceLimitSafetyFunction",               1u << 6),
-    BitLabel::bitIfOn("RobotPowerLimitSafetyFunction",             1u << 7),
-    BitLabel::bitIfOn("PowerAndForceLimitSafetyFunction",          1u << 8),
-    BitLabel::bitIfOn("SpeedAndSeparationMonitoringSafetyFunction",1u << 9),
-    BitLabel::bitIfOn("StandstillMonitoringSafetyFunction",        1u << 10),
-    BitLabel::bitIfOn("SafeHomeSafetyFunction",                    1u << 11),
+    BitLabel::bitIfOn("AxPos",           1u << 0),
+    BitLabel::bitIfOn("TCPPos",            1u << 1),
+    BitLabel::bitIfOn("Orient",         1u << 2),
+    BitLabel::bitIfOn("AxSpd",              1u << 3),
+    BitLabel::bitIfOn("TCPSpd",               1u << 4),
+    BitLabel::bitIfOn("AxTrq",             1u << 5),
+    BitLabel::bitIfOn("TCPFrc",               1u << 6),
+    BitLabel::bitIfOn("Power",             1u << 7),
+    BitLabel::bitIfOn("PwrFrc",          1u << 8),
+    BitLabel::bitIfOn("SSM",1u << 9),
+    BitLabel::bitIfOn("StndMon",        1u << 10),
+    BitLabel::bitIfOn("SafeHome",                    1u << 11),
 };
 
 // 0x4019: Axis position limit status (bit value 0: within limit /
 // 1: over limit)
 inline BitLabel kAxisPositionLimitStatusBitLabels[] = {
-    BitLabel::bitIfOn("Axis1PosLimit", 1u << 0),
-    BitLabel::bitIfOn("Axis2PosLimit", 1u << 1),
-    BitLabel::bitIfOn("Axis3PosLimit", 1u << 2),
-    BitLabel::bitIfOn("Axis4PosLimit", 1u << 3),
-    BitLabel::bitIfOn("Axis5PosLimit", 1u << 4),
-    BitLabel::bitIfOn("Axis6PosLimit", 1u << 5),
-    BitLabel::bitIfOn("Axis7PosLimit", 1u << 6),
+    BitLabel::bitIfOn("Ax1", 1u << 0),
+    BitLabel::bitIfOn("Ax2", 1u << 1),
+    BitLabel::bitIfOn("Ax3", 1u << 2),
+    BitLabel::bitIfOn("Ax4", 1u << 3),
+    BitLabel::bitIfOn("Ax5", 1u << 4),
+    BitLabel::bitIfOn("Ax6", 1u << 5),
+    BitLabel::bitIfOn("Ax7", 1u << 6),
 };
 
 // 0x401A: TCP position limit status (bit value 0: not in Cart. zone /
 // 1: in Cart. zone)
 inline BitLabel kTCPPositionLimitStatusBitLabels[] = {
-    BitLabel::bitIfOn("TCP0PosLimit", 1u << 0),
-    BitLabel::bitIfOn("TCP1PosLimit", 1u << 1),
-    BitLabel::bitIfOn("TCP2PosLimit", 1u << 2),
-    BitLabel::bitIfOn("TCP3PosLimit", 1u << 3),
-    BitLabel::bitIfOn("TCP4PosLimit", 1u << 4),
-    BitLabel::bitIfOn("TCP5PosLimit", 1u << 5),
-    BitLabel::bitIfOn("TCP6PosLimit", 1u << 6),
-    BitLabel::bitIfOn("TCP7PosLimit", 1u << 7),
-    BitLabel::bitIfOn("TCP8PosLimit", 1u << 8),
+    BitLabel::bitIfOn("TCP0", 1u << 0),
+    BitLabel::bitIfOn("TCP1", 1u << 1),
+    BitLabel::bitIfOn("TCP2", 1u << 2),
+    BitLabel::bitIfOn("TCP3", 1u << 3),
+    BitLabel::bitIfOn("TCP4", 1u << 4),
+    BitLabel::bitIfOn("TCP5", 1u << 5),
+    BitLabel::bitIfOn("TCP6", 1u << 6),
+    BitLabel::bitIfOn("TCP7", 1u << 7),
+    BitLabel::bitIfOn("TCP8", 1u << 8),
 };
 
 // 0x401B: Endpoint position limit status (bit value 0: not in Cart. zone /
 // 1: in Cart. zone)
 inline BitLabel kEndpointPositionLimitStatusBitLabels[] = {
-    BitLabel::bitIfOn("Endpoint1PosLimit", 1u << 0),
-    BitLabel::bitIfOn("Endpoint2PosLimit", 1u << 1),
-    BitLabel::bitIfOn("Endpoint3PosLimit", 1u << 2),
-    BitLabel::bitIfOn("Endpoint4PosLimit", 1u << 3),
-    BitLabel::bitIfOn("Endpoint5PosLimit", 1u << 4),
-    BitLabel::bitIfOn("Endpoint6PosLimit", 1u << 5),
-    BitLabel::bitIfOn("Endpoint7PosLimit", 1u << 6),
+    BitLabel::bitIfOn("EP1", 1u << 0),
+    BitLabel::bitIfOn("EP2", 1u << 1),
+    BitLabel::bitIfOn("EP3", 1u << 2),
+    BitLabel::bitIfOn("EP4", 1u << 3),
+    BitLabel::bitIfOn("EP5", 1u << 4),
+    BitLabel::bitIfOn("EP6", 1u << 5),
+    BitLabel::bitIfOn("EP7", 1u << 6),
 };
 
 // 0x401C: Axis speed limit status (bit value 0: under limit / 1: over limit)
 inline BitLabel kAxisSpeedLimitStatusBitLabels[] = {
-    BitLabel::bitIfOn("Axis1SpeedLimit", 1u << 0),
-    BitLabel::bitIfOn("Axis2SpeedLimit", 1u << 1),
-    BitLabel::bitIfOn("Axis3SpeedLimit", 1u << 2),
-    BitLabel::bitIfOn("Axis4SpeedLimit", 1u << 3),
-    BitLabel::bitIfOn("Axis5SpeedLimit", 1u << 4),
-    BitLabel::bitIfOn("Axis6SpeedLimit", 1u << 5),
-    BitLabel::bitIfOn("Axis7SpeedLimit", 1u << 6),
+    BitLabel::bitIfOn("Ax1", 1u << 0),
+    BitLabel::bitIfOn("Ax2", 1u << 1),
+    BitLabel::bitIfOn("Ax3", 1u << 2),
+    BitLabel::bitIfOn("Ax4", 1u << 3),
+    BitLabel::bitIfOn("Ax5", 1u << 4),
+    BitLabel::bitIfOn("Ax6", 1u << 5),
+    BitLabel::bitIfOn("Ax7", 1u << 6),
 };
 
 // 0x401D: TCP speed limit status (bit value 0: under limit / 1: over limit)
 inline BitLabel kTCPSpeedLimitStatusBitLabels[] = {
-    BitLabel::bitIfOn("TCP0SpeedLimit", 1u << 0),
-    BitLabel::bitIfOn("TCP1SpeedLimit", 1u << 1),
-    BitLabel::bitIfOn("TCP2SpeedLimit", 1u << 2),
-    BitLabel::bitIfOn("TCP3SpeedLimit", 1u << 3),
-    BitLabel::bitIfOn("TCP4SpeedLimit", 1u << 4),
-    BitLabel::bitIfOn("TCP5SpeedLimit", 1u << 5),
-    BitLabel::bitIfOn("TCP6SpeedLimit", 1u << 6),
-    BitLabel::bitIfOn("TCP7SpeedLimit", 1u << 7),
-    BitLabel::bitIfOn("TCP8SpeedLimit", 1u << 8),
+    BitLabel::bitIfOn("TCP0", 1u << 0),
+    BitLabel::bitIfOn("TCP1", 1u << 1),
+    BitLabel::bitIfOn("TCP2", 1u << 2),
+    BitLabel::bitIfOn("TCP3", 1u << 3),
+    BitLabel::bitIfOn("TCP4", 1u << 4),
+    BitLabel::bitIfOn("TCP5", 1u << 5),
+    BitLabel::bitIfOn("TCP6", 1u << 6),
+    BitLabel::bitIfOn("TCP7", 1u << 7),
+    BitLabel::bitIfOn("TCP8", 1u << 8),
 };
 
 // 0x401E: Endpoint speed limit status (bit value 0: under limit /
 // 1: over limit)
 inline BitLabel kEndpointSpeedLimitStatusBitLabels[] = {
-    BitLabel::bitIfOn("Endpoint1SpeedLimit", 1u << 0),
-    BitLabel::bitIfOn("Endpoint2SpeedLimit", 1u << 1),
-    BitLabel::bitIfOn("Endpoint3SpeedLimit", 1u << 2),
-    BitLabel::bitIfOn("Endpoint4SpeedLimit", 1u << 3),
-    BitLabel::bitIfOn("Endpoint5SpeedLimit", 1u << 4),
-    BitLabel::bitIfOn("Endpoint6SpeedLimit", 1u << 5),
-    BitLabel::bitIfOn("Endpoint7SpeedLimit", 1u << 6),
+    BitLabel::bitIfOn("EP1", 1u << 0),
+    BitLabel::bitIfOn("EP2", 1u << 1),
+    BitLabel::bitIfOn("EP3", 1u << 2),
+    BitLabel::bitIfOn("EP4", 1u << 3),
+    BitLabel::bitIfOn("EP5", 1u << 4),
+    BitLabel::bitIfOn("EP6", 1u << 5),
+    BitLabel::bitIfOn("EP7", 1u << 6),
 };
 
 // 0x401F: Axis torque limit status (bit value 0: under limit /
 // 1: over limit)
 inline BitLabel kAxisTorqueLimitStatusBitLabels[] = {
-    BitLabel::bitIfOn("Axis1TorqueLimit", 1u << 0),
-    BitLabel::bitIfOn("Axis2TorqueLimit", 1u << 1),
-    BitLabel::bitIfOn("Axis3TorqueLimit", 1u << 2),
-    BitLabel::bitIfOn("Axis4TorqueLimit", 1u << 3),
-    BitLabel::bitIfOn("Axis5TorqueLimit", 1u << 4),
-    BitLabel::bitIfOn("Axis6TorqueLimit", 1u << 5),
-    BitLabel::bitIfOn("Axis7TorqueLimit", 1u << 6),
+    BitLabel::bitIfOn("Ax1", 1u << 0),
+    BitLabel::bitIfOn("Ax2", 1u << 1),
+    BitLabel::bitIfOn("Ax3", 1u << 2),
+    BitLabel::bitIfOn("Ax4", 1u << 3),
+    BitLabel::bitIfOn("Ax5", 1u << 4),
+    BitLabel::bitIfOn("Ax6", 1u << 5),
+    BitLabel::bitIfOn("Ax7", 1u << 6),
 };
 
 // 0x4020: TCP force limit status (bit value 0: under limit / 1: over limit)
 inline BitLabel kTCPForceLimitStatusBitLabels[] = {
-    BitLabel::bitIfOn("TCP0ForceLimit", 1u << 0),
-    BitLabel::bitIfOn("TCP1ForceLimit", 1u << 1),
-    BitLabel::bitIfOn("TCP2ForceLimit", 1u << 2),
-    BitLabel::bitIfOn("TCP3ForceLimit", 1u << 3),
-    BitLabel::bitIfOn("TCP4ForceLimit", 1u << 4),
-    BitLabel::bitIfOn("TCP5ForceLimit", 1u << 5),
-    BitLabel::bitIfOn("TCP6ForceLimit", 1u << 6),
-    BitLabel::bitIfOn("TCP7ForceLimit", 1u << 7),
-    BitLabel::bitIfOn("TCP8ForceLimit", 1u << 8),
+    BitLabel::bitIfOn("TCP0", 1u << 0),
+    BitLabel::bitIfOn("TCP1", 1u << 1),
+    BitLabel::bitIfOn("TCP2", 1u << 2),
+    BitLabel::bitIfOn("TCP3", 1u << 3),
+    BitLabel::bitIfOn("TCP4", 1u << 4),
+    BitLabel::bitIfOn("TCP5", 1u << 5),
+    BitLabel::bitIfOn("TCP6", 1u << 6),
+    BitLabel::bitIfOn("TCP7", 1u << 7),
+    BitLabel::bitIfOn("TCP8", 1u << 8),
 };
 
 /// Returns the set of bit labels for a bitfield object in 0x4001-0x4023,
