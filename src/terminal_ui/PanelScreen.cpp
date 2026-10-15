@@ -269,6 +269,12 @@ void PanelScreen::run(std::atomic<bool>& cancel, double durationSec) {
             }
         }
 
+        // Esc clears view-local state first (search/filter/prompt);
+        // only an unconsumed Esc reaches the quit check below.
+        if (key == 27 && active_ < hooks_.views.size() &&
+            hooks_.views[active_].onKey &&
+            hooks_.views[active_].onKey(key))
+            continue;
         if (key == 27 || key == 'q' || key == 'Q') {
             if (hooks_.quitGuard && hooks_.quitGuard()) {
                 if (hooks_.onKey) hooks_.onKey(key);

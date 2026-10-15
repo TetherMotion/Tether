@@ -223,7 +223,16 @@ Two layers, split so application "views" can be built without ncurses:
   (`CompositeEntityProvider` — inner provider + callback extra rows for
   virtual/synthetic entities; `DispatchingRegisterReader` — predicate
   routes entity indices to an injected handler, rest to the inner
-  reader).
+  reader), `Sparkline.hpp` (`SparklineHistory<N>` ring buffer +
+  `renderSparkline` → `▁▂▃▄▅▆▇█` string), `Overlay.hpp` (`Overlay`
+  model + `OverlayStack`; `DialogButton`/`buttons()`/`focusedButton()`/
+  `wantsClose()` extension points let any overlay render as a button
+  dialog), `Dialog.hpp` (`Dialog` — modal message + button-row model:
+  Left/Right/h/l/Tab move focus, Enter fires the focused button,
+  per-button `hotkey` (case-insensitive), Esc fires `cancel_index`
+  (default: last button, -1 = close without result); factories
+  `makeMessageBox` `[ OK ]` and `makeConfirmDialog` `[ Yes ] [ No ]`
+  with `kDialogOk/Yes/No/Cancel` result ids).
 - **`tether/terminal_ui/*` — ncurses widgets**: `Session` (ncurses
   lifecycle + palette; `pollKeyDecoded` resolves split CSI/SS3 escape
   tails — lone ESC still returns 27), `PanelScreen` (titled multi-tab
@@ -245,11 +254,39 @@ Two layers, split so application "views" can be built without ncurses:
     `drawRangeTrack` (`[---#---]` marker on a [low, high] span).
   - `AnsiLine.hpp` — `renderAnsiLine` (interprets embedded ANSI SGR as
     curses colors), `utf8Cols`/`utf8Trunc` (column-accurate UTF-8).
+  - `StyledText.hpp` — `putStyled`/`putPair` (attron+mvprintw+attroff
+    collapsed into one call returning the column advance for `col +=`
+    chaining), `AttrScope` RAII, `Span`/`putSpans`/`spansWidth`
+    (mixed-color runs), `pairAttrs` (constexpr `chtype`→`int` for
+    braced `Span` inits).  IMPORTANT: consumers `#undef OK`/`ERR`
+    after <ncurses.h> (macro clash with Tether error enums) — widget
+    headers must use mvprintw-family calls only; mvaddnstr/mvaddch
+    expand `wmove()==ERR` internally and fail to compile.
+  - `StatusBar.hpp` — `drawStatusBar(y, left, right, width)`: left/
+    right-anchored `BarSeg` (styled `Span`) segments, no manual column
+    math (e.g. `cycle=N t=Ns ESC err=none  [PDO ERROR]`).
+  - `Lamp.hpp` — `drawLamp(y, x, LampState{Off,On,Unknown}, style)`:
+    `kLampDots` (●/○/?) for pin grids, `kLampTags` (" ON"/" off"/" ?")
+    for columnar lists.
+  - `HexView.hpp` — `drawHexLine(y, x, max_cols, bytes, fields)`: `hh`
+    byte dump with per-`HexField{off,len,attrs}` highlighting and `…`
+    clipping — for protocol frames with known field layout.
+  - `Sparkline.hpp` — `drawSparkline(y, x, w, samples, lo, hi, attrs)`
+    (overloads for `SparklineHistory`).
 
 `PanelScreen` supports per-view `keyHintsFn` (merged into the footer),
 routes keys to `OverlayHost` overlays before normal view handling, and
 binds `?` to a modal "Keys — <view>" overlay listing screen-level and
-view-specific key bindings.
+view-specific key bindings.  Esc is offered to the active view's
+`onKey` before the quit check, so views can consume it to clear local
+state (search/filter); `quitGuard` + `hooks.onKey` can divert q/Q/Esc
+to application logic (e.g. a confirm-quit `UI::Dialog` pushed via
+`pushOverlay` — overlays are modal and pop on `wantsClose()`).
+`OverlayHost` renders `Overlay::buttons()` as a centered `[ label ]`
+row at the bottom interior (focused button `A_REVERSE|A_BOLD`),
+routes Esc to `Overlay::handleKey` first (unconsumed Esc pops), and
+pops overlays whose `wantsClose()` fired (dialog results propagate
+through the model's `onResult(id)` callback before closing).
 
 Consumers: `esc211_inspect_config` (TreeScreen), `esc211_fsoe_monitor` +
 `esc211_fsoe_blackchannel` (PanelScreen tabs — chip-panel RSAP grid,
