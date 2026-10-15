@@ -52,13 +52,32 @@ bool OverlayHost::render(int top, int bottom) {
     box(ot, ol, h, w, ov->title());
 
     const int ct = ot + 1, cb = ot + h - 1;
+    const auto btns = ov->buttons();
+    const int content_bottom = btns.empty() ? cb : cb - 1;
     if (UI::TableModel* t = ov->table()) {
-        TablePanel::render(*t, ct, cb, ol + 2, w - 4, /*focused=*/true);
+        TablePanel::render(*t, ct, content_bottom, ol + 2, w - 4,
+                           /*focused=*/true);
     } else {
         int y = ct;
         for (const auto& line : ov->lines()) {
-            if (y >= cb) break;
+            if (y >= content_bottom) break;
             mvprintw(y++, ol + 2, "%.*s", w - 4, line.c_str());
+        }
+    }
+
+    // Dialog button row — centered on the last interior row, focused
+    // button reversed.
+    if (!btns.empty()) {
+        int bw = 0;
+        for (const auto& b : btns)
+            bw += static_cast<int>(b.label.size()) + 6;  // "[ x ]" + gap
+        int bx = ol + (w - bw) / 2;
+        for (size_t i = 0; i < btns.size(); ++i) {
+            const bool focus = (i == ov->focusedButton());
+            if (focus) attron(A_REVERSE | A_BOLD);
+            mvprintw(cb - 1, bx, "[ %s ]", btns[i].label.c_str());
+            if (focus) attroff(A_REVERSE | A_BOLD);
+            bx += static_cast<int>(btns[i].label.size()) + 6;
         }
     }
     return true;
@@ -67,20 +86,27 @@ bool OverlayHost::render(int top, int bottom) {
 bool OverlayHost::handleKey(int key) {
     UI::Overlay* ov = stack_.top();
     if (!ov) return false;
-    if (key == 27) { stack_.pop(); return true; }
-    // Table overlays get full navigation via their model.
-    if (UI::TableModel* t = ov->table()) {
-        switch (key) {
-            case KEY_UP:    t->move(-1); return true;
-            case KEY_DOWN:  t->move(+1); return true;
-            case KEY_PPAGE: t->pageMove(-1, 8); return true;
-            case KEY_NPAGE: t->pageMove(+1, 8); return true;
-            case KEY_HOME:  t->selectFirst(); return true;
-            case KEY_END:   t->selectLast(); return true;
-            default: break;
+    if (key == 27) {
+        // The overlay may consume Esc (dialog: cancel result); the
+        // default is pop.
+        if (!ov->handleKey(key)) stack_.pop();
+    } else {
+        // Table overlays get full navigation via their model.
+        if (UI::TableModel* t = ov->table()) {
+            switch (key) {
+                case KEY_UP:    t->move(-1); return true;
+                case KEY_DOWN:  t->move(+1); return true;
+                case KEY_PPAGE: t->pageMove(-1, 8); return true;
+                case KEY_NPAGE: t->pageMove(+1, 8); return true;
+                case KEY_HOME:  t->selectFirst(); return true;
+                case KEY_END:   t->selectLast(); return true;
+                default: break;
+            }
         }
+        ov->handleKey(key);   // overlay may consume or ignore
     }
-    ov->handleKey(key);   // overlay may consume or ignore
+    // A dialog that fired its result asks to be closed.
+    if (stack_.top() == ov && ov->wantsClose()) stack_.pop();
     return true;          // never leak to the underlying panel
 }
 

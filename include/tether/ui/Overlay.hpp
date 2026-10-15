@@ -17,6 +17,7 @@
 
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -41,6 +42,14 @@ struct PanelAction {
 // Overlay model
 // ---------------------------------------------------------------------------
 
+/// A button in a modal dialog — rendered as a styled row by the
+/// frontend (`[ Yes ]` with the focused button reversed).
+struct DialogButton {
+    std::string label;   ///< button text ("Yes", "Cancel", …)
+    int id = 0;          ///< result id passed to the result callback
+    int hotkey = 0;      ///< extra trigger key (e.g. 'y', 'n'); 0 = none
+};
+
 class Overlay {
 public:
     virtual ~Overlay() = default;
@@ -55,9 +64,20 @@ public:
     /// Text content lines (used when table() is null).
     virtual std::vector<std::string> lines() { return {}; }
 
+    /// Dialog buttons — when non-empty the frontend renders them as a
+    /// row at the bottom of the box and highlights `focusedButton()`.
+    virtual std::span<const DialogButton> buttons() const { return {}; }
+    virtual size_t focusedButton() const { return 0; }
+
     /// Keys routed to the top overlay.  Return true when consumed.
-    /// Esc/close handling is the frontend's job.
+    /// Esc reaches handleKey first — return false to let the frontend
+    /// apply its default close behaviour, true to consume it (e.g. a
+    /// dialog mapping Esc to its cancel result).
     virtual bool handleKey(int /*key*/) { return false; }
+
+    /// When true after a key was handled, the frontend pops the
+    /// overlay (e.g. a dialog whose result already fired).
+    virtual bool wantsClose() const { return false; }
 
     /// Footer hint text while this overlay is on top.
     virtual std::string keyHints() const { return {}; }
