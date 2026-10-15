@@ -252,7 +252,14 @@ endif()
 # call sites compile unchanged. On toolchains that do provide a real
 # <expected> (GCC >= 12, recent clang/MSVC) the shim is not put on the include
 # path and the standard header is used directly.
-check_include_file_cxx("expected" TETHER_HAVE_NATIVE_STD_EXPECTED)
+include(CheckCXXSourceCompiles)
+set(_tether_expected_check_flags_backup "${CMAKE_REQUIRED_FLAGS}")
+set(CMAKE_REQUIRED_FLAGS "-std=c++23")
+check_cxx_source_compiles("#include <expected>
+int main() { std::expected<int,int> e = 1; return e.value(); }"
+    TETHER_HAVE_NATIVE_STD_EXPECTED)
+set(CMAKE_REQUIRED_FLAGS "${_tether_expected_check_flags_backup}")
+unset(_tether_expected_check_flags_backup)
 
 if(NOT TETHER_HAVE_NATIVE_STD_EXPECTED)
     message(STATUS "Native <expected> not available; using tl::expected submodule shim as std::expected polyfill.")
@@ -449,6 +456,7 @@ option(TETHER_BUILD_BENCHMARKS "Build benchmarks" OFF)
 # Optional small tools (non-library utilities)
 # Enabled by default: handy standalone utility to extract human-readable data from ESI XML
 option(TETHER_BUILD_EXTRACT_ESI "Build extract_esi_xml utility" ON)
+option(TETHER_BUILD_IO_CLIENT "Build tether_io_client CLI utility" ON)
 
 option(TETHER_BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
 option(TETHER_BUILD_SHARED_LIBS "Build Tether component libraries as shared" ON)
@@ -992,6 +1000,9 @@ endif()
 # =============================================================================
 if(TETHER_BUILD_EXTRACT_ESI)
     add_subdirectory(tools/extract_esi)
+endif()
+if(TETHER_BUILD_IO_CLIENT AND TETHER_BUILD_IO_PROTOCOL)
+    add_subdirectory(tools/tether_io_client)
 endif()
 
 
