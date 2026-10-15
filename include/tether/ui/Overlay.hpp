@@ -126,6 +126,76 @@ private:
     TableModel model_;
 };
 
+/// Vertical action menu — a list of labelled items rendered through
+/// the standard table overlay machinery (arrow navigation comes from
+/// the host's table keys).  Enter fires the selected item's invoke
+/// callback (or its `id` via onResult when no callback is given) and
+/// closes the menu.  Esc closes without an action.
+class MenuOverlay : public Overlay {
+public:
+    struct Item {
+        std::string label;
+        int id = 0;
+        std::function<void()> invoke;   ///< optional — else onResult(id)
+        int color = 0;                  ///< RowColor, 0 = default
+    };
+
+    /// `onResult` fires with the item's `id` when it has no invoke
+    /// callback (lets one handler serve the whole menu).
+    explicit MenuOverlay(std::string title,
+                         std::function<void(int id)> onResult = {})
+        : title_(std::move(title)), on_result_(std::move(onResult)) {
+        model_.setColumns({"action"});
+    }
+
+    void addItem(Item item) {
+        Row r;
+        r.tag = static_cast<int>(items_.size());
+        r.cells = {item.label};
+        r.color = item.color;
+        items_.push_back(std::move(item));
+        rows_.push_back(std::move(r));
+        model_.setRows(rows_);
+    }
+
+    std::string title() const override { return title_; }
+    TableModel* table() override { return &model_; }
+    bool wantsClose() const override { return dismissed_; }
+
+    bool handleKey(int key) override {
+        switch (key) {
+            case '\n': case '\r': case 343:   // Enter / KEY_ENTER
+                fire();
+                return true;
+            case 'k': case 'u': model_.move(-1); return true;
+            case 'j': case 'd': model_.move(+1); return true;
+            case 'g': model_.selectFirst(); return true;
+            case 'G': model_.selectLast(); return true;
+            default: return false;
+        }
+    }
+    std::string keyHints() const override {
+        return "up/dn:select Enter:run Esc:close";
+    }
+
+private:
+    void fire() {
+        const Row* sel = model_.selected();
+        if (!sel || dismissed_) return;
+        dismissed_ = true;
+        const Item& it = items_[static_cast<size_t>(sel->tag)];
+        if (it.invoke) it.invoke();
+        else if (on_result_) on_result_(it.id);
+    }
+
+    std::string title_;
+    std::function<void(int)> on_result_;
+    std::vector<Item> items_;
+    std::vector<Row> rows_;
+    TableModel model_;
+    bool dismissed_ = false;
+};
+
 // ---------------------------------------------------------------------------
 // Overlay stack (model side — owns overlay lifetimes)
 // ---------------------------------------------------------------------------

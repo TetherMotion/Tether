@@ -38,6 +38,8 @@
 #include <vector>
 
 #include "tether/terminal_ui/OverlayHost.hpp"
+#include "tether/terminal_ui/PanelScreen.hpp"
+#include "tether/ui/LineInput.hpp"
 #include "tether/ui/Overlay.hpp"
 #include "tether/ui/Panels.hpp"
 
@@ -81,7 +83,7 @@ private:
     OverlayHost overlay_host_{overlays_};
     std::vector<UI::PanelAction> actions_;
     Prompt prompt_ = Prompt::None;
-    std::string prompt_buf_;
+    UI::LineInput prompt_input_;
     std::chrono::milliseconds refresh_ms_{1000};
     std::chrono::steady_clock::time_point last_refresh_{};
     /// With autoRead on, registers re-read at this cadence so live
@@ -94,6 +96,22 @@ private:
 /// Helper for the common "show full entity details" action — builds a
 /// TextOverlay dumping every field of the currently selected entity.
 std::unique_ptr<UI::Overlay> makeEntityInfoOverlay(UI::EntityBrowser& b);
+
+/// Build a PanelScreen view hosting an EntityBrowserPanel — wires
+/// renderBody/onKey/keyHintsFn to the panel.  Replaces the identical
+/// ~5-line view registration in every PanelScreen app:
+///   hooks.views.push_back(TUI::entityBrowserView(entity_panel));
+inline PanelView entityBrowserView(EntityBrowserPanel& panel,
+                                   std::string name = "Entities") {
+    PanelView v;
+    v.name = std::move(name);
+    v.renderBody = [&panel](int top, int bottom) {
+        panel.render(top, bottom);
+    };
+    v.onKey = [&panel](int key) { return panel.handleKey(key); };
+    v.keyHintsFn = [&panel] { return panel.keyHints(); };
+    return v;
+}
 
 } // namespace TUI
 } // namespace Tether

@@ -27,39 +27,31 @@ TreeScreen::TreeScreen(std::string title, TreeNode root, TreeScreenHooks hooks)
 
 void TreeScreen::openLinePrompt(LinePromptSpec spec) {
     prompt_spec_ = std::move(spec);
-    prompt_buf_  = prompt_spec_.initial;
+    prompt_input_.reset(prompt_spec_.initial);
+    prompt_input_.on_commit = [this](const std::string& s) {
+        prompt_active_ = false;
+        if (prompt_spec_.on_commit) prompt_spec_.on_commit(s);
+    };
+    prompt_input_.on_cancel = [this] {
+        prompt_active_ = false;
+        if (prompt_spec_.on_cancel) prompt_spec_.on_cancel();
+    };
+    prompt_input_.on_change = prompt_spec_.on_change;
     prompt_active_ = true;
 }
 
 void TreeScreen::handlePromptKey(int key) {
-    switch (key) {
-        case 27:  // Esc cancels
-            prompt_active_ = false;
-            if (prompt_spec_.on_cancel) prompt_spec_.on_cancel();
-            return;
-        case '\n':
-        case '\r':
-        case KEY_ENTER:
-            prompt_active_ = false;
-            if (prompt_spec_.on_commit) prompt_spec_.on_commit(prompt_buf_);
-            return;
-        case KEY_BACKSPACE:
-        case 127:
-        case '\b':
-            if (!prompt_buf_.empty()) prompt_buf_.pop_back();
-            return;
-        default:
-            if (key >= 32 && key <= 126)
-                prompt_buf_ += static_cast<char>(key);
-            return;
-    }
+    prompt_input_.handleKey(key);   // commit/cancel fire via callbacks
 }
 
 void TreeScreen::renderPrompt(TermWindow* w) {
     WINDOW* win = static_cast<WINDOW*>(w);
     wattron(win, A_BOLD | COLOR_PAIR(PalHint));
-    mvwprintw(win, 0, 1, "%s: %s_", prompt_spec_.label.c_str(),
-              prompt_buf_.c_str());
+    const std::string& buf = prompt_input_.buffer();
+    const size_t cur = prompt_input_.cursor();
+    // Caret at the real cursor position (LineInput supports Left/Right).
+    mvwprintw(win, 0, 1, "%s: %.*s_%s", prompt_spec_.label.c_str(),
+              static_cast<int>(cur), buf.c_str(), buf.c_str() + cur);
     wattroff(win, A_BOLD | COLOR_PAIR(PalHint));
     wattron(win, A_DIM);
     int row = 1;
@@ -148,13 +140,25 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
         mvprintw(0, session_.cols() - 12, "t=%6.1f s", elapsed);
 
         // ---- Footer -----------------------------------------------------
-        if (session_.colors()) attron(COLOR_PAIR(PalHint));
-        mvprintw(footerY, 0,
-                 " arrows: navigate  left/right: fold  q: quit"
-                 "  S-Up/S-Dn/End: log%s%s",
-                 hooks_.keyHints.empty() ? "" : "  ",
-                 hooks_.keyHints.c_str());
-        if (session_.colors()) attroff(COLOR_PAIR(PalHint));
+        // A live flash notice replaces the key hints until it expires.
+        const bool flashing =
+            !flash_msg_.empty() &&
+            std::chrono::steady_clock::now() < flash_until_;
+        if (flashing) {
+            attron(A_BOLD | (session_.colors()
+                                 ? COLOR_PAIR(PalHint) : 0));
+            mvprintw(footerY, 0, " %s", flash_msg_.c_str());
+            attroff(A_BOLD | (session_.colors()
+                                  ? COLOR_PAIR(PalHint) : 0));
+        } else {
+            if (session_.colors()) attron(COLOR_PAIR(PalHint));
+            mvprintw(footerY, 0,
+                     " arrows: navigate  left/right: fold  q: quit"
+                     "  S-Up/S-Dn/End: log%s%s",
+                     hooks_.keyHints.empty() ? "" : "  ",
+                     hooks_.keyHints.c_str());
+            if (session_.colors()) attroff(COLOR_PAIR(PalHint));
+        }
 
         // ---- Panes -----------------------------------------------------
         const int leftW = std::max(24, session_.cols() * 2 / 5);
@@ -196,6 +200,9 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
         log_.render(logWin);
         wnoutrefresh(static_cast<WINDOW*>(logWin));
 
+        // Modal overlays draw over the panes (below the header row).
+        overlay_host_.render(1, sepY);
+
         doupdate();
 
         // ---- Input ------------------------------------------------------
@@ -204,6 +211,8 @@ void TreeScreen::run(std::atomic<bool>& cancel, double durationSec) {
         // lone ESC stays 27 → quit/cancel.
         const int key = session_.pollKeyDecoded(50);
         if (key == KEY_RESIZE) { footerY = layout(); continue; }
+        // Modal overlays consume every key (Esc pops the stack).
+        if (!overlays_.empty()) { overlay_host_.handleKey(key); continue; }
         // An open line prompt is modal: every key goes to it — including
         // 'q'/'Q' (printable → appended) and Esc (cancels the prompt).
         if (prompt_active_) { handlePromptKey(key); continue; }

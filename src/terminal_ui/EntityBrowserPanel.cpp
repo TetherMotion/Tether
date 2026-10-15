@@ -18,6 +18,11 @@ EntityBrowserPanel::EntityBrowserPanel(UI::EntityBrowser& browser)
     b_.entities().setColumns(
         {"idx", "name", "state", "code", "err", "susp", "detail"});
     b_.registers().setColumns({"obj", "name", "value", "status"});
+    prompt_input_.on_commit = [this](const std::string&) { commitPrompt(); };
+    // Live type-ahead: the search prompt filters the table as you type.
+    prompt_input_.on_change = [this](const std::string& s) {
+        if (prompt_ == Prompt::Search) focusedTable().setSearch(s);
+    };
 }
 
 UI::TableModel& EntityBrowserPanel::focusedTable() {
@@ -80,11 +85,13 @@ void EntityBrowserPanel::render(int top, int bottom) {
     // Modal prompt on the last row.
     if (prompt_ != Prompt::None) {
         attron(COLOR_PAIR(PalHint));
-        mvprintw(bottom - 1, 0, "%s: %s_",
+        const std::string& pb = prompt_input_.buffer();
+        mvprintw(bottom - 1, 0, "%s: %.*s_%s",
                  prompt_ == Prompt::Search ? "search" : "filter",
-                 prompt_buf_.c_str());
+                 static_cast<int>(prompt_input_.cursor()), pb.c_str(),
+                 pb.c_str() + prompt_input_.cursor());
         if (prompt_ == Prompt::Filter) {
-            mvprintw(bottom - 1, 20 + static_cast<int>(prompt_buf_.size()),
+            mvprintw(bottom - 1, 20 + static_cast<int>(pb.size()),
                      "(field=v !field=v field>v text=v — Enter applies, Esc cancels)");
         }
         attroff(COLOR_PAIR(PalHint));
@@ -93,11 +100,10 @@ void EntityBrowserPanel::render(int top, int bottom) {
 
 void EntityBrowserPanel::commitPrompt() {
     if (prompt_ == Prompt::Search)
-        focusedTable().setSearch(prompt_buf_);
+        focusedTable().setSearch(prompt_input_.buffer());
     else if (prompt_ == Prompt::Filter)
-        focusedTable().setFilterExpr(prompt_buf_);
+        focusedTable().setFilterExpr(prompt_input_.buffer());
     prompt_ = Prompt::None;
-    prompt_buf_.clear();
 }
 
 std::string EntityBrowserPanel::keyHints() const {
@@ -140,20 +146,12 @@ bool EntityBrowserPanel::handleKey(int key) {
 
     // Prompt mode consumes everything except Enter/Esc.
     if (prompt_ != Prompt::None) {
-        if (key == '\n' || key == KEY_ENTER) { commitPrompt(); return true; }
-        if (key == 27) { prompt_ = Prompt::None; prompt_buf_.clear(); return true; }
-        if (key == KEY_BACKSPACE || key == 127 || key == '\b') {
-            if (!prompt_buf_.empty()) prompt_buf_.pop_back();
-            return true;
+        prompt_input_.handleKey(key);
+        if (prompt_input_.done()) {
+            if (prompt_input_.cancelled()) prompt_ = Prompt::None;
+            // commit path runs through on_commit → commitPrompt()
         }
-        if (key >= 32 && key < 127) {
-            prompt_buf_.push_back(static_cast<char>(key));
-            // Live type-ahead for quicksearch.
-            if (prompt_ == Prompt::Search)
-                focusedTable().setSearch(prompt_buf_);
-            return true;
-        }
-        return true;   // swallow everything else while prompting
+        return true;
     }
 
     // App-registered actions get first pick.
@@ -198,11 +196,11 @@ bool EntityBrowserPanel::handleKey(int key) {
 
         case '/':
             prompt_ = Prompt::Search;
-            prompt_buf_ = focusedTable().search();
+            prompt_input_.reset(focusedTable().search());
             return true;
         case 'f':
             prompt_ = Prompt::Filter;
-            prompt_buf_ = focusedTable().filterExpr();
+            prompt_input_.reset(focusedTable().filterExpr());
             return true;
         case 'x':
             focusedTable().clearFilter();

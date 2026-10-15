@@ -22,6 +22,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <string>
 #include <vector>
@@ -53,6 +54,16 @@ struct PanelView {
     /// over the static `keyHints` (e.g. widgets whose hints change with
     /// state, like an open overlay or prompt).
     std::function<std::string()> keyHintsFn;
+
+    /// Pre-dispatch claim: evaluated before the screen's own key
+    /// handling (tab digits, ? overlay, log scroll).  When it returns
+    /// true for a key, the key goes to `onKey` first; an unhandled
+    /// key still falls through to the screen.  Use sparingly — e.g.
+    /// a view with an active quicksearch claims digits so "FSoE3"
+    /// isn't split by the tab shortcuts.  Returning true for '1'
+    /// while idle would break navigation, so claims should be
+    /// state-conditional.
+    std::function<bool(int)> wantsKey;
 };
 
 struct PanelScreenHooks {
@@ -120,6 +131,11 @@ public:
     /// Whether a modal overlay is currently shown.
     bool overlayOpen() const { return !overlays_.empty(); }
 
+    /// Show a transient notice in the footer for `seconds` (action
+    /// feedback like "filter cleared" / "applied").  Empty message
+    /// clears it.  The notice replaces the key hints while visible.
+    void flash(std::string msg, double seconds = 3.0);
+
 private:
     Session         session_;
     LogPane         log_;
@@ -128,6 +144,9 @@ private:
     size_t          active_ = 0;
     /// Rows available to the log view in the last layout (for paging).
     int             bodyRows_ = 8;
+    /// Transient footer notice (flash()) — message + expiry.
+    std::string     flash_msg_;
+    std::chrono::steady_clock::time_point flash_until_{};
     /// Modal overlay stack — '?' pushes a keys overlay; apps may push
     /// their own via pushOverlay().
     UI::OverlayStack overlays_;

@@ -25,6 +25,9 @@ struct LinePromptSpec {
     std::vector<std::string> hint_lines;          ///< dim lines under the input
     std::function<void(const std::string&)> on_commit;  ///< Enter pressed
     std::function<void()> on_cancel;              ///< Esc pressed (optional)
+    /// Fires on every buffer mutation — live type-ahead (e.g. updating
+    /// a TableModel search while typing).
+    std::function<void(const std::string&)> on_change;
 };
 
 } // namespace TUI
