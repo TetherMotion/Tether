@@ -193,21 +193,22 @@ bool TcpTransportServer::start() {
 
 void TcpTransportServer::stop() {
     listening_ = false;
-    if (listenFd_ >= 0) {
+    const int fd = listenFd_.exchange(-1);
+    if (fd >= 0) {
         // shutdown() wakes a thread blocked in accept() — close() alone leaves
         // it parked on the still-open file description.
-        ::shutdown(listenFd_, SHUT_RDWR);
-        ::close(listenFd_);
-        listenFd_ = -1;
+        ::shutdown(fd, SHUT_RDWR);
+        ::close(fd);
     }
 }
 
 std::unique_ptr<ITransport> TcpTransportServer::accept() {
-    if (listenFd_ < 0) return nullptr;
+    const int fd = listenFd_.load(std::memory_order_acquire);
+    if (fd < 0) return nullptr;
 
     struct sockaddr_in clientAddr{};
     socklen_t addrLen = sizeof(clientAddr);
-    int clientFd = ::accept(listenFd_,
+    int clientFd = ::accept(fd,
                             reinterpret_cast<struct sockaddr*>(&clientAddr),
                             &addrLen);
     if (clientFd < 0) return nullptr;

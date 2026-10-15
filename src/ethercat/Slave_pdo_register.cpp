@@ -84,7 +84,7 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
         out_config.rxpdo_index = rxpdo->pdo_index;
         out_config.rxpdo_size  = size;
         out_config.has_rxpdo   = true;
-        if (slave_debug_flags_.pdoConfiguration) {
+        if (debugFlags().pdoConfiguration) {
             TETHER_LOGI(TAG, "{}: Registered RxPDO 0x{:04X} ({} bytes) from SII", logPrefix().c_str(),
                         rxpdo->pdo_index, size);
         }
@@ -101,7 +101,7 @@ SlaveError Slave::registerPDOsFromSII(SIIPDOConfig& out_config) {
         out_config.txpdo_index = txpdo->pdo_index;
         out_config.txpdo_size  = size;
         out_config.has_txpdo   = true;
-        if (slave_debug_flags_.pdoConfiguration) {
+        if (debugFlags().pdoConfiguration) {
             TETHER_LOGI(TAG, "{}: Registered TxPDO 0x{:04X} ({} bytes) from SII", logPrefix().c_str(),
                         txpdo->pdo_index, size);
         }
@@ -177,7 +177,7 @@ SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_conf
         out_config.rxpdo_index = rxpdo->index;
         out_config.rxpdo_size  = size;
         out_config.has_rxpdo   = true;
-        if (slave_debug_flags_.pdoConfiguration) {
+        if (debugFlags().pdoConfiguration) {
             TETHER_LOGI(TAG, "{}: Registered RxPDO 0x{:04X} ({} bytes) from ESI", logPrefix().c_str(),
                         rxpdo->index, size);
         }
@@ -194,7 +194,7 @@ SlaveError Slave::registerPDOsFromESI(const ESIFile& esi, SIIPDOConfig& out_conf
         out_config.txpdo_index = txpdo->index;
         out_config.txpdo_size  = size;
         out_config.has_txpdo   = true;
-        if (slave_debug_flags_.pdoConfiguration) {
+        if (debugFlags().pdoConfiguration) {
             TETHER_LOGI(TAG, "{}: Registered TxPDO 0x{:04X} ({} bytes) from ESI", logPrefix().c_str(),
                         txpdo->index, size);
         }

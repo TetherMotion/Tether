@@ -71,7 +71,7 @@ private:
     uint16_t port_;
     std::string bindAddress_;
     int backlog_;
-    int listenFd_ = -1;
+    std::atomic<int> listenFd_{-1};
     std::atomic<bool> listening_{false};
 };
 

@@ -114,7 +114,7 @@ SlaveError Slave::transitionTo(SlaveState target) {
 }
 
 SlaveError Slave::transitionToInit() {
-    if (slave_debug_flags_.stateMachine) {
+    if (debugFlags().stateMachine) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -136,7 +136,7 @@ SlaveError Slave::transitionToInit() {
     mailbox_configured_ = false;
     pdo_configured_ = false;
     
-    if (slave_debug_flags_.stateMachine) {
+    if (debugFlags().stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  Transition Result: {} => INIT SUCCESS                  ║", logPrefix().c_str());
         TETHER_LOGI(TAG, "║  Configuration flags reset: mailbox=false, pdo=false          ║");
@@ -147,7 +147,7 @@ SlaveError Slave::transitionToInit() {
 }
 
 SlaveError Slave::transitionToPreOp() {
-    if (slave_debug_flags_.stateMachine) {
+    if (debugFlags().stateMachine) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -171,7 +171,7 @@ SlaveError Slave::transitionToPreOp() {
             "for mailbox-less slaves first.", logPrefix().c_str());
         return SlaveError::MailboxNotConfigured;
     }
-    verifySyncManagers(*this, 0, 1, slave_debug_flags_.verifyPreOp, TAG);
+    verifySyncManagers(*this, 0, 1, debugFlags().verifyPreOp, TAG);
     if (!master_->transitionSlaveToPreOperational(index_)) {
         TETHER_LOGE( TAG,
             "{}: Failed to transition to PRE_OP", logPrefix().c_str());
@@ -187,7 +187,7 @@ SlaveError Slave::transitionToPreOp() {
     // on the first SDO exchange after entering PRE-OP.
     (void)drainMailbox();
 
-    if (slave_debug_flags_.stateMachine) {
+    if (debugFlags().stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  Transition Result: {} => PRE_OP SUCCESS                ║", logPrefix().c_str());
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -197,7 +197,7 @@ SlaveError Slave::transitionToPreOp() {
 }
 
 SlaveError Slave::transitionToSafeOp() {
-    if (slave_debug_flags_.stateMachine) {
+    if (debugFlags().stateMachine) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -220,7 +220,7 @@ SlaveError Slave::transitionToSafeOp() {
             "assumePDOAlreadyConfigured() first.", logPrefix().c_str());
         return SlaveError::PDONotConfigured;
     }
-    verifySyncManagers(*this, 0, 3, slave_debug_flags_.verifySafeOp, TAG);
+    verifySyncManagers(*this, 0, 3, debugFlags().verifySafeOp, TAG);
     if (!master_->requestSlaveApplicationLayerState(index_, static_cast<uint8_t>(SlaveState::SAFE_OP))) {
         TETHER_LOGE( TAG,
             "{}: Failed to transition to SAFE_OP (transport error)", logPrefix().c_str());
@@ -237,7 +237,7 @@ SlaveError Slave::transitionToSafeOp() {
         uint8_t state = 0;
         if (master_->readSlaveApplicationLayerState(index_, state)) {
             if (state == static_cast<uint8_t>(SlaveState::SAFE_OP)) {
-                if (slave_debug_flags_.stateMachine) {
+                if (debugFlags().stateMachine) {
                     TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
                     TETHER_LOGI(TAG, "║  Transition Result: {} => SAFE_OP SUCCESS               ║", logPrefix().c_str());
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -282,7 +282,7 @@ SlaveError Slave::transitionToOp() {
     }
     bool fmmu_ok = fmmu_mgr_.verifyFromSlave();
 
-    if (slave_debug_flags_.stateMachine) {
+    if (debugFlags().stateMachine) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -435,7 +435,7 @@ SlaveError Slave::transitionToOp() {
         }
         if (ok) {
             if (state == static_cast<uint8_t>(SlaveState::OP)) {
-                if (slave_debug_flags_.stateMachine) {
+                if (debugFlags().stateMachine) {
                     TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
                     TETHER_LOGI(TAG, "║  Transition Result: {} => OP SUCCESS                    ║", logPrefix().c_str());
                     TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -590,7 +590,7 @@ void Slave::dumpOpDiagnostics() {
 }
 
 SlaveError Slave::transitionToBoot() {
-    if (slave_debug_flags_.stateMachine) {
+    if (debugFlags().stateMachine) {
         SlaveState current_state;
         readState(current_state);
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
@@ -609,7 +609,7 @@ SlaveError Slave::transitionToBoot() {
         return SlaveError::TransportError;
     }
     
-    if (slave_debug_flags_.stateMachine) {
+    if (debugFlags().stateMachine) {
         TETHER_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
         TETHER_LOGI(TAG, "║  Transition Result: {} => BOOT SUCCESS                  ║", logPrefix().c_str());
         TETHER_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");

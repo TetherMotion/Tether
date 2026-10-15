@@ -114,6 +114,11 @@ protected:
             while (pumpRunning_) {
                 auto msg = client_->receiveMessage(50);
                 (void)msg;
+                // receiveMessage() holds the client mutex for its whole
+                // blocking wait — release it briefly between iterations so a
+                // requester on the test thread (ping(), request()) is not
+                // starved by the microsecond re-lock window.
+                std::this_thread::sleep_for(1ms);
             }
         });
     }

@@ -103,8 +103,8 @@ SlaveError Slave::configureCustomTxPDO(
 
     uint8_t sub = 1;
     const bool dbg_pdo = (direction == PDO::PDODirection::RxPDO)
-                             ? slave_debug_flags_.rxPDO
-                             : slave_debug_flags_.txPDO;
+                             ? debugFlags().rxPDO
+                             : debugFlags().txPDO;
     for (const auto& e : entries) {
         uint8_t sz = e.resolvedSize();
         uint32_t val = encodePDOMappingValue(e.entry, sz);
@@ -374,8 +374,8 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         return SlaveError::PDOConfigFailed;
     }
 
-    const bool dbg_pdo_cfg = slave_debug_flags_.pdoConfiguration;
-    if (slave_debug_flags_.pdoSm) {
+    const bool dbg_pdo_cfg = debugFlags().pdoConfiguration;
+    if (debugFlags().pdoSm) {
         TETHER_LOGI(TAG, "{}: Configuring multi-PDO SMs ({} SM configs)", logPrefix().c_str(), config.sm_configs.size());
     }
 
@@ -502,7 +502,7 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         master_->writeRegister(EtherCAT::SlaveAddress(index_),
                               static_cast<uint16_t>(base + 4), &ctrl_byte, 1, 200);
 
-        if (slave_debug_flags_.pdoSm) {
+        if (debugFlags().pdoSm) {
             TETHER_LOGI(TAG, "{}: Wrote SM{} (disabled): addr=0x{:04X} len={} (total) ctrl=0x{:02X}",
                         logPrefix().c_str(), mc.sm_index, mc.phys_start_addr, mc.totalLength(), ctrl_byte);
         }
@@ -568,12 +568,12 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
         }
     }
 
-    if (!fmmu_mgr_.configureFromMultiPDO(multi_configs, base_log, slave_debug_flags_.fmmu)) {
+    if (!fmmu_mgr_.configureFromMultiPDO(multi_configs, base_log, debugFlags().fmmu)) {
         TETHER_LOGE(TAG, "{}: FMMU configuration from multi-PDO failed", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
 
-    if (!fmmu_mgr_.writeToSlave(slave_debug_flags_.fmmu)) {
+    if (!fmmu_mgr_.writeToSlave(debugFlags().fmmu)) {
         TETHER_LOGE(TAG, "{}: FMMU write failed", logPrefix().c_str());
         return SlaveError::PDOConfigFailed;
     }
@@ -602,7 +602,7 @@ SlaveError Slave::configureMultiPDOs(const MultiPDOAssignment& config) {
             TETHER_LOGW(TAG, "{}: SM{} activate not confirmed (rb=0x{:02X})",
                         logPrefix().c_str(), mc.sm_index, rb);
         }
-        if (slave_debug_flags_.pdoSm) {
+        if (debugFlags().pdoSm) {
             TETHER_LOGI(TAG, "{}: Enabled SM{}", logPrefix().c_str(), mc.sm_index);
         }
 
