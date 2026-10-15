@@ -63,6 +63,22 @@ public:
     /// Returns -1 on timeout, else the curses key code (KEY_* etc.).
     int pollKey(int timeout_ms);
 
+    /**
+     * @brief pollKey() with split escape-sequence decoding.
+     *
+     * When ncurses delivers a raw ESC byte (keypad() could not assemble
+     * the sequence — e.g. byte-at-a-time writes through a PTY, slow
+     * links, some terminal emulators), the pending bytes are drained and
+     * decoded here: CSI (`ESC [ …`) and SS3 (`ESC O X`) sequences map to
+     * KEY_UP/DOWN/LEFT/RIGHT/HOME/END/PPAGE/NPAGE/IC/DC/BTAB/F(1..12).
+     *
+     * A genuine lone ESC (nothing pending within ~30 ms) still returns
+     * 27, and ESC-ESC also returns 27 — callers may keep using
+     * `key == 27` as their quit/cancel test.  Unrecognized sequences are
+     * swallowed and return -1.
+     */
+    int pollKeyDecoded(int timeout_ms);
+
     /// Create a subwindow.  Rows/cols follow curses convention (y, x order).
     TermWindow* makeWindow(int y, int x, int h, int w) const;
     /// Free a window created by makeWindow().

@@ -417,99 +417,46 @@ std::optional<uint32_t> snapValue(
     return std::nullopt;
 }
 
-DisplayRow labelRow(const char* name) {
-    return DisplayRow{{{name, DisplayTone::Muted}}};
-}
+using Tether::UI::labeledRow;
 
-// Chips for every labeled bit of an "expected-set" object: a set bit is
-// the present/safe state (green), a cleared labeled bit means that
-// element is absent (red).  shouldShow() is deliberately ignored so
-// missing elements are rendered instead of hidden.
+// Thin RSAP adapters over the generic bitfield chip builders
+// (tether/ui/ChipPanels.hpp): they resolve the object value from the
+// snapshot and delegate the tone semantics.
 void pushExpectedSet(DisplayRow& row,
                      const RSAPInformationProcessor::Snapshot& snap,
                      uint16_t index) {
-    const auto v = snapValue(snap, index, 0);
-    if (!v) {
-        row.cells.push_back({"n/a", DisplayTone::Muted});
-        return;
-    }
-    bool any = false;
-    for (const auto& l : Reg::bitLabelsFor(index)) {
-        row.cells.push_back({l.name, l.isActive(*v)
-                                         ? DisplayTone::Ok
-                                         : DisplayTone::Missing});
-        any = true;
-    }
-    // Unknown set bits are still flagged.
-    for (uint32_t bit = 0; bit < 32; ++bit) {
-        if ((*v & (1u << bit)) && !bitName(index, bit)) {
-            row.cells.push_back({std::format("bit{}", bit),
-                                 DisplayTone::Info});
-        }
-    }
-    if (!any && *v == 0) {
-        row.cells.push_back({"none", DisplayTone::Missing});
-    }
+    Tether::UI::appendBitfieldChips(row, snapValue(snap, index, 0),
+                                    Reg::bitLabelsFor(index),
+                                    Tether::UI::ChipSemantics::ExpectedSet);
 }
 
-// Chips for an "expected-clear" object (fault/limit/discrepancy): the
-// healthy state is value==0 -> green "none"; every set bit is a red
-// fault chip.
 void pushExpectedClear(DisplayRow& row,
                        const RSAPInformationProcessor::Snapshot& snap,
                        uint16_t index) {
-    const auto v = snapValue(snap, index, 0);
-    if (!v) {
-        row.cells.push_back({"n/a", DisplayTone::Muted});
-        return;
-    }
-    if (*v == 0) {
-        row.cells.push_back({"none", DisplayTone::Ok});
-        return;
-    }
-    for (const auto& l : Reg::bitLabelsFor(index)) {
-        if (l.isActive(*v)) {
-            row.cells.push_back({l.name, DisplayTone::Fault});
-        }
-    }
-    for (uint32_t bit = 0; bit < 32; ++bit) {
-        if ((*v & (1u << bit)) && !bitName(index, bit)) {
-            row.cells.push_back({std::format("bit{}", bit),
-                                 DisplayTone::Fault});
-        }
-    }
+    Tether::UI::appendBitfieldChips(row, snapValue(snap, index, 0),
+                                    Reg::bitLabelsFor(index),
+                                    Tether::UI::ChipSemantics::ExpectedClear);
 }
 
-// Chips for a mode/state bitmask where "not active" is normal, not a
-// deficiency: active -> green, inactive -> dim.
 void pushModeChips(DisplayRow& row,
                    const RSAPInformationProcessor::Snapshot& snap,
                    uint16_t index) {
-    const auto v = snapValue(snap, index, 0);
-    if (!v) {
-        row.cells.push_back({"n/a", DisplayTone::Muted});
-        return;
-    }
-    for (const auto& l : Reg::bitLabelsFor(index)) {
-        row.cells.push_back({l.name, l.isActive(*v)
-                                         ? DisplayTone::Ok
-                                         : DisplayTone::Muted});
-    }
+    Tether::UI::appendBitfieldChips(row, snapValue(snap, index, 0),
+                                    Reg::bitLabelsFor(index),
+                                    Tether::UI::ChipSemantics::Mode);
 }
 
 void pushScalar(DisplayRow& row, uint16_t index,
                 const RSAPInformationProcessor::Snapshot& snap,
                 DisplayTone tone) {
-    const auto v = snapValue(snap, index, 0);
-    if (!v) {
-        row.cells.push_back({"n/a", DisplayTone::Muted});
-        return;
+    std::optional<std::string> text;
+    if (const auto v = snapValue(snap, index, 0)) {
+        std::string name = RSAPInformationProcessor::scalarName(index, *v);
+        text = name.empty()
+                   ? std::format("{}", static_cast<int16_t>(*v))
+                   : std::move(name);
     }
-    std::string name = RSAPInformationProcessor::scalarName(index, *v);
-    if (name.empty()) {
-        name = std::format("{}", static_cast<int16_t>(*v));
-    }
-    row.cells.push_back({name, tone});
+    Tether::UI::appendScalarChip(row, std::move(text), tone);
 }
 
 } // namespace
@@ -544,7 +491,7 @@ RSAPInformationProcessor::buildDisplayPanels(const Snapshot& snap,
 
         {
             auto v = snapValue(snap, Reg::RSAPStateIndex, 0);
-            auto r = labelRow("State");
+            auto r = labeledRow("State");
             if (v) {
                 DisplayTone t = DisplayTone::Warn;
                 if (*v == 1)      t = DisplayTone::Ok;    // MONITORING
@@ -557,19 +504,19 @@ RSAPInformationProcessor::buildDisplayPanels(const Snapshot& snap,
             p.rows.push_back(std::move(r));
         }
         {
-            auto r = labelRow("Sub");
+            auto r = labeledRow("Sub");
             pushModeChips(r, snap, Reg::MonitoringSubStateIndex);
             p.rows.push_back(std::move(r));
         }
         {
-            auto r = labelRow("OpMode");
+            auto r = labeledRow("OpMode");
             pushScalar(r, Reg::OperationModeIndex, snap, DisplayTone::Info);
             p.rows.push_back(std::move(r));
         }
         {
             // A stop state engaged is the safe state -> green.
             const auto v = snapValue(snap, Reg::StopStateIndex, 0);
-            auto r = labelRow("Stop");
+            auto r = labeledRow("Stop");
             DisplayTone t = DisplayTone::Muted;
             if (v && *v != 0)  t = DisplayTone::Ok;    // stop engaged
             if (v && *v > 2)   t = DisplayTone::Warn;  // unknown value
@@ -578,7 +525,7 @@ RSAPInformationProcessor::buildDisplayPanels(const Snapshot& snap,
         }
         {
             const auto v = snapValue(snap, Reg::StopCategoryIndex, 0);
-            auto r = labelRow("Cat");
+            auto r = labeledRow("Cat");
             DisplayTone t = DisplayTone::Muted;
             if (v && *v < 4) t = DisplayTone::Ok;      // Cat0/1/2/RedSpd
             if (v && *v > 4) t = DisplayTone::Warn;
@@ -587,7 +534,7 @@ RSAPInformationProcessor::buildDisplayPanels(const Snapshot& snap,
         }
         {
             const auto v = snapValue(snap, Reg::ErrorCodeIndex, 0);
-            auto r = labelRow("Err");
+            auto r = labeledRow("Err");
             if (!v) {
                 r.cells.push_back({"n/a", DisplayTone::Muted});
             } else if (*v == 0) {
@@ -603,12 +550,12 @@ RSAPInformationProcessor::buildDisplayPanels(const Snapshot& snap,
             p.rows.push_back(std::move(r));
         }
         {
-            auto r = labelRow("Faults");
+            auto r = labeledRow("Faults");
             pushExpectedClear(r, snap, Reg::FaultAndViolationStatusIndex);
             p.rows.push_back(std::move(r));
         }
         {
-            auto r = labelRow("InDisc");
+            auto r = labeledRow("InDisc");
             pushExpectedClear(r, snap, Reg::InputDiscrepancyStatusIndex);
             p.rows.push_back(std::move(r));
         }
@@ -638,7 +585,7 @@ RSAPInformationProcessor::buildDisplayPanels(const Snapshot& snap,
             {"stoV", 4, true},  {"sosV", 5, true},
         };
         for (const auto& m : matrix) {
-            auto r = labelRow(m.name);
+            auto r = labeledRow(m.name);
             const auto v =
                 snapValue(snap, Reg::DriveValidStatusIndex, m.sub);
             if (!v) {
@@ -656,7 +603,7 @@ RSAPInformationProcessor::buildDisplayPanels(const Snapshot& snap,
             p.rows.push_back(std::move(r));
         }
         {
-            auto r = labelRow("sum");
+            auto r = labeledRow("sum");
             pushModeChips(r, snap, Reg::DriveStatusIndex);
             p.rows.push_back(std::move(r));
         }
@@ -709,7 +656,7 @@ RSAPInformationProcessor::buildDisplayPanels(const Snapshot& snap,
             {"SSM",    Reg::SSMInputStateIndex},
         };
         for (const auto& i : in) {
-            auto r = labelRow(i.name);
+            auto r = labeledRow(i.name);
             pushExpectedSet(r, snap, i.index);
             p.rows.push_back(std::move(r));
         }
@@ -721,22 +668,22 @@ RSAPInformationProcessor::buildDisplayPanels(const Snapshot& snap,
         DisplayPanel p;
         p.title = "Outputs & functions";
         {
-            auto r = labelRow("OutDisc");
+            auto r = labeledRow("OutDisc");
             pushExpectedClear(r, snap, Reg::OutputDiscrepancyStatusIndex);
             p.rows.push_back(std::move(r));
         }
         {
-            auto r = labelRow("SafeOut");
+            auto r = labeledRow("SafeOut");
             pushExpectedSet(r, snap, Reg::SafetyOutputStateIndex);
             p.rows.push_back(std::move(r));
         }
         {
-            auto r = labelRow("CtrlFunc");
+            auto r = labeledRow("CtrlFunc");
             pushExpectedSet(r, snap, Reg::SafetyControlFunctionStateIndex);
             p.rows.push_back(std::move(r));
         }
         {
-            auto r = labelRow("LimFunc");
+            auto r = labeledRow("LimFunc");
             pushExpectedClear(r, snap, Reg::SafetyLimitFunctionStateIndex);
             p.rows.push_back(std::move(r));
         }
@@ -756,7 +703,7 @@ RSAPInformationProcessor::buildDisplayPanels(const Snapshot& snap,
             {"TCP0Pwr",  0x4023},
         };
         for (const auto& l : lim) {
-            auto r = labelRow(l.name);
+            auto r = labeledRow(l.name);
             pushExpectedClear(r, snap, l.index);
             p.rows.push_back(std::move(r));
         }

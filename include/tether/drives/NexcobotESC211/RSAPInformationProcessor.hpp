@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "tether/ethercat/Slave.hpp"
+#include "tether/ui/ChipPanels.hpp"
 
 namespace EtherCAT {
 namespace Drives {
@@ -172,20 +173,13 @@ public:
     // every set bit.
     // ------------------------------------------------------------------
 
-    /// Semantic tone for one display cell (see panel docs above).
-    enum class DisplayTone { Ok, Missing, Fault, Warn, Info, Muted };
-
-    struct DisplayCell {
-        std::string text;
-        DisplayTone tone = DisplayTone::Muted;
-    };
-    struct DisplayRow {
-        std::vector<DisplayCell> cells;
-    };
-    struct DisplayPanel {
-        std::string              title;
-        std::vector<DisplayRow>  rows;
-    };
+    // The cell/row/panel types are the generic Tether::UI chip-panel
+    // model (tether/ui/ChipPanels.hpp) — aliased here so existing
+    // RSAPInformationProcessor::DisplayPanel code keeps compiling.
+    using DisplayTone  = Tether::UI::DisplayTone;
+    using DisplayCell  = Tether::UI::DisplayCell;
+    using DisplayRow   = Tether::UI::DisplayRow;
+    using DisplayPanel = Tether::UI::DisplayPanel;
 
     /**
      * @brief Build the color-coded multi-panel display model of a snapshot.

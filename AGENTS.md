@@ -208,6 +208,53 @@ Both transports share a single `KlippyServer` instance. See
 `examples/klipper_http.cpp` for a complete example running both
 transports and serving Mainsail/Fluidd static assets directly.
 
+### Terminal UI framework (tether_terminal_ui + Tether::UI models)
+
+Two layers, split so application "views" can be built without ncurses:
+
+- **`tether/ui/*` — toolkit-agnostic models**: `Panels.hpp`
+  (`SlaveEntity`, `ISlaveEntityProvider`, `NamedRegister`,
+  `IRegisterReader`, `EntityBrowser`, `TableModel`), `EthercatPanels.hpp`
+  (`MasterEntityProvider`, `SdoRegisterReader`), `ChipPanels.hpp`
+  (`DisplayTone`/`DisplayCell`/`DisplayRow`/`DisplayPanel` chip model +
+  `appendBitfieldChips` with `ChipSemantics` ExpectedSet/ExpectedClear/
+  Mode + `labeledRow`/`appendScalarChip` + `formatChips` for
+  ANSI-colored stream output), `EntityAdapters.hpp`
+  (`CompositeEntityProvider` — inner provider + callback extra rows for
+  virtual/synthetic entities; `DispatchingRegisterReader` — predicate
+  routes entity indices to an injected handler, rest to the inner
+  reader).
+- **`tether/terminal_ui/*` — ncurses widgets**: `Session` (ncurses
+  lifecycle + palette; `pollKeyDecoded` resolves split CSI/SS3 escape
+  tails — lone ESC still returns 27), `PanelScreen` (titled multi-tab
+  screen + captured-log pane), `LogPane`, `EntityBrowserPanel`,
+  `TablePanel`, `TreeScreen`/`TreeView`, `LinePrompt`, `OverlayHost`,
+  `TextWrap`, plus the shared widgets:
+
+  - `ChipPanel.hpp/.cpp` — `drawChipPanelBox`/`drawChipPanelGrid`: boxed,
+    flow-wrapped, tone-colored chip panels in an adaptive 1/2/4-column
+    grid (the RSAP dashboard shape).
+  - `Chips.hpp` — `drawChips`/`chipsWidth`/`chipTonePair`: the same chip
+    model as an inline (non-boxed) renderer for per-row indicators.
+  - `Box.hpp` — UTF-8 box-drawing primitives (`drawBoxFrame`/`Rule`/
+    `Title`/`padRow`) and two complete panel shapes: `drawKeyValueBox`
+    (headered `KvRow` list, `std::optional<DisplayTone>` value tones)
+    and `drawBoxedLines` (titled line box).
+  - `Gauge.hpp` — `drawGauge` (`[###....]` utilization bar, green
+    <70 %/yellow <90 %/red ≥90 % or violated, `>` overflow marker) and
+    `drawRangeTrack` (`[---#---]` marker on a [low, high] span).
+  - `AnsiLine.hpp` — `renderAnsiLine` (interprets embedded ANSI SGR as
+    curses colors), `utf8Cols`/`utf8Trunc` (column-accurate UTF-8).
+
+`PanelScreen` supports per-view `keyHintsFn` (merged into the footer),
+routes keys to `OverlayHost` overlays before normal view handling, and
+binds `?` to a modal "Keys — <view>" overlay listing screen-level and
+view-specific key bindings.
+
+Consumers: `esc211_inspect_config` (TreeScreen), `esc211_fsoe_monitor` +
+`esc211_fsoe_blackchannel` (PanelScreen tabs — chip-panel RSAP grid,
+gauge Limits view, composite Entities view, LogPane).
+
 ## Code Conventions
 
 - C++23 (`-std=c++23`)

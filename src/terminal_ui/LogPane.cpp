@@ -7,31 +7,15 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cwchar>
 #include <sstream>
+#include <string_view>
 
 #include <ncurses.h>
 
+#include "tether/terminal_ui/AnsiLine.hpp"
+
 namespace Tether {
 namespace TUI {
-
-// Truncate a UTF-8 string to at most `maxCols` display columns without
-// splitting a multibyte codepoint.
-static std::string utf8Trunc(const std::string& s, int maxCols) {
-    if (maxCols <= 0) return {};
-    std::mbstate_t st{};
-    int    cols = 0;
-    size_t i    = 0;
-    while (i < s.size() && cols < maxCols) {
-        wchar_t      wc = 0;
-        const size_t n  = std::mbrtowc(&wc, s.data() + i, s.size() - i, &st);
-        if (n == (size_t)-1 || n == (size_t)-2) { ++i; ++cols; continue; }
-        if (n == 0) { ++i; continue; }
-        i += n;
-        ++cols;
-    }
-    return s.substr(0, i);
-}
 
 // Map a log level to its display palette pair.
 static short levelColor(Platform::LogLevel level, short infoColor) {
@@ -131,7 +115,19 @@ void LogPane::attach() {
         [this](Platform::LogLevel level, const char* tag, const char* msg) {
             static const char* lv[] = {"", "E", "W", "I", "D", "V"};
             const char* l = lv[std::min<int>(static_cast<int>(level), 5)];
-            addLine(std::string(l) + " " + tag + ": " + msg, level, tag);
+            const std::string prefix =
+                std::string(l) + " " + tag + ": ";
+            // Multi-line messages → one entry per line so scroll
+            // accounting stays in display rows and every line keeps
+            // its severity color + tag (for filtering).
+            std::string_view rest = msg;
+            while (true) {
+                const size_t nl = rest.find('\n');
+                addLine(prefix + std::string(rest.substr(0, nl)),
+                        level, tag);
+                if (nl == std::string_view::npos) break;
+                rest.remove_prefix(nl + 1);
+            }
         });
 }
 
@@ -265,11 +261,8 @@ void LogPane::render(TermWindow* w, short colorPair) {
 
     int row = 0;
     for (size_t i = start; i < end && row < h; ++i, ++row) {
-        const short cp = levelColor(copy[i].level, colorPair);
-        if (cp != PalNone) wattron(win, COLOR_PAIR(cp));
-        mvwprintw(win, row, 0, "%s",
-                  utf8Trunc(copy[i].text, width - 1).c_str());
-        if (cp != PalNone) wattroff(win, COLOR_PAIR(cp));
+        renderAnsiLine(win, row, 0, width - 1, copy[i].text,
+                       levelColor(copy[i].level, colorPair));
     }
     // Scroll/filter indicator on the last row.
     if (h > 0 && (scrollOffset_ > 0 || filtered())) {

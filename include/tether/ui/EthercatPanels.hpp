@@ -26,6 +26,8 @@
 
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
+#include "tether/ethercat/SlaveStatusPoller.hpp"
+#include "tether/ethercat/SlaveSupervisor.hpp"
 #include "tether/ethercat/Types.hpp"
 #include "tether/ui/Panels.hpp"
 
