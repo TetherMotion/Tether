@@ -387,6 +387,13 @@ struct Esc211InitConfig {
     /// for tools that only need CoE/SDO access.
     bool stop_after_preop = false;
 
+    /// Stop after PDO assignment + sync-manager config, before the
+    /// SAFE-OP request — the slave stays in PRE-OP fully configured.
+    /// Used by barriered multi-slave bring-up: every slave prepares in
+    /// parallel, then all request SAFE-OP together via
+    /// esc211RequestSafeOp().  Implies no PDO priming either.
+    bool stop_before_safeop = false;
+
     /// PDO priming after SAFE-OP: prime_cycles x prime_delay exchanges.
     int prime_cycles = 5;
     std::chrono::milliseconds prime_delay{0};
@@ -401,10 +408,31 @@ struct Esc211InitConfig {
     std::function<bool(EtherCAT::Slave&)> preop_hook;
 };
 
+/// SAFE-OP request + confirmation only — the second half of
+/// initEsc211ToSafeOp() after a stop_before_safeop prepare.  Barriered
+/// multi-slave bring-up calls this once every slave has finished its
+/// parallel PRE-OP configuration.
+inline bool esc211RequestSafeOp(EtherCAT::Slave& s,
+                                std::mutex* sdo_mutex,
+                                const char* tag) {
+    {
+        auto g = sdo_mutex ? std::unique_lock<std::mutex>(*sdo_mutex)
+                           : std::unique_lock<std::mutex>();
+        auto safe_err = s.transitionToSafeOp();
+        if (safe_err != EtherCAT::SlaveError::Ok) {
+            TETHER_LOGE(tag, "SAFE-OP transition failed: {}",
+                        EtherCAT::slaveErrorToString(safe_err));
+            return false;
+        }
+    }
+    TETHER_LOGI(tag, "{} in SAFE-OP", s.logPrefix().c_str());
+    return true;
+}
+
 /// Force INIT -> mailbox -> PRE-OP -> [drain] -> [preop_hook] ->
 /// ESI PDO assignment -> applyCustomPDOs -> sync-manager config ->
 /// SAFE-OP -> PDO priming.  Returns true in SAFE-OP (or PRE-OP when
-/// cfg.stop_after_preop).
+/// cfg.stop_after_preop / cfg.stop_before_safeop).
 inline bool initEsc211ToSafeOp(EtherCAT::Master& master,
                                EtherCAT::PDOManager& pdo,
                                uint16_t slave_index,
@@ -527,17 +555,17 @@ inline bool initEsc211ToSafeOp(EtherCAT::Master& master,
         }
     }
 
-    // 8. SAFE-OP transition
-    {
-        auto g = lock();
-        auto safe_err = s.transitionToSafeOp();
-        if (safe_err != EtherCAT::SlaveError::Ok) {
-            TETHER_LOGE(tag, "SAFE-OP transition failed: {}",
-                        EtherCAT::slaveErrorToString(safe_err));
-            return false;
-        }
+    // 7b. Split point for barriered bring-up: the slave is fully
+    //     configured in PRE-OP — the caller requests SAFE-OP itself
+    //     (esc211RequestSafeOp) once every slave reaches this point.
+    if (cfg.stop_before_safeop) {
+        return true;
     }
-    TETHER_LOGI(tag, "{} in SAFE-OP", master.slaveLogPrefix(slave_index).c_str());
+
+    // 8. SAFE-OP transition
+    if (!esc211RequestSafeOp(s, cfg.sdo_mutex, tag)) {
+        return false;
+    }
 
     // 9. Prime PDO exchange (raises the PDO request/reply counters the
     //    OP transition check requires).
@@ -563,18 +591,15 @@ struct Esc211OpTransitionConfig {
     std::mutex* sdo_mutex = nullptr;
 };
 
-/// Prime PDO exchange (or wait for the exchange thread to prime), then
-/// request the OP transition.  Call after initEsc211ToSafeOp().
-inline bool esc211TransitionToOp(EtherCAT::Slave& s,
-                                 EtherCAT::PDOManager& pdo,
-                                 uint16_t slave_index,
-                                 const Esc211OpTransitionConfig& cfg,
-                                 const char* tag) {
-    auto lock = [&cfg]() {
-        return cfg.sdo_mutex ? std::unique_lock<std::mutex>(*cfg.sdo_mutex)
-                             : std::unique_lock<std::mutex>();
-    };
-
+/// Prime PDO exchange (or wait for the exchange thread to prime) —
+/// the pre-request half of esc211TransitionToOp().  Barriered bring-up
+/// runs this per slave in parallel, then releases all OP requests
+/// together via esc211RequestOp().
+inline bool esc211PrepareForOp(EtherCAT::Slave& s,
+                               EtherCAT::PDOManager& pdo,
+                               uint16_t slave_index,
+                               const Esc211OpTransitionConfig& cfg,
+                               const char* tag) {
     if (cfg.exchange_thread_priming) {
         TETHER_LOGI(tag, "{}: priming PDO exchange before OP transition...", s.logPrefix().c_str());
         for (int i = 0; i < cfg.prime_cycles; ++i) {
@@ -588,9 +613,17 @@ inline bool esc211TransitionToOp(EtherCAT::Slave& s,
         TETHER_LOGI(tag, "{}: waiting for exchange thread to prime PDO counters...", s.logPrefix().c_str());
         std::this_thread::sleep_for(cfg.prime_delay * cfg.prime_cycles);
     }
+    return true;
+}
 
+/// OP request + confirmation only — the second half of
+/// esc211TransitionToOp() after esc211PrepareForOp().
+inline bool esc211RequestOp(EtherCAT::Slave& s,
+                            const Esc211OpTransitionConfig& cfg,
+                            const char* tag) {
     {
-        auto g = lock();
+        auto g = cfg.sdo_mutex ? std::unique_lock<std::mutex>(*cfg.sdo_mutex)
+                               : std::unique_lock<std::mutex>();
         auto op_err = s.transitionToOp();
         if (op_err != EtherCAT::SlaveError::Ok) {
             TETHER_LOGE(tag, "OP transition failed: {}",
@@ -600,6 +633,17 @@ inline bool esc211TransitionToOp(EtherCAT::Slave& s,
     }
     TETHER_LOGI(tag, "{} in OP", s.logPrefix().c_str());
     return true;
+}
+
+/// Prime PDO exchange (or wait for the exchange thread to prime), then
+/// request the OP transition.  Call after initEsc211ToSafeOp().
+inline bool esc211TransitionToOp(EtherCAT::Slave& s,
+                                 EtherCAT::PDOManager& pdo,
+                                 uint16_t slave_index,
+                                 const Esc211OpTransitionConfig& cfg,
+                                 const char* tag) {
+    return esc211PrepareForOp(s, pdo, slave_index, cfg, tag) &&
+           esc211RequestOp(s, cfg, tag);
 }
 
 } // namespace ESC211
