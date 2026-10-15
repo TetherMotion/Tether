@@ -7,12 +7,17 @@
 
 #include <sys/socket.h>
 #include <sys/select.h>
+#include <netdb.h>
+#include <poll.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <chrono>
 #include <cerrno>
 #include <cstring>
+#include <string>
 
 namespace tether { namespace io {
 
@@ -75,6 +80,67 @@ void TcpTransport::close() {
 
 bool TcpTransport::isConnected() const {
     return connected_.load(std::memory_order_relaxed) && fd_ >= 0;
+}
+
+// ---------------------------------------------------------------------------
+// tcpConnect
+// ---------------------------------------------------------------------------
+
+std::unique_ptr<TcpTransport> tcpConnect(const char* host, uint16_t port,
+                                         uint32_t timeoutMs) {
+    if (!host || !*host) return nullptr;
+
+    struct addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo* addrs = nullptr;
+    const std::string portStr = std::to_string(port);
+    if (::getaddrinfo(host, portStr.c_str(), &hints, &addrs) != 0 || !addrs) {
+        return nullptr;
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(timeoutMs);
+    int fd = -1;
+    for (struct addrinfo* ai = addrs; ai && fd < 0; ai = ai->ai_next) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) break;
+        const int remainMs = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline - now).count());
+
+        fd = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (fd < 0) continue;
+
+        // Non-blocking connect + poll() so timeoutMs bounds the attempt.
+        const int flags = ::fcntl(fd, F_GETFL, 0);
+        ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+        int rc = ::connect(fd, ai->ai_addr, ai->ai_addrlen);
+        if (rc < 0 && errno == EINPROGRESS) {
+            struct pollfd pfd{};
+            pfd.fd = fd;
+            pfd.events = POLLOUT;
+            rc = ::poll(&pfd, 1, remainMs);
+            if (rc > 0) {
+                int err = 0;
+                socklen_t errLen = sizeof(err);
+                ::getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errLen);
+                rc = (err == 0) ? 0 : -1;
+            }
+        }
+        if (rc != 0) {
+            ::close(fd);
+            fd = -1;
+            continue;
+        }
+        ::fcntl(fd, F_SETFL, flags);   // restore blocking mode
+        int opt = 1;
+        ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+    }
+    ::freeaddrinfo(addrs);
+
+    if (fd < 0) return nullptr;
+    return std::make_unique<TcpTransport>(fd);
 }
 
 // ---------------------------------------------------------------------------

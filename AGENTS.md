@@ -329,6 +329,40 @@ gauge Limits view, composite Entities view, LogPane).
   size constant must be a free `inline constexpr` — nested constants
   are not visible in the base-specifier.
 
+### Tether IO client (`tether_io_client`)
+
+`tools/tether_io_client/` is a standalone C++ client for the Tether IO V6
+protocol — no webinterface needed. Three surfaces share one dispatcher
+(`commands.cpp` → `dispatch(ctx, args)`): direct CLI, `shell` REPL, and the
+`:` prompt in the ncurses TUI (`PanelScreen` tabs: Catalog/Watch/Stream/
+Functions + captured log).
+
+Transports (`tether_io_protocol`): `ws://` (`WsClientTransport`, minimal
+RFC 6455 client — no asio/Drogon), `tcp://`/`serial://` (`SlipFramedTransport`
++ `TcpConnector`/`SerialTransport`), plus a `MessagePipeTransport` for
+in-proc tests. V6 values carry `schemaSlot`, not `ValueType` — the client
+retains the negotiated `SchemaGraph`+manifest and decodes via
+`SchemaValue.hpp` (`decodeSchemaValue`/`encodeSchemaValue`/
+`formatSchemaValueText`/`schemaValueToJson`).
+
+Smoke test without hardware: `examples/tether_io_sim` (TCP/SLIP :4000,
+`--ws-port` adds a minimal RFC 6455 server for ws:// E2E) serving the
+simulated CiA402 fleet + writable `sim.*` params + `sim.counter` stream.
+
+```bash
+cmake --build build --target tether_io_client tether_io_sim -j8
+./build/bin/tether_io_sim --port 4000 --ws-port 4001 &
+./build/bin/tether_io_client -u tcp://127.0.0.1:4000 info
+./build/bin/tether_io_client -u ws://127.0.0.1:4001 stream sim.counter --count 5
+```
+
+Tests: `tether_io_client_tests` (in `tests/io/test_io_client_commands.cpp`)
+runs the dispatcher over `MessagePipeTransport` ↔ `Session(Framing::None)`
++ `SimulatedCiA402Fleet`. The logic lives in `tether_io_client_lib` (STATIC)
+so tests link it without ncurses; `tui.cpp` only compiles into the exe when
+`tether_terminal_ui` is present. See `tools/tether_io_client/README.md` for
+the full command surface and `IO-PLAN.md` for the design notes.
+
 ## Code Conventions
 
 - C++23 (`-std=c++23`)
