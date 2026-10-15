@@ -45,7 +45,8 @@ jobs:
           gcc \
           libc6-dev \
           libboost-dev \
-          make
+          make \
+          ccache
     
     - name: Cache googletest source
       uses: actions/cache@v4
@@ -61,10 +62,25 @@ jobs:
         fi
         echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
 
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-${{ github.sha }}
+        restore-keys: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-
+
+    - name: Configure ccache
+      run: |
+        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
+        ccache -M 5G
+        ccache -s
+
     - name: Configure and build
       run: |
         cmake -S . -B build \
           -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_BUILD_SIMULATION=ON \
           -DTETHER_BUILD_ETHERCAT_MASTER=ON \
@@ -117,7 +133,8 @@ jobs:
           gcc \
           libc6-dev \
           libboost-dev \
-          make
+          make \
+          ccache
 
     - name: Cache googletest source
       uses: actions/cache@v4
@@ -133,10 +150,25 @@ jobs:
         fi
         echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
 
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-${{ github.sha }}
+        restore-keys: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-
+
+    - name: Configure ccache
+      run: |
+        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
+        ccache -M 5G
+        ccache -s
+
     - name: Configure and build (static only)
       run: |
         cmake -S . -B build-static \
           -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -DTETHER_BUILD_SHARED_LIBS=OFF \
           -DTETHER_BUILD_STATIC_LIBS=ON \
           -DTETHER_BUILD_TESTS=ON \
@@ -192,7 +224,8 @@ jobs:
           gcc \
           libc6-dev \
           libboost-dev \
-          make
+          make \
+          ccache
 
     - name: Show toolchain versions
       run: |
@@ -215,10 +248,25 @@ jobs:
         fi
         echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
 
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-${{ github.sha }}
+        restore-keys: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-
+
+    - name: Configure ccache
+      run: |
+        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
+        ccache -M 5G
+        ccache -s
+
     - name: Configure and build
       run: |
         cmake -S . -B build \
           -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_BUILD_SIMULATION=ON \
           -DTETHER_BUILD_ETHERCAT_MASTER=ON \
@@ -427,7 +475,8 @@ jobs:
           libc6-dev \
           make \
           lcov \
-          gcovr
+          gcovr \
+          ccache
     
     - name: Cache googletest source
       uses: actions/cache@v4
@@ -443,10 +492,25 @@ jobs:
         fi
         echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
 
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-${{ github.sha }}
+        restore-keys: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-
+
+    - name: Configure ccache
+      run: |
+        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
+        ccache -M 5G
+        ccache -s
+
     - name: Configure and build with coverage
       run: |
         cmake -S . -B build-coverage \
           -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_BUILD_SIMULATION=ON \
           -DTETHER_BUILD_ETHERCAT_MASTER=ON \
@@ -590,6 +654,8 @@ jobs:
         
         cmake -S . -B build-asan \
           -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_BUILD_MODULE_TESTS=ON \
           -DTETHER_BUILD_DESTABILIZER=ON \
@@ -705,6 +771,8 @@ jobs:
         
         cmake -S . -B build-tsan \
           -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_BUILD_MODULE_TESTS=ON \
           -DTETHER_BUILD_DESTABILIZER=ON \
