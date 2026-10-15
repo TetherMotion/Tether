@@ -158,45 +158,14 @@ kSdoEntries = [] {
 }();
 
 RSAPMonitoringProcessor::RSAPMonitoringProcessor(EtherCAT::Slave& slave)
-    : slave_(slave) {}
-
-size_t RSAPMonitoringProcessor::poll() {
-    // Carry previous values forward so objects not attempted in a paused
-    // or partially-failed poll keep their last known state.
-    Snapshot next;
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        next = snap_;
-    }
-    next.generation++;
-
-    next.read_ok = EtherCAT::pollSdoObjects(
-        slave_, kSdoEntries, next.value, next.ok,
-        [this] { return paused_.load(std::memory_order_relaxed); },
-        [](size_t i, const EtherCAT::SdoObjectEntry& e,
-           EtherCAT::SlaveError err) {
-            TETHER_LOGD(TAG, "0x{:04X}:{} ({}): SDO read failed ({})",
-                        e.index, e.subindex,
-                        RSAPMonitoringProcessor::kObjects[i].name,
-                        static_cast<int>(err));
-        });
-
-    std::lock_guard<std::mutex> lock(mtx_);
-    snap_ = next;
-    return next.read_ok;
-}
-
-RSAPMonitoringProcessor::Snapshot
-RSAPMonitoringProcessor::snapshot() const {
-    std::lock_guard<std::mutex> lock(mtx_);
-    return snap_;
-}
+    : SdoObjectPoller(slave, kSdoEntries,
+                      +[](size_t i) { return kObjects[i].name; },
+                      TAG) {}
 
 std::optional<uint32_t>
-RSAPMonitoringProcessor::Snapshot::get(uint16_t index,
-                                       uint8_t subindex) const {
-    for (size_t i = 0; i < kObjectCount; ++i) {
-        const auto& o = kObjects[i];
+RSAPMonitoringSnapshot::get(uint16_t index, uint8_t subindex) const {
+    for (size_t i = 0; i < RSAPMonitoringProcessor::kObjectCount; ++i) {
+        const auto& o = RSAPMonitoringProcessor::kObjects[i];
         if (o.index == index && o.subindex == subindex) {
             return ok[i] ? std::optional<uint32_t>(value[i])
                          : std::nullopt;
@@ -206,8 +175,8 @@ RSAPMonitoringProcessor::Snapshot::get(uint16_t index,
 }
 
 std::optional<int32_t>
-RSAPMonitoringProcessor::Snapshot::getSigned(uint16_t index,
-                                             uint8_t subindex) const {
+RSAPMonitoringSnapshot::getSigned(uint16_t index,
+                                  uint8_t subindex) const {
     const auto v = get(index, subindex);
     if (!v) return std::nullopt;
     return static_cast<int32_t>(*v);

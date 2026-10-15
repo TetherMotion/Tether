@@ -1,16 +1,39 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstdint>
-#include <mutex>
 #include <optional>
 
+#include "tether/ethercat/SdoObjectPoller.hpp"
 #include "tether/ethercat/Slave.hpp"
 
 namespace EtherCAT {
 namespace Drives {
 namespace ESC211 {
+
+/// Polled table size — every data sub-entry of 0x4100-0x4115.
+/// Free-standing because the class needs it in its base-specifier.
+inline constexpr size_t kRSAPMonitoringPollObjects = 104;
+
+/**
+ * @brief Snapshot of one RSAP-monitoring poll cycle.
+ *
+ * Adds (index, subindex) lookup helpers to the generic storage; the
+ * search table is `RSAPMonitoringProcessor::kObjects`.
+ */
+struct RSAPMonitoringSnapshot
+    : SdoPollSnapshot<kRSAPMonitoringPollObjects> {
+    /**
+     * @brief Raw value of one object by (index, subindex).
+     * @return the value, or nullopt when the object is not in the
+     *         table or its last read failed.
+     */
+    std::optional<uint32_t> get(uint16_t index, uint8_t subindex = 0) const;
+
+    /// Signed interpretation of get() for DINT objects.
+    std::optional<int32_t> getSigned(uint16_t index,
+                                     uint8_t subindex = 0) const;
+};
 
 /**
  * @brief Reads the ESC211 RSAP monitoring objects 0x4100-0x4115 via SDO.
@@ -57,8 +80,12 @@ namespace ESC211 {
  *       ...
  * @endcode
  */
-class RSAPMonitoringProcessor {
+class RSAPMonitoringProcessor
+    : public SdoObjectPoller<kRSAPMonitoringPollObjects,
+                             RSAPMonitoringSnapshot> {
 public:
+    using Snapshot = RSAPMonitoringSnapshot;
+
     /// Object dictionary metadata for one polled (sub)object.
     struct ObjectInfo {
         uint16_t    index;     ///< CoE index (0x4100..0x4115)
@@ -68,60 +95,16 @@ public:
     };
 
     /// All polled objects (every data sub-entry of 0x4100-0x4115).
-    static constexpr size_t kObjectCount = 104;
+    static constexpr size_t kObjectCount = kRSAPMonitoringPollObjects;
     static const std::array<ObjectInfo, kObjectCount> kObjects;
-
-    /// Copyable snapshot of one poll cycle — safe to share across threads.
-    struct Snapshot {
-        std::array<uint32_t, kObjectCount> value{};  ///< raw value per object
-        std::array<bool,     kObjectCount> ok{};     ///< SDO read succeeded
-        size_t   read_ok = 0;    ///< objects read successfully this poll
-        uint64_t generation = 0; ///< incremented on every poll()
-
-        /**
-         * @brief Raw value of one object by (index, subindex).
-         * @return the value, or nullopt when the object is not in the
-         *         table or its last read failed.
-         */
-        std::optional<uint32_t> get(uint16_t index,
-                                    uint8_t subindex = 0) const;
-
-        /// Signed interpretation of get() for DINT objects.
-        std::optional<int32_t> getSigned(uint16_t index,
-                                         uint8_t subindex = 0) const;
-    };
 
     explicit RSAPMonitoringProcessor(EtherCAT::Slave& slave);
 
-    RSAPMonitoringProcessor(const RSAPMonitoringProcessor&) = delete;
-    RSAPMonitoringProcessor& operator=(const RSAPMonitoringProcessor&) = delete;
-
-    /**
-     * @brief Read all monitoring objects via SDO (best effort).
-     *
-     * Semantics match RSAPInformationProcessor::poll(): failed reads are
-     * marked !ok and polling continues; while paused the poll aborts
-     * between objects, keeping previous values.
-     *
-     * @return number of objects read successfully (0..kObjectCount)
-     */
-    size_t poll();
-
-    /// Copy of the latest snapshot (empty generation until first poll).
-    Snapshot snapshot() const;
-
-    /// Pause/resume polling — same purpose as
-    /// RSAPInformationProcessor::pause(): keep SDO reads from overlapping
-    /// 0xF100 safety state machine command sequences.
-    void pause()  { paused_.store(true,  std::memory_order_relaxed); }
-    void resume() { paused_.store(false, std::memory_order_relaxed); }
-    bool isPaused() const { return paused_.load(std::memory_order_relaxed); }
-
-private:
-    EtherCAT::Slave& slave_;
-    mutable std::mutex mtx_;
-    Snapshot snap_;
-    std::atomic<bool> paused_{false};
+    // poll()/snapshot()/pause()/resume()/isPaused() are inherited from
+    // SdoObjectPoller — failed reads mark the slot !ok and polling
+    // continues; while paused the poll aborts between objects, keeping
+    // previous values.  pause() keeps SDO reads from overlapping 0xF100
+    // safety state machine command sequences.
 };
 
 } // namespace ESC211
