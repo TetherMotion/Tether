@@ -74,7 +74,7 @@ struct SchemaValue {
 
 namespace schema_value_detail {
 
-inline std::unexpected<std::string> svfail(const char* msg) {
+inline auto svfail(const char* msg) {
     return std::unexpected(std::string(msg));
 }
 
