@@ -383,7 +383,7 @@ void Session::handleStartStream() {
     rowsInChunk_ = 0;
     chunkWritePos_ = 0;
     skipCounter_ = 0;
-    lastSampleTimeUs_ = getTimestampUs_();
+    lastSampleTimeUs_ = nowUs();
     lastTriggerValue_.clear();
     lastValues_.clear();
     lastValues_.resize(collectPlan_.size());
@@ -517,7 +517,7 @@ void Session::handleSnapshotParamsReq(const uint8_t* body, size_t len) {
         }
     }
 
-    uint64_t ts = getTimestampUs_();
+    uint64_t ts = nowUs();
 
     struct SnapshotValue {
         uint64_t id;
@@ -586,7 +586,7 @@ void Session::handleSnapshotSignalsReq(const uint8_t* body, size_t len) {
         }
     }
 
-    uint64_t ts = getTimestampUs_();
+    uint64_t ts = nowUs();
 
     struct SnapshotValue {
         uint64_t id;
@@ -659,7 +659,8 @@ void Session::handleConfigureDatalogReq(const uint8_t* body, size_t len) {
         return true;
     };
 
-    datalogRecorder_->configure(config, readFn, getTimestampUs_, nullptr);
+    datalogRecorder_->configure(config, readFn,
+                                [this] { return nowUs(); }, nullptr);
     if (config.enabled) {
         datalogRecorder_->start();
     } else {
@@ -943,7 +944,7 @@ void Session::handleInvokeExResp(const uint8_t* body, size_t len) {
     InvokeResult result;
     result.requestId = requestId;
     result.functionId = pending.functionId;
-    const uint64_t now = getTimestampUs_();
+    const uint64_t now = nowUs();
     result.rttUs = now - pending.sentAtUs;
     if (pending.deadlineAtUs != 0 && now > pending.deadlineAtUs) {
         // The response crossed the wire after its deadline — same

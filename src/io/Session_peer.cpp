@@ -65,7 +65,7 @@ bool Session::callPeer(uint64_t functionId,
         size += FUNCTION_VALUE_HEADER_MAX_SIZE + argument.value.size();
         if (size > MAX_MESSAGE_SIZE) return false;
     }
-    const uint64_t now = getTimestampUs_();
+    const uint64_t now = nowUs();
     const uint64_t deadlineAtUs =
         (deadlineUs == 0 || deadlineUs > UINT64_MAX - now) ? 0 : now + deadlineUs;
 
@@ -115,7 +115,7 @@ void Session::invokeSweepLoop() {
         uint64_t waitUs = UINT64_MAX;
         {
             std::unique_lock<std::mutex> lock(invokeMutex_);
-            const uint64_t now = getTimestampUs_();
+            const uint64_t now = nowUs();
             for (const auto& [id, pending] : pendingInvokes_) {
                 (void)id;
                 if (pending.deadlineAtUs == 0) continue;
@@ -138,7 +138,7 @@ void Session::invokeSweepLoop() {
 }
 
 void Session::sweepInvokeDeadlines() {
-    const uint64_t now = getTimestampUs_();
+    const uint64_t now = nowUs();
     std::vector<std::pair<InvokeResultFn, InvokeResult>> expired;
     {
         std::lock_guard<std::mutex> lock(invokeMutex_);
@@ -446,7 +446,7 @@ void Session::sendInputStreamResponse(MessageType type, uint32_t streamId, bool 
 void Session::publishLog(LogSeverity severity, std::string_view component,
                          std::string_view message, std::string_view location) {
     LogRecord record;
-    record.timestampUs = getTimestampUs_ ? getTimestampUs_() : 0;
+    record.timestampUs = getTimestampUs_ ? nowUs() : 0;
     record.severity = severity;
     record.component.assign(component);
     record.message.assign(message);

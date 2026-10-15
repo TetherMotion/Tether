@@ -108,6 +108,11 @@ Session::~Session() {
     if (transport_) transport_->close();
 }
 
+uint64_t Session::nowUs() {
+    std::lock_guard<std::mutex> lock(timestampMutex_);
+    return getTimestampUs_ ? getTimestampUs_() : 0;
+}
+
 // --------------------------------------------------------------------------
 // Logging helper
 // --------------------------------------------------------------------------
@@ -161,7 +166,7 @@ void Session::run() {
         // Calculate timeout
         uint32_t timeoutMs;
         if (streaming_) {
-            uint64_t now = getTimestampUs_();
+            uint64_t now = nowUs();
             uint64_t elapsed = (now >= lastSampleTimeUs_) ? (now - lastSampleTimeUs_) : 0;
             uint64_t targetUs = static_cast<uint64_t>(intervalUs_);
             if (elapsed >= targetUs) {

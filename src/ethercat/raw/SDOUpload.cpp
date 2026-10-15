@@ -168,6 +168,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
         bool logged_mbx_mismatch = false;
         bool got_init_response = false;
         int stale_retry_count = 0;
+        uint32_t foreign_drains = 0;
         const uint8_t* r_sdo_bytes = nullptr;
         uint8_t sdo_cmd = 0;
         uint16_t r_len = 0;
@@ -355,10 +356,9 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 const uint8_t r_sub = res->sub;
                 if (r_index != index || r_sub != sub) {
                     ++stale_retry_count;
-                    if (stale_retry_count <= 4 || (stale_retry_count % 32) == 0) {
+                    if (drainWarnVisible(++foreign_drains))
                         TETHER_LOGW(TAG, "Stale SDO response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — draining (#{}), NOT re-sending",
-                                    r_index, r_sub, index, sub, adp, stale_retry_count);
-                    }
+                                r_index, r_sub, index, sub, adp, stale_retry_count);
                     // Stale answer to an earlier queued request — drain it and
                     // keep waiting for ours.  Never re-send here: the slave's
                     // FIFO queue would only grow (ESC211 faults with AL 0x0016).

@@ -135,6 +135,7 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
     }
 
     int stale_retry_count = 0;
+    uint32_t foreign_drains = 0;
 
     // Slaves like the ESC211 drain SM0 into an internal FIFO and answer each
     // request ~25-30 ms late; responses queued ahead of ours must be drained,
@@ -190,7 +191,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
             }
         }
         if (hdr.type != EC_MBXT_COE) {
-            TETHER_LOGW(TAG, "Non-CoE mailbox response (normal download): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
+            if (drainWarnVisible(++foreign_drains))
+                TETHER_LOGW(TAG, "Non-CoE mailbox response (normal download): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                         hdr.type, hdr.cnt, adp, index, sub);
             continue;  // foreign mailbox traffic — drain, keep polling
         }
@@ -249,7 +251,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
         std::memcpy(&resp_coe, rspbuf + sizeof(MbxHeader), sizeof(resp_coe));
         const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
         if (resp_service != EC_COES_SDORES) {
-            TETHER_LOGW(TAG, "Unexpected CoE service (normal download): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — draining",
+            if (drainWarnVisible(++foreign_drains))
+                TETHER_LOGW(TAG, "Unexpected CoE service (normal download): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                         resp_service, adp, index, sub);
             continue;  // foreign CoE service — drain, keep polling
         }
@@ -265,10 +268,9 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
                     return true;
                 }
                 ++stale_retry_count;
-                if (stale_retry_count <= 4 || (stale_retry_count % 32) == 0) {
+                if (drainWarnVisible(++foreign_drains))
                     TETHER_LOGW(TAG, "Stale SDO normal download response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — draining (#{}), NOT re-sending",
-                                res_index, res.sub, index, sub, adp, stale_retry_count);
-                }
+                            res_index, res.sub, index, sub, adp, stale_retry_count);
                 // Stale answer to an earlier queued request — drain and keep
                 // waiting for ours; re-sending only grows the slave's queue.
                 std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
@@ -277,7 +279,8 @@ bool SDODownload::executeNormal(Master& master, uint16_t adp,
         }
 
         // Foreign SDO response — drain and keep waiting for ours.
-        TETHER_LOGW(TAG, "Unexpected SDO command (normal download): cmd=0x{:02X} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
+        if (drainWarnVisible(++foreign_drains))
+            TETHER_LOGW(TAG, "Unexpected SDO command (normal download): cmd=0x{:02X} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                     sdo_cmd, adp, index, sub);
         std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
         continue;

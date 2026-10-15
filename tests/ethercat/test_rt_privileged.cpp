@@ -1004,7 +1004,8 @@ TEST_F(RtVethTest, WaitCyclicSlotViewOverRealWire) {
     int peer = openBoundPacketSocket(veth_.ifB, kEtherCat);
     ASSERT_GE(peer, 0);
 
-    // Block a waiter on slot 0 (idx 0xF8).
+    // Block a waiter on pool slot 0 (wire idx 0x9C via cyclicPoolWireIdx).
+    const uint8_t slot0_idx = cyclicPoolWireIdx(0);
     std::atomic<bool> got{false};
     CyclicSlotView view{};
     std::thread waiter([&] {
@@ -1015,11 +1016,15 @@ TEST_F(RtVethTest, WaitCyclicSlotViewOverRealWire) {
     // Send a cyclic response on the wire.
     uint8_t f[80];
     const uint8_t pay[4] = {0xAB, 0xCD, 0xEF, 0x01};
-    buildEcatFrame(f, 0x0C, 0xF8, 0x1234, 0x5678, pay, 4, 3);
+    buildEcatFrame(f, 0x0C, slot0_idx, 0x1234, 0x5678, pay, 4, 3);
     ASSERT_TRUE(sendRaw(peer, veth_.ifB, f, 60));
 
-    ASSERT_TRUE(waitFor([&] { return got.load(); }, 2'000ms));
+    // join() before asserting: the waiter honours its 2 s deadline, so a
+    // missed wake reports as a plain failure instead of terminating on a
+    // joinable thread's destruction.
+    const bool arrived = waitFor([&] { return got.load(); }, 2'000ms);
     waiter.join();
+    ASSERT_TRUE(arrived);
     ASSERT_TRUE(got);
     EXPECT_EQ(view.datalen, 4u);
     EXPECT_EQ(view.wkc, 3u);
@@ -1349,12 +1354,13 @@ TEST_F(RtVethTest, CyclicExecutiveExchangeOverWireAtFifo) {
     ASSERT_GE(peer, 0);
 
     // Responder thread: echo every cyclic frame back with a payload + WKC.
+    const uint8_t slot0_idx = cyclicPoolWireIdx(0);
     std::atomic<bool> run{true};
     std::thread responder([&] {
         uint8_t b[2048];
         while (run.load()) {
             ssize_t n = recvOne(peer, b, sizeof(b), 50);
-            if (n > 0 && n >= 18 && b[17] >= 0xF8 && b[17] <= 0xFD)
+            if (n > 0 && n >= 18 && b[17] == slot0_idx)
                 sendRaw(peer, veth_.ifB, b, (size_t)n);
         }
     });
@@ -1372,7 +1378,7 @@ TEST_F(RtVethTest, CyclicExecutiveExchangeOverWireAtFifo) {
             uint8_t* f = chp->txAcquire();
             if (!f) return false;
             const uint8_t pay[4] = {0x01,0x02,0x03,0x04};
-            buildEcatFrame(f, 0x0C, 0xF8, 0, 0, pay, 4, 0);
+            buildEcatFrame(f, 0x0C, slot0_idx, 0, 0, pay, 4, 0);
             if (!chp->txCommitFrame(60)) return false;
             ++sends;
             // Collect: wait for the echo on slot 0 within the cycle budget.

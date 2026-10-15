@@ -258,6 +258,11 @@ private:
     /// session end).
     void releaseRingSource();
 
+    /// Serialized getTimestampUs_() — the user callback may not be
+    /// thread-safe, but it is invoked from the run thread, the invoke
+    /// sweep thread, and the datalog recorder.
+    uint64_t nowUs();
+
     // ---- Logging ----
     void log(const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 
@@ -265,6 +270,7 @@ private:
     std::unique_ptr<ITransport> transport_;
     Registry&        registry_;
     TimestampFn      getTimestampUs_;
+    std::mutex       timestampMutex_;
     LogFn            logFn_;
     DatalogRecorder* datalogRecorder_;
     InputStreamCreateFn inputStreamCreateFn_;

@@ -103,7 +103,7 @@ void Session::collectOneRow() {
         uint8_t* row = chunkBuf_.data() + chunkWritePos_;
         uint8_t* rowStart = row;
 
-        uint64_t ts = getTimestampUs_();
+        uint64_t ts = nowUs();
         std::memcpy(row, &ts, 8);
         row += 8;
 
@@ -143,7 +143,7 @@ void Session::collectOneRow() {
     uint8_t* row = chunkBuf_.data() + offset;
     uint8_t* rowStart = row;
 
-    uint64_t ts = getTimestampUs_();
+    uint64_t ts = nowUs();
     std::memcpy(row, &ts, 8);
     row += 8;
 
@@ -237,7 +237,7 @@ void Session::handleStreamingCycle() {
             // A ring producer may pause mid-chunk; without a flush the pending
             // rows would stall indefinitely.  Flush once they've waited as
             // long as a polled chunk would take to fill (interval x chunk).
-            const uint64_t now = getTimestampUs_();
+            const uint64_t now = nowUs();
             const uint64_t budget =
                 static_cast<uint64_t>(intervalUs_) * chunkSize_;
             if (now - lastRingRowUs_ >= budget) sendStreamData();
@@ -352,7 +352,7 @@ void Session::collectRingRows() {
     if (!streamFilters_.empty()) currentValues.resize(collectPlan_.size());
 
     const size_t got = ringSource_->drainRows(ringScratch_.data(), space);
-    if (got > 0) lastRingRowUs_ = getTimestampUs_();
+    if (got > 0) lastRingRowUs_ = nowUs();
     for (size_t n = 0; n < got; ++n) {
         const uint8_t* srow = ringScratch_.data() + n * srcRowSize;
 
