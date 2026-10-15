@@ -435,7 +435,10 @@ TEST_F(IOPeerCallsTest, NormalRequestsProceedWhilePeerCallPending) {
     EXPECT_EQ(*ping, 77u);
 
     auto future = promise.get_future();
-    ASSERT_EQ(future.wait_for(2s), std::future_status::ready);
+    // Generous bound: the point under test is that the slow call does not
+    // head-of-line block the PingReq — not how fast it completes.  Under
+    // coverage/sanitizer instrumentation scheduling slack exceeds 2 s.
+    ASSERT_EQ(future.wait_for(10s), std::future_status::ready);
     EXPECT_TRUE(future.get().success);
 }
 
