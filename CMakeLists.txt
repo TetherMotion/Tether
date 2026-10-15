@@ -1001,8 +1001,7 @@ endif()
 if(TETHER_BUILD_EXTRACT_ESI)
     add_subdirectory(tools/extract_esi)
 endif()
-if(TETHER_BUILD_IO_CLIENT AND TETHER_BUILD_IO_PROTOCOL
-        AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/tether_io_client/CMakeLists.txt")
+if(TETHER_BUILD_IO_CLIENT AND TETHER_BUILD_IO_PROTOCOL)
     add_subdirectory(tools/tether_io_client)
 endif()
 
