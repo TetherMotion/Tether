@@ -65,18 +65,19 @@ public:
     // master's counter doesn't match the slave's expected value.
     static bool isCounterMismatchError(const uint8_t* mbxbuf, const MbxResponseHeader& hdr);
 
-    // Check for a stale mailbox response (counter mismatch) and re-send.
-    // When a mismatch is detected, the master's mailbox counter is synced
-    // to the slave's counter (extracted from the stale response) before
-    // re-sending, so that slaves that validate the incoming counter (e.g.
-    // ESC211) will accept the re-sent request.
+    // Check for a stale mailbox response (counter mismatch) and drain it.
+    // The response was already consumed by the caller's poll; this helper
+    // only logs, throttles, and returns — it deliberately does NOT re-send
+    // the request.  Slaves like the ESC211 queue SM0 writes internally and
+    // answer FIFO, ~25-30 ms per response; re-sending on every stale
+    // response feeds that queue faster than it drains and the device
+    // eventually faults (AL 0x0016, INIT+ERR).  The caller's poll loop keeps
+    // draining until our response surfaces or the quiet deadline expires.
     //
-    // @param inoutMbxCnt  Pointer to the master's persistent mailbox counter.
-    //                     Updated to the synced value on counter mismatch.
-    // @param inOutExpectedCnt  Pointer to the expected response counter.
-    //                          Updated to the synced value on mismatch.
-    // @return true if the caller should continue polling (re-send succeeded
-    //         or retry budget exhausted), false on fatal error.
+    // @param inoutMbxCnt  Pointer to the master's persistent mailbox counter
+    //                     (unused — no re-send occurs).
+    // @param inOutExpectedCnt  Expected response counter (unchanged).
+    // @return always true — the caller should continue polling.
     bool checkStaleCounter(Master& master, uint16_t adp,
                            uint16_t mbxWriteAddr, uint16_t mbxWriteLen,
                            uint16_t mbxReadAddr, uint16_t mbxReadLen,

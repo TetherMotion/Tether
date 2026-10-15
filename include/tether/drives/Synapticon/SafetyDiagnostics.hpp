@@ -319,6 +319,9 @@ inline const char* moduleIdentDesc(uint32_t ident) {
 inline const char* knownErrorReport(const char* code) {
     if (!code) return "unknown";
     if (std::strncmp(code, "NoFault", 7) == 0)  return "No fault";
+    if (std::strncmp(code, "SmmNoCfg", 8) == 0) return "SMM not configured — missing validated safety parameter file; "
+                                                  "download & validate the parameter file in OBLAC Drives "
+                                                  "(SMM refuses FSoE communication entirely)";
     if (std::strncmp(code, "SmmFIO25", 8) == 0) return "Black channel fault — safety parameters not verified in OBLAC Drives";
     if (std::strncmp(code, "SmmFIO26", 8) == 0) return "FSoE connection timeout — master not sending FSoE frames";
     if (std::strncmp(code, "SmmFIO27", 8) == 0) return "FSoE CRC error — CRC mismatch in received frame";

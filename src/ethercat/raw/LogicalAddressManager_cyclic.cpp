@@ -48,6 +48,10 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
     // Whole-image decimation: with image_every_n_ > 1 the full exchange
     // runs only every Nth cycle — user PDO slices carry the hot bytes on
     // the in-between cycles (10 kHz slice / 1 kHz image, e.g.).
+    // Stamp the send time before the early return: the slice collect's
+    // RTT stats compare deposits against cyclic_send_ns_ on EVERY cycle.
+    cyclic_send_ns_     = monoNowNs();
+    cyclic_deadline_ns_ = cyclic_send_ns_ + rx_timeout_ns;
     const uint64_t cycle = exchange_cycle_++;
     if (total_data == 0 || (cycle % image_every_n_) != 0) {
         emitSlices(mapping, image, rx_timeout_ns);
@@ -167,10 +171,9 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
     }
 
     // ---- Emit slices -----------------------------------------------------
-    // Collect the response deadline once — the collect half shares it
-    // regardless of when it runs (split-phase overlap).
-    cyclic_send_ns_     = monoNowNs();
-    cyclic_deadline_ns_ = cyclic_send_ns_ + rx_timeout_ns;
+    // cyclic_send_ns_/cyclic_deadline_ns_ were stamped above the
+    // decimation early-return — the collect half shares them regardless
+    // of when it runs (split-phase overlap).
     cyclic_pending_count_ = 0;
     pending_image_ = image;
     cnt_pending_ = false;
@@ -357,9 +360,10 @@ bool LogicalAddressManager::cyclicSend(const PDO::PDOMapping& mapping,
 void LogicalAddressManager::deriveExpectedWkc(
     const PDO::PDOMapping& mapping)
 {
-    // LRW WKC: +1 per slave that writes output bytes in the slice's
-    // logical range, +2 per slave that reads input bytes.  Distinct
-    // slaves per direction per slice — bitsets, then popcount.
+    // LRW WKC: each addressed slave increments +2 when its output
+    // (RxPDO, master-write) FMMU range matches and +1 when its input
+    // (TxPDO, master-read) range matches.  Distinct slaves per
+    // direction per slice — bitsets, then popcount.
     const uint32_t nslices = cyclic_slice_count_;
     const uint32_t max_slice = maxSliceLength();
     std::array<uint64_t, kMaxCyclicSlices> rx_set{}, tx_set{};
@@ -377,7 +381,7 @@ void LogicalAddressManager::deriveExpectedWkc(
     }
     for (uint32_t s = 0; s < nslices && s < kMaxCyclicSlices; ++s) {
         const uint32_t wkc =
-            std::popcount(rx_set[s]) + 2u * std::popcount(tx_set[s]);
+            2u * std::popcount(rx_set[s]) + std::popcount(tx_set[s]);
         // A 0 derivation means "no entry mapped into this slice" — bogus
         // for a live image slice, so keep the learn sentinel (Q7).
         expected_wkc_[s] = wkc ? static_cast<uint16_t>(wkc) : kWkcUnknown;

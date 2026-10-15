@@ -28,11 +28,14 @@ namespace Obj2010 {
 
 static constexpr uint16_t ObjectIndex = 0x2010;
 
+// DT2010 per ESI: subs 1-3 REAL ("Controller Kp/Ki/Kd (disabled)" — the
+// current loop runs them internally), sub4+ are field-weakening/chopper
+// settings, NOT an integral limit.
 constexpr RegisterEntry TorqueControllerKp = {
     .index = ObjectIndex,
     .subindex = 0x01,
     .name = "Torque controller Kp",
-    .data_type = ODDataType::Integer32,
+    .data_type = ODDataType::Real32,
     .default_value = 0,
     .unit = Unit_None,
     .options_enum = nullptr,
@@ -46,7 +49,7 @@ constexpr RegisterEntry TorqueControllerKi = {
     .index = ObjectIndex,
     .subindex = 0x02,
     .name = "Torque controller Ki",
-    .data_type = ODDataType::Integer32,
+    .data_type = ODDataType::Real32,
     .default_value = 0,
     .unit = Unit_None,
     .options_enum = nullptr,
@@ -60,7 +63,7 @@ constexpr RegisterEntry TorqueControllerKd = {
     .index = ObjectIndex,
     .subindex = 0x03,
     .name = "Torque controller Kd",
-    .data_type = ODDataType::Integer32,
+    .data_type = ODDataType::Real32,
     .default_value = 0,
     .unit = Unit_None,
     .options_enum = nullptr,
@@ -70,16 +73,16 @@ constexpr RegisterEntry TorqueControllerKd = {
     .effective_time = EffectiveTime::Immediately,
 };
 
-constexpr RegisterEntry TorqueControllerIntegralLimit = {
+constexpr RegisterEntry FieldWeakeningEnabled = {
     .index = ObjectIndex,
     .subindex = 0x04,
-    .name = "Torque controller integral limit",
-    .data_type = ODDataType::Integer32,
+    .name = "Field weakening enabled",
+    .data_type = ODDataType::Unsigned32,
     .default_value = 0,
     .unit = Unit_None,
     .options_enum = nullptr,
     .min_value = 0,
-    .max_value = 0x7FFFFFFF,
+    .max_value = 0xFFFFFFFF,
     .modification_mode = ModificationMode::DuringOperation,
     .effective_time = EffectiveTime::Immediately,
 };
@@ -88,7 +91,7 @@ inline const RegisterList kRegisterList = {
     &TorqueControllerKp,
     &TorqueControllerKi,
     &TorqueControllerKd,
-    &TorqueControllerIntegralLimit,
+    &FieldWeakeningEnabled,
 };
 
 } // namespace Obj2010
@@ -100,11 +103,14 @@ namespace Obj2011 {
 
 static constexpr uint16_t ObjectIndex = 0x2011;
 
+// DT2011 per ESI: subs 1-3 REAL (Kp/Ki/Kd), sub4 UDINT integral limit.
+// NOTE: used only in velocity-control mode — cascaded position control
+// uses the 0x2012 velocity-loop entries instead.
 constexpr RegisterEntry VelocityControllerKp = {
     .index = ObjectIndex,
     .subindex = 0x01,
     .name = "Velocity controller Kp",
-    .data_type = ODDataType::Integer32,
+    .data_type = ODDataType::Real32,
     .default_value = 0,
     .unit = Unit_None,
     .options_enum = nullptr,
@@ -118,7 +124,21 @@ constexpr RegisterEntry VelocityControllerKi = {
     .index = ObjectIndex,
     .subindex = 0x02,
     .name = "Velocity controller Ki",
-    .data_type = ODDataType::Integer32,
+    .data_type = ODDataType::Real32,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0x7FFFFFFF,
+    .modification_mode = ModificationMode::DuringOperation,
+    .effective_time = EffectiveTime::Immediately,
+};
+
+constexpr RegisterEntry VelocityControllerKd = {
+    .index = ObjectIndex,
+    .subindex = 0x03,
+    .name = "Velocity controller Kd",
+    .data_type = ODDataType::Real32,
     .default_value = 0,
     .unit = Unit_None,
     .options_enum = nullptr,
@@ -130,14 +150,14 @@ constexpr RegisterEntry VelocityControllerKi = {
 
 constexpr RegisterEntry VelocityControllerIntegralLimit = {
     .index = ObjectIndex,
-    .subindex = 0x03,
+    .subindex = 0x04,
     .name = "Velocity controller integral limit",
-    .data_type = ODDataType::Integer32,
+    .data_type = ODDataType::Unsigned32,
     .default_value = 0,
     .unit = Unit_None,
     .options_enum = nullptr,
     .min_value = 0,
-    .max_value = 0x7FFFFFFF,
+    .max_value = 0xFFFFFFFF,
     .modification_mode = ModificationMode::DuringOperation,
     .effective_time = EffectiveTime::Immediately,
 };
@@ -145,6 +165,7 @@ constexpr RegisterEntry VelocityControllerIntegralLimit = {
 inline const RegisterList kRegisterList = {
     &VelocityControllerKp,
     &VelocityControllerKi,
+    &VelocityControllerKd,
     &VelocityControllerIntegralLimit,
 };
 
@@ -157,11 +178,15 @@ namespace Obj2012 {
 
 static constexpr uint16_t ObjectIndex = 0x2012;
 
+// DT2012 per ESI — the cascaded position controller (the loop that runs
+// in CSP/PP/PV): subs 1-3 REAL position-loop Kp/Ki/Kd, sub4 UDINT
+// position integral limit, subs 5-7 REAL velocity-loop Kp/Ki/Kd,
+// sub8 UDINT velocity integral limit, sub9 USINT encoder source.
 constexpr RegisterEntry PositionControllerKp = {
     .index = ObjectIndex,
     .subindex = 0x01,
-    .name = "Position controller Kp",
-    .data_type = ODDataType::Integer32,
+    .name = "Position loop Kp",
+    .data_type = ODDataType::Real32,
     .default_value = 0,
     .unit = Unit_None,
     .options_enum = nullptr,
@@ -174,8 +199,8 @@ constexpr RegisterEntry PositionControllerKp = {
 constexpr RegisterEntry PositionControllerKi = {
     .index = ObjectIndex,
     .subindex = 0x02,
-    .name = "Position controller Ki",
-    .data_type = ODDataType::Integer32,
+    .name = "Position loop Ki",
+    .data_type = ODDataType::Real32,
     .default_value = 0,
     .unit = Unit_None,
     .options_enum = nullptr,
@@ -188,8 +213,8 @@ constexpr RegisterEntry PositionControllerKi = {
 constexpr RegisterEntry PositionControllerKd = {
     .index = ObjectIndex,
     .subindex = 0x03,
-    .name = "Position controller Kd",
-    .data_type = ODDataType::Integer32,
+    .name = "Position loop Kd",
+    .data_type = ODDataType::Real32,
     .default_value = 0,
     .unit = Unit_None,
     .options_enum = nullptr,
@@ -202,8 +227,22 @@ constexpr RegisterEntry PositionControllerKd = {
 constexpr RegisterEntry PositionControllerIntegralLimit = {
     .index = ObjectIndex,
     .subindex = 0x04,
-    .name = "Position controller integral limit",
-    .data_type = ODDataType::Integer32,
+    .name = "Position loop integral limit",
+    .data_type = ODDataType::Unsigned32,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0xFFFFFFFF,
+    .modification_mode = ModificationMode::DuringOperation,
+    .effective_time = EffectiveTime::Immediately,
+};
+
+constexpr RegisterEntry CascadedVelocityControllerKp = {
+    .index = ObjectIndex,
+    .subindex = 0x05,
+    .name = "Velocity loop Kp",
+    .data_type = ODDataType::Real32,
     .default_value = 0,
     .unit = Unit_None,
     .options_enum = nullptr,
@@ -213,16 +252,44 @@ constexpr RegisterEntry PositionControllerIntegralLimit = {
     .effective_time = EffectiveTime::Immediately,
 };
 
-constexpr RegisterEntry PositionControllerFeedForward = {
+constexpr RegisterEntry CascadedVelocityControllerKi = {
     .index = ObjectIndex,
-    .subindex = 0x05,
-    .name = "Position controller feed forward",
-    .data_type = ODDataType::Integer32,
+    .subindex = 0x06,
+    .name = "Velocity loop Ki",
+    .data_type = ODDataType::Real32,
     .default_value = 0,
     .unit = Unit_None,
     .options_enum = nullptr,
     .min_value = 0,
     .max_value = 0x7FFFFFFF,
+    .modification_mode = ModificationMode::DuringOperation,
+    .effective_time = EffectiveTime::Immediately,
+};
+
+constexpr RegisterEntry CascadedVelocityControllerKd = {
+    .index = ObjectIndex,
+    .subindex = 0x07,
+    .name = "Velocity loop Kd",
+    .data_type = ODDataType::Real32,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0x7FFFFFFF,
+    .modification_mode = ModificationMode::DuringOperation,
+    .effective_time = EffectiveTime::Immediately,
+};
+
+constexpr RegisterEntry CascadedVelocityControllerIntegralLimit = {
+    .index = ObjectIndex,
+    .subindex = 0x08,
+    .name = "Velocity loop integral limit",
+    .data_type = ODDataType::Unsigned32,
+    .default_value = 0,
+    .unit = Unit_None,
+    .options_enum = nullptr,
+    .min_value = 0,
+    .max_value = 0xFFFFFFFF,
     .modification_mode = ModificationMode::DuringOperation,
     .effective_time = EffectiveTime::Immediately,
 };
@@ -232,7 +299,10 @@ inline const RegisterList kRegisterList = {
     &PositionControllerKi,
     &PositionControllerKd,
     &PositionControllerIntegralLimit,
-    &PositionControllerFeedForward,
+    &CascadedVelocityControllerKp,
+    &CascadedVelocityControllerKi,
+    &CascadedVelocityControllerKd,
+    &CascadedVelocityControllerIntegralLimit,
 };
 
 } // namespace Obj2012

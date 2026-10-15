@@ -40,6 +40,16 @@ uint8_t Master::sliceSlotGen(uint8_t slice) const
     return datapath_->sliceSlotGen(slice);
 }
 
+int Master::acquireSliceSlot()
+{
+    return datapath_->acquireSliceSlot();
+}
+
+void Master::releaseSliceSlot(uint8_t slice)
+{
+    datapath_->releaseSliceSlot(slice);
+}
+
 bool Master::sendSliceDatagram(Command cmd, uint8_t slice_slot,
                                uint16_t adp, uint16_t ado,
                                const void* data, uint16_t datalen,

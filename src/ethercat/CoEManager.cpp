@@ -206,6 +206,7 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
                     log_prefix_.c_str(), index, subindex, size);
     }
 
+    options.timeout_ms = effectiveTimeoutMs(options.timeout_ms);
     CoEWriteTransaction txn;
     txn.index = index;
     txn.subindex = subindex;

@@ -1235,6 +1235,12 @@ public:
     // the cyclic image slots, demultiplexed by the same socket filter.
     uint64_t sliceSlotToken(uint8_t slice) const;
     uint8_t  sliceSlotGen(uint8_t slice) const;
+    /// Claim/release a slice slot on the shared datapath pool — used by
+    /// LogicalAddressManager::replanSlices() so that PDO groups (each
+    /// with its own LAM) never collide on the same wire idx.
+    /// @return slot index in [0, kNumSliceSlots), or -1 if exhausted.
+    int      acquireSliceSlot();
+    void     releaseSliceSlot(uint8_t slice);
     bool     sendSliceDatagram(Command cmd, uint8_t slice_slot,
                                uint16_t adp, uint16_t ado,
                                const void* data, uint16_t datalen,

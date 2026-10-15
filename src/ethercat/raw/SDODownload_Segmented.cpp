@@ -156,10 +156,23 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
 
         bool got_init = false;
         int stale_retry_count = 0;
-        for (int attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+        // ESC211 answers queued SM0 requests FIFO, ~25-30 ms late — drain
+        // stale responses, never re-send (see checkStaleCounter).  Give up
+        // after transactionTimeoutMs of silence; hard-capped for safety.
+        const auto quiet_timeout = std::chrono::milliseconds(transactionTimeoutMs);
+        auto quiet_deadline = std::chrono::steady_clock::now() + quiet_timeout;
+        const auto hard_deadline = quiet_deadline + std::chrono::milliseconds(60000);
+        for (int attempt = 0; attempt < MAX_POLL_ATTEMPTS * 100; attempt++) {
+            const auto poll_now = std::chrono::steady_clock::now();
+            if (poll_now > quiet_deadline || poll_now > hard_deadline) {
+                break;
+            }
             MbxResponseHeader hdr;
             auto outcome = pollSm1AndRead(master, adp, mbxReadAddr, mbxReadLen,
                                           rspbuf, pollIntervalMs, hdr);
+            if (outcome == MbxPollOutcome::GotData) {
+                quiet_deadline = std::chrono::steady_clock::now() + quiet_timeout;
+            }
 
             if (outcome == MbxPollOutcome::Cancelled) {
                 TETHER_LOGW(TAG, "SDO segmented download cancelled");
@@ -195,9 +208,9 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                 }
             }
             if (hdr.type != EC_MBXT_COE) {
-                TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download init): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
+                TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download init): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                             hdr.type, hdr.cnt, adp, index, sub);
-                break;
+                continue;  // foreign mailbox traffic — drain, keep polling
             }
             if (hdr.cnt != expected_mbx_cnt) {
                 if (!adoptCounterOnEcho(master, adp, mbxbuf, rspbuf, mbxReadLen, hdr,
@@ -232,6 +245,15 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     SdoAbort abort{};
                     std::memcpy(&abort, rspbuf + sdo_offset, sizeof(abort));
                     const uint32_t abort_code = le32_to_host(abort.abortCode_le);
+                    const uint16_t ab_index = le16_to_host(abort.index_le);
+                    if (ab_index != index || abort.sub != sub) {
+                        // Stale abort answering an earlier queued request —
+                        // drain it and keep waiting for ours.
+                        ++stale_retry_count;
+                        TETHER_LOGD(TAG, "Stale SDO abort (seg download init): idx=0x{:04x}:{} expected=0x{:04x}:{} — draining",
+                                 ab_index, abort.sub, index, sub);
+                        continue;
+                    }
                     TETHER_LOGD(TAG, "SDO segmented download abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                              index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                     if (outAbortCode) *outAbortCode = abort_code;
@@ -265,9 +287,9 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
             std::memcpy(&resp_coe, rspbuf + sizeof(MbxHeader), sizeof(resp_coe));
             const uint8_t resp_service = (le16_to_host(resp_coe.raw_le) >> 12) & 0x0Fu;
             if (resp_service != EC_COES_SDORES) {
-                TETHER_LOGW(TAG, "Unexpected CoE service (seg download init): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
+                TETHER_LOGW(TAG, "Unexpected CoE service (seg download init): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                             resp_service, adp, index, sub);
-                break;
+                continue;  // foreign CoE service — drain, keep polling
             }
 
             if ((sdo_cmd & 0xE0u) == 0x60u) {
@@ -280,24 +302,20 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     break;
                 }
 
-                TETHER_LOGW(TAG, "Stale SDO segmented download init response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — clearing and re-sending",
-                            res_index, res.sub, index, sub, adp);
-                // Do NOT sync counter — just drain and retry.
-                if (++stale_retry_count <= MAX_STALE_RETRIES) {
-                    if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
-                                     mbxReadAddr, mbxReadLen, mbxbuf, 500,
-                                     pollIntervalMs, transactionTimeoutMs, "seg download init")) {
-                        return false;
-                    }
-                } else {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
+                ++stale_retry_count;
+                if (stale_retry_count <= 4 || (stale_retry_count % 32) == 0) {
+                    TETHER_LOGW(TAG, "Stale SDO segmented download init response: idx=0x{:04X}:{} expected=0x{:04X}:{} (adp=0x{:04X}) — draining (#{}), NOT re-sending",
+                                res_index, res.sub, index, sub, adp, stale_retry_count);
                 }
+                std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
                 continue;
             }
 
-            TETHER_LOGW(TAG, "Unexpected SDO command (seg download init): cmd=0x{:02X} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
+            // Foreign SDO response — drain and keep waiting for ours.
+            TETHER_LOGW(TAG, "Unexpected SDO command (seg download init): cmd=0x{:02X} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                         sdo_cmd, adp, index, sub);
-            break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
+            continue;
         }
 
         if (!got_init) {
@@ -376,10 +394,23 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
 
         bool got_seg = false;
         int stale_retry_count = 0;
-        for (int attempt2 = 0; attempt2 < MAX_POLL_ATTEMPTS; attempt2++) {
+        // Same drain-don't-resend policy as the init phase: the slave answers
+        // FIFO from its internal queue; our segment response surfaces once
+        // the backlog ahead of it drains.
+        const auto quiet_timeout = std::chrono::milliseconds(transactionTimeoutMs);
+        auto quiet_deadline = std::chrono::steady_clock::now() + quiet_timeout;
+        const auto hard_deadline = quiet_deadline + std::chrono::milliseconds(60000);
+        for (int attempt2 = 0; attempt2 < MAX_POLL_ATTEMPTS * 100; attempt2++) {
+            const auto poll_now = std::chrono::steady_clock::now();
+            if (poll_now > quiet_deadline || poll_now > hard_deadline) {
+                break;
+            }
             MbxResponseHeader hdr;
             auto outcome = pollSm1AndRead(master, adp, mbxReadAddr, mbxReadLen,
                                           rspbuf, pollIntervalMs, hdr);
+            if (outcome == MbxPollOutcome::GotData) {
+                quiet_deadline = std::chrono::steady_clock::now() + quiet_timeout;
+            }
 
             if (outcome == MbxPollOutcome::Cancelled) {
                 TETHER_LOGW(TAG, "SDO segmented download cancelled");
@@ -415,9 +446,9 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                 }
             }
             if (hdr.type != EC_MBXT_COE) {
-                TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download seg {}): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
+                TETHER_LOGW(TAG, "Non-CoE mailbox response (seg download seg {}): type={} cnt={} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                             seg, hdr.type, hdr.cnt, adp, index, sub);
-                break;
+                continue;  // foreign mailbox traffic — drain, keep polling
             }
             if (hdr.len < sizeof(CoeHeader) + 1) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
@@ -437,6 +468,15 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     SdoAbort abort{};
                     std::memcpy(&abort, seg_res, sizeof(abort));
                     const uint32_t abort_code = le32_to_host(abort.abortCode_le);
+                    const uint16_t ab_index = le16_to_host(abort.index_le);
+                    if (ab_index != index || abort.sub != sub) {
+                        // Stale abort answering an earlier queued request —
+                        // drain it and keep waiting for ours.
+                        ++stale_retry_count;
+                        TETHER_LOGD(TAG, "Stale SDO abort (seg download seg {}): idx=0x{:04x}:{} expected=0x{:04x}:{} — draining",
+                                 seg, ab_index, abort.sub, index, sub);
+                        continue;
+                    }
                     TETHER_LOGD(TAG, "SDO segmented download segment {} abort: index=0x{:04x}:{:02x} code=0x{:08x} ({})",
                                 seg, index, sub, abort_code, errorDecoder_.sdoAbortCodeStr(abort_code));
                     if (outAbortCode) *outAbortCode = abort_code;
@@ -455,43 +495,29 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
             const uint16_t r2_coe_raw = le16_to_host(r2_coe->raw_le);
             const uint8_t r2_service = (r2_coe_raw >> 12) & 0x0Fu;
             if (r2_service != EC_COES_SDORES) {
-                TETHER_LOGW(TAG, "Unexpected CoE service (seg download seg {}): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
+                TETHER_LOGW(TAG, "Unexpected CoE service (seg download seg {}): 0x{:X} (expected 0x3) (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                             seg, r2_service, adp, index, sub);
-                break;
+                continue;  // foreign CoE service — drain, keep polling
             }
 
             const uint8_t seg_ccs = (seg_res_cmd >> 5) & 0x07u;
             if (seg_ccs != 1) {
-                TETHER_LOGW(TAG, "Unexpected SDO command (seg download seg {}): cmd=0x{:02X} ccs={} (adp=0x{:04X} index=0x{:04X}:{}) — aborting",
+                TETHER_LOGW(TAG, "Unexpected SDO command (seg download seg {}): cmd=0x{:02X} ccs={} (adp=0x{:04X} index=0x{:04X}:{}) — draining",
                             seg, seg_res_cmd, seg_ccs, adp, index, sub);
-                break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
+                continue;
             }
 
             const bool seg_toggle = (seg_res_cmd & 0x10u) != 0;
             if (seg_toggle != toggle) {
-                TETHER_LOGW(TAG, "SDO segmented download segment {} toggle mismatch: got={} expected={} (adp=0x{:04X} index=0x{:04X}:{}) — clearing and re-sending",
-                            seg, seg_toggle, toggle, adp, index, sub);
-                // Do NOT adopt the stale counter — just drain and retry,
-                // but with a fresh request counter: duplicate-detecting
-                // slaves (SOMANET) drop a repeated request counter.
-                if (++stale_retry_count <= MAX_STALE_RETRIES) {
-                    const uint8_t prev_req =
-                        static_cast<uint8_t>((mbxbuf[5] >> 4) & 0x07u);
-                    const uint8_t new_req = SDOMailboxIO::nextMbxCnt(prev_req);
-                    mbxbuf[5] = mbx_type_with_cnt(mbxbuf[5] & 0x0Fu, new_req);
-                    expected_mbx_cnt = new_req;
-                    mbx_cnt = SDOMailboxIO::nextMbxCnt(new_req);
-                    if (inoutMbxCnt != nullptr) {
-                        *inoutMbxCnt = mbx_cnt;
-                    }
-                    if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
-                                     mbxReadAddr, mbxReadLen, mbxbuf, 500,
-                                     pollIntervalMs, transactionTimeoutMs, "seg download segment")) {
-                        return false;
-                    }
-                } else {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
+                ++stale_retry_count;
+                if (stale_retry_count <= 4 || (stale_retry_count % 32) == 0) {
+                    TETHER_LOGW(TAG, "SDO segmented download segment {} toggle mismatch: got={} expected={} (adp=0x{:04X} index=0x{:04X}:{}) — draining (#{}), NOT re-sending",
+                                seg, seg_toggle, toggle, adp, index, sub, stale_retry_count);
                 }
+                // Stale answer to an earlier queued request — drain and keep
+                // waiting for ours; re-sending only grows the slave's queue.
+                std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
                 continue;
             }
 
@@ -502,11 +528,6 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                                        inoutMbxCnt, expected_mbx_cnt,
                                        stale_retry_count, index, sub, "seg download segment")) {
                     return false;
-                }
-                // checkStaleCounter bumped the request counter — keep the
-                // local sequence in step for subsequent segments.
-                if (inoutMbxCnt != nullptr) {
-                    mbx_cnt = *inoutMbxCnt;
                 }
                 continue;
             }

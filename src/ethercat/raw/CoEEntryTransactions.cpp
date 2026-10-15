@@ -145,6 +145,7 @@ std::future<CoEResult<uint64_t>> CoEManager::readEntryAsync(
                     log_prefix_.c_str(), entry.index, entry.subindex);
     }
 
+    options.timeout_ms = effectiveTimeoutMs(options.timeout_ms);
     CoEEntryReadTransaction txn;
     txn.index = entry.index;
     txn.subindex = entry.subindex;
@@ -200,8 +201,9 @@ CoEResult<uint64_t> CoEManager::readEntry(
     const ObjectDictionary::ObjectDictionaryEntry& entry,
     CoETransactionOptions opts) {
     auto future = readEntryAsync(entry, opts);
-    const uint32_t timeout_ms =
+    uint32_t timeout_ms =
         (opts.timeout_ms > 0) ? opts.timeout_ms : kDefaultTimeoutMs;
+    timeout_ms = effectiveTimeoutMs(timeout_ms);
     if (future.wait_for(std::chrono::milliseconds(timeout_ms)) !=
             std::future_status::ready) {
         return std::unexpected(CoEErrorCode::Timeout);
@@ -213,8 +215,9 @@ CoEResult<void> CoEManager::writeEntry(
     const ObjectDictionary::ObjectDictionaryEntry& entry,
     uint64_t value, CoETransactionOptions opts) {
     auto future = writeEntryAsync(entry, value, opts);
-    const uint32_t timeout_ms =
+    uint32_t timeout_ms =
         (opts.timeout_ms > 0) ? opts.timeout_ms : kDefaultTimeoutMs;
+    timeout_ms = effectiveTimeoutMs(timeout_ms);
     if (future.wait_for(std::chrono::milliseconds(timeout_ms)) !=
             std::future_status::ready) {
         return std::unexpected(CoEErrorCode::Timeout);
@@ -242,8 +245,9 @@ CoEResult<uint64_t> CoEManager::readEntry(
     const ObjectDictionary::ObjectDictionaryEntry& entry,
     uint8_t subindex, CoETransactionOptions opts) {
     auto future = readEntryAsync(entry, subindex, opts);
-    const uint32_t timeout_ms =
+    uint32_t timeout_ms =
         (opts.timeout_ms > 0) ? opts.timeout_ms : kDefaultTimeoutMs;
+    timeout_ms = effectiveTimeoutMs(timeout_ms);
     if (future.wait_for(std::chrono::milliseconds(timeout_ms)) !=
             std::future_status::ready) {
         return std::unexpected(CoEErrorCode::Timeout);
@@ -255,8 +259,9 @@ CoEResult<void> CoEManager::writeEntry(
     const ObjectDictionary::ObjectDictionaryEntry& entry,
     uint8_t subindex, uint64_t value, CoETransactionOptions opts) {
     auto future = writeEntryAsync(entry, subindex, value, opts);
-    const uint32_t timeout_ms =
+    uint32_t timeout_ms =
         (opts.timeout_ms > 0) ? opts.timeout_ms : kDefaultTimeoutMs;
+    timeout_ms = effectiveTimeoutMs(timeout_ms);
     if (future.wait_for(std::chrono::milliseconds(timeout_ms)) !=
             std::future_status::ready) {
         return std::unexpected(CoEErrorCode::Timeout);

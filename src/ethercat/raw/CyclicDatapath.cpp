@@ -175,6 +175,34 @@ uint8_t CyclicDatapath::sliceSlotGen(uint8_t slice) const
     return slot_gen_[sliceFastIndex(slice)];
 }
 
+int CyclicDatapath::acquireSliceSlot()
+{
+    // First-free-bit claim.  Rare path (slice replan only), so a plain
+    // CAS loop is plenty — the pool is 16 slots.
+    uint16_t claimed = slice_slot_claimed_.load(std::memory_order_relaxed);
+    for (;;) {
+        const uint16_t free_bits =
+            static_cast<uint16_t>(~claimed & ((1u << kNumSliceSlots) - 1u));
+        if (!free_bits) return -1;
+        const uint16_t bit = static_cast<uint16_t>(
+            free_bits & (~free_bits + 1u));          // lowest set bit
+        if (slice_slot_claimed_.compare_exchange_weak(
+                claimed, static_cast<uint16_t>(claimed | bit),
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            return __builtin_ctz(bit);
+        }
+    }
+}
+
+void CyclicDatapath::releaseSliceSlot(uint8_t slice)
+{
+    if (slice >= kNumSliceSlots) return;
+    slice_slot_claimed_.fetch_and(
+        static_cast<uint16_t>(~(1u << slice)),
+        std::memory_order_acq_rel);
+}
+
 const CyclicDatapath::HdrTemplate& CyclicDatapath::ensureTemplate(
     uint8_t fast_idx, uint8_t gen, Command cmd,
     uint16_t adp, uint16_t ado, uint16_t datalen, bool roundtrip)

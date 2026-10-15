@@ -192,35 +192,27 @@ bool SDOTransactionBase::checkStaleCounter(Master& master, uint16_t adp,
                                            int& staleRetryCount,
                                            uint16_t index_, uint8_t sub_,
                                            const char* phaseLabel) {
-    TETHER_LOGW(TAG, "{}: Stale mailbox response ({}): cnt={} expected={} (index=0x{:04X}:{}) — clearing and re-sending",
-                master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), phaseLabel, hdr.cnt, inOutExpectedCnt, index_, sub_);
+    (void)mbxWriteAddr; (void)mbxWriteLen; (void)mbxReadAddr; (void)mbxReadLen;
+    (void)mbxbuf; (void)transactionTimeoutMs; (void)inoutMbxCnt;
+
+    ++staleRetryCount;
+    if (staleRetryCount <= 4 || (staleRetryCount % 32) == 0) {
+        TETHER_LOGW(TAG, "{}: Stale mailbox response ({}): cnt={} expected={} (index=0x{:04X}:{}) — draining (#{}), NOT re-sending",
+                    master.slaveLogPrefix(slaveIndexFromADP(adp)).c_str(), phaseLabel, hdr.cnt, inOutExpectedCnt, index_, sub_, staleRetryCount);
+    }
     // This response is genuinely stale — the caller already checked
     // adoptCounterOnEcho() so it neither echoes our index nor matches the
-    // expected counter.  Drain it and re-send the request.
+    // expected counter.  Drain it and keep polling — do NOT re-send.
     //
-    // The re-send MUST use a fresh counter: slaves that use the mailbox
-    // counter for duplicate detection (e.g. Synapticon SOMANET) silently
-    // drop a request whose counter repeats the last one seen.  The bumped
-    // counter is written back to the request buffer and becomes the new
-    // expected response counter for slaves that echo the request counter
-    // (e.g. ESC211); slaves with an independent response counter are still
-    // handled by adoptCounterOnEcho() when the response arrives.
-    if (++staleRetryCount <= MAX_STALE_RETRIES) {
-        const uint8_t prev_req = static_cast<uint8_t>((mbxbuf[5] >> 4) & 0x07u);
-        const uint8_t new_req = SDOMailboxIO::nextMbxCnt(prev_req);
-        mbxbuf[5] = mbx_type_with_cnt(mbxbuf[5] & 0x0Fu, new_req);
-        inOutExpectedCnt = new_req;
-        if (inoutMbxCnt != nullptr) {
-            *inoutMbxCnt = SDOMailboxIO::nextMbxCnt(new_req);
-        }
-        if (!sendAndWait(master, adp, mbxWriteAddr, mbxWriteLen,
-                         mbxReadAddr, mbxReadLen, mbxbuf, 500,
-                         pollIntervalMs, transactionTimeoutMs, phaseLabel)) {
-            return false;
-        }
-    } else {
-        std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
-    }
+    // Slaves like the ESC211 drain SM0 quickly into an internal request queue
+    // and answer FIFO, ~25-30 ms per response.  Re-sending on every stale
+    // response enqueues a duplicate faster than the slave drains them, so the
+    // backlog grows without bound until the device faults (AL status 0x0016,
+    // INIT+ERR).  Our request was accepted (APWR WKC>0) and its response will
+    // surface once the queue ahead of it drains.  If the request was genuinely
+    // dropped, the poll loop's quiet deadline expires and the caller-level
+    // retry re-sends it exactly once.
+    std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
     return true;
 }
 

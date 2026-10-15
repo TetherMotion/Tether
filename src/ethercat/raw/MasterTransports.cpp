@@ -165,6 +165,12 @@ public:
     uint8_t sliceSlotGen(uint8_t slice) override {
         return master_.sliceSlotGen(slice);
     }
+    int acquireSliceSlot() override {
+        return master_.acquireSliceSlot();
+    }
+    void releaseSliceSlot(uint8_t slice) override {
+        master_.releaseSliceSlot(slice);
+    }
     bool sendSliceDatagram(Command cmd, uint8_t slice_slot,
                            uint16_t adp, uint16_t ado,
                            const void* data, uint16_t datalen,

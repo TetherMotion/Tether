@@ -43,13 +43,21 @@ size_t LogicalAddressManager::resolveSpecRuns(
             segs[nseg++] = {e.offset, e.length};
         }
         std::sort(segs.begin(), segs.begin() + nseg);
-        for (size_t i = 0; i < nseg && n < out.size(); ++i) {
+        size_t processed = 0;
+        for (; processed < nseg && n < out.size(); ++processed) {
             if (n > 0 && out[n - 1].first + out[n - 1].second
-                             == segs[i].first) {
-                out[n - 1].second += segs[i].second;   // contiguous — merge
+                             == segs[processed].first) {
+                out[n - 1].second += segs[processed].second;  // merge
             } else {
-                out[n++] = segs[i];
+                out[n++] = segs[processed];
             }
+        }
+        if (processed < nseg) {
+            // Segments beyond the run cap are dropped — flag it loudly:
+            // the resulting slice silently covers less than the spec.
+            TETHER_LOGW(TAG, "PDO slice spec: {} of {} contiguous "
+                             "segments dropped — run cap {} reached",
+                        nseg - processed, nseg, out.size());
         }
     } else {
         for (const auto& r : spec.ranges) {
@@ -133,17 +141,34 @@ uint32_t LogicalAddressManager::definePDOSlice(
 
 bool LogicalAddressManager::clearPDOSlices()
 {
+    releaseSliceSlots();
     slices_.clear();
     slice_epoch_ = 0xFFFFFFFFu;
     return true;
 }
 
+void LogicalAddressManager::releaseSliceSlots()
+{
+    // Return every claimed slot to the transport's shared pool — other
+    // LogicalAddressManagers on the same datapath need them.
+    for (auto& slice : slices_) {
+        for (auto& run : slice.runs) {
+            if (run.slot_owned) {
+                transport_.releaseSliceSlot(run.slot);
+                run.slot_owned = false;
+            }
+        }
+    }
+}
+
 bool LogicalAddressManager::replanSlices(const PDO::PDOMapping& mapping)
 {
     // Re-resolve every slice's runs against the current mapping and
-    // re-assign slots in define-order — deterministic, so the same
-    // mapping always yields the same slot layout.
-    uint8_t next_slot = 0;
+    // re-claim slots from the transport's shared pool — every LAM bound
+    // to the same datapath (one per PDO group) draws from the same 16
+    // wire indices, so slot ids are allocated centrally, never from a
+    // per-LAM counter (two groups would collide on idx 0xE0+ otherwise).
+    releaseSliceSlots();
     const uint32_t max_len = maxSliceLength();
     const auto entries = describeEntries(mapping);   // WKC derivation
     for (auto& slice : slices_) {
@@ -162,16 +187,22 @@ bool LogicalAddressManager::replanSlices(const PDO::PDOMapping& mapping)
                 slice.run_count = 0;
                 break;
             }
-            if (next_slot >= IPDOTransport::kNumSliceSlots) {
-                TETHER_LOGE(TAG, "PDO slice replan: slice-slot pool "
-                                 "exhausted — slice disabled");
+            const int slot = transport_.acquireSliceSlot();
+            if (slot < 0) {
+                TETHER_LOGE(TAG, "PDO slice replan: shared slice-slot "
+                                 "pool exhausted — slice disabled");
                 slice.run_count = 0;
                 break;
             }
-            run.slot  = next_slot++;
-            run.sent  = 0;
-            // Derive the run's expected WKC: +1 per slave writing output
-            // bytes in range, +2 per slave reading input bytes.
+            run.slot       = static_cast<uint8_t>(slot);
+            run.slot_owned = true;
+            run.sent       = 0;
+            // Derive the run's expected WKC.  For LRW each addressed
+            // slave increments the counter once per matching direction:
+            // +2 when its output (RxPDO, master-write) FMMU range
+            // matches, +1 when its input (TxPDO, master-read) range
+            // matches.  Distinct slaves per direction — bitsets, then
+            // popcount.
             uint64_t rx_set = 0, tx_set = 0;
             for (const auto& e : entries) {
                 if (e.length == 0 || e.slave_index >= 64) continue;
@@ -183,9 +214,19 @@ bool LogicalAddressManager::replanSlices(const PDO::PDOMapping& mapping)
                     tx_set |= 1ull << e.slave_index;
             }
             const uint32_t wkc =
-                std::popcount(rx_set) + 2u * std::popcount(tx_set);
+                2u * std::popcount(rx_set) + std::popcount(tx_set);
             run.expected_wkc = wkc ? static_cast<uint16_t>(wkc)
                                    : kWkcUnknown;
+        }
+        // Disabled mid-loop — release any slots this slice's earlier
+        // runs claimed during this replan so they don't leak.
+        if (slice.run_count == 0) {
+            for (auto& run : slice.runs) {
+                if (run.slot_owned) {
+                    transport_.releaseSliceSlot(run.slot);
+                    run.slot_owned = false;
+                }
+            }
         }
     }
     slice_epoch_ = mapping.epoch();

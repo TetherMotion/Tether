@@ -52,6 +52,13 @@ public:
     /// PDO-slice slot variants — `slice` in [0, kNumSliceSlots).
     uint64_t sliceSlotToken(uint8_t slice) const;
     uint8_t  sliceSlotGen(uint8_t slice) const;
+    /// Claim a slice slot from the shared pool.  Every
+    /// LogicalAddressManager bound to this datapath (one per PDO group)
+    /// draws from the same 16 slots — claims must come from here, not
+    /// from per-LAM counters, or two groups' runs collide on the same
+    /// wire idx.  Returns the slot index, or -1 when the pool is empty.
+    int  acquireSliceSlot();
+    void releaseSliceSlot(uint8_t slice);
 
     // ---- Wire send path ------------------------------------------------
     bool sendDatagram(Command cmd, uint8_t slot, uint16_t adp, uint16_t ado,
@@ -237,6 +244,11 @@ public:
     /// Per-slot send generation (lenFlags res-bit 13), toggled on every
     /// send on that index — written/read on the cyclic thread only.
     std::array<uint8_t, kNumFastSlots> slot_gen_{};
+
+    /// Claimed PDO-slice slots (bit s = slot s).  The pool is shared by
+    /// every LogicalAddressManager bound to this datapath — claims go
+    /// through acquireSliceSlot()/releaseSliceSlot().
+    std::atomic<uint16_t> slice_slot_claimed_{0};
 
     /**
      * @brief Baked wire-header templates, [fast_idx][send_gen].

@@ -467,11 +467,17 @@ inline bool initEsc211ToSafeOp(EtherCAT::Master& master,
         }
     }
 
-    // 4. Enable post-SDO AL status read-back for diagnostics.
+    // 4. Enable post-SDO AL status read-back for diagnostics, and raise the
+    //    per-transaction timeout floor: the ESC211's CoE task is serviced
+    //    lazily and can take well over a second per mailbox response while
+    //    the safety application is busy.  With the 1 s default the response
+    //    arrives just after the timeout and is drained as stale by the next
+    //    transaction — an endless catch-up cycle.
     {
         auto g = lock();
         master.sdoManager(slave_index)
-            .setBehaviourOptions({.request_al_status_after_coe_requests = true});
+            .setBehaviourOptions({.request_al_status_after_coe_requests = true,
+                                  .min_transaction_timeout_ms = 5000});
     }
 
     if (cfg.stop_after_preop) {

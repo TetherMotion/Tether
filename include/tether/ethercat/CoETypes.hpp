@@ -107,6 +107,13 @@ struct CoETransactionOptions {
 
 struct BehaviourOptions {
     bool request_al_status_after_coe_requests = false;
+    /// @brief Floor for CoETransactionOptions::timeout_ms, applied at enqueue
+    /// and at the synchronous wait sites.  The ESC211's CoE task can take
+    /// well over a second per mailbox transaction while its safety
+    /// application is busy; with the 1 s default the response arrives just
+    /// after the timeout and is then drained as "stale" by the next
+    /// transaction — an endless catch-up cycle.  0 = no floor.
+    uint32_t min_transaction_timeout_ms = 0;
 };
 
 // ============================================================================
