@@ -44,6 +44,14 @@ struct Command {
 
     static Command safeStop();
     static Command motionEnabled();
+
+    /// True only when no motion-restricting safety function is
+    /// demanded — STO, SS1, SS2, SOS, SBC and all four SLS instances
+    /// released.  The handshake bits (error/restart acknowledge, reset
+    /// position, safe output) are not motion restrictions.  A master
+    /// that demands any of these must not command motion, independent
+    /// of whether the slave has already acknowledged the demand.
+    bool motionPermitted() const;
 };
 
 struct Status {
@@ -69,6 +77,13 @@ struct Status {
     /// LW2 frame variant only — stays 0 when the slave uses LW1 framing.
     int16_t safe_torque = 0;
 
+    /// True only while no stop function is active: STO, SS1, SS2, SOS,
+    /// SBC (brake_engaged — engaged brakes physically hold the axis),
+    /// error and pending restart acknowledge all gate.  SLS limits
+    /// rather than stops and is deliberately not part of this gate —
+    /// consumers that cannot enforce a nonzero speed limit (the servo
+    /// emulator) must treat a demanded SLS as a halt themselves, see
+    /// `SafeMotionServoEmulator::controlMotionAllowed()`.
     bool motionAllowed() const;
 };
 
@@ -139,10 +154,22 @@ struct ServoEmulatorConfig {
     // for emulator/test use — see the safety note in FSoESlaveConfig.
     bool crc_resync = false;
 
-    // When true, the master→slave STO bit is interpreted as
-    // one-active (bit=1 → STO active) instead of the standard
-    // zero-active (bit=0 → STO active) semantics.  Only takes effect
-    // when the slave is in the Data/ProcessData state.
+    // Command polarity (SDD-derived).  When true, the master→slave
+    // demanded-function bits (STO/SS1/SS2/SOS/SLS/SBC) are one-active —
+    // bit=1 demands the function — instead of the standard zero-active
+    // semantics `Codec::decodeMainToSlave` applies.  The decoded
+    // `Command` is normalized in `normalizeCommand()` so `last_command_`
+    // always carries demanded==true semantics.  Handshake bits
+    // (ErrorAck/RestartAck/ResetPos/SafeOutput) keep their one-active
+    // interpretation either way.
+    bool command_active_high = false;
+
+    // When true, the slave→master STO status bit is mirrored as the
+    // logical NOT of the master→slave STO command bit (one-active echo
+    // of the zero-active command) instead of a verbatim echo.  This is
+    // a *status* polarity only — it does not change how the command is
+    // decoded (that is `command_active_high`).  Only takes effect when
+    // the slave is in the Data/ProcessData state.
     bool invert_sto = false;
 
     // Same as invert_sto for the SOS status bit — the slave→master
@@ -310,20 +337,30 @@ public:
     /// suppress_motion_demands the master's gating demands are released
     /// for control (they still report active in the published status);
     /// error/restart conditions always gate.
+    ///
+    /// A demanded SLS counts as a full stop here: `Status::motionAllowed`
+    /// deliberately excludes it (real drives keep moving at the
+    /// configured limited speed), but the emulator models no speed
+    /// limit, so halting is the safe interpretation.
     bool controlMotionAllowed() const {
-        return config_.suppress_motion_demands
-                   ? (!error_active_ && !restart_required_)
-                   : published_status_.motionAllowed();
+        if (config_.suppress_motion_demands) {
+            return !error_active_ && !restart_required_;
+        }
+        const Status& s = published_status_;
+        return s.motionAllowed() && !s.sls_active[0] && !s.sls_active[1] &&
+               !s.sls_active[2] && !s.sls_active[3];
     }
 
-    /// Toggle one-active (bit=1) vs. zero-active (bit=0) interpretation
-    /// of the master→slave STO bit.  Only affects the ProcessData state.
+    /// Toggle the slave→master STO status-mirror polarity (one-active
+    /// vs. verbatim echo).  Only affects the ProcessData state; the
+    /// command decode is governed by `command_active_high`.
     void setInvertSto(bool invert);
     bool invertSto() const;
 
 protected:
     void onInitialize() override;
     void onCommandConsumed(const Command& cmd) override;
+    void normalizeCommand(Command& cmd) override;
     void buildStatus(Status& out) override;
     void onReset() override;
 

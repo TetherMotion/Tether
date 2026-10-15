@@ -123,6 +123,158 @@ TEST(SynapticonSafeMotion, ErrorAndRestartAcknowledgementRecoverMotion) {
     EXPECT_FALSE(main.status().restart_acknowledge_required);
 }
 
+TEST(SynapticonSafeMotion, StatusMotionAllowedCoversEveryStopFunction) {
+    Status released{};
+    released.sto_active = released.ss1_active = released.ss2_active =
+        released.sos_active = released.brake_engaged = false;
+    EXPECT_TRUE(released.motionAllowed());
+
+    const auto expect_gated = [](const auto& mutate) {
+        Status s{};
+        s.sto_active = s.ss1_active = s.ss2_active = s.sos_active =
+            s.brake_engaged = false;
+        mutate(s);
+        EXPECT_FALSE(s.motionAllowed());
+    };
+    expect_gated([](Status& s) { s.sto_active = true; });
+    expect_gated([](Status& s) { s.ss1_active = true; });
+    expect_gated([](Status& s) { s.ss2_active = true; });
+    expect_gated([](Status& s) { s.sos_active = true; });
+    expect_gated([](Status& s) { s.brake_engaged = true; });   // SBC
+    expect_gated([](Status& s) { s.error_active = true; });
+    expect_gated([](Status& s) { s.restart_acknowledge_required = true; });
+}
+
+TEST(SynapticonSafeMotion, DemandedStopFunctionsHaltEmulatedMotion) {
+    // Every demanded stop function must hold the axis completely:
+    // STO, SS1, SS2, SOS, SBC (brake) and SLS (no modelled speed limit
+    // → halt).  The gate must fire twice — at the master the instant
+    // the demand is set (before the slave's status echo), and inside
+    // the servo even when a velocity is still fed in (the blackchannel
+    // motion thread commands unconditionally).
+    for (int function = 0; function < 6; ++function) {
+        MainConfig main_config;
+        main_config.feature_enabled = true;
+        main_config.connection_id = 0x4444;
+
+        ServoEmulatorConfig servo_config;
+        servo_config.connection_id = main_config.connection_id;
+
+        MainInstance main(main_config);
+        SafeMotionServoEmulator servo(servo_config);
+        ASSERT_TRUE(main.initialize());
+        ASSERT_TRUE(servo.initialize());
+
+        main.requestMotionEnabled();
+        uint64_t now_ms = 0;
+        advance(main, servo, now_ms, 8, 1000.0);
+        ASSERT_TRUE(main.motionAllowed()) << "function " << function;
+        const int32_t pos_before = servo.status().safe_position;
+        ASSERT_GT(pos_before, 0) << "function " << function;
+
+        // Demand a single stop function; everything else stays released.
+        Command stop = Command::motionEnabled();
+        switch (function) {
+            case 0: stop.sto = true; break;
+            case 1: stop.ss1 = true; break;
+            case 2: stop.ss2 = true; break;
+            case 3: stop.sos = true; break;
+            case 4: stop.brake_engage = true; break;   // SBC
+            case 5: stop.sls[0] = true; break;         // SLS1
+        }
+        main.setCommand(stop);
+
+        // The master gate drops immediately — no slave ack needed.
+        EXPECT_FALSE(main.motionAllowed()) << "function " << function;
+
+        advance(main, servo, now_ms, 4, 1000.0);
+        EXPECT_EQ(servo.status().safe_position, pos_before)
+            << "function " << function;
+        EXPECT_EQ(servo.status().safe_velocity, 0) << "function " << function;
+        EXPECT_FALSE(servo.controlMotionAllowed()) << "function " << function;
+
+        // Feed a velocity straight into the servo — its internal gate
+        // must hold the axis regardless of the caller.
+        servo.step(1000.0, 0.015);
+        EXPECT_EQ(servo.status().safe_position, pos_before)
+            << "function " << function;
+    }
+}
+
+TEST(SynapticonSafeMotion, SuppressDemandsReleasesGatingButNotErrorRestart) {
+    MainConfig main_config;
+    main_config.feature_enabled = true;
+    main_config.connection_id = 0x6666;
+
+    ServoEmulatorConfig servo_config;
+    servo_config.connection_id = main_config.connection_id;
+    servo_config.suppress_motion_demands = true;
+
+    MainInstance main(main_config);
+    SafeMotionServoEmulator servo(servo_config);
+    ASSERT_TRUE(main.initialize());
+    ASSERT_TRUE(servo.initialize());
+
+    main.requestMotionEnabled();
+    uint64_t now_ms = 0;
+    advance(main, servo, now_ms, 8, 800.0);
+    ASSERT_TRUE(servo.controlMotionAllowed());
+
+    // Demanded STO: the published status still mirrors the demand (the
+    // master sees a compliant drive) but the emulated power stage is
+    // released — the --override-safety semantics.
+    Command stop = Command::motionEnabled();
+    stop.sto = true;
+    main.setCommand(stop);
+    advance(main, servo, now_ms, 3, 800.0);
+    EXPECT_TRUE(servo.status().sto_active);
+    EXPECT_TRUE(servo.controlMotionAllowed());
+
+    const int32_t pos = servo.status().safe_position;
+    servo.step(800.0, 0.015);
+    EXPECT_GT(servo.status().safe_position, pos);
+
+    // Internal error/restart conditions still gate under suppression.
+    servo.injectError(true);
+    EXPECT_FALSE(servo.controlMotionAllowed());
+}
+
+TEST(SynapticonSafeMotion, OneActiveCommandPolarityNormalizesDecode) {
+    // Expose the protected decode-normalization hook.
+    struct TestServo : SafeMotionServoEmulator {
+        using SafeMotionServoEmulator::SafeMotionServoEmulator;
+        using SafeMotionServoEmulator::normalizeCommand;
+    };
+
+    // A one-active "all functions demanded" wire word decodes to
+    // "nothing demanded" under the standard zero-active semantics —
+    // normalization must flip the function bits back to demanded while
+    // leaving the one-active handshake bits untouched.
+    ServoEmulatorConfig cfg;
+    cfg.command_active_high = true;
+    TestServo servo(cfg);
+
+    Command decoded = Command::motionEnabled();
+    decoded.error_acknowledge = true;
+    servo.normalizeCommand(decoded);
+    EXPECT_TRUE(decoded.sto);
+    EXPECT_TRUE(decoded.ss1);
+    EXPECT_TRUE(decoded.ss2);
+    EXPECT_TRUE(decoded.sos);
+    EXPECT_TRUE(decoded.brake_engage);
+    for (const bool s : decoded.sls) {
+        EXPECT_TRUE(s);
+    }
+    EXPECT_TRUE(decoded.error_acknowledge);
+    EXPECT_FALSE(decoded.motionPermitted());
+
+    // Default (zero-active) polarity leaves the command untouched.
+    TestServo zero_polarity(ServoEmulatorConfig{});
+    Command kept = Command::motionEnabled();
+    zero_polarity.normalizeCommand(kept);
+    EXPECT_TRUE(kept.motionPermitted());
+}
+
 TEST(DS402Master, CyclicTaskExecutesWithoutDriveControllers) {
     EtherCAT::DS402Master master;
     int count = 0;

@@ -96,9 +96,16 @@ Command Command::motionEnabled()
     return command;
 }
 
+bool Command::motionPermitted() const
+{
+    return !sto && !ss1 && !ss2 && !sos && !brake_engage &&
+           !sls[0] && !sls[1] && !sls[2] && !sls[3];
+}
+
 bool Status::motionAllowed() const
 {
     return !sto_active && !ss1_active && !ss2_active && !sos_active &&
+           !brake_engaged &&
            !error_active && !restart_acknowledge_required;
 }
 
@@ -386,7 +393,14 @@ bool MainInstance::exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max,
 
 bool MainInstance::motionAllowed() const
 {
-    return !feature_enabled_ || (has_status_ && status_.motionAllowed());
+    // Gate on the demanded command as well as the slave-acknowledged
+    // status: the instant the master demands a stop function the
+    // commanded velocity must drop to zero — waiting for the slave's
+    // status echo would leave a full FSoE round-trip of residual
+    // commanded motion.
+    return !feature_enabled_ ||
+           (command_.motionPermitted() && has_status_ &&
+            status_.motionAllowed());
 }
 
 void MainInstance::clearPulseBits()
@@ -452,6 +466,26 @@ void SafeMotionServoEmulator::onInitialize()
     const uint8_t sos_status_bit =
         ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSOSState);
     Base::setStatusBitMirrorInvert(sos_status_bit, config_.invert_sos);
+}
+
+void SafeMotionServoEmulator::normalizeCommand(Command& cmd)
+{
+    if (!config_.command_active_high) {
+        return;
+    }
+    // decodeMainToSlave applies the standard zero-active semantics —
+    // flip the demanded-function fields when the channel's SDD
+    // configures one-active command bits (bit=1 demands the function).
+    // Handshake bits (ErrorAck/RestartAck/ResetPos/SafeOutput) keep
+    // their one-active decode either way.
+    cmd.sto = !cmd.sto;
+    cmd.ss1 = !cmd.ss1;
+    cmd.ss2 = !cmd.ss2;
+    cmd.sos = !cmd.sos;
+    for (auto& s : cmd.sls) {
+        s = !s;
+    }
+    cmd.brake_engage = !cmd.brake_engage;
 }
 
 void SafeMotionServoEmulator::onCommandConsumed(const Command& cmd)
