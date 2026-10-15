@@ -63,9 +63,13 @@
 
 // ncurses last: it #defines OK/ERR/timeout/... which collide with
 // identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
 #ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
 #include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #endif
 
 static const char* TAG = "beckhoff_output_toggle";
@@ -136,61 +140,55 @@ static void runTui(Beckhoff::MultiOutputTerminal<>& outs,
     };
     hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
         WINDOW* win = static_cast<WINDOW*>(w);
-        int row = 1;
+        TUI::RowWriter rw(win, 1, 1);
 
         // Managed output terminal → live channels, lit one highlighted.
         for (size_t m = 0; m < outs.moduleCount(); ++m) {
             if (outs.slaveIndex(m) != static_cast<uint16_t>(node.tag)) continue;
             const auto& mod = outs.module(m);
-            mvwprintw(win, row++, 1, "%s  —  slave %d", mod.deviceName(),
-                      node.tag);
-            ++row;
-            mvwprintw(win, row++, 1, "channel :");
+            rw.text("%s  —  slave %d", mod.deviceName(), node.tag);
+            rw.blank();
+            rw.put(1, 0, "channel :");
             for (size_t k = 0; k < mod.bitCount(); ++k) {
-                mvwprintw(win, row - 1, 12 + k * 4, "%zu", k + 1);
+                rw.put(12 + k * 4, 0, "%zu", k + 1);
             }
-            mvwprintw(win, row++, 1, "output  :");
+            rw.advance();
+            rw.put(1, 0, "output  :");
             const size_t base = outs.bitOffset(m);
             for (size_t k = 0; k < mod.bitCount(); ++k) {
                 const bool on = mod.bit(k);
                 const bool activeBit = on && (base + k == active);
-                const int attrs = activeBit
-                    ? (COLOR_PAIR(TUI::PalSelected) | A_BOLD)
-                    : (on ? (COLOR_PAIR(TUI::PalValue) | A_BOLD) : A_DIM);
-                wattron(win, attrs);
-                mvwprintw(win, row - 1, 12 + k * 4, "%s", on ? "*" : ".");
-                wattroff(win, attrs);
+                rw.put(12 + k * 4,
+                       activeBit
+                           ? TUI::pairAttrs(TUI::PalSelected) | A_BOLD
+                           : (on ? TUI::pairAttrs(TUI::PalValue) | A_BOLD
+                                 : A_DIM),
+                       "%s", on ? "*" : ".");
             }
-            ++row;
+            rw.advance();
+            rw.blank();
             size_t am = 0, ac = 0;
             locateBit(outs, active, am, ac);
-            mvwprintw(win, row++, 1,
-                      "active: bit %zu = slave %u CH%zu (enter: next)",
-                      active, outs.slaveIndex(am), ac + 1);
+            rw.text("active: bit %zu = slave %u CH%zu (enter: next)",
+                    active, outs.slaveIndex(am), ac + 1);
             return;
         }
 
         // Coupler or unmanaged node → identity info.
         const auto* s = slaveByIndex(slaves, node.tag);
         if (s) {
-            mvwprintw(win, row++, 1, "%s",
-                      s->device_name ? s->device_name->c_str() : "?");
-            mvwprintw(win, row++, 1, "slave   : %u", s->index);
-            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
-                      s->vendor_id ? *s->vendor_id : 0);
-            mvwprintw(win, row++, 1, "product : 0x%08X",
-                      s->product_code ? *s->product_code : 0);
+            rw.text("%s", s->device_name ? s->device_name->c_str() : "?");
+            rw.text("slave   : %u", s->index);
+            rw.text("vendor  : 0x%08X", s->vendor_id ? *s->vendor_id : 0);
+            rw.text("product : 0x%08X",
+                    s->product_code ? *s->product_code : 0);
         }
         if (!node.children.empty()) {
-            ++row;
-            mvwprintw(win, row++, 1, "%zu terminal(s) below",
-                      node.children.size());
+            rw.blank();
+            rw.text("%zu terminal(s) below", node.children.size());
         } else {
-            ++row;
-            wattron(win, A_DIM);
-            mvwprintw(win, row++, 1,
-                      "(not an EL200x  —  not managed by this demo)");
-            wattroff(win, A_DIM);
+            rw.blank();
+            rw.styled(A_DIM, "(not an EL200x  —  not managed by this demo)");
         }
     };
 

@@ -45,9 +45,15 @@
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
+// ncurses last: it #defines OK/ERR/timeout/... which collide with
+// identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
 #ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
 #include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #endif
 
 static const char* TAG = "beckhoff_drive_move";
@@ -161,67 +167,55 @@ static void runTui(Beckhoff::CompactDriveTerminal& d,
     };
     hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
         WINDOW* win = static_cast<WINDOW*>(w);
-        int h = 0, cols = 0;
-        getmaxyx(win, h, cols);
-        int row = 1;
+        TUI::RowWriter rw(win, 1, 1);
 
         if (static_cast<uint16_t>(node.tag) == d.slaveIndex()) {
-            mvwprintw(win, row++, 1, "%s  —  slave %u, %zu axis",
-                      d.deviceName(), d.slaveIndex(), d.axisCount());
-            ++row;
-            mvwprintw(win, row++, 1, "enable=%s  speed=%d  dir=%+d",
-                      g_enabled.load() ? "ON" : "off",
-                      g_speed.load(), g_direction.load());
-            ++row;
-            for (size_t a = 0; a < d.axisCount() && row < h - 8; ++a) {
-                mvwprintw(win, row++, 1, "axis %zu  sw=0x%04X", a,
-                          d.statusword(a));
+            rw.text("%s  —  slave %u, %zu axis",
+                    d.deviceName(), d.slaveIndex(), d.axisCount());
+            rw.blank();
+            rw.text("enable=%s  speed=%d  dir=%+d",
+                    g_enabled.load() ? "ON" : "off",
+                    g_speed.load(), g_direction.load());
+            rw.blank();
+            for (size_t a = 0; a < d.axisCount() && rw.remaining() > 8; ++a) {
+                rw.text("axis %zu  sw=0x%04X", a, d.statusword(a));
+                rw.margin(3);
                 const auto st = d.driveState(a);
-                wattron(win, (st == DriveState::OperationEnabled)
-                                 ? COLOR_PAIR(TUI::PalValue) | A_BOLD
-                                 : (st == DriveState::Fault
-                                        ? COLOR_PAIR(TUI::PalError) | A_BOLD
-                                        : A_NORMAL));
-                mvwprintw(win, row++, 3, "%s", stateName(st));
-                wattroff(win, COLOR_PAIR(TUI::PalValue) |
-                              COLOR_PAIR(TUI::PalError) | A_BOLD);
+                rw.styled(
+                    (st == DriveState::OperationEnabled)
+                        ? TUI::pairAttrs(TUI::PalValue) | A_BOLD
+                        : (st == DriveState::Fault
+                               ? TUI::pairAttrs(TUI::PalError) | A_BOLD
+                               : A_NORMAL),
+                    "%s", stateName(st));
                 if (d.hasActualPosition(a))
-                    mvwprintw(win, row++, 3, "position   : %d",
-                              d.actualPosition(a));
+                    rw.text("position   : %d", d.actualPosition(a));
                 if (d.hasActualVelocity(a))
-                    mvwprintw(win, row++, 3, "velocity   : %d",
-                              d.actualVelocity(a));
+                    rw.text("velocity   : %d", d.actualVelocity(a));
                 if (d.hasActualTorque(a))
-                    mvwprintw(win, row++, 3, "torque     : %d",
-                              d.actualTorque(a));
+                    rw.text("torque     : %d", d.actualTorque(a));
                 if (d.hasFollowingError(a))
-                    mvwprintw(win, row++, 3, "following  : %d",
-                              d.followingError(a));
-                ++row;
+                    rw.text("following  : %d", d.followingError(a));
+                rw.margin(1).blank();
             }
             return;
         }
 
         const auto* s = slaveByIndex(slaves, node.tag);
         if (s) {
-            mvwprintw(win, row++, 1, "%s",
-                      s->device_name ? s->device_name->c_str() : "?");
-            mvwprintw(win, row++, 1, "slave   : %u", s->index);
-            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
-                      s->vendor_id ? *s->vendor_id : 0);
-            mvwprintw(win, row++, 1, "product : 0x%08X",
-                      s->product_code ? *s->product_code : 0);
+            rw.text("%s", s->device_name ? s->device_name->c_str() : "?");
+            rw.text("slave   : %u", s->index);
+            rw.text("vendor  : 0x%08X", s->vendor_id ? *s->vendor_id : 0);
+            rw.text("product : 0x%08X",
+                    s->product_code ? *s->product_code : 0);
         }
         if (!node.children.empty()) {
-            ++row;
-            mvwprintw(win, row++, 1, "%zu terminal(s) below",
-                      node.children.size());
-        } else if (row < h) {
-            ++row;
-            wattron(win, A_DIM);
-            mvwprintw(win, row++, 1,
+            rw.blank();
+            rw.text("%zu terminal(s) below", node.children.size());
+        } else if (rw.fits()) {
+            rw.blank();
+            rw.styled(A_DIM,
                       "(not a compact drive  —  not managed by this demo)");
-            wattroff(win, A_DIM);
         }
     };
 

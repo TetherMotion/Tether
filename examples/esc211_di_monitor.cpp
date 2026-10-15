@@ -23,17 +23,7 @@
 #include <print>
 #include <format>
 
-#include <clocale>
-
 #include "tether/drives/NexcobotESC211/NexcobotESC211Registers.hpp"
-
-namespace Reg = EtherCAT::Drives::Registers::NexcobotESC211;
-
-// ncurses defines OK/ERR as macros; undefine them before Tether headers
-// that use Error::OK are parsed.
-#include <ncurses.h>
-#undef OK
-#undef ERR
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/Types.hpp"
@@ -50,7 +40,17 @@ namespace Reg = EtherCAT::Drives::Registers::NexcobotESC211;
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
+// ncurses last: it #defines OK/ERR/timeout/... which collide with
+// identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
+#include <clocale>
+#include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
+
 namespace TUI = Tether::TUI;
+namespace Reg = EtherCAT::Drives::Registers::NexcobotESC211;
 
 // Packed TxPDO 0x1A01 (7 entries x UDINT = 28 bytes, per ESI v0.9)
 struct TxPDO_1A01_Remapped {
@@ -103,52 +103,34 @@ static void parseSafeDI(uint32_t di_val, DIState& state) {
 static void drawBody(const DIState& state, int top, int bottom) {
     std::lock_guard<std::mutex> lock(state.mtx);
 
-    int y = top;
-    if (y >= bottom) return;
+    TUI::RowWriter w(stdscr, top, 0, bottom);
 
     if (state.stale) {
-        attron(COLOR_PAIR(TUI::PalError));
-        mvprintw(y, 0, "[STALE / SDO ERROR]");
-        attroff(COLOR_PAIR(TUI::PalError));
+        w.put(0, TUI::pairAttrs(TUI::PalError), "[STALE / SDO ERROR]");
     }
 
     // Header (same row as the stale banner, different columns — as before)
-    attron(A_BOLD);
-    mvprintw(y, 2,  "IA (left)");
-    mvprintw(y, 22, "IB (right)");
-    attroff(A_BOLD);
-    ++y;
+    w.put(2,  A_BOLD, "IA (left)");
+    w.put(22, A_BOLD, "IB (right)");
+    w.advance();
 
-    for (int row = 0; row < 10 && y < bottom; ++row, ++y) {
+    for (int row = 0; row < 10 && w.fits(); ++row) {
         // Left: IA1..IA10
-        bool a = state.ia[row];
-        mvprintw(y, 2, "IA%2d", row + 1);
-        if (a) {
-            attron(COLOR_PAIR(TUI::PalValue));
-            mvprintw(y, 8, "  ON");
-            attroff(COLOR_PAIR(TUI::PalValue));
-        } else {
-            mvprintw(y, 8, " off");
-        }
+        w.put(2, 0, "IA%2d", row + 1);
+        w.putLamp(8, state.ia[row] ? TUI::LampState::On : TUI::LampState::Off,
+                  TUI::kLampTags);
 
         // Right: IB1..IB10
-        bool b = state.ib[row];
-        mvprintw(y, 22, "IB%2d", row + 1);
-        if (b) {
-            attron(COLOR_PAIR(TUI::PalValue));
-            mvprintw(y, 28, "  ON");
-            attroff(COLOR_PAIR(TUI::PalValue));
-        } else {
-            mvprintw(y, 28, " off");
-        }
+        w.put(22, 0, "IB%2d", row + 1);
+        w.putLamp(28, state.ib[row] ? TUI::LampState::On : TUI::LampState::Off,
+                  TUI::kLampTags);
+        w.advance();
     }
-    ++y;
+    w.blank();
 
-    if (y < bottom) {
-        mvprintw(y++, 0, "Read count: %llu  di_val=0x%08X",
-                 static_cast<unsigned long long>(state.read_count),
-                 state.last_safe_di);
-    }
+    w.put(0, 0, "Read count: %llu  di_val=0x%08X",
+          static_cast<unsigned long long>(state.read_count),
+          state.last_safe_di);
 }
 
 // ---------------------------------------------------------------------------

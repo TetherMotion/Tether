@@ -42,25 +42,32 @@ inline int chipsWidth(std::span<const UI::DisplayCell> cells,
  * @return the column after the last character drawn (for chaining
  *         more content on the same line).
  */
-inline int drawChips(int y, int col,
-                     std::span<const UI::DisplayCell> cells,
-                     bool brackets = true) {
-    if (brackets) mvprintw(y, col++, "[");
+inline int wdrawChips(WINDOW* w, int y, int col,
+                      std::span<const UI::DisplayCell> cells,
+                      bool brackets = true) {
+    if (brackets) mvwprintw(w, y, col++, "[");
     bool first = true;
     for (const auto& c : cells) {
-        if (!first) mvprintw(y, col++, " ");
+        if (!first) mvwprintw(w, y, col++, " ");
         first = false;
         const short pair = chipTonePair(c.tone);
         const bool bold = (c.tone == UI::DisplayTone::Fault);
-        attron(COLOR_PAIR(pair));
-        if (bold) attron(A_BOLD);
-        mvprintw(y, col, "%s", c.text.c_str());
-        if (bold) attroff(A_BOLD);
-        attroff(COLOR_PAIR(pair));
+        wattron(w, COLOR_PAIR(pair));
+        if (bold) wattron(w, A_BOLD);
+        mvwprintw(w, y, col, "%s", c.text.c_str());
+        if (bold) wattroff(w, A_BOLD);
+        wattroff(w, COLOR_PAIR(pair));
         col += static_cast<int>(c.text.size());
     }
-    if (brackets) mvprintw(y, col++, "]");
+    if (brackets) mvwprintw(w, y, col++, "]");
     return col;
+}
+
+/// stdscr convenience — same as wdrawChips(stdscr, ...).
+inline int drawChips(int y, int col,
+                     std::span<const UI::DisplayCell> cells,
+                     bool brackets = true) {
+    return wdrawChips(stdscr, y, col, cells, brackets);
 }
 
 } // namespace TUI

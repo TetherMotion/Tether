@@ -3,11 +3,6 @@
  * @brief UTF-8 measuring + ANSI SGR-to-curses line rendering.
  */
 
-// ncurses defines OK/ERR as macros; undefine them before Tether headers
-#include <ncurses.h>
-#undef OK
-#undef ERR
-
 #include "tether/terminal_ui/AnsiLine.hpp"
 
 #include <cstdlib>

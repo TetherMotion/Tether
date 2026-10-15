@@ -452,7 +452,7 @@ if(TETHER_DRIVE_RP20)
 find_package(Curses)
 if(CURSES_FOUND)
     add_tether_example(kinco_rp20_io
-        LIBRARIES tether_ethercat_master tether_device_drivers tether_ethercat_common tether_hal tether_common tether_examples_common ${CURSES_LIBRARIES})
+        LIBRARIES tether_ethercat_master tether_device_drivers tether_terminal_ui tether_ethercat_common tether_hal tether_common tether_examples_common ${CURSES_LIBRARIES})
     target_include_directories(kinco_rp20_io PRIVATE ${CURSES_INCLUDE_DIRS})
     target_compile_definitions(kinco_rp20_io PRIVATE HAVE_NCURSES)
 else()

@@ -3,37 +3,18 @@
  * @brief ncurses renderer + key router for UI::OverlayStack.
  */
 
-#include <ncurses.h>
+#include "tether/terminal_ui/OverlayHost.hpp"
 
 #include <algorithm>
 #include <string>
 
-#include "tether/terminal_ui/OverlayHost.hpp"
+#include <ncurses.h>
+#include "tether/terminal_ui/Box.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #include "tether/terminal_ui/TablePanel.hpp"
 
 namespace Tether {
 namespace TUI {
-
-namespace {
-void box(int top, int left, int h, int w, const std::string& title) {
-    attron(A_BOLD);
-    mvaddch(top, left, ACS_ULCORNER);
-    mvaddch(top, left + w - 1, ACS_URCORNER);
-    mvaddch(top + h - 1, left, ACS_LLCORNER);
-    mvaddch(top + h - 1, left + w - 1, ACS_LRCORNER);
-    for (int x = 1; x < w - 1; ++x) {
-        mvaddch(top, left + x, ACS_HLINE);
-        mvaddch(top + h - 1, left + x, ACS_HLINE);
-    }
-    for (int y = 1; y < h - 1; ++y) {
-        mvaddch(top + y, left, ACS_VLINE);
-        mvaddch(top + y, left + w - 1, ACS_VLINE);
-    }
-    if (!title.empty())
-        mvprintw(top, left + 2, " %s ", title.c_str());
-    attroff(A_BOLD);
-}
-} // namespace
 
 bool OverlayHost::render(int top, int bottom) {
     UI::Overlay* ov = stack_.top();
@@ -45,11 +26,13 @@ bool OverlayHost::render(int top, int bottom) {
     const int ot = top + (total_h - h) / 2;
     const int ol = (COLS - w) / 2;
 
-    // Shade the box interior.
-    for (int y = ot + 1; y < ot + h - 1; ++y)
-        mvhline(y, ol + 1, ' ', w - 2);
-
-    box(ot, ol, h, w, ov->title());
+    // Frame + shaded interior (drawBoxInnerRow pads content with spaces).
+    attron(A_BOLD);
+    drawBoxTop(ot, ol, w, ov->title(), /*bold=*/false);
+    for (int r = 1; r < h - 1; ++r)
+        drawBoxInnerRow(ot + r, ol, w);
+    drawBoxBottom(ot + h - 1, ol, w);
+    attroff(A_BOLD);
 
     const int ct = ot + 1, cb = ot + h - 1;
     const auto btns = ov->buttons();
@@ -58,10 +41,10 @@ bool OverlayHost::render(int top, int bottom) {
         TablePanel::render(*t, ct, content_bottom, ol + 2, w - 4,
                            /*focused=*/true);
     } else {
-        int y = ct;
+        RowWriter rw(stdscr, ct, ol + 2, content_bottom);
         for (const auto& line : ov->lines()) {
-            if (y >= content_bottom) break;
-            mvprintw(y++, ol + 2, "%.*s", w - 4, line.c_str());
+            if (!rw.fits()) break;
+            rw.text("%.*s", w - 4, line.c_str());
         }
     }
 

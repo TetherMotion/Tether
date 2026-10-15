@@ -45,9 +45,15 @@
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
+// ncurses last: it #defines OK/ERR/timeout/... which collide with
+// identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
 #ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
 #include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #endif
 
 static const char* TAG = "beckhoff_pulse_jog";
@@ -117,61 +123,51 @@ static void runTui(Beckhoff::PulseTrainTerminal& p,
     hooks.onTick = [&] { tickPto(p); };
     hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
         WINDOW* win = static_cast<WINDOW*>(w);
-        int h = 0, cols = 0;
-        getmaxyx(win, h, cols);
-        int row = 1;
+        TUI::RowWriter rw(win, 1, 1);
 
         if (static_cast<uint16_t>(node.tag) == p.slaveIndex()) {
-            mvwprintw(win, row++, 1, "%s  —  slave %u, %zu ch",
-                      p.deviceName(), p.slaveIndex(), p.channelCount());
-            mvwprintw(win, row++, 1, "go=%s  freq=%d  dir=%+d",
-                      g_go.load() ? "ON" : "off",
-                      g_freq.load(), g_direction.load());
-            ++row;
-            for (size_t ch = 0; ch < p.channelCount() && row < h - 1;
+            rw.text("%s  —  slave %u, %zu ch",
+                    p.deviceName(), p.slaveIndex(), p.channelCount());
+            rw.text("go=%s  freq=%d  dir=%+d",
+                    g_go.load() ? "ON" : "off",
+                    g_freq.load(), g_direction.load());
+            rw.blank();
+            for (size_t ch = 0; ch < p.channelCount() && rw.remaining() > 1;
                  ++ch) {
-                mvwprintw(win, row++, 1, "ch%zu", ch + 1);
+                rw.text("ch%zu", ch + 1);
+                rw.margin(3);
                 if (p.hasEnc(ch)) {
-                    mvwprintw(win, row++, 3, "counter : %d",
-                              p.counterValue(ch));
-                    mvwprintw(win, row++, 3, "latch   : %d",
-                              p.latchValue(ch));
+                    rw.text("counter : %d", p.counterValue(ch));
+                    rw.text("latch   : %d", p.latchValue(ch));
                 }
                 auto flag = [&](const char* label, bool v) {
-                    wattron(win, v ? COLOR_PAIR(TUI::PalError) : A_DIM);
-                    mvwprintw(win, row++, 3, "%-9s %s", label,
-                              v ? "true" : "false");
-                    wattroff(win, COLOR_PAIR(TUI::PalError) | A_DIM);
+                    rw.styled(v ? TUI::pairAttrs(TUI::PalError) : A_DIM,
+                              "%-9s %s", label, v ? "true" : "false");
                 };
                 flag("ramp",     p.rampActive(ch));
                 flag("error",    p.error(ch));
                 flag("underfl.", p.counterUnderflow(ch));
                 flag("overfl.",  p.counterOverflow(ch));
-                ++row;
+                rw.margin(1).blank();
             }
             return;
         }
 
         const auto* s = slaveByIndex(slaves, node.tag);
         if (s) {
-            mvwprintw(win, row++, 1, "%s",
-                      s->device_name ? s->device_name->c_str() : "?");
-            mvwprintw(win, row++, 1, "slave   : %u", s->index);
-            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
-                      s->vendor_id ? *s->vendor_id : 0);
-            mvwprintw(win, row++, 1, "product : 0x%08X",
-                      s->product_code ? *s->product_code : 0);
+            rw.text("%s", s->device_name ? s->device_name->c_str() : "?");
+            rw.text("slave   : %u", s->index);
+            rw.text("vendor  : 0x%08X", s->vendor_id ? *s->vendor_id : 0);
+            rw.text("product : 0x%08X",
+                    s->product_code ? *s->product_code : 0);
         }
         if (!node.children.empty()) {
-            ++row;
-            mvwprintw(win, row++, 1, "%zu terminal(s) below",
-                      node.children.size());
-        } else if (row < h) {
-            ++row;
-            wattron(win, A_DIM);
-            mvwprintw(win, row++, 1,
+            rw.blank();
+            rw.text("%zu terminal(s) below", node.children.size());
+        } else if (rw.fits()) {
+            rw.blank();
+            rw.styled(A_DIM,
                       "(not a pulse-train terminal  —  not managed here)");
-            wattroff(win, A_DIM);
         }
     };
 

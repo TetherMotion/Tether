@@ -55,9 +55,13 @@
 
 // ncurses last: it #defines OK/ERR/timeout/... which collide with
 // identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
 #ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
 #include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #endif
 
 static const char* TAG = "beckhoff_analog_output_sweep";
@@ -159,65 +163,56 @@ static void runTui(Beckhoff::MultiAnalogOutputTerminal<>& outs,
     };
     hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
         WINDOW* win = static_cast<WINDOW*>(w);
-        int h = 0, cols = 0;
-        getmaxyx(win, h, cols);
-        int row = 1;
+        TUI::RowWriter rw(win, 1, 1);
 
         // Managed output terminal → live channels, swept one highlighted.
         for (size_t m = 0; m < outs.moduleCount(); ++m) {
             if (outs.slaveIndex(m) != static_cast<uint16_t>(node.tag)) continue;
             const auto& mod = outs.module(m);
-            mvwprintw(win, row++, 1, "%s  —  slave %d", mod.deviceName(),
-                      node.tag);
-            ++row;
-            mvwprintw(win, row++, 1, "ch   value");
+            rw.text("%s  —  slave %d", mod.deviceName(), node.tag);
+            rw.blank();
+            rw.text("ch   value");
             const size_t base = outs.channelOffset(m);
-            for (size_t k = 0; k < mod.channelCount() && row < h - 3; ++k) {
+            for (size_t k = 0; k < mod.channelCount() && rw.remaining() > 3;
+                 ++k) {
                 const int32_t v  = mod.value(k);
                 const bool  act  = !sweep.paused && (base + k == sweep.channel);
-                mvwprintw(win, row, 1, "%zu", k + 1);
-                wattron(win, act ? (COLOR_PAIR(TUI::PalSelected) | A_BOLD)
-                                 : (COLOR_PAIR(TUI::PalValue) | A_BOLD));
-                mvwprintw(win, row, 4, "%+d", v);
-                wattroff(win, act ? (COLOR_PAIR(TUI::PalSelected) | A_BOLD)
-                                  : (COLOR_PAIR(TUI::PalValue) | A_BOLD));
+                rw.put(1, 0, "%zu", k + 1);
+                rw.put(4,
+                       TUI::pairAttrs(act ? TUI::PalSelected
+                                          : TUI::PalValue) | A_BOLD,
+                       "%+d", v);
                 // Simple bar: position within [-32767, 32767] -> 0..20 cols.
                 const int pos = static_cast<int>(
                     (static_cast<long>(v) + 32767) * 20 / 65534);
-                mvwaddch(win, row, 12 + pos, '|');
-                ++row;
+                rw.put(12 + pos, 0, "|");
+                rw.advance();
             }
-            ++row;
+            rw.blank();
             size_t am = 0, ac = 0;
             locateChannel(outs, sweep.channel, am, ac);
-            mvwprintw(win, row++, 1,
-                      "sweep: ch %zu = slave %u CH%zu value %+d%s",
-                      sweep.channel, outs.slaveIndex(am), ac + 1,
-                      sweep.value, sweep.paused ? " (paused)" : "");
+            rw.text("sweep: ch %zu = slave %u CH%zu value %+d%s",
+                    sweep.channel, outs.slaveIndex(am), ac + 1,
+                    sweep.value, sweep.paused ? " (paused)" : "");
             return;
         }
 
         // Coupler or unmanaged node → identity info.
         const auto* s = slaveByIndex(slaves, node.tag);
         if (s) {
-            mvwprintw(win, row++, 1, "%s",
-                      s->device_name ? s->device_name->c_str() : "?");
-            mvwprintw(win, row++, 1, "slave   : %u", s->index);
-            mvwprintw(win, row++, 1, "vendor  : 0x%08X",
-                      s->vendor_id ? *s->vendor_id : 0);
-            mvwprintw(win, row++, 1, "product : 0x%08X",
-                      s->product_code ? *s->product_code : 0);
+            rw.text("%s", s->device_name ? s->device_name->c_str() : "?");
+            rw.text("slave   : %u", s->index);
+            rw.text("vendor  : 0x%08X", s->vendor_id ? *s->vendor_id : 0);
+            rw.text("product : 0x%08X",
+                    s->product_code ? *s->product_code : 0);
         }
         if (!node.children.empty()) {
-            ++row;
-            mvwprintw(win, row++, 1, "%zu terminal(s) below",
-                      node.children.size());
-        } else if (row < h) {
-            ++row;
-            wattron(win, A_DIM);
-            mvwprintw(win, row++, 1,
+            rw.blank();
+            rw.text("%zu terminal(s) below", node.children.size());
+        } else if (rw.fits()) {
+            rw.blank();
+            rw.styled(A_DIM,
                       "(not an analog output  —  not managed by this demo)");
-            wattroff(win, A_DIM);
         }
     };
 

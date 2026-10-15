@@ -38,9 +38,41 @@ inline constexpr LampStyle kLampTags = {
     COLOR_PAIR(PalHint),
 };
 
-/// Draw a lamp at (y, x); returns the glyph's column width.
-inline int drawLamp(int y, int x, LampState s,
-                    const LampStyle& style = kLampDots) {
+/// "1"/"0" bit columns (dense packed-bit displays like FSoE inputs).
+inline constexpr LampStyle kLampDigits = {
+    "1", "0", "?",
+    COLOR_PAIR(PalValue) | A_BOLD,
+    A_DIM,
+    A_DIM,
+};
+
+/// "*"/"." bit columns (sparse terminal channel rows).
+inline constexpr LampStyle kLampBits = {
+    "*", ".", "?",
+    COLOR_PAIR(PalValue) | A_BOLD,
+    A_DIM,
+    A_DIM,
+};
+
+/// "*"/"." bit columns where "on" is a fault/flag condition (red).
+inline constexpr LampStyle kLampAlertBits = {
+    "*", ".", "?",
+    COLOR_PAIR(PalError) | A_BOLD,
+    A_DIM,
+    A_DIM,
+};
+
+/// "■"/"□" square bit columns (beckhoff_tui detail panes).
+inline constexpr LampStyle kLampSquares = {
+    "\xE2\x96\xA0", "\xE2\x96\xA1", "?",
+    COLOR_PAIR(PalValue) | A_BOLD,
+    A_DIM,
+    A_DIM,
+};
+
+/// Draw a lamp at (y, x) in window `w`; returns the glyph's column width.
+inline int wdrawLamp(WINDOW* w, int y, int x, LampState s,
+                     const LampStyle& style = kLampDots) {
     const char* glyph;
     int attrs;
     switch (s) {
@@ -48,7 +80,13 @@ inline int drawLamp(int y, int x, LampState s,
         case LampState::Off:     glyph = style.off;     attrs = style.off_attrs;     break;
         default:                 glyph = style.unknown; attrs = style.unknown_attrs; break;
     }
-    return putStyled(y, x, attrs, "%s", glyph);
+    return wputStyled(w, y, x, attrs, "%s", glyph);
+}
+
+/// stdscr convenience — same as wdrawLamp(stdscr, ...).
+inline int drawLamp(int y, int x, LampState s,
+                    const LampStyle& style = kLampDots) {
+    return wdrawLamp(stdscr, y, x, s, style);
 }
 
 } // namespace TUI

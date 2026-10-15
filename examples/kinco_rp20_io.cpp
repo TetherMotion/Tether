@@ -21,6 +21,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <format>
 #include <iomanip>
 #include <iostream>
 #include <optional>
@@ -29,12 +30,6 @@
 #include <vector>
 
 #include <magic_enum/magic_enum.hpp>
-
-#ifdef HAVE_NCURSES
-#include <ncurses.h>
-#undef OK
-#undef ERR
-#endif
 
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
@@ -52,8 +47,27 @@
 #include "tether/drives/RP20/RP20Registers.hpp"
 #include "tether/utils/SignalHandler.hpp"
 
+#ifdef HAVE_NCURSES
+// TUI framework/model headers are ncurses-free (TermWindow is opaque).
+#include "tether/terminal_ui/PanelScreen.hpp"
+#include "tether/terminal_ui/TablePanel.hpp"
+#include "tether/ui/TableModel.hpp"
+#include "tether/ui/KeyMap.hpp"
+#endif
+
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
+
+// ncurses last: it #defines OK/ERR/timeout/... which collide with
+// identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
+#ifdef HAVE_NCURSES
+#include <clocale>
+#include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
+#endif
 
 static const char* TAG = "kinco_rp20_io";
 static EtherCAT::Master* g_master = nullptr;
@@ -63,6 +77,9 @@ namespace RP20Mod = ::EtherCAT::Drives::RP20Module;
 namespace RP20Cfg = ::EtherCAT::Drives::RP20Config;
 namespace RP20Reg = ::EtherCAT::Drives::Registers::RP20;
 namespace RP20Pdo = ::EtherCAT::Drives::RP20_pdo;
+#ifdef HAVE_NCURSES
+namespace TUI = Tether::TUI;
+#endif
 
 // ============================================================================
 // Discovered module info
@@ -609,7 +626,8 @@ static void updateSMLengths(EtherCAT::Master& master,
 }
 
 // ============================================================================
-// Interactive ncurses UI
+// Interactive ncurses UI — PanelScreen + TableModel (Session owns the
+// ncurses lifecycle/palette; TableModel owns selection/scroll/search).
 // ============================================================================
 
 #ifdef HAVE_NCURSES
@@ -618,20 +636,8 @@ struct OutputBit {
     size_t module_idx;
     size_t field_idx;
     uint8_t bit;
-    const char* label;
+    std::string label;
 };
-
-static void initColors() {
-    if (has_colors()) {
-        start_color();
-        use_default_colors();
-        init_pair(1, COLOR_GREEN, -1);   // active ON
-        init_pair(2, COLOR_WHITE, -1);   // inactive
-        init_pair(3, COLOR_RED, -1);     // error/stale
-        init_pair(4, COLOR_CYAN, -1);    // header
-        init_pair(5, COLOR_YELLOW, -1);  // cursor
-    }
-}
 
 static void runInteractiveUI(EtherCAT::Master& master,
                              std::vector<DiscoveredModule>& modules,
@@ -655,11 +661,9 @@ static void runInteractiveUI(EtherCAT::Master& master,
                     if (!f) continue;
                     uint8_t nbits = f->size * 8;
                     for (uint8_t b = 0; b < nbits; ++b) {
-                        char buf[64];
-                        std::snprintf(buf, sizeof(buf), "%s DO.%zu.%u",
-                                      desc->name, fi, b);
-                        output_bits.push_back({mi, fi, b, ""});
-                        output_bits.back().label = strdup(buf);
+                        output_bits.push_back(
+                            {mi, fi, b,
+                             std::format("{} DO.{}.{}", desc->name, fi, b)});
                     }
                 }
                 break;
@@ -677,20 +681,6 @@ static void runInteractiveUI(EtherCAT::Master& master,
     // State: which output bits are ON
     std::vector<bool> bit_states(output_bits.size(), false);
 
-    // Initialize ncurses
-    setlocale(LC_ALL, "");
-    initscr();
-    noecho();
-    cbreak();
-    curs_set(0);
-    nodelay(stdscr, TRUE);
-    keypad(stdscr, TRUE);
-    initColors();
-
-    int cursor = 0;
-    int scroll_offset = 0;
-    const int max_rows = LINES - 8;
-
     auto applyOutputs = [&]() {
         for (size_t i = 0; i < output_bits.size(); ++i) {
             auto& ob = output_bits[i];
@@ -704,125 +694,168 @@ static void runInteractiveUI(EtherCAT::Master& master,
 
     applyOutputs();
 
-    while (g_running.load()) {
-        if (!pdo_ok.load()) {
-            // Keep trying  -  the RT loop keeps exchanging
-        }
+    // ---- Table model: one row per toggleable output bit ----
+    namespace UI = Tether::UI;
+    UI::TableModel out_table;
+    out_table.setColumns({"State", "Output", "Module"});
 
-        uint64_t cyc = cycle_count.load();
-
-        clear();
-
-        // Header
-        attron(COLOR_PAIR(4) | A_BOLD);
-        mvprintw(0, 0, "Kinco RP20 Interactive I/O   —   Cycle %llu  (%zu outputs)",
-                 static_cast<unsigned long long>(cyc), output_bits.size());
-        attroff(COLOR_PAIR(4) | A_BOLD);
-        mvprintw(1, 0, "UP/DOWN: select  SPACE: toggle  a: all on  n: all off  q: quit");
-
-        // Adjust scroll
-        if (cursor < scroll_offset) scroll_offset = cursor;
-        if (cursor >= scroll_offset + max_rows) scroll_offset = cursor - max_rows + 1;
-
-        // Output section
-        attron(A_BOLD);
-        mvprintw(3, 0, "Outputs:");
-        attroff(A_BOLD);
-
-        int y = 4;
-        int visible = 0;
+    auto rebuildRows = [&] {
+        std::vector<UI::Row> rows;
+        rows.reserve(output_bits.size());
         for (size_t i = 0; i < output_bits.size(); ++i) {
-            if (static_cast<int>(i) < scroll_offset) continue;
-            if (visible >= max_rows) break;
-            visible++;
-
-            auto& ob = output_bits[i];
-            auto& mod = modules[ob.module_idx];
-
-            bool is_cursor = static_cast<int>(i) == cursor;
-            bool is_on = bit_states[i];
-
-            if (is_cursor) attron(COLOR_PAIR(5) | A_BOLD);
-            else if (is_on) attron(COLOR_PAIR(1));
-
-            mvprintw(y, 2, "[%s] %s  (s%u/slot%u)",
-                     is_on ? "ON " : "off",
-                     ob.label,
-                     mod.slave_index, mod.slot);
-
-            if (is_cursor) attroff(COLOR_PAIR(5) | A_BOLD);
-            else if (is_on) attroff(COLOR_PAIR(1));
-            y++;
+            const auto& ob = output_bits[i];
+            const auto& mod = modules[ob.module_idx];
+            const bool on = bit_states[i];
+            UI::Row row;
+            row.cells = {on ? "ON" : "off", ob.label,
+                         std::format("s{}/slot{}", mod.slave_index,
+                                     mod.slot)};
+            row.tag = static_cast<int>(i);
+            row.color = on ? UI::RowOk : UI::RowNone;
+            rows.push_back(std::move(row));
         }
+        out_table.setRows(std::move(rows));
+    };
+    rebuildRows();
 
-        // Input section
-        y++;
-        attron(A_BOLD);
-        mvprintw(y, 0, "Inputs:");
-        attroff(A_BOLD);
-        y++;
+    auto setAll = [&](bool on) {
+        std::fill(bit_states.begin(), bit_states.end(), on);
+        applyOutputs();
+        rebuildRows();
+    };
+    auto toggleSelected = [&] {
+        const int tag = out_table.selectedTag();
+        if (tag < 0) return;
+        bit_states[static_cast<size_t>(tag)] =
+            !bit_states[static_cast<size_t>(tag)];
+        applyOutputs();
+        rebuildRows();
+    };
 
+    UI::KeyMap keys;
+    keys.add({{KEY_UP, 'k'}, "up/dn", "Select output",
+              [&] { out_table.move(-1); return true; }});
+    keys.add({{KEY_DOWN, 'j'}, "", "Select output",
+              [&] { out_table.move(+1); return true; }});
+    keys.add({{' ', '\n', '\r', KEY_ENTER}, "spc", "Toggle selected output",
+              [&] { toggleSelected(); return true; }});
+    keys.add('a', "a", "All outputs on",
+             [&] { setAll(true); return true; });
+    keys.add('n', "n", "All outputs off",
+             [&] { setAll(false); return true; });
+    keys.add({{27}, "Esc", "Clear the quicksearch",
+              [&] {
+                  if (out_table.search().empty()) return false;  // → quit
+                  out_table.setSearch("");
+                  return true;
+              }});
+    keys.add({{KEY_BACKSPACE, 127, 8}, "bksp", "Delete last search char",
+              [&] {
+                  if (out_table.search().empty()) return false;
+                  auto s = out_table.search();
+                  s.pop_back();
+                  out_table.setSearch(s);
+                  return true;
+              }});
+    keys.add({{}, "type:search",
+              "Printable chars filter the output list", nullptr});
+
+    std::atomic<bool> cancel{false};
+
+    TUI::PanelView io_view;
+    io_view.name = "I/O";
+    io_view.keyHintsFn = [&] { return keys.keyHints(); };
+    // While a quicksearch is active every printable char (digits and
+    // 'q' included) edits it — view claimed ahead of tab shortcuts.
+    io_view.wantsKey = [&](int k) {
+        return !out_table.search().empty() && k >= 0x20 && k < 0x7F;
+    };
+    io_view.onKey = [&](int key) -> bool {
+        // Search-active: printable text extends the filter *before* any
+        // action bindings fire (typing "an" must not toggle outputs).
+        if (!out_table.search().empty() && key >= 0x20 && key < 0x7F) {
+            out_table.setSearch(out_table.search() +
+                                static_cast<char>(key));
+            return true;
+        }
+        if (keys.handleKey(key)) return true;
+        if (key >= 0x20 && key < 0x7F && key != 'q' && key != 'Q' &&
+            key != ' ') {
+            out_table.setSearch(std::string(1, static_cast<char>(key)));
+            return true;
+        }
+        return false;
+    };
+    io_view.renderBody = [&](int top, int bottom) {
+        TUI::putStyled(top, 0, TUI::pairAttrs(TUI::PalHeader) | A_BOLD,
+                       "Cycle %llu  —  %zu outputs (type to filter, "
+                       "Enter/Space toggles)",
+                       static_cast<unsigned long long>(cycle_count.load()),
+                       output_bits.size());
+
+        // Collect input display lines first so the table gets the
+        // remaining space above them.
+        struct InLine {
+            std::string label;
+            std::vector<bool> bits;   // empty => plain text line
+        };
+        std::vector<InLine> in_lines;
         for (auto& mod : modules) {
             const auto* desc = mod.descriptor;
-            if (!desc->has_txpdo || !desc->txpdo || mod.tx_buffer.empty()) continue;
-
-            std::span<const uint8_t> tx(mod.tx_buffer.data(), mod.tx_buffer.size());
-
+            if (!desc->has_txpdo || !desc->txpdo || mod.tx_buffer.empty())
+                continue;
+            std::span<const uint8_t> tx(mod.tx_buffer.data(),
+                                        mod.tx_buffer.size());
             switch (desc->type) {
                 case RP20Mod::ModuleType::DI_16:
                 case RP20Mod::ModuleType::Multi_DIO_8: {
                     for (size_t fi = 0; fi < desc->txpdo->field_count; ++fi) {
-                        const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, fi);
+                        const auto* f = RP20Mod::getFieldByChannel(
+                            *desc->txpdo, fi);
                         if (!f) continue;
-                        uint8_t val = RP20Mod::readU8(tx, *f);
-                        uint8_t nbits = f->size * 8;
-                        mvprintw(y, 2, "%s DI.%zu: ", desc->name, fi);
-                        int x = 2 + static_cast<int>(strlen(desc->name)) + 8;
-                        for (uint8_t b = 0; b < nbits; ++b) {
-                            bool on = (val >> b) & 1u;
-                            if (on) attron(COLOR_PAIR(1));
-                            mvprintw(y, x + b * 4, "%2d", b);
-                            if (on) {
-                                attron(A_BOLD);
-                                mvprintw(y, x + b * 4 + 2, "1");
-                                attroff(A_BOLD);
-                                attroff(COLOR_PAIR(1));
-                            } else {
-                                mvprintw(y, x + b * 4 + 2, "0");
-                            }
-                        }
-                        y++;
+                        const uint8_t val = RP20Mod::readU8(tx, *f);
+                        const uint8_t nbits = f->size * 8;
+                        InLine line;
+                        line.label = std::format("{} DI.{}", desc->name, fi);
+                        for (uint8_t b = 0; b < nbits; ++b)
+                            line.bits.push_back((val >> b) & 1u);
+                        in_lines.push_back(std::move(line));
                     }
                     break;
                 }
                 case RP20Mod::ModuleType::TC_4: {
-                    auto tc_label = formatTcConfigLabel(mod_config);
+                    const auto tc_label = formatTcConfigLabel(mod_config);
                     for (size_t fi = 0; fi < desc->txpdo->field_count; ++fi) {
-                        const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, fi);
+                        const auto* f = RP20Mod::getFieldByChannel(
+                            *desc->txpdo, fi);
                         if (!f) continue;
-                        int16_t val = RP20Mod::readI16(tx, *f);
-                        mvprintw(y, 2, "%s %s TC.%zu: %6.1f C",
-                                 desc->name, tc_label.c_str(), fi, val / 10.0);
-                        y++;
+                        const int16_t val = RP20Mod::readI16(tx, *f);
+                        in_lines.push_back(InLine{
+                            std::format("{} {} TC.{}: {:6.1f} C",
+                                        desc->name, tc_label, fi,
+                                        val / 10.0), {}});
                     }
                     break;
                 }
                 case RP20Mod::ModuleType::AI_4:
                 case RP20Mod::ModuleType::RD_4:
                 case RP20Mod::ModuleType::Mixed_AIO: {
-                    const char* prefix = (desc->type == RP20Mod::ModuleType::RD_4) ? "RD" : "AI";
-                    std::string label;
-                    if (desc->type == RP20Mod::ModuleType::RD_4)
-                        label = formatRdConfigLabel(mod_config);
-                    else
-                        label = formatAiConfigLabel(mod_config);
+                    const char* prefix =
+                        (desc->type == RP20Mod::ModuleType::RD_4) ? "RD"
+                                                                : "AI";
+                    const std::string label =
+                        (desc->type == RP20Mod::ModuleType::RD_4)
+                            ? formatRdConfigLabel(mod_config)
+                            : formatAiConfigLabel(mod_config);
                     for (size_t fi = 0; fi < desc->txpdo->field_count; ++fi) {
-                        const auto* f = RP20Mod::getFieldByChannel(*desc->txpdo, fi);
+                        const auto* f = RP20Mod::getFieldByChannel(
+                            *desc->txpdo, fi);
                         if (!f) continue;
-                        int16_t val = RP20Mod::readI16(tx, *f);
-                        mvprintw(y, 2, "%s %s %s.%zu: %d",
-                                 desc->name, label.c_str(), prefix, fi, val);
-                        y++;
+                        const int16_t val = RP20Mod::readI16(tx, *f);
+                        in_lines.push_back(InLine{
+                            std::format("{} {} {}.{}: {}",
+                                        desc->name, label, prefix, fi,
+                                        val), {}});
                     }
                     break;
                 }
@@ -831,45 +864,52 @@ static void runInteractiveUI(EtherCAT::Master& master,
             }
         }
 
-        // Footer
-        if (!pdo_ok.load()) {
-            attron(COLOR_PAIR(3));
-            mvprintw(LINES - 1, 0, "[PDO EXCHANGE ERROR]");
-            attroff(COLOR_PAIR(3));
+        // Inputs anchored at the bottom of the body; the output table
+        // takes the rows above (scrolls when they don't all fit).
+        const int in_rows = static_cast<int>(in_lines.size()) + 1;
+        int split = bottom - in_rows - 1;
+        if (split < top + 4) split = top + 4;   // keep a minimal table
+        TUI::putStyled(top + 1, 0, A_BOLD, "Outputs:");
+        TUI::TablePanel::render(out_table, top + 2, split, 0, COLS,
+                                /*focused=*/true, {6, 30});
+
+        TUI::RowWriter rw(stdscr, split + 1, 0, bottom);
+        rw.styled(A_BOLD, "Inputs:");
+        for (const auto& line : in_lines) {
+            if (!rw.fits()) break;
+            rw.put(2, 0, "%s", line.label.c_str());
+            if (!line.bits.empty()) {
+                int x = 2 + static_cast<int>(line.label.size()) + 2;
+                for (size_t b = 0; b < line.bits.size(); ++b) {
+                    x += rw.put(x, TUI::pairAttrs(TUI::PalMuted), "%2zu", b);
+                    rw.putLamp(x, line.bits[b] ? TUI::LampState::On
+                                             : TUI::LampState::Off,
+                               TUI::kLampDots);
+                    x += 2;
+                }
+            }
+            rw.advance();
         }
 
-        refresh();
-
-        // Handle input
-        int ch = getch();
-        if (ch == 'q' || ch == 27) {
-            g_running.store(false);
-            if (g_master) g_master->requestCancel();
-            break;
-        } else if (ch == KEY_UP || ch == 'k') {
-            if (cursor > 0) cursor--;
-        } else if (ch == KEY_DOWN || ch == 'j') {
-            if (cursor < static_cast<int>(output_bits.size()) - 1) cursor++;
-        } else if (ch == ' ' || ch == '\n') {
-            bit_states[cursor] = !bit_states[cursor];
-            applyOutputs();
-        } else if (ch == 'a') {
-            std::fill(bit_states.begin(), bit_states.end(), true);
-            applyOutputs();
-        } else if (ch == 'n') {
-            std::fill(bit_states.begin(), bit_states.end(), false);
-            applyOutputs();
+        if (!pdo_ok.load() && bottom > top) {
+            TUI::putStyled(bottom - 1, 0, TUI::pairAttrs(TUI::PalError),
+                           "[PDO EXCHANGE ERROR]");
         }
+    };
 
-        Tether::Platform::Clock::instance().delayMilliseconds(20);
-    }
+    TUI::PanelScreenHooks hooks;
+    hooks.onTick = [&] {
+        if (!g_running.load()) cancel.store(true);
+        rebuildRows();
+    };
+    hooks.views = {std::move(io_view)};
+    hooks.showLogView = true;
 
-    // Cleanup
-    for (auto& ob : output_bits) {
-        if (ob.label) free(const_cast<char*>(ob.label));
-    }
+    TUI::PanelScreen screen("Kinco RP20 Interactive I/O", std::move(hooks));
+    screen.run(cancel);
 
-    endwin();
+    g_running.store(false);
+    if (g_master) g_master->requestCancel();
 }
 
 #endif // HAVE_NCURSES

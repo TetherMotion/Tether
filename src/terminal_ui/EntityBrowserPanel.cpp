@@ -3,11 +3,11 @@
  * @brief Standard entities+registers view widget.
  */
 
-#include <ncurses.h>
+#include "tether/terminal_ui/EntityBrowserPanel.hpp"
 
 #include <cstdio>
 
-#include "tether/terminal_ui/EntityBrowserPanel.hpp"
+#include <ncurses.h>
 #include "tether/terminal_ui/TablePanel.hpp"
 
 namespace Tether {

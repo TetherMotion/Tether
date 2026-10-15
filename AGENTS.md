@@ -264,23 +264,52 @@ Two layers, split so application "views" can be built without ncurses:
     curses colors), `utf8Cols`/`utf8Trunc` (column-accurate UTF-8).
   - `StyledText.hpp` — `putStyled`/`putPair` (attron+mvprintw+attroff
     collapsed into one call returning the column advance for `col +=`
-    chaining), `AttrScope` RAII, `Span`/`putSpans`/`spansWidth`
-    (mixed-color runs), `pairAttrs` (constexpr `chtype`→`int` for
-    braced `Span` inits).  IMPORTANT: consumers `#undef OK`/`ERR`
-    after <ncurses.h> (macro clash with Tether error enums) — widget
-    headers must use mvprintw-family calls only; mvaddnstr/mvaddch
-    expand `wmove()==ERR` internally and fail to compile.
+    chaining), `AttrScope`/`WAttrScope` RAII, `Span`/`putSpans`/
+    `spansWidth` (mixed-color runs), `pairAttrs` (constexpr
+    `chtype`→`int` for braced `Span` inits).  Include order: standard
+    headers, then Tether/framework headers, then common headers, then
+    `<clocale>`+`<ncurses.h>`, and widget headers that render via curses
+    calls LAST — <ncurses.h> `#define`s OK/ERR/timeout/... which collide
+    with identifiers in the Tether headers (e.g. HALTypes'
+    `enum class Error::OK`), so all framework headers must be parsed
+    before it.  Widget headers only use mvprintw-family calls so they
+    still compile in TUs that `#undef ERR` — mvaddnstr/mvaddch expand
+    `wmove()==ERR` internally and would fail there.
   - `StatusBar.hpp` — `drawStatusBar(y, left, right, width)`: left/
     right-anchored `BarSeg` (styled `Span`) segments, no manual column
     math (e.g. `cycle=N t=Ns ESC err=none  [PDO ERROR]`).
   - `Lamp.hpp` — `drawLamp(y, x, LampState{Off,On,Unknown}, style)`:
     `kLampDots` (●/○/?) for pin grids, `kLampTags` (" ON"/" off"/" ?")
-    for columnar lists.
+    for columnar lists, `kLampDigits` (1/0) for packed-bit rows,
+    `kLampBits` and `kLampAlertBits` (*/., green/red on) for terminal
+    channel rows, `kLampSquares` (■/□).
   - `HexView.hpp` — `drawHexLine(y, x, max_cols, bytes, fields)`: `hh`
     byte dump with per-`HexField{off,len,attrs}` highlighting and `…`
     clipping — for protocol frames with known field layout.
   - `Sparkline.hpp` — `drawSparkline(y, x, w, samples, lo, hi, attrs)`
     (overloads for `SparklineHistory`).
+  - `RowWriter.hpp` — sequential top-to-bottom writer for one window:
+    replaces the `int row = top; mvwprintw(win, row++, x, ...)` idiom.
+    Whole-line emitters (`text`/`styled`/`spans`/`lamp`/`rule`) write at
+    the margin column and advance; `put`/`putSpans`/`putLamp` write at an
+    absolute column on the current row for multi-column lines
+    (`put(4,...); put(16,...); advance()`).  Everything clips at
+    `bottom` (default: window height) — use `remaining()`/`fits()` to
+    stop early, `margin(x)` for indented sections, `seek(row)` to resume
+    after a computed-coordinate block.  Pass `RowWriter&` to section
+    helpers instead of `int& row`.  `columnSplit(total_w, desired,
+    min_w, max_w, gap)` covers the N-side-by-side-columns idiom
+    (`two_col = COLS >= 70; col_w = min(54, COLS/2-1)` hand math).
+
+  Every widget also has a `w`-prefixed `WINDOW*` variant
+  (`wputStyled`, `wputPair`, `wputSpans`, `wdrawLamp`, `wdrawChips`,
+  `wdrawStatusBar`, `wdrawGauge`, `wdrawRangeTrack`, `wdrawHexLine`,
+  `wdrawSparkline`, `wdrawBox*`, `wpadBoxRowEnd`, `wdrawKeyValueBox`,
+  `wdrawBoxedLines`) for code rendering into `TermWindow*`/derived
+  windows — `TreeScreen`'s `renderDetail` casts `TermWindow*` to
+  `WINDOW*` and calls these directly (the `beckhoff_*` examples show
+  the pattern).  `width <= 0` in `wdrawStatusBar`/`wdrawKeyValueBox`/
+  `wdrawBoxedLines` means the window's own width.
 
 `PanelScreen` supports per-view `keyHintsFn` (merged into the footer),
 routes keys to `OverlayHost` overlays before normal view handling, and

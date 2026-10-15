@@ -85,9 +85,15 @@
 #include "common/ExampleHelpers.hpp"
 #include "common/EtherCATHostSetup.hpp"
 
+// ncurses last: it #defines OK/ERR/timeout/... which collide with
+// identifiers in the Tether headers (e.g. HALTypes' enum class Error::OK).
+// Widget headers that render via curses calls go after <ncurses.h>.
 #ifdef TETHER_HAS_TERMINAL_UI
 #include <clocale>
 #include <ncurses.h>
+#include "tether/terminal_ui/StyledText.hpp"
+#include "tether/terminal_ui/Lamp.hpp"
+#include "tether/terminal_ui/RowWriter.hpp"
 #endif
 
 static const char* TAG = "beckhoff_tui";
@@ -358,43 +364,33 @@ namespace {
 
 // -- small drawing helpers ---------------------------------------------------
 
-void put(WINDOW* w, int& row, const char* fmt, ...) {
-    char buf[256];
-    va_list ap; va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    mvwprintw(w, row++, 1, "%s", buf);
-}
-
 // Aligned "key        value" row — the detail pane's table structure.
-void kv(WINDOW* w, int& row, const char* key, const char* fmt, ...) {
+void kv(TUI::RowWriter& rw, const char* key, const char* fmt, ...) {
     char buf[256];
     va_list ap; va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    mvwprintw(w, row++, 1, "%-10s %s", key, buf);
+    rw.text("%-10s %s", key, buf);
 }
 
 // Dim horizontal rule across the pane width.
-void rule(WINDOW* w, int& row) {
-    const int width = getmaxx(w);
-    wattron(w, A_DIM);
-    for (int c = 1; c < width - 1; ++c)
-        mvwprintw(w, row, c, "%s", "\xE2\x94\x80");   // ─
-    wattroff(w, A_DIM);
-    ++row;
+void rule(TUI::RowWriter& rw) {
+    const int width = getmaxx(rw.window());
+    std::string dashes;
+    dashes.reserve(static_cast<size_t>(width) * 3);
+    for (int c = 1; c < width - 1; ++c) dashes += "─";
+    rw.styled(A_DIM, "%s", dashes.c_str());
 }
 
-void bitRow(WINDOW* w, int row, const char* label,
+void bitRow(TUI::RowWriter& rw, const char* label,
             size_t n, const std::function<bool(size_t)>& get) {
-    mvwprintw(w, row, 1, "%-10s", label);
+    rw.put(1, 0, "%-10s", label);
     for (size_t k = 0; k < n && k < 32; ++k) {
-        const bool on = get(k);
-        wattron(w, on ? (COLOR_PAIR(TUI::PalValue) | A_BOLD) : A_DIM);
-        mvwprintw(w, row, 11 + static_cast<int>(k) * 2, "%s",
-                  on ? "\xE2\x96\xA0" : "\xE2\x96\xA1");   // ■ □
-        wattroff(w, on ? (COLOR_PAIR(TUI::PalValue) | A_BOLD) : A_DIM);
+        rw.putLamp(11 + static_cast<int>(k) * 2,
+                   get(k) ? TUI::LampState::On : TUI::LampState::Off,
+                   TUI::kLampSquares);
     }
+    rw.advance();
 }
 
 const char* driveStateName(Beckhoff::DriveState s) {
@@ -424,22 +420,19 @@ struct UiState {
     std::map<uint16_t, uint64_t>              prevBits;
 };
 
-static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
+static void renderLive(TUI::RowWriter& rw, uint16_t slave, DeviceFamily family,
                        Drivers& drivers, UiState& uiState, const std::string& iface) {
     using namespace Beckhoff;
 
     auto hint = [&](const char* s) {
-        ++row;
-        wattron(w, COLOR_PAIR(TUI::PalHint));
-        mvwprintw(w, row++, 1, "%s", s);
-        wattroff(w, COLOR_PAIR(TUI::PalHint));
+        rw.blank();
+        rw.styled(TUI::pairAttrs(TUI::PalHint), "%s", s);
     };
     auto errLine = [&]() {
         auto it = drivers.errors.find(slave);
         if (it == drivers.errors.end()) return;
-        wattron(w, COLOR_PAIR(TUI::PalError));
-        mvwprintw(w, row++, 1, "bring-up: %s", it->second.c_str());
-        wattroff(w, COLOR_PAIR(TUI::PalError));
+        rw.styled(TUI::pairAttrs(TUI::PalError),
+                  "bring-up: %s", it->second.c_str());
     };
 
     switch (family) {
@@ -448,15 +441,15 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         const size_t m = moduleOf(*drivers.din, slave);
         if (m == SIZE_MAX) break;
         const auto& mod = drivers.din->module(m);
-        kv(w, row, "channels", "%zu", mod.bitCount());
-        bitRow(w, row++, "in", mod.bitCount(),
+        kv(rw, "channels", "%zu", mod.bitCount());
+        bitRow(rw, "in", mod.bitCount(),
                [&](size_t k) { return mod.bit(k); });
         auto& tr = uiState.transitions[slave];
         if (tr.size() == mod.bitCount()) {
-            mvwprintw(w, row, 1, "%-10s", "changes");
+            rw.put(1, 0, "%-10s", "changes");
             for (size_t k = 0; k < mod.bitCount() && k < 32; ++k)
-                mvwprintw(w, row, 11 + (int)k * 4, "%-4u", tr[k]);
-            ++row;
+                rw.put(11 + (int)k * 4, 0, "%-4u", tr[k]);
+            rw.advance();
         }
         break;
     }
@@ -466,12 +459,12 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         if (m == SIZE_MAX) break;
         const auto& mod = drivers.dout->module(m);
         const size_t n = mod.bitCount();
-        kv(w, row, "channels", "%zu", n);
-        bitRow(w, row++, "out", n,
+        kv(rw, "channels", "%zu", n);
+        bitRow(rw, "out", n,
                [&](size_t k) { return mod.bit(k); });
         size_t& sel = uiState.sel[slave];
         if (n > 0) sel = std::min(sel, n - 1);
-        kv(w, row, "selected", "%zu", sel + 1);
+        kv(rw, "selected", "%zu", sel + 1);
         hint("1-9 toggle  ,/. select  space toggle  a/o invert node");
         break;
     }
@@ -481,15 +474,15 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         if (m == SIZE_MAX) break;
         const auto& mod = drivers.combo->module(m);
         const size_t n = mod.outputChannelCount();
-        kv(w, row, "channels", "in %zu  out %zu",
+        kv(rw, "channels", "in %zu  out %zu",
            mod.inputChannelCount(), n);
-        bitRow(w, row++, "in", mod.inputChannelCount(),
+        bitRow(rw, "in", mod.inputChannelCount(),
                [&](size_t k) { return mod.input(k); });
-        bitRow(w, row++, "out", n,
+        bitRow(rw, "out", n,
                [&](size_t k) { return mod.output(k); });
         size_t& sel = uiState.sel[slave];
         if (n > 0) sel = std::min(sel, n - 1);
-        kv(w, row, "selected", "%zu", sel + 1);
+        kv(rw, "selected", "%zu", sel + 1);
         hint("1-9 toggle  ,/. select  space toggle  a/o invert node");
         break;
     }
@@ -500,10 +493,10 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         const auto& mod = drivers.ain->module(m);
         for (size_t k = 0; k < mod.channelCount(); ++k) {
             if (mod.hasStatus(k))
-                put(w, row, "ch %-3zu %12d   status 0x%04X",
+                rw.text("ch %-3zu %12d   status 0x%04X",
                     k, mod.value(k), mod.status(k));
             else
-                put(w, row, "ch %-3zu %12d", k, mod.value(k));
+                rw.text("ch %-3zu %12d", k, mod.value(k));
         }
         break;
     }
@@ -515,10 +508,8 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         size_t& sel = uiState.sel[slave];
         if (sel >= mod.channelCount()) sel = 0;
         for (size_t k = 0; k < mod.channelCount(); ++k) {
-            if (k == sel) wattron(w, A_REVERSE);
-            put(w, row, "ch %-3zu %12d", k,
-                mod.value(k));
-            if (k == sel) wattroff(w, A_REVERSE);
+            rw.styled(k == sel ? A_REVERSE : 0,
+                      "ch %-3zu %12d", k, mod.value(k));
         }
         hint("[/] channel  +/- value  0 zero all");
         break;
@@ -530,11 +521,11 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         const auto& mod = drivers.pos->module(m);
         for (size_t k = 0; k < mod.channelCount(); ++k) {
             if (mod.hasLatch(k))
-                put(w, row, "ch %-3zu pos %-12lld latch %lld",
+                rw.text("ch %-3zu pos %-12lld latch %lld",
                     k, static_cast<long long>(mod.position(k)),
                     static_cast<long long>(mod.latch(k)));
             else
-                put(w, row, "ch %-3zu pos %-12lld",
+                rw.text("ch %-3zu pos %-12lld",
                     k, static_cast<long long>(mod.position(k)));
         }
         break;
@@ -542,17 +533,17 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
     case DeviceFamily::Stepper: {
         auto* t = findBySlave(drivers.steppers, slave);
         if (!t) break;
-        kv(w, row, "status", "0x%04X   enc 0x%04X",
+        kv(rw, "status", "0x%04X   enc 0x%04X",
            t->stmStatusWord(), t->encStatusWord());
-        kv(w, row, "flags", "rdyEn %d  rdy %d  warn %d  err %d",
+        kv(rw, "flags", "rdyEn %d  rdy %d  warn %d  err %d",
            t->readyToEnable(), t->ready(), t->warning(), t->error());
-        kv(w, row, "motion", "moving %+d   torqueReduced %d",
+        kv(rw, "motion", "moving %+d   torqueReduced %d",
            t->movingPositive() ? 1 : t->movingNegative() ? -1 : 0,
            t->torqueReduced());
-        kv(w, row, "counter", "%d   latch %d%s",
+        kv(rw, "counter", "%d   latch %d%s",
            t->counterValue(), t->latchValue(),
            t->latchValid() ? " (valid)" : "");
-        kv(w, row, "din", "din1 %d  din2 %d  syncErr %d",
+        kv(rw, "din", "din1 %d  din2 %d  syncErr %d",
            t->digitalInput1(), t->digitalInput2(), t->syncError());
         hint("e enable  +/- velocity  0 stop  x reset");
         break;
@@ -564,12 +555,12 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         if (auto it = uiState.sel.find(slave); it != uiState.sel.end())
             sel = it->second;
         for (size_t a = 0; a < t->axisCount(); ++a) {
-            put(w, row, "%s ax %zu    sw 0x%04X  %s",
+            rw.text("%s ax %zu    sw 0x%04X  %s",
                 a == sel ? ">" : " ",
                 a, t->statusword(a),
                 driveStateName(t->driveState(a)));
             if (t->hasActualPosition(a) || t->hasActualVelocity(a))
-                put(w, row, "          pos %-10d vel %-10d tq %d",
+                rw.text("          pos %-10d vel %-10d tq %d",
                     t->actualPosition(a), t->actualVelocity(a),
                     t->actualTorque(a));
         }
@@ -583,7 +574,7 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         if (auto it = uiState.sel.find(slave); it != uiState.sel.end())
             sel = it->second;
         for (size_t c = 0; c < t->channelCount(); ++c) {
-            put(w, row, "%s ch %-3zu duty %-6u%s%s%s",
+            rw.text("%s ch %-3zu duty %-6u%s%s%s",
                 c == sel ? ">" : " ",
                 c, t->duty(c),
                 t->hasStatus(c) && t->warning(c) ? "  WARN" : "",
@@ -600,14 +591,14 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         if (auto it = uiState.sel.find(slave); it != uiState.sel.end())
             sel = it->second;
         for (size_t c = 0; c < t->channelCount(); ++c) {
-            put(w, row, "%s ch %-3zu freq %-6u%s%s%s",
+            rw.text("%s ch %-3zu freq %-6u%s%s%s",
                 c == sel ? ">" : " ",
                 c, t->frequency(c),
                 t->rampActive(c) ? "  ramp" : "",
                 t->error(c)      ? "  ERR"  : "",
                 t->syncError(c)  ? "  SYNC" : "");
             if (t->hasEnc(c))
-                put(w, row, "          enc %-10d latch %d",
+                rw.text("          enc %-10d latch %d",
                     t->counterValue(c), t->latchValue(c));
         }
         hint("[/] channel  +/- freq  f/r dir  0 stop");
@@ -620,12 +611,12 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         if (auto it = uiState.sel.find(slave); it != uiState.sel.end())
             sel = it->second;
         for (size_t a = 0; a < t->axisCount(); ++a) {
-            put(w, row, "%s ax %zu    sw 0x%04X  rdyEn %d rdy %d warn %d err %d",
+            rw.text("%s ax %zu    sw 0x%04X  rdyEn %d rdy %d warn %d err %d",
                 a == sel ? ">" : " ",
                 a, t->motStatusWord(a), t->readyToEnable(a),
                 t->ready(a), t->warning(a), t->error(a));
             if (t->hasEncoder(a))
-                put(w, row, "          enc %-10d latch %d",
+                rw.text("          enc %-10d latch %d",
                     t->counterValue(a), t->latchValue(a));
         }
         hint("[/] axis  e enable  +/- velocity  0 stop  x reset");
@@ -641,7 +632,7 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
             snprintf(vb, sizeof(vb), v  ? "%.2f" : "-", v  ? *v  : 0.0);
             snprintf(ib, sizeof(ib), i  ? "%.3f" : "-", i  ? *i  : 0.0);
             snprintf(pb, sizeof(pb), pw ? "%.1f" : "-", pw ? *pw : 0.0);
-            put(w, row, "L%zu   %9s V  %9s A  %9s W", p + 1, vb, ib, pb);
+            rw.text("L%zu   %9s V  %9s A  %9s W", p + 1, vb, ib, pb);
         }
         if (t->indexSelectors())
             hint("+/- index selector 0");
@@ -652,7 +643,7 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         if (!t) break;
         for (size_t c = 0; c < t->channels(); ++c) {
             const size_t n = t->samplesPerCycle(c);
-            put(w, row, "ch %-3zu %zu x %u-bit", c, n, t->sampleBits(c));
+            rw.text("ch %-3zu %zu x %u-bit", c, n, t->sampleBits(c));
             std::string line;
             for (size_t i = 0; i < n && i < 8; ++i) {
                 char b[24];
@@ -660,7 +651,7 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
                 line += b;
             }
             if (n > 8) line += " …";
-            put(w, row, "          %s", line.c_str());
+            rw.text("          %s", line.c_str());
         }
         break;
     }
@@ -668,7 +659,7 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
         auto* t = findBySlave(drivers.comms, slave);
         if (!t) break;
         for (size_t c = 0; c < t->channels(); ++c) {
-            put(w, row, "ch %-3zu ctrl 0x%04X  stat 0x%04X  fifo %zu/%zu",
+            rw.text("ch %-3zu ctrl 0x%04X  stat 0x%04X  fifo %zu/%zu",
                 c, t->ctrlWord(c), t->statusWord(c),
                 t->rxCapacity(c), t->txCapacity(c));
             auto data = t->dataIn(c);
@@ -681,17 +672,17 @@ static void renderLive(WINDOW* w, int& row, uint16_t slave, DeviceFamily family,
                     asc += (data[i] >= 32 && data[i] < 127)
                          ? (char)data[i] : '.';
                 }
-                put(w, row, "  rx       %s", hex.c_str());
-                put(w, row, "           %s", asc.c_str());
+                rw.text("  rx       %s", hex.c_str());
+                rw.text("           %s", asc.c_str());
             }
         }
         hint("t transmit test bytes");
         break;
     }
     case DeviceFamily::Safety:
-        ++row;
-        put(w, row, "TwinSAFE needs FSoE master config");
-        put(w, row, "run: ./beckhoff_safety_monitor -i %s "
+        rw.blank();
+        rw.text("TwinSAFE needs FSoE master config");
+        rw.text("run: ./beckhoff_safety_monitor -i %s "
                     "--safety-addr <n>", iface.c_str());
         break;
     default:
@@ -1033,27 +1024,25 @@ static void runTui(std::span<const DiscoveredSlave> slaves,
 
     hooks.renderDetail = [&](TUI::TermWindow* w, const TUI::TreeNode& node) {
         WINDOW* win = static_cast<WINDOW*>(w);
-        int row = 1;
+        TUI::RowWriter rw(win, 1, 1);
 
         const auto* s = slaveByIndex(slaves, node.tag);
         if (!s) {
             if (!node.children.empty())
-                mvwprintw(win, row++, 1, "%zu terminal(s) below",
+                rw.text("%zu terminal(s) below",
                           node.children.size());
             else
-                mvwprintw(win, row++, 1, "(bus root)");
+                rw.text("(bus root)");
             return;
         }
 
-        wattron(win, A_BOLD);
-        mvwprintw(win, row++, 1, "%s",
-                  s->device_name ? s->device_name->c_str() : "?");
-        wattroff(win, A_BOLD);
-        rule(win, row);
-        kv(win, row, "slave",   "%u", s->index);
-        kv(win, row, "vendor",  "0x%08X",
+        rw.styled(A_BOLD, "%s",
+                s->device_name ? s->device_name->c_str() : "?");
+        rule(rw);
+        kv(rw, "slave",   "%u", s->index);
+        kv(rw, "vendor",  "0x%08X",
            s->vendor_id ? *s->vendor_id : 0);
-        kv(win, row, "product", "0x%08X",
+        kv(rw, "product", "0x%08X",
            s->product_code ? *s->product_code : 0);
 
         auto it = assignments.find(s->index);
@@ -1061,24 +1050,24 @@ static void runTui(std::span<const DiscoveredSlave> slaves,
         const SlaveClass& assigned = it != assignments.end() ? it->second : empty;
 
         if (assigned.family != DeviceFamily::None && assigned.entry) {
-            kv(win, row, "family", "%s", assigned.entry->label);
-            rule(win, row);
-            renderLive(win, row, s->index, assigned.family, drivers, uiState, iface);
-            rule(win, row);
-            wattron(win, A_DIM);
-            kv(win, row, "example", "./%s -i %s",
-               assigned.entry->example, iface.c_str());
-            wattroff(win, A_DIM);
+            kv(rw, "family", "%s", assigned.entry->label);
+            rule(rw);
+            renderLive(rw, s->index, assigned.family, drivers, uiState, iface);
+            rule(rw);
+            {
+                TUI::WAttrScope dim(win, A_DIM);
+                kv(rw, "example", "./%s -i %s",
+                   assigned.entry->example, iface.c_str());
+            }
         } else {
-            rule(win, row);
-            wattron(win, A_DIM);
+            rule(rw);
+            TUI::WAttrScope dim(win, A_DIM);
             if (isCouplerDevice(*s))
-                mvwprintw(win, row++, 1, "(coupler  —  %zu terminal(s))",
+                rw.text("(coupler  —  %zu terminal(s))",
                           node.children.size());
             else
-                mvwprintw(win, row++, 1,
+                rw.text(
                           "(product not in any driver registry)");
-            wattroff(win, A_DIM);
         }
     };
 
