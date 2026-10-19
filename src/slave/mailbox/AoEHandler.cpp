@@ -204,6 +204,12 @@ public:
     
     bool processRequest(const uint8_t* data, size_t length,
                        uint8_t* response, size_t& responseLength) override {
+        // Every handler's fixed response fits in sizeof(AmsHeader) + 32 bytes
+        // (device-info is the largest); reject tiny buffers up front.
+        if (responseLength < sizeof(AmsHeader) + 32) {
+            responseLength = 0;
+            return false;
+        }
         if (length < sizeof(AmsHeader)) {
             return sendError(ADS_ERR_INTERNAL, {}, response, responseLength);
         }
@@ -510,6 +516,12 @@ private:
         
         AdsReadWriteRequest rwReq;
         memcpy(&rwReq, data, sizeof(rwReq));
+        
+        // The declared write-data length must fit within the actual request —
+        // otherwise the symbol-name read below runs past the buffer.
+        if (rwReq.cbWriteLength > length - sizeof(AdsReadWriteRequest)) {
+            return sendError(ADS_ERR_INTERNAL, request, response, responseLength);
+        }
         
         // Handle special index groups
         if (rwReq.indexGroup == ADSIGRP_SYM_HANDLE) {

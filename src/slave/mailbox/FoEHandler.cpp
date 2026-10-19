@@ -8,6 +8,7 @@
 #include "slave/core/SlaveTypes.hpp"
 #include "slave/logging/SlaveLogger.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <vector>
@@ -42,6 +43,11 @@ namespace {
     constexpr uint32_t FOE_ERR_NOT_IN_BOOTSTRAP = 0x8009;
     constexpr uint32_t FOE_ERR_NO_RIGHTS = 0x800A;
     constexpr uint32_t FOE_ERR_PROGRAM_ERROR = 0x800B;
+
+    // Maximum accumulated size of a single FoE write transfer. Firmware
+    // images are well below this; the bound stops a hostile master from
+    // exhausting memory with an endless DATA stream.
+    constexpr size_t kMaxFoETransferSize = 8 * 1024 * 1024;
 }
 
 // ============================================================================
@@ -300,9 +306,15 @@ private:
         
         transfer_.packetNumber = packetNum;
         
-        // Append data
+        // Append data — bounded so a hostile master cannot exhaust memory
+        // with an unbounded write transfer.
         size_t dataLen = length - 6;
         const uint8_t* fileData = data + 6;
+        if (transfer_.data.size() + dataLen > kMaxFoETransferSize) {
+            abortTransfer();
+            return sendError(FOE_ERR_DISK_FULL, "File too large",
+                           response, responseLength);
+        }
         transfer_.data.insert(transfer_.data.end(), fileData, fileData + dataLen);
         
         // Check if transfer complete (short packet)
@@ -401,6 +413,8 @@ private:
     }
     
     bool sendAck(uint32_t packetNumber, uint8_t* response, size_t& responseLength) {
+        // responseLength on input holds the response buffer capacity.
+        if (responseLength < 6) return false;
         response[0] = FOE_OP_ACK;
         response[1] = 0;
         response[2] = packetNumber & 0xFF;
@@ -414,6 +428,9 @@ private:
     
     bool sendError(uint32_t errorCode, const char* errorText,
                   uint8_t* response, size_t& responseLength) {
+        // responseLength on input holds the response buffer capacity.
+        size_t bufCap = responseLength;
+        if (bufCap < 7) return false;  // Need header(6) + at least a NUL
         response[0] = FOE_OP_ERROR;
         response[1] = 0;
         response[2] = errorCode & 0xFF;
@@ -422,7 +439,10 @@ private:
         response[5] = (errorCode >> 24) & 0xFF;
         
         size_t textLen = strlen(errorText);
-        memcpy(response + 6, errorText, textLen + 1);
+        size_t maxText = bufCap - 7;   // Reserve one byte for the NUL
+        if (textLen > maxText) textLen = maxText;
+        memcpy(response + 6, errorText, textLen);
+        response[6 + textLen] = '\0';
         
         responseLength = 6 + textLen + 1;
         

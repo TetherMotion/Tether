@@ -466,7 +466,9 @@ void ProcessImage::publishInputView(const uint8_t* payload, uint32_t len,
         in_cookie_  = static_cast<int64_t>(cookie);
     }
     in_ptr_.store(payload, std::memory_order_release);
-    in_len_ = len;
+    // Clamp to the configured image size — the wire may carry more bytes
+    // than the image, and consumers treat in_len_ as the readable extent.
+    in_len_ = len < size_ ? len : size_;
     publishNotify();
 }
 

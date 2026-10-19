@@ -7,6 +7,7 @@
 #include "slave/core/SlaveCore.hpp"
 #include "slave/logging/SlaveLogger.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <vector>
@@ -28,6 +29,10 @@ struct VoEHeader {
     uint8_t flags;            // Message flags
     uint8_t reserved;
 };
+
+// Maximum size of a buffered vendor transfer (e.g. firmware update).
+// Bounds the memory a hostile master can consume with an endless data stream.
+constexpr size_t kMaxVoETransferSize = 8 * 1024 * 1024;
 
 /**
  * Registered VoE handler
@@ -51,9 +56,10 @@ public:
         // Register some example vendor-specific handlers
         registerVendorHandler(0x0001, "Echo",
             [](const uint8_t* data, size_t length, uint8_t* response, size_t& responseLength) {
-                // Simple echo: return same data
-                memcpy(response, data, length);
-                responseLength = length;
+                // Simple echo — bounded by the response buffer capacity
+                size_t n = std::min(length, responseLength);
+                memcpy(response, data, n);
+                responseLength = n;
                 return true;
             });
         
@@ -90,7 +96,7 @@ public:
     
     bool processRequest(const uint8_t* data, size_t length,
                        uint8_t* response, size_t& responseLength) override {
-        if (length < sizeof(VoEHeader)) {
+        if (length < sizeof(VoEHeader) || responseLength < sizeof(VoEHeader)) {
             responseLength = 0;
             return false;
         }
@@ -123,8 +129,10 @@ public:
         
         memcpy(response, &respHeader, sizeof(respHeader));
         
-        // Call vendor handler
-        size_t dataResponseLength = 0;
+        // Call vendor handler — its writable region is what remains after the
+        // VoE header, so that is the capacity it is given.
+        const size_t subCap = responseLength - sizeof(VoEHeader);
+        size_t dataResponseLength = subCap;
         const uint8_t* requestData = data + sizeof(VoEHeader);
         size_t requestLength = length - sizeof(VoEHeader);
         
@@ -132,6 +140,9 @@ public:
                                         response + sizeof(VoEHeader),
                                         dataResponseLength);
         
+        if (dataResponseLength > subCap) {
+            dataResponseLength = subCap;  // Handler reported more than it could hold
+        }
         responseLength = sizeof(VoEHeader) + dataResponseLength;
         return result;
     }
@@ -218,6 +229,10 @@ private:
             char hardwareVersion[16];
         } __attribute__((packed));
         
+        if (responseLength < sizeof(DeviceInfo)) {
+            responseLength = 0;
+            return false;
+        }
         DeviceInfo info{};
         info.vendorId = vendorId_;
         info.productCode = 0x12345678;
@@ -236,6 +251,9 @@ private:
                            uint8_t* response, size_t& responseLength) {
         if (length < 1) {
             return sendInlineError(0x0002, "Missing command", response, responseLength);
+        }
+        if (responseLength < 1) {
+            return false;
         }
         
         uint8_t command = data[0];
@@ -267,6 +285,9 @@ private:
                     stats.errorsDetected = errorsDetected_;
                     stats.uptimeSeconds = core_ ? core_->getDCSystemTime() / 1000000000ULL : 0;
                     
+                    if (responseLength < sizeof(stats)) {
+                        return false;
+                    }
                     memcpy(response, &stats, sizeof(stats));
                     responseLength = sizeof(stats);
                     return true;
@@ -313,6 +334,9 @@ private:
         if (length < 1) {
             return sendInlineError(0x0010, "Missing subcommand", response, responseLength);
         }
+        if (responseLength < 1) {
+            return false;
+        }
         
         uint8_t subCommand = data[0];
         
@@ -330,6 +354,11 @@ private:
             case 0x02:  // Data chunk
                 if (!pendingTransfer_) {
                     return sendInlineError(0x0012, "No transfer active", response, responseLength);
+                }
+                if (transferBuffer_.size() + (length - 1) > kMaxVoETransferSize) {
+                    pendingTransfer_ = false;
+                    transferBuffer_.clear();
+                    return sendInlineError(0x0013, "Transfer too large", response, responseLength);
                 }
                 transferBuffer_.insert(transferBuffer_.end(), data + 1, data + length);
                 response[0] = 0;
@@ -363,6 +392,9 @@ private:
         if (length < 1) {
             return sendInlineError(0x0020, "Missing subcommand", response, responseLength);
         }
+        if (responseLength < 1) {
+            return false;
+        }
         
         uint8_t subCommand = data[0];
         
@@ -370,8 +402,9 @@ private:
             case 0x01:  // Read config
                 {
                     auto configData = getCustomData("config");
-                    memcpy(response, configData.data(), configData.size());
-                    responseLength = configData.size();
+                    size_t n = std::min(configData.size(), responseLength);
+                    memcpy(response, configData.data(), n);
+                    responseLength = n;
                     return true;
                 }
                 
@@ -403,6 +436,12 @@ private:
     
     bool sendErrorResponse(uint16_t vendorType, uint16_t errorCode, const char* errorText,
                           uint8_t* response, size_t& responseLength) {
+        // responseLength on input holds the response buffer capacity.
+        size_t bufCap = responseLength;
+        if (bufCap < sizeof(VoEHeader) + 3) {   // header + code + NUL
+            responseLength = 0;
+            return false;
+        }
         VoEHeader header;
         header.vendorId = vendorId_;
         header.vendorType = vendorType;
@@ -415,7 +454,10 @@ private:
         response[sizeof(header) + 1] = (errorCode >> 8) & 0xFF;
         
         size_t textLen = strlen(errorText);
-        memcpy(response + sizeof(header) + 2, errorText, textLen + 1);
+        size_t maxText = bufCap - sizeof(header) - 3;
+        if (textLen > maxText) textLen = maxText;
+        memcpy(response + sizeof(header) + 2, errorText, textLen);
+        response[sizeof(header) + 2 + textLen] = '\0';
         
         responseLength = sizeof(header) + 2 + textLen + 1;
         return true;
@@ -423,12 +465,21 @@ private:
     
     bool sendInlineError(uint16_t errorCode, const char* errorText,
                         uint8_t* response, size_t& responseLength) {
+        // responseLength on input holds the response buffer capacity.
+        size_t bufCap = responseLength;
+        if (bufCap < 4) {   // marker + code + NUL
+            responseLength = 0;
+            return false;
+        }
         response[0] = 0xFF;  // Error marker
         response[1] = errorCode & 0xFF;
         response[2] = (errorCode >> 8) & 0xFF;
         
         size_t textLen = strlen(errorText);
-        memcpy(response + 3, errorText, textLen + 1);
+        size_t maxText = bufCap - 4;
+        if (textLen > maxText) textLen = maxText;
+        memcpy(response + 3, errorText, textLen);
+        response[3 + textLen] = '\0';
         
         responseLength = 3 + textLen + 1;
         return true;

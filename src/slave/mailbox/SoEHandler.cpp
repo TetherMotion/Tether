@@ -99,7 +99,7 @@ public:
     
     bool processRequest(const uint8_t* data, size_t length,
                        uint8_t* response, size_t& responseLength) override {
-        if (length < 4) {
+        if (length < 6) {  // Header fields reach data[4]; payload starts at data+6
             return sendError(0, SOE_ERR_COMMAND, response, responseLength);
         }
         
@@ -250,6 +250,7 @@ private:
                           uint8_t* response, size_t& responseLength) {
         // responseLength on input holds the response buffer capacity.
         size_t bufCap = responseLength;
+        if (bufCap < 6) return false;  // Fixed response header is 6 bytes
         auto it = idnMap_.find(idn);
         if (it == idnMap_.end()) {
             return sendError(idn, SOE_ERR_NO_IDN, response, responseLength);
@@ -418,6 +419,7 @@ private:
         }
         
         // Build success response
+        if (responseLength < 6) return false;
         response[0] = SOE_OP_WRITE_RESPONSE;
         response[1] = driveNo;
         response[2] = elements;
@@ -431,6 +433,7 @@ private:
     
     bool sendError(uint16_t idn, uint16_t errorCode,
                   uint8_t* response, size_t& responseLength) {
+        if (responseLength < 8) return false;
         response[0] = SOE_OP_READ_RESPONSE | 0x10;  // Error flag
         response[1] = 0;
         response[2] = 0;

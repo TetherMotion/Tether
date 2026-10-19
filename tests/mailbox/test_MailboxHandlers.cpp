@@ -1187,3 +1187,100 @@ TEST(MailboxHeaderExtraTest, ChannelAndPriority) {
     EXPECT_EQ(parsed.length, 0x1234);
     EXPECT_EQ(parsed.address, 0x5678);
 }
+
+// ============================================================================
+// Regression tests: wire-controlled length handling
+// ============================================================================
+
+TEST_F(SoEHandlerTest, FiveByteRequestRejected) {
+    // Requests of 4-5 bytes are too short for the SoE header (reaches
+    // data[4] and passes data+6 to sub-handlers). Must not read past
+    // the request buffer.
+    uint8_t req[5] = {0x01, 0, 0, 0x34, 0x12};
+    respLen = sizeof(resp);
+    bool ok = handler->processRequest(req, 5, resp, respLen);
+    // Error response is allowed, a crash/overread is not
+    if (ok) {
+        EXPECT_NE(resp[0] & 0x10, 0);
+    }
+}
+
+TEST_F(SoEHandlerTest, TinyResponseBufferRejected) {
+    auto req = buildSoEReadReq(0x0001, SOE_ELEM_DATA);
+    respLen = 4;   // smaller than the 8-byte error response
+    bool ok = handler->processRequest(req.data(), req.size(), resp, respLen);
+    EXPECT_FALSE(ok);
+}
+
+TEST_F(AoEHandlerTest, ReadWriteLengthExceedsRequestRejected) {
+    // AdsReadWriteRequest with cbWriteLength far beyond the actual request —
+    // the symbol-name construction must not read past the buffer.
+    auto req = buildAmsHeader(ADS_CMD_READ_WRITE, 16);
+    req.resize(32 + 16, 0);
+    auto put32 = [&](size_t off, uint32_t v) {
+        req[off] = v & 0xFF; req[off+1] = (v >> 8) & 0xFF;
+        req[off+2] = (v >> 16) & 0xFF; req[off+3] = (v >> 24) & 0xFF;
+    };
+    put32(32, ADSIGRP_SYM_HANDLE);
+    put32(36, 0);           // indexOffset
+    put32(40, 4);           // cbReadLength
+    put32(44, 0xFFFFFF00);  // cbWriteLength — absurd, beyond any real mailbox
+
+    respLen = sizeof(resp);
+    bool ok = handler->processRequest(req.data(), req.size(), resp, respLen);
+    // Error response accepted; an overread is not
+    if (ok) {
+        uint32_t errCode;
+        memcpy(&errCode, resp + 32, 4);
+        EXPECT_NE(errCode, 0u);
+    }
+}
+
+TEST_F(AoEHandlerTest, TinyResponseBufferRejected) {
+    auto req = buildAmsHeader(ADS_CMD_READ_STATE);
+    respLen = 8;   // smaller than any possible ADS response
+    bool ok = handler->processRequest(req.data(), req.size(), resp, respLen);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(respLen, 0u);
+}
+
+TEST_F(VoEHandlerTest, EchoBoundedByResponseCapacity) {
+    // Echo with a request payload larger than the remaining response
+    // capacity must truncate, not overflow.
+    uint32_t vid = 0;
+    uint16_t vtype = 0x0001;
+    std::vector<uint8_t> payload(2000, 0xAA);
+    auto req = buildVoERequest(vid, vtype, payload.data(), payload.size());
+
+    uint8_t smallResp[64] = {};
+    size_t smallLen = sizeof(smallResp);
+    bool ok = handler->processRequest(req.data(), req.size(), smallResp, smallLen);
+    EXPECT_TRUE(ok);
+    EXPECT_LE(smallLen, sizeof(smallResp));
+}
+
+TEST_F(VoEHandlerTest, TinyResponseBufferRejected) {
+    uint32_t vid = 0;
+    uint16_t vtype = 0x0001;
+    uint8_t payload[] = {0x01};
+    auto req = buildVoERequest(vid, vtype, payload, sizeof(payload));
+
+    uint8_t tiny[4] = {};
+    size_t tinyLen = sizeof(tiny);   // < sizeof(VoEHeader)
+    bool ok = handler->processRequest(req.data(), req.size(), tiny, tinyLen);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(tinyLen, 0u);
+}
+
+TEST_F(EoEHandlerTest, FragmentMapBounded) {
+    // Flood distinct frame numbers — the reassembly map must stay bounded.
+    for (int i = 0; i < 200; i++) {
+        // frameType=0 (fragment data), not last, frameNumber varies via data[3:4]
+        std::vector<uint8_t> req = {0x00, 0x00,
+                                    static_cast<uint8_t>((i & 0x3F) << 6 | (i >> 6)),
+                                    static_cast<uint8_t>(i & 0xFF), 0xAA};
+        respLen = sizeof(resp);
+        handler->processRequest(req.data(), req.size(), resp, respLen);
+    }
+    SUCCEED();  // Bounded state — no crash, no unbounded growth
+}

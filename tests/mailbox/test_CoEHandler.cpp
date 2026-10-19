@@ -623,3 +623,109 @@ TEST(SDOAbortCodeTest, Values) {
 TEST(MailboxConstantsTest, HeaderSize) {
     EXPECT_EQ(kMailboxHeaderSize, 6u);
 }
+
+// ============================================================================
+// Regression tests: wire-controlled length handling (malformed mailboxes)
+// ============================================================================
+
+TEST_F(CoEHandlerTest, MailboxLengthUnderflowRejected) {
+    // mbxLength = 0 — mbxLength - 2 used to underflow to a huge size_t.
+    uint8_t request[kMinRequestSize] = {};
+    buildSdoUploadRequest(request, 0x2000, 0);
+    request[0] = 0; request[1] = 0;
+
+    uint8_t response[256] = {};
+    size_t responseLen = sizeof(response);
+    EXPECT_FALSE(handler_->processRequest(request, kMinRequestSize, response, responseLen));
+}
+
+TEST_F(CoEHandlerTest, MailboxLengthOneRejected) {
+    // mbxLength = 1 — smaller than the 2-byte CoE header it must cover.
+    uint8_t request[kMinRequestSize] = {};
+    buildSdoUploadRequest(request, 0x2000, 0);
+    request[0] = 1; request[1] = 0;
+
+    uint8_t response[256] = {};
+    size_t responseLen = sizeof(response);
+    EXPECT_FALSE(handler_->processRequest(request, kMinRequestSize, response, responseLen));
+}
+
+TEST_F(CoEHandlerTest, MailboxLengthExceedsRequestRejected) {
+    // mbxLength declares far more service data than the buffer contains.
+    uint8_t request[kMinRequestSize] = {};
+    buildSdoUploadRequest(request, 0x2000, 0);
+    request[0] = 0xFF; request[1] = 0xFF;
+
+    uint8_t response[256] = {};
+    size_t responseLen = sizeof(response);
+    EXPECT_FALSE(handler_->processRequest(request, kMinRequestSize, response, responseLen));
+}
+
+TEST_F(CoEHandlerTest, SmallResponseBufferRejected) {
+    // Response capacity below the fixed response size must fail cleanly
+    // rather than let a sub-handler write past the buffer.
+    uint8_t request[kMinRequestSize] = {};
+    buildSdoUploadRequest(request, 0x2000, 0);
+
+    uint8_t response[8] = {};
+    size_t responseLen = sizeof(response);
+    EXPECT_FALSE(handler_->processRequest(request, kMinRequestSize, response, responseLen));
+}
+
+TEST_F(CoEHandlerTest, SdoInfoGetODListTruncatedRejected) {
+    // SDO_INFO GetODList request without its 2-byte list-type field —
+    // mbxLength = 4 covers only the CoE header + opcode.
+    uint8_t request[12] = {};
+    request[0] = 4; request[1] = 0;      // mbxLength = 4
+    request[5] = 0x03;                    // type = CoE
+    request[7] = 0x80;                    // CoE service = 0x8 (SDO_INFO)
+    request[8] = 0x01;                    // opcode: GetODList request
+
+    uint8_t response[256] = {};
+    size_t responseLen = sizeof(response);
+    EXPECT_FALSE(handler_->processRequest(request, sizeof(request), response, responseLen));
+}
+
+TEST_F(CoEHandlerTest, SdoInfoGetObjDescTruncatedRejected) {
+    // SDO_INFO GetObjDesc without its 2-byte index field.
+    uint8_t request[12] = {};
+    request[0] = 4; request[1] = 0;
+    request[5] = 0x03;
+    request[7] = 0x80;
+    request[8] = 0x03;                    // opcode: GetObjDesc request
+
+    uint8_t response[256] = {};
+    size_t responseLen = sizeof(response);
+    EXPECT_FALSE(handler_->processRequest(request, sizeof(request), response, responseLen));
+}
+
+TEST_F(CoEHandlerTest, SdoInfoGetEntryDescTruncatedRejected) {
+    // SDO_INFO GetEntryDesc needs 6 bytes; give it 5.
+    uint8_t request[13] = {};
+    request[0] = 5; request[1] = 0;
+    request[5] = 0x03;
+    request[7] = 0x80;
+    request[8] = 0x05;                    // opcode: GetEntryDesc request
+    request[9] = 0x00; request[10] = 0x20;
+    request[11] = 0x00;
+
+    uint8_t response[256] = {};
+    size_t responseLen = sizeof(response);
+    EXPECT_FALSE(handler_->processRequest(request, sizeof(request), response, responseLen));
+}
+
+TEST_F(CoEHandlerTest, SdoInfoGetODListValid) {
+    // Sanity: a well-formed GetODList request still works.
+    uint8_t request[14] = {};
+    request[0] = 6; request[1] = 0;      // mbxLength = 6 (CoE hdr + 4-byte req)
+    request[5] = 0x03;
+    request[7] = 0x80;                    // CoE service = 0x8 (SDO_INFO)
+    request[8] = 0x01;                    // opcode: GetODList
+    request[9] = 0x00;
+    request[10] = 0x01; request[11] = 0x00;  // listType = 1
+
+    uint8_t response[256] = {};
+    size_t responseLen = sizeof(response);
+    EXPECT_TRUE(handler_->processRequest(request, sizeof(request), response, responseLen));
+    EXPECT_EQ(response[8], 0x02);         // GetODList response opcode
+}

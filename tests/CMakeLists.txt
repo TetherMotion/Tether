@@ -26,6 +26,28 @@ endif()
 # Include GoogleTest for gtest_discover_tests
 include(GoogleTest)
 
+# Per-test timeout multiplier.  The ctest TIMEOUT property below is a
+# wall-clock bound tuned for a plain Debug build; instrumented builds
+# (ASAN/TSAN/coverage) and heavily-parallel ctest invocations are several
+# times slower, so a hardcoded bound flakes (random tests hit Timeout under
+# load).  Auto-scale to 4x when a sanitizer or coverage flag is present in
+# the compiler flags; overridable via -DTETHER_TEST_TIMEOUT_SCALE=N.
+set(TETHER_TEST_TIMEOUT_SCALE "" CACHE STRING
+    "Per-test ctest timeout multiplier (auto-detected for instrumented builds)")
+if(NOT TETHER_TEST_TIMEOUT_SCALE)
+    if(CMAKE_CXX_FLAGS MATCHES "-fsanitize|--coverage|-fprofile"
+            OR CMAKE_C_FLAGS MATCHES "-fsanitize|--coverage|-fprofile"
+            OR CMAKE_BUILD_TYPE MATCHES "[Cc]overage")
+        set(TETHER_TEST_TIMEOUT_SCALE 4)
+    else()
+        set(TETHER_TEST_TIMEOUT_SCALE 1)
+    endif()
+endif()
+math(EXPR TETHER_TEST_TIMEOUT_30  "30  * ${TETHER_TEST_TIMEOUT_SCALE}")
+math(EXPR TETHER_TEST_TIMEOUT_60  "60  * ${TETHER_TEST_TIMEOUT_SCALE}")
+math(EXPR TETHER_TEST_TIMEOUT_120 "120 * ${TETHER_TEST_TIMEOUT_SCALE}")
+math(EXPR TETHER_TEST_TIMEOUT_300 "300 * ${TETHER_TEST_TIMEOUT_SCALE}")
+
 # Test executables are not part of the default `all` target.  They are built
 # only when the `tests` custom target is requested (e.g. `make tests`, `ninja tests`).
 set_property(GLOBAL PROPERTY TETHER_ALL_TEST_TARGETS "")
@@ -100,7 +122,7 @@ function(create_module_test MODULE_NAME SOURCES LIBS DEFINITIONS)
         ${DEFINITIONS}
     )
 
-    gtest_discover_tests(tether_${MODULE_NAME}_tests PROPERTIES TIMEOUT 30)
+    gtest_discover_tests(tether_${MODULE_NAME}_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_30})
 endfunction()
 
 # Like create_module_test but with a custom per-test timeout (seconds).
@@ -141,7 +163,8 @@ function(create_module_test_timeout MODULE_NAME SOURCES LIBS DEFINITIONS TEST_TI
         ${DEFINITIONS}
     )
 
-    gtest_discover_tests(tether_${MODULE_NAME}_tests PROPERTIES TIMEOUT ${TEST_TIMEOUT})
+    math(EXPR _scaled_test_timeout "${TEST_TIMEOUT} * ${TETHER_TEST_TIMEOUT_SCALE}")
+    gtest_discover_tests(tether_${MODULE_NAME}_tests PROPERTIES TIMEOUT ${_scaled_test_timeout})
 endfunction()
 
 # Collect test sources by module
@@ -627,7 +650,7 @@ target_compile_definitions(tether_motion_geometry_tests PRIVATE
 # test exceed the default 30 s under Debug/ASAN.
 gtest_discover_tests(tether_motion_geometry_tests
     TEST_PREFIX motion_geometry.
-    PROPERTIES TIMEOUT 120
+    PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_120}
 )
 
 # New blend layer (namespace tether::motion), Phase 2 of the motion-planner
@@ -675,7 +698,7 @@ target_compile_definitions(tether_motion_blend_new_tests PRIVATE
 )
 gtest_discover_tests(tether_motion_blend_new_tests
     TEST_PREFIX motion_blend_new.
-    PROPERTIES TIMEOUT 300
+    PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_300}
 )
 
 # ReNURBS profile representation (namespace tether::motion::profile_renurbs).
@@ -718,7 +741,7 @@ target_compile_definitions(tether_motion_planner_renurbs_tests PRIVATE
 )
 gtest_discover_tests(tether_motion_planner_renurbs_tests
     TEST_PREFIX motion_renurbs.
-    PROPERTIES TIMEOUT 120
+    PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_120}
 )
 
 create_module_test(motion_replanner_core "${MOTION_REPLANNER_CORE_SOURCES}" "${MOTION_REPLANNER_LIBS}" "")
@@ -910,7 +933,7 @@ target_compile_definitions(tether_platform_serial_tests PRIVATE
 )
 
 gtest_discover_tests(tether_platform_serial_tests
-    PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
+    PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_60} RUN_SERIAL TRUE)
 
 if(MOCKS_TEST_SOURCES)
     create_module_test(mocks
@@ -949,7 +972,7 @@ target_compile_definitions(tether_fsoe_integration_tests PRIVATE
     TETHER_COMPILE_MASTER=1
 )
 
-gtest_discover_tests(tether_fsoe_integration_tests PROPERTIES TIMEOUT 30)
+gtest_discover_tests(tether_fsoe_integration_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_30})
 
 tether_add_test_executable(tether_header_tests
     sii/zero_coverage_header_tests.cpp
@@ -970,7 +993,7 @@ target_link_libraries(tether_header_tests
 target_compile_definitions(tether_header_tests PRIVATE
 )
 
-gtest_discover_tests(tether_header_tests PROPERTIES TIMEOUT 30)
+gtest_discover_tests(tether_header_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_30})
 
 # Utility tests (header-only utilities, no EtherCAT dependencies)
 tether_add_test_executable(tether_utils_tests
@@ -987,7 +1010,7 @@ target_link_libraries(tether_utils_tests
     GTest::gtest_main
 )
 
-gtest_discover_tests(tether_utils_tests PROPERTIES TIMEOUT 30)
+gtest_discover_tests(tether_utils_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_30})
 
 # Helper to create ethercat test executables with common settings
 function(create_ethercat_test NAME)
@@ -1011,7 +1034,7 @@ function(create_ethercat_test NAME)
     target_compile_definitions(tether_ethercat_${NAME}_tests PRIVATE
         ${ET_DEFS}
     )
-    gtest_discover_tests(tether_ethercat_${NAME}_tests PROPERTIES TIMEOUT 30)
+    gtest_discover_tests(tether_ethercat_${NAME}_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_30})
 endfunction()
 
 # Common stubs and source files compiled into each ethercat test exe
@@ -1239,7 +1262,7 @@ target_compile_definitions(tether_ethercat_integration_tests PRIVATE
     TETHER_COMPILE_MASTER=1
 )
 
-gtest_discover_tests(tether_ethercat_integration_tests PROPERTIES TIMEOUT 30)
+gtest_discover_tests(tether_ethercat_integration_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_30})
 
 # EtherCAT master + slave state-machine tests (needs full Master/Slave linkage)
 tether_add_test_executable(tether_ethercat_master_tests
@@ -1274,7 +1297,7 @@ target_compile_definitions(tether_ethercat_master_tests PRIVATE
     TETHER_COMPILE_MASTER=1
 )
 
-gtest_discover_tests(tether_ethercat_master_tests PROPERTIES TIMEOUT 30)
+gtest_discover_tests(tether_ethercat_master_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_30})
 
 # Privileged realtime integration tests — exercise AF_PACKET / PACKET_MMAP
 # rings / kernel cBPF demux / SCHED_FIFO / SCHED_DEADLINE / CPU isolation /
@@ -1312,7 +1335,7 @@ target_compile_definitions(tether_ethercat_rt_privileged_tests PRIVATE
     TETHER_COMPILE_MASTER=1
 )
 
-gtest_discover_tests(tether_ethercat_rt_privileged_tests PROPERTIES TIMEOUT 60)
+gtest_discover_tests(tether_ethercat_rt_privileged_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_60})
 
 # EtherCAT slave supervisor tests (needs full Master linkage for ALResetController,
 # SlaveStatusPoller, and Slave access)
@@ -1339,7 +1362,7 @@ target_compile_definitions(tether_ethercat_supervisor_tests PRIVATE
     TETHER_COMPILE_MASTER=1
 )
 
-gtest_discover_tests(tether_ethercat_supervisor_tests PROPERTIES TIMEOUT 30)
+gtest_discover_tests(tether_ethercat_supervisor_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_30})
 
 tether_add_test_executable(tether_model_identification_tests
     identification/test_ModelIdentification.cpp
@@ -1363,7 +1386,7 @@ target_link_libraries(tether_model_identification_tests
 target_compile_definitions(tether_model_identification_tests PRIVATE
 )
 
-gtest_discover_tests(tether_model_identification_tests PROPERTIES TIMEOUT 30)
+gtest_discover_tests(tether_model_identification_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_30})
 
 tether_add_test_executable(tether_simulation_identification_tests
     identification/test_SimulationIdentificationIntegration.cpp
@@ -1388,7 +1411,7 @@ target_link_libraries(tether_simulation_identification_tests
 target_compile_definitions(tether_simulation_identification_tests PRIVATE
 )
 
-gtest_discover_tests(tether_simulation_identification_tests PROPERTIES TIMEOUT 30)
+gtest_discover_tests(tether_simulation_identification_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_30})
 
 # =============================================================================
 # Klipper protocol tests
