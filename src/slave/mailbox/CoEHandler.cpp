@@ -51,6 +51,11 @@ namespace {
     constexpr uint8_t SDO_INFO_GET_ENTRY_DESC_REQ = 0x05;
     constexpr uint8_t SDO_INFO_GET_ENTRY_DESC_RES = 0x06;
     constexpr uint8_t SDO_INFO_ERROR = 0x07;
+
+    // Cap on accumulated data for a segmented SDO download. Real objects are
+    // far smaller; this bound stops a hostile master from exhausting memory
+    // with an endless download.
+    constexpr size_t kMaxSegmentedDownloadSize = 65536;
 }
 
 // ============================================================================
@@ -289,7 +294,10 @@ public:
     
     bool processRequest(const uint8_t* request, size_t requestLength,
                         uint8_t* response, size_t& responseLength) override {
-        if (requestLength < 8) {  // Minimum mailbox + CoE header
+        // Minimum request: mailbox header (6) + CoE header (2).
+        // Minimum response capacity: fixed part (8) + largest fixed service
+        // payload prefix so sub-handlers never write past the buffer.
+        if (requestLength < 8 || responseLength < 16) {
             return false;
         }
         
@@ -305,6 +313,14 @@ public:
             return false;  // Not CoE
         }
         
+        // The declared mailbox service length must cover the 2-byte CoE
+        // header and fit within the actual request buffer — otherwise the
+        // subtraction below underflows or the handlers read past the buffer.
+        if (mbxLength < 2 ||
+            static_cast<size_t>(mbxLength) + 6 > requestLength) {
+            return false;
+        }
+        
         // Parse CoE header (2 bytes)
         const uint8_t* coeData = request + 6;
         uint16_t coeHeader = coeData[0] | (coeData[1] << 8);
@@ -316,38 +332,41 @@ public:
         response[4] = mbxChannel | (mbxPriority << 6);
         response[5] = MBOX_TYPE_COE | (mbxCount << 4);
         
+        // Service payload capacity: the service handlers write at
+        // response + 8, so they may use at most responseLength - 8 bytes.
+        size_t payloadLen = responseLength - 8;
         bool result = false;
         
         switch (coeService) {
             case COE_SDO_REQ:
                 result = processSDORequest(coeData + 2, mbxLength - 2,
-                                           response + 8, responseLength);
+                                           response + 8, payloadLen);
                 if (result) {
                     // Add CoE header to response
                     response[6] = ((COE_SDO_RES & 0x0F) << 4);
                     response[7] = 0;
                     
                     // Update mailbox length
-                    uint16_t respLen = responseLength + 2;  // +2 for CoE header
+                    uint16_t respLen = payloadLen + 2;  // +2 for CoE header
                     response[0] = respLen & 0xFF;
                     response[1] = (respLen >> 8) & 0xFF;
                     
-                    responseLength += 8;  // Total response includes mailbox + CoE header
+                    responseLength = payloadLen + 8;  // Total response includes mailbox + CoE header
                 }
                 break;
                 
             case COE_SDO_INFO:
                 result = processSDOInfo(coeData + 2, mbxLength - 2,
-                                        response + 8, responseLength);
+                                        response + 8, payloadLen);
                 if (result) {
                     response[6] = ((COE_SDO_INFO & 0x0F) << 4);
                     response[7] = 0;
                     
-                    uint16_t respLen = responseLength + 2;
+                    uint16_t respLen = payloadLen + 2;
                     response[0] = respLen & 0xFF;
                     response[1] = (respLen >> 8) & 0xFF;
                     
-                    responseLength += 8;
+                    responseLength = payloadLen + 8;
                 }
                 break;
                 
@@ -402,6 +421,7 @@ private:
     
     bool processUploadInit(const uint8_t* data, size_t length,
                            uint8_t* response, size_t& responseLength) {
+        if (responseLength < 8) return false;
         uint16_t index = data[1] | (data[2] << 8);
         uint8_t subindex = data[3];
         
@@ -470,6 +490,7 @@ private:
     
     bool processUploadSegment(const uint8_t* data, size_t length,
                                uint8_t* response, size_t& responseLength) {
+        if (responseLength < 8) return false;
         if (!segmentedTransferActive_ || !segmentedUpload_) {
             return sendAbort(segmentedIndex_, segmentedSubindex_,
                             static_cast<uint32_t>(SDOAbortCode::InvalidCommand),
@@ -509,6 +530,7 @@ private:
     
     bool processDownloadInit(const uint8_t* data, size_t length,
                               uint8_t* response, size_t& responseLength) {
+        if (responseLength < 8) return false;
         uint16_t index = data[1] | (data[2] << 8);
         uint8_t subindex = data[3];
         
@@ -580,6 +602,7 @@ private:
     
     bool processDownloadSegment(const uint8_t* data, size_t length,
                                  uint8_t* response, size_t& responseLength) {
+        if (responseLength < 8) return false;
         if (!segmentedTransferActive_ || segmentedUpload_) {
             return sendAbort(segmentedIndex_, segmentedSubindex_,
                             static_cast<uint32_t>(SDOAbortCode::InvalidCommand),
@@ -596,6 +619,23 @@ private:
         uint8_t n = (data[0] >> 1) & 0x07;
         bool lastSegment = (data[0] & 0x01) != 0;
         size_t segmentSize = 7 - n;
+        
+        // The request must actually contain the declared segment bytes.
+        if (length < 1 + segmentSize) {
+            return sendAbort(segmentedIndex_, segmentedSubindex_,
+                            static_cast<uint32_t>(SDOAbortCode::InvalidCommand),
+                            response, responseLength);
+        }
+        
+        // Bound the accumulated download — a hostile master could otherwise
+        // grow segmentedData_ without limit.
+        if (segmentedData_.size() + segmentSize > kMaxSegmentedDownloadSize) {
+            segmentedTransferActive_ = false;
+            segmentedData_.clear();
+            return sendAbort(segmentedIndex_, segmentedSubindex_,
+                            static_cast<uint32_t>(SDOAbortCode::OutOfMemory),
+                            response, responseLength);
+        }
         
         segmentedData_.insert(segmentedData_.end(), data + 1, data + 1 + segmentSize);
         
@@ -649,6 +689,10 @@ private:
     
     bool processGetODList(const uint8_t* data, size_t length,
                            uint8_t* response, size_t& responseLength) {
+        // opcode(2) + list type(2) request, opcode(2) + list type(2) response
+        if (length < 4 || responseLength < 4) {
+            return false;
+        }
         // This requires knowing all indices - we can iterate if needed
         // For now, return a minimal response
         uint16_t listType = data[2] | (data[3] << 8);
@@ -664,6 +708,10 @@ private:
     
     bool processGetObjDesc(const uint8_t* data, size_t length,
                             uint8_t* response, size_t& responseLength) {
+        // opcode(2) + index(2) request; response needs at least 7 fixed bytes
+        if (length < 4 || responseLength < 7) {
+            return false;
+        }
         size_t bufCap = responseLength;
         uint16_t index = data[2] | (data[3] << 8);
 
@@ -696,6 +744,11 @@ private:
     
     bool processGetEntryDesc(const uint8_t* data, size_t length,
                               uint8_t* response, size_t& responseLength) {
+        // opcode(2) + index(2) + subindex(1) + valueInfo(1) request;
+        // response needs at least 10 fixed bytes
+        if (length < 6 || responseLength < 10) {
+            return false;
+        }
         size_t bufCap = responseLength;
         uint16_t index = data[2] | (data[3] << 8);
         uint8_t subindex = data[4];
@@ -731,6 +784,9 @@ private:
     
     bool sendAbort(uint16_t index, uint8_t subindex, uint32_t abortCode,
                    uint8_t* response, size_t& responseLength) {
+        if (responseLength < 8) {
+            return false;  // Abort response does not fit — nothing safe to send
+        }
         response[0] = (SDO_CCS_ABORT << 5);
         response[1] = index & 0xFF;
         response[2] = (index >> 8) & 0xFF;

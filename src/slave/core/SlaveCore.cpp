@@ -192,14 +192,20 @@ std::vector<uint8_t> SlaveCore::processFrame(const uint8_t* frame, size_t length
     uint16_t ecatLength = ecatHeader & 0x07FF;
     offset += 2;
     
-    // Process datagrams
-    size_t remaining = ecatLength;
-    while (remaining >= 10) {  // Minimum datagram header size
+    // Process datagrams. The wire-declared EtherCAT length is clamped to the
+    // actual frame length so a malformed frame cannot drive reads or writes
+    // past the caller's buffer.
+    size_t remaining = std::min<size_t>(ecatLength, length - offset);
+    while (remaining >= sizeof(DatagramHeader)) {
         // Parse datagram header using the EtherCATTypes DatagramHeader structure
         DatagramHeader header;
         std::memcpy(&header, frame + offset, sizeof(DatagramHeader));
         
         uint16_t dataLen = header.dataLength();
+        size_t datagramSize = sizeof(DatagramHeader) + dataLen + 2;  // header + data + WKC
+        if (datagramSize > remaining) {
+            break;  // Truncated datagram — do not touch memory past the frame
+        }
         
         // Process this datagram
         uint8_t* dataPtr = response.data() + offset + sizeof(DatagramHeader);
@@ -216,7 +222,6 @@ std::vector<uint8_t> SlaveCore::processFrame(const uint8_t* frame, size_t length
         std::memcpy(response.data() + offset, &header, sizeof(DatagramHeader));
         
         // Move to next datagram
-        size_t datagramSize = sizeof(DatagramHeader) + dataLen + 2;  // header + data + WKC
         offset += datagramSize;
         remaining -= datagramSize;
         
@@ -642,7 +647,8 @@ bool SlaveCore::writeRegister(uint16_t addr, const uint8_t* data, uint16_t len) 
     siiEmulator_.handleRegisterWrite(addr, data, len);
     
     // Handle FMMU writes
-    if (addr >= ESCReg::FMMU0 && addr < ESCReg::FMMU0 + 16 * ESCReg::FMMUSize) {
+    if (addr >= ESCReg::FMMU0 && addr < ESCReg::FMMU0 + 16 * ESCReg::FMMUSize &&
+        addr + len <= registers_.size()) {
         size_t fmmuIndex = (addr - ESCReg::FMMU0) / ESCReg::FMMUSize;
         if (fmmuIndex < fmmus_.size()) {
             // Update from register
@@ -653,7 +659,8 @@ bool SlaveCore::writeRegister(uint16_t addr, const uint8_t* data, uint16_t len) 
     }
     
     // Handle SM writes
-    if (addr >= ESCReg::SM0 && addr < ESCReg::SM0 + 8 * ESCReg::SMSize) {
+    if (addr >= ESCReg::SM0 && addr < ESCReg::SM0 + 8 * ESCReg::SMSize &&
+        addr + len <= registers_.size()) {
         size_t smIndex = (addr - ESCReg::SM0) / ESCReg::SMSize;
         if (smIndex < syncManagers_.size()) {
             std::memcpy(&registers_[addr], data, len);
@@ -808,11 +815,16 @@ void SlaveCore::processMailboxOut() {
                     // Sync status byte back to register image
                     registers_[ESCReg::SM0 + 5] = std::bit_cast<uint8_t>(sm.status);
 
-                    // Dispatch to mailbox handlers and generate response
+                    // Dispatch to mailbox handlers and generate response.
+                    // Pass the number of bytes actually copied into
+                    // mailboxOut_ — never the raw wire-controlled sm.length,
+                    // which may exceed the buffer.
+                    const size_t mbxDataLen =
+                        std::min(static_cast<size_t>(sm.length), mailboxOut_.size());
                     for (auto& handler : mailboxHandlers_) {
                         uint8_t responseBuf[256] = {0};
                         size_t responseLen = sizeof(responseBuf);
-                        if (handler->processRequest(mailboxOut_.data(), sm.length,
+                        if (handler->processRequest(mailboxOut_.data(), mbxDataLen,
                                                      responseBuf, responseLen)) {
                             // Clamp responseLen to buffer capacity as a safety
                             // net — handlers should respect the input value of

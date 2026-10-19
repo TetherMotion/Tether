@@ -687,3 +687,128 @@ TEST_F(SlaveCoreTest, MailboxOut_RecoveryAfterMasterConsumesResponse) {
     EXPECT_EQ(handler->call_count, 2)
         << "Handler should be called after master consumed the previous response";
 }
+
+// ============================================================================
+// Regression tests: malformed wire frames (packet-injection hardening)
+// ============================================================================
+
+TEST_F(SlaveCoreTest, TruncatedEtherCATLengthDoesNotOverread) {
+    // The EtherCAT header declares a payload longer than the actual frame.
+    // Before the fix, the parser trusted the declared length and walked
+    // off the end of the buffer.
+    auto frame = buildFrame(EcCmd::BRD, 0, REG_TYPE, std::vector<uint8_t>(8, 0));
+    // Inflate the declared EtherCAT length to the 11-bit maximum.
+    uint16_t ecLen = 0x07FF | (0x01 << 12);
+    frame[14] = ecLen & 0xFF;
+    frame[15] = (ecLen >> 8) & 0xFF;
+
+    auto response = core->processFrame(frame.data(), frame.size());
+    EXPECT_EQ(response.size(), frame.size());
+}
+
+TEST_F(SlaveCoreTest, TruncatedDatagramStopsParsing) {
+    // Datagram header declares dataLen far beyond the frame — the parser
+    // must stop instead of processing phantom payload/WKC bytes.
+    auto frame = buildFrame(EcCmd::BRD, 0, REG_TYPE, std::vector<uint8_t>(4, 0));
+    // lenFlags lives at bytes 22-23 of the datagram header (frame offset 16).
+    frame[22] = 0xFF;  // dataLength low bits → 0x7FF = 2047
+    frame[23] = (frame[23] & ~0x07) | 0x07;
+
+    auto response = core->processFrame(frame.data(), frame.size());
+    EXPECT_EQ(response.size(), frame.size());
+}
+
+TEST_F(SlaveCoreTest, EmptyDatagramTailDoesNotReadPastFrame) {
+    // A frame ending right after a datagram header (no data/WKC bytes).
+    // ecatLength declares a bare header (10 bytes); the WKC must not be
+    // read or written past the end.
+    std::vector<uint8_t> frame(14 + 2 + 10, 0);
+    std::memset(&frame[0], 0xFF, 6);
+    frame[12] = (ETHERCAT_ETHERTYPE >> 8) & 0xFF;
+    frame[13] = ETHERCAT_ETHERTYPE & 0xFF;
+    uint16_t ecLen = 10 | (0x01 << 12);
+    frame[14] = ecLen & 0xFF;
+    frame[15] = (ecLen >> 8) & 0xFF;
+    frame[16] = static_cast<uint8_t>(EcCmd::BRD);
+    // lenFlags = 0 → dataLen 0 → datagram needs 12 bytes, only 10 present.
+
+    auto response = core->processFrame(frame.data(), frame.size());
+    EXPECT_EQ(response.size(), frame.size());
+}
+
+TEST_F(SlaveCoreTest, OversizedSmRegisterWriteDoesNotOverflow) {
+    // BWR to the last SM register byte (0x87F) with a max-length datagram.
+    // The SM config path copies len bytes into registers_ — without the
+    // bounds guard this writes past the 4 KiB register bank.
+    std::vector<uint8_t> payload(0x7FF, 0xAA);
+    auto frame = buildFrame(EcCmd::BWR, 0, REG_SM0 + 0x7F, payload);
+    auto response = core->processFrame(frame.data(), frame.size());
+    EXPECT_EQ(response.size(), frame.size());
+
+    // Slave must remain functional after the rejected/trimmed write.
+    auto ping = buildFrame(EcCmd::BRD, 0, REG_TYPE, std::vector<uint8_t>(4, 0));
+    auto r2 = core->processFrame(ping.data(), ping.size());
+    EXPECT_EQ(r2.size(), ping.size());
+}
+
+TEST_F(SlaveCoreTest, OversizedFmmuRegisterWriteDoesNotOverflow) {
+    // Same pattern for the FMMU register region (0x0600-0x06FF).
+    std::vector<uint8_t> payload(0x7FF, 0xAA);
+    auto frame = buildFrame(EcCmd::BWR, 0, REG_FMMU0 + 0xFF, payload);
+    auto response = core->processFrame(frame.data(), frame.size());
+    EXPECT_EQ(response.size(), frame.size());
+}
+
+TEST_F(SlaveCoreTest, ValidFrameStillProcessedAfterHardening) {
+    // Sanity: a normal broadcast register read still returns a WKC.
+    auto frame = buildFrame(EcCmd::BRD, 0, REG_TYPE, std::vector<uint8_t>(4, 0));
+    auto response = core->processFrame(frame.data(), frame.size());
+    ASSERT_EQ(response.size(), frame.size());
+    EXPECT_NE(extractWKC(response, 4), 0xFFFF);
+}
+
+// Handler that records the request length it was given — used to verify
+// the wire-controlled SM length is clamped to the mailbox buffer size.
+class LengthRecordingHandler : public IMailboxHandler {
+public:
+    MailboxProtocol getProtocol() const override { return MailboxProtocol::CoE; }
+    const char* getProtocolName() const override { return "LenMock"; }
+    void reset() override {}
+    bool processRequest(const uint8_t* /*request*/, size_t requestLen,
+                        uint8_t* response, size_t& responseLen) override {
+        last_length = requestLen;
+        call_count++;
+        if (responseLen < 8) return false;
+        std::memset(response, 0xAB, 8);
+        responseLen = 8;
+        return true;
+    }
+    int call_count = 0;
+    size_t last_length = 0;
+};
+
+TEST_F(SlaveCoreTest, MailboxHandlerReceivesClampedSmLength) {
+    // Attacker writes an SM0 length larger than the configured mailbox
+    // buffer (mailboxOutSize, default 128). The handler must see the
+    // number of bytes actually copied into mailboxOut_, not sm.length.
+    auto sm0 = core->getSyncManager(0);
+    sm0.setEnabled(true);
+    sm0.length = 512;   // > default mailboxOutSize (128), still within process RAM
+    core->setSyncManager(0, sm0);
+
+    auto sm1 = core->getSyncManager(1);
+    sm1.setEnabled(true);
+    core->setSyncManager(1, sm1);
+
+    auto handler = std::make_shared<LengthRecordingHandler>();
+    core->addMailboxHandler(handler);
+
+    std::vector<uint8_t> reqData(sm0.length, 0x42);
+    auto frame = buildFrame(EcCmd::FPWR, 0x0000, sm0.physicalAddr, reqData);
+    core->processFrame(frame.data(), frame.size());
+    core->simulate(1000000);
+
+    ASSERT_EQ(handler->call_count, 1);
+    EXPECT_LE(handler->last_length, 128u)
+        << "Handler must not see more bytes than the mailbox buffer holds";
+}

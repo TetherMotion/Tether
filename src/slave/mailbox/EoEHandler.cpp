@@ -45,6 +45,11 @@ namespace {
     
     // Maximum Ethernet frame size
     constexpr size_t MAX_ETHERNET_FRAME = 1518;
+
+    // Bounds on RX fragment reassembly state — stop a hostile master from
+    // exhausting memory with an endless stream of fragments.
+    constexpr size_t kMaxPendingFrames = 64;       // distinct frame numbers in flight
+    constexpr size_t kMaxFragmentsPerFrame = 64;   // fragments accumulated per frame
 }
 
 // ============================================================================
@@ -185,6 +190,9 @@ public:
     }
     
     bool getNextTxFragment(uint8_t* data, size_t maxLength, size_t& length) {
+        if (maxLength < 4) {  // Fragment header alone needs 4 bytes
+            return false;
+        }
         if (currentTxFrame_.empty()) {
             if (txQueue_.empty()) {
                 return false;
@@ -254,8 +262,24 @@ private:
         size_t dataSize = length - headerSize;
         const uint8_t* frameData = data + headerSize;
         
-        // Find or create fragment entry
+        // Bound reassembly state — a hostile master could otherwise grow the
+        // map (distinct frame numbers) or a single fragment list without
+        // limit and exhaust memory.
+        auto fragIt = rxFragments_.find(frameNumber);
+        if (fragIt == rxFragments_.end()) {
+            if (rxFragments_.size() >= kMaxPendingFrames) {
+                stats_.reassemblyErrors++;
+                responseLength = 0;
+                return true;
+            }
+        }
         auto& fragments = rxFragments_[frameNumber];
+        if (fragments.size() >= kMaxFragmentsPerFrame) {
+            rxFragments_.erase(frameNumber);
+            stats_.reassemblyErrors++;
+            responseLength = 0;
+            return true;
+        }
         
         EoEFragment frag;
         frag.data.assign(frameData, frameData + dataSize);
@@ -329,6 +353,7 @@ private:
     }
     
     bool handleTimestampRequest(uint8_t* response, size_t& responseLength) {
+        if (responseLength < 12) return false;
         // Build timestamp response
         response[0] = (EOE_TYPE_TIMESTAMP_RESPONSE << 4);
         response[1] = 0;
@@ -409,7 +434,11 @@ private:
         }
         
         if (flags & 0x20) {  // DNS name included
-            ipParams_.dnsName = std::string(reinterpret_cast<const char*>(data + offset));
+            // The name is expected NUL-terminated, but bound the scan to the
+            // request so an unterminated name cannot read past the buffer.
+            const char* nameStart = reinterpret_cast<const char*>(data + offset);
+            size_t nameLen = strnlen(nameStart, length - offset);
+            ipParams_.dnsName.assign(nameStart, nameLen);
             ipParams_.dnsNameIncluded = true;
         }
         
@@ -501,6 +530,7 @@ private:
     
     bool sendResponse(uint8_t frameType, uint16_t result,
                      uint8_t* response, size_t& responseLength) {
+        if (responseLength < 4) return false;
         response[0] = (frameType << 4);
         response[1] = 0;
         response[2] = result & 0xFF;

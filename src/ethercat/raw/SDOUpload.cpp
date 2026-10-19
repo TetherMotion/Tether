@@ -668,11 +668,19 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 }
                 produced += seg_data_bytes;
                 if (last) {
-                    if (outLen) {
-                        *outLen = produced;
+                    // Report only the number of bytes actually valid in the
+                    // caller buffer — the same contract as the inline path
+                    // above. A slave that over-produces (or never sets
+                    // total_size) cannot push outLen past outCap.
+                    size_t reported = produced;
+                    if (total_size != 0 && reported > total_size) {
+                        reported = total_size;
                     }
-                    if (total_size != 0 && produced > total_size && outLen) {
-                        *outLen = total_size;
+                    if (out && reported > outCap) {
+                        reported = outCap;
+                    }
+                    if (outLen) {
+                        *outLen = reported;
                     }
                     diagnostics_.logCoeMbxPacket("RX", adp, index, sub, rspbuf, mbxReadLen,
                             master.debugFlags().coeRxPackets && master.debugFlags().coeRxPacketsFilt.allows(slaveIndexFromADP(adp)));
