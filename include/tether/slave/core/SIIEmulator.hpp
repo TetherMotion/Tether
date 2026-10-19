@@ -43,7 +43,7 @@ public:
 
     uint16_t readWord(uint16_t wordAddr) const {
         size_t byteAddr = static_cast<size_t>(wordAddr) * 2;
-        if (byteAddr + 1 > siiState_.eepromData.size()) {
+        if (byteAddr + 2 > siiState_.eepromData.size()) {
             return 0xFFFF;
         }
         return siiState_.eepromData[byteAddr] |
@@ -52,7 +52,7 @@ public:
 
     bool writeWord(uint16_t wordAddr, uint16_t data) {
         size_t byteAddr = static_cast<size_t>(wordAddr) * 2;
-        if (byteAddr + 1 > siiState_.eepromData.size()) {
+        if (byteAddr + 2 > siiState_.eepromData.size()) {
             return false;
         }
         siiState_.eepromData[byteAddr] = data & 0xFF;

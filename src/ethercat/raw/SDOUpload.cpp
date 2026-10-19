@@ -345,7 +345,10 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                     continue;
                 }
             }
-            r_len = le16_to_host(reinterpret_cast<const MbxHeader*>(rspbuf)->length_le);
+            // hdr.len was already clamped to the received byte count inside
+            // pollSm1AndRead (and resyncMailboxCounter's internal poll) —
+            // use it rather than re-reading the slave-claimed field.
+            r_len = hdr.len;
             got_init_response = true;
             if (r_len < (sizeof(CoeHeader) + sizeof(SdoInitUploadRes))) {
                 return false;
@@ -576,6 +579,11 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                 MbxHeader r2_mbx;
                 std::memcpy(&r2_mbx, rspbuf, sizeof(r2_mbx));
                 uint16_t r2_len = le16_to_host(r2_mbx.length_le);
+                // Clamp slave-claimed payload length to bytes received —
+                // see pollSm1AndRead for the same treatment.
+                const uint16_t r2_body = (mbxReadLen > sizeof(MbxHeader))
+                    ? static_cast<uint16_t>(mbxReadLen - sizeof(MbxHeader)) : 0;
+                if (r2_len > r2_body) r2_len = r2_body;
                 uint8_t r2_type = static_cast<uint8_t>(r2_mbx.mbxtype & 0x0Fu);
                 if (r2_type == EC_MBXT_ERR) {
                     MbxResponseHeader err_hdr{};
@@ -603,6 +611,7 @@ bool SDOUpload::execute(Master& master, uint16_t adp,
                         // Recovered — re-read the accepted response header.
                         std::memcpy(&r2_mbx, rspbuf, sizeof(r2_mbx));
                         r2_len = le16_to_host(r2_mbx.length_le);
+                        if (r2_len > r2_body) r2_len = r2_body;
                         r2_type = static_cast<uint8_t>(r2_mbx.mbxtype & 0x0Fu);
                     } else {
                         handleMailboxError(rspbuf, err_hdr, adp, index, sub);

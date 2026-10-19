@@ -272,7 +272,7 @@ bool SDODownload::executeSegmented(Master& master, uint16_t adp,
                     TETHER_LOGE(TAG, "SDO segmented download abort (malformed response)");
                 }
 #ifdef TETHER_DIAG_SDO_IO
-                if (diagEnabled) {
+                if (diagEnabled && mbxReadLen > sdo_offset) {
                     TETHER_LOGI(TAG, "SDO segmented download abort raw response (mbx_read_len={})", (unsigned)mbxReadLen);
                     diagnostics_.diagHexdump(rspbuf + sdo_offset, mbxReadLen - sdo_offset, 256);
                 }

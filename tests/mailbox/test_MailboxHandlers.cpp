@@ -401,6 +401,48 @@ TEST_F(FoEHandlerTest, BootstrapFileReadAllowedWithoutCore) {
     EXPECT_EQ(resp[0], FOE_OP_DATA);
 }
 
+TEST_F(FoEHandlerTest, FileCountCapRejectsNewFiles) {
+    // 3 files are pre-registered; the virtual filesystem is capped at 32
+    // entries, so only 29 further files may be created before a WRQ for a
+    // new name is refused with DISK_FULL (0x8003).
+    for (int i = 0; i < 29; ++i) {
+        std::string name = "f" + std::to_string(i) + ".bin";
+        auto wrq = buildFoERequest(FOE_OP_WRITE_REQUEST, 0, name);
+        respLen = sizeof(resp);
+        ASSERT_TRUE(handler->processRequest(wrq.data(), wrq.size(), resp, respLen));
+        ASSERT_EQ(resp[0], FOE_OP_ACK) << "WRQ refused for " << name;
+        auto dataPkt = buildFoEData(1, {0xAA});
+        respLen = sizeof(resp);
+        ASSERT_TRUE(handler->processRequest(dataPkt.data(), dataPkt.size(), resp, respLen));
+        ASSERT_EQ(resp[0], FOE_OP_ACK);
+    }
+
+    auto wrq = buildFoERequest(FOE_OP_WRITE_REQUEST, 0, "overflow.bin");
+    respLen = sizeof(resp);
+    ASSERT_TRUE(handler->processRequest(wrq.data(), wrq.size(), resp, respLen));
+    EXPECT_EQ(resp[0], FOE_OP_ERROR);
+    uint32_t errCode = resp[2] | (resp[3]<<8) | (resp[4]<<16) | (resp[5]<<24);
+    EXPECT_EQ(errCode, 0x8003u);  // FOE_ERR_DISK_FULL
+}
+
+TEST_F(FoEHandlerTest, ExistingFileWritableAtCap) {
+    // At the file-count cap, writes to an already-registered file must
+    // still succeed — the cap only stops creation of NEW entries.
+    for (int i = 0; i < 29; ++i) {
+        std::string name = "f" + std::to_string(i) + ".bin";
+        auto wrq = buildFoERequest(FOE_OP_WRITE_REQUEST, 0, name);
+        respLen = sizeof(resp);
+        ASSERT_TRUE(handler->processRequest(wrq.data(), wrq.size(), resp, respLen));
+        auto dataPkt = buildFoEData(1, {0xAA});
+        respLen = sizeof(resp);
+        ASSERT_TRUE(handler->processRequest(dataPkt.data(), dataPkt.size(), resp, respLen));
+    }
+    auto wrq = buildFoERequest(FOE_OP_WRITE_REQUEST, 0, "config.bin");
+    respLen = sizeof(resp);
+    ASSERT_TRUE(handler->processRequest(wrq.data(), wrq.size(), resp, respLen));
+    EXPECT_EQ(resp[0], FOE_OP_ACK);
+}
+
 // ############################################################################
 //  SoE Handler Tests
 // ############################################################################

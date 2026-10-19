@@ -48,6 +48,12 @@ namespace {
     // images are well below this; the bound stops a hostile master from
     // exhausting memory with an endless DATA stream.
     constexpr size_t kMaxFoETransferSize = 8 * 1024 * 1024;
+
+    // Virtual filesystem bounds.  A WRQ to a new filename creates a file on
+    // completion, so without a cap a hostile master could grow files_
+    // indefinitely (each entry up to kMaxFoETransferSize).
+    constexpr size_t kMaxFoEFiles = 32;
+    constexpr size_t kMaxFoETotalBytes = 32 * 1024 * 1024;
 }
 
 // ============================================================================
@@ -261,16 +267,19 @@ private:
         auto it = files_.find(fileName);
         if (it != files_.end()) {
             VirtualFile& file = it->second;
-            
+
             if (file.readOnly) {
-                return sendError(FOE_ERR_ACCESS_DENIED, "File is read-only", 
+                return sendError(FOE_ERR_ACCESS_DENIED, "File is read-only",
                                response, responseLength);
             }
-            
+
             if (file.bootstrapOnly && core_ && core_->getState() != SlaveState::BOOT) {
                 return sendError(FOE_ERR_ACCESS_DENIED, "File only writable in Bootstrap",
                                response, responseLength);
             }
+        } else if (files_.size() >= kMaxFoEFiles) {
+            return sendError(FOE_ERR_DISK_FULL, "Too many files",
+                           response, responseLength);
         }
         
         // Start transfer
@@ -321,7 +330,10 @@ private:
         size_t maxDataSize = 512 - 6;  // Typical mailbox size - header
         if (dataLen < maxDataSize) {
             // Transfer complete
-            completeWriteTransfer();
+            if (!completeWriteTransfer()) {
+                return sendError(FOE_ERR_DISK_FULL, "Filesystem full",
+                               response, responseLength);
+            }
         }
         
         // Send ACK
@@ -358,21 +370,46 @@ private:
         return sendDataPacket(response, responseLength);
     }
     
-    void completeWriteTransfer() {
+    size_t totalFileBytes() const {
+        size_t total = 0;
+        for (const auto& [name, file] : files_) {
+            total += file.data.size();
+        }
+        return total;
+    }
+
+    bool completeWriteTransfer() {
         // Find file and update
         auto it = files_.find(transfer_.fileName);
         if (it != files_.end()) {
             VirtualFile& file = it->second;
-            
+
             if (file.writeCallback) {
                 if (!file.writeCallback(transfer_.data)) {
                     log(SlaveLogLevel::Error, SlaveLogCategory::FoE,
                         "Write callback failed for '{}'", transfer_.fileName);
                 }
             } else {
+                // Enforce the total-bytes cap on net growth of the store.
+                if (totalFileBytes() - file.data.size() + transfer_.data.size()
+                        > kMaxFoETotalBytes) {
+                    log(SlaveLogLevel::Warning, SlaveLogCategory::FoE,
+                        "Refusing to store '{}': filesystem full",
+                        transfer_.fileName);
+                    transfer_.active = false;
+                    return false;
+                }
                 file.data = transfer_.data;
             }
         } else {
+            if (files_.size() >= kMaxFoEFiles ||
+                totalFileBytes() + transfer_.data.size() > kMaxFoETotalBytes) {
+                log(SlaveLogLevel::Warning, SlaveLogCategory::FoE,
+                    "Refusing to store '{}': filesystem full",
+                    transfer_.fileName);
+                transfer_.active = false;
+                return false;
+            }
             // Create new file
             VirtualFile file;
             file.name = transfer_.fileName;
@@ -381,12 +418,13 @@ private:
             file.bootstrapOnly = false;
             files_[transfer_.fileName] = file;
         }
-        
+
         log(SlaveLogLevel::Info, SlaveLogCategory::FoE,
             "Write transfer complete: '{}', {} bytes",
             transfer_.fileName, transfer_.data.size());
-        
+
         transfer_.active = false;
+        return true;
     }
     
     bool sendDataPacket(uint8_t* response, size_t& responseLength) {

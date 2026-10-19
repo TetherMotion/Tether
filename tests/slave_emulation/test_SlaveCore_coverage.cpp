@@ -479,6 +479,33 @@ TEST_F(SlaveCoreTest, WriteSIIWord) {
     EXPECT_EQ(core->readSIIWord(0), 0x5678u);
 }
 
+TEST_F(SlaveCoreTest, SIIWordBoundaryOddSize) {
+    // Regression: readWord/writeWord accepted byteAddr+1 == size, so on an
+    // odd-sized EEPROM the trailing byte was treated as a complete word —
+    // a one-byte heap OOB read/write.  It must now be rejected.
+    std::vector<uint8_t> siiData(255, 0xAA);
+    core->setSIIData(siiData);
+    // Word 126 covers bytes 252-253 — the last complete word.
+    EXPECT_EQ(core->readSIIWord(126), 0xAAAAu);
+    EXPECT_TRUE(core->writeSIIWord(126, 0x1234));
+    EXPECT_EQ(core->readSIIWord(126), 0x1234u);
+    // Word 127 would need bytes 254-255 — byte 255 is out of bounds.
+    EXPECT_EQ(core->readSIIWord(127), 0xFFFFu);
+    EXPECT_FALSE(core->writeSIIWord(127, 0xBEEF));
+}
+
+TEST_F(SlaveCoreTest, SIIWordBoundaryEvenSize) {
+    // Even-sized EEPROM: the first word index past the end must fail while
+    // the last complete word still works.
+    std::vector<uint8_t> siiData = {1, 2, 3, 4, 5, 6, 7, 8};
+    core->setSIIData(siiData);
+    EXPECT_EQ(core->readSIIWord(3), 0x0807u);
+    EXPECT_EQ(core->readSIIWord(4), 0xFFFFu);
+    EXPECT_TRUE(core->writeSIIWord(3, 0xBEEF));
+    EXPECT_EQ(core->readSIIWord(3), 0xBEEFu);
+    EXPECT_FALSE(core->writeSIIWord(4, 0xBEEF));
+}
+
 // --- Watchdog ---
 
 TEST_F(SlaveCoreTest, WatchdogState) {

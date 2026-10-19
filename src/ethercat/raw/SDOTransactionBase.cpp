@@ -86,6 +86,17 @@ MbxPollOutcome SDOTransactionBase::pollSm1AndRead(Master& master, uint16_t adp,
     hdr.priority = r_mbx.priority;
     hdr.rawMbxType = r_mbx.mbxtype;
 
+    // Clamp the slave-claimed payload length to the bytes actually received:
+    // a hostile or buggy slave can claim more than the SM delivers, and
+    // callers index the buffer by hdr.len — anything past mbxReadLen is
+    // stale data from a previous transfer, not real response bytes.
+    const size_t bodyCap = (mbxReadLen > sizeof(MbxHeader))
+        ? static_cast<size_t>(mbxReadLen) - sizeof(MbxHeader)
+        : 0;
+    if (static_cast<size_t>(hdr.len) > bodyCap) {
+        hdr.len = static_cast<uint16_t>(bodyCap);
+    }
+
     return MbxPollOutcome::GotData;
 }
 
