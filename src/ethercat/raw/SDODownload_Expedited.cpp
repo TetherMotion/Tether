@@ -276,7 +276,7 @@ bool SDODownload::executeExpedited(Master& master, uint16_t adp,
                 TETHER_LOGE(TAG, "SDO download abort (malformed response)");
             }
 #ifdef TETHER_DIAG_SDO_IO
-            if (diagEnabled) {
+            if (diagEnabled && mbxReadLen > sdo_offset) {
                 TETHER_LOGI(TAG, "SDO download abort raw response (mbx_read_len={})", (unsigned)mbxReadLen);
                 diagnostics_.diagHexdump(rspbuf + sdo_offset, mbxReadLen - sdo_offset, 256);
             }

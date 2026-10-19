@@ -7,6 +7,7 @@
 #include "tether/ethercat/DCClass.hpp"
 #include "tether/platform/EspCompat.hpp"
 
+#include <algorithm>
 #include <bit>
 
 #define LOG_TAG "EC_EMU"
@@ -17,6 +18,14 @@
 
 namespace EtherCAT {
 namespace Emulator {
+
+namespace {
+/// Per-SM data buffer cap.  The SM length register is wire-writable and the
+/// emulator resizes sm.buffer to match; real ESC DPRAM is only a few KB in
+/// total, so bound the emulation buffer to stop a hostile master from
+/// growing memory (up to 64KB per SM, repeated writes included).
+constexpr size_t kMaxSmBufferBytes = 8 * 1024;
+}
 
 // ============================================================================
 // SlaveEmulator Implementation
@@ -69,7 +78,8 @@ void SlaveEmulator::setSIIConfig(const SIIConfig& config) {
         sync_managers_[i].length = config.sync_managers[i].length;
         sync_managers_[i].control = config.sync_managers[i].control;
         sync_managers_[i].enable = config.sync_managers[i].enable;
-        sync_managers_[i].buffer.resize(config.sync_managers[i].length, 0);
+        sync_managers_[i].buffer.resize(
+            std::min<size_t>(config.sync_managers[i].length, kMaxSmBufferBytes), 0);
     }
 }
 
@@ -311,7 +321,8 @@ bool SlaveEmulator::writeRegister(uint16_t addr, const uint8_t* data, uint16_t l
                 case 2:
                     if (len >= 2) {
                         sm.length = data[0] | (data[1] << 8);
-                        sm.buffer.resize(sm.length, 0);
+                        sm.buffer.resize(
+                            std::min<size_t>(sm.length, kMaxSmBufferBytes), 0);
                     }
                     return true;
                 case 4:
@@ -364,9 +375,13 @@ bool SlaveEmulator::processLogicalRead(uint32_t logical_addr, uint8_t* data, uin
             
             // Find which SM contains this physical address
             for (auto& sm : sync_managers_) {
-                if (sm.isEnabled() && phys >= sm.start_addr && 
+                if (sm.isEnabled() && phys >= sm.start_addr &&
                     phys + len <= sm.start_addr + sm.length) {
                     uint16_t offset = phys - sm.start_addr;
+                    // buffer may be capped below sm.length (kMaxSmBufferBytes)
+                    if (static_cast<size_t>(offset) + len > sm.buffer.size()) {
+                        return false;
+                    }
                     std::memcpy(data, &sm.buffer[offset], len);
                     return true;
                 }
@@ -384,9 +399,13 @@ bool SlaveEmulator::processLogicalWrite(uint32_t logical_addr, const uint8_t* da
             
             // Find which SM contains this physical address
             for (auto& sm : sync_managers_) {
-                if (sm.isEnabled() && phys >= sm.start_addr && 
+                if (sm.isEnabled() && phys >= sm.start_addr &&
                     phys + len <= sm.start_addr + sm.length) {
                     uint16_t offset = phys - sm.start_addr;
+                    // buffer may be capped below sm.length (kMaxSmBufferBytes)
+                    if (static_cast<size_t>(offset) + len > sm.buffer.size()) {
+                        return false;
+                    }
                     std::memcpy(&sm.buffer[offset], data, len);
                     return true;
                 }

@@ -164,6 +164,37 @@ TEST_F(SlaveEmulatorCovTest, WriteSMRegisters) {
     emu->processAPWR(0x0800, data, 8);
 }
 
+TEST_F(SlaveEmulatorCovTest, SMBufferBoundedByCap) {
+    // The SM length register is wire-writable and resizes the backing
+    // buffer.  The buffer must be capped (8KB) so a hostile master cannot
+    // grow memory arbitrarily, and accesses past the cap must fail cleanly.
+    uint8_t start[2] = {0x00, 0x20};           // SM3 start_addr = 0x2000
+    ASSERT_TRUE(emu->processAPWR(0x0818, start, 2));
+    uint8_t len[2] = {0xFF, 0xFF};             // SM3 length = 0xFFFF (wire max)
+    ASSERT_TRUE(emu->processAPWR(0x081A, len, 2));
+    uint8_t ctrl[1] = {0x04};                  // direction=1 (process data)
+    ASSERT_TRUE(emu->processAPWR(0x081C, ctrl, 1));
+    uint8_t en[1] = {0x01};                    // SM enable
+    ASSERT_TRUE(emu->processAPWR(0x081E, en, 1));
+
+    // FMMU0: logical 0x1000+ -> physical 0x2000, len 0xFFFF, rd+wr, enabled
+    uint8_t fmmu[16] = {};
+    fmmu[0] = 0x00; fmmu[1] = 0x10;            // logical_start 0x1000
+    fmmu[4] = 0xFF; fmmu[5] = 0xFF;            // length 0xFFFF
+    fmmu[8] = 0x00; fmmu[9] = 0x20;            // physical_start 0x2000
+    fmmu[11] = 0x03;                           // read+write enable
+    fmmu[12] = 0x01;                           // enabled
+    ASSERT_TRUE(emu->processAPWR(0x0600, fmmu, 16));
+
+    uint8_t buf[4] = {};
+    // Inside the 8KB cap — works.
+    EXPECT_TRUE(emu->processLogicalRead(0x1000, buf, 4));
+    EXPECT_TRUE(emu->processLogicalWrite(0x1000 + 8000, buf, 4));
+    // Past the cap — must fail cleanly, not index the backing buffer.
+    EXPECT_FALSE(emu->processLogicalRead(0x1000 + 8192, buf, 4));
+    EXPECT_FALSE(emu->processLogicalWrite(0x1000 + 8192, buf, 4));
+}
+
 // --- FMMU Registers ---
 
 TEST_F(SlaveEmulatorCovTest, ReadFMMURegisters) {
