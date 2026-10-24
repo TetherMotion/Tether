@@ -176,7 +176,7 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry BleederResistorRes
 
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry BleederResistorHeatDissipationCoefficient = {
     .index = C00ObjectIndex,
-    .subindex = 0x13,
+    .subindex = 0x14,
     .name = "Bleeder resistor heat dissipation coefficient",
     .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned16,
     .default_value = 30,
@@ -188,7 +188,7 @@ constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry BleederResistorHea
 
 constexpr ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry BrakeEnableSwitch = {
     .index = C00ObjectIndex,
-    .subindex = 0x14,
+    .subindex = 0x15,
     .name = "Brake enable switch",
     .data_type = EtherCAT::slave::ObjectDictionaryDataType::Unsigned16,
     .default_value = 0,
