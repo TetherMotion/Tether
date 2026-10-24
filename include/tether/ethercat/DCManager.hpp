@@ -41,6 +41,7 @@ public:
     void forceSync();
     void setPDOEnabled(bool en);
     bool reconfigureSync(uint16_t slave_index);
+    bool synchronizeSlaveClock(uint16_t slave_index) { return get()->synchronizeSlaveClock(slave_index); }
 
     /* Convenience passthroughs to the underlying EtherCATDC instance. */
     bool readRegister(uint16_t slave_index, DCRegisters reg, void* data, uint16_t size,

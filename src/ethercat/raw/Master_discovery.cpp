@@ -7,6 +7,7 @@
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/SlaveDiscoveryManager.hpp"
 #include "tether/ethercat/DC.hpp"
+#include "tether/ethercat/DCManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/SDOManager.hpp"
 #include "tether/ethercat/SlaveStatusPoller.hpp"
@@ -325,6 +326,18 @@ bool Master::setPreopAndConfirm(uint16_t slave_index)
                         if (sm0_ctrl != 0x26 || sm1_ctrl != 0x22) {
                             TETHER_LOGW(TAG, "setPreop: SM0=0x{:02X} SM1=0x{:02X} (expected 0x26/0x22) — slave may have rejected mailbox config", sm0_ctrl, sm1_ctrl);
                         }
+                    }
+
+                    // Re-sync the slave's absolute DC system time while it
+                    // sits in PRE_OP, before SYNC0/process data start. The
+                    // offset programmed once during DC init goes stale when
+                    // the slave's local clock restarts (ESC reset, firmware
+                    // reboot) — entering cyclic operation with a stale
+                    // offset rails 0x092C and trips sync supervision
+                    // (AL 0x001A). Covers recovery: every INIT->PRE_OP
+                    // re-entry lands here.
+                    if (dc_ && dc_->isInitialized()) {
+                        dc_->synchronizeSlaveClock(slave_index);
                     }
 
                     // Debug gate checkpoint: PRE_OP confirmed
