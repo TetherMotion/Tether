@@ -799,4 +799,27 @@ bool EtherCATDC::reconfigureSync(uint16_t slave_index) {
     return configureSyncSignals(slave_index);
 }
 
+bool EtherCATDC::synchronizeSlaveClock(uint16_t slave_index) {
+    if (slave_index >= slave_count_ || !slaves_[slave_index].dc_supported) {
+        return false;
+    }
+
+    if (!programSystemTimeOffset(slave_index)) {
+        TETHER_LOGW(TAG, "Slave[{}]: system-time offset re-sync failed", slave_index);
+        return false;
+    }
+
+    // Re-arm SYNC0 against the corrected time base — any start time
+    // programmed while the slave carried a stale offset targets the
+    // wrong epoch.
+    if (slaves_[slave_index].dc_active) {
+        updateSyncStartTime(slave_index);
+    }
+
+    TETHER_LOGI(TAG, "Slave[{}]: system-time offset re-synced "
+                "(offset_to_master={} ns)", slave_index,
+                static_cast<long long>(slaves_[slave_index].offset_to_master_ns));
+    return true;
+}
+
 } // namespace EtherCAT

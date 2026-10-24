@@ -47,6 +47,7 @@ int64_t NoDistributedClockConfigured::getSlaveOffset(uint16_t) const { logCritic
 
 void NoDistributedClockConfigured::readSyncConfig(uint16_t) { logCritical("readSyncConfig"); }
 bool NoDistributedClockConfigured::reconfigureSync(uint16_t) { logCritical("reconfigureSync"); return false; }
+bool NoDistributedClockConfigured::synchronizeSlaveClock(uint16_t) { logCritical("synchronizeSlaveClock"); return false; }
 
 uint64_t NoDistributedClockConfigured::getMasterTimeNs() { logCritical("getMasterTimeNs"); return 0; }
 
