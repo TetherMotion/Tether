@@ -584,7 +584,7 @@ if(TETHER_BUILD_IO_PROTOCOL)
     endif()
     if(TETHER_BUILD_ETHERCAT_MASTER AND TETHER_BUILD_DEVICE_DRIVERS)
         create_module_test(io_exposers
-            "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_as715n_exposer.cpp;${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_snapshot_exposer.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_as715n_exposer.cpp;${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_named_sdo_exposer.cpp;${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_snapshot_exposer.cpp"
             "tether_common;tether_io_protocol;tether_ethercat_master;tether_device_drivers" "")
     endif()
 endif()

@@ -29,6 +29,7 @@
 
 #include "tether/io/ParameterExposer.hpp"
 #include "tether/io/RingStreamSource.hpp"
+#include "tether/io/exposers/detail/OdSdoParam.hpp"
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/ObjectDictionary.hpp"
 #include "tether/profiles/cia402/CiA402StateUtils.hpp"
@@ -154,77 +155,6 @@ inline constexpr AS715NPdoField kPdoFields[] = {
 
 inline constexpr size_t kPdoFieldCount =
     sizeof(kPdoFields) / sizeof(kPdoFields[0]);
-
-/// Map an object-dictionary data type to an IO value type.
-/// Returns false for types with no meaningful scalar representation.
-inline bool odToValueType(OD::ObjectDictionaryDataType t, ValueType& out) {
-    using T = OD::ObjectDictionaryDataType;
-    switch (t) {
-        case T::Boolean:       out = ValueType::Bool;   return true;
-        case T::Integer8:      out = ValueType::I8;     return true;
-        case T::Integer16:     out = ValueType::I16;    return true;
-        case T::Integer32:     out = ValueType::I32;    return true;
-        case T::Integer64:     out = ValueType::I64;    return true;
-        case T::Unsigned8:     out = ValueType::U8;     return true;
-        case T::Unsigned16:    out = ValueType::U16;    return true;
-        case T::Unsigned32:    out = ValueType::U32;    return true;
-        case T::Unsigned64:    out = ValueType::U64;    return true;
-        case T::Real32:        out = ValueType::F32;    return true;
-        case T::Real64:        out = ValueType::F64;    return true;
-        case T::VisibleString:
-        case T::UnicodeString: out = ValueType::String; return true;
-        default:               out = ValueType::Binary; return true;
-    }
-}
-
-/// Fixed wire size for scalar OD types; 0 for variable-length / odd types.
-inline uint8_t odFixedSize(OD::ObjectDictionaryDataType t) {
-    using T = OD::ObjectDictionaryDataType;
-    switch (t) {
-        case T::Boolean:
-        case T::Integer8:
-        case T::Unsigned8:    return 1;
-        case T::Integer16:
-        case T::Unsigned16:   return 2;
-        case T::Integer24:
-        case T::Unsigned24:   return 3;
-        case T::Integer32:
-        case T::Unsigned32:
-        case T::Real32:       return 4;
-        case T::Integer40:
-        case T::Unsigned40:   return 5;
-        case T::Integer48:
-        case T::Unsigned48:   return 6;
-        case T::Integer56:
-        case T::Unsigned56:   return 7;
-        case T::Integer64:
-        case T::Unsigned64:
-        case T::Real64:
-        case T::TimeOfDay:
-        case T::TimeDifference: return 8;
-        default:              return 0;
-    }
-}
-
-inline const char* modificationModeName(OD::ModificationMode m) {
-    switch (m) {
-        case OD::ModificationMode::ReadOnly:        return "readonly";
-        case OD::ModificationMode::AtStop:          return "at_stop";
-        case OD::ModificationMode::DuringOperation: return "during_operation";
-        default:                                    return "unknown";
-    }
-}
-
-inline const char* effectiveTimeName(OD::EffectiveTime e) {
-    switch (e) {
-        case OD::EffectiveTime::Immediately:    return "immediately";
-        case OD::EffectiveTime::UponRepowerOn:  return "upon_repower_on";
-        default:                                return "unknown";
-    }
-}
-
-/// SDO transaction timeout for IO-triggered reads/writes (session thread).
-inline constexpr uint32_t kSdoTimeoutMs = 500;
 
 // ---------------------------------------------------------------------------
 // Standard CoE communication objects (CiA 301 / ETG.1000)
@@ -353,6 +283,41 @@ public:
         exposePdoSignals(registry, idBase, group);
         exposeDecodedSignals(registry, idBase, group);
         exposeSdoCatalog(registry, idBase, group);
+    }
+
+    /**
+     * @brief Every register group exposed via SDO: the AS715N vendor groups
+     *        (C00..U42) plus the standard CoE objects.
+     *
+     * Shared with NamedSdoExposer when slug-named aliases are wanted for the
+     * same objects — pass this list to its constructor.
+     */
+    static const ::EtherCAT::Drives::Registers::RegisterListOfLists&
+        sdoCatalog() {
+        static const ::EtherCAT::Drives::Registers::RegisterListOfLists
+            groups = {
+                &RegAS715N::C00::kRegisterList,
+                &RegAS715N::C01::kRegisterList,
+                &RegAS715N::C02::kRegisterList,
+                &RegAS715N::C03::kRegisterList,
+                &RegAS715N::C04::kRegisterList,
+                &RegAS715N::C05::kRegisterList,
+                &RegAS715N::C06::kRegisterList,
+                &RegAS715N::C07::kRegisterList,
+                &RegAS715N::C0A::kRegisterList,
+                &RegAS715N::C10::kRegisterList,
+                &RegAS715N::C13::kRegisterList,
+                &RegAS715N::F30::kRegisterList,
+                &RegAS715N::F31::kRegisterList,
+                &RegAS715N::R20::kRegisterList,
+                &RegAS715N::R22::kRegisterList,
+                &RegAS715N::U40::kRegisterList,
+                &RegAS715N::U41::kRegisterList,
+                &RegAS715N::U42::kRegisterList,
+                // Standard CoE objects: identity, PDO assignment, SM sync params.
+                &detail::kCoeObjectList(),
+            };
+        return groups;
     }
 
 private:
@@ -513,31 +478,7 @@ private:
 
     void exposeSdoCatalog(Registry& registry, uint64_t idBase,
                           const std::string& group) {
-        // All register groups' kRegisterList collections.
-        const ::EtherCAT::Drives::Registers::RegisterListOfLists groups = {
-            &RegAS715N::C00::kRegisterList,
-            &RegAS715N::C01::kRegisterList,
-            &RegAS715N::C02::kRegisterList,
-            &RegAS715N::C03::kRegisterList,
-            &RegAS715N::C04::kRegisterList,
-            &RegAS715N::C05::kRegisterList,
-            &RegAS715N::C06::kRegisterList,
-            &RegAS715N::C07::kRegisterList,
-            &RegAS715N::C0A::kRegisterList,
-            &RegAS715N::C10::kRegisterList,
-            &RegAS715N::C13::kRegisterList,
-            &RegAS715N::F30::kRegisterList,
-            &RegAS715N::F31::kRegisterList,
-            &RegAS715N::R20::kRegisterList,
-            &RegAS715N::R22::kRegisterList,
-            &RegAS715N::U40::kRegisterList,
-            &RegAS715N::U41::kRegisterList,
-            &RegAS715N::U42::kRegisterList,
-            // Standard CoE objects: identity, PDO assignment, SM sync params.
-            &detail::kCoeObjectList(),
-        };
-
-        for (const auto* list : groups) {
+        for (const auto* list : sdoCatalog()) {
             for (const auto* entry : *list) {
                 if (entry) exposeSdoEntry(registry, idBase, group, *entry);
             }
@@ -550,90 +491,13 @@ private:
         // Local id encodes 0x01 | index | subindex — decodable by clients.
         const uint32_t local =
             0x01000000u | (static_cast<uint32_t>(e.index) << 8) | e.subindex;
-        const uint64_t id = makeId(idBase, local);
 
         char nameBuf[64];
         std::snprintf(nameBuf, sizeof(nameBuf), "%s.sdo.%04X_%02X",
                       prefix_.c_str(), e.index, e.subindex);
 
-        std::string desc = e.name ? e.name : "";
-        if (e.comment && *e.comment) {
-            desc += " — ";
-            desc += e.comment;
-        }
-
-        ParamEntry p;
-        p.id          = id;
-        p.name        = nameBuf;
-        p.description = desc;
-        p.group       = group + ".sdo";
-        p.extraFlags  = EntryFlags::NoStream;  // SDO reads must not be polled
-                                               // at stream rate
-        p.metadata    = {
-            {"index",        hexU16(e.index)},
-            {"subindex",     hexU8(e.subindex)},
-            {"od_type",      hexU16(static_cast<uint16_t>(e.data_type))},
-            {"default",      std::to_string(e.default_value)},
-            {"min",          std::to_string(e.min_value)},
-            {"max",          std::to_string(e.max_value)},
-            {"unit",         std::to_string(static_cast<uint32_t>(e.unit))},
-            {"modification", detail::modificationModeName(e.modification_mode)},
-            {"effective",    detail::effectiveTimeName(e.effective_time)},
-        };
-        if (e.options_enum.has_value() && e.options_enum.name())
-            p.metadata["options_enum"] = e.options_enum.name();
-
-        const uint16_t index = e.index;
-        const uint8_t  sub   = e.subindex;
-        const bool writable  =
-            e.modification_mode != OD::ModificationMode::ReadOnly;
-        const uint8_t fixedSize = detail::odFixedSize(e.data_type);
-
-        if (fixedSize > 0) {
-            // Fixed-size scalar (including odd-width ints as raw bytes).
-            ValueType vt;
-            detail::odToValueType(e.data_type, vt);
-            p.valueType = vt;
-            p.readFn = [this, index, sub, fixedSize](void* d) {
-                uint8_t buf[8] = {};
-                coe_.readSync(index, sub, buf, fixedSize,
-                              detail::kSdoTimeoutMs, nullptr);
-                std::memcpy(d, buf, fixedSize);
-            };
-            if (writable) {
-                p.writeFn = [this, index, sub, fixedSize](const void* src) {
-                    coe_.writeSync(index, sub, src, fixedSize);
-                };
-            }
-        } else {
-            // Variable-length (strings, octet strings, domains).
-            p.valueType     = ValueType::Binary;
-            p.maxValueSize  = 256;
-            p.varReadFn = [this, index, sub](void* d, size_t maxLen) -> size_t {
-                size_t actual = 0;
-                coe_.readSync(index, sub, d, maxLen,
-                              detail::kSdoTimeoutMs, &actual);
-                return actual;
-            };
-            if (writable) {
-                p.varWriteFn = [this, index, sub](const void* src, size_t len) {
-                    coe_.writeSync(index, sub, src, len);
-                };
-            }
-        }
-
-        registry.addParam(std::move(p));
-    }
-
-    static std::string hexU16(uint16_t v) {
-        char b[8];
-        std::snprintf(b, sizeof(b), "0x%04X", v);
-        return b;
-    }
-    static std::string hexU8(uint8_t v) {
-        char b[8];
-        std::snprintf(b, sizeof(b), "0x%02X", v);
-        return b;
+        registry.addParam(detail::makeSdoParam(
+            coe_, e, makeId(idBase, local), nameBuf, group + ".sdo"));
     }
 
     IAS715NPdoAccess& pdo_;
