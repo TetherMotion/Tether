@@ -52,6 +52,20 @@ public:
     int16_t referenceSlave() const { return reference_slave_; }
     virtual void readSyncConfig(uint16_t slave_index);
     virtual bool reconfigureSync(uint16_t slave_index);
+
+    /**
+     * @brief Re-program the slave's absolute system-time offset (0x0920)
+     *        so its DC system time matches the master clock now, and
+     *        re-arm the SYNC0 start time against the corrected base.
+     *
+     * The one-time offset programming in initialize() goes stale when the
+     * slave's local clock restarts (ESC reset, firmware reboot). A slave
+     * entering cyclic operation with a stale offset rails its System Time
+     * Difference register and trips sync supervision (AL 0x001A). Call
+     * while the slave sits in PRE_OP — before SYNC0/process data start.
+     * No-op (returns false) for slaves without DC support.
+     */
+    virtual bool synchronizeSlaveClock(uint16_t slave_index);
     virtual uint64_t getMasterTimeNs();
     virtual bool readRegister(uint16_t slave_index, DCRegisters reg, void* data, uint16_t size,
                       unsigned int timeout_ms = 200);
@@ -139,6 +153,7 @@ public:
 
     void readSyncConfig(uint16_t slave_index) override;
     bool reconfigureSync(uint16_t slave_index) override;
+    bool synchronizeSlaveClock(uint16_t slave_index) override;
 
     uint64_t getMasterTimeNs() override;
 
