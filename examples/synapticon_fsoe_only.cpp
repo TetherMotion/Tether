@@ -41,6 +41,7 @@
 #include "tether/drives/Synapticon.hpp"
 #include "tether/drives/Synapticon/SafetyDiagnostics.hpp"
 #include "tether/drives/Synapticon/SynapticonPDO.hpp"
+#include "tether/drives/Synapticon/SynapticonDriveInitializer.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/fsoe/FSoEDefs.hpp"
 #include "tether/fsoe/FSoEHelpers.hpp"
@@ -433,6 +434,13 @@ int main(int argc, char** argv) {
             return 2;
         }
         TETHER_LOGI(TAG, "Slave {} transitioned to PRE_OP", slave_idx);
+
+        // Sync the detected SMM module ident (0xF050:2 -> 0xF030:2) —
+        // the slave rejects PRE_OP -> SAFE_OP with AL status 0x0070 when
+        // the configured module ident list doesn't match the detected one.
+        EtherCAT::Drives::Synapticon::SynapticonDriveInitializer init(
+            master, slave_idx, TAG);
+        init.configureDetectedSmmModule();
     }
 
     // --- Pre-activation safety check: read 0x2611 Safety Module input diagnostics ---
