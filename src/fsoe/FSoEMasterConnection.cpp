@@ -337,6 +337,25 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
         return false;
     }
 
+    // Data-state duplicate: with same-direction collision avoidance the
+    // generator can never emit a new frame byte-identical to its previous
+    // one, so identical bytes here are provably a resend.  CRC-validation
+    // would reject it (its CRC0 equals prev_same_dir_crc0 by definition),
+    // so handle it before parsing: refresh the watchdog — a resend still
+    // proves liveness — and report success without re-processing (the
+    // identical command/data was already applied).  The duplicate counter
+    // is intentionally NOT incremented: the direct exchange path treats
+    // Data-state resends as normal keep-alive traffic.
+    if (status_.state == ConnectionState::Data &&
+        !last_rx_frame_.empty() &&
+        last_rx_frame_.size() == len &&
+        std::memcmp(last_rx_frame_.data(), data, len) == 0) {
+        status_.last_valid_frame_ms = current_time_ms_;
+        trace("RX duplicate %s frame (Data state, resend — watchdog updated)",
+              commandName(data[0]));
+        return true;
+    }
+
     last_rx_frame_.assign(data, data + len);
 
     rx_frame_events_.emit([data, len] {
@@ -388,7 +407,8 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
             data, len, cmd, frame_data, data_len, conn_id,
             parse_start_crc, parse_seq_no,
             &last_rx_crc0_,  // always capture CRC0 for cross-direction chaining
-            &seq_used, &crc_error_detail)) {
+            &seq_used, &crc_error_detail,
+            &last_rx_crc0_)) {  // same-direction reference: slave's prev TX CRC0
         // --- Diagnostic seq±1 fallback ---
         // The CRC didn't verify with the expected seq.  As a diagnostic
         // aid, try seq-1 and seq+1 to detect off-by-one seq
@@ -409,7 +429,8 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
             if (CRC::parseFSoEFrameWithCollisionAvoidance(
                     data, len, cmd, frame_data, data_len, conn_id,
                     parse_start_crc, seq_minus,
-                    &last_rx_crc0_, &fb_seq_used, &fb_error)) {
+                    &last_rx_crc0_, &fb_seq_used, &fb_error,
+                    &last_rx_crc0_)) {
                 consecutive_seq_fallback_++;
                 seq_used = fb_seq_used;
                 crc_trace_fb_used = true;
@@ -436,7 +457,8 @@ bool FSoEMasterConnection::processRxFrame(const uint8_t* data, size_t len)
             if (CRC::parseFSoEFrameWithCollisionAvoidance(
                     data, len, cmd, frame_data, data_len, conn_id,
                     parse_start_crc, seq_plus,
-                    &last_rx_crc0_, &fb_seq_used, &fb_error)) {
+                    &last_rx_crc0_, &fb_seq_used, &fb_error,
+                    &last_rx_crc0_)) {
                 consecutive_seq_fallback_++;
                 seq_used = fb_seq_used;
                 crc_trace_fb_used = true;
