@@ -259,6 +259,7 @@ set(IO_PROTOCOL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_cia402_profile.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_wire_contract.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_malformed.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_monitored_remote.cpp"
 )
 set(IO_TRANSPORT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_receive_buffer.cpp"
