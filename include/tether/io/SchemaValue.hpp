@@ -179,6 +179,19 @@ decodeScalar(const SchemaNode& node, BufReader& reader) {
             v.payload = SchemaValue::Bytes{std::vector<uint8_t>(p, p + 6)};
             return v;
         }
+        case ValueType::FixedString: {
+            const auto* p = reader.getBytes(node.fixedCount);
+            if (!p) return svfail("truncated fixed string");
+            const char* begin = reinterpret_cast<const char*>(p);
+            const char* end = begin + node.fixedCount;
+            const char* nul = static_cast<const char*>(
+                std::memchr(begin, 0, node.fixedCount));
+            SchemaValue v;
+            v.node = &node;
+            v.payload = SchemaValue::Str{
+                std::string(begin, nul ? nul : end)};
+            return v;
+        }
         default:
             return svfail("unsupported scalar type");
     }
@@ -331,7 +344,24 @@ decodeNode(const SchemaGraph& graph, const SchemaNode& node, BufReader& reader,
             if (!reader.ok() || present > 1) return svfail("invalid optional tag");
             SchemaValue::Optional o;
             o.present = present != 0;
-            if (o.present) {
+            // Fixed-layout elements occupy their slot regardless of the tag
+            // (absent = zero-filled) — keeps surrounding fields at fixed
+            // offsets. Variable elements stay tag-conditional.
+            const SchemaNode* elementNode = graph.find(node.element->key);
+            const auto elemSize =
+                elementNode ? detail::fixedWireSizeOf(graph, *elementNode)
+                            : std::optional<size_t>{};
+            if (elemSize) {
+                if (o.present) {
+                    auto el = decodeRef(graph, *node.element, reader, limits,
+                                        depth);
+                    if (!el) return el;
+                    o.value = std::make_unique<SchemaValue>(std::move(*el));
+                } else {
+                    const auto* p = reader.getBytes(*elemSize);
+                    if (!p) return svfail("truncated optional slot");
+                }
+            } else if (o.present) {
                 auto el = decodeRef(graph, *node.element, reader, limits, depth);
                 if (!el) return el;
                 o.value = std::make_unique<SchemaValue>(std::move(*el));
@@ -486,6 +516,8 @@ encodeNode(const SchemaGraph& graph, const SchemaNode& node,
                     case ValueType::UVarint: case ValueType::IVarint:
                     case ValueType::Enum:
                         w.putU64Varint(s->bits); return {};
+                    case ValueType::FixedString:
+                        return svfail("fixed string needs a Str payload");
                     default:
                         return svfail("unsupported scalar type");
                 }
@@ -499,6 +531,17 @@ encodeNode(const SchemaGraph& graph, const SchemaNode& node,
                     return svfail("bad byte-scalar length");
                 }
                 w.putBytes(b->value.data(), b->value.size());
+                return {};
+            }
+            if (node.scalarType == ValueType::FixedString) {
+                const auto* s = std::get_if<SchemaValue::Str>(&value.payload);
+                if (!s || s->value.size() > node.fixedCount ||
+                    s->value.find('\0') != std::string::npos) {
+                    return svfail("payload does not fit fixed string capacity");
+                }
+                w.putBytes(s->value.data(), s->value.size());
+                for (size_t i = s->value.size(); i < node.fixedCount; ++i)
+                    w.putU8(0);
                 return {};
             }
             return svfail("payload kind does not match scalar schema");
@@ -657,6 +700,13 @@ encodeNode(const SchemaGraph& graph, const SchemaNode& node,
                 return svfail("payload kind does not match optional schema");
             }
             w.putU8(o->present ? 1 : 0);
+            // Fixed-layout elements occupy their slot regardless of the tag:
+            // absent = zero-filled slot. Variable elements stay
+            // tag-conditional (no fixed size exists).
+            const SchemaNode* elemNode = graph.find(node.element->key);
+            const auto elemSize =
+                elemNode ? detail::fixedWireSizeOf(graph, *elemNode)
+                         : std::optional<size_t>{};
             if (o->present) {
                 if (!o->value) return svfail("present optional without value");
                 const SchemaNode* elementNode =
@@ -664,6 +714,8 @@ encodeNode(const SchemaGraph& graph, const SchemaNode& node,
                 if (!elementNode) return svfail("unresolvable element schema");
                 if (auto r = encodeNode(graph, *elementNode, *o->value, w, depth + 1);
                     !r) return r;
+            } else if (elemSize) {
+                for (size_t i = 0; i < *elemSize; ++i) w.putU8(0);
             }
             return {};
         }

@@ -170,6 +170,12 @@ enum class ValueType : uint8_t {
     Struct  = 20,   ///< Tether extension: composite binary struct
     Array   = 21,   ///< Length-prefixed sequence of values
     Stream  = 22,   ///< U32 stream handle
+    /// Fixed-capacity string: exactly `SchemaNode::fixedCount` bytes on the
+    /// schema-value wire, content at offset 0, NUL-padded. Keeps the
+    /// containing struct's fields at fixed offsets (SchemaLayout.hpp).
+    /// In the flat v4 param namespace it is treated as variable-length
+    /// (capacity is schema-side metadata, unavailable there).
+    FixedString = 23,
 };
 
 /// Returns true for variable-length types in the canonical v4 value namespace.
@@ -177,7 +183,7 @@ inline constexpr bool isVariableLength(ValueType t) {
     return t == ValueType::String || t == ValueType::Binary ||
            t == ValueType::Enum || t == ValueType::UVarint ||
            t == ValueType::IVarint || t == ValueType::Struct ||
-           t == ValueType::Array;
+           t == ValueType::Array || t == ValueType::FixedString;
 }
 
 /// Returns the byte size of a fixed-size ValueType, or 0 for variable-length/unknown.

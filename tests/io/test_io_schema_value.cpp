@@ -229,7 +229,8 @@ TEST_F(SchemaValueCodecTest, OptionalAndOneOf) {
     auto none = makeAbsentValue(node(12));
     auto enc = encodeSchemaValue(graph_, none);
     ASSERT_TRUE(enc);
-    EXPECT_EQ(enc->size(), 1u);
+    // Fixed-layout element: [tag][zero slot] — 1 + 8 bytes (fixed offsets).
+    EXPECT_EQ(enc->size(), 9u);
     auto dv = decodeSchemaValue(graph_, *node(12), enc->data(), enc->size());
     ASSERT_TRUE(dv);
     EXPECT_EQ(formatSchemaValueText(*dv), "none");

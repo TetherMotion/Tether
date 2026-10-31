@@ -337,6 +337,15 @@ buildScalar(const SchemaNode& node, const NativeValue& nv) {
             default:
                 return bfail("double into non-float scalar");
         }
+    } else if (const auto* s = std::get_if<std::string_view>(&nv.payload)) {
+        if (t != ValueType::FixedString)
+            return bfail("string into non-string scalar");
+        if (s->find('\0') != std::string_view::npos)
+            return bfail("string contains NUL");
+        if (s->size() > node.fixedCount)
+            return bfail("string exceeds fixed capacity");
+        v.payload = SchemaValue::Str{std::string(*s)};
+        return v;
     } else if (const auto* raw = std::get_if<std::span<const uint8_t>>(
                    &nv.payload)) {
         const size_t need = t == ValueType::IPv4  ? 4
