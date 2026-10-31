@@ -82,6 +82,7 @@ class MonitoredRemoteFunctionInvocation {
                   "Payload must be default-constructible for slot storage");
 
 public:
+    /// Caller-chosen tick/stamp type (e.g. a loop sequence number).
     using Tick = uint64_t;
     /// producerTick sentinel until the first successful result lands.
     static constexpr Tick kNoResult = ~Tick{0};
@@ -144,12 +145,12 @@ public:
 
     /**
      * @brief Issue one call stamped `tick`.
+     * @param tick  caller-chosen stamp (a loop sequence number); stored
+     *              onto the result so consumers classify freshness at
+     *              their own current tick
+     * @param arg   raw argument bytes handed to the invoker
      * @return false when `invoke` is empty, a call is already in flight,
      *         or the invoker refused the call.
-     *
-     * The tick is caller-chosen (a loop sequence number); it is stamped
-     * onto the result so consumers can classify freshness at their own
-     * current tick.
      */
     bool call(Tick tick, std::vector<uint8_t> arg) {
         if (!invoke_ || state_->in_flight.exchange(true)) return false;
@@ -224,6 +225,7 @@ public:
 
     /**
      * @brief Ticks between `tick` and the newest result.
+     * @param tick  consumer's current tick
      * @return ~Tick{0} when there is no result or the stamp is ahead of
      *         `tick` (clock skew guard).
      */
@@ -233,23 +235,35 @@ public:
         return tick - produced;
     }
 
-    /// True when a result exists and its age is within maxAgeTicks
-    /// (inclusive bound).
+    /// @brief True when a result exists and its age is within maxAgeTicks
+    ///        (inclusive bound).
+    /// @param tick  consumer's current tick
     bool fresh(Tick tick) const {
         return age(tick) <= state_->max_age_ticks.load();
     }
 
+    /// True while a call awaits its done callback.
     bool inFlight() const { return state_->in_flight.load(); }
+    /// Calls successfully handed to the invoker.
     uint64_t issued() const { return state_->issued.load(); }
+    /// Calls that produced a decoded result.
     uint64_t completed() const { return state_->completed.load(); }
+    /// Calls whose outcome was a transport timeout.
     uint64_t timeouts() const { return state_->timeouts.load(); }
+    /// Calls that failed, lacked a return value, or failed to decode.
     uint64_t errors() const { return state_->errors.load(); }
 
+    /// Freshness window for fresh(), in ticks (inclusive bound).
     uint32_t maxAgeTicks() const { return state_->max_age_ticks.load(); }
+    /// @brief Retune the freshness window.
+    /// @param ticks  new maxAgeTicks value
     void setMaxAgeTicks(uint32_t ticks) {
         state_->max_age_ticks.store(ticks);
     }
+    /// Per-call deadline budget handed to the invoker (µs).
     uint64_t timeoutUs() const { return state_->timeout_us.load(); }
+    /// @brief Retune the per-call deadline budget.
+    /// @param us  new timeoutUs value
     void setTimeoutUs(uint64_t us) { state_->timeout_us.store(us); }
 
     /// Drop the stored result and all counters. An in-flight call is not
