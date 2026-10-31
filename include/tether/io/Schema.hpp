@@ -270,6 +270,9 @@ inline SchemaValidationResult validateNodeShape(const SchemaNode& node, const Sc
         return SchemaValidationResult::failure("map requires key and value schemas");
     if (node.kind == SchemaKind::OneOf && node.oneOfMembers.empty())
         return SchemaValidationResult::failure("oneof requires at least one member");
+    if (node.kind == SchemaKind::Scalar && node.scalarType == ValueType::FixedString &&
+        (node.fixedCount == 0 || node.fixedCount > limits.maxStringBytes))
+        return SchemaValidationResult::failure("fixed string requires a capacity");
     if (node.kind == SchemaKind::Struct) {
         uint32_t previous = 0;
         for (const auto& field : node.fields) {
@@ -324,6 +327,104 @@ inline SchemaValidationResult validateReferences(const SchemaGraph& graph, const
     }
     return SchemaValidationResult::success();
 }
+
+/// Wire size of a node whose encoding is fixed-length, or nullopt when the
+/// subtree contains any variable-length member. Varint scalar types
+/// (UVarint/IVarint/Enum) are variable; FixedString is `fixedCount` bytes;
+/// Optional is 1 byte + the element's fixed size when the element is
+/// fixed-layout. Memoized over `sizes`.
+inline std::optional<size_t> fixedWireSize(
+    const SchemaGraph& graph, const SchemaKey& key,
+    std::unordered_map<SchemaKey, std::optional<size_t>, SchemaKeyHash>& sizes,
+    const SchemaLimits& limits) {
+    if (const auto cached = sizes.find(key); cached != sizes.end()) return cached->second;
+    const auto* node = graph.find(key);
+    if (!node) return std::optional<size_t>{};
+    // Alias chasing has no memo entry until resolved below.
+    std::optional<size_t> result;
+    switch (node->kind) {
+        case SchemaKind::Scalar:
+        case SchemaKind::Enum:
+            if (node->scalarType == ValueType::FixedString)
+                result = node->fixedCount > 0 ? std::optional<size_t>(node->fixedCount)
+                                            : std::nullopt;
+            else if (isFixedScalar(node->scalarType))
+                result = valueTypeSize(node->scalarType);
+            break;
+        case SchemaKind::Alias:
+            result = node->target ? fixedWireSize(graph, node->target->key, sizes, limits)
+                                : std::nullopt;
+            break;
+        case SchemaKind::FixedArray:
+            if (node->element) {
+                const auto elementSize =
+                    fixedWireSize(graph, node->element->key, sizes, limits);
+                if (elementSize && *elementSize > 0 &&
+                    node->fixedCount <= limits.maxFixedSize / *elementSize)
+                    result = *elementSize * node->fixedCount;
+            }
+            break;
+        case SchemaKind::Optional:
+            if (node->element) {
+                const auto elementSize =
+                    fixedWireSize(graph, node->element->key, sizes, limits);
+                if (elementSize && *elementSize < limits.maxFixedSize)
+                    result = 1 + *elementSize;
+            }
+            break;
+        case SchemaKind::Struct:
+            if (node->structEncoding == StructEncoding::Packed) {
+                size_t total = 0;
+                result = total;
+                for (const auto& field : node->fields) {
+                    const auto fieldSize =
+                        fixedWireSize(graph, field.schema.key, sizes, limits);
+                    if (!fieldSize || total > limits.maxFixedSize - *fieldSize) {
+                        result = std::nullopt;
+                        break;
+                    }
+                    total += *fieldSize;
+                }
+                if (result) result = total;
+            }
+            break;
+        default:
+            break;
+    }
+    sizes.emplace(key, result);
+    return result;
+}
+
+/// Single-call convenience over fixedWireSize (own memo map).
+inline std::optional<size_t> fixedWireSizeOf(const SchemaGraph& graph,
+                                             const SchemaNode& node,
+                                             const SchemaLimits& limits = {}) {
+    std::unordered_map<SchemaKey, std::optional<size_t>, SchemaKeyHash> sizes;
+    return fixedWireSize(graph, node.key, sizes, limits);
+}
+
+/// Packed-struct ordering rule: every fixed-layout field must be declared
+/// before every variable-layout field, so all fixed fields sit at
+/// computable wire offsets (the "static head") and the variable tail
+/// decodes sequentially.
+inline SchemaValidationResult validatePackedFieldOrdering(
+    const SchemaGraph& graph, const SchemaNode& node, const SchemaLimits& limits) {
+    if (node.kind != SchemaKind::Struct || node.structEncoding != StructEncoding::Packed)
+        return SchemaValidationResult::success();
+    std::unordered_map<SchemaKey, std::optional<size_t>, SchemaKeyHash> sizes;
+    bool dynamicSeen = false;
+    for (const auto& field : node.fields) {
+        const bool fixed =
+            fixedWireSize(graph, field.schema.key, sizes, limits).has_value();
+        if (fixed && dynamicSeen)
+            return SchemaValidationResult::failure(
+                "packed struct must declare fixed-layout fields before "
+                "variable-layout fields",
+                {field.key});
+        dynamicSeen = dynamicSeen || !fixed;
+    }
+    return SchemaValidationResult::success();
+}
 }
 
 inline SchemaValidationResult validateSchemaGraph(const SchemaGraph& graph,
@@ -339,6 +440,10 @@ inline SchemaValidationResult validateSchemaGraph(const SchemaGraph& graph,
     }
     for (const auto& node : graph.nodes) {
         auto result = detail::validateReferences(graph, node);
+        if (!result) return result;
+    }
+    for (const auto& node : graph.nodes) {
+        auto result = detail::validatePackedFieldOrdering(graph, node, limits);
         if (!result) return result;
     }
 
@@ -380,59 +485,15 @@ inline SchemaValidationResult validateSchemaGraph(const SchemaGraph& graph,
     return SchemaValidationResult::success();
 }
 
+/// Wire size of `root` when its entire subtree is fixed-layout, else
+/// nullopt. Computes the same layout as detail::fixedWireSize after
+/// validating the graph.
 inline std::optional<size_t> fixedSchemaSize(const SchemaGraph& graph,
                                              const SchemaKey& root,
                                              const SchemaLimits& limits = {}) {
     if (!validateSchemaGraph(graph, limits)) return std::nullopt;
     std::unordered_map<SchemaKey, std::optional<size_t>, SchemaKeyHash> sizes;
-    std::function<std::optional<size_t>(const SchemaKey&)> sizeOf = [&](const SchemaKey& key) {
-        if (const auto cached = sizes.find(key); cached != sizes.end()) return cached->second;
-        const auto* node = graph.find(key);
-        if (!node) return std::optional<size_t>{};
-        std::optional<size_t> result;
-        switch (node->kind) {
-            case SchemaKind::Scalar:
-                if (detail::isFixedScalar(node->scalarType)) result = valueTypeSize(node->scalarType);
-                break;
-            case SchemaKind::Enum:
-                if (detail::isFixedScalar(node->scalarType)) result = valueTypeSize(node->scalarType);
-                break;
-            case SchemaKind::Alias:
-                result = node->target ? sizeOf(node->target->key) : std::nullopt;
-                break;
-            case SchemaKind::FixedArray:
-                if (node->element) {
-                    const auto elementSize = sizeOf(node->element->key);
-                    if (elementSize && node->fixedCount <= limits.maxFixedSize / *elementSize)
-                        result = *elementSize * node->fixedCount;
-                }
-                break;
-            case SchemaKind::Struct:
-                if (node->structEncoding == StructEncoding::Packed) {
-                    size_t total = 0;
-                    result = total;
-                    for (const auto& field : node->fields) {
-                        if (field.presence != FieldPresence::Required) {
-                            result = std::nullopt;
-                            break;
-                        }
-                        const auto fieldSize = sizeOf(field.schema.key);
-                        if (!fieldSize || total > limits.maxFixedSize - *fieldSize) {
-                            result = std::nullopt;
-                            break;
-                        }
-                        total += *fieldSize;
-                        result = total;
-                    }
-                }
-                break;
-            default:
-                break;
-        }
-        sizes.emplace(key, result);
-        return result;
-    };
-    return sizeOf(root);
+    return detail::fixedWireSize(graph, root, sizes, limits);
 }
 
 } // namespace tether::io
