@@ -10,7 +10,33 @@ using Vec = std::vector<double>;
 using CondD = SetpointConditioner<double>;
 using CondV = SetpointConditioner<Vec>;
 
+// Custom Value type exercising the ConditionerOps extension point.
+struct Vec3 {
+  double v[3] = {0, 0, 0};
+  bool operator==(const Vec3&) const = default;
+};
+
+namespace tether::control {
+template <>
+struct ConditionerOps<Vec3> {
+  static Vec3 lerp(const Vec3& from, const Vec3& to, double t) {
+    Vec3 out;
+    for (int i = 0; i < 3; ++i)
+      out.v[i] = ConditionerOps<double>::lerp(from.v[i], to.v[i], t);
+    return out;
+  }
+  static Vec3 approach(const Vec3& from, const Vec3& to, double d) {
+    Vec3 out;
+    for (int i = 0; i < 3; ++i)
+      out.v[i] = ConditionerOps<double>::approach(from.v[i], to.v[i], d);
+    return out;
+  }
+};
+}  // namespace tether::control
+
 namespace {
+
+using Cond3 = SetpointConditioner<Vec3>;
 
 TEST(SetpointConditioner, ZeroOrderHoldSnapsImmediately) {
   CondD c(std::make_unique<ZeroOrderHold<double>>(), 4, 1.0);
@@ -143,6 +169,88 @@ TEST(SetpointConditioner, ResetReanchorsLawAndTarget) {
   c.reset(3.0);
   EXPECT_DOUBLE_EQ(c.step(), 3.0);  // re-anchored, not converging to 10
   EXPECT_DOUBLE_EQ(c.target(), 3.0);
+}
+
+TEST(SetpointConditioner, RampTicksOneEqualsZeroOrderHold) {
+  CondD c(std::make_unique<LinearRampHold<double>>(1), 1, 0.0);
+  c.refresh(8.0);
+  EXPECT_DOUBLE_EQ(c.step(), 8.0);  // single-step ramp = snap
+  c.refresh(-3.0);
+  EXPECT_DOUBLE_EQ(c.step(), -3.0);
+}
+
+TEST(SetpointConditioner, SlewRateArrivesExactlyWhenDeltaDivides) {
+  CondD c(std::make_unique<SlewRateHold<double>>(2.0), 1, 0.0);
+  c.refresh(8.0);
+  EXPECT_DOUBLE_EQ(c.step(), 2.0);
+  EXPECT_DOUBLE_EQ(c.step(), 4.0);
+  EXPECT_DOUBLE_EQ(c.step(), 6.0);
+  EXPECT_DOUBLE_EQ(c.step(), 8.0);   // lands exactly
+  EXPECT_DOUBLE_EQ(c.step(), 8.0);   // and stays
+}
+
+TEST(SetpointConditioner, DivisorOneRefreshesEveryTick) {
+  CondD c(std::make_unique<ZeroOrderHold<double>>(), 1, 0.0);
+  for (uint64_t tick = 0; tick < 5; ++tick)
+    EXPECT_TRUE(c.refreshDue(tick));
+}
+
+TEST(SetpointConditioner, RefreshBeforeFirstStepIsHandled) {
+  // Two refreshes without a step in between: the second refresh anchors
+  // off the last output (still the initial value), not the first target.
+  auto law = std::make_unique<LinearRampHold<double>>(4);
+  CondD c(std::move(law), 1, 2.0);
+  c.refresh(10.0);
+  c.refresh(10.0);
+  const double v = c.step();
+  EXPECT_GT(v, 2.0);
+  EXPECT_LT(v, 10.0);  // ramping from 2.0, not from 10.0
+}
+
+TEST(SetpointConditioner, InstancesAreIndependent) {
+  CondD a(std::make_unique<FirstOrderLag<double>>(0.5), 1, 0.0);
+  CondD b(std::make_unique<FirstOrderLag<double>>(0.5), 1, 0.0);
+  a.refresh(10.0);
+  b.refresh(-10.0);
+  EXPECT_DOUBLE_EQ(a.step(), 5.0);
+  EXPECT_DOUBLE_EQ(b.step(), -5.0);
+}
+
+TEST(SetpointConditioner, MoveConstructionPreservesState) {
+  CondD a(std::make_unique<FirstOrderLag<double>>(0.5), 2, 1.0);
+  a.refresh(5.0);
+  a.step();
+  CondD b(std::move(a));
+  EXPECT_DOUBLE_EQ(b.target(), 5.0);
+  EXPECT_TRUE(b.refreshDue(0));
+  EXPECT_FALSE(b.refreshDue(1));
+}
+
+TEST(SetpointConditioner, CustomValueTypeViaOpsSpecialization) {
+  Cond3 c(std::make_unique<FirstOrderLag<Vec3>>(0.5), 1, Vec3{});
+  Vec3 t{{4.0, -4.0, 2.0}};
+  c.refresh(t);
+  const Vec3& out = c.step();
+  EXPECT_DOUBLE_EQ(out.v[0], 2.0);
+  EXPECT_DOUBLE_EQ(out.v[1], -2.0);
+  EXPECT_DOUBLE_EQ(out.v[2], 1.0);
+}
+
+TEST(SetpointConditioner, LargeTickValuesDoNotOverflow) {
+  CondD c(std::make_unique<ZeroOrderHold<double>>(), 7, 0.0);
+  const uint64_t big = ~uint64_t{0} - 3;
+  EXPECT_EQ(c.refreshDue(big), big % 7 == 0);  // modulo on huge ticks
+  EXPECT_EQ(c.refreshDue(big - (big % 7)), true);
+}
+
+TEST(SetpointConditioner, EmittedRefValidUntilNextStep) {
+  CondD c(std::make_unique<FirstOrderLag<double>>(0.5), 1, 0.0);
+  c.refresh(10.0);
+  const double& r1 = c.step();
+  const double v1 = r1;
+  const double& r2 = c.step();
+  EXPECT_DOUBLE_EQ(v1, 5.0);
+  EXPECT_DOUBLE_EQ(r2, 7.5);  // second step advanced; r1 was read before it
 }
 
 TEST(SetpointConditioner, BoundaryValidation) {

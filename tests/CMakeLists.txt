@@ -1000,6 +1000,7 @@ gtest_discover_tests(tether_header_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOU
 # Utility tests (header-only utilities, no EtherCAT dependencies)
 tether_add_test_executable(tether_utils_tests
     utils/test_spsc_ring.cpp
+    common/test_pending_slot.cpp
 )
 
 target_include_directories(tether_utils_tests PRIVATE
