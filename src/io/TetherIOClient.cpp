@@ -313,82 +313,98 @@ TetherIOClient::receiveMessage(uint32_t timeoutMs) {
     if (!transport_ || !transport_->isConnected()) {
         return std::unexpected(makeError(ErrorCode::InternalError, "Not connected"));
     }
-    uint32_t to = (timeoutMs == 0) ? defaultTimeoutMs_ : timeoutMs;
-    std::vector<uint8_t> msg;
-    if (!transport_->receiveMessage(msg, to)) {
-        if (!transport_->isConnected()) {
-            return std::unexpected(makeError(ErrorCode::InternalError, "Disconnected"));
+    const uint32_t to = (timeoutMs == 0) ? defaultTimeoutMs_ : timeoutMs;
+    // One deadline for the whole call: async-dispatched frames keep waiting
+    // but may not extend it — a sustained StreamData flood must not starve
+    // the caller (or a request() wrapping this) forever.
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(to);
+    for (;;) {
+        const auto remainMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now()).count();
+        if (remainMs <= 0) {
+            return std::unexpected(makeError(ErrorCode::InternalError,
+                                             "Receive timeout"));
         }
-        return std::unexpected(makeError(ErrorCode::InternalError, "Receive timeout"));
-    }
-    if (msg.empty()) {
-        return std::unexpected(makeError(ErrorCode::InvalidMessage, "Empty message"));
-    }
-
-    // Dispatch StreamData and LogData to callbacks, return everything else
-    uint8_t type = msg[0];
-    if (type == static_cast<uint8_t>(MessageType::StreamData)) {
-        if (streamCallback_) {
-            // Parse StreamData: type(1) + specId(u32) + count(u32) + rows
-            ClientBufReader r(msg.data(), msg.size());
-            r.getU8(); // type
-            uint32_t specId = r.getU32();
-            uint32_t count = r.getU32();
-            for (uint32_t i = 0; i < count && r.ok(); ++i) {
-                ClientStreamRow row;
-                row.specId = specId;
-                row.timestampUs = r.getU64();
-                for (const auto& entry : streamLayout_) {
-                    size_t sz = entry.valueSize > 0 ? entry.valueSize : r.getVarint();
-                    row.values.push_back(r.getBytes(sz));
-                }
-                streamCallback_(row);
+        std::vector<uint8_t> msg;
+        if (!transport_->receiveMessage(msg, static_cast<uint32_t>(remainMs))) {
+            if (!transport_->isConnected()) {
+                return std::unexpected(makeError(ErrorCode::InternalError,
+                                                 "Disconnected"));
             }
+            return std::unexpected(makeError(ErrorCode::InternalError,
+                                             "Receive timeout"));
         }
-        // Recursively get the next message
-        return receiveMessage(timeoutMs);
-    }
-    if (type == static_cast<uint8_t>(MessageType::LogData)) {
-        if (logCallback_) {
-            ClientBufReader r(msg.data(), msg.size());
-            r.getU8(); // type
-            r.getU64(); // timestampUs
-            ClientLogRecord rec;
-            rec.severity = r.getU8();
-            rec.component = r.getString16();
-            rec.message = r.getString16();
-            rec.location = r.getString16();
-            logCallback_(rec);
+        if (msg.empty()) {
+            return std::unexpected(makeError(ErrorCode::InvalidMessage,
+                                             "Empty message"));
         }
-        return receiveMessage(timeoutMs);
+
+        // Dispatch StreamData and LogData to callbacks, return everything else
+        uint8_t type = msg[0];
+        if (type == static_cast<uint8_t>(MessageType::StreamData)) {
+            if (streamCallback_) {
+                // Parse StreamData: type(1) + specId(u32) + count(u32) + rows
+                ClientBufReader r(msg.data(), msg.size());
+                r.getU8(); // type
+                uint32_t specId = r.getU32();
+                uint32_t count = r.getU32();
+                for (uint32_t i = 0; i < count && r.ok(); ++i) {
+                    ClientStreamRow row;
+                    row.specId = specId;
+                    row.timestampUs = r.getU64();
+                    for (const auto& entry : streamLayout_) {
+                        size_t sz = entry.valueSize > 0 ? entry.valueSize
+                                                      : r.getVarint();
+                        row.values.push_back(r.getBytes(sz));
+                    }
+                    streamCallback_(row);
+                }
+            }
+            continue;
+        }
+        if (type == static_cast<uint8_t>(MessageType::LogData)) {
+            if (logCallback_) {
+                ClientBufReader r(msg.data(), msg.size());
+                r.getU8(); // type
+                r.getU64(); // timestampUs
+                ClientLogRecord rec;
+                rec.severity = r.getU8();
+                rec.component = r.getString16();
+                rec.message = r.getString16();
+                rec.location = r.getString16();
+                logCallback_(rec);
+            }
+            continue;
+        }
+        // A server-originated call: dispatch to the local catalog and answer,
+        // then keep waiting for the pending response.
+        if (type == static_cast<uint8_t>(MessageType::InvokeExReq)) {
+            handleInvokeExReq(msg);
+            continue;
+        }
+        // Server push notifications — fire callbacks and keep waiting.
+        if (type == static_cast<uint8_t>(MessageType::CatalogChanged)) {
+            if (catalogChangedCb_) catalogChangedCb_();
+            continue;
+        }
+        if (type == static_cast<uint8_t>(MessageType::SchemaUpdate)) {
+            if (schemaUpdateCb_) schemaUpdateCb_();
+            continue;
+        }
+        // Any other unsolicited message: hand to the generic async hook if
+        // registered, then keep waiting (only when a callback consumed it —
+        // otherwise return so callers can still see unexpected frames).
+        if (asyncMessageCb_ &&
+            type != static_cast<uint8_t>(MessageType::StreamData) &&
+            type != static_cast<uint8_t>(MessageType::LogData)) {
+            // Only consume messages that aren't expected request responses —
+            // the caller's request() path filters those by type already.
+            asyncMessageCb_(type, msg);
+            continue;
+        }
+        return msg;
     }
-    // A server-originated call: dispatch to the local catalog and answer,
-    // then keep waiting for the pending response.
-    if (type == static_cast<uint8_t>(MessageType::InvokeExReq)) {
-        handleInvokeExReq(msg);
-        return receiveMessage(timeoutMs);
-    }
-    // Server push notifications — fire callbacks and keep waiting.
-    if (type == static_cast<uint8_t>(MessageType::CatalogChanged)) {
-        if (catalogChangedCb_) catalogChangedCb_();
-        return receiveMessage(timeoutMs);
-    }
-    if (type == static_cast<uint8_t>(MessageType::SchemaUpdate)) {
-        if (schemaUpdateCb_) schemaUpdateCb_();
-        return receiveMessage(timeoutMs);
-    }
-    // Any other unsolicited message: hand to the generic async hook if
-    // registered, then keep waiting (only when a callback consumed it —
-    // otherwise return so callers can still see unexpected frames).
-    if (asyncMessageCb_ &&
-        type != static_cast<uint8_t>(MessageType::StreamData) &&
-        type != static_cast<uint8_t>(MessageType::LogData)) {
-        // Only consume messages that aren't expected request responses —
-        // the caller's request() path filters those by type already.
-        asyncMessageCb_(type, msg);
-        return receiveMessage(timeoutMs);
-    }
-    return msg;
 }
 
 std::expected<std::vector<uint8_t>, ClientError>
