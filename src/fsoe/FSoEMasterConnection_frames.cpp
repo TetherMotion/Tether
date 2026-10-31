@@ -84,7 +84,10 @@ size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
     // Reset frames reset the CRC chain AND the sequence number:
     //   - start_crc = 0 (CRC chain reset)
     //   - seq = config_.initial_seq_no (0 for Synapticon, 1 per ETG.5100)
-    // last_tx_crc0_ is NOT updated (stays at 0 for the next frame).
+    // last_tx_crc0_ IS updated to this frame's CRC0 — it is the "previous
+    // frame" reference for same-direction collision avoidance on the NEXT
+    // frame (the slave's last_rx_crc0_ captures it identically).  The CRC
+    // chain itself still resets (next frame uses start_crc=0).
     // last_tx_seq_no_ is set for diagnostics.
     uint8_t payload[CRC::MAX_PARSE_DATA_SIZE] = {0};
     payload[0] = ResetErrorCode::None;  // Local reset
@@ -96,8 +99,9 @@ size_t FSoEMasterConnection::buildResetFrame(uint8_t* data, size_t max_len)
         0,  // Conn_Id = 0 in Reset state (ETG.5100 §8.2.2.2)
         0,  // start_crc = 0 (Reset resets CRC chain)
         config_.initial_seq_no,
-        nullptr,  // don't update CRC chain (Reset resets it)
-        &seq_used);
+        &last_tx_crc0_,  // capture CRC0 for same-direction collision tracking
+        &seq_used,
+        &last_tx_crc0_);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;
@@ -141,7 +145,7 @@ size_t FSoEMasterConnection::buildSessionResetFrame(uint8_t* data, size_t max_le
         data, Command::Session, payload, config_.output_size,
         0,  // Conn_Id = 0 in Session state (ETG.5100 §8.2.2.3)
         start_crc, seq_no,
-        &last_tx_crc0_, &seq_used);
+        &last_tx_crc0_, &seq_used, &last_tx_crc0_);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     session_first_tx_done_ = true;
@@ -183,7 +187,8 @@ size_t FSoEMasterConnection::buildConnectionFrame(uint8_t* data, size_t max_len)
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Connection, payload, config_.output_size,
         config_.connection_id,
-        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used,
+        &last_tx_crc0_);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;
@@ -219,7 +224,8 @@ size_t FSoEMasterConnection::buildParameterFrame(uint8_t* data, size_t max_len)
     size_t result = CRC::buildFSoEFrameWithCollisionAvoidance(
         data, Command::Parameter, payload, config_.output_size,
         config_.connection_id,
-        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used,
+        &last_tx_crc0_);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;
@@ -236,7 +242,8 @@ size_t FSoEMasterConnection::buildDataFrame(uint8_t* data, size_t max_len)
         data, Command::ProcessData,
         safe_outputs_.data(), config_.output_size,
         config_.connection_id,
-        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used,
+        &last_tx_crc0_);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;
@@ -259,7 +266,8 @@ size_t FSoEMasterConnection::buildFailSafeFrame(uint8_t* data, size_t max_len)
         data, Command::FailSafeData,
         zero_safe_data.data(), config_.output_size,
         config_.connection_id,
-        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used);
+        last_rx_crc0_, tx_seq_no_, &last_tx_crc0_, &seq_used,
+        &last_tx_crc0_);
     tx_seq_no_ = seq_used;
     last_tx_seq_no_ = seq_used;
     return result;
@@ -280,7 +288,8 @@ bool FSoEMasterConnection::validateCRC(const uint8_t* data, size_t len) const
     return CRC::parseFSoEFrameWithCollisionAvoidance(
         data, len, cmd, {}, data_len, conn_id,
         is_reset_frame ? 0 : last_tx_crc0_,
-        is_reset_frame ? CRC::incrementSeqNo(config_.initial_seq_no) : tx_seq_no_);
+        is_reset_frame ? CRC::incrementSeqNo(config_.initial_seq_no) : tx_seq_no_,
+        nullptr, nullptr, nullptr, &last_rx_crc0_);
 }
 
 bool FSoEMasterConnection::validateSequence(uint8_t seq)

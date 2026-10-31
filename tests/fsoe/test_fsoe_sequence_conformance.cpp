@@ -8,10 +8,16 @@
  * - Sequence numbers wrap from 65535 back to 1
  * - Reset frames use seq=1 (resetting the sequence for a new connection)
  * - After a Reset frame, the next frame uses seq=2
- * - CRC collision avoidance: when CRC0 == previous CRC0, the seq is
- *   incremented and CRC recomputed (both on build and parse sides)
- * - The collision avoidance parser only retries on collision (CRC matches
- *   but equals previous), not on CRC mismatch
+ * - CRC collision avoidance: when CRC0 collides with EITHER the peer's
+ *   last frame CRC0 (start_crc, cross-direction) or the sender's own
+ *   previous frame CRC0 (same-direction), the seq is incremented and
+ *   CRC recomputed (both on build and parse sides)
+ * - The collision avoidance parser replicates the generator's seq skips:
+ *   it retries when the CRC verifies but collides, and when the computed
+ *   CRC0 collides (generator skipped that seq), but not on ordinary CRC
+ *   mismatch
+ * - Same-direction avoidance prevents byte-identical consecutive frames
+ *   (which the receiver's resend detection would misclassify)
  * - Mid-stream reset properly resynchronizes master and slave seq numbers
  */
 
@@ -679,6 +685,227 @@ TEST(FSoECollisionAvoidance, ParseReplicatesCollisionAvoidance) {
     }
 }
 
+TEST(FSoECollisionAvoidance, ParseAcceptsSeqBumpedFrame) {
+    // Regression test: when the generator's collision avoidance bumps the
+    // seq (computed CRC0 == start_crc), the checker must replicate the skip
+    // and accept the frame at the bumped seq.
+    //
+    // start_crc=0x1234, seq=56422 produces crc0 == start_crc for this
+    // payload (found by enumeration — collisions occur with probability
+    // ~1/65536 per frame, so this case is rarely exercised by chance).
+    const uint16_t start_crc = 0x1234;
+    const uint16_t colliding_seq = 56422;
+    uint8_t payload[] = {0x34, 0x12, 0x00, 0x01};
+
+    // Confirm the case actually collides at the un-bumped seq.
+    uint8_t probe[64];
+    uint16_t probe_crc0 = 0;
+    ASSERT_GT(CRC::buildFSoEFrame(probe, Command::Connection, payload, 4,
+                                  0x1234, start_crc, colliding_seq,
+                                  &probe_crc0), 0u);
+    ASSERT_EQ(probe_crc0, start_crc)
+        << "Test premise broken: expected collision at seq " << colliding_seq;
+
+    // Build with collision avoidance — the seq must be bumped.
+    uint8_t frame[64];
+    uint16_t build_crc0 = 0;
+    uint16_t build_seq = 0;
+    size_t len = CRC::buildFSoEFrameWithCollisionAvoidance(
+        frame, Command::Connection, payload, 4, 0x1234,
+        start_crc, colliding_seq, &build_crc0, &build_seq);
+    ASSERT_GT(len, 0u);
+    ASSERT_NE(build_crc0, start_crc);
+    ASSERT_GT(build_seq, colliding_seq);
+
+    // The checker must accept the bumped frame.
+    uint8_t cmd = 0;
+    uint8_t data[16] = {0};
+    size_t data_len = 0;
+    uint16_t conn_id = 0;
+    uint16_t parse_crc0 = 0;
+    uint16_t parse_seq = 0;
+
+    EXPECT_TRUE(CRC::parseFSoEFrameWithCollisionAvoidance(
+        frame, len, cmd, data, data_len, conn_id,
+        start_crc, colliding_seq,
+        &parse_crc0, &parse_seq));
+    EXPECT_EQ(parse_crc0, build_crc0);
+    EXPECT_EQ(parse_seq, build_seq);
+}
+
+TEST(FSoECollisionAvoidance, ParseRoundTripsAllBumpedSeqs) {
+    // Scan for colliding seqs and verify every bumped frame round-trips.
+    const uint16_t start_crc = 0x5A5A;
+    uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF};
+    int collisions = 0;
+
+    for (uint32_t seq = 1; seq < 0x10000 && collisions < 8; ++seq) {
+        uint8_t probe[64];
+        uint16_t probe_crc0 = 0;
+        if (CRC::buildFSoEFrame(probe, Command::Parameter, payload, 4,
+                                  0x1234, start_crc, (uint16_t)seq,
+                                  &probe_crc0) == 0) continue;
+        if (probe_crc0 != start_crc) continue;
+        ++collisions;
+
+        uint8_t frame[64];
+        uint16_t build_crc0 = 0, build_seq = 0;
+        size_t len = CRC::buildFSoEFrameWithCollisionAvoidance(
+            frame, Command::Parameter, payload, 4, 0x1234,
+            start_crc, (uint16_t)seq, &build_crc0, &build_seq);
+        ASSERT_GT(len, 0u);
+        ASSERT_NE(build_crc0, start_crc);
+        ASSERT_GT(build_seq, seq);
+
+        uint8_t cmd = 0;
+        uint8_t data[16] = {0};
+        size_t data_len = 0;
+        uint16_t conn_id = 0;
+        uint16_t parse_crc0 = 0, parse_seq = 0;
+        EXPECT_TRUE(CRC::parseFSoEFrameWithCollisionAvoidance(
+            frame, len, cmd, data, data_len, conn_id,
+            start_crc, (uint16_t)seq,
+            &parse_crc0, &parse_seq))
+            << "Parse rejected seq-bumped frame (colliding seq=" << seq << ")";
+        EXPECT_EQ(parse_crc0, build_crc0);
+        EXPECT_EQ(parse_seq, build_seq);
+    }
+    EXPECT_GT(collisions, 0)
+        << "No collision found in seq scan — test provides no coverage";
+}
+
+TEST(FSoECollisionAvoidance, ParseStillRejectsCorruptedFrame) {
+    // The seq-skip replication must not weaken integrity checking: a frame
+    // whose stored CRC does not match at ANY generator-legal seq is a
+    // genuine error and must be rejected.
+    const uint16_t start_crc = 0x1234;
+    const uint16_t colliding_seq = 56422;  // collides (see test above)
+    uint8_t payload[] = {0x34, 0x12, 0x00, 0x01};
+
+    uint8_t frame[64];
+    uint16_t build_crc0 = 0, build_seq = 0;
+    size_t len = CRC::buildFSoEFrameWithCollisionAvoidance(
+        frame, Command::Connection, payload, 4, 0x1234,
+        start_crc, colliding_seq, &build_crc0, &build_seq);
+    ASSERT_GT(len, 0u);
+    ASSERT_GT(build_seq, colliding_seq);  // sanity: seq was bumped
+
+    // Corrupt a data byte — the frame can no longer verify at any seq.
+    frame[1] ^= 0xFF;
+
+    uint8_t cmd = 0;
+    uint8_t data[16] = {0};
+    size_t data_len = 0;
+    uint16_t conn_id = 0;
+    EXPECT_FALSE(CRC::parseFSoEFrameWithCollisionAvoidance(
+        frame, len, cmd, data, data_len, conn_id,
+        start_crc, colliding_seq, nullptr, nullptr));
+}
+
+TEST(FSoECollisionAvoidance, BuildAvoidsSameDirectionCollision) {
+    // Regression test for the consecutive-frame collision defect:
+    // all CRC segments fold the seq in, so crcCommon(S) == crcCommon(S+1)
+    // (~1/65536 per pair) makes two consecutive same-direction frames
+    // BYTE-IDENTICAL.  The receiver's resend detection keys on byte
+    // equality, so a legitimate new frame was swallowed and the CRC/seq
+    // chains desynchronized permanently.
+    //
+    // The generator must skip a seq whose CRC0 equals its OWN previous
+    // frame's CRC0 (same direction), not just the peer's (start_crc) —
+    // and the checker must replicate that skip.
+    const uint16_t conn_id = 0x1234;
+    uint8_t payload[] = {0x11, 0x22};
+
+    // Find a real-world collision: consecutive frames are built with
+    // DIFFERENT start_crc values (the chain inherits the peer's CRC0,
+    // which changes each exchange).  crc0 is injective in seq for a fixed
+    // start_crc, so identical frames require crc0(B, seq+1) == crc0(A, seq)
+    // across two different inherited values — ~1/65536 per (A, B) pair.
+    //
+    // With data_len <= 2 the frame carries a single CRC segment, so equal
+    // crc0 implies BYTE-identical frames (start_crc is not in the bytes).
+    const uint16_t prev_seq = 100;
+    uint8_t prev_frame[64];
+    size_t prev_len = 0;
+    uint16_t prev_crc0 = 0;
+    const uint16_t prev_start_crc = 0x1234;
+    prev_len = CRC::buildFSoEFrame(
+        prev_frame, Command::ProcessData, payload, 2, conn_id,
+        prev_start_crc, prev_seq, &prev_crc0);
+    ASSERT_GT(prev_len, 0u);
+
+    uint16_t start_crc = 0;
+    for (uint32_t sc = 1; sc < 0x10000; ++sc) {
+        if ((uint16_t)sc == prev_start_crc) continue;
+        uint8_t probe[64];
+        uint16_t crc0 = 0;
+        if (CRC::buildFSoEFrame(probe, Command::ProcessData, payload, 2,
+                                  conn_id, (uint16_t)sc,
+                                  CRC::incrementSeqNo(prev_seq),
+                                  &crc0) == 0) continue;
+        // Require crc0 == prev frame's CRC0 (the same-direction collision)
+        // but crc0 != sc so the cross-direction check alone can't trigger
+        // the bump — isolating the same-direction rule under test.
+        if (crc0 == prev_crc0 && crc0 != (uint16_t)sc) {
+            start_crc = (uint16_t)sc;
+            break;
+        }
+    }
+    const uint16_t colliding_seq = CRC::incrementSeqNo(prev_seq);
+    ASSERT_NE(start_crc, 0)
+        << "No same-direction collision found in start_crc scan — "
+           "test provides no coverage";
+
+    // Sanity: the unprotected frame is byte-identical to the previous one.
+    uint8_t frame[64];
+    uint16_t coll_crc0 = 0;
+    size_t coll_len = CRC::buildFSoEFrame(
+        frame, Command::ProcessData, payload, 2, conn_id,
+        start_crc, colliding_seq, &coll_crc0);
+    ASSERT_EQ(coll_len, prev_len);
+    ASSERT_EQ(coll_crc0, prev_crc0);
+    ASSERT_EQ(0, std::memcmp(frame, prev_frame, coll_len));
+
+    // Without same-direction avoidance the builder emits the identical
+    // frame — a resend detector cannot distinguish it from a duplicate.
+    {
+        uint8_t old_frame[64];
+        uint16_t old_crc0 = 0, old_seq = 0;
+        size_t old_len = CRC::buildFSoEFrameWithCollisionAvoidance(
+            old_frame, Command::ProcessData, payload, 2, conn_id,
+            start_crc, colliding_seq, &old_crc0, &old_seq);
+        ASSERT_GT(old_len, 0u);
+        ASSERT_EQ(old_seq, colliding_seq);  // no bump without prev ref
+        ASSERT_EQ(0, std::memcmp(old_frame, prev_frame, old_len));
+    }
+
+    // With prev_same_dir_crc0 the builder MUST bump past the collision.
+    uint16_t build_crc0 = 0, build_seq = 0;
+    size_t len = CRC::buildFSoEFrameWithCollisionAvoidance(
+        frame, Command::ProcessData, payload, 2, conn_id,
+        start_crc, colliding_seq, &build_crc0, &build_seq,
+        &prev_crc0);
+    ASSERT_GT(len, 0u);
+    ASSERT_NE(build_crc0, prev_crc0);
+    ASSERT_GT(build_seq, colliding_seq);
+    ASSERT_NE(0, std::memcmp(frame, prev_frame, len))
+        << "Bumped frame still byte-identical to previous frame";
+
+    // The checker replicates the skip: parsing from the un-bumped seq
+    // with the same prev reference accepts the bumped frame.
+    uint8_t cmd = 0;
+    uint8_t data[16] = {0};
+    size_t data_len = 0;
+    uint16_t parsed_conn = 0;
+    uint16_t parse_crc0 = 0, parse_seq = 0;
+    EXPECT_TRUE(CRC::parseFSoEFrameWithCollisionAvoidance(
+        frame, len, cmd, data, data_len, parsed_conn,
+        start_crc, colliding_seq,
+        &parse_crc0, &parse_seq, nullptr, &prev_crc0));
+    EXPECT_EQ(parse_crc0, build_crc0);
+    EXPECT_EQ(parse_seq, build_seq);
+}
+
 // ============================================================================
 // Sequence number wrap-around in exchange
 // ============================================================================
@@ -845,32 +1072,26 @@ TEST(FSoESequenceConformance, ResetFrameResetsCrcChain) {
     EXPECT_EQ(conn.getTxLastCrc0(), 0u);
     EXPECT_EQ(conn.getRxLastCrc0(), 0u);
 
-    // Exchange: master sends Reset (seq=1, start_crc=0, doesn't update CRC chain).
-    // Slave was in Data state, receives Reset, transitions to Session,
-    // sends Session response (which DOES update the CRC chain).
+    // Exchange: master sends Reset (seq=1, start_crc=0 — the CRC
+    // inheritance chain resets, but the frame's CRC0 IS captured into
+    // last_tx_crc0_ for same-direction collision tracking).
+    // Slave was in Data state, receives Reset (captures its CRC0 into
+    // last_rx_crc0_), transitions to Session, sends Session response.
     // So after this exchange:
-    //   - Master TX CRC = 0 (sent Reset, didn't update)
-    //   - Slave RX CRC = 0 (received Reset, didn't update)
-    //   - Master RX CRC = non-zero (received Session response, updated)
-    //   - Slave TX CRC = non-zero (sent Session response, updated)
+    //   - Master TX CRC0 tracking = Reset frame's CRC0 (non-zero)
+    //   - Slave RX CRC0 tracking  = same Reset frame's CRC0 (non-zero)
+    //   - The inheritance chain itself still reset (next TX uses
+    //     start_crc=0) — proven by the Session exchange succeeding below.
     now += 15;
     ASSERT_TRUE(conn.exchangeWith(slave, now));
 
-    // Reset frame sides: CRC chain stays at 0.
-    // With cross-direction inheritance, getRxLastCrc0() returns the
-    // master's own last TX CRC0 (last_tx_crc0_), which stays at 0
-    // because the Reset TX doesn't update it.  Similarly, the slave's
-    // getTxLastCrc0() returns last_rx_crc0_ (what the slave received
-    // from the master), which stays at 0 because the Reset RX doesn't
-    // update it.
-    EXPECT_EQ(conn.getRxLastCrc0(), 0u);  // Master sent Reset (last_tx_crc0_=0)
-    EXPECT_EQ(slave.getTxLastCrc0(), 0u);  // Slave received Reset (last_rx_crc0_=0)
-
-    // Session response sides: CRC chain is updated (non-zero)
-    // (These may be 0 in the rare case where the Session response's CRC0
-    //  happens to be 0, but that's extremely unlikely with real data.)
-    // We don't assert non-zero here to avoid flakiness — the key invariant
-    // is that the Reset sides stay at 0.
+    // Both sides track the master's Reset frame CRC0 for same-direction
+    // collision avoidance — they must be equal.
+    // With cross-direction naming, getRxLastCrc0() on the master returns
+    // last_tx_crc0_, and getTxLastCrc0() on the slave returns
+    // last_rx_crc0_.
+    EXPECT_NE(conn.getRxLastCrc0(), 0u);  // Master sent Reset (CRC0 captured)
+    EXPECT_EQ(conn.getRxLastCrc0(), slave.getTxLastCrc0());  // same Reset frame
 
     // After the next exchange (Session), CRC chain should be non-zero
     // on all sides (both master and slave send Session frames)
