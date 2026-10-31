@@ -1,28 +1,57 @@
-// SetpointConditioner — bridge a slow setpoint producer to a fast consumer.
-//
-// A target refreshed at a low cadence (every Nth tick, or on any producer
-// event) is emitted every tick through a pluggable condition law:
-//
-//   ZeroOrderHold    snap to the newest target (the classic sample&hold)
-//   FirstOrderLag    held += α·(target − held); α=1 degenerates to ZOH
-//   LinearRampHold   linear move from the last output to the target over
-//                    a fixed tick count (a simple trajectory generator)
-//   SlewRateHold     move ≤ maxDelta per step toward the target
-//   user-defined     subclass IConditionLaw<Value>
-//
-// Per-channel behavior is per-Value: use one conditioner per member (e.g.
-// positions smoothed, gains snapped) or a custom Value type with a
-// ConditionerOps specialization.
-//
-// Assumptions checked at boundaries:
-//   * refresh divisor ≥ 1, α ∈ (0,1], ramp ticks ≥ 1, slew delta > 0.
-//   * Vector targets must keep a constant size across refreshes
-//     (std::invalid_argument on drift — silent resizing would mask a
-//     dimension bug upstream).
-//   * The law pointer must be non-null (std::invalid_argument).
-//
-// Threading: single-threaded per instance. The emitted reference is valid
-// until the next refresh()/step() call — copy it when crossing threads.
+/**
+ * @file SetpointConditioner.hpp
+ * @brief Bridge a slow setpoint producer to a fast consumer through a
+ *        pluggable condition law
+ *
+ * A target refreshed at a low cadence (every Nth tick, or on any producer
+ * event) is emitted every tick through a selectable IConditionLaw:
+ *
+ *   - @ref ZeroOrderHold   — snap to the newest target (the classic
+ *                            sample&hold)
+ *   - @ref FirstOrderLag   — held += α·(target − held); α=1 degenerates
+ *                            to ZOH
+ *   - @ref LinearRampHold  — linear move from the last output to the
+ *                            target over a fixed tick count (a simple
+ *                            trajectory generator)
+ *   - @ref SlewRateHold    — move ≤ maxDelta per step toward the target
+ *   - user-defined         — subclass @ref IConditionLaw
+ *
+ * Per-channel behavior is per-Value: use one conditioner per member (e.g.
+ * positions smoothed, gains snapped) or a custom Value type with a
+ * @ref ConditionerOps specialization.
+ *
+ * ## Usage
+ *
+ * @code
+ *   using Cond = SetpointConditioner<std::vector<double>>;
+ *   Cond pos(std::make_unique<FirstOrderLag<std::vector<double>>>(0.5),
+ *            /*divisor=* /20, initial);
+ *   Cond gains(std::make_unique<ZeroOrderHold<std::vector<double>>(),
+ *              20, initial);
+ *
+ *   // fast loop:
+ *   if (pos.refreshDue(tick)) {         // one gate check for all members
+ *       auto bundle = produce();
+ *       pos.refresh(bundle.pos);
+ *       gains.refresh(bundle.gains);
+ *   }
+ *   const auto& q_des = pos.step();     // smoothed emission this tick
+ *   const auto& kp    = gains.step();   // snapped emission this tick
+ * @endcode
+ *
+ * ## Assumptions checked at boundaries
+ *
+ *   - refresh divisor ≥ 1, α ∈ (0,1], ramp ticks ≥ 1, slew delta > 0.
+ *   - Vector targets must keep a constant size across refreshes
+ *     (std::invalid_argument on drift — silent resizing would mask a
+ *     dimension bug upstream).
+ *   - The law pointer must be non-null (std::invalid_argument).
+ *
+ * ## Threading
+ *
+ * Single-threaded per instance. The emitted reference is valid until the
+ * next refresh()/step() call — copy it when crossing threads.
+ */
 #pragma once
 
 #include <algorithm>
@@ -35,12 +64,20 @@
 namespace tether::control {
 
 // ---- Value arithmetic ------------------------------------------------------
-// The laws need only two vector-space ops. Specialize for custom Value
-// types (both must be defined together).
+
+/**
+ * @brief Vector-space ops the laws need.
+ *
+ * Specialize both members together for a custom Value type:
+ * lerp(from,to,t) = from + t·(to − from); approach(from,to,d) = move ≤ d
+ * per element toward `to`.
+ *
+ * @tparam V  value type (double and std::vector<double> are provided)
+ */
 template <typename V>
 struct ConditionerOps;  // undefined: forces a specialization
 
-// out = from + t·(to − from); out = move ≤maxDelta per element toward to.
+/// @copydoc ConditionerOps
 template <>
 struct ConditionerOps<double> {
   static double lerp(double from, double to, double t) {
@@ -52,7 +89,8 @@ struct ConditionerOps<double> {
   }
 };
 
-// Element-wise; size drift is a contract violation, reported loudly.
+/// @copydoc ConditionerOps
+/// Element-wise; size drift is a contract violation, reported loudly.
 template <>
 struct ConditionerOps<std::vector<double>> {
   static std::vector<double> lerp(const std::vector<double>& from,
@@ -81,25 +119,43 @@ struct ConditionerOps<std::vector<double>> {
 
 // ---- Law interface ---------------------------------------------------------
 
-// Governs the emitted value between refreshes. One law instance per
-// conditioner; methods run on the conditioner's thread, exactly once each
-// per refresh()/step().
+/**
+ * @brief Governs the emitted value between refreshes.
+ *
+ * One law instance per conditioner; methods run on the conditioner's
+ * thread, exactly once each per refresh()/step().
+ *
+ * @tparam Value  target/output type
+ */
 template <typename Value>
 class IConditionLaw {
  public:
   virtual ~IConditionLaw() = default;
-  // A fresh target landed (called before the step() that emits it).
-  // `previous` is the target being replaced. Default: ignore.
+  /**
+   * @brief A fresh target landed (called before the step() emitting it).
+   * @param previous  the target being replaced
+   *
+   * Default: ignore. Laws that ramp/track transitions (e.g.
+   * LinearRampHold) anchor their internal state here.
+   */
   virtual void refreshed(const Value& previous) { (void)previous; }
-  // Emit this tick's conditioned value. The returned reference stays
-  // valid until the next step()/refreshed() on this law.
+  /**
+   * @brief Emit this tick's conditioned value.
+   * @return reference valid until the next step()/refreshed() on this law
+   */
   virtual const Value& step(const Value& target) = 0;
-  // Re-anchor internal state at `initial` (e.g. re-prime from a measured
-  // state so the output resumes smoothly).
+  /**
+   * @brief Re-anchor internal state at `initial`.
+   *
+   * E.g. re-prime from a measured state so the output resumes smoothly.
+   */
   virtual void reset(const Value& initial) = 0;
 };
 
-// Snap to the newest target. Stateless.
+/**
+ * @brief Snap to the newest target. Stateless.
+ * @tparam Value  any type; no ConditionerOps needed
+ */
 template <typename Value>
 class ZeroOrderHold final : public IConditionLaw<Value> {
  public:
@@ -107,10 +163,15 @@ class ZeroOrderHold final : public IConditionLaw<Value> {
   void reset(const Value&) override {}
 };
 
-// Exponential approach: out += α·(target − out). α=1 equals ZOH.
+/**
+ * @brief Exponential approach: out += α·(target − out). α=1 equals ZOH.
+ * @tparam Value  needs ConditionerOps<Value>::lerp
+ */
 template <typename Value>
 class FirstOrderLag final : public IConditionLaw<Value> {
  public:
+  /// @param alpha  blend factor in (0,1]; 1 = snap, smaller = smoother
+  /// @throw std::invalid_argument  α outside (0,1] or non-finite
   explicit FirstOrderLag(double alpha) : alpha_(alpha) {
     if (!(alpha > 0.0 && alpha <= 1.0) || !std::isfinite(alpha))
       throw std::invalid_argument("FirstOrderLag: alpha must be in (0,1]");
@@ -127,12 +188,21 @@ class FirstOrderLag final : public IConditionLaw<Value> {
   Value out_{};
 };
 
-// Linear move from the output at refresh time to the target, over
-// `rampTicks` steps. Starting from the last output keeps the signal
-// continuous even when a refresh lands mid-ramp.
+/**
+ * @brief Linear move from the output at refresh time to the target, over
+ *        `rampTicks` steps.
+ *
+ * Starting from the last output (not the previous target) keeps the
+ * signal continuous even when a refresh lands mid-ramp. rampTicks=1
+ * degenerates to ZOH.
+ *
+ * @tparam Value  needs ConditionerOps<Value>::lerp
+ */
 template <typename Value>
 class LinearRampHold final : public IConditionLaw<Value> {
  public:
+  /// @param rampTicks  steps to reach the target; ≥ 1
+  /// @throw std::invalid_argument  rampTicks < 1
   explicit LinearRampHold(uint64_t rampTicks) : rampTicks_(rampTicks) {
     if (rampTicks < 1)
       throw std::invalid_argument("LinearRampHold: rampTicks must be >= 1");
@@ -160,12 +230,19 @@ class LinearRampHold final : public IConditionLaw<Value> {
   Value src_{}, out_{};
 };
 
-// Move ≤ maxDelta per step toward the target (per element). A torque/slew
-// rate limiter: bounds how fast the emitted value may change regardless of
-// target jumps.
+/**
+ * @brief Move ≤ maxDelta per step toward the target (per element).
+ *
+ * A torque/slew rate limiter: bounds how fast the emitted value may
+ * change regardless of target jumps.
+ *
+ * @tparam Value  needs ConditionerOps<Value>::approach
+ */
 template <typename Value>
 class SlewRateHold final : public IConditionLaw<Value> {
  public:
+  /// @param maxDeltaPerStep  max |Δ| per step, > 0
+  /// @throw std::invalid_argument  non-positive or non-finite delta
   explicit SlewRateHold(double maxDeltaPerStep) : maxDelta_(maxDeltaPerStep) {
     if (!(maxDeltaPerStep > 0.0) || !std::isfinite(maxDeltaPerStep))
       throw std::invalid_argument("SlewRateHold: maxDeltaPerStep must be > 0");
@@ -183,16 +260,27 @@ class SlewRateHold final : public IConditionLaw<Value> {
 
 // ---- Conditioner -----------------------------------------------------------
 
-// Owns the refresh gate and the law. Producer-side decimation is
-// refreshDue(): tick % divisor == 0 — check it once per tick and push the
-// produced bundle via refresh() per member, or use update() for the common
-// single-target case.
+/**
+ * @brief Owns the refresh gate and the law.
+ *
+ * Producer-side decimation is refreshDue() (`tick % divisor == 0`):
+ * check it once per tick and push the produced bundle via refresh() per
+ * member, or use update() for the common single-target case.
+ *
+ * @tparam Value  target/output type (e.g. double, std::vector<double>,
+ *                or a custom type with a ConditionerOps specialization)
+ */
 template <typename Value>
 class SetpointConditioner {
  public:
-  // `law` must be non-null; `refreshDivisor` >= 1 (1 = refresh every tick).
-  // `initial` seeds both the target and the law state so step() emits a
-  // sane value before the first refresh.
+  /**
+   * @param law            hold law (must be non-null)
+   * @param refreshDivisor  refresh gate divisor; ≥ 1 (1 = every tick)
+   * @param initial        seeds both the target and the law state so
+   *                       step() emits a sane value before the first
+   *                       refresh
+   * @throw std::invalid_argument  null law or divisor < 1
+   */
   SetpointConditioner(std::unique_ptr<IConditionLaw<Value>> law,
                       uint64_t refreshDivisor = 1, Value initial = {})
       : law_(std::move(law)),
@@ -210,28 +298,38 @@ class SetpointConditioner {
   SetpointConditioner(SetpointConditioner&&) = default;
   SetpointConditioner& operator=(SetpointConditioner&&) = default;
 
-  // Producer gate: is a refresh due on this tick?
+  /// @brief Producer gate: is a refresh due on this tick?
   bool refreshDue(uint64_t tick) const { return tick % divisor_ == 0; }
 
-  // Push a fresh target. Call on due ticks — or on any producer event;
-  // the conditioner does not care why targets refresh.
+  /**
+   * @brief Push a fresh target.
+   *
+   * Call on due ticks — or on any producer event; the conditioner does
+   * not care why targets refresh.
+   */
   void refresh(Value target) {
     law_->refreshed(target_);
     target_ = std::move(target);
   }
 
-  // Emit this tick's conditioned value (once per consumer tick).
+  /// @brief Emit this tick's conditioned value (once per consumer tick).
+  /// @return reference valid until the next refresh()/step()
   const Value& step() { return law_->step(target_); }
 
-  // Fused single-target form: produce a fresh target on due ticks, always
-  // step. Equivalent to: if (refreshDue(tick)) refresh(produce()); step().
+  /**
+   * @brief Fused single-target form: produce a fresh target on due
+   *        ticks, always step.
+   *
+   * Equivalent to: `if (refreshDue(tick)) refresh(produce()); step();`
+   */
   template <typename ProduceFn>
   const Value& update(uint64_t tick, ProduceFn&& produce) {
     if (refreshDue(tick)) refresh(produce());
     return step();
   }
 
-  // Re-anchor target + law state (e.g. to a measured state on restart).
+  /// @brief Re-anchor target + law state (e.g. to a measured state on
+  ///        restart).
   void reset(const Value& initial) {
     target_ = initial;
     law_->reset(initial);

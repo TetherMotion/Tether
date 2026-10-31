@@ -149,4 +149,129 @@ TEST(MonitoredRemote, ResetClearsResultAndCounters) {
     EXPECT_EQ(mon.completed(), 0u);
 }
 
+TEST(MonitoredRemote, FreshBoundaryIsInclusive) {
+    StubInvoker inv;
+    inv.outcome = okResult({1.0});
+    Mon mon(inv.fn(), decodeF64, 5, 0);
+    mon.call(10, {});
+    EXPECT_TRUE(mon.fresh(15));   // age 5 == maxAge 5: still fresh
+    EXPECT_FALSE(mon.fresh(16));  // age 6: stale
+}
+
+TEST(MonitoredRemote, AgeIsMaxSentinelOnSkewAndNoResult) {
+    StubInvoker inv;
+    inv.outcome = okResult({1.0});
+    Mon mon(inv.fn(), decodeF64, 5, 0);
+    EXPECT_EQ(mon.age(100), ~uint64_t{0});  // no result yet
+    mon.call(50, {});
+    EXPECT_EQ(mon.age(40), ~uint64_t{0});   // producer ahead of consumer
+    EXPECT_EQ(mon.age(50), 0u);             // same-tick: age 0
+}
+
+TEST(MonitoredRemote, TimeoutClearsInFlightAndAllowsRetry) {
+    StubInvoker inv;
+    inv.outcome.timedOut = true;
+    Mon mon(inv.fn(), decodeF64, 5, 0);
+    EXPECT_TRUE(mon.call(1, {}));
+    EXPECT_FALSE(mon.inFlight());  // timeout frees the slot
+    EXPECT_EQ(mon.timeouts(), 1u);
+    inv.outcome = okResult({2.0});
+    EXPECT_TRUE(mon.call(2, {}));  // retry works after a timeout
+    EXPECT_TRUE(mon.result().valid);
+}
+
+TEST(MonitoredRemote, ResultSnapshotIsIsolatedCopy) {
+    StubInvoker inv;
+    inv.outcome = okResult({1.0, 2.0});
+    Mon mon(inv.fn(), decodeF64, 5, 0);
+    mon.call(1, {});
+    auto res = mon.result();
+    res.payload[0] = 999.0;  // mutating the snapshot must not corrupt state
+    EXPECT_DOUBLE_EQ(mon.result().payload[0], 1.0);
+}
+
+TEST(MonitoredRemote, CountersAccumulateAcrossMixedOutcomes) {
+    StubInvoker inv;
+    Mon mon(inv.fn(), decodeF64, 5, 0);
+    inv.outcome = okResult({1.0});
+    mon.call(1, {});            // completed
+    inv.outcome.timedOut = true;
+    mon.call(2, {});            // timeout
+    inv.outcome = Mon::Outcome{};
+    mon.call(3, {});            // error
+    mon.call(4, {});            // error (again)
+    EXPECT_EQ(mon.issued(), 4u);
+    EXPECT_EQ(mon.completed(), 1u);
+    EXPECT_EQ(mon.timeouts(), 1u);
+    EXPECT_EQ(mon.errors(), 2u);
+}
+
+TEST(MonitoredRemote, SettersTakeEffectImmediately) {
+    StubInvoker inv;
+    inv.outcome = okResult({1.0});
+    Mon mon(inv.fn(), decodeF64, 5, 111);
+    mon.call(10, {});
+    EXPECT_EQ(inv.last_timeout, 111u);
+    EXPECT_FALSE(mon.fresh(20));  // age 10 > 5
+    mon.setMaxAgeTicks(15);
+    EXPECT_TRUE(mon.fresh(20));   // age 10 <= 15
+    mon.setTimeoutUs(222);
+    mon.call(30, {});
+    EXPECT_EQ(inv.last_timeout, 222u);
+}
+
+TEST(MonitoredRemote, LateOutcomeAfterResetLandsNewResult) {
+    // Documented contract: reset() does not cancel an in-flight call — a
+    // completion after reset still stores a fresh result.
+    Mon::DoneFn held;
+    Mon mon(
+        [&held](std::vector<uint8_t>, uint64_t, Mon::DoneFn done) {
+            held = done;
+            return true;
+        },
+        decodeF64, 5, 0);
+    EXPECT_TRUE(mon.call(7, {}));
+    mon.reset();
+    held(okResult({3.0}));
+    const auto res = mon.result();
+    ASSERT_TRUE(res.valid);
+    EXPECT_EQ(res.producerTick, 7u);
+}
+
+TEST(MonitoredRemote, NewestResultReplacesOlder) {
+    StubInvoker inv;
+    Mon mon(inv.fn(), decodeF64, 5, 0);
+    inv.outcome = okResult({1.0});
+    mon.call(10, {});
+    inv.outcome = okResult({2.0});
+    mon.call(20, {});
+    const auto res = mon.result();
+    EXPECT_EQ(res.producerTick, 20u);  // newest wins
+    EXPECT_DOUBLE_EQ(res.payload[0], 2.0);
+}
+
+TEST(MonitoredRemote, ArgAndTickPassThroughUnaltered) {
+    StubInvoker inv;
+    inv.outcome = okResult({1.0});
+    Mon mon(inv.fn(), decodeF64, 5, 0);
+    const std::vector<uint8_t> arg{0xDE, 0xAD, 0xBE, 0xEF};
+    EXPECT_TRUE(mon.call(~uint64_t{0} - 1, arg));  // huge tick survives
+    EXPECT_EQ(inv.last_arg, arg);
+    EXPECT_EQ(mon.producerTick(), ~uint64_t{0} - 1);
+}
+
+TEST(MonitoredRemote, DecodeThrowIsContainedAsError) {
+    StubInvoker inv;
+    inv.outcome = okResult({1.0});
+    Mon mon(inv.fn(),
+            [](const uint8_t*, size_t, std::vector<double>&) -> bool {
+                throw std::runtime_error("bad payload");
+            },
+            5, 0);
+    EXPECT_TRUE(mon.call(1, {}));
+    EXPECT_EQ(mon.errors(), 1u);       // exception → counted error, no throw
+    EXPECT_FALSE(mon.result().valid);
+    EXPECT_TRUE(mon.call(2, {}));      // still usable after a throwing decode
+}
+
 }  // namespace

@@ -1,36 +1,69 @@
-// MonitoredRemoteFunctionInvocation — serialize one-at-a-time remote function
-// calls with tick-stamped results and freshness accounting.
-//
-// The component wraps an invoker (e.g. Server::callPeerFunction for
-// server→peer calls, or TetherIOClient::invokeEx for client→server calls)
-// and provides the bookkeeping every caller-side "remote stage" needs:
-//
-//   * At most one call is in flight; call() during a call returns false.
-//   * The newest successful result is stored stamped with the caller's
-//     tick, so a consumer at tick T can classify freshness by age.
-//   * Timeouts, transport/decode errors, issued and completed calls are
-//     counted separately.
-//   * Counters and the result snapshot are safe to read from any thread.
-//
-// Threading contract:
-//   * call() may run on any thread (typically a control loop).
-//   * The invoker's done callback may run on any thread (typically an
-//     IO/session thread) and MAY run inline inside call() for synchronous
-//     invokers. Everything done-touched is shared state; no caller context
-//     is assumed.
-//   * result()/fresh()/age() may run concurrently with call().
-//
-// Lifetime contract: the done callback holds the invocation state via
-// weak_ptr — a call completing after this object is destroyed drops its
-// result instead of touching freed memory. Destruction does NOT cancel an
-// in-flight call; invoke() must remain callable until its last callback
-// fires, so the invoker (session/client) should outlive the object or be
-// stopped first.
-//
-// Decode contract: `decode` is invoked on the done thread with the raw
-// return value; it must validate sizes itself and return false on any
-// malformed input (counted as an error). Exceptions from decode/invoke are
-// caught and counted as errors — the control path never throws.
+/**
+ * @file MonitoredRemoteFunctionInvocation.hpp
+ * @brief Serialized asynchronous remote-function invocation with
+ *        tick-stamped results and freshness accounting
+ *
+ * MonitoredRemoteFunctionInvocation wraps an invoker (e.g.
+ * Server::callPeerFunction for server→peer calls, or
+ * TetherIOClient::invokeEx for client→server calls) and provides the
+ * bookkeeping every caller-side "remote stage" needs:
+ *
+ *   - At most one call is in flight; call() during a call returns false.
+ *   - The newest successful result is stored stamped with the caller's
+ *     producer tick, so a consumer at tick T can classify freshness by
+ *     age: age(T) = T − producerTick.
+ *   - Timeouts, transport/decode errors, issued and completed calls are
+ *     counted separately.
+ *   - The result snapshot and all counters are safe to read from any
+ *     thread.
+ *
+ * ## Usage
+ *
+ * @code
+ *   MonitoredRemoteFunctionInvocation<std::vector<double>> mon(
+ *       // invoker: issue one call, report through done exactly once
+ *       [&](std::vector<uint8_t> arg, uint64_t timeoutUs, auto done) {
+ *           return server.callPeerFunction("fn", {arg}, deadline, done);
+ *       },
+ *       // decoder: bytes -> payload, false = malformed
+ *       [](const uint8_t* d, size_t n, std::vector<double>& out) {
+ *           return decode(d, n, out);
+ *       },
+ *       /*maxAgeTicks=* / 5, /*timeoutUs=* / 2000000);
+ *
+ *   // fast loop:
+ *   if (!mon.inFlight()) mon.call(tick, argBytes);
+ *   if (mon.fresh(tick)) { const auto& payload = mon.result().payload; ... }
+ * @endcode
+ *
+ * ## Threading contract
+ *
+ *   - call() may run on any thread (typically a control loop).
+ *   - The invoker's done callback may run on any thread (typically an
+ *     IO/session thread) and MAY run inline inside call() for synchronous
+ *     invokers — everything done-touched is shared state; no caller
+ *     context is assumed.
+ *   - result()/producerTick()/age()/fresh()/the counters may run
+ *     concurrently with call() and the done callback.
+ *
+ * ## Lifetime contract
+ *
+ * The done callback holds the invocation state via weak_ptr — a call
+ * completing after this object is destroyed drops its result instead of
+ * touching freed memory. Destruction does NOT cancel an in-flight call;
+ * invoke() must remain callable until its last callback fires, so the
+ * invoker (session/client) should outlive the object or be stopped first.
+ *
+ * ## Decode contract
+ *
+ * `decode` is invoked on the done thread with the raw return value; it
+ * must validate sizes itself and return false on any malformed input
+ * (counted as an error). Exceptions from decode/invoke are caught and
+ * counted as errors — the control path never throws.
+ *
+ * @tparam Payload  decoded result type; must be default-constructible
+ *                  for the result slot.
+ */
 #pragma once
 
 #include <atomic>
@@ -53,33 +86,71 @@ public:
     /// producerTick sentinel until the first successful result lands.
     static constexpr Tick kNoResult = ~Tick{0};
 
-    /// Normalized call outcome the invoker reports through `done`.
+    /**
+     * @brief Normalized call outcome the invoker reports through `done`.
+     *
+     * Field mapping for the common invokers:
+     *   - Session::InvokeResult maps field-for-field
+     *     (timedOut/success/hasReturnValue/returnValue).
+     *   - A client-side invokeEx adapter fills the same fields from its
+     *     InvokeResult.
+     *
+     * Exactly one of: timedOut, !success/!hasReturnValue, or a decoded
+     * result applies per call.
+     */
     struct Outcome {
-        bool timedOut = false;        // transport deadline hit
-        bool success = false;         // callee executed without RPC error
-        bool hasReturnValue = false;  // return payload present
-        std::vector<uint8_t> returnValue;
+        bool timedOut = false;        ///< transport deadline hit
+        bool success = false;         ///< callee executed without RPC error
+        bool hasReturnValue = false;  ///< return payload present
+        std::vector<uint8_t> returnValue;  ///< raw encoded return value
     };
 
+    /// Invoker completion sink: called exactly once per issued call.
     using DoneFn = std::function<void(const Outcome&)>;
-    /// Invoker: issue one call carrying `arg`, honoring `timeoutUs`, and
-    /// report through `done` exactly once. Return false when the call
-    /// cannot be issued (e.g. no peer hosts the function).
+    /**
+     * @brief Invoker: issue one call carrying `arg`, honoring `timeoutUs`,
+     *        and report through `done` exactly once.
+     * @return false when the call cannot be issued (e.g. no peer hosts
+     *         the function).
+     *
+     * `timeoutUs` is a relative budget the invoker maps to its own
+     * deadline scheme; 0 = no deadline.
+     */
     using InvokeFn = std::function<bool(std::vector<uint8_t> arg,
                                         uint64_t timeoutUs, DoneFn done)>;
-    /// Decoder: translate `returnValue` bytes into `out`; false = malformed.
+    /**
+     * @brief Decoder: translate `returnValue` bytes into `out`.
+     * @return false on any malformed input (counted as an error).
+     */
     using DecodeFn = std::function<bool(const uint8_t* data, size_t len,
                                         Payload& out)>;
 
-    /// `invoke`/`decode` may be empty: an empty invoke makes call() return
-    /// false; an empty decode counts every successful call as an error.
+    /**
+     * @param invoke       issue-fn; empty → call() always returns false
+     * @param decode       decode-fn; empty → every successful call counts
+     *                     as an error
+     * @param maxAgeTicks  freshness window for fresh(); tunable at runtime
+     * @param timeoutUs    per-call deadline budget passed to the invoker
+     */
     MonitoredRemoteFunctionInvocation(InvokeFn invoke, DecodeFn decode,
                                       uint32_t maxAgeTicks, uint64_t timeoutUs)
         : invoke_(std::move(invoke)), decode_(std::move(decode)),
           state_(std::make_shared<State>(maxAgeTicks, timeoutUs)) {}
 
-    /// Issue one call stamped `tick`. Returns false when `invoke` is empty,
-    /// a call is already in flight, or the invoker refused the call.
+    MonitoredRemoteFunctionInvocation(
+        const MonitoredRemoteFunctionInvocation&) = delete;
+    MonitoredRemoteFunctionInvocation& operator=(
+        const MonitoredRemoteFunctionInvocation&) = delete;
+
+    /**
+     * @brief Issue one call stamped `tick`.
+     * @return false when `invoke` is empty, a call is already in flight,
+     *         or the invoker refused the call.
+     *
+     * The tick is caller-chosen (a loop sequence number); it is stamped
+     * onto the result so consumers can classify freshness at their own
+     * current tick.
+     */
     bool call(Tick tick, std::vector<uint8_t> arg) {
         if (!invoke_ || state_->in_flight.exchange(true)) return false;
         const std::weak_ptr<State> weak = state_;
@@ -117,6 +188,9 @@ public:
                                    std::lock_guard lk(st->result_mtx);
                                    st->result = {tick, std::move(payload), true};
                                }
+                               // Ordered after the result write: a reader
+                               // seeing the new tick is guaranteed the
+                               // payload is already stored.
                                st->producer_tick.store(tick);
                                ++st->completed;
                            });
@@ -131,15 +205,15 @@ public:
         return true;
     }
 
-    /// Latest completed result. `valid` is false until the first
-    /// successful call completes.
+    /// Snapshot of the newest successful result (copies the payload).
     struct Result {
-        Tick producerTick = 0;
-        Payload payload{};
-        bool valid = false;
+        Tick producerTick = 0;  ///< tick stamped by call()
+        Payload payload{};      ///< decoded return value
+        bool valid = false;     ///< false until the first success
     };
 
-    /// Snapshot of the newest successful result (copies the payload).
+    /// Latest completed result. `valid` is false until the first
+    /// successful call completes.
     Result result() const {
         std::lock_guard lk(state_->result_mtx);
         return state_->result;
@@ -148,15 +222,19 @@ public:
     /// Tick stamped on the newest result; kNoResult until the first one.
     Tick producerTick() const { return state_->producer_tick.load(); }
 
-    /// Ticks between `tick` and the newest result; ~Tick{0} when there is
-    /// no result or the stamp is ahead of `tick` (clock skew guard).
+    /**
+     * @brief Ticks between `tick` and the newest result.
+     * @return ~Tick{0} when there is no result or the stamp is ahead of
+     *         `tick` (clock skew guard).
+     */
     uint64_t age(Tick tick) const {
         const Tick produced = producerTick();
         if (produced == kNoResult || produced > tick) return ~Tick{0};
         return tick - produced;
     }
 
-    /// True when a result exists and its age is within maxAgeTicks.
+    /// True when a result exists and its age is within maxAgeTicks
+    /// (inclusive bound).
     bool fresh(Tick tick) const {
         return age(tick) <= state_->max_age_ticks.load();
     }
