@@ -179,6 +179,7 @@ set(CONTROL_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_jog_controller.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_classical_tuning_factory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_setpoint_conditioner.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/test_loop_pacer.cpp"
 )
 set(CONTROL_EXTRUSION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_power_law_rheology.cpp"
@@ -261,6 +262,7 @@ set(IO_PROTOCOL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_wire_contract.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_malformed.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_monitored_remote.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_value_builder.cpp"
 )
 set(IO_TRANSPORT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_receive_buffer.cpp"
@@ -1001,6 +1003,7 @@ gtest_discover_tests(tether_header_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOU
 tether_add_test_executable(tether_utils_tests
     utils/test_spsc_ring.cpp
     common/test_pending_slot.cpp
+    common/test_window_stats.cpp
 )
 
 target_include_directories(tether_utils_tests PRIVATE
