@@ -141,11 +141,13 @@ class IConditionLaw {
   virtual void refreshed(const Value& previous) { (void)previous; }
   /**
    * @brief Emit this tick's conditioned value.
+   * @param target  newest refreshed target
    * @return reference valid until the next step()/refreshed() on this law
    */
   virtual const Value& step(const Value& target) = 0;
   /**
    * @brief Re-anchor internal state at `initial`.
+   * @param initial  value the law should emit/converge from
    *
    * E.g. re-prime from a measured state so the output resumes smoothly.
    */
@@ -299,10 +301,13 @@ class SetpointConditioner {
   SetpointConditioner& operator=(SetpointConditioner&&) = default;
 
   /// @brief Producer gate: is a refresh due on this tick?
+  /// @param tick  consumer's tick counter
+  /// @return `tick % refreshDivisor == 0`
   bool refreshDue(uint64_t tick) const { return tick % divisor_ == 0; }
 
   /**
    * @brief Push a fresh target.
+   * @param target  newest producer output (moved in)
    *
    * Call on due ticks — or on any producer event; the conditioner does
    * not care why targets refresh.
@@ -319,6 +324,11 @@ class SetpointConditioner {
   /**
    * @brief Fused single-target form: produce a fresh target on due
    *        ticks, always step.
+   * @param tick     consumer's tick counter
+   * @param produce  callable returning a fresh Value; invoked only on
+   *                 due ticks
+   * @return this tick's conditioned value
+   * @tparam ProduceFn  `Value() -> Value` callable
    *
    * Equivalent to: `if (refreshDue(tick)) refresh(produce()); step();`
    */
@@ -330,13 +340,17 @@ class SetpointConditioner {
 
   /// @brief Re-anchor target + law state (e.g. to a measured state on
   ///        restart).
+  /// @param initial  new target and law-state anchor
   void reset(const Value& initial) {
     target_ = initial;
     law_->reset(initial);
   }
 
+  /// Newest refreshed target.
   const Value& target() const { return target_; }
+  /// The installed condition law (read-only).
   const IConditionLaw<Value>& law() const { return *law_; }
+  /// Refresh gate divisor (1 = every tick due).
   uint64_t refreshDivisor() const { return divisor_; }
 
  private:
