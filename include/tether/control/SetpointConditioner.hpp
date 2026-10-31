@@ -207,6 +207,8 @@ class SetpointConditioner {
 
   SetpointConditioner(const SetpointConditioner&) = delete;
   SetpointConditioner& operator=(const SetpointConditioner&) = delete;
+  SetpointConditioner(SetpointConditioner&&) = default;
+  SetpointConditioner& operator=(SetpointConditioner&&) = default;
 
   // Producer gate: is a refresh due on this tick?
   bool refreshDue(uint64_t tick) const { return tick % divisor_ == 0; }
