@@ -178,6 +178,7 @@ set(CONTROL_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_scurve_ramper.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_jog_controller.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_classical_tuning_factory.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/test_setpoint_conditioner.cpp"
 )
 set(CONTROL_EXTRUSION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_power_law_rheology.cpp"
