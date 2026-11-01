@@ -191,6 +191,10 @@ public:
     /**
      * @brief Set second-order system model
      * ẍ = f(x,ẋ) + g(x,ẋ)u + d
+     *
+     * @param naturalFreq Undamped natural frequency ω_n [rad/s].
+     * @param damping Damping ratio ζ.
+     * @param inputGain Input gain g (default 1).
      */
     void setSecondOrderModel(double naturalFreq, double damping,
                             double inputGain = 1.0);
@@ -207,6 +211,7 @@ public:
     /**
      * @brief Set disturbance bounds
      * |d| ≤ dMax
+     * @param dMax Maximum expected disturbance magnitude.
      */
     void setDisturbanceBound(double dMax) { m_dMax = dMax; }
     
@@ -231,11 +236,13 @@ public:
     
     /**
      * @brief Set surface parameters
+     * @param params Surface coefficients/order and tracking configuration.
      */
     void setSurfaceParams(const SlidingSurfaceParams& params);
     
     /**
      * @brief Get current sliding variable value
+     * @return σ evaluated at the last compute() call.
      */
     double getSigma() const { return m_sigma; }
     
@@ -245,11 +252,13 @@ public:
     
     /**
      * @brief Set reaching law
+     * @param law Reaching law shaping σ̇ (constant rate, exponential, power).
      */
     void setReachingLaw(ReachingLaw law) { m_reachingLaw = law; }
     
     /**
      * @brief Set chattering reduction method
+     * @param method Boundary-layer, saturation or observer-based smoothing.
      */
     void setChatteringReduction(ChatteringReduction method) { 
         m_chatterReduction = method; 
@@ -257,21 +266,25 @@ public:
     
     /**
      * @brief Set SMC gains
+     * @param gains Switching gain, boundary width and reaching gains.
      */
     void setGains(const SMCGains& gains) { m_gains = gains; }
     
     /**
      * @brief Set switching gain K
+     * @param K Must exceed the disturbance bound for reachability.
      */
     void setSwitchingGain(double K) { m_gains.switchingGain = K; }
     
     /**
      * @brief Set boundary layer width Φ
+     * @param phi Half-width of the linear region; trades chattering for error.
      */
     void setBoundaryLayer(double phi) { m_gains.boundaryWidth = phi; }
     
     /**
      * @brief Set proportional reaching gain λ
+     * @param lambda Gain of the proportional reaching term.
      */
     void setProportionalGain(double lambda) { m_gains.proportionalGain = lambda; }
     
@@ -283,11 +296,15 @@ public:
      * @brief Enable equivalent control estimation
      * 
      * If disturbance model unknown, estimate u_eq from σ dynamics
+     * @param enable true to estimate the equivalent control online.
+     * @param filterConst Low-pass time constant for the estimate [s].
      */
     void enableEquivalentEstimation(bool enable, double filterConst = 0.01);
     
     /**
      * @brief Set control saturation limits
+     * @param uMin Lower output bound.
+     * @param uMax Upper output bound.
      */
     void setControlLimits(double uMin, double uMax) {
         m_uMin = uMin;
@@ -297,6 +314,9 @@ public:
     /**
      * @brief Enable adaptive gain
      * K̇ = γ|σ| when |σ| > threshold
+     * @param enable true to adapt the switching gain online.
+     * @param gamma Adaptation rate γ.
+     * @param threshold |σ| below which adaptation stops.
      */
     void enableAdaptiveGain(bool enable, double gamma = 0.1, double threshold = 0.01);
     
@@ -307,21 +327,26 @@ public:
     /**
      * @brief Check reachability condition
      * σσ̇ < -η|σ| for some η > 0
+     * @return true when the configured gains satisfy the condition.
      */
     bool isReachable() const;
     
     /**
      * @brief Get reaching time estimate
+     * @param sigma0 Initial sliding variable value.
+     * @return Estimated time to reach the surface [s].
      */
     double estimateReachingTime(double sigma0) const;
     
     /**
      * @brief Get equivalent control (if computed)
+     * @return Last equivalent-control term u_eq.
      */
     double getEquivalentControl() const { return m_uEq; }
     
     /**
      * @brief Get switching control
+     * @return Last switching term u_sw.
      */
     double getSwitchingControl() const { return m_uSw; }
     
@@ -411,11 +436,17 @@ public:
     
     /**
      * @brief Set system model
+     * @param A State matrix (n×n, row-major).
+     * @param B Input matrix (n×m, row-major).
+     * @param n State dimension.
+     * @param m Input dimension.
      */
     void setSystemModel(const double* A, const double* B, int n, int m);
     
     /**
      * @brief Set sliding surface
+     * @param C Surface coefficients (1×n).
+     * @param n State dimension.
      */
     void setSlidingSurface(const double* C, int n);
     
@@ -437,6 +468,7 @@ public:
     
     /**
      * @brief Get integral state
+     * @return Integrator state v of the super-twisting law.
      */
     double getIntegralState() const { return m_v; }
     
@@ -488,16 +520,22 @@ public:
     
     /**
      * @brief Set system parameters
+     * @param A State matrix (n×n, row-major).
+     * @param B Input matrix (n×m, row-major).
+     * @param n State dimension.
+     * @param m Input dimension.
      */
     void setSystemModel(const double* A, const double* B, int n, int m);
     
     /**
      * @brief Set switching gain
+     * @param K Switching gain; must dominate the disturbance bound.
      */
     void setSwitchingGain(double K) { m_K = K; }
     
     /**
      * @brief Set boundary layer for chattering reduction
+     * @param phi Half-width of the linear region around σ = 0.
      */
     void setBoundaryLayer(double phi) { m_phi = phi; }
     
@@ -505,11 +543,14 @@ public:
      * @brief Enable non-singular terminal SMC
      * 
      * Avoids singularity when e = 0, ė ≠ 0
+     * @param enable true to use the non-singular surface.
      */
     void enableNonsingular(bool enable) { m_nonsingular = enable; }
     
     /**
      * @brief Estimate convergence time from current state
+     * @param error Current tracking error.
+     * @return Estimated finite settling time [s].
      */
     double estimateConvergenceTime(double error) const;
     
@@ -557,31 +598,42 @@ public:
     
     /**
      * @brief Set system model
+     * @param A State matrix (n×n, row-major).
+     * @param B Input matrix (n×m, row-major).
+     * @param n State dimension.
+     * @param m Input dimension.
      */
     void setSystemModel(const double* A, const double* B, int n, int m);
     
     /**
      * @brief Set nominal control (baseline without SMC)
+     * @param uNom Nominal law evaluated as (state, time) -> control.
      */
     void setNominalControl(std::function<double(const StateVector&, double)> uNom);
     
     /**
      * @brief Set integral gain
+     * @param Ki Integral gain vector (1×n).
+     * @param n State dimension.
      */
     void setIntegralGain(const double* Ki, int n);
     
     /**
      * @brief Set discontinuous control gain
+     * @param K Switching gain; must dominate the matched uncertainty.
      */
     void setSwitchingGain(double K) { m_K = K; }
     
     /**
      * @brief Set boundary layer
+     * @param phi Half-width of the linear region around σ = 0.
      */
     void setBoundaryLayer(double phi) { m_phi = phi; }
     
     /**
      * @brief Initialize integral state for smooth start
+     * @param x0 Initial state.
+     * @param xd0 Initial desired state (sets the integral offset).
      */
     void initialize(const StateVector& x0, const StateVector& xd0);
     
@@ -627,6 +679,10 @@ public:
     
     /**
      * @brief Set system model
+     * @param A State matrix (n×n, row-major).
+     * @param B Input matrix (n×m, row-major).
+     * @param n State dimension.
+     * @param m Input dimension.
      */
     void setSystemModel(const double* A, const double* B, int n, int m);
     
@@ -645,11 +701,13 @@ public:
     
     /**
      * @brief Set boundary layer
+     * @param phi Half-width of the linear region around σ = 0.
      */
     void setBoundaryLayer(double phi) { m_phi = phi; }
     
     /**
      * @brief Get current adapted gain
+     * @return Switching gain after the latest adaptation step.
      */
     double getAdaptedGain() const { return m_K; }
     
@@ -707,6 +765,9 @@ public:
      * @brief Compute minimum switching gain for robustness
      * 
      * K > |d_max| + η for some η > 0
+     * @param disturbanceBound Maximum expected disturbance magnitude.
+     * @param safetyMargin Extra margin η added on top of the bound.
+     * @return Recommended switching gain K.
      */
     static double minimumSwitchingGain(double disturbanceBound, 
                                        double safetyMargin = 0.1);
@@ -716,6 +777,11 @@ public:
      * 
      * For σ̇ = -K·sign(σ): t_r = |σ(0)|/K
      * For σ̇ = -K·sign(σ) - λσ: t_r = (1/λ)ln(1 + λ|σ(0)|/K)
+     *
+     * @param sigma0 Initial sliding variable value.
+     * @param K Switching gain.
+     * @param lambda Proportional reaching gain (0 = pure constant-rate law).
+     * @return Estimated reaching time [s].
      */
     static double reachingTime(double sigma0, double K, 
                               double lambda = 0.0);
@@ -723,6 +789,10 @@ public:
     /**
      * @brief Check Lyapunov stability condition
      * V̇ = σσ̇ < 0 outside boundary layer
+     * @param sigma Sliding variable value.
+     * @param sigmaDot Sliding variable derivative.
+     * @param boundaryLayer Half-width of the linear region (0 = none).
+     * @return true when σσ̇ < 0 (or inside the boundary layer).
      */
     static bool checkLyapunovCondition(double sigma, double sigmaDot,
                                        double boundaryLayer = 0.0);
@@ -732,6 +802,7 @@ public:
      * @param K Switching gain
      * @param phi Boundary layer width
      * @param systemBandwidth System bandwidth (approximate)
+     * @return Estimated chattering amplitude at the output.
      */
     static double chatteringAmplitude(double K, double phi, 
                                      double systemBandwidth);
@@ -751,12 +822,17 @@ public:
     /**
      * @brief Compute control for r-th order SMC
      * Drives σ, σ̇, ..., σ^(r-1) to zero
+     * @param sigma Current sliding variable value.
+     * @param sigmaDerivatives σ̇, σ̈, ... up to order r-1.
+     * @param dt Sample period [s].
+     * @return Control value for this step.
      */
     double compute(double sigma, const std::vector<double>& sigmaDerivatives,
                   double dt);
     
     /**
      * @brief Set gains for each order
+     * @param gains One gain per order, starting at order 1.
      */
     void setGains(const std::vector<double>& gains);
     
