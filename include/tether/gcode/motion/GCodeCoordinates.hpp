@@ -432,27 +432,36 @@ public:
     /**
      * @brief Select work coordinate system by G-code
      * @param gcode G54, G55, ..., G59, G59.1, G59.2, G59.3
+     * @return Error::OK, or an unsupported-code error.
      */
     Error selectWCS(double gcode);
     
     /**
      * @brief Select work coordinate system by number (1-9)
+     * @param number WCS number (1-9).
+     * @return Error::OK, or an out-of-range error.
      */
     Error selectWCS(int32_t number);
     
     /**
      * @brief Get currently selected WCS
+     * @return The active work coordinate system.
      */
     const WorkCoordinateSystem& getActiveWCS() const;
     
     /**
      * @brief Get WCS by number (1-9)
+     * @param number WCS number (1-9).
+     * @return Requested coordinate system (WCS 1 when out of range).
      */
     const WorkCoordinateSystem& getWCS(int32_t number) const;
+    /// @param number WCS number (1-9).
+    /// @return Mutable access to the requested coordinate system.
     WorkCoordinateSystem& getWCS(int32_t number);
     
     /**
      * @brief Get active WCS number
+     * @return Number of the currently selected WCS.
      */
     int32_t getActiveWCSNumber() const { return m_activeWCS; }
     
@@ -464,6 +473,12 @@ public:
      * @brief Process G92 (set position)
      * 
      * Sets the offset so current position becomes the specified coordinate.
+     *
+     * @param block G-code block with the new program coordinates.
+     * @param machinePos Current machine position.
+     * @param state Machine state (updated with the G92 offset).
+     * @param vars Variable system (#5420-#5428 updated).
+     * @return Error::OK on success.
      */
     Error processG92(
         const Block& block,
@@ -474,26 +489,35 @@ public:
     
     /**
      * @brief Process G92.1 (reset G92)
+     * @param state Machine state (G92 offset cleared).
+     * @param vars Variable system (#5211-#5218 updated).
+     * @return Error::OK on success.
      */
     Error processG92_1(MachineState& state, VariableSystem& vars);
     
     /**
      * @brief Process G92.2 (disable G92)
+     * @param state Machine state (G92 offset disabled).
+     * @return Error::OK on success.
      */
     Error processG92_2(MachineState& state);
     
     /**
      * @brief Process G92.3 (re-enable G92)
+     * @param state Machine state (previously saved G92 offset restored).
+     * @return Error::OK on success.
      */
     Error processG92_3(MachineState& state);
     
     /**
      * @brief Get G92 offset
+     * @return Current G92 coordinate offset.
      */
     const Position& getG92Offset() const { return m_g92Offset; }
     
     /**
      * @brief Check if G92 is active
+     * @return true when a G92 offset is currently applied.
      */
     bool isG92Active() const { return m_g92Active; }
     
@@ -505,11 +529,14 @@ public:
      * @brief Process G53 (machine coordinate mode)
      * 
      * Returns true—caller should use machine coordinates for this block only.
+     *
+     * @return true; the mode lasts for the current block only.
      */
     bool processG53();
     
     /**
      * @brief Check if in G53 mode (non-modal, check after processing)
+     * @return true while the current block is being interpreted as G53.
      */
     bool inG53Mode() const { return m_g53Active; }
     
@@ -535,6 +562,8 @@ public:
 
     /**
      * @brief Reset G52 offset to zero.
+     * @param state Machine state (g52Offset zeroed).
+     * @return Error::OK on success.
      */
     Error clearG52(MachineState& state);
 
@@ -565,6 +594,8 @@ public:
 
     /**
      * @brief Process G69 (cancel coordinate rotation)
+     * @param state Machine state (rotation reset to identity).
+     * @return Error::OK on success.
      */
     Error processG69(MachineState& state);
 
@@ -586,16 +617,24 @@ public:
 
     /**
      * @brief Process G50 (cancel scaling)
+     * @param state Machine state (scale factors reset to 1).
+     * @return Error::OK on success.
      */
     Error processG50(MachineState& state);
 
     /// @brief Process G51.1 — programmable mirror image. Each axis word
-    ///        present (X<c>, Y<c>, Z<c>, ...) enables mirroring of that axis
-    ///        about program coordinate <c>.
+    ///        present (`X&lt;c&gt;`, `Y&lt;c&gt;`, `Z&lt;c&gt;`, ...) enables mirroring of
+    ///        that axis about program coordinate `&lt;c&gt;`.
+    /// @param block G-code block with the mirror axis words.
+    /// @param state Machine state (mirror configuration updated).
+    /// @return Error::OK on success.
     Error processG51_1(const Block& block, MachineState& state);
 
     /// @brief Process G50.1 — cancel mirror image. Axis words disable
     ///        mirroring on those axes; no words disables all axes.
+    /// @param block G-code block with the axes to un-mirror.
+    /// @param state Machine state (mirror configuration updated).
+    /// @return Error::OK on success.
     Error processG50_1(const Block& block, MachineState& state);
 
     // ========================================================================
@@ -606,7 +645,9 @@ public:
      * @brief Process G10 L2 (set WCS offset absolute)
      * 
      * @param pWord WCS number (1-9)
-     * @param offset New offset values (only specified axes are changed)
+     * @param block G-code block with the offset axis words
+     * @param vars Variable system (#5201-#5399 updated)
+     * @return Error::OK, or a WCS-range error.
      */
     Error processG10L2(
         int32_t pWord,
@@ -618,6 +659,12 @@ public:
      * @brief Process G10 L20 (set WCS based on current position)
      * 
      * Sets WCS so current position becomes specified coordinate.
+     *
+     * @param pWord WCS number (1-9).
+     * @param block G-code block with the target coordinates.
+     * @param machinePos Current machine position.
+     * @param vars Variable system (#5201-#5399 updated).
+     * @return Error::OK, or a WCS-range error.
      */
     Error processG10L20(
         int32_t pWord,
@@ -632,6 +679,11 @@ public:
     
     /**
      * @brief Process G28 (return to reference)
+     * @param block G-code block with the intermediate point axes.
+     * @param state Machine state (updated).
+     * @param segments Motion segments appended for the intermediate move and
+     *        the move to the reference point.
+     * @return Error::OK on success.
      */
     Error processG28(
         const Block& block,
@@ -641,6 +693,9 @@ public:
     
     /**
      * @brief Process G28.1 (store reference point)
+     * @param machinePos Current machine position stored as the reference.
+     * @param vars Variable system (#5161-#5169 updated).
+     * @return Error::OK on success.
      */
     Error processG28_1(
         const Position& machinePos,
@@ -649,6 +704,11 @@ public:
     
     /**
      * @brief Process G30 (return to secondary reference)
+     * @param block G-code block with the intermediate point axes.
+     * @param pWord Which reference (1-4)
+     * @param state Machine state (updated).
+     * @param segments Motion segments appended for the moves.
+     * @return Error::OK, or a reference-range error.
      */
     Error processG30(
         const Block& block,
@@ -659,6 +719,10 @@ public:
     
     /**
      * @brief Process G30.1 (store secondary reference)
+     * @param machinePos Current machine position stored as the reference.
+     * @param pWord Which reference (1-4)
+     * @param vars Variable system (#5181-#5189 updated).
+     * @return Error::OK, or a reference-range error.
      */
     Error processG30_1(
         const Position& machinePos,
@@ -668,11 +732,14 @@ public:
     
     /**
      * @brief Get G28 reference point
+     * @return Machine position of the G28 reference.
      */
     const Position& getG28Reference() const { return m_g28Reference; }
     
     /**
      * @brief Get G30 reference point
+     * @param point Reference index (1-4).
+     * @return Machine position of the requested G30 reference.
      */
     const Position& getG30Reference(int32_t point = 1) const;
     
@@ -693,6 +760,8 @@ public:
 
     /**
      * @brief Convert machine coordinates to program coordinates (inverse).
+     * @param machinePos Machine coordinates.
+     * @return Program coordinates.
      */
     Position toProgramCoords(const Position& machinePos) const;
 
@@ -700,6 +769,7 @@ public:
      * @brief Get total additive offset (WCS + G92 + G52).
      * @note This ignores rotation and scaling; it is the legacy additive
      *       offset only. For the full transform use @ref toMachineCoords.
+     * @return Sum of the additive offsets.
      */
     Position getTotalOffset() const;
 
@@ -707,6 +777,7 @@ public:
      * @brief Access the composed CoordinateTransform (scale + rotation +
      *        translation). Rebuilt whenever WCS/G52/G92/G68/G51 parameters
      *        change via the process* methods.
+     * @return Composed scale/rotation/translation transform.
      */
     const CoordinateTransform& transform() const { return m_transform; }
 
@@ -714,6 +785,8 @@ public:
      * @brief Rebuild the transform from the current MachineState.
      * Called automatically by the process* methods; can also be called
      * manually after directly modifying state fields.
+     *
+     * @param state Machine state to derive the transform from.
      */
     void syncTransform(const MachineState& state);
     
@@ -723,16 +796,20 @@ public:
     
     /**
      * @brief Sync all offsets to variable system
+     * @param vars Variable system receiving the offset values.
      */
     void syncToVariables(VariableSystem& vars) const;
     
     /**
      * @brief Load offsets from variable system
+     * @param vars Variable system supplying the offset values.
      */
     void loadFromVariables(const VariableSystem& vars);
     
     /**
      * @brief Update current position variables (#5420-#5428)
+     * @param machinePos Current machine position.
+     * @param vars Variable system receiving the position values.
      */
     void updatePositionVariables(
         const Position& machinePos,
@@ -745,11 +822,15 @@ public:
     
     /**
      * @brief Save all WCS to file
+     * @param filename Destination path.
+     * @return Error::OK, or a file I/O error.
      */
     Error saveToFile(const std::string& filename) const;
     
     /**
      * @brief Load all WCS from file
+     * @param filename Source path.
+     * @return Error::OK, or a file/parse error.
      */
     Error loadFromFile(const std::string& filename);
     
@@ -800,21 +881,30 @@ private:
 
 /**
  * @brief Convert G-code (G54-G59.3) to WCS number (1-9)
+ * @param gcode G54, G55, ..., G59.3.
+ * @return WCS number 1-9, or 0 for unrecognized codes.
  */
 int32_t gcodeToWCSNumber(double gcode);
 
 /**
  * @brief Convert WCS number (1-9) to G-code (54-59.3)
+ * @param number WCS number 1-9.
+ * @return G-code number, or 0 when out of range.
  */
 double wcsNumberToGCode(int32_t number);
 
 /**
  * @brief Get WCS name string (e.g., "G54", "G59.1")
+ * @param number WCS number 1-9.
+ * @return Static name string, or "G54" when out of range.
  */
 const char* wcsNumberToString(int32_t number);
 
 /**
  * @brief Process coordinate system G-codes
+ * @param state Machine state updated by the selected WCS.
+ * @param csm Coordinate system manager holding the WCS offsets.
+ * @return Error::OK on success.
  */
 Error processG54(MachineState& state, CoordinateSystemManager& csm);
 Error processG55(MachineState& state, CoordinateSystemManager& csm);

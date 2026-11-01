@@ -267,28 +267,42 @@ class SubroutineRegistry {
 public:
     /**
      * @brief Register a numbered subroutine
+     * @param oNumber O-code number of the subroutine.
+     * @param info Name, arguments and source location.
+     * @return Error::OK, or a duplicate/validation error.
      */
     Error registerSubroutine(int32_t oNumber, const SubroutineInfo& info);
     
     /**
      * @brief Register a named subroutine
+     * @param name Subroutine name as used by `o<name> call`.
+     * @param info Name, arguments and source location.
+     * @return Error::OK, or a duplicate/validation error.
      */
     Error registerSubroutine(const std::string& name, const SubroutineInfo& info);
     
     /**
      * @brief Find numbered subroutine
+     * @param oNumber O-code number to look up.
+     * @return Registered info, or nullptr when unknown.
      */
     const SubroutineInfo* find(int32_t oNumber) const;
     
     /**
      * @brief Find named subroutine
+     * @param name Subroutine name to look up.
+     * @return Registered info, or nullptr when unknown.
      */
     const SubroutineInfo* find(const std::string& name) const;
     
     /**
      * @brief Check if subroutine exists
+     * @param oNumber O-code number to test.
+     * @return true when a numbered subroutine is registered.
      */
     bool exists(int32_t oNumber) const;
+    /// @param name Subroutine name to test.
+    /// @return true when a named subroutine is registered.
     bool exists(const std::string& name) const;
     
     /**
@@ -298,11 +312,15 @@ public:
     
     /**
      * @brief Scan source for subroutines
+     * @param parser Parser positioned at the program source.
+     * @return Error::OK, or the first parse error encountered.
      */
     Error scanSource(Parser& parser);
     
     /**
      * @brief Load subroutines from file
+     * @param filename Path of the G-code source to scan.
+     * @return Error::OK, or a file/parse error.
      */
     Error loadFromFile(const std::string& filename);
     
@@ -380,12 +398,14 @@ public:
     
     /**
      * @brief Get jump address after execute() returns JUMP
+     * @return Block index the interpreter should continue at.
      */
     size_t getJumpAddress() const { return m_jumpAddress; }
     uint32_t getJumpLine() const { return m_jumpLine; }
     
     /**
      * @brief Get return value (if any)
+     * @return Value passed to `o<sub> return`, or nullopt.
      */
     std::optional<double> getReturnValue() const;
     
@@ -403,6 +423,9 @@ public:
     
     /**
      * @brief Call a named subroutine
+     * @param name Subroutine name to call.
+     * @param args Arguments bound to the subroutine's parameter frame.
+     * @return Error::OK, or an unknown-subroutine/argument-count error.
      */
     Error callSubroutine(const std::string& name,
                          const std::vector<double>& args = {});
@@ -413,6 +436,10 @@ public:
      * Like callSubroutine() but also accepts bare `O<num>` program labels
      * (Fanuc-style subprograms terminated by M99). Arguments are bound to
      * local parameters #1..#30 via VariableSystem::pushFrame.
+     *
+     * @param oNumber Subprogram number.
+     * @param args Arguments bound to #1..#30.
+     * @return Error::OK, or an unknown-subprogram/argument-count error.
      */
     Error callSubprogram(int32_t oNumber, const std::vector<double>& args);
     
@@ -424,6 +451,7 @@ public:
     
     /**
      * @brief Check if in subroutine
+     * @return true when at least one subroutine call is active.
      */
     bool inSubroutine() const { return !m_callStack.empty(); }
     
@@ -438,52 +466,78 @@ public:
     
     /**
      * @brief Begin while loop
+     * @param oNumber O-code number of the while.
+     * @param condition Loop condition expression.
+     * @return Error::OK on success.
      */
     Error beginWhile(int32_t oNumber, const std::string& condition);
     
     /**
      * @brief End while loop
+     * @param oNumber O-code number of the endwhile.
+     * @param nextAction Output action (jump back when the condition holds).
+     * @return Error::OK, or a nesting mismatch error.
      */
     Error endWhile(int32_t oNumber, NextAction& nextAction);
     
     /**
      * @brief Begin do block
+     * @param oNumber O-code number of the do.
+     * @return Error::OK on success.
      */
     Error beginDo(int32_t oNumber);
     
     /**
      * @brief End do-while (while after do)
+     * @param oNumber O-code number of the trailing while.
+     * @param condition Loop condition expression.
+     * @param nextAction Output action (jump back when the condition holds).
+     * @return Error::OK, or a nesting mismatch error.
      */
     Error doWhile(int32_t oNumber, const std::string& condition,
                   NextAction& nextAction);
     
     /**
      * @brief Begin repeat
+     * @param oNumber O-code number of the repeat.
+     * @param count Number of iterations to execute.
+     * @return Error::OK on success.
      */
     Error beginRepeat(int32_t oNumber, int32_t count);
     
     /**
      * @brief End repeat
+     * @param oNumber O-code number of the endrepeat.
+     * @param nextAction Output action (jump back while iterations remain).
+     * @return Error::OK, or a nesting mismatch error.
      */
     Error endRepeat(int32_t oNumber, NextAction& nextAction);
     
     /**
      * @brief Break out of loop
+     * @param oNumber O-code number of the break.
+     * @param nextAction Output action jumping past the loop.
+     * @return Error::OK, or a break-outside-loop error.
      */
     Error breakLoop(int32_t oNumber, NextAction& nextAction);
     
     /**
      * @brief Continue to next iteration
+     * @param oNumber O-code number of the continue.
+     * @param nextAction Output action jumping to the loop condition.
+     * @return Error::OK, or a continue-outside-loop error.
      */
     Error continueLoop(int32_t oNumber, NextAction& nextAction);
     
     /**
      * @brief Check if in loop
+     * @return true when at least one loop is active.
      */
     bool inLoop() const { return !m_loopStack.empty(); }
     
     /**
-     * @brief Get current repeat count (for #<_repeat_count>)
+     * @brief Get current repeat count (for `#&lt;_repeat_count&gt;`)
+     * @return 1-based iteration index of the innermost repeat block.
      */
     int32_t getRepeatCount() const;
     
@@ -496,23 +550,33 @@ public:
      * @param oNumber O-code number
      * @param condition Condition expression
      * @param nextAction Output action
+     * @return Error::OK on success.
      */
     Error beginIf(int32_t oNumber, const std::string& condition,
                   NextAction& nextAction);
     
     /**
      * @brief Handle elseif
+     * @param oNumber O-code number of the elseif.
+     * @param condition Condition expression.
+     * @param nextAction Output action.
+     * @return Error::OK on success.
      */
     Error handleElseIf(int32_t oNumber, const std::string& condition,
                        NextAction& nextAction);
     
     /**
      * @brief Handle else
+     * @param oNumber O-code number of the else.
+     * @param nextAction Output action.
+     * @return Error::OK on success.
      */
     Error handleElse(int32_t oNumber, NextAction& nextAction);
     
     /**
      * @brief End if block
+     * @param oNumber O-code number of the endif.
+     * @return Error::OK, or a nesting mismatch error.
      */
     Error endIf(int32_t oNumber);
     
@@ -524,12 +588,14 @@ public:
      * @brief Execute M98 (call subprogram)
      * @param pWord P parameter (subprogram number)
      * @param lWord L parameter (repeat count, default 1)
+     * @return Error::OK, or an unknown-subprogram error.
      */
     Error executeM98(int32_t pWord, int32_t lWord = 1);
     
     /**
      * @brief Execute M99 (return/end)
      * @param nextAction Output action
+     * @return Error::OK, or a return-without-call error.
      */
     Error executeM99(NextAction& nextAction);
     
@@ -539,21 +605,28 @@ public:
     
     /**
      * @brief Save modal state (M70)
+     * @param state Machine state snapshot to store.
+     * @return Error::OK on success.
      */
     Error saveModalState(const MachineState& state);
     
     /**
      * @brief Restore modal state (M72)
+     * @param state Machine state overwritten with the saved snapshot.
+     * @return Error::OK, or an error when no state was saved.
      */
     Error restoreModalState(MachineState& state);
     
     /**
      * @brief Invalidate saved state (M71)
+     * @return Error::OK on success.
      */
     Error invalidateModalState();
     
     /**
      * @brief Save and auto-restore on return (M73)
+     * @param state Machine state snapshot to store.
+     * @return Error::OK on success.
      */
     Error autoRestoreModalState(const MachineState& state);
     
@@ -563,17 +636,21 @@ public:
     
     /**
      * @brief Get subroutine registry
+     * @return Mutable registry of known subroutines.
      */
     SubroutineRegistry& getRegistry() { return m_registry; }
+    /// @return Read-only registry of known subroutines.
     const SubroutineRegistry& getRegistry() const { return m_registry; }
     
     /**
      * @brief Scan current source for subroutines
+     * @return Error::OK, or the first parse error encountered.
      */
     Error scanSubroutines();
     
     /**
      * @brief Add search path for subroutine files
+     * @param path Directory searched by M98/O-call file resolution.
      */
     void addSearchPath(const std::string& path);
     
@@ -588,6 +665,7 @@ public:
     
     /**
      * @brief Get last error
+     * @return Error produced by the most recent operation.
      */
     const Error& getError() const { return m_error; }
     
@@ -649,33 +727,49 @@ private:
 
 /**
  * @brief Get keyword string from O-code type
+ * @param type O-code type to name.
+ * @return Static keyword (e.g. "while"), or nullptr for unknown types.
  */
 const char* oCodeTypeToKeyword(OCodeType type);
 
 /**
  * @brief Parse keyword to O-code type
+ * @param keyword Keyword such as "while" or "if".
+ * @return Matching type, or OCodeType::NONE when unrecognized.
  */
 OCodeType keywordToOCodeType(const std::string& keyword);
 
 /**
  * @brief Check if O-code type is block opener
+ * @param type O-code type to test.
+ * @return true for while/do/repeat/if and similar openers.
  */
 bool isBlockOpener(OCodeType type);
 
 /**
  * @brief Check if O-code type is block closer
+ * @param type O-code type to test.
+ * @return true for endwhile/enddo/endrepeat/endif.
  */
 bool isBlockCloser(OCodeType type);
 
 /**
  * @brief Get matching closer for opener
+ * @param opener Block-opening type.
+ * @return Corresponding closing type, or OCodeType::NONE when not an opener.
  */
 OCodeType getMatchingCloser(OCodeType opener);
 
 /**
  * @brief Format O-code for display
+ * @param oNumber O-code number.
+ * @param type O-code type.
+ * @return Human-readable form such as "o100 while".
  */
 std::string formatOCode(int32_t oNumber, OCodeType type);
+/// @param name Subroutine name.
+/// @param type O-code type.
+/// @return Human-readable form such as "o<name> call".
 std::string formatOCode(const std::string& name, OCodeType type);
 
 } // namespace GCode
