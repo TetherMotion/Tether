@@ -112,6 +112,8 @@ public:
     }
 
     /// @brief Report a trigger from an MCU.
+    /// @param mcuId MCU that raised the trigger
+    /// @param clock Clock value at trigger time
     void reportTrigger(uint8_t mcuId, uint32_t clock) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!active_ || triggered_) return;
@@ -121,6 +123,7 @@ public:
     }
 
     /// @brief Check if trsync has been triggered.
+    /// @return `true` once any MCU reports a trigger
     bool isTriggered() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return triggered_;
