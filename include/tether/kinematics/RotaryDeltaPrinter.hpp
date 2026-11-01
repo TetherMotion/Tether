@@ -76,9 +76,11 @@ struct RotaryDeltaEndstopAdjust {
 class RotaryDeltaPrinter {
 public:
     /// @brief Set rotary delta geometry.
+    /// @param geo Arm lengths, tower positions, angles
     void setGeometry(const RotaryDeltaGeometry& geo) { geometry_ = geo; }
 
     /// @brief Set endstop angle adjustments.
+    /// @param adj Per-tower angle corrections
     void setEndstopAdjust(const RotaryDeltaEndstopAdjust& adj) { endstopAdjust_ = adj; }
 
     /// @return Current geometry.
@@ -91,6 +93,10 @@ public:
     ///
     /// The angle is measured from the horizontal plane: 0 = arm horizontal,
     /// positive = arm pointing upward.
+    /// @param x Effector X [mm]
+    /// @param y Effector Y [mm]
+    /// @param z Effector Z [mm]
+    /// @return Shoulder angles (A, B, C) [rad]
     std::array<double, 3> forwardActuatorKinematics(double x, double y, double z) const {
         const double angles[3] = {
             geometry_.towerAngleA * M_PI / 180.0,
@@ -167,6 +173,10 @@ public:
     ///
     /// Computes the upper-arm-end positions, then trilaterates with forearm
     /// length L2 to find the effector center.
+    /// @param thetaA Shoulder A angle [rad]
+    /// @param thetaB Shoulder B angle [rad]
+    /// @param thetaC Shoulder C angle [rad]
+    /// @return Effector position (X, Y, Z)
     std::array<double, 3> inverseActuatorKinematics(
         double thetaA, double thetaB, double thetaC) const {
         const double angles[3] = {

@@ -38,6 +38,9 @@ struct McuInstance {
 class MultiMcuManager {
 public:
     /// @brief Register an MCU.
+    /// @param name Human-readable MCU name
+    /// @param mcuId Unique MCU identifier
+    /// @param clockSync Clock-sync object tracking that MCU's clock
     void registerMcu(const std::string& name, uint8_t mcuId,
                      std::shared_ptr<ClockSync> clockSync) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -50,12 +53,15 @@ public:
     }
 
     /// @brief Unregister an MCU.
+    /// @param mcuId MCU to remove
     void unregisterMcu(uint8_t mcuId) {
         std::lock_guard<std::mutex> lock(mutex_);
         mcus_.erase(mcuId);
     }
 
     /// @brief Get an MCU by ID.
+    /// @param mcuId MCU to look up
+    /// @return Clock sync for that MCU, or nullptr if unknown
     std::shared_ptr<ClockSync> getMcu(uint8_t mcuId) const {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = mcus_.find(mcuId);
@@ -130,6 +136,7 @@ public:
     }
 
     /// @brief Check if trsync is active.
+    /// @return `true` between start() and end()
     bool isActive() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return active_;
@@ -142,12 +149,14 @@ public:
     }
 
     /// @brief Get the triggering MCU.
+    /// @return MCU ID that fired the trigger
     uint8_t triggerMcu() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return triggerMcu_;
     }
 
     /// @brief Get the trigger clock.
+    /// @return MCU clock at trigger time
     uint32_t triggerClock() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return triggerClock_;
