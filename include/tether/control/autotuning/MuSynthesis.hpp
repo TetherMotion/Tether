@@ -234,6 +234,14 @@ public:
      * P is partitioned as:
      * [z]   [P11 P12] [w]
      * [e] = [P21 P22] [u]
+     * @param P11 w→z block (row-major)
+     * @param P12 u→z block
+     * @param P21 w→e block
+     * @param P22 u→e block
+     * @param nz Performance output dimension
+     * @param ne Measurement output dimension
+     * @param nw Exogenous input dimension
+     * @param nu Control input dimension
      */
     void setInterconnection(const double* P11, const double* P12,
                            const double* P21, const double* P22,
@@ -246,17 +254,24 @@ public:
     /**
      * @brief Set sensitivity weight for tracking/disturbance rejection
      * W₁(s) = (s/M + ωB) / (s + ωB·ε)
+     * @param M Peak sensitivity bound
+     * @param omegaB Target bandwidth [rad/s]
+     * @param epsilon Low-frequency gain floor (roll-off at DC)
      */
     void setSensitivityWeight(double M, double omegaB, double epsilon);
-    
+
     /**
      * @brief Set control effort weight
+     * @param maxControl Maximum allowed control magnitude
      */
     void setControlWeight(double maxControl);
-    
+
     /**
      * @brief Set complementary sensitivity weight for robustness
      * W₃(s) = (s + ωT/M) / (ε·s + ωT)
+     * @param M Peak complementary-sensitivity bound
+     * @param omegaT Roll-off frequency [rad/s]
+     * @param epsilon High-frequency gain floor
      */
     void setComplementarySensitivityWeight(double M, double omegaT, double epsilon);
     
@@ -280,39 +295,48 @@ public:
     /**
      * @brief Run μ-synthesis (D-K iteration)
      * @param config Synthesis configuration
-     * @return true if synthesis succeeded
+     * @return `true` if synthesis succeeded
      */
     bool synthesize(const SynthesisConfig& config);
-    
+
     /**
      * @brief Run μ-synthesis with default configuration
+     * @return `true` if synthesis succeeded
      */
     bool synthesize() { return synthesize(SynthesisConfig{}); }
-    
+
     /**
      * @brief Get current μ analysis result
+     * @return Latest analysis (peak bounds, convergence)
      */
     const MuAnalysisResult& getMuAnalysis() const { return m_muResult; }
-    
+
     /**
      * @brief Get peak μ value (upper bound)
+     * @return Highest μ upper bound across the frequency grid
      */
     double getPeakMu() const { return m_muResult.peakMuUpper; }
-    
+
     /**
      * @brief Check if robust performance achieved
+     * @return `true` when peak μ < 1 over the grid
      */
     bool hasRobustPerformance() const { return m_muResult.robustPerformance(); }
-    
+
     /**
      * @brief Get number of D-K iterations performed
+     * @return Iteration count of the last synthesize() run
      */
     int getIterationCount() const { return m_iterations; }
-    
+
     /**
      * @brief Get controller state-space matrices
+     * @param[out] Ak Controller state matrix (row-major, nK×nK)
+     * @param[out] Bk Controller input matrix
+     * @param[out] Ck Controller output matrix
+     * @param[out] Dk Controller feedthrough matrix
      */
-    void getControllerMatrices(double* Ak, double* Bk, 
+    void getControllerMatrices(double* Ak, double* Bk,
                               double* Ck, double* Dk) const;
     
     // ========================================================================
@@ -337,6 +361,10 @@ public:
     
     /**
      * @brief Perform full μ analysis over frequency range
+     * @param freqMin Start of the frequency grid [rad/s]
+     * @param freqMax End of the frequency grid [rad/s]
+     * @param numPoints Number of grid points
+     * @return Analysis result with per-frequency bounds and peak μ
      */
     MuAnalysisResult analyzeMu(double freqMin, double freqMax, int numPoints);
     
@@ -404,14 +432,22 @@ public:
      * 
      * μ(M) ≤ inf σ̄(DMD⁻¹)
      *        D∈D
+     * @param M Frequency-response matrix (row-major, n×n)
+     * @param n Matrix dimension
+     * @param blocks Uncertainty structure blocks
+     * @return μ upper bound (D-scaled)
      */
     static double upperBound(const std::complex<double>* M, int n,
                             const std::vector<UncertaintyBlock>& blocks);
-    
+
     /**
      * @brief Compute μ lower bound using power iteration
-     * 
+     *
      * Uses structured perturbation to find destabilizing Δ
+     * @param M Frequency-response matrix (row-major, n×n)
+     * @param n Matrix dimension
+     * @param blocks Uncertainty structure blocks
+     * @return μ lower bound estimate
      */
     static double lowerBound(const std::complex<double>* M, int n,
                             const std::vector<UncertaintyBlock>& blocks);
@@ -458,26 +494,39 @@ class StructuredUncertainModel {
 public:
     /**
      * @brief Set nominal system matrices
+     * @param A State matrix (row-major, n×n)
+     * @param B Input matrix (n×m)
+     * @param C Output matrix (p×n)
+     * @param D Feedthrough matrix (p×m)
+     * @param n State dimension
+     * @param m Input dimension
+     * @param p Output dimension
      */
-    void setNominal(const double* A, const double* B, 
+    void setNominal(const double* A, const double* B,
                    const double* C, const double* D,
                    int n, int m, int p);
-    
+
     /**
      * @brief Add multiplicative input uncertainty
      * G_true = G * (I + W_I * Δ_I)
+     * @param W Uncertainty weighting function
+     * @param bound Norm bound on Δ_I
      */
     void addInputMultiplicative(const WeightingFunction& W, double bound = 1.0);
-    
+
     /**
      * @brief Add multiplicative output uncertainty
      * G_true = (I + W_O * Δ_O) * G
+     * @param W Uncertainty weighting function
+     * @param bound Norm bound on Δ_O
      */
     void addOutputMultiplicative(const WeightingFunction& W, double bound = 1.0);
-    
+
     /**
      * @brief Add additive uncertainty
      * G_true = G + W_A * Δ_A
+     * @param W Uncertainty weighting function
+     * @param bound Norm bound on Δ_A
      */
     void addAdditive(const WeightingFunction& W, double bound = 1.0);
     
@@ -493,15 +542,22 @@ public:
                       double bound);
     
     /**
-     * @brief Build LFT representation
-     * @return (M, Δ-structure) for μ-synthesis
+     * @brief Build LFT representation (M, Δ-structure) for μ-synthesis
+     * @param[out] M11 w→z block of M
+     * @param[out] M12 u→z block of M
+     * @param[out] M21 w→e block of M
+     * @param[out] M22 u→e block of M
+     * @param[out] blocks Receives the uncertainty-block structure
      */
     void buildLFT(double* M11, double* M12, double* M21, double* M22,
                  std::vector<UncertaintyBlock>& blocks) const;
-    
+
     /**
-     * @brief Sample uncertain system
-     * @return State-space matrices for one sample of uncertainty
+     * @brief Sample uncertain system (state-space matrices for one Δ draw)
+     * @param[out] A Sampled state matrix
+     * @param[out] B Sampled input matrix
+     * @param[out] C Sampled output matrix
+     * @param[out] D Sampled feedthrough matrix
      */
     void sampleUncertainty(double* A, double* B, double* C, double* D) const;
     
