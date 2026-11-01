@@ -7,14 +7,14 @@
  * installed IPacingPolicy for the next tick's start time, sleeps until
  * then, and records how late the tick actually began.
  *
- * ## Policies (pluggable; subclass @ref IPacingPolicy for custom)
+ * ## Policies (pluggable; subclass `IPacingPolicy` for custom)
  *
- *   - @ref FreeRunPolicy      — no pacing; every tick starts immediately
- *   - @ref FixedRatePolicy    — absolute grid advanced by `period` per
+ *   - `FreeRunPolicy`      — no pacing; every tick starts immediately
+ *   - `FixedRatePolicy`    — absolute grid advanced by `period` per
  *     tick. Behind schedule → immediate fire (natural catch-up/burst);
  *     lag beyond `resyncAfterUs` → grid rebased to now (the "drop",
  *     counted as a resync). `resyncAfterUs=0` → never rebase.
- *   - @ref SnapToGridPolicy   — phase-locked: the next tick is always the
+ *   - `SnapToGridPolicy`   — phase-locked: the next tick is always the
  *     first grid point at/after now plus `lateToleranceUs`. Overruns
  *     wait for the next slot — slots are never caught up and never burst.
  *
@@ -65,12 +65,16 @@ public:
      */
     virtual TimePoint schedule(TimePoint now) = 0;
     /// Target period in µs; 0 = unbounded (free run). Feeds overrun stats.
+    /// @return Nominal tick period [µs]
     virtual double periodUs() const = 0;
     /// Schedule rebases/drops since construction or reset().
+    /// @return Number of times the schedule was rebased
     virtual uint64_t resyncs() const { return 0; }
     /// Ticks fired behind their grid point to catch up.
+    /// @return Number of catch-up ticks fired
     virtual uint64_t catchUpTicks() const { return 0; }
     /// Re-anchor internal state (e.g. after a loop pause/reset).
+    /// @param now Current time to re-anchor the schedule to
     virtual void reset(TimePoint now) = 0;
 };
 
@@ -234,9 +238,12 @@ public:
         double lastLateStartUs = 0;
         double maxLateStartUs = 0;
         /// Effective wall rate implied by the EMA tick (Hz; 0 if none).
+        /// @return 1e6/emaTickUs, or 0 before the first tick
         double effectiveHz() const { return emaTickUs > 0 ? 1e6 / emaTickUs : 0.0; }
         /// Effective real-time factor for a loop advancing `simDtUs` of
         /// simulated time per tick (0 if no EMA yet).
+        /// @param simDtUs Simulated time advanced per tick [µs]
+        /// @return simDtUs/emaTickUs — &gt;1 means faster than real time
         double effectiveRtf(double simDtUs) const {
             return emaTickUs > 0 ? simDtUs / emaTickUs : 0.0;
         }
@@ -315,6 +322,7 @@ public:
     }
 
     /// Consistent snapshot of cumulative stats (windows are separate).
+    /// @return Copy of all counters and aggregates
     LoopStats stats() const {
         std::lock_guard lk(stats_mtx_);
         return stats_;
@@ -322,21 +330,26 @@ public:
 
     /// Tick-work duration window (p50/p95/p99 via percentile()).
     /// Copied under the stats mutex — safe to query from any thread.
+    /// @return Copy of the rolling tick-duration window
     common::WindowStats<WindowN> tickWindow() const {
         std::lock_guard lk(stats_mtx_);
         return tickWindow_;
     }
     /// Start-lateness window.
+    /// @return Copy of the rolling start-lateness window
     common::WindowStats<WindowN> lateWindow() const {
         std::lock_guard lk(stats_mtx_);
         return lateWindow_;
     }
 
     /// Policy-reported schedule rebases.
+    /// @return Rebase count forwarded from the installed policy
     uint64_t resyncs() const { return policy_->resyncs(); }
     /// Policy-reported catch-up fires.
+    /// @return Catch-up count forwarded from the installed policy
     uint64_t catchUpTicks() const { return policy_->catchUpTicks(); }
     /// Target period of the installed policy (µs; 0 = free run).
+    /// @return Nominal tick period [µs]
     double periodUs() const { return policy_->periodUs(); }
 
     /// Zero all stats and re-anchor the policy at the current time.

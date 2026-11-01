@@ -167,6 +167,7 @@ public:
     
     /**
      * @brief Check if slave is running
+     * @return `true` between start() and stop()
      */
     bool isRunning() const { return running_.load(); }
     
@@ -196,11 +197,13 @@ public:
     
     /**
      * @brief Get current slave state
+     * @return Current AL state (INIT, PRE_OP, SAFE_OP, OP, BOOT)
      */
     SlaveState getState() const { return stateMgr_.status().state; }
-    
+
     /**
      * @brief Get AL status
+     * @return Full AL status register value including error flag and code
      */
     ALStatus getALStatus() const;
     
@@ -213,6 +216,7 @@ public:
     
     /**
      * @brief Set state change callback
+     * @param callback Function invoked on every AL state transition
      */
     void setStateChangeCallback(StateChangeCallback callback);
     
@@ -234,6 +238,7 @@ public:
     /**
      * @brief Get FMMU configuration
      * @param index FMMU index (0-15)
+     * @return Current FMMU configuration for `index`
      */
     const FMMUConfig& getFMMU(size_t index) const;
     
@@ -246,6 +251,7 @@ public:
     
     /**
      * @brief Get number of configured FMMUs
+     * @return FMMU count from the ESC configuration
      */
     size_t getFMMUCount() const { return config_.escConfig.fmmuCount; }
     
@@ -256,6 +262,7 @@ public:
     /**
      * @brief Get Sync Manager configuration
      * @param index SM index (0-7)
+     * @return Current sync manager configuration for `index`
      */
     const SyncManagerConfig& getSyncManager(size_t index) const;
     
@@ -268,6 +275,7 @@ public:
     
     /**
      * @brief Get number of Sync Managers
+     * @return Sync manager count from the ESC configuration
      */
     size_t getSyncManagerCount() const { return config_.escConfig.smCount; }
     
@@ -293,6 +301,7 @@ public:
     
     /**
      * @brief Set PDO exchange callback (called after each exchange)
+     * @param callback Function invoked after every process data exchange
      */
     void setPDOExchangeCallback(PDOExchangeCallback callback);
     
@@ -302,6 +311,7 @@ public:
     
     /**
      * @brief Get DC state
+     * @return Distributed-clocks state (system time, sync config, offsets)
      */
     const DCState& getDCState() const { return dcState_; }
     DCState& getDCState() { return dcState_; }
@@ -314,11 +324,13 @@ public:
     
     /**
      * @brief Set SYNC callback
+     * @param callback Function invoked when a SYNC0/SYNC1 event fires
      */
     void setSyncCallback(SyncCallback callback);
-    
+
     /**
      * @brief Get current DC system time
+     * @return Distributed-clocks system time [ns]
      */
     uint64_t getDCSystemTime() const { return dcState_.systemTime; }
     
@@ -334,6 +346,7 @@ public:
     
     /**
      * @brief Get SII EEPROM data
+     * @return Raw EEPROM image as loaded via setSIIData()
      */
     const std::vector<uint8_t>& getSIIData() const;
     
@@ -358,11 +371,13 @@ public:
     
     /**
      * @brief Get watchdog state
+     * @return Watchdog configuration, counters, and expiry status
      */
     const WatchdogState& getWatchdogState() const { return watchdog_; }
-    
+
     /**
      * @brief Set watchdog callback
+     * @param callback Function invoked when the watchdog expires
      */
     void setWatchdogCallback(WatchdogCallback callback);
     
@@ -377,6 +392,7 @@ public:
     
     /**
      * @brief Check if mailbox out has data (master → slave)
+     * @return `true` if a master request is pending for the slave to consume
      */
     bool hasMailboxRequest() const;
     
@@ -394,6 +410,7 @@ public:
     
     /**
      * @brief Check if mailbox in has response (slave → master)
+     * @return `true` if a slave response is pending for the master to read
      */
     bool hasMailboxResponse() const;
     
@@ -403,31 +420,37 @@ public:
     
     /**
      * @brief Get slave configuration
+     * @return Configuration this slave was constructed with
      */
     const SlaveConfig& getConfig() const { return config_; }
-    
+
     /**
      * @brief Get slave identity
+     * @return Vendor/product/revision/serial identity block
      */
     const SlaveIdentity& getIdentity() const { return config_.identity; }
-    
+
     /**
      * @brief Get configured station address
+     * @return Station address last written by the master (0x0012)
      */
     uint16_t getConfiguredAddress() const { return configuredAddress_; }
-    
+
     /**
      * @brief Get station alias
+     * @return Alias read from SII for alias-based addressing
      */
     uint16_t getStationAlias() const { return stationAlias_; }
-    
+
     /**
      * @brief Get position (auto-increment counter)
+     * @return Ring position assigned via setPosition()
      */
     uint16_t getPosition() const { return position_; }
-    
+
     /**
      * @brief Set position (for network topology)
+     * @param pos Logical ring position used for position addressing
      */
     void setPosition(uint16_t pos) { position_ = pos; }
     
@@ -437,12 +460,15 @@ public:
     
     /**
      * @brief Get logger
+     * @return Per-slave logger used for ESC/PDO/mailbox traces
      */
     SlaveLogger& getLogger() { return *logger_; }
     const SlaveLogger& getLogger() const { return *logger_; }
-    
+
     /**
      * @brief Enable/disable logging categories
+     * @param category Log category to toggle
+     * @param enabled `true` to emit this category, `false` to silence it
      */
     void setLogEnabled(SlaveLogCategory category, bool enabled);
     
@@ -458,11 +484,13 @@ public:
     
     /**
      * @brief Get ESC register memory (for debugging)
+     * @return Pointer to the emulated ESC register file (4096 bytes)
      */
     const uint8_t* getRegisterMemory() const { return registers_.data(); }
-    
+
     /**
      * @brief Get process data RAM (for debugging)
+     * @return Pointer to the process-data RAM region (from 0x1000)
      */
     const uint8_t* getProcessDataRAM() const { return processDataRAM_.data(); }
     

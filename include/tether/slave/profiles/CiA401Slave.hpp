@@ -137,6 +137,7 @@ public:
     
     /**
      * @brief Get number of digital input bytes
+     * @return Configured count of 8-bit digital input groups
      */
     size_t getDigitalInputCount() const { return ioConfig_.digitalInputs8; }
     
@@ -152,26 +153,36 @@ public:
     
     /**
      * @brief Get digital input value (8-bit group)
+     * @param group 8-bit group index (0-31)
+     * @return Current simulated input byte for `group`
      */
     uint8_t getDigitalInput8(size_t group) const;
-    
+
     /**
      * @brief Set digital input value (16-bit group)
+     * @param group 16-bit group index
+     * @param value 16-bit value the slave reports for `group`
      */
     void setDigitalInput16(size_t group, uint16_t value);
-    
+
     /**
      * @brief Get digital input value (16-bit group)
+     * @param group 16-bit group index
+     * @return Current simulated input word for `group`
      */
     uint16_t getDigitalInput16(size_t group) const;
-    
+
     /**
      * @brief Set single digital input bit
+     * @param bit Absolute input bit index (0-255)
+     * @param value Bit state the slave reports
      */
     void setDigitalInputBit(size_t bit, bool value);
-    
+
     /**
      * @brief Get single digital input bit
+     * @param bit Absolute input bit index (0-255)
+     * @return Current state of input `bit`
      */
     bool getDigitalInputBit(size_t bit) const;
     
@@ -181,23 +192,30 @@ public:
     
     /**
      * @brief Get number of digital output bytes
+     * @return Configured count of 8-bit digital output groups
      */
     size_t getDigitalOutputCount() const { return ioConfig_.digitalOutputs8; }
-    
+
     /**
      * @brief Get digital output value (8-bit group)
      *
      * Returns the value written by the master.
+     * @param group 8-bit group index
+     * @return Output byte last written via process data for `group`
      */
     uint8_t getDigitalOutput8(size_t group) const;
-    
+
     /**
      * @brief Get digital output value (16-bit group)
+     * @param group 16-bit group index
+     * @return Output word last written via process data for `group`
      */
     uint16_t getDigitalOutput16(size_t group) const;
-    
+
     /**
      * @brief Get single digital output bit
+     * @param bit Absolute output bit index (0-255)
+     * @return Current state of output `bit`
      */
     bool getDigitalOutputBit(size_t bit) const;
     
@@ -215,6 +233,7 @@ public:
     
     /**
      * @brief Get number of analog inputs
+     * @return Configured analog input channel count
      */
     size_t getAnalogInputCount() const { return ioConfig_.analogInputs; }
     
@@ -230,6 +249,8 @@ public:
     
     /**
      * @brief Get analog input value
+     * @param channel Channel index (0-7)
+     * @return Current simulated input value for `channel` (after scaling)
      */
     int16_t getAnalogInput(size_t channel) const;
     
@@ -248,13 +269,16 @@ public:
     
     /**
      * @brief Get number of analog outputs
+     * @return Configured analog output channel count
      */
     size_t getAnalogOutputCount() const { return ioConfig_.analogOutputs; }
-    
+
     /**
      * @brief Get analog output value
      *
      * Returns the value written by the master.
+     * @param channel Channel index (0-7)
+     * @return Output value last written via process data for `channel`
      */
     int16_t getAnalogOutput(size_t channel) const;
     
@@ -291,6 +315,8 @@ public:
      * @brief Set error value for digital outputs
      *
      * These values are used when communication is lost.
+     * @param group 8-bit group index
+     * @param value Substitute byte applied to `group` on communication error
      */
     void setDigitalOutputErrorValue(size_t group, uint8_t value);
     
@@ -382,6 +408,8 @@ private:
 
 /**
  * @brief Create a CiA 401 I/O slave with specified configuration
+ * @param config Slave identity and I/O layout configuration
+ * @return New slave instance, ready to attach to a slave stack
  */
 std::unique_ptr<CiA401Slave> createCiA401Slave(const CiA401SlaveConfig& config);
 
@@ -390,6 +418,7 @@ std::unique_ptr<CiA401Slave> createCiA401Slave(const CiA401SlaveConfig& config);
  *
  * @param inputs Number of digital input bits (rounded up to 8)
  * @param outputs Number of digital output bits (rounded up to 8)
+ * @return New slave instance with only digital channels configured
  */
 std::unique_ptr<CiA401Slave> createDigitalIOSlave(size_t inputs, size_t outputs);
 
@@ -398,6 +427,7 @@ std::unique_ptr<CiA401Slave> createDigitalIOSlave(size_t inputs, size_t outputs)
  *
  * @param inputs Number of analog input channels
  * @param outputs Number of analog output channels
+ * @return New slave instance with only analog channels configured
  */
 std::unique_ptr<CiA401Slave> createAnalogIOSlave(size_t inputs, size_t outputs);
 
