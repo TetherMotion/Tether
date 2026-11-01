@@ -59,6 +59,12 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
 
 .. toctree::
    :maxdepth: 2
+   :caption: G-Code
+
+   gcode/GCodeInterpreterGuide
+
+.. toctree::
+   :maxdepth: 2
    :caption: Klipper
 
    KlipperArchitecture
