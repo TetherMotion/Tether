@@ -87,12 +87,15 @@ public:
 
     /**
      * @brief Construct from trajectory and parameters.
+     * @param traj Extrusion trajectory (referenced, must outlive this)
+     * @param params LPV model parameters (delay, interpolation settings)
      */
     AnalyticalARXLPVInverse(const Traj& traj, AnalyticalARXLPVParams params)
         : traj_(&traj), params_(params) {}
 
     /**
      * @brief Add an identified ARX model at operating point p.
+     * @param point Identified coefficients at one operating point
      */
     void addModelPoint(const AnalyticalARXModelPoint& point) {
         modelLut_[point.parameter] = point;
@@ -100,6 +103,10 @@ public:
 
     /**
      * @brief Add an identified ARX model (convenience overload).
+     * @param p Operating point (e.g. velocity) the model was identified at
+     * @param a ARX denominator coefficients
+     * @param b ARX numerator coefficients
+     * @param delay Transport delay [s]
      */
     void addModelPoint(double p, std::vector<double> a,
                        std::vector<double> b, double delay = 0.0) {
@@ -118,6 +125,8 @@ public:
      *   x(t) = (ẏ(t+d) + a(p̄)·y(t+d)) / b(p̄)
      *
      * where d is the transport delay and p̄ is the arc-averaged velocity.
+     * @param t Absolute time along the trajectory [s]
+     * @return Inverse-model input required at t
      */
     double inputAtTime(double t) const {
         if (modelLut_.empty()) return 0.0;
@@ -191,6 +200,8 @@ public:
 
     /**
      * @brief Compute the required input at multiple time points.
+     * @param times Absolute sample times [s]
+     * @return Required input at each time
      */
     std::vector<double> inputSeries(const std::vector<double>& times) const {
         std::vector<double> result;
@@ -202,6 +213,8 @@ public:
 
     /**
      * @brief Compute the adjusted extruder position at time t.
+     * @param t Absolute time along the trajectory [s]
+     * @return Nominal extruder position plus inverse-model offset [mm]
      */
     double adjustedExtruderPosition(double t) const {
         return traj_->extruderPositionAtTime(t) + inputAtTime(t);
@@ -209,6 +222,8 @@ public:
 
     /**
      * @brief Compute the adjusted extruder position at multiple times.
+     * @param times Absolute sample times [s]
+     * @return Adjusted extruder position at each time [mm]
      */
     std::vector<double> adjustedExtruderPositionSeries(
         const std::vector<double>& times) const {
@@ -219,13 +234,22 @@ public:
         return result;
     }
 
-    /// Number of model points
+    /**
+     * @brief Number of model points.
+     * @return Operating points registered via addModelPoint()
+     */
     size_t numModelPoints() const { return modelLut_.size(); }
 
-    /// Parameters
+    /**
+     * @brief Parameters in use.
+     * @return Parameters passed at construction
+     */
     const AnalyticalARXLPVParams& params() const { return params_; }
 
-    /// Trajectory
+    /**
+     * @brief Trajectory the inverse was computed for.
+     * @return Referenced extrusion trajectory
+     */
     const Traj& trajectory() const { return *traj_; }
 
 private:
