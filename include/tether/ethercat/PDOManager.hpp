@@ -132,6 +132,7 @@ public:
     /// Log the transfer statistics block (FMMU/LRW cycle counters plus
     /// physical FPWR/FPRD counters) — reveals WKC errors where a slave
     /// stopped acknowledging frames.
+    /// @param tag Log prefix identifying the dump
     void dumpStats(const char* tag) const;
 
     // ----- Per-slave PDO counter accessors -----
@@ -152,7 +153,9 @@ public:
      * Entries registered through add_rxpdo()/add_txpdo() take their
      * `configured_address` (used by FPWR/FPRD transfers) from the mapping's
      * per-slave table.  When that table is still empty for @p slave_index
-     * this issues a single APRD of register 0x0010 and installs the result
+     * this issues a single APRD of register 0x0010 and installs the result.
+     * @param slave_index Slave position whose station address is fetched
+     * @return `true` once the configured address is installed
      * in both the SlaveConfig and the mapping.  Called automatically by
      * finalizeMapping(), so callers never need to read 0x0010 themselves.
      *
@@ -194,10 +197,9 @@ public:
      *
      * Falls back to a full exchangeAll() when no logical address
      * manager is configured.
+     * @return `true` when all emitted datagrams succeeded
      */
     bool exchangeConfiguredSlaveWindows();
-
-    // ----- Split send/receive (Mode 1: direct, user-driven) -----
     // sendAll() sends all RxPDO datagrams and returns immediately.
     // receiveAll() waits for all TxPDO responses and copies data into buffers.
     // exchangeAll() = sendAll() + receiveAll() (backward compat).
@@ -213,9 +215,15 @@ public:
     // sendAll()/receiveAll() split state (they are self-contained atomic
     // LRW exchanges).
     bool exchangeLRWSlice(uint32_t offset, uint32_t length);
-    /// Maximum slice length that fits one LRW datagram (0 if unavailable).
+    /**
+     * @brief Maximum slice length that fits one LRW datagram.
+     * @return Max bytes per slice; 0 if no logical address manager
+     */
     uint32_t maxLogicalSliceLength() const;
-    /// Logical placement of every enabled PDO entry (empty if unavailable).
+    /**
+     * @brief Logical placement of every enabled PDO entry.
+     * @return Per-entry logical address/length; empty if unavailable
+     */
     std::vector<PDO::LogicalEntrySlice> describeLogicalEntries() const;
 
     /**
@@ -227,6 +235,8 @@ public:
      * per-slave PDO counters that the OP-transition check reads.
      *
      * @param rx_timeout_ns  Response wait budget in nanoseconds.
+     * @param image Process image to use; nullptr selects the default
+     * @return `true` on a successful cyclic exchange
      */
     bool exchangeAllLRWCyclic(uint32_t rx_timeout_ns = 200'000,
                               ProcessImage* image = nullptr);
@@ -253,14 +263,19 @@ public:
     bool     clearPDOSlices();
     size_t   pdoSliceCount() const;
     /// Blocking one-off slice exchange on the async path (no fast path).
+    /// @param spec Slice window and addressing to exchange
+    /// @return `true` on a successful exchange
     bool     exchangePDOSlice(const PDOSliceSpec& spec);
     /// Run the whole-image exchange every Nth cycle (default 1).
+    /// @param every_n Exchange every Nth cycle tick
     void     setImageExchangeDecimation(uint32_t every_n);
 
     /// Slices the current image occupies on the wire (1 = single frame).
+    /// @return Number of cyclic slices
     uint8_t cyclicSliceCount() const;
 
     /// Strict per-slice WKC verify — see LogicalAddressManager::setStrictWkc.
+    /// @param strict `true` fails a cycle whose WKC is short
     void setCyclicStrictWkc(bool strict);
 
     /**
@@ -270,11 +285,13 @@ public:
      * entries sharing a byte with a neighbour or flagged
      * `PDOEntry::image_exclude` stay buffered (offset -1).
      * Requires an initialized LogicalAddressManager.
-     *
-     * @param shm_name  Optional POSIX shm export — the image's regions
+     * @param image Process image to lay out
+     * @param mode Image placement mode
+     * @param shm_name Optional POSIX shm export — the image's regions
      *        live in a shared segment a process-external motion source
      *        can ProcessImage::attachShared() to.  Forces Direct-mode
-     *        semantics.
+     *        semantics; nullptr keeps the image in-process.
+     * @return `true` when the image was configured
      */
     bool configureProcessImage(ProcessImage& image, ImageMode mode,
                                const char* shm_name = nullptr);
@@ -358,6 +375,7 @@ public:
     // ----- Log Prefix (set by Master from per-slave name) -----
 
     /// @brief Set a function that returns the log prefix for a given slave index.
+    /// @param provider (slave index) -> prefix string for log output
     void setPrefixProvider(std::function<std::string(uint16_t)> provider) {
         prefix_provider_ = std::move(provider);
     }
