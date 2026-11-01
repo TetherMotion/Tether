@@ -305,7 +305,13 @@ public:
     bool initialize(uint64_t cycleTimeNs);
     
     /**
-     * @brief Check if DC is initialized
+     * @brief Whether the DC clock has been initialized.
+     *
+     * Set by a successful initialize(); cleared by reset(). SYNC
+     * configuration and system-time updates are only meaningful while this
+     * is true.
+     *
+     * @return true once initialize() has run and not yet reset.
      */
     bool isInitialized() const { return state_.clockInitialized; }
     
@@ -315,12 +321,38 @@ public:
     void reset();
     
     /**
-     * @brief Configure SYNC0
+     * @brief Configure the SYNC0 distributed-clock signal.
+     *
+     * Programs the SYNC0 cycle time and shift into the emulated DC unit and
+     * marks SYNC0 configured. Always accepts the values — fault scenarios
+     * are expressed through the error-injection flags instead of a failure
+     * return: `injectConfigMismatch` silently stores a wrong (doubled)
+     * cycle time to emulate a misbehaving slave, and `injectPartialConfig`
+     * marks SYNC0 enabled but never configured so isConfigurationComplete()
+     * stays false.
+     *
+     * @param cycleTimeNs  SYNC0 period in nanoseconds.
+     * @param shiftNs      Sync-signal shift relative to the cycle start in
+     *                     nanoseconds (may be negative).
+     * @return Always true; failure modes are simulated via error injection,
+     *         not rejected calls.
      */
     bool configureSync0(uint64_t cycleTimeNs, int32_t shiftNs);
     
     /**
-     * @brief Configure SYNC1
+     * @brief Configure the SYNC1 distributed-clock signal.
+     *
+     * SYNC1 is a secondary, typically slower pulse referenced to SYNC0;
+     * honors the same error-injection scenarios as configureSync0()
+     * (`injectConfigMismatch` stores a doubled cycle time,
+     * `injectPartialConfig` leaves it enabled-but-unconfigured).
+     *
+     * @param cycleTimeNs  SYNC1 period in nanoseconds; conventionally a
+     *                     multiple of the SYNC0 cycle.
+     * @param shiftNs      Sync-signal shift in nanoseconds (may be
+     *                     negative).
+     * @return Always true; failure modes are simulated via error injection,
+     *         not rejected calls.
      */
     bool configureSync1(uint64_t cycleTimeNs, int32_t shiftNs);
     
@@ -367,22 +399,51 @@ public:
     DCState& getState() { return state_; }
     
     /**
-     * @brief Get current system time
+     * @brief The slave's current DC system time.
+     *
+     * Advances between master updates at the local clock rate and is
+     * corrected by each processSystemTimeUpdate(); error injection (drift,
+     * jitter, jumps) is folded into this value via applyTimeInjection().
+     *
+     * @return System time in nanoseconds since the DC epoch.
      */
     uint64_t getSystemTime() const { return state_.systemTimeNs; }
     
     /**
-     * @brief Get offset to master
+     * @brief Estimated offset between the local clock and the master clock.
+     *
+     * Positive means the local clock reads ahead of the master. Updated by
+     * each system-time update; this is the quantity a real DC control loop
+     * would servo toward zero.
+     *
+     * @return Local-minus-master clock offset in nanoseconds.
      */
     int64_t getOffsetToMaster() const { return state_.offsetToMasterNs; }
     
     /**
-     * @brief Check if configuration is complete
+     * @brief Whether all required DC configuration steps have completed.
+     *
+     * Requires the DC unit to be configured, the cycle time to be set, and
+     * every *enabled* SYNC signal (SYNC0/SYNC1) to also be marked
+     * configured — a SYNC that was enabled but whose configure call was
+     * sabotaged by `injectPartialConfig` keeps this false, exactly the
+     * stuck state the injection scenario exists to create.
+     *
+     * @return true if the DC unit is fully configured.
      */
     bool isConfigurationComplete() const;
     
     /**
-     * @brief Check for partial configuration
+     * @brief Whether some but not all DC configuration steps are done.
+     *
+     * True when at least one of SYNC0-enable, SYNC1-enable, or
+     * cycle-time-configured is set while some enabled SYNC is still
+     * unconfigured. Distinguishes "never configured" from "half-applied" —
+     * the state produced by an `injectPartialConfig` run or an interrupted
+     * configuration sequence.
+     *
+     * @return true if partially configured; false when fully configured or
+     *         untouched.
      */
     bool hasPartialConfiguration() const;
     
@@ -446,7 +507,16 @@ public:
     const DCErrorInjection& getErrorInjection() const { return injection_; }
     
     /**
-     * @brief Apply error injection to system time
+     * @brief Apply the configured time-domain error injection to a timestamp.
+     *
+     * Passes @p timeNs through the active DCErrorInjection model —
+     * accumulating drift, adding jitter samples, or applying programmed
+     * jumps — and returns the corrupted value a faulty clock would report.
+     * With no injection configured the input is returned unchanged, so
+     * callers can use it unconditionally on every time read.
+     *
+     * @param timeNs  Nominal system time in nanoseconds.
+     * @return System time with injected error applied, in nanoseconds.
      */
     uint64_t applyTimeInjection(uint64_t timeNs);
 
