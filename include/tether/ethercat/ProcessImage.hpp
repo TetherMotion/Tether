@@ -164,6 +164,8 @@ public:
      * frame commits until the next cycle attaches a fresh one (re-query per
      * cycle; writes to nullptr are dropped).
      * Buffered: nullptr.
+     *
+     * @return Pointer to the output region for this cycle, or nullptr.
      */
     uint8_t* outputWrite() {
         switch (mode_) {
@@ -183,6 +185,9 @@ public:
      *        at [0, rx_bytes), inputs at [rx_bytes, size)).
      *        nullptr until the first publish; may point into channel-owned
      *        ring memory — valid until inputSeq() bumps again.
+     *
+     * @return Pointer to the latest input image, or nullptr before the
+     *         first publish.
      */
     const uint8_t* inputRead() const {
         return in_ptr_.load(std::memory_order_acquire);
@@ -190,6 +195,7 @@ public:
 
     /// Monotonic publish counter — bumps once per published input frame.
     /// shm-attached readers see the exporting process's publishes.
+    /// @return Current input publish sequence number.
     uint64_t inputSeq() const {
         return ext_in_seq_
             ? ext_in_seq_->load(std::memory_order_acquire)
@@ -198,11 +204,15 @@ public:
 
     /// Byte offset of mapping entry i in the image; -1 = buffered-only.
     /// Legacy raw access — prefer entryHandle() for epoch-checked use.
+    /// @param i Mapping entry index.
+    /// @return Byte offset in the image, or -1 for buffered-only entries.
     int32_t entryOffset(size_t i) const {
         return i < entry_count_ ? entry_off_[i] : -1;
     }
 
     /// Epoch-checked handle for entry i.  invalid() when i is out of range.
+    /// @param i Mapping entry index.
+    /// @return Handle carrying index, offset and mapping epoch.
     EntryHandle entryHandle(size_t i) const {
         if (i >= entry_count_) return {};
         return { static_cast<uint32_t>(i), entry_off_[i],
@@ -211,6 +221,8 @@ public:
 
     /// Resolve a handle to the current output image base + offset.
     /// nullptr when the epoch went stale or the entry is buffered-only.
+    /// @param h Handle from entryHandle().
+    /// @return Pointer into the output image, or nullptr.
     uint8_t* outputPtrRaw(const EntryHandle& h) {
         if (!h.valid() || h.offset < 0 ||
             h.epoch != epoch_.load(std::memory_order_acquire)) return nullptr;
@@ -229,6 +241,8 @@ public:
     }
 
     /// Typed field accessors (nullptr for unmapped/buffered entries).
+    /// @param entry_idx Mapping entry index.
+    /// @return Typed pointer into the output image, or nullptr.
     template<typename T>
     T* outputPtr(size_t entry_idx) {
         const int32_t off = entryOffset(entry_idx);
@@ -237,6 +251,8 @@ public:
             static_cast<uint32_t>(off) + sizeof(T) > rx_bytes_) return nullptr;
         return reinterpret_cast<T*>(base + off);
     }
+    /// @param entry_idx Mapping entry index.
+    /// @return Typed pointer into the input image, or nullptr.
     template<typename T>
     const T* inputPtr(size_t entry_idx) const {
         const int32_t off = entryOffset(entry_idx);
@@ -246,6 +262,8 @@ public:
         return reinterpret_cast<const T*>(base + off);
     }
     /// Handle variants — stale-epoch safe.
+    /// @param h Handle from entryHandle().
+    /// @return Typed pointer into the output image, or nullptr.
     template<typename T> T* outputPtr(const EntryHandle& h) {
         return reinterpret_cast<T*>(outputPtrRaw(h));
     }
@@ -305,6 +323,8 @@ public:
      * Rotating → nullptr (the payload already lives inside the acquired
      * frame; use rotatingFrameBase() + sendCyclicFrame instead).
      * Buffered → nullptr (caller uses its own staging buffer).
+     *
+     * @return Pointer to the image to transmit, or nullptr.
      */
     const uint8_t* acquireSendImage() {
         switch (mode_) {
@@ -357,6 +377,9 @@ public:
      *        executive at frame-build time each cycle.  The frame header
      *        region [base, base+26) is written by the exchange; the payload
      *        region [base+26, +26+size) is what outputWrite() returns.
+     *
+     * @param frame_base Start of the acquired TX frame buffer.
+     * @param frame_payload_off Payload offset inside the frame (26 untagged).
      */
     void attachTxFrame(uint8_t* frame_base, uint32_t frame_payload_off = 26) {
         rotating_frame_ = frame_base;
@@ -373,6 +396,11 @@ public:
     /**
      * @brief Publish a received payload as the input image — zero-copy view
      *        into channel memory.  Holds the cookie until the next publish.
+     *
+     * @param payload Received payload (channel-owned memory).
+     * @param len Payload length in bytes.
+     * @param cookie Channel cookie pinning the memory until the next publish.
+     * @param ch Channel that owns the memory.
      */
     void publishInputView(const uint8_t* payload, uint32_t len,
                           uint32_t cookie, ICyclicChannel* ch);
@@ -380,6 +408,9 @@ public:
     /**
      * @brief Publish by copy into an owned bank — used when no channel
      *        exists (software deposit path).
+     *
+     * @param payload Received payload to copy.
+     * @param len Payload length in bytes.
      */
     void publishInputCopy(const uint8_t* payload, uint32_t len);
 
@@ -393,6 +424,8 @@ public:
      *        image offset, then call commitInput() once — readers see a
      *        single coherent publish.  In shm mode this returns the shm
      *        input region directly.  nullptr when not configured.
+     *
+     * @return Pointer to the staging bank, or nullptr.
      */
     uint8_t* inputWriteBank();
 
@@ -409,6 +442,10 @@ public:
      *        thread/process.  Linux: futex on the publish counter
      *        (cross-process when shm mode is active).  Elsewhere: bounded
      *        spin+yield.  Returns true when new input was published.
+     *
+     * @param last_seq Sequence value the caller already observed.
+     * @param timeout_ns Maximum wait time [ns].
+     * @return true when a newer input image was published.
      */
     bool waitInput(uint64_t last_seq, uint32_t timeout_ns);
 
@@ -426,14 +463,17 @@ public:
      *        unmapped (-1) — address fields by raw byte offset.
      * @param name  shm name as passed to the creator's Config::shm_name
      *              (without or with leading '/')
+     * @return true when the shared image was attached successfully.
      */
     bool attachShared(const char* name);
 
     /// True when this instance's regions live in shared memory.
+    /// @return true when the image is backed by an shm segment.
     bool shmBacked() const { return shm_map_ != nullptr; }
 
     /// Output commit counter — bumps when the external writer calls
     /// commitOutputs() on an attached image (master-side observability).
+    /// @return Current output commit sequence number.
     uint32_t outputSeq() const {
         return shm_out_seq_
             ? shm_out_seq_->load(std::memory_order_acquire)
@@ -441,6 +481,7 @@ public:
     }
 
     /// shm feature flags exported by the creator (kShmFlag*).
+    /// @return Feature bitmask of the attached segment.
     uint32_t shmFlags() const { return shm_flags_; }
 
     /**
@@ -448,6 +489,7 @@ public:
      *        completed its export — `ready` set and header checksum
      *        verified.  attachShared() already enforces this; expose it
      *        for late attachers polling a not-yet-exported segment.
+     * @return true when the exporter completed its handshake.
      */
     bool shmReady() const { return shm_ready_; }
 
@@ -457,8 +499,10 @@ public:
      *        process discover fields (slave/pdo/direction/offset/size)
      *        instead of hardcoding raw offsets.  nullptr/0 when the
      *        exporter didn't export a table.
+     * @return Pointer to the entry table, or nullptr.
      */
     const ShmEntryDesc* shmEntryTable() const { return shm_entries_; }
+    /// @return Number of valid rows in the exported entry table.
     uint32_t            shmEntryCount() const { return shm_entry_count_; }
 
     /// shm region selector for the optional seqlock API (Q5).
@@ -469,6 +513,7 @@ public:
      *        The writer of a shm region (external producer → Output,
      *        master collector → Input) brackets its update so readers
      *        can detect torn snapshots.  Only when kShmFlagSeqlock.
+     * @param r Region being written.
      */
     void shmWriteBegin(ShmRegion r);
     void shmWriteEnd(ShmRegion r);
@@ -478,6 +523,8 @@ public:
      *        stamp; end returns true when the region was quiescent across
      *        the read (even seq both times, unchanged).  Retry the read
      *        when end returns false.
+     * @param r Region being read.
+     * @return Sequence stamp to pass to shmReadEnd().
      */
     uint32_t shmReadBegin(ShmRegion r) const;
     bool     shmReadEnd(ShmRegion r, uint32_t stamp) const;
@@ -486,6 +533,9 @@ public:
      * @brief Exporter-side: fill the reserved entry-table rows.  Called
      *        by PDOManager after configure() when shm is active; rows
      *        beyond capacity are truncated.  Publishes entry_count last.
+     *
+     * @param rows Entry descriptors to publish.
+     * @param count Number of rows in @p rows.
      */
     void exportEntryTable(const ShmEntryDesc* rows, uint32_t count);
 
@@ -512,12 +562,14 @@ public:
     void triggerSend(uint32_t producer_id = 0);
 
     /// Send-request counter — bumped once per triggerSend().
+    /// @return Current send-request sequence number.
     uint32_t sendSeq() const {
         return sendSeqWord()->load(std::memory_order_acquire);
     }
 
     /// CLOCK_MONOTONIC stamp of the last triggerSend() (0 = never).
     /// The async loop reads this to derive trigger→send latency.
+    /// @return Timestamp of the last send trigger [ns].
     uint64_t sendStampNs() const {
         return sendStampWord()->load(std::memory_order_acquire);
     }
@@ -526,9 +578,12 @@ public:
     /// Returns -1 when all slots are taken — fall back to id 0, which is
     /// always available.  Cross-process safe in shm mode (bitmap in the
     /// header).  Slot 0 is the shared anonymous bucket.
+    /// @return Claimed slot index, or -1 when all slots are taken.
     int claimProducerSlot();
 
     /// Trigger count recorded under producer slot @p id (0..7).
+    /// @param id Producer slot from claimProducerSlot() (0 = anonymous).
+    /// @return Number of triggerSend() calls recorded for that slot.
     uint32_t producerTriggerCount(uint32_t id) const;
 
     /// Which loop kind consumes triggerSend() — set by Master on
@@ -550,6 +605,10 @@ public:
      *        in-process; shared FUTEX_WAIT when shm-backed).  Returns true
      *        when the send-request counter changed — callers re-check
      *        their own stop flag before acting on the wake.
+     *
+     * @param last_seq Send sequence value the caller already observed.
+     * @param timeout_ns Maximum wait time [ns]; UINT64_MAX waits forever.
+     * @return true when a newer send request was published.
      */
     bool waitSend(uint32_t last_seq, uint64_t timeout_ns);
 
