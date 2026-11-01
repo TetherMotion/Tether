@@ -111,23 +111,39 @@ public:
     
     /**
      * @brief Read SDO
+     * @param slaveId Slave position/address
+     * @param index Object index (e.g. 0x6040)
+     * @param subindex Object subindex
+     * @param[out] data Buffer receiving the object value
+     * @param size Size of `data` in bytes
+     * @return SDO result (success flag + bytes transferred/error)
      */
     virtual SDOResult readSDO(uint32_t slaveId, uint16_t index, uint8_t subindex,
                              void* data, size_t size) = 0;
-    
+
     /**
      * @brief Write SDO
+     * @param slaveId Slave position/address
+     * @param index Object index
+     * @param subindex Object subindex
+     * @param data Value bytes to write
+     * @param size Size of `data` in bytes
+     * @return SDO result (success flag + bytes transferred/error)
      */
     virtual SDOResult writeSDO(uint32_t slaveId, uint16_t index, uint8_t subindex,
                               const void* data, size_t size) = 0;
-    
+
     /**
      * @brief Check if slave is operational
+     * @param slaveId Slave position/address
+     * @return `true` while the slave is in OP state
      */
     virtual bool isSlaveOperational(uint32_t slaveId) = 0;
-    
+
     /**
      * @brief Get slave state
+     * @param slaveId Slave position/address
+     * @return AL state code (1=INIT, 2=PRE_OP, 4=SAFE_OP, 8=OP)
      */
     virtual int getSlaveState(uint32_t slaveId) = 0;
 };
@@ -286,21 +302,25 @@ public:
     
     /**
      * @brief Get slave configuration
+     * @return Configuration this backend was created with
      */
     const EtherCATSlaveConfig& getSlaveConfig() const { return m_config; }
-    
+
     /**
      * @brief Set PDO mapping
+     * @param mapping RxPDO/TxPDO object layout applied to this slave
      */
     void setPDOMapping(const PDOMapping& mapping);
-    
+
     /**
      * @brief Get raw RxPDO buffer
+     * @return Master→slave process-image bytes
      */
     const uint8_t* getRxPDOBuffer() const { return m_rxPdo; }
-    
+
     /**
      * @brief Get raw TxPDO buffer
+     * @return Slave→master process-image bytes
      */
     const uint8_t* getTxPDOBuffer() const { return m_txPdo; }
     
@@ -366,16 +386,21 @@ class EtherCATBackendFactory {
 public:
     /**
      * @brief Set master interface
+     * @param master EtherCAT master used by created backends
      */
     void setMaster(EtherCATMasterPtr master) { m_master = master; }
-    
+
     /**
      * @brief Create backend for slave
+     * @param slaveId Slave position/address to wrap
+     * @return Drive backend bound to that slave
      */
     DriveBackendUPtr createBackend(uint32_t slaveId);
-    
+
     /**
      * @brief Create backend with custom config
+     * @param config Slave configuration (address, PDO mapping, vendor info)
+     * @return Drive backend configured per `config`
      */
     DriveBackendUPtr createBackend(const EtherCATSlaveConfig& config);
     

@@ -67,6 +67,7 @@ public:
      *
      * Reads SII identity object (0x1018) via SDO and compares vendor ID
      * and product code against known ATI Axia80 values.
+     * @return `true` when the slave's identity matches an Axia80 device
      */
     bool isAxia80Device();
 
@@ -82,6 +83,8 @@ public:
      * 5. transitionToSafeOp → transitionToOp
      *
      * @param log_level  Verbosity for diagnostic output
+     * @param transition_to_op `true` performs the full PRE_OP→SAFE_OP→OP
+     *        sequence; `false` leaves the slave in PRE_OP
      * @return true on success
      */
     bool init(Tether::Platform::LogLevel log_level = Tether::Platform::LogLevel::Info,
@@ -111,12 +114,18 @@ public:
 
     // -- PDO access --------------------------------------------------------
 
-    /** @brief Typed pointer to the mapped TxPDO buffer (slave → master). */
+    /**
+     * @brief Typed pointer to the mapped TxPDO buffer (slave → master).
+     * @return Struct overlay on the incoming process data
+     */
     Axia80_pdo::Axia80_TxPDO* txPDO() {
         return reinterpret_cast<Axia80_pdo::Axia80_TxPDO*>(txpdo_buffer_);
     }
 
-    /** @brief Typed pointer to the mapped RxPDO buffer (master → slave). */
+    /**
+     * @brief Typed pointer to the mapped RxPDO buffer (master → slave).
+     * @return Struct overlay on the outgoing process data
+     */
     Axia80_pdo::Axia80_RxPDO* rxPDO() {
         return reinterpret_cast<Axia80_pdo::Axia80_RxPDO*>(rxpdo_buffer_);
     }
@@ -136,12 +145,18 @@ public:
 
     // -- Control helpers ---------------------------------------------------
 
-    /** @brief Set control word 1 (0x7010.1) — convenience for raw access. */
+    /**
+     * @brief Set control word 1 (0x7010.1) — convenience for raw access.
+     * @param value Raw control1 bitfield written into the RxPDO
+     */
     void setControl1(uint32_t value) {
         if (auto* pdo = rxPDO()) { pdo->control1 = value; }
     }
 
-    /** @brief Set control word 2 (0x7010.2) — convenience for raw access. */
+    /**
+     * @brief Set control word 2 (0x7010.2) — convenience for raw access.
+     * @param value Raw control2 bitfield written into the RxPDO
+     */
     void setControl2(uint32_t value) {
         if (auto* pdo = rxPDO()) { pdo->control2 = value; }
     }
@@ -178,14 +193,23 @@ public:
     /** @brief Pulse the clear-bias bit. */
     void clearBias();
 
-    /** @brief Write filter + calibration + sample rate settings. */
+    /**
+     * @brief Write filter + calibration + sample rate settings.
+     * @param filter Filter cutoff selection
+     * @param slot Calibration slot to activate
+     * @param rate Sensor sample-rate selection
+     */
     void setConfiguration(Axia80::FilterType filter,
                           Axia80::CalibrationSlot slot,
                           Axia80::SampleRate rate);
 
     // -- Status helpers ----------------------------------------------------
 
-    /** @brief Check if the status code indicates any error condition. */
+    /**
+     * @brief Check if the status code indicates any error condition.
+     * @param status Status word from the TxPDO
+     * @return `true` when the error bit is set
+     */
     static bool hasError(uint32_t status) {
         return (status & Axia80::STATUS_ERROR) != 0;
     }
@@ -258,21 +282,30 @@ public:
 
     /**
      * @brief Read status info (0x2080) via SDO.
+     * @param[out] info Decoded status information structure
+     * @return `true` on successful SDO read
      */
     bool readStatusInfo(Axia80::StatusInfo& info);
 
     /**
      * @brief Read version info (0x2090) via SDO.
+     * @param[out] info Firmware/hardware version structure
+     * @return `true` on successful SDO read
      */
     bool readVersionInfo(Axia80::VersionInfo& info);
 
     /**
      * @brief Read product description (0x2019) via SDO.
+     * @param[out] desc Product description structure
+     * @return `true` on successful SDO read
      */
     bool readProductDescription(Axia80::ProductDescription& desc);
 
     /**
      * @brief Read device name string (0x1008) via SDO.
+     * @param[out] out Destination buffer for the name
+     * @param capacity Size of `out` in bytes (NUL-terminated result)
+     * @return `true` on successful SDO read
      */
     bool readDeviceName(char* out, size_t capacity);
 
