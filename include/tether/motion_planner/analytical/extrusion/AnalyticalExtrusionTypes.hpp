@@ -72,6 +72,8 @@ struct ExtrusionArc {
 
     /**
      * @brief Evaluate the path velocity v(τ) at local time τ.
+     * @param tau Local time within the arc [s].
+     * @return Path velocity [mm/s].
      */
     double pathVelocity(double tau) const {
         return c0 + c1 * tau + c2 * tau * tau + c3 * tau * tau * tau;
@@ -79,6 +81,8 @@ struct ExtrusionArc {
 
     /**
      * @brief Evaluate the extruder velocity v_e(τ) at local time τ.
+     * @param tau Local time within the arc [s].
+     * @return Extruder velocity [mm/s] (α_e · v(τ)).
      */
     double extruderVelocity(double tau) const {
         return extrusionRatio * pathVelocity(tau);
@@ -86,6 +90,8 @@ struct ExtrusionArc {
 
     /**
      * @brief Evaluate the path acceleration a(τ) at local time τ.
+     * @param tau Local time within the arc [s].
+     * @return Path acceleration [mm/s^2].
      */
     double pathAcceleration(double tau) const {
         return c1 + 2.0 * c2 * tau + 3.0 * c3 * tau * tau;
@@ -96,6 +102,9 @@ struct ExtrusionArc {
      *
      * jerk = d²v/dτ² = 2·c2 + 6·c3·τ
      * (constant 2·c2 when c3 = 0, i.e. for SINGULAR/WALL arcs)
+     *
+     * @param tau Local time within the arc [s].
+     * @return Path jerk [mm/s^3].
      */
     double pathJerk(double tau = 0.0) const {
         return 2.0 * c2 + 6.0 * c3 * tau;
@@ -104,6 +113,9 @@ struct ExtrusionArc {
     /**
      * @brief Antiderivative of v(τ): ∫₀^τ v(s) ds
      *   = c0·τ + ½·c1·τ² + ⅓·c2·τ³ + ¼·c3·τ⁴
+     *
+     * @param tau Local time within the arc [s].
+     * @return Path distance travelled [mm].
      */
     double pathVelocityIntegral(double tau) const {
         return c0 * tau + 0.5 * c1 * tau * tau
@@ -113,6 +125,8 @@ struct ExtrusionArc {
 
     /**
      * @brief Antiderivative of v_e(τ): α_e · ∫₀^τ v(s) ds
+     * @param tau Local time within the arc [s].
+     * @return Filament length consumed [mm].
      */
     double extruderVelocityIntegral(double tau) const {
         return extrusionRatio * pathVelocityIntegral(tau);
@@ -121,6 +135,8 @@ struct ExtrusionArc {
     /**
      * @brief Time-averaged path velocity over the arc.
      * ṽ = (1/Δt) ∫₀^Δt v(τ) dτ = Δs / Δt
+     *
+     * @return Time-averaged path velocity [mm/s].
      */
     double avgPathVelocity() const {
         if (duration <= 0.0) return c0;
@@ -129,6 +145,7 @@ struct ExtrusionArc {
 
     /**
      * @brief Time-averaged extruder velocity over the arc.
+     * @return α_e · avgPathVelocity() [mm/s].
      */
     double avgExtruderVelocity() const {
         return extrusionRatio * avgPathVelocity();
@@ -181,24 +198,31 @@ public:
     }
 
     /// Number of extrusion arcs
+    /// @return Count of arcs in the trajectory.
     size_t numArcs() const { return arcs_.size(); }
 
     /// Get all arcs
+    /// @return All arcs in time order.
     const std::vector<Arc>& arcs() const { return arcs_; }
 
     /// Get arc by index
+    /// @param i Arc index; throws when out of range.
+    /// @return Arc at that index.
     const Arc& arc(size_t i) const { return arcs_.at(i); }
 
     /// Total trajectory time [s]
+    /// @return Duration of the whole trajectory [s].
     double totalTime() const {
         return arcs_.empty() ? 0.0
             : arcs_.back().t0 + arcs_.back().duration;
     }
 
     /// Total path length [mm]
+    /// @return Length of the path the trajectory follows.
     double totalLength() const { return totalLength_; }
 
     /// Total extruded length [mm] (sum of α_e · Δs over all arcs)
+    /// @return Filament consumed over the whole trajectory [mm].
     double totalExtrudedLength() const {
         double total = 0.0;
         for (const auto& a : arcs_)
@@ -208,6 +232,7 @@ public:
 
     /**
      * @brief Locate the arc containing time t.
+     * @param t Time from trajectory start [s].
      * @return Arc index (clamped to [0, numArcs-1])
      */
     size_t findArc(double t) const {
@@ -226,6 +251,8 @@ public:
 
     /**
      * @brief Evaluate the path velocity at time t.
+     * @param t Time from trajectory start [s].
+     * @return Path velocity [mm/s].
      */
     double pathVelocityAtTime(double t) const {
         if (arcs_.empty()) return 0.0;
@@ -237,6 +264,8 @@ public:
 
     /**
      * @brief Evaluate the extruder velocity at time t.
+     * @param t Time from trajectory start [s].
+     * @return Extruder velocity [mm/s].
      */
     double extruderVelocityAtTime(double t) const {
         if (arcs_.empty()) return 0.0;
@@ -248,6 +277,8 @@ public:
 
     /**
      * @brief Evaluate the path acceleration at time t.
+     * @param t Time from trajectory start [s].
+     * @return Path acceleration [mm/s^2].
      */
     double pathAccelerationAtTime(double t) const {
         if (arcs_.empty()) return 0.0;
@@ -259,6 +290,8 @@ public:
 
     /**
      * @brief Evaluate the path jerk at time t.
+     * @param t Time from trajectory start [s].
+     * @return Path jerk [mm/s^3].
      */
     double pathJerkAtTime(double t) const {
         if (arcs_.empty()) return 0.0;
@@ -270,6 +303,8 @@ public:
 
     /**
      * @brief Evaluate the arc length at time t.
+     * @param t Time from trajectory start [s].
+     * @return Distance travelled along the path [mm].
      */
     double arcLengthAtTime(double t) const {
         if (arcs_.empty()) return 0.0;
@@ -281,6 +316,8 @@ public:
 
     /**
      * @brief Evaluate the extruder position at time t (cumulative E).
+     * @param t Time from trajectory start [s].
+     * @return Cumulative filament position (G-code E axis) [mm].
      */
     double extruderPositionAtTime(double t) const {
         if (arcs_.empty()) return 0.0;
@@ -295,6 +332,7 @@ public:
     }
 
     /// The underlying WSS
+    /// @return Source weighted switching structure.
     const WSS& wss() const { return *wss_; }
 
 private:
@@ -435,6 +473,10 @@ double smoothedPathVelocity(const ExtrusionTrajectory<Dim, T>& traj,
  * For per-segment ratios, the integral is split at segment boundaries.
  */
 template<size_t Dim, typename T>
+/// @param traj Trajectory providing the per-arc extrusion ratios.
+/// @param t Time at which the smoothed velocity is evaluated [s].
+/// @param smoothTime Averaging window width [s] (0 = no smoothing).
+/// @return Window-averaged extruder velocity [mm/s].
 double smoothedExtruderVelocity(const ExtrusionTrajectory<Dim, T>& traj,
                                 double t, double smoothTime) {
     if (smoothTime <= 0.0) {
@@ -487,7 +529,10 @@ double smoothedExtruderVelocity(const ExtrusionTrajectory<Dim, T>& traj,
  * antiderivative is a polynomial of degree 3n+1.  This function expands
  * the polynomial and integrates term by term.
  *
- * @param c0, c1, c2, c3 Polynomial coefficients of v(τ)
+ * @param c0 Constant term of v(τ)
+ * @param c1 Linear coefficient of v(τ)
+ * @param c2 Quadratic coefficient of v(τ)
+ * @param c3 Cubic coefficient of v(τ)
  * @param n Power (must be a non-negative integer)
  * @param tau Upper limit of integration
  * @return ∫₀^τ (c0 + c1·s + c2·s² + c3·s³)^n ds
@@ -527,6 +572,12 @@ inline double polynomialPowerIntegral(double c0, double c1, double c2,
 
 /**
  * @brief Backward-compatible overload (c3 = 0).
+ * @param c0 Constant term of v(τ)
+ * @param c1 Linear coefficient of v(τ)
+ * @param c2 Quadratic coefficient of v(τ)
+ * @param n Power (non-negative integer)
+ * @param tau Upper limit of integration
+ * @return ∫₀^τ (c0 + c1·s + c2·s²)^n ds
  */
 inline double polynomialPowerIntegral(double c0, double c1, double c2,
                                        int n, double tau) {
@@ -564,7 +615,10 @@ inline double linearPowerIntegral(double c0, double c1, double n, double tau) {
  * up to degree 15 — more than sufficient since the integrand is smooth
  * (v > 0 on each arc) and the arc duration is short.
  *
- * @param c0, c1, c2, c3 Polynomial coefficients of v(τ)
+ * @param c0 Constant term of v(τ)
+ * @param c1 Linear coefficient of v(τ)
+ * @param c2 Quadratic coefficient of v(τ)
+ * @param c3 Cubic coefficient of v(τ)
  * @param n Power (real, n > -1)
  * @param tau Upper limit
  * @return ∫₀^τ (c0 + c1·s + c2·s² + c3·s³)^n ds (to quadrature precision)
@@ -602,7 +656,10 @@ inline double quadraticPowerIntegralGL(double c0, double c1, double c2,
  * Dispatches to the appropriate closed-form or quadrature based on the
  * arc type (c2 = 0 → linear, c2 ≠ 0 → quadratic) and n (integer vs real).
  *
- * @param c0, c1, c2, c3 Polynomial coefficients of v(τ)
+ * @param c0 Constant term of v(τ)
+ * @param c1 Linear coefficient of v(τ)
+ * @param c2 Quadratic coefficient of v(τ)
+ * @param c3 Cubic coefficient of v(τ)
  * @param n Power
  * @param tau Upper limit
  * @return ∫₀^τ v(s)^n ds
@@ -634,6 +691,10 @@ inline double velocityPowerIntegral(double c0, double c1, double c2,
 }
 
 /// @brief Backwards-compatible overload (c3 = 0).
+/// @param c0, c1, c2 Polynomial coefficients of v(τ)
+/// @param n Power (may be non-integer)
+/// @param tau Upper limit of integration
+/// @return ∫₀^τ (c0 + c1·s + c2·s²)^n ds
 inline double velocityPowerIntegral(double c0, double c1, double c2,
                                      double n, double tau) {
     return velocityPowerIntegral(c0, c1, c2, 0.0, n, tau);
