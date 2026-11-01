@@ -33,6 +33,13 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
 
 .. toctree::
    :maxdepth: 2
+   :caption: Control
+
+   control/ControllerGuide
+   control/AutotuningGuide
+
+.. toctree::
+   :maxdepth: 2
    :caption: Motion
 
    MotionReplanner
