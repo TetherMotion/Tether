@@ -172,13 +172,34 @@ public:
      *
      * Must be called before `start()`.  Calling after start() requires a
      * stop() + start() cycle to take effect.
+     *
+     * @param config  Recovery policy: enable flag, critical triggers,
+     *                retry limits/backoff, and timeouts. Copied into the
+     *                supervisor; the caller may reuse or destroy the
+     *                argument afterwards.
      */
     void configure(const RecoveryConfig& config);
 
-    /**Get the current configuration */
+    /**
+     * @brief Read the currently active recovery configuration.
+     *
+     * @return Const reference to the configuration installed by the last
+     *         configure() call (or the defaults if never configured). The
+     *         reference remains valid until the next configure() call or
+     *         destruction of the supervisor — it is not a snapshot, so do
+     *         not hold it across a configure().
+     */
     const RecoveryConfig& config() const { return config_; }
 
-    /**Check if the supervisor is enabled (config_.enabled == true) */
+    /**
+     * @brief Whether supervision is enabled in the current configuration.
+     *
+     * start() refuses to run when this returns false, so a supervisor can
+     * be constructed and wired up while staying inert until the application
+     * enables it via configure().
+     *
+     * @return `config_.enabled`
+     */
     bool isEnabled() const { return config_.enabled; }
 
     // ----- Recovery Handler -----
@@ -186,8 +207,19 @@ public:
     /**
      * @brief Set the recovery handler invoked during slave re-initialization.
      *
-     * Must be set before recovery is attempted.  If no handler is set,
-     * recovery will fail immediately.
+     * The handler performs the actual recovery work — re-configuring the
+     * slave's mailbox/SDOs, re-mapping PDOs, and driving the AL state
+     * machine back to OP — while the supervisor only decides when and how
+     * often to attempt it. Ownership is transferred to the supervisor;
+     * the handler must outlive any in-progress recovery, which stop()
+     * guarantees by cancelling first.
+     *
+     * Must be set before start(); a supervisor without a handler refuses
+     * to start, and if the handler is cleared mid-run recovery attempts
+     * fail immediately and count against the retry limit.
+     *
+     * @param handler  Recovery implementation to adopt; may be nullptr to
+     *                 uninstall the current handler.
      */
     void setRecoveryHandler(std::unique_ptr<ISlaveRecoveryHandler> handler);
 
@@ -195,12 +227,24 @@ public:
 
     /**
      * @brief Register an event listener.
+     *
+     * The listener is invoked on every recovery lifecycle event (critical
+     * condition detected, attempt started/finished, slave recovered or
+     * declared failed). Listeners are called synchronously on the recovery
+     * thread, so callbacks must be fast and must not call back into the
+     * supervisor. The supervisor does not take ownership — the caller must
+     * keep the listener alive until it is removed or the supervisor is
+     * stopped.
+     *
+     * @param listener  Listener to add; borrowed, not owned.
      * @return true on success, false if the listener is null or already registered.
      */
     bool addEventListener(IRecoveryEventListener* listener);
 
     /**
      * @brief Unregister an event listener.
+     *
+     * @param listener  Listener previously passed to addEventListener().
      * @return true if the listener was found and removed.
      */
     bool removeEventListener(IRecoveryEventListener* listener);
@@ -250,6 +294,11 @@ public:
      *
      * Evaluates the event against the configured triggers and initiates
      * recovery if a critical condition is detected.
+     *
+     * @param event  Poller event: slave index, observed AL state /
+     *               working-counter failure, and timestamp. Only events for
+     *               slaves below slaveCount() are acted on; out-of-range
+     *               indices are ignored.
      */
     void handleStatusEvent(const SlaveStatusEvent& event);
 
@@ -306,22 +355,47 @@ public:
 
     /**
      * @brief Get the current recovery state of a slave.
+     *
+     * @param slave_index  Slave to query (0-based station index).
      * @return SlaveRecoveryState, or Normal if the slave index is invalid.
      */
     SlaveRecoveryState slaveState(uint16_t slave_index) const;
 
     /**
      * @brief Get the number of recovery attempts made for a slave.
+     *
+     * Counts every attempt since init() or the last resetSlaveState(),
+     * including the one currently in progress. Compared against the
+     * configured retry limit — when it reaches the limit the slave is
+     * declared failed and no further automatic attempts are made.
+     *
+     * @param slave_index  Slave to query (0-based station index).
+     * @return Attempt count, or 0 for an invalid index.
      */
     int slaveAttemptCount(uint16_t slave_index) const;
 
     /**
      * @brief Reset the recovery state for a slave (e.g. after manual
      *        intervention).  Does not affect an in-progress recovery.
+     *
+     * Clears the attempt counter and moves the slave back to
+     * SlaveRecoveryState::Normal so automatic recovery can trigger again.
+     * Also clears the suspended flag, so the motion loop resumes using the
+     * slave's PDO data — only call this once the slave is actually healthy.
+     *
+     * @param slave_index  Slave to reset (0-based station index); invalid
+     *                     indices are ignored.
      */
     void resetSlaveState(uint16_t slave_index);
 
-    /**Get the number of slaves being supervised */
+    /**
+     * @brief Number of slaves under supervision.
+     *
+     * Set by init() and used to bound every per-slave query and event —
+     * indices ≥ slaveCount() are treated as invalid and ignored.
+     *
+     * @return Slave count passed to the last successful init()/start().
+     */
     uint16_t slaveCount() const { return slave_count_.load(std::memory_order_acquire); }
 
 private:
