@@ -378,11 +378,15 @@ Error calculateArcCenter(
 
 /**
  * @brief Validate arc geometry
- * 
+ *
  * Checks:
  * - Radius consistency
  * - Non-degenerate arc
  * - Within tolerance
+ * @param spec Resolved arc specification to check
+ * @param config Arc motion configuration supplying the tolerances
+ * @return Error::OK when the arc is valid; an error describing the
+ *         violated constraint otherwise
  */
 Error validateArcGeometry(
     const ArcSpec& spec,
@@ -463,6 +467,11 @@ Error generateG2Segments(
 
 /**
  * @brief Generate motion segment for G3 (CCW arc)
+ * @param block Parsed G3 block (target, center/radius, turns)
+ * @param state Current machine state (position, plane)
+ * @param config Arc motion configuration
+ * @param[out] segments Receives the generated arc/linearized segments
+ * @return Error::OK on success
  */
 Error generateG3Segments(
     const Block& block,
@@ -473,9 +482,13 @@ Error generateG3Segments(
 
 /**
  * @brief Generate single arc/helix motion segment
- * 
+ *
  * This keeps the arc as a single segment for output to
  * hardware that supports native arc commands.
+ * @param spec Resolved arc/helix specification
+ * @param feedRate Programmed feed rate [mm/min]
+ * @param[out] segments Receives the single arc segment
+ * @return Error::OK on success
  */
 Error generateArcSegment(
     const ArcSpec& spec,
@@ -511,6 +524,8 @@ double limitArcFeedRate(
  * 
  * For multi-turn:
  * L = sqrt((turns * 2 * pi * radius + final_arc)² + linear_delta²)
+ * @param spec Arc/helix specification (radius, turns, linear delta)
+ * @return Total path length [mm]
  */
 double calculateHelixLength(const ArcSpec& spec);
 
@@ -525,6 +540,7 @@ class ArcMotionHandler {
 public:
     /**
      * @brief Constructor
+     * @param config Arc motion configuration (tolerances, linearization)
      */
     explicit ArcMotionHandler(const ArcMotionConfig& config = {});
     
@@ -545,6 +561,11 @@ public:
     
     /**
      * @brief Process G3 command
+     * @param block Parsed G3 block
+     * @param state Machine state updated with the arc end position
+     * @param vars Variable system for parameter-word evaluation
+     * @param[out] segments Receives the generated motion segments
+     * @return Error::OK on success
      */
     Error processG3(
         const Block& block,
@@ -555,16 +576,19 @@ public:
     
     /**
      * @brief Update configuration
+     * @param config New arc motion configuration
      */
     void setConfig(const ArcMotionConfig& config) { m_config = config; }
-    
+
     /**
      * @brief Get current configuration
+     * @return Active arc motion configuration
      */
     const ArcMotionConfig& getConfig() const { return m_config; }
-    
+
     /**
      * @brief Get last computed arc specification
+     * @return Arc spec resolved by the most recent G2/G3 processing
      */
     const ArcSpec& getLastArc() const { return m_lastArc; }
     
@@ -576,6 +600,8 @@ public:
     
     /**
      * @brief Check if native arc output is enabled
+     * @return `true` when arcs are emitted as single native segments
+     *         (rather than linearized)
      */
     bool getNativeArcOutput() const { return m_nativeArcs; }
     
@@ -610,21 +636,29 @@ struct PlaneAxes {
 
 /**
  * @brief Get axis indices for plane
+ * @param plane Active plane (G17=XY, G18=ZX, G19=YZ)
+ * @return Primary/secondary axis indices and the normal axis for `plane`
  */
 PlaneAxes getPlaneAxes(Plane plane);
 
 /**
  * @brief Process G17 (XY plane select)
+ * @param state Machine state whose active plane is updated
+ * @return Error::OK on success
  */
 Error processG17(MachineState& state);
 
 /**
  * @brief Process G18 (XZ plane select)
+ * @param state Machine state whose active plane is updated
+ * @return Error::OK on success
  */
 Error processG18(MachineState& state);
 
 /**
  * @brief Process G19 (YZ plane select)
+ * @param state Machine state whose active plane is updated
+ * @return Error::OK on success
  */
 Error processG19(MachineState& state);
 
