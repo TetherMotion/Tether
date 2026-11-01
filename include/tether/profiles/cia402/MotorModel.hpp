@@ -424,6 +424,7 @@ public:
     
     /**
      * @brief Check if initialized
+     * @return `true` after successful init
      */
     bool isInitialized() const { return initialized_; }
     
@@ -440,11 +441,13 @@ public:
     
     /**
      * @brief Set control mode
+     * @param mode Disabled/Position/Velocity/Torque
      */
     void setControlMode(ControlMode mode);
-    
+
     /**
      * @brief Get control mode
+     * @return Active control mode
      */
     ControlMode getControlMode() const { return controlMode_; }
     
@@ -472,6 +475,7 @@ public:
     
     /**
      * @brief Set external load torque
+     * @param torque Load opposing the motor [Nm]
      */
     void setLoadTorque(double torque);
     
@@ -484,46 +488,55 @@ public:
     
     /**
      * @brief Get position in encoder counts
+     * @return Current position [counts]
      */
     int32_t getActualPosition() const { return state_.encoderPosition; }
-    
+
     /**
      * @brief Get velocity in encoder counts/s
+     * @return Current velocity [counts/s]
      */
     int32_t getActualVelocity() const { return state_.encoderVelocity; }
-    
+
     /**
      * @brief Get torque in 0.1% of rated
+     * @return Actual torque [0.1% rated]
      */
     int16_t getActualTorque() const;
-    
+
     /**
      * @brief Get following error (target - actual position)
+     * @return Position error [counts]
      */
     int32_t getFollowingError() const;
-    
+
     /**
      * @brief Check if at positive limit
+     * @return `true` while the positive limit switch is hit
      */
     bool atPositiveLimit() const { return state_.positiveLimit; }
-    
+
     /**
      * @brief Check if at negative limit
+     * @return `true` while the negative limit switch is hit
      */
     bool atNegativeLimit() const { return state_.negativeLimit; }
-    
+
     /**
      * @brief Check if home switch active
+     * @return `true` while the home switch is engaged
      */
     bool isHomeSwitchActive() const { return state_.homeSwitch; }
-    
+
     /**
      * @brief Check if index pulse detected
+     * @return `true` once the encoder index was seen
      */
     bool isIndexPulseDetected() const { return state_.indexPulseDetected; }
-    
+
     /**
      * @brief Check if any fault active
+     * @return `true` when a fault flag is set
      */
     bool hasFault() const;
     
