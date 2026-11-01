@@ -106,6 +106,8 @@ enum class EncoderClassEx : uint8_t {
 
 /**
  * @brief Get human-readable name for encoder class
+ * @param cls Encoder class to name.
+ * @return Static class name (e.g. "C2_AbsoluteMultiTurn").
  */
 const char* getEncoderClassName(EncoderClassEx cls);
 
@@ -136,6 +138,8 @@ enum class InterfaceType : uint8_t {
 
 /**
  * @brief Get human-readable name for interface type
+ * @param type Interface type to name.
+ * @return Static interface name (e.g. "BiSS-C").
  */
 const char* getInterfaceTypeName(InterfaceType type);
 
@@ -153,9 +157,12 @@ struct OperatingStatus {
     bool supply_voltage_high;     ///< Supply voltage above threshold
     
     /// Parse from raw status word
+    /// @param raw Raw status word from the drive.
+    /// @return Decoded status flags.
     static OperatingStatus fromRaw(uint16_t raw);
     
     /// Convert to raw status word
+    /// @return Status word encoding of these flags.
     uint16_t toRaw() const;
 };
 
@@ -175,12 +182,16 @@ struct AlarmFlags {
     bool position_limit_exceeded; ///< Position outside valid range
     
     /// Parse from raw alarm word
+    /// @param raw Raw alarm word from the drive.
+    /// @return Decoded alarm flags.
     static AlarmFlags fromRaw(uint16_t raw);
     
     /// Check if any alarm is active
+    /// @return true when at least one alarm flag is set.
     bool hasAnyAlarm() const;
     
     /// Get description of active alarms
+    /// @return Comma-separated list of active alarm names (empty when none).
     std::string getDescription() const;
 };
 
@@ -325,12 +336,16 @@ struct ScalingConfig {
     int32_t offset;       ///< Position offset
     
     /// Apply scaling to raw position
+    /// @param raw_position Raw encoder position [counts].
+    /// @return Scaled position in user units.
     int32_t apply(int32_t raw_position) const {
         if (!enabled || denominator == 0) return raw_position;
         return ((int64_t)raw_position * numerator) / denominator + offset;
     }
     
     /// Reverse scaling (user units to raw)
+    /// @param scaled_position Position in user units.
+    /// @return Equivalent raw encoder position [counts].
     int32_t reverse(int32_t scaled_position) const {
         if (!enabled || numerator == 0) return scaled_position;
         return ((int64_t)(scaled_position - offset) * denominator) / numerator;
@@ -428,11 +443,13 @@ public:
     
     /**
      * @brief Check if encoder is initialized
+     * @return true after a successful initialize().
      */
     bool isInitialized() const { return initialized_; }
     
     /**
      * @brief Get encoder capabilities
+     * @return Capability set read from the device during initialize().
      */
     const EncoderCapabilities& getCapabilities() const { return capabilities_; }
     
@@ -453,6 +470,7 @@ public:
     
     /**
      * @brief Get current PDO mapping preset
+     * @return Preset currently applied to the process data.
      */
     PDOMappingPreset getCurrentMapping() const { return current_mapping_; }
     
@@ -525,6 +543,7 @@ public:
     
     /**
      * @brief Get current scaling configuration
+     * @return Active position scaling.
      */
     const ScalingConfig& getScaling() const { return scaling_; }
     
@@ -568,6 +587,7 @@ public:
     
     /**
      * @brief Check if reference is complete
+     * @return true when the encoder reference procedure finished.
      */
     bool isReferenced() const { return status_.reference_done; }
     
@@ -582,26 +602,31 @@ public:
     
     /**
      * @brief Get current operating status
+     * @return Status flags from the last process-data update.
      */
     const OperatingStatus& getStatus() const { return status_; }
     
     /**
      * @brief Check if position is valid
+     * @return true when the encoder reports a trustworthy position.
      */
     bool isPositionValid() const { return status_.position_valid; }
     
     /**
      * @brief Get current alarm flags
+     * @return Decoded alarm flags.
      */
     const AlarmFlags& getAlarms() const { return alarms_; }
     
     /**
      * @brief Get raw alarm word
+     * @return Undecoded alarm word from the drive.
      */
     uint16_t getAlarmsRaw() const { return alarms_raw_; }
     
     /**
      * @brief Check if any alarm is active
+     * @return true when at least one alarm flag is set.
      */
     bool hasAlarm() const { return alarms_.hasAnyAlarm(); }
     
@@ -613,11 +638,13 @@ public:
     
     /**
      * @brief Get warning flags
+     * @return Undecoded warning word from the drive.
      */
     uint16_t getWarnings() const { return warnings_raw_; }
     
     /**
      * @brief Check if any warning is active
+     * @return true when the warning word is non-zero.
      */
     bool hasWarning() const { return warnings_raw_ != 0; }
     
@@ -636,11 +663,13 @@ public:
     
     /**
      * @brief Get current working area state
+     * @return Position status relative to the configured working area.
      */
     WorkingAreaState getWorkingAreaState() const { return working_area_state_; }
     
     /**
      * @brief Check if position is within working area
+     * @return true when the position lies inside the configured area.
      */
     bool isWithinWorkingArea() const;
     
@@ -680,11 +709,13 @@ public:
     
     /**
      * @brief Get encoder serial number
+     * @return Serial number read during diagnostics (empty when unknown).
      */
     const std::string& getSerialNumber() const { return serial_number_; }
     
     /**
      * @brief Get encoder firmware version
+     * @return Firmware version string (empty when unknown).
      */
     const std::string& getFirmwareVersion() const { return firmware_version_; }
     
@@ -698,17 +729,23 @@ public:
      * @param data_bits Number of data bits
      * @param gray_code Use Gray code encoding
      * @param msb_first MSB transmitted first
+     * @return true when the drive accepted the parameters.
      */
     bool configureSSI(uint16_t clock_khz, uint8_t data_bits, 
                       bool gray_code = true, bool msb_first = true);
     
     /**
      * @brief Configure BiSS interface parameters
+     * @param clock_hz Clock frequency [Hz].
+     * @param data_bits Number of data bits.
+     * @return true when the drive accepted the parameters.
      */
     bool configureBiSS(uint32_t clock_hz, uint8_t data_bits);
     
     /**
      * @brief Configure EnDat interface parameters
+     * @param clock_hz Clock frequency [Hz].
+     * @return true when the drive accepted the parameters.
      */
     bool configureEnDat(uint32_t clock_hz);
     
@@ -718,6 +755,7 @@ public:
     
     /**
      * @brief Register event callback
+     * @param callback Invoked on encoder events (alarm, warning, reference).
      */
     void setEventCallback(EncoderEventCallback callback);
     
@@ -732,11 +770,22 @@ public:
     
     /**
      * @brief Read object via SDO
+     * @param index Object dictionary index.
+     * @param subindex Object dictionary subindex.
+     * @param data Destination buffer.
+     * @param size Capacity of @p data in bytes.
+     * @param out_size Receives the number of bytes read.
+     * @return true when the transfer succeeded.
      */
     bool readObject(uint16_t index, uint8_t subindex, void* data, size_t size, size_t* out_size);
     
     /**
      * @brief Write object via SDO
+     * @param index Object dictionary index.
+     * @param subindex Object dictionary subindex.
+     * @param data Payload to write.
+     * @param size Payload size in bytes.
+     * @return true when the transfer succeeded.
      */
     bool writeObject(uint16_t index, uint8_t subindex, const void* data, size_t size);
     
@@ -806,9 +855,8 @@ private:
 
 /**
  * @brief Create encoder with automatic type detection
- * @param sdo SDOManager instance for SDO access
- * @param slave_position Slave position
- * @return Initialized encoder or nullptr if detection failed
+ * @param coe CoE manager providing SDO access to the encoder.
+ * @return Initialized encoder, or nullptr when detection failed.
  */
 std::unique_ptr<Encoder> createEncoder(EtherCAT::CoE::CoEManager& coe);
 
