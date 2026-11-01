@@ -103,6 +103,9 @@ public:
     
     /**
      * @brief Warning level log
+     * @param tag Source tag shown with the message
+     * @param format printf-style format string
+     * @param ... Format arguments
      */
     void warn(const char* tag, const char* format, ...) {
         va_list args;
@@ -110,9 +113,12 @@ public:
         log(LogLevel::Warn, tag, format, args);
         va_end(args);
     }
-    
+
     /**
      * @brief Info level log
+     * @param tag Source tag shown with the message
+     * @param format printf-style format string
+     * @param ... Format arguments
      */
     void info(const char* tag, const char* format, ...) {
         va_list args;
@@ -120,9 +126,12 @@ public:
         log(LogLevel::Info, tag, format, args);
         va_end(args);
     }
-    
+
     /**
      * @brief Debug level log
+     * @param tag Source tag shown with the message
+     * @param format printf-style format string
+     * @param ... Format arguments
      */
     void debug(const char* tag, const char* format, ...) {
         va_list args;
@@ -130,9 +139,12 @@ public:
         log(LogLevel::Debug, tag, format, args);
         va_end(args);
     }
-    
+
     /**
      * @brief Verbose level log
+     * @param tag Source tag shown with the message
+     * @param format printf-style format string
+     * @param ... Format arguments
      */
     void verbose(const char* tag, const char* format, ...) {
         va_list args;
@@ -140,29 +152,35 @@ public:
         log(LogLevel::Verbose, tag, format, args);
         va_end(args);
     }
-    
+
     /**
      * @brief Set minimum log level
+     * @param level Messages below this level are discarded
      */
     virtual void setLevel(LogLevel level) = 0;
-    
+
     /**
      * @brief Get current log level
+     * @return Active minimum log level
      */
     virtual LogLevel getLevel() const = 0;
-    
+
     /**
      * @brief Set log level for specific tag
+     * @param tag Tag to override
+     * @param level Minimum level applied to messages with `tag`
      */
     virtual void setTagLevel(const char* tag, LogLevel level) = 0;
-    
+
     /**
      * @brief Enable/disable timestamps
+     * @param enable `true` to prefix each message with a timestamp
      */
     virtual void setTimestamps(bool enable) = 0;
-    
+
     /**
      * @brief Enable/disable colors (ANSI escape codes)
+     * @param enable `true` to colorize output by level
      */
     virtual void setColors(bool enable) = 0;
     
@@ -205,26 +223,32 @@ public:
 
 /**
  * @brief Get the global logger instance
+ * @return Process-wide logger (default logger when none was set)
  */
 ILogger& getLogger();
 
 /**
  * @brief Set custom logger
+ * @param logger Logger taking over the global slot (ownership transferred)
  */
 void setLogger(std::unique_ptr<ILogger> logger);
 
 /**
  * @brief Create platform-appropriate logger
+ * @return Console logger on desktop platforms, UART/logger on embedded
  */
 std::unique_ptr<ILogger> createDefaultLogger();
 
 /**
  * @brief Create console logger
+ * @return Logger writing to stdout/stderr
  */
 std::unique_ptr<ILogger> createConsoleLogger();
 
 /**
  * @brief Create file logger
+ * @param filename Path of the log file (truncated on open)
+ * @return Logger appending formatted lines to `filename`
  */
 std::unique_ptr<ILogger> createFileLogger(const char* filename);
 

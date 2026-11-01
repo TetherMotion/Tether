@@ -26,36 +26,59 @@ namespace Autotuning {
  */
 class ZieglerNicholsUltimateCycle : public AutotunerBase {
 public:
-    /** @brief Human-readable name of the tuner. */
+    /** @brief Human-readable name of the tuner.
+     *  @return Display name ("Ziegler-Nichols Ultimate Cycle")
+     */
     std::string getName() const override;
 
-    /** @brief Short description for UI or logs. */
+    /** @brief Short description for UI or logs.
+     *  @return One-line description of the ultimate-cycle method
+     */
     std::string getDescription() const override;
 
-    /** @brief Offline/online mode of operation. */
+    /** @brief Offline/online mode of operation.
+     *  @return AutotuningMode::Online — drives the closed loop to its
+     *          stability limit to measure Ku/Tu
+     */
     AutotuningMode getMode() const override;
 
-    /** @brief Whether the given controller is compatible with this tuner. */
+    /** @brief Whether the given controller is compatible with this tuner.
+     *  @param controller Controller to check
+     *  @return `true` if the tuner can produce gains for `controller`
+     */
     bool isCompatible(const TunableController& controller) const override;
 
     /**
      * @brief Execute closed-loop ultimate-cycle tuning and apply parameters.
      * @param controller Controller to tune.
      * @param model Optional process model (may provide initial estimates).
+     * @return Tuning outcome including the computed gains and status
      */
     TuningResult tune(TunableController& controller,
                       const ProcessModel* model = nullptr) override;
 
-    /** @brief Compute PID gains from Ku and Tu for a given PID form. */
+    /** @brief Compute PID gains from Ku and Tu for a given PID form.
+     *  @param Ku Ultimate gain at the stability limit
+     *  @param Tu Ultimate oscillation period [s]
+     *  @param form PID gain form the result is expressed in
+     *  @return Computed PID gains
+     */
     static PIDGains calculateGains(double Ku, double Tu, PIDForm form);
 
-    /** @brief Set measured or estimated ultimate gain and period. */
+    /** @brief Set measured or estimated ultimate gain and period.
+     *  @param Ku Ultimate gain at the stability limit
+     *  @param Tu Ultimate oscillation period [s]
+     */
     void setUltimateParameters(double Ku, double Tu);
 
-    /** @brief Set the controller form to compute gains for. */
+    /** @brief Set the controller form to compute gains for.
+     *  @param form Gain form (e.g. Parallel, Standard)
+     */
     void setControllerForm(PIDForm form) { m_form = form; }
 
-    /** @brief Set an implementation variant string (informational). */
+    /** @brief Set an implementation variant string (informational).
+     *  @param variant Variant label recorded with the tuning result
+     */
     void setVariant(const std::string& variant) { m_variant = variant; }
 
 private:
