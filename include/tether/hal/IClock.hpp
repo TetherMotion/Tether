@@ -37,6 +37,12 @@ public:
     
     /**
      * @brief Get current time in milliseconds
+     *
+     * Convenience wrapper over nowMicros() (integer-division truncated),
+     * sharing its monotonic epoch and guarantees. Override only if the
+     * platform offers a cheaper or higher-precision millisecond source.
+     *
+     * @return Monotonic timestamp in milliseconds.
      */
     virtual Timestamp nowMillis() {
         return nowMicros() / 1000;
@@ -58,6 +64,13 @@ public:
     
     /**
      * @brief Get clock resolution in nanoseconds
+     *
+     * The smallest time increment the clock can distinguish — the
+     * granularity of the underlying hardware/OS timer, not the nominal
+     * unit of the returned timestamps. Useful for judging whether a
+     * measured interval is meaningful or within quantization noise.
+     *
+     * @return Clock tick granularity in nanoseconds.
      */
     virtual Nanoseconds resolution() = 0;
     
@@ -119,6 +132,9 @@ public:
     
     /**
      * @brief Check if timer is running
+     *
+     * @return true between a successful start() and the next stop();
+     *         callbacks only fire while running.
      */
     virtual bool isRunning() const = 0;
     
@@ -141,6 +157,12 @@ public:
     
     /**
      * @brief Get current period in microseconds
+     *
+     * The period the hardware is actually programmed for — when init()
+     * was called with a frequency the platform can only approximate, this
+     * may differ slightly from `1e6 / frequencyHz`.
+     *
+     * @return Programmed tick period in microseconds.
      */
     virtual Microseconds getPeriodMicros() const = 0;
     
@@ -185,6 +207,10 @@ public:
     
     /**
      * @brief Check if timer is pending
+     *
+     * @return true while a start()ed timer is armed and has not yet
+     *         fired or been cancelled; false after expiry, cancel(), or
+     *         before the first start().
      */
     virtual bool isPending() const = 0;
     
@@ -257,16 +283,32 @@ public:
     
     /**
      * @brief Get the system clock instance
+     *
+     * @return Reference to the platform clock singleton. The reference
+     *         remains valid for the factory's lifetime; repeated calls
+     *         return the same instance.
      */
     virtual IClock& getSystemClock() = 0;
     
     /**
      * @brief Create a periodic timer
+     *
+     * The returned timer is inert until init() + start(). Caller owns
+     * the instance; destroying it must stop any pending tick delivery.
+     *
+     * @return New periodic timer, or nullptr if the platform cannot
+     *         allocate more timers.
      */
     virtual std::unique_ptr<IPeriodicTimer> createPeriodicTimer() = 0;
     
     /**
      * @brief Create a one-shot timer
+     *
+     * Caller owns the instance; destroying it must cancel any pending
+     * expiry callback.
+     *
+     * @return New one-shot timer, or nullptr if the platform cannot
+     *         allocate more timers.
      */
     virtual std::unique_ptr<IOneShotTimer> createOneShotTimer() = 0;
 };
@@ -277,11 +319,22 @@ public:
 
 /**
  * @brief Get platform-specific clock factory
+ *
+ * Lazily instantiates the platform's factory singleton on first call
+ * (Linux, Windows, embedded port, or the test double installed via
+ * setClockFactory()).
+ *
+ * @return Reference to the active IClockFactory singleton — valid until
+ *         resetClockFactory() or process teardown.
  */
 IClockFactory& getClockFactory();
 
 /**
  * @brief Get system clock (convenience)
+ *
+ * Equivalent to getClockFactory().getSystemClock().
+ *
+ * @return Reference to the platform's monotonic clock singleton.
  */
 inline IClock& getSystemClock() {
     return getClockFactory().getSystemClock();
@@ -289,6 +342,15 @@ inline IClock& getSystemClock() {
 
 /**
  * @brief Set custom clock factory (for testing)
+ *
+ * Replaces the platform singleton so all subsequent getClockFactory()/
+ * getSystemClock() calls and every component built on them use the
+ * injected implementation — the standard way to run deterministic
+ * simulated time in unit tests. Install before first use; existing
+ * references obtained earlier keep pointing at the previous factory.
+ *
+ * @param factory  Replacement factory; ownership is transferred. Must
+ *                 not be null.
  */
 void setClockFactory(std::unique_ptr<IClockFactory> factory);
 
