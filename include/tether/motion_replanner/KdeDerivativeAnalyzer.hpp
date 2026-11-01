@@ -451,8 +451,10 @@ struct KdeConfig {
 /// ```
 
 /// @brief Dependence metrics between two sample vectors.
-/// @see KdeDerivativeAnalyzer::computeDependence
-/// @see DependenceAnalyzer::compute
+/**
+ * @see KdeDerivativeAnalyzer::computeDependence
+ * @see DependenceAnalyzer::compute
+ */
 struct DependenceMetrics {
     double pearson = 0.0;
     double spearman = 0.0;
@@ -466,9 +468,11 @@ struct DependenceMetrics {
     double normalizedMutualInfo = 0.0;
 };
 
-/// @brief Tail risk metrics (VaR, CVaR, ETD).
-/// @see KdeDerivativeAnalyzer::computeTailRisk
-/// @see KdeStatistics::computeTailRisk
+/**
+ * @brief Tail risk metrics (VaR, CVaR, ETD).
+ * @see KdeDerivativeAnalyzer::computeTailRisk
+ * @see KdeStatistics::computeTailRisk
+ */
 struct TailRisk {
     double tailFraction = 0.0;
     double var95 = 0.0;
@@ -674,39 +678,53 @@ private:
 // Utility functions
 //=============================================================================
 
-/// Convert a DerivativeAxis to a human-readable string.
-/// @param axis Axis kind to convert
-/// @return Axis name for labels/logging
+/**
+ * Convert a DerivativeAxis to a human-readable string.
+ * @param axis Axis kind to convert
+ * @return Axis name for labels/logging
+ */
 std::string toString(DerivativeAxis axis);
 
-/// Convert a DeviationAxis to a human-readable string.
-/// @param axis Deviation axis kind to convert
-/// @return Axis name for labels/logging
+/**
+ * Convert a DeviationAxis to a human-readable string.
+ * @param axis Deviation axis kind to convert
+ * @return Axis name for labels/logging
+ */
 std::string toString(DeviationAxis axis);
 
-/// Convert a KernelType to a human-readable string.
-/// @param kernel Kernel type to convert
-/// @return Kernel name ("Gaussian", "Epanechnikov", ...)
+/**
+ * Convert a KernelType to a human-readable string.
+ * @param kernel Kernel type to convert
+ * @return Kernel name ("Gaussian", "Epanechnikov", ...)
+ */
 std::string toString(KernelType kernel);
 
-/// Convert a BandwidthMethod to a human-readable string.
-/// @param method Bandwidth selection method to convert
-/// @return Method name for logging
+/**
+ * Convert a BandwidthMethod to a human-readable string.
+ * @param method Bandwidth selection method to convert
+ * @return Method name for logging
+ */
 std::string toString(BandwidthMethod method);
 
-/// Convert a KdeColormap to a human-readable string.
-/// @param cmap Colormap to convert
-/// @return Colormap name
+/**
+ * Convert a KdeColormap to a human-readable string.
+ * @param cmap Colormap to convert
+ * @return Colormap name
+ */
 std::string toString(KdeColormap cmap);
 
-/// Get the unit string for a DerivativeAxis.
-/// @param axis Axis kind
-/// @return Unit label ("mm/s", "mm/s²", ...)
+/**
+ * Get the unit string for a DerivativeAxis.
+ * @param axis Axis kind
+ * @return Unit label ("mm/s", "mm/s²", ...)
+ */
 std::string unitString(DerivativeAxis axis);
 
-/// Get the unit string for a DeviationAxis.
-/// @param axis Deviation axis kind
-/// @return Unit label for that axis
+/**
+ * Get the unit string for a DeviationAxis.
+ * @param axis Deviation axis kind
+ * @return Unit label for that axis
+ */
 std::string unitString(DeviationAxis axis);
 
 } // namespace tether::motion::replanner

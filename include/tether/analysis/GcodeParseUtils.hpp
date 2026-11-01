@@ -21,7 +21,11 @@
 
 namespace tether::analysis {
 
-/// @brief Strip comments (; and parenthesised) from a G-code line.
+/**
+ * @brief Strip comments (; and parenthesised) from a G-code line.
+ * @param line Raw G-code line
+ * @return Trimmed line with comments removed
+ */
 inline std::string stripComments(std::string_view line) {
     // Remove parenthesised comments first.
     std::string result{line};
@@ -44,7 +48,12 @@ inline std::string stripComments(std::string_view line) {
     return result.substr(first, last - first + 1);
 }
 
-/// @brief Check if a stripped code line contains a G-code word (word boundary).
+/**
+ * @brief Check if a stripped code line contains a G-code word (word boundary).
+ * @param code Comment-stripped G-code line
+ * @param word Word to find (e.g. "G1", "M104"), case-insensitive
+ * @return `true` if `word` appears as a whole word
+ */
 inline bool hasWord(std::string_view code, std::string_view word) {
     // Case-insensitive word-boundary search.
     std::string hay{code};
@@ -68,8 +77,12 @@ inline bool hasWord(std::string_view code, std::string_view word) {
     return false;
 }
 
-/// @brief Extract a numeric value for an axis word (e.g. X, Y, Z, E, F, I, J, R).
-/// @return std::nullopt if the word is not present.
+/**
+ * @brief Extract a numeric value for an axis word (e.g. X, Y, Z, E, F, I, J, R).
+ * @param code Comment-stripped G-code line
+ * @param axis Axis letter to extract
+ * @return Value after the axis letter, or std::nullopt if absent
+ */
 inline std::optional<double> extractValue(std::string_view code, char axis) {
     // Case-insensitive search for <axis><number>.
     for (std::size_t i = 0; i + 1 < code.size(); ++i) {
@@ -104,7 +117,9 @@ inline std::optional<double> extractValue(std::string_view code, char axis) {
     return std::nullopt;
 }
 
-/// @brief Motion mode of a G-code line.
+/**
+ * @brief Motion mode of a G-code line.
+ */
 enum class MotionMode {
     None,   ///< Not a motion command
     Rapid,  ///< G0
@@ -114,7 +129,11 @@ enum class MotionMode {
     Cancel  ///< G80
 };
 
-/// @brief Detect the motion mode of a stripped G-code line.
+/**
+ * @brief Detect the motion mode of a stripped G-code line.
+ * @param code Comment-stripped G-code line
+ * @return Motion mode (Rapid/Feed/ArcCW/ArcCCW/Cancel/None)
+ */
 inline MotionMode detectMotionMode(std::string_view code) {
     if (hasWord(code, "G0"))  return MotionMode::Rapid;
     if (hasWord(code, "G1"))  return MotionMode::Feed;
@@ -124,7 +143,9 @@ inline MotionMode detectMotionMode(std::string_view code) {
     return MotionMode::None;
 }
 
-/// @brief A parsed G-code motion move (position + feed + extrusion).
+/**
+ * @brief A parsed G-code motion move (position + feed + extrusion).
+ */
 struct ParsedMove {
     MotionMode mode = MotionMode::None;
     double x = 0, y = 0, z = 0, e = 0;
@@ -135,8 +156,14 @@ struct ParsedMove {
     int lineNumber = 0;
 };
 
-/// @brief Parse a single G-code line into a ParsedMove.
-/// Previous values are used for missing axes.
+/**
+ * @brief Parse a single G-code line into a ParsedMove.
+ * Previous values are used for missing axes.
+ * @param rawLine Raw G-code line (comments are stripped)
+ * @param lineNumber Source line number stored in the result
+ * @param prev Previous move state for modal axes
+ * @return Parsed move with modal values carried over
+ */
 inline ParsedMove parseLine(std::string_view rawLine, int lineNumber,
                             const ParsedMove& prev) {
     ParsedMove m = prev;
@@ -162,7 +189,12 @@ inline ParsedMove parseLine(std::string_view rawLine, int lineNumber,
     return m;
 }
 
-/// @brief Euclidean distance between two moves (3D).
+/**
+ * @brief Euclidean distance between two moves (3D).
+ * @param a Start move
+ * @param b End move
+ * @return XYZ distance between positions [mm]
+ */
 inline double moveDistance(const ParsedMove& a, const ParsedMove& b) {
     const double dx = b.x - a.x;
     const double dy = b.y - a.y;
@@ -170,25 +202,44 @@ inline double moveDistance(const ParsedMove& a, const ParsedMove& b) {
     return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-/// @brief Euclidean distance between two moves (XY only).
+/**
+ * @brief Euclidean distance between two moves (XY only).
+ * @param a Start move
+ * @param b End move
+ * @return Planar distance between positions [mm]
+ */
 inline double moveDistanceXY(const ParsedMove& a, const ParsedMove& b) {
     const double dx = b.x - a.x;
     const double dy = b.y - a.y;
     return std::sqrt(dx * dx + dy * dy);
 }
 
-/// @brief Check if a move is a motion command (G0-G3).
+/**
+ * @brief Check if a move is a motion command (G0-G3).
+ * @param m Parsed move to check
+ * @return `true` for Rapid/Feed/ArcCW/ArcCCW modes
+ */
 inline bool isMotion(const ParsedMove& m) {
     return m.mode == MotionMode::Rapid || m.mode == MotionMode::Feed ||
            m.mode == MotionMode::ArcCW || m.mode == MotionMode::ArcCCW;
 }
 
-/// @brief Check if a move is extruding (E increased).
+/**
+ * @brief Check if a move is extruding (E increased).
+ * @param prev Previous move state
+ * @param cur Current move
+ * @return `true` when E increased relative to `prev`
+ */
 inline bool isExtruding(const ParsedMove& prev, const ParsedMove& cur) {
     return cur.hasE && cur.e > prev.e;
 }
 
-/// @brief Check if a move is a retraction (E decreased).
+/**
+ * @brief Check if a move is a retraction (E decreased).
+ * @param prev Previous move state
+ * @param cur Current move
+ * @return `true` when E decreased relative to `prev`
+ */
 inline bool isRetraction(const ParsedMove& prev, const ParsedMove& cur) {
     return cur.hasE && cur.e < prev.e - 0.001;
 }

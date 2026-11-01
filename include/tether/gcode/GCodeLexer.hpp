@@ -1,7 +1,7 @@
 /**
  * @file GCodeLexer.hpp
  * @brief G-Code Lexical Analyzer (Tokenizer)
- * 
+ *
  * @details
  * The lexer breaks G-code source text into tokens for parsing. It handles:
  * - Word letters (A-Z) with their values
@@ -11,9 +11,9 @@
  * - Block delete (/ at line start)
  * - Expression brackets []
  * - Parameter references #
- * 
+ *
  * ## Lexer States
- * 
+ *
  * ```
  * START ──> WORD_LETTER ──> WORD_VALUE ──> START
  *   │           │
@@ -23,9 +23,9 @@
  *   │
  *   └──> EXPRESSION ──> START
  * ```
- * 
+ *
  * ## Token Types
- * 
+ *
  * | Token | Description | Example |
  * |-------|-------------|---------|
  * | WORD | Letter + value | X100.5, G1, M3 |
@@ -36,13 +36,13 @@
  * | BLOCK_DELETE | Line delete | / at start |
  * | EOL | End of line | \\n |
  * | END | End of input | EOF |
- * 
+ *
  * ## Usage Example
- * 
+ *
  * ```cpp
  * GCode::Lexer lexer;
  * lexer.setInput("G1 X100 Y50 F1000 ; rapid move");
- * 
+ *
  * while (auto token = lexer.nextToken()) {
  *     switch (token.type) {
  *         case TokenType::WORD:
@@ -55,25 +55,25 @@
  *     }
  * }
  * ```
- * 
+ *
  * ## Backward Parsing Support
- * 
+ *
  * The lexer supports reverse tokenization for lookbehind functionality:
- * 
+ *
  * ```cpp
  * lexer.setInput(programBuffer, programSize);
  * lexer.seekToEnd();  // Start from end
- * 
+ *
  * while (auto token = lexer.prevToken()) {
  *     // Process tokens in reverse order
  * }
  * ```
- * 
+ *
  * This is essential for:
  * - Negative feed rate lookahead
  * - Reverse path optimization
  * - Finding matching O-code blocks
- * 
+ *
  * @see GCodeParser
  */
 
@@ -157,14 +157,18 @@ struct LexerToken {
     size_t offset{0};  ///< Byte offset in source
     size_t length{0};  ///< Token length in bytes
     
-    /// Check if token is valid
-    /// @return `true` unless the token is END or ERROR
+    /**
+     * Check if token is valid
+     * @return `true` unless the token is END or ERROR
+     */
     bool valid() const {
         return type != LexerTokenType::END && type != LexerTokenType::ERROR;
     }
 
-    /// Check if token represents end of line or input
-    /// @return `true` for EOL or END token types
+    /**
+     * Check if token represents end of line or input
+     * @return `true` for EOL or END token types
+     */
     bool isTerminator() const {
         return type == LexerTokenType::EOL || type == LexerTokenType::END;
     }
