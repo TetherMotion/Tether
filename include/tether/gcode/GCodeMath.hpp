@@ -33,6 +33,10 @@ constexpr double EPSILON = 1e-9;
 
 /**
  * @brief Clamp a value between min and max
+ * @param value Value to clamp
+ * @param min_val Lower bound
+ * @param max_val Upper bound
+ * @return `value` constrained to [min_val, max_val]
  */
 template<typename T>
 constexpr T clamp(T value, T min_val, T max_val) {
@@ -41,6 +45,10 @@ constexpr T clamp(T value, T min_val, T max_val) {
 
 /**
  * @brief Linear interpolation between two values
+ * @param a Start value (t=0)
+ * @param b End value (t=1)
+ * @param t Interpolation factor
+ * @return a + t·(b−a)
  */
 template<typename T>
 constexpr T lerp(T a, T b, double t) {
@@ -58,6 +66,8 @@ inline double normalizeAngle(double angle) {
 
 /**
  * @brief Convert degrees to radians
+ * @param degrees Angle in degrees
+ * @return Angle in radians
  */
 constexpr double toRadians(double degrees) {
     return degrees * PI / 180.0;
@@ -65,6 +75,8 @@ constexpr double toRadians(double degrees) {
 
 /**
  * @brief Convert radians to degrees
+ * @param radians Angle in radians
+ * @return Angle in degrees
  */
 constexpr double toDegrees(double radians) {
     return radians * 180.0 / PI;
@@ -276,6 +288,8 @@ struct ZFilter {
     
     /**
      * @brief Check if a Z value passes the filter
+     * @param z Z height to test [mm]
+     * @return `true` if `z` satisfies the active filter mode
      */
     bool passes(double z) const {
         switch (mode) {
@@ -394,6 +408,10 @@ inline Vec2 interpolateArc(
 
 /**
  * @brief Calculate the perpendicular distance from a point to a line segment
+ * @param point Point to measure from
+ * @param segStart Segment start
+ * @param segEnd Segment end
+ * @return Shortest distance to the segment [mm]
  */
 inline double pointToSegmentDistance(const Vec2& point, const Vec2& segStart, const Vec2& segEnd) {
     Eigen::Vector2d p = point.toEigen();
@@ -432,6 +450,10 @@ struct Color {
     
     /**
      * @brief Linear interpolation between two colors
+     * @param a Start color (t=0)
+     * @param b End color (t=1)
+     * @param t Interpolation factor
+     * @return Per-channel interpolated color
      */
     static Color lerp(const Color& a, const Color& b, float t) {
         return {
@@ -444,6 +466,11 @@ struct Color {
     
     /**
      * @brief Create color from HSV
+     * @param h Hue [0..360]
+     * @param s Saturation [0..1]
+     * @param v Value [0..1]
+     * @param a Alpha [0..1]
+     * @return Equivalent RGBA color
      */
     static Color fromHSV(float h, float s, float v, float a = 1.0f);
 };
@@ -494,6 +521,8 @@ struct ColorMap {
     
     /**
      * @brief Map a value to a color
+     * @param value Scalar to map into [minValue, maxValue]
+     * @return Color from the colormap at that point
      */
     Color mapValue(double value) const {
         if (mode == ColorMapMode::Solid) {
@@ -511,6 +540,9 @@ struct ColorMap {
 
 /**
  * @brief Calculate time for a linear move given distance and velocity
+ * @param distance Move distance [mm]
+ * @param velocity Move velocity [mm/s]; 0 or negative returns 0
+ * @return Move duration [s]
  */
 inline double timeForMove(double distance, double velocity) {
     if (velocity <= EPSILON) return 0.0;
