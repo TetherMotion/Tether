@@ -115,11 +115,14 @@ struct PlantTemplate {
     
     /**
      * @brief Get template boundary (convex hull)
+     * @return Convex hull of the template points in Nichols space.
      */
     std::vector<NicholsPoint> boundary() const;
     
     /**
      * @brief Check if point is inside template
+     * @param point Nichols point to test.
+     * @return true when the point lies inside the convex hull.
      */
     bool contains(const NicholsPoint& point) const;
 };
@@ -140,6 +143,8 @@ struct QFTBound {
     
     /**
      * @brief Check if loop point satisfies bound
+     * @param loopPoint Loop transmission point at this frequency.
+     * @return true when the point lies outside the forbidden region.
      */
     bool isSatisfied(const NicholsPoint& loopPoint) const;
 };
@@ -203,22 +208,39 @@ public:
     /**
      * @brief Set nominal FOPDT plant
      * G(s) = K * exp(-L*s) / (τs + 1)
+     *
+     * @param K Process gain.
+     * @param tau Time constant τ [s].
+     * @param L Dead time L [s].
      */
     void setNominalPlant(double K, double tau, double L);
     
     /**
      * @brief Set nominal SOPDT plant
      * G(s) = K * exp(-L*s) / ((τ₁s + 1)(τ₂s + 1))
+     *
+     * @param K Process gain.
+     * @param tau1 First time constant τ₁ [s].
+     * @param tau2 Second time constant τ₂ [s].
+     * @param L Dead time L [s].
      */
     void setNominalPlant(double K, double tau1, double tau2, double L);
     
     /**
      * @brief Set nominal plant as transfer function
+     * @param tf Nominal plant P_nom(s).
      */
     void setNominalPlant(const TransferFunction& tf);
     
     /**
      * @brief Set nominal plant as state-space
+     * @param A State matrix (n×n, row-major).
+     * @param B Input matrix (n×m, row-major).
+     * @param C Output matrix (p×n, row-major).
+     * @param D Feedthrough matrix (p×m, row-major).
+     * @param n State dimension.
+     * @param m Input dimension.
+     * @param p Output dimension.
      */
     void setNominalPlant(const double* A, const double* B,
                         const double* C, const double* D,
@@ -226,6 +248,12 @@ public:
     
     /**
      * @brief Define FOPDT uncertainty ranges
+     * @param Kmin Minimum process gain.
+     * @param Kmax Maximum process gain.
+     * @param tauMin Minimum time constant [s].
+     * @param tauMax Maximum time constant [s].
+     * @param Lmin Minimum dead time [s].
+     * @param Lmax Maximum dead time [s].
      */
     void setFOPDTUncertainty(double Kmin, double Kmax,
                              double tauMin, double tauMax,
@@ -244,11 +272,13 @@ public:
     /**
      * @brief Set multiplicative uncertainty model
      * P_true = P_nom * (1 + W*Δ), |Δ| ≤ 1
+     * @param W Uncertainty weight shaping the bound.
      */
     void setMultiplicativeUncertainty(const TransferFunction& W);
     
     /**
      * @brief Directly provide plant family samples
+     * @param plants Plant variants used to build the templates.
      */
     void setPlantSamples(const std::vector<TransferFunction>& plants);
     
@@ -277,6 +307,8 @@ public:
     /**
      * @brief Set disturbance rejection specification
      * |S(jω)| ≤ spec(ω)
+     * @param freqs Frequency points [rad/s].
+     * @param maxSensitivity Maximum |S| at each frequency.
      */
     void setDisturbanceSpec(const std::vector<double>& freqs,
                            const std::vector<double>& maxSensitivity);
@@ -284,6 +316,8 @@ public:
     /**
      * @brief Set simple disturbance spec
      * |S| ≤ Smax below crossover, roll off above
+     * @param Smax Maximum sensitivity below the crossover frequency.
+     * @param crossover Frequency below which the bound applies [rad/s].
      */
     void setDisturbanceSpec(double Smax, double crossover);
     
@@ -326,11 +360,13 @@ public:
     
     /**
      * @brief Get computed templates
+     * @return Plant templates at the design frequencies.
      */
     const std::vector<PlantTemplate>& getTemplates() const { return m_templates; }
     
     /**
      * @brief Get computed bounds
+     * @return QFT bounds at the design frequencies.
      */
     const std::vector<QFTBound>& getBounds() const { return m_bounds; }
     
@@ -358,18 +394,23 @@ public:
     
     /**
      * @brief Auto shape with configuration
+     * @param config Search space and iteration budget for the shaper.
+     * @return true when a bound-satisfying controller was found.
      */
     bool autoShapeLoop(const LoopShapingConfig& config);
     
     /**
      * @brief Manually set controller
+     * @param C Loop controller C(s) to evaluate against the bounds.
      */
     void setController(const TransferFunction& C);
     
     /**
      * @brief Add controller element
+     * @param pole Real pole location to append.
      */
     void addControllerPole(double pole);
+    /// @param zero Real zero location to append.
     void addControllerZero(double zero);
     void addControllerPole(std::complex<double> pole);  // Complex pair
     void addControllerZero(std::complex<double> zero);  // Complex pair
@@ -377,16 +418,19 @@ public:
     
     /**
      * @brief Get designed controller
+     * @return Controller C(s) currently being evaluated.
      */
     const TransferFunction& getController() const { return m_controller; }
     
     /**
      * @brief Check if all bounds satisfied
+     * @return true when the controller meets every bound at every frequency.
      */
     bool checkBounds() const;
     
     /**
      * @brief Get bound satisfaction at each frequency
+     * @return Per-frequency satisfaction flags (design frequency order).
      */
     std::vector<bool> getBoundSatisfaction() const;
     
@@ -401,16 +445,20 @@ public:
     
     /**
      * @brief Design prefilter with specified bandwidth
+     * @param bandwidth Desired closed-loop bandwidth [rad/s].
+     * @param order Filter order (1-3).
      */
     void designPrefilter(double bandwidth, int order = 2);
     
     /**
      * @brief Manually set prefilter
+     * @param F Prefilter F(s) applied to the reference.
      */
     void setPrefilter(const TransferFunction& F);
     
     /**
      * @brief Get designed prefilter
+     * @return Reference prefilter F(s).
      */
     const TransferFunction& getPrefilter() const { return m_prefilter; }
     
@@ -420,16 +468,22 @@ public:
     
     /**
      * @brief Get loop transmission L(jω) = P_nom(jω) * C(jω)
+     * @param omega Frequency [rad/s].
+     * @return Complex loop transmission at @p omega.
      */
     std::complex<double> evaluateLoop(double omega) const;
     
     /**
      * @brief Get closed-loop response T(jω) = L/(1+L)
+     * @param omega Frequency [rad/s].
+     * @return Complex closed-loop response at @p omega.
      */
     std::complex<double> evaluateClosedLoop(double omega) const;
     
     /**
      * @brief Get sensitivity S(jω) = 1/(1+L)
+     * @param omega Frequency [rad/s].
+     * @return Complex sensitivity at @p omega.
      */
     std::complex<double> evaluateSensitivity(double omega) const;
     
@@ -446,6 +500,8 @@ public:
     
     /**
      * @brief Get worst-case closed-loop response over uncertainty
+     * @param omega Frequency [rad/s].
+     * @return (magnitude, phase) pairs of the worst-case plant response.
      */
     std::pair<std::vector<double>, std::vector<double>> 
         worstCaseResponse(double omega) const;
