@@ -121,6 +121,7 @@ public:
     
     /**
      * @brief Get path type
+     * @return Enumerated segment kind.
      */
     virtual PathType getType() const = 0;
     
@@ -134,21 +135,25 @@ public:
     
     /**
      * @brief Get path length
+     * @return Arc length of the segment [units].
      */
     virtual double getLength() const = 0;
     
     /**
      * @brief Get number of axes
+     * @return Number of axes the segment interpolates.
      */
     virtual size_t getNumAxes() const = 0;
     
     /**
      * @brief Get start point
+     * @return Path point at parameter u = 0.
      */
     virtual PathPoint getStartPoint() const { return evaluate(0.0); }
     
     /**
      * @brief Get end point
+     * @return Path point at parameter u = 1.
      */
     virtual PathPoint getEndPoint() const { return evaluate(1.0); }
     
@@ -165,6 +170,7 @@ public:
      * 
      * @param u Parameter in [0, 1]
      * @param numSteps Integration steps
+     * @return Arc length from u = 0 to @p u [units].
      */
     double arcLength(double u, size_t numSteps = 100) const;
     
@@ -173,6 +179,7 @@ public:
      * 
      * @param s Arc length from start
      * @param tolerance Search tolerance
+     * @return Parameter u whose arcLength(u) equals @p s.
      */
     double parameterAtLength(double s, double tolerance = 1e-6) const;
 };
@@ -200,6 +207,7 @@ public:
     
     /**
      * @brief Configure linear path
+     * @param config Start/end points and axis count.
      */
     void configure(const LinearConfig& config);
     
@@ -242,11 +250,17 @@ public:
     
     /**
      * @brief Configure circular path
+     * @param config Center, radius, angles and plane.
      */
     void configure(const CircularConfig& config);
     
     /**
      * @brief Configure from center and endpoints
+     * @param center Circle center in the selected plane.
+     * @param start Arc start point.
+     * @param end Arc end point.
+     * @param dir Arc direction (clockwise/counter-clockwise).
+     * @param plane Plane the arc lies in.
      */
     void configureFromPoints(const std::array<double, 3>& center,
                             const std::array<double, 3>& start,
@@ -278,11 +292,13 @@ public:
     
     /**
      * @brief Get arc angle in radians
+     * @return Swept angle, always non-negative.
      */
     double getArcAngle() const { return std::abs(m_endAngle - m_startAngle); }
     
     /**
      * @brief Get radius
+     * @return Arc radius [units].
      */
     double getRadius() const { return m_radius; }
     
@@ -363,6 +379,7 @@ public:
     
     /**
      * @brief Add control point
+     * @param point Control point in axis space (extra axes ignored).
      */
     void addControlPoint(const std::array<double, MAX_PATH_AXES>& point);
     
@@ -378,6 +395,7 @@ public:
     
     /**
      * @brief Get spline degree
+     * @return Polynomial degree of the B-spline.
      */
     int getDegree() const { return m_config.degree; }
     
@@ -466,6 +484,11 @@ public:
     
     /**
      * @brief Configure cubic Bezier from 4 points
+     * @param p0 Start point.
+     * @param p1 First control point.
+     * @param p2 Second control point.
+     * @param p3 End point.
+     * @param numAxes Number of axes to interpolate.
      */
     void configureCubic(const std::array<double, MAX_PATH_AXES>& p0,
                        const std::array<double, MAX_PATH_AXES>& p1,
@@ -480,6 +503,7 @@ public:
     
     /**
      * @brief Get Bezier degree
+     * @return Degree implied by the number of control points.
      */
     int getDegree() const { 
         return static_cast<int>(m_config.controlPoints.size()) - 1; 
@@ -545,21 +569,28 @@ public:
     
     /**
      * @brief Sample at given time (alias)
+     * @param time Time from start [s].
+     * @return Point on path with velocities.
      */
     PathPoint sampleAtTime(double time) const { return sample(time); }
     
     /**
      * @brief Check if motion is complete
+     * @param time Time from start [s].
+     * @return true once @p time reaches getDuration().
      */
     bool isComplete(double time) const;
     
     /**
      * @brief Get total motion time
+     * @return Time needed to traverse the whole path [s].
      */
     double getDuration() const;
     
     /**
      * @brief Get current parameter
+     * @param time Time from start [s].
+     * @return Path parameter u in [0, 1] at that time.
      */
     double getParameter(double time) const;
     
@@ -595,6 +626,7 @@ class MultiSegmentPath : public PathSegment {
 public:
     /**
      * @brief Add segment to path
+     * @param segment Segment appended after the existing ones.
      */
     void addSegment(std::shared_ptr<PathSegment> segment);
     
@@ -606,11 +638,13 @@ public:
     
     /**
      * @brief Set blend mode for all transitions
+     * @param mode Blending strategy between consecutive segments.
      */
     void setBlendMode(BlendMode mode) { m_blendMode = mode; }
     
     /**
      * @brief Set blend radius/tolerance
+     * @param tolerance Maximum deviation introduced by blending [units].
      */
     void setBlendTolerance(double tolerance) { m_blendTolerance = tolerance; }
     
@@ -624,21 +658,26 @@ public:
     
     /**
      * @brief Sample at given time
+     * @param time Time from start [s].
+     * @return Point on the composite path with velocities.
      */
     PathPoint sample(double time) const;
     
     /**
      * @brief Get total duration
+     * @return Time needed to traverse all segments [s].
      */
     double getDuration() const { return m_totalDuration; }
     
     /**
      * @brief Get total path length
+     * @return Sum of all segment lengths [units].
      */
     double getTotalLength() const;
     
     /**
      * @brief Get number of segments
+     * @return Count of segments added so far.
      */
     size_t getSegmentCount() const { return m_segments.size(); }
     
@@ -669,6 +708,8 @@ private:
 
 /**
  * @brief Create path segment by type
+ * @param type Segment kind to instantiate.
+ * @return Newly constructed segment.
  */
 std::unique_ptr<PathSegment> createPathSegment(PathType type);
 

@@ -89,16 +89,19 @@ public:
     
     /**
      * @brief Get algorithm name
+     * @return Short display name (e.g. "Adam", "Nelder-Mead").
      */
     virtual std::string getName() const = 0;
     
     /**
      * @brief Get algorithm description
+     * @return One-line description of the optimization strategy.
      */
     virtual std::string getDescription() const = 0;
     
     /**
      * @brief Check if algorithm requires gradient
+     * @return true when the algorithm consumes CostFunction::gradient().
      */
     virtual bool requiresGradient() const = 0;
     
@@ -116,6 +119,7 @@ public:
     
     /**
      * @brief Set termination criteria
+     * @param criteria Iteration/evaluation/time budgets and tolerances.
      */
     void setTerminationCriteria(const TerminationCriteria& criteria) {
         m_criteria = criteria;
@@ -123,6 +127,7 @@ public:
     
     /**
      * @brief Set random seed for reproducibility
+     * @param seed Seed for the internal RNG.
      */
     void setRandomSeed(unsigned int seed) {
         m_rng.seed(seed);
@@ -131,11 +136,13 @@ public:
     
     /**
      * @brief Enable/disable convergence history tracking
+     * @param track true to record cost/parameter history in the result.
      */
     void setTrackHistory(bool track) { m_trackHistory = track; }
     
     /**
      * @brief Set callback for progress updates
+     * @param callback Invoked per iteration with (iteration, cost, params).
      */
     void setProgressCallback(
         std::function<void(int iteration, double cost, const ParameterVector&)> callback) {
@@ -151,6 +158,12 @@ protected:
     
     /**
      * @brief Check if termination criteria met
+     * @param iterations Iterations performed so far.
+     * @param funcEvals Cost-function evaluations performed so far.
+     * @param costChange Relative cost change over the last window.
+     * @param paramChange Relative parameter change over the last window.
+     * @param gradNorm Current gradient norm (infinite when not tracked).
+     * @return true when any configured criterion is satisfied.
      */
     bool shouldTerminate(int iterations, int funcEvals, 
                         double costChange, double paramChange,
@@ -158,27 +171,41 @@ protected:
     
     /**
      * @brief Generate random number in range
+     * @param min Lower bound (inclusive).
+     * @param max Upper bound (exclusive).
+     * @return Uniformly distributed sample.
      */
     double randomUniform(double min = 0.0, double max = 1.0);
     
     /**
      * @brief Generate random integer in range
+     * @param min Lower bound (inclusive).
+     * @param max Upper bound (inclusive).
+     * @return Uniformly distributed integer.
      */
     int randomInt(int min, int max);
     
     /**
      * @brief Generate Gaussian random number
+     * @param mean Distribution mean.
+     * @param stddev Distribution standard deviation.
+     * @return Normally distributed sample.
      */
     double randomGaussian(double mean = 0.0, double stddev = 1.0);
     
     /**
      * @brief Project parameters onto bounds
+     * @param params Parameter vector to clamp.
+     * @param bounds Per-parameter bounds.
+     * @return Copy of @p params clamped into @p bounds.
      */
     static ParameterVector projectToBounds(const ParameterVector& params,
                                            const std::vector<ParameterBounds>& bounds);
     
     /**
      * @brief Generate random point within bounds
+     * @param bounds Per-parameter bounds.
+     * @return Uniformly sampled point inside @p bounds.
      */
     ParameterVector randomInBounds(const std::vector<ParameterBounds>& bounds);
 };
@@ -192,6 +219,7 @@ protected:
  */
 class GradientDescent : public OptimizationAlgorithm {
 public:
+    /// Gradient-descent update rule variants.
     enum class Variant {
         Standard,       ///< Basic gradient descent
         Momentum,       ///< With momentum term
@@ -214,21 +242,28 @@ public:
     
     /**
      * @brief Set learning rate
+     * @param lr Step size applied to the update direction.
      */
     void setLearningRate(double lr) { m_learningRate = lr; }
     
     /**
      * @brief Set momentum coefficient (for momentum variants)
+     * @param momentum Velocity decay factor in [0, 1).
      */
     void setMomentum(double momentum) { m_momentum = momentum; }
     
     /**
      * @brief Set Adam parameters
+     * @param beta1 Exponential decay for the first moment estimate.
+     * @param beta2 Exponential decay for the second moment estimate.
+     * @param epsilon Small constant added for numerical stability.
      */
     void setAdamParams(double beta1 = 0.9, double beta2 = 0.999, double epsilon = 1e-8);
     
     /**
      * @brief Enable numerical gradient computation
+     * @param enable true to use finite differences instead of CostFunction::gradient().
+     * @param stepSize Finite-difference step size.
      */
     void setNumericalGradient(bool enable, double stepSize = 1e-6) {
         m_useNumericalGradient = enable;
@@ -287,6 +322,7 @@ public:
     
     /**
      * @brief Set initial simplex size
+     * @param size Edge length of the initial simplex around the start point.
      */
     void setInitialSimplexSize(double size) { m_initialSize = size; }
     
@@ -395,6 +431,7 @@ private:
  */
 class ParticleSwarmOptimization : public OptimizationAlgorithm {
 public:
+    /// Neighborhood topology controlling information sharing.
     enum class Topology {
         Global,     ///< All particles are neighbors (gbest)
         Ring,       ///< Each particle has 2 neighbors (lbest)
@@ -457,6 +494,7 @@ private:
  */
 class SimulatedAnnealing : public OptimizationAlgorithm {
 public:
+    /// Temperature decay schedules.
     enum class CoolingSchedule {
         Exponential,    ///< T(k) = T0 * alpha^k
         Linear,         ///< T(k) = T0 - k * delta
@@ -509,6 +547,7 @@ private:
  */
 class DifferentialEvolution : public OptimizationAlgorithm {
 public:
+    /// Mutation/crossover strategies (DE/... notation).
     enum class Strategy {
         Best1Bin,       ///< DE/best/1/bin
         Rand1Bin,       ///< DE/rand/1/bin
@@ -561,6 +600,7 @@ private:
  */
 class BayesianOptimization : public OptimizationAlgorithm {
 public:
+    /// Acquisition functions selecting the next sample point.
     enum class AcquisitionFunction {
         ExpectedImprovement,    ///< EI
         ProbabilityOfImprovement, ///< PI
@@ -568,6 +608,7 @@ public:
         ThompsonSampling        ///< TS
     };
     
+    /// Gaussian-process kernel families.
     enum class KernelType {
         SquaredExponential,     ///< RBF kernel
         Matern32,               ///< Matern 3/2
@@ -828,11 +869,14 @@ private:
 
 /**
  * @brief Create optimizer by name
+ * @param name Optimizer name as returned by getAvailableOptimizers().
+ * @return New optimizer instance, or nullptr for unknown names.
  */
 std::shared_ptr<OptimizationAlgorithm> createOptimizer(const std::string& name);
 
 /**
  * @brief Get list of available optimizer names
+ * @return Names accepted by createOptimizer().
  */
 std::vector<std::string> getAvailableOptimizers();
 
