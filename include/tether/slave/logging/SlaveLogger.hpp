@@ -232,7 +232,13 @@ public:
     void stop();
     
     /**
-     * @brief Check if logger is running
+     * @brief Whether the background drain thread is active.
+     *
+     * Entries enqueued via log()/logv()/logFrame()/logHex() are only
+     * written to the configured sinks while this returns true; calls made
+     * while stopped are still queued but pile up until start() or flush().
+     *
+     * @return true between a successful start() and the next stop().
      */
     bool isRunning() const { return running_.load(); }
     
@@ -246,32 +252,64 @@ public:
     // ========================================================================
     
     /**
-     * @brief Set enabled categories
+     * @brief Replace the enabled-category bitmask.
+     *
+     * Entries whose category bit is not set are dropped at the log() call
+     * site before entering the queue, so disabled categories cost
+     * essentially nothing on the realtime path. Applies to entries logged
+     * after the change; entries already queued keep their original
+     * accepted/rejected state. Note that logFrame() does not consult this
+     * mask — frame captures always enter the queue.
+     *
+     * @param categories  Bitwise-OR of SlaveLogCategory flags to keep.
      */
     void setEnabledCategories(SlaveLogCategory categories);
     
     /**
-     * @brief Enable/disable a specific category
+     * @brief Enable or disable a single category without touching the rest.
+     *
+     * @param category  Category flag to modify.
+     * @param enabled   true to set the bit, false to clear it.
      */
     void setCategoryEnabled(SlaveLogCategory category, bool enabled);
     
     /**
-     * @brief Check if category is enabled
+     * @brief Test whether a category currently passes the filter.
+     *
+     * @param category  Category flag to test.
+     * @return true if entries in this category are accepted into the queue.
      */
     bool isCategoryEnabled(SlaveLogCategory category) const;
     
     /**
-     * @brief Set minimum log level
+     * @brief Set the minimum severity accepted by log()/logv()/logHex().
+     *
+     * Entries below @p level are discarded at the call site, like disabled
+     * categories. logFrame() is the exception: it always stamps Debug level
+     * and bypasses both severity and category filtering, so frame captures
+     * are never silently filtered away.
+     *
+     * @param level  Lowest SlaveLogLevel that is still logged.
      */
     void setMinLevel(SlaveLogLevel level);
     
     /**
-     * @brief Get minimum log level
+     * @brief The currently configured minimum severity.
+     *
+     * @return SlaveLogLevel set by the last setMinLevel() call or the
+     *         configuration default.
      */
     SlaveLogLevel getMinLevel() const { return config_.minLevel; }
     
     /**
-     * @brief Set slave address (for identification in logs)
+     * @brief Set the slave's configured station address stamped on entries.
+     *
+     * Included in the formatted output so interleaved logs from several
+     * slaves can be told apart. Purely a label — it does not affect routing
+     * or filtering.
+     *
+     * @param addr  EtherCAT configured station address (0x1001+ typically),
+     *              or the ring position if addressing is not yet assigned.
      */
     void setSlaveAddress(uint16_t addr) { slaveAddress_ = addr; }
     
@@ -293,7 +331,17 @@ public:
              const char* format, ...) __attribute__((format(printf, 4, 5)));
     
     /**
-     * @brief Log a message with va_list
+     * @brief Log a message from a pre-captured va_list.
+     *
+     * Same semantics and filtering as log(), but takes the variadic
+     * arguments as a va_list so wrapper functions can forward their own
+     * `...` without re-parsing the format string. The caller retains
+     * ownership of @p args; it is consumed with va_arg but not va_end'ed.
+     *
+     * @param category  Log category filtered against setEnabledCategories().
+     * @param level     Severity filtered against setMinLevel().
+     * @param format    Printf-style format string (must not be null).
+     * @param args      va_list matching @p format.
      */
     void logv(SlaveLogCategory category, SlaveLogLevel level,
               const char* format, va_list args);
@@ -362,7 +410,14 @@ public:
                         uint64_t timestamp = 0);
 
     /**
-     * @brief Get packet logger
+     * @brief Access the underlying PcapNG packet logger, if configured.
+     *
+     * Useful for querying the pcap file path, flushing, or checking open
+     * status directly. The pointer is borrowed — owned by this SlaveLogger
+     * and invalidated when it is destroyed.
+     *
+     * @return PacketLogger instance, or nullptr if pcap output was not
+     *         enabled in the configuration.
      */
     Tether::PacketLoggers::PacketLogger* getPcapLogger() { return pcapLogger_.get(); }
     
@@ -371,12 +426,25 @@ public:
     // ========================================================================
     
     /**
-     * @brief Get number of logged entries
+     * @brief Total entries accepted into the queue since the last reset.
+     *
+     * Counts entries that passed category/level filtering — not entries
+     * actually written to the sinks yet, so the number can lead the visible
+     * output while the drain thread catches up.
+     *
+     * @return Accepted entry count (monotonic until resetStatistics()).
      */
     uint64_t getLogCount() const { return logCount_.load(); }
     
     /**
-     * @brief Get number of dropped entries (queue full)
+     * @brief Total entries rejected because the lock-free queue was full.
+     *
+     * Drops happen when producers outpace the drain thread (e.g. sinks
+     * blocked on disk I/O). A non-zero, growing value means logging
+     * configuration or sink throughput should be revisited — log() never
+     * blocks, it sheds load instead.
+     *
+     * @return Dropped entry count (monotonic until resetStatistics()).
      */
     uint64_t getDropCount() const { return dropCount_.load(); }
     

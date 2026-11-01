@@ -290,12 +290,21 @@ public:
     void getGainMatrix(double* K) const;
     
     /**
-     * @brief Get number of states
+     * @brief Number of states `n` configured via setSystemMatrices().
+     *
+     * @return State dimension `n`; 0 until the system matrices have been set.
+     *         All per-call buffers passed to getGainMatrix() and the
+     *         `input.state` array of computeImpl() must hold exactly this many
+     *         elements.
      */
     int getNumStates() const { return m_n; }
     
     /**
-     * @brief Get number of inputs
+     * @brief Number of control inputs `m` configured via setSystemMatrices().
+     *
+     * @return Input dimension `m`; 0 until the system matrices have been set.
+     *         This is the row count of the gain matrix K (m×n) and the size of
+     *         the control output produced by computeImpl().
      */
     int getNumInputs() const { return m_m; }
     
@@ -306,7 +315,17 @@ public:
     void setReferenceState(const double* ref);
     
     /**
-     * @brief Enable feedforward from reference (for tracking)
+     * @brief Enable or disable feedforward action for reference tracking.
+     *
+     * When enabled, the control law becomes `u = -K(x - xRef)` so the
+     * feedback acts on the tracking error rather than the absolute state —
+     * the reference state set via setReferenceState() effectively shifts the
+     * equilibrium the regulator drives toward. When disabled (the default),
+     * the controller regulates toward the origin: `u = -Kx`, and
+     * setReferenceState() has no effect on the computed output.
+     *
+     * @param enable `true` to apply the reference-state offset in the control
+     *               law; `false` for pure origin regulation.
      */
     void enableFeedforward(bool enable) { m_useFeedforward = enable; }
     
@@ -391,12 +410,32 @@ public:
                            int n, int m, int p);
     
     /**
-     * @brief Set LQR weight matrices
+     * @brief Set the LQR cost weights for the control side of the LQG design.
+     *
+     * These are forwarded verbatim to the internal LQRController and define
+     * the quadratic cost `J = ∫(x'Qx + u'Ru)dt` minimized by the feedback
+     * gain. Q must be positive semi-definite (n×n, row-major) and R positive
+     * definite (m×m, row-major); Bryson's rule (`Q_ii = 1/x_i,max²`,
+     * `R_jj = 1/u_j,max²`) is a sensible starting point. Must be called
+     * before design(), which fails otherwise.
+     *
+     * @param Q  State weighting matrix (n×n, row-major, PSD)
+     * @param R  Control weighting matrix (m×m, row-major, PD)
      */
     void setLQRWeights(const double* Q, const double* R);
     
     /**
-     * @brief Set noise covariance matrices
+     * @brief Set the noise covariances for the Kalman-filter side of the LQG.
+     *
+     * W models process noise — plant disturbances and model mismatch on
+     * `ẋ = Ax + Bu + w` with `w ~ N(0, W)`. V models measurement noise on
+     * `y = Cx + v` with `v ~ N(0, V)`. The W/V ratio steers estimator
+     * bandwidth: large W relative to V makes the filter trust measurements
+     * and track quickly; large V relative to W makes it trust the model and
+     * reject sensor noise at the cost of slower state convergence.
+     *
+     * @param W  Process-noise covariance (n×n, row-major, PSD)
+     * @param V  Measurement-noise covariance (p×p, row-major, PD)
      */
     void setNoiseCovariances(const double* W, const double* V);
     
@@ -410,17 +449,40 @@ public:
     bool design();
     
     /**
-     * @brief Access the internal LQR controller
+     * @brief Access the internal LQR controller used for the feedback gain.
+     *
+     * Exposed for tuning and inspection — e.g. reading back the computed K
+     * via LQRController::getGainMatrix() or overriding it with
+     * setGainMatrix() after design(). The reference is valid for the
+     * lifetime of this LQGController; mutating it (weights, matrices) takes
+     * effect on the next computeImpl() call without redesign.
+     *
+     * @return Mutable reference to the owned LQRController.
      */
     LQRController& getLQR() { return m_lqr; }
     
     /**
-     * @brief Access the internal Kalman filter
+     * @brief Access the internal Kalman filter used for state estimation.
+     *
+     * Exposed for inspecting the current state estimate and covariance, or
+     * for re-seeding the estimate before enabling the loop. The reference is
+     * valid for the lifetime of this LQGController. Each computeImpl() call
+     * feeds the latest measurement through this filter before applying the
+     * LQR gain to the estimate.
+     *
+     * @return Mutable reference to the owned KalmanFilter.
      */
     KalmanFilter& getKalmanFilter() { return m_kf; }
     
     /**
-     * @brief Set reference for tracking
+     * @brief Set the scalar reference the first output should track.
+     *
+     * Used by computeImpl() to form the tracking error fed through the
+     * estimator/controller chain. Only meaningful for single-output (p = 1)
+     * configurations; for multi-output tracking, drive the reference through
+     * the LQR's reference state instead (see getLQR()).
+     *
+     * @param ref  Desired output value in the plant's output units.
      */
     void setReference(double ref) { m_reference = ref; }
     
@@ -511,22 +573,56 @@ public:
     bool design();
     
     /**
-     * @brief Set integral limits (anti-windup)
+     * @brief Clamp the integral state to `[min, max]` (anti-windup).
+     *
+     * Each computeImpl() call integrates `xᵢ += (r - y)·dt` per output and
+     * then clamps every component into this range. Tight limits prevent the
+     * integrator from winding up during actuator saturation or large
+     * reference steps at the cost of slower steady-state convergence; the
+     * default `±1e6` is effectively unclamped. Pass `min = max = 0` to
+     * freeze the integral term entirely.
+     *
+     * @param min  Lower clamp applied to each integral-state component.
+     * @param max  Upper clamp applied to each integral-state component;
+     *             must be ≥ `min`.
      */
     void setIntegralLimits(double min, double max);
     
     /**
-     * @brief Get state feedback gain Kx
+     * @brief Copy the state-feedback part of the LQI gain into `Kx`.
+     *
+     * Splits the augmented gain `K = [Kx Ki]` so callers can inspect or
+     * reuse the part acting on the plant state x in `u = -Kx·x - Ki·xᵢ`.
+     * Only meaningful after a successful design() call; before that the
+     * buffer is filled with the zero-initialized gain.
+     *
+     * @param[out] Kx  Output buffer, row-major m×n — must hold at least
+     *                 `getNumInputs() * getNumStates()` doubles.
      */
     void getStateGain(double* Kx) const;
     
     /**
-     * @brief Get integral gain Ki
+     * @brief Copy the integral part of the LQI gain into `Ki`.
+     *
+     * The gain acting on the integral-of-error state xᵢ in
+     * `u = -Kx·x - Ki·xᵢ`. Only meaningful after a successful design() call.
+     *
+     * @param[out] Ki  Output buffer, row-major m×p — must hold at least
+     *                 `m * p` doubles (inputs × outputs).
      */
     void getIntegralGain(double* Ki) const;
     
     /**
-     * @brief Get current integral state
+     * @brief Copy the current integrator state into `xi`.
+     *
+     * The accumulated `xᵢ = ∫(r - y)dt` per output, after anti-windup
+     * clamping. Useful for diagnostics (detecting persistent offset that the
+     * integrator is fighting) and for bumpless transfer: read the state
+     * before disabling the loop and re-inject it into a fresh controller to
+     * resume without a transient. Cleared to zero by resetImpl().
+     *
+     * @param[out] xi  Output buffer of at least `p` doubles (one per
+     *                 measured output).
      */
     void getIntegralState(double* xi) const;
     
