@@ -45,15 +45,20 @@ public:
     virtual ~IRingStreamSource() = default;
 
     /// Entry IDs covered by this source's rows, in row-field order.
+    /// @return Registry entry IDs for each row field
     virtual std::span<const uint64_t> schemaEntryIds() const = 0;
     /// Byte size of each field, parallel to schemaEntryIds().  Fixed-size only.
+    /// @return Per-field byte sizes
     virtual std::span<const uint16_t> schemaFieldSizes() const = 0;
     /// Total bytes per row image, including the leading 8-byte timestamp.
+    /// @return Row image stride [bytes]
     virtual size_t rowSize() const = 0;
 
     /**
      * Copy up to maxRows oldest pending row images into dst.
      * dst must have room for at least maxRows * rowSize() bytes.
+     * @param dst Destination buffer for row images
+     * @param maxRows Maximum rows to copy
      * @return number of rows written.
      */
     virtual size_t drainRows(uint8_t* dst, size_t maxRows) = 0;
@@ -62,14 +67,17 @@ public:
     virtual void start() = 0;
     /// Disable production.
     virtual void stop() = 0;
+    /// @return `true` while production is enabled
     virtual bool active() const = 0;
 
     /// Producer-side count of rows dropped because the ring was full.
+    /// @return Rows lost since start()
     virtual uint64_t dropped() const = 0;
 
     /**
      * Exclusive binding: returns false if another session already holds
      * this source.  Pair with release() when the stream ends.
+     * @return `true` when this caller now owns the source
      */
     bool tryAcquire() {
         bool expected = false;
@@ -111,6 +119,8 @@ public:
 
     /// (Re)install the schema.  Not thread-safe: call during setup, before
     /// any session can bind this source.
+    /// @param entryIds Registry IDs per row field
+    /// @param fieldSizes Byte size per field (parallel to entryIds)
     void setSchema(std::vector<uint64_t> entryIds,
                    std::vector<uint16_t> fieldSizes) {
         entryIds_   = std::move(entryIds);
@@ -139,7 +149,8 @@ public:
     uint64_t dropped() const override { return ring_.dropped(); }
 
     /// Producer side (single producer thread): fill a row in place.
-    /// Returns false if the source is inactive or the ring is full.
+    /// @param fill Callable that initializes the pending row
+    /// @return `false` if the source is inactive or the ring is full
     template <typename F>
     bool produce(F&& fill) {
         if (!active_.load(std::memory_order_acquire)) return false;
@@ -147,6 +158,7 @@ public:
     }
 
     /// Underlying ring (e.g. for reset during shutdown).
+    /// @return The backing SPSC ring buffer
     Tether::Utils::SPSCRing<Row, Capacity>& ring() { return ring_; }
 
 private:

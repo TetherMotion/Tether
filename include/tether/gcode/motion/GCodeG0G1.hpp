@@ -59,7 +59,7 @@
  * ### Feed Override
  * 
  * G0 respects the rapid override (typically 25%, 50%, 100% on machines).
- * LinuxCNC stores override as percentage parameter #<_rapid_override>.
+ * LinuxCNC stores override as percentage parameter \#&lt;_rapid_override&gt;.
  * 
  * ### Example Usage
  * 
@@ -167,7 +167,7 @@
  * When M52 P1 is active, feed rate can be dynamically scaled via:
  * - analog input
  * - motion.adaptive-feed HAL pin
- * - #<_adaptive_feed> parameter
+ * - \#&lt;_adaptive_feed&gt; parameter
  * 
  * ### Examples
  * 
@@ -443,17 +443,27 @@ std::vector<double> planLookaheadVelocities(
 
 /**
  * @brief Validate G0 parameters
+ * @param block Parsed G-code block
+ * @param state Current machine state
+ * @return Error on invalid parameters, else success
  */
 Error validateG0(const Block& block, const MachineState& state);
 
 /**
  * @brief Validate G1 parameters
+ * @param block Parsed G-code block
+ * @param state Current machine state
+ * @param config Linear-motion limits/behaviors
+ * @return Error on invalid parameters, else success
  */
 Error validateG1(const Block& block, const MachineState& state,
                  const LinearMotionConfig& config);
 
 /**
  * @brief Check for rapid plunge warning
+ * @param current Start position
+ * @param target Destination position
+ * @return `true` when the rapid move descends into the work zone
  */
 bool checkRapidPlungeWarning(
     const Position& current,
@@ -508,39 +518,45 @@ public:
     
     /**
      * @brief Update configuration
+     * @param config New linear-motion config
      */
     void setConfig(const LinearMotionConfig& config) { m_config = config; }
-    
+
     /**
      * @brief Get current configuration
+     * @return Active config
      */
     const LinearMotionConfig& getConfig() const { return m_config; }
-    
+
     /**
      * @brief Set path blend mode
+     * @param mode G61/G64 blend selection
      */
     void setPathMode(PathMode mode) { m_pathMode = mode; }
     void setPathMode(PathMode mode, double p, double q = 0);
-    
+
     /**
      * @brief Get path blend parameters
+     * @return Active blend parameters
      */
     const PathBlendParams& getPathBlend() const { return m_blendParams; }
-    
+
     /**
      * @brief Set rapid override
+     * @param override Rapid-rate scale factor (0–1)
      */
     void setRapidOverride(double override);
-    double getRapidOverride() const { return m_rapidOverride; }
-    
+
     /**
      * @brief Set feed override
+     * @param override Feed-rate scale factor (0–1)
      */
     void setFeedOverride(double override);
-    double getFeedOverride() const { return m_feedOverride; }
-    
+
     /**
      * @brief Enable/disable adaptive feed
+     * @param enable `true` enables dynamic feed scaling
+     * @param factor External scale multiplier
      */
     void setAdaptiveFeed(bool enable, double factor = 1.0);
     bool getAdaptiveFeedEnabled() const { return m_adaptiveFeedEnabled; }
