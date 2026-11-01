@@ -161,28 +161,42 @@ public:
 
     /// Apply the configured pre-command reset (if enabled).  Called
     /// automatically by sendAndWait(); may also be called manually.
+    /// @return `true` when the reset write succeeded (or was not needed)
     bool resetResponse();
 
     /// Write a command code to the command register (no reset, no polling).
+    /// @param cmd Command value to write
+    /// @return `true` on successful SDO write
     bool sendCommand(uint32_t cmd);
 
     /// Read the response register once.  Returns false on SDO error.
+    /// @param[out] out Receives the response value
+    /// @return `true` on successful read
     bool pollResponse(uint32_t& out);
 
     /// Poll the response register until `matcher` accepts, the configured
     /// failure response is seen, or the timeout expires.
     /// SDO read errors are retried (they do not abort the wait).
+    /// @param cmd Command value sent for matching
+    /// @param matcher Predicate accepting the response value
+    /// @param timeout Wait budget
+    /// @return Result of the wait
     Result waitForResponse(uint32_t cmd,
                            const ResponseMatcher& matcher,
                            std::chrono::milliseconds timeout = {});
 
     /// Full sequence: resetResponse() → sendCommand(cmd) →
     /// waitForResponse() → optional post-command reset.
+    /// @param cmd Command value to execute
+    /// @param matcher Predicate accepting the response value
+    /// @param timeout Wait budget
+    /// @return Result of the full command exchange
     Result sendAndWait(uint32_t cmd,
                        const ResponseMatcher& matcher = {},
                        std::chrono::milliseconds timeout = {});
 
     /// Read the error-code register (0 when none configured / on error).
+    /// @return Error code register value
     uint32_t readErrorCode();
 
     // --- Generic polling ---
@@ -191,6 +205,12 @@ public:
     /// `onValue` (optional) receives every successfully-read value — use
     /// it for change-detected logging.  The registered PollObserver is
     /// invoked after each read, the stop token aborts the wait.
+    /// @param index Object index to poll
+    /// @param subindex Object subindex
+    /// @param match Predicate accepting a read value
+    /// @param timeout Wait budget
+    /// @param onValue Optional observer called with every read value
+    /// @return Result of the poll
     Result pollUntil(uint16_t index, uint8_t subindex,
                      const std::function<bool(uint32_t)>& match,
                      std::chrono::milliseconds timeout,
@@ -199,6 +219,8 @@ public:
     /// Poll a set of registers until each reads its expected value.
     /// Thin wrapper over waitForSdoValues() with this channel's
     /// poll interval, stop token and tag.
+    /// @param expectations (index, subindex, value) tuples to satisfy
+    /// @return `true` when all expectations matched in time
     bool waitUntilMatch(std::span<const SdoExpectation> expectations,
                         std::chrono::milliseconds timeout);
 

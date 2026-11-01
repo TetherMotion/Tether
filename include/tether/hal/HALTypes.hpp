@@ -123,11 +123,13 @@ struct MacAddress {
     }
     
     /// EtherCAT broadcast MAC
+    /// @return FF:FF:FF:FF:FF:FF
     static MacAddress etherCATBroadcast() {
         return MacAddress(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
     }
     
     /// EtherCAT multicast MAC (used by some implementations)
+    /// @return 01:01:05:00:00:00
     static MacAddress etherCATMulticast() {
         return MacAddress(0x01, 0x01, 0x05, 0x00, 0x00, 0x00);
     }
@@ -221,6 +223,8 @@ using VoidResult = Result<void>;
 
 /**
  * @brief Swap bytes of a 16-bit value
+ * @param v Value to byte-swap
+ * @return Byte-swapped value
  */
 inline uint16_t bswap16(uint16_t v) {
 #if defined(__GNUC__) || defined(__clang__)
@@ -232,6 +236,8 @@ inline uint16_t bswap16(uint16_t v) {
 
 /**
  * @brief Swap bytes of a 32-bit value
+ * @param v Value to byte-swap
+ * @return Byte-swapped value
  */
 inline uint32_t bswap32(uint32_t v) {
 #if defined(__GNUC__) || defined(__clang__)
@@ -246,6 +252,8 @@ inline uint32_t bswap32(uint32_t v) {
 
 /**
  * @brief Host to big-endian (network byte order)
+ * @param host Host-order value
+ * @return Big-endian value
  */
 inline uint16_t htobe16(uint16_t host) {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
@@ -265,6 +273,8 @@ inline uint32_t htobe32(uint32_t host) {
 
 /**
  * @brief Big-endian to host
+ * @param be Big-endian value
+ * @return Host-order value
  */
 inline uint16_t betoh16(uint16_t be) {
     return htobe16(be);  // Same operation
@@ -276,6 +286,8 @@ inline uint32_t betoh32(uint32_t be) {
 
 /**
  * @brief Host to little-endian
+ * @param host Host-order value
+ * @return Little-endian value
  */
 inline uint16_t htole16(uint16_t host) {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
@@ -295,6 +307,8 @@ inline uint32_t htole32(uint32_t host) {
 
 /**
  * @brief Little-endian to host
+ * @param le Little-endian value
+ * @return Host-order value
  */
 inline uint16_t letoh16(uint16_t le) {
     return htole16(le);  // Same operation
