@@ -269,11 +269,16 @@ public:
     
     /**
      * @brief Check if parameter is defined
+     * @param number Parameter number (1-5999)
+     * @return `true` if the parameter has been assigned a value
      */
     bool isDefined(int32_t number) const;
-    
+
     /**
      * @brief Check if parameter is read-only
+     * @param number Parameter number (1-5999)
+     * @return `true` for system/predefined parameters that cannot be
+     *         written from G-code
      */
     bool isReadOnly(int32_t number) const;
     
@@ -283,7 +288,7 @@ public:
     
     /**
      * @brief Get named parameter value
-     * @param name Parameter name (without #<>)
+     * @param name Parameter name (without the `#<...>` delimiters)
      * @return Parameter value, nullopt if undefined
      */
     std::optional<double> getNamed(const std::string& name) const;
@@ -292,16 +297,21 @@ public:
      * @brief Set named parameter
      * @param name Parameter name
      * @param value Value to set
+     * @return Error if the name is invalid or read-only
      */
     Error setNamed(const std::string& name, double value);
-    
+
     /**
      * @brief Check if named parameter exists
+     * @param name Parameter name (without the `#<...>` delimiters)
+     * @return `true` if the named parameter has been assigned
      */
     bool existsNamed(const std::string& name) const;
-    
+
     /**
      * @brief Check if name is a global parameter (starts with _)
+     * @param name Parameter name to test
+     * @return `true` if `name` begins with `_`, marking it global
      */
     static bool isGlobalName(const std::string& name) {
         return !name.empty() && name[0] == '_';
@@ -314,16 +324,19 @@ public:
     /**
      * @brief Push new local frame for subroutine call
      * @param args Arguments to pass (#1, #2, etc.)
+     * @return Error if the call depth limit is exceeded
      */
     Error pushFrame(const std::vector<double>& args = {});
-    
+
     /**
      * @brief Pop local frame on subroutine return
+     * @return Error if the call stack is already empty
      */
     Error popFrame();
-    
+
     /**
      * @brief Get current call depth
+     * @return Number of active local frames (0 = top-level program scope)
      */
     size_t getCallDepth() const { return m_callStack.size(); }
     
@@ -338,32 +351,43 @@ public:
     
     /**
      * @brief Update system parameters from machine state
+     * @param state Current machine state; read-only parameters (position,
+     *        feed, tool, coordinate system) are recomputed from it
      */
     void updateFromState(const MachineState& state);
-    
+
     /**
      * @brief Set probe result
+     * @param result Probe outcome; populates the #5061-#5070 predefined
+     *        parameters (trip coordinates and success flag)
      */
     void setProbeResult(const ProbeResult& result);
-    
+
     /**
      * @brief Set coordinate system offsets
+     * @param cs Coordinate system to update (G54-G59.x)
+     * @param offset Work offset vector for `cs`
+     * @param rotation Optional XY rotation applied to `cs` [deg]
      */
-    void setCoordSystemOffset(CoordSystem cs, const Position& offset, 
+    void setCoordSystemOffset(CoordSystem cs, const Position& offset,
                               double rotation = 0.0);
-    
+
     /**
      * @brief Get coordinate system offset
+     * @param cs Coordinate system to query
+     * @return Stored work offset for `cs`
      */
     Position getCoordSystemOffset(CoordSystem cs) const;
-    
+
     /**
      * @brief Set return value (for subroutine returns)
+     * @param value Value made available to the caller via getReturnValue()
      */
     void setReturnValue(double value);
-    
+
     /**
      * @brief Get return value
+     * @return Value left by the last subroutine return, or nullopt if none
      */
     std::optional<double> getReturnValue() const;
     
@@ -487,7 +511,7 @@ struct Token {
  * - SIN[x]   - Sine (x in degrees)
  * - SQRT[x]  - Square root
  * - TAN[x]   - Tangent (x in degrees)
- * - EXISTS[#<name>] - Check if parameter exists
+ * - EXISTS[#&lt;name&gt;] - Check if parameter exists
  */
 /**
  * @brief Expression evaluator for G-code [...] expressions and parameters.
@@ -515,16 +539,22 @@ public:
     
     /**
      * @brief Evaluate expression returning result or error
+     * @param expr Expression string to evaluate (with or without brackets)
+     * @return (value, Error) pair; value is 0.0 when the error is set
      */
     std::pair<double, Error> evaluate(const char* expr);
-    
+
     /**
      * @brief Get position after last evaluation
+     * @return Character offset where parsing stopped; useful for
+     *         detecting trailing garbage after a valid expression
      */
     size_t getEndPosition() const { return m_pos; }
-    
+
     /**
      * @brief Get last error message
+     * @return Description of the most recent evaluation error, or an
+     *         empty string if the last call succeeded
      */
     const char* getErrorMessage() const { return m_error.data(); }
     
@@ -577,7 +607,7 @@ private:
 /**
  * @brief Substitute parameter references in a string
  * 
- * Replaces #N and #<name> with their values.
+ * Replaces `\#N` and `#&lt;name&gt;` with their values.
  * 
  * @param input Input string with parameter references
  * @param vars Variable system
@@ -591,7 +621,7 @@ Error substituteParameters(const char* input, VariableSystem& vars,
 /**
  * @brief Parse a parameter reference
  * 
- * Parses #N, #<name>, or #<expr> from input.
+ * Parses `\#N`, `#&lt;name&gt;`, or `#&lt;expr&gt;` from input.
  * 
  * @param input Input starting at #
  * @param vars Variable system (for expression evaluation)

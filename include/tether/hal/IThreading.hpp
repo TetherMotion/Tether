@@ -74,21 +74,26 @@ public:
     
     /**
      * @brief Check if thread is running
+     * @return `true` while the thread function is executing
      */
     virtual bool isRunning() const = 0;
-    
+
     /**
      * @brief Request thread to stop (cooperative)
      */
     virtual void requestStop() = 0;
-    
+
     /**
      * @brief Check if stop was requested
+     * @return `true` after requestStop() was called; the thread function
+     *         should poll this and return promptly
      */
     virtual bool stopRequested() const = 0;
-    
+
     /**
      * @brief Get native thread handle (platform-specific)
+     * @return e.g. `pthread_t*` on Linux, `TaskHandle_t` on FreeRTOS;
+     *         nullptr if unsupported
      */
     virtual void* nativeHandle() = 0;
 };
@@ -139,6 +144,7 @@ public:
     
     /**
      * @brief Get native mutex handle
+     * @return e.g. `pthread_mutex_t*` on Linux; nullptr if unsupported
      */
     virtual void* nativeHandle() = 0;
 };
@@ -264,6 +270,11 @@ public:
     
     /**
      * @brief Wait with timeout and predicate
+     * @param lock Lock to release while waiting
+     * @param timeout_ms Timeout applied to each internal waitFor() call [ms]
+     * @param pred Predicate that must return true to stop waiting
+     * @return Error::OK when `pred` became true, or the waitFor() error
+     *         (Timeout if expired)
      */
     template<typename Predicate>
     Error waitForUntil(UniqueLock& lock, Milliseconds timeout_ms, Predicate pred) {
@@ -286,6 +297,7 @@ public:
     
     /**
      * @brief Get native handle
+     * @return e.g. `pthread_cond_t*` on Linux; nullptr if unsupported
      */
     virtual void* nativeHandle() = 0;
 };
@@ -328,11 +340,14 @@ public:
     
     /**
      * @brief Get current count
+     * @return Current semaphore count (number of wait() calls that would
+     *         not block)
      */
     virtual int getCount() const = 0;
-    
+
     /**
      * @brief Get native handle
+     * @return e.g. `sem_t*` on Linux; nullptr if unsupported
      */
     virtual void* nativeHandle() = 0;
 };
@@ -373,6 +388,7 @@ public:
     
     /**
      * @brief Check if event is signaled
+     * @return `true` if the event is currently in the signaled state
      */
     virtual bool isSignaled() const = 0;
 };
@@ -424,36 +440,42 @@ public:
     
     /**
      * @brief Get number of items currently in the queue
+     * @return Count of pending items
      */
     virtual size_t getCount() const = 0;
-    
+
     /**
      * @brief Get maximum queue capacity
+     * @return Maximum number of items the queue can hold
      */
     virtual size_t getCapacity() const = 0;
-    
+
     /**
      * @brief Get size of each item in bytes
+     * @return Item size fixed at queue creation
      */
     virtual size_t getItemSize() const = 0;
-    
+
     /**
      * @brief Check if queue is empty
+     * @return `true` if no items are pending
      */
     virtual bool isEmpty() const = 0;
-    
+
     /**
      * @brief Check if queue is full
+     * @return `true` if the queue holds capacity items
      */
     virtual bool isFull() const = 0;
-    
+
     /**
      * @brief Clear all items from queue
      */
     virtual void clear() = 0;
-    
+
     /**
      * @brief Get number of free spaces in the queue
+     * @return getCapacity() - getCount()
      */
     virtual size_t getAvailableSpace() const = 0;
 };
@@ -471,26 +493,40 @@ public:
     
     /**
      * @brief Create a thread
+     * @param config Thread name, stack size, priority, affinity, and
+     *        scheduling policy; defaults are platform-appropriate
+     * @return New thread instance (not yet started — call IThread::start())
      */
     virtual std::unique_ptr<IThread> createThread(const ThreadConfig& config = {}) = 0;
-    
+
     /**
      * @brief Create a mutex
+     * @param type `Normal` for standard behavior, `Recursive` to allow
+     *        re-locking by the owning thread
+     * @return New mutex instance
      */
     virtual std::unique_ptr<IMutex> createMutex(MutexType type = MutexType::Normal) = 0;
-    
+
     /**
      * @brief Create a condition variable
+     * @return New condition variable instance
      */
     virtual std::unique_ptr<IConditionVariable> createConditionVariable() = 0;
-    
+
     /**
      * @brief Create a semaphore
+     * @param initialCount Count the semaphore starts with
+     * @param maxCount Maximum count signal() can reach
+     * @return New semaphore instance
      */
     virtual std::unique_ptr<ISemaphore> createSemaphore(int initialCount = 0, int maxCount = 1) = 0;
-    
+
     /**
      * @brief Create an event
+     * @param manualReset `true` for manual-reset semantics (stays signaled
+     *        until reset()), `false` for auto-reset (wakes one waiter and clears)
+     * @param initialState Initial signaled state
+     * @return New event instance
      */
     virtual std::unique_ptr<IEvent> createEvent(bool manualReset = false, bool initialState = false) = 0;
     
@@ -504,16 +540,18 @@ public:
     
     /**
      * @brief Sleep current thread
+     * @param ms Duration to block the calling thread [ms]
      */
     virtual void sleep(Milliseconds ms) = 0;
-    
+
     /**
      * @brief Yield current thread
      */
     virtual void yield() = 0;
-    
+
     /**
      * @brief Get current thread ID
+     * @return Platform thread identifier for the calling thread
      */
     virtual uint32_t currentThreadId() = 0;
 };
@@ -524,11 +562,15 @@ public:
 
 /**
  * @brief Get platform-specific threading factory
+ * @return Singleton factory for the active platform (created on first use)
  */
 IThreadingFactory& getThreadingFactory();
 
 /**
  * @brief Set custom threading factory (for testing)
+ * @param factory Replacement factory; ownership is transferred. Pass the
+ *        mock/stub implementation in unit tests, or call
+ *        resetThreadingFactory() to restore the platform default
  */
 void setThreadingFactory(std::unique_ptr<IThreadingFactory> factory);
 

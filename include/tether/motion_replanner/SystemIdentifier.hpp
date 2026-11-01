@@ -99,11 +99,14 @@ struct FrictionModelParams {
     
     /**
      * @brief Calculate friction force for given velocity
+     * @param velocity Signed velocity at which to evaluate the model [units/s]
+     * @return Friction force predicted by this model [N or Nm, matching the fitted data]
      */
     double calculate(double velocity) const;
-    
+
     /**
      * @brief Get model name
+     * @return Human-readable name of `type` (e.g. "Stribeck"), for reporting
      */
     std::string modelName() const;
 };
@@ -235,21 +238,28 @@ public:
     
     /**
      * @brief Add identification sample
+     * @param sample Sample to append; only fields relevant to the planned
+     *        analysis need to be populated (e.g. delay ID needs `timestamp`,
+     *        `commanded`, `actual`; friction ID also uses `velocity` and
+     *        `torque`/`current`)
      */
     void addSample(const IdentificationSample& sample);
-    
+
     /**
      * @brief Add batch of samples
+     * @param samples Samples to append in order; equivalent to calling
+     *        addSample() on each element
      */
     void addSamples(const std::vector<IdentificationSample>& samples);
-    
+
     /**
      * @brief Clear all samples
      */
     void clearSamples();
-    
+
     /**
      * @brief Get sample count
+     * @return Number of samples currently buffered for identification
      */
     size_t sampleCount() const { return samples_.size(); }
     
@@ -260,11 +270,18 @@ public:
     /**
      * @brief Identify system transport delay
      * Uses cross-correlation between commanded and actual signals
+     * @return Delay estimate; check `isValid()` (confidence &gt; 0.5) before
+     *         trusting `transportDelay`
      */
     DelayIdentificationResult identifyDelay();
-    
+
     /**
      * @brief Identify delay from step response
+     * @param stepTime Timestamp of the applied step [s]
+     * @param stepMagnitude Signed amplitude of the applied step, in the
+     *        command units
+     * @return Delay estimate derived from the step's response onset; check
+     *         `isValid()` before use
      */
     DelayIdentificationResult identifyDelayFromStep(
         double stepTime, double stepMagnitude);
@@ -275,16 +292,24 @@ public:
     
     /**
      * @brief Identify friction model from constant velocity data
+     * @return Result with the best-fitting model and all tried candidates;
+     *         check `isValid()` (R² &gt; 0.7) before applying `bestModel`
      */
     FrictionIdentificationResult identifyFriction();
-    
+
     /**
      * @brief Identify friction using velocity reversal method
+     * @return Result comparing positive- and negative-direction fits;
+     *         `isSymmetric`/`asymmetryRatio` indicate direction-dependent friction
      */
     FrictionIdentificationResult identifyFrictionFromReversals();
-    
+
     /**
      * @brief Fit specific friction model to data
+     * @param type Model form to fit (Coulomb, viscous, Stribeck, ...)
+     * @param velocities Measured velocities; must match `forces` element-wise
+     * @param forces Measured friction forces at `velocities`
+     * @return Fitted parameters with `rSquared`/`residualRMS` fit quality
      */
     FrictionModelParams fitFrictionModel(
         FrictionModelType type,
@@ -297,21 +322,29 @@ public:
     
     /**
      * @brief Analyze PID tuning from step response
+     * @return Assessment with observed gains (if inferrable), performance
+     *         metrics, 0-100 quality scores, and detected issues
      */
     PIDTuningAssessment analyzePIDTuning();
-    
+
     /**
      * @brief Analyze tracking performance
+     * @return Assessment focused on tracking accuracy over the buffered
+     *         trajectory rather than a single step
      */
     PIDTuningAssessment analyzeTracking();
-    
+
     /**
      * @brief Suggest PID gains using Ziegler-Nichols rules
+     * @param[in,out] assessment Assessment to fill: `suggestedKp/Ki/Kd` and
+     *        `tuningAdvice` are overwritten based on the identified dynamics
      */
     void suggestZieglerNichols(PIDTuningAssessment& assessment);
-    
+
     /**
      * @brief Suggest PID gains using SIMC rules
+     * @param[in,out] assessment Assessment to fill: `suggestedKp/Ki/Kd` and
+     *        `tuningAdvice` are overwritten based on the identified dynamics
      */
     void suggestSIMC(PIDTuningAssessment& assessment);
     
@@ -321,11 +354,15 @@ public:
     
     /**
      * @brief Identify system dynamics from step response
+     * @return First/second-order model parameters; check `isValid()`
+     *         (`systemOrder` &gt; 0) before using the fitted values
      */
     DynamicsIdentificationResult identifyDynamics();
-    
+
     /**
      * @brief Perform frequency response analysis
+     * @return Result with `frequencies`/`magnitudeDb`/`phaseDeg` Bode data
+     *         plus bandwidth and stability margins
      */
     DynamicsIdentificationResult performFrequencyAnalysis();
     
@@ -335,19 +372,32 @@ public:
     
     /**
      * @brief Compute cross-correlation between two signals
+     * @param signal1 First signal (typically the commanded value)
+     * @param signal2 Second signal (typically the actual value)
+     * @param maxLag Maximum lag to evaluate, in samples; result covers
+     *        lags `-maxLag` .. `+maxLag`
+     * @return Correlation values indexed by lag, where index `maxLag`
+     *         corresponds to lag 0; positive lags mean `signal2` trails `signal1`
      */
     static std::vector<double> crossCorrelation(
         const std::vector<double>& signal1,
         const std::vector<double>& signal2,
         int maxLag);
-    
+
     /**
      * @brief Find step transitions in signal
+     * @param threshold Minimum change magnitude to count as a step
+     * @return (sample index, step magnitude) pairs in chronological order
      */
     std::vector<std::pair<size_t, double>> findSteps(double threshold);
-    
+
     /**
      * @brief Compute FFT of signal
+     * @param[in] signal Time-domain samples
+     * @param[out] frequencies Bin center frequencies [Hz], size fftSize/2
+     * @param[out] magnitudes Per-bin magnitudes, same indexing as `frequencies`
+     * @param[out] phases Per-bin phases [deg], same indexing as `frequencies`
+     * @param sampleRate Sampling rate of `signal` [Hz]
      */
     static void computeFFT(
         const std::vector<double>& signal,
@@ -389,14 +439,25 @@ public:
     /**
      * @brief Full Stribeck friction model
      * F = Fc + (Fs - Fc)*exp(-(v/vs)^delta) + sigma_v * v
+     * @param velocity Signed velocity at which to evaluate [units/s]
+     * @param coulomb Kinetic (Coulomb) friction level Fc
+     * @param staticFriction Breakaway friction level Fs
+     * @param stribeckVelocity Stribeck characteristic velocity vs
+     * @param stribeckExponent Stribeck shape exponent delta (typically 2)
+     * @param viscousCoeff Linear viscous coefficient sigma_v
+     * @return Friction force at `velocity`, in the same force unit as the inputs
      */
-    static double calculate(double velocity, 
+    static double calculate(double velocity,
                            double coulomb, double staticFriction,
                            double stribeckVelocity, double stribeckExponent,
                            double viscousCoeff);
-    
+
     /**
      * @brief Fit Stribeck model to velocity-force data
+     * @param velocities Measured velocities; must match `forces` element-wise
+     * @param forces Measured friction forces at `velocities`
+     * @return Fitted `FrictionModelParams` with `type` = Stribeck and fit
+     *         quality in `rSquared`/`residualRMS`
      */
     static FrictionModelParams fit(const std::vector<double>& velocities,
                                    const std::vector<double>& forces);
@@ -415,16 +476,21 @@ public:
     
     /**
      * @brief Update estimate with new sample
+     * @param commanded Commanded value at `timestamp`
+     * @param actual Measured value at `timestamp`
+     * @param timestamp Sample time [s]; must be monotonically increasing
      */
     void update(double commanded, double actual, double timestamp);
-    
+
     /**
      * @brief Get current delay estimate
+     * @return Estimated transport delay [s]
      */
     double getDelay() const { return currentDelay_; }
-    
+
     /**
      * @brief Get delay confidence
+     * @return Confidence in the current estimate, 0 (none) to 1 (certain)
      */
     double getConfidence() const { return confidence_; }
     
@@ -485,17 +551,25 @@ public:
     
     /**
      * @brief Process sample during relay test
-     * @return Control output (-amplitude or +amplitude)
+     * @param setpoint Target value the relay oscillates around
+     * @param measurement Current measured process value
+     * @param timestamp Sample time [s]; must be monotonically increasing
+     * @return Control output (-amplitude or +amplitude) to apply this cycle
      */
     double process(double setpoint, double measurement, double timestamp);
-    
+
     /**
      * @brief Check if enough oscillations collected
+     * @return `true` once at least 3 oscillations were observed, i.e.
+     *         computeTuning() has enough data for a meaningful result
      */
     bool isReady() const { return oscillationCount_ >= 3; }
-    
+
     /**
      * @brief Compute tuning result
+     * @return Ultimate gain/period plus suggested gains under the
+     *         Ziegler-Nichols, Tyreus-Luyben, some-overshoot and no-overshoot
+     *         rules; `isValid` is `false` if oscillation data was insufficient
      */
     TuningResult computeTuning();
     
