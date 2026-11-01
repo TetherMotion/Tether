@@ -124,10 +124,14 @@ public:
     
     /**
      * @brief Set read timeout
+     * @param timeout_ms EEPROM read wait budget [ms]
      */
     void setTimeout(uint32_t timeout_ms) { m_timeout_ms = timeout_ms; }
 
-    /// @brief Access the owning Master (for log prefix queries)
+    /**
+     * @brief Access the owning Master (for log prefix queries)
+     * @return Master that owns this reader
+     */
     Master& master() { return m_master; }
     const Master& master() const { return m_master; }
 
@@ -193,19 +197,22 @@ private:
 public:
     // --- Per-slave SII bus state introspection (used by SIIManager) ---
 
-    /// @brief Cached configured station address, or 0 if not yet determined.
+    /// @brief Cached configured station address.
+    /// @return Station address, or 0 if not yet determined
     uint16_t configuredStationAddr() const {
         std::lock_guard<std::mutex> lock(state_mutex_);
         return configured_addr_;
     }
 
-    /// @brief True if this slave should use FPWR for EEPROM control writes.
+    /// @brief Whether this slave should use FPWR for EEPROM control writes.
+    /// @return `true` for FPWR, `false` for APWR
     bool useFpwr() const {
         std::lock_guard<std::mutex> lock(state_mutex_);
         return use_fpwr_;
     }
 
-    /// @brief True if the EEPROM has already been forced to ECAT control.
+    /// @brief Whether the EEPROM has already been forced to ECAT control.
+    /// @return `true` once forced
     bool eepromForcedToEcat() const {
         std::lock_guard<std::mutex> lock(state_mutex_);
         return eeprom_forced_;
@@ -246,6 +253,7 @@ class SIIParser {
 public:
     /**
      * @brief Constructor with reader reference
+     * @param reader SII reader used for EEPROM access
      */
     explicit SIIParser(SIIReader& reader);
     
@@ -259,11 +267,17 @@ public:
     
     /**
      * @brief Parse only the configuration area (quick read)
+     * @param slave_index Slave index
+     * @param[out] out_data Parsed configuration data
+     * @return `true` on success
      */
     bool parseConfigArea(uint16_t slave_index, SIIData& out_data);
-    
+
     /**
      * @brief Parse only identity and mailbox (medium read)
+     * @param slave_index Slave index
+     * @param[out] out_data Parsed identity/mailbox data
+     * @return `true` on success
      */
     bool parseIdentity(uint16_t slave_index, SIIData& out_data);
 
@@ -288,6 +302,10 @@ public:
     
     /**
      * @brief Get last parse error message
+     */
+    /**
+     * @brief Get last parse error message
+     * @return Static error description from the latest failed parse
      */
     const char* lastError() const { return m_last_error; }
     
@@ -334,11 +352,19 @@ bool readSII(Master& master, uint16_t slave_index, SIIData& out_data);
 
 /**
  * @brief Read SII identity only (quick read)
+ * @param master Master owning the slave
+ * @param slave_index Slave index
+ * @param[out] out_identity Parsed vendor/product/revision
+ * @return `true` on success
  */
 bool readSIIIdentity(Master& master, uint16_t slave_index, SIIIdentity& out_identity);
 
 /**
  * @brief Read SII mailbox configuration
+ * @param master Master owning the slave
+ * @param slave_index Slave index
+ * @param[out] out_mailbox Parsed mailbox settings
+ * @return `true` on success
  */
 bool readSIIMailbox(Master& master, uint16_t slave_index, SIIMailboxConfig& out_mailbox);
 

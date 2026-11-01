@@ -108,6 +108,7 @@ public:
     
     /**
      * @brief Check if HAL is initialized
+     * @return `true` after successful init() until shutdown()
      */
     virtual bool isInitialized() const = 0;
     
@@ -117,11 +118,15 @@ public:
     
     /**
      * @brief Get MAC address
+     * @param[out] mac Receives the 6-byte MAC address
+     * @return Error code (OK on success)
      */
     virtual HAL::Error getMacAddress(HAL::MacAddress& mac) const = 0;
-    
+
     /**
      * @brief Set MAC address
+     * @param mac 6-byte MAC address to program
+     * @return Error code (OK on success)
      */
     virtual HAL::Error setMacAddress(const HAL::MacAddress& mac) = 0;
     
@@ -189,11 +194,14 @@ public:
     
     /**
      * @brief Get link status
+     * @return Link state (up/down/speed)
      */
     virtual HAL::LinkStatus getLinkStatus() const = 0;
-    
+
     /**
      * @brief Wait for link up
+     * @param timeoutMs Wait budget [ms]
+     * @return Error code (OK when link came up)
      */
     virtual HAL::Error waitForLinkUp(HAL::Milliseconds timeoutMs) = 0;
     
@@ -226,6 +234,8 @@ public:
 
     /**
      * @brief Enable packet logging
+     * @param config Logger configuration (output path, filters)
+     * @return Error code (OK on success)
      */
     virtual HAL::Error enablePcapLogging(
         const Tether::PacketLoggers::PCAP::PCAPLoggerConfig& config) = 0;
@@ -237,11 +247,13 @@ public:
 
     /**
      * @brief Check if packet logging is enabled
+     * @return `true` while logging is active
      */
     virtual bool isPcapLoggingEnabled() const = 0;
 
     /**
      * @brief Get packet logger (may be null)
+     * @return Active logger, or nullptr when disabled
      */
     virtual Tether::PacketLoggers::PacketLogger* getPcapLogger() = 0;
 };
@@ -281,6 +293,7 @@ public:
  *
  * This HAL is for unit testing. It connects directly to a master HAL
  * without any network or inter-process communication.
+ * @return New in-process slave HAL instance
  */
 std::unique_ptr<ISlaveHAL> createDirectSlaveHAL();
 
