@@ -120,24 +120,24 @@
  * ### Bézier Curves (Step 2)
  *
  * Quintic Bézier with 6 control points:
- * $$ B(u) = \sum_{i=0}^{5} \binom{5}{i} (1-u)^{5-i} u^i P_i $$
+ * \f[ B(u) = \sum_{i=0}^{5} \binom{5}{i} (1-u)^{5-i} u^i P_i \f]
  *
  * Evaluated using de Casteljau's algorithm for numerical stability.
  *
  * ### Curvature Computation
  *
  * For a parametric curve γ(u):
- * $$ \kappa = \frac{|\gamma' \times \gamma''|}{|\gamma'|^3} $$
+ * \f[ \kappa = \frac{|\gamma' \times \gamma''|}{|\gamma'|^3} \f]
  *
  * ### S-Curve Velocity Profile (Step 8)
  *
  * Position during jerk phase:
- * $$ p(t) = p_0 + v_0 t + \frac{1}{2} a_0 t^2 + \frac{1}{6} j t^3 $$
+ * \f[ p(t) = p_0 + v_0 t + \frac{1}{2} a_0 t^2 + \frac{1}{6} j t^3 \f]
  *
  * ### Arc Length Computation
  *
  * Adaptive Gaussian quadrature:
- * $$ L = \int_0^1 |\gamma'(u)| du \approx \sum_{i=1}^{n} w_i |\gamma'(u_i)| $$
+ * \f[ L = \int_0^1 |\gamma'(u)| du \approx \sum_{i=1}^{n} w_i |\gamma'(u_i)| \f]
  *
  * ## Files
  *
@@ -215,6 +215,9 @@ constexpr const char* VERSION = "1.0.0";
 
 /**
  * @brief Get library version string
+ *
+ * @return NUL-terminated version identifier ("1.0.0"), same constant as
+ *         the VERSION symbol; static storage, never null.
  */
 inline const char* version() { return VERSION; }
 
