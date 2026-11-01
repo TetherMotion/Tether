@@ -271,11 +271,13 @@ public:
     
     /**
      * @brief Check if initialized
+     * @return `true` after a successful initialize()
      */
     bool isInitialized() const { return initialized_; }
-    
+
     /**
      * @brief Get device capabilities
+     * @return Channel counts and feature flags reported by the device
      */
     const DeviceCapabilities& getCapabilities() const { return capabilities_; }
     
@@ -292,6 +294,7 @@ public:
     
     /**
      * @brief Get current PDO mapping
+     * @return Active PDO mapping preset
      */
     PDOMappingPreset getCurrentMapping() const { return current_mapping_; }
     
@@ -551,21 +554,33 @@ public:
     
     /**
      * @brief Set high alarm limit
+     * @param channel Channel number
+     * @param limit High alarm threshold in the channel's units
+     * @return `true` if the limit was written
      */
     bool setAlarmHigh(uint8_t channel, int32_t limit);
-    
+
     /**
      * @brief Set low alarm limit
+     * @param channel Channel number
+     * @param limit Low alarm threshold in the channel's units
+     * @return `true` if the limit was written
      */
     bool setAlarmLow(uint8_t channel, int32_t limit);
-    
+
     /**
      * @brief Set low-low alarm limit
+     * @param channel Channel number
+     * @param limit Low-low (critical low) alarm threshold
+     * @return `true` if the limit was written
      */
     bool setAlarmLowLow(uint8_t channel, int32_t limit);
-    
+
     /**
      * @brief Set alarm hysteresis
+     * @param channel Channel number
+     * @param hysteresis Dead-band around thresholds in the channel's units
+     * @return `true` if the hysteresis was written
      */
     bool setAlarmHysteresis(uint8_t channel, int32_t hysteresis);
     
@@ -728,16 +743,19 @@ public:
     
     /**
      * @brief Set general event callback
+     * @param callback Invoked on DeviceEvent transitions
      */
     void setEventCallback(DeviceEventCallback callback);
-    
+
     /**
      * @brief Set alarm callback
+     * @param callback Invoked when an alarm limit is crossed
      */
     void setAlarmCallback(AlarmCallback callback);
-    
+
     /**
      * @brief Set value update callback
+     * @param callback Invoked when measured values refresh
      */
     void setValueCallback(ValueCallback callback);
 
@@ -795,6 +813,8 @@ private:
 
 /**
  * @brief Get name of device event
+ * @param event Device event to convert
+ * @return Human-readable event name for logging
  */
 inline const char* getDeviceEventName(DeviceEvent event) {
     switch (event) {
@@ -819,6 +839,8 @@ inline const char* getDeviceEventName(DeviceEvent event) {
 
 /**
  * @brief Get name of input range type
+ * @param range InputRange code to convert
+ * @return Human-readable range name ("0-10V", "PT100", ...)
  */
 inline const char* getInputRangeName(uint8_t range) {
     switch (range) {
@@ -841,6 +863,8 @@ inline const char* getInputRangeName(uint8_t range) {
 
 /**
  * @brief Get name of controller mode
+ * @param mode ControllerModes code to convert
+ * @return Human-readable mode name for logging
  */
 inline const char* getControllerModeName(uint8_t mode) {
     switch (mode) {
@@ -859,6 +883,8 @@ inline const char* getControllerModeName(uint8_t mode) {
 
 /**
  * @brief Convert Q16 fixed point to float
+ * @param q16 Signed Q16.16 fixed-point value from the device
+ * @return Floating-point equivalent
  */
 inline float q16ToFloat(int32_t q16) {
     return static_cast<float>(q16) / 65536.0f;
@@ -866,6 +892,8 @@ inline float q16ToFloat(int32_t q16) {
 
 /**
  * @brief Convert float to Q16 fixed point
+ * @param f Floating-point value
+ * @return Signed Q16.16 fixed-point equivalent for SDO writes
  */
 inline int32_t floatToQ16(float f) {
     return static_cast<int32_t>(f * 65536.0f);
