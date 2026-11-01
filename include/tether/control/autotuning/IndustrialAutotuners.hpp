@@ -76,21 +76,30 @@ public:
     
     /**
      * @brief Set relay amplitude
+     * @param d Symmetric output amplitude applied during the relay test,
+     *        in controller output units (typically % or command units)
      */
     void setAmplitude(double d) { m_amplitude = d; }
-    
+
     /**
      * @brief Set asymmetric amplitudes
+     * @param dUp Output amplitude applied while the relay is high
+     * @param dDown Output amplitude applied while the relay is low
+     * @note Only used when `RelayType::Asymmetric` is selected
      */
     void setAsymmetricAmplitudes(double dUp, double dDown);
-    
+
     /**
      * @brief Set hysteresis width
+     * @param h Deadband around the setpoint the measured value must cross
+     *        before the relay switches; prevents noise-induced chatter
      */
     void setHysteresis(double h) { m_hysteresis = h; }
-    
+
     /**
      * @brief Set minimum cycles for identification
+     * @param n Number of complete oscillation cycles that must be observed
+     *        before gains are computed (higher = more reliable, slower)
      */
     void setMinCycles(int n) { m_minCycles = n; }
     
@@ -124,11 +133,15 @@ public:
     /**
      * @brief Enable automatic setpoint bias
      * Keeps oscillation around operating point
+     * @param enable `true` to bias the relay output so oscillation stays
+     *        centered on the operating point instead of drifting
      */
     void enableSetpointBias(bool enable) { m_autoSetpoint = enable; }
-    
+
     /**
      * @brief Set convergence tolerance
+     * @param tol Relative tolerance on cycle-to-cycle amplitude/period
+     *        agreement required to declare a stable oscillation
      */
     void setTolerance(double tol) { m_tolerance = tol; }
     
@@ -207,6 +220,8 @@ public:
     
     /**
      * @brief Set step size
+     * @param step Magnitude of the output step applied during the
+     *        identification test, in controller output units
      */
     void setStepSize(double step) { m_stepSize = step; }
     
@@ -223,21 +238,29 @@ public:
     
     /**
      * @brief Set test duration (auto if 0)
+     * @param duration Maximum length of the step test [s]; pass 0 to let
+     *        the tuner stop automatically once the response settles
      */
     void setTestDuration(double duration) { m_testDuration = duration; }
-    
+
     /**
      * @brief Set tuning method after identification
+     * @param tuner Offline tuning rule (e.g. Lambda, SIMC) applied to the
+     *        identified FOPDT model; ownership is transferred
      */
     void setTuningMethod(std::unique_ptr<OfflineAutotuner> tuner);
-    
+
     /**
      * @brief Get identified model
+     * @return Fitted first-order-plus-dead-time model; only meaningful
+     *         after the step test completes
      */
     FOPDTModel getModel() const { return m_model; }
-    
+
     /**
      * @brief Get fit quality
+     * @return Goodness-of-fit of the identified model (R², 0-1); higher
+     *         means the FOPDT approximation explains the data better
      */
     double getFitQuality() const { return m_fitQuality; }
     
@@ -337,16 +360,24 @@ public:
     
     /**
      * @brief Set gain adjustment factors
+     * @param kpFactor Multiplier applied to Kp per adjustment step
+     *        (&gt;1 increases gain, &lt;1 decreases)
+     * @param tiFactor Multiplier applied to Ti per adjustment step
+     * @param tdFactor Multiplier applied to Td per adjustment step
      */
     void setAdjustmentFactors(double kpFactor, double tiFactor, double tdFactor);
-    
+
     /**
      * @brief Set maximum iterations
+     * @param n Upper bound on analyze/adjust cycles before the tuner gives
+     *        up even if the pattern is not yet `Good`
      */
     void setMaxIterations(int n) { m_maxIterations = n; }
-    
+
     /**
      * @brief Get current detected pattern
+     * @return Most recently classified response pattern; `Unknown` until
+     *         the first transient has been analyzed
      */
     Pattern getCurrentPattern() const { return m_currentPattern; }
     
@@ -428,21 +459,29 @@ public:
     
     /**
      * @brief Report manual control change
+     * @param oldOutput Operator output before the manual bump
+     * @param newOutput Operator output after the manual bump; the
+     *        difference is recorded as an identification excitation
      */
     void reportManualChange(double oldOutput, double newOutput);
-    
+
     /**
      * @brief Set minimum bump size for identification
+     * @param size Minimum output change [%] that counts as a usable bump;
+     *        smaller adjustments are ignored as noise
      */
     void setMinBumpSize(double size) { m_minBumpSize = size; }
-    
+
     /**
      * @brief Set number of bumps required
+     * @param n Bumps that must be collected and averaged before a model
+     *        is produced
      */
     void setBumpsRequired(int n) { m_bumpsRequired = n; }
-    
+
     /**
      * @brief Get identification confidence
+     * @return Confidence in the averaged model, 0 (no usable bumps) to 1
      */
     double getConfidence() const { return m_confidence; }
     
@@ -498,31 +537,40 @@ public:
     
     /**
      * @brief Set tuning interval
+     * @param hours Hours of run time between automatic retunes; the timer
+     *        restarts after each completed tune
      */
     void setTuningInterval(double hours) { m_intervalHours = hours; }
-    
+
     /**
      * @brief Set performance degradation threshold
+     * @param threshold Ratio of current error metric to baseline that
+     *        triggers an early retune (e.g. 1.5 = retune at 50 % degradation)
      */
     void setPerformanceThreshold(double threshold) { m_perfThreshold = threshold; }
-    
+
     /**
      * @brief Set underlying autotuner
+     * @param tuner Online autotuner invoked for each scheduled/triggered
+     *        retune; ownership is transferred
      */
     void setAutotuner(std::unique_ptr<OnlineAutotuner> tuner);
-    
+
     /**
      * @brief Force immediate retuning
      */
     void triggerRetune() { m_forceTune = true; }
-    
+
     /**
      * @brief Get time since last tune
+     * @return Elapsed time since the last completed retune [hours]
      */
     double getTimeSinceLastTune() const;
-    
+
     /**
      * @brief Get current performance metric
+     * @return Running error metric relative to the post-tune baseline;
+     *         1.0 means performance matches the baseline
      */
     double getCurrentPerformance() const { return m_currentPerf; }
     
@@ -574,31 +622,44 @@ public:
     
     /**
      * @brief Set process variable limits
+     * @param low Lower bound for the measured value during tuning
+     * @param high Upper bound for the measured value; exceeding either
+     *        bound trips `wereLimitsHit()` and clamps/abort the test
      */
     void setPVLimits(double low, double high);
-    
+
     /**
      * @brief Set control output limits
+     * @param low Minimum output the autotuner may command
+     * @param high Maximum output the autotuner may command
      */
     void setOutputLimits(double low, double high);
-    
+
     /**
      * @brief Set rate of change limit
+     * @param maxRate Maximum allowed output slew [%/s]; faster commanded
+     *        changes are clamped
      */
     void setRateLimit(double maxRate);
-    
+
     /**
      * @brief Set maximum oscillation amplitude
+     * @param amplitude Largest permitted PV oscillation during excitation,
+     *        in PV units; exceeding it marks `wereLimitsHit()`
      */
     void setMaxOscillation(double amplitude) { m_maxOsc = amplitude; }
-    
+
     /**
      * @brief Set underlying autotuner
+     * @param tuner Online autotuner whose outputs are supervised by this
+     *        safety wrapper; ownership is transferred
      */
     void setAutotuner(std::unique_ptr<OnlineAutotuner> tuner);
-    
+
     /**
      * @brief Check if safety limits were hit
+     * @return `true` if any PV, output, rate, or oscillation limit was
+     *         exceeded since the tuner was started/reset
      */
     bool wereLimitsHit() const { return m_limitsHit; }
     
@@ -667,16 +728,22 @@ public:
     
     /**
      * @brief Get detected process category
+     * @return Category inferred from the observed dynamics; `Unknown`
+     *         until enough data has been collected
      */
     ProcessCategory getProcessCategory() const { return m_category; }
-    
+
     /**
      * @brief Get selected method name
+     * @return Name of the autotuner chosen for the detected category
+     *         (empty until selectMethod() has run)
      */
     std::string getSelectedMethod() const;
-    
+
     /**
      * @brief Override auto selection
+     * @param methodName Name of the tuner to use regardless of the
+     *        detected category; must match a known method
      */
     void forceMethod(const std::string& methodName);
     

@@ -135,6 +135,9 @@ enum class ALStatusCode : uint16_t {
 
 /**
  * @brief Get human-readable name for AL Status Code
+ * @param code AL status code from register 0x0134 (enum or raw value)
+ * @return Static string such as "Synchronization error"; "Unknown" for
+ *         unrecognized codes — never nullptr
  */
 const char* getALStatusCodeName(ALStatusCode code);
 const char* getALStatusCodeName(uint16_t code);
@@ -178,6 +181,9 @@ enum class CiA402ErrorCode : uint16_t {
 
 /**
  * @brief Get human-readable name for CiA 402 Error Code
+ * @param code Emergency error code from object 0x603F (enum or raw value)
+ * @return Static string such as "Over current"; "Unknown" for
+ *         unrecognized codes — never nullptr
  */
 const char* getCiA402ErrorCodeName(CiA402ErrorCode code);
 const char* getCiA402ErrorCodeName(uint16_t code);
@@ -296,6 +302,8 @@ public:
 
     /**
      * @brief Get current monotonic timestamp in milliseconds
+     * @return Milliseconds since an arbitrary epoch; must be monotonic and
+     *         is used for fault timestamps and ACK-wait timeouts
      */
     virtual uint64_t getTimestampMs() = 0;
 
@@ -326,6 +334,8 @@ public:
      * @brief Construct a FaultDetector with the given transport.
      *
      * The transport reference must outlive the FaultDetector.
+     * @param transport I/O backend used for register reads/writes,
+     *        timestamps, and delays
      */
     explicit FaultDetector(IFaultTransport& transport);
     ~FaultDetector() = default;
@@ -356,10 +366,15 @@ public:
      */
     void shutdown();
 
-    /** @brief Check whether init() has been called. */
+    /** @brief Check whether init() has been called.
+     *  @return `true` after a successful init(), `false` after shutdown()
+     *          or before first init
+     */
     bool isInitialized() const { return initialized_; }
 
-    /** @brief Number of slaves currently being monitored. */
+    /** @brief Number of slaves currently being monitored.
+     *  @return Slave count passed to init() (clamped to kMaxSlaves)
+     */
     uint16_t slaveCount() const { return slave_count_; }
 
     // ----- Polling -----
@@ -395,6 +410,7 @@ public:
 
     /**
      * @brief Check if any slave has an active fault.
+     * @return `true` if at least one monitored slave's `has_fault` flag is set
      */
     bool anyActive() const;
 
@@ -416,6 +432,8 @@ public:
      * @brief Register a callback for fault notifications.
      *
      * Called whenever a previously-unfaulted slave transitions to faulted.
+     * @param callback Function invoked with (slave_index, state) on each
+     *        new fault transition; replaces any previously set callback
      */
     void setCallback(FaultCallback callback);
 
@@ -423,6 +441,8 @@ public:
 
     /// @brief Set a function that returns the log prefix for a given slave index.
     /// Called by Master to inject per-slave names into fault detection logs.
+    /// @param provider Function mapping slave index to display name; when
+    ///        unset, prefixes default to "Slave &lt;index&gt;"
     void setPrefixProvider(std::function<std::string(uint16_t)> provider) {
         prefix_provider_ = std::move(provider);
     }
@@ -431,11 +451,15 @@ public:
 
     /**
      * @brief Log comprehensive fault diagnostics for a slave.
+     * @param slave_index Slave to report on; logs AL status, error codes,
+     *        decoded manufacturer fault, and counters
      */
     void diagnose(uint16_t slave_index) const;
 
     /**
      * @brief Log detailed "No Sync" (Err74.1) diagnosis.
+     * @param slave_index Slave to report on; intended for slaves showing
+     *        DC/sync-related AL status codes
      */
     void diagnoseNoSync(uint16_t slave_index) const;
 
@@ -458,52 +482,85 @@ private:
 // Free-function API (delegates to a FaultDetector instance)
 // ============================================================================
 
-/** @brief Initialize fault detection on the given detector. */
+/** @brief Initialize fault detection on the given detector.
+ *  @param fd Detector instance to initialize
+ *  @param slave_count Number of slaves to monitor (clamped to kMaxSlaves)
+ *  @return `true` on success; idempotent once initialized
+ */
 inline bool fault_init(FaultDetector& fd, uint16_t slave_count) {
     return fd.init(slave_count);
 }
 
-/** @brief Shut down fault detection on the given detector. */
+/** @brief Shut down fault detection on the given detector.
+ *  @param fd Detector instance to shut down
+ */
 inline void fault_shutdown(FaultDetector& fd) {
     fd.shutdown();
 }
 
-/** @brief Poll a single slave via the given detector. */
+/** @brief Poll a single slave via the given detector.
+ *  @param fd Detector instance to poll through
+ *  @param slave_index Slave to poll
+ *  @return Updated fault state (also stored in `fd`)
+ */
 inline SlaveFaultState fault_poll(FaultDetector& fd, uint16_t slave_index) {
     return fd.poll(slave_index);
 }
 
-/** @brief Poll all slaves via the given detector. */
+/** @brief Poll all slaves via the given detector.
+ *  @param fd Detector instance to poll through
+ *  @return Number of slaves with active faults
+ */
 inline uint16_t fault_poll_all(FaultDetector& fd) {
     return fd.pollAll();
 }
 
-/** @brief Get stored state from the given detector. */
+/** @brief Get stored state from the given detector.
+ *  @param fd Detector instance to query
+ *  @param slave_index Slave index
+ *  @return Pointer to internal state, or nullptr if invalid/uninitialized
+ */
 inline const SlaveFaultState* fault_get_state(FaultDetector& fd, uint16_t slave_index) {
     return fd.getState(slave_index);
 }
 
-/** @brief Check if any slave has an active fault in the given detector. */
+/** @brief Check if any slave has an active fault in the given detector.
+ *  @param fd Detector instance to query
+ *  @return `true` if at least one monitored slave is faulted
+ */
 inline bool fault_any_active(FaultDetector& fd) {
     return fd.anyActive();
 }
 
-/** @brief Clear a slave fault via the given detector. */
+/** @brief Clear a slave fault via the given detector.
+ *  @param fd Detector instance to clear through
+ *  @param slave_index Slave to clear
+ *  @return `true` if the fault was acknowledged and cleared
+ */
 inline bool fault_clear(FaultDetector& fd, uint16_t slave_index) {
     return fd.clear(slave_index);
 }
 
-/** @brief Register a fault callback on the given detector. */
+/** @brief Register a fault callback on the given detector.
+ *  @param fd Detector instance to configure
+ *  @param callback Function invoked on each new fault transition
+ */
 inline void fault_set_callback(FaultDetector& fd, FaultCallback callback) {
     fd.setCallback(std::move(callback));
 }
 
-/** @brief Log diagnostics via the given detector. */
+/** @brief Log diagnostics via the given detector.
+ *  @param fd Detector instance to report through
+ *  @param slave_index Slave to report on
+ */
 inline void fault_diagnose(FaultDetector& fd, uint16_t slave_index) {
     fd.diagnose(slave_index);
 }
 
-/** @brief Log no-sync diagnostics via the given detector. */
+/** @brief Log no-sync diagnostics via the given detector.
+ *  @param fd Detector instance to report through
+ *  @param slave_index Slave to report on
+ */
 inline void fault_diagnose_no_sync(FaultDetector& fd, uint16_t slave_index) {
     fd.diagnoseNoSync(slave_index);
 }

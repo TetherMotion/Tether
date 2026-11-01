@@ -230,54 +230,93 @@ using CatalogChangeListener = std::function<void()>;
 class Registry {
 public:
     /// Register a parameter. Returns true on success, false if ID is duplicate.
+    /// @param entry Parameter descriptor to add; must have a unique ID
+    /// @return `true` if registered, `false` if the ID already exists
     bool addParam(ParamEntry entry);
 
     /// Register a signal. Returns true on success, false if ID is duplicate.
+    /// @param entry Signal descriptor to add; must have a unique ID
+    /// @return `true` if registered, `false` if the ID already exists
     bool addSignal(SignalEntry entry);
 
     /// Total parameter count.
+    /// @return Number of registered parameters
     uint32_t paramCount() const;
 
     /// Total signal count.
+    /// @return Number of registered signals
     uint32_t signalCount() const;
 
     /// Total entry count (params + signals).
+    /// @return paramCount() + signalCount()
     uint32_t totalCount() const;
 
     /// Get a page of parameter views.
+    /// @param offset Index of the first parameter to include
+    /// @param maxCount Maximum number of entries to return
+    /// @return Up to `maxCount` views starting at `offset`; empty if
+    ///         `offset` is past the end
     std::vector<EntryView> paramPage(uint32_t offset, uint32_t maxCount) const;
 
     /// Get a page of signal views.
+    /// @param offset Index of the first signal to include
+    /// @param maxCount Maximum number of entries to return
+    /// @return Up to `maxCount` views starting at `offset`; empty if
+    ///         `offset` is past the end
     std::vector<EntryView> signalPage(uint32_t offset, uint32_t maxCount) const;
 
     /// Find any entry (param or signal) by ID.
+    /// @param id Entry ID to look up
+    /// @return View of the entry; converts to `false` when `id` is unknown
     EntryView find(uint64_t id) const;
 
     /// Find a parameter by ID.
+    /// @param id Parameter ID to look up
+    /// @return View of the parameter; converts to `false` when `id` is
+    ///         unknown or names a signal/function
     EntryView findParam(uint64_t id) const;
 
     /// Find a signal by ID.
+    /// @param id Signal ID to look up
+    /// @return View of the signal; converts to `false` when `id` is
+    ///         unknown or names a param/function
     EntryView findSignal(uint64_t id) const;
 
     /// Register a fully annotated function. IDs are unique across all catalogs.
+    /// @param entry Function descriptor to add; must have a unique ID
+    /// @return `true` if registered, `false` if the ID already exists
     bool addFunction(FunctionEntry entry);
 
     /// Total registered function count.
+    /// @return Number of registered functions
     uint32_t functionCount() const;
 
     /// Get a page of function descriptors.
+    /// @param offset Index of the first function to include
+    /// @param maxCount Maximum number of entries to return
+    /// @return Up to `maxCount` views starting at `offset`; empty if
+    ///         `offset` is past the end
     std::vector<FunctionView> functionPage(uint32_t offset, uint32_t maxCount) const;
 
     /// Find a function by ID.
+    /// @param id Function ID to look up
+    /// @return View of the function; converts to `false` when `id` is
+    ///         unknown or names a param/signal
     FunctionView findFunction(uint64_t id) const;
 
     /// Register a catalog change listener. Returns a handle for removal.
+    /// @param listener Callback invoked whenever the catalog changes
+    /// @return Opaque handle to pass to removeChangeListener()
     size_t addChangeListener(CatalogChangeListener listener);
 
     /// Remove a catalog change listener by handle.
+    /// @param handle Handle returned by addChangeListener(); unknown
+    ///        handles are ignored. Blocks until any in-flight invocation
+    ///        of this listener completes.
     void removeChangeListener(size_t handle);
 
     /// Get a monotonically increasing revision counter (incremented on each add).
+    /// @return Current catalog revision; clients can poll this to detect changes
     uint32_t revision() const { return revision_; }
 
     /**
@@ -290,6 +329,8 @@ public:
     void clear();
 
     /// Configure the declarative stream-filter properties supported by this registry.
+    /// @param definition Filter property to declare; subsequent
+    ///        validateStreamFilter() calls accept properties matching it
     void defineStreamFilterProperty(FilterPropertyDef definition);
     StreamFilterSchema::Result validateStreamFilter(const FilterProperty& property) const;
     bool supportsStreamFilters() const;
