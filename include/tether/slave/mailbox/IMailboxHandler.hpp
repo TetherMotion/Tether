@@ -62,6 +62,8 @@ struct MailboxHeader {
     
     /**
      * @brief Parse header from bytes
+     * @param data Pointer to the 6-byte mailbox header.
+     * @return Decoded header.
      */
     static MailboxHeader fromBytes(const uint8_t* data) {
         MailboxHeader h;
@@ -76,6 +78,7 @@ struct MailboxHeader {
     
     /**
      * @brief Serialize header to bytes
+     * @param data Destination buffer (at least 6 bytes).
      */
     void toBytes(uint8_t* data) const {
         data[0] = length & 0xFF;
@@ -125,11 +128,13 @@ public:
     
     /**
      * @brief Get the protocol type this handler supports
+     * @return Mailbox protocol served by this handler.
      */
     virtual MailboxProtocol getProtocol() const = 0;
     
     /**
      * @brief Get protocol name for logging
+     * @return Static protocol name (e.g. "CoE").
      */
     virtual const char* getProtocolName() const = 0;
     
@@ -149,6 +154,7 @@ public:
      * @brief Check if handler has pending response
      *
      * Some protocols (like FoE) may need multiple exchanges.
+     * @return true when getPendingResponse() has data ready.
      */
     virtual bool hasPendingResponse() const { return false; }
     
@@ -171,6 +177,7 @@ public:
     
     /**
      * @brief Set slave core reference
+     * @param slave Slave core the handler serves (nullptr clears it).
      */
     virtual void setSlaveCore(SlaveCore* slave) { slave_ = slave; }
     
@@ -258,17 +265,26 @@ public:
     
     /**
      * @brief Check if object exists
+     * @param index Object dictionary index.
+     * @param subindex Object dictionary subindex.
+     * @return true when the object is registered.
      */
     virtual bool hasObject(uint16_t index, uint8_t subindex) const = 0;
     
     /**
      * @brief Get object information
+     * @param index Object dictionary index.
+     * @param subindex Object dictionary subindex.
+     * @param info Receives the object description.
+     * @return true when the object exists and @p info was filled.
      */
     virtual bool getObjectInfo(uint16_t index, uint8_t subindex,
                                ODEntryInfo& info) const = 0;
     
     /**
      * @brief Get number of subindices for an object
+     * @param index Object dictionary index.
+     * @return Subindex count (0 when the object is unknown).
      */
     virtual uint8_t getSubindexCount(uint16_t index) const = 0;
     
@@ -278,6 +294,8 @@ public:
     
     /**
      * @brief Register a new object
+     * @param info Object description (index, subindex, type, access).
+     * @return true when the object was added (false on conflict).
      */
     virtual bool registerObject(const ODEntryInfo& info) = 0;
     
@@ -313,11 +331,15 @@ public:
     
     /**
      * @brief Save object dictionary to file/memory
+     * @param data Receives the serialized dictionary.
+     * @return true when serialization succeeded.
      */
     virtual bool save(std::vector<uint8_t>& data) const = 0;
     
     /**
      * @brief Load object dictionary from file/memory
+     * @param data Serialized dictionary to restore.
+     * @return true when the data was parsed and applied.
      */
     virtual bool load(const std::vector<uint8_t>& data) = 0;
 };
@@ -330,6 +352,7 @@ public:
  * @brief Create CoE (CANopen over EtherCAT) handler
  *
  * @param od Object dictionary to use
+ * @return CoE handler bound to that dictionary.
  */
 std::unique_ptr<IMailboxHandler> createCoEHandler(std::shared_ptr<IObjectDictionary> od);
 
@@ -337,26 +360,31 @@ std::unique_ptr<IMailboxHandler> createCoEHandler(std::shared_ptr<IObjectDiction
  * @brief Create FoE (File over EtherCAT) handler
  *
  * @param rootPath Root path for file operations
+ * @return FoE handler rooted at @p rootPath.
  */
 std::unique_ptr<IMailboxHandler> createFoEHandler(const std::string& rootPath);
 
 /**
  * @brief Create EoE (Ethernet over EtherCAT) handler
+ * @return EoE handler.
  */
 std::unique_ptr<IMailboxHandler> createEoEHandler();
 
 /**
  * @brief Create VoE (Vendor over EtherCAT) handler
+ * @return VoE handler.
  */
 std::unique_ptr<IMailboxHandler> createVoEHandler();
 
 /**
  * @brief Create SoE (Servo over EtherCAT) handler
+ * @return SoE handler.
  */
 std::unique_ptr<IMailboxHandler> createSoEHandler();
 
 /**
  * @brief Create AoE (ADS over EtherCAT) handler
+ * @return AoE handler.
  */
 std::unique_ptr<IMailboxHandler> createAoEHandler();
 
@@ -366,6 +394,7 @@ std::unique_ptr<IMailboxHandler> createAoEHandler();
 
 /**
  * @brief Create a basic object dictionary
+ * @return Empty object dictionary ready for registerObject() calls.
  */
 std::unique_ptr<IObjectDictionary> createObjectDictionary();
 
