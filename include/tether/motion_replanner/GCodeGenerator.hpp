@@ -104,6 +104,8 @@ struct GCodeBlock {
     
     /**
      * @brief Convert to string
+     * @param opts Formatting options (precision, comments, ...).
+     * @return Single G-code line.
      */
     std::string toString(const GCodeOptions& opts) const;
 };
@@ -121,12 +123,15 @@ public:
     
     /**
      * @brief Add a block
+     * @param block Block appended to the program.
      */
     void addBlock(const GCodeBlock& block);
+    /// @param line Pre-formatted G-code line appended verbatim.
     void addBlock(const std::string& line);
     
     /**
      * @brief Add common commands
+     * @param comment Comment text (emitted with the program's comment style).
      */
     void addComment(const std::string& comment);
     void addBlankLine();
@@ -162,32 +167,40 @@ public:
     
     /**
      * @brief Access blocks
+     * @return Program blocks in order.
      */
     const std::vector<GCodeBlock>& blocks() const { return blocks_; }
+    /// @return Mutable program blocks.
     std::vector<GCodeBlock>& blocks() { return blocks_; }
     
     /**
      * @brief Export to string
+     * @return Complete program text.
      */
     std::string toString() const;
     
     /**
      * @brief Export to file
+     * @param filename Destination path.
+     * @return true when the file was written.
      */
     bool saveToFile(const std::string& filename) const;
     
     /**
      * @brief Export to stream
+     * @param out Stream receiving the program text.
      */
     void write(std::ostream& out) const;
     
     /**
      * @brief Get estimated duration
+     * @return Estimated run time [s] from the programmed feeds.
      */
     double estimateDuration() const;
     
     /**
      * @brief Get bounds
+     * @return (min XYZ, max XYZ) over all programmed positions.
      */
     std::pair<std::array<double, 3>, std::array<double, 3>> getBounds() const;
     
@@ -213,22 +226,42 @@ public:
     
     /**
      * @brief Generate single-axis test pattern
+     * @param config Axis, travel range, feed rates and repeats.
+     * @return Program exercising one axis.
      */
     GCodeProgram generateSingleAxisTest(const SingleAxisTestConfig& config);
     
     /**
      * @brief Generate multi-axis test pattern
+     * @param config Axes, ranges and sequencing options.
+     * @return Program exercising several axes.
      */
     GCodeProgram generateMultiAxisTest(const MultiAxisTestConfig& config);
     
     /**
      * @brief Generate circle test
+     * @param centerX Circle centre X [mm].
+     * @param centerY Circle centre Y [mm].
+     * @param centerZ Z height for the circle [mm].
+     * @param radius Circle radius [mm].
+     * @param feedRate Feed rate [mm/min].
+     * @param revolutions Number of laps.
+     * @return Circle program.
      */
     GCodeProgram generateCircleTest(double centerX, double centerY, double centerZ,
                                      double radius, double feedRate, int revolutions = 1);
     
     /**
      * @brief Generate ellipse test
+     * @param centerX Ellipse centre X [mm].
+     * @param centerY Ellipse centre Y [mm].
+     * @param centerZ Z height [mm].
+     * @param radiusX Semi-axis along X [mm].
+     * @param radiusY Semi-axis along Y [mm].
+     * @param rotation In-plane rotation [deg].
+     * @param feedRate Feed rate [mm/min].
+     * @param revolutions Number of laps.
+     * @return Ellipse program.
      */
     GCodeProgram generateEllipseTest(double centerX, double centerY, double centerZ,
                                       double radiusX, double radiusY, double rotation,
@@ -236,6 +269,14 @@ public:
     
     /**
      * @brief Generate helix test
+     * @param centerX Helix axis X [mm].
+     * @param centerY Helix axis Y [mm].
+     * @param startZ Starting Z height [mm].
+     * @param radius Helix radius [mm].
+     * @param pitch Z advance per revolution [mm].
+     * @param feedRate Feed rate [mm/min].
+     * @param revolutions Number of revolutions.
+     * @return Helix program.
      */
     GCodeProgram generateHelixTest(double centerX, double centerY, double startZ,
                                     double radius, double pitch, double feedRate,
@@ -243,24 +284,52 @@ public:
     
     /**
      * @brief Generate sinusoid test
+     * @param axis Axis index (0 = X).
+     * @param center Centre position [mm].
+     * @param amplitude Peak amplitude [mm].
+     * @param frequency Spatial frequency [1/mm].
+     * @param cycles Number of periods.
+     * @param feedRate Feed rate [mm/min].
+     * @return Sinusoid program.
      */
     GCodeProgram generateSinusoidTest(int axis, double center, double amplitude,
                                        double frequency, int cycles, double feedRate);
     
     /**
      * @brief Generate ramp test
+     * @param axis Axis index (0 = X).
+     * @param start Start position [mm].
+     * @param end End position [mm].
+     * @param feedRate Feed rate [mm/min].
+     * @param repeats Number of back-and-forth passes.
+     * @return Ramp program.
      */
     GCodeProgram generateRampTest(int axis, double start, double end,
                                    double feedRate, int repeats = 1);
     
     /**
      * @brief Generate square test with corners
+     * @param centerX Square centre X [mm].
+     * @param centerY Square centre Y [mm].
+     * @param centerZ Z height [mm].
+     * @param size Edge length [mm].
+     * @param feedRate Feed rate [mm/min].
+     * @param revolutions Number of laps.
+     * @return Square program (sharp corners).
      */
     GCodeProgram generateSquareTest(double centerX, double centerY, double centerZ,
                                      double size, double feedRate, int revolutions = 1);
     
     /**
      * @brief Generate rounded square test
+     * @param centerX Square centre X [mm].
+     * @param centerY Square centre Y [mm].
+     * @param centerZ Z height [mm].
+     * @param size Edge length [mm].
+     * @param cornerRadius Corner radius [mm].
+     * @param feedRate Feed rate [mm/min].
+     * @param revolutions Number of laps.
+     * @return Rounded-square program.
      */
     GCodeProgram generateRoundedSquareTest(double centerX, double centerY, double centerZ,
                                             double size, double cornerRadius,
@@ -268,6 +337,11 @@ public:
     
     /**
      * @brief Generate friction test sequence
+     * @param axis Axis index (0 = X).
+     * @param distance Stroke length [mm].
+     * @param feedRates Feed rates to sweep [mm/min].
+     * @param repeatsPerRate Passes per feed rate.
+     * @return Friction-characterisation program.
      */
     GCodeProgram generateFrictionTest(int axis, double distance,
                                        const std::vector<double>& feedRates,
@@ -275,17 +349,24 @@ public:
     
     /**
      * @brief Generate workspace sweep for heatmap
+     * @param heatmapConfig Grid configuration of the workspace.
+     * @param testRadius Radius of the pattern at each grid point [mm].
+     * @param feedRate Feed rate [mm/min].
+     * @return Sweep program covering the configured grid.
      */
     GCodeProgram generateWorkspaceSweep(const HeatmapConfig& heatmapConfig,
                                          double testRadius, double feedRate);
     
     /**
      * @brief Generate complete calibration sequence
+     * @param sequence Ordered list of tests to emit.
+     * @return Concatenated calibration program.
      */
     GCodeProgram generateCalibrationSequence(const TestSequence& sequence);
     
     /**
      * @brief Configuration
+     * @param opts Formatting options for generated programs.
      */
     void setOptions(const GCodeOptions& opts) { opts_ = opts; }
     const GCodeOptions& options() const { return opts_; }
@@ -315,17 +396,24 @@ public:
     
     /**
      * @brief Export position samples to G-code
+     * @param samples Trajectory samples to emit (linear G1 moves).
+     * @return Generated program.
      */
     GCodeProgram exportTrajectory(const std::vector<PositionSample>& samples);
     
     /**
      * @brief Export with arc fitting
+     * @param samples Trajectory samples to emit.
+     * @param arcTolerance Maximum deviation when fitting G2/G3 arcs [mm].
+     * @return Generated program (arcs where the fit succeeds).
      */
     GCodeProgram exportTrajectoryWithArcs(const std::vector<PositionSample>& samples,
                                            double arcTolerance = 0.001);
     
     /**
      * @brief Export test results as G-code with annotations
+     * @param result Test result whose trajectory is emitted.
+     * @return Generated program with per-segment comments.
      */
     GCodeProgram exportTestResult(const TestResult& result);
     
