@@ -84,6 +84,8 @@ enum class ControlMode : uint8_t {
 
 /**
  * @brief Get human-readable name for a control mode.
+ * @param mode Control mode to name.
+ * @return Static string such as "ACCEL_MAX".
  */
 inline const char* controlModeName(ControlMode mode) {
     switch (mode) {
@@ -162,19 +164,25 @@ struct EtaBounds {
     double eta_max =  std::numeric_limits<double>::infinity();
 
     /// Check if the interval is non-empty.
+    /// @return true when eta_min <= eta_max.
     bool feasible() const { return eta_min <= eta_max; }
 
     /// Check if a given eta value is within the bounds.
+    /// @param eta Value to test.
+    /// @return true when eta_min <= eta <= eta_max.
     bool contains(double eta) const {
         return eta >= eta_min && eta <= eta_max;
     }
 
     /// Clamp eta to the feasible interval.
+    /// @param eta Value to clamp.
+    /// @return eta limited to [eta_min, eta_max].
     double clamp(double eta) const {
         return std::max(eta_min, std::min(eta, eta_max));
     }
 
     /// Intersect with another interval (take the tighter bounds).
+    /// @param other Interval to intersect with; bounds are tightened in place.
     void intersect(const EtaBounds& other) {
         eta_min = std::max(eta_min, other.eta_min);
         eta_max = std::min(eta_max, other.eta_max);
@@ -236,9 +244,11 @@ struct SwitchingArc {
     double duration = 0.0;
 
     /// Check if this arc is valid (non-empty domain)
+    /// @return true when s_end > s_begin.
     bool valid() const { return s_end > s_begin; }
 
     /// Arc length span
+    /// @return s_end - s_begin.
     double length() const { return s_end - s_begin; }
 };
 
@@ -269,51 +279,79 @@ public:
     virtual ~AnalyticalTrajectorySource() = default;
 
     /// Total traversal time (seconds)
+    /// @return Duration of the whole trajectory [s].
     virtual T totalTime() const = 0;
 
     /// Total path length (arc length)
+    /// @return Arc length of the whole trajectory [units].
     virtual T totalLength() const = 0;
 
     /// Position in task space at time t
+    /// @param t Time from trajectory start [s]; clamped to the domain.
+    /// @return Position vector in R^Dim.
     virtual Vec<Dim, T> position(T t) const = 0;
 
     /// Velocity vector in task space at time t
+    /// @param t Time from trajectory start [s]; clamped to the domain.
+    /// @return Velocity vector in R^Dim.
     virtual Vec<Dim, T> velocity(T t) const = 0;
 
     /// Acceleration vector in task space at time t
+    /// @param t Time from trajectory start [s]; clamped to the domain.
+    /// @return Acceleration vector in R^Dim.
     virtual Vec<Dim, T> acceleration(T t) const = 0;
 
     /// Arc length position at time t
+    /// @param t Time from trajectory start [s]; clamped to the domain.
+    /// @return Path position [units].
     virtual T arcLength(T t) const = 0;
 
     /// Time at which the trajectory reaches arc length s
+    /// @param s Path position [units]; clamped to [0, totalLength()].
+    /// @return Time [s] when that position is reached.
     virtual T timeAtArcLength(T s) const = 0;
 
     /// Path (tangential) velocity magnitude at time t
+    /// @param t Time from trajectory start [s].
+    /// @return Tangential velocity [units/s].
     virtual T pathVelocity(T t) const = 0;
 
     /// Path (tangential) acceleration magnitude at time t
+    /// @param t Time from trajectory start [s].
+    /// @return Tangential acceleration [units/s^2].
     virtual T pathAcceleration(T t) const = 0;
 
     /// Path jerk magnitude at time t
+    /// @param t Time from trajectory start [s].
+    /// @return Tangential jerk [units/s^3].
     virtual T pathJerk(T t) const = 0;
 
     /// Curvature at time t
+    /// @param t Time from trajectory start [s].
+    /// @return Path curvature [1/units].
     virtual T curvature(T t) const = 0;
 
     /// Source reference at time t (G-code traceability)
+    /// @param t Time from trajectory start [s].
+    /// @return G-code source location this trajectory point originates from.
     virtual SourceReference sourceRef(T t) const = 0;
 
     /// Segment index at time t
+    /// @param t Time from trajectory start [s].
+    /// @return Index of the trajectory segment containing @p t.
     virtual size_t segmentIndex(T t) const = 0;
 
     /// Segment parameter [0,1] at time t
+    /// @param t Time from trajectory start [s].
+    /// @return Parameter of the segment containing @p t.
     virtual T segmentParameter(T t) const = 0;
 
     /// Representation type name (for logging/debugging)
+    /// @return Static representation name.
     virtual const char* representationName() const = 0;
 
     /// Highest path derivative represented by this analytical source.
+    /// @return Derivative order the source models.
     virtual ProfileDerivativeOrder derivativeOrder() const {
         return ProfileDerivativeOrder::Jerk;
     }
