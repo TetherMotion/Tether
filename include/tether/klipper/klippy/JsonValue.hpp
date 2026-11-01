@@ -56,48 +56,113 @@ public:
     // Type-checked accessors (inherently safe — return nullopt on mismatch)
     // ------------------------------------------------------------------
 
-    /**@brief Type-checked bool access. Returns nullopt if not a bool. */
+    /**
+     * @brief Type-checked bool access.
+     *
+     * @return The stored value if this value is a bool; std::nullopt
+     *         otherwise. Never throws.
+     */
     std::optional<bool> tryBool() const {
         return isBool() ? std::optional<bool>(bool_) : std::nullopt;
     }
 
-    /**@brief Type-checked int access. Returns nullopt if not an int. */
+    /**
+     * @brief Type-checked int access.
+     *
+     * @return The stored value if this value is an integer; std::nullopt
+     *         otherwise. Doubles are not coerced — a numeric value stored
+     *         as a double must be read via tryDouble().
+     */
     std::optional<int64_t> tryInt() const {
         return isInt() ? std::optional<int64_t>(int_) : std::nullopt;
     }
 
-    /**@brief Type-checked double access. Returns nullopt if not a double or int. */
+    /**
+     * @brief Type-checked double access with int promotion.
+     *
+     * @return The stored value if this value is a double, or the int
+     *         value widened to double if it is an integer; std::nullopt
+     *         for all other types. Note JSON "1" parses as int and is
+     *         therefore also accepted here.
+     */
     std::optional<double> tryDouble() const {
         if (isDouble()) return double_;
         if (isInt()) return static_cast<double>(int_);
         return std::nullopt;
     }
 
-    /**@brief Type-checked string access. Returns nullptr if not a string. */
+    /**
+     * @brief Type-checked string access.
+     *
+     * @return Pointer to the stored string if this value is a string;
+     *         nullptr otherwise. The pointer aliases internal storage and
+     *         is invalidated by mutation or destruction of this value.
+     */
     const std::string* tryString() const {
         return isString() ? &str_ : nullptr;
     }
 
-    /**@brief Type-checked array access. Returns nullptr if not an array. */
+    /**
+     * @brief Type-checked array access.
+     *
+     * @return Pointer to the stored array if this value is an array;
+     *         nullptr otherwise. The pointer aliases internal storage —
+     *         invalidated by mutation or destruction of this value.
+     */
     const std::vector<JsonValue>* tryArray() const {
         return isArray() ? &arr_ : nullptr;
     }
 
-    /**@brief Type-checked object access. Returns nullptr if not an object. */
+    /**
+     * @brief Type-checked object access.
+     *
+     * @return Pointer to the stored object map if this value is an
+     *         object; nullptr otherwise. The pointer aliases internal
+     *         storage — invalidated by mutation or destruction of this
+     *         value.
+     */
     const std::map<std::string, JsonValue>* tryObject() const {
         return isObject() ? &obj_ : nullptr;
     }
 
-    /**@brief Serialise to compact JSON string. */
+    /**
+     * @brief Serialise to compact JSON string.
+     *
+     * Produces minimal JSON — no whitespace or pretty-printing; strings
+     * are escaped and object keys emitted in std::map (sorted) order.
+     *
+     * @return Compact JSON text representing this value and its children.
+     */
     std::string dump() const;
 
-    /**@brief Parse a JSON string into a JsonValue. */
+    /**
+     * @brief Parse a JSON string into a JsonValue.
+     *
+     * @param json  JSON text to parse; leading/trailing whitespace is
+     *              tolerated.
+     * @return The parsed document root, or std::nullopt on malformed
+     *         input.
+     */
     static std::optional<JsonValue> parse(std::string_view json);
 
-    /**@brief Get a field from an object, or nullptr if not present. */
+    /**
+     * @brief Get a field from an object, or nullptr if not present.
+     *
+     * @param key  Member name to look up.
+     * @return Pointer to the member value if this is an object containing
+     *         @p key; nullptr otherwise (including when this value is not
+     *         an object). The pointer aliases internal storage and is
+     *         invalidated by mutation.
+     */
     const JsonValue* find(std::string_view key) const;
 
-    /**@brief Check if object has a key. */
+    /**
+     * @brief Check if object has a key.
+     *
+     * @param key  Member name to test.
+     * @return true if this value is an object containing @p key — note a
+     *         member explicitly set to null still counts as present.
+     */
     bool has(std::string_view key) const {
         return find(key) != nullptr;
     }
