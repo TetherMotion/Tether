@@ -110,6 +110,7 @@ struct GCodeLineRef {
 
     /**
      * @brief Check if this is a valid reference
+     * @return true when a 1-based line number is set.
      */
     bool isValid() const noexcept {
         return lineNumber > 0;
@@ -181,12 +182,14 @@ public:
 
     /**
      * @brief Single line reference
+     * @param ref Line reference to wrap.
      */
     explicit SourceReference(GCodeLineRef ref)
         : type_(Type::Single), primaryRef_(std::move(ref)) {}
 
     /**
      * @brief Multiple line references
+     * @param refs Contributing line references (first becomes primary).
      */
     explicit SourceReference(std::vector<GCodeLineRef> refs)
         : type_(refs.size() == 1 ? Type::Single : Type::Multiple)
@@ -198,12 +201,16 @@ public:
 
     /**
      * @brief Range of contiguous lines
+     * @param start First line of the range.
+     * @param end Last line of the range.
      */
     SourceReference(GCodeLineRef start, GCodeLineRef end)
         : type_(Type::Range), primaryRef_(std::move(start)), endRef_(std::move(end)) {}
 
     /**
      * @brief Create synthetic reference with description
+     * @param description Human-readable origin (e.g. "replan: corner blend").
+     * @return Synthetic reference carrying that description.
      */
     static SourceReference synthetic(std::string description) {
         SourceReference ref;
@@ -215,6 +222,10 @@ public:
     /**
      * @brief Backwards-compatible helpers for tests and older callers
      */
+    /// @param lineNumber 1-based source line.
+    /// @param file Source file the line belongs to.
+    /// @param text Original line text (for traceability).
+    /// @return Single-line reference.
     static SourceReference fromLine(uint32_t lineNumber, std::shared_ptr<SourceFile> file = nullptr, std::string text = "") {
         GCodeLineRef ref(std::move(file), lineNumber, std::move(text));
         return SourceReference(std::move(ref));
@@ -242,31 +253,37 @@ public:
 
     /**
      * @brief Get reference type
+     * @return Kind of reference (none/single/multiple/range/synthetic).
      */
     Type type() const noexcept { return type_; }
 
     /**
      * @brief Convenience: legacy accessor returning primary line number
+     * @return 1-based line number of the primary reference.
      */
     uint32_t lineNumber() const noexcept { return primaryRef_.lineNumber; }
 
     /**
      * @brief Convenience: legacy accessor returning raw pointer to source file
+     * @return Source file of the primary reference, or nullptr.
      */
     const SourceFile* sourceFile() const noexcept { return primaryRef_.sourceFile.get(); }
 
     /**
      * @brief Convenience: start line for range type
+     * @return First line number of the reference.
      */
     uint32_t startLine() const noexcept { return primaryRef_.lineNumber; }
 
     /**
      * @brief Convenience: end line for range type
+     * @return Last line number of a range reference.
      */
     uint32_t endLine() const noexcept { return endRef_.lineNumber; }
 
     /**
      * @brief Check if reference is valid
+     * @return true when the reference has a type or a description.
      */
     bool isValid() const noexcept {
         return type_ != Type::None || !description_.empty();
@@ -274,6 +291,7 @@ public:
 
     /**
      * @brief Check if this is a synthetic (computed) reference
+     * @return true for references created by synthetic().
      */
     bool isSynthetic() const noexcept {
         return type_ == Type::Synthetic;
@@ -281,6 +299,7 @@ public:
 
     /**
      * @brief Get primary line reference (first/most relevant line)
+     * @return Primary line reference.
      */
     const GCodeLineRef& primary() const noexcept {
         return primaryRef_;
@@ -288,6 +307,7 @@ public:
 
     /**
      * @brief Get all contributing line references
+     * @return Every line reference this source covers.
      */
     std::vector<GCodeLineRef> allRefs() const {
         if (type_ == Type::Multiple) {
@@ -300,6 +320,7 @@ public:
 
     /**
      * @brief Get number of contributing lines
+     * @return Count of source lines this reference spans.
      */
     size_t lineCount() const noexcept {
         switch (type_) {
@@ -313,6 +334,7 @@ public:
 
     /**
      * @brief Get description (for synthetic references)
+     * @return Description text, or an empty string.
      */
     const std::string& description() const noexcept {
         return description_;
@@ -320,6 +342,7 @@ public:
 
     /**
      * @brief Set description
+     * @param desc Description text to store.
      */
     void setDescription(std::string desc) {
         description_ = std::move(desc);
@@ -333,6 +356,8 @@ public:
      * @brief Merge with another reference
      *
      * Creates a new reference that includes all lines from both.
+     * @param other Reference to merge in.
+     * @return Combined reference.
      */
     SourceReference merge(const SourceReference& other) const {
         if (!isValid()) return other;
@@ -351,6 +376,7 @@ public:
 
     /**
      * @brief Get human-readable location string
+     * @return Text such as "file:line" or "<synthetic: ...>".
      */
     std::string locationString() const {
         switch (type_) {
@@ -380,6 +406,7 @@ public:
 
     /**
      * @brief Get original G-code text (from primary reference)
+     * @return Source line text, or an empty string when unavailable.
      */
     std::string originalText() const {
         return primaryRef_.originalText;
@@ -387,6 +414,8 @@ public:
 
     /**
      * @brief Check if this reference contains a specific line
+     * @param lineNum 1-based line number to test.
+     * @return true when the line belongs to this reference.
      */
     bool containsLine(uint32_t lineNum) const {
         switch (type_) {
@@ -426,6 +455,7 @@ class SourceReferenceBuilder {
 public:
     /**
      * @brief Set the source file for all subsequent references
+     * @param file Source file the following lines belong to.
      */
     void setSourceFile(std::shared_ptr<SourceFile> file) {
         currentFile_ = std::move(file);
@@ -433,6 +463,9 @@ public:
 
     /**
      * @brief Create a reference for a single line
+     * @param lineNumber 1-based line number.
+     * @param text Original line text (optional).
+     * @return Single-line reference.
      */
     SourceReference forLine(uint32_t lineNumber, std::string text = "") {
         GCodeLineRef ref(currentFile_, lineNumber, std::move(text));
@@ -441,6 +474,9 @@ public:
 
     /**
      * @brief Create a reference for a range of lines
+     * @param startLine First line of the range.
+     * @param endLine Last line of the range.
+     * @return Range reference.
      */
     SourceReference forRange(uint32_t startLine, uint32_t endLine) {
         GCodeLineRef start(currentFile_, startLine);
@@ -450,6 +486,9 @@ public:
 
     /**
      * @brief Create a reference combining multiple sources
+     * @param a First reference.
+     * @param b Second reference.
+     * @return Merged reference covering both.
      */
     SourceReference combine(const SourceReference& a, const SourceReference& b) {
         return a.merge(b);
@@ -457,6 +496,7 @@ public:
 
     /**
      * @brief Get the current source file
+     * @return File set by setSourceFile() (may be null).
      */
     std::shared_ptr<SourceFile> currentSourceFile() const {
         return currentFile_;
@@ -481,11 +521,13 @@ public:
 
     /**
      * @brief Get the source reference
+     * @return Reference to the originating G-code line(s).
      */
     virtual const SourceReference& sourceRef() const = 0;
 
     /**
      * @brief Check if this has valid source reference
+     * @return true when sourceRef() is valid.
      */
     bool hasSourceRef() const {
         return sourceRef().isValid();
@@ -493,6 +535,7 @@ public:
 
     /**
      * @brief Get location string for error messages
+     * @return Human-readable location of the origin.
      */
     std::string locationString() const {
         return sourceRef().locationString();
