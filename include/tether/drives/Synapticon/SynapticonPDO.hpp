@@ -401,11 +401,15 @@ static constexpr PDODescriptor TxPDO_1B00_LW1 = { 0x1B00, sizeof(SOMANET_TxPDO_1
 // ============================================================================
 
 /// TxPDO 0x1B00 descriptor for the given frame variant (LW1=31B, LW2=35B).
+/// @param variant FSoE frame layout in use
+/// @return PDO descriptor for that variant
 constexpr const PDODescriptor& fsoeTxPDO(FSoEFrameVariant variant) {
     return variant == FSoEFrameVariant::LW2 ? TxPDO_1B00 : TxPDO_1B00_LW1;
 }
 
 /// Encoded FSoE TxPDO frame size in bytes (31 or 35).
+/// @param variant FSoE frame layout in use
+/// @return Frame size [bytes]
 constexpr uint16_t fsoeTxPDOSize(FSoEFrameVariant variant) {
     return fsoeTxPDO(variant).size;
 }
@@ -413,17 +417,23 @@ constexpr uint16_t fsoeTxPDOSize(FSoEFrameVariant variant) {
 /// Slave->master safe-data byte count carried inside the FSoE frame
 /// (excludes the command byte, CRCs and ConnectionID):
 /// LW1 = 14, LW2 = 16 (adds the 2-byte safe torque data).
+/// @param variant FSoE frame layout in use
+/// @return Safe-data payload bytes
 constexpr uint8_t fsoeSafeDataSize(FSoEFrameVariant variant) {
     return variant == FSoEFrameVariant::LW2 ? 16 : 14;
 }
 
 /// Motion PDO offset within SM3 for a given frame variant
 /// (FSoE PDO comes first at offset 0).
+/// @param variant FSoE frame layout in use
+/// @return Byte offset of the motion PDO inside SM3
 constexpr uint16_t motionTxPDOOffset(FSoEFrameVariant variant) {
     return fsoeTxPDOSize(variant);
 }
 
 /// Combined SM3 length (FSoE + all motion PDOs) for a given frame variant.
+/// @param variant FSoE frame layout in use
+/// @return Total SM3 byte length
 constexpr uint16_t sm3CombinedSize(FSoEFrameVariant variant) {
     return static_cast<uint16_t>(
         fsoeTxPDOSize(variant) + TxPDO_1A00.size + TxPDO_1A01.size +
@@ -498,6 +508,7 @@ constexpr uint16_t kSM3CombinedSize = TxPDO_1B00.size + kSM3TotalSize;   // 35 +
 /// Build a MultiPDOAssignment with all standard CiA 402 PDOs (no FSoE).
 /// SM2: 0x1600 + 0x1601 + 0x1602 (35 bytes)
 /// SM3: 0x1A00 + 0x1A01 + 0x1A02 + 0x1A03 (47 bytes)
+/// @return Assignment covering SM2/SM3 for standard operation
 inline Slave::MultiPDOAssignment makeStandardPDOAssignment() {
     Slave::MultiPDOAssignment assignment;
 
@@ -536,6 +547,7 @@ inline Slave::MultiPDOAssignment makeStandardPDOAssignment() {
 /// @param fsoe_frame  FSoE status-frame variant the slave is configured
 ///                    with (LW2 = safe torque data appended, LW1 = without).
 /// FSoE PDOs are written explicitly to 0x1C12/0x1C13 (fixed=false).
+/// @return Assignment covering only the FSoE PDOs
 inline Slave::MultiPDOAssignment makeFSoEPDOAssignment(
     FSoEFrameVariant fsoe_frame = FSoEFrameVariant::LW2) {
     Slave::MultiPDOAssignment assignment;
@@ -581,6 +593,7 @@ inline Slave::MultiPDOAssignment makeFSoEPDOAssignment(
 /// ALL PDOs (including FSoE) are written explicitly to 0x1C12/0x1C13.
 /// SM register length = totalLength() (all PDOs).
 /// FMMU length = totalLength() (all PDOs).
+/// @return Combined FSoE + motion PDO assignment
 inline Slave::MultiPDOAssignment makeCombinedPDOAssignment(
     FSoEFrameVariant fsoe_frame = FSoEFrameVariant::LW2) {
     Slave::MultiPDOAssignment assignment;
@@ -621,6 +634,7 @@ inline Slave::MultiPDOAssignment makeCombinedPDOAssignment(
 /// This matches the CST (Cyclic Sync Torque) mode configuration.
 /// SM2: 0x1600 (19 bytes)
 /// SM3: 0x1A00 (13 bytes)
+/// @return Minimal PDO assignment for CST mode
 inline Slave::MultiPDOAssignment makeCSTModePDOAssignment() {
     Slave::MultiPDOAssignment assignment;
 
@@ -650,6 +664,7 @@ inline Slave::MultiPDOAssignment makeCSTModePDOAssignment() {
 ///
 /// ALL PDOs (including 0x1700/0x1B00) are written explicitly to 0x1C12/0x1C13
 /// with fixed=false.  The drive accepts the full ESI PDO assignment.
+/// @return Assignment built from the requested PDO indices
 ///
 /// @param rxpdo_indices  PDO indices to assign to SM2 (outputs)
 /// @param txpdo_indices  PDO indices to assign to SM3 (inputs)

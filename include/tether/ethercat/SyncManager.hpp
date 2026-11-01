@@ -89,6 +89,8 @@ constexpr uint8_t kRegOffsetPDICtrl   = 7;
 constexpr uint16_t kWatchdogStatusReg = 0x0440;
 
 /// Return the physical ESC register base address for SM @p smIndex.
+/// @param smIndex Zero-based sync-manager index
+/// @return ESC register address of the SM block
 constexpr uint16_t registerBase(uint8_t smIndex) {
     return static_cast<uint16_t>(kRegisterBase + smIndex * kRegisterStride);
 }
@@ -107,11 +109,15 @@ constexpr uint16_t kSyncParamSM2    = 0x1C32;
 constexpr uint16_t kSyncParamSM3    = 0x1C33;
 
 /// Return the PDO Assignment OD index for SM @p smIndex (0x1C10 + smIndex).
+/// @param smIndex Zero-based sync-manager index
+/// @return Object-dictionary index of the SM's assign array
 constexpr uint16_t pdoAssignIndex(uint8_t smIndex) {
     return static_cast<uint16_t>(kPDOAssignBase + smIndex);
 }
 
 /// Return the SM Synchronization OD index for SM @p smIndex (valid for SM2/SM3 → 0x1C32/0x1C33).
+/// @param smIndex Sync-manager index (2 or 3)
+/// @return Object-dictionary index of the sync parameter object
 constexpr uint16_t syncParamIndex(uint8_t smIndex) {
     return static_cast<uint16_t>(0x1C30 + smIndex);
 }
@@ -167,6 +173,7 @@ namespace SyncSub {
  * @param index    Object dictionary index of the mapped object
  * @param subindex Subindex of the mapped object
  * @param bits     Bit length of the mapped object
+ * @return Packed 32-bit mapping entry (index<<16 | subindex<<8 | bits)
  */
 constexpr uint32_t makeMappingEntry(uint16_t index, uint8_t subindex, uint8_t bits) {
     return (static_cast<uint32_t>(index) << 16) |
@@ -175,16 +182,22 @@ constexpr uint32_t makeMappingEntry(uint16_t index, uint8_t subindex, uint8_t bi
 }
 
 /// Extract the object index from a PDO mapping entry.
+/// @param entry Packed mapping entry
+/// @return Object-dictionary index
 constexpr uint16_t mappingIndex(uint32_t entry) {
     return static_cast<uint16_t>((entry >> 16) & 0xFFFFU);
 }
 
 /// Extract the subindex from a PDO mapping entry.
+/// @param entry Packed mapping entry
+/// @return Object subindex
 constexpr uint8_t mappingSubindex(uint32_t entry) {
     return static_cast<uint8_t>((entry >> 8) & 0xFFU);
 }
 
 /// Extract the bit length from a PDO mapping entry.
+/// @param entry Packed mapping entry
+/// @return Bit length of the mapped object
 constexpr uint8_t mappingBits(uint32_t entry) {
     return static_cast<uint8_t>(entry & 0xFFU);
 }
@@ -335,9 +348,15 @@ public:
     // Identity
     // -----------------------------------------------------------------------
 
-    /** @brief Zero-based SM index. */
+    /**
+     * @brief Zero-based SM index.
+     * @return Sync-manager number this accessor wraps
+     */
     uint8_t  index()            const { return index_; }
-    /** @brief Physical ESC register base address (0x0800 + index * 8). */
+    /**
+     * @brief Physical ESC register base address (0x0800 + index * 8).
+     * @return Register address of this SM
+     */
     uint16_t physRegisterBase() const {
         return EtherCAT::SyncManager::registerBase(index_);
     }
