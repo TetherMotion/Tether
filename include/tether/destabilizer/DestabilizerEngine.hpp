@@ -35,11 +35,27 @@ public:
     explicit ThreadPool(int numThreads = 0);
     ~ThreadPool();
 
-    /**Submit a task and get a future for its result. */
+    /**
+     * @brief Submit a task and get a future for its result.
+     *
+     * The task is queued and picked up by the next free worker;
+     * activeTasks_ counts it immediately so waitAll() observes it even
+     * before a worker dequeues it.
+     *
+     * @param f      Callable to execute.
+     * @param args   Arguments forwarded to @p f (bound at submit time).
+     * @return std::future delivering the callable's return value; throws
+     *         std::runtime_error if the pool has been shut down.
+     */
     template<typename F, typename... Args>
     auto submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))>;
 
-    /**Get number of threads. */
+    /**
+     * @brief Get number of threads.
+     *
+     * @return Worker-thread count — the number of spawned workers, not
+     *         the numThreads constructor hint.
+     */
     int size() const { return static_cast<int>(workers_.size()); }
 
     /**Wait for all pending tasks to complete. */
@@ -98,22 +114,80 @@ public:
     DestabilizerEngine();
     ~DestabilizerEngine();
 
-    /**Set the configuration for the run. */
+    /**
+     * @brief Set the configuration for the run.
+     *
+     * Must be called before run()/start(). Copied — the caller's struct
+     * may be reused; a re-configure between runs resets the search to
+     * the new parameter bounds, population, and iteration budget.
+     *
+     * @param config  DestabilizerConfig: parameter-space definition,
+     *                search strategy, rollout/iteration limits, and
+     *                success criteria.
+     */
     void configure(const DestabilizerConfig& config);
 
-    /**Set a custom controller (otherwise open-loop). */
+    /**
+     * @brief Set a custom controller (otherwise open-loop).
+     *
+     * The controller drives each simulated rollout; without one the
+     * system under test runs open-loop, useful for intrinsic-stability
+     * searches. Shared ownership — the engine keeps it alive for the
+     * run's duration.
+     *
+     * @param controller  Controller used by rollouts, or nullptr to
+     *                    revert to open-loop.
+     */
     void setController(std::shared_ptr<Simulation::SimController> controller);
 
-    /**Set progress callback (called after each iteration). */
+    /**
+     * @brief Set progress callback (called after each iteration).
+     *
+     * Fires once per completed search iteration with the current best —
+     * use it for UI updates or early termination decisions. Called on
+     * the engine's worker thread, so keep it fast; heavy work should be
+     * handed off to another thread.
+     *
+     * @param cb  Callback receiving the iteration's progress report.
+     */
     void setProgressCallback(ProgressCallback cb);
 
-    /**Set abort check callback (called before each iteration). */
+    /**
+     * @brief Set abort check callback (called before each iteration).
+     *
+     * Returning true aborts the search at the next iteration boundary
+     * and yields a DestabilizerResult flagged aborted — the cooperative
+     * way to stop a long run without losing the best-so-far candidate.
+     *
+     * @param cb  Callback queried before every iteration.
+     */
     void setAbortCheck(AbortCheck cb);
 
-    /**Run the destabilizer search. Blocking call. */
+    /**
+     * @brief Run the destabilizer search. Blocking call.
+     *
+     * Executes the full configured search synchronously — rollouts are
+     * still fanned out across the internal thread pool, only the
+     * orchestration blocks the caller.
+     *
+     * @return Final DestabilizerResult: best-found θ, achieved
+     *         destabilization metric, iteration log, and completion/
+     *         abort status.
+     */
     DestabilizerResult run();
 
-    /**Warm-start from a previous result's best θ. */
+    /**
+     * @brief Warm-start from a previous result's best θ.
+     *
+     * Seeds the initial population around @p theta instead of sampling
+     * the parameter space cold — the standard way to refine a solution
+     * found by an earlier run or to continue an aborted search. Call
+     * between configure() and run()/start().
+     *
+     * @param theta  Parameter vector in the order defined by the
+     *               configuration; dimension must match the search
+     *               space.
+     */
     void warmStart(const std::vector<double>& theta);
 
     /**Non-blocking control. */
@@ -124,10 +198,22 @@ public:
     bool isRunning() const;
     bool isPaused() const;
 
-    /**Get the current result (thread-safe snapshot). */
+    /**
+     * @brief Get the current result (thread-safe snapshot).
+     *
+     * @return Copy of the best result so far — while running this is a
+     *         mid-search snapshot reflecting the latest completed
+     *         iteration; after run()/abort() it equals the final result.
+     */
     DestabilizerResult currentResult() const;
 
-    /**Get config (const). */
+    /**
+     * @brief Get config (const).
+     *
+     * @return Const reference to the configuration installed by the last
+     *         configure() call (or the defaults); valid until the next
+     *         configure().
+     */
     const DestabilizerConfig& config() const { return config_; }
 
 private:
