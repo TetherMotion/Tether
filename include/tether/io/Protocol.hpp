@@ -70,6 +70,16 @@ inline constexpr uint16_t DEFAULT_PORT = 4000;
 // ---------------------------------------------------------------------------
 // Message types (first byte of every SLIP payload)
 // ---------------------------------------------------------------------------
+/**
+ * @brief Wire message-type identifiers for the Tether IO protocol.
+ *
+ * First byte of every SLIP-framed payload. Values 0x01–0x13 are the
+ * ParameterStreamProtocol v4 namespace and must not change; 0x20+ are
+ * Tether extensions (snapshots, datalog, thresholds, peer functions,
+ * input streams); 0x50+ are the V6 schema-negotiation bootstrap. A few
+ * trailing enumerators are source-level aliases for the canonical v4
+ * names, not new wire values.
+ */
 enum class MessageType : uint8_t {
     // ParameterStreamProtocol v4 wire IDs. Keep these values stable.
     ListParamsReq       = 0x01,
@@ -153,6 +163,15 @@ enum class MessageType : uint8_t {
 // ---------------------------------------------------------------------------
 // Value type identifiers
 // ---------------------------------------------------------------------------
+/**
+ * @brief Type tag for values on the wire.
+ *
+ * Annotates every parameter/signal value so the peer can decode it
+ * without schema knowledge. Fixed-width scalars carry a canonical byte
+ * size (see valueTypeSize()); variable-length types (strings, binary,
+ * enums, varints, structs, arrays) are length-prefixed instead —
+ * isVariableLength() classifies them.
+ */
 enum class ValueType : uint8_t {
     U8      = 1,
     U16     = 2,
@@ -186,7 +205,19 @@ enum class ValueType : uint8_t {
     FixedString = 23,
 };
 
-/**Returns true for variable-length types in the canonical v4 value namespace. */
+/**
+ * @brief Whether a ValueType is length-prefixed on the wire.
+ *
+ * Variable-length types (String, Binary, Enum, UVarint, IVarint, Struct,
+ * Array, FixedString) carry no canonical byte size — each occurrence is
+ * preceded by a length field. FixedString is classed as variable-length
+ * here because its capacity lives in schema metadata, not in the value
+ * itself.
+ *
+ * @param t  ValueType to classify.
+ * @return true if the type is length-prefixed; false for fixed-width
+ *         scalars.
+ */
 inline constexpr bool isVariableLength(ValueType t) {
     return t == ValueType::String || t == ValueType::Binary ||
            t == ValueType::Enum || t == ValueType::UVarint ||
@@ -194,7 +225,15 @@ inline constexpr bool isVariableLength(ValueType t) {
            t == ValueType::Array || t == ValueType::FixedString;
 }
 
-/**Returns the byte size of a fixed-size ValueType, or 0 for variable-length/unknown. */
+/**
+ * @brief Canonical wire size of a fixed-size ValueType.
+ *
+ * @param t  ValueType to size.
+ * @return Byte count for fixed-width types (1–16 depending on type),
+ *         or 0 for variable-length types and unrecognized tags — always
+ *         pair with isVariableLength() to distinguish "variable" from
+ *         "unknown".
+ */
 inline constexpr uint8_t valueTypeSize(ValueType t) {
     switch (t) {
         case ValueType::U8:   case ValueType::I8:  case ValueType::Bool: return 1;
@@ -224,6 +263,13 @@ enum class EntryKind : uint8_t {
 // ---------------------------------------------------------------------------
 // Stream trigger modes
 // ---------------------------------------------------------------------------
+/**
+ * @brief How a stream decides when to emit a sample.
+ *
+ * Time mode produces periodic samples at the configured interval;
+ * OnChange emits only when a designated trigger entry's value changes —
+ * used to build event-driven streams without host polling.
+ */
 enum class TriggerMode : uint8_t {
     Time     = 0, /**< Periodic sampling at interval_ms on the wire */
     OnChange = 1, /**< Trigger when the configured trigger entry changes */
@@ -307,6 +353,14 @@ private:
 // ---------------------------------------------------------------------------
 // Threshold types for change detection / skip filtering
 // ---------------------------------------------------------------------------
+/**
+ * @brief Change-detection rule kind for threshold-filtered streams.
+ *
+ * Selects how ThresholdFilter decides whether a value change is
+ * significant enough to transmit: none (always), absolute delta,
+ * relative delta, or a named custom evaluator with its own config
+ * primitives.
+ */
 enum class ThresholdType : uint8_t {
     None     = 0, /**< No threshold — always send */
     Absolute = 1, /**< Send when |new − old| > threshold */
@@ -327,6 +381,14 @@ enum class DatalogState : uint8_t {
 // ---------------------------------------------------------------------------
 // Error codes (used in Error messages)
 // ---------------------------------------------------------------------------
+/**
+ * @brief Error codes carried in Error messages.
+ *
+ * uint32_t wire field identifying why a request failed — protocol-level
+ * problems (malformed frames, unknown types/IDs) and request-level
+ * failures (stream state, capacity). InvalidParameterId aliases
+ * InvalidId for readability at param-handling call sites.
+ */
 enum class ErrorCode : uint32_t {
     None                = 0,
     InvalidMessage      = 1,
@@ -394,7 +456,18 @@ inline int64_t zigzagDecode64(uint64_t value) {
     return static_cast<int64_t>((value >> 1) ^ -(value & 1));
 }
 
-/**Encode a uint32_t as a varint into buf (max 5 bytes). Returns bytes written, 0 on overflow. */
+/**
+ * @brief Encode a uint32_t as a base-128 varint.
+ *
+ * Little-endian 7-bit groups, MSB continuation flag — the standard
+ * protobuf-style encoding, max 5 bytes for a 32-bit value.
+ *
+ * @param buf    Output buffer.
+ * @param cap    Capacity of @p buf in bytes.
+ * @param value  Value to encode.
+ * @return Bytes written (1–5); 0 if @p cap is too small — nothing
+ *         meaningful is left in @p buf in that case.
+ */
 inline size_t encodeVarint(uint8_t* buf, size_t cap, uint32_t value) {
     size_t pos = 0;
     while (value >= 0x80) {
@@ -407,7 +480,20 @@ inline size_t encodeVarint(uint8_t* buf, size_t cap, uint32_t value) {
     return pos;
 }
 
-/**Decode a varint from buf. Returns bytes consumed, 0 on error. */
+/**
+ * @brief Decode a base-128 varint.
+ *
+ * Inverse of encodeVarint(). Rejects encodings that run past the buffer,
+ * use more than 5 bytes, or overflow a uint32_t (fifth byte carrying
+ * bits above bit 31).
+ *
+ * @param buf    Input buffer containing the varint.
+ * @param len    Readable bytes in @p buf.
+ * @param value  [out] Decoded value; set to 0 on entry and only
+ *               meaningful when the return is non-zero.
+ * @return Bytes consumed (1–5); 0 on truncated input, overlong
+ *         encoding, or value overflow.
+ */
 inline size_t decodeVarint(const uint8_t* buf, size_t len, uint32_t& value) {
     value = 0;
     uint32_t shift = 0;
