@@ -83,25 +83,49 @@ class IJogRamper {
 public:
     virtual ~IJogRamper() = default;
 
-    /// Track a velocity command (units/s).  Switches to velocity mode.
+    /**
+     * @brief Track a velocity command (units/s).  Switches to velocity mode.
+     * @param rate Commanded velocity [units/s]
+     */
     virtual void setRate(double rate) = 0;
-    /// Ramp to an absolute jog position.  Switches to position mode.
+    /**
+     * @brief Ramp to an absolute jog position.  Switches to position mode.
+     * @param position Absolute destination [units]
+     */
     virtual void setTarget(double position) = 0;
     /// Decelerate to rest and hold position.
     virtual void stop() = 0;
-    /// Advance the profile by dt seconds.
+    /**
+     * @brief Advance the profile by dt seconds.
+     * @param dt Integration step [s]
+     */
     virtual void update(double dt) = 0;
 
-    /// Current profile position.
+    /**
+     * @brief Current profile position.
+     * @return Integrated position [units]
+     */
     virtual double position() const = 0;
-    /// Current profile velocity.
+    /**
+     * @brief Current profile velocity.
+     * @return Instantaneous profile velocity [units/s]
+     */
     virtual double rate() const = 0;
-    /// Current position target (position mode; position() otherwise).
+    /**
+     * @brief Current position target (position mode; position() otherwise).
+     * @return Active destination [units]
+     */
     virtual double target() const = 0;
-    /// True when the ramper has no work left: at rest after stop() or
-    /// after reaching a position target.  Never true in velocity mode.
+    /**
+     * @brief True when the ramper has no work left: at rest after stop() or
+     * after reaching a position target.  Never true in velocity mode.
+     * @return `true` when idle/settled
+     */
     virtual bool finished() const = 0;
-    /// Re-base the profile position (e.g. after homing).  Keeps the phase.
+    /**
+     * @brief Re-base the profile position (e.g. after homing).  Keeps the phase.
+     * @param position New reference position [units]
+     */
     virtual void reset(double position) = 0;
 };
 
