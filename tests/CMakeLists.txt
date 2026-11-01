@@ -1005,6 +1005,7 @@ gtest_discover_tests(tether_header_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOU
 tether_add_test_executable(tether_utils_tests
     utils/test_spsc_ring.cpp
     common/test_pending_slot.cpp
+    common/test_stage_timer.cpp
     common/test_window_stats.cpp
 )
 
