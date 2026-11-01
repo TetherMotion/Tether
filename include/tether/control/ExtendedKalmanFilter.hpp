@@ -48,6 +48,7 @@ public:
 
     /**
      * @brief Set state, input, and output dimensions
+     * @param n State vector size
      */
     void setStateDim(size_t n);
     void setInputDim(size_t m);
@@ -56,12 +57,15 @@ public:
 
     /**
      * @brief Set initial state estimate and covariance
+     * @param x0 Initial state vector (size n)
+     * @param P0 Initial error covariance (n×n); zero → identity
      */
     void setInitialState(const Eigen::VectorXd& x0,
                          const Eigen::MatrixXd& P0 = Eigen::MatrixXd());
 
     /**
      * @brief Set process and measurement noise covariances
+     * @param W Process noise covariance (n×n)
      */
     void setProcessNoise(const Eigen::MatrixXd& W);
     void setMeasurementNoise(const Eigen::MatrixXd& V);
@@ -82,6 +86,8 @@ public:
 
     /**
      * @brief Enable or disable numerical differentiation fallback
+     * @param enable `true` uses finite differences when no analytic
+     *        Jacobians are set
      */
     void enableNumericalDifferentiation(bool enable) { use_numdiff_ = enable; }
 
@@ -102,6 +108,10 @@ public:
 
     /**
      * @brief Combined prediction + update step
+     * @param y Measurement vector (size p)
+     * @param u Control input (size m)
+     * @param dt Step interval [s]
+     * @return Updated state estimate (size n)
      */
     Eigen::VectorXd estimate(const Eigen::VectorXd& y,
                              const Eigen::VectorXd& u,
@@ -109,6 +119,10 @@ public:
 
     /**
      * @brief StateEstimator interface implementation
+     * @param measurement Output vector (size p)
+     * @param control Control vector (size m)
+     * @param dt Step interval [s]
+     * @return Updated state estimate
      */
     StateVector estimate(const OutputVector& measurement,
                          const ControlVector& control,
@@ -116,21 +130,25 @@ public:
 
     /**
      * @brief Get current state estimate (StateEstimator interface)
+     * @return Latest state estimate
      */
     StateVector getState() const override;
 
     /**
      * @brief Get current state estimate as Eigen vector
+     * @return State estimate (size n)
      */
     Eigen::VectorXd getStateVector() const { return x_; }
 
     /**
      * @brief Get current error covariance
+     * @return Error covariance matrix (n×n)
      */
     const Eigen::MatrixXd& getCovariance() const { return P_; }
 
     /**
      * @brief Get state dimension
+     * @return State vector size n
      */
     size_t getStateDim() const override { return n_; }
 
