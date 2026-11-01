@@ -135,6 +135,9 @@ struct CostWeights {
      * @brief Compute the costate level c from a target singular jerk.
      *
      * c = w_j · j*² - w_t
+     *
+     * @param j_star Target jerk level [units/s^3].
+     * @return Costate level c corresponding to j*.
      */
     double costateFromJStar(double j_star) const {
         return w_j * j_star * j_star - w_t;
@@ -143,9 +146,13 @@ struct CostWeights {
     // --- Backward compatibility aliases (deprecated) ---
 
     /// @deprecated Use j_star() instead.
+    /// @param c Costate level.
+    /// @return Jerk level j* for costate c.
     double a_star(double c) const { return j_star(c); }
 
     /// @deprecated Use costateFromJStar() instead.
+    /// @param a_star Jerk level j*.
+    /// @return Costate level c corresponding to the jerk level.
     double costateFromAStar(double a_star) const {
         return costateFromJStar(a_star);
     }
@@ -164,6 +171,8 @@ enum class WeightedArcType : uint8_t {
 
 /**
  * @brief Get human-readable name for a weighted arc type.
+ * @param type Arc type to name.
+ * @return Static arc-type name.
  */
 inline const char* weightedArcTypeName(WeightedArcType type) {
     switch (type) {
@@ -228,9 +237,11 @@ struct WeightedArc {
     uint8_t activeConstraints = 0;
 
     /// Check if this arc is valid (non-empty domain)
+    /// @return true when s1 > s0.
     bool valid() const { return s1 > s0; }
 
     /// Arc length span
+    /// @return s1 - s0 [units].
     double length() const { return s1 - s0; }
 
     // --- Backward compatibility accessors (deprecated) ---
@@ -319,6 +330,11 @@ struct SingularJSeg {
      *
     * Safeguarded Newton-bisection hybrid. Returns NaN when `ds` cannot be
     * reached while the arc remains forward-monotone.
+     * @param v0 Initial velocity [units/s].
+     * @param a0 Initial acceleration [units/s^2].
+     * @param j_star Target jerk level [units/s^3].
+     * @param ds Arc-length increment [units].
+     * @return Smallest positive duration, or NaN when unreachable.
      */
     static double tau_for_ds(double v0, double a0, double j_star, double ds) {
         if (ds <= 0.0) return 0.0;
@@ -386,6 +402,11 @@ struct SnapSeg {
     }
 
     /// Velocity derivative (for Newton's method): dv/dτ = a(τ)
+    /// @param a0 Initial acceleration [units/s^2].
+    /// @param j0 Initial jerk [units/s^3].
+    /// @param sigma Snap [units/s^4].
+    /// @param tau Time at which the derivative is evaluated [s].
+    /// @return dv/dτ at @p tau.
     static double dv_dt(double a0, double j0, double sigma, double tau) {
         return a0 + j0 * tau + 0.5 * sigma * tau * tau;
     }
@@ -398,6 +419,12 @@ struct SnapSeg {
      * increasing while v > 0, so a bracket [0, τ_hi] can be established
     * by doubling. Returns NaN when `ds` cannot be reached while the arc
     * remains forward-monotone.
+     * @param v0 Initial velocity [units/s].
+     * @param a0 Initial acceleration [units/s^2].
+     * @param j0 Initial jerk [units/s^3].
+     * @param sigma Snap (jerk derivative) [units/s^4].
+     * @param ds Arc-length increment [units].
+     * @return Smallest positive duration, or NaN when unreachable.
      */
     static double tau_for_ds(double v0, double a0, double j0, double sigma,
                               double ds) {
@@ -451,6 +478,11 @@ struct SnapSeg {
      * Uses Newton's method with bracketing.
      *
      * Returns +∞ if v(t) stays positive for all τ > 0.
+     * @param v0 Initial velocity [units/s].
+     * @param a0 Initial acceleration [units/s^2].
+     * @param j0 Initial jerk [units/s^3].
+     * @param sigma Snap (jerk derivative) [units/s^4].
+     * @return Time to reach v = 0, or +inf when v stays positive.
      */
     static double timeToStop(double v0, double a0, double j0, double sigma) {
         if (v0 <= 0.0) return 0.0;
@@ -487,6 +519,11 @@ struct SnapSeg {
 
     /**
      * @brief Maximum forward distance reachable while keeping v ≥ 0.
+     * @param v0 Initial velocity [units/s].
+     * @param a0 Initial acceleration [units/s^2].
+     * @param j0 Initial jerk [units/s^3].
+     * @param sigma Snap (jerk derivative) [units/s^4].
+     * @return Maximum distance reachable while v >= 0.
      */
     static double maxForwardDistance(double v0, double a0, double j0,
                                       double sigma) {
@@ -508,6 +545,16 @@ struct SnapSeg {
      *   τ2 = -2·v1/a1, jTerm = a1²/(2·v1)  (requires a1 < 0, v1 > 0)
      *
      * @return true if feasible, populating sigma1, tau1, jTerm, tau2.
+     * @param v0 Initial velocity [units/s].
+     * @param a0 Initial acceleration [units/s^2].
+     * @param j0 Initial jerk [units/s^3].
+     * @param sRemaining Input value.
+     * @param sigmaMax Snap limit [units/s^4].
+     * @param jMax Jerk limit [units/s^3].
+     * @param sigma1 Input value.
+     * @param tau1 Input value.
+     * @param jTerm Input value.
+     * @param tau2 Input value.
      */
     static bool terminalArc2(double v0, double a0, double j0, double sRemaining,
                              double sigmaMax, double jMax,
@@ -603,6 +650,13 @@ struct SnapSeg {
      * 1. SNAP to bring j to 0 (distance ≈ v·|j|/σMax)
      * 2. Constant jerk to bring a to 0 (distance ≈ v·|a|/jMax)
      * 3. Constant -aMax deceleration to v=0 (distance ≈ v²/(2·aMax))
+     * @param v0 Initial velocity [units/s].
+     * @param a0 Initial acceleration [units/s^2].
+     * @param j0 Initial jerk [units/s^3].
+     * @param sigmaMax Snap limit [units/s^4].
+     * @param jMax Jerk limit [units/s^3].
+     * @param aMax Acceleration limit [units/s^2].
+     * @return Minimum distance the 2-arc terminal sequence needs.
      */
     static double terminalMinDistance(double v0, double a0, double j0,
                                        double sigmaMax, double jMax,
@@ -650,6 +704,18 @@ struct SnapSeg {
      *   τ2 = -2·v1/a1, jTerm = a1²/(2·v1)
      *
      * @return true if feasible, populating sigma0, tau0, sigma1, tau1, jTerm, tau2.
+     * @param v0 Initial velocity [units/s].
+     * @param a0 Initial acceleration [units/s^2].
+     * @param j0 Initial jerk [units/s^3].
+     * @param sRemaining Input value.
+     * @param sigmaMax Snap limit [units/s^4].
+     * @param jMax Jerk limit [units/s^3].
+     * @param sigma0 Input value.
+     * @param tau0 Input value.
+     * @param sigma1 Input value.
+     * @param tau1 Input value.
+     * @param jTerm Input value.
+     * @param tau2 Input value.
      */
     static bool terminalArc3(double v0, double a0, double j0, double sRemaining,
                              double sigmaMax, double jMax,
@@ -811,6 +877,14 @@ struct SingSeg {
  * @brief Closed-form braking distance estimate (snapspace).
  *
  * Estimates the distance to bring (v, a, j) → (0, 0, 0).
+ *
+ * @param v Current velocity [units/s].
+ * @param a Current acceleration [units/s^2].
+ * @param j Current jerk [units/s^3].
+ * @param sigmaMax Snap limit [units/s^4].
+ * @param jMax Jerk limit [units/s^3].
+ * @param aMax Acceleration limit [units/s^2].
+ * @return Estimated braking distance [units].
  */
 inline double brake_distance(double v, double a, double j,
                               double sigmaMax, double jMax, double aMax) {
@@ -818,6 +892,11 @@ inline double brake_distance(double v, double a, double j,
 }
 
 /// @deprecated Old jerkspace brake_distance signature.
+/// @param v Current velocity [units/s].
+/// @param a_star Deceleration level [units/s^2].
+/// @param eta_min Lower jerk level bound (unused).
+/// @param eta_max Upper jerk level bound (unused).
+/// @return Estimated braking distance v²/(2·a*).
 inline double brake_distance(double v, double a_star,
                               double eta_min, double eta_max) {
     if (v <= 0.0) return 0.0;
@@ -944,6 +1023,8 @@ public:
      *
      * Inverts each arc's s(t) relation exactly (BANG/SINGULAR via closed-form
      * polynomials, WALL via the velocity-limit quadrature).
+     * @param s_query Input value.
+     * @return Time [s] at which the given arc length is reached.
      */
     T timeAtArcLength(T s_query) const override {
         double s = static_cast<double>(s_query);
@@ -1074,10 +1155,12 @@ public:
 
     /**
      * @brief The optimal singular acceleration level a* found by the solver.
+     * @return Optimal jerk level of the solution.
      */
     double optimalAStar() const { return optimalAStar_; }
 
     /// Exact start state encoded by the first stored arc.
+    /// @return Initial (s, v, a, j) state, or a zero state when empty.
     WeightedState startState() const {
         if (arcs_.empty()) return {};
         const auto& arc = arcs_.front();
@@ -1085,6 +1168,7 @@ public:
     }
 
     /// Exact terminal state encoded by the final stored arc.
+    /// @return Final (s, v, a, j) state, or a zero state when empty.
     WeightedState endState() const {
         if (arcs_.empty()) return {};
         const auto& arc = arcs_.back();
@@ -1154,6 +1238,8 @@ public:
 
     /**
      * @brief The arc type active at time t.
+     * @param t Time [s].
+     * @return Arc type at @p t (SINGULAR when the structure is empty).
      */
     WeightedArcType arcTypeAt(T t) const {
         double tD = static_cast<double>(t);
@@ -1172,6 +1258,7 @@ public:
     }
 
     /// Access the path (kept alive by the WSS).
+    /// @return Path the structure was built for.
     std::shared_ptr<const Path> path() const { return pathPtr_; }
 
 private:
@@ -1391,14 +1478,6 @@ public:
     }
 
     /**
-     * @brief Solve the weighted-cost problem.
-     *
-     * @param startVelocity Initial velocity (default 0)
-     * @param endVelocity Final velocity (default 0)
-     * @param constraintCacheSize Number of grid points for the constraint cache
-     * @return Vector of weighted arcs (the solution)
-     */
-    /**
      * @brief Solve the weighted-cost problem (snapspace).
      *
      * Optimizes over j* (singular jerk level) using golden-section search.
@@ -1552,23 +1631,28 @@ public:
 
     /**
      * @brief Get the achieved cost value.
+     * @return Weighted cost J of the last solution.
      */
     double costValue() const { return lastCost_; }
 
     /**
      * @brief Get the optimal j* found by the solver.
+     * @return Optimal jerk level j*.
      */
     double optimalJStar() const { return lastJStar_; }
 
     /// Whether the latest `solve()` call reached all requested boundaries.
+    /// @return true when arcs were produced and no failure was recorded.
     bool feasible() const { return arcs_.size() > 0 && lastFailure_.empty(); }
 
     /// Empty on success; otherwise explains why `solve()` returned no arcs.
+    /// @return Failure description (empty on success).
     const std::string& failureReason() const { return lastFailure_; }
 
     /// @deprecated Use optimalJStar() instead. Returns j* clamped to aMax
     /// for backward compatibility with callers expecting an acceleration-like
     /// value bounded by aMax.
+    /// @return j* clamped to the path acceleration limit.
     double optimalAStar() const {
         double aMax = static_cast<double>(limits_.path.maxPathAcceleration);
         return std::min(lastJStar_, aMax);
@@ -1576,6 +1660,7 @@ public:
 
     /**
      * @brief Get the total traversal time of the solution.
+     * @return Total duration [s].
      */
     double totalTime() const {
         if (arcs_.empty()) return 0.0;
@@ -1587,6 +1672,7 @@ public:
 
     /**
      * @brief Get the constraint evaluator.
+     * @return Constraint evaluator in use.
      */
     const Evaluator& evaluator() const { return evaluator_; }
 
@@ -1616,6 +1702,8 @@ public:
      *
      * This is the v_lim function used by the standard solver. It can be
      * passed to forwardPass() for testing.
+     * @return Default velocity limit at that arc length.
+     * @param s Arc length [units].
      */
     double defaultVLimAt(double s) const {
         double vGrid = vLimFineGrid_[fineGridIndex(s)];
@@ -1624,11 +1712,13 @@ public:
 
     /**
      * @brief Get the path length.
+     * @return Total path length [units].
      */
     double pathLength() const { return sTotal_; }
 
     /**
      * @brief Get the grid step size.
+     * @return Arc-length grid step [units].
      */
     double gridStep() const { return ds_; }
 
@@ -3752,6 +3842,15 @@ public:
      *
      * Solves the weighted-cost problem and produces a WeightedSwitchingStructure
      * wrapped in an AnalyticalSSRVelocityProfile.
+     * @param path Path to profile.
+     * @param feedRate Nominal feed rate [units/s].
+     * @param startVelocity Initial velocity [units/s] (default 0).
+     * @param endVelocity Final velocity [units/s] (default 0).
+     * @param constraintCacheSize Number of cached constraint samples.
+     * @param startAcceleration Initial acceleration [units/s^2] (default 0).
+     * @param startJerk Initial jerk [units/s^3] (default 0).
+     * @return Generated profile (never null; falls back to a sampled profile
+     *         when the problem is infeasible — inspect failureReason()).
      */
     std::unique_ptr<VelocityProfile> computeProfile(
         const Path& path,
@@ -4069,11 +4168,13 @@ public:
 
     /**
      * @brief Get the weighted switching structure (for exact sampling).
+     * @return Weighted source view of the produced profile.
      */
     std::shared_ptr<WSS> weightedSource() const { return wss_; }
 
     /**
      * @brief Get the achieved cost value J.
+     * @return Weighted cost of the last solution (0 when none).
      */
     double costValue() const {
         return wss_ ? wss_->costValue() : 0.0;
@@ -4081,21 +4182,25 @@ public:
 
     /**
      * @brief Get the optimal singular acceleration a*.
+     * @return Optimal singular acceleration of the last solution (0 when none).
      */
     double optimalAStar() const {
         return wss_ ? wss_->optimalAStar() : 0.0;
     }
 
     /// Empty on success; otherwise the reason the last solve returned empty.
+    /// @return Failure description (empty on success).
     const std::string& failureReason() const { return lastFailure_; }
 
     /**
      * @brief Get the cost weights.
+     * @return Cost weights in use.
      */
     CostWeights weights() const { return weights_; }
 
     /**
      * @brief Set the cost weights.
+     * @param w New cost weights (w_t must be > 0).
      */
     void setWeights(CostWeights w) { weights_ = w; }
 

@@ -719,6 +719,7 @@ public:
      * 
      * @param p1_start First path segment start point.
      * @param p1_end First path segment end point.
+     * @param p2_start Second path segment start point.
      * @param p2_end Second path segment end point.
      * @param radius Tool radius.
      * @return true if gouge would occur
@@ -819,7 +820,7 @@ Error processM6(
  * @param vars Variable system receiving the values.
  * @param toolTable Table supplying the tool data.
  * @param tloState Active tool-length compensation state.
- * @param cutterState Active cutter-radius compensation state.
+ * @param crcState Active cutter-radius compensation state.
  */
 void updateToolVariables(
     VariableSystem& vars,

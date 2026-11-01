@@ -399,6 +399,7 @@ public:
      * @param iy Y index
      * @param iz Z index
      * @param error Error vector
+     * @return Error::OK, or an out-of-range error.
      */
     Error setError(int ix, int iy, int iz, const VolumetricError& error);
     

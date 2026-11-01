@@ -557,6 +557,7 @@ public:
      *
      * @param block  G-code block with X/Y/Z/A/B/C/U/V/W words
      * @param state  Machine state (updated with g52Offset)
+     * @return Error::OK on success.
      */
     Error processG52(const Block& block, MachineState& state);
 
@@ -589,6 +590,7 @@ public:
      *
      * @param block  G-code block
      * @param state  Machine state (updated with g68* fields)
+     * @return Error::OK, or a geometry/parameter error.
      */
     Error processG68(const Block& block, MachineState& state);
 
@@ -612,6 +614,7 @@ public:
      *
      * @param block  G-code block
      * @param state  Machine state (updated with scaleFactors)
+     * @return Error::OK, or a scale-parameter error.
      */
     Error processG51(const Block& block, MachineState& state);
 

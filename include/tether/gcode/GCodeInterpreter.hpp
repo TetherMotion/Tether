@@ -549,24 +549,35 @@ public:
     // ========================================================================
 
     /// '!' — pause motion after the current segment
+    /// @return Error::OK when the hold was accepted.
     Error feedHold();
     /// '~' — resume after feed hold
+    /// @return Error::OK when motion resumed.
     Error cycleResume();
     /// Ctrl-X (0x18) — soft reset: abort program, clear errors
+    /// @return Error::OK after the reset.
     Error softReset();
     /// 0x85 — cancel an in-progress jog
+    /// @return Error::OK when a jog was cancelled.
     Error jogCancel();
     /// '?' — GRBL-style status line, e.g. "<Run|MPos:1.0,2.0,3.0|FS:500,1000>"
+    /// @return Status line text.
     std::string statusReport() const;
     /// '$...' — GRBL system command ($G, $#, $I, $X, $H, $N, $J=, $$)
+    /// @param command System command without the leading '$'.
+    /// @return Error::OK, or an unsupported-command error.
     Error systemCommand(const std::string& command);
     /// Dispatch a single real-time character ('!', '~', '?', 0x18, 0x85)
+    /// @param command Real-time character received on the stream.
+    /// @return Error::OK, or an unknown-character error.
     Error processRealtimeChar(char command);
     /// Startup blocks set via `$N0=`/`$N1=` (GRBL)
+    /// @return Startup lines executed on reset, in order.
     const std::vector<std::string>& getStartupLines() const {
         return m_startupLines;
     }
     /// Text replies from systemCommand()/status queries
+    /// @param callback Sink for the replies; null clears it.
     void setRealtimeCallback(RealtimeCallback callback) {
         m_realtimeCallback = std::move(callback);
     }
@@ -620,6 +631,7 @@ public:
     /**
      * @brief Set handler for dialect-specific G-codes (G10/G11 retract,
      *        G29 bed leveling, etc.)
+     * @param callback Invoked for G-codes the interpreter does not handle.
      */
     void setUserGCodeCallback(UserGCodeCallback callback) {
         m_userGCodeCallback = std::move(callback);
@@ -643,29 +655,35 @@ public:
     
     /**
      * @brief Get variable system
+     * @return Mutable variable system holding #-parameters and modal state.
      */
     VariableSystem& getVariables() { return m_variables; }
+    /// @return Read-only variable system.
     const VariableSystem& getVariables() const { return m_variables; }
     
     /**
      * @brief Get tool table
+     * @return Tool table used for G43/G41 compensation.
      */
     ToolTable& getToolTable() { return m_toolTable; }
     const ToolTable& getToolTable() const { return m_toolTable; }
     
     /**
      * @brief Get coordinate system manager
+     * @return Manager holding WCS/G92/G52/G68/G51 state.
      */
     CoordinateSystemManager& getCoordinates() { return m_coordinates; }
     const CoordinateSystemManager& getCoordinates() const { return m_coordinates; }
     
     /**
      * @brief Get O-code executor
+     * @return Executor handling O-words, subroutines and control flow.
      */
     OCodeExecutor& getOCodeExecutor() { return *m_oCodeExecutor; }
     
     /**
      * @brief Get override controller
+     * @return Feed/rapid/spindle override controller.
      */
     OverrideController& getOverrides() { return m_overrides; }
     const OverrideController& getOverrides() const { return m_overrides; }
@@ -676,16 +694,20 @@ public:
     
     /**
      * @brief Get current position (program coordinates)
+     * @return Current program-space position.
      */
     Position getCurrentPosition() const;
     
     /**
      * @brief Get current position (machine coordinates)
+     * @return Current machine-space position.
      */
     Position getMachinePosition() const;
     
     /**
      * @brief Set position (for homing, etc.)
+     * @param pos New position.
+     * @param machineCoords true when @p pos is in machine coordinates.
      */
     void setPosition(const Position& pos, bool machineCoords = false);
     
@@ -695,11 +717,13 @@ public:
     
     /**
      * @brief Get configuration
+     * @return Active interpreter configuration.
      */
     const InterpreterConfig& getConfig() const { return m_config; }
     
     /**
      * @brief Update configuration
+     * @param config Configuration to apply.
      */
     void setConfig(const InterpreterConfig& config);
     
@@ -723,11 +747,14 @@ public:
     /**
      * @brief Marlin/RepRap-domain state (M82/83, M92, M114, M204/205,
      *        M206, M218, M220/221, M280, M301/304, M401/402, M420/421, M851)
+     * @return Marlin/RepRap-domain state (units, offsets, limits, ...).
      */
     const MarlinMachineState& marlinState() const { return m_marlinState; }
     MarlinMCodeHandler& marlinHandler() { return m_marlinHandler; }
 
     /// @brief GRBL `$n=` setting value, or nullopt if unset.
+    /// @param n Setting number.
+    /// @return Setting value, or nullopt when unset.
     std::optional<double> grblSetting(int n) const {
         auto it = m_grblSettings.find(n);
         return it != m_grblSettings.end() ? std::optional{it->second}

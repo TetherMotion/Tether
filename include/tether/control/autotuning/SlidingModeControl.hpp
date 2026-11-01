@@ -688,6 +688,8 @@ public:
     
     /**
      * @brief Set sliding surface
+     * @param C Surface coefficients (1×n).
+     * @param n State dimension.
      */
     void setSlidingSurface(const double* C, int n);
     
@@ -713,6 +715,7 @@ public:
     
     /**
      * @brief Get estimated disturbance
+     * @return Estimated disturbance magnitude driving the gain adaptation.
      */
     double getDisturbanceEstimate() const { return m_dHat; }
     
