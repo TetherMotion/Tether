@@ -110,17 +110,26 @@ public:
     
     /**
      * @brief Add a performance sample at a position
+     * @param position Axis position [mm].
+     * @param velocity Velocity at that position [mm/s].
+     * @param accel Acceleration at that position [mm/s^2].
+     * @param trackingError Measured tracking error [mm].
+     * @param feedRateRatio Achieved feed rate divided by the programmed rate.
      */
     void addSample(double position, double velocity, double accel, 
                    double trackingError, double feedRateRatio);
     
     /**
      * @brief Get performance metrics at a position
+     * @param position Axis position [mm].
+     * @return Metrics of the bin containing @p position.
      */
     PerformanceMetrics getMetrics(double position) const;
     
     /**
      * @brief Get suggested limits at a position
+     * @param position Axis position [mm].
+     * @return Limits derived from the bin containing @p position.
      */
     SuggestedLimits getSuggestedLimits(double position) const;
     
@@ -179,12 +188,23 @@ public:
     
     /**
      * @brief Add a performance sample at a 2D position
+     * @param u First in-plane coordinate [mm].
+     * @param v Second in-plane coordinate [mm].
+     * @param velocity Velocity at that position [mm/s].
+     * @param accel Acceleration at that position [mm/s^2].
+     * @param trackingError Measured tracking error [mm].
+     * @param feedRateRatio Achieved feed rate divided by the programmed rate.
      */
     void addSample(double u, double v, double velocity, double accel,
                    double trackingError, double feedRateRatio);
     
     /**
      * @brief Add sample with full 3D position (projected to plane)
+     * @param position Machine position; the plane axes are extracted.
+     * @param velocity Velocity at that position [mm/s].
+     * @param accel Acceleration at that position [mm/s^2].
+     * @param trackingError Measured tracking error [mm].
+     * @param feedRateRatio Achieved feed rate divided by the programmed rate.
      */
     void addSample3D(const std::array<double, 3>& position,
                      double velocity, double accel, double trackingError,
@@ -192,16 +212,25 @@ public:
     
     /**
      * @brief Get performance metrics at a position
+     * @param u First in-plane coordinate [mm].
+     * @param v Second in-plane coordinate [mm].
+     * @return Metrics of the cell containing the point.
      */
     PerformanceMetrics getMetrics(double u, double v) const;
     
     /**
      * @brief Get suggested limits at a position
+     * @param u First in-plane coordinate [mm].
+     * @param v Second in-plane coordinate [mm].
+     * @return Limits derived from the cell containing the point.
      */
     SuggestedLimits getSuggestedLimits(double u, double v) const;
     
     /**
      * @brief Get interpolated metrics at exact position
+     * @param u First in-plane coordinate [mm].
+     * @param v Second in-plane coordinate [mm].
+     * @return Bilinearly interpolated metrics.
      */
     PerformanceMetrics getInterpolatedMetrics(double u, double v) const;
     
@@ -258,6 +287,11 @@ public:
     
     /**
      * @brief Add a performance sample at a 3D position
+     * @param position Machine position [mm].
+     * @param velocity Velocity at that position [mm/s].
+     * @param accel Acceleration at that position [mm/s^2].
+     * @param trackingError Measured tracking error [mm].
+     * @param feedRateRatio Achieved feed rate divided by the programmed rate.
      */
     void addSample(const std::array<double, 3>& position,
                    double velocity, double accel, double trackingError,
@@ -265,16 +299,22 @@ public:
     
     /**
      * @brief Get performance metrics at a position
+     * @param position Machine position [mm].
+     * @return Metrics of the voxel containing the point.
      */
     PerformanceMetrics getMetrics(const std::array<double, 3>& position) const;
     
     /**
      * @brief Get suggested limits at a position
+     * @param position Machine position [mm].
+     * @return Limits derived from the voxel containing the point.
      */
     SuggestedLimits getSuggestedLimits(const std::array<double, 3>& position) const;
     
     /**
      * @brief Get trilinearly interpolated metrics
+     * @param position Machine position [mm].
+     * @return Trilinearly interpolated metrics.
      */
     PerformanceMetrics getInterpolatedMetrics(const std::array<double, 3>& position) const;
     
@@ -291,11 +331,14 @@ public:
     
     /**
      * @brief Get only populated voxels (sparse representation)
+     * @return Voxels that received at least one sample.
      */
     std::vector<VoxelData> getPopulatedVoxels() const;
     
     /**
      * @brief Get a 2D slice at constant Z
+     * @param z Z coordinate of the slice [mm].
+     * @return 2D heatmap of the voxel layer nearest @p z.
      */
     Heatmap2D getSliceAtZ(double z) const;
     
@@ -341,6 +384,9 @@ public:
     
     /**
      * @brief Set expected performance model
+     * @param velocity Expected velocity capability [mm/s].
+     * @param accel Expected acceleration capability [mm/s^2].
+     * @param jerk Expected jerk capability [mm/s^3].
      */
     void setExpectedPerformance(double velocity, double accel, double jerk) {
         expectedVelocity_ = velocity;
@@ -359,6 +405,10 @@ public:
     
     /**
      * @brief Add actual performance sample
+     * @param position Machine position [mm].
+     * @param velocity Velocity at that position [mm/s].
+     * @param accel Acceleration at that position [mm/s^2].
+     * @param trackingError Measured tracking error [mm].
      */
     void addActualSample(const std::array<double, 3>& position,
                          double velocity, double accel, double trackingError);
@@ -378,11 +428,17 @@ public:
     
     /**
      * @brief Get problem areas (where actual << expected)
+     * @param threshold Ratio below which a voxel counts as a problem area.
+     * @return Voxels whose achieved performance is below @p threshold of
+     *         the expected model.
      */
     std::vector<VoxelData> getProblemAreas(double threshold = 0.8) const;
     
     /**
      * @brief Export differential grid for visualization
+     * @param plane Plane to project onto.
+     * @param slice Coordinate of the slice within the plane's normal axis.
+     * @return Grid of velocity ratios for the requested slice.
      */
     Heatmap2D::GridData getVelocityRatioGrid(Heatmap2D::Plane plane, double slice) const;
     
@@ -410,6 +466,12 @@ public:
     
     /**
      * @brief Process a trajectory sample with error info
+     * @param position Per-axis position at the sample [mm].
+     * @param velocity Per-axis velocity at the sample [mm/s].
+     * @param trackingError Measured tracking error [mm].
+     * @param contourError Measured contour error [mm].
+     * @param commandedFeedRate Programmed feed rate [mm/s].
+     * @param actualFeedRate Achieved feed rate [mm/s].
      */
     void processSample(const std::array<double, 9>& position,
                        const std::array<double, 9>& velocity,
@@ -420,6 +482,7 @@ public:
     
     /**
      * @brief Get the built heatmaps
+     * @return Per-axis heatmaps (index = axis).
      */
     const std::array<Heatmap1D, 9>& getAxisHeatmaps() const { return axisHeatmaps_; }
     const Heatmap2D& getXYHeatmap() const { return xyHeatmap_; }
@@ -429,6 +492,7 @@ public:
     
     /**
      * @brief Get mutable heatmaps for direct manipulation
+     * @return Mutable per-axis heatmaps (index = axis).
      */
     std::array<Heatmap1D, 9>& axisHeatmaps() { return axisHeatmaps_; }
     Heatmap2D& xyHeatmap() { return xyHeatmap_; }
