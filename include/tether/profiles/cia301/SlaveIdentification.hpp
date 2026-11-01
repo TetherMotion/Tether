@@ -93,6 +93,7 @@ struct IdentityRecord {
     
     /**
      * @brief Get major revision (high word)
+     * @return Major revision number.
      */
     uint16_t revisionMajor() const { 
         return static_cast<uint16_t>((revision_number >> 16) & 0xFFFF); 
@@ -100,6 +101,7 @@ struct IdentityRecord {
     
     /**
      * @brief Get minor revision (low word)
+     * @return Minor revision number.
      */
     uint16_t revisionMinor() const { 
         return static_cast<uint16_t>(revision_number & 0xFFFF); 
@@ -107,6 +109,7 @@ struct IdentityRecord {
     
     /**
      * @brief Check if identity has been read successfully
+     * @return true when a non-zero vendor ID was read.
      */
     bool isValid() const { return vendor_id != 0; }
 };
@@ -123,6 +126,7 @@ struct DeviceTypeInfo {
     
     /**
      * @brief Get device profile number (e.g., 402 for drives)
+     * @return CiA profile number (low word of 0x1000).
      */
     uint16_t profileNumber() const {
         return static_cast<uint16_t>(raw_value & 0xFFFF);
@@ -130,6 +134,7 @@ struct DeviceTypeInfo {
     
     /**
      * @brief Get additional information (upper 16 bits)
+     * @return Profile-specific additional information.
      */
     uint16_t additionalInfo() const {
         return static_cast<uint16_t>((raw_value >> 16) & 0xFFFF);
@@ -137,6 +142,7 @@ struct DeviceTypeInfo {
     
     /**
      * @brief Check if this is a CiA 402 drive
+     * @return true when the profile number is 402.
      */
     bool isCiA402Drive() const { return profileNumber() == 402; }
 };
@@ -175,21 +181,27 @@ public:
     
     /**
      * @brief Copy constructor - properly copies string buffer
+     * @param other Identity to copy (strings are duplicated into this buffer).
      */
     SlaveIdentity(const SlaveIdentity& other);
     
     /**
      * @brief Copy assignment - properly copies string buffer
+     * @param other Identity to copy (strings are duplicated into this buffer).
+     * @return Reference to this identity.
      */
     SlaveIdentity& operator=(const SlaveIdentity& other);
     
     /**
      * @brief Move constructor
+     * @param other Identity to move from; its string pointers are rebound.
      */
     SlaveIdentity(SlaveIdentity&& other) noexcept;
     
     /**
      * @brief Move assignment
+     * @param other Identity to move from; its string pointers are rebound.
+     * @return Reference to this identity.
      */
     SlaveIdentity& operator=(SlaveIdentity&& other) noexcept;
     
@@ -199,26 +211,31 @@ public:
     
     /**
      * @brief Get identity record (0x1018)
+     * @return Vendor/product/revision/serial record.
      */
     const IdentityRecord& identityRecord() const { return m_identity; }
     
     /**
      * @brief Get vendor ID
+     * @return ETG-assigned vendor ID.
      */
     uint32_t vendorId() const { return m_identity.vendor_id; }
     
     /**
      * @brief Get product code
+     * @return Vendor-specific product code.
      */
     uint32_t productCode() const { return m_identity.product_code; }
     
     /**
      * @brief Get revision number
+     * @return Packed major.minor revision.
      */
     uint32_t revisionNumber() const { return m_identity.revision_number; }
     
     /**
      * @brief Get serial number
+     * @return Device serial number.
      */
     uint32_t serialNumber() const { return m_identity.serial_number; }
     
@@ -228,11 +245,13 @@ public:
     
     /**
      * @brief Get device type info (0x1000)
+     * @return Decoded device type.
      */
     const DeviceTypeInfo& deviceType() const { return m_device_type; }
     
     /**
      * @brief Check if this is a CiA 402 drive
+     * @return true when the device type reports profile 402.
      */
     bool isCiA402Drive() const { return m_device_type.isCiA402Drive(); }
     
@@ -266,16 +285,19 @@ public:
     
     /**
      * @brief Check if device name was read
+     * @return true when a non-empty device name is available.
      */
     bool hasDeviceName() const { return m_device_name != nullptr && m_device_name[0] != '\0'; }
     
     /**
      * @brief Check if hardware version was read
+     * @return true when a non-empty hardware version is available.
      */
     bool hasHardwareVersion() const { return m_hw_version != nullptr && m_hw_version[0] != '\0'; }
     
     /**
      * @brief Check if software version was read
+     * @return true when a non-empty software version is available.
      */
     bool hasSoftwareVersion() const { return m_sw_version != nullptr && m_sw_version[0] != '\0'; }
     
@@ -285,21 +307,25 @@ public:
     
     /**
      * @brief Get slave index (position in chain)
+     * @return 0-based slave position.
      */
     uint16_t slaveIndex() const { return m_slave_index; }
     
     /**
      * @brief Get error register value (0x1001)
+     * @return Raw error register byte.
      */
     uint8_t errorRegister() const { return m_error_register; }
     
     /**
      * @brief Get supported drive modes (0x6502, CiA 402)
+     * @return Bitmask of supported CiA 402 operating modes.
      */
     uint32_t supportedDriveModes() const { return m_supported_modes; }
     
     /**
      * @brief Check if identification was successful
+     * @return true when the identity record was read and marked valid.
      */
     bool isValid() const { return m_valid && m_identity.isValid(); }
     
@@ -317,51 +343,61 @@ public:
     
     /**
      * @brief Set identity record
+     * @param record Vendor/product/revision/serial values.
      */
     void setIdentityRecord(const IdentityRecord& record) { m_identity = record; }
     
     /**
      * @brief Set device type
+     * @param type Device type value (0x1000).
      */
     void setDeviceType(const DeviceTypeInfo& type) { m_device_type = type; }
     
     /**
      * @brief Set device name pointer (must point to buffer)
+     * @param ptr String living in this identity's string buffer.
      */
     void setDeviceNamePtr(const char* ptr) { m_device_name = ptr; }
     
     /**
      * @brief Set hardware version pointer (must point to buffer)
+     * @param ptr String living in this identity's string buffer.
      */
     void setHardwareVersionPtr(const char* ptr) { m_hw_version = ptr; }
     
     /**
      * @brief Set software version pointer (must point to buffer)
+     * @param ptr String living in this identity's string buffer.
      */
     void setSoftwareVersionPtr(const char* ptr) { m_sw_version = ptr; }
     
     /**
      * @brief Set order code pointer (must point to buffer)
+     * @param ptr String living in this identity's string buffer.
      */
     void setOrderCodePtr(const char* ptr) { m_order_code = ptr; }
     
     /**
      * @brief Set slave index
+     * @param index 0-based slave position.
      */
     void setSlaveIndex(uint16_t index) { m_slave_index = index; }
     
     /**
      * @brief Set error register
+     * @param reg Raw error register value (0x1001).
      */
     void setErrorRegister(uint8_t reg) { m_error_register = reg; }
     
     /**
      * @brief Set supported drive modes
+     * @param modes Bitmask of supported CiA 402 operating modes.
      */
     void setSupportedDriveModes(uint32_t modes) { m_supported_modes = modes; }
     
     /**
      * @brief Mark identity as valid
+     * @param valid true when the identity was read successfully.
      */
     void setValid(bool valid) { m_valid = valid; }
     
@@ -372,6 +408,7 @@ public:
     
     /**
      * @brief Get remaining buffer space
+     * @return Bytes still free in the identity string buffer.
      */
     size_t remainingBufferSpace() const { 
         return kMaxIdentityStringBuffer - m_buffer_offset; 
@@ -450,11 +487,13 @@ public:
     
     /**
      * @brief Set SDO timeout in milliseconds
+     * @param timeout_ms Per-transaction SDO timeout [ms].
      */
     void setSDOTimeout(uint32_t timeout_ms) { m_sdo_timeout_ms = timeout_ms; }
     
     /**
      * @brief Get SDO timeout
+     * @return Per-transaction SDO timeout [ms].
      */
     uint32_t getSDOTimeout() const { return m_sdo_timeout_ms; }
     
@@ -473,7 +512,8 @@ public:
     /**
      * @brief Identify multiple slaves
      * 
-     * @param[out] identities Vector to fill with identities
+     * @param[out] identities Array to fill with identities
+     * @param max_count Capacity of @p identities
      * @param slave_count Number of slaves to identify
      * @return Number of successfully identified slaves
      */
@@ -574,6 +614,9 @@ const char* getVendorName(uint32_t vendor_id);
  *
  * Returns a static string for well-known product codes or a formatted
  * "Product 0x%08X" fallback when unknown.
+ *
+ * @param product_code Product code from the identity record.
+ * @return Static product name or fallback string.
  */
 const char* getProductName(uint32_t product_code);
 
