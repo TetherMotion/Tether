@@ -98,26 +98,34 @@ public:
     
     /**
      * @brief Set PID gains
+     * @param gains Gain set to apply.
      */
     void setGains(const PIDGains& gains);
     
     /**
      * @brief Set gains individually
+     * @param Kp Proportional gain.
+     * @param Ki Integral gain.
+     * @param Kd Derivative gain.
+     * @param Kff Velocity feedforward gain.
      */
     void setGains(double Kp, double Ki, double Kd, double Kff = 0.0);
     
     /**
      * @brief Get current gains
+     * @return Gains currently in use.
      */
     PIDGains getGains() const { return m_gains; }
     
     /**
      * @brief Set output limits
+     * @param limits Output/integral bounds and rate limit.
      */
     void setLimits(const PIDLimits& limits);
     
     /**
      * @brief Get output limits
+     * @return Limits currently enforced.
      */
     PIDLimits getLimits() const { return m_limits; }
     
@@ -130,11 +138,13 @@ public:
     
     /**
      * @brief Set anti-windup method
+     * @param method Anti-windup strategy to apply while saturated.
      */
     void setAntiWindup(AntiWindupMethod method) { m_antiWindup = method; }
     
     /**
      * @brief Set back-calculation gain (for BackCalculation anti-windup)
+     * @param Kb Back-calculation gain (1/Tt); larger unwinds faster.
      */
     void setBackCalcGain(double Kb) { m_Kb = Kb; }
     
@@ -182,31 +192,37 @@ public:
     
     /**
      * @brief Get current error
+     * @return Error from the last update.
      */
     double getError() const { return m_error; }
     
     /**
      * @brief Get integral term
+     * @return Integral contribution of the last update.
      */
     double getIntegralTerm() const { return m_integral; }
     
     /**
      * @brief Get derivative term
+     * @return Derivative contribution of the last update.
      */
     double getDerivativeTerm() const { return m_derivative; }
     
     /**
      * @brief Get proportional term
+     * @return Proportional contribution of the last update.
      */
     double getProportionalTerm() const { return m_proportional; }
     
     /**
      * @brief Get last output
+     * @return Control output produced by the last update.
      */
     double getOutput() const { return m_output; }
     
     /**
      * @brief Check if output is saturated
+     * @return true when the output hit a limit in the last update.
      */
     bool isSaturated() const { return m_saturated; }
     
@@ -268,31 +284,39 @@ public:
     
     /**
      * @brief Set cutoff frequency
+     * @param cutoffHz -3 dB cutoff frequency [Hz].
      */
     void setCutoffFrequency(double cutoffHz);
     
     /**
      * @brief Set sample time
+     * @param sampleTimeS Filter sample period [s].
      */
     void setSampleTime(double sampleTimeS);
     
     /**
      * @brief Reset filter
+     *
+     * Clears the internal state; the next sample starts from rest.
      */
     void reset();
     
     /**
      * @brief Reset with initial value
+     * @param initialValue Output the filter starts from.
      */
     void reset(double initialValue);
     
     /**
      * @brief Apply filter
+     * @param input New sample.
+     * @return Filtered sample.
      */
     double filter(double input);
     
     /**
      * @brief Get last output
+     * @return Most recent filtered value.
      */
     double getOutput() const { return m_output; }
     
@@ -327,31 +351,39 @@ public:
     
     /**
      * @brief Set notch frequency
+     * @param notchHz Notch centre frequency [Hz].
      */
     void setNotchFrequency(double notchHz);
     
     /**
      * @brief Set Q factor
+     * @param Q Quality factor (higher = narrower notch).
      */
     void setQ(double Q);
     
     /**
      * @brief Set sample time
+     * @param sampleTimeS Filter sample period [s].
      */
     void setSampleTime(double sampleTimeS);
     
     /**
      * @brief Reset filter
+     *
+     * Clears the biquad history; the next sample starts from rest.
      */
     void reset();
     
     /**
      * @brief Apply filter
+     * @param input New sample.
+     * @return Filtered sample.
      */
     double filter(double input);
     
     /**
      * @brief Get last output
+     * @return Most recent filtered value.
      */
     double getOutput() const { return m_y1; }
     
@@ -385,21 +417,27 @@ public:
     
     /**
      * @brief Set window size
+     * @param size Number of samples averaged.
      */
     void setWindowSize(size_t size);
     
     /**
      * @brief Reset filter
+     *
+     * Clears the window; the average restarts from the next sample.
      */
     void reset();
     
     /**
      * @brief Apply filter
+     * @param input New sample.
+     * @return Mean of the samples in the window.
      */
     double filter(double input);
     
     /**
      * @brief Get last output
+     * @return Most recent window average.
      */
     double getOutput() const { return m_output; }
     
@@ -426,31 +464,38 @@ public:
     
     /**
      * @brief Set position loop gains
+     * @param gains Outer (position) loop gains.
      */
     void setPositionGains(const PIDGains& gains);
     
     /**
      * @brief Set velocity loop gains
+     * @param gains Inner (velocity) loop gains.
      */
     void setVelocityGains(const PIDGains& gains);
     
     /**
      * @brief Set position loop limits
+     * @param limits Output limits of the position loop (velocity command).
      */
     void setPositionLimits(const PIDLimits& limits);
     
     /**
      * @brief Set velocity loop limits
+     * @param limits Output limits of the velocity loop (torque command).
      */
     void setVelocityLimits(const PIDLimits& limits);
     
     /**
      * @brief Set sample time for both loops
+     * @param sampleTimeS Sample period [s].
      */
     void setSampleTime(double sampleTimeS);
     
     /**
      * @brief Reset both controllers
+     *
+     * Clears integrators and filter state in both loops.
      */
     void reset();
     
@@ -468,26 +513,31 @@ public:
     
     /**
      * @brief Get position controller
+     * @return Outer (position) loop controller for live tuning.
      */
     PIDController& getPositionController() { return m_positionPID; }
     
     /**
      * @brief Get velocity controller
+     * @return Inner (velocity) loop controller for live tuning.
      */
     PIDController& getVelocityController() { return m_velocityPID; }
     
     /**
      * @brief Get position error
+     * @return Position error from the last calculate() call.
      */
     double getPositionError() const { return m_positionPID.getError(); }
     
     /**
      * @brief Get velocity error
+     * @return Velocity error from the last calculate() call.
      */
     double getVelocityError() const { return m_velocityPID.getError(); }
     
     /**
      * @brief Get velocity setpoint (output of position loop)
+     * @return Velocity command produced by the position loop.
      */
     double getVelocitySetpoint() const { return m_velocitySetpoint; }
     
