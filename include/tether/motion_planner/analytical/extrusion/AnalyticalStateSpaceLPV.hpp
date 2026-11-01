@@ -87,6 +87,17 @@ public:
 
     /**
      * @brief Construct from trajectory and parameters.
+     *
+     * Stores a pointer to @p traj — the trajectory must outlive this
+     * object. The internal model LUT starts empty, so at least one
+     * addModelPoint() call is required before inputAtTime() returns
+     * anything but 0. The LPV state v is initialized to zero.
+     *
+     * @param traj    Extrusion trajectory to invert the plant model for;
+     *                borrowed, not owned.
+     * @param params  Tikhonov λ for the [CB]⁺ pseudo-inverse, state/input/
+     *                output dimensions, and whether the output y is
+     *                extruder position or velocity. Copied.
      */
     AnalyticalStateSpaceLPV(const Traj& traj,
                              AnalyticalStateSpaceLPVParams params)
@@ -96,13 +107,38 @@ public:
 
     /**
      * @brief Add a state-space model at operating point p.
+     *
+     * Registers the (A, B, C) triple valid at scheduling-parameter value
+     * @p point.parameter (typically arc-averaged extrusion velocity).
+     * Between registered points the model is linearly interpolated, and
+     * outside the registered range the nearest endpoint model is used, so
+     * the LUT should bracket the velocities the trajectory will reach.
+     * A point added at an existing parameter overwrites the previous one.
+     *
+     * @param point  Model point: `parameter` (scheduling value) plus the
+     *               state/input/output matrices sized per params_.
      */
     void addModelPoint(const AnalyticalStateSpaceModelPoint& point) {
         modelLut_[point.parameter] = point;
     }
 
     /**
-     * @brief Compute the required input x(t) at time t.
+     * @brief Compute the required plant input x(t) at time t.
+     *
+     * Inverts the interpolated LPV model analytically: locates the arc
+     * containing t, evaluates the scheduling parameter as the arc's
+     * average path velocity, interpolates (A, B, C), propagates the
+     * internal state v within the arc via the closed-form matrix-
+     * exponential solution, and returns
+     * `x = [CB]⁺·(ẏ − CA·v)` where [CB]⁺ uses Tikhonov λ-regularization.
+     *
+     * Each call recomputes the state trajectory from zero through all arcs
+     * up to t (there is no cross-call state caching), so queries are safe
+     * in any order but cost O(number of preceding arcs) per call.
+     *
+     * @param t  Query time [s] within the trajectory.
+     * @return Required plant input x(t); 0.0 if no model points are
+     *         registered or the trajectory is empty.
      */
     double inputAtTime(double t) const {
         if (modelLut_.empty()) return 0.0;
@@ -148,6 +184,12 @@ public:
 
     /**
      * @brief Compute the required input at multiple time points.
+     *
+     * Batch form of inputAtTime() — same semantics per element; each
+     * element independently re-propagates the state from t = 0.
+     *
+     * @param times  Query times [s].
+     * @return Required inputs x(t), same size and order as @p times.
      */
     std::vector<double> inputSeries(const std::vector<double>& times) const {
         std::vector<double> result;
@@ -159,6 +201,13 @@ public:
 
     /**
      * @brief Compute the adjusted extruder position at time t.
+     *
+     * `e_raw(t) + x(t)` — the nominal extruder position plus the LPV
+     * inverse-model correction, i.e. the command stream for the extruder
+     * axis.
+     *
+     * @param t  Query time [s].
+     * @return Adjusted extruder position [mm].
      */
     double adjustedExtruderPosition(double t) const {
         return traj_->extruderPositionAtTime(t) + inputAtTime(t);
@@ -166,6 +215,13 @@ public:
 
     /**
      * @brief Compute the adjusted extruder position at multiple times.
+     *
+     * Batch form of adjustedExtruderPosition() — same semantics per
+     * element.
+     *
+     * @param times  Query times [s].
+     * @return Adjusted extruder positions [mm], same size and order as
+     *         @p times.
      */
     std::vector<double> adjustedExtruderPositionSeries(
         const std::vector<double>& times) const {
@@ -176,13 +232,29 @@ public:
         return result;
     }
 
-    /**Number of model points */
+    /**
+     * @brief Number of registered operating-point models in the LUT.
+     *
+     * @return Count of distinct parameters added via addModelPoint();
+     *         inputAtTime() returns 0 while this is 0.
+     */
     size_t numModelPoints() const { return modelLut_.size(); }
 
-    /**Parameters */
+    /**
+     * @brief The parameters this estimator was constructed with.
+     *
+     * @return Const reference to the copied parameter set; valid for the
+     *         lifetime of this object.
+     */
     const AnalyticalStateSpaceLPVParams& params() const { return params_; }
 
-    /**Trajectory */
+    /**
+     * @brief The extrusion trajectory this estimator inverts the model for.
+     *
+     * @return Const reference to the trajectory passed to the constructor;
+     *         aliases the caller's original, which must outlive this
+     *         object.
+     */
     const Traj& trajectory() const { return *traj_; }
 
 private:

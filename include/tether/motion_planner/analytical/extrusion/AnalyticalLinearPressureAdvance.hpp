@@ -72,6 +72,16 @@ public:
 
     /**
      * @brief Construct from an extrusion trajectory and parameters.
+     *
+     * Stores a pointer to @p traj — the trajectory must outlive this
+     * object. When `params.smoothTime > 0` the constructor precomputes a
+     * trapezoidal-integration table of the smoothed offset (≥100 samples,
+     * ~1 ms resolution) so integratedOffsetAtTime() is O(log n) per query.
+     *
+     * @param traj    Extrusion trajectory supplying v_e(t) and e(t);
+     *                borrowed, not owned.
+     * @param params  Pressure-advance amount [s], smoothing window [s],
+     *                and optional compensation clamp [mm]. Copied.
      */
     AnalyticalLinearPressureAdvance(const Traj& traj, AnalyticalLinearPressureAdvanceParams params)
         : traj_(&traj), params_(params) {
@@ -82,7 +92,14 @@ public:
      * @brief Compute the instantaneous position offset δe(t) [mm].
      *
      * This is the pressure-advance offset added to the raw extruder
-     * position at time t.
+     * position at time t: `δe = pressureAdvance · v_e(t)`, where v_e is
+     * the raw WSS extruder velocity or its centered moving average when
+     * `smoothTime > 0`. Returns 0 when `pressureAdvance <= 0`, and the
+     * result is symmetrically clamped to `maxCompensation` when that is
+     * positive.
+     *
+     * @param t  Query time [s] within the trajectory.
+     * @return Extruder position offset [mm] to add at time t.
      */
     double offsetAtTime(double t) const {
         if (params_.pressureAdvance <= 0.0) return 0.0;
@@ -107,7 +124,14 @@ public:
      * which is PressureAdvance · α_e · s(t) — a piecewise polynomial.
      *
      * With smoothing, the integral is computed numerically from the
-     * precomputed offset samples.
+     * precomputed offset samples — trapezoidal accumulation at ~1 ms
+     * resolution, linearly interpolated between table entries and clamped
+     * to the table ends outside [0, totalTime].
+     *
+     * @param t  Query time [s].
+     * @return Accumulated offset ∫₀^t δe dt' [mm·s] — note the units:
+     *         this integrates a position offset over time, so it is
+     *         PressureAdvance-scaled extrusion-distance, not a position.
      */
     double integratedOffsetAtTime(double t) const {
         if (params_.pressureAdvance <= 0.0) return 0.0;
@@ -138,6 +162,11 @@ public:
 
     /**
      * @brief Compute the integrated offset at multiple time points.
+     *
+     * Batch form of integratedOffsetAtTime() — same semantics per element.
+     *
+     * @param times  Query times [s], any order.
+     * @return Integrated offsets [mm·s], same size and order as @p times.
      */
     std::vector<double> integratedOffsetSeries(
         const std::vector<double>& times) const {
@@ -151,7 +180,12 @@ public:
     /**
      * @brief Compute the adjusted extruder position at time t.
      *
-     * e_adjusted(t) = e_raw(t) + δe(t)
+     * `e_adjusted(t) = e_raw(t) + δe(t)` — the raw extrusion position with
+     * the instantaneous pressure-advance offset applied, i.e. the target
+     * position stream a stepper generator would consume.
+     *
+     * @param t  Query time [s].
+     * @return Pressure-advance-adjusted extruder position [mm].
      */
     double adjustedExtruderPosition(double t) const {
         return traj_->extruderPositionAtTime(t) + offsetAtTime(t);
@@ -159,6 +193,14 @@ public:
 
     /**
      * @brief Compute the adjusted extruder position at multiple times.
+     *
+     * Batch form of adjustedExtruderPosition() — same semantics per
+     * element; this is the ready-to-sample command stream for the
+     * extruder axis.
+     *
+     * @param times  Query times [s], any order.
+     * @return Adjusted extruder positions [mm], same size and order as
+     *         @p times.
      */
     std::vector<double> adjustedExtruderPositionSeries(
         const std::vector<double>& times) const {
@@ -169,10 +211,22 @@ public:
         return result;
     }
 
-    /**Parameters */
+    /**
+     * @brief The parameters this compensator was constructed with.
+     *
+     * @return Const reference to the copied parameter set (pressureAdvance
+     *         [s], smoothTime [s], maxCompensation [mm]); valid for the
+     *         lifetime of this object.
+     */
     const AnalyticalLinearPressureAdvanceParams& params() const { return params_; }
 
-    /**Trajectory */
+    /**
+     * @brief The extrusion trajectory this compensator reads from.
+     *
+     * @return Const reference to the trajectory passed to the constructor.
+     *         The reference aliases the caller's original — the trajectory
+     *         must remain alive while this object exists.
+     */
     const Traj& trajectory() const { return *traj_; }
 
 private:
