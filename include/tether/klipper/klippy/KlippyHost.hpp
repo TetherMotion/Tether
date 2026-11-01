@@ -50,29 +50,36 @@ public:
     ~KlippyHost();
 
     /// @brief Open the transport and start the connection.
+    /// @return `true` on success
     bool connect();
 
     /// @brief Run the identify handshake to download the data dictionary.
     /// @param devicePump Optional callback to pump the device side (for
     ///        loopback/in-process use). Called after each host pump.
+    /// @return `true` once the dictionary was received
     bool downloadDictionary(std::function<void()> devicePump = nullptr);
 
     /// @brief Synchronise the clock by sending get_clock.
     /// @param devicePump Optional callback to pump the device side.
+    /// @return `true` on successful sync
     bool syncClock(std::function<void()> devicePump = nullptr);
 
     /// @brief Allocate an OID for a peripheral type.
+    /// @param type Peripheral kind requesting an OID
     /// @return The allocated OID, or std::nullopt if OIDs are exhausted.
     std::optional<uint8_t> allocateOid(const std::string& type);
 
     /// @brief Send a command by format string with parameter values.
+    /// @param formatStr Dictionary command format (e.g. "queue_step oid=%c ...")
+    /// @param params Parameter values matching the format
+    /// @return `true` when the command was encoded and sent
     bool sendCommand(const std::string& formatStr,
                      const std::vector<protocol::ParamValue>& params);
 
     /// @brief Send a translated step sequence to the device.
     ///
     /// Emits (per axis, in order):
-    ///   - reset_step_clock oid=%c clock=<startClock>  (once at the start)
+    ///   - reset_step_clock oid=%c clock=&lt;startClock&gt;  (once at the start)
     ///   - set_next_step_dir oid=%c dir=<0|1>          (when direction changes)
     ///   - queue_step oid=%c interval=%u count=%hu add=%hi  (per StepCommand)
     ///
@@ -85,10 +92,15 @@ public:
                             std::function<void()> pump = nullptr);
 
     /// @brief Send multiple step sequences (convenience overload).
+    /// @param seqs Step sequences to enqueue
+    /// @param pump Same window-freeing callback as sendStepSequence()
+    /// @return Total queue_step commands enqueued
     size_t sendStepSequences(const std::vector<motion::AxisStepSequence>& seqs,
                              std::function<void()> pump = nullptr);
 
     /// @brief Register a response handler for a response format string.
+    /// @param formatStr Dictionary response format
+    /// @param handler Invoked with decoded response params
     void onResponse(const std::string& formatStr, protocol::ResponseHandler handler);
 
     /// @brief Pump the event loop: read transport, process acks, dispatch responses.
@@ -129,6 +141,7 @@ public:
     /// @brief Enable error-recovery mode on the internal BlockReader.
     /// When enabled, corrupt blocks are skipped (with optional callback)
     /// instead of causing pump() to silently drop remaining data.
+    /// @param enabled `true` to skip corrupt blocks
     void setBlockRecoveryMode(bool enabled,
                               protocol::BlockReader::ErrorCallback cb = nullptr) {
         blockReader_.setRecoveryMode(enabled, std::move(cb));

@@ -31,6 +31,7 @@ public:
     uint8_t oid() const { return oid_; }
 
     /// @brief Set fan speed (0.0 to 1.0).
+    /// @param speed PWM duty cycle, clamped to [0,1]
     void setSpeed(double speed) {
         speed_ = std::clamp(speed, 0.0, 1.0);
         if (!offTime_.has_value() || speed_ >= offTime_.value()) {
@@ -41,9 +42,12 @@ public:
     }
 
     /// @brief Get current fan speed.
+    /// @return PWM duty cycle [0,1]
     double speed() const { return speed_; }
 
     /// @brief Set tachometer reader.
+    /// @param tachRead Reads cumulative tach pulse count
+    /// @param tachCpr Pulses per revolution
     void setTachometer(TachReadFunc tachRead, uint32_t tachCpr = 2) {
         tachRead_ = std::move(tachRead);
         tachCpr_ = tachCpr;
@@ -51,6 +55,7 @@ public:
 
     /// @brief Compute RPM from tachometer readings.
     /// @param interval Time between readings in seconds.
+    /// @return Fan speed [RPM]; 0 without tachometer
     double computeRpm(double interval) {
         if (!tachRead_) return 0.0;
         uint32_t current = tachRead_();
@@ -61,12 +66,15 @@ public:
     }
 
     /// @brief Set off-time (fan turns off below this speed).
+    /// @param offTime Duty threshold below which PWM is forced to 0
     void setOffTime(double offTime) { offTime_ = offTime; }
 
     /// @brief Set cycle time for PWM.
+    /// @param cycleTime PWM period [s]
     void setCycleTime(double cycleTime) { cycleTime_ = cycleTime; }
 
     /// @brief Get cycle time.
+    /// @return PWM period [s]
     double cycleTime() const { return cycleTime_; }
 
 private:
@@ -109,6 +117,8 @@ public:
     uint8_t oid() const { return oid_; }
 
     /// @brief Set color of a single LED.
+    /// @param index LED position [0, numLeds)
+    /// @param color RGB(W) color to buffer
     void setColor(int index, const LedColor& color) {
         if (index >= 0 && index < numLeds_) {
             colors_[index] = color;
@@ -116,11 +126,14 @@ public:
     }
 
     /// @brief Set color of all LEDs.
+    /// @param color RGB(W) color applied to every LED
     void setAll(const LedColor& color) {
         for (auto& c : colors_) c = color;
     }
 
     /// @brief Get color of a LED.
+    /// @param index LED position
+    /// @return Buffered color; default (black) out of range
     LedColor color(int index) const {
         if (index >= 0 && index < numLeds_) return colors_[index];
         return {};
@@ -148,6 +161,7 @@ public:
     }
 
     /// @brief Get number of LEDs.
+    /// @return Strip length configured
     int numLeds() const { return numLeds_; }
 
     /// @brief Clear all LEDs to off.
