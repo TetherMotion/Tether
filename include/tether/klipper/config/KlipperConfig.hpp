@@ -44,81 +44,105 @@ public:
         dict_.setBuildVersions("tether_klipper");
     }
 
-    /// @brief Set the application name.
-    /// @param name Application identifier advertised in the dictionary
-    /// @return `*this` for chaining
+    /**
+     * @brief Set the application name.
+     * @param name Application identifier advertised in the dictionary
+     * @return `*this` for chaining
+     */
     KlipperConfig& app(std::string_view name) { dict_.setApp(std::string(name)); return *this; }
 
-    /// @brief Set the version string.
-    /// @param v Version advertised in the dictionary
-    /// @return `*this` for chaining
+    /**
+     * @brief Set the version string.
+     * @param v Version advertised in the dictionary
+     * @return `*this` for chaining
+     */
     KlipperConfig& version(std::string_view v) { dict_.setVersion(std::string(v)); return *this; }
 
-    /// @brief Set the build versions string.
-    /// @param v Build-version identifier advertised in the dictionary
-    /// @return `*this` for chaining
+    /**
+     * @brief Set the build versions string.
+     * @param v Build-version identifier advertised in the dictionary
+     * @return `*this` for chaining
+     */
     KlipperConfig& buildVersions(std::string_view v) { dict_.setBuildVersions(std::string(v)); return *this; }
 
-    /// @brief Register a command format string.
-    /// @param fmt Klipper command format (e.g. `"set_pwm pin=%u cycle=%u value=%u"`)
-    /// @return `*this` for chaining
+    /**
+     * @brief Register a command format string.
+     * @param fmt Klipper command format (e.g. `"set_pwm pin=%u cycle=%u value=%u"`)
+     * @return `*this` for chaining
+     */
     KlipperConfig& addCommand(std::string_view fmt) { dict_.addCommand(fmt); return *this; }
 
-    /// @brief Register a response format string.
-    /// @param fmt Klipper response format string
-    /// @return `*this` for chaining
+    /**
+     * @brief Register a response format string.
+     * @param fmt Klipper response format string
+     * @return `*this` for chaining
+     */
     KlipperConfig& addResponse(std::string_view fmt) { dict_.addResponse(fmt); return *this; }
 
-    /// @brief Register an output format string.
-    /// @param fmt Klipper output format string
-    /// @return `*this` for chaining
+    /**
+     * @brief Register an output format string.
+     * @param fmt Klipper output format string
+     * @return `*this` for chaining
+     */
     KlipperConfig& addOutput(std::string_view fmt) { dict_.addOutput(fmt); return *this; }
 
-    /// @brief Add an integer constant.
-    /// @param name Constant name exported to the host
-    /// @param value Constant value
-    /// @return `*this` for chaining
+    /**
+     * @brief Add an integer constant.
+     * @param name Constant name exported to the host
+     * @param value Constant value
+     * @return `*this` for chaining
+     */
     KlipperConfig& addConstant(std::string_view name, int64_t value) {
         dict_.addConstant(name, value);
         return *this;
     }
 
-    /// @brief Add a string constant.
-    /// @param name Constant name exported to the host
-    /// @param value Constant string value
-    /// @return `*this` for chaining
+    /**
+     * @brief Add a string constant.
+     * @param name Constant name exported to the host
+     * @param value Constant string value
+     * @return `*this` for chaining
+     */
     KlipperConfig& addConstantString(std::string_view name, std::string_view value) {
         dict_.addConstantString(name, value);
         return *this;
     }
 
-    /// @brief Add a simple enumeration value.
-    /// @param enumName Enumeration the value belongs to
-    /// @param key Enumeration key name
-    /// @param value Integer value for `key`
-    /// @return `*this` for chaining
+    /**
+     * @brief Add a simple enumeration value.
+     * @param enumName Enumeration the value belongs to
+     * @param key Enumeration key name
+     * @param value Integer value for `key`
+     * @return `*this` for chaining
+     */
     KlipperConfig& addEnumValue(std::string_view enumName, std::string_view key, uint32_t value) {
         dict_.addEnumValue(enumName, key, value);
         return *this;
     }
 
-    /// @brief Add a range enumeration (key -> [start, start+count-1]).
-    /// @param enumName Enumeration the range belongs to
-    /// @param key Base key name for the range
-    /// @param start First value of the range
-    /// @param count Number of values in the range
-    /// @return `*this` for chaining
+    /**
+     * @brief Add a range enumeration (key -> [start, start+count-1]).
+     * @param enumName Enumeration the range belongs to
+     * @param key Base key name for the range
+     * @param start First value of the range
+     * @param count Number of values in the range
+     * @return `*this` for chaining
+     */
     KlipperConfig& addEnumRange(std::string_view enumName, std::string_view key,
                                 uint32_t start, uint32_t count) {
         dict_.addEnumRange(enumName, key, start, count);
         return *this;
     }
 
-    /// @brief Build the data dictionary.
-    /// @return DataDictionary populated with everything registered so far
+    /**
+     * @brief Build the data dictionary.
+     * @return DataDictionary populated with everything registered so far
+     */
     protocol::DataDictionary build() { return dict_; }
 
-    /// @return The underlying dictionary (for inspection).
+    /**
+     * @return The underlying dictionary (for inspection).
+     */
     const protocol::DataDictionary& dictionary() const { return dict_; }
 
 private:

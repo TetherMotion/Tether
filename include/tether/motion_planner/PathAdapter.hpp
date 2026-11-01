@@ -102,10 +102,12 @@ public:
         rebuildSegmentInfo();
     }
 
-    /// Construct with PHData sidecar (Phase 5.4 fast path).
-    /// @param path Piecewise-NURBS path to wrap
-    /// @param sourceRefs G-code source reference per piece
-    /// @param phData PH-quintic sidecar data per piece (empty optional = none)
+    /**
+     * Construct with PHData sidecar (Phase 5.4 fast path).
+     * @param path Piecewise-NURBS path to wrap
+     * @param sourceRefs G-code source reference per piece
+     * @param phData PH-quintic sidecar data per piece (empty optional = none)
+     */
     explicit PathAdapter(tether::motion::PiecewiseNurbsPath path,
                          std::vector<SourceReference> sourceRefs,
                          std::vector<std::optional<tether::motion::PHData>> phData)
@@ -138,22 +140,28 @@ public:
         return segments_;
     }
 
-    /// Access the underlying new-type path.
-    /// @return Wrapped PiecewiseNurbsPath
+    /**
+     * Access the underlying new-type path.
+     * @return Wrapped PiecewiseNurbsPath
+     */
     const tether::motion::PiecewiseNurbsPath& inner() const {
         return *path_;
     }
 
-    /// True if the adapter holds a real path (not default-constructed).
-    /// @return `true` when a path is present
+    /**
+     * True if the adapter holds a real path (not default-constructed).
+     * @return `true` when a path is present
+     */
     bool hasInner() const noexcept { return path_.has_value(); }
 
-    /// Access the lazy certified curvature sampler for this path.
-    /// The sampler is constructed on first call and memoized; it is
-    /// bound to the underlying PiecewiseNurbsPath and samples per span
-    /// on demand. See CertifiedCurvatureSampler.hpp for the algorithm.
-    /// @throws std::runtime_error if the adapter is empty (no path).
-    /// @return Memoized curvature sampler bound to this path
+    /**
+     * Access the lazy certified curvature sampler for this path.
+     * The sampler is constructed on first call and memoized; it is
+     * bound to the underlying PiecewiseNurbsPath and samples per span
+     * on demand. See CertifiedCurvatureSampler.hpp for the algorithm.
+     * @throws std::runtime_error if the adapter is empty (no path).
+     * @return Memoized curvature sampler bound to this path
+     */
     const tether::motion::CertifiedCurvatureSampler& curvatureSampler() const {
         if (!path_) {
             throw std::runtime_error(
@@ -167,13 +175,15 @@ public:
         return *curvatureSampler_;
     }
 
-    /// PHData sidecar per piece: phData(i) is populated iff piece i is a
-    /// PH quintic blend curve. When present, enables closed-form arc
-    /// length / curvature (M16–M19, Phase 5.4 fast path).
-    /// Returns an empty optional if the adapter is empty or the piece
-    /// has no PHData.
-    /// @param pieceIndex Piece index
-    /// @return PHData for the piece, or empty optional
+    /**
+     * PHData sidecar per piece: phData(i) is populated iff piece i is a
+     * PH quintic blend curve. When present, enables closed-form arc
+     * length / curvature (M16–M19, Phase 5.4 fast path).
+     * Returns an empty optional if the adapter is empty or the piece
+     * has no PHData.
+     * @param pieceIndex Piece index
+     * @return PHData for the piece, or empty optional
+     */
     const std::optional<tether::motion::PHData>& phData(
         std::size_t pieceIndex) const {
         if (pieceIndex < phData_.size()) return phData_[pieceIndex];
@@ -181,8 +191,10 @@ public:
         return empty;
     }
 
-    /// True if any piece has PHData (i.e. PH fast path is available).
-    /// @return `true` when at least one piece carries PHData
+    /**
+     * True if any piece has PHData (i.e. PH fast path is available).
+     * @return `true` when at least one piece carries PHData
+     */
     bool hasPHData() const noexcept {
         for (const auto& ph : phData_) if (ph) return true;
         return false;
@@ -280,9 +292,11 @@ public:
         return evaluateFullAtArcLength(s).sourceRef;
     }
 
-    /// Find arc length position for a given G-code line number.
-    /// @param lineNumber Source line number to locate
-    /// @return Cumulative arc length at that line, or nullopt when absent
+    /**
+     * Find arc length position for a given G-code line number.
+     * @param lineNumber Source line number to locate
+     * @return Cumulative arc length at that line, or nullopt when absent
+     */
     std::optional<T> findArcLengthForLine(size_t lineNumber) const {
         for (const auto& seg : segments_) {
             if (seg.sourceRef.type() == SourceReference::Type::Single &&
@@ -325,18 +339,22 @@ public:
     // Per-Segment Velocity Limits (opt-in)
     // ========================================================================
 
-    /// True if per-segment velocity limits (feed rates and/or corner
-    /// velocities) have been set via setSegmentVelocityLimits() or
-    /// computeCornerVelocities().
-    /// @return `true` when per-segment limits are active
+    /**
+     * True if per-segment velocity limits (feed rates and/or corner
+     * velocities) have been set via setSegmentVelocityLimits() or
+     * computeCornerVelocities().
+     * @return `true` when per-segment limits are active
+     */
     bool hasPerSegmentVelocityLimits() const noexcept {
         return hasPerSegmentLimits_;
     }
 
-    /// Set per-segment maximum velocities (from G-code F-values).
-    /// @param feedRates One entry per segment, in mm/s. The vector size
-    ///        must match numSegments(). Values <= 0 are treated as
-    ///        "no limit" (infinity).
+    /**
+     * Set per-segment maximum velocities (from G-code F-values).
+     * @param feedRates One entry per segment, in mm/s. The vector size
+     *        must match numSegments(). Values <= 0 are treated as
+     *        "no limit" (infinity).
+     */
     void setSegmentVelocityLimits(const std::vector<double>& feedRates) {
         if (!path_ || feedRates.empty()) return;
         segmentMaxVelocities_.assign(path_->numPieces(),
@@ -351,21 +369,23 @@ public:
         updateSegmentVelocityFields();
     }
 
-    /// Compute corner velocities at all junctions using the junction
-    /// deviation model (Marlin-style):
-    ///
-    ///   v_corner = sqrt(a_max * delta / sin(theta/2))
-    ///
-    /// where theta is the junction angle between consecutive segment
-    /// tangents, delta is the allowed junction deviation, and a_max is
-    /// the maximum centripetal acceleration.
-    ///
-    /// For collinear segments (theta = 0), no corner limit is applied.
-    /// For 180-degree reversals, v_corner = sqrt(a_max * delta).
-    ///
-    /// @param junctionDeviation Allowed junction deviation (mm). Typical
-    ///        values: 0.01–0.1 mm. 0 disables cornering.
-    /// @param maxCentripetalAccel Maximum centripetal acceleration (mm/s²).
+    /**
+     * Compute corner velocities at all junctions using the junction
+     * deviation model (Marlin-style):
+ *
+     *   v_corner = sqrt(a_max * delta / sin(theta/2))
+ *
+     * where theta is the junction angle between consecutive segment
+     * tangents, delta is the allowed junction deviation, and a_max is
+     * the maximum centripetal acceleration.
+ *
+     * For collinear segments (theta = 0), no corner limit is applied.
+     * For 180-degree reversals, v_corner = sqrt(a_max * delta).
+ *
+     * @param junctionDeviation Allowed junction deviation (mm). Typical
+     *        values: 0.01–0.1 mm. 0 disables cornering.
+     * @param maxCentripetalAccel Maximum centripetal acceleration (mm/s²).
+     */
     void computeCornerVelocities(double junctionDeviation,
                                  double maxCentripetalAccel) {
         if (!path_ || path_->numPieces() == 0) return;
@@ -436,12 +456,14 @@ public:
         updateSegmentVelocityFields();
     }
 
-    /// Get the per-segment velocity limit at arc length s.
-    /// Combines the segment feed rate and the corner velocity at the
-    /// nearest junction. Returns +infinity if per-segment limits are
-    /// not set.
-    /// @param s Arc-length coordinate
-    /// @return Velocity limit at s [mm/s]
+    /**
+     * Get the per-segment velocity limit at arc length s.
+     * Combines the segment feed rate and the corner velocity at the
+     * nearest junction. Returns +infinity if per-segment limits are
+     * not set.
+     * @param s Arc-length coordinate
+     * @return Velocity limit at s [mm/s]
+     */
     double maxVelocityAtArcLength(T s) const {
         if (!hasPerSegmentLimits_) return std::numeric_limits<double>::infinity();
         const size_t N = segments_.size();
@@ -486,9 +508,11 @@ public:
         return vSeg;
     }
 
-    /// Get the segment index containing arc length s (binary search).
-    /// @param s Arc-length coordinate
-    /// @return Index of the segment containing s
+    /**
+     * Get the segment index containing arc length s (binary search).
+     * @param s Arc-length coordinate
+     * @return Index of the segment containing s
+     */
     size_t segmentIndexAtArcLength(T s) const {
         const size_t N = segments_.size();
         if (N == 0) return 0;
@@ -510,15 +534,19 @@ public:
         return lo;
     }
 
-    /// Direct access to per-segment max velocities vector (empty if not set).
-    /// @return Per-segment velocity limits
+    /**
+     * Direct access to per-segment max velocities vector (empty if not set).
+     * @return Per-segment velocity limits
+     */
     const std::vector<double>& segmentMaxVelocities() const noexcept {
         return segmentMaxVelocities_;
     }
 
-    /// Direct access to corner velocities vector (empty if not set).
-    /// Size = numSegments + 1 (one per junction, including path start/end).
-    /// @return Corner velocity limits
+    /**
+     * Direct access to corner velocities vector (empty if not set).
+     * Size = numSegments + 1 (one per junction, including path start/end).
+     * @return Corner velocity limits
+     */
     const std::vector<double>& cornerVelocities() const noexcept {
         return cornerVelocities_;
     }
@@ -527,17 +555,19 @@ public:
     // Dwell Points (G4 dwell commands)
     // ========================================================================
 
-    /// Set dwell points on the path. Each dwell point forces velocity to 0
-    /// at the given arc length (the planner will decelerate to a stop,
-    /// pause for the dwell duration, then accelerate from 0).
-    ///
-    /// This method:
-    /// 1. Stores the dwell points for the planner to insert dwell arcs.
-    /// 2. Sets the corner velocity at the nearest segment boundary to 0
-    ///    (or creates a corner velocity vector if not already set).
-    ///
-    /// @param dwellPoints Vector of (arcLength, duration) pairs, in
-    ///                   arc-length order. Duration is in seconds.
+    /**
+     * Set dwell points on the path. Each dwell point forces velocity to 0
+     * at the given arc length (the planner will decelerate to a stop,
+     * pause for the dwell duration, then accelerate from 0).
+ *
+     * This method:
+     * 1. Stores the dwell points for the planner to insert dwell arcs.
+     * 2. Sets the corner velocity at the nearest segment boundary to 0
+     *    (or creates a corner velocity vector if not already set).
+ *
+     * @param dwellPoints Vector of (arcLength, duration) pairs, in
+     *                   arc-length order. Duration is in seconds.
+     */
     void setDwellPoints(const std::vector<std::pair<double, double>>& dwellPoints) {
         dwellPoints_.clear();
         dwellPoints_.reserve(dwellPoints.size());
@@ -587,8 +617,10 @@ public:
         updateSegmentVelocityFields();
     }
 
-    /// Get the dwell points set on this path.
-    /// @return Vector of (arcLength, duration) pairs. Empty if no dwells.
+    /**
+     * Get the dwell points set on this path.
+     * @return Vector of (arcLength, duration) pairs. Empty if no dwells.
+     */
     const std::vector<std::pair<double, double>>& dwellPoints() const noexcept {
         return dwellPoints_;
     }
@@ -733,11 +765,13 @@ class PathBuilderAdapter {
 public:
     using BuildResult = PathAdapterBuildResult<Dim, T>;
 
-    /// Build a path from a list of motion segments.
-    /// @param segments The motion segments (from G-code parser).
-    /// @param blendSpec The blend specification (tolerance, etc.).
-    ///   If tolerance is 0, no blending is applied (ExactPath mode).
-    /// @return The build result with the path and source references.
+    /**
+     * Build a path from a list of motion segments.
+     * @param segments The motion segments (from G-code parser).
+     * @param blendSpec The blend specification (tolerance, etc.).
+     *   If tolerance is 0, no blending is applied (ExactPath mode).
+     * @return The build result with the path and source references.
+     */
     BuildResult build(const MotionSegmentList& segments,
                       const tether::motion::BlendSpec& blendSpec = {}) {
         if (segments.empty()) {

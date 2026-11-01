@@ -118,6 +118,13 @@ public:
          * A⁻¹·(exp(A·τ) - I)·b breaks down when A is singular, which
          * happens on zero-flow arcs with the heater on (no finite steady
          * state exists).
+         *
+         * @param tau Local time within this arc [s], clamped to
+         *        [0, duration] by the caller-visible semantics
+         * @param A_arc Arc-local system matrix including the flow-dependent
+         *        convection terms for this segment
+         * @return Thermal state [T_h, T_s, T_m] at local time `tau`; the
+         *         endpoints return stateStart / stateAtEnd() directly
          */
         StateVec stateAt(double tau, const StateMat& A_arc) const {
             if (tau <= 0.0) return stateStart;
@@ -138,6 +145,16 @@ public:
 
     /**
      * @brief Construct from trajectory and parameters.
+     *
+     * Precomputes the per-arc thermal solutions for the whole trajectory
+     * starting from inlet temperature. The trajectory is referenced, not
+     * copied — it must outlive the observer.
+     *
+     * @param traj Extrusion trajectory (arc times, durations, and flow
+     *        rates per segment)
+     * @param params Thermal model parameters: nozzle geometry, filament
+     *        diameter, heat capacities, convection coefficients, and
+     *        Luenberger observer gains
      */
     AnalyticalMeltZoneThermalObserver(const Traj& traj,
                                        AnalyticalThermalParams params)
@@ -151,6 +168,13 @@ public:
 
     /**
      * @brief Initialize all states to a known temperature.
+     *
+     * Restarts the thermal propagation at t=0 from explicit per-node
+     * temperatures and recomputes every arc solution.
+     *
+     * @param heaterBlockTempC Heater block temperature T_h [°C]
+     * @param sensorTempC Sensor measurement point T_s [°C]
+     * @param meltTempC Melt zone temperature T_m [°C]
      */
     void initialize(double heaterBlockTempC, double sensorTempC,
                     double meltTempC) {
@@ -158,27 +182,40 @@ public:
         precompute();
     }
 
-    /// Convenience: initialize all to the same temperature
+    /**
+     * @brief Initialize all three states to a uniform temperature.
+     * @param tempC Initial temperature for T_h, T_s, and T_m [°C]
+     */
     void initialize(double tempC) {
         initialize(tempC, tempC, tempC);
     }
 
     /**
-     * @brief Evaluate the melt-zone temperature at time t [°C].
+     * @brief Evaluate the melt-zone temperature at time t.
+     * @param t Absolute time along the trajectory [s]
+     * @return Melt-zone temperature T_m [°C]
      */
     double meltTempAt(double t) const {
         return stateAt(t)[2];
     }
 
     /**
-     * @brief Evaluate the heater-block temperature at time t [°C].
+     * @brief Evaluate the heater-block temperature at time t.
+     * @param t Absolute time along the trajectory [s]
+     * @return Heater-block temperature T_h [°C]
      */
     double heaterBlockTempAt(double t) const {
         return stateAt(t)[0];
     }
 
     /**
-     * @brief Evaluate the sensor-point temperature at time t [°C].
+     * @brief Evaluate the sensor-point temperature at time t.
+     *
+     * This is the temperature a physical thermistor would report —
+     * lagging the heater block and leading the melt zone.
+     *
+     * @param t Absolute time along the trajectory [s]
+     * @return Sensor-point temperature T_s [°C]
      */
     double sensorTempAt(double t) const {
         return stateAt(t)[1];
@@ -186,6 +223,13 @@ public:
 
     /**
      * @brief Get the full thermal state [T_h, T_s, T_m] at time t.
+     *
+     * Locates the arc containing `t` and evaluates its closed-form
+     * solution; times before the first arc return the initial state and
+     * times past the end return the final state.
+     *
+     * @param t Absolute time along the trajectory [s]
+     * @return State vector [T_h, T_s, T_m] in [°C]
      */
     StateVec stateAt(double t) const {
         if (solutions_.empty()) return state_;
@@ -228,6 +272,8 @@ public:
 
     /**
      * @brief Get the melt temperature at multiple time points.
+     * @param times Absolute sample times [s]
+     * @return Melt-zone temperature at each sample, in input order [°C]
      */
     std::vector<double> meltTempSeries(const std::vector<double>& times) const {
         std::vector<double> result;
@@ -237,13 +283,22 @@ public:
         return result;
     }
 
-    /// Parameters
+    /**
+     * @brief Thermal model parameters in use.
+     * @return Parameters passed at construction
+     */
     const AnalyticalThermalParams& params() const { return params_; }
 
-    /// Trajectory
+    /**
+     * @brief Trajectory the observer was built for.
+     * @return Referenced extrusion trajectory
+     */
     const Traj& trajectory() const { return *traj_; }
 
-    /// Current state at t=0
+    /**
+     * @brief Thermal state used as the propagation start (t=0).
+     * @return Initial [T_h, T_s, T_m] state vector [°C]
+     */
     StateVec initialState() const { return state_; }
 
 private:

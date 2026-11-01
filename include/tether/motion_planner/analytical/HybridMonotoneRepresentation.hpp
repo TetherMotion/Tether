@@ -109,8 +109,10 @@ struct LGLElement {
     /// Reference derivative matrix D[i][j] = dL_j/dxi at xi_i
     std::vector<std::vector<double>> deriv_matrix;
 
-    /// Initialize the LGL structure (nodes, weights, derivative matrix)
-    /// @param degree Polynomial degree (produces degree+1 LGL nodes)
+    /**
+     * Initialize the LGL structure (nodes, weights, derivative matrix)
+     * @param degree Polynomial degree (produces degree+1 LGL nodes)
+     */
     void init(int degree) {
         N = degree;
         ref_nodes = lglNodes(N);
@@ -119,32 +121,40 @@ struct LGLElement {
         node_values.assign(N + 1, 0.0);
     }
 
-    /// Map s to reference coordinate xi in [-1, 1]
-    /// @param s Physical arc-length coordinate
-    /// @return Normalized coordinate ξ on the element
+    /**
+     * Map s to reference coordinate xi in [-1, 1]
+     * @param s Physical arc-length coordinate
+     * @return Normalized coordinate ξ on the element
+     */
     double sToXi(double s) const {
         return 2.0 * (s - s_left) / (s_right - s_left) - 1.0;
     }
 
-    /// Map reference coordinate xi to physical s
-    /// @param xi Normalized coordinate on [-1, 1]
-    /// @return Physical arc-length coordinate
+    /**
+     * Map reference coordinate xi to physical s
+     * @param xi Normalized coordinate on [-1, 1]
+     * @return Physical arc-length coordinate
+     */
     double xiToS(double xi) const {
         return s_left + (xi + 1.0) * (s_right - s_left) / 2.0;
     }
 
-    /// Evaluate f(s) using barycentric interpolation
-    /// @param s Physical arc-length coordinate (clamped to the element)
-    /// @return Interpolated value
+    /**
+     * Evaluate f(s) using barycentric interpolation
+     * @param s Physical arc-length coordinate (clamped to the element)
+     * @return Interpolated value
+     */
     double evaluate(double s) const {
         double xi = sToXi(s);
         xi = std::clamp(xi, -1.0, 1.0);
         return barycentricEvaluate(ref_nodes, node_values, bary_weights, xi);
     }
 
-    /// Evaluate df/ds using barycentric derivative
-    /// @param s Physical arc-length coordinate
-    /// @return Interpolated derivative df/ds
+    /**
+     * Evaluate df/ds using barycentric derivative
+     * @param s Physical arc-length coordinate
+     * @return Interpolated derivative df/ds
+     */
     double evaluateDerivative(double s) const {
         double xi = sToXi(s);
         xi = std::clamp(xi, -1.0, 1.0);
@@ -223,10 +233,10 @@ public:
 
     /**
      * @brief Construct from an SSR with target tolerance.
-     *
+ *
      * The Hybrid stores a reference to the same path as the SSR (non-owning).
      * The caller must ensure the path outlives this Hybrid.
-     *
+ *
      * @param ssr The switching structure representation to approximate
      * @param targetTolerance Target error tolerance for position
      */
@@ -370,7 +380,7 @@ public:
 
     /**
      * @brief Compute certified error bounds at time t.
-     *
+ *
      * @param t Query time
      * @return Error certificate with position, velocity, acceleration bounds
      */
@@ -402,25 +412,35 @@ public:
     // Access to internal data
     // ========================================================================
 
-    /// Number of hybrid elements
-    /// @return Element count covering the path
+    /**
+     * Number of hybrid elements
+     * @return Element count covering the path
+     */
     size_t numElements() const { return elements_.size(); }
 
-    /// Get element by index
-    /// @param i Element index
-    /// @return Element i (throws when out of range)
+    /**
+     * Get element by index
+     * @param i Element index
+     * @return Element i (throws when out of range)
+     */
     const HybridElement& element(size_t i) const { return elements_.at(i); }
 
-    /// Get all elements
-    /// @return Element list covering the path
+    /**
+     * Get all elements
+     * @return Element list covering the path
+     */
     const std::vector<HybridElement>& elements() const { return elements_; }
 
-    /// Get the target tolerance
-    /// @return Discretization tolerance used at build time
+    /**
+     * Get the target tolerance
+     * @return Discretization tolerance used at build time
+     */
     double tolerance() const { return tolerance_; }
 
-    /// Get the path
-    /// @return Path the representation was built for
+    /**
+     * Get the path
+     * @return Path the representation was built for
+     */
     const Path& path() const { return *path_; }
 
     /**
@@ -489,7 +509,7 @@ private:
 
     /**
      * @brief Build hybrid element(s) for a single SSR arc.
-     *
+ *
      * Starts with one element per arc. If the error certificate exceeds
      * the tolerance, splits the arc into smaller elements (h-refinement).
      */
@@ -531,7 +551,7 @@ private:
 
     /**
      * @brief Build a single hybrid element on [sLo, sHi].
-     *
+ *
      * Samples t(s), v(s), a(s) at LGL nodes by integrating the arc dynamics.
      * Computes Padé approximant for u(s) from Taylor coefficients.
      * Certifies the error by comparing Padé to exact values at the midpoint.
@@ -644,9 +664,9 @@ private:
 
     /**
      * @brief Integrate arc dynamics in s-space from (sStart) to (sTarget).
-     *
+ *
      * Dynamics: t' = 1/v, v' = a/v, a' = eta/v  (where ' = d/ds)
-     *
+ *
      * @return (t, v, a) at sTarget
      */
     std::tuple<double, double, double> integrateInSSpace(
@@ -783,21 +803,21 @@ private:
 
     /**
      * @brief Compute Taylor coefficients of u(s) at a point.
-     *
+ *
      * u(s) satisfies du/ds = 1/g(u), where g(u) = ||C'(u)||.
-     *
+ *
      * Taylor expansion: u(s) = u_0 + u_1*delta + u_2*delta² + ...
      * where delta = s - s_0.
-     *
+ *
      * u_0 = u(s_0)
      * u_1 = du/ds = 1/g(u_0) = h(u_0)
      * u_2 = d²u/ds² = h'(u) * du/ds = h'(u_0) * h(u_0)
      * u_3 = d³u/ds³ = (h''(u) * (du/ds)² + h'(u) * d²u/ds²)
      *       = h''(u_0) * h(u_0)² + h'(u_0)² * h(u_0)
      * etc.
-     *
+ *
      * where h(u) = 1/g(u), h'(u) = -g'(u)/g(u)², etc.
-     *
+ *
      * @param u0 u at s_0
      * @param s0 arc length at the point
      * @param numCoeffs Number of Taylor coefficients to compute
@@ -858,10 +878,10 @@ private:
 
     /**
      * @brief Invert t(s) to find s such that t(s) = tQuery.
-     *
+ *
      * Uses Newton iteration safeguarded by bisection. The LGL representation
      * of t(s) provides both the function value and its derivative (dt/ds = 1/v).
-     *
+ *
      * @param tQuery Target time
      * @return Arc length s such that t(s) ≈ tQuery
      */

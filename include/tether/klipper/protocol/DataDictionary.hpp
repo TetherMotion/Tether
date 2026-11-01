@@ -39,7 +39,9 @@
 
 namespace tether::klipper::protocol {
 
-/// @brief An enumeration entry: either a simple value or a range [start, count].
+/**
+ * @brief An enumeration entry: either a simple value or a range [start, count].
+ */
 struct EnumEntry {
     std::string key;
     /// For a simple enum: just `start`. For a range enum: [start, count].
@@ -47,23 +49,31 @@ struct EnumEntry {
     uint32_t count = 1;  ///< 1 = simple enum, >1 = range enum
 };
 
-/// @brief A named enumeration (e.g. "pin", "spi_bus").
+/**
+ * @brief A named enumeration (e.g. "pin", "spi_bus").
+ */
 struct Enumeration {
     std::string name;
     std::vector<EnumEntry> entries;
 };
 
-/// @brief A constant value (integer or string).
+/**
+ * @brief A constant value (integer or string).
+ */
 using ConstantValue = std::variant<int64_t, std::string>;
 
-/// @brief Direction of a message in the dictionary.
+/**
+ * @brief Direction of a message in the dictionary.
+ */
 enum class MessageDirection : uint8_t {
     Command,  ///< host -> MCU
     Response, ///< MCU -> host
     Output,   ///< free-form debug (MCU -> host)
 };
 
-/// @brief A registered message (command/response/output).
+/**
+ * @brief A registered message (command/response/output).
+ */
 struct MessageEntry {
     uint16_t msgid = 0;             ///< Wire msgid
     MessageDirection direction;
@@ -186,7 +196,7 @@ public:
 
     /**
      * @brief Serialise the dictionary to a JSON string (uncompressed).
-     *
+ *
      * The format matches the protocol's data-dictionary JSON schema:
      *   { "app", "version", "build_versions", "license",
      *     "commands": {fmt -> msgid}, "responses": {fmt -> msgid},

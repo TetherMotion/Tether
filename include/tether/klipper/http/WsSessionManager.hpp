@@ -1,12 +1,23 @@
 #pragma once
 
-/// @file WsSessionManager.hpp
-/// @brief Manages WebSocket client sessions and their subscriptions.
-///
-/// Each WebSocket connection is tracked as a WsSession with its own
-/// object subscriptions, gcode-output subscription status, and client
-/// identification info. The NotificationBridge fans out events to
-/// sessions via this manager.
+
+/**
+
+ * @file WsSessionManager.hpp
+
+ * @brief Manages WebSocket client sessions and their subscriptions.
+
+ *
+
+ * Each WebSocket connection is tracked as a WsSession with its own
+
+ * object subscriptions, gcode-output subscription status, and client
+
+ * identification info. The NotificationBridge fans out events to
+
+ * sessions via this manager.
+
+ */
 
 #include "tether/klipper/klippy/JsonValue.hpp"
 #include "tether/klipper/http/NotificationSink.hpp"
@@ -23,7 +34,9 @@
 
 namespace tether::klipper::http {
 
-/// @brief A single WebSocket client session.
+/**
+ * @brief A single WebSocket client session.
+ */
 struct WsSession {
     int64_t id = 0;
     drogon::WebSocketConnectionPtr conn;
@@ -36,10 +49,12 @@ struct WsSession {
     bool identified = false;
 };
 
-/// @brief Manages all active WebSocket sessions.
-///
-/// Thread-safe. The WebSocket controller creates/removes sessions, and the
-/// NotificationBridge iterates sessions to push notifications.
+/**
+ * @brief Manages all active WebSocket sessions.
+ *
+ * Thread-safe. The WebSocket controller creates/removes sessions, and the
+ * NotificationBridge iterates sessions to push notifications.
+ */
 class WsSessionManager {
 public:
     /// @brief Create a new session for a WebSocket connection.
