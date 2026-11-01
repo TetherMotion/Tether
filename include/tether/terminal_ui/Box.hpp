@@ -43,6 +43,12 @@ namespace TUI {
 
 /// `┌─ title ────┐` top border (bold) in window `win`.  `title` is
 /// clipped to fit.
+/// @param win ncurses window to draw into
+/// @param y Row of the top border
+/// @param x Left column of the box
+/// @param w Box width in columns (< 2 draws nothing)
+/// @param title Optional title embedded in the top border
+/// @param bold Draw the border with A_BOLD
 inline void wdrawBoxTop(WINDOW* win, int y, int x, int w,
                         std::string_view title = {}, bool bold = true) {
     if (w < 2) return;
@@ -63,12 +69,21 @@ inline void wdrawBoxTop(WINDOW* win, int y, int x, int w,
     if (bold) wattroff(win, A_BOLD);
 }
 /// stdscr convenience — same as wdrawBoxTop(stdscr, ...).
+/// @param y Row of the top border
+/// @param x Left column of the box
+/// @param w Box width in columns
+/// @param title Optional title embedded in the top border
+/// @param bold Draw the border with A_BOLD
 inline void drawBoxTop(int y, int x, int w, std::string_view title = {},
                        bool bold = true) {
     wdrawBoxTop(stdscr, y, x, w, title, bold);
 }
 
 /// `├───┤` interior horizontal rule.
+/// @param win ncurses window to draw into
+/// @param y Row of the rule
+/// @param x Left column of the box
+/// @param w Box width in columns (< 2 draws nothing)
 inline void wdrawBoxRule(WINDOW* win, int y, int x, int w) {
     if (w < 2) return;
     std::string r = "├";
@@ -77,11 +92,18 @@ inline void wdrawBoxRule(WINDOW* win, int y, int x, int w) {
     mvwprintw(win, y, x, "%s", r.c_str());
 }
 /// stdscr convenience — same as wdrawBoxRule(stdscr, ...).
+/// @param y Row of the rule
+/// @param x Left column of the box
+/// @param w Box width in columns
 inline void drawBoxRule(int y, int x, int w) {
     wdrawBoxRule(stdscr, y, x, w);
 }
 
 /// `└───┘` bottom border.
+/// @param win ncurses window to draw into
+/// @param y Row of the bottom border
+/// @param x Left column of the box
+/// @param w Box width in columns (< 2 draws nothing)
 inline void wdrawBoxBottom(WINDOW* win, int y, int x, int w) {
     if (w < 2) return;
     std::string r = "└";
@@ -90,12 +112,20 @@ inline void wdrawBoxBottom(WINDOW* win, int y, int x, int w) {
     mvwprintw(win, y, x, "%s", r.c_str());
 }
 /// stdscr convenience — same as wdrawBoxBottom(stdscr, ...).
+/// @param y Row of the bottom border
+/// @param x Left column of the box
+/// @param w Box width in columns
 inline void drawBoxBottom(int y, int x, int w) {
     wdrawBoxBottom(stdscr, y, x, w);
 }
 
 /// `│<content padded to w-2>│` — one inner row with side borders.
 /// `content` is clipped/padded to exactly w-2 columns.
+/// @param win ncurses window to draw into
+/// @param y Row to draw
+/// @param x Left column of the box
+/// @param w Box width in columns (< 2 draws nothing)
+/// @param content Text for the inner area
 inline void wdrawBoxInnerRow(WINDOW* win, int y, int x, int w,
                              std::string_view content = {}) {
     if (w < 2) return;
@@ -104,6 +134,10 @@ inline void wdrawBoxInnerRow(WINDOW* win, int y, int x, int w,
                          static_cast<size_t>(w - 2)).c_str());
 }
 /// stdscr convenience — same as wdrawBoxInnerRow(stdscr, ...).
+/// @param y Row to draw
+/// @param x Left column of the box
+/// @param w Box width in columns
+/// @param content Text for the inner area
 inline void drawBoxInnerRow(int y, int x, int w,
                             std::string_view content = {}) {
     wdrawBoxInnerRow(stdscr, y, x, w, content);
@@ -112,6 +146,11 @@ inline void drawBoxInnerRow(int y, int x, int w,
 /// Finish an inner row after `filled` columns of content were already
 /// drawn at x+1..x+filled: pads the rest with spaces and draws the
 /// right border.
+/// @param win ncurses window to draw into
+/// @param y Row to finish
+/// @param x Left column of the box
+/// @param w Box width in columns (< 2 draws nothing)
+/// @param filled Inner columns already drawn (0 .. w-2)
 inline void wpadBoxRowEnd(WINDOW* win, int y, int x, int w, int filled) {
     if (w < 2) return;
     mvwprintw(win, y, x, "│");
@@ -119,6 +158,10 @@ inline void wpadBoxRowEnd(WINDOW* win, int y, int x, int w, int filled) {
     mvwprintw(win, y, x + w - 1, "│");
 }
 /// stdscr convenience — same as wpadBoxRowEnd(stdscr, ...).
+/// @param y Row to finish
+/// @param x Left column of the box
+/// @param w Box width in columns
+/// @param filled Inner columns already drawn
 inline void padBoxRowEnd(int y, int x, int w, int filled) {
     wpadBoxRowEnd(stdscr, y, x, w, filled);
 }
@@ -126,6 +169,13 @@ inline void padBoxRowEnd(int y, int x, int w, int filled) {
 /// Full frame: top border (optional title), `h-2` blank inner rows,
 /// bottom border.  Returns the rows consumed (== h, or 0 when h<2 or
 /// w<4).
+/// @param win ncurses window to draw into
+/// @param y Top row of the frame
+/// @param x Left column of the frame
+/// @param w Frame width in columns
+/// @param h Frame height in rows
+/// @param title Optional title embedded in the top border
+/// @return Rows consumed (== h, 0 when h<2 or w<4)
 inline int wdrawBoxFrame(WINDOW* win, int y, int x, int w, int h,
                          std::string_view title = {}) {
     if (h < 2 || w < 4) return 0;
@@ -135,6 +185,12 @@ inline int wdrawBoxFrame(WINDOW* win, int y, int x, int w, int h,
     return h;
 }
 /// stdscr convenience — same as wdrawBoxFrame(stdscr, ...).
+/// @param y Top row of the frame
+/// @param x Left column of the frame
+/// @param w Frame width in columns
+/// @param h Frame height in rows
+/// @param title Optional title embedded in the top border
+/// @return Rows consumed (== h, 0 when h<2 or w<4)
 inline int drawBoxFrame(int y, int x, int w, int h,
                         std::string_view title = {}) {
     return wdrawBoxFrame(stdscr, y, x, w, h, title);
@@ -164,7 +220,13 @@ struct KvRow {
  * The key column auto-sizes to the widest key; the value column takes
  * the remainder.  `key_header`/`value_header` are drawn (bold) when
  * non-empty — pass an empty header to skip the header row + rule.
- * Returns the rows consumed.
+ * @param win ncurses window to draw into (full width is used)
+ * @param y Top row of the box
+ * @param rows Key/value rows to render
+ * @param key_header Header text for the key column; empty skips the
+ *        header row and rule
+ * @param value_header Header text for the value column
+ * @return Rows consumed
  */
 inline int wdrawKeyValueBox(WINDOW* win, int y,
                             std::span<const KvRow> rows,
@@ -234,6 +296,11 @@ inline int wdrawKeyValueBox(WINDOW* win, int y,
 }
 
 /// stdscr convenience — same as wdrawKeyValueBox(stdscr, ...).
+/// @param y Top row of the box
+/// @param rows Key/value rows to render
+/// @param key_header Header text for the key column
+/// @param value_header Header text for the value column
+/// @return Rows consumed
 inline int drawKeyValueBox(int y, std::span<const KvRow> rows,
                            std::string_view key_header = " Object ",
                            std::string_view value_header = " Value ") {
@@ -250,7 +317,13 @@ inline int drawKeyValueBox(int y, std::span<const KvRow> rows,
  * └────────────────────────────────┘
  * ```
  *
- * At most `max_lines` lines are drawn.  Returns the rows consumed.
+ * At most `max_lines` lines are drawn.
+ * @param win ncurses window to draw into (full width is used)
+ * @param y Top row of the box
+ * @param max_lines Maximum content rows to draw
+ * @param lines Text lines to render verbatim
+ * @param title Optional title embedded in the top border
+ * @return Rows consumed
  */
 inline int wdrawBoxedLines(WINDOW* win, int y, int max_lines,
                            std::span<const std::string> lines,
@@ -271,6 +344,11 @@ inline int wdrawBoxedLines(WINDOW* win, int y, int max_lines,
 }
 
 /// stdscr convenience — same as wdrawBoxedLines(stdscr, ...).
+/// @param y Top row of the box
+/// @param max_lines Maximum content rows to draw
+/// @param lines Text lines to render verbatim
+/// @param title Optional title embedded in the top border
+/// @return Rows consumed
 inline int drawBoxedLines(int y, int max_lines,
                           std::span<const std::string> lines,
                           std::string_view title = {}) {
