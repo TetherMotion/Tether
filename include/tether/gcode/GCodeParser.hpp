@@ -155,11 +155,16 @@ enum class ModalGroup : uint8_t {
 
 /**
  * @brief Get modal group for a G-code
+ * @param gcode G-code number (e.g. 1 for G1).
+ * @return Modal group the code belongs to.
  */
 ModalGroup getModalGroup(int gcode);
 
 /**
  * @brief Get modal group for a G-code with decimal (e.g., 5.1, 43.2)
+ * @param gcode Integer part of the G-code.
+ * @param decimal Decimal part (e.g. 1 for G5.1).
+ * @return Modal group the code belongs to.
  */
 ModalGroup getModalGroup(int gcode, int decimal);
 
@@ -211,45 +216,62 @@ public:
     BlockQueue(size_t maxSize = MAX_LOOKAHEAD);
     
     /// Add block to front (for lookbehind)
+    /// @param block Block inserted at the front.
     void pushFront(const Block& block);
     
     /// Add block to back (for lookahead)
+    /// @param block Block appended at the back.
     void pushBack(const Block& block);
     
     /// Remove block from front
+    /// @return Removed block; undefined when the queue is empty.
     Block popFront();
     
     /// Remove block from back
+    /// @return Removed block; undefined when the queue is empty.
     Block popBack();
     
     /// Get block at index (0 = front)
+    /// @param index Position from the front.
+    /// @return Mutable block reference.
     Block& operator[](size_t index);
+    /// @param index Position from the front.
+    /// @return Read-only block reference.
     const Block& operator[](size_t index) const;
     
     /// Get front block
+    /// @return Mutable reference to the front block.
     Block& front();
+    /// @return Read-only reference to the front block.
     const Block& front() const;
     
     /// Get back block
+    /// @return Mutable reference to the back block.
     Block& back();
+    /// @return Read-only reference to the back block.
     const Block& back() const;
     
     /// Number of blocks in queue
+    /// @return Current queue length.
     size_t size() const { return m_blocks.size(); }
     
     /// Check if empty
+    /// @return true when no blocks are queued.
     bool empty() const { return m_blocks.empty(); }
     
     /// Check if full
+    /// @return true when the queue reached its maximum size.
     bool full() const { return m_blocks.size() >= m_maxSize; }
     
     /// Clear all blocks
     void clear() { m_blocks.clear(); }
     
     /// Get maximum size
+    /// @return Configured capacity of the queue.
     size_t maxSize() const { return m_maxSize; }
     
     /// Iterator support
+    /// @return Iterator to the front block.
     auto begin() { return m_blocks.begin(); }
     auto end() { return m_blocks.end(); }
     auto begin() const { return m_blocks.begin(); }
@@ -368,6 +390,7 @@ public:
     /**
      * @brief Seek to specific line
      * @param lineNum 1-based line number
+     * @return Error::OK, or an out-of-range error.
      */
     Error seekToLine(uint32_t lineNum);
     
@@ -383,32 +406,39 @@ public:
     
     /**
      * @brief Get current line number
+     * @return 1-based line number of the parse position.
      */
     uint32_t getCurrentLine() const;
     
     /**
      * @brief Check if at end of input
+     * @return true when no further blocks can be parsed.
      */
     bool atEnd() const;
     
     /**
      * @brief Check if at start of input
+     * @return true when the parse position is before the first block.
      */
     bool atStart() const;
 
     /**
      * @brief Get the underlying lexer (for position tracking)
+     * @return Mutable lexer used by the parser.
      */
     Lexer& getLexer() { return m_lexer; }
+    /// @return Read-only lexer used by the parser.
     const Lexer& getLexer() const { return m_lexer; }
 
     /**
      * @brief Get current block number (0-based count of parsed blocks)
+     * @return Number of blocks parsed so far.
      */
     size_t getCurrentBlockNumber() const { return m_currentBlockNum; }
 
     /**
      * @brief Set current block number (for restoring state after scans)
+     * @param n Block counter value to restore.
      */
     void setCurrentBlockNumber(size_t n) { m_currentBlockNum = n; }
     
@@ -462,11 +492,14 @@ public:
      * After parseNextBlock() or findMatchingOCode()/findSubroutine() returns,
      * this is the offset where that block's line begins. Useful for jumping
      * *to* a block (re-execute it) as opposed to past it.
+     *
+     * @return Byte offset of the last block's line start.
      */
     size_t getLastBlockStart() const { return m_lastBlockStart; }
 
     /**
      * @brief Source offset just past the most recently parsed block's line
+     * @return Byte offset just after the last block's line.
      */
     size_t getLastBlockEnd() const { return m_lastBlockEnd; }
     
@@ -483,6 +516,7 @@ public:
     
     /**
      * @brief Get last error
+     * @return Error produced by the most recent parse/validate call.
      */
     const Error& getError() const { return m_error; }
     
@@ -497,6 +531,7 @@ public:
     
     /**
      * @brief Get total block count (after full scan)
+     * @return Number of blocks found by scanBlockCount().
      */
     uint32_t getTotalBlocks() const { return m_totalBlocks; }
     
@@ -567,26 +602,39 @@ void parseGCodeNumber(double value, int& major, int& minor);
 
 /**
  * @brief Format G-code for display
+ * @param major Major code number.
+ * @param minor Minor code number (-1 when absent).
+ * @return Canonical text such as "G1" or "G5.1".
  */
 std::string formatGCode(int major, int minor = -1);
 
 /**
  * @brief Check if G-code is valid
+ * @param major Major code number.
+ * @param minor Minor code number (-1 when absent).
+ * @return true when the code is recognized.
  */
 bool isValidGCode(int major, int minor = -1);
 
 /**
  * @brief Check if M-code is valid
+ * @param mcode M-code number.
+ * @return true when the code is recognized.
  */
 bool isValidMCode(int mcode);
 
 /**
  * @brief Get description for G-code
+ * @param major Major code number.
+ * @param minor Minor code number (-1 when absent).
+ * @return Static description, or "Unknown" when unrecognized.
  */
 const char* getGCodeDescription(int major, int minor = -1);
 
 /**
  * @brief Get description for M-code
+ * @param mcode M-code number.
+ * @return Static description, or "Unknown" when unrecognized.
  */
 const char* getMCodeDescription(int mcode);
 
