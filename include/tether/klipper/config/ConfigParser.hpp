@@ -29,17 +29,25 @@ struct ConfigSection {
     std::vector<std::string> multiValues;          ///< For multi-line values
 
     /// @brief Check if a key exists.
+    /// @param key Option name within the section.
+    /// @return true when the key is present.
     bool has(const std::string& key) const {
         return values.count(key) > 0;
     }
 
     /// @brief Get a value as string.
+    /// @param key Option name within the section.
+    /// @param defaultVal Value returned when the key is absent.
+    /// @return Raw string value.
     std::string get(const std::string& key, const std::string& defaultVal = "") const {
         auto it = values.find(key);
         return it == values.end() ? defaultVal : it->second;
     }
 
     /// @brief Get a value as integer.
+    /// @param key Option name within the section.
+    /// @param defaultVal Value returned when absent or unparseable.
+    /// @return Parsed integer.
     int64_t getInt(const std::string& key, int64_t defaultVal = 0) const {
         auto it = values.find(key);
         if (it == values.end()) return defaultVal;
@@ -48,6 +56,9 @@ struct ConfigSection {
     }
 
     /// @brief Get a value as double.
+    /// @param key Option name within the section.
+    /// @param defaultVal Value returned when absent or unparseable.
+    /// @return Parsed floating-point value.
     double getDouble(const std::string& key, double defaultVal = 0.0) const {
         auto it = values.find(key);
         if (it == values.end()) return defaultVal;
@@ -56,6 +67,9 @@ struct ConfigSection {
     }
 
     /// @brief Get a value as boolean.
+    /// @param key Option name within the section.
+    /// @param defaultVal Value returned when the key is absent.
+    /// @return Parsed boolean (true/1/yes).
     bool getBool(const std::string& key, bool defaultVal = false) const {
         auto it = values.find(key);
         if (it == values.end()) return defaultVal;
@@ -64,6 +78,9 @@ struct ConfigSection {
     }
 
     /// @brief Get a comma-separated list.
+    /// @param key Option name within the section.
+    /// @param defaultVal Comma-separated fallback when the key is absent.
+    /// @return Trimmed list elements.
     std::vector<std::string> getList(const std::string& key,
                                       const std::string& defaultVal = "") const {
         auto it = values.find(key);
@@ -102,6 +119,8 @@ public:
     /// @brief Parse a configuration string.
     /// Supports include directives ([include file.cfg]), variable substitution
     /// ({variable}), and multi-line values (backslash continuation).
+    /// @param content Configuration text.
+    /// @return true when at least one section was parsed.
     bool parse(const std::string& content) {
         sections_.clear();
         includedFiles_.clear();
@@ -112,6 +131,8 @@ public:
     }
 
     /// @brief Parse a configuration file.
+    /// @param path Path of the file to read.
+    /// @return true when the file was read and parsed.
     bool parseFile(const std::string& path) {
         std::ifstream file(path);
         if (!file.is_open()) return false;
@@ -132,9 +153,12 @@ public:
     }
 
     /// @brief Get all sections.
+    /// @return Parsed sections in file order.
     const std::vector<ConfigSection>& sections() const { return sections_; }
 
     /// @brief Get sections by name.
+    /// @param name Section name (e.g. "stepper_x").
+    /// @return Every section with that name.
     std::vector<const ConfigSection*> getSections(const std::string& name) const {
         std::vector<const ConfigSection*> result;
         for (const auto& s : sections_) {
@@ -144,6 +168,8 @@ public:
     }
 
     /// @brief Get the first section with a given name.
+    /// @param name Section name.
+    /// @return Section, or nullptr when absent.
     const ConfigSection* getSection(const std::string& name) const {
         for (const auto& s : sections_) {
             if (s.name == name) return &s;
@@ -152,11 +178,14 @@ public:
     }
 
     /// @brief Check if a section exists.
+    /// @param name Section name.
+    /// @return true when the section is present.
     bool hasSection(const std::string& name) const {
         return getSection(name) != nullptr;
     }
 
     /// @brief Get all section names.
+    /// @return Unique section names in first-seen order.
     std::vector<std::string> sectionNames() const {
         std::vector<std::string> names;
         for (const auto& s : sections_) {
@@ -168,9 +197,12 @@ public:
     }
 
     /// @brief Get the list of included files.
+    /// @return Paths of files pulled in via [include ...].
     const std::vector<std::string>& includedFiles() const { return includedFiles_; }
 
     /// @brief Set a variable for substitution.
+    /// @param key Variable name (referenced as {key}).
+    /// @param value Replacement text.
     void setVariable(const std::string& key, const std::string& value) {
         variables_[key] = value;
     }
@@ -370,6 +402,8 @@ struct ConfigValidationResult {
 class ConfigValidator {
 public:
     /// @brief Validate all sections in a parsed config.
+    /// @param parser Parsed configuration to check.
+    /// @return One result per section, in file order.
     std::vector<ConfigValidationResult> validate(const ConfigParser& parser) const {
         std::vector<ConfigValidationResult> results;
         for (const auto& section : parser.sections()) {
@@ -379,6 +413,8 @@ public:
     }
 
     /// @brief Validate a single section.
+    /// @param section Section to check.
+    /// @return Validation result with errors and warnings.
     ConfigValidationResult validateSection(const ConfigSection& section) const {
         ConfigValidationResult result;
         result.sectionName = section.name;
@@ -440,6 +476,8 @@ public:
     }
 
     /// @brief Check if all sections are valid.
+    /// @param results Validation results to inspect.
+    /// @return true when no result reports an error.
     bool allValid(const std::vector<ConfigValidationResult>& results) const {
         for (const auto& r : results) {
             if (!r.valid) return false;
@@ -448,6 +486,8 @@ public:
     }
 
     /// @brief Get all errors as a single string.
+    /// @param results Validation results to format.
+    /// @return Human-readable error summary (empty when all valid).
     std::string formatErrors(const std::vector<ConfigValidationResult>& results) const {
         std::ostringstream ss;
         for (const auto& r : results) {
