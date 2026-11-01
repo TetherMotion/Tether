@@ -31,29 +31,47 @@ class IFileSystemProvider {
 public:
     virtual ~IFileSystemProvider() = default;
 
-    /// @brief Check if a file exists.
-    /// @param path File path relative to the provider root.
+    /**
+     * @brief Check if a file exists.
+     * @param path File path relative to the provider root.
+     * @return `true` when the file exists and is readable
+     */
     virtual bool fileExists(const std::string& path) = 0;
 
-    /// @brief Read a file's contents. Returns nullopt on failure.
-    /// @param path File path relative to the provider root.
+    /**
+     * @brief Read a file's contents.
+     * @param path File path relative to the provider root.
+     * @return Full file contents, or nullopt on failure
+     */
     virtual std::optional<std::string> readFile(const std::string& path) = 0;
 
-    /// @brief Write data to a file. Returns true on success.
-    /// @param path File path relative to the provider root.
-    /// @param content Data written (file is truncated first).
+    /**
+     * @brief Write data to a file.
+     * @param path File path relative to the provider root.
+     * @param content Data written (file is truncated first).
+     * @return `true` on success
+     */
     virtual bool writeFile(const std::string& path, const std::string& content) = 0;
 
-    /// @brief Get file size. Returns 0 if file doesn't exist.
-    /// @param path File path relative to the provider root.
+    /**
+     * @brief Get file size.
+     * @param path File path relative to the provider root.
+     * @return Size in bytes; 0 if the file doesn't exist
+     */
     virtual size_t fileSize(const std::string& path) = 0;
 
-    /// @brief List files in a directory.
-    /// @param dirPath Directory path relative to the provider root.
+    /**
+     * @brief List files in a directory.
+     * @param dirPath Directory path relative to the provider root.
+     * @return Entries in the directory; empty on error
+     */
     virtual std::vector<FileInfo> listFiles(const std::string& dirPath) = 0;
 
-    /// @brief Delete a file. Returns true on success.
-    /// @param path File path relative to the provider root.
+    /**
+     * @brief Delete a file.
+     * @param path File path relative to the provider root.
+     * @return `true` on success
+     */
     virtual bool deleteFile(const std::string& path) = 0;
 };
 
