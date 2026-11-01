@@ -216,6 +216,9 @@ public:
 
     /**
      * @brief Construct from path and velocity profile
+     * @param path Geometric path to follow.
+     * @param profile Velocity profile along that path.
+     * @param config Feed/pause/reverse defaults.
      */
     MotionPlan(Path path, std::shared_ptr<VelocityProfile> profile, Config config = {})
         : path_(std::move(path))
@@ -229,6 +232,11 @@ public:
      * the motion replanner). The velocity profile is consumed as-is —
      * no post-hoc smoothing is applied. The profiler that produced the
      * profile is responsible for respecting all constraints.
+     *
+     * @param path Geometric path to follow.
+     * @param profile Velocity profile along that path.
+     * @param limits Kinematic limits the profile was built for.
+     * @param config Feed/pause/reverse defaults.
      */
     MotionPlan(Path path, std::shared_ptr<VelocityProfile> profile, Limits limits, Config config = {})
         : path_(std::move(path))
@@ -249,6 +257,9 @@ public:
      * AnalyticalJerkLimitedTOPPRA profiler), it is used for exact/certified sampling
      * of position, velocity, and acceleration. Otherwise, the tabulated
      * velocity profile is used (backward-compatible behavior).
+     *
+     * @param t Time since the plan started [s].
+     * @return Motion state at that time.
      */
     State evaluateAt(T t) const {
         State state;
@@ -294,6 +305,8 @@ public:
 
     /**
      * @brief Evaluate position only at time t (faster than full state)
+     * @param t Time since the plan started [s].
+     * @return Path position at that time.
      */
     Point positionAt(T t) const {
         if (path_.numSegments() == 0) {
@@ -314,6 +327,7 @@ public:
 
     /**
      * @brief Get total duration of motion plan
+     * @return Duration of the whole plan [s].
      */
     T totalDuration() const {
         if (path_.numSegments() == 0 || !profile_) {
@@ -324,11 +338,13 @@ public:
 
     /**
      * @brief Get total path length
+     * @return Arc length of the whole path [units].
      */
     T totalLength() const { return path_.totalLength(); }
 
     /**
      * @brief Number of path segments
+     * @return Segment count of the underlying path.
      */
     size_t numSegments() const { return path_.numSegments(); }
 
@@ -338,6 +354,7 @@ public:
 
     /**
      * @brief Set feed rate override (1.0 = 100%)
+     * @param override Feed rate multiplier (clamped to the configured range).
      */
     void setFeedOverride(T override) {
         currentFeedOverride_ = clamp(override, 
@@ -347,11 +364,14 @@ public:
 
     /**
      * @brief Get current feed rate override
+     * @return Active feed override factor.
      */
     T feedOverride() const { return currentFeedOverride_; }
 
     /**
      * @brief Ramp feed override smoothly to target
+     * @param target Target override factor.
+     * @param deltaTime Time step for the ramp [s].
      */
     void rampFeedOverride(T target, T deltaTime) {
         target = clamp(target, config_.minFeedOverride, config_.maxFeedOverride);
@@ -372,6 +392,7 @@ public:
 
     /**
      * @brief Pause motion at current state
+     * @param currentTime Time at which the pause starts [s].
      */
     void pause(T currentTime) {
         if (!isPaused_) {
@@ -383,6 +404,7 @@ public:
 
     /**
      * @brief Resume motion from paused state
+     * @param currentTime Time at which motion resumes [s].
      */
     void resume(T currentTime) {
         if (isPaused_) {
@@ -393,6 +415,7 @@ public:
 
     /**
      * @brief Check if paused
+     * @return true while the plan is paused.
      */
     bool isPaused() const { return isPaused_; }
 
@@ -402,6 +425,7 @@ public:
 
     /**
      * @brief Enable/disable reverse motion
+     * @param reverse true to run the plan backwards.
      */
     void setReverse(bool reverse) {
         if (config_.enableReverse) {
@@ -411,6 +435,7 @@ public:
 
     /**
      * @brief Check if moving in reverse
+     * @return true when the plan runs in reverse.
      */
     bool isReverse() const { return isReverse_; }
 
@@ -420,6 +445,8 @@ public:
 
     /**
      * @brief Get progress as fraction [0, 1]
+     * @param t Time since the plan started [s].
+     * @return Progress in [0, 1].
      */
     T progressAt(T t) const {
         T duration = totalDuration();
@@ -428,6 +455,8 @@ public:
 
     /**
      * @brief Check if motion is complete
+     * @param t Time since the plan started [s].
+     * @return true when @p t has reached the plan duration.
      */
     bool isComplete(T t) const {
         return t >= totalDuration();
@@ -435,6 +464,8 @@ public:
 
     /**
      * @brief Get remaining distance
+     * @param t Time since the plan started [s].
+     * @return Remaining arc length [units].
      */
     T remainingDistance(T t) const {
         State state = evaluateAt(t);
@@ -443,6 +474,8 @@ public:
 
     /**
      * @brief Get remaining time
+     * @param t Time since the plan started [s].
+     * @return Remaining duration [s].
      */
     T remainingTime(T t) const {
         return std::max(totalDuration() - t, T(0));
@@ -454,6 +487,8 @@ public:
 
     /**
      * @brief Find time at which a G-code line is reached
+     * @param lineNumber 1-based G-code line number.
+     * @return Time at which the line is reached [s], or nullopt.
      */
     std::optional<T> findTimeAtLine(size_t lineNumber) const {
         // Find arc length for this line
@@ -468,6 +503,9 @@ public:
 
     /**
      * @brief Get all G-code lines traversed in time range
+     * @param startTime Start of the time range [s].
+     * @param endTime End of the time range [s].
+     * @return Line numbers executed in that range.
      */
     std::vector<size_t> getLinesInRange(T startTime, T endTime) const {
         std::vector<size_t> lines;
@@ -492,11 +530,13 @@ public:
 
     /**
      * @brief Access the underlying path
+     * @return Geometric path the plan follows.
      */
     const Path& path() const { return path_; }
 
     /**
      * @brief Access the velocity profile
+     * @return Velocity profile along the path.
      */
     const Profile& profile() const { return profile_; }
 
@@ -507,6 +547,8 @@ public:
      * profile is an AnalyticalSSRVelocityProfile (e.g. from AnalyticalJerkLimitedTOPPRA
      * or ParetoTimeEnergyOptimalVelocityPlanner). Returns nullptr for
      * sampled/tabulated profiles.
+     *
+     * @return Analytical source when available, otherwise nullptr.
      */
     std::shared_ptr<analytical::AnalyticalTrajectorySource<Dim, T>>
     analyticalSource() const {
@@ -520,11 +562,13 @@ public:
 
     /**
      * @brief Access configuration
+     * @return Configuration in use.
      */
     const Config& config() const { return config_; }
 
     /**
      * @brief Access kinematic limits
+     * @return Kinematic limits stored with the plan.
      */
     const Limits& limits() const { return limits_; }
 
@@ -538,6 +582,7 @@ public:
 
     /**
      * @brief Set the ReNURBS profile (used by MotionPlanBuilder).
+     * @param p Profile to attach.
      */
     void setRenurbsProfile(tether::motion::profile_renurbs::ReNURBSProfile p) {
         renurbsProfile_ = std::move(p);
@@ -819,18 +864,23 @@ public:
 
     /**
      * @brief Get/set kinematic limits
+     * @return Mutable limits the builder will apply.
      */
     Limits& limits() { return limits_; }
+    /// @return Limits the builder will apply.
     const Limits& limits() const { return limits_; }
 
     /**
      * @brief Get/set configuration
+     * @return Mutable builder configuration.
      */
     Config& config() { return config_; }
+    /// @return Builder configuration.
     const Config& config() const { return config_; }
 
     /**
      * @brief Get/set the profiler type (ignored if custom profiler is set).
+     * @return Profiler type the builder will use.
      */
     ProfilerType profilerType() const { return profilerType_; }
     void setProfilerType(ProfilerType type) { profilerType_ = type; }
