@@ -82,32 +82,41 @@ public:
     
     /**
      * @brief Set specification weights
+     * @param wSettling Weight of the settling-time objective.
+     * @param wOvershoot Weight of the overshoot objective.
+     * @param wEffort Weight of the control-effort objective.
      */
     void setWeights(double wSettling, double wOvershoot, double wEffort);
     
     /**
      * @brief Set state dimension
+     * @param n Number of states n.
      */
     void setStateDimension(int n) { m_stateDim = n; }
     
     /**
      * @brief Set control dimension
+     * @param m Number of control inputs m.
      */
     void setControlDimension(int m) { m_controlDim = m; }
     
     /**
      * @brief Fix some Q elements (not optimized)
+     * @param indices Flat (row-major) Q indices held constant.
+     * @param values Values assigned to those indices.
      */
     void fixQElements(const std::vector<int>& indices, 
                      const std::vector<double>& values);
     
     /**
         * @brief Get optimized Q matrix (flattened row-major)
+     * @return Optimal state weighting Q.
      */
     std::vector<double> getOptimalQ() const { return m_Qopt; }
     
     /**
         * @brief Get optimized R matrix (flattened row-major)
+     * @return Optimal input weighting R.
      */
     std::vector<double> getOptimalR() const { return m_Ropt; }
     
@@ -168,6 +177,9 @@ public:
     
     /**
      * @brief Set state-space model
+     * @param A State matrix (n×n).
+     * @param B Input matrix (n×m).
+     * @param C Output matrix (p×n).
      */
     void setStateSpaceModel(const std::vector<std::vector<double>>& A,
                            const std::vector<std::vector<double>>& B,
@@ -175,32 +187,38 @@ public:
     
     /**
      * @brief Set target LQ gains (computed separately)
+     * @param K Target state-feedback gain vector.
      */
     void setTargetGains(const std::vector<double>& K);
     
     /**
      * @brief Set recovery parameter
      * Higher q = better recovery but more noise sensitivity
+     * @param q Recovery intensity.
      */
     void setRecoveryParameter(double q) { m_q = q; }
     
     /**
      * @brief Set process noise matrix (V1)
+     * @param V1 Process noise covariance.
      */
     void setProcessNoise(const std::vector<std::vector<double>>& V1);
     
     /**
      * @brief Set measurement noise matrix (V2)
+     * @param V2 Measurement noise covariance.
      */
     void setMeasurementNoise(const std::vector<std::vector<double>>& V2);
     
     /**
      * @brief Get computed Kalman filter gain
+     * @return Kalman gain matrix.
      */
     std::vector<std::vector<double>> getKalmanGain() const { return m_Kf; }
     
     /**
      * @brief Get loop recovery error
+     * @return Difference between the recovered and target loop gain.
      */
     double getRecoveryError() const { return m_recoveryError; }
     
@@ -262,6 +280,7 @@ public:
     
     /**
      * @brief Add region constraint
+     * @param region LMI region the closed-loop poles must lie in.
      */
     void addRegion(const LMIRegion& region);
     
@@ -272,17 +291,21 @@ public:
     
     /**
      * @brief Set state-space model
+     * @param A State matrix (n×n).
+     * @param B Input matrix (n×m).
      */
     void setStateSpaceModel(const std::vector<std::vector<double>>& A,
                            const std::vector<std::vector<double>>& B);
     
     /**
      * @brief Set gain structure (for structured synthesis)
+     * @param structure Mask of gain entries allowed to be non-zero.
      */
     void setGainStructure(const std::vector<bool>& structure);
     
     /**
      * @brief Get pole locations of designed system
+     * @return Closed-loop poles as (real, imaginary) pairs.
      */
     std::vector<std::pair<double, double>> getPoles() const { return m_poles; }
     
@@ -336,27 +359,33 @@ public:
     
     /**
      * @brief Set reference signal for experiments
+     * @param r Reference samples used by the gradient experiments.
      */
     void setReferenceSignal(const std::vector<double>& r);
     
     /**
      * @brief Set cost function weights
      * J = λ_y * ||y - y_d||² + λ_u * ||u||²
+     * @param lambdaY Weight of the tracking-error term.
+     * @param lambdaU Weight of the control-effort term.
      */
     void setWeights(double lambdaY, double lambdaU);
     
     /**
      * @brief Set step size
+     * @param gamma Gradient step size γ.
      */
     void setStepSize(double gamma) { m_gamma = gamma; }
     
     /**
      * @brief Set number of iterations
+     * @param n Iteration budget.
      */
     void setIterations(int n) { m_maxIterations = n; }
     
     /**
      * @brief Set finite difference step
+     * @param delta Perturbation used for the gradient estimate.
      */
     void setFiniteDifferenceStep(double delta) { m_delta = delta; }
     
@@ -372,6 +401,7 @@ public:
     
     /**
      * @brief Get current gradient estimate
+     * @return Gradient of the cost with respect to the tuned parameters.
      */
     std::vector<double> getGradient() const { return m_gradient; }
     
@@ -428,6 +458,9 @@ public:
     
     /**
      * @brief Set experimental data
+     * @param u Input samples from the experiment.
+     * @param y Output samples (same length as @p u).
+     * @param Ts Sample time [s].
      */
     void setData(const std::vector<double>& u, 
                 const std::vector<double>& y,
@@ -436,30 +469,40 @@ public:
     /**
      * @brief Set reference model
      * Desired closed-loop transfer function
+     * @param K Model gain.
+     * @param tau Time constant [s] (first-order model).
      */
     void setReferenceModel(double K, double tau);  // First order
+    /// @param K Model gain.
+    /// @param wn Natural frequency [rad/s].
+    /// @param zeta Damping ratio.
     void setReferenceModel(double K, double wn, double zeta);  // Second order
     
     /**
      * @brief Set controller structure
      * 
      * PID: C(s) = Kp + Ki/s + Kd*s / (1 + s/N)
+     * @param terms Controller terms to identify (e.g. "Kp", "Ki", "Kd").
      */
     void setControllerStructure(const std::vector<std::string>& terms);
     
     /**
      * @brief Set prefilter for noise reduction
+     * @param numL Prefilter numerator coefficients.
+     * @param denL Prefilter denominator coefficients.
      */
     void setPrefilter(const std::vector<double>& numL,
                      const std::vector<double>& denL);
     
     /**
      * @brief Get virtual reference signal
+     * @return Computed virtual reference samples.
      */
     std::vector<double> getVirtualReference() const { return m_rVirtual; }
     
     /**
      * @brief Get fit quality (R²)
+     * @return Coefficient of determination of the fit (1 = perfect).
      */
     double getFitQuality() const { return m_R2; }
     
@@ -515,6 +558,10 @@ public:
     
     /**
      * @brief Set experimental data
+     * @param r Reference samples used in the experiment.
+     * @param u Input samples.
+     * @param y Output samples.
+     * @param Ts Sample time [s].
      */
     void setData(const std::vector<double>& r,
                 const std::vector<double>& u,
@@ -523,17 +570,24 @@ public:
     
     /**
      * @brief Set reference model
+     * @param K Model gain.
+     * @param tau Time constant [s] (first-order model).
      */
     void setReferenceModel(double K, double tau);
+    /// @param K Model gain.
+    /// @param wn Natural frequency [rad/s].
+    /// @param zeta Damping ratio.
     void setReferenceModel(double K, double wn, double zeta);
     
     /**
      * @brief Set optimization algorithm
+     * @param opt Optimizer used for the parameter search (takes ownership).
      */
     void setOptimizer(std::unique_ptr<OptimizationAlgorithm> opt);
     
     /**
      * @brief Get model matching error
+     * @return Final matching error of the identified parameters.
      */
     double getMatchingError() const { return m_matchingError; }
     
@@ -562,6 +616,10 @@ private:
 namespace DataDrivenUtils {
     /**
      * @brief Filter signal (IIR)
+     * @param signal Input samples.
+     * @param num Numerator coefficients.
+     * @param den Denominator coefficients.
+     * @return Filtered samples (same length as @p signal).
      */
     std::vector<double> filter(const std::vector<double>& signal,
                                const std::vector<double>& num,
@@ -569,22 +627,34 @@ namespace DataDrivenUtils {
     
     /**
      * @brief Compute numerical derivative
+     * @param signal Input samples.
+     * @param Ts Sample time [s].
+     * @return Time derivative of @p signal.
      */
     std::vector<double> derivative(const std::vector<double>& signal, double Ts);
     
     /**
      * @brief Compute integral
+     * @param signal Input samples.
+     * @param Ts Sample time [s].
+     * @return Cumulative integral (trapezoidal).
      */
     std::vector<double> integrate(const std::vector<double>& signal, double Ts);
     
     /**
      * @brief Least squares fit
+     * @param A Design matrix (rows = samples).
+     * @param b Observation vector.
+     * @return Parameter vector minimising ||A·x - b||².
      */
     std::vector<double> leastSquares(const std::vector<std::vector<double>>& A,
                                      const std::vector<double>& b);
     
     /**
      * @brief Compute cross-correlation
+     * @param x First signal.
+     * @param y Second signal.
+     * @return Cross-correlation sequence (zero lag at the centre).
      */
     std::vector<double> crossCorrelation(const std::vector<double>& x,
                                          const std::vector<double>& y);
