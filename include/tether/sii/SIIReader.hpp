@@ -302,9 +302,6 @@ public:
     
     /**
      * @brief Get last parse error message
-     */
-    /**
-     * @brief Get last parse error message
      * @return Static error description from the latest failed parse
      */
     const char* lastError() const { return m_last_error; }
