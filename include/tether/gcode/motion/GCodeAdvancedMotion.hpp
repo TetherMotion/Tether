@@ -174,7 +174,7 @@
  * 
  * - Analog input (0-10V → 0-100%)
  * - HAL pin (motion.adaptive-feed)
- * - Parameter #<_adaptive_feed>
+ * - Parameter `#<_adaptive_feed>`
  * 
  * ### Feed Calculation
  * 
@@ -337,6 +337,11 @@ public:
     
     /**
      * @brief Process G12.1 (trochoidal slot - custom code)
+     * @param block G-code block with the slot geometry words.
+     * @param state Machine state (updated).
+     * @param vars Variable system (#5400-#5413 updated).
+     * @param segments Motion segments appended for the trochoidal path.
+     * @return Error::OK, or a geometry error.
      */
     Error processG12_1(
         const Block& block,
@@ -347,6 +352,7 @@ public:
     
     /**
      * @brief Set configuration
+     * @param config Trochoidal step-over and depth settings.
      */
     void setConfig(const TrochoidalConfig& config) { m_config = config; }
     const TrochoidalConfig& getConfig() const { return m_config; }
@@ -381,6 +387,7 @@ public:
     
     /**
      * @brief Enable/disable compensation
+     * @param enabled true to apply the table on every position query.
      */
     void setEnabled(bool enabled) { m_enabled = enabled; }
     bool isEnabled() const { return m_enabled; }
@@ -397,6 +404,10 @@ public:
     
     /**
      * @brief Get error at grid point
+     * @param ix X grid index.
+     * @param iy Y grid index.
+     * @param iz Z grid index.
+     * @return Error at that grid point, or nullptr when out of range/unset.
      */
     const VolumetricError* getError(int ix, int iy, int iz) const;
     
@@ -404,6 +415,9 @@ public:
      * @brief Interpolate error at arbitrary position
      * 
      * Uses trilinear interpolation.
+     *
+     * @param pos Position in machine coordinates.
+     * @return Interpolated error at @p pos (zero outside the grid).
      */
     VolumetricError interpolateError(const Position& pos) const;
     
@@ -417,26 +431,36 @@ public:
     
     /**
      * @brief Remove compensation from position
+     * @param pos Compensated position.
+     * @return Uncompensated (programmed) position.
      */
     Position removeCompensation(const Position& pos) const;
     
     /**
      * @brief Load compensation table from file
+     * @param filename Path of the compensation table.
+     * @return Error::OK, or a file/parse error.
      */
     Error loadFromFile(const std::string& filename);
     
     /**
      * @brief Save compensation table to file
+     * @param filename Destination path.
+     * @return Error::OK, or a file I/O error.
      */
     Error saveToFile(const std::string& filename) const;
     
     /**
      * @brief Get grid size
+     * @param[out] nx Number of grid points along X.
+     * @param[out] ny Number of grid points along Y.
+     * @param[out] nz Number of grid points along Z.
      */
     void getGridSize(int& nx, int& ny, int& nz) const;
     
     /**
      * @brief Get config
+     * @return Active grid origin/spacing configuration.
      */
     const VolumetricConfig& getConfig() const { return m_config; }
     
@@ -505,16 +529,24 @@ public:
     
     /**
      * @brief Process G61 (exact stop)
+     * @param state Machine state (path mode set to exact stop).
+     * @return Error::OK on success.
      */
     Error processG61(MachineState& state);
     
     /**
      * @brief Process G61.1 (exact path)
+     * @param state Machine state (path mode set to exact path).
+     * @return Error::OK on success.
      */
     Error processG61_1(MachineState& state);
     
     /**
      * @brief Process G64 (path blending)
+     * @param block G-code block with the P/Q tolerance words.
+     * @param state Machine state (path mode set to blending).
+     * @param vars Variable system (tolerance variables updated).
+     * @return Error::OK, or a tolerance-range error.
      */
     Error processG64(
         const Block& block,
@@ -545,6 +577,7 @@ public:
      * 
      * @param segments Input segments
      * @param[out] velocities Planned entry/exit velocities
+     * @return Error::OK, or a limit-violation error.
      */
     Error planVelocities(
         const std::vector<MotionSegment>& segments,
@@ -553,11 +586,13 @@ public:
     
     /**
      * @brief Get current mode
+     * @return Active path blending mode (exact stop/path/blend).
      */
     PathBlendMode getMode() const { return m_config.mode; }
     
     /**
      * @brief Set configuration
+     * @param config Blending tolerance and angle limits.
      */
     void setConfig(const PathBlendConfig& config) { m_config = config; }
     const PathBlendConfig& getConfig() const { return m_config; }
@@ -592,7 +627,7 @@ private:
  */
 enum class AdaptiveFeedSource {
     DISABLED,       ///< No adaptive feed
-    PARAMETER,      ///< From #<_adaptive_feed> parameter
+    PARAMETER,      ///< From `#<_adaptive_feed>` parameter
     ANALOG_INPUT,   ///< From analog input
     SPINDLE_LOAD,   ///< Based on spindle load
     CALLBACK        ///< User callback function
@@ -624,21 +659,27 @@ public:
     
     /**
      * @brief Check if enabled
+     * @return true while adaptive feed is active.
      */
     bool isEnabled() const { return m_enabled; }
     
     /**
      * @brief Set feed source
+     * @param source Where the adaptive factor comes from.
      */
     void setSource(AdaptiveFeedSource source);
     
     /**
      * @brief Set callback for CALLBACK source
+     * @param callback Invoked per query to obtain the adaptive factor.
      */
     void setCallback(AdaptiveFeedCallback callback);
     
     /**
      * @brief Get current adaptive factor
+     * @param pos Current position (for position-dependent sources).
+     * @param vars Variable system (`#<_adaptive_feed>` source).
+     * @return Factor in [minFactor, maxFactor].
      */
     double getAdaptiveFactor(
         const Position& pos,
@@ -647,6 +688,10 @@ public:
     
     /**
      * @brief Apply adaptive feed to rate
+     * @param programmedFeed Feed rate from the G-code [units/s].
+     * @param pos Current position.
+     * @param vars Variable system for the parameter source.
+     * @return Feed rate multiplied by the adaptive factor.
      */
     double applyAdaptiveFeed(
         double programmedFeed,
@@ -656,6 +701,7 @@ public:
     
     /**
      * @brief Set limits
+     * @param min Lower bound for the adaptive factor.
      */
     void setMinFactor(double min) { m_minFactor = min; }
     void setMaxFactor(double max) { m_maxFactor = max; }
@@ -694,22 +740,29 @@ class BacklashCompensation {
 public:
     /**
      * @brief Constructor
-     * @param config Per-axis backlash configuration
+     *
+     * Starts with all axes disabled; configure with setBacklash().
      */
     BacklashCompensation();
     
     /**
      * @brief Set backlash for axis
+     * @param axis Axis index (0 = X).
+     * @param amount Backlash width in axis units.
+     * @param takeupVel Velocity used for the take-up move [units/s].
      */
     void setBacklash(int axis, double amount, double takeupVel = 10.0);
     
     /**
      * @brief Enable/disable backlash compensation for axis
+     * @param axis Axis index (0 = X).
+     * @param enabled true to compensate that axis.
      */
     void setEnabled(int axis, bool enabled);
     
     /**
      * @brief Global enable/disable
+     * @param enabled false to bypass compensation on all axes.
      */
     void setGlobalEnabled(bool enabled) { m_globalEnabled = enabled; }
     bool isGlobalEnabled() const { return m_globalEnabled; }
@@ -731,6 +784,8 @@ public:
     
     /**
      * @brief Get backlash amount for axis
+     * @param axis Axis index (0 = X).
+     * @return Configured backlash width, or 0 for unknown axes.
      */
     double getBacklash(int axis) const;
     
@@ -757,60 +812,76 @@ class OverrideController {
 public:
     /**
      * @brief Set feed override (0.0 to 2.0, typically)
+     * @param override Feed rate multiplier (1.0 = programmed rate).
      */
     void setFeedOverride(double override);
     double getFeedOverride() const { return m_feedOverride; }
     
     /**
      * @brief Set rapid override (0.0 to 1.0, typically)
+     * @param override Rapid move multiplier (1.0 = programmed rate).
      */
     void setRapidOverride(double override);
     double getRapidOverride() const { return m_rapidOverride; }
     
     /**
      * @brief Set spindle override
+     * @param override Spindle speed multiplier (1.0 = programmed speed).
      */
     void setSpindleOverride(double override);
     double getSpindleOverride() const { return m_spindleOverride; }
     
     /**
      * @brief Enable/disable feed override (M48/M49)
+     * @param enabled true to apply the feed override to G-code feed rates.
      */
     void setFeedOverrideEnabled(bool enabled) { m_feedOverrideEnabled = enabled; }
     bool isFeedOverrideEnabled() const { return m_feedOverrideEnabled; }
     
     /**
      * @brief Apply feed override
+     * @param feed Programmed feed rate.
+     * @return Feed rate with the override applied (unchanged when disabled).
      */
     double applyFeedOverride(double feed) const;
     
     /**
      * @brief Apply rapid override
+     * @param rapid Programmed rapid rate.
+     * @return Rapid rate with the override applied.
      */
     double applyRapidOverride(double rapid) const;
     
     /**
      * @brief Apply spindle override
+     * @param rpm Programmed spindle speed.
+     * @return Spindle speed with the override applied.
      */
     double applySpindleOverride(double rpm) const;
     
     /**
      * @brief Process M48 (enable overrides)
+     * @return Error::OK on success.
      */
     Error processM48();
     
     /**
      * @brief Process M49 (disable overrides)
+     * @return Error::OK on success.
      */
     Error processM49();
     
     /**
      * @brief Process M50 (feed override control)
+     * @param block G-code block with the P word (0 = off, 1 = on).
+     * @return Error::OK, or a range error.
      */
     Error processM50(const Block& block);
     
     /**
      * @brief Process M51 (spindle override control)
+     * @param block G-code block with the P word (0 = off, 1 = on).
+     * @return Error::OK, or a range error.
      */
     Error processM51(const Block& block);
     

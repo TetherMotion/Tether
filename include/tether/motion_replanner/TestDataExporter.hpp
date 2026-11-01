@@ -129,6 +129,10 @@ public:
     
     /**
      * @brief Export desired vs actual trajectory
+     * @param filename Destination path (CSV).
+     * @param desired Commanded samples.
+     * @param actual Measured samples (same timeline).
+     * @return true when the file was written.
      */
     bool exportTrajectory(const std::string& filename,
                          const std::vector<GCodeExport::TrajectorySample>& desired,
@@ -136,24 +140,36 @@ public:
     
     /**
      * @brief Export tracking error analysis
+     * @param filename Destination path (CSV).
+     * @param errors Per-sample tracking errors.
+     * @return true when the file was written.
      */
     bool exportTrackingErrors(const std::string& filename,
                              const std::vector<TrackingError>& errors);
     
     /**
      * @brief Export segment performance data
+     * @param filename Destination path (CSV).
+     * @param segments Per-segment metrics.
+     * @return true when the file was written.
      */
     bool exportSegmentPerformance(const std::string& filename,
                                   const std::vector<SegmentPerformance>& segments);
     
     /**
      * @brief Export error statistics
+     * @param filename Destination path (CSV).
+     * @param stats Aggregate error statistics.
+     * @return true when the file was written.
      */
     bool exportErrorStatistics(const std::string& filename,
                               const ErrorStatistics& stats);
     
     /**
      * @brief Export parameter suggestions
+     * @param filename Destination path (CSV).
+     * @param suggestions Tuning recommendations to persist.
+     * @return true when the file was written.
      */
     bool exportSuggestions(const std::string& filename,
                           const std::vector<ParameterSuggestion>& suggestions);
@@ -181,27 +197,42 @@ public:
     
     /**
      * @brief Export 1D heatmap data
+     * @param filename Destination path (CSV).
+     * @param heatmap Sampled 1D metric.
+     * @return true when the file was written.
      */
     bool exportHeatmap1D(const std::string& filename, const Heatmap1D& heatmap);
     
     /**
      * @brief Export 2D heatmap data
+     * @param filename Destination path (CSV grid).
+     * @param heatmap Sampled 2D metric.
+     * @return true when the file was written.
      */
     bool exportHeatmap2D(const std::string& filename, const Heatmap2D& heatmap);
     
     /**
      * @brief Export 3D heatmap data
+     * @param filename Destination path (CSV).
+     * @param heatmap Sampled 3D metric.
+     * @return true when the file was written.
      */
     bool exportHeatmap3D(const std::string& filename, const Heatmap3D& heatmap);
     
     /**
      * @brief Export differential heatmap
+     * @param filename Destination path (CSV).
+     * @param heatmap Difference between two 2D maps.
+     * @return true when the file was written.
      */
     bool exportDifferentialHeatmap(const std::string& filename,
                                    const DifferentialHeatmap& heatmap);
     
     /**
      * @brief Export suggested limits
+     * @param filename Destination path (CSV).
+     * @param limits Limits derived from the heatmap analysis.
+     * @return true when the file was written.
      */
     bool exportSuggestedLimits(const std::string& filename,
                               const SuggestedLimits& limits);
@@ -225,29 +256,44 @@ public:
     
     /**
      * @brief Export complete test result
+     * @param filename Destination path (JSON/CSV bundle per config).
+     * @param result Full test result to serialize.
+     * @return true when the file was written.
      */
     bool exportTestResult(const std::string& filename, const TestResult& result);
     
     /**
      * @brief Export friction identification result
+     * @param filename Destination path.
+     * @param result Identified friction parameters.
+     * @return true when the file was written.
      */
     bool exportFrictionModel(const std::string& filename,
                             const FrictionIdentificationResult& result);
     
     /**
      * @brief Export delay identification result
+     * @param filename Destination path.
+     * @param result Identified transport/loop delay.
+     * @return true when the file was written.
      */
     bool exportDelayIdentification(const std::string& filename,
                                    const DelayIdentificationResult& result);
     
     /**
      * @brief Export PID tuning assessment
+     * @param filename Destination path.
+     * @param assessment Per-axis tuning verdict.
+     * @return true when the file was written.
      */
     bool exportPIDAssessment(const std::string& filename,
                             const PIDTuningAssessment& assessment);
     
     /**
      * @brief Export dynamics identification
+     * @param filename Destination path.
+     * @param result Identified plant model.
+     * @return true when the file was written.
      */
     bool exportDynamicsModel(const std::string& filename,
                             const DynamicsIdentificationResult& result);
@@ -270,26 +316,34 @@ public:
     
     /**
      * @brief Set base filename prefix
+     * @param prefix Prefix prepended to every generated filename.
      */
     void setPrefix(const std::string& prefix) { prefix_ = prefix; }
     
     /**
      * @brief Export all replanner data
+     * @param replanner Replanner whose traces are dumped.
      */
     void exportReplannerData(const MotionReplanner& replanner);
     
     /**
      * @brief Export all heatmap data
+     * @param builder Heatmap source to serialize.
      */
     void exportHeatmapData(const HeatmapBuilder& builder);
     
     /**
      * @brief Export all test results
+     * @param results Test results to serialize.
      */
     void exportTestResults(const std::vector<TestResult>& results);
     
     /**
      * @brief Export system identification data
+     * @param identifier System identification results.
+     * @param delay Identified delay.
+     * @param friction Identified friction model.
+     * @param pid PID tuning assessment.
      */
     void exportIdentificationData(const SystemIdentifier& identifier,
                                   const DelayIdentificationResult& delay,
@@ -339,11 +393,14 @@ public:
     
     /**
      * @brief Generate manifest file listing all exported files
+     * @param filename Destination path (Markdown index).
+     * @return true when the manifest was written.
      */
     bool generateManifest(const std::string& filename);
     
     /**
      * @brief Get list of generated files
+     * @return Paths of every file written by this exporter so far.
      */
     const std::vector<std::string>& generatedFiles() const { return generatedFiles_; }
     
@@ -370,6 +427,7 @@ public:
     
     /**
      * @brief Open file for writing
+     * @return true when the file was opened.
      */
     bool open();
     
@@ -380,28 +438,35 @@ public:
     
     /**
      * @brief Check if open
+     * @return true while the stream is open.
      */
     bool isOpen() const { return file_.is_open(); }
     
     /**
      * @brief Write header
+     * @param columns Column names written as the first CSV row.
      */
     void writeHeader(const std::vector<std::string>& columns);
     
     /**
      * @brief Write data row
+     * @param values Numeric cells for one row.
      */
     void writeRow(const std::vector<double>& values);
+    /// @param values String cells for one row.
     void writeRow(const std::vector<std::string>& values);
     
     /**
      * @brief Write trajectory sample
+     * @param desired Commanded sample.
+     * @param actual Measured sample.
      */
     void writeSample(const GCodeExport::TrajectorySample& desired,
                     const GCodeExport::TrajectorySample& actual);
     
     /**
      * @brief Write tracking error
+     * @param error Per-sample tracking error.
      */
     void writeError(const TrackingError& error);
     
@@ -412,6 +477,7 @@ public:
     
     /**
      * @brief Get bytes written
+     * @return Number of bytes flushed to the file so far.
      */
     size_t bytesWritten() const { return bytesWritten_; }
     
@@ -443,21 +509,27 @@ public:
     
     /**
      * @brief Add section to report
+     * @param section Pre-rendered section to append.
      */
     void addSection(const ReportSection& section);
     
     /**
      * @brief Generate summary section from test results
+     * @param results Test results summarised into the report.
      */
     void addSummary(const std::vector<TestResult>& results);
     
     /**
      * @brief Generate error statistics section
+     * @param stats Aggregate error statistics.
      */
     void addErrorStatistics(const ErrorStatistics& stats);
     
     /**
      * @brief Generate system identification section
+     * @param delay Identified delay.
+     * @param friction Identified friction model.
+     * @param pid PID tuning assessment.
      */
     void addSystemIdentification(const DelayIdentificationResult& delay,
                                  const FrictionIdentificationResult& friction,
@@ -465,21 +537,28 @@ public:
     
     /**
      * @brief Generate recommendations section
+     * @param suggestions Tuning recommendations to include.
      */
     void addRecommendations(const std::vector<ParameterSuggestion>& suggestions);
     
     /**
      * @brief Export as Markdown
+     * @param filename Destination path.
+     * @return true when the report was written.
      */
     bool exportMarkdown(const std::string& filename);
     
     /**
      * @brief Export as HTML
+     * @param filename Destination path.
+     * @return true when the report was written.
      */
     bool exportHTML(const std::string& filename);
     
     /**
      * @brief Export as LaTeX
+     * @param filename Destination path.
+     * @return true when the report was written.
      */
     bool exportLaTeX(const std::string& filename);
     
