@@ -58,10 +58,16 @@ public:
     /// @return Temperature in °C, or NaN on error.
     virtual double read() = 0;
 
-    /// @brief Sensor type name (e.g. "thermistor", "thermocouple").
+    /**
+     * @brief Sensor type name (e.g. "thermistor", "thermocouple").
+     * @return Static type label
+     */
     virtual std::string type() const = 0;
 
-    /// @brief Last measured temperature.
+    /**
+     * @brief Last measured temperature.
+     * @return Cached value from the latest update() [°C]
+     */
     double lastTemperature() const { return lastTemp_; }
 
     /// @brief Update the sensor (called periodically).
@@ -311,37 +317,62 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Set target temperature in °C.
+    /**
+     * @brief Set target temperature in °C.
+     * @param target Setpoint the PID loop drives toward
+     */
     void setTarget(double target) { target_ = target; }
 
-    /// @brief Get target temperature.
+    /**
+     * @brief Get target temperature.
+     * @return Active setpoint [°C]
+     */
     double target() const { return target_; }
 
-    /// @brief Get current temperature.
+    /**
+     * @brief Get current temperature.
+     * @return Latest sensor reading [°C]
+     */
     double currentTemp() const { return currentTemp_; }
 
-    /// @brief Set PID parameters.
+    /**
+     * @brief Set PID parameters.
+     * @param params Kp/Ki/Kd gains and limits applied to the loop
+     */
     void setPIDParams(const HeaterPIDParams& params) {
         pidParams_ = params;
         pid_.setGains(params.Kp, params.Ki, params.Kd);
         applyPIDLimits();
     }
 
-    /// @brief Get PID parameters.
+    /**
+     * @brief Get PID parameters.
+     * @return Parameters currently installed
+     */
     const HeaterPIDParams& pidParams() const { return pidParams_; }
 
-    /// @brief Set safety limits.
+    /**
+     * @brief Set safety limits.
+     * @param minTemp Below this temp the heater faults [°C]
+     * @param maxTemp Above this temp the heater faults [°C]
+     */
     void setSafetyLimits(double minTemp, double maxTemp) {
         minTemp_ = minTemp;
         maxTemp_ = maxTemp;
     }
 
-    /// @brief Set shutdown callback (called when safety limit is violated).
+    /**
+     * @brief Set shutdown callback (called when safety limit is violated).
+     * @param cb Invoked once on limit violation
+     */
     void setShutdownCallback(ShutdownCallback cb) {
         shutdownCallback_ = std::move(cb);
     }
 
-    /// @brief Set the control interval in seconds.
+    /**
+     * @brief Set the control interval in seconds.
+     * @param interval Period between PID updates [s]
+     */
     void setControlInterval(double interval) { controlInterval_ = interval; }
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
@@ -458,7 +489,11 @@ public:
         pwmWrite_(0.0);
     }
 
-    /// @brief Check if heater is at target temperature (within tolerance).
+    /**
+     * @brief Check if heater is at target temperature (within tolerance).
+     * @param tolerance Allowed deviation from target [°C]
+     * @return `true` when |current − target| < tolerance (or no target set)
+     */
     bool atTarget(double tolerance = 2.0) const {
         if (target_ <= 0.0) return true;
         return std::abs(currentTemp_ - target_) < tolerance;
