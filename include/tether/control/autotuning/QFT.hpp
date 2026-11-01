@@ -331,6 +331,8 @@ public:
     /**
      * @brief Set control effort bound
      * |C*S| ≤ bound
+     * @param bound Transfer function bounding controller output magnitude
+     *        per frequency
      */
     void setControlEffortSpec(const TransferFunction& bound);
     
@@ -340,11 +342,14 @@ public:
     
     /**
      * @brief Design frequency points
+     * @param freqs Frequency grid the bounds and templates are
+     *        evaluated on [rad/s]
      */
     void setDesignFrequencies(const std::vector<double>& freqs);
-    
+
     /**
      * @brief Auto-select design frequencies based on plant
+     * @param numPoints Number of logarithmically spaced points
      */
     void autoSelectFrequencies(int numPoints = 20);
     
@@ -589,16 +594,23 @@ public:
     
     /**
      * @brief Compute closed-loop magnitude from Nichols point
+     * @param point Open-loop point (gain dB, phase deg)
+     * @return |T| = |L/(1+L)| closed-loop magnitude [dB]
      */
     static double closedLoopMagnitude(const NicholsPoint& point);
-    
+
     /**
      * @brief Compute closed-loop phase from Nichols point
+     * @param point Open-loop point (gain dB, phase deg)
+     * @return Closed-loop phase [degrees]
      */
     static double closedLoopPhase(const NicholsPoint& point);
-    
+
     /**
      * @brief Check if point is in right-half Nichols plane (unstable)
+     * @param point Open-loop point to test
+     * @return `true` when the point lies in the Nichols-plane region
+     *         indicating instability
      */
     static bool isUnstableRegion(const NicholsPoint& point);
 };
@@ -610,20 +622,27 @@ class TemplateUtils {
 public:
     /**
      * @brief Compute convex hull of template
+     * @param points Template boundary points
+     * @return Convex-hull vertices enclosing the uncertainty region
      */
     static std::vector<NicholsPoint> convexHull(
         const std::vector<NicholsPoint>& points);
-    
+
     /**
      * @brief Shift template by loop gain
      * @param templ Original template
      * @param loopGain Loop gain to add [dB, degrees]
+     * @return Template displaced by `loopGain`
      */
     static PlantTemplate shiftTemplate(const PlantTemplate& templ,
                                        const NicholsPoint& loopGain);
-    
+
     /**
      * @brief Interpolate template at intermediate frequency
+     * @param t1 Lower-frequency template
+     * @param t2 Higher-frequency template
+     * @param omega Frequency to interpolate at [rad/s]
+     * @return Template interpolated between t1 and t2 at `omega`
      */
     static PlantTemplate interpolateTemplate(const PlantTemplate& t1,
                                              const PlantTemplate& t2,
@@ -653,15 +672,24 @@ public:
     
     /**
      * @brief Optimize controller to satisfy QFT bounds
+     * @param nominalPlant Nominal plant model (center of the template)
+     * @param bounds Horowitz bounds to satisfy
+     * @param frequencies Design frequency grid [rad/s]
+     * @param config Optimizer structure/search limits
+     * @return Shaped controller transfer function
      */
     static TransferFunction optimize(
         const TransferFunction& nominalPlant,
         const std::vector<QFTBound>& bounds,
         const std::vector<double>& frequencies,
         const Config& config);
-    
+
     /**
      * @brief Optimize with default configuration
+     * @param nominalPlant Nominal plant model
+     * @param bounds Horowitz bounds to satisfy
+     * @param frequencies Design frequency grid [rad/s]
+     * @return Shaped controller transfer function
      */
     static TransferFunction optimize(
         const TransferFunction& nominalPlant,
