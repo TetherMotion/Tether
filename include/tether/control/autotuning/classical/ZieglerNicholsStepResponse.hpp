@@ -28,16 +28,29 @@ namespace Autotuning {
  */
 class ZieglerNicholsStepResponse : public AutotunerBase {
 public:
-    /** @brief Human-readable name of the tuner. */
+    /**
+     * @brief Human-readable name of the tuner.
+     * @return Display name ("Ziegler-Nichols Step Response")
+     */
     std::string getName() const override;
 
-    /** @brief Short description for UI or logs. */
+    /**
+     * @brief Short description for UI or logs.
+     * @return One-line description of the step-response method
+     */
     std::string getDescription() const override;
 
-    /** @brief Offline/online mode of operation. */
+    /**
+     * @brief Offline/online mode of operation.
+     * @return AutotuningMode::Offline — needs recorded step data
+     */
     AutotuningMode getMode() const override;
 
-    /** @brief Whether the given controller is compatible with this tuner. */
+    /**
+     * @brief Whether the given controller is compatible with this tuner.
+     * @param controller Controller to check
+     * @return `true` if the tuner can produce gains for `controller`
+     */
     bool isCompatible(const TunableController& controller) const override;
 
     /**
@@ -66,17 +79,25 @@ public:
      * @brief Compute PID gains using Ziegler-Nichols step-response rules.
      * @param model FOPDT model used for calculation.
      * @param form Desired PID form (Parallel/Standard/Series).
+     * @return Computed PID gains
      */
     static PIDGains calculateGains(const FOPDTModel& model, PIDForm form);
 
     /**
      * @brief Provide step response data for offline identification.
+     * @param time Sample times [s]
+     * @param response Measured output values
+     * @param stepSize Input step amplitude
+     * @param initialValue Output value before the step
      */
     void setStepResponseData(const std::vector<double>& time,
                              const std::vector<double>& response,
                              double stepSize, double initialValue);
 
-    /** @brief Select the controller PID form to compute gains for. */
+    /**
+     * @brief Select the controller PID form to compute gains for.
+     * @param form Gain form (e.g. Parallel, Standard)
+     */
     void setControllerForm(PIDForm form) { m_form = form; }
 
 private:
