@@ -145,6 +145,8 @@ public:
      * @param t Query time [s]
      * @param usePosition If true, y(t) = extruder position; if false,
      *                    y(t) = extruder velocity.  Default: velocity.
+     * @return Required plant input x(t) — the deconvolved command
+     *         correction at time t.
      */
     double inputAtTime(double t, bool usePosition = false) const {
         if (mode_ == Mode::ImpulseResponse) {
@@ -155,6 +157,14 @@ public:
 
     /**
      * @brief Compute the required input at multiple time points.
+     *
+     * Batch form of inputAtTime() — same semantics per element.
+     *
+     * @param times        Query times [s], any order.
+     * @param usePosition  Selects y(t) = extruder position (true) or
+     *                     extruder velocity (false, default) as the
+     *                     deconvolution target.
+     * @return Required inputs x(t), same size and order as @p times.
      */
     std::vector<double> inputSeries(const std::vector<double>& times,
                                      bool usePosition = false) const {
@@ -170,6 +180,13 @@ public:
      *
      * e_adjusted(t) = e_raw(t) + x(t)  (the deconvolved input is the
      * feedforward compensation)
+     *
+     * Internally queries inputAtTime() with usePosition = true so the
+     * deconvolved correction is consistent with the position-domain
+     * target.
+     *
+     * @param t  Query time [s].
+     * @return Adjusted extruder position [mm].
      */
     double adjustedExtruderPosition(double t) const {
         return traj_->extruderPositionAtTime(t) + inputAtTime(t, true);
@@ -177,6 +194,13 @@ public:
 
     /**
      * @brief Compute the adjusted extruder position at multiple times.
+     *
+     * Batch form of adjustedExtruderPosition() — the ready-to-sample
+     * extruder command stream with deconvolution feedforward applied.
+     *
+     * @param times  Query times [s], any order.
+     * @return Adjusted extruder positions [mm], same size and order as
+     *         @p times.
      */
     std::vector<double> adjustedExtruderPositionSeries(
         const std::vector<double>& times) const {
@@ -187,18 +211,46 @@ public:
         return result;
     }
 
-    /**Parameters */
+    /**
+     * @brief The parameters this deconvolver was constructed with.
+     *
+     * @return Const reference to the copied parameter set; valid for the
+     *         lifetime of this object.
+     */
     const AnalyticalLTIDeconvParams& params() const { return params_; }
 
-    /**The precomputed regularized inverse (impulse-response mode) */
+    /**
+     * @brief The precomputed regularized inverse impulse response.
+     *
+     * Sampled at the rate passed to the impulse-response constructor and
+     * regularized so its convolution with the plant's h approximates a
+     * delayed unit impulse. Only populated in impulse-response mode —
+     * empty when constructed from state-space matrices.
+     *
+     * @return Const reference to the inverse-IR sample vector.
+     */
     const std::vector<double>& inverseImpulseResponse() const {
         return hInv_;
     }
 
-    /**The precomputed moments M_k (impulse-response mode) */
+    /**
+     * @brief The precomputed moments M_k of the impulse response.
+     *
+     * M_k = ∫ h(τ)·τ^k dτ, used to expand the deconvolution integral in
+     * closed form against the polynomial target. Only populated in
+     * impulse-response mode — empty for state-space mode.
+     *
+     * @return Const reference to the moment vector.
+     */
     const std::vector<double>& moments() const { return moments_; }
 
-    /**Trajectory */
+    /**
+     * @brief The extrusion trajectory this deconvolver targets.
+     *
+     * @return Const reference to the trajectory passed to the constructor;
+     *         aliases the caller's original, which must outlive this
+     *         object.
+     */
     const Traj& trajectory() const { return *traj_; }
 
 private:

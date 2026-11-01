@@ -71,7 +71,16 @@ public:
     /**
      * @brief Construct from trajectory and parameters.
      *
-     * Operating points must be added via addOperatingPoint() before use.
+     * Stores a pointer to @p traj — the trajectory must outlive this
+     * object. The inverse-filter LUT starts empty, so at least one
+     * addOperatingPoint() call is required before inputAtTime() returns
+     * anything but 0.
+     *
+     * @param traj    Extrusion trajectory to deconvolve against; borrowed,
+     *                not owned.
+     * @param params  Tikhonov λ for inverse-filter design, polynomial
+     *                degree cap, group-delay compensation [s], and the
+     *                first-order-correction flag. Copied.
      */
     AnalyticalOverlapAddLPV(const Traj& traj,
                              AnalyticalOverlapAddLPVParams params)
@@ -103,8 +112,19 @@ public:
     /**
      * @brief Compute the required input x(t) at time t.
      *
+     * Shifts the query back by `params.groupDelay` (returning 0 for
+     * t < groupDelay since the plant cannot respond before it is
+     * excited), locates the arc containing the shifted time, interpolates
+     * the moment vector at the arc-averaged path velocity, and contracts
+     * it with the polynomial coefficients of the delayed target
+     * y(t − τ). The velocity form (degree-3 polynomial) may additionally
+     * add the first-order scheduling-error correction when
+     * `firstOrderCorrection` is enabled and ≥2 operating points exist.
+     *
      * @param t Query time [s]
      * @param usePosition If true, y(t) = extruder position; else velocity
+     * @return Required plant input x(t); 0.0 if the LUT is empty, the
+     *         trajectory has no arcs, or t < groupDelay.
      */
     double inputAtTime(double t, bool usePosition = false) const {
         if (momentLut_.empty()) return 0.0;
@@ -166,6 +186,13 @@ public:
 
     /**
      * @brief Compute the required input at multiple time points.
+     *
+     * Batch form of inputAtTime() — same semantics per element.
+     *
+     * @param times        Query times [s], any order.
+     * @param usePosition  Selects extruder position (true) or velocity
+     *                     (false, default) as the deconvolution target.
+     * @return Required inputs x(t), same size and order as @p times.
      */
     std::vector<double> inputSeries(const std::vector<double>& times,
                                      bool usePosition = false) const {
@@ -178,6 +205,13 @@ public:
 
     /**
      * @brief Compute the adjusted extruder position at time t.
+     *
+     * `e_raw(t) + x(t)` with x evaluated in position mode — the nominal
+     * extruder position plus the gain-scheduled deconvolution correction;
+     * the command stream for the extruder axis.
+     *
+     * @param t  Query time [s].
+     * @return Adjusted extruder position [mm].
      */
     double adjustedExtruderPosition(double t) const {
         return traj_->extruderPositionAtTime(t) + inputAtTime(t, true);
@@ -185,6 +219,13 @@ public:
 
     /**
      * @brief Compute the adjusted extruder position at multiple times.
+     *
+     * Batch form of adjustedExtruderPosition() — same semantics per
+     * element.
+     *
+     * @param times  Query times [s], any order.
+     * @return Adjusted extruder positions [mm], same size and order as
+     *         @p times.
      */
     std::vector<double> adjustedExtruderPositionSeries(
         const std::vector<double>& times) const {
@@ -195,13 +236,30 @@ public:
         return result;
     }
 
-    /**Number of operating points */
+    /**
+     * @brief Number of registered operating points in the LUT.
+     *
+     * @return Count of addOperatingPoint() calls; inputAtTime() returns
+     *         0 while this is 0, and the first-order correction requires
+     *         ≥ 2 points.
+     */
     size_t numOperatingPoints() const { return momentLut_.size(); }
 
-    /**Parameters */
+    /**
+     * @brief The parameters this deconvolver was constructed with.
+     *
+     * @return Const reference to the copied parameter set; valid for the
+     *         lifetime of this object.
+     */
     const AnalyticalOverlapAddLPVParams& params() const { return params_; }
 
-    /**Trajectory */
+    /**
+     * @brief The extrusion trajectory this deconvolver targets.
+     *
+     * @return Const reference to the trajectory passed to the constructor;
+     *         aliases the caller's original, which must outlive this
+     *         object.
+     */
     const Traj& trajectory() const { return *traj_; }
 
 private:
