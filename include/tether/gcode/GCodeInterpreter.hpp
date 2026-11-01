@@ -386,26 +386,34 @@ public:
     
     /**
      * @brief Load program from file
+     * @param filename Path of the G-code program.
+     * @return Error::OK, or a file/parse error.
      */
     Error loadFile(const std::string& filename);
     
     /**
      * @brief Load program from string
+     * @param program Program text (same syntax as a file).
+     * @return Error::OK, or a parse error.
      */
     Error loadString(const std::string& program);
     
     /**
      * @brief Unload current program
+     *
+     * Discards the block list; modal state is preserved until reset().
      */
     void unload();
     
     /**
      * @brief Check if program is loaded
+     * @return true when a program is ready to run.
      */
     bool isProgramLoaded() const;
     
     /**
      * @brief Get loaded filename
+     * @return Source filename, or an empty string for string programs.
      */
     const std::string& getFilename() const { return m_filename; }
     
@@ -415,41 +423,53 @@ public:
     
     /**
      * @brief Run program to completion
+     * @return Error::OK, or the first error that stopped the program.
      */
     Error run();
     
     /**
      * @brief Execute single step
+     * @return Error::OK, or the error that stopped this block.
      */
     Error step();
     
     /**
      * @brief Pause execution
+     *
+     * Takes effect after the current block; the machine keeps its position.
      */
     void pause();
     
     /**
      * @brief Resume from pause
+     * @return Error::OK, or an error when not paused.
      */
     Error resume();
     
     /**
      * @brief Stop execution
+     *
+     * Ends the program immediately; modal state is preserved.
      */
     void stop();
     
     /**
      * @brief Reset interpreter state
+     *
+     * Clears modal state, errors and the loaded program.
      */
     void reset();
     
     /**
      * @brief Execute single line (MDI mode)
+     * @param line One G-code block.
+     * @return Error::OK, or a parse/execution error.
      */
     Error executeLine(const std::string& line);
     
     /**
      * @brief Verify program without executing
+     * @return Error::OK when the program is structurally valid.
      */
     Error verify();
     
@@ -459,37 +479,45 @@ public:
     
     /**
      * @brief Get interpreter state
+     * @return Current lifecycle state (Idle/Running/Paused/Finished/Error).
      */
     InterpreterState getState() const { return m_state; }
     
     /**
      * @brief Check if finished
+     * @return true when the program completed (successfully or not).
      */
     bool isFinished() const;
     
     /**
      * @brief Get current line number
+     * @return 1-based source line being executed.
      */
     uint32_t getCurrentLine() const;
     
     /**
      * @brief Get total lines
+     * @return Number of blocks in the loaded program.
      */
     uint32_t getTotalLines() const;
     
     /**
      * @brief Get machine state
+     * @return Live modal/machine state (feed, plane, WCS, tool, ...).
      */
     const MachineState& getMachineState() const { return m_machineState; }
+    /// @return Mutable modal/machine state for supervisory adjustments.
     MachineState& getMachineState() { return m_machineState; }
     
     /**
      * @brief Get last error
+     * @return Most recent error produced by the interpreter.
      */
     const Error& getLastError() const { return m_lastError; }
     
     /**
      * @brief Get error history
+     * @return Every error recorded since the last reset().
      */
     const std::vector<Error>& getErrors() const { return m_errors; }
     
@@ -499,14 +527,18 @@ public:
     
     /**
      * @brief Set execution mode
+     * @param mode Auto (program) or MDI (line-at-a-time).
      */
     void setMode(InterpreterMode mode) { m_mode = mode; }
+    /// @return Current execution mode.
     InterpreterMode getMode() const { return m_mode; }
     
     /**
      * @brief Set dry run (no motion output)
+     * @param dryRun true to execute the program without emitting motion.
      */
     void setDryRun(bool dryRun) { m_dryRun = dryRun; }
+    /// @return true while dry-run mode is active.
     bool isDryRun() const { return m_dryRun; }
 
     // ========================================================================
@@ -550,19 +582,25 @@ public:
      *
      * Default: false (tessellate, backward compatible).
      */
+    /// @param emit true to emit one arc segment instead of tessellating.
     void setEmitArcSegments(bool emit) { m_emitArcSegments = emit; }
+    /// @return true when arcs are emitted as single arc segments.
     bool emitArcSegments() const { return m_emitArcSegments; }
     
     /**
      * @brief Set block delete mode
+     * @param enabled true to skip blocks prefixed with `/`.
      */
     void setBlockDelete(bool enabled);
+    /// @return true while block delete (`/`) is active.
     bool isBlockDeleteEnabled() const;
     
     /**
      * @brief Set optional stop mode
+     * @param enabled true to stop at `M1`.
      */
     void setOptionalStop(bool enabled);
+    /// @return true while optional stop (`M1`) is active.
     bool isOptionalStopEnabled() const;
     
     // ========================================================================
@@ -590,6 +628,8 @@ public:
     /**
      * @brief Enable/disable an opt-in feature (see `Feature`). All
      *        features default to off (pure RS274/NGC semantics).
+     * @param f Feature flag to change.
+     * @param on true to enable, false to disable.
      */
     void enableFeature(Feature f, bool on = true) { m_features[f] = on; }
     bool featureEnabled(Feature f) const {
@@ -893,8 +933,9 @@ private:
 
     /// @brief Haas G150 generic pocket milling: raster-clear the pocket
     ///        bounded by the XY profile of subprogram P.
-    ///        Words: P<sub O-num>, Z<depth>, R<clearance>, I/J<stepover>,
-    ///        Q<Z increment>, K<finish allowance>, F<feed>, S<rpm>.
+    ///        Words: `P<O-num>`, `Z<depth>`, `R<clearance>`,
+    ///        `I`/`J<stepover>`, `Q<Z increment>`, `K<finish allowance>`,
+    ///        `F<feed>`, `S<rpm>`.
     Error dispatchG150(const Block& block, std::vector<MotionSegment>& segments);
     /// @brief Collect the closed XY boundary polygon from subprogram
     ///        @p prog (G0/G1 endpoints; G2/G3 tessellated).
