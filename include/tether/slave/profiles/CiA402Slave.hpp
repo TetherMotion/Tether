@@ -236,16 +236,19 @@ public:
     
     /**
      * @brief Get current drive state
+     * @return Decoded CiA 402 state machine state.
      */
     CiA402State getDriveState() const { return driveState_; }
     
     /**
      * @brief Get status word (0x6041)
+     * @return Raw status word.
      */
     uint16_t getStatusWord() const;
     
     /**
      * @brief Process control word (0x6040)
+     * @param controlWord Control word received from the master.
      */
     void processControlWord(uint16_t controlWord);
     
@@ -272,16 +275,20 @@ public:
     
     /**
      * @brief Get current operating mode (0x6061)
+     * @return Mode the drive reports it is running.
      */
     int8_t getOperatingMode() const { return operatingModeDisplay_; }
     
     /**
      * @brief Get target operating mode (0x6060)
+     * @return Operating mode requested by the master.
      */
     int8_t getTargetOperatingMode() const { return operatingMode_; }
     
     /**
      * @brief Check if mode is supported
+     * @param mode CiA 402 operating mode to test.
+     * @return true when the drive supports that mode.
      */
     bool isModeSupported(int8_t mode) const;
     
@@ -291,26 +298,31 @@ public:
     
     /**
      * @brief Get actual position (0x6064)
+     * @return Actual position in drive units.
      */
     int32_t getActualPosition() const { return actualPosition_; }
     
     /**
      * @brief Set actual position (for simulation)
+     * @param position Position value to apply.
      */
     void setActualPosition(int32_t position);
     
     /**
      * @brief Get target position (0x607A)
+     * @return Target position in drive units.
      */
     int32_t getTargetPosition() const { return targetPosition_; }
     
     /**
      * @brief Get position demand value (0x6062)
+     * @return Internal position demand.
      */
     int32_t getPositionDemand() const { return positionDemand_; }
     
     /**
      * @brief Get following error (0x60F4)
+     * @return Following error in drive units.
      */
     int32_t getFollowingError() const;
     
@@ -320,21 +332,25 @@ public:
     
     /**
      * @brief Get actual velocity (0x606C)
+     * @return Actual velocity in drive units/s.
      */
     int32_t getActualVelocity() const { return actualVelocity_; }
     
     /**
      * @brief Set actual velocity (for simulation)
+     * @param velocity Velocity value to apply.
      */
     void setActualVelocity(int32_t velocity);
     
     /**
      * @brief Get target velocity (0x60FF)
+     * @return Target velocity in drive units/s.
      */
     int32_t getTargetVelocity() const { return targetVelocity_; }
     
     /**
      * @brief Get velocity demand value (0x606B)
+     * @return Internal velocity demand.
      */
     int32_t getVelocityDemand() const { return velocityDemand_; }
     
@@ -344,21 +360,25 @@ public:
     
     /**
      * @brief Get actual torque (0x6077) in 0.1% of rated torque
+     * @return Actual torque in 0.1 % of rated torque.
      */
     int16_t getActualTorque() const { return actualTorque_; }
     
     /**
      * @brief Set actual torque (for simulation)
+     * @param torque Torque value to apply.
      */
     void setActualTorque(int16_t torque);
     
     /**
      * @brief Get target torque (0x6071)
+     * @return Target torque in 0.1 % of rated torque.
      */
     int16_t getTargetTorque() const { return targetTorque_; }
     
     /**
      * @brief Get torque demand value (0x6074)
+     * @return Internal torque demand in 0.1 % of rated torque.
      */
     int16_t getTorqueDemand() const { return torqueDemand_; }
     
@@ -368,11 +388,13 @@ public:
     
     /**
      * @brief Check if homing is complete
+     * @return true when homing finished successfully.
      */
     bool isHomingComplete() const { return homingComplete_; }
     
     /**
      * @brief Set homing complete flag
+     * @param complete Homing-complete state to apply.
      */
     void setHomingComplete(bool complete);
     
@@ -406,11 +428,14 @@ public:
     
     /**
      * @brief Get touch probe position
+     * @param probeNum Touch-probe channel (1 or 2).
+     * @return Latched probe position in drive units.
      */
     int32_t getTouchProbePosition(int probeNum) const;
     
     /**
      * @brief Get touch probe status (0x60B8)
+     * @return Touch-probe status word.
      */
     uint16_t getTouchProbeStatus() const { return touchProbeStatus_; }
     
@@ -420,16 +445,19 @@ public:
     
     /**
      * @brief Set digital inputs (0x60FD)
+     * @param inputs Digital input bitfield to apply.
      */
     void setDigitalInputs(uint32_t inputs);
     
     /**
      * @brief Get digital inputs (0x60FD)
+     * @return Digital input bitfield.
      */
     uint32_t getDigitalInputs() const { return digitalInputs_; }
     
     /**
      * @brief Get digital outputs (0x60FE)
+     * @return Digital output bitfield.
      */
     uint32_t getDigitalOutputs() const { return digitalOutputs_; }
     
@@ -439,6 +467,7 @@ public:
     
     /**
      * @brief Get supported drive functions
+     * @return Supported-function bitmask (0x6502).
      */
     uint32_t getSupportedDriveFunctions() const;
     
@@ -571,22 +600,30 @@ private:
 
 /**
  * @brief Create a CiA 402 drive slave with specified configuration
+ * @param config Object-dictionary layout and drive parameters.
+ * @return Configured slave.
  */
 std::unique_ptr<CiA402Slave> createCiA402Slave(const CiA402SlaveConfig& config);
 
 /**
  * @brief Create a simple servo drive (CSP mode)
+ * @param encoderResolution Encoder counts per revolution.
+ * @return Configured servo slave.
  */
 std::unique_ptr<CiA402Slave> createServoDrive(uint32_t encoderResolution = 131072);
 
 /**
  * @brief Create a stepper drive (CSP mode)
+ * @param stepsPerRevolution Full steps per revolution.
+ * @param microstepping Microsteps per full step.
+ * @return Configured stepper slave.
  */
 std::unique_ptr<CiA402Slave> createStepperDrive(uint32_t stepsPerRevolution = 200,
                                                   uint32_t microstepping = 256);
 
 /**
  * @brief Create a frequency inverter (CSV mode)
+ * @return Configured inverter slave.
  */
 std::unique_ptr<CiA402Slave> createFrequencyInverter();
 
