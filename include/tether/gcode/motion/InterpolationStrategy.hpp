@@ -221,9 +221,12 @@ struct TrajectoryPoint {
     TrajectoryPoint() = default;
 
     /// Create from position
+    /// @param pos Position to wrap
     explicit TrajectoryPoint(const Position& pos) : position(pos) {}
 
     /// Euclidean distance to another point
+    /// @param other Point to measure against
+    /// @return Distance between the positions [mm]
     double distanceTo(const TrajectoryPoint& other) const {
         return position.linearDistance(other.position);
     }
@@ -271,12 +274,14 @@ struct PlanningSegment {
     PlanningSegment() = default;
 
     /// Check if this is an arc segment
+    /// @return `true` for ArcCW/ArcCCW motion types
     bool isArc() const {
         return motionType == SegmentMotionType::ArcCW ||
                motionType == SegmentMotionType::ArcCCW;
     }
 
     /// Check if this is a spline segment
+    /// @return `true` for CubicSpline/QuadraticSpline/NURBS motion types
     bool isSpline() const {
         return motionType == SegmentMotionType::CubicSpline ||
                motionType == SegmentMotionType::QuadraticSpline ||
@@ -284,6 +289,7 @@ struct PlanningSegment {
     }
 
     /// Get arc direction (1 for CCW, -1 for CW)
+    /// @return +1 for counter-clockwise, -1 otherwise
     int arcDirection() const {
         return (motionType == SegmentMotionType::ArcCCW) ? 1 : -1;
     }
@@ -346,6 +352,7 @@ struct InterpolationContext {
     }
 
     /// Update bounds with a position
+    /// @param p Position folded into the per-axis min/max bounds
     void updateBounds(const Position& p) {
         for (size_t i = 0; i < MAX_AXES; ++i) {
             minBounds[i] = std::min(minBounds[i], p[i]);
@@ -354,6 +361,8 @@ struct InterpolationContext {
     }
 
     /// Get segment at offset from current (negative = lookbehind, positive = lookahead)
+    /// @param offset Segment offset relative to currentSegmentIndex
+    /// @return Segment pointer, or nullptr when out of range
     const PlanningSegment* getSegment(int offset) const {
         int idx = static_cast<int>(currentSegmentIndex) + offset;
         if (idx < 0 || idx >= static_cast<int>(segments.size())) {
@@ -363,11 +372,15 @@ struct InterpolationContext {
     }
 
     /// Check if we have lookahead available
+    /// @param count Number of segments ahead required
+    /// @return `true` if at least `count` segments remain after the current one
     bool hasLookahead(size_t count) const {
         return (currentSegmentIndex + count) < segments.size();
     }
 
     /// Check if we have lookbehind available
+    /// @param count Number of segments behind required
+    /// @return `true` if at least `count` segments precede the current one
     bool hasLookbehind(size_t count) const {
         return currentSegmentIndex >= count;
     }
@@ -414,11 +427,13 @@ public:
 
     /**
      * @brief Get the strategy type
+     * @return InterpolationStrategyType identifying the implementation
      */
     virtual InterpolationStrategyType type() const = 0;
 
     /**
      * @brief Get human-readable strategy name
+     * @return Static strategy name for logging/UI
      */
     virtual const char* name() const = 0;
 
@@ -515,6 +530,10 @@ public:
 
     /**
      * @brief Clamp value to range
+     * @param v Value to clamp
+     * @param lo Lower bound
+     * @param hi Upper bound
+     * @return `v` constrained to [lo, hi]
      */
     static double clamp(double v, double lo, double hi) {
         return std::max(lo, std::min(hi, v));
