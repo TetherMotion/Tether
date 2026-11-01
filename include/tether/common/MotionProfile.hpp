@@ -74,36 +74,43 @@ public:
     
     /**
      * @brief Get profile type
+     * @return Enumerated profile shape.
      */
     virtual ProfileType getType() const = 0;
     
     /**
      * @brief Set motion limits
+     * @param limits Velocity/acceleration/jerk limits to enforce.
      */
     virtual void setLimits(const MotionLimits& limits);
     
     /**
      * @brief Get motion limits
+     * @return Limits currently enforced.
      */
     const MotionLimits& getLimits() const { return m_limits; }
     
     /**
      * @brief Set velocity limit
+     * @param velocity Maximum velocity [units/s].
      */
     void setMaxVelocity(double velocity) { m_limits.maxVelocity = static_cast<uint32_t>(velocity); }
     
     /**
      * @brief Set acceleration limit
+     * @param accel Maximum acceleration [units/s^2].
      */
     void setMaxAcceleration(double accel) { m_limits.maxAcceleration = static_cast<uint32_t>(accel); }
     
     /**
      * @brief Set deceleration limit
+     * @param decel Maximum deceleration [units/s^2].
      */
     void setMaxDeceleration(double decel) { m_limits.maxDeceleration = static_cast<uint32_t>(decel); }
     
     /**
      * @brief Set jerk limit
+     * @param jerk Maximum jerk [units/s^3].
      */
     void setMaxJerk(double jerk) { m_limits.maxJerk = static_cast<uint32_t>(jerk); }
     
@@ -129,6 +136,7 @@ public:
     
     /**
      * @brief Get total profile duration
+     * @return Duration of the profile [s].
      */
     virtual double getDuration() const = 0;
     
@@ -136,6 +144,7 @@ public:
      * @brief Check if profile is complete
      * 
      * @param currentTime Current time from start
+     * @return true once @p currentTime reaches the profile duration.
      */
     virtual bool isComplete(double currentTime) const {
         return currentTime >= getDuration();
@@ -143,16 +152,19 @@ public:
     
     /**
      * @brief Get start position
+     * @return Position the profile starts from.
      */
     double getStartPosition() const { return m_startPos; }
     
     /**
      * @brief Get end position
+     * @return Position the profile ends at.
      */
     double getEndPosition() const { return m_endPos; }
     
     /**
      * @brief Get distance (signed)
+     * @return Signed travel distance (end - start).
      */
     double getDistance() const { return m_endPos - m_startPos; }
     
@@ -165,6 +177,7 @@ public:
     
     /**
      * @brief Get current speed factor
+     * @return Active speed factor.
      */
     double getSpeedFactor() const { return m_speedFactor; }
     
@@ -240,11 +253,15 @@ public:
     
     /**
      * @brief Check if profile is triangular (no coast phase)
+     * @return true when the profile has no constant-velocity phase.
      */
     bool isTriangular() const { return m_isTriangular; }
     
     /**
      * @brief Get phase times
+     * @param accelTime Receives the acceleration phase duration [s].
+     * @param coastTime Receives the coast phase duration [s].
+     * @param decelTime Receives the deceleration phase duration [s].
      */
     void getPhaseTimes(double& accelTime, double& coastTime, double& decelTime) const {
         accelTime = m_t1;
@@ -301,11 +318,13 @@ public:
     
     /**
      * @brief Get number of phases actually used
+     * @return Phase count (3 for trapezoidal, 7 for S-curve).
      */
     int getPhaseCount() const { return m_phaseCount; }
     
     /**
      * @brief Get phase end times
+     * @return Pointer to the phase end-time array.
      */
     const double* getPhaseTimes() const { return m_t; }
     
@@ -409,11 +428,14 @@ public:
     
     /**
      * @brief Set desired duration
+     * @param duration Requested profile duration [s].
      */
     void setDuration(double duration) { m_desiredDuration = duration; }
     
     /**
      * @brief Set boundary accelerations (for quintic and above)
+     * @param startAccel Acceleration at the start [units/s^2].
+     * @param endAccel Acceleration at the end [units/s^2].
      */
     void setBoundaryAcceleration(double startAccel, double endAccel) {
         m_startAccel = startAccel;
@@ -422,6 +444,8 @@ public:
     
     /**
      * @brief Set boundary jerks (for septic)
+     * @param startJerk Jerk at the start [units/s^3].
+     * @param endJerk Jerk at the end [units/s^3].
      */
     void setBoundaryJerk(double startJerk, double endJerk) {
         m_startJerk = startJerk;
@@ -437,6 +461,7 @@ public:
     
     /**
      * @brief Get polynomial coefficients
+     * @return Pointer to the coefficient array (order+1 entries).
      */
     const double* getCoefficients() const { return m_coeff; }
     
@@ -479,6 +504,9 @@ std::unique_ptr<MotionProfile> createProfile(ProfileType type);
 
 /**
  * @brief Create motion profile by type and apply limits
+ * @param type Profile shape to instantiate.
+ * @param limits Limits applied to the new profile.
+ * @return Newly constructed profile.
  */
 std::unique_ptr<MotionProfile> createProfile(ProfileType type,
                                              const MotionLimits& limits);
