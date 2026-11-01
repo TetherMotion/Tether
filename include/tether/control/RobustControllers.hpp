@@ -188,11 +188,17 @@ namespace tether::control {
 struct WeightingFunction {
     /**
      * @brief First-order weight: W(s) = (s + z) / (s + p)
+     * @param zero Zero location [rad/s]
+     * @param pole Pole location [rad/s]
+     * @param gain DC gain multiplier
+     * @return Weighting function descriptor
      */
     static WeightingFunction firstOrder(double zero, double pole, double gain = 1.0);
-    
+
     /**
      * @brief Integrating weight: W(s) = k/s
+     * @param gain Integrator gain
+     * @return Weighting function descriptor
      */
     static WeightingFunction integrator(double gain);
     
@@ -204,6 +210,7 @@ struct WeightingFunction {
      * @param M Maximum sensitivity (typically 1.5-2)
      * @param omegaB Bandwidth [rad/s]
      * @param epsilon Low-frequency gain (typically 0.001)
+     * @return Weighting function descriptor
      */
     static WeightingFunction sensitivity(double M, double omegaB, double epsilon);
     
@@ -215,6 +222,7 @@ struct WeightingFunction {
      * @param M Low-frequency gain (typically 0.5-1)
      * @param omegaT Rolloff frequency [rad/s]
      * @param epsilon High-frequency gain (typically 0.01)
+     * @return Weighting function descriptor
      */
     static WeightingFunction complementary(double M, double omegaT, double epsilon);
     
@@ -226,11 +234,18 @@ struct WeightingFunction {
     
     /**
      * @brief Evaluate magnitude at frequency
+     * @param omega Frequency [rad/s]
+     * @return |W(jω)| magnitude
      */
     double magnitude(double omega) const;
-    
+
     /**
      * @brief Get state-space realization
+     * @param[out] A State matrix
+     * @param[out] B Input matrix
+     * @param[out] C Output matrix
+     * @param[out] D Feedthrough matrix
+     * @param[out] n State dimension written
      */
     void toStateSpace(double* A, double* B, double* C, double* D, int& n) const;
 };
@@ -295,11 +310,16 @@ public:
      * - z = [Q^½·e; R^½·u] (weighted error and control)
      * - w = [ref; dist; noise]
      * 
-     * @param A, B, C, D Plant matrices
+     * @param A Plant state matrix
+     * @param B Plant input matrix
+     * @param C Plant output matrix
      * @param Q State/output weight
      * @param R Control weight
      * @param W Process noise intensity
      * @param V Measurement noise intensity
+     * @param n Number of states
+     * @param m Number of inputs
+     * @param p Number of outputs
      */
     void setRegulatorProblem(const double* A, const double* B, const double* C,
                              const double* Q, const double* R,
@@ -314,18 +334,23 @@ public:
     
     /**
      * @brief Get achieved H2 norm
+     * @return Closed-loop H2 norm of the designed controller
      */
     double getH2Norm() const { return m_h2Norm; }
-    
+
     /**
      * @brief Get controller state-space matrices
+     * @param[out] Ak Controller state matrix
+     * @param[out] Bk Controller input matrix
+     * @param[out] Ck Controller output matrix
+     * @param[out] Dk Controller feedthrough matrix
      */
     void getControllerMatrices(double* Ak, double* Bk, double* Ck, double* Dk) const;
-    
+
 protected:
     ControllerOutput computeImpl(const ControllerInput& input) override;
     void resetImpl() override;
-    
+
 private:
     int m_n{0}, m_nw{0}, m_nu{0}, m_nz{0}, m_ny{0};
     
@@ -390,14 +415,33 @@ public:
     
     /**
      * @brief Set plant model
-     * @param A, B, C, D State-space matrices
-     * @param n States, m Inputs, p Outputs
+     * @param A State matrix
+     * @param B Input matrix
+     * @param C Output matrix
+     * @param D Feedthrough matrix
+     * @param n Number of states
+     * @param m Number of inputs
+     * @param p Number of outputs
      */
     void setPlant(const double* A, const double* B, const double* C, const double* D,
                   int n, int m, int p);
-    
+
     /**
      * @brief Set generalized plant directly
+     * @param A Plant state matrix
+     * @param B1 Exogenous-input block (w)
+     * @param B2 Control-input block (u)
+     * @param C1 Performance-output block (z)
+     * @param C2 Measurement-output block (e/y)
+     * @param D11 w→z feedthrough
+     * @param D12 u→z feedthrough
+     * @param D21 w→y feedthrough
+     * @param D22 u→y feedthrough
+     * @param n Number of states
+     * @param nw Exogenous input dimension
+     * @param nu Control input dimension
+     * @param nz Performance output dimension
+     * @param ny Measurement output dimension
      */
     void setGeneralizedPlant(const double* A, const double* B1, const double* B2,
                              const double* C1, const double* C2,
@@ -424,14 +468,19 @@ public:
     
     /**
      * @brief Set complementary sensitivity weight W₃
-     * @param omegaT High-frequency cutoff
+     * @param M Peak complementary-sensitivity bound
+     * @param omegaT High-frequency cutoff [rad/s]
+     * @param epsilon High-frequency gain floor
      */
     void setComplementaryWeight(double M, double omegaT, double epsilon);
-    
+
     /**
      * @brief Set custom weighting functions
+     * @param W1 Sensitivity weight
+     * @param W2 Control-effort weight
+     * @param W3 Complementary-sensitivity weight
      */
-    void setWeights(const WeightingFunction& W1, 
+    void setWeights(const WeightingFunction& W1,
                     const WeightingFunction& W2,
                     const WeightingFunction& W3);
     
@@ -458,14 +507,19 @@ public:
     
     /**
      * @brief Get achieved H∞ norm (gamma)
+     * @return Closed-loop ∞-norm achieved by the last design
      */
     double getGamma() const { return m_gamma; }
-    
+
     /**
      * @brief Get controller state-space matrices
+     * @param[out] Ak Controller state matrix
+     * @param[out] Bk Controller input matrix
+     * @param[out] Ck Controller output matrix
+     * @param[out] Dk Controller feedthrough matrix
      */
     void getControllerMatrices(double* Ak, double* Bk, double* Ck, double* Dk) const;
-    
+
 protected:
     ControllerOutput computeImpl(const ControllerInput& input) override;
     void resetImpl() override;
@@ -553,6 +607,7 @@ public:
     
     /**
      * @brief Perform one D-K iteration
+     * @return `true` if the iteration converged or made progress
      */
     bool dkIteration();
     
