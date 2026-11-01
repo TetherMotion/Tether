@@ -58,10 +58,12 @@ struct SlaveGroupState {
     uint16_t al_status_code = 0;      ///< AL_STATUS_CODE register (0x0134)
 
     /// AL state (low nibble of AL_STATUS).
+    /// @return Decoded AL state of the slave.
     SlaveState state() const {
         return static_cast<SlaveState>(al_status & 0x000F);
     }
     /// AL error flag (bit 4 of AL_STATUS).
+    /// @return true when the slave signals an AL error.
     bool errorFlag() const { return (al_status & 0x0010) != 0; }
 };
 
@@ -75,6 +77,8 @@ class SlaveGroup {
 public:
     /// Group over an explicit set of bus indices — writes use one
     /// APWR-per-slave multi-datagram frame.
+    /// @param master Master owning the bus.
+    /// @param slave_indices Bus indices of the group members.
     SlaveGroup(Master& master, std::span<const uint16_t> slave_indices)
         : master_(master), indices_(slave_indices.begin(), slave_indices.end()) {}
 
@@ -88,11 +92,15 @@ public:
     /// Whole-bus group: requestState*() emits a single BWR datagram;
     /// readStates() still queries every discovered slave individually
     /// (broadcast reads return only one merged result).
+    /// @param master Master owning the bus.
+    /// @return Group covering every discovered slave.
     static SlaveGroup all(Master& master);
 
     /// Whole-bus group with addressed writes: one APWR datagram per
     /// discovered slave in a single frame — useful when a broadcast write
     /// is undesirable (e.g. slaves that must not see the request).
+    /// @param master Master owning the bus.
+    /// @return Group covering every discovered slave, addressed writes.
     static SlaveGroup allAddressed(Master& master);
 
     // ---- Group description -------------------------------------------------
@@ -101,9 +109,13 @@ public:
     size_t size()  const { return indices_.size(); }
     bool   empty() const { return indices_.empty(); }
     /// True when created via all() — writes go out as one BWR datagram.
+    /// @return true for broadcast groups.
     bool   isBroadcast() const { return broadcast_; }
 
     /// Build the AL_CONTROL byte: requested state | optional error-ack bit.
+    /// @param target AL state to request.
+    /// @param ack_error true to set the acknowledge-error bit.
+    /// @return Encoded AL_CONTROL byte.
     static constexpr uint8_t controlByte(SlaveState target, bool ack_error) {
         return static_cast<uint8_t>(target) | (ack_error ? 0x10u : 0x00u);
     }
@@ -125,6 +137,10 @@ public:
     uint16_t requestAlControl(uint8_t al_control, uint32_t timeout_ms = 200);
 
     /// Convenience wrapper: request @p target on the whole group.
+    /// @param target AL state to request.
+    /// @param ack_error true to acknowledge existing AL errors.
+    /// @param timeout_ms Response timeout [ms].
+    /// @return Number of slaves that acknowledged the request.
     uint16_t requestState(SlaveState target, bool ack_error = false,
                           uint32_t timeout_ms = 200) {
         return requestAlControl(controlByte(target, ack_error), timeout_ms);
@@ -138,6 +154,9 @@ public:
      * Two APRD datagrams per slave (0x0130 and 0x0134, 2 bytes each) are
      * packed into a single Ethernet frame, so a whole-group status poll is
      * one wire round-trip.
+     *
+     * @param timeout_ms Response timeout [ms].
+     * @return One state record per member, in group order.
      */
     std::vector<SlaveGroupState> readStates(uint32_t timeout_ms = 200);
 
@@ -149,6 +168,9 @@ public:
      * One Ethernet packet per poll.  Aborts early on cancellation and when
      * a slave signals an AL error (error flag + status code are logged).
      *
+     * @param target Desired AL state.
+     * @param timeout_ms Overall timeout [ms].
+     * @param poll_interval_ms Delay between polls [ms].
      * @param resend_interval_ms  If > 0, re-issue requestState() every
      *        interval while waiting — some slaves need repeated requests.
      * @return true when all members reached @p target.
@@ -182,6 +204,8 @@ public:
      * opts.timeout_ms.  Members that do not answer in time get
      * CoEErrorCode::Timeout in their result slot.
      *
+     * @param entry Register definition (index, subindex, data type).
+     * @param opts Transaction options (timeout, diagnostics).
      * @return One SlaveGroupReadResult per member, in indices() order
      *         (discovery order for broadcast groups).
      */
@@ -193,6 +217,9 @@ public:
      * @brief Async variant: enqueue the read on every member and return one
      *        std::future per member (aligned with indices() order).
      *        The caller waits on the futures itself.
+     * @param entry Register definition (index, subindex, data type).
+     * @param opts Transaction options (timeout, diagnostics).
+     * @return One future per member, in indices() order.
      */
     std::vector<std::future<CoE::CoEResult<uint64_t>>> readEntryAsync(
         const ObjectDictionary::ObjectDictionaryEntry& entry,
@@ -202,6 +229,10 @@ public:
      * @brief Write `value` to `entry` on every group member, synchronously.
      *        Same semantics as readEntry(); the value is truncated to the
      *        width declared by entry.data_type.
+     * @param entry Register definition (index, subindex, data type).
+     * @param value Raw bits to write.
+     * @param opts Transaction options (timeout, diagnostics).
+     * @return One result per member, in indices() order.
      */
     std::vector<SlaveGroupWriteResult> writeEntry(
         const ObjectDictionary::ObjectDictionaryEntry& entry,
@@ -209,6 +240,10 @@ public:
 
     /**
      * @brief Async variant of writeEntry — one std::future per member.
+     * @param entry Register definition (index, subindex, data type).
+     * @param value Raw bits to write.
+     * @param opts Transaction options (timeout, diagnostics).
+     * @return One future per member, in indices() order.
      */
     std::vector<std::future<CoE::CoEResult<void>>> writeEntryAsync(
         const ObjectDictionary::ObjectDictionaryEntry& entry,
@@ -219,6 +254,10 @@ public:
      *        member i (indices() order).  values.size() must equal the
      *        member count; on mismatch nothing is written and every member
      *        gets CoEErrorCode::NotConfigured.
+     * @param entry Register definition (index, subindex, data type).
+     * @param values One raw value per member, in indices() order.
+     * @param opts Transaction options (timeout, diagnostics).
+     * @return One result per member, in indices() order.
      */
     std::vector<SlaveGroupWriteResult> writeEntry(
         const ObjectDictionary::ObjectDictionaryEntry& entry,
@@ -226,6 +265,10 @@ public:
         CoE::CoETransactionOptions opts = {});
 
     /// Async variant of the per-member writeEntry.
+    /// @param entry Register definition (index, subindex, data type).
+    /// @param values One raw value per member, in indices() order.
+    /// @param opts Transaction options (timeout, diagnostics).
+    /// @return One future per member, in indices() order.
     std::vector<std::future<CoE::CoEResult<void>>> writeEntryAsync(
         const ObjectDictionary::ObjectDictionaryEntry& entry,
         std::span<const uint64_t> values,
@@ -234,6 +277,8 @@ public:
     // ---- Result helpers ---------------------------------------------------
 
     /// True when every member result carries a value.
+    /// @param results Per-member results to inspect.
+    /// @return true when no member failed.
     template<typename T>
     static bool allOk(const std::vector<SlaveGroupSdoResult<T>>& results) {
         for (const auto& r : results)
@@ -243,6 +288,9 @@ public:
 
     /**
      * @brief Log one error line per failed member result.
+     * @param results Per-member results to inspect.
+     * @param entry Register definition used for the log message.
+     * @param log_tag Log tag prefixed to each error line.
      * @return allOk(results)
      */
     template<typename T>
@@ -266,6 +314,10 @@ public:
 
     /**
      * @brief writeEntry() + per-member error logging.
+     * @param entry Register definition (index, subindex, data type).
+     * @param value Raw bits to write.
+     * @param opts Transaction options (timeout, diagnostics).
+     * @param log_tag Log tag prefixed to each error line.
      * @return true when every member acknowledged the write.
      */
     bool writeEntryAll(
@@ -275,6 +327,11 @@ public:
         return logErrors(writeEntry(entry, value, opts), entry, log_tag);
     }
     /// Per-member-values variant of writeEntryAll().
+    /// @param entry Register definition (index, subindex, data type).
+    /// @param values One raw value per member, in indices() order.
+    /// @param opts Transaction options (timeout, diagnostics).
+    /// @param log_tag Log tag prefixed to each error line.
+    /// @return true when every member acknowledged the write.
     bool writeEntryAll(
         const ObjectDictionary::ObjectDictionaryEntry& entry,
         std::span<const uint64_t> values,
@@ -286,6 +343,10 @@ public:
     /**
      * @brief Read `entry` on all members and compare against `expected`.
      *        Logs one warning per mismatching/failing member.
+     * @param entry Register definition (index, subindex, data type).
+     * @param expected Value every member must report.
+     * @param opts Transaction options (timeout, diagnostics).
+     * @param log_tag Log tag prefixed to each warning.
      * @return true when every member read successfully and matches.
      */
     bool verifyEntry(
@@ -297,6 +358,9 @@ public:
      * @brief Read a list of register definitions on all members and log
      *        one line per entry: `0x2004:3 'Pull time': s0=50 s1=50`.
      *        Members that fail a read show `s<idx>=<err>`.
+     * @param entries Register definitions to read on every member.
+     * @param log_tag Log tag prefixed to each line.
+     * @param opts Transaction options (timeout, diagnostics).
      */
     void dumpEntries(
         std::span<const ObjectDictionary::ObjectDictionaryEntry* const> entries,
@@ -304,6 +368,9 @@ public:
         CoE::CoETransactionOptions opts = {});
 
     /// Braced-list convenience overload.
+    /// @param entries Register definitions to read on every member.
+    /// @param log_tag Log tag prefixed to each line.
+    /// @param opts Transaction options (timeout, diagnostics).
     void dumpEntries(
         std::initializer_list<const ObjectDictionary::ObjectDictionaryEntry*> entries,
         const char* log_tag,
@@ -323,6 +390,10 @@ public:
      * slave enables the mailbox channels asynchronously once its firmware
      * has brought them up.  One Ethernet frame per poll (two APRD
      * datagrams per member).
+     *
+     * @param timeout_ms Overall timeout [ms].
+     * @param poll_interval_ms Delay between polls [ms].
+     * @return true when every member reports an active mailbox.
      */
     bool waitForMailboxReady(uint32_t timeout_ms,
                              uint32_t poll_interval_ms = 10);
