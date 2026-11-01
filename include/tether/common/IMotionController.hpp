@@ -28,13 +28,30 @@ public:
 
     /**
      * @brief Enable all axes
-     * @return true on success
+     *
+     * Drives every registered axis toward its operational/enabled state
+     * (CiA 402: Operation Enabled). Implementations may enable axes
+     * sequentially; the call returns as soon as all axes report enabled
+     * or the timeout expires.
+     *
+     * @param timeoutMs  Per-axis or total wait budget in milliseconds,
+     *                   implementation-defined granularity.
+     * @return true if every axis reached the enabled state within the
+     *         timeout; false if any axis timed out or faulted.
      */
     virtual bool enableAll(uint32_t timeoutMs = 5000) = 0;
 
     /**
      * @brief Disable all axes
-     * @return true on success
+     *
+     * Drives every registered axis back to a safe, de-energized state
+     * (CiA 402: Switch On Disabled / Ready To Switch On), typically used
+     * for shutdown or fault recovery.
+     *
+     * @param timeoutMs  Per-axis or total wait budget in milliseconds,
+     *                   implementation-defined granularity.
+     * @return true if every axis reached the disabled state within the
+     *         timeout; false if any axis failed to respond in time.
      */
     virtual bool disableAll(uint32_t timeoutMs = 5000) = 0;
 

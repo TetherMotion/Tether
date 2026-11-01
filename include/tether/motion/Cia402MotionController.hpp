@@ -48,27 +48,55 @@ public:
     // ========================================================================
 
     /**
-     * @brief Add an axis to the controller
+     * @brief Register an axis under a logical ID.
+     *
+     * The controller shares ownership via the shared_ptr — destroying the
+     * caller's handle does not detach the axis. Registering an ID that is
+     * already in use replaces the previous axis; coordinated-motion and
+     * homing calls refer to axes by this ID.
+     *
+     * @param id    Logical axis identifier used by getAxis() and the
+     *              move/home APIs.
+     * @param axis  Axis implementation to register; must not be null.
+     * @return The axis that was registered (same object as @p axis).
      */
     std::shared_ptr<tether::common::IAxis> addAxis(AxisId id, std::shared_ptr<tether::common::IAxis> axis);
 
     /**
-     * @brief Get axis by ID
+     * @brief Look up a registered axis by ID.
+     *
+     * @param id  Logical axis identifier passed to addAxis().
+     * @return Shared pointer to the axis, or nullptr if no axis is
+     *         registered under @p id.
      */
     std::shared_ptr<tether::common::IAxis> getAxis(AxisId id);
 
     /**
-     * @brief Get all axes
+     * @brief All registered axes keyed by ID.
+     *
+     * @return Const reference to the internal map — stable only until the
+     *         next addAxis()/removeAxis() call; do not hold it across
+     *         axis-management operations.
      */
     const AxisMap& getAxes() const { return m_axes; }
 
     /**
      * @brief Remove axis
+     *
+     * Erases the ID from the axis map only — a previously configured
+     * coordinated list keeps the ID, but it resolves to no axis in future
+     * moves. The axis object itself survives in any other shared_ptr
+     * owner.
+     *
+     * @param id  Logical axis identifier to remove.
+     * @return true if the axis existed and was removed.
      */
     bool removeAxis(AxisId id);
 
     /**
-     * @brief Get number of axes
+     * @brief Number of registered axes.
+     *
+     * @return Count of IDs currently in the axis map.
      */
     size_t getAxisCount() const { return m_axes.size(); }
 
@@ -91,11 +119,17 @@ public:
 
     /**
      * @brief Check if all axes are enabled
+     *
+     * Vacuously true when no axes are registered.
+     *
+     * @return true if every registered axis reports enabled.
      */
     bool allEnabled() const;
 
     /**
      * @brief Check if any axis has fault
+     *
+     * @return true if at least one registered axis reports a fault state.
      */
     bool anyFault() const;
 
@@ -104,7 +138,16 @@ public:
     // ========================================================================
 
     /**
-     * @brief Set axes for coordinated motion
+     * @brief Select which axes participate in coordinated moves.
+     *
+     * The listed IDs define the axis order for moveLinear()/
+     * moveCircular()/moveHelical() target positions — element i of a
+     * target vector maps to axisIds[i]. IDs not registered via addAxis()
+     * are skipped when a move executes. Must be called before coordinated
+     * moves; a stale list after removeAxis() simply ignores the missing
+     * axis.
+     *
+     * @param axisIds  Axis IDs in coordinate order.
      */
     void setCoordinatedAxes(const std::vector<AxisId>& axisIds);
 
