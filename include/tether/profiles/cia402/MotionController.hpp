@@ -94,11 +94,13 @@ public:
     
     /**
      * @brief Get current status
+     * @return Combined status word (state, motion flags, faults).
      */
     Status getStatus() const;
     
     /**
      * @brief Get CiA 402 state
+     * @return Decoded state-machine state.
      */
     State getState() const;
     
@@ -112,21 +114,27 @@ public:
     
     /**
      * @brief Enable drive (transition to OperationEnabled)
+     * @param timeoutMs Maximum time to wait for the transition [ms].
+     * @return true when OperationEnabled was reached.
      */
     bool enable(uint32_t timeoutMs = 5000) override;
     
     /**
      * @brief Disable drive (transition to SwitchOnDisabled)
+     * @param timeoutMs Maximum time to wait for the transition [ms].
+     * @return true when SwitchOnDisabled was reached.
      */
     bool disable(uint32_t timeoutMs = 5000) override;
     
     /**
      * @brief Quick stop
+     * @return true when the quick-stop transition was accepted.
      */
     bool quickStop();
     
     /**
      * @brief Clear fault and reset
+     * @return true when the fault was cleared (FaultReset accepted).
      */
     bool clearFault() override;
     
@@ -136,11 +144,14 @@ public:
     
     /**
      * @brief Set operating mode
+     * @param mode CiA 402 mode (PP, PV, PT, CSP, CSV, CST, HM, ...).
+     * @return true when the drive accepted the mode.
      */
     bool setOperatingMode(OperatingMode mode);
     
     /**
      * @brief Get current operating mode
+     * @return Mode currently commanded by the axis.
      */
     OperatingMode getOperatingMode() const;
     
@@ -150,27 +161,37 @@ public:
     
     /**
      * @brief Execute point-to-point motion
+     * @param position Absolute target position in drive units.
+     * @param velocity Profile velocity (0 = configured default).
+     * @return true when the drive accepted the command.
      */
     bool moveAbsolute(int32_t position, uint32_t velocity = 0);
     
     /**
      * @brief Execute relative motion
+     * @param distance Relative distance in drive units.
+     * @param velocity Profile velocity (0 = configured default).
+     * @return true when the drive accepted the command.
      */
     bool moveRelative(int32_t distance, uint32_t velocity = 0);
     
     /**
      * @brief Execute motion with full parameters
+     * @param cmd Complete motion command (target, velocity, accel, ...).
+     * @return true when the drive accepted the command.
      */
     bool executeMotion(const MotionCommand& cmd);
     
     /**
      * @brief Halt motion immediately
+     * @return true when the halt request was accepted.
      */
     bool halt();
     
     /**
      * @brief Wait for motion complete
      * @param timeoutMs Timeout in milliseconds
+     * @return true when the target was reached before the timeout.
      */
     bool waitMotionComplete(uint32_t timeoutMs = 60000) override;
     
@@ -180,11 +201,15 @@ public:
     
     /**
      * @brief Set target velocity
+     * @param velocity Target velocity in drive units.
+     * @return true when the drive accepted the target.
      */
     bool setVelocity(int32_t velocity);
     
     /**
      * @brief Execute velocity command
+     * @param cmd Complete velocity command (target, accel, ...).
+     * @return true when the drive accepted the command.
      */
     bool executeVelocity(const VelocityCommand& cmd);
     
@@ -194,11 +219,15 @@ public:
     
     /**
      * @brief Set target torque
+     * @param torque Target torque in 0.1 % of rated torque.
+     * @return true when the drive accepted the target.
      */
     bool setTorque(int16_t torque);
     
     /**
      * @brief Execute torque command
+     * @param cmd Complete torque command (target, ramp, ...).
+     * @return true when the drive accepted the command.
      */
     bool executeTorque(const TorqueCommand& cmd);
     
@@ -208,16 +237,22 @@ public:
     
     /**
      * @brief Set cyclic position target
+     * @param position Target position for the next cycle.
+     * @param velocityFF Velocity feedforward in drive units.
+     * @param torqueFF Torque feedforward in 0.1 % of rated torque.
      */
     void setCyclicPosition(int32_t position, int32_t velocityFF = 0, int16_t torqueFF = 0);
     
     /**
      * @brief Set cyclic velocity target
+     * @param velocity Target velocity for the next cycle.
+     * @param torqueFF Torque feedforward in 0.1 % of rated torque.
      */
     void setCyclicVelocity(int32_t velocity, int16_t torqueFF = 0);
     
     /**
      * @brief Set cyclic torque target
+     * @param torque Target torque in 0.1 % of rated torque.
      */
     void setCyclicTorque(int16_t torque);
     
@@ -227,26 +262,34 @@ public:
     
     /**
      * @brief Start homing operation
+     * @param cmd Complete homing command (method, speeds, offsets).
+     * @return true when the homing sequence was started.
      */
     bool startHoming(const HomingCommand& cmd);
     
     /**
      * @brief Start homing with default parameters
+     * @param method CiA 402 homing method.
+     * @return true when the homing sequence was started.
      */
     bool startHoming(HomingMethod method = HomingMethod::CurrentPosition);
     
     /**
      * @brief Wait for homing complete
+     * @param timeoutMs Maximum wait time [ms].
+     * @return true when homing completed before the timeout.
      */
     bool waitHomingComplete(uint32_t timeoutMs = 30000) override;
     
     /**
      * @brief Check if homing is complete
+     * @return true when the drive reports homing completed.
      */
     bool isHomingComplete() const;
     
     /**
      * @brief Check if axis is homed
+     * @return true when a successful homing has been recorded.
      */
     bool isHomed() const override;
     
@@ -274,31 +317,37 @@ public:
     
     /**
      * @brief Set motion limits
+     * @param limits Position/velocity/acceleration limits enforced by the axis.
      */
     void setMotionLimits(const MotionLimits& limits) override;
     
     /**
      * @brief Get motion limits
+     * @return Limits currently enforced by the axis.
      */
     MotionLimits getMotionLimits() const override;
     
     /**
      * @brief Set profile velocity
+     * @param velocity Default profile velocity in drive units.
      */
     void setProfileVelocity(uint32_t velocity);
     
     /**
      * @brief Set profile acceleration
+     * @param acceleration Default profile acceleration in drive units.
      */
     void setProfileAcceleration(uint32_t acceleration);
     
     /**
      * @brief Set profile deceleration
+     * @param deceleration Default profile deceleration in drive units.
      */
     void setProfileDeceleration(uint32_t deceleration);
     
     /**
      * @brief Set default profile type
+     * @param type Motion profile shape (trapezoidal or S-curve).
      */
     void setDefaultProfileType(ProfileType type);
     
@@ -308,21 +357,27 @@ public:
     
     /**
      * @brief Configure position loop PID
+     * @param gains Position loop gains.
+     * @param limits Output/integral limits for the position loop.
      */
     void setPositionPID(const PIDGains& gains, const PIDLimits& limits = {});
     
     /**
      * @brief Configure velocity loop PID
+     * @param gains Velocity loop gains.
+     * @param limits Output/integral limits for the velocity loop.
      */
     void setVelocityPID(const PIDGains& gains, const PIDLimits& limits = {});
     
     /**
      * @brief Get position PID controller
+     * @return Position loop controller for live tuning.
      */
     PIDController& getPositionPID();
     
     /**
      * @brief Get velocity PID controller
+     * @return Velocity loop controller for live tuning.
      */
     PIDController& getVelocityPID();
     
@@ -332,21 +387,26 @@ public:
     
     /**
      * @brief Set gearing master axis
+     * @param masterAxis Axis whose position drives this slave; null detaches.
      */
     void setGearingMaster(CiA402Axis* masterAxis);
     
     /**
      * @brief Set gear ratio
+     * @param numerator Slave units per master unit (numerator).
+     * @param denominator Slave units per master unit (denominator).
      */
     void setGearRatio(int32_t numerator, int32_t denominator);
     
     /**
      * @brief Enable/disable gearing
+     * @param enable true to lock this axis to the master position.
      */
     void enableGearing(bool enable);
     
     /**
      * @brief Check if axis is gearing slave
+     * @return true when electronic gearing is enabled.
      */
     bool isGearingSlave() const;
     
@@ -370,6 +430,7 @@ public:
     
     /**
      * @brief Get drive backend (for advanced access)
+     * @return Backend implementing the wire protocol, or nullptr.
      */
     DriveBackend* getBackend() { return m_backend.get(); }
     const DriveBackend* getBackend() const { return m_backend.get(); }
