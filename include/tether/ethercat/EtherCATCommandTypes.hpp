@@ -41,6 +41,8 @@ enum class Command : uint8_t {
 
 /**
  * @brief Convert command to string name
+ * @param cmd EtherCAT datagram command to convert
+ * @return Static command name ("APRD", "BRW", ...; "UNK" for unrecognized)
  */
 inline const char* commandToString(Command cmd) {
     switch (cmd) {
@@ -65,6 +67,8 @@ inline const char* commandToString(Command cmd) {
 
 /**
  * @brief Check if command is a read operation
+ * @param cmd Command to classify
+ * @return `true` for RD and RW command variants (RW reads too)
  */
 inline bool isReadCommand(Command cmd) {
     return cmd == Command::APRD || cmd == Command::FPRD || 
@@ -75,6 +79,8 @@ inline bool isReadCommand(Command cmd) {
 
 /**
  * @brief Check if command is a write operation
+ * @param cmd Command to classify
+ * @return `true` for WR and RW command variants
  */
 inline bool isWriteCommand(Command cmd) {
     return cmd == Command::APWR || cmd == Command::FPWR || 
@@ -143,6 +149,8 @@ inline constexpr uint8_t kCyclicDcPoolPos   = 82;
 inline constexpr uint8_t kCyclicSlotBaseIdx = kFastSlotBaseIdx;
 
 /// Rotating pool position -> wire index (pos 82 = the DC index).
+/// @param pos Cyclic pool position (0-82)
+/// @return Wire index the position maps to on the frame
 inline constexpr uint8_t cyclicPoolWireIdx(uint8_t pos) {
     if (pos < 68) return static_cast<uint8_t>(0x9C + pos);   // 0x9C..0xDF
     if (pos < 82) return static_cast<uint8_t>(0xF0 + pos - 68); // 0xF0..0xFD
@@ -151,6 +159,9 @@ inline constexpr uint8_t cyclicPoolWireIdx(uint8_t pos) {
 
 /// Wire index -> rotating pool position; kCyclicDcPoolPos for the DC
 /// index and 0xFF for slice/fire-and-forget indices (not pool members).
+/// @param idx Wire index to translate
+/// @return Pool position, kCyclicDcPoolPos for the DC index, or 0xFF
+///         when `idx` is not a pool member
 inline constexpr uint8_t cyclicWirePoolPos(uint8_t idx) {
     if (idx >= 0x9C && idx <= 0xDF) return static_cast<uint8_t>(idx - 0x9C);
     if (idx >= 0xF0 && idx <= 0xFD)
@@ -168,21 +179,29 @@ inline constexpr uint16_t kLrwCounterTrailerBytes = 8;
 /// True when @p idx lies in the reserved fastpath band [0x9C, 0xFF]
 /// minus the 0xFE fire-and-forget index (its echoes belong to the async
 /// parser path — txpdo_rx_queue_ consumers).
+/// @param idx Wire index to test
+/// @return `true` when `idx` is inside the fastpath band
 inline constexpr bool isFastPathIdx(uint8_t idx) {
     return idx >= kFastSlotBaseIdx && idx <= kFastSlotEndIdx &&
            idx != kFastSlotReservedIdx;
 }
 /// True when @p idx is a user-slice index (0xE0..0xEF).
+/// @param idx Wire index to test
+/// @return `true` when `idx` belongs to a user slice slot
 inline constexpr bool isSliceIdx(uint8_t idx) {
     return idx >= kSliceSlotBaseIdx &&
            idx <  kSliceSlotBaseIdx + static_cast<uint8_t>(kNumSliceSlots);
 }
 /// True when @p idx is a cyclic-pool or DC index — everything in the
 /// band except the slice range and 0xFE.
+/// @param idx Wire index to test
+/// @return `true` when `idx` belongs to the cyclic pool or DC slot
 inline constexpr bool isCyclicIdx(uint8_t idx) {
     return isFastPathIdx(idx) && !isSliceIdx(idx);
 }
 /// True when @p idx maps to a real fastpath mailbox slot.
+/// @param idx Wire index to test
+/// @return `true` when `idx` maps to a fastpath slot
 inline constexpr bool isSlotIdx(uint8_t idx) {
     return isFastPathIdx(idx);
 }
@@ -246,6 +265,7 @@ struct CyclicSliceHealth {
     /// can publish it with one atomic store and readers never see a torn
     /// mix of fields.  Layout: expected[0:16) last[16:32) status[32:40)
     /// failures[40:64) — failures saturate at 2^24-1.
+    /// @return Packed 64-bit snapshot, reversible via unpack()
     uint64_t pack() const {
         const uint64_t f = consecutive_failures > 0xFFFFFFu
                                ? 0xFFFFFFu : consecutive_failures;
@@ -266,6 +286,8 @@ struct CyclicSliceHealth {
 };
 
 /// Short stable names for logs — same style as toString(VlanTagDelivery).
+/// @param s Slice status to convert
+/// @return Static status name for logging
 inline const char* toString(CyclicSliceStatus s) {
     switch (s) {
     case CyclicSliceStatus::Ok:        return "ok";
@@ -322,10 +344,13 @@ struct WireEncap {
     uint32_t wire_rtt_ns = 0;
 
     /// True when tagged frames are part of the RX filter.
+    /// @return `true` if RX VLAN filtering is active
     bool tagged()   const { return rx_vlan_any || rx_vlan_lo != 0; }
     /// True when the link is untagged EtherCAT (no VLAN filtering).
+    /// @return `true` if no VLAN tag is in use
     bool untagged() const { return !tagged(); }
     /// Wire prefix length of a composed cyclic TX frame on the channel.
+    /// @return Bytes before the datagram payload (30 tagged, 26 untagged)
     uint16_t prefixLen() const { return tx_vlan ? 30 : 26; }
 };
 
