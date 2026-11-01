@@ -49,6 +49,14 @@ namespace EtherCAT {
 // Transition Flags (bitmask)
 // ============================================================================
 
+/**
+ * @brief Bitmask classifying an AL state transition.
+ *
+ * Combine with `|` to express interest in several transition kinds in a
+ * StatusFilter — e.g. `ToLowerState | ErrorSet` catches both graceful
+ * downgrades and error assertions. Higher/lower refer to the AL state
+ * rank order (INIT < PRE_OP < SAFE_OP < OP).
+ */
 enum class StatusTransitionFlags : uint8_t {
     None          = 0x00,
     ToHigherState = 0x01, /**< new state rank > old state rank */
@@ -91,15 +99,31 @@ struct StatusFilter {
     SlaveState to_state = kAnyState; /**< kAnyState = don't filter on new state */
     uint8_t transition_flags = static_cast<uint8_t>(StatusTransitionFlags::AnyTransition);
 
-    /**Construct from transition flags only (any slave, any state) */
+    /**
+     * @brief Construct from transition flags only (any slave, any state).
+     *
+     * @param flags  Bitmask of StatusTransitionFlags the event must
+     *               match — combine values with `|`.
+     */
     StatusFilter(StatusTransitionFlags flags)
         : transition_flags(static_cast<uint8_t>(flags)) {}
 
-    /**Construct from slave index + transition flags */
+    /**
+     * @brief Construct from slave index + transition flags.
+     *
+     * @param slave  0-based slave index to watch, or kAnySlave for all.
+     * @param flags  Bitmask of StatusTransitionFlags the event must match.
+     */
     StatusFilter(uint16_t slave, StatusTransitionFlags flags)
         : slave_index(slave), transition_flags(static_cast<uint8_t>(flags)) {}
 
-    /**Construct from from/to states + transition flags */
+    /**
+     * @brief Construct from from/to states + transition flags.
+     *
+     * @param from   Required old state, or kAnyState to ignore it.
+     * @param to     Required new state, or kAnyState to ignore it.
+     * @param flags  Bitmask of StatusTransitionFlags the event must match.
+     */
     StatusFilter(SlaveState from, SlaveState to, StatusTransitionFlags flags)
         : from_state(from), to_state(to), transition_flags(static_cast<uint8_t>(flags)) {}
 
@@ -156,6 +180,14 @@ public:
     /**
      * @brief Initialize for the given number of slaves.
      * Called automatically by Master during discovery.
+     *
+     * Sizes the per-slave state cache and readies the poller for start().
+     * Slave indices ≥ @p slave_count are out of range for every query
+     * and event.
+     *
+     * @param slave_count  Number of slaves to monitor (≤ kMaxSlaves).
+     * @return true on success; false if @p slave_count exceeds kMaxSlaves
+     *         or the poller is already initialized.
      */
     bool init(uint16_t slave_count);
 
@@ -169,7 +201,15 @@ public:
 
     // ----- Configuration -----
 
-    /**Set poll interval in milliseconds (default 500). Must be called before start(). */
+    /**
+     * @brief Set poll interval in milliseconds (default 500).
+     *
+     * Must be called before start() — a running poller keeps the interval
+     * it was started with. Lower values catch transitions sooner at the
+     * cost of more non-realtime AL_STATUS traffic on the bus.
+     *
+     * @param ms  Poll period in milliseconds; must be > 0.
+     */
     void setPollIntervalMs(uint32_t ms) { poll_interval_ms_ = ms; }
     uint32_t pollIntervalMs() const { return poll_interval_ms_; }
 
@@ -177,12 +217,23 @@ public:
 
     /**
      * @brief Register a callback with a filter.
+     *
+     * The callback fires on the poller thread for each polled event
+     * matching @p filter — keep it short and non-blocking, and do not
+     * call back into the poller. The SlaveStatusPoller does not own the
+     * callback's captured state.
+     *
+     * @param filter    StatusFilter describing which transitions to
+     *                  deliver (slave, from/to state, transition flags).
+     * @param callback  Function invoked per matching event.
      * @return Handle for later unregisterCallback(), or 0 on failure.
      */
     CallbackHandle registerCallback(const StatusFilter& filter, StatusCallback callback);
 
     /**
      * @brief Unregister a previously registered callback.
+     *
+     * @param handle  CallbackHandle returned by registerCallback().
      * @return true if the handle was found and removed.
      */
     bool unregisterCallback(CallbackHandle handle);
@@ -198,7 +249,17 @@ public:
 
     // ----- Query -----
 
-    /**Thread-safe snapshot of a slave's current cached state. */
+    /**
+     * @brief Thread-safe snapshot of a slave's current cached state.
+     *
+     * Reflects the last AL_STATUS read by the poll thread — may lag the
+     * wire state by up to one poll interval; it is a cache, not a live
+     * register read.
+     *
+     * @param slave_index  0-based slave index (must be < slaveCount()).
+     * @return Last polled SlaveState, or the initial/invalid value for
+     *         an out-of-range index or before the first poll.
+     */
     SlaveState getSlaveState(uint16_t slave_index) const;
 
 private:
