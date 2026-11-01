@@ -76,17 +76,30 @@ public:
 
     /// Write CMD=0 (ResetResponseToStandby) and wait pre_command_reset_delay.
     /// Called automatically by sendAndWait(), or can be called manually.
+    /// @return `true` if the reset write succeeded
     bool resetResponseToStandby();
 
     /// Write a command code to 0xF100:0x01 (no reset, no polling).
+    /// @param cmd Command code to send
+    /// @return `true` if the SDO write succeeded; does not wait for the
+    ///         device to act on the command
     bool sendCommand(ControlCommandCode cmd);
 
     /// Poll 0xF100:0x02 once.  Returns true on successful read, false on error.
     /// On success, `out` is set to the response value.
+    /// @param[out] out Receives the raw response register value
+    /// @return `true` if the SDO read succeeded
     bool pollResponse(uint32_t& out);
 
     /// Poll 0xF100:0x02 until the matcher returns true or the timeout expires.
     /// If the response is Failed (3), returns Result::Failed immediately.
+    /// @param cmd Command that was sent (passed to `matcher` for
+    ///        command-specific handling)
+    /// @param matcher Predicate deciding whether a response value means
+    ///        success; empty matcher defaults to matchDone
+    /// @param timeout Maximum total wait; `command_timeout` from Config
+    ///        when zero
+    /// @return Result::Success, ::Failed, ::Timeout, or ::SDOError
     Result waitForResponse(ControlCommandCode cmd,
                            const ResponseMatcher& matcher,
                            std::chrono::milliseconds timeout);
@@ -95,11 +108,20 @@ public:
 
     /// Full sequence: resetResponseToStandby() → sendCommand(cmd) →
     /// waitForResponse(cmd, matcher, timeout) → optional post_command_reset.
+    /// @param cmd Command code to send
+    /// @param matcher Success predicate; empty uses matchDone (Done==2)
+    /// @param timeout Maximum wait for the response; `command_timeout`
+    ///        from Config when zero
+    /// @return Result of the whole transaction; when an admin password is
+    ///         configured, performs adminLogin() and retries once on the
+    ///         access-denied error code
     Result sendAndWait(ControlCommandCode cmd,
                        const ResponseMatcher& matcher = {},
                        std::chrono::milliseconds timeout = {});
 
     /// Read the response error code from 0xF100:0x03.
+    /// @return Device error code for the last command
+    ///         (e.g. kAccessDeniedError), 0 if none
     uint32_t readErrorCode();
 
     // --- Admin login (password) ---
@@ -120,6 +142,8 @@ public:
     //      verdict.
 
     /// Set/clear the admin password (empty = disable auto-login).
+    /// @param password Password to store; clearing it also clears the
+    ///        logged-in flag
     void setAdminPassword(std::string password) {
         admin_password_ = std::move(password);
         if (admin_password_.empty()) admin_logged_in_ = false;
@@ -128,6 +152,8 @@ public:
 
     /// Enter the configured admin password on the device (see procedure
     /// above).  Returns true when the password was accepted.
+    /// @return `true` when the device reported a nonzero privilege level
+    ///         or accepted the password write
     bool adminLogin();
     bool isAdminLoggedIn() const { return admin_logged_in_; }
 
@@ -137,6 +163,13 @@ public:
     /// SDO read errors are retried; the registered poll observer is
     /// invoked after each read; the stop token aborts the wait.
     /// `onValue` (optional) receives every successfully-read value.
+    /// @param index Object dictionary index to read
+    /// @param subindex Object dictionary subindex to read
+    /// @param match Predicate on each polled value; `true` ends the wait
+    /// @param timeout Maximum total wait
+    /// @param onValue Optional callback receiving each successfully read value
+    /// @return Result::Success when `match` fired, ::Timeout on expiry,
+    ///         or ::SDOError on persistent read failure
     Result pollUntil(uint16_t index, uint8_t subindex,
                      const std::function<bool(uint32_t)>& match,
                      std::chrono::milliseconds timeout,
@@ -151,24 +184,44 @@ public:
     }
 
     /// Human-readable result string.
+    /// @param r Result to convert
+    /// @return Static string such as "Success" or "Timeout"
     static const char* resultToString(Result r);
 
     /// Human-readable command name.
+    /// @param cmd Command code to convert
+    /// @return Static string naming the command, for logging
     static const char* commandName(ControlCommandCode cmd);
 
     /// Human-readable response name.
+    /// @param code Raw 0xF100:0x02 response value (0=Standby, 1=Ongoing,
+    ///        2=Done, 3=Failed)
+    /// @return Static string naming the response, for logging
     static const char* responseName(uint32_t code);
 
     // --- Pre-built matchers ---
 
     /// Default: response == Done (2).
+    /// @param cmdCode Command the matcher is attached to (unused)
+    /// @param response Polled 0xF100:0x02 value
+    /// @param slave Slave the command ran on (unused)
+    /// @return `true` when `response` is Done (2)
     static bool matchDone(uint32_t cmdCode, uint32_t response, EtherCAT::Slave& slave);
 
     /// Command 4 (DownloadRSPAndSDDByObject): response == Standby (0) with
     /// errCode (0xF100:0x03) == 0, OR response == Done (2).
+    /// @param cmdCode Command the matcher is attached to (unused)
+    /// @param response Polled 0xF100:0x02 value
+    /// @param slave Slave to read the error-code object from when
+    ///        `response` is Standby
+    /// @return `true` on Done, or on Standby with errCode 0
     static bool matchCmd4(uint32_t cmdCode, uint32_t response, EtherCAT::Slave& slave);
 
     /// Command 10/11 (start/stop safety app): response == Ongoing (1) || Done (2).
+    /// @param cmdCode Command the matcher is attached to (unused)
+    /// @param response Polled 0xF100:0x02 value
+    /// @param slave Slave the command ran on (unused)
+    /// @return `true` when `response` is Ongoing or Done
     static bool matchOngoingOrDone(uint32_t cmdCode, uint32_t response, EtherCAT::Slave& slave);
 
 private:

@@ -74,94 +74,113 @@ public:
     
     /**
      * @brief Initialize HAL with configuration
+     * @param config Ethernet, logging, threading, and VLAN settings
+     * @return Error::OK on success; subsystems are ready only then
      */
     Error init(const HALConfig& config);
-    
+
     /**
      * @brief Shutdown HAL
      */
     void shutdown();
-    
+
     /**
      * @brief Check if initialized
+     * @return `true` after a successful init(), `false` after shutdown()
      */
     bool isInitialized() const { return m_initialized; }
-    
+
     // --- Component Access ---
-    
+
     /**
      * @brief Get Ethernet interface
+     * @return Raw-frame Ethernet backend for EtherCAT traffic
      */
     IEthernet& ethernet() { return *m_ethernet; }
     const IEthernet& ethernet() const { return *m_ethernet; }
-    
+
     /**
      * @brief Get threading factory
+     * @return Factory for threads, mutexes, condvars, queues, and sleep
      */
     IThreadingFactory& threading() { return getThreadingFactory(); }
-    
+
     /**
      * @brief Get clock factory
+     * @return Factory for timers and clock sources
      */
     IClockFactory& clock() { return getClockFactory(); }
-    
+
     /**
      * @brief Get system clock
+     * @return Monotonic system clock instance
      */
     IClock& systemClock() { return getSystemClock(); }
-    
+
     /**
      * @brief Get logger
+     * @return Application logger instance
      */
     ILogger& logger() { return getLogger(); }
-    
+
     /**
      * @brief Get state machine logger
+     * @return Logger for ESC/AL state transitions
      */
     IStateMachineLogger& stateLogger() { return *m_stateLogger; }
-    
+
     /**
      * @brief Get packet logger (may be null)
+     * @return Packet capture backend, or nullptr when packet logging is
+     *         disabled in HALConfig
      */
     Tether::PacketLoggers::PacketLogger* packetLogger() { return m_packetLogger.get(); }
-    
+
     /**
      * @brief Get traffic splitter (may be null)
+     * @return VLAN/EtherType traffic splitter, or nullptr when disabled
      */
     TrafficSplitter* trafficSplitter() { return m_trafficSplitter; }
-    
+
     // --- Convenience Methods ---
-    
+
     /**
      * @brief Create a periodic timer
+     * @return New periodic timer from the clock factory
      */
     std::unique_ptr<IPeriodicTimer> createPeriodicTimer() {
         return clock().createPeriodicTimer();
     }
-    
+
     /**
      * @brief Create a thread
+     * @param config Thread name, stack, priority, affinity, scheduling
+     * @return New thread instance (not yet started)
      */
     std::unique_ptr<IThread> createThread(const ThreadConfig& config = {}) {
         return threading().createThread(config);
     }
-    
+
     /**
      * @brief Create a mutex
+     * @param type `Normal` or `Recursive`
+     * @return New mutex instance
      */
     std::unique_ptr<IMutex> createMutex(MutexType type = MutexType::Normal) {
         return threading().createMutex(type);
     }
-    
+
     /**
      * @brief Get current time in microseconds
+     * @return Monotonic timestamp [µs]
      */
     Timestamp nowMicros() {
         return systemClock().nowMicros();
     }
-    
+
     /**
      * @brief Sleep
+     * @param ms Duration to block the calling thread [ms]
      */
     void sleep(Milliseconds ms) {
         threading().sleep(ms);
@@ -183,11 +202,14 @@ private:
 
 /**
  * @brief Get global HAL instance
+ * @return Process-wide HAL singleton (created on first access)
  */
 HALInstance& getHAL();
 
 /**
  * @brief Initialize global HAL
+ * @param config HAL configuration forwarded to HALInstance::init()
+ * @return Error::OK on success
  */
 Error initHAL(const HALConfig& config);
 
@@ -210,6 +232,8 @@ void resetHAL();
 
 /**
  * @brief Get platform name string
+ * @return Compile-time platform name ("ESP32", "Linux", "STM32", "Test",
+ *         or "Unknown")
  */
 inline const char* getPlatformName() {
 #if defined(HAL_PLATFORM_ESP32)
@@ -227,6 +251,7 @@ inline const char* getPlatformName() {
 
 /**
  * @brief Check if running on ESP32
+ * @return `true` when built with HAL_PLATFORM_ESP32
  */
 inline bool isESP32() {
 #ifdef HAL_PLATFORM_ESP32
@@ -238,6 +263,7 @@ inline bool isESP32() {
 
 /**
  * @brief Check if running on Linux
+ * @return `true` when built with HAL_PLATFORM_LINUX
  */
 inline bool isLinux() {
 #ifdef HAL_PLATFORM_LINUX
@@ -249,6 +275,7 @@ inline bool isLinux() {
 
 /**
  * @brief Check if running on STM32
+ * @return `true` when built with HAL_PLATFORM_STM32
  */
 inline bool isSTM32() {
 #ifdef HAL_PLATFORM_STM32

@@ -45,16 +45,21 @@ public:
     
     /**
      * @brief Get current value
+     * @return Current ramped value
      */
     virtual double getValue() const = 0;
-    
+
     /**
      * @brief Get current velocity (rate of change)
+     * @return Current value velocity in units/s; 0 for shapes that do not
+     *         track it
      */
     virtual double getVelocity() const { return 0.0; }
-    
+
     /**
      * @brief Get current acceleration
+     * @return Current value acceleration in units/s²; 0 for shapes that
+     *         do not track it
      */
     virtual double getAcceleration() const { return 0.0; }
     
@@ -67,28 +72,33 @@ public:
     
     /**
      * @brief Check if ramping is complete
+     * @return `true` when the current value has reached the target
      */
     virtual bool isComplete() const = 0;
-    
+
     /**
      * @brief Get progress (0.0 to 1.0)
+     * @return Fraction of the ramp traversed, 0 at start, 1 at target
      */
     virtual double getProgress() const = 0;
-    
+
     /**
      * @brief Get target value
+     * @return Value the ramp is moving toward
      */
     double getTarget() const { return m_target; }
-    
+
     /**
      * @brief Set completion callback
+     * @param callback Function invoked once when the ramp reaches the target
      */
     void setOnComplete(std::function<void()> callback) {
         m_onComplete = std::move(callback);
     }
-    
+
     /**
      * @brief Reset to value without transition
+     * @param value Value to snap the ramp to (current and target)
      */
     virtual void reset(double value) {
         m_current = value;
@@ -188,6 +198,7 @@ public:
     }
     
     /// Set ramp time
+    /// @param time Ramp duration [s]; clamped to `minRampTime`
     void setRampTime(double time) {
         m_config.rampTime = std::max(m_config.minRampTime, time);
     }
