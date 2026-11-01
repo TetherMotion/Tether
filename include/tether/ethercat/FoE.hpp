@@ -75,6 +75,8 @@ enum class FoEOpcode : uint8_t {
 
 /**
  * @brief Convert FoE opcode to string
+ * @param op FoE opcode value
+ * @return Human-readable opcode name (e.g. "RRQ", "DATA")
  */
 const char* foe_opcode_string(FoEOpcode op);
 
@@ -112,6 +114,8 @@ enum class FoEError : uint32_t {
 
 /**
  * @brief Get human-readable error string
+ * @param error FoE error code
+ * @return Error description for logging/UI
  */
 const char* foe_error_string(FoEError error);
 
@@ -181,7 +185,11 @@ struct FoEResult {
     /** @brief Check if transfer succeeded */
     operator bool() const { return success; }
 
-    /** @brief Create a failure result with the given error code */
+    /**
+     * @brief Create a failure result with the given error code
+     * @param error FoE error code to report
+     * @return FoEResult with success=false and zeroed counters
+     */
     static FoEResult Failure(FoEError error) {
         FoEResult r{};
         r.success = false;
@@ -210,7 +218,10 @@ struct FoETransferHandle {
     
     FoETransferHandle() : id(0), complete(false), cancel(false) {}
     
-    /** @brief Check if transfer is still in progress */
+    /**
+     * @brief Check if transfer is still in progress
+     * @return `true` until the worker marks the transfer complete
+     */
     bool in_progress() const { return !complete.load(); }
     
     /** @brief Request cancellation */
@@ -296,12 +307,16 @@ public:
 
     /**
      * @brief Read from the currently open file
+     * @param buffer Destination for file bytes
+     * @param size Bytes requested
      * @return Bytes actually read, or -1 on error
      */
     virtual int32_t fileRead(void* buffer, size_t size) = 0;
 
     /**
      * @brief Write to the currently open file
+     * @param buffer Source bytes
+     * @param size Bytes to write
      * @return Bytes actually written, or -1 on error
      */
     virtual int32_t fileWrite(const void* buffer, size_t size) = 0;
@@ -313,11 +328,13 @@ public:
 
     /**
      * @brief Get current monotonic time in milliseconds
+     * @return Milliseconds since an arbitrary epoch
      */
     virtual uint32_t getTimeMs() = 0;
 
     /**
      * @brief Blocking delay
+     * @param ms Duration to wait [ms]
      */
     virtual void delayMs(uint32_t ms) = 0;
 };
@@ -339,6 +356,7 @@ public:
      * @brief Construct an FoEManager with the given transport.
      *
      * The transport reference must outlive the FoEManager.
+     * @param transport Network/file I/O implementation the manager drives
      */
     explicit FoEManager(IFoETransport& transport);
 
@@ -366,6 +384,7 @@ public:
 
     /**
      * @brief Check if FoE is initialized.
+     * @return `true` after init() until deinit()
      */
     bool isInitialized() const;
 
