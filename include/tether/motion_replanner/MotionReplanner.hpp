@@ -196,6 +196,15 @@ public:
     
     /**
      * @brief Set the desired trajectory (from G-code)
+     *
+     * Replaces the reference path the replanner compares actual samples
+     * against. The samples are copied and the call internally invokes
+     * reset(), so all previously accumulated actual samples, errors, and
+     * segment statistics are cleared — a new trajectory always starts
+     * with a clean comparison baseline.
+     *
+     * @param desired  Time-stamped nominal trajectory samples (position/
+     *                 velocity per axis), in ascending time order.
      */
     void setDesiredTrajectory(const std::vector<GCodeExport::TrajectorySample>& desired);
     
@@ -213,26 +222,60 @@ public:
     
     /**
      * @brief Get current tracking error (most recent)
+     *
+     * @return The newest TrackingError computed by
+     *         processAccumulatedSamples(), or std::nullopt when no error
+     *         has been computed yet (no samples processed or after
+     *         reset()).
      */
     std::optional<TrackingError> getCurrentError() const;
     
     /**
      * @brief Get error statistics for the entire trajectory so far
+     *
+     * Aggregates every TrackingError recorded since the last reset() —
+     * mean/max position error, contour error, and lag — regardless of
+     * where on the path they occurred.
+     *
+     * @return Statistics over all accumulated error samples; zeroed when
+     *         no errors have been recorded.
      */
     ErrorStatistics getOverallStatistics() const;
     
     /**
      * @brief Get error statistics for critical points only
+     *
+     * Same aggregation as getOverallStatistics() but restricted to
+     * samples flagged as critical points (corners, direction reversals,
+     * high-curvature regions) — where tracking error is most likely to
+     * manifest as visible surface defects.
+     *
+     * @return Statistics over critical-point error samples only.
      */
     ErrorStatistics getCriticalPointStatistics() const;
     
     /**
      * @brief Get per-segment performance analysis
+     *
+     * Breaks the accumulated error record down per path segment so the
+     * caller can see which parts of the trajectory drive the overall
+     * error — each entry carries the segment index, its error metrics,
+     * and a severity classification.
+     *
+     * @return One SegmentPerformance per evaluated segment, in path
+     *         order; empty until samples have been processed.
      */
     std::vector<SegmentPerformance> getSegmentPerformance() const;
     
     /**
      * @brief Get parameter suggestions for problem segments
+     *
+     * Translates the per-segment analysis into actionable tuning hints
+     * (reduced feed rate / acceleration / jerk) for segments whose error
+     * exceeds the configured thresholds.
+     *
+     * @return Suggestions ordered by path position; empty when no
+     *         segment exceeds thresholds.
      */
     std::vector<ParameterSuggestion> getParameterSuggestions() const;
     
@@ -250,6 +293,13 @@ public:
     
     /**
      * @brief Get the detected/configured system delay
+     *
+     * The delay used to time-align actual samples with the desired
+     * trajectory — either the configured constant or the value last
+     * estimated by detectSystemDelay(). A wrong delay shows up as a
+     * phantom lag error skewing all statistics.
+     *
+     * @return System delay in seconds.
      */
     double getSystemDelay() const { return detectedDelay_; }
     
@@ -266,6 +316,11 @@ public:
     
     /**
      * @brief Get all tracking errors (if logging enabled)
+     *
+     * @return Const reference to the internal error log — valid until the
+     *         next processAccumulatedSamples() or reset(). With error
+     *         logging disabled in the config the vector stays empty even
+     *         though errors are computed.
      */
     const std::vector<TrackingError>& getAllErrors() const { return trackingErrors_; }
     
@@ -282,6 +337,13 @@ public:
     
     /**
      * @brief Configuration access
+     *
+     * Replaces the active configuration (error thresholds, critical-point
+     * detection, logging, delay). Takes effect on subsequent
+     * processAccumulatedSamples() calls; already-computed errors are not
+     * recomputed retroactively.
+     *
+     * @param config  New ReplannerConfig; copied.
      */
     void configure(const ReplannerConfig& config) { config_ = config; }
     const ReplannerConfig& config() const { return config_; }
@@ -418,12 +480,28 @@ public:
     
     /**
      * @brief Update with new sample pair
+     *
+     * Feeds one measured/nominal pair into the rolling statistics and
+     * re-evaluates the alert thresholds; when a threshold is exceeded the
+     * alert callback (if set) fires with a human-readable message. Call
+     * once per control cycle.
+     *
+     * @param actual   Measured position sample with timestamp.
+     * @param desired  Corresponding desired trajectory sample (after the
+     *                 caller's own delay compensation, if any).
      */
     void update(const PositionSample& actual, 
                 const GCodeExport::TrajectorySample& desired);
     
     /**
      * @brief Get current status
+     *
+     * Snapshot of the monitor: current error magnitudes, active alert
+     * flags with message, and the composite feed-rate-efficiency /
+     * overall-health metrics (both 0–1, where 1 is nominal).
+     *
+     * @return MonitorStatus reflecting the last update() call; defaults
+     *         before any update or after reset().
      */
     MonitorStatus getStatus() const;
     
