@@ -42,7 +42,7 @@ namespace EtherCAT::Drives::ESC211 {
 
 class ConfigRecoveryHandler {
 public:
-    /// One data type's sections + CRC expectation.
+    /**One data type's sections + CRC expectation. */
     struct Entry {
         ConfigDataType type;
         std::vector<std::vector<uint8_t>> sections;  // 256-byte sections
@@ -50,10 +50,12 @@ public:
     };
 
     struct Config {
-        /// If true, re-activate after re-writing.  If false, only re-write
-        /// the temp objects (caller activates separately).
+        /**
+         * If true, re-activate after re-writing.  If false, only re-write
+         * the temp objects (caller activates separately).
+         */
         bool re_activate = true;
-        /// If true, verify CRC after activation.
+        /**If true, verify CRC after activation. */
         bool verify_crc = true;
     };
 
@@ -61,35 +63,43 @@ public:
                           Config config,
                           const char* tag = "ESC211ConfigRecoveryHandler");
 
-    /// Store config data for later re-write.  Call this once during
-    /// initialization, after parsing the XML files but before (or after)
-    /// the initial write+activate.
+    /**
+     * Store config data for later re-write.  Call this once during
+     * initialization, after parsing the XML files but before (or after)
+     * the initial write+activate.
+     */
     void storeData(std::span<const Entry> entries);
 
-    /// Re-write all stored sections to temp objects and optionally
-    /// re-activate.  Returns true on success.
-    /// This method is thread-safe (locks sdo_mutex_ if set).
+    /**
+     * Re-write all stored sections to temp objects and optionally
+     * re-activate.  Returns true on success.
+     * This method is thread-safe (locks sdo_mutex_ if set).
+     */
     bool reWriteAndActivate();
 
-    /// Returns true if storeData() has been called with at least one entry.
+    /**Returns true if storeData() has been called with at least one entry. */
     bool hasData() const { return !entries_.empty(); }
 
-    /// Number of stored data type entries.
+    /**Number of stored data type entries. */
     size_t entryCount() const { return entries_.size(); }
 
-    /// Set a callback invoked after successful re-write + activate.
-    /// Useful for re-starting the safety state machine.
+    /**
+     * Set a callback invoked after successful re-write + activate.
+     * Useful for re-starting the safety state machine.
+     */
     void setPostRecoveryCallback(std::function<void()> callback);
 
-    /// Set a mutex to serialize SDO access (the master's SDO channel is
-    /// not internally mutex-protected).  If set, reWriteAndActivate()
-    /// locks it before any SDO operation.
+    /**
+     * Set a mutex to serialize SDO access (the master's SDO channel is
+     * not internally mutex-protected).  If set, reWriteAndActivate()
+     * locks it before any SDO operation.
+     */
     void setSdoMutex(std::mutex* mutex);
 
-    /// Set a stop_token for cooperative cancellation.
+    /**Set a stop_token for cooperative cancellation. */
     void setStopToken(std::stop_token token);
 
-    /// Number of times reWriteAndActivate() has been called.
+    /**Number of times reWriteAndActivate() has been called. */
     uint32_t recoveryCount() const { return recovery_count_.load(); }
 
 private:

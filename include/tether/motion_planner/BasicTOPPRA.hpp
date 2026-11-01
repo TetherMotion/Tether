@@ -354,9 +354,11 @@ private:
             sample.tangent, sample.curvature, currentVelocity);
     }
 
-    /// WI-4: Compute junction velocity at a tangent discontinuity.
-    /// Currently implements exact-stop semantics (v = 0 at corners),
-    /// matching LinuxCNC "exact path" mode.
+    /**
+     * WI-4: Compute junction velocity at a tangent discontinuity.
+     * Currently implements exact-stop semantics (v = 0 at corners),
+     * matching LinuxCNC "exact path" mode.
+     */
     T computeJunctionVelocity(const Vec<Dim, T>& tPrev,
                                 const Vec<Dim, T>& tCur) const {
         T dot = T(0);

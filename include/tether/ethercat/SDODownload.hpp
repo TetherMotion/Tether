@@ -14,15 +14,17 @@ public:
     SDODownload(SDOErrorDecoder& ed, SDOMailboxIO& mio, SDODiagnostics& diag)
         : SDOTransactionBase(ed, mio, diag) {}
 
-    /// @param outAbortCode  If non-null, set to the CoE SDO abort code (0 on
-    ///                      success or non-abort failure) reported by the slave.
-    ///                      Callers can use this to distinguish a definitive
-    ///                      slave rejection (e.g. 0x06070010 length mismatch)
-    ///                      from a transport/timeout failure.
-    /// @param uploadForDiag  Optional SDOUpload instance used to perform a
-    ///                       follow-up read when a PDO-mapping subindex abort
-    ///                       is observed, so a richer diagnostic can be logged.
-    ///                       May be nullptr to skip the diagnostic read.
+    /**
+     * @param outAbortCode  If non-null, set to the CoE SDO abort code (0 on
+     *                      success or non-abort failure) reported by the slave.
+     *                      Callers can use this to distinguish a definitive
+     *                      slave rejection (e.g. 0x06070010 length mismatch)
+     *                      from a transport/timeout failure.
+     * @param uploadForDiag  Optional SDOUpload instance used to perform a
+     *                       follow-up read when a PDO-mapping subindex abort
+     *                       is observed, so a richer diagnostic can be logged.
+     *                       May be nullptr to skip the diagnostic read.
+     */
     virtual bool execute(Master& master, uint16_t adp,
                          uint8_t* inoutMbxCnt,
                          uint16_t mbxWriteAddr, uint16_t mbxWriteLen,

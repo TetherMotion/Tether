@@ -20,20 +20,22 @@
 
 namespace EtherCAT {
 
-/// Open + configure a non-blocking AF_PACKET socket on `ifindex`, attach the
-/// cyclic demux program (or a caller-composed one), and register it with the
-/// NIC error-counter monitor.  Returns -1 on failure.
+/**
+ * Open + configure a non-blocking AF_PACKET socket on `ifindex`, attach the
+ * cyclic demux program (or a caller-composed one), and register it with the
+ * NIC error-counter monitor.  Returns -1 on failure.
+ */
 int openCyclicSocket(int ifindex,
                      const CBPFInsn* accept_prog = nullptr,
                      size_t accept_prog_len = 0);
 
-/// CLOCK_MONOTONIC now, in nanoseconds.
+/**CLOCK_MONOTONIC now, in nanoseconds. */
 uint64_t monoNowNs();
 
-/// Convert a CLOCK_REALTIME kernel RX stamp to the CLOCK_MONOTONIC domain.
+/**Convert a CLOCK_REALTIME kernel RX stamp to the CLOCK_MONOTONIC domain. */
 uint64_t rtStampToMonoNs(uint64_t rt_ns);
 
-/// ppoll a single fd for POLLIN.  >0 ready, 0 timeout, <0 error.
+/**ppoll a single fd for POLLIN.  >0 ready, 0 timeout, <0 error. */
 int waitReadable(int fd, uint32_t timeout_ns);
 
 } // namespace EtherCAT

@@ -38,30 +38,34 @@ namespace EtherCAT {
 
 class ESIFile {
 public:
-    /// Construct from pre-parsed device info (no tether_esi needed).
+    /**Construct from pre-parsed device info (no tether_esi needed). */
     explicit ESIFile(std::vector<ESI::DeviceInfo> devices)
         : devices_(std::move(devices)) {}
 
-    /// Parse an ESI XML file.
-    /// Requires the tether_esi library to be linked (TETHER_HAVE_ESI=1).
-    /// On parse failure, empty() returns true and errorMessage() has details.
-    /// If ESI support is not compiled in, logs a critical error and leaves
-    /// the object empty.
+    /**
+     * Parse an ESI XML file.
+     * Requires the tether_esi library to be linked (TETHER_HAVE_ESI=1).
+     * On parse failure, empty() returns true and errorMessage() has details.
+     * If ESI support is not compiled in, logs a critical error and leaves
+     * the object empty.
+     */
     explicit ESIFile(const std::string& path);
 
-    /// True if no devices were parsed.
+    /**True if no devices were parsed. */
     bool empty() const { return devices_.empty(); }
 
-    /// Parse error message (empty if no error).
+    /**Parse error message (empty if no error). */
     const std::string& errorMessage() const { return error_; }
 
-    /// The parsed device entries.
+    /**The parsed device entries. */
     const std::vector<ESI::DeviceInfo>& devices() const { return devices_; }
 
-    /// Find the device matching the given vendor/product.
-    /// A value of 0 for vendorId or productCode acts as a wildcard.
-    /// Falls back to devices[0] if no exact match is found.
-    /// Returns nullptr if empty().
+    /**
+     * Find the device matching the given vendor/product.
+     * A value of 0 for vendorId or productCode acts as a wildcard.
+     * Falls back to devices[0] if no exact match is found.
+     * Returns nullptr if empty().
+     */
     const ESI::DeviceInfo* findDevice(uint32_t vendorId, uint32_t productCode) const {
         if (devices_.empty()) return nullptr;
         for (const auto& d : devices_) {

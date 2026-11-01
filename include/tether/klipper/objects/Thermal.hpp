@@ -46,7 +46,7 @@ namespace tether::klipper::objects {
 // Temperature sensor interface
 // ============================================================================
 
-/// @brief Base class for temperature sensors.
+/**@brief Base class for temperature sensors. */
 class TemperatureSensor {
 public:
     explicit TemperatureSensor(uint8_t oid) : oid_(oid) {}
@@ -54,8 +54,10 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Read the current temperature in degrees Celsius.
-    /// @return Temperature in °C, or NaN on error.
+    /**
+     * @brief Read the current temperature in degrees Celsius.
+     * @return Temperature in °C, or NaN on error.
+     */
     virtual double read() = 0;
 
     /**
@@ -70,7 +72,7 @@ public:
      */
     double lastTemperature() const { return lastTemp_; }
 
-    /// @brief Update the sensor (called periodically).
+    /**@brief Update the sensor (called periodically). */
     virtual void update() { lastTemp_ = read(); }
 
 protected:
@@ -82,23 +84,23 @@ protected:
 // Thermistor (NTC via ADC)
 // ============================================================================
 
-/// @brief NTC thermistor temperature sensor using beta model or Steinhart-Hart.
+/**@brief NTC thermistor temperature sensor using beta model or Steinhart-Hart. */
 class Thermistor : public TemperatureSensor {
 public:
     struct CalPoint {
-        double temperature; ///< Temperature in °C
-        double resistance;  ///< Resistance in ohms
+        double temperature; /**< Temperature in °C */
+        double resistance; /**< Resistance in ohms */
     };
 
     struct Params {
-        double pullupResistor = 4700.0;   ///< Pullup resistor in ohms.
-        double referenceVoltage = 3.3;    ///< ADC reference voltage.
-        double adcMax = 4095.0;           ///< ADC max value (12-bit).
-        double resistanceAt25C = 100000.0; ///< Thermistor resistance at 25°C.
-        double beta = 3950.0;             ///< Beta coefficient.
-        double minTemp = -50.0;           ///< Minimum valid temperature.
-        double maxTemp = 300.0;           ///< Maximum valid temperature.
-        std::vector<CalPoint> calibrationTable; ///< Multi-point calibration (optional)
+        double pullupResistor = 4700.0; /**< Pullup resistor in ohms. */
+        double referenceVoltage = 3.3; /**< ADC reference voltage. */
+        double adcMax = 4095.0; /**< ADC max value (12-bit). */
+        double resistanceAt25C = 100000.0; /**< Thermistor resistance at 25°C. */
+        double beta = 3950.0; /**< Beta coefficient. */
+        double minTemp = -50.0; /**< Minimum valid temperature. */
+        double maxTemp = 300.0; /**< Maximum valid temperature. */
+        std::vector<CalPoint> calibrationTable; /**< Multi-point calibration (optional) */
     };
 
     using AdcReadFunc = std::function<double()>;
@@ -143,8 +145,10 @@ private:
     Params params_;
     AdcReadFunc adcRead_;
 
-    /// @brief Interpolate temperature from resistance using calibration table.
-    /// Table is assumed sorted by resistance (descending for NTC).
+    /**
+     * @brief Interpolate temperature from resistance using calibration table.
+     * Table is assumed sorted by resistance (descending for NTC).
+     */
     double interpolateFromTable(double resistance) const {
         const auto& table = params_.calibrationTable;
         if (table.empty()) return NAN;
@@ -173,7 +177,7 @@ private:
 // Thermocouple (SPI-based)
 // ============================================================================
 
-/// @brief SPI-based thermocouple sensor (MAX31856, MAX31855, etc.)
+/**@brief SPI-based thermocouple sensor (MAX31856, MAX31855, etc.) */
 class Thermocouple : public TemperatureSensor {
 public:
     using SpiTransferFunc = std::function<std::vector<uint8_t>(std::span<const uint8_t>)>;
@@ -215,20 +219,22 @@ private:
 // RTD (PT100/PT1000 via ADC or SPI)
 // ============================================================================
 
-/// @brief RTD (Resistance Temperature Detector) sensor.
-/// Supports PT100 and PT1000 using the Callendar-Van Dusen equation.
-/// Reads resistance via an ADC (with a reference resistor circuit) or
-/// via an SPI-based RTD amplifier (e.g. MAX31865).
+/**
+ * @brief RTD (Resistance Temperature Detector) sensor.
+ * Supports PT100 and PT1000 using the Callendar-Van Dusen equation.
+ * Reads resistance via an ADC (with a reference resistor circuit) or
+ * via an SPI-based RTD amplifier (e.g. MAX31865).
+ */
 class RtdSensor : public TemperatureSensor {
 public:
     struct Params {
-        double nominalResistance = 100.0;   ///< Resistance at 0°C (100 for PT100, 1000 for PT1000)
-        double alpha = 0.003851;            ///< Temperature coefficient of resistance (PT385)
-        double referenceResistor = 430.0;   ///< Reference resistor for ADC circuit (ohms)
-        double adcMax = 4095.0;             ///< ADC max value (12-bit)
-        double referenceVoltage = 3.3;      ///< ADC reference voltage
-        double minTemp = -200.0;            ///< Minimum valid temperature
-        double maxTemp = 850.0;             ///< Maximum valid temperature
+        double nominalResistance = 100.0; /**< Resistance at 0°C (100 for PT100, 1000 for PT1000) */
+        double alpha = 0.003851; /**< Temperature coefficient of resistance (PT385) */
+        double referenceResistor = 430.0; /**< Reference resistor for ADC circuit (ohms) */
+        double adcMax = 4095.0; /**< ADC max value (12-bit) */
+        double referenceVoltage = 3.3; /**< ADC reference voltage */
+        double minTemp = -200.0; /**< Minimum valid temperature */
+        double maxTemp = 850.0; /**< Maximum valid temperature */
     };
 
     using AdcReadFunc = std::function<double()>;
@@ -289,17 +295,17 @@ private:
 // Heater (PWM-controlled with PID)
 // ============================================================================
 
-/// @brief PID controller parameters for a heater.
+/**@brief PID controller parameters for a heater. */
 struct HeaterPIDParams {
-    double Kp = 0.0;    ///< Proportional gain
-    double Ki = 0.0;    ///< Integral gain
-    double Kd = 0.0;    ///< Derivative gain
-    double imax = 0.0;  ///< Integral windup limit
-    double pwmMin = 0.0; ///< Minimum PWM (0.0-1.0)
-    double pwmMax = 1.0; ///< Maximum PWM (0.0-1.0)
+    double Kp = 0.0; /**< Proportional gain */
+    double Ki = 0.0; /**< Integral gain */
+    double Kd = 0.0; /**< Derivative gain */
+    double imax = 0.0; /**< Integral windup limit */
+    double pwmMin = 0.0; /**< Minimum PWM (0.0-1.0) */
+    double pwmMax = 1.0; /**< Maximum PWM (0.0-1.0) */
 };
 
-/// @brief Heater peripheral: PWM output with PID temperature control.
+/**@brief Heater peripheral: PWM output with PID temperature control. */
 class Heater {
 public:
     using PWMWriteFunc = std::function<void(double)>;
@@ -376,10 +382,12 @@ public:
     void setControlInterval(double interval) { controlInterval_ = interval; }
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-    /// @brief Flow-adaptive compensation hook.
-    /// When set, control() feeds the current flow (from the tracker) into
-    /// the controller and adds its feed-forward output to the PID PWM.
-    /// Pass nullptr to disable.
+    /**
+     * @brief Flow-adaptive compensation hook.
+     * When set, control() feeds the current flow (from the tracker) into
+     * the controller and adds its feed-forward output to the PID PWM.
+     * Pass nullptr to disable.
+     */
     void setFlowCompensation(
         std::shared_ptr<tether::control::extrusion::FlowAdaptiveHeaterController>
             controller,
@@ -392,23 +400,27 @@ public:
         flowTracker_.reset();
     }
 
-    /// @brief Estimated melt-zone temperature from the flow controller's
-    /// internal observer (0.0 if no controller is wired).
+    /**
+     * @brief Estimated melt-zone temperature from the flow controller's
+     * internal observer (0.0 if no controller is wired).
+     */
     double meltTempEstimate() const {
         return flowController_ ? flowController_->meltTempEst() : 0.0;
     }
-    /// @brief Last pre-emphasis PWM contribution (0.0 if none).
+    /**@brief Last pre-emphasis PWM contribution (0.0 if none). */
     double preEmphasisPWM() const {
         return flowController_ ? flowController_->emphasis().preEmphasisPWM : 0.0;
     }
-    /// @brief Last post-emphasis PWM contribution (0.0 if none).
+    /**@brief Last post-emphasis PWM contribution (0.0 if none). */
     double postEmphasisPWM() const {
         return flowController_ ? flowController_->emphasis().postEmphasisPWM : 0.0;
     }
 #endif
 
-    /// @brief Run one PID control iteration.
-    /// @return PWM output (0.0 to 1.0).
+    /**
+     * @brief Run one PID control iteration.
+     * @return PWM output (0.0 to 1.0).
+     */
     double control() {
         double measured = sensorRead_();
         currentTemp_ = measured;
@@ -465,11 +477,13 @@ public:
         return pwm;
     }
 
-    /// @brief Manually apply a power level and update the temperature reading.
-    /// Used by PID autotune to drive the heater with a fixed duty cycle.
-    /// @param power PWM duty cycle to apply (0.0 to 1.0).
-    /// @param dt Time step in seconds (unused, kept for API compatibility).
-    /// @return The applied PWM output.
+    /**
+     * @brief Manually apply a power level and update the temperature reading.
+     * Used by PID autotune to drive the heater with a fixed duty cycle.
+     * @param power PWM duty cycle to apply (0.0 to 1.0).
+     * @param dt Time step in seconds (unused, kept for API compatibility).
+     * @return The applied PWM output.
+     */
     double update(double power, double dt) {
         (void)dt;
         power = std::clamp(power, 0.0, 1.0);
@@ -481,7 +495,7 @@ public:
         return power;
     }
 
-    /// @brief Reset PID state.
+    /**@brief Reset PID state. */
     void reset() {
         pid_.reset();
         lastOutput_ = {};
@@ -499,7 +513,7 @@ public:
         return std::abs(currentTemp_ - target_) < tolerance;
     }
 
-    /// @brief Get PID diagnostic values.
+    /**@brief Get PID diagnostic values. */
     struct PIDState {
         double error;
         double integral;
@@ -513,7 +527,7 @@ public:
     }
 
 private:
-    /// @brief Apply integral and output limits from pidParams_ to the PID controller.
+    /**@brief Apply integral and output limits from pidParams_ to the PID controller. */
     void applyPIDLimits() {
         tether::control::SaturationLimits limits;
         limits.outputMin = pidParams_.pwmMin;
@@ -548,12 +562,12 @@ private:
 // Heater printer object (for UDS status queries)
 // ============================================================================
 
-/// @brief Heater status for the UDS object model.
+/**@brief Heater status for the UDS object model. */
 struct HeaterStatus {
     double temperature = 0.0;
     double target = 0.0;
     double power = 0.0;
-    std::string state = "off"; ///< "off", "active", "stable"
+    std::string state = "off"; /**< "off", "active", "stable" */
 };
 
 } // namespace tether::klipper::objects

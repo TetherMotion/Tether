@@ -44,34 +44,38 @@
 
 namespace tether::motion::replanner {
 
-/// One junction analysis result, augmented with the piece indices.
+/**One junction analysis result, augmented with the piece indices. */
 struct CertifiedJunction {
-    /// Index of the incoming piece (0..numPieces-2).
+    /**Index of the incoming piece (0..numPieces-2). */
     std::size_t pieceInIndex = 0;
 
-    /// Index of the outgoing piece (1..numPieces-1).
+    /**Index of the outgoing piece (1..numPieces-1). */
     std::size_t pieceOutIndex = 0;
 
-    /// The full CornerAnalysis from CornerAnalyzer::analyze.
+    /**The full CornerAnalysis from CornerAnalyzer::analyze. */
     CornerAnalysis analysis;
 
-    /// Human-readable classification string for backward compatibility
-    /// with the old MotionReplanner criticalPointType field.
+    /**
+     * Human-readable classification string for backward compatibility
+     * with the old MotionReplanner criticalPointType field.
+     */
     std::string kindString() const;
 };
 
-/// Result of analyzing all junctions in a path.
+/**Result of analyzing all junctions in a path. */
 struct CertifiedCornerDetection {
-    /// One entry per junction (numPieces - 1 entries).
+    /**One entry per junction (numPieces - 1 entries). */
     std::vector<CertifiedJunction> junctions;
 
-    /// Count of junctions by kind.
+    /**Count of junctions by kind. */
     int straightCount = 0;
     int cornerCount = 0;
     int cuspCount = 0;
 
-    /// Find the junction at the boundary between pieceInIndex and
-    /// pieceOutIndex, or nullopt if not found.
+    /**
+     * Find the junction at the boundary between pieceInIndex and
+     * pieceOutIndex, or nullopt if not found.
+     */
     std::optional<CertifiedJunction> junctionAt(
         std::size_t pieceInIndex) const;
 };

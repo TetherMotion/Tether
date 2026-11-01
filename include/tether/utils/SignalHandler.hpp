@@ -44,35 +44,41 @@ namespace EtherCAT { class Master; }
 namespace Tether {
 namespace Utils {
 
-/// RAII signal handler that triggers a std::stop_source on SIGINT/SIGTERM.
-///
-/// On construction, installs signal handlers for SIGINT and SIGTERM.
-/// On destruction, restores the previous handlers.
-/// The stop_source can be queried via stop_requested() / stopToken(), and
-/// is intended to be shared with std::jthread instances for cooperative
-/// cancellation.
+/**
+ * RAII signal handler that triggers a std::stop_source on SIGINT/SIGTERM.
+ *
+ * On construction, installs signal handlers for SIGINT and SIGTERM.
+ * On destruction, restores the previous handlers.
+ * The stop_source can be queried via stop_requested() / stopToken(), and
+ * is intended to be shared with std::jthread instances for cooperative
+ * cancellation.
+ */
 class SignalHandler {
 public:
-    /// Create with an internally-owned stop_source.
+    /**Create with an internally-owned stop_source. */
     explicit SignalHandler()
         : stop_source_(owned_source_) {
         install();
     }
 
-    /// Create with an externally-owned stop_source (e.g. one shared with
-    /// jthreads created before the SignalHandler).  On signal,
-    /// externalSource.request_stop() is called.
+    /**
+     * Create with an externally-owned stop_source (e.g. one shared with
+     * jthreads created before the SignalHandler).  On signal,
+     * externalSource.request_stop() is called.
+     */
     explicit SignalHandler(std::stop_source& externalSource)
         : stop_source_(externalSource) {
         install();
     }
 
-    /// Backward-compatible constructor: sets the given atomic<bool> to true
-    /// on signal.  If install_signals is true (default), installs SIGINT/
-    /// SIGTERM handlers; if false, the caller is responsible for signal
-    /// handling (the atomic is still set if a signal was already delivered
-    /// via a previously installed handler — but typically install_signals
-    /// should be true).
+    /**
+     * Backward-compatible constructor: sets the given atomic<bool> to true
+     * on signal.  If install_signals is true (default), installs SIGINT/
+     * SIGTERM handlers; if false, the caller is responsible for signal
+     * handling (the atomic is still set if a signal was already delivered
+     * via a previously installed handler — but typically install_signals
+     * should be true).
+     */
     explicit SignalHandler(std::atomic<bool>& cancel_flag,
                            bool install_signals = true)
         : stop_source_(owned_source_), legacy_cancel_flag_(&cancel_flag) {
@@ -89,27 +95,31 @@ public:
     SignalHandler(SignalHandler&&) = delete;
     SignalHandler& operator=(SignalHandler&&) = delete;
 
-    /// Returns true if stop was requested (signal received).
+    /**Returns true if stop was requested (signal received). */
     bool stop_requested() const {
         return stop_source_.stop_requested();
     }
 
-    /// Returns the stop_token for this stop_source.  Pass this to
-    /// std::jthread lambdas or use it directly in polling loops.
+    /**
+     * Returns the stop_token for this stop_source.  Pass this to
+     * std::jthread lambdas or use it directly in polling loops.
+     */
     std::stop_token stopToken() const {
         return stop_source_.get_token();
     }
 
-    /// Returns a reference to the stop_source, allowing manual request_stop().
+    /**Returns a reference to the stop_source, allowing manual request_stop(). */
     std::stop_source& stopSource() { return stop_source_; }
 
-    /// Request stop manually (same effect as receiving a signal).
+    /**Request stop manually (same effect as receiving a signal). */
     void requestStop() { stop_source_.request_stop(); }
 
-    /// Set a callback invoked when the signal fires (in addition to
-    /// request_stop()).  Use this to call Master::requestCancel() etc.
-    /// Must be set before the signal arrives; not thread-safe with respect
-    /// to signal delivery.
+    /**
+     * Set a callback invoked when the signal fires (in addition to
+     * request_stop()).  Use this to call Master::requestCancel() etc.
+     * Must be set before the signal arrives; not thread-safe with respect
+     * to signal delivery.
+     */
     void setCancelCallback(std::function<void()> cb) {
         callback_ = std::move(cb);
     }

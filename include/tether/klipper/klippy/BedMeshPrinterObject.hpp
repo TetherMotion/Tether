@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file BedMeshPrinterObject.hpp
-/// @brief BedMesh, QueryEndstops, MotionReport, Adxl345 printer objects for UDS
+/**
+ * @file BedMeshPrinterObject.hpp
+ * @brief BedMesh, QueryEndstops, MotionReport, Adxl345 printer objects for UDS
+ */
 
 #include "tether/klipper/objects/BedLevel.hpp"
 #include "tether/klipper/objects/Peripherals.hpp"
@@ -16,7 +18,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Printer object exposing bed_mesh status via UDS.
+/**@brief Printer object exposing bed_mesh status via UDS. */
 class BedMeshObject : public PrinterObject {
 public:
     explicit BedMeshObject(std::shared_ptr<objects::BedMesh> mesh)
@@ -73,7 +75,7 @@ private:
     std::string profileName_ = "default";
 };
 
-/// @brief Printer object exposing endstop states via UDS.
+/**@brief Printer object exposing endstop states via UDS. */
 class QueryEndstopsObject : public PrinterObject {
 public:
     using EndstopStateFunc = std::function<std::map<std::string, bool>()>;
@@ -103,7 +105,7 @@ private:
     EndstopStateFunc func_;
 };
 
-/// @brief Printer object exposing motion statistics via UDS.
+/**@brief Printer object exposing motion statistics via UDS. */
 class MotionReportObject : public PrinterObject {
 public:
     std::string name() const override { return "motion_report"; }
@@ -142,7 +144,7 @@ private:
     double extruderVelocity_ = 0.0;
 };
 
-/// @brief Printer object exposing ADXL345 accelerometer data via UDS.
+/**@brief Printer object exposing ADXL345 accelerometer data via UDS. */
 class Adxl345Object : public PrinterObject {
 public:
     explicit Adxl345Object(std::shared_ptr<objects::Adxl345> adxl)

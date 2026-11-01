@@ -1,12 +1,14 @@
 #pragma once
 
-/// @file KlippyUdsServer.hpp
-/// @brief Unix domain socket transport layer for the Klipper/Moonraker API.
-///
-/// KlippyUdsServer is a thin transport that manages UDS connections, frame
-/// parsing, and UDS-specific subscriptions. All business logic (endpoint
-/// handlers, state, data stores) lives in KlippyServer, which is shared
-/// between this transport and the HTTP/WebSocket transport.
+/**
+ * @file KlippyUdsServer.hpp
+ * @brief Unix domain socket transport layer for the Klipper/Moonraker API.
+ *
+ * KlippyUdsServer is a thin transport that manages UDS connections, frame
+ * parsing, and UDS-specific subscriptions. All business logic (endpoint
+ * handlers, state, data stores) lives in KlippyServer, which is shared
+ * between this transport and the HTTP/WebSocket transport.
+ */
 
 #include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/klippy/UdsTypes.hpp"
@@ -25,24 +27,28 @@ namespace tether::klipper::klippy {
 
 class UdsConnection;
 
-/// @brief Unix domain socket transport for the Klipper/Moonraker API.
-///
-/// This class manages:
-///   - UDS socket lifecycle (create, bind, listen, accept)
-///   - Connection management and frame parsing (ETX-delimited JSON)
-///   - UDS-specific subscriptions (objects/subscribe, gcode/subscribe_output)
-///   - Remote method registration (register_remote_method)
-///   - Subscription refresh (periodic diff push to UDS clients)
-///
-/// All endpoint dispatch delegates to the shared KlippyServer instance.
+/**
+ * @brief Unix domain socket transport for the Klipper/Moonraker API.
+ *
+ * This class manages:
+ *   - UDS socket lifecycle (create, bind, listen, accept)
+ *   - Connection management and frame parsing (ETX-delimited JSON)
+ *   - UDS-specific subscriptions (objects/subscribe, gcode/subscribe_output)
+ *   - Remote method registration (register_remote_method)
+ *   - Subscription refresh (periodic diff push to UDS clients)
+ *
+ * All endpoint dispatch delegates to the shared KlippyServer instance.
+ */
 class KlippyUdsServer {
 public:
-    /// @brief Construct a UDS transport with its own KlippyServer.
+    /**@brief Construct a UDS transport with its own KlippyServer. */
     explicit KlippyUdsServer(UdsServerConfig cfg = {});
 
-    /// @brief Construct a UDS transport using an existing KlippyServer.
-    /// @param server Shared business-logic server instance.
-    /// @param cfg UDS transport configuration (socketPath, backlog, etc.).
+    /**
+     * @brief Construct a UDS transport using an existing KlippyServer.
+     * @param server Shared business-logic server instance.
+     * @param cfg UDS transport configuration (socketPath, backlog, etc.).
+     */
     KlippyUdsServer(KlippyServer& server, UdsServerConfig cfg = {});
 
     ~KlippyUdsServer();
@@ -62,7 +68,7 @@ public:
     // Access to the underlying KlippyServer
     // ------------------------------------------------------------------
 
-    /// @brief Get the shared KlippyServer instance.
+    /**@brief Get the shared KlippyServer instance. */
     KlippyServer& server() { return ownsServer_ ? *ownedServer_ : *externalServer_; }
     const KlippyServer& server() const { return ownsServer_ ? *ownedServer_ : *externalServer_; }
 
@@ -70,13 +76,13 @@ public:
     // UDS-specific operations
     // ------------------------------------------------------------------
 
-    /// @brief Invoke a remote method (Server -> Client push over UDS).
+    /**@brief Invoke a remote method (Server -> Client push over UDS). */
     void invokeRemoteMethod(const std::string& method, const JsonValue& params);
 
-    /// @brief Get number of active UDS subscriptions.
+    /**@brief Get number of active UDS subscriptions. */
     size_t subscriptionCount() const;
 
-    /// @brief Manually trigger a subscription refresh (for testing).
+    /**@brief Manually trigger a subscription refresh (for testing). */
     void refreshSubscriptions();
 
 private:
@@ -101,7 +107,7 @@ private:
     void cleanupConnections();
     void subscriptionRefreshTick();
 
-    /// @brief Register UDS-specific callbacks on the KlippyServer.
+    /**@brief Register UDS-specific callbacks on the KlippyServer. */
     void registerUdsCallbacks();
 
     // ------------------------------------------------------------------

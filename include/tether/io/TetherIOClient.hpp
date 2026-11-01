@@ -39,7 +39,7 @@
 
 namespace tether { namespace io {
 
-/// Catalog entry returned by listParams / listSignals.
+/**Catalog entry returned by listParams / listSignals. */
 struct ClientCatalogEntry {
     uint64_t id = 0;
     uint64_t schemaEpoch = 0;
@@ -52,7 +52,7 @@ struct ClientCatalogEntry {
     std::string group;
 };
 
-/// Function parameter descriptor.
+/**Function parameter descriptor. */
 struct ClientFunctionParam {
     uint32_t key = 0;
     std::string name;
@@ -65,7 +65,7 @@ struct ClientFunctionParam {
     std::vector<uint8_t> defaultValue;
 };
 
-/// Function entry returned by listFunctions.
+/**Function entry returned by listFunctions. */
 struct ClientFunctionEntry {
     uint64_t id = 0;
     uint64_t schemaEpoch = 0;
@@ -78,7 +78,7 @@ struct ClientFunctionEntry {
     uint32_t returnSchemaSlot = 0;
 };
 
-/// Stream layout entry from ConfigureStreamAck.
+/**Stream layout entry from ConfigureStreamAck. */
 struct ClientStreamLayoutEntry {
     uint64_t id = 0;
     uint64_t schemaEpoch = 0;
@@ -87,20 +87,20 @@ struct ClientStreamLayoutEntry {
     uint8_t valueSize = 0;
 };
 
-/// A single stream data row.
+/**A single stream data row. */
 struct ClientStreamRow {
     uint32_t specId = 0;
     uint64_t timestampUs = 0;
     std::vector<std::vector<uint8_t>> values;
 };
 
-/// Metadata key-value pair.
+/**Metadata key-value pair. */
 struct ClientMetadata {
     std::string key;
     std::string value;
 };
 
-/// Snapshot value entry.
+/**Snapshot value entry. */
 struct ClientSnapshotValue {
     uint64_t id = 0;
     uint64_t schemaEpoch = 0;
@@ -109,13 +109,13 @@ struct ClientSnapshotValue {
     std::vector<uint8_t> value;
 };
 
-/// Error from the server or client.
+/**Error from the server or client. */
 struct ClientError {
     ErrorCode code = ErrorCode::None;
     std::string message;
 };
 
-/// Result of a CallFunction request.
+/**Result of a CallFunction request. */
 struct ClientCallResult {
     uint64_t functionId = 0;
     bool success = false;
@@ -125,14 +125,14 @@ struct ClientCallResult {
     std::vector<uint8_t> returnValue;
 };
 
-/// Result of a SubscribeLog request.
+/**Result of a SubscribeLog request. */
 struct ClientLogSubscription {
     uint32_t subscriptionId = 0;
     bool failed = false;
     std::string errorMessage;
 };
 
-/// Log record received via LogData.
+/**Log record received via LogData. */
 struct ClientLogRecord {
     uint8_t severity = 0;
     std::string component;
@@ -140,21 +140,27 @@ struct ClientLogRecord {
     std::string location;
 };
 
-/// Stream data callback.
+/**Stream data callback. */
 using StreamDataCallback = std::function<void(const ClientStreamRow&)>;
-/// Log data callback.
+/**Log data callback. */
 using LogDataCallback = std::function<void(const ClientLogRecord&)>;
 
-/// Fired when the server pushes CatalogChanged (0x2C) — the catalog is
-/// stale; call the list*/catalog APIs again to refresh.
+/**
+ * Fired when the server pushes CatalogChanged (0x2C) — the catalog is
+ * stale; call the list/catalog APIs again to refresh.
+ */
 using CatalogChangedCallback = std::function<void()>;
 
-/// Fired when the server pushes SchemaUpdate (0x56) mid-session — the
-/// schema epoch changed; previously negotiated slots are stale.
+/**
+ * Fired when the server pushes SchemaUpdate (0x56) mid-session — the
+ * schema epoch changed; previously negotiated slots are stale.
+ */
 using SchemaUpdateCallback = std::function<void()>;
 
-/// Fired for any other unhandled unsolicited message type (async error
-/// frames, unknown pushes). Receives the raw type byte + body.
+/**
+ * Fired for any other unhandled unsolicited message type (async error
+ * frames, unknown pushes). Receives the raw type byte + body.
+ */
 using AsyncMessageCallback =
     std::function<void(uint8_t type, const std::vector<uint8_t>& body)>;
 
@@ -167,9 +173,11 @@ using AsyncMessageCallback =
  */
 class TetherIOClient {
 public:
-    /// Construct with a transport (takes ownership).
-    /// @param transport Transport to the server; the client drives it.
-    /// @param defaultTimeoutMs Default request timeout [ms].
+    /**
+     * Construct with a transport (takes ownership).
+     * @param transport Transport to the server; the client drives it.
+     * @param defaultTimeoutMs Default request timeout [ms].
+     */
     explicit TetherIOClient(std::unique_ptr<ITransport> transport,
                             uint32_t defaultTimeoutMs = 5000);
     ~TetherIOClient();
@@ -184,40 +192,54 @@ public:
 
     // ---- Negotiated schema state (populated during construction) ----
 
-    /// Schema epoch committed during the V6 bootstrap (0 = not negotiated).
-    /// @return Negotiated schema epoch.
+    /**
+     * Schema epoch committed during the V6 bootstrap (0 = not negotiated).
+     * @return Negotiated schema epoch.
+     */
     uint64_t schemaEpoch() const { return schemaEpoch_; }
-    /// Schema graph fetched during bootstrap; empty when the server
-    /// advertised no schemas. All V6 value decoding goes through this.
-    /// @return Negotiated schema graph.
+    /**
+     * Schema graph fetched during bootstrap; empty when the server
+     * advertised no schemas. All V6 value decoding goes through this.
+     * @return Negotiated schema graph.
+     */
     const SchemaGraph& schemaGraph() const { return schemaGraph_; }
-    /// Server-advertised manifest in slot order (slot == index).
-    /// @return Manifest entries; slot number equals the vector index.
+    /**
+     * Server-advertised manifest in slot order (slot == index).
+     * @return Manifest entries; slot number equals the vector index.
+     */
     const std::vector<SchemaManifestEntry>& schemaManifest() const {
         return manifest_;
     }
-    /// Negotiated protocol limits from ServerHello.
-    /// @return Limits the client must respect (max message size, counts, ...).
+    /**
+     * Negotiated protocol limits from ServerHello.
+     * @return Limits the client must respect (max message size, counts, ...).
+     */
     const SchemaNegotiationLimits& serverLimits() const { return serverLimits_; }
-    /// Negotiated encoding feature bits from ServerHello.
-    /// @return Feature bitmask supported by both sides.
+    /**
+     * Negotiated encoding feature bits from ServerHello.
+     * @return Feature bitmask supported by both sides.
+     */
     uint32_t negotiatedFeatures() const { return negotiatedFeatures_; }
 
-    /// Resolve a wire schema slot to a node in the negotiated graph.
-    /// Returns nullptr for out-of-range slots or missing definitions.
-    /// @param slot Wire schema slot.
-    /// @return Node in the negotiated graph, or nullptr when unresolved.
+    /**
+     * Resolve a wire schema slot to a node in the negotiated graph.
+     * Returns nullptr for out-of-range slots or missing definitions.
+     * @param slot Wire schema slot.
+     * @return Node in the negotiated graph, or nullptr when unresolved.
+     */
     const SchemaNode* resolveSchemaSlot(uint32_t slot) const {
         if (slot >= manifest_.size()) return nullptr;
         return schemaGraph_.find(manifest_[slot].ref.key);
     }
 
-    /// Convenience: decode a raw value against a schema slot.
-    /// Requires exact consumption of `len` bytes.
-    /// @param schemaSlot Wire schema slot the value was encoded against.
-    /// @param data Encoded value bytes.
-    /// @param len Number of bytes in @p data.
-    /// @return Decoded value, or an error on schema/length mismatch.
+    /**
+     * Convenience: decode a raw value against a schema slot.
+     * Requires exact consumption of `len` bytes.
+     * @param schemaSlot Wire schema slot the value was encoded against.
+     * @param data Encoded value bytes.
+     * @param len Number of bytes in @p data.
+     * @return Decoded value, or an error on schema/length mismatch.
+     */
     std::expected<SchemaValue, ClientError>
     decodeValue(uint32_t schemaSlot, const uint8_t* data, size_t len) const {
         const SchemaNode* node = resolveSchemaSlot(schemaSlot);
@@ -243,124 +265,150 @@ public:
 
     // ---- Ping ----
 
-    /// Send PingReq with a nonce, expect PongResp. Returns the echoed nonce.
-    /// @param nonce Value the server must echo back.
-    /// @return Echoed nonce, or a transport/protocol error.
+    /**
+     * Send PingReq with a nonce, expect PongResp. Returns the echoed nonce.
+     * @param nonce Value the server must echo back.
+     * @return Echoed nonce, or a transport/protocol error.
+     */
     std::expected<uint32_t, ClientError> ping(uint32_t nonce = 0);
 
     // ---- Catalog: Parameters ----
 
-    /// List parameters starting at offset, up to maxCount entries.
-    /// @param offset Index of the first entry to return.
-    /// @param maxCount Maximum entries per response.
-    /// @return Catalog entries, or an error.
+    /**
+     * List parameters starting at offset, up to maxCount entries.
+     * @param offset Index of the first entry to return.
+     * @param maxCount Maximum entries per response.
+     * @return Catalog entries, or an error.
+     */
     std::expected<std::vector<ClientCatalogEntry>, ClientError>
     listParams(uint32_t offset = 0, uint32_t maxCount = 1000);
 
-    /// Get a parameter's current value.
-    /// @param id Parameter ID from the catalog.
-    /// @return Encoded value bytes, or an error.
+    /**
+     * Get a parameter's current value.
+     * @param id Parameter ID from the catalog.
+     * @return Encoded value bytes, or an error.
+     */
     std::expected<std::vector<uint8_t>, ClientError>
     getParam(uint64_t id);
 
-    /// Set a parameter's value (fixed-length).
-    /// @param id Parameter ID from the catalog.
-    /// @param value Encoded value bytes.
-    /// @param valueSize Number of bytes in @p value.
-    /// @return Empty on success, or an error.
+    /**
+     * Set a parameter's value (fixed-length).
+     * @param id Parameter ID from the catalog.
+     * @param value Encoded value bytes.
+     * @param valueSize Number of bytes in @p value.
+     * @return Empty on success, or an error.
+     */
     std::expected<void, ClientError>
     setParam(uint64_t id, const void* value, uint8_t valueSize);
 
-    /// Set a parameter's value (variable-length).
-    /// @param id Parameter ID from the catalog.
-    /// @param value Encoded value bytes.
-    /// @param len Number of bytes in @p value.
-    /// @return Empty on success, or an error.
+    /**
+     * Set a parameter's value (variable-length).
+     * @param id Parameter ID from the catalog.
+     * @param value Encoded value bytes.
+     * @param len Number of bytes in @p value.
+     * @return Empty on success, or an error.
+     */
     std::expected<void, ClientError>
     setParamVar(uint64_t id, const void* value, size_t len);
 
     // ---- Catalog: Signals ----
 
-    /// List signals starting at offset, up to maxCount entries.
-    /// @param offset Index of the first entry to return.
-    /// @param maxCount Maximum entries per response.
-    /// @return Catalog entries, or an error.
+    /**
+     * List signals starting at offset, up to maxCount entries.
+     * @param offset Index of the first entry to return.
+     * @param maxCount Maximum entries per response.
+     * @return Catalog entries, or an error.
+     */
     std::expected<std::vector<ClientCatalogEntry>, ClientError>
     listSignals(uint32_t offset = 0, uint32_t maxCount = 1000);
 
-    /// Get a signal's current value.
-    /// @param id Signal ID from the catalog.
-    /// @return Encoded value bytes, or an error.
+    /**
+     * Get a signal's current value.
+     * @param id Signal ID from the catalog.
+     * @return Encoded value bytes, or an error.
+     */
     std::expected<std::vector<uint8_t>, ClientError>
     getSignal(uint64_t id);
 
     // ---- Metadata ----
 
-    /// Get metadata key-value pairs for an entry.
-    /// @param id Parameter/signal ID from the catalog.
-    /// @return Metadata pairs, or an error.
+    /**
+     * Get metadata key-value pairs for an entry.
+     * @param id Parameter/signal ID from the catalog.
+     * @return Metadata pairs, or an error.
+     */
     std::expected<std::vector<ClientMetadata>, ClientError>
     getMetadata(uint64_t id);
 
     // ---- Functions ----
 
-    /// List functions starting at offset, up to maxCount entries.
-    /// @param offset Index of the first entry to return.
-    /// @param maxCount Maximum entries per response.
-    /// @return Function entries, or an error.
+    /**
+     * List functions starting at offset, up to maxCount entries.
+     * @param offset Index of the first entry to return.
+     * @param maxCount Maximum entries per response.
+     * @return Function entries, or an error.
+     */
     std::expected<std::vector<ClientFunctionEntry>, ClientError>
     listFunctions(uint32_t offset = 0, uint32_t maxCount = 1000);
 
-    /// Call a function by ID with keyed, schema-directed arguments.
+    /**Call a function by ID with keyed, schema-directed arguments. */
     struct FunctionArg {
         uint32_t position = 0;
         ValueType type = ValueType::F64;
         std::vector<uint8_t> value;
         uint32_t key = 0;
     };
-    /// @param functionId Function ID from the catalog.
-    /// @param args Keyed arguments in wire order.
-    /// @return Call result, or an error.
+    /**
+     * @param functionId Function ID from the catalog.
+     * @param args Keyed arguments in wire order.
+     * @return Call result, or an error.
+     */
     std::expected<ClientCallResult, ClientError>
     callFunction(uint64_t functionId, const std::vector<FunctionArg>& args = {});
 
     // ---- Peer functions + correlated invocation ----
 
-    /// Host local functions and publish their catalog to the server
-    /// (RegisterFunctionsReq).  Entries are stored for the lifetime of the
-    /// connection and dispatched when InvokeExReq arrives; each entry must
-    /// satisfy FunctionEntry::validSignature().  Returns the registered
-    /// count.  Repeat calls replace the whole catalog.
-    /// @param functions Function entries to publish.
-    /// @return Number of functions registered, or an error.
+    /**
+     * Host local functions and publish their catalog to the server
+     * (RegisterFunctionsReq).  Entries are stored for the lifetime of the
+     * connection and dispatched when InvokeExReq arrives; each entry must
+     * satisfy FunctionEntry::validSignature().  Returns the registered
+     * count.  Repeat calls replace the whole catalog.
+     * @param functions Function entries to publish.
+     * @return Number of functions registered, or an error.
+     */
     std::expected<uint32_t, ClientError>
     registerFunctions(const std::vector<FunctionEntry>& functions);
 
-    /// Correlated function call (InvokeEx).  Unlike callFunction() the
-    /// request carries an explicit request id and a `deadlineUs` hint
-    /// (0 = none), so calls compose with a pipelined reverse direction on
-    /// the same connection.  Functionally identical invocation semantics
-    /// to callFunction().
-    ///
-    /// @param functionId Function ID from the catalog.
-    /// @param args Keyed arguments in wire order.
-    /// @param deadlineUs Relative deadline hint [us] (0 = none).
-    /// @param timeoutMs Client-side wait timeout [ms] (0 = default).
-    /// @return Call result, or an error.
+    /**
+     * Correlated function call (InvokeEx).  Unlike callFunction() the
+     * request carries an explicit request id and a `deadlineUs` hint
+     * (0 = none), so calls compose with a pipelined reverse direction on
+     * the same connection.  Functionally identical invocation semantics
+     * to callFunction().
+     *
+     * @param functionId Function ID from the catalog.
+     * @param args Keyed arguments in wire order.
+     * @param deadlineUs Relative deadline hint [us] (0 = none).
+     * @param timeoutMs Client-side wait timeout [ms] (0 = default).
+     * @return Call result, or an error.
+     */
     std::expected<ClientCallResult, ClientError>
     invokeEx(uint64_t functionId, const std::vector<FunctionArg>& args = {},
              uint64_t deadlineUs = 0, uint32_t timeoutMs = 0);
 
-    /// Optional catch-all for InvokeExReq functions not found among the
-    /// registered localFunctions_.  Runs inside a request()/receiveMessage()
-    /// wait — keep it non-blocking or delegate.
+    /**
+     * Optional catch-all for InvokeExReq functions not found among the
+     * registered localFunctions_.  Runs inside a request()/receiveMessage()
+     * wait — keep it non-blocking or delegate.
+     */
     using InvokeHandler = std::function<ClientCallResult(
         uint64_t functionId, const std::vector<FunctionArg>& args)>;
     void setInvokeHandler(InvokeHandler cb);
 
     // ---- Streaming ----
 
-    /// Configure a stream. Returns {specId, layout}.
+    /**Configure a stream. Returns {specId, layout}. */
     struct ConfigureStreamResult {
         uint32_t specId = 0;
         std::vector<ClientStreamLayoutEntry> layout;
@@ -373,26 +421,34 @@ public:
                     uint8_t triggerMode = 0,
                     uint64_t triggerEntryId = 0);
 
-    /// Start streaming (no response expected).
-    /// @return Empty on success, or an error.
+    /**
+     * Start streaming (no response expected).
+     * @return Empty on success, or an error.
+     */
     std::expected<void, ClientError> startStream();
 
-    /// Stop streaming.
-    /// @return Empty on success, or an error.
+    /**
+     * Stop streaming.
+     * @return Empty on success, or an error.
+     */
     std::expected<void, ClientError> stopStream();
 
     // ---- Snapshots ----
 
-    /// Snapshot all or specific parameters.
-    /// Empty ids = snapshot all.
-    /// @param ids Parameter IDs to include.
-    /// @return (snapshot timestamp, values) or an error.
+    /**
+     * Snapshot all or specific parameters.
+     * Empty ids = snapshot all.
+     * @param ids Parameter IDs to include.
+     * @return (snapshot timestamp, values) or an error.
+     */
     std::expected<std::pair<uint64_t, std::vector<ClientSnapshotValue>>, ClientError>
     snapshotParams(const std::vector<uint64_t>& ids = {});
 
-    /// Snapshot all or specific signals.
-    /// @param ids Signal IDs to include; empty means all signals.
-    /// @return (snapshot timestamp, values) or an error.
+    /**
+     * Snapshot all or specific signals.
+     * @param ids Signal IDs to include; empty means all signals.
+     * @return (snapshot timestamp, values) or an error.
+     */
     std::expected<std::pair<uint64_t, std::vector<ClientSnapshotValue>>, ClientError>
     snapshotSignals(const std::vector<uint64_t>& ids = {});
 
@@ -441,28 +497,34 @@ public:
 
     // ---- Low-level access ----
 
-    /// Send a raw protocol message (no framing).
-    /// @param data Message bytes.
-    /// @param len Number of bytes in @p data.
-    /// @return true when the bytes were handed to the transport.
+    /**
+     * Send a raw protocol message (no framing).
+     * @param data Message bytes.
+     * @param len Number of bytes in @p data.
+     * @return true when the bytes were handed to the transport.
+     */
     bool sendRaw(const uint8_t* data, size_t len);
 
-    /// Receive the next message, dispatching StreamData/LogData and
-    /// answering incoming InvokeExReq messages.  Returns the frame for
-    /// anything else.  Safe to call from a dedicated pump thread; it
-    /// serializes with request() so a synchronous call never starves —
-    /// but one caller at a time holds the receive wait.
-    /// @param timeoutMs Maximum wait [ms]; 0 uses the client default.
-    /// @return Raw frame bytes, or an error.
+    /**
+     * Receive the next message, dispatching StreamData/LogData and
+     * answering incoming InvokeExReq messages.  Returns the frame for
+     * anything else.  Safe to call from a dedicated pump thread; it
+     * serializes with request() so a synchronous call never starves —
+     * but one caller at a time holds the receive wait.
+     * @param timeoutMs Maximum wait [ms]; 0 uses the client default.
+     * @return Raw frame bytes, or an error.
+     */
     std::expected<std::vector<uint8_t>, ClientError>
     receiveMessage(uint32_t timeoutMs = 0);
 
-    /// Send a request and wait for a specific response type.
-    /// StreamData and LogData messages are dispatched to callbacks while waiting.
-    /// @param payload Encoded request message.
-    /// @param expectedResponseType Response type that completes the call.
-    /// @param timeoutMs Maximum wait [ms]; 0 uses the client default.
-    /// @return Response payload bytes, or an error.
+    /**
+     * Send a request and wait for a specific response type.
+     * StreamData and LogData messages are dispatched to callbacks while waiting.
+     * @param payload Encoded request message.
+     * @param expectedResponseType Response type that completes the call.
+     * @param timeoutMs Maximum wait [ms]; 0 uses the client default.
+     * @return Response payload bytes, or an error.
+     */
     std::expected<std::vector<uint8_t>, ClientError>
     request(const std::vector<uint8_t>& payload,
             MessageType expectedResponseType,
@@ -479,8 +541,10 @@ private:
     InvokeHandler invokeHandler_;
     std::vector<FunctionEntry> localFunctions_;
     std::vector<ClientStreamLayoutEntry> streamLayout_;
-    /// Recursive: request() holds it while receiveMessage() dispatches an
-    /// InvokeExReq whose handler sends the InvokeExResp.
+    /**
+     * Recursive: request() holds it while receiveMessage() dispatches an
+     * InvokeExReq whose handler sends the InvokeExResp.
+     */
     std::recursive_mutex mutex_;
     std::atomic<uint64_t> nextRequestId_{1};
     uint64_t schemaEpoch_ = 0;

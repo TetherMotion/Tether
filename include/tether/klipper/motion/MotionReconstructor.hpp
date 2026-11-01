@@ -27,12 +27,12 @@
 
 namespace tether::klipper::motion {
 
-/// @brief A sampled point in the reconstructed trajectory.
+/**@brief A sampled point in the reconstructed trajectory. */
 struct TrajectoryPoint {
-    uint32_t clock = 0;       ///< MCU clock at this point
-    double position = 0;     ///< Cumulative position (steps)
-    double velocity = 0;     ///< Step rate (steps per clock tick)
-    double acceleration = 0; ///< Acceleration (steps per clock^2)
+    uint32_t clock = 0; /**< MCU clock at this point */
+    double position = 0; /**< Cumulative position (steps) */
+    double velocity = 0; /**< Step rate (steps per clock tick) */
+    double acceleration = 0; /**< Acceleration (steps per clock^2) */
 };
 
 /**

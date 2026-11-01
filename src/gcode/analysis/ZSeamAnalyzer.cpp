@@ -1,5 +1,7 @@
-/// @file ZSeamAnalyzer.cpp
-/// @brief Z-seam detection and consistency scoring.
+/**
+ * @file ZSeamAnalyzer.cpp
+ * @brief Z-seam detection and consistency scoring.
+ */
 
 #include "tether/gcode/analysis/ZSeamAnalyzer.hpp"
 #include "AnalysisUtil.hpp"

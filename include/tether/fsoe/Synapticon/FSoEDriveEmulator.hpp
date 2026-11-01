@@ -43,27 +43,35 @@ namespace EtherCAT::Drives::Synapticon::SafeMotion {
  * @brief Configuration for one emulated FSoE channel's drive.
  */
 struct FSoEDriveEmulatorConfig {
-    size_t   index = 0;            ///< channel index (for logging)
-    uint16_t conn_id = 0;          ///< expected FSoE connection ID
-    uint16_t safety_addr = 0;      ///< FSoE safety address
-    uint16_t slave_addr = 0;       ///< nominal EtherCAT station address
-    size_t   resp_frame_len = 31;  ///< slave→master wire length (31=LW1, 35=LW2)
-    uint16_t watchdog_ms = 50;     ///< FSoE slave watchdog
-    /// Status polarity (SDD-derived): true → mirror the zero-active
-    /// command bit inverted so the status bit reads one-active.
+    size_t   index = 0; /**< channel index (for logging) */
+    uint16_t conn_id = 0; /**< expected FSoE connection ID */
+    uint16_t safety_addr = 0; /**< FSoE safety address */
+    uint16_t slave_addr = 0; /**< nominal EtherCAT station address */
+    size_t   resp_frame_len = 31; /**< slave→master wire length (31=LW1, 35=LW2) */
+    uint16_t watchdog_ms = 50; /**< FSoE slave watchdog */
+    /**
+     * Status polarity (SDD-derived): true → mirror the zero-active
+     * command bit inverted so the status bit reads one-active.
+     */
     bool invert_sto = true;
     bool invert_sos = true;
-    /// Command polarity (SDD-derived): true → master→slave demanded-
-    /// function bits are one-active (bit=1 demands the function).
+    /**
+     * Command polarity (SDD-derived): true → master→slave demanded-
+     * function bits are one-active (bit=1 demands the function).
+     */
     bool command_active_high = false;
-    /// Emulated power stage ignores motion-gating FSoE demands — the
-    /// wire/status path still reports demanded functions active (same
-    /// end result as wire suppression applied to physical drives).
+    /**
+     * Emulated power stage ignores motion-gating FSoE demands — the
+     * wire/status path still reports demanded functions active (same
+     * end result as wire suppression applied to physical drives).
+     */
     bool suppress_demands = false;
-    /// Maximum CSP tracking velocity in counts/s.  Bounds the position
-    /// error divided by dt, so a target that kept advancing while a
-    /// demanded stop function held the axis produces a bounded
-    /// catch-up ramp on release instead of a one-cycle jump.
+    /**
+     * Maximum CSP tracking velocity in counts/s.  Bounds the position
+     * error divided by dt, so a target that kept advancing while a
+     * demanded stop function held the axis produces a bounded
+     * catch-up ramp on release instead of a one-cycle jump.
+     */
     double tracking_velocity_limit = 200000.0;
 };
 
@@ -73,11 +81,13 @@ public:
 
     explicit FSoEDriveEmulator(const FSoEDriveEmulatorConfig& cfg);
 
-    /// Build the emulator and publish an initial Reset-state response.
+    /**Build the emulator and publish an initial Reset-state response. */
     bool initialize();
 
-    /// Hard reset: FSoE slave state machine reset + safe state (STO/SBC
-    /// active) + fresh initial response.  Call after a master restart.
+    /**
+     * Hard reset: FSoE slave state machine reset + safe state (STO/SBC
+     * active) + fresh initial response.  Call after a master restart.
+     */
     void reset();
 
     /**
@@ -91,7 +101,7 @@ public:
      */
     void process(const uint8_t* master_frame, size_t len, uint64_t time_ms);
 
-    /// Latest slave→master wire frame.
+    /**Latest slave→master wire frame. */
     const uint8_t* response() const { return response_.data(); }
     size_t responseLen() const { return response_len_; }
 
@@ -107,17 +117,19 @@ public:
      */
     void processMotion(const CiA402::MotionCommand& cmd, double dt_seconds);
 
-    /// Latest emulated CiA402 motion feedback (statusword, mode display,
-    /// position/velocity/torque actual).
+    /**
+     * Latest emulated CiA402 motion feedback (statusword, mode display,
+     * position/velocity/torque actual).
+     */
     const CiA402::MotionFeedback& motionFeedback() const {
         return motion_fb_;
     }
 
-    /// True when the last process() call consumed a new master frame.
+    /**True when the last process() call consumed a new master frame. */
     bool newFrame() const { return new_frame_; }
-    /// FSoE slave state (FSoE::SlaveState ordinal).
+    /**FSoE slave state (FSoE::SlaveState ordinal). */
     uint8_t state() const;
-    /// Last master command byte that was processed (0 when none yet).
+    /**Last master command byte that was processed (0 when none yet). */
     uint8_t lastMasterCmd() const { return last_master_[0]; }
 
     const SafeMotionServoEmulator& emulator() const { return *emu_; }

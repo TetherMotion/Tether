@@ -36,8 +36,10 @@ double CrossWlfRheology::viscosity(double shearRate, double tempC,
 
 namespace {
 
-/// @brief Volumetric flow for a Newtonian pipe at viscosity eta (used as a
-/// scale for the bisection bracket).
+/**
+ * @brief Volumetric flow for a Newtonian pipe at viscosity eta (used as a
+ * scale for the bisection bracket).
+ */
 double newtonianFlow(double pressurePa, double viscosityPas,
                      const NozzleGeometry& g) {
     if (viscosityPas <= 0.0) return 0.0;
@@ -46,15 +48,17 @@ double newtonianFlow(double pressurePa, double viscosityPas,
            (8.0 * viscosityPas * g.lengthMm);
 }
 
-/// @brief Integrate the pipe-flow velocity profile for a Cross-WLF fluid at
-/// a given pressure gradient and temperature, returning Q [mm³/s].
-///
-/// For a circular pipe with pressure gradient dp/dz = -P/L, the wall shear
-/// stress is τ_w = P·R/(2·L). The shear stress varies linearly with radius:
-/// τ(r) = τ_w · (r/R). The shear rate is γ̇(r) = τ(r)/η(γ̇,T), which is
-/// implicit for a shear-thinning fluid. We solve it by fixed-point iteration
-/// at each radial node, then integrate Q = ∫ 2π r v(r) dr with v(R)=0 and
-/// dv/dr = -γ̇.
+/**
+ * @brief Integrate the pipe-flow velocity profile for a Cross-WLF fluid at
+ * a given pressure gradient and temperature, returning Q [mm³/s].
+ *
+ * For a circular pipe with pressure gradient dp/dz = -P/L, the wall shear
+ * stress is τ_w = P·R/(2·L). The shear stress varies linearly with radius:
+ * τ(r) = τ_w · (r/R). The shear rate is γ̇(r) = τ(r)/η(γ̇,T), which is
+ * implicit for a shear-thinning fluid. We solve it by fixed-point iteration
+ * at each radial node, then integrate Q = ∫ 2π r v(r) dr with v(R)=0 and
+ * dv/dr = -γ̇.
+ */
 double integrateFlow(double pressurePa, double tempC,
                      const CrossWlfParams& p, const NozzleGeometry& g) {
     if (pressurePa <= 0.0) return 0.0;

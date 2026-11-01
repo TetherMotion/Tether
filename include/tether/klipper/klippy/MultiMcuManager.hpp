@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file MultiMcuManager.hpp
-/// @brief Multi-MCU coordination manager
+/**
+ * @file MultiMcuManager.hpp
+ * @brief Multi-MCU coordination manager
+ */
 
 #include <format>
 #include <map>
@@ -10,7 +12,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Secondary MCU configuration.
+/**@brief Secondary MCU configuration. */
 struct SecondaryMcuConfig {
     int id = 0;
     std::string serialPath;
@@ -24,35 +26,35 @@ struct SecondaryMcuConfig {
     uint32_t retransmits = 0;
 };
 
-/// @brief Multi-MCU coordination manager.
+/**@brief Multi-MCU coordination manager. */
 class MultiMcuManager {
 public:
-    /// @brief Set serial path for a secondary MCU (M860).
+    /**@brief Set serial path for a secondary MCU (M860). */
     void setSerialPath(int id, const std::string& path) {
         mcus_[id].id = id;
         mcus_[id].serialPath = path;
     }
 
-    /// @brief Set baud rate for a secondary MCU (M861).
+    /**@brief Set baud rate for a secondary MCU (M861). */
     void setBaudRate(int id, int baud) {
         mcus_[id].id = id;
         mcus_[id].baudRate = baud;
     }
 
-    /// @brief Enable/disable a secondary MCU (M862).
+    /**@brief Enable/disable a secondary MCU (M862). */
     void setEnabled(int id, bool enable) {
         mcus_[id].id = id;
         mcus_[id].enabled = enable;
         mcus_[id].connected = enable; // Simplified: enabling connects
     }
 
-    /// @brief Set clock frequency for a secondary MCU (M863).
+    /**@brief Set clock frequency for a secondary MCU (M863). */
     void setClockFreq(int id, uint32_t freq) {
         mcus_[id].id = id;
         mcus_[id].clockFreq = freq;
     }
 
-    /// @brief Get status of a secondary MCU (M876).
+    /**@brief Get status of a secondary MCU (M876). */
     std::string getStatus(int id) const {
         auto it = mcus_.find(id);
         if (it == mcus_.end()) return std::format("MCU {}: not configured", id);
@@ -63,7 +65,7 @@ public:
                            mcu.bytesRead, mcu.bytesWrite);
     }
 
-    /// @brief Update MCU statistics.
+    /**@brief Update MCU statistics. */
     void updateStats(int id, uint32_t bytesRead, uint32_t bytesWrite,
                      uint32_t retransmits) {
         auto& mcu = mcus_[id];
@@ -72,19 +74,19 @@ public:
         mcu.retransmits = retransmits;
     }
 
-    /// @brief Set firmware version for an MCU.
+    /**@brief Set firmware version for an MCU. */
     void setFirmwareVersion(int id, const std::string& version) {
         mcus_[id].firmwareVersion = version;
     }
 
-    /// @brief Get all configured MCU IDs.
+    /**@brief Get all configured MCU IDs. */
     std::vector<int> mcuIds() const {
         std::vector<int> result;
         for (const auto& [id, _] : mcus_) result.push_back(id);
         return result;
     }
 
-    /// @brief Get configuration for an MCU.
+    /**@brief Get configuration for an MCU. */
     const SecondaryMcuConfig* getMcu(int id) const {
         auto it = mcus_.find(id);
         return it != mcus_.end() ? &it->second : nullptr;

@@ -51,11 +51,11 @@ namespace EtherCAT {
 
 enum class StatusTransitionFlags : uint8_t {
     None          = 0x00,
-    ToHigherState = 0x01,  ///< new state rank > old state rank
-    ToLowerState  = 0x02,  ///< new state rank < old state rank
-    ErrorSet      = 0x04,  ///< error bit transitioned 0 -> 1
-    ErrorCleared  = 0x08,  ///< error bit transitioned 1 -> 0
-    AnyTransition = 0x10,  ///< any state or error-flag change
+    ToHigherState = 0x01, /**< new state rank > old state rank */
+    ToLowerState  = 0x02, /**< new state rank < old state rank */
+    ErrorSet      = 0x04, /**< error bit transitioned 0 -> 1 */
+    ErrorCleared  = 0x08, /**< error bit transitioned 1 -> 0 */
+    AnyTransition = 0x10, /**< any state or error-flag change */
 };
 
 inline StatusTransitionFlags operator|(StatusTransitionFlags a, StatusTransitionFlags b) {
@@ -76,34 +76,34 @@ inline bool has_flag(StatusTransitionFlags flags, StatusTransitionFlags test) {
 // Filter and Event
 // ============================================================================
 
-/// Sentinel slave index meaning "any slave"
+/**Sentinel slave index meaning "any slave" */
 static constexpr uint16_t kAnySlave = 0xFFFF;
 
-/// Sentinel SlaveState meaning "any state" (used in StatusFilter)
+/**Sentinel SlaveState meaning "any state" (used in StatusFilter) */
 static constexpr SlaveState kAnyState = static_cast<SlaveState>(0x00);
 
 /**
  * @brief Filter for which state transitions trigger a callback
  */
 struct StatusFilter {
-    uint16_t slave_index = kAnySlave;       ///< kAnySlave = all slaves
-    SlaveState from_state = kAnyState;       ///< kAnyState = don't filter on old state
-    SlaveState to_state = kAnyState;         ///< kAnyState = don't filter on new state
+    uint16_t slave_index = kAnySlave; /**< kAnySlave = all slaves */
+    SlaveState from_state = kAnyState; /**< kAnyState = don't filter on old state */
+    SlaveState to_state = kAnyState; /**< kAnyState = don't filter on new state */
     uint8_t transition_flags = static_cast<uint8_t>(StatusTransitionFlags::AnyTransition);
 
-    /// Construct from transition flags only (any slave, any state)
+    /**Construct from transition flags only (any slave, any state) */
     StatusFilter(StatusTransitionFlags flags)
         : transition_flags(static_cast<uint8_t>(flags)) {}
 
-    /// Construct from slave index + transition flags
+    /**Construct from slave index + transition flags */
     StatusFilter(uint16_t slave, StatusTransitionFlags flags)
         : slave_index(slave), transition_flags(static_cast<uint8_t>(flags)) {}
 
-    /// Construct from from/to states + transition flags
+    /**Construct from from/to states + transition flags */
     StatusFilter(SlaveState from, SlaveState to, StatusTransitionFlags flags)
         : from_state(from), to_state(to), transition_flags(static_cast<uint8_t>(flags)) {}
 
-    /// Default construct (AnyTransition, any slave, any state)
+    /**Default construct (AnyTransition, any slave, any state) */
     StatusFilter() = default;
 };
 
@@ -111,20 +111,20 @@ struct StatusFilter {
  * @brief Event payload delivered to callbacks
  */
 struct SlaveStatusEvent {
-    uint16_t slave_index;           ///< 0-based slave index
-    SlaveState old_state;           ///< Previous AL state
-    SlaveState new_state;           ///< Current AL state
-    uint16_t old_al_status;         ///< Raw AL_STATUS register value before
-    uint16_t new_al_status;         ///< Raw AL_STATUS register value now
-    bool old_error_flag;            ///< Error bit (bit 4) before
-    bool new_error_flag;            ///< Error bit (bit 4) now
-    uint16_t al_status_code;        ///< AL_STATUS_CODE (0x0134), read when error bit is set
+    uint16_t slave_index; /**< 0-based slave index */
+    SlaveState old_state; /**< Previous AL state */
+    SlaveState new_state; /**< Current AL state */
+    uint16_t old_al_status; /**< Raw AL_STATUS register value before */
+    uint16_t new_al_status; /**< Raw AL_STATUS register value now */
+    bool old_error_flag; /**< Error bit (bit 4) before */
+    bool new_error_flag; /**< Error bit (bit 4) now */
+    uint16_t al_status_code; /**< AL_STATUS_CODE (0x0134), read when error bit is set */
 };
 
-/// Callback signature
+/**Callback signature */
 using StatusCallback = std::function<void(const SlaveStatusEvent&)>;
 
-/// Opaque handle for deregistration
+/**Opaque handle for deregistration */
 using CallbackHandle = uint32_t;
 
 // ============================================================================
@@ -169,7 +169,7 @@ public:
 
     // ----- Configuration -----
 
-    /// Set poll interval in milliseconds (default 500). Must be called before start().
+    /**Set poll interval in milliseconds (default 500). Must be called before start(). */
     void setPollIntervalMs(uint32_t ms) { poll_interval_ms_ = ms; }
     uint32_t pollIntervalMs() const { return poll_interval_ms_; }
 
@@ -187,7 +187,7 @@ public:
      */
     bool unregisterCallback(CallbackHandle handle);
 
-    /// Remove all registered callbacks.
+    /**Remove all registered callbacks. */
     void clearCallbacks();
 
     // ----- Thread Control -----
@@ -198,7 +198,7 @@ public:
 
     // ----- Query -----
 
-    /// Thread-safe snapshot of a slave's current cached state.
+    /**Thread-safe snapshot of a slave's current cached state. */
     SlaveState getSlaveState(uint16_t slave_index) const;
 
 private:

@@ -52,13 +52,13 @@ namespace MotionPlanner {
  * supports multi-file programs (e.g., with file inclusions).
  */
 struct SourceFile {
-    /// Unique identifier for this file
+    /**Unique identifier for this file */
     uint32_t id = 0;
     
-    /// File path or name
+    /**File path or name */
     std::string path;
     
-    /// Optional description or label
+    /**Optional description or label */
     std::string description;
 
     SourceFile() = default;
@@ -82,22 +82,22 @@ struct SourceFile {
  * exact source line that generated a piece of motion data.
  */
 struct GCodeLineRef {
-    /// Source file (can be shared across many references)
+    /**Source file (can be shared across many references) */
     std::shared_ptr<SourceFile> sourceFile;
     
-    /// 1-based line number in source file
+    /**1-based line number in source file */
     uint32_t lineNumber = 0;
     
-    /// 1-based column (optional, for specific word references)
+    /**1-based column (optional, for specific word references) */
     uint16_t column = 0;
     
-    /// Original G-code text (optional, for debugging)
+    /**Original G-code text (optional, for debugging) */
     std::string originalText;
     
-    /// Block number (N word value, if present)
+    /**Block number (N word value, if present) */
     std::optional<uint32_t> blockNumber;
     
-    /// Comment from this line (if any)
+    /**Comment from this line (if any) */
     std::string comment;
 
     GCodeLineRef() = default;
@@ -161,14 +161,14 @@ struct GCodeLineRef {
  */
 class SourceReference {
 public:
-    /// Reference type
+    /**Reference type */
     enum class Type : uint8_t {
-        None,           ///< No source (synthetic/computed)
-        Empty = None,   ///< Legacy name for None
-        Single,         ///< Single G-code line
-        Multiple,       ///< Multiple contributing lines
-        Range,          ///< Contiguous range of lines
-        Synthetic       ///< Generated (not from source)
+        None, /**< No source (synthetic/computed) */
+        Empty = None, /**< Legacy name for None */
+        Single, /**< Single G-code line */
+        Multiple, /**< Multiple contributing lines */
+        Range, /**< Contiguous range of lines */
+        Synthetic /**< Generated (not from source) */
     };
 
     // ========================================================================
@@ -222,10 +222,12 @@ public:
     /**
      * @brief Backwards-compatible helpers for tests and older callers
      */
-    /// @param lineNumber 1-based source line.
-    /// @param file Source file the line belongs to.
-    /// @param text Original line text (for traceability).
-    /// @return Single-line reference.
+    /**
+     * @param lineNumber 1-based source line.
+     * @param file Source file the line belongs to.
+     * @param text Original line text (for traceability).
+     * @return Single-line reference.
+     */
     static SourceReference fromLine(uint32_t lineNumber, std::shared_ptr<SourceFile> file = nullptr, std::string text = "") {
         GCodeLineRef ref(std::move(file), lineNumber, std::move(text));
         return SourceReference(std::move(ref));

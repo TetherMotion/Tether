@@ -43,14 +43,16 @@ namespace EtherCAT {
 namespace Drives {
 namespace Synapticon {
 
-/// Brake status / control values for 0x2004:7.
+/**Brake status / control values for 0x2004:7. */
 using BrakeStatusValue = Registers::Synapticon::Obj2004::BrakeStatusOptions;
 
-/// SDO transaction timeout used by the brake helpers when none is given.
+/**SDO transaction timeout used by the brake helpers when none is given. */
 static constexpr uint32_t kBrakeSdoTimeoutMs = 3000;
 
-/// Delay applied after commanding a brake state change so the solenoid has
-/// time to actuate before the caller proceeds.
+/**
+ * Delay applied after commanding a brake state change so the solenoid has
+ * time to actuate before the caller proceeds.
+ */
 static constexpr uint32_t kBrakeActuationDelayMs = 200;
 
 /**
@@ -62,43 +64,51 @@ static constexpr uint32_t kBrakeActuationDelayMs = 200;
  */
 class BrakeControl {
 public:
-    /// Disengage (release) the brake by writing 2 to 0x2004:7.
-    /// Optionally verifies the status afterwards and waits for actuation.
-    /// @param sdo       CoE manager bound to the target slave.
-    /// @param timeout_ms SDO transaction timeout (0 = use default).
-    /// @param verify    When true, re-reads 0x2004:7 and confirms Disengaged.
-    /// @return true if the write (and optional verification) succeeded.
+    /**
+     * Disengage (release) the brake by writing 2 to 0x2004:7.
+     * Optionally verifies the status afterwards and waits for actuation.
+     * @param sdo       CoE manager bound to the target slave.
+     * @param timeout_ms SDO transaction timeout (0 = use default).
+     * @param verify    When true, re-reads 0x2004:7 and confirms Disengaged.
+     * @return true if the write (and optional verification) succeeded.
+     */
     static bool disengageBrake(EtherCAT::CoE::CoEManager& sdo,
                                uint32_t timeout_ms = 0,
                                bool verify = true);
 
-    /// Engage the brake by writing 1 to 0x2004:7.
-    /// @param sdo       CoE manager bound to the target slave.
-    /// @param timeout_ms SDO transaction timeout (0 = use default).
-    /// @param verify    When true, re-reads 0x2004:7 and confirms Engaged.
-    /// @return true if the write (and optional verification) succeeded.
+    /**
+     * Engage the brake by writing 1 to 0x2004:7.
+     * @param sdo       CoE manager bound to the target slave.
+     * @param timeout_ms SDO transaction timeout (0 = use default).
+     * @param verify    When true, re-reads 0x2004:7 and confirms Engaged.
+     * @return true if the write (and optional verification) succeeded.
+     */
     static bool engageBrake(EtherCAT::CoE::CoEManager& sdo,
                             uint32_t timeout_ms = 0,
                             bool verify = true);
 
-    /// Read the current brake status from 0x2004:7.
-    /// @return the BrakeStatusValue on success, or std::nullopt on SDO failure.
+    /**
+     * Read the current brake status from 0x2004:7.
+     * @return the BrakeStatusValue on success, or std::nullopt on SDO failure.
+     */
     static std::optional<BrakeStatusValue> readBrakeStatus(
         EtherCAT::CoE::CoEManager& sdo,
         uint32_t timeout_ms = 0);
 
-    /// @return true when the brake reports Disengaged (0x2004:7 == 2).
+    /**@return true when the brake reports Disengaged (0x2004:7 == 2). */
     static bool isDisengaged(EtherCAT::CoE::CoEManager& sdo,
                              uint32_t timeout_ms = 0);
 
-    /// @return true when the brake reports Engaged (0x2004:7 == 1).
+    /**@return true when the brake reports Engaged (0x2004:7 == 1). */
     static bool isEngaged(EtherCAT::CoE::CoEManager& sdo,
                           uint32_t timeout_ms = 0);
 
-    /// Configure the automatic release strategy (0x2004:4).
-    /// Use this to switch from manual output voltage (0) to Pin brake (2) or
-    /// Clutch-style brake (1) control before disengaging.
-    /// @return true on successful SDO write.
+    /**
+     * Configure the automatic release strategy (0x2004:4).
+     * Use this to switch from manual output voltage (0) to Pin brake (2) or
+     * Clutch-style brake (1) control before disengaging.
+     * @return true on successful SDO write.
+     */
     static bool setReleaseStrategy(
         EtherCAT::CoE::CoEManager& sdo,
         Registers::Synapticon::Obj2004::ReleaseStrategyOptions strategy,
@@ -108,8 +118,10 @@ public:
     // Diagnostics
     // ------------------------------------------------------------------
 
-    /// All fixed-width 0x2004 entries, in display order — suitable for
-    /// SlaveGroup::dumpEntries() or per-slave dumps.
+    /**
+     * All fixed-width 0x2004 entries, in display order — suitable for
+     * SlaveGroup::dumpEntries() or per-slave dumps.
+     */
     static constexpr std::array<
         const EtherCAT::ObjectDictionary::ObjectDictionaryEntry*, 6>
     kConfigEntries = {
@@ -121,33 +133,39 @@ public:
         &Registers::Synapticon::Obj2004::OutputVoltage,
     };
 
-    /// Snapshot of the full 0x2004 brake configuration.  Fields that could
-    /// not be read stay std::nullopt (best-effort read).
+    /**
+     * Snapshot of the full 0x2004 brake configuration.  Fields that could
+     * not be read stay std::nullopt (best-effort read).
+     */
     struct Config {
-        std::optional<uint8_t>          release_strategy;   ///< 0x2004:4
-        std::optional<uint32_t>         pull_voltage;       ///< 0x2004:1
-        std::optional<uint32_t>         hold_voltage;       ///< 0x2004:2
-        std::optional<uint16_t>         pull_time;          ///< 0x2004:3
-        std::optional<BrakeStatusValue> status;             ///< 0x2004:7
-        std::optional<uint16_t>         output_voltage;     ///< 0x2004:0A
+        std::optional<uint8_t>          release_strategy; /**< 0x2004:4 */
+        std::optional<uint32_t>         pull_voltage; /**< 0x2004:1 */
+        std::optional<uint32_t>         hold_voltage; /**< 0x2004:2 */
+        std::optional<uint16_t>         pull_time; /**< 0x2004:3 */
+        std::optional<BrakeStatusValue> status; /**< 0x2004:7 */
+        std::optional<uint16_t>         output_voltage; /**< 0x2004:0A */
     };
 
-    /// Read every kConfigEntries object into a Config snapshot.
-    /// Transfer widths come from the register definitions — firmware that
-    /// declares the U16 subs rejects oversized reads.
+    /**
+     * Read every kConfigEntries object into a Config snapshot.
+     * Transfer widths come from the register definitions — firmware that
+     * declares the U16 subs rejects oversized reads.
+     */
     static Config readConfig(EtherCAT::CoE::CoEManager& sdo,
                              uint32_t timeout_ms = 0);
 
-    /// Log the full 0x2004 configuration, one line per object.
+    /**Log the full 0x2004 configuration, one line per object. */
     static void dumpConfig(EtherCAT::CoE::CoEManager& sdo,
                            const char* tag, uint32_t timeout_ms = 0);
 
-    /// Cross-check the authoritative brake status (0x2004:7) against the
-    /// statusword brake bit (SOMANET TxPDO statusword bit 15, 1=disengaged)
-    /// and log one combined diagnostic line.
-    /// @param statusword_disengaged  bit-15 decode from the cyclic
-    ///        statusword, or std::nullopt when no PDO sample is available.
-    /// @return true when 0x2004:7 reports Disengaged.
+    /**
+     * Cross-check the authoritative brake status (0x2004:7) against the
+     * statusword brake bit (SOMANET TxPDO statusword bit 15, 1=disengaged)
+     * and log one combined diagnostic line.
+     * @param statusword_disengaged  bit-15 decode from the cyclic
+     *        statusword, or std::nullopt when no PDO sample is available.
+     * @return true when 0x2004:7 reports Disengaged.
+     */
     static bool verifyDisengaged(
         EtherCAT::CoE::CoEManager& sdo,
         std::optional<bool> statusword_disengaged,

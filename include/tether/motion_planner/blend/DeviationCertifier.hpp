@@ -23,26 +23,28 @@
 
 namespace tether::motion {
 
-/// Certified deviation interval: the true δ lies in [lower, upper].
+/**Certified deviation interval: the true δ lies in [lower, upper]. */
 struct DeviationCertificate {
-    /// Two-sided Hausdorff deviation (M14): true δ ∈ [lower, upper].
+    /**Two-sided Hausdorff deviation (M14): true δ ∈ [lower, upper]. */
     double lower = 0.0;
     double upper = 0.0;
 
-    /// Signed split (M20): interior-cut component (the forbidden side for
-    /// ears). Valid (non-zero) only when a cut direction was supplied.
+    /**
+     * Signed split (M20): interior-cut component (the forbidden side for
+     * ears). Valid (non-zero) only when a cut direction was supplied.
+     */
     double insideLo = 0.0;
     double insideHi = 0.0;
 
-    /// Signed split (M20): exterior (ear-height) component.
+    /**Signed split (M20): exterior (ear-height) component. */
     double outsideLo = 0.0;
     double outsideHi = 0.0;
 };
 
-/// Computes certified deviation intervals for blend curves.
+/**Computes certified deviation intervals for blend curves. */
 class DeviationCertifier {
 public:
-    /// @param epsilon Certificate width goal (upper − lower ≤ epsilon).
+    /**@param epsilon Certificate width goal (upper − lower ≤ epsilon). */
     explicit DeviationCertifier(double epsilon);
 
     /**

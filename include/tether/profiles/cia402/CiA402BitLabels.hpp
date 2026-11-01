@@ -40,9 +40,11 @@ using ::EtherCAT::Utils::ColoredBitsetFormatter;
 // Statusword (0x6041) label table
 // ---------------------------------------------------------------------------
 
-/// CiA 402 statusword bit labels (0x6041).
-/// Quick stop (bit 5) is active-low: bit clear = quick stop active.
-/// Bits 12-13 are mode-specific (generic names used here).
+/**
+ * CiA 402 statusword bit labels (0x6041).
+ * Quick stop (bit 5) is active-low: bit clear = quick stop active.
+ * Bits 12-13 are mode-specific (generic names used here).
+ */
 inline BitLabel kStatuswordLabels[] = {
     BitLabel::bit(   "RdyToSwOn",  StatuswordBits::ReadyToSwitchOn),
     BitLabel::bit(   "SwitchedOn", StatuswordBits::SwitchedOn),
@@ -59,16 +61,18 @@ inline BitLabel kStatuswordLabels[] = {
     BitLabel::bit(   "ModeBit13",  StatuswordBits::FollowingError),
 };
 
-/// Formatter for the CiA 402 statusword.
+/**Formatter for the CiA 402 statusword. */
 inline const ColoredBitsetFormatter kStatuswordFormatter{kStatuswordLabels};
 
 // ---------------------------------------------------------------------------
 // Controlword (0x6040) label table
 // ---------------------------------------------------------------------------
 
-/// CiA 402 controlword bit labels (0x6040).
-/// Quick stop (bit 2) is active-low: bit clear = quick stop command.
-/// Bits 4-6 are mode-specific (generic names used here).
+/**
+ * CiA 402 controlword bit labels (0x6040).
+ * Quick stop (bit 2) is active-low: bit clear = quick stop command.
+ * Bits 4-6 are mode-specific (generic names used here).
+ */
 inline BitLabel kControlwordLabels[] = {
     BitLabel::bit(   "SwOn",       ControlwordBits::SwitchOn),
     BitLabel::bit(   "EnableV",    ControlwordBits::EnableVoltage),
@@ -81,7 +85,7 @@ inline BitLabel kControlwordLabels[] = {
     BitLabel::bit(   "Halt",       ControlwordBits::Halt),
 };
 
-/// Formatter for the CiA 402 controlword.
+/**Formatter for the CiA 402 controlword. */
 inline const ColoredBitsetFormatter kControlwordFormatter{kControlwordLabels};
 
 } // namespace CiA402

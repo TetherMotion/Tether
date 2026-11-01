@@ -99,7 +99,7 @@ constexpr ObjectDictionaryEntry Count = {
     .effective_time = EffectiveTime::Immediately,
 };
 
-/// Subindex template — read member i via readEntry(Error, i).
+/**Subindex template — read member i via readEntry(Error, i). */
 constexpr ObjectDictionaryEntry Error = {
     .index = 0x1003,
     .subindex = 0x01,
@@ -126,7 +126,7 @@ constexpr ObjectDictionaryEntry Count = {
     .effective_time = EffectiveTime::Immediately,
 };
 
-/// Subindex template — read member i via readEntry(Assignment, i).
+/**Subindex template — read member i via readEntry(Assignment, i). */
 constexpr ObjectDictionaryEntry Assignment = {
     .index = 0x1C12,
     .subindex = 0x01,
@@ -175,7 +175,7 @@ constexpr ObjectDictionaryEntry Count = {
     .effective_time = EffectiveTime::Immediately,
 };
 
-/// Subindex template — read member i via readEntry(Mapping, i).
+/**Subindex template — read member i via readEntry(Mapping, i). */
 constexpr ObjectDictionaryEntry Mapping = {
     .index = 0x1B00,
     .subindex = 0x01,
@@ -202,7 +202,7 @@ constexpr ObjectDictionaryEntry Count = {
     .effective_time = EffectiveTime::Immediately,
 };
 
-/// Subindex template — access member i via sdoReadEntry(Entry, i).
+/**Subindex template — access member i via sdoReadEntry(Entry, i). */
 constexpr ObjectDictionaryEntry Entry = {
     .index = 0xF030,
     .subindex = 0x01,

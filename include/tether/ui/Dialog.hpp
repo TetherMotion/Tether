@@ -30,7 +30,7 @@
 namespace Tether {
 namespace UI {
 
-/// Common result ids — applications may use their own.
+/**Common result ids — applications may use their own. */
 inline constexpr int kDialogCancel = -1;
 inline constexpr int kDialogOk = 0;
 inline constexpr int kDialogYes = 1;
@@ -38,8 +38,10 @@ inline constexpr int kDialogNo = 2;
 
 class Dialog : public Overlay {
 public:
-    /// @param cancel_index button fired by Esc (default: last button).
-    ///        Use -1 for "Esc closes without a result".
+    /**
+     * @param cancel_index button fired by Esc (default: last button).
+     *        Use -1 for "Esc closes without a result".
+     */
     Dialog(std::string title, std::vector<std::string> lines,
            std::vector<DialogButton> buttons,
            std::function<void(int id)> onResult,
@@ -123,9 +125,11 @@ private:
     bool dismissed_ = false;
 };
 
-/// Single-button message box — [ OK ].  `text` is word-wrapped by the
-/// caller if needed (pass pre-split lines via `TUI::wrapText` or a plain
-/// string with '\n' separators, which are split here).
+/**
+ * Single-button message box — [ OK ].  `text` is word-wrapped by the
+ * caller if needed (pass pre-split lines via `TUI::wrapText` or a plain
+ * string with '\n' separators, which are split here).
+ */
 inline std::unique_ptr<Dialog>
 makeMessageBox(std::string title, std::string text,
                std::function<void()> onClose = {}) {
@@ -143,8 +147,10 @@ makeMessageBox(std::string title, std::string text,
         [cb = std::move(onClose)](int) { if (cb) cb(); });
 }
 
-/// Two-button confirm — [ Yes ] [ No ], Esc = No.
-/// `onNo` is optional; both results close the dialog.
+/**
+ * Two-button confirm — [ Yes ] [ No ], Esc = No.
+ * `onNo` is optional; both results close the dialog.
+ */
 inline std::unique_ptr<Dialog>
 makeConfirmDialog(std::string title, std::string text,
                   std::function<void()> onYes,

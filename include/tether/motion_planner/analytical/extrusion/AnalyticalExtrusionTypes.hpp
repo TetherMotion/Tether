@@ -51,23 +51,25 @@ namespace MotionPlanner::analytical::extrusion {
  *   WALL:     c0 = v0, c1 = c2 = c3 = 0 (non-polynomial, sampled)
  */
 struct ExtrusionArc {
-    /// The underlying WSS arc
+    /**The underlying WSS arc */
     WeightedArc arc;
 
-    /// Extrusion ratio (E per unit path distance). 0 for travel moves.
+    /**Extrusion ratio (E per unit path distance). 0 for travel moves. */
     double extrusionRatio = 0.0;
 
-    /// Polynomial coefficients of v(τ) = c0 + c1·τ + c2·τ² + c3·τ³
-    /// (c2 = c3 = 0 for WALL arcs; c3 = 0 for SINGULAR arcs)
-    double c0 = 0.0;  ///< v at arc start
-    double c1 = 0.0;  ///< acceleration at arc start
-    double c2 = 0.0;  ///< ½·jerk at arc start (0 for SINGULAR/WALL)
-    double c3 = 0.0;  ///< (1/6)·snap (0 for SINGULAR/WALL)
+    /**
+     * Polynomial coefficients of v(τ) = c0 + c1·τ + c2·τ² + c3·τ³
+     * (c2 = c3 = 0 for WALL arcs; c3 = 0 for SINGULAR arcs)
+     */
+    double c0 = 0.0; /**< v at arc start */
+    double c1 = 0.0; /**< acceleration at arc start */
+    double c2 = 0.0; /**< ½·jerk at arc start (0 for SINGULAR/WALL) */
+    double c3 = 0.0; /**< (1/6)·snap (0 for SINGULAR/WALL) */
 
-    /// Arc duration [s]
+    /**Arc duration [s] */
     double duration = 0.0;
 
-    /// Arc start time [s]
+    /**Arc start time [s] */
     double t0 = 0.0;
 
     /**
@@ -197,32 +199,44 @@ public:
         buildPerSegment(segmentRatios);
     }
 
-    /// Number of extrusion arcs
-    /// @return Count of arcs in the trajectory.
+    /**
+     * Number of extrusion arcs
+     * @return Count of arcs in the trajectory.
+     */
     size_t numArcs() const { return arcs_.size(); }
 
-    /// Get all arcs
-    /// @return All arcs in time order.
+    /**
+     * Get all arcs
+     * @return All arcs in time order.
+     */
     const std::vector<Arc>& arcs() const { return arcs_; }
 
-    /// Get arc by index
-    /// @param i Arc index; throws when out of range.
-    /// @return Arc at that index.
+    /**
+     * Get arc by index
+     * @param i Arc index; throws when out of range.
+     * @return Arc at that index.
+     */
     const Arc& arc(size_t i) const { return arcs_.at(i); }
 
-    /// Total trajectory time [s]
-    /// @return Duration of the whole trajectory [s].
+    /**
+     * Total trajectory time [s]
+     * @return Duration of the whole trajectory [s].
+     */
     double totalTime() const {
         return arcs_.empty() ? 0.0
             : arcs_.back().t0 + arcs_.back().duration;
     }
 
-    /// Total path length [mm]
-    /// @return Length of the path the trajectory follows.
+    /**
+     * Total path length [mm]
+     * @return Length of the path the trajectory follows.
+     */
     double totalLength() const { return totalLength_; }
 
-    /// Total extruded length [mm] (sum of α_e · Δs over all arcs)
-    /// @return Filament consumed over the whole trajectory [mm].
+    /**
+     * Total extruded length [mm] (sum of α_e · Δs over all arcs)
+     * @return Filament consumed over the whole trajectory [mm].
+     */
     double totalExtrudedLength() const {
         double total = 0.0;
         for (const auto& a : arcs_)
@@ -331,8 +345,10 @@ public:
         return ePos;
     }
 
-    /// The underlying WSS
-    /// @return Source weighted switching structure.
+    /**
+     * The underlying WSS
+     * @return Source weighted switching structure.
+     */
     const WSS& wss() const { return *wss_; }
 
 private:
@@ -473,10 +489,12 @@ double smoothedPathVelocity(const ExtrusionTrajectory<Dim, T>& traj,
  * For per-segment ratios, the integral is split at segment boundaries.
  */
 template<size_t Dim, typename T>
-/// @param traj Trajectory providing the per-arc extrusion ratios.
-/// @param t Time at which the smoothed velocity is evaluated [s].
-/// @param smoothTime Averaging window width [s] (0 = no smoothing).
-/// @return Window-averaged extruder velocity [mm/s].
+/**
+ * @param traj Trajectory providing the per-arc extrusion ratios.
+ * @param t Time at which the smoothed velocity is evaluated [s].
+ * @param smoothTime Averaging window width [s] (0 = no smoothing).
+ * @return Window-averaged extruder velocity [mm/s].
+ */
 double smoothedExtruderVelocity(const ExtrusionTrajectory<Dim, T>& traj,
                                 double t, double smoothTime) {
     if (smoothTime <= 0.0) {
@@ -690,11 +708,13 @@ inline double velocityPowerIntegral(double c0, double c1, double c2,
     return quadraticPowerIntegralGL(c0, c1, c2, c3, n, tau);
 }
 
-/// @brief Backwards-compatible overload (c3 = 0).
-/// @param c0, c1, c2 Polynomial coefficients of v(τ)
-/// @param n Power (may be non-integer)
-/// @param tau Upper limit of integration
-/// @return ∫₀^τ (c0 + c1·s + c2·s²)^n ds
+/**
+ * @brief Backwards-compatible overload (c3 = 0).
+ * @param c0, c1, c2 Polynomial coefficients of v(τ)
+ * @param n Power (may be non-integer)
+ * @param tau Upper limit of integration
+ * @return ∫₀^τ (c0 + c1·s + c2·s²)^n ds
+ */
 inline double velocityPowerIntegral(double c0, double c1, double c2,
                                      double n, double tau) {
     return velocityPowerIntegral(c0, c1, c2, 0.0, n, tau);

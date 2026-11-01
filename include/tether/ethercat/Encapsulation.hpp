@@ -34,45 +34,51 @@ namespace HAL { class IEthernet; }
  * Examples: "vlan:1999", "udp", "vlan:100,udp", "vlan:100-200,vlantx:off".
  */
 struct EncapsulationConfig {
-    /// VLAN mode is active (router needed) when any of these are set.
+    /**VLAN mode is active (router needed) when any of these are set. */
     std::optional<uint16_t> txVlan;
     bool rxAny = false;
     std::optional<VLANRouter::VLANRange> rxRange;
 
-    /// EtherCAT-over-UDP encapsulation (ETG.1000.3).
+    /**EtherCAT-over-UDP encapsulation (ETG.1000.3). */
     bool     udp     = false;
     uint16_t udpPort = kEtherCATUdpPort;
 
-    /// VLAN routing/tagging is in use.
+    /**VLAN routing/tagging is in use. */
     bool vlanActive() const {
         return rxAny || rxRange.has_value() || txVlan.has_value();
     }
-    /// Any encapsulation (VLAN or UDP) is in use.
+    /**Any encapsulation (VLAN or UDP) is in use. */
     bool enabled() const { return vlanActive() || udp; }
 };
 
-/// Parse an encapsulation spec string (grammar documented on
-/// EncapsulationConfig) into @p out.
-/// Returns false and prints to stderr on invalid input.
+/**
+ * Parse an encapsulation spec string (grammar documented on
+ * EncapsulationConfig) into @p out.
+ * Returns false and prints to stderr on invalid input.
+ */
 bool parseEncapsulationSpec(const std::string& spec,
                             EncapsulationConfig& out,
                             const char* tag);
 
-/// Log the encapsulation configuration via TETHER_LOGI.
+/**Log the encapsulation configuration via TETHER_LOGI. */
 void logEncapsulationConfig(const EncapsulationConfig& config,
                             const char* tag);
 
-/// Build the kernel socket-filter program matching @p config — untagged
-/// EtherCAT (+any-VID tagged) for raw mode, VID-restricted for vlan mode,
-/// plus EtherCAT-over-UDP when enabled.  Empty program = attach nothing.
-/// @p delivery prunes the unreachable VLAN leg when probeVlanTagDelivery()
-/// determined how this NIC presents tags (Auto = emit both legs).
+/**
+ * Build the kernel socket-filter program matching @p config — untagged
+ * EtherCAT (+any-VID tagged) for raw mode, VID-restricted for vlan mode,
+ * plus EtherCAT-over-UDP when enabled.  Empty program = attach nothing.
+ * @p delivery prunes the unreachable VLAN leg when probeVlanTagDelivery()
+ * determined how this NIC presents tags (Auto = emit both legs).
+ */
 std::vector<CBPFInsn> buildEncapsulationBpfProgram(
     const EncapsulationConfig& config,
     VlanDeliveryHint delivery = VlanDeliveryHint::Auto);
 
-/// Attach the encapsulation filter to the Ethernet device's native socket
-/// (SO_ATTACH_FILTER on Linux; soft-fails with a warning).
+/**
+ * Attach the encapsulation filter to the Ethernet device's native socket
+ * (SO_ATTACH_FILTER on Linux; soft-fails with a warning).
+ */
 void attachEncapsulationBpfFilter(
     HAL::IEthernet& eth,
     const EncapsulationConfig& config,

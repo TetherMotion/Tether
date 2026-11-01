@@ -1,12 +1,14 @@
-/// @file DefaultLimits.cpp
-/// @brief Per-system default perturbation limits based on real-world physics.
+/**
+ * @file DefaultLimits.cpp
+ * @brief Per-system default perturbation limits based on real-world physics.
+ */
 
 #include "tether/destabilizer/DefaultLimits.hpp"
 #include <unordered_map>
 
 namespace Destabilizer {
 
-/// Helper: create a single-channel default.
+/**Helper: create a single-channel default. */
 static PerturbationChannel makeChannel(int inputIdx, const char* name,
                                          double aMax, double rateMax,
                                          double energyMax, const char* rationale) {

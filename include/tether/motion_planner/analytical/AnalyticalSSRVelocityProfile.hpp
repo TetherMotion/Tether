@@ -74,10 +74,10 @@ public:
                        : ProfileDerivativeOrder::Velocity;
     }
 
-    /// Access the underlying analytical source.
+    /**Access the underlying analytical source. */
     const std::shared_ptr<Source>& source() const { return source_; }
 
-    /// Tabulated points sampled from the analytical source (lazy, cached).
+    /**Tabulated points sampled from the analytical source (lazy, cached). */
     const std::vector<VelocityProfilePoint>& points() const override {
         if (sampledCache_.points().empty() && source_ && source_->totalLength() > T(0)) {
             sampleSourceTo(sampledCache_, 200);

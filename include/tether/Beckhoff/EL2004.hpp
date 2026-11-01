@@ -54,11 +54,11 @@ public:
     static constexpr uint32_t kVendorId    = Devices::EL2004.vendor_id;
     static constexpr uint32_t kProductCode = Devices::EL2004.product_code;
     static constexpr size_t   kNumChannels = Devices::EL2004.num_bits;
-    static constexpr uint16_t kRxPdoIndex  = 0x1600;  ///< first of 0x1600-0x1603
+    static constexpr uint16_t kRxPdoIndex  = 0x1600; /**< first of 0x1600-0x1603 */
 
     static constexpr DeviceIdentity kIdentity = Devices::EL2004;
 
-    /// Channel bitmask type — bit N corresponds to output channel N.
+    /**Channel bitmask type — bit N corresponds to output channel N. */
     using Channels = std::bitset<kNumChannels>;
 
     // Keep the old type aliases working.
@@ -79,7 +79,7 @@ public:
 
     // -- Factories ---------------------------------------------------------------
 
-    /// True when `s` carries the EL2004 vendor/product identity.
+    /**True when `s` carries the EL2004 vendor/product identity. */
     static bool matches(const DiscoveredSlave& s) {
         return OutputTerminal::matches(s, kIdentity);
     }
@@ -104,19 +104,19 @@ public:
     // Generic bit access (setBit/bit/setBits/bits/setOnly/allOn/allOff) is
     // inherited from OutputTerminal.
 
-    /// Set a single channel (0-3).  Out-of-range indices are ignored.
+    /**Set a single channel (0-3).  Out-of-range indices are ignored. */
     void set(size_t channel, bool on) { setBit(channel, on); }
 
-    /// Current requested state of a channel (0-3); false if out of range.
+    /**Current requested state of a channel (0-3); false if out of range. */
     bool get(size_t channel) const { return bit(channel); }
 
-    /// Write all four channels at once (bit N = channel N).
+    /**Write all four channels at once (bit N = channel N). */
     void setChannels(Channels bits) { setBits(bits.to_ullong()); }
 
-    /// Currently requested channel states (bit N = channel N).
+    /**Currently requested channel states (bit N = channel N). */
     Channels channels() const { return Channels(bits()); }
 
-    /// Raw output byte (only the low 4 bits are used).
+    /**Raw output byte (only the low 4 bits are used). */
     void    setRaw(uint8_t byte) { setBits(byte); }
     uint8_t raw() const { return static_cast<uint8_t>(bits()); }
 };

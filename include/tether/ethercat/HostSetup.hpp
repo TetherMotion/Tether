@@ -35,8 +35,10 @@ struct HostEtherNetSession {
     std::unique_ptr<HAL::IEthernet> eth;
     std::unique_ptr<NetworkInterface> ni;
     std::unique_ptr<VLANRouter> router;
-    /// Interface the master runs on — set by setupEncapsulation()
-    /// (router's per-master view under VLAN, `ni.get()` otherwise).
+    /**
+     * Interface the master runs on — set by setupEncapsulation()
+     * (router's per-master view under VLAN, `ni.get()` otherwise).
+     */
     NetworkInterface* masterInterface = nullptr;
     std::atomic<bool> pollRunning{false};
     std::thread pollThread;
@@ -45,48 +47,58 @@ struct HostEtherNetSession {
     ~HostEtherNetSession();
 };
 
-/// Initialise the Ethernet HAL, verify link, read MAC, create NetworkInterface
-/// and store it in the session.  Returns false on any error (already
-/// logged via TETHER_LOGE).
+/**
+ * Initialise the Ethernet HAL, verify link, read MAC, create NetworkInterface
+ * and store it in the session.  Returns false on any error (already
+ * logged via TETHER_LOGE).
+ */
 bool initHostEthernet(HostEtherNetSession& session,
                       const std::string& interfaceName,
                       const char* tag);
 
-/// Start a background thread that polls the Ethernet HAL.
+/**Start a background thread that polls the Ethernet HAL. */
 void startHostPollThread(HostEtherNetSession& session, const char* tag);
 
-/// Stop the poll thread and shut down the Ethernet HAL.
+/**Stop the poll thread and shut down the Ethernet HAL. */
 void shutdownHostEthernet(HostEtherNetSession& session);
 
-/// One-call encapsulation setup: attaches the kernel cBPF ingress filter,
-/// enables EtherCAT-over-UDP on the master when requested (fails if the
-/// build lacks TETHER_ENABLE_UDP_ENCAPSULATION), wires up VLAN routing and
-/// the RX callback, and stores the interface the master should start() on
-/// in `session.masterInterface`.  See the lower-level setupEncapsulation()
-/// in Encapsulation.hpp for the full behaviour.
+/**
+ * One-call encapsulation setup: attaches the kernel cBPF ingress filter,
+ * enables EtherCAT-over-UDP on the master when requested (fails if the
+ * build lacks TETHER_ENABLE_UDP_ENCAPSULATION), wires up VLAN routing and
+ * the RX callback, and stores the interface the master should start() on
+ * in `session.masterInterface`.  See the lower-level setupEncapsulation()
+ * in Encapsulation.hpp for the full behaviour.
+ */
 bool setupEncapsulation(HostEtherNetSession& session,
                         Master& master,
                         const EncapsulationConfig& encapsulation,
                         const char* tag);
 
-/// Start the EtherCAT master on the interface selected by
-/// setupEncapsulation() (per-master VLAN-router interface under VLAN,
-/// otherwise the session's own NetworkInterface).
+/**
+ * Start the EtherCAT master on the interface selected by
+ * setupEncapsulation() (per-master VLAN-router interface under VLAN,
+ * otherwise the session's own NetworkInterface).
+ */
 bool startHostMaster(HostEtherNetSession& session,
                      Master& master,
                      const char* tag);
 
-/// Convenience: perform full master startup (discover + summary logging).
-/// Returns false if no slaves are found or the master fails to start.
+/**
+ * Convenience: perform full master startup (discover + summary logging).
+ * Returns false if no slaves are found or the master fails to start.
+ */
 bool startHostMasterAndDiscover(HostEtherNetSession& session,
                                 Master& master,
                                 const char* tag);
 
-/// One-call host bring-up: initHostEthernet() + setupEncapsulation() +
-/// startHostPollThread() + startHostMaster() + mailbox-fallback enable.
-/// When @p sig is given, wires its cancel callback to
-/// master.requestCancel() so Ctrl-C wakes SDO/mailbox waiters.
-/// On failure the session is already shut down.
+/**
+ * One-call host bring-up: initHostEthernet() + setupEncapsulation() +
+ * startHostPollThread() + startHostMaster() + mailbox-fallback enable.
+ * When @p sig is given, wires its cancel callback to
+ * master.requestCancel() so Ctrl-C wakes SDO/mailbox waiters.
+ * On failure the session is already shut down.
+ */
 bool bringUpHost(HostEtherNetSession& session,
                  Master& master,
                  const std::string& interfaceName,
@@ -95,13 +107,15 @@ bool bringUpHost(HostEtherNetSession& session,
                  Tether::Utils::SignalHandler* sig = nullptr,
                  bool enable_mailbox_fallback = true);
 
-/// RAII cleanup for a host session: on destruction runs the registered
-/// exit action (typically `master.stopDistributedClocks(); master.stop();`)
-/// and then shutdownHostEthernet().  Declare it right after bringUpHost()
-/// and *before* any resource that must be released ahead of the master
-/// (per-slave interfaces, PDO keep-alives) — C++ destroys in reverse
-/// declaration order, so those release first and every early `return`
-/// then performs the full graceful shutdown automatically.
+/**
+ * RAII cleanup for a host session: on destruction runs the registered
+ * exit action (typically `master.stopDistributedClocks(); master.stop();`)
+ * and then shutdownHostEthernet().  Declare it right after bringUpHost()
+ * and *before* any resource that must be released ahead of the master
+ * (per-slave interfaces, PDO keep-alives) — C++ destroys in reverse
+ * declaration order, so those release first and every early `return`
+ * then performs the full graceful shutdown automatically.
+ */
 class HostSessionGuard {
 public:
     explicit HostSessionGuard(HostEtherNetSession& session,

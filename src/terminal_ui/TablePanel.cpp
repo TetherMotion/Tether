@@ -15,7 +15,7 @@ namespace TUI {
 
 namespace {
 
-/// Truncate/pad to fit `width` columns.
+/**Truncate/pad to fit `width` columns. */
 std::string fitCell(const std::string& s, int width) {
     if (width <= 0) return {};
     if (static_cast<int>(s.size()) > width)

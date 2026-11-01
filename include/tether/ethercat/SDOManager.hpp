@@ -108,20 +108,20 @@ constexpr uint32_t kDefaultSDOTimeoutMs = ECAT_SDO_MANAGER_DEFAULT_TIMEOUT_MS;
  * @brief SDO operation type
  */
 enum class SDOOperation : uint8_t {
-    Upload = 0,    ///< Read from slave (slave→master)
-    Download = 1   ///< Write to slave (master→slave)
+    Upload = 0, /**< Read from slave (slave→master) */
+    Download = 1 /**< Write to slave (master→slave) */
 };
 
 /**
  * @brief SDO request status
  */
 enum class SDOStatus : uint8_t {
-    Pending = 0,   ///< Request is queued, not yet processed
-    InProgress,    ///< Request is being processed
-    Complete,      ///< Request completed successfully
-    Failed,        ///< Request failed (check abort_code)
-    Timeout,       ///< Request timed out
-    Cancelled      ///< Request was cancelled
+    Pending = 0, /**< Request is queued, not yet processed */
+    InProgress, /**< Request is being processed */
+    Complete, /**< Request completed successfully */
+    Failed, /**< Request failed (check abort_code) */
+    Timeout, /**< Request timed out */
+    Cancelled /**< Request was cancelled */
 };
 
 // Forward declaration for callback
@@ -145,26 +145,26 @@ using SDOCallback = std::function<void(const SDOResponse& response)>;
  */
 struct SDORequest {
     // Target specification
-    uint16_t slave_index;      ///< Target slave (0-based index)
-    uint16_t index;            ///< Object dictionary index (e.g., 0x6040)
-    uint8_t  subindex;         ///< Object dictionary subindex
+    uint16_t slave_index; /**< Target slave (0-based index) */
+    uint16_t index; /**< Object dictionary index (e.g., 0x6040) */
+    uint8_t  subindex; /**< Object dictionary subindex */
     
     // Operation
-    SDOOperation operation;    ///< Upload (read) or Download (write)
+    SDOOperation operation; /**< Upload (read) or Download (write) */
     
     // Data for download operations
-    uint8_t  data[kMaxSDODataSize]; ///< Data buffer
-    size_t   data_size;        ///< Size of data to write (download) or max to read (upload)
+    uint8_t  data[kMaxSDODataSize]; /**< Data buffer */
+    size_t   data_size; /**< Size of data to write (download) or max to read (upload) */
     
     // Options
-    uint32_t timeout_ms;       ///< Timeout in milliseconds (0 = use default)
+    uint32_t timeout_ms; /**< Timeout in milliseconds (0 = use default) */
     
     // Completion notification (optional)
-    SDOCallback callback;      ///< Called when operation completes
-    void*    user_context;     ///< User-provided context pointer
+    SDOCallback callback; /**< Called when operation completes */
+    void*    user_context; /**< User-provided context pointer */
     
     // Internal use
-    uint32_t request_id;       ///< Assigned by the queue system
+    uint32_t request_id; /**< Assigned by the queue system */
 };
 
 /**
@@ -175,25 +175,25 @@ struct SDORequest {
  */
 struct SDOResponse {
     // Request identification
-    uint32_t request_id;       ///< Matches the original request
-    uint16_t slave_index;      ///< Target slave
-    uint16_t index;            ///< Object dictionary index
-    uint8_t  subindex;         ///< Object dictionary subindex
-    SDOOperation operation;    ///< Upload or Download
+    uint32_t request_id; /**< Matches the original request */
+    uint16_t slave_index; /**< Target slave */
+    uint16_t index; /**< Object dictionary index */
+    uint8_t  subindex; /**< Object dictionary subindex */
+    SDOOperation operation; /**< Upload or Download */
     
     // Result
-    SDOStatus status;          ///< Completion status
-    SDOAbortCode abort_code;   ///< Abort code if failed
+    SDOStatus status; /**< Completion status */
+    SDOAbortCode abort_code; /**< Abort code if failed */
     
     // Data for upload operations
-    uint8_t  data[kMaxSDODataSize]; ///< Received data (upload) or echoed data (download)
-    size_t   data_size;        ///< Actual size of data
+    uint8_t  data[kMaxSDODataSize]; /**< Received data (upload) or echoed data (download) */
+    size_t   data_size; /**< Actual size of data */
     
     // Context
-    void*    user_context;     ///< From the original request
+    void*    user_context; /**< From the original request */
     
     // Timing
-    uint32_t duration_ms;      ///< Time taken for the operation
+    uint32_t duration_ms; /**< Time taken for the operation */
     
     // Helper to check success
     bool success() const { return status == SDOStatus::Complete; }

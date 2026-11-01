@@ -53,9 +53,11 @@
 
 namespace tether::motion::profile_renurbs {
 
-/// Base exception for ReNURBS certification failures.
-/// Defined here (in the base data header) so both the velocity-specific
-/// and generic builders can reference it without circular dependencies.
+/**
+ * Base exception for ReNURBS certification failures.
+ * Defined here (in the base data header) so both the velocity-specific
+ * and generic builders can reference it without circular dependencies.
+ */
 class ReNURBSCertificationError : public std::runtime_error {
 public:
     explicit ReNURBSCertificationError(const std::string& msg)
@@ -66,24 +68,29 @@ public:
 // Generic Sample Representation
 // ===========================================================================
 
-/// A single sample of one or more quantities at a parameter value.
-///
-/// The parameter can be anything monotonic: arc length, time, or any
-/// other independent variable. Each sample carries one or more quantity
-/// values and optionally per-quantity upper limits (for constraint
-/// preservation).
-///
+/**
+ * A single sample of one or more quantities at a parameter value.
+ *
+ * The parameter can be anything monotonic: arc length, time, or any
+ * other independent variable. Each sample carries one or more quantity
+ * values and optionally per-quantity upper limits (for constraint
+ * preservation).
+ */
 struct GenericSample {
-    /// The independent variable (arc length, time, etc.).
+    /**The independent variable (arc length, time, etc.). */
     double parameter = 0.0;
 
-    /// Quantity values at this sample point. Index corresponds to the
-    /// quantity index in the QuantitySpec vector.
+    /**
+     * Quantity values at this sample point. Index corresponds to the
+     * quantity index in the QuantitySpec vector.
+     */
     std::vector<double> quantities;
 
-    /// Per-quantity upper limit at this sample point. Use +inf for
-    /// "no limit". If empty, no per-sample limits are provided (the
-    /// builder will use uniform limits from QuantitySpec, or none).
+    /**
+     * Per-quantity upper limit at this sample point. Use +inf for
+     * "no limit". If empty, no per-sample limits are provided (the
+     * builder will use uniform limits from QuantitySpec, or none).
+     */
     std::vector<double> limits;
 };
 
@@ -91,74 +98,88 @@ struct GenericSample {
 // Generic Configuration
 // ===========================================================================
 
-/// How limits are interpreted for a quantity.
+/**How limits are interpreted for a quantity. */
 enum class LimitType : uint8_t {
-    /// No constraint — pure interpolation, no clamping.
+    /**No constraint — pure interpolation, no clamping. */
     None = 0,
 
-    /// Upper limit only: q(u) ≤ limit(u) − safetyMargin.
-    /// The limit comes from per-sample data (GenericSample::limits).
+    /**
+     * Upper limit only: q(u) ≤ limit(u) − safetyMargin.
+     * The limit comes from per-sample data (GenericSample::limits).
+     */
     UpperPerSample = 1,
 
-    /// Upper limit only: q(u) ≤ uniformLimit − safetyMargin.
-    /// The limit is a single constant for the entire curve.
+    /**
+     * Upper limit only: q(u) ≤ uniformLimit − safetyMargin.
+     * The limit is a single constant for the entire curve.
+     */
     UpperUniform = 2,
 
-    /// Symmetric limit: |q(u)| ≤ uniformLimit − safetyMargin.
-    /// Used for pressure advance (±maxCompensation) and similar
-    /// bounded-offset quantities.
+    /**
+     * Symmetric limit: |q(u)| ≤ uniformLimit − safetyMargin.
+     * Used for pressure advance (±maxCompensation) and similar
+     * bounded-offset quantities.
+     */
     SymmetricUniform = 3,
 };
 
-/// Configuration for a single quantity in a generic ReNURBS profile.
+/**Configuration for a single quantity in a generic ReNURBS profile. */
 struct QuantitySpec {
-    /// Human-readable name (e.g., "velocity", "pressure_offset").
+    /**Human-readable name (e.g., "velocity", "pressure_offset"). */
     std::string name;
 
-    /// Interpolation tolerance: |B(u_i) − q_i| ≤ epsilon.
+    /**Interpolation tolerance: |B(u_i) − q_i| ≤ epsilon. */
     double epsilon = 1e-4;
 
-    /// Safety margin below the limit envelope.
+    /**Safety margin below the limit envelope. */
     double safetyMargin = 1e-4;
 
-    /// B-spline degree (continuity = degree − 1 inside a segment).
+    /**B-spline degree (continuity = degree − 1 inside a segment). */
     int degree = 5;
 
-    /// Optional lower bound (e.g., 0.0 for velocity, or nullopt for
-    /// quantities that can go negative).
+    /**
+     * Optional lower bound (e.g., 0.0 for velocity, or nullopt for
+     * quantities that can go negative).
+     */
     std::optional<double> lowerBound;
 
-    /// How limits are interpreted for this quantity.
+    /**How limits are interpreted for this quantity. */
     LimitType limitType = LimitType::None;
 
-    /// Uniform limit value (used when limitType is UpperUniform or
-    /// SymmetricUniform). Ignored for None and UpperPerSample.
+    /**
+     * Uniform limit value (used when limitType is UpperUniform or
+     * SymmetricUniform). Ignored for None and UpperPerSample.
+     */
     double uniformLimit = std::numeric_limits<double>::infinity();
 };
 
-/// Generic ReNURBS configuration.
+/**Generic ReNURBS configuration. */
 struct GenericReNURBSConfig {
-    /// Master switch.
+    /**Master switch. */
     bool enabled = false;
 
-    /// Per-quantity configuration. The order defines the quantity index
-    /// in GenericSample::quantities and GenericSegmentProfile::quantities.
+    /**
+     * Per-quantity configuration. The order defines the quantity index
+     * in GenericSample::quantities and GenericSegmentProfile::quantities.
+     */
     std::vector<QuantitySpec> quantities;
 
-    /// Adaptive refinement cap: max control points per segment per quantity.
+    /**Adaptive refinement cap: max control points per segment per quantity. */
     std::size_t maxControlPointsPerSegment = 64;
 
-    /// Refinement grid multiplier (test grid = multiplier × samples).
+    /**Refinement grid multiplier (test grid = multiplier × samples). */
     std::size_t refinementGridMultiplier = 10;
 
-    /// Run the certifier after building.
+    /**Run the certifier after building. */
     bool certify = true;
 
-    /// Lipschitz certificate width goal.
+    /**Lipschitz certificate width goal. */
     double certificationEpsilon = 1e-5;
 
-    /// If true, throw on certification failure; if false, return the
-    /// profile with the certificate attached (for debugging).
+    /**
+     * If true, throw on certification failure; if false, return the
+     * profile with the certificate attached (for debugging).
+     */
     bool certifyThrowOnFailure = true;
 };
 
@@ -166,61 +187,67 @@ struct GenericReNURBSConfig {
 // Generic Segment / Profile Representation
 // ===========================================================================
 
-/// Segment boundary info (decoupled from PathAdapter).
+/**Segment boundary info (decoupled from PathAdapter). */
 struct SegmentInfo {
-    /// Parameter range [paramStart, paramEnd] covered by this segment.
+    /**Parameter range [paramStart, paramEnd] covered by this segment. */
     double paramStart = 0.0;
     double paramEnd = 0.0;
 
-    /// Source reference (G-code traceability, or empty).
+    /**Source reference (G-code traceability, or empty). */
     MotionPlanner::SourceReference sourceRef;
 };
 
-/// NURBS curve result for one quantity in one segment (reuses the
-/// existing ReNURBSQuantityCurves struct since it's already generic
-/// in its fields — only the naming is velocity-specific, but the
-/// data is just "a NURBS curve + fit metadata").
+/**
+ * NURBS curve result for one quantity in one segment (reuses the
+ * existing ReNURBSQuantityCurves struct since it's already generic
+ * in its fields — only the naming is velocity-specific, but the
+ * data is just "a NURBS curve + fit metadata").
+ */
 using GenericQuantityCurve = ReNURBSQuantityCurves;
 
-/// All quantity curves for one segment.
+/**All quantity curves for one segment. */
 struct GenericSegmentProfile {
-    /// Segment index (matches SegmentInfo order).
+    /**Segment index (matches SegmentInfo order). */
     std::size_t segmentIndex = 0;
 
-    /// Parameter range [paramStart, paramEnd].
+    /**Parameter range [paramStart, paramEnd]. */
     double paramStart = 0.0;
     double paramEnd = 0.0;
 
-    /// Source reference.
+    /**Source reference. */
     MotionPlanner::SourceReference sourceRef;
 
-    /// Per-quantity NURBS curves. Index matches QuantitySpec order.
+    /**Per-quantity NURBS curves. Index matches QuantitySpec order. */
     std::vector<GenericQuantityCurve> quantities;
 
-    /// Per-quantity boundary continuity (between this segment and the
-    /// next). Index matches QuantitySpec order.
+    /**
+     * Per-quantity boundary continuity (between this segment and the
+     * next). Index matches QuantitySpec order.
+     */
     std::vector<ContinuityClass> boundaryContinuity;
 };
 
-/// A generic constraint violation (reuses SegmentViolation but with
-/// a quantity index instead of a fixed enum).
+/**
+ * A generic constraint violation (reuses SegmentViolation but with
+ * a quantity index instead of a fixed enum).
+ */
 struct GenericViolation {
     std::size_t segmentIndex = 0;
-    std::size_t quantityIndex = 0;  ///< Index into QuantitySpec vector
-    std::string quantityName;       ///< Human-readable name
-    double parameter = 0.0;         ///< Where the violation was detected
-    double value = 0.0;             ///< The offending NURBS value
-    double limit = 0.0;             ///< The limit at that parameter
-    double overshoot = 0.0;         ///< value − limit
+    std::size_t quantityIndex = 0; /**< Index into QuantitySpec vector */
+    std::string quantityName; /**< Human-readable name */
+    double parameter = 0.0; /**< Where the violation was detected */
+    double value = 0.0; /**< The offending NURBS value */
+    double limit = 0.0; /**< The limit at that parameter */
+    double overshoot = 0.0; /**< value − limit */
 };
 
-/// Generic continuity report for one segment boundary.
+/**Generic continuity report for one segment boundary. */
 struct GenericContinuityReport {
     std::size_t segmentIndex = 0;
-    std::vector<ContinuityClass> perQuantity;  ///< Index matches QuantitySpec
+    std::vector<ContinuityClass> perQuantity; /**< Index matches QuantitySpec */
 };
 
-/// Certificate produced by the generic certifier.
+/**Certificate produced by the generic certifier. */
 struct GenericCertificate {
     bool compliant = true;
     std::vector<GenericViolation> violations;
@@ -229,24 +256,24 @@ struct GenericCertificate {
     std::vector<GenericContinuityReport> continuity;
 };
 
-/// The complete generic ReNURBS profile.
+/**The complete generic ReNURBS profile. */
 struct GenericReNURBSProfile {
-    /// Per-segment curves.
+    /**Per-segment curves. */
     std::vector<GenericSegmentProfile> perSegment;
 
-    /// Optional certificate.
+    /**Optional certificate. */
     std::optional<GenericCertificate> certificate;
 
-    /// Quantity names (mirrors QuantitySpec::name for convenience).
+    /**Quantity names (mirrors QuantitySpec::name for convenience). */
     std::vector<std::string> quantityNames;
 
-    /// True if the profile is empty.
+    /**True if the profile is empty. */
     bool empty() const noexcept { return perSegment.empty(); }
 
-    /// Number of segments.
+    /**Number of segments. */
     std::size_t numSegments() const noexcept { return perSegment.size(); }
 
-    /// Number of quantities.
+    /**Number of quantities. */
     std::size_t numQuantities() const noexcept { return quantityNames.size(); }
 };
 
@@ -254,19 +281,22 @@ struct GenericReNURBSProfile {
 // Convenience: convert between generic and velocity-specific structures
 // ===========================================================================
 
-/// Convert a GenericReNURBSProfile to a velocity-specific ReNURBSProfile.
-///
-/// This is used by the velocity adapter to maintain backward compatibility.
-/// The generic profile must have exactly 4 quantities named (in order)
-/// "velocity", "acceleration", "jerk", "time".
-///
+/**
+ * Convert a GenericReNURBSProfile to a velocity-specific ReNURBSProfile.
+ *
+ * This is used by the velocity adapter to maintain backward compatibility.
+ * The generic profile must have exactly 4 quantities named (in order)
+ * "velocity", "acceleration", "jerk", "time".
+ */
 ReNURBSProfile toVelocityProfile(const GenericReNURBSProfile& generic);
 
-/// Convert a velocity-specific ReNURBSProfile to a generic one.
+/**Convert a velocity-specific ReNURBSProfile to a generic one. */
 GenericReNURBSProfile fromVelocityProfile(const ReNURBSProfile& velocity);
 
-/// Convert a GenericCertificate to a velocity-specific
-/// ProfileConstraintCertificate.
+/**
+ * Convert a GenericCertificate to a velocity-specific
+ * ProfileConstraintCertificate.
+ */
 ProfileConstraintCertificate toVelocityCertificate(
     const GenericCertificate& generic);
 

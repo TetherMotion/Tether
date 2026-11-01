@@ -32,28 +32,32 @@ class WindowStats {
     static_assert(N > 0, "WindowStats needs a positive window");
 
 public:
-    /// @brief Append a sample, evicting the oldest once full.
-    /// @param v  sample value (non-finite values are stored as-is)
+    /**
+     * @brief Append a sample, evicting the oldest once full.
+     * @param v  sample value (non-finite values are stored as-is)
+     */
     void add(double v) {
         buf_[head_] = v;
         head_ = (head_ + 1) % N;
         if (size_ < N) ++size_;
     }
 
-    /// Number of valid samples (≤ N).
+    /**Number of valid samples (≤ N). */
     size_t size() const { return size_; }
-    /// Window capacity.
+    /**Window capacity. */
     static constexpr size_t capacity() { return N; }
     bool empty() const { return size_ == 0; }
 
-    /// @brief Most recent sample.
-    /// @throw std::out_of_range on an empty window
+    /**
+     * @brief Most recent sample.
+     * @throw std::out_of_range on an empty window
+     */
     double last() const {
         if (size_ == 0) throw std::out_of_range("WindowStats: empty");
         return buf_[(head_ + N - 1) % N];
     }
 
-    /// Arithmetic mean over the window; 0 on empty.
+    /**Arithmetic mean over the window; 0 on empty. */
     double mean() const {
         if (size_ == 0) return 0.0;
         double sum = 0.0;
@@ -61,13 +65,13 @@ public:
         return sum / static_cast<double>(size_);
     }
 
-    /// Largest sample in the window; 0 on empty.
+    /**Largest sample in the window; 0 on empty. */
     double max() const {
         if (size_ == 0) return 0.0;
         return *std::max_element(buf_.begin(), buf_.begin() + size_);
     }
 
-    /// Smallest sample in the window; 0 on empty.
+    /**Smallest sample in the window; 0 on empty. */
     double min() const {
         if (size_ == 0) return 0.0;
         return *std::min_element(buf_.begin(), buf_.begin() + size_);
@@ -90,7 +94,7 @@ public:
         return sorted[rank];
     }
 
-    /// Drop all samples.
+    /**Drop all samples. */
     void reset() {
         size_ = 0;
         head_ = 0;

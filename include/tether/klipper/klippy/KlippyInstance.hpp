@@ -72,10 +72,12 @@
 namespace tether::klipper::klippy {
 
 
-/// @brief Config-based temperature sensor stub.
-/// Reports a configurable temperature until a real hardware backend is set.
-/// Used when `[temperature_sensor &lt;name&gt;]` is parsed from config but no
-/// hardware sensor is registered via registerTemperatureSensor().
+/**
+ * @brief Config-based temperature sensor stub.
+ * Reports a configurable temperature until a real hardware backend is set.
+ * Used when `[temperature_sensor &lt;name&gt;]` is parsed from config but no
+ * hardware sensor is registered via registerTemperatureSensor().
+ */
 class ConfigTemperatureSensor : public objects::TemperatureSensor {
 public:
     ConfigTemperatureSensor(const std::string& name,
@@ -102,49 +104,51 @@ private:
 };
 
 
-/// @brief Integrated Klippy instance.
-///
-/// Wires together the UDS server, G-code executor, virtual SD card,
-/// and all printer objects. Provides a single entry point for running
-/// a complete Klipper-compatible host.
-///
-/// @section threading Threading model
-///
-/// KlippyInstance is **not internally synchronized**. The UDS server
-/// runs its event loop on a dedicated thread (`eventThread_`) and calls
-/// back into KlippyInstance via endpoint handlers. The UDS server
-/// protects its own state with `KlippyServer::mutex_` (a
-/// `std::recursive_mutex`), but KlippyInstance's state (settings,
-/// motion state, heater/fan backends, etc.) is **not** protected by
-/// that mutex.
-///
-/// **Recommended usage:**
-/// - **Single-threaded mode**: Call `start()` then `tick()` from the
-///   same thread. The UDS event loop runs on its own thread but only
-///   touches UDS-server-internal state (protected by the server's
-///   mutex). KlippyInstance state is only modified from the `tick()`
-///   thread. This is the safest mode.
-/// - **Multi-threaded mode**: If you must call KlippyInstance methods
-///   from multiple threads (e.g., the UDS event thread + a main
-///   thread), use `mutex()` to synchronize all external access:
-///   ```cpp
-///   {
-///       std::lock_guard<std::mutex> lock(instance.mutex());
-///       instance.executeGcode("G28");
-///   }
-///   ```
-///   The UDS server's event loop does **not** acquire this mutex, so
-///   endpoint handlers that modify KlippyInstance state are only safe
-///   if no other thread is concurrently modifying the same state.
-///
-/// Inherits privately from KlippyState which groups all extended command
-/// state (servo positions, bed mesh profiles, LED colors, idle timeout,
-/// delayed G-codes, etc.) into a single struct, reducing the god-object
-/// problem. The .ipp callback files reference these fields by name.
-///
-/// Also inherits privately from PrinterObjectRegistry which groups all
-/// printer object shared_ptrs (toolhead, extruder, heater_bed, etc.)
-/// into a separate struct, further reducing the god-object problem.
+/**
+ * @brief Integrated Klippy instance.
+ *
+ * Wires together the UDS server, G-code executor, virtual SD card,
+ * and all printer objects. Provides a single entry point for running
+ * a complete Klipper-compatible host.
+ *
+ * @section threading Threading model
+ *
+ * KlippyInstance is **not internally synchronized**. The UDS server
+ * runs its event loop on a dedicated thread (`eventThread_`) and calls
+ * back into KlippyInstance via endpoint handlers. The UDS server
+ * protects its own state with `KlippyServer::mutex_` (a
+ * `std::recursive_mutex`), but KlippyInstance's state (settings,
+ * motion state, heater/fan backends, etc.) is **not** protected by
+ * that mutex.
+ *
+ * **Recommended usage:**
+ * - **Single-threaded mode**: Call `start()` then `tick()` from the
+ *   same thread. The UDS event loop runs on its own thread but only
+ *   touches UDS-server-internal state (protected by the server's
+ *   mutex). KlippyInstance state is only modified from the `tick()`
+ *   thread. This is the safest mode.
+ * - **Multi-threaded mode**: If you must call KlippyInstance methods
+ *   from multiple threads (e.g., the UDS event thread + a main
+ *   thread), use `mutex()` to synchronize all external access:
+ *   ```cpp
+ *   {
+ *       std::lock_guard<std::mutex> lock(instance.mutex());
+ *       instance.executeGcode("G28");
+ *   }
+ *   ```
+ *   The UDS server's event loop does **not** acquire this mutex, so
+ *   endpoint handlers that modify KlippyInstance state are only safe
+ *   if no other thread is concurrently modifying the same state.
+ *
+ * Inherits privately from KlippyState which groups all extended command
+ * state (servo positions, bed mesh profiles, LED colors, idle timeout,
+ * delayed G-codes, etc.) into a single struct, reducing the god-object
+ * problem. The .ipp callback files reference these fields by name.
+ *
+ * Also inherits privately from PrinterObjectRegistry which groups all
+ * printer object shared_ptrs (toolhead, extruder, heater_bed, etc.)
+ * into a separate struct, further reducing the god-object problem.
+ */
 class KlippyInstance : private KlippyState, private PrinterObjectRegistry {
 public:
     explicit KlippyInstance(KlippyInstanceConfig cfg = {})
@@ -178,8 +182,10 @@ public:
     // Accessors
     // ------------------------------------------------------------------
 
-    /// @return Reference to the instance mutex. Use for multi-threaded
-    ///         access synchronization (see threading model above).
+    /**
+     * @return Reference to the instance mutex. Use for multi-threaded
+     *         access synchronization (see threading model above).
+     */
     std::recursive_mutex& mutex() { return instanceMutex_; }
 
     KlippyServer& server() { return server_; }
@@ -219,11 +225,13 @@ public:
     std::shared_ptr<IdleTimeoutObject>& idleTimeoutObject() { return idleTimeoutObj_; }
     std::shared_ptr<StepperEnableObject>& stepperEnableObject() { return stepperEnableObj_; }
 
-    /// @brief Set the initial toolhead position (machine coordinates).
-    /// Updates motionState_, toolhead, motion_report, and gcode_move objects.
-    /// Use this to place the toolhead at a specific physical position before
-    /// homing (G28 will move from this position to the endstop).
-    /// @param pos Machine-space position (X, Y, Z, E).
+    /**
+     * @brief Set the initial toolhead position (machine coordinates).
+     * Updates motionState_, toolhead, motion_report, and gcode_move objects.
+     * Use this to place the toolhead at a specific physical position before
+     * homing (G28 will move from this position to the endstop).
+     * @param pos Machine-space position (X, Y, Z, E).
+     */
     void setToolheadPosition(const std::array<double, 4>& pos) {
         motionState_.position = pos;
         if (toolheadObj_) toolheadObj_->setPosition(pos);
@@ -232,15 +240,19 @@ public:
     }
 
     // Heater/Fan/Probe backends
-    /// @brief Set the heater for extruder index 0 (single-extruder convenience).
-    /// @param h Heater object backing the extruder.
+    /**
+     * @brief Set the heater for extruder index 0 (single-extruder convenience).
+     * @param h Heater object backing the extruder.
+     */
     void setExtruderHeater(std::shared_ptr<objects::Heater> h) {
         setExtruderHeater(0, h);
     }
-    /// @brief Set the heater for a specific extruder index (multi-extruder).
-    /// Updates the active extruder object if this index is the active one.
-    /// @param index Extruder index (0-based).
-    /// @param h Heater object backing that extruder.
+    /**
+     * @brief Set the heater for a specific extruder index (multi-extruder).
+     * Updates the active extruder object if this index is the active one.
+     * @param index Extruder index (0-based).
+     * @param h Heater object backing that extruder.
+     */
     void setExtruderHeater(int index, std::shared_ptr<objects::Heater> h) {
         extruderHeaters_[index] = h;
         if (index == activeExtruder_) {
@@ -248,19 +260,23 @@ public:
             refreshExtruderObject();
         }
     }
-    /// @brief Select the active extruder by index (T-command).
-    /// Updates extruderHeater_ and extruderObj_ to point at this extruder.
-    /// @param index Extruder to activate (0-based).
+    /**
+     * @brief Select the active extruder by index (T-command).
+     * Updates extruderHeater_ and extruderObj_ to point at this extruder.
+     * @param index Extruder to activate (0-based).
+     */
     void setActiveExtruder(int index) {
         activeExtruder_ = index;
         auto it = extruderHeaters_.find(index);
         extruderHeater_ = (it != extruderHeaters_.end()) ? it->second : nullptr;
         refreshExtruderObject();
     }
-    /// @return The active extruder index.
+    /**@return The active extruder index. */
     int activeExtruder() const { return activeExtruder_; }
-    /// @return The heater for a given extruder index, or nullptr.
-    /// @param index Extruder index (0-based).
+    /**
+     * @return The heater for a given extruder index, or nullptr.
+     * @param index Extruder index (0-based).
+     */
     std::shared_ptr<objects::Heater> extruderHeater(int index) const {
         auto it = extruderHeaters_.find(index);
         return (it != extruderHeaters_.end()) ? it->second : nullptr;
@@ -277,49 +293,61 @@ public:
         server_.registerObject(probeObj_);
     }
 
-    /// @brief Register an ADC read callback for a given pin name.
-    /// Used by auto-wired thermistor sensors to read real ADC values.
-    /// @param pin Pin name (e.g. "PA4", matching sensor_pin in config).
-    /// @param func Callback returning the current ADC value (0..adcMax).
+    /**
+     * @brief Register an ADC read callback for a given pin name.
+     * Used by auto-wired thermistor sensors to read real ADC values.
+     * @param pin Pin name (e.g. "PA4", matching sensor_pin in config).
+     * @param func Callback returning the current ADC value (0..adcMax).
+     */
     void registerAdcCallback(const std::string& pin, std::function<double()> func) {
         adcCallbacks_[pin] = std::move(func);
     }
 
-    /// @brief Get the ADC callback for a pin, or nullptr if not registered.
-    /// @param pin ADC pin name as used in the config.
-    /// @return Registered callback, or an empty std::function.
+    /**
+     * @brief Get the ADC callback for a pin, or nullptr if not registered.
+     * @param pin ADC pin name as used in the config.
+     * @return Registered callback, or an empty std::function.
+     */
     std::function<double()> adcCallback(const std::string& pin) const {
         auto it = adcCallbacks_.find(pin);
         return (it != adcCallbacks_.end()) ? it->second : nullptr;
     }
 
-    /// @brief Register an SPI transfer callback for a given SPI bus name.
-    /// Used by auto-wired thermocouple and ADXL345 sensors.
-    /// @param bus SPI bus name (e.g. "spi0", matching spi_bus in config).
-    /// @param func Callback performing a full-duplex SPI transfer.
+    /**
+     * @brief Register an SPI transfer callback for a given SPI bus name.
+     * Used by auto-wired thermocouple and ADXL345 sensors.
+     * @param bus SPI bus name (e.g. "spi0", matching spi_bus in config).
+     * @param func Callback performing a full-duplex SPI transfer.
+     */
     void registerSpiCallback(const std::string& bus,
                              std::function<std::vector<uint8_t>(std::span<const uint8_t>)> func) {
         spiCallbacks_[bus] = std::move(func);
     }
 
-    /// @brief Get the SPI callback for a bus, or nullptr if not registered.
-    /// @param bus SPI bus name.
-    /// @return Registered callback, or an empty std::function.
+    /**
+     * @brief Get the SPI callback for a bus, or nullptr if not registered.
+     * @param bus SPI bus name.
+     * @return Registered callback, or an empty std::function.
+     */
     std::function<std::vector<uint8_t>(std::span<const uint8_t>)>
     spiCallback(const std::string& bus) const {
         auto it = spiCallbacks_.find(bus);
         return (it != spiCallbacks_.end()) ? it->second : nullptr;
     }
 
-    /// @brief Register an endstop for an axis (for M119/query_endstops).
-    /// @param axis Axis name (e.g. "x", "y", "z").
-    /// @param e Endstop object backing that axis.
+    /**
+     * @brief Register an endstop for an axis (for M119/query_endstops).
+     * @param axis Axis name (e.g. "x", "y", "z").
+     * @param e Endstop object backing that axis.
+     */
     void setEndstop(const std::string& axis, std::shared_ptr<objects::Endstop> e) {
         endstops_[axis] = e;
     }
 
-    /// @brief Set the ADXL345 accelerometer (for input shaper calibration).
-    /// @param a Accelerometer backend to expose as the "adxl345" object.
+    /**
+     * @brief Set the ADXL345 accelerometer (for input shaper calibration).
+     * @param a Accelerometer backend to expose as the "adxl345" object.
+     */
     void setAdxl345(std::shared_ptr<objects::Adxl345> a) {
         adxl345_ = a;
         adxl345Obj_ = std::make_shared<Adxl345Object>(a);
@@ -327,94 +355,118 @@ public:
         server_.registerObject(adxl345Obj_);
     }
 
-    /// @brief Set the PID autotuning method to use for M303/PID_CALIBRATE.
-    /// Default is RelayFeedback (Åström-Hägglund).  All Tether autotuning
-    /// methods are supported (see AutotuneMethod enum).
-    /// @param method Autotuning method used by M303/PID_CALIBRATE.
+    /**
+     * @brief Set the PID autotuning method to use for M303/PID_CALIBRATE.
+     * Default is RelayFeedback (Åström-Hägglund).  All Tether autotuning
+     * methods are supported (see AutotuneMethod enum).
+     * @param method Autotuning method used by M303/PID_CALIBRATE.
+     */
     void setPIDAutotuneMethod(AutotuneMethod method) {
         pidAutotuneMethod_ = method;
     }
 
-    /// @brief Get the currently configured PID autotuning method.
-    /// @return Autotuning method used by M303/PID_CALIBRATE.
+    /**
+     * @brief Get the currently configured PID autotuning method.
+     * @return Autotuning method used by M303/PID_CALIBRATE.
+     */
     AutotuneMethod pidAutotuneMethod() const { return pidAutotuneMethod_; }
 
-    /// @brief Set the I2C bus (for M260/M261 I2C commands).
-    /// @param i2c I2C backend to expose as the "i2c" object.
+    /**
+     * @brief Set the I2C bus (for M260/M261 I2C commands).
+     * @param i2c I2C backend to expose as the "i2c" object.
+     */
     void setI2cBus(std::shared_ptr<objects::I2c> i2c) {
         i2cBus_ = i2c;
         server_.registerObject(std::make_shared<I2cObject>(i2c));
     }
 
-    /// @brief Register a temperature sensor (e.g. "temperature_sensor chamber").
-    /// @param name Sensor object name as it appears in the config.
-    /// @param sensor Temperature sensor backend to expose.
+    /**
+     * @brief Register a temperature sensor (e.g. "temperature_sensor chamber").
+     * @param name Sensor object name as it appears in the config.
+     * @param sensor Temperature sensor backend to expose.
+     */
     void registerTemperatureSensor(const std::string& name,
                                     std::shared_ptr<objects::TemperatureSensor> sensor) {
         auto obj = std::make_shared<TemperatureSensorObject>(name, sensor);
         server_.registerObject(obj);
     }
 
-    /// @brief Register a filament switch sensor.
-    /// @param name Sensor object name as it appears in the config.
-    /// @param sensor Filament sensor backend to expose.
+    /**
+     * @brief Register a filament switch sensor.
+     * @param name Sensor object name as it appears in the config.
+     * @param sensor Filament sensor backend to expose.
+     */
     void registerFilamentSwitchSensor(const std::string& name,
                                        std::shared_ptr<objects::FilamentSensor> sensor) {
         auto obj = std::make_shared<FilamentSwitchSensorObject>(name, sensor);
         server_.registerObject(obj);
     }
 
-    /// @brief Register a digital output pin.
-    /// @param name Pin object name as it appears in the config.
-    /// @param dev Digital-output backend to expose.
+    /**
+     * @brief Register a digital output pin.
+     * @param name Pin object name as it appears in the config.
+     * @param dev Digital-output backend to expose.
+     */
     void registerDigitalOut(const std::string& name,
                              std::shared_ptr<objects::DigitalOut> dev) {
         server_.registerObject(std::make_shared<DigitalOutObject>(dev, name));
     }
 
-    /// @brief Register a PWM output pin.
-    /// @param name Pin object name as it appears in the config.
-    /// @param dev PWM-output backend to expose.
+    /**
+     * @brief Register a PWM output pin.
+     * @param name Pin object name as it appears in the config.
+     * @param dev PWM-output backend to expose.
+     */
     void registerPWMOut(const std::string& name,
                          std::shared_ptr<objects::PWMOut> dev) {
         server_.registerObject(std::make_shared<PWMOutObject>(dev, name));
     }
 
-    /// @brief Register an analog input pin.
-    /// @param name Pin object name as it appears in the config.
-    /// @param dev Analog-input backend to expose.
+    /**
+     * @brief Register an analog input pin.
+     * @param name Pin object name as it appears in the config.
+     * @param dev Analog-input backend to expose.
+     */
     void registerAnalogIn(const std::string& name,
                            std::shared_ptr<objects::AnalogIn> dev) {
         server_.registerObject(std::make_shared<AnalogInObject>(dev, name));
     }
 
-    /// @brief Register a Neopixel LED strip.
-    /// @param name Strip object name as it appears in the config.
-    /// @param dev Neopixel backend to expose.
+    /**
+     * @brief Register a Neopixel LED strip.
+     * @param name Strip object name as it appears in the config.
+     * @param dev Neopixel backend to expose.
+     */
     void registerNeopixel(const std::string& name,
                            std::shared_ptr<objects::Neopixel> dev) {
         server_.registerObject(std::make_shared<NeopixelObject>(dev, name));
     }
 
-    /// @brief Register a pulse counter.
-    /// @param name Counter object name as it appears in the config.
-    /// @param dev Pulse-counter backend to expose.
+    /**
+     * @brief Register a pulse counter.
+     * @param name Counter object name as it appears in the config.
+     * @param dev Pulse-counter backend to expose.
+     */
     void registerPulseCounter(const std::string& name,
                                std::shared_ptr<objects::PulseCounter> dev) {
         server_.registerObject(std::make_shared<PulseCounterObject>(dev, name));
     }
 
-    /// @brief Register a Hall filament sensor.
-    /// @param name Sensor object name as it appears in the config.
-    /// @param dev Hall-sensor backend to expose.
+    /**
+     * @brief Register a Hall filament sensor.
+     * @param name Sensor object name as it appears in the config.
+     * @param dev Hall-sensor backend to expose.
+     */
     void registerHallFilamentSensor(const std::string& name,
                                      std::shared_ptr<objects::HallFilamentSensor> dev) {
         server_.registerObject(std::make_shared<HallFilamentSensorObject>(dev, name));
     }
 
-    /// @brief Register a TMC UART driver.
-    /// @param name Driver object name as it appears in the config.
-    /// @param dev TMC UART backend to expose.
+    /**
+     * @brief Register a TMC UART driver.
+     * @param name Driver object name as it appears in the config.
+     * @param dev TMC UART backend to expose.
+     */
     void registerTmcUart(const std::string& name,
                           std::shared_ptr<objects::TmcUart> dev) {
         server_.registerObject(std::make_shared<TmcUartObject>(dev, name));
@@ -432,74 +484,86 @@ public:
         udsTransport_.stop();
     }
 
-    /// @return The motion backend's KlippyHost, or nullptr if not configured.
+    /**@return The motion backend's KlippyHost, or nullptr if not configured. */
     klippy::KlippyHost* motionHost() { return motionHost_.get(); }
 
-    /// @return The motion backend's device interface, or nullptr if not configured
-    ///         or no in-process device was created.
+    /**
+     * @return The motion backend's device interface, or nullptr if not configured
+     *         or no in-process device was created.
+     */
     device::IKlipperDevice* motionDevice() { return motionDevice_.get(); }
 
-    /// @return The motion backend's MotionDispatcher, or nullptr if not configured.
+    /**@return The motion backend's MotionDispatcher, or nullptr if not configured. */
     motion::MotionDispatcher* motionDispatcher() { return motionDispatcher_.get(); }
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-    /// @return The shared extrusion-flow tracker (may be null if no motion
-    ///         backend is configured). Updated by the dispatcher on each move.
+    /**
+     * @return The shared extrusion-flow tracker (may be null if no motion
+     *         backend is configured). Updated by the dispatcher on each move.
+     */
     std::shared_ptr<motion::ExtrusionFlowTracker> extrusionFlowTracker() {
         return extrusionFlowTracker_;
     }
 
-    /// @return The flow-adaptive heater controller, or nullptr if not enabled.
+    /**@return The flow-adaptive heater controller, or nullptr if not enabled. */
     std::shared_ptr<tether::control::extrusion::FlowAdaptiveHeaterController>
     flowAdaptiveHeater() { return flowAdaptiveHeater_; }
 
-    /// @brief Apply the current flow-adaptive heater settings from settings_.
-    /// Builds the controller if enabled and wires it to the extruder heater
-    /// and the extrusion flow tracker. Called from applySettings() and from
-    /// the SET_HEATER_FLOW_COMPENSATION G-code command.
+    /**
+     * @brief Apply the current flow-adaptive heater settings from settings_.
+     * Builds the controller if enabled and wires it to the extruder heater
+     * and the extrusion flow tracker. Called from applySettings() and from
+     * the SET_HEATER_FLOW_COMPENSATION G-code command.
+     */
     void applyFlowAdaptiveHeaterSettings() { applyFlowAdaptiveHeaterSettingsImpl(); }
 
-    /// @return The active deconvolution controller type name, or "none".
+    /**@return The active deconvolution controller type name, or "none". */
     const std::string& deconvolutionControllerType() const {
         return settings_.deconvolutionController;
     }
 
-    /// @return True if the deconvolution controller is enabled at runtime.
+    /**@return True if the deconvolution controller is enabled at runtime. */
     bool deconvolutionEnabled() const { return settings_.deconvolutionEnabled; }
 
-    /// @return The LTI frequency-domain deconvolver, or nullptr if not active.
+    /**@return The LTI frequency-domain deconvolver, or nullptr if not active. */
     std::shared_ptr<tether::control::extrusion::LTIFrequencyDomainDeconvolver>
     ltiDeconvolver() { return ltiDeconvolver_; }
 
-    /// @return The overlap-add LPV deconvolver, or nullptr if not active.
+    /**@return The overlap-add LPV deconvolver, or nullptr if not active. */
     std::shared_ptr<tether::control::extrusion::OverlapAddLPVDeconvolver>
     overlapAddDeconvolver() { return overlapAddDeconvolver_; }
 
-    /// @return The ARX LPV inverse filter, or nullptr if not active.
+    /**@return The ARX LPV inverse filter, or nullptr if not active. */
     std::shared_ptr<tether::control::extrusion::ARXLPVInverseFilter>
     arxInverseFilter() { return arxInverseFilter_; }
 
-    /// @return The state-space LPV input estimator, or nullptr if not active.
+    /**@return The state-space LPV input estimator, or nullptr if not active. */
     std::shared_ptr<tether::control::extrusion::StateSpaceLPVInputEstimator>
     stateSpaceEstimator() { return stateSpaceEstimator_; }
 
-    /// @brief Apply the current deconvolution controller settings from
-    /// settings_. Builds the selected controller if enabled. Called from
-    /// applySettings() and from the SET_DECONVOLUTION_CONTROLLER G-code
-    /// command.
+    /**
+     * @brief Apply the current deconvolution controller settings from
+     * settings_. Builds the selected controller if enabled. Called from
+     * applySettings() and from the SET_DECONVOLUTION_CONTROLLER G-code
+     * command.
+     */
     void applyDeconvolutionSettings() { applyDeconvolutionSettingsImpl(); }
 #endif
 
-    /// @return True if the motion backend is wired and the host is ready
-    ///         (connected + dict downloaded + clock synced).
+    /**
+     * @return True if the motion backend is wired and the host is ready
+     *         (connected + dict downloaded + clock synced).
+     */
     bool motionBackendReady() const {
         return motionHost_ && motionHost_->isReady();
     }
 
-    /// @brief Pump the motion backend: pump the device (if in-process) and
-    ///        the host so protocol messages flow. Call this periodically
-    ///        (e.g. from tick()) when using the motion backend.
-    ///        Also ticks the StepScheduler so queued steps can fire.
+    /**
+     * @brief Pump the motion backend: pump the device (if in-process) and
+     *        the host so protocol messages flow. Call this periodically
+     *        (e.g. from tick()) when using the motion backend.
+     *        Also ticks the StepScheduler so queued steps can fire.
+     */
     void pumpMotionBackend() {
         if (motionDevice_) {
             motionDevice_->pump();
@@ -508,9 +572,11 @@ public:
         if (motionHost_) motionHost_->pump();
     }
 
-    /// @brief Update motionState_/toolhead from the virtual stepper positions.
-    /// Converts step counts back to machine coordinates using the configured
-    /// steps-per-mm and the active kinematics transform.
+    /**
+     * @brief Update motionState_/toolhead from the virtual stepper positions.
+     * Converts step counts back to machine coordinates using the configured
+     * steps-per-mm and the active kinematics transform.
+     */
     void updateToolheadFromSteppers() {
         if (!motionDevice_ || !motionBackendCfg_) return;
         const auto& spm = motionBackendCfg_->stepsPerMm;
@@ -546,8 +612,10 @@ public:
         }
     }
 
-    /// @brief Set virtual stepper counters and motion-dispatcher position
-    ///        to the current logical position (used after homing/G92).
+    /**
+     * @brief Set virtual stepper counters and motion-dispatcher position
+     *        to the current logical position (used after homing/G92).
+     */
     void syncSteppersAndDispatcher() {
         if (!motionDevice_ || !motionBackendCfg_) return;
         const auto& spm = motionBackendCfg_->stepsPerMm;
@@ -569,16 +637,20 @@ public:
         lastStepperPosition_ = motionState_.position;
     }
 
-    /// @brief Execute a G-code script.
-    /// @param script G-code text (may contain several lines).
-    /// @return true when every block executed without error.
+    /**
+     * @brief Execute a G-code script.
+     * @param script G-code text (may contain several lines).
+     * @return true when every block executed without error.
+     */
     bool executeGcode(const std::string& script) {
         std::lock_guard<std::recursive_mutex> lock(instanceMutex_);
         return gcode_.execute(script);
     }
 
-    /// @brief Register a G-code macro.
-    /// @param macro Macro definition (name, parameters, body).
+    /**
+     * @brief Register a G-code macro.
+     * @param macro Macro definition (name, parameters, body).
+     */
     void registerMacro(const GcodeMacro& macro) {
         macros_->registerMacro(macro);
         // Register a printer object for the macro
@@ -589,10 +661,12 @@ public:
     // === Config processing (extracted to .ipp) ===
     #include "tether/klipper/klippy/KlippyInstanceConfigProcessing.ipp"
 
-    /// @brief Set up the motion backend: create KlippyHost (+ optional
-    /// KlipperDevice), connect, download dict, sync clock, create
-    /// MotionDispatcher, and override the G-code move callback to route
-    /// moves through the real Klipper wire protocol.
+    /**
+     * @brief Set up the motion backend: create KlippyHost (+ optional
+     * KlipperDevice), connect, download dict, sync clock, create
+     * MotionDispatcher, and override the G-code move callback to route
+     * moves through the real Klipper wire protocol.
+     */
     void setupMotionBackend() {
         auto& mb = *config_.motionBackend;
         motionBackendCfg_ = config_.motionBackend;
@@ -745,10 +819,12 @@ public:
     }
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-    /// @brief Apply the current flow-adaptive heater settings from settings_.
-    /// Builds the controller if enabled and wires it to the extruder heater
-    /// and the extrusion flow tracker. Called from applySettings() and from
-    /// the SET_HEATER_FLOW_COMPENSATION G-code command.
+    /**
+     * @brief Apply the current flow-adaptive heater settings from settings_.
+     * Builds the controller if enabled and wires it to the extruder heater
+     * and the extrusion flow tracker. Called from applySettings() and from
+     * the SET_HEATER_FLOW_COMPENSATION G-code command.
+     */
     void applyFlowAdaptiveHeaterSettingsImpl() {
         if (!settings_.heaterFlowPreEmphasis) {
             flowAdaptiveHeater_.reset();
@@ -790,10 +866,12 @@ public:
         }
     }
 
-    /// @brief Apply the current deconvolution controller settings from
-    /// settings_. Builds the selected controller if enabled, or tears down
-    /// all controllers if disabled. Called from applySettings() and from
-    /// the SET_DECONVOLUTION_CONTROLLER G-code command.
+    /**
+     * @brief Apply the current deconvolution controller settings from
+     * settings_. Builds the selected controller if enabled, or tears down
+     * all controllers if disabled. Called from applySettings() and from
+     * the SET_DECONVOLUTION_CONTROLLER G-code command.
+     */
     void applyDeconvolutionSettingsImpl() {
         // Tear down all controllers when disabled or set to "none".
         const auto& type = settings_.deconvolutionController;
@@ -870,14 +948,16 @@ public:
     }
 #endif
 
-    /// @brief Set a custom system stats provider (for testing).
-    /// Pass nullptr to restore the default Linux provider.
-    /// @param provider Stats source to use.
+    /**
+     * @brief Set a custom system stats provider (for testing).
+     * Pass nullptr to restore the default Linux provider.
+     * @param provider Stats source to use.
+     */
     void setSystemStatsProvider(std::shared_ptr<ISystemStatsProvider> provider) {
         systemStatsProvider_ = std::move(provider);
     }
 
-    /// @brief Update system statistics (call periodically).
+    /**@brief Update system statistics (call periodically). */
     void updateSystemStats() {
         if (!systemStatsObj_) return;
         if (!systemStatsProvider_) {
@@ -888,11 +968,13 @@ public:
         systemStatsObj_->setMemavail(static_cast<size_t>(snap.memAvailable * 1024.0));
     }
 
-    /// @brief Update MCU statistics (call periodically with real MCU data).
-    /// @param bytesRead Bytes received from the MCU since the last call.
-    /// @param bytesWrite Bytes sent to the MCU since the last call.
-    /// @param retransmits Retransmissions since the last call.
-    /// @param mcuAwake MCU busy time [s].
+    /**
+     * @brief Update MCU statistics (call periodically with real MCU data).
+     * @param bytesRead Bytes received from the MCU since the last call.
+     * @param bytesWrite Bytes sent to the MCU since the last call.
+     * @param retransmits Retransmissions since the last call.
+     * @param mcuAwake MCU busy time [s].
+     */
     void updateMcuStats(uint32_t bytesRead, uint32_t bytesWrite,
                         uint32_t retransmits, double mcuAwake) {
         if (mcuObj_) {
@@ -900,13 +982,17 @@ public:
         }
     }
 
-    /// @brief Set the simulation tick dt (seconds) used for homing steps.
-    /// @param dt Simulation step [s].
+    /**
+     * @brief Set the simulation tick dt (seconds) used for homing steps.
+     * @param dt Simulation step [s].
+     */
     void setSimTickDt(double dt) { simTickDt_ = dt; }
 
-    /// @brief Step all active homing axis simulators by simTickDt_.
-    /// Updates toolhead/motion positions in real-time. When all axes
-    /// complete, marks them as homed and clears the active homing state.
+    /**
+     * @brief Step all active homing axis simulators by simTickDt_.
+     * Updates toolhead/motion positions in real-time. When all axes
+     * complete, marks them as homed and clears the active homing state.
+     */
     void stepActiveHoming() {
         // Prevent an in-progress S-curve move from overriding homing positions
         // while axes are still seeking their endstops.
@@ -943,9 +1029,11 @@ public:
         }
     }
 
-    /// @brief Step the active S-curve linear move by simTickDt_.
-    /// Updates toolhead/motion positions in real-time so the simulated
-    /// printer reaches the target with a smooth S-curve instead of jumping.
+    /**
+     * @brief Step the active S-curve linear move by simTickDt_.
+     * Updates toolhead/motion positions in real-time so the simulated
+     * printer reaches the target with a smooth S-curve instead of jumping.
+     */
     void stepActiveMove() {
         if (!activeMove_) return;
 
@@ -963,9 +1051,11 @@ public:
         }
     }
 
-    /// @brief Start a new S-curve linear move to the given machine target.
-    /// @param target Machine-space target (X, Y, Z, E).
-    /// @param speed Requested feed rate [mm/s] (clamped to the max velocity).
+    /**
+     * @brief Start a new S-curve linear move to the given machine target.
+     * @param target Machine-space target (X, Y, Z, E).
+     * @param speed Requested feed rate [mm/s] (clamped to the max velocity).
+     */
     void startLinearMove(const std::array<double, 4>& target, double speed) {
         activeMove_ = std::make_unique<Simulation::LinearMoveSimulator>();
         double maxV = (settings_.maxVelocity > 0.0) ? settings_.maxVelocity : 300.0;
@@ -977,9 +1067,11 @@ public:
         noteActivity();
     }
 
-    /// @brief Process due delayed G-codes (call periodically).
-    /// Executes any delayed G-codes whose scheduled time has passed.
-    /// Also checks idle timeout and executes timeout G-code if expired.
+    /**
+     * @brief Process due delayed G-codes (call periodically).
+     * Executes any delayed G-codes whose scheduled time has passed.
+     * Also checks idle timeout and executes timeout G-code if expired.
+     */
     void tick() {
         std::lock_guard<std::recursive_mutex> lock(instanceMutex_);
         auto now = std::chrono::steady_clock::now();
@@ -1020,8 +1112,10 @@ public:
         checkIdleTimeout(now);
     }
 
-    /// @brief Check if idle timeout has expired and execute timeout G-code.
-    /// @param now Current steady-clock time.
+    /**
+     * @brief Check if idle timeout has expired and execute timeout G-code.
+     * @param now Current steady-clock time.
+     */
     void checkIdleTimeout(std::chrono::steady_clock::time_point now) {
         if (idleTimeout_ <= 0.0) return;
         if (settings_.idleTimeoutGcode.empty()) return;
@@ -1039,7 +1133,7 @@ public:
         }
     }
 
-    /// @brief Mark activity (resets idle timeout timer).
+    /**@brief Mark activity (resets idle timeout timer). */
     void noteActivity() {
         lastActivityTime_ = std::chrono::steady_clock::now();
         if (idleTimeoutState_ != "Printing") {
@@ -1050,23 +1144,29 @@ public:
         }
     }
 
-    /// @brief Set fan RPM from tachometer.
-    /// @param rpm Measured fan speed [RPM].
+    /**
+     * @brief Set fan RPM from tachometer.
+     * @param rpm Measured fan speed [RPM].
+     */
     void setFanRpm(double rpm) {
         if (fanObj_) fanObj_->setRpm(rpm);
     }
 
-    /// @brief Set an ADC value (for QUERY_ADC to return).
-    /// @param name ADC pin name as used in the config.
-    /// @param value Raw ADC reading.
+    /**
+     * @brief Set an ADC value (for QUERY_ADC to return).
+     * @param name ADC pin name as used in the config.
+     * @param value Raw ADC reading.
+     */
     void setAdcValue(const std::string& name, double value) {
         adcValues_[name] = value;
     }
 
 private:
-    /// @brief Rebuild extruderObj_ from the current active extruder heater.
-    /// Called after setExtruderHeater/setActiveExtruder so the printer
-    /// object always reflects the active extruder's heater.
+    /**
+     * @brief Rebuild extruderObj_ from the current active extruder heater.
+     * Called after setExtruderHeater/setActiveExtruder so the printer
+     * object always reflects the active extruder's heater.
+     */
     void refreshExtruderObject() {
         auto newObj = std::make_shared<ExtruderObject>(extruderHeater_);
         newObj->setName("extruder");
@@ -1282,11 +1382,11 @@ private:
     // Internal state
     // ------------------------------------------------------------------
 
-    std::recursive_mutex instanceMutex_; ///< Protects KlippyInstance state (recursive: tick() may call executeGcode())
+    std::recursive_mutex instanceMutex_; /**< Protects KlippyInstance state (recursive: tick() may call executeGcode()) */
     KlippyInstanceConfig config_;
     KlippyServer server_;
     KlippyUdsServer udsTransport_;
-    std::shared_ptr<ISystemStatsProvider> systemStatsProvider_; ///< Injectable system stats
+    std::shared_ptr<ISystemStatsProvider> systemStatsProvider_; /**< Injectable system stats */
     std::shared_ptr<VirtualSdcard> sdcard_;
     std::shared_ptr<GcodeMacroRegistry> macros_;
     std::shared_ptr<FirmwareRetraction> firmwareRetraction_;
@@ -1306,14 +1406,18 @@ private:
     std::array<double, 4> lastStepperPosition_{0, 0, 0, 0};
     bool steppersNeedSync_ = false;
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-    /// @brief Shared extrusion-flow tap between the dispatcher and the
-    /// flow-adaptive heater compensation.
+    /**
+     * @brief Shared extrusion-flow tap between the dispatcher and the
+     * flow-adaptive heater compensation.
+     */
     std::shared_ptr<motion::ExtrusionFlowTracker> extrusionFlowTracker_;
-    /// @brief Optional flow-adaptive heater controller (built when
-    /// heater_flow_pre_emphasis is enabled in config or via G-code).
+    /**
+     * @brief Optional flow-adaptive heater controller (built when
+     * heater_flow_pre_emphasis is enabled in config or via G-code).
+     */
     std::shared_ptr<tether::control::extrusion::FlowAdaptiveHeaterController>
         flowAdaptiveHeater_;
-    /// @brief Deconvolution feedforward controllers (at most one active).
+    /**@brief Deconvolution feedforward controllers (at most one active). */
     std::shared_ptr<tether::control::extrusion::LTIFrequencyDomainDeconvolver>
         ltiDeconvolver_;
     std::shared_ptr<tether::control::extrusion::OverlapAddLPVDeconvolver>
@@ -1322,14 +1426,14 @@ private:
         arxInverseFilter_;
     std::shared_ptr<tether::control::extrusion::StateSpaceLPVInputEstimator>
         stateSpaceEstimator_;
-    /// @brief Deconvolution printer object (for status reporting).
+    /**@brief Deconvolution printer object (for status reporting). */
     std::shared_ptr<klippy::DeconvolutionObject> deconvolutionObj_;
 #endif
 
     // Heater/Fan/Probe backends (set by user)
-    std::shared_ptr<objects::Heater> extruderHeater_;  ///< active extruder's heater
-    std::map<int, std::shared_ptr<objects::Heater>> extruderHeaters_; ///< per-index heaters
-    int activeExtruder_ = 0; ///< active extruder index (T-command)
+    std::shared_ptr<objects::Heater> extruderHeater_; /**< active extruder's heater */
+    std::map<int, std::shared_ptr<objects::Heater>> extruderHeaters_; /**< per-index heaters */
+    int activeExtruder_ = 0; /**< active extruder index (T-command) */
     std::shared_ptr<objects::Heater> heaterBed_;
     std::shared_ptr<objects::Fan> fan_;
     std::shared_ptr<objects::Probe> probe_;
@@ -1373,8 +1477,8 @@ private:
         char axisChar = '\0';
     };
     std::vector<ActiveHomingAxis> activeHomingAxes_;
-    std::string pendingHomedAxes_; ///< axes to mark homed when all sims complete
-    double simTickDt_ = 0.1; ///< dt for homing simulation steps (seconds)
+    std::string pendingHomedAxes_; /**< axes to mark homed when all sims complete */
+    double simTickDt_ = 0.1; /**< dt for homing simulation steps (seconds) */
 
     // Active S-curve linear move — when present, stepActiveMove() animates
     // the toolhead toward a target coordinate instead of jumping there.

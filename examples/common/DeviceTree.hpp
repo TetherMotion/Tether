@@ -31,12 +31,14 @@
 namespace Tether {
 namespace Examples {
 
-/// Beckhoff vendor id.
+/**Beckhoff vendor id. */
 inline constexpr uint32_t kBeckhoffVendor = 0x00000002;
 
-/// Coupler detection: Beckhoff vendor, and either a name starting with "EK"
-/// ("EK1100 EtherCAT Coupler") or the EK-family product-code marker
-/// (low word 0x2C5x  -  e.g. EK1100 = 0x044C2C52).
+/**
+ * Coupler detection: Beckhoff vendor, and either a name starting with "EK"
+ * ("EK1100 EtherCAT Coupler") or the EK-family product-code marker
+ * (low word 0x2C5x  -  e.g. EK1100 = 0x044C2C52).
+ */
 inline bool isCouplerDevice(const EtherCAT::DiscoveredSlave& s) {
     const uint32_t vendor  = s.vendor_id ? *s.vendor_id : 0;
     const uint32_t product = s.product_code ? *s.product_code : 0;
@@ -50,15 +52,17 @@ inline bool isCouplerDevice(const EtherCAT::DiscoveredSlave& s) {
     return low == 0x2C52 || low == 0x2C50;
 }
 
-/// One-line label for a slave: "s3 EL2004 4K. Dig. Ausgang 24V, 0.5A".
+/**One-line label for a slave: "s3 EL2004 4K. Dig. Ausgang 24V, 0.5A". */
 inline std::string slaveLabel(const EtherCAT::DiscoveredSlave& s) {
     std::string label = "s" + std::to_string(s.index) + " ";
     label += s.device_name ? *s.device_name : "?";
     return label;
 }
 
-/// Build the coupler/terminal tree.  `managed(slave_index)` decides the
-/// node color: managed terminals get PalValue, couplers PalHeader.
+/**
+ * Build the coupler/terminal tree.  `managed(slave_index)` decides the
+ * node color: managed terminals get PalValue, couplers PalHeader.
+ */
 inline TUI::TreeNode buildDeviceTree(
     std::span<const EtherCAT::DiscoveredSlave> slaves,
     const std::function<bool(uint16_t)>& managed) {
@@ -92,7 +96,7 @@ inline TUI::TreeNode buildDeviceTree(
     return root;
 }
 
-/// Find a slave by its bus index (for detail-pane identity info).
+/**Find a slave by its bus index (for detail-pane identity info). */
 inline const EtherCAT::DiscoveredSlave* slaveByIndex(
     std::span<const EtherCAT::DiscoveredSlave> slaves, int index) {
     for (const auto& s : slaves) {

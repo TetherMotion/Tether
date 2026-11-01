@@ -10,24 +10,28 @@ namespace EtherCAT {
 namespace Drives {
 namespace ESC211 {
 
-/// Configuration data types managed by the ESC211 safety subsystem.
-/// FNI = Fieldbus Node Interface, RSP = Safety-Related Parameters,
-/// SDD = Safety-Related Device Description.
+/**
+ * Configuration data types managed by the ESC211 safety subsystem.
+ * FNI = Fieldbus Node Interface, RSP = Safety-Related Parameters,
+ * SDD = Safety-Related Device Description.
+ */
 enum class ConfigDataType : uint8_t {
     FNI,
     RSP,
     SDD,
 };
 
-/// Metadata for each config data type: SDO indices, section limits, and the
-/// control command codes used to activate / save / load that type.
+/**
+ * Metadata for each config data type: SDO indices, section limits, and the
+ * control command codes used to activate / save / load that type.
+ */
 struct ConfigDataTypeInfo {
     ConfigDataType type;
     const char* name;
     uint16_t inputIndex;     // SDO index for writing (temp/input to device)
     uint16_t outputIndex;    // SDO index for reading (active/output from device)
     uint16_t crcIndex;       // SDO index for CRC register
-    /// Register definition for the CRC object — access via sdoReadEntry.
+    /**Register definition for the CRC object — access via sdoReadEntry. */
     const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry* crcEntry;
     uint16_t maxSections;    // Maximum number of 256-byte sections
     EtherCAT::Drives::Registers::NexcobotESC211::UserSystem::ControlCommandCode activateCmd;
@@ -38,7 +42,7 @@ struct ConfigDataTypeInfo {
 namespace BulkData = EtherCAT::Drives::Registers::NexcobotESC211::BulkData;
 namespace UserSystem = EtherCAT::Drives::Registers::NexcobotESC211::UserSystem;
 
-/// Table of all config data types (FNI, RSP, SDD).
+/**Table of all config data types (FNI, RSP, SDD). */
 inline constexpr ConfigDataTypeInfo kConfigDataTypes[] = {
     {ConfigDataType::FNI, "fni",
      BulkData::TempFNIDataIndex, BulkData::ActiveFNIDataIndex, BulkData::ActiveFNIDataCRCIndex,
@@ -60,7 +64,7 @@ inline constexpr ConfigDataTypeInfo kConfigDataTypes[] = {
      UserSystem::ControlCommandCode::LoadRSPAndSDDFromFlash},
 };
 
-/// Look up the info struct for a config data type.
+/**Look up the info struct for a config data type. */
 inline const ConfigDataTypeInfo& configDataTypeInfo(ConfigDataType type) {
     for (const auto& dt : kConfigDataTypes) {
         if (dt.type == type) return dt;
@@ -69,8 +73,10 @@ inline const ConfigDataTypeInfo& configDataTypeInfo(ConfigDataType type) {
     return kConfigDataTypes[0];
 }
 
-/// Look up the info struct by name string ("fni", "rsp", "sdd").
-/// Returns nullptr if the name is not recognized.
+/**
+ * Look up the info struct by name string ("fni", "rsp", "sdd").
+ * Returns nullptr if the name is not recognized.
+ */
 inline const ConfigDataTypeInfo* configDataTypeByName(const char* name) {
     for (const auto& dt : kConfigDataTypes) {
         if (std::string_view(dt.name) == name) return &dt;
@@ -78,7 +84,7 @@ inline const ConfigDataTypeInfo* configDataTypeByName(const char* name) {
     return nullptr;
 }
 
-/// All config data types as a span (for iteration).
+/**All config data types as a span (for iteration). */
 inline std::span<const ConfigDataTypeInfo> allConfigDataTypes() {
     return kConfigDataTypes;
 }

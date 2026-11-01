@@ -44,9 +44,9 @@ namespace tether::klipper::protocol {
  */
 struct EnumEntry {
     std::string key;
-    /// For a simple enum: just `start`. For a range enum: [start, count].
+    /**For a simple enum: just `start`. For a range enum: [start, count]. */
     uint32_t start = 0;
-    uint32_t count = 1;  ///< 1 = simple enum, >1 = range enum
+    uint32_t count = 1; /**< 1 = simple enum, >1 = range enum */
 };
 
 /**
@@ -66,18 +66,18 @@ using ConstantValue = std::variant<int64_t, std::string>;
  * @brief Direction of a message in the dictionary.
  */
 enum class MessageDirection : uint8_t {
-    Command,  ///< host -> MCU
-    Response, ///< MCU -> host
-    Output,   ///< free-form debug (MCU -> host)
+    Command, /**< host -> MCU */
+    Response, /**< MCU -> host */
+    Output, /**< free-form debug (MCU -> host) */
 };
 
 /**
  * @brief A registered message (command/response/output).
  */
 struct MessageEntry {
-    uint16_t msgid = 0;             ///< Wire msgid
+    uint16_t msgid = 0; /**< Wire msgid */
     MessageDirection direction;
-    FormatSpec format;              ///< Parsed format string
+    FormatSpec format; /**< Parsed format string */
 };
 
 /**
@@ -89,15 +89,15 @@ struct MessageEntry {
  */
 class DataDictionary {
 public:
-    /// @return The dictionary version string (e.g. "tether_klipper-1.0.0").
+    /**@return The dictionary version string (e.g. "tether_klipper-1.0.0"). */
     const std::string& version() const { return version_; }
     void setVersion(std::string v) { version_ = std::move(v); }
 
-    /// @return The application name ("tether_klipper").
+    /**@return The application name ("tether_klipper"). */
     const std::string& app() const { return app_; }
     void setApp(std::string a) { app_ = std::move(a); }
 
-    /// @return Build/toolchain version string.
+    /**@return Build/toolchain version string. */
     const std::string& buildVersions() const { return buildVersions_; }
     void setBuildVersions(std::string v) { buildVersions_ = std::move(v); }
 
@@ -125,71 +125,91 @@ public:
 
     // --- Lookups ------------------------------------------------------------
 
-    /// @param msgid Message ID to look up
-    /// @return The message entry for a msgid, or nullptr.
+    /**
+     * @param msgid Message ID to look up
+     * @return The message entry for a msgid, or nullptr.
+     */
     const MessageEntry* lookupMsgid(uint16_t msgid) const;
 
-    /// @param formatStr Command format string
-    /// @return The msgid for a command format string, or std::nullopt.
+    /**
+     * @param formatStr Command format string
+     * @return The msgid for a command format string, or std::nullopt.
+     */
     std::optional<uint16_t> lookupCommand(std::string_view formatStr) const;
 
-    /// @param formatStr Response format string
-    /// @return The msgid for a response format string, or std::nullopt.
+    /**
+     * @param formatStr Response format string
+     * @return The msgid for a response format string, or std::nullopt.
+     */
     std::optional<uint16_t> lookupResponse(std::string_view formatStr) const;
 
-    /// @param formatStr Output format string
-    /// @return The msgid for an output format string, or std::nullopt.
+    /**
+     * @param formatStr Output format string
+     * @return The msgid for an output format string, or std::nullopt.
+     */
     std::optional<uint16_t> lookupOutput(std::string_view formatStr) const;
 
-    /// @return All registered messages (ordered by msgid).
+    /**@return All registered messages (ordered by msgid). */
     const std::map<uint16_t, MessageEntry>& messages() const { return messages_; }
 
     // --- Enumerations -------------------------------------------------------
 
-    /// @brief Add a simple enumeration entry (key -> value).
-    /// @param enumName Enumeration the value belongs to
-    /// @param key Enumeration key name
-    /// @param value Integer value for `key`
+    /**
+     * @brief Add a simple enumeration entry (key -> value).
+     * @param enumName Enumeration the value belongs to
+     * @param key Enumeration key name
+     * @param value Integer value for `key`
+     */
     void addEnumValue(std::string_view enumName, std::string_view key, uint32_t value);
 
-    /// @brief Add a range enumeration entry (key -> [start, start+count-1]).
-    /// @param enumName Enumeration the range belongs to
-    /// @param key Base key name for the range
-    /// @param start First value of the range
-    /// @param count Number of values in the range
+    /**
+     * @brief Add a range enumeration entry (key -> [start, start+count-1]).
+     * @param enumName Enumeration the range belongs to
+     * @param key Base key name for the range
+     * @param start First value of the range
+     * @param count Number of values in the range
+     */
     void addEnumRange(std::string_view enumName, std::string_view key,
                       uint32_t start, uint32_t count);
 
-    /// @param enumName Enumeration name to look up
-    /// @return The enumeration named @p enumName, or nullptr.
+    /**
+     * @param enumName Enumeration name to look up
+     * @return The enumeration named @p enumName, or nullptr.
+     */
     const Enumeration* lookupEnum(std::string_view enumName) const;
 
-    /// @brief Resolve a string value to its integer for an enumeration.
-    ///        Matches by exact key or by range expansion (e.g. "PA3" -> 3).
-    /// @param enumName Enumeration to resolve in
-    /// @param key Key string (exact or expanded)
-    /// @return Integer value, or std::nullopt when unresolvable
+    /**
+     * @brief Resolve a string value to its integer for an enumeration.
+     *        Matches by exact key or by range expansion (e.g. "PA3" -> 3).
+     * @param enumName Enumeration to resolve in
+     * @param key Key string (exact or expanded)
+     * @return Integer value, or std::nullopt when unresolvable
+     */
     std::optional<uint32_t> resolveEnum(std::string_view enumName, std::string_view key) const;
 
-    /// @return All enumerations.
+    /**@return All enumerations. */
     const std::vector<Enumeration>& enumerations() const { return enumerations_; }
 
     // --- Constants ----------------------------------------------------------
 
-    /// @brief Add an integer constant.
-    /// @param name Constant name
-    /// @param value Constant value
+    /**
+     * @brief Add an integer constant.
+     * @param name Constant name
+     * @param value Constant value
+     */
     void addConstant(std::string_view name, int64_t value);
 
-    /// @brief Add a string constant.
-    /// @param name Constant name
-    /// @param value Constant string value
+    /**
+     * @brief Add a string constant.
+     * @param name Constant name
+     * @param value Constant string value
+     */
     void addConstantString(std::string_view name, std::string_view value);
 
-    /// @return The constant value, or std::nullopt.
+    /**@return The constant value, or std::nullopt. */
     std::optional<ConstantValue> lookupConstant(std::string_view name) const;
 
-    /// @return All constants.
+    /**@return All constants. */
     const std::map<std::string, ConstantValue>& constants() const { return constants_; }
 
     // --- Serialisation ------------------------------------------------------
@@ -226,7 +246,7 @@ public:
      */
     static std::string fromWire(std::span<const uint8_t> wire);
 
-    /// @return The next msgid that would be assigned (for testing/inspection).
+    /**@return The next msgid that would be assigned (for testing/inspection). */
     uint16_t nextMsgid() const { return nextMsgid_; }
 
 private:

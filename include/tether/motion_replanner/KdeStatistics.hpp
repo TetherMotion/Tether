@@ -29,12 +29,12 @@ class KdeStatistics {
 public:
     //--- Marginal statistics ---
 
-    /// Compute marginal statistics from a 1D sample.
+    /**Compute marginal statistics from a 1D sample. */
     static MarginalStats computeMarginalStats(const std::vector<double>& data);
 
     //--- Conditional statistics ---
 
-    /// Compute conditional statistics p(e | d) from the KDE grid.
+    /**Compute conditional statistics p(e | d) from the KDE grid. */
     static std::vector<ConditionalStats> computeConditionalStats(
         const KdeGrid& grid,
         const std::vector<double>& quantileLevels,
@@ -42,29 +42,31 @@ public:
 
     //--- Tail risk ---
 
-    /// Compute tail risk metrics (VaR, CVaR, ETD).
+    /**Compute tail risk metrics (VaR, CVaR, ETD). */
     static TailRisk computeTailRisk(
         const std::vector<double>& deviations,
         double varPercentile = 0.95);
 
     //--- 1D density helpers ---
 
-    /// Compute the mode (peak) of a 1D density estimate.
+    /**Compute the mode (peak) of a 1D density estimate. */
     static double densityMode(const std::vector<double>& bins,
                               const std::vector<double>& density);
 
-    /// Compute the quantile of a 1D density estimate.
+    /**Compute the quantile of a 1D density estimate. */
     static double densityQuantile(const std::vector<double>& bins,
                                   const std::vector<double>& density,
                                   double q);
 
-    /// Compute the entropy of a 1D density estimate (bits).
+    /**Compute the entropy of a 1D density estimate (bits). */
     static double densityEntropy(const std::vector<double>& density);
 
     //--- Colormap ---
 
-    /// Convert a colormap enum to an RGB color for a value in [0, 1].
-    /// @return (r, g, b) in [0, 255].
+    /**
+     * Convert a colormap enum to an RGB color for a value in [0, 1].
+     * @return (r, g, b) in [0, 255].
+     */
     static std::array<int, 3> colormapColor(KdeColormap cmap, double value);
 
 private:

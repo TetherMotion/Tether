@@ -66,30 +66,30 @@ namespace Platform {
  * @brief File open mode
  */
 enum class FileMode {
-    READ,           ///< Open for reading (file must exist)
-    WRITE,          ///< Open for writing (truncate if exists)
-    WRITE_CREATE,   ///< Open for writing (create if not exists)
-    APPEND,         ///< Open for appending
-    READ_WRITE,     ///< Open for read and write
+    READ, /**< Open for reading (file must exist) */
+    WRITE, /**< Open for writing (truncate if exists) */
+    WRITE_CREATE, /**< Open for writing (create if not exists) */
+    APPEND, /**< Open for appending */
+    READ_WRITE, /**< Open for read and write */
 };
 
 /**
  * @brief File seek origin
  */
 enum class SeekOrigin {
-    BEGIN,      ///< Seek from beginning
-    CURRENT,    ///< Seek from current position
-    END,        ///< Seek from end
+    BEGIN, /**< Seek from beginning */
+    CURRENT, /**< Seek from current position */
+    END, /**< Seek from end */
 };
 
 /**
  * @brief File information
  */
 struct FileInfo {
-    char name[64];      ///< File name
-    uint32_t size;      ///< File size in bytes
-    bool is_directory;  ///< true if directory
-    uint32_t modified;  ///< Modification time (unix timestamp, 0 if unavailable)
+    char name[64]; /**< File name */
+    uint32_t size; /**< File size in bytes */
+    bool is_directory; /**< true if directory */
+    uint32_t modified; /**< Modification time (unix timestamp, 0 if unavailable) */
 };
 
 /**

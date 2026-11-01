@@ -54,13 +54,17 @@ class FaultInterlock {
 public:
     using MemberId = uint16_t;
 
-    /// Invoked once when a member becomes inhibited, on the reportFault()
-    /// caller's thread.  Must not block.
+    /**
+     * Invoked once when a member becomes inhibited, on the reportFault()
+     * caller's thread.  Must not block.
+     */
     using InhibitCallback = std::function<void(MemberId member,
                                                MemberId source)>;
 
-    /// Registration state for one member of the group.  Members read
-    /// `inhibited` / `source` directly — plain atomic loads, RT-safe.
+    /**
+     * Registration state for one member of the group.  Members read
+     * `inhibited` / `source` directly — plain atomic loads, RT-safe.
+     */
     struct Member {
         MemberId id;
         InhibitCallback on_inhibit;
@@ -68,8 +72,10 @@ public:
         std::atomic<MemberId> source{0};
     };
 
-    /// Register a member.  Idempotent by id — re-adding an existing id
-    /// returns the same Member (the callback is replaced if given).
+    /**
+     * Register a member.  Idempotent by id — re-adding an existing id
+     * returns the same Member (the callback is replaced if given).
+     */
     std::shared_ptr<Member> add(MemberId id, InhibitCallback cb = {})
     {
         std::lock_guard<std::mutex> lk(mutex_);
@@ -98,10 +104,12 @@ public:
         return false;
     }
 
-    /// Report a fault on `source`.  Latches the first fault source and
-    /// marks all other members inhibited (their on_inhibit callbacks run
-    /// on this thread, outside the internal lock).  Returns true when this
-    /// call won the latch (i.e. it is the first fault in the group).
+    /**
+     * Report a fault on `source`.  Latches the first fault source and
+     * marks all other members inhibited (their on_inhibit callbacks run
+     * on this thread, outside the internal lock).  Returns true when this
+     * call won the latch (i.e. it is the first fault in the group).
+     */
     bool reportFault(MemberId source)
     {
         bool expected = false;
@@ -128,7 +136,7 @@ public:
         return first;
     }
 
-    /// Manually inhibit one member (same effect as a peer fault).
+    /**Manually inhibit one member (same effect as a peer fault). */
     void inhibit(MemberId id, MemberId source)
     {
         std::vector<std::shared_ptr<Member>> members;
@@ -147,7 +155,7 @@ public:
         }
     }
 
-    /// Clear one member's inhibit flag.  Does not clear the latch.
+    /**Clear one member's inhibit flag.  Does not clear the latch. */
     void release(MemberId id)
     {
         std::vector<std::shared_ptr<Member>> members;
@@ -161,7 +169,7 @@ public:
         }
     }
 
-    /// Clear every member's inhibit flag and re-arm the fault latch.
+    /**Clear every member's inhibit flag and re-arm the fault latch. */
     void releaseAll()
     {
         std::vector<std::shared_ptr<Member>> members;
@@ -185,10 +193,10 @@ public:
         return false;
     }
 
-    /// True once any member has reported a fault (until releaseAll()).
+    /**True once any member has reported a fault (until releaseAll()). */
     bool latched() const { return latched_.load(std::memory_order_acquire); }
 
-    /// The member that first latched the interlock (0 when released).
+    /**The member that first latched the interlock (0 when released). */
     MemberId faultSource() const
     {
         return fault_source_.load(std::memory_order_acquire);

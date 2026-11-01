@@ -350,62 +350,62 @@ class VariableSystem;
 struct CannedCycleConfig {
     // === Retract ===
     
-    /// Default retract mode (G98/G99)
+    /**Default retract mode (G98/G99) */
     bool defaultRetractToInitial{true};  // G98
     
-    /// Rapid retract rate (if not infinite)
+    /**Rapid retract rate (if not infinite) */
     double rapidRetractRate{10000.0};  // mm/min
     
     // === Peck Drilling ===
     
-    /// G73 chip-break retract distance
+    /**G73 chip-break retract distance */
     double chipBreakRetract{0.1};  // mm
     
-    /// G83 clearance above previous depth
+    /**G83 clearance above previous depth */
     double peckClearance{0.5};  // mm
     
-    /// Minimum peck depth
+    /**Minimum peck depth */
     double minPeckDepth{0.1};  // mm
     
-    /// Maximum peck depth
+    /**Maximum peck depth */
     double maxPeckDepth{100.0};  // mm
     
     // === Tapping ===
     
-    /// Enable rigid tapping
+    /**Enable rigid tapping */
     bool enableRigidTapping{true};
     
-    /// Spindle synchronization tolerance (for tapping)
+    /**Spindle synchronization tolerance (for tapping) */
     double tapSyncTolerance{0.02};  // mm
     
-    /// Tap retract speed multiplier
+    /**Tap retract speed multiplier */
     double tapRetractMultiplier{1.0};
     
     // === Boring ===
     
-    /// Enable spindle orient (for G76, G87)
+    /**Enable spindle orient (for G76, G87) */
     bool enableSpindleOrient{true};
     
-    /// Shift distance for fine boring (if not specified)
+    /**Shift distance for fine boring (if not specified) */
     double defaultBoreShift{0.5};  // mm
     
     // === Dwell ===
     
-    /// Minimum dwell time
+    /**Minimum dwell time */
     double minDwellTime{0.0};  // seconds
     
-    /// Maximum dwell time
+    /**Maximum dwell time */
     double maxDwellTime{60.0};  // seconds
     
     // === Safety ===
     
-    /// Require R to be above Z
+    /**Require R to be above Z */
     bool requireRAboveZ{true};
     
-    /// Require spindle running for drilling
+    /**Require spindle running for drilling */
     bool requireSpindleForDrill{true};
     
-    /// Check for tool breakage (if probing available)
+    /**Check for tool breakage (if probing available) */
     bool toolBreakCheck{false};
 };
 
@@ -417,19 +417,19 @@ struct CannedCycleConfig {
  * @brief Canned cycle type
  */
 enum class CannedCycleType {
-    NONE,           ///< No cycle active (G80)
-    DRILL_PECK_G73, ///< G73 High-speed peck drill
-    TAP_LEFT_G74,   ///< G74 Left-hand tapping
-    BORE_FINE_G76,  ///< G76 Fine boring (spindle orient)
-    DRILL_SIMPLE,   ///< G81 Simple drill
-    DRILL_DWELL,    ///< G82 Drill with dwell
-    DRILL_PECK_G83, ///< G83 Deep hole peck drill
-    TAP_RIGHT_G84,  ///< G84 Right-hand tapping
-    BORE_FEED,      ///< G85 Boring (feed out)
-    BORE_STOP,      ///< G86 Boring (spindle stop)
-    BORE_BACK,      ///< G87 Back boring
-    BORE_MANUAL,    ///< G88 Boring (manual retract)
-    BORE_DWELL      ///< G89 Boring (dwell, feed out)
+    NONE, /**< No cycle active (G80) */
+    DRILL_PECK_G73, /**< G73 High-speed peck drill */
+    TAP_LEFT_G74, /**< G74 Left-hand tapping */
+    BORE_FINE_G76, /**< G76 Fine boring (spindle orient) */
+    DRILL_SIMPLE, /**< G81 Simple drill */
+    DRILL_DWELL, /**< G82 Drill with dwell */
+    DRILL_PECK_G83, /**< G83 Deep hole peck drill */
+    TAP_RIGHT_G84, /**< G84 Right-hand tapping */
+    BORE_FEED, /**< G85 Boring (feed out) */
+    BORE_STOP, /**< G86 Boring (spindle stop) */
+    BORE_BACK, /**< G87 Back boring */
+    BORE_MANUAL, /**< G88 Boring (manual retract) */
+    BORE_DWELL /**< G89 Boring (dwell, feed out) */
 };
 
 #ifndef GCODE_CANNED_CYCLE_PARAMS_DEFINED
@@ -438,46 +438,46 @@ enum class CannedCycleType {
  * @brief Canned cycle parameters
  */
 struct CannedCycleParams {
-    /// Cycle type
+    /**Cycle type */
     CannedCycleType type{CannedCycleType::NONE};
     
-    /// Position (XY or appropriate for plane)
+    /**Position (XY or appropriate for plane) */
     double x{0}, y{0};
     
-    /// Bottom (Z or appropriate)
+    /**Bottom (Z or appropriate) */
     double z{0};
     
-    /// Retract plane
+    /**Retract plane */
     double r{0};
     
-    /// Initial plane (for G98)
+    /**Initial plane (for G98) */
     double initialZ{0};
     
-    /// Peck depth (Q)
+    /**Peck depth (Q) */
     double q{0};
     
-    /// Dwell time in seconds (converted from P milliseconds)
+    /**Dwell time in seconds (converted from P milliseconds) */
     double dwell{0};
     
-    /// Feed rate
+    /**Feed rate */
     double feedRate{0};
     
-    /// Repeat count
+    /**Repeat count */
     int32_t repeatCount{1};
     
-    /// Bore shift (I, J for G76/G87)
+    /**Bore shift (I, J for G76/G87) */
     double shiftI{0}, shiftJ{0};
     
-    /// Spindle orient angle (Q for G76)
+    /**Spindle orient angle (Q for G76) */
     double orientAngle{0};
     
-    /// Retract mode: true = initial (G98), false = R plane (G99)
+    /**Retract mode: true = initial (G98), false = R plane (G99) */
     bool retractToInitial{true};
     
-    /// Current spindle speed (for tapping calculations)
+    /**Current spindle speed (for tapping calculations) */
     double spindleRPM{0};
     
-    /// Thread pitch (for tapping, derived from F and RPM)
+    /**Thread pitch (for tapping, derived from F and RPM) */
     double threadPitch{0};
 };
 #endif // GCODE_CANNED_CYCLE_PARAMS_DEFINED
@@ -490,19 +490,19 @@ struct CannedCycleParams {
  * @brief Persistent canned cycle state
  */
 struct CannedCycleState {
-    /// Active cycle type (NONE if cancelled)
+    /**Active cycle type (NONE if cancelled) */
     CannedCycleType activeType{CannedCycleType::NONE};
     
-    /// Stored parameters (modal)
+    /**Stored parameters (modal) */
     CannedCycleParams params;
     
-    /// Retract mode
+    /**Retract mode */
     bool retractToInitial{true};  // G98 = true, G99 = false
     
-    /// First hole done (affects R handling)
+    /**First hole done (affects R handling) */
     bool firstHoleDone{false};
     
-    /// Current repetition in L sequence
+    /**Current repetition in L sequence */
     int32_t currentRepeat{0};
 };
 

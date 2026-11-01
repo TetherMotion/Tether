@@ -57,9 +57,11 @@ struct WsSession {
  */
 class WsSessionManager {
 public:
-    /// @brief Create a new session for a WebSocket connection.
-    /// @param conn Drogon connection the session wraps
-    /// @return The session ID.
+    /**
+     * @brief Create a new session for a WebSocket connection.
+     * @param conn Drogon connection the session wraps
+     * @return The session ID.
+     */
     int64_t createSession(const drogon::WebSocketConnectionPtr& conn) {
         std::lock_guard<std::mutex> lock(mutex_);
         int64_t id = nextId_.fetch_add(1);
@@ -70,16 +72,20 @@ public:
         return id;
     }
 
-    /// @brief Remove a session by ID.
-    /// @param id Session ID returned by createSession()
+    /**
+     * @brief Remove a session by ID.
+     * @param id Session ID returned by createSession()
+     */
     void removeSession(int64_t id) {
         std::lock_guard<std::mutex> lock(mutex_);
         sessions_.erase(id);
     }
 
-    /// @brief Get a session by ID.
-    /// @param id Session ID to look up
-    /// @return Session pointer, or nullptr when not found
+    /**
+     * @brief Get a session by ID.
+     * @param id Session ID to look up
+     * @return Session pointer, or nullptr when not found
+     */
     std::shared_ptr<WsSession> getSession(int64_t id) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = sessions_.find(id);
@@ -87,8 +93,10 @@ public:
         return it->second;
     }
 
-    /// @brief Get all sessions (for fan-out).
-    /// @return Snapshot of every connected session
+    /**
+     * @brief Get all sessions (for fan-out).
+     * @return Snapshot of every connected session
+     */
     std::vector<std::shared_ptr<WsSession>> getAllSessions() {
         std::lock_guard<std::mutex> lock(mutex_);
         std::vector<std::shared_ptr<WsSession>> result;
@@ -99,8 +107,10 @@ public:
         return result;
     }
 
-    /// @brief Get all sessions with object subscriptions.
-    /// @return Sessions that have at least one printer-object subscription
+    /**
+     * @brief Get all sessions with object subscriptions.
+     * @return Sessions that have at least one printer-object subscription
+     */
     std::vector<std::shared_ptr<WsSession>> getSubscribedSessions() {
         std::lock_guard<std::mutex> lock(mutex_);
         std::vector<std::shared_ptr<WsSession>> result;
@@ -112,8 +122,10 @@ public:
         return result;
     }
 
-    /// @brief Get all sessions subscribed to gcode output.
-    /// @return Sessions receiving gcode-response notifications
+    /**
+     * @brief Get all sessions subscribed to gcode output.
+     * @return Sessions receiving gcode-response notifications
+     */
     std::vector<std::shared_ptr<WsSession>> getGcodeSubscribedSessions() {
         std::lock_guard<std::mutex> lock(mutex_);
         std::vector<std::shared_ptr<WsSession>> result;
@@ -125,10 +137,12 @@ public:
         return result;
     }
 
-    /// @brief Set object subscriptions for a session.
-    /// @param id Session ID
-    /// @param subs Map of printer object -> field list to subscribe to;
-    ///        also clears the diffing baseline
+    /**
+     * @brief Set object subscriptions for a session.
+     * @param id Session ID
+     * @param subs Map of printer object -> field list to subscribe to;
+     *        also clears the diffing baseline
+     */
     void setSubscriptions(int64_t id,
                           const std::map<std::string, std::vector<std::string>>& subs) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -139,9 +153,11 @@ public:
         }
     }
 
-    /// @brief Set gcode output subscription for a session.
-    /// @param id Session ID
-    /// @param subscribed `true` to receive gcode-response notifications
+    /**
+     * @brief Set gcode output subscription for a session.
+     * @param id Session ID
+     * @param subscribed `true` to receive gcode-response notifications
+     */
     void setGcodeSubscribed(int64_t id, bool subscribed) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = sessions_.find(id);
@@ -150,11 +166,13 @@ public:
         }
     }
 
-    /// @brief Mark a session as identified.
-    /// @param id Session ID
-    /// @param clientType Client kind (e.g. "web", "agent")
-    /// @param clientName Client name reported by the client
-    /// @param version Client version string
+    /**
+     * @brief Mark a session as identified.
+     * @param id Session ID
+     * @param clientType Client kind (e.g. "web", "agent")
+     * @param clientName Client name reported by the client
+     * @param version Client version string
+     */
     void setIdentified(int64_t id, const std::string& clientType,
                        const std::string& clientName, const std::string& version) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -167,10 +185,12 @@ public:
         }
     }
 
-    /// @brief Update the baseline for a session (for subscription diffing).
-    /// @param id Session ID
-    /// @param objName Printer object the fields belong to
-    /// @param fields New field values merged into the baseline
+    /**
+     * @brief Update the baseline for a session (for subscription diffing).
+     * @param id Session ID
+     * @param objName Printer object the fields belong to
+     * @param fields New field values merged into the baseline
+     */
     void updateBaseline(int64_t id,
                         const std::string& objName,
                         const std::map<std::string, klippy::JsonValue>& fields) {
@@ -183,9 +203,11 @@ public:
         }
     }
 
-    /// @brief Get the baseline for a session.
-    /// @param id Session ID
-    /// @return Per-object field baseline; empty when unknown
+    /**
+     * @brief Get the baseline for a session.
+     * @param id Session ID
+     * @return Per-object field baseline; empty when unknown
+     */
     std::map<std::string, std::map<std::string, klippy::JsonValue>>
     getBaseline(int64_t id) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -194,9 +216,11 @@ public:
         return it->second->baseline;
     }
 
-    /// @brief Get the subscriptions for a session.
-    /// @param id Session ID
-    /// @return Object -> subscribed field list; empty when unknown
+    /**
+     * @brief Get the subscriptions for a session.
+     * @param id Session ID
+     * @return Object -> subscribed field list; empty when unknown
+     */
     std::map<std::string, std::vector<std::string>> getSubscriptions(int64_t id) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = sessions_.find(id);
@@ -204,16 +228,20 @@ public:
         return it->second->subscriptions;
     }
 
-    /// @brief Get the number of active sessions.
-    /// @return Connected session count
+    /**
+     * @brief Get the number of active sessions.
+     * @return Connected session count
+     */
     size_t sessionCount() {
         std::lock_guard<std::mutex> lock(mutex_);
         return sessions_.size();
     }
 
-    /// @brief Send a message to a specific session.
-    /// @param id Session ID (ignored when unknown or disconnected)
-    /// @param message JSON payload to send
+    /**
+     * @brief Send a message to a specific session.
+     * @param id Session ID (ignored when unknown or disconnected)
+     * @param message JSON payload to send
+     */
     void sendToSession(int64_t id, const std::string& message) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = sessions_.find(id);
@@ -222,8 +250,10 @@ public:
         }
     }
 
-    /// @brief Broadcast a message to all sessions.
-    /// @param message JSON payload sent to every connected session
+    /**
+     * @brief Broadcast a message to all sessions.
+     * @param message JSON payload sent to every connected session
+     */
     void broadcast(const std::string& message) {
         std::lock_guard<std::mutex> lock(mutex_);
         for (const auto& [_, session] : sessions_) {
@@ -233,9 +263,11 @@ public:
         }
     }
 
-    /// @brief Broadcast a message to all identified sessions.
-    /// @param message JSON payload sent to sessions that completed
-    ///        the identify handshake
+    /**
+     * @brief Broadcast a message to all identified sessions.
+     * @param message JSON payload sent to sessions that completed
+     *        the identify handshake
+     */
     void broadcastToIdentified(const std::string& message) {
         std::lock_guard<std::mutex> lock(mutex_);
         for (const auto& [_, session] : sessions_) {

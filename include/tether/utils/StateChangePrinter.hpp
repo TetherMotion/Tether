@@ -30,17 +30,21 @@ namespace Utils {
 
 class StateChangePrinter {
 public:
-    /// @param tag        Log tag passed to TETHER_LOGI.
-    /// @param label      Prefix for each line (e.g. "X DI").
-    /// @param bit_names  Optional names for bits 0..n; unnamed bits print
-    ///                   as "bitN".
+    /**
+     * @param tag        Log tag passed to TETHER_LOGI.
+     * @param label      Prefix for each line (e.g. "X DI").
+     * @param bit_names  Optional names for bits 0..n; unnamed bits print
+     *                   as "bitN".
+     */
     StateChangePrinter(const char* tag, std::string label,
                        std::vector<std::string> bit_names = {})
         : tag_(tag), label_(std::move(label)), bit_names_(std::move(bit_names)) {}
 
-    /// Record a new sample.  The first call prints the initial value once;
-    /// subsequent calls print one line per changed bit.
-    /// @return true if at least one bit changed.
+    /**
+     * Record a new sample.  The first call prints the initial value once;
+     * subsequent calls print one line per changed bit.
+     * @return true if at least one bit changed.
+     */
     bool update(uint32_t value) {
         if (!last_.has_value()) {
             TETHER_LOGI(tag_, "{} initial state: 0x{:08X}", label_, value);
@@ -67,10 +71,10 @@ public:
         return true;
     }
 
-    /// Forget the previous sample; the next update prints the initial state.
+    /**Forget the previous sample; the next update prints the initial state. */
     void reset() { last_.reset(); }
 
-    /// Last sampled value (undefined until the first update()).
+    /**Last sampled value (undefined until the first update()). */
     uint32_t last() const { return last_.value_or(0); }
 
 private:

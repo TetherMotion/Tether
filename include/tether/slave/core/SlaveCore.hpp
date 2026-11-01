@@ -60,26 +60,26 @@ struct SlaveConfig {
     ESCConfig escConfig;
     
     // Mailbox configuration
-    uint16_t mailboxOutOffset = 0x1000;   ///< SM0 (MbxOut/M→S): Master→Slave mailbox offset
-    uint16_t mailboxOutSize = 128;        ///< SM0: Mailbox size
-    uint16_t mailboxInOffset = 0x1080;    ///< SM1 (MbxIn/S→M): Slave→Master mailbox offset
-    uint16_t mailboxInSize = 128;         ///< SM1: Mailbox size
-    uint16_t mailboxProtocol = 0x000C;    ///< Supported protocols (CoE + FoE)
+    uint16_t mailboxOutOffset = 0x1000; /**< SM0 (MbxOut/M→S): Master→Slave mailbox offset */
+    uint16_t mailboxOutSize = 128; /**< SM0: Mailbox size */
+    uint16_t mailboxInOffset = 0x1080; /**< SM1 (MbxIn/S→M): Slave→Master mailbox offset */
+    uint16_t mailboxInSize = 128; /**< SM1: Mailbox size */
+    uint16_t mailboxProtocol = 0x000C; /**< Supported protocols (CoE + FoE) */
     
     // Process data configuration
-    uint16_t rxPdoOffset = 0x1100;        ///< SM2: RxPDO offset
-    uint16_t rxPdoSize = 0;               ///< SM2: RxPDO size (0 = auto from mapping)
-    uint16_t txPdoOffset = 0x1180;        ///< SM3: TxPDO offset
-    uint16_t txPdoSize = 0;               ///< SM3: TxPDO size (0 = auto from mapping)
+    uint16_t rxPdoOffset = 0x1100; /**< SM2: RxPDO offset */
+    uint16_t rxPdoSize = 0; /**< SM2: RxPDO size (0 = auto from mapping) */
+    uint16_t txPdoOffset = 0x1180; /**< SM3: TxPDO offset */
+    uint16_t txPdoSize = 0; /**< SM3: TxPDO size (0 = auto from mapping) */
     
     // DC configuration
-    bool supportsDC = true;               ///< DC support enabled
-    uint32_t defaultCycleTime = 1000000;  ///< Default cycle time in ns (1ms)
+    bool supportsDC = true; /**< DC support enabled */
+    uint32_t defaultCycleTime = 1000000; /**< Default cycle time in ns (1ms) */
     
     // Watchdog
     bool watchdogEnabled = true;
-    uint16_t watchdogDivider = 2498;      ///< ~100µs tick
-    uint16_t watchdogTimeout = 1000;      ///< 100ms default
+    uint16_t watchdogDivider = 2498; /**< ~100µs tick */
+    uint16_t watchdogTimeout = 1000; /**< 100ms default */
     
     // Bootstrap support
     bool supportsBootstrap = false;
@@ -516,8 +516,8 @@ private:
     void doStateTransition(SlaveState newState);
     void onEnterState(SlaveState state);
     void onExitState(SlaveState state);
-    void setErrorLocked(ALStatusCode code);   ///< setError without locking stateMutex_
-    void clearErrorLocked();                  ///< clearError without locking stateMutex_
+    void setErrorLocked(ALStatusCode code); /**< setError without locking stateMutex_ */
+    void clearErrorLocked(); /**< clearError without locking stateMutex_ */
     
     // SII processing
     void processSIICommand();

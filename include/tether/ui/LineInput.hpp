@@ -31,11 +31,11 @@ namespace UI {
 
 class LineInput {
 public:
-    /// Live type-ahead hook — fires after every buffer mutation.
+    /**Live type-ahead hook — fires after every buffer mutation. */
     std::function<void(const std::string&)> on_change;
-    /// Enter pressed — receives the final buffer.
+    /**Enter pressed — receives the final buffer. */
     std::function<void(const std::string&)> on_commit;
-    /// Esc pressed.
+    /**Esc pressed. */
     std::function<void()> on_cancel;
 
     explicit LineInput(std::string initial = {})
@@ -44,27 +44,29 @@ public:
     const std::string& buffer() const { return buf_; }
     size_t cursor() const { return cur_; }
 
-    /// Replace the buffer programmatically (cursor moves to the end).
+    /**Replace the buffer programmatically (cursor moves to the end). */
     void setBuffer(std::string s) {
         buf_ = std::move(s);
         cur_ = buf_.size();
         if (on_change) on_change(buf_);
     }
 
-    /// True once Enter or Esc ended the editing session.
+    /**True once Enter or Esc ended the editing session. */
     bool done() const { return committed_ || cancelled_; }
     bool committed() const { return committed_; }
     bool cancelled() const { return cancelled_; }
 
-    /// Re-arm after done() (e.g. reopening the prompt).
+    /**Re-arm after done() (e.g. reopening the prompt). */
     void reset(std::string initial = {}) {
         buf_ = std::move(initial);
         cur_ = buf_.size();
         committed_ = cancelled_ = false;
     }
 
-    /// Feed a key.  Returns true when the key belonged to the editor
-    /// (editing keys, Enter, Esc — everything while active).
+    /**
+     * Feed a key.  Returns true when the key belonged to the editor
+     * (editing keys, Enter, Esc — everything while active).
+     */
     bool handleKey(int key) {
         if (done()) return false;
         switch (key) {

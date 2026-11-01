@@ -27,7 +27,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Extended command state for KlippyInstance.
+/**@brief Extended command state for KlippyInstance. */
 struct KlippyState {
     // --- Servo state (SET_SERVO) ---
     struct ServoState {
@@ -223,11 +223,15 @@ struct KlippyState {
     std::map<int, std::array<double, 4>> thermistorParams_;
 
     // --- Motion callback (for G53 machine moves and canned cycles) ---
-    /// @brief Move callback that applies the coordinate transform (WCS,
-    ///        G52, G68 rotation, G51 scale). Used for normal G-code moves.
+    /**
+     * @brief Move callback that applies the coordinate transform (WCS,
+     *        G52, G68 rotation, G51 scale). Used for normal G-code moves.
+     */
     std::function<void(double, double, double, double, double)> moveCallback_;
-    /// @brief Raw move callback that bypasses the coordinate transform.
-    /// Used for G53 (machine coordinates) and internal repositioning.
+    /**
+     * @brief Raw move callback that bypasses the coordinate transform.
+     * Used for G53 (machine coordinates) and internal repositioning.
+     */
     std::function<void(double, double, double, double, double)> moveCallbackRaw_;
 
     // --- Runtime state ---

@@ -36,23 +36,27 @@ inline CyclicSliceHealth healthLoad(const uint64_t& p) {
 inline void healthStore(uint64_t& p, const CyclicSliceHealth& h) {
     __atomic_store_n(&p, h.pack(), __ATOMIC_RELEASE);
 }
-/// Change last_status only (Stale marking keeps wkc/consec for the
-/// following timeout classification).
+/**
+ * Change last_status only (Stale marking keeps wkc/consec for the
+ * following timeout classification).
+ */
 inline void healthMarkStatus(uint64_t& p, CyclicSliceStatus st) {
     auto h = healthLoad(p);
     h.last_status = st;
     healthStore(p, h);
 }
-/// Unconditional failure: set status and bump the failure streak.
+/**Unconditional failure: set status and bump the failure streak. */
 inline void healthFail(uint64_t& p, CyclicSliceStatus st) {
     auto h = healthLoad(p);
     h.last_status = st;
     ++h.consecutive_failures;
     healthStore(p, h);
 }
-/// Timeout: keeps a Stale classification (the late echo IS the story)
-/// but still bumps the consecutive-failure streak.  `expected` refreshes
-/// the published expectation so diagnostics stay current.
+/**
+ * Timeout: keeps a Stale classification (the late echo IS the story)
+ * but still bumps the consecutive-failure streak.  `expected` refreshes
+ * the published expectation so diagnostics stay current.
+ */
 inline void healthTimeout(uint64_t& p, uint16_t expected) {
     auto h = healthLoad(p);
     if (h.last_status != CyclicSliceStatus::Stale)
@@ -61,7 +65,7 @@ inline void healthTimeout(uint64_t& p, uint16_t expected) {
     ++h.consecutive_failures;
     healthStore(p, h);
 }
-/// Full outcome write: status + WKC pair + failure-streak bookkeeping.
+/**Full outcome write: status + WKC pair + failure-streak bookkeeping. */
 inline void markRunStatus(uint64_t& p, CyclicSliceStatus st,
                           uint16_t wkc = 0, uint16_t expected = 0xFFFF) {
     auto h = healthLoad(p);

@@ -64,7 +64,7 @@ public:
         const std::string& filePrefix,
         const tether::motion::replanner::KdeEvaluation& kde) const;
 
-    /// Convert a normalized density [0,1] to an SVG color string.
+    /**Convert a normalized density [0,1] to an SVG color string. */
     std::string densityColor(double normalizedDensity) const;
 
 private:

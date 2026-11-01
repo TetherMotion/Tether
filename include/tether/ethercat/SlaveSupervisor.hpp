@@ -149,7 +149,7 @@ class Slave;
  */
 class SlaveSupervisor {
 public:
-    /// Maximum number of slaves the supervisor can track
+    /**Maximum number of slaves the supervisor can track */
     static constexpr size_t kMaxSlaves = ECAT_STATUS_POLLER_MAX_SLAVES;
 
     /**
@@ -175,10 +175,10 @@ public:
      */
     void configure(const RecoveryConfig& config);
 
-    /// Get the current configuration
+    /**Get the current configuration */
     const RecoveryConfig& config() const { return config_; }
 
-    /// Check if the supervisor is enabled (config_.enabled == true)
+    /**Check if the supervisor is enabled (config_.enabled == true) */
     bool isEnabled() const { return config_.enabled; }
 
     // ----- Recovery Handler -----
@@ -205,7 +205,7 @@ public:
      */
     bool removeEventListener(IRecoveryEventListener* listener);
 
-    /// Remove all event listeners
+    /**Remove all event listeners */
     void clearEventListeners();
 
     // ----- Lifecycle -----
@@ -321,7 +321,7 @@ public:
      */
     void resetSlaveState(uint16_t slave_index);
 
-    /// Get the number of slaves being supervised
+    /**Get the number of slaves being supervised */
     uint16_t slaveCount() const { return slave_count_.load(std::memory_order_acquire); }
 
 private:

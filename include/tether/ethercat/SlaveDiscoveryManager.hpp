@@ -99,60 +99,60 @@ class Master;
  * `initSlaves()`). "Deep" options require a full SII category parse.
  */
 enum class DiscoveryOption : uint32_t {
-    /// Just count slaves (BRD scan only, no SII reads). Always implicitly done.
+    /**Just count slaves (BRD scan only, no SII reads). Always implicitly done. */
     SlaveCount        = 0x00000001,
 
     // --- Identity (SII words 0x08-0x0F, shallow) ---
-    /// Vendor ID (SII word 0x08-0x09)
+    /**Vendor ID (SII word 0x08-0x09) */
     VendorId          = 0x00000002,
-    /// Product code (SII word 0x0A-0x0B)
+    /**Product code (SII word 0x0A-0x0B) */
     ProductCode       = 0x00000004,
-    /// Revision number (SII word 0x0C-0x0D)
+    /**Revision number (SII word 0x0C-0x0D) */
     RevisionNumber    = 0x00000008,
-    /// Serial number (SII word 0x0E-0x0F)
+    /**Serial number (SII word 0x0E-0x0F) */
     SerialNumber      = 0x00000010,
 
     // --- Strings (SII CAT_STRINGS + CAT_GENERAL, deep) ---
-    /// Device name, group name, order code
+    /**Device name, group name, order code */
     DeviceNames       = 0x00000020,
 
     // --- Mailbox (SII words 0x14-0x1D, shallow) ---
-    /// Mailbox offsets/sizes (bootstrap + standard)
+    /**Mailbox offsets/sizes (bootstrap + standard) */
     MailboxConfig     = 0x00000040,
-    /// Supported mailbox protocols (CoE, FoE, EoE, AoE, SoE, VoE)
+    /**Supported mailbox protocols (CoE, FoE, EoE, AoE, SoE, VoE) */
     MailboxProtocols  = 0x00000080,
 
     // --- Process data (SII categories, deep) ---
-    /// Sync Manager configuration (CAT_SYNC_MANAGER)
+    /**Sync Manager configuration (CAT_SYNC_MANAGER) */
     SyncManagers      = 0x00000100,
-    /// FMMU configuration (CAT_FMMU)
+    /**FMMU configuration (CAT_FMMU) */
     FMMUs             = 0x00000200,
-    /// TxPDO descriptions (CAT_TXPDO)
+    /**TxPDO descriptions (CAT_TXPDO) */
     TxPDOs            = 0x00000400,
-    /// RxPDO descriptions (CAT_RXPDO)
+    /**RxPDO descriptions (CAT_RXPDO) */
     RxPDOs            = 0x00000800,
 
     // --- Distributed Clocks (SII CAT_DC, deep) ---
-    /// DC configuration (cycle times, sync modes)
+    /**DC configuration (cycle times, sync modes) */
     DistributedClocks = 0x00001000,
 
     // --- Device profile (SII CAT_GENERAL, deep) ---
-    /// CoE/FoE/EoE details, DS402 channels, system manager class
+    /**CoE/FoE/EoE details, DS402 channels, system manager class */
     DeviceProfile     = 0x00002000,
 
     // --- General info (SII CAT_GENERAL, deep) ---
-    /// General flags, E-Bus current, physical port config
+    /**General flags, E-Bus current, physical port config */
     GeneralInfo       = 0x00004000,
 
     // --- Physical ports (SII CAT_GENERAL, deep) ---
-    /// Physical port descriptor
+    /**Physical port descriptor */
     PhysicalPorts     = 0x00008000,
 
     // --- EEPROM size (SII word 0x2E, shallow) ---
-    /// EEPROM size in Kbits
+    /**EEPROM size in Kbits */
     EepromSize        = 0x00010000,
 
-    /// Everything available
+    /**Everything available */
     All               = 0xFFFFFFFF,
 };
 
@@ -169,37 +169,49 @@ enum class DiscoveryOption : uint32_t {
  */
 class DiscoveryOptions {
 public:
-    /// Empty options (only BRD scan / slave count).
+    /**Empty options (only BRD scan / slave count). */
     constexpr DiscoveryOptions() = default;
 
-    /// Single option.
-    /// @param o Option to enable (e.g. DiscoveryOption::All)
+    /**
+     * Single option.
+     * @param o Option to enable (e.g. DiscoveryOption::All)
+     */
     constexpr DiscoveryOptions(DiscoveryOption o)
         : mask_(static_cast<uint32_t>(o)) {}
 
-    /// Combine multiple options from an initializer_list.
-    /// @param opts Options to enable; all are OR-ed into the mask
+    /**
+     * Combine multiple options from an initializer_list.
+     * @param opts Options to enable; all are OR-ed into the mask
+     */
     DiscoveryOptions(std::initializer_list<DiscoveryOption> opts) {
         for (auto o : opts) mask_ |= static_cast<uint32_t>(o);
     }
 
-    /// Check whether a specific option is set.
-    /// @param o Option to test
-    /// @return `true` if `o` is enabled in this mask
+    /**
+     * Check whether a specific option is set.
+     * @param o Option to test
+     * @return `true` if `o` is enabled in this mask
+     */
     constexpr bool has(DiscoveryOption o) const {
         return (mask_ & static_cast<uint32_t>(o)) != 0;
     }
 
-    /// True if any option is set (i.e. SII reads are needed).
-    /// @return `true` if at least one option is enabled
+    /**
+     * True if any option is set (i.e. SII reads are needed).
+     * @return `true` if at least one option is enabled
+     */
     constexpr bool any() const { return mask_ != 0; }
 
-    /// True if no options are set (BRD scan only).
-    /// @return `true` if the mask is empty
+    /**
+     * True if no options are set (BRD scan only).
+     * @return `true` if the mask is empty
+     */
     constexpr bool empty() const { return mask_ == 0; }
 
-    /// Raw bitmask value.
-    /// @return OR-ed DiscoveryOption bits
+    /**
+     * Raw bitmask value.
+     * @return OR-ed DiscoveryOption bits
+     */
     constexpr uint32_t mask() const { return mask_; }
 
 private:
@@ -218,10 +230,10 @@ private:
  * slave exists.
  */
 struct DiscoveredSlave {
-    /// Zero-based bus position (always set).
+    /**Zero-based bus position (always set). */
     uint16_t index = 0;
 
-    /// Configured station address (SII alias or auto-assigned).
+    /**Configured station address (SII alias or auto-assigned). */
     std::optional<uint16_t> configured_address;
 
     // --- Identity ---
@@ -267,38 +279,48 @@ struct DiscoveredSlave {
     // Query helpers
     // ------------------------------------------------------------------
 
-    /// True if this slave's vendor ID matches `vid`.
-    /// @param vid Vendor ID to compare against
-    /// @return `false` if vendor_id was not discovered
+    /**
+     * True if this slave's vendor ID matches `vid`.
+     * @param vid Vendor ID to compare against
+     * @return `false` if vendor_id was not discovered
+     */
     bool hasVendorId(uint32_t vid) const {
         return vendor_id.has_value() && *vendor_id == vid;
     }
 
-    /// True if this slave's product code matches `pid`.
-    /// @param pid Product code to compare against
-    /// @return `false` if product_code was not discovered
+    /**
+     * True if this slave's product code matches `pid`.
+     * @param pid Product code to compare against
+     * @return `false` if product_code was not discovered
+     */
     bool hasProductCode(uint32_t pid) const {
         return product_code.has_value() && *product_code == pid;
     }
 
-    /// True if both vendor ID and product code match.
-    /// @param vid Vendor ID to compare against
-    /// @param pid Product code to compare against
-    /// @return `true` only when both identity fields match
+    /**
+     * True if both vendor ID and product code match.
+     * @param vid Vendor ID to compare against
+     * @param pid Product code to compare against
+     * @return `true` only when both identity fields match
+     */
     bool hasVendorAndProduct(uint32_t vid, uint32_t pid) const {
         return hasVendorId(vid) && hasProductCode(pid);
     }
 
-    /// True if the device name exactly matches `name`.
-    /// @param name Expected device name
-    /// @return `false` if device_name was not discovered
+    /**
+     * True if the device name exactly matches `name`.
+     * @param name Expected device name
+     * @return `false` if device_name was not discovered
+     */
     bool hasDeviceName(std::string_view name) const {
         return device_name.has_value() && *device_name == name;
     }
 
-    /// True if the device name contains `substr` (case-sensitive).
-    /// @param substr Substring to search for in the device name
-    /// @return `false` if device_name was not discovered
+    /**
+     * True if the device name contains `substr` (case-sensitive).
+     * @param substr Substring to search for in the device name
+     * @return `false` if device_name was not discovered
+     */
     bool hasDeviceNameContaining(std::string_view substr) const {
         return device_name.has_value() &&
                device_name->find(substr) != std::string::npos;
@@ -352,24 +374,30 @@ public:
     // Asynchronous discovery (returns std::future, "Async" suffix)
     // ------------------------------------------------------------------
 
-    /// Async version of discover(opts).
-    /// @param opts What to read per slave (default: everything)
-    /// @return Future yielding one DiscoveredSlave per slave found
+    /**
+     * Async version of discover(opts).
+     * @param opts What to read per slave (default: everything)
+     * @return Future yielding one DiscoveredSlave per slave found
+     */
     std::future<std::vector<DiscoveredSlave>> discoverAsync(
         DiscoveryOptions opts = DiscoveryOption::All);
 
-    /// Async version of discoverOne(index, opts).
-    /// @param index Zero-based slave position
-    /// @param opts What to read (default: everything)
-    /// @return Future yielding the discovered slave
+    /**
+     * Async version of discoverOne(index, opts).
+     * @param index Zero-based slave position
+     * @param opts What to read (default: everything)
+     * @return Future yielding the discovered slave
+     */
     std::future<DiscoveredSlave> discoverOneAsync(
         uint16_t index,
         DiscoveryOptions opts = DiscoveryOption::All);
 
-    /// Async version of discover(indices, opts).
-    /// @param indices Slave indices to discover
-    /// @param opts What to read per slave (default: everything)
-    /// @return Future yielding one DiscoveredSlave per requested index
+    /**
+     * Async version of discover(indices, opts).
+     * @param indices Slave indices to discover
+     * @param opts What to read per slave (default: everything)
+     * @return Future yielding one DiscoveredSlave per requested index
+     */
     std::future<std::vector<DiscoveredSlave>> discoverAsync(
         std::span<const uint16_t> indices,
         DiscoveryOptions opts = DiscoveryOption::All);
@@ -378,12 +406,16 @@ public:
     // Configuration
     // ------------------------------------------------------------------
 
-    /// Set the maximum number of worker threads for parallel per-slave SII reads.
-    /// @param max Thread cap; values below 1 are clamped to 1
+    /**
+     * Set the maximum number of worker threads for parallel per-slave SII reads.
+     * @param max Thread cap; values below 1 are clamped to 1
+     */
     void setMaxThreads(uint16_t max) { max_threads_ = max > 0 ? max : 1; }
 
-    /// Current maximum worker thread count (default: 1).
-    /// @return Configured thread cap
+    /**
+     * Current maximum worker thread count (default: 1).
+     * @return Configured thread cap
+     */
     uint16_t maxThreads() const { return max_threads_; }
 
 private:
@@ -391,12 +423,12 @@ private:
 
     explicit SlaveDiscoveryManager(Master& master);
 
-    /// Core synchronous discovery used by both sync and async public methods.
+    /**Core synchronous discovery used by both sync and async public methods. */
     std::vector<DiscoveredSlave> discoverSync(DiscoveryOptions opts,
                                               std::span<const uint16_t> indices,
                                               bool all_slaves);
 
-    /// Read SII data for one slave into a DiscoveredSlave.
+    /**Read SII data for one slave into a DiscoveredSlave. */
     void readSlaveSii(DiscoveredSlave& out, DiscoveryOptions opts);
 
     Master* master_;

@@ -6,36 +6,38 @@
 #include "tether/TetherConfig.hpp"
 #endif
 
-/// @file GCodeExecutor.hpp
-/// @brief G-code executor that dispatches commands to callbacks.
-///
-/// This file includes the parser, state, callbacks, and macro sub-components
-/// and defines the main GCodeExecutor class.
-///
-/// @par Feature limitations
-/// The Klipper G-code executor is a lightweight parser for 3D printer
-/// control. It does **not** support the following features that the main
-/// Tether RS274/NGC interpreter (tether::gcode::GCodeInterpreter) provides:
-///
-/// - O-code control flow (subroutines, if/else, while, repeat)
-/// - # parameters and expression evaluation
-/// - Tool compensation (G40-G42, G43-G49)
-/// - Full canned cycle semantics (G73-G89 with rigid tapping)
-/// - NURBS splines (G5.1, G5.2/G5.3)
-/// - Execution modes (MDI, STEP, VERIFY)
-///
-/// Coordinate system features that ARE supported:
-/// - Work coordinate systems G54-G59.3 (selection + offsets)
-/// - G52 local coordinate offset
-/// - G68/G69 coordinate rotation (2D plane + 3D Euler + axis-angle)
-/// - G51/G50 per-axis and uniform scaling
-/// - G53 machine coordinates (non-modal bypass)
-/// - G92 position offset and G92.1/G92.2/G92.3 reset
-///
-/// Conversely, it provides 3D-printer-specific features not in the main
-/// interpreter: temperature control, bed mesh leveling, input shaping,
-/// TMC driver configuration, LED control, and 50+ Klipper extended
-/// commands. See docs/KlipperGcodeCommands.md for the full reference.
+/**
+ * @file GCodeExecutor.hpp
+ * @brief G-code executor that dispatches commands to callbacks.
+ *
+ * This file includes the parser, state, callbacks, and macro sub-components
+ * and defines the main GCodeExecutor class.
+ *
+ * @par Feature limitations
+ * The Klipper G-code executor is a lightweight parser for 3D printer
+ * control. It does **not** support the following features that the main
+ * Tether RS274/NGC interpreter (tether::gcode::GCodeInterpreter) provides:
+ *
+ * - O-code control flow (subroutines, if/else, while, repeat)
+ * - # parameters and expression evaluation
+ * - Tool compensation (G40-G42, G43-G49)
+ * - Full canned cycle semantics (G73-G89 with rigid tapping)
+ * - NURBS splines (G5.1, G5.2/G5.3)
+ * - Execution modes (MDI, STEP, VERIFY)
+ *
+ * Coordinate system features that ARE supported:
+ * - Work coordinate systems G54-G59.3 (selection + offsets)
+ * - G52 local coordinate offset
+ * - G68/G69 coordinate rotation (2D plane + 3D Euler + axis-angle)
+ * - G51/G50 per-axis and uniform scaling
+ * - G53 machine coordinates (non-modal bypass)
+ * - G92 position offset and G92.1/G92.2/G92.3 reset
+ *
+ * Conversely, it provides 3D-printer-specific features not in the main
+ * interpreter: temperature control, bed mesh leveling, input shaping,
+ * TMC driver configuration, LED control, and 50+ Klipper extended
+ * commands. See docs/KlipperGcodeCommands.md for the full reference.
+ */
 
 #include "tether/klipper/klippy/GCodeParser.hpp"
 #include "tether/klipper/klippy/PrinterMotionState.hpp"
@@ -69,19 +71,21 @@ class VirtualSdcard;
 // G-code executor
 // ============================================================================
 
-/// @brief Executes G-code commands by dispatching to callbacks.
+/**@brief Executes G-code commands by dispatching to callbacks. */
 class GCodeExecutor {
 public:
     GCodeExecutor(GcodeCallbacks callbacks, PrinterMotionState* state = nullptr)
         : callbacks_(std::move(callbacks))
         , state_(state ? state : &internalState_) {}
 
-    /// @brief Set the macro registry for macro expansion.
+    /**@brief Set the macro registry for macro expansion. */
     void setMacroRegistry(GcodeMacroRegistry* registry) { macroRegistry_ = registry; }
 
-    /// @brief Execute a G-code script (possibly multiple lines).
-    /// @param script Multi-line G-code string.
-    /// @return True if all commands executed successfully.
+    /**
+     * @brief Execute a G-code script (possibly multiple lines).
+     * @param script Multi-line G-code string.
+     * @return True if all commands executed successfully.
+     */
     bool execute(const std::string& script) {
         bool success = true;
         size_t pos = 0;
@@ -102,7 +106,7 @@ public:
         return success;
     }
 
-    /// @brief Execute a single G-code line.
+    /**@brief Execute a single G-code line. */
     bool executeLine(const std::string& line) {
         auto parsed = parseGcodeLine(line);
         if (!parsed) return true; // Empty/comment lines are OK
@@ -1222,28 +1226,30 @@ public:
         return true;
     }
 
-    /// @brief Get the current printer state.
+    /**@brief Get the current printer state. */
     const PrinterMotionState& state() const { return *state_; }
 
-    /// @brief Get mutable printer state.
+    /**@brief Get mutable printer state. */
     PrinterMotionState& state() { return *state_; }
 
-    /// @brief Get the callbacks (for extended command dispatch).
+    /**@brief Get the callbacks (for extended command dispatch). */
     GcodeCallbacks& callbacks() { return callbacks_; }
     const GcodeCallbacks& callbacks() const { return callbacks_; }
 
 private:
-    /// @brief Compute machine-space speed from program-space feed rate.
-    ///
-    /// When G51 scaling or G68 rotation is active, the machine-space distance
-    /// differs from the program-space distance. This method computes the
-    /// ratio by transforming the direction vector and scales the feed rate
-    /// accordingly. If the transform is identity, the speed is unchanged.
-    ///
-    /// @param progStartX/Y/Z  Program-space start position.
-    /// @param progEndX/Y/Z    Program-space end position.
-    /// @param feedRate        Program-space feed rate (mm/min).
-    /// @return Machine-space speed (mm/s).
+    /**
+     * @brief Compute machine-space speed from program-space feed rate.
+     *
+     * When G51 scaling or G68 rotation is active, the machine-space distance
+     * differs from the program-space distance. This method computes the
+     * ratio by transforming the direction vector and scales the feed rate
+     * accordingly. If the transform is identity, the speed is unchanged.
+     *
+     * @param progStartX/Y/Z  Program-space start position.
+     * @param progEndX/Y/Z    Program-space end position.
+     * @param feedRate        Program-space feed rate (mm/min).
+     * @return Machine-space speed (mm/s).
+     */
     double computeScaledSpeed(
         double progStartX, double progStartY, double progStartZ,
         double progEndX, double progEndY, double progEndZ,
@@ -1432,24 +1438,26 @@ private:
         return true;
     }
 
-    /// @brief Execute an arc move (G2/G3).
-    /// Decomposes the arc into line segments and calls move for each.
-    ///
-    /// @details
-    /// The arc center and all interpolated points are computed in **program
-    /// space**. The move callback applies the coordinate transform
-    /// (WCS + G52 + G68 rotation + G51 scale) to each interpolated point,
-    /// so a circle in program space correctly maps to an ellipse in machine
-    /// space when rotation or non-uniform scaling is active.
-    ///
-    /// The I/J/K center offsets are relative to the start position in
-    /// program space and define the arc geometry in program space. The
-    /// transform is applied to each interpolated point via the move
-    /// callback (through @ref CoordinateTransform::toMachineXYZ).
-    ///
-    /// For G17 (XY plane): I=X offset, J=Y offset
-    /// For G18 (ZX plane): I=X offset, K=Z offset
-    /// For G19 (YZ plane): J=Y offset, K=Z offset
+    /**
+     * @brief Execute an arc move (G2/G3).
+     * Decomposes the arc into line segments and calls move for each.
+     *
+     * @details
+     * The arc center and all interpolated points are computed in **program
+     * space**. The move callback applies the coordinate transform
+     * (WCS + G52 + G68 rotation + G51 scale) to each interpolated point,
+     * so a circle in program space correctly maps to an ellipse in machine
+     * space when rotation or non-uniform scaling is active.
+     *
+     * The I/J/K center offsets are relative to the start position in
+     * program space and define the arc geometry in program space. The
+     * transform is applied to each interpolated point via the move
+     * callback (through @ref CoordinateTransform::toMachineXYZ).
+     *
+     * For G17 (XY plane): I=X offset, J=Y offset
+     * For G18 (ZX plane): I=X offset, K=Z offset
+     * For G19 (YZ plane): J=Y offset, K=Z offset
+     */
     bool executeArcMove(const GcodeLine& g) {
         double x = g.has('X') ? g.get('X') : state_->position[0];
         double y = g.has('Y') ? g.get('Y') : state_->position[1];
@@ -1657,9 +1665,11 @@ private:
         return true;
     }
 
-    /// @brief Execute a Bezier spline move (G5).
-    /// Uses cubic Bezier with I/J control point 1 and P/Q control point 2.
-    /// Delegates the actual curve interpolation to the move callback.
+    /**
+     * @brief Execute a Bezier spline move (G5).
+     * Uses cubic Bezier with I/J control point 1 and P/Q control point 2.
+     * Delegates the actual curve interpolation to the move callback.
+     */
     bool executeBezierMove(const GcodeLine& g) {
         // G5 X.. Y.. Z.. E.. F.. I.. J.. P.. Q..
         // First control point: (I, J) relative to start

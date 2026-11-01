@@ -1,8 +1,10 @@
 #pragma once
 
-/// Toolkit-agnostic sparkline model: renders a sample history as Unicode
-/// block characters (▁▂▃▄▅▆▇█).  The ncurses renderer lives in
-/// terminal_ui/Sparkline.hpp as a thin wrapper.
+/**
+ * Toolkit-agnostic sparkline model: renders a sample history as Unicode
+ * block characters (▁▂▃▄▅▆▇█).  The ncurses renderer lives in
+ * terminal_ui/Sparkline.hpp as a thin wrapper.
+ */
 
 #include <algorithm>
 #include <array>
@@ -15,8 +17,10 @@
 namespace Tether {
 namespace UI {
 
-/// Fixed-capacity ring buffer of samples, newest last.  `samples()` returns
-/// them in chronological order for rendering.
+/**
+ * Fixed-capacity ring buffer of samples, newest last.  `samples()` returns
+ * them in chronological order for rendering.
+ */
 template <size_t Capacity>
 class SparklineHistory {
 public:
@@ -56,9 +60,11 @@ private:
     size_t head_ = 0, count_ = 0;
 };
 
-/// Render `samples` (chronological, right-aligned to `width` — extra room is
-/// filled with the lowest block) as block glyphs quantized onto [lo, hi].
-/// Returns up to `width` characters (one glyph per column).
+/**
+ * Render `samples` (chronological, right-aligned to `width` — extra room is
+ * filled with the lowest block) as block glyphs quantized onto [lo, hi].
+ * Returns up to `width` characters (one glyph per column).
+ */
 inline std::string renderSparkline(std::span<const double> samples,
                                    size_t width,
                                    double lo, double hi) {

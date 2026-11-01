@@ -119,10 +119,12 @@ public:
                             uint16_t index, uint8_t sub,
                             const char* phaseLabel);
 
-    /// Rate limit for drained-foreign-traffic WARN logs: a slave that
-    /// keeps feeding stale/foreign responses would otherwise emit one
-    /// WARN per poll iteration (line-rate log spam).  WARNs the first 3
-    /// drains of a transaction, then one per 256.
+    /**
+     * Rate limit for drained-foreign-traffic WARN logs: a slave that
+     * keeps feeding stale/foreign responses would otherwise emit one
+     * WARN per poll iteration (line-rate log spam).  WARNs the first 3
+     * drains of a transaction, then one per 256.
+     */
     static bool drainWarnVisible(uint32_t drain_count) {
         return drain_count <= 3 || (drain_count & 0xFFu) == 0;
     }

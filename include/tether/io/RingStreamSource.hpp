@@ -44,14 +44,20 @@ class IRingStreamSource {
 public:
     virtual ~IRingStreamSource() = default;
 
-    /// Entry IDs covered by this source's rows, in row-field order.
-    /// @return Registry entry IDs for each row field
+    /**
+     * Entry IDs covered by this source's rows, in row-field order.
+     * @return Registry entry IDs for each row field
+     */
     virtual std::span<const uint64_t> schemaEntryIds() const = 0;
-    /// Byte size of each field, parallel to schemaEntryIds().  Fixed-size only.
-    /// @return Per-field byte sizes
+    /**
+     * Byte size of each field, parallel to schemaEntryIds().  Fixed-size only.
+     * @return Per-field byte sizes
+     */
     virtual std::span<const uint16_t> schemaFieldSizes() const = 0;
-    /// Total bytes per row image, including the leading 8-byte timestamp.
-    /// @return Row image stride [bytes]
+    /**
+     * Total bytes per row image, including the leading 8-byte timestamp.
+     * @return Row image stride [bytes]
+     */
     virtual size_t rowSize() const = 0;
 
     /**
@@ -63,15 +69,17 @@ public:
      */
     virtual size_t drainRows(uint8_t* dst, size_t maxRows) = 0;
 
-    /// Enable production.  Clears pending rows and the drop counter.
+    /**Enable production.  Clears pending rows and the drop counter. */
     virtual void start() = 0;
-    /// Disable production.
+    /**Disable production. */
     virtual void stop() = 0;
-    /// @return `true` while production is enabled
+    /**@return `true` while production is enabled */
     virtual bool active() const = 0;
 
-    /// Producer-side count of rows dropped because the ring was full.
-    /// @return Rows lost since start()
+    /**
+     * Producer-side count of rows dropped because the ring was full.
+     * @return Rows lost since start()
+     */
     virtual uint64_t dropped() const = 0;
 
     /**
@@ -117,10 +125,12 @@ public:
         : entryIds_(std::move(entryIds))
         , fieldSizes_(std::move(fieldSizes)) {}
 
-    /// (Re)install the schema.  Not thread-safe: call during setup, before
-    /// any session can bind this source.
-    /// @param entryIds Registry IDs per row field
-    /// @param fieldSizes Byte size per field (parallel to entryIds)
+    /**
+     * (Re)install the schema.  Not thread-safe: call during setup, before
+     * any session can bind this source.
+     * @param entryIds Registry IDs per row field
+     * @param fieldSizes Byte size per field (parallel to entryIds)
+     */
     void setSchema(std::vector<uint64_t> entryIds,
                    std::vector<uint16_t> fieldSizes) {
         entryIds_   = std::move(entryIds);
@@ -148,17 +158,21 @@ public:
     bool active() const override { return active_.load(std::memory_order_acquire); }
     uint64_t dropped() const override { return ring_.dropped(); }
 
-    /// Producer side (single producer thread): fill a row in place.
-    /// @param fill Callable that initializes the pending row
-    /// @return `false` if the source is inactive or the ring is full
+    /**
+     * Producer side (single producer thread): fill a row in place.
+     * @param fill Callable that initializes the pending row
+     * @return `false` if the source is inactive or the ring is full
+     */
     template <typename F>
     bool produce(F&& fill) {
         if (!active_.load(std::memory_order_acquire)) return false;
         return ring_.produce(std::forward<F>(fill));
     }
 
-    /// Underlying ring (e.g. for reset during shutdown).
-    /// @return The backing SPSC ring buffer
+    /**
+     * Underlying ring (e.g. for reset during shutdown).
+     * @return The backing SPSC ring buffer
+     */
     Tether::Utils::SPSCRing<Row, Capacity>& ring() { return ring_; }
 
 private:

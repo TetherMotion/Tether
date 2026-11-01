@@ -73,11 +73,11 @@ struct PDOMapping {
  * @brief EtherCAT slave configuration
  */
 struct EtherCATSlaveConfig {
-    uint32_t slaveId{0};            ///< Slave position on bus
-    uint32_t vendorId{0};           ///< Vendor ID
-    uint32_t productCode{0};        ///< Product code
-    PDOMapping pdoMapping;          ///< PDO mapping configuration
-    std::string name;               ///< Slave name/description
+    uint32_t slaveId{0}; /**< Slave position on bus */
+    uint32_t vendorId{0}; /**< Vendor ID */
+    uint32_t productCode{0}; /**< Product code */
+    PDOMapping pdoMapping; /**< PDO mapping configuration */
+    std::string name; /**< Slave name/description */
 };
 
 /**

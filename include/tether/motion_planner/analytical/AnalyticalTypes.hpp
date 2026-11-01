@@ -75,11 +75,11 @@ namespace MotionPlanner::analytical {
  *   (e.g., velocity constraint active with a = 0)
  */
 enum class ControlMode : uint8_t {
-    ACCEL_MAX,            ///< eta = eta_upper
-    DECEL_MAX,            ///< eta = eta_lower
-    ZERO_JERK,            ///< eta = 0, a = const
-    SINGULAR,             ///< singular arc (phi = 0)
-    CONSTRAINT_SURFACE,   ///< following active constraint boundary
+    ACCEL_MAX, /**< eta = eta_upper */
+    DECEL_MAX, /**< eta = eta_lower */
+    ZERO_JERK, /**< eta = 0, a = const */
+    SINGULAR, /**< singular arc (phi = 0) */
+    CONSTRAINT_SURFACE, /**< following active constraint boundary */
 };
 
 /**
@@ -123,27 +123,29 @@ inline const char* controlModeName(ControlMode mode) {
  *   beta_i  = j⃗_i * v³ + 3 * κ⃗_i * v * a  (jounce and curvature terms)
  */
 struct KinematicCoefficients {
-    /// Tangent vector T = dp/ds (unit, from arcDerivatives order 1)
+    /**Tangent vector T = dp/ds (unit, from arcDerivatives order 1) */
     std::vector<double> tangent;      // size = dim
 
-    /// Curvature vector κ⃗ = d²p/ds² (from arcDerivatives order 2)
+    /**Curvature vector κ⃗ = d²p/ds² (from arcDerivatives order 2) */
     std::vector<double> curvature;    // size = dim
 
-    /// Jounce vector j⃗ = d³p/ds³ (from arcDerivatives order 3)
+    /**Jounce vector j⃗ = d³p/ds³ (from arcDerivatives order 3) */
     std::vector<double> jounce;       // size = dim
 
-    /// Per-axis alpha coefficients for jerk: alpha_i = T_i
+    /**Per-axis alpha coefficients for jerk: alpha_i = T_i */
     std::vector<double> alpha_jerk;   // size = dim
 
-    /// Per-axis beta coefficients for jerk: beta_i = j⃗_i*v³ + 3*κ⃗_i*v*a
+    /**Per-axis beta coefficients for jerk: beta_i = j⃗_i*v³ + 3*κ⃗_i*v*a */
     std::vector<double> beta_jerk;    // size = dim
 
-    /// Speed factor g(u) = ||C'(u)|| = ||T|| * ... actually for arc-length
-    /// parameterization, ds/du = g(u), and T = C'(u)/g(u). So g = ||C'(u)||.
-    /// But since we work in s-space, T is already the unit tangent.
+    /**
+     * Speed factor g(u) = ||C'(u)|| = ||T|| * ... actually for arc-length
+     * parameterization, ds/du = g(u), and T = C'(u)/g(u). So g = ||C'(u)||.
+     * But since we work in s-space, T is already the unit tangent.
+     */
     double speedFactor = 0.0;  // g(u) = ||C'(u)||
 
-    /// Path curvature magnitude kappa = ||κ⃗||
+    /**Path curvature magnitude kappa = ||κ⃗|| */
     double kappa = 0.0;
 };
 
@@ -163,26 +165,34 @@ struct EtaBounds {
     double eta_min = -std::numeric_limits<double>::infinity();
     double eta_max =  std::numeric_limits<double>::infinity();
 
-    /// Check if the interval is non-empty.
-    /// @return true when eta_min <= eta_max.
+    /**
+     * Check if the interval is non-empty.
+     * @return true when eta_min <= eta_max.
+     */
     bool feasible() const { return eta_min <= eta_max; }
 
-    /// Check if a given eta value is within the bounds.
-    /// @param eta Value to test.
-    /// @return true when eta_min <= eta <= eta_max.
+    /**
+     * Check if a given eta value is within the bounds.
+     * @param eta Value to test.
+     * @return true when eta_min <= eta <= eta_max.
+     */
     bool contains(double eta) const {
         return eta >= eta_min && eta <= eta_max;
     }
 
-    /// Clamp eta to the feasible interval.
-    /// @param eta Value to clamp.
-    /// @return eta limited to [eta_min, eta_max].
+    /**
+     * Clamp eta to the feasible interval.
+     * @param eta Value to clamp.
+     * @return eta limited to [eta_min, eta_max].
+     */
     double clamp(double eta) const {
         return std::max(eta_min, std::min(eta, eta_max));
     }
 
-    /// Intersect with another interval (take the tighter bounds).
-    /// @param other Interval to intersect with; bounds are tightened in place.
+    /**
+     * Intersect with another interval (take the tighter bounds).
+     * @param other Interval to intersect with; bounds are tightened in place.
+     */
     void intersect(const EtaBounds& other) {
         eta_min = std::max(eta_min, other.eta_min);
         eta_max = std::min(eta_max, other.eta_max);
@@ -211,44 +221,50 @@ struct EtaBounds {
  *   eta is determined by the constraint/optimality condition
  */
 struct SwitchingArc {
-    /// Arc-length domain
+    /**Arc-length domain */
     double s_begin = 0.0;
     double s_end = 0.0;
 
-    /// Control mode
+    /**Control mode */
     ControlMode mode = ControlMode::ACCEL_MAX;
 
-    /// Constant eta value for this arc.
-    /// For ACCEL_MAX: eta = eta_upper at s_begin (may vary along arc
-    ///   as constraints change, but we store the initial value and
-    ///   recompute during integration)
-    /// For DECEL_MAX: eta = eta_lower
-    /// For ZERO_JERK: eta = 0
-    /// For SINGULAR/CONSTRAINT_SURFACE: the determined value
+    /**
+     * Constant eta value for this arc.
+     * For ACCEL_MAX: eta = eta_upper at s_begin (may vary along arc
+     *   as constraints change, but we store the initial value and
+     *   recompute during integration)
+     * For DECEL_MAX: eta = eta_lower
+     * For ZERO_JERK: eta = 0
+     * For SINGULAR/CONSTRAINT_SURFACE: the determined value
+     */
     double eta = 0.0;
 
-    /// Initial conditions at s_begin (stored for independent reconstruction)
-    double v0 = 0.0;   ///< v(s_begin)
-    double a0 = 0.0;   ///< a(s_begin)
-    double t0 = 0.0;   ///< t(s_begin)
-    double u0 = 0.0;   ///< u(s_begin) — NURBS parameter
+    /**Initial conditions at s_begin (stored for independent reconstruction) */
+    double v0 = 0.0; /**< v(s_begin) */
+    double a0 = 0.0; /**< a(s_begin) */
+    double t0 = 0.0; /**< t(s_begin) */
+    double u0 = 0.0; /**< u(s_begin) — NURBS parameter */
 
-    /// For CONSTRAINT_SURFACE: which constraint is active
+    /**For CONSTRAINT_SURFACE: which constraint is active */
     int active_constraint_idx = -1;
 
-    /// Integration tolerance for ODE reconstruction
+    /**Integration tolerance for ODE reconstruction */
     double integrator_abs_tol = 1e-12;
     double integrator_rel_tol = 1e-10;
 
-    /// Arc duration (time span), computed during solve
+    /**Arc duration (time span), computed during solve */
     double duration = 0.0;
 
-    /// Check if this arc is valid (non-empty domain)
-    /// @return true when s_end > s_begin.
+    /**
+     * Check if this arc is valid (non-empty domain)
+     * @return true when s_end > s_begin.
+     */
     bool valid() const { return s_end > s_begin; }
 
-    /// Arc length span
-    /// @return s_end - s_begin.
+    /**
+     * Arc length span
+     * @return s_end - s_begin.
+     */
     double length() const { return s_end - s_begin; }
 };
 
@@ -278,80 +294,112 @@ class AnalyticalTrajectorySource {
 public:
     virtual ~AnalyticalTrajectorySource() = default;
 
-    /// Total traversal time (seconds)
-    /// @return Duration of the whole trajectory [s].
+    /**
+     * Total traversal time (seconds)
+     * @return Duration of the whole trajectory [s].
+     */
     virtual T totalTime() const = 0;
 
-    /// Total path length (arc length)
-    /// @return Arc length of the whole trajectory [units].
+    /**
+     * Total path length (arc length)
+     * @return Arc length of the whole trajectory [units].
+     */
     virtual T totalLength() const = 0;
 
-    /// Position in task space at time t
-    /// @param t Time from trajectory start [s]; clamped to the domain.
-    /// @return Position vector in R^Dim.
+    /**
+     * Position in task space at time t
+     * @param t Time from trajectory start [s]; clamped to the domain.
+     * @return Position vector in R^Dim.
+     */
     virtual Vec<Dim, T> position(T t) const = 0;
 
-    /// Velocity vector in task space at time t
-    /// @param t Time from trajectory start [s]; clamped to the domain.
-    /// @return Velocity vector in R^Dim.
+    /**
+     * Velocity vector in task space at time t
+     * @param t Time from trajectory start [s]; clamped to the domain.
+     * @return Velocity vector in R^Dim.
+     */
     virtual Vec<Dim, T> velocity(T t) const = 0;
 
-    /// Acceleration vector in task space at time t
-    /// @param t Time from trajectory start [s]; clamped to the domain.
-    /// @return Acceleration vector in R^Dim.
+    /**
+     * Acceleration vector in task space at time t
+     * @param t Time from trajectory start [s]; clamped to the domain.
+     * @return Acceleration vector in R^Dim.
+     */
     virtual Vec<Dim, T> acceleration(T t) const = 0;
 
-    /// Arc length position at time t
-    /// @param t Time from trajectory start [s]; clamped to the domain.
-    /// @return Path position [units].
+    /**
+     * Arc length position at time t
+     * @param t Time from trajectory start [s]; clamped to the domain.
+     * @return Path position [units].
+     */
     virtual T arcLength(T t) const = 0;
 
-    /// Time at which the trajectory reaches arc length s
-    /// @param s Path position [units]; clamped to [0, totalLength()].
-    /// @return Time [s] when that position is reached.
+    /**
+     * Time at which the trajectory reaches arc length s
+     * @param s Path position [units]; clamped to [0, totalLength()].
+     * @return Time [s] when that position is reached.
+     */
     virtual T timeAtArcLength(T s) const = 0;
 
-    /// Path (tangential) velocity magnitude at time t
-    /// @param t Time from trajectory start [s].
-    /// @return Tangential velocity [units/s].
+    /**
+     * Path (tangential) velocity magnitude at time t
+     * @param t Time from trajectory start [s].
+     * @return Tangential velocity [units/s].
+     */
     virtual T pathVelocity(T t) const = 0;
 
-    /// Path (tangential) acceleration magnitude at time t
-    /// @param t Time from trajectory start [s].
-    /// @return Tangential acceleration [units/s^2].
+    /**
+     * Path (tangential) acceleration magnitude at time t
+     * @param t Time from trajectory start [s].
+     * @return Tangential acceleration [units/s^2].
+     */
     virtual T pathAcceleration(T t) const = 0;
 
-    /// Path jerk magnitude at time t
-    /// @param t Time from trajectory start [s].
-    /// @return Tangential jerk [units/s^3].
+    /**
+     * Path jerk magnitude at time t
+     * @param t Time from trajectory start [s].
+     * @return Tangential jerk [units/s^3].
+     */
     virtual T pathJerk(T t) const = 0;
 
-    /// Curvature at time t
-    /// @param t Time from trajectory start [s].
-    /// @return Path curvature [1/units].
+    /**
+     * Curvature at time t
+     * @param t Time from trajectory start [s].
+     * @return Path curvature [1/units].
+     */
     virtual T curvature(T t) const = 0;
 
-    /// Source reference at time t (G-code traceability)
-    /// @param t Time from trajectory start [s].
-    /// @return G-code source location this trajectory point originates from.
+    /**
+     * Source reference at time t (G-code traceability)
+     * @param t Time from trajectory start [s].
+     * @return G-code source location this trajectory point originates from.
+     */
     virtual SourceReference sourceRef(T t) const = 0;
 
-    /// Segment index at time t
-    /// @param t Time from trajectory start [s].
-    /// @return Index of the trajectory segment containing @p t.
+    /**
+     * Segment index at time t
+     * @param t Time from trajectory start [s].
+     * @return Index of the trajectory segment containing @p t.
+     */
     virtual size_t segmentIndex(T t) const = 0;
 
-    /// Segment parameter [0,1] at time t
-    /// @param t Time from trajectory start [s].
-    /// @return Parameter of the segment containing @p t.
+    /**
+     * Segment parameter [0,1] at time t
+     * @param t Time from trajectory start [s].
+     * @return Parameter of the segment containing @p t.
+     */
     virtual T segmentParameter(T t) const = 0;
 
-    /// Representation type name (for logging/debugging)
-    /// @return Static representation name.
+    /**
+     * Representation type name (for logging/debugging)
+     * @return Static representation name.
+     */
     virtual const char* representationName() const = 0;
 
-    /// Highest path derivative represented by this analytical source.
-    /// @return Derivative order the source models.
+    /**
+     * Highest path derivative represented by this analytical source.
+     * @return Derivative order the source models.
+     */
     virtual ProfileDerivativeOrder derivativeOrder() const {
         return ProfileDerivativeOrder::Jerk;
     }
@@ -369,13 +417,13 @@ public:
  * precomputed element-wise certificates.
  */
 struct ErrorCertificate {
-    /// Position error bound (task-space units)
+    /**Position error bound (task-space units) */
     double pos_error = 0.0;
 
-    /// Velocity error bound (task-space units/second)
+    /**Velocity error bound (task-space units/second) */
     double vel_error = 0.0;
 
-    /// Acceleration error bound (task-space units/second²)
+    /**Acceleration error bound (task-space units/second²) */
     double acc_error = 0.0;
 };
 

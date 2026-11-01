@@ -74,19 +74,19 @@
 
 namespace tether::control::extrusion {
 
-/// @brief Parameters for the flow-adaptive heater controller.
+/**@brief Parameters for the flow-adaptive heater controller. */
 struct FlowAdaptiveHeaterParams {
     // --- Filament and heater ---
-    double filamentHeatCapacity  = 2.1;   ///< ρ·c_p [J/(mm³·K)]
-    double inletTempC            = 25.0;  ///< T_inlet [°C]
-    double heaterPowerScale      = 40.0;  ///< [W] at PWM=1
+    double filamentHeatCapacity  = 2.1; /**< ρ·c_p [J/(mm³·K)] */
+    double inletTempC            = 25.0; /**< T_inlet [°C] */
+    double heaterPowerScale      = 40.0; /**< [W] at PWM=1 */
 
     // --- Three-state thermal model ---
-    double heaterBlockCapacitance  = 8.0; ///< C_h [J/K]
-    double sensorCapacitance       = 1.0; ///< C_s [J/K]
-    double meltZoneCapacitance     = 2.0; ///< C_m [J/K]
-    double heaterSensorConductance = 2.0; ///< G_hs [W/K]
-    double sensorMeltConductance   = 1.5; ///< G_sm [W/K]
+    double heaterBlockCapacitance  = 8.0; /**< C_h [J/K] */
+    double sensorCapacitance       = 1.0; /**< C_s [J/K] */
+    double meltZoneCapacitance     = 2.0; /**< C_m [J/K] */
+    double heaterSensorConductance = 2.0; /**< G_hs [W/K] */
+    double sensorMeltConductance   = 1.5; /**< G_sm [W/K] */
 
     // --- Luenberger observer gains [1/s] ---
     double luenbergerGainHeater = 0.5;
@@ -94,13 +94,13 @@ struct FlowAdaptiveHeaterParams {
     double luenbergerGainMelt   = 0.3;
 
     // --- Feed-forward limits ---
-    double debtTimeConstant      = 2.0;   ///< τ [s] — post-emphasis decay
-    double maxPreEmphasisPower   = 0.4;   ///< [0-1 PWM]
-    double maxPostEmphasisPower  = 0.2;   ///< [0-1 PWM]
-    double maxHeaterOvershoot    = 10.0;  ///< [°C]
+    double debtTimeConstant      = 2.0; /**< τ [s] — post-emphasis decay */
+    double maxPreEmphasisPower   = 0.4; /**< [0-1 PWM] */
+    double maxPostEmphasisPower  = 0.2; /**< [0-1 PWM] */
+    double maxHeaterOvershoot    = 10.0; /**< [°C] */
 };
 
-/// @brief Flow-adaptive heater controller (PID + model-based pre/post-emphasis).
+/**@brief Flow-adaptive heater controller (PID + model-based pre/post-emphasis). */
 class FlowAdaptiveHeaterController : public ::tether::control::ControllerBase {
 public:
     explicit FlowAdaptiveHeaterController(FlowAdaptiveHeaterParams params = FlowAdaptiveHeaterParams{})
@@ -118,41 +118,41 @@ public:
         return "PID + three-state model-based pre/post-emphasis feed-forward.";
     }
 
-    /// @brief Set the PID gains of the internal backend.
+    /**@brief Set the PID gains of the internal backend. */
     void setGains(double kp, double ki, double kd) {
         pid_.setGains(kp, ki, kd);
     }
 
-    /// @brief Set the flow rate for the next control cycle [mm³/s].
+    /**@brief Set the flow rate for the next control cycle [mm³/s]. */
     void setFlow(double flowMm3PerS) { flowMm3PerS_ = flowMm3PerS; }
     double flow() const { return flowMm3PerS_; }
 
-    /// @brief Set the parameters (also resets the observer params).
+    /**@brief Set the parameters (also resets the observer params). */
     void setParams(FlowAdaptiveHeaterParams p) {
         params_ = p;
         observer_.setParams(toObserverParams(p));
     }
     const FlowAdaptiveHeaterParams& params() const { return params_; }
 
-    /// @brief Estimated melt-zone temperature from the internal observer.
+    /**@brief Estimated melt-zone temperature from the internal observer. */
     double meltTempEst() const { return observer_.meltTempEst(); }
 
-    /// @brief Heater-block state from the internal observer.
+    /**@brief Heater-block state from the internal observer. */
     double heaterBlockTemp() const { return observer_.heaterBlockTemp(); }
 
-    /// @brief Sensor-point state from the internal observer.
+    /**@brief Sensor-point state from the internal observer. */
     double sensorTemp() const { return observer_.sensorTemp(); }
 
-    /// @brief Last computed feed-forward contributions (diagnostics).
+    /**@brief Last computed feed-forward contributions (diagnostics). */
     struct EmphasisState {
         double preEmphasisPWM = 0.0;
         double postEmphasisPWM = 0.0;
         double thermalDebt = 0.0;
-        double sensorCouplingAlpha = 0.0; ///< Fraction of disturbance PID sees
+        double sensorCouplingAlpha = 0.0; /**< Fraction of disturbance PID sees */
     };
     const EmphasisState& emphasis() const { return emphasis_; }
 
-    /// @brief Reset internal state (PID, observer, debt).
+    /**@brief Reset internal state (PID, observer, debt). */
     void resetImpl() override {
         pid_.reset();
         observer_.reset();
@@ -183,17 +183,19 @@ private:
         return m;
     }
 
-    /// @brief Compute the sensor coupling factor α = G_sm / (G_hs + G_sm).
-    /// This is the fraction of the melt-zone thermal disturbance that the
-    /// PID (which reacts to T_s) will compensate on its own. The feed-forward
-    /// only needs to cover the remaining (1 - α) fraction.
+    /**
+     * @brief Compute the sensor coupling factor α = G_sm / (G_hs + G_sm).
+     * This is the fraction of the melt-zone thermal disturbance that the
+     * PID (which reacts to T_s) will compensate on its own. The feed-forward
+     * only needs to cover the remaining (1 - α) fraction.
+     */
     double sensorCouplingAlpha() const {
         const double Gsum = params_.heaterSensorConductance +
                             params_.sensorMeltConductance;
         return (Gsum > 0.0) ? params_.sensorMeltConductance / Gsum : 1.0;
     }
 
-    /// @brief Effective series conductance from heater block to melt zone.
+    /**@brief Effective series conductance from heater block to melt zone. */
     double effectiveConductance() const {
         const double Ghs = params_.heaterSensorConductance;
         const double Gsm = params_.sensorMeltConductance;
@@ -204,7 +206,7 @@ private:
     ::tether::control::PIDController pid_;
     MeltZoneThermalObserver observer_;
     double flowMm3PerS_ = 0.0;
-    double thermalDebt_ = 0.0;   ///< current thermal-debt state [W]
+    double thermalDebt_ = 0.0; /**< current thermal-debt state [W] */
     EmphasisState emphasis_;
 };
 

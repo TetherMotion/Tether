@@ -52,11 +52,11 @@ public:
     static constexpr uint32_t kVendorId    = Devices::EL1014.vendor_id;
     static constexpr uint32_t kProductCode = Devices::EL1014.product_code;
     static constexpr size_t   kNumChannels = Devices::EL1014.num_bits;
-    static constexpr uint16_t kTxPdoIndex  = 0x1A00;  ///< first of 0x1A00-0x1A03
+    static constexpr uint16_t kTxPdoIndex  = 0x1A00; /**< first of 0x1A00-0x1A03 */
 
     static constexpr DeviceIdentity kIdentity = Devices::EL1014;
 
-    /// Channel bitmask type — bit N corresponds to input channel N.
+    /**Channel bitmask type — bit N corresponds to input channel N. */
     using Channels = std::bitset<kNumChannels>;
 
     using Error        = Beckhoff::Error;
@@ -76,7 +76,7 @@ public:
 
     // -- Factories ---------------------------------------------------------------
 
-    /// True when `s` carries the EL1014 vendor/product identity.
+    /**True when `s` carries the EL1014 vendor/product identity. */
     static bool matches(const DiscoveredSlave& s) {
         return InputTerminal::matches(s, kIdentity);
     }
@@ -100,13 +100,13 @@ public:
     // -- std::bitset channel API -------------------------------------------------
     // Generic bit access (bit/bits) is inherited from InputTerminal.
 
-    /// Current state of a channel (0-3); false if out of range.
+    /**Current state of a channel (0-3); false if out of range. */
     bool get(size_t channel) const { return bit(channel); }
 
-    /// Current channel states (bit N = channel N).
+    /**Current channel states (bit N = channel N). */
     Channels channels() const { return Channels(bits()); }
 
-    /// Raw input byte (only the low 4 bits are used).
+    /**Raw input byte (only the low 4 bits are used). */
     uint8_t raw() const { return static_cast<uint8_t>(bits()); }
 };
 

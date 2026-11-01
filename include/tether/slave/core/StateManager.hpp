@@ -27,7 +27,7 @@ namespace EtherCAT { namespace slave {
 
 class StateManager {
 public:
-    /// @param registers  Pointer to the ESC register bank (for AL status/code updates).
+    /**@param registers  Pointer to the ESC register bank (for AL status/code updates). */
     explicit StateManager(std::array<uint8_t, 4096>* registers)
         : registers_(registers) {}
 
@@ -38,28 +38,32 @@ public:
 
     // ---- State transitions -------------------------------------------------
 
-    /// @brief Request a state change. Thread-safe.
-    /// @return true if the transition is valid and was performed.
+    /**
+     * @brief Request a state change. Thread-safe.
+     * @return true if the transition is valid and was performed.
+     */
     bool requestStateChange(const ALControl& control);
 
-    /// @brief Check if a state transition is valid per ETG.1000.
+    /**@brief Check if a state transition is valid per ETG.1000. */
     static bool canTransition(SlaveState from, SlaveState to);
 
-    /// @brief Set an error state. Thread-safe.
+    /**@brief Set an error state. Thread-safe. */
     void setError(ALStatusCode code);
 
-    /// @brief Clear the error state. Thread-safe.
+    /**@brief Clear the error state. Thread-safe. */
     void clearError();
 
     void setStateChangeCallback(StateChangeCallback callback) {
         stateChangeCallback_ = std::move(callback);
     }
 
-    /// @brief Set the initial state (called once during initialization).
+    /**@brief Set the initial state (called once during initialization). */
     void setInitialState(SlaveState state);
 
-    /// @brief Register a callback invoked on entering INIT state (for watchdog reset).
-    /// This breaks the dependency on WatchdogManager.
+    /**
+     * @brief Register a callback invoked on entering INIT state (for watchdog reset).
+     * This breaks the dependency on WatchdogManager.
+     */
     void setOnInitCallback(std::function<void()> callback) {
         onInitCallback_ = std::move(callback);
     }

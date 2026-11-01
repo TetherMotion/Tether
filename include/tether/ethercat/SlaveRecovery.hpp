@@ -35,16 +35,20 @@ class Slave;
  */
 enum class CriticalTrigger : uint16_t {
     None                = 0x0000,
-    /// React to standard AL status codes that indicate the slave needs reset
-    /// (SlaveNeedsInit, SlaveNeedsColdStart, SlaveNeedsPreOp,
-    ///  SlaveNeedsSafeOp, FatalSyncError, NoSyncError, SynchronizationError)
+    /**
+     * React to standard AL status codes that indicate the slave needs reset
+     * (SlaveNeedsInit, SlaveNeedsColdStart, SlaveNeedsPreOp,
+     *  SlaveNeedsSafeOp, FatalSyncError, NoSyncError, SynchronizationError)
+     */
     ALStatusCodes       = 0x0001,
-    /// React to transition failures (OP/SAFE_OP not confirmed, or slave
-    /// dropping to a lower state unexpectedly)
+    /**
+     * React to transition failures (OP/SAFE_OP not confirmed, or slave
+     * dropping to a lower state unexpectedly)
+     */
     TransitionFailures  = 0x0002,
-    /// React to app-injected critical flags via markCritical()
+    /**React to app-injected critical flags via markCritical() */
     AppInjected         = 0x0004,
-    /// React to all triggers
+    /**React to all triggers */
     All                 = 0xFFFF,
 };
 
@@ -66,17 +70,17 @@ inline bool has_trigger(CriticalTrigger flags, CriticalTrigger test) {
 // Recovery State
 // ============================================================================
 
-/// Per-slave recovery state tracked by the supervisor
+/**Per-slave recovery state tracked by the supervisor */
 enum class SlaveRecoveryState : uint8_t {
-    /// Slave is operating normally (no critical condition)
+    /**Slave is operating normally (no critical condition) */
     Normal      = 0,
-    /// Critical condition detected, recovery pending
+    /**Critical condition detected, recovery pending */
     Critical    = 1,
-    /// Recovery in progress (slave is being re-initialized)
+    /**Recovery in progress (slave is being re-initialized) */
     Recovering  = 2,
-    /// Recovery succeeded, slave is back in operation
+    /**Recovery succeeded, slave is back in operation */
     Recovered   = 3,
-    /// Recovery failed permanently (retry limit exceeded)
+    /**Recovery failed permanently (retry limit exceeded) */
     Failed      = 4,
 };
 
@@ -84,38 +88,38 @@ enum class SlaveRecoveryState : uint8_t {
 // Recovery Event
 // ============================================================================
 
-/// Type of recovery event
+/**Type of recovery event */
 enum class RecoveryEventType : uint8_t {
-    /// Critical condition detected on a slave
+    /**Critical condition detected on a slave */
     CriticalDetected  = 0,
-    /// Recovery attempt started
+    /**Recovery attempt started */
     RecoveryStarted   = 1,
-    /// Recovery attempt succeeded
+    /**Recovery attempt succeeded */
     RecoverySucceeded = 2,
-    /// Recovery attempt failed (will retry if attempts remain)
+    /**Recovery attempt failed (will retry if attempts remain) */
     RecoveryFailed    = 3,
-    /// Recovery permanently failed (retry limit exhausted)
+    /**Recovery permanently failed (retry limit exhausted) */
     RecoveryGaveUp    = 4,
-    /// Slave PDO data suspended (motion loop must skip this slave)
+    /**Slave PDO data suspended (motion loop must skip this slave) */
     SlaveSuspended    = 5,
-    /// Slave PDO data resumed (motion loop may use this slave again)
+    /**Slave PDO data resumed (motion loop may use this slave again) */
     SlaveResumed      = 6,
 };
 
-/// Human-readable name for a recovery event type
+/**Human-readable name for a recovery event type */
 const char* recoveryEventTypeName(RecoveryEventType type);
 
 /**
  * @brief Event payload delivered to recovery event listeners
  */
 struct RecoveryEvent {
-    RecoveryEventType type;           ///< Event type
-    uint16_t slave_index;             ///< Affected slave index
-    SlaveRecoveryState state;         ///< Current recovery state of the slave
-    uint16_t al_status_code;          ///< AL_STATUS_CODE that triggered this (0 if N/A)
-    int attempt;                      ///< Recovery attempt number (1-based, 0 for detection)
-    int max_attempts;                 ///< Configured max attempts
-    std::string_view detail;          ///< Human-readable detail string
+    RecoveryEventType type; /**< Event type */
+    uint16_t slave_index; /**< Affected slave index */
+    SlaveRecoveryState state; /**< Current recovery state of the slave */
+    uint16_t al_status_code; /**< AL_STATUS_CODE that triggered this (0 if N/A) */
+    int attempt; /**< Recovery attempt number (1-based, 0 for detection) */
+    int max_attempts; /**< Configured max attempts */
+    std::string_view detail; /**< Human-readable detail string */
 };
 
 // ============================================================================
@@ -184,44 +188,52 @@ public:
  * @brief Configuration for the SlaveSupervisor
  */
 struct RecoveryConfig {
-    /// Enable automatic recovery (default: false — opt-in)
+    /**Enable automatic recovery (default: false — opt-in) */
     bool enabled = false;
 
-    /// Which trigger categories are active (default: All)
+    /**Which trigger categories are active (default: All) */
     CriticalTrigger triggers = CriticalTrigger::All;
 
-    /// Maximum recovery attempts before giving up (default: 3)
-    /// Set to 0 for unlimited retries (not recommended).
+    /**
+     * Maximum recovery attempts before giving up (default: 3)
+     * Set to 0 for unlimited retries (not recommended).
+     */
     int max_attempts = 3;
 
-    /// Delay between recovery attempts in milliseconds (default: 1000)
+    /**Delay between recovery attempts in milliseconds (default: 1000) */
     uint32_t retry_delay_ms = 1000;
 
-    /// Delay after forcing slave to INIT before calling the handler (default: 500)
+    /**Delay after forcing slave to INIT before calling the handler (default: 500) */
     uint32_t post_init_delay_ms = 500;
 
-    /// Poll interval for background monitoring in milliseconds (default: 250)
+    /**Poll interval for background monitoring in milliseconds (default: 250) */
     uint32_t poll_interval_ms = 250;
 
-    /// Whether to stop the entire motion loop during recovery (default: true)
-    /// If true, all slaves are suspended during recovery of any slave.
-    /// If false, only the affected slave is suspended.
+    /**
+     * Whether to stop the entire motion loop during recovery (default: true)
+     * If true, all slaves are suspended during recovery of any slave.
+     * If false, only the affected slave is suspended.
+     */
     bool stop_loop_during_recovery = true;
 
-    /// Quiesce the cyclic/async wire exchange around the recovery
-    /// handler's re-initialization (default: true).  The handler mutates
-    /// the PDO mapping — suspension serializes that against the loop
-    /// thread instead of relying on the epoch guard alone.  Applies to
-    /// the cyclic and async loops; legacy loops use
-    /// stop_loop_during_recovery.
+    /**
+     * Quiesce the cyclic/async wire exchange around the recovery
+     * handler's re-initialization (default: true).  The handler mutates
+     * the PDO mapping — suspension serializes that against the loop
+     * thread instead of relying on the epoch guard alone.  Applies to
+     * the cyclic and async loops; legacy loops use
+     * stop_loop_during_recovery.
+     */
     bool suspend_cyclic_exchange = true;
 
-    /// Max wait for the exchange to quiesce during suspend (µs).
+    /**Max wait for the exchange to quiesce during suspend (µs). */
     uint32_t exchange_suspend_timeout_us = 20'000;
 
-    /// Additional AL status codes (beyond the standard critical set) that
-    /// should trigger recovery.  Values are raw AL_STATUS_CODE register
-    /// values (e.g. 0xAC00 for a vendor-specific code).
+    /**
+     * Additional AL status codes (beyond the standard critical set) that
+     * should trigger recovery.  Values are raw AL_STATUS_CODE register
+     * values (e.g. 0xAC00 for a vendor-specific code).
+     */
     std::vector<uint16_t> critical_al_codes;
 
     /**

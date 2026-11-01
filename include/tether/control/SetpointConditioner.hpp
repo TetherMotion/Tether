@@ -77,7 +77,7 @@ namespace tether::control {
 template <typename V>
 struct ConditionerOps;  // undefined: forces a specialization
 
-/// @copydoc ConditionerOps
+/**@copydoc ConditionerOps */
 template <>
 struct ConditionerOps<double> {
   static double lerp(double from, double to, double t) {
@@ -89,8 +89,10 @@ struct ConditionerOps<double> {
   }
 };
 
-/// @copydoc ConditionerOps
-/// Element-wise; size drift is a contract violation, reported loudly.
+/**
+ * @copydoc ConditionerOps
+ * Element-wise; size drift is a contract violation, reported loudly.
+ */
 template <>
 struct ConditionerOps<std::vector<double>> {
   static std::vector<double> lerp(const std::vector<double>& from,
@@ -172,8 +174,10 @@ class ZeroOrderHold final : public IConditionLaw<Value> {
 template <typename Value>
 class FirstOrderLag final : public IConditionLaw<Value> {
  public:
-  /// @param alpha  blend factor in (0,1]; 1 = snap, smaller = smoother
-  /// @throw std::invalid_argument  α outside (0,1] or non-finite
+  /**
+   * @param alpha  blend factor in (0,1]; 1 = snap, smaller = smoother
+   * @throw std::invalid_argument  α outside (0,1] or non-finite
+   */
   explicit FirstOrderLag(double alpha) : alpha_(alpha) {
     if (!(alpha > 0.0 && alpha <= 1.0) || !std::isfinite(alpha))
       throw std::invalid_argument("FirstOrderLag: alpha must be in (0,1]");
@@ -203,8 +207,10 @@ class FirstOrderLag final : public IConditionLaw<Value> {
 template <typename Value>
 class LinearRampHold final : public IConditionLaw<Value> {
  public:
-  /// @param rampTicks  steps to reach the target; ≥ 1
-  /// @throw std::invalid_argument  rampTicks < 1
+  /**
+   * @param rampTicks  steps to reach the target; ≥ 1
+   * @throw std::invalid_argument  rampTicks < 1
+   */
   explicit LinearRampHold(uint64_t rampTicks) : rampTicks_(rampTicks) {
     if (rampTicks < 1)
       throw std::invalid_argument("LinearRampHold: rampTicks must be >= 1");
@@ -243,8 +249,10 @@ class LinearRampHold final : public IConditionLaw<Value> {
 template <typename Value>
 class SlewRateHold final : public IConditionLaw<Value> {
  public:
-  /// @param maxDeltaPerStep  max |Δ| per step, > 0
-  /// @throw std::invalid_argument  non-positive or non-finite delta
+  /**
+   * @param maxDeltaPerStep  max |Δ| per step, > 0
+   * @throw std::invalid_argument  non-positive or non-finite delta
+   */
   explicit SlewRateHold(double maxDeltaPerStep) : maxDelta_(maxDeltaPerStep) {
     if (!(maxDeltaPerStep > 0.0) || !std::isfinite(maxDeltaPerStep))
       throw std::invalid_argument("SlewRateHold: maxDeltaPerStep must be > 0");
@@ -300,9 +308,11 @@ class SetpointConditioner {
   SetpointConditioner(SetpointConditioner&&) = default;
   SetpointConditioner& operator=(SetpointConditioner&&) = default;
 
-  /// @brief Producer gate: is a refresh due on this tick?
-  /// @param tick  consumer's tick counter
-  /// @return `tick % refreshDivisor == 0`
+  /**
+   * @brief Producer gate: is a refresh due on this tick?
+   * @param tick  consumer's tick counter
+   * @return `tick % refreshDivisor == 0`
+   */
   bool refreshDue(uint64_t tick) const { return tick % divisor_ == 0; }
 
   /**
@@ -317,8 +327,10 @@ class SetpointConditioner {
     target_ = std::move(target);
   }
 
-  /// @brief Emit this tick's conditioned value (once per consumer tick).
-  /// @return reference valid until the next refresh()/step()
+  /**
+   * @brief Emit this tick's conditioned value (once per consumer tick).
+   * @return reference valid until the next refresh()/step()
+   */
   const Value& step() { return law_->step(target_); }
 
   /**
@@ -338,19 +350,21 @@ class SetpointConditioner {
     return step();
   }
 
-  /// @brief Re-anchor target + law state (e.g. to a measured state on
-  ///        restart).
-  /// @param initial  new target and law-state anchor
+  /**
+   * @brief Re-anchor target + law state (e.g. to a measured state on
+   *        restart).
+   * @param initial  new target and law-state anchor
+   */
   void reset(const Value& initial) {
     target_ = initial;
     law_->reset(initial);
   }
 
-  /// Newest refreshed target.
+  /**Newest refreshed target. */
   const Value& target() const { return target_; }
-  /// The installed condition law (read-only).
+  /**The installed condition law (read-only). */
   const IConditionLaw<Value>& law() const { return *law_; }
-  /// Refresh gate divisor (1 = every tick due).
+  /**Refresh gate divisor (1 = every tick due). */
   uint64_t refreshDivisor() const { return divisor_; }
 
  private:

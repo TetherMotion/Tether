@@ -52,19 +52,19 @@ namespace MotionPlanner::analytical::extrusion {
  * @brief Parameters for analytical Cross-WLF pressure advance.
  */
 struct AnalyticalCrossWLFPressureAdvanceParams {
-    /// βV_m / A_f [mm/Pa] — melt compressibility over filament area
+    /**βV_m / A_f [mm/Pa] — melt compressibility over filament area */
     double compressibilityOverArea = 0.0;
 
-    /// Filament diameter [mm]
+    /**Filament diameter [mm] */
     double filamentDiameterMm = 1.75;
 
-    /// Smoothing window [s] (0 = no smoothing)
+    /**Smoothing window [s] (0 = no smoothing) */
     double smoothTime = 0.0;
 
-    /// Maximum absolute compensation [mm] (safety clamp, 0 = no clamp)
+    /**Maximum absolute compensation [mm] (safety clamp, 0 = no clamp) */
     double maxCompensation = 0.0;
 
-    /// Default melt temperature [°C] when no thermal observer is provided
+    /**Default melt temperature [°C] when no thermal observer is provided */
     double defaultTempC = 210.0;
 };
 

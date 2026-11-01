@@ -47,19 +47,19 @@ namespace tether::klipper::protocol {
  * BlockParser::reset() or BlockParser::resetStats().
  */
 struct BlockParseStats {
-    size_t blocksParsed = 0;     ///< Blocks successfully parsed (status == Ok)
-    size_t badCrcCount = 0;      ///< Blocks rejected due to CRC mismatch
-    size_t badSyncCount = 0;     ///< Blocks rejected due to sync-byte mismatch
-    size_t badLengthCount = 0;   ///< Blocks rejected due to out-of-range length
-    size_t bytesSkipped = 0;     ///< Total garbage bytes skipped during resync
-    size_t blocksSkipped = 0;    ///< Total blocks skipped in recovery mode
+    size_t blocksParsed = 0; /**< Blocks successfully parsed (status == Ok) */
+    size_t badCrcCount = 0; /**< Blocks rejected due to CRC mismatch */
+    size_t badSyncCount = 0; /**< Blocks rejected due to sync-byte mismatch */
+    size_t badLengthCount = 0; /**< Blocks rejected due to out-of-range length */
+    size_t bytesSkipped = 0; /**< Total garbage bytes skipped during resync */
+    size_t blocksSkipped = 0; /**< Total blocks skipped in recovery mode */
 
-    /// @return Total number of blocks encountered (parsed + rejected).
+    /**@return Total number of blocks encountered (parsed + rejected). */
     size_t totalBlocks() const {
         return blocksParsed + badCrcCount + badSyncCount + badLengthCount;
     }
 
-    /// @return Total number of error blocks (all non-Ok statuses).
+    /**@return Total number of error blocks (all non-Ok statuses). */
     size_t totalErrors() const {
         return badCrcCount + badSyncCount + badLengthCount;
     }
@@ -94,10 +94,12 @@ struct BlockParseStats {
  */
 class BlockParser {
 public:
-    /// @brief Callback invoked for each rejected/skipped block in recovery mode.
-    /// @param offset   Byte offset within the input where the error was found.
-    /// @param status   The parse status that would have been returned.
-    /// @param msg      Human-readable description of the error.
+    /**
+     * @brief Callback invoked for each rejected/skipped block in recovery mode.
+     * @param offset   Byte offset within the input where the error was found.
+     * @param status   The parse status that would have been returned.
+     * @param msg      Human-readable description of the error.
+     */
     using ErrorCallback = std::function<void(size_t offset,
                                               BlockParseStatus status,
                                               std::string_view msg)>;
@@ -121,13 +123,13 @@ public:
         errorCallback_ = std::move(cb);
     }
 
-    /// @return True if recovery mode is enabled.
+    /**@return True if recovery mode is enabled. */
     bool recoveryMode() const { return recoveryMode_; }
 
-    /// @return Number of blocks skipped due to errors in recovery mode.
+    /**@return Number of blocks skipped due to errors in recovery mode. */
     size_t skippedBlockCount() const { return stats_.blocksSkipped; }
 
-    /// @return Cumulative parse statistics.
+    /**@return Cumulative parse statistics. */
     const BlockParseStats& stats() const { return stats_; }
 
     /**
@@ -197,12 +199,12 @@ public:
         }
     }
 
-    /// @brief Reset statistics and recovery state (keeps recovery-mode setting).
+    /**@brief Reset statistics and recovery state (keeps recovery-mode setting). */
     void resetStats() {
         stats_ = BlockParseStats{};
     }
 
-    /// @brief Reset all parser state: statistics, recovery mode, and callback.
+    /**@brief Reset all parser state: statistics, recovery mode, and callback. */
     void reset() {
         stats_ = BlockParseStats{};
         recoveryMode_ = false;

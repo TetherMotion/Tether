@@ -121,12 +121,12 @@ inline std::optional<double> extractValue(std::string_view code, char axis) {
  * @brief Motion mode of a G-code line.
  */
 enum class MotionMode {
-    None,   ///< Not a motion command
-    Rapid,  ///< G0
-    Feed,   ///< G1
-    ArcCW,  ///< G2
-    ArcCCW, ///< G3
-    Cancel  ///< G80
+    None, /**< Not a motion command */
+    Rapid, /**< G0 */
+    Feed, /**< G1 */
+    ArcCW, /**< G2 */
+    ArcCCW, /**< G3 */
+    Cancel /**< G80 */
 };
 
 /**
@@ -149,8 +149,8 @@ inline MotionMode detectMotionMode(std::string_view code) {
 struct ParsedMove {
     MotionMode mode = MotionMode::None;
     double x = 0, y = 0, z = 0, e = 0;
-    double feedRate = 0;       ///< mm/min
-    double i = 0, j = 0, r = 0; ///< Arc params
+    double feedRate = 0; /**< mm/min */
+    double i = 0, j = 0, r = 0; /**< Arc params */
     bool hasX = false, hasY = false, hasZ = false, hasE = false;
     bool hasI = false, hasJ = false, hasR = false;
     int lineNumber = 0;

@@ -35,9 +35,9 @@ namespace EtherCAT::Drives::Synapticon {
  *        its value.
  */
 struct EncoderResolution {
-    uint32_t counts_per_rev = 0;  ///< encoder counts per shaft revolution
-    uint16_t index = 0;           ///< CoE index that produced the value
-    uint8_t  subindex = 0;        ///< CoE subindex that produced the value
+    uint32_t counts_per_rev = 0; /**< encoder counts per shaft revolution */
+    uint16_t index = 0; /**< CoE index that produced the value */
+    uint8_t  subindex = 0; /**< CoE subindex that produced the value */
 };
 
 /**

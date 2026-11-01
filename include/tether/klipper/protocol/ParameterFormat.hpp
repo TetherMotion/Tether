@@ -38,38 +38,38 @@
 
 namespace tether::klipper::protocol {
 
-/// @brief Parameter wire type (derived from the format specifier).
+/**@brief Parameter wire type (derived from the format specifier). */
 enum class ParamType : uint8_t {
-    Uint32,   ///< %u
-    Int32,    ///< %i
-    Uint16,   ///< %hu
-    Int16,    ///< %hi
-    Byte,     ///< %c
-    String,   ///< %s
-    Buffer,   ///< %*s
-    ProgmemBuf, ///< %.*s
+    Uint32, /**< %u */
+    Int32, /**< %i */
+    Uint16, /**< %hu */
+    Int16, /**< %hi */
+    Byte, /**< %c */
+    String, /**< %s */
+    Buffer, /**< %*s */
+    ProgmemBuf, /**< %.*s */
 };
 
-/// @brief Whether a parameter is an integer (VLQ) or a string/buffer.
+/**@brief Whether a parameter is an integer (VLQ) or a string/buffer. */
 inline bool isIntegerType(ParamType t) {
     return t != ParamType::String && t != ParamType::Buffer && t != ParamType::ProgmemBuf;
 }
 
-/// @brief A single declared parameter in a format string.
+/**@brief A single declared parameter in a format string. */
 struct ParamSpec {
-    std::string name;     ///< Parameter name (e.g. "oid", "value")
-    ParamType type;       ///< Wire type
+    std::string name; /**< Parameter name (e.g. "oid", "value") */
+    ParamType type; /**< Wire type */
 };
 
-/// @brief A parsed format string: message name + ordered parameter list.
+/**@brief A parsed format string: message name + ordered parameter list. */
 struct FormatSpec {
-    std::string name;             ///< Message name (first token)
-    std::vector<ParamSpec> params; ///< Ordered parameters
+    std::string name; /**< Message name (first token) */
+    std::vector<ParamSpec> params; /**< Ordered parameters */
 
-    /// @return The canonical format string (e.g. "queue_step oid=%c interval=%u count=%hu add=%hi").
+    /**@return The canonical format string (e.g. "queue_step oid=%c interval=%u count=%hu add=%hi"). */
     std::string toString() const;
 
-    /// @return Number of parameters.
+    /**@return Number of parameters. */
     size_t arity() const { return params.size(); }
 };
 

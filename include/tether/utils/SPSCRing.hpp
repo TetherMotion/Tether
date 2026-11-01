@@ -55,7 +55,7 @@ public:
         return true;
     }
 
-    /// Producer side: copy a record into the ring.  false if full.
+    /**Producer side: copy a record into the ring.  false if full. */
     bool push(const T& value) {
         return produce([&](T& slot) { slot = value; });
     }
@@ -90,10 +90,10 @@ public:
         return drain(std::forward<F>(consume), UINT64_MAX);
     }
 
-    /// Records dropped because the ring was full (producer side).
+    /**Records dropped because the ring was full (producer side). */
     uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
 
-    /// Records currently visible to the consumer.
+    /**Records currently visible to the consumer. */
     size_t size() const {
         const uint64_t head = head_.load(std::memory_order_acquire);
         const uint64_t tail = tail_.load(std::memory_order_acquire);
@@ -102,7 +102,7 @@ public:
 
     bool empty() const { return size() == 0; }
 
-    /// Clear the ring.  Only safe while producer and consumer are idle.
+    /**Clear the ring.  Only safe while producer and consumer are idle. */
     void reset() {
         head_.store(0, std::memory_order_relaxed);
         tail_.store(0, std::memory_order_relaxed);

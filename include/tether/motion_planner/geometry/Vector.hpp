@@ -35,17 +35,17 @@ namespace tether::motion {
 
 class RVec {
 public:
-    /// Maximum supported dimension (number of axes).
+    /**Maximum supported dimension (number of axes). */
     static constexpr std::size_t kMaxDim = 5;
 
     // ========================================================================
     // Construction
     // ========================================================================
 
-    /// Default: dimension 0 (invalid for geometry; assign before use).
+    /**Default: dimension 0 (invalid for geometry; assign before use). */
     RVec() noexcept : data_{}, dim_(0) {}
 
-    /// Zero vector of the given dimension (1..kMaxDim).
+    /**Zero vector of the given dimension (1..kMaxDim). */
     static RVec zero(std::size_t dim) {
         checkDim(dim);
         RVec v;
@@ -53,8 +53,10 @@ public:
         return v;
     }
 
-    /// Construct from an initializer list; dimension = number of elements.
-    /// Example: `RVec p{1.0, 2.0, 3.0};` is a 3-D point.
+    /**
+     * Construct from an initializer list; dimension = number of elements.
+     * Example: `RVec p{1.0, 2.0, 3.0};` is a 3-D point.
+     */
     RVec(std::initializer_list<double> init) : data_{}, dim_(0) {
         if (init.size() < 1 || init.size() > kMaxDim) {
             throw std::invalid_argument(
@@ -89,7 +91,7 @@ public:
         return data_[i];
     }
 
-    /// Raw access without bounds check (i must be < dim()).
+    /**Raw access without bounds check (i must be < dim()). */
     double unchecked(std::size_t i) const noexcept { return data_[i]; }
 
     // ========================================================================
@@ -150,7 +152,7 @@ public:
     // Vector operations
     // ========================================================================
 
-    /// Euclidean dot product.
+    /**Euclidean dot product. */
     double dot(const RVec& o) const {
         checkSameDim(o);
         double r = 0.0;
@@ -158,14 +160,14 @@ public:
         return r;
     }
 
-    /// Squared Euclidean norm (avoids sqrt).
+    /**Squared Euclidean norm (avoids sqrt). */
     double normSq() const {
         double r = 0.0;
         for (std::size_t i = 0; i < dim_; ++i) r += data_[i] * data_[i];
         return r;
     }
 
-    /// Euclidean norm.
+    /**Euclidean norm. */
     double norm() const { return std::sqrt(normSq()); }
 
     /**
@@ -181,14 +183,14 @@ public:
         return *this / n;
     }
 
-    /// Euclidean distance to another vector.
+    /**Euclidean distance to another vector. */
     double distanceTo(const RVec& o) const { return (*this - o).norm(); }
 
     // ========================================================================
     // Comparison
     // ========================================================================
 
-    /// Exact (bitwise per-component) equality, including dimension.
+    /**Exact (bitwise per-component) equality, including dimension. */
     bool operator==(const RVec& o) const noexcept {
         if (dim_ != o.dim_) return false;
         for (std::size_t i = 0; i < dim_; ++i) {
@@ -198,7 +200,7 @@ public:
     }
     bool operator!=(const RVec& o) const noexcept { return !(*this == o); }
 
-    /// Tolerant per-component comparison (dimensions must match).
+    /**Tolerant per-component comparison (dimensions must match). */
     bool nearEqual(const RVec& o, double tol) const {
         checkSameDim(o);
         for (std::size_t i = 0; i < dim_; ++i) {
@@ -227,7 +229,7 @@ private:
     std::uint8_t dim_;
 };
 
-/// Scalar * vector (convenience non-member).
+/**Scalar * vector (convenience non-member). */
 inline RVec operator*(double s, const RVec& v) { return v * s; }
 
 } // namespace tether::motion

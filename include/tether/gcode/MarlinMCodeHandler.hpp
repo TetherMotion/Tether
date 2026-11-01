@@ -72,16 +72,16 @@ namespace GCode {
  * @brief Parameters parsed from an M-code command
  */
 struct MCodeParameters {
-    int mCode = -1;                         ///< The M-code number
-    std::optional<double> P;                ///< P parameter
-    std::optional<double> S;                ///< S parameter (often spindle speed)
-    std::optional<double> R;                ///< R parameter
-    std::optional<double> F;                ///< F parameter (feedrate)
-    std::optional<double> T;                ///< T parameter (tool number)
-    std::optional<double> D;                ///< D parameter (PID derivative, etc.)
-    std::optional<double> I;                ///< I parameter
-    std::optional<double> J;                ///< J parameter
-    std::optional<double> K;                ///< K parameter
+    int mCode = -1; /**< The M-code number */
+    std::optional<double> P; /**< P parameter */
+    std::optional<double> S; /**< S parameter (often spindle speed) */
+    std::optional<double> R; /**< R parameter */
+    std::optional<double> F; /**< F parameter (feedrate) */
+    std::optional<double> T; /**< T parameter (tool number) */
+    std::optional<double> D; /**< D parameter (PID derivative, etc.) */
+    std::optional<double> I; /**< I parameter */
+    std::optional<double> J; /**< J parameter */
+    std::optional<double> K; /**< K parameter */
 
     // Axis parameters (for M201/M203/M204/M205)
     std::optional<double> X;
@@ -93,14 +93,14 @@ struct MCodeParameters {
     std::optional<double> U;
     std::optional<double> V;
     std::optional<double> W;
-    std::optional<double> E;                ///< Extruder parameter
+    std::optional<double> E; /**< Extruder parameter */
 
     // String parameters
-    std::string message;                    ///< For M117/M118 messages
+    std::string message; /**< For M117/M118 messages */
 
     // Additional context
-    int lineNumber = -1;                    ///< Source line number
-    std::string rawLine;                    ///< Original command text
+    int lineNumber = -1; /**< Source line number */
+    std::string rawLine; /**< Original command text */
 
     /**
      * @brief Get axis value by index
@@ -137,12 +137,12 @@ struct MCodeParameters {
  */
 struct MCodeResult {
     bool success = true;
-    bool pauseExecution = false;            ///< Request execution pause
-    bool stopExecution = false;             ///< Request execution stop
-    bool waitForCompletion = false;         ///< Wait before continuing
-    double waitTime = 0.0;                  ///< Time to wait in seconds
-    std::string message;                    ///< Status/error message
-    std::string response;                   ///< Response to send (e.g., for M114)
+    bool pauseExecution = false; /**< Request execution pause */
+    bool stopExecution = false; /**< Request execution stop */
+    bool waitForCompletion = false; /**< Wait before continuing */
+    double waitTime = 0.0; /**< Time to wait in seconds */
+    std::string message; /**< Status/error message */
+    std::string response; /**< Response to send (e.g., for M114) */
 };
 
 /**
@@ -156,11 +156,11 @@ struct MarlinMachineState {
     bool spindleOn = false;
     bool spindleCW = true;
     int currentTool = 0;
-    bool coolantMist = false;               ///< M7 state
-    bool coolantFlood = false;              ///< M8 state
+    bool coolantMist = false; /**< M7 state */
+    bool coolantFlood = false; /**< M8 state */
     bool isMetric = true;
     bool absoluteMode = true;
-    bool extruderAbsolute = true;           ///< M82 vs M83
+    bool extruderAbsolute = true; /**< M82 vs M83 */
     double extruderPosition = 0.0;
 
     // Temperatures (for 3D printer mode)
@@ -171,31 +171,31 @@ struct MarlinMachineState {
 
     // Motion settings
     KinematicLimits kinematicLimits;
-    double travelAcceleration = 0.0;        ///< M204 T — travel accel (mm/s²)
-    double retractAcceleration = 0.0;       ///< M204 R — retract accel (mm/s²)
-    double extruderMaxAcceleration = 0.0;   ///< M201 E (mm/s²)
-    double extruderMaxVelocity = 0.0;       ///< M203 E (mm/s)
-    double extruderMaxJerk = 0.0;           ///< M205 E (mm/s)
-    double junctionDeviation = 0.0;         ///< M205 J (mm)
-    double minFeedrate = 0.0;               ///< M205 S (mm/s)
-    double minTravelFeedrate = 0.0;         ///< M205 T (mm/s)
-    double minSegmentTime = 0.0;            ///< M205 B (ms)
-    std::array<double, 4> stepsPerMm{80.0, 80.0, 400.0, 95.0}; ///< M92 X Y Z E
+    double travelAcceleration = 0.0; /**< M204 T — travel accel (mm/s²) */
+    double retractAcceleration = 0.0; /**< M204 R — retract accel (mm/s²) */
+    double extruderMaxAcceleration = 0.0; /**< M201 E (mm/s²) */
+    double extruderMaxVelocity = 0.0; /**< M203 E (mm/s) */
+    double extruderMaxJerk = 0.0; /**< M205 E (mm/s) */
+    double junctionDeviation = 0.0; /**< M205 J (mm) */
+    double minFeedrate = 0.0; /**< M205 S (mm/s) */
+    double minTravelFeedrate = 0.0; /**< M205 T (mm/s) */
+    double minSegmentTime = 0.0; /**< M205 B (ms) */
+    std::array<double, 4> stepsPerMm{80.0, 80.0, 400.0, 95.0}; /**< M92 X Y Z E */
 
     // Overrides (percent)
-    double feedOverridePercent = 100.0;     ///< M220 S
-    double flowOverridePercent = 100.0;     ///< M221 S
+    double feedOverridePercent = 100.0; /**< M220 S */
+    double flowOverridePercent = 100.0; /**< M221 S */
 
     // Calibration / offsets
-    Position homeOffset{};                  ///< M206 X Y Z
-    std::array<Position, 8> toolOffsets{};  ///< M218 T<n> X Y Z
-    Position probeOffset{};                 ///< M851 X Y Z
-    std::array<double, 3> hotendPid{0.0, 0.0, 0.0}; ///< M301 P I D
-    std::array<double, 3> bedPid{0.0, 0.0, 0.0};    ///< M304 P I D
-    std::array<double, 8> servoAngles{};    ///< M280 P<n> S<angle>
-    bool probeDeployed = false;             ///< M401 / M402
-    bool bedLevelingEnabled = false;        ///< M420 S
-    std::unordered_map<uint32_t, double> bedMesh; ///< M421 (key: i*1024+j)
+    Position homeOffset{}; /**< M206 X Y Z */
+    std::array<Position, 8> toolOffsets{}; /**< M218 T<n> X Y Z */
+    Position probeOffset{}; /**< M851 X Y Z */
+    std::array<double, 3> hotendPid{0.0, 0.0, 0.0}; /**< M301 P I D */
+    std::array<double, 3> bedPid{0.0, 0.0, 0.0}; /**< M304 P I D */
+    std::array<double, 8> servoAngles{}; /**< M280 P<n> S<angle> */
+    bool probeDeployed = false; /**< M401 / M402 */
+    bool bedLevelingEnabled = false; /**< M420 S */
+    std::unordered_map<uint32_t, double> bedMesh; /**< M421 (key: i*1024+j) */
 
     // User-defined state storage
     std::unordered_map<std::string, double> userVariables;
@@ -219,10 +219,10 @@ using MarlinMCodeCallback = std::function<MCodeResult(const MCodeParameters& par
  * @brief Configuration options for MarlinMCodeHandler
  */
 struct MarlinMCodeHandlerConfig {
-    bool enableMarlinDefaults = true;   ///< Register default Marlin handlers
-    bool enableRepRapCompat = true;     ///< RepRap compatibility mode
-    bool strict = false;                ///< Fail on unknown M-codes
-    bool verbose = false;               ///< Verbose logging
+    bool enableMarlinDefaults = true; /**< Register default Marlin handlers */
+    bool enableRepRapCompat = true; /**< RepRap compatibility mode */
+    bool strict = false; /**< Fail on unknown M-codes */
+    bool verbose = false; /**< Verbose logging */
 };
 
 // ============================================================================

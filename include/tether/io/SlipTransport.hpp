@@ -37,9 +37,11 @@ namespace tether { namespace io {
  */
 class SlipFramedTransport final : public ITransport {
 public:
-    /// @param inner byte-stream transport (takes ownership)
-    /// @param maxEncodedSize bound on the encoded accumulation buffer
-    /// @param maxDecodedSize bound on one decoded message
+    /**
+     * @param inner byte-stream transport (takes ownership)
+     * @param maxEncodedSize bound on the encoded accumulation buffer
+     * @param maxDecodedSize bound on one decoded message
+     */
     explicit SlipFramedTransport(
         std::unique_ptr<ITransport> inner,
         size_t maxEncodedSize = MAX_ENCODED_MESSAGE_SIZE,
@@ -51,26 +53,28 @@ public:
     void close() override;
     bool isConnected() const override;
 
-    /// Access the wrapped byte-stream transport.
+    /**Access the wrapped byte-stream transport. */
     ITransport* inner() const { return inner_.get(); }
 
-    /// Statistics — useful for `stream --stats` and diagnostics.
+    /**Statistics — useful for `stream --stats` and diagnostics. */
     size_t droppedFrames() const { return droppedFrames_; }
     size_t decodedFrames() const { return decodedFrames_; }
 
 private:
-    /// Feed one received byte; returns true when a complete message was
-    /// produced into `out`.
+    /**
+     * Feed one received byte; returns true when a complete message was
+     * produced into `out`.
+     */
     bool feedByte(uint8_t byte, std::vector<uint8_t>& out);
 
     std::unique_ptr<ITransport> inner_;
-    std::vector<uint8_t> encoded_;   ///< accumulated encoded packet bytes
-    std::vector<uint8_t> decoded_;   ///< decode scratch
-    std::vector<uint8_t> pending_;   ///< undispatched bytes from last receive()
+    std::vector<uint8_t> encoded_; /**< accumulated encoded packet bytes */
+    std::vector<uint8_t> decoded_; /**< decode scratch */
+    std::vector<uint8_t> pending_; /**< undispatched bytes from last receive() */
     size_t pendingOff_ = 0;
     size_t maxEncoded_;
     size_t maxDecoded_;
-    bool discardUntilEnd_ = false;   ///< resync: drop through next END
+    bool discardUntilEnd_ = false; /**< resync: drop through next END */
     size_t droppedFrames_ = 0;
     size_t decodedFrames_ = 0;
 };

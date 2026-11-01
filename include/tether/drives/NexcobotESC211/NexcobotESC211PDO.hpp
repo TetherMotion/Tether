@@ -25,23 +25,25 @@ namespace EtherCAT {
 namespace Drives {
 namespace NexcobotESC211PDO {
 
-/// Maximum number of FSoE channels defined by the ESC211 object
-/// dictionary (FSoE0–FSoE7: 0x6100–0x6170 / 0x7100–0x7170).
+/**
+ * Maximum number of FSoE channels defined by the ESC211 object
+ * dictionary (FSoE0–FSoE7: 0x6100–0x6170 / 0x7100–0x7170).
+ */
 inline constexpr size_t kMaxFSoEChannels = 8;
 
-/// Flat SafetyPDU layout: 16 PDO entries of 248 bits (31 bytes) each.
+/**Flat SafetyPDU layout: 16 PDO entries of 248 bits (31 bytes) each. */
 inline constexpr size_t kPduSections    = 16;
-inline constexpr size_t kPduSectionSize = 31;   ///< 248 bits
+inline constexpr size_t kPduSectionSize = 31; /**< 248 bits */
 inline constexpr size_t kPduTotalBytes  = kPduSections * kPduSectionSize;  // 496
 
-/// 0x6000 — FSoE SafetyPDU RxPDO (slave→master, 496 bytes flat).
+/**0x6000 — FSoE SafetyPDU RxPDO (slave→master, 496 bytes flat). */
 struct RxPDO_0x6000_SafetyPDU {
     uint8_t data[kPduTotalBytes];
 } __attribute__((packed));
 static_assert(sizeof(RxPDO_0x6000_SafetyPDU) == kPduTotalBytes,
               "RxPDO_0x6000_SafetyPDU size mismatch");
 
-/// 0x7000 — FSoE SafetyPDU TxPDO (master→slave, 496 bytes flat).
+/**0x7000 — FSoE SafetyPDU TxPDO (master→slave, 496 bytes flat). */
 struct TxPDO_0x7000_SafetyPDU {
     uint8_t data[kPduTotalBytes];
 } __attribute__((packed));

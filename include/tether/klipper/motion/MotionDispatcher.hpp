@@ -54,36 +54,38 @@
 
 namespace tether::klipper::motion {
 
-/// @brief Configuration for the MotionDispatcher.
+/**@brief Configuration for the MotionDispatcher. */
 struct MotionDispatcherConfig {
     std::array<AxisConfig, 4> axisConfigs = {{
         {80.0, false}, {80.0, false}, {400.0, false}, {500.0, false}
     }};
     std::array<uint8_t, 4> axisOids = {0, 1, 2, 3};
     uint32_t clockFreqHz = 180000000;
-    /// Sample interval for MotionTranslator discretization (seconds).
+    /**Sample interval for MotionTranslator discretization (seconds). */
     double sampleIntervalSec = 0.0001;
-    /// Kinematic limits for the MotionPlanBuilder.
+    /**Kinematic limits for the MotionPlanBuilder. */
     MotionPlanner::KinematicLimits<4, double> limits{};
-    /// Velocity profiler type (default: ParetoTimeEnergy).
+    /**Velocity profiler type (default: ParetoTimeEnergy). */
     MotionPlanner::ProfilerType profilerType =
         MotionPlanner::ProfilerType::ParetoTimeEnergy;
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-    /// Pressure advance configuration for the extruder axis.
+    /**Pressure advance configuration for the extruder axis. */
     PressureAdvanceConfig pressureAdvance{};
 #endif
 };
 
-/// @brief Bridges G-code move callbacks to the Klipper queue_step protocol path.
+/**@brief Bridges G-code move callbacks to the Klipper queue_step protocol path. */
 class MotionDispatcher {
 public:
     using Config = MotionDispatcherConfig;
 
-    /// @brief Callback that ships translated step sequences to the device.
-    /// @return Number of queue_step commands actually enqueued.
+    /**
+     * @brief Callback that ships translated step sequences to the device.
+     * @return Number of queue_step commands actually enqueued.
+     */
     using SendCallback = std::function<size_t(const std::vector<AxisStepSequence>&)>;
 
-    /// @brief Returns the current MCU clock (ticks) used as the startClock.
+    /**@brief Returns the current MCU clock (ticks) used as the startClock. */
     using ClockProvider = std::function<uint32_t()>;
 
     explicit MotionDispatcher(Config config = Config{})
@@ -100,52 +102,58 @@ public:
 #endif
     }
 
-    /// @brief Set the callback that sends step sequences to the device.
+    /**@brief Set the callback that sends step sequences to the device. */
     void setSendCallback(SendCallback cb) { send_ = std::move(cb); }
 
-    /// @brief Set the clock provider (returns current MCU clock in ticks).
+    /**@brief Set the clock provider (returns current MCU clock in ticks). */
     void setClockProvider(ClockProvider cp) { clock_ = std::move(cp); }
 
-    /// @brief Set the kinematics transform (Cartesian/CoreXY/Delta/...).
+    /**@brief Set the kinematics transform (Cartesian/CoreXY/Delta/...). */
     void setKinematicsTransform(const KinematicsTransform& kt) {
         translator_.setKinematicsTransform(kt);
     }
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-    /// @brief Update pressure advance config at runtime.
-    /// Allows G-code (M900 / SET_PRESSURE_ADVANCE) to enable/disable
-    /// and tune PA without recreating the dispatcher.
+    /**
+     * @brief Update pressure advance config at runtime.
+     * Allows G-code (M900 / SET_PRESSURE_ADVANCE) to enable/disable
+     * and tune PA without recreating the dispatcher.
+     */
     void setPressureAdvanceConfig(const PressureAdvanceConfig& pa) {
         translator_.setPressureAdvanceConfig(pa);
     }
 
-    /// @brief Get the current pressure advance config.
+    /**@brief Get the current pressure advance config. */
     const PressureAdvanceConfig& pressureAdvanceConfig() const {
         return translator_.pressureAdvanceConfig();
     }
 #endif
 
-    /// @brief Set/override the current position (mm). Used after homing/G92.
+    /**@brief Set/override the current position (mm). Used after homing/G92. */
     void setPosition(std::array<double, 4> pos) { current_ = pos; }
 
-    /// @brief Set the shared extrusion-flow tracker. When set, each move
-    /// updates the tracker with the per-move E-axis velocity so the
-    /// flow-adaptive heater compensation can react to flow changes.
+    /**
+     * @brief Set the shared extrusion-flow tracker. When set, each move
+     * updates the tracker with the per-move E-axis velocity so the
+     * flow-adaptive heater compensation can react to flow changes.
+     */
     void setFlowTracker(std::shared_ptr<ExtrusionFlowTracker> tracker) {
         flowTracker_ = std::move(tracker);
     }
 
-    /// @brief Get the flow tracker (may be null).
+    /**@brief Get the flow tracker (may be null). */
     std::shared_ptr<ExtrusionFlowTracker> flowTracker() const {
         return flowTracker_;
     }
 
-    /// @return The current logical position (mm).
+    /**@return The current logical position (mm). */
     std::array<double, 4> position() const { return current_; }
 
-    /// @brief Execute a linear move to (x, y, z, e) at speed_mm_s (mm/s).
-    /// @return Number of queue_step commands dispatched, or 0 if no send
-    ///         callback is set / no motion is needed.
+    /**
+     * @brief Execute a linear move to (x, y, z, e) at speed_mm_s (mm/s).
+     * @return Number of queue_step commands dispatched, or 0 if no send
+     *         callback is set / no motion is needed.
+     */
     size_t move(double x, double y, double z, double e, double speed_mm_s) {
         if (!send_) return 0;
 

@@ -42,69 +42,77 @@
 
 namespace tether::control::extrusion {
 
-/// @brief ARX model identified at a single operating point.
+/**@brief ARX model identified at a single operating point. */
 struct ARXLPVModelPoint {
-    double parameter = 0.0;            ///< Scheduling parameter p
-    std::vector<double> aCoeffs;       ///< A(z) = 1 + a_1 z^{-1} + ... + a_{Na} z^{-Na}
-    std::vector<double> bCoeffs;       ///< B'(z) = b_0 + b_1 z^{-1} + ... + b_{Nb} z^{-Nb}
-    int delay = 0;                     ///< Transport delay d (steps)
+    double parameter = 0.0; /**< Scheduling parameter p */
+    std::vector<double> aCoeffs; /**< A(z) = 1 + a_1 z^{-1} + ... + a_{Na} z^{-Na} */
+    std::vector<double> bCoeffs; /**< B'(z) = b_0 + b_1 z^{-1} + ... + b_{Nb} z^{-Nb} */
+    int delay = 0; /**< Transport delay d (steps) */
 
-    /// @brief Default constructor for container compatibility.
+    /**@brief Default constructor for container compatibility. */
     ARXLPVModelPoint() = default;
     ARXLPVModelPoint(double p, std::vector<double> a, std::vector<double> b, int d)
         : parameter(p), aCoeffs(std::move(a)), bCoeffs(std::move(b)), delay(d) {}
 };
 
-/// @brief Time-domain LPV inverse IIR filter.
-///
-/// Processes one sample at a time using the algebraic inverse of the ARX
-/// difference equation.  Coefficients are interpolated from a LUT of
-/// identified model points.
+/**
+ * @brief Time-domain LPV inverse IIR filter.
+ *
+ * Processes one sample at a time using the algebraic inverse of the ARX
+ * difference equation.  Coefficients are interpolated from a LUT of
+ * identified model points.
+ */
 class ARXLPVInverseFilter {
 public:
-    /// @brief Construct with polynomial orders.
-    /// @param na Order of A(z) (autoregressive part).
-    /// @param nb Order of B'(z) (exogenous part, excluding delay).
+    /**
+     * @brief Construct with polynomial orders.
+     * @param na Order of A(z) (autoregressive part).
+     * @param nb Order of B'(z) (exogenous part, excluding delay).
+     */
     ARXLPVInverseFilter(int na = 0, int nb = 0);
 
-    /// @brief Add an identified ARX model at operating point p.
+    /**@brief Add an identified ARX model at operating point p. */
     void addModelPoint(const ARXLPVModelPoint& point);
 
-    /// @brief Add an identified ARX model (convenience overload).
+    /**@brief Add an identified ARX model (convenience overload). */
     void addModelPoint(double p, std::vector<double> a,
                        std::vector<double> b, int delay = 0);
 
-    /// @brief Process one sample.
-    /// @param yTargetCurrent y_tgt[n] (current target).
-    /// @param yTargetAhead y_tgt[n+d] (lookahead target, d = current delay).
-    /// @param pCurrent Current scheduling parameter p[n].
-    /// @return x_req[n] (required input at step n).
+    /**
+     * @brief Process one sample.
+     * @param yTargetCurrent y_tgt[n] (current target).
+     * @param yTargetAhead y_tgt[n+d] (lookahead target, d = current delay).
+     * @param pCurrent Current scheduling parameter p[n].
+     * @return x_req[n] (required input at step n).
+     */
     double process(double yTargetCurrent, double yTargetAhead, double pCurrent);
 
-    /// @brief Process a full trajectory with lookahead.
-    /// @param yTarget Target trajectory y_tgt[0..N-1].
-    /// @param p Scheduling parameter trajectory p[0..N-1].
-    /// @return Required input x_req[0..N-1].
+    /**
+     * @brief Process a full trajectory with lookahead.
+     * @param yTarget Target trajectory y_tgt[0..N-1].
+     * @param p Scheduling parameter trajectory p[0..N-1].
+     * @return Required input x_req[0..N-1].
+     */
     std::vector<double> process(const std::vector<double>& yTarget,
                                 const std::vector<double>& p);
 
-    /// @brief Reset the filter state (ring buffers).
+    /**@brief Reset the filter state (ring buffers). */
     void reset();
 
-    /// @return Number of model points in the LUT.
+    /**@return Number of model points in the LUT. */
     size_t numModelPoints() const { return modelLut_.size(); }
 
-    /// @return Current delay d (from the last interpolated model).
+    /**@return Current delay d (from the last interpolated model). */
     int currentDelay() const { return currentDelay_; }
 
 private:
-    int na_;  ///< Order of A(z)
-    int nb_;  ///< Order of B'(z)
+    int na_; /**< Order of A(z) */
+    int nb_; /**< Order of B'(z) */
     std::map<double, ARXLPVModelPoint> modelLut_;
 
     // Ring buffers for past values
-    std::deque<double> yTargetHistory_;  ///< y_tgt[n-1], y_tgt[n-2], ...
-    std::deque<double> xReqHistory_;     ///< x_req[n-1], x_req[n-2], ...
+    std::deque<double> yTargetHistory_; /**< y_tgt[n-1], y_tgt[n-2], ... */
+    std::deque<double> xReqHistory_; /**< x_req[n-1], x_req[n-2], ... */
 
     // Last interpolated coefficients (cached for process() calls)
     std::vector<double> currentA_;
@@ -112,10 +120,10 @@ private:
     int currentDelay_ = 0;
     double lastP_ = std::numeric_limits<double>::quiet_NaN();
 
-    /// @brief Interpolate ARX coefficients at scheduling parameter p.
+    /**@brief Interpolate ARX coefficients at scheduling parameter p. */
     void interpolateCoefficients(double p);
 
-    /// @brief Ensure ring buffers have the right size.
+    /**@brief Ensure ring buffers have the right size. */
     void ensureBufferSize();
 };
 

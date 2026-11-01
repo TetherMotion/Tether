@@ -96,30 +96,36 @@ public:
 
     // ----- Per-PDO address queries (multi-PDO mode) -----
 
-    /// Per-PDO logical address entry within a slave's FMMU region.
+    /**Per-PDO logical address entry within a slave's FMMU region. */
     struct PDOLogicalAddrEntry {
         uint16_t pdo_index{0};
         uint32_t logical_addr{0};
         uint16_t length{0};
         uint8_t  sm_index{0xFF};
-        bool     is_output{false};  ///< true = RxPDO (output), false = TxPDO (input)
+        bool     is_output{false}; /**< true = RxPDO (output), false = TxPDO (input) */
     };
 
-    /// Get the logical address of a specific PDO on a specific slave.
-    /// Returns 0 if the PDO is not found.
+    /**
+     * Get the logical address of a specific PDO on a specific slave.
+     * Returns 0 if the PDO is not found.
+     */
     uint32_t getPDOLogicalAddr(uint16_t slave_index, uint16_t pdo_index) const;
 
-    /// Get the length of a specific PDO on a specific slave.
-    /// Returns 0 if the PDO is not found.
+    /**
+     * Get the length of a specific PDO on a specific slave.
+     * Returns 0 if the PDO is not found.
+     */
     uint16_t getPDOLength(uint16_t slave_index, uint16_t pdo_index) const;
 
-    /// Get all per-PDO logical address entries for a slave.
+    /**Get all per-PDO logical address entries for a slave. */
     std::vector<PDOLogicalAddrEntry> getSlavePDOLogicalAddrs(uint16_t slave_index) const;
 
-    /// Logical window of one slave relative to base_logical_addr_ —
-    /// i.e. the [offset, offset+length) slice that covers all of that
-    /// slave's PDO regions and can be exchanged with a single datagram.
-    /// Returns false when the slave has no assigned window.
+    /**
+     * Logical window of one slave relative to base_logical_addr_ —
+     * i.e. the [offset, offset+length) slice that covers all of that
+     * slave's PDO regions and can be exchanged with a single datagram.
+     * Returns false when the slave has no assigned window.
+     */
     bool getSlaveLogicalWindow(uint16_t slave_index,
                                uint32_t& offset, uint32_t& length) const {
         if (slave_index >= PDO::kMaxPDOSlaves ||
@@ -134,12 +140,14 @@ public:
 
     uint32_t totalRxPDOBytes() const { return total_rxpdo_bytes_; }
     uint32_t totalTxPDOBytes() const { return total_txpdo_bytes_; }
-    /// Extent of the logical process image in bytes, relative to
-    /// base_logical_addr_ — i.e. the span an LRW covering every live slave
-    /// window must address.  This is the high-water mark of allocated
-    /// windows, NOT the sum of live PDO bytes: sticky windows never move,
-    /// so a slave whose window was reallocated to a larger size leaves
-    /// dead space behind and the extent exceeds Rx+Tx totals.
+    /**
+     * Extent of the logical process image in bytes, relative to
+     * base_logical_addr_ — i.e. the span an LRW covering every live slave
+     * window must address.  This is the high-water mark of allocated
+     * windows, NOT the sum of live PDO bytes: sticky windows never move,
+     * so a slave whose window was reallocated to a larger size leaves
+     * dead space behind and the extent exceeds Rx+Tx totals.
+     */
     uint32_t totalLogicalSize()  const { return next_free_log_; }
 
     // ----- LRW Exchange -----
@@ -221,29 +229,37 @@ public:
      */
     uint64_t lastLrwCounter() const { return lrw_counter_ok_; }
 
-    /// DC System Time read in the last collect (nanoseconds since
-    /// 2000-01-01).  Meaningful only when dcTimeValid() is true.
+    /**
+     * DC System Time read in the last collect (nanoseconds since
+     * 2000-01-01).  Meaningful only when dcTimeValid() is true.
+     */
     uint64_t lastDcTimeNs() const { return dc_time_ns_; }
-    /// True when the last collect verified a fresh DC System Time.
+    /**True when the last collect verified a fresh DC System Time. */
     bool dcTimeValid() const { return dc_time_valid_; }
-    /// True while responses are in flight — image slices OR user PDO
-    /// slices (a decimated image can leave only slice runs pending).
+    /**
+     * True while responses are in flight — image slices OR user PDO
+     * slices (a decimated image can leave only slice runs pending).
+     */
     bool cyclicExchangePending() const {
         if (cyclic_pending_count_ > 0) return true;
         for (const auto& s : slices_) if (s.pending) return true;
         return false;
     }
 
-    /// Slices the current image occupies (1 = single-frame exchange).
+    /**Slices the current image occupies (1 = single-frame exchange). */
     uint8_t cyclicSliceCount() const { return cyclic_slice_count_; }
 
-    /// Strict WKC verify (default on): after the first successful exchange
-    /// the per-slice response WKC is learned; later mismatches count as
-    /// wkc_errors.  Disable when slaves legitimately vary their WKC.
+    /**
+     * Strict WKC verify (default on): after the first successful exchange
+     * the per-slice response WKC is learned; later mismatches count as
+     * wkc_errors.  Disable when slaves legitimately vary their WKC.
+     */
     void setStrictWkc(bool strict) { strict_wkc_ = strict; }
 
-    /// Sentinel per-slice expected WKC — "not derivable, learn from the
-    /// first successful response" (Q6/Q7).
+    /**
+     * Sentinel per-slice expected WKC — "not derivable, learn from the
+     * first successful response" (Q6/Q7).
+     */
     static constexpr uint16_t kWkcUnknown = 0xFFFF;
 
     /**
@@ -262,19 +278,23 @@ public:
      */
     void deriveExpectedWkc(const PDO::PDOMapping& mapping);
 
-    /// Forget all derived/learned expectations — the next successful
-    /// responses relearn them (Q7).
+    /**
+     * Forget all derived/learned expectations — the next successful
+     * responses relearn them (Q7).
+     */
     void resetExpectedWkc() {
         expected_wkc_.fill(kWkcUnknown);
     }
 
-    /// Override one slice's expected WKC (0 = no slaves respond; use
-    /// kWkcUnknown to return that slice to learn mode).
+    /**
+     * Override one slice's expected WKC (0 = no slaves respond; use
+     * kWkcUnknown to return that slice to learn mode).
+     */
     void setExpectedWkc(uint8_t slice, uint16_t wkc) {
         if (slice < kMaxCyclicSlices) expected_wkc_[slice] = wkc;
     }
 
-    /// Current per-slice expectations (kWkcUnknown = still learning).
+    /**Current per-slice expectations (kWkcUnknown = still learning). */
     uint16_t expectedWkc(uint8_t slice) const {
         return slice < kMaxCyclicSlices ? expected_wkc_[slice] : 0;
     }
@@ -297,8 +317,10 @@ public:
                    : CyclicSliceHealth{};
     }
 
-    /// Health of every user-defined PDO-slice run, in (slice, run) order.
-    /// Empty when no slices are defined.
+    /**
+     * Health of every user-defined PDO-slice run, in (slice, run) order.
+     * Empty when no slices are defined.
+     */
     std::vector<CyclicSliceHealth> pdoSliceHealth() const {
         std::vector<CyclicSliceHealth> out;
         for (const auto& s : slices_)
@@ -333,10 +355,10 @@ public:
 
     // ----- Partial LRW exchange (logical-address slices) -----
 
-    /// Logical placement of one enabled PDO entry (see PDO::LogicalEntrySlice).
+    /**Logical placement of one enabled PDO entry (see PDO::LogicalEntrySlice). */
     using EntrySlice = PDO::LogicalEntrySlice;
 
-    /// Maximum slice length that fits in a single LRW datagram (one frame).
+    /**Maximum slice length that fits in a single LRW datagram (one frame). */
     uint32_t maxSliceLength() const;
 
     /**
@@ -358,21 +380,25 @@ public:
     bool exchangeLRWSlice(const PDO::PDOMapping& mapping,
                           uint32_t offset, uint32_t length);
 
-    /// @brief Describe the logical placement of every enabled PDO entry.
-    ///
-    /// Lets a caller compose slices from the PDO layout (e.g. group the FSoE
-    /// PDOs apart from the RSAP/debug PDOs) without knowing the internal
-    /// address map.
+    /**
+     * @brief Describe the logical placement of every enabled PDO entry.
+     *
+     * Lets a caller compose slices from the PDO layout (e.g. group the FSoE
+     * PDOs apart from the RSAP/debug PDOs) without knowing the internal
+     * address map.
+     */
     std::vector<EntrySlice> describeEntries(const PDO::PDOMapping& mapping) const;
 
     // ----- User-defined PDO slices (dedicated wire idx, own pipeline) -----
 
-    /// Runs a slice resolves to at plan time — one LRW datagram each.
+    /**Runs a slice resolves to at plan time — one LRW datagram each. */
     static constexpr size_t kMaxSliceRuns = 8;
 
-    /// Slice configuration type — defined at namespace scope in
-    /// PDOManager.hpp (LAM is forward-declared there, so the spec cannot
-    /// live as a nested type here).
+    /**
+     * Slice configuration type — defined at namespace scope in
+     * PDOManager.hpp (LAM is forward-declared there, so the spec cannot
+     * live as a nested type here).
+     */
     using PDOSliceSpec = ::EtherCAT::PDOSliceSpec;
 
     /**
@@ -393,7 +419,7 @@ public:
      */
     uint32_t definePDOSlice(const PDO::PDOMapping& mapping,
                             const PDOSliceSpec& spec);
-    /// Drop all defined slices (pending responses are abandoned).
+    /**Drop all defined slices (pending responses are abandoned). */
     bool clearPDOSlices();
     size_t pdoSliceCount() const { return slices_.size(); }
 
@@ -426,30 +452,40 @@ public:
         uint32_t wkc_errors{0};
         uint32_t send_errors{0};
         uint32_t timeout_errors{0};
-        /// Responses whose echoed send-generation didn't match the pending
-        /// send — a stale deposit surviving a timed-out cycle.
+        /**
+         * Responses whose echoed send-generation didn't match the pending
+         * send — a stale deposit surviving a timed-out cycle.
+         */
         uint32_t stale_responses{0};
-        /// Wire RTT of replies that arrived in-generation, measured from
-        /// slice emit to the deposit's stamp_ns (kernel RX stamp where
-        /// available).  min/avg/max in ns; rtt_samples counts arrivals.
+        /**
+         * Wire RTT of replies that arrived in-generation, measured from
+         * slice emit to the deposit's stamp_ns (kernel RX stamp where
+         * available).  min/avg/max in ns; rtt_samples counts arrivals.
+         */
         uint64_t rtt_ns_sum{0};
         uint32_t rtt_ns_min{0};
         uint32_t rtt_ns_max{0};
         uint32_t rtt_samples{0};
-        /// Host stalls detected in the polled LRW path (gap between
-        /// exchangeLRW calls exceeded stall detection threshold).
+        /**
+         * Host stalls detected in the polled LRW path (gap between
+         * exchangeLRW calls exceeded stall detection threshold).
+         */
         uint32_t stall_events{0};
-        /// Frames pulled off the wire by post-stall/timeout drains.
+        /**Frames pulled off the wire by post-stall/timeout drains. */
         uint32_t drained_frames{0};
-        /// Currently consecutive LRW timeouts (resets on success).
+        /**Currently consecutive LRW timeouts (resets on success). */
         uint32_t consecutive_timeouts{0};
-        /// Cyclic counter-trailer datagrams whose echo did not match the
-        /// send — a late/stale frame, consumed and rejected.
+        /**
+         * Cyclic counter-trailer datagrams whose echo did not match the
+         * send — a late/stale frame, consumed and rejected.
+         */
         uint32_t counter_mismatches{0};
-        /// Cyclic DC-timepoint datagrams that timed out or failed WKC.
+        /**Cyclic DC-timepoint datagrams that timed out or failed WKC. */
         uint32_t dc_timeouts{0};
-        /// Exchange-health monitor worker spawns — one per init() (the
-        /// worker is persistent for the manager's lifetime).
+        /**
+         * Exchange-health monitor worker spawns — one per init() (the
+         * worker is persistent for the manager's lifetime).
+         */
         uint32_t tx_diag_spawns{0};
     };
     Stats getStats() const;
@@ -457,7 +493,7 @@ public:
 
     // ----- Stall self-heal (polled LRW path) -----
 
-    /// Response wait budget per LRW datagram, ms (default 10).
+    /**Response wait budget per LRW datagram, ms (default 10). */
     void setLrwResponseTimeoutMs(uint32_t ms) { response_timeout_ms_ = ms ? ms : 1; }
     uint32_t lrwResponseTimeoutMs() const { return response_timeout_ms_; }
 
@@ -472,31 +508,35 @@ public:
     void setStallDetectionGapUs(uint32_t us) { stall_detect_us_ = us; }
     uint32_t stallDetectionGapUs() const { return stall_detect_us_; }
 
-    /// Consecutive-timeout count that triggers a ring probe + warning
-    /// (default 64; 0 disables).  Executed and logged by the monitor thread.
+    /**
+     * Consecutive-timeout count that triggers a ring probe + warning
+     * (default 64; 0 disables).  Executed and logged by the monitor thread.
+     */
     void setEscalateAfterTimeouts(uint32_t n);
 
     // ----- Log Prefix (set by Master from per-slave name) -----
 
-    /// @brief Set a function that returns the log prefix for a given slave index.
+    /**@brief Set a function that returns the log prefix for a given slave index. */
     void setPrefixProvider(std::function<std::string(uint16_t)> provider) {
         prefix_provider_ = std::move(provider);
     }
 
     // ----- Base Logical Address -----
 
-    /// @brief Set the base logical address for this manager's address space.
-    ///
-    /// Default is 0x10000.  When using multiple independent PDOManager /
-    /// LogicalAddressManager instances (e.g. one per slave), each manager
-    /// should use a non-overlapping base address so that LRW datagrams
-    /// from different managers don't conflict on the same slave's FMMU.
-    ///
-    /// Must be called before buildAddressMap() / buildAddressMapFromMultiPDO().
+    /**
+     * @brief Set the base logical address for this manager's address space.
+     *
+     * Default is 0x10000.  When using multiple independent PDOManager /
+     * LogicalAddressManager instances (e.g. one per slave), each manager
+     * should use a non-overlapping base address so that LRW datagrams
+     * from different managers don't conflict on the same slave's FMMU.
+     *
+     * Must be called before buildAddressMap() / buildAddressMapFromMultiPDO().
+     */
     void setBaseLogicalAddress(uint32_t base) { base_logical_addr_ = base; }
     uint32_t getBaseLogicalAddress() const { return base_logical_addr_; }
 
-    /// @brief Wire the manager to the master' s debug flags.
+    /**@brief Wire the manager to the master' s debug flags. */
     void setDebugFlags(const EtherCATMasterDebugFlags* flags) {
         debug_flags_.store(flags, std::memory_order_relaxed);
     }
@@ -515,9 +555,11 @@ private:
     // escalation.
     std::unique_ptr<TxFailureDiagnostics> tx_diag_;
 
-    /// Detect a host stall since the last exchange call; drain the wire
-    /// backlog when one fired.  Pending waiters are NOT purged — backlog
-    /// frames are routed normally so late replies still reach them.
+    /**
+     * Detect a host stall since the last exchange call; drain the wire
+     * backlog when one fired.  Pending waiters are NOT purged — backlog
+     * frames are routed normally so late replies still reach them.
+     */
     void stallCheck();
     /**
      * @brief Claim the response slot this polled exchange will send on.
@@ -537,12 +579,14 @@ private:
      *         owned by a live waiter.
      */
     size_t claimExchangeWaiter(uint8_t& idx_out, RxDatagram& resp);
-    /// Timeout bookkeeping: count the streak, notify the monitor (it
-    /// rate-limits the log and fires the ring probe at the escalation
-    /// threshold), drain the wire.  `what` is the caller's function name.
-    /// No logging happens on this (RT) thread.
+    /**
+     * Timeout bookkeeping: count the streak, notify the monitor (it
+     * rate-limits the log and fires the ring probe at the escalation
+     * threshold), drain the wire.  `what` is the caller's function name.
+     * No logging happens on this (RT) thread.
+     */
     void onExchangeTimeout(const char* what);
-    /// Success bookkeeping: reset the consecutive-timeout streak.
+    /**Success bookkeeping: reset the consecutive-timeout streak. */
     void onExchangeSuccess();
 
     IPDOTransport& transport_;
@@ -554,9 +598,11 @@ private:
         uint16_t txpdo_length{0};
         bool     active{false};
 
-        /// Per-PDO logical address entries (multi-PDO mode).
-        /// Fixed-size array to avoid heap allocation in real-time paths.
-        static constexpr size_t kMaxPDOEntries = 32;  ///< 16 RxPDO + 16 TxPDO max
+        /**
+         * Per-PDO logical address entries (multi-PDO mode).
+         * Fixed-size array to avoid heap allocation in real-time paths.
+         */
+        static constexpr size_t kMaxPDOEntries = 32; /**< 16 RxPDO + 16 TxPDO max */
         PDOLogicalAddrEntry pdo_entries[kMaxPDOEntries]{};
         size_t pdo_entry_count{0};
 
@@ -572,7 +618,7 @@ private:
     uint16_t slave_count_{0};
     uint32_t total_rxpdo_bytes_{0};
     uint32_t total_txpdo_bytes_{0};
-    uint32_t base_logical_addr_{0x10000};  ///< Base logical address (default 0x10000)
+    uint32_t base_logical_addr_{0x10000}; /**< Base logical address (default 0x10000) */
 
     // Sticky per-slave logical window assignment.  A slave's FMMUs are
     // programmed once during its PDO configuration using the addresses in
@@ -584,66 +630,76 @@ private:
     static constexpr uint32_t kUnassigned = 0xFFFFFFFFu;
     std::array<uint32_t, PDO::kMaxPDOSlaves> slave_log_base_{};
     std::array<uint32_t, PDO::kMaxPDOSlaves> slave_log_size_{};
-    uint32_t next_free_log_{0};  ///< next free logical offset (rel. to base)
+    uint32_t next_free_log_{0}; /**< next free logical offset (rel. to base) */
     Stats    stats_{};
     bool     initialized_{false};
     std::function<std::string(uint16_t)> prefix_provider_;
     std::atomic<const EtherCATMasterDebugFlags*> debug_flags_{nullptr};
 
-    /// Shared implementation for exchangeAllLRW() (whole image) and
-    /// exchangeLRWSlice() (partial).  @p enforce_slice_limit rejects slices
-    /// larger than one datagram; the whole-image path leaves it off so it
-    /// keeps the transport's own frame-size diagnostic.
+    /**
+     * Shared implementation for exchangeAllLRW() (whole image) and
+     * exchangeLRWSlice() (partial).  @p enforce_slice_limit rejects slices
+     * larger than one datagram; the whole-image path leaves it off so it
+     * keeps the transport's own frame-size diagnostic.
+     */
     bool exchangeLRWImpl(const PDO::PDOMapping& mapping,
                          uint32_t offset, uint32_t length,
                          bool enforce_slice_limit);
 
-    /// Persistent LRW payload for the cyclic fast path — allocated at
-    /// buildAddressMap() time (or lazily on first cyclic exchange), sized to
-    /// the total process image.  Avoids the ~64 KiB stack buffer the router
-    /// path uses per call.
+    /**
+     * Persistent LRW payload for the cyclic fast path — allocated at
+     * buildAddressMap() time (or lazily on first cyclic exchange), sized to
+     * the total process image.  Avoids the ~64 KiB stack buffer the router
+     * path uses per call.
+     */
     std::unique_ptr<uint8_t[]> cyclic_payload_;
     uint32_t cyclic_payload_size_{0};
     void ensureCyclicPayload(uint32_t size);
 
     // ---- Cyclic slice / split-phase state (cyclic thread only) ----
     static constexpr size_t kMaxCyclicSlices = IPDOTransport::kNumCyclicSlots;
-    /// One in-flight image slice.  `pos` is the ROTATING pool position
-    /// the datagram was sent on — slices no longer own fixed slots, so
-    /// a late response deposits into a mailbox nobody else will re-arm
-    /// until the pool wraps (82 sends), and the generation/counter
-    /// checks reject it if it outlives that window.
+    /**
+     * One in-flight image slice.  `pos` is the ROTATING pool position
+     * the datagram was sent on — slices no longer own fixed slots, so
+     * a late response deposits into a mailbox nobody else will re-arm
+     * until the pool wraps (82 sends), and the generation/counter
+     * checks reject it if it outlives that window.
+     */
     struct PendingSlice { uint64_t token; uint32_t off; uint32_t len;
                           uint8_t gen; uint8_t pos; };
     std::array<PendingSlice, kMaxCyclicSlices> cyclic_pending_{};
-    uint8_t  cyclic_pending_count_{0};   ///< slices awaiting collect
-    uint8_t  cyclic_slice_count_{1};     ///< slices needed for the image
-    uint64_t cyclic_deadline_ns_{0};     ///< collect deadline (mono ns)
-    uint64_t cyclic_send_ns_{0};         ///< slice emit time (mono ns)
+    uint8_t  cyclic_pending_count_{0}; /**< slices awaiting collect */
+    uint8_t  cyclic_slice_count_{1}; /**< slices needed for the image */
+    uint64_t cyclic_deadline_ns_{0}; /**< collect deadline (mono ns) */
+    uint64_t cyclic_send_ns_{0}; /**< slice emit time (mono ns) */
     ProcessImage* pending_image_{nullptr};
 
     // ---- Rotating pool / counter trailer / DC timepoint ------------
-    uint8_t  pool_pos_next_{0};   ///< next free rotating-pool position
-    uint64_t lrw_counter_{0};     ///< counter stamped into the last send
-    uint64_t lrw_counter_ok_{0};  ///< counter verified by the last collect
-    /// Bookkeeping for the trailing counter datagram (one per send —
-    /// a dedicated pool position, payload = the counter bytes at the
-    /// first unmapped logical address, echoed verbatim).
+    uint8_t  pool_pos_next_{0}; /**< next free rotating-pool position */
+    uint64_t lrw_counter_{0}; /**< counter stamped into the last send */
+    uint64_t lrw_counter_ok_{0}; /**< counter verified by the last collect */
+    /**
+     * Bookkeeping for the trailing counter datagram (one per send —
+     * a dedicated pool position, payload = the counter bytes at the
+     * first unmapped logical address, echoed verbatim).
+     */
     uint8_t  cnt_pos_{0};
     uint64_t cnt_token_{0};
     uint8_t  cnt_gen_{0};
-    uint64_t cnt_value_{0};       ///< counter bytes as sent (LE64)
+    uint64_t cnt_value_{0}; /**< counter bytes as sent (LE64) */
     bool     cnt_pending_{false};
-    /// Bookkeeping for the DC-timepoint datagram (fixed idx 0xFF =
-    /// pool position kCyclicDcPoolPos).
+    /**
+     * Bookkeeping for the DC-timepoint datagram (fixed idx 0xFF =
+     * pool position kCyclicDcPoolPos).
+     */
     uint64_t dc_token_{0};
     uint8_t  dc_gen_{0};
     bool     dc_pending_{false};
-    int32_t  dc_slave_pos_{-1};   ///< APRD position; <0 = disabled
-    uint64_t dc_time_ns_{0};      ///< last verified DC System Time
+    int32_t  dc_slave_pos_{-1}; /**< APRD position; <0 = disabled */
+    uint64_t dc_time_ns_{0}; /**< last verified DC System Time */
     bool     dc_time_valid_{false};
 
-    /// Draw the next rotating-pool position (wraps 0..kNumCyclicSlots-1).
+    /**Draw the next rotating-pool position (wraps 0..kNumCyclicSlots-1). */
     uint8_t allocPoolPos() {
         const uint8_t p = pool_pos_next_;
         pool_pos_next_ = static_cast<uint8_t>(
@@ -651,72 +707,84 @@ private:
         return p;
     }
 
-    /// Expected-WKC per slice — kWkcUnknown = learn from first success
-    /// (derived from the slave set by cyclicSend when a mapping is known).
+    /**
+     * Expected-WKC per slice — kWkcUnknown = learn from first success
+     * (derived from the slave set by cyclicSend when a mapping is known).
+     */
     std::array<uint16_t, kMaxCyclicSlices> expected_wkc_{};
-    /// Last collect outcome per image slice — packed CyclicSliceHealth
-    /// words (single atomic load/store, never torn for readers).
+    /**
+     * Last collect outcome per image slice — packed CyclicSliceHealth
+     * words (single atomic load/store, never torn for readers).
+     */
     std::array<uint64_t, kMaxCyclicSlices> slice_health_{};
     bool strict_wkc_{true};
 
     // ---- User PDO slices (cyclic thread only) ---------------------------
     struct PDOSliceRun {
-        uint32_t off{0};                    ///< image-space offset
-        uint32_t len{0};                    ///< bytes (<= maxSliceLength)
-        uint8_t  slot{0};                   ///< slice slot (idx 0xE0+slot)
-        bool     slot_owned{false};         ///< slot claimed from the
-                                            ///< transport's shared pool
-        uint64_t token{0};                  ///< pending seq token
-        uint8_t  gen{0};                    ///< send generation expected
-        uint8_t  sent{0};                   ///< datagram emitted this cycle
-        uint16_t expected_wkc{kWkcUnknown}; ///< derived/learned WKC
-        uint64_t health_packed{0};          ///< packed CyclicSliceHealth
+        uint32_t off{0}; /**< image-space offset */
+        uint32_t len{0}; /**< bytes (<= maxSliceLength) */
+        uint8_t  slot{0}; /**< slice slot (idx 0xE0+slot) */
+        bool     slot_owned{false}; /**< slot claimed from the */
+                                            /**< transport's shared pool */
+        uint64_t token{0}; /**< pending seq token */
+        uint8_t  gen{0}; /**< send generation expected */
+        uint8_t  sent{0}; /**< datagram emitted this cycle */
+        uint16_t expected_wkc{kWkcUnknown}; /**< derived/learned WKC */
+        uint64_t health_packed{0}; /**< packed CyclicSliceHealth */
     };
     struct PDOSlice {
         std::array<PDOSliceRun, kMaxSliceRuns> runs{};
         uint8_t  run_count{0};
-        /// Spec for replanning on mapping-epoch change (config data only —
-        /// never touched on the RT path except during a replan).
+        /**
+         * Spec for replanning on mapping-epoch change (config data only —
+         * never touched on the RT path except during a replan).
+         */
         PDOSliceSpec spec;
         uint32_t every_n{1};
-        uint32_t cycle_mod{0};              ///< decimation phase counter
-        uint64_t deadline_ns{0};            ///< collect deadline this emit
-        bool     pending{false};            ///< runs in flight
+        uint32_t cycle_mod{0}; /**< decimation phase counter */
+        uint64_t deadline_ns{0}; /**< collect deadline this emit */
+        bool     pending{false}; /**< runs in flight */
     };
     std::vector<PDOSlice> slices_;
-    /// Mapping epoch the runs were planned on.  UINT32_MAX = "never
-    /// planned" — a define/clear stamps it so the next emitSlices()
-    /// replans even when the mapping's epoch is still 0 (add_*pdo()
-    /// doesn't bump the epoch, only clear()/remove_* do).
+    /**
+     * Mapping epoch the runs were planned on.  UINT32_MAX = "never
+     * planned" — a define/clear stamps it so the next emitSlices()
+     * replans even when the mapping's epoch is still 0 (add_*pdo()
+     * doesn't bump the epoch, only clear()/remove_* do).
+     */
     uint32_t slice_epoch_{0xFFFFFFFFu};
-    uint64_t exchange_cycle_{0};  ///< cyclicSend invocation counter
-    uint32_t image_every_n_{1};   ///< whole-image decimation
-    /// Staging for non-image-mode slice payloads (gather per run).
+    uint64_t exchange_cycle_{0}; /**< cyclicSend invocation counter */
+    uint32_t image_every_n_{1}; /**< whole-image decimation */
+    /**Staging for non-image-mode slice payloads (gather per run). */
     std::unique_ptr<uint8_t[]> slice_payload_;
     uint32_t slice_payload_size_{0};
 
-    /// Re-plan every slice's runs against the current mapping — claims
-    /// slice slots from the transport's shared pool (the pool is shared
-    /// by every LAM bound to a datapath, so per-LAM counters would
-    /// collide on wire idx) and derives per-run expected WKC.  Runs on
-    /// epoch change or first send after define.
+    /**
+     * Re-plan every slice's runs against the current mapping — claims
+     * slice slots from the transport's shared pool (the pool is shared
+     * by every LAM bound to a datapath, so per-LAM counters would
+     * collide on wire idx) and derives per-run expected WKC.  Runs on
+     * epoch change or first send after define.
+     */
     bool replanSlices(const PDO::PDOMapping& mapping);
-    /// Release every slice slot this LAM claimed from the pool.
+    /**Release every slice slot this LAM claimed from the pool. */
     void releaseSliceSlots();
-    /// Resolve a spec to contiguous runs (no slot assignment).
+    /**Resolve a spec to contiguous runs (no slot assignment). */
     size_t resolveSpecRuns(const PDO::PDOMapping& mapping,
                            const PDOSliceSpec& spec,
                            std::array<std::pair<uint32_t,uint32_t>,
                                       kMaxSliceRuns>& out) const;
-    /// cyclicSend() helper — emit due slices onto their slice slots.
+    /**cyclicSend() helper — emit due slices onto their slice slots. */
     void emitSlices(const PDO::PDOMapping& mapping, ProcessImage* image,
                     uint32_t rx_timeout_ns);
-    /// cyclicCollect() helper — wait/scatter/publish pending slices.
-    /// Shares the image input bank with the full-image publish so later
-    /// (fresher) slice data lands on top.  Returns false on any miss.
+    /**
+     * cyclicCollect() helper — wait/scatter/publish pending slices.
+     * Shares the image input bank with the full-image publish so later
+     * (fresher) slice data lands on top.  Returns false on any miss.
+     */
     bool collectSlices(const PDO::PDOMapping& mapping, ProcessImage* image);
 
-    /// Build the log prefix for a slave (uses prefix_provider_ if set, else default)
+    /**Build the log prefix for a slave (uses prefix_provider_ if set, else default) */
     std::string slavePrefix(uint16_t idx) const {
         if (prefix_provider_) return prefix_provider_(idx);
         return std::format("Slave {}", idx);

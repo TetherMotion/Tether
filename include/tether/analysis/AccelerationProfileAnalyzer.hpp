@@ -12,23 +12,23 @@
 
 namespace tether::analysis {
 
-/// @brief A single acceleration data point.
+/**@brief A single acceleration data point. */
 struct AccelerationPoint {
     int line = 0;
-    double acceleration = 0; ///< mm/s²
+    double acceleration = 0; /**< mm/s² */
     enum class Type { Acceleration, Deceleration, Steady, Jerk } type = Type::Steady;
     enum class Magnitude { Low, Medium, High, Extreme } magnitude = Magnitude::Low;
 };
 
-/// @brief Per-segment time data (sampled).
+/**@brief Per-segment time data (sampled). */
 struct AccelTimeSegment {
     int lineNumber = 0;
-    double unlimitedTime = 0;  ///< seconds (no accel limit)
-    double limitedTime = 0;    ///< seconds (with accel limit)
+    double unlimitedTime = 0; /**< seconds (no accel limit) */
+    double limitedTime = 0; /**< seconds (with accel limit) */
     bool isAccelLimited = false;
 };
 
-/// @brief Combined acceleration profile analysis result.
+/**@brief Combined acceleration profile analysis result. */
 struct AccelerationProfileResult {
     // Acceleration profile
     std::vector<AccelerationPoint> points;
@@ -40,19 +40,19 @@ struct AccelerationProfileResult {
     double smoothnessScore = 100;
 
     // Acceleration-limited time estimation
-    double limitedTime = 0;          ///< seconds
-    double unlimitedTime = 0;        ///< seconds
-    double accelerationOverhead = 0; ///< seconds
+    double limitedTime = 0; /**< seconds */
+    double unlimitedTime = 0; /**< seconds */
+    double accelerationOverhead = 0; /**< seconds */
     double overheadPercentage = 0;
     int directionChanges = 0;
     int stops = 0;
-    double avgLimitedSpeed = 0;      ///< mm/min
+    double avgLimitedSpeed = 0; /**< mm/min */
     std::vector<AccelTimeSegment> segments;
 
     std::vector<std::string> recommendations;
 };
 
-/// @brief Analyze acceleration profile and estimate acceleration-limited time.
+/**@brief Analyze acceleration profile and estimate acceleration-limited time. */
 class AccelerationProfileAnalyzer {
 public:
     struct Params {
@@ -64,7 +64,7 @@ public:
     explicit AccelerationProfileAnalyzer() : params_() {}
     explicit AccelerationProfileAnalyzer(Params params) : params_(params) {}
 
-    /// @brief Analyze acceleration profile from G-code.
+    /**@brief Analyze acceleration profile from G-code. */
     AccelerationProfileResult analyze(const std::vector<std::string>& gcodeLines) const;
 
     const Params& params() const { return params_; }

@@ -33,22 +33,28 @@ namespace EtherCAT {
 
 class TxFailureDiagnostics {
 public:
-    /// Format a diagnostic report for an AF_PACKET `fd`.  Returns an empty
-    /// string when the fd cannot be diagnosed (non-Linux, not a bound
-    /// AF_PACKET socket, or no fd).
+    /**
+     * Format a diagnostic report for an AF_PACKET `fd`.  Returns an empty
+     * string when the fd cannot be diagnosed (non-Linux, not a bound
+     * AF_PACKET socket, or no fd).
+     */
     static std::string probe(int fd);
 
-    using ProbeFn       = std::function<std::string()>;  ///< wire probe → report
-    using ErrnoFn       = std::function<int()>;          ///< last sendto errno
-    /// Ring probe on consecutive timeouts — returns a short verdict like
-    /// "ALIVE (AL_STATUS=0x0002)", or "" to emit nothing.  Runs a transport
-    /// read from the monitor thread (async transport ops are legal there).
+    using ProbeFn       = std::function<std::string()>; /**< wire probe → report */
+    using ErrnoFn       = std::function<int()>; /**< last sendto errno */
+    /**
+     * Ring probe on consecutive timeouts — returns a short verdict like
+     * "ALIVE (AL_STATUS=0x0002)", or "" to emit nothing.  Runs a transport
+     * read from the monitor thread (async transport ops are legal there).
+     */
     using EscalationFn  = std::function<std::string()>;
 
-    /// @param probe       wire probe → full report (may be null)
-    /// @param errno_fn    errno of the last failed sendto (may be null)
-    /// @param escalation  ring probe for timeout streaks (may be null)
-    /// @param log_tag     logging tag used when emitting
+    /**
+     * @param probe       wire probe → full report (may be null)
+     * @param errno_fn    errno of the last failed sendto (may be null)
+     * @param escalation  ring probe for timeout streaks (may be null)
+     * @param log_tag     logging tag used when emitting
+     */
     TxFailureDiagnostics(ProbeFn probe, ErrnoFn errno_fn,
                          EscalationFn escalation,
                          const char* log_tag = "ethercat");
@@ -57,39 +63,49 @@ public:
     TxFailureDiagnostics(const TxFailureDiagnostics&) = delete;
     TxFailureDiagnostics& operator=(const TxFailureDiagnostics&) = delete;
 
-    /// Spawn the persistent monitor thread.  Idempotent.  Called by
-    /// LogicalAddressManager::init().
+    /**
+     * Spawn the persistent monitor thread.  Idempotent.  Called by
+     * LogicalAddressManager::init().
+     */
     void start();
-    /// Stop and join the worker (the destructor does this too).
+    /**Stop and join the worker (the destructor does this too). */
     void stop();
 
     // ----- RT-thread notifiers: atomic bumps only, never log -----
 
-    /// A cyclic sendSingleDatagram failed.  `mask` is the slave mask for
-    /// exchangeLRWForSlaves failures (0 = whole-image exchangeLRW).
+    /**
+     * A cyclic sendSingleDatagram failed.  `mask` is the slave mask for
+     * exchangeLRWForSlaves failures (0 = whole-image exchangeLRW).
+     */
     void noteSendFailure(uint32_t mask = 0);
-    /// No pre-registered response slot was free for the exchange.
+    /**No pre-registered response slot was free for the exchange. */
     void noteNoResponseSlot();
-    /// An exchange timed out waiting for its response.  `what` must point
-    /// to a string literal (or other immortal storage).
+    /**
+     * An exchange timed out waiting for its response.  `what` must point
+     * to a string literal (or other immortal storage).
+     */
     void noteTimeout(const char* what);
-    /// An exchange response carried WKC=0 — slaves aren't processing.
+    /**An exchange response carried WKC=0 — slaves aren't processing. */
     void noteWkcZero(const char* what);
-    /// exchangeLRW call gap exceeded the stall threshold.
+    /**exchangeLRW call gap exceeded the stall threshold. */
     void noteStall(int64_t gap_ns);
-    /// A sendSingleDatagram got on the wire — resets the send-fail streak.
-    /// (A successful send can still be followed by a response timeout.)
+    /**
+     * A sendSingleDatagram got on the wire — resets the send-fail streak.
+     * (A successful send can still be followed by a response timeout.)
+     */
     void noteSendOk();
-    /// A full exchange succeeded — resets both streaks.
+    /**A full exchange succeeded — resets both streaks. */
     void noteSuccess();
 
-    /// Consecutive-timeout count that fires the ring probe (default 64;
-    /// 0 disables).
+    /**
+     * Consecutive-timeout count that fires the ring probe (default 64;
+     * 0 disables).
+     */
     void setEscalateAfterTimeouts(uint32_t n) {
         escalate_after_.store(n ? n : 0, std::memory_order_relaxed);
     }
 
-    /// Worker thread spawns so far — one per start().
+    /**Worker thread spawns so far — one per start(). */
     uint32_t spawns() const { return spawns_.load(std::memory_order_relaxed); }
 
 private:

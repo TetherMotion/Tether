@@ -54,8 +54,10 @@ public:
     using Listener = std::function<void(DataPtr)>;
     using ListenerHandle = size_t;
 
-    /// Register a listener.  Returns a handle for later removal, or 0 if
-    /// the listener is null/empty (in which case nothing is registered).
+    /**
+     * Register a listener.  Returns a handle for later removal, or 0 if
+     * the listener is null/empty (in which case nothing is registered).
+     */
     ListenerHandle addListener(Listener listener) {
         if (!listener) return 0;
         const ListenerHandle handle = next_handle_++;
@@ -63,8 +65,10 @@ public:
         return handle;
     }
 
-    /// Remove the listener with the given handle.  Returns true if a
-    /// listener was removed, false if the handle was not found.
+    /**
+     * Remove the listener with the given handle.  Returns true if a
+     * listener was removed, false if the handle was not found.
+     */
     bool removeListener(ListenerHandle handle) {
         for (auto it = listeners_.begin(); it != listeners_.end(); ++it) {
             if (it->first == handle) {
@@ -75,19 +79,21 @@ public:
         return false;
     }
 
-    /// Remove all listeners.
+    /**Remove all listeners. */
     void clear() noexcept { listeners_.clear(); }
 
-    /// True when no listeners are registered (emit() is a no-op then).
+    /**True when no listeners are registered (emit() is a no-op then). */
     bool empty() const noexcept { return listeners_.empty(); }
 
-    /// Number of registered listeners.
+    /**Number of registered listeners. */
     std::size_t size() const noexcept { return listeners_.size(); }
 
-    /// Notify all listeners.  @p factory is called only when at least one
-    /// listener is registered; the returned shared_ptr is passed to every
-    /// listener.  When no listeners exist, factory is not invoked — this is
-    /// the no-copy fast path.
+    /**
+     * Notify all listeners.  @p factory is called only when at least one
+     * listener is registered; the returned shared_ptr is passed to every
+     * listener.  When no listeners exist, factory is not invoked — this is
+     * the no-copy fast path.
+     */
     template <typename Factory>
     void emit(Factory&& factory) {
         if (listeners_.empty()) return;

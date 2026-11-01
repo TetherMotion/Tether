@@ -37,44 +37,48 @@
 
 namespace tether::motion {
 
-/// One entry in the blend audit trail.
+/**One entry in the blend audit trail. */
 struct BlendAuditEntry {
-    std::size_t cornerIndex;       ///< Index of the junction (0..N-2).
-    CornerKind cornerKind;         ///< Classification of the corner.
-    double angleRad;               ///< Turning angle.
-    BlendSpec spec;                ///< Spec used (may differ from template
-                                   ///< after overlap adjustment).
-    BlendGeometry geometry;        ///< Solver result.
-    double originalTrimIn = 0.0;   ///< Trim requested before overlap adj.
+    std::size_t cornerIndex; /**< Index of the junction (0..N-2). */
+    CornerKind cornerKind; /**< Classification of the corner. */
+    double angleRad; /**< Turning angle. */
+    BlendSpec spec; /**< Spec used (may differ from template */
+                                   /**< after overlap adjustment). */
+    BlendGeometry geometry; /**< Solver result. */
+    double originalTrimIn = 0.0; /**< Trim requested before overlap adj. */
     double originalTrimOut = 0.0;
-    double overlapAdjustment = 0.0; ///< Reduction due to overlap (≥ 0).
-    std::string note;              ///< Human-readable diagnostic.
+    double overlapAdjustment = 0.0; /**< Reduction due to overlap (≥ 0). */
+    std::string note; /**< Human-readable diagnostic. */
 };
 
-/// Result of blending a whole path.
+/**Result of blending a whole path. */
 struct BlendedPath {
-    /// The new piece sequence: original pieces trimmed and interleaved
-    /// with blend curves. Empty if no blends were applied.
+    /**
+     * The new piece sequence: original pieces trimmed and interleaved
+     * with blend curves. Empty if no blends were applied.
+     */
     std::vector<NurbsCurve> pieces;
 
-    /// PHData sidecar per piece: phData[i] is populated iff pieces[i] is
-    /// a PH quintic blend curve (BlendCurveType::PHQuintic). Absent for
-    /// original (non-blend) pieces and non-PH blend curves.
-    /// When present, enables closed-form arc length / curvature (M16–M19).
+    /**
+     * PHData sidecar per piece: phData[i] is populated iff pieces[i] is
+     * a PH quintic blend curve (BlendCurveType::PHQuintic). Absent for
+     * original (non-blend) pieces and non-PH blend curves.
+     * When present, enables closed-form arc length / curvature (M16–M19).
+     */
     std::vector<std::optional<PHData>> phData;
 
-    /// Audit trail, one entry per junction.
+    /**Audit trail, one entry per junction. */
     std::vector<BlendAuditEntry> audit;
 
-    /// Number of corners that were successfully blended.
+    /**Number of corners that were successfully blended. */
     int blendedCount = 0;
-    /// Number that fell back to ExactStop.
+    /**Number that fell back to ExactStop. */
     int exactStopCount = 0;
-    /// Number that were straight (no blend needed).
+    /**Number that were straight (no blend needed). */
     int straightCount = 0;
 };
 
-/// Whole-path blend orchestrator.
+/**Whole-path blend orchestrator. */
 class PathBlender {
 public:
     /**

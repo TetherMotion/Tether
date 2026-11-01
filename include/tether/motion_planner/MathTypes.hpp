@@ -178,13 +178,13 @@ public:
     static_assert(N > 0, "Vector dimension must be positive");
     static_assert(std::is_arithmetic_v<T>, "Vector element type must be arithmetic");
 
-    /// Number of dimensions
+    /**Number of dimensions */
     static constexpr size_t Dimensions = N;
 
-    /// Element type
+    /**Element type */
     using value_type = T;
 
-    /// Storage type
+    /**Storage type */
     using storage_type = std::array<T, N>;
 
     // ========================================================================
@@ -260,33 +260,37 @@ public:
         return data_[i];
     }
 
-    /// Named accessors for common dimensions
-    /// @return Reference to component 0.
+    /**
+     * Named accessors for common dimensions
+     * @return Reference to component 0.
+     */
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 1), T&> x() noexcept { return data_[0]; }
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 1), const T&> x() const noexcept { return data_[0]; }
 
-    /// @return Reference to component 1.
+    /**@return Reference to component 1. */
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 2), T&> y() noexcept { return data_[1]; }
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 2), const T&> y() const noexcept { return data_[1]; }
 
-    /// @return Reference to component 2.
+    /**@return Reference to component 2. */
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 3), T&> z() noexcept { return data_[2]; }
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 3), const T&> z() const noexcept { return data_[2]; }
 
-    /// @return Reference to component 3.
+    /**@return Reference to component 3. */
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 4), T&> w() noexcept { return data_[3]; }
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 4), const T&> w() const noexcept { return data_[3]; }
 
-    /// Size and data access
-    /// @return Vector dimension N.
+    /**
+     * Size and data access
+     * @return Vector dimension N.
+     */
     constexpr size_t size() const noexcept { return N; }
     constexpr T* data() noexcept { return data_.data(); }
     constexpr const T* data() const noexcept { return data_.data(); }
@@ -296,16 +300,20 @@ public:
     // Eigen Interoperability (floating-point types only)
     // ========================================================================
 
-    /// Convert to Eigen vector (floating-point types only)
-    /// @return Eigen column vector with the same components.
+    /**
+     * Convert to Eigen vector (floating-point types only)
+     * @return Eigen column vector with the same components.
+     */
     template<typename U = T, typename = std::enable_if_t<std::is_floating_point_v<U>>>
     Eigen::Matrix<U, N, 1> toEigen() const noexcept {
         return Eigen::Matrix<U, N, 1>(data_.data());
     }
 
-    /// Convert from Eigen vector (floating-point types only)
-    /// @param v Eigen column vector to copy.
-    /// @return Vec with components converted to T.
+    /**
+     * Convert from Eigen vector (floating-point types only)
+     * @param v Eigen column vector to copy.
+     * @return Vec with components converted to T.
+     */
     template<typename U = T, typename = std::enable_if_t<std::is_floating_point_v<U>>>
     static Vec fromEigen(const Eigen::Matrix<U, N, 1>& v) noexcept {
         Vec result;
@@ -315,8 +323,10 @@ public:
         return result;
     }
 
-    /// Iterator support
-    /// @return Iterator to the first component.
+    /**
+     * Iterator support
+     * @return Iterator to the first component.
+     */
     constexpr auto begin() noexcept { return data_.begin(); }
     constexpr auto end() noexcept { return data_.end(); }
     constexpr auto begin() const noexcept { return data_.begin(); }
@@ -328,8 +338,10 @@ public:
     // Arithmetic Operations
     // ========================================================================
 
-    /// Negation
-    /// @return Component-wise negation.
+    /**
+     * Negation
+     * @return Component-wise negation.
+     */
     constexpr Vec operator-() const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -338,9 +350,11 @@ public:
         return result;
     }
 
-    /// Addition
-    /// @param other Vector added component-wise.
-    /// @return Sum vector.
+    /**
+     * Addition
+     * @param other Vector added component-wise.
+     * @return Sum vector.
+     */
     constexpr Vec operator+(const Vec& other) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -356,9 +370,11 @@ public:
         return *this;
     }
 
-    /// Subtraction
-    /// @param other Vector subtracted component-wise.
-    /// @return Difference vector.
+    /**
+     * Subtraction
+     * @param other Vector subtracted component-wise.
+     * @return Difference vector.
+     */
     constexpr Vec operator-(const Vec& other) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -374,9 +390,11 @@ public:
         return *this;
     }
 
-    /// Scalar multiplication
-    /// @param scalar Factor applied to every component.
-    /// @return Scaled vector.
+    /**
+     * Scalar multiplication
+     * @param scalar Factor applied to every component.
+     * @return Scaled vector.
+     */
     constexpr Vec operator*(T scalar) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -392,9 +410,11 @@ public:
         return *this;
     }
 
-    /// Scalar division
-    /// @param scalar Divisor applied to every component; must be non-zero.
-    /// @return Scaled vector.
+    /**
+     * Scalar division
+     * @param scalar Divisor applied to every component; must be non-zero.
+     * @return Scaled vector.
+     */
     constexpr Vec operator/(T scalar) const noexcept {
         Vec result;
         T inv = T(1) / scalar;
@@ -412,9 +432,11 @@ public:
         return *this;
     }
 
-    /// Element-wise multiplication (Hadamard product)
-    /// @param other Vector multiplied component-wise.
-    /// @return Hadamard product.
+    /**
+     * Element-wise multiplication (Hadamard product)
+     * @param other Vector multiplied component-wise.
+     * @return Hadamard product.
+     */
     constexpr Vec elementMul(const Vec& other) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -423,9 +445,11 @@ public:
         return result;
     }
 
-    /// Element-wise division
-    /// @param other Vector divided component-wise; components must be non-zero.
-    /// @return Quotient vector.
+    /**
+     * Element-wise division
+     * @param other Vector divided component-wise; components must be non-zero.
+     * @return Quotient vector.
+     */
     constexpr Vec elementDiv(const Vec& other) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -434,9 +458,11 @@ public:
         return result;
     }
 
-    /// Element-wise minimum
-    /// @param other Vector providing the second operand.
-    /// @return Component-wise min(*this, other).
+    /**
+     * Element-wise minimum
+     * @param other Vector providing the second operand.
+     * @return Component-wise min(*this, other).
+     */
     constexpr Vec elementMin(const Vec& other) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -445,9 +471,11 @@ public:
         return result;
     }
 
-    /// Element-wise maximum
-    /// @param other Vector providing the second operand.
-    /// @return Component-wise max(*this, other).
+    /**
+     * Element-wise maximum
+     * @param other Vector providing the second operand.
+     * @return Component-wise max(*this, other).
+     */
     constexpr Vec elementMax(const Vec& other) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -456,8 +484,10 @@ public:
         return result;
     }
 
-    /// Element-wise absolute value
-    /// @return Vector with |component| of every entry.
+    /**
+     * Element-wise absolute value
+     * @return Vector with |component| of every entry.
+     */
     constexpr Vec abs() const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -801,8 +831,10 @@ public:
         return result;
     }
 
-    /// Common unit vectors for 2D/3D
-    /// @return Unit vector along the x axis.
+    /**
+     * Common unit vectors for 2D/3D
+     * @return Unit vector along the x axis.
+     */
     template<size_t M = N>
     static constexpr std::enable_if_t<(M >= 1), Vec> unitX() noexcept { return unit(0); }
     template<size_t M = N>
@@ -818,10 +850,12 @@ private:
 // Non-member operators
 // ============================================================================
 
-/// Scalar * Vector
-/// @param scalar Factor applied to every component.
-/// @param v Vector to scale.
-/// @return Scaled vector.
+/**
+ * Scalar * Vector
+ * @param scalar Factor applied to every component.
+ * @param v Vector to scale.
+ * @return Scaled vector.
+ */
 template<size_t N, typename T>
 constexpr Vec<N, T> operator*(T scalar, const Vec<N, T>& v) noexcept {
     return v * scalar;
@@ -879,10 +913,10 @@ public:
     static_assert(MaxDegree > 0, "Maximum polynomial degree must be positive");
     static_assert(std::is_floating_point_v<T>, "Polynomial coefficients must be floating point");
 
-    /// Maximum degree this polynomial can represent
+    /**Maximum degree this polynomial can represent */
     static constexpr size_t MaxCoefficients = MaxDegree + 1;
 
-    /// Coefficient type
+    /**Coefficient type */
     using value_type = T;
 
     // ========================================================================
@@ -1078,7 +1112,7 @@ public:
      *
      * @param constant Integration constant (default: 0)
      */
-    /// @return Antiderivative with the given integration constant.
+    /**@return Antiderivative with the given integration constant. */
     Polynomial<MaxDegree + 1, T> integral(T constant = T(0)) const noexcept {
         Polynomial<MaxDegree + 1, T> result;
         result.setCoefficient(0, constant);
@@ -1479,10 +1513,12 @@ private:
 // Non-member operators
 // ============================================================================
 
-/// Scalar * Polynomial
-/// @param scalar Factor applied to every coefficient.
-/// @param p Polynomial to scale.
-/// @return Scaled polynomial.
+/**
+ * Scalar * Polynomial
+ * @param scalar Factor applied to every coefficient.
+ * @param p Polynomial to scale.
+ * @return Scaled polynomial.
+ */
 template<size_t N, typename T>
 Polynomial<N, T> operator*(T scalar, const Polynomial<N, T>& p) noexcept {
     return p * scalar;

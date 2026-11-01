@@ -16,11 +16,11 @@ namespace Identification {
  * thus uniquely estimated from joint torque/motion data via regression.
  */
 struct BaseParameterIdentificationResult {
-    Vector base_parameters;                  ///< The aggregated parameter values mapping to physical quantities (like mass*length).
-    std::vector<size_t> identifiable_columns;///< Indices of the column space (regressor columns) that are mathematically independent.
-    Matrix reduced_regressor;                ///< The pruned data matrix W_base mapping motion to torque: Torque = W_base * base_parameters.
-    size_t rank{0};                          ///< The numerical rank found (the number of independent base parameters).
-    double condition_number{0.0};            ///< Condition number of the reduced regressor. Values > 100 predict extreme sensitivity to sensor noise.
+    Vector base_parameters; /**< The aggregated parameter values mapping to physical quantities (like mass*length). */
+    std::vector<size_t> identifiable_columns; /**< Indices of the column space (regressor columns) that are mathematically independent. */
+    Matrix reduced_regressor; /**< The pruned data matrix W_base mapping motion to torque: Torque = W_base * base_parameters. */
+    size_t rank{0}; /**< The numerical rank found (the number of independent base parameters). */
+    double condition_number{0.0}; /**< Condition number of the reduced regressor. Values > 100 predict extreme sensitivity to sensor noise. */
 };
 
 /**
@@ -32,11 +32,11 @@ struct BaseParameterIdentificationResult {
  * ensuring smooth physical actuation.
  */
 struct FourierExcitationTrajectory {
-    Vector offsets;               ///< DC offsets forming the mean joint position configuration.
-    Matrix sine_coefficients;     ///< Fourier sine amplitudes driving each joint harmonic.
-    Matrix cosine_coefficients;   ///< Fourier cosine amplitudes driving each joint harmonic.
-    double base_frequency{1.0};   ///< The fundamental period (1/period) of the movement [Hz].
-    double duration{1.0};         ///< The total experiment time in seconds.
+    Vector offsets; /**< DC offsets forming the mean joint position configuration. */
+    Matrix sine_coefficients; /**< Fourier sine amplitudes driving each joint harmonic. */
+    Matrix cosine_coefficients; /**< Fourier cosine amplitudes driving each joint harmonic. */
+    double base_frequency{1.0}; /**< The fundamental period (1/period) of the movement [Hz]. */
+    double duration{1.0}; /**< The total experiment time in seconds. */
 
     /**
      * @brief Computes the trajectory position evaluated at a given time tick.
@@ -53,8 +53,8 @@ struct FourierExcitationTrajectory {
  * the optimizer to respect strict joint limits and workspace boundaries better than Fourier series.
  */
 struct BSplineExcitationTrajectory {
-    Matrix control_points; ///< Discretized anchor points dictating the B-Spline shape.
-    double duration{1.0};  ///< The total experiment time mapping out the spline curve.
+    Matrix control_points; /**< Discretized anchor points dictating the B-Spline shape. */
+    double duration{1.0}; /**< The total experiment time mapping out the spline curve. */
 
     /**
      * @brief Resolves the B-Spline value at physical time t. 

@@ -1,5 +1,5 @@
 #pragma once
-/// Master include for all simulation system headers
+/**Master include for all simulation system headers */
 #include "systems/MechanicalSystems.hpp"
 #include "systems/RotationalSystems.hpp"
 #include "systems/AerospaceSystems.hpp"
@@ -17,13 +17,13 @@
 
 namespace Simulation {
 
-/// Factory for creating systems by ID
+/**Factory for creating systems by ID */
 std::unique_ptr<DynamicalSystem> createSystem(int systemId);
 
-/// Get list of all available systems
+/**Get list of all available systems */
 std::vector<std::pair<int, const char*>> listSystems();
 
-/// Get the total number of systems
+/**Get the total number of systems */
 int systemCount();
 
 } // namespace Simulation

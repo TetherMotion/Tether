@@ -14,8 +14,10 @@ namespace EtherCAT::Drives::Synapticon::SafeMotion {
 
 namespace PDO = EtherCAT::Drives::SynapticonPDO;
 
-/// diagnostic_flags field mask → absolute bit index in the status safe
-/// data: the diagnostic word occupies status safe-data bits 16-31.
+/**
+ * diagnostic_flags field mask → absolute bit index in the status safe
+ * data: the diagnostic word occupies status safe-data bits 16-31.
+ */
 constexpr uint8_t diagStatusBit(uint16_t diagnostic_flags_mask)
 {
     return ::FSoE::bitIndexOf(
@@ -45,12 +47,14 @@ struct Command {
     static Command safeStop();
     static Command motionEnabled();
 
-    /// True only when no motion-restricting safety function is
-    /// demanded — STO, SS1, SS2, SOS, SBC and all four SLS instances
-    /// released.  The handshake bits (error/restart acknowledge, reset
-    /// position, safe output) are not motion restrictions.  A master
-    /// that demands any of these must not command motion, independent
-    /// of whether the slave has already acknowledged the demand.
+    /**
+     * True only when no motion-restricting safety function is
+     * demanded — STO, SS1, SS2, SOS, SBC and all four SLS instances
+     * released.  The handshake bits (error/restart acknowledge, reset
+     * position, safe output) are not motion restrictions.  A master
+     * that demands any of these must not command motion, independent
+     * of whether the slave has already acknowledged the demand.
+     */
     bool motionPermitted() const;
 };
 
@@ -74,16 +78,18 @@ struct Status {
     int32_t safe_position = 0;
     int32_t safe_velocity = 0;
     int16_t safe_analog_input = 0;
-    /// LW2 frame variant only — stays 0 when the slave uses LW1 framing.
+    /**LW2 frame variant only — stays 0 when the slave uses LW1 framing. */
     int16_t safe_torque = 0;
 
-    /// True only while no stop function is active: STO, SS1, SS2, SOS,
-    /// SBC (brake_engaged — engaged brakes physically hold the axis),
-    /// error and pending restart acknowledge all gate.  SLS limits
-    /// rather than stops and is deliberately not part of this gate —
-    /// consumers that cannot enforce a nonzero speed limit (the servo
-    /// emulator) must treat a demanded SLS as a halt themselves, see
-    /// `SafeMotionServoEmulator::controlMotionAllowed()`.
+    /**
+     * True only while no stop function is active: STO, SS1, SS2, SOS,
+     * SBC (brake_engaged — engaged brakes physically hold the axis),
+     * error and pending restart acknowledge all gate.  SLS limits
+     * rather than stops and is deliberately not part of this gate —
+     * consumers that cannot enforce a nonzero speed limit (the servo
+     * emulator) must treat a demanded SLS as a halt themselves, see
+     * `SafeMotionServoEmulator::controlMotionAllowed()`.
+     */
     bool motionAllowed() const;
 };
 
@@ -94,10 +100,12 @@ struct MainConfig {
     uint16_t master_address = 0x0001;
     uint16_t watchdog_time_ms = Timing::kMinimumWatchdogTimeMs;
     bool feature_enabled = false;
-    /// FSoE status-frame variant the slave is configured with:
-    /// LW1 = 31-byte frame (14 safe-data bytes), LW2 = 35-byte frame
-    /// (16 safe-data bytes — safe torque data appended).  Must match the
-    /// TxPDO 0x1B00 size used in the PDO assignment.
+    /**
+     * FSoE status-frame variant the slave is configured with:
+     * LW1 = 31-byte frame (14 safe-data bytes), LW2 = 35-byte frame
+     * (16 safe-data bytes — safe torque data appended).  Must match the
+     * TxPDO 0x1B00 size used in the PDO assignment.
+     */
     PDO::FSoEFrameVariant frame_variant = PDO::FSoEFrameVariant::LW1;
 };
 
@@ -112,14 +120,16 @@ struct ServoEmulatorConfig {
     bool temperature_ok = true;
     bool safe_input_1_high = false;
     bool safe_input_2_high = false;
-    /// When true, the emulated power stage ignores the master's
-    /// motion-gating demands (STO/SS1/SS2/SOS/SLS/SBC) for control — the
-    /// equivalent of the blackchannel's --override-safety wire rewrite on
-    /// a physical drive.  The published status still mirrors the raw
-    /// command, so the master sees the demanded functions active while
-    /// the emulated axis keeps moving (mirroring the real drive's
-    /// observable behaviour under suppression, including the resulting
-    /// StandstillViolation upstream).  Error/restart state still gates.
+    /**
+     * When true, the emulated power stage ignores the master's
+     * motion-gating demands (STO/SS1/SS2/SOS/SLS/SBC) for control — the
+     * equivalent of the blackchannel's --override-safety wire rewrite on
+     * a physical drive.  The published status still mirrors the raw
+     * command, so the master sees the demanded functions active while
+     * the emulated axis keeps moving (mirroring the real drive's
+     * observable behaviour under suppression, including the resulting
+     * StandstillViolation upstream).  Error/restart state still gates.
+     */
     bool suppress_motion_demands = false;
     bool analog_input_diagnostic_active = true;
     bool analog_input_value_valid = true;
@@ -133,9 +143,11 @@ struct ServoEmulatorConfig {
     // letting the slave re-synchronize after a missed transition.
     bool reset_crc_on_state_transition = false;
 
-    /// FSoE status-frame variant this slave emulates:
-    /// LW1 = 31-byte frame (14 safe-data bytes), LW2 = 35-byte frame
-    /// (16 safe-data bytes — safe torque data appended).
+    /**
+     * FSoE status-frame variant this slave emulates:
+     * LW1 = 31-byte frame (14 safe-data bytes), LW2 = 35-byte frame
+     * (16 safe-data bytes — safe torque data appended).
+     */
     PDO::FSoEFrameVariant frame_variant = PDO::FSoEFrameVariant::LW1;
 
     // Override the slave→master safe-data size (bytes).  0 (default)
@@ -182,12 +194,16 @@ struct ServoEmulatorConfig {
 
 struct Codec {
     static constexpr std::size_t kMainToSlaveSize = 4;
-    /// Maximum slave→master safe-data size (LW2).  LW1 uses the first
-    /// kSlaveToMainSizeLW1 bytes — encode/decode take spans so the same
-    /// codec serves both frame variants.
+    /**
+     * Maximum slave→master safe-data size (LW2).  LW1 uses the first
+     * kSlaveToMainSizeLW1 bytes — encode/decode take spans so the same
+     * codec serves both frame variants.
+     */
     static constexpr std::size_t kSlaveToMainSize = 16;
-    /// Slave→master safe-data size for the LW1 frame variant (no safe
-    /// torque data).
+    /**
+     * Slave→master safe-data size for the LW1 frame variant (no safe
+     * torque data).
+     */
     static constexpr std::size_t kSlaveToMainSizeLW1 = 14;
 
     static void encodeMainToSlave(const Command& command,
@@ -195,37 +211,43 @@ struct Codec {
     static std::optional<Command> decodeMainToSlave(
         std::span<const uint8_t> bytes);
 
-    /// Encode the slave→master safe data.  The first 14 bytes are the
-    /// LW1 payload; when @p bytes has room for 16 (LW2) the safe-torque
-    /// word is appended.
+    /**
+     * Encode the slave→master safe data.  The first 14 bytes are the
+     * LW1 payload; when @p bytes has room for 16 (LW2) the safe-torque
+     * word is appended.
+     */
     static void encodeSlaveToMain(const Status& status,
                                   std::span<uint8_t> bytes);
-    /// Decode slave→master safe data.  Requires at least 14 bytes (LW1);
-    /// with 16 bytes (LW2) the safe-torque word is decoded as well.
+    /**
+     * Decode slave→master safe data.  Requires at least 14 bytes (LW1);
+     * with 16 bytes (LW2) the safe-torque word is decoded as well.
+     */
     static std::optional<Status> decodeSlaveToMain(
         std::span<const uint8_t> bytes);
 
-    /// Command→status bit-mirror table for the SOMANET SafeMotion wire
-    /// format.  The FSoE master (e.g. ESC211) expects each master→slave
-    /// command bit echoed VERBATIM into the corresponding slave→master
-    /// status bit — at a DIFFERENT position, since the two directions
-    /// use different field layouts:
-    ///
-    ///   master→slave cmd (safe data)      slave→master status
-    ///   safety_flags bit 0  STO            safety_state bit 0
-    ///   safety_flags bit 1  SS1            safety_state bit 8
-    ///   safety_flags bit 2  SS2            safety_state bit 9
-    ///   safety_flags bit 3  SOS            safety_state bit 3
-    ///   safety_flags bit 8-11 SLS 1-4      safety_state bits 12-15
-    ///   safety_flags bit 13 SBC            diagnostic_flags bit 1
-    ///   safe-data bits 28-29 safe outputs  diagnostic_flags bits 12-13
-    ///
-    /// Positions are extracted from the PDO mask definitions in
-    /// SynapticonPDO.hpp (via ::FSoE::bitIndexOf; diagStatusBit shifts
-    /// the diagnostic-field masks into the status safe-data space) —
-    /// no raw bit numbers are hardcoded here.
-    ///
-    /// Consumed automatically by FSoESlaveEmulator::refreshPublishedStatus().
+    /**
+     * Command→status bit-mirror table for the SOMANET SafeMotion wire
+     * format.  The FSoE master (e.g. ESC211) expects each master→slave
+     * command bit echoed VERBATIM into the corresponding slave→master
+     * status bit — at a DIFFERENT position, since the two directions
+     * use different field layouts:
+     *
+     *   master→slave cmd (safe data)      slave→master status
+     *   safety_flags bit 0  STO            safety_state bit 0
+     *   safety_flags bit 1  SS1            safety_state bit 8
+     *   safety_flags bit 2  SS2            safety_state bit 9
+     *   safety_flags bit 3  SOS            safety_state bit 3
+     *   safety_flags bit 8-11 SLS 1-4      safety_state bits 12-15
+     *   safety_flags bit 13 SBC            diagnostic_flags bit 1
+     *   safe-data bits 28-29 safe outputs  diagnostic_flags bits 12-13
+     *
+     * Positions are extracted from the PDO mask definitions in
+     * SynapticonPDO.hpp (via ::FSoE::bitIndexOf; diagStatusBit shifts
+     * the diagnostic-field masks into the status safe-data space) —
+     * no raw bit numbers are hardcoded here.
+     *
+     * Consumed automatically by FSoESlaveEmulator::refreshPublishedStatus().
+     */
     static constexpr ::FSoE::BitMirror kStatusBitMirrors[] = {
         {::FSoE::bitIndexOf(PDO::SOMANET_RxPDO_1700::kSTO),
          ::FSoE::bitIndexOf(PDO::SOMANET_TxPDO_1B00::kSTOState)},
@@ -274,20 +296,22 @@ public:
 
     bool exchangeWith(SafeMotionServoEmulator& slave, uint64_t current_time_ms);
 
-    /// Exchange FSoE frames via EtherCAT PDO buffers (real drive communication).
-    ///
-    /// Encodes the current command, runs the FSoE state machine, builds the
-    /// master-to-slave frame into @p rx_pdo_out (the RxPDO 0x1700 buffer),
-    /// and processes the slave-to-master frame from @p tx_pdo_in (the TxPDO
-    /// 0x1B00 buffer).  On success, decodes the safety status and clears
-    /// pulse bits.
-    ///
-    /// @param rx_pdo_out      Output buffer for the master→slave FSoE frame (RxPDO)
-    /// @param rx_pdo_max      Capacity of rx_pdo_out (must be ≥ 11 for Data state)
-    /// @param tx_pdo_in       Input buffer with the slave→master FSoE frame (TxPDO)
-    /// @param tx_pdo_len      Number of valid bytes in tx_pdo_in
-    /// @param current_time_ms Monotonic time in milliseconds
-    /// @return true if the frame was processed successfully
+    /**
+     * Exchange FSoE frames via EtherCAT PDO buffers (real drive communication).
+     *
+     * Encodes the current command, runs the FSoE state machine, builds the
+     * master-to-slave frame into @p rx_pdo_out (the RxPDO 0x1700 buffer),
+     * and processes the slave-to-master frame from @p tx_pdo_in (the TxPDO
+     * 0x1B00 buffer).  On success, decodes the safety status and clears
+     * pulse bits.
+     *
+     * @param rx_pdo_out      Output buffer for the master→slave FSoE frame (RxPDO)
+     * @param rx_pdo_max      Capacity of rx_pdo_out (must be ≥ 11 for Data state)
+     * @param tx_pdo_in       Input buffer with the slave→master FSoE frame (TxPDO)
+     * @param tx_pdo_len      Number of valid bytes in tx_pdo_in
+     * @param current_time_ms Monotonic time in milliseconds
+     * @return true if the frame was processed successfully
+     */
     bool exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max,
                         const uint8_t* tx_pdo_in, size_t tx_pdo_len,
                         uint64_t current_time_ms);
@@ -324,24 +348,28 @@ public:
     void injectError(bool require_restart_acknowledge = true);
     void clearError();
 
-    /// Reset the emulator to the safe state (STO active, SBC active / brakes
-    /// engaged).  Resets last_command_ to safeStop(), clears error state,
-    /// and republishes the status.  Call this after rawSlave().reset() to
-    /// ensure the slave reports STO+SBC active immediately, before the master
-    /// sends any new command.
+    /**
+     * Reset the emulator to the safe state (STO active, SBC active / brakes
+     * engaged).  Resets last_command_ to safeStop(), clears error state,
+     * and republishes the status.  Call this after rawSlave().reset() to
+     * ensure the slave reports STO+SBC active immediately, before the master
+     * sends any new command.
+     */
     void resetToSafeState();
 
     bool motionAllowed() const { return published_status_.motionAllowed(); }
 
-    /// Motion gate for the emulated power stage.  With
-    /// suppress_motion_demands the master's gating demands are released
-    /// for control (they still report active in the published status);
-    /// error/restart conditions always gate.
-    ///
-    /// A demanded SLS counts as a full stop here: `Status::motionAllowed`
-    /// deliberately excludes it (real drives keep moving at the
-    /// configured limited speed), but the emulator models no speed
-    /// limit, so halting is the safe interpretation.
+    /**
+     * Motion gate for the emulated power stage.  With
+     * suppress_motion_demands the master's gating demands are released
+     * for control (they still report active in the published status);
+     * error/restart conditions always gate.
+     *
+     * A demanded SLS counts as a full stop here: `Status::motionAllowed`
+     * deliberately excludes it (real drives keep moving at the
+     * configured limited speed), but the emulator models no speed
+     * limit, so halting is the safe interpretation.
+     */
     bool controlMotionAllowed() const {
         if (config_.suppress_motion_demands) {
             return !error_active_ && !restart_required_;
@@ -351,9 +379,11 @@ public:
                !s.sls_active[2] && !s.sls_active[3];
     }
 
-    /// Toggle the slave→master STO status-mirror polarity (one-active
-    /// vs. verbatim echo).  Only affects the ProcessData state; the
-    /// command decode is governed by `command_active_high`.
+    /**
+     * Toggle the slave→master STO status-mirror polarity (one-active
+     * vs. verbatim echo).  Only affects the ProcessData state; the
+     * command decode is governed by `command_active_high`.
+     */
     void setInvertSto(bool invert);
     bool invertSto() const;
 

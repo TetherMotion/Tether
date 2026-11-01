@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file PrinterObjectsLeds.hpp
-/// @brief LED printer objects (led, dotstar, neopixel)
+/**
+ * @file PrinterObjectsLeds.hpp
+ * @brief LED printer objects (led, dotstar, neopixel)
+ */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 #include "tether/klipper/objects/Peripherals.hpp"
@@ -17,7 +19,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Neopixel printer object.
+/**@brief Neopixel printer object. */
 class NeopixelObject : public PrinterObject {
 public:
     explicit NeopixelObject(std::shared_ptr<objects::Neopixel> dev,
@@ -55,7 +57,7 @@ private:
     std::string name_;
 };
 
-/// @brief LED printer object (led).
+/**@brief LED printer object (led). */
 class LedObject : public PrinterObject {
 public:
     explicit LedObject(const std::string& name) : name_(name) {}
@@ -80,7 +82,7 @@ private:
     std::array<double, 4> color_ = {0, 0, 0, 0};
 };
 
-/// @brief Dotstar printer object (dotstar).
+/**@brief Dotstar printer object (dotstar). */
 class DotstarObject : public PrinterObject {
 public:
     explicit DotstarObject(const std::string& name) : name_(name) {}

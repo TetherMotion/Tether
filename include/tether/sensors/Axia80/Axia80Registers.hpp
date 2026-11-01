@@ -32,7 +32,7 @@ namespace Axia80 {
 
 static constexpr uint32_t kVendorId = 0x00000732u;
 static constexpr uint32_t kProductCode = 0x26483053u;
-static constexpr uint32_t kDeviceType = 0x00000192u; ///< Default device type (402 decimal)
+static constexpr uint32_t kDeviceType = 0x00000192u; /**< Default device type (402 decimal) */
 
 // ============================================================================
 // Object Dictionary Indices
@@ -72,7 +72,7 @@ static constexpr uint8_t PROD_SUBIDX_PRODUCT_NAME = 3;
 static constexpr uint8_t PROD_SUBIDX_PRODUCT_REVISION = 4;
 static constexpr uint8_t PROD_SUBIDX_PRODUCT_SERIAL = 5;
 static constexpr uint8_t PROD_SUBIDX_MANUFACTURER = 6;
-static constexpr uint8_t PROD_SUBIDX_COMMIT = 7; ///< Write password to commit changes
+static constexpr uint8_t PROD_SUBIDX_COMMIT = 7; /**< Write password to commit changes */
 
 // ============================================================================
 // Tool Transform Sub-indices (0x2020)
@@ -86,7 +86,7 @@ static constexpr uint8_t TT_SUBIDX_RY = 5;
 static constexpr uint8_t TT_SUBIDX_RZ = 6;
 static constexpr uint8_t TT_SUBIDX_DIST_UNITS = 7;
 static constexpr uint8_t TT_SUBIDX_ANG_UNITS = 8;
-static constexpr uint8_t TT_SUBIDX_COMMIT = 9; ///< Write 123 to commit and activate
+static constexpr uint8_t TT_SUBIDX_COMMIT = 9; /**< Write 123 to commit and activate */
 
 static constexpr uint16_t OD_RXPDO_MAP = 0x1601;
 static constexpr uint16_t OD_TXPDO_MAP = 0x1A00;
@@ -137,22 +137,22 @@ static constexpr uint8_t CAL_SUBIDX_HWOFFSET_G6 = 77;
 // Control Register 1 Bit Definitions (0x7010.1)
 // ============================================================================
 
-static constexpr uint32_t CTRL_BIAS_BIT = 0x00000001u;      ///< Bit 0: Set bias
-static constexpr uint32_t CTRL_RESERVED_BIT1 = 0x00000002u; ///< Bit 1: Reserved
-static constexpr uint32_t CTRL_CLEAR_BIAS_BIT = 0x00000004u;///< Bit 2: Clear bias
-static constexpr uint32_t CTRL_RESERVED_BIT3 = 0x00000008u; ///< Bit 3: Reserved
-static constexpr uint32_t CTRL_FILTER_MASK = 0x000000F0u;    ///< Bits 4-7: Filter type
+static constexpr uint32_t CTRL_BIAS_BIT = 0x00000001u; /**< Bit 0: Set bias */
+static constexpr uint32_t CTRL_RESERVED_BIT1 = 0x00000002u; /**< Bit 1: Reserved */
+static constexpr uint32_t CTRL_CLEAR_BIAS_BIT = 0x00000004u; /**< Bit 2: Clear bias */
+static constexpr uint32_t CTRL_RESERVED_BIT3 = 0x00000008u; /**< Bit 3: Reserved */
+static constexpr uint32_t CTRL_FILTER_MASK = 0x000000F0u; /**< Bits 4-7: Filter type */
 static constexpr uint32_t CTRL_FILTER_SHIFT = 4;
-static constexpr uint32_t CTRL_CALIBRATION_MASK = 0x00000F00u; ///< Bits 8-11: Calibration slot
+static constexpr uint32_t CTRL_CALIBRATION_MASK = 0x00000F00u; /**< Bits 8-11: Calibration slot */
 static constexpr uint32_t CTRL_CALIBRATION_SHIFT = 8;
-static constexpr uint32_t CTRL_SAMPLE_RATE_MASK = 0x0000F000u; ///< Bits 12-15: Sample rate
+static constexpr uint32_t CTRL_SAMPLE_RATE_MASK = 0x0000F000u; /**< Bits 12-15: Sample rate */
 static constexpr uint32_t CTRL_SAMPLE_RATE_SHIFT = 12;
 
 // ============================================================================
 // Control Register 2 Bit Definitions (0x7010.2)
 // ============================================================================
 
-static constexpr uint32_t CTRL2_SIMULATED_ERROR_BIT = 0x80000000u; ///< Bit 31: Inject simulated error into 0x6010 bit 28
+static constexpr uint32_t CTRL2_SIMULATED_ERROR_BIT = 0x80000000u; /**< Bit 31: Inject simulated error into 0x6010 bit 28 */
 
 // ============================================================================
 // Enumerations
@@ -162,57 +162,57 @@ static constexpr uint32_t CTRL2_SIMULATED_ERROR_BIT = 0x80000000u; ///< Bit 31: 
  * @brief Low-pass filter types for signal conditioning
  */
 enum class FilterType : uint8_t {
-    NO_FILTER = 0, ///< No filtering
-    FILTER_1 = 1,  ///< Light filtering
-    FILTER_2 = 2,  ///< Light-medium filtering
-    FILTER_3 = 3,  ///< Medium filtering
-    FILTER_4 = 4,  ///< Medium-heavy filtering
-    FILTER_5 = 5,  ///< Heavy filtering
-    FILTER_6 = 6,  ///< Very heavy filtering
-    FILTER_7 = 7,  ///< Extremely heavy filtering
-    FILTER_8 = 8,  ///< Maximum filtering
+    NO_FILTER = 0, /**< No filtering */
+    FILTER_1 = 1, /**< Light filtering */
+    FILTER_2 = 2, /**< Light-medium filtering */
+    FILTER_3 = 3, /**< Medium filtering */
+    FILTER_4 = 4, /**< Medium-heavy filtering */
+    FILTER_5 = 5, /**< Heavy filtering */
+    FILTER_6 = 6, /**< Very heavy filtering */
+    FILTER_7 = 7, /**< Extremely heavy filtering */
+    FILTER_8 = 8, /**< Maximum filtering */
 };
 
 /**
  * @brief Calibration slot selection
  */
 enum class CalibrationSlot : uint8_t {
-    SLOT_0 = 0, ///< Calibration stored in slot 0
-    SLOT_1 = 1, ///< Calibration stored in slot 1
+    SLOT_0 = 0, /**< Calibration stored in slot 0 */
+    SLOT_1 = 1, /**< Calibration stored in slot 1 */
 };
 
 /**
  * @brief Sample rate options
  */
 enum class SampleRate : uint8_t {
-    RATE_488_HZ = 0,  ///< 488 Hz
-    RATE_976_HZ = 1,  ///< 976 Hz
-    RATE_1953_HZ = 2, ///< 1953 Hz
-    RATE_3906_HZ = 3, ///< 3906 Hz
-    RATE_7812_HZ = 4, ///< 7812 Hz
+    RATE_488_HZ = 0, /**< 488 Hz */
+    RATE_976_HZ = 1, /**< 976 Hz */
+    RATE_1953_HZ = 2, /**< 1953 Hz */
+    RATE_3906_HZ = 3, /**< 3906 Hz */
+    RATE_7812_HZ = 4, /**< 7812 Hz */
 };
 
 /**
  * @brief Force measurement units
  */
 enum class ForceUnits : uint8_t {
-    LBF = 0,   ///< Pound-force
-    N = 1,     ///< Newtons
-    KLBF = 2,  ///< Kilo pound-force
-    KN = 3,    ///< Kilonewtons
-    KG = 4,    ///< Kilograms-force
+    LBF = 0, /**< Pound-force */
+    N = 1, /**< Newtons */
+    KLBF = 2, /**< Kilo pound-force */
+    KN = 3, /**< Kilonewtons */
+    KG = 4, /**< Kilograms-force */
 };
 
 /**
  * @brief Torque measurement units
  */
 enum class TorqueUnits : uint8_t {
-    LBF_IN = 0, ///< Pound-force inches
-    LBF_FT = 1, ///< Pound-force feet
-    NM = 2,     ///< Newton-meters
-    NMM = 3,    ///< Newton-millimeters
-    KGF_CM = 4, ///< Kilogram-force centimeters
-    KNM = 5,    ///< Kilonewton-meters
+    LBF_IN = 0, /**< Pound-force inches */
+    LBF_FT = 1, /**< Pound-force feet */
+    NM = 2, /**< Newton-meters */
+    NMM = 3, /**< Newton-millimeters */
+    KGF_CM = 4, /**< Kilogram-force centimeters */
+    KNM = 5, /**< Kilonewton-meters */
 };
 
 /**
@@ -239,33 +239,33 @@ enum class AngleUnits : uint8_t {
 // ============================================================================
 
 static constexpr uint32_t STATUS_NONE = 0x00000000u;
-static constexpr uint32_t STATUS_ERROR = 0x80000000u;              ///< General error (bit 31)
-static constexpr uint32_t STATUS_TEMP_OUT_OF_RANGE = 0x00000001u;  ///< Bit 0
-static constexpr uint32_t STATUS_VOLTAGE_OUT_OF_RANGE = 0x00000002u; ///< Bit 1
-static constexpr uint32_t STATUS_BROKEN_GAGE = 0x00000004u;      ///< Bit 2
-static constexpr uint32_t STATUS_BUSY = 0x00000008u;               ///< Bit 3
-static constexpr uint32_t STATUS_HW_STACK_ERROR = 0x00000020u;     ///< Bit 5
-static constexpr uint32_t STATUS_GAGE_OUT_OF_RANGE_WARN = 0x04000000u; ///< Bit 26
-static constexpr uint32_t STATUS_GAGE_OUT_OF_RANGE = 0x08000000u;  ///< Bit 27
-static constexpr uint32_t STATUS_SIMULATED_ERROR = 0x10000000u;    ///< Bit 28
-static constexpr uint32_t STATUS_CAL_CHECKSUM_ERROR = 0x20000000u; ///< Bit 29
-static constexpr uint32_t STATUS_SENSING_RANGE_EXCEEDED = 0x40000000u; ///< Bit 30
+static constexpr uint32_t STATUS_ERROR = 0x80000000u; /**< General error (bit 31) */
+static constexpr uint32_t STATUS_TEMP_OUT_OF_RANGE = 0x00000001u; /**< Bit 0 */
+static constexpr uint32_t STATUS_VOLTAGE_OUT_OF_RANGE = 0x00000002u; /**< Bit 1 */
+static constexpr uint32_t STATUS_BROKEN_GAGE = 0x00000004u; /**< Bit 2 */
+static constexpr uint32_t STATUS_BUSY = 0x00000008u; /**< Bit 3 */
+static constexpr uint32_t STATUS_HW_STACK_ERROR = 0x00000020u; /**< Bit 5 */
+static constexpr uint32_t STATUS_GAGE_OUT_OF_RANGE_WARN = 0x04000000u; /**< Bit 26 */
+static constexpr uint32_t STATUS_GAGE_OUT_OF_RANGE = 0x08000000u; /**< Bit 27 */
+static constexpr uint32_t STATUS_SIMULATED_ERROR = 0x10000000u; /**< Bit 28 */
+static constexpr uint32_t STATUS_CAL_CHECKSUM_ERROR = 0x20000000u; /**< Bit 29 */
+static constexpr uint32_t STATUS_SENSING_RANGE_EXCEEDED = 0x40000000u; /**< Bit 30 */
 
 // ============================================================================
 // Status Message Error Priority Hierarchy (from manual section 2.4)
 // ============================================================================
 
 enum class StatusMessagePriority : uint8_t {
-    SUPPLY_VOLTAGE_OUT_OF_RANGE = 1,   ///< Input voltage < 12V or > 30V
-    GAGE_TEMPERATURE_OUT_OF_RANGE = 2, ///< Temperature outside -5°C to +70°C
-    ERROR_UNSPECIFIED = 3,             ///< General unmapped system flags
-    GAGES_DISCONNECTED = 4,              ///< Open-circuit on strain gages
-    GAGES_OUT_OF_RANGE = 5,            ///< Operational saturation on gage elements
-    FT_OUT_OF_RANGE = 6,               ///< Combined loading exceeds 105% threshold
-    COMMON_ERROR = 7,                  ///< Internal system processing bus fault
-    SIMULATED_ERROR_MSG = 8,           ///< Verification test sequence flag enabled
-    SPARE = 9,                         ///< Unused priority level
-    NO_ERRORS = 10,                    ///< Nominal healthy operations
+    SUPPLY_VOLTAGE_OUT_OF_RANGE = 1, /**< Input voltage < 12V or > 30V */
+    GAGE_TEMPERATURE_OUT_OF_RANGE = 2, /**< Temperature outside -5°C to +70°C */
+    ERROR_UNSPECIFIED = 3, /**< General unmapped system flags */
+    GAGES_DISCONNECTED = 4, /**< Open-circuit on strain gages */
+    GAGES_OUT_OF_RANGE = 5, /**< Operational saturation on gage elements */
+    FT_OUT_OF_RANGE = 6, /**< Combined loading exceeds 105% threshold */
+    COMMON_ERROR = 7, /**< Internal system processing bus fault */
+    SIMULATED_ERROR_MSG = 8, /**< Verification test sequence flag enabled */
+    SPARE = 9, /**< Unused priority level */
+    NO_ERRORS = 10, /**< Nominal healthy operations */
 };
 
 inline const char* statusPriorityToString(StatusMessagePriority p) {
@@ -381,28 +381,28 @@ inline bool isSensingRangeExceeded(int32_t fx, int32_t fy, int32_t fz,
  * @brief Calibration data read from OD 0x2021
  */
 struct CalibrationData {
-    char ft_serial[9] = {};        ///< Serial number (8 chars + null)
-    char part_number[31] = {};     ///< Part number (30 chars + null)
-    char family[9] = {};           ///< Family (8 chars + null)
-    char cal_time[31] = {};        ///< Calibration timestamp (30 chars + null)
-    double matrix[6][7] = {};      ///< 6×7 calibration matrix (Fx..Tz × G0..G6)
+    char ft_serial[9] = {}; /**< Serial number (8 chars + null) */
+    char part_number[31] = {}; /**< Part number (30 chars + null) */
+    char family[9] = {}; /**< Family (8 chars + null) */
+    char cal_time[31] = {}; /**< Calibration timestamp (30 chars + null) */
+    double matrix[6][7] = {}; /**< 6×7 calibration matrix (Fx..Tz × G0..G6) */
     ForceUnits force_units = ForceUnits::N;
     TorqueUnits torque_units = TorqueUnits::NM;
-    int32_t max_counts[6] = {};    ///< Max counts per axis
+    int32_t max_counts[6] = {}; /**< Max counts per axis */
     uint32_t counts_per_force = 0;
     uint32_t counts_per_torque = 0;
-    uint16_t gains[8] = {};        ///< G0..G7
-    int32_t bias_defaults[6] = {}; ///< Default bias values
-    int32_t hw_offsets[7] = {};    ///< HW offsets G0..G6
+    uint16_t gains[8] = {}; /**< G0..G7 */
+    int32_t bias_defaults[6] = {}; /**< Default bias values */
+    int32_t hw_offsets[7] = {}; /**< HW offsets G0..G6 */
 };
 
 /**
  * @brief Status info read from OD 0x2080
  */
 struct StatusInfo {
-    uint16_t supply_voltage_x10 = 0; ///< Supply voltage × 10 (decivolts)
-    int16_t temperature_x10 = 0;     ///< Temperature × 10 (decidegrees C)
-    char status_message[41] = {};    ///< Status message (40 chars + null)
+    uint16_t supply_voltage_x10 = 0; /**< Supply voltage × 10 (decivolts) */
+    int16_t temperature_x10 = 0; /**< Temperature × 10 (decidegrees C) */
+    char status_message[41] = {}; /**< Status message (40 chars + null) */
 };
 
 /**
@@ -423,10 +423,10 @@ struct VersionInfo {
 struct ProductDescription {
     uint32_t vendor_id = 0;
     uint32_t product_code = 0;
-    char product_name[33] = {};       ///< 32 chars + null
+    char product_name[33] = {}; /**< 32 chars + null */
     uint32_t product_revision = 0;
     uint32_t product_serial_number = 0;
-    char manufacturer[33] = {};       ///< 32 chars + null
+    char manufacturer[33] = {}; /**< 32 chars + null */
 };
 
 /**
@@ -437,12 +437,12 @@ struct ProductDescription {
  * Write 123 to subindex 9 (Commit) to activate changes.
  */
 struct ToolTransform {
-    char dx_str[17] = {};     ///< Displacement X as string (16 chars max)
-    char dy_str[17] = {};     ///< Displacement Y as string (16 chars max)
-    char dz_str[17] = {};     ///< Displacement Z as string (16 chars max)
-    char rx_str[17] = {};     ///< Rotation X as string (16 chars max)
-    char ry_str[17] = {};     ///< Rotation Y as string (16 chars max)
-    char rz_str[17] = {};     ///< Rotation Z as string (16 chars max)
+    char dx_str[17] = {}; /**< Displacement X as string (16 chars max) */
+    char dy_str[17] = {}; /**< Displacement Y as string (16 chars max) */
+    char dz_str[17] = {}; /**< Displacement Z as string (16 chars max) */
+    char rx_str[17] = {}; /**< Rotation X as string (16 chars max) */
+    char ry_str[17] = {}; /**< Rotation Y as string (16 chars max) */
+    char rz_str[17] = {}; /**< Rotation Z as string (16 chars max) */
     DistanceUnits distance_units = DistanceUnits::MILLIMETERS;
     AngleUnits angle_units = AngleUnits::DEGREES;
 };

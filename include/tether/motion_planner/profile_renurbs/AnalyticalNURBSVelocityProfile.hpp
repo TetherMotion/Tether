@@ -94,7 +94,7 @@ public:
     double totalTime() const override { return totalTime_; }
     double totalLength() const override { return totalLength_; }
 
-    /// Access the underlying ReNURBS profile.
+    /**Access the underlying ReNURBS profile. */
     const std::shared_ptr<const ReNURBSProfile>& profile() const { return profile_; }
 
 private:
@@ -102,8 +102,10 @@ private:
     double totalTime_ = 0.0;
     double totalLength_ = 0.0;
 
-    /// Evaluate one of the four quantities at arc length s.
-    /// quantityIndex: 0=velocity, 1=acceleration, 2=jerk, 3=time.
+    /**
+     * Evaluate one of the four quantities at arc length s.
+     * quantityIndex: 0=velocity, 1=acceleration, 2=jerk, 3=time.
+     */
     double evaluateAt(double arcLength, int quantityIndex) const {
         if (!profile_ || profile_->perSegment.empty()) return 0.0;
 

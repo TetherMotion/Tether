@@ -1,5 +1,7 @@
-/// @file FirstLayerAnalyzer.cpp
-/// @brief First-layer quality analysis.
+/**
+ * @file FirstLayerAnalyzer.cpp
+ * @brief First-layer quality analysis.
+ */
 
 #include "tether/gcode/analysis/FirstLayerAnalyzer.hpp"
 #include "tether/gcode/motion/InterpolationStrategy.hpp"

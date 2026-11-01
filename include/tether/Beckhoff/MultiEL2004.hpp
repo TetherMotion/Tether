@@ -74,12 +74,12 @@ public:
 
     // -- Typed module access ---------------------------------------------------
 
-    /// Access the EL2004 driver for one module (throws std::out_of_range).
+    /**Access the EL2004 driver for one module (throws std::out_of_range). */
     EL2004&       module(size_t i)       { return static_cast<EL2004&>(Base::module(i)); }
     const EL2004& module(size_t i) const { return static_cast<const EL2004&>(Base::module(i)); }
 
 private:
-    /// Matcher constructing typed EL2004 devices (so module() can downcast).
+    /**Matcher constructing typed EL2004 devices (so module() can downcast). */
     static std::span<const typename Base::DeviceMatcher> el2004Matcher() {
         static const typename Base::DeviceMatcher m[]{
             typename Base::DeviceMatcher{

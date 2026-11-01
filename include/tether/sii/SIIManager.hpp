@@ -388,7 +388,7 @@ private:
     // Parsed SII cache (guarded by bus_mutex_).
     SIIData cached_data_{};
     bool full_parse_done_ = false;
-    uint32_t cached_cat_mask_ = 0;  ///< Category mask for cached_data_ (0 = full parse)
+    uint32_t cached_cat_mask_ = 0; /**< Category mask for cached_data_ (0 = full parse) */
 
     // Low-level SII bus reader owned by this manager. One reader per manager
     // means the SIIReader's configured-address / FPWR / force-to-ECAT state

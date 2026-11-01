@@ -45,36 +45,38 @@
 
 namespace EtherCAT {
 
-/// Wire offset of the first datagram's payload in a single-datagram cyclic
-/// frame: eth(14) + ecat-hdr(2) + dg-hdr(10).
+/**
+ * Wire offset of the first datagram's payload in a single-datagram cyclic
+ * frame: eth(14) + ecat-hdr(2) + dg-hdr(10).
+ */
 inline constexpr uint32_t kCyclicFramePayloadOff = 26;
 
 // ============================================================================
 // Types
 // ============================================================================
 
-/// A received Ethernet frame, zero-copy view into channel memory.
+/**A received Ethernet frame, zero-copy view into channel memory. */
 struct CyclicFrameView {
-    const uint8_t* frame     = nullptr;  ///< full frame incl. Ethernet header
+    const uint8_t* frame     = nullptr; /**< full frame incl. Ethernet header */
     uint32_t       frame_len = 0;
-    uint64_t       stamp_ns  = 0;        ///< rx timestamp (hw when available)
-    uint32_t       cookie    = 0;        ///< opaque — for rxHold/rxRelease
+    uint64_t       stamp_ns  = 0; /**< rx timestamp (hw when available) */
+    uint32_t       cookie    = 0; /**< opaque — for rxHold/rxRelease */
 };
 
-/// Scatter-gather TX description: EtherCAT datagram(s) without staging copy.
+/**Scatter-gather TX description: EtherCAT datagram(s) without staging copy. */
 struct CyclicTxParts {
-    const uint8_t* header;       ///< eth + ecat + first datagram header
-    uint16_t       header_len;   ///< bytes at header
-    const uint8_t* payload;      ///< datagram payload (may be nullptr)
+    const uint8_t* header; /**< eth + ecat + first datagram header */
+    uint16_t       header_len; /**< bytes at header */
+    const uint8_t* payload; /**< datagram payload (may be nullptr) */
     uint16_t       payload_len;
-    uint16_t       wkc;          ///< appended after payload (usually 0 on TX)
+    uint16_t       wkc; /**< appended after payload (usually 0 on TX) */
 };
 
-/// How the cyclic channel reaches the wire.
+/**How the cyclic channel reaches the wire. */
 enum class CyclicWireMode : uint8_t {
-    Auto,        ///< Prefer PACKET_MMAP rings; fall back to socket (logged)
-    SocketIO,    ///< Plain AF_PACKET socket: recv + sendmsg
-    PacketRing,  ///< PACKET_MMAP rings only — creation fails if unsupported
+    Auto, /**< Prefer PACKET_MMAP rings; fall back to socket (logged) */
+    SocketIO, /**< Plain AF_PACKET socket: recv + sendmsg */
+    PacketRing, /**< PACKET_MMAP rings only — creation fails if unsupported */
 };
 
 // ============================================================================
@@ -94,10 +96,10 @@ public:
      */
     virtual uint8_t* txAcquire() = 0;
 
-    /// Maximum bytes one composed frame may occupy.
+    /**Maximum bytes one composed frame may occupy. */
     virtual size_t   txCapacity() const = 0;
 
-    /// Send the frame composed in the last txAcquire() buffer.
+    /**Send the frame composed in the last txAcquire() buffer. */
     virtual bool     txCommitFrame(uint32_t frame_len) = 0;
 
     /**
@@ -153,16 +155,16 @@ public:
      */
     virtual bool rxPending() const { return false; }
 
-    /// Pin a view's buffer beyond the next rxPoll (refcount ++).
+    /**Pin a view's buffer beyond the next rxPoll (refcount ++). */
     virtual void rxHold(uint32_t cookie)   = 0;
-    /// Drop one hold (refcount --; buffer frees when it reaches 0).
+    /**Drop one hold (refcount --; buffer frees when it reaches 0). */
     virtual void rxRelease(uint32_t cookie) = 0;
 
     // ---- Introspection ---------------------------------------------------
 
-    /// fd for ppoll integration, or -1 when the backend has none.
+    /**fd for ppoll integration, or -1 when the backend has none. */
     virtual int  fd() const = 0;
-    /// True when RX views point into kernel-shared ring memory.
+    /**True when RX views point into kernel-shared ring memory. */
     virtual bool zeroCopy() const = 0;
     virtual const char* backendName() const = 0;
     /**
@@ -207,11 +209,11 @@ public:
 // ============================================================================
 
 struct CyclicChannelConfig {
-    int      ifindex = 0;              ///< required — interface to bind
+    int      ifindex = 0; /**< required — interface to bind */
     CyclicWireMode wire_mode = CyclicWireMode::Auto;
 
-    uint32_t rx_ring_blocks = 128;     ///< PACKET_RX_RING blocks (4 KiB each)
-    uint32_t tx_ring_blocks = 16;      ///< PACKET_TX_RING blocks
+    uint32_t rx_ring_blocks = 128; /**< PACKET_RX_RING blocks (4 KiB each) */
+    uint32_t tx_ring_blocks = 16; /**< PACKET_TX_RING blocks */
 
     /**
      * @brief Spin window applied inside rxPoll() before falling back to a
@@ -233,16 +235,18 @@ struct CyclicChannelConfig {
      *        profiling comparison under high-RX-rate workloads (Q17).
      */
     bool     rx_tpacket_v3 = false;
-    uint32_t rx_v3_retire_us = 10'000;  ///< tp_retire_blk_tov (µs)
+    uint32_t rx_v3_retire_us = 10'000; /**< tp_retire_blk_tov (µs) */
 
-    /// Max frame bytes the channel must carry (Ethernet header + payload,
-    /// excl. FCS).  Default 1600 covers standard frames; raise to match
-    /// Master::Config::max_frame_size on jumbo links so ring slots and the
-    /// socket staging buffer can hold a full frame.
+    /**
+     * Max frame bytes the channel must carry (Ethernet header + payload,
+     * excl. FCS).  Default 1600 covers standard frames; raise to match
+     * Master::Config::max_frame_size on jumbo links so ring slots and the
+     * socket staging buffer can hold a full frame.
+     */
     uint32_t frame_size = 1600;
 
-    int      async_fd = -1;            ///< async socket (socket B) — the mirror
-                                       ///< BPF is attached here when >= 0
+    int      async_fd = -1; /**< async socket (socket B) — the mirror */
+                                       /**< BPF is attached here when >= 0 */
 
     /**
      * @brief Optional caller-built demux programs, replacing the built-in
@@ -254,9 +258,9 @@ struct CyclicChannelConfig {
      * generated program (see CBPFSpec::first_idx_range).  Pointers need
      * only outlive the createCyclicChannel() call.
      */
-    const CBPFInsn* accept_prog = nullptr;  ///< cyclic socket's program
+    const CBPFInsn* accept_prog = nullptr; /**< cyclic socket's program */
     size_t          accept_prog_len = 0;
-    const CBPFInsn* async_prog  = nullptr;  ///< async socket's program
+    const CBPFInsn* async_prog  = nullptr; /**< async socket's program */
     size_t          async_prog_len  = 0;
 };
 
@@ -303,8 +307,10 @@ struct CyclicBpfInsn {
 };
 static_assert(sizeof(CyclicBpfInsn) == 8, "must match struct sock_filter");
 
-/// Number of instructions in each demux filter program (VLAN-aware
-/// variant — see cyclicChannelBpfProgram).
+/**
+ * Number of instructions in each demux filter program (VLAN-aware
+ * variant — see cyclicChannelBpfProgram).
+ */
 inline constexpr size_t kCyclicBpfInsnCount = 14;
 
 /**
@@ -421,15 +427,19 @@ struct CyclicSlotView {
     uint8_t         cmd     = 0;
     uint16_t        adp     = 0;
     uint16_t        ado     = 0;
-    /// Channel cookie + owner for held views; nullptr/0 for inline copies.
+    /**Channel cookie + owner for held views; nullptr/0 for inline copies. */
     uint32_t        cookie  = 0;
     ICyclicChannel* channel = nullptr;
-    /// Frame arrival timestamp (kernel stamp when available, else the
-    /// deposit's monotonic now).
+    /**
+     * Frame arrival timestamp (kernel stamp when available, else the
+     * deposit's monotonic now).
+     */
     uint64_t        stamp_ns = 0;
-    /// Send-generation bit echoed from the datagram's lenFlags reserved
-    /// bit 13 — distinguishes a fresh response from a stale deposit that
-    /// survived a timed-out cycle (stale-deposit ABA guard).
+    /**
+     * Send-generation bit echoed from the datagram's lenFlags reserved
+     * bit 13 — distinguishes a fresh response from a stale deposit that
+     * survived a timed-out cycle (stale-deposit ABA guard).
+     */
     uint8_t         gen     = 0;
 };
 

@@ -1,23 +1,25 @@
 #pragma once
 
-/// @file KlippyHttpServer.hpp
-/// @brief Native HTTP/WebSocket server for Mainsail/Fluidd frontends.
-///
-/// This server implements the full Moonraker HTTP + WebSocket API directly
-/// in C++ using Drogon as the web framework and Glaze for JSON serialization.
-/// It delegates all business logic to a shared KlippyServer instance via
-/// callEndpoint(), so there is zero business-logic duplication between
-/// the UDS and HTTP transports.
-///
-/// The server provides:
-///   - REST HTTP endpoints (GET/POST/DELETE) for all Moonraker APIs
-///   - WebSocket endpoint at /websocket for real-time JSON-RPC 2.0
-///   - JSON-RPC 2.0 endpoint at POST /server/jsonrpc
-///   - File upload (multipart/form-data) and download
-///   - Authentication (API key, JWT, oneshot token, trusted clients)
-///   - CORS support
-///   - Static asset serving for SPA frontends
-///   - All 26+ WebSocket notification types
+/**
+ * @file KlippyHttpServer.hpp
+ * @brief Native HTTP/WebSocket server for Mainsail/Fluidd frontends.
+ *
+ * This server implements the full Moonraker HTTP + WebSocket API directly
+ * in C++ using Drogon as the web framework and Glaze for JSON serialization.
+ * It delegates all business logic to a shared KlippyServer instance via
+ * callEndpoint(), so there is zero business-logic duplication between
+ * the UDS and HTTP transports.
+ *
+ * The server provides:
+ *   - REST HTTP endpoints (GET/POST/DELETE) for all Moonraker APIs
+ *   - WebSocket endpoint at /websocket for real-time JSON-RPC 2.0
+ *   - JSON-RPC 2.0 endpoint at POST /server/jsonrpc
+ *   - File upload (multipart/form-data) and download
+ *   - Authentication (API key, JWT, oneshot token, trusted clients)
+ *   - CORS support
+ *   - Static asset serving for SPA frontends
+ *   - All 26+ WebSocket notification types
+ */
 
 #include "tether/klipper/klippy/KlippyServer.hpp"
 #include "tether/klipper/http/HttpServerConfig.hpp"
@@ -48,19 +50,23 @@ class AuthFilter;
 
 namespace tether::klipper::http {
 
-/// @brief Native HTTP/WebSocket server implementing the Moonraker API.
-///
-/// Wraps Drogon's HttpAppFramework and registers all routes, controllers,
-/// and filters needed to serve Mainsail/Fluidd directly.
-///
-/// The public interface (this header) does NOT include Drogon headers.
-/// Define TETHER_KLIPPER_HTTP_INTERNAL before including this header to
-/// access the Drogon-dependent methods (used by internal controllers).
+/**
+ * @brief Native HTTP/WebSocket server implementing the Moonraker API.
+ *
+ * Wraps Drogon's HttpAppFramework and registers all routes, controllers,
+ * and filters needed to serve Mainsail/Fluidd directly.
+ *
+ * The public interface (this header) does NOT include Drogon headers.
+ * Define TETHER_KLIPPER_HTTP_INTERNAL before including this header to
+ * access the Drogon-dependent methods (used by internal controllers).
+ */
 class KlippyHttpServer : public std::enable_shared_from_this<KlippyHttpServer> {
 public:
-    /// @brief Construct with a reference to the shared server and config.
-    /// @param server The KlippyServer instance (must outlive this).
-    /// @param cfg HTTP server configuration.
+    /**
+     * @brief Construct with a reference to the shared server and config.
+     * @param server The KlippyServer instance (must outlive this).
+     * @param cfg HTTP server configuration.
+     */
     explicit KlippyHttpServer(klippy::KlippyServer& server,
                                HttpServerConfig cfg = {});
 
@@ -73,14 +79,16 @@ public:
     // Lifecycle
     // ------------------------------------------------------------------
 
-    /// @brief Register all routes and start the HTTP server.
-    /// @return True on success.
+    /**
+     * @brief Register all routes and start the HTTP server.
+     * @return True on success.
+     */
     bool start();
 
-    /// @brief Stop the HTTP server.
+    /**@brief Stop the HTTP server. */
     void stop();
 
-    /// @brief Check if the server is running.
+    /**@brief Check if the server is running. */
     bool isRunning() const { return running_.load(); }
 
     // ------------------------------------------------------------------
@@ -89,10 +97,10 @@ public:
 
     const HttpServerConfig& config() const { return config_; }
 
-    /// @brief Get the JSON-RPC dispatcher (for testing).
+    /**@brief Get the JSON-RPC dispatcher (for testing). */
     JsonRpcDispatcher& dispatcher() { return dispatcher_; }
 
-    /// @brief Get the NotificationSink for this server (for registering with UDS server).
+    /**@brief Get the NotificationSink for this server (for registering with UDS server). */
     NotificationSink* notificationSink() { return notificationBridge_.get(); }
 
 #ifdef TETHER_KLIPPER_HTTP_INTERNAL
@@ -136,17 +144,17 @@ private:
     // REST handler helpers
     // ------------------------------------------------------------------
 
-    /// Call a UDS endpoint by slash-method name and return a Drogon response.
+    /**Call a UDS endpoint by slash-method name and return a Drogon response. */
     drogon::HttpResponsePtr callEndpointAndBuildResponse(
         const std::string& method, const klippy::JsonValue& params);
 
-    /// Build params from query parameters.
+    /**Build params from query parameters. */
     klippy::JsonValue paramsFromQuery(const drogon::HttpRequestPtr& req);
 
-    /// Build params from JSON body.
+    /**Build params from JSON body. */
     klippy::JsonValue paramsFromBody(const drogon::HttpRequestPtr& req);
 
-    /// Build params from both query and body (body takes precedence).
+    /**Build params from both query and body (body takes precedence). */
     klippy::JsonValue paramsFromRequest(const drogon::HttpRequestPtr& req);
 
     // ------------------------------------------------------------------

@@ -33,71 +33,79 @@
 
 namespace tether::control::extrusion {
 
-/// @brief Parameters for the overlap-add LPV deconvolver.
+/**@brief Parameters for the overlap-add LPV deconvolver. */
 struct OverlapAddLPVParams {
-    /// @brief Block size B (samples).  Must be > 0.
+    /**@brief Block size B (samples).  Must be > 0. */
     int blockSize = 256;
 
-    /// @brief Overlap ratio in [0, 1).  0.5 = 50% overlap.
+    /**@brief Overlap ratio in [0, 1).  0.5 = 50% overlap. */
     double overlapRatio = 0.5;
 
-    /// @brief Tikhonov regularization λ for inverse filter precomputation.
+    /**@brief Tikhonov regularization λ for inverse filter precomputation. */
     double lambda = 1e-6;
 };
 
-/// @brief Gain-scheduled overlap-add LPV deconvolver.
-///
-/// Stores a LUT of regularized inverse filters indexed by scheduling
-/// parameter.  At runtime, the target trajectory is segmented into
-/// overlapping Hann-windowed blocks; each block is convolved with an
-/// interpolated inverse filter and the results are overlap-added.
+/**
+ * @brief Gain-scheduled overlap-add LPV deconvolver.
+ *
+ * Stores a LUT of regularized inverse filters indexed by scheduling
+ * parameter.  At runtime, the target trajectory is segmented into
+ * overlapping Hann-windowed blocks; each block is convolved with an
+ * interpolated inverse filter and the results are overlap-added.
+ */
 class OverlapAddLPVDeconvolver {
 public:
     explicit OverlapAddLPVDeconvolver(OverlapAddLPVParams params = {});
 
-    /// @brief Add an operating point to the inverse-filter LUT.
-    /// @param p Scheduling parameter value (e.g., nominal speed).
-    /// @param h Measured impulse response at this operating point.
-    /// The regularized inverse is computed internally using lambda.
+    /**
+     * @brief Add an operating point to the inverse-filter LUT.
+     * @param p Scheduling parameter value (e.g., nominal speed).
+     * @param h Measured impulse response at this operating point.
+     * The regularized inverse is computed internally using lambda.
+     */
     void addOperatingPoint(double p, const std::vector<double>& h);
 
-    /// @brief Add a precomputed inverse filter directly to the LUT.
-    /// @param p Scheduling parameter value.
-    /// @param hInv Regularized inverse filter (already computed).
+    /**
+     * @brief Add a precomputed inverse filter directly to the LUT.
+     * @param p Scheduling parameter value.
+     * @param hInv Regularized inverse filter (already computed).
+     */
     void addInverseFilter(double p, const std::vector<double>& hInv);
 
-    /// @brief Deconvolve a target trajectory with a scheduling parameter
-    /// trajectory of the same length.
-    /// @param y_tgt Target output trajectory.
-    /// @param p Scheduling parameter trajectory (one value per sample).
-    /// @return Required input x_req of the same length as y_tgt.
+    /**
+     * @brief Deconvolve a target trajectory with a scheduling parameter
+     * trajectory of the same length.
+     * @param y_tgt Target output trajectory.
+     * @param p Scheduling parameter trajectory (one value per sample).
+     * @return Required input x_req of the same length as y_tgt.
+     */
     std::vector<double> deconvolve(const std::vector<double>& y_tgt,
                                    const std::vector<double>& p) const;
 
-    /// @return Number of operating points in the LUT.
+    /**@return Number of operating points in the LUT. */
     size_t numOperatingPoints() const { return inverseFilterLut_.size(); }
 
-    /// @return The parameters.
+    /**@return The parameters. */
     const OverlapAddLPVParams& params() const { return params_; }
 
-    /// @brief Clear the LUT and reset state.
+    /**@brief Clear the LUT and reset state. */
     void reset();
 
 private:
     OverlapAddLPVParams params_;
     std::map<double, std::vector<double>> inverseFilterLut_;
 
-    /// @brief Interpolate an inverse filter at scheduling parameter p.
+    /**@brief Interpolate an inverse filter at scheduling parameter p. */
     std::vector<double> interpolateInverseFilter(double p) const;
 
-    /// @brief Generate a Hann window of length N.
+    /**@brief Generate a Hann window of length N. */
     static std::vector<double> hannWindow(int N);
 
-    /// @brief Time-domain linear convolution of two sequences.
+    /**@brief Time-domain linear convolution of two sequences. */
     static std::vector<double> convolve(const std::vector<double>& a,
                                         const std::vector<double>& b);
 
-    /// @brief Compute the hop size from block size and overlap ratio.
+    /**@brief Compute the hop size from block size and overlap ratio. */
     int hopSize() const {
         return static_cast<int>(params_.blockSize * (1.0 - params_.overlapRatio));
     }

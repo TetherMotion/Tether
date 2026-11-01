@@ -42,22 +42,26 @@ namespace tether { namespace io {
 class WsClientTransport final : public ITransport {
 public:
     struct Options {
-        std::string host;                            ///< Host header value
-        std::string target = "/tether-io";           ///< Path incl. ?query
-        /// Extra request headers (e.g. {"Authorization", "Bearer <t>"}).
-        /// Upgrade/Connection/Sec-WebSocket-* headers are managed
-        /// internally and rejected here.
+        std::string host; /**< Host header value */
+        std::string target = "/tether-io"; /**< Path incl. ?query */
+        /**
+         * Extra request headers (e.g. {"Authorization", "Bearer <t>"}).
+         * Upgrade/Connection/Sec-WebSocket-* headers are managed
+         * internally and rejected here.
+         */
         std::vector<std::pair<std::string, std::string>> headers;
         uint32_t handshakeTimeoutMs = 5000;
         size_t maxMessageSize = MAX_MESSAGE_SIZE;
     };
 
-    /// Wrap a connected byte-stream transport (takes ownership).
+    /**Wrap a connected byte-stream transport (takes ownership). */
     explicit WsClientTransport(std::unique_ptr<ITransport> byteTransport);
     ~WsClientTransport() override;
 
-    /// Convenience: TCP-connect then handshake. Returns the failure reason
-    /// on error.
+    /**
+     * Convenience: TCP-connect then handshake. Returns the failure reason
+     * on error.
+     */
     static std::expected<std::unique_ptr<WsClientTransport>, std::string>
     connect(const char* host, uint16_t port, const Options& opts);
     static std::expected<std::unique_ptr<WsClientTransport>, std::string>
@@ -65,8 +69,10 @@ public:
         return connect(host, port, Options{});
     }
 
-    /// Perform the HTTP/1.1 Upgrade handshake (sends GET, verifies the
-    /// 101 response and Sec-WebSocket-Accept).
+    /**
+     * Perform the HTTP/1.1 Upgrade handshake (sends GET, verifies the
+     * 101 response and Sec-WebSocket-Accept).
+     */
     std::expected<void, std::string> handshake(const Options& opts);
 
     bool send(const uint8_t* data, size_t len) override;
@@ -75,26 +81,28 @@ public:
     void close() override;
     bool isConnected() const override;
 
-    /// The wrapped byte-stream transport.
+    /**The wrapped byte-stream transport. */
     ITransport* inner() const { return inner_.get(); }
 
 private:
-    /// Send one frame: opcode 0x2 (binary) by default, always masked.
+    /**Send one frame: opcode 0x2 (binary) by default, always masked. */
     bool sendFrame(uint8_t opcode, const uint8_t* payload, size_t len);
-    /// Read exactly `n` bytes within the deadline slice. Returns false on
-    /// timeout/disconnect.
+    /**
+     * Read exactly `n` bytes within the deadline slice. Returns false on
+     * timeout/disconnect.
+     */
     bool readExact(uint8_t* dst, size_t n,
                    std::chrono::steady_clock::time_point deadline);
-    /// Protocol-error shutdown: close frame 1002 + disconnect.
+    /**Protocol-error shutdown: close frame 1002 + disconnect. */
     void protocolError();
 
     std::unique_ptr<ITransport> inner_;
     bool connected_ = false;
     bool sentClose_ = false;
     size_t maxMessageSize_ = MAX_MESSAGE_SIZE;
-    std::vector<uint8_t> message_;     ///< fragmented message accumulator
+    std::vector<uint8_t> message_; /**< fragmented message accumulator */
     bool fragmented_ = false;
-    std::vector<uint8_t> msgBytes_;    ///< leftover for receive() byte view
+    std::vector<uint8_t> msgBytes_; /**< leftover for receive() byte view */
     size_t msgOffset_ = 0;
 };
 

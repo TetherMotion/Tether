@@ -41,79 +41,93 @@ namespace EtherCAT {
 class CyclicExecutive {
 public:
     using TaskFn   = std::function<bool()>;
-    using TimeFunc = std::function<uint64_t()>;   ///< monotonic time in ns
+    using TimeFunc = std::function<uint64_t()>; /**< monotonic time in ns */
 
-    /// How the worker waits for its next deadline.
+    /**How the worker waits for its next deadline. */
     enum class SleepMode : uint8_t {
-        Nanosleep,    ///< clock_nanosleep(TIMER_ABSTIME) — lowest CPU
-        HybridSpin,   ///< sleep + busy-spin tail (spin_window_us) — lowest jitter
+        Nanosleep, /**< clock_nanosleep(TIMER_ABSTIME) — lowest CPU */
+        HybridSpin, /**< sleep + busy-spin tail (spin_window_us) — lowest jitter */
     };
 
-    /// Where DC synchronisation frames are emitted.
+    /**Where DC synchronisation frames are emitted. */
     enum class DCPlacement : uint8_t {
-        Disabled,         ///< No DC sync driven by this executive
-        DedicatedThread,  ///< Separate high-priority deadline-driven thread
-                          ///< (fault-isolated from the cyclic path)
-        Inline,           ///< Same thread, first action of every
-                          ///< dc_interval_cycles-th cycle
+        Disabled, /**< No DC sync driven by this executive */
+        DedicatedThread, /**< Separate high-priority deadline-driven thread */
+                          /**< (fault-isolated from the cyclic path) */
+        Inline, /**< Same thread, first action of every */
+                          /**< dc_interval_cycles-th cycle */
     };
 
-    /// Kernel scheduling class for the cyclic thread.
+    /**Kernel scheduling class for the cyclic thread. */
     enum class SchedClass : uint8_t {
-        Fifo,       ///< SCHED_FIFO @ priority — needs CAP_SYS_NICE
-        Deadline,   ///< SCHED_DEADLINE CBS (runtime/deadline/period) —
-                    ///< works on vanilla kernels, bounds runaway-RT damage.
-                    ///< Falls back to Fifo with a logged warning.
+        Fifo, /**< SCHED_FIFO @ priority — needs CAP_SYS_NICE */
+        Deadline, /**< SCHED_DEADLINE CBS (runtime/deadline/period) — */
+                    /**< 
+                     * works on vanilla kernels, bounds runaway-RT damage.
+                     * Falls back to Fifo with a logged warning.
+                     */
     };
 
     struct Config {
-        uint32_t cycle_period_us = 1000;   ///< Cyclic period in µs
+        uint32_t cycle_period_us = 1000; /**< Cyclic period in µs */
 
-        int      priority     = 80;        ///< SCHED_FIFO priority of cyclic thread
-        int      cpu_affinity = -1;        ///< CPU to pin cyclic thread (-1 = any)
-        size_t   stack_size   = 262144;    ///< Cyclic thread stack bytes
+        int      priority     = 80; /**< SCHED_FIFO priority of cyclic thread */
+        int      cpu_affinity = -1; /**< CPU to pin cyclic thread (-1 = any) */
+        size_t   stack_size   = 262144; /**< Cyclic thread stack bytes */
         SleepMode sleep_mode  = SleepMode::Nanosleep;
-        uint32_t spin_window_us = 50;      ///< HybridSpin: busy-wait tail in µs
+        uint32_t spin_window_us = 50; /**< HybridSpin: busy-wait tail in µs */
 
-        /// Scheduling class for the cyclic thread (DC thread always uses
-        /// SCHED_FIFO — its budget is a single short frame).
+        /**
+         * Scheduling class for the cyclic thread (DC thread always uses
+         * SCHED_FIFO — its budget is a single short frame).
+         */
         SchedClass sched_class = SchedClass::Fifo;
 
-        /// SCHED_DEADLINE auto-measure (Q10): when sched_class==Deadline
-        /// and dl_runtime_ns==0, the cyclic thread runs its first
-        /// dl_measure_cycles on SCHED_FIFO while recording per-cycle work,
-        /// then switches to CBS with runtime = P99 × (100+margin_pct)/100.
-        /// Turn off to get the legacy period/2 default immediately.
+        /**
+         * SCHED_DEADLINE auto-measure (Q10): when sched_class==Deadline
+         * and dl_runtime_ns==0, the cyclic thread runs its first
+         * dl_measure_cycles on SCHED_FIFO while recording per-cycle work,
+         * then switches to CBS with runtime = P99 × (100+margin_pct)/100.
+         * Turn off to get the legacy period/2 default immediately.
+         */
         bool     dl_auto_measure   = true;
         uint32_t dl_measure_cycles = 512;
-        /// Headroom over the measured P99 — 100 ⇒ runtime = P99 × 2.
+        /**Headroom over the measured P99 — 100 ⇒ runtime = P99 × 2. */
         uint32_t dl_margin_pct     = 100;
-        /// SCHED_DEADLINE parameters (ns).  0 → runtime = period/2,
-        /// deadline = period.  Only used when sched_class == Deadline.
+        /**
+         * SCHED_DEADLINE parameters (ns).  0 → runtime = period/2,
+         * deadline = period.  Only used when sched_class == Deadline.
+         */
         uint64_t dl_runtime_ns  = 0;
         uint64_t dl_deadline_ns = 0;
 
-        /// Pre-fault the cyclic thread's stack at thread start (avoids
-        /// first-touch page faults mid-cycle).  Bytes to descend.
+        /**
+         * Pre-fault the cyclic thread's stack at thread start (avoids
+         * first-touch page faults mid-cycle).  Bytes to descend.
+         */
         uint32_t stack_prefault_bytes = 128 * 1024;
-        /// Kill the kernel's ~50 µs timer slack on this thread — only
-        /// matters when SCHED_FIFO could not be acquired (RT tasks skip
-        /// slack already), but it is free insurance on the degraded path.
+        /**
+         * Kill the kernel's ~50 µs timer slack on this thread — only
+         * matters when SCHED_FIFO could not be acquired (RT tasks skip
+         * slack already), but it is free insurance on the degraded path.
+         */
         bool     low_timer_slack = true;
 
         // ---- DC synchronisation ----
         DCPlacement dc_placement      = DCPlacement::DedicatedThread;
-        uint32_t    dc_interval_cycles = 10;   ///< Inline decimation / dedicated
-                                               ///< thread period = period × this
-        int         dc_priority       = 90;    ///< Dedicated DC thread priority
+        uint32_t    dc_interval_cycles = 10; /**< Inline decimation / dedicated */
+                                               /**< thread period = period × this */
+        int         dc_priority       = 90; /**< Dedicated DC thread priority */
         int         dc_cpu_affinity   = -1;
 
-        /// Jitter thresholds (auto-derived by defaults())
+        /**Jitter thresholds (auto-derived by defaults()) */
         JitterConfig jitter    = JitterConfig::defaults(1000);
         JitterConfig dc_jitter = JitterConfig::defaults(10000);
 
-        /// If true, the loop keeps running when a task/exchange returns false
-        /// (error counted).  If false, the first failure stops the loop.
+        /**
+         * If true, the loop keeps running when a task/exchange returns false
+         * (error counted).  If false, the first failure stops the loop.
+         */
         bool continue_on_error = true;
 
         static Config defaults(uint32_t cycle_us = 1000, uint32_t dc_cycles = 10) {
@@ -130,15 +144,15 @@ public:
         uint64_t cycle_count        = 0;
         uint64_t exchange_errors    = 0;
         uint64_t task_errors        = 0;
-        uint64_t missed_deadlines   = 0;   ///< skipped deadline count (overruns)
-        uint32_t max_cycle_work_us  = 0;   ///< longest in-cycle work burst
-        bool     deadline_active    = false; ///< SCHED_DEADLINE engaged
-        uint64_t dl_runtime_ns      = 0;   ///< CBS runtime actually applied
-        JitterStats jitter;                ///< wake-up period jitter (cyclic)
+        uint64_t missed_deadlines   = 0; /**< skipped deadline count (overruns) */
+        uint32_t max_cycle_work_us  = 0; /**< longest in-cycle work burst */
+        bool     deadline_active    = false; /**< SCHED_DEADLINE engaged */
+        uint64_t dl_runtime_ns      = 0; /**< CBS runtime actually applied */
+        JitterStats jitter; /**< wake-up period jitter (cyclic) */
 
         uint64_t   dc_sync_count    = 0;
         uint64_t   dc_sync_errors   = 0;
-        JitterStats dc_jitter;             ///< dedicated DC thread jitter
+        JitterStats dc_jitter; /**< dedicated DC thread jitter */
     };
 
     /**
@@ -167,12 +181,12 @@ public:
     void stop();
     bool isRunning() const { return running_.load(std::memory_order_acquire); }
 
-    /// Enable/disable the exchange step (tasks still run).  Default: enabled.
+    /**Enable/disable the exchange step (tasks still run).  Default: enabled. */
     void setExchangeEnabled(bool en) { exchange_enabled_.store(en, std::memory_order_release); }
 
     Stats getStats() const;
 
-    /// Tasks registered for a phase (introspection/tests).
+    /**Tasks registered for a phase (introspection/tests). */
     size_t taskCount(TaskPhase p) const {
         return phase_tasks_[phaseIndex(p)].size();
     }

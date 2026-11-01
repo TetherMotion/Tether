@@ -39,16 +39,20 @@ public:
 
     // --- High-level FSM transitions ---
 
-    /// @brief Enable DynaDrive: walk Standby -> MotorOp -> ControlOp.
-    /// @param timeout_ms Total timeout for the entire sequence.
-    /// @return true if ControlOp was reached.
+    /**
+     * @brief Enable DynaDrive: walk Standby -> MotorOp -> ControlOp.
+     * @param timeout_ms Total timeout for the entire sequence.
+     * @return true if ControlOp was reached.
+     */
     bool enable(uint32_t timeout_ms = 10000);
 
-    /// @brief Disable DynaDrive: ControlOp -> Standby.
-    /// @return true if the transition command was sent (or already not in ControlOp).
+    /**
+     * @brief Disable DynaDrive: ControlOp -> Standby.
+     * @return true if the transition command was sent (or already not in ControlOp).
+     */
     bool disable();
 
-    /// @brief Check if the DynaDrive is currently in ControlOp state.
+    /**@brief Check if the DynaDrive is currently in ControlOp state. */
     bool isControlOp();
 
 private:

@@ -71,12 +71,12 @@ public:
 
     // -- Typed module access ---------------------------------------------------
 
-    /// Access the EL1014 driver for one module (throws std::out_of_range).
+    /**Access the EL1014 driver for one module (throws std::out_of_range). */
     EL1014&       module(size_t i)       { return static_cast<EL1014&>(Base::module(i)); }
     const EL1014& module(size_t i) const { return static_cast<const EL1014&>(Base::module(i)); }
 
 private:
-    /// Matcher constructing typed EL1014 devices (so module() can downcast).
+    /**Matcher constructing typed EL1014 devices (so module() can downcast). */
     static std::span<const typename Base::DeviceMatcher> el1014Matcher() {
         static const typename Base::DeviceMatcher m[]{
             typename Base::DeviceMatcher{

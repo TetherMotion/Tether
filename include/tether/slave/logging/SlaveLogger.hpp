@@ -44,41 +44,41 @@ enum class SlaveLogCategory : uint32_t {
     None           = 0x00000000,
     
     // Core operations
-    StateMachine   = 0x00000001,  ///< AL state machine transitions
-    Register       = 0x00000002,  ///< ESC register access
-    FMMU           = 0x00000004,  ///< FMMU configuration and translation
-    SyncManager    = 0x00000008,  ///< Sync Manager operations
-    DC             = 0x00000010,  ///< Distributed Clock
-    Watchdog       = 0x00000020,  ///< Watchdog events
-    SII            = 0x00000040,  ///< SII/EEPROM access
+    StateMachine   = 0x00000001, /**< AL state machine transitions */
+    Register       = 0x00000002, /**< ESC register access */
+    FMMU           = 0x00000004, /**< FMMU configuration and translation */
+    SyncManager    = 0x00000008, /**< Sync Manager operations */
+    DC             = 0x00000010, /**< Distributed Clock */
+    Watchdog       = 0x00000020, /**< Watchdog events */
+    SII            = 0x00000040, /**< SII/EEPROM access */
     
     // Frame processing
-    FrameRx        = 0x00000100,  ///< Received frames
-    FrameTx        = 0x00000200,  ///< Transmitted frames
-    Datagram       = 0x00000400,  ///< Individual datagram processing
-    LogicalAddr    = 0x00000800,  ///< Logical address translation
+    FrameRx        = 0x00000100, /**< Received frames */
+    FrameTx        = 0x00000200, /**< Transmitted frames */
+    Datagram       = 0x00000400, /**< Individual datagram processing */
+    LogicalAddr    = 0x00000800, /**< Logical address translation */
     
     // Mailbox
-    Mailbox        = 0x00001000,  ///< General mailbox
-    CoE            = 0x00002000,  ///< CANopen over EtherCAT
-    FoE            = 0x00004000,  ///< File over EtherCAT
-    EoE            = 0x00008000,  ///< Ethernet over EtherCAT
-    VoE            = 0x00010000,  ///< Vendor over EtherCAT
-    SoE            = 0x00020000,  ///< Servo over EtherCAT
-    AoE            = 0x00040000,  ///< ADS over EtherCAT
+    Mailbox        = 0x00001000, /**< General mailbox */
+    CoE            = 0x00002000, /**< CANopen over EtherCAT */
+    FoE            = 0x00004000, /**< File over EtherCAT */
+    EoE            = 0x00008000, /**< Ethernet over EtherCAT */
+    VoE            = 0x00010000, /**< Vendor over EtherCAT */
+    SoE            = 0x00020000, /**< Servo over EtherCAT */
+    AoE            = 0x00040000, /**< ADS over EtherCAT */
     
     // Process data
-    PDO            = 0x00100000,  ///< PDO exchange
-    TxPDO          = 0x00200000,  ///< TxPDO (slave → master)
-    RxPDO          = 0x00400000,  ///< RxPDO (master → slave)
+    PDO            = 0x00100000, /**< PDO exchange */
+    TxPDO          = 0x00200000, /**< TxPDO (slave → master) */
+    RxPDO          = 0x00400000, /**< RxPDO (master → slave) */
     
     // Profile specific
-    CiA401         = 0x01000000,  ///< CiA 401 I/O profile
-    CiA402         = 0x02000000,  ///< CiA 402 drive profile
+    CiA401         = 0x01000000, /**< CiA 401 I/O profile */
+    CiA402         = 0x02000000, /**< CiA 402 drive profile */
     
     // Debug
-    Verbose        = 0x40000000,  ///< Verbose output
-    Trace          = 0x80000000,  ///< Trace level (very verbose)
+    Verbose        = 0x40000000, /**< Verbose output */
+    Trace          = 0x80000000, /**< Trace level (very verbose) */
     
     // Common combinations
     All            = 0xFFFFFFFF,
@@ -111,13 +111,13 @@ inline SlaveLogCategory operator~(SlaveLogCategory a) {
  * @brief Log severity levels
  */
 enum class SlaveLogLevel : uint8_t {
-    Trace    = 0,  ///< Very detailed trace info
-    Debug    = 1,  ///< Debug information
-    Info     = 2,  ///< Informational messages
-    Warning  = 3,  ///< Warnings
-    Error    = 4,  ///< Errors
-    Critical = 5,  ///< Critical errors
-    None     = 6,  ///< Disable all logging
+    Trace    = 0, /**< Very detailed trace info */
+    Debug    = 1, /**< Debug information */
+    Info     = 2, /**< Informational messages */
+    Warning  = 3, /**< Warnings */
+    Error    = 4, /**< Errors */
+    Critical = 5, /**< Critical errors */
+    None     = 6, /**< Disable all logging */
 };
 
 // ============================================================================
@@ -128,11 +128,11 @@ enum class SlaveLogLevel : uint8_t {
  * @brief Single log entry
  */
 struct SlaveLogEntry {
-    uint64_t timestamp = 0;           ///< Timestamp (ns)
-    SlaveLogCategory category;        ///< Log category
-    SlaveLogLevel level;              ///< Log level
-    uint16_t slaveAddress = 0;        ///< Slave address (for identification)
-    char message[256];                ///< Log message
+    uint64_t timestamp = 0; /**< Timestamp (ns) */
+    SlaveLogCategory category; /**< Log category */
+    SlaveLogLevel level; /**< Log level */
+    uint16_t slaveAddress = 0; /**< Slave address (for identification) */
+    char message[256]; /**< Log message */
     
     // Optional binary data (for frame logging)
     uint8_t data[64];
@@ -165,7 +165,7 @@ struct SlaveLogConfig {
     Tether::PacketLoggers::PCAP::PCAPLoggerConfig pcapConfig;
     
     // Realtime queue
-    size_t queueSize = 1024;  ///< Number of entries in RT queue
+    size_t queueSize = 1024; /**< Number of entries in RT queue */
     
     // Custom output callback
     using OutputCallback = std::function<void(const SlaveLogEntry&)>;

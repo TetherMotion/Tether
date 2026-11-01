@@ -596,8 +596,10 @@ inline BitLabel kTCPForceLimitStatusBitLabels[] = {
     BitLabel::bitIfOn("TCP8", 1u << 8),
 };
 
-/// Returns the set of bit labels for a bitfield object in 0x4001-0x4023,
-/// or an empty span for objects without defined labels.
+/**
+ * Returns the set of bit labels for a bitfield object in 0x4001-0x4023,
+ * or an empty span for objects without defined labels.
+ */
 inline std::span<const BitLabel> bitLabelsFor(uint16_t index) {
     switch (index) {
         case MonitoringSubStateIndex:          return std::span(kMonitoringSubStateBitLabels);

@@ -43,21 +43,23 @@ namespace EtherCAT {
 
 class SmDeliveryProbe {
 public:
-    /// @param master  EtherCAT master (provides readRegister + the
-    ///                slave's PDO/SM configuration).
+    /**
+     * @param master  EtherCAT master (provides readRegister + the
+     *                slave's PDO/SM configuration).
+     */
     explicit SmDeliveryProbe(Master& master) : master_(master) {}
 
     /**
      * @brief Result of one region comparison.
      */
     struct Result {
-        bool configured = false;   ///< slave has a valid SM config
-        bool read_ok    = false;   ///< FPRD of the SM region succeeded
-        bool full_match  = false;  ///< memcmp over min(sm_len, app_len)
-        bool prefix_match = false; ///< memcmp over prefix_len bytes
-        uint16_t phys_addr = 0;    ///< SM physical start address
-        uint16_t length    = 0;    ///< SM region length in bytes
-        std::vector<uint8_t> sm_bytes;  ///< raw SM region as read back
+        bool configured = false; /**< slave has a valid SM config */
+        bool read_ok    = false; /**< FPRD of the SM region succeeded */
+        bool full_match  = false; /**< memcmp over min(sm_len, app_len) */
+        bool prefix_match = false; /**< memcmp over prefix_len bytes */
+        uint16_t phys_addr = 0; /**< SM physical start address */
+        uint16_t length    = 0; /**< SM region length in bytes */
+        std::vector<uint8_t> sm_bytes; /**< raw SM region as read back */
     };
 
     /**
@@ -103,8 +105,10 @@ public:
         return r;
     }
 
-    /// Convenience: compare against Sync Manager 2 (process-data
-    /// outputs / RxPDO) — the usual "did my frame reach the slave" check.
+    /**
+     * Convenience: compare against Sync Manager 2 (process-data
+     * outputs / RxPDO) — the usual "did my frame reach the slave" check.
+     */
     Result compareSm2(uint16_t slave_index,
                       const uint8_t* app_buf, size_t app_size,
                       size_t prefix_len) {

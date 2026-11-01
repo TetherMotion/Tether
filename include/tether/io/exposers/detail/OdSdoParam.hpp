@@ -25,8 +25,10 @@
 
 namespace tether { namespace io { namespace exposers { namespace detail {
 
-/// Map an object-dictionary data type to an IO value type.
-/// Returns false for types with no meaningful scalar representation.
+/**
+ * Map an object-dictionary data type to an IO value type.
+ * Returns false for types with no meaningful scalar representation.
+ */
 inline bool odToValueType(
     ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType t,
     ValueType& out) {
@@ -49,7 +51,7 @@ inline bool odToValueType(
     }
 }
 
-/// Fixed wire size for scalar OD types; 0 for variable-length / odd types.
+/**Fixed wire size for scalar OD types; 0 for variable-length / odd types. */
 inline uint8_t odFixedSize(
     ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType t) {
     using T = ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType;
@@ -100,7 +102,7 @@ inline const char* effectiveTimeName(
     }
 }
 
-/// SDO transaction timeout for IO-triggered reads/writes (session thread).
+/**SDO transaction timeout for IO-triggered reads/writes (session thread). */
 inline constexpr uint32_t kSdoTimeoutMs = 500;
 
 inline std::string odHexU16(uint16_t v) {

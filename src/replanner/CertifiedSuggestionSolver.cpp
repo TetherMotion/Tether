@@ -13,8 +13,10 @@ namespace tether::motion::replanner {
 
 namespace {
 
-/// Predict the contour error at a candidate feed rate using the
-/// measured error model: error(v) = measuredError × (v/measuredFeed)².
+/**
+ * Predict the contour error at a candidate feed rate using the
+ * measured error model: error(v) = measuredError × (v/measuredFeed)².
+ */
 double predictedErrorAt(double candidateFeed,
                         double measuredFeed,
                         double measuredError) {
@@ -25,7 +27,7 @@ double predictedErrorAt(double candidateFeed,
     return measuredError * ratio * ratio;
 }
 
-/// Acceptance test: is the predicted error at this feed ≤ threshold?
+/**Acceptance test: is the predicted error at this feed ≤ threshold? */
 bool isAccepted(double candidateFeed,
                 double measuredFeed,
                 double measuredError,

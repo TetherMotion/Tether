@@ -32,11 +32,13 @@
 
 namespace tether::platform {
 
-/// @brief Connect to a TCP host:port with a timeout (client mode).
-/// @param host Hostname or IP address.
-/// @param port TCP port.
-/// @param timeoutMs Connect timeout in milliseconds.
-/// @return Connected file descriptor, or -1 on failure.
+/**
+ * @brief Connect to a TCP host:port with a timeout (client mode).
+ * @param host Hostname or IP address.
+ * @param port TCP port.
+ * @param timeoutMs Connect timeout in milliseconds.
+ * @return Connected file descriptor, or -1 on failure.
+ */
 inline int posixTcpConnect(const std::string& host, uint16_t port, int timeoutMs) {
     int sock = ::socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) return -1;
@@ -83,11 +85,13 @@ inline int posixTcpConnect(const std::string& host, uint16_t port, int timeoutMs
     return sock;
 }
 
-/// @brief Listen on a port and accept one connection (server mode).
-/// @param port TCP port to listen on.
-/// @param backlog Listen backlog.
-/// @param timeoutMs Accept timeout in milliseconds.
-/// @return Connected file descriptor, or -1 on failure.
+/**
+ * @brief Listen on a port and accept one connection (server mode).
+ * @param port TCP port to listen on.
+ * @param backlog Listen backlog.
+ * @param timeoutMs Accept timeout in milliseconds.
+ * @return Connected file descriptor, or -1 on failure.
+ */
 inline int posixTcpListenAccept(uint16_t port, int backlog, int timeoutMs) {
     int listenSock = ::socket(AF_INET, SOCK_STREAM, 0);
     if (listenSock < 0) return -1;

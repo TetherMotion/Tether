@@ -17,7 +17,7 @@
 
 namespace tether::klipper::objects {
 
-/// @brief TMC stepper driver UART interface.
+/**@brief TMC stepper driver UART interface. */
 class TmcUart {
 public:
     using UartTransferFunc = std::function<std::vector<uint8_t>(std::span<const uint8_t>)>;
@@ -30,9 +30,11 @@ public:
     uint8_t oid() const { return oid_; }
     uint8_t slaveAddress() const { return slaveAddr_; }
 
-    /// @brief Read a register from the TMC driver.
-    /// @param reg Register address (7 bits).
-    /// @return 32-bit register value, or -1 on error.
+    /**
+     * @brief Read a register from the TMC driver.
+     * @param reg Register address (7 bits).
+     * @return 32-bit register value, or -1 on error.
+     */
     int64_t readRegister(uint8_t reg) {
         // TMC UART format: sync byte, slave addr, register+R/W, CRC, data
         // Read request: 0x05, slave, 0x00 | reg, CRC
@@ -55,10 +57,12 @@ public:
         return value;
     }
 
-    /// @brief Write a register to the TMC driver.
-    /// @param reg Register address (7 bits).
-    /// @param value 32-bit value to write.
-    /// @return True on success.
+    /**
+     * @brief Write a register to the TMC driver.
+     * @param reg Register address (7 bits).
+     * @param value 32-bit value to write.
+     * @return True on success.
+     */
     bool writeRegister(uint8_t reg, uint32_t value) {
         // Write request: 0x05, slave, 0x80 | reg, CRC, 4 data bytes, CRC
         std::vector<uint8_t> req = {
@@ -82,7 +86,7 @@ public:
         return resp.size() >= 4; // Simple ACK check
     }
 
-    /// @brief Set a field within a register.
+    /**@brief Set a field within a register. */
     bool setField(uint8_t reg, uint8_t offset, uint8_t width, uint32_t value) {
         int64_t current = readRegister(reg);
         if (current < 0) return false;
@@ -91,7 +95,7 @@ public:
         return writeRegister(reg, newVal);
     }
 
-    /// @brief Get a field within a register.
+    /**@brief Get a field within a register. */
     int32_t getField(uint8_t reg, uint8_t offset, uint8_t width) {
         int64_t current = readRegister(reg);
         if (current < 0) return -1;
@@ -100,7 +104,7 @@ public:
     }
 
 private:
-    /// @brief Compute TMC UART CRC (XOR of all bytes).
+    /**@brief Compute TMC UART CRC (XOR of all bytes). */
     uint8_t computeCrc(const std::vector<uint8_t>& data) {
         uint8_t crc = 0;
         for (uint8_t b : data) crc ^= b;

@@ -436,9 +436,9 @@ public:
     std::string getErrorDescription();
     
 private:
-    CoE::CoEManager& m_coe; ///< SDO manager for SDO access
-    const uint16_t slave_index_;   ///< Slave index
-    ResetResult last_result_;       ///< Last reset result
+    CoE::CoEManager& m_coe; /**< SDO manager for SDO access */
+    const uint16_t slave_index_; /**< Slave index */
+    ResetResult last_result_; /**< Last reset result */
     ResetProgressCallback progress_callback_;
     uint32_t reset_attempt_count_{0};
     uint32_t successful_reset_count_{0};

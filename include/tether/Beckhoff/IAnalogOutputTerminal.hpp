@@ -35,13 +35,13 @@ public:
 
     // -- Identity --------------------------------------------------------------
 
-    /// Zero-based bus position of this device.
+    /**Zero-based bus position of this device. */
     virtual uint16_t slaveIndex() const = 0;
 
-    /// Number of analog output channels on this device.
+    /**Number of analog output channels on this device. */
     virtual size_t channelCount() const = 0;
 
-    /// Device name for logging/UI.
+    /**Device name for logging/UI. */
     virtual const char* deviceName() const = 0;
 
     // -- Outputs ----------------------------------------------------------------
@@ -57,10 +57,10 @@ public:
      */
     virtual void setValue(size_t channel, int32_t value) = 0;
 
-    /// Last value written to `channel` (0 initially).
+    /**Last value written to `channel` (0 initially). */
     virtual int32_t value(size_t channel) const = 0;
 
-    /// All output channels to 0.
+    /**All output channels to 0. */
     virtual void allZero() = 0;
 
     // -- Chained bring-up (called by MultiAnalogOutputTerminal) ------------------
@@ -83,7 +83,7 @@ public:
      */
     virtual Result<> mapLogicalAndEnterSafeOp() = 0;
 
-    /// Request the OP state and wait for confirmation (or cancellation).
+    /**Request the OP state and wait for confirmation (or cancellation). */
     virtual Result<> requestOp(int timeout_ms) = 0;
 };
 

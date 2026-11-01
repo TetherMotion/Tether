@@ -62,7 +62,7 @@ namespace tether { namespace io { namespace exposers {
  */
 class NamedSdoExposer : public IParameterExposer {
 public:
-    /// Local-id tag byte for named entries (index-named entries use 0x01).
+    /**Local-id tag byte for named entries (index-named entries use 0x01). */
     static constexpr uint8_t kLocalIdTag = 0x02;
 
     /**
@@ -86,8 +86,10 @@ public:
         , prefix_(std::move(prefix))
         , module_(std::move(moduleName)) {}
 
-    /// Append another register group after construction.  The list must
-    /// outlive the exposer (pass the address of a static kRegisterList).
+    /**
+     * Append another register group after construction.  The list must
+     * outlive the exposer (pass the address of a static kRegisterList).
+     */
     void addRegisterList(
         const ::EtherCAT::Drives::Registers::RegisterList* list) {
         if (list) groups_.push_back(list);
@@ -95,8 +97,10 @@ public:
 
     const char* moduleName() const override { return module_.c_str(); }
 
-    /// Parameter id of the named alias for a given object — shared idBase
-    /// safe: tag 0x02 never collides with the 0x01-tagged index scheme.
+    /**
+     * Parameter id of the named alias for a given object — shared idBase
+     * safe: tag 0x02 never collides with the 0x01-tagged index scheme.
+     */
     static constexpr uint64_t namedId(uint64_t idBase, uint16_t index,
                                       uint8_t sub) {
         return makeId(idBase, (static_cast<uint32_t>(kLocalIdTag) << 24) |

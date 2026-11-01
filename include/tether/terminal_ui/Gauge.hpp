@@ -32,8 +32,10 @@
 namespace Tether {
 namespace TUI {
 
-/// Fill ratio -> palette pair for utilization bars: muted for n/a,
-/// green/yellow/red thresholds, red when the row is flagged violated.
+/**
+ * Fill ratio -> palette pair for utilization bars: muted for n/a,
+ * green/yellow/red thresholds, red when the row is flagged violated.
+ */
 inline short gaugeRatioPair(double ratio, bool violated) {
     if (ratio < 0) return PalMuted;
     if (violated || ratio >= 0.9) return PalError;
@@ -41,10 +43,12 @@ inline short gaugeRatioPair(double ratio, bool violated) {
     return PalValue;
 }
 
-/// Draw one utilization bar `[###....]` of width `w` at (y, x) in window
-/// `win`.  `ratio` 0..1 fills left to right; >1 clamps and draws a red
-/// `>` overflow marker after the bar; <0 renders an empty muted bar.
-/// `violated` forces the bar red+bold regardless of the ratio.
+/**
+ * Draw one utilization bar `[###....]` of width `w` at (y, x) in window
+ * `win`.  `ratio` 0..1 fills left to right; >1 clamps and draws a red
+ * `>` overflow marker after the bar; <0 renders an empty muted bar.
+ * `violated` forces the bar red+bold regardless of the ratio.
+ */
 inline void wdrawGauge(WINDOW* win, int y, int x, int w,
                        double ratio, bool violated) {
     if (w < 4) return;
@@ -70,18 +74,20 @@ inline void wdrawGauge(WINDOW* win, int y, int x, int w,
     }
 }
 
-/// stdscr convenience — same as wdrawGauge(stdscr, ...).
+/**stdscr convenience — same as wdrawGauge(stdscr, ...). */
 inline void drawGauge(int y, int x, int w, double ratio, bool violated) {
     wdrawGauge(stdscr, y, x, w, ratio, violated);
 }
 
-/// Draw a range track `[-----#-----]` of width `w` at (y, x) in window
-/// `win`: the allowed span is [low, high] and `value` is drawn as a `#`
-/// marker at its position — clamped to the track ends when outside.
-/// The marker is green inside (yellow within the outer 10 % of the
-/// span), red when outside or `violated`.  Without a value only the
-/// empty track shows.  Falls back to printing "low/high" when the track
-/// does not fit.
+/**
+ * Draw a range track `[-----#-----]` of width `w` at (y, x) in window
+ * `win`: the allowed span is [low, high] and `value` is drawn as a `#`
+ * marker at its position — clamped to the track ends when outside.
+ * The marker is green inside (yellow within the outer 10 % of the
+ * span), red when outside or `violated`.  Without a value only the
+ * empty track shows.  Falls back to printing "low/high" when the track
+ * does not fit.
+ */
 inline void wdrawRangeTrack(WINDOW* win, int y, int x, int w,
                             int64_t low, int64_t high,
                             std::optional<int64_t> value, bool violated) {
@@ -115,7 +121,7 @@ inline void wdrawRangeTrack(WINDOW* win, int y, int x, int w,
     wattroff(win, COLOR_PAIR(pair) | A_BOLD);
 }
 
-/// stdscr convenience — same as wdrawRangeTrack(stdscr, ...).
+/**stdscr convenience — same as wdrawRangeTrack(stdscr, ...). */
 inline void drawRangeTrack(int y, int x, int w, int64_t low, int64_t high,
                            std::optional<int64_t> value, bool violated) {
     wdrawRangeTrack(stdscr, y, x, w, low, high, value, violated);

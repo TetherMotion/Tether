@@ -31,8 +31,10 @@
 
 namespace EtherCAT {
 
-/// @brief Configuration for EtherCAT-over-UDP encapsulation (ETG.1000.3).
-/// @note Only used when TETHER_ENABLE_UDP_ENCAPSULATION is defined.
+/**
+ * @brief Configuration for EtherCAT-over-UDP encapsulation (ETG.1000.3).
+ * @note Only used when TETHER_ENABLE_UDP_ENCAPSULATION is defined.
+ */
 struct UdpEncapsulationConfig {
     bool     enabled          = false;
     uint32_t source_ip        = 0;
@@ -41,8 +43,10 @@ struct UdpEncapsulationConfig {
     uint16_t destination_port = 0x88A4;
 };
 
-/// @brief Low-level frame transport: sends EtherCAT frames over a NetworkInterface,
-///        optionally wrapping them in IPv4/UDP when EtherCAT-over-UDP is enabled.
+/**
+ * @brief Low-level frame transport: sends EtherCAT frames over a NetworkInterface,
+ *        optionally wrapping them in IPv4/UDP when EtherCAT-over-UDP is enabled.
+ */
 class EtherCATTransport {
 public:
 #if TETHER_ENABLE_UDP_ENCAPSULATION
@@ -54,8 +58,10 @@ public:
         : iface_(iface) {}
 #endif
 
-    /// @brief Send a raw frame, applying UDP encapsulation if enabled.
-    /// @return true if the network interface accepted the frame.
+    /**
+     * @brief Send a raw frame, applying UDP encapsulation if enabled.
+     * @return true if the network interface accepted the frame.
+     */
     bool send(const uint8_t* frame, size_t len) const {
 #if TETHER_ENABLE_UDP_ENCAPSULATION
         return sendWithEncapsulation(frame, len);
@@ -64,7 +70,7 @@ public:
 #endif
     }
 
-    /// @brief Maximum EtherCAT payload bytes per frame, accounting for UDP overhead.
+    /**@brief Maximum EtherCAT payload bytes per frame, accounting for UDP overhead. */
     size_t maxEtherCATPayloadPerFrame() const {
 #if TETHER_ENABLE_UDP_ENCAPSULATION
         if (udp_config_ && udp_config_->enabled) {
@@ -74,9 +80,11 @@ public:
         return max_payload_;
     }
 
-    /// @brief Set the Ethernet frame size (excluding FCS) the transport
-    ///        may emit.  Default is the standard 1514; raise for jumbo
-    ///        links (requires NIC MTU and slave support).
+    /**
+     * @brief Set the Ethernet frame size (excluding FCS) the transport
+     *        may emit.  Default is the standard 1514; raise for jumbo
+     *        links (requires NIC MTU and slave support).
+     */
     void setMaxFrameSize(size_t frame_size) {
         // 14 Ethernet + 2 EtherCAT header; the EtherCAT frame header's
         // length field is 11 bits, so EtherCAT payload per frame can never
@@ -89,20 +97,22 @@ public:
     }
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION
-    /// @brief Compute the IPv4 header checksum (ones-complement sum over 20-byte header).
+    /**@brief Compute the IPv4 header checksum (ones-complement sum over 20-byte header). */
     static uint16_t computeIpChecksum(const uint8_t* ip_header);
 
-    /// @brief Encapsulate a direct Ethernet/EtherCAT frame into Ethernet/IPv4/UDP/EtherCAT.
-    /// @param in_frame  Original frame (Ethernet + EtherCAT, EtherType 0x88A4).
-    /// @param in_len    Length of the original frame.
-    /// @param out_buf   Output buffer (must be at least in_len + kUdpEncapOverhead bytes).
-    /// @param out_cap   Capacity of out_buf.
-    /// @param[out] out_len  Actual length of the encapsulated frame.
-    /// @return true on success, false if the frame is too short or output buffer too small.
+    /**
+     * @brief Encapsulate a direct Ethernet/EtherCAT frame into Ethernet/IPv4/UDP/EtherCAT.
+     * @param in_frame  Original frame (Ethernet + EtherCAT, EtherType 0x88A4).
+     * @param in_len    Length of the original frame.
+     * @param out_buf   Output buffer (must be at least in_len + kUdpEncapOverhead bytes).
+     * @param out_cap   Capacity of out_buf.
+     * @param[out] out_len  Actual length of the encapsulated frame.
+     * @return true on success, false if the frame is too short or output buffer too small.
+     */
     bool encapsulateFrame(const uint8_t* in_frame, size_t in_len,
                           uint8_t* out_buf, size_t out_cap, size_t* out_len) const;
 
-    /// @brief Send a frame, applying UDP encapsulation if enabled.
+    /**@brief Send a frame, applying UDP encapsulation if enabled. */
     bool sendWithEncapsulation(const uint8_t* frame, size_t len) const;
 #endif
 
@@ -115,7 +125,7 @@ private:
 #endif
 
     static constexpr size_t kMaxEtherCATPayloadPerFrame_ = 1498;
-    /// Configured per-frame EtherCAT payload ceiling (jumbo support).
+    /**Configured per-frame EtherCAT payload ceiling (jumbo support). */
     size_t max_payload_ = kMaxEtherCATPayloadPerFrame_;
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION

@@ -49,11 +49,11 @@ namespace Motor {
  *   Fv = Viscous coefficient
  */
 struct FrictionParams {
-    double staticFriction = 0.1;      ///< Static friction torque [Nm] (breakaway)
-    double coulombFriction = 0.05;    ///< Coulomb (kinetic) friction torque [Nm]
-    double viscousCoeff = 0.01;       ///< Viscous friction coefficient [Nm/(rad/s)]
-    double stribeckVelocity = 0.1;    ///< Stribeck velocity [rad/s]
-    double stictionVelocity = 0.001;  ///< Velocity threshold for stiction [rad/s]
+    double staticFriction = 0.1; /**< Static friction torque [Nm] (breakaway) */
+    double coulombFriction = 0.05; /**< Coulomb (kinetic) friction torque [Nm] */
+    double viscousCoeff = 0.01; /**< Viscous friction coefficient [Nm/(rad/s)] */
+    double stribeckVelocity = 0.1; /**< Stribeck velocity [rad/s] */
+    double stictionVelocity = 0.001; /**< Velocity threshold for stiction [rad/s] */
     
     /**
      * @brief Calculate friction torque
@@ -89,12 +89,12 @@ struct FrictionParams {
  *   T_available = T_rated * (cornerSpeed / speed) for speed > cornerSpeed
  */
 struct TorqueSpeedCurve {
-    double ratedTorque = 5.0;         ///< Continuous rated torque [Nm]
-    double peakTorque = 15.0;         ///< Peak torque (short duration) [Nm]
-    double stallTorque = 6.0;         ///< Stall torque at zero speed [Nm]
-    double cornerSpeed = 300.0;       ///< Corner speed (start of field weakening) [rad/s]
-    double maxSpeed = 600.0;          ///< Maximum speed [rad/s]
-    double peakTorqueDuration = 2.0;  ///< Maximum peak torque duration [s]
+    double ratedTorque = 5.0; /**< Continuous rated torque [Nm] */
+    double peakTorque = 15.0; /**< Peak torque (short duration) [Nm] */
+    double stallTorque = 6.0; /**< Stall torque at zero speed [Nm] */
+    double cornerSpeed = 300.0; /**< Corner speed (start of field weakening) [rad/s] */
+    double maxSpeed = 600.0; /**< Maximum speed [rad/s] */
+    double peakTorqueDuration = 2.0; /**< Maximum peak torque duration [s] */
     
     /**
      * @brief Get available torque at given speed
@@ -109,23 +109,23 @@ struct TorqueSpeedCurve {
  * @brief Motor electrical parameters
  */
 struct MotorElectricalParams {
-    double torqueConstant = 0.1;      ///< Torque constant Kt [Nm/A]
-    double backEMFConstant = 0.1;     ///< Back-EMF constant Ke [V/(rad/s)]
-    double windingResistance = 1.0;   ///< Winding resistance [Ohm]
-    double windingInductance = 0.005; ///< Winding inductance [H]
-    double ratedCurrent = 5.0;        ///< Rated continuous current [A]
-    double peakCurrent = 15.0;        ///< Peak current [A]
-    double supplyVoltage = 48.0;      ///< DC bus voltage [V]
+    double torqueConstant = 0.1; /**< Torque constant Kt [Nm/A] */
+    double backEMFConstant = 0.1; /**< Back-EMF constant Ke [V/(rad/s)] */
+    double windingResistance = 1.0; /**< Winding resistance [Ohm] */
+    double windingInductance = 0.005; /**< Winding inductance [H] */
+    double ratedCurrent = 5.0; /**< Rated continuous current [A] */
+    double peakCurrent = 15.0; /**< Peak current [A] */
+    double supplyVoltage = 48.0; /**< DC bus voltage [V] */
 };
 
 /**
  * @brief Motor mechanical parameters
  */
 struct MotorMechanicalParams {
-    double rotorInertia = 0.001;      ///< Rotor inertia [kg·m²]
-    FrictionParams friction;          ///< Motor bearing friction
-    int32_t encoderResolution = 131072; ///< Encoder counts per revolution
-    double maxAcceleration = 10000.0; ///< Maximum angular acceleration [rad/s²]
+    double rotorInertia = 0.001; /**< Rotor inertia [kg·m²] */
+    FrictionParams friction; /**< Motor bearing friction */
+    int32_t encoderResolution = 131072; /**< Encoder counts per revolution */
+    double maxAcceleration = 10000.0; /**< Maximum angular acceleration [rad/s²] */
 };
 
 /**
@@ -155,20 +155,20 @@ struct MotorParams {
  * - In backlash: no contact, no torque transmission
  */
 struct BacklashParams {
-    double totalBacklash = 0.001;     ///< Total backlash angle [rad] (half on each side)
-    double contactStiffness = 10000.0; ///< Stiffness when in contact [Nm/rad]
-    double contactDamping = 10.0;     ///< Damping when in contact [Nm/(rad/s)]
-    double backlashViscosity = 0.001; ///< Viscous damping in backlash zone [Nm/(rad/s)]
-    bool enabled = true;              ///< Enable backlash modeling
+    double totalBacklash = 0.001; /**< Total backlash angle [rad] (half on each side) */
+    double contactStiffness = 10000.0; /**< Stiffness when in contact [Nm/rad] */
+    double contactDamping = 10.0; /**< Damping when in contact [Nm/(rad/s)] */
+    double backlashViscosity = 0.001; /**< Viscous damping in backlash zone [Nm/(rad/s)] */
+    bool enabled = true; /**< Enable backlash modeling */
 };
 
 /**
  * @brief Backlash state
  */
 enum class BacklashState {
-    ContactPositive,  ///< Motor driving forward
-    InBacklash,       ///< In dead zone
-    ContactNegative   ///< Motor driving backward
+    ContactPositive, /**< Motor driving forward */
+    InBacklash, /**< In dead zone */
+    ContactNegative /**< Motor driving backward */
 };
 
 // ============================================================================
@@ -185,13 +185,13 @@ enum class BacklashState {
  * - Internal friction
  */
 struct GeartrainParams {
-    double gearRatio = 10.0;          ///< Gear ratio (motor:output, >1 is reduction)
-    double forwardEfficiency = 0.90;  ///< Forward efficiency (motor->load) [0-1]
-    double backwardEfficiency = 0.85; ///< Backward efficiency (load->motor) [0-1]
-    double gearInertia = 0.0001;      ///< Geartrain internal inertia [kg·m²] (at output)
-    FrictionParams friction;          ///< Geartrain internal friction (at output)
-    bool backdrivable = true;         ///< Whether load can drive motor
-    double backdriveTorqueThreshold = 0.5; ///< Min torque to backdrive [Nm] (if not backdrivable)
+    double gearRatio = 10.0; /**< Gear ratio (motor:output, >1 is reduction) */
+    double forwardEfficiency = 0.90; /**< Forward efficiency (motor->load) [0-1] */
+    double backwardEfficiency = 0.85; /**< Backward efficiency (load->motor) [0-1] */
+    double gearInertia = 0.0001; /**< Geartrain internal inertia [kg·m²] (at output) */
+    FrictionParams friction; /**< Geartrain internal friction (at output) */
+    bool backdrivable = true; /**< Whether load can drive motor */
+    double backdriveTorqueThreshold = 0.5; /**< Min torque to backdrive [Nm] (if not backdrivable) */
 };
 
 // ============================================================================
@@ -202,13 +202,13 @@ struct GeartrainParams {
  * @brief Output load parameters
  */
 struct LoadParams {
-    double inertia = 0.01;            ///< Load inertia [kg·m²]
-    FrictionParams friction;          ///< Load friction
-    double externalTorque = 0.0;      ///< External applied torque [Nm] (gravity, process forces)
-    double positionMin = -1e9;        ///< Minimum position [rad]
-    double positionMax = 1e9;         ///< Maximum position [rad]
-    double hardStopStiffness = 100000.0; ///< Hard stop spring constant [Nm/rad]
-    double hardStopDamping = 1000.0;  ///< Hard stop damping [Nm/(rad/s)]
+    double inertia = 0.01; /**< Load inertia [kg·m²] */
+    FrictionParams friction; /**< Load friction */
+    double externalTorque = 0.0; /**< External applied torque [Nm] (gravity, process forces) */
+    double positionMin = -1e9; /**< Minimum position [rad] */
+    double positionMax = 1e9; /**< Maximum position [rad] */
+    double hardStopStiffness = 100000.0; /**< Hard stop spring constant [Nm/rad] */
+    double hardStopDamping = 1000.0; /**< Hard stop damping [Nm/(rad/s)] */
 };
 
 // ============================================================================
@@ -219,17 +219,17 @@ struct LoadParams {
  * @brief Thermal model parameters
  */
 struct ThermalParams {
-    bool enabled = false;             ///< Enable thermal simulation
-    double motorThermalMass = 100.0;  ///< Motor thermal mass [J/K]
-    double motorThermalResistance = 5.0; ///< Motor to ambient [K/W]
-    double windingThermalMass = 10.0; ///< Winding thermal mass [J/K]
-    double windingToMotorResistance = 1.0; ///< Winding to motor case [K/W]
-    double ambientTemperature = 25.0; ///< Ambient temperature [°C]
-    double maxWindingTemp = 120.0;    ///< Maximum winding temperature [°C]
-    double maxMotorTemp = 80.0;       ///< Maximum motor case temperature [°C]
-    double gearboxThermalMass = 50.0; ///< Gearbox thermal mass [J/K]
-    double gearboxThermalResistance = 10.0; ///< Gearbox to ambient [K/W]
-    double maxGearboxTemp = 80.0;     ///< Maximum gearbox temperature [°C]
+    bool enabled = false; /**< Enable thermal simulation */
+    double motorThermalMass = 100.0; /**< Motor thermal mass [J/K] */
+    double motorThermalResistance = 5.0; /**< Motor to ambient [K/W] */
+    double windingThermalMass = 10.0; /**< Winding thermal mass [J/K] */
+    double windingToMotorResistance = 1.0; /**< Winding to motor case [K/W] */
+    double ambientTemperature = 25.0; /**< Ambient temperature [°C] */
+    double maxWindingTemp = 120.0; /**< Maximum winding temperature [°C] */
+    double maxMotorTemp = 80.0; /**< Maximum motor case temperature [°C] */
+    double gearboxThermalMass = 50.0; /**< Gearbox thermal mass [J/K] */
+    double gearboxThermalResistance = 10.0; /**< Gearbox to ambient [K/W] */
+    double maxGearboxTemp = 80.0; /**< Maximum gearbox temperature [°C] */
 };
 
 // ============================================================================
@@ -242,22 +242,22 @@ struct ThermalParams {
 struct SensorConfig {
     // Limit switches (at output)
     bool positiveLimitEnabled = false;
-    double positiveLimitPosition = 1e9;  ///< [rad] at output
-    bool positiveLimitNC = false;        ///< Normally closed
+    double positiveLimitPosition = 1e9; /**< [rad] at output */
+    bool positiveLimitNC = false; /**< Normally closed */
     
     bool negativeLimitEnabled = false;
-    double negativeLimitPosition = -1e9; ///< [rad] at output
+    double negativeLimitPosition = -1e9; /**< [rad] at output */
     bool negativeLimitNC = false;
     
     // Home switch
     bool homeEnabled = false;
-    double homePosition = 0.0;           ///< [rad] at output
-    double homeWidth = 0.01;             ///< Width of home zone [rad]
+    double homePosition = 0.0; /**< [rad] at output */
+    double homeWidth = 0.01; /**< Width of home zone [rad] */
     bool homeNC = false;
     
     // Index pulse (at motor)
     bool indexEnabled = false;
-    double indexPosition = 0.0;          ///< [rad] at motor
+    double indexPosition = 0.0; /**< [rad] at motor */
 };
 
 // ============================================================================
@@ -268,52 +268,52 @@ struct SensorConfig {
  * @brief Motor state
  */
 struct MotorState {
-    double position = 0.0;            ///< Motor position [rad]
-    double velocity = 0.0;            ///< Motor velocity [rad/s]
-    double acceleration = 0.0;        ///< Motor acceleration [rad/s²]
-    double torque = 0.0;              ///< Applied torque [Nm]
-    double current = 0.0;             ///< Motor current [A]
-    double backEMF = 0.0;             ///< Back-EMF voltage [V]
-    double powerDissipation = 0.0;    ///< I²R losses [W]
-    double frictionTorque = 0.0;      ///< Friction torque [Nm]
+    double position = 0.0; /**< Motor position [rad] */
+    double velocity = 0.0; /**< Motor velocity [rad/s] */
+    double acceleration = 0.0; /**< Motor acceleration [rad/s²] */
+    double torque = 0.0; /**< Applied torque [Nm] */
+    double current = 0.0; /**< Motor current [A] */
+    double backEMF = 0.0; /**< Back-EMF voltage [V] */
+    double powerDissipation = 0.0; /**< I²R losses [W] */
+    double frictionTorque = 0.0; /**< Friction torque [Nm] */
 };
 
 /**
  * @brief Geartrain state
  */
 struct GeartrainState {
-    double inputPosition = 0.0;       ///< Input (motor side) position [rad]
-    double outputPosition = 0.0;      ///< Output (load side) position [rad]
-    double inputVelocity = 0.0;       ///< Input velocity [rad/s]
-    double outputVelocity = 0.0;      ///< Output velocity [rad/s]
-    double transmittedTorque = 0.0;   ///< Torque transmitted through gear [Nm]
-    double frictionTorque = 0.0;      ///< Internal friction torque [Nm]
-    double efficiency = 0.0;          ///< Current efficiency
+    double inputPosition = 0.0; /**< Input (motor side) position [rad] */
+    double outputPosition = 0.0; /**< Output (load side) position [rad] */
+    double inputVelocity = 0.0; /**< Input velocity [rad/s] */
+    double outputVelocity = 0.0; /**< Output velocity [rad/s] */
+    double transmittedTorque = 0.0; /**< Torque transmitted through gear [Nm] */
+    double frictionTorque = 0.0; /**< Internal friction torque [Nm] */
+    double efficiency = 0.0; /**< Current efficiency */
     BacklashState backlashState = BacklashState::InBacklash;
-    double backlashAngle = 0.0;       ///< Current position within backlash [rad]
+    double backlashAngle = 0.0; /**< Current position within backlash [rad] */
 };
 
 /**
  * @brief Load state
  */
 struct LoadState {
-    double position = 0.0;            ///< Load position [rad]
-    double velocity = 0.0;            ///< Load velocity [rad/s]
-    double acceleration = 0.0;        ///< Load acceleration [rad/s²]
-    double appliedTorque = 0.0;       ///< Torque from geartrain [Nm]
-    double frictionTorque = 0.0;      ///< Load friction [Nm]
-    double externalTorque = 0.0;      ///< External forces [Nm]
-    bool atPositiveLimit = false;     ///< At positive hard stop
-    bool atNegativeLimit = false;     ///< At negative hard stop
+    double position = 0.0; /**< Load position [rad] */
+    double velocity = 0.0; /**< Load velocity [rad/s] */
+    double acceleration = 0.0; /**< Load acceleration [rad/s²] */
+    double appliedTorque = 0.0; /**< Torque from geartrain [Nm] */
+    double frictionTorque = 0.0; /**< Load friction [Nm] */
+    double externalTorque = 0.0; /**< External forces [Nm] */
+    bool atPositiveLimit = false; /**< At positive hard stop */
+    bool atNegativeLimit = false; /**< At negative hard stop */
 };
 
 /**
  * @brief Thermal state
  */
 struct ThermalState {
-    double windingTemp = 25.0;        ///< Winding temperature [°C]
-    double motorCaseTemp = 25.0;      ///< Motor case temperature [°C]
-    double gearboxTemp = 25.0;        ///< Gearbox temperature [°C]
+    double windingTemp = 25.0; /**< Winding temperature [°C] */
+    double motorCaseTemp = 25.0; /**< Motor case temperature [°C] */
+    double gearboxTemp = 25.0; /**< Gearbox temperature [°C] */
     bool windingOvertemp = false;
     bool motorOvertemp = false;
     bool gearboxOvertemp = false;
@@ -327,8 +327,8 @@ struct SensorState {
     bool negativeLimitActive = false;
     bool homeActive = false;
     bool indexPulse = false;
-    int32_t encoderPosition = 0;      ///< Motor encoder [counts]
-    int32_t outputPosition = 0;       ///< Output encoder (if present) [counts]
+    int32_t encoderPosition = 0; /**< Motor encoder [counts] */
+    int32_t outputPosition = 0; /**< Output encoder (if present) [counts] */
 };
 
 /**
@@ -341,7 +341,7 @@ struct SystemState {
     ThermalState thermal;
     SensorState sensors;
     
-    double simulationTime = 0.0;      ///< Total simulation time [s]
+    double simulationTime = 0.0; /**< Total simulation time [s] */
     bool hasFault = false;
     uint16_t faultCode = 0;
     
@@ -400,10 +400,10 @@ struct ErrorInjection {
  * @brief Control mode
  */
 enum class ControlMode {
-    Disabled,         ///< No control, motor freewheeling
-    Torque,           ///< Direct torque command
-    Velocity,         ///< Velocity control
-    Position          ///< Position control (cascaded velocity)
+    Disabled, /**< No control, motor freewheeling */
+    Torque, /**< Direct torque command */
+    Velocity, /**< Velocity control */
+    Position /**< Position control (cascaded velocity) */
 };
 
 /**

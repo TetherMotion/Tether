@@ -65,11 +65,11 @@ namespace Motion {
  * @brief Motion generator state
  */
 enum class GeneratorState : uint8_t {
-    Idle,       ///< Generator not running
-    Running,    ///< Generator actively producing motion
-    Paused,     ///< Generator paused (can resume)
-    Complete,   ///< Motion sequence complete
-    Error       ///< Configuration invalid (e.g. zero acceleration/velocity)
+    Idle, /**< Generator not running */
+    Running, /**< Generator actively producing motion */
+    Paused, /**< Generator paused (can resume) */
+    Complete, /**< Motion sequence complete */
+    Error /**< Configuration invalid (e.g. zero acceleration/velocity) */
 };
 
 /**

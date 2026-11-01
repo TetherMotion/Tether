@@ -36,14 +36,16 @@ namespace UI {
 
 class MasterEntityProvider : public ISlaveEntityProvider {
 public:
-    /// `mutex` optionally guards every master access (SDO/register path
-    /// shared with other threads).  `detail_fn(i)` supplies the trailing
-    /// free-form column (e.g. CiA-402 status, FSoE channel state).
+    /**
+     * `mutex` optionally guards every master access (SDO/register path
+     * shared with other threads).  `detail_fn(i)` supplies the trailing
+     * free-form column (e.g. CiA-402 status, FSoE channel state).
+     */
     explicit MasterEntityProvider(EtherCAT::Master& master,
                                   std::mutex* mutex = nullptr)
         : master_(master), mutex_(mutex) {}
 
-    /// Optional per-entity detail column callback.
+    /**Optional per-entity detail column callback. */
     std::function<std::string(uint16_t)> detail_fn;
 
     std::vector<SlaveEntity> entities() override {

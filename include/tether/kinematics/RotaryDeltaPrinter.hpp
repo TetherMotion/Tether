@@ -1,102 +1,110 @@
 #pragma once
 
-/// @file RotaryDeltaPrinter.hpp
-/// @brief Rotary delta printer configuration and kinematics.
-///
-/// @details
-/// A rotary delta printer has three upper arms pivoting around fixed
-/// shoulder joints at 120° spacing around the base. Each upper arm has
-/// length **L1** (upper arm) and connects via a forearm of length **L2**
-/// to the effector. The actuated quantity is the **shoulder angle**
-/// (the angle of the upper arm relative to the horizontal plane).
-///
-/// Geometry (top view, looking down the Z axis):
-///
-/// @code
-///        Tower C (90°)
-///           *
-///          / \
-///         /   \
-///        /     \
-///       *-------*
-///  Tower A      Tower B
-///  (210°)       (330°)
-/// @endcode
-///
-/// Forward kinematics (cartesian -> joint angles):
-///   For each tower i at base position (bx_i, by_i):
-///     1. Compute horizontal distance from effector to tower base:
-///        d_i = sqrt((x - bx_i)^2 + (y - by_i)^2)
-///     2. The effector joint is at height z. The upper-arm pivot is at
-///        height baseHeight. The vertical offset is:
-///        dz = z - baseHeight
-///     3. The upper arm end is at (d_i - effectorRadius, dz) in the
-///        (radial, vertical) plane relative to the pivot.
-///     4. The shoulder angle theta_i satisfies:
-///          L1 * cos(theta_i) = d_i - effectorRadius
-///          L1 * sin(theta_i) = dz
-///        => theta_i = atan2(dz, d_i - effectorRadius)
-///     (When the arm is horizontal, theta = 0; when pointing up, theta = 90°.)
-///
-/// Inverse kinematics (joint angles -> cartesian):
-///   For each tower i, the upper-arm end is at:
-///     (bx_i + (effectorRadius + L1*cos(theta_i)) * cos(angle_i),
-///      by_i + (effectorRadius + L1*cos(theta_i)) * sin(angle_i),
-///      baseHeight + L1*sin(theta_i))
-///   The effector position is at the intersection of three spheres of
-///   radius L2 centered at each upper-arm end. We solve by trilateration
-///   (same approach as the linear DeltaPrinter, adapted for the
-///   upper-arm-end centers instead of fixed tower tops).
+/**
+ * @file RotaryDeltaPrinter.hpp
+ * @brief Rotary delta printer configuration and kinematics.
+ *
+ * @details
+ * A rotary delta printer has three upper arms pivoting around fixed
+ * shoulder joints at 120° spacing around the base. Each upper arm has
+ * length **L1** (upper arm) and connects via a forearm of length **L2**
+ * to the effector. The actuated quantity is the **shoulder angle**
+ * (the angle of the upper arm relative to the horizontal plane).
+ *
+ * Geometry (top view, looking down the Z axis):
+ *
+ * @code
+ *        Tower C (90°)
+ *           *
+ *          / \
+ *         /   \
+ *        /     \
+ *       *-------*
+ *  Tower A      Tower B
+ *  (210°)       (330°)
+ * @endcode
+ *
+ * Forward kinematics (cartesian -> joint angles):
+ *   For each tower i at base position (bx_i, by_i):
+ *     1. Compute horizontal distance from effector to tower base:
+ *        d_i = sqrt((x - bx_i)^2 + (y - by_i)^2)
+ *     2. The effector joint is at height z. The upper-arm pivot is at
+ *        height baseHeight. The vertical offset is:
+ *        dz = z - baseHeight
+ *     3. The upper arm end is at (d_i - effectorRadius, dz) in the
+ *        (radial, vertical) plane relative to the pivot.
+ *     4. The shoulder angle theta_i satisfies:
+ *          L1 * cos(theta_i) = d_i - effectorRadius
+ *          L1 * sin(theta_i) = dz
+ *        => theta_i = atan2(dz, d_i - effectorRadius)
+ *     (When the arm is horizontal, theta = 0; when pointing up, theta = 90°.)
+ *
+ * Inverse kinematics (joint angles -> cartesian):
+ *   For each tower i, the upper-arm end is at:
+ *     (bx_i + (effectorRadius + L1*cos(theta_i)) * cos(angle_i),
+ *      by_i + (effectorRadius + L1*cos(theta_i)) * sin(angle_i),
+ *      baseHeight + L1*sin(theta_i))
+ *   The effector position is at the intersection of three spheres of
+ *   radius L2 centered at each upper-arm end. We solve by trilateration
+ *   (same approach as the linear DeltaPrinter, adapted for the
+ *   upper-arm-end centers instead of fixed tower tops).
+ */
 
 #include <cmath>
 #include <array>
 
 namespace tether::kinematics {
 
-/// @brief Rotary delta geometry parameters.
+/**@brief Rotary delta geometry parameters. */
 struct RotaryDeltaGeometry {
-    double upperArmLength = 170.0;    ///< Upper arm length L1 (mm)
-    double forearmLength = 320.0;     ///< Forearm length L2 (mm)
-    double baseRadius = 90.0;         ///< Distance from center to shoulder pivot (mm)
-    double effectorRadius = 24.0;     ///< Effector joint radius (mm)
-    double baseHeight = 0.0;          ///< Shoulder pivot height above bed (mm)
-    double towerAngleA = 210.0;       ///< Tower A angle (degrees)
-    double towerAngleB = 330.0;       ///< Tower B angle (degrees)
-    double towerAngleC = 90.0;        ///< Tower C angle (degrees)
+    double upperArmLength = 170.0; /**< Upper arm length L1 (mm) */
+    double forearmLength = 320.0; /**< Forearm length L2 (mm) */
+    double baseRadius = 90.0; /**< Distance from center to shoulder pivot (mm) */
+    double effectorRadius = 24.0; /**< Effector joint radius (mm) */
+    double baseHeight = 0.0; /**< Shoulder pivot height above bed (mm) */
+    double towerAngleA = 210.0; /**< Tower A angle (degrees) */
+    double towerAngleB = 330.0; /**< Tower B angle (degrees) */
+    double towerAngleC = 90.0; /**< Tower C angle (degrees) */
 };
 
-/// @brief Rotary delta endstop angle adjustments (radians).
+/**@brief Rotary delta endstop angle adjustments (radians). */
 struct RotaryDeltaEndstopAdjust {
-    double adjA = 0.0;  ///< Tower A endstop angle adjustment (rad)
-    double adjB = 0.0;  ///< Tower B endstop angle adjustment (rad)
-    double adjC = 0.0;  ///< Tower C endstop angle adjustment (rad)
+    double adjA = 0.0; /**< Tower A endstop angle adjustment (rad) */
+    double adjB = 0.0; /**< Tower B endstop angle adjustment (rad) */
+    double adjC = 0.0; /**< Tower C endstop angle adjustment (rad) */
 };
 
-/// @brief Rotary delta printer configuration and kinematics.
+/**@brief Rotary delta printer configuration and kinematics. */
 class RotaryDeltaPrinter {
 public:
-    /// @brief Set rotary delta geometry.
-    /// @param geo Arm lengths, tower positions, angles
+    /**
+     * @brief Set rotary delta geometry.
+     * @param geo Arm lengths, tower positions, angles
+     */
     void setGeometry(const RotaryDeltaGeometry& geo) { geometry_ = geo; }
 
-    /// @brief Set endstop angle adjustments.
-    /// @param adj Per-tower angle corrections
+    /**
+     * @brief Set endstop angle adjustments.
+     * @param adj Per-tower angle corrections
+     */
     void setEndstopAdjust(const RotaryDeltaEndstopAdjust& adj) { endstopAdjust_ = adj; }
 
-    /// @return Current geometry.
+    /**@return Current geometry. */
     const RotaryDeltaGeometry& geometry() const { return geometry_; }
 
-    /// @return Current endstop adjustments.
+    /**@return Current endstop adjustments. */
     const RotaryDeltaEndstopAdjust& endstopAdjust() const { return endstopAdjust_; }
 
-    /// @brief Convert Cartesian (X, Y, Z) to shoulder angles (A, B, C) in radians.
-    ///
-    /// The angle is measured from the horizontal plane: 0 = arm horizontal,
-    /// positive = arm pointing upward.
-    /// @param x Effector X [mm]
-    /// @param y Effector Y [mm]
-    /// @param z Effector Z [mm]
-    /// @return Shoulder angles (A, B, C) [rad]
+    /**
+     * @brief Convert Cartesian (X, Y, Z) to shoulder angles (A, B, C) in radians.
+     *
+     * The angle is measured from the horizontal plane: 0 = arm horizontal,
+     * positive = arm pointing upward.
+     * @param x Effector X [mm]
+     * @param y Effector Y [mm]
+     * @param z Effector Z [mm]
+     * @return Shoulder angles (A, B, C) [rad]
+     */
     std::array<double, 3> forwardActuatorKinematics(double x, double y, double z) const {
         const double angles[3] = {
             geometry_.towerAngleA * M_PI / 180.0,
@@ -169,14 +177,16 @@ public:
         return result;
     }
 
-    /// @brief Convert shoulder angles (A, B, C in radians) back to Cartesian.
-    ///
-    /// Computes the upper-arm-end positions, then trilaterates with forearm
-    /// length L2 to find the effector center.
-    /// @param thetaA Shoulder A angle [rad]
-    /// @param thetaB Shoulder B angle [rad]
-    /// @param thetaC Shoulder C angle [rad]
-    /// @return Effector position (X, Y, Z)
+    /**
+     * @brief Convert shoulder angles (A, B, C in radians) back to Cartesian.
+     *
+     * Computes the upper-arm-end positions, then trilaterates with forearm
+     * length L2 to find the effector center.
+     * @param thetaA Shoulder A angle [rad]
+     * @param thetaB Shoulder B angle [rad]
+     * @param thetaC Shoulder C angle [rad]
+     * @return Effector position (X, Y, Z)
+     */
     std::array<double, 3> inverseActuatorKinematics(
         double thetaA, double thetaB, double thetaC) const {
         const double angles[3] = {

@@ -24,15 +24,19 @@ namespace tether::klipper::objects {
  */
 class OidAllocator {
 public:
-    /// @brief Allocate the next OID (0..254).
-    /// @return The allocated OID, or std::nullopt if exhausted.
+    /**
+     * @brief Allocate the next OID (0..254).
+     * @return The allocated OID, or std::nullopt if exhausted.
+     */
     std::optional<uint8_t> allocate() {
         if (nextOid_ > 254) { full_ = true; return std::nullopt; }
         return nextOid_++;
     }
 
-    /// @brief Allocate a contiguous block of @p count OIDs; returns the first.
-    /// @return The first OID in the block, or std::nullopt if not enough remain.
+    /**
+     * @brief Allocate a contiguous block of @p count OIDs; returns the first.
+     * @return The first OID in the block, or std::nullopt if not enough remain.
+     */
     std::optional<uint8_t> allocateBlock(uint8_t count) {
         if (nextOid_ + count > 255) { full_ = true; return std::nullopt; }
         uint8_t first = nextOid_;
@@ -40,24 +44,24 @@ public:
         return first;
     }
 
-    /// @brief Record an OID -> type mapping (for bookkeeping).
+    /**@brief Record an OID -> type mapping (for bookkeeping). */
     void assign(uint8_t oid, std::string type) {
         types_[oid] = std::move(type);
     }
 
-    /// @return The type string for an OID, or empty if unknown.
+    /**@return The type string for an OID, or empty if unknown. */
     std::string typeOf(uint8_t oid) const {
         auto it = types_.find(oid);
         return it == types_.end() ? std::string{} : it->second;
     }
 
-    /// @return The next OID that will be allocated.
+    /**@return The next OID that will be allocated. */
     uint8_t nextOid() const { return nextOid_; }
 
-    /// @return True if all 255 OIDs are exhausted.
+    /**@return True if all 255 OIDs are exhausted. */
     bool isFull() const { return full_; }
 
-    /// @brief Reset the allocator.
+    /**@brief Reset the allocator. */
     void reset() { nextOid_ = 0; full_ = false; types_.clear(); }
 
 private:

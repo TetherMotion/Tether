@@ -12,25 +12,25 @@
 
 namespace tether::analysis {
 
-/// @brief A single retraction event.
+/**@brief A single retraction event. */
 struct RetractionEvent {
     int lineNumber = 0;
-    double distance = 0;   ///< mm
-    double speed = 0;      ///< mm/min
-    double zHop = 0;       ///< mm
+    double distance = 0; /**< mm */
+    double speed = 0; /**< mm/min */
+    double zHop = 0; /**< mm */
     double x = 0, y = 0, z = 0;
     bool isDeretraction = false;
 };
 
-/// @brief Recommended retraction settings.
+/**@brief Recommended retraction settings. */
 struct RetractionSettings {
-    double distance = 0;    ///< mm
-    double speed = 0;       ///< mm/min
-    double extraRestart = 0; ///< mm
-    double zHop = 0;        ///< mm
+    double distance = 0; /**< mm */
+    double speed = 0; /**< mm/min */
+    double extraRestart = 0; /**< mm */
+    double zHop = 0; /**< mm */
 };
 
-/// @brief A retraction optimization recommendation.
+/**@brief A retraction optimization recommendation. */
 struct RetractionRecommendation {
     std::string parameter;
     double current = 0;
@@ -39,7 +39,7 @@ struct RetractionRecommendation {
     std::string improvement;
 };
 
-/// @brief Combined retraction analysis result.
+/**@brief Combined retraction analysis result. */
 struct RetractionResult {
     // Basic analysis
     std::vector<RetractionEvent> events;
@@ -48,7 +48,7 @@ struct RetractionResult {
     double minDistance = 0;
     double maxDistance = 0;
     double avgSpeed = 0;
-    double totalRetractionTime = 0; ///< seconds
+    double totalRetractionTime = 0; /**< seconds */
     int zHopCount = 0;
     std::vector<double> uniqueDistances;
     std::vector<double> uniqueSpeeds;
@@ -67,8 +67,8 @@ struct RetractionResult {
     // Speed optimization
     double currentSpeedMmPerS = 0;
     double recommendedSpeedMmPerS = 0;
-    double slipRisk = 0;      ///< 0-100
-    double stringingRisk = 0; ///< 0-100
+    double slipRisk = 0; /**< 0-100 */
+    double stringingRisk = 0; /**< 0-100 */
     double speedScore = 100;
 
     // Frequency analysis
@@ -80,17 +80,17 @@ struct RetractionResult {
     double frequencyScore = 100;
 
     // Acceleration analysis
-    double avgRetractSpeed = 0;  ///< mm/s
-    double maxRetractSpeed = 0;  ///< mm/s
-    double avgAcceleration = 0;  ///< mm/s²
-    double maxAcceleration = 0;  ///< mm/s²
+    double avgRetractSpeed = 0; /**< mm/s */
+    double maxRetractSpeed = 0; /**< mm/s */
+    double avgAcceleration = 0; /**< mm/s² */
+    double maxAcceleration = 0; /**< mm/s² */
     int highAccelCount = 0;
     double qualityScore = 100;
 
     std::vector<std::string> advice;
 };
 
-/// @brief Analyze and optimize retraction settings from G-code.
+/**@brief Analyze and optimize retraction settings from G-code. */
 class RetractionAnalyzer {
 public:
     struct Params {
@@ -104,7 +104,7 @@ public:
     explicit RetractionAnalyzer() : params_() {}
     explicit RetractionAnalyzer(Params params) : params_(params) {}
 
-    /// @brief Analyze retraction settings from G-code.
+    /**@brief Analyze retraction settings from G-code. */
     RetractionResult analyze(const std::vector<std::string>& gcodeLines) const;
 
     const Params& params() const { return params_; }

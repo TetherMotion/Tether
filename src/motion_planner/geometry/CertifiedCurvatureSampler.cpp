@@ -20,12 +20,14 @@ namespace tether::motion {
 
 namespace {
 
-/// Control-polygon bound on ‖C^(k)‖ for a single Bézier span of degree n
-/// with control points P_0..P_n:
-///   ‖C'(u)‖  ≤ n · max_i ‖P_{i+1} − P_i‖
-///   ‖C''(u)‖ ≤ n(n−1) · max_i ‖P_{i+2} − 2P_{i+1} + P_i‖
-///   ‖C'''(u)‖ ≤ n(n−1)(n−2) · max_i ‖Δ³P_i‖
-/// These are the standard de Casteljau / forward-difference bounds (M1).
+/**
+ * Control-polygon bound on ‖C^(k)‖ for a single Bézier span of degree n
+ * with control points P_0..P_n:
+ *   ‖C'(u)‖  ≤ n · max_i ‖P_{i+1} − P_i‖
+ *   ‖C''(u)‖ ≤ n(n−1) · max_i ‖P_{i+2} − 2P_{i+1} + P_i‖
+ *   ‖C'''(u)‖ ≤ n(n−1)(n−2) · max_i ‖Δ³P_i‖
+ * These are the standard de Casteljau / forward-difference bounds (M1).
+ */
 double boundC1(const NurbsCurve& c) {
     const auto& P = c.controlPoints();
     const int n = c.degree();
@@ -61,10 +63,12 @@ double boundC3(const NurbsCurve& c) {
     return static_cast<double>(n * (n - 1) * (n - 2)) * m;
 }
 
-/// Lower bound on ‖C'(u)‖ over the span — use the minimum distance between
-/// consecutive control-point *chord* segments as a crude but safe lower
-/// bound. For a non-degenerate Bézier this is > 0; if it underflows we
-/// fall back to the minimum sampled speed.
+/**
+ * Lower bound on ‖C'(u)‖ over the span — use the minimum distance between
+ * consecutive control-point *chord* segments as a crude but safe lower
+ * bound. For a non-degenerate Bézier this is > 0; if it underflows we
+ * fall back to the minimum sampled speed.
+ */
 double boundSpeedLower(const NurbsCurve& c) {
     const auto& P = c.controlPoints();
     if (P.size() < 2) return 0.0;

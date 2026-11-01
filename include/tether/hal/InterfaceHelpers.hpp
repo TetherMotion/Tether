@@ -23,13 +23,17 @@ namespace HAL {
  */
 std::string resolveInterface(const std::string& requested, const char* tag);
 
-/// Enumerate and log all physical network interfaces (name, type, state,
-/// MAC) to help the user pick one.
+/**
+ * Enumerate and log all physical network interfaces (name, type, state,
+ * MAC) to help the user pick one.
+ */
 void listPhysicalInterfaces(const char* tag);
 
-/// Log a consistent "permission denied" error message advising the user to
-/// run via `runec` or `sudo`.  Call this when the Ethernet HAL returns
-/// Error::PermissionDenied.
+/**
+ * Log a consistent "permission denied" error message advising the user to
+ * run via `runec` or `sudo`.  Call this when the Ethernet HAL returns
+ * Error::PermissionDenied.
+ */
 void logPermissionDeniedError(const char* tag);
 
 } // namespace HAL

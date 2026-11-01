@@ -1,11 +1,13 @@
 #pragma once
 
-/// @file PrinterObjectsBuiltin.hpp
-/// @brief Built-in printer objects that reference KlippyServer directly.
-///
-/// These objects (webhooks, gcode_move, toolhead, configfile, pause_resume,
-/// virtual_sdcard, display_status) are defined here because they need access
-/// to KlippyServer's state.
+/**
+ * @file PrinterObjectsBuiltin.hpp
+ * @brief Built-in printer objects that reference KlippyServer directly.
+ *
+ * These objects (webhooks, gcode_move, toolhead, configfile, pause_resume,
+ * virtual_sdcard, display_status) are defined here because they need access
+ * to KlippyServer's state.
+ */
 
 #include "tether/klipper/klippy/KlippyServer.hpp"
 
@@ -21,7 +23,7 @@ namespace tether::klipper::klippy {
 // Built-in printer objects
 // ============================================================================
 
-/// @brief The webhooks printer object (exposes state and state_message).
+/**@brief The webhooks printer object (exposes state and state_message). */
 class WebhooksObject : public PrinterObject {
 public:
     explicit WebhooksObject(KlippyServer& server) : server_(server) {}
@@ -39,7 +41,7 @@ private:
     KlippyServer& server_;
 };
 
-/// @brief The gcode_move printer object.
+/**@brief The gcode_move printer object. */
 class GcodeMoveObject : public PrinterObject {
 public:
     std::string name() const override { return "gcode_move"; }
@@ -72,7 +74,7 @@ private:
     std::array<double, 4> gcodePos_ = {0, 0, 0, 0};
 };
 
-/// @brief The toolhead printer object.
+/**@brief The toolhead printer object. */
 class ToolheadObject : public PrinterObject {
 public:
     std::string name() const override { return "toolhead"; }
@@ -111,7 +113,7 @@ private:
     int stalls_ = 0;
 };
 
-/// @brief The configfile printer object.
+/**@brief The configfile printer object. */
 class ConfigfileObject : public PrinterObject {
 public:
     std::string name() const override { return "configfile"; }
@@ -130,8 +132,10 @@ public:
         saveConfigPendingItems_ = items;
     }
 
-    /// Set the parsed config settings (section name -> key -> value).
-    /// Keys should be lowercase as Mainsail expects.
+    /**
+     * Set the parsed config settings (section name -> key -> value).
+     * Keys should be lowercase as Mainsail expects.
+     */
     void setSettings(std::map<std::string, JsonValue> s) { settings_ = std::move(s); }
     void setConfig(std::map<std::string, JsonValue> c) { config_ = std::move(c); }
 
@@ -144,7 +148,7 @@ private:
     std::map<std::string, JsonValue> config_;
 };
 
-/// @brief The pause_resume printer object.
+/**@brief The pause_resume printer object. */
 class PauseResumeObject : public PrinterObject {
 public:
     std::string name() const override { return "pause_resume"; }
@@ -162,17 +166,19 @@ private:
     bool isPaused_ = false;
 };
 
-/// @brief The virtual_sdcard printer object.
-///
-/// Wraps a VirtualSdcard instance and exposes its status via UDS.
-/// If no VirtualSdcard is provided, falls back to manual setters.
+/**
+ * @brief The virtual_sdcard printer object.
+ *
+ * Wraps a VirtualSdcard instance and exposes its status via UDS.
+ * If no VirtualSdcard is provided, falls back to manual setters.
+ */
 class VirtualSdcardObject : public PrinterObject {
 public:
-    /// @brief Construct with a VirtualSdcard backend.
+    /**@brief Construct with a VirtualSdcard backend. */
     explicit VirtualSdcardObject(std::shared_ptr<class VirtualSdcard> sd)
         : sd_(std::move(sd)) {}
 
-    /// @brief Construct as a standalone stub (manual setters).
+    /**@brief Construct as a standalone stub (manual setters). */
     VirtualSdcardObject() = default;
 
     std::string name() const override { return "virtual_sdcard"; }
@@ -202,7 +208,7 @@ private:
     size_t filePosition_ = 0;
 };
 
-/// @brief The display_status printer object.
+/**@brief The display_status printer object. */
 class DisplayStatusObject : public PrinterObject {
 public:
     std::string name() const override { return "display_status"; }

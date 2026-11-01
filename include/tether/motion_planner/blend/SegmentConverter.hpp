@@ -68,18 +68,18 @@ public:
         const std::vector<MotionPlanner::MotionSegment>& segments);
 
 private:
-    /// Extract the active axes from a 9-axis position array as an `RVec`.
+    /**Extract the active axes from a 9-axis position array as an `RVec`. */
     static RVec extractActive(const std::array<double, MotionPlanner::MAX_MOTION_AXES>& pos,
                               const std::array<bool, MotionPlanner::MAX_MOTION_AXES>& activeAxes,
                               std::size_t numActive);
 
-    /// Build a line NURBS from start/end positions.
+    /**Build a line NURBS from start/end positions. */
     static NurbsCurve convertLinear(const MotionPlanner::MotionSegment& seg);
 
-    /// Build an arc NURBS (M6) honoring the ArcPlane.
+    /**Build an arc NURBS (M6) honoring the ArcPlane. */
     static NurbsCurve convertArc(const MotionPlanner::MotionSegment& seg);
 
-    /// Build a NURBS from stored control points / weights / knots / degree.
+    /**Build a NURBS from stored control points / weights / knots / degree. */
     static NurbsCurve convertNurbs(const MotionPlanner::MotionSegment& seg);
 };
 

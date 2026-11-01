@@ -31,15 +31,15 @@ public:
     int stateDim() const override { return 2; } // [C_A, T]
     int inputDim() const override { return 2; } // [F, Q_cool]
     int outputDim() const override { return 2; }
-    /// Evaluate coupled species and energy balances for an exothermic reactor.
+    /**Evaluate coupled species and energy balances for an exothermic reactor. */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
-    /// Report concentration and temperature, which are the usual process measurements.
+    /**Report concentration and temperature, which are the usual process measurements. */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
-    /// Start from a moderate conversion operating point near the nominal feed temperature.
+    /**Start from a moderate conversion operating point near the nominal feed temperature. */
     StateVector defaultInitialState() const override;
-    /// Return kinetic, thermal, and transport coefficients for operating-point studies.
+    /**Return kinetic, thermal, and transport coefficients for operating-point studies. */
     std::vector<ParamDescriptor> parameterDescriptors() const override;
-    /// Provide standard and high-gain operating points for nonlinear identification experiments.
+    /**Provide standard and high-gain operating points for nonlinear identification experiments. */
     std::vector<Preset> presets() const override;
     void applyPreset(int index) override;
     std::vector<std::string> stateNames() const override;

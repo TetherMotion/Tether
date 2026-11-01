@@ -182,8 +182,10 @@ inline constexpr DeviceIdentity EJ9505{0x00000002, 0x25212852, 2,  "EJ9505"};
 inline constexpr DeviceIdentity ELX9410{0x00000002, 0x970D4A29, 2, "ELX9410"};
 inline constexpr DeviceIdentity ELX9560{0x00000002, 0x970D5389, 2, "ELX9560"};
 
-/// Every known packed-input terminal — the default detection set used by
-/// MultiInputTerminal::detect().
+/**
+ * Every known packed-input terminal — the default detection set used by
+ * MultiInputTerminal::detect().
+ */
 inline constexpr std::array kInputTerminals{
     EL1002, EL1004, EL1008, EL1012, EL1014, EL1018, EL1024, EL1034,
     EL1052, EL1054, EL1084, EL1088, EL1094, EL1098, EL1104, EL1114,
@@ -211,7 +213,7 @@ inline constexpr std::array kInputTerminals{
 
 class InputTerminal : public IInputTerminal {
 public:
-    /// Maximum input bits supported per device (one 64-bit field).
+    /**Maximum input bits supported per device (one 64-bit field). */
     static constexpr size_t kMaxBits = 64;
 
     // -- Construction ----------------------------------------------------------
@@ -248,7 +250,7 @@ public:
 
     // -- Factories ---------------------------------------------------------------
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
@@ -261,7 +263,7 @@ public:
     static Result<InputTerminal> findFirst(Master& master,
                                          const DeviceIdentity& identity);
 
-    /// Like findFirst(master, identity) but reuses an existing scan.
+    /**Like findFirst(master, identity) but reuses an existing scan. */
     static Result<InputTerminal> findFirst(
         Master& master, const DeviceIdentity& identity,
         std::span<const DiscoveredSlave> scan);
@@ -312,42 +314,48 @@ public:
 
     // -- Status -------------------------------------------------------------------
 
-    /// True after configure()/mapLogicalAndEnterSafeOp() succeeded.
+    /**True after configure()/mapLogicalAndEnterSafeOp() succeeded. */
     bool configured() const { return configured_; }
 
-    /// Live-read the application-layer (ESM) state register.
+    /**Live-read the application-layer (ESM) state register. */
     SlaveState alState();
 
-    /// True when the terminal is in OP.
+    /**True when the terminal is in OP. */
     bool operational() { return alState() == SlaveState::OP; }
 
-    /// AL status code captured by the last failed state transition (0 = none).
+    /**AL status code captured by the last failed state transition (0 = none). */
     uint16_t lastAlStatusCode() const { return last_al_status_code_; }
 
-    /// The declared/resolved device identity.
+    /**The declared/resolved device identity. */
     const DeviceIdentity& identity() const { return identity_; }
 
-    /// Logical address assigned to this device's input field (chained
-    /// operation only; 0 when unmapped).
+    /**
+     * Logical address assigned to this device's input field (chained
+     * operation only; 0 when unmapped).
+     */
     uint32_t logicalAddress() const { return logical_addr_; }
 
 private:
-    /// Poll AL status until `target` or timeout; honours master cancellation.
+    /**Poll AL status until `target` or timeout; honours master cancellation. */
     bool waitAlState(SlaveState target, int timeout_ms);
 
-    /// Resolve the process-input SM (channel, address, length, control)
-    /// and the input bit width from the bound discovery data / SII.
+    /**
+     * Resolve the process-input SM (channel, address, length, control)
+     * and the input bit width from the bound discovery data / SII.
+     */
     void resolveInputSm();
 
-    /// Shared bring-up: SII, identity check, input SM registers, PRE-OP,
-    /// TxPDO registration in the given address mode, finalizeMapping().
-    /// Ends before SAFE-OP so the chain can interpose FMMU programming.
+    /**
+     * Shared bring-up: SII, identity check, input SM registers, PRE-OP,
+     * TxPDO registration in the given address mode, finalizeMapping().
+     * Ends before SAFE-OP so the chain can interpose FMMU programming.
+     */
     Result<> prepare(PDO::PDOAddressMode mode);
 
-    /// assumePDOAlreadyConfigured() + SAFE-OP transition.
+    /**assumePDOAlreadyConfigured() + SAFE-OP transition. */
     Result<> enterSafeOp();
 
-    /// Bit mask covering num_inputs_ bits.
+    /**Bit mask covering num_inputs_ bits. */
     uint64_t mask() const {
         return num_inputs_ >= kMaxBits ? ~uint64_t{0}
                                        : (uint64_t{1} << num_inputs_) - 1;
@@ -358,14 +366,16 @@ private:
     DeviceIdentity                 identity_;
     std::optional<DiscoveredSlave> info_;
 
-    /// Registered PDO buffer — the cyclic exchange writes the latest input
-    /// field into it.  Heap-allocated so the pointer stays valid when the
-    /// driver object is moved (e.g. returned from findFirst()).
-    /// Bit N maps to input N (little-endian byte order).
-    /// PDO state word — points at the mapping entry's storage after
-    /// prepare(), or at *state_local_ before registration (Q1).
-    /// unique_ptr keeps the terminal movable.  Same lifetime rule as
-    /// TerminalBase::in_buf_: entry removal invalidates it.
+    /**
+     * Registered PDO buffer — the cyclic exchange writes the latest input
+     * field into it.  Heap-allocated so the pointer stays valid when the
+     * driver object is moved (e.g. returned from findFirst()).
+     * Bit N maps to input N (little-endian byte order).
+     * PDO state word — points at the mapping entry's storage after
+     * prepare(), or at *state_local_ before registration (Q1).
+     * unique_ptr keeps the terminal movable.  Same lifetime rule as
+     * TerminalBase::in_buf_: entry removal invalidates it.
+     */
     std::unique_ptr<std::atomic<uint64_t>> state_local_ =
         std::make_unique<std::atomic<uint64_t>>(0);
     std::atomic<uint64_t>* state_ = state_local_.get();

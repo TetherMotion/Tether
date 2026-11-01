@@ -68,7 +68,7 @@ inline constexpr DeviceIdentity EL2522{0x00000002, 0x09DA3052, 2, "EL2522"};
 inline constexpr DeviceIdentity EJ2521{0x00000002, 0x09D92852, 1, "EJ2521"};
 inline constexpr DeviceIdentity EJ2522{0x00000002, 0x09DA2852, 2, "EJ2522"};
 
-/// Every known pulse-train terminal.
+/**Every known pulse-train terminal. */
 inline constexpr std::array kPulseTrainTerminals{
     EL2521, EL2522, EJ2521, EJ2522,
 };
@@ -97,12 +97,12 @@ public:
     PulseTrainTerminal(const PulseTrainTerminal&)                = delete;
     PulseTrainTerminal& operator=(const PulseTrainTerminal&)     = delete;
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
 
-    /// Scan the bus for the first slave matching `identity`.
+    /**Scan the bus for the first slave matching `identity`. */
     static Result<PulseTrainTerminal> findFirst(
         Master& master, const DeviceIdentity& identity);
     static Result<PulseTrainTerminal> findFirst(
@@ -111,14 +111,14 @@ public:
 
     // -- Bring-up ----------------------------------------------------------------------
 
-    /// Standalone bring-up to SAFE-OP (position addressing).
+    /**Standalone bring-up to SAFE-OP (position addressing). */
     Result<> configure();
 
-    /// configure() then OP (+ managed realtime loop by default).
+    /**configure() then OP (+ managed realtime loop by default). */
     Result<> start() { return start(StartOptions()); }
     Result<> start(const StartOptions& opts);
 
-    /// Chained-operation contract.
+    /**Chained-operation contract. */
     Result<> prepareForLogicalExchange();
     Result<> mapLogicalAndEnterSafeOp();
     Result<> requestOp(int timeout_ms);
@@ -129,25 +129,29 @@ public:
 
     // -- PTO control -------------------------------------------------------------------------
 
-    /// Frequency value (0x70xx:17, 16 bit).  Units per the terminal's
-    /// SDO frequency scaling (default: pulses per second).
+    /**
+     * Frequency value (0x70xx:17, 16 bit).  Units per the terminal's
+     * SDO frequency scaling (default: pulses per second).
+     */
     void setFrequency(size_t ch, uint16_t freq);
     uint16_t frequency(size_t ch) const;
     bool hasFrequency(size_t ch) const;
 
-    void setFrequencySelect(size_t ch, bool on);   ///< :01
-    void setDisableRamp(size_t ch, bool on);       ///< :02
-    void setGoCounter(size_t ch, bool on);         ///< :03
-    void setAutoDirection(size_t ch, bool on);     ///< :04
-    void setForward(size_t ch, bool on);           ///< :05
-    void setReverse(size_t ch, bool on);           ///< :06
+    void setFrequencySelect(size_t ch, bool on); /**< :01 */
+    void setDisableRamp(size_t ch, bool on); /**< :02 */
+    void setGoCounter(size_t ch, bool on); /**< :03 */
+    void setAutoDirection(size_t ch, bool on); /**< :04 */
+    void setForward(size_t ch, bool on); /**< :05 */
+    void setReverse(size_t ch, bool on); /**< :06 */
 
-    /// Target counter value (0x70xx:18, 16 or 32 bit) — travel distance
-    /// for "go counter" mode.
+    /**
+     * Target counter value (0x70xx:18, 16 or 32 bit) — travel distance
+     * for "go counter" mode.
+     */
     void setTarget(size_t ch, int32_t target);
     bool hasTarget(size_t ch) const;
 
-    /// Legacy 16-bit Ctrl / Data words (early EL2521 revisions).
+    /**Legacy 16-bit Ctrl / Data words (early EL2521 revisions). */
     uint16_t rawCtrl(size_t ch) const;
     void setRawCtrl(size_t ch, uint16_t w);
     uint16_t rawData(size_t ch) const;
@@ -156,16 +160,16 @@ public:
 
     // -- ENC control ----------------------------------------------------------------------------
 
-    void setEncSetCounter(size_t ch, bool on);     ///< ENC ctrl :03
-    void setEncCounterValue(size_t ch, int32_t v); ///< ENC ctrl :17
+    void setEncSetCounter(size_t ch, bool on); /**< ENC ctrl :03 */
+    void setEncCounterValue(size_t ch, int32_t v); /**< ENC ctrl :17 */
     bool hasEnc(size_t ch) const;
 
     // -- Status ------------------------------------------------------------------------------------
 
-    bool selAck(size_t ch) const;        ///< PTO status :01
-    bool rampActive(size_t ch) const;    ///< PTO status :02
-    bool error(size_t ch) const;         ///< PTO status :07
-    bool syncError(size_t ch) const;     ///< PTO status :14
+    bool selAck(size_t ch) const; /**< PTO status :01 */
+    bool rampActive(size_t ch) const; /**< PTO status :02 */
+    bool error(size_t ch) const; /**< PTO status :07 */
+    bool syncError(size_t ch) const; /**< PTO status :14 */
 
     bool setCounterDone(size_t ch) const;
     bool counterUnderflow(size_t ch) const;

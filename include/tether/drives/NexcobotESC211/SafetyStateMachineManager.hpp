@@ -57,9 +57,11 @@ public:
         InvalidState,
     };
 
-    /// Start mode for startMonitoring().
-    ///   FSoEConnectionOnly  — command 11: start FSoE connection only (fire-and-forget).
-    ///   FSoEAndSafetyApp    — command 10: start FSoE + safety application (waits for Done).
+    /**
+     * Start mode for startMonitoring().
+     *   FSoEConnectionOnly  — command 11: start FSoE connection only (fire-and-forget).
+     *   FSoEAndSafetyApp    — command 10: start FSoE + safety application (waits for Done).
+     */
     enum class StartMode {
         FSoEConnectionOnly,
         FSoEAndSafetyApp,
@@ -76,8 +78,10 @@ public:
         // Timeout for the post-start MONITORING state wait.
         std::chrono::milliseconds monitoring_state_timeout;
         uint32_t max_command_retries = 0;
-        /// Admin password entered on the device (0xF105) before privileged
-        /// commands; enables automatic login+retry on access-denied.
+        /**
+         * Admin password entered on the device (0xF105) before privileged
+         * commands; enables automatic login+retry on access-denied.
+         */
         std::string admin_password;
         Config()
             : command_timeout(10000)
@@ -125,18 +129,24 @@ public:
     // Human-readable result string.
     static const char* resultToString(Result result);
 
-    /// Set a callback invoked after each command-response poll (0xF100:0x02).
-    /// Useful for logging PDO/TxPDU contents alongside the poll to correlate
-    /// the safety state machine progress with live FSoE frame traffic.
+    /**
+     * Set a callback invoked after each command-response poll (0xF100:0x02).
+     * Useful for logging PDO/TxPDU contents alongside the poll to correlate
+     * the safety state machine progress with live FSoE frame traffic.
+     */
     void setPollObserver(std::function<void()> observer);
 
-    /// Set a stop_token for cooperative cancellation.  When stop is
-    /// requested on the token, all polling loops abort immediately.
+    /**
+     * Set a stop_token for cooperative cancellation.  When stop is
+     * requested on the token, all polling loops abort immediately.
+     */
     void setStopToken(std::stop_token token);
 
-    /// Set the admin password on both command channels (0xF100 command
-    /// channel and the ConfigManager's channel).  Overrides
-    /// Config::admin_password.
+    /**
+     * Set the admin password on both command channels (0xF100 command
+     * channel and the ConfigManager's channel).  Overrides
+     * Config::admin_password.
+     */
     void setAdminPassword(std::string password);
 
 private:

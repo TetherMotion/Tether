@@ -48,7 +48,7 @@ class LoopbackAdapter {
 public:
     explicit LoopbackAdapter(const char* name) : name_(name) {}
 
-    /// Wire up to a master instance
+    /**Wire up to a master instance */
     EtherCAT::NetworkInterface makeInterface() {
         EtherCAT::NetworkInterface iface{};
         iface.send = [this](const uint8_t* buf, size_t len) -> bool {
@@ -57,10 +57,10 @@ public:
         return iface;
     }
 
-    /// Set the master that will receive responses
+    /**Set the master that will receive responses */
     void setMaster(EtherCAT::Master* m) { master_ = m; }
 
-    /// Number of frames sent through this adapter
+    /**Number of frames sent through this adapter */
     uint32_t txCount() const { return tx_count_.load(); }
 
 private:

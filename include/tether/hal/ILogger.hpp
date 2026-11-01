@@ -23,12 +23,12 @@ namespace HAL {
  * @brief Log severity levels
  */
 enum class LogLevel {
-    None = 0,       ///< Logging disabled
-    Error,          ///< Error conditions
-    Warn,           ///< Warning conditions
-    Info,           ///< Informational messages
-    Debug,          ///< Debug messages
-    Verbose,        ///< Verbose debug messages
+    None = 0, /**< Logging disabled */
+    Error, /**< Error conditions */
+    Warn, /**< Warning conditions */
+    Info, /**< Informational messages */
+    Debug, /**< Debug messages */
+    Verbose, /**< Verbose debug messages */
 };
 
 /**

@@ -98,11 +98,11 @@ using ModeCallback = std::function<void(OperatingMode)>;
  * @brief State transition result
  */
 enum class TransitionResult {
-    Success,            ///< Transition completed
-    Pending,            ///< Transition in progress
-    InvalidTransition,  ///< Requested transition not allowed
-    Timeout,            ///< Transition timed out
-    FaultOccurred,      ///< Fault occurred during transition
+    Success, /**< Transition completed */
+    Pending, /**< Transition in progress */
+    InvalidTransition, /**< Requested transition not allowed */
+    Timeout, /**< Transition timed out */
+    FaultOccurred, /**< Fault occurred during transition */
 };
 
 /**

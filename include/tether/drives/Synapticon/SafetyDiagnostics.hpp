@@ -122,8 +122,10 @@ static constexpr uint8_t kFSoECmdFailSafe   = 0x00;
 // Data structures
 // ---------------------------------------------------------------------------
 
-/// Result of reading the safety module input diagnostics (0x2611) and the
-/// FSoE active indicator (0x2620:2 "Safe fieldbus").
+/**
+ * Result of reading the safety module input diagnostics (0x2611) and the
+ * FSoE active indicator (0x2620:2 "Safe fieldbus").
+ */
 struct SafetyModuleState {
     bool ok = false;
     uint8_t input1 = 0;
@@ -151,7 +153,7 @@ struct SafetyModuleState {
     }
 };
 
-/// Comprehensive safety diagnostic report.
+/**Comprehensive safety diagnostic report. */
 struct SafetyDiagnosticReport {
     // Safety module inputs (0x2611)
     bool inputs_ok = false;
@@ -236,11 +238,13 @@ struct SafetyDiagnosticReport {
 // Decoding helpers
 // ---------------------------------------------------------------------------
 
-/// Re-use the generic FSoE command name decoder from the FSoE driver.
-/// (The kFSoECmd* constants above are kept for SDO diagnostic reference,
-///  but the name decoder uses the canonical ETG.5100 values from
-///  FSoE::Command in FSoEDefs.hpp, which are verified by the protocol
-///  implementation in FSoESlave.cpp / FSoEMasterConnection.cpp.)
+/**
+ * Re-use the generic FSoE command name decoder from the FSoE driver.
+ * (The kFSoECmd* constants above are kept for SDO diagnostic reference,
+ *  but the name decoder uses the canonical ETG.5100 values from
+ *  FSoE::Command in FSoEDefs.hpp, which are verified by the protocol
+ *  implementation in FSoESlave.cpp / FSoEMasterConnection.cpp.)
+ */
 /**
  * @brief Decode an FSoE command byte to a name.
  * @param cmd FSoE command value (ETG.5100)
@@ -254,11 +258,13 @@ inline const char* fsoeCommandName(uint8_t cmd) {
 // Label tables for ColoredBitsetFormatter
 // ---------------------------------------------------------------------------
 
-/// Safety status byte 1 (0x6621:1) bit labels.
-/// All one-active: bit set = function active.
-/// Bit layout per Synapticon SMM documentation:
-///   bit 0: STO, bit 1: SS1, bit 2: SS2, bit 3: SOS,
-///   bit 4-7: SLS1-4
+/**
+ * Safety status byte 1 (0x6621:1) bit labels.
+ * All one-active: bit set = function active.
+ * Bit layout per Synapticon SMM documentation:
+ *   bit 0: STO, bit 1: SS1, bit 2: SS2, bit 3: SOS,
+ *   bit 4-7: SLS1-4
+ */
 inline BitLabel kSafetyStatusByte1Labels[] = {
     BitLabel::bit("STO",  1u << 0),
     BitLabel::bit("SS1",  1u << 1),
@@ -270,9 +276,11 @@ inline BitLabel kSafetyStatusByte1Labels[] = {
     BitLabel::bit("SLS4", 1u << 7),
 };
 
-/// Safety status byte 2 (0x6621:2) bit labels.
-/// All one-active: bit set = function active.
-///   bit 0: SBC, bit 1-4: Safe outputs, bit 5-7: Parameter validation
+/**
+ * Safety status byte 2 (0x6621:2) bit labels.
+ * All one-active: bit set = function active.
+ *   bit 0: SBC, bit 1-4: Safe outputs, bit 5-7: Parameter validation
+ */
 inline BitLabel kSafetyStatusByte2Labels[] = {
     BitLabel::bit("SBC",         1u << 0),
     BitLabel::bit("SafeOut1",    1u << 1),
@@ -284,8 +292,10 @@ inline BitLabel kSafetyStatusByte2Labels[] = {
     BitLabel::bit("ParamValid3", 1u << 7),
 };
 
-/// Error register (0x1001) bit labels.
-/// All one-active: bit set = error condition present.
+/**
+ * Error register (0x1001) bit labels.
+ * All one-active: bit set = error condition present.
+ */
 inline BitLabel kErrorRegisterLabels[] = {
     BitLabel::bit("Generic",     1u << 0),
     BitLabel::bit("Profile",     1u << 1),
@@ -293,14 +303,16 @@ inline BitLabel kErrorRegisterLabels[] = {
     BitLabel::bit("DeviceSpec",  1u << 3),
 };
 
-/// Formatters for the above label tables.
+/**Formatters for the above label tables. */
 inline const ColoredBitsetFormatter kSafetyStatusByte1Formatter{kSafetyStatusByte1Labels};
 inline const ColoredBitsetFormatter kSafetyStatusByte2Formatter{kSafetyStatusByte2Labels};
 inline const ColoredBitsetFormatter kErrorRegisterFormatter{kErrorRegisterLabels};
 
-/// Decode the CiA 402 statusword (0x6041) to a state name.
-/// @param sw Raw statusword value
-/// @return State name (e.g. "Operation enabled")
+/**
+ * Decode the CiA 402 statusword (0x6041) to a state name.
+ * @param sw Raw statusword value
+ * @return State name (e.g. "Operation enabled")
+ */
 inline const char* cia402StateName(uint16_t sw) {
     uint16_t state = sw & 0x006F;  // Mask relevant bits
     switch (state) {
@@ -316,19 +328,23 @@ inline const char* cia402StateName(uint16_t sw) {
     }
 }
 
-/// Decode the module ident value to a parameter configuration description.
-/// @param ident Module ident value from the slave
-/// @return Description of the parameter mode
+/**
+ * Decode the module ident value to a parameter configuration description.
+ * @param ident Module ident value from the slave
+ * @return Description of the parameter mode
+ */
 inline const char* moduleIdentDesc(uint32_t ident) {
     if (ident == kModuleIdentNoParam)  return "No parameter changes via master (params from OBLAC)";
     if (ident == kModuleIdentWithParam) return "With parameter changes via master";
     return "Unknown module ident";
 }
 
-/// Known Synapticon error report codes (from 0x203F:1).
-/// These are 8-character strings; only the first 7 are typically meaningful.
-/// @param code Raw 8-char code read from 0x203F:1
-/// @return Human-readable explanation of the code
+/**
+ * Known Synapticon error report codes (from 0x203F:1).
+ * These are 8-character strings; only the first 7 are typically meaningful.
+ * @param code Raw 8-char code read from 0x203F:1
+ * @return Human-readable explanation of the code
+ */
 inline const char* knownErrorReport(const char* code) {
     if (!code) return "unknown";
     if (std::strncmp(code, "NoFault", 7) == 0)  return "No fault";
@@ -386,14 +402,16 @@ inline bool readU32(::EtherCAT::Slave& slave, uint16_t idx, uint8_t sub,
     return true;
 }
 
-/// Read the 8-byte error report string from 0x203F:1.
-/// This object is a STRING(8) type.  The SDO read returns the raw bytes;
-/// we copy them and also log the hex representation for debugging.
-/// @param slave Slave to read from
-/// @param[out] out_buf Buffer receiving the raw report bytes
-/// @param out_buf_size Size of `out_buf`
-/// @param tag Log prefix
-/// @return `true` on successful read
+/**
+ * Read the 8-byte error report string from 0x203F:1.
+ * This object is a STRING(8) type.  The SDO read returns the raw bytes;
+ * we copy them and also log the hex representation for debugging.
+ * @param slave Slave to read from
+ * @param[out] out_buf Buffer receiving the raw report bytes
+ * @param out_buf_size Size of `out_buf`
+ * @param tag Log prefix
+ * @return `true` on successful read
+ */
 inline bool readErrorReport(::EtherCAT::Slave& slave, char* out_buf,
                             size_t out_buf_size, const char* tag = "SafetyDiag") {
     if (!out_buf || out_buf_size < 9) return false;
@@ -434,10 +452,12 @@ inline bool readErrorReport(::EtherCAT::Slave& slave, char* out_buf,
 // Public API — individual read functions
 // ---------------------------------------------------------------------------
 
-/// Read the safety module input diagnostics (0x2611) and FSoE active
-/// indicator (0x2620:2) from a SOMANET drive.
-/// @param slave Slave to read
-/// @return Decoded safety module state
+/**
+ * Read the safety module input diagnostics (0x2611) and FSoE active
+ * indicator (0x2620:2) from a SOMANET drive.
+ * @param slave Slave to read
+ * @return Decoded safety module state
+ */
 inline SafetyModuleState readSafetyModuleState(::EtherCAT::Slave& slave) {
     SafetyModuleState state;
 
@@ -459,10 +479,12 @@ inline SafetyModuleState readSafetyModuleState(::EtherCAT::Slave& slave) {
     return state;
 }
 
-/// Read the FSoE safety address (0xF980:1) from a SOMANET drive.
-/// @param slave Slave to read
-/// @param[out] safety_address Receives the 16-bit safety address
-/// @return SlaveError::Ok on success
+/**
+ * Read the FSoE safety address (0xF980:1) from a SOMANET drive.
+ * @param slave Slave to read
+ * @param[out] safety_address Receives the 16-bit safety address
+ * @return SlaveError::Ok on success
+ */
 inline ::EtherCAT::SlaveError readFSoESafetyAddress(
         ::EtherCAT::Slave& slave, uint16_t& safety_address) {
     return slave.sdoReadU16(kFSoESafetyAddressIndex,

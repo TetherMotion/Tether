@@ -35,11 +35,11 @@ using TimerCallback = std::function<bool(void* user_data)>;
  * @brief Timer configuration
  */
 struct TimerConfig {
-    uint32_t period_us;         ///< Timer period in microseconds (e.g., 1000 for 1kHz)
-    TimerCallback callback;     ///< Function to call on each timer expiration
-    void* user_data;            ///< User context passed to callback
-    int priority;               ///< Thread/interrupt priority (platform-specific, 0 = default)
-    bool auto_reload;           ///< Automatically reload timer after expiration
+    uint32_t period_us; /**< Timer period in microseconds (e.g., 1000 for 1kHz) */
+    TimerCallback callback; /**< Function to call on each timer expiration */
+    void* user_data; /**< User context passed to callback */
+    int priority; /**< Thread/interrupt priority (platform-specific, 0 = default) */
+    bool auto_reload; /**< Automatically reload timer after expiration */
 };
 
 /**

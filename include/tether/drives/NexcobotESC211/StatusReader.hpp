@@ -27,7 +27,7 @@ namespace ESC211 {
  */
 class StatusReader {
 public:
-    /// Snapshot of the ESC system state (0xF100/0xF101/0xF102/0xF103).
+    /**Snapshot of the ESC system state (0xF100/0xF101/0xF102/0xF103). */
     struct SystemStateSnapshot {
         uint32_t last_command_response = 0;
         bool last_command_response_ok = false;
@@ -39,13 +39,15 @@ public:
         bool error_message_ok = false;
     };
 
-    /// Read the four system-state objects into `snap` (best effort).
+    /**Read the four system-state objects into `snap` (best effort). */
     static void readSystemState(EtherCAT::Slave& slave,
                                 SystemStateSnapshot& snap);
 
-    /// Read the 0xF110 debug message table into `out` (one string per
-    /// entry; read failures are pushed as "read failed" lines so the
-    /// caller can display them verbatim).
+    /**
+     * Read the 0xF110 debug message table into `out` (one string per
+     * entry; read failures are pushed as "read failed" lines so the
+     * caller can display them verbatim).
+     */
     static void readDebugMessages(EtherCAT::Slave& slave,
                                   std::vector<std::string>& out);
 };

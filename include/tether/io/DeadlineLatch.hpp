@@ -26,15 +26,17 @@ template <typename T>
 class DeadlineLatch {
 public:
     struct Sample {
-        bool     valid = false;  ///< a value was offered at least once
-        bool     fresh = false;  ///< newest value is within the deadline
-        uint64_t seq   = 0;      ///< sequence the initiator correlates with
-        uint64_t ageUs = 0;      ///< now - receive time of the newest value
+        bool     valid = false; /**< a value was offered at least once */
+        bool     fresh = false; /**< newest value is within the deadline */
+        uint64_t seq   = 0; /**< sequence the initiator correlates with */
+        uint64_t ageUs = 0; /**< now - receive time of the newest value */
         T        value{};
     };
 
-    /// Store `value`, replacing any previous offer.  Out-of-order arrivals
-    /// (late responses) are discarded; only the newest seq wins.
+    /**
+     * Store `value`, replacing any previous offer.  Out-of-order arrivals
+     * (late responses) are discarded; only the newest seq wins.
+     */
     void offer(uint64_t seq, T value, uint64_t receivedUs) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (has_ && seq <= seq_) return;
@@ -44,9 +46,11 @@ public:
         value_ = std::move(value);
     }
 
-    /// Snapshot the newest value.  `fresh` is true iff a value exists and
-    /// `nowUs - receivedUs <= deadlineUs`.  A non-fresh or invalid sample
-    /// is the application's cue to apply its fallback policy.
+    /**
+     * Snapshot the newest value.  `fresh` is true iff a value exists and
+     * `nowUs - receivedUs <= deadlineUs`.  A non-fresh or invalid sample
+     * is the application's cue to apply its fallback policy.
+     */
     Sample consume(uint64_t nowUs, uint64_t deadlineUs) const {
         std::lock_guard<std::mutex> lock(mutex_);
         Sample s;
@@ -59,7 +63,7 @@ public:
         return s;
     }
 
-    /// Discard the stored value (e.g. on mode transitions or reconnect).
+    /**Discard the stored value (e.g. on mode transitions or reconnect). */
     void reset() {
         std::lock_guard<std::mutex> lock(mutex_);
         has_ = false;

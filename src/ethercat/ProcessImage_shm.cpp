@@ -40,10 +40,12 @@ static const char* TAG = "process_image";
 // shm export / attach (Linux; stubs elsewhere)
 // ============================================================================
 
-/// FNV-1a over the fixed sizing/offset fields the handshake guards —
-/// catches a half-written export before the attacher trusts any offset.
-/// entry_count is deliberately excluded: exportEntryTable publishes it
-/// after ready=1, so it must not invalidate the static geometry check.
+/**
+ * FNV-1a over the fixed sizing/offset fields the handshake guards —
+ * catches a half-written export before the attacher trusts any offset.
+ * entry_count is deliberately excluded: exportEntryTable publishes it
+ * after ready=1, so it must not invalidate the static geometry check.
+ */
 uint32_t ProcessImage::headerChecksum(const ShmImageHeader& h) {
     const uint32_t fields[] = {
         h.magic, h.version, h.rx_bytes, h.tx_bytes, h.header_bytes,

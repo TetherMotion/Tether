@@ -51,7 +51,7 @@ constexpr uint16_t FREERUN_3BUF_NEEDED    = 0x002A;
 constexpr uint16_t BG_WATCHDOG            = 0x002B;
 constexpr uint16_t NO_VALID_INPUTS_OUTPUTS= 0x002C;
 constexpr uint16_t FATAL_SYNC_ERROR       = 0x002D;
-constexpr uint16_t NO_SYNC_ERROR          = 0x002E;  ///< "Err74.1" - No sync
+constexpr uint16_t NO_SYNC_ERROR          = 0x002E; /**< "Err74.1" - No sync */
 constexpr uint16_t INVALID_DC_SYNC_CFG    = 0x0030;
 constexpr uint16_t INVALID_DC_LATCH_CFG   = 0x0031;
 constexpr uint16_t PLL_ERROR              = 0x0032;
@@ -72,7 +72,7 @@ constexpr uint16_t SLAVE_RESTARTED        = 0x0060;
 constexpr uint16_t DEVICE_ID_UPDATE_ERR   = 0x0061;
 constexpr uint16_t APPLICATION_CTRL_ERR   = 0x00F0;
 
-/// Get string description for AL status code
+/**Get string description for AL status code */
 inline const char* alStatusCodeToString(uint16_t code) {
     switch (code) {
         case NO_ERROR: return "No error";

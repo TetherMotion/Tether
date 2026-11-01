@@ -20,8 +20,10 @@ constexpr double kTol = 1e-14;
 // B-spline basis functions (Cox–de Boor)
 // ============================================================================
 
-/// Find the span index i such that knots[i] <= u < knots[i+1].
-/// Returns the index of the left end of the span containing u.
+/**
+ * Find the span index i such that knots[i] <= u < knots[i+1].
+ * Returns the index of the left end of the span containing u.
+ */
 int findSpan(const std::vector<double>& knots, int degree, double u) {
     const int n = static_cast<int>(knots.size()) - degree - 2; // #CP - 1
     if (u >= knots[n + 1]) return n;
@@ -37,9 +39,11 @@ int findSpan(const std::vector<double>& knots, int degree, double u) {
     return mid;
 }
 
-/// Evaluate all non-zero B-spline basis functions at u in span `span`.
-/// Returns a vector of size degree+1: N_{span-degree+1}, ..., N_{span}.
-/// (Piegl & Tiller A2.2.)
+/**
+ * Evaluate all non-zero B-spline basis functions at u in span `span`.
+ * Returns a vector of size degree+1: N_{span-degree+1}, ..., N_{span}.
+ * (Piegl & Tiller A2.2.)
+ */
 std::vector<double> basisFunctions(int span, double u, int degree,
                                    const std::vector<double>& knots) {
     std::vector<double> N(degree + 1, 0.0);
@@ -60,11 +64,13 @@ std::vector<double> basisFunctions(int span, double u, int degree,
     return N;
 }
 
-/// Evaluate all non-zero B-spline basis function *derivatives* at u.
-/// Returns the first derivative values: dN/du for the basis functions
-/// N_{span-degree} .. N_{span} (degree+1 values).
-/// Uses the direct formula: dN_{i,p}/du = p * (N_{i,p-1}/(u_{i+p}-u_i)
-///                                       - N_{i+1,p-1}/(u_{i+p+1}-u_{i+1}))
+/**
+ * Evaluate all non-zero B-spline basis function *derivatives* at u.
+ * Returns the first derivative values: dN/du for the basis functions
+ * N_{span-degree} .. N_{span} (degree+1 values).
+ * Uses the direct formula: dN_{i,p}/du = p * (N_{i,p-1}/(u_{i+p}-u_i)
+ *                                       - N_{i+1,p-1}/(u_{i+p+1}-u_{i+1}))
+ */
 std::vector<double> basisFunctionDerivatives(int span, double u, int degree,
                                              const std::vector<double>& knots) {
     std::vector<double> ders(degree + 1, 0.0);
@@ -111,9 +117,11 @@ std::vector<double> basisFunctionDerivatives(int span, double u, int degree,
 // Knot vector construction (Piegl & Tiller §9.3.1)
 // ============================================================================
 
-/// Compute the averaged knot vector for global B-spline interpolation.
-/// Given parameters u[0..n] and degree p, returns a clamped knot vector
-/// of size n + p + 2.
+/**
+ * Compute the averaged knot vector for global B-spline interpolation.
+ * Given parameters u[0..n] and degree p, returns a clamped knot vector
+ * of size n + p + 2.
+ */
 std::vector<double> computeKnotVector(const std::vector<double>& u, int degree) {
     int n = static_cast<int>(u.size()) - 1; // n+1 samples
     int m = n + degree + 1; // knot vector size - 1
@@ -141,10 +149,12 @@ std::vector<double> computeKnotVector(const std::vector<double>& u, int degree) 
 // Banded linear solve for global B-spline interpolation
 // ============================================================================
 
-/// Solve the interpolation system N^T * N * P = N^T * Q for control points P.
-/// N is the (n+1) x (n+1) basis matrix: N[i][j] = N_{j,degree}(u_i).
-/// We build N directly and solve via Gaussian elimination with partial
-/// pivoting (n is small, ≤ 64, so O(n³) is fine).
+/**
+ * Solve the interpolation system N^T * N * P = N^T * Q for control points P.
+ * N is the (n+1) x (n+1) basis matrix: N[i][j] = N_{j,degree}(u_i).
+ * We build N directly and solve via Gaussian elimination with partial
+ * pivoting (n is small, ≤ 64, so O(n³) is fine).
+ */
 std::vector<double> solveInterpolation(
     const std::vector<double>& u,
     const std::vector<double>& q,
@@ -236,8 +246,10 @@ double linearInterpLimit(const std::vector<double>& u,
 // Convex-hull constraint clamping
 // ============================================================================
 
-/// For each span of the B-spline, clamp the control points so the convex
-/// hull lies below the minimum of the limit over that span.
+/**
+ * For each span of the B-spline, clamp the control points so the convex
+ * hull lies below the minimum of the limit over that span.
+ */
 void clampControlPointsToLimit(
     std::vector<double>& cp,
     const std::vector<double>& knots,
@@ -520,11 +532,13 @@ SplineFitResult fitSplineThroughSamples(
         return std::make_pair(maxRes, maxInterRes);
     };
 
-    /// Solve the interpolation or regularized least-squares problem.
-    /// For ncp == nsamp: exact interpolation via A*P = q.
-    /// For ncp > nsamp: smoothness-regularized least-squares:
-    ///   min ||A*P - q||² + λ||D*P||²  where D is 2nd-difference operator.
-    ///   Solution: (A^T A + λ D^T D) P = A^T q
+    /**
+     * Solve the interpolation or regularized least-squares problem.
+     * For ncp == nsamp: exact interpolation via A*P = q.
+     * For ncp > nsamp: smoothness-regularized least-squares:
+     *   min ||A*P - q||² + λ||D*P||²  where D is 2nd-difference operator.
+     *   Solution: (A^T A + λ D^T D) P = A^T q
+     */
     auto reSolve = [&]() {
         int ncp = static_cast<int>(cp.size());
         int nsamp = static_cast<int>(u.size());

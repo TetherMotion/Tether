@@ -32,58 +32,68 @@ namespace UI {
 // ---------------------------------------------------------------------------
 
 struct PanelAction {
-    int key = 0;                  ///< trigger key (e.g. 'i', 'w')
-    std::string label;            ///< hint text, e.g. "i:info"
-    std::string description;      ///< longer text for help overlays
-    std::function<void()> invoke; ///< typically pushes an Overlay
+    int key = 0; /**< trigger key (e.g. 'i', 'w') */
+    std::string label; /**< hint text, e.g. "i:info" */
+    std::string description; /**< longer text for help overlays */
+    std::function<void()> invoke; /**< typically pushes an Overlay */
 };
 
 // ---------------------------------------------------------------------------
 // Overlay model
 // ---------------------------------------------------------------------------
 
-/// A button in a modal dialog — rendered as a styled row by the
-/// frontend (`[ Yes ]` with the focused button reversed).
+/**
+ * A button in a modal dialog — rendered as a styled row by the
+ * frontend (`[ Yes ]` with the focused button reversed).
+ */
 struct DialogButton {
-    std::string label;   ///< button text ("Yes", "Cancel", …)
-    int id = 0;          ///< result id passed to the result callback
-    int hotkey = 0;      ///< extra trigger key (e.g. 'y', 'n'); 0 = none
+    std::string label; /**< button text ("Yes", "Cancel", …) */
+    int id = 0; /**< result id passed to the result callback */
+    int hotkey = 0; /**< extra trigger key (e.g. 'y', 'n'); 0 = none */
 };
 
 class Overlay {
 public:
     virtual ~Overlay() = default;
 
-    /// Title shown in the overlay border.
+    /**Title shown in the overlay border. */
     virtual std::string title() const { return {}; }
 
-    /// When non-null the frontend renders this table as the content
-    /// (searchable/filterable for free).  Takes precedence over lines().
+    /**
+     * When non-null the frontend renders this table as the content
+     * (searchable/filterable for free).  Takes precedence over lines().
+     */
     virtual TableModel* table() { return nullptr; }
 
-    /// Text content lines (used when table() is null).
+    /**Text content lines (used when table() is null). */
     virtual std::vector<std::string> lines() { return {}; }
 
-    /// Dialog buttons — when non-empty the frontend renders them as a
-    /// row at the bottom of the box and highlights `focusedButton()`.
+    /**
+     * Dialog buttons — when non-empty the frontend renders them as a
+     * row at the bottom of the box and highlights `focusedButton()`.
+     */
     virtual std::span<const DialogButton> buttons() const { return {}; }
     virtual size_t focusedButton() const { return 0; }
 
-    /// Keys routed to the top overlay.  Return true when consumed.
-    /// Esc reaches handleKey first — return false to let the frontend
-    /// apply its default close behaviour, true to consume it (e.g. a
-    /// dialog mapping Esc to its cancel result).
+    /**
+     * Keys routed to the top overlay.  Return true when consumed.
+     * Esc reaches handleKey first — return false to let the frontend
+     * apply its default close behaviour, true to consume it (e.g. a
+     * dialog mapping Esc to its cancel result).
+     */
     virtual bool handleKey(int /*key*/) { return false; }
 
-    /// When true after a key was handled, the frontend pops the
-    /// overlay (e.g. a dialog whose result already fired).
+    /**
+     * When true after a key was handled, the frontend pops the
+     * overlay (e.g. a dialog whose result already fired).
+     */
     virtual bool wantsClose() const { return false; }
 
-    /// Footer hint text while this overlay is on top.
+    /**Footer hint text while this overlay is on top. */
     virtual std::string keyHints() const { return {}; }
 };
 
-/// Simple text overlay — title + wrapped lines + optional key handler.
+/**Simple text overlay — title + wrapped lines + optional key handler. */
 class TextOverlay : public Overlay {
 public:
     TextOverlay(std::string title, std::vector<std::string> lines)
@@ -91,7 +101,7 @@ public:
 
     std::string title() const override { return title_; }
     std::vector<std::string> lines() override { return lines_; }
-    std::function<bool(int)> onKey;    ///< optional
+    std::function<bool(int)> onKey; /**< optional */
     bool handleKey(int key) override {
         return onKey ? onKey(key) : false;
     }
@@ -103,8 +113,10 @@ private:
     std::vector<std::string> lines_;
 };
 
-/// Overlay presenting a TableModel — gets navigation, quicksearch and
-/// complex filtering through the host's standard table keys.
+/**
+ * Overlay presenting a TableModel — gets navigation, quicksearch and
+ * complex filtering through the host's standard table keys.
+ */
 class TableOverlay : public Overlay {
 public:
     TableOverlay(std::string title, TableModel model)
@@ -126,22 +138,26 @@ private:
     TableModel model_;
 };
 
-/// Vertical action menu — a list of labelled items rendered through
-/// the standard table overlay machinery (arrow navigation comes from
-/// the host's table keys).  Enter fires the selected item's invoke
-/// callback (or its `id` via onResult when no callback is given) and
-/// closes the menu.  Esc closes without an action.
+/**
+ * Vertical action menu — a list of labelled items rendered through
+ * the standard table overlay machinery (arrow navigation comes from
+ * the host's table keys).  Enter fires the selected item's invoke
+ * callback (or its `id` via onResult when no callback is given) and
+ * closes the menu.  Esc closes without an action.
+ */
 class MenuOverlay : public Overlay {
 public:
     struct Item {
         std::string label;
         int id = 0;
-        std::function<void()> invoke;   ///< optional — else onResult(id)
-        int color = 0;                  ///< RowColor, 0 = default
+        std::function<void()> invoke; /**< optional — else onResult(id) */
+        int color = 0; /**< RowColor, 0 = default */
     };
 
-    /// `onResult` fires with the item's `id` when it has no invoke
-    /// callback (lets one handler serve the whole menu).
+    /**
+     * `onResult` fires with the item's `id` when it has no invoke
+     * callback (lets one handler serve the whole menu).
+     */
     explicit MenuOverlay(std::string title,
                          std::function<void(int id)> onResult = {})
         : title_(std::move(title)), on_result_(std::move(onResult)) {

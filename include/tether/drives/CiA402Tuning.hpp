@@ -39,11 +39,13 @@ class CiA402Tuning {
 public:
     using Entry = ObjectDictionary::ObjectDictionaryEntry;
     using D = ObjectDictionary::ObjectDictionaryDataType;
-    /// Any container of `const Entry*` (Parameters60xx::kRegisterList
-    /// array, Registers::Synapticon RegisterList vectors, ad-hoc lists).
+    /**
+     * Any container of `const Entry*` (Parameters60xx::kRegisterList
+     * array, Registers::Synapticon RegisterList vectors, ad-hoc lists).
+     */
     using EntryList = std::span<const Entry* const>;
 
-    /// One read outcome: the entry queried and its raw bits (or the error).
+    /**One read outcome: the entry queried and its raw bits (or the error). */
     struct Result {
         const Entry* entry = nullptr;
         CoE::CoEResult<uint64_t> bits = std::unexpected(
@@ -57,16 +59,16 @@ public:
 
     // ----- Raw access ----------------------------------------------------
 
-    /// Read the entry at its declared subindex.
+    /**Read the entry at its declared subindex. */
     CoE::CoEResult<uint64_t> readBits(const Entry& e) {
         return sdo_.readEntry(e, opts_);
     }
-    /// Read a record subindex overriding entry.subindex.
+    /**Read a record subindex overriding entry.subindex. */
     CoE::CoEResult<uint64_t> readBits(const Entry& e, uint8_t subindex) {
         return sdo_.readEntry(e, subindex, opts_);
     }
 
-    /// Write raw bits (as produced by encode()) at the declared subindex.
+    /**Write raw bits (as produced by encode()) at the declared subindex. */
     CoE::CoEResult<void> writeBits(const Entry& e, uint64_t bits) {
         return sdo_.writeEntry(e, bits, opts_);
     }
@@ -77,9 +79,11 @@ public:
 
     // ----- Typed access ----------------------------------------------------
 
-    /// Read and decode per entry.data_type (signed/unsigned/Real32/Real64
-    /// all collapse to double — lossless for every width except U64/I64
-    /// extremes).
+    /**
+     * Read and decode per entry.data_type (signed/unsigned/Real32/Real64
+     * all collapse to double — lossless for every width except U64/I64
+     * extremes).
+     */
     CoE::CoEResult<double> read(const Entry& e) {
         auto r = readBits(e);
         if (!r) return std::unexpected(r.error());
@@ -91,8 +95,10 @@ public:
         return asDouble(e, *r);
     }
 
-    /// Write a numeric value encoded per entry.data_type — Real32/Real64
-    /// are bit-cast, integer types are rounded to the nearest whole.
+    /**
+     * Write a numeric value encoded per entry.data_type — Real32/Real64
+     * are bit-cast, integer types are rounded to the nearest whole.
+     */
     CoE::CoEResult<void> write(const Entry& e, double value) {
         return writeBits(e, encode(e, value));
     }
@@ -101,8 +107,10 @@ public:
         return writeBits(e, subindex, encode(e, value));
     }
 
-    /// Whole-list snapshot: preserves order so two drives' snapshots align
-    /// entry-for-entry for diff().
+    /**
+     * Whole-list snapshot: preserves order so two drives' snapshots align
+     * entry-for-entry for diff().
+     */
     std::vector<Result> readAll(EntryList entries) {
         std::vector<Result> out;
         out.reserve(entries.size());
@@ -149,7 +157,7 @@ public:
         return static_cast<double>(bits);
     }
 
-    /// Encode a numeric value into the raw bits writeEntry expects.
+    /**Encode a numeric value into the raw bits writeEntry expects. */
     static uint64_t encode(const Entry& e, double value) {
         if (e.data_type == D::Real32)
             return std::bit_cast<uint32_t>(static_cast<float>(value));
@@ -161,7 +169,7 @@ public:
         return static_cast<uint64_t>(std::llround(value));
     }
 
-    /// Human-readable value honoring the declared type (floats get %g).
+    /**Human-readable value honoring the declared type (floats get %g). */
     static std::string format(const Entry& e, uint64_t bits) {
         if (e.data_type == D::Real32)
             return std::format("{:.6g}", asF32(e, bits));
@@ -179,9 +187,11 @@ public:
 
     // ----- Comparison -----------------------------------------------------
 
-    /// Compare two aligned snapshots (same entry list order — e.g. two
-    /// drives read with readAll over the same RegisterList).  Returns one
-    /// line per differing or unresolved entry; empty means identical.
+    /**
+     * Compare two aligned snapshots (same entry list order — e.g. two
+     * drives read with readAll over the same RegisterList).  Returns one
+     * line per differing or unresolved entry; empty means identical.
+     */
     static std::vector<std::string> diff(const std::vector<Result>& a,
                                          const std::vector<Result>& b) {
         std::vector<std::string> out;
@@ -207,10 +217,12 @@ public:
     }
 
     // ----- Curated CiA 402 tuning set --------------------------------------
-    /// Standard objects that shape how a drive interprets position/velocity
-    /// commands: encoder resolution, gear ratio, feed constant, limits,
-    /// polarity, following-error window, profile speeds.  Vendor loop gains
-    /// live in the drive's Registers:: tables (same API).
+    /**
+     * Standard objects that shape how a drive interprets position/velocity
+     * commands: encoder resolution, gear ratio, feed constant, limits,
+     * polarity, following-error window, profile speeds.  Vendor loop gains
+     * live in the drive's Registers:: tables (same API).
+     */
     static const Entry* const* standardTuningEntries() {
         namespace P = CiA402::Parameters60xx;
         static const Entry* const k[] = {

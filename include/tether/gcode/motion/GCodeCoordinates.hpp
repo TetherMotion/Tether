@@ -336,10 +336,10 @@ class VariableSystem;
 // Constants
 // ============================================================================
 
-/// Number of work coordinate systems (G54-G59.3)
+/**Number of work coordinate systems (G54-G59.3) */
 constexpr size_t NUM_WORK_COORD_SYSTEMS = 9;
 
-/// Parameter base addresses for each WCS
+/**Parameter base addresses for each WCS */
 constexpr int32_t WCS_PARAM_BASE[NUM_WORK_COORD_SYSTEMS] = {
     5221,  // G54 (WCS 1)
     5241,  // G55 (WCS 2)
@@ -352,42 +352,46 @@ constexpr int32_t WCS_PARAM_BASE[NUM_WORK_COORD_SYSTEMS] = {
     5381   // G59.3 (WCS 9)
 };
 
-/// G92 offset parameter base
+/**G92 offset parameter base */
 constexpr int32_t G92_PARAM_BASE = 5211;
 
-/// G28 reference point parameter base
+/**G28 reference point parameter base */
 constexpr int32_t G28_PARAM_BASE = 5161;
 
-/// G30 reference points parameter bases (4 points)
+/**G30 reference points parameter bases (4 points) */
 constexpr int32_t G30_PARAM_BASE[4] = {5181, 5186, 5191, 5196};
 
-/// Current position parameter base
+/**Current position parameter base */
 constexpr int32_t CURRENT_POS_PARAM_BASE = 5420;
 
-/// G68 coordinate rotation parameter base (custom extension).
-/// #5400 = rotation active (0/1)
-/// #5401 = rotation mode (0=2D, 1=Euler, 2=axis-angle)
-/// #5402 = 2D rotation angle (degrees)
-/// #5403 = pivot X
-/// #5404 = pivot Y
-/// #5405 = pivot Z
-/// #5406 = Euler A angle (degrees)
-/// #5407 = Euler B angle (degrees)
-/// #5408 = Euler C angle (degrees)
-/// #5409 = axis I
-/// #5410 = axis J
-/// #5411 = axis K
-/// #5412 = axis-angle R (degrees)
+/**
+ * G68 coordinate rotation parameter base (custom extension).
+ * #5400 = rotation active (0/1)
+ * #5401 = rotation mode (0=2D, 1=Euler, 2=axis-angle)
+ * #5402 = 2D rotation angle (degrees)
+ * #5403 = pivot X
+ * #5404 = pivot Y
+ * #5405 = pivot Z
+ * #5406 = Euler A angle (degrees)
+ * #5407 = Euler B angle (degrees)
+ * #5408 = Euler C angle (degrees)
+ * #5409 = axis I
+ * #5410 = axis J
+ * #5411 = axis K
+ * #5412 = axis-angle R (degrees)
+ */
 constexpr int32_t G68_PARAM_BASE = 5400;
 
-/// G51 scaling parameter base (custom extension).
-/// #5413 = scaling active (0/1)
-/// #5414 = scale X
-/// #5415 = scale Y
-/// #5416 = scale Z
-/// #5417 = scale A
-/// #5418 = scale B
-/// #5419 = scale C
+/**
+ * G51 scaling parameter base (custom extension).
+ * #5413 = scaling active (0/1)
+ * #5414 = scale X
+ * #5415 = scale Y
+ * #5416 = scale Z
+ * #5417 = scale A
+ * #5418 = scale B
+ * #5419 = scale C
+ */
 constexpr int32_t G51_PARAM_BASE = 5413;
 
 // ============================================================================
@@ -398,20 +402,22 @@ constexpr int32_t G51_PARAM_BASE = 5413;
  * @brief Single work coordinate system (WCS)
  */
 struct WorkCoordinateSystem {
-    /// Offset from machine coordinates
+    /**Offset from machine coordinates */
     Position offset;
 
-    /// WCS rotation angle in degrees (G10 L2 R word).
-    /// Applied as a 2D rotation in the active plane when this WCS is selected.
+    /**
+     * WCS rotation angle in degrees (G10 L2 R word).
+     * Applied as a 2D rotation in the active plane when this WCS is selected.
+     */
     double rotation{0.0};
 
-    /// WCS number (1-9)
+    /**WCS number (1-9) */
     int32_t number{1};
 
-    /// Name (optional, e.g., "PART_1")
+    /**Name (optional, e.g., "PART_1") */
     std::string name;
 
-    /// Is modified from default
+    /**Is modified from default */
     bool modified{false};
 };
 
@@ -455,8 +461,10 @@ public:
      * @return Requested coordinate system (WCS 1 when out of range).
      */
     const WorkCoordinateSystem& getWCS(int32_t number) const;
-    /// @param number WCS number (1-9).
-    /// @return Mutable access to the requested coordinate system.
+    /**
+     * @param number WCS number (1-9).
+     * @return Mutable access to the requested coordinate system.
+     */
     WorkCoordinateSystem& getWCS(int32_t number);
     
     /**
@@ -625,19 +633,23 @@ public:
      */
     Error processG50(MachineState& state);
 
-    /// @brief Process G51.1 — programmable mirror image. Each axis word
-    ///        present (`X&lt;c&gt;`, `Y&lt;c&gt;`, `Z&lt;c&gt;`, ...) enables mirroring of
-    ///        that axis about program coordinate `&lt;c&gt;`.
-    /// @param block G-code block with the mirror axis words.
-    /// @param state Machine state (mirror configuration updated).
-    /// @return Error::OK on success.
+    /**
+     * @brief Process G51.1 — programmable mirror image. Each axis word
+     *        present (`X&lt;c&gt;`, `Y&lt;c&gt;`, `Z&lt;c&gt;`, ...) enables mirroring of
+     *        that axis about program coordinate `&lt;c&gt;`.
+     * @param block G-code block with the mirror axis words.
+     * @param state Machine state (mirror configuration updated).
+     * @return Error::OK on success.
+     */
     Error processG51_1(const Block& block, MachineState& state);
 
-    /// @brief Process G50.1 — cancel mirror image. Axis words disable
-    ///        mirroring on those axes; no words disables all axes.
-    /// @param block G-code block with the axes to un-mirror.
-    /// @param state Machine state (mirror configuration updated).
-    /// @return Error::OK on success.
+    /**
+     * @brief Process G50.1 — cancel mirror image. Axis words disable
+     *        mirroring on those axes; no words disables all axes.
+     * @param block G-code block with the axes to un-mirror.
+     * @param state Machine state (mirror configuration updated).
+     * @return Error::OK on success.
+     */
     Error processG50_1(const Block& block, MachineState& state);
 
     // ========================================================================

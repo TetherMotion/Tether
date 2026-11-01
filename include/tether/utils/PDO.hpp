@@ -7,18 +7,20 @@
 namespace EtherCAT {
 namespace Utils {
 
-/// Generic PDO lookup helper.
-///
-/// Iterates over a span of pointers to PDO-like objects, checking the
-/// `index` member of each entry and returning the first match.  This
-/// function is constexpr and can be used in compile-time contexts.
-///
-/// 	PDOType  type of object stored in the span; must expose a `uint16_t
-/// 	index` member.
-/// 	list     span containing pointers to PDOType instances.
-/// 	idx      index value to search for.
-///
-/// 	Returns a pointer to the matching entry or nullptr if none was found.
+/**
+ * Generic PDO lookup helper.
+ *
+ * Iterates over a span of pointers to PDO-like objects, checking the
+ * `index` member of each entry and returning the first match.  This
+ * function is constexpr and can be used in compile-time contexts.
+ *
+ * 	PDOType  type of object stored in the span; must expose a `uint16_t
+ * 	index` member.
+ * 	list     span containing pointers to PDOType instances.
+ * 	idx      index value to search for.
+ *
+ * 	Returns a pointer to the matching entry or nullptr if none was found.
+ */
 template <typename Range>
 inline constexpr auto findPDOByIndex(const Range& list, uint16_t idx) noexcept
 {

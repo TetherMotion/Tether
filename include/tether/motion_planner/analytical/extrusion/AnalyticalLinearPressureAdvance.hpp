@@ -44,13 +44,13 @@ namespace MotionPlanner::analytical::extrusion {
  * @brief Parameters for analytical linear pressure advance.
  */
 struct AnalyticalLinearPressureAdvanceParams {
-    /// Classic linear PressureAdvance amount [s].
+    /**Classic linear PressureAdvance amount [s]. */
     double pressureAdvance = 0.0;
 
-    /// Smoothing window [s] (0 = no smoothing).
+    /**Smoothing window [s] (0 = no smoothing). */
     double smoothTime = 0.0;
 
-    /// Maximum absolute compensation [mm] (safety clamp, 0 = no clamp).
+    /**Maximum absolute compensation [mm] (safety clamp, 0 = no clamp). */
     double maxCompensation = 0.0;
 };
 
@@ -169,10 +169,10 @@ public:
         return result;
     }
 
-    /// Parameters
+    /**Parameters */
     const AnalyticalLinearPressureAdvanceParams& params() const { return params_; }
 
-    /// Trajectory
+    /**Trajectory */
     const Traj& trajectory() const { return *traj_; }
 
 private:

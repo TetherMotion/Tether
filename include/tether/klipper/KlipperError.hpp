@@ -24,33 +24,35 @@
 
 namespace tether::klipper {
 
-/// @brief Error category for Klipper module operations.
+/**@brief Error category for Klipper module operations. */
 enum class ErrorCategory : uint8_t {
-    /// Transport I/O error (open, read, write, connection failure).
+    /**Transport I/O error (open, read, write, connection failure). */
     Transport,
-    /// Protocol error (malformed message, unknown command, CRC mismatch).
+    /**Protocol error (malformed message, unknown command, CRC mismatch). */
     Protocol,
-    /// Data dictionary error (parse failure, unknown format string).
+    /**Data dictionary error (parse failure, unknown format string). */
     Dictionary,
-    /// Configuration error (file not found, parse error, invalid value).
+    /**Configuration error (file not found, parse error, invalid value). */
     Config,
-    /// Clock synchronization error (insufficient samples, convergence failure).
+    /**Clock synchronization error (insufficient samples, convergence failure). */
     ClockSync,
-    /// G-code execution error (unknown command, invalid parameters).
+    /**G-code execution error (unknown command, invalid parameters). */
     Gcode,
-    /// UDS server error (endpoint not found, serialization failure).
+    /**UDS server error (endpoint not found, serialization failure). */
     Uds,
-    /// Device error (shutdown, not finalized, OID allocation failure).
+    /**Device error (shutdown, not finalized, OID allocation failure). */
     Device,
-    /// Timeout error (operation did not complete in time).
+    /**Timeout error (operation did not complete in time). */
     Timeout,
-    /// Generic/unknown error.
+    /**Generic/unknown error. */
     Unknown,
 };
 
-/// @brief Convert an error category to a string name.
-/// @param c Category to convert
-/// @return Static category name for logging/diagnostics
+/**
+ * @brief Convert an error category to a string name.
+ * @param c Category to convert
+ * @return Static category name for logging/diagnostics
+ */
 inline std::string_view categoryToString(ErrorCategory c) {
     switch (c) {
         case ErrorCategory::Transport:   return "Transport";
@@ -67,10 +69,12 @@ inline std::string_view categoryToString(ErrorCategory c) {
     return "Unknown";
 }
 
-/// @brief A structured error for the Klipper module.
-///
-/// Used as the error type in `std::expected<T, KlipperError>`.
-/// Carries a category, message, and optional numeric code.
+/**
+ * @brief A structured error for the Klipper module.
+ *
+ * Used as the error type in `std::expected<T, KlipperError>`.
+ * Carries a category, message, and optional numeric code.
+ */
 class KlipperError {
 public:
     KlipperError() = default;
@@ -78,88 +82,106 @@ public:
     KlipperError(ErrorCategory cat, std::string msg, int32_t code = 0)
         : category_(cat), message_(std::move(msg)), code_(code) {}
 
-    /// @brief Construct a transport error.
-    /// @param msg Human-readable description
-    /// @param code Optional numeric code (0 = none)
-    /// @return KlipperError with ErrorCategory::Transport
+    /**
+     * @brief Construct a transport error.
+     * @param msg Human-readable description
+     * @param code Optional numeric code (0 = none)
+     * @return KlipperError with ErrorCategory::Transport
+     */
     static KlipperError transport(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Transport, std::move(msg), code};
     }
 
-    /// @brief Construct a protocol error.
-    /// @param msg Human-readable description
-    /// @param code Optional numeric code (0 = none)
-    /// @return KlipperError with ErrorCategory::Protocol
+    /**
+     * @brief Construct a protocol error.
+     * @param msg Human-readable description
+     * @param code Optional numeric code (0 = none)
+     * @return KlipperError with ErrorCategory::Protocol
+     */
     static KlipperError protocol(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Protocol, std::move(msg), code};
     }
 
-    /// @brief Construct a dictionary error.
-    /// @param msg Human-readable description
-    /// @param code Optional numeric code (0 = none)
-    /// @return KlipperError with ErrorCategory::Dictionary
+    /**
+     * @brief Construct a dictionary error.
+     * @param msg Human-readable description
+     * @param code Optional numeric code (0 = none)
+     * @return KlipperError with ErrorCategory::Dictionary
+     */
     static KlipperError dictionary(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Dictionary, std::move(msg), code};
     }
 
-    /// @brief Construct a config error.
-    /// @param msg Human-readable description
-    /// @param code Optional numeric code (0 = none)
-    /// @return KlipperError with ErrorCategory::Config
+    /**
+     * @brief Construct a config error.
+     * @param msg Human-readable description
+     * @param code Optional numeric code (0 = none)
+     * @return KlipperError with ErrorCategory::Config
+     */
     static KlipperError config(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Config, std::move(msg), code};
     }
 
-    /// @brief Construct a clock sync error.
-    /// @param msg Human-readable description
-    /// @param code Optional numeric code (0 = none)
-    /// @return KlipperError with ErrorCategory::ClockSync
+    /**
+     * @brief Construct a clock sync error.
+     * @param msg Human-readable description
+     * @param code Optional numeric code (0 = none)
+     * @return KlipperError with ErrorCategory::ClockSync
+     */
     static KlipperError clockSync(std::string msg, int32_t code = 0) {
         return {ErrorCategory::ClockSync, std::move(msg), code};
     }
 
-    /// @brief Construct a G-code error.
-    /// @param msg Human-readable description
-    /// @param code Optional numeric code (0 = none)
-    /// @return KlipperError with ErrorCategory::Gcode
+    /**
+     * @brief Construct a G-code error.
+     * @param msg Human-readable description
+     * @param code Optional numeric code (0 = none)
+     * @return KlipperError with ErrorCategory::Gcode
+     */
     static KlipperError gcode(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Gcode, std::move(msg), code};
     }
 
-    /// @brief Construct a UDS error.
-    /// @param msg Human-readable description
-    /// @param code Optional numeric code (0 = none)
-    /// @return KlipperError with ErrorCategory::Uds
+    /**
+     * @brief Construct a UDS error.
+     * @param msg Human-readable description
+     * @param code Optional numeric code (0 = none)
+     * @return KlipperError with ErrorCategory::Uds
+     */
     static KlipperError uds(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Uds, std::move(msg), code};
     }
 
-    /// @brief Construct a device error.
-    /// @param msg Human-readable description
-    /// @param code Optional numeric code (0 = none)
-    /// @return KlipperError with ErrorCategory::Device
+    /**
+     * @brief Construct a device error.
+     * @param msg Human-readable description
+     * @param code Optional numeric code (0 = none)
+     * @return KlipperError with ErrorCategory::Device
+     */
     static KlipperError device(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Device, std::move(msg), code};
     }
 
-    /// @brief Construct a timeout error.
-    /// @param msg Human-readable description
-    /// @param code Optional numeric code (0 = none)
-    /// @return KlipperError with ErrorCategory::Timeout
+    /**
+     * @brief Construct a timeout error.
+     * @param msg Human-readable description
+     * @param code Optional numeric code (0 = none)
+     * @return KlipperError with ErrorCategory::Timeout
+     */
     static KlipperError timeout(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Timeout, std::move(msg), code};
     }
 
-    /// @return The error category.
+    /**@return The error category. */
     ErrorCategory category() const { return category_; }
 
-    /// @return The human-readable error message.
+    /**@return The human-readable error message. */
     const std::string& message() const { return message_; }
 
-    /// @return The numeric error code (0 if not set).
+    /**@return The numeric error code (0 if not set). */
     int32_t code() const { return code_; }
 
-    /// @return A formatted string: "Category: message (code)".
+    /**@return A formatted string: "Category: message (code)". */
     std::string format() const {
         std::string s;
         s += std::string(categoryToString(category_));
@@ -173,16 +195,22 @@ public:
         return s;
     }
 
-    /// @brief Check if this is a transport error.
-    /// @return `true` if category is Transport
+    /**
+     * @brief Check if this is a transport error.
+     * @return `true` if category is Transport
+     */
     bool isTransport() const { return category_ == ErrorCategory::Transport; }
 
-    /// @brief Check if this is a protocol error.
-    /// @return `true` if category is Protocol
+    /**
+     * @brief Check if this is a protocol error.
+     * @return `true` if category is Protocol
+     */
     bool isProtocol() const { return category_ == ErrorCategory::Protocol; }
 
-    /// @brief Check if this is a timeout error.
-    /// @return `true` if category is Timeout
+    /**
+     * @brief Check if this is a timeout error.
+     * @return `true` if category is Timeout
+     */
     bool isTimeout() const { return category_ == ErrorCategory::Timeout; }
 
 private:

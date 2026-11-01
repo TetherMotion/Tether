@@ -220,17 +220,19 @@ struct MotionNativeArgs {
     EtherCAT::EncapsulationConfig encapsulation;
 };
 
-/// Parse the standard motion-native arguments (`-i`/`--interface`,
-/// `-d`/`--duration`, and the `--encapsulation` flag added
-/// automatically by addInterfaceArg()).  Prints usage to stderr and returns
-/// `false` on failure.  If no interface is given, auto-selects the sole
-/// physical Ethernet interface via the shared resolveInterface() helper.
-///
-/// Motion-shape switches:
-///   -p/--position  CSP peak amplitude (encoder counts)
-///   -v/--velocity  CSV peak amplitude (counts/s)
-///   -t/--torque    CST peak amplitude (0.1% of rated torque)
-///   -f/--frequency Sine frequency in Hz
+/**
+ * Parse the standard motion-native arguments (`-i`/`--interface`,
+ * `-d`/`--duration`, and the `--encapsulation` flag added
+ * automatically by addInterfaceArg()).  Prints usage to stderr and returns
+ * `false` on failure.  If no interface is given, auto-selects the sole
+ * physical Ethernet interface via the shared resolveInterface() helper.
+ *
+ * Motion-shape switches:
+ *   -p/--position  CSP peak amplitude (encoder counts)
+ *   -v/--velocity  CSV peak amplitude (counts/s)
+ *   -t/--torque    CST peak amplitude (0.1% of rated torque)
+ *   -f/--frequency Sine frequency in Hz
+ */
 inline bool parseMotionNativeArgs(int argc, char** argv,
                                   const char* program_name,
                                   MotionNativeArgs& out,

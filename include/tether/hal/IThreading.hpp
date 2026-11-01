@@ -23,22 +23,22 @@ namespace HAL {
  * @brief Thread priority levels
  */
 enum class ThreadPriority {
-    Idle,           ///< Lowest priority
-    Low,            ///< Below normal priority
-    Normal,         ///< Default priority
-    High,           ///< Above normal priority
-    Realtime,       ///< Highest priority (realtime if supported)
+    Idle, /**< Lowest priority */
+    Low, /**< Below normal priority */
+    Normal, /**< Default priority */
+    High, /**< Above normal priority */
+    Realtime, /**< Highest priority (realtime if supported) */
 };
 
 /**
  * @brief Thread configuration
  */
 struct ThreadConfig {
-    const char* name = "thread";      ///< Thread name (for debugging)
-    size_t stackSize = 4096;          ///< Stack size in bytes
+    const char* name = "thread"; /**< Thread name (for debugging) */
+    size_t stackSize = 4096; /**< Stack size in bytes */
     ThreadPriority priority = ThreadPriority::Normal;
-    int cpuAffinity = -1;             ///< CPU affinity (-1 = any)
-    bool useRealtimeScheduling = false; ///< Use SCHED_FIFO on Linux
+    int cpuAffinity = -1; /**< CPU affinity (-1 = any) */
+    bool useRealtimeScheduling = false; /**< Use SCHED_FIFO on Linux */
 };
 
 /**
@@ -106,8 +106,8 @@ public:
  * @brief Mutex type
  */
 enum class MutexType {
-    Normal,         ///< Standard mutex
-    Recursive,      ///< Can be locked multiple times by same thread
+    Normal, /**< Standard mutex */
+    Recursive, /**< Can be locked multiple times by same thread */
 };
 
 /**

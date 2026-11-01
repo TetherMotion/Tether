@@ -23,79 +23,83 @@
 
 namespace tether::motion::profile_renurbs {
 
-/// Continuity class achieved for a quantity (v, a, j, t) on a segment.
+/**Continuity class achieved for a quantity (v, a, j, t) on a segment. */
 enum class ContinuityClass : uint8_t {
-    Discontinuous = 0, ///< C⁻¹ (not even C⁰)
-    C0 = 1,            ///< C⁰ / G⁰
-    C1 = 2,            ///< C¹ / G¹
-    C2 = 3,            ///< C² / G²
-    C3 = 4,            ///< C³ / G³
-    C4 = 5,            ///< C⁴ / G⁴ (quintic inside-segment)
+    Discontinuous = 0, /**< C⁻¹ (not even C⁰) */
+    C0 = 1, /**< C⁰ / G⁰ */
+    C1 = 2, /**< C¹ / G¹ */
+    C2 = 3, /**< C² / G² */
+    C3 = 4, /**< C³ / G³ */
+    C4 = 5, /**< C⁴ / G⁴ (quintic inside-segment) */
 };
 
-/// NURBS curves for one profile quantity on one segment.
+/**NURBS curves for one profile quantity on one segment. */
 struct ReNURBSQuantityCurves {
-    /// The NURBS curve (1-D, parameterized by u ∈ [0,1] within the segment).
-    /// May be std::nullopt if the segment is degenerate (zero-length, etc.).
+    /**
+     * The NURBS curve (1-D, parameterized by u ∈ [0,1] within the segment).
+     * May be std::nullopt if the segment is degenerate (zero-length, etc.).
+     */
     std::optional<NurbsCurve> curve;
 
-    /// Maximum residual |B(u_i) − q_i| over all samples in this segment.
+    /**Maximum residual |B(u_i) − q_i| over all samples in this segment. */
     double maxResidual = 0.0;
 
-    /// True if the fit achieved maxResidual ≤ epsilon.
+    /**True if the fit achieved maxResidual ≤ epsilon. */
     bool withinEpsilon = false;
 
-    /// True if the constraint clamp was applied to this quantity.
+    /**True if the constraint clamp was applied to this quantity. */
     bool constraintClamped = false;
 
-    /// True if the max control point cap was hit (graceful degradation).
+    /**True if the max control point cap was hit (graceful degradation). */
     bool controlPointCapHit = false;
 
-    /// Achieved continuity inside the segment.
+    /**Achieved continuity inside the segment. */
     ContinuityClass achievedContinuity = ContinuityClass::C0;
 
-    /// Number of control points (0 if no curve).
+    /**Number of control points (0 if no curve). */
     std::size_t numControlPoints = 0;
 };
 
-/// All four NURBS curves for one motion segment.
+/**All four NURBS curves for one motion segment. */
 struct ReNURBSSegmentProfile {
-    /// Segment index in the PathAdapter.
+    /**Segment index in the PathAdapter. */
     std::size_t segmentIndex = 0;
 
-    /// Arc length range [sStart, sEnd] covered by this segment.
+    /**Arc length range [sStart, sEnd] covered by this segment. */
     double sStart = 0.0;
     double sEnd = 0.0;
 
-    /// Source reference (G-code traceability).
+    /**Source reference (G-code traceability). */
     MotionPlanner::SourceReference sourceRef;
 
-    /// NURBS curves for velocity v(s), acceleration a(s), jerk j(s), time t(s).
+    /**NURBS curves for velocity v(s), acceleration a(s), jerk j(s), time t(s). */
     ReNURBSQuantityCurves velocity;
     ReNURBSQuantityCurves acceleration;
     ReNURBSQuantityCurves jerk;
     ReNURBSQuantityCurves time;
 
-    /// Continuity achieved at the *boundary* between this segment and the
-    /// next (Cᵏ means both position and k derivatives match). For the last
-    /// segment, this is N/A.
+    /**
+     * Continuity achieved at the *boundary* between this segment and the
+     * next (Cᵏ means both position and k derivatives match). For the last
+     * segment, this is N/A.
+     */
     ContinuityClass boundaryContinuityVelocity = ContinuityClass::C0;
     ContinuityClass boundaryContinuityAcceleration = ContinuityClass::C0;
     ContinuityClass boundaryContinuityJerk = ContinuityClass::C0;
     ContinuityClass boundaryContinuityTime = ContinuityClass::C0;
 };
 
-/// A constraint violation found by the certifier.
+/**A constraint violation found by the certifier. */
 struct SegmentViolation {
     std::size_t segmentIndex = 0;
     enum class Quantity : uint8_t { Velocity, Acceleration, Jerk, Time } quantity;
-    double arcLength = 0.0;  ///< Where the violation was detected
-    double value = 0.0;      ///< The offending NURBS value
-    double limit = 0.0;      ///< The limit at that s
-    double overshoot = 0.0;  ///< value − limit
+    double arcLength = 0.0; /**< Where the violation was detected */
+    double value = 0.0; /**< The offending NURBS value */
+    double limit = 0.0; /**< The limit at that s */
+    double overshoot = 0.0; /**< value − limit */
 };
 
-/// Continuity report for one segment boundary.
+/**Continuity report for one segment boundary. */
 struct ContinuityReport {
     std::size_t segmentIndex = 0;
     ContinuityClass velocity = ContinuityClass::C0;
@@ -104,7 +108,7 @@ struct ContinuityReport {
     ContinuityClass time = ContinuityClass::C0;
 };
 
-/// Certificate produced by ProfileConstraintCertifier.
+/**Certificate produced by ProfileConstraintCertifier. */
 struct ProfileConstraintCertificate {
     bool compliant = true;
     std::vector<SegmentViolation> violations;
@@ -113,22 +117,22 @@ struct ProfileConstraintCertificate {
     std::vector<ContinuityReport> continuity;
 };
 
-/// The complete ReNURBS profile: per-segment NURBS curves + optional certificate.
+/**The complete ReNURBS profile: per-segment NURBS curves + optional certificate. */
 struct ReNURBSProfile {
-    /// Per-segment curves (one entry per PathAdapter segment).
+    /**Per-segment curves (one entry per PathAdapter segment). */
     std::vector<ReNURBSSegmentProfile> perSegment;
 
-    /// Optional constraint certificate (populated if config.certify == true).
+    /**Optional constraint certificate (populated if config.certify == true). */
     std::optional<ProfileConstraintCertificate> certificate;
 
-    /// True if the profile is empty (no segments / no samples).
+    /**True if the profile is empty (no segments / no samples). */
     bool empty() const noexcept { return perSegment.empty(); }
 
-    /// Number of segments.
+    /**Number of segments. */
     std::size_t numSegments() const noexcept { return perSegment.size(); }
 };
 
-/// Configuration for ReNURBS profile construction.
+/**Configuration for ReNURBS profile construction. */
 struct ReNURBSConfig {
     bool enabled = false;
 

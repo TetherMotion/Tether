@@ -39,11 +39,11 @@ namespace tether::klipper::protocol {
  */
 class IdentifyServer {
 public:
-    /// @brief Construct with the wire-format (compressed) dictionary blob.
+    /**@brief Construct with the wire-format (compressed) dictionary blob. */
     explicit IdentifyServer(std::vector<uint8_t> wireBlob)
         : blob_(std::move(wireBlob)) {}
 
-    /// @return Total size of the dictionary blob in bytes.
+    /**@return Total size of the dictionary blob in bytes. */
     size_t size() const { return blob_.size(); }
 
     /**
@@ -69,21 +69,25 @@ class IdentifyClient {
 public:
     IdentifyClient() = default;
 
-    /// @brief Build the content for an `identify` request for the next chunk.
-    /// @param count Maximum chunk size to request.
+    /**
+     * @brief Build the content for an `identify` request for the next chunk.
+     * @param count Maximum chunk size to request.
+     */
     std::vector<uint8_t> buildRequestContent(uint8_t count = kDefaultIdentifyChunkSize) const;
 
-    /// @return The next offset that will be requested.
+    /**@return The next offset that will be requested. */
     uint32_t nextOffset() const { return static_cast<uint32_t>(received_.size()); }
 
-    /// @brief Consume an `identify_response` content payload.
-    /// @return true if the response offset matched the expected next offset.
+    /**
+     * @brief Consume an `identify_response` content payload.
+     * @return true if the response offset matched the expected next offset.
+     */
     bool consumeResponseContent(std::span<const uint8_t> content);
 
-    /// @return true once an empty-data response has been received (download done).
+    /**@return true once an empty-data response has been received (download done). */
     bool complete() const { return complete_; }
 
-    /// @return The assembled (compressed) wire blob.
+    /**@return The assembled (compressed) wire blob. */
     const std::vector<uint8_t>& wireBlob() const { return received_; }
 
     /**

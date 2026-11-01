@@ -72,19 +72,23 @@ namespace Reg = EtherCAT::Drives::Registers::NexcobotESC211;
 // mappings) which breaks applyCustomPDOs().
 // ---------------------------------------------------------------------------
 
-/// (index, first_sub, count) descriptor for the mappable RSAP-Info
-/// entries in TxPDO 0x1A02 (every entry is a 32-bit UDINT).
+/**
+ * (index, first_sub, count) descriptor for the mappable RSAP-Info
+ * entries in TxPDO 0x1A02 (every entry is a 32-bit UDINT).
+ */
 struct RsapInfoSpec {
     uint16_t index;
     uint8_t first_sub;
     uint8_t count;
 };
 
-/// Record layout of TxPDO 0x1A02 (RSAP-Info) accepted by the current ESC211
-/// firmware: 32 x UDINT mapping the 0x4100-0x4108 calculated-values /
-/// monitoring-limit objects.  The ESI's nominal 0x4000-0x4023 status-object
-/// mapping is NOT PDO-mappable on this firmware and must not be written.
-/// See ESC211-PDO-Restrictions.md.
+/**
+ * Record layout of TxPDO 0x1A02 (RSAP-Info) accepted by the current ESC211
+ * firmware: 32 x UDINT mapping the 0x4100-0x4108 calculated-values /
+ * monitoring-limit objects.  The ESI's nominal 0x4000-0x4023 status-object
+ * mapping is NOT PDO-mappable on this firmware and must not be written.
+ * See ESC211-PDO-Restrictions.md.
+ */
 inline constexpr RsapInfoSpec kRsapInfoSpecs[] = {
     {0x4100, 1, 6},   // TCP 0 Position Calculated
     {0x4101, 0, 1},   // TCP Monitoring Speed Limit
@@ -97,8 +101,10 @@ inline constexpr RsapInfoSpec kRsapInfoSpecs[] = {
     {0x4108, 0, 1},   // Endpoints Monitoring Speed Limit
 };
 
-/// constexpr-generated ObjectDictionaryEntry table for the 32 mappable
-/// RSAP-Info mapping entries (index:subindex, all 32-bit).
+/**
+ * constexpr-generated ObjectDictionaryEntry table for the 32 mappable
+ * RSAP-Info mapping entries (index:subindex, all 32-bit).
+ */
 inline constexpr auto kRsapInfoEntries = [] {
     std::array<::EtherCAT::ObjectDictionary::ObjectDictionaryEntry, 32> a{};
     size_t k = 0;
@@ -123,24 +129,26 @@ inline constexpr auto kRsapInfoEntries = [] {
     return a;
 }();
 
-/// Per-channel FSoE frame-object mapping entries for the 0x1610+k RxPDOs.
-///
-/// Instead of the contiguous 0x6000 SafetyPDU buffer (whose fixed 31-byte
-/// sections overlap for 35-byte responses), each channel's response is
-/// delivered through its own structured objects:
-///   0x6100+16k  FSOE Master Frame k  (sub1 cmd, sub3 conn_id, sub4-11 crc_0-7)
-///   0x6101+16k  FSOE Master Frame k_Data (sub1-8 safe-data words)
-///
-/// The entries are mapped in WIRE order —
-///   [cmd][data_i][crc_i] x nsegs ... [conn_id]
-/// so the resulting PDO slot is a verbatim FSoE wire frame of
-/// 4*nsegs + 3 bytes (31 B for 7 segments, 35 B for 8).
-///
-/// Table layout: kFsoeChannelEntries[k][j], j =
-///   0      cmd        (0x61n0:1)
-///   1..8   data_1..8   (0x61n1:1..8)
-///   9..16  crc_0..7    (0x61n0:4..11)
-///   17     conn_id     (0x61n0:3)
+/**
+ * Per-channel FSoE frame-object mapping entries for the 0x1610+k RxPDOs.
+ *
+ * Instead of the contiguous 0x6000 SafetyPDU buffer (whose fixed 31-byte
+ * sections overlap for 35-byte responses), each channel's response is
+ * delivered through its own structured objects:
+ *   0x6100+16k  FSOE Master Frame k  (sub1 cmd, sub3 conn_id, sub4-11 crc_0-7)
+ *   0x6101+16k  FSOE Master Frame k_Data (sub1-8 safe-data words)
+ *
+ * The entries are mapped in WIRE order —
+ *   [cmd][data_i][crc_i] x nsegs ... [conn_id]
+ * so the resulting PDO slot is a verbatim FSoE wire frame of
+ * 4*nsegs + 3 bytes (31 B for 7 segments, 35 B for 8).
+ *
+ * Table layout: kFsoeChannelEntries[k][j], j =
+ *   0      cmd        (0x61n0:1)
+ *   1..8   data_1..8   (0x61n1:1..8)
+ *   9..16  crc_0..7    (0x61n0:4..11)
+ *   17     conn_id     (0x61n0:3)
+ */
 inline constexpr size_t kFsoeChannelEntryCmd = 0;
 inline constexpr size_t kFsoeChannelEntryDataBase = 1;   // +seg
 inline constexpr size_t kFsoeChannelEntryCrcBase = 9;    // +seg
@@ -182,17 +190,19 @@ inline constexpr auto kFsoeChannelEntries = [] {
     return a;
 }();
 
-/// Assign the ESC211 SM2/SM3 PDOs per the ESI.  @p flat_fsoe_maps adds
-/// the raw 496-byte FSoE SafetyPDU TxPDO block (0x1A00) — needed by
-/// applications that read the raw master->slave FSoE command frames.
-/// @p fsoe_channels is the number of per-channel PDOs (0x1610+k /
-/// 0x1A10+k) to assign.  Each 0x1610+k maps channel k's structured
-/// frame objects (0x6100+16k / 0x6101+16k) in wire order, sized to
-/// resp_pdu_lens[k] (default 35 B when empty or out of range).
-///
-/// Returns false when a mandatory part fails; optional PDOs (RSAP,
-/// per-channel) that the device does not declare are skipped with a
-/// warning.
+/**
+ * Assign the ESC211 SM2/SM3 PDOs per the ESI.  @p flat_fsoe_maps adds
+ * the raw 496-byte FSoE SafetyPDU TxPDO block (0x1A00) — needed by
+ * applications that read the raw master->slave FSoE command frames.
+ * @p fsoe_channels is the number of per-channel PDOs (0x1610+k /
+ * 0x1A10+k) to assign.  Each 0x1610+k maps channel k's structured
+ * frame objects (0x6100+16k / 0x6101+16k) in wire order, sized to
+ * resp_pdu_lens[k] (default 35 B when empty or out of range).
+ *
+ * Returns false when a mandatory part fails; optional PDOs (RSAP,
+ * per-channel) that the device does not declare are skipped with a
+ * warning.
+ */
 inline bool configureEsc211PdoAssignment(EtherCAT::Slave& s,
                                          const char* tag,
                                          bool flat_fsoe_maps,
@@ -328,9 +338,11 @@ inline bool configureEsc211PdoAssignment(EtherCAT::Slave& s,
     return true;
 }
 
-/// Bump the ESC211 OutputCounter — the first UDINT of the mandatory RxPDO
-/// 0x1601 (host→ESC211 heartbeat per the ESI).  Call once per PDO cycle
-/// before exchangeAll().  No-op when 0x1601 is not assigned.
+/**
+ * Bump the ESC211 OutputCounter — the first UDINT of the mandatory RxPDO
+ * 0x1601 (host→ESC211 heartbeat per the ESI).  Call once per PDO cycle
+ * before exchangeAll().  No-op when 0x1601 is not assigned.
+ */
 inline void bumpOutputCounter(EtherCAT::PDOManager& pdo,
                               uint16_t slave_index) {
     auto& mapping = pdo.mapping();
@@ -365,53 +377,63 @@ inline void bumpOutputCounter(EtherCAT::PDOManager& pdo,
 // priming policy) instead of duplicating the ladder.
 // ---------------------------------------------------------------------------
 
-/// Configuration for initEsc211ToSafeOp().
+/**Configuration for initEsc211ToSafeOp(). */
 struct Esc211InitConfig {
     EtherCAT::MailboxSyncManagerConfig mailbox_out;
     EtherCAT::MailboxSyncManagerConfig mailbox_in;
     uint16_t mailbox_protocols = 0x0004;
 
-    /// PDO assignment variant (see configureEsc211PdoAssignment).
+    /**PDO assignment variant (see configureEsc211PdoAssignment). */
     bool flat_fsoe_maps = false;
     size_t fsoe_channels = 0;
 
-    /// Per-channel response (slave->master) wire-frame lengths for the
-    /// 0x1610+k PDOs — 31 for LW1 channels, 35 for LW2.  Entries left at
-    /// 0 default to 35 B (8 data/CRC segments).
+    /**
+     * Per-channel response (slave->master) wire-frame lengths for the
+     * 0x1610+k PDOs — 31 for LW1 channels, 35 for LW2.  Entries left at
+     * 0 default to 35 B (8 data/CRC segments).
+     */
     std::array<uint16_t, 8> fsoe_resp_pdu_len{};
 
-    /// Drain stale SM1 mailbox data after the PRE-OP transition.
+    /**Drain stale SM1 mailbox data after the PRE-OP transition. */
     bool drain_mailbox = false;
 
-    /// Stop after the PRE-OP transition (before PDO assignment) —
-    /// for tools that only need CoE/SDO access.
+    /**
+     * Stop after the PRE-OP transition (before PDO assignment) —
+     * for tools that only need CoE/SDO access.
+     */
     bool stop_after_preop = false;
 
-    /// Stop after PDO assignment + sync-manager config, before the
-    /// SAFE-OP request — the slave stays in PRE-OP fully configured.
-    /// Used by barriered multi-slave bring-up: every slave prepares in
-    /// parallel, then all request SAFE-OP together via
-    /// esc211RequestSafeOp().  Implies no PDO priming either.
+    /**
+     * Stop after PDO assignment + sync-manager config, before the
+     * SAFE-OP request — the slave stays in PRE-OP fully configured.
+     * Used by barriered multi-slave bring-up: every slave prepares in
+     * parallel, then all request SAFE-OP together via
+     * esc211RequestSafeOp().  Implies no PDO priming either.
+     */
     bool stop_before_safeop = false;
 
-    /// PDO priming after SAFE-OP: prime_cycles x prime_delay exchanges.
+    /**PDO priming after SAFE-OP: prime_cycles x prime_delay exchanges. */
     int prime_cycles = 5;
     std::chrono::milliseconds prime_delay{0};
-    /// Increment the 0x1601 OutputCounter during priming.
+    /**Increment the 0x1601 OutputCounter during priming. */
     bool bump_counters = false;
 
-    /// Optional mutex serialising every bus step (blackchannel sdo_mutex).
+    /**Optional mutex serialising every bus step (blackchannel sdo_mutex). */
     std::mutex* sdo_mutex = nullptr;
 
-    /// Optional hook run in PRE-OP after the mailbox drain (e.g. the
-    /// blackchannel --program config write).  Return false to abort.
+    /**
+     * Optional hook run in PRE-OP after the mailbox drain (e.g. the
+     * blackchannel --program config write).  Return false to abort.
+     */
     std::function<bool(EtherCAT::Slave&)> preop_hook;
 };
 
-/// SAFE-OP request + confirmation only — the second half of
-/// initEsc211ToSafeOp() after a stop_before_safeop prepare.  Barriered
-/// multi-slave bring-up calls this once every slave has finished its
-/// parallel PRE-OP configuration.
+/**
+ * SAFE-OP request + confirmation only — the second half of
+ * initEsc211ToSafeOp() after a stop_before_safeop prepare.  Barriered
+ * multi-slave bring-up calls this once every slave has finished its
+ * parallel PRE-OP configuration.
+ */
 inline bool esc211RequestSafeOp(EtherCAT::Slave& s,
                                 std::mutex* sdo_mutex,
                                 const char* tag) {
@@ -429,10 +451,12 @@ inline bool esc211RequestSafeOp(EtherCAT::Slave& s,
     return true;
 }
 
-/// Force INIT -> mailbox -> PRE-OP -> [drain] -> [preop_hook] ->
-/// ESI PDO assignment -> applyCustomPDOs -> sync-manager config ->
-/// SAFE-OP -> PDO priming.  Returns true in SAFE-OP (or PRE-OP when
-/// cfg.stop_after_preop / cfg.stop_before_safeop).
+/**
+ * Force INIT -> mailbox -> PRE-OP -> [drain] -> [preop_hook] ->
+ * ESI PDO assignment -> applyCustomPDOs -> sync-manager config ->
+ * SAFE-OP -> PDO priming.  Returns true in SAFE-OP (or PRE-OP when
+ * cfg.stop_after_preop / cfg.stop_before_safeop).
+ */
 inline bool initEsc211ToSafeOp(EtherCAT::Master& master,
                                EtherCAT::PDOManager& pdo,
                                uint16_t slave_index,
@@ -579,11 +603,13 @@ inline bool initEsc211ToSafeOp(EtherCAT::Master& master,
     return true;
 }
 
-/// Configuration for esc211TransitionToOp().
+/**Configuration for esc211TransitionToOp(). */
 struct Esc211OpTransitionConfig {
-    /// PDO priming before OP.  When exchange_thread_priming is false,
-    /// skips the manual priming and waits prime_delay * prime_cycles
-    /// for the cyclic exchange thread to raise the counters.
+    /**
+     * PDO priming before OP.  When exchange_thread_priming is false,
+     * skips the manual priming and waits prime_delay * prime_cycles
+     * for the cyclic exchange thread to raise the counters.
+     */
     int prime_cycles = 5;
     std::chrono::milliseconds prime_delay{0};
     bool bump_counters = false;
@@ -591,10 +617,12 @@ struct Esc211OpTransitionConfig {
     std::mutex* sdo_mutex = nullptr;
 };
 
-/// Prime PDO exchange (or wait for the exchange thread to prime) —
-/// the pre-request half of esc211TransitionToOp().  Barriered bring-up
-/// runs this per slave in parallel, then releases all OP requests
-/// together via esc211RequestOp().
+/**
+ * Prime PDO exchange (or wait for the exchange thread to prime) —
+ * the pre-request half of esc211TransitionToOp().  Barriered bring-up
+ * runs this per slave in parallel, then releases all OP requests
+ * together via esc211RequestOp().
+ */
 inline bool esc211PrepareForOp(EtherCAT::Slave& s,
                                EtherCAT::PDOManager& pdo,
                                uint16_t slave_index,
@@ -616,8 +644,10 @@ inline bool esc211PrepareForOp(EtherCAT::Slave& s,
     return true;
 }
 
-/// OP request + confirmation only — the second half of
-/// esc211TransitionToOp() after esc211PrepareForOp().
+/**
+ * OP request + confirmation only — the second half of
+ * esc211TransitionToOp() after esc211PrepareForOp().
+ */
 inline bool esc211RequestOp(EtherCAT::Slave& s,
                             const Esc211OpTransitionConfig& cfg,
                             const char* tag) {
@@ -635,8 +665,10 @@ inline bool esc211RequestOp(EtherCAT::Slave& s,
     return true;
 }
 
-/// Prime PDO exchange (or wait for the exchange thread to prime), then
-/// request the OP transition.  Call after initEsc211ToSafeOp().
+/**
+ * Prime PDO exchange (or wait for the exchange thread to prime), then
+ * request the OP transition.  Call after initEsc211ToSafeOp().
+ */
 inline bool esc211TransitionToOp(EtherCAT::Slave& s,
                                  EtherCAT::PDOManager& pdo,
                                  uint16_t slave_index,

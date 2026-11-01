@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file PrinterObjectsHeaters.hpp
-/// @brief Heater printer objects (heater_generic, temperature_probe)
+/**
+ * @file PrinterObjectsHeaters.hpp
+ * @brief Heater printer objects (heater_generic, temperature_probe)
+ */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 #include "tether/klipper/objects/Thermal.hpp"
@@ -17,7 +19,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Generic heater printer object (heater_generic).
+/**@brief Generic heater printer object (heater_generic). */
 class HeaterGenericObject : public PrinterObject {
 public:
     explicit HeaterGenericObject(const std::string& name) : name_(name) {}
@@ -48,7 +50,7 @@ private:
     double power_ = 0.0;
 };
 
-/// @brief Temperature probe printer object (temperature_probe).
+/**@brief Temperature probe printer object (temperature_probe). */
 class TemperatureProbeObject : public PrinterObject {
 public:
     explicit TemperatureProbeObject(const std::string& name) : name_(name) {}

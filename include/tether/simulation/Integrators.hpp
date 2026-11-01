@@ -4,10 +4,10 @@
 
 namespace Simulation {
 
-/// ODE right-hand side function type: f(t, y) -> dydt
+/**ODE right-hand side function type: f(t, y) -> dydt */
 using OdeFunction = std::function<StateVector(double, const StateVector&)>;
 
-/// Integrator result
+/**Integrator result */
 struct IntegratorStep {
     StateVector state;
     double dt_used;
@@ -15,7 +15,7 @@ struct IntegratorStep {
     bool accepted;
 };
 
-/// Abstract integrator interface
+/**Abstract integrator interface */
 class Integrator {
 public:
     virtual ~Integrator() = default;
@@ -26,7 +26,7 @@ public:
     virtual bool isImplicit() const { return false; }
 };
 
-/// Forward Euler
+/**Forward Euler */
 class EulerForwardIntegrator : public Integrator {
 public:
     IntegratorStep step(const OdeFunction& f, double t,
@@ -34,7 +34,7 @@ public:
     const char* name() const override { return "Forward Euler"; }
 };
 
-/// Classical 4th-order Runge-Kutta
+/**Classical 4th-order Runge-Kutta */
 class RungeKutta4Integrator : public Integrator {
 public:
     IntegratorStep step(const OdeFunction& f, double t,
@@ -42,7 +42,7 @@ public:
     const char* name() const override { return "RK4"; }
 };
 
-/// Dormand-Prince RK45 (adaptive)
+/**Dormand-Prince RK45 (adaptive) */
 class DormandPrinceRK45Integrator : public Integrator {
 public:
     DormandPrinceRK45Integrator(double atol = 1e-6, double rtol = 1e-6);
@@ -57,7 +57,7 @@ private:
     double atol_, rtol_;
 };
 
-/// Bogacki-Shampine RK23 (adaptive)
+/**Bogacki-Shampine RK23 (adaptive) */
 class BogackiShampineRK23Integrator : public Integrator {
 public:
     BogackiShampineRK23Integrator(double atol = 1e-6, double rtol = 1e-6);
@@ -72,7 +72,7 @@ private:
     double atol_, rtol_;
 };
 
-/// Implicit trapezoidal method (for stiff systems)
+/**Implicit trapezoidal method (for stiff systems) */
 class ImplicitTrapezoidalIntegrator : public Integrator {
 public:
     ImplicitTrapezoidalIntegrator(int maxIter = 20, double tol = 1e-10);
@@ -86,7 +86,7 @@ private:
     double tol_;
 };
 
-/// BDF2 (Backward Differentiation Formula, order 2) for stiff systems
+/**BDF2 (Backward Differentiation Formula, order 2) for stiff systems */
 class BDF2Integrator : public Integrator {
 public:
     BDF2Integrator(int maxIter = 20, double tol = 1e-10);
@@ -104,7 +104,7 @@ private:
     bool hasPrev_ = false;
 };
 
-/// Factory for creating integrators
+/**Factory for creating integrators */
 std::unique_ptr<Integrator> createIntegrator(IntegrationMethod method,
                                                double atol = 1e-6,
                                                double rtol = 1e-6);

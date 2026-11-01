@@ -50,7 +50,7 @@
 namespace Tether {
 namespace UI {
 
-/// Semantic color role for one display cell (see file docs above).
+/**Semantic color role for one display cell (see file docs above). */
 enum class DisplayTone { Ok, Missing, Fault, Warn, Info, Muted };
 
 struct DisplayCell {
@@ -65,21 +65,25 @@ struct DisplayPanel {
     std::vector<DisplayRow> rows;
 };
 
-/// A row whose first cell is a muted label — the common shape of
-/// chip-panel rows ("EStop In1 In2 …").
+/**
+ * A row whose first cell is a muted label — the common shape of
+ * chip-panel rows ("EStop In1 In2 …").
+ */
 inline DisplayRow labeledRow(std::string_view label) {
     return DisplayRow{{{std::string(label), DisplayTone::Muted}}};
 }
 
-/// How `appendBitfieldChips` maps bit activity to cell tones.
+/**How `appendBitfieldChips` maps bit activity to cell tones. */
 enum class ChipSemantics {
-    ExpectedSet,   ///< set bits -> Ok, cleared labeled bits -> Missing
-    ExpectedClear, ///< value==0 -> Ok "none", set bits -> Fault
-    Mode,          ///< active labels -> Ok, inactive -> Muted
+    ExpectedSet, /**< set bits -> Ok, cleared labeled bits -> Missing */
+    ExpectedClear, /**< value==0 -> Ok "none", set bits -> Fault */
+    Mode, /**< active labels -> Ok, inactive -> Muted */
 };
 
-/// True when any label's mask covers @p bit — used to suppress "bitN"
-/// chips for labeled bits while still reporting *unknown* set bits.
+/**
+ * True when any label's mask covers @p bit — used to suppress "bitN"
+ * chips for labeled bits while still reporting *unknown* set bits.
+ */
 inline bool bitIsLabeled(std::span<const EtherCAT::Utils::BitLabel> labels,
                          uint32_t bit) {
     const uint32_t m = 1u << bit;
@@ -158,8 +162,10 @@ inline void appendBitfieldChips(
     }
 }
 
-/// Append one scalar chip: `text` when the value was read, muted "n/a"
-/// otherwise.
+/**
+ * Append one scalar chip: `text` when the value was read, muted "n/a"
+ * otherwise.
+ */
 inline void appendScalarChip(DisplayRow& row,
                              std::optional<std::string> text,
                              DisplayTone tone = DisplayTone::Ok) {
@@ -172,7 +178,7 @@ inline void appendScalarChip(DisplayRow& row,
 // TUI::drawChips in tether/terminal_ui/Chips.hpp)
 // ---------------------------------------------------------------------------
 
-/// ANSI SGR parameter for a tone ("0" resets).
+/**ANSI SGR parameter for a tone ("0" resets). */
 inline const char* toneToAnsi(DisplayTone t) {
     switch (t) {
         case DisplayTone::Ok:      return "32";    // green

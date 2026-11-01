@@ -72,15 +72,17 @@ namespace Platform = Tether::Platform;
 static std::atomic<bool> g_cancel{false};
 // SignalHandler sets this to true on SIGINT/SIGTERM.
 
-/// Sweep state shared by both display modes.
+/**Sweep state shared by both display modes. */
 struct Sweep {
-    size_t   channel = 0;          ///< flat channel being driven
-    int32_t  value   = -32767;     ///< current output value
-    int      dir     = +400;       ///< ramp step (signed)
+    size_t   channel = 0; /**< flat channel being driven */
+    int32_t  value   = -32767; /**< current output value */
+    int      dir     = +400; /**< ramp step (signed) */
     bool     paused  = false;
 
-    /// Advance the ramp one step; wraps to the next channel after a full
-    /// up-down cycle.  Returns true when the active channel changed.
+    /**
+     * Advance the ramp one step; wraps to the next channel after a full
+     * up-down cycle.  Returns true when the active channel changed.
+     */
     bool tick(Beckhoff::MultiAnalogOutputTerminal<>& outs) {
         if (paused || outs.channelCount() == 0) return false;
         value += dir;
@@ -90,7 +92,7 @@ struct Sweep {
         return false;
     }
 
-    /// Move to the next flat channel; the old channel returns to 0.
+    /**Move to the next flat channel; the old channel returns to 0. */
     bool next(Beckhoff::MultiAnalogOutputTerminal<>& outs) {
         outs.setValue(channel, 0);
         channel = (channel + 1) % outs.channelCount();
@@ -100,7 +102,7 @@ struct Sweep {
     }
 };
 
-/// Compact per-module value rendering: "s3:+01234,-00042 ...".
+/**Compact per-module value rendering: "s3:+01234,-00042 ...". */
 static std::string moduleStates(
     const Beckhoff::MultiAnalogOutputTerminal<>& outs) {
     std::string out;
@@ -116,7 +118,7 @@ static std::string moduleStates(
     return out;
 }
 
-/// Which module+channel a flat chain channel belongs to.
+/**Which module+channel a flat chain channel belongs to. */
 static void locateChannel(
     const Beckhoff::MultiAnalogOutputTerminal<>& outs,
     size_t channel, size_t& mod, size_t& ch) {

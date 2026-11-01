@@ -25,21 +25,21 @@ namespace EtherCAT {
 // ============================================================================
 
 enum class DebugConditionType {
-    State,              ///< Triggered by EtherCAT state transitions
-    Checkpoint,         ///< Triggered by named program-flow checkpoints
-    RegisterIntercept,  ///< Triggered by intercepting register reads
-    CoEIntercept,       ///< Triggered by intercepting CoE/SDO reads
-    Custom,             ///< User-defined callback
+    State, /**< Triggered by EtherCAT state transitions */
+    Checkpoint, /**< Triggered by named program-flow checkpoints */
+    RegisterIntercept, /**< Triggered by intercepting register reads */
+    CoEIntercept, /**< Triggered by intercepting CoE/SDO reads */
+    Custom, /**< User-defined callback */
 };
 
 enum class CompareOp {
-    Eq,      ///< ==
-    Ne,      ///< !=
-    Bitmask, ///< (read & value) == value
-    Ge,      ///< >=
-    Le,      ///< <=
-    Gt,      ///< >
-    Lt,      ///< <
+    Eq, /**< == */
+    Ne, /**< != */
+    Bitmask, /**< (read & value) == value */
+    Ge, /**< >= */
+    Le, /**< <= */
+    Gt, /**< > */
+    Lt, /**< < */
 };
 
 // ============================================================================

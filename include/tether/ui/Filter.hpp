@@ -30,7 +30,7 @@
 namespace Tether {
 namespace UI {
 
-/// Named fields attached to a row/record — what `field=` terms match on.
+/**Named fields attached to a row/record — what `field=` terms match on. */
 struct FieldSet {
     std::map<std::string, std::string> fields;
 
@@ -46,7 +46,7 @@ public:
     struct Term {
         std::string field;
         std::string value;
-        char op = '=';      ///< '=' contains, '>' numeric-gt, '<' numeric-lt
+        char op = '='; /**< '=' contains, '>' numeric-gt, '<' numeric-lt */
         bool negated = false;
     };
 
@@ -61,8 +61,10 @@ public:
         return lower(hay).find(lower(needle)) != std::string::npos;
     }
 
-    /// Parse an expression string.  Always succeeds — unrecognized terms
-    /// degrade to substring matches so a partial expression still filters.
+    /**
+     * Parse an expression string.  Always succeeds — unrecognized terms
+     * degrade to substring matches so a partial expression still filters.
+     */
     static RecordFilter parse(std::string_view expr) {
         RecordFilter f;
         std::istringstream in{std::string{expr}};
@@ -103,7 +105,7 @@ public:
         return f;
     }
 
-    /// `haystack` is the row's pre-joined cell text (for `text=`/bare words).
+    /**`haystack` is the row's pre-joined cell text (for `text=`/bare words). */
     bool matches(const FieldSet& fs, std::string_view haystack) const {
         if (!active_) return true;
         for (const auto& t : terms_) {
@@ -139,7 +141,7 @@ public:
     bool active() const { return active_; }
     void clear() { *this = RecordFilter{}; }
 
-    /// Compact human-readable summary for status lines.
+    /**Compact human-readable summary for status lines. */
     std::string describe() const {
         if (!active_) return {};
         std::string out;

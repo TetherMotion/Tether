@@ -79,7 +79,7 @@ bool PowerMeterTerminal::resolveLayout() {
         const auto& tx = *info_->tx_pdos;
         const uint8_t ch = sm_in_.channel;
 
-        /// Fill `f` when a >=8-bit entry (index,sub) exists in the image.
+        /**Fill `f` when a >=8-bit entry (index,sub) exists in the image. */
         auto resolveIn = [&](uint16_t idx, int sub, uint32_t occ,
                              Field& f) {
             f = {};

@@ -1,5 +1,7 @@
-/// @file AnalysisTypes.hpp
-/// @brief Pure C++ result types for G-code analysis.
+/**
+ * @file AnalysisTypes.hpp
+ * @brief Pure C++ result types for G-code analysis.
+ */
 
 #pragma once
 
@@ -10,7 +12,7 @@
 
 namespace tether::gcode::analysis {
 
-/// @brief Severity level for analysis events, aligned with the viewer protobuf.
+/**@brief Severity level for analysis events, aligned with the viewer protobuf. */
 enum class Severity {
     Info = 0,
     Low = 1,
@@ -18,7 +20,7 @@ enum class Severity {
     High = 3,
 };
 
-/// @brief A single named metric value.
+/**@brief A single named metric value. */
 struct Metric {
     std::string key;
     std::variant<double, int64_t> value;
@@ -32,7 +34,7 @@ inline Metric makeMetric(const std::string& key, int64_t value) {
     return Metric{key, value};
 }
 
-/// @brief A single analysis event / finding.
+/**@brief A single analysis event / finding. */
 struct Event {
     std::string id;
     int32_t lineNumber = 0;
@@ -43,7 +45,7 @@ struct Event {
     std::string detailsJson;
 };
 
-/// @brief One analysis section (e.g. overhang, first layer, thermal).
+/**@brief One analysis section (e.g. overhang, first layer, thermal). */
 struct Section {
     std::string name;
     std::string displayName;
@@ -54,10 +56,10 @@ struct Section {
     bool hasMoreEvents = false;
 };
 
-/// @brief Common options controlling how much detail each analyzer returns.
+/**@brief Common options controlling how much detail each analyzer returns. */
 struct Options {
-    std::string detailLevel = "standard"; ///< "summary", "standard", "full"
-    std::size_t topEventLimit = 64;       ///< max top events for standard mode (0 = 64)
+    std::string detailLevel = "standard"; /**< "summary", "standard", "full" */
+    std::size_t topEventLimit = 64; /**< max top events for standard mode (0 = 64) */
 };
 
 } // namespace tether::gcode::analysis

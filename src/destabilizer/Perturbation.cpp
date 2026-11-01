@@ -1,5 +1,7 @@
-/// @file Perturbation.cpp
-/// @brief Perturbation signal parameterization implementations.
+/**
+ * @file Perturbation.cpp
+ * @brief Perturbation signal parameterization implementations.
+ */
 
 #include "tether/destabilizer/Perturbation.hpp"
 #include <stdexcept>

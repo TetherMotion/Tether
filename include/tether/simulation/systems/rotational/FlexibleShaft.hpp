@@ -27,15 +27,15 @@ public:
     int stateDim() const override { return 4; } // [theta_m, omega_m, theta_l, omega_l]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
-    /// Evaluate the coupled motor-load dynamics through the compliant shaft.
+    /**Evaluate the coupled motor-load dynamics through the compliant shaft. */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
-    /// Report load-side position, which is the most common measured signal in drive systems.
+    /**Report load-side position, which is the most common measured signal in drive systems. */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
-    /// Start with aligned shafts and zero angular velocity.
+    /**Start with aligned shafts and zero angular velocity. */
     StateVector defaultInitialState() const override;
-    /// Return the inertial, damping, and shaft-coupling coefficients.
+    /**Return the inertial, damping, and shaft-coupling coefficients. */
     std::vector<ParamDescriptor> parameterDescriptors() const override;
-    /// Provide presets spanning moderately flexible to strongly resonant shafts.
+    /**Provide presets spanning moderately flexible to strongly resonant shafts. */
     std::vector<Preset> presets() const override;
     void applyPreset(int index) override;
     std::vector<std::string> stateNames() const override;

@@ -31,8 +31,8 @@ namespace PCAP {
 // ============================================================================
 
 struct PCAPNGSectionInfo {
-    bool byteOrderSwapped = false;   ///< True if file byte order differs from host
-    int64_t sectionLength = -1;      ///< -1 if unknown
+    bool byteOrderSwapped = false; /**< True if file byte order differs from host */
+    int64_t sectionLength = -1; /**< -1 if unknown */
     std::string hardware;
     std::string os;
     std::string application;
@@ -44,24 +44,24 @@ struct PCAPNGSectionInfo {
 // ============================================================================
 
 struct PCAPNGInterfaceInfo {
-    uint32_t id = 0;                 ///< Interface index (0-based)
-    uint16_t linkType = 1;           ///< LINKTYPE_ETHERNET = 1
-    uint32_t snapLen = 65535;        ///< Max captured bytes
-    uint64_t speed = 0;              ///< Bits/sec, 0 if unknown
-    uint8_t tsResol = 9;             ///< 10^-tsResol seconds (default nanoseconds)
-    int64_t tsOffset = 0;            ///< Timestamp offset in units of tsResol
-    uint8_t fcsLen = 0;              ///< FCS length in bytes
+    uint32_t id = 0; /**< Interface index (0-based) */
+    uint16_t linkType = 1; /**< LINKTYPE_ETHERNET = 1 */
+    uint32_t snapLen = 65535; /**< Max captured bytes */
+    uint64_t speed = 0; /**< Bits/sec, 0 if unknown */
+    uint8_t tsResol = 9; /**< 10^-tsResol seconds (default nanoseconds) */
+    int64_t tsOffset = 0; /**< Timestamp offset in units of tsResol */
+    uint8_t fcsLen = 0; /**< FCS length in bytes */
     std::string name;
     std::string description;
     std::string filter;
     std::string os;
     std::array<uint8_t, 6> macAddress{};
-    std::array<uint8_t, 4> ipv4Address{};   ///< if_ipv4addr (network byte order)
-    std::array<uint8_t, 4> ipv4Mask{};      ///< if_ipv4addr netmask
-    std::array<uint8_t, 16> ipv6Address{};  ///< if_ipv6addr (network byte order)
-    std::array<uint8_t, 16> ipv6Mask{};     ///< if_ipv6addr prefix mask
-    std::array<uint8_t, 8> euiAddress{};    ///< if_euiaddr (EUI-64)
-    uint8_t tzZone = 0;                     ///< if_tzone (deprecated, hours from UTC)
+    std::array<uint8_t, 4> ipv4Address{}; /**< if_ipv4addr (network byte order) */
+    std::array<uint8_t, 4> ipv4Mask{}; /**< if_ipv4addr netmask */
+    std::array<uint8_t, 16> ipv6Address{}; /**< if_ipv6addr (network byte order) */
+    std::array<uint8_t, 16> ipv6Mask{}; /**< if_ipv6addr prefix mask */
+    std::array<uint8_t, 8> euiAddress{}; /**< if_euiaddr (EUI-64) */
+    uint8_t tzZone = 0; /**< if_tzone (deprecated, hours from UTC) */
     std::string comment;
 };
 
@@ -71,15 +71,15 @@ struct PCAPNGInterfaceInfo {
 
 struct PCAPNGInterfaceStats {
     uint32_t interfaceId = 0;
-    uint64_t timestampNs = 0;        ///< Timestamp of the statistics record
-    uint64_t startTime = 0;          ///< isb_starttime (raw ticks)
-    uint64_t endTime = 0;            ///< isb_endtime (raw ticks)
-    uint64_t ifRecv = 0;             ///< isb_ifrecv — packets received
-    uint64_t ifDrop = 0;             ///< isb_ifdrop — dropped by interface
-    uint64_t filterAccept = 0;       ///< isb_filteraccept
-    uint64_t filterDrop = 0;         ///< isb_filterdrop
-    uint64_t osDrop = 0;             ///< isb_osdrop — dropped by OS
-    uint64_t usrDeliv = 0;           ///< isb_usrdeliv — delivered to user
+    uint64_t timestampNs = 0; /**< Timestamp of the statistics record */
+    uint64_t startTime = 0; /**< isb_starttime (raw ticks) */
+    uint64_t endTime = 0; /**< isb_endtime (raw ticks) */
+    uint64_t ifRecv = 0; /**< isb_ifrecv — packets received */
+    uint64_t ifDrop = 0; /**< isb_ifdrop — dropped by interface */
+    uint64_t filterAccept = 0; /**< isb_filteraccept */
+    uint64_t filterDrop = 0; /**< isb_filterdrop */
+    uint64_t osDrop = 0; /**< isb_osdrop — dropped by OS */
+    uint64_t usrDeliv = 0; /**< isb_usrdeliv — delivered to user */
     std::string comment;
 };
 
@@ -90,9 +90,9 @@ struct PCAPNGInterfaceStats {
 struct PCAPNGNameResolutionRecord {
     enum class Type : uint8_t { Ipv4, Ipv6, Comment };
     Type type = Type::Ipv4;
-    std::array<uint8_t, 4> ipv4{};   ///< Valid when type == Ipv4
-    std::array<uint8_t, 16> ipv6{};  ///< Valid when type == Ipv6
-    std::string name;                ///< Hostname (or comment text)
+    std::array<uint8_t, 4> ipv4{}; /**< Valid when type == Ipv4 */
+    std::array<uint8_t, 16> ipv6{}; /**< Valid when type == Ipv6 */
+    std::string name; /**< Hostname (or comment text) */
 };
 
 // ============================================================================
@@ -100,7 +100,7 @@ struct PCAPNGNameResolutionRecord {
 // ============================================================================
 
 struct PCAPNGDecryptionSecrets {
-    uint16_t secretsType = 0;        ///< Secrets type code
+    uint16_t secretsType = 0; /**< Secrets type code */
     std::vector<uint8_t> secretsData;
     std::string comment;
 };
@@ -115,13 +115,13 @@ struct EtherCATDatagramInfo {
     uint16_t adp = 0;
     uint16_t ado = 0;
     uint16_t dataLength = 0;
-    uint16_t irq = 0;              ///< Interrupt request register
+    uint16_t irq = 0; /**< Interrupt request register */
     uint16_t wkc = 0;
     bool more = false;
     bool circulating = false;
-    std::vector<uint8_t> data;       ///< Copy of datagram payload
+    std::vector<uint8_t> data; /**< Copy of datagram payload */
 
-    /// @return 32-bit logical address for LRD/LWR/LRW datagrams
+    /**@return 32-bit logical address for LRD/LWR/LRW datagrams */
     uint32_t logicalAddress() const {
         return (static_cast<uint32_t>(ado) << 16) | adp;
     }
@@ -135,40 +135,42 @@ struct InterpretedFrame {
     // Packet-block metadata
     uint64_t timestampNs = 0;
     uint32_t interfaceId = 0;
-    uint32_t capturedLength = 0;   ///< Raw on-wire captured length (incl. FCS)
-    uint32_t originalLength = 0;   ///< Raw on-wire original length (incl. FCS)
-    uint8_t  fcsLength = 0;        ///< FCS bytes stripped from frameData
+    uint32_t capturedLength = 0; /**< Raw on-wire captured length (incl. FCS) */
+    uint32_t originalLength = 0; /**< Raw on-wire original length (incl. FCS) */
+    uint8_t  fcsLength = 0; /**< FCS bytes stripped from frameData */
     PacketDirection direction = PacketDirection::Unknown;
     uint32_t packetFlags = 0;
     uint64_t dropCount = 0;
     std::string comment;
 
     // EPB optional metadata
-    std::optional<uint64_t> packetId;  ///< epb_packetid
-    std::optional<uint32_t> queue;     ///< epb_queue
+    std::optional<uint64_t> packetId; /**< epb_packetid */
+    std::optional<uint32_t> queue; /**< epb_queue */
     struct PacketHash {
-        uint8_t type = 0;              ///< Hash algorithm (e.g. 1=IPv4, 2=IPv6)
+        uint8_t type = 0; /**< Hash algorithm (e.g. 1=IPv4, 2=IPv6) */
         std::vector<uint8_t> data;
     };
-    std::optional<PacketHash> hash;    ///< epb_hash
+    std::optional<PacketHash> hash; /**< epb_hash */
     struct PacketVerdict {
-        uint16_t type = 0;             ///< Verdict type code
-        std::string text;              ///< Verdict description
+        uint16_t type = 0; /**< Verdict type code */
+        std::string text; /**< Verdict description */
     };
-    std::optional<PacketVerdict> verdict;  ///< epb_verdict
+    std::optional<PacketVerdict> verdict; /**< epb_verdict */
 
     // Custom EtherCAT options stored by the writer
     uint16_t slaveAddress = 0;
     bool isProcessData = false;
     uint8_t workingCounter = 0;
 
-    /// Full captured Ethernet frame (including header, VLAN tag, and payload).
-    /// For non-Ethernet link types, this is the link-layer payload after FCS
-    /// stripping (e.g. the SLL header + payload, or the raw IP packet).
+    /**
+     * Full captured Ethernet frame (including header, VLAN tag, and payload).
+     * For non-Ethernet link types, this is the link-layer payload after FCS
+     * stripping (e.g. the SLL header + payload, or the raw IP packet).
+     */
     std::vector<uint8_t> frameData;
 
     // Link-layer information
-    uint16_t linkType = 1;          ///< LINKTYPE_* of the capturing interface
+    uint16_t linkType = 1; /**< LINKTYPE_* of the capturing interface */
 
     // Ethernet header
     std::array<uint8_t, 6> dstMac{};
@@ -186,13 +188,13 @@ struct InterpretedFrame {
     // EtherCAT-over-UDP encapsulation (set when EtherCAT is tunneled via UDP
     // port 34980/0x88A4 instead of using EtherType 0x88A4 directly).
     bool isEtherCATOverUDP = false;
-    uint32_t srcIp = 0;   ///< IPv4 source address (host byte order)
-    uint32_t dstIp = 0;   ///< IPv4 destination address (host byte order)
-    std::array<uint8_t, 16> srcIpv6{};  ///< IPv6 source address (network byte order)
-    std::array<uint8_t, 16> dstIpv6{};  ///< IPv6 destination address (network byte order)
-    uint8_t ipVersion = 0;  ///< 4 or 6 (0 if not IP)
-    uint16_t srcPort = 0; ///< UDP source port (host byte order)
-    uint16_t dstPort = 0; ///< UDP destination port (host byte order)
+    uint32_t srcIp = 0; /**< IPv4 source address (host byte order) */
+    uint32_t dstIp = 0; /**< IPv4 destination address (host byte order) */
+    std::array<uint8_t, 16> srcIpv6{}; /**< IPv6 source address (network byte order) */
+    std::array<uint8_t, 16> dstIpv6{}; /**< IPv6 destination address (network byte order) */
+    uint8_t ipVersion = 0; /**< 4 or 6 (0 if not IP) */
+    uint16_t srcPort = 0; /**< UDP source port (host byte order) */
+    uint16_t dstPort = 0; /**< UDP destination port (host byte order) */
 
     // EtherCAT frame header (valid when isEtherCAT == true)
     uint16_t ecatFrameLength = 0;
@@ -201,7 +203,7 @@ struct InterpretedFrame {
     // Decoded datagrams
     std::vector<EtherCATDatagramInfo> datagrams;
 
-    /// @return true if this frame carried at least one EtherCAT datagram
+    /**@return true if this frame carried at least one EtherCAT datagram */
     bool hasEtherCAT() const { return isEtherCAT && !datagrams.empty(); }
 };
 
@@ -214,63 +216,73 @@ public:
     PCAPNGReader();
     ~PCAPNGReader();
 
-    /// Open a pcapng file from disk.
+    /**Open a pcapng file from disk. */
     bool open(const std::string& path);
 
-    /// Open a pcapng capture from an in-memory buffer (useful for tests).
+    /**Open a pcapng capture from an in-memory buffer (useful for tests). */
     bool open(const std::vector<uint8_t>& data);
 
-    /// Release any open resources.
+    /**Release any open resources. */
     void close();
 
-    /// True when a file or memory buffer is loaded.
+    /**True when a file or memory buffer is loaded. */
     bool isOpen() const;
 
-    /// Parsed Section Header Block information.
+    /**Parsed Section Header Block information. */
     const PCAPNGSectionInfo& sectionInfo() const { return section_; }
 
-    /// Parsed Interface Description Blocks.
+    /**Parsed Interface Description Blocks. */
     const std::vector<PCAPNGInterfaceInfo>& interfaces() const { return interfaces_; }
 
-    /// Parsed Interface Statistics Blocks.
+    /**Parsed Interface Statistics Blocks. */
     const std::vector<PCAPNGInterfaceStats>& interfaceStats() const { return interfaceStats_; }
 
-    /// Parsed Name Resolution records (from all NRBs).
+    /**Parsed Name Resolution records (from all NRBs). */
     const std::vector<PCAPNGNameResolutionRecord>& nameResolutionRecords() const { return nameRecords_; }
 
-    /// Parsed Decryption Secrets Blocks.
+    /**Parsed Decryption Secrets Blocks. */
     const std::vector<PCAPNGDecryptionSecrets>& decryptionSecrets() const { return decryptionSecrets_; }
 
-    /// Callback invoked once for every interpreted frame.
+    /**Callback invoked once for every interpreted frame. */
     using PacketCallback = std::function<void(const InterpretedFrame&)>;
 
-    /// Read and interpret all packets, invoking @p cb for each one.
-    /// @return true if the file was parsed successfully to the end.
+    /**
+     * Read and interpret all packets, invoking @p cb for each one.
+     * @return true if the file was parsed successfully to the end.
+     */
     bool readAll(PacketCallback cb);
 
-    /// Convenience overload that collects all interpreted frames.
+    /**Convenience overload that collects all interpreted frames. */
     std::vector<InterpretedFrame> readAll();
 
-    /// Read the next interpreted frame incrementally.  Processes metadata
-    /// blocks (SHB/IDB/ISB/NRB/DSB) as encountered and returns the next
-    /// packet block (EPB/PB/SPB) via @p out.
-    /// @return true if a frame was produced; false at EOF or on error.
+    /**
+     * Read the next interpreted frame incrementally.  Processes metadata
+     * blocks (SHB/IDB/ISB/NRB/DSB) as encountered and returns the next
+     * packet block (EPB/PB/SPB) via @p out.
+     * @return true if a frame was produced; false at EOF or on error.
+     */
     bool readNext(InterpretedFrame& out);
 
-    /// Reset the read cursor to the beginning of the capture without
-    /// reloading the buffer.  Useful for re-iterating with readNext().
+    /**
+     * Reset the read cursor to the beginning of the capture without
+     * reloading the buffer.  Useful for re-iterating with readNext().
+     */
     void reset();
 
-    /// Error callback invoked when a malformed block is encountered in
-    /// recovery mode.  Receives the block offset and a human-readable message.
+    /**
+     * Error callback invoked when a malformed block is encountered in
+     * recovery mode.  Receives the block offset and a human-readable message.
+     */
     using ErrorCallback = std::function<void(size_t offset, const std::string& msg)>;
 
-    /// Enable or disable recovery mode.  When enabled, malformed blocks are
-    /// skipped (the reader scans forward for the next valid block) instead of
-    /// aborting the parse.  @p cb is invoked for each skipped block.
+    /**
+     * Enable or disable recovery mode.  When enabled, malformed blocks are
+     * skipped (the reader scans forward for the next valid block) instead of
+     * aborting the parse.  @p cb is invoked for each skipped block.
+     */
     void setRecoveryMode(bool enabled, ErrorCallback cb = nullptr);
 
-    /// @return number of blocks skipped due to errors in recovery mode.
+    /**@return number of blocks skipped due to errors in recovery mode. */
     size_t skippedBlockCount() const { return skippedBlockCount_; }
 
 private:
@@ -280,12 +292,16 @@ private:
     };
 
     bool parseBuffer(PacketCallback cb);
-    /// Process the block at @p offset, invoking @p cb for packet blocks.
-    /// @return true on success.  Does not advance currentOffset_.
+    /**
+     * Process the block at @p offset, invoking @p cb for packet blocks.
+     * @return true on success.  Does not advance currentOffset_.
+     */
     bool processBlock(size_t offset, const BlockHeader& header, PacketCallback cb);
     bool readBlockHeader(size_t offset, BlockHeader& header) const;
-    /// Scan forward from @p from for the next plausible block header.
-    /// @return offset of the next valid block, or fileSize_ if none found.
+    /**
+     * Scan forward from @p from for the next plausible block header.
+     * @return offset of the next valid block, or fileSize_ if none found.
+     */
     size_t findNextBlockOffset(size_t from) const;
     bool parseSectionHeaderBlock(size_t offset, const BlockHeader& header);
     bool parseInterfaceDescriptionBlock(size_t offset, const BlockHeader& header);
@@ -306,40 +322,44 @@ private:
     bool interpretEthernetFrame(const uint8_t* data, size_t length,
                                 InterpretedFrame& frame) const;
 
-    /// Dispatch frame interpretation based on the interface link type.
+    /**Dispatch frame interpretation based on the interface link type. */
     void interpretFrameByLinkType(const uint8_t* data, size_t length,
                                   InterpretedFrame& frame) const;
 
-    /// Interpret a Linux cooked-capture (SLL) frame (LINKTYPE_LINUX_SLL=113).
+    /**Interpret a Linux cooked-capture (SLL) frame (LINKTYPE_LINUX_SLL=113). */
     void interpretLinuxSllFrame(const uint8_t* data, size_t length,
                                 InterpretedFrame& frame) const;
 
-    /// Interpret a raw IP frame (LINKTYPE_RAW=101/228, no link-layer header).
+    /**Interpret a raw IP frame (LINKTYPE_RAW=101/228, no link-layer header). */
     void interpretRawIpFrame(const uint8_t* data, size_t length,
                              InterpretedFrame& frame) const;
 
-    /// Interpret a BSD loopback frame (LINKTYPE_NULL=0): 4-byte family + IP.
+    /**Interpret a BSD loopback frame (LINKTYPE_NULL=0): 4-byte family + IP. */
     void interpretNullFrame(const uint8_t* data, size_t length,
                             InterpretedFrame& frame) const;
 
-    /// Common post-EtherType payload interpretation (VLAN already stripped).
+    /**Common post-EtherType payload interpretation (VLAN already stripped). */
     void interpretPayload(uint16_t etherType, const uint8_t* data, size_t length,
                           size_t payloadOffset, InterpretedFrame& frame) const;
 
-    /// @return FCS length (bytes) for the given interface, or 0 if unknown.
+    /**@return FCS length (bytes) for the given interface, or 0 if unknown. */
     uint8_t interfaceFcsLen(uint32_t interfaceId) const;
 
-    /// @return LINKTYPE_* for the given interface, or LINKTYPE_ETHERNET if unknown.
+    /**@return LINKTYPE_* for the given interface, or LINKTYPE_ETHERNET if unknown. */
     uint16_t interfaceLinkType(uint32_t interfaceId) const;
 
-    /// Parse EtherCAT datagrams starting at @p ecatOffset within @p data.
-    /// @p dataEnd is the exclusive end boundary (data + dataEnd is one-past-the-last valid byte).
+    /**
+     * Parse EtherCAT datagrams starting at @p ecatOffset within @p data.
+     * @p dataEnd is the exclusive end boundary (data + dataEnd is one-past-the-last valid byte).
+     */
     void parseEtherCATDatagrams(const uint8_t* data, size_t dataEnd,
                                 size_t ecatOffset,
                                 InterpretedFrame& frame) const;
 
-    /// Detect and parse EtherCAT-over-UDP encapsulation (UDP dst port 34980).
-    /// @p ipOffset points to the start of the IPv4 header within @p data.
+    /**
+     * Detect and parse EtherCAT-over-UDP encapsulation (UDP dst port 34980).
+     * @p ipOffset points to the start of the IPv4 header within @p data.
+     */
     void parseEtherCATOverUDP(const uint8_t* data, size_t length,
                               size_t ipOffset,
                               InterpretedFrame& frame) const;

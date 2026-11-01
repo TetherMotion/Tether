@@ -24,31 +24,39 @@ namespace tether::motion::replanner {
 
 class FFTProcessor {
 public:
-    /// Cooley-Tukey radix-2 FFT (in-place, complex).
-    /// @param data Must be a power-of-2 sized complex vector.
+    /**
+     * Cooley-Tukey radix-2 FFT (in-place, complex).
+     * @param data Must be a power-of-2 sized complex vector.
+     */
     static void fft(std::vector<std::complex<double>>& data);
 
-    /// Apply a window function to a real-valued signal.
-    /// @param signal The signal (modified in-place).
-    /// @param window Window type.
+    /**
+     * Apply a window function to a real-valued signal.
+     * @param signal The signal (modified in-place).
+     * @param window Window type.
+     */
     static void applyWindow(std::vector<double>& signal,
                             FFTConfig::Window window);
 
-    /// Detrend: remove DC and/or linear trend.
-    /// @param signal The signal (modified in-place).
-    /// @param removeDC If true, subtract the mean.
-    /// @param removeLinear If true, remove a least-squares linear fit.
+    /**
+     * Detrend: remove DC and/or linear trend.
+     * @param signal The signal (modified in-place).
+     * @param removeDC If true, subtract the mean.
+     * @param removeLinear If true, remove a least-squares linear fit.
+     */
     static void detrend(std::vector<double>& signal,
                         bool removeDC, bool removeLinear);
 
-    /// Find the top N spectral peaks with prominence filtering.
-    /// @param freqs Frequency bins (Hz).
-    /// @param mags Magnitude spectrum.
-    /// @param phases Phase spectrum (radians).
-    /// @param psd Power spectral density.
-    /// @param maxPeaks Maximum number of peaks to return.
-    /// @param prominenceThreshold Minimum prominence (fraction of max).
-    /// @return Vector of spectral peaks, sorted by prominence (descending).
+    /**
+     * Find the top N spectral peaks with prominence filtering.
+     * @param freqs Frequency bins (Hz).
+     * @param mags Magnitude spectrum.
+     * @param phases Phase spectrum (radians).
+     * @param psd Power spectral density.
+     * @param maxPeaks Maximum number of peaks to return.
+     * @param prominenceThreshold Minimum prominence (fraction of max).
+     * @return Vector of spectral peaks, sorted by prominence (descending).
+     */
     static std::vector<SpectralPeak> findPeaks(
         const std::vector<double>& freqs,
         const std::vector<double>& mags,
@@ -58,7 +66,7 @@ public:
         double prominenceThreshold);
 
 private:
-    /// Compute the arithmetic mean of a vector.
+    /**Compute the arithmetic mean of a vector. */
     static double mean(const std::vector<double>& v);
 };
 

@@ -17,7 +17,7 @@ namespace GCode {
 
 namespace {
 
-/// Helper to construct an Error with a message string.
+/**Helper to construct an Error with a message string. */
 Error makeError(ErrorCode code, const char* msg) {
     Error err;
     err.code = code;

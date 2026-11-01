@@ -1,5 +1,7 @@
-/// @file OverhangAnalyzer.cpp
-/// @brief Overhang, bridge and support detection using layer-by-layer geometry.
+/**
+ * @file OverhangAnalyzer.cpp
+ * @brief Overhang, bridge and support detection using layer-by-layer geometry.
+ */
 
 #include "tether/gcode/analysis/OverhangAnalyzer.hpp"
 #include "AnalysisUtil.hpp"

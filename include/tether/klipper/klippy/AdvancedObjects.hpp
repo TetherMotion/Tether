@@ -6,11 +6,13 @@
 #include "tether/TetherConfig.hpp"
 #endif
 
-/// @file AdvancedObjects.hpp
-/// @brief Umbrella header for all advanced Klippy feature components.
-///
-/// This file includes all topic-based component headers. Individual
-/// components can also be included directly for faster compilation.
+/**
+ * @file AdvancedObjects.hpp
+ * @brief Umbrella header for all advanced Klippy feature components.
+ *
+ * This file includes all topic-based component headers. Individual
+ * components can also be included directly for faster compilation.
+ */
 
 #include "tether/klipper/klippy/VirtualSdcard.hpp"
 #include "tether/klipper/klippy/BedMeshPrinterObject.hpp"

@@ -25,13 +25,13 @@ class RtoEstimator {
 public:
     RtoEstimator() = default;
 
-    /// @return The current retransmission timeout in seconds.
+    /**@return The current retransmission timeout in seconds. */
     double rto() const { return rto_; }
 
-    /// @return The current smoothed RTT in seconds.
+    /**@return The current smoothed RTT in seconds. */
     double srtt() const { return srtt_; }
 
-    /// @brief Update the estimator with a new RTT sample (seconds).
+    /**@brief Update the estimator with a new RTT sample (seconds). */
     void update(double rttSample) {
         if (!initialized_) {
             srtt_ = rttSample;
@@ -48,7 +48,7 @@ public:
                           protocol::kMinRtoSeconds, protocol::kMaxRtoSeconds);
     }
 
-    /// @brief Reset the estimator (e.g. after a connection reset).
+    /**@brief Reset the estimator (e.g. after a connection reset). */
     void reset() {
         srtt_ = 0;
         rttvar_ = 0;

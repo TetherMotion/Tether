@@ -1,5 +1,7 @@
-/// @file CncToolpathAnalyzer.cpp
-/// @brief Basic CNC toolpath, chip-load and MRR analysis.
+/**
+ * @file CncToolpathAnalyzer.cpp
+ * @brief Basic CNC toolpath, chip-load and MRR analysis.
+ */
 
 #include "tether/gcode/analysis/CncToolpathAnalyzer.hpp"
 #include "AnalysisUtil.hpp"

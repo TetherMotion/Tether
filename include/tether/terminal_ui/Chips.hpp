@@ -21,7 +21,7 @@
 namespace Tether {
 namespace TUI {
 
-/// Display width of a chip list as drawn by drawChips().
+/**Display width of a chip list as drawn by drawChips(). */
 inline int chipsWidth(std::span<const UI::DisplayCell> cells,
                       bool brackets = true) {
     int w = brackets ? 2 : 0;
@@ -63,7 +63,7 @@ inline int wdrawChips(WINDOW* w, int y, int col,
     return col;
 }
 
-/// stdscr convenience — same as wdrawChips(stdscr, ...).
+/**stdscr convenience — same as wdrawChips(stdscr, ...). */
 inline int drawChips(int y, int col,
                      std::span<const UI::DisplayCell> cells,
                      bool brackets = true) {

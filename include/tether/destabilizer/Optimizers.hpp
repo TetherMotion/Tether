@@ -1,9 +1,11 @@
 #pragma once
-/// @file Optimizers.hpp
-/// @brief Stochastic optimization algorithms for the Destabilizer.
-///
-/// Each optimizer searches over perturbation parameters θ to MAXIMIZE
-/// an instability metric J(θ).
+/**
+ * @file Optimizers.hpp
+ * @brief Stochastic optimization algorithms for the Destabilizer.
+ *
+ * Each optimizer searches over perturbation parameters θ to MAXIMIZE
+ * an instability metric J(θ).
+ */
 
 #include "DestabilizerTypes.hpp"
 #include <vector>
@@ -14,53 +16,69 @@
 
 namespace Destabilizer {
 
-/// Objective function: given θ, returns J(θ).
-/// The Destabilizer engine provides this by running a simulation rollout.
+/**
+ * Objective function: given θ, returns J(θ).
+ * The Destabilizer engine provides this by running a simulation rollout.
+ */
 using ObjectiveFunction = std::function<double(const std::vector<double>&)>;
 
-/// Abstract optimizer base class.
+/**Abstract optimizer base class. */
 class Optimizer {
 public:
     virtual ~Optimizer() = default;
 
-    /// Initialize the optimizer with the problem dimension and config.
-    /// @param dim Number of parameters (theta size).
-    /// @param config Step size, iteration budget and method-specific settings.
-    /// @param seed RNG seed for stochastic methods (deterministic when unused).
+    /**
+     * Initialize the optimizer with the problem dimension and config.
+     * @param dim Number of parameters (theta size).
+     * @param config Step size, iteration budget and method-specific settings.
+     * @param seed RNG seed for stochastic methods (deterministic when unused).
+     */
     virtual void initialize(int dim, const OptimizerConfig& config, uint64_t seed) = 0;
 
-    /// Run one optimization step. Updates theta in-place. Returns current J.
-    /// @param theta Current parameter vector, updated in place.
-    /// @param objective Cost function; lower is better.
-    /// @return Objective value at the new theta.
+    /**
+     * Run one optimization step. Updates theta in-place. Returns current J.
+     * @param theta Current parameter vector, updated in place.
+     * @param objective Cost function; lower is better.
+     * @return Objective value at the new theta.
+     */
     virtual double step(std::vector<double>& theta, const ObjectiveFunction& objective) = 0;
 
-    /// Get current iteration count.
-    /// @return Number of steps taken since initialize().
+    /**
+     * Get current iteration count.
+     * @return Number of steps taken since initialize().
+     */
     virtual int iteration() const = 0;
 
-    /// Get current gradient norm (0 for gradient-free methods).
-    /// @return Norm of the last estimated gradient, or 0 when unavailable.
+    /**
+     * Get current gradient norm (0 for gradient-free methods).
+     * @return Norm of the last estimated gradient, or 0 when unavailable.
+     */
     virtual double gradientNorm() const = 0;
 
-    /// Get current step size / learning rate.
-    /// @return Step size used by the next update.
+    /**
+     * Get current step size / learning rate.
+     * @return Step size used by the next update.
+     */
     virtual double currentStepSize() const = 0;
 
-    /// Get number of function evaluations used in the last step.
-    /// @return Objective evaluations consumed by the previous step().
+    /**
+     * Get number of function evaluations used in the last step.
+     * @return Objective evaluations consumed by the previous step().
+     */
     virtual int lastStepEvaluations() const = 0;
 
-    /// Reset optimizer state.
+    /**Reset optimizer state. */
     virtual void reset() = 0;
 
-    /// Create an optimizer of the given type.
-    /// @param type Optimizer family to instantiate.
-    /// @return Newly constructed optimizer.
+    /**
+     * Create an optimizer of the given type.
+     * @param type Optimizer family to instantiate.
+     * @return Newly constructed optimizer.
+     */
     static std::unique_ptr<Optimizer> create(OptimizerType type);
 };
 
-/// Vanilla SGD with finite-difference gradient estimation.
+/**Vanilla SGD with finite-difference gradient estimation. */
 class VanillaSGDOptimizer : public Optimizer {
 public:
     void initialize(int dim, const OptimizerConfig& config, uint64_t seed) override;
@@ -81,7 +99,7 @@ private:
     std::mt19937_64 rng_;
 };
 
-/// SPSA (Simultaneous Perturbation Stochastic Approximation).
+/**SPSA (Simultaneous Perturbation Stochastic Approximation). */
 class SPSAOptimizer : public Optimizer {
 public:
     void initialize(int dim, const OptimizerConfig& config, uint64_t seed) override;
@@ -101,7 +119,7 @@ private:
     std::mt19937_64 rng_;
 };
 
-/// Adam optimizer with finite-difference or SPSA gradient estimation.
+/**Adam optimizer with finite-difference or SPSA gradient estimation. */
 class AdamOptimizer : public Optimizer {
 public:
     void initialize(int dim, const OptimizerConfig& config, uint64_t seed) override;
@@ -129,7 +147,7 @@ private:
                                             double eps, bool central);
 };
 
-/// CMA-ES (Covariance Matrix Adaptation Evolution Strategy).
+/**CMA-ES (Covariance Matrix Adaptation Evolution Strategy). */
 class CMAESOptimizer : public Optimizer {
 public:
     void initialize(int dim, const OptimizerConfig& config, uint64_t seed) override;
@@ -160,7 +178,7 @@ private:
     bool needsDecomposition_ = true;
 };
 
-/// Cross-Entropy Method (CEM).
+/**Cross-Entropy Method (CEM). */
 class CEMOptimizer : public Optimizer {
 public:
     void initialize(int dim, const OptimizerConfig& config, uint64_t seed) override;
@@ -180,7 +198,7 @@ private:
     std::mt19937_64 rng_;
 };
 
-/// Random search baseline.
+/**Random search baseline. */
 class RandomSearchOptimizer : public Optimizer {
 public:
     void initialize(int dim, const OptimizerConfig& config, uint64_t seed) override;
@@ -200,7 +218,7 @@ private:
     std::mt19937_64 rng_;
 };
 
-/// Coordinate descent over θ components.
+/**Coordinate descent over θ components. */
 class CoordinateDescentOptimizer : public Optimizer {
 public:
     void initialize(int dim, const OptimizerConfig& config, uint64_t seed) override;
@@ -221,7 +239,7 @@ private:
     std::mt19937_64 rng_;
 };
 
-/// (μ, λ) Evolutionary Strategy with mutation and selection.
+/**(μ, λ) Evolutionary Strategy with mutation and selection. */
 class EvolutionaryStrategyOptimizer : public Optimizer {
 public:
     void initialize(int dim, const OptimizerConfig& config, uint64_t seed) override;

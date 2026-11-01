@@ -96,20 +96,20 @@ namespace GCode {
  * @brief Token type enumeration
  */
 enum class LexerTokenType : uint8_t {
-    WORD,           ///< Letter + numeric value (G, M, X, Y, etc.)
-    OCODE_NUMBER,   ///< O followed by number
-    OCODE_NAME,     ///< O&lt;name&gt;
-    OCODE_KEYWORD,  ///< sub, endsub, call, if, etc.
-    PARAMETER,      ///< #\#number or #&lt;name&gt;
-    PARAM_ASSIGN,   ///< #\#number = expr or #&lt;name&gt; = expr
-    EXPRESSION,     ///< [...] bracketed expression
-    COMMENT,        ///< ( ) or ; comment
-    BLOCK_DELETE,   ///< / at line start
-    PERCENT,        ///< % program delimiter
-    KEYVALUE,       ///< KEY=VALUE token (multi-letter key)
-    EOL,            ///< End of line
-    END,            ///< End of input
-    ERROR           ///< Lexer error
+    WORD, /**< Letter + numeric value (G, M, X, Y, etc.) */
+    OCODE_NUMBER, /**< O followed by number */
+    OCODE_NAME, /**< O&lt;name&gt; */
+    OCODE_KEYWORD, /**< sub, endsub, call, if, etc. */
+    PARAMETER, /**< #\#number or #&lt;name&gt; */
+    PARAM_ASSIGN, /**< #\#number = expr or #&lt;name&gt; = expr */
+    EXPRESSION, /**< [...] bracketed expression */
+    COMMENT, /**< ( ) or ; comment */
+    BLOCK_DELETE, /**< / at line start */
+    PERCENT, /**< % program delimiter */
+    KEYVALUE, /**< KEY=VALUE token (multi-letter key) */
+    EOL, /**< End of line */
+    END, /**< End of input */
+    ERROR /**< Lexer error */
 };
 
 /**
@@ -118,44 +118,46 @@ enum class LexerTokenType : uint8_t {
 struct LexerToken {
     LexerTokenType type{LexerTokenType::END};
     
-    /// For WORD tokens: the letter (A-Z)
+    /**For WORD tokens: the letter (A-Z) */
     WordLetter letter{WordLetter::INVALID};
 
-    /// For WORD tokens: the numeric value
+    /**For WORD tokens: the numeric value */
     double value{0.0};
 
-    /// For WORD tokens whose value is an unevaluated expression ([...]) or
-    /// parameter reference (#\#N / #&lt;name&gt;). When true, the parser must
-    /// evaluate `expression` / `paramNumber` / `paramName` to obtain `value`.
+    /**
+     * For WORD tokens whose value is an unevaluated expression ([...]) or
+     * parameter reference (#\#N / #&lt;name&gt;). When true, the parser must
+     * evaluate `expression` / `paramNumber` / `paramName` to obtain `value`.
+     */
     bool wordNeedsEval{false};
     
-    /// For OCODE_NUMBER: the O-code number
+    /**For OCODE_NUMBER: the O-code number */
     int32_t oNumber{-1};
     
-    /// For OCODE_NAME, OCODE_KEYWORD, COMMENT: text content
+    /**For OCODE_NAME, OCODE_KEYWORD, COMMENT: text content */
     std::string text;
     
-    /// For OCODE_KEYWORD: the keyword type
+    /**For OCODE_KEYWORD: the keyword type */
     OCodeType oKeyword{OCodeType::SUB};
     
-    /// For PARAMETER: numbered or named flag
+    /**For PARAMETER: numbered or named flag */
     bool isNamedParam{false};
     int32_t paramNumber{-1};
     std::string paramName;
 
-    /// For KEYVALUE: key and value strings
+    /**For KEYVALUE: key and value strings */
     bool isKeyValue{false};
     std::string kvKey;
     std::string kvValue;
     
-    /// For EXPRESSION: the expression text without brackets
+    /**For EXPRESSION: the expression text without brackets */
     std::string expression;
     
-    /// Source location
+    /**Source location */
     uint32_t line{0};
     uint32_t column{0};
-    size_t offset{0};  ///< Byte offset in source
-    size_t length{0};  ///< Token length in bytes
+    size_t offset{0}; /**< Byte offset in source */
+    size_t length{0}; /**< Token length in bytes */
     
     /**
      * Check if token is valid
@@ -216,25 +218,25 @@ struct HighlightSpan {
  * @brief Lexer configuration options
  */
 struct LexerConfig {
-    /// Allow spaces within numbers (e.g., "10 00" = 1000)
+    /**Allow spaces within numbers (e.g., "10 00" = 1000) */
     bool allowSpacesInNumbers{false};
     
-    /// Case insensitive (convert to uppercase)
+    /**Case insensitive (convert to uppercase) */
     bool caseInsensitive{true};
     
-    /// Allow both () and ; comments
+    /**Allow both () and ; comments */
     bool allowBothCommentStyles{true};
     
-    /// Treat % as program delimiter
+    /**Treat % as program delimiter */
     bool treatPercentAsDelimiter{true};
     
-    /// Allow nested parentheses in comments
+    /**Allow nested parentheses in comments */
     bool allowNestedParentheses{false};
     
-    /// Maximum token length
+    /**Maximum token length */
     size_t maxTokenLength{256};
     
-    /// Skip block delete lines
+    /**Skip block delete lines */
     bool skipBlockDelete{false};
 };
 

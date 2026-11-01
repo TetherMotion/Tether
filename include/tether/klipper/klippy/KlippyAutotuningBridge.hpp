@@ -1,25 +1,27 @@
-/// @file KlippyAutotuningBridge.hpp
-/// @brief Bridge between Klipper heater/accelerometer interfaces and the
-///        Tether autotuning framework.
-///
-/// This bridge allows Klipper's PID_CALIBRATE / M303 and resonance testing
-/// commands to use the full Tether autotuning framework instead of any
-/// inline autotuning code.  All applicable Tether autotuning methods are
-/// supported:
-///
-///   - Relay feedback (Åström-Hägglund) — online
-///   - Ziegler-Nichols (step response & ultimate cycle) — offline
-///   - Cohen-Coon — offline
-///   - Lambda / IMC — offline
-///   - SIMC (Skogestad) — offline
-///   - AMIGO — offline
-///   - Tyreus-Luyben — offline
-///   - Chien-Hrones-Reswick — offline
-///   - Lopez (ITAE/IAE/ISE) — offline
-///
-/// For resonance / input-shaper calibration the bridge uses the Tether
-/// FrequencyResponseAnalyzer and ChirpGenerator from the identification
-/// framework.
+/**
+ * @file KlippyAutotuningBridge.hpp
+ * @brief Bridge between Klipper heater/accelerometer interfaces and the
+ *        Tether autotuning framework.
+ *
+ * This bridge allows Klipper's PID_CALIBRATE / M303 and resonance testing
+ * commands to use the full Tether autotuning framework instead of any
+ * inline autotuning code.  All applicable Tether autotuning methods are
+ * supported:
+ *
+ *   - Relay feedback (Åström-Hägglund) — online
+ *   - Ziegler-Nichols (step response & ultimate cycle) — offline
+ *   - Cohen-Coon — offline
+ *   - Lambda / IMC — offline
+ *   - SIMC (Skogestad) — offline
+ *   - AMIGO — offline
+ *   - Tyreus-Luyben — offline
+ *   - Chien-Hrones-Reswick — offline
+ *   - Lopez (ITAE/IAE/ISE) — offline
+ *
+ * For resonance / input-shaper calibration the bridge uses the Tether
+ * FrequencyResponseAnalyzer and ChirpGenerator from the identification
+ * framework.
+ */
 
 #pragma once
 
@@ -79,23 +81,23 @@ using ::tether::control::Autotuning::ProcessIdentification;
 // Tuning method enumeration (mirrors Tether's available methods)
 // ============================================================================
 
-/// @brief PID autotuning method selector.
+/**@brief PID autotuning method selector. */
 enum class AutotuneMethod {
-    RelayFeedback,          ///< Åström-Hägglund relay feedback (online)
-    ZieglerNicholsStep,     ///< Z-N step response (offline, needs step data)
-    ZieglerNicholsUltimate, ///< Z-N ultimate cycle (offline, needs Ku/Tu)
-    CohenCoon,              ///< Cohen-Coon (offline, needs FOPDT model)
-    Lambda,                 ///< Lambda / IMC tuning (offline)
-    SIMC,                   ///< Skogestad SIMC (offline)
-    AMIGO,                  ///< AMIGO robust tuning (offline)
-    TyreusLuyben,           ///< Conservative ultimate-cycle tuning (offline)
-    ChienHronesReswick,     ///< CHR with overshoot spec (offline)
-    LopezITAE,              ///< ITAE-optimal tuning (offline)
-    LopezIAE,               ///< IAE-optimal tuning (offline)
-    LopezISE,               ///< ISE-optimal tuning (offline)
+    RelayFeedback, /**< Åström-Hägglund relay feedback (online) */
+    ZieglerNicholsStep, /**< Z-N step response (offline, needs step data) */
+    ZieglerNicholsUltimate, /**< Z-N ultimate cycle (offline, needs Ku/Tu) */
+    CohenCoon, /**< Cohen-Coon (offline, needs FOPDT model) */
+    Lambda, /**< Lambda / IMC tuning (offline) */
+    SIMC, /**< Skogestad SIMC (offline) */
+    AMIGO, /**< AMIGO robust tuning (offline) */
+    TyreusLuyben, /**< Conservative ultimate-cycle tuning (offline) */
+    ChienHronesReswick, /**< CHR with overshoot spec (offline) */
+    LopezITAE, /**< ITAE-optimal tuning (offline) */
+    LopezIAE, /**< IAE-optimal tuning (offline) */
+    LopezISE, /**< ISE-optimal tuning (offline) */
 };
 
-/// @brief Convert method enum to string name.
+/**@brief Convert method enum to string name. */
 inline std::string autotuneMethodName(AutotuneMethod m) {
     switch (m) {
         case AutotuneMethod::RelayFeedback:          return "relay_feedback";
@@ -114,8 +116,10 @@ inline std::string autotuneMethodName(AutotuneMethod m) {
     return "unknown";
 }
 
-/// @brief Parse a method name string to enum.
-/// @return Method enum, or RelayFeedback if unknown.
+/**
+ * @brief Parse a method name string to enum.
+ * @return Method enum, or RelayFeedback if unknown.
+ */
 inline AutotuneMethod parseAutotuneMethod(const std::string& name) {
     if (name == "relay_feedback" || name == "relay")          return AutotuneMethod::RelayFeedback;
     if (name == "ziegler_nichols_step" || name == "zn_step")  return AutotuneMethod::ZieglerNicholsStep;
@@ -132,7 +136,7 @@ inline AutotuneMethod parseAutotuneMethod(const std::string& name) {
     return AutotuneMethod::RelayFeedback;
 }
 
-/// @brief Get a list of all supported autotuning method names.
+/**@brief Get a list of all supported autotuning method names. */
 inline std::vector<std::string> listAutotuneMethods() {
     return {
         "relay_feedback", "ziegler_nichols_step", "ziegler_nichols_ultimate",
@@ -145,14 +149,14 @@ inline std::vector<std::string> listAutotuneMethods() {
 // PID Autotuning Result
 // ============================================================================
 
-/// @brief Result of a PID autotuning run.
+/**@brief Result of a PID autotuning run. */
 struct PIDAutotuneResult {
     bool success = false;
     double Kp = 0.0;
     double Ki = 0.0;
     double Kd = 0.0;
-    double Ku = 0.0;  ///< Ultimate gain (if identified)
-    double Tu = 0.0;  ///< Ultimate period (if identified)
+    double Ku = 0.0; /**< Ultimate gain (if identified) */
+    double Tu = 0.0; /**< Ultimate period (if identified) */
     std::string method;
     std::string message;
 };
@@ -161,18 +165,22 @@ struct PIDAutotuneResult {
 // Heater Autotuning Bridge
 // ============================================================================
 
-/// @brief Bridge to run Tether autotuning methods on a Klipper Heater.
-///
-/// The bridge wraps a Heater object and provides:
-///   - Online relay-feedback autotuning (drives the heater in real time)
-///   - Offline autotuning from collected step-response data
-///   - Offline autotuning from a known FOPDT model
-///   - Offline autotuning from known ultimate parameters (Ku, Tu)
+/**
+ * @brief Bridge to run Tether autotuning methods on a Klipper Heater.
+ *
+ * The bridge wraps a Heater object and provides:
+ *   - Online relay-feedback autotuning (drives the heater in real time)
+ *   - Offline autotuning from collected step-response data
+ *   - Offline autotuning from a known FOPDT model
+ *   - Offline autotuning from known ultimate parameters (Ku, Tu)
+ */
 class HeaterAutotuneBridge {
 public:
-    /// @brief Construct the bridge for a specific heater.
-    /// @param heater The heater to tune (must have sensor + PWM callbacks wired).
-    /// @param settingsPID Reference to settings PID params (to store results).
+    /**
+     * @brief Construct the bridge for a specific heater.
+     * @param heater The heater to tune (must have sensor + PWM callbacks wired).
+     * @param settingsPID Reference to settings PID params (to store results).
+     */
     HeaterAutotuneBridge(objects::Heater& heater,
                           double& settingsKp, double& settingsKi, double& settingsKd)
         : heater_(heater)
@@ -184,12 +192,14 @@ public:
     // Online relay-feedback autotuning
     // ------------------------------------------------------------------
 
-    /// @brief Run relay-feedback autotuning on the heater.
-    /// @param targetTemp Target temperature in °C.
-    /// @param cycles Number of oscillation cycles (min 3).
-    /// @param relayAmplitude Relay output amplitude (0.0–1.0 PWM).
-    /// @param rule Tuning rule (ZN, TyreusLuyben, or AMIGO).
-    /// @return Result with PID gains.
+    /**
+     * @brief Run relay-feedback autotuning on the heater.
+     * @param targetTemp Target temperature in °C.
+     * @param cycles Number of oscillation cycles (min 3).
+     * @param relayAmplitude Relay output amplitude (0.0–1.0 PWM).
+     * @param rule Tuning rule (ZN, TyreusLuyben, or AMIGO).
+     * @return Result with PID gains.
+     */
     PIDAutotuneResult runRelayFeedback(
         double targetTemp,
         int cycles = 5,
@@ -266,11 +276,13 @@ public:
     // Offline autotuning from step-response data
     // ------------------------------------------------------------------
 
-    /// @brief Collect step-response data from the heater.
-    /// @param stepPower PWM power to apply for the step (0.0–1.0).
-    /// @param duration Duration of the step test in seconds.
-    /// @param dt Sample interval in seconds.
-    /// @return (time, temperature) pairs.
+    /**
+     * @brief Collect step-response data from the heater.
+     * @param stepPower PWM power to apply for the step (0.0–1.0).
+     * @param duration Duration of the step test in seconds.
+     * @param dt Sample interval in seconds.
+     * @return (time, temperature) pairs.
+     */
     std::vector<std::pair<double, double>> collectStepResponse(
         double stepPower = 0.5,
         double duration = 60.0,
@@ -297,13 +309,15 @@ public:
         return data;
     }
 
-    /// @brief Run offline autotuning from step-response data.
-    /// @param stepData Collected (time, temperature) pairs.
-    /// @param stepPower The power level used for the step.
-    /// @param method Tuning method to apply.
-    /// @param form PID form (Parallel/Standard/Series).
-    /// @param lambda Lambda parameter (for Lambda/SIMC methods, -1 = auto).
-    /// @return Result with PID gains.
+    /**
+     * @brief Run offline autotuning from step-response data.
+     * @param stepData Collected (time, temperature) pairs.
+     * @param stepPower The power level used for the step.
+     * @param method Tuning method to apply.
+     * @param form PID form (Parallel/Standard/Series).
+     * @param lambda Lambda parameter (for Lambda/SIMC methods, -1 = auto).
+     * @return Result with PID gains.
+     */
     PIDAutotuneResult runFromStepResponse(
         const std::vector<std::pair<double, double>>& stepData,
         double stepPower,
@@ -368,12 +382,14 @@ public:
     // Offline autotuning from known ultimate parameters (Ku, Tu)
     // ------------------------------------------------------------------
 
-    /// @brief Run offline autotuning from known ultimate gain and period.
-    /// @param Ku Ultimate gain.
-    /// @param Tu Ultimate period (seconds).
-    /// @param method Tuning method (ZN ultimate, Tyreus-Luyben).
-    /// @param form PID form.
-    /// @return Result with PID gains.
+    /**
+     * @brief Run offline autotuning from known ultimate gain and period.
+     * @param Ku Ultimate gain.
+     * @param Tu Ultimate period (seconds).
+     * @param method Tuning method (ZN ultimate, Tyreus-Luyben).
+     * @param form PID form.
+     * @return Result with PID gains.
+     */
     PIDAutotuneResult runFromUltimateParams(
         double Ku, double Tu,
         AutotuneMethod method,
@@ -416,12 +432,14 @@ public:
     // Offline autotuning from a known FOPDT model
     // ------------------------------------------------------------------
 
-    /// @brief Run offline autotuning from a known FOPDT model.
-    /// @param model FOPDT model (K, tau, L).
-    /// @param method Tuning method.
-    /// @param form PID form.
-    /// @param lambda Lambda parameter (for Lambda/SIMC, -1 = auto).
-    /// @return Result with PID gains.
+    /**
+     * @brief Run offline autotuning from a known FOPDT model.
+     * @param model FOPDT model (K, tau, L).
+     * @param method Tuning method.
+     * @param form PID form.
+     * @param lambda Lambda parameter (for Lambda/SIMC, -1 = auto).
+     * @return Result with PID gains.
+     */
     PIDAutotuneResult runFromModel(
         const FOPDTModel& model,
         AutotuneMethod method,
@@ -467,18 +485,20 @@ public:
     // High-level convenience: run autotune with method selection
     // ------------------------------------------------------------------
 
-    /// @brief Run PID autotuning using the specified method.
-    ///
-    /// For online methods (RelayFeedback), the heater is driven in real time.
-    /// For offline methods, step-response data is collected first, then the
-    /// tuning rule is applied.
-    ///
-    /// @param targetTemp Target temperature in °C.
-    /// @param method Tuning method to use.
-    /// @param cycles Number of cycles (for relay feedback).
-    /// @param form PID form.
-    /// @param lambda Lambda parameter (for Lambda/SIMC).
-    /// @return Result with PID gains.
+    /**
+     * @brief Run PID autotuning using the specified method.
+     *
+     * For online methods (RelayFeedback), the heater is driven in real time.
+     * For offline methods, step-response data is collected first, then the
+     * tuning rule is applied.
+     *
+     * @param targetTemp Target temperature in °C.
+     * @param method Tuning method to use.
+     * @param cycles Number of cycles (for relay feedback).
+     * @param form PID form.
+     * @param lambda Lambda parameter (for Lambda/SIMC).
+     * @return Result with PID gains.
+     */
     PIDAutotuneResult autotune(
         double targetTemp,
         AutotuneMethod method = AutotuneMethod::RelayFeedback,
@@ -506,7 +526,7 @@ private:
     double& settingsKi_;
     double& settingsKd_;
 
-    /// @brief Apply computed gains to the heater and settings.
+    /**@brief Apply computed gains to the heater and settings. */
     void applyGains(const PIDAutotuneResult& result) {
         if (!result.success) return;
         settingsKp_ = result.Kp;
@@ -515,7 +535,7 @@ private:
         heater_.setPIDParams({result.Kp, result.Ki, result.Kd, 100.0, 0.0, 1.0});
     }
 
-    /// @brief Compute PID gains from a FOPDT model using the specified method.
+    /**@brief Compute PID gains from a FOPDT model using the specified method. */
     static PIDGains computeGains(const FOPDTModel& model,
                                   AutotuneMethod method,
                                   PIDForm form,
@@ -564,45 +584,53 @@ private:
 // Resonance / Input-Shaper Calibration Bridge
 // ============================================================================
 
-/// @brief Result of a resonance calibration run.
+/**@brief Result of a resonance calibration run. */
 struct ResonanceCalibrationResult {
     bool success = false;
-    double resonantFreqX = 0.0;  ///< Identified X resonant frequency (Hz)
-    double resonantFreqY = 0.0;  ///< Identified Y resonant frequency (Hz)
-    std::string shaperTypeX;     ///< Recommended X shaper type
-    std::string shaperTypeY;     ///< Recommended Y shaper type
+    double resonantFreqX = 0.0; /**< Identified X resonant frequency (Hz) */
+    double resonantFreqY = 0.0; /**< Identified Y resonant frequency (Hz) */
+    std::string shaperTypeX; /**< Recommended X shaper type */
+    std::string shaperTypeY; /**< Recommended Y shaper type */
     std::vector<Identification::FrequencyResponsePoint> bodeX;
     std::vector<Identification::FrequencyResponsePoint> bodeY;
     std::string message;
 };
 
-/// @brief Bridge for resonance testing and input-shaper calibration.
-///
-/// Uses Tether's FrequencyResponseAnalyzer and ChirpGenerator to perform
-/// frequency-sweep measurements on accelerometer data, then recommends
-/// input shaper parameters.
+/**
+ * @brief Bridge for resonance testing and input-shaper calibration.
+ *
+ * Uses Tether's FrequencyResponseAnalyzer and ChirpGenerator to perform
+ * frequency-sweep measurements on accelerometer data, then recommends
+ * input shaper parameters.
+ */
 class ResonanceCalibrationBridge {
 public:
-    /// @brief Set the accelerometer data source.
-    /// @param accelRead Function that returns current acceleration (x, y, z) in g.
+    /**
+     * @brief Set the accelerometer data source.
+     * @param accelRead Function that returns current acceleration (x, y, z) in g.
+     */
     void setAccelerometerSource(
         std::function<std::array<double, 3>()> accelRead) {
         accelRead_ = std::move(accelRead);
     }
 
-    /// @brief Set the motion callback for generating excitation.
-    /// @param moveCallback Function to move the axis (x_mm, y_mm, z_mm, feedrate).
+    /**
+     * @brief Set the motion callback for generating excitation.
+     * @param moveCallback Function to move the axis (x_mm, y_mm, z_mm, feedrate).
+     */
     void setMoveCallback(
         std::function<void(double, double, double, double)> moveCallback) {
         moveCallback_ = std::move(moveCallback);
     }
 
-    /// @brief Run a resonance sweep on the specified axis.
-    /// @param axis "X" or "Y".
-    /// @param minFreq Start frequency in Hz.
-    /// @param maxFreq End frequency in Hz.
-    /// @param duration Sweep duration in seconds.
-    /// @return Frequency response data.
+    /**
+     * @brief Run a resonance sweep on the specified axis.
+     * @param axis "X" or "Y".
+     * @param minFreq Start frequency in Hz.
+     * @param maxFreq End frequency in Hz.
+     * @param duration Sweep duration in seconds.
+     * @return Frequency response data.
+     */
     std::vector<Identification::FrequencyResponsePoint> runSweep(
         const std::string& axis,
         float minFreq = 5.0f,
@@ -655,9 +683,11 @@ public:
         return results;
     }
 
-    /// @brief Calibrate input shaper from frequency response data.
-    /// @param bode Frequency response data for one axis.
-    /// @return (resonant_freq, recommended_shaper_type)
+    /**
+     * @brief Calibrate input shaper from frequency response data.
+     * @param bode Frequency response data for one axis.
+     * @return (resonant_freq, recommended_shaper_type)
+     */
     static std::pair<double, std::string> calibrateFromBode(
         const std::vector<Identification::FrequencyResponsePoint>& bode) {
 
@@ -691,10 +721,12 @@ public:
         return {resonantFreq, shaperType};
     }
 
-    /// @brief Full calibration: sweep both axes and recommend shaper params.
-    /// @param minFreq Minimum frequency to test.
-    /// @param maxFreq Maximum frequency to test.
-    /// @return Calibration result with recommendations.
+    /**
+     * @brief Full calibration: sweep both axes and recommend shaper params.
+     * @param minFreq Minimum frequency to test.
+     * @param maxFreq Maximum frequency to test.
+     * @return Calibration result with recommendations.
+     */
     ResonanceCalibrationResult calibrate(
         float minFreq = 5.0f,
         float maxFreq = 100.0f) {

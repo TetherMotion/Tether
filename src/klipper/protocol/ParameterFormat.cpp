@@ -34,14 +34,16 @@ std::string FormatSpec::toString() const {
 
 namespace {
 
-/// Skip whitespace in a string view, returning the new position.
+/**Skip whitespace in a string view, returning the new position. */
 size_t skipSpaces(std::string_view s, size_t i) {
     while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
     return i;
 }
 
-/// Parse a "%spec" starting at position @p i (s[i-1] may be '%'); return the
-/// ParamType and advance @p i past the spec.
+/**
+ * Parse a "%spec" starting at position @p i (s[i-1] may be '%'); return the
+ * ParamType and advance @p i past the spec.
+ */
 std::optional<ParamType> parseSpec(std::string_view s, size_t& i) {
     // s[i] should be right after the '%'. Actually we call with i pointing at '%'.
     if (i >= s.size() || s[i] != '%') return std::nullopt;

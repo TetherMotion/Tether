@@ -41,8 +41,10 @@ namespace tether::io::exposers {
 
 class JogExposer : public IParameterExposer {
 public:
-    /// Millisecond clock used for lease deadlines.  Must be the same
-    /// monotonic time source the host passes to JogController::update().
+    /**
+     * Millisecond clock used for lease deadlines.  Must be the same
+     * monotonic time source the host passes to JogController::update().
+     */
     using NowFn = std::function<int64_t()>;
 
     /**
@@ -128,7 +130,7 @@ public:
         }
     }
 
-    /// Default monotonic millisecond clock (steady_clock).
+    /**Default monotonic millisecond clock (steady_clock). */
     static int64_t defaultClock() {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
                    std::chrono::steady_clock::now().time_since_epoch())

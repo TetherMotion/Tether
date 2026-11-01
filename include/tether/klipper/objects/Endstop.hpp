@@ -14,7 +14,7 @@ namespace tether::klipper::objects {
 // Endstop
 // ============================================================================
 
-/// @brief Endstop peripheral.
+/**@brief Endstop peripheral. */
 class Endstop {
 public:
     using PinReadFunc = std::function<bool()>;
@@ -25,22 +25,22 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Check if endstop is currently triggered.
+    /**@brief Check if endstop is currently triggered. */
     bool triggered() const { return pinRead_ ? pinRead_() : false; }
 
-    /// @brief Set the pin read function.
+    /**@brief Set the pin read function. */
     void setPinReadFunc(PinReadFunc func) { pinRead_ = std::move(func); }
 
-    /// @brief Set the sample count for debouncing.
+    /**@brief Set the sample count for debouncing. */
     void setSampleCount(int count) { sampleCount_ = count; }
 
-    /// @brief Get the sample count.
+    /**@brief Get the sample count. */
     int sampleCount() const { return sampleCount_; }
 
-    /// @brief Set the endstop state directly (for testing/simulation).
+    /**@brief Set the endstop state directly (for testing/simulation). */
     void setState(uint32_t triggered) { state_ = triggered != 0; }
 
-    /// @brief Get the endstop state.
+    /**@brief Get the endstop state. */
     uint32_t state() const { return state_ ? 1u : 0u; }
 
 private:
@@ -54,7 +54,7 @@ private:
 // Endstop proxy
 // ============================================================================
 
-/// @brief Proxy for Endstop that allows setting state.
+/**@brief Proxy for Endstop that allows setting state. */
 class EndstopProxy {
 public:
     explicit EndstopProxy(uint8_t oid) : oid_(oid) {}

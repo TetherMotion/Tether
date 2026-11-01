@@ -71,8 +71,10 @@ public:
             : identity(id), create(std::move(f)) {}
     };
 
-    /// Construct bound to a started master.  Performs no bus I/O —
-    /// call detect()/attach() to populate the chain.
+    /**
+     * Construct bound to a started master.  Performs no bus I/O —
+     * call detect()/attach() to populate the chain.
+     */
     explicit MultiCombinedIoTerminal(Master& master) : master_(master) {}
 
     ~MultiCombinedIoTerminal() { stop(); }
@@ -81,7 +83,7 @@ public:
     MultiCombinedIoTerminal(const MultiCombinedIoTerminal&)            = delete;
     MultiCombinedIoTerminal& operator=(const MultiCombinedIoTerminal&) = delete;
 
-    /// All combined-I/O devices known to this driver (ESI-verified).
+    /**All combined-I/O devices known to this driver (ESI-verified). */
     static std::span<const DeviceIdentity> knownDevices() {
         return std::span<const DeviceIdentity>(
             Devices::kCombinedIoTerminals.data(),
@@ -99,30 +101,32 @@ public:
         return detect(knownDevices(), shallowScan());
     }
 
-    /// Detect only the given identities (own bus scan).
+    /**Detect only the given identities (own bus scan). */
     Result<size_t> detect(std::span<const DeviceIdentity> devices) {
         return detect(devices, shallowScan());
     }
 
-    /// Detect with custom matchers (own bus scan).
+    /**Detect with custom matchers (own bus scan). */
     Result<size_t> detect(std::span<const DeviceMatcher> matchers) {
         return detect(matchers, shallowScan());
     }
 
-    /// Populate the chain from an existing discovery result (all known
-    /// identities).
+    /**
+     * Populate the chain from an existing discovery result (all known
+     * identities).
+     */
     Result<size_t> detect(std::span<const DiscoveredSlave> scan) {
         return detect(knownDevices(), scan);
     }
 
-    /// Detect only the given identities, reusing an existing scan.
+    /**Detect only the given identities, reusing an existing scan. */
     Result<size_t> detect(std::span<const DeviceIdentity> devices,
                           std::span<const DiscoveredSlave> scan) {
         const auto matchers = makeMatchers(devices);
         return detect(std::span<const DeviceMatcher>(matchers), scan);
     }
 
-    /// Detect with custom matchers, reusing an existing scan.
+    /**Detect with custom matchers, reusing an existing scan. */
     Result<size_t> detect(std::span<const DeviceMatcher> matchers,
                           std::span<const DiscoveredSlave> scan) {
         modules_.clear();
@@ -159,21 +163,21 @@ public:
 
     // -- Chain layout ---------------------------------------------------------------
 
-    /// Number of devices in the chain.
+    /**Number of devices in the chain. */
     size_t moduleCount() const { return modules_.size(); }
 
-    /// Total input/output channel counts across all devices.
+    /**Total input/output channel counts across all devices. */
     size_t inputChannelCount()  const { return total_in_; }
     size_t outputChannelCount() const { return total_out_; }
 
-    /// Access one chain device (throws std::out_of_range).
+    /**Access one chain device (throws std::out_of_range). */
     ICombinedIoTerminal&       module(size_t i)       { return *modules_.at(i); }
     const ICombinedIoTerminal& module(size_t i) const { return *modules_.at(i); }
 
-    /// Bus position of chain device `i`.
+    /**Bus position of chain device `i`. */
     uint16_t slaveIndex(size_t i) const { return modules_.at(i)->slaveIndex(); }
 
-    /// Flat offsets where device `i`'s inputs/outputs begin.
+    /**Flat offsets where device `i`'s inputs/outputs begin. */
     size_t inputOffset(size_t i)  const { return in_offsets_.at(i); }
     size_t outputOffset(size_t i) const { return out_offsets_.at(i); }
 
@@ -219,7 +223,7 @@ public:
         return {};
     }
 
-    /// Stop the RT loop if we started it.
+    /**Stop the RT loop if we started it. */
     void stop() {
         if (loop_started_) {
             Tether::Platform::Clock::instance().delayMilliseconds(20);
@@ -228,18 +232,18 @@ public:
         }
     }
 
-    /// Index of the device that produced the last error (SIZE_MAX if none).
+    /**Index of the device that produced the last error (SIZE_MAX if none). */
     size_t lastErrorModule() const { return last_error_module_; }
 
     // -- Introspection for app-managed loops ---------------------------------------------
 
-    /// The chain's dedicated PDO manager (created by configure()/start()).
+    /**The chain's dedicated PDO manager (created by configure()/start()). */
     PDOManager* pdoManager() const { return group_pdo_; }
 
-    /// The chain's logical address manager (same lifetime as pdoManager()).
+    /**The chain's logical address manager (same lifetime as pdoManager()). */
     LogicalAddressManager* logicalAddressManager() const { return group_lam_; }
 
-    /// Base of the chain's logical address space (0 before configure()).
+    /**Base of the chain's logical address space (0 before configure()). */
     uint32_t baseLogicalAddress() const {
         return group_lam_ ? group_lam_->getBaseLogicalAddress() : 0;
     }
@@ -248,37 +252,37 @@ public:
     // Global numbering: flat bit i maps to the device whose
     // [offset, offset + count) range contains i.
 
-    /// Latest state of flat input bit `i` (throws std::out_of_range).
+    /**Latest state of flat input bit `i` (throws std::out_of_range). */
     bool input(size_t i) const {
         const size_t m = locate(in_offsets_, total_in_, i);
         return modules_[m]->input(i - in_offsets_[m]);
     }
 
-    /// Write flat output bit `i` (throws std::out_of_range).
+    /**Write flat output bit `i` (throws std::out_of_range). */
     void setOutput(size_t i, bool on) {
         const size_t m = locate(out_offsets_, total_out_, i);
         modules_[m]->setOutput(i - out_offsets_[m], on);
     }
 
-    /// Read-back of flat output bit `i` (throws std::out_of_range).
+    /**Read-back of flat output bit `i` (throws std::out_of_range). */
     bool output(size_t i) const {
         const size_t m = locate(out_offsets_, total_out_, i);
         return modules_[m]->output(i - out_offsets_[m]);
     }
 
-    /// Clear every device's output image.
+    /**Clear every device's output image. */
     void allOutputsOff() {
         for (auto& m : modules_) m->allOutputsOff();
     }
 
 protected:
-    /// Shallow vendor/product scan used by detect() variants and subclasses.
+    /**Shallow vendor/product scan used by detect() variants and subclasses. */
     std::vector<DiscoveredSlave> shallowScan() {
         return master_.discovery().discover(
             {DiscoveryOption::VendorId, DiscoveryOption::ProductCode});
     }
 
-    /// Bound master (for subclasses).
+    /**Bound master (for subclasses). */
     Master& master() { return master_; }
 
 private:
@@ -290,8 +294,10 @@ private:
         return out;
     }
 
-    /// Sort devices by bus position and rebuild the flat channel layout,
-    /// dropping devices that would overflow MaxBits per direction.
+    /**
+     * Sort devices by bus position and rebuild the flat channel layout,
+     * dropping devices that would overflow MaxBits per direction.
+     */
     void rebuildLayout() {
         std::stable_sort(modules_.begin(), modules_.end(),
             [](const auto& a, const auto& b) {
@@ -316,7 +322,7 @@ private:
         out_offsets_.resize(used);
     }
 
-    /// Find the device covering flat bit `i` (throws std::out_of_range).
+    /**Find the device covering flat bit `i` (throws std::out_of_range). */
     static size_t locate(const std::vector<size_t>& offsets,
                          size_t total, size_t i) {
         if (i >= total) {
@@ -326,7 +332,7 @@ private:
         return static_cast<size_t>(std::distance(offsets.begin(), it)) - 1;
     }
 
-    /// Group + shared logical map + FMMU programming, up to SAFE-OP.
+    /**Group + shared logical map + FMMU programming, up to SAFE-OP. */
     Result<> configureChain(const StartOptions& opts) {
         if (configured_) return {};
         if (modules_.empty()) return std::unexpected(Error::NoDeviceFound);

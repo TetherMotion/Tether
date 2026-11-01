@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file PrinterObjectsSensors.hpp
-/// @brief Sensor printer objects (temperature_sensor, filament sensors, load_cell, etc.)
+/**
+ * @file PrinterObjectsSensors.hpp
+ * @brief Sensor printer objects (temperature_sensor, filament sensors, load_cell, etc.)
+ */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 #include "tether/klipper/objects/Thermal.hpp"
@@ -18,7 +20,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief The temperature_sensor printer object.
+/**@brief The temperature_sensor printer object. */
 class TemperatureSensorObject : public PrinterObject {
 public:
     explicit TemperatureSensorObject(const std::string& name,
@@ -58,7 +60,7 @@ private:
     double maxTemp_ = NAN;
 };
 
-/// @brief The filament_switch_sensor printer object.
+/**@brief The filament_switch_sensor printer object. */
 class FilamentSwitchSensorObject : public PrinterObject {
 public:
     explicit FilamentSwitchSensorObject(const std::string& name,
@@ -93,7 +95,7 @@ private:
     bool enabled_ = true;
 };
 
-/// @brief Analog input printer object.
+/**@brief Analog input printer object. */
 class AnalogInObject : public PrinterObject {
 public:
     explicit AnalogInObject(std::shared_ptr<objects::AnalogIn> dev,
@@ -120,7 +122,7 @@ private:
     std::string name_;
 };
 
-/// @brief Hall filament sensor printer object.
+/**@brief Hall filament sensor printer object. */
 class HallFilamentSensorObject : public PrinterObject {
 public:
     explicit HallFilamentSensorObject(std::shared_ptr<objects::HallFilamentSensor> dev,
@@ -148,7 +150,7 @@ private:
     std::string name_;
 };
 
-/// @brief Pulse counter printer object.
+/**@brief Pulse counter printer object. */
 class PulseCounterObject : public PrinterObject {
 public:
     explicit PulseCounterObject(std::shared_ptr<objects::PulseCounter> dev,
@@ -176,7 +178,7 @@ private:
     std::string name_;
 };
 
-/// @brief Filament motion sensor printer object (filament_motion_sensor).
+/**@brief Filament motion sensor printer object (filament_motion_sensor). */
 class FilamentMotionSensorObject : public PrinterObject {
 public:
     explicit FilamentMotionSensorObject(const std::string& name) : name_(name) {}
@@ -210,7 +212,7 @@ private:
     double detectionDistance_ = 7.0;
 };
 
-/// @brief Load cell printer object (load_cell).
+/**@brief Load cell printer object (load_cell). */
 class LoadCellObject : public PrinterObject {
 public:
     explicit LoadCellObject(const std::string& name) : name_(name) {}
@@ -245,7 +247,7 @@ private:
     double maxLoad_ = 0.0;
 };
 
-/// @brief Angle sensor printer object (angle).
+/**@brief Angle sensor printer object (angle). */
 class AngleObject : public PrinterObject {
 public:
     explicit AngleObject(const std::string& name) : name_(name) {}

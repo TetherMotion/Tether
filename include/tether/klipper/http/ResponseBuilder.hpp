@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file ResponseBuilder.hpp
-/// @brief Helpers for building Moonraker-compatible HTTP/JSON-RPC responses.
+/**
+ * @file ResponseBuilder.hpp
+ * @brief Helpers for building Moonraker-compatible HTTP/JSON-RPC responses.
+ */
 
 #include "tether/klipper/klippy/JsonValue.hpp"
 #include "tether/klipper/http/GlazeAdapter.hpp"
@@ -11,7 +13,7 @@
 
 namespace tether::klipper::http {
 
-/// @brief Moonraker JSON-RPC error codes.
+/**@brief Moonraker JSON-RPC error codes. */
 enum class RpcErrorCode : int {
     ParseError = -32700,
     InvalidRequest = -32600,
@@ -29,14 +31,14 @@ enum class RpcErrorCode : int {
     ServiceUnavailable = 503,
 };
 
-/// @brief Build a Moonraker-style success response envelope: {"result": ...}
+/**@brief Build a Moonraker-style success response envelope: {"result": ...} */
 inline std::string buildSuccessResponse(const klippy::JsonValue& result) {
     std::map<std::string, klippy::JsonValue> envelope;
     envelope["result"] = result;
     return dumpJson(klippy::JsonValue(envelope));
 }
 
-/// @brief Build a Moonraker-style error response envelope: {"error": {...}}
+/**@brief Build a Moonraker-style error response envelope: {"error": {...}} */
 inline std::string buildErrorResponse(int code, const std::string& message) {
     std::map<std::string, klippy::JsonValue> err;
     err["code"] = klippy::JsonValue(static_cast<int64_t>(code));
@@ -46,7 +48,7 @@ inline std::string buildErrorResponse(int code, const std::string& message) {
     return dumpJson(klippy::JsonValue(envelope));
 }
 
-/// @brief Build a JSON-RPC 2.0 success response.
+/**@brief Build a JSON-RPC 2.0 success response. */
 inline std::string buildJsonRpcSuccess(const klippy::JsonValue& id,
                                         const klippy::JsonValue& result) {
     std::map<std::string, klippy::JsonValue> resp;
@@ -56,7 +58,7 @@ inline std::string buildJsonRpcSuccess(const klippy::JsonValue& id,
     return dumpJson(klippy::JsonValue(resp));
 }
 
-/// @brief Build a JSON-RPC 2.0 error response.
+/**@brief Build a JSON-RPC 2.0 error response. */
 inline std::string buildJsonRpcError(const klippy::JsonValue& id,
                                       int code, const std::string& message) {
     std::map<std::string, klippy::JsonValue> err;
@@ -69,7 +71,7 @@ inline std::string buildJsonRpcError(const klippy::JsonValue& id,
     return dumpJson(klippy::JsonValue(resp));
 }
 
-/// @brief Build a JSON-RPC 2.0 notification (no id, method + params).
+/**@brief Build a JSON-RPC 2.0 notification (no id, method + params). */
 inline std::string buildJsonRpcNotification(const std::string& method,
                                              const klippy::JsonValue& params) {
     std::map<std::string, klippy::JsonValue> msg;

@@ -13,7 +13,7 @@ namespace tether::motion::profile_renurbs {
 
 namespace detail {
 
-/// Evaluate a 1-D NurbsCurve at parameter u, returning the scalar value.
+/**Evaluate a 1-D NurbsCurve at parameter u, returning the scalar value. */
 inline double evalScalarCurve(const std::optional<NurbsCurve>& curve, double u) {
     if (!curve) return 0.0;
     const double uMin = curve->knotMin();
@@ -24,7 +24,7 @@ inline double evalScalarCurve(const std::optional<NurbsCurve>& curve, double u) 
     return curve->evaluate(uu)[0];
 }
 
-/// Interpolate a value at normalized parameter u from sample arrays.
+/**Interpolate a value at normalized parameter u from sample arrays. */
 inline double interpAtU(
     const std::vector<double>& sampleU,
     const std::vector<double>& sampleVal,
@@ -39,7 +39,7 @@ inline double interpAtU(
     return sampleVal[idx-1] * (1.0 - alpha) + sampleVal[idx] * alpha;
 }
 
-/// Check a quantity curve against its limit on a dense grid.
+/**Check a quantity curve against its limit on a dense grid. */
 inline std::vector<GenericViolation> checkQuantityConstraint(
     const GenericSegmentProfile& seg,
     std::size_t quantityIndex,
@@ -126,11 +126,11 @@ inline std::vector<GenericViolation> checkQuantityConstraint(
     return violations;
 }
 
-/// Collect per-segment samples for certification (parameter + limits).
+/**Collect per-segment samples for certification (parameter + limits). */
 struct CertSegmentSamples {
     std::vector<double> u;
-    std::vector<double> param;  ///< absolute parameter values
-    std::vector<std::vector<double>> limits;  ///< per-quantity limits
+    std::vector<double> param; /**< absolute parameter values */
+    std::vector<std::vector<double>> limits; /**< per-quantity limits */
 };
 
 inline CertSegmentSamples collectCertSamples(

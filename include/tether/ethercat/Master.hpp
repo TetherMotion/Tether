@@ -109,11 +109,13 @@ class SlaveRegistry;
 
 class Master;
 
-/// Factory for the private Master::MasterSDOTransport adapter
-/// (defined in src/ethercat/raw/MasterTransports.cpp).  Friended below so
-/// it can name the private nested class.
-/// @param master Master whose raw SDO path the adapter forwards to.
-/// @return Transport usable with CoE::CoEManager / profile objects.
+/**
+ * Factory for the private Master::MasterSDOTransport adapter
+ * (defined in src/ethercat/raw/MasterTransports.cpp).  Friended below so
+ * it can name the private nested class.
+ * @param master Master whose raw SDO path the adapter forwards to.
+ * @return Transport usable with CoE::CoEManager / profile objects.
+ */
 std::unique_ptr<SDO::ISDOTransport> makeMasterSDOTransport(Master& master);
 
 // ============================================================================
@@ -332,13 +334,17 @@ public:
     // Uses the reserved-index cyclic fast path for the PDO exchange when the
     // transport supports it (responses deposited into fixed slots — no
     // TransactionRouter round-trip).
-    /// Which CPUs to claim for the RT threads (opt-in runtime isolation).
+    /**Which CPUs to claim for the RT threads (opt-in runtime isolation). */
 
-    /// Granular memory locking — each flag is an independent opt-out.
-    /// Locking is best-effort: failures are logged, never fatal.
+    /**
+     * Granular memory locking — each flag is an independent opt-out.
+     * Locking is best-effort: failures are logged, never fatal.
+     */
 
-    /// Where in the phase pipeline the exchange's collect half runs when
-    /// split_exchange is set.  Atomic keeps send+collect in one step.
+    /**
+     * Where in the phase pipeline the exchange's collect half runs when
+     * split_exchange is set.  Atomic keeps send+collect in one step.
+     */
 
 
     /**
@@ -364,9 +370,9 @@ public:
             }
             return *this;
         }
-        /// true while the guard owns a running loop.
+        /**true while the guard owns a running loop. */
         explicit operator bool() const { return master_ != nullptr; }
-        /// Stop early; safe to call explicitly (destructor then no-ops).
+        /**Stop early; safe to call explicitly (destructor then no-ops). */
         void stop() {
             if (master_) { master_->stopCyclicLoop(); master_ = nullptr; }
         }
@@ -388,10 +394,12 @@ public:
      * loop — starting one stops the other.
      */
 
-    /// Process image — valid once the cyclic loop is running with an
-    /// image_mode other than Buffered.  Safe to cache the reference;
-    /// epoch() changes on re-configuration.
-    /// @return Mutable process image shared with the cyclic loop.
+    /**
+     * Process image — valid once the cyclic loop is running with an
+     * image_mode other than Buffered.  Safe to cache the reference;
+     * epoch() changes on re-configuration.
+     * @return Mutable process image shared with the cyclic loop.
+     */
     ProcessImage&       processImage();
     const ProcessImage& processImage() const;
     bool startCyclicLoop() { return startCyclicLoop(CyclicLoopConfig{}); }
@@ -458,13 +466,17 @@ public:
      */
     bool suspendCyclicExchange(uint32_t timeout_us = 20'000);
     void resumeCyclicExchange();
-    /// True while the exchange is suspended by suspendCyclicExchange().
-    /// @return true between a successful suspend and its resume.
+    /**
+     * True while the exchange is suspended by suspendCyclicExchange().
+     * @return true between a successful suspend and its resume.
+     */
     bool cyclicExchangeSuspended() const;
 
-    /// Async send-on-change loop — see AsyncLoopConfig.  Explicitly
-    /// separate from startCyclicLoop: the user chooses the loop model.
-    /// @return true when the async loop started.
+    /**
+     * Async send-on-change loop — see AsyncLoopConfig.  Explicitly
+     * separate from startCyclicLoop: the user chooses the loop model.
+     * @return true when the async loop started.
+     */
     bool startAsyncLoop() { return startAsyncLoop(AsyncLoopConfig{}); }
     bool startAsyncLoop(const AsyncLoopConfig& config);
     void stopAsyncLoop();
@@ -510,9 +522,11 @@ public:
      */
     std::string txFailureDiagnostics();
 
-    /// @return errno of the most recent failed TX send attempt (0 = none so far).
-    /// The kernel's own verdict: ENOBUFS = TX ring wedged / carrier lost,
-    /// ENETDOWN = interface down, ENODEV = interface gone.
+    /**
+     * @return errno of the most recent failed TX send attempt (0 = none so far).
+     * The kernel's own verdict: ENOBUFS = TX ring wedged / carrier lost,
+     * ENETDOWN = interface down, ENODEV = interface gone.
+     */
     int lastTxErrno() const {
         return last_tx_errno_.load(std::memory_order_relaxed);
     }
@@ -722,11 +736,13 @@ public:
                             const void* data, uint16_t datalen,
                             bool roundtrip);
 
-    /// Pack multiple datagrams into one or more Ethernet frames and send immediately.
-    /// Auto-splits across frames if total exceeds 1514 bytes.
-    /// @param specs Array of datagram specifications
-    /// @param count Number of specs
-    /// @return Number of frames sent, or 0 on failure
+    /**
+     * Pack multiple datagrams into one or more Ethernet frames and send immediately.
+     * Auto-splits across frames if total exceeds 1514 bytes.
+     * @param specs Array of datagram specifications
+     * @param count Number of specs
+     * @return Number of frames sent, or 0 on failure
+     */
     size_t sendMultiDatagram(const MultiDatagramSpec* specs, size_t count);
 
     bool writeRegister(SlaveAddress slave_address, RegisterAddress register_address,
@@ -1088,13 +1104,15 @@ public:
                         unsigned int poll_interval_ms = 5,
                         unsigned int transaction_timeout_ms = 1000);
 
-    /// @brief Return the CoE SDO abort code reported by the slave on the most
-    /// recent coeSdoUpload/coeSdoDownload call. 0 means no abort (success or
-    /// a non-abort failure such as a transport/timeout error). Read this
-    /// immediately after a call returns false to distinguish a definitive
-    /// slave rejection (e.g. 0x06070010 length mismatch) from a transport
-    /// issue.
-    /// @return CoE abort code of the most recent SDO call (0 = none).
+    /**
+     * @brief Return the CoE SDO abort code reported by the slave on the most
+     * recent coeSdoUpload/coeSdoDownload call. 0 means no abort (success or
+     * a non-abort failure such as a transport/timeout error). Read this
+     * immediately after a call returns false to distinguish a definitive
+     * slave rejection (e.g. 0x06070010 length mismatch) from a transport
+     * issue.
+     * @return CoE abort code of the most recent SDO call (0 = none).
+     */
     uint32_t lastCoeSdoAbortCode() const;
 
     // ---- Utilities (stateless) ---------------------------------------------
@@ -1139,33 +1157,41 @@ public:
     // pair with its own logical address space and assign specific
     // slaves to it.
 
-    /// Returns the PDOManager that covers the given slave.
-    /// By default this is the default pdo(); after createPdoGroup() it
-    /// may be a group-specific manager.
-    /// @param slave_index Slave index (0-based).
-    /// @return Manager owning that slave's PDO mapping.
+    /**
+     * Returns the PDOManager that covers the given slave.
+     * By default this is the default pdo(); after createPdoGroup() it
+     * may be a group-specific manager.
+     * @param slave_index Slave index (0-based).
+     * @return Manager owning that slave's PDO mapping.
+     */
     PDOManager&     pdoForSlave(uint16_t slave_index);
 
-    /// Returns the LogicalAddressManager that covers the given slave.
-    /// By default this is the default logicalAddressManager(); after
-    /// createPdoGroup() it may be a group-specific LAM.
-    /// @param slave_index Slave index (0-based).
-    /// @return Manager owning that slave's logical address space.
+    /**
+     * Returns the LogicalAddressManager that covers the given slave.
+     * By default this is the default logicalAddressManager(); after
+     * createPdoGroup() it may be a group-specific LAM.
+     * @param slave_index Slave index (0-based).
+     * @return Manager owning that slave's logical address space.
+     */
     LogicalAddressManager& logicalAddressManagerForSlave(uint16_t slave_index);
 
-    /// Create a new PDOManager + LogicalAddressManager pair with its
-    /// own logical address space, and assign the given slaves to it.
-    ///
-    /// @param slave_indices  Slaves to assign to this group
-    /// @param base_logical_addr  Base logical address for this group's
-    ///                           LRW datagrams (must not overlap with
-    ///                           other groups; default 0x10000)
-    /// @return Reference to the new PDOManager
+    /**
+     * Create a new PDOManager + LogicalAddressManager pair with its
+     * own logical address space, and assign the given slaves to it.
+     *
+     * @param slave_indices  Slaves to assign to this group
+     * @param base_logical_addr  Base logical address for this group's
+     *                           LRW datagrams (must not overlap with
+     *                           other groups; default 0x10000)
+     * @return Reference to the new PDOManager
+     */
     PDOManager&     createPdoGroup(const std::vector<uint16_t>& slave_indices,
                                    uint32_t base_logical_addr = 0x10000);
 
-    /// Access the list of additional PDO groups (for iteration by the
-    /// DC real-time loop or custom exchange loops).
+    /**
+     * Access the list of additional PDO groups (for iteration by the
+     * DC real-time loop or custom exchange loops).
+     */
     struct PdoGroup {
         std::unique_ptr<IPDOTransport>         transport;
         std::unique_ptr<PDOManager>            pdo;
@@ -1255,11 +1281,13 @@ public:
     // maps to the dedicated DC-timepoint index 0xFF.
     bool     supportsCyclicFastPath() const { return static_cast<bool>(iface_.send); }
     uint64_t cyclicSlotToken(uint8_t slot) const;
-    /// Generation bit of the last datagram sent on @p slot — the echo
-    /// distinguishes a fresh response from a stale deposit that outlived
-    /// its cycle's timeout (stale-deposit ABA guard).
-    /// @param slot Cyclic slot index.
-    /// @return Generation bit of the last datagram sent on @p slot.
+    /**
+     * Generation bit of the last datagram sent on @p slot — the echo
+     * distinguishes a fresh response from a stale deposit that outlived
+     * its cycle's timeout (stale-deposit ABA guard).
+     * @param slot Cyclic slot index.
+     * @return Generation bit of the last datagram sent on @p slot.
+     */
     uint8_t  cyclicSlotGen(uint8_t slot) const;
     bool     sendCyclicDatagram(Command cmd, uint8_t slot,
                                 uint16_t adp, uint16_t ado,
@@ -1275,22 +1303,28 @@ public:
      * @return true when the frame was handed to the wire.
      */
     bool     sendCyclicFrame(uint32_t frame_len);
-    /// Wire-offset of the first datagram's payload in a cyclic frame
-    /// (eth 14 + ecat-hdr 2 + dg-hdr 10).
+    /**
+     * Wire-offset of the first datagram's payload in a cyclic frame
+     * (eth 14 + ecat-hdr 2 + dg-hdr 10).
+     */
     static constexpr uint32_t kCyclicFramePayloadOff = 26;
-    /// Acquire the channel's next TX frame (Rotating mode).
-    /// @return Pointer to the frame buffer, or nullptr when none is free.
+    /**
+     * Acquire the channel's next TX frame (Rotating mode).
+     * @return Pointer to the frame buffer, or nullptr when none is free.
+     */
     uint8_t* acquireCyclicTxFrame();
 
     bool     waitCyclicSlot(uint8_t slot, uint64_t token,
                             uint32_t timeout_ns, RxDatagram& out);
-    /// View-returning variant — payload points into the slot's inline
-    /// buffer (copy path) or into channel ring/bank memory (view path).
-    /// @param slot Cyclic slot index to wait on.
-    /// @param token Sequence token the deposit must be newer than.
-    /// @param timeout_ns Deadline in nanoseconds.
-    /// @param out Receives the deposited datagram view on success.
-    /// @return true when a fresh deposit arrived before the deadline.
+    /**
+     * View-returning variant — payload points into the slot's inline
+     * buffer (copy path) or into channel ring/bank memory (view path).
+     * @param slot Cyclic slot index to wait on.
+     * @param token Sequence token the deposit must be newer than.
+     * @param timeout_ns Deadline in nanoseconds.
+     * @param out Receives the deposited datagram view on success.
+     * @return true when a fresh deposit arrived before the deadline.
+     */
     bool     waitCyclicSlotView(uint8_t slot, uint64_t token,
                                 uint32_t timeout_ns, CyclicSlotView& out);
     /**
@@ -1310,24 +1344,30 @@ public:
      */
     uint32_t waitCyclicSlotMask(uint32_t slot_mask, const uint64_t* tokens,
                                 uint32_t timeout_ns, CyclicSlotView* views);
-    /// Compose [eth][ecat][dg-hdr] into an acquired frame buffer
-    /// (Rotating image mode).
-    /// @param frame Frame buffer from acquireCyclicTxFrame().
-    /// @param cmd EtherCAT command (usually LRW).
-    /// @param slot Cyclic slot index baked into the header.
-    /// @param adp Auto-increment position (0 for logical addressing).
-    /// @param ado Auto-increment offset / logical address.
-    /// @param datalen Payload length in bytes.
-    /// @param roundtrip true to request the reply in the same frame.
+    /**
+     * Compose [eth][ecat][dg-hdr] into an acquired frame buffer
+     * (Rotating image mode).
+     * @param frame Frame buffer from acquireCyclicTxFrame().
+     * @param cmd EtherCAT command (usually LRW).
+     * @param slot Cyclic slot index baked into the header.
+     * @param adp Auto-increment position (0 for logical addressing).
+     * @param ado Auto-increment offset / logical address.
+     * @param datalen Payload length in bytes.
+     * @param roundtrip true to request the reply in the same frame.
+     */
     void     composeCyclicHeader(uint8_t* frame, Command cmd, uint8_t slot,
                                  uint16_t adp, uint16_t ado, uint16_t datalen,
                                  bool roundtrip);
-    /// Byte offset of the first datagram's payload in a composed cyclic
-    /// frame — 26 untagged, 30 when a TX VLAN tag is baked into headers.
-    /// @return Payload offset in bytes.
+    /**
+     * Byte offset of the first datagram's payload in a composed cyclic
+     * frame — 26 untagged, 30 when a TX VLAN tag is baked into headers.
+     * @return Payload offset in bytes.
+     */
     uint32_t cyclicPayloadOffset() const;
-    /// Channel accessor for the process image / transport adapter.
-    /// @return Active cyclic channel, or nullptr when none is configured.
+    /**
+     * Channel accessor for the process image / transport adapter.
+     * @return Active cyclic channel, or nullptr when none is configured.
+     */
     ICyclicChannel* cyclicChannel() const;
 
     /**
@@ -1366,10 +1406,12 @@ public:
     // the cyclic image slots, demultiplexed by the same socket filter.
     uint64_t sliceSlotToken(uint8_t slice) const;
     uint8_t  sliceSlotGen(uint8_t slice) const;
-    /// Claim/release a slice slot on the shared datapath pool — used by
-    /// LogicalAddressManager::replanSlices() so that PDO groups (each
-    /// with its own LAM) never collide on the same wire idx.
-    /// @return slot index in [0, kNumSliceSlots), or -1 if exhausted.
+    /**
+     * Claim/release a slice slot on the shared datapath pool — used by
+     * LogicalAddressManager::replanSlices() so that PDO groups (each
+     * with its own LAM) never collide on the same wire idx.
+     * @return slot index in [0, kNumSliceSlots), or -1 if exhausted.
+     */
     int      acquireSliceSlot();
     void     releaseSliceSlot(uint8_t slice);
     bool     sendSliceDatagram(Command cmd, uint8_t slice_slot,
@@ -1396,10 +1438,10 @@ public:
     // ---- Frame capacity ----------------------------------------------------
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION
-    /// @return max EtherCAT payload bytes per frame, accounting for UDP overhead.
+    /**@return max EtherCAT payload bytes per frame, accounting for UDP overhead. */
     size_t maxEtherCATPayloadPerFrame() const;
 #else
-    /// @return max EtherCAT payload bytes per frame.
+    /**@return max EtherCAT payload bytes per frame. */
     size_t maxEtherCATPayloadPerFrame() const {
         if (!transport_) return 1498;
         return transport_->maxEtherCATPayloadPerFrame();
@@ -1408,10 +1450,12 @@ public:
 
 private:
     friend class SlaveDiscoveryManager;
-    /// Test seam — lets tests inject a cyclic channel and drive the
-    /// private dispatch path without a live AF_PACKET socket.
+    /**
+     * Test seam — lets tests inject a cyclic channel and drive the
+     * private dispatch path without a live AF_PACKET socket.
+     */
     friend struct MasterCyclicTestAccess;
-    /// The cyclic datapath reaches back for iface_/router/cancel state.
+    /**The cyclic datapath reaches back for iface_/router/cancel state. */
     friend class CyclicDatapath;
 
     // ---- Internal helpers --------------------------------------------------
@@ -1431,42 +1475,50 @@ private:
     void ensureRxQueues();
     void flushRxQueue();
     void parseEtherCATFrame(const uint8_t* frame, size_t length);
-    /// Deposit a fastpath response (cyclic slot OR PDO-slice idx) into
-    /// its fixed slot — `idx` is the wire datagram index [0xE0..0xFD].
+    /**
+     * Deposit a fastpath response (cyclic slot OR PDO-slice idx) into
+     * its fixed slot — `idx` is the wire datagram index [0xE0..0xFD].
+     */
     void depositCyclicSlot(uint8_t idx, Command cmd,
                            uint16_t adp, uint16_t ado,
                            const uint8_t* payload, uint16_t datalen,
                            uint16_t wkc, uint8_t gen);
-    /// View-mode deposit: payload points into channel-owned memory held by
-    /// `cookie`.  The previous held cookie (if any) is released.
-    /// `stamp_ns` carries the frame's kernel timestamp (0 → deposit-time).
-    /// `gen` is the echoed send-generation bit (lenFlags res-bit 13).
+    /**
+     * View-mode deposit: payload points into channel-owned memory held by
+     * `cookie`.  The previous held cookie (if any) is released.
+     * `stamp_ns` carries the frame's kernel timestamp (0 → deposit-time).
+     * `gen` is the echoed send-generation bit (lenFlags res-bit 13).
+     */
     void publishCyclicSlotView(uint8_t idx, Command cmd,
                                uint16_t adp, uint16_t ado,
                                const uint8_t* payload, uint16_t datalen,
                                uint16_t wkc, uint32_t cookie,
                                uint64_t stamp_ns = 0, uint8_t gen = 0);
-    /// Route a frame received on the cyclic channel: pure-cyclic frames
-    /// publish slot views, mixed/async frames go to the parser.
+    /**
+     * Route a frame received on the cyclic channel: pure-cyclic frames
+     * publish slot views, mixed/async frames go to the parser.
+     */
     void dispatchChannelFrame(const CyclicFrameView& view);
 
     // ---- EtherCAT-over-UDP encapsulation ----------------------------------
 #if TETHER_ENABLE_UDP_ENCAPSULATION
-    /// Compute the IPv4 header checksum (ones-complement sum over 20-byte header).
+    /**Compute the IPv4 header checksum (ones-complement sum over 20-byte header). */
     static uint16_t computeIpChecksum(const uint8_t* ip_header);
-    /// Transform a direct Ethernet/EtherCAT frame into Ethernet/IPv4/UDP/EtherCAT.
-    /// @param in_frame  Pointer to the original frame (Ethernet + EtherCAT, EtherType 0x88A4).
-    /// @param in_len    Length of the original frame.
-    /// @param out_buf   Output buffer (must be at least in_len + kUdpEncapOverhead bytes).
-    /// @param out_cap   Capacity of out_buf.
-    /// @param[out] out_len  Actual length of the encapsulated frame.
-    /// @return true on success, false if the frame is too short or output buffer too small.
+    /**
+     * Transform a direct Ethernet/EtherCAT frame into Ethernet/IPv4/UDP/EtherCAT.
+     * @param in_frame  Pointer to the original frame (Ethernet + EtherCAT, EtherType 0x88A4).
+     * @param in_len    Length of the original frame.
+     * @param out_buf   Output buffer (must be at least in_len + kUdpEncapOverhead bytes).
+     * @param out_cap   Capacity of out_buf.
+     * @param[out] out_len  Actual length of the encapsulated frame.
+     * @return true on success, false if the frame is too short or output buffer too small.
+     */
     bool encapsulateFrame(const uint8_t* in_frame, size_t in_len,
                           uint8_t* out_buf, size_t out_cap, size_t* out_len) const;
-    /// Send a frame via iface_.send(), applying UDP encapsulation if enabled.
+    /**Send a frame via iface_.send(), applying UDP encapsulation if enabled. */
     bool sendWithEncapsulation(const uint8_t* frame, size_t len);
 #else
-    /// Without UDP encapsulation, sendWithEncapsulation delegates to transport_.
+    /**Without UDP encapsulation, sendWithEncapsulation delegates to transport_. */
     bool sendWithEncapsulation(const uint8_t* frame, size_t len) {
         if (!transport_) return iface_.send ? iface_.send(frame, len) : false;
         return transport_->send(frame, len);
@@ -1485,12 +1537,16 @@ private:
     std::unique_ptr<EtherCATTransport> transport_;
 
 #ifdef __linux__
-    /// Batched backlog dequeue for drainWire() — see drainWireBatch().
-    /// Returns frames drained, or -1 when the fd cannot be drained this
-    /// way (caller falls back to the per-frame receive path).
+    /**
+     * Batched backlog dequeue for drainWire() — see drainWireBatch().
+     * Returns frames drained, or -1 when the fd cannot be drained this
+     * way (caller falls back to the per-frame receive path).
+     */
     int drainWireBatch(int fd, int max_frames);
-    /// Receive scratch for drainWireBatch — sized lazily on first use
-    /// (recovery path, not per-cycle).  kDrainBatch × kMaxJumboFrameSize.
+    /**
+     * Receive scratch for drainWireBatch — sized lazily on first use
+     * (recovery path, not per-cycle).  kDrainBatch × kMaxJumboFrameSize.
+     */
     std::vector<uint8_t> drain_buf_;
 #endif
 
@@ -1512,19 +1568,23 @@ private:
     std::unique_ptr<CyclicDatapath> datapath_;
 
     std::unique_ptr<CyclicExecutive> cyclic_loop_;
-    /// Async send-on-change loop — mutually exclusive with cyclic_loop_.
+    /**Async send-on-change loop — mutually exclusive with cyclic_loop_. */
     std::unique_ptr<AsyncCyclicLoop> async_loop_;
 
-    /// CPU claims held while the cyclic loop runs (CpuIsolationConfig);
-    /// -1 = no claim.  Released by stopCyclicLoop() / ~Master().
+    /**
+     * CPU claims held while the cyclic loop runs (CpuIsolationConfig);
+     * -1 = no claim.  Released by stopCyclicLoop() / ~Master().
+     */
     int cyclic_cpu_claim_ = -1;
     int dc_cpu_claim_     = -1;
-    /// CPU claim held while the async loop runs; -1 = none.
+    /**CPU claim held while the async loop runs; -1 = none. */
     int async_cpu_claim_  = -1;
 
-    /// Shared datapath bring-up/teardown used by startCyclicLoop() and
-    /// startAsyncLoop(): cyclic channel, process image, strict-WKC, and
-    /// the lockable image/slot sections.
+    /**
+     * Shared datapath bring-up/teardown used by startCyclicLoop() and
+     * startAsyncLoop(): cyclic channel, process image, strict-WKC, and
+     * the lockable image/slot sections.
+     */
     void setupCyclicDatapath(CyclicWireMode wire_mode, ImageMode image_mode,
                              const std::string& shm_name, uint32_t rx_spin_ns,
                              uint32_t slot_spin_ns,
@@ -1576,8 +1636,10 @@ private:
     std::atomic<uint32_t> total_flushed_{0};
     std::atomic<uint32_t> flush_calls_{0};
 #endif
-    /// errno of the last failed send — always tracked (cheap), drives
-    /// IPDOTransport::lastSendErrno() and the TX diagnostics report.
+    /**
+     * errno of the last failed send — always tracked (cheap), drives
+     * IPDOTransport::lastSendErrno() and the TX diagnostics report.
+     */
     std::atomic<int> last_tx_errno_{0};
 
     // Log dedup / rate limiting
@@ -1635,7 +1697,7 @@ private:
     // a set of slaves.  The default group (pdo_ / logical_addr_mgr_)
     // covers all slaves not assigned to a specific group.
     std::vector<PdoGroup>          pdo_groups_;
-    std::array<int, ECAT_PDO_MAX_SLAVES> pdo_group_idx_for_slave_;  ///< -1 = default group, else index into pdo_groups_
+    std::array<int, ECAT_PDO_MAX_SLAVES> pdo_group_idx_for_slave_; /**< -1 = default group, else index into pdo_groups_ */
 
     // Per-slave state machines, names, invalid-index sentinel, and the
     // discovered-slave count — owned by SlaveRegistry

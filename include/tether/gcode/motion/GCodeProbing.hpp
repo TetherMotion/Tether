@@ -219,52 +219,52 @@ class VariableSystem;
 struct ProbeConfig {
     // === Probe Input ===
     
-    /// Probe input is normally open (true) or normally closed (false)
+    /**Probe input is normally open (true) or normally closed (false) */
     bool normallyOpen{true};
     
-    /// Debounce time (seconds)
+    /**Debounce time (seconds) */
     double debounceTime{0.010};  // 10ms
     
-    /// Input number/pin
+    /**Input number/pin */
     int32_t inputPin{0};
     
     // === Motion ===
     
-    /// Maximum probe feed rate
+    /**Maximum probe feed rate */
     double maxProbeFeed{500.0};  // mm/min
     
-    /// Default probe feed if not specified
+    /**Default probe feed if not specified */
     double defaultProbeFeed{100.0};  // mm/min
     
-    /// Minimum probe feed rate
+    /**Minimum probe feed rate */
     double minProbeFeed{1.0};  // mm/min
     
-    /// Maximum travel before error (if no trip)
+    /**Maximum travel before error (if no trip) */
     double maxProbeTravel{200.0};  // mm
     
-    /// Deceleration distance after trip
+    /**Deceleration distance after trip */
     double stopDistance{0.5};  // mm
     
     // === Accuracy ===
     
-    /// Enable second touch (slow approach for accuracy)
+    /**Enable second touch (slow approach for accuracy) */
     bool enableSecondTouch{true};
     
-    /// Second touch feed rate
+    /**Second touch feed rate */
     double secondTouchFeed{10.0};  // mm/min
     
-    /// Back-off distance before second touch
+    /**Back-off distance before second touch */
     double secondTouchBackoff{1.0};  // mm
     
     // === Safety ===
     
-    /// Require probe signal valid before move
+    /**Require probe signal valid before move */
     bool checkProbeBeforeMove{true};
     
-    /// Error if probe already tripped at start (G38.2/G38.3)
+    /**Error if probe already tripped at start (G38.2/G38.3) */
     bool errorOnPreTrip{true};
     
-    /// Maximum overtravel beyond expected surface
+    /**Maximum overtravel beyond expected surface */
     double maxOvertravel{5.0};  // mm
 };
 #endif // GCODE_PROBE_CONFIG_DEFINED
@@ -277,10 +277,10 @@ struct ProbeConfig {
  * @brief Probe cycle type
  */
 enum class ProbeType {
-    TOWARD_WITH_ERROR,    ///< G38.2 - Probe toward, error on no contact
-    TOWARD_NO_ERROR,      ///< G38.3 - Probe toward, no error on miss
-    AWAY_WITH_ERROR,      ///< G38.4 - Probe away from, error on no break
-    AWAY_NO_ERROR         ///< G38.5 - Probe away from, no error on miss
+    TOWARD_WITH_ERROR, /**< G38.2 - Probe toward, error on no contact */
+    TOWARD_NO_ERROR, /**< G38.3 - Probe toward, no error on miss */
+    AWAY_WITH_ERROR, /**< G38.4 - Probe away from, error on no break */
+    AWAY_NO_ERROR /**< G38.5 - Probe away from, no error on miss */
 };
 
 #ifndef GCODE_PROBE_RESULT_DEFINED
@@ -289,25 +289,25 @@ enum class ProbeType {
  * @brief Probe result
  */
 struct ProbeResult {
-    /// Did probe trip?
+    /**Did probe trip? */
     bool tripped{false};
     
-    /// Position at trip (machine coordinates)
+    /**Position at trip (machine coordinates) */
     Position tripPosition;
     
-    /// Position at trip (work coordinates)
+    /**Position at trip (work coordinates) */
     Position tripWorkPosition;
     
-    /// Probe type used
+    /**Probe type used */
     ProbeType type{ProbeType::TOWARD_WITH_ERROR};
     
-    /// Error if any
+    /**Error if any */
     Error error;
     
-    /// Distance traveled
+    /**Distance traveled */
     double travelDistance{0};
     
-    /// Timestamp of trip
+    /**Timestamp of trip */
     double tripTime{0};
 };
 #endif // GCODE_PROBE_RESULT_DEFINED

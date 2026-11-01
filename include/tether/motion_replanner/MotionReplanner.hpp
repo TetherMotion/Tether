@@ -34,10 +34,10 @@ namespace MotionReplanner {
  * @brief A timestamped position sample from the control system
  */
 struct PositionSample {
-    double timestamp = 0.0;               ///< System time (seconds)
-    std::array<double, 9> position{};     ///< Position (X,Y,Z,A,B,C,U,V,W)
-    std::array<double, 9> velocity{};     ///< Velocity (optional, may be derived)
-    bool velocityValid = false;           ///< Whether velocity was measured or derived
+    double timestamp = 0.0; /**< System time (seconds) */
+    std::array<double, 9> position{}; /**< Position (X,Y,Z,A,B,C,U,V,W) */
+    std::array<double, 9> velocity{}; /**< Velocity (optional, may be derived) */
+    bool velocityValid = false; /**< Whether velocity was measured or derived */
 };
 
 /**
@@ -45,19 +45,19 @@ struct PositionSample {
  */
 struct TrackingError {
     double timestamp = 0.0;
-    double pathPosition = 0.0;            ///< Arc length from start
+    double pathPosition = 0.0; /**< Arc length from start */
     
     std::array<double, 9> positionError{};
     std::array<double, 9> velocityError{};
     
-    double combinedPositionError = 0.0;   ///< 3D position error magnitude
-    double contourError = 0.0;            ///< Error perpendicular to path
-    double lagError = 0.0;                ///< Error along path direction
+    double combinedPositionError = 0.0; /**< 3D position error magnitude */
+    double contourError = 0.0; /**< Error perpendicular to path */
+    double lagError = 0.0; /**< Error along path direction */
     
     int32_t segmentIndex = -1;
     int32_t blockIndex = -1;
-    bool isCriticalPoint = false;         ///< Corner, direction change, etc.
-    std::string criticalPointType;        ///< "corner", "arc_start", "arc_end", etc.
+    bool isCriticalPoint = false; /**< Corner, direction change, etc. */
+    std::string criticalPointType; /**< "corner", "arc_start", "arc_end", etc. */
 };
 
 /**
@@ -70,8 +70,8 @@ struct ErrorStatistics {
     double geometricMean = 0.0;
     double stdDev = 0.0;
     double rmsError = 0.0;
-    double p95Error = 0.0;                ///< 95th percentile
-    double p99Error = 0.0;                ///< 99th percentile
+    double p95Error = 0.0; /**< 95th percentile */
+    double p99Error = 0.0; /**< 99th percentile */
     size_t sampleCount = 0;
     
     // For critical points specifically
@@ -93,7 +93,7 @@ struct SegmentPerformance {
     ErrorStatistics lagStats;
     
     // Achieved vs commanded
-    double commandedFeedRate = 0.0;       ///< mm/min
+    double commandedFeedRate = 0.0; /**< mm/min */
     double achievedMeanFeedRate = 0.0;
     double achievedMinFeedRate = 0.0;
     double achievedMaxFeedRate = 0.0;
@@ -103,7 +103,7 @@ struct SegmentPerformance {
     
     // Performance ratio (0-1, where 1 = perfect)
     double feedRateRatio = 1.0;
-    double accuracyScore = 1.0;           ///< Based on contour error
+    double accuracyScore = 1.0; /**< Based on contour error */
     double overallScore = 1.0;
     
     // Suggested limits for this segment
@@ -132,11 +132,11 @@ struct ParameterSuggestion {
     double suggestedJerk = 0.0;
     
     // Transition parameters for C2 smoothness
-    double transitionLength = 0.0;        ///< mm, for smooth ramp
-    double transitionTime = 0.0;          ///< seconds
+    double transitionLength = 0.0; /**< mm, for smooth ramp */
+    double transitionTime = 0.0; /**< seconds */
     
     std::string reason;
-    double confidenceScore = 0.0;         ///< 0-1
+    double confidenceScore = 0.0; /**< 0-1 */
     bool limitAdjustmentNeeded = false;
 };
 
@@ -145,42 +145,42 @@ struct ParameterSuggestion {
  */
 struct ReplannerConfig {
     // System delay compensation
-    double systemDelay = 0.001;           ///< Constant system delay (seconds)
-    bool autoDetectDelay = false;         ///< Enable automatic delay detection
-    double delayDetectionWindow = 0.1;    ///< Window for cross-correlation (seconds)
+    double systemDelay = 0.001; /**< Constant system delay (seconds) */
+    bool autoDetectDelay = false; /**< Enable automatic delay detection */
+    double delayDetectionWindow = 0.1; /**< Window for cross-correlation (seconds) */
     
     // Error thresholds
-    double positionErrorThreshold = 0.05; ///< mm - flag if exceeded
-    double contourErrorThreshold = 0.02;  ///< mm - critical for surface finish
-    double lagErrorThreshold = 0.1;       ///< mm - acceptable along-path error
+    double positionErrorThreshold = 0.05; /**< mm - flag if exceeded */
+    double contourErrorThreshold = 0.02; /**< mm - critical for surface finish */
+    double lagErrorThreshold = 0.1; /**< mm - acceptable along-path error */
     
     // Corner detection
-    double cornerAngleThreshold = 10.0;   ///< degrees - angle change to be a corner
-    double cornerProximity = 0.5;         ///< mm - region around corner for analysis
+    double cornerAngleThreshold = 10.0; /**< degrees - angle change to be a corner */
+    double cornerProximity = 0.5; /**< mm - region around corner for analysis */
     
     // Limit adjustment
     bool enableLimitSuggestions = true;
-    bool enableAutoAdjustment = false;    ///< Actually modify limits online
-    double maxFeedRateIncrease = 1.2;     ///< Max factor to increase (e.g., 1.2 = 20%)
-    double maxFeedRateDecrease = 0.5;     ///< Min factor (0.5 = reduce to 50%)
-    double safetyMargin = 0.1;            ///< 10% margin from measured capability
+    bool enableAutoAdjustment = false; /**< Actually modify limits online */
+    double maxFeedRateIncrease = 1.2; /**< Max factor to increase (e.g., 1.2 = 20%) */
+    double maxFeedRateDecrease = 0.5; /**< Min factor (0.5 = reduce to 50%) */
+    double safetyMargin = 0.1; /**< 10% margin from measured capability */
     
     // Maximum allowed limits (user configured)
-    double absoluteMaxVelocity = 10000.0; ///< mm/min
-    double absoluteMaxAccel = 5000.0;     ///< mm/s²
-    double absoluteMaxJerk = 50000.0;     ///< mm/s³
+    double absoluteMaxVelocity = 10000.0; /**< mm/min */
+    double absoluteMaxAccel = 5000.0; /**< mm/s² */
+    double absoluteMaxJerk = 50000.0; /**< mm/s³ */
     
     // Smoothing for online adjustments
-    double limitTransitionTime = 0.1;     ///< seconds for C2-smooth transitions
-    double minTransitionLength = 5.0;     ///< mm minimum transition length
+    double limitTransitionTime = 0.1; /**< seconds for C2-smooth transitions */
+    double minTransitionLength = 5.0; /**< mm minimum transition length */
     
     // Statistical analysis
     size_t minSamplesForStatistics = 10;
-    double statisticsWindowTime = 1.0;    ///< Rolling window for live stats
+    double statisticsWindowTime = 1.0; /**< Rolling window for live stats */
     
     // Monitoring mode
-    bool monitoringOnly = true;           ///< Only monitor, don't suggest changes
-    bool logAllSamples = false;           ///< Keep all samples (memory intensive)
+    bool monitoringOnly = true; /**< Only monitor, don't suggest changes */
+    bool logAllSamples = false; /**< Keep all samples (memory intensive) */
 };
 
 //=============================================================================

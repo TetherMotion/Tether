@@ -132,13 +132,13 @@ public:
     }
 
 private:
-    /// Packed per-slave recovery snapshot filled from SlaveSupervisor.
+    /**Packed per-slave recovery snapshot filled from SlaveSupervisor. */
     struct SlaveRecoverySnapshot {
-        uint8_t  state;         ///< SlaveRecoveryState enum value
-        uint8_t  suspended;     ///< PDO data suspended for this slave
-        uint8_t  recovering;    ///< Recovery currently in progress
+        uint8_t  state; /**< SlaveRecoveryState enum value */
+        uint8_t  suspended; /**< PDO data suspended for this slave */
+        uint8_t  recovering; /**< Recovery currently in progress */
         uint8_t  _reserved;
-        uint32_t attempt_count; ///< Recovery attempts so far
+        uint32_t attempt_count; /**< Recovery attempts so far */
     };
 
     void buildSnapshots() {

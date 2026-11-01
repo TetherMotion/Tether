@@ -80,7 +80,7 @@ constexpr uint8_t kProbeDstMac[6] = {0x01, 0x01, 0x05, 0x00, 0x00, 0x00};
 constexpr uint8_t kCmdLRW         = 0x0C;
 constexpr uint16_t kEtherTypeEcat = 0x88A4;
 
-/// Build the tagged-or-untagged bogus-LRW probe frame.  Returns length.
+/**Build the tagged-or-untagged bogus-LRW probe frame.  Returns length. */
 size_t buildProbeFrame(uint8_t* out, const uint8_t src[6], uint16_t vid) {
     uint8_t* p = out;
     std::memcpy(p, kProbeDstMac, 6); p += 6;
@@ -121,8 +121,10 @@ int64_t nowUs() {
     return ts.tv_sec * 1'000'000LL + ts.tv_nsec / 1000;
 }
 
-/// True when @p frame is our probe's reply: EtherCAT ethertype (after any
-/// inline tag), LRW cmd byte and our idx at the delivery-appropriate offset.
+/**
+ * True when @p frame is our probe's reply: EtherCAT ethertype (after any
+ * inline tag), LRW cmd byte and our idx at the delivery-appropriate offset.
+ */
 bool isProbeReply(const uint8_t* frame, size_t len, VlanTagDelivery del) {
     if (len < 40) return false;
     size_t base;

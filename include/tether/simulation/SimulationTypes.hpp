@@ -13,16 +13,16 @@
 
 namespace Simulation {
 
-/// State vector type
+/**State vector type */
 using StateVector = std::vector<double>;
 
-/// Parameter map type
+/**Parameter map type */
 using ParamMap = std::unordered_map<std::string, double>;
 
-/// External force callback: (time, state) -> force vector
+/**External force callback: (time, state) -> force vector */
 using ForceCallback = std::function<StateVector(double, const StateVector&)>;
 
-/// Integration method enumeration
+/**Integration method enumeration */
 enum class IntegrationMethod {
     EulerForward,
     EulerBackward,
@@ -34,7 +34,7 @@ enum class IntegrationMethod {
     SDIRK4
 };
 
-/// System category for UI grouping
+/**System category for UI grouping */
 enum class SystemCategory {
     MechanicalTranslational,
     RotationalAngular,
@@ -49,7 +49,7 @@ enum class SystemCategory {
     DelayDominated
 };
 
-/// Geometry shape type for inertia computation
+/**Geometry shape type for inertia computation */
 enum class GeometryShape {
     PointMass,
     Sphere,
@@ -62,7 +62,7 @@ enum class GeometryShape {
     Custom
 };
 
-/// Geometry descriptor
+/**Geometry descriptor */
 struct GeometryDesc {
     GeometryShape shape = GeometryShape::PointMass;
     double mass = 1.0;
@@ -73,13 +73,13 @@ struct GeometryDesc {
     double innerRadius = 0.0;
     double density = 7850.0; // steel
 
-    /// Compute moment of inertia about primary axis
+    /**Compute moment of inertia about primary axis */
     double computeInertia() const;
-    /// Compute cross-sectional area
+    /**Compute cross-sectional area */
     double computeArea() const;
 };
 
-/// Friction model type
+/**Friction model type */
 enum class FrictionModel {
     None,
     Coulomb,
@@ -90,7 +90,7 @@ enum class FrictionModel {
     Dahl
 };
 
-/// Friction parameters
+/**Friction parameters */
 struct FrictionParams {
     FrictionModel model = FrictionModel::None;
     double staticFriction = 0.0;
@@ -104,11 +104,11 @@ struct FrictionParams {
     double sigma2 = 0.0;     // viscous
     double lugreState = 0.0; // internal state z
 
-    /// Compute friction force given velocity
+    /**Compute friction force given velocity */
     double compute(double velocity, double normalForce, double dt);
 };
 
-/// Noise type enumeration
+/**Noise type enumeration */
 enum class NoiseType {
     None,
     White,
@@ -119,7 +119,7 @@ enum class NoiseType {
     ActuatorDependent
 };
 
-/// Noise parameters
+/**Noise parameters */
 struct NoiseParams {
     NoiseType type = NoiseType::None;
     double amplitude = 0.0;
@@ -129,7 +129,7 @@ struct NoiseParams {
     uint64_t seed = 42;
 };
 
-/// Sensor configuration
+/**Sensor configuration */
 struct SensorConfig {
     NoiseParams noise;
     double delay = 0.0;            // fixed delay in seconds
@@ -140,7 +140,7 @@ struct SensorConfig {
     double saturationMax = 1e9;
 };
 
-/// Actuator nonlinearity type
+/**Actuator nonlinearity type */
 enum class ActuatorNonlinearity {
     None,
     Saturation,
@@ -151,7 +151,7 @@ enum class ActuatorNonlinearity {
     ReducedPerformanceNearLimits
 };
 
-/// Actuator configuration
+/**Actuator configuration */
 struct ActuatorConfig {
     double maxOutput = 1e6;
     double minOutput = -1e6;
@@ -165,7 +165,7 @@ struct ActuatorConfig {
     FrictionParams stiction;
 };
 
-/// Air resistance configuration
+/**Air resistance configuration */
 struct AirResistanceConfig {
     bool enabled = false;
     double dragCoefficient = 0.47;  // sphere default
@@ -173,7 +173,7 @@ struct AirResistanceConfig {
     double referenceArea = 0.01;    // m²
 };
 
-/// Simulation result for one timestep
+/**Simulation result for one timestep */
 struct SimStepResult {
     double time;
     StateVector state;
@@ -182,7 +182,7 @@ struct SimStepResult {
     double error;
 };
 
-/// System parameter descriptor for UI
+/**System parameter descriptor for UI */
 struct ParamDescriptor {
     std::string name;
     std::string unit;
@@ -194,14 +194,14 @@ struct ParamDescriptor {
     bool logarithmic = false;
 };
 
-/// Preset configuration
+/**Preset configuration */
 struct Preset {
     std::string name;
     std::string description;
     ParamMap params;
 };
 
-/// Complete simulation configuration
+/**Complete simulation configuration */
 struct SimConfig {
     double dt = 0.001;
     double totalTime = 10.0;

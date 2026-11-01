@@ -35,13 +35,13 @@ namespace tether::klipper::transport {
  */
 class LoopbackTransport : public IByteStreamTransport {
 public:
-    /// @brief Internal shared buffer type.
+    /**@brief Internal shared buffer type. */
     struct SharedBuffer {
         std::mutex mtx;
         std::deque<uint8_t> buf;
     };
 
-    /// @brief Construct an unconnected endpoint.
+    /**@brief Construct an unconnected endpoint. */
     LoopbackTransport() = default;
 
     bool open() override { open_ = true; return true; }
@@ -70,7 +70,7 @@ public:
         return n;
     }
 
-    /// @brief Wire this endpoint: writes go to @p writeTarget, reads come from @p readSource.
+    /**@brief Wire this endpoint: writes go to @p writeTarget, reads come from @p readSource. */
     void wire(std::shared_ptr<SharedBuffer> writeTarget,
               std::shared_ptr<SharedBuffer> readSource) {
         writeTarget_ = std::move(writeTarget);

@@ -29,14 +29,16 @@
 namespace Tether {
 namespace Platform {
 
-/// Per-section lock configuration — each flag is an independent opt-out.
+/**Per-section lock configuration — each flag is an independent opt-out. */
 struct MemoryLockSections {
-    bool lock_all_process = false;   ///< mlockall(MCL_CURRENT|MCL_FUTURE)
-    bool lock_image       = true;    ///< process-image buffers
-    bool lock_slots       = true;    ///< cyclic slot bank + staging buffers
-    bool prefault_stack   = true;    ///< touch cyclic thread stack pages
-    /// Bytes of the worker thread's own stack to pre-touch at thread start
-    /// (0 → a conservative default of 128 KiB).
+    bool lock_all_process = false; /**< mlockall(MCL_CURRENT|MCL_FUTURE) */
+    bool lock_image       = true; /**< process-image buffers */
+    bool lock_slots       = true; /**< cyclic slot bank + staging buffers */
+    bool prefault_stack   = true; /**< touch cyclic thread stack pages */
+    /**
+     * Bytes of the worker thread's own stack to pre-touch at thread start
+     * (0 → a conservative default of 128 KiB).
+     */
     uint32_t stack_prefault_bytes = 0;
 };
 

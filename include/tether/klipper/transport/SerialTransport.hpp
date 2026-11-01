@@ -26,7 +26,7 @@
 
 namespace tether::klipper::transport {
 
-/// @brief USB CDC serial transport backed by user-supplied callbacks.
+/**@brief USB CDC serial transport backed by user-supplied callbacks. */
 class UsbSerialTransport : public IByteStreamTransport {
 public:
     using UsbWriteFunc = std::function<ssize_t(const uint8_t*, size_t)>;
@@ -77,7 +77,7 @@ public:
         return n < 0 ? 0 : static_cast<size_t>(n);
     }
 
-    /// @return Transport name (for diagnostics).
+    /**@return Transport name (for diagnostics). */
     std::string name() const { return "usb:" + deviceName_; }
 
 private:
@@ -89,7 +89,7 @@ private:
     std::atomic<bool> open_{false};
 };
 
-/// @brief Hardware UART transport backed by user-supplied callbacks.
+/**@brief Hardware UART transport backed by user-supplied callbacks. */
 class UartTransport : public IByteStreamTransport {
 public:
     using UartWriteFunc = std::function<ssize_t(const uint8_t*, size_t)>;
@@ -139,7 +139,7 @@ public:
         return n < 0 ? 0 : static_cast<size_t>(n);
     }
 
-    /// @return Transport name (for diagnostics).
+    /**@return Transport name (for diagnostics). */
     std::string name() const {
         return std::format("uart:{}@{}", deviceName_, baudRate_);
     }

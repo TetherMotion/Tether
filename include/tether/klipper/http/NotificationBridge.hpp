@@ -1,8 +1,10 @@
 #pragma once
 
-/// @file NotificationBridge.hpp
-/// @brief Bridge that receives notifications from KlippyUdsServer and fans
-///        them out to WebSocket clients via WsSessionManager.
+/**
+ * @file NotificationBridge.hpp
+ * @brief Bridge that receives notifications from KlippyUdsServer and fans
+ *        them out to WebSocket clients via WsSessionManager.
+ */
 
 #include "tether/klipper/http/NotificationSink.hpp"
 #include "tether/klipper/http/WsSessionManager.hpp"
@@ -12,7 +14,7 @@
 
 namespace tether::klipper::http {
 
-/// @brief Implementation of NotificationSink that bridges events to WebSocket sessions.
+/**@brief Implementation of NotificationSink that bridges events to WebSocket sessions. */
 class NotificationBridge : public NotificationSink {
 public:
     explicit NotificationBridge(WsSessionManager& sessions) : sessions_(sessions) {}

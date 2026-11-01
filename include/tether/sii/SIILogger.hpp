@@ -29,46 +29,50 @@ struct SIIMailboxConfig;
 // Utility Functions
 // ============================================================================
 
-/// Map an SII category type code to a human-readable string.
+/**Map an SII category type code to a human-readable string. */
 const char* getCategoryTypeName(uint16_t type);
 
-/// Map a mailbox protocol bitfield to a human-readable string.
+/**Map a mailbox protocol bitfield to a human-readable string. */
 const char* getMailboxProtocolName(uint16_t protocol);
 
 // ============================================================================
 // Logging Functions
 // ============================================================================
 
-/// Log complete SII data (identity, mailbox, SMs, FMMUs, PDOs, DC).
+/**Log complete SII data (identity, mailbox, SMs, FMMUs, PDOs, DC). */
 void logSIIData(const SIIData& data, const char* tag);
 
-/// Log SII identity (vendor ID, product code, revision, serial).
+/**Log SII identity (vendor ID, product code, revision, serial). */
 void logSIIIdentity(const SIIIdentity& identity, const char* tag);
 
-/// Log SII mailbox configuration (standard + bootstrap, protocols).
+/**Log SII mailbox configuration (standard + bootstrap, protocols). */
 void logSIIMailbox(const SIIMailboxConfig& mailbox, const char* tag);
 
-/// Log SII Sync Manager configuration.
+/**Log SII Sync Manager configuration. */
 void logSIISyncManagers(const SIIData& data, const char* tag);
 
-/// Log SII PDO configuration (TxPDO and RxPDO entries).
+/**Log SII PDO configuration (TxPDO and RxPDO entries). */
 void logSIIPDOs(const SIIData& data, const char* tag);
 
-/// Log a one-line SII summary for a slave.
-/// @param data        Parsed SII data
-/// @param log_prefix  Log prefix string (e.g. "Slave My Drive (#0)" or "Slave 0")
-/// @param tag         Log tag
+/**
+ * Log a one-line SII summary for a slave.
+ * @param data        Parsed SII data
+ * @param log_prefix  Log prefix string (e.g. "Slave My Drive (#0)" or "Slave 0")
+ * @param tag         Log tag
+ */
 void logSIISummary(const SIIData& data, std::string_view log_prefix, const char* tag);
 
-/// Debug SII mailbox derivation with step-by-step detail.
-///
-/// Reads the raw EEPROM words and logs every step of how the mailbox
-/// configuration is derived, including byte breakdowns, field
-/// assignments, protocol flag decoding, and validation checks.
-///
-/// @param master      Master instance for network I/O
-/// @param slave_index Slave index
-/// @param tag         Log tag
+/**
+ * Debug SII mailbox derivation with step-by-step detail.
+ *
+ * Reads the raw EEPROM words and logs every step of how the mailbox
+ * configuration is derived, including byte breakdowns, field
+ * assignments, protocol flag decoding, and validation checks.
+ *
+ * @param master      Master instance for network I/O
+ * @param slave_index Slave index
+ * @param tag         Log tag
+ */
 void debugSIIMailboxDerivation(Master& master, uint16_t slave_index, const char* tag);
 
 } // namespace SII

@@ -33,19 +33,21 @@
 namespace EtherCAT {
 namespace HAL { class IEthernet; }
 
-/// How the reply's 802.1Q tag was presented to the socket.
+/**How the reply's 802.1Q tag was presented to the socket. */
 enum class VlanTagDelivery {
-    NoReply,     ///< nothing matching came back within the timeout
-    Untagged,    ///< reply arrived without any tag
-    InlineTag,   ///< tag present in the frame bytes ([12] = TPID)
-    StrippedTag, ///< kernel stripped the tag into PACKET_AUXDATA
+    NoReply, /**< nothing matching came back within the timeout */
+    Untagged, /**< reply arrived without any tag */
+    InlineTag, /**< tag present in the frame bytes ([12] = TPID) */
+    StrippedTag, /**< kernel stripped the tag into PACKET_AUXDATA */
 };
 
 const char* toString(VlanTagDelivery d);
 
-/// Map a detected delivery mode to the filter-generation hint used by
-/// CBPFSpec / WireEncap.  Ambiguous results (NoReply, Untagged) map to
-/// Auto — the safe both-legs program.
+/**
+ * Map a detected delivery mode to the filter-generation hint used by
+ * CBPFSpec / WireEncap.  Ambiguous results (NoReply, Untagged) map to
+ * Auto — the safe both-legs program.
+ */
 inline VlanDeliveryHint vlanDeliveryHint(VlanTagDelivery d) {
     switch (d) {
     case VlanTagDelivery::StrippedTag: return VlanDeliveryHint::StrippedOnly;
@@ -56,9 +58,9 @@ inline VlanDeliveryHint vlanDeliveryHint(VlanTagDelivery d) {
 
 struct VlanProbeResult {
     VlanTagDelivery delivery = VlanTagDelivery::NoReply;
-    uint16_t vid     = 0;    ///< VID observed on the reply (0 if none)
-    uint16_t tpid    = 0;    ///< TPID observed (inline [12] or auxdata)
-    int64_t  rtt_us  = -1;   ///< probe round-trip time (-1 on NoReply)
+    uint16_t vid     = 0; /**< VID observed on the reply (0 if none) */
+    uint16_t tpid    = 0; /**< TPID observed (inline [12] or auxdata) */
+    int64_t  rtt_us  = -1; /**< probe round-trip time (-1 on NoReply) */
 };
 
 /**
@@ -98,7 +100,7 @@ VlanTagDelivery classifyVlanReply(const uint8_t* frame, size_t len,
  *         (unsupported platform, unusable fd, send failure).  A probe that
  *         ran but saw no reply yields delivery == NoReply.
  */
-inline constexpr uint8_t  kVlanProbeIdx         = 0x2C;   ///< outside fastpath
+inline constexpr uint8_t  kVlanProbeIdx         = 0x2C; /**< outside fastpath */
 inline constexpr uint32_t kVlanProbeLogicalAddr = 0xDEADBEEFu;
 
 std::optional<VlanProbeResult> probeVlanTagDelivery(

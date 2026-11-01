@@ -31,10 +31,12 @@
 
 namespace tether::klipper::protocol {
 
-/// @brief Clamp an integer to the target type's range before casting.
-/// @details Prevents silent truncation when narrowing int32_t to smaller
-///          types (uint8_t, int16_t, uint16_t, etc.). Out-of-range values
-///          are clamped to the nearest representable value.
+/**
+ * @brief Clamp an integer to the target type's range before casting.
+ * @details Prevents silent truncation when narrowing int32_t to smaller
+ *          types (uint8_t, int16_t, uint16_t, etc.). Out-of-range values
+ *          are clamped to the nearest representable value.
+ */
 template <typename Target, typename Source>
 constexpr Target clampCast(Source value) noexcept {
     if constexpr (std::numeric_limits<Target>::is_signed) {
@@ -51,23 +53,23 @@ constexpr Target clampCast(Source value) noexcept {
     }
 }
 
-/// @brief A decoded parameter value (integer or string/buffer bytes).
+/**@brief A decoded parameter value (integer or string/buffer bytes). */
 struct ParamValue {
-    int32_t integer = 0;            ///< Valid for integer types
-    std::vector<uint8_t> bytes;     ///< Valid for string/buffer types
+    int32_t integer = 0; /**< Valid for integer types */
+    std::vector<uint8_t> bytes; /**< Valid for string/buffer types */
     bool isInteger = true;
 };
 
-/// @brief A decoded message: msgid + ordered parameter values.
+/**@brief A decoded message: msgid + ordered parameter values. */
 struct DecodedMessage {
     uint16_t msgid = 0;
     std::vector<ParamValue> params;
 };
 
-/// @brief Command handler signature (device side). Receives decoded params.
+/**@brief Command handler signature (device side). Receives decoded params. */
 using CommandHandler = std::function<void(const std::vector<ParamValue>&)>;
 
-/// @brief Response handler signature (host side). Receives decoded params.
+/**@brief Response handler signature (host side). Receives decoded params. */
 using ResponseHandler = std::function<void(const std::vector<ParamValue>&)>;
 
 /**
@@ -104,22 +106,22 @@ class CommandTable {
 public:
     explicit CommandTable(const DataDictionary& dict) : dict_(dict) {}
 
-    /// @brief Register a command handler (device side).
+    /**@brief Register a command handler (device side). */
     void registerCommand(uint16_t msgid, CommandHandler handler);
 
-    /// @brief Register a response handler (host side).
+    /**@brief Register a response handler (host side). */
     void registerResponse(uint16_t msgid, ResponseHandler handler);
 
-    /// @brief Dispatch a decoded command (device side). No-op if unregistered.
+    /**@brief Dispatch a decoded command (device side). No-op if unregistered. */
     void dispatchCommand(const DecodedMessage& msg) const;
 
-    /// @brief Dispatch a decoded response (host side). No-op if unregistered.
+    /**@brief Dispatch a decoded response (host side). No-op if unregistered. */
     void dispatchResponse(const DecodedMessage& msg) const;
 
-    /// @return The bound data dictionary.
+    /**@return The bound data dictionary. */
     const DataDictionary& dictionary() const { return dict_; }
 
-    /// @brief Clear all handlers.
+    /**@brief Clear all handlers. */
     void clear() { commandHandlers_.clear(); responseHandlers_.clear(); }
 
 private:

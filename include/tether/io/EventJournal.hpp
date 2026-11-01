@@ -73,9 +73,11 @@ public:
         return events_.back().eventId;
     }
 
-    /// Register a durable sink called once per appended record (under the
-    /// journal lock). Used for audit persistence; the in-memory journal
-    /// remains bounded regardless of sink behavior.
+    /**
+     * Register a durable sink called once per appended record (under the
+     * journal lock). Used for audit persistence; the in-memory journal
+     * remains bounded regardless of sink behavior.
+     */
     void setListener(std::function<void(const EventRecordV1&)> listener) {
         std::lock_guard lock(mutex_);
         listener_ = std::move(listener);
@@ -138,7 +140,7 @@ private:
     std::function<void(const EventRecordV1&)> listener_;
 };
 
-/// Escape \t, \n, and \\ so one record is always exactly one TSV line.
+/**Escape \t, \n, and \\ so one record is always exactly one TSV line. */
 inline std::string escapeAuditField(std::string_view value) {
     std::string out;
     out.reserve(value.size());

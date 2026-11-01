@@ -53,17 +53,19 @@ namespace tether::control {
  * G(s) = K * exp(-L*s) / (τ*s + 1)
  */
 struct FOPDTModel {
-    double K{1.0};      ///< Process gain
-    double tau{1.0};    ///< Time constant
-    double L{0.0};      ///< Dead time (delay)
+    double K{1.0}; /**< Process gain */
+    double tau{1.0}; /**< Time constant */
+    double L{0.0}; /**< Dead time (delay) */
     
     bool isValid() const {
         return K != 0 && tau > 0 && L >= 0;
     }
     
-    /// Simulate step response at time t
-    /// @param t Time since the step was applied [s].
-    /// @return Process output (0 before the dead time).
+    /**
+     * Simulate step response at time t
+     * @param t Time since the step was applied [s].
+     * @return Process output (0 before the dead time).
+     */
     double stepResponse(double t) const {
         if (t < L) return 0.0;
         return K * (1.0 - std::exp(-(t - L) / tau));
@@ -74,11 +76,11 @@ struct FOPDTModel {
  * @brief Second Order Plus Dead Time (SOPDT) model parameters
  */
 struct SOPDTModel {
-    double K{1.0};      ///< Process gain
-    double tau1{1.0};   ///< First time constant
-    double tau2{1.0};   ///< Second time constant
-    double L{0.0};      ///< Dead time
-    double zeta{1.0};   ///< Damping ratio (alternative form)
+    double K{1.0}; /**< Process gain */
+    double tau1{1.0}; /**< First time constant */
+    double tau2{1.0}; /**< Second time constant */
+    double L{0.0}; /**< Dead time */
+    double zeta{1.0}; /**< Damping ratio (alternative form) */
     
     bool isValid() const {
         return K != 0 && tau1 > 0 && tau2 > 0 && L >= 0;
@@ -91,8 +93,8 @@ struct SOPDTModel {
  * G(s) = K * exp(-L*s) / s
  */
 struct IPDTModel {
-    double K{1.0};      ///< Integrator gain
-    double L{0.0};      ///< Dead time
+    double K{1.0}; /**< Integrator gain */
+    double L{0.0}; /**< Dead time */
     
     double rampResponse(double t) const {
         if (t < L) return 0.0;
@@ -109,36 +111,36 @@ struct IPDTModel {
  */
 enum class TuningRule {
     // Classic methods
-    ZieglerNichols,         ///< Z-N original (aggressive)
-    ZieglerNicholsNoOvershoot, ///< Z-N with no overshoot
-    ZieglerNicholsSomeOvershoot, ///< Z-N with 20% overshoot
+    ZieglerNichols, /**< Z-N original (aggressive) */
+    ZieglerNicholsNoOvershoot, /**< Z-N with no overshoot */
+    ZieglerNicholsSomeOvershoot, /**< Z-N with 20% overshoot */
     
     // Process reaction curve methods
-    CohenCoon,              ///< Better for dead time
-    ChienHronesReswick0,    ///< 0% overshoot setpoint
-    ChienHronesReswick20,   ///< 20% overshoot setpoint
+    CohenCoon, /**< Better for dead time */
+    ChienHronesReswick0, /**< 0% overshoot setpoint */
+    ChienHronesReswick20, /**< 20% overshoot setpoint */
     
     // IMC-based methods
-    Lambda,                 ///< Internal Model Control
-    SIMC,                   ///< Skogestad IMC
+    Lambda, /**< Internal Model Control */
+    SIMC, /**< Skogestad IMC */
     
     // Optimization-based
-    AMIGO,                  ///< Approximate M-constrained
-    TyreusLuyben,           ///< Conservative, no overshoot
+    AMIGO, /**< Approximate M-constrained */
+    TyreusLuyben, /**< Conservative, no overshoot */
     
     // Special purpose
-    ISE,                    ///< Minimize integral squared error
-    IAE,                    ///< Minimize integral absolute error
-    ITAE                    ///< Minimize integral time-weighted absolute error
+    ISE, /**< Minimize integral squared error */
+    IAE, /**< Minimize integral absolute error */
+    ITAE /**< Minimize integral time-weighted absolute error */
 };
 
 /**
  * @brief Tuning goal specification
  */
 enum class TuningGoal {
-    Regulatory,             ///< Disturbance rejection
-    Setpoint,               ///< Setpoint tracking
-    Balanced                ///< Balance between both
+    Regulatory, /**< Disturbance rejection */
+    Setpoint, /**< Setpoint tracking */
+    Balanced /**< Balance between both */
 };
 
 /**
@@ -147,7 +149,7 @@ enum class TuningGoal {
 enum class ControllerForm {
     PI,
     PID,
-    PIDFiltered             ///< PID with derivative filter
+    PIDFiltered /**< PID with derivative filter */
 };
 
 // ============================================================================
@@ -158,17 +160,21 @@ enum class ControllerForm {
  * @brief Complete PID parameter set
  */
 struct PIDGains {
-    double Kp{0.0};         ///< Proportional gain
-    double Ki{0.0};         ///< Integral gain
-    double Kd{0.0};         ///< Derivative gain
-    double Tf{0.0};         ///< Derivative filter time constant
+    double Kp{0.0}; /**< Proportional gain */
+    double Ki{0.0}; /**< Integral gain */
+    double Kd{0.0}; /**< Derivative gain */
+    double Tf{0.0}; /**< Derivative filter time constant */
     
     // Alternative representation
-    /// Integral time Ti = Kp/Ki.
-    /// @return Integral time [s], or 0 when Ki is 0.
+    /**
+     * Integral time Ti = Kp/Ki.
+     * @return Integral time [s], or 0 when Ki is 0.
+     */
     double Ti() const { return (Ki != 0) ? Kp / Ki : 0.0; }
-    /// Derivative time Td = Kd/Kp.
-    /// @return Derivative time [s], or 0 when Kp is 0.
+    /**
+     * Derivative time Td = Kd/Kp.
+     * @return Derivative time [s], or 0 when Kp is 0.
+     */
     double Td() const { return (Kp != 0) ? Kd / Kp : 0.0; }
     
     void setFromTimeConstants(double kp, double ti, double td) {
@@ -358,11 +364,11 @@ public:
      * @brief Configuration for relay autotuning
      */
     struct Config {
-        double relayAmplitude = 1.0;     ///< Relay output amplitude
-        double hysteresis = 0.0;         ///< Relay hysteresis (for noise)
-        int minCycles = 3;               ///< Minimum oscillation cycles
-        int maxCycles = 20;              ///< Maximum cycles before timeout
-        double stabilityMargin = 0.05;   ///< Amplitude variation tolerance
+        double relayAmplitude = 1.0; /**< Relay output amplitude */
+        double hysteresis = 0.0; /**< Relay hysteresis (for noise) */
+        int minCycles = 3; /**< Minimum oscillation cycles */
+        int maxCycles = 20; /**< Maximum cycles before timeout */
+        double stabilityMargin = 0.05; /**< Amplitude variation tolerance */
         TuningRule rule = TuningRule::ZieglerNichols;
         ControllerForm form = ControllerForm::PID;
         
@@ -415,9 +421,9 @@ public:
      * @brief Get results
      */
     struct Results {
-        double Ku{0.0};         ///< Ultimate gain
-        double Tu{0.0};         ///< Ultimate period
-        PIDGains gains;         ///< Calculated gains
+        double Ku{0.0}; /**< Ultimate gain */
+        double Tu{0.0}; /**< Ultimate period */
+        PIDGains gains; /**< Calculated gains */
         bool valid{false};
     };
     
@@ -460,10 +466,10 @@ class PatternSearchAutotuner {
 public:
     struct Config {
         PIDGains initialGains;
-        double stepSize{0.1};           ///< Initial step as fraction of gain
-        double stepReduction{0.5};      ///< Step reduction factor
-        double minStep{0.01};           ///< Minimum step size
-        double evaluationTime{10.0};    ///< Seconds per evaluation
+        double stepSize{0.1}; /**< Initial step as fraction of gain */
+        double stepReduction{0.5}; /**< Step reduction factor */
+        double minStep{0.01}; /**< Minimum step size */
+        double evaluationTime{10.0}; /**< Seconds per evaluation */
         int maxIterations{50};
     };
     
@@ -567,10 +573,10 @@ public:
 class ARMAXEstimator {
 public:
     struct Config {
-        int na{2};          ///< Number of autoregressive terms
-        int nb{2};          ///< Number of input terms
-        int nk{1};          ///< Input delay (dead time in samples)
-        double forgetting{0.99}; ///< Forgetting factor for RLS
+        int na{2}; /**< Number of autoregressive terms */
+        int nb{2}; /**< Number of input terms */
+        int nk{1}; /**< Input delay (dead time in samples) */
+        double forgetting{0.99}; /**< Forgetting factor for RLS */
     };
     
     ARMAXEstimator(const Config& config);
@@ -587,7 +593,7 @@ public:
      * @return Autoregressive (denominator) coefficients.
      */
     std::vector<double> getARCoeffs() const;
-    /// @return Moving-average (numerator) coefficients.
+    /**@return Moving-average (numerator) coefficients. */
     std::vector<double> getMACoeffs() const;
     
     /**
@@ -623,9 +629,9 @@ private:
 class MRACAutotuner {
 public:
     struct Config {
-        double referenceTimeConstant{1.0};  ///< Desired response speed
+        double referenceTimeConstant{1.0}; /**< Desired response speed */
         double adaptationGain{0.01};
-        double signalAmplitude{1.0};        ///< Excitation signal amplitude
+        double signalAmplitude{1.0}; /**< Excitation signal amplitude */
     };
     
     MRACAutotuner(const Config& config);

@@ -118,14 +118,14 @@ struct AS715NPdoRow {
 
 namespace detail {
 
-/// One field of the PDO stream schema / signal set.
+/**One field of the PDO stream schema / signal set. */
 struct AS715NPdoField {
-    const char* name;      ///< Signal name suffix ("rx_controlword")
-    const char* desc;      ///< Object index + CiA 402 name
+    const char* name; /**< Signal name suffix ("rx_controlword") */
+    const char* desc; /**< Object index + CiA 402 name */
     ValueType   type;
     uint8_t     size;
-    bool        rx;        ///< true: RxPDO image, false: TxPDO image
-    uint16_t    offset;    ///< offsetof() in the respective PDO struct
+    bool        rx; /**< true: RxPDO image, false: TxPDO image */
+    uint16_t    offset; /**< offsetof() in the respective PDO struct */
 };
 
 using RxPDO1704 = AS715N_pdo::AS715N_RxPDO_1704;
@@ -178,7 +178,7 @@ using OdType  = ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType;
         .modification_mode = RegMod::ReadOnly,                              \
         .effective_time = RegEff::Immediately}
 
-/// Standard CoE objects reachable via SDO on any CoE slave.
+/**Standard CoE objects reachable via SDO on any CoE slave. */
 inline const OD::ObjectDictionaryEntry kCoeObjects[] = {
     AS715N_COE_RO(0x1000, 0x00, "Device type",                    OdType::Unsigned32),
     AS715N_COE_RO(0x1008, 0x00, "Manufacturer device name",       OdType::VisibleString),
@@ -224,8 +224,10 @@ inline const OD::ObjectDictionaryEntry kCoeObjects[] = {
 
 #undef AS715N_COE_RO
 
-/// RegisterList view of kCoeObjects so exposeSdoCatalog can treat the
-/// standard objects exactly like a vendor register group.
+/**
+ * RegisterList view of kCoeObjects so exposeSdoCatalog can treat the
+ * standard objects exactly like a vendor register group.
+ */
 inline const ::EtherCAT::Drives::Registers::RegisterList&
     kCoeObjectList() {
     static const ::EtherCAT::Drives::Registers::RegisterList list = [] {
@@ -262,8 +264,10 @@ public:
 
     const char* moduleName() const override { return "as715n"; }
 
-    /// Ring stream source covering all pdo.* signals — register into
-    /// ServerConfig::ringSources after calling expose().
+    /**
+     * Ring stream source covering all pdo.* signals — register into
+     * ServerConfig::ringSources after calling expose().
+     */
     IRingStreamSource& ringSource() { return ringSource_; }
 
     /**

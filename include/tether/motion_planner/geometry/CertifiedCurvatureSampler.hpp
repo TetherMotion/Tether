@@ -57,13 +57,13 @@
 
 namespace tether::motion {
 
-/// Result of a certified per-span curvature query.
+/**Result of a certified per-span curvature query. */
 struct CertifiedCurvature {
-    double maxKappa = 0.0;       ///< Certified upper bound on max κ on the span.
-    double minKappa = 0.0;       ///< Lower bound (max sample).
-    double Lipschitz = 0.0;      ///< The L_κ constant used (diagnostic).
-    std::size_t samples = 0;     ///< Number of κ evaluations performed.
-    double gridSpacing = 0.0;    ///< h (diagnostic).
+    double maxKappa = 0.0; /**< Certified upper bound on max κ on the span. */
+    double minKappa = 0.0; /**< Lower bound (max sample). */
+    double Lipschitz = 0.0; /**< The L_κ constant used (diagnostic). */
+    std::size_t samples = 0; /**< Number of κ evaluations performed. */
+    double gridSpacing = 0.0; /**< h (diagnostic). */
 };
 
 /**
@@ -158,14 +158,14 @@ public:
         return result;
     }
 
-    /// Number of spans actually sampled so far (laziness diagnostic).
+    /**Number of spans actually sampled so far (laziness diagnostic). */
     std::size_t spansSampled() const;
 
-    /// Total number of κ evaluations across all sampled spans.
+    /**Total number of κ evaluations across all sampled spans. */
     std::size_t totalCurvatureEvaluations() const;
 
 private:
-    /// Evaluate scalar curvature κ(u) on a single span.
+    /**Evaluate scalar curvature κ(u) on a single span. */
     static double curvatureAt(const NurbsCurve& c, double u);
 
     const PiecewiseNurbsPath& path_;
@@ -179,7 +179,7 @@ private:
     mutable std::vector<CacheEntry> cache_;
     mutable std::mutex mutex_;
 
-    /// Fill `cache_[pieceIndex]` (caller holds `mutex_`).
+    /**Fill `cache_[pieceIndex]` (caller holds `mutex_`). */
     void computeSpan(std::size_t pieceIndex) const;
 };
 

@@ -204,8 +204,10 @@ bool Master::autoConfigureMailbox(SlaveAddress slave_address, Tether::Platform::
 
 namespace {
 
-/// Find a SyncManagerEntry by name substring (e.g. "MBoxOut", "MBoxIn",
-/// "Outputs", "Inputs").
+/**
+ * Find a SyncManagerEntry by name substring (e.g. "MBoxOut", "MBoxIn",
+ * "Outputs", "Inputs").
+ */
 const EtherCAT::ESI::SyncManagerEntry* findEsiSmByName(
     const EtherCAT::ESI::DeviceInfo& dev, const char* needle) {
     for (const auto& sm : dev.syncManagers) {
@@ -214,7 +216,7 @@ const EtherCAT::ESI::SyncManagerEntry* findEsiSmByName(
     return nullptr;
 }
 
-/// Read SII identity for ESI device matching.
+/**Read SII identity for ESI device matching. */
 struct EsiMatchId {
     uint32_t vendorId{0};
     uint32_t productCode{0};

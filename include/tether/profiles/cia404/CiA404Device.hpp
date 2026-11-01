@@ -141,13 +141,13 @@ using ValueCallback = std::function<void(uint16_t slave_addr, uint8_t channel,
  * @brief Device capabilities discovered during initialization
  */
 struct DeviceCapabilities {
-    uint8_t num_process_inputs;    ///< Number of process inputs
-    uint8_t num_process_outputs;   ///< Number of process outputs
-    bool has_controller;           ///< Has closed loop controller
-    bool has_calibration;          ///< Has calibration support
-    bool has_linearization;        ///< Has linearization table
-    bool has_alarms;               ///< Has alarm functionality
-    bool has_diagnostics;          ///< Has diagnostic readings
+    uint8_t num_process_inputs; /**< Number of process inputs */
+    uint8_t num_process_outputs; /**< Number of process outputs */
+    bool has_controller; /**< Has closed loop controller */
+    bool has_calibration; /**< Has calibration support */
+    bool has_linearization; /**< Has linearization table */
+    bool has_alarms; /**< Has alarm functionality */
+    bool has_diagnostics; /**< Has diagnostic readings */
     
     DeviceCapabilities()
         : num_process_inputs(0)
@@ -164,12 +164,12 @@ struct DeviceCapabilities {
  * @brief Process input channel state
  */
 struct ProcessInputState {
-    int32_t raw_value;             ///< Raw ADC value
-    int32_t scaled_value;          ///< Scaled engineering value
-    int32_t filtered_value;        ///< Filtered value
-    uint8_t status;                ///< Channel status
-    uint16_t alarm_status;         ///< Active alarms
-    uint16_t warning_status;       ///< Active warnings
+    int32_t raw_value; /**< Raw ADC value */
+    int32_t scaled_value; /**< Scaled engineering value */
+    int32_t filtered_value; /**< Filtered value */
+    uint8_t status; /**< Channel status */
+    uint16_t alarm_status; /**< Active alarms */
+    uint16_t warning_status; /**< Active warnings */
     
     ProcessInputState()
         : raw_value(0)
@@ -185,13 +185,13 @@ struct ProcessInputState {
  * @brief Controller state
  */
 struct ControllerState {
-    int32_t setpoint;              ///< Current setpoint
-    int32_t actual_value;          ///< Process variable
-    int32_t deviation;             ///< Control deviation (error)
-    int32_t output;                ///< Controller output
-    int32_t integral_sum;          ///< Integral accumulator
-    uint8_t mode;                  ///< Current mode
-    uint16_t status;               ///< Controller status bits
+    int32_t setpoint; /**< Current setpoint */
+    int32_t actual_value; /**< Process variable */
+    int32_t deviation; /**< Control deviation (error) */
+    int32_t output; /**< Controller output */
+    int32_t integral_sum; /**< Integral accumulator */
+    uint8_t mode; /**< Current mode */
+    uint16_t status; /**< Controller status bits */
     
     ControllerState()
         : setpoint(0)

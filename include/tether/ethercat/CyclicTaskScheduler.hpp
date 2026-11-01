@@ -45,22 +45,26 @@ public:
     CyclicTaskScheduler(const CyclicTaskScheduler&) = delete;
     CyclicTaskScheduler& operator=(const CyclicTaskScheduler&) = delete;
 
-    /// Register a task with phase + priority (lower = earlier within same phase).
-    /// The task pointer must remain valid until removed.
-    /// Thread-safe.
+    /**
+     * Register a task with phase + priority (lower = earlier within same phase).
+     * The task pointer must remain valid until removed.
+     * Thread-safe.
+     */
     TaskHandle addTask(ICyclicTask* task, TaskPhase phase, uint8_t priority = 128);
 
-    /// Remove a task by handle. Thread-safe.
+    /**Remove a task by handle. Thread-safe. */
     bool removeTask(TaskHandle handle);
 
-    /// Clear all tasks. Thread-safe.
+    /**Clear all tasks. Thread-safe. */
     void clear();
 
-    /// Execute all tasks in pre-sorted order. Called from RT thread.
-    /// Lock-free: iterates a snapshot of raw pointers.
+    /**
+     * Execute all tasks in pre-sorted order. Called from RT thread.
+     * Lock-free: iterates a snapshot of raw pointers.
+     */
     bool executeAll(DS402Master& master, double dt_seconds);
 
-    /// Number of registered tasks.
+    /**Number of registered tasks. */
     size_t taskCount() const;
 
 private:

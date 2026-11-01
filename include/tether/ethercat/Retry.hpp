@@ -37,14 +37,16 @@ using EtherCATCommand = Command;
  * @brief Configuration for retry behavior
  */
 struct RetryPolicy {
-    uint32_t max_retries = 3;              ///< Maximum number of retry attempts
-    uint32_t initial_timeout_ms = 10;      ///< Initial timeout in milliseconds
-    uint32_t max_timeout_ms = 100;         ///< Maximum timeout (for exponential backoff)
-    float backoff_multiplier = 2.0f;       ///< Multiplier for exponential backoff
-    bool use_exponential_backoff = true;   ///< Enable exponential backoff
+    uint32_t max_retries = 3; /**< Maximum number of retry attempts */
+    uint32_t initial_timeout_ms = 10; /**< Initial timeout in milliseconds */
+    uint32_t max_timeout_ms = 100; /**< Maximum timeout (for exponential backoff) */
+    float backoff_multiplier = 2.0f; /**< Multiplier for exponential backoff */
+    bool use_exponential_backoff = true; /**< Enable exponential backoff */
 
-    /// Default fast retry (for real-time operations)
-    /// @return 2 retries, 5 ms base timeout, 1.5x backoff.
+    /**
+     * Default fast retry (for real-time operations)
+     * @return 2 retries, 5 ms base timeout, 1.5x backoff.
+     */
     static RetryPolicy fast() {
         return RetryPolicy{
             .max_retries = 2,
@@ -55,8 +57,10 @@ struct RetryPolicy {
         };
     }
 
-    /// Default standard retry
-    /// @return 3 retries, 10 ms base timeout, 2x backoff.
+    /**
+     * Default standard retry
+     * @return 3 retries, 10 ms base timeout, 2x backoff.
+     */
     static RetryPolicy standard() {
         return RetryPolicy{
             .max_retries = 3,
@@ -67,8 +71,10 @@ struct RetryPolicy {
         };
     }
 
-    /// Slow retry (for configuration operations)
-    /// @return 5 retries, 50 ms base timeout, 2x backoff.
+    /**
+     * Slow retry (for configuration operations)
+     * @return 5 retries, 50 ms base timeout, 2x backoff.
+     */
     static RetryPolicy slow() {
         return RetryPolicy{
             .max_retries = 5,
@@ -79,8 +85,10 @@ struct RetryPolicy {
         };
     }
 
-    /// Single attempt, no retry
-    /// @return Policy with max_retries = 0.
+    /**
+     * Single attempt, no retry
+     * @return Policy with max_retries = 0.
+     */
     static RetryPolicy none() {
         return RetryPolicy{
             .max_retries = 0,
@@ -91,9 +99,11 @@ struct RetryPolicy {
         };
     }
 
-    /// Calculate timeout for a given attempt number
-    /// @param attempt Zero-based attempt index.
-    /// @return Timeout for that attempt [ms], clamped to max_timeout_ms.
+    /**
+     * Calculate timeout for a given attempt number
+     * @param attempt Zero-based attempt index.
+     * @return Timeout for that attempt [ms], clamped to max_timeout_ms.
+     */
     uint32_t getTimeoutForAttempt(uint32_t attempt) const {
         if (!use_exponential_backoff || attempt == 0) {
             return initial_timeout_ms;
@@ -116,21 +126,23 @@ struct RetryPolicy {
 struct StoredDatagram {
     EtherCATCommand cmd = EtherCATCommand::NOP;
     uint8_t idx = 0;
-    uint16_t adp = 0;        ///< Slave address (ADP for auto-increment, position for position-based)
-    uint16_t ado = 0;        ///< Memory address / offset
+    uint16_t adp = 0; /**< Slave address (ADP for auto-increment, position for position-based) */
+    uint16_t ado = 0; /**< Memory address / offset */
     uint16_t datalen = 0;
-    uint8_t data[1486] = {0};  ///< Max EtherCAT datagram data
+    uint8_t data[1486] = {0}; /**< Max EtherCAT datagram data */
 
-    /// Create empty datagram
+    /**Create empty datagram */
     StoredDatagram() = default;
 
-    /// Create with command info
-    /// @param c EtherCAT command (APRD, LRW, ...).
-    /// @param i Datagram index.
-    /// @param ap Auto-increment position (ADP).
-    /// @param ao Auto-increment offset (ADO) or logical address.
-    /// @param d Payload bytes (may be null for reads).
-    /// @param len Payload length in bytes.
+    /**
+     * Create with command info
+     * @param c EtherCAT command (APRD, LRW, ...).
+     * @param i Datagram index.
+     * @param ap Auto-increment position (ADP).
+     * @param ao Auto-increment offset (ADO) or logical address.
+     * @param d Payload bytes (may be null for reads).
+     * @param len Payload length in bytes.
+     */
     StoredDatagram(EtherCATCommand c, uint8_t i, uint16_t ap, uint16_t ao, 
                    const uint8_t* d, uint16_t len)
         : cmd(c), idx(i), adp(ap), ado(ao), datalen(len)
@@ -140,8 +152,10 @@ struct StoredDatagram {
         }
     }
 
-    /// Check if valid
-    /// @return true when the command is not NOP and a payload is present.
+    /**
+     * Check if valid
+     * @return true when the command is not NOP and a payload is present.
+     */
     bool isValid() const {
         return cmd != EtherCATCommand::NOP && datalen > 0;
     }
@@ -155,17 +169,19 @@ struct StoredDatagram {
  * @brief Result of a retry operation
  */
 struct RetryResult {
-    bool success = false;           ///< True if operation succeeded
-    bool timeout = false;           ///< True if all retries timed out
-    uint32_t attempts = 0;          ///< Number of attempts made
-    uint32_t total_time_ms = 0;     ///< Total time spent
-    uint16_t wkc = 0;               ///< Working counter from response
-    uint16_t data_length = 0;       ///< Length of response data
-    uint8_t idx = 0;                ///< Index from response
+    bool success = false; /**< True if operation succeeded */
+    bool timeout = false; /**< True if all retries timed out */
+    uint32_t attempts = 0; /**< Number of attempts made */
+    uint32_t total_time_ms = 0; /**< Total time spent */
+    uint16_t wkc = 0; /**< Working counter from response */
+    uint16_t data_length = 0; /**< Length of response data */
+    uint8_t idx = 0; /**< Index from response */
 
-    /// Check if this was a WKC error (got response but WKC was wrong)
-    /// @param expected_wkc Working counter the operation required.
-    /// @return true when the exchange succeeded but the WKC differs.
+    /**
+     * Check if this was a WKC error (got response but WKC was wrong)
+     * @param expected_wkc Working counter the operation required.
+     * @return true when the exchange succeeded but the WKC differs.
+     */
     bool isWkcError(uint16_t expected_wkc) const {
         return success && wkc != expected_wkc;
     }
@@ -179,24 +195,28 @@ struct RetryResult {
  * @brief Statistics for retry operations
  */
 struct RetryStats {
-    uint64_t total_requests = 0;       ///< Total requests sent
-    uint64_t first_try_success = 0;    ///< Succeeded on first try
-    uint64_t retry_success = 0;        ///< Succeeded after retry
-    uint64_t total_failures = 0;       ///< Failed after all retries
-    uint64_t total_retries = 0;        ///< Total retry attempts
-    uint64_t total_timeouts = 0;       ///< Total timeout events
-    uint64_t max_retries_used = 0;     ///< Maximum retries needed for success
+    uint64_t total_requests = 0; /**< Total requests sent */
+    uint64_t first_try_success = 0; /**< Succeeded on first try */
+    uint64_t retry_success = 0; /**< Succeeded after retry */
+    uint64_t total_failures = 0; /**< Failed after all retries */
+    uint64_t total_retries = 0; /**< Total retry attempts */
+    uint64_t total_timeouts = 0; /**< Total timeout events */
+    uint64_t max_retries_used = 0; /**< Maximum retries needed for success */
 
-    /// Calculate success rate
-    /// @return Fraction of requests that eventually succeeded.
+    /**
+     * Calculate success rate
+     * @return Fraction of requests that eventually succeeded.
+     */
     float successRate() const {
         return total_requests > 0 
             ? static_cast<float>(first_try_success + retry_success) / total_requests 
             : 0.0f;
     }
 
-    /// Calculate first-try success rate
-    /// @return Fraction of requests that succeeded on the first attempt.
+    /**
+     * Calculate first-try success rate
+     * @return Fraction of requests that succeeded on the first attempt.
+     */
     float firstTryRate() const {
         return total_requests > 0
             ? static_cast<float>(first_try_success) / total_requests
@@ -208,78 +228,96 @@ struct RetryStats {
 // Request Builder Functions
 // ============================================================================
 
-/// Build APRD (Auto-increment Physical Read) datagram
-/// @param idx Datagram index.
-/// @param slave_position Slave position on the bus.
-/// @param ado Register offset.
-/// @param length Number of bytes to read.
-/// @return Ready-to-send datagram.
+/**
+ * Build APRD (Auto-increment Physical Read) datagram
+ * @param idx Datagram index.
+ * @param slave_position Slave position on the bus.
+ * @param ado Register offset.
+ * @param length Number of bytes to read.
+ * @return Ready-to-send datagram.
+ */
 StoredDatagram buildAPRD(uint8_t idx, uint16_t slave_position, uint16_t ado, uint16_t length);
 
-/// Build APWR (Auto-increment Physical Write) datagram
-/// @param idx Datagram index.
-/// @param slave_position Slave position on the bus.
-/// @param ado Register offset.
-/// @param data Payload to write.
-/// @param length Payload length in bytes.
-/// @return Ready-to-send datagram.
+/**
+ * Build APWR (Auto-increment Physical Write) datagram
+ * @param idx Datagram index.
+ * @param slave_position Slave position on the bus.
+ * @param ado Register offset.
+ * @param data Payload to write.
+ * @param length Payload length in bytes.
+ * @return Ready-to-send datagram.
+ */
 StoredDatagram buildAPWR(uint8_t idx, uint16_t slave_position, uint16_t ado, 
                           const uint8_t* data, uint16_t length);
 
-/// Build FPRD (Configured Address Physical Read) datagram
-/// @param idx Datagram index.
-/// @param configured_addr Configured station address.
-/// @param ado Register offset.
-/// @param length Number of bytes to read.
-/// @return Ready-to-send datagram.
+/**
+ * Build FPRD (Configured Address Physical Read) datagram
+ * @param idx Datagram index.
+ * @param configured_addr Configured station address.
+ * @param ado Register offset.
+ * @param length Number of bytes to read.
+ * @return Ready-to-send datagram.
+ */
 StoredDatagram buildFPRD(uint8_t idx, uint16_t configured_addr, uint16_t ado, uint16_t length);
 
-/// Build FPWR (Configured Address Physical Write) datagram
-/// @param idx Datagram index.
-/// @param configured_addr Configured station address.
-/// @param ado Register offset.
-/// @param data Payload to write.
-/// @param length Payload length in bytes.
-/// @return Ready-to-send datagram.
+/**
+ * Build FPWR (Configured Address Physical Write) datagram
+ * @param idx Datagram index.
+ * @param configured_addr Configured station address.
+ * @param ado Register offset.
+ * @param data Payload to write.
+ * @param length Payload length in bytes.
+ * @return Ready-to-send datagram.
+ */
 StoredDatagram buildFPWR(uint8_t idx, uint16_t configured_addr, uint16_t ado,
                           const uint8_t* data, uint16_t length);
 
-/// Build BRD (Broadcast Read) datagram
-/// @param idx Datagram index.
-/// @param ado Register offset.
-/// @param length Number of bytes to read from every slave.
-/// @return Ready-to-send datagram.
+/**
+ * Build BRD (Broadcast Read) datagram
+ * @param idx Datagram index.
+ * @param ado Register offset.
+ * @param length Number of bytes to read from every slave.
+ * @return Ready-to-send datagram.
+ */
 StoredDatagram buildBRD(uint8_t idx, uint16_t ado, uint16_t length);
 
-/// Build BWR (Broadcast Write) datagram
-/// @param idx Datagram index.
-/// @param ado Register offset.
-/// @param data Payload to write to every slave.
-/// @param length Payload length in bytes.
-/// @return Ready-to-send datagram.
+/**
+ * Build BWR (Broadcast Write) datagram
+ * @param idx Datagram index.
+ * @param ado Register offset.
+ * @param data Payload to write to every slave.
+ * @param length Payload length in bytes.
+ * @return Ready-to-send datagram.
+ */
 StoredDatagram buildBWR(uint8_t idx, uint16_t ado, const uint8_t* data, uint16_t length);
 
-/// Build LRW (Logical Read/Write) datagram
-/// @param idx Datagram index.
-/// @param logical_addr Logical (FMMU-mapped) address.
-/// @param data Payload: outputs written, inputs overwritten on reply.
-/// @param length Payload length in bytes.
-/// @return Ready-to-send datagram.
+/**
+ * Build LRW (Logical Read/Write) datagram
+ * @param idx Datagram index.
+ * @param logical_addr Logical (FMMU-mapped) address.
+ * @param data Payload: outputs written, inputs overwritten on reply.
+ * @param length Payload length in bytes.
+ * @return Ready-to-send datagram.
+ */
 StoredDatagram buildLRW(uint8_t idx, uint32_t logical_addr, const uint8_t* data, uint16_t length);
 
-/// Build LRD (Logical Read) datagram
-/// @param idx Datagram index.
-/// @param logical_addr Logical (FMMU-mapped) address.
-/// @param length Number of bytes to read.
-/// @return Ready-to-send datagram.
+/**
+ * Build LRD (Logical Read) datagram
+ * @param idx Datagram index.
+ * @param logical_addr Logical (FMMU-mapped) address.
+ * @param length Number of bytes to read.
+ * @return Ready-to-send datagram.
+ */
 StoredDatagram buildLRD(uint8_t idx, uint32_t logical_addr, uint16_t length);
 
-/// Build LWR (Logical Write) datagram
-/// @param idx Datagram index.
-/// @param logical_addr Logical (FMMU-mapped) address.
-/// @param data Payload to write.
-/// @param length Payload length in bytes.
-/// @return Ready-to-send datagram.
+/**
+ * Build LWR (Logical Write) datagram
+ * @param idx Datagram index.
+ * @param logical_addr Logical (FMMU-mapped) address.
+ * @param data Payload to write.
+ * @param length Payload length in bytes.
+ * @return Ready-to-send datagram.
+ */
 StoredDatagram buildLWR(uint8_t idx, uint32_t logical_addr, const uint8_t* data, uint16_t length);
 
 // ============================================================================
@@ -365,14 +403,16 @@ public:
                                uint16_t expected_wkc,
                                const RetryPolicy& policy = RetryPolicy::standard());
 
-    /// Get statistics
-    /// @return Counters accumulated since construction or resetStats().
+    /**
+     * Get statistics
+     * @return Counters accumulated since construction or resetStats().
+     */
     RetryStats getStats() const { return stats_; }
 
-    /// Reset statistics
+    /**Reset statistics */
     void resetStats() { stats_ = {}; }
 
-    /// Log statistics
+    /**Log statistics */
     void logStats() const;
 
 private:

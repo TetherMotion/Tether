@@ -12,8 +12,10 @@ public:
     SDOUpload(SDOErrorDecoder& ed, SDOMailboxIO& mio, SDODiagnostics& diag)
         : SDOTransactionBase(ed, mio, diag) {}
 
-    /// @param outAbortCode  If non-null, set to the CoE SDO abort code (0 on
-    ///                      success or non-abort failure) reported by the slave.
+    /**
+     * @param outAbortCode  If non-null, set to the CoE SDO abort code (0 on
+     *                      success or non-abort failure) reported by the slave.
+     */
     virtual bool execute(Master& master, uint16_t adp,
                          uint8_t* inoutMbxCnt,
                          uint16_t mbxWriteAddr, uint16_t mbxWriteLen,

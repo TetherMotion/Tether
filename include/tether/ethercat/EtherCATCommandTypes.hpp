@@ -22,21 +22,21 @@ namespace EtherCAT {
  * @brief EtherCAT datagram command types
  */
 enum class Command : uint8_t {
-    NOP  = 0x00,  ///< No operation
-    APRD = 0x01,  ///< Auto Position Read
-    APWR = 0x02,  ///< Auto Position Write
-    APRW = 0x03,  ///< Auto Position Read/Write
-    FPRD = 0x04,  ///< Configured Address Read
-    FPWR = 0x05,  ///< Configured Address Write
-    FPRW = 0x06,  ///< Configured Address Read/Write
-    BRD  = 0x07,  ///< Broadcast Read
-    BWR  = 0x08,  ///< Broadcast Write
-    BRW  = 0x09,  ///< Broadcast Read/Write
-    LRD  = 0x0A,  ///< Logical Read
-    LWR  = 0x0B,  ///< Logical Write
-    LRW  = 0x0C,  ///< Logical Read/Write
-    ARMW = 0x0D,  ///< Auto Read Multiple Write
-    FRMW = 0x0E,  ///< Configured Read Multiple Write
+    NOP  = 0x00, /**< No operation */
+    APRD = 0x01, /**< Auto Position Read */
+    APWR = 0x02, /**< Auto Position Write */
+    APRW = 0x03, /**< Auto Position Read/Write */
+    FPRD = 0x04, /**< Configured Address Read */
+    FPWR = 0x05, /**< Configured Address Write */
+    FPRW = 0x06, /**< Configured Address Read/Write */
+    BRD  = 0x07, /**< Broadcast Read */
+    BWR  = 0x08, /**< Broadcast Write */
+    BRW  = 0x09, /**< Broadcast Read/Write */
+    LRD  = 0x0A, /**< Logical Read */
+    LWR  = 0x0B, /**< Logical Write */
+    LRW  = 0x0C, /**< Logical Read/Write */
+    ARMW = 0x0D, /**< Auto Read Multiple Write */
+    FRMW = 0x0E, /**< Configured Read Multiple Write */
 };
 
 /**
@@ -95,13 +95,13 @@ inline bool isWriteCommand(Command cmd) {
  * Passed through the RX queue when a response is received.
  */
 struct RxDatagram {
-    uint8_t idx;              ///< Matching index from request
-    Command cmd;              ///< Command type
-    uint16_t adp;             ///< Address position
-    uint16_t ado;             ///< Address offset
-    uint16_t datalen;         ///< Data length
-    uint16_t wkc;             ///< Working Counter (incremented by each slave that processes)
-    uint8_t data[kMaxDatagramDataSize]; ///< Payload (max single-datagram size)
+    uint8_t idx; /**< Matching index from request */
+    Command cmd; /**< Command type */
+    uint16_t adp; /**< Address position */
+    uint16_t ado; /**< Address offset */
+    uint16_t datalen; /**< Data length */
+    uint16_t wkc; /**< Working Counter (incremented by each slave that processes) */
+    uint8_t data[kMaxDatagramDataSize]; /**< Payload (max single-datagram size) */
 };
 
 /**
@@ -131,37 +131,41 @@ struct RxDatagram {
  */
 inline constexpr uint8_t kFastSlotBaseIdx   = 0x9C;
 inline constexpr uint8_t kFastSlotEndIdx    = 0xFF;
-inline constexpr size_t  kNumFastSlots      = 100;   ///< slots 0x9C..0xFF
+inline constexpr size_t  kNumFastSlots      = 100; /**< slots 0x9C..0xFF */
 
 inline constexpr uint8_t kSliceSlotBaseIdx  = 0xE0;
-inline constexpr size_t  kNumSliceSlots     = 16;    ///< slots 0xE0..0xEF
+inline constexpr size_t  kNumSliceSlots     = 16; /**< slots 0xE0..0xEF */
 
-/// Wire index of the dedicated DC-timepoint datagram (pool pos 82).
+/**Wire index of the dedicated DC-timepoint datagram (pool pos 82). */
 inline constexpr uint8_t kDcTimeIdx         = 0xFF;
-/// Fire-and-forget wire index — inside the band but owns no mailbox.
+/**Fire-and-forget wire index — inside the band but owns no mailbox. */
 inline constexpr uint8_t kFastSlotReservedIdx = 0xFE;
 
-/// Rotating cyclic-request pool depth (positions 0..81).
+/**Rotating cyclic-request pool depth (positions 0..81). */
 inline constexpr size_t  kNumCyclicSlots    = 82;
-/// Pool position pinned for the DC-timepoint datagram (wire 0xFF).
+/**Pool position pinned for the DC-timepoint datagram (wire 0xFF). */
 inline constexpr uint8_t kCyclicDcPoolPos   = 82;
-/// Back-compat alias: the cyclic band starts at the pool base.
+/**Back-compat alias: the cyclic band starts at the pool base. */
 inline constexpr uint8_t kCyclicSlotBaseIdx = kFastSlotBaseIdx;
 
-/// Rotating pool position -> wire index (pos 82 = the DC index).
-/// @param pos Cyclic pool position (0-82)
-/// @return Wire index the position maps to on the frame
+/**
+ * Rotating pool position -> wire index (pos 82 = the DC index).
+ * @param pos Cyclic pool position (0-82)
+ * @return Wire index the position maps to on the frame
+ */
 inline constexpr uint8_t cyclicPoolWireIdx(uint8_t pos) {
     if (pos < 68) return static_cast<uint8_t>(0x9C + pos);   // 0x9C..0xDF
     if (pos < 82) return static_cast<uint8_t>(0xF0 + pos - 68); // 0xF0..0xFD
     return kDcTimeIdx;                                       // pos 82
 }
 
-/// Wire index -> rotating pool position; kCyclicDcPoolPos for the DC
-/// index and 0xFF for slice/fire-and-forget indices (not pool members).
-/// @param idx Wire index to translate
-/// @return Pool position, kCyclicDcPoolPos for the DC index, or 0xFF
-///         when `idx` is not a pool member
+/**
+ * Wire index -> rotating pool position; kCyclicDcPoolPos for the DC
+ * index and 0xFF for slice/fire-and-forget indices (not pool members).
+ * @param idx Wire index to translate
+ * @return Pool position, kCyclicDcPoolPos for the DC index, or 0xFF
+ *         when `idx` is not a pool member
+ */
 inline constexpr uint8_t cyclicWirePoolPos(uint8_t idx) {
     if (idx >= 0x9C && idx <= 0xDF) return static_cast<uint8_t>(idx - 0x9C);
     if (idx >= 0xF0 && idx <= 0xFD)
@@ -170,38 +174,48 @@ inline constexpr uint8_t cyclicWirePoolPos(uint8_t idx) {
     return 0xFF;
 }
 
-/// 8-byte monotonically increasing counter appended to the last LRW
-/// datagram of a cyclic exchange (lands on unmapped logical space past
-/// the image end, so slaves pass it through verbatim).  Verified on the
-/// response — a stale echo carries an older counter and is rejected.
+/**
+ * 8-byte monotonically increasing counter appended to the last LRW
+ * datagram of a cyclic exchange (lands on unmapped logical space past
+ * the image end, so slaves pass it through verbatim).  Verified on the
+ * response — a stale echo carries an older counter and is rejected.
+ */
 inline constexpr uint16_t kLrwCounterTrailerBytes = 8;
 
-/// True when @p idx lies in the reserved fastpath band [0x9C, 0xFF]
-/// minus the 0xFE fire-and-forget index (its echoes belong to the async
-/// parser path — txpdo_rx_queue_ consumers).
-/// @param idx Wire index to test
-/// @return `true` when `idx` is inside the fastpath band
+/**
+ * True when @p idx lies in the reserved fastpath band [0x9C, 0xFF]
+ * minus the 0xFE fire-and-forget index (its echoes belong to the async
+ * parser path — txpdo_rx_queue_ consumers).
+ * @param idx Wire index to test
+ * @return `true` when `idx` is inside the fastpath band
+ */
 inline constexpr bool isFastPathIdx(uint8_t idx) {
     return idx >= kFastSlotBaseIdx && idx <= kFastSlotEndIdx &&
            idx != kFastSlotReservedIdx;
 }
-/// True when @p idx is a user-slice index (0xE0..0xEF).
-/// @param idx Wire index to test
-/// @return `true` when `idx` belongs to a user slice slot
+/**
+ * True when @p idx is a user-slice index (0xE0..0xEF).
+ * @param idx Wire index to test
+ * @return `true` when `idx` belongs to a user slice slot
+ */
 inline constexpr bool isSliceIdx(uint8_t idx) {
     return idx >= kSliceSlotBaseIdx &&
            idx <  kSliceSlotBaseIdx + static_cast<uint8_t>(kNumSliceSlots);
 }
-/// True when @p idx is a cyclic-pool or DC index — everything in the
-/// band except the slice range and 0xFE.
-/// @param idx Wire index to test
-/// @return `true` when `idx` belongs to the cyclic pool or DC slot
+/**
+ * True when @p idx is a cyclic-pool or DC index — everything in the
+ * band except the slice range and 0xFE.
+ * @param idx Wire index to test
+ * @return `true` when `idx` belongs to the cyclic pool or DC slot
+ */
 inline constexpr bool isCyclicIdx(uint8_t idx) {
     return isFastPathIdx(idx) && !isSliceIdx(idx);
 }
-/// True when @p idx maps to a real fastpath mailbox slot.
-/// @param idx Wire index to test
-/// @return `true` when `idx` maps to a fastpath slot
+/**
+ * True when @p idx maps to a real fastpath mailbox slot.
+ * @param idx Wire index to test
+ * @return `true` when `idx` maps to a fastpath slot
+ */
 inline constexpr bool isSlotIdx(uint8_t idx) {
     return isFastPathIdx(idx);
 }
@@ -225,8 +239,10 @@ struct CyclicDgramSpec {
     const void*  tail{nullptr};
     uint16_t     tail_len{0};
     bool         roundtrip{true};
-    /// Stamp the per-slot send-generation bit (lenFlags res-bit 13) —
-    /// the echoed bit lets collect reject deposits of an older send.
+    /**
+     * Stamp the per-slot send-generation bit (lenFlags res-bit 13) —
+     * the echoed bit lets collect reject deposits of an older send.
+     */
     bool         stamp_gen{false};
 };
 
@@ -241,31 +257,37 @@ struct CyclicDgramSpec {
  * arriving (Stale — a reply that survived its own cycle's deadline).
  */
 enum class CyclicSliceStatus : uint8_t {
-    None,      ///< No collect has run yet
-    Ok,        ///< Reply in time, WKC valid
-    Timeout,   ///< No reply before the cycle deadline — packet didn't circulate
-    WkcError,  ///< Reply arrived but WKC == 0 or != expected
-    Stale,     ///< Only a previous-generation echo arrived this cycle
-    SendError, ///< The datagram could not be sent this cycle
+    None, /**< No collect has run yet */
+    Ok, /**< Reply in time, WKC valid */
+    Timeout, /**< No reply before the cycle deadline — packet didn't circulate */
+    WkcError, /**< Reply arrived but WKC == 0 or != expected */
+    Stale, /**< Only a previous-generation echo arrived this cycle */
+    SendError, /**< The datagram could not be sent this cycle */
 };
 
-/// Per-slice cyclic health snapshot — written by the cyclic thread during
-/// collect, read by diagnostic callers.  The runtime stores it packed in
-/// a single atomic word (pack()/unpack()) so readers never see torn
-/// fields.
+/**
+ * Per-slice cyclic health snapshot — written by the cyclic thread during
+ * collect, read by diagnostic callers.  The runtime stores it packed in
+ * a single atomic word (pack()/unpack()) so readers never see torn
+ * fields.
+ */
 struct CyclicSliceHealth {
-    uint16_t expected_wkc = 0xFFFF;  ///< LogicalAddressManager::kWkcUnknown
-    uint16_t last_wkc     = 0;       ///< WKC of the last reply that arrived
+    uint16_t expected_wkc = 0xFFFF; /**< LogicalAddressManager::kWkcUnknown */
+    uint16_t last_wkc     = 0; /**< WKC of the last reply that arrived */
     CyclicSliceStatus last_status = CyclicSliceStatus::None;
-    /// Consecutive non-Ok cycles on this slice — a slowly flapping slave
-    /// shows up here even when cumulative counters look fine.
+    /**
+     * Consecutive non-Ok cycles on this slice — a slowly flapping slave
+     * shows up here even when cumulative counters look fine.
+     */
     uint32_t consecutive_failures = 0;
 
-    /// Pack the whole snapshot into a single word so the cyclic thread
-    /// can publish it with one atomic store and readers never see a torn
-    /// mix of fields.  Layout: expected[0:16) last[16:32) status[32:40)
-    /// failures[40:64) — failures saturate at 2^24-1.
-    /// @return Packed 64-bit snapshot, reversible via unpack()
+    /**
+     * Pack the whole snapshot into a single word so the cyclic thread
+     * can publish it with one atomic store and readers never see a torn
+     * mix of fields.  Layout: expected[0:16) last[16:32) status[32:40)
+     * failures[40:64) — failures saturate at 2^24-1.
+     * @return Packed 64-bit snapshot, reversible via unpack()
+     */
     uint64_t pack() const {
         const uint64_t f = consecutive_failures > 0xFFFFFFu
                                ? 0xFFFFFFu : consecutive_failures;
@@ -285,9 +307,11 @@ struct CyclicSliceHealth {
     }
 };
 
-/// Short stable names for logs — same style as toString(VlanTagDelivery).
-/// @param s Slice status to convert
-/// @return Static status name for logging
+/**
+ * Short stable names for logs — same style as toString(VlanTagDelivery).
+ * @param s Slice status to convert
+ * @return Static status name for logging
+ */
 inline const char* toString(CyclicSliceStatus s) {
     switch (s) {
     case CyclicSliceStatus::Ok:        return "ok";
@@ -310,9 +334,9 @@ inline const char* toString(CyclicSliceStatus s) {
  * machine.
  */
 enum class VlanDeliveryHint : uint8_t {
-    Auto,         ///< delivery unknown — emit legs for both (default, safe)
-    StrippedOnly, ///< kernel strips tags into auxdata — no inline-tag leg
-    InlineOnly,   ///< kernel keeps tags inline — no SKF_AD_VLAN_* loads
+    Auto, /**< delivery unknown — emit legs for both (default, safe) */
+    StrippedOnly, /**< kernel strips tags into auxdata — no inline-tag leg */
+    InlineOnly, /**< kernel keeps tags inline — no SKF_AD_VLAN_* loads */
 };
 
 /**
@@ -327,30 +351,40 @@ enum class VlanDeliveryHint : uint8_t {
  * router's per-frame rebuild never runs on the cyclic path.
  */
 struct WireEncap {
-    uint16_t tx_vlan     = 0;     ///< VID to insert on TX (0 = untagged)
-    uint16_t rx_vlan_lo  = 0;     ///< Accepted RX VID range; 0/0 = untagged
+    uint16_t tx_vlan     = 0; /**< VID to insert on TX (0 = untagged) */
+    uint16_t rx_vlan_lo  = 0; /**< Accepted RX VID range; 0/0 = untagged */
     uint16_t rx_vlan_hi  = 0;
-    bool     rx_vlan_any = false; ///< Accept any tagged EtherCAT frame
+    bool     rx_vlan_any = false; /**< Accept any tagged EtherCAT frame */
 
-    /// Detected tag delivery for this NIC — set from probeVlanTagDelivery.
-    /// Shrinks the composed cyclic/async demux programs by dropping the
-    /// leg that can never execute.
+    /**
+     * Detected tag delivery for this NIC — set from probeVlanTagDelivery.
+     * Shrinks the composed cyclic/async demux programs by dropping the
+     * leg that can never execute.
+     */
     VlanDeliveryHint delivery_hint = VlanDeliveryHint::Auto;
 
-    /// Measured wire round-trip (ns) from the startup probe — 0 when
-    /// unmeasured.  startCyclicLoop() auto-sizes the collect deadline
-    /// (CyclicLoopConfig::rx_budget_ns == 0) from this with headroom, and
-    /// warns when it cannot fit the configured cycle period.
+    /**
+     * Measured wire round-trip (ns) from the startup probe — 0 when
+     * unmeasured.  startCyclicLoop() auto-sizes the collect deadline
+     * (CyclicLoopConfig::rx_budget_ns == 0) from this with headroom, and
+     * warns when it cannot fit the configured cycle period.
+     */
     uint32_t wire_rtt_ns = 0;
 
-    /// True when tagged frames are part of the RX filter.
-    /// @return `true` if RX VLAN filtering is active
+    /**
+     * True when tagged frames are part of the RX filter.
+     * @return `true` if RX VLAN filtering is active
+     */
     bool tagged()   const { return rx_vlan_any || rx_vlan_lo != 0; }
-    /// True when the link is untagged EtherCAT (no VLAN filtering).
-    /// @return `true` if no VLAN tag is in use
+    /**
+     * True when the link is untagged EtherCAT (no VLAN filtering).
+     * @return `true` if no VLAN tag is in use
+     */
     bool untagged() const { return !tagged(); }
-    /// Wire prefix length of a composed cyclic TX frame on the channel.
-    /// @return Bytes before the datagram payload (30 tagged, 26 untagged)
+    /**
+     * Wire prefix length of a composed cyclic TX frame on the channel.
+     * @return Bytes before the datagram payload (30 tagged, 26 untagged)
+     */
     uint16_t prefixLen() const { return tx_vlan ? 30 : 26; }
 };
 
@@ -375,23 +409,23 @@ inline constexpr uint8_t kPiggybackIdx = 0xFE;
  * address, data, and roundtrip behavior.
  */
 struct MultiDatagramSpec {
-    Command     cmd;        ///< Datagram command (APRD, APWR, FPRD, FPWR, etc.)
-    uint8_t     idx;        ///< Datagram index for response matching
-    uint16_t    adp;        ///< Address position (slave-dependent)
-    uint16_t    ado;        ///< Address offset (register address or logical low word)
-    const void* data;      ///< Payload data (nullptr for read-only datagrams)
-    uint16_t    datalen;    ///< Payload length in bytes
-    bool        roundtrip;  ///< If true, sets the circulating flag (C bit)
+    Command     cmd; /**< Datagram command (APRD, APWR, FPRD, FPWR, etc.) */
+    uint8_t     idx; /**< Datagram index for response matching */
+    uint16_t    adp; /**< Address position (slave-dependent) */
+    uint16_t    ado; /**< Address offset (register address or logical low word) */
+    const void* data; /**< Payload data (nullptr for read-only datagrams) */
+    uint16_t    datalen; /**< Payload length in bytes */
+    bool        roundtrip; /**< If true, sets the circulating flag (C bit) */
 };
 
 /**
  * @brief Result of a single read operation within a batch transaction
  */
 struct BatchReadResult {
-    bool success{false};       ///< Whether the response was received
-    uint16_t wkc{0};           ///< Working counter from the response
-    uint16_t datalen{0};       ///< Actual data length received
-    const uint8_t* data{nullptr};  ///< Pointer to data (valid until BatchTransaction is destroyed)
+    bool success{false}; /**< Whether the response was received */
+    uint16_t wkc{0}; /**< Working counter from the response */
+    uint16_t datalen{0}; /**< Actual data length received */
+    const uint8_t* data{nullptr}; /**< Pointer to data (valid until BatchTransaction is destroyed) */
 };
 
 } // namespace EtherCAT

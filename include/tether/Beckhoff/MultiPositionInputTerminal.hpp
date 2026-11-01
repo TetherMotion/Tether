@@ -76,7 +76,7 @@ public:
             : identity(id), create(std::move(f)) {}
     };
 
-    /// Bind to a started master — no bus I/O until detect()/attach().
+    /**Bind to a started master — no bus I/O until detect()/attach(). */
     explicit MultiPositionInputTerminal(Master& master) : master_(master) {}
 
     ~MultiPositionInputTerminal() { stop(); }
@@ -86,7 +86,7 @@ public:
     MultiPositionInputTerminal& operator=(
         const MultiPositionInputTerminal&)                              = delete;
 
-    /// All position-input terminals known to this driver (ESI-verified).
+    /**All position-input terminals known to this driver (ESI-verified). */
     static std::span<const DeviceIdentity> knownDevices() {
         return std::span<const DeviceIdentity>(
             Devices::kPositionInputTerminals.data(),
@@ -95,34 +95,34 @@ public:
 
     // -- Detection ---------------------------------------------------------------
 
-    /// Scan the bus for every known position-input terminal.
+    /**Scan the bus for every known position-input terminal. */
     Result<size_t> detect() {
         return detect(knownDevices(), shallowScan());
     }
 
-    /// Detect only the given identities (own bus scan).
+    /**Detect only the given identities (own bus scan). */
     Result<size_t> detect(std::span<const DeviceIdentity> devices) {
         return detect(devices, shallowScan());
     }
 
-    /// Detect with custom matchers (own bus scan).
+    /**Detect with custom matchers (own bus scan). */
     Result<size_t> detect(std::span<const DeviceMatcher> matchers) {
         return detect(matchers, shallowScan());
     }
 
-    /// Populate the chain from an existing discovery result.
+    /**Populate the chain from an existing discovery result. */
     Result<size_t> detect(std::span<const DiscoveredSlave> scan) {
         return detect(knownDevices(), scan);
     }
 
-    /// Detect only the given identities, reusing an existing scan.
+    /**Detect only the given identities, reusing an existing scan. */
     Result<size_t> detect(std::span<const DeviceIdentity> devices,
                           std::span<const DiscoveredSlave> scan) {
         const auto matchers = makeMatchers(devices);
         return detect(std::span<const DeviceMatcher>(matchers), scan);
     }
 
-    /// Detect with custom matchers, reusing an existing scan.
+    /**Detect with custom matchers, reusing an existing scan. */
     Result<size_t> detect(std::span<const DeviceMatcher> matchers,
                           std::span<const DiscoveredSlave> scan) {
         modules_.clear();
@@ -143,7 +143,7 @@ public:
         return modules_.size();
     }
 
-    /// Append a pre-constructed chained device (any IPositionInputTerminal).
+    /**Append a pre-constructed chained device (any IPositionInputTerminal). */
     Result<> attach(std::unique_ptr<IPositionInputTerminal> device) {
         if (!device) return std::unexpected(Error::NoDeviceFound);
         modules_.push_back(std::move(device));
@@ -153,31 +153,35 @@ public:
 
     // -- Chain layout ---------------------------------------------------------------
 
-    /// Number of devices in the chain.
+    /**Number of devices in the chain. */
     size_t moduleCount() const { return modules_.size(); }
 
-    /// Total number of position channels across all devices.
+    /**Total number of position channels across all devices. */
     size_t channelCount() const { return total_channels_; }
 
-    /// Access one chain device (throws std::out_of_range).
+    /**Access one chain device (throws std::out_of_range). */
     IPositionInputTerminal&       module(size_t i)       { return *modules_.at(i); }
     const IPositionInputTerminal& module(size_t i) const { return *modules_.at(i); }
 
-    /// Bus position of chain device `i`.
+    /**Bus position of chain device `i`. */
     uint16_t slaveIndex(size_t i) const { return modules_.at(i)->slaveIndex(); }
 
-    /// Flat channel offset where device `i`'s channels begin.
+    /**Flat channel offset where device `i`'s channels begin. */
     size_t channelOffset(size_t i) const { return channel_offsets_.at(i); }
 
     // -- Bring-up ----------------------------------------------------------------------
 
-    /// Configure the whole chain up to SAFE-OP (dedicated PDO group +
-    /// shared logical map + per-device FMMU).
+    /**
+     * Configure the whole chain up to SAFE-OP (dedicated PDO group +
+     * shared logical map + per-device FMMU).
+     */
     Result<> configure() { return configureChain(StartOptions()); }
 
-    /// Bring every device to OP and (by default) start the master's
-    /// realtime loop exchanging the chain's PDO group — one LRW datagram
-    /// per cycle for the whole chain.
+    /**
+     * Bring every device to OP and (by default) start the master's
+     * realtime loop exchanging the chain's PDO group — one LRW datagram
+     * per cycle for the whole chain.
+     */
     Result<> start() { return start(StartOptions()); }
     Result<> start(const StartOptions& opts) {
         if (auto r = configureChain(opts); !r) return r;
@@ -208,7 +212,7 @@ public:
         return {};
     }
 
-    /// Stop the RT loop if we started it.
+    /**Stop the RT loop if we started it. */
     void stop() {
         if (loop_started_) {
             Tether::Platform::Clock::instance().delayMilliseconds(20);
@@ -217,76 +221,76 @@ public:
         }
     }
 
-    /// Index of the device that produced the last error (SIZE_MAX if none).
+    /**Index of the device that produced the last error (SIZE_MAX if none). */
     size_t lastErrorModule() const { return last_error_module_; }
 
     // -- Introspection for app-managed loops --------------------------------------------
 
-    /// The chain's dedicated PDO manager (created by configure()/start()).
+    /**The chain's dedicated PDO manager (created by configure()/start()). */
     PDOManager* pdoManager() const { return group_pdo_; }
 
-    /// The chain's logical address manager (same lifetime).
+    /**The chain's logical address manager (same lifetime). */
     LogicalAddressManager* logicalAddressManager() const { return group_lam_; }
 
-    /// Base of the chain's logical address space (0 before configure()).
+    /**Base of the chain's logical address space (0 before configure()). */
     uint32_t baseLogicalAddress() const {
         return group_lam_ ? group_lam_->getBaseLogicalAddress() : 0;
     }
 
     // -- Flat channel interface ------------------------------------------------------------
 
-    /// Position/counter of flat channel `i` (throws std::out_of_range).
+    /**Position/counter of flat channel `i` (throws std::out_of_range). */
     int64_t position(size_t channel) const { return value(channel, 0); }
 
-    /// Raw (zero-extended) position of flat channel `i`.
+    /**Raw (zero-extended) position of flat channel `i`. */
     uint64_t rawPosition(size_t channel) const { return rawValue(channel, 0); }
 
-    /// i-th value field of flat channel `ch`, sign-extended.
+    /**i-th value field of flat channel `ch`, sign-extended. */
     int64_t value(size_t channel, size_t i) const {
         const size_t m = locate(channel);
         return modules_[m]->value(channel - channel_offsets_[m], i);
     }
 
-    /// i-th value field of flat channel `ch`, zero-extended.
+    /**i-th value field of flat channel `ch`, zero-extended. */
     uint64_t rawValue(size_t channel, size_t i) const {
         const size_t m = locate(channel);
         return modules_[m]->rawValue(channel - channel_offsets_[m], i);
     }
 
-    /// First latch value of flat channel `i` (0 when none).
+    /**First latch value of flat channel `i` (0 when none). */
     int64_t latch(size_t channel) const { return value(channel, 1); }
 
-    /// Number of value fields of flat channel `i`.
+    /**Number of value fields of flat channel `i`. */
     size_t valueCount(size_t channel) const {
         const size_t m = locate(channel);
         return modules_[m]->valueCount(channel - channel_offsets_[m]);
     }
 
-    /// Raw status word of flat channel `i` (0 if none).
+    /**Raw status word of flat channel `i` (0 if none). */
     uint16_t status(size_t channel) const {
         const size_t m = locate(channel);
         return modules_[m]->status(channel - channel_offsets_[m]);
     }
 
-    /// Whether flat channel `i` carries a status field.
+    /**Whether flat channel `i` carries a status field. */
     bool hasStatus(size_t channel) const {
         const size_t m = locate(channel);
         return modules_[m]->hasStatus(channel - channel_offsets_[m]);
     }
 
-    /// Whether flat channel `i` carries a latch field.
+    /**Whether flat channel `i` carries a latch field. */
     bool hasLatch(size_t channel) const {
         return valueCount(channel) > 1;
     }
 
 protected:
-    /// Shallow vendor/product scan used by detect() variants and subclasses.
+    /**Shallow vendor/product scan used by detect() variants and subclasses. */
     std::vector<DiscoveredSlave> shallowScan() {
         return master_.discovery().discover(
             {DiscoveryOption::VendorId, DiscoveryOption::ProductCode});
     }
 
-    /// Bound master (for subclasses).
+    /**Bound master (for subclasses). */
     Master& master() { return master_; }
 
 private:
@@ -298,8 +302,10 @@ private:
         return out;
     }
 
-    /// Sort devices by bus position and rebuild the flat channel layout,
-    /// dropping devices that would overflow MaxChannels.
+    /**
+     * Sort devices by bus position and rebuild the flat channel layout,
+     * dropping devices that would overflow MaxChannels.
+     */
     void rebuildLayout() {
         std::stable_sort(modules_.begin(), modules_.end(),
             [](const auto& a, const auto& b) {
@@ -319,7 +325,7 @@ private:
         channel_offsets_.resize(used);
     }
 
-    /// Find the device covering flat channel `i` (throws std::out_of_range).
+    /**Find the device covering flat channel `i` (throws std::out_of_range). */
     size_t locate(size_t channel) const {
         if (channel >= total_channels_) {
             throw std::out_of_range("MultiPositionInputTerminal channel index");
@@ -330,7 +336,7 @@ private:
             std::distance(channel_offsets_.begin(), it)) - 1;
     }
 
-    /// Group + shared logical map + FMMU programming, up to SAFE-OP.
+    /**Group + shared logical map + FMMU programming, up to SAFE-OP. */
     Result<> configureChain(const StartOptions& opts) {
         if (configured_) return {};
         if (modules_.empty()) return std::unexpected(Error::NoDeviceFound);

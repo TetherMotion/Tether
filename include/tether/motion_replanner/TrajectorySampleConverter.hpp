@@ -56,28 +56,34 @@
 
 namespace tether::motion::replanner {
 
-/// Mapping from segment index to piece index in the resulting path.
+/**Mapping from segment index to piece index in the resulting path. */
 struct SegmentToPieceMap {
-    /// (segmentIndex, pieceIndex) pairs, sorted by segmentIndex.
+    /**(segmentIndex, pieceIndex) pairs, sorted by segmentIndex. */
     std::vector<std::pair<int32_t, std::size_t>> entries;
 
-    /// Look up the piece index for a given segment index, or nullopt.
+    /**Look up the piece index for a given segment index, or nullopt. */
     std::optional<std::size_t> pieceForSegment(int32_t segmentIndex) const;
 };
 
-/// Configuration for the converter.
+/**Configuration for the converter. */
 struct ConverterConfig {
-    /// Maximum residual (mm) for accepting an arc fit.
-    /// If the circumcenter fit residual exceeds this, a polyline is used.
+    /**
+     * Maximum residual (mm) for accepting an arc fit.
+     * If the circumcenter fit residual exceeds this, a polyline is used.
+     */
     double arcFitTolerance = 0.001; // 1 µm
 
-    /// Minimum number of samples in a segment to attempt arc fitting.
-    /// Segments with fewer samples use a line or polyline.
+    /**
+     * Minimum number of samples in a segment to attempt arc fitting.
+     * Segments with fewer samples use a line or polyline.
+     */
     std::size_t minSamplesForArc = 3;
 
-    /// Whether to collapse collinear line segments into a single line.
-    /// If true, consecutive linear segments with the same direction are
-    /// merged into one NurbsCurve. If false, each segment gets its own piece.
+    /**
+     * Whether to collapse collinear line segments into a single line.
+     * If true, consecutive linear segments with the same direction are
+     * merged into one NurbsCurve. If false, each segment gets its own piece.
+     */
     bool mergeCollinearLines = false;
 };
 

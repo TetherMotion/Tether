@@ -1,5 +1,7 @@
-/// @file StockCollisionAnalyzer.cpp
-/// @brief Stock, fixture and build-plate collision/clearance analysis.
+/**
+ * @file StockCollisionAnalyzer.cpp
+ * @brief Stock, fixture and build-plate collision/clearance analysis.
+ */
 
 #include "tether/gcode/analysis/StockCollisionAnalyzer.hpp"
 #include "AnalysisUtil.hpp"

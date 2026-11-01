@@ -53,32 +53,32 @@ namespace MotionPlanner {
  * @brief Type of motion segment
  */
 enum class MotionSegmentType : uint8_t {
-    Linear,         ///< G0/G1 - Linear motion
-    ArcCW,          ///< G2 - Clockwise arc
-    ArcCCW,         ///< G3 - Counter-clockwise arc
-    CubicSpline,    ///< G5 - Cubic spline
-    QuadSpline,     ///< G5.1 - Quadratic spline
-    NURBS,          ///< G5.2/G5.3 - NURBS curve
-    Dwell,          ///< G4 - Dwell (pause)
-    Rapid           ///< G0 - Rapid positioning
+    Linear, /**< G0/G1 - Linear motion */
+    ArcCW, /**< G2 - Clockwise arc */
+    ArcCCW, /**< G3 - Counter-clockwise arc */
+    CubicSpline, /**< G5 - Cubic spline */
+    QuadSpline, /**< G5.1 - Quadratic spline */
+    NURBS, /**< G5.2/G5.3 - NURBS curve */
+    Dwell, /**< G4 - Dwell (pause) */
+    Rapid /**< G0 - Rapid positioning */
 };
 
 /**
  * @brief Plane for arc interpolation
  */
 enum class ArcPlane : uint8_t {
-    XY,     ///< G17 - XY plane
-    XZ,     ///< G18 - XZ plane
-    YZ      ///< G19 - YZ plane
+    XY, /**< G17 - XY plane */
+    XZ, /**< G18 - XZ plane */
+    YZ /**< G19 - YZ plane */
 };
 
 /**
  * @brief Path control mode
  */
 enum class PathMode : uint8_t {
-    ExactStop,      ///< G61 - Full stop at endpoint
-    ExactPath,      ///< G61.1 - Follow exact path
-    Blending        ///< G64 - Path blending/corner rounding
+    ExactStop, /**< G61 - Full stop at endpoint */
+    ExactPath, /**< G61.1 - Follow exact path */
+    Blending /**< G64 - Path blending/corner rounding */
 };
 
 // ============================================================================
@@ -126,19 +126,19 @@ struct SegmentKinematicLimits {
  * @brief Configuration for corner blending (G64)
  */
 struct BlendingConfig {
-    /// Path blending tolerance (G64 P value)
+    /**Path blending tolerance (G64 P value) */
     double tolerance = 0.0;
     
-    /// Naive CAM tolerance (G64 Q value) - simplified blending
+    /**Naive CAM tolerance (G64 Q value) - simplified blending */
     double naiveCamTolerance = 0.0;
     
-    /// Maximum fraction of segment that can be consumed by blend [0, 0.5]
+    /**Maximum fraction of segment that can be consumed by blend [0, 0.5] */
     double maxBlendFraction = 0.3;
     
-    /// Minimum segment length for blending
+    /**Minimum segment length for blending */
     double minSegmentLength = 0.01;
     
-    /// Continuity level to achieve (1 = G1, 2 = G2)
+    /**Continuity level to achieve (1 = G1, 2 = G2) */
     int continuityLevel = 2;
 };
 
@@ -146,7 +146,7 @@ struct BlendingConfig {
 // Motion Segment
 // ============================================================================
 
-/// Maximum number of axes
+/**Maximum number of axes */
 constexpr size_t MAX_MOTION_AXES = 9;
 
 /**
@@ -160,83 +160,83 @@ struct MotionSegment {
     // Segment Identity
     // ========================================================================
     
-    /// Unique segment ID within the program
+    /**Unique segment ID within the program */
     uint64_t id = 0;
     
-    /// Motion type
+    /**Motion type */
     MotionSegmentType type = MotionSegmentType::Linear;
     
-    /// Source reference for traceability
+    /**Source reference for traceability */
     SourceReference sourceRef;
     
     // ========================================================================
     // Geometry
     // ========================================================================
     
-    /// Start position (all axes)
+    /**Start position (all axes) */
     std::array<double, MAX_MOTION_AXES> startPosition{};
     
-    /// End position (all axes)
+    /**End position (all axes) */
     std::array<double, MAX_MOTION_AXES> endPosition{};
     
-    /// Arc center (for G2/G3)
+    /**Arc center (for G2/G3) */
     std::array<double, MAX_MOTION_AXES> arcCenter{};
     
-    /// Arc radius (for G2/G3)
+    /**Arc radius (for G2/G3) */
     double arcRadius = 0.0;
     
-    /// Arc sweep angle in radians (positive for CCW)
+    /**Arc sweep angle in radians (positive for CCW) */
     double arcSweep = 0.0;
     
-    /// Arc plane (for G2/G3)
+    /**Arc plane (for G2/G3) */
     ArcPlane arcPlane = ArcPlane::XY;
     
-    /// Spline control points (for G5, NURBS)
+    /**Spline control points (for G5, NURBS) */
     std::vector<std::array<double, MAX_MOTION_AXES>> controlPoints;
     
-    /// NURBS weights
+    /**NURBS weights */
     std::vector<double> weights;
     
-    /// NURBS knot vector
+    /**NURBS knot vector */
     std::vector<double> knots;
     
-    /// NURBS/spline degree
+    /**NURBS/spline degree */
     size_t degree = 0;
     
     // ========================================================================
     // Motion Parameters
     // ========================================================================
     
-    /// Feedrate (mm/min for linear, deg/min for rotary)
+    /**Feedrate (mm/min for linear, deg/min for rotary) */
     double feedrate = 0.0;
-    /// Backwards-compatible alias used in older code/tests
+    /**Backwards-compatible alias used in older code/tests */
     double& feedRate = feedrate;
     
-    /// Dwell time (seconds, for G4)
+    /**Dwell time (seconds, for G4) */
     double dwellTime = 0.0;
-    /// Backwards-compatible alias name expected by tests
+    /**Backwards-compatible alias name expected by tests */
     double& dwellDuration = dwellTime;
     
-    /// Path mode
+    /**Path mode */
     PathMode pathMode = PathMode::Blending;
     
-    /// Blending configuration (for G64 mode)
+    /**Blending configuration (for G64 mode) */
     BlendingConfig blending;
     
-    /// Per-segment kinematic limits (optional override)
+    /**Per-segment kinematic limits (optional override) */
     std::optional<SegmentKinematicLimits> kinematicLimits;
     
     // ========================================================================
     // Computed Properties
     // ========================================================================
     
-    /// Computed segment length (set during preprocessing)
+    /**Computed segment length (set during preprocessing) */
     double segmentLength = 0.0;
     
-    /// Axes that are active (moving) in this segment
+    /**Axes that are active (moving) in this segment */
     std::array<bool, MAX_MOTION_AXES> activeAxes{};
     
-    /// Number of active axes
+    /**Number of active axes */
     size_t numActiveAxes = 0;
     
     // ========================================================================

@@ -6,16 +6,18 @@ namespace EtherCAT {
 namespace Drives {
 namespace ESC211 {
 
-/// Human-readable name for the ESC211 system current state (0xF101:0x00).
-///
-/// State mapping:
-///   0          -> INIT
-///   2          -> READY
-///   6          -> MONITOR
-///   3–5, 7–13  -> CONFIG
-///   14         -> APP_ERR
-///   15         -> SYS_ERR
-///   99         -> OS_ERR
+/**
+ * Human-readable name for the ESC211 system current state (0xF101:0x00).
+ *
+ * State mapping:
+ *   0          -> INIT
+ *   2          -> READY
+ *   6          -> MONITOR
+ *   3–5, 7–13  -> CONFIG
+ *   14         -> APP_ERR
+ *   15         -> SYS_ERR
+ *   99         -> OS_ERR
+ */
 inline constexpr uint32_t kSystemStateInit      = 0;
 inline constexpr uint32_t kSystemStateReady     = 2;
 inline constexpr uint32_t kSystemStateMonitoring = 6;

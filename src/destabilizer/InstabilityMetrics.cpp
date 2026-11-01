@@ -1,5 +1,7 @@
-/// @file InstabilityMetrics.cpp
-/// @brief All 20 instability metric implementations.
+/**
+ * @file InstabilityMetrics.cpp
+ * @brief All 20 instability metric implementations.
+ */
 
 #include "tether/destabilizer/InstabilityMetrics.hpp"
 #include <algorithm>

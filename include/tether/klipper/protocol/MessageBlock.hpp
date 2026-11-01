@@ -39,10 +39,10 @@ namespace tether::klipper::protocol {
  * @brief A decoded message-block frame (header + content; trailer stripped).
  */
 struct MessageBlock {
-    uint8_t sequence = 0;          ///< 4-bit sequence counter
-    std::vector<uint8_t> content;  ///< Content bytes (0..59)
+    uint8_t sequence = 0; /**< 4-bit sequence counter */
+    std::vector<uint8_t> content; /**< Content bytes (0..59) */
 
-    /// @return Total wire length this block would occupy.
+    /**@return Total wire length this block would occupy. */
     size_t wireLength() const { return kHeaderSize + content.size() + kTrailerSize; }
 };
 
@@ -104,11 +104,11 @@ inline std::vector<uint8_t> buildAckBlock(uint8_t sequence) {
  * @brief Result of attempting to parse a block from a byte stream.
  */
 enum class BlockParseStatus : uint8_t {
-    Ok,            ///< Block parsed successfully
-    NeedMoreData,  ///< Not enough bytes yet for a complete block
-    BadSync,       ///< Trailer sync byte mismatch
-    BadCrc,        ///< CRC mismatch (corrupt block)
-    BadLength,     ///< LEN field out of range
+    Ok, /**< Block parsed successfully */
+    NeedMoreData, /**< Not enough bytes yet for a complete block */
+    BadSync, /**< Trailer sync byte mismatch */
+    BadCrc, /**< CRC mismatch (corrupt block) */
+    BadLength, /**< LEN field out of range */
 };
 
 /**
@@ -116,10 +116,10 @@ enum class BlockParseStatus : uint8_t {
  */
 struct ParsedBlock {
     BlockParseStatus status = BlockParseStatus::NeedMoreData;
-    MessageBlock block;           ///< Valid when status == Ok
-    size_t consumedBytes = 0;     ///< Bytes consumed from the input (to advance buffer)
-    size_t wireLength = 0;        ///< Total wire length of the parsed block (0 if not Ok)
-    size_t skippedBytes = 0;      ///< Garbage bytes skipped before finding this block
+    MessageBlock block; /**< Valid when status == Ok */
+    size_t consumedBytes = 0; /**< Bytes consumed from the input (to advance buffer) */
+    size_t wireLength = 0; /**< Total wire length of the parsed block (0 if not Ok) */
+    size_t skippedBytes = 0; /**< Garbage bytes skipped before finding this block */
 };
 
 /**

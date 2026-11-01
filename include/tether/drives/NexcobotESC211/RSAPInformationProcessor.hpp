@@ -13,8 +13,10 @@ namespace EtherCAT {
 namespace Drives {
 namespace ESC211 {
 
-/// Polled table size — every 0x4000-0x4023 (sub)object.
-/// Free-standing because the class needs it in its base-specifier.
+/**
+ * Polled table size — every 0x4000-0x4023 (sub)object.
+ * Free-standing because the class needs it in its base-specifier.
+ */
 inline constexpr size_t kRSAPInformationPollObjects = 46;
 
 /**
@@ -64,19 +66,19 @@ inline constexpr size_t kRSAPInformationPollObjects = 46;
 class RSAPInformationProcessor
     : public SdoObjectPoller<kRSAPInformationPollObjects> {
 public:
-    /// All RSAP information objects, in index order.
+    /**All RSAP information objects, in index order. */
     static constexpr size_t kObjectCount = kRSAPInformationPollObjects;
 
-    /// Copyable snapshot of one poll cycle — safe to share across threads.
+    /**Copyable snapshot of one poll cycle — safe to share across threads. */
     using Snapshot = SdoPollSnapshot<kObjectCount>;
 
-    /// Object dictionary metadata for one 0x40xx (sub)object.
+    /**Object dictionary metadata for one 0x40xx (sub)object. */
     struct ObjectInfo {
-        uint16_t    index;    ///< CoE index (0x4000..0x4023)
-        uint8_t     subindex; ///< CoE subindex (0, or 1..n for records)
-        const char* name;     ///< ESI object name
-        uint8_t     bytes;    ///< 1 (USINT) or 2 (UINT/INT)
-        bool        scalar;   ///< true = plain value, false = bitfield
+        uint16_t    index; /**< CoE index (0x4000..0x4023) */
+        uint8_t     subindex; /**< CoE subindex (0, or 1..n for records) */
+        const char* name; /**< ESI object name */
+        uint8_t     bytes; /**< 1 (USINT) or 2 (UINT/INT) */
+        bool        scalar; /**< true = plain value, false = bitfield */
     };
 
     static const std::array<ObjectInfo, kObjectCount> kObjects;
@@ -89,7 +91,7 @@ public:
     // decodeTriggered()), pause() aborts between objects so no SDO
     // read overlaps safety state machine command sequences (0xF100).
 
-    /// True if any bitfield object has a set bit or the error code != 0.
+    /**True if any bitfield object has a set bit or the error code != 0. */
     static bool anyTriggered(const Snapshot& snap);
 
     /**
@@ -113,15 +115,19 @@ public:
      */
     static std::vector<std::string> decodeTriggered(const Snapshot& snap);
 
-    /// Value name for a scalar object per the vendor manual — e.g.
-    /// RSAP state 1 -> "MONITORING", op mode 0 -> "T1", error code
-    /// -202 -> "Drive does not switch to STO status within the
-    /// specified time".  Empty string when no decode exists.
+    /**
+     * Value name for a scalar object per the vendor manual — e.g.
+     * RSAP state 1 -> "MONITORING", op mode 0 -> "T1", error code
+     * -202 -> "Drive does not switch to STO status within the
+     * specified time".  Empty string when no decode exists.
+     */
     static std::string scalarName(uint16_t index, uint32_t value);
 
-    /// Error-code description from the vendor manual's Error Code
-    /// table (covers the RSAP/CONFIG/SAFETY/SYSMGR/FSoE ranges).
-    /// nullptr for unknown codes.
+    /**
+     * Error-code description from the vendor manual's Error Code
+     * table (covers the RSAP/CONFIG/SAFETY/SYSMGR/FSoE ranges).
+     * nullptr for unknown codes.
+     */
     static const char* errorCodeName(int32_t code);
 
     // ------------------------------------------------------------------

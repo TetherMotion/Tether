@@ -34,12 +34,16 @@
 namespace Tether {
 namespace UI {
 
-/// Provider that appends callback-supplied entities after an inner
-/// provider's list.  The extra source is called on every `entities()`.
+/**
+ * Provider that appends callback-supplied entities after an inner
+ * provider's list.  The extra source is called on every `entities()`.
+ */
 class CompositeEntityProvider : public ISlaveEntityProvider {
 public:
-    /// Produces the appended rows; called on every entities() — may
-    /// return different state each time (live virtual status).
+    /**
+     * Produces the appended rows; called on every entities() — may
+     * return different state each time (live virtual status).
+     */
     using ExtraSource = std::function<std::vector<SlaveEntity>()>;
 
     CompositeEntityProvider(ISlaveEntityProvider& inner,
@@ -62,9 +66,11 @@ private:
     ExtraSource extra_;
 };
 
-/// Register reader that dispatches by entity index: entities accepted
-/// by `is_virtual` are answered by `read_virtual` (synthetic data, no
-/// bus traffic); all other indices delegate to `inner`.
+/**
+ * Register reader that dispatches by entity index: entities accepted
+ * by `is_virtual` are answered by `read_virtual` (synthetic data, no
+ * bus traffic); all other indices delegate to `inner`.
+ */
 class DispatchingRegisterReader : public IRegisterReader {
 public:
     using Predicate = std::function<bool(uint16_t entity_index)>;

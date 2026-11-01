@@ -12,7 +12,7 @@
 
 namespace tether::analysis {
 
-/// @brief Detected toolpath loop.
+/**@brief Detected toolpath loop. */
 struct LoopInfo {
     int startLine = 0;
     int endLine = 0;
@@ -21,7 +21,7 @@ struct LoopInfo {
     enum class Type { Pattern, Spiral, Rectangular, Circular } type = Type::Pattern;
 };
 
-/// @brief Self-intersection of two path segments.
+/**@brief Self-intersection of two path segments. */
 struct SelfIntersection {
     int line1 = 0;
     int line2 = 0;
@@ -30,15 +30,15 @@ struct SelfIntersection {
     enum class Severity { Warning, Error } severity = Severity::Warning;
 };
 
-/// @brief Overlapping extrusion paths.
+/**@brief Overlapping extrusion paths. */
 struct OverlapRegion {
     int line1 = 0;
     int line2 = 0;
-    double area = 0;       ///< mm²
+    double area = 0; /**< mm² */
     double percentage = 0;
 };
 
-/// @brief Combined topology analysis result.
+/**@brief Combined topology analysis result. */
 struct PathTopologyResult {
     // Loops
     std::vector<LoopInfo> loops;
@@ -70,7 +70,7 @@ struct PathTopologyResult {
     std::vector<std::string> recommendations;
 };
 
-/// @brief Detect toolpath topology: loops, self-intersections, overlaps, symmetry.
+/**@brief Detect toolpath topology: loops, self-intersections, overlaps, symmetry. */
 class PathTopologyDetector {
 public:
     struct Params {
@@ -86,7 +86,7 @@ public:
     explicit PathTopologyDetector() : params_() {}
     explicit PathTopologyDetector(Params params) : params_(params) {}
 
-    /// @brief Detect all topology features in G-code.
+    /**@brief Detect all topology features in G-code. */
     PathTopologyResult analyze(const std::vector<std::string>& gcodeLines) const;
 
     const Params& params() const { return params_; }
@@ -100,7 +100,7 @@ private:
     void detectOverlaps(const std::vector<ParsedMove>& moves, PathTopologyResult& result) const;
     void detectSymmetry(const std::vector<ParsedMove>& moves, PathTopologyResult& result) const;
 
-    /// Segment-segment intersection test (2D).
+    /**Segment-segment intersection test (2D). */
     static bool segmentIntersection(
         double x1, double y1, double x2, double y2,
         double x3, double y3, double x4, double y4,

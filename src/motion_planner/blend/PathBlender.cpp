@@ -18,12 +18,14 @@ namespace tether::motion {
 
 namespace {
 
-/// Adjust overlapping trims on a shared piece (L1).
-/// `trimOutK` is the trim at the end of piece k (from blend k).
-/// `trimInK1` is the trim at the start of piece k+1 (from blend k+1).
-/// `pieceLen` is the length of the shared piece.
-/// If the trims overlap (sum > pieceLen), reduce both proportionally.
-/// Returns the adjusted (trimOutK, trimInK1) and the reduction amount.
+/**
+ * Adjust overlapping trims on a shared piece (L1).
+ * `trimOutK` is the trim at the end of piece k (from blend k).
+ * `trimInK1` is the trim at the start of piece k+1 (from blend k+1).
+ * `pieceLen` is the length of the shared piece.
+ * If the trims overlap (sum > pieceLen), reduce both proportionally.
+ * Returns the adjusted (trimOutK, trimInK1) and the reduction amount.
+ */
 struct TrimAdjustment {
     double trimOutK;
     double trimInK1;

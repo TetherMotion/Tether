@@ -82,9 +82,9 @@ class MonitoredRemoteFunctionInvocation {
                   "Payload must be default-constructible for slot storage");
 
 public:
-    /// Caller-chosen tick/stamp type (e.g. a loop sequence number).
+    /**Caller-chosen tick/stamp type (e.g. a loop sequence number). */
     using Tick = uint64_t;
-    /// producerTick sentinel until the first successful result lands.
+    /**producerTick sentinel until the first successful result lands. */
     static constexpr Tick kNoResult = ~Tick{0};
 
     /**
@@ -100,13 +100,13 @@ public:
      * result applies per call.
      */
     struct Outcome {
-        bool timedOut = false;        ///< transport deadline hit
-        bool success = false;         ///< callee executed without RPC error
-        bool hasReturnValue = false;  ///< return payload present
-        std::vector<uint8_t> returnValue;  ///< raw encoded return value
+        bool timedOut = false; /**< transport deadline hit */
+        bool success = false; /**< callee executed without RPC error */
+        bool hasReturnValue = false; /**< return payload present */
+        std::vector<uint8_t> returnValue; /**< raw encoded return value */
     };
 
-    /// Invoker completion sink: called exactly once per issued call.
+    /**Invoker completion sink: called exactly once per issued call. */
     using DoneFn = std::function<void(const Outcome&)>;
     /**
      * @brief Invoker: issue one call carrying `arg`, honoring `timeoutUs`,
@@ -206,21 +206,23 @@ public:
         return true;
     }
 
-    /// Snapshot of the newest successful result (copies the payload).
+    /**Snapshot of the newest successful result (copies the payload). */
     struct Result {
-        Tick producerTick = 0;  ///< tick stamped by call()
-        Payload payload{};      ///< decoded return value
-        bool valid = false;     ///< false until the first success
+        Tick producerTick = 0; /**< tick stamped by call() */
+        Payload payload{}; /**< decoded return value */
+        bool valid = false; /**< false until the first success */
     };
 
-    /// Latest completed result. `valid` is false until the first
-    /// successful call completes.
+    /**
+     * Latest completed result. `valid` is false until the first
+     * successful call completes.
+     */
     Result result() const {
         std::lock_guard lk(state_->result_mtx);
         return state_->result;
     }
 
-    /// Tick stamped on the newest result; kNoResult until the first one.
+    /**Tick stamped on the newest result; kNoResult until the first one. */
     Tick producerTick() const { return state_->producer_tick.load(); }
 
     /**
@@ -235,39 +237,47 @@ public:
         return tick - produced;
     }
 
-    /// @brief True when a result exists and its age is within maxAgeTicks
-    ///        (inclusive bound).
-    /// @param tick  consumer's current tick
+    /**
+     * @brief True when a result exists and its age is within maxAgeTicks
+     *        (inclusive bound).
+     * @param tick  consumer's current tick
+     */
     bool fresh(Tick tick) const {
         return age(tick) <= state_->max_age_ticks.load();
     }
 
-    /// True while a call awaits its done callback.
+    /**True while a call awaits its done callback. */
     bool inFlight() const { return state_->in_flight.load(); }
-    /// Calls successfully handed to the invoker.
+    /**Calls successfully handed to the invoker. */
     uint64_t issued() const { return state_->issued.load(); }
-    /// Calls that produced a decoded result.
+    /**Calls that produced a decoded result. */
     uint64_t completed() const { return state_->completed.load(); }
-    /// Calls whose outcome was a transport timeout.
+    /**Calls whose outcome was a transport timeout. */
     uint64_t timeouts() const { return state_->timeouts.load(); }
-    /// Calls that failed, lacked a return value, or failed to decode.
+    /**Calls that failed, lacked a return value, or failed to decode. */
     uint64_t errors() const { return state_->errors.load(); }
 
-    /// Freshness window for fresh(), in ticks (inclusive bound).
+    /**Freshness window for fresh(), in ticks (inclusive bound). */
     uint32_t maxAgeTicks() const { return state_->max_age_ticks.load(); }
-    /// @brief Retune the freshness window.
-    /// @param ticks  new maxAgeTicks value
+    /**
+     * @brief Retune the freshness window.
+     * @param ticks  new maxAgeTicks value
+     */
     void setMaxAgeTicks(uint32_t ticks) {
         state_->max_age_ticks.store(ticks);
     }
-    /// Per-call deadline budget handed to the invoker (µs).
+    /**Per-call deadline budget handed to the invoker (µs). */
     uint64_t timeoutUs() const { return state_->timeout_us.load(); }
-    /// @brief Retune the per-call deadline budget.
-    /// @param us  new timeoutUs value
+    /**
+     * @brief Retune the per-call deadline budget.
+     * @param us  new timeoutUs value
+     */
     void setTimeoutUs(uint64_t us) { state_->timeout_us.store(us); }
 
-    /// Drop the stored result and all counters. An in-flight call is not
-    /// cancelled — its outcome can still land and become the new result.
+    /**
+     * Drop the stored result and all counters. An in-flight call is not
+     * cancelled — its outcome can still land and become the new result.
+     */
     void reset() {
         std::lock_guard lk(state_->result_mtx);
         state_->result = {};
@@ -279,8 +289,10 @@ public:
     }
 
 private:
-    /// Shared state — captured weakly by done callbacks so a call
-    /// completing after destruction cannot touch freed memory.
+    /**
+     * Shared state — captured weakly by done callbacks so a call
+     * completing after destruction cannot touch freed memory.
+     */
     struct State {
         explicit State(uint32_t maxAgeTicks, uint64_t timeoutUs)
             : max_age_ticks(maxAgeTicks), timeout_us(timeoutUs) {}

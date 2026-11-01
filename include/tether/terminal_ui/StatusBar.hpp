@@ -1,12 +1,14 @@
 #pragma once
 
-/// Segmented status bar: left-anchored and right-anchored styled segments on
-/// one row, without manual column arithmetic.  Covers the "t=12.3s
-/// reads=4021 [STALE]" header rows that applications previously drew with
-/// hand-computed mvprintw offsets.
-///
-/// Uses mvprintw only, so it still compiles in translation units that
-/// `#undef ERR` after <ncurses.h>.
+/**
+ * Segmented status bar: left-anchored and right-anchored styled segments on
+ * one row, without manual column arithmetic.  Covers the "t=12.3s
+ * reads=4021 [STALE]" header rows that applications previously drew with
+ * hand-computed mvprintw offsets.
+ *
+ * Uses mvprintw only, so it still compiles in translation units that
+ * `#undef ERR` after <ncurses.h>.
+ */
 
 #include <ncurses.h>
 #include <span>
@@ -17,14 +19,16 @@
 namespace Tether {
 namespace TUI {
 
-/// One status-bar segment (alias of the generic styled Span).
+/**One status-bar segment (alias of the generic styled Span). */
 using BarSeg = Span;
 
-/// Draw a status bar on row `y` of window `w` spanning [0, width):
-/// `left` segments drawn from column 0 left-to-right (each separated by
-/// one space if the text does not end with whitespace), `right` segments
-/// right-aligned to `width`.  `width <= 0` means the window's width.
-/// Returns the first free column after the left group.
+/**
+ * Draw a status bar on row `y` of window `w` spanning [0, width):
+ * `left` segments drawn from column 0 left-to-right (each separated by
+ * one space if the text does not end with whitespace), `right` segments
+ * right-aligned to `width`.  `width <= 0` means the window's width.
+ * Returns the first free column after the left group.
+ */
 inline int wdrawStatusBar(WINDOW* w, int y, std::span<const BarSeg> left,
                           std::span<const BarSeg> right = {},
                           int width = 0) {
@@ -53,8 +57,10 @@ inline int wdrawStatusBar(WINDOW* w, int y, std::span<const BarSeg> left,
     return col;
 }
 
-/// stdscr convenience — same as wdrawStatusBar(stdscr, ...) with
-/// `width <= 0` meaning COLS.
+/**
+ * stdscr convenience — same as wdrawStatusBar(stdscr, ...) with
+ * `width <= 0` meaning COLS.
+ */
 inline int drawStatusBar(int y, std::span<const BarSeg> left,
                          std::span<const BarSeg> right = {},
                          int width = COLS) {

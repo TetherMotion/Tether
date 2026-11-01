@@ -21,7 +21,7 @@
 
 namespace tether::klipper::logging {
 
-/// @brief Log level.
+/**@brief Log level. */
 enum class Level {
     Error = 0,
     Warn  = 1,
@@ -29,40 +29,40 @@ enum class Level {
     Debug = 3,
 };
 
-/// @brief Log callback type. Receives level, file, line, and message.
+/**@brief Log callback type. Receives level, file, line, and message. */
 using LogCallback = std::function<void(Level, std::string_view, int, std::string_view)>;
 
-/// @brief Set a custom log callback. Pass nullptr to restore default (stderr).
+/**@brief Set a custom log callback. Pass nullptr to restore default (stderr). */
 void setLogCallback(LogCallback cb);
 
-/// @brief Get the current log callback (or nullptr for default).
+/**@brief Get the current log callback (or nullptr for default). */
 LogCallback getLogCallback();
 
-/// @brief Set the minimum log level. Messages below this level are dropped.
+/**@brief Set the minimum log level. Messages below this level are dropped. */
 void setLogLevel(Level level);
 
-/// @brief Get the current minimum log level.
+/**@brief Get the current minimum log level. */
 Level getLogLevel();
 
-/// @brief Internal: emit a log message.
+/**@brief Internal: emit a log message. */
 void emit(Level level, std::string_view file, int line, std::string_view msg);
 
 } // namespace tether::klipper::logging
 
-/// @brief Log an error message.
+/**@brief Log an error message. */
 #define KLIPPER_LOG_ERROR(msg) \
     ::tether::klipper::logging::emit(::tether::klipper::logging::Level::Error, __FILE__, __LINE__, msg)
 
-/// @brief Log a warning message.
+/**@brief Log a warning message. */
 #define KLIPPER_LOG_WARN(msg) \
     ::tether::klipper::logging::emit(::tether::klipper::logging::Level::Warn, __FILE__, __LINE__, msg)
 
-/// @brief Log an info message.
+/**@brief Log an info message. */
 #define KLIPPER_LOG_INFO(msg) \
     ::tether::klipper::logging::emit(::tether::klipper::logging::Level::Info, __FILE__, __LINE__, msg)
 
 #ifdef KLIPPER_ENABLE_DEBUG_LOG
-/// @brief Log a debug message (only when KLIPPER_ENABLE_DEBUG_LOG is defined).
+/**@brief Log a debug message (only when KLIPPER_ENABLE_DEBUG_LOG is defined). */
 #define KLIPPER_LOG_DEBUG(msg) \
     ::tether::klipper::logging::emit(::tether::klipper::logging::Level::Debug, __FILE__, __LINE__, msg)
 #else

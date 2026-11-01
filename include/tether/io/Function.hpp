@@ -21,7 +21,7 @@ inline constexpr uint32_t MAX_AGGREGATE_ELEMENTS = 65536;
 inline constexpr uint32_t MAX_AGGREGATE_FIELDS = 65536;
 inline constexpr uint32_t MAX_AGGREGATE_DEPTH = 16;
 
-/// Recursive value schema used by function arguments, returns, and streams.
+/**Recursive value schema used by function arguments, returns, and streams. */
 struct ValueDescriptor {
     ValueType type = ValueType::Binary;
     std::shared_ptr<const ValueDescriptor> element;
@@ -191,7 +191,7 @@ inline bool validateValuePayload(const ValueDescriptor& descriptor,
     return reader.ok() && reader.remaining() == 0;
 }
 
-/// Encodes one V6 function field as [field_key varuint][length varuint][value].
+/**Encodes one V6 function field as [field_key varuint][length varuint][value]. */
 inline bool encodeFunctionValue(BufWriter& writer, uint32_t key,
                                 const uint8_t* value, size_t length) {
     if (key == 0 || (length != 0 && value == nullptr)) {
@@ -207,7 +207,7 @@ inline bool encodeFunctionValue(BufWriter& writer, uint32_t key,
     return writer.ok();
 }
 
-/// Flags describing an annotated positional function argument.
+/**Flags describing an annotated positional function argument. */
 namespace FunctionParameterFlags {
 inline constexpr uint8_t Optional = 0x01;
 inline constexpr uint8_t HasDefault = 0x02;
@@ -300,10 +300,12 @@ struct FunctionCallResult {
     std::vector<uint8_t> returnValue;
 };
 
-/// Invocation context supplied by the serving Session. `identity` is the
-/// transport-authenticated caller (unauthenticated observer when the
-/// transport did not prove one); `requestId`/`deadlineUs` are the InvokeEx
-/// correlation fields (zero for CallFunctionReq).
+/**
+ * Invocation context supplied by the serving Session. `identity` is the
+ * transport-authenticated caller (unauthenticated observer when the
+ * transport did not prove one); `requestId`/`deadlineUs` are the InvokeEx
+ * correlation fields (zero for CallFunctionReq).
+ */
 struct FunctionInvokeContext {
     machine::SessionIdentity identity;
     uint64_t requestId = 0;
@@ -313,13 +315,15 @@ struct FunctionInvokeContext {
 using FunctionCallback = std::function<FunctionCallResult(
     const std::vector<FunctionArgument>& arguments)>;
 
-/// Callback variant that additionally receives the caller's session context.
-/// Preferred over `callback` whenever set.
+/**
+ * Callback variant that additionally receives the caller's session context.
+ * Preferred over `callback` whenever set.
+ */
 using ContextualFunctionCallback = std::function<FunctionCallResult(
     const std::vector<FunctionArgument>& arguments,
     const FunctionInvokeContext& context)>;
 
-/// A fully annotated callable function in the IO registry.
+/**A fully annotated callable function in the IO registry. */
 struct FunctionEntry {
     uint64_t id = 0;
     std::string name;
@@ -329,14 +333,18 @@ struct FunctionEntry {
     FunctionReturn returnValue;
     std::map<std::string, std::string> metadata;
     FunctionCallback callback;
-    /// When set, invoked with the caller's session context instead of
-    /// `callback`. Contextual functions receive the transport-authenticated
-    /// identity and must enforce their own role/authority checks.
+    /**
+     * When set, invoked with the caller's session context instead of
+     * `callback`. Contextual functions receive the transport-authenticated
+     * identity and must enforce their own role/authority checks.
+     */
     ContextualFunctionCallback contextualCallback;
 
-    /// Functions use positional calls. Once an optional argument appears,
-    /// every subsequent argument must also be optional. Optional arguments
-    /// must carry a default because omitted positions are materialized locally.
+    /**
+     * Functions use positional calls. Once an optional argument appears,
+     * every subsequent argument must also be optional. Optional arguments
+     * must carry a default because omitted positions are materialized locally.
+     */
     bool validSignature() const {
         bool optionalSeen = false;
         for (const auto& parameter : parameters) {
@@ -406,10 +414,12 @@ private:
 // Peer function descriptors + symmetric invocation
 // ---------------------------------------------------------------------------
 
-/// A function signature as carried on the wire — the unit of
-/// RegisterFunctionsReq and the entry format of ListFunctionsResp.
-/// Unlike FunctionEntry it has no callback: invoking a peer function is a
-/// remote call, not a local one.
+/**
+ * A function signature as carried on the wire — the unit of
+ * RegisterFunctionsReq and the entry format of ListFunctionsResp.
+ * Unlike FunctionEntry it has no callback: invoking a peer function is a
+ * remote call, not a local one.
+ */
 struct FunctionDescriptor {
     uint64_t id = 0;
     std::string name;
@@ -420,12 +430,14 @@ struct FunctionDescriptor {
     std::map<std::string, std::string> metadata;
 };
 
-/// Parse `argumentCount` positional argument TLVs from `reader`, validate
-/// them against the signature, materialize defaults for omitted optional
-/// arguments, invoke the callback, and validate the return value.
-/// Shared by the CallFunctionReq and InvokeExReq handlers on both ends so
-/// request semantics stay identical; the caller picks the wire-level
-/// error representation for result.success == false.
+/**
+ * Parse `argumentCount` positional argument TLVs from `reader`, validate
+ * them against the signature, materialize defaults for omitted optional
+ * arguments, invoke the callback, and validate the return value.
+ * Shared by the CallFunctionReq and InvokeExReq handlers on both ends so
+ * request semantics stay identical; the caller picks the wire-level
+ * error representation for result.success == false.
+ */
 inline FunctionCallResult invokeFunctionChecked(const FunctionView& function,
                                                 uint32_t argumentCount,
                                                 BufReader& reader,
@@ -625,7 +637,7 @@ inline bool decodeWireString(BufReader& r, std::string& out) {
 
 } // namespace detail
 
-/// Encode a function descriptor in the ListFunctionsResp entry format.
+/**Encode a function descriptor in the ListFunctionsResp entry format. */
 inline bool encodeFunctionDescriptor(BufWriter& w, const FunctionView& function) {
     if (function.parameterCount() > MAX_COLLECTION_COUNT) return false;
     w.putU64(function.id());
@@ -657,7 +669,7 @@ inline bool encodeFunctionDescriptor(BufWriter& w, const FunctionView& function)
     return detail::encodeWireMetadata(w, function.metadata()) && w.ok();
 }
 
-/// Decode a descriptor produced by encodeFunctionDescriptor.
+/**Decode a descriptor produced by encodeFunctionDescriptor. */
 inline bool decodeFunctionDescriptor(BufReader& r, FunctionDescriptor& out) {
     out = {};
     out.id = r.getU64();

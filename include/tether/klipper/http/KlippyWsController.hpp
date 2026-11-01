@@ -1,11 +1,13 @@
 #pragma once
 
-/// @file KlippyWsController.hpp
-/// @brief WebSocket controller for the Klippy HTTP server.
-///
-/// Drogon's WebSocket controller system requires a class derived from
-/// WebSocketController<T, false> with static path routing. This controller
-/// delegates all WebSocket events to the parent KlippyHttpServer.
+/**
+ * @file KlippyWsController.hpp
+ * @brief WebSocket controller for the Klippy HTTP server.
+ *
+ * Drogon's WebSocket controller system requires a class derived from
+ * WebSocketController<T, false> with static path routing. This controller
+ * delegates all WebSocket events to the parent KlippyHttpServer.
+ */
 
 #ifndef TETHER_KLIPPER_HTTP_INTERNAL
 #define TETHER_KLIPPER_HTTP_INTERNAL
@@ -22,10 +24,12 @@ namespace tether::klipper::http {
 
 class KlippyHttpServer;
 
-/// @brief WebSocket controller for /websocket endpoint.
-///
-/// Created with AutoCreation=false so we can inject a pointer to the
-/// KlippyHttpServer instance. Registered via drogon::app().registerController().
+/**
+ * @brief WebSocket controller for /websocket endpoint.
+ *
+ * Created with AutoCreation=false so we can inject a pointer to the
+ * KlippyHttpServer instance. Registered via drogon::app().registerController().
+ */
 class KlippyWsController
     : public drogon::WebSocketController<KlippyWsController, false> {
 public:

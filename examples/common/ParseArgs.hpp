@@ -6,12 +6,14 @@
 
 namespace Tether::Examples {
 
-/// Parse `argc`/`argv`; on failure prints the error and usage to stderr
-/// and returns false — replaces the repeated
-/// `try { program.parse_args } catch { err + usage; return 1; }` block.
-/// Call sites: `if (!parseArgs(program, argc, argv)) return 1;`
-///
-/// Header-only so tools that do not link tether_examples_common can use it.
+/**
+ * Parse `argc`/`argv`; on failure prints the error and usage to stderr
+ * and returns false — replaces the repeated
+ * `try { program.parse_args } catch { err + usage; return 1; }` block.
+ * Call sites: `if (!parseArgs(program, argc, argv)) return 1;`
+ *
+ * Header-only so tools that do not link tether_examples_common can use it.
+ */
 inline bool parseArgs(argparse::ArgumentParser& program, int argc,
                       char** argv) {
     try {

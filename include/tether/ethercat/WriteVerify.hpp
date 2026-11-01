@@ -50,10 +50,10 @@ namespace Verify {
  * @brief Write-verify configuration
  */
 struct WriteVerifyConfig {
-    uint32_t retry_count;          ///< Number of retries on verification failure
-    uint32_t retry_delay_ms;       ///< Delay between retries
-    uint32_t read_delay_ms;        ///< Delay before read-back verification
-    bool log_failures;             ///< Log verification failures
+    uint32_t retry_count; /**< Number of retries on verification failure */
+    uint32_t retry_delay_ms; /**< Delay between retries */
+    uint32_t read_delay_ms; /**< Delay before read-back verification */
+    bool log_failures; /**< Log verification failures */
 
     static WriteVerifyConfig defaults() {
         return {
@@ -69,15 +69,15 @@ struct WriteVerifyConfig {
  * @brief Result of a write-verify operation
  */
 struct WriteVerifyResult {
-    bool success;                  ///< Write and verify succeeded
-    bool write_ok;                 ///< Initial write succeeded (WKC > 0)
-    bool verify_ok;                ///< Verification read-back matched
-    uint16_t write_wkc;            ///< WKC from write operation
-    uint16_t read_wkc;             ///< WKC from verify read operation
-    uint32_t attempts;             ///< Number of attempts made
-    size_t mismatch_offset;        ///< First byte that mismatched (if verify failed)
-    uint8_t expected_byte;         ///< Expected byte at mismatch_offset
-    uint8_t actual_byte;           ///< Actual byte at mismatch_offset
+    bool success; /**< Write and verify succeeded */
+    bool write_ok; /**< Initial write succeeded (WKC > 0) */
+    bool verify_ok; /**< Verification read-back matched */
+    uint16_t write_wkc; /**< WKC from write operation */
+    uint16_t read_wkc; /**< WKC from verify read operation */
+    uint32_t attempts; /**< Number of attempts made */
+    size_t mismatch_offset; /**< First byte that mismatched (if verify failed) */
+    uint8_t expected_byte; /**< Expected byte at mismatch_offset */
+    uint8_t actual_byte; /**< Actual byte at mismatch_offset */
 
     static WriteVerifyResult Success(uint16_t wkc, uint32_t attempts) {
         WriteVerifyResult r = {};
@@ -120,13 +120,13 @@ struct WriteVerifyResult {
  * @brief Write-verify statistics
  */
 struct WriteVerifyStats {
-    uint64_t total_writes;         ///< Total write operations attempted
-    uint64_t successful_writes;    ///< Writes that succeeded on first try
-    uint64_t verify_failures;      ///< Verification failures
-    uint64_t write_failures;       ///< Write failures (WKC = 0)
-    uint64_t retries;              ///< Total retry attempts
-    uint64_t eventual_success;     ///< Writes that succeeded after retry
-    uint64_t permanent_failures;   ///< Writes that failed after all retries
+    uint64_t total_writes; /**< Total write operations attempted */
+    uint64_t successful_writes; /**< Writes that succeeded on first try */
+    uint64_t verify_failures; /**< Verification failures */
+    uint64_t write_failures; /**< Write failures (WKC = 0) */
+    uint64_t retries; /**< Total retry attempts */
+    uint64_t eventual_success; /**< Writes that succeeded after retry */
+    uint64_t permanent_failures; /**< Writes that failed after all retries */
 };
 
 // ============================================================================
@@ -137,9 +137,9 @@ struct WriteVerifyStats {
  * @brief Response from a datagram operation
  */
 struct DatagramResponse {
-    uint16_t wkc;                  ///< Working Counter
-    uint16_t datalen;              ///< Data length
-    uint8_t data[256];             ///< Payload data
+    uint16_t wkc; /**< Working Counter */
+    uint16_t datalen; /**< Data length */
+    uint8_t data[256]; /**< Payload data */
 };
 
 // ============================================================================
@@ -150,9 +150,9 @@ struct DatagramResponse {
  * @brief EtherCAT command constants used by the transport interface
  */
 struct EtherCATCmd {
-    static constexpr uint8_t APRD = 0x01;  ///< Auto Position Read
-    static constexpr uint8_t APWR = 0x02;  ///< Auto Position Write
-    static constexpr uint8_t BWR  = 0x08;  ///< Broadcast Write
+    static constexpr uint8_t APRD = 0x01; /**< Auto Position Read */
+    static constexpr uint8_t APWR = 0x02; /**< Auto Position Write */
+    static constexpr uint8_t BWR  = 0x08; /**< Broadcast Write */
 };
 
 /**
@@ -235,9 +235,11 @@ public:
  */
 class WriteVerifier {
 public:
-    /// Maximum data length for a single write-verify operation.
-    /// Configurable via ECAT_WRITE_VERIFY_MAX_DATA_LEN in EtherCATConfig.hpp.
-    /// This is a Tether-internal stack buffer limit.
+    /**
+     * Maximum data length for a single write-verify operation.
+     * Configurable via ECAT_WRITE_VERIFY_MAX_DATA_LEN in EtherCATConfig.hpp.
+     * This is a Tether-internal stack buffer limit.
+     */
     static constexpr uint16_t kMaxDataLen = ECAT_WRITE_VERIFY_MAX_DATA_LEN;
 
     /**

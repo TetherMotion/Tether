@@ -8,7 +8,7 @@
 
 namespace FSoE {
 
-/// Decode the FSoE command byte to a human-readable name (with hex code).
+/**Decode the FSoE command byte to a human-readable name (with hex code). */
 inline const char* fsoeCommandName(uint8_t cmd) {
     switch (cmd) {
         case FSoE::Command::ProcessData:   return "ProcessData(0x36)";
@@ -21,7 +21,7 @@ inline const char* fsoeCommandName(uint8_t cmd) {
     }
 }
 
-/// Decode the FSoE command byte to a plain name (no hex suffix).
+/**Decode the FSoE command byte to a plain name (no hex suffix). */
 inline const char* fsoeCommandShortName(uint8_t cmd) {
     switch (cmd) {
         case FSoE::Command::ProcessData:   return "ProcessData";
@@ -34,8 +34,10 @@ inline const char* fsoeCommandShortName(uint8_t cmd) {
     }
 }
 
-/// Map an FSoE command byte to the connection state it belongs to
-/// (FSoE::ConnectionState::*).  Unknown commands map to Error.
+/**
+ * Map an FSoE command byte to the connection state it belongs to
+ * (FSoE::ConnectionState::*).  Unknown commands map to Error.
+ */
 inline uint8_t fsoeStateFromCommand(uint8_t cmd) {
     switch (cmd) {
         case FSoE::Command::Reset:         return FSoE::ConnectionState::Reset;
@@ -48,7 +50,7 @@ inline uint8_t fsoeStateFromCommand(uint8_t cmd) {
     }
 }
 
-/// Decode the FSoE connection state to a human-readable name.
+/**Decode the FSoE connection state to a human-readable name. */
 inline const char* fsoeStateName(uint8_t state) {
     switch (state) {
         case FSoE::ConnectionState::Reset:      return "RESET";
@@ -62,7 +64,7 @@ inline const char* fsoeStateName(uint8_t state) {
     }
 }
 
-/// Decode the FSoE error code to a human-readable name.
+/**Decode the FSoE error code to a human-readable name. */
 inline const char* fsoeErrorName(uint16_t code) {
     switch (code) {
         case FSoE::ErrorCode::NoError:           return "NoError";
@@ -85,10 +87,12 @@ inline const char* fsoeErrorName(uint16_t code) {
     }
 }
 
-/// Decode the FSoE Reset PDU error code (SafeData[0] in a Reset frame,
-/// ETG.5100) to a human-readable name.
-/// A value of 0x00 means local reset or acknowledgement.
-/// Values 0x80–0xFF are device-specific (Invalid SafePara).
+/**
+ * Decode the FSoE Reset PDU error code (SafeData[0] in a Reset frame,
+ * ETG.5100) to a human-readable name.
+ * A value of 0x00 means local reset or acknowledgement.
+ * Values 0x80–0xFF are device-specific (Invalid SafePara).
+ */
 inline const char* fsoeResetErrorCodeName(uint8_t code) {
     switch (code) {
         case FSoE::ResetErrorCode::None:               return "None (local reset/ack)";
@@ -109,8 +113,10 @@ inline const char* fsoeResetErrorCodeName(uint8_t code) {
     }
 }
 
-/// Decode the FSoE Reset PDU error code to a plain short name
-/// (no parenthetical ETG.5100 code suffix).
+/**
+ * Decode the FSoE Reset PDU error code to a plain short name
+ * (no parenthetical ETG.5100 code suffix).
+ */
 inline const char* fsoeResetReasonName(uint8_t code) {
     switch (code) {
         case FSoE::ResetErrorCode::None:               return "None";
@@ -129,9 +135,11 @@ inline const char* fsoeResetReasonName(uint8_t code) {
     }
 }
 
-/// Compact per-frame tag for stream lines: "cmd=<name>", plus
-/// " reason=<name>" when the frame is a Reset command.
-/// @param frame  Raw FSoE frame (byte 0 = command, byte 1 = reset reason).
+/**
+ * Compact per-frame tag for stream lines: "cmd=<name>", plus
+ * " reason=<name>" when the frame is a Reset command.
+ * @param frame  Raw FSoE frame (byte 0 = command, byte 1 = reset reason).
+ */
 inline std::string fsoeCommandTag(const uint8_t* frame) {
     std::string s = "cmd=";
     s += fsoeCommandShortName(frame[0]);
@@ -146,25 +154,27 @@ inline std::string fsoeCommandTag(const uint8_t* frame) {
 // PDO priming helpers
 // ============================================================================
 
-/// Build an FSoE Reset PDU that fills a PDO buffer.
-///
-/// Writes the FSoE Reset command (0x2A) at byte 0, zero-fills all data/CRC
-/// bytes, and writes the connection ID at the last two bytes of the buffer.
-/// This is intended for pre-priming the PDO buffer before the FSoE master
-/// cyclic task takes over — the slave's safety module sees a valid FSoE
-/// command on the wire immediately rather than an uninitialized buffer.
-///
-/// For a PDO buffer sized to a full FSoE frame (e.g. 11 bytes for the
-/// Synapticon 0x1700 RxPDO), the layout is:
-///   [CMD(0x2A)] [zeros(data+CRCs)] [ConnID_lo] [ConnID_hi]
-///
-/// For a minimal 3-byte buffer (no data bytes), the layout is:
-///   [CMD(0x2A)] [ConnID_lo] [ConnID_hi]
-///
-/// @param buf      Output buffer (PDO region to fill).
-/// @param buf_size Total size of the PDO region in bytes.
-/// @param conn_id  FSoE Connection ID.
-/// @return Number of bytes written (equal to buf_size).
+/**
+ * Build an FSoE Reset PDU that fills a PDO buffer.
+ *
+ * Writes the FSoE Reset command (0x2A) at byte 0, zero-fills all data/CRC
+ * bytes, and writes the connection ID at the last two bytes of the buffer.
+ * This is intended for pre-priming the PDO buffer before the FSoE master
+ * cyclic task takes over — the slave's safety module sees a valid FSoE
+ * command on the wire immediately rather than an uninitialized buffer.
+ *
+ * For a PDO buffer sized to a full FSoE frame (e.g. 11 bytes for the
+ * Synapticon 0x1700 RxPDO), the layout is:
+ *   [CMD(0x2A)] [zeros(data+CRCs)] [ConnID_lo] [ConnID_hi]
+ *
+ * For a minimal 3-byte buffer (no data bytes), the layout is:
+ *   [CMD(0x2A)] [ConnID_lo] [ConnID_hi]
+ *
+ * @param buf      Output buffer (PDO region to fill).
+ * @param buf_size Total size of the PDO region in bytes.
+ * @param conn_id  FSoE Connection ID.
+ * @return Number of bytes written (equal to buf_size).
+ */
 inline size_t buildResetPdu(uint8_t* buf, size_t buf_size, uint16_t conn_id) {
     if (!buf || buf_size < 3) return 0;
     std::memset(buf, 0, buf_size);

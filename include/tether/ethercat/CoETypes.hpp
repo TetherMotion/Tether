@@ -38,7 +38,7 @@ namespace CoE {
 enum class CoEErrorCode : uint8_t {
     Ok = 0,
     Timeout,
-    Aborted,          ///< Slave replied with an SDO abort — see abort/abort_code
+    Aborted, /**< Slave replied with an SDO abort — see abort/abort_code */
     TransportError,
     QueueFull,
     NotConfigured,
@@ -62,17 +62,17 @@ struct CoEError {
     uint32_t     abort_code = 0;
 
     constexpr CoEError() = default;
-    /// Implicit: a bare category means "no abort detail".
+    /**Implicit: a bare category means "no abort detail". */
     constexpr CoEError(CoEErrorCode c) : code(c) {}
     constexpr CoEError(CoEErrorCode c, SDOAbortCode a, uint32_t raw)
         : code(c), abort(a), abort_code(raw) {}
 
-    /// Build an Aborted error carrying the slave's raw abort code.
+    /**Build an Aborted error carrying the slave's raw abort code. */
     static constexpr CoEError aborted(uint32_t raw) {
         return CoEError(CoEErrorCode::Aborted, static_cast<SDOAbortCode>(raw), raw);
     }
 
-    /// Compare against a bare category: `err == CoEErrorCode::Timeout`.
+    /**Compare against a bare category: `err == CoEErrorCode::Timeout`. */
     constexpr bool operator==(CoEErrorCode c) const { return code == c; }
     bool operator==(const CoEError&) const = default;
 };
@@ -95,24 +95,28 @@ struct CoETransactionOptions {
     uint8_t priority = 0;
     uint8_t max_retries = 3;
     bool complete_access = false;
-    /// @brief When true, suppress the "trailing bytes discarded" warning
-    /// emitted when a typed read (e.g. readU8) returns more bytes than the
-    /// requested C++ type. Set this when the caller knowingly reads a narrow
-    /// value from a wider SDO entry (e.g. a 1-byte module ID stored in a
-    /// 4-byte OD entry). The leading sizeof(T) bytes are still copied
-    /// regardless; this flag only silences the warning. The hard error path
-    /// for short reads (out_len < sizeof(T)) is unaffected.
+    /**
+     * @brief When true, suppress the "trailing bytes discarded" warning
+     * emitted when a typed read (e.g. readU8) returns more bytes than the
+     * requested C++ type. Set this when the caller knowingly reads a narrow
+     * value from a wider SDO entry (e.g. a 1-byte module ID stored in a
+     * 4-byte OD entry). The leading sizeof(T) bytes are still copied
+     * regardless; this flag only silences the warning. The hard error path
+     * for short reads (out_len < sizeof(T)) is unaffected.
+     */
     bool allow_trailing_bytes = false;
 };
 
 struct BehaviourOptions {
     bool request_al_status_after_coe_requests = false;
-    /// @brief Floor for CoETransactionOptions::timeout_ms, applied at enqueue
-    /// and at the synchronous wait sites.  The ESC211's CoE task can take
-    /// well over a second per mailbox transaction while its safety
-    /// application is busy; with the 1 s default the response arrives just
-    /// after the timeout and is then drained as "stale" by the next
-    /// transaction — an endless catch-up cycle.  0 = no floor.
+    /**
+     * @brief Floor for CoETransactionOptions::timeout_ms, applied at enqueue
+     * and at the synchronous wait sites.  The ESC211's CoE task can take
+     * well over a second per mailbox transaction while its safety
+     * application is busy; with the 1 s default the response arrives just
+     * after the timeout and is then drained as "stale" by the next
+     * transaction — an endless catch-up cycle.  0 = no floor.
+     */
     uint32_t min_transaction_timeout_ms = 0;
 };
 

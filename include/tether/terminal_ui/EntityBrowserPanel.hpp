@@ -50,27 +50,29 @@ class EntityBrowserPanel {
 public:
     explicit EntityBrowserPanel(UI::EntityBrowser& browser);
 
-    /// Minimum interval between provider polls (default 1000 ms).
+    /**Minimum interval between provider polls (default 1000 ms). */
     void setRefreshInterval(std::chrono::milliseconds ms) { refresh_ms_ = ms; }
 
-    /// Register a hotkey action.  The label appears in the footer hints;
-    /// invoke() may push an overlay or do anything else.
+    /**
+     * Register a hotkey action.  The label appears in the footer hints;
+     * invoke() may push an overlay or do anything else.
+     */
     void addAction(UI::PanelAction action) { actions_.push_back(std::move(action)); }
 
-    /// Push a modal overlay (called from action callbacks).
+    /**Push a modal overlay (called from action callbacks). */
     void pushOverlay(std::unique_ptr<UI::Overlay> overlay) {
         overlays_.push(std::move(overlay));
     }
     UI::OverlayStack& overlays() { return overlays_; }
     bool overlayOpen() const { return !overlays_.empty(); }
 
-    /// Render into the screen region [top, bottom).
+    /**Render into the screen region [top, bottom). */
     void render(int top, int bottom);
 
-    /// Returns true when the key was consumed.
+    /**Returns true when the key was consumed. */
     bool handleKey(int key);
 
-    /// Footer hint string for PanelView::keyHints.
+    /**Footer hint string for PanelView::keyHints. */
     std::string keyHints() const;
 
 private:
@@ -86,21 +88,27 @@ private:
     UI::LineInput prompt_input_;
     std::chrono::milliseconds refresh_ms_{1000};
     std::chrono::steady_clock::time_point last_refresh_{};
-    /// With autoRead on, registers re-read at this cadence so live
-    /// values refresh without a manual 'r'.
+    /**
+     * With autoRead on, registers re-read at this cadence so live
+     * values refresh without a manual 'r'.
+     */
     std::chrono::milliseconds reg_reread_interval_{5000};
     std::chrono::steady_clock::time_point last_reg_read_{};
     bool first_render_ = true;
 };
 
-/// Helper for the common "show full entity details" action — builds a
-/// TextOverlay dumping every field of the currently selected entity.
+/**
+ * Helper for the common "show full entity details" action — builds a
+ * TextOverlay dumping every field of the currently selected entity.
+ */
 std::unique_ptr<UI::Overlay> makeEntityInfoOverlay(UI::EntityBrowser& b);
 
-/// Build a PanelScreen view hosting an EntityBrowserPanel — wires
-/// renderBody/onKey/keyHintsFn to the panel.  Replaces the identical
-/// ~5-line view registration in every PanelScreen app:
-///   hooks.views.push_back(TUI::entityBrowserView(entity_panel));
+/**
+ * Build a PanelScreen view hosting an EntityBrowserPanel — wires
+ * renderBody/onKey/keyHintsFn to the panel.  Replaces the identical
+ * ~5-line view registration in every PanelScreen app:
+ *   hooks.views.push_back(TUI::entityBrowserView(entity_panel));
+ */
 inline PanelView entityBrowserView(EntityBrowserPanel& panel,
                                    std::string name = "Entities") {
     PanelView v;

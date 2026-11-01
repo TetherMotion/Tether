@@ -32,11 +32,13 @@ namespace tether::klipper::http {
 
 namespace fs = std::filesystem;
 
-/// Filter name for Drogon route constraints
+/**Filter name for Drogon route constraints */
 static const std::string kAuthFilterName = "tether::klipper::http::AuthFilter";
 
-/// Build a constraint vector with optional auth filter + HTTP methods.
-/// When requireAuth is false, only the HTTP methods are included.
+/**
+ * Build a constraint vector with optional auth filter + HTTP methods.
+ * When requireAuth is false, only the HTTP methods are included.
+ */
 static std::vector<drogon::internal::HttpConstraint>
 withAuth(bool requireAuth, std::initializer_list<drogon::HttpMethod> methods) {
     std::vector<drogon::internal::HttpConstraint> constraints;
@@ -2685,7 +2687,7 @@ bool KlippyHttpServer::checkApiKey(const std::string& key) const {
     return key == config_.apiKey;
 }
 
-/// Base64url encode (no padding)
+/**Base64url encode (no padding) */
 static std::string base64urlEncode(const unsigned char* data, size_t len) {
     static const char alphabet[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -2703,7 +2705,7 @@ static std::string base64urlEncode(const unsigned char* data, size_t len) {
     return result;
 }
 
-/// Base64url decode
+/**Base64url decode */
 static std::string base64urlDecode(const std::string& input) {
     static const int decodeTable[256] = {
         -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -2738,7 +2740,7 @@ static std::string base64urlDecode(const std::string& input) {
     return result;
 }
 
-/// HMAC-SHA256
+/**HMAC-SHA256 */
 static std::string hmacSha256(const std::string& key, const std::string& data) {
     unsigned char result[EVP_MAX_MD_SIZE];
     unsigned int len = 0;

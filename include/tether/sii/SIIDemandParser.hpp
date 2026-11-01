@@ -142,25 +142,27 @@ bool parseDCFromBuffer(const uint8_t* data, size_t size_bytes, SIIData& out);
  * @brief Result of a demand-driven SII parse attempt.
  */
 struct SIIDemandResult {
-    /// Parse status.
+    /**Parse status. */
     enum Status : uint8_t {
-        NEED_WORDS,  ///< More word-pairs must be fetched from the bus.
-        COMPLETE,    ///< Parsing is complete; out_data is valid.
-        FAILED,      ///< Parsing failed (permanent error).
+        NEED_WORDS, /**< More word-pairs must be fetched from the bus. */
+        COMPLETE, /**< Parsing is complete; out_data is valid. */
+        FAILED, /**< Parsing failed (permanent error). */
     } status{NEED_WORDS};
 
-    /// Even word addresses that must be fetched (32-bit reads).
-    /// Populated only when status == NEED_WORDS.
-    /// Each address starts a 2-word (32-bit) EEPROM read.
+    /**
+     * Even word addresses that must be fetched (32-bit reads).
+     * Populated only when status == NEED_WORDS.
+     * Each address starts a 2-word (32-bit) EEPROM read.
+     */
     std::vector<uint16_t> needed_word_pairs;
 
-    /// True if parsing is complete.
+    /**True if parsing is complete. */
     bool isComplete() const { return status == COMPLETE; }
 
-    /// True if parsing failed.
+    /**True if parsing failed. */
     bool isFailed() const { return status == FAILED; }
 
-    /// True if more words are needed.
+    /**True if more words are needed. */
     bool needsWords() const { return status == NEED_WORDS; }
 };
 
@@ -206,16 +208,16 @@ public:
      */
     SIIDemandResult parse(const SIISlaveCache& cache, SIIData& out_data);
 
-    /// True if parsing is complete (all phases done).
+    /**True if parsing is complete (all phases done). */
     bool isComplete() const { return phase_ == Phase::COMPLETE; }
 
-    /// True if parsing failed.
+    /**True if parsing failed. */
     bool isFailed() const { return phase_ == Phase::FAILED; }
 
-    /// Current phase (for diagnostics).
+    /**Current phase (for diagnostics). */
     uint8_t phase() const { return static_cast<uint8_t>(phase_); }
 
-    /// Last error message (if failed).
+    /**Last error message (if failed). */
     const char* lastError() const { return last_error_; }
 
     // ----------------------------------------------------------------
@@ -272,31 +274,31 @@ public:
                                           uint16_t start, uint16_t word_count);
 
 private:
-    /// Parsing phases (sequential, resumable).
+    /**Parsing phases (sequential, resumable). */
     enum class Phase : uint8_t {
-        CONFIG_AREA,    ///< Words 0x0000-0x0007
-        IDENTITY,       ///< Words 0x0008-0x000F, 0x0014-0x001D
-        SIZE_INFO,      ///< Word-pair 0x002E-0x002F
-        CATEGORY_SCAN,  ///< Categories from 0x0040
-        COMPLETE,       ///< All phases done
-        FAILED,         ///< Error
+        CONFIG_AREA, /**< Words 0x0000-0x0007 */
+        IDENTITY, /**< Words 0x0008-0x000F, 0x0014-0x001D */
+        SIZE_INFO, /**< Word-pair 0x002E-0x002F */
+        CATEGORY_SCAN, /**< Categories from 0x0040 */
+        COMPLETE, /**< All phases done */
+        FAILED, /**< Error */
     };
 
     Phase    phase_{Phase::CONFIG_AREA};
     uint32_t cat_mask_{CAT_MASK_ALL};
 
     // Category scan state (used during CATEGORY_SCAN phase)
-    uint16_t cat_scan_addr_{SII_CATEGORY_START};  ///< Next category header addr
-    int      category_count_{0};                   ///< Categories processed
+    uint16_t cat_scan_addr_{SII_CATEGORY_START}; /**< Next category header addr */
+    int      category_count_{0}; /**< Categories processed */
 
     char last_error_[128]{};
 
-    /// Collect missing word-pairs from a list of even addresses.
+    /**Collect missing word-pairs from a list of even addresses. */
     static void collectMissing(const SIISlaveCache& cache,
                                std::vector<uint16_t>& out,
                                std::initializer_list<uint16_t> pairs);
 
-    /// Set error message and transition to FAILED.
+    /**Set error message and transition to FAILED. */
     void fail(const std::string& msg);
 
     // Phase handlers — each returns NEED_WORDS, COMPLETE, or FAILED.

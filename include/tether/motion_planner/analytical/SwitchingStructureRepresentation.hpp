@@ -313,10 +313,10 @@ public:
     const std::vector<double>& arcStartTimes() const { return arcStartTimes_; }
 
 private:
-    const Path* path_;  ///< Non-owning pointer to the path
+    const Path* path_; /**< Non-owning pointer to the path */
     std::vector<Arc> arcs_;
     ConstraintEvaluator<Dim, T> evaluator_;
-    std::vector<double> arcStartTimes_;  ///< t_k for each arc
+    std::vector<double> arcStartTimes_; /**< t_k for each arc */
 
     // ========================================================================
     // Precomputation

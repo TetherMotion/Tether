@@ -18,37 +18,47 @@
 
 namespace tether::klipper::device {
 
-/// @brief Interface for the Klipper device's motion-related operations.
-///
-/// This interface exposes only the methods that KlippyInstance needs to call
-/// on the device. The full KlipperDevice class implements this interface
-/// plus many more methods used internally by the device layer.
+/**
+ * @brief Interface for the Klipper device's motion-related operations.
+ *
+ * This interface exposes only the methods that KlippyInstance needs to call
+ * on the device. The full KlipperDevice class implements this interface
+ * plus many more methods used internally by the device layer.
+ */
 class IKlipperDevice {
 public:
     virtual ~IKlipperDevice() = default;
 
-    /// @brief Open the transport and start serving.
-    /// @return True if the device started successfully.
+    /**
+     * @brief Open the transport and start serving.
+     * @return True if the device started successfully.
+     */
     virtual bool start() = 0;
 
-    /// @brief Pump the event loop: read transport, parse blocks, dispatch, ack.
+    /**@brief Pump the event loop: read transport, parse blocks, dispatch, ack. */
     virtual void pump() = 0;
 
-    /// @brief Advance the MCU clock by @p deltaTicks.
+    /**@brief Advance the MCU clock by @p deltaTicks. */
     virtual void advanceClock(uint32_t deltaTicks) = 0;
 
-    /// @brief Register a Stepper peripheral and auto-wire the queue_step /
-    ///        set_next_step_dir / reset_step_clock handlers for its OID.
-    /// @return The OID passed in, for chaining.
+    /**
+     * @brief Register a Stepper peripheral and auto-wire the queue_step /
+     *        set_next_step_dir / reset_step_clock handlers for its OID.
+     * @return The OID passed in, for chaining.
+     */
     virtual uint8_t registerStepper(std::shared_ptr<objects::Stepper> stepper) = 0;
 
-    /// @brief Register all default stepper motion command handlers
-    ///        (queue_step, set_next_step_dir, reset_step_clock) for every
-    ///        Stepper currently registered.
+    /**
+     * @brief Register all default stepper motion command handlers
+     *        (queue_step, set_next_step_dir, reset_step_clock) for every
+     *        Stepper currently registered.
+     */
     virtual void enableStepperMotion() = 0;
 
-    /// @brief Tick the real-time StepScheduler (if enabled).
-    /// @return Number of steps fired, or 0 if the scheduler is not enabled.
+    /**
+     * @brief Tick the real-time StepScheduler (if enabled).
+     * @return Number of steps fired, or 0 if the scheduler is not enabled.
+     */
     virtual size_t tickStepScheduler() = 0;
 };
 

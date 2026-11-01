@@ -1,5 +1,7 @@
-/// @file SelfIntersectionAnalyzer.cpp
-/// @brief Detect self-intersections and crossing toolpaths.
+/**
+ * @file SelfIntersectionAnalyzer.cpp
+ * @brief Detect self-intersections and crossing toolpaths.
+ */
 
 #include "tether/gcode/analysis/SelfIntersectionAnalyzer.hpp"
 #include "AnalysisUtil.hpp"

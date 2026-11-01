@@ -30,44 +30,44 @@ namespace MotionReplanner {
  * @brief Types of single-axis tests
  */
 enum class SingleAxisTestType {
-    Ramp,               ///< Linear ramp up/down
-    Sinusoid,           ///< Sinusoidal motion
-    SCurve,             ///< S-curve velocity profile
-    Step,               ///< Step response for PID analysis
-    Triangular,         ///< Triangle wave
-    Trapezoidal         ///< Trapezoidal velocity profile
+    Ramp, /**< Linear ramp up/down */
+    Sinusoid, /**< Sinusoidal motion */
+    SCurve, /**< S-curve velocity profile */
+    Step, /**< Step response for PID analysis */
+    Triangular, /**< Triangle wave */
+    Trapezoidal /**< Trapezoidal velocity profile */
 };
 
 /**
  * @brief Types of multi-axis tests
  */
 enum class MultiAxisTestType {
-    Circle,             ///< Circular motion in plane
-    Ellipse,            ///< Elliptical motion
-    Helix,              ///< Helical motion (circle + Z)
-    Lissajous,          ///< Lissajous curve
-    Square,             ///< Square path with corners
-    RoundedSquare,      ///< Square with rounded corners
-    DiagonalBox         ///< Box with diagonals
+    Circle, /**< Circular motion in plane */
+    Ellipse, /**< Elliptical motion */
+    Helix, /**< Helical motion (circle + Z) */
+    Lissajous, /**< Lissajous curve */
+    Square, /**< Square path with corners */
+    RoundedSquare, /**< Square with rounded corners */
+    DiagonalBox /**< Box with diagonals */
 };
 
 /**
  * @brief Configuration for a single-axis test
  */
 struct SingleAxisTestConfig {
-    int axis = 0;                         ///< Axis index (0=X, 1=Y, etc.)
+    int axis = 0; /**< Axis index (0=X, 1=Y, etc.) */
     SingleAxisTestType type = SingleAxisTestType::Sinusoid;
     
-    double amplitude = 50.0;              ///< mm
-    double frequency = 1.0;               ///< Hz
-    double velocity = 1000.0;             ///< mm/min (for ramps)
-    double acceleration = 500.0;          ///< mm/s² (for S-curves)
-    double jerk = 5000.0;                 ///< mm/s³ (for S-curves)
+    double amplitude = 50.0; /**< mm */
+    double frequency = 1.0; /**< Hz */
+    double velocity = 1000.0; /**< mm/min (for ramps) */
+    double acceleration = 500.0; /**< mm/s² (for S-curves) */
+    double jerk = 5000.0; /**< mm/s³ (for S-curves) */
     
-    double duration = 5.0;                ///< seconds
-    int cycles = 5;                       ///< Number of cycles (for periodic)
+    double duration = 5.0; /**< seconds */
+    int cycles = 5; /**< Number of cycles (for periodic) */
     
-    double centerPosition = 0.0;          ///< Center of motion
+    double centerPosition = 0.0; /**< Center of motion */
 };
 
 /**
@@ -76,26 +76,26 @@ struct SingleAxisTestConfig {
 struct MultiAxisTestConfig {
     MultiAxisTestType type = MultiAxisTestType::Circle;
     
-    int uAxis = 0;                        ///< First axis (typically X)
-    int vAxis = 1;                        ///< Second axis (typically Y)
-    int wAxis = 2;                        ///< Third axis for 3D (typically Z)
+    int uAxis = 0; /**< First axis (typically X) */
+    int vAxis = 1; /**< Second axis (typically Y) */
+    int wAxis = 2; /**< Third axis for 3D (typically Z) */
     
-    double radiusU = 50.0;                ///< Radius in U direction
-    double radiusV = 50.0;                ///< Radius in V direction (same as U for circle)
-    double pitchW = 0.0;                  ///< Pitch per revolution for helix
+    double radiusU = 50.0; /**< Radius in U direction */
+    double radiusV = 50.0; /**< Radius in V direction (same as U for circle) */
+    double pitchW = 0.0; /**< Pitch per revolution for helix */
     
-    double rotationAngle = 0.0;           ///< Rotation of pattern (degrees)
-    double feedRate = 1000.0;             ///< mm/min
+    double rotationAngle = 0.0; /**< Rotation of pattern (degrees) */
+    double feedRate = 1000.0; /**< mm/min */
     
-    double duration = 10.0;               ///< seconds
-    int revolutions = 5;                  ///< Number of revolutions
+    double duration = 10.0; /**< seconds */
+    int revolutions = 5; /**< Number of revolutions */
     
     std::array<double, 3> center = {0.0, 0.0, 0.0};
     
-    double cornerRadius = 5.0;            ///< For rounded square
-    double lissajousRatioU = 1.0;         ///< Frequency ratio for Lissajous
+    double cornerRadius = 5.0; /**< For rounded square */
+    double lissajousRatioU = 1.0; /**< Frequency ratio for Lissajous */
     double lissajousRatioV = 2.0;
-    double lissajousPhase = 90.0;         ///< Phase difference (degrees)
+    double lissajousPhase = 90.0; /**< Phase difference (degrees) */
 };
 
 /**
@@ -104,12 +104,12 @@ struct MultiAxisTestConfig {
 struct FrictionTestConfig {
     int axis = 0;
     
-    std::vector<double> velocities = {10, 50, 100, 200, 500, 1000, 2000};  ///< mm/min
-    double distance = 100.0;              ///< mm per velocity level
-    int repeats = 3;                      ///< Repetitions per velocity
+    std::vector<double> velocities = {10, 50, 100, 200, 500, 1000, 2000}; /**< mm/min */
+    double distance = 100.0; /**< mm per velocity level */
+    int repeats = 3; /**< Repetitions per velocity */
     
-    bool bidirectional = true;            ///< Test both directions
-    double settleTime = 0.5;              ///< seconds between moves
+    bool bidirectional = true; /**< Test both directions */
+    double settleTime = 0.5; /**< seconds between moves */
 };
 
 /**
@@ -118,13 +118,13 @@ struct FrictionTestConfig {
 struct DelayTestConfig {
     int axis = 0;
     
-    double stepAmplitude = 10.0;          ///< mm
-    double stepVelocity = 5000.0;         ///< mm/min (fast for clear response)
-    int stepCount = 10;                   ///< Number of steps
-    double settleTime = 0.2;              ///< seconds between steps
+    double stepAmplitude = 10.0; /**< mm */
+    double stepVelocity = 5000.0; /**< mm/min (fast for clear response) */
+    int stepCount = 10; /**< Number of steps */
+    double settleTime = 0.2; /**< seconds between steps */
     
-    double maxExpectedDelay = 0.01;       ///< seconds (10ms max search)
-    double delayResolution = 0.0001;      ///< 0.1ms resolution
+    double maxExpectedDelay = 0.01; /**< seconds (10ms max search) */
+    double delayResolution = 0.0001; /**< 0.1ms resolution */
 };
 
 /**
@@ -133,14 +133,14 @@ struct DelayTestConfig {
 struct PIDTestConfig {
     int axis = 0;
     
-    double stepAmplitude = 5.0;           ///< mm
+    double stepAmplitude = 5.0; /**< mm */
     std::vector<double> stepVelocities = {100, 500, 1000, 2000, 5000};
     
     // Chirp signal for frequency response
-    double chirpStartFreq = 0.5;          ///< Hz
-    double chirpEndFreq = 50.0;           ///< Hz
-    double chirpAmplitude = 2.0;          ///< mm
-    double chirpDuration = 20.0;          ///< seconds
+    double chirpStartFreq = 0.5; /**< Hz */
+    double chirpEndFreq = 50.0; /**< Hz */
+    double chirpAmplitude = 2.0; /**< mm */
+    double chirpDuration = 20.0; /**< seconds */
     
     int repeats = 3;
 };
@@ -154,30 +154,30 @@ struct TestResult {
     double timestamp = 0.0;
     
     // General metrics
-    double maxVelocityAchieved = 0.0;     ///< mm/min
-    double maxAccelerationAchieved = 0.0; ///< mm/s²
-    double maxJerkAchieved = 0.0;         ///< mm/s³
+    double maxVelocityAchieved = 0.0; /**< mm/min */
+    double maxAccelerationAchieved = 0.0; /**< mm/s² */
+    double maxJerkAchieved = 0.0; /**< mm/s³ */
     
     // Error metrics
     ErrorStatistics positionError;
-    ErrorStatistics contourError;         ///< For multi-axis
+    ErrorStatistics contourError; /**< For multi-axis */
     
     // Specific test results
-    double detectedDelay = 0.0;           ///< For delay tests
-    double staticFriction = 0.0;          ///< N or current
-    double viscousFriction = 0.0;         ///< N/(mm/s)
-    double coulombFriction = 0.0;         ///< N
+    double detectedDelay = 0.0; /**< For delay tests */
+    double staticFriction = 0.0; /**< N or current */
+    double viscousFriction = 0.0; /**< N/(mm/s) */
+    double coulombFriction = 0.0; /**< N */
     
     // PID analysis
-    double overshoot = 0.0;               ///< %
-    double riseTime = 0.0;                ///< seconds
-    double settlingTime = 0.0;            ///< seconds (to 2%)
-    double steadyStateError = 0.0;        ///< mm
+    double overshoot = 0.0; /**< % */
+    double riseTime = 0.0; /**< seconds */
+    double settlingTime = 0.0; /**< seconds (to 2%) */
+    double steadyStateError = 0.0; /**< mm */
     
     // Multi-axis circularity
-    double circularityError = 0.0;        ///< mm
-    double radiusError = 0.0;             ///< mm
-    double phaseError = 0.0;              ///< degrees between axes
+    double circularityError = 0.0; /**< mm */
+    double radiusError = 0.0; /**< mm */
+    double phaseError = 0.0; /**< degrees between axes */
     
     // Raw data for export
     std::vector<PositionSample> desiredSamples;
@@ -352,11 +352,11 @@ private:
  * @brief Friction model parameters
  */
 struct FrictionModel {
-    double staticFriction = 0.0;          ///< Force to overcome at standstill
-    double coulombFriction = 0.0;         ///< Constant friction force during motion
-    double viscousFriction = 0.0;         ///< Velocity-proportional friction
-    double stribeckVelocity = 0.0;        ///< Stribeck effect velocity threshold
-    double stribeckExponent = 2.0;        ///< Stribeck curve exponent
+    double staticFriction = 0.0; /**< Force to overcome at standstill */
+    double coulombFriction = 0.0; /**< Constant friction force during motion */
+    double viscousFriction = 0.0; /**< Velocity-proportional friction */
+    double stribeckVelocity = 0.0; /**< Stribeck effect velocity threshold */
+    double stribeckExponent = 2.0; /**< Stribeck curve exponent */
     
     /**
      * @brief Calculate friction force at a given velocity
@@ -395,18 +395,18 @@ struct FrictionModel {
  */
 struct PIDAnalysis {
     // Time domain metrics
-    double riseTime = 0.0;                ///< 10% to 90%
-    double settlingTime = 0.0;            ///< To within 2%
-    double overshoot = 0.0;               ///< Percentage
-    double peakTime = 0.0;                ///< Time to peak
+    double riseTime = 0.0; /**< 10% to 90% */
+    double settlingTime = 0.0; /**< To within 2% */
+    double overshoot = 0.0; /**< Percentage */
+    double peakTime = 0.0; /**< Time to peak */
     double steadyStateError = 0.0;
     
     // Frequency domain metrics
-    double bandwidth = 0.0;               ///< -3dB bandwidth (Hz)
-    double phaseMargin = 0.0;             ///< degrees
-    double gainMargin = 0.0;              ///< dB
-    double resonanceFreq = 0.0;           ///< Hz
-    double resonancePeak = 0.0;           ///< dB
+    double bandwidth = 0.0; /**< -3dB bandwidth (Hz) */
+    double phaseMargin = 0.0; /**< degrees */
+    double gainMargin = 0.0; /**< dB */
+    double resonanceFreq = 0.0; /**< Hz */
+    double resonancePeak = 0.0; /**< dB */
     
     // Suggested improvements
     bool needsMoreP = false;

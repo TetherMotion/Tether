@@ -28,7 +28,7 @@
 
 namespace tether::motion {
 
-/// Static, pure builder for G²/G³ Bézier blends. No state, no side effects.
+/**Static, pure builder for G²/G³ Bézier blends. No state, no side effects. */
 class BlendCurveBuilder {
 public:
     /**

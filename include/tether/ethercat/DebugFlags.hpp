@@ -28,9 +28,9 @@ namespace EtherCAT {
  * indices that are present in the mask.
  */
 struct SlaveFilter {
-    bool pass_all = true;             ///< If true, applies to all slaves.
-    std::vector<bool> slave_mask;     ///< Per-slave enable bits.
-    std::vector<uint16_t> filter_indices; ///< Raw indices parsed from CLI (for late resize).
+    bool pass_all = true; /**< If true, applies to all slaves. */
+    std::vector<bool> slave_mask; /**< Per-slave enable bits. */
+    std::vector<uint16_t> filter_indices; /**< Raw indices parsed from CLI (for late resize). */
 
     /**
      * @brief Query whether a slave passes this filter.
@@ -276,8 +276,8 @@ namespace debug {
  * @brief Metadata for a single debug flag.
  */
 struct DebugFlagInfo {
-    std::string name;           ///< Flag name used on the command line.
-    std::string description;    ///< Human-readable description.
+    std::string name; /**< Flag name used on the command line. */
+    std::string description; /**< Human-readable description. */
 };
 
 /**

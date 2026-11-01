@@ -60,10 +60,12 @@
 
 namespace tether::motion::profile_renurbs {
 
-/// Exception thrown when generic certification fails and
-/// certifyThrowOnFailure is true.
-/// Inherits from ReNURBSCertificationError so existing code catching
-/// the velocity-specific exception type still works.
+/**
+ * Exception thrown when generic certification fails and
+ * certifyThrowOnFailure is true.
+ * Inherits from ReNURBSCertificationError so existing code catching
+ * the velocity-specific exception type still works.
+ */
 class GenericReNURBSCertificationError : public ReNURBSCertificationError {
 public:
     explicit GenericReNURBSCertificationError(const std::string& msg)

@@ -118,11 +118,15 @@ namespace P60 = CiA402::Parameters60xx;
 
 static constexpr const char* TAG = "synapticon_cst_dynamic_brake";
 
-/// Offset of RxPDO 0x1601 (0x60FE physical outputs + bit mask) inside the
-/// 35-byte SM2 image — bit 0 of both words drives the brake output pin.
+/**
+ * Offset of RxPDO 0x1601 (0x60FE physical outputs + bit mask) inside the
+ * 35-byte SM2 image — bit 0 of both words drives the brake output pin.
+ */
 static constexpr size_t kBrakeOutputOffset = sizeof(SPdo::SOMANET_RxPDO_1600);
-/// Byte offset of the remapped 0x2004:10 Output voltage word inside the
-/// SM2 image: after RxPDO 0x1600 (19 B) and RxPDO 0x1601 (8 B).
+/**
+ * Byte offset of the remapped 0x2004:10 Output voltage word inside the
+ * SM2 image: after RxPDO 0x1600 (19 B) and RxPDO 0x1601 (8 B).
+ */
 static constexpr size_t kBrakeByteOffset =
     sizeof(SPdo::SOMANET_RxPDO_1600) + sizeof(SPdo::SOMANET_RxPDO_1601);
 static constexpr size_t kRxPDOImageSize = 35;

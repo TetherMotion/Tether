@@ -24,15 +24,19 @@
 namespace Tether {
 namespace TUI {
 
-/// Display-column width of a UTF-8 string (invalid bytes count 1 each).
+/**Display-column width of a UTF-8 string (invalid bytes count 1 each). */
 int utf8Cols(const std::string& s);
 
-/// Truncate a UTF-8 string to at most `max_cols` display columns
-/// without splitting a multibyte codepoint.
+/**
+ * Truncate a UTF-8 string to at most `max_cols` display columns
+ * without splitting a multibyte codepoint.
+ */
 std::string utf8Trunc(const std::string& s, int max_cols);
 
-/// Map an ANSI SGR basic foreground index (0-7) to the palette pair
-/// carrying that color (black renders as muted — invisible on black).
+/**
+ * Map an ANSI SGR basic foreground index (0-7) to the palette pair
+ * carrying that color (black renders as muted — invisible on black).
+ */
 short ansiFgPair(int color_index);
 
 /**

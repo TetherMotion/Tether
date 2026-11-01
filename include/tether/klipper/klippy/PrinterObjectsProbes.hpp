@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file PrinterObjectsProbes.hpp
-/// @brief Probe and bed leveling printer objects
+/**
+ * @file PrinterObjectsProbes.hpp
+ * @brief Probe and bed leveling printer objects
+ */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 #include "tether/klipper/objects/Homing.hpp"
@@ -17,7 +19,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief The probe printer object.
+/**@brief The probe printer object. */
 class ProbeObject : public PrinterObject {
 public:
     explicit ProbeObject(std::shared_ptr<objects::Probe> probe)
@@ -53,7 +55,7 @@ private:
     double zOffset_ = 0.0;
 };
 
-/// @brief BLTouch printer object (bltouch).
+/**@brief BLTouch printer object (bltouch). */
 class BltouchObject : public PrinterObject {
 public:
     std::string name() const override { return "bltouch"; }
@@ -78,7 +80,7 @@ private:
     double lastZValue_ = 0.0;
 };
 
-/// @brief Z tilt printer object (z_tilt).
+/**@brief Z tilt printer object (z_tilt). */
 class ZTiltObject : public PrinterObject {
 public:
     std::string name() const override { return "z_tilt"; }
@@ -103,7 +105,7 @@ private:
     std::vector<JsonValue> zPositions_;
 };
 
-/// @brief Quad gantry level printer object (quad_gantry_level).
+/**@brief Quad gantry level printer object (quad_gantry_level). */
 class QuadGantryLevelObject : public PrinterObject {
 public:
     std::string name() const override { return "quad_gantry_level"; }
@@ -128,7 +130,7 @@ private:
     std::vector<JsonValue> zValues_;
 };
 
-/// @brief Screws tilt adjust printer object (screws_tilt_adjust).
+/**@brief Screws tilt adjust printer object (screws_tilt_adjust). */
 class ScrewsTiltAdjustObject : public PrinterObject {
 public:
     std::string name() const override { return "screws_tilt_adjust"; }
@@ -159,7 +161,7 @@ private:
     bool adjusted_ = false;
 };
 
-/// @brief Bed screws printer object (bed_screws).
+/**@brief Bed screws printer object (bed_screws). */
 class BedScrewsObject : public PrinterObject {
 public:
     std::string name() const override { return "bed_screws"; }
@@ -187,7 +189,7 @@ private:
     int acceptedScrews_ = 0;
 };
 
-/// @brief Delta calibrate printer object (delta_calibrate).
+/**@brief Delta calibrate printer object (delta_calibrate). */
 class DeltaCalibrateObject : public PrinterObject {
 public:
     std::string name() const override { return "delta_calibrate"; }
@@ -216,7 +218,7 @@ private:
     bool applied_ = false;
 };
 
-/// @brief Safe Z home printer object (safe_z_home).
+/**@brief Safe Z home printer object (safe_z_home). */
 class SafeZHomeObject : public PrinterObject {
 public:
     std::string name() const override { return "safe_z_home"; }
@@ -250,7 +252,7 @@ private:
     bool moveToPrevious_ = false;
 };
 
-/// @brief Bed tilt printer object (bed_tilt).
+/**@brief Bed tilt printer object (bed_tilt). */
 class BedTiltObject : public PrinterObject {
 public:
     std::string name() const override { return "bed_tilt"; }
@@ -278,7 +280,7 @@ private:
     bool applied_ = false;
 };
 
-/// @brief Manual probe printer object (manual_probe).
+/**@brief Manual probe printer object (manual_probe). */
 class ManualProbeObject : public PrinterObject {
 public:
     std::string name() const override { return "manual_probe"; }

@@ -1,20 +1,22 @@
 #pragma once
 
-/// @file KinematicsTransform.hpp
-/// @brief Kinematics transform: converts Cartesian (X,Y,Z) to stepper positions
-///        and back, for all supported printer kinematics types.
-///
-/// @details
-/// This class was previously embedded in
-/// `tether/klipper/motion/MotionTranslator.hpp`. It has been extracted into
-/// the `tether_kinematics` module so that the kinematics conversion layer
-/// is independent of the Klipper step-generation machinery.
-///
-/// For Cartesian: stepper = cartesian (identity).
-/// For CoreXY: A = X+Y, B = X-Y.
-/// For CoreXZ: A = X+Z, B = X-Z.
-/// For Delta: uses DeltaPrinter::forwardActuatorKinematics.
-/// For RotaryDelta: uses RotaryDeltaPrinter::forwardActuatorKinematics.
+/**
+ * @file KinematicsTransform.hpp
+ * @brief Kinematics transform: converts Cartesian (X,Y,Z) to stepper positions
+ *        and back, for all supported printer kinematics types.
+ *
+ * @details
+ * This class was previously embedded in
+ * `tether/klipper/motion/MotionTranslator.hpp`. It has been extracted into
+ * the `tether_kinematics` module so that the kinematics conversion layer
+ * is independent of the Klipper step-generation machinery.
+ *
+ * For Cartesian: stepper = cartesian (identity).
+ * For CoreXY: A = X+Y, B = X-Y.
+ * For CoreXZ: A = X+Z, B = X-Z.
+ * For Delta: uses DeltaPrinter::forwardActuatorKinematics.
+ * For RotaryDelta: uses RotaryDeltaPrinter::forwardActuatorKinematics.
+ */
 
 #include "tether/kinematics/PrinterKinematics.hpp"
 #include "tether/kinematics/DeltaPrinter.hpp"
@@ -25,38 +27,42 @@
 
 namespace tether::kinematics {
 
-/// @brief Kinematics transform: converts Cartesian (X,Y,Z) to stepper positions.
-///
-/// For Cartesian: stepper = cartesian (identity).
-/// For CoreXY: A = X+Y, B = X-Y.
-/// For CoreXZ: A = X+Z, B = X-Z.
-/// For Delta: uses DeltaPrinter::forwardActuatorKinematics.
+/**
+ * @brief Kinematics transform: converts Cartesian (X,Y,Z) to stepper positions.
+ *
+ * For Cartesian: stepper = cartesian (identity).
+ * For CoreXY: A = X+Y, B = X-Y.
+ * For CoreXZ: A = X+Z, B = X-Z.
+ * For Delta: uses DeltaPrinter::forwardActuatorKinematics.
+ */
 class KinematicsTransform {
 public:
-    /// @brief Set the kinematics type.
+    /**@brief Set the kinematics type. */
     void setKinematics(PrinterKinematics k) { kinematics_ = k; }
 
-    /// @brief Get the kinematics type.
+    /**@brief Get the kinematics type. */
     PrinterKinematics kinematics() const { return kinematics_; }
 
-    /// @brief Set the delta printer (for delta kinematics).
+    /**@brief Set the delta printer (for delta kinematics). */
     void setDeltaPrinter(const DeltaPrinter* dp) { deltaPrinter_ = dp; }
 
-    /// @brief Set the rotary delta printer (for rotary delta kinematics).
+    /**@brief Set the rotary delta printer (for rotary delta kinematics). */
     void setRotaryDeltaPrinter(const RotaryDeltaPrinter* rdp) {
         rotaryDeltaPrinter_ = rdp;
     }
 
-    /// @brief Set winch anchor parameters (for winch kinematics).
+    /**@brief Set winch anchor parameters (for winch kinematics). */
     void setWinchParams(double anchorRadius, double anchorHeight) {
         winchAnchorRadius_ = anchorRadius;
         winchAnchorHeight_ = anchorHeight;
     }
 
-    /// @brief Transform a Cartesian position to stepper-space positions.
-    ///
-    /// @param x, y, z Cartesian position in mm.
-    /// @return Array of 3 stepper positions (A, B, C) in mm.
+    /**
+     * @brief Transform a Cartesian position to stepper-space positions.
+     *
+     * @param x, y, z Cartesian position in mm.
+     * @return Array of 3 stepper positions (A, B, C) in mm.
+     */
     std::array<double, 3> forwardActuatorKinematics(double x, double y, double z) const {
         switch (kinematics_) {
             case PrinterKinematics::CoreXY:
@@ -117,10 +123,12 @@ public:
         }
     }
 
-    /// @brief Transform stepper-space positions back to Cartesian.
-    ///
-    /// @param a, b, c Stepper positions in mm.
-    /// @return Array of 3 Cartesian positions (X, Y, Z) in mm.
+    /**
+     * @brief Transform stepper-space positions back to Cartesian.
+     *
+     * @param a, b, c Stepper positions in mm.
+     * @return Array of 3 Cartesian positions (X, Y, Z) in mm.
+     */
     std::array<double, 3> inverseActuatorKinematics(double a, double b, double c) const {
         switch (kinematics_) {
             case PrinterKinematics::CoreXY:
@@ -182,8 +190,8 @@ private:
     PrinterKinematics kinematics_ = PrinterKinematics::Cartesian;
     const DeltaPrinter* deltaPrinter_ = nullptr;
     const RotaryDeltaPrinter* rotaryDeltaPrinter_ = nullptr;
-    double winchAnchorRadius_ = 500.0;   ///< Winch anchor radius (mm)
-    double winchAnchorHeight_ = 300.0;   ///< Winch anchor height (mm)
+    double winchAnchorRadius_ = 500.0; /**< Winch anchor radius (mm) */
+    double winchAnchorHeight_ = 300.0; /**< Winch anchor height (mm) */
 };
 
 } // namespace tether::kinematics

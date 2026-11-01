@@ -21,7 +21,7 @@ class IPDOTransport {
 public:
     virtual ~IPDOTransport() = default;
 
-    /// Fire-and-forget index constant
+    /**Fire-and-forget index constant */
     static constexpr uint8_t kFireAndForgetIdx = 0xFE;
 
     // ------------------------------------------------------------------
@@ -37,7 +37,7 @@ public:
     static constexpr uint8_t kCyclicSlotBase = ::EtherCAT::kCyclicSlotBaseIdx;
     static constexpr size_t  kNumCyclicSlots = ::EtherCAT::kNumCyclicSlots;
 
-    /// @return true if the transport implements the cyclic slot fast path.
+    /**@return true if the transport implements the cyclic slot fast path. */
     virtual bool supportsCyclicFastPath() const { return false; }
 
     /**
@@ -166,12 +166,12 @@ public:
         (void)datalen; (void)roundtrip;
     }
 
-    /// Commit the frame composed into the last acquireCyclicTxFrame() buffer.
+    /**Commit the frame composed into the last acquireCyclicTxFrame() buffer. */
     virtual bool sendCyclicFrame(uint32_t frame_len) {
         (void)frame_len; return false;
     }
 
-    /// @return the cyclic channel, or nullptr on the software path.
+    /**@return the cyclic channel, or nullptr on the software path. */
     virtual ICyclicChannel* cyclicChannel() { return nullptr; }
 
     // ------------------------------------------------------------------
@@ -186,11 +186,11 @@ public:
     static constexpr uint8_t kSliceSlotBase = ::EtherCAT::kSliceSlotBaseIdx;
     static constexpr size_t  kNumSliceSlots = ::EtherCAT::kNumSliceSlots;
 
-    /// Seq token of a slice slot — call BEFORE sendSliceDatagram().
+    /**Seq token of a slice slot — call BEFORE sendSliceDatagram(). */
     virtual uint64_t sliceSlotToken(uint8_t slice) {
         (void)slice; return 0;
     }
-    /// Generation bit of the last datagram sent on @p slice (stale guard).
+    /**Generation bit of the last datagram sent on @p slice (stale guard). */
     virtual uint8_t sliceSlotGen(uint8_t slice) {
         (void)slice; return 0;
     }
@@ -205,9 +205,9 @@ public:
      * transport has no slice fast path.
      */
     virtual int acquireSliceSlot() { return -1; }
-    /// Release a slot claimed via acquireSliceSlot().
+    /**Release a slot claimed via acquireSliceSlot(). */
     virtual void releaseSliceSlot(uint8_t slice) { (void)slice; }
-    /// Send a datagram on a dedicated slice index (wire idx = base + slot).
+    /**Send a datagram on a dedicated slice index (wire idx = base + slot). */
     virtual bool sendSliceDatagram(Command cmd, uint8_t slice_slot,
                                    uint16_t adp, uint16_t ado,
                                    const void* data, uint16_t datalen,
@@ -216,8 +216,10 @@ public:
         (void)data; (void)datalen; (void)roundtrip;
         return false;
     }
-    /// Single-slot view wait over a slice index — same semantics as
-    /// waitCyclicSlotView().
+    /**
+     * Single-slot view wait over a slice index — same semantics as
+     * waitCyclicSlotView().
+     */
     virtual bool waitSliceSlotView(uint8_t slice, uint64_t token,
                                    uint32_t timeout_ns,
                                    CyclicSlotView& out) {
@@ -247,8 +249,10 @@ public:
         }
         return arrived;
     }
-    /// Byte offset of the datagram payload in a composed cyclic TX frame
-    /// (26 untagged, 30 with a baked TX VLAN tag).
+    /**
+     * Byte offset of the datagram payload in a composed cyclic TX frame
+     * (26 untagged, 30 with a baked TX VLAN tag).
+     */
     virtual uint32_t cyclicPayloadOffset() const { return 26; }
 
     /**
@@ -315,36 +319,42 @@ public:
     virtual bool waitForResponseIdx(uint8_t idx, unsigned int timeout_ms,
                                     RxDatagram& out) = 0;
 
-    /// Pre-register a response waiter slot for @p idx BEFORE sending the frame.
-    /// This avoids the send-then-register race when multiple datagrams share
-    /// one frame.  Returns a slot handle on success.  kPreRegInvalid means
-    /// the transport does not support pre-registration; kPreRegBusy means
-    /// a live waiter owns @p idx's slot — the caller must NOT steal it and
-    /// should retry with a different idx (or give up).  A successful claim
-    /// prunes the slot: it atomically invalidates any stale registration
-    /// state that belonged to an earlier request on the same idx.
+    /**
+     * Pre-register a response waiter slot for @p idx BEFORE sending the frame.
+     * This avoids the send-then-register race when multiple datagrams share
+     * one frame.  Returns a slot handle on success.  kPreRegInvalid means
+     * the transport does not support pre-registration; kPreRegBusy means
+     * a live waiter owns @p idx's slot — the caller must NOT steal it and
+     * should retry with a different idx (or give up).  A successful claim
+     * prunes the slot: it atomically invalidates any stale registration
+     * state that belonged to an earlier request on the same idx.
+     */
     virtual size_t preRegisterResponseWaiter(uint8_t idx,
                                              uint8_t* buffer, size_t buffer_size) {
         (void)idx; (void)buffer; (void)buffer_size;
         return static_cast<size_t>(-1);
     }
 
-    /// Wait for a previously pre-registered response.  Fills @p out on success.
+    /**Wait for a previously pre-registered response.  Fills @p out on success. */
     virtual bool waitForPreRegistered(size_t slot, unsigned int timeout_ms,
                                       RxDatagram& out) {
         (void)slot; (void)timeout_ms; (void)out;
         return false;
     }
 
-    /// Cancel a previously pre-registered waiter slot.  Called when the
-    /// batched send path is abandoned so the slot doesn't linger with a
-    /// dangling response buffer.
+    /**
+     * Cancel a previously pre-registered waiter slot.  Called when the
+     * batched send path is abandoned so the slot doesn't linger with a
+     * dangling response buffer.
+     */
     virtual void cancelPreRegistered(size_t slot) { (void)slot; }
 
-    /// Sentinel returned by preRegisterResponseWaiter when unsupported.
+    /**Sentinel returned by preRegisterResponseWaiter when unsupported. */
     static constexpr size_t kPreRegInvalid = static_cast<size_t>(-1);
-    /// Sentinel returned by preRegisterResponseWaiter when @p idx's slot is
-    /// owned by a live waiter — pick another idx, never steal it.
+    /**
+     * Sentinel returned by preRegisterResponseWaiter when @p idx's slot is
+     * owned by a live waiter — pick another idx, never steal it.
+     */
     static constexpr size_t kPreRegBusy = static_cast<size_t>(-2);
 
     virtual uint8_t  allocIdx() = 0;
@@ -395,18 +405,24 @@ public:
      */
     virtual std::string txFailureDiagnostics() { return {}; }
 
-    /// errno from the most recent failed TX send (0 = none/unsupported).
-    /// The kernel's own verdict for the failure-path log: ENOBUFS = TX
-    /// ring wedged / carrier lost, ENETDOWN = interface down, ENODEV =
-    /// interface gone, EPERM = filtered, EAGAIN = nonblocking queue full.
+    /**
+     * errno from the most recent failed TX send (0 = none/unsupported).
+     * The kernel's own verdict for the failure-path log: ENOBUFS = TX
+     * ring wedged / carrier lost, ENETDOWN = interface down, ENODEV =
+     * interface gone, EPERM = filtered, EAGAIN = nonblocking queue full.
+     */
     virtual int lastSendErrno() const { return 0; }
 
-    /// @return true if cancellation has been requested (e.g. during shutdown).
-    /// Used by callers to suppress error logging when failures are expected.
+    /**
+     * @return true if cancellation has been requested (e.g. during shutdown).
+     * Used by callers to suppress error logging when failures are expected.
+     */
     virtual bool isCancelRequested() const { return false; }
 
-    /// Maximum EtherCAT payload bytes that fit in one Ethernet frame,
-    /// including per-datagram overhead.  Used to size partial LRW slices.
+    /**
+     * Maximum EtherCAT payload bytes that fit in one Ethernet frame,
+     * including per-datagram overhead.  Used to size partial LRW slices.
+     */
     virtual size_t maxEtherCATPayloadPerFrame() const { return 1498; }
 };
 } // namespace EtherCAT

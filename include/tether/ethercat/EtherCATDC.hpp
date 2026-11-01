@@ -93,10 +93,10 @@ private:
     IDCTransport& transport_;
     std::unique_ptr<RealtimeLoop> realtime_loop_;
     std::function<bool()> pdo_exchange_fn_;
-    int16_t reference_slave_ = -1; ///< First DC-capable slave (DC reference clock); -1 = none
-    DCTopology topology_{};        ///< Measured segment topology + per-link delays
-    bool dc_debug_ = false;      ///< Verbose DC debug logging (enabled via --debug dc)
-    bool shutdown_debug_ = false; ///< Verbose shutdown logging (enabled via --debug shutdown)
+    int16_t reference_slave_ = -1; /**< First DC-capable slave (DC reference clock); -1 = none */
+    DCTopology topology_{}; /**< Measured segment topology + per-link delays */
+    bool dc_debug_ = false; /**< Verbose DC debug logging (enabled via --debug dc) */
+    bool shutdown_debug_ = false; /**< Verbose shutdown logging (enabled via --debug shutdown) */
 
     bool initialize();
     bool readSlaveCapabilities(uint16_t slave_index);

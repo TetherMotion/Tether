@@ -62,15 +62,17 @@
 
 namespace EtherCAT {
 
-/// Raw snapshot storage of one poll cycle — one slot per table entry,
-/// copyable and safe to share across threads.  Derived structs may add
-/// accessor methods (see SdoObjectPoller's SnapshotT parameter).
+/**
+ * Raw snapshot storage of one poll cycle — one slot per table entry,
+ * copyable and safe to share across threads.  Derived structs may add
+ * accessor methods (see SdoObjectPoller's SnapshotT parameter).
+ */
 template <size_t N>
 struct SdoPollSnapshot {
-    std::array<uint32_t, N> value{};  ///< raw value per object
-    std::array<bool,     N> ok{};     ///< SDO read succeeded
-    size_t   read_ok    = 0;          ///< objects read this poll
-    uint64_t generation = 0;          ///< incremented on every poll()
+    std::array<uint32_t, N> value{}; /**< raw value per object */
+    std::array<bool,     N> ok{}; /**< SDO read succeeded */
+    size_t   read_ok    = 0; /**< objects read this poll */
+    uint64_t generation = 0; /**< incremented on every poll() */
 };
 
 /**
@@ -87,8 +89,10 @@ public:
                   "SnapshotT must derive from SdoPollSnapshot<N>");
 
     using Snapshot  = SnapshotT;
-    /// Maps a table position to a display name for error logging.
-    /// Pass `nullptr` to log "?" names.
+    /**
+     * Maps a table position to a display name for error logging.
+     * Pass `nullptr` to log "?" names.
+     */
     using NameOfFn  = const char* (*)(size_t);
 
     /**
@@ -140,7 +144,7 @@ public:
         return next.read_ok;
     }
 
-    /// Copy of the latest snapshot (empty generation until first poll).
+    /**Copy of the latest snapshot (empty generation until first poll). */
     Snapshot snapshot() const {
         std::lock_guard<std::mutex> lock(mtx_);
         return snap_;

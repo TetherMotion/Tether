@@ -52,61 +52,63 @@
 
 namespace tether::motion::replanner {
 
-/// Per-axis kinematic limits for the profile replanner.
-/// This is a simplified, non-templated version of
-/// MotionPlanner::KinematicLimits<Dim, T> for the common 2D/3D case.
+/**
+ * Per-axis kinematic limits for the profile replanner.
+ * This is a simplified, non-templated version of
+ * MotionPlanner::KinematicLimits<Dim, T> for the common 2D/3D case.
+ */
 struct ProfileLimits {
-    /// Maximum path velocity (mm/s).
+    /**Maximum path velocity (mm/s). */
     double maxPathVelocity = 100.0;
 
-    /// Maximum path acceleration (mm/s²).
+    /**Maximum path acceleration (mm/s²). */
     double maxPathAcceleration = 500.0;
 
-    /// Maximum path jerk (mm/s³).
+    /**Maximum path jerk (mm/s³). */
     double maxPathJerk = 5000.0;
 
-    /// Maximum centripetal acceleration (mm/s²).
+    /**Maximum centripetal acceleration (mm/s²). */
     double maxCentripetalAcceleration = 500.0;
 
-    /// Per-axis velocity limits (mm/s). Up to 5 axes.
+    /**Per-axis velocity limits (mm/s). Up to 5 axes. */
     std::array<double, 5> maxAxisVelocity = {100, 100, 100, 100, 100};
 
-    /// Per-axis acceleration limits (mm/s²).
+    /**Per-axis acceleration limits (mm/s²). */
     std::array<double, 5> maxAxisAcceleration = {500, 500, 500, 500, 500};
 
-    /// Per-axis jerk limits (mm/s³). If all zero, jerk limiting is disabled.
+    /**Per-axis jerk limits (mm/s³). If all zero, jerk limiting is disabled. */
     std::array<double, 5> maxAxisJerk = {5000, 5000, 5000, 5000, 5000};
 
-    /// Whether jerk limits are enabled.
+    /**Whether jerk limits are enabled. */
     bool jerkLimitEnabled = true;
 };
 
-/// A point on the recomputed velocity profile.
+/**A point on the recomputed velocity profile. */
 struct ProfilePoint {
-    double arcLength = 0.0;  ///< Arc length along path (mm)
-    double velocity = 0.0;   ///< Path velocity (mm/s)
-    double acceleration = 0.0; ///< Path acceleration (mm/s²)
-    double time = 0.0;       ///< Time from start (s)
+    double arcLength = 0.0; /**< Arc length along path (mm) */
+    double velocity = 0.0; /**< Path velocity (mm/s) */
+    double acceleration = 0.0; /**< Path acceleration (mm/s²) */
+    double time = 0.0; /**< Time from start (s) */
 };
 
-/// Result of a velocity profile re-plan.
+/**Result of a velocity profile re-plan. */
 struct ProfileReplanResult {
-    /// The recomputed velocity profile, one point per sample.
+    /**The recomputed velocity profile, one point per sample. */
     std::vector<ProfilePoint> points;
 
-    /// Total traversal time (s).
+    /**Total traversal time (s). */
     double totalTime = 0.0;
 
-    /// Total path length (mm).
+    /**Total path length (mm). */
     double totalLength = 0.0;
 
-    /// Maximum velocity in the profile (mm/s).
+    /**Maximum velocity in the profile (mm/s). */
     double maxVelocity = 0.0;
 
-    /// Whether jerk limiting was applied.
+    /**Whether jerk limiting was applied. */
     bool jerkLimited = false;
 
-    /// Human-readable diagnostic.
+    /**Human-readable diagnostic. */
     std::string summary;
 };
 

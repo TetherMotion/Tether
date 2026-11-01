@@ -53,18 +53,20 @@ namespace FSoE::CRC {
 // CRC Error Detail
 // ---------------------------------------------------------------------------
 
-/// Diagnostic detail populated by parseFSoEFrame when CRC verification fails.
-///
-/// FSoE frames carry multiple CRC-16 segments (one per 2 data bytes).  This
-/// struct identifies which segment failed and what the expected/received
-/// values were, so callers can produce verbose error messages instead of a
-/// bare "CRCError".
+/**
+ * Diagnostic detail populated by parseFSoEFrame when CRC verification fails.
+ *
+ * FSoE frames carry multiple CRC-16 segments (one per 2 data bytes).  This
+ * struct identifies which segment failed and what the expected/received
+ * values were, so callers can produce verbose error messages instead of a
+ * bare "CRCError".
+ */
 struct CrcErrorDetail {
-    bool valid = false;             ///< Set to true when the struct is populated
-    int segment_index = -1;         ///< 0-based index of the failing CRC segment
-    uint16_t expected_crc = 0;      ///< CRC value computed by the receiver
-    uint16_t received_crc = 0;      ///< CRC value stored in the frame
-    size_t frame_offset = 0;        ///< Byte offset of the failing CRC in the frame
+    bool valid = false; /**< Set to true when the struct is populated */
+    int segment_index = -1; /**< 0-based index of the failing CRC segment */
+    uint16_t expected_crc = 0; /**< CRC value computed by the receiver */
+    uint16_t received_crc = 0; /**< CRC value stored in the frame */
+    size_t frame_offset = 0; /**< Byte offset of the failing CRC in the frame */
 };
 
 // ---------------------------------------------------------------------------
@@ -120,9 +122,11 @@ inline constexpr bool kUseTable = true;
 //
 // See: https://techoverflow.net/2026/08/09/how-are-the-fsoe-crc-tables-constructed/
 
-/// Compute (byte * x^(8+shifts)) mod P by bit-by-bit polynomial long division.
-/// Loads byte into the high byte of a 16-bit register and shifts left
-/// 'shifts' times, XORing POLY in whenever bit 15 is set.
+/**
+ * Compute (byte * x^(8+shifts)) mod P by bit-by-bit polynomial long division.
+ * Loads byte into the high byte of a 16-bit register and shifts left
+ * 'shifts' times, XORing POLY in whenever bit 15 is set.
+ */
 constexpr uint16_t polyMod(uint8_t byte, int shifts) {
     uint16_t r = static_cast<uint16_t>(byte) << 8;
     for (int i = 0; i < shifts; i++)
@@ -131,8 +135,10 @@ constexpr uint16_t polyMod(uint8_t byte, int shifts) {
     return r;
 }
 
-/// Build T0: the ordinary byte-wise table (k=0, 8 shifts).
-/// T0[i] = (i * x^16) mod P
+/**
+ * Build T0: the ordinary byte-wise table (k=0, 8 shifts).
+ * T0[i] = (i * x^16) mod P
+ */
 constexpr std::array<uint16_t, 256> makeTable0() {
     std::array<uint16_t, 256> t{};
     for (int i = 0; i < 256; i++)
@@ -140,8 +146,10 @@ constexpr std::array<uint16_t, 256> makeTable0() {
     return t;
 }
 
-/// Build T3: the slice-by-4 table (k=3, 32 shifts).
-/// T3[i] = (i * x^40) mod P
+/**
+ * Build T3: the slice-by-4 table (k=3, 32 shifts).
+ * T3[i] = (i * x^40) mod P
+ */
 constexpr std::array<uint16_t, 256> makeTable3() {
     std::array<uint16_t, 256> t{};
     for (int i = 0; i < 256; i++)
@@ -149,8 +157,10 @@ constexpr std::array<uint16_t, 256> makeTable3() {
     return t;
 }
 
-/// Statically precomputed lookup tables (constexpr-generated at compile time).
-/// See: https://techoverflow.net/2026/08/09/how-are-the-fsoe-crc-tables-constructed/
+/**
+ * Statically precomputed lookup tables (constexpr-generated at compile time).
+ * See: https://techoverflow.net/2026/08/09/how-are-the-fsoe-crc-tables-constructed/
+ */
 inline constexpr auto crcTable0 = makeTable0();  // T0[i] = (i * x^16) mod P
 inline constexpr auto crcTable3 = makeTable3();  // T3[i] = (i * x^40) mod P
 
@@ -158,19 +168,21 @@ inline constexpr auto crcTable3 = makeTable3();  // T3[i] = (i * x^40) mod P
 // Low-level CRC update
 // ---------------------------------------------------------------------------
 
-/// FSoE per-byte CRC update step:
-///
-///   new_crc = (crc_lo << 8) ^ T0[crc_hi] ^ T3[input]
-///
-/// The term (crc_lo << 8) ^ T0[crc_hi] is exactly the standard MSB-first
-/// CRC register shift by one byte (equivalent to processing a zero byte).
-/// Then T3[input] is XORed in, giving each input byte an extra factor of
-/// x^24 compared to a standard CRC.
-///
-/// When TETHER_FSOE_CRC_NO_TABLE is defined, T0 and T3 are computed on the
-/// fly using polyMod() — slower (8+32 shifts per byte) but self-contained.
-///
-/// See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+/**
+ * FSoE per-byte CRC update step:
+ *
+ *   new_crc = (crc_lo << 8) ^ T0[crc_hi] ^ T3[input]
+ *
+ * The term (crc_lo << 8) ^ T0[crc_hi] is exactly the standard MSB-first
+ * CRC register shift by one byte (equivalent to processing a zero byte).
+ * Then T3[input] is XORed in, giving each input byte an extra factor of
+ * x^24 compared to a standard CRC.
+ *
+ * When TETHER_FSOE_CRC_NO_TABLE is defined, T0 and T3 are computed on the
+ * fly using polyMod() — slower (8+32 shifts per byte) but self-contained.
+ *
+ * See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+ */
 inline uint16_t updateCrc(uint16_t crc, uint8_t input) {
     if constexpr (kUseTable) {
         return static_cast<uint16_t>(
@@ -182,7 +194,7 @@ inline uint16_t updateCrc(uint16_t crc, uint8_t input) {
     }
 }
 
-/// Process a 16-bit value in little-endian byte order (lo first, then hi).
+/**Process a 16-bit value in little-endian byte order (lo first, then hi). */
 inline uint16_t updateCrc16(uint16_t crc, uint16_t word) {
     crc = updateCrc(crc, static_cast<uint8_t>(word & 0xFF));
     crc = updateCrc(crc, static_cast<uint8_t>((word >> 8) & 0xFF));
@@ -219,20 +231,22 @@ inline uint16_t updateCrc16(uint16_t crc, uint16_t word) {
 //
 // See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
 
-/// Compute CRC0: the first (and possibly only) CRC for an FSoE PDU.
-///
-/// Processes: startCrc(2), ConnID(2), SeqNo(2), Command(1), Data[0..dataLen-1]
-/// dataLen is 1 for PDU size <= 6, 2 for PDU size > 6.
-///
-/// @param startCrc  The previous frame's CRC0 (CRC inheritance).  0 for the
-///                  very first frame.
-/// @param connId    The connection ID (read from the end of the PDU).
-/// @param seqNo     The sequence number (not transmitted, but shared between
-///                  master and slave).
-/// @param command   The command byte.
-/// @param data      Pointer to the safe data bytes.
-/// @param dataLen   Number of data bytes to include (1 or 2).
-/// @return The CRC0 value.  This becomes startCrc for the next frame.
+/**
+ * Compute CRC0: the first (and possibly only) CRC for an FSoE PDU.
+ *
+ * Processes: startCrc(2), ConnID(2), SeqNo(2), Command(1), Data[0..dataLen-1]
+ * dataLen is 1 for PDU size <= 6, 2 for PDU size > 6.
+ *
+ * @param startCrc  The previous frame's CRC0 (CRC inheritance).  0 for the
+ *                  very first frame.
+ * @param connId    The connection ID (read from the end of the PDU).
+ * @param seqNo     The sequence number (not transmitted, but shared between
+ *                  master and slave).
+ * @param command   The command byte.
+ * @param data      Pointer to the safe data bytes.
+ * @param dataLen   Number of data bytes to include (1 or 2).
+ * @return The CRC0 value.  This becomes startCrc for the next frame.
+ */
 inline uint16_t computeCrc0(uint16_t startCrc, uint16_t connId,
                              uint16_t seqNo, uint8_t command,
                              const uint8_t* data, int dataLen) {
@@ -246,14 +260,16 @@ inline uint16_t computeCrc0(uint16_t startCrc, uint16_t connId,
     return crc;
 }
 
-/// Compute crc_common: the shared base for multi-CRC segments.
-///
-/// Processes: startCrc(2), ConnID(2), SeqNo(2), Command(1) — the 7 header
-/// bytes.  This base encapsulates all the "header" fields: the inherited
-/// old CRC, the Connection ID, the Sequence Number, and the Command byte.
-/// It is saved and reused as the starting point for each segment CRC.
-///
-/// See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+/**
+ * Compute crc_common: the shared base for multi-CRC segments.
+ *
+ * Processes: startCrc(2), ConnID(2), SeqNo(2), Command(1) — the 7 header
+ * bytes.  This base encapsulates all the "header" fields: the inherited
+ * old CRC, the Connection ID, the Sequence Number, and the Command byte.
+ * It is saved and reused as the starting point for each segment CRC.
+ *
+ * See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+ */
 inline uint16_t computeCrcCommon(uint16_t startCrc, uint16_t connId,
                                   uint16_t seqNo, uint8_t command) {
     uint16_t crc = 0;
@@ -264,15 +280,17 @@ inline uint16_t computeCrcCommon(uint16_t startCrc, uint16_t connId,
     return crc;
 }
 
-/// Compute CRCi (i >= 1): a subsequent segment CRC from crc_common.
-///
-/// Restarts from crc_common, then processes: Index(2), Data[2i], Data[2i+1].
-/// The index byte pair (1-based, little-endian) ensures that even if two
-/// segments contain identical data bytes, their CRCs will differ because
-/// the index differs.  Without the index, swapping two data segments would
-/// go undetected.
-///
-/// See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+/**
+ * Compute CRCi (i >= 1): a subsequent segment CRC from crc_common.
+ *
+ * Restarts from crc_common, then processes: Index(2), Data[2i], Data[2i+1].
+ * The index byte pair (1-based, little-endian) ensures that even if two
+ * segments contain identical data bytes, their CRCs will differ because
+ * the index differs.  Without the index, swapping two data segments would
+ * go undetected.
+ *
+ * See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
+ */
 inline uint16_t computeCrcI(uint16_t crcCommon, uint16_t index,
                              uint8_t data0, uint8_t data1) {
     uint16_t crc = crcCommon;           // restart from shared base
@@ -282,17 +300,19 @@ inline uint16_t computeCrcI(uint16_t crcCommon, uint16_t index,
     return crc;
 }
 
-/// Compute all CRCs for an FSoE PDU.
-///
-/// @param startCrc  Previous frame's CRC0 (0 for the first frame).
-/// @param connId    Connection ID.
-/// @param seqNo     Sequence number (shared between master and slave).
-/// @param command   Command byte.
-/// @param data      Safe data bytes.
-/// @param numData   Number of data bytes in the PDU.
-/// @param pduSize   Total PDU size in bytes (CMD + data + CRCs + ConnID).
-/// @return Vector of CRCs: [CRC0, CRC1, CRC2, ...].  The first element
-///         becomes startCrc for the next frame (CRC inheritance).
+/**
+ * Compute all CRCs for an FSoE PDU.
+ *
+ * @param startCrc  Previous frame's CRC0 (0 for the first frame).
+ * @param connId    Connection ID.
+ * @param seqNo     Sequence number (shared between master and slave).
+ * @param command   Command byte.
+ * @param data      Safe data bytes.
+ * @param numData   Number of data bytes in the PDU.
+ * @param pduSize   Total PDU size in bytes (CMD + data + CRCs + ConnID).
+ * @return Vector of CRCs: [CRC0, CRC1, CRC2, ...].  The first element
+ *         becomes startCrc for the next frame (CRC inheritance).
+ */
 inline std::array<uint16_t, 16> computeAllCrcs(uint16_t startCrc,
                                                uint16_t connId,
                                                uint16_t seqNo,
@@ -363,8 +383,10 @@ inline constexpr size_t MIN_FSOE_FRAME_SIZE = 3;
 // Accommodates 16 bytes of safe data + 2 bytes error code (fail-safe response).
 inline constexpr size_t MAX_PARSE_DATA_SIZE = 18;
 
-/// Compute the total frame size (including CMD, CRCs, and ConnID) for a
-/// given data length.
+/**
+ * Compute the total frame size (including CMD, CRCs, and ConnID) for a
+ * given data length.
+ */
 inline constexpr size_t fsoeFrameSize(size_t data_len) {
     if (data_len == 0) return MIN_FSOE_FRAME_SIZE;  // CMD(1) + ConnID(2)
     size_t full_chunks = data_len / 2;
@@ -372,7 +394,7 @@ inline constexpr size_t fsoeFrameSize(size_t data_len) {
     return 1 + full_chunks * 4 + (has_odd ? 3 : 0) + 2;
 }
 
-/// Compute the data length from the frame size.
+/**Compute the data length from the frame size. */
 inline constexpr size_t fsoeDataLen(size_t frame_size) {
     if (frame_size < MIN_FSOE_FRAME_SIZE) return 0;
     if (frame_size == MIN_FSOE_FRAME_SIZE) return 0;  // CMD + ConnID only
@@ -386,25 +408,29 @@ inline constexpr size_t fsoeDataLen(size_t frame_size) {
     return full_chunks * 2 + (remainder == 3 ? 1 : 0);
 }
 
-/// Compute the PDU size from the data length.
-/// PDU size = frame size (CMD + data + CRCs + ConnID).
+/**
+ * Compute the PDU size from the data length.
+ * PDU size = frame size (CMD + data + CRCs + ConnID).
+ */
 inline constexpr size_t fsoePduSize(size_t data_len) {
     return fsoeFrameSize(data_len);
 }
 
-/// Extract data fields from an FSoE frame WITHOUT CRC verification.
-///
-/// This is used when CRC has already been verified (e.g., by validateFrame)
-/// and the caller only needs to extract the command, data, and ConnID.
-/// It does NOT update any CRC state and does NOT verify CRCs.
-///
-/// @param frame      Input frame bytes.
-/// @param frame_len  Frame length in bytes.
-/// @param out_cmd    Receives the command byte.
-/// @param out_data   Receives the data bytes (empty span to skip extraction).
-/// @param out_data_len  Receives the data length.
-/// @param out_conn_id   Receives the connection ID.
-/// @return true if the frame format is valid (CRCs are NOT checked).
+/**
+ * Extract data fields from an FSoE frame WITHOUT CRC verification.
+ *
+ * This is used when CRC has already been verified (e.g., by validateFrame)
+ * and the caller only needs to extract the command, data, and ConnID.
+ * It does NOT update any CRC state and does NOT verify CRCs.
+ *
+ * @param frame      Input frame bytes.
+ * @param frame_len  Frame length in bytes.
+ * @param out_cmd    Receives the command byte.
+ * @param out_data   Receives the data bytes (empty span to skip extraction).
+ * @param out_data_len  Receives the data length.
+ * @param out_conn_id   Receives the connection ID.
+ * @return true if the frame format is valid (CRCs are NOT checked).
+ */
 inline bool extractFSoEFrame(const uint8_t* frame, size_t frame_len,
                               uint8_t& out_cmd,
                               std::span<uint8_t> out_data, size_t& out_data_len,
@@ -461,26 +487,28 @@ inline bool extractFSoEFrame(const uint8_t* frame, size_t frame_len,
 // Frame building
 // ---------------------------------------------------------------------------
 
-/// Build an FSoE frame with correct CRCs.
-///
-/// The frame layout is:
-///   [CMD] [Data0] [Data1] [CRC0(2)] [Data2] [Data3] [CRC1(2)] ... [ConnID(2)]
-///
-/// For 0 data bytes: [CMD] [ConnID(2)]  (no CRC — Reset frame)
-/// For 1 data byte:  [CMD] [Data0] [CRC0(2)] [ConnID(2)]
-/// For 2+ data bytes: [CMD] [Data0] [Data1] [CRC0(2)] ... [ConnID(2)]
-///
-/// @param out        Output buffer (must be at least fsoeFrameSize(data_len) bytes)
-/// @param cmd        Command byte
-/// @param data       Safe data bytes (may be nullptr if data_len == 0)
-/// @param data_len   Number of data bytes
-/// @param conn_id    Connection ID
-/// @param start_crc  Previous frame's CRC0 (CRC inheritance).  Use 0 for the
-///                   very first frame.
-/// @param seq_no     Sequence number (shared between master and slave).
-/// @param out_crc0   If non-null, receives the CRC0 value (for CRC inheritance:
-///                   pass as start_crc to the next frame).
-/// @return Frame size in bytes, or 0 on error.
+/**
+ * Build an FSoE frame with correct CRCs.
+ *
+ * The frame layout is:
+ *   [CMD] [Data0] [Data1] [CRC0(2)] [Data2] [Data3] [CRC1(2)] ... [ConnID(2)]
+ *
+ * For 0 data bytes: [CMD] [ConnID(2)]  (no CRC — Reset frame)
+ * For 1 data byte:  [CMD] [Data0] [CRC0(2)] [ConnID(2)]
+ * For 2+ data bytes: [CMD] [Data0] [Data1] [CRC0(2)] ... [ConnID(2)]
+ *
+ * @param out        Output buffer (must be at least fsoeFrameSize(data_len) bytes)
+ * @param cmd        Command byte
+ * @param data       Safe data bytes (may be nullptr if data_len == 0)
+ * @param data_len   Number of data bytes
+ * @param conn_id    Connection ID
+ * @param start_crc  Previous frame's CRC0 (CRC inheritance).  Use 0 for the
+ *                   very first frame.
+ * @param seq_no     Sequence number (shared between master and slave).
+ * @param out_crc0   If non-null, receives the CRC0 value (for CRC inheritance:
+ *                   pass as start_crc to the next frame).
+ * @return Frame size in bytes, or 0 on error.
+ */
 inline size_t buildFSoEFrame(uint8_t* out, uint8_t cmd,
                               const uint8_t* data, size_t data_len,
                               uint16_t conn_id,
@@ -557,24 +585,26 @@ inline size_t buildFSoEFrame(uint8_t* out, uint8_t cmd,
 // Frame parsing and CRC verification
 // ---------------------------------------------------------------------------
 
-/// Parse an FSoE frame and verify all CRCs.
-///
-/// @param frame      Input frame bytes.
-/// @param frame_len  Frame length in bytes.
-/// @param out_cmd    Receives the command byte.
-/// @param out_data   Receives the data bytes (empty span to skip extraction).
-/// @param out_data_len  Receives the data length.
-/// @param out_conn_id   Receives the connection ID.
-/// @param start_crc  Previous frame's CRC0 (for CRC inheritance).  Use 0 for
-///                   the very first frame.
-/// @param seq_no     Expected sequence number (shared between master and slave).
-/// @param out_crc0   If non-null, receives the frame's CRC0 (for CRC inheritance:
-///                   pass as start_crc when parsing the next frame).
-/// @param out_crc_error  If non-null, receives diagnostic detail (expected vs
-///                       received CRC, failing segment index) when CRC
-///                       verification fails.  Not populated for non-CRC
-///                       failures (e.g. too-short frame).
-/// @return true if all CRCs verify, false otherwise.
+/**
+ * Parse an FSoE frame and verify all CRCs.
+ *
+ * @param frame      Input frame bytes.
+ * @param frame_len  Frame length in bytes.
+ * @param out_cmd    Receives the command byte.
+ * @param out_data   Receives the data bytes (empty span to skip extraction).
+ * @param out_data_len  Receives the data length.
+ * @param out_conn_id   Receives the connection ID.
+ * @param start_crc  Previous frame's CRC0 (for CRC inheritance).  Use 0 for
+ *                   the very first frame.
+ * @param seq_no     Expected sequence number (shared between master and slave).
+ * @param out_crc0   If non-null, receives the frame's CRC0 (for CRC inheritance:
+ *                   pass as start_crc when parsing the next frame).
+ * @param out_crc_error  If non-null, receives diagnostic detail (expected vs
+ *                       received CRC, failing segment index) when CRC
+ *                       verification fails.  Not populated for non-CRC
+ *                       failures (e.g. too-short frame).
+ * @return true if all CRCs verify, false otherwise.
+ */
 inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
                             uint8_t& out_cmd,
                             std::span<uint8_t> out_data, size_t& out_data_len,
@@ -759,74 +789,86 @@ inline bool parseFSoEFrame(const uint8_t* frame, size_t frame_len,
 // with the configured, fixed frame length.
 // ============================================================================
 
-/// Result of a frame scan: location and length of a verified FSoE frame
-/// inside a larger buffer.
+/**
+ * Result of a frame scan: location and length of a verified FSoE frame
+ * inside a larger buffer.
+ */
 struct FSoEFrameMatch {
-    size_t offset = 0;     ///< Byte offset of the frame's CMD byte
-    size_t length = 0;     ///< Verified frame length in bytes
-    uint16_t conn_id = 0;  ///< Connection ID parsed from the frame
-    uint8_t command = 0;   ///< Command byte of the frame
-    bool found = false;    ///< true if a frame was found
+    size_t offset = 0; /**< Byte offset of the frame's CMD byte */
+    size_t length = 0; /**< Verified frame length in bytes */
+    uint16_t conn_id = 0; /**< Connection ID parsed from the frame */
+    uint8_t command = 0; /**< Command byte of the frame */
+    bool found = false; /**< true if a frame was found */
 };
 
-/// Offline scanner that locates CRC-verified FSoE frames in binary data.
-///
-/// The FSoE PDU carries no length field — its size is implicitly agreed via
-/// the configured safe-data length.  This class recovers the position and
-/// length of a frame when they are not known a priori.
-///
-/// OFFLINE / ONE-SHOT USE ONLY — see the safety warning above.  Do NOT use
-/// on live received data.
-///
-/// Usage:
-///   FSoEFrameScanner scanner({.expected_conn_id = 0x1234});
-///   auto m = scanner.findFrame(dump, dump_len);          // first match
-///   auto n = scanner.findFrame(dump, dump_len, m.offset + 1);  // next
+/**
+ * Offline scanner that locates CRC-verified FSoE frames in binary data.
+ *
+ * The FSoE PDU carries no length field — its size is implicitly agreed via
+ * the configured safe-data length.  This class recovers the position and
+ * length of a frame when they are not known a priori.
+ *
+ * OFFLINE / ONE-SHOT USE ONLY — see the safety warning above.  Do NOT use
+ * on live received data.
+ *
+ * Usage:
+ *   FSoEFrameScanner scanner({.expected_conn_id = 0x1234});
+ *   auto m = scanner.findFrame(dump, dump_len);          // first match
+ *   auto n = scanner.findFrame(dump, dump_len, m.offset + 1);  // next
+ */
 class FSoEFrameScanner {
 public:
-    /// Scanner configuration (CRC-inheritance inputs and match filters).
+    /**Scanner configuration (CRC-inheritance inputs and match filters). */
     struct Config {
-        uint16_t start_crc = 0;  ///< Previous frame's CRC0.  0 if unknown /
-                                 ///< first frame — frames chained from a
-                                 ///< predecessor only verify with the
-                                 ///< correct start_crc.
-        uint16_t seq_no = 0;     ///< Expected sequence number.
-        int expected_conn_id = -1;  ///< If >= 0, only frames whose ConnID
-                                    ///< equals this value are accepted
-                                    ///< (strongly recommended — it is the
-                                    ///< main disambiguator against spurious
-                                    ///< CRC hits).
-        /// Only accept verified frames at least this long.  Defaults to
-        /// MIN_FSOE_FRAME_SIZE+1 so the CRC-less 3-byte Reset frame — which
-        /// matches vacuously at every offset — is excluded.  Set to
-        /// MIN_FSOE_FRAME_SIZE (with expected_conn_id) to also detect
-        /// Reset frames.
+        uint16_t start_crc = 0; /**< Previous frame's CRC0.  0 if unknown / */
+                                 /**< 
+                                  * first frame — frames chained from a
+                                  * predecessor only verify with the
+                                  * correct start_crc.
+                                  */
+        uint16_t seq_no = 0; /**< Expected sequence number. */
+        int expected_conn_id = -1; /**< If >= 0, only frames whose ConnID */
+                                    /**< 
+                                     * equals this value are accepted
+                                     * (strongly recommended — it is the
+                                     * main disambiguator against spurious
+                                     * CRC hits).
+                                     * Only accept verified frames at least this long.  Defaults to
+                                     * MIN_FSOE_FRAME_SIZE+1 so the CRC-less 3-byte Reset frame — which
+                                     * matches vacuously at every offset — is excluded.  Set to
+                                     * MIN_FSOE_FRAME_SIZE (with expected_conn_id) to also detect
+                                     * Reset frames.
+                                     */
         size_t min_frame_len = MIN_FSOE_FRAME_SIZE + 1;
-        /// If non-zero, only this exact frame length is tried at each
-        /// offset (fast path when the frame size is known).
+        /**
+         * If non-zero, only this exact frame length is tried at each
+         * offset (fast path when the frame size is known).
+         */
         size_t expected_len = 0;
     };
 
     constexpr FSoEFrameScanner() = default;
     explicit constexpr FSoEFrameScanner(Config cfg) : cfg_(cfg) {}
 
-    /// Find the length for which an FSoE frame's CRCs verify.
-    ///
-    /// Scans candidate frame sizes and returns the longest one whose CRCs
-    /// verify.  Candidates are tried from max_len downwards; only
-    /// structurally valid sizes are tested (see fsoeDataLen: 3-byte Reset
-    /// frame, then sizes of the form 4k+2 / 4k+3).  Returning the LONGEST
-    /// match is deliberate: a 3-byte Reset frame has no CRC and therefore
-    /// "verifies" vacuously for any buffer, so it is only returned when no
-    /// longer candidate verifies.
-    ///
-    /// @param frame    Input buffer containing an FSoE frame as a prefix
-    ///                 (may have trailing bytes beyond it).
-    /// @param max_len  Number of valid bytes in the buffer.  Capped at the
-    ///                 largest frame parseFSoEFrame supports
-    ///                 (fsoeFrameSize(MAX_PARSE_DATA_SIZE)).
-    /// @return The verified frame length in bytes, or 0 if no candidate
-    ///         length passes CRC verification (and the configured filters).
+    /**
+     * Find the length for which an FSoE frame's CRCs verify.
+     *
+     * Scans candidate frame sizes and returns the longest one whose CRCs
+     * verify.  Candidates are tried from max_len downwards; only
+     * structurally valid sizes are tested (see fsoeDataLen: 3-byte Reset
+     * frame, then sizes of the form 4k+2 / 4k+3).  Returning the LONGEST
+     * match is deliberate: a 3-byte Reset frame has no CRC and therefore
+     * "verifies" vacuously for any buffer, so it is only returned when no
+     * longer candidate verifies.
+     *
+     * @param frame    Input buffer containing an FSoE frame as a prefix
+     *                 (may have trailing bytes beyond it).
+     * @param max_len  Number of valid bytes in the buffer.  Capped at the
+     *                 largest frame parseFSoEFrame supports
+     *                 (fsoeFrameSize(MAX_PARSE_DATA_SIZE)).
+     * @return The verified frame length in bytes, or 0 if no candidate
+     *         length passes CRC verification (and the configured filters).
+     */
     size_t findFrameLength(const uint8_t* frame, size_t max_len) const {
         if (!frame || max_len < MIN_FSOE_FRAME_SIZE) return 0;
 
@@ -858,17 +900,19 @@ public:
         return 0;
     }
 
-    /// Scan a binary buffer for the first FSoE frame whose CRCs verify.
-    ///
-    /// Slides a window over the buffer and applies findFrameLength() at
-    /// every offset.
-    ///
-    /// @param data          Buffer to scan.
-    /// @param data_len      Number of valid bytes in the buffer.
-    /// @param start_offset  Byte offset to begin scanning at (default 0).
-    ///                      To find subsequent frames, call again with
-    ///                      match.offset + 1.
-    /// @return FSoEFrameMatch with found=true on success.
+    /**
+     * Scan a binary buffer for the first FSoE frame whose CRCs verify.
+     *
+     * Slides a window over the buffer and applies findFrameLength() at
+     * every offset.
+     *
+     * @param data          Buffer to scan.
+     * @param data_len      Number of valid bytes in the buffer.
+     * @param start_offset  Byte offset to begin scanning at (default 0).
+     *                      To find subsequent frames, call again with
+     *                      match.offset + 1.
+     * @return FSoEFrameMatch with found=true on success.
+     */
     FSoEFrameMatch findFrame(const uint8_t* data, size_t data_len,
                               size_t start_offset = 0) const {
         FSoEFrameMatch match{};
@@ -991,58 +1035,64 @@ inline uint16_t calculate(const uint8_t* data, size_t len,
 //
 // See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
 
-/// Increment a sequence number with ETG.5100 wrap-around (1..65535, skip 0).
-///
-///   0     → 1   (initial value)
-///   1     → 2
-///   65534 → 65535
-///   65535 → 1   (wrap, skip 0)
+/**
+ * Increment a sequence number with ETG.5100 wrap-around (1..65535, skip 0).
+ *
+ *   0     → 1   (initial value)
+ *   1     → 2
+ *   65534 → 65535
+ *   65535 → 1   (wrap, skip 0)
+ */
 inline uint16_t incrementSeqNo(uint16_t seq) {
     return (seq == 65535) ? 1 : static_cast<uint16_t>(seq + 1);
 }
 
-/// Decrement a sequence number with ETG.5100 wrap-around (1..65535, skip 0).
-///
-///   0     → 65535 (wrap)
-///   1     → 65535 (wrap, skip 0)
-///   2     → 1
-///   65535 → 65534
+/**
+ * Decrement a sequence number with ETG.5100 wrap-around (1..65535, skip 0).
+ *
+ *   0     → 65535 (wrap)
+ *   1     → 65535 (wrap, skip 0)
+ *   2     → 1
+ *   65535 → 65534
+ */
 inline uint16_t decrementSeqNo(uint16_t seq) {
     return (seq <= 1) ? 65535 : static_cast<uint16_t>(seq - 1);
 }
 
-/// Build an FSoE frame with ETG.5100 §8.1.3.4 CRC collision avoidance.
-///
-/// This is a wrapper around buildFSoEFrame that implements the do…while loop:
-/// the sequence number is incremented (wrapping 65535 → 1, skipping 0) and the
-/// CRC recomputed until the new frame's CRC0 differs from BOTH:
-///
-///   1. start_crc — the CRC0 of the last frame RECEIVED from the peer
-///      (cross-direction: the new frame must not collide with the peer's
-///      last frame, so a response is never mistaken for an echo), and
-///   2. prev_same_dir_crc0 — the CRC0 of the sender's OWN previous frame
-///      (same-direction: two consecutive frames sent by one side must not
-///      be identical — the receiver detects a new frame by CRC change;
-///      a byte-identical frame is indistinguishable from a resend).
-///
-/// @param out            Output buffer.
-/// @param cmd            Command byte.
-/// @param data           Safe data bytes (may be nullptr if data_len == 0).
-/// @param data_len       Number of data bytes.
-/// @param conn_id        Connection ID.
-/// @param start_crc      Previous frame's CRC0 (CRC inheritance).  Use 0 for
-///                       the very first frame.  This is also the value used
-///                       for collision detection.
-/// @param initial_seq    Initial sequence number to try (must be 1..65535).
-/// @param out_crc0       If non-null, receives the frame's CRC0.
-/// @param out_seq_used   If non-null, receives the sequence number that was
-///                       actually used (after collision avoidance).  The
-///                       caller should update its counter to this value.
-/// @param prev_same_dir_crc0  If non-null, CRC0 of the sender's previous
-///                       frame in the same direction (own last TX CRC0).
-///                       May alias out_crc0 (captured before any write).
-///                       nullptr disables the same-direction check.
-/// @return Frame size in bytes, or 0 on error.
+/**
+ * Build an FSoE frame with ETG.5100 §8.1.3.4 CRC collision avoidance.
+ *
+ * This is a wrapper around buildFSoEFrame that implements the do…while loop:
+ * the sequence number is incremented (wrapping 65535 → 1, skipping 0) and the
+ * CRC recomputed until the new frame's CRC0 differs from BOTH:
+ *
+ *   1. start_crc — the CRC0 of the last frame RECEIVED from the peer
+ *      (cross-direction: the new frame must not collide with the peer's
+ *      last frame, so a response is never mistaken for an echo), and
+ *   2. prev_same_dir_crc0 — the CRC0 of the sender's OWN previous frame
+ *      (same-direction: two consecutive frames sent by one side must not
+ *      be identical — the receiver detects a new frame by CRC change;
+ *      a byte-identical frame is indistinguishable from a resend).
+ *
+ * @param out            Output buffer.
+ * @param cmd            Command byte.
+ * @param data           Safe data bytes (may be nullptr if data_len == 0).
+ * @param data_len       Number of data bytes.
+ * @param conn_id        Connection ID.
+ * @param start_crc      Previous frame's CRC0 (CRC inheritance).  Use 0 for
+ *                       the very first frame.  This is also the value used
+ *                       for collision detection.
+ * @param initial_seq    Initial sequence number to try (must be 1..65535).
+ * @param out_crc0       If non-null, receives the frame's CRC0.
+ * @param out_seq_used   If non-null, receives the sequence number that was
+ *                       actually used (after collision avoidance).  The
+ *                       caller should update its counter to this value.
+ * @param prev_same_dir_crc0  If non-null, CRC0 of the sender's previous
+ *                       frame in the same direction (own last TX CRC0).
+ *                       May alias out_crc0 (captured before any write).
+ *                       nullptr disables the same-direction check.
+ * @return Frame size in bytes, or 0 on error.
+ */
 inline size_t buildFSoEFrameWithCollisionAvoidance(
     uint8_t* out, uint8_t cmd,
     const uint8_t* data, size_t data_len,
@@ -1099,58 +1149,60 @@ inline size_t buildFSoEFrameWithCollisionAvoidance(
     return frame_size;
 }
 
-/// Parse an FSoE frame with ETG.5100 §8.1.3.4 CRC collision avoidance.
-///
-/// This is a wrapper around parseFSoEFrame that replicates the collision
-/// avoidance algorithm on the checking side.  The generator skips a seq
-/// value whenever the CRC0 computed for it collides with EITHER of two
-/// reference CRCs:
-///
-///   1. start_crc — the CRC0 of the last frame the GENERATOR received
-///      (cross-direction: from the checker's view, its own last TX CRC0),
-///   2. prev_same_dir_crc0 — the CRC0 of the generator's OWN previous
-///      frame (same-direction: from the checker's view, the last frame
-///      it received — consecutive same-direction frames must never be
-///      identical, since the checker detects a new frame by CRC change).
-///
-/// The algorithm is:
-///
-///   1. Try the expected seq → compute CRC.
-///   2. If the CRC0 we COMPUTED for this seq equals start_crc or
-///      prev_same_dir_crc0, the generator could not have used this seq
-///      (its own avoidance would have incremented it) → increment seq,
-///      go to 1.
-///   3. If CRC matches:
-///      a. If CRC0 collides with neither reference → accept.
-///      b. If CRC0 collides → increment seq, go to 1.
-///   4. If CRC doesn't match → FAIL (genuine CRC error).
-///
-/// The key insight: the checker deterministically replicates which seq
-/// values the generator would have skipped (those whose computed CRC0
-/// collides with either reference CRC).  It increments seq on a CRC
-/// match-with-collision AND when the computed CRC0 collides — but never
-/// blindly on an ordinary CRC mismatch.  This prevents false positives
-/// where a corrupted frame happens to match a different seq value by
-/// chance, while still accepting legitimately seq-bumped frames.
-///
-/// @param frame          Input frame bytes.
-/// @param frame_len      Frame length in bytes.
-/// @param out_cmd        Receives the command byte.
-/// @param out_data       Receives the data bytes (empty span to skip).
-/// @param out_data_len   Receives the data length.
-/// @param out_conn_id    Receives the connection ID.
-/// @param start_crc      Previous frame's CRC0 (for CRC inheritance).
-/// @param initial_seq    Expected sequence number (must be 1..65535).
-/// @param out_crc0       If non-null, receives the frame's CRC0.
-/// @param out_seq_used   If non-null, receives the seq that matched.
-/// @param out_crc_error  If non-null, receives diagnostic detail on failure.
-/// @param prev_same_dir_crc0  If non-null, CRC0 of the last frame received
-///                       from the peer in the same direction (the sender's
-///                       own previous frame CRC0).  May alias out_crc0
-///                       (captured before any write).  nullptr disables
-///                       the same-direction skip check.
-/// @param max_attempts   Maximum number of collision retries (default 65535).
-/// @return true if all CRCs verify and no collision, false otherwise.
+/**
+ * Parse an FSoE frame with ETG.5100 §8.1.3.4 CRC collision avoidance.
+ *
+ * This is a wrapper around parseFSoEFrame that replicates the collision
+ * avoidance algorithm on the checking side.  The generator skips a seq
+ * value whenever the CRC0 computed for it collides with EITHER of two
+ * reference CRCs:
+ *
+ *   1. start_crc — the CRC0 of the last frame the GENERATOR received
+ *      (cross-direction: from the checker's view, its own last TX CRC0),
+ *   2. prev_same_dir_crc0 — the CRC0 of the generator's OWN previous
+ *      frame (same-direction: from the checker's view, the last frame
+ *      it received — consecutive same-direction frames must never be
+ *      identical, since the checker detects a new frame by CRC change).
+ *
+ * The algorithm is:
+ *
+ *   1. Try the expected seq → compute CRC.
+ *   2. If the CRC0 we COMPUTED for this seq equals start_crc or
+ *      prev_same_dir_crc0, the generator could not have used this seq
+ *      (its own avoidance would have incremented it) → increment seq,
+ *      go to 1.
+ *   3. If CRC matches:
+ *      a. If CRC0 collides with neither reference → accept.
+ *      b. If CRC0 collides → increment seq, go to 1.
+ *   4. If CRC doesn't match → FAIL (genuine CRC error).
+ *
+ * The key insight: the checker deterministically replicates which seq
+ * values the generator would have skipped (those whose computed CRC0
+ * collides with either reference CRC).  It increments seq on a CRC
+ * match-with-collision AND when the computed CRC0 collides — but never
+ * blindly on an ordinary CRC mismatch.  This prevents false positives
+ * where a corrupted frame happens to match a different seq value by
+ * chance, while still accepting legitimately seq-bumped frames.
+ *
+ * @param frame          Input frame bytes.
+ * @param frame_len      Frame length in bytes.
+ * @param out_cmd        Receives the command byte.
+ * @param out_data       Receives the data bytes (empty span to skip).
+ * @param out_data_len   Receives the data length.
+ * @param out_conn_id    Receives the connection ID.
+ * @param start_crc      Previous frame's CRC0 (for CRC inheritance).
+ * @param initial_seq    Expected sequence number (must be 1..65535).
+ * @param out_crc0       If non-null, receives the frame's CRC0.
+ * @param out_seq_used   If non-null, receives the seq that matched.
+ * @param out_crc_error  If non-null, receives diagnostic detail on failure.
+ * @param prev_same_dir_crc0  If non-null, CRC0 of the last frame received
+ *                       from the peer in the same direction (the sender's
+ *                       own previous frame CRC0).  May alias out_crc0
+ *                       (captured before any write).  nullptr disables
+ *                       the same-direction skip check.
+ * @param max_attempts   Maximum number of collision retries (default 65535).
+ * @return true if all CRCs verify and no collision, false otherwise.
+ */
 inline bool parseFSoEFrameWithCollisionAvoidance(
     const uint8_t* frame, size_t frame_len,
     uint8_t& out_cmd,
@@ -1235,10 +1287,12 @@ inline bool parseFSoEFrameWithCollisionAvoidance(
 // Native CRC-chain resynchronization
 // ---------------------------------------------------------------------------
 
-/// Solve a 16-bit affine CRC system: find x such that f(x) == target,
-/// where f(x) = eval(x) is affine over GF(2) (f(x) = M·x ⊕ f(0)).
-/// Returns true and sets out_x when a (unique or minimum-norm) solution
-/// exists; false if the system is inconsistent.
+/**
+ * Solve a 16-bit affine CRC system: find x such that f(x) == target,
+ * where f(x) = eval(x) is affine over GF(2) (f(x) = M·x ⊕ f(0)).
+ * Returns true and sets out_x when a (unique or minimum-norm) solution
+ * exists; false if the system is inconsistent.
+ */
 namespace detail {
 inline bool solveCrcAffine16(auto&& eval, uint16_t target, uint16_t& out_x) {
     // rows[e] = 16-bit coefficient mask for output bit e; rhs[e] = RHS bit.
@@ -1289,42 +1343,44 @@ inline bool solveCrcAffine16(auto&& eval, uint16_t target, uint16_t& out_x) {
 }
 } // namespace detail
 
-/// Recover the CRC-chain seed a frame was generated with, directly from
-/// the frame's own stored CRCs — "native" resynchronization.
-///
-/// Every stored CRC is an affine function of the shared 16-bit
-/// `crc_common` state (CRC16 over startCrc ‖ connId ‖ seqNo ‖ cmd).  The
-/// individual (startCrc, seqNo) pair is *not* identifiable — all seeds
-/// producing the same crc_common generate identical frames — so the solve
-/// works in two steps:
-///
-///   1. Invert the trailing data-byte updates on stored CRC0 to recover
-///      crc_common exactly (16 unknowns, GF(2) affine solve — always
-///      solvable because byte-append steps are invertible).
-///   2. Verify every additional stored segment CRC against
-///      computeCrcI(crc_common, …).  A frame with N stored CRCs yields
-///      N−1 independent 16-bit verifications — genuine corruption
-///      detection for N ≥ 2 (data_len ≥ 3).  For N = 1 (data_len ≤ 2)
-///      there is no independent check and any consistent frame is
-///      accepted — structural validity only.
-///   3. Recover an *equivalent* sequence number: the seqNo such that
-///      computeCrcCommon(0, connId, seqNo, cmd) == crc_common (another
-///      invertible affine solve, startCrc fixed to 0).  The returned
-///      (0, seqNo) seed is functionally identical to the master's real
-///      seed for this frame, but is a representative — it is not
-///      guaranteed to equal the master's actual seqNo.  Callers should
-///      therefore re-resync each frame while the mode is active rather
-///      than assuming the recovered seq tracks the master's counter.
-///
-/// Typical use: a slave that joins a running connection mid-stream (or
-/// missed a state-transition frame and lost the inherited CRC chain) can
-/// verify-and-accept the next valid frame and continue.
-///
-/// @param frame         Input frame bytes (must contain ≥ 1 CRC segment).
-/// @param frame_len     Frame length in bytes.
-/// @param out_start_crc Receives the equivalent seed's startCrc (always 0).
-/// @param out_seq_no    Receives the equivalent sequence number.
-/// @return true if the frame verifies under the recovered crc_common.
+/**
+ * Recover the CRC-chain seed a frame was generated with, directly from
+ * the frame's own stored CRCs — "native" resynchronization.
+ *
+ * Every stored CRC is an affine function of the shared 16-bit
+ * `crc_common` state (CRC16 over startCrc ‖ connId ‖ seqNo ‖ cmd).  The
+ * individual (startCrc, seqNo) pair is *not* identifiable — all seeds
+ * producing the same crc_common generate identical frames — so the solve
+ * works in two steps:
+ *
+ *   1. Invert the trailing data-byte updates on stored CRC0 to recover
+ *      crc_common exactly (16 unknowns, GF(2) affine solve — always
+ *      solvable because byte-append steps are invertible).
+ *   2. Verify every additional stored segment CRC against
+ *      computeCrcI(crc_common, …).  A frame with N stored CRCs yields
+ *      N−1 independent 16-bit verifications — genuine corruption
+ *      detection for N ≥ 2 (data_len ≥ 3).  For N = 1 (data_len ≤ 2)
+ *      there is no independent check and any consistent frame is
+ *      accepted — structural validity only.
+ *   3. Recover an *equivalent* sequence number: the seqNo such that
+ *      computeCrcCommon(0, connId, seqNo, cmd) == crc_common (another
+ *      invertible affine solve, startCrc fixed to 0).  The returned
+ *      (0, seqNo) seed is functionally identical to the master's real
+ *      seed for this frame, but is a representative — it is not
+ *      guaranteed to equal the master's actual seqNo.  Callers should
+ *      therefore re-resync each frame while the mode is active rather
+ *      than assuming the recovered seq tracks the master's counter.
+ *
+ * Typical use: a slave that joins a running connection mid-stream (or
+ * missed a state-transition frame and lost the inherited CRC chain) can
+ * verify-and-accept the next valid frame and continue.
+ *
+ * @param frame         Input frame bytes (must contain ≥ 1 CRC segment).
+ * @param frame_len     Frame length in bytes.
+ * @param out_start_crc Receives the equivalent seed's startCrc (always 0).
+ * @param out_seq_no    Receives the equivalent sequence number.
+ * @return true if the frame verifies under the recovered crc_common.
+ */
 inline bool resyncSolveSeed(const uint8_t* frame, size_t frame_len,
                             uint16_t& out_start_crc, uint16_t& out_seq_no) {
     uint8_t cmd = 0;
@@ -1396,20 +1452,22 @@ inline bool resyncSolveSeed(const uint8_t* frame, size_t frame_len,
     return true;
 }
 
-/// Parse an FSoE frame in CRC-resync mode.
-///
-/// Recovers the frame's crc_common from its stored CRCs and verifies all
-/// additional segment CRCs against it (resyncSolveSeed), then runs the
-/// full parseFSoEFrame() verification with the equivalent (0, seqNo)
-/// seed.  Succeeds only when every stored CRC is reproduced — frames
-/// with ≥ 2 CRC segments (data_len ≥ 3) get genuine independent
-/// verification; shorter frames are accepted on structural validity
-/// alone (documented in resyncSolveSeed).
-///
-/// @param out_start_crc  If non-null, receives the equivalent startCrc
-///                       (always 0 — see resyncSolveSeed).
-/// @param out_seq_used   If non-null, receives the equivalent seqNo.
-/// @return true if the seed was solved and the frame verifies with it.
+/**
+ * Parse an FSoE frame in CRC-resync mode.
+ *
+ * Recovers the frame's crc_common from its stored CRCs and verifies all
+ * additional segment CRCs against it (resyncSolveSeed), then runs the
+ * full parseFSoEFrame() verification with the equivalent (0, seqNo)
+ * seed.  Succeeds only when every stored CRC is reproduced — frames
+ * with ≥ 2 CRC segments (data_len ≥ 3) get genuine independent
+ * verification; shorter frames are accepted on structural validity
+ * alone (documented in resyncSolveSeed).
+ *
+ * @param out_start_crc  If non-null, receives the equivalent startCrc
+ *                       (always 0 — see resyncSolveSeed).
+ * @param out_seq_used   If non-null, receives the equivalent seqNo.
+ * @return true if the seed was solved and the frame verifies with it.
+ */
 inline bool parseFSoEFrameResync(
     const uint8_t* frame, size_t frame_len,
     uint8_t& out_cmd,

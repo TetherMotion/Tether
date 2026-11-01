@@ -246,10 +246,12 @@ inline constexpr DeviceIdentity EL9576{0x00000002, 0x25683052, 1, "EL9576"};
 inline constexpr DeviceIdentity EJ9576{0x00000002, 0x25682852, 1, "EJ9576"};
 inline constexpr DeviceIdentity EP9576{0x00000002, 0x25684052, 1, "EP9576"};
 
-/// Every known analog-input terminal — the default detection set used by
-/// MultiAnalogInputTerminal::detect().  All entries verified against the
-/// ESIs for shape (mailbox + SM3 inputs + per-channel ≤32-bit value
-/// entries); none verified on hardware yet.
+/**
+ * Every known analog-input terminal — the default detection set used by
+ * MultiAnalogInputTerminal::detect().  All entries verified against the
+ * ESIs for shape (mailbox + SM3 inputs + per-channel ≤32-bit value
+ * entries); none verified on hardware yet.
+ */
 inline constexpr std::array kAnalogInputTerminals{
     EL3001, EL3002, EL3004, EL3008, EL3011, EL3012, EL3014,
     EL3021, EL3022, EL3024, EL3041, EL3042, EL3044, EL3048,
@@ -287,11 +289,13 @@ inline constexpr std::array kAnalogInputTerminals{
 class AnalogInputTerminal : public TerminalBase,
                             public IAnalogInputTerminal {
 public:
-    /// Maximum channels supported per device (EL3403-class devices exceed
-    /// this and are intentionally not in the registry).
+    /**
+     * Maximum channels supported per device (EL3403-class devices exceed
+     * this and are intentionally not in the registry).
+     */
     static constexpr size_t kMaxChannels = 64;
 
-    /// Maximum process-image bytes per device (input or output side).
+    /**Maximum process-image bytes per device (input or output side). */
     static constexpr size_t kMaxImageBytes = 512;
 
     // -- Construction ----------------------------------------------------------
@@ -328,7 +332,7 @@ public:
 
     // -- Factories ---------------------------------------------------------------
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
@@ -341,7 +345,7 @@ public:
     static Result<AnalogInputTerminal> findFirst(Master& master,
                                                  const DeviceIdentity& identity);
 
-    /// Like findFirst(master, identity) but reuses an existing scan.
+    /**Like findFirst(master, identity) but reuses an existing scan. */
     static Result<AnalogInputTerminal> findFirst(
         Master& master, const DeviceIdentity& identity,
         std::span<const DiscoveredSlave> scan);
@@ -389,26 +393,32 @@ public:
 
     // -- Status -------------------------------------------------------------------
 
-    /// Bit width of channel `ch`'s value field (16 or 32; 0 when the
-    /// layout is not resolved yet or `ch` is out of range).
+    /**
+     * Bit width of channel `ch`'s value field (16 or 32; 0 when the
+     * layout is not resolved yet or `ch` is out of range).
+     */
     size_t channelBits(size_t ch) const;
 
 private:
-    /// Per-channel layout resolved from the SII TxPDO list.
+    /**Per-channel layout resolved from the SII TxPDO list. */
     struct ChannelLayout {
-        uint16_t value_off;   ///< byte offset of the value in the SM3 image
-        uint8_t  value_bits;  ///< value width: 16 or 32
-        int16_t  status_off;  ///< byte offset of the status word, -1 = none
+        uint16_t value_off; /**< byte offset of the value in the SM3 image */
+        uint8_t  value_bits; /**< value width: 16 or 32 */
+        int16_t  status_off; /**< byte offset of the status word, -1 = none */
     };
 
-    /// Resolve the per-channel value/status offsets from the bound
-    /// discovery data / SII (SM regions themselves come from the base).
-    /// Returns false when the slave does not match the terminal shape.
+    /**
+     * Resolve the per-channel value/status offsets from the bound
+     * discovery data / SII (SM regions themselves come from the base).
+     * Returns false when the slave does not match the terminal shape.
+     */
     bool resolveLayout();
 
-    /// Shared bring-up: SII, identity check, mailbox config, SM registers,
-    /// PRE-OP, PDO buffer registration in the given address mode.
-    /// Ends before SAFE-OP so the chain can interpose FMMU programming.
+    /**
+     * Shared bring-up: SII, identity check, mailbox config, SM registers,
+     * PRE-OP, PDO buffer registration in the given address mode.
+     * Ends before SAFE-OP so the chain can interpose FMMU programming.
+     */
     Result<> prepare(PDO::PDOAddressMode mode);
 
     std::vector<ChannelLayout> channels_;

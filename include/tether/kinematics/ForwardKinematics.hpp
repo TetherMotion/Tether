@@ -176,15 +176,19 @@ struct Quaternion {
     Quaternion() = default;
     Quaternion(float w_, float x_, float y_, float z_) : w(w_), x(x_), y(y_), z(z_) {}
 
-    /// Convert to Eigen quaternion
-    /// @return Eigen quaternion with the same w, x, y, z components.
+    /**
+     * Convert to Eigen quaternion
+     * @return Eigen quaternion with the same w, x, y, z components.
+     */
     Eigen::Quaternionf toEigen() const {
         return Eigen::Quaternionf(w, x, y, z);
     }
 
-    /// Convert from Eigen quaternion
-    /// @param q Eigen quaternion to copy.
-    /// @return Quaternion with the same components.
+    /**
+     * Convert from Eigen quaternion
+     * @param q Eigen quaternion to copy.
+     * @return Quaternion with the same components.
+     */
     static Quaternion fromEigen(const Eigen::Quaternionf& q) {
         return Quaternion(q.w(), q.x(), q.y(), q.z());
     }
@@ -306,7 +310,7 @@ struct Transform4x4 {
     float& at(int row, int col) { return m[row * 4 + col]; }
     float at(int row, int col) const { return m[row * 4 + col]; }
 
-    /// Map to Eigen row-major 4x4 matrix
+    /**Map to Eigen row-major 4x4 matrix */
     using EigenMatrix = Eigen::Matrix<float, 4, 4, Eigen::RowMajor>;
     Eigen::Map<const EigenMatrix> toEigen() const {
         return Eigen::Map<const EigenMatrix>(m);
@@ -865,7 +869,7 @@ public:
      * @return Maximum end-effector distance from the base [m].
      */
     float getMaxReach() const { return m_L1 + m_L2; }
-    /// @return Minimum end-effector distance from the base [m].
+    /**@return Minimum end-effector distance from the base [m]. */
     float getMinReach() const { return std::abs(m_L1 - m_L2); }
     
 private:

@@ -87,60 +87,60 @@ namespace Motor {
  */
 struct MotorParams {
     // Mechanical parameters
-    double inertia = 0.001;              ///< Moment of inertia (kg·m²)
-    double viscousDamping = 0.01;        ///< Viscous damping coefficient (N·m·s/rad)
-    double coulombFriction = 0.1;        ///< Coulomb friction torque (N·m)
-    double staticFriction = 0.15;        ///< Static friction torque (N·m)
-    double stictionVelocity = 0.01;      ///< Velocity threshold for stiction (rad/s)
+    double inertia = 0.001; /**< Moment of inertia (kg·m²) */
+    double viscousDamping = 0.01; /**< Viscous damping coefficient (N·m·s/rad) */
+    double coulombFriction = 0.1; /**< Coulomb friction torque (N·m) */
+    double staticFriction = 0.15; /**< Static friction torque (N·m) */
+    double stictionVelocity = 0.01; /**< Velocity threshold for stiction (rad/s) */
     
     // Electrical parameters (for torque calculation)
-    double torqueConstant = 1.0;         ///< Torque constant (N·m/A)
-    double backEMFConstant = 1.0;        ///< Back-EMF constant (V·s/rad)
-    double windingResistance = 1.0;      ///< Winding resistance (Ω)
-    double windingInductance = 0.001;    ///< Winding inductance (H)
-    double ratedCurrent = 10.0;          ///< Rated current (A)
-    double peakCurrent = 20.0;           ///< Peak current (A)
+    double torqueConstant = 1.0; /**< Torque constant (N·m/A) */
+    double backEMFConstant = 1.0; /**< Back-EMF constant (V·s/rad) */
+    double windingResistance = 1.0; /**< Winding resistance (Ω) */
+    double windingInductance = 0.001; /**< Winding inductance (H) */
+    double ratedCurrent = 10.0; /**< Rated current (A) */
+    double peakCurrent = 20.0; /**< Peak current (A) */
     
     // Limits
-    double maxTorque = 10.0;             ///< Maximum torque (N·m)
-    double maxVelocity = 100.0;          ///< Maximum velocity (rad/s)
-    double maxAcceleration = 1000.0;     ///< Maximum acceleration (rad/s²)
-    double maxPosition = 1e9;            ///< Maximum position (rad or counts)
-    double minPosition = -1e9;           ///< Minimum position (rad or counts)
+    double maxTorque = 10.0; /**< Maximum torque (N·m) */
+    double maxVelocity = 100.0; /**< Maximum velocity (rad/s) */
+    double maxAcceleration = 1000.0; /**< Maximum acceleration (rad/s²) */
+    double maxPosition = 1e9; /**< Maximum position (rad or counts) */
+    double minPosition = -1e9; /**< Minimum position (rad or counts) */
     
     // Encoder
-    uint32_t encoderResolution = 131072; ///< Encoder counts per revolution
-    bool hasIndexPulse = true;           ///< Encoder has index pulse
-    int32_t indexPulsePosition = 0;      ///< Index pulse position (counts)
+    uint32_t encoderResolution = 131072; /**< Encoder counts per revolution */
+    bool hasIndexPulse = true; /**< Encoder has index pulse */
+    int32_t indexPulsePosition = 0; /**< Index pulse position (counts) */
     
     // Gearing
-    double gearRatio = 1.0;              ///< Gear ratio (motor:load)
-    double gearEfficiency = 0.95;        ///< Gear efficiency
-    double gearBacklash = 0.0;           ///< Gear backlash (rad)
+    double gearRatio = 1.0; /**< Gear ratio (motor:load) */
+    double gearEfficiency = 0.95; /**< Gear efficiency */
+    double gearBacklash = 0.0; /**< Gear backlash (rad) */
 };
 
 /**
  * @brief Thermal parameters
  */
 struct ThermalParams {
-    double ambientTemp = 25.0;           ///< Ambient temperature (°C)
-    double thermalResistance = 1.0;      ///< Thermal resistance (°C/W)
-    double thermalCapacity = 100.0;      ///< Thermal capacity (J/°C)
-    double maxWindingTemp = 150.0;       ///< Max winding temperature (°C)
-    double maxMotorTemp = 100.0;         ///< Max motor case temperature (°C)
-    bool enableThermalModel = true;      ///< Enable thermal simulation
+    double ambientTemp = 25.0; /**< Ambient temperature (°C) */
+    double thermalResistance = 1.0; /**< Thermal resistance (°C/W) */
+    double thermalCapacity = 100.0; /**< Thermal capacity (J/°C) */
+    double maxWindingTemp = 150.0; /**< Max winding temperature (°C) */
+    double maxMotorTemp = 100.0; /**< Max motor case temperature (°C) */
+    bool enableThermalModel = true; /**< Enable thermal simulation */
 };
 
 /**
  * @brief Braking resistor parameters
  */
 struct BrakingResistorParams {
-    bool enabled = true;                 ///< Braking resistor installed
-    double resistance = 10.0;            ///< Resistance (Ω)
-    double maxPower = 100.0;             ///< Max power dissipation (W)
-    double thermalTimeConstant = 10.0;   ///< Thermal time constant (s)
-    double maxTemperature = 200.0;       ///< Max temperature (°C)
-    double activationVoltage = 400.0;    ///< DC bus voltage for activation (V)
+    bool enabled = true; /**< Braking resistor installed */
+    double resistance = 10.0; /**< Resistance (Ω) */
+    double maxPower = 100.0; /**< Max power dissipation (W) */
+    double thermalTimeConstant = 10.0; /**< Thermal time constant (s) */
+    double maxTemperature = 200.0; /**< Max temperature (°C) */
+    double activationVoltage = 400.0; /**< DC bus voltage for activation (V) */
     bool enableOverheatProtection = true;
 };
 
@@ -150,9 +150,9 @@ struct BrakingResistorParams {
 struct EndstopConfig {
     // Positive limit
     bool positiveEnabled = true;
-    double positivePosition = 1e9;       ///< Position (counts or rad)
-    bool positiveNC = true;              ///< Normally closed switch
-    bool positiveFault = false;          ///< Simulate disconnected
+    double positivePosition = 1e9; /**< Position (counts or rad) */
+    bool positiveNC = true; /**< Normally closed switch */
+    bool positiveFault = false; /**< Simulate disconnected */
     
     // Negative limit
     bool negativeEnabled = true;
@@ -163,9 +163,9 @@ struct EndstopConfig {
     // Home switch
     bool homeEnabled = true;
     double homePosition = 0.0;
-    double homeWidth = 100.0;            ///< Width of home switch active zone
-    bool homeNC = false;                 ///< Normally open
-    bool homeFault = false;              ///< Simulate disconnected
+    double homeWidth = 100.0; /**< Width of home switch active zone */
+    bool homeNC = false; /**< Normally open */
+    bool homeFault = false; /**< Simulate disconnected */
     
     // Index pulse
     bool indexEnabled = true;
@@ -173,8 +173,8 @@ struct EndstopConfig {
     bool indexFault = false;
     
     // Behavior
-    double switchDebounceMs = 1.0;       ///< Switch debounce time
-    double hardStopStiffness = 1e6;      ///< Stiffness at hard stop (N/m)
+    double switchDebounceMs = 1.0; /**< Switch debounce time */
+    double hardStopStiffness = 1e6; /**< Stiffness at hard stop (N/m) */
 };
 
 // ============================================================================
@@ -186,48 +186,48 @@ struct EndstopConfig {
  */
 struct PositionControllerParams {
     // Outer loop (position)
-    double posKp = 100.0;                ///< Position proportional gain
-    double posKi = 0.0;                  ///< Position integral gain
-    double posKd = 10.0;                 ///< Position derivative gain
-    double posDerivativeFilter = 0.01;   ///< Derivative filter time constant (s)
-    double posIntegralLimit = 1000.0;    ///< Integral windup limit
+    double posKp = 100.0; /**< Position proportional gain */
+    double posKi = 0.0; /**< Position integral gain */
+    double posKd = 10.0; /**< Position derivative gain */
+    double posDerivativeFilter = 0.01; /**< Derivative filter time constant (s) */
+    double posIntegralLimit = 1000.0; /**< Integral windup limit */
     
     // Inner loop (velocity)
-    double velKp = 10.0;                 ///< Velocity proportional gain
-    double velKi = 1.0;                  ///< Velocity integral gain
-    double velKd = 0.0;                  ///< Velocity derivative gain
-    double velDerivativeFilter = 0.001;  ///< Derivative filter time constant (s)
-    double velIntegralLimit = 100.0;     ///< Integral windup limit
+    double velKp = 10.0; /**< Velocity proportional gain */
+    double velKi = 1.0; /**< Velocity integral gain */
+    double velKd = 0.0; /**< Velocity derivative gain */
+    double velDerivativeFilter = 0.001; /**< Derivative filter time constant (s) */
+    double velIntegralLimit = 100.0; /**< Integral windup limit */
     
     // Feed-forward
-    double velocityFeedforward = 0.0;    ///< Velocity feed-forward gain
-    double accelerationFeedforward = 0.0; ///< Acceleration feed-forward gain
-    double torqueFeedforward = 0.0;      ///< Torque feed-forward gain
+    double velocityFeedforward = 0.0; /**< Velocity feed-forward gain */
+    double accelerationFeedforward = 0.0; /**< Acceleration feed-forward gain */
+    double torqueFeedforward = 0.0; /**< Torque feed-forward gain */
     
     // Output limits
-    double maxVelocityCmd = 100.0;       ///< Max velocity command from position loop
-    double maxTorqueCmd = 10.0;          ///< Max torque command from velocity loop
+    double maxVelocityCmd = 100.0; /**< Max velocity command from position loop */
+    double maxTorqueCmd = 10.0; /**< Max torque command from velocity loop */
 };
 
 /**
  * @brief Velocity controller parameters
  */
 struct VelocityControllerParams {
-    double kp = 10.0;                    ///< Proportional gain
-    double ki = 1.0;                     ///< Integral gain
-    double kd = 0.0;                     ///< Derivative gain
-    double derivativeFilter = 0.001;     ///< Derivative filter time constant
-    double integralLimit = 100.0;        ///< Integral windup limit
-    double torqueFeedforward = 0.0;      ///< Torque feed-forward
-    double maxTorqueCmd = 10.0;          ///< Max torque command
+    double kp = 10.0; /**< Proportional gain */
+    double ki = 1.0; /**< Integral gain */
+    double kd = 0.0; /**< Derivative gain */
+    double derivativeFilter = 0.001; /**< Derivative filter time constant */
+    double integralLimit = 100.0; /**< Integral windup limit */
+    double torqueFeedforward = 0.0; /**< Torque feed-forward */
+    double maxTorqueCmd = 10.0; /**< Max torque command */
 };
 
 /**
  * @brief Torque controller parameters
  */
 struct TorqueControllerParams {
-    double maxTorque = 10.0;             ///< Maximum torque
-    double torqueRampRate = 1000.0;      ///< Torque ramp rate (N·m/s)
+    double maxTorque = 10.0; /**< Maximum torque */
+    double torqueRampRate = 1000.0; /**< Torque ramp rate (N·m/s) */
     bool enableCurrentLimit = true;
 };
 
@@ -240,39 +240,39 @@ struct TorqueControllerParams {
  */
 struct MotorState {
     // Position and velocity
-    double position = 0.0;               ///< Current position (rad)
-    double velocity = 0.0;               ///< Current velocity (rad/s)
-    double acceleration = 0.0;           ///< Current acceleration (rad/s²)
+    double position = 0.0; /**< Current position (rad) */
+    double velocity = 0.0; /**< Current velocity (rad/s) */
+    double acceleration = 0.0; /**< Current acceleration (rad/s²) */
     
     // Torques
-    double commandedTorque = 0.0;        ///< Commanded torque (N·m)
-    double actualTorque = 0.0;           ///< Actual torque (N·m)
-    double loadTorque = 0.0;             ///< External load torque (N·m)
-    double frictionTorque = 0.0;         ///< Friction torque (N·m)
+    double commandedTorque = 0.0; /**< Commanded torque (N·m) */
+    double actualTorque = 0.0; /**< Actual torque (N·m) */
+    double loadTorque = 0.0; /**< External load torque (N·m) */
+    double frictionTorque = 0.0; /**< Friction torque (N·m) */
     
     // Electrical
-    double current = 0.0;                ///< Motor current (A)
-    double voltage = 0.0;                ///< Motor voltage (V)
-    double backEMF = 0.0;                ///< Back-EMF voltage (V)
-    double dcBusVoltage = 0.0;           ///< DC bus voltage (V)
+    double current = 0.0; /**< Motor current (A) */
+    double voltage = 0.0; /**< Motor voltage (V) */
+    double backEMF = 0.0; /**< Back-EMF voltage (V) */
+    double dcBusVoltage = 0.0; /**< DC bus voltage (V) */
     
     // Thermal
-    double windingTemperature = 25.0;    ///< Winding temperature (°C)
-    double motorTemperature = 25.0;      ///< Motor case temperature (°C)
-    double brakingResistorTemp = 25.0;   ///< Braking resistor temperature (°C)
-    double powerDissipation = 0.0;       ///< Power dissipation (W)
+    double windingTemperature = 25.0; /**< Winding temperature (°C) */
+    double motorTemperature = 25.0; /**< Motor case temperature (°C) */
+    double brakingResistorTemp = 25.0; /**< Braking resistor temperature (°C) */
+    double powerDissipation = 0.0; /**< Power dissipation (W) */
     
     // Encoder
-    int32_t encoderPosition = 0;         ///< Encoder position (counts)
-    int32_t encoderVelocity = 0;         ///< Encoder velocity (counts/s)
-    bool indexPulseDetected = false;     ///< Index pulse detected this cycle
-    int32_t lastIndexPosition = 0;       ///< Last index pulse position
+    int32_t encoderPosition = 0; /**< Encoder position (counts) */
+    int32_t encoderVelocity = 0; /**< Encoder velocity (counts/s) */
+    bool indexPulseDetected = false; /**< Index pulse detected this cycle */
+    int32_t lastIndexPosition = 0; /**< Last index pulse position */
     
     // Limits
-    bool positiveLimit = false;          ///< At positive limit
-    bool negativeLimit = false;          ///< At negative limit
-    bool homeSwitch = false;             ///< Home switch active
-    bool indexPulse = false;             ///< Index pulse active
+    bool positiveLimit = false; /**< At positive limit */
+    bool negativeLimit = false; /**< At negative limit */
+    bool homeSwitch = false; /**< Home switch active */
+    bool indexPulse = false; /**< Index pulse active */
     
     // Faults
     bool overTorqueFault = false;
@@ -310,8 +310,8 @@ struct MotorErrorInjection {
     bool simulateShortCircuit = false;
     
     // Mechanical faults
-    bool simulateJam = false;              ///< Axis jammed
-    bool simulateSlip = false;             ///< Coupling slip
+    bool simulateJam = false; /**< Axis jammed */
+    bool simulateSlip = false; /**< Coupling slip */
     bool simulateBrokenBelt = false;
     bool simulateEncoderFault = false;
     
@@ -321,7 +321,7 @@ struct MotorErrorInjection {
     
     // Timing faults
     bool simulateEncoderNoise = false;
-    double encoderNoiseAmplitude = 0.0;    ///< Noise amplitude (counts)
+    double encoderNoiseAmplitude = 0.0; /**< Noise amplitude (counts) */
     
     // Load disturbances
     bool injectLoadTorque = false;

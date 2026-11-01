@@ -35,51 +35,63 @@ namespace tether::motion {
 
 namespace bernstein {
 
-/// A closed parameter interval [lo, hi] ⊆ [0,1] isolating at least one root.
+/**A closed parameter interval [lo, hi] ⊆ [0,1] isolating at least one root. */
 struct Interval {
     double lo;
     double hi;
 };
 
-/// Evaluate p(t) by De Casteljau's algorithm (eq. (G.3)).
-/// @param coeffs Bernstein coefficients b_0..b_n
-/// @param t Evaluation point in [0,1]
-/// @return Polynomial value at t
+/**
+ * Evaluate p(t) by De Casteljau's algorithm (eq. (G.3)).
+ * @param coeffs Bernstein coefficients b_0..b_n
+ * @param t Evaluation point in [0,1]
+ * @return Polynomial value at t
+ */
 double evaluate(const std::vector<double>& coeffs, double t);
 
-/// Bernstein coefficients of the derivative p'(t):
-/// b'_i = n·(b_{i+1} − b_i), degree n−1 (eq. (G.4)).
-/// @param coeffs Bernstein coefficients b_0..b_n
-/// @return Derivative coefficients (degree n−1)
+/**
+ * Bernstein coefficients of the derivative p'(t):
+ * b'_i = n·(b_{i+1} − b_i), degree n−1 (eq. (G.4)).
+ * @param coeffs Bernstein coefficients b_0..b_n
+ * @return Derivative coefficients (degree n−1)
+ */
 std::vector<double> derivative(const std::vector<double>& coeffs);
 
-/// Subdivide at t ∈ (0,1) into [left, right] Bernstein representations of
-/// the same polynomial on [0,t] and [t,1] (De Casteljau, eq. (G.3)).
-/// @param coeffs Bernstein coefficients b_0..b_n
-/// @param t Split point in (0,1)
-/// @return (left, right) coefficient pairs
+/**
+ * Subdivide at t ∈ (0,1) into [left, right] Bernstein representations of
+ * the same polynomial on [0,t] and [t,1] (De Casteljau, eq. (G.3)).
+ * @param coeffs Bernstein coefficients b_0..b_n
+ * @param t Split point in (0,1)
+ * @return (left, right) coefficient pairs
+ */
 std::pair<std::vector<double>, std::vector<double>>
 subdivide(const std::vector<double>& coeffs, double t);
 
-/// Product of two Bernstein polynomials (degrees m, n → m+n), exact:
-/// c_k = Σ_{i+j=k} [C(m,i)·C(n,j)/C(m+n,k)] · a_i · b_j  (eq. (G.7)).
-/// @param a First polynomial coefficients
-/// @param b Second polynomial coefficients
-/// @return Product coefficients (degree m+n)
+/**
+ * Product of two Bernstein polynomials (degrees m, n → m+n), exact:
+ * c_k = Σ_{i+j=k} [C(m,i)·C(n,j)/C(m+n,k)] · a_i · b_j  (eq. (G.7)).
+ * @param a First polynomial coefficients
+ * @param b Second polynomial coefficients
+ * @return Product coefficients (degree m+n)
+ */
 std::vector<double> multiply(const std::vector<double>& a,
                              const std::vector<double>& b);
 
-/// Convert power-basis coefficients [a_0..a_n] (p(x) = Σ a_i xⁱ) to
-/// Bernstein coefficients of the same degree n: b_i = Σ_{j≤i} a_j·C(i,j)/C(n,j)
-/// (eq. (G.8)).
-/// @param power Power-basis coefficients
-/// @return Equivalent Bernstein coefficients
+/**
+ * Convert power-basis coefficients [a_0..a_n] (p(x) = Σ a_i xⁱ) to
+ * Bernstein coefficients of the same degree n: b_i = Σ_{j≤i} a_j·C(i,j)/C(n,j)
+ * (eq. (G.8)).
+ * @param power Power-basis coefficients
+ * @return Equivalent Bernstein coefficients
+ */
 std::vector<double> powerToBernstein(const std::vector<double>& power);
 
-/// Convert Bernstein coefficients back to power basis:
-/// a_m = Σ_{i≤m} b_i·C(n,i)·C(n−i,m−i)·(−1)^{m−i}  (eq. (G.9)).
-/// @param coeffs Bernstein coefficients
-/// @return Equivalent power-basis coefficients
+/**
+ * Convert Bernstein coefficients back to power basis:
+ * a_m = Σ_{i≤m} b_i·C(n,i)·C(n−i,m−i)·(−1)^{m−i}  (eq. (G.9)).
+ * @param coeffs Bernstein coefficients
+ * @return Equivalent power-basis coefficients
+ */
 std::vector<double> bernsteinToPower(const std::vector<double>& coeffs);
 
 /**

@@ -13,7 +13,7 @@
 
 namespace tether::analysis {
 
-/// @brief Complete modal state snapshot.
+/**@brief Complete modal state snapshot. */
 struct ModalState {
     std::string motionMode = "G0";
     std::string plane = "G17";
@@ -27,7 +27,7 @@ struct ModalState {
     std::string coolant = "M9";
 };
 
-/// @brief A single modal state change.
+/**@brief A single modal state change. */
 struct ModalStateChange {
     int lineNumber = 0;
     std::string property;
@@ -35,7 +35,7 @@ struct ModalStateChange {
     std::string newValue;
 };
 
-/// @brief A modal transition (group-level).
+/**@brief A modal transition (group-level). */
 struct ModalTransition {
     int line = 0;
     std::string group;
@@ -43,7 +43,7 @@ struct ModalTransition {
     std::string to;
 };
 
-/// @brief Modal group state (for group analysis).
+/**@brief Modal group state (for group analysis). */
 struct ModalGroupState {
     std::string group;
     std::string state;
@@ -51,7 +51,7 @@ struct ModalGroupState {
     int lastChangeLine = -1;
 };
 
-/// @brief Combined modal state analysis result.
+/**@brief Combined modal state analysis result. */
 struct ModalStateResult {
     // From trackModalStates
     ModalState finalState;
@@ -76,10 +76,10 @@ struct ModalStateResult {
     std::vector<std::string> recommendations;
 };
 
-/// @brief Track and analyze modal state changes in G-code.
+/**@brief Track and analyze modal state changes in G-code. */
 class ModalStateAnalyzer {
 public:
-    /// @brief Analyze modal states, groups, and transitions.
+    /**@brief Analyze modal states, groups, and transitions. */
     ModalStateResult analyze(const std::vector<std::string>& gcodeLines) const;
 
 private:

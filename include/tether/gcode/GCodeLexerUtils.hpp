@@ -27,11 +27,13 @@ namespace GCode {
 // Line-based tokenizer helpers
 // ============================================================================
 
-/// Tokenize a single G-code line into tokens.
-/// @param line   G-code line to tokenize
-/// @param tokens Output: vector of tokens
-/// @param config Optional lexer configuration
-/// @return Error if tokenization failed
+/**
+ * Tokenize a single G-code line into tokens.
+ * @param line   G-code line to tokenize
+ * @param tokens Output: vector of tokens
+ * @param config Optional lexer configuration
+ * @return Error if tokenization failed
+ */
 Error tokenizeLine(const char* line, std::vector<LexerToken>& tokens,
                    const LexerConfig& config = LexerConfig{});
 

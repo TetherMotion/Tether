@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file AuthFilter.hpp
-/// @brief Drogon HttpFilter that enforces authentication on all routes.
+/**
+ * @file AuthFilter.hpp
+ * @brief Drogon HttpFilter that enforces authentication on all routes.
+ */
 
 #ifndef TETHER_KLIPPER_HTTP_INTERNAL
 #define TETHER_KLIPPER_HTTP_INTERNAL
@@ -12,10 +14,12 @@
 
 namespace tether::klipper::http {
 
-/// @brief Drogon filter that checks authentication before allowing requests.
-///
-/// Applied to all REST routes. If auth is required and the request fails
-/// the auth check, a 401 Unauthorized response is returned immediately.
+/**
+ * @brief Drogon filter that checks authentication before allowing requests.
+ *
+ * Applied to all REST routes. If auth is required and the request fails
+ * the auth check, a 401 Unauthorized response is returned immediately.
+ */
 class AuthFilter : public drogon::HttpFilter<AuthFilter, false> {
 public:
     explicit AuthFilter(KlippyHttpServer* server) : server_(server) {}

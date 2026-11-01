@@ -19,9 +19,11 @@ namespace PDO {
 
 class PDOMapping {
 public:
-    /// Register an RxPDO (master→slave).  Storage is manager-owned — the
-    /// caller receives an entry index and accesses the bytes through
-    /// entryDataMut()/entryDataAs<T>() or an epoch-checked entryHandle().
+    /**
+     * Register an RxPDO (master→slave).  Storage is manager-owned — the
+     * caller receives an entry index and accesses the bytes through
+     * entryDataMut()/entryDataAs<T>() or an epoch-checked entryHandle().
+     */
     int  add_rxpdo(uint16_t slave_index, uint16_t size,
                    uint16_t pdo_index = 0x1600,
                    PDOAddressMode mode = PDOAddressMode::Position);
@@ -35,8 +37,10 @@ public:
 
     void set_slave_configured_address(uint16_t slave_index, uint16_t configured_addr);
 
-    /// Enable/disable the "Added RxPDO/TxPDO" registration logs
-    /// (set by PDOManager from the pdo-configuration debug flag).
+    /**
+     * Enable/disable the "Added RxPDO/TxPDO" registration logs
+     * (set by PDOManager from the pdo-configuration debug flag).
+     */
     void setAddLogging(bool enabled) { m_log_adds = enabled; }
 
     size_t         entry_count() const { return m_entry_count; }
@@ -46,10 +50,12 @@ public:
     void            remove_entries_for_slave(uint16_t slave_index);
 
     // ---- Buffered-path data access (Q1) ---------------------------------
-    /// Epoch-checked handle for a buffered entry.  offset stays -1 — the
-    /// handle resolves to entry storage, not a process-image offset.
-    /// The epoch changes on clear()/remove_entries_for_slave(), making
-    /// stale handles fail resolve() instead of pointing at recycled slots.
+    /**
+     * Epoch-checked handle for a buffered entry.  offset stays -1 — the
+     * handle resolves to entry storage, not a process-image offset.
+     * The epoch changes on clear()/remove_entries_for_slave(), making
+     * stale handles fail resolve() instead of pointing at recycled slots.
+     */
     EntryHandle entryHandle(size_t index) const {
         EntryHandle h;
         h.index  = static_cast<uint32_t>(index);
@@ -57,10 +63,12 @@ public:
         h.epoch  = m_epoch;
         return h;
     }
-    /// Direct index access — the fast path for RT code that caches the
-    /// pointer once after registration.  nullptr on out-of-range.
-    /// Taking a storage pointer marks the entry `storage_bound`: image-mode
-    /// exchanges keep bridging it so the cached pointer stays live.
+    /**
+     * Direct index access — the fast path for RT code that caches the
+     * pointer once after registration.  nullptr on out-of-range.
+     * Taking a storage pointer marks the entry `storage_bound`: image-mode
+     * exchanges keep bridging it so the cached pointer stays live.
+     */
     uint8_t* entryDataMut(size_t index) {
         if (index >= m_entry_count) return nullptr;
         m_entries[index].storage_bound = true;
@@ -71,7 +79,7 @@ public:
         m_entries[index].storage_bound = true;
         return m_entries[index].storage;
     }
-    /// Typed access — nullptr when sizeof(T) exceeds the registered size.
+    /**Typed access — nullptr when sizeof(T) exceeds the registered size. */
     template<typename T> T* entryDataAs(size_t index) {
         return (index < m_entry_count && sizeof(T) <= m_entries[index].data_size)
                    ? reinterpret_cast<T*>(entryDataMut(index)) : nullptr;
@@ -80,8 +88,10 @@ public:
         return (index < m_entry_count && sizeof(T) <= m_entries[index].data_size)
                    ? reinterpret_cast<const T*>(entryData(index)) : nullptr;
     }
-    /// Epoch-checked resolve — nullptr when the handle is stale or the
-    /// entry is out of range.
+    /**
+     * Epoch-checked resolve — nullptr when the handle is stale or the
+     * entry is out of range.
+     */
     uint8_t* resolveMut(const EntryHandle& h) {
         return (h.epoch == m_epoch) ? entryDataMut(h.index) : nullptr;
     }
@@ -97,8 +107,8 @@ private:
     PDOEntry m_entries[kMaxPDOEntries];
     size_t   m_entry_count = 0;
     uint16_t m_slave_configured_addrs[kMaxPDOSlaves] = {0};
-    uint32_t m_epoch = 0;   ///< bumped on clear()/remove_entries_for_slave()
-    bool     m_log_adds = false;  ///< gate for the add_rxpdo/add_txpdo logs
+    uint32_t m_epoch = 0; /**< bumped on clear()/remove_entries_for_slave() */
+    bool     m_log_adds = false; /**< gate for the add_rxpdo/add_txpdo logs */
 };
 
 } // namespace PDO

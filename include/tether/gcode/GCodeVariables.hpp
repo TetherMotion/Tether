@@ -127,17 +127,17 @@ namespace GCode {
 // Parameter Ranges
 // ============================================================================
 
-/// Start of local parameters
+/**Start of local parameters */
 constexpr int32_t PARAM_LOCAL_START = 1;
-/// End of local parameters
+/**End of local parameters */
 constexpr int32_t PARAM_LOCAL_END = 30;
 
-/// Start of global user parameters
+/**Start of global user parameters */
 constexpr int32_t PARAM_GLOBAL_START = 31;
-/// End of global user parameters
+/**End of global user parameters */
 constexpr int32_t PARAM_GLOBAL_END = 5000;
 
-/// System parameter ranges
+/**System parameter ranges */
 constexpr int32_t PARAM_PROBE_RESULT = 5061;    // #5061-#5069 probe position
 constexpr int32_t PARAM_PROBE_SUCCESS = 5070;   // #5070 probe success
 constexpr int32_t PARAM_G28_HOME = 5161;        // #5161-#5169 G28 position

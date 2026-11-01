@@ -104,32 +104,32 @@ namespace tether::control {
  * @brief Reaching law type for driving σ → 0
  */
 enum class ReachingLaw {
-    Constant,       ///< σ̇ = -K·sign(σ)
-    ConstantPlusProportional, ///< σ̇ = -K·sign(σ) - λσ
-    PowerRate,      ///< σ̇ = -K|σ|^α·sign(σ), 0 < α < 1
-    Exponential     ///< σ̇ = -K·exp(ε|σ|)·sign(σ)
+    Constant, /**< σ̇ = -K·sign(σ) */
+    ConstantPlusProportional, /**< σ̇ = -K·sign(σ) - λσ */
+    PowerRate, /**< σ̇ = -K|σ|^α·sign(σ), 0 < α < 1 */
+    Exponential /**< σ̇ = -K·exp(ε|σ|)·sign(σ) */
 };
 
 /**
  * @brief Chattering reduction method
  */
 enum class ChatteringReduction {
-    None,           ///< Pure switching (sign function)
-    Saturation,     ///< Boundary layer with sat()
-    Sigmoid,        ///< Smooth sigmoid approximation
-    Hyperbolic,     ///< tanh() approximation
-    SuperTwisting   ///< Second-order sliding mode
+    None, /**< Pure switching (sign function) */
+    Saturation, /**< Boundary layer with sat() */
+    Sigmoid, /**< Smooth sigmoid approximation */
+    Hyperbolic, /**< tanh() approximation */
+    SuperTwisting /**< Second-order sliding mode */
 };
 
 /**
  * @brief Sliding surface type
  */
 enum class SurfaceType {
-    Linear,         ///< σ = Cx (linear combination)
-    Integral,       ///< σ = Cx + Ki∫e
-    Terminal,       ///< σ = ė + βe^(p/q) (finite time)
-    NonsingularTerminal, ///< Modified terminal for singularity avoidance
-    FractionalOrder ///< Fractional derivative surface
+    Linear, /**< σ = Cx (linear combination) */
+    Integral, /**< σ = Cx + Ki∫e */
+    Terminal, /**< σ = ė + βe^(p/q) (finite time) */
+    NonsingularTerminal, /**< Modified terminal for singularity avoidance */
+    FractionalOrder /**< Fractional derivative surface */
 };
 
 /**
@@ -137,22 +137,22 @@ enum class SurfaceType {
  */
 struct SlidingSurfaceParams {
     SurfaceType type{SurfaceType::Linear};
-    std::vector<double> coefficients;  ///< Surface coefficients
-    double integralGain{0.0};          ///< For integral SMC
-    double terminalBeta{1.0};          ///< Terminal SMC β
-    double terminalP{5.0};             ///< Terminal SMC p (odd)
-    double terminalQ{3.0};             ///< Terminal SMC q (odd, p > q)
-    double fractionalOrder{0.5};       ///< For fractional surface
+    std::vector<double> coefficients; /**< Surface coefficients */
+    double integralGain{0.0}; /**< For integral SMC */
+    double terminalBeta{1.0}; /**< Terminal SMC β */
+    double terminalP{5.0}; /**< Terminal SMC p (odd) */
+    double terminalQ{3.0}; /**< Terminal SMC q (odd, p > q) */
+    double fractionalOrder{0.5}; /**< For fractional surface */
 };
 
 /**
  * @brief SMC gain parameters
  */
 struct SMCGains {
-    double switchingGain{1.0};    ///< K in switching term
-    double proportionalGain{0.0}; ///< λ for proportional reaching
-    double powerAlpha{0.5};       ///< α for power rate law
-    double boundaryWidth{0.1};    ///< Φ for boundary layer
+    double switchingGain{1.0}; /**< K in switching term */
+    double proportionalGain{0.0}; /**< λ for proportional reaching */
+    double powerAlpha{0.5}; /**< α for power rate law */
+    double boundaryWidth{0.1}; /**< Φ for boundary layer */
 };
 
 // ============================================================================

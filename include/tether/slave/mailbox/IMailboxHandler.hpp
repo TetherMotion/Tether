@@ -40,25 +40,25 @@ class IObjectDictionary;
  * @brief Mailbox protocol identifiers
  */
 enum class MailboxProtocol : uint8_t {
-    Error = 0x00,  ///< Error response
-    AoE   = 0x01,  ///< ADS over EtherCAT
-    EoE   = 0x02,  ///< Ethernet over EtherCAT
-    CoE   = 0x03,  ///< CANopen over EtherCAT
-    FoE   = 0x04,  ///< File over EtherCAT
-    SoE   = 0x05,  ///< Servo over EtherCAT
-    VoE   = 0x0F,  ///< Vendor over EtherCAT
+    Error = 0x00, /**< Error response */
+    AoE   = 0x01, /**< ADS over EtherCAT */
+    EoE   = 0x02, /**< Ethernet over EtherCAT */
+    CoE   = 0x03, /**< CANopen over EtherCAT */
+    FoE   = 0x04, /**< File over EtherCAT */
+    SoE   = 0x05, /**< Servo over EtherCAT */
+    VoE   = 0x0F, /**< Vendor over EtherCAT */
 };
 
 /**
  * @brief Mailbox header structure (6 bytes)
  */
 struct MailboxHeader {
-    uint16_t length;      ///< Data length (excluding header)
-    uint16_t address;     ///< Station address
-    uint8_t  channel : 6; ///< Channel
-    uint8_t  priority : 2;///< Priority
-    uint8_t  type : 4;    ///< Protocol type
-    uint8_t  counter : 4; ///< Counter for duplicate detection
+    uint16_t length; /**< Data length (excluding header) */
+    uint16_t address; /**< Station address */
+    uint8_t  channel : 6; /**< Channel */
+    uint8_t  priority : 2; /**< Priority */
+    uint8_t  type : 4; /**< Protocol type */
+    uint8_t  counter : 4; /**< Counter for duplicate detection */
     
     /**
      * @brief Parse header from bytes

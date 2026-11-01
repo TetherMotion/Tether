@@ -94,9 +94,9 @@ struct Vec3 {
     constexpr Vec3() = default;
     constexpr Vec3(double x_, double y_, double z_) : x(x_), y(y_), z(z_) {}
 
-    /// Convert to Eigen vector
+    /**Convert to Eigen vector */
     Eigen::Vector3d toEigen() const { return Eigen::Vector3d(x, y, z); }
-    /// Convert from Eigen vector
+    /**Convert from Eigen vector */
     static Vec3 fromEigen(const Eigen::Vector3d& v) { return {v.x(), v.y(), v.z()}; }
 
     constexpr Vec3 operator+(const Vec3& other) const {
@@ -149,9 +149,9 @@ struct Vec2 {
     constexpr Vec2() = default;
     constexpr Vec2(double x_, double y_) : x(x_), y(y_) {}
 
-    /// Convert to Eigen vector
+    /**Convert to Eigen vector */
     Eigen::Vector2d toEigen() const { return Eigen::Vector2d(x, y); }
-    /// Convert from Eigen vector
+    /**Convert from Eigen vector */
     static Vec2 fromEigen(const Eigen::Vector2d& v) { return {v.x(), v.y()}; }
 
     constexpr Vec2 operator+(const Vec2& other) const {
@@ -194,9 +194,9 @@ struct Vec2 {
  * @brief Projection plane enumeration
  */
 enum class ProjectionPlane {
-    XY,  ///< Top view (looking down Z axis)
-    XZ,  ///< Front view (looking down Y axis)
-    YZ,  ///< Side view (looking down X axis)
+    XY, /**< Top view (looking down Z axis) */
+    XZ, /**< Front view (looking down Y axis) */
+    YZ, /**< Side view (looking down X axis) */
 };
 
 /**
@@ -268,11 +268,11 @@ inline Vec3 unprojectFromPlane(const Vec2& point2D, double depth, ProjectionPlan
  * @brief Z filter mode
  */
 enum class ZFilterMode {
-    None,       ///< No filtering
-    Above,      ///< Show only points above Z threshold
-    Below,      ///< Show only points below Z threshold
-    Between,    ///< Show only points between Z min and Z max
-    Layer,      ///< Show only points within a layer (Z +/- tolerance)
+    None, /**< No filtering */
+    Above, /**< Show only points above Z threshold */
+    Below, /**< Show only points below Z threshold */
+    Between, /**< Show only points between Z min and Z max */
+    Layer, /**< Show only points within a layer (Z +/- tolerance) */
 };
 
 /**
@@ -280,11 +280,11 @@ enum class ZFilterMode {
  */
 struct ZFilter {
     ZFilterMode mode = ZFilterMode::None;
-    double threshold = 0.0;  ///< For Above/Below modes
-    double zMin = 0.0;       ///< For Between mode
-    double zMax = 0.0;       ///< For Between mode
-    double layerZ = 0.0;     ///< For Layer mode
-    double tolerance = 0.5;  ///< For Layer mode (layer height / 2)
+    double threshold = 0.0; /**< For Above/Below modes */
+    double zMin = 0.0; /**< For Between mode */
+    double zMax = 0.0; /**< For Between mode */
+    double layerZ = 0.0; /**< For Layer mode */
+    double tolerance = 0.5; /**< For Layer mode (layer height / 2) */
     
     /**
      * @brief Check if a Z value passes the filter
@@ -496,13 +496,13 @@ inline Color Color::fromHSV(float h, float s, float v, float a) {
  * @brief Color mapping mode
  */
 enum class ColorMapMode {
-    Solid,          ///< Single solid color
-    BySpeed,        ///< Color by feed rate
-    ByZHeight,      ///< Color by Z coordinate
-    ByTime,         ///< Color by time in program
-    ByAcceleration, ///< Color by acceleration
-    ByAccuracy,     ///< Color by deviation from desired path
-    ByMoveType,     ///< Different colors for rapids, feeds, arcs
+    Solid, /**< Single solid color */
+    BySpeed, /**< Color by feed rate */
+    ByZHeight, /**< Color by Z coordinate */
+    ByTime, /**< Color by time in program */
+    ByAcceleration, /**< Color by acceleration */
+    ByAccuracy, /**< Color by deviation from desired path */
+    ByMoveType, /**< Different colors for rapids, feeds, arcs */
 };
 
 /**

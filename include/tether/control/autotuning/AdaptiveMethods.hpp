@@ -190,9 +190,9 @@ public:
      * @brief Select adaptation law
      */
     enum class AdaptationLaw {
-        MIT,        ///< MIT rule (gradient)
-        Lyapunov,   ///< Lyapunov-based
-        NormalizedMIT  ///< Normalized MIT rule
+        MIT, /**< MIT rule (gradient) */
+        Lyapunov, /**< Lyapunov-based */
+        NormalizedMIT /**< Normalized MIT rule */
     };
     void setAdaptationLaw(AdaptationLaw law) { m_law = law; }
     
@@ -285,10 +285,10 @@ public:
      * @brief Set estimation method
      */
     enum class EstimationMethod {
-        RLS,            ///< Recursive Least Squares
-        RLSForgetting,  ///< RLS with forgetting factor
-        ELS,            ///< Extended Least Squares
-        RPEM            ///< Recursive Prediction Error
+        RLS, /**< Recursive Least Squares */
+        RLSForgetting, /**< RLS with forgetting factor */
+        ELS, /**< Extended Least Squares */
+        RPEM /**< Recursive Prediction Error */
     };
     void setEstimationMethod(EstimationMethod method) { m_estimator = method; }
     
@@ -321,7 +321,7 @@ public:
      * @return Estimated A (output-lag) coefficients.
      */
     std::vector<double> getEstimatedA() const { return m_aHat; }
-    /// @return Estimated B (input-lag) coefficients.
+    /**@return Estimated B (input-lag) coefficients. */
     std::vector<double> getEstimatedB() const { return m_bHat; }
     
     /**
@@ -733,9 +733,9 @@ public:
      * @brief Set mixing mode
      */
     enum class MixingMode {
-        Switching,      ///< Hard switch to best model
-        BayesianMixing, ///< Posterior probability weighted
-        SoftmaxMixing   ///< Softmax weighted
+        Switching, /**< Hard switch to best model */
+        BayesianMixing, /**< Posterior probability weighted */
+        SoftmaxMixing /**< Softmax weighted */
     };
     void setMixingMode(MixingMode mode) { m_mixingMode = mode; }
     

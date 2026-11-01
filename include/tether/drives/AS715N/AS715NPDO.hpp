@@ -37,7 +37,7 @@ namespace EtherCAT {
 namespace Drives {
 namespace AS715N_pdo {
 
-/// One field inside a PDO, referencing a parameter entry.
+/**One field inside a PDO, referencing a parameter entry. */
 struct PDOField {
     const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry* entry;
     uint16_t offset;
@@ -45,7 +45,7 @@ struct PDOField {
     const char* description;
 };
 
-/// Description of a whole PDO (index, size and pointer to field list).
+/**Description of a whole PDO (index, size and pointer to field list). */
 struct PDO {
     uint16_t index;
     uint16_t size;
@@ -408,11 +408,13 @@ inline const std::vector<const PDO*> kTxPDOs = {
 };
 
 
-/// @brief Find a PDO descriptor by its index value (AS715N-specific wrapper).
-///
-/// Internally forwards to the generic helper in `EtherCAT::Utils`.  Keeping
-/// a small drive-specific function ensures existing code continues to compile
-/// unmodified.
+/**
+ * @brief Find a PDO descriptor by its index value (AS715N-specific wrapper).
+ *
+ * Internally forwards to the generic helper in `EtherCAT::Utils`.  Keeping
+ * a small drive-specific function ensures existing code continues to compile
+ * unmodified.
+ */
 inline constexpr const PDO* findPDOByIndex(uint16_t idx) noexcept
 {
     // generic helper accepts any range of pointers.
@@ -433,14 +435,14 @@ inline constexpr const PDO* findPDOByIndex(uint16_t idx) noexcept
  * to the RxPDO buffer.
  */
 struct AS715N_RxPDO_1705 {
-    uint16_t controlword;           ///< 0x6040 Controlword
-    int32_t  target_position;       ///< 0x607A Target Position (encoder counts)
-    int32_t  target_velocity;       ///< 0x60FF Target Velocity (counts/s)
-    int8_t   modes_of_operation;    ///< 0x6060 Modes of Operation (8 = CSP)
-    uint16_t touch_probe_function;  ///< 0x60B8 Touch Probe Function
-    uint16_t positive_torque_limit; ///< 0x60E0 Positive Torque Limit (‰ of rated)
-    uint16_t negative_torque_limit; ///< 0x60E1 Negative Torque Limit (‰ of rated)
-    int16_t  torque_offset;         ///< 0x60B2 Torque Offset (‰ of rated)
+    uint16_t controlword; /**< 0x6040 Controlword */
+    int32_t  target_position; /**< 0x607A Target Position (encoder counts) */
+    int32_t  target_velocity; /**< 0x60FF Target Velocity (counts/s) */
+    int8_t   modes_of_operation; /**< 0x6060 Modes of Operation (8 = CSP) */
+    uint16_t touch_probe_function; /**< 0x60B8 Touch Probe Function */
+    uint16_t positive_torque_limit; /**< 0x60E0 Positive Torque Limit (‰ of rated) */
+    uint16_t negative_torque_limit; /**< 0x60E1 Negative Torque Limit (‰ of rated) */
+    int16_t  torque_offset; /**< 0x60B2 Torque Offset (‰ of rated) */
 } __attribute__((packed));
 
 static_assert(sizeof(AS715N_RxPDO_1705) == RxPDO_1705.size,
@@ -454,16 +456,16 @@ static_assert(sizeof(AS715N_RxPDO_1705) == RxPDO_1705.size,
  * to the TxPDO buffer.
  */
 struct AS715N_TxPDO_1B04 {
-    uint16_t error_code;                 ///< 0x603F Manufacturer Error / Error Code
-    uint16_t statusword;                 ///< 0x6041 Statusword
-    int32_t  position_actual;            ///< 0x6064 Position Actual Value
-    int16_t  torque_actual;              ///< 0x6077 Torque Actual Value (‰ of rated)
-    int8_t   modes_of_operation_display; ///< 0x6061 Modes of Operation Display
-    int32_t  position_deviation;         ///< 0x60F4 Following Error / Position Deviation
-    uint16_t touch_probe_status;         ///< 0x60B9 Touch Probe Status
-    int32_t  touch_probe_pos1;           ///< 0x60BA Touch Probe 1 Pos Edge
-    int32_t  touch_probe_pos2;           ///< 0x60BC Touch Probe 2 Pos Edge
-    int32_t  speed_feedback;             ///< 0x606C Speed Feedback (counts/s)
+    uint16_t error_code; /**< 0x603F Manufacturer Error / Error Code */
+    uint16_t statusword; /**< 0x6041 Statusword */
+    int32_t  position_actual; /**< 0x6064 Position Actual Value */
+    int16_t  torque_actual; /**< 0x6077 Torque Actual Value (‰ of rated) */
+    int8_t   modes_of_operation_display; /**< 0x6061 Modes of Operation Display */
+    int32_t  position_deviation; /**< 0x60F4 Following Error / Position Deviation */
+    uint16_t touch_probe_status; /**< 0x60B9 Touch Probe Status */
+    int32_t  touch_probe_pos1; /**< 0x60BA Touch Probe 1 Pos Edge */
+    int32_t  touch_probe_pos2; /**< 0x60BC Touch Probe 2 Pos Edge */
+    int32_t  speed_feedback; /**< 0x606C Speed Feedback (counts/s) */
 } __attribute__((packed));
 
 static_assert(sizeof(AS715N_TxPDO_1B04) == TxPDO_1B04.size,
@@ -477,16 +479,16 @@ static_assert(sizeof(AS715N_TxPDO_1B04) == TxPDO_1B04.size,
  * Modes of Operation Display.
  */
 struct AS715N_TxPDO_1B03 {
-    uint16_t error_code;                 ///< 0x603F Error Code
-    uint16_t statusword;                 ///< 0x6041 Statusword
-    int32_t  position_actual;            ///< 0x6064 Position Actual Value
-    int16_t  torque_actual;              ///< 0x6077 Torque Actual Value (‰ of rated)
-    int32_t  position_deviation;         ///< 0x60F4 Following Error / Position Deviation
-    int8_t   modes_of_operation_display; ///< 0x6061 Modes of Operation Display
-    uint16_t touch_probe_status;         ///< Touch Probe Status
-    int32_t  touch_probe_pos1;           ///< 0x60BA Touch Probe 1 Pos Edge
-    int32_t  touch_probe_pos2;           ///< 0x60BC Touch Probe 2 Pos Edge
-    uint32_t digital_inputs;             ///< 0x60FD Digital Inputs
+    uint16_t error_code; /**< 0x603F Error Code */
+    uint16_t statusword; /**< 0x6041 Statusword */
+    int32_t  position_actual; /**< 0x6064 Position Actual Value */
+    int16_t  torque_actual; /**< 0x6077 Torque Actual Value (‰ of rated) */
+    int32_t  position_deviation; /**< 0x60F4 Following Error / Position Deviation */
+    int8_t   modes_of_operation_display; /**< 0x6061 Modes of Operation Display */
+    uint16_t touch_probe_status; /**< Touch Probe Status */
+    int32_t  touch_probe_pos1; /**< 0x60BA Touch Probe 1 Pos Edge */
+    int32_t  touch_probe_pos2; /**< 0x60BC Touch Probe 2 Pos Edge */
+    uint32_t digital_inputs; /**< 0x60FD Digital Inputs */
 } __attribute__((packed));
 
 static_assert(sizeof(AS715N_TxPDO_1B03) == TxPDO_1B03.size,
@@ -499,13 +501,13 @@ static_assert(sizeof(AS715N_TxPDO_1B03) == TxPDO_1B03.size,
  * set as 0x1705 but without the trailing Torque Offset (0x60B2).
  */
 struct AS715N_RxPDO_1703 {
-    uint16_t controlword;           ///< 0x6040 Controlword
-    int32_t  target_position;       ///< 0x607A Target Position (encoder counts)
-    int32_t  target_velocity;       ///< 0x60FF Target Velocity (counts/s)
-    int8_t   modes_of_operation;    ///< 0x6060 Modes of Operation (8 = CSP)
-    uint16_t touch_probe_function;  ///< 0x60B8 Touch Probe Function
-    uint16_t positive_torque_limit; ///< 0x60E0 Positive Torque Limit (‰ of rated)
-    uint16_t negative_torque_limit; ///< 0x60E1 Negative Torque Limit (‰ of rated)
+    uint16_t controlword; /**< 0x6040 Controlword */
+    int32_t  target_position; /**< 0x607A Target Position (encoder counts) */
+    int32_t  target_velocity; /**< 0x60FF Target Velocity (counts/s) */
+    int8_t   modes_of_operation; /**< 0x6060 Modes of Operation (8 = CSP) */
+    uint16_t touch_probe_function; /**< 0x60B8 Touch Probe Function */
+    uint16_t positive_torque_limit; /**< 0x60E0 Positive Torque Limit (‰ of rated) */
+    uint16_t negative_torque_limit; /**< 0x60E1 Negative Torque Limit (‰ of rated) */
 } __attribute__((packed));
 
 static_assert(sizeof(AS715N_RxPDO_1703) == RxPDO_1703.size,
@@ -515,13 +517,13 @@ static_assert(sizeof(AS715N_RxPDO_1703) == RxPDO_1703.size,
  * @brief RxPDO 0x1702 struct (master → slave, 19 bytes)
  */
 struct AS715N_RxPDO_1702 {
-    uint16_t controlword;           ///< 0x6040 Controlword
-    int32_t  target_position;       ///< 0x607A Target Position
-    int32_t  target_velocity;       ///< 0x60FF Target Velocity
-    int16_t  target_torque;         ///< 0x6071 Target Torque
-    int8_t   modes_of_operation;    ///< 0x6060 Modes of Operation
-    uint16_t touch_probe_function;  ///< 0x60B8 Touch Probe Function
-    uint32_t max_profile_velocity;  ///< 0x607F Max Profile Velocity
+    uint16_t controlword; /**< 0x6040 Controlword */
+    int32_t  target_position; /**< 0x607A Target Position */
+    int32_t  target_velocity; /**< 0x60FF Target Velocity */
+    int16_t  target_torque; /**< 0x6071 Target Torque */
+    int8_t   modes_of_operation; /**< 0x6060 Modes of Operation */
+    uint16_t touch_probe_function; /**< 0x60B8 Touch Probe Function */
+    uint32_t max_profile_velocity; /**< 0x607F Max Profile Velocity */
 } __attribute__((packed));
 
 static_assert(sizeof(AS715N_RxPDO_1702) == RxPDO_1702.size,
@@ -535,15 +537,15 @@ static_assert(sizeof(AS715N_RxPDO_1702) == RxPDO_1702.size,
  * position control and CST torque-mode operation (e.g. sensorless homing).
  */
 struct AS715N_RxPDO_1704 {
-    uint16_t controlword;           ///< 0x6040 Controlword
-    int32_t  target_position;       ///< 0x607A Target Position (encoder counts)
-    int32_t  target_velocity;       ///< 0x60FF Target Velocity (counts/s)
-    int16_t  target_torque;         ///< 0x6071 Target Torque (‰ of rated)
-    int8_t   modes_of_operation;    ///< 0x6060 Modes of Operation
-    uint16_t touch_probe_function;  ///< 0x60B8 Touch Probe Function
-    uint32_t max_profile_velocity;  ///< 0x607F Max Profile Velocity
-    uint16_t positive_torque_limit; ///< 0x60E0 Positive Torque Limit (‰ of rated)
-    uint16_t negative_torque_limit; ///< 0x60E1 Negative Torque Limit (‰ of rated)
+    uint16_t controlword; /**< 0x6040 Controlword */
+    int32_t  target_position; /**< 0x607A Target Position (encoder counts) */
+    int32_t  target_velocity; /**< 0x60FF Target Velocity (counts/s) */
+    int16_t  target_torque; /**< 0x6071 Target Torque (‰ of rated) */
+    int8_t   modes_of_operation; /**< 0x6060 Modes of Operation */
+    uint16_t touch_probe_function; /**< 0x60B8 Touch Probe Function */
+    uint32_t max_profile_velocity; /**< 0x607F Max Profile Velocity */
+    uint16_t positive_torque_limit; /**< 0x60E0 Positive Torque Limit (‰ of rated) */
+    uint16_t negative_torque_limit; /**< 0x60E1 Negative Torque Limit (‰ of rated) */
 } __attribute__((packed));
 
 static_assert(sizeof(AS715N_RxPDO_1704) == RxPDO_1704.size,
@@ -553,15 +555,15 @@ static_assert(sizeof(AS715N_RxPDO_1704) == RxPDO_1704.size,
  * @brief TxPDO 0x1B02 struct (slave → master, 25 bytes)
  */
 struct AS715N_TxPDO_1B02 {
-    uint16_t error_code;                 ///< 0x603F Error Code
-    uint16_t statusword;                 ///< 0x6041 Statusword
-    int32_t  position_actual;            ///< 0x6064 Position Actual Value
-    int16_t  torque_actual;              ///< 0x6077 Torque Actual Value
-    int8_t   modes_of_operation_display; ///< 0x6061 Modes of Operation Display
-    uint16_t touch_probe_status;         ///< 0x60B9 Touch Probe Status
-    int32_t  touch_probe_pos1;           ///< 0x60BA Touch Probe 1 Pos Edge
-    int32_t  touch_probe_pos2;           ///< 0x60BC Touch Probe 2 Pos Edge
-    uint32_t digital_inputs;             ///< 0x60FD Digital Inputs
+    uint16_t error_code; /**< 0x603F Error Code */
+    uint16_t statusword; /**< 0x6041 Statusword */
+    int32_t  position_actual; /**< 0x6064 Position Actual Value */
+    int16_t  torque_actual; /**< 0x6077 Torque Actual Value */
+    int8_t   modes_of_operation_display; /**< 0x6061 Modes of Operation Display */
+    uint16_t touch_probe_status; /**< 0x60B9 Touch Probe Status */
+    int32_t  touch_probe_pos1; /**< 0x60BA Touch Probe 1 Pos Edge */
+    int32_t  touch_probe_pos2; /**< 0x60BC Touch Probe 2 Pos Edge */
+    uint32_t digital_inputs; /**< 0x60FD Digital Inputs */
 } __attribute__((packed));
 
 static_assert(sizeof(AS715N_TxPDO_1B02) == TxPDO_1B02.size,
@@ -601,15 +603,19 @@ inline ::EtherCAT::Slave::MultiPDOAssignment makePDOAssignment(
     return assignment;
 }
 
-/// @brief Default motion PDO assignment used by the native examples:
-///        RxPDO 0x1705 (19 bytes) and TxPDO 0x1B04 (29 bytes).
+/**
+ * @brief Default motion PDO assignment used by the native examples:
+ *        RxPDO 0x1705 (19 bytes) and TxPDO 0x1B04 (29 bytes).
+ */
 inline ::EtherCAT::Slave::MultiPDOAssignment makeDefaultPDOAssignment()
 {
     return makePDOAssignment(RxPDO_1705, TxPDO_1B04);
 }
 
-/// @brief Byte offset of the ModesOfOperation field in the given RxPDO.
-/// @return Byte offset, or -1 if the RxPDO has no mode field.
+/**
+ * @brief Byte offset of the ModesOfOperation field in the given RxPDO.
+ * @return Byte offset, or -1 if the RxPDO has no mode field.
+ */
 constexpr int opmodeOffsetFor(uint16_t rxpdo_index) {
     switch (rxpdo_index) {
         case 0x1702u: return 12;
@@ -620,8 +626,10 @@ constexpr int opmodeOffsetFor(uint16_t rxpdo_index) {
     }
 }
 
-/// @brief Byte offset of the Statusword field in the given TxPDO.
-/// @return Byte offset, or -1 if the TxPDO has no statusword.
+/**
+ * @brief Byte offset of the Statusword field in the given TxPDO.
+ * @return Byte offset, or -1 if the TxPDO has no statusword.
+ */
 constexpr int statuswordOffsetFor(uint16_t txpdo_index) {
     switch (txpdo_index) {
         case 0x1B01u:

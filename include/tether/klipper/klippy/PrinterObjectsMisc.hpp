@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file PrinterObjectsMisc.hpp
-/// @brief Miscellaneous printer objects (gcode_macro, output_pin, servo, menu, etc.)
+/**
+ * @file PrinterObjectsMisc.hpp
+ * @brief Miscellaneous printer objects (gcode_macro, output_pin, servo, menu, etc.)
+ */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 
@@ -16,7 +18,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief The gcode_macro printer object (one per macro).
+/**@brief The gcode_macro printer object (one per macro). */
 class GcodeMacroObject : public PrinterObject {
 public:
     GcodeMacroObject(const std::string& macroName,
@@ -50,7 +52,7 @@ private:
     std::shared_ptr<GcodeMacroRegistry> registry_;
 };
 
-/// @brief Output pin printer object (output_pin).
+/**@brief Output pin printer object (output_pin). */
 class OutputPinObject : public PrinterObject {
 public:
     explicit OutputPinObject(const std::string& name) : name_(name) {}
@@ -73,7 +75,7 @@ private:
     double value_ = 0.0;
 };
 
-/// @brief PWM tool printer object (pwm_tool).
+/**@brief PWM tool printer object (pwm_tool). */
 class PWMToolObject : public PrinterObject {
 public:
     explicit PWMToolObject(const std::string& name) : name_(name) {}
@@ -96,7 +98,7 @@ private:
     double value_ = 0.0;
 };
 
-/// @brief Servo printer object (servo).
+/**@brief Servo printer object (servo). */
 class ServoObject : public PrinterObject {
 public:
     explicit ServoObject(const std::string& name) : name_(name) {}
@@ -122,7 +124,7 @@ private:
     double width_ = 0.0;
 };
 
-/// @brief Multi-pin printer object (multi_pin).
+/**@brief Multi-pin printer object (multi_pin). */
 class MultiPinObject : public PrinterObject {
 public:
     explicit MultiPinObject(const std::string& name) : name_(name) {}
@@ -152,7 +154,7 @@ private:
     std::string value_ = "0";
 };
 
-/// @brief Button printer object (button).
+/**@brief Button printer object (button). */
 class ButtonObject : public PrinterObject {
 public:
     explicit ButtonObject(const std::string& name) : name_(name) {}
@@ -175,7 +177,7 @@ private:
     std::string state_ = "PRESSED";
 };
 
-/// @brief Smart effector printer object (smart_effector).
+/**@brief Smart effector printer object (smart_effector). */
 class SmartEffectorObject : public PrinterObject {
 public:
     std::string name() const override { return "smart_effector"; }
@@ -195,7 +197,7 @@ private:
     std::string probeState_ = "open";
 };
 
-/// @brief CAN bus statistics printer object (canbus_stats).
+/**@brief CAN bus statistics printer object (canbus_stats). */
 class CanbusStatsObject : public PrinterObject {
 public:
     explicit CanbusStatsObject(const std::string& name) : name_(name) {}
@@ -230,7 +232,7 @@ private:
     std::string busState_ = "active";
 };
 
-/// @brief PWM cycle time printer object (pwm_cycle_time).
+/**@brief PWM cycle time printer object (pwm_cycle_time). */
 class PWMCycleTimeObject : public PrinterObject {
 public:
     explicit PWMCycleTimeObject(const std::string& name) : name_(name) {}
@@ -258,7 +260,7 @@ private:
     double cycleTime_ = 0.100;
 };
 
-/// @brief Resonance tester printer object (resonance_tester).
+/**@brief Resonance tester printer object (resonance_tester). */
 class ResonanceTesterObject : public PrinterObject {
 public:
     std::string name() const override { return "resonance_tester"; }
@@ -289,7 +291,7 @@ private:
     double hzPerSec_ = 1.0;
 };
 
-/// @brief Palette 2 printer object (palette2).
+/**@brief Palette 2 printer object (palette2). */
 class Palette2Object : public PrinterObject {
 public:
     std::string name() const override { return "palette2"; }
@@ -326,7 +328,7 @@ private:
     double longLoadSpeed_ = 1.0;
 };
 
-/// @brief Menu printer object (menu).
+/**@brief Menu printer object (menu). */
 class MenuObject : public PrinterObject {
 public:
     std::string name() const override { return "menu"; }
@@ -355,7 +357,7 @@ private:
     int cols_ = 20;
 };
 
-/// @brief G-code printer object (gcode).
+/**@brief G-code printer object (gcode). */
 class GcodeObject : public PrinterObject {
 public:
     std::string name() const override { return "gcode"; }

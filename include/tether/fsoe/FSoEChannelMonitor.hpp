@@ -77,40 +77,48 @@ public:
         return false;
     }
 
-    /// Direction a Reset frame travelled — master→slave resets and
-    /// slave→master resets are tallied separately so a flapping
-    /// connection shows which side keeps restarting it.
+    /**
+     * Direction a Reset frame travelled — master→slave resets and
+     * slave→master resets are tallied separately so a flapping
+     * connection shows which side keeps restarting it.
+     */
     enum class ResetOrigin : size_t { Master = 0, Slave = 1 };
 
-    /// Tally a reset-reason code observed on channel `k` (the reason the
-    /// endpoint embedded in its Reset frame, 0–255).
+    /**
+     * Tally a reset-reason code observed on channel `k` (the reason the
+     * endpoint embedded in its Reset frame, 0–255).
+     */
     void noteResetReason(size_t k, ResetOrigin origin, uint8_t reason) {
         ++ch_[k].reset_reasons[static_cast<size_t>(origin)][reason];
     }
 
-    /// Occurrences of `reason` on channel `k` in direction `origin`
-    /// since construction/clearResetReasons().
+    /**
+     * Occurrences of `reason` on channel `k` in direction `origin`
+     * since construction/clearResetReasons().
+     */
     uint32_t resetReasonCount(size_t k, ResetOrigin origin,
                               uint8_t reason) const {
         return ch_[k].reset_reasons[static_cast<size_t>(origin)][reason];
     }
-    /// Full reason-code histogram for channel `k` / direction `origin`.
+    /**Full reason-code histogram for channel `k` / direction `origin`. */
     const std::array<uint32_t, 256>& resetReasons(
         size_t k, ResetOrigin origin) const {
         return ch_[k].reset_reasons[static_cast<size_t>(origin)];
     }
-    /// Clear all per-channel counters (state tracking is kept).
+    /**Clear all per-channel counters (state tracking is kept). */
     void clearResetReasons() {
         for (auto& c : ch_)
             for (auto& t : c.reset_reasons) t.fill(0);
     }
 
-    /// Derived FSoE connection state of channel `k`
-    /// (`FSoE::ConnectionState` ordinal; `fsoeStateName()` formats it).
+    /**
+     * Derived FSoE connection state of channel `k`
+     * (`FSoE::ConnectionState` ordinal; `fsoeStateName()` formats it).
+     */
     uint8_t state(size_t k) const { return ch_[k].state; }
-    /// Last master command byte fed for channel `k`.
+    /**Last master command byte fed for channel `k`. */
     uint8_t lastCmd(size_t k) const { return ch_[k].last_cmd; }
-    /// When the channel entered its current state.
+    /**When the channel entered its current state. */
     std::chrono::steady_clock::time_point stateSince(size_t k) const {
         return ch_[k].state_since;
     }

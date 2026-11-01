@@ -41,14 +41,16 @@ namespace tether { namespace io {
 // Entry ids
 // ---------------------------------------------------------------------------
 
-/// Canonical entry-id derivation: FNV-1a 64 over the dotted entry name
-/// (e.g. "state.frame", "cmd.vx"). Servers that derive ids from names
-/// (instead of numbering manually) should use this so producers and
-/// clients agree on the id↔name mapping by construction. Ids are
-/// negotiated through the entry listing, so the convention only needs to
-/// be consistent, not universal.
-/// @param name dotted entry name.
-/// @return the 64-bit FNV-1a hash.
+/**
+ * Canonical entry-id derivation: FNV-1a 64 over the dotted entry name
+ * (e.g. "state.frame", "cmd.vx"). Servers that derive ids from names
+ * (instead of numbering manually) should use this so producers and
+ * clients agree on the id↔name mapping by construction. Ids are
+ * negotiated through the entry listing, so the convention only needs to
+ * be consistent, not universal.
+ * @param name dotted entry name.
+ * @return the 64-bit FNV-1a hash.
+ */
 inline constexpr uint64_t entryId(std::string_view name) {
     uint64_t h = 14695981039346656037ull;   // FNV offset basis
     for (char c : name) {
@@ -62,33 +64,33 @@ inline constexpr uint64_t entryId(std::string_view name) {
 // Callback types
 // ---------------------------------------------------------------------------
 
-/// Reads a fixed-size value into dest (exactly valueTypeSize bytes).
+/**Reads a fixed-size value into dest (exactly valueTypeSize bytes). */
 using ReadFn  = std::function<void(void* dest)>;
-/// Writes a fixed-size value from src (exactly valueTypeSize bytes).
+/**Writes a fixed-size value from src (exactly valueTypeSize bytes). */
 using WriteFn = std::function<void(const void* src)>;
-/// Reads a variable-length value. Returns actual bytes written (≤ maxLen).
+/**Reads a variable-length value. Returns actual bytes written (≤ maxLen). */
 using VarReadFn  = std::function<size_t(void* dest, size_t maxLen)>;
-/// Writes a variable-length value.
+/**Writes a variable-length value. */
 using VarWriteFn = std::function<void(const void* src, size_t len)>;
 
 // ---------------------------------------------------------------------------
 // Parameter entry
 // ---------------------------------------------------------------------------
 
-/// A single parameter definition.
+/**A single parameter definition. */
 struct ParamEntry {
     uint64_t    id;
     std::string name;
     std::string description;
-    std::string group;              ///< Logical group (e.g. "pid.axis0", "ethercat.slave1")
+    std::string group; /**< Logical group (e.g. "pid.axis0", "ethercat.slave1") */
     ValueType   valueType;
     ReadFn      readFn;
-    WriteFn     writeFn;            ///< nullptr = read-only parameter
-    VarReadFn   varReadFn;          ///< For String/Binary
-    VarWriteFn  varWriteFn;         ///< For String/Binary
-    uint16_t    maxValueSize = 0;   ///< 0 for fixed-size; max bytes for variable-length
+    WriteFn     writeFn; /**< nullptr = read-only parameter */
+    VarReadFn   varReadFn; /**< For String/Binary */
+    VarWriteFn  varWriteFn; /**< For String/Binary */
+    uint16_t    maxValueSize = 0; /**< 0 for fixed-size; max bytes for variable-length */
     std::map<std::string, std::string> metadata;
-    uint8_t     extraFlags = 0;     ///< Additional EntryFlags bits (e.g. NoStream)
+    uint8_t     extraFlags = 0; /**< Additional EntryFlags bits (e.g. NoStream) */
     SchemaRef   schema;
     uint32_t    schemaSlot = 0;
 
@@ -108,7 +110,7 @@ struct ParamEntry {
 // Signal entry
 // ---------------------------------------------------------------------------
 
-/// A single signal definition (read-only).
+/**A single signal definition (read-only). */
 struct SignalEntry {
     uint64_t    id;
     std::string name;
@@ -119,7 +121,7 @@ struct SignalEntry {
     VarReadFn   varReadFn;
     uint16_t    maxValueSize = 0;
     std::map<std::string, std::string> metadata;
-    uint8_t     extraFlags = 0;     ///< Additional EntryFlags bits (e.g. NoStream)
+    uint8_t     extraFlags = 0; /**< Additional EntryFlags bits (e.g. NoStream) */
     SchemaRef   schema;
     uint32_t    schemaSlot = 0;
 
@@ -209,7 +211,7 @@ private:
 // Catalog change listener
 // ---------------------------------------------------------------------------
 
-/// Callback invoked when the catalog changes (entries added/removed).
+/**Callback invoked when the catalog changes (entries added/removed). */
 using CatalogChangeListener = std::function<void()>;
 
 // ---------------------------------------------------------------------------
@@ -229,94 +231,128 @@ using CatalogChangeListener = std::function<void()>;
  */
 class Registry {
 public:
-    /// Register a parameter. Returns true on success, false if ID is duplicate.
-    /// @param entry Parameter descriptor to add; must have a unique ID
-    /// @return `true` if registered, `false` if the ID already exists
+    /**
+     * Register a parameter. Returns true on success, false if ID is duplicate.
+     * @param entry Parameter descriptor to add; must have a unique ID
+     * @return `true` if registered, `false` if the ID already exists
+     */
     bool addParam(ParamEntry entry);
 
-    /// Register a signal. Returns true on success, false if ID is duplicate.
-    /// @param entry Signal descriptor to add; must have a unique ID
-    /// @return `true` if registered, `false` if the ID already exists
+    /**
+     * Register a signal. Returns true on success, false if ID is duplicate.
+     * @param entry Signal descriptor to add; must have a unique ID
+     * @return `true` if registered, `false` if the ID already exists
+     */
     bool addSignal(SignalEntry entry);
 
-    /// Total parameter count.
-    /// @return Number of registered parameters
+    /**
+     * Total parameter count.
+     * @return Number of registered parameters
+     */
     uint32_t paramCount() const;
 
-    /// Total signal count.
-    /// @return Number of registered signals
+    /**
+     * Total signal count.
+     * @return Number of registered signals
+     */
     uint32_t signalCount() const;
 
-    /// Total entry count (params + signals).
-    /// @return paramCount() + signalCount()
+    /**
+     * Total entry count (params + signals).
+     * @return paramCount() + signalCount()
+     */
     uint32_t totalCount() const;
 
-    /// Get a page of parameter views.
-    /// @param offset Index of the first parameter to include
-    /// @param maxCount Maximum number of entries to return
-    /// @return Up to `maxCount` views starting at `offset`; empty if
-    ///         `offset` is past the end
+    /**
+     * Get a page of parameter views.
+     * @param offset Index of the first parameter to include
+     * @param maxCount Maximum number of entries to return
+     * @return Up to `maxCount` views starting at `offset`; empty if
+     *         `offset` is past the end
+     */
     std::vector<EntryView> paramPage(uint32_t offset, uint32_t maxCount) const;
 
-    /// Get a page of signal views.
-    /// @param offset Index of the first signal to include
-    /// @param maxCount Maximum number of entries to return
-    /// @return Up to `maxCount` views starting at `offset`; empty if
-    ///         `offset` is past the end
+    /**
+     * Get a page of signal views.
+     * @param offset Index of the first signal to include
+     * @param maxCount Maximum number of entries to return
+     * @return Up to `maxCount` views starting at `offset`; empty if
+     *         `offset` is past the end
+     */
     std::vector<EntryView> signalPage(uint32_t offset, uint32_t maxCount) const;
 
-    /// Find any entry (param or signal) by ID.
-    /// @param id Entry ID to look up
-    /// @return View of the entry; converts to `false` when `id` is unknown
+    /**
+     * Find any entry (param or signal) by ID.
+     * @param id Entry ID to look up
+     * @return View of the entry; converts to `false` when `id` is unknown
+     */
     EntryView find(uint64_t id) const;
 
-    /// Find a parameter by ID.
-    /// @param id Parameter ID to look up
-    /// @return View of the parameter; converts to `false` when `id` is
-    ///         unknown or names a signal/function
+    /**
+     * Find a parameter by ID.
+     * @param id Parameter ID to look up
+     * @return View of the parameter; converts to `false` when `id` is
+     *         unknown or names a signal/function
+     */
     EntryView findParam(uint64_t id) const;
 
-    /// Find a signal by ID.
-    /// @param id Signal ID to look up
-    /// @return View of the signal; converts to `false` when `id` is
-    ///         unknown or names a param/function
+    /**
+     * Find a signal by ID.
+     * @param id Signal ID to look up
+     * @return View of the signal; converts to `false` when `id` is
+     *         unknown or names a param/function
+     */
     EntryView findSignal(uint64_t id) const;
 
-    /// Register a fully annotated function. IDs are unique across all catalogs.
-    /// @param entry Function descriptor to add; must have a unique ID
-    /// @return `true` if registered, `false` if the ID already exists
+    /**
+     * Register a fully annotated function. IDs are unique across all catalogs.
+     * @param entry Function descriptor to add; must have a unique ID
+     * @return `true` if registered, `false` if the ID already exists
+     */
     bool addFunction(FunctionEntry entry);
 
-    /// Total registered function count.
-    /// @return Number of registered functions
+    /**
+     * Total registered function count.
+     * @return Number of registered functions
+     */
     uint32_t functionCount() const;
 
-    /// Get a page of function descriptors.
-    /// @param offset Index of the first function to include
-    /// @param maxCount Maximum number of entries to return
-    /// @return Up to `maxCount` views starting at `offset`; empty if
-    ///         `offset` is past the end
+    /**
+     * Get a page of function descriptors.
+     * @param offset Index of the first function to include
+     * @param maxCount Maximum number of entries to return
+     * @return Up to `maxCount` views starting at `offset`; empty if
+     *         `offset` is past the end
+     */
     std::vector<FunctionView> functionPage(uint32_t offset, uint32_t maxCount) const;
 
-    /// Find a function by ID.
-    /// @param id Function ID to look up
-    /// @return View of the function; converts to `false` when `id` is
-    ///         unknown or names a param/signal
+    /**
+     * Find a function by ID.
+     * @param id Function ID to look up
+     * @return View of the function; converts to `false` when `id` is
+     *         unknown or names a param/signal
+     */
     FunctionView findFunction(uint64_t id) const;
 
-    /// Register a catalog change listener. Returns a handle for removal.
-    /// @param listener Callback invoked whenever the catalog changes
-    /// @return Opaque handle to pass to removeChangeListener()
+    /**
+     * Register a catalog change listener. Returns a handle for removal.
+     * @param listener Callback invoked whenever the catalog changes
+     * @return Opaque handle to pass to removeChangeListener()
+     */
     size_t addChangeListener(CatalogChangeListener listener);
 
-    /// Remove a catalog change listener by handle.
-    /// @param handle Handle returned by addChangeListener(); unknown
-    ///        handles are ignored. Blocks until any in-flight invocation
-    ///        of this listener completes.
+    /**
+     * Remove a catalog change listener by handle.
+     * @param handle Handle returned by addChangeListener(); unknown
+     *        handles are ignored. Blocks until any in-flight invocation
+     *        of this listener completes.
+     */
     void removeChangeListener(size_t handle);
 
-    /// Get a monotonically increasing revision counter (incremented on each add).
-    /// @return Current catalog revision; clients can poll this to detect changes
+    /**
+     * Get a monotonically increasing revision counter (incremented on each add).
+     * @return Current catalog revision; clients can poll this to detect changes
+     */
     uint32_t revision() const { return revision_; }
 
     /**
@@ -328,9 +364,11 @@ public:
      */
     void clear();
 
-    /// Configure the declarative stream-filter properties supported by this registry.
-    /// @param definition Filter property to declare; subsequent
-    ///        validateStreamFilter() calls accept properties matching it
+    /**
+     * Configure the declarative stream-filter properties supported by this registry.
+     * @param definition Filter property to declare; subsequent
+     *        validateStreamFilter() calls accept properties matching it
+     */
     void defineStreamFilterProperty(FilterPropertyDef definition);
     StreamFilterSchema::Result validateStreamFilter(const FilterProperty& property) const;
     bool supportsStreamFilters() const;
@@ -344,19 +382,21 @@ private:
     std::deque<ParamEntry>  params_;
     std::deque<SignalEntry> signals_;
     std::deque<FunctionEntry> functions_;
-    std::map<uint64_t, EntryKind> idMap_;  ///< id → kind for fast lookup
+    std::map<uint64_t, EntryKind> idMap_; /**< id → kind for fast lookup */
     StreamFilterSchema filterSchema_;
     uint32_t revision_ = 0;
 
     std::map<size_t, CatalogChangeListener> listeners_;
     size_t nextListenerHandle_ = 1;
 
-    /// In-flight callback counter. `notifyChange` increments this under
-    /// `mutex_` before invoking listeners outside the lock; `removeChangeListener`
-    /// waits for it to reach zero before returning, guaranteeing that no
-    /// in-flight callback can outlive a removed (and potentially destroyed)
-    /// listener. This prevents use-after-free when a listener captures `this`
-    /// and the owner is destroyed during `removeChangeListener`.
+    /**
+     * In-flight callback counter. `notifyChange` increments this under
+     * `mutex_` before invoking listeners outside the lock; `removeChangeListener`
+     * waits for it to reach zero before returning, guaranteeing that no
+     * in-flight callback can outlive a removed (and potentially destroyed)
+     * listener. This prevents use-after-free when a listener captures `this`
+     * and the owner is destroyed during `removeChangeListener`.
+     */
     mutable std::condition_variable notifyCv_;
     uint32_t notifyInFlight_ = 0;
 };

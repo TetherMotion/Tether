@@ -68,18 +68,18 @@ constexpr uint32_t DeviceType = 0x00000196; // 406 in hex
  * @brief Encoder class definitions
  */
 enum class EncoderClass : uint8_t {
-    AbsoluteSingleTurn = 1,  ///< C1: Absolute single-turn encoder
-    AbsoluteMultiTurn  = 2,  ///< C2: Absolute multi-turn encoder
-    Incremental        = 3,  ///< C3: Incremental encoder
-    IncrementalLimit   = 4,  ///< C4: Incremental with limit switches
+    AbsoluteSingleTurn = 1, /**< C1: Absolute single-turn encoder */
+    AbsoluteMultiTurn  = 2, /**< C2: Absolute multi-turn encoder */
+    Incremental        = 3, /**< C3: Incremental encoder */
+    IncrementalLimit   = 4, /**< C4: Incremental with limit switches */
 };
 
 /**
  * @brief Encoder subclass/type definitions
  */
 enum class EncoderType : uint8_t {
-    Rotary = 0,   ///< Rotary encoder
-    Linear = 1,   ///< Linear encoder/scale
+    Rotary = 0, /**< Rotary encoder */
+    Linear = 1, /**< Linear encoder/scale */
 };
 
 // ============================================================================
@@ -98,9 +98,9 @@ constexpr uint16_t OperatingParameters          = 0x6000;
 
 namespace OperatingParametersSub {
     constexpr uint8_t NumberOfEntries           = 0x00;
-    constexpr uint8_t CodingSequence            = 0x01;  ///< 0=CW increasing, 1=CCW increasing
-    constexpr uint8_t ScalingFunctionEnabled    = 0x02;  ///< 0=disabled, 1=enabled
-    constexpr uint8_t EncoderClass              = 0x03;  ///< Encoder class C1-C4
+    constexpr uint8_t CodingSequence            = 0x01; /**< 0=CW increasing, 1=CCW increasing */
+    constexpr uint8_t ScalingFunctionEnabled    = 0x02; /**< 0=disabled, 1=enabled */
+    constexpr uint8_t EncoderClass              = 0x03; /**< Encoder class C1-C4 */
 }
 
 /**
@@ -483,13 +483,13 @@ constexpr uint16_t SSIConfiguration             = 0x6601;
 
 namespace SSIConfigSub {
     constexpr uint8_t NumberOfEntries           = 0x00;
-    constexpr uint8_t ClockFrequency            = 0x01;  ///< kHz
-    constexpr uint8_t DataBits                  = 0x02;  ///< Total data bits
-    constexpr uint8_t BinaryGray                = 0x03;  ///< 0=Binary, 1=Gray
-    constexpr uint8_t MSBFirst                  = 0x04;  ///< 0=LSB first, 1=MSB first
-    constexpr uint8_t MonoFlop                  = 0x05;  ///< Monoflop time in µs
-    constexpr uint8_t ErrorBit                  = 0x06;  ///< Error bit position
-    constexpr uint8_t WarningBit                = 0x07;  ///< Warning bit position
+    constexpr uint8_t ClockFrequency            = 0x01; /**< kHz */
+    constexpr uint8_t DataBits                  = 0x02; /**< Total data bits */
+    constexpr uint8_t BinaryGray                = 0x03; /**< 0=Binary, 1=Gray */
+    constexpr uint8_t MSBFirst                  = 0x04; /**< 0=LSB first, 1=MSB first */
+    constexpr uint8_t MonoFlop                  = 0x05; /**< Monoflop time in µs */
+    constexpr uint8_t ErrorBit                  = 0x06; /**< Error bit position */
+    constexpr uint8_t WarningBit                = 0x07; /**< Warning bit position */
 }
 
 /**
@@ -627,19 +627,19 @@ constexpr uint16_t HardwareVersion              = 0x6906;
 // ============================================================================
 
 namespace PDOMapping {
-    /// Common TxPDO entry for position value (32-bit)
+    /**Common TxPDO entry for position value (32-bit) */
     constexpr uint32_t PositionValue32      = 0x60040020;  // 0x6004:00, 32 bits
     
-    /// Common TxPDO entry for velocity actual (32-bit)
+    /**Common TxPDO entry for velocity actual (32-bit) */
     constexpr uint32_t VelocityActual32     = 0x60200020;  // 0x6020:00, 32 bits
     
-    /// Common TxPDO entry for operating status (16-bit)
+    /**Common TxPDO entry for operating status (16-bit) */
     constexpr uint32_t OperatingStatus16    = 0x60100010;  // 0x6010:00, 16 bits
     
-    /// Common TxPDO entry for alarm object (16-bit)
+    /**Common TxPDO entry for alarm object (16-bit) */
     constexpr uint32_t AlarmObject16        = 0x60500010;  // 0x6050:00, 16 bits
     
-    /// Common RxPDO entry for preset value (32-bit)
+    /**Common RxPDO entry for preset value (32-bit) */
     constexpr uint32_t PresetValue32        = 0x60030020;  // 0x6003:00, 32 bits
 }
 

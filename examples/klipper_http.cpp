@@ -70,19 +70,21 @@ using namespace tether::klipper::objects;
 // Thermal simulation
 // ============================================================================
 
-/// @brief Thermal plant for one heater, backed by a SingleZoneOven model.
-///
-/// The oven dynamics are:
-///   C_th * dT/dt = eta * Q - (T - T_amb) / R_th
-/// where Q is the heater power in Watts.  The PID controller in the Heater
-/// class produces a PWM duty cycle in [0, 1]; we scale it by maxPowerW to
-/// obtain Q.
+/**
+ * @brief Thermal plant for one heater, backed by a SingleZoneOven model.
+ *
+ * The oven dynamics are:
+ *   C_th * dT/dt = eta * Q - (T - T_amb) / R_th
+ * where Q is the heater power in Watts.  The PID controller in the Heater
+ * class produces a PWM duty cycle in [0, 1]; we scale it by maxPowerW to
+ * obtain Q.
+ */
 struct ThermalPlant {
     Simulation::SingleZoneOven oven;
     double maxPowerW;
-    double pwm = 0.0;   ///< Last applied PWM duty cycle (0..1)
-    double temp = 25.0; ///< Current plant temperature [°C]
-    double dt;          ///< Simulation time step [s]
+    double pwm = 0.0; /**< Last applied PWM duty cycle (0..1) */
+    double temp = 25.0; /**< Current plant temperature [°C] */
+    double dt; /**< Simulation time step [s] */
 
     ThermalPlant(double C_th, double R_th, double eta, double T_amb,
                  double maxPower, double step)
@@ -93,7 +95,7 @@ struct ThermalPlant {
         oven.setParameter("T_amb", T_amb);
     }
 
-    /// Advance the plant by one dt using forward Euler.
+    /**Advance the plant by one dt using forward Euler. */
     void step() {
         double Q = pwm * maxPowerW;
         auto d = oven.dynamics(0.0, {temp}, {Q});
@@ -105,8 +107,10 @@ struct ThermalPlant {
 // Default printer.cfg for the simulated printer
 // ============================================================================
 
-/// @brief Write a default printer.cfg matching the simulated printer.
-/// @param path Full path to the output file.
+/**
+ * @brief Write a default printer.cfg matching the simulated printer.
+ * @param path Full path to the output file.
+ */
 static void generateDefaultPrinterCfg(const std::string& path) {
     std::ofstream f(path);
     if (!f.is_open()) return;
@@ -236,9 +240,11 @@ static void generateDefaultPrinterCfg(const std::string& path) {
 // G-code sample file generation
 // ============================================================================
 
-/// @brief Generate a sample G-code file that prints a small calibration square.
-/// @param path Full path to the output file.
-/// @param layers Number of print layers to generate.
+/**
+ * @brief Generate a sample G-code file that prints a small calibration square.
+ * @param path Full path to the output file.
+ * @param layers Number of print layers to generate.
+ */
 static void generateSampleGcode(const std::string& path, int layers) {
     std::ofstream f(path);
     if (!f.is_open()) return;
@@ -282,9 +288,11 @@ static void generateSampleGcode(const std::string& path, int layers) {
 // Main
 // ============================================================================
 
-/// @brief Resolve a writable default data directory.
-/// Uses $XDG_DATA_HOME/tether, $HOME/.local/share/tether, or /tmp/tether
-/// (in that order) so the example never tries to write to /etc or /var.
+/**
+ * @brief Resolve a writable default data directory.
+ * Uses $XDG_DATA_HOME/tether, $HOME/.local/share/tether, or /tmp/tether
+ * (in that order) so the example never tries to write to /etc or /var.
+ */
 static std::string defaultDataDir(const std::string& subdir) {
     namespace fs = std::filesystem;
     // 1. XDG_DATA_HOME
@@ -299,7 +307,7 @@ static std::string defaultDataDir(const std::string& subdir) {
     return (fs::path("/tmp/tether") / subdir).string();
 }
 
-/// @brief Resolve a writable default config directory.
+/**@brief Resolve a writable default config directory. */
 static std::string defaultConfigDir() {
     namespace fs = std::filesystem;
     if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg) {
@@ -315,8 +323,10 @@ static std::string defaultConfigDir() {
 // Web UI (Mainsail / Fluidd) setup
 // ============================================================================
 
-/// @brief Ask the user a yes/no question on stdin.
-/// @return true if the user answered 'y' or 'Y', false otherwise.
+/**
+ * @brief Ask the user a yes/no question on stdin.
+ * @return true if the user answered 'y' or 'Y', false otherwise.
+ */
 static bool askYesNo(const std::string& question) {
     std::printf("%s [y/N] ", question.c_str());
     std::fflush(stdout);
@@ -325,8 +335,10 @@ static bool askYesNo(const std::string& question) {
     return !line.empty() && (line[0] == 'y' || line[0] == 'Y');
 }
 
-/// @brief Run a shell command, streaming its output to stdout/stderr.
-/// @return true if the command exited with status 0.
+/**
+ * @brief Run a shell command, streaming its output to stdout/stderr.
+ * @return true if the command exited with status 0.
+ */
 static bool runCommand(const std::string& cmd) {
     std::printf("  $ %s\n", cmd.c_str());
     std::fflush(stdout);
@@ -337,15 +349,17 @@ static bool runCommand(const std::string& cmd) {
     return rc == 0;
 }
 
-/// @brief Check if a directory looks like a built Mainsail/Fluidd dist.
+/**@brief Check if a directory looks like a built Mainsail/Fluidd dist. */
 static bool isBuiltDist(const std::filesystem::path& dir) {
     namespace fs = std::filesystem;
     return fs::exists(dir / "index.html") &&
            fs::exists(dir / "config.json");
 }
 
-/// @brief Check if a file contains a given substring (used to detect whether
-///        an existing config.json is already in the Fluidd schema).
+/**
+ * @brief Check if a file contains a given substring (used to detect whether
+ *        an existing config.json is already in the Fluidd schema).
+ */
 static bool fileContains(const std::filesystem::path& path, const std::string& needle) {
     std::ifstream f(path);
     if (!f.is_open()) return false;
@@ -354,17 +368,19 @@ static bool fileContains(const std::filesystem::path& path, const std::string& n
     return content.find(needle) != std::string::npos;
 }
 
-/// @brief Write a Mainsail/Fluidd config.json that points to the given port.
-///
-/// Mainsail and Fluidd use **different config.json schemas**:
-/// - Mainsail: `{ "instances": [{ "hostname": "localhost", "port": PORT }] }`
-/// - Fluidd:   `{ "endpoints": [], "blacklist": [...], "hosted": false, "themePresets": [...] }`
-///
-/// When Tether serves both the SPA and the API on the same port, Fluidd's
-/// default `endpoints: []` makes it fall back to the browser URL, which is
-/// already correct.  So for Fluidd we only write a config if one is missing
-/// or is in the wrong (Mainsail) schema  -  we never overwrite a valid Fluidd
-/// config because it contains themePresets we don't want to clobber.
+/**
+ * @brief Write a Mainsail/Fluidd config.json that points to the given port.
+ *
+ * Mainsail and Fluidd use **different config.json schemas**:
+ * - Mainsail: `{ "instances": [{ "hostname": "localhost", "port": PORT }] }`
+ * - Fluidd:   `{ "endpoints": [], "blacklist": [...], "hosted": false, "themePresets": [...] }`
+ *
+ * When Tether serves both the SPA and the API on the same port, Fluidd's
+ * default `endpoints: []` makes it fall back to the browser URL, which is
+ * already correct.  So for Fluidd we only write a config if one is missing
+ * or is in the wrong (Mainsail) schema  -  we never overwrite a valid Fluidd
+ * config because it contains themePresets we don't want to clobber.
+ */
 static void writeWebUiConfig(const std::filesystem::path& distDir,
                               const std::string& uiName, uint16_t port) {
     namespace fs = std::filesystem;
@@ -405,31 +421,33 @@ static void writeWebUiConfig(const std::filesystem::path& distDir,
       << "}\n";
 }
 
-/// @brief Check whether a shell command is available on PATH.
+/**@brief Check whether a shell command is available on PATH. */
 static bool commandAvailable(const std::string& cmd) {
     // `command -v` is POSIX; returns 0 if cmd resolves on PATH.
     return std::system(("command -v " + cmd + " >/dev/null 2>&1").c_str()) == 0;
 }
 
-/// @brief Detected package manager for a Node project.
+/**@brief Detected package manager for a Node project. */
 struct PackageManager {
-    std::string name;       ///< "pnpm", "yarn", or "npm" (for user-facing messages).
-    std::string installCmd; ///< Shell token after "cd <dir> && " (e.g. "corepack pnpm install").
-    std::string buildCmd;   ///< Shell token after "cd <dir> && " (e.g. "corepack pnpm run build").
+    std::string name; /**< "pnpm", "yarn", or "npm" (for user-facing messages). */
+    std::string installCmd; /**< Shell token after "cd <dir> && " (e.g. "corepack pnpm install"). */
+    std::string buildCmd; /**< Shell token after "cd <dir> && " (e.g. "corepack pnpm run build"). */
 };
 
-/// @brief Detect the package manager for a Node project from its lockfile.
-///
-/// pnpm-lock.yaml  → pnpm  (Fluidd uses the `catalog:` protocol in package.json
-///                          overrides, which npm cannot resolve  -  EUNSUPPORTEDPROTOCOL.
-///                          Node ≥16.9 ships corepack, so prefer `corepack pnpm`
-///                          to avoid needing a global pnpm install.)
-/// yarn.lock       → yarn  (prefer corepack yarn, fall back to bare yarn)
-/// otherwise       → npm
-///
-/// If a pnpm-lock.yaml is present but neither corepack nor pnpm is available,
-/// we warn and fall back to npm (which will likely fail on catalog: URLs, but
-/// the error is then self-explanatory).
+/**
+ * @brief Detect the package manager for a Node project from its lockfile.
+ *
+ * pnpm-lock.yaml  → pnpm  (Fluidd uses the `catalog:` protocol in package.json
+ *                          overrides, which npm cannot resolve  -  EUNSUPPORTEDPROTOCOL.
+ *                          Node ≥16.9 ships corepack, so prefer `corepack pnpm`
+ *                          to avoid needing a global pnpm install.)
+ * yarn.lock       → yarn  (prefer corepack yarn, fall back to bare yarn)
+ * otherwise       → npm
+ *
+ * If a pnpm-lock.yaml is present but neither corepack nor pnpm is available,
+ * we warn and fall back to npm (which will likely fail on catalog: URLs, but
+ * the error is then self-explanatory).
+ */
 static PackageManager detectPackageManager(const std::filesystem::path& dir) {
     namespace fs = std::filesystem;
     if (fs::exists(dir / "pnpm-lock.yaml")) {
@@ -454,8 +472,10 @@ static PackageManager detectPackageManager(const std::filesystem::path& dir) {
     return {"npm", "npm install", "npm run build"};
 }
 
-/// @brief Run `install` then `build` for a Node project using the detected PM.
-/// @return true if both commands exited 0.
+/**
+ * @brief Run `install` then `build` for a Node project using the detected PM.
+ * @return true if both commands exited 0.
+ */
 static bool installAndBuild(const std::filesystem::path& dir, const PackageManager& pm) {
     std::string cd = "cd " + dir.string();
     if (!runCommand(cd + " && " + pm.installCmd)) {
@@ -469,15 +489,17 @@ static bool installAndBuild(const std::filesystem::path& dir, const PackageManag
     return true;
 }
 
-/// @brief Ensure a web UI (Mainsail or Fluidd) is built and return the dist path.
-///
-/// @param uiDir     Directory passed via --mainsail or --fluidd.
-/// @param repoUrl   Git URL to clone from if the directory doesn't exist.
-/// @param uiName    Human-readable name ("Mainsail" or "Fluidd").
-/// @param subdirName  Name for the subdirectory if uiDir already exists
-///                    (e.g. "mainsail" or "fluidd").
-/// @param port      Port for the config.json.
-/// @return Path to the dist/ directory containing index.html, or empty on failure.
+/**
+ * @brief Ensure a web UI (Mainsail or Fluidd) is built and return the dist path.
+ *
+ * @param uiDir     Directory passed via --mainsail or --fluidd.
+ * @param repoUrl   Git URL to clone from if the directory doesn't exist.
+ * @param uiName    Human-readable name ("Mainsail" or "Fluidd").
+ * @param subdirName  Name for the subdirectory if uiDir already exists
+ *                    (e.g. "mainsail" or "fluidd").
+ * @param port      Port for the config.json.
+ * @return Path to the dist/ directory containing index.html, or empty on failure.
+ */
 static std::string ensureWebUi(const std::string& uiDir,
                                 const std::string& repoUrl,
                                 const std::string& uiName,

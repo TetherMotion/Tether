@@ -22,8 +22,10 @@ namespace tether::motion::profile_renurbs {
 
 namespace detail {
 
-/// Convert a ReNURBSConfig to a GenericReNURBSConfig with 4 quantities
-/// (velocity, acceleration, jerk, time).
+/**
+ * Convert a ReNURBSConfig to a GenericReNURBSConfig with 4 quantities
+ * (velocity, acceleration, jerk, time).
+ */
 template<std::size_t Dim, typename T>
 GenericReNURBSConfig toGenericConfig(
     const ReNURBSConfig& cfg,
@@ -94,9 +96,11 @@ GenericReNURBSConfig toGenericConfig(
     return gc;
 }
 
-/// Sample an arbitrary VelocityProfile into tabulated points.
-/// If the profile is already a SampledVelocityProfile, reuse its points.
-/// Otherwise, sample the public query API uniformly in arc length.
+/**
+ * Sample an arbitrary VelocityProfile into tabulated points.
+ * If the profile is already a SampledVelocityProfile, reuse its points.
+ * Otherwise, sample the public query API uniformly in arc length.
+ */
 inline std::vector<MotionPlanner::VelocityProfilePoint>
 sampleProfileToPoints(const MotionPlanner::VelocityProfile& profile,
                       std::size_t numSamples = 200) {
@@ -123,7 +127,7 @@ sampleProfileToPoints(const MotionPlanner::VelocityProfile& profile,
     return points;
 }
 
-/// Convert a VelocityProfile + PathAdapter into generic samples + segments.
+/**Convert a VelocityProfile + PathAdapter into generic samples + segments. */
 template<std::size_t Dim, typename T>
 void toGenericSamples(
     const MotionPlanner::VelocityProfile& profile,

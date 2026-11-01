@@ -43,10 +43,12 @@ namespace tether::klipper::klippy {
 class KlippyUdsServer;
 struct KlippyInstanceConfig;
 
-/// @brief Printer object storage and setup for KlippyInstance.
-///
-/// Holds all printer object shared_ptrs and provides the setupObjects()
-/// method that creates and registers them with the UDS server.
+/**
+ * @brief Printer object storage and setup for KlippyInstance.
+ *
+ * Holds all printer object shared_ptrs and provides the setupObjects()
+ * method that creates and registers them with the UDS server.
+ */
 struct PrinterObjectRegistry {
     // --- Core printer objects ---
     std::shared_ptr<ToolheadObject> toolheadObj_;

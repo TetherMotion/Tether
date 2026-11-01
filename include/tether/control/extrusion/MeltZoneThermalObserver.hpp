@@ -79,44 +79,44 @@
 
 namespace tether::control::extrusion {
 
-/// @brief Parameters for the three-state melt-zone thermal observer.
+/**@brief Parameters for the three-state melt-zone thermal observer. */
 struct MeltZoneThermalParams {
     // --- Thermal capacitances [J/K] ---
-    double heaterBlockCapacitance = 8.0;   ///< C_h [J/K] — heater block mass
-    double sensorCapacitance      = 1.0;   ///< C_s [J/K] — thermistor + surrounding metal
-    double meltZoneCapacitance    = 2.0;   ///< C_m [J/K] — melt zone thermal mass
+    double heaterBlockCapacitance = 8.0; /**< C_h [J/K] — heater block mass */
+    double sensorCapacitance      = 1.0; /**< C_s [J/K] — thermistor + surrounding metal */
+    double meltZoneCapacitance    = 2.0; /**< C_m [J/K] — melt zone thermal mass */
 
     // --- Thermal conductances [W/K] ---
-    double heaterSensorConductance = 2.0;  ///< G_hs [W/K] — heater block → sensor
-    double sensorMeltConductance   = 1.5;  ///< G_sm [W/K] — sensor → melt zone
+    double heaterSensorConductance = 2.0; /**< G_hs [W/K] — heater block → sensor */
+    double sensorMeltConductance   = 1.5; /**< G_sm [W/K] — sensor → melt zone */
 
     // --- Filament properties ---
-    double filamentHeatCapacity   = 2.1;   ///< ρ·c_p [J/(mm³·K)]
-    double inletTempC             = 25.0;  ///< T_inlet [°C]
+    double filamentHeatCapacity   = 2.1; /**< ρ·c_p [J/(mm³·K)] */
+    double inletTempC             = 25.0; /**< T_inlet [°C] */
 
     // --- Heater ---
-    double heaterPowerScale       = 40.0;  ///< [W] at PWM=1
+    double heaterPowerScale       = 40.0; /**< [W] at PWM=1 */
 
     // --- Luenberger observer gains [1/s] ---
-    /// Correction applied to T_h from sensor innovation.
+    /**Correction applied to T_h from sensor innovation. */
     double luenbergerGainHeater   = 0.5;
-    /// Correction applied to T_s from sensor innovation (direct measurement).
+    /**Correction applied to T_s from sensor innovation (direct measurement). */
     double luenbergerGainSensor   = 2.0;
-    /// Correction applied to T_m from sensor innovation.
+    /**Correction applied to T_m from sensor innovation. */
     double luenbergerGainMelt     = 0.3;
 };
 
-/// @brief Three-state lumped melt-zone thermal observer with Luenberger correction.
+/**@brief Three-state lumped melt-zone thermal observer with Luenberger correction. */
 class MeltZoneThermalObserver {
 public:
     explicit MeltZoneThermalObserver(MeltZoneThermalParams params = MeltZoneThermalParams{})
         : params_(params) {}
 
-    /// @brief Set the parameters.
+    /**@brief Set the parameters. */
     void setParams(MeltZoneThermalParams p) { params_ = p; }
     const MeltZoneThermalParams& params() const { return params_; }
 
-    /// @brief Initialize all three states to known temperatures.
+    /**@brief Initialize all three states to known temperatures. */
     void initialize(double heaterBlockTempC, double sensorTempC,
                     double meltTempC) {
         heaterBlockTemp_ = heaterBlockTempC;
@@ -124,41 +124,49 @@ public:
         meltTemp_ = meltTempC;
     }
 
-    /// @brief Convenience: initialize all states to the same temperature
-    /// (e.g. from a single sensor reading at startup).
+    /**
+     * @brief Convenience: initialize all states to the same temperature
+     * (e.g. from a single sensor reading at startup).
+     */
     void initialize(double tempC) {
         initialize(tempC, tempC, tempC);
     }
 
-    /// @brief Seed the sensor state from a measured thermistor reading.
-    /// The heater-block and melt states are left as-is.
+    /**
+     * @brief Seed the sensor state from a measured thermistor reading.
+     * The heater-block and melt states are left as-is.
+     */
     void setSensorTemp(double tempC) { sensorTemp_ = tempC; }
 
-    /// @brief Advance the observer by one control interval.
-    /// @param heaterPWM Heater PWM fraction [0,1].
-    /// @param flowMm3PerS Volumetric flow [mm³/s].
-    /// @param dt Time step [s].
+    /**
+     * @brief Advance the observer by one control interval.
+     * @param heaterPWM Heater PWM fraction [0,1].
+     * @param flowMm3PerS Volumetric flow [mm³/s].
+     * @param dt Time step [s].
+     */
     void update(double heaterPWM, double flowMm3PerS, double dt);
 
-    /// @brief Advance the observer with Luenberger correction from a real
-    /// sensor measurement.
-    /// @param heaterPWM Heater PWM fraction [0,1].
-    /// @param flowMm3PerS Volumetric flow [mm³/s].
-    /// @param measuredSensorTempC The actual thermistor reading [°C].
-    /// @param dt Time step [s].
+    /**
+     * @brief Advance the observer with Luenberger correction from a real
+     * sensor measurement.
+     * @param heaterPWM Heater PWM fraction [0,1].
+     * @param flowMm3PerS Volumetric flow [mm³/s].
+     * @param measuredSensorTempC The actual thermistor reading [°C].
+     * @param dt Time step [s].
+     */
     void updateWithMeasurement(double heaterPWM, double flowMm3PerS,
                                double measuredSensorTempC, double dt);
 
-    /// @brief Estimated melt-zone temperature [°C].
+    /**@brief Estimated melt-zone temperature [°C]. */
     double meltTempEst() const { return meltTemp_; }
 
-    /// @brief Heater-block state [°C].
+    /**@brief Heater-block state [°C]. */
     double heaterBlockTemp() const { return heaterBlockTemp_; }
 
-    /// @brief Sensor-point state [°C].
+    /**@brief Sensor-point state [°C]. */
     double sensorTemp() const { return sensorTemp_; }
 
-    /// @brief Reset state to inlet temperature.
+    /**@brief Reset state to inlet temperature. */
     void reset() {
         heaterBlockTemp_ = params_.inletTempC;
         sensorTemp_ = params_.inletTempC;

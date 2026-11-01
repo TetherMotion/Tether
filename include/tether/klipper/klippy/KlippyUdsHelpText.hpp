@@ -20,13 +20,13 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief G-code help text entry.
+/**@brief G-code help text entry. */
 struct GcodeHelpEntry {
     const char* code;
     const char* description;
 };
 
-/// @brief Static table of G-code help text.
+/**@brief Static table of G-code help text. */
 inline constexpr std::array<GcodeHelpEntry, 85> GcodeHelpTable = {{
     // Motion
     {"G0",   "Rapid move"},
@@ -138,7 +138,7 @@ inline constexpr std::array<GcodeHelpEntry, 85> GcodeHelpTable = {{
     {"M600", "Filament change"},
 }};
 
-/// @brief Build the G-code help JSON map from the static table.
+/**@brief Build the G-code help JSON map from the static table. */
 inline JsonValue getGcodeHelpJson() {
     std::map<std::string, JsonValue> result;
     for (const auto& entry : GcodeHelpTable) {

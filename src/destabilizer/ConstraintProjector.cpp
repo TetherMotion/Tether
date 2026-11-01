@@ -1,5 +1,7 @@
-/// @file ConstraintProjector.cpp
-/// @brief Constraint projection implementations.
+/**
+ * @file ConstraintProjector.cpp
+ * @brief Constraint projection implementations.
+ */
 
 #include "tether/destabilizer/ConstraintProjector.hpp"
 #include <cmath>

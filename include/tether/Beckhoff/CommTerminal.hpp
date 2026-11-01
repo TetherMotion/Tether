@@ -92,7 +92,7 @@ inline constexpr DeviceIdentity EPP6090{0x00000002, 0x647742A9, 1, "EPP6090"};
 inline constexpr DeviceIdentity EPP6224{0x00000002, 0x64774C09, 4, "EPP6224"};
 inline constexpr DeviceIdentity EPP6228{0x00000002, 0x64774C69, 8, "EPP6228"};
 
-/// Every known communication terminal.
+/**Every known communication terminal. */
 inline constexpr std::array kCommTerminals{
     EL6001, EL6002, EL6021, EL6022, EL6070, EL6080, EL6090,
     EL6201, EL6224, EL6233, ELX6233,
@@ -127,12 +127,12 @@ public:
     CommTerminal(const CommTerminal&)                = delete;
     CommTerminal& operator=(const CommTerminal&)     = delete;
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
 
-    /// Scan the bus for the first slave matching `identity`.
+    /**Scan the bus for the first slave matching `identity`. */
     static Result<CommTerminal> findFirst(Master& master,
                                           const DeviceIdentity& identity);
     static Result<CommTerminal> findFirst(
@@ -141,38 +141,38 @@ public:
 
     // -- Bring-up ------------------------------------------------------------------
 
-    /// Standalone bring-up to SAFE-OP (position addressing).
+    /**Standalone bring-up to SAFE-OP (position addressing). */
     Result<> configure();
 
-    /// configure() then OP (+ managed realtime loop by default).
+    /**configure() then OP (+ managed realtime loop by default). */
     Result<> start() { return start(StartOptions()); }
     Result<> start(const StartOptions& opts);
 
-    /// Chained-operation contract (shared logical address space).
+    /**Chained-operation contract (shared logical address space). */
     Result<> prepareForLogicalExchange();
     Result<> mapLogicalAndEnterSafeOp();
     Result<> requestOp(int timeout_ms);
 
     // -- Channels ----------------------------------------------------------------------
 
-    /// Number of FIFO channel pairs resolved (0 before prepare()).
+    /**Number of FIFO channel pairs resolved (0 before prepare()). */
     size_t channels() const { return chans_.size(); }
 
-    /// Data capacity of the transmit/receive FIFO images, in bytes.
+    /**Data capacity of the transmit/receive FIFO images, in bytes. */
     size_t txCapacity(size_t ch) const;
     size_t rxCapacity(size_t ch) const;
 
     // -- Control / status words -----------------------------------------------------------
 
-    /// Ctrl word of channel `ch` (8- or 16-bit field, zero-extended).
+    /**Ctrl word of channel `ch` (8- or 16-bit field, zero-extended). */
     uint16_t ctrlWord(size_t ch) const;
-    /// Overwrite the channel's ctrl word.
+    /**Overwrite the channel's ctrl word. */
     void setCtrlWord(size_t ch, uint16_t w);
-    /// Single ctrl-word bit access (handshake toggles etc.).
+    /**Single ctrl-word bit access (handshake toggles etc.). */
     bool ctrlBit(size_t ch, uint8_t bit) const;
     void setCtrlBit(size_t ch, uint8_t bit, bool v);
 
-    /// Status word of channel `ch`.
+    /**Status word of channel `ch`. */
     uint16_t statusWord(size_t ch) const;
     bool statusBit(size_t ch, uint8_t bit) const;
 
@@ -184,25 +184,25 @@ public:
      */
     size_t writeData(size_t ch, std::span<const uint8_t> src);
 
-    /// Read view over the channel's receive FIFO image.
+    /**Read view over the channel's receive FIFO image. */
     std::span<const uint8_t> dataIn(size_t ch) const;
 
-    /// Copy the receive FIFO image into `dst`; @return bytes copied.
+    /**Copy the receive FIFO image into `dst`; @return bytes copied. */
     size_t readData(size_t ch, std::span<uint8_t> dst) const;
 
 private:
     bool resolveLayout();
     Result<> prepare(PDO::PDOAddressMode mode);
 
-    /// One resolved FIFO channel.
+    /**One resolved FIFO channel. */
     struct Channel {
-        uint16_t ctrl_off   = 0;    ///< byte offset in the output image
+        uint16_t ctrl_off   = 0; /**< byte offset in the output image */
         uint8_t  ctrl_bits  = 0;
-        uint16_t stat_off   = 0;    ///< byte offset in the input image
+        uint16_t stat_off   = 0; /**< byte offset in the input image */
         uint8_t  stat_bits  = 0;
-        uint16_t dout_off   = 0;    ///< first Data Out byte
-        uint16_t dout_len   = 0;    ///< Data Out byte count
-        uint16_t din_off    = 0;    ///< first Data In byte
+        uint16_t dout_off   = 0; /**< first Data Out byte */
+        uint16_t dout_len   = 0; /**< Data Out byte count */
+        uint16_t din_off    = 0; /**< first Data In byte */
         uint16_t din_len    = 0;
     };
 

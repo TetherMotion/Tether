@@ -69,7 +69,7 @@ inline constexpr DeviceIdentity ELM3604{0x00000002, 0x50219349, 4, "ELM3604"};
 inline constexpr DeviceIdentity ELM3702{0x00000002, 0x50219969, 2, "ELM3702"};
 inline constexpr DeviceIdentity ELM3704{0x00000002, 0x50219989, 4, "ELM3704"};
 
-/// Every known oversampling terminal.
+/**Every known oversampling terminal. */
 inline constexpr std::array kOversamplingTerminals{
     EL3773, EL3783,
     ELM3002, ELM3004, ELM3102, ELM3104, ELM3142, ELM3144, ELM3146,
@@ -86,7 +86,7 @@ inline constexpr std::array kOversamplingTerminals{
 class OversamplingTerminal : public TerminalBase {
 public:
     static constexpr size_t kMaxChannels  = 16;
-    static constexpr size_t kMaxSamples   = 1024;   ///< per channel/cycle
+    static constexpr size_t kMaxSamples   = 1024; /**< per channel/cycle */
 
     // -- Construction / factories ----------------------------------------------
 
@@ -102,12 +102,12 @@ public:
     OversamplingTerminal(const OversamplingTerminal&)                = delete;
     OversamplingTerminal& operator=(const OversamplingTerminal&)     = delete;
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
 
-    /// Scan the bus for the first slave matching `identity`.
+    /**Scan the bus for the first slave matching `identity`. */
     static Result<OversamplingTerminal> findFirst(
         Master& master, const DeviceIdentity& identity);
     static Result<OversamplingTerminal> findFirst(
@@ -116,27 +116,27 @@ public:
 
     // -- Bring-up ------------------------------------------------------------------
 
-    /// Standalone bring-up to SAFE-OP (position addressing).
+    /**Standalone bring-up to SAFE-OP (position addressing). */
     Result<> configure();
 
-    /// configure() then OP (+ managed realtime loop by default).
+    /**configure() then OP (+ managed realtime loop by default). */
     Result<> start() { return start(StartOptions()); }
     Result<> start(const StartOptions& opts);
 
-    /// Chained-operation contract (shared logical address space).
+    /**Chained-operation contract (shared logical address space). */
     Result<> prepareForLogicalExchange();
     Result<> mapLogicalAndEnterSafeOp();
     Result<> requestOp(int timeout_ms);
 
     // -- Samples -----------------------------------------------------------------------
 
-    /// Number of resolved channels (0 before prepare()).
+    /**Number of resolved channels (0 before prepare()). */
     size_t channels() const { return channels_.size(); }
 
-    /// Samples per channel per cycle (the oversampling factor).
+    /**Samples per channel per cycle (the oversampling factor). */
     size_t samplesPerCycle(size_t ch) const;
 
-    /// Bit width of the channel's sample entries (16/24/32).
+    /**Bit width of the channel's sample entries (16/24/32). */
     uint8_t sampleBits(size_t ch) const;
 
     /**
@@ -145,11 +145,13 @@ public:
      */
     int32_t sample(size_t ch, size_t i) const;
 
-    /// Copy the whole channel's sample block into `dst` (sign-extended).
-    /// @return samples written.
+    /**
+     * Copy the whole channel's sample block into `dst` (sign-extended).
+     * @return samples written.
+     */
     size_t samples(size_t ch, std::span<int32_t> dst) const;
 
-    /// Per-channel status word (16 bit), 0xffff when absent.
+    /**Per-channel status word (16 bit), 0xffff when absent. */
     uint16_t statusWord(size_t ch) const;
     bool hasStatus(size_t ch) const;
 
@@ -157,7 +159,7 @@ private:
     bool resolveLayout();
     Result<> prepare(PDO::PDOAddressMode mode);
 
-    /// One resolved sample field inside the input image.
+    /**One resolved sample field inside the input image. */
     struct Sample {
         uint16_t byte_off = 0;
         uint8_t  bit_len  = 0;

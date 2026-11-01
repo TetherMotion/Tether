@@ -53,7 +53,7 @@ EtherCATDC::~EtherCATDC() {
     stop();
 }
 
-/// No-op PDO exchange (used when no callback is provided)
+/**No-op PDO exchange (used when no callback is provided) */
 static bool ExchangeNoop_impl() { return true; }
 
 // ============================================================================
@@ -394,10 +394,10 @@ bool EtherCATDC::readSlaveCapabilities(uint16_t slave_index) {
 
 namespace {
 
-/// Fallback per-link delay when registers cannot be measured (ns).
+/**Fallback per-link delay when registers cannot be measured (ns). */
 constexpr uint32_t kFallbackLinkDelayNs = 150;
 
-/// Wrapping 32-bit time difference (receive-time registers are 32-bit).
+/**Wrapping 32-bit time difference (receive-time registers are 32-bit). */
 inline int32_t rt_diff(uint32_t a, uint32_t b) {
     return static_cast<int32_t>(a - b);
 }

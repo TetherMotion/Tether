@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file InputShaper.hpp
-/// @brief Input shaper for vibration compensation
+/**
+ * @file InputShaper.hpp
+ * @brief Input shaper for vibration compensation
+ */
 
 #include <cmath>
 #include <utility>
@@ -9,28 +11,30 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Input shaper type.
+/**@brief Input shaper type. */
 enum class ShaperType {
     None,
-    ZV,         ///< Zero Vibration
-    ZVD,        ///< Zero Vibration Derivative
-    MZV,        ///< Modified Zero Vibration
-    EI,         ///< Extra Insensitivity
-    DampedEI,   ///< Damped Extra Insensitivity
+    ZV, /**< Zero Vibration */
+    ZVD, /**< Zero Vibration Derivative */
+    MZV, /**< Modified Zero Vibration */
+    EI, /**< Extra Insensitivity */
+    DampedEI, /**< Damped Extra Insensitivity */
 };
 
-/// @brief Input shaper parameters.
+/**@brief Input shaper parameters. */
 struct InputShaperParams {
     ShaperType type = ShaperType::None;
-    double freq = 0.0;     ///< Shaping frequency (Hz)
-    double damping = 0.0;  ///< Damping ratio (0.0 = no damping)
+    double freq = 0.0; /**< Shaping frequency (Hz) */
+    double damping = 0.0; /**< Damping ratio (0.0 = no damping) */
 };
 
-/// @brief Input shaper for vibration compensation.
-///
-/// Implements input shaping to cancel mechanical resonances.
-/// The shaper modifies the acceleration profile of moves to
-/// reduce vibrations at specific frequencies.
+/**
+ * @brief Input shaper for vibration compensation.
+ *
+ * Implements input shaping to cancel mechanical resonances.
+ * The shaper modifies the acceleration profile of moves to
+ * reduce vibrations at specific frequencies.
+ */
 class InputShaper {
 public:
     explicit InputShaper(InputShaperParams params = {})
@@ -38,27 +42,29 @@ public:
         computeCoefficients();
     }
 
-    /// @brief Set the shaper parameters and recompute coefficients.
+    /**@brief Set the shaper parameters and recompute coefficients. */
     void setParams(InputShaperParams params) {
         params_ = params;
         computeCoefficients();
     }
 
-    /// @brief Get the current parameters.
+    /**@brief Get the current parameters. */
     const InputShaperParams& params() const { return params_; }
 
-    /// @brief Check if the shaper is active.
+    /**@brief Check if the shaper is active. */
     bool isActive() const { return params_.type != ShaperType::None && params_.freq > 0.0; }
 
-    /// @brief Get the shaping coefficients (A_i, t_i pairs).
+    /**@brief Get the shaping coefficients (A_i, t_i pairs). */
     const std::vector<std::pair<double, double>>& coefficients() const {
         return coeffs_;
     }
 
-    /// @brief Apply shaping to an acceleration command.
-    /// @param accel Input acceleration (mm/s^2)
-    /// @param time Current time (s)
-    /// @return Shaped acceleration.
+    /**
+     * @brief Apply shaping to an acceleration command.
+     * @param accel Input acceleration (mm/s^2)
+     * @param time Current time (s)
+     * @return Shaped acceleration.
+     */
     double shapeAcceleration(double accel, double time) const {
         if (!isActive() || coeffs_.empty()) return accel;
         double result = 0.0;
@@ -71,7 +77,7 @@ public:
         return result;
     }
 
-    /// @brief Get the total shaping delay (seconds).
+    /**@brief Get the total shaping delay (seconds). */
     double shapingDelay() const {
         if (coeffs_.empty()) return 0.0;
         return coeffs_.back().second;
@@ -124,10 +130,10 @@ private:
     }
 
     InputShaperParams params_;
-    std::vector<std::pair<double, double>> coeffs_; ///< (A_i, t_i) impulse pairs
+    std::vector<std::pair<double, double>> coeffs_; /**< (A_i, t_i) impulse pairs */
 };
 
-/// @brief Convert ShaperType to string representation.
+/**@brief Convert ShaperType to string representation. */
 inline const char* shaperTypeToString(ShaperType type) {
     switch (type) {
         case ShaperType::None:      return "none";

@@ -144,15 +144,15 @@ constexpr size_t kQueueDepth = ECAT_VOE_QUEUE_DEPTH;
  * vendor-defined.
  */
 enum class VoEError : uint32_t {
-    SUCCESS           = 0x0000,  ///< No error
-    TIMEOUT           = 0x0001,  ///< Communication timeout
-    MAILBOX_ERROR     = 0x0002,  ///< Mailbox communication failed
-    INVALID_VENDOR_ID = 0x0003,  ///< Unknown/unsupported vendor ID
-    BUFFER_TOO_SMALL  = 0x0004,  ///< Response buffer too small
-    INVALID_STATE     = 0x0005,  ///< Invalid protocol state
-    NOT_INITIALIZED   = 0x0006,  ///< VoE not initialized
-    QUEUE_FULL        = 0x0007,  ///< Request queue full
-    VENDOR_ERROR      = 0x1000,  ///< Vendor-specific error (check vendor data)
+    SUCCESS           = 0x0000, /**< No error */
+    TIMEOUT           = 0x0001, /**< Communication timeout */
+    MAILBOX_ERROR     = 0x0002, /**< Mailbox communication failed */
+    INVALID_VENDOR_ID = 0x0003, /**< Unknown/unsupported vendor ID */
+    BUFFER_TOO_SMALL  = 0x0004, /**< Response buffer too small */
+    INVALID_STATE     = 0x0005, /**< Invalid protocol state */
+    NOT_INITIALIZED   = 0x0006, /**< VoE not initialized */
+    QUEUE_FULL        = 0x0007, /**< Request queue full */
+    VENDOR_ERROR      = 0x1000, /**< Vendor-specific error (check vendor data) */
 };
 
 /**
@@ -168,12 +168,12 @@ const char* voe_error_string(VoEError error);
  * @brief VoE response structure (for async)
  */
 struct VoEResponse {
-    bool success;               ///< true if transaction succeeded
-    VoEError error_code;        ///< Error code if failed
-    uint16_t slave_index;       ///< Responding slave
-    uint32_t vendor_id;         ///< Vendor ID from response
-    uint8_t data[kMaxDataSize]; ///< Response data
-    size_t data_len;            ///< Response data length
+    bool success; /**< true if transaction succeeded */
+    VoEError error_code; /**< Error code if failed */
+    uint16_t slave_index; /**< Responding slave */
+    uint32_t vendor_id; /**< Vendor ID from response */
+    uint8_t data[kMaxDataSize]; /**< Response data */
+    size_t data_len; /**< Response data length */
 };
 
 /**
@@ -185,13 +185,13 @@ using VoECallback = std::function<void(const VoEResponse&)>;
  * @brief VoE request structure
  */
 struct VoERequest {
-    uint16_t slave_index;       ///< Target slave (0-based)
-    uint32_t vendor_id;         ///< Vendor ID
-    const void* data;           ///< Request data
-    size_t data_len;            ///< Request data length
-    uint32_t timeout_ms;        ///< Timeout (default: ECAT_VOE_TIMEOUT_MS)
-    VoECallback callback;       ///< Optional completion callback
-    void* user_data;            ///< User-provided context
+    uint16_t slave_index; /**< Target slave (0-based) */
+    uint32_t vendor_id; /**< Vendor ID */
+    const void* data; /**< Request data */
+    size_t data_len; /**< Request data length */
+    uint32_t timeout_ms; /**< Timeout (default: ECAT_VOE_TIMEOUT_MS) */
+    VoECallback callback; /**< Optional completion callback */
+    void* user_data; /**< User-provided context */
     
     VoERequest()
         : slave_index(0)
@@ -208,10 +208,10 @@ struct VoERequest {
  * @brief VoE transaction result (for sync operations)
  */
 struct VoEResult {
-    bool success;           ///< true if transaction succeeded
-    VoEError error_code;    ///< Error code if failed
-    size_t response_len;    ///< Response data length
-    uint32_t duration_ms;   ///< Transaction duration
+    bool success; /**< true if transaction succeeded */
+    VoEError error_code; /**< Error code if failed */
+    size_t response_len; /**< Response data length */
+    uint32_t duration_ms; /**< Transaction duration */
     
     operator bool() const { return success; }
 };
@@ -336,12 +336,12 @@ void voe_unregister_handler(uint32_t vendor_id);
  * @brief VoE statistics
  */
 struct VoEStats {
-    uint32_t requests_sent;     ///< Total requests sent
-    uint32_t responses_received;///< Responses received
-    uint32_t timeouts;          ///< Timeout count
-    uint32_t errors;            ///< Error count
-    uint64_t bytes_sent;        ///< Total bytes sent
-    uint64_t bytes_received;    ///< Total bytes received
+    uint32_t requests_sent; /**< Total requests sent */
+    uint32_t responses_received; /**< Responses received */
+    uint32_t timeouts; /**< Timeout count */
+    uint32_t errors; /**< Error count */
+    uint64_t bytes_sent; /**< Total bytes sent */
+    uint64_t bytes_received; /**< Total bytes received */
 };
 
 /**
@@ -365,8 +365,8 @@ void voe_reset_stats();
  * Some vendors use different headers.
  */
 struct __attribute__((packed)) VoEHeader {
-    uint32_t vendor_id_le;  ///< Vendor ID (little-endian)
-    uint16_t vendor_type;   ///< Vendor-specific message type
+    uint32_t vendor_id_le; /**< Vendor ID (little-endian) */
+    uint16_t vendor_type; /**< Vendor-specific message type */
     // Followed by vendor-specific payload
 };
 static_assert(sizeof(VoEHeader) == 6, "VoEHeader size check");

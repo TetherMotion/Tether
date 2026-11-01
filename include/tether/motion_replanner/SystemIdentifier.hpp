@@ -28,34 +28,34 @@ namespace MotionReplanner {
  * @brief Sample with timing for identification
  */
 struct IdentificationSample {
-    double timestamp;        ///< Time in seconds
-    double commanded;        ///< Commanded value
-    double actual;           ///< Actual measured value
-    double velocity;         ///< Velocity (if available)
-    double acceleration;     ///< Acceleration (if available)
-    double current;          ///< Motor current (if available)
-    double torque;           ///< Torque estimate (if available)
+    double timestamp; /**< Time in seconds */
+    double commanded; /**< Commanded value */
+    double actual; /**< Actual measured value */
+    double velocity; /**< Velocity (if available) */
+    double acceleration; /**< Acceleration (if available) */
+    double current; /**< Motor current (if available) */
+    double torque; /**< Torque estimate (if available) */
 };
 
 /**
  * @brief System delay identification result
  */
 struct DelayIdentificationResult {
-    double transportDelay;              ///< Pure time delay (seconds)
-    double delayConfidence;             ///< Confidence in estimate (0-1)
-    double crossCorrelation;            ///< Peak cross-correlation value
-    int crossCorrelationLag;            ///< Lag at peak correlation (samples)
-    double samplingPeriod;              ///< Estimated sampling period
+    double transportDelay; /**< Pure time delay (seconds) */
+    double delayConfidence; /**< Confidence in estimate (0-1) */
+    double crossCorrelation; /**< Peak cross-correlation value */
+    int crossCorrelationLag; /**< Lag at peak correlation (samples) */
+    double samplingPeriod; /**< Estimated sampling period */
     
     // Statistical measures
-    double delayStdDev;                 ///< Standard deviation across tests
-    double delayMin;                    ///< Minimum detected delay
-    double delayMax;                    ///< Maximum detected delay
+    double delayStdDev; /**< Standard deviation across tests */
+    double delayMin; /**< Minimum detected delay */
+    double delayMax; /**< Maximum detected delay */
     
     // Step response characteristics
-    double riseTime;                    ///< 10-90% rise time
-    double settlingTime;                ///< 2% settling time
-    double overshoot;                   ///< Percent overshoot
+    double riseTime; /**< 10-90% rise time */
+    double settlingTime; /**< 2% settling time */
+    double overshoot; /**< Percent overshoot */
     
     bool isValid() const { return delayConfidence > 0.5; }
 };
@@ -64,11 +64,11 @@ struct DelayIdentificationResult {
  * @brief Friction model types
  */
 enum class FrictionModelType {
-    Coulomb,            ///< Simple Coulomb (constant)
-    Viscous,            ///< Linear viscous
-    CoulombViscous,     ///< Combined Coulomb + viscous
-    Stribeck,           ///< Full Stribeck model
-    LuGre               ///< LuGre dynamic model
+    Coulomb, /**< Simple Coulomb (constant) */
+    Viscous, /**< Linear viscous */
+    CoulombViscous, /**< Combined Coulomb + viscous */
+    Stribeck, /**< Full Stribeck model */
+    LuGre /**< LuGre dynamic model */
 };
 
 /**
@@ -78,24 +78,24 @@ struct FrictionModelParams {
     FrictionModelType type;
     
     // Coulomb parameters
-    double coulombForce = 0;           ///< Static/kinetic Coulomb friction
-    double staticFriction = 0;         ///< Breakaway friction
+    double coulombForce = 0; /**< Static/kinetic Coulomb friction */
+    double staticFriction = 0; /**< Breakaway friction */
     
     // Viscous parameters
-    double viscousCoeff = 0;           ///< Viscous friction coefficient
+    double viscousCoeff = 0; /**< Viscous friction coefficient */
     
     // Stribeck parameters
-    double stribeckVelocity = 0;       ///< Stribeck velocity
-    double stribeckExponent = 2.0;     ///< Stribeck exponent
+    double stribeckVelocity = 0; /**< Stribeck velocity */
+    double stribeckExponent = 2.0; /**< Stribeck exponent */
     
     // LuGre parameters
-    double sigma0 = 0;                 ///< Bristle stiffness
-    double sigma1 = 0;                 ///< Bristle damping
-    double sigma2 = 0;                 ///< Viscous damping
+    double sigma0 = 0; /**< Bristle stiffness */
+    double sigma1 = 0; /**< Bristle damping */
+    double sigma2 = 0; /**< Viscous damping */
     
     // Fit quality
-    double rSquared = 0;               ///< R² fit quality
-    double residualRMS = 0;            ///< RMS residual
+    double rSquared = 0; /**< R² fit quality */
+    double residualRMS = 0; /**< RMS residual */
     
     /**
      * @brief Calculate friction force for given velocity
@@ -115,14 +115,14 @@ struct FrictionModelParams {
  * @brief Friction identification result
  */
 struct FrictionIdentificationResult {
-    FrictionModelParams bestModel;      ///< Best fitting model
-    std::vector<FrictionModelParams> allModels;  ///< All tried models
+    FrictionModelParams bestModel; /**< Best fitting model */
+    std::vector<FrictionModelParams> allModels; /**< All tried models */
     
     // Per-direction results
     FrictionModelParams positiveDirection;
     FrictionModelParams negativeDirection;
-    bool isSymmetric;                   ///< Similar in both directions
-    double asymmetryRatio;              ///< Ratio between directions
+    bool isSymmetric; /**< Similar in both directions */
+    double asymmetryRatio; /**< Ratio between directions */
     
     // Velocity-force curve
     std::vector<double> velocities;
@@ -142,18 +142,18 @@ struct PIDTuningAssessment {
     double observedKd = 0;
     
     // Performance metrics
-    double steadyStateError;            ///< Steady state error
-    double riseTime;                    ///< 10-90% rise time
-    double settlingTime;                ///< 2% settling time
-    double overshoot;                   ///< Percent overshoot
-    double dampingRatio;                ///< Estimated damping ratio
-    double naturalFrequency;            ///< Estimated natural frequency
+    double steadyStateError; /**< Steady state error */
+    double riseTime; /**< 10-90% rise time */
+    double settlingTime; /**< 2% settling time */
+    double overshoot; /**< Percent overshoot */
+    double dampingRatio; /**< Estimated damping ratio */
+    double naturalFrequency; /**< Estimated natural frequency */
     
     // Quality scores (0-100)
-    double stabilityScore;              ///< Stability margin
-    double responseScore;               ///< Response speed quality
-    double accuracyScore;               ///< Tracking accuracy
-    double overallScore;                ///< Combined score
+    double stabilityScore; /**< Stability margin */
+    double responseScore; /**< Response speed quality */
+    double accuracyScore; /**< Tracking accuracy */
+    double overallScore; /**< Combined score */
     
     // Suggested improvements
     double suggestedKp = 0;
@@ -171,26 +171,26 @@ struct PIDTuningAssessment {
  */
 struct DynamicsIdentificationResult {
     // First-order model: G(s) = K / (Ts + 1)
-    double gain;                        ///< DC gain K
-    double timeConstant;                ///< Time constant T
+    double gain; /**< DC gain K */
+    double timeConstant; /**< Time constant T */
     
     // Second-order model: G(s) = K*wn² / (s² + 2*zeta*wn*s + wn²)
-    double naturalFrequency;            ///< Natural frequency wn
-    double dampingRatio;                ///< Damping ratio zeta
+    double naturalFrequency; /**< Natural frequency wn */
+    double dampingRatio; /**< Damping ratio zeta */
     
     // Higher order approximation
-    int systemOrder;                    ///< Estimated system order
-    std::vector<double> poles;          ///< Identified poles
-    std::vector<double> zeros;          ///< Identified zeros
+    int systemOrder; /**< Estimated system order */
+    std::vector<double> poles; /**< Identified poles */
+    std::vector<double> zeros; /**< Identified zeros */
     
     // Frequency response
     std::vector<double> frequencies;
     std::vector<double> magnitudeDb;
     std::vector<double> phaseDeg;
     
-    double bandwidthHz;                 ///< -3dB bandwidth
-    double phaseMarginDeg;              ///< Phase margin
-    double gainMarginDb;                ///< Gain margin
+    double bandwidthHz; /**< -3dB bandwidth */
+    double phaseMarginDeg; /**< Phase margin */
+    double gainMarginDb; /**< Gain margin */
     
     bool isValid() const { return systemOrder > 0; }
 };
@@ -204,25 +204,25 @@ struct DynamicsIdentificationResult {
  */
 struct IdentificationConfig {
     // Delay identification
-    double maxDelay = 0.1;              ///< Maximum expected delay (seconds)
-    int correlationWindow = 1000;       ///< Window size for correlation
-    double stepThreshold = 0.1;         ///< Threshold for step detection
+    double maxDelay = 0.1; /**< Maximum expected delay (seconds) */
+    int correlationWindow = 1000; /**< Window size for correlation */
+    double stepThreshold = 0.1; /**< Threshold for step detection */
     
     // Friction identification
-    double velocityRangeMin = 0.1;      ///< Min velocity for friction ID
-    double velocityRangeMax = 1000;     ///< Max velocity for friction ID
-    int velocityBins = 50;              ///< Number of velocity bins
-    double steadyStateWindow = 0.5;     ///< Window for steady-state detection
+    double velocityRangeMin = 0.1; /**< Min velocity for friction ID */
+    double velocityRangeMax = 1000; /**< Max velocity for friction ID */
+    int velocityBins = 50; /**< Number of velocity bins */
+    double steadyStateWindow = 0.5; /**< Window for steady-state detection */
     
     // PID analysis
-    double settlingThreshold = 0.02;    ///< 2% settling threshold
-    double riseTimeStart = 0.1;         ///< Rise time start (10%)
-    double riseTimeEnd = 0.9;           ///< Rise time end (90%)
+    double settlingThreshold = 0.02; /**< 2% settling threshold */
+    double riseTimeStart = 0.1; /**< Rise time start (10%) */
+    double riseTimeEnd = 0.9; /**< Rise time end (90%) */
     
     // Frequency analysis
-    double fftMinFreq = 0.1;            ///< Min frequency for analysis
-    double fftMaxFreq = 1000;           ///< Max frequency for analysis
-    int fftSize = 4096;                 ///< FFT size
+    double fftMinFreq = 0.1; /**< Min frequency for analysis */
+    double fftMaxFreq = 1000; /**< Max frequency for analysis */
+    int fftSize = 4096; /**< FFT size */
 };
 
 /**
@@ -523,8 +523,8 @@ private:
 class RelayAutoTuner {
 public:
     struct TuningResult {
-        double ultimateGain;            ///< Ultimate gain Ku
-        double ultimatePeriod;          ///< Ultimate period Pu
+        double ultimateGain; /**< Ultimate gain Ku */
+        double ultimatePeriod; /**< Ultimate period Pu */
         
         // Suggested gains (different rules)
         struct {
@@ -543,7 +543,7 @@ public:
             double Kp, Ki, Kd;
         } noOvershoot;
         
-        int oscillationCount;           ///< Number of oscillations detected
+        int oscillationCount; /**< Number of oscillations detected */
         bool isValid;
     };
     

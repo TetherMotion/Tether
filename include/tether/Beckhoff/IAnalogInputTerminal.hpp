@@ -31,13 +31,13 @@ public:
 
     // -- Identity --------------------------------------------------------------
 
-    /// Zero-based bus position of this device.
+    /**Zero-based bus position of this device. */
     virtual uint16_t slaveIndex() const = 0;
 
-    /// Number of analog input channels on this device.
+    /**Number of analog input channels on this device. */
     virtual size_t channelCount() const = 0;
 
-    /// Device name for logging/UI.
+    /**Device name for logging/UI. */
     virtual const char* deviceName() const = 0;
 
     // -- Inputs -----------------------------------------------------------------
@@ -63,7 +63,7 @@ public:
      */
     virtual uint16_t status(size_t channel) const = 0;
 
-    /// True when `channel` has a status field in its process image.
+    /**True when `channel` has a status field in its process image. */
     virtual bool hasStatus(size_t channel) const = 0;
 
     // -- Chained bring-up (called by MultiAnalogInputTerminal) -------------------
@@ -83,7 +83,7 @@ public:
      */
     virtual Result<> mapLogicalAndEnterSafeOp() = 0;
 
-    /// Request the OP state and wait for confirmation (or cancellation).
+    /**Request the OP state and wait for confirmation (or cancellation). */
     virtual Result<> requestOp(int timeout_ms) = 0;
 };
 

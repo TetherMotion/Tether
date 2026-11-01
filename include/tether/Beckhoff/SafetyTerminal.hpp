@@ -88,7 +88,7 @@ inline constexpr DeviceIdentity EJ2914{0x00000002, 0x0B622852, 4, "EJ2914"};
 inline constexpr DeviceIdentity EJ2918{0x00000002, 0x0B662852, 8, "EJ2918"};
 inline constexpr DeviceIdentity EK1914{0x00000002, 0x077A2C52, 4, "EK1914"};
 
-/// Every known TwinSAFE terminal.
+/**Every known TwinSAFE terminal. */
 inline constexpr std::array kSafetyTerminals{
     EL1904, EL1918, EL2904, EL2911, EL2912,
     EP1908, EP1918, EP2918, EJ1914, EJ1918, EJ2914, EJ2918, EK1914,
@@ -102,20 +102,24 @@ inline constexpr std::array kSafetyTerminals{
 
 class SafetyTerminal : public TerminalBase {
 public:
-    /// FSoE connection parameters.  The safety address comes from the
-    /// TwinSAFE project downloaded to the device.
+    /**
+     * FSoE connection parameters.  The safety address comes from the
+     * TwinSAFE project downloaded to the device.
+     */
     struct Config {
-        uint16_t safety_addr = 0;      ///< FSoE slave address (required)
-        uint16_t connection_id = 0;    ///< 0 = derived from safety_addr
-        uint8_t  safety_level = 2;     ///< FSoE SIL level (2 or 3)
+        uint16_t safety_addr = 0; /**< FSoE slave address (required) */
+        uint16_t connection_id = 0; /**< 0 = derived from safety_addr */
+        uint8_t  safety_level = 2; /**< FSoE SIL level (2 or 3) */
 
-        /// Safe user-data bytes inside each FSoE frame.  0 = derived
-        /// from the SM image length (image - cmd - CRC - connID).
+        /**
+         * Safe user-data bytes inside each FSoE frame.  0 = derived
+         * from the SM image length (image - cmd - CRC - connID).
+         */
         uint8_t  safe_input_bytes  = 0;
         uint8_t  safe_output_bytes = 0;
 
         std::array<uint8_t, 16> fail_safe_values = {};
-        std::vector<uint8_t> app_parameters;     ///< SR-AppParams, if any
+        std::vector<uint8_t> app_parameters; /**< SR-AppParams, if any */
     };
 
     // -- Construction / factories ------------------------------------------------
@@ -132,12 +136,12 @@ public:
     SafetyTerminal(const SafetyTerminal&)                = delete;
     SafetyTerminal& operator=(const SafetyTerminal&)     = delete;
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
 
-    /// Scan the bus for the first slave matching `identity`.
+    /**Scan the bus for the first slave matching `identity`. */
     static Result<SafetyTerminal> findFirst(Master& master,
                                             const DeviceIdentity& identity);
     static Result<SafetyTerminal> findFirst(
@@ -146,15 +150,17 @@ public:
 
     // -- Bring-up ----------------------------------------------------------------------
 
-    /// Standalone bring-up to SAFE-OP (position addressing) and create
-    /// the FSoE connection.  FSoE session establishment starts with the
-    /// first exchange() call in OP.
+    /**
+     * Standalone bring-up to SAFE-OP (position addressing) and create
+     * the FSoE connection.  FSoE session establishment starts with the
+     * first exchange() call in OP.
+     */
     Result<> configure(const Config& cfg);
 
-    /// configure() then OP (+ managed realtime loop by default).
+    /**configure() then OP (+ managed realtime loop by default). */
     Result<> start(const Config& cfg, const StartOptions& opts = {});
 
-    /// Chained-operation contract.
+    /**Chained-operation contract. */
     Result<> prepareForLogicalExchange();
     Result<> mapLogicalAndEnterSafeOp();
     Result<> requestOp(int timeout_ms);
@@ -173,13 +179,13 @@ public:
      */
     bool exchange(uint64_t current_time_ms);
 
-    /// Access the underlying FSoE connection (status, callbacks, stats).
+    /**Access the underlying FSoE connection (status, callbacks, stats). */
     FSoE::FSoEMasterConnection& fsoe() { return *fsoe_; }
     const FSoE::FSoEMasterConnection& fsoe() const { return *fsoe_; }
 
     // -- Safe I/O ---------------------------------------------------------------------------
 
-    /// Number of safe channels for this device (from the registry).
+    /**Number of safe channels for this device (from the registry). */
     size_t channelCount() const { return identity_.num_bits; }
 
     bool  safeInputBit(uint8_t bit) const;
@@ -194,7 +200,7 @@ public:
     uint8_t fsoeState() const;
     uint16_t fsoeErrorCode() const;
 
-    /// Reset the FSoE connection (e.g. after a watchdog trip).
+    /**Reset the FSoE connection (e.g. after a watchdog trip). */
     void resetConnection();
 
 private:

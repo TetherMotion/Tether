@@ -129,10 +129,12 @@ public:
     void           resetStats();
     PDO::PDOStats& statsRef();
 
-    /// Log the transfer statistics block (FMMU/LRW cycle counters plus
-    /// physical FPWR/FPRD counters) — reveals WKC errors where a slave
-    /// stopped acknowledging frames.
-    /// @param tag Log prefix identifying the dump
+    /**
+     * Log the transfer statistics block (FMMU/LRW cycle counters plus
+     * physical FPWR/FPRD counters) — reveals WKC errors where a slave
+     * stopped acknowledging frames.
+     * @param tag Log prefix identifying the dump
+     */
     void dumpStats(const char* tag) const;
 
     // ----- Per-slave PDO counter accessors -----
@@ -262,20 +264,28 @@ public:
     uint32_t definePDOSlice(const PDOSliceSpec& spec);
     bool     clearPDOSlices();
     size_t   pdoSliceCount() const;
-    /// Blocking one-off slice exchange on the async path (no fast path).
-    /// @param spec Slice window and addressing to exchange
-    /// @return `true` on a successful exchange
+    /**
+     * Blocking one-off slice exchange on the async path (no fast path).
+     * @param spec Slice window and addressing to exchange
+     * @return `true` on a successful exchange
+     */
     bool     exchangePDOSlice(const PDOSliceSpec& spec);
-    /// Run the whole-image exchange every Nth cycle (default 1).
-    /// @param every_n Exchange every Nth cycle tick
+    /**
+     * Run the whole-image exchange every Nth cycle (default 1).
+     * @param every_n Exchange every Nth cycle tick
+     */
     void     setImageExchangeDecimation(uint32_t every_n);
 
-    /// Slices the current image occupies on the wire (1 = single frame).
-    /// @return Number of cyclic slices
+    /**
+     * Slices the current image occupies on the wire (1 = single frame).
+     * @return Number of cyclic slices
+     */
     uint8_t cyclicSliceCount() const;
 
-    /// Strict per-slice WKC verify — see LogicalAddressManager::setStrictWkc.
-    /// @param strict `true` fails a cycle whose WKC is short
+    /**
+     * Strict per-slice WKC verify — see LogicalAddressManager::setStrictWkc.
+     * @param strict `true` fails a cycle whose WKC is short
+     */
     void setCyclicStrictWkc(bool strict);
 
     /**
@@ -374,14 +384,16 @@ public:
 
     // ----- Log Prefix (set by Master from per-slave name) -----
 
-    /// @brief Set a function that returns the log prefix for a given slave index.
-    /// @param provider (slave index) -> prefix string for log output
+    /**
+     * @brief Set a function that returns the log prefix for a given slave index.
+     * @param provider (slave index) -> prefix string for log output
+     */
     void setPrefixProvider(std::function<std::string(uint16_t)> provider) {
         prefix_provider_ = std::move(provider);
     }
 
 private:
-    /// Build the log prefix for a slave (uses prefix_provider_ if set, else default)
+    /**Build the log prefix for a slave (uses prefix_provider_ if set, else default) */
     std::string slavePrefix(uint16_t idx) const {
         if (prefix_provider_) return prefix_provider_(idx);
         return std::format("Slave {}", idx);

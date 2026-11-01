@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file FilamentLoader.hpp
-/// @brief Filament load/unload state and operations
+/**
+ * @file FilamentLoader.hpp
+ * @brief Filament load/unload state and operations
+ */
 
 #include <functional>
 #include <map>
@@ -10,10 +12,10 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Filament load/unload state and operations.
+/**@brief Filament load/unload state and operations. */
 class FilamentLoader {
 public:
-    /// @brief Set the load/unload callback.
+    /**@brief Set the load/unload callback. */
     using FilamentCallback = std::function<void(int extruder, double length, double speed)>;
 
     void setLoadCallback(FilamentCallback cb) { loadCb_ = std::move(cb); }
@@ -21,44 +23,44 @@ public:
     void setPurgeCallback(FilamentCallback cb) { purgeCb_ = std::move(cb); }
     void setRetractCallback(FilamentCallback cb) { retractCb_ = std::move(cb); }
 
-    /// @brief Load filament (M701).
+    /**@brief Load filament (M701). */
     void loadFilament(int extruder) {
         if (loadCb_) loadCb_(extruder, loadLength_, loadSpeed_);
         filamentLoaded_[extruder] = true;
     }
 
-    /// @brief Unload filament (M702).
+    /**@brief Unload filament (M702). */
     void unloadFilament(int extruder) {
         if (unloadCb_) unloadCb_(extruder, loadLength_, loadSpeed_);
         filamentLoaded_[extruder] = false;
     }
 
-    /// @brief Load filament into tool (M703).
+    /**@brief Load filament into tool (M703). */
     void loadToTool(int tool) {
         if (loadCb_) loadCb_(tool, toolLoadLength_, loadSpeed_);
     }
 
-    /// @brief Unload filament from tool (M704).
+    /**@brief Unload filament from tool (M704). */
     void unloadFromTool(int tool) {
         if (unloadCb_) unloadCb_(tool, toolLoadLength_, loadSpeed_);
     }
 
-    /// @brief Purge filament (M705).
+    /**@brief Purge filament (M705). */
     void purge(int extruder) {
         if (purgeCb_) purgeCb_(extruder, purgeLength_, purgeSpeed_);
     }
 
-    /// @brief Retract filament (M706).
+    /**@brief Retract filament (M706). */
     void retract(int extruder) {
         if (retractCb_) retractCb_(extruder, retractLength_, retractSpeed_);
     }
 
-    /// @brief Set filament sensor state (M707).
+    /**@brief Set filament sensor state (M707). */
     void setSensorState(int sensor, bool enabled) {
         sensorEnabled_[sensor] = enabled;
     }
 
-    /// @brief Report filament sensor state (M708).
+    /**@brief Report filament sensor state (M708). */
     std::string reportSensorState() const {
         std::ostringstream ss;
         ss << "Filament sensors:";
@@ -69,13 +71,13 @@ public:
         return ss.str();
     }
 
-    /// @brief Check if filament is loaded for an extruder.
+    /**@brief Check if filament is loaded for an extruder. */
     bool isLoaded(int extruder) const {
         auto it = filamentLoaded_.find(extruder);
         return it != filamentLoaded_.end() && it->second;
     }
 
-    /// @brief Set load parameters.
+    /**@brief Set load parameters. */
     void setLoadLength(double length) { loadLength_ = length; }
     void setToolLoadLength(double length) { toolLoadLength_ = length; }
     void setLoadSpeed(double speed) { loadSpeed_ = speed; }

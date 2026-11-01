@@ -23,8 +23,10 @@
 using namespace MotionPlanner;
 using namespace std::chrono;
 
-/// Build a zigzag path with `numCorners` 90° corners.
-/// Each leg is 10 units long; the path zigzags in X and Y.
+/**
+ * Build a zigzag path with `numCorners` 90° corners.
+ * Each leg is 10 units long; the path zigzags in X and Y.
+ */
 MotionSegmentList buildZigzag(size_t numCorners) {
     MotionSegmentList segments;
     double x = 0, y = 0;
@@ -38,8 +40,10 @@ MotionSegmentList buildZigzag(size_t numCorners) {
     return segments;
 }
 
-/// Plan the path with the given curve type and return the planning time in ms.
-/// Also reports the blend construction time and velocity planning time separately.
+/**
+ * Plan the path with the given curve type and return the planning time in ms.
+ * Also reports the blend construction time and velocity planning time separately.
+ */
 struct PlanTiming {
     double blendMs = 0;
     double velocityMs = 0;

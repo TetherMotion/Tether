@@ -51,7 +51,7 @@ class NetworkEmulator;
 using EtherCAT::SlaveState;
 using EtherCAT::slaveStateToString;
 
-/// AL Status register value (includes error flag)
+/**AL Status register value (includes error flag) */
 struct ALStatus {
     SlaveState state = SlaveState::INIT;
     bool error = false;
@@ -163,13 +163,13 @@ struct FMMU {
     bool write_enable = false;
     bool enabled = false;
     
-    /// Check if a logical address falls within this FMMU
+    /**Check if a logical address falls within this FMMU */
     bool containsLogicalAddress(uint32_t addr, uint16_t len) const {
         if (!enabled) return false;
         return addr < (logical_start + length) && (addr + len) > logical_start;
     }
     
-    /// Translate logical address to physical
+    /**Translate logical address to physical */
     uint16_t translateToPhysical(uint32_t logical_addr) const {
         return physical_start + (logical_addr - logical_start);
     }
@@ -199,7 +199,7 @@ struct DCState {
     bool sync0_enable = false;
     bool sync1_enable = false;
     
-    /// Advance simulated time
+    /**Advance simulated time */
     void advanceTime(uint64_t delta_ns) {
         system_time += delta_ns;
     }
@@ -431,18 +431,18 @@ private:
 // Factory Functions for Common Slave Profiles
 // ============================================================================
 
-/// Create a generic I/O slave (CiA 401 style)
+/**Create a generic I/O slave (CiA 401 style) */
 std::unique_ptr<SlaveEmulator> createGenericIOSlave(
     uint16_t vendor_id, uint16_t product_code,
     uint8_t digital_inputs, uint8_t digital_outputs,
     uint8_t analog_inputs = 0, uint8_t analog_outputs = 0);
 
-/// Create a CiA 402 servo drive
+/**Create a CiA 402 servo drive */
 std::unique_ptr<SlaveEmulator> createCiA402Drive(
     uint16_t vendor_id, uint16_t product_code,
     const std::string& name = "Emulated Drive");
 
-/// Create a simple slave with configurable PDOs
+/**Create a simple slave with configurable PDOs */
 std::unique_ptr<SlaveEmulator> createSimpleSlave(
     uint16_t vendor_id, uint16_t product_code,
     uint16_t input_bytes, uint16_t output_bytes);

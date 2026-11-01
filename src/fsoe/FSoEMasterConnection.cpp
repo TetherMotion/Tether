@@ -43,8 +43,10 @@ const char* commandName(uint8_t cmd) {
     }
 }
 
-/// Decode the slave's Reset reason code (SafeData[0] of the slave's Reset PDU).
-/// See ETG.5100 S (D) V1.2.0, §8.2.2.2 and ResetErrorCode in FSoEDefs.hpp.
+/**
+ * Decode the slave's Reset reason code (SafeData[0] of the slave's Reset PDU).
+ * See ETG.5100 S (D) V1.2.0, §8.2.2.2 and ResetErrorCode in FSoEDefs.hpp.
+ */
 const char* resetReasonName(uint8_t reason) {
     switch (reason) {
         case ResetErrorCode::None:               return "None(0x00)";
@@ -62,8 +64,10 @@ const char* resetReasonName(uint8_t reason) {
     }
 }
 
-/// Extract the slave's reset reason from a parsed Reset frame.
-/// Returns ResetErrorCode::None if data is null or empty.
+/**
+ * Extract the slave's reset reason from a parsed Reset frame.
+ * Returns ResetErrorCode::None if data is null or empty.
+ */
 uint8_t extractResetReason(const uint8_t* data, size_t data_len) {
     if (data && data_len >= 1) return data[0];
     return ResetErrorCode::None;

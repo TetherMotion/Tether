@@ -138,56 +138,56 @@ struct CiA402SlaveConfig {
     uint32_t supportedModes = CiA402Mode::AllCyclic | CiA402Mode::PP | CiA402Mode::HM;
     
     // Motor/encoder parameters
-    uint32_t positionEncoderResolution = 131072;  ///< Position units per revolution
-    uint32_t velocityEncoderResolution = 131072;  ///< Velocity encoder resolution
-    uint32_t encoderIncrements = 131072;          ///< Encoder increments per revolution
-    uint32_t motorRevolutions = 1;                ///< Motor revolutions for above increments
+    uint32_t positionEncoderResolution = 131072; /**< Position units per revolution */
+    uint32_t velocityEncoderResolution = 131072; /**< Velocity encoder resolution */
+    uint32_t encoderIncrements = 131072; /**< Encoder increments per revolution */
+    uint32_t motorRevolutions = 1; /**< Motor revolutions for above increments */
     
     // Position limits
-    int32_t softwarePosLimitMin = -2147483647;    ///< Minimum position (0x607D:1)
-    int32_t softwarePosLimitMax = 2147483647;     ///< Maximum position (0x607D:2)
-    int32_t homingOffset = 0;                     ///< Homing offset (0x607C)
+    int32_t softwarePosLimitMin = -2147483647; /**< Minimum position (0x607D:1) */
+    int32_t softwarePosLimitMax = 2147483647; /**< Maximum position (0x607D:2) */
+    int32_t homingOffset = 0; /**< Homing offset (0x607C) */
     
     // Velocity limits
-    uint32_t maxProfileVelocity = 1000000;        ///< Max profile velocity (0x607F)
-    uint32_t maxMotorVelocity = 1200000;          ///< Max motor velocity (0x6080)
+    uint32_t maxProfileVelocity = 1000000; /**< Max profile velocity (0x607F) */
+    uint32_t maxMotorVelocity = 1200000; /**< Max motor velocity (0x6080) */
     
     // Acceleration limits
-    uint32_t maxAcceleration = 10000000;          ///< Max acceleration (0x60C5)
-    uint32_t maxDeceleration = 10000000;          ///< Max deceleration (0x60C6)
-    uint32_t quickStopDeceleration = 20000000;    ///< Quick stop deceleration
+    uint32_t maxAcceleration = 10000000; /**< Max acceleration (0x60C5) */
+    uint32_t maxDeceleration = 10000000; /**< Max deceleration (0x60C6) */
+    uint32_t quickStopDeceleration = 20000000; /**< Quick stop deceleration */
     
     // Torque limits
-    int16_t maxTorque = 1000;                     ///< Max torque in 0.1% units
-    int16_t motorRatedTorque = 1000;              ///< Rated torque (0x6076)
-    uint32_t motorRatedCurrent = 1000;            ///< Rated current in mA (0x6075)
+    int16_t maxTorque = 1000; /**< Max torque in 0.1% units */
+    int16_t motorRatedTorque = 1000; /**< Rated torque (0x6076) */
+    uint32_t motorRatedCurrent = 1000; /**< Rated current in mA (0x6075) */
     
     // Following error
-    uint32_t followingErrorWindow = 65535;        ///< Following error window (0x6065)
-    uint16_t followingErrorTimeout = 0;           ///< Following error timeout ms (0x6066)
+    uint32_t followingErrorWindow = 65535; /**< Following error window (0x6065) */
+    uint16_t followingErrorTimeout = 0; /**< Following error timeout ms (0x6066) */
     
     // Position window
-    uint32_t positionWindow = 10;                 ///< Position window (0x6067)
-    uint16_t positionWindowTime = 0;              ///< Position window time ms (0x6068)
+    uint32_t positionWindow = 10; /**< Position window (0x6067) */
+    uint16_t positionWindowTime = 0; /**< Position window time ms (0x6068) */
     
     // Velocity threshold
-    uint16_t velocityThreshold = 10;              ///< Velocity threshold (0x606F)
-    uint16_t velocityThresholdTime = 0;           ///< Velocity threshold time ms (0x6070)
+    uint16_t velocityThreshold = 10; /**< Velocity threshold (0x606F) */
+    uint16_t velocityThresholdTime = 0; /**< Velocity threshold time ms (0x6070) */
     
     // Homing parameters
-    int8_t homingMethod = 35;                     ///< Homing method (0x6098)
-    uint32_t homingSwitchSpeed = 10000;           ///< Speed for homing switch (0x6099:1)
-    uint32_t homingZeroSpeed = 1000;              ///< Speed for zero (0x6099:2)
-    uint32_t homingAcceleration = 100000;         ///< Homing acceleration (0x609A)
+    int8_t homingMethod = 35; /**< Homing method (0x6098) */
+    uint32_t homingSwitchSpeed = 10000; /**< Speed for homing switch (0x6099:1) */
+    uint32_t homingZeroSpeed = 1000; /**< Speed for zero (0x6099:2) */
+    uint32_t homingAcceleration = 100000; /**< Homing acceleration (0x609A) */
     
     // DC support
     bool supportsDC = true;
     uint32_t defaultCycleTime = 1000000;          // 1ms
     
     // Simulation parameters
-    bool enableSimulation = true;                 ///< Enable motor simulation
-    float simulatedInertia = 0.001f;              ///< Simulated inertia (kg·m²)
-    float simulatedFriction = 0.1f;               ///< Simulated friction coefficient
+    bool enableSimulation = true; /**< Enable motor simulation */
+    float simulatedInertia = 0.001f; /**< Simulated inertia (kg·m²) */
+    float simulatedFriction = 0.1f; /**< Simulated friction coefficient */
     
     // Logging
     SlaveLogConfig logConfig;

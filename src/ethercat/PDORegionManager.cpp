@@ -12,7 +12,7 @@ namespace EtherCAT {
 
 namespace {
 
-/// Adapter tasks for scheduler registration
+/**Adapter tasks for scheduler registration */
 class PrepareExchangeTask final : public ICyclicTask {
 public:
     explicit PrepareExchangeTask(PDORegionManager& mgr) : mgr_(mgr) {}

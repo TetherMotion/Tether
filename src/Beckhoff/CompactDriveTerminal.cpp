@@ -33,8 +33,10 @@ static const char* TAG = "CompactDriveTerminal";
 
 namespace {
 
-/// DRV object candidates for axis `a` — the channel-2 object index is
-/// 0x7080 on EL7062/ELM72x2 but 0x7020 on other dual-channel DRV devices.
+/**
+ * DRV object candidates for axis `a` — the channel-2 object index is
+ * 0x7080 on EL7062/ELM72x2 but 0x7020 on other dual-channel DRV devices.
+ */
 constexpr uint16_t drvOutObject(size_t a) { return 0x7010 + 0x70 * a; }
 constexpr uint16_t drvInObject(size_t a)  { return 0x6010 + 0x70 * a; }
 constexpr uint16_t drvOutObjectAlt(size_t a) { return 0x7010 + 0x10 * a; }

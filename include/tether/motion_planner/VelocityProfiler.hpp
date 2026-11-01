@@ -68,23 +68,27 @@ class VelocityProfile;
 template<size_t Dim, typename T> class PathAdapter;
 template<size_t NumAxes, typename T> struct KinematicLimits;
 
-/// Enum identifying the profiler type (for logging/debugging).
+/**Enum identifying the profiler type (for logging/debugging). */
 enum class ProfilerType : uint8_t {
-    /// Pareto time-energy-optimal planner with configurable cost
-    /// J = ∫[w_t + w_a·a²]dt (see analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp).
-    /// This is the default profiler — it recovers time-optimal behavior
-    /// when w_a = 0 and smoothly trades time for energy as w_a increases.
+    /**
+     * Pareto time-energy-optimal planner with configurable cost
+     * J = ∫[w_t + w_a·a²]dt (see analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp).
+     * This is the default profiler — it recovers time-optimal behavior
+     * when w_a = 0 and smoothly trades time for energy as w_a increases.
+     */
     ParetoTimeEnergy,
-    /// Basic 2nd-order TOPP-RA (bang-bang acceleration, no jerk limit)
+    /**Basic 2nd-order TOPP-RA (bang-bang acceleration, no jerk limit) */
     ToppraBasic,
-    /// 3rd-order TOPP-RA with jerk constraints inside the optimizer
+    /**3rd-order TOPP-RA with jerk constraints inside the optimizer */
     ToppraJerkConstrained,
-    /// Basic per-piece S-curve (jerk-limited but not time-optimal)
+    /**Basic per-piece S-curve (jerk-limited but not time-optimal) */
     SCurve,
-    /// Analytical 2nd-order TOPP-RA without a jerk constraint.
+    /**Analytical 2nd-order TOPP-RA without a jerk constraint. */
     AnalyticalTOPPRA,
-    /// Analytical 3rd-order TOPP-RA with a jerk constraint, SSR, and
-    /// certifiable Hybrid representations (see analytical/).
+    /**
+     * Analytical 3rd-order TOPP-RA with a jerk constraint, SSR, and
+     * certifiable Hybrid representations (see analytical/).
+     */
     AnalyticalJerkLimitedTOPPRA,
 };
 

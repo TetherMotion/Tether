@@ -39,7 +39,7 @@ class SeqLockBuffer {
 public:
     SeqLockBuffer() = default;
 
-    /// Writer side: publish a new value.  Not re-entrant.
+    /**Writer side: publish a new value.  Not re-entrant. */
     void write(const T& value) {
         const uint64_t seq = seq_.load(std::memory_order_relaxed);
         seq_.store(seq + 1, std::memory_order_release);  // odd → writing
@@ -82,7 +82,7 @@ public:
         return tmp;  // best effort — may be stale
     }
 
-    /// Current sequence number (even = stable, odd = writing).
+    /**Current sequence number (even = stable, odd = writing). */
     uint64_t sequence() const {
         return seq_.load(std::memory_order_acquire);
     }

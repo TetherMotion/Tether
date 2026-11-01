@@ -90,10 +90,12 @@
 
 namespace MotionPlanner {
 
-/// Add the analytical profiler type to the ProfilerType enum.
-/// We extend the existing enum by adding a new value. Since the existing
-/// enum is in VelocityProfiler.hpp, we add a constant here for the
-/// analytical profiler type identification.
+/**
+ * Add the analytical profiler type to the ProfilerType enum.
+ * We extend the existing enum by adding a new value. Since the existing
+ * enum is in VelocityProfiler.hpp, we add a constant here for the
+ * analytical profiler type identification.
+ */
 namespace analytical {
 
 /**

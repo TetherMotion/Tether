@@ -31,35 +31,37 @@
 
 namespace tether::motion {
 
-/// Classification of a junction between two path pieces.
+/**Classification of a junction between two path pieces. */
 enum class CornerKind {
-    Straight, ///< θ < minAngleRad: nearly collinear, no blend needed.
-    Corner,   ///< minAngleRad ≤ θ ≤ maxAngleRad: blendable.
-    Cusp,     ///< θ > maxAngleRad: path reverses, blending unsafe.
+    Straight, /**< θ < minAngleRad: nearly collinear, no blend needed. */
+    Corner, /**< minAngleRad ≤ θ ≤ maxAngleRad: blendable. */
+    Cusp, /**< θ > maxAngleRad: path reverses, blending unsafe. */
 };
 
-/// Result of analyzing one corner (the junction between two NURBS pieces).
+/**Result of analyzing one corner (the junction between two NURBS pieces). */
 struct CornerAnalysis {
     CornerKind kind = CornerKind::Corner;
-    double angleRad = 0.0; ///< θ ∈ (0, π), the turning angle.
+    double angleRad = 0.0; /**< θ ∈ (0, π), the turning angle. */
 
-    RVec vertex;       ///< The shared junction point (end of `in`, start of `out`).
-    RVec tangentIn;    ///< Unit tangent at the end of the incoming piece.
-    RVec tangentOut;   ///< Unit tangent at the start of the outgoing piece.
+    RVec vertex; /**< The shared junction point (end of `in`, start of `out`). */
+    RVec tangentIn; /**< Unit tangent at the end of the incoming piece. */
+    RVec tangentOut; /**< Unit tangent at the start of the outgoing piece. */
 
-    /// Orthonormal basis of span{t_in, t_out} (M13):
-    /// e₁ = t_in,  e₂ = normalize(t_out − (t_out·e₁) e₁).
+    /**
+     * Orthonormal basis of span{t_in, t_out} (M13):
+     * e₁ = t_in,  e₂ = normalize(t_out − (t_out·e₁) e₁).
+     */
     RVec planeE1;
     RVec planeE2;
 
-    RVec curvatureIn;  ///< κ⃗ = d²p/ds² at the end of the incoming piece.
-    RVec curvatureOut; ///< κ⃗ at the start of the outgoing piece.
-    RVec jounceIn;     ///< j⃗ = d³p/ds³ at the end of `in` (valid iff hasJounce).
-    RVec jounceOut;    ///< j⃗ at the start of `out` (valid iff hasJounce).
+    RVec curvatureIn; /**< κ⃗ = d²p/ds² at the end of the incoming piece. */
+    RVec curvatureOut; /**< κ⃗ at the start of the outgoing piece. */
+    RVec jounceIn; /**< j⃗ = d³p/ds³ at the end of `in` (valid iff hasJounce). */
+    RVec jounceOut; /**< j⃗ at the start of `out` (valid iff hasJounce). */
     bool hasJounce = false;
 };
 
-/// Analyzes corners between consecutive NURBS pieces.
+/**Analyzes corners between consecutive NURBS pieces. */
 class CornerAnalyzer {
 public:
     /**

@@ -38,16 +38,18 @@ namespace ESC211 {
  */
 class ErrorStateReader {
 public:
-    /// Aggregated error-state snapshot.  `valid` is true only if every
-    /// individual SDO upload completed without a transport/abort error.
-    /// `valid == false` does NOT mean the device is in an error state — it
-    /// means the snapshot could not be fully read.
+    /**
+     * Aggregated error-state snapshot.  `valid` is true only if every
+     * individual SDO upload completed without a transport/abort error.
+     * `valid == false` does NOT mean the device is in an error state — it
+     * means the snapshot could not be fully read.
+     */
     struct Snapshot {
         bool        valid = false;
-        uint32_t    system_state = 0;        ///< 0xF101:0x00
-        int32_t     error_code = 0;          ///< 0xF102:0x00
-        std::string error_message;           ///< 0xF103:0x00 (NUL-trimmed)
-        std::string diagnostic_message;      ///< 0xF110:0x01 (NUL-trimmed, CA)
+        uint32_t    system_state = 0; /**< 0xF101:0x00 */
+        int32_t     error_code = 0; /**< 0xF102:0x00 */
+        std::string error_message; /**< 0xF103:0x00 (NUL-trimmed) */
+        std::string diagnostic_message; /**< 0xF110:0x01 (NUL-trimmed, CA) */
     };
 
     /**

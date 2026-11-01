@@ -23,21 +23,25 @@ namespace tether::motion::replanner {
 
 class KdeGridEvaluator {
 public:
-    /// Evaluate a 1D kernel function at a normalized distance.
-    /// @param kernel Kernel type.
-    /// @param u Normalized distance (x - x_i) / h.
-    /// @return Kernel weight K(u).
+    /**
+     * Evaluate a 1D kernel function at a normalized distance.
+     * @param kernel Kernel type.
+     * @param u Normalized distance (x - x_i) / h.
+     * @return Kernel weight K(u).
+     */
     static double kernelValue(KernelType kernel, double u);
 
-    /// Evaluate the 2D KDE on a regular grid.
-    /// @param derivatives X-axis sample values.
-    /// @param deviations Y-axis sample values.
-    /// @param hX X bandwidth.
-    /// @param hY Y bandwidth.
-    /// @param xMin, xMax, yMin, yMax Grid bounds.
-    /// @param nX, nY Grid resolution.
-    /// @param kernel Kernel type.
-    /// @return The KDE grid.
+    /**
+     * Evaluate the 2D KDE on a regular grid.
+     * @param derivatives X-axis sample values.
+     * @param deviations Y-axis sample values.
+     * @param hX X bandwidth.
+     * @param hY Y bandwidth.
+     * @param xMin, xMax, yMin, yMax Grid bounds.
+     * @param nX, nY Grid resolution.
+     * @param kernel Kernel type.
+     * @return The KDE grid.
+     */
     static KdeGrid evaluate(
         const std::vector<double>& derivatives,
         const std::vector<double>& deviations,
@@ -47,8 +51,10 @@ public:
         std::size_t nX, std::size_t nY,
         KernelType kernel);
 
-    /// Binned KDE for large N (histogram + kernel convolution).
-    /// @param histSize Internal histogram resolution (typically 256).
+    /**
+     * Binned KDE for large N (histogram + kernel convolution).
+     * @param histSize Internal histogram resolution (typically 256).
+     */
     static KdeGrid binnedEvaluate(
         const std::vector<double>& derivatives,
         const std::vector<double>& deviations,
@@ -60,10 +66,10 @@ public:
         std::size_t histSize = 256);
 
 private:
-    /// Linear interpolation.
+    /**Linear interpolation. */
     static double lerp(double a, double b, double t);
 
-    /// Generate n linearly-spaced values in [min, max].
+    /**Generate n linearly-spaced values in [min, max]. */
     static std::vector<double> linspace(double min, double max, std::size_t n);
 };
 

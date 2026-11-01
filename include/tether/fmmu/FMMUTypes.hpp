@@ -24,8 +24,10 @@ constexpr size_t kMaxFMMUs = 8;
 constexpr uint16_t kFMMURegBase = 0x0600;
 constexpr size_t kFMMURegSize = 16;
 
-/// Maximum number of PDO mappings tracked per FMMU region.
-/// Matches PDO::kMaxPDOsPerSM — well above any real-world slave.
+/**
+ * Maximum number of PDO mappings tracked per FMMU region.
+ * Matches PDO::kMaxPDOsPerSM — well above any real-world slave.
+ */
 constexpr size_t kMaxPDOsPerFMMU = 16;
 
 enum class FMMUType : uint8_t {
@@ -114,11 +116,11 @@ struct FMMUConfig {
  * per-PDO data access during LRW exchanges.
  */
 struct FMMUPDOEntry {
-    uint16_t pdo_index{0};          ///< OD index of the PDO mapping object
-    uint32_t logical_addr{0};       ///< Logical address of this PDO within the FMMU region
-    uint16_t physical_offset{0};    ///< Byte offset from the SM physical start address
-    uint16_t size_bytes{0};         ///< Size of this PDO in bytes
-    uint8_t  sm_index{0xFF};        ///< Associated sync manager index
+    uint16_t pdo_index{0}; /**< OD index of the PDO mapping object */
+    uint32_t logical_addr{0}; /**< Logical address of this PDO within the FMMU region */
+    uint16_t physical_offset{0}; /**< Byte offset from the SM physical start address */
+    uint16_t size_bytes{0}; /**< Size of this PDO in bytes */
+    uint8_t  sm_index{0xFF}; /**< Associated sync manager index */
 
     bool isValid() const { return pdo_index != 0 && size_bytes > 0; }
 };

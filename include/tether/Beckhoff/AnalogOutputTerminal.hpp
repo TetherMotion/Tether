@@ -143,10 +143,12 @@ inline constexpr DeviceIdentity EPP4374{0x00000002, 0x6476D769, 4, "EPP4374"};
 inline constexpr DeviceIdentity ELX4154{0x00000002, 0x970C01A9, 4, "ELX4154"};
 inline constexpr DeviceIdentity ELX4181{0x00000002, 0x970C0359, 1, "ELX4181"};
 
-/// Every known analog-output terminal — the default detection set used by
-/// MultiAnalogOutputTerminal::detect().  All entries verified against the
-/// ESI for shape (mailbox + SM2 outputs + one ≤32-bit value entry per
-/// channel PDO); none verified on hardware yet.
+/**
+ * Every known analog-output terminal — the default detection set used by
+ * MultiAnalogOutputTerminal::detect().  All entries verified against the
+ * ESI for shape (mailbox + SM2 outputs + one ≤32-bit value entry per
+ * channel PDO); none verified on hardware yet.
+ */
 inline constexpr std::array kAnalogOutputTerminals{
     EL4001, EL4002, EL4004, EL4008, EL4011, EL4012, EL4014, EL4018,
     EL4021, EL4022, EL4024, EL4028, EL4031, EL4032, EL4034, EL4038,
@@ -169,10 +171,10 @@ inline constexpr std::array kAnalogOutputTerminals{
 class AnalogOutputTerminal : public TerminalBase,
                              public IAnalogOutputTerminal {
 public:
-    /// Maximum channels supported per device.
+    /**Maximum channels supported per device. */
     static constexpr size_t kMaxChannels = 64;
 
-    /// Maximum process-image bytes per device (either direction).
+    /**Maximum process-image bytes per device (either direction). */
     static constexpr size_t kMaxImageBytes = 512;
 
     // -- Construction ----------------------------------------------------------
@@ -203,7 +205,7 @@ public:
 
     // -- Factories ---------------------------------------------------------------
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
@@ -216,7 +218,7 @@ public:
     static Result<AnalogOutputTerminal> findFirst(Master& master,
                                                   const DeviceIdentity& identity);
 
-    /// Like findFirst(master, identity) but reuses an existing scan.
+    /**Like findFirst(master, identity) but reuses an existing scan. */
     static Result<AnalogOutputTerminal> findFirst(
         Master& master, const DeviceIdentity& identity,
         std::span<const DiscoveredSlave> scan);
@@ -259,24 +261,30 @@ public:
 
     // -- Status --------------------------------------------------------------------
 
-    /// Bit width of channel `ch`'s value field (16 or 32; 0 when the
-    /// layout is not resolved yet or `ch` is out of range).
+    /**
+     * Bit width of channel `ch`'s value field (16 or 32; 0 when the
+     * layout is not resolved yet or `ch` is out of range).
+     */
     size_t channelBits(size_t ch) const;
 
 private:
-    /// Per-channel layout resolved from the SII RxPDO list.
+    /**Per-channel layout resolved from the SII RxPDO list. */
     struct ChannelLayout {
-        uint16_t value_off;   ///< byte offset of the value in the SM2 image
-        uint8_t  value_bits;  ///< value width: 16 or 32
+        uint16_t value_off; /**< byte offset of the value in the SM2 image */
+        uint8_t  value_bits; /**< value width: 16 or 32 */
     };
 
-    /// Resolve the per-channel value offsets from the bound discovery
-    /// data / SII (SM regions themselves come from the base).
+    /**
+     * Resolve the per-channel value offsets from the bound discovery
+     * data / SII (SM regions themselves come from the base).
+     */
     bool resolveLayout();
 
-    /// Shared bring-up: SII, identity check, mailbox config, SM registers,
-    /// PRE-OP, PDO buffer registration in the given address mode.
-    /// Ends before SAFE-OP.
+    /**
+     * Shared bring-up: SII, identity check, mailbox config, SM registers,
+     * PRE-OP, PDO buffer registration in the given address mode.
+     * Ends before SAFE-OP.
+     */
     Result<> prepare(PDO::PDOAddressMode mode);
 
     std::vector<ChannelLayout> channels_;

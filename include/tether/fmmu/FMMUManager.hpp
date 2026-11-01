@@ -38,7 +38,7 @@ struct SlaveFMMUConfig {
     uint32_t next_logical_addr{0};
     bool configured{false};
 
-    /// Per-PDO logical address entries (tracks multiple PDOs per FMMU region).
+    /**Per-PDO logical address entries (tracks multiple PDOs per FMMU region). */
     std::array<FMMUPDOEntry, kMaxPDOsPerFMMU> pdo_entries{};
     size_t pdo_entry_count{0};
 
@@ -137,7 +137,7 @@ struct SlaveFMMUConfig {
     const FMMUConfig* getOutputFMMU() const { return findByType(FMMUType::Output); }
     const FMMUConfig* getInputFMMU() const { return findByType(FMMUType::Input); }
 
-    /// Find a PDO entry by its OD index.
+    /**Find a PDO entry by its OD index. */
     const FMMUPDOEntry* findPDOByIndex(uint16_t pdo_index) const {
         for (size_t i = 0; i < pdo_entry_count; i++) {
             if (pdo_entries[i].pdo_index == pdo_index) return &pdo_entries[i];
@@ -167,9 +167,11 @@ public:
     virtual bool aprd(uint16_t ado, void* out,
                       uint16_t len, unsigned int timeout_ms) = 0;
 
-    /// Write several register blocks — transports that can pack multiple
-    /// datagrams per frame should override to send them in one shot.
-    /// Default: sequential apwr calls.
+    /**
+     * Write several register blocks — transports that can pack multiple
+     * datagrams per frame should override to send them in one shot.
+     * Default: sequential apwr calls.
+     */
     virtual bool apwrBatch(const uint16_t* ados, const void* const* datas,
                            const uint16_t* lens, size_t count,
                            unsigned int timeout_ms) {
@@ -247,16 +249,22 @@ public:
 
     // ----- Per-PDO address queries (multi-PDO mode) -----
 
-    /// Get the logical address of a specific PDO by its OD index.
-    /// Returns 0 if the PDO is not found.
+    /**
+     * Get the logical address of a specific PDO by its OD index.
+     * Returns 0 if the PDO is not found.
+     */
     uint32_t getPDOLogicalAddr(uint16_t pdo_index) const;
 
-    /// Get the size in bytes of a specific PDO by its OD index.
-    /// Returns 0 if the PDO is not found.
+    /**
+     * Get the size in bytes of a specific PDO by its OD index.
+     * Returns 0 if the PDO is not found.
+     */
     uint16_t getPDOSize(uint16_t pdo_index) const;
 
-    /// Find a PDO entry by its OD index.
-    /// Returns nullptr if not found.
+    /**
+     * Find a PDO entry by its OD index.
+     * Returns nullptr if not found.
+     */
     const FMMUPDOEntry* findPDOEntry(uint16_t pdo_index) const;
 
     void logConfig(const char* tag) const;

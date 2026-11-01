@@ -1,10 +1,12 @@
 #pragma once
 
-/// @file PrinterObjects.hpp
-/// @brief Umbrella header for all printer object definitions.
-///
-/// This file includes all topic-based printer object headers. Individual
-/// components can also be included directly for faster compilation.
+/**
+ * @file PrinterObjects.hpp
+ * @brief Umbrella header for all printer object definitions.
+ *
+ * This file includes all topic-based printer object headers. Individual
+ * components can also be included directly for faster compilation.
+ */
 
 // Core objects (extruder, heater_bed, fan, heaters, mcu, stepper_enable, etc.)
 #include "tether/klipper/klippy/PrinterObjectsCore.hpp"

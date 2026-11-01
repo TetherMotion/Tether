@@ -23,17 +23,21 @@ namespace EtherCAT { namespace slave {
 
 class WatchdogManager {
 public:
-    /// @param enabled  Whether watchdog monitoring is enabled.
-    /// @param state    Watchdog state (owned by SlaveCore).
+    /**
+     * @param enabled  Whether watchdog monitoring is enabled.
+     * @param state    Watchdog state (owned by SlaveCore).
+     */
     WatchdogManager(bool enabled, WatchdogState* state)
         : enabled_(enabled), state_(state) {}
 
-    /// @brief Advance the watchdog by deltaNs.
-    /// @param currentState  Current AL state (watchdog only active in OP).
-    /// @param deltaNs       Time delta in nanoseconds.
+    /**
+     * @brief Advance the watchdog by deltaNs.
+     * @param currentState  Current AL state (watchdog only active in OP).
+     * @param deltaNs       Time delta in nanoseconds.
+     */
     void update(SlaveState currentState, uint64_t deltaNs);
 
-    /// @brief Reset both PDI and SM watchdogs.
+    /**@brief Reset both PDI and SM watchdogs. */
     void reset() {
         state_->resetPdiWatchdog();
         state_->resetSmWatchdog();

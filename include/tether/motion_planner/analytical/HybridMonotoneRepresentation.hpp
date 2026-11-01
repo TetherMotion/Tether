@@ -95,18 +95,18 @@ namespace MotionPlanner::analytical {
 struct LGLElement {
     double s_left = 0.0;
     double s_right = 0.0;
-    int N = 4;  ///< Polynomial degree (nodes = N+1)
+    int N = 4; /**< Polynomial degree (nodes = N+1) */
 
-    /// Function values at LGL nodes in reference coordinates [-1, 1]
+    /**Function values at LGL nodes in reference coordinates [-1, 1] */
     std::vector<double> node_values;
 
-    /// Barycentric weights for the LGL nodes
+    /**Barycentric weights for the LGL nodes */
     std::vector<double> bary_weights;
 
-    /// LGL nodes in reference coordinates [-1, 1]
+    /**LGL nodes in reference coordinates [-1, 1] */
     std::vector<double> ref_nodes;
 
-    /// Reference derivative matrix D[i][j] = dL_j/dxi at xi_i
+    /**Reference derivative matrix D[i][j] = dL_j/dxi at xi_i */
     std::vector<std::vector<double>> deriv_matrix;
 
     /**
@@ -181,26 +181,26 @@ struct HybridElement {
     double s_begin = 0.0;
     double s_end = 0.0;
 
-    /// LGL representations for time-optimal profile
-    LGLElement t_of_s;  ///< t(s), strictly increasing
-    LGLElement v_of_s;  ///< v(s) >= 0
-    LGLElement a_of_s;  ///< a(s)
+    /**LGL representations for time-optimal profile */
+    LGLElement t_of_s; /**< t(s), strictly increasing */
+    LGLElement v_of_s; /**< v(s) >= 0 */
+    LGLElement a_of_s; /**< a(s) */
 
-    /// Padé approximant for geometric parameter u(s)
+    /**Padé approximant for geometric parameter u(s) */
     PadeApproximant u_of_s;
 
-    /// Exact values at element boundaries (for certification)
+    /**Exact values at element boundaries (for certification) */
     double u_exact_begin = 0.0;
     double u_exact_end = 0.0;
     double du_ds_exact_begin = 0.0;
     double du_ds_exact_end = 0.0;
 
-    /// Error certificates for this element
+    /**Error certificates for this element */
     double certified_u_error = 0.0;
     double certified_du_error = 0.0;
     double certified_d2u_error = 0.0;
 
-    /// Element time span
+    /**Element time span */
     double t_begin = 0.0;
     double t_end = 0.0;
 };
@@ -477,7 +477,7 @@ public:
     }
 
 private:
-    const Path* path_;  ///< Non-owning reference to the path
+    const Path* path_; /**< Non-owning reference to the path */
     ConstraintEvaluator<Dim, T> evaluator_;
     std::vector<HybridElement> elements_;
     double tolerance_;
@@ -767,7 +767,7 @@ private:
     // NURBS parameter u(s) utilities
     // ========================================================================
 
-    /// Get the NURBS parameter u at arc length s
+    /**Get the NURBS parameter u at arc length s */
     double getUAtS(double s) const {
         if (!path_->hasInner()) return s;  // Fallback
         const auto& inner = path_->inner();
@@ -776,7 +776,7 @@ private:
         return piece.invertLength(loc.localS);
     }
 
-    /// Get the speed factor g(u) = ||C'(u)||
+    /**Get the speed factor g(u) = ||C'(u)|| */
     double getSpeedFactor(double u) const {
         if (!path_->hasInner()) return 1.0;
         const auto& inner = path_->inner();
@@ -927,7 +927,7 @@ private:
         return std::clamp(s, elem.s_begin, elem.s_end);
     }
 
-    /// Find element containing arc length s
+    /**Find element containing arc length s */
     size_t findElementByS(double s) const {
         if (elements_.empty()) return 0;
         size_t lo = 0, hi = elements_.size() - 1;
@@ -945,7 +945,7 @@ private:
         return lo;
     }
 
-    /// Find element containing time t
+    /**Find element containing time t */
     size_t findElementByT(double t) const {
         if (elements_.empty()) return 0;
         size_t lo = 0, hi = elements_.size() - 1;
@@ -963,7 +963,7 @@ private:
         return lo;
     }
 
-    /// Estimate maximum speed factor on an element
+    /**Estimate maximum speed factor on an element */
     double estimateMaxSpeed(const HybridElement& elem) const {
         double maxG = 0.0;
         // Sample at a few points
@@ -993,7 +993,7 @@ private:
         return Point{};
     }
 
-    /// Convert RVec to Vec<Dim, T>
+    /**Convert RVec to Vec<Dim, T> */
     template<typename RVecType>
     Point toVec(const RVecType& rv) const {
         Point result;

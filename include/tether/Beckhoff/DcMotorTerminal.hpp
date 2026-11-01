@@ -74,7 +74,7 @@ inline constexpr DeviceIdentity EP7342 {0x00000002, 0x1CAE4052, 2, "EP7342"};
 inline constexpr DeviceIdentity ER7342 {0x00000002, 0x1CAE4852, 2, "ER7342"};
 inline constexpr DeviceIdentity EPP7342{0x00000002, 0x647790E9, 2, "EPP7342"};
 
-/// Every known MOT-interface DC-motor terminal.
+/**Every known MOT-interface DC-motor terminal. */
 inline constexpr std::array kDcMotorTerminals{
     EL7332, EL7342, EJ7332, EJ7334, EJ7342, EP7342, ER7342, EPP7342,
 };
@@ -103,12 +103,12 @@ public:
     DcMotorTerminal(const DcMotorTerminal&)                = delete;
     DcMotorTerminal& operator=(const DcMotorTerminal&)     = delete;
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
 
-    /// Scan the bus for the first slave matching `identity`.
+    /**Scan the bus for the first slave matching `identity`. */
     static Result<DcMotorTerminal> findFirst(Master& master,
                                              const DeviceIdentity& identity);
     static Result<DcMotorTerminal> findFirst(
@@ -117,30 +117,30 @@ public:
 
     // -- Bring-up ------------------------------------------------------------------
 
-    /// Standalone bring-up to SAFE-OP (position addressing).
+    /**Standalone bring-up to SAFE-OP (position addressing). */
     Result<> configure();
 
-    /// configure() then OP (+ managed realtime loop by default).
+    /**configure() then OP (+ managed realtime loop by default). */
     Result<> start() { return start(StartOptions()); }
     Result<> start(const StartOptions& opts);
 
-    /// Chained-operation contract (shared logical address space).
+    /**Chained-operation contract (shared logical address space). */
     Result<> prepareForLogicalExchange();
     Result<> mapLogicalAndEnterSafeOp();
     Result<> requestOp(int timeout_ms);
 
     // -- Axes ------------------------------------------------------------------------
 
-    /// Number of resolved motor axes (0 before prepare()).
+    /**Number of resolved motor axes (0 before prepare()). */
     size_t axisCount() const { return axes_.size(); }
 
     // -- Motor control (SM2 image), per axis -------------------------------------------
 
-    /// MOT Control :01 — power-stage enable.
+    /**MOT Control :01 — power-stage enable. */
     void setEnable(size_t axis, bool on);
-    /// MOT Control :02 — fault reset (write 1, then clear).
+    /**MOT Control :02 — fault reset (write 1, then clear). */
     void setReset(size_t axis, bool on);
-    /// MOT Control :03 — reduced motor torque.
+    /**MOT Control :03 — reduced motor torque. */
     void setReduceTorque(size_t axis, bool on);
 
     /**
@@ -149,93 +149,93 @@ public:
      */
     void setVelocity(size_t axis, int16_t v);
 
-    /// Raw MOT control word (16 bit) — for bits not wrapped above.
+    /**Raw MOT control word (16 bit) — for bits not wrapped above. */
     uint16_t motControlWord(size_t axis) const;
 
     // -- Motor status (SM3 image), per axis --------------------------------------------
 
-    /// MOT Status :01 — ready to enable.
+    /**MOT Status :01 — ready to enable. */
     bool readyToEnable(size_t axis) const;
-    /// MOT Status :02 — ready (power stage active).
+    /**MOT Status :02 — ready (power stage active). */
     bool ready(size_t axis) const;
-    /// MOT Status :03 — warning present.
+    /**MOT Status :03 — warning present. */
     bool warning(size_t axis) const;
-    /// MOT Status :04 — error present (reset via setReset()).
+    /**MOT Status :04 — error present (reset via setReset()). */
     bool error(size_t axis) const;
-    /// MOT Status :05/:06 — currently moving in +/- direction.
+    /**MOT Status :05/:06 — currently moving in +/- direction. */
     bool movingPositive(size_t axis) const;
     bool movingNegative(size_t axis) const;
-    /// MOT Status :07 — running at reduced torque.
+    /**MOT Status :07 — running at reduced torque. */
     bool torqueReduced(size_t axis) const;
-    /// MOT Status :0C/:0D — digital inputs 1/2.
+    /**MOT Status :0C/:0D — digital inputs 1/2. */
     bool digitalInput1(size_t axis) const;
     bool digitalInput2(size_t axis) const;
-    /// Sync error flag (object 0x1C32:32 inside the axis status PDO).
+    /**Sync error flag (object 0x1C32:32 inside the axis status PDO). */
     bool syncError(size_t axis) const;
 
-    /// Raw MOT status word (16 bit).
+    /**Raw MOT status word (16 bit). */
     uint16_t motStatusWord(size_t axis) const;
 
     // -- Optional encoder channel (EL7342-class devices) --------------------------------
 
-    /// True when axis carries an ENC object pair (counter/latch).
+    /**True when axis carries an ENC object pair (counter/latch). */
     bool hasEncoder(size_t axis) const;
 
-    /// ENC counter value (object 0x60xx:0x11, 16/32 bit signed).
+    /**ENC counter value (object 0x60xx:0x11, 16/32 bit signed). */
     int32_t counterValue(size_t axis) const;
-    /// ENC latch value (object 0x60xx:0x12, 16/32 bit signed).
+    /**ENC latch value (object 0x60xx:0x12, 16/32 bit signed). */
     int32_t latchValue(size_t axis) const;
-    /// ENC Status :02 — external latch captured a value.
+    /**ENC Status :02 — external latch captured a value. */
     bool latchValid(size_t axis) const;
-    /// ENC Status :03 — a set-counter command completed.
+    /**ENC Status :03 — a set-counter command completed. */
     bool setCounterDone(size_t axis) const;
-    /// ENC Status :04/:05 — counter wrapped.
+    /**ENC Status :04/:05 — counter wrapped. */
     bool counterUnderflow(size_t axis) const;
     bool counterOverflow(size_t axis) const;
 
-    /// ENC set-counter preset value (object 0x70xx:0x11).
+    /**ENC set-counter preset value (object 0x70xx:0x11). */
     void setCounterValue(size_t axis, int32_t v);
-    /// ENC Control :03 — "Set counter" command bit.
+    /**ENC Control :03 — "Set counter" command bit. */
     void setSetCounter(size_t axis, bool on);
-    /// ENC Control :02/:04 — external latch on positive/negative edge.
+    /**ENC Control :02/:04 — external latch on positive/negative edge. */
     void setLatchExtPos(size_t axis, bool on);
     void setLatchExtNeg(size_t axis, bool on);
 
-    /// Raw ENC status word (16 bit), 0 when no encoder.
+    /**Raw ENC status word (16 bit), 0 when no encoder. */
     uint16_t encStatusWord(size_t axis) const;
 
 private:
     static constexpr uint32_t kInvalid = ~0u;
 
-    /// One resolved field — absolute bit offset + width (0 = absent).
+    /**One resolved field — absolute bit offset + width (0 = absent). */
     struct Field {
         uint32_t bit_off = kInvalid;
         uint8_t  bit_len = 0;
     };
 
-    /// Resolved per-axis layout.
+    /**Resolved per-axis layout. */
     struct Axis {
         // motor control (SM2)
-        uint16_t mot_obj        = 0;        ///< 0x70xx motor object index
-        uint32_t off_enable     = kInvalid; ///< :01
-        uint32_t off_reset      = kInvalid; ///< :02
-        uint32_t off_rtq        = kInvalid; ///< :03
-        Field    velocity;                  ///< :21 (16b)
+        uint16_t mot_obj        = 0; /**< 0x70xx motor object index */
+        uint32_t off_enable     = kInvalid; /**< :01 */
+        uint32_t off_reset      = kInvalid; /**< :02 */
+        uint32_t off_rtq        = kInvalid; /**< :03 */
+        Field    velocity; /**< :21 (16b) */
         // encoder control (SM2, optional)
-        uint16_t enc_obj        = 0;        ///< 0x70xx encoder object index
-        uint32_t off_latch_pos  = kInvalid; ///< :02
-        uint32_t off_set_counter= kInvalid; ///< :03
-        uint32_t off_latch_neg  = kInvalid; ///< :04
-        Field    set_counter_val;           ///< :11 (16/32b)
+        uint16_t enc_obj        = 0; /**< 0x70xx encoder object index */
+        uint32_t off_latch_pos  = kInvalid; /**< :02 */
+        uint32_t off_set_counter= kInvalid; /**< :03 */
+        uint32_t off_latch_neg  = kInvalid; /**< :04 */
+        Field    set_counter_val; /**< :11 (16/32b) */
         // motor status (SM3)
-        uint16_t stat_obj       = 0;        ///< mot_obj - 0x1000
-        uint32_t off_status     = kInvalid; ///< first status bit
-        uint32_t off_sync_err   = kInvalid; ///< 0x1C32:32 inside PDO
+        uint16_t stat_obj       = 0; /**< mot_obj - 0x1000 */
+        uint32_t off_status     = kInvalid; /**< first status bit */
+        uint32_t off_sync_err   = kInvalid; /**< 0x1C32:32 inside PDO */
         // encoder status (SM3, optional)
-        uint16_t enc_stat_obj   = 0;        ///< enc_obj - 0x1000
-        uint32_t off_enc_status = kInvalid; ///< first ENC status bit
-        Field    counter;                   ///< :11 (16/32b)
-        Field    latch;                     ///< :12 (16/32b)
+        uint16_t enc_stat_obj   = 0; /**< enc_obj - 0x1000 */
+        uint32_t off_enc_status = kInvalid; /**< first ENC status bit */
+        Field    counter; /**< :11 (16/32b) */
+        Field    latch; /**< :12 (16/32b) */
     };
 
     bool resolveLayout();

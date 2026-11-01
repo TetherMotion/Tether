@@ -43,16 +43,16 @@ namespace MotionPlanner::analytical::extrusion {
  * @brief Parameters for analytical overlap-add LPV deconvolution.
  */
 struct AnalyticalOverlapAddLPVParams {
-    /// Tikhonov regularization λ for inverse filter precomputation
+    /**Tikhonov regularization λ for inverse filter precomputation */
     double lambda = 1e-6;
 
-    /// Maximum polynomial degree K of the target trajectory
+    /**Maximum polynomial degree K of the target trajectory */
     int maxPolyDegree = 3;
 
-    /// Group delay [s]
+    /**Group delay [s] */
     double groupDelay = 0.0;
 
-    /// If true, apply first-order correction for p variation within arcs
+    /**If true, apply first-order correction for p variation within arcs */
     bool firstOrderCorrection = false;
 };
 
@@ -195,13 +195,13 @@ public:
         return result;
     }
 
-    /// Number of operating points
+    /**Number of operating points */
     size_t numOperatingPoints() const { return momentLut_.size(); }
 
-    /// Parameters
+    /**Parameters */
     const AnalyticalOverlapAddLPVParams& params() const { return params_; }
 
-    /// Trajectory
+    /**Trajectory */
     const Traj& trajectory() const { return *traj_; }
 
 private:

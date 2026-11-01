@@ -16,9 +16,11 @@ namespace tether::motion::replanner {
 
 namespace {
 
-/// Convert ProfileLimits to MotionPlanner::KinematicLimits<Dim, double>.
-/// This is templated on Dim because PathAdapter and VelocityProfiler are
-/// templated. We dispatch on the path dimension.
+/**
+ * Convert ProfileLimits to MotionPlanner::KinematicLimits<Dim, double>.
+ * This is templated on Dim because PathAdapter and VelocityProfiler are
+ * templated. We dispatch on the path dimension.
+ */
 template <std::size_t Dim>
 MotionPlanner::KinematicLimits<Dim, double> toKinematicLimits(
     const ProfileLimits& limits) {
@@ -39,7 +41,7 @@ MotionPlanner::KinematicLimits<Dim, double> toKinematicLimits(
     return kl;
 }
 
-/// Run the VelocityProfiler for a given dimension.
+/**Run the VelocityProfiler for a given dimension. */
 template <std::size_t Dim>
 ProfileReplanResult runProfiler(
     const PiecewiseNurbsPath& path,

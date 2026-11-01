@@ -96,7 +96,7 @@ std::string JsonValue::dump() const {
 
 namespace {
 
-/// @brief Simple recursive-descent JSON parser.
+/**@brief Simple recursive-descent JSON parser. */
 class JsonParser {
 public:
     explicit JsonParser(std::string_view s) : s_(s), pos_(0) {}

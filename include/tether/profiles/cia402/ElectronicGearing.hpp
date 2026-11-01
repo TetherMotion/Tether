@@ -75,37 +75,37 @@ namespace CiA402 {
  * @brief Gearing engagement state
  */
 enum class GearingState {
-    Disengaged,     ///< Not following master
-    Engaging,       ///< Ramping up to full ratio
-    Engaged,        ///< Fully synchronized
-    Disengaging,    ///< Ramping down from full ratio
-    Error           ///< Error condition
+    Disengaged, /**< Not following master */
+    Engaging, /**< Ramping up to full ratio */
+    Engaged, /**< Fully synchronized */
+    Disengaging, /**< Ramping down from full ratio */
+    Error /**< Error condition */
 };
 
 /**
  * @brief Slave configuration
  */
 struct GearingSlaveConfig {
-    int32_t numerator{1};       ///< Gear ratio numerator
-    int32_t denominator{1};     ///< Gear ratio denominator
-    int32_t offset{0};          ///< Position offset
-    bool enableFeedForward{true};  ///< Enable velocity feed-forward
-    double feedForwardGain{1.0};   ///< Feed-forward gain
+    int32_t numerator{1}; /**< Gear ratio numerator */
+    int32_t denominator{1}; /**< Gear ratio denominator */
+    int32_t offset{0}; /**< Position offset */
+    bool enableFeedForward{true}; /**< Enable velocity feed-forward */
+    double feedForwardGain{1.0}; /**< Feed-forward gain */
 };
 
 /**
  * @brief Slave runtime data
  */
 struct GearingSlave {
-    DriveBackendPtr backend;        ///< Slave drive backend
-    GearingSlaveConfig config;      ///< Slave configuration
+    DriveBackendPtr backend; /**< Slave drive backend */
+    GearingSlaveConfig config; /**< Slave configuration */
     GearingState state{GearingState::Disengaged};
     
-    double currentRatio{0.0};       ///< Current effective ratio (during ramp)
-    int32_t lastMasterPos{0};       ///< Last master position
-    int32_t syncPosition{0};        ///< Position at engage
-    int32_t targetPosition{0};      ///< Calculated target position
-    uint64_t engageStartTime{0};    ///< Time engage started
+    double currentRatio{0.0}; /**< Current effective ratio (during ramp) */
+    int32_t lastMasterPos{0}; /**< Last master position */
+    int32_t syncPosition{0}; /**< Position at engage */
+    int32_t targetPosition{0}; /**< Calculated target position */
+    uint64_t engageStartTime{0}; /**< Time engage started */
 };
 
 /**
@@ -372,7 +372,7 @@ public:
      */
     struct MasterInput {
         DriveBackendPtr backend;
-        double weight{1.0};     ///< Weight (0.0 to 1.0)
+        double weight{1.0}; /**< Weight (0.0 to 1.0) */
         int32_t numerator{1};
         int32_t denominator{1};
     };

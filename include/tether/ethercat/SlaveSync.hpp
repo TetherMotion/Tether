@@ -102,24 +102,30 @@ namespace Util {
 // Transition Context
 // ============================================================================
 
-/// Context passed to `ISlaveTransitionHandler::transitionTo()`.
-///
-/// Carries information about the environment in which the transition
-/// is happening, so the handler can adapt its behavior (e.g. skip
-/// manual PDO priming when the exchange thread is already running).
+/**
+ * Context passed to `ISlaveTransitionHandler::transitionTo()`.
+ *
+ * Carries information about the environment in which the transition
+ * is happening, so the handler can adapt its behavior (e.g. skip
+ * manual PDO priming when the exchange thread is already running).
+ */
 struct TransitionContext {
-    /// Whether a PDO exchange thread is already cycling this slave's
-    /// PDO group.  When true, the handler should skip manual
-    /// `exchangeAll()` priming — the exchange thread is doing it.
-    /// When false, the handler must do its own priming before
-    /// requesting a state that requires PDO counters (e.g. OP).
+    /**
+     * Whether a PDO exchange thread is already cycling this slave's
+     * PDO group.  When true, the handler should skip manual
+     * `exchangeAll()` priming — the exchange thread is doing it.
+     * When false, the handler must do its own priming before
+     * requesting a state that requires PDO counters (e.g. OP).
+     */
     bool exchange_thread_active = false;
 
-    /// Whether this transition is part of a recovery sequence
-    /// (triggered by the SlaveSupervisor).  Recovery transitions
-    /// typically start from INIT and go all the way to OP, with
-    /// `exchange_thread_active = false` (the exchange thread skips
-    /// the recovering slave's group because its ready flag is cleared).
+    /**
+     * Whether this transition is part of a recovery sequence
+     * (triggered by the SlaveSupervisor).  Recovery transitions
+     * typically start from INIT and go all the way to OP, with
+     * `exchange_thread_active = false` (the exchange thread skips
+     * the recovering slave's group because its ready flag is cleared).
+     */
     bool is_recovery = false;
 };
 
@@ -195,39 +201,45 @@ public:
  * slaves to reach a target state.
  */
 struct SlaveSyncSlot {
-    /// The slave index this slot manages.
+    /**The slave index this slot manages. */
     uint16_t slave_index = 0;
 
-    /// The transition handler (owned by the application).
+    /**The transition handler (owned by the application). */
     ISlaveTransitionHandler* handler = nullptr;
 
-    /// Human-readable name for logging.
+    /**Human-readable name for logging. */
     std::string name;
 
     // --- Synchronization atomics ---
 
-    /// Set after PDO mapping is stable and PDO buffers are cached.
-    /// The exchange thread checks this before calling exchangeAll().
+    /**
+     * Set after PDO mapping is stable and PDO buffers are cached.
+     * The exchange thread checks this before calling exchangeAll().
+     */
     std::atomic<bool> ready{false};
 
-    /// Set after the slave reaches its target state.
-    /// Checked by the gate's waitAll/waitOne methods.
+    /**
+     * Set after the slave reaches its target state.
+     * Checked by the gate's waitAll/waitOne methods.
+     */
     std::atomic<bool> in_target_state{false};
 
-    /// Set if a transition fails permanently.
+    /**Set if a transition fails permanently. */
     std::atomic<bool> failed{false};
 
     // --- Callbacks ---
 
-    /// Called after a successful transition to the target state
-    /// (e.g. to cache PDO buffer pointers and set the ready flag).
-    /// Called from the same thread that invoked the coordinator's
-    /// transitionAllTo().
+    /**
+     * Called after a successful transition to the target state
+     * (e.g. to cache PDO buffer pointers and set the ready flag).
+     * Called from the same thread that invoked the coordinator's
+     * transitionAllTo().
+     */
     std::function<void()> on_reached;
 
     // --- Convenience ---
 
-    /// Reset all flags to their initial state (before re-initialization).
+    /**Reset all flags to their initial state (before re-initialization). */
     void reset() {
         ready.store(false, std::memory_order_release);
         in_target_state.store(false, std::memory_order_release);
@@ -252,21 +264,25 @@ struct SlaveSyncSlot {
  */
 class SlaveSyncGate {
 public:
-    /// Notify the gate that a slot's state changed.
+    /**Notify the gate that a slot's state changed. */
     void notify();
 
-    /// Wait until all slots have reached their target state or one has failed.
-    /// @param st    Stop token for cooperative cancellation.
-    /// @param slots List of slots to check.
-    /// @return true if all slots are in their target state,
-    ///         false if one failed or the stop token was requested.
+    /**
+     * Wait until all slots have reached their target state or one has failed.
+     * @param st    Stop token for cooperative cancellation.
+     * @param slots List of slots to check.
+     * @return true if all slots are in their target state,
+     *         false if one failed or the stop token was requested.
+     */
     bool waitAll(std::stop_token st, const std::vector<SlaveSyncSlot*>& slots) const;
 
-    /// Wait until one specific slot has reached its target state or failed.
-    /// @param st   Stop token for cooperative cancellation.
-    /// @param slot The slot to wait on.
-    /// @return true if the slot reached its target state,
-    ///         false if it failed or the stop token was requested.
+    /**
+     * Wait until one specific slot has reached its target state or failed.
+     * @param st   Stop token for cooperative cancellation.
+     * @param slot The slot to wait on.
+     * @return true if the slot reached its target state,
+     *         false if it failed or the stop token was requested.
+     */
     bool waitOne(std::stop_token st, const SlaveSyncSlot& slot) const;
 
 private:
@@ -301,23 +317,25 @@ private:
  */
 class SlaveSyncCoordinator {
 public:
-    /// Register a slot.  The coordinator does not take ownership.
-    /// The slot must outlive the coordinator.
+    /**
+     * Register a slot.  The coordinator does not take ownership.
+     * The slot must outlive the coordinator.
+     */
     void registerSlot(SlaveSyncSlot& slot);
 
-    /// Unregister a slot by slave index.
+    /**Unregister a slot by slave index. */
     void unregisterSlot(uint16_t slave_index);
 
-    /// Get all registered slots.
+    /**Get all registered slots. */
     const std::vector<SlaveSyncSlot*>& slots() const { return slots_; }
 
-    /// Find a slot by slave index.  Returns nullptr if not found.
+    /**Find a slot by slave index.  Returns nullptr if not found. */
     SlaveSyncSlot* findSlot(uint16_t slave_index) const;
 
-    /// Clear the ready flag for all slots (before re-initialization).
+    /**Clear the ready flag for all slots (before re-initialization). */
     void clearAllReady();
 
-    /// Clear the ready flag for one slot.
+    /**Clear the ready flag for one slot. */
     void clearReady(uint16_t slave_index);
 
     /**
@@ -398,13 +416,15 @@ private:
  */
 class SyncRecoveryHandler : public ISlaveRecoveryHandler {
 public:
-    /// Construct with a reference to the coordinator.
+    /**Construct with a reference to the coordinator. */
     explicit SyncRecoveryHandler(SlaveSyncCoordinator& coord);
 
-    /// @brief Re-initialize the slave from scratch.
-    /// @param slave_index  Slave to re-initialize.
-    /// @return true if the slave is back in its operational state,
-    ///         false on failure or if the slave is not registered.
+    /**
+     * @brief Re-initialize the slave from scratch.
+     * @param slave_index  Slave to re-initialize.
+     * @return true if the slave is back in its operational state,
+     *         false on failure or if the slave is not registered.
+     */
     bool reinitializeSlave(uint16_t slave_index) override;
 
 private:

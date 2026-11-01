@@ -31,15 +31,19 @@ namespace tether::io {
 // ===========================================================================
 
 struct SchemaValue {
-    /// The resolved node this value was decoded/encoded against.
-    /// Aliases are chased during decode, so this is never an Alias node.
+    /**
+     * The resolved node this value was decoded/encoded against.
+     * Aliases are chased during decode, so this is never an Alias node.
+     */
     const SchemaNode* node = nullptr;
 
     struct Scalar {
-        /// Raw payload bits, matching SchemaValueCodec's NumericValue
-        /// convention: unsigned/enum/varint values stored directly, signed
-        /// integers sign-extended to 64 bits, F32/F64 stored as the raw
-        /// IEEE bit pattern in the low bits.
+        /**
+         * Raw payload bits, matching SchemaValueCodec's NumericValue
+         * convention: unsigned/enum/varint values stored directly, signed
+         * integers sign-extended to 64 bits, F32/F64 stored as the raw
+         * IEEE bit pattern in the low bits.
+         */
         uint64_t bits = 0;
     };
     struct Str   { std::string value; };
@@ -48,19 +52,19 @@ struct SchemaValue {
     struct Struct {
         struct Field {
             uint32_t key = 0;
-            const SchemaField* schemaField = nullptr;   ///< nullptr = unknown key
+            const SchemaField* schemaField = nullptr; /**< nullptr = unknown key */
             std::unique_ptr<SchemaValue> value;
         };
-        std::vector<Field> fields;                      ///< wire order (sorted keys)
+        std::vector<Field> fields; /**< wire order (sorted keys) */
     };
     struct Map {
         struct Entry {
             std::unique_ptr<SchemaValue> key;
             std::unique_ptr<SchemaValue> value;
         };
-        std::vector<Entry> entries;                     ///< wire order
+        std::vector<Entry> entries; /**< wire order */
     };
-    /// std::nullopt payload = present and value == nullptr; use `present`.
+    /**std::nullopt payload = present and value == nullptr; use `present`. */
     struct Optional { bool present = false; std::unique_ptr<SchemaValue> value; };
     struct OneOf { uint32_t memberKey = 0; std::unique_ptr<SchemaValue> value; };
 
@@ -104,8 +108,10 @@ decodeRef(const SchemaGraph& graph, const SchemaRef& ref, BufReader& reader,
     return decodeNode(graph, *node, reader, limits, depth + 1);
 }
 
-/// Decode a payload of `len` bytes as the given ref (element/map children
-/// are length-delimited on the wire).
+/**
+ * Decode a payload of `len` bytes as the given ref (element/map children
+ * are length-delimited on the wire).
+ */
 inline std::expected<SchemaValue, std::string>
 decodeChildPayload(const SchemaGraph& graph, const SchemaRef& ref,
                    BufReader& reader, const SchemaValueLimits& limits,
@@ -399,9 +405,11 @@ decodeNode(const SchemaGraph& graph, const SchemaNode& node, BufReader& reader,
 
 } // namespace schema_value_detail
 
-/// Decode one schema value from a BufReader. `node` must be the resolved
-/// node (aliases are chased internally). Bytes consumed are read from
-/// `reader` — check `reader.remaining()` for exact-consumption rules.
+/**
+ * Decode one schema value from a BufReader. `node` must be the resolved
+ * node (aliases are chased internally). Bytes consumed are read from
+ * `reader` — check `reader.remaining()` for exact-consumption rules.
+ */
 inline std::expected<SchemaValue, std::string>
 decodeSchemaValue(const SchemaGraph& graph, const SchemaNode& node,
                   BufReader& reader, const SchemaValueLimits& limits = {}) {
@@ -410,7 +418,7 @@ decodeSchemaValue(const SchemaGraph& graph, const SchemaNode& node,
     return schema_value_detail::decodeNode(graph, *resolved, reader, limits, 0);
 }
 
-/// Convenience full-buffer decode — requires exact consumption.
+/**Convenience full-buffer decode — requires exact consumption. */
 inline std::expected<SchemaValue, std::string>
 decodeSchemaValue(const SchemaGraph& graph, const SchemaNode& node,
                   const uint8_t* data, size_t len,
@@ -439,7 +447,7 @@ decodeSchemaValue(const SchemaGraph& graph, const SchemaRef& ref,
 
 namespace schema_value_detail {
 
-/// Growable byte sink with the subset of the BufWriter API the encoder uses.
+/**Growable byte sink with the subset of the BufWriter API the encoder uses. */
 struct VecWriter {
     std::vector<uint8_t> buf;
 
@@ -469,8 +477,10 @@ inline std::expected<void, std::string>
 encodeNode(const SchemaGraph& graph, const SchemaNode& node,
            const SchemaValue& value, VecWriter& w, uint32_t depth);
 
-/// Encode a single child value into a scratch buffer (for length-prefixed
-/// wire forms).
+/**
+ * Encode a single child value into a scratch buffer (for length-prefixed
+ * wire forms).
+ */
 inline std::expected<VecWriter, std::string>
 encodeChild(const SchemaGraph& graph, const SchemaValue& value, uint32_t depth) {
     const SchemaNode* node = resolveAliasNode(graph, value.node);
@@ -748,8 +758,10 @@ encodeNode(const SchemaGraph& graph, const SchemaNode& node,
 
 } // namespace schema_value_detail
 
-/// Encode a SchemaValue tree into canonical wire bytes.
-/// `value.node` must point into `graph` (aliases are chased).
+/**
+ * Encode a SchemaValue tree into canonical wire bytes.
+ * `value.node` must point into `graph` (aliases are chased).
+ */
 inline std::expected<std::vector<uint8_t>, std::string>
 encodeSchemaValue(const SchemaGraph& graph, const SchemaValue& value) {
     const SchemaNode* node = schema_value_detail::resolveAliasNode(graph, value.node);
@@ -860,7 +872,7 @@ inline std::string formatScalarText(const SchemaNode& node, uint64_t bits) {
     }
 }
 
-/// Format a byte-typed scalar (IPv4/IPv6/MAC) or bytes payload.
+/**Format a byte-typed scalar (IPv4/IPv6/MAC) or bytes payload. */
 inline std::string formatBytesText(const SchemaNode* node,
                                    const std::vector<uint8_t>& b) {
     if (node && node->scalarType == ValueType::IPv4 && b.size() == 4) {
@@ -981,7 +993,7 @@ inline void formatText(const SchemaValue& v, std::string& out,
     out += "<empty>";
 }
 
-/// Look up a oneof member's display name via its member node (graph needed).
+/**Look up a oneof member's display name via its member node (graph needed). */
 inline std::string oneOfMemberName(const SchemaGraph* graph,
                                    const SchemaNode& node, uint32_t memberKey) {
     const auto it = std::lower_bound(
@@ -1095,9 +1107,11 @@ inline void formatJson(const SchemaGraph* graph, const SchemaValue& v,
 
 } // namespace schema_value_detail
 
-/// Human-readable single-line rendering: `42`, `"str"`, `{a: 1, b: [1, 2]}`,
-/// `hex:aa55`, `none`, `#3{...}`.
-/// `maxElements`/`maxString` truncate for compact display (0 = unlimited).
+/**
+ * Human-readable single-line rendering: `42`, `"str"`, `{a: 1, b: [1, 2]}`,
+ * `hex:aa55`, `none`, `#3{...}`.
+ * `maxElements`/`maxString` truncate for compact display (0 = unlimited).
+ */
 inline std::string formatSchemaValueText(const SchemaValue& value,
                                          size_t maxElements = 0,
                                          size_t maxString = 0) {
@@ -1106,11 +1120,13 @@ inline std::string formatSchemaValueText(const SchemaValue& value,
     return out;
 }
 
-/// JSON rendering: structs/objects for structs, arrays, `[k, v]` pair lists
-/// for maps (JSON object keys must be strings), `{"<member>": v}` for oneof,
-/// null for absent optionals, `"hex:…"`-style strings for byte payloads,
-/// integers above 2^53 emitted as strings.
-/// `graph` is optional — pass it for named oneof members.
+/**
+ * JSON rendering: structs/objects for structs, arrays, `[k, v]` pair lists
+ * for maps (JSON object keys must be strings), `{"<member>": v}` for oneof,
+ * null for absent optionals, `"hex:…"`-style strings for byte payloads,
+ * integers above 2^53 emitted as strings.
+ * `graph` is optional — pass it for named oneof members.
+ */
 inline std::string schemaValueToJson(const SchemaValue& value,
                                      const SchemaGraph* graph = nullptr) {
     std::string out;
@@ -1138,7 +1154,7 @@ inline const SchemaValue::Struct* schemaStruct(const SchemaValue& v) {
     return std::get_if<SchemaValue::Struct>(&v.payload);
 }
 
-/// Signed/unsigned/double projections of a Scalar payload.
+/**Signed/unsigned/double projections of a Scalar payload. */
 inline int64_t schemaValueAsInt(const SchemaValue& v) {
     if (const auto* s = schemaScalar(v)) return static_cast<int64_t>(s->bits);
     return 0;

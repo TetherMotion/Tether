@@ -23,11 +23,11 @@
 
 namespace tether::io::machine {
 
-/// Maps one transport credential to a session identity, or rejects it.
+/**Maps one transport credential to a session identity, or rejects it. */
 class IMachineAuthProvider {
 public:
     virtual ~IMachineAuthProvider() = default;
-    /// Returns an authenticated identity for `credential`, or nullopt.
+    /**Returns an authenticated identity for `credential`, or nullopt. */
     virtual std::optional<SessionIdentity> authenticate(std::string_view credential) const = 0;
 };
 
@@ -109,8 +109,10 @@ private:
     std::map<std::string, Entry> entries_;
 };
 
-/// Extracts a bearer credential from an HTTP Authorization header value.
-/// Returns nullopt for absent/malformed/non-Bearer values.
+/**
+ * Extracts a bearer credential from an HTTP Authorization header value.
+ * Returns nullopt for absent/malformed/non-Bearer values.
+ */
 inline std::optional<std::string> bearerCredential(std::string_view authorization) {
     constexpr std::string_view prefix = "Bearer ";
     if (authorization.size() <= prefix.size() ||

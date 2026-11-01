@@ -31,25 +31,27 @@ namespace UI {
 class KeyMap {
 public:
     struct Binding {
-        std::vector<int> keys;          ///< key codes (chars and KEY_*)
-        std::string hint;               ///< footer hint, e.g. "up/dn:nav"
-        std::string description;        ///< longer text for the ? overlay
-        std::function<bool()> invoke;   ///< false = "not consumed"
+        std::vector<int> keys; /**< key codes (chars and KEY_*) */
+        std::string hint; /**< footer hint, e.g. "up/dn:nav" */
+        std::string description; /**< longer text for the ? overlay */
+        std::function<bool()> invoke; /**< false = "not consumed" */
     };
 
-    /// Register a binding for `key` (single-key convenience).
+    /**Register a binding for `key` (single-key convenience). */
     void add(int key, std::string hint, std::string description,
              std::function<bool()> invoke) {
         bindings_.push_back({{key}, std::move(hint),
                              std::move(description), std::move(invoke)});
     }
 
-    /// Register a multi-key binding (e.g. arrows + hjkl for one action).
+    /**Register a multi-key binding (e.g. arrows + hjkl for one action). */
     void add(Binding b) { bindings_.push_back(std::move(b)); }
 
-    /// Dispatch: first binding listing `key` wins.  A binding whose
-    /// invoke returns false falls through to the next matching
-    /// binding (rare) and then to "unhandled".
+    /**
+     * Dispatch: first binding listing `key` wins.  A binding whose
+     * invoke returns false falls through to the next matching
+     * binding (rare) and then to "unhandled".
+     */
     bool handleKey(int key) {
         for (auto& b : bindings_)
             for (const int k : b.keys)
@@ -58,8 +60,10 @@ public:
         return false;
     }
 
-    /// Footer hint text — the distinct non-empty hints in
-    /// registration order, space-joined.
+    /**
+     * Footer hint text — the distinct non-empty hints in
+     * registration order, space-joined.
+     */
     std::string keyHints() const {
         std::string out;
         for (const auto& b : bindings_)
@@ -70,7 +74,7 @@ public:
         return out;
     }
 
-    /// "hint — description" lines for a help overlay.
+    /**"hint — description" lines for a help overlay. */
     std::vector<std::string> helpLines() const {
         std::vector<std::string> out;
         for (const auto& b : bindings_) {
@@ -88,7 +92,7 @@ public:
     bool empty() const { return bindings_.empty(); }
 
 private:
-    /// Human-readable name for a key code (printable chars as-is).
+    /**Human-readable name for a key code (printable chars as-is). */
     static std::string keyName(int key) {
         if (key >= 32 && key <= 126)
             return std::string(1, static_cast<char>(key));

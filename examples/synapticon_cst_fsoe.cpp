@@ -230,12 +230,14 @@ using FSoEMain = EtherCAT::Drives::Synapticon::SafeMotion::MainInstance;
 
 class SineTorqueController final : public EtherCAT::DS402Master::IDriveMotionController {
 public:
-    /// @param amplitude_nm   Peak torque amplitude in Nm (half of peak-to-peak)
-    /// @param frequency_hz   Sine frequency in Hz
-    /// @param rated_torque_mnm  Motor rated torque in mNm (from object 0x6076)
-    /// @param rx_pdo_offset  Byte offset of the motion RxPDO (0x1600) in the
-    ///                       combined PDO buffer (after the FSoE PDO)
-    /// @param fsoe_main      FSoE main instance used to gate torque output
+    /**
+     * @param amplitude_nm   Peak torque amplitude in Nm (half of peak-to-peak)
+     * @param frequency_hz   Sine frequency in Hz
+     * @param rated_torque_mnm  Motor rated torque in mNm (from object 0x6076)
+     * @param rx_pdo_offset  Byte offset of the motion RxPDO (0x1600) in the
+     *                       combined PDO buffer (after the FSoE PDO)
+     * @param fsoe_main      FSoE main instance used to gate torque output
+     */
     SineTorqueController(double amplitude_nm, double frequency_hz,
                          uint32_t rated_torque_mnm, size_t rx_pdo_offset,
                          const FSoEMain& fsoe_main)
@@ -300,7 +302,7 @@ public:
         return true;
     }
 
-    /// Returns the most recently commanded torque in Nm (for diagnostics)
+    /**Returns the most recently commanded torque in Nm (for diagnostics) */
     double lastTorqueNm() const { return last_torque_nm_; }
 
 private:
@@ -589,7 +591,7 @@ public:
         , debug_wire_(debug_wire)
     {}
 
-    /// Suppress all FSoE debug output from this task (for diagnostics mode).
+    /**Suppress all FSoE debug output from this task (for diagnostics mode). */
     void suppressDebug() {
         debug_raw_ = false;
         debug_frame_ = false;
@@ -874,25 +876,25 @@ struct Args {
     int slave_index = 0;
     double duration = 10.0;
     bool enable_dc_sync = false;
-    uint16_t connection_id = 0x0006;  ///< Must match drive's Device Safety Address (0xF980:1)
-    uint16_t safety_address = 0x0006; ///< FSoE slave safety address (0x2620:3)
+    uint16_t connection_id = 0x0006; /**< Must match drive's Device Safety Address (0xF980:1) */
+    uint16_t safety_address = 0x0006; /**< FSoE slave safety address (0x2620:3) */
     uint16_t watchdog_ms = EtherCAT::Drives::Synapticon::SafeMotion::Timing::kMinimumWatchdogTimeMs;
     uint32_t diag_interval_ms = 1000;
     std::string debug;
     EtherCAT::EncapsulationConfig encapsulation;
-    ///< STO override: -1 = not set (use motionEnabled default), 0 = force STO off, 1 = force STO on
+    /**< STO override: -1 = not set (use motionEnabled default), 0 = force STO off, 1 = force STO on */
     int sto_override = -1;
-    ///< SOS override: -1 = not set (defaults to STO value), 0 = force SOS off, 1 = force SOS on
+    /**< SOS override: -1 = not set (defaults to STO value), 0 = force SOS off, 1 = force SOS on */
     int sos_override = -1;
-    ///< SBC override: -1 = not set (use motionEnabled default), 0 = force brake released, 1 = force brake engaged
+    /**< SBC override: -1 = not set (use motionEnabled default), 0 = force brake released, 1 = force brake engaged */
     int sbc_override = -1;
-    ///< After N seconds, run full safety diagnostics via CoE then exit. 0 = disabled.
+    /**< After N seconds, run full safety diagnostics via CoE then exit. 0 = disabled. */
     double diagnostics_after = 0.0;
-    ///< FSoE status-frame variant: "lw1" (31 B frame) or "lw2" (35 B frame).
+    /**< FSoE status-frame variant: "lw1" (31 B frame) or "lw2" (35 B frame). */
     std::string fsoe_frame = "lw2";
-    double torque_pp_nm = 0.0;       ///< Peak-to-peak CST sine torque in Nm (0 = no motion)
-    double freq_hz = 0.5;            ///< Sine torque frequency in Hz
-    uint32_t rated_torque_mnm = 0;   ///< Motor rated torque in mNm (0 = auto-detect from 0x6076)
+    double torque_pp_nm = 0.0; /**< Peak-to-peak CST sine torque in Nm (0 = no motion) */
+    double freq_hz = 0.5; /**< Sine torque frequency in Hz */
+    uint32_t rated_torque_mnm = 0; /**< Motor rated torque in mNm (0 = auto-detect from 0x6076) */
 };
 
 bool parseArgs(int argc, char** argv, Args& out) {

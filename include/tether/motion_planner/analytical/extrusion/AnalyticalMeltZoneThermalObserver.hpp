@@ -57,21 +57,21 @@ namespace MotionPlanner::analytical::extrusion {
  */
 struct AnalyticalThermalParams {
     // --- Thermal capacitances [J/K] ---
-    double heaterBlockCapacitance = 8.0;   ///< C_h
-    double sensorCapacitance      = 1.0;   ///< C_s
-    double meltZoneCapacitance    = 2.0;   ///< C_m
+    double heaterBlockCapacitance = 8.0; /**< C_h */
+    double sensorCapacitance      = 1.0; /**< C_s */
+    double meltZoneCapacitance    = 2.0; /**< C_m */
 
     // --- Thermal conductances [W/K] ---
-    double heaterSensorConductance = 2.0;  ///< G_hs
-    double sensorMeltConductance   = 1.5;  ///< G_sm
+    double heaterSensorConductance = 2.0; /**< G_hs */
+    double sensorMeltConductance   = 1.5; /**< G_sm */
 
     // --- Filament properties ---
-    double filamentHeatCapacity = 2.1;     ///< ρ·c_p [J/(mm³·K)]
-    double inletTempC           = 25.0;    ///< T_inlet [°C]
+    double filamentHeatCapacity = 2.1; /**< ρ·c_p [J/(mm³·K)] */
+    double inletTempC           = 25.0; /**< T_inlet [°C] */
 
     // --- Heater ---
-    double heaterPowerScale = 40.0;        ///< [W] at PWM=1
-    double heaterPWM        = 0.0;         ///< Heater PWM fraction [0,1]
+    double heaterPowerScale = 40.0; /**< [W] at PWM=1 */
+    double heaterPWM        = 0.0; /**< Heater PWM fraction [0,1] */
 
     // --- Luenberger gains [1/s] ---
     double luenbergerGainHeater = 0.5;
@@ -100,13 +100,13 @@ public:
      * @brief Per-arc precomputed thermal solution.
      */
     struct ArcThermalSolution {
-        double t0 = 0.0;         ///< Arc start time
-        double duration = 0.0;   ///< Arc duration
-        StateVec stateStart;     ///< State at arc start
-        StateMat expA;           ///< exp(A_arc · Δt)
-        StateVec phi;            ///< ∫₀^Δt exp(A·s)·b ds (particular solution)
-        StateVec b;              ///< Arc input vector (for mid-arc evaluation)
-        double Qbar = 0.0;       ///< Average flow for this arc
+        double t0 = 0.0; /**< Arc start time */
+        double duration = 0.0; /**< Arc duration */
+        StateVec stateStart; /**< State at arc start */
+        StateMat expA; /**< exp(A_arc · Δt) */
+        StateVec phi; /**< ∫₀^Δt exp(A·s)·b ds (particular solution) */
+        StateVec b; /**< Arc input vector (for mid-arc evaluation) */
+        double Qbar = 0.0; /**< Average flow for this arc */
 
         /**
          * @brief Evaluate the thermal state at local time tau ∈ [0, duration].
@@ -308,7 +308,7 @@ private:
     StateVec state_;
 
     std::vector<ArcThermalSolution> solutions_;
-    std::vector<StateMat> arcMatrices_;  ///< A_arc for each arc
+    std::vector<StateMat> arcMatrices_; /**< A_arc for each arc */
 
     size_t findArc(double t) const {
         if (solutions_.empty()) return 0;

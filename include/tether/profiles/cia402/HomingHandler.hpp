@@ -75,12 +75,12 @@ namespace CiA402 {
  * @brief Homing state
  */
 enum class HomingState {
-    Idle,               ///< Not homing
-    SearchingSwitch,    ///< Searching for switch/limit
-    Reversing,          ///< Reversing direction after switch
-    SearchingIndex,     ///< Searching for index pulse
-    Attained,           ///< Homing complete
-    Error               ///< Homing error
+    Idle, /**< Not homing */
+    SearchingSwitch, /**< Searching for switch/limit */
+    Reversing, /**< Reversing direction after switch */
+    SearchingIndex, /**< Searching for index pulse */
+    Attained, /**< Homing complete */
+    Error /**< Homing error */
 };
 
 /**

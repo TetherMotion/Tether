@@ -39,21 +39,23 @@
 
 namespace tether::klipper::objects {
 
-/// @brief A single mesh probe point.
+/**@brief A single mesh probe point. */
 struct MeshPoint {
     double x, y, z;
 };
 
-/// @brief Bed mesh for Z compensation.
+/**@brief Bed mesh for Z compensation. */
 class BedMesh {
 public:
-    /// @brief Configure mesh dimensions.
-    /// @param minX Mesh X lower bound [mm]
-    /// @param maxX Mesh X upper bound [mm]
-    /// @param minY Mesh Y lower bound [mm]
-    /// @param maxY Mesh Y upper bound [mm]
-    /// @param xPoints Probe columns
-    /// @param yPoints Probe rows
+    /**
+     * @brief Configure mesh dimensions.
+     * @param minX Mesh X lower bound [mm]
+     * @param maxX Mesh X upper bound [mm]
+     * @param minY Mesh Y lower bound [mm]
+     * @param maxY Mesh Y upper bound [mm]
+     * @param xPoints Probe columns
+     * @param yPoints Probe rows
+     */
     void configure(double minX, double maxX, double minY, double maxY,
                    int xPoints, int yPoints) {
         minX_ = minX; maxX_ = maxX;
@@ -63,10 +65,12 @@ public:
         probed_.assign(xPoints, std::vector<bool>(yPoints, false));
     }
 
-    /// @brief Set a mesh point value.
-    /// @param xIdx Column index
-    /// @param yIdx Row index
-    /// @param z Measured Z offset at that point [mm]
+    /**
+     * @brief Set a mesh point value.
+     * @param xIdx Column index
+     * @param yIdx Row index
+     * @param z Measured Z offset at that point [mm]
+     */
     void setPoint(int xIdx, int yIdx, double z) {
         if (xIdx >= 0 && xIdx < xPoints_ && yIdx >= 0 && yIdx < yPoints_) {
             mesh_[xIdx][yIdx] = z;
@@ -74,10 +78,12 @@ public:
         }
     }
 
-    /// @brief Get Z compensation at a given XY position using bilinear interpolation.
-    /// @param x Query X [mm]
-    /// @param y Query Y [mm]
-    /// @return Interpolated Z offset [mm]; 0 outside the mesh
+    /**
+     * @brief Get Z compensation at a given XY position using bilinear interpolation.
+     * @param x Query X [mm]
+     * @param y Query Y [mm]
+     * @return Interpolated Z offset [mm]; 0 outside the mesh
+     */
     double compensationAt(double x, double y) const {
         if (xPoints_ < 2 || yPoints_ < 2) return 0.0;
         if (x < minX_ || x > maxX_ || y < minY_ || y > maxY_) return 0.0;
@@ -105,8 +111,10 @@ public:
         return z0 * (1 - ty) + z1 * ty;
     }
 
-    /// @brief Check if all points have been probed.
-    /// @return `true` when every mesh point has a value
+    /**
+     * @brief Check if all points have been probed.
+     * @return `true` when every mesh point has a value
+     */
     bool isComplete() const {
         for (int i = 0; i < xPoints_; ++i) {
             for (int j = 0; j < yPoints_; ++j) {
@@ -116,14 +124,16 @@ public:
         return true;
     }
 
-    /// @brief Clear the mesh.
+    /**@brief Clear the mesh. */
     void clear() {
         std::ranges::for_each(mesh_, [](auto& col) { std::ranges::fill(col, 0.0); });
         std::ranges::for_each(probed_, [](auto& col) { std::fill(col.begin(), col.end(), false); });
     }
 
-    /// @brief Get mesh dimensions.
-    /// @return Probe column count
+    /**
+     * @brief Get mesh dimensions.
+     * @return Probe column count
+     */
     int xPoints() const { return xPoints_; }
     int yPoints() const { return yPoints_; }
     double minX() const { return minX_; }
@@ -131,8 +141,10 @@ public:
     double minY() const { return minY_; }
     double maxY() const { return maxY_; }
 
-    /// @brief Get all mesh points as a flat list.
-    /// @return Every (x, y, z) mesh sample
+    /**
+     * @brief Get all mesh points as a flat list.
+     * @return Every (x, y, z) mesh sample
+     */
     std::vector<MeshPoint> points() const {
         std::vector<MeshPoint> result;
         for (int i = 0; i < xPoints_; ++i) {
@@ -145,8 +157,10 @@ public:
         return result;
     }
 
-    /// @brief Get mesh as a 2D matrix (for serialization).
-    /// @return Raw [x][y] mesh values
+    /**
+     * @brief Get mesh as a 2D matrix (for serialization).
+     * @return Raw [x][y] mesh values
+     */
     const std::vector<std::vector<double>>& matrix() const { return mesh_; }
 
 private:
@@ -156,15 +170,17 @@ private:
     std::vector<std::vector<bool>> probed_;
 };
 
-/// @brief Bed leveling controller that manages mesh probing and compensation.
+/**@brief Bed leveling controller that manages mesh probing and compensation. */
 class BedLevelController {
 public:
     using ProbeFunc = std::function<double(double x, double y)>;
 
     BedLevelController(BedMesh& mesh) : mesh_(mesh) {}
 
-    /// @brief Probe the mesh at all points.
-    /// @param probeFunc (x, y) -> measured Z offset, called once per point
+    /**
+     * @brief Probe the mesh at all points.
+     * @param probeFunc (x, y) -> measured Z offset, called once per point
+     */
     void probeMesh(ProbeFunc probeFunc) {
         auto pts = mesh_.points();
         for (const auto& p : pts) {
@@ -180,19 +196,23 @@ public:
         }
     }
 
-    /// @brief Get Z compensation at a position.
-    /// @param x Query X [mm]
-    /// @param y Query Y [mm]
-    /// @return Interpolated mesh offset [mm]
+    /**
+     * @brief Get Z compensation at a position.
+     * @param x Query X [mm]
+     * @param y Query Y [mm]
+     * @return Interpolated mesh offset [mm]
+     */
     double compensationAt(double x, double y) const {
         return mesh_.compensationAt(x, y);
     }
 
-    /// @brief Apply compensation to a target Z position.
-    /// @param x Move X [mm]
-    /// @param y Move Y [mm]
-    /// @param z Nominal Z [mm]
-    /// @return Mesh-compensated Z [mm]
+    /**
+     * @brief Apply compensation to a target Z position.
+     * @param x Move X [mm]
+     * @param y Move Y [mm]
+     * @param z Nominal Z [mm]
+     * @return Mesh-compensated Z [mm]
+     */
     double applyCompensation(double x, double y, double z) const {
         return z + compensationAt(x, y);
     }

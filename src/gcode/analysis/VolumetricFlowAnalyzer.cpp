@@ -1,5 +1,7 @@
-/// @file VolumetricFlowAnalyzer.cpp
-/// @brief Volumetric flow rate and extrusion consistency analysis.
+/**
+ * @file VolumetricFlowAnalyzer.cpp
+ * @brief Volumetric flow rate and extrusion consistency analysis.
+ */
 
 #include "tether/gcode/analysis/VolumetricFlowAnalyzer.hpp"
 #include "tether/gcode/motion/InterpolationStrategy.hpp"

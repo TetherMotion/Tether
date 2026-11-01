@@ -34,15 +34,17 @@ namespace EtherCAT::Drives::Synapticon {
  * @brief One drive-safety poll sample.
  */
 struct DriveSafetySnapshot {
-    uint8_t  safety_sw1 = 0;   ///< 0x6621:1 — safety statusword byte 1
-    uint8_t  safety_sw2 = 0;   ///< 0x6621:2 — safety statusword byte 2
-    uint8_t  safe_in1   = 0;   ///< 0x2611:1 — safe input 1 level
-    uint8_t  safe_in2   = 0;   ///< 0x2611:2 — safe input 2 level
-    uint16_t statusword = 0;   ///< 0x6041   — CiA 402 statusword
-    uint16_t error_code = 0;   ///< 0x603F   — CiA 402 error code
+    uint8_t  safety_sw1 = 0; /**< 0x6621:1 — safety statusword byte 1 */
+    uint8_t  safety_sw2 = 0; /**< 0x6621:2 — safety statusword byte 2 */
+    uint8_t  safe_in1   = 0; /**< 0x2611:1 — safe input 1 level */
+    uint8_t  safe_in2   = 0; /**< 0x2611:2 — safe input 2 level */
+    uint16_t statusword = 0; /**< 0x6041   — CiA 402 statusword */
+    uint16_t error_code = 0; /**< 0x603F   — CiA 402 error code */
 
-    /// Pack all fields into one integer — `a.key() != b.key()` iff any
-    /// sampled value changed (for last-seen change detection).
+    /**
+     * Pack all fields into one integer — `a.key() != b.key()` iff any
+     * sampled value changed (for last-seen change detection).
+     */
     uint64_t key() const {
         return (static_cast<uint64_t>(safety_sw1) << 40) |
                (static_cast<uint64_t>(safety_sw2) << 32) |
@@ -52,8 +54,10 @@ struct DriveSafetySnapshot {
                (static_cast<uint64_t>(error_code) << 48);
     }
 
-    /// True when a hardware safe input is low — the drive's local SMM
-    /// demands a stop function regardless of the FSoE master's commands.
+    /**
+     * True when a hardware safe input is low — the drive's local SMM
+     * demands a stop function regardless of the FSoE master's commands.
+     */
     bool safeInputsLow() const { return safe_in1 == 0 || safe_in2 == 0; }
 };
 

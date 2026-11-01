@@ -1,6 +1,8 @@
 #pragma once
-/// @file DestabilizerEngine.hpp
-/// @brief Main Destabilizer engine: orchestrates adversarial search.
+/**
+ * @file DestabilizerEngine.hpp
+ * @brief Main Destabilizer engine: orchestrates adversarial search.
+ */
 
 #include "DestabilizerTypes.hpp"
 #include "Perturbation.hpp"
@@ -27,23 +29,23 @@ namespace Destabilizer {
 // Thread Pool
 // ---------------------------------------------------------------------------
 
-/// Simple work-stealing thread pool for parallel rollout evaluation.
+/**Simple work-stealing thread pool for parallel rollout evaluation. */
 class ThreadPool {
 public:
     explicit ThreadPool(int numThreads = 0);
     ~ThreadPool();
 
-    /// Submit a task and get a future for its result.
+    /**Submit a task and get a future for its result. */
     template<typename F, typename... Args>
     auto submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))>;
 
-    /// Get number of threads.
+    /**Get number of threads. */
     int size() const { return static_cast<int>(workers_.size()); }
 
-    /// Wait for all pending tasks to complete.
+    /**Wait for all pending tasks to complete. */
     void waitAll();
 
-    /// Shutdown the pool.
+    /**Shutdown the pool. */
     void shutdown();
 
 private:
@@ -82,37 +84,39 @@ auto ThreadPool::submit(F&& f, Args&&... args) -> std::future<decltype(f(args...
 // Destabilizer Engine
 // ---------------------------------------------------------------------------
 
-/// Main Destabilizer engine.
-///
-/// Usage:
-/// 1. Configure with DestabilizerConfig.
-/// 2. Optionally set a progress callback.
-/// 3. Call run() — blocking, returns DestabilizerResult.
-/// 4. Or call start()/pause()/resume()/abort() for async control.
+/**
+ * Main Destabilizer engine.
+ *
+ * Usage:
+ * 1. Configure with DestabilizerConfig.
+ * 2. Optionally set a progress callback.
+ * 3. Call run() — blocking, returns DestabilizerResult.
+ * 4. Or call start()/pause()/resume()/abort() for async control.
+ */
 class DestabilizerEngine {
 public:
     DestabilizerEngine();
     ~DestabilizerEngine();
 
-    /// Set the configuration for the run.
+    /**Set the configuration for the run. */
     void configure(const DestabilizerConfig& config);
 
-    /// Set a custom controller (otherwise open-loop).
+    /**Set a custom controller (otherwise open-loop). */
     void setController(std::shared_ptr<Simulation::SimController> controller);
 
-    /// Set progress callback (called after each iteration).
+    /**Set progress callback (called after each iteration). */
     void setProgressCallback(ProgressCallback cb);
 
-    /// Set abort check callback (called before each iteration).
+    /**Set abort check callback (called before each iteration). */
     void setAbortCheck(AbortCheck cb);
 
-    /// Run the destabilizer search. Blocking call.
+    /**Run the destabilizer search. Blocking call. */
     DestabilizerResult run();
 
-    /// Warm-start from a previous result's best θ.
+    /**Warm-start from a previous result's best θ. */
     void warmStart(const std::vector<double>& theta);
 
-    /// Non-blocking control.
+    /**Non-blocking control. */
     void start();
     void pause();
     void resume();
@@ -120,10 +124,10 @@ public:
     bool isRunning() const;
     bool isPaused() const;
 
-    /// Get the current result (thread-safe snapshot).
+    /**Get the current result (thread-safe snapshot). */
     DestabilizerResult currentResult() const;
 
-    /// Get config (const).
+    /**Get config (const). */
     const DestabilizerConfig& config() const { return config_; }
 
 private:
@@ -145,23 +149,23 @@ private:
     // Async thread
     std::thread runThread_;
 
-    /// Execute a single optimization run from an initial θ.
+    /**Execute a single optimization run from an initial θ. */
     DestabilizerResult runSingleStart(const std::vector<double>& initialTheta,
                                       uint64_t seed);
 
-    /// Simulate one rollout with the given perturbation parameters.
+    /**Simulate one rollout with the given perturbation parameters. */
     RolloutTrajectory simulateRollout(const std::vector<double>& theta,
                                       const std::vector<std::unique_ptr<PerturbationSignal>>& pertSignals) const;
 
-    /// Evaluate J(θ) by running a simulation rollout.
+    /**Evaluate J(θ) by running a simulation rollout. */
     double evaluateObjective(const std::vector<double>& theta,
                              const std::vector<std::unique_ptr<PerturbationSignal>>& pertSignals,
                              const CombinedMetricEvaluator& evaluator) const;
 
-    /// Build the combined parameter vector from per-channel θ.
+    /**Build the combined parameter vector from per-channel θ. */
     static int totalParameterCount(const std::vector<std::unique_ptr<PerturbationSignal>>& signals);
 
-    /// Record worst-case trajectory into the result.
+    /**Record worst-case trajectory into the result. */
     void recordWorstCase(DestabilizerResult& result,
                          const RolloutTrajectory& traj,
                          const std::vector<double>& theta,

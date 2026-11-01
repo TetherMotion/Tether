@@ -1,6 +1,8 @@
-/// @file PatternAnalyzer.cpp
-/// @brief Detect toolpath patterns (spirals, concentric contours, zigzags) from
-///        already parsed G-code segments.
+/**
+ * @file PatternAnalyzer.cpp
+ * @brief Detect toolpath patterns (spirals, concentric contours, zigzags) from
+ *        already parsed G-code segments.
+ */
 
 #include "tether/gcode/analysis/PatternAnalyzer.hpp"
 #include "tether/gcode/motion/InterpolationStrategy.hpp"
@@ -39,7 +41,7 @@ constexpr std::size_t kMaxLoopWindow = 200;  // segments: max loop search window
 constexpr std::size_t kMinSpiralArcs = 2;    // arcs required for a spiral
 constexpr std::size_t kMinZigzagStrokes = 3; // strokes required for a zigzag
 
-/// Two-dimensional projection of a PlanningSegment in its active plane.
+/**Two-dimensional projection of a PlanningSegment in its active plane. */
 struct Seg2D {
     const PlanningSegment* seg = nullptr;
     const tether::gcode::SegmentSpeed* speed = nullptr;

@@ -22,12 +22,12 @@ namespace Autotuning {
  * methods convert between forms or validate the gains.
  */
 struct PIDGains {
-    double Kp{0.0};   ///< Proportional gain
-    double Ki{0.0};   ///< Integral gain (1/Ti form or direct Ki)
-    double Kd{0.0};   ///< Derivative gain (Kd)
-    double Ti{0.0};   ///< Integral time constant
-    double Td{0.0};   ///< Derivative time constant
-    double Tf{0.0};   ///< Filter time constant for derivative action
+    double Kp{0.0}; /**< Proportional gain */
+    double Ki{0.0}; /**< Integral gain (1/Ti form or direct Ki) */
+    double Kd{0.0}; /**< Derivative gain (Kd) */
+    double Ti{0.0}; /**< Integral time constant */
+    double Td{0.0}; /**< Derivative time constant */
+    double Tf{0.0}; /**< Filter time constant for derivative action */
 
     /** @brief Convert stored gains to standard (series) form. */
     void toStandardForm();
