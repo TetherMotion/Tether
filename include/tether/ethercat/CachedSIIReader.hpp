@@ -155,16 +155,28 @@ public:
         cached_sii_ = SIIData{};
     }
 
-    /** @brief Slave index bound to this cache. */
+    /**
+     * @brief Slave index bound to this cache.
+     * @return Slave position this cache belongs to
+     */
     uint16_t slaveIndex() const { return slave_index_; }
 
-    /** @brief Number of cached words. */
+    /**
+     * @brief Number of cached words.
+     * @return Words currently held in the cache
+     */
     size_t cacheSize() const { return cache_.size(); }
 
-    /** @brief Check if full SII has been parsed. */
+    /**
+     * @brief Check if full SII has been parsed.
+     * @return `true` after a full parse completes
+     */
     bool isFullParseDone() const { return full_parse_done_; }
 
-    /** @brief Check if a reader has been assigned. */
+    /**
+     * @brief Check if a reader has been assigned.
+     * @return `true` once bound to a reader
+     */
     bool isInitialized() const { return reader_ != nullptr; }
 
 private:
