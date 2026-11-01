@@ -50,14 +50,14 @@ public:
         insns_.push_back({code, 0, 0, k});
     }
 
-    /// Conditional jump: op is JEQ/JGT/JGE/JSET (combined JMP|op|K).
+    /**Conditional jump: op is JEQ/JGT/JGE/JSET (combined JMP|op|K). */
     void jump(uint16_t code, uint32_t k, int jt, int jf) {
         fixups_.push_back({insns_.size(), jt, Field::JT});
         fixups_.push_back({insns_.size(), jf, Field::JF});
         insns_.push_back({code, 0, 0, k});
     }
 
-    /// Unconditional jump (offset in k, relative to the next instruction).
+    /**Unconditional jump (offset in k, relative to the next instruction). */
     void ja(int target) {
         fixups_.push_back({insns_.size(), target, Field::K});
         insns_.push_back({cbpf::JMP | cbpf::JA | cbpf::K, 0, 0, 0});
@@ -110,7 +110,7 @@ constexpr uint32_t kAccept          = 0xFFFFFFFFu;
  * Emit the IPv4/UDP check for an IP header at absolute offset `base`:
  * proto==UDP, IHL>=5, first fragment, dst port == `port`.
  */
-/// Wire offsets of the first datagram's idx byte.
+/**Wire offsets of the first datagram's idx byte. */
 constexpr uint32_t kFirstIdxOff       = 17;  // untagged EtherCAT
 constexpr uint32_t kFirstIdxOffTagged = 21;  // inline 802.1Q tag
 

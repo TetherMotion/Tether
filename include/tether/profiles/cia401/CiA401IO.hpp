@@ -167,18 +167,18 @@ struct ModuleCapabilities {
     ModuleType module_type;
     
     // Digital capabilities
-    uint8_t digital_input_8bit_blocks;    ///< Number of 8-bit input blocks
-    uint8_t digital_input_16bit_blocks;   ///< Number of 16-bit input blocks
-    uint8_t digital_input_32bit_blocks;   ///< Number of 32-bit input blocks
-    uint8_t digital_output_8bit_blocks;   ///< Number of 8-bit output blocks
-    uint8_t digital_output_16bit_blocks;  ///< Number of 16-bit output blocks
-    uint8_t digital_output_32bit_blocks;  ///< Number of 32-bit output blocks
+    uint8_t digital_input_8bit_blocks; /**< Number of 8-bit input blocks */
+    uint8_t digital_input_16bit_blocks; /**< Number of 16-bit input blocks */
+    uint8_t digital_input_32bit_blocks; /**< Number of 32-bit input blocks */
+    uint8_t digital_output_8bit_blocks; /**< Number of 8-bit output blocks */
+    uint8_t digital_output_16bit_blocks; /**< Number of 16-bit output blocks */
+    uint8_t digital_output_32bit_blocks; /**< Number of 32-bit output blocks */
     
     // Analog capabilities
-    uint8_t analog_input_16bit_channels;  ///< Number of 16-bit AI channels
-    uint8_t analog_input_32bit_channels;  ///< Number of 32-bit AI channels
-    uint8_t analog_output_16bit_channels; ///< Number of 16-bit AO channels
-    uint8_t analog_output_32bit_channels; ///< Number of 32-bit AO channels
+    uint8_t analog_input_16bit_channels; /**< Number of 16-bit AI channels */
+    uint8_t analog_input_32bit_channels; /**< Number of 32-bit AI channels */
+    uint8_t analog_output_16bit_channels; /**< Number of 16-bit AO channels */
+    uint8_t analog_output_32bit_channels; /**< Number of 32-bit AO channels */
     
     // Optional features
     bool has_counters;
@@ -233,11 +233,11 @@ struct ModuleCapabilities {
  * @brief Digital channel state tracking
  */
 struct DigitalChannelState {
-    uint8_t block_index;        ///< Block index
-    uint8_t bit_position;       ///< Bit position within block
-    bool current_state;         ///< Current state
-    bool previous_state;        ///< Previous state for edge detection
-    EdgeType edge_mask;         ///< Configured edge detection
+    uint8_t block_index; /**< Block index */
+    uint8_t bit_position; /**< Bit position within block */
+    bool current_state; /**< Current state */
+    bool previous_state; /**< Previous state for edge detection */
+    EdgeType edge_mask; /**< Configured edge detection */
     
     DigitalChannelState()
         : block_index(0), bit_position(0), current_state(false),
@@ -248,12 +248,12 @@ struct DigitalChannelState {
  * @brief Analog channel state tracking
  */
 struct AnalogChannelState {
-    uint8_t channel;            ///< Channel index
-    int32_t raw_value;          ///< Raw ADC value
-    int32_t scaled_value;       ///< Scaled engineering units
-    int32_t previous_value;     ///< Previous value for delta
-    bool upper_limit_active;    ///< Upper limit triggered
-    bool lower_limit_active;    ///< Lower limit triggered
+    uint8_t channel; /**< Channel index */
+    int32_t raw_value; /**< Raw ADC value */
+    int32_t scaled_value; /**< Scaled engineering units */
+    int32_t previous_value; /**< Previous value for delta */
+    bool upper_limit_active; /**< Upper limit triggered */
+    bool lower_limit_active; /**< Lower limit triggered */
     
     AnalogChannelState()
         : channel(0), raw_value(0), scaled_value(0), previous_value(0),

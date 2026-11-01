@@ -27,9 +27,9 @@ namespace Raw {
  * @brief Ethernet frame header
  */
 struct __attribute__((packed)) EthernetHeader {
-    uint8_t dst[6];         ///< Destination MAC address
-    uint8_t src[6];         ///< Source MAC address
-    uint16_t etherType_be;  ///< EtherType in big-endian
+    uint8_t dst[6]; /**< Destination MAC address */
+    uint8_t src[6]; /**< Source MAC address */
+    uint16_t etherType_be; /**< EtherType in big-endian */
 };
 static_assert(sizeof(EthernetHeader) == 14, "EthernetHeader must be 14 bytes");
 
@@ -37,7 +37,7 @@ static_assert(sizeof(EthernetHeader) == 14, "EthernetHeader must be 14 bytes");
  * @brief EtherCAT frame header (2 bytes after Ethernet header)
  */
 struct __attribute__((packed)) FrameHeader {
-    uint16_t raw_le;  ///< [0:10]=length, [11]=reserved, [12:15]=type (must be 1)
+    uint16_t raw_le; /**< [0:10]=length, [11]=reserved, [12:15]=type (must be 1) */
     
     uint16_t length() const { return raw_le & 0x07FF; }
     uint16_t type() const { return (raw_le >> 12) & 0x0F; }
@@ -58,12 +58,12 @@ static_assert(sizeof(FrameHeader) == 2, "FrameHeader must be 2 bytes");
  * @brief EtherCAT datagram header (10 bytes)
  */
 struct __attribute__((packed)) DatagramHeader {
-    Command cmd;        ///< Command type
-    uint8_t idx;        ///< Index for request/response matching
-    uint16_t adp_le;    ///< Address Position
-    uint16_t ado_le;    ///< Address Offset
-    uint16_t lenFlags_le; ///< [0:10]=length, [14]=C, [15]=M
-    uint16_t irq_le;    ///< Interrupt request
+    Command cmd; /**< Command type */
+    uint8_t idx; /**< Index for request/response matching */
+    uint16_t adp_le; /**< Address Position */
+    uint16_t ado_le; /**< Address Offset */
+    uint16_t lenFlags_le; /**< [0:10]=length, [14]=C, [15]=M */
+    uint16_t irq_le; /**< Interrupt request */
     
     // Accessors
     uint16_t dataLength() const { return lenFlags_le & 0x07FF; }

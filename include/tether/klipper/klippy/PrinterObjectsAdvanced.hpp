@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file PrinterObjectsAdvanced.hpp
-/// @brief Advanced printer objects (firmware_retraction, exclude_object, z_thermal_adjust)
+/**
+ * @file PrinterObjectsAdvanced.hpp
+ * @brief Advanced printer objects (firmware_retraction, exclude_object, z_thermal_adjust)
+ */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 #include "tether/klipper/klippy/AdvancedObjects.hpp"
@@ -17,7 +19,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Printer object for firmware_retraction (G10/G11 state).
+/**@brief Printer object for firmware_retraction (G10/G11 state). */
 class FirmwareRetractionObject : public PrinterObject {
 public:
     explicit FirmwareRetractionObject(std::shared_ptr<FirmwareRetraction> fr)
@@ -48,7 +50,7 @@ private:
     std::shared_ptr<FirmwareRetraction> fr_;
 };
 
-/// @brief Exclude object printer object (exclude_object).
+/**@brief Exclude object printer object (exclude_object). */
 class ExcludeObjectObject : public PrinterObject {
 public:
     std::string name() const override { return "exclude_object"; }
@@ -80,7 +82,7 @@ private:
     std::vector<std::string> objects_;
 };
 
-/// @brief Z thermal adjust printer object (z_thermal_adjust).
+/**@brief Z thermal adjust printer object (z_thermal_adjust). */
 class ZThermalAdjustObject : public PrinterObject {
 public:
     std::string name() const override { return "z_thermal_adjust"; }

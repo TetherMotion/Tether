@@ -21,14 +21,14 @@
 
 namespace tether::klipper::motion {
 
-/// @brief Abstract sink for MotionBlocks.
+/**@brief Abstract sink for MotionBlocks. */
 class MotionBlockSink {
 public:
     virtual ~MotionBlockSink() = default;
     virtual void emit(const MotionBlock& block) = 0;
 };
 
-/// @brief A sink that records all blocks in memory.
+/**@brief A sink that records all blocks in memory. */
 class RecordingSink : public MotionBlockSink {
 public:
     void emit(const MotionBlock& block) override {
@@ -42,7 +42,7 @@ private:
     std::vector<MotionBlock> blocks_;
 };
 
-/// @brief A sink that prints blocks to stdout (for examples).
+/**@brief A sink that prints blocks to stdout (for examples). */
 class PrintingSink : public MotionBlockSink {
 public:
     void emit(const MotionBlock& block) override {
@@ -61,7 +61,7 @@ private:
     std::mutex mtx_;
 };
 
-/// @brief A sink that forwards to a callback.
+/**@brief A sink that forwards to a callback. */
 class CallbackSink : public MotionBlockSink {
 public:
     using Callback = std::function<void(const MotionBlock&)>;

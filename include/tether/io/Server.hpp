@@ -26,23 +26,27 @@
 
 namespace tether { namespace io {
 
-/// Server configuration.
+/**Server configuration. */
 struct ServerConfig {
-    size_t      maxClients   = 4;       ///< Max concurrent sessions
-    TimestampFn timestampFn  = nullptr; ///< Required: µs timestamp
-    LogFn       logFn        = nullptr; ///< Optional logging callback
+    size_t      maxClients   = 4; /**< Max concurrent sessions */
+    TimestampFn timestampFn  = nullptr; /**< Required: µs timestamp */
+    LogFn       logFn        = nullptr; /**< Optional logging callback */
     InputStreamCreateFn inputStreamCreateFn;
     InputStreamDataFn inputStreamDataFn;
     ReceiveBufferFactory encodedBufferFactory;
     ReceiveBufferFactory decodedBufferFactory;
-    Framing     framing      = Framing::Slip; ///< Message framing mode
-    /// Ring-buffered stream sources (producer-driven).  A configured stream
-    /// whose entries are all covered by a source's schema drains that source
-    /// instead of polling entry read functions.  Sources are owned by the
-    /// caller and must outlive the Server.
+    Framing     framing      = Framing::Slip; /**< Message framing mode */
+    /**
+     * Ring-buffered stream sources (producer-driven).  A configured stream
+     * whose entries are all covered by a source's schema drains that source
+     * instead of polling entry read functions.  Sources are owned by the
+     * caller and must outlive the Server.
+     */
     std::vector<IRingStreamSource*> ringSources;
-    /// Active V6 schemas shared by every session. Entries, functions, and
-    /// input streams resolve their session-local slots against this catalog.
+    /**
+     * Active V6 schemas shared by every session. Entries, functions, and
+     * input streams resolve their session-local slots against this catalog.
+     */
     const SchemaCatalog* schemaCatalog = nullptr;
 };
 
@@ -62,40 +66,44 @@ public:
            ServerConfig config);
     ~Server();
 
-    /// Start the accept loop. Returns false on failure.
+    /**Start the accept loop. Returns false on failure. */
     bool start();
 
-    /// Shut down all sessions and the accept loop.
+    /**Shut down all sessions and the accept loop. */
     void stop();
 
-    /// Number of active sessions.
+    /**Number of active sessions. */
     size_t activeSessionCount() const;
 
-    /// Returns true if the server is accepting connections.
+    /**Returns true if the server is accepting connections. */
     bool isRunning() const { return running_.load(std::memory_order_relaxed); }
 
-    /// Access the server's datalogging recorder (may be null).
+    /**Access the server's datalogging recorder (may be null). */
     DatalogRecorder* datalogRecorder() { return &datalogRecorder_; }
 
-    /// Publish a log record to all matching client subscriptions.
+    /**Publish a log record to all matching client subscriptions. */
     void publishLog(LogSeverity severity, std::string_view component,
                     std::string_view message, std::string_view location = {});
 
     // ---- Peer function invocation ----
 
-    /// Invoke a function hosted by a connected client.  Routes to the
-    /// session whose RegisterFunctionsReq catalog contains
-    /// `functionName`.  `deadlineUs` bounds the response wait (see
-    /// Session::callPeer).  Returns false when no connected peer hosts
-    /// that function or the call could not be queued.  The callback runs
-    /// on the session worker thread.
+    /**
+     * Invoke a function hosted by a connected client.  Routes to the
+     * session whose RegisterFunctionsReq catalog contains
+     * `functionName`.  `deadlineUs` bounds the response wait (see
+     * Session::callPeer).  Returns false when no connected peer hosts
+     * that function or the call could not be queued.  The callback runs
+     * on the session worker thread.
+     */
     bool callPeerFunction(std::string_view functionName,
                           const std::vector<FunctionArgument>& arguments,
                           uint64_t deadlineUs,
                           Session::InvokeResultFn callback);
 
-    /// (name, id) of every function currently registered by connected
-    /// clients, across all sessions.
+    /**
+     * (name, id) of every function currently registered by connected
+     * clients, across all sessions.
+     */
     std::vector<std::pair<std::string, uint64_t>> peerFunctions() const;
 
 private:

@@ -61,10 +61,12 @@ public:
             controller_->stopImmediate();
         }
 
-        /// Set the controlword the cyclic update asserts every cycle.
-        /// Defaults to ENABLE_OPERATION; the motion loop re-writes it each
-        /// cycle so one-shot SDO/PDO writes cannot leave a stale value (e.g.
-        /// a bare homing-start bit with the enable bits cleared) on the wire.
+        /**
+         * Set the controlword the cyclic update asserts every cycle.
+         * Defaults to ENABLE_OPERATION; the motion loop re-writes it each
+         * cycle so one-shot SDO/PDO writes cannot leave a stale value (e.g.
+         * a bare homing-start bit with the enable bits cleared) on the wire.
+         */
         void setDesiredControlword(uint16_t cw) {
             desired_controlword_.store(cw, std::memory_order_relaxed);
         }
@@ -147,8 +149,10 @@ public:
 
     DS402Master();
     explicit DS402Master(const Master::Config& config);
-    /// Applies any controller/task mutations still queued from a previous
-    /// loop run before the members destruct.
+    /**
+     * Applies any controller/task mutations still queued from a previous
+     * loop run before the members destruct.
+     */
     ~DS402Master();
 
     void start(const NetworkInterface& iface, const uint8_t src_mac[6]);
@@ -164,7 +168,7 @@ public:
 
     bool initializeDistributedClocks(const DC::DCConfig& config, uint16_t slave_count = 0);
     bool startDistributedClocks();
-    /// Convenience: initializeDistributedClocks(config, slave_count) + start().
+    /**Convenience: initializeDistributedClocks(config, slave_count) + start(). */
     bool startDistributedClocks(const DC::DCConfig& config, uint16_t slave_count = 0);
     void stopDistributedClocks();
 
@@ -179,12 +183,14 @@ public:
     bool isDS402Slave(uint16_t slave_index) const;
     bool isManagedDrive(uint16_t slave_index) const;
 
-    /// Register a motion controller for a managed drive.
-    ///
-    /// The controller's start() runs synchronously so failures are reported
-    /// to the caller.  While a realtime loop is running the registration is
-    /// deferred: the controller joins the loop at the next cycle boundary,
-    /// applied on the loop thread — safe to call at any time.
+    /**
+     * Register a motion controller for a managed drive.
+     *
+     * The controller's start() runs synchronously so failures are reported
+     * to the caller.  While a realtime loop is running the registration is
+     * deferred: the controller joins the loop at the next cycle boundary,
+     * applied on the loop thread — safe to call at any time.
+     */
     bool addMotionController(uint16_t slave_index, std::unique_ptr<IDriveMotionController> controller);
     template<typename RxPDO>
     bool addMotionController(uint16_t slave_index,
@@ -196,12 +202,14 @@ public:
             slave_index,
             std::make_unique<GenericDriveMotionController<RxPDO>>(target, std::move(source), scale));
     }
-    /// Remove a controller.  While a realtime loop is running the removal
-    /// (and the controller's stop()) is deferred to the loop thread's next
-    /// pass; with no loop running it happens synchronously.  Returns false
-    /// if no controller is registered or pending for the slave.
+    /**
+     * Remove a controller.  While a realtime loop is running the removal
+     * (and the controller's stop()) is deferred to the loop thread's next
+     * pass; with no loop running it happens synchronously.  Returns false
+     * if no controller is registered or pending for the slave.
+     */
     bool removeMotionController(uint16_t slave_index);
-    /// Remove all controllers.  Deferred to the loop thread while running.
+    /**Remove all controllers.  Deferred to the loop thread while running. */
     void clearMotionControllers();
     bool addCyclicTask(std::unique_ptr<ICyclicTask> task);
     bool addCyclicTask(std::unique_ptr<ICyclicTask> task, TaskPhase phase, uint8_t priority = 128);
@@ -266,7 +274,7 @@ public:
     bool enableSlaveRecovery(const RecoveryConfig& config,
                               const std::vector<DriveConfiguration>& configs);
 
-    /// Disable and stop slave recovery supervision.
+    /**Disable and stop slave recovery supervision. */
     void disableSlaveRecovery();
 
     bool startRealtimeMotionControlLoop();
@@ -290,8 +298,10 @@ public:
      * config.motion_in_loop is false (external motion source).
      */
     bool startCyclicLoop(const Master::CyclicLoopConfig& config);
-    /// RAII variant: returns a guard that owns the running loop and stops it
-    /// on destruction.  A disengaged guard means startup failed.
+    /**
+     * RAII variant: returns a guard that owns the running loop and stops it
+     * on destruction.  A disengaged guard means startup failed.
+     */
     [[nodiscard]] Master::CyclicLoopGuard startCyclicLoopScoped(
         const Master::CyclicLoopConfig& config);
     void stopCyclicLoop();
@@ -302,14 +312,16 @@ public:
     CiA402Drive* driveBySlaveIndex(uint16_t slave_index);
     const CiA402Drive* driveBySlaveIndex(uint16_t slave_index) const;
 
-    /// Get-or-create the CiA402Drive for @p slave_index.
-    ///
-    /// Ensures the slave is marked as DS402-managed and that a CiA402Drive
-    /// object exists in the internal drive table.  Idempotent: repeated calls
-    /// with the same slave index return the same drive.  Use this instead of
-    /// driveBySlaveIndex() when a drive must be created without going through
-    /// configureDrive() (e.g. when using the multi-PDO-per-sync-manager
-    /// transitionToOp() overload directly).
+    /**
+     * Get-or-create the CiA402Drive for @p slave_index.
+     *
+     * Ensures the slave is marked as DS402-managed and that a CiA402Drive
+     * object exists in the internal drive table.  Idempotent: repeated calls
+     * with the same slave index return the same drive.  Use this instead of
+     * driveBySlaveIndex() when a drive must be created without going through
+     * configureDrive() (e.g. when using the multi-PDO-per-sync-manager
+     * transitionToOp() overload directly).
+     */
     CiA402Drive& ensureDrive(uint16_t slave_index);
 
     bool enableDrive(uint16_t slave_index, uint32_t timeout_ms = 5000);
@@ -320,17 +332,23 @@ public:
 private:
     void ensureSlaveRoleCapacity(uint16_t slave_index);
 
-    /// True while a realtime loop thread may be iterating controllers/tasks.
+    /**True while a realtime loop thread may be iterating controllers/tasks. */
     bool realtimeLoopRunning() const;
-    /// Scan drives_ WITHOUT the role gate — teardown paths must reach a
-    /// drive whose role was already flipped by a pending EraseDrive.
+    /**
+     * Scan drives_ WITHOUT the role gate — teardown paths must reach a
+     * drive whose role was already flipped by a pending EraseDrive.
+     */
     CiA402Drive* findDriveRaw(uint16_t slave_index);
-    /// Stop and erase a controller by slave index.  Caller thread only —
-    /// must not run concurrently with updateMotionControllers().
+    /**
+     * Stop and erase a controller by slave index.  Caller thread only —
+     * must not run concurrently with updateMotionControllers().
+     */
     bool eraseController(uint16_t slave_index);
-    /// Apply queued controller/task mutations.  Called at the top of
-    /// updateMotionControllers() (the loop thread) and by the stop/clear
-    /// paths once no loop is running.
+    /**
+     * Apply queued controller/task mutations.  Called at the top of
+     * updateMotionControllers() (the loop thread) and by the stop/clear
+     * paths once no loop is running.
+     */
     void drainControllerOps();
 
     struct PendingControllerOp {

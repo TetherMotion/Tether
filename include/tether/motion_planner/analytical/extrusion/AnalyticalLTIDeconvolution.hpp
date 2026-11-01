@@ -58,15 +58,19 @@ namespace MotionPlanner::analytical::extrusion {
  * @brief Parameters for analytical LTI deconvolution.
  */
 struct AnalyticalLTIDeconvParams {
-    /// Tikhonov regularization parameter λ > 0
+    /**Tikhonov regularization parameter λ > 0 */
     double lambda = 1e-6;
 
-    /// Maximum polynomial degree K of the target trajectory y(t).
-    /// K=3 for velocity (SNAP arcs have cubic velocity), K=4 for position.
+    /**
+     * Maximum polynomial degree K of the target trajectory y(t).
+     * K=3 for velocity (SNAP arcs have cubic velocity), K=4 for position.
+     */
     int maxPolyDegree = 4;
 
-    /// Group delay [s] — the output is shifted by this amount for causal
-    /// alignment (0 = no shift).
+    /**
+     * Group delay [s] — the output is shifted by this amount for causal
+     * alignment (0 = no shift).
+     */
     double groupDelay = 0.0;
 };
 
@@ -183,18 +187,18 @@ public:
         return result;
     }
 
-    /// Parameters
+    /**Parameters */
     const AnalyticalLTIDeconvParams& params() const { return params_; }
 
-    /// The precomputed regularized inverse (impulse-response mode)
+    /**The precomputed regularized inverse (impulse-response mode) */
     const std::vector<double>& inverseImpulseResponse() const {
         return hInv_;
     }
 
-    /// The precomputed moments M_k (impulse-response mode)
+    /**The precomputed moments M_k (impulse-response mode) */
     const std::vector<double>& moments() const { return moments_; }
 
-    /// Trajectory
+    /**Trajectory */
     const Traj& trajectory() const { return *traj_; }
 
 private:
@@ -206,19 +210,19 @@ private:
 
     // Impulse-response mode data
     double sampleRate_ = 0.0;
-    std::vector<double> hInv_;     ///< Regularized inverse impulse response
-    std::vector<double> moments_;  ///< M_k = ∫ h_inv(τ) τ^k dτ
+    std::vector<double> hInv_; /**< Regularized inverse impulse response */
+    std::vector<double> moments_; /**< M_k = ∫ h_inv(τ) τ^k dτ */
 
     // State-space mode data
     Eigen::MatrixXd ssA_, ssB_, ssC_;
     double ssD_ = 0.0;
-    Eigen::MatrixXd ssF_;  ///< A - B·D⁺·C
-    Eigen::VectorXd ssState_;  ///< Current internal state
+    Eigen::MatrixXd ssF_; /**< A - B·D⁺·C */
+    Eigen::VectorXd ssState_; /**< Current internal state */
     struct SSArcSolution {
         double t0 = 0.0;
         double duration = 0.0;
         Eigen::VectorXd stateStart;
-        Eigen::MatrixXd expF;  ///< exp(F·Δt)
+        Eigen::MatrixXd expF; /**< exp(F·Δt) */
         // Polynomial forcing integral coefficients
         // I_k = ∫₀^Δt exp(F·(Δt-s)) · s^k ds  (vector per k)
         std::vector<Eigen::VectorXd> forcingIntegrals;

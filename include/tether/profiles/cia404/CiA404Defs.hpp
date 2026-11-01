@@ -689,14 +689,14 @@ namespace EngineeringUnit {
  * @brief PID controller parameters
  */
 struct PIDParameters {
-    int32_t kp;             ///< Proportional gain (Q16 fixed point)
-    int32_t ti;             ///< Integral time in ms (0 = disabled)
-    int32_t td;             ///< Derivative time in ms (0 = disabled)
-    uint16_t sample_time;   ///< Sample time in ms
-    int32_t output_max;     ///< Output upper limit
-    int32_t output_min;     ///< Output lower limit
-    int32_t anti_windup;    ///< Anti-windup limit
-    uint8_t derivative_filter; ///< Derivative filter coefficient (0-255)
+    int32_t kp; /**< Proportional gain (Q16 fixed point) */
+    int32_t ti; /**< Integral time in ms (0 = disabled) */
+    int32_t td; /**< Derivative time in ms (0 = disabled) */
+    uint16_t sample_time; /**< Sample time in ms */
+    int32_t output_max; /**< Output upper limit */
+    int32_t output_min; /**< Output lower limit */
+    int32_t anti_windup; /**< Anti-windup limit */
+    uint8_t derivative_filter; /**< Derivative filter coefficient (0-255) */
     
     PIDParameters()
         : kp(0x10000)  // 1.0 in Q16
@@ -714,13 +714,13 @@ struct PIDParameters {
  * @brief Analog input channel configuration
  */
 struct AnalogInputChannelConfig {
-    int32_t scaling_factor;     ///< Scaling factor (Q16)
-    int32_t offset;             ///< Offset value
-    uint16_t engineering_unit;  ///< Engineering unit code
-    uint8_t decimal_places;     ///< Number of decimal places
-    uint8_t input_range;        ///< Input range type
-    uint8_t sensor_type;        ///< Sensor type code
-    uint16_t filter_time;       ///< Filter time constant in ms
+    int32_t scaling_factor; /**< Scaling factor (Q16) */
+    int32_t offset; /**< Offset value */
+    uint16_t engineering_unit; /**< Engineering unit code */
+    uint8_t decimal_places; /**< Number of decimal places */
+    uint8_t input_range; /**< Input range type */
+    uint8_t sensor_type; /**< Sensor type code */
+    uint16_t filter_time; /**< Filter time constant in ms */
     
     AnalogInputChannelConfig()
         : scaling_factor(0x10000)
@@ -737,15 +737,15 @@ struct AnalogInputChannelConfig {
  * @brief Alarm configuration
  */
 struct AlarmConfig {
-    int32_t high_high_limit;    ///< High-high alarm limit
-    int32_t high_limit;         ///< High alarm limit
-    int32_t low_limit;          ///< Low alarm limit
-    int32_t low_low_limit;      ///< Low-low alarm limit
-    int32_t warning_high;       ///< High warning limit
-    int32_t warning_low;        ///< Low warning limit
-    int32_t hysteresis;         ///< Alarm hysteresis
-    uint16_t delay_time;        ///< Alarm delay time in ms
-    int32_t rate_of_change;     ///< Rate of change limit
+    int32_t high_high_limit; /**< High-high alarm limit */
+    int32_t high_limit; /**< High alarm limit */
+    int32_t low_limit; /**< Low alarm limit */
+    int32_t low_low_limit; /**< Low-low alarm limit */
+    int32_t warning_high; /**< High warning limit */
+    int32_t warning_low; /**< Low warning limit */
+    int32_t hysteresis; /**< Alarm hysteresis */
+    uint16_t delay_time; /**< Alarm delay time in ms */
+    int32_t rate_of_change; /**< Rate of change limit */
     
     AlarmConfig()
         : high_high_limit(32767)
@@ -764,12 +764,12 @@ struct AlarmConfig {
  * @brief Calibration data
  */
 struct CalibrationData {
-    int32_t zero_raw;           ///< Raw value at zero
-    int32_t zero_eng;           ///< Engineering value at zero
-    int32_t span_raw;           ///< Raw value at span
-    int32_t span_eng;           ///< Engineering value at span
-    int32_t tare_value;         ///< Current tare offset
-    uint8_t status;             ///< Calibration status
+    int32_t zero_raw; /**< Raw value at zero */
+    int32_t zero_eng; /**< Engineering value at zero */
+    int32_t span_raw; /**< Raw value at span */
+    int32_t span_eng; /**< Engineering value at span */
+    int32_t tare_value; /**< Current tare offset */
+    uint8_t status; /**< Calibration status */
     
     CalibrationData()
         : zero_raw(0)
@@ -789,53 +789,53 @@ struct CalibrationData {
  * @brief TxPDO for process data input with status
  */
 struct __attribute__((packed)) TxPDO_ProcessInput {
-    int32_t value;          ///< Process input value
-    uint8_t status;         ///< Input status
+    int32_t value; /**< Process input value */
+    uint8_t status; /**< Input status */
 };
 
 /**
  * @brief TxPDO for multiple process inputs
  */
 struct __attribute__((packed)) TxPDO_MultiInput {
-    int16_t input1;         ///< Process input 1 (16-bit)
-    int16_t input2;         ///< Process input 2
-    int16_t input3;         ///< Process input 3
-    int16_t input4;         ///< Process input 4
+    int16_t input1; /**< Process input 1 (16-bit) */
+    int16_t input2; /**< Process input 2 */
+    int16_t input3; /**< Process input 3 */
+    int16_t input4; /**< Process input 4 */
 };
 
 /**
  * @brief RxPDO for process data output
  */
 struct __attribute__((packed)) RxPDO_ProcessOutput {
-    int32_t value;          ///< Process output value
-    uint8_t command;        ///< Output command
+    int32_t value; /**< Process output value */
+    uint8_t command; /**< Output command */
 };
 
 /**
  * @brief TxPDO for controller status
  */
 struct __attribute__((packed)) TxPDO_ControllerStatus {
-    int32_t actual_value;   ///< Process variable
-    int32_t output;         ///< Controller output
-    int32_t deviation;      ///< Control deviation
-    uint16_t status;        ///< Controller status
+    int32_t actual_value; /**< Process variable */
+    int32_t output; /**< Controller output */
+    int32_t deviation; /**< Control deviation */
+    uint16_t status; /**< Controller status */
 };
 
 /**
  * @brief RxPDO for controller setpoint
  */
 struct __attribute__((packed)) RxPDO_ControllerSetpoint {
-    int32_t setpoint;       ///< Controller setpoint
-    uint8_t mode;           ///< Controller mode
+    int32_t setpoint; /**< Controller setpoint */
+    uint8_t mode; /**< Controller mode */
 };
 
 /**
  * @brief TxPDO for alarm status
  */
 struct __attribute__((packed)) TxPDO_AlarmStatus {
-    int32_t value;          ///< Current value
-    uint16_t alarm_status;  ///< Alarm status bits
-    uint16_t warning_status;///< Warning status bits
+    int32_t value; /**< Current value */
+    uint16_t alarm_status; /**< Alarm status bits */
+    uint16_t warning_status; /**< Warning status bits */
 };
 
 } // namespace CiA404

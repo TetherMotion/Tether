@@ -70,21 +70,21 @@ struct CiA401SlaveConfig {
     };
     
     // Digital I/O configuration (number of 8-bit groups)
-    uint8_t digitalInputs8 = 1;   ///< Number of 8-bit digital input groups (max 32)
-    uint8_t digitalOutputs8 = 1;  ///< Number of 8-bit digital output groups (max 32)
+    uint8_t digitalInputs8 = 1; /**< Number of 8-bit digital input groups (max 32) */
+    uint8_t digitalOutputs8 = 1; /**< Number of 8-bit digital output groups (max 32) */
     
     // Analog I/O configuration (number of channels)
-    uint8_t analogInputs = 0;     ///< Number of analog input channels (max 8)
-    uint8_t analogOutputs = 0;    ///< Number of analog output channels (max 8)
+    uint8_t analogInputs = 0; /**< Number of analog input channels (max 8) */
+    uint8_t analogOutputs = 0; /**< Number of analog output channels (max 8) */
     
     // Analog parameters
-    int16_t analogInputMin = -32768;   ///< Minimum analog input value
-    int16_t analogInputMax = 32767;    ///< Maximum analog input value
-    int16_t analogOutputMin = -32768;  ///< Minimum analog output value
-    int16_t analogOutputMax = 32767;   ///< Maximum analog output value
+    int16_t analogInputMin = -32768; /**< Minimum analog input value */
+    int16_t analogInputMax = 32767; /**< Maximum analog input value */
+    int16_t analogOutputMin = -32768; /**< Minimum analog output value */
+    int16_t analogOutputMax = 32767; /**< Maximum analog output value */
     
     // Error behavior
-    bool outputErrorModeEnabled = true;  ///< Use error values on communication loss
+    bool outputErrorModeEnabled = true; /**< Use error values on communication loss */
     
     // DC support
     bool supportsDC = true;

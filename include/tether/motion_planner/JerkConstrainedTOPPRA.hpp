@@ -554,7 +554,7 @@ public:
     }
 
 private:
-    /// Internal path sample
+    /**Internal path sample */
     struct PathSample {
         T arcLength = T(0);
         Vec<Dim, T> position;
@@ -563,7 +563,7 @@ private:
         size_t segmentIndex = 0;
     };
 
-    /// Compute velocity limit at a path sample (same as basic profiler)
+    /**Compute velocity limit at a path sample (same as basic profiler) */
     T computeVelocityLimit(const PathSample& sample, T feedRate) const {
         T limit = feedRate;
         // WI-1: guard against negative maxCentripetalAcceleration (NaN).
@@ -579,9 +579,11 @@ private:
         return limit;
     }
 
-    /// WI-4: Compute junction velocity at a tangent discontinuity.
-    /// Currently implements exact-stop semantics (v = 0 at corners),
-    /// matching LinuxCNC "exact path" mode.
+    /**
+     * WI-4: Compute junction velocity at a tangent discontinuity.
+     * Currently implements exact-stop semantics (v = 0 at corners),
+     * matching LinuxCNC "exact path" mode.
+     */
     T computeJunctionVelocity(const Vec<Dim, T>& tPrev,
                                 const Vec<Dim, T>& tCur) const {
         T dot = T(0);

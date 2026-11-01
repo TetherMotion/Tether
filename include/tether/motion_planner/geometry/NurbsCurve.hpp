@@ -41,12 +41,14 @@
 
 namespace tether::motion {
 
-/// Arc-length derivatives of a curve at one parameter value.
-/// Field validity depends on the requested order:
-/// - order 0: position only
-/// - order 1: + tangent (unit)
-/// - order 2: + curvature vector κ⃗ = d²p/ds²
-/// - order 3: + jounce vector j⃗ = d³p/ds³
+/**
+ * Arc-length derivatives of a curve at one parameter value.
+ * Field validity depends on the requested order:
+ * - order 0: position only
+ * - order 1: + tangent (unit)
+ * - order 2: + curvature vector κ⃗ = d²p/ds²
+ * - order 3: + jounce vector j⃗ = d³p/ds³
+ */
 struct ArcDerivatives {
     RVec position;
     RVec tangent;
@@ -71,8 +73,10 @@ public:
     NurbsCurve(std::vector<RVec> controlPoints, std::vector<double> weights,
                std::vector<double> knots, int degree);
 
-    /// Degree-1 line from a to b; knots {0,0,1,1}, weights {1,1}.
-    /// @throws std::invalid_argument if a == b (zero-length) or dim mismatch.
+    /**
+     * Degree-1 line from a to b; knots {0,0,1,1}, weights {1,1}.
+     * @throws std::invalid_argument if a == b (zero-length) or dim mismatch.
+     */
     static NurbsCurve fromLine(const RVec& a, const RVec& b);
 
     /**
@@ -108,21 +112,21 @@ public:
     const std::vector<double>& weights() const noexcept { return weights_; }
     const std::vector<double>& knots() const noexcept { return knots_; }
 
-    /// Parameter domain [knotMin, knotMax].
+    /**Parameter domain [knotMin, knotMax]. */
     double knotMin() const noexcept { return knots_[degree_]; }
     double knotMax() const noexcept { return knots_[knots_.size() - degree_ - 1]; }
 
     RVec startPoint() const { return evaluate(knotMin()); }
     RVec endPoint() const { return evaluate(knotMax()); }
 
-    /// True for degree-1 curves (piecewise-linear; arc length is exact).
+    /**True for degree-1 curves (piecewise-linear; arc length is exact). */
     bool isPolyline() const noexcept { return degree_ == 1; }
 
     // ========================================================================
     // Evaluation and derivatives
     // ========================================================================
 
-    /// Evaluate position at u (clamped to the domain). Exact (De Boor).
+    /**Evaluate position at u (clamped to the domain). Exact (De Boor). */
     RVec evaluate(double u) const;
 
     /**
@@ -145,11 +149,13 @@ public:
     // Arc length (lazy, memoized; NOT thread-safe — one path per thread)
     // ========================================================================
 
-    /// Total arc length. Memoized after the first call.
+    /**Total arc length. Memoized after the first call. */
     double length() const;
 
-    /// Arc length from knotMin() to u (u clamped). Exact for polylines;
-    /// adaptive Gauss–Legendre quadrature otherwise (eq. (G.24)).
+    /**
+     * Arc length from knotMin() to u (u clamped). Exact for polylines;
+     * adaptive Gauss–Legendre quadrature otherwise (eq. (G.24)).
+     */
     double arcLengthTo(double u) const;
 
     /**
@@ -161,13 +167,15 @@ public:
      */
     double invertLength(double s) const;
 
-    /// Number of adaptive-quadrature integrations performed on this curve
-    /// (test/diagnostic counter proving laziness: 0 for pure line curves).
+    /**
+     * Number of adaptive-quadrature integrations performed on this curve
+     * (test/diagnostic counter proving laziness: 0 for pure line curves).
+     */
     std::size_t arcLengthComputationCount() const noexcept {
         return arcLengthComputations_;
     }
 
-    /// Approximate memory footprint in bytes (object + heap), for tests.
+    /**Approximate memory footprint in bytes (object + heap), for tests. */
     std::size_t estimatedMemoryBytes() const noexcept;
 
     // ========================================================================
@@ -185,12 +193,16 @@ public:
      */
     std::pair<NurbsCurve, NurbsCurve> split(double u) const;
 
-    /// Arc-length trim: sub-curve between lengths s0 ≤ s1 (clamped to
-    /// [0, length()]). Exact up to the invertLength tolerance.
+    /**
+     * Arc-length trim: sub-curve between lengths s0 ≤ s1 (clamped to
+     * [0, length()]). Exact up to the invertLength tolerance.
+     */
     NurbsCurve trim(double s0, double s1) const;
 
-    /// Decompose into single-span Bézier pieces (exact knot insertion).
-    /// Each piece has knots {a×(p+1), b×(p+1)} and p+1 control points.
+    /**
+     * Decompose into single-span Bézier pieces (exact knot insertion).
+     * Each piece has knots {a×(p+1), b×(p+1)} and p+1 control points.
+     */
     std::vector<NurbsCurve> bezierDecompose() const;
 
 private:
@@ -203,12 +215,14 @@ private:
     int knotMultiplicity(double u) const;
     NurbsCurve insertKnot(double u) const;
 
-    /// De Boor in homogeneous coordinates; returns (w·C, w).
+    /**De Boor in homogeneous coordinates; returns (w·C, w). */
     HomPoint evaluateHomogeneous(double u) const;
 
-    /// All parametric derivatives of the homogeneous curve up to order k
-    /// (Piegl & Tiller A2.3 basis derivatives applied to (w·P, w)).
-    /// out[kk][0..dim] = d^kk/du^kk (w·C, w); kk = 0..k (capped at degree).
+    /**
+     * All parametric derivatives of the homogeneous curve up to order k
+     * (Piegl & Tiller A2.3 basis derivatives applied to (w·P, w)).
+     * out[kk][0..dim] = d^kk/du^kk (w·C, w); kk = 0..k (capped at degree).
+     */
     void homogeneousDerivatives(double u, int k, std::vector<HomPoint>& out) const;
 
     double clampToDomain(double u) const;

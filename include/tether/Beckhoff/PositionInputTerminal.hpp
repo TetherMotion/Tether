@@ -91,10 +91,12 @@ inline constexpr DeviceIdentity EL5131{0x00000002, 0x140B3052, 1, "EL5131"};
 inline constexpr DeviceIdentity EL5151{0x00000002, 0x141F3052, 1, "EL5151"};
 inline constexpr DeviceIdentity EL5152{0x00000002, 0x14203052, 2, "EL5152"};
 
-/// Every known position-input terminal — the default detection set used
-/// by MultiPositionInputTerminal::detect().  All entries verified against
-/// the ESIs for shape (mailbox + process-input SM + >=16-bit value
-/// entries); none verified on hardware yet.
+/**
+ * Every known position-input terminal — the default detection set used
+ * by MultiPositionInputTerminal::detect().  All entries verified against
+ * the ESIs for shape (mailbox + process-input SM + >=16-bit value
+ * entries); none verified on hardware yet.
+ */
 
 // -- EP/ER/EJ variants — same electronics under 0x2852/0x4052/0x4852 ------------
 inline constexpr DeviceIdentity EJ5002{0x00000002, 0x138A2852, 2, "EJ5002"};
@@ -142,19 +144,19 @@ inline constexpr std::array kPositionInputTerminals{
 class PositionInputTerminal : public TerminalBase,
                               public IPositionInputTerminal {
 public:
-    /// Maximum channels supported per device.
+    /**Maximum channels supported per device. */
     static constexpr size_t kMaxChannels = 16;
 
-    /// Maximum process-image bytes per device (input or output side).
+    /**Maximum process-image bytes per device (input or output side). */
     static constexpr size_t kMaxImageBytes = 512;
 
     // -- Construction ----------------------------------------------------------
 
-    /// Bind by bus position; SII data is read lazily in configure().
+    /**Bind by bus position; SII data is read lazily in configure(). */
     PositionInputTerminal(Master& master, uint16_t slave_index,
                           const DeviceIdentity& identity);
 
-    /// Bind to an already-discovered slave — reuses its SII data.
+    /**Bind to an already-discovered slave — reuses its SII data. */
     PositionInputTerminal(Master& master, const DiscoveredSlave& slave,
                           const DeviceIdentity& identity);
 
@@ -167,27 +169,29 @@ public:
 
     // -- Factories ---------------------------------------------------------------
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
 
-    /// Scan the bus and return a driver bound to the first slave matching
-    /// `identity` (shallow vendor/product discovery).
+    /**
+     * Scan the bus and return a driver bound to the first slave matching
+     * `identity` (shallow vendor/product discovery).
+     */
     static Result<PositionInputTerminal> findFirst(
         Master& master, const DeviceIdentity& identity);
 
-    /// Like findFirst(master, identity) but reuses an existing scan.
+    /**Like findFirst(master, identity) but reuses an existing scan. */
     static Result<PositionInputTerminal> findFirst(
         Master& master, const DeviceIdentity& identity,
         std::span<const DiscoveredSlave> scan);
 
     // -- Standalone bring-up ------------------------------------------------------
 
-    /// Configure the terminal up to SAFE-OP using position addressing.
+    /**Configure the terminal up to SAFE-OP using position addressing. */
     Result<> configure();
 
-    /// configure() then OP (+ the managed realtime loop by default).
+    /**configure() then OP (+ the managed realtime loop by default). */
     Result<> start() { return start(StartOptions()); }
     Result<> start(const StartOptions& opts);
 
@@ -214,18 +218,20 @@ public:
 
     // -- Extra queries ---------------------------------------------------------------
 
-    /// Object index/subindex of value field `i` of channel `ch`
-    /// (0/0 when out of range) — identifies what a value *is* on devices
-    /// carrying several (counter vs. latch vs. timestamp).
+    /**
+     * Object index/subindex of value field `i` of channel `ch`
+     * (0/0 when out of range) — identifies what a value *is* on devices
+     * carrying several (counter vs. latch vs. timestamp).
+     */
     std::pair<uint16_t, uint8_t> valueObject(size_t ch, size_t i) const;
 
 private:
-    /// Per-channel layout resolved from the SII TxPDO list.
+    /**Per-channel layout resolved from the SII TxPDO list. */
     struct ChannelLayout {
-        /// All >=16-bit value entries in PDO order (position first).
+        /**All >=16-bit value entries in PDO order (position first). */
         struct Field {
             uint16_t byte_off;
-            uint8_t  bit_len;   ///< 16…64
+            uint8_t  bit_len; /**< 16…64 */
             uint16_t index;
             uint8_t  subindex;
         };

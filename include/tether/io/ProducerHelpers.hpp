@@ -1,24 +1,26 @@
-/// @file ProducerHelpers.hpp
-/// @brief Producer-side conveniences for Tether IO servers: clock/log
-///        defaults, atomic-shadowed params, no-argument actions, and
-///        callback string signals.
-///
-/// The registry API is deliberately low-level (read/write function
-/// pointers on entry structs). These factories cover the three shapes
-/// nearly every producer writes by hand:
-///
-///   atomicParam<T>()  — a RW param backed by std::atomic<T>, with an
-///                       optional hook fired after each write.
-///   makeAction()      — a parameterless function entry wrapping a
-///                       void() / FunctionCallResult() body.
-///   makeStringSignal()— a read-only String signal whose value a callback
-///                       produces on each read (NUL-terminated wire form).
-///
-/// Plus the two defaults ServerConfig wants: steadyClockUs() matches
-/// TimestampFn, stderrLog() matches LogFn.
-///
-/// Lifetime: entry callbacks capture their storage/callbacks by
-/// reference — the atomics and hook targets must outlive the Registry.
+/**
+ * @file ProducerHelpers.hpp
+ * @brief Producer-side conveniences for Tether IO servers: clock/log
+ *        defaults, atomic-shadowed params, no-argument actions, and
+ *        callback string signals.
+ *
+ * The registry API is deliberately low-level (read/write function
+ * pointers on entry structs). These factories cover the three shapes
+ * nearly every producer writes by hand:
+ *
+ *   atomicParam<T>()  — a RW param backed by std::atomic<T>, with an
+ *                       optional hook fired after each write.
+ *   makeAction()      — a parameterless function entry wrapping a
+ *                       void() / FunctionCallResult() body.
+ *   makeStringSignal()— a read-only String signal whose value a callback
+ *                       produces on each read (NUL-terminated wire form).
+ *
+ * Plus the two defaults ServerConfig wants: steadyClockUs() matches
+ * TimestampFn, stderrLog() matches LogFn.
+ *
+ * Lifetime: entry callbacks capture their storage/callbacks by
+ * reference — the atomics and hook targets must outlive the Registry.
+ */
 #pragma once
 
 #include <atomic>
@@ -42,8 +44,10 @@ namespace tether::io {
 // ServerConfig defaults
 // ---------------------------------------------------------------------------
 
-/// Steady-clock µs timestamp — drop-in ServerConfig::timestampFn.
-/// @return microseconds since an arbitrary epoch (monotonic).
+/**
+ * Steady-clock µs timestamp — drop-in ServerConfig::timestampFn.
+ * @return microseconds since an arbitrary epoch (monotonic).
+ */
 inline uint64_t steadyClockUs() {
     return static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
@@ -51,7 +55,7 @@ inline uint64_t steadyClockUs() {
             .count());
 }
 
-/// stderr logger — drop-in ServerConfig::logFn.
+/**stderr logger — drop-in ServerConfig::logFn. */
 inline void stderrLog(const char* tag, const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -65,8 +69,10 @@ inline void stderrLog(const char* tag, const char* fmt, ...) {
 // Atomic-shadowed params
 // ---------------------------------------------------------------------------
 
-/// Maps a C++ scalar to its wire ValueType.
-/// @tparam T fixed-width scalar (bool, integers, float, double).
+/**
+ * Maps a C++ scalar to its wire ValueType.
+ * @tparam T fixed-width scalar (bool, integers, float, double).
+ */
 template <typename T>
 constexpr ValueType valueTypeOf() {
     if constexpr (std::is_same_v<T, bool>)     return ValueType::Bool;
@@ -84,18 +90,20 @@ constexpr ValueType valueTypeOf() {
         "valueTypeOf: no ValueType mapping for this type");
 }
 
-/// A RW param backed by an atomic shadow: reads load, writes store then
-/// fire `onWrite` (e.g. to push the new value into the control loop).
-/// @tparam T fixed-width scalar — the ValueType is derived from it.
-/// @param id entry id (see entryId()).
-/// @param name dotted entry name.
-/// @param group catalog group label.
-/// @param schema schema ref for the entry's value.
-/// @param schemaSlot slot of that schema in the installed catalog.
-/// @param slot atomic storage; must outlive the registered entry.
-/// @param onWrite hook invoked with the stored value after each write;
-///        empty disables it (the param is still writable).
-/// @return the ParamEntry to hand to Registry::addParam.
+/**
+ * A RW param backed by an atomic shadow: reads load, writes store then
+ * fire `onWrite` (e.g. to push the new value into the control loop).
+ * @tparam T fixed-width scalar — the ValueType is derived from it.
+ * @param id entry id (see entryId()).
+ * @param name dotted entry name.
+ * @param group catalog group label.
+ * @param schema schema ref for the entry's value.
+ * @param schemaSlot slot of that schema in the installed catalog.
+ * @param slot atomic storage; must outlive the registered entry.
+ * @param onWrite hook invoked with the stored value after each write;
+ *        empty disables it (the param is still writable).
+ * @return the ParamEntry to hand to Registry::addParam.
+ */
 template <typename T, typename Hook = std::function<void(T)>>
 ParamEntry atomicParam(uint64_t id, std::string_view name,
                        std::string_view group, const SchemaRef& schema,
@@ -129,13 +137,15 @@ ParamEntry atomicParam(uint64_t id, std::string_view name,
 // No-argument actions
 // ---------------------------------------------------------------------------
 
-/// A parameterless function entry that runs `body` and reports success.
-/// @param id entry id (see entryId()).
-/// @param name dotted function name.
-/// @param group catalog group label.
-/// @param body action to run on invocation (must return void — use the
-///        FunctionCallResult overload for actions that can fail).
-/// @return the FunctionEntry to hand to Registry::addFunction.
+/**
+ * A parameterless function entry that runs `body` and reports success.
+ * @param id entry id (see entryId()).
+ * @param name dotted function name.
+ * @param group catalog group label.
+ * @param body action to run on invocation (must return void — use the
+ *        FunctionCallResult overload for actions that can fail).
+ * @return the FunctionEntry to hand to Registry::addFunction.
+ */
 template <typename F>
     requires std::is_void_v<std::invoke_result_t<F>>
 FunctionEntry makeAction(uint64_t id, std::string_view name,
@@ -153,13 +163,15 @@ FunctionEntry makeAction(uint64_t id, std::string_view name,
     return e;
 }
 
-/// A parameterless function entry whose body controls the result —
-/// for actions that can fail with a message.
-/// @param id entry id (see entryId()).
-/// @param name dotted function name.
-/// @param group catalog group label.
-/// @param body action to run; its result is returned to the caller.
-/// @return the FunctionEntry to hand to Registry::addFunction.
+/**
+ * A parameterless function entry whose body controls the result —
+ * for actions that can fail with a message.
+ * @param id entry id (see entryId()).
+ * @param name dotted function name.
+ * @param group catalog group label.
+ * @param body action to run; its result is returned to the caller.
+ * @return the FunctionEntry to hand to Registry::addFunction.
+ */
 inline FunctionEntry makeAction(uint64_t id, std::string_view name,
                                 std::string_view group,
                                 std::function<FunctionCallResult()> body) {
@@ -177,17 +189,19 @@ inline FunctionEntry makeAction(uint64_t id, std::string_view name,
 // Callback string signals
 // ---------------------------------------------------------------------------
 
-/// A read-only String signal whose wire value `fn` produces on each
-/// read, NUL-terminated (the String schema-value encoding) and capped
-/// at `maxValueSize` bytes.
-/// @param id entry id (see entryId()).
-/// @param name dotted signal name.
-/// @param group catalog group label.
-/// @param schema schema ref for the string value.
-/// @param schemaSlot slot of that schema in the installed catalog.
-/// @param fn value producer; must outlive the registered entry.
-/// @param maxValueSize declared wire cap (bytes incl. NUL).
-/// @return the SignalEntry to hand to Registry::addSignal.
+/**
+ * A read-only String signal whose wire value `fn` produces on each
+ * read, NUL-terminated (the String schema-value encoding) and capped
+ * at `maxValueSize` bytes.
+ * @param id entry id (see entryId()).
+ * @param name dotted signal name.
+ * @param group catalog group label.
+ * @param schema schema ref for the string value.
+ * @param schemaSlot slot of that schema in the installed catalog.
+ * @param fn value producer; must outlive the registered entry.
+ * @param maxValueSize declared wire cap (bytes incl. NUL).
+ * @return the SignalEntry to hand to Registry::addSignal.
+ */
 inline SignalEntry makeStringSignal(uint64_t id, std::string_view name,
                                     std::string_view group,
                                     const SchemaRef& schema,

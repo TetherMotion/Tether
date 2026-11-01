@@ -11,10 +11,10 @@ namespace Identification {
  * @brief Represents the types of static memoryless nonlinearities that can be applied.
  */
 enum class StaticNonlinearityType {
-    Linear,     ///< Standard linear mapping: y = gain * x + offset
-    Saturation, ///< Limits the output between a lower and upper bound.
-    DeadZone,   ///< Output remains zero if input is within the deadzone symmetric around origin.
-    Cubic       ///< Nonlinear cubic mapping: y = gain * x + cubic * x^3 + offset
+    Linear, /**< Standard linear mapping: y = gain * x + offset */
+    Saturation, /**< Limits the output between a lower and upper bound. */
+    DeadZone, /**< Output remains zero if input is within the deadzone symmetric around origin. */
+    Cubic /**< Nonlinear cubic mapping: y = gain * x + cubic * x^3 + offset */
 };
 
 /**
@@ -25,13 +25,13 @@ enum class StaticNonlinearityType {
  * independent of past values (no state memory).
  */
 struct StaticNonlinearity {
-    StaticNonlinearityType type{StaticNonlinearityType::Linear}; ///< The form of the nonlinearity.
-    double gain{1.0};                                            ///< Linear gain scaling the input.
-    double offset{0.0};                                          ///< Fixed DC offset applied to the output.
-    double lower_limit{-1.0};                                    ///< The minimum output bound (Saturation only).
-    double upper_limit{1.0};                                     ///< The maximum output bound (Saturation only).
-    double deadzone{0.0};                                        ///< The symmetric width of the deadzone (+/- value).
-    double cubic{0.0};                                           ///< The coefficient of the cubic term (Cubic only).
+    StaticNonlinearityType type{StaticNonlinearityType::Linear}; /**< The form of the nonlinearity. */
+    double gain{1.0}; /**< Linear gain scaling the input. */
+    double offset{0.0}; /**< Fixed DC offset applied to the output. */
+    double lower_limit{-1.0}; /**< The minimum output bound (Saturation only). */
+    double upper_limit{1.0}; /**< The maximum output bound (Saturation only). */
+    double deadzone{0.0}; /**< The symmetric width of the deadzone (+/- value). */
+    double cubic{0.0}; /**< The coefficient of the cubic term (Cubic only). */
 
     /**
      * @brief Evaluates the nonlinear function on a scalar value.
@@ -53,9 +53,9 @@ struct StaticNonlinearity {
  * have deadzones, or elements displaying odd harmonics.
  */
 struct HammersteinWienerModel {
-    StaticNonlinearity input_non_linearity;  ///< Non-linearity applied to input signals before the linear block.
-    DiscretePolynomialModel linear_block;    ///< Dynamic LTI core of the model.
-    StaticNonlinearity output_non_linearity; ///< Non-linearity applied to the linear block's output.
+    StaticNonlinearity input_non_linearity; /**< Non-linearity applied to input signals before the linear block. */
+    DiscretePolynomialModel linear_block; /**< Dynamic LTI core of the model. */
+    StaticNonlinearity output_non_linearity; /**< Non-linearity applied to the linear block's output. */
 
     /**
      * @brief Generates simulated output for the model given an input sequence.

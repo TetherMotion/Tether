@@ -23,31 +23,33 @@ namespace GCodeExport {
  * @brief A single trajectory sample with all derivatives
  */
 struct TrajectorySample {
-    double time = 0.0;                          ///< Time from start (seconds)
-    double pathPosition = 0.0;                  ///< Arc length from start (mm)
+    double time = 0.0; /**< Time from start (seconds) */
+    double pathPosition = 0.0; /**< Arc length from start (mm) */
     
     // Per-axis data (X, Y, Z, A, B, C, U, V, W)
-    std::array<double, 9> position{};           ///< Position (mm or deg)
-    std::array<double, 9> velocity{};           ///< Velocity (mm/s or deg/s)
-    std::array<double, 9> acceleration{};       ///< Acceleration (mm/s² or deg/s²)
-    std::array<double, 9> jerk{};               ///< Jerk (mm/s³ or deg/s³)
+    std::array<double, 9> position{}; /**< Position (mm or deg) */
+    std::array<double, 9> velocity{}; /**< Velocity (mm/s or deg/s) */
+    std::array<double, 9> acceleration{}; /**< Acceleration (mm/s² or deg/s²) */
+    std::array<double, 9> jerk{}; /**< Jerk (mm/s³ or deg/s³) */
     
     // Combined metrics
-    double linearVelocity = 0.0;                ///< 3D linear velocity magnitude (mm/s)
-    double linearAcceleration = 0.0;            ///< 3D linear acceleration magnitude
-    double linearJerk = 0.0;                    ///< 3D linear jerk magnitude
-    double curvature = 0.0;                     ///< Local curvature (1/mm)
-    double centripetalAccel = 0.0;              ///< Centripetal acceleration
+    double linearVelocity = 0.0; /**< 3D linear velocity magnitude (mm/s) */
+    double linearAcceleration = 0.0; /**< 3D linear acceleration magnitude */
+    double linearJerk = 0.0; /**< 3D linear jerk magnitude */
+    double curvature = 0.0; /**< Local curvature (1/mm) */
+    double centripetalAccel = 0.0; /**< Centripetal acceleration */
     
     // Segment info
     int32_t segmentIndex = -1;
     int32_t blockIndex = -1;
-    uint8_t motionType = 0;                     ///< 0=rapid, 1=linear, 2=arcCW, 3=arcCCW
+    uint8_t motionType = 0; /**< 0=rapid, 1=linear, 2=arcCW, 3=arcCCW */
 
-    /// G64 corner deviation as percentage of blend tolerance (0-100).
-    /// 0 = straight (no deviation), 100 = full reversal (max deviation).
-    /// Computed from the turn angle between consecutive segments.
-    /// 0 when G64 blending is not active (G61 exact stop mode).
+    /**
+     * G64 corner deviation as percentage of blend tolerance (0-100).
+     * 0 = straight (no deviation), 100 = full reversal (max deviation).
+     * Computed from the turn angle between consecutive segments.
+     * 0 when G64 blending is not active (G61 exact stop mode).
+     */
     double deviation = 0.0;
 };
 
@@ -56,19 +58,19 @@ struct TrajectorySample {
  */
 struct LimitViolation {
     double time;
-    int axis;                                   ///< -1 for combined, 0-8 for individual axes
-    std::string limitType;                      ///< "velocity", "acceleration", "jerk"
+    int axis; /**< -1 for combined, 0-8 for individual axes */
+    std::string limitType; /**< "velocity", "acceleration", "jerk" */
     double value;
     double limit;
-    double overshoot;                           ///< Percentage over limit
+    double overshoot; /**< Percentage over limit */
 };
 
 /**
  * @brief Statistics for a trajectory
  */
 struct TrajectoryStatistics {
-    double duration = 0.0;                      ///< Total time (seconds)
-    double pathLength = 0.0;                    ///< Total path length (mm)
+    double duration = 0.0; /**< Total time (seconds) */
+    double pathLength = 0.0; /**< Total path length (mm) */
     size_t sampleCount = 0;
     
     // Per-axis statistics
@@ -95,22 +97,22 @@ struct TrajectoryStatistics {
     
     // Corner error analysis
     struct CornerError {
-        size_t cornerIndex = 0;                 ///< Index of corner in segment sequence
-        double idealCornerX = 0.0;              ///< Ideal (programmed) corner X
-        double idealCornerY = 0.0;              ///< Ideal (programmed) corner Y
-        double idealCornerZ = 0.0;              ///< Ideal (programmed) corner Z
-        double maxDeviation = 0.0;              ///< Maximum deviation from ideal path (mm)
-        double insideDeviation = 0.0;           ///< Maximum deviation toward inside (mm)
-        double outsideDeviation = 0.0;          ///< Maximum deviation toward outside (mm)
-        double minDistanceFromCorner = 0.0;     ///< Closest approach to corner vertex
-        double cornerAngle = 0.0;               ///< Corner angle (degrees)
-        double entryVelocity = 0.0;             ///< Velocity entering corner blend
-        double exitVelocity = 0.0;              ///< Velocity exiting corner blend
-        double minVelocity = 0.0;               ///< Minimum velocity during corner
+        size_t cornerIndex = 0; /**< Index of corner in segment sequence */
+        double idealCornerX = 0.0; /**< Ideal (programmed) corner X */
+        double idealCornerY = 0.0; /**< Ideal (programmed) corner Y */
+        double idealCornerZ = 0.0; /**< Ideal (programmed) corner Z */
+        double maxDeviation = 0.0; /**< Maximum deviation from ideal path (mm) */
+        double insideDeviation = 0.0; /**< Maximum deviation toward inside (mm) */
+        double outsideDeviation = 0.0; /**< Maximum deviation toward outside (mm) */
+        double minDistanceFromCorner = 0.0; /**< Closest approach to corner vertex */
+        double cornerAngle = 0.0; /**< Corner angle (degrees) */
+        double entryVelocity = 0.0; /**< Velocity entering corner blend */
+        double exitVelocity = 0.0; /**< Velocity exiting corner blend */
+        double minVelocity = 0.0; /**< Minimum velocity during corner */
     };
     std::vector<CornerError> cornerErrors;
-    double totalCornerError = 0.0;              ///< Sum of all corner deviations
-    double maxCornerError = 0.0;                ///< Maximum single corner deviation
+    double totalCornerError = 0.0; /**< Sum of all corner deviations */
+    double maxCornerError = 0.0; /**< Maximum single corner deviation */
     
     // Limit violations
     std::vector<LimitViolation> violations;
@@ -122,28 +124,32 @@ struct TrajectoryStatistics {
  */
 struct AnalysisConfig {
     // Sampling
-    double timeStep = 0.001;                    ///< Sample time step (seconds)
+    double timeStep = 0.001; /**< Sample time step (seconds) */
     bool useAdaptiveSampling = false;
-    double maxChordError = 0.005;               ///< For adaptive sampling (mm)
+    double maxChordError = 0.005; /**< For adaptive sampling (mm) */
 
-    /// Maximum number of samples to generate. If the estimated sample count
-    /// (totalTime / timeStep) exceeds this, the effective time step is
-    /// increased to cap the sample count. 0 = no cap. Prevents OOM on very
-    /// long trajectories (e.g. 3-hour print at 1ms = 10.8M samples → 7GB).
+    /**
+     * Maximum number of samples to generate. If the estimated sample count
+     * (totalTime / timeStep) exceeds this, the effective time step is
+     * increased to cap the sample count. 0 = no cap. Prevents OOM on very
+     * long trajectories (e.g. 3-hour print at 1ms = 10.8M samples → 7GB).
+     */
     size_t maxSamples = 0;
 
     // Derivative computation
-    int derivativeOrder = 4;                    ///< Central difference order (2, 4, 6)
+    int derivativeOrder = 4; /**< Central difference order (2, 4, 6) */
 
     // Kinematic limits for compliance checking
     GCode::KinematicLimits limits;
 
     // Tolerance for violation detection
-    double violationTolerance = 0.01;           ///< 1% over limit before flagging
+    double violationTolerance = 0.01; /**< 1% over limit before flagging */
 
-    /// Maximum number of limit violations to store in TrajectoryStatistics.
-    /// 0 = no cap (stores all). Capping prevents unbounded memory growth on
-    /// trajectories with many violations.
+    /**
+     * Maximum number of limit violations to store in TrajectoryStatistics.
+     * 0 = no cap (stores all). Capping prevents unbounded memory growth on
+     * trajectories with many violations.
+     */
     size_t maxViolations = 10000;
 };
 

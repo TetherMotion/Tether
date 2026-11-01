@@ -52,8 +52,10 @@ using GCodeExport::RenderableBezierPath;
 
 namespace {
 
-/// Pre-filter Klipper extended commands that the Tether parser doesn't
-/// understand (same logic as GCodeProcessor / wss_diag).
+/**
+ * Pre-filter Klipper extended commands that the Tether parser doesn't
+ * understand (same logic as GCodeProcessor / wss_diag).
+ */
 bool isKlipperCommand(std::string_view line) {
     size_t i = 0;
     while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) i++;
@@ -128,8 +130,10 @@ std::string filterKlipperCommands(const std::string& gcodeText) {
     return result;
 }
 
-/// Convert PlanningSegments to NurbsCurves for the gray "raw G-code" path.
-/// Each segment becomes a single linear NurbsCurve (degree 1), XY projection.
+/**
+ * Convert PlanningSegments to NurbsCurves for the gray "raw G-code" path.
+ * Each segment becomes a single linear NurbsCurve (degree 1), XY projection.
+ */
 std::vector<tether::motion::NurbsCurve> segmentsToNurbsCurves(
     const std::vector<PlanningSegment>& segments)
 {

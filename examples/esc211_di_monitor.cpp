@@ -96,10 +96,12 @@ static void parseSafeDI(uint32_t di_val, DIState& state) {
 // PanelScreen body renderer
 // ---------------------------------------------------------------------------
 
-/// Draw the DI panel into stdscr rows [top, bottom) — called each frame by
-/// PanelScreen, which owns the ncurses session, header, log pane and
-/// footer.  Uses the shared Session palette (PalValue=green active,
-/// PalError=red stale, PalMuted=inactive).
+/**
+ * Draw the DI panel into stdscr rows [top, bottom) — called each frame by
+ * PanelScreen, which owns the ncurses session, header, log pane and
+ * footer.  Uses the shared Session palette (PalValue=green active,
+ * PalError=red stale, PalMuted=inactive).
+ */
 static void drawBody(const DIState& state, int top, int bottom) {
     std::lock_guard<std::mutex> lock(state.mtx);
 

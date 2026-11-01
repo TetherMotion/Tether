@@ -52,48 +52,48 @@
 
 namespace tether::motion::replanner {
 
-/// Configuration for the online reblender.
+/**Configuration for the online reblender. */
 struct ReblenderConfig {
-    /// Default blend tolerance (mm). Positive = inside cut.
+    /**Default blend tolerance (mm). Positive = inside cut. */
     double defaultTolerance = 0.1; // 100 µm
 
-    /// Tighter tolerance for problematic junctions (mm).
+    /**Tighter tolerance for problematic junctions (mm). */
     double tightTolerance = 0.02; // 20 µm
 
-    /// Default continuity order.
+    /**Default continuity order. */
     Continuity defaultContinuity = Continuity::G2;
 
-    /// Higher continuity for problematic junctions.
+    /**Higher continuity for problematic junctions. */
     Continuity tightContinuity = Continuity::G3;
 
-    /// Default curve type.
+    /**Default curve type. */
     BlendCurveType defaultCurveType = BlendCurveType::BezierGk;
 
-    /// Maximum blend fraction per neighbor.
+    /**Maximum blend fraction per neighbor. */
     double maxBlendFraction = 0.5;
 
-    /// Minimum segment length for trimming.
+    /**Minimum segment length for trimming. */
     double minSegmentLength = 0.01;
 };
 
-/// Result of a reblend operation.
+/**Result of a reblend operation. */
 struct ReblendResult {
-    /// The new blended path (may be the same as input if no blends applied).
+    /**The new blended path (may be the same as input if no blends applied). */
     BlendedPath blendedPath;
 
-    /// Whether any junctions were re-blended with a tighter spec.
+    /**Whether any junctions were re-blended with a tighter spec. */
     bool reblended = false;
 
-    /// Number of junctions that were successfully blended.
+    /**Number of junctions that were successfully blended. */
     int blendedCount = 0;
 
-    /// Number that fell back to ExactStop.
+    /**Number that fell back to ExactStop. */
     int exactStopCount = 0;
 
-    /// Number that were straight (no blend needed).
+    /**Number that were straight (no blend needed). */
     int straightCount = 0;
 
-    /// Human-readable summary.
+    /**Human-readable summary. */
     std::string summary;
 };
 

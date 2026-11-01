@@ -54,72 +54,88 @@ namespace Tether {
 namespace TUI {
 
 struct TreeScreenHooks {
-    /// Draw the detail pane for the selected node (may be a coupler-level
-    /// node or a leaf — check node.tag / node.children).
+    /**
+     * Draw the detail pane for the selected node (may be a coupler-level
+     * node or a leaf — check node.tag / node.children).
+     */
     std::function<void(TermWindow*, const TreeNode&)> renderDetail;
 
-    /// Called once per frame (~50 ms) before drawing — update model state.
+    /**Called once per frame (~50 ms) before drawing — update model state. */
     std::function<void()> onTick;
 
-    /// Keys not consumed by tree navigation arrive here.
-    /// Return true when handled.
+    /**
+     * Keys not consumed by tree navigation arrive here.
+     * Return true when handled.
+     */
     std::function<bool(int)> onKey;
 
-    /// Optional modal intercept: called for every key BEFORE tree
-    /// navigation sees it.  Return true to consume the key — e.g. while a
-    /// text-input prompt is active and Space/Enter/arrows must not fold
-    /// or move the tree.  Combine with quitGuard so q/Esc also reach it.
+    /**
+     * Optional modal intercept: called for every key BEFORE tree
+     * navigation sees it.  Return true to consume the key — e.g. while a
+     * text-input prompt is active and Space/Enter/arrows must not fold
+     * or move the tree.  Combine with quitGuard so q/Esc also reach it.
+     */
     std::function<bool(int)> preKey;
 
-    /// Optional modal guard: when set and it returns true, the quit keys
-    /// (q/Q/Esc) are passed to onKey instead of ending run() — e.g. while
-    /// a search prompt is active and Esc should cancel the prompt.
+    /**
+     * Optional modal guard: when set and it returns true, the quit keys
+     * (q/Q/Esc) are passed to onKey instead of ending run() — e.g. while
+     * a search prompt is active and Esc should cancel the prompt.
+     */
     std::function<bool()> quitGuard;
 
-    /// Extra text appended to the footer key hints (e.g. "enter: next").
+    /**Extra text appended to the footer key hints (e.g. "enter: next"). */
     std::string keyHints;
 };
 
 class TreeScreen {
 public:
-    /// `title` shows in the header bar; `root`'s children become the
-    /// top-level tree nodes (all expanded by default via TreeNode).
+    /**
+     * `title` shows in the header bar; `root`'s children become the
+     * top-level tree nodes (all expanded by default via TreeNode).
+     */
     TreeScreen(std::string title, TreeNode root, TreeScreenHooks hooks);
 
-    /// Run the draw/dispatch loop until 'q'/Esc, `cancel`, or duration.
+    /**Run the draw/dispatch loop until 'q'/Esc, `cancel`, or duration. */
     void run(std::atomic<bool>& cancel, double durationSec = 0.0);
 
-    /// Currently selected node (may be null when the tree is empty).
+    /**Currently selected node (may be null when the tree is empty). */
     const TreeNode* selected() const { return tree_.selected(); }
 
-    /// Access to the tree (e.g. to update node badges from onTick).
+    /**Access to the tree (e.g. to update node badges from onTick). */
     TreeView& tree() { return tree_; }
 
-    /// Access to the captured log pane (add application lines).
+    /**Access to the captured log pane (add application lines). */
     LogPane& log() { return log_; }
 
-    /// Open a modal one-line input prompt (see LinePromptSpec).  While a
-    /// prompt is active it consumes all keys and renders in the detail
-    /// pane instead of the node detail.
+    /**
+     * Open a modal one-line input prompt (see LinePromptSpec).  While a
+     * prompt is active it consumes all keys and renders in the detail
+     * pane instead of the node detail.
+     */
     void openLinePrompt(LinePromptSpec spec);
-    /// Close the prompt without committing (e.g. from onTick).
+    /**Close the prompt without committing (e.g. from onTick). */
     void closeLinePrompt() { prompt_active_ = false; }
-    /// True while a line prompt is open.
+    /**True while a line prompt is open. */
     bool promptActive() const { return prompt_active_; }
-    /// Current prompt buffer (for live filtering while typing).
+    /**Current prompt buffer (for live filtering while typing). */
     const std::string& promptText() const { return prompt_input_.buffer(); }
 
-    /// Push a modal overlay (message box, confirm dialog, menu, …).
-    /// Overlays consume all keys until closed.
+    /**
+     * Push a modal overlay (message box, confirm dialog, menu, …).
+     * Overlays consume all keys until closed.
+     */
     void pushOverlay(std::unique_ptr<UI::Overlay> overlay) {
         overlays_.push(std::move(overlay));
     }
-    /// True while at least one overlay is open.
+    /**True while at least one overlay is open. */
     bool overlayOpen() const { return !overlays_.empty(); }
 
-    /// Show a transient notice in the footer for `seconds` (action
-    /// feedback like "saved 3 files" — the hint line returns after the
-    /// notice expires).  Same semantics as PanelScreen::flash.
+    /**
+     * Show a transient notice in the footer for `seconds` (action
+     * feedback like "saved 3 files" — the hint line returns after the
+     * notice expires).  Same semantics as PanelScreen::flash.
+     */
     void flash(std::string msg, double seconds = 3.0) {
         flash_msg_ = std::move(msg);
         flash_until_ = std::chrono::steady_clock::now() +
@@ -131,7 +147,7 @@ public:
 private:
     void renderWrappedDetail(TermWindow* win, const TreeNode& node);
     void renderPrompt(TermWindow* win);
-    /// Feed a key to the open prompt (called for every key while active).
+    /**Feed a key to the open prompt (called for every key while active). */
     void handlePromptKey(int key);
 
     Session      session_;

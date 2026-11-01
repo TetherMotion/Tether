@@ -95,8 +95,8 @@ namespace tether::control {
  * @brief Nichols chart point (gain in dB, phase in degrees)
  */
 struct NicholsPoint {
-    double gain{0.0};   ///< Gain [dB]
-    double phase{0.0};  ///< Phase [degrees]
+    double gain{0.0}; /**< Gain [dB] */
+    double phase{0.0}; /**< Phase [degrees] */
     
     NicholsPoint() = default;
     NicholsPoint(double g, double p) : gain(g), phase(p) {}
@@ -109,9 +109,9 @@ struct NicholsPoint {
  * @brief Plant template at a frequency
  */
 struct PlantTemplate {
-    double frequency{0.0};  ///< Frequency [rad/s]
-    std::vector<NicholsPoint> points;  ///< Template points
-    NicholsPoint nominal;   ///< Nominal plant point
+    double frequency{0.0}; /**< Frequency [rad/s] */
+    std::vector<NicholsPoint> points; /**< Template points */
+    NicholsPoint nominal; /**< Nominal plant point */
     
     /**
      * @brief Get template boundary (convex hull)
@@ -132,7 +132,7 @@ struct PlantTemplate {
  */
 struct QFTBound {
     double frequency{0.0};
-    std::vector<NicholsPoint> boundary;  ///< Forbidden region boundary
+    std::vector<NicholsPoint> boundary; /**< Forbidden region boundary */
     enum Type {
         Tracking,
         Stability,
@@ -154,8 +154,8 @@ struct QFTBound {
  */
 struct TrackingSpec {
     std::vector<double> frequencies;
-    std::vector<double> lowerBound;  ///< |T(jω)| ≥ lower [dB]
-    std::vector<double> upperBound;  ///< |T(jω)| ≤ upper [dB]
+    std::vector<double> lowerBound; /**< |T(jω)| ≥ lower [dB] */
+    std::vector<double> upperBound; /**< |T(jω)| ≤ upper [dB] */
 };
 
 /**
@@ -163,15 +163,15 @@ struct TrackingSpec {
  */
 struct DisturbanceSpec {
     std::vector<double> frequencies;
-    std::vector<double> maxSensitivity;  ///< |S(jω)| ≤ spec [dB]
+    std::vector<double> maxSensitivity; /**< |S(jω)| ≤ spec [dB] */
 };
 
 /**
  * @brief Transfer function representation
  */
 struct TransferFunction {
-    std::vector<double> num;  ///< Numerator coefficients (highest order first)
-    std::vector<double> den;  ///< Denominator coefficients
+    std::vector<double> num; /**< Numerator coefficients (highest order first) */
+    std::vector<double> den; /**< Denominator coefficients */
     
     std::complex<double> evaluate(double omega) const;
     int order() const { return static_cast<int>(den.size()) - 1; }
@@ -389,11 +389,11 @@ public:
      * @brief Configuration for automatic loop shaping
      */
     struct LoopShapingConfig {
-        int maxPoles{6};            ///< Maximum controller poles
-        int maxZeros{5};            ///< Maximum controller zeros
-        bool allowUnstablePoles{false};  ///< Allow RHP poles
-        double integralLowFreq{0.1}; ///< Frequency for integral action
-        double filterHighFreq{100.0}; ///< High-frequency rolloff
+        int maxPoles{6}; /**< Maximum controller poles */
+        int maxZeros{5}; /**< Maximum controller zeros */
+        bool allowUnstablePoles{false}; /**< Allow RHP poles */
+        double integralLowFreq{0.1}; /**< Frequency for integral action */
+        double filterHighFreq{100.0}; /**< High-frequency rolloff */
         int optimizationIterations{1000};
     };
     
@@ -415,7 +415,7 @@ public:
      * @param pole Real pole location to append.
      */
     void addControllerPole(double pole);
-    /// @param zero Real zero location to append.
+    /**@param zero Real zero location to append. */
     void addControllerZero(double zero);
     void addControllerPole(std::complex<double> pole);  // Complex pair
     void addControllerZero(std::complex<double> zero);  // Complex pair
@@ -496,10 +496,10 @@ public:
      * @brief Analyze stability margins
      */
     struct StabilityMargins {
-        double gainMargin{0.0};      ///< [dB]
-        double phaseMargin{0.0};     ///< [degrees]
-        double gainCrossover{0.0};   ///< [rad/s]
-        double phaseCrossover{0.0};  ///< [rad/s]
+        double gainMargin{0.0}; /**< [dB] */
+        double phaseMargin{0.0}; /**< [degrees] */
+        double gainCrossover{0.0}; /**< [rad/s] */
+        double phaseCrossover{0.0}; /**< [rad/s] */
     };
     StabilityMargins analyzeMargins() const;
     

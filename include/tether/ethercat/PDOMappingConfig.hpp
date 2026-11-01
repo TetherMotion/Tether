@@ -45,8 +45,10 @@ namespace PDO {
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Maximum number of PDO mappings per sync manager.
-/// 16 is well above any real-world slave (typically 1-4 PDOs per SM).
+/**
+ * Maximum number of PDO mappings per sync manager.
+ * 16 is well above any real-world slave (typically 1-4 PDOs per SM).
+ */
 constexpr size_t kMaxPDOsPerSM = 16;
 
 // ---------------------------------------------------------------------------
@@ -70,9 +72,9 @@ constexpr size_t kMaxPDOsPerSM = 16;
  * AL_STATUS_CODE 0x0025 (Invalid output mapping) error.
  */
 struct PDOMappingRegion {
-    uint16_t pdo_index{0};      ///< OD index (0x1600-0x17FF RxPDO, 0x1A00-0x1BFF TxPDO)
-    uint16_t size_bytes{0};     ///< Total size of this PDO mapping in bytes
-    bool     fixed{false};      ///< If true, don't write to 0x1C1n (drive auto-includes)
+    uint16_t pdo_index{0}; /**< OD index (0x1600-0x17FF RxPDO, 0x1A00-0x1BFF TxPDO) */
+    uint16_t size_bytes{0}; /**< Total size of this PDO mapping in bytes */
+    bool     fixed{false}; /**< If true, don't write to 0x1C1n (drive auto-includes) */
 
     PDOMappingRegion() = default;
     PDOMappingRegion(uint16_t index, uint16_t size, bool is_fixed = false)
@@ -96,14 +98,14 @@ struct PDOMappingRegion {
  * are laid out contiguously starting from this address.
  */
 struct MultiPDOSyncManagerConfig {
-    uint8_t  sm_index{2};             ///< SM index (0-7); default SM2
-    uint16_t phys_start_addr{0};      ///< Physical start address in ESC memory
+    uint8_t  sm_index{2}; /**< SM index (0-7); default SM2 */
+    uint16_t phys_start_addr{0}; /**< Physical start address in ESC memory */
     EtherCAT::SyncManager::SMControlReg control{};
     bool     enable{true};
     SyncManagerType type{SyncManagerType::ProcessOutput};
     std::vector<PDOMappingRegion> pdo_mappings;
 
-    /// Sum of all PDO mapping sizes — the total SM length.
+    /**Sum of all PDO mapping sizes — the total SM length. */
     uint16_t totalLength() const {
         uint16_t total = 0;
         for (const auto& p : pdo_mappings) {
@@ -112,9 +114,11 @@ struct MultiPDOSyncManagerConfig {
         return total;
     }
 
-    /// Sum of writable (non-fixed) PDO mapping sizes only.
-    /// This is the SM length that the master should write to the SM
-    /// length register — the drive firmware adds fixed PDOs itself.
+    /**
+     * Sum of writable (non-fixed) PDO mapping sizes only.
+     * This is the SM length that the master should write to the SM
+     * length register — the drive firmware adds fixed PDOs itself.
+     */
     uint16_t writableLength() const {
         uint16_t total = 0;
         for (const auto& p : pdo_mappings) {
@@ -123,16 +127,20 @@ struct MultiPDOSyncManagerConfig {
         return total;
     }
 
-    /// Add a PDO mapping to this SM.
-    /// @param pdo_index  OD index of the PDO mapping object
-    /// @param size_bytes Total size of this PDO in bytes
-    /// @param is_fixed   If true, don't write to 0x1C1n (drive auto-includes)
+    /**
+     * Add a PDO mapping to this SM.
+     * @param pdo_index  OD index of the PDO mapping object
+     * @param size_bytes Total size of this PDO in bytes
+     * @param is_fixed   If true, don't write to 0x1C1n (drive auto-includes)
+     */
     void addPDOMapping(uint16_t pdo_index, uint16_t size_bytes, bool is_fixed = false) {
         pdo_mappings.push_back(PDOMappingRegion(pdo_index, size_bytes, is_fixed));
     }
 
-    /// Create a ProcessOutput (RxPDO) SM config with multiple PDO mappings.
-    /// Defaults to SM2 with standard buffered-write control register.
+    /**
+     * Create a ProcessOutput (RxPDO) SM config with multiple PDO mappings.
+     * Defaults to SM2 with standard buffered-write control register.
+     */
     static MultiPDOSyncManagerConfig process_output(
         uint16_t addr,
         std::initializer_list<PDOMappingRegion> pdos) {
@@ -146,8 +154,10 @@ struct MultiPDOSyncManagerConfig {
         return cfg;
     }
 
-    /// Create a ProcessInput (TxPDO) SM config with multiple PDO mappings.
-    /// Defaults to SM3 with standard buffered-read control register.
+    /**
+     * Create a ProcessInput (TxPDO) SM config with multiple PDO mappings.
+     * Defaults to SM3 with standard buffered-read control register.
+     */
     static MultiPDOSyncManagerConfig process_input(
         uint16_t addr,
         std::initializer_list<PDOMappingRegion> pdos) {
@@ -161,7 +171,7 @@ struct MultiPDOSyncManagerConfig {
         return cfg;
     }
 
-    /// Convert to a legacy SyncManagerConfig (single PDO, total length).
+    /**Convert to a legacy SyncManagerConfig (single PDO, total length). */
     SyncManagerConfig toLegacyConfig() const {
         SyncManagerConfig leg;
         leg.phys_start_addr = phys_start_addr;

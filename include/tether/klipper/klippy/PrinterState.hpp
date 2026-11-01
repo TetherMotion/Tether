@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file PrinterState.hpp
-/// @brief Printer state machine enum and helpers.
+/**
+ * @file PrinterState.hpp
+ * @brief Printer state machine enum and helpers.
+ */
 
 #include <cstdint>
 #include <string>
@@ -21,7 +23,7 @@ enum class PrinterState : uint8_t {
     Shutdown  = 5,
 };
 
-/// @brief Convert PrinterState to string.
+/**@brief Convert PrinterState to string. */
 inline const char* stateToString(PrinterState s) {
     switch (s) {
         case PrinterState::Startup:  return "startup";

@@ -23,29 +23,31 @@ namespace tether::motion {
 
 namespace {
 
-/// Auto-select a certificate width: 1e-3·|tol| with a floor of 1e-9.
+/**Auto-select a certificate width: 1e-3·|tol| with a floor of 1e-9. */
 double autoEpsilon(double tol) {
     return std::max(1e-9, 1e-3 * std::abs(tol));
 }
 
-/// Check if a piece is long enough to trim by `trim` on the junction end.
+/**Check if a piece is long enough to trim by `trim` on the junction end. */
 bool canTrim(const NurbsCurve& piece, double trim, double minLength) {
     return piece.length() >= std::max(2.0 * minLength, trim);
 }
 
-/// Coarse deviation lower bound: sample the blend and the removed corner
-/// pieces at a small number of points and compute the min point-to-curve
-/// distance in both directions (blend→Ω and Ω→blend). The result is a
-/// lower bound on the true Hausdorff deviation — if it already exceeds
-/// the tolerance, the full (M10) certification would reject the blend, so
-/// the caller can skip that expensive step.
-///
-/// This is the key performance optimization for tight tolerances: the
-/// (M10) certifier's grid size scales as L/(2ε), and ε = 1e-3·|tol|. For
-/// tight tolerances, ε is tiny, making the grid enormous (up to 100000
-/// samples, each calling pointCurveDistance). Most bisection iterations
-/// test high speeds where the deviation is far above the tolerance —
-/// this pre-check skips the expensive certification for those iterations.
+/**
+ * Coarse deviation lower bound: sample the blend and the removed corner
+ * pieces at a small number of points and compute the min point-to-curve
+ * distance in both directions (blend→Ω and Ω→blend). The result is a
+ * lower bound on the true Hausdorff deviation — if it already exceeds
+ * the tolerance, the full (M10) certification would reject the blend, so
+ * the caller can skip that expensive step.
+ *
+ * This is the key performance optimization for tight tolerances: the
+ * (M10) certifier's grid size scales as L/(2ε), and ε = 1e-3·|tol|. For
+ * tight tolerances, ε is tiny, making the grid enormous (up to 100000
+ * samples, each calling pointCurveDistance). Most bisection iterations
+ * test high speeds where the deviation is far above the tolerance —
+ * this pre-check skips the expensive certification for those iterations.
+ */
 double coarseDeviationLowerBound(const NurbsCurve& blend,
                                  const NurbsCurve& removedIn,
                                  const NurbsCurve& removedOut,

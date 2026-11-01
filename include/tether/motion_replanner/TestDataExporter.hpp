@@ -35,13 +35,13 @@ namespace MotionReplanner {
  * @brief Export format options
  */
 enum class ExportFormat {
-    CSV,            ///< Comma-separated values
-    TSV,            ///< Tab-separated values
-    JSON,           ///< JSON format
-    JSONPretty,     ///< Pretty-printed JSON
-    Binary,         ///< Binary format for efficiency
-    Numpy,          ///< NumPy-compatible binary
-    SVG             ///< SVG vector graphics
+    CSV, /**< Comma-separated values */
+    TSV, /**< Tab-separated values */
+    JSON, /**< JSON format */
+    JSONPretty, /**< Pretty-printed JSON */
+    Binary, /**< Binary format for efficiency */
+    Numpy, /**< NumPy-compatible binary */
+    SVG /**< SVG vector graphics */
 };
 
 /**
@@ -58,11 +58,11 @@ struct ExportConfig {
     std::string timestampFormat = "%Y-%m-%d %H:%M:%S";
     
     // Column selection
-    std::vector<std::string> selectedColumns;  ///< Empty = all columns
+    std::vector<std::string> selectedColumns; /**< Empty = all columns */
     
     // Filtering
     double timeStart = 0;
-    double timeEnd = -1;  ///< -1 = no end limit
+    double timeEnd = -1; /**< -1 = no end limit */
     int downsampleFactor = 1;
 };
 
@@ -453,7 +453,7 @@ public:
      * @param values Numeric cells for one row.
      */
     void writeRow(const std::vector<double>& values);
-    /// @param values String cells for one row.
+    /**@param values String cells for one row. */
     void writeRow(const std::vector<std::string>& values);
     
     /**
@@ -501,8 +501,8 @@ public:
     struct ReportSection {
         std::string title;
         std::string content;
-        std::vector<std::string> figures;  ///< Paths to associated figures
-        std::vector<std::string> tables;   ///< Paths to associated data files
+        std::vector<std::string> figures; /**< Paths to associated figures */
+        std::vector<std::string> tables; /**< Paths to associated data files */
     };
     
     ReportGenerator();

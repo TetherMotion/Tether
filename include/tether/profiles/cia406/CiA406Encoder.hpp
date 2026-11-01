@@ -147,22 +147,26 @@ const char* getInterfaceTypeName(InterfaceType type);
  * @brief Encoder operating status flags
  */
 struct OperatingStatus {
-    bool position_valid;          ///< Position value is valid
-    bool scaling_active;          ///< Scaling function is enabled
-    bool reference_done;          ///< Reference/homing complete
-    bool preset_executed;         ///< Preset was applied
-    bool overspeed_warning;       ///< Velocity exceeds limit
-    bool counting_range_exceeded; ///< Position outside counting range
-    bool supply_voltage_low;      ///< Supply voltage below threshold
-    bool supply_voltage_high;     ///< Supply voltage above threshold
+    bool position_valid; /**< Position value is valid */
+    bool scaling_active; /**< Scaling function is enabled */
+    bool reference_done; /**< Reference/homing complete */
+    bool preset_executed; /**< Preset was applied */
+    bool overspeed_warning; /**< Velocity exceeds limit */
+    bool counting_range_exceeded; /**< Position outside counting range */
+    bool supply_voltage_low; /**< Supply voltage below threshold */
+    bool supply_voltage_high; /**< Supply voltage above threshold */
     
-    /// Parse from raw status word
-    /// @param raw Raw status word from the drive.
-    /// @return Decoded status flags.
+    /**
+     * Parse from raw status word
+     * @param raw Raw status word from the drive.
+     * @return Decoded status flags.
+     */
     static OperatingStatus fromRaw(uint16_t raw);
     
-    /// Convert to raw status word
-    /// @return Status word encoding of these flags.
+    /**
+     * Convert to raw status word
+     * @return Status word encoding of these flags.
+     */
     uint16_t toRaw() const;
 };
 
@@ -170,28 +174,34 @@ struct OperatingStatus {
  * @brief Encoder alarm flags
  */
 struct AlarmFlags {
-    bool hardware_error;          ///< General hardware fault
-    bool temperature_exceeded;    ///< Over-temperature
-    bool light_source_error;      ///< Optical encoder light source failure
-    bool battery_error;           ///< Backup battery failure (multi-turn)
-    bool position_error;          ///< Position reading error
-    bool communication_error;     ///< Interface communication error
-    bool multi_turn_error;        ///< Multi-turn position lost
-    bool initialization_error;    ///< Startup/init failure
-    bool speed_exceeded;          ///< Over-speed condition
-    bool position_limit_exceeded; ///< Position outside valid range
+    bool hardware_error; /**< General hardware fault */
+    bool temperature_exceeded; /**< Over-temperature */
+    bool light_source_error; /**< Optical encoder light source failure */
+    bool battery_error; /**< Backup battery failure (multi-turn) */
+    bool position_error; /**< Position reading error */
+    bool communication_error; /**< Interface communication error */
+    bool multi_turn_error; /**< Multi-turn position lost */
+    bool initialization_error; /**< Startup/init failure */
+    bool speed_exceeded; /**< Over-speed condition */
+    bool position_limit_exceeded; /**< Position outside valid range */
     
-    /// Parse from raw alarm word
-    /// @param raw Raw alarm word from the drive.
-    /// @return Decoded alarm flags.
+    /**
+     * Parse from raw alarm word
+     * @param raw Raw alarm word from the drive.
+     * @return Decoded alarm flags.
+     */
     static AlarmFlags fromRaw(uint16_t raw);
     
-    /// Check if any alarm is active
-    /// @return true when at least one alarm flag is set.
+    /**
+     * Check if any alarm is active
+     * @return true when at least one alarm flag is set.
+     */
     bool hasAnyAlarm() const;
     
-    /// Get description of active alarms
-    /// @return Comma-separated list of active alarm names (empty when none).
+    /**
+     * Get description of active alarms
+     * @return Comma-separated list of active alarm names (empty when none).
+     */
     std::string getDescription() const;
 };
 
@@ -220,22 +230,22 @@ struct EncoderCapabilities {
     EncoderTypeEx encoder_type;
     InterfaceType interface_type;
     
-    uint32_t single_turn_resolution;   ///< Resolution bits (single turn)
-    uint32_t multi_turn_revolutions;   ///< Number of distinguishable revolutions
-    uint32_t total_measuring_range;    ///< Total counting range
+    uint32_t single_turn_resolution; /**< Resolution bits (single turn) */
+    uint32_t multi_turn_revolutions; /**< Number of distinguishable revolutions */
+    uint32_t total_measuring_range; /**< Total counting range */
     
-    bool has_velocity_output;          ///< Device provides velocity
-    bool has_acceleration_output;      ///< Device provides acceleration
-    bool has_working_area_monitoring;  ///< Working area limits available
-    bool has_scaling_function;         ///< Scaling can be configured
-    bool has_preset_function;          ///< Position can be preset
-    bool has_reference_input;          ///< Reference/home signal available
-    bool has_limit_switches;           ///< Limit switch inputs (C4)
-    bool has_temperature_sensor;       ///< Temperature monitoring
-    bool has_signal_quality;           ///< Signal quality indicator
+    bool has_velocity_output; /**< Device provides velocity */
+    bool has_acceleration_output; /**< Device provides acceleration */
+    bool has_working_area_monitoring; /**< Working area limits available */
+    bool has_scaling_function; /**< Scaling can be configured */
+    bool has_preset_function; /**< Position can be preset */
+    bool has_reference_input; /**< Reference/home signal available */
+    bool has_limit_switches; /**< Limit switch inputs (C4) */
+    bool has_temperature_sensor; /**< Temperature monitoring */
+    bool has_signal_quality; /**< Signal quality indicator */
     
-    uint16_t supported_alarms;         ///< Bitmap of supported alarms
-    uint16_t supported_warnings;       ///< Bitmap of supported warnings
+    uint16_t supported_alarms; /**< Bitmap of supported alarms */
+    uint16_t supported_warnings; /**< Bitmap of supported warnings */
 };
 
 // ============================================================================
@@ -246,25 +256,25 @@ struct EncoderCapabilities {
  * @brief Pre-defined PDO mapping configurations
  */
 enum class PDOMappingPreset : uint8_t {
-    /// Basic: Position + Status
+    /**Basic: Position + Status */
     Basic,
     
-    /// With velocity: Position + Velocity + Status
+    /**With velocity: Position + Velocity + Status */
     WithVelocity,
     
-    /// Full: Position + Velocity + Status + Alarms
+    /**Full: Position + Velocity + Status + Alarms */
     Full,
     
-    /// Multi-turn: Position + Multi-turn + Single-turn + Status
+    /**Multi-turn: Position + Multi-turn + Single-turn + Status */
     MultiTurn,
     
-    /// High-speed: Position only (minimal latency)
+    /**High-speed: Position only (minimal latency) */
     HighSpeed,
     
-    /// Diagnostic: All diagnostic info (Position, Velocity, Status, Alarms, Temp, Quality)
+    /**Diagnostic: All diagnostic info (Position, Velocity, Status, Alarms, Temp, Quality) */
     Diagnostic,
     
-    /// Custom (user-defined)
+    /**Custom (user-defined) */
     Custom,
 };
 
@@ -331,21 +341,25 @@ struct TxPDOMultiTurn {
  */
 struct ScalingConfig {
     bool enabled;
-    int32_t numerator;    ///< Scaling numerator
-    int32_t denominator;  ///< Scaling denominator
-    int32_t offset;       ///< Position offset
+    int32_t numerator; /**< Scaling numerator */
+    int32_t denominator; /**< Scaling denominator */
+    int32_t offset; /**< Position offset */
     
-    /// Apply scaling to raw position
-    /// @param raw_position Raw encoder position [counts].
-    /// @return Scaled position in user units.
+    /**
+     * Apply scaling to raw position
+     * @param raw_position Raw encoder position [counts].
+     * @return Scaled position in user units.
+     */
     int32_t apply(int32_t raw_position) const {
         if (!enabled || denominator == 0) return raw_position;
         return ((int64_t)raw_position * numerator) / denominator + offset;
     }
     
-    /// Reverse scaling (user units to raw)
-    /// @param scaled_position Position in user units.
-    /// @return Equivalent raw encoder position [counts].
+    /**
+     * Reverse scaling (user units to raw)
+     * @param scaled_position Position in user units.
+     * @return Equivalent raw encoder position [counts].
+     */
     int32_t reverse(int32_t scaled_position) const {
         if (!enabled || numerator == 0) return scaled_position;
         return ((int64_t)(scaled_position - offset) * denominator) / numerator;
@@ -361,10 +375,10 @@ struct ScalingConfig {
  */
 enum class ReferenceMode : uint8_t {
     None = 0,
-    OnZeroPulse = 1,       ///< Reference on next zero/index pulse
-    OnLimitSwitch = 2,     ///< Reference on limit switch
-    OnExternalInput = 3,   ///< Reference on external signal
-    CurrentPosition = 4,   ///< Set current position as reference
+    OnZeroPulse = 1, /**< Reference on next zero/index pulse */
+    OnLimitSwitch = 2, /**< Reference on limit switch */
+    OnExternalInput = 3, /**< Reference on external signal */
+    CurrentPosition = 4, /**< Set current position as reference */
 };
 
 /**
@@ -372,9 +386,9 @@ enum class ReferenceMode : uint8_t {
  */
 struct ReferenceConfig {
     ReferenceMode mode;
-    int32_t reference_position;  ///< Position to set at reference
-    bool direction_positive;     ///< Search direction
-    uint32_t search_velocity;    ///< Velocity during search (if applicable)
+    int32_t reference_position; /**< Position to set at reference */
+    bool direction_positive; /**< Search direction */
+    uint32_t search_velocity; /**< Velocity during search (if applicable) */
 };
 
 // ============================================================================
@@ -385,14 +399,14 @@ struct ReferenceConfig {
  * @brief Event types for encoder callbacks
  */
 enum class EncoderEvent : uint8_t {
-    PositionUpdated,      ///< New position available
-    AlarmTriggered,       ///< Alarm condition detected
-    AlarmCleared,         ///< Alarm condition cleared
-    WarningTriggered,     ///< Warning condition detected
-    ReferenceDone,        ///< Reference procedure complete
-    WorkingAreaEntered,   ///< Entered working area
-    WorkingAreaExited,    ///< Exited working area
-    CommunicationError,   ///< Communication lost/recovered
+    PositionUpdated, /**< New position available */
+    AlarmTriggered, /**< Alarm condition detected */
+    AlarmCleared, /**< Alarm condition cleared */
+    WarningTriggered, /**< Warning condition detected */
+    ReferenceDone, /**< Reference procedure complete */
+    WorkingAreaEntered, /**< Entered working area */
+    WorkingAreaExited, /**< Exited working area */
+    CommunicationError, /**< Communication lost/recovered */
 };
 
 /**

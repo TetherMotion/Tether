@@ -43,27 +43,35 @@
 
 namespace tether::motion {
 
-/// Sidecar for a PH quintic blend: the ω coefficients and corner-plane
-/// basis that enable closed-form arc length / inversion / curvature (M16).
+/**
+ * Sidecar for a PH quintic blend: the ω coefficients and corner-plane
+ * basis that enable closed-form arc length / inversion / curvature (M16).
+ */
 struct PHData {
-    /// Complex ω coefficients of the quadratic ω(ξ) = ω₀(1−ξ)² +
-    /// 2ω₁(1−ξ)ξ + ω₂ξ² whose square is the hodograph (M16).
+    /**
+     * Complex ω coefficients of the quadratic ω(ξ) = ω₀(1−ξ)² +
+     * 2ω₁(1−ξ)ξ + ω₂ξ² whose square is the hodograph (M16).
+     */
     std::complex<double> w0, w1, w2;
 
-    /// Corner-plane basis (M13): the complex coordinate r = x + iy refers
-    /// to the plane through `origin` spanned by `planeE1`, `planeE2`.
+    /**
+     * Corner-plane basis (M13): the complex coordinate r = x + iy refers
+     * to the plane through `origin` spanned by `planeE1`, `planeE2`.
+     */
     RVec planeE1, planeE2, origin;
 };
 
-/// Opt-in PH quintic blend builder (D6 fast path).
+/**Opt-in PH quintic blend builder (D6 fast path). */
 class PHQuinticBlendBuilder {
 public:
-    /// A candidate PH blend: the ordinary quintic NURBS (weights 1) plus
-    /// the PHData sidecar for closed-form operations.
+    /**
+     * A candidate PH blend: the ordinary quintic NURBS (weights 1) plus
+     * the PHData sidecar for closed-form operations.
+     */
     struct Result {
         NurbsCurve curve;
         PHData ph;
-        bool degenerate = false; ///< true if σ ≡ 0 anywhere (discard).
+        bool degenerate = false; /**< true if σ ≡ 0 anywhere (discard). */
     };
 
     /**
@@ -87,20 +95,24 @@ public:
                                                const RVec& planeE1,
                                                const RVec& planeE2);
 
-    /// @name Closed-form operations on the PH representation (T4, no quadrature).
-    ///@{
+    /**
+     * @name Closed-form operations on the PH representation (T4, no quadrature).
+     * @{
+     */
 
-    /// Arc length s(ξ) = ∫₀^ξ σ(τ) dτ — a polynomial (M16).
+    /**Arc length s(ξ) = ∫₀^ξ σ(τ) dτ — a polynomial (M16). */
     static double arcLength(const PHData& ph, double xi);
 
-    /// Invert s → ξ by Newton–Raphson on the polynomial s(ξ) (M19).
-    /// Bracketed by bisection on [0,1] for safety (σ > 0 ⇒ monotone).
+    /**
+     * Invert s → ξ by Newton–Raphson on the polynomial s(ξ) (M19).
+     * Bracketed by bisection on [0,1] for safety (σ > 0 ⇒ monotone).
+     */
     static double invertArcLength(const PHData& ph, double s);
 
-    /// Curvature κ(ξ) = 2(u v' − u' v) / σ²(ξ) — closed form (M16).
+    /**Curvature κ(ξ) = 2(u v' − u' v) / σ²(ξ) — closed form (M16). */
     static double curvature(const PHData& ph, double xi);
 
-    ///@}
+    /**@} */
 };
 
 } // namespace tether::motion

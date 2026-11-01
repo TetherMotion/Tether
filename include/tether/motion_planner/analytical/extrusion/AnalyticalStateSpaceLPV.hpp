@@ -52,28 +52,28 @@ namespace MotionPlanner::analytical::extrusion {
  */
 struct AnalyticalStateSpaceModelPoint {
     double parameter = 0.0;
-    Eigen::MatrixXd A;  ///< [stateDim × stateDim]
-    Eigen::MatrixXd B;  ///< [stateDim × inputDim]
-    Eigen::MatrixXd C;  ///< [outputDim × stateDim]
+    Eigen::MatrixXd A; /**< [stateDim × stateDim] */
+    Eigen::MatrixXd B; /**< [stateDim × inputDim] */
+    Eigen::MatrixXd C; /**< [outputDim × stateDim] */
 };
 
 /**
  * @brief Parameters for analytical state-space LPV.
  */
 struct AnalyticalStateSpaceLPVParams {
-    /// Tikhonov regularization λ for matrix pseudo-inverse
+    /**Tikhonov regularization λ for matrix pseudo-inverse */
     double lambda = 1e-8;
 
-    /// State dimension
+    /**State dimension */
     int stateDim = 2;
 
-    /// Input dimension (1 for SISO)
+    /**Input dimension (1 for SISO) */
     int inputDim = 1;
 
-    /// Output dimension (1 for SISO)
+    /**Output dimension (1 for SISO) */
     int outputDim = 1;
 
-    /// If true, y(t) = extruder position; if false, velocity
+    /**If true, y(t) = extruder position; if false, velocity */
     bool usePosition = false;
 };
 
@@ -176,13 +176,13 @@ public:
         return result;
     }
 
-    /// Number of model points
+    /**Number of model points */
     size_t numModelPoints() const { return modelLut_.size(); }
 
-    /// Parameters
+    /**Parameters */
     const AnalyticalStateSpaceLPVParams& params() const { return params_; }
 
-    /// Trajectory
+    /**Trajectory */
     const Traj& trajectory() const { return *traj_; }
 
 private:

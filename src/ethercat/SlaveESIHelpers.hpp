@@ -17,8 +17,10 @@ namespace EtherCAT {
 
 class Master;
 
-/// Find a SyncManagerEntry by name substring (e.g. "MBoxOut", "MBoxIn",
-/// "Outputs", "Inputs").
+/**
+ * Find a SyncManagerEntry by name substring (e.g. "MBoxOut", "MBoxIn",
+ * "Outputs", "Inputs").
+ */
 inline const ESI::SyncManagerEntry* findSmByName(const ESI::DeviceInfo& dev,
                                                const char* needle) {
     for (const auto& sm : dev.syncManagers) {
@@ -27,7 +29,7 @@ inline const ESI::SyncManagerEntry* findSmByName(const ESI::DeviceInfo& dev,
     return nullptr;
 }
 
-/// Read SII identity for matching; returns {vendorId, productCode} or {0,0}.
+/**Read SII identity for matching; returns {vendorId, productCode} or {0,0}. */
 struct ESIIdentityMatch {
     uint32_t vendorId{0};
     uint32_t productCode{0};

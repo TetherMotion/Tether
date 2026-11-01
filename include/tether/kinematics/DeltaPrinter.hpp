@@ -1,30 +1,32 @@
 #pragma once
 
-/// @file DeltaPrinter.hpp
-/// @brief Delta printer configuration and kinematics
+/**
+ * @file DeltaPrinter.hpp
+ * @brief Delta printer configuration and kinematics
+ */
 
 #include <cmath>
 #include <array>
 
 namespace tether::kinematics {
 
-/// @brief Delta printer geometry parameters (M665).
+/**@brief Delta printer geometry parameters (M665). */
 struct DeltaGeometry {
-    double armLength = 250.0;       ///< Delta arm length (mm)
-    double deltaRadius = 125.0;     ///< Delta radius (mm)
-    double towerAngleA = 0.0;       ///< Tower A angle offset (degrees)
-    double towerAngleB = 0.0;       ///< Tower B angle offset (degrees)
-    double towerAngleC = 0.0;       ///< Tower C angle offset (degrees)
+    double armLength = 250.0; /**< Delta arm length (mm) */
+    double deltaRadius = 125.0; /**< Delta radius (mm) */
+    double towerAngleA = 0.0; /**< Tower A angle offset (degrees) */
+    double towerAngleB = 0.0; /**< Tower B angle offset (degrees) */
+    double towerAngleC = 0.0; /**< Tower C angle offset (degrees) */
 };
 
-/// @brief Delta endstop adjustments (M666).
+/**@brief Delta endstop adjustments (M666). */
 struct DeltaEndstopAdjust {
-    double adjX = 0.0;  ///< X tower endstop adjustment (mm)
-    double adjY = 0.0;  ///< Y tower endstop adjustment (mm)
-    double adjZ = 0.0;  ///< Z tower endstop adjustment (mm)
+    double adjX = 0.0; /**< X tower endstop adjustment (mm) */
+    double adjY = 0.0; /**< Y tower endstop adjustment (mm) */
+    double adjZ = 0.0; /**< Z tower endstop adjustment (mm) */
 };
 
-/// @brief Delta printer configuration and kinematics.
+/**@brief Delta printer configuration and kinematics. */
 class DeltaPrinter {
 public:
     /**
@@ -91,14 +93,16 @@ public:
         return {towerA, towerB, towerC};
     }
 
-    /// @brief Convert tower positions back to Cartesian (inverse kinematics).
-    /// Uses trilateration: subtract pairs of sphere equations to get two
-    /// linear equations, express x and y in terms of z, then substitute
-    /// into one sphere equation to get a quadratic in z.
-    /// @param towerA Tower A position
-    /// @param towerB Tower B position
-    /// @param towerC Tower C position
-    /// @return Effector position (X, Y, Z)
+    /**
+     * @brief Convert tower positions back to Cartesian (inverse kinematics).
+     * Uses trilateration: subtract pairs of sphere equations to get two
+     * linear equations, express x and y in terms of z, then substitute
+     * into one sphere equation to get a quadratic in z.
+     * @param towerA Tower A position
+     * @param towerB Tower B position
+     * @param towerC Tower C position
+     * @return Effector position (X, Y, Z)
+     */
     std::array<double, 3> inverseActuatorKinematics(
         double towerA, double towerB, double towerC) const {
         // Tower base positions

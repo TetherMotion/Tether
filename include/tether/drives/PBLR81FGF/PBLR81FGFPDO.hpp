@@ -30,7 +30,7 @@ namespace EtherCAT {
 namespace Drives {
 namespace PBLR81FGF {
 
-/// One field inside a PDO, referencing a parameter entry.
+/**One field inside a PDO, referencing a parameter entry. */
 struct PDOField {
     const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry* entry;
     uint16_t offset;
@@ -38,7 +38,7 @@ struct PDOField {
     const char* description;
 };
 
-/// Description of a whole PDO (index, size and pointer to field list).
+/**Description of a whole PDO (index, size and pointer to field list). */
 struct PDO {
     uint16_t index;
     uint16_t size;
@@ -117,7 +117,7 @@ inline const std::vector<const PDO*> kTxPDOs = {
     &TxPDO_1A00,
 };
 
-/// @brief Find a PDO descriptor by its index value (PBLR81FGF-specific).
+/**@brief Find a PDO descriptor by its index value (PBLR81FGF-specific). */
 inline constexpr const PDO* findPDOByIndex(uint16_t idx) noexcept
 {
     return EtherCAT::Utils::findPDOByIndex(kAllPDOs, idx);

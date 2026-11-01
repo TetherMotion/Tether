@@ -52,8 +52,8 @@ enum class Error {
 // ============================================================================
 
 enum class FrameDirection {
-    Rx,     ///< Received frame
-    Tx,     ///< Transmitted frame
+    Rx, /**< Received frame */
+    Tx, /**< Transmitted frame */
 };
 
 // ============================================================================

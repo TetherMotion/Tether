@@ -25,21 +25,21 @@
 
 namespace tether::klipper::motion {
 
-/// @brief A decoded queue_step sequence for analysis.
+/**@brief A decoded queue_step sequence for analysis. */
 struct MotionBlock {
-    /// OID of the stepper this block targets.
+    /**OID of the stepper this block targets. */
     uint8_t oid = 0;
-    /// Ordered step commands in this block.
+    /**Ordered step commands in this block. */
     std::vector<objects::StepCommand> steps;
-    /// Starting MCU clock for the first step.
+    /**Starting MCU clock for the first step. */
     uint32_t startClock = 0;
-    /// Total number of steps in this block.
+    /**Total number of steps in this block. */
     uint32_t totalSteps() const {
         uint32_t n = 0;
         for (const auto& s : steps) n += s.count;
         return n;
     }
-    /// Total duration in clock ticks.
+    /**Total duration in clock ticks. */
     uint32_t totalDuration() const {
         if (steps.empty()) return 0;
         uint32_t dur = 0;
@@ -56,15 +56,15 @@ struct MotionBlock {
         }
         return dur;
     }
-    /// Average step rate (steps per clock tick).
+    /**Average step rate (steps per clock tick). */
     double averageStepRate() const {
         uint32_t dur = totalDuration();
         if (dur == 0) return 0;
         return static_cast<double>(totalSteps()) / static_cast<double>(dur);
     }
-    /// Source label (e.g. G-code line) for traceability.
+    /**Source label (e.g. G-code line) for traceability. */
     std::string sourceLabel;
-    /// Timestamp when this block was recorded (host time).
+    /**Timestamp when this block was recorded (host time). */
     std::chrono::steady_clock::time_point recordTime;
 };
 

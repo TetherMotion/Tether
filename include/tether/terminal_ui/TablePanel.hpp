@@ -23,10 +23,12 @@ namespace TUI {
 
 class TablePanel {
 public:
-    /// Render `model` into the screen region [top, bottom) starting at
-    /// column `left`.  Returns the number of screen rows consumed
-    /// (header + rows + status line).  `focused=false` draws the header
-    /// dimmed and hides the selection highlight.
+    /**
+     * Render `model` into the screen region [top, bottom) starting at
+     * column `left`.  Returns the number of screen rows consumed
+     * (header + rows + status line).  `focused=false` draws the header
+     * dimmed and hides the selection highlight.
+     */
     static int render(UI::TableModel& model, int top, int bottom,
                       int left, int width, bool focused = true,
                       const std::vector<int>& widths = {});
@@ -37,7 +39,7 @@ private:
                                           const std::vector<int>& widths);
 };
 
-/// Map a UI::RowColor to a Session palette index.
+/**Map a UI::RowColor to a Session palette index. */
 inline short rowPalette(int color) {
     switch (color) {
         case UI::RowOk:    return PalValue;

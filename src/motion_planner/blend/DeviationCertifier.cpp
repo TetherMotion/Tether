@@ -18,10 +18,12 @@ namespace tether::motion {
 
 namespace {
 
-/// Lipschitz constant of a Bézier curve B(t): ‖B'‖ ≤ n·max_i‖P_{i+1}−P_i‖
-/// (G.4 derivative identity + triangle inequality). The distance-to-a-
-/// fixed-set function f(t) = dist(B(t), Ω) is 1-Lipschitz in B(t), so
-/// |f'| ≤ ‖B'‖ ≤ L. (M10.)
+/**
+ * Lipschitz constant of a Bézier curve B(t): ‖B'‖ ≤ n·max_i‖P_{i+1}−P_i‖
+ * (G.4 derivative identity + triangle inequality). The distance-to-a-
+ * fixed-set function f(t) = dist(B(t), Ω) is 1-Lipschitz in B(t), so
+ * |f'| ≤ ‖B'‖ ≤ L. (M10.)
+ */
 double blendLipschitz(const NurbsCurve& blend) {
     const auto& cps = blend.controlPoints();
     if (cps.size() < 2) return 0.0;
@@ -32,9 +34,11 @@ double blendLipschitz(const NurbsCurve& blend) {
     return static_cast<double>(blend.degree()) * maxStep;
 }
 
-/// Sample the blend B(t) on a uniform grid of N+1 points (t = i/N) and
-/// return the max distance to Ω = trimmedIn ∪ trimmedOut, plus the
-/// per-sample (t, point, side) data for signed splitting.
+/**
+ * Sample the blend B(t) on a uniform grid of N+1 points (t = i/N) and
+ * return the max distance to Ω = trimmedIn ∪ trimmedOut, plus the
+ * per-sample (t, point, side) data for signed splitting.
+ */
 struct Sample {
     double t;
     RVec point;
@@ -66,9 +70,11 @@ std::vector<Sample> sampleBlend(const NurbsCurve& blend,
     return samples;
 }
 
-/// Sample Ω (the trimmed original pieces) on arc-length grids and return
-/// the max distance to the blend. Ω is arc-length parameterized so the
-/// Lipschitz constant of dist(q, B) along Ω is 1.
+/**
+ * Sample Ω (the trimmed original pieces) on arc-length grids and return
+ * the max distance to the blend. Ω is arc-length parameterized so the
+ * Lipschitz constant of dist(q, B) along Ω is 1.
+ */
 struct OmegaSample {
     double dist;  // dist(q, B)
     RVec point;

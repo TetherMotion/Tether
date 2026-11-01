@@ -20,13 +20,13 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief File information.
+/**@brief File information. */
 struct FileInfo {
     std::string name;
     size_t size = 0;
 };
 
-/// @brief Abstract interface for filesystem operations.
+/**@brief Abstract interface for filesystem operations. */
 class IFileSystemProvider {
 public:
     virtual ~IFileSystemProvider() = default;
@@ -75,7 +75,7 @@ public:
     virtual bool deleteFile(const std::string& path) = 0;
 };
 
-/// @brief Default implementation using std::filesystem.
+/**@brief Default implementation using std::filesystem. */
 class StdFileSystemProvider : public IFileSystemProvider {
 public:
     bool fileExists(const std::string& path) override;
@@ -86,10 +86,10 @@ public:
     bool deleteFile(const std::string& path) override;
 };
 
-/// @brief In-memory mock for testing.
+/**@brief In-memory mock for testing. */
 class MockFileSystemProvider : public IFileSystemProvider {
 public:
-    /// Map of path -> file content.
+    /**Map of path -> file content. */
     std::map<std::string, std::string> files;
 
     bool fileExists(const std::string& path) override {

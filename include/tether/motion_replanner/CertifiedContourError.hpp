@@ -54,33 +54,41 @@
 
 namespace tether::motion::replanner {
 
-/// Certified contour error result — carries the true geometric distance
-/// plus the decomposition into contour (perpendicular) and lag (along-path)
-/// components.
+/**
+ * Certified contour error result — carries the true geometric distance
+ * plus the decomposition into contour (perpendicular) and lag (along-path)
+ * components.
+ */
 struct CertifiedContourError {
-    /// True geometric distance from the actual position to the path
-    /// (certified global minimum via Bernstein root isolation, M8/M9).
+    /**
+     * True geometric distance from the actual position to the path
+     * (certified global minimum via Bernstein root isolation, M8/M9).
+     */
     double contourError = 0.0;
 
-    /// Lag error: signed arc-length offset from the desired position to
-    /// the closest point on the path. Positive = ahead, negative = behind.
+    /**
+     * Lag error: signed arc-length offset from the desired position to
+     * the closest point on the path. Positive = ahead, negative = behind.
+     */
     double lagError = 0.0;
 
-    /// Combined 3D position error magnitude (Euclidean distance to the
-    /// desired position, not the closest point — same as the old method
-    /// for backward compatibility).
+    /**
+     * Combined 3D position error magnitude (Euclidean distance to the
+     * desired position, not the closest point — same as the old method
+     * for backward compatibility).
+     */
     double combinedPositionError = 0.0;
 
-    /// The closest point on the path (S(u) achieving the minimum distance).
+    /**The closest point on the path (S(u) achieving the minimum distance). */
     RVec closestPoint{};
 
-    /// The parameter u on the piece's NurbsCurve achieving the minimum.
+    /**The parameter u on the piece's NurbsCurve achieving the minimum. */
     double closestParam = 0.0;
 
-    /// Index of the piece on which the closest point was found.
+    /**Index of the piece on which the closest point was found. */
     std::size_t closestPiece = 0;
 
-    /// Whether the certified computation was used (vs. a fast-path fallback).
+    /**Whether the certified computation was used (vs. a fast-path fallback). */
     bool isCertified = true;
 };
 

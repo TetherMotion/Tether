@@ -42,15 +42,17 @@
 
 namespace FSoE {
 
-/// Initial sequence number (ETG.5100: range 1..65535, 0 is never used).
+/**Initial sequence number (ETG.5100: range 1..65535, 0 is never used). */
 inline constexpr uint16_t kInitialSeqNo = 1;
 
-/// Extract the CRC0 field stored inside a serialized FSoE frame.
-///
-/// Frame layouts:
-///   len == 3 : [CMD][ConnID(2)]            — bare Reset, no CRC → returns 0
-///   len 4..6 : [CMD][D0][CRC0(2)][ConnID(2)]        — CRC0 at offset 2
-///   len >= 7 : [CMD][D0][D1][CRC0(2)]...            — CRC0 at offset 3
+/**
+ * Extract the CRC0 field stored inside a serialized FSoE frame.
+ *
+ * Frame layouts:
+ *   len == 3 : [CMD][ConnID(2)]            — bare Reset, no CRC → returns 0
+ *   len 4..6 : [CMD][D0][CRC0(2)][ConnID(2)]        — CRC0 at offset 2
+ *   len >= 7 : [CMD][D0][D1][CRC0(2)]...            — CRC0 at offset 3
+ */
 inline uint16_t storedCrc0(const uint8_t* frame, size_t len) {
     if (!frame || len <= CRC::MIN_FSOE_FRAME_SIZE) return 0;
     const size_t off = (len <= 6) ? 2 : 3;
@@ -59,8 +61,10 @@ inline uint16_t storedCrc0(const uint8_t* frame, size_t len) {
            static_cast<uint16_t>(frame[off + 1]) << 8;
 }
 
-/// Whether a byte is a defined FSoE command (guards against forwarding
-/// garbage from an all-zero / uninitialized PDO buffer).
+/**
+ * Whether a byte is a defined FSoE command (guards against forwarding
+ * garbage from an all-zero / uninitialized PDO buffer).
+ */
 inline bool isFSoECommand(uint8_t cmd) {
     switch (cmd) {
         case Command::Reset:
@@ -101,8 +105,10 @@ inline bool isFSoECommand(uint8_t cmd) {
 // permanently once a single frame is rejected.
 class MasterFrameRewriter {
 public:
-    /// Cycles to wait for slave progress before toggling the first-frame
-    /// chaining model (~0.3 s at a 1 kHz processing cycle).
+    /**
+     * Cycles to wait for slave progress before toggling the first-frame
+     * chaining model (~0.3 s at a 1 kHz processing cycle).
+     */
     static constexpr uint32_t kStallCycles = 300;
 
     void reset() {
@@ -116,17 +122,21 @@ public:
         last_out_len_ = 0;
     }
 
-    /// Observe the slave's latest TX frame — captures its stored CRC0 and
-    /// locks the chaining model once the slave advances past Reset.
+    /**
+     * Observe the slave's latest TX frame — captures its stored CRC0 and
+     * locks the chaining model once the slave advances past Reset.
+     */
     void noteSlaveFrame(const uint8_t* frame, size_t len) {
         if (!frame || len == 0 || !isFSoECommand(frame[0])) return;
         slave_crc0_ = storedCrc0(frame, len);
         if (frame[0] != Command::Reset) model_locked_ = true;
     }
 
-    /// Rewrite one incoming master frame for delivery to the slave.
-    /// Returns the output frame length, or 0 if the input is not a
-    /// recognizable FSoE frame (caller should emit nothing / zeros).
+    /**
+     * Rewrite one incoming master frame for delivery to the slave.
+     * Returns the output frame length, or 0 if the input is not a
+     * recognizable FSoE frame (caller should emit nothing / zeros).
+     */
     size_t rewrite(const uint8_t* in, size_t in_len,
                    uint8_t* out, size_t out_cap) {
         // Identical retransmission → identical output (see class comment).
@@ -243,8 +253,10 @@ public:
         desynced_ = false;
     }
 
-    /// Observe the slave's latest TX frame — maintains the current and
-    /// previous stored CRC0 used to identify the master's chain base.
+    /**
+     * Observe the slave's latest TX frame — maintains the current and
+     * previous stored CRC0 used to identify the master's chain base.
+     */
     void noteSlaveFrame(const uint8_t* frame, size_t len) {
         if (!frame || len == 0 || !isFSoECommand(frame[0])) return;
         const uint16_t crc0 = storedCrc0(frame, len);
@@ -254,9 +266,11 @@ public:
         }
     }
 
-    /// Observe the master's latest TX frame — tracks its CRC0 and sequence
-    /// number so responses can be built with the values the master will
-    /// validate against.
+    /**
+     * Observe the master's latest TX frame — tracks its CRC0 and sequence
+     * number so responses can be built with the values the master will
+     * validate against.
+     */
     void noteMasterFrame(const uint8_t* frame, size_t len) {
         if (!frame || len > last_frame_.size()) return;
         if (len == last_len_ &&
@@ -309,9 +323,11 @@ public:
         last_len_ = len;
     }
 
-    /// Rewrite one incoming slave frame for delivery to the master.
-    /// Returns the output frame length, or 0 if the input is not a
-    /// recognizable FSoE frame.
+    /**
+     * Rewrite one incoming slave frame for delivery to the master.
+     * Returns the output frame length, or 0 if the input is not a
+     * recognizable FSoE frame.
+     */
     size_t rewrite(const uint8_t* in, size_t in_len,
                    uint8_t* out, size_t out_cap) {
         uint8_t cmd = 0;
@@ -333,8 +349,10 @@ public:
             master_crc0_, master_seq_, nullptr, nullptr);
     }
 
-    /// True when the last master frame's (startCrc, seq) could not be
-    /// identified — responses built in this state are best-effort.
+    /**
+     * True when the last master frame's (startCrc, seq) could not be
+     * identified — responses built in this state are best-effort.
+     */
     bool desynced() const { return desynced_; }
 
 private:

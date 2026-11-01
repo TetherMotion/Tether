@@ -12,8 +12,10 @@
 namespace EtherCAT {
 namespace CoE {
 
-/// Map a CoEError to the closest SDO abort code (preserving the slave's own
-/// abort code when it carries one).
+/**
+ * Map a CoEError to the closest SDO abort code (preserving the slave's own
+ * abort code when it carries one).
+ */
 SDOAbortCode coeErrorToAbortCode(CoEError err);
 
 } // namespace CoE

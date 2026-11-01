@@ -14,10 +14,12 @@
 
 namespace tether::kinematics {
 
-/// @brief Solve a 3x3 linear system Ax = b.
-/// @param A 3x3 coefficient matrix (row-major C array).
-/// @param b Right-hand side vector (length 3).
-/// @param x Output solution vector (length 3). Zeroed if A is singular.
+/**
+ * @brief Solve a 3x3 linear system Ax = b.
+ * @param A 3x3 coefficient matrix (row-major C array).
+ * @param b Right-hand side vector (length 3).
+ * @param x Output solution vector (length 3). Zeroed if A is singular.
+ */
 inline void solve3x3(float A[3][3], float b[3], float x[3]) {
     // Map the row-major C arrays to Eigen fixed-size matrices
     // float[3][3] is row-major; Eigen::Matrix3f is column-major by default,

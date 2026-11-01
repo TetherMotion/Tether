@@ -9,7 +9,7 @@ class Master;
 
 namespace debug {
 
-/// Parse a comma-separated debug-flags spec into a set of trimmed tokens.
+/**Parse a comma-separated debug-flags spec into a set of trimmed tokens. */
 std::set<std::string> parseFlags(const std::string& spec);
 
 /**
@@ -45,11 +45,13 @@ bool applyGateConditions(const std::string& startCond,
                          Master& master,
                          const char* tag);
 
-/// Print the available debug flags and filter syntax to stdout and return
-/// true when @p spec is the "help" token.
+/**
+ * Print the available debug flags and filter syntax to stdout and return
+ * true when @p spec is the "help" token.
+ */
 bool printFlagsHelp(const std::string& spec);
 
-/// Print debug condition help and return true when @p spec is "help".
+/**Print debug condition help and return true when @p spec is "help". */
 bool printConditionHelp(const std::string& spec);
 
 } // namespace debug

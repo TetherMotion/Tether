@@ -39,7 +39,7 @@
 
 namespace MotionPlanner {
 
-/// Evaluation result matching the old `NURBSPathEvaluation<Dim, T>`.
+/**Evaluation result matching the old `NURBSPathEvaluation<Dim, T>`. */
 template <size_t Dim, typename T = double>
 struct PathAdapterEvaluation {
     Vec<Dim, T> position;
@@ -56,7 +56,7 @@ struct PathAdapterEvaluation {
     SourceReference sourceRef;
 };
 
-/// A segment in the adapter path, matching the old `NURBSPathSegmentInfo`.
+/**A segment in the adapter path, matching the old `NURBSPathSegmentInfo`. */
 template <size_t Dim, typename T = double>
 struct PathAdapterSegment {
     SourceReference sourceRef;
@@ -65,21 +65,29 @@ struct PathAdapterSegment {
     // The underlying NURBS piece (reference into the PiecewiseNurbsPath).
     // We don't expose the curve directly; callers use the path API.
 
-    /// Per-segment maximum velocity (from G-code F-value, mm/s).
-    /// Default +infinity means "not set" — the global feedRate is used.
+    /**
+     * Per-segment maximum velocity (from G-code F-value, mm/s).
+     * Default +infinity means "not set" — the global feedRate is used.
+     */
     T maxVelocity = std::numeric_limits<T>::infinity();
 
-    /// Corner velocity at the segment start (junction with previous segment).
-    /// Default +infinity means "no corner limit".
+    /**
+     * Corner velocity at the segment start (junction with previous segment).
+     * Default +infinity means "no corner limit".
+     */
     T entryCornerVelocity = std::numeric_limits<T>::infinity();
 
-    /// Corner velocity at the segment end (junction with next segment).
-    /// Default +infinity means "no corner limit".
+    /**
+     * Corner velocity at the segment end (junction with next segment).
+     * Default +infinity means "no corner limit".
+     */
     T exitCornerVelocity = std::numeric_limits<T>::infinity();
 };
 
-/// Adapter wrapping `tether::motion::PiecewiseNurbsPath` with the old
-/// `PiecewiseNURBSPath<Dim, T>` API.
+/**
+ * Adapter wrapping `tether::motion::PiecewiseNurbsPath` with the old
+ * `PiecewiseNURBSPath<Dim, T>` API.
+ */
 template <size_t Dim, typename T = double>
 class PathAdapter {
 public:
@@ -89,8 +97,10 @@ public:
 
     PathAdapter() = default; // empty adapter; path_ is nullopt.
 
-    /// Construct from a `tether::motion::PiecewiseNurbsPath` and a list
-    /// of source references (one per piece).
+    /**
+     * Construct from a `tether::motion::PiecewiseNurbsPath` and a list
+     * of source references (one per piece).
+     */
     explicit PathAdapter(tether::motion::PiecewiseNurbsPath path,
                          std::vector<SourceReference> sourceRefs = {})
         : path_(std::move(path))
@@ -631,21 +641,25 @@ private:
     std::vector<SegmentInfo> segments_;
     std::vector<std::optional<tether::motion::PHData>> phData_;
     mutable std::shared_ptr<tether::motion::CertifiedCurvatureSampler>
-        curvatureSampler_; ///< Lazy, memoized.
+        curvatureSampler_; /**< Lazy, memoized. */
 
-    /// Per-segment maximum velocity (from G-code F-values, mm/s).
-    /// Empty = not set (use global feedRate only).
+    /**
+     * Per-segment maximum velocity (from G-code F-values, mm/s).
+     * Empty = not set (use global feedRate only).
+     */
     std::vector<double> segmentMaxVelocities_;
 
-    /// Per-junction corner velocity (size = numSegments + 1).
-    /// Entry 0 = start of path, entry N = end of path.
-    /// Empty = not set.
+    /**
+     * Per-junction corner velocity (size = numSegments + 1).
+     * Entry 0 = start of path, entry N = end of path.
+     * Empty = not set.
+     */
     std::vector<double> cornerVelocities_;
 
-    /// Dwell points: (arcLength, duration) pairs from G4 commands.
+    /**Dwell points: (arcLength, duration) pairs from G4 commands. */
     std::vector<std::pair<double, double>> dwellPoints_;
 
-    /// True if per-segment velocity limits have been set.
+    /**True if per-segment velocity limits have been set. */
     bool hasPerSegmentLimits_ = false;
 
     void rebuildSegmentInfo() {
@@ -667,8 +681,10 @@ private:
         updateSegmentVelocityFields();
     }
 
-    /// Sync the maxVelocity/entryCornerVelocity/exitCornerVelocity fields
-    /// on each SegmentInfo from the internal vectors.
+    /**
+     * Sync the maxVelocity/entryCornerVelocity/exitCornerVelocity fields
+     * on each SegmentInfo from the internal vectors.
+     */
     void updateSegmentVelocityFields() {
         if (segments_.empty()) return;
         for (size_t i = 0; i < segments_.size(); ++i) {
@@ -689,8 +705,10 @@ private:
         }
     }
 
-    /// Convert `RVec` to `Vec<Dim, T>`, zero-padding if the RVec has
-    /// fewer dimensions than Dim.
+    /**
+     * Convert `RVec` to `Vec<Dim, T>`, zero-padding if the RVec has
+     * fewer dimensions than Dim.
+     */
     template <size_t D, typename U>
     static Vec<D, U> toVec(const tether::motion::RVec& rv) {
         Vec<D, U> result;
@@ -702,7 +720,7 @@ private:
     }
 };
 
-/// Result of building a path from segments.
+/**Result of building a path from segments. */
 template <size_t Dim, typename T = double>
 struct PathAdapterBuildResult {
     bool success = false;
@@ -710,12 +728,14 @@ struct PathAdapterBuildResult {
     std::string errorMessage;
 };
 
-/// Embed a low-dimensional NURBS curve into the full Dim-dimensional axis
-/// space, placing the active-axis components at their correct positions
-/// and filling the inactive axes with zeros. This is needed because
-/// SegmentConverter extracts only the active axes, producing minimal-dim
-/// curves whose component indices don't correspond to the global axis
-/// indices.
+/**
+ * Embed a low-dimensional NURBS curve into the full Dim-dimensional axis
+ * space, placing the active-axis components at their correct positions
+ * and filling the inactive axes with zeros. This is needed because
+ * SegmentConverter extracts only the active axes, producing minimal-dim
+ * curves whose component indices don't correspond to the global axis
+ * indices.
+ */
 inline tether::motion::NurbsCurve embedCurveInFullSpace(
     const tether::motion::NurbsCurve& c,
     const MotionPlanner::MotionSegment& seg,
@@ -758,8 +778,10 @@ inline tether::motion::NurbsCurve embedCurveInFullSpace(
     return tether::motion::NurbsCurve(newCps, wts, knots, c.degree());
 }
 
-/// Adapter replacing `PathBuilder<Dim, T>`. Uses `SegmentConverter` +
-/// `PathBlender` to build the path from `MotionSegmentList`.
+/**
+ * Adapter replacing `PathBuilder<Dim, T>`. Uses `SegmentConverter` +
+ * `PathBlender` to build the path from `MotionSegmentList`.
+ */
 template <size_t Dim, typename T = double>
 class PathBuilderAdapter {
 public:

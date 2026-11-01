@@ -12,10 +12,10 @@ namespace EtherCAT {
 namespace Identity {
 
 struct SlaveIdentity {
-    std::optional<uint32_t> vendor_id;        ///< Vendor ID (ETG assigned)
-    std::optional<uint32_t> product_code;     ///< Vendor-specific product code
-    std::optional<uint32_t> revision_number;  ///< Revision (major.minor in high.low words)
-    std::optional<uint32_t> serial_number;    ///< Device serial number
+    std::optional<uint32_t> vendor_id; /**< Vendor ID (ETG assigned) */
+    std::optional<uint32_t> product_code; /**< Vendor-specific product code */
+    std::optional<uint32_t> revision_number; /**< Revision (major.minor in high.low words) */
+    std::optional<uint32_t> serial_number; /**< Device serial number */
 };
 
 } // namespace Identity

@@ -30,27 +30,27 @@ namespace Beckhoff {
 
 enum class Error : uint8_t {
     Ok = 0,
-    NoDeviceFound,          ///< detect()/findFirst(): no matching device on the bus
-    WrongDevice,            ///< slave identity does not match vendor/product
-    SlaveIndexOutOfRange,   ///< index exceeds the PDO manager's slave table
-    SmConfigFailed,         ///< could not write the sync-manager registers
-    PdoRegistrationFailed,  ///< add_rxpdo()/add_txpdo() rejected the buffer
-    FmmuConfigFailed,       ///< could not program the FMMU
-    LogicalMapMissing,      ///< no logical address was assigned to this slave
-    PreOpFailed,            ///< INIT -> PRE-OP transition failed
-    SafeOpFailed,           ///< PRE-OP -> SAFE-OP transition failed
-    OpRequestFailed,        ///< SAFE-OP -> OP request could not be sent
-    OpTimeout,              ///< slave did not reach OP in time
-    LoopStartFailed,        ///< master realtime loop failed to start
-    TooManyBits,            ///< chain exceeds the MaxBits capacity
-    FsoeInitFailed,         ///< FSoE master connection could not be initialized
-    Cancelled,              ///< aborted via master.requestCancel()
+    NoDeviceFound, /**< detect()/findFirst(): no matching device on the bus */
+    WrongDevice, /**< slave identity does not match vendor/product */
+    SlaveIndexOutOfRange, /**< index exceeds the PDO manager's slave table */
+    SmConfigFailed, /**< could not write the sync-manager registers */
+    PdoRegistrationFailed, /**< add_rxpdo()/add_txpdo() rejected the buffer */
+    FmmuConfigFailed, /**< could not program the FMMU */
+    LogicalMapMissing, /**< no logical address was assigned to this slave */
+    PreOpFailed, /**< INIT -> PRE-OP transition failed */
+    SafeOpFailed, /**< PRE-OP -> SAFE-OP transition failed */
+    OpRequestFailed, /**< SAFE-OP -> OP request could not be sent */
+    OpTimeout, /**< slave did not reach OP in time */
+    LoopStartFailed, /**< master realtime loop failed to start */
+    TooManyBits, /**< chain exceeds the MaxBits capacity */
+    FsoeInitFailed, /**< FSoE master connection could not be initialized */
+    Cancelled, /**< aborted via master.requestCancel() */
 };
 
-/// Human-readable description of an Error value.
+/**Human-readable description of an Error value. */
 const char* errorToString(Error e);
 
-/// Expected-like result type used by all fallible operations.
+/**Expected-like result type used by all fallible operations. */
 template <typename T = void>
 using Result = std::expected<T, Error>;
 
@@ -81,17 +81,21 @@ struct DeviceIdentity {
 // ============================================================================
 
 struct StartOptions {
-    /// When true (default), the driver installs a motion-control callback
-    /// that exchanges the PDO manager(s) covering the device(s) and starts
-    /// the master's realtime loop if it is not already running.  Set false
-    /// when the application manages its own cyclic exchange.
+    /**
+     * When true (default), the driver installs a motion-control callback
+     * that exchanges the PDO manager(s) covering the device(s) and starts
+     * the master's realtime loop if it is not already running.  Set false
+     * when the application manages its own cyclic exchange.
+     */
     bool     manage_realtime_loop = true;
-    /// Cycle period used when the driver starts the RT loop (microseconds).
+    /**Cycle period used when the driver starts the RT loop (microseconds). */
     uint32_t cycle_period_us      = 1000;
-    /// How long to wait for the OP state confirmation (milliseconds).
+    /**How long to wait for the OP state confirmation (milliseconds). */
     int      op_timeout_ms        = 5000;
-    /// Base of the chain's logical address space (Multi* only).
-    /// 0 = auto-select a non-overlapping range.
+    /**
+     * Base of the chain's logical address space (Multi* only).
+     * 0 = auto-select a non-overlapping range.
+     */
     uint32_t base_logical_addr    = 0;
 };
 

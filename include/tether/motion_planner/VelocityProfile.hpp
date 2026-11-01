@@ -53,22 +53,22 @@ enum class ProfileDerivativeOrder : uint8_t {
  */
 template<size_t NumAxes, typename T = double>
 struct AxisLimits {
-    /// Maximum velocity per axis (units/second)
+    /**Maximum velocity per axis (units/second) */
     std::array<T, NumAxes> maxVelocity;
     
-    /// Maximum acceleration per axis (units/second²)
+    /**Maximum acceleration per axis (units/second²) */
     std::array<T, NumAxes> maxAcceleration;
     
-    /// Maximum jerk per axis (units/second³) - optional
+    /**Maximum jerk per axis (units/second³) - optional */
     std::array<T, NumAxes> maxJerk;
 
-    /// Maximum snap (jerk derivative) per axis (units/second⁴) - optional
+    /**Maximum snap (jerk derivative) per axis (units/second⁴) - optional */
     std::array<T, NumAxes> maxSnap;
 
-    /// Whether jerk limits are enabled
+    /**Whether jerk limits are enabled */
     bool jerkLimitEnabled = false;
 
-    /// Whether snap limits are enabled
+    /**Whether snap limits are enabled */
     bool snapLimitEnabled = false;
 
     /**
@@ -103,25 +103,25 @@ struct AxisLimits {
  */
 template<typename T = double>
 struct PathLimits {
-    /// Maximum tangential velocity along path
+    /**Maximum tangential velocity along path */
     T maxPathVelocity = T(100);
     
-    /// Maximum tangential acceleration along path
+    /**Maximum tangential acceleration along path */
     T maxPathAcceleration = T(500);
     
-    /// Maximum tangential jerk along path
+    /**Maximum tangential jerk along path */
     T maxPathJerk = T(5000);
 
-    /// Maximum tangential snap (jerk derivative) along path
+    /**Maximum tangential snap (jerk derivative) along path */
     T maxPathSnap = T(50000);
 
-    /// Maximum centripetal acceleration (limits velocity on curves)
+    /**Maximum centripetal acceleration (limits velocity on curves) */
     T maxCentripetalAcceleration = T(500);
 
-    /// Whether jerk limits are enabled
+    /**Whether jerk limits are enabled */
     bool jerkLimitEnabled = false;
 
-    /// Whether snap limits are enabled
+    /**Whether snap limits are enabled */
     bool snapLimitEnabled = false;
 };
 
@@ -216,38 +216,46 @@ using KinematicLimits2D = KinematicLimits<2, double>;
  * @brief A point on the velocity profile
  */
 struct VelocityProfilePoint {
-    /// Arc length position along path
+    /**Arc length position along path */
     double arcLength = 0.0;
     
-    /// Velocity at this point
+    /**Velocity at this point */
     double velocity = 0.0;
     
-    /// Acceleration at this point (interval-average finite-difference
-    /// approximation for BasicTOPPRA; analytic from carried state for
-    /// JerkConstrainedTOPPRA after WI-8).
+    /**
+     * Acceleration at this point (interval-average finite-difference
+     * approximation for BasicTOPPRA; analytic from carried state for
+     * JerkConstrainedTOPPRA after WI-8).
+     */
     double acceleration = 0.0;
 
-    /// Jerk at this point (units/second³), when the producer represents it.
-    /// A default zero is only storage compatibility for lower-order sampled
-    /// profiles; callers must use `VelocityProfile::hasJerk()` before
-    /// interpreting it as a physical jerk value.
+    /**
+     * Jerk at this point (units/second³), when the producer represents it.
+     * A default zero is only storage compatibility for lower-order sampled
+     * profiles; callers must use `VelocityProfile::hasJerk()` before
+     * interpreting it as a physical jerk value.
+     */
     double jerk = 0.0;
     
-    /// Time to reach this point from path start
+    /**Time to reach this point from path start */
     double time = 0.0;
 
-    /// Velocity limit at this point (the v_lim(s) used by the profiler).
-    /// Populated by the profiler so downstream consumers (e.g. ReNURBS)
-    /// can check constraint preservation against the *exact* limits the
-    /// profiler used, without reconstructing them. Default +infinity so
-    /// hand-built profiles (e.g. in tests) remain unconstrained.
+    /**
+     * Velocity limit at this point (the v_lim(s) used by the profiler).
+     * Populated by the profiler so downstream consumers (e.g. ReNURBS)
+     * can check constraint preservation against the *exact* limits the
+     * profiler used, without reconstructing them. Default +infinity so
+     * hand-built profiles (e.g. in tests) remain unconstrained.
+     */
     double velocityLimit = std::numeric_limits<double>::infinity();
 
-    /// Tangential acceleration limit at this point (the a_max(s) used by
-    /// the profiler). Default +infinity for backward compatibility.
+    /**
+     * Tangential acceleration limit at this point (the a_max(s) used by
+     * the profiler). Default +infinity for backward compatibility.
+     */
     double accelerationLimit = std::numeric_limits<double>::infinity();
 
-    /// Limiting factor (for debugging)
+    /**Limiting factor (for debugging) */
     enum class LimitType : uint8_t {
         None,
         ForwardAccel,
@@ -274,61 +282,83 @@ class VelocityProfile {
 public:
     virtual ~VelocityProfile() = default;
 
-    /// Velocity at the given arc length.
-    /// @param arcLength Position along the path [units]; clamped to the domain.
-    /// @return Tangential velocity [units/s].
+    /**
+     * Velocity at the given arc length.
+     * @param arcLength Position along the path [units]; clamped to the domain.
+     * @return Tangential velocity [units/s].
+     */
     virtual double velocityAt(double arcLength) const = 0;
 
-    /// Acceleration at the given arc length.
-    /// @param arcLength Position along the path [units]; clamped to the domain.
-    /// @return Tangential acceleration [units/s^2].
+    /**
+     * Acceleration at the given arc length.
+     * @param arcLength Position along the path [units]; clamped to the domain.
+     * @return Tangential acceleration [units/s^2].
+     */
     virtual double accelerationAt(double arcLength) const = 0;
 
-    /// Jerk at the given arc length.
-    /// @param arcLength Position along the path [units]; clamped to the domain.
-    /// @return Tangential jerk [units/s^3]; 0 when not modeled.
+    /**
+     * Jerk at the given arc length.
+     * @param arcLength Position along the path [units]; clamped to the domain.
+     * @return Tangential jerk [units/s^3]; 0 when not modeled.
+     */
     virtual double jerkAt(double arcLength) const = 0;
 
-    /// Time at the given arc length.
-    /// @param arcLength Position along the path [units]; clamped to the domain.
-    /// @return Elapsed time [s] when the path point is reached.
+    /**
+     * Time at the given arc length.
+     * @param arcLength Position along the path [units]; clamped to the domain.
+     * @return Elapsed time [s] when the path point is reached.
+     */
     virtual double timeAt(double arcLength) const = 0;
 
-    /// Arc length at the given time.
-    /// @param time Elapsed time [s]; clamped to [0, totalTime()].
-    /// @return Path position [units] at that time.
+    /**
+     * Arc length at the given time.
+     * @param time Elapsed time [s]; clamped to [0, totalTime()].
+     * @return Path position [units] at that time.
+     */
     virtual double arcLengthAt(double time) const = 0;
 
-    /// Total traversal time.
-    /// @return Duration of the whole profile [s].
+    /**
+     * Total traversal time.
+     * @return Duration of the whole profile [s].
+     */
     virtual double totalTime() const = 0;
 
-    /// Total path length.
-    /// @return Arc length of the whole profile [units].
+    /**
+     * Total path length.
+     * @return Arc length of the whole profile [units].
+     */
     virtual double totalLength() const = 0;
 
-    /// Highest path derivative represented by this profile.
-    /// @return Derivative order the profile models (acceleration or higher).
+    /**
+     * Highest path derivative represented by this profile.
+     * @return Derivative order the profile models (acceleration or higher).
+     */
     virtual ProfileDerivativeOrder derivativeOrder() const {
         return ProfileDerivativeOrder::Acceleration;
     }
 
-    /// Whether `jerkAt()` has a physically meaningful value.
-    /// @return true when the profile models jerk or a higher derivative.
+    /**
+     * Whether `jerkAt()` has a physically meaningful value.
+     * @return true when the profile models jerk or a higher derivative.
+     */
     bool hasJerk() const {
         return derivativeOrder() >= ProfileDerivativeOrder::Jerk;
     }
 
-    /// Whether the profile is generated by a snap-limited trajectory.
-    /// @return true when the profile models snap or a higher derivative.
+    /**
+     * Whether the profile is generated by a snap-limited trajectory.
+     * @return true when the profile models snap or a higher derivative.
+     */
     bool hasSnap() const {
         return derivativeOrder() >= ProfileDerivativeOrder::Snap;
     }
 
-    /// Tabulated points, if available. The default implementation returns
-    /// an empty vector; SampledVelocityProfile and AnalyticalSSRVelocityProfile
-    /// override it with their actual tabulated representation.
-    /// @return Read-only view of the tabulated profile points.
+    /**
+     * Tabulated points, if available. The default implementation returns
+     * an empty vector; SampledVelocityProfile and AnalyticalSSRVelocityProfile
+     * override it with their actual tabulated representation.
+     * @return Read-only view of the tabulated profile points.
+     */
     virtual const std::vector<VelocityProfilePoint>& points() const {
         static const std::vector<VelocityProfilePoint> empty;
         return empty;
@@ -510,7 +540,7 @@ template<size_t N>
 using KinematicLimitsN = KinematicLimits<N, double>;
 using KinematicLimits3D = KinematicLimits<3, double>;
 
-/// Backward-compatible alias for the old concrete sampled profile type.
+/**Backward-compatible alias for the old concrete sampled profile type. */
 using VelocityProfileD = SampledVelocityProfile;
 
 }  // namespace MotionPlanner

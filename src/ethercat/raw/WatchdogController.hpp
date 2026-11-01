@@ -22,19 +22,23 @@ class WatchdogController {
 public:
     explicit WatchdogController(Master& master) : master_(master) {}
 
-    /// Arm both watchdogs in one frame (three APWR datagrams — the registers
-    /// are not contiguous).  A zero timeout disables that watchdog.
+    /**
+     * Arm both watchdogs in one frame (three APWR datagrams — the registers
+     * are not contiguous).  A zero timeout disables that watchdog.
+     */
     bool configure(SlaveAddress slave_address,
                    uint16_t pdi_timeout_100us,
                    uint16_t pdata_timeout_100us);
 
-    /// Disarm both watchdogs.
+    /**Disarm both watchdogs. */
     bool disable(SlaveAddress slave_address) {
         return configure(slave_address, 0, 0);
     }
 
-    /// Read WD_STATUS (0x0440) plus the PDI/PDATA counters (0x0442/0x0443)
-    /// in a single contiguous read.
+    /**
+     * Read WD_STATUS (0x0440) plus the PDI/PDATA counters (0x0442/0x0443)
+     * in a single contiguous read.
+     */
     bool readStatus(SlaveAddress slave_address,
                     uint8_t& wd_status,
                     uint8_t& pdi_cnt,

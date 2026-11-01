@@ -27,22 +27,22 @@ class SlaveResetController;
  * Defines the hierarchy of reset operations from least to most disruptive.
  */
 enum class ResetLevel : uint8_t {
-    /// Level 0: Soft/Application reset - clears errors, preserves config
+    /**Level 0: Soft/Application reset - clears errors, preserves config */
     SoftReset = 0,
     
-    /// Level 1: Communication parameter reset - resets PDO/SDO config
+    /**Level 1: Communication parameter reset - resets PDO/SDO config */
     CommunicationReset = 1,
     
-    /// Level 2: Application layer reset - restarts device profile
+    /**Level 2: Application layer reset - restarts device profile */
     ApplicationReset = 2,
     
-    /// Level 3: State machine reset - forces INIT state
+    /**Level 3: State machine reset - forces INIT state */
     StateMachineReset = 3,
     
-    /// Level 4: ESC hardware reset - resets EtherCAT controller
+    /**Level 4: ESC hardware reset - resets EtherCAT controller */
     ESCHardwareReset = 4,
     
-    /// Level 5: Full hardware reset - power cycle
+    /**Level 5: Full hardware reset - power cycle */
     HardwareReset = 5,
 };
 
@@ -64,13 +64,13 @@ const char* getResetLevelDescription(ResetLevel level);
  * @brief EtherCAT Application Layer states
  */
 enum class ALState : uint8_t {
-    Init         = 0x01,  ///< Initialization state
-    PreOp        = 0x02,  ///< Pre-Operational state
-    Bootstrap    = 0x03,  ///< Bootstrap state (firmware update)
-    SafeOp       = 0x04,  ///< Safe-Operational state
-    Op           = 0x08,  ///< Operational state
+    Init         = 0x01, /**< Initialization state */
+    PreOp        = 0x02, /**< Pre-Operational state */
+    Bootstrap    = 0x03, /**< Bootstrap state (firmware update) */
+    SafeOp       = 0x04, /**< Safe-Operational state */
+    Op           = 0x08, /**< Operational state */
     
-    /// State with error flag (OR with actual state)
+    /**State with error flag (OR with actual state) */
     ErrorFlag    = 0x10,
 };
 
@@ -78,10 +78,10 @@ enum class ALState : uint8_t {
  * @brief AL Control register bit definitions
  */
 namespace ALControl {
-    constexpr uint16_t StateMask       = 0x000F;  ///< State bits
-    constexpr uint16_t AckError        = 0x0010;  ///< Acknowledge/clear error
-    constexpr uint16_t RequestId       = 0x0020;  ///< Request slave ID
-    constexpr uint16_t ESCReset        = 0x0040;  ///< ESC hardware reset (specific ESCs)
+    constexpr uint16_t StateMask       = 0x000F; /**< State bits */
+    constexpr uint16_t AckError        = 0x0010; /**< Acknowledge/clear error */
+    constexpr uint16_t RequestId       = 0x0020; /**< Request slave ID */
+    constexpr uint16_t ESCReset        = 0x0040; /**< ESC hardware reset (specific ESCs) */
 }
 
 // NOTE: AL status codes live in the canonical enum EtherCAT::ALStatusCode
@@ -105,26 +105,26 @@ const char* getALStatusCodeName(uint16_t code);
  * using the 0x0000:0x00 broadcast SDO or specific object writes.
  */
 enum class NMTCommand : uint8_t {
-    StartNode           = 0x01,  ///< Start remote node (enter Operational)
-    StopNode            = 0x02,  ///< Stop remote node (enter Stopped)
-    EnterPreOp          = 0x80,  ///< Enter Pre-Operational
-    ResetNode           = 0x81,  ///< Reset Node (application reset)
-    ResetCommunication  = 0x82,  ///< Reset Communication only
+    StartNode           = 0x01, /**< Start remote node (enter Operational) */
+    StopNode            = 0x02, /**< Stop remote node (enter Stopped) */
+    EnterPreOp          = 0x80, /**< Enter Pre-Operational */
+    ResetNode           = 0x81, /**< Reset Node (application reset) */
+    ResetCommunication  = 0x82, /**< Reset Communication only */
 };
 
 /**
  * @brief CiA 301 Object Dictionary indexes for reset
  */
 namespace CiA301Reset {
-    /// Store parameters (0x1010) - Write 0x65766173 ("save") to store
+    /**Store parameters (0x1010) - Write 0x65766173 ("save") to store */
     constexpr uint16_t StoreParameters     = 0x1010;
     constexpr uint32_t StoreSignature      = 0x65766173; // "save" in ASCII
     
-    /// Restore parameters (0x1011) - Write 0x64616F6C ("load") to restore
+    /**Restore parameters (0x1011) - Write 0x64616F6C ("load") to restore */
     constexpr uint16_t RestoreParameters   = 0x1011;
     constexpr uint32_t RestoreSignature    = 0x64616F6C; // "load" in ASCII
     
-    /// Subindexes for store/restore
+    /**Subindexes for store/restore */
     constexpr uint8_t AllParameters        = 0x01;
     constexpr uint8_t CommunicationParams  = 0x02;
     constexpr uint8_t ApplicationParams    = 0x03;
@@ -139,20 +139,20 @@ namespace CiA301Reset {
  * @brief CiA 402 Controlword bits for reset operations
  */
 namespace CiA402Reset {
-    /// Fault Reset (bit 7) - Rising edge clears fault
+    /**Fault Reset (bit 7) - Rising edge clears fault */
     constexpr uint16_t FaultReset         = 0x0080;
     
-    /// Halt (bit 8) - Stops motion
+    /**Halt (bit 8) - Stops motion */
     constexpr uint16_t Halt               = 0x0100;
     
-    /// Quick Stop disable (bit 2 = 0 triggers quick stop)
+    /**Quick Stop disable (bit 2 = 0 triggers quick stop) */
     constexpr uint16_t QuickStopActive    = 0x0000;
     constexpr uint16_t QuickStopInactive  = 0x0004;
     
-    /// Enable Operation (bit 3)
+    /**Enable Operation (bit 3) */
     constexpr uint16_t EnableOperation    = 0x0008;
     
-    /// Switch On (bits 0-3 control power stage)
+    /**Switch On (bits 0-3 control power stage) */
     constexpr uint16_t SwitchOn           = 0x0001;
     constexpr uint16_t EnableVoltage      = 0x0002;
 }
@@ -179,18 +179,18 @@ enum class CiA402State : uint8_t {
  * @brief Result of a reset operation
  */
 struct ResetResult {
-    bool success;                  ///< Overall success flag
-    ResetLevel requested_level;    ///< Level that was requested
-    ResetLevel achieved_level;     ///< Level actually achieved
-    uint16_t al_status;            ///< Final AL Status after reset
-    uint16_t al_status_code;       ///< AL Status Code (error details)
-    uint32_t duration_us;          ///< Time taken for reset in microseconds
-    std::string error_message;     ///< Human-readable error if failed
+    bool success; /**< Overall success flag */
+    ResetLevel requested_level; /**< Level that was requested */
+    ResetLevel achieved_level; /**< Level actually achieved */
+    uint16_t al_status; /**< Final AL Status after reset */
+    uint16_t al_status_code; /**< AL Status Code (error details) */
+    uint32_t duration_us; /**< Time taken for reset in microseconds */
+    std::string error_message; /**< Human-readable error if failed */
     
-    /// Check if reset fully completed at requested level
+    /**Check if reset fully completed at requested level */
     bool isComplete() const { return success && (achieved_level == requested_level); }
     
-    /// Check if partial reset achieved (less than requested but non-zero)
+    /**Check if partial reset achieved (less than requested but non-zero) */
     bool isPartial() const { return success && (achieved_level != requested_level); }
 };
 
@@ -211,28 +211,28 @@ using ResetProgressCallback = std::function<void(const char* stage, uint8_t prog
  * @brief Reset policy configuration
  */
 struct ResetPolicy {
-    /// Maximum automatic reset attempts before giving up
+    /**Maximum automatic reset attempts before giving up */
     uint8_t max_auto_attempts{3};
     
-    /// Delay between reset attempts (ms)
+    /**Delay between reset attempts (ms) */
     uint16_t retry_delay_ms{100};
     
-    /// Whether to escalate reset level on failure
+    /**Whether to escalate reset level on failure */
     bool escalate_on_failure{true};
     
-    /// Starting reset level
+    /**Starting reset level */
     ResetLevel starting_level{ResetLevel::SoftReset};
     
-    /// Maximum reset level to attempt
+    /**Maximum reset level to attempt */
     ResetLevel max_level{ResetLevel::ApplicationReset};
     
-    /// Whether to automatically retry on transient errors
+    /**Whether to automatically retry on transient errors */
     bool auto_retry_transient{true};
     
-    /// For CiA 402: automatically return to op enabled after fault reset
+    /**For CiA 402: automatically return to op enabled after fault reset */
     bool auto_reenable_drive{false};
     
-    /// Callback for policy decisions
+    /**Callback for policy decisions */
     std::function<bool(const ResetResult&, uint8_t attempt)> should_continue;
 };
 

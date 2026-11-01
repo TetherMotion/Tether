@@ -53,18 +53,18 @@ public:
     using SSR = SwitchingStructureRepresentation<Dim, T>;
     using Hybrid = HybridMonotoneRepresentation<Dim, T>;
 
-    /// Representation type enum
+    /**Representation type enum */
     enum class RepresentationType : uint8_t {
-        SSR,     ///< Switching Structure Representation (exact)
-        Hybrid,  ///< Hybrid Monotone Representation (certified)
+        SSR, /**< Switching Structure Representation (exact) */
+        Hybrid, /**< Hybrid Monotone Representation (certified) */
     };
 
-    /// Construct from SSR
+    /**Construct from SSR */
     explicit TrajectorySampler(std::shared_ptr<SSR> ssr)
         : type_(RepresentationType::SSR)
         , ssr_(std::move(ssr)) {}
 
-    /// Construct from Hybrid
+    /**Construct from Hybrid */
     explicit TrajectorySampler(std::shared_ptr<Hybrid> hybrid)
         : type_(RepresentationType::Hybrid)
         , hybrid_(std::move(hybrid)) {}

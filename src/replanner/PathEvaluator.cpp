@@ -22,12 +22,12 @@ namespace {
 // Utility functions
 //=============================================================================
 
-/// Linear interpolation between two values.
+/**Linear interpolation between two values. */
 double lerp(double a, double b, double t) {
     return a + t * (b - a);
 }
 
-/// Trapezoidal integration of y(x) given non-uniform x.
+/**Trapezoidal integration of y(x) given non-uniform x. */
 double trapezoidalIntegrate(const std::vector<double>& x,
                             const std::vector<double>& y) {
     if (x.size() < 2) return 0.0;
@@ -39,7 +39,7 @@ double trapezoidalIntegrate(const std::vector<double>& x,
     return sum;
 }
 
-/// Trapezoidal integration of y(x) with a weighting function w(x).
+/**Trapezoidal integration of y(x) with a weighting function w(x). */
 double trapezoidalIntegrateWeighted(const std::vector<double>& x,
                                     const std::vector<double>& y,
                                     const std::vector<double>& w) {
@@ -54,13 +54,13 @@ double trapezoidalIntegrateWeighted(const std::vector<double>& x,
     return sum;
 }
 
-/// Compute the mean of a vector.
+/**Compute the mean of a vector. */
 double mean(const std::vector<double>& v) {
     if (v.empty()) return 0.0;
     return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size());
 }
 
-/// Compute the RMS of a vector.
+/**Compute the RMS of a vector. */
 double rms(const std::vector<double>& v) {
     if (v.empty()) return 0.0;
     double sumSq = 0.0;
@@ -68,7 +68,7 @@ double rms(const std::vector<double>& v) {
     return std::sqrt(sumSq / static_cast<double>(v.size()));
 }
 
-/// Compute the max absolute value of a vector.
+/**Compute the max absolute value of a vector. */
 double maxAbs(const std::vector<double>& v) {
     if (v.empty()) return 0.0;
     double m = 0.0;
@@ -76,7 +76,7 @@ double maxAbs(const std::vector<double>& v) {
     return m;
 }
 
-/// Compute ErrorStatistics from a vector of error values.
+/**Compute ErrorStatistics from a vector of error values. */
 MotionReplanner::ErrorStatistics computeErrorStats(const std::vector<double>& errors) {
     MotionReplanner::ErrorStatistics stats;
     stats.sampleCount = errors.size();
@@ -137,8 +137,10 @@ MotionReplanner::ErrorStatistics computeErrorStats(const std::vector<double>& er
     return stats;
 }
 
-/// Discrete Frechet distance between two point sequences (O(n*m) DP).
-/// Each point is a (x,y) pair; we use the first 2 active axes.
+/**
+ * Discrete Frechet distance between two point sequences (O(n*m) DP).
+ * Each point is a (x,y) pair; we use the first 2 active axes.
+ */
 double discreteFrechet(const std::vector<double>& p1, const std::vector<double>& p2) {
     // p1, p2 are interleaved 3D points: [x0,y0,z0, x1,y1,z1, ...]
     auto n1 = p1.size() / 3;
@@ -173,8 +175,10 @@ double discreteFrechet(const std::vector<double>& p1, const std::vector<double>&
     return dp[(n1 - 1) * n2 + (n2 - 1)];
 }
 
-/// Dynamic time warping distance between two point sequences (O(n*m) DP).
-/// Returns the minimum total alignment cost normalized by the longer path.
+/**
+ * Dynamic time warping distance between two point sequences (O(n*m) DP).
+ * Returns the minimum total alignment cost normalized by the longer path.
+ */
 double dynamicTimeWarping(const std::vector<double>& p1, const std::vector<double>& p2) {
     auto n1 = p1.size() / 3;
     auto n2 = p2.size() / 3;
@@ -208,8 +212,10 @@ double dynamicTimeWarping(const std::vector<double>& p1, const std::vector<doubl
     return dp[(n1 - 1) * n2 + (n2 - 1)] / static_cast<double>(n1 + n2);
 }
 
-/// Cross-correlation: find the lag that maximizes correlation between
-/// two signals. Returns (peakCorrelation, lagInSamples).
+/**
+ * Cross-correlation: find the lag that maximizes correlation between
+ * two signals. Returns (peakCorrelation, lagInSamples).
+ */
 std::pair<double, std::size_t> crossCorrelate(
     const std::vector<double>& a, const std::vector<double>& b) {
     if (a.empty() || b.empty()) return {0.0, 0};

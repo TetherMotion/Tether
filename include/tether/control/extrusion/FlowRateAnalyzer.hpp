@@ -37,40 +37,40 @@
 
 namespace tether::control::extrusion {
 
-/// @brief Per-segment flow-rate sample.
+/**@brief Per-segment flow-rate sample. */
 struct FlowRateSample {
-    double flowRateMm3PerS = 0.0;  ///< Volumetric flow Q [mm³/s]
-    double beadWidthMm = 0.0;      ///< Estimated bead width [mm]
-    double feedRateMmPerMin = 0.0; ///< G-code feed rate [mm/min]
-    double distanceMm = 0.0;       ///< XY travel distance [mm]
+    double flowRateMm3PerS = 0.0; /**< Volumetric flow Q [mm³/s] */
+    double beadWidthMm = 0.0; /**< Estimated bead width [mm] */
+    double feedRateMmPerMin = 0.0; /**< G-code feed rate [mm/min] */
+    double distanceMm = 0.0; /**< XY travel distance [mm] */
 };
 
-/// @brief Result of a flow-rate consistency analysis.
+/**@brief Result of a flow-rate consistency analysis. */
 struct FlowRateAnalysisResult {
     // --- Flow-rate statistics ---
-    double avgFlowRate = 0.0;       ///< Mean Q [mm³/s]
-    double minFlowRate = 0.0;       ///< Min Q [mm³/s]
-    double maxFlowRate = 0.0;       ///< Max Q [mm³/s]
-    double stdDev = 0.0;            ///< Standard deviation [mm³/s]
-    double coefficientOfVariation = 0.0; ///< CV = σ/μ (dimensionless)
+    double avgFlowRate = 0.0; /**< Mean Q [mm³/s] */
+    double minFlowRate = 0.0; /**< Min Q [mm³/s] */
+    double maxFlowRate = 0.0; /**< Max Q [mm³/s] */
+    double stdDev = 0.0; /**< Standard deviation [mm³/s] */
+    double coefficientOfVariation = 0.0; /**< CV = σ/μ (dimensionless) */
 
     // --- Bead-width statistics ---
-    double avgBeadWidth = 0.0;      ///< Mean estimated bead width [mm]
-    double expectedBeadWidth = 0.0; ///< Expected width = nozzle × 1.2 [mm]
-    double widthDeviationPercent = 0.0; ///< (avg - expected) / expected × 100
-    bool overExtrusion = false;     ///< Width deviation > +5%
-    bool underExtrusion = false;    ///< Width deviation < -5%
+    double avgBeadWidth = 0.0; /**< Mean estimated bead width [mm] */
+    double expectedBeadWidth = 0.0; /**< Expected width = nozzle × 1.2 [mm] */
+    double widthDeviationPercent = 0.0; /**< (avg - expected) / expected × 100 */
+    bool overExtrusion = false; /**< Width deviation > +5% */
+    bool underExtrusion = false; /**< Width deviation < -5% */
 
     // --- Quality metrics ---
-    int sampleCount = 0;            ///< Number of extruding segments
-    int outlierCount = 0;           ///< Samples > 2σ from mean
-    double consistencyScore = 0.0;  ///< 0-100, higher is better
-    double calibrationScore = 0.0;  ///< 0-100, based on width deviation
+    int sampleCount = 0; /**< Number of extruding segments */
+    int outlierCount = 0; /**< Samples > 2σ from mean */
+    double consistencyScore = 0.0; /**< 0-100, higher is better */
+    double calibrationScore = 0.0; /**< 0-100, based on width deviation */
 
     // --- Flow-rate adjustment advice ---
-    double currentFlowRatePercent = 100.0;  ///< Current flow rate [%]
-    double recommendedFlowRatePercent = 100.0; ///< Recommended flow [%]
-    double flowAdjustmentPercent = 0.0;     ///< recommended - current [%]
+    double currentFlowRatePercent = 100.0; /**< Current flow rate [%] */
+    double recommendedFlowRatePercent = 100.0; /**< Recommended flow [%] */
+    double flowAdjustmentPercent = 0.0; /**< recommended - current [%] */
 
     // --- Per-segment data (optional, may be empty for large files) ---
     std::vector<FlowRateSample> samples;
@@ -78,21 +78,25 @@ struct FlowRateAnalysisResult {
     std::vector<std::string> recommendations;
 };
 
-/// @brief Parameters for the analyser.
+/**@brief Parameters for the analyser. */
 struct FlowRateAnalyzerParams {
-    double nozzleDiameterMm = 0.4;   ///< Nozzle diameter [mm]
-    double filamentDiameterMm = 1.75; ///< Filament diameter [mm]
-    double defaultLayerHeightMm = 0.2; ///< Fallback layer height [mm]
-    /// Maximum samples to store (0 = unlimited).  Large files may
-    /// produce hundreds of thousands of samples; set a cap to
-    /// limit memory.
+    double nozzleDiameterMm = 0.4; /**< Nozzle diameter [mm] */
+    double filamentDiameterMm = 1.75; /**< Filament diameter [mm] */
+    double defaultLayerHeightMm = 0.2; /**< Fallback layer height [mm] */
+    /**
+     * Maximum samples to store (0 = unlimited).  Large files may
+     * produce hundreds of thousands of samples; set a cap to
+     * limit memory.
+     */
     size_t maxStoredSamples = 10000;
 };
 
-/// @brief Flow-rate consistency analyser.
-///
-/// Scans G-code for extruding moves and computes volumetric flow-rate
-/// statistics, bead-width estimates, and calibration advice.
+/**
+ * @brief Flow-rate consistency analyser.
+ *
+ * Scans G-code for extruding moves and computes volumetric flow-rate
+ * statistics, bead-width estimates, and calibration advice.
+ */
 class FlowRateAnalyzer {
 public:
     using Params = FlowRateAnalyzerParams;
@@ -100,8 +104,10 @@ public:
     explicit FlowRateAnalyzer(Params params = Params{})
         : params_(params) {}
 
-    /// @brief Analyse a G-code program for flow-rate consistency.
-    /// @param gcodeLines The G-code text, one entry per line.
+    /**
+     * @brief Analyse a G-code program for flow-rate consistency.
+     * @param gcodeLines The G-code text, one entry per line.
+     */
     FlowRateAnalysisResult analyse(const std::vector<std::string>& gcodeLines) const;
 
     // --- Accessors ---
@@ -111,15 +117,15 @@ public:
 private:
     Params params_;
 
-    /// @brief Compute statistics from a list of flow rates.
+    /**@brief Compute statistics from a list of flow rates. */
     void computeStats(std::vector<double>& flowRates,
                       FlowRateAnalysisResult& result) const;
 
-    /// @brief Compute bead-width statistics and calibration advice.
+    /**@brief Compute bead-width statistics and calibration advice. */
     void computeBeadWidth(std::vector<double>& widths,
                           FlowRateAnalysisResult& result) const;
 
-    /// @brief Generate human-readable recommendations.
+    /**@brief Generate human-readable recommendations. */
     void generateRecommendations(FlowRateAnalysisResult& result) const;
 };
 

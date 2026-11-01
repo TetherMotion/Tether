@@ -40,44 +40,46 @@ class TerminalBase {
 public:
     // -- Shared queries --------------------------------------------------------
 
-    /// Zero-based bus position.
+    /**Zero-based bus position. */
     uint16_t slaveIndex() const { return slave_index_; }
 
-    /// Device name (SII name when discovered, else registry name).
+    /**Device name (SII name when discovered, else registry name). */
     const char* deviceName() const;
 
-    /// True after the SAFE-OP transition succeeded.
+    /**True after the SAFE-OP transition succeeded. */
     bool configured() const { return configured_; }
 
-    /// Live-read the application-layer (ESM) state register.
+    /**Live-read the application-layer (ESM) state register. */
     SlaveState alState();
 
-    /// True when the terminal is in OP.
+    /**True when the terminal is in OP. */
     bool operational() { return alState() == SlaveState::OP; }
 
-    /// AL status code captured by the last failed state transition (0 = none).
+    /**AL status code captured by the last failed state transition (0 = none). */
     uint16_t lastAlStatusCode() const { return last_al_status_code_; }
 
-    /// The declared device identity.
+    /**The declared device identity. */
     const DeviceIdentity& identity() const { return identity_; }
 
-    /// Logical address assigned to this device (chained operation only).
+    /**Logical address assigned to this device (chained operation only). */
     uint32_t logicalAddress() const { return logical_addr_; }
 
-    /// Raw input process image (SM3 region) as last exchanged.
+    /**Raw input process image (SM3 region) as last exchanged. */
     std::span<const uint8_t> rawInput() const { return in_buf_; }
 
-    /// Raw output process image (SM2 region) — what will be sent next cycle.
+    /**Raw output process image (SM2 region) — what will be sent next cycle. */
     std::span<const uint8_t> rawOutput() const { return out_buf_; }
 
-    /// Writable view of the output process image (scratch/control regions).
+    /**Writable view of the output process image (scratch/control regions). */
     std::span<uint8_t> rawOutput() { return out_buf_; }
 
-    /// The underlying slave object — for SDO configuration (operating
-    /// modes, encoder coding, PTO ramp settings, ...) before start().
+    /**
+     * The underlying slave object — for SDO configuration (operating
+     * modes, encoder coding, PTO ramp settings, ...) before start().
+     */
     Slave& slave();
 
-    /// Stop the master's realtime loop if this driver started it.
+    /**Stop the master's realtime loop if this driver started it. */
     void stop();
 
     virtual ~TerminalBase();
@@ -88,20 +90,20 @@ public:
     TerminalBase& operator=(const TerminalBase&)     = delete;
 
 protected:
-    /// A resolved process-data sync-manager region.
+    /**A resolved process-data sync-manager region. */
     struct SmRegion {
-        uint8_t  channel   = 0;      ///< SM channel index (2 or 3 normally)
-        uint16_t phys_addr = 0;      ///< physical start address in the ESC
-        uint16_t length    = 0;      ///< region length in bytes
-        uint8_t  ctrl      = 0;      ///< SM control byte from SII
-        bool     enabled   = false;  ///< region exists and is enabled
-        uint16_t first_pdo = 0;      ///< first PDO index assigned to this SM
+        uint8_t  channel   = 0; /**< SM channel index (2 or 3 normally) */
+        uint16_t phys_addr = 0; /**< physical start address in the ESC */
+        uint16_t length    = 0; /**< region length in bytes */
+        uint8_t  ctrl      = 0; /**< SM control byte from SII */
+        bool     enabled   = false; /**< region exists and is enabled */
+        uint16_t first_pdo = 0; /**< first PDO index assigned to this SM */
     };
 
     TerminalBase(Master& master, uint16_t slave_index,
                  const DeviceIdentity& identity);
 
-    /// Bind to an already-discovered slave — reuses its SII data.
+    /**Bind to an already-discovered slave — reuses its SII data. */
     TerminalBase(Master& master, const DiscoveredSlave& slave,
                  const DeviceIdentity& identity);
 
@@ -129,9 +131,11 @@ protected:
      */
     void resolveSyncManagers();
 
-    /// Write all enabled process-data SM regions into the slave's
-    /// SyncManagerConfig table (they are flushed to the ESC by the
-    /// following configureMailbox()/flushSyncManagers() call).
+    /**
+     * Write all enabled process-data SM regions into the slave's
+     * SyncManagerConfig table (they are flushed to the ESC by the
+     * following configureMailbox()/flushSyncManagers() call).
+     */
     void stageSyncManagers();
 
     /**
@@ -142,10 +146,10 @@ protected:
      */
     void configureMailboxOrDeclare();
 
-    /// Flush all staged sync-manager registers to the ESC.
+    /**Flush all staged sync-manager registers to the ESC. */
     void flushSyncManagers();
 
-    /// INIT -> PRE-OP transition.
+    /**INIT -> PRE-OP transition. */
     Result<> enterPreOp();
 
     /**
@@ -155,7 +159,7 @@ protected:
      */
     Result<> registerProcessData(PDO::PDOAddressMode mode);
 
-    /// assumePDOAlreadyConfigured() + PRE-OP -> SAFE-OP.
+    /**assumePDOAlreadyConfigured() + PRE-OP -> SAFE-OP. */
     Result<> enterSafeOp();
 
     /**
@@ -167,7 +171,7 @@ protected:
      */
     Result<> programFmmuAndEnterSafeOp();
 
-    /// SAFE-OP -> OP request + wait, honouring cancellation.
+    /**SAFE-OP -> OP request + wait, honouring cancellation. */
     Result<> requestOp(int timeout_ms);
 
     /**
@@ -178,10 +182,10 @@ protected:
      */
     Result<> startLoopIfManaged(const StartOptions& opts);
 
-    /// Poll AL status until `target` or timeout; honours master cancellation.
+    /**Poll AL status until `target` or timeout; honours master cancellation. */
     bool waitAlState(SlaveState target, int timeout_ms);
 
-    /// Log-prefixed identity string ("<name> (#N)") for messages.
+    /**Log-prefixed identity string ("<name> (#N)") for messages. */
     std::string logPrefix() const;
 
     // -- State -----------------------------------------------------------------
@@ -191,17 +195,19 @@ protected:
     DeviceIdentity                 identity_;
     std::optional<DiscoveredSlave> info_;
 
-    /// Registered PDO regions — views over the PDOMapping's per-entry
-    /// storage (Q1).  Valid while the entry lives:
-    /// remove_entries_for_slave()/clear() compacts the entry array and
-    /// rebinds these to recycled slots — callers that tear down PDOs
-    /// must treat the terminal as un-prepared (re-run registerProcessData
-    /// before using rawInput()/rawOutput() again).
-    std::span<const uint8_t> in_buf_;   ///< SM3 process image
-    std::span<uint8_t>       out_buf_;  ///< SM2 process image
+    /**
+     * Registered PDO regions — views over the PDOMapping's per-entry
+     * storage (Q1).  Valid while the entry lives:
+     * remove_entries_for_slave()/clear() compacts the entry array and
+     * rebinds these to recycled slots — callers that tear down PDOs
+     * must treat the terminal as un-prepared (re-run registerProcessData
+     * before using rawInput()/rawOutput() again).
+     */
+    std::span<const uint8_t> in_buf_; /**< SM3 process image */
+    std::span<uint8_t>       out_buf_; /**< SM2 process image */
 
-    SmRegion sm_in_;                 ///< process-input region (SM3 normally)
-    SmRegion sm_out_;                ///< process-output region (SM2 normally)
+    SmRegion sm_in_; /**< process-input region (SM3 normally) */
+    SmRegion sm_out_; /**< process-output region (SM2 normally) */
 
     bool     prepared_      = false;  // PDO buffers registered (any mode)
     bool     configured_    = false;  // reached SAFE-OP

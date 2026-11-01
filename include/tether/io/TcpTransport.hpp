@@ -24,7 +24,7 @@ namespace tether { namespace io {
  */
 class TcpTransport : public ITransport {
 public:
-    /// Construct from an already-connected socket fd (takes ownership).
+    /**Construct from an already-connected socket fd (takes ownership). */
     explicit TcpTransport(int fd);
     ~TcpTransport() override;
 
@@ -54,10 +54,12 @@ std::unique_ptr<TcpTransport> tcpConnect(const char* host, uint16_t port,
  */
 class TcpTransportServer : public ITransportServer {
 public:
-    /// @param port TCP port to listen on.
-    /// @param bindAddress IPv4 address to listen on (e.g. "127.0.0.1" for
-    ///        loopback only).  Empty or "0.0.0.0" binds all interfaces.
-    /// @param backlog Listen backlog (default 4).
+    /**
+     * @param port TCP port to listen on.
+     * @param bindAddress IPv4 address to listen on (e.g. "127.0.0.1" for
+     *        loopback only).  Empty or "0.0.0.0" binds all interfaces.
+     * @param backlog Listen backlog (default 4).
+     */
     explicit TcpTransportServer(uint16_t port, std::string bindAddress = {},
                                 int backlog = 4);
     ~TcpTransportServer() override;

@@ -38,9 +38,9 @@ struct SlaveTimeInfo {
  * frame is a downstream port leading to a child subtree.
  */
 struct DCPortInfo {
-    uint32_t recv_time_ns[4] = {};  ///< Latched receive time per port; 0 = port saw no frame
-    uint8_t  active_port_mask = 0;  ///< Bit p set => port p latched a non-zero receive time
-    int8_t   entry_port = -1;       ///< Upstream port (smallest recv time); -1 = unknown
+    uint32_t recv_time_ns[4] = {}; /**< Latched receive time per port; 0 = port saw no frame */
+    uint8_t  active_port_mask = 0; /**< Bit p set => port p latched a non-zero receive time */
+    int8_t   entry_port = -1; /**< Upstream port (smallest recv time); -1 = unknown */
 };
 
 /**
@@ -53,12 +53,12 @@ struct DCPortInfo {
  * branched (multi-port) topologies are handled, not just linear chains.
  */
 struct DCLinkInfo {
-    int16_t  parent = -1;          ///< Parent slave index; -1 = directly at the master
-    int8_t   parent_port = -1;     ///< Downstream port on the parent leading to this slave
-    uint32_t link_delay_ns = 0;    ///< Measured one-way delay parent -> this slave
-    uint32_t subtree_time_ns = 0;  ///< Time the latch frame spent inside this slave's subtree
-    uint32_t total_delay_ns = 0;   ///< Accumulated delay from the reference clock (written to 0x0928)
-    bool     timing_valid = false; ///< Receive-time registers could be read and were non-zero
+    int16_t  parent = -1; /**< Parent slave index; -1 = directly at the master */
+    int8_t   parent_port = -1; /**< Downstream port on the parent leading to this slave */
+    uint32_t link_delay_ns = 0; /**< Measured one-way delay parent -> this slave */
+    uint32_t subtree_time_ns = 0; /**< Time the latch frame spent inside this slave's subtree */
+    uint32_t total_delay_ns = 0; /**< Accumulated delay from the reference clock (written to 0x0928) */
+    bool     timing_valid = false; /**< Receive-time registers could be read and were non-zero */
 };
 
 /**
@@ -70,7 +70,7 @@ struct DCLinkInfo {
 struct DCTopology {
     DCPortInfo ports[kMaxDCSlaves];
     DCLinkInfo links[kMaxDCSlaves];
-    int16_t    reference = -1;     ///< Index of the DC reference clock slave; -1 = none
+    int16_t    reference = -1; /**< Index of the DC reference clock slave; -1 = none */
 };
 
 struct DCLoopStats {
@@ -91,13 +91,17 @@ struct DCConfig {
     int32_t  sync0_shift_ns;
     bool     enable_sync0;
     bool     enable_sync1;
-    /// Slave indices that should NOT receive SYNC0/SYNC1 activation.
-    /// All other DC-capable slaves get SYNC signals as normal.
-    /// Empty by default (all slaves enabled).
+    /**
+     * Slave indices that should NOT receive SYNC0/SYNC1 activation.
+     * All other DC-capable slaves get SYNC signals as normal.
+     * Empty by default (all slaves enabled).
+     */
     std::vector<uint16_t> sync_disabled_slaves;
-    /// CPU affinity for the internal realtime loop's threads
-    /// (-1 = unpinned).  Typically filled from a
-    /// Tether::Platform::CpuIsolation claim.
+    /**
+     * CPU affinity for the internal realtime loop's threads
+     * (-1 = unpinned).  Typically filled from a
+     * Tether::Platform::CpuIsolation claim.
+     */
     int pdo_cpu_affinity = -1;
     int dc_cpu_affinity  = -1;
 

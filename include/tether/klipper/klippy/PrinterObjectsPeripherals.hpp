@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file PrinterObjectsPeripherals.hpp
-/// @brief Peripheral printer objects (digital_out, pwm_out, spi, i2c, endstop, trsync)
+/**
+ * @file PrinterObjectsPeripherals.hpp
+ * @brief Peripheral printer objects (digital_out, pwm_out, spi, i2c, endstop, trsync)
+ */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 #include "tether/klipper/objects/Peripherals.hpp"
@@ -17,7 +19,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Digital output pin printer object.
+/**@brief Digital output pin printer object. */
 class DigitalOutObject : public PrinterObject {
 public:
     explicit DigitalOutObject(std::shared_ptr<objects::DigitalOut> dev,
@@ -44,7 +46,7 @@ private:
     std::string name_;
 };
 
-/// @brief PWM output pin printer object.
+/**@brief PWM output pin printer object. */
 class PWMOutObject : public PrinterObject {
 public:
     explicit PWMOutObject(std::shared_ptr<objects::PWMOut> dev,
@@ -71,7 +73,7 @@ private:
     std::string name_;
 };
 
-/// @brief SPI bus printer object.
+/**@brief SPI bus printer object. */
 class SpiObject : public PrinterObject {
 public:
     explicit SpiObject(std::shared_ptr<objects::Spi> dev,
@@ -106,7 +108,7 @@ private:
     mutable uint64_t errorCount_ = 0;
 };
 
-/// @brief I2C bus printer object.
+/**@brief I2C bus printer object. */
 class I2cObject : public PrinterObject {
 public:
     explicit I2cObject(std::shared_ptr<objects::I2c> dev,
@@ -141,7 +143,7 @@ private:
     mutable uint64_t errorCount_ = 0;
 };
 
-/// @brief Endstop printer object (per-endstop).
+/**@brief Endstop printer object (per-endstop). */
 class EndstopObject : public PrinterObject {
 public:
     explicit EndstopObject(std::shared_ptr<objects::Endstop> dev,
@@ -169,7 +171,7 @@ private:
     std::string name_;
 };
 
-/// @brief TRsync printer object.
+/**@brief TRsync printer object. */
 class TrsyncObject : public PrinterObject {
 public:
     explicit TrsyncObject(std::shared_ptr<objects::Trsync> dev,

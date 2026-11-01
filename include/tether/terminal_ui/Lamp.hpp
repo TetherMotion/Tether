@@ -1,9 +1,11 @@
 #pragma once
 
-/// Tri-state indicator lamp: renders on/off/unknown as a styled glyph.
-/// Two ready-made styles cover the common cases:
-///   kLampDots  — "●" green-bold / "○" muted / "?" muted  (pin/flag maps)
-///   kLampTags  — " ON"/" off"/"  ?"                      (columnar lists)
+/**
+ * Tri-state indicator lamp: renders on/off/unknown as a styled glyph.
+ * Two ready-made styles cover the common cases:
+ *   kLampDots  — "●" green-bold / "○" muted / "?" muted  (pin/flag maps)
+ *   kLampTags  — " ON"/" off"/"  ?"                      (columnar lists)
+ */
 
 #include <ncurses.h>
 #include "tether/terminal_ui/Session.hpp"      // Palette
@@ -38,7 +40,7 @@ inline constexpr LampStyle kLampTags = {
     COLOR_PAIR(PalHint),
 };
 
-/// "1"/"0" bit columns (dense packed-bit displays like FSoE inputs).
+/**"1"/"0" bit columns (dense packed-bit displays like FSoE inputs). */
 inline constexpr LampStyle kLampDigits = {
     "1", "0", "?",
     COLOR_PAIR(PalValue) | A_BOLD,
@@ -46,7 +48,7 @@ inline constexpr LampStyle kLampDigits = {
     A_DIM,
 };
 
-/// "*"/"." bit columns (sparse terminal channel rows).
+/**"*"/"." bit columns (sparse terminal channel rows). */
 inline constexpr LampStyle kLampBits = {
     "*", ".", "?",
     COLOR_PAIR(PalValue) | A_BOLD,
@@ -54,7 +56,7 @@ inline constexpr LampStyle kLampBits = {
     A_DIM,
 };
 
-/// "*"/"." bit columns where "on" is a fault/flag condition (red).
+/**"*"/"." bit columns where "on" is a fault/flag condition (red). */
 inline constexpr LampStyle kLampAlertBits = {
     "*", ".", "?",
     COLOR_PAIR(PalError) | A_BOLD,
@@ -62,7 +64,7 @@ inline constexpr LampStyle kLampAlertBits = {
     A_DIM,
 };
 
-/// "■"/"□" square bit columns (beckhoff_tui detail panes).
+/**"■"/"□" square bit columns (beckhoff_tui detail panes). */
 inline constexpr LampStyle kLampSquares = {
     "\xE2\x96\xA0", "\xE2\x96\xA1", "?",
     COLOR_PAIR(PalValue) | A_BOLD,
@@ -70,7 +72,7 @@ inline constexpr LampStyle kLampSquares = {
     A_DIM,
 };
 
-/// Draw a lamp at (y, x) in window `w`; returns the glyph's column width.
+/**Draw a lamp at (y, x) in window `w`; returns the glyph's column width. */
 inline int wdrawLamp(WINDOW* w, int y, int x, LampState s,
                      const LampStyle& style = kLampDots) {
     const char* glyph;
@@ -83,7 +85,7 @@ inline int wdrawLamp(WINDOW* w, int y, int x, LampState s,
     return wputStyled(w, y, x, attrs, "%s", glyph);
 }
 
-/// stdscr convenience — same as wdrawLamp(stdscr, ...).
+/**stdscr convenience — same as wdrawLamp(stdscr, ...). */
 inline int drawLamp(int y, int x, LampState s,
                     const LampStyle& style = kLampDots) {
     return wdrawLamp(stdscr, y, x, s, style);

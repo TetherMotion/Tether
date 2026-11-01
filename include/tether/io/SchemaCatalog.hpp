@@ -26,11 +26,13 @@ struct SchemaSlotEntry {
     const SchemaNode* node = nullptr;
 };
 
-/// Builds an install-manifest covering every node in `graph`, in
-/// declaration order: `{key, digest}` ref + the node's revision.
-/// @param graph schema graph (nodes must have resolvable digests — run
-///        resolveSchemaDigests first when the graph was built by hand).
-/// @return manifest entries, one per node.
+/**
+ * Builds an install-manifest covering every node in `graph`, in
+ * declaration order: `{key, digest}` ref + the node's revision.
+ * @param graph schema graph (nodes must have resolvable digests — run
+ *        resolveSchemaDigests first when the graph was built by hand).
+ * @return manifest entries, one per node.
+ */
 inline std::vector<SchemaManifestEntry>
 buildSchemaManifest(const SchemaGraph& graph) {
     std::vector<SchemaManifestEntry> manifest;
@@ -86,10 +88,12 @@ public:
         return std::nullopt;
     }
 
-    /// Slot for the node with `key`, regardless of digest — the common
-    /// case when registering entries against the installed catalog.
-    /// @param key schema node key.
-    /// @return the slot, or nullopt when no installed entry has that key.
+    /**
+     * Slot for the node with `key`, regardless of digest — the common
+     * case when registering entries against the installed catalog.
+     * @param key schema node key.
+     * @return the slot, or nullopt when no installed entry has that key.
+     */
     std::optional<SchemaSlot> slotForKey(const SchemaKey& key) const {
         for (const auto& entry : slots_) {
             if (entry.manifest.ref.key == key) return entry.slot;

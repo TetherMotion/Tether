@@ -149,9 +149,9 @@ inline double safeAsin(double x) {
  * @brief Interpolation planes for arc motion
  */
 enum class Plane : uint8_t {
-    XY = 0,  ///< G17 - XY plane, Z is normal
-    XZ = 1,  ///< G18 - XZ plane, Y is normal
-    YZ = 2   ///< G19 - YZ plane, X is normal
+    XY = 0, /**< G17 - XY plane, Z is normal */
+    XZ = 1, /**< G18 - XZ plane, Y is normal */
+    YZ = 2 /**< G19 - YZ plane, X is normal */
 };
 
 /**

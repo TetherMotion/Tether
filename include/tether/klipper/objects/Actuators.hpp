@@ -18,7 +18,7 @@ namespace tether::klipper::objects {
 // Fan
 // ============================================================================
 
-/// @brief PWM-controlled fan with optional tachometer.
+/**@brief PWM-controlled fan with optional tachometer. */
 class Fan {
 public:
     using PWMWriteFunc = std::function<void(double)>;
@@ -30,8 +30,10 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Set fan speed (0.0 to 1.0).
-    /// @param speed PWM duty cycle, clamped to [0,1]
+    /**
+     * @brief Set fan speed (0.0 to 1.0).
+     * @param speed PWM duty cycle, clamped to [0,1]
+     */
     void setSpeed(double speed) {
         speed_ = std::clamp(speed, 0.0, 1.0);
         if (!offTime_.has_value() || speed_ >= offTime_.value()) {
@@ -41,21 +43,27 @@ public:
         }
     }
 
-    /// @brief Get current fan speed.
-    /// @return PWM duty cycle [0,1]
+    /**
+     * @brief Get current fan speed.
+     * @return PWM duty cycle [0,1]
+     */
     double speed() const { return speed_; }
 
-    /// @brief Set tachometer reader.
-    /// @param tachRead Reads cumulative tach pulse count
-    /// @param tachCpr Pulses per revolution
+    /**
+     * @brief Set tachometer reader.
+     * @param tachRead Reads cumulative tach pulse count
+     * @param tachCpr Pulses per revolution
+     */
     void setTachometer(TachReadFunc tachRead, uint32_t tachCpr = 2) {
         tachRead_ = std::move(tachRead);
         tachCpr_ = tachCpr;
     }
 
-    /// @brief Compute RPM from tachometer readings.
-    /// @param interval Time between readings in seconds.
-    /// @return Fan speed [RPM]; 0 without tachometer
+    /**
+     * @brief Compute RPM from tachometer readings.
+     * @param interval Time between readings in seconds.
+     * @return Fan speed [RPM]; 0 without tachometer
+     */
     double computeRpm(double interval) {
         if (!tachRead_) return 0.0;
         uint32_t current = tachRead_();
@@ -65,16 +73,22 @@ public:
         return static_cast<double>(delta) * 60.0 / (tachCpr_ * interval);
     }
 
-    /// @brief Set off-time (fan turns off below this speed).
-    /// @param offTime Duty threshold below which PWM is forced to 0
+    /**
+     * @brief Set off-time (fan turns off below this speed).
+     * @param offTime Duty threshold below which PWM is forced to 0
+     */
     void setOffTime(double offTime) { offTime_ = offTime; }
 
-    /// @brief Set cycle time for PWM.
-    /// @param cycleTime PWM period [s]
+    /**
+     * @brief Set cycle time for PWM.
+     * @param cycleTime PWM period [s]
+     */
     void setCycleTime(double cycleTime) { cycleTime_ = cycleTime; }
 
-    /// @brief Get cycle time.
-    /// @return PWM period [s]
+    /**
+     * @brief Get cycle time.
+     * @return PWM period [s]
+     */
     double cycleTime() const { return cycleTime_; }
 
 private:
@@ -92,16 +106,16 @@ private:
 // Neopixel / WS2812
 // ============================================================================
 
-/// @brief RGB color for LEDs.
+/**@brief RGB color for LEDs. */
 struct LedColor {
-    uint8_t r = 0, g = 0, b = 0, w = 0; ///< w = white (for RGBW)
+    uint8_t r = 0, g = 0, b = 0, w = 0; /**< w = white (for RGBW) */
 
     bool operator==(const LedColor& o) const {
         return r == o.r && g == o.g && b == o.b && w == o.w;
     }
 };
 
-/// @brief WS2812/NeoPixel LED strip.
+/**@brief WS2812/NeoPixel LED strip. */
 class Neopixel {
 public:
     using SpiWriteFunc = std::function<void(std::span<const uint8_t>)>;
@@ -116,30 +130,36 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Set color of a single LED.
-    /// @param index LED position [0, numLeds)
-    /// @param color RGB(W) color to buffer
+    /**
+     * @brief Set color of a single LED.
+     * @param index LED position [0, numLeds)
+     * @param color RGB(W) color to buffer
+     */
     void setColor(int index, const LedColor& color) {
         if (index >= 0 && index < numLeds_) {
             colors_[index] = color;
         }
     }
 
-    /// @brief Set color of all LEDs.
-    /// @param color RGB(W) color applied to every LED
+    /**
+     * @brief Set color of all LEDs.
+     * @param color RGB(W) color applied to every LED
+     */
     void setAll(const LedColor& color) {
         for (auto& c : colors_) c = color;
     }
 
-    /// @brief Get color of a LED.
-    /// @param index LED position
-    /// @return Buffered color; default (black) out of range
+    /**
+     * @brief Get color of a LED.
+     * @param index LED position
+     * @return Buffered color; default (black) out of range
+     */
     LedColor color(int index) const {
         if (index >= 0 && index < numLeds_) return colors_[index];
         return {};
     }
 
-    /// @brief Update the LED strip (send colors via SPI).
+    /**@brief Update the LED strip (send colors via SPI). */
     void update() {
         // WS2812 encoding: each bit is ~1.25us
         // 0: high ~0.4us, low ~0.85us
@@ -160,11 +180,13 @@ public:
         spiWrite_(data);
     }
 
-    /// @brief Get number of LEDs.
-    /// @return Strip length configured
+    /**
+     * @brief Get number of LEDs.
+     * @return Strip length configured
+     */
     int numLeds() const { return numLeds_; }
 
-    /// @brief Clear all LEDs to off.
+    /**@brief Clear all LEDs to off. */
     void clear() {
         for (auto& c : colors_) c = {};
     }

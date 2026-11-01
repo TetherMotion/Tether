@@ -115,109 +115,113 @@ namespace tether::motion::replanner {
 // Enums
 //=============================================================================
 
-/// Which Frenet-frame error component to analyze.
+/**Which Frenet-frame error component to analyze. */
 enum class SpectralComponent {
-    Contour,   ///< Normal to path (surface-finish-critical)
-    Lag,       ///< Along path (timing)
-    Binormal,  ///< Out-of-plane (3D only)
-    Combined   ///< 3D position error magnitude
+    Contour, /**< Normal to path (surface-finish-critical) */
+    Lag, /**< Along path (timing) */
+    Binormal, /**< Out-of-plane (3D only) */
+    Combined /**< 3D position error magnitude */
 };
 
-/// Domain for spectral analysis.
+/**Domain for spectral analysis. */
 enum class SpectralDomain {
-    Spatial,   ///< Arc-length resampled, frequency in cycles/mm
-    Temporal   ///< Time resampled, frequency in Hz
+    Spatial, /**< Arc-length resampled, frequency in cycles/mm */
+    Temporal /**< Time resampled, frequency in Hz */
 };
 
 //=============================================================================
 // Result structs
 //=============================================================================
 
-/// A single detected spectral peak.
+/**A single detected spectral peak. */
 struct SpectralPeak {
-    double frequency = 0.0;   ///< cycles/mm or Hz
-    double magnitude = 0.0;   ///< Amplitude
-    double power = 0.0;       ///< Magnitude²
-    double phase = 0.0;       ///< Radians
-    double prominence = 0.0;  ///< Height above surrounding valleys
+    double frequency = 0.0; /**< cycles/mm or Hz */
+    double magnitude = 0.0; /**< Amplitude */
+    double power = 0.0; /**< Magnitude² */
+    double phase = 0.0; /**< Radians */
+    double prominence = 0.0; /**< Height above surrounding valleys */
 };
 
-/// Spectral metrics for one component in one domain.
+/**Spectral metrics for one component in one domain. */
 struct ComponentSpectrum {
     SpectralComponent component = SpectralComponent::Contour;
     SpectralDomain domain = SpectralDomain::Spatial;
 
-    /// Frequency axis (one-sided, 0 to Nyquist).
+    /**Frequency axis (one-sided, 0 to Nyquist). */
     std::vector<double> frequencies;
-    /// Magnitude spectrum |FFT| (one-sided).
+    /**Magnitude spectrum |FFT| (one-sided). */
     std::vector<double> magnitudes;
-    /// Phase spectrum (radians).
+    /**Phase spectrum (radians). */
     std::vector<double> phases;
-    /// Power spectral density |FFT|².
+    /**Power spectral density |FFT|². */
     std::vector<double> powerSpectralDensity;
 
     //--- Derived metrics ---
 
-    /// Frequency of the highest peak (cycles/mm or Hz).
+    /**Frequency of the highest peak (cycles/mm or Hz). */
     double dominantFrequency = 0.0;
-    /// Magnitude at the dominant frequency.
+    /**Magnitude at the dominant frequency. */
     double dominantMagnitude = 0.0;
-    /// Normalized spectral entropy [0, 1]. Low = concentrated.
+    /**Normalized spectral entropy [0, 1]. Low = concentrated. */
     double spectralEntropy = 0.0;
-    /// Oscillation index: PSD(dominant) / ΣPSD. High = strong oscillation.
+    /**Oscillation index: PSD(dominant) / ΣPSD. High = strong oscillation. */
     double oscillationIndex = 0.0;
-    /// Total power (sum of PSD).
+    /**Total power (sum of PSD). */
     double totalPower = 0.0;
-    /// RMS amplitude: sqrt(totalPower / N).
+    /**RMS amplitude: sqrt(totalPower / N). */
     double rmsAmplitude = 0.0;
 
     //--- Band power ---
-    double lowBandPower = 0.0;    ///< Below lowBandCutoff
-    double midBandPower = 0.0;    ///< Between low and high cutoffs
-    double highBandPower = 0.0;   ///< Above highBandCutoff
+    double lowBandPower = 0.0; /**< Below lowBandCutoff */
+    double midBandPower = 0.0; /**< Between low and high cutoffs */
+    double highBandPower = 0.0; /**< Above highBandCutoff */
 
     //--- Harmonic analysis ---
-    /// (P_2nd + P_3rd) / P_fundamental — harmonic distortion ratio.
+    /**(P_2nd + P_3rd) / P_fundamental — harmonic distortion ratio. */
     double harmonicDistortion = 0.0;
 
-    /// Detected peaks (top N, sorted by magnitude descending).
+    /**Detected peaks (top N, sorted by magnitude descending). */
     std::vector<SpectralPeak> peaks;
 
-    /// Whether certified contour error was used (vs tangent projection).
+    /**Whether certified contour error was used (vs tangent projection). */
     bool isCertified = true;
 };
 
-/// Cross-domain comparison result (spatial vs temporal).
+/**Cross-domain comparison result (spatial vs temporal). */
 struct CrossDomainComparison {
-    /// Feed-rate modulation index = f_temporal / (f_spatial × v_avg).
-    /// If ≈ 1, oscillation is purely spatial (path-correlated).
+    /**
+     * Feed-rate modulation index = f_temporal / (f_spatial × v_avg).
+     * If ≈ 1, oscillation is purely spatial (path-correlated).
+     */
     double feedRateModulationIndex = 0.0;
 
-    /// Spectral coherence: Pearson correlation between normalized spatial
-    /// and temporal spectra. High = similar spectral shape.
+    /**
+     * Spectral coherence: Pearson correlation between normalized spatial
+     * and temporal spectra. High = similar spectral shape.
+     */
     double spectralCoherence = 0.0;
 
-    /// True if modulation index is near 1 (path-correlated oscillation).
+    /**True if modulation index is near 1 (path-correlated oscillation). */
     bool isPathCorrelated = false;
 
-    /// Human-readable interpretation.
+    /**Human-readable interpretation. */
     std::string interpretation;
 };
 
-/// Path-geometry correlation: matches spectral peaks to path features.
+/**Path-geometry correlation: matches spectral peaks to path features. */
 struct PathGeometryCorrelation {
-    /// 1 / average corner spacing (cycles/mm). 0 if no corners.
+    /**1 / average corner spacing (cycles/mm). 0 if no corners. */
     double cornerFrequency = 0.0;
-    /// 1 / average arc segment length (cycles/mm).
+    /**1 / average arc segment length (cycles/mm). */
     double arcFrequency = 0.0;
-    /// 1 / average segment length (cycles/mm).
+    /**1 / average segment length (cycles/mm). */
     double segmentFrequency = 0.0;
 
-    /// Matched peaks: (peak frequency, geometry source description).
+    /**Matched peaks: (peak frequency, geometry source description). */
     std::vector<std::pair<double, std::string>> matchedPeaks;
 };
 
-/// Complete spectral evaluation.
+/**Complete spectral evaluation. */
 struct SpectralEvaluation {
     //--- Spatial domain (arc-length, cycles/mm) ---
     ComponentSpectrum spatialContour;
@@ -239,11 +243,11 @@ struct SpectralEvaluation {
     PathGeometryCorrelation geometryCorrelation;
 
     //--- Overall oscillation assessment ---
-    /// True if any component's oscillation index exceeds the threshold.
+    /**True if any component's oscillation index exceeds the threshold. */
     bool oscillationDetected = false;
-    /// Overall severity [0, 1] — max oscillation index across all components.
+    /**Overall severity [0, 1] — max oscillation index across all components. */
     double oscillationSeverity = 0.0;
-    /// Human-readable description of detected oscillations.
+    /**Human-readable description of detected oscillations. */
     std::string oscillationDescription;
 };
 
@@ -251,55 +255,57 @@ struct SpectralEvaluation {
 // Configuration
 //=============================================================================
 
-/// Configuration for the path-relative FFT evaluator.
+/**Configuration for the path-relative FFT evaluator. */
 struct FFTConfig {
     //--- Resampling ---
-    /// Interpolation method for resampling to uniform grid.
+    /**Interpolation method for resampling to uniform grid. */
     enum class Interpolation { Linear, CubicPCHIP };
     Interpolation interpolation = Interpolation::CubicPCHIP;
 
-    /// Minimum number of samples for FFT (pad if fewer).
+    /**Minimum number of samples for FFT (pad if fewer). */
     std::size_t minSamples = 16;
 
-    /// Maximum number of resampled points (cap for memory).
+    /**Maximum number of resampled points (cap for memory). */
     std::size_t maxSamples = 65536;
 
     //--- Windowing ---
-    /// Window function to apply before FFT.
+    /**Window function to apply before FFT. */
     enum class Window { Hann, Hamming, Blackman, Rectangular };
     Window window = Window::Hann;
 
     //--- Detrending ---
-    /// Remove the DC (mean) component before FFT.
+    /**Remove the DC (mean) component before FFT. */
     bool removeDC = true;
-    /// Remove a linear trend (least-squares) before FFT.
+    /**Remove a linear trend (least-squares) before FFT. */
     bool removeLinearTrend = true;
 
     //--- Peak detection ---
-    /// Maximum number of peaks to report per spectrum.
+    /**Maximum number of peaks to report per spectrum. */
     std::size_t maxPeaks = 5;
-    /// Peak prominence threshold (relative to max peak magnitude).
+    /**Peak prominence threshold (relative to max peak magnitude). */
     double peakProminenceThreshold = 0.05;
 
     //--- Band boundaries ---
-    /// Spatial domain (cycles/mm): low/mid/high band cutoffs.
+    /**Spatial domain (cycles/mm): low/mid/high band cutoffs. */
     double spatialLowBandCutoff = 0.01;
     double spatialHighBandCutoff = 0.1;
-    /// Temporal domain (Hz): low/mid/high band cutoffs.
+    /**Temporal domain (Hz): low/mid/high band cutoffs. */
     double temporalLowBandCutoff = 5.0;
     double temporalHighBandCutoff = 100.0;
 
     //--- Oscillation detection ---
-    /// Oscillation index above this = oscillation detected.
+    /**Oscillation index above this = oscillation detected. */
     double oscillationIndexThreshold = 0.3;
 
     //--- Algorithm selection ---
-    /// Use certified contour error (Bernstein root isolation) vs tangent
-    /// projection. Certified is more accurate but slower.
+    /**
+     * Use certified contour error (Bernstein root isolation) vs tangent
+     * projection. Certified is more accurate but slower.
+     */
     bool useCertifiedContourError = true;
 
     //--- Active axes ---
-    /// Which axes to include (X=0, Y=1, Z=2, ...). Empty = auto-detect.
+    /**Which axes to include (X=0, Y=1, Z=2, ...). Empty = auto-detect. */
     std::vector<int> activeAxes;
 };
 
@@ -307,48 +313,54 @@ struct FFTConfig {
 // PathRelativeFFT class
 //=============================================================================
 
-/// Computes path-relative spectral analysis for oscillation detection.
-///
-/// Usage:
-/// ```cpp
-/// PathRelativeFFT fftEval;
-/// SpectralEvaluation spectral = fftEval.evaluate(desired, actual);
-///
-/// if (spectral.oscillationDetected) {
-///     std::cout << spectral.oscillationDescription << std::endl;
-/// }
-/// ```
+/**
+ * Computes path-relative spectral analysis for oscillation detection.
+ *
+ * Usage:
+ * ```cpp
+ * PathRelativeFFT fftEval;
+ * SpectralEvaluation spectral = fftEval.evaluate(desired, actual);
+ *
+ * if (spectral.oscillationDetected) {
+ *     std::cout << spectral.oscillationDescription << std::endl;
+ * }
+ * ```
+ */
 class PathRelativeFFT {
 public:
     explicit PathRelativeFFT(FFTConfig config = {});
 
-    /// Compute the full spectral evaluation from desired/actual trajectories.
-    ///
-    /// Internally:
-    /// 1. Builds a PiecewiseNurbsPath from the desired samples.
-    /// 2. Computes Frenet-decomposed errors per sample.
-    /// 3. Resamples in both spatial and temporal domains.
-    /// 4. Runs FFT for each component in each domain.
-    /// 5. Derives metrics, detects peaks, correlates with path geometry.
-    ///
-    /// @param desired The desired trajectory samples (ordered by time).
-    /// @param actual The actual measured trajectory samples (ordered by time).
-    /// @return The complete spectral evaluation.
+    /**
+     * Compute the full spectral evaluation from desired/actual trajectories.
+     *
+     * Internally:
+     * 1. Builds a PiecewiseNurbsPath from the desired samples.
+     * 2. Computes Frenet-decomposed errors per sample.
+     * 3. Resamples in both spatial and temporal domains.
+     * 4. Runs FFT for each component in each domain.
+     * 5. Derives metrics, detects peaks, correlates with path geometry.
+     *
+     * @param desired The desired trajectory samples (ordered by time).
+     * @param actual The actual measured trajectory samples (ordered by time).
+     * @return The complete spectral evaluation.
+     */
     SpectralEvaluation evaluate(
         const std::vector<GCodeExport::TrajectorySample>& desired,
         const std::vector<GCodeExport::TrajectorySample>& actual) const;
 
-    /// Compute a single component spectrum from a pre-computed error signal.
-    ///
-    /// This is useful for incremental/online analysis where the caller
-    /// has already computed the error signal.
-    ///
-    /// @param errorSignal The error values at each sample.
-    /// @param abscissa The abscissa values (arc lengths for spatial,
-    ///        timestamps for temporal).
-    /// @param component Which component this is (for labeling).
-    /// @param domain Which domain (spatial or temporal).
-    /// @return The component spectrum.
+    /**
+     * Compute a single component spectrum from a pre-computed error signal.
+     *
+     * This is useful for incremental/online analysis where the caller
+     * has already computed the error signal.
+     *
+     * @param errorSignal The error values at each sample.
+     * @param abscissa The abscissa values (arc lengths for spatial,
+     *        timestamps for temporal).
+     * @param component Which component this is (for labeling).
+     * @param domain Which domain (spatial or temporal).
+     * @return The component spectrum.
+     */
     ComponentSpectrum computeComponentSpectrum(
         const std::vector<double>& errorSignal,
         const std::vector<double>& abscissa,
@@ -360,42 +372,42 @@ private:
 
     //--- Internal helpers ---
 
-    /// Resample (x, y) pairs to a uniform grid using PCHIP or linear.
+    /**Resample (x, y) pairs to a uniform grid using PCHIP or linear. */
     std::vector<double> resampleUniform(
         const std::vector<double>& values,
         const std::vector<double>& abscissa,
         double xMin, double xMax,
         std::size_t numPoints) const;
 
-    /// PCHIP interpolation at a single query point.
+    /**PCHIP interpolation at a single query point. */
     double pchipInterpolate(
         const std::vector<double>& xs,
         const std::vector<double>& ys,
         double xq) const;
 
-    /// Linear interpolation at a single query point.
+    /**Linear interpolation at a single query point. */
     double linearInterpolate(
         const std::vector<double>& xs,
         const std::vector<double>& ys,
         double xq) const;
 
-    /// Compute path-geometry frequencies and match to spectral peaks.
+    /**Compute path-geometry frequencies and match to spectral peaks. */
     PathGeometryCorrelation computeGeometryCorrelation(
         const PiecewiseNurbsPath& path,
         const std::vector<GCodeExport::TrajectorySample>& desired,
         const std::vector<SpectralPeak>& spatialPeaks) const;
 
-    /// Compute cross-domain comparison for one component.
+    /**Compute cross-domain comparison for one component. */
     CrossDomainComparison computeCrossDomain(
         const ComponentSpectrum& spatial,
         const ComponentSpectrum& temporal,
         double avgVelocity) const;
 
-    /// Detect active axes from the desired trajectory.
+    /**Detect active axes from the desired trajectory. */
     std::vector<int> detectActiveAxes(
         const std::vector<GCodeExport::TrajectorySample>& desired) const;
 
-    /// Compute Frenet-decomposed errors for all samples.
+    /**Compute Frenet-decomposed errors for all samples. */
     struct FrenetErrors {
         std::vector<double> arcLengths;
         std::vector<double> times;

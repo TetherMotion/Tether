@@ -7,9 +7,11 @@
 namespace Tether {
 namespace TUI {
 
-/// Word-wrap `text` to `width` columns: split on newlines first, then wrap
-/// each line at the last space that still fits (hard-break when no space).
-/// Empty input lines are preserved as empty output lines.
+/**
+ * Word-wrap `text` to `width` columns: split on newlines first, then wrap
+ * each line at the last space that still fits (hard-break when no space).
+ * Empty input lines are preserved as empty output lines.
+ */
 inline std::vector<std::string> wrapText(const std::string& text, int width) {
     std::vector<std::string> lines;
     if (width <= 0) return lines;
@@ -32,7 +34,7 @@ inline std::vector<std::string> wrapText(const std::string& text, int width) {
     return lines;
 }
 
-/// Pad or truncate a string to a fixed display width (byte count).
+/**Pad or truncate a string to a fixed display width (byte count). */
 inline std::string padToWidth(const std::string& s, size_t w) {
     if (s.size() >= w) return s.substr(0, w);
     return s + std::string(w - s.size(), ' ');

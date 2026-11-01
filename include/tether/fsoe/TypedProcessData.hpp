@@ -48,19 +48,21 @@ public:
         return connection_.exchangeWith(slave, current_time_ms);
     }
 
-    /// Typed FSoE exchange with a slave emulator, with profile-specific hooks.
-    ///
-    /// Encodes @p payload, runs the raw master↔slave frame exchange.  @p mid_exchange
-    /// is invoked after the master→slave frame has been delivered to the slave but
-    /// before the slave→master frame is read (e.g. for the SafeMotionServoEmulator's
-    /// command/status synchronization).  @p on_success is invoked only when the
-    /// raw frame exchange succeeds (e.g. to clear edge-triggered pulse bits).
-    ///
-    /// The decoded slave→main payload is not returned here because it may be
-    /// unavailable (std::nullopt) during the handshake phase even when the raw
-    /// exchange succeeds.  Call read() separately to obtain it.
-    ///
-    /// @return true if the raw frame exchange succeeded.
+    /**
+     * Typed FSoE exchange with a slave emulator, with profile-specific hooks.
+     *
+     * Encodes @p payload, runs the raw master↔slave frame exchange.  @p mid_exchange
+     * is invoked after the master→slave frame has been delivered to the slave but
+     * before the slave→master frame is read (e.g. for the SafeMotionServoEmulator's
+     * command/status synchronization).  @p on_success is invoked only when the
+     * raw frame exchange succeeds (e.g. to clear edge-triggered pulse bits).
+     *
+     * The decoded slave→main payload is not returned here because it may be
+     * unavailable (std::nullopt) during the handshake phase even when the raw
+     * exchange succeeds.  Call read() separately to obtain it.
+     *
+     * @return true if the raw frame exchange succeeded.
+     */
     bool exchangeWith(
         FSoESlave& slave,
         const MainToSlavePayload& payload,
@@ -108,19 +110,21 @@ public:
         return true;
     }
 
-    /// Typed FSoE-over-PDO exchange for real drive communication.
-    ///
-    /// Encodes @p payload into the connection's safe outputs, runs the FSoE
-    /// state machine, builds the master→slave frame into @p rx_pdo_out
-    /// (the RxPDO buffer), and processes the slave→master frame from
-    /// @p tx_pdo_in (the TxPDO buffer).  @p on_success is invoked only when
-    /// the raw exchange succeeds (e.g. to clear edge-triggered pulse bits).
-    ///
-    /// The decoded slave→main payload is not returned here because it may be
-    /// unavailable (std::nullopt) during the handshake phase even when the raw
-    /// exchange succeeds.  Call read() separately to obtain it.
-    ///
-    /// @return true if the raw frame exchange succeeded.
+    /**
+     * Typed FSoE-over-PDO exchange for real drive communication.
+     *
+     * Encodes @p payload into the connection's safe outputs, runs the FSoE
+     * state machine, builds the master→slave frame into @p rx_pdo_out
+     * (the RxPDO buffer), and processes the slave→master frame from
+     * @p tx_pdo_in (the TxPDO buffer).  @p on_success is invoked only when
+     * the raw exchange succeeds (e.g. to clear edge-triggered pulse bits).
+     *
+     * The decoded slave→main payload is not returned here because it may be
+     * unavailable (std::nullopt) during the handshake phase even when the raw
+     * exchange succeeds.  Call read() separately to obtain it.
+     *
+     * @return true if the raw frame exchange succeeded.
+     */
     bool exchangeViaPDO(
         uint8_t* rx_pdo_out, size_t rx_pdo_max,
         const uint8_t* tx_pdo_in, size_t tx_pdo_len,

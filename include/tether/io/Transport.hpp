@@ -30,41 +30,49 @@ class ITransport {
 public:
     virtual ~ITransport() = default;
 
-    /// Send exactly `len` bytes. Returns true on success.
-    /// @param data Bytes to send.
-    /// @param len Number of bytes in @p data.
+    /**
+     * Send exactly `len` bytes. Returns true on success.
+     * @param data Bytes to send.
+     * @param len Number of bytes in @p data.
+     */
     virtual bool send(const uint8_t* data, size_t len) = 0;
 
-    /// Receive up to `maxLen` bytes into `buf`.
-    /// Returns the number of bytes received, or 0 on disconnect/error.
-    /// May block for up to `timeoutMs` milliseconds (0 = non-blocking poll).
-    /// @param buf Destination buffer.
-    /// @param maxLen Capacity of @p buf in bytes.
-    /// @param timeoutMs Maximum wait time [ms]; 0 polls without blocking.
+    /**
+     * Receive up to `maxLen` bytes into `buf`.
+     * Returns the number of bytes received, or 0 on disconnect/error.
+     * May block for up to `timeoutMs` milliseconds (0 = non-blocking poll).
+     * @param buf Destination buffer.
+     * @param maxLen Capacity of @p buf in bytes.
+     * @param timeoutMs Maximum wait time [ms]; 0 polls without blocking.
+     */
     virtual size_t receive(uint8_t* buf, size_t maxLen, uint32_t timeoutMs) = 0;
 
-    /// Receive a complete message into `out`.
-    ///
-    /// For message-oriented transports (e.g. WebSocket), this returns one
-    /// complete transport-level message (one WS frame).  For byte-stream
-    /// transports, this is not supported and returns false — the caller
-    /// should use `receive()` with an external framing layer (e.g. SLIP).
-    ///
-    /// Returns true if a message was received, false on timeout or disconnect.
-    /// The default implementation returns false (not supported).
-    ///
-    /// @param out Destination buffer receiving the message.
-    /// @param timeoutMs Maximum wait time [ms]; 0 polls without blocking.
+    /**
+     * Receive a complete message into `out`.
+     *
+     * For message-oriented transports (e.g. WebSocket), this returns one
+     * complete transport-level message (one WS frame).  For byte-stream
+     * transports, this is not supported and returns false — the caller
+     * should use `receive()` with an external framing layer (e.g. SLIP).
+     *
+     * Returns true if a message was received, false on timeout or disconnect.
+     * The default implementation returns false (not supported).
+     *
+     * @param out Destination buffer receiving the message.
+     * @param timeoutMs Maximum wait time [ms]; 0 polls without blocking.
+     */
     virtual bool receiveMessage(std::vector<uint8_t>& out, uint32_t timeoutMs) {
         (void)out; (void)timeoutMs;
         return false;
     }
 
-    /// Close the connection.
+    /**Close the connection. */
     virtual void close() = 0;
 
-    /// Returns true if the transport is connected.
-    /// @return true while the link is usable.
+    /**
+     * Returns true if the transport is connected.
+     * @return true while the link is usable.
+     */
     virtual bool isConnected() const = 0;
 };
 
@@ -78,25 +86,33 @@ class ITransportServer {
 public:
     virtual ~ITransportServer() = default;
 
-    /// Start listening. Returns true on success.
-    /// @return true when the server bound its endpoint.
+    /**
+     * Start listening. Returns true on success.
+     * @return true when the server bound its endpoint.
+     */
     virtual bool start() = 0;
 
-    /// Stop listening and reject new connections.
+    /**Stop listening and reject new connections. */
     virtual void stop() = 0;
 
-    /// Accept a new connection. Blocks until a connection arrives or stop() is called.
-    /// Returns nullptr if the server was stopped or an error occurred.
-    /// @return Transport for the new connection, or nullptr.
+    /**
+     * Accept a new connection. Blocks until a connection arrives or stop() is called.
+     * Returns nullptr if the server was stopped or an error occurred.
+     * @return Transport for the new connection, or nullptr.
+     */
     virtual std::unique_ptr<ITransport> accept() = 0;
 
-    /// Returns true if the server is listening.
-    /// @return true while the server accepts connections.
+    /**
+     * Returns true if the server is listening.
+     * @return true while the server accepts connections.
+     */
     virtual bool isListening() const = 0;
 };
 
-/// Factory function type for creating a serial transport.
-/// Parameters: port path, baud rate.
+/**
+ * Factory function type for creating a serial transport.
+ * Parameters: port path, baud rate.
+ */
 using SerialTransportFactory = std::function<
     std::unique_ptr<ITransport>(const char* port, uint32_t baudRate)>;
 

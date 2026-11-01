@@ -68,7 +68,7 @@ namespace Platform = Tether::Platform;
 static std::atomic<bool> g_cancel{false};
 // SignalHandler sets this to true on SIGINT/SIGTERM.
 
-/// Compact per-module bit rendering: "s1:1001 s2:0000".
+/**Compact per-module bit rendering: "s1:1001 s2:0000". */
 static std::string moduleStates(const Beckhoff::MultiEL1014<>& ins) {
     std::string out;
     for (size_t m = 0; m < ins.moduleCount(); ++m) {

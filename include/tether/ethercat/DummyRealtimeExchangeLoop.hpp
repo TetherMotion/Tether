@@ -37,15 +37,15 @@ namespace EtherCAT {
 
 class DummyRealtimeExchangeLoop {
 public:
-    /// Callback invoked every cycle.  Return value is ignored.
+    /**Callback invoked every cycle.  Return value is ignored. */
     using ExchangeFunc = std::function<void()>;
 
-    /// Configuration
+    /**Configuration */
     struct Config {
-        /// Cycle period in microseconds (default: 1000 = 1 kHz).
+        /**Cycle period in microseconds (default: 1000 = 1 kHz). */
         uint32_t cycle_period_us = 1000;
 
-        /// Thread name (informational, for logging if desired).
+        /**Thread name (informational, for logging if desired). */
         const char* name = "dummy_rt_exchange";
     };
 
@@ -77,7 +77,7 @@ public:
     DummyRealtimeExchangeLoop(DummyRealtimeExchangeLoop&&) = delete;
     DummyRealtimeExchangeLoop& operator=(DummyRealtimeExchangeLoop&&) = delete;
 
-    /// Start the exchange thread.  Returns false if already running.
+    /**Start the exchange thread.  Returns false if already running. */
     bool start() {
         if (running_.load(std::memory_order_acquire)) return false;
         running_.store(true, std::memory_order_release);
@@ -85,20 +85,20 @@ public:
         return true;
     }
 
-    /// Stop the exchange thread and join it.
+    /**Stop the exchange thread and join it. */
     void stop() {
         if (!running_.load(std::memory_order_acquire)) return;
         running_.store(false, std::memory_order_release);
         if (thread_.joinable()) thread_.join();
     }
 
-    /// Check if the loop is currently running.
+    /**Check if the loop is currently running. */
     bool isRunning() const { return running_.load(std::memory_order_acquire); }
 
-    /// Get the configured cycle period in microseconds.
+    /**Get the configured cycle period in microseconds. */
     uint32_t cyclePeriodUs() const { return config_.cycle_period_us; }
 
-    /// Get the number of cycles completed so far.
+    /**Get the number of cycles completed so far. */
     uint64_t cycleCount() const { return cycle_count_.load(std::memory_order_relaxed); }
 
 private:

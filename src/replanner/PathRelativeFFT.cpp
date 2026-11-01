@@ -23,7 +23,7 @@ namespace {
 // Utility functions
 //=============================================================================
 
-/// Next power of 2 >= n.
+/**Next power of 2 >= n. */
 std::size_t nextPow2(std::size_t n) {
     if (n == 0) return 1;
     std::size_t p = 1;
@@ -31,14 +31,14 @@ std::size_t nextPow2(std::size_t n) {
     return p;
 }
 
-/// Sign function.
+/**Sign function. */
 double sign(double x) {
     if (x > 0) return 1.0;
     if (x < 0) return -1.0;
     return 0.0;
 }
 
-/// Pearson correlation coefficient between two vectors.
+/**Pearson correlation coefficient between two vectors. */
 double pearsonCorrelation(const std::vector<double>& a, const std::vector<double>& b) {
     auto n = std::min(a.size(), b.size());
     if (n == 0) return 0.0;

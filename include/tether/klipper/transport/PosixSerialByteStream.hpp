@@ -32,22 +32,26 @@
 
 namespace tether::klipper::transport {
 
-/// @brief Adapter wrapping tether::io::ISerialDriver into IByteStreamTransport.
+/**@brief Adapter wrapping tether::io::ISerialDriver into IByteStreamTransport. */
 class PosixSerialByteStream : public IByteStreamTransport {
 public:
-    /// @brief Construct with a serial driver, port name, and baud rate.
-    /// @param driver The serial driver (takes ownership).
-    /// @param port Device path (e.g. "/dev/ttyUSB0").
-    /// @param baudRate Baud rate (e.g. 250000).
+    /**
+     * @brief Construct with a serial driver, port name, and baud rate.
+     * @param driver The serial driver (takes ownership).
+     * @param port Device path (e.g. "/dev/ttyUSB0").
+     * @param baudRate Baud rate (e.g. 250000).
+     */
     PosixSerialByteStream(std::unique_ptr<tether::io::ISerialDriver> driver,
                           std::string port, uint32_t baudRate)
         : driver_(std::move(driver))
         , port_(std::move(port))
         , baudRate_(baudRate) {}
 
-    /// @brief Construct with default PosixSerialDriver.
-    /// @param port Device path (e.g. "/dev/ttyUSB0").
-    /// @param baudRate Baud rate (e.g. 250000).
+    /**
+     * @brief Construct with default PosixSerialDriver.
+     * @param port Device path (e.g. "/dev/ttyUSB0").
+     * @param baudRate Baud rate (e.g. 250000).
+     */
     PosixSerialByteStream(std::string port, uint32_t baudRate)
         : driver_(std::make_unique<tether::io::PosixSerialDriver>())
         , port_(std::move(port))
@@ -90,10 +94,10 @@ public:
         return driver_->read(out, maxLen, timeoutMs);
     }
 
-    /// @return The port name.
+    /**@return The port name. */
     const std::string& port() const { return port_; }
 
-    /// @return The baud rate.
+    /**@return The baud rate. */
     uint32_t baudRate() const { return baudRate_; }
 
 private:

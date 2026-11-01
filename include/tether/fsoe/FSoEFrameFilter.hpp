@@ -55,53 +55,67 @@ class IFSoEFrameFilter {
 public:
     virtual ~IFSoEFrameFilter() = default;
 
-    /// Reset chain-tracking state (call when the channel's processor
-    /// resets — e.g. after an FSoE Reset command cycle).
+    /**
+     * Reset chain-tracking state (call when the channel's processor
+     * resets — e.g. after an FSoE Reset command cycle).
+     */
     virtual void reset() {}
 
-    /// Observe the master's latest outgoing frame slice for this
-    /// channel — feeds cross-direction CRC chain tracking.
-    /// @param frame Frame bytes as sent by the master.
-    /// @param len Number of bytes in @p frame.
+    /**
+     * Observe the master's latest outgoing frame slice for this
+     * channel — feeds cross-direction CRC chain tracking.
+     * @param frame Frame bytes as sent by the master.
+     * @param len Number of bytes in @p frame.
+     */
     virtual void noteMasterFrame(const uint8_t* frame, size_t len) {
         (void)frame; (void)len;
     }
 
-    /// Observe the channel's emitted slave→master frame (as the master
-    /// received it) — feeds cross-direction CRC chain tracking.
-    /// @param frame Frame bytes as received by the master.
-    /// @param len Number of bytes in @p frame.
+    /**
+     * Observe the channel's emitted slave→master frame (as the master
+     * received it) — feeds cross-direction CRC chain tracking.
+     * @param frame Frame bytes as received by the master.
+     * @param len Number of bytes in @p frame.
+     */
     virtual void noteSlaveFrame(const uint8_t* frame, size_t len) {
         (void)frame; (void)len;
     }
 
-    /// slave→master: transform the slave's raw TX frame into the frame
-    /// the master expects.  Returns the output length (0 = no valid
-    /// frame this cycle — the caller should emit zeros/a fail-safe
-    /// placeholder).
-    /// @param in Raw slave TX frame.
-    /// @param in_len Length of @p in in bytes.
-    /// @param out Destination buffer for the rewritten frame.
-    /// @param out_cap Capacity of @p out in bytes.
+    /**
+     * slave→master: transform the slave's raw TX frame into the frame
+     * the master expects.  Returns the output length (0 = no valid
+     * frame this cycle — the caller should emit zeros/a fail-safe
+     * placeholder).
+     * @param in Raw slave TX frame.
+     * @param in_len Length of @p in in bytes.
+     * @param out Destination buffer for the rewritten frame.
+     * @param out_cap Capacity of @p out in bytes.
+     */
     virtual size_t filterSlaveToMaster(const uint8_t* in, size_t in_len,
                                        uint8_t* out, size_t out_cap) = 0;
 
-    /// master→slave: transform the master's command frame for the slave.
-    /// Same wire layout for LW1/LW2 — passthrough in all current filters.
-    /// @param in Master command frame.
-    /// @param in_len Length of @p in in bytes.
-    /// @param out Destination buffer for the slave-facing frame.
-    /// @param out_cap Capacity of @p out in bytes.
+    /**
+     * master→slave: transform the master's command frame for the slave.
+     * Same wire layout for LW1/LW2 — passthrough in all current filters.
+     * @param in Master command frame.
+     * @param in_len Length of @p in in bytes.
+     * @param out Destination buffer for the slave-facing frame.
+     * @param out_cap Capacity of @p out in bytes.
+     */
     virtual size_t filterMasterToSlave(const uint8_t* in, size_t in_len,
                                        uint8_t* out, size_t out_cap) = 0;
 
-    /// Short diagnostic name for logging.
-    /// @return Static filter name.
+    /**
+     * Short diagnostic name for logging.
+     * @return Static filter name.
+     */
     virtual const char* name() const = 0;
 
-    /// False when the filter re-serializes frames (needs CRC chain
-    /// tracking via noteMasterFrame/noteSlaveFrame).
-    /// @return true when frames pass through unchanged.
+    /**
+     * False when the filter re-serializes frames (needs CRC chain
+     * tracking via noteMasterFrame/noteSlaveFrame).
+     * @return true when frames pass through unchanged.
+     */
     virtual bool isTransparent() const { return true; }
 };
 

@@ -188,23 +188,23 @@ namespace GCode {
  * @brief Interpreter execution mode
  */
 enum class InterpreterMode {
-    AUTO,       ///< Running program from file
-    MDI,        ///< Manual Data Input (single lines)
-    STEP,       ///< Single-step through program
-    VERIFY      ///< Verify only, no motion output
+    AUTO, /**< Running program from file */
+    MDI, /**< Manual Data Input (single lines) */
+    STEP, /**< Single-step through program */
+    VERIFY /**< Verify only, no motion output */
 };
 
 /**
  * @brief Interpreter state
  */
 enum class InterpreterState {
-    IDLE,           ///< No program loaded
-    READY,          ///< Program loaded, ready to run
-    RUNNING,        ///< Executing program
-    PAUSED,         ///< Paused mid-execution
-    FINISHED,       ///< Program completed (M30/M2)
-    ERROR,          ///< Error occurred
-    STOPPED         ///< Emergency stop
+    IDLE, /**< No program loaded */
+    READY, /**< Program loaded, ready to run */
+    RUNNING, /**< Executing program */
+    PAUSED, /**< Paused mid-execution */
+    FINISHED, /**< Program completed (M30/M2) */
+    ERROR, /**< Error occurred */
+    STOPPED /**< Emergency stop */
 };
 
 /**
@@ -216,17 +216,25 @@ enum class InterpreterState {
  * dialect.
  */
 enum class Feature {
-    /// G30 = single-point Z probe at current/optional XY (Marlin/RepRap)
-    /// instead of the RS274 move to the stored reference point.
+    /**
+     * G30 = single-point Z probe at current/optional XY (Marlin/RepRap)
+     * instead of the RS274 move to the stored reference point.
+     */
     G30_PROBE,
-    /// G80 = cancel bed leveling / mesh compensation (Marlin/RepRap)
-    /// instead of cancelling the modal canned cycle.
+    /**
+     * G80 = cancel bed leveling / mesh compensation (Marlin/RepRap)
+     * instead of cancelling the modal canned cycle.
+     */
     G80_CANCEL_LEVELING,
-    /// G76 = Fanuc lathe threading cycle (contour params) instead of the
-    /// RS274 fine-boring canned cycle.
+    /**
+     * G76 = Fanuc lathe threading cycle (contour params) instead of the
+     * RS274 fine-boring canned cycle.
+     */
     G76_LATHE_THREADING,
-    /// G70/G71 = inch/metric units (Fanuc lathe dialects) instead of the
-    /// lathe finishing/rough-turning cycles.
+    /**
+     * G70/G71 = inch/metric units (Fanuc lathe dialects) instead of the
+     * lathe finishing/rough-turning cycles.
+     */
     G70_G71_UNITS
 };
 
@@ -322,10 +330,10 @@ using RealtimeCallback = std::function<Error(char command)>;
  * @brief Master interpreter configuration
  */
 struct InterpreterConfig {
-    /// Parser configuration
+    /**Parser configuration */
     ParserConfig parser;
     
-    /// Motion configurations
+    /**Motion configurations */
     LinearMotionConfig linearMotion;
     ArcMotionConfig arcMotion;
     SplineConfig spline;
@@ -336,25 +344,25 @@ struct InterpreterConfig {
     TrochoidalConfig trochoidal;
     VolumetricConfig volumetric;
     
-    /// Tool table
+    /**Tool table */
     size_t maxTools{MAX_TOOLS};
     std::string toolTableFile;
     
-    /// Coordinate persistence
+    /**Coordinate persistence */
     std::string wcsFile;
     
-    /// O-code search paths
+    /**O-code search paths */
     std::vector<std::string> subSearchPaths;
     
-    /// Feature flags
+    /**Feature flags */
     FeatureFlags features;
     
-    /// Error handling
+    /**Error handling */
     bool stopOnError{true};
     bool skipOptionalBlocks{false};  // Block delete '/'
     bool m1OptionalStop{false};      // M1 behavior
     
-    /// Execution limits
+    /**Execution limits */
     size_t maxProgramSize{10000000};  // 10MB
     size_t maxLineLength{1024};
     uint32_t maxExecutionTime{0};     // seconds, 0 = unlimited
@@ -506,7 +514,7 @@ public:
      * @return Live modal/machine state (feed, plane, WCS, tool, ...).
      */
     const MachineState& getMachineState() const { return m_machineState; }
-    /// @return Mutable modal/machine state for supervisory adjustments.
+    /**@return Mutable modal/machine state for supervisory adjustments. */
     MachineState& getMachineState() { return m_machineState; }
     
     /**
@@ -530,7 +538,7 @@ public:
      * @param mode Auto (program) or MDI (line-at-a-time).
      */
     void setMode(InterpreterMode mode) { m_mode = mode; }
-    /// @return Current execution mode.
+    /**@return Current execution mode. */
     InterpreterMode getMode() const { return m_mode; }
     
     /**
@@ -538,7 +546,7 @@ public:
      * @param dryRun true to execute the program without emitting motion.
      */
     void setDryRun(bool dryRun) { m_dryRun = dryRun; }
-    /// @return true while dry-run mode is active.
+    /**@return true while dry-run mode is active. */
     bool isDryRun() const { return m_dryRun; }
 
     // ========================================================================
@@ -548,36 +556,54 @@ public:
     // G-code blocks and may be invoked while a program is executing.
     // ========================================================================
 
-    /// '!' — pause motion after the current segment
-    /// @return Error::OK when the hold was accepted.
+    /**
+     * '!' — pause motion after the current segment
+     * @return Error::OK when the hold was accepted.
+     */
     Error feedHold();
-    /// '~' — resume after feed hold
-    /// @return Error::OK when motion resumed.
+    /**
+     * '~' — resume after feed hold
+     * @return Error::OK when motion resumed.
+     */
     Error cycleResume();
-    /// Ctrl-X (0x18) — soft reset: abort program, clear errors
-    /// @return Error::OK after the reset.
+    /**
+     * Ctrl-X (0x18) — soft reset: abort program, clear errors
+     * @return Error::OK after the reset.
+     */
     Error softReset();
-    /// 0x85 — cancel an in-progress jog
-    /// @return Error::OK when a jog was cancelled.
+    /**
+     * 0x85 — cancel an in-progress jog
+     * @return Error::OK when a jog was cancelled.
+     */
     Error jogCancel();
-    /// '?' — GRBL-style status line, e.g. "<Run|MPos:1.0,2.0,3.0|FS:500,1000>"
-    /// @return Status line text.
+    /**
+     * '?' — GRBL-style status line, e.g. "<Run|MPos:1.0,2.0,3.0|FS:500,1000>"
+     * @return Status line text.
+     */
     std::string statusReport() const;
-    /// '$...' — GRBL system command ($G, $#, $I, $X, $H, $N, $J=, $$)
-    /// @param command System command without the leading '$'.
-    /// @return Error::OK, or an unsupported-command error.
+    /**
+     * '$...' — GRBL system command ($G, $#, $I, $X, $H, $N, $J=, $$)
+     * @param command System command without the leading '$'.
+     * @return Error::OK, or an unsupported-command error.
+     */
     Error systemCommand(const std::string& command);
-    /// Dispatch a single real-time character ('!', '~', '?', 0x18, 0x85)
-    /// @param command Real-time character received on the stream.
-    /// @return Error::OK, or an unknown-character error.
+    /**
+     * Dispatch a single real-time character ('!', '~', '?', 0x18, 0x85)
+     * @param command Real-time character received on the stream.
+     * @return Error::OK, or an unknown-character error.
+     */
     Error processRealtimeChar(char command);
-    /// Startup blocks set via `$N0=`/`$N1=` (GRBL)
-    /// @return Startup lines executed on reset, in order.
+    /**
+     * Startup blocks set via `$N0=`/`$N1=` (GRBL)
+     * @return Startup lines executed on reset, in order.
+     */
     const std::vector<std::string>& getStartupLines() const {
         return m_startupLines;
     }
-    /// Text replies from systemCommand()/status queries
-    /// @param callback Sink for the replies; null clears it.
+    /**
+     * Text replies from systemCommand()/status queries
+     * @param callback Sink for the replies; null clears it.
+     */
     void setRealtimeCallback(RealtimeCallback callback) {
         m_realtimeCallback = std::move(callback);
     }
@@ -593,9 +619,9 @@ public:
      *
      * Default: false (tessellate, backward compatible).
      */
-    /// @param emit true to emit one arc segment instead of tessellating.
+    /**@param emit true to emit one arc segment instead of tessellating. */
     void setEmitArcSegments(bool emit) { m_emitArcSegments = emit; }
-    /// @return true when arcs are emitted as single arc segments.
+    /**@return true when arcs are emitted as single arc segments. */
     bool emitArcSegments() const { return m_emitArcSegments; }
     
     /**
@@ -603,7 +629,7 @@ public:
      * @param enabled true to skip blocks prefixed with `/`.
      */
     void setBlockDelete(bool enabled);
-    /// @return true while block delete (`/`) is active.
+    /**@return true while block delete (`/`) is active. */
     bool isBlockDeleteEnabled() const;
     
     /**
@@ -611,7 +637,7 @@ public:
      * @param enabled true to stop at `M1`.
      */
     void setOptionalStop(bool enabled);
-    /// @return true while optional stop (`M1`) is active.
+    /**@return true while optional stop (`M1`) is active. */
     bool isOptionalStopEnabled() const;
     
     // ========================================================================
@@ -658,7 +684,7 @@ public:
      * @return Mutable variable system holding #-parameters and modal state.
      */
     VariableSystem& getVariables() { return m_variables; }
-    /// @return Read-only variable system.
+    /**@return Read-only variable system. */
     const VariableSystem& getVariables() const { return m_variables; }
     
     /**
@@ -752,9 +778,11 @@ public:
     const MarlinMachineState& marlinState() const { return m_marlinState; }
     MarlinMCodeHandler& marlinHandler() { return m_marlinHandler; }
 
-    /// @brief GRBL `$n=` setting value, or nullopt if unset.
-    /// @param n Setting number.
-    /// @return Setting value, or nullopt when unset.
+    /**
+     * @brief GRBL `$n=` setting value, or nullopt if unset.
+     * @param n Setting number.
+     * @return Setting value, or nullopt when unset.
+     */
     std::optional<double> grblSetting(int n) const {
         auto it = m_grblSettings.find(n);
         return it != m_grblSettings.end() ? std::optional{it->second}
@@ -806,22 +834,22 @@ private:
     // Stored canned-cycle parameters (modal — a subsequent block with only
     // axis words repeats the cycle at the new location).
     struct CannedParams {
-        double z{0};            ///< Bottom position (drill axis, work coords)
+        double z{0}; /**< Bottom position (drill axis, work coords) */
         bool zSet{false};
-        double r{0};            ///< R plane (drill axis, work coords)
+        double r{0}; /**< R plane (drill axis, work coords) */
         bool rSet{false};
-        double q{0};            ///< Peck depth / bore shift magnitude
-        double dwell{0};        ///< P word dwell (seconds)
-        double shiftI{0};       ///< G76/G87 shift
+        double q{0}; /**< Peck depth / bore shift magnitude */
+        double dwell{0}; /**< P word dwell (seconds) */
+        double shiftI{0}; /**< G76/G87 shift */
         double shiftJ{0};
-        int32_t repeat{1};      ///< L word
+        int32_t repeat{1}; /**< L word */
     };
     CannedParams m_cannedParams;
     // Cutter compensation (G41/G42) tracking
-    bool m_compHasOffset{false};    ///< A compensated move was emitted
-    double m_compLastX{0.0};        ///< Last offset endpoint (work coords)
+    bool m_compHasOffset{false}; /**< A compensated move was emitted */
+    double m_compLastX{0.0}; /**< Last offset endpoint (work coords) */
     double m_compLastY{0.0};
-    double m_compLastDX{1.0};       ///< Last move direction (unit)
+    double m_compLastDX{1.0}; /**< Last move direction (unit) */
     double m_compLastDY{0.0};
 
     bool m_cannedActive{false};
@@ -867,20 +895,22 @@ private:
     Error handleArc(const Block& block, const Position& target,
                     MotionMode mode, double unitScale,
                     std::vector<MotionSegment>& segments);
-    /// Expand a canned cycle (G73/G74/G76/G81–G89) into motion segments.
+    /**Expand a canned cycle (G73/G74/G76/G81–G89) into motion segments. */
     Error executeCannedCycle(MotionMode cycle, const Block& block,
                              const Position& target, double unitScale,
                              std::vector<MotionSegment>& segments);
-    /// Execute a probe move (G38.2–G38.5); fills probe result parameters.
+    /**Execute a probe move (G38.2–G38.5); fills probe result parameters. */
     Error executeProbe(MotionMode probeType, const Block& block,
                        const Position& target, double unitScale,
                        std::vector<MotionSegment>& segments);
-    /// Execute a cubic (G5) or quadratic (G5.1) spline segment.
+    /**Execute a cubic (G5) or quadratic (G5.1) spline segment. */
     Error executeSpline(MotionMode mode, const Block& block,
                         const Position& target, double unitScale,
                         std::vector<MotionSegment>& segments);
-    /// Handle NURBS blocks: G5.2 starts collection, plain axis blocks add
-    /// control points, G5.3 tessellates into linear segments.
+    /**
+     * Handle NURBS blocks: G5.2 starts collection, plain axis blocks add
+     * control points, G5.3 tessellates into linear segments.
+     */
     Error executeNurbs(int nurbsG, const Block& block,
                        const Position& target, double unitScale,
                        std::vector<MotionSegment>& segments);
@@ -894,15 +924,17 @@ private:
     
     // M-code dispatch
     Error dispatchMCode(int32_t mcode, const Block& block);
-    /// Route a Marlin/RepRap-domain M-code through MarlinMCodeHandler,
-    /// then still invoke the user M-code hook (hardware side effects).
+    /**
+     * Route a Marlin/RepRap-domain M-code through MarlinMCodeHandler,
+     * then still invoke the user M-code hook (hardware side effects).
+     */
     Error dispatchMarlinMCode(int32_t mcode, const Block& block);
     
     // State management
     void updateModalState(const Block& block);
     void updatePositionVariables();
 
-    /// @brief Check if the block has any motion axis words (X/Y/Z/A/B/C/U/V/W).
+    /**@brief Check if the block has any motion axis words (X/Y/Z/A/B/C/U/V/W). */
     bool hasMotionWords(const Block& block) const;
 
     // Initialization
@@ -918,28 +950,30 @@ private:
     // emitting MotionSegments.
     // ------------------------------------------------------------------
 
-    /// @brief Dispatch G52 (local offset) to the coordinate manager.
+    /**@brief Dispatch G52 (local offset) to the coordinate manager. */
     Error dispatchG52(const Block& block) {
         return m_coordinates.processG52(block, m_machineState);
     }
 
-    /// @brief Dispatch G68 (coordinate rotation) to the coordinate manager.
+    /**@brief Dispatch G68 (coordinate rotation) to the coordinate manager. */
     Error dispatchG68(const Block& block) {
         return m_coordinates.processG68(block, m_machineState);
     }
 
-    /// @brief Dispatch G69 (cancel rotation) to the coordinate manager.
+    /**@brief Dispatch G69 (cancel rotation) to the coordinate manager. */
     Error dispatchG69() {
         return m_coordinates.processG69(m_machineState);
     }
 
-    /// @brief Dispatch G51 (scaling) to the coordinate manager.
+    /**@brief Dispatch G51 (scaling) to the coordinate manager. */
     Error dispatchG51(const Block& block) {
         return m_coordinates.processG51(block, m_machineState);
     }
 
-    /// @brief Dispatch G50. Fanuc lathe dialect: `G50 S<rpm>` sets the
-    ///        spindle-speed clamp; bare G50 cancels scaling (RS274).
+    /**
+     * @brief Dispatch G50. Fanuc lathe dialect: `G50 S<rpm>` sets the
+     *        spindle-speed clamp; bare G50 cancels scaling (RS274).
+     */
     Error dispatchG50(const Block& block) {
         if (block.hasWord(WordLetter::S)) {
             m_machineState.maxSpindleSpeed = block.getWord(WordLetter::S);
@@ -948,74 +982,90 @@ private:
         return m_coordinates.processG50(m_machineState);
     }
 
-    /// @brief Dispatch G51.1 (programmable mirror image).
+    /**@brief Dispatch G51.1 (programmable mirror image). */
     Error dispatchG51_1(const Block& block) {
         return m_coordinates.processG51_1(block, m_machineState);
     }
 
-    /// @brief Dispatch G50.1 (cancel mirror image).
+    /**@brief Dispatch G50.1 (cancel mirror image). */
     Error dispatchG50_1(const Block& block) {
         return m_coordinates.processG50_1(block, m_machineState);
     }
 
-    /// @brief Haas G150 generic pocket milling: raster-clear the pocket
-    ///        bounded by the XY profile of subprogram P.
-    ///        Words: `P<O-num>`, `Z<depth>`, `R<clearance>`,
-    ///        `I`/`J<stepover>`, `Q<Z increment>`, `K<finish allowance>`,
-    ///        `F<feed>`, `S<rpm>`.
+    /**
+     * @brief Haas G150 generic pocket milling: raster-clear the pocket
+     *        bounded by the XY profile of subprogram P.
+     *        Words: `P<O-num>`, `Z<depth>`, `R<clearance>`,
+     *        `I`/`J<stepover>`, `Q<Z increment>`, `K<finish allowance>`,
+     *        `F<feed>`, `S<rpm>`.
+     */
     Error dispatchG150(const Block& block, std::vector<MotionSegment>& segments);
-    /// @brief Collect the closed XY boundary polygon from subprogram
-    ///        @p prog (G0/G1 endpoints; G2/G3 tessellated).
+    /**
+     * @brief Collect the closed XY boundary polygon from subprogram
+     *        @p prog (G0/G1 endpoints; G2/G3 tessellated).
+     */
     Error collectPocketBoundary(int32_t prog, double unitScale,
                                 std::vector<std::pair<double, double>>& pts);
 
-    /// @brief Fanuc lathe cycles (single-line form). The finish contour is
-    ///        the block range N<P>..N<Q> in the current program.
-    ///        G71 rough turning: cuts along Z, levels spaced in X by D.
-    ///        G72 rough facing: cuts along X, levels spaced in Z by D.
-    ///        G73 pattern repeat: traces the contour R times with the
-    ///        U/W relief divided across passes.
-    ///        G70 finishing: traces the contour once at feed rate.
-    ///        Words: P/Q<block range>, U<X allowance>, W<Z allowance>,
-    ///        D<depth of cut>, R<divisions> (G73), F<feed>, S<rpm>.
+    /**
+     * @brief Fanuc lathe cycles (single-line form). The finish contour is
+     *        the block range N<P>..N<Q> in the current program.
+     *        G71 rough turning: cuts along Z, levels spaced in X by D.
+     *        G72 rough facing: cuts along X, levels spaced in Z by D.
+     *        G73 pattern repeat: traces the contour R times with the
+     *        U/W relief divided across passes.
+     *        G70 finishing: traces the contour once at feed rate.
+     *        Words: P/Q<block range>, U<X allowance>, W<Z allowance>,
+     *        D<depth of cut>, R<divisions> (G73), F<feed>, S<rpm>.
+     */
     Error dispatchG70(const Block& block, std::vector<MotionSegment>& segments);
     Error dispatchG71(const Block& block, std::vector<MotionSegment>& segments);
     Error dispatchG72(const Block& block, std::vector<MotionSegment>& segments);
     Error dispatchG73Lathe(const Block& block, std::vector<MotionSegment>& segments);
-    /// @brief Shared G71/G72 roughing driver (@p turning selects the axis roles).
+    /**@brief Shared G71/G72 roughing driver (@p turning selects the axis roles). */
     Error dispatchG71_G72Impl(const Block& block,
                               std::vector<MotionSegment>& segments,
                               bool turning);
-    /// @brief Collect the open XZ finish contour from blocks N<P>..N<Q>
-    ///        (X/Z endpoints; G2/G3 tessellated via I/K centers).
+    /**
+     * @brief Collect the open XZ finish contour from blocks N<P>..N<Q>
+     *        (X/Z endpoints; G2/G3 tessellated via I/K centers).
+     */
     Error collectLatheContour(int32_t seqStart, int32_t seqEnd,
                               double unitScale,
                               std::vector<std::pair<double, double>>& pts);
 
-    /// @brief G33 spindle-synchronized threading move. K = pitch along Z
-    ///        (I = X pitch for tapered threads); feed = pitch * RPM.
+    /**
+     * @brief G33 spindle-synchronized threading move. K = pitch along Z
+     *        (I = X pitch for tapered threads); feed = pitch * RPM.
+     */
     Error executeThreading(const Block& block, const Position& target,
                            double unitScale,
                            std::vector<MotionSegment>& segments);
-    /// @brief G76 Fanuc lathe threading cycle (Feature::G76_LATHE_THREADING).
-    ///        Single-line form: X/Z thread end (X travel sets the total
-    ///        depth), I taper, D first-cut depth, Q minimum depth, F pitch.
-    ///        Pass depths follow the constant-area rule d_i = D*sqrt(i).
+    /**
+     * @brief G76 Fanuc lathe threading cycle (Feature::G76_LATHE_THREADING).
+     *        Single-line form: X/Z thread end (X travel sets the total
+     *        depth), I taper, D first-cut depth, Q minimum depth, F pitch.
+     *        Pass depths follow the constant-area rule d_i = D*sqrt(i).
+     */
     Error dispatchG76Threading(const Block& block, const Position& target,
                                double unitScale,
                                std::vector<MotionSegment>& segments);
-    /// @brief G33.1 rigid tapping: synchronized feed to the target, then a
-    ///        synchronized retract to the start point (spindle reversal
-    ///        signaled via negative pitch on the retract segment).
+    /**
+     * @brief G33.1 rigid tapping: synchronized feed to the target, then a
+     *        synchronized retract to the start point (spindle reversal
+     *        signaled via negative pitch on the retract segment).
+     */
     Error executeRigidTap(const Block& block, const Position& target,
                           double unitScale,
                           std::vector<MotionSegment>& segments);
 
-    /// @brief Emit one cutter-compensated linear move (G41/G42). Offsets
-    ///        the chord by cutterRadius perpendicular to travel, inserts a
-    ///        lead-in move on the first compensated move, and joins
-    ///        consecutive offsets with a corner arc (convex) or offset-line
-    ///        intersection (concave). XY plane only.
+    /**
+     * @brief Emit one cutter-compensated linear move (G41/G42). Offsets
+     *        the chord by cutterRadius perpendicular to travel, inserts a
+     *        lead-in move on the first compensated move, and joins
+     *        consecutive offsets with a corner arc (convex) or offset-line
+     *        intersection (concave). XY plane only.
+     */
     Error emitCompMove(const Position& target, int32_t line,
                        std::vector<MotionSegment>& segments);
     bool cutterCompActive() const {
@@ -1024,13 +1074,15 @@ private:
                m_machineState.plane == Plane::XY;
     }
 
-    /// @brief Transform a program-space position to machine coordinates
-    /// using the composed coordinate transform (WCS + G52 + G92 + G68 + G51).
+    /**
+     * @brief Transform a program-space position to machine coordinates
+     * using the composed coordinate transform (WCS + G52 + G92 + G68 + G51).
+     */
     Position toMachine(const Position& programPos) const {
         return m_coordinates.toMachineCoords(programPos);
     }
 
-    /// @brief Transform machine coordinates back to program space.
+    /**@brief Transform machine coordinates back to program space. */
     Position toProgram(const Position& machinePos) const {
         return m_coordinates.toProgramCoords(machinePos);
     }

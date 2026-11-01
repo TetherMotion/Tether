@@ -1,12 +1,14 @@
 #pragma once
 
-/// @file GlazeAdapter.hpp
-/// @brief Conversion between JsonValue (klippy UDS) and glz::generic (Glaze JSON).
-///
-/// The existing KlippyUdsServer uses a hand-written JsonValue type for all
-/// endpoint handlers. The HTTP layer uses Glaze for JSON serialization at the
-/// Drogon boundary. This adapter converts between the two, allowing all 120+
-/// existing endpoint handlers to be reused without modification.
+/**
+ * @file GlazeAdapter.hpp
+ * @brief Conversion between JsonValue (klippy UDS) and glz::generic (Glaze JSON).
+ *
+ * The existing KlippyUdsServer uses a hand-written JsonValue type for all
+ * endpoint handlers. The HTTP layer uses Glaze for JSON serialization at the
+ * Drogon boundary. This adapter converts between the two, allowing all 120+
+ * existing endpoint handlers to be reused without modification.
+ */
 
 #include "tether/klipper/klippy/JsonValue.hpp"
 
@@ -18,9 +20,11 @@
 
 namespace tether::klipper::http {
 
-/// @brief Convert a JsonValue to a glz::generic.
-/// @param val The JsonValue to convert.
-/// @return The equivalent glz::generic.
+/**
+ * @brief Convert a JsonValue to a glz::generic.
+ * @param val The JsonValue to convert.
+ * @return The equivalent glz::generic.
+ */
 inline glz::generic toJsonGeneric(const klippy::JsonValue& val) {
     using namespace klippy;
     switch (val.type()) {
@@ -52,9 +56,11 @@ inline glz::generic toJsonGeneric(const klippy::JsonValue& val) {
     return glz::generic{};
 }
 
-/// @brief Convert a glz::generic to a JsonValue.
-/// @param val The glz::generic to convert.
-/// @return The equivalent JsonValue.
+/**
+ * @brief Convert a glz::generic to a JsonValue.
+ * @param val The glz::generic to convert.
+ * @return The equivalent JsonValue.
+ */
 inline klippy::JsonValue fromJsonGeneric(const glz::generic& val) {
     using namespace klippy;
     if (val.is_null()) {
@@ -93,20 +99,24 @@ inline klippy::JsonValue fromJsonGeneric(const glz::generic& val) {
     return JsonValue{};
 }
 
-/// @brief Serialize a JsonValue to a JSON string.
-///
-/// Uses JsonValue::dump() directly rather than going through glz::generic,
-/// which avoids a known corruption issue when converting int64_t values
-/// inside nested arrays/objects through the Glaze intermediate representation.
-/// @param val The JsonValue to serialize.
-/// @return The JSON string.
+/**
+ * @brief Serialize a JsonValue to a JSON string.
+ *
+ * Uses JsonValue::dump() directly rather than going through glz::generic,
+ * which avoids a known corruption issue when converting int64_t values
+ * inside nested arrays/objects through the Glaze intermediate representation.
+ * @param val The JsonValue to serialize.
+ * @return The JSON string.
+ */
 inline std::string dumpJson(const klippy::JsonValue& val) {
     return val.dump();
 }
 
-/// @brief Parse a JSON string into a JsonValue using Glaze.
-/// @param json The JSON string to parse.
-/// @return The parsed JsonValue, or nullopt on error.
+/**
+ * @brief Parse a JSON string into a JsonValue using Glaze.
+ * @param json The JSON string to parse.
+ * @return The parsed JsonValue, or nullopt on error.
+ */
 inline std::optional<klippy::JsonValue> parseJson(std::string_view json) {
     auto rd = glz::read_json<glz::generic>(json);
     if (!rd) return std::nullopt;

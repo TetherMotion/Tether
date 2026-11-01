@@ -42,10 +42,12 @@ public:
     SDOUpload& uploadOp() { return upload_; }
     SDODownload& downloadOp() { return download_; }
 
-    /// @brief Return the CoE SDO abort code reported by the slave on the most
-    /// recent upload/download call. 0 means no abort (success or non-abort
-    /// failure such as a transport/timeout error). Safe to read immediately
-    /// after a call returns false; SDO operations on a master are serialized.
+    /**
+     * @brief Return the CoE SDO abort code reported by the slave on the most
+     * recent upload/download call. 0 means no abort (success or non-abort
+     * failure such as a transport/timeout error). Safe to read immediately
+     * after a call returns false; SDO operations on a master are serialized.
+     */
     uint32_t lastAbortCode() const { return last_abort_code_.load(std::memory_order_relaxed); }
 
 private:

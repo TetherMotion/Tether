@@ -1,5 +1,7 @@
-/// @file SelfIntersectionAnalyzer.hpp
-/// @brief Detect self-intersections and crossing toolpaths.
+/**
+ * @file SelfIntersectionAnalyzer.hpp
+ * @brief Detect self-intersections and crossing toolpaths.
+ */
 
 #pragma once
 
@@ -15,7 +17,7 @@ struct PlanningSegment;
 
 namespace tether::gcode::analysis {
 
-/// @brief Analyze self-intersections and crossing toolpaths from aligned planning data.
+/**@brief Analyze self-intersections and crossing toolpaths from aligned planning data. */
 Section analyzeSelfIntersections(const std::vector<GCode::PlanningSegment>& planningSegments,
                                  const std::vector<tether::gcode::SegmentSpeed>& segmentSpeeds,
                                  const std::vector<std::string>& gcodeLines,

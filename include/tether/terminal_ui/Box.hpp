@@ -224,8 +224,10 @@ inline int drawBoxFrame(int y, int x, int w, int h,
 // Content widgets
 // ---------------------------------------------------------------------------
 
-/// One row of a key|value box; `value_tone` colors only the value cell
-/// (std::nullopt draws the value uncolored).
+/**
+ * One row of a key|value box; `value_tone` colors only the value cell
+ * (std::nullopt draws the value uncolored).
+ */
 struct KvRow {
     std::string key;
     std::string value;

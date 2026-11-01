@@ -16,31 +16,31 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief System statistics snapshot.
+/**@brief System statistics snapshot. */
 struct SystemStatsSnapshot {
-    double sysload = 0.0;       ///< 1-minute load average
-    double memAvailable = 0.0;  ///< Available memory in MB
-    uint64_t mcuMcups = 0;      ///< MCU million-commands-per-second
-    uint32_t mcuTaskAvg = 0;    ///< MCU average task duration (ticks)
-    uint32_t mcuSbAvg = 0;      ///< MCU serial buffer average
+    double sysload = 0.0; /**< 1-minute load average */
+    double memAvailable = 0.0; /**< Available memory in MB */
+    uint64_t mcuMcups = 0; /**< MCU million-commands-per-second */
+    uint32_t mcuTaskAvg = 0; /**< MCU average task duration (ticks) */
+    uint32_t mcuSbAvg = 0; /**< MCU serial buffer average */
 };
 
-/// @brief Abstract interface for reading system statistics.
+/**@brief Abstract interface for reading system statistics. */
 class ISystemStatsProvider {
 public:
     virtual ~ISystemStatsProvider() = default;
 
-    /// @brief Read current system statistics.
+    /**@brief Read current system statistics. */
     virtual SystemStatsSnapshot readStats() = 0;
 };
 
-/// @brief Default Linux implementation that reads /proc/loadavg and /proc/meminfo.
+/**@brief Default Linux implementation that reads /proc/loadavg and /proc/meminfo. */
 class LinuxSystemStatsProvider : public ISystemStatsProvider {
 public:
     SystemStatsSnapshot readStats() override;
 };
 
-/// @brief Mock implementation for testing. Returns fixed values.
+/**@brief Mock implementation for testing. Returns fixed values. */
 class MockSystemStatsProvider : public ISystemStatsProvider {
 public:
     SystemStatsSnapshot snapshot;
@@ -50,7 +50,7 @@ public:
 
     SystemStatsSnapshot readStats() override { return snapshot; }
 
-    /// @brief Set the values to be returned by readStats().
+    /**@brief Set the values to be returned by readStats(). */
     void setStats(SystemStatsSnapshot snap) { snapshot = std::move(snap); }
 };
 

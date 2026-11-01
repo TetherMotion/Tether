@@ -260,40 +260,40 @@ class VariableSystem;
  * @brief Trochoidal milling parameters
  */
 struct TrochoidalParams {
-    /// Slot start position
+    /**Slot start position */
     Position start;
     
-    /// Slot end position  
+    /**Slot end position */
     Position end;
     
-    /// Slot width
+    /**Slot width */
     double slotWidth{10.0};
     
-    /// Tool diameter
+    /**Tool diameter */
     double toolDiameter{6.0};
     
-    /// Circle radius (tool center path)
+    /**Circle radius (tool center path) */
     double circleRadius{3.0};
     
-    /// Stepover per circle
+    /**Stepover per circle */
     double stepover{2.0};
     
-    /// Depth of cut
+    /**Depth of cut */
     double depth{-5.0};
     
-    /// Feed rate
+    /**Feed rate */
     double feedRate{1000.0};
     
-    /// Plunge feed rate
+    /**Plunge feed rate */
     double plungeFeed{200.0};
     
-    /// Maximum tool engagement (degrees)
+    /**Maximum tool engagement (degrees) */
     double maxEngagement{90.0};
     
-    /// Direction (1 = climb, -1 = conventional)
+    /**Direction (1 = climb, -1 = conventional) */
     int direction{1};
     
-    /// Points per circle
+    /**Points per circle */
     int pointsPerCircle{36};
 };
 
@@ -490,34 +490,34 @@ private:
  * @brief Path blending mode (G64/G61/G61.1)
  */
 enum class PathBlendMode {
-    EXACT_STOP,     ///< G61 - Full stop at corners
-    EXACT_PATH,     ///< G61.1 - Pass through points exactly
-    CONTINUOUS      ///< G64 - Blend corners
+    EXACT_STOP, /**< G61 - Full stop at corners */
+    EXACT_PATH, /**< G61.1 - Pass through points exactly */
+    CONTINUOUS /**< G64 - Blend corners */
 };
 
 /**
  * @brief Path blending configuration
  */
 struct PathBlendConfig {
-    /// Blend mode
+    /**Blend mode */
     PathBlendMode mode{PathBlendMode::CONTINUOUS};
     
-    /// Path tolerance P (mm)
+    /**Path tolerance P (mm) */
     double toleranceP{0.05};
     
-    /// Naive CAM tolerance Q (mm)
+    /**Naive CAM tolerance Q (mm) */
     double toleranceQ{0.1};
     
-    /// Maximum blend velocity
+    /**Maximum blend velocity */
     double maxBlendVelocity{10000.0};  // mm/min
     
-    /// Maximum blend acceleration
+    /**Maximum blend acceleration */
     double maxBlendAccel{500.0};  // mm/s²
     
-    /// Minimum angle to blend (radians)
+    /**Minimum angle to blend (radians) */
     double minBlendAngle{0.01};
     
-    /// Maximum angle to blend (radians) - above this, exact stop
+    /**Maximum angle to blend (radians) - above this, exact stop */
     double maxBlendAngle{M_PI * 0.9};
 };
 
@@ -627,11 +627,11 @@ private:
  * @brief Adaptive feed rate source
  */
 enum class AdaptiveFeedSource {
-    DISABLED,       ///< No adaptive feed
-    PARAMETER,      ///< From `#<_adaptive_feed>` parameter
-    ANALOG_INPUT,   ///< From analog input
-    SPINDLE_LOAD,   ///< Based on spindle load
-    CALLBACK        ///< User callback function
+    DISABLED, /**< No adaptive feed */
+    PARAMETER, /**< From `#<_adaptive_feed>` parameter */
+    ANALOG_INPUT, /**< From analog input */
+    SPINDLE_LOAD, /**< Based on spindle load */
+    CALLBACK /**< User callback function */
 };
 
 /**
@@ -723,14 +723,14 @@ private:
  * @brief Backlash compensation per axis
  */
 struct AxisBacklash {
-    double amount{0};      ///< Backlash amount (mm)
-    double takeupVel{10};  ///< Takeup velocity (mm/s)
+    double amount{0}; /**< Backlash amount (mm) */
+    double takeupVel{10}; /**< Takeup velocity (mm/s) */
     bool enabled{false};
     
-    /// Last direction of axis motion (+1, -1, 0)
+    /**Last direction of axis motion (+1, -1, 0) */
     int lastDirection{0};
     
-    /// Accumulated backlash to apply
+    /**Accumulated backlash to apply */
     double pending{0};
 };
 

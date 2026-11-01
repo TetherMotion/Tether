@@ -69,30 +69,30 @@ constexpr size_t MAX_PATH_AXES = CIA402_MAX_GROUP_AXES;
  * @brief Point in multi-axis space
  */
 struct PathPoint {
-    std::array<double, MAX_PATH_AXES> position{};   ///< Axis positions
-    std::array<double, MAX_PATH_AXES> velocity{};   ///< Axis velocities
-    std::array<double, MAX_PATH_AXES> acceleration{};///< Axis accelerations
-    double parameter{0.0};                           ///< Path parameter [0,1]
-    double pathVelocity{0.0};                        ///< Tangential velocity
-    double curvature{0.0};                           ///< Path curvature
-    size_t numAxes{0};                               ///< Number of active axes
+    std::array<double, MAX_PATH_AXES> position{}; /**< Axis positions */
+    std::array<double, MAX_PATH_AXES> velocity{}; /**< Axis velocities */
+    std::array<double, MAX_PATH_AXES> acceleration{}; /**< Axis accelerations */
+    double parameter{0.0}; /**< Path parameter [0,1] */
+    double pathVelocity{0.0}; /**< Tangential velocity */
+    double curvature{0.0}; /**< Path curvature */
+    size_t numAxes{0}; /**< Number of active axes */
 };
 
 /**
  * @brief Arc direction for circular interpolation
  */
 enum class ArcDirection {
-    CW,     ///< Clockwise
-    CCW     ///< Counter-clockwise
+    CW, /**< Clockwise */
+    CCW /**< Counter-clockwise */
 };
 
 /**
  * @brief Plane for 2D circular interpolation
  */
 enum class Plane {
-    XY,     ///< X-Y plane (Z normal)
-    XZ,     ///< X-Z plane (Y normal)
-    YZ      ///< Y-Z plane (X normal)
+    XY, /**< X-Y plane (Z normal) */
+    XZ, /**< X-Z plane (Y normal) */
+    YZ /**< Y-Z plane (X normal) */
 };
 
 /**
@@ -229,15 +229,15 @@ private:
  * @brief Circular path configuration
  */
 struct CircularConfig {
-    std::array<double, 3> center{};     ///< Arc center point
-    std::array<double, 3> start{};      ///< Start point
-    std::array<double, 3> end{};        ///< End point (or angle)
-    double radius{0.0};                  ///< Radius (calculated if 0)
-    double startAngle{0.0};              ///< Start angle [rad]
-    double endAngle{0.0};                ///< End angle [rad]
-    Plane plane{Plane::XY};              ///< Interpolation plane
-    ArcDirection direction{ArcDirection::CCW};  ///< Arc direction
-    bool useAngles{false};               ///< Use angles instead of endpoints
+    std::array<double, 3> center{}; /**< Arc center point */
+    std::array<double, 3> start{}; /**< Start point */
+    std::array<double, 3> end{}; /**< End point (or angle) */
+    double radius{0.0}; /**< Radius (calculated if 0) */
+    double startAngle{0.0}; /**< Start angle [rad] */
+    double endAngle{0.0}; /**< End angle [rad] */
+    Plane plane{Plane::XY}; /**< Interpolation plane */
+    ArcDirection direction{ArcDirection::CCW}; /**< Arc direction */
+    bool useAngles{false}; /**< Use angles instead of endpoints */
 };
 
 /**
@@ -322,12 +322,12 @@ private:
  * @brief Helical path configuration
  */
 struct HelicalConfig {
-    std::array<double, 3> center{};     ///< Helix center (in plane)
-    double radius{100.0};                ///< Helix radius
-    double pitch{10.0};                  ///< Height per revolution
-    double startAngle{0.0};              ///< Start angle [rad]
-    double totalAngle{2 * M_PI};         ///< Total rotation [rad]
-    Plane plane{Plane::XY};              ///< Base plane
+    std::array<double, 3> center{}; /**< Helix center (in plane) */
+    double radius{100.0}; /**< Helix radius */
+    double pitch{10.0}; /**< Height per revolution */
+    double startAngle{0.0}; /**< Start angle [rad] */
+    double totalAngle{2 * M_PI}; /**< Total rotation [rad] */
+    Plane plane{Plane::XY}; /**< Base plane */
     ArcDirection direction{ArcDirection::CCW};
 };
 
@@ -362,8 +362,8 @@ private:
  */
 struct BSplineConfig {
     std::vector<std::array<double, MAX_PATH_AXES>> controlPoints;
-    std::vector<double> knots;           ///< Knot vector (empty = uniform)
-    int degree{3};                       ///< Spline degree (default cubic)
+    std::vector<double> knots; /**< Knot vector (empty = uniform) */
+    int degree{3}; /**< Spline degree (default cubic) */
     size_t numAxes{3};
 };
 
@@ -428,9 +428,9 @@ private:
  */
 struct NURBSConfig {
     std::vector<std::array<double, MAX_PATH_AXES>> controlPoints;
-    std::vector<double> weights;         ///< Control point weights
-    std::vector<double> knots;           ///< Knot vector
-    int degree{3};                       ///< Curve degree
+    std::vector<double> weights; /**< Control point weights */
+    std::vector<double> knots; /**< Knot vector */
+    int degree{3}; /**< Curve degree */
     size_t numAxes{3};
 };
 
@@ -597,7 +597,7 @@ public:
 private:
     std::shared_ptr<PathSegment> m_path;
     std::shared_ptr<MotionProfile> m_profile;
-    std::unique_ptr<PathSegment> m_ownedPath;  ///< Owned path for convenience constructor
+    std::unique_ptr<PathSegment> m_ownedPath; /**< Owned path for convenience constructor */
     double m_pathLength{0.0};
     double m_feedrate{0.0};
     double m_duration{0.0};
@@ -611,10 +611,10 @@ private:
  * @brief Blending mode between segments
  */
 enum class BlendMode {
-    None,           ///< Full stop between segments
-    Corner,         ///< Sharp corner (velocity limited)
-    Arc,            ///< Arc blending
-    Spline          ///< Spline blending
+    None, /**< Full stop between segments */
+    Corner, /**< Sharp corner (velocity limited) */
+    Arc, /**< Arc blending */
+    Spline /**< Spline blending */
 };
 
 /**

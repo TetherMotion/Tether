@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file VirtualSdcard.hpp
-/// @brief Virtual SD card for G-code file management and playback
+/**
+ * @file VirtualSdcard.hpp
+ * @brief Virtual SD card for G-code file management and playback
+ */
 
 #include <filesystem>
 #include <fstream>
@@ -11,11 +13,13 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Virtual SD card for G-code file management and playback.
-///
-/// Implements the Klipper virtual_sdcard module: file listing, opening,
-/// and G-code streaming via M23 (select), M24 (start), M25 (pause),
-/// M27 (report), and M20 (list).
+/**
+ * @brief Virtual SD card for G-code file management and playback.
+ *
+ * Implements the Klipper virtual_sdcard module: file listing, opening,
+ * and G-code streaming via M23 (select), M24 (start), M25 (pause),
+ * M27 (report), and M20 (list).
+ */
 class VirtualSdcard {
 public:
     struct FileInfo {
@@ -26,7 +30,7 @@ public:
     explicit VirtualSdcard(std::string rootDir)
         : rootDir_(std::move(rootDir)) {}
 
-    /// @brief List files in the virtual SD card root.
+    /**@brief List files in the virtual SD card root. */
     std::vector<FileInfo> listFiles() const {
         std::vector<FileInfo> result;
         if (!std::filesystem::exists(rootDir_)) return result;
@@ -41,9 +45,11 @@ public:
         return result;
     }
 
-    /// @brief Select a file for printing (M23).
-    /// @param filename Filename relative to root.
-    /// @return True if file exists and was opened.
+    /**
+     * @brief Select a file for printing (M23).
+     * @param filename Filename relative to root.
+     * @return True if file exists and was opened.
+     */
     bool selectFile(const std::string& filename) {
         std::lock_guard<std::mutex> lock(mutex_);
         closeFile();
@@ -57,8 +63,10 @@ public:
         return true;
     }
 
-    /// @brief Start printing the selected file (M24).
-    /// @return True if printing started.
+    /**
+     * @brief Start printing the selected file (M24).
+     * @return True if printing started.
+     */
     bool startPrint() {
         std::lock_guard<std::mutex> lock(mutex_);
         if (filePath_.empty()) return false;
@@ -67,19 +75,19 @@ public:
         return true;
     }
 
-    /// @brief Pause printing (M25).
+    /**@brief Pause printing (M25). */
     void pausePrint() {
         std::lock_guard<std::mutex> lock(mutex_);
         isPaused_ = true;
     }
 
-    /// @brief Resume printing (M24 after pause).
+    /**@brief Resume printing (M24 after pause). */
     void resumePrint() {
         std::lock_guard<std::mutex> lock(mutex_);
         isPaused_ = false;
     }
 
-    /// @brief Cancel printing.
+    /**@brief Cancel printing. */
     void cancelPrint() {
         std::lock_guard<std::mutex> lock(mutex_);
         isActive_ = false;
@@ -87,7 +95,7 @@ public:
         filePosition_ = 0;
     }
 
-    /// @brief Close the current file.
+    /**@brief Close the current file. */
     void closeFile() {
         filePath_.clear();
         fileSize_ = 0;
@@ -96,9 +104,11 @@ public:
         isPaused_ = false;
     }
 
-    /// @brief Get the next chunk of G-code from the file.
-    /// @param maxLines Maximum lines to read.
-    /// @return Lines read, or empty if at EOF / not active.
+    /**
+     * @brief Get the next chunk of G-code from the file.
+     * @param maxLines Maximum lines to read.
+     * @return Lines read, or empty if at EOF / not active.
+     */
     std::vector<std::string> readChunk(size_t maxLines = 32) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!isActive_ || isPaused_ || filePath_.empty()) return {};
@@ -120,13 +130,13 @@ public:
         return lines;
     }
 
-    /// @brief Reset file position to beginning.
+    /**@brief Reset file position to beginning. */
     void resetPosition() {
         std::lock_guard<std::mutex> lock(mutex_);
         filePosition_ = 0;
     }
 
-    /// @brief Seek to a specific position in the file.
+    /**@brief Seek to a specific position in the file. */
     void seek(size_t position) {
         std::lock_guard<std::mutex> lock(mutex_);
         filePosition_ = std::min(position, fileSize_);

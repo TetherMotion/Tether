@@ -60,7 +60,7 @@ inline constexpr DeviceIdentity EJ2502{0x00000002, 0x09C62852, 2, "EJ2502"};
 inline constexpr DeviceIdentity EJ2564{0x00000002, 0x0A042852, 4, "EJ2564"};
 inline constexpr DeviceIdentity EP2534{0x00000002, 0x09E64052, 4, "EP2534"};
 
-/// Every known PWM output terminal.
+/**Every known PWM output terminal. */
 inline constexpr std::array kPwmTerminals{
     EL2502, EL2535, EL2564, EJ2502, EJ2564, EP2534,
 };
@@ -73,7 +73,7 @@ inline constexpr std::array kPwmTerminals{
 
 class PwmTerminal : public TerminalBase {
 public:
-    /// Raw duty full-scale (0..0x7FFF = 0..100 %).
+    /**Raw duty full-scale (0..0x7FFF = 0..100 %). */
     static constexpr uint16_t kDutyFullScale = 0x7FFF;
     static constexpr size_t kMaxChannels = 8;
 
@@ -91,12 +91,12 @@ public:
     PwmTerminal(const PwmTerminal&)                = delete;
     PwmTerminal& operator=(const PwmTerminal&)     = delete;
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
 
-    /// Scan the bus for the first slave matching `identity`.
+    /**Scan the bus for the first slave matching `identity`. */
     static Result<PwmTerminal> findFirst(Master& master,
                                          const DeviceIdentity& identity);
     static Result<PwmTerminal> findFirst(
@@ -105,51 +105,51 @@ public:
 
     // -- Bring-up ----------------------------------------------------------------------
 
-    /// Standalone bring-up to SAFE-OP (position addressing).
+    /**Standalone bring-up to SAFE-OP (position addressing). */
     Result<> configure();
 
-    /// configure() then OP (+ managed realtime loop by default).
+    /**configure() then OP (+ managed realtime loop by default). */
     Result<> start() { return start(StartOptions()); }
     Result<> start(const StartOptions& opts);
 
-    /// Chained-operation contract.
+    /**Chained-operation contract. */
     Result<> prepareForLogicalExchange();
     Result<> mapLogicalAndEnterSafeOp();
     Result<> requestOp(int timeout_ms);
 
     // -- Channels --------------------------------------------------------------------------
 
-    /// Number of PWM channels resolved from the SII layout.
+    /**Number of PWM channels resolved from the SII layout. */
     size_t channelCount() const { return channels_.size(); }
 
     // -- Duty cycle -------------------------------------------------------------------------
 
-    /// Raw duty value, clamped to [0, kDutyFullScale].
+    /**Raw duty value, clamped to [0, kDutyFullScale]. */
     void setDuty(size_t ch, uint16_t raw);
-    /// Scaled duty: 0.0 = off, 1.0 = full scale.
+    /**Scaled duty: 0.0 = off, 1.0 = full scale. */
     void setDutyFraction(size_t ch, float fraction);
-    /// Current raw duty value from the output image.
+    /**Current raw duty value from the output image. */
     uint16_t duty(size_t ch) const;
-    /// Ramp all channels to zero (leaves enable bits untouched).
+    /**Ramp all channels to zero (leaves enable bits untouched). */
     void allOff();
 
     // -- Control bits (EL2535-class; no-ops when the device doesn't map them) ------------------
 
-    void setEnable(size_t ch, bool on);          ///< :06
-    void setReset(size_t ch, bool on);           ///< :07
-    void setEnableDithering(size_t ch, bool on); ///< :01
+    void setEnable(size_t ch, bool on); /**< :06 */
+    void setReset(size_t ch, bool on); /**< :07 */
+    void setEnableDithering(size_t ch, bool on); /**< :01 */
     bool hasEnable(size_t ch) const;
     bool hasDithering(size_t ch) const;
 
-    /// Device-wide master gain (EL2564 only; 0xF719:17).
+    /**Device-wide master gain (EL2564 only; 0xF719:17). */
     void setMasterGain(uint16_t gain);
     bool hasMasterGain() const { return master_gain_.present(); }
 
     // -- Status --------------------------------------------------------------------------------
 
-    bool warning(size_t ch) const;              ///< 0x6xxx:06
-    bool error(size_t ch) const;                ///< 0x6xxx:07
-    bool digitalInput(size_t ch) const;         ///< 0x6xxx:01 (EL2535)
+    bool warning(size_t ch) const; /**< 0x6xxx:06 */
+    bool error(size_t ch) const; /**< 0x6xxx:07 */
+    bool digitalInput(size_t ch) const; /**< 0x6xxx:01 (EL2535) */
     bool hasStatus(size_t ch) const;
 
 private:

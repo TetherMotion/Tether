@@ -39,7 +39,7 @@ public:
     explicit MotionPlanExposer3D(Builder& builder)
         : builder_(builder) {}
 
-    /// Set (or update) the active plan pointer.
+    /**Set (or update) the active plan pointer. */
     void setPlan(Plan* plan) { plan_ = plan; }
 
     const char* moduleName() const override { return "motion_planner"; }

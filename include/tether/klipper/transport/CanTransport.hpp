@@ -35,14 +35,16 @@ namespace tether::klipper::transport {
  * @brief Configuration for a CAN-based byte-stream transport.
  */
 struct CanTransportConfig {
-    /// HAL CAN interface to use (must be open).
+    /**HAL CAN interface to use (must be open). */
     std::shared_ptr<tether::hal::ICan> can;
-    /// CAN ID used for transmitting (this end -> peer).
+    /**CAN ID used for transmitting (this end -> peer). */
     uint32_t txCanId = 0x100;
-    /// CAN ID used for receiving (peer -> this end). Frames with other IDs
-    /// are ignored. If 0, accepts all IDs.
+    /**
+     * CAN ID used for receiving (peer -> this end). Frames with other IDs
+     * are ignored. If 0, accepts all IDs.
+     */
     uint32_t rxCanId = 0x101;
-    /// Poll interval in microseconds when blocking-read is requested.
+    /**Poll interval in microseconds when blocking-read is requested. */
     int pollIntervalUs = 1000;
 };
 

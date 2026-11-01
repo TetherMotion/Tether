@@ -33,7 +33,7 @@ namespace tether::io::machine {
 using ProfileKey = std::array<uint8_t, 32>;
 using ProfileMac = std::array<uint8_t, 32>;
 
-/// Keyed BLAKE3 MAC of a profile document.
+/**Keyed BLAKE3 MAC of a profile document. */
 inline ProfileMac signProfileDocument(const void* document, size_t size,
                                       const ProfileKey& key) {
     blake3_hasher hasher;
@@ -44,7 +44,7 @@ inline ProfileMac signProfileDocument(const void* document, size_t size,
     return mac;
 }
 
-/// Constant-time MAC comparison.
+/**Constant-time MAC comparison. */
 inline bool verifyProfileDocument(const void* document, size_t size,
                                   const ProfileKey& key, const ProfileMac& mac) {
     const ProfileMac expected = signProfileDocument(document, size, key);
@@ -53,12 +53,14 @@ inline bool verifyProfileDocument(const void* document, size_t size,
     return diff == 0;
 }
 
-/// Application profile document schema (server-side startup validation,
-/// plan item 86). Mirrors the widget contract the dashboard parses in
-/// `domain/app-profile.ts`: format marker, panels of widgets, and per-kind
-/// required fields. Validation is compile-time gated on Glaze; when Glaze is
-/// unavailable `install` fails closed and the machine.app.profile surface is
-/// simply absent.
+/**
+ * Application profile document schema (server-side startup validation,
+ * plan item 86). Mirrors the widget contract the dashboard parses in
+ * `domain/app-profile.ts`: format marker, panels of widgets, and per-kind
+ * required fields. Validation is compile-time gated on Glaze; when Glaze is
+ * unavailable `install` fails closed and the machine.app.profile surface is
+ * simply absent.
+ */
 inline constexpr std::string_view kAppProfileFormat = "tether.app.profile.v1";
 inline constexpr size_t kMaxProfileDocumentBytes = 256 * 1024;
 inline constexpr size_t kMaxProfilePanels = 64;
@@ -130,9 +132,11 @@ inline bool profileWidgetValid(const glz::generic& widget) {
 }
 } // namespace detail
 
-/// Validate the declarative profile document against the widget contract.
-/// Returns false for malformed JSON, a wrong format marker, unbounded
-/// documents, or widgets missing their kind-required fields.
+/**
+ * Validate the declarative profile document against the widget contract.
+ * Returns false for malformed JSON, a wrong format marker, unbounded
+ * documents, or widgets missing their kind-required fields.
+ */
 inline bool validateAppProfileDocument(const void* document, size_t size) {
     if (!document || size == 0 || size > kMaxProfileDocumentBytes) return false;
     auto parsed = glz::read_json<glz::generic>(
@@ -172,21 +176,27 @@ inline bool validateAppProfileDocument(const void* document, size_t size) {
     return true;
 }
 #else
-/// Without Glaze the document cannot be validated; fail closed so an
-/// unverifiable profile never reaches the wire.
+/**
+ * Without Glaze the document cannot be validated; fail closed so an
+ * unverifiable profile never reaches the wire.
+ */
 inline bool validateAppProfileDocument(const void*, size_t) { return false; }
 #endif
 
-/// In-memory application profile source. `install` verifies the MAC against
-/// the key and validates the document against the profile contract; a
-/// tampered, mismatched, or malformed document never reaches the wire.
+/**
+ * In-memory application profile source. `install` verifies the MAC against
+ * the key and validates the document against the profile contract; a
+ * tampered, mismatched, or malformed document never reaches the wire.
+ */
 class StaticAppProfileSource final : public IMachineAppProfileSource {
 public:
     explicit StaticAppProfileSource(ProfileKey key) : key_(key) {}
 
-    /// Verify + validate + install the profile document. Returns false when
-    /// `mac` does not match `document` under this source's key or the
-    /// document violates the profile contract.
+    /**
+     * Verify + validate + install the profile document. Returns false when
+     * `mac` does not match `document` under this source's key or the
+     * document violates the profile contract.
+     */
     bool install(std::string name, std::string version,
                  std::vector<uint8_t> document, const ProfileMac& mac) {
         if (!verifyProfileDocument(document.data(), document.size(), key_, mac))
@@ -208,8 +218,10 @@ private:
     bool installed_ = false;
 };
 
-/// In-memory recipe store: `add` registers a named set of ConfigWrites that
-/// machine.recipe.apply stages through the normal configuration transaction.
+/**
+ * In-memory recipe store: `add` registers a named set of ConfigWrites that
+ * machine.recipe.apply stages through the normal configuration transaction.
+ */
 class InMemoryRecipeStore final : public IMachineRecipeStore {
 public:
     void add(std::string name, std::string description,

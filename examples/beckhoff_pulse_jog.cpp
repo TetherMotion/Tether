@@ -65,7 +65,7 @@ static std::atomic<int>  g_direction{1};
 static std::atomic<int>  g_freq{5000};      // pulses/s
 static std::atomic<bool> g_go{false};
 
-/// Push the shared setpoints into every PTO channel.
+/**Push the shared setpoints into every PTO channel. */
 static void tickPto(Beckhoff::PulseTrainTerminal& p) {
     for (size_t ch = 0; ch < p.channelCount(); ++ch) {
         if (!p.hasFrequency(ch)) continue;

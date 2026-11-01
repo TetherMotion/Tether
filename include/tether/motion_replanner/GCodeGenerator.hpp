@@ -31,13 +31,13 @@ namespace MotionReplanner {
  * @brief G-code machine dialect
  */
 enum class GCodeDialect {
-    LinuxCNC,           ///< LinuxCNC / EMC2
-    Fanuc,              ///< Fanuc-style
-    Mach3,              ///< Mach3 / Mach4
-    Grbl,               ///< Grbl
-    Marlin,             ///< Marlin 3D printer
-    Haas,               ///< Haas controllers
-    Generic             ///< Generic compatible
+    LinuxCNC, /**< LinuxCNC / EMC2 */
+    Fanuc, /**< Fanuc-style */
+    Mach3, /**< Mach3 / Mach4 */
+    Grbl, /**< Grbl */
+    Marlin, /**< Marlin 3D printer */
+    Haas, /**< Haas controllers */
+    Generic /**< Generic compatible */
 };
 
 /**
@@ -47,28 +47,28 @@ struct GCodeOptions {
     GCodeDialect dialect = GCodeDialect::LinuxCNC;
     
     // Formatting
-    int positionPrecision = 4;            ///< Decimal places for position
-    int feedPrecision = 1;                ///< Decimal places for feed rate
+    int positionPrecision = 4; /**< Decimal places for position */
+    int feedPrecision = 1; /**< Decimal places for feed rate */
     bool useLineNumbers = false;
     int lineNumberIncrement = 10;
-    bool useParenComments = true;         ///< (comment) vs ; comment
+    bool useParenComments = true; /**< (comment) vs ; comment */
     
     // Units and modes
-    bool useMetric = true;                ///< G21 vs G20
-    bool absoluteMode = true;             ///< G90 vs G91
-    bool useArcMode = true;               ///< Use G2/G3 for arcs
-    double arcMinRadius = 0.1;            ///< Min radius to use arc vs linear
+    bool useMetric = true; /**< G21 vs G20 */
+    bool absoluteMode = true; /**< G90 vs G91 */
+    bool useArcMode = true; /**< Use G2/G3 for arcs */
+    double arcMinRadius = 0.1; /**< Min radius to use arc vs linear */
     
     // Motion parameters
-    double rapidRate = 10000.0;           ///< mm/min
-    double defaultFeedRate = 1000.0;      ///< mm/min
+    double rapidRate = 10000.0; /**< mm/min */
+    double defaultFeedRate = 1000.0; /**< mm/min */
     
     // Safety
-    double safeZ = 10.0;                  ///< Safe Z height
+    double safeZ = 10.0; /**< Safe Z height */
     bool retractBetweenMoves = true;
     
     // Path tolerance for arc fitting
-    double arcTolerance = 0.001;          ///< mm
+    double arcTolerance = 0.001; /**< mm */
 };
 
 //=============================================================================
@@ -80,18 +80,18 @@ struct GCodeOptions {
  */
 struct GCodeBlock {
     int lineNumber = -1;
-    std::string gCode;                    ///< G command (G0, G1, G2, etc.)
-    std::string mCode;                    ///< M command
+    std::string gCode; /**< G command (G0, G1, G2, etc.) */
+    std::string mCode; /**< M command */
     
-    std::array<double, 9> position;       ///< X, Y, Z, A, B, C, U, V, W
-    std::array<bool, 9> hasPosition;      ///< Which axes are specified
+    std::array<double, 9> position; /**< X, Y, Z, A, B, C, U, V, W */
+    std::array<bool, 9> hasPosition; /**< Which axes are specified */
     
-    double feedRate = -1;                 ///< F value
-    double spindleSpeed = -1;             ///< S value
+    double feedRate = -1; /**< F value */
+    double spindleSpeed = -1; /**< S value */
     
     // Arc parameters
-    double i = 0, j = 0, k = 0;           ///< Arc center offset
-    double r = 0;                         ///< Arc radius (alternative)
+    double i = 0, j = 0, k = 0; /**< Arc center offset */
+    double r = 0; /**< Arc radius (alternative) */
     bool hasIJK = false;
     bool hasR = false;
     
@@ -126,7 +126,7 @@ public:
      * @param block Block appended to the program.
      */
     void addBlock(const GCodeBlock& block);
-    /// @param line Pre-formatted G-code line appended verbatim.
+    /**@param line Pre-formatted G-code line appended verbatim. */
     void addBlock(const std::string& line);
     
     /**
@@ -170,7 +170,7 @@ public:
      * @return Program blocks in order.
      */
     const std::vector<GCodeBlock>& blocks() const { return blocks_; }
-    /// @return Mutable program blocks.
+    /**@return Mutable program blocks. */
     std::vector<GCodeBlock>& blocks() { return blocks_; }
     
     /**

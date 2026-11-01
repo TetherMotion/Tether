@@ -7,10 +7,12 @@
 namespace EtherCAT {
 namespace Utils {
 
-/// Spin barrier for N-thread synchronization.
-///
-/// Uses a generation counter so the barrier can be reused across cycles
-/// without reset races. No mutex, no priority inversion.
+/**
+ * Spin barrier for N-thread synchronization.
+ *
+ * Uses a generation counter so the barrier can be reused across cycles
+ * without reset races. No mutex, no priority inversion.
+ */
 class SpinBarrier {
 public:
     explicit SpinBarrier(int n) : target_(n) {}

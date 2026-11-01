@@ -54,7 +54,7 @@ namespace tether::klipper::protocol {
  */
 class BlockReader {
 public:
-    /// @brief Callback invoked for each rejected/skipped block in recovery mode.
+    /**@brief Callback invoked for each rejected/skipped block in recovery mode. */
     using ErrorCallback = BlockParser::ErrorCallback;
 
     /**
@@ -134,13 +134,13 @@ public:
         parser_.setRecoveryMode(enabled, std::move(cb));
     }
 
-    /// @return True if recovery mode is enabled.
+    /**@return True if recovery mode is enabled. */
     bool recoveryMode() const { return parser_.recoveryMode(); }
 
-    /// @return Number of blocks skipped due to errors in recovery mode.
+    /**@return Number of blocks skipped due to errors in recovery mode. */
     size_t skippedBlockCount() const { return parser_.skippedBlockCount(); }
 
-    /// @return Cumulative parse statistics (from the embedded BlockParser).
+    /**@return Cumulative parse statistics (from the embedded BlockParser). */
     const BlockParseStats& stats() const { return parser_.stats(); }
 
     /**
@@ -156,10 +156,10 @@ public:
         parser_.resetStats();
     }
 
-    /// @brief Clear the internal accumulation buffer (without resetting stats).
+    /**@brief Clear the internal accumulation buffer (without resetting stats). */
     void clearBuffer() { buffer_.clear(); }
 
-    /// @return Number of bytes currently buffered (not yet parsed).
+    /**@return Number of bytes currently buffered (not yet parsed). */
     size_t bufferedBytes() const { return buffer_.size(); }
 
 private:

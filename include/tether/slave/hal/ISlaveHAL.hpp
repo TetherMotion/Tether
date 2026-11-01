@@ -43,8 +43,8 @@ struct SlaveHALConfig {
     std::string interfaceName;
     
     // FIFO paths (for FIFOSlaveHAL)
-    std::string fifoRxPath;   ///< Path for receiving frames
-    std::string fifoTxPath;   ///< Path for sending frames
+    std::string fifoRxPath; /**< Path for receiving frames */
+    std::string fifoTxPath; /**< Path for sending frames */
     
     // Packet logging
     bool enablePcapLogging = false;

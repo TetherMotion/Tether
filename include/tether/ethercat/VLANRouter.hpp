@@ -90,8 +90,8 @@ public:
      * A single VLAN is represented as {vid, vid}.
      */
     struct VLANRange {
-        uint16_t start;  ///< First VLAN ID in the range (inclusive)
-        uint16_t end;    ///< Last VLAN ID in the range (inclusive)
+        uint16_t start; /**< First VLAN ID in the range (inclusive) */
+        uint16_t end; /**< Last VLAN ID in the range (inclusive) */
 
         VLANRange(uint16_t s, uint16_t e) : start(s), end(e) {}
 
@@ -104,9 +104,9 @@ public:
      * @brief Public snapshot of a registered master entry.
      */
     struct Entry {
-        std::shared_ptr<Master> master;       ///< The registered master
-        std::optional<VLANRange> rx_vlan_range;       ///< Expected RX VLAN range (nullopt = untagged)
-        std::optional<uint16_t> tx_vlan_id;           ///< TX VLAN ID to insert (nullopt = pass-through)
+        std::shared_ptr<Master> master; /**< The registered master */
+        std::optional<VLANRange> rx_vlan_range; /**< Expected RX VLAN range (nullopt = untagged) */
+        std::optional<uint16_t> tx_vlan_id; /**< TX VLAN ID to insert (nullopt = pass-through) */
     };
 
     /**
@@ -324,7 +324,7 @@ private:
         std::shared_ptr<Master> master;
         std::optional<VLANRange> rx_vlan_range;
         std::optional<uint16_t> tx_vlan_id;
-        NetworkInterface iface;  ///< Per-master view (send encapsulates)
+        NetworkInterface iface; /**< Per-master view (send encapsulates) */
     };
 
     /**

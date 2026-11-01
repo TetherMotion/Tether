@@ -19,24 +19,24 @@ namespace GCodeExport {
  */
 struct SVGConfig {
     // Canvas settings
-    double width = 800.0;                       ///< SVG width (pixels)
-    double height = 600.0;                      ///< SVG height (pixels)
-    double margin = 50.0;                       ///< Margin around content
-    bool autoScale = true;                      ///< Auto-fit to canvas
+    double width = 800.0; /**< SVG width (pixels) */
+    double height = 600.0; /**< SVG height (pixels) */
+    double margin = 50.0; /**< Margin around content */
+    bool autoScale = true; /**< Auto-fit to canvas */
     
     // View settings
-    int primaryAxis1 = 0;                       ///< First axis for 2D view (0=X, 1=Y, 2=Z)
-    int primaryAxis2 = 1;                       ///< Second axis for 2D view
-    bool flipY = true;                          ///< Flip Y axis (SVG origin is top-left)
+    int primaryAxis1 = 0; /**< First axis for 2D view (0=X, 1=Y, 2=Z) */
+    int primaryAxis2 = 1; /**< Second axis for 2D view */
+    bool flipY = true; /**< Flip Y axis (SVG origin is top-left) */
     
     // Styling
-    std::string rapidColor = "#ff6600";         ///< Rapid move color
-    std::string linearColor = "#0066ff";        ///< Linear move color
-    std::string arcCWColor = "#00cc00";         ///< CW arc color
-    std::string arcCCWColor = "#cc00cc";        ///< CCW arc color
+    std::string rapidColor = "#ff6600"; /**< Rapid move color */
+    std::string linearColor = "#0066ff"; /**< Linear move color */
+    std::string arcCWColor = "#00cc00"; /**< CW arc color */
+    std::string arcCCWColor = "#cc00cc"; /**< CCW arc color */
     double rapidStrokeWidth = 0.5;
     double feedStrokeWidth = 1.0;
-    std::string rapidDash = "2,2";              ///< Dash pattern for rapids
+    std::string rapidDash = "2,2"; /**< Dash pattern for rapids */
     
     // Options
     bool showRapids = true;
@@ -45,14 +45,14 @@ struct SVGConfig {
     bool showDirectionArrows = false;
     bool showSegmentNumbers = false;
     bool showGrid = true;
-    double gridSpacing = 10.0;                  ///< Grid line spacing (mm)
+    double gridSpacing = 10.0; /**< Grid line spacing (mm) */
     std::string gridColor = "#dddddd";
     
     // Color coding
-    bool colorByVelocity = false;               ///< Color code by velocity
-    bool colorByAcceleration = false;           ///< Color code by acceleration
+    bool colorByVelocity = false; /**< Color code by velocity */
+    bool colorByAcceleration = false; /**< Color code by acceleration */
     double velocityColorMin = 0.0;
-    double velocityColorMax = 100.0;            ///< mm/s
+    double velocityColorMax = 100.0; /**< mm/s */
 };
 
 struct RenderableBezierPath {

@@ -28,15 +28,15 @@ public:
     int stateDim() const override { return 2; }
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
-    /// Evaluate the nonlinear forced oscillator with linear damping and cubic spring stiffness.
+    /**Evaluate the nonlinear forced oscillator with linear damping and cubic spring stiffness. */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
-    /// Report oscillator displacement for direct comparison with ETFE estimates.
+    /**Report oscillator displacement for direct comparison with ETFE estimates. */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
-    /// Start near the origin with a small displacement to avoid trivial zero motion.
+    /**Start near the origin with a small displacement to avoid trivial zero motion. */
     StateVector defaultInitialState() const override;
-    /// Return the forcing and stiffness coefficients that shape the nonlinear response.
+    /**Return the forcing and stiffness coefficients that shape the nonlinear response. */
     std::vector<ParamDescriptor> parameterDescriptors() const override;
-    /// Provide both the classic chaotic regime and a milder hardening-spring regime.
+    /**Provide both the classic chaotic regime and a milder hardening-spring regime. */
     std::vector<Preset> presets() const override;
     void applyPreset(int index) override;
     std::vector<std::string> stateNames() const override;

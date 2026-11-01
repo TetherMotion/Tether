@@ -37,8 +37,10 @@ std::optional<std::size_t> SegmentToPieceMap::pieceForSegment(
 
 namespace {
 
-/// Determine which axes are active (vary) across the trajectory.
-/// Returns a bitmask of 9 bits: bit i set means axis i is active.
+/**
+ * Determine which axes are active (vary) across the trajectory.
+ * Returns a bitmask of 9 bits: bit i set means axis i is active.
+ */
 std::array<bool, 9> computeActiveAxes(
     const std::vector<GCodeExport::TrajectorySample>& samples) {
     std::array<bool, 9> active{};
@@ -55,14 +57,14 @@ std::array<bool, 9> computeActiveAxes(
     return active;
 }
 
-/// Count the number of active axes.
+/**Count the number of active axes. */
 std::size_t countActive(const std::array<bool, 9>& active) {
     std::size_t n = 0;
     for (bool a : active) if (a) ++n;
     return n;
 }
 
-/// Extract an RVec of the active axes from a 9-axis position array.
+/**Extract an RVec of the active axes from a 9-axis position array. */
 RVec extractActiveRVec(const std::array<double, 9>& pos,
                        const std::array<bool, 9>& active,
                        std::size_t dim) {
@@ -77,15 +79,15 @@ RVec extractActiveRVec(const std::array<double, 9>& pos,
     return v;
 }
 
-/// A group of consecutive samples belonging to one segment.
+/**A group of consecutive samples belonging to one segment. */
 struct SegmentGroup {
     int32_t segmentIndex = -1;
     uint8_t motionType = 0;
-    std::size_t startSample = 0; ///< Index into the samples vector
-    std::size_t endSample = 0;   ///< Exclusive
+    std::size_t startSample = 0; /**< Index into the samples vector */
+    std::size_t endSample = 0; /**< Exclusive */
 };
 
-/// Group samples by segmentIndex, preserving order.
+/**Group samples by segmentIndex, preserving order. */
 std::vector<SegmentGroup> groupBySegment(
     const std::vector<GCodeExport::TrajectorySample>& samples) {
     std::vector<SegmentGroup> groups;
@@ -110,7 +112,7 @@ std::vector<SegmentGroup> groupBySegment(
     return groups;
 }
 
-/// Build a line NurbsCurve from the first and last sample of a group.
+/**Build a line NurbsCurve from the first and last sample of a group. */
 NurbsCurve buildLine(const std::vector<GCodeExport::TrajectorySample>& samples,
                      const SegmentGroup& group,
                      const std::array<bool, 9>& active,
@@ -122,8 +124,10 @@ NurbsCurve buildLine(const std::vector<GCodeExport::TrajectorySample>& samples,
     return NurbsCurve::fromLine(p0, p1);
 }
 
-/// Fit a circle through 3 points in 2D (XY plane).
-/// Returns (centerX, centerY, radius). Throws if the points are collinear.
+/**
+ * Fit a circle through 3 points in 2D (XY plane).
+ * Returns (centerX, centerY, radius). Throws if the points are collinear.
+ */
 struct Circle2D {
     double cx, cy, radius;
 };
@@ -146,8 +150,10 @@ Circle2D fitCircle2D(double x0, double y0,
     return {ux, uy, r};
 }
 
-/// Compute the residual of a circle fit: max distance deviation of the
-/// 3 input points from the fitted circle.
+/**
+ * Compute the residual of a circle fit: max distance deviation of the
+ * 3 input points from the fitted circle.
+ */
 double circleResidual(const Circle2D& c,
                       double x0, double y0,
                       double x1, double y1,
@@ -158,7 +164,7 @@ double circleResidual(const Circle2D& c,
     return std::max({d0, d1, d2});
 }
 
-/// Build a polyline (degree-1 multi-span NURBS) through all sample positions.
+/**Build a polyline (degree-1 multi-span NURBS) through all sample positions. */
 NurbsCurve buildPolyline(
     const std::vector<GCodeExport::TrajectorySample>& samples,
     const SegmentGroup& group,
@@ -211,9 +217,11 @@ NurbsCurve buildPolyline(
     return NurbsCurve(std::move(cps), std::move(weights), std::move(knots), 1);
 }
 
-/// Attempt to build an arc NurbsCurve from a group of samples.
-/// Falls back to a polyline if the arc fit is poor or the geometry is
-/// not in the XY plane.
+/**
+ * Attempt to build an arc NurbsCurve from a group of samples.
+ * Falls back to a polyline if the arc fit is poor or the geometry is
+ * not in the XY plane.
+ */
 NurbsCurve buildArcOrPolyline(
     const std::vector<GCodeExport::TrajectorySample>& samples,
     const SegmentGroup& group,

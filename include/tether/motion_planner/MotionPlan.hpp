@@ -71,55 +71,55 @@ namespace MotionPlanner {
  */
 template<size_t Dim, typename T = double>
 struct MotionState {
-    /// Time from plan start (seconds)
+    /**Time from plan start (seconds) */
     T time = T(0);
     
-    /// Arc length position along path
+    /**Arc length position along path */
     T arcLength = T(0);
     
-    /// Position in Cartesian coordinates
+    /**Position in Cartesian coordinates */
     Vec<Dim, T> position;
     
-    /// Velocity vector (units/second)
+    /**Velocity vector (units/second) */
     Vec<Dim, T> velocity;
     
-    /// Acceleration vector (units/second²)
+    /**Acceleration vector (units/second²) */
     Vec<Dim, T> acceleration;
     
-    /// Jerk vector (units/second³)
+    /**Jerk vector (units/second³) */
     Vec<Dim, T> jerk;
     
-    /// Path (tangential) velocity magnitude
+    /**Path (tangential) velocity magnitude */
     T pathVelocity = T(0);
     
-    /// Path (tangential) acceleration magnitude
+    /**Path (tangential) acceleration magnitude */
     T pathAcceleration = T(0);
     
-    /// Path jerk magnitude
+    /**Path jerk magnitude */
     T pathJerk = T(0);
     
-    /// Current curvature
+    /**Current curvature */
     T curvature = T(0);
     
-    /// Source reference for current position
+    /**Source reference for current position */
     SourceReference sourceRef;
     
-    /// Index of current path segment
+    /**Index of current path segment */
     size_t segmentIndex = 0;
     
-    /// Parameter within current segment [0, 1]
+    /**Parameter within current segment [0, 1] */
     T segmentParameter = T(0);
     
-    /// Is motion in reverse direction?
+    /**Is motion in reverse direction? */
     bool isReverse = false;
     
-    /// Current feed rate override (1.0 = 100%)
+    /**Current feed rate override (1.0 = 100%) */
     T feedOverride = T(1);
     
-    /// Is motion paused?
+    /**Is motion paused? */
     bool isPaused = false;
     
-    /// S-curve phase (if applicable)
+    /**S-curve phase (if applicable) */
     SCurvePhase scurvePhase = SCurvePhase::Cruise;
 };
 
@@ -132,32 +132,34 @@ struct MotionState {
  */
 template<typename T = double>
 struct MotionPlanConfig {
-    /// Sample interval for internal profile (seconds)
+    /**Sample interval for internal profile (seconds) */
     T sampleInterval = T(0.001);
 
-    /// Enable S-curve profiles for jerk limiting
+    /**Enable S-curve profiles for jerk limiting */
     bool enableSCurve = true;
 
-    /// Enable reverse motion support
+    /**Enable reverse motion support */
     bool enableReverse = true;
 
-    /// Minimum feed rate override (0.0 = pause)
+    /**Minimum feed rate override (0.0 = pause) */
     T minFeedOverride = T(0.0);
 
-    /// Maximum feed rate override
+    /**Maximum feed rate override */
     T maxFeedOverride = T(2.0);
 
-    /// Feed override ramp rate (per second)
+    /**Feed override ramp rate (per second) */
     T feedOverrideRampRate = T(1.0);
 
-    /// Position tolerance for segment transitions
+    /**Position tolerance for segment transitions */
     T positionTolerance = T(1e-9);
 
-    /// ReNURBS configuration (analytical NURBS representation of the
-    /// velocity/acceleration/jerk/time profiles). When enabled, the
-    /// MotionPlanBuilder builds a ReNURBSProfile from the sampled
-    /// VelocityProfile and stores it in the MotionPlan.
-    /// Default: disabled (the sampled profile is used as-is).
+    /**
+     * ReNURBS configuration (analytical NURBS representation of the
+     * velocity/acceleration/jerk/time profiles). When enabled, the
+     * MotionPlanBuilder builds a ReNURBSProfile from the sampled
+     * VelocityProfile and stores it in the MotionPlan.
+     * Default: disabled (the sampled profile is used as-is).
+     */
     tether::motion::profile_renurbs::ReNURBSConfig renurbs;
 };
 
@@ -708,7 +710,7 @@ private:
     Limits limits_;
     Config config_;
 
-    /// Optional ReNURBS profile (populated if config_.renurbs.enabled).
+    /**Optional ReNURBS profile (populated if config_.renurbs.enabled). */
     std::optional<tether::motion::profile_renurbs::ReNURBSProfile> renurbsProfile_;
 
     T currentFeedOverride_ = T(1);
@@ -867,7 +869,7 @@ public:
      * @return Mutable limits the builder will apply.
      */
     Limits& limits() { return limits_; }
-    /// @return Limits the builder will apply.
+    /**@return Limits the builder will apply. */
     const Limits& limits() const { return limits_; }
 
     /**
@@ -875,7 +877,7 @@ public:
      * @return Mutable builder configuration.
      */
     Config& config() { return config_; }
-    /// @return Builder configuration.
+    /**@return Builder configuration. */
     const Config& config() const { return config_; }
 
     /**
@@ -891,7 +893,7 @@ private:
     ProfilerType profilerType_ = ProfilerType::ParetoTimeEnergy;
     std::unique_ptr<IProfiler> customProfiler_;
 
-    /// Create a profiler instance for the given type.
+    /**Create a profiler instance for the given type. */
     std::unique_ptr<IProfiler> createProfiler(ProfilerType type) {
         switch (type) {
             case ProfilerType::ToppraBasic:

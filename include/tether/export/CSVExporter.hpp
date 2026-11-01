@@ -31,7 +31,7 @@ struct CSVConfig {
     bool exportVelocity = true;
     bool exportAcceleration = true;
     bool exportJerk = true;
-    bool exportCombinedMetrics = true;       ///< Linear vel/accel/jerk, curvature
+    bool exportCombinedMetrics = true; /**< Linear vel/accel/jerk, curvature */
     bool exportSegmentInfo = true;
     
     // Formatting
@@ -43,7 +43,7 @@ struct CSVConfig {
     
     // Headers
     bool includeHeader = true;
-    bool includeUnits = true;                 ///< Add units row after header
+    bool includeUnits = true; /**< Add units row after header */
     
     // Axis names
     std::array<std::string, 9> axisNames = {"X", "Y", "Z", "A", "B", "C", "U", "V", "W"};
@@ -99,7 +99,7 @@ private:
 class BatchExporter {
 public:
     struct ExportSpec {
-        std::string basename;                 ///< Base filename without extension
+        std::string basename; /**< Base filename without extension */
         bool exportSVG = true;
         bool exportCSV = true;
         bool exportStatistics = true;

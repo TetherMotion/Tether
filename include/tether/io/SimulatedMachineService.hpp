@@ -27,7 +27,7 @@
 
 namespace tether::io::machine {
 
-/// DS402 state values used by the simulated fleet (subset of CiA 402).
+/**DS402 state values used by the simulated fleet (subset of CiA 402). */
 namespace sim_states {
 inline constexpr uint8_t kSwitchOnDisabled = 1;
 inline constexpr uint8_t kReadyToSwitchOn = 2;
@@ -37,15 +37,17 @@ inline constexpr uint8_t kQuickStop = 5;
 inline constexpr uint8_t kFault = 7;
 }
 
-/// Deterministic action-parameter encoding for the simulated dispatcher:
-/// little-endian scalars packed into CommandRequest::parameters.
+/**
+ * Deterministic action-parameter encoding for the simulated dispatcher:
+ * little-endian scalars packed into CommandRequest::parameters.
+ */
 struct SimulatedCommandParameters {
-    std::optional<int8_t> mode;        ///< SetMode
-    std::optional<int32_t> position;   ///< MoveToPosition
-    std::optional<int32_t> delta;      ///< StepMove
-    std::optional<int32_t> velocity;   ///< JogStart (drive units/s)
-    std::optional<uint32_t> durationMs;///< JogStart / JogRenew
-    std::optional<uint64_t> alarmId;   ///< AcknowledgeAlarm
+    std::optional<int8_t> mode; /**< SetMode */
+    std::optional<int32_t> position; /**< MoveToPosition */
+    std::optional<int32_t> delta; /**< StepMove */
+    std::optional<int32_t> velocity; /**< JogStart (drive units/s) */
+    std::optional<uint32_t> durationMs; /**< JogStart / JogRenew */
+    std::optional<uint64_t> alarmId; /**< AcknowledgeAlarm */
 };
 
 inline std::optional<SimulatedCommandParameters> decodeSimulatedParameters(
@@ -82,7 +84,7 @@ inline std::optional<SimulatedCommandParameters> decodeSimulatedParameters(
     return out;
 }
 
-/// TLV helper matching decodeSimulatedParameters.
+/**TLV helper matching decodeSimulatedParameters. */
 inline void putParameter(std::vector<uint8_t>& bytes, uint8_t tag, uint64_t value,
                          size_t width) {
     bytes.push_back(tag);
@@ -90,7 +92,7 @@ inline void putParameter(std::vector<uint8_t>& bytes, uint8_t tag, uint64_t valu
         bytes.push_back(static_cast<uint8_t>(value >> (index * 8U)));
 }
 
-/// Simulated state source: the fleet is the source of truth.
+/**Simulated state source: the fleet is the source of truth. */
 class SimulatedStateSource final : public IMachineStateSource {
 public:
     explicit SimulatedStateSource(cia402::SimulatedCiA402Fleet& fleet)
@@ -205,9 +207,11 @@ private:
     uint64_t configurationRevision_ = 1;
 };
 
-/// Simulated dispatcher: applies command effects to the fleet and drives the
-/// operation record to a terminal state. Continuous actions (jog, homing)
-/// stay Running until a stop/cancel command or session end.
+/**
+ * Simulated dispatcher: applies command effects to the fleet and drives the
+ * operation record to a terminal state. Continuous actions (jog, homing)
+ * stay Running until a stop/cancel command or session end.
+ */
 class SimulatedDispatcher final : public IMachineDispatcher {
 public:
     SimulatedDispatcher(cia402::SimulatedCiA402Fleet& fleet,
@@ -455,9 +459,11 @@ private:
     AlarmService& alarms_;
 };
 
-/// IMachineDiagnosticsSource fed from the simulated fleet's own snapshot —
-/// honest counters (no fabricated jitter), matching what a real adapter
-/// reads from the master's loop stats.
+/**
+ * IMachineDiagnosticsSource fed from the simulated fleet's own snapshot —
+ * honest counters (no fabricated jitter), matching what a real adapter
+ * reads from the master's loop stats.
+ */
 class SimulatedDiagnosticsSource final : public IMachineDiagnosticsSource {
 public:
     explicit SimulatedDiagnosticsSource(cia402::SimulatedCiA402Fleet& fleet)
@@ -485,9 +491,11 @@ private:
     cia402::SimulatedCiA402Fleet& fleet_;
 };
 
-/// IMachinePdoSource fabricated from the fleet's axis layout — each axis maps
-/// a canonical CiA 402 RxPDO (controlword/target position/velocity) and TxPDO
-/// (statusword/actual position/velocity), laid out consecutively per slave.
+/**
+ * IMachinePdoSource fabricated from the fleet's axis layout — each axis maps
+ * a canonical CiA 402 RxPDO (controlword/target position/velocity) and TxPDO
+ * (statusword/actual position/velocity), laid out consecutively per slave.
+ */
 class SimulatedPdoSource final : public IMachinePdoSource {
 public:
     explicit SimulatedPdoSource(cia402::SimulatedCiA402Fleet& fleet) : fleet_(fleet) {}
@@ -517,9 +525,11 @@ private:
     cia402::SimulatedCiA402Fleet& fleet_;
 };
 
-/// IMachineSupervisorAccess mirroring the fleet's simulated recovery states —
-/// recovering drives map to Recovering, faulted drives to Critical; retry()
-/// records the request and flips a faulted drive back to normal.
+/**
+ * IMachineSupervisorAccess mirroring the fleet's simulated recovery states —
+ * recovering drives map to Recovering, faulted drives to Critical; retry()
+ * records the request and flips a faulted drive back to normal.
+ */
 class SimulatedSupervisorAccess final : public IMachineSupervisorAccess {
 public:
     explicit SimulatedSupervisorAccess(cia402::SimulatedCiA402Fleet& fleet)
@@ -570,9 +580,11 @@ private:
     std::map<uint16_t, uint16_t> retries_;
 };
 
-/// IMachineChecklistSource evaluating commissioning requirements against the
-/// live simulated fleet: all slaves OP, no faults, authority established,
-/// staged config committed (nonzero revision), capture configured.
+/**
+ * IMachineChecklistSource evaluating commissioning requirements against the
+ * live simulated fleet: all slaves OP, no faults, authority established,
+ * staged config committed (nonzero revision), capture configured.
+ */
 class SimulatedChecklistSource final : public IMachineChecklistSource {
 public:
     SimulatedChecklistSource(cia402::SimulatedCiA402Fleet& fleet,
@@ -615,7 +627,7 @@ private:
     const MachineCaptureService& capture_;
 };
 
-/// Convenience aggregate: owns every piece of the simulated machine service.
+/**Convenience aggregate: owns every piece of the simulated machine service. */
 struct SimulatedMachineStack {
     cia402::SimulatedCiA402Fleet fleet;
     ControlAuthority authority;
@@ -667,12 +679,14 @@ struct SimulatedMachineStack {
           service(stateSource, dispatcher, authority, gate, alarms, operations,
                   &fleet.eventJournal()) {}
 
-    /// Create the registry-dependent services and install every machine
-    /// function into `registry`. Call once, before sessions are accepted.
-    /// `enableSdo` attaches the in-memory SDO inspector backend — surfaces
-    /// are opt-in; pass false (or leave a real stack without setSdoService)
-    /// to keep machine.sdo.* off the catalog entirely. `enableExtension`
-    /// attaches the application-profile + recipe surfaces (Phase 7).
+    /**
+     * Create the registry-dependent services and install every machine
+     * function into `registry`. Call once, before sessions are accepted.
+     * `enableSdo` attaches the in-memory SDO inspector backend — surfaces
+     * are opt-in; pass false (or leave a real stack without setSdoService)
+     * to keep machine.sdo.* off the catalog entirely. `enableExtension`
+     * attaches the application-profile + recipe surfaces (Phase 7).
+     */
     bool install(Registry& registry, const SchemaCatalog& catalog,
                  bool enableSdo = true, bool enableDiagnostics = true,
                  bool enableExtension = true) {
@@ -754,8 +768,10 @@ struct SimulatedMachineStack {
         return service.install(registry, catalog);
     }
 
-    /// CiA 301 data type code → Tether value type + fixed byte size (0 for
-    /// variable-length types).
+    /**
+     * CiA 301 data type code → Tether value type + fixed byte size (0 for
+     * variable-length types).
+     */
     static std::pair<ValueType, size_t> odTypeInfo(uint16_t dataType) {
         switch (dataType) {
             case 0x0001: return {ValueType::Bool, 1};
@@ -774,8 +790,10 @@ struct SimulatedMachineStack {
         }
     }
 
-    /// Live snapshot fields surfaced as OD objects: measured objects read the
-    /// current snapshot; writable command objects also mirror writes back.
+    /**
+     * Live snapshot fields surfaced as OD objects: measured objects read the
+     * current snapshot; writable command objects also mirror writes back.
+     */
     static bool liveObjectValue(const cia402::DriveSnapshotV1& s, uint16_t index,
                                 int64_t& value) {
         switch (index) {
@@ -802,11 +820,13 @@ struct SimulatedMachineStack {
         }
     }
 
-    /// Expose every axis' object dictionary as browsable catalog parameters
-    /// (`sdo.<axis>.<index>_<sub>`) so the generic Explore view shows the
-    /// CiA 402 parameter surface. Read-only objects read live from the drive
-    /// snapshot where a mapping exists; writable objects update both the OD
-    /// store and the snapshot (which journals a DriveStateChanged event).
+    /**
+     * Expose every axis' object dictionary as browsable catalog parameters
+     * (`sdo.<axis>.<index>_<sub>`) so the generic Explore view shows the
+     * CiA 402 parameter surface. Read-only objects read live from the drive
+     * snapshot where a mapping exists; writable objects update both the OD
+     * store and the snapshot (which journals a DriveStateChanged event).
+     */
     void registerObjectDictionary(Registry& registry) {
         static constexpr uint64_t kIdBase = 0x5400'0000'0000'0000ULL;
         const auto table = simulatedObjectTable();
@@ -892,7 +912,7 @@ struct SimulatedMachineStack {
         }
     }
 
-    /// Common CiA 402 object table shown by machine.sdo.list in simulation.
+    /**Common CiA 402 object table shown by machine.sdo.list in simulation. */
     static std::vector<SdoObjectInfoV1> simulatedObjectTable() {
         return {
             {0x1000, 0, 0x0007, 1, "Device type"},

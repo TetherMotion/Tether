@@ -22,32 +22,38 @@
 
 namespace tether::klipper::config {
 
-/// @brief A configuration section (e.g. [stepper_x]).
+/**@brief A configuration section (e.g. [stepper_x]). */
 struct ConfigSection {
-    std::string name;                              ///< Section name (without brackets)
-    std::map<std::string, std::string> values;     ///< Key-value pairs
-    std::vector<std::string> multiValues;          ///< For multi-line values
+    std::string name; /**< Section name (without brackets) */
+    std::map<std::string, std::string> values; /**< Key-value pairs */
+    std::vector<std::string> multiValues; /**< For multi-line values */
 
-    /// @brief Check if a key exists.
-    /// @param key Option name within the section.
-    /// @return true when the key is present.
+    /**
+     * @brief Check if a key exists.
+     * @param key Option name within the section.
+     * @return true when the key is present.
+     */
     bool has(const std::string& key) const {
         return values.count(key) > 0;
     }
 
-    /// @brief Get a value as string.
-    /// @param key Option name within the section.
-    /// @param defaultVal Value returned when the key is absent.
-    /// @return Raw string value.
+    /**
+     * @brief Get a value as string.
+     * @param key Option name within the section.
+     * @param defaultVal Value returned when the key is absent.
+     * @return Raw string value.
+     */
     std::string get(const std::string& key, const std::string& defaultVal = "") const {
         auto it = values.find(key);
         return it == values.end() ? defaultVal : it->second;
     }
 
-    /// @brief Get a value as integer.
-    /// @param key Option name within the section.
-    /// @param defaultVal Value returned when absent or unparseable.
-    /// @return Parsed integer.
+    /**
+     * @brief Get a value as integer.
+     * @param key Option name within the section.
+     * @param defaultVal Value returned when absent or unparseable.
+     * @return Parsed integer.
+     */
     int64_t getInt(const std::string& key, int64_t defaultVal = 0) const {
         auto it = values.find(key);
         if (it == values.end()) return defaultVal;
@@ -55,10 +61,12 @@ struct ConfigSection {
         catch (...) { return defaultVal; }
     }
 
-    /// @brief Get a value as double.
-    /// @param key Option name within the section.
-    /// @param defaultVal Value returned when absent or unparseable.
-    /// @return Parsed floating-point value.
+    /**
+     * @brief Get a value as double.
+     * @param key Option name within the section.
+     * @param defaultVal Value returned when absent or unparseable.
+     * @return Parsed floating-point value.
+     */
     double getDouble(const std::string& key, double defaultVal = 0.0) const {
         auto it = values.find(key);
         if (it == values.end()) return defaultVal;
@@ -66,10 +74,12 @@ struct ConfigSection {
         catch (...) { return defaultVal; }
     }
 
-    /// @brief Get a value as boolean.
-    /// @param key Option name within the section.
-    /// @param defaultVal Value returned when the key is absent.
-    /// @return Parsed boolean (true/1/yes).
+    /**
+     * @brief Get a value as boolean.
+     * @param key Option name within the section.
+     * @param defaultVal Value returned when the key is absent.
+     * @return Parsed boolean (true/1/yes).
+     */
     bool getBool(const std::string& key, bool defaultVal = false) const {
         auto it = values.find(key);
         if (it == values.end()) return defaultVal;
@@ -77,10 +87,12 @@ struct ConfigSection {
         return v == "true" || v == "True" || v == "1" || v == "yes" || v == "Yes";
     }
 
-    /// @brief Get a comma-separated list.
-    /// @param key Option name within the section.
-    /// @param defaultVal Comma-separated fallback when the key is absent.
-    /// @return Trimmed list elements.
+    /**
+     * @brief Get a comma-separated list.
+     * @param key Option name within the section.
+     * @param defaultVal Comma-separated fallback when the key is absent.
+     * @return Trimmed list elements.
+     */
     std::vector<std::string> getList(const std::string& key,
                                       const std::string& defaultVal = "") const {
         auto it = values.find(key);
@@ -113,14 +125,16 @@ struct ConfigSection {
     }
 };
 
-/// @brief Configuration file parser.
+/**@brief Configuration file parser. */
 class ConfigParser {
 public:
-    /// @brief Parse a configuration string.
-    /// Supports include directives ([include file.cfg]), variable substitution
-    /// ({variable}), and multi-line values (backslash continuation).
-    /// @param content Configuration text.
-    /// @return true when at least one section was parsed.
+    /**
+     * @brief Parse a configuration string.
+     * Supports include directives ([include file.cfg]), variable substitution
+     * ({variable}), and multi-line values (backslash continuation).
+     * @param content Configuration text.
+     * @return true when at least one section was parsed.
+     */
     bool parse(const std::string& content) {
         sections_.clear();
         includedFiles_.clear();
@@ -130,9 +144,11 @@ public:
         return !sections_.empty();
     }
 
-    /// @brief Parse a configuration file.
-    /// @param path Path of the file to read.
-    /// @return true when the file was read and parsed.
+    /**
+     * @brief Parse a configuration file.
+     * @param path Path of the file to read.
+     * @return true when the file was read and parsed.
+     */
     bool parseFile(const std::string& path) {
         std::ifstream file(path);
         if (!file.is_open()) return false;
@@ -152,13 +168,17 @@ public:
         return !sections_.empty();
     }
 
-    /// @brief Get all sections.
-    /// @return Parsed sections in file order.
+    /**
+     * @brief Get all sections.
+     * @return Parsed sections in file order.
+     */
     const std::vector<ConfigSection>& sections() const { return sections_; }
 
-    /// @brief Get sections by name.
-    /// @param name Section name (e.g. "stepper_x").
-    /// @return Every section with that name.
+    /**
+     * @brief Get sections by name.
+     * @param name Section name (e.g. "stepper_x").
+     * @return Every section with that name.
+     */
     std::vector<const ConfigSection*> getSections(const std::string& name) const {
         std::vector<const ConfigSection*> result;
         for (const auto& s : sections_) {
@@ -167,9 +187,11 @@ public:
         return result;
     }
 
-    /// @brief Get the first section with a given name.
-    /// @param name Section name.
-    /// @return Section, or nullptr when absent.
+    /**
+     * @brief Get the first section with a given name.
+     * @param name Section name.
+     * @return Section, or nullptr when absent.
+     */
     const ConfigSection* getSection(const std::string& name) const {
         for (const auto& s : sections_) {
             if (s.name == name) return &s;
@@ -177,15 +199,19 @@ public:
         return nullptr;
     }
 
-    /// @brief Check if a section exists.
-    /// @param name Section name.
-    /// @return true when the section is present.
+    /**
+     * @brief Check if a section exists.
+     * @param name Section name.
+     * @return true when the section is present.
+     */
     bool hasSection(const std::string& name) const {
         return getSection(name) != nullptr;
     }
 
-    /// @brief Get all section names.
-    /// @return Unique section names in first-seen order.
+    /**
+     * @brief Get all section names.
+     * @return Unique section names in first-seen order.
+     */
     std::vector<std::string> sectionNames() const {
         std::vector<std::string> names;
         for (const auto& s : sections_) {
@@ -196,13 +222,17 @@ public:
         return names;
     }
 
-    /// @brief Get the list of included files.
-    /// @return Paths of files pulled in via [include ...].
+    /**
+     * @brief Get the list of included files.
+     * @return Paths of files pulled in via [include ...].
+     */
     const std::vector<std::string>& includedFiles() const { return includedFiles_; }
 
-    /// @brief Set a variable for substitution.
-    /// @param key Variable name (referenced as {key}).
-    /// @param value Replacement text.
+    /**
+     * @brief Set a variable for substitution.
+     * @param key Variable name (referenced as {key}).
+     * @param value Replacement text.
+     */
     void setVariable(const std::string& key, const std::string& value) {
         variables_[key] = value;
     }
@@ -212,7 +242,7 @@ private:
     std::map<std::string, std::string> variables_;
     std::vector<std::string> includedFiles_;
 
-    /// @brief Parse content, handling includes and multi-line values.
+    /**@brief Parse content, handling includes and multi-line values. */
     void parseContent(const std::string& content, const std::string& baseDir) {
         std::stringstream ss(content);
         std::string line;
@@ -354,7 +384,7 @@ private:
         }
     }
 
-    /// @brief Apply {variable} substitution to all values.
+    /**@brief Apply {variable} substitution to all values. */
     void applyVariableSubstitution() {
         for (auto& section : sections_) {
             for (auto& [key, value] : section.values) {
@@ -363,7 +393,7 @@ private:
         }
     }
 
-    /// @brief Substitute {variable} references in a string.
+    /**@brief Substitute {variable} references in a string. */
     std::string substituteVariables(const std::string& input) const {
         std::string result = input;
         size_t pos = 0;
@@ -387,7 +417,7 @@ private:
 // Config Validator — validates Klipper config sections
 // ============================================================================
 
-/// @brief Validation result for a single section.
+/**@brief Validation result for a single section. */
 struct ConfigValidationResult {
     std::string sectionName;
     bool valid = true;
@@ -395,15 +425,19 @@ struct ConfigValidationResult {
     std::vector<std::string> warnings;
 };
 
-/// @brief Validates Klipper configuration sections.
-///
-/// Checks that required keys are present and that values are within
-/// reasonable ranges for each known Klipper section type.
+/**
+ * @brief Validates Klipper configuration sections.
+ *
+ * Checks that required keys are present and that values are within
+ * reasonable ranges for each known Klipper section type.
+ */
 class ConfigValidator {
 public:
-    /// @brief Validate all sections in a parsed config.
-    /// @param parser Parsed configuration to check.
-    /// @return One result per section, in file order.
+    /**
+     * @brief Validate all sections in a parsed config.
+     * @param parser Parsed configuration to check.
+     * @return One result per section, in file order.
+     */
     std::vector<ConfigValidationResult> validate(const ConfigParser& parser) const {
         std::vector<ConfigValidationResult> results;
         for (const auto& section : parser.sections()) {
@@ -412,9 +446,11 @@ public:
         return results;
     }
 
-    /// @brief Validate a single section.
-    /// @param section Section to check.
-    /// @return Validation result with errors and warnings.
+    /**
+     * @brief Validate a single section.
+     * @param section Section to check.
+     * @return Validation result with errors and warnings.
+     */
     ConfigValidationResult validateSection(const ConfigSection& section) const {
         ConfigValidationResult result;
         result.sectionName = section.name;
@@ -475,9 +511,11 @@ public:
         return result;
     }
 
-    /// @brief Check if all sections are valid.
-    /// @param results Validation results to inspect.
-    /// @return true when no result reports an error.
+    /**
+     * @brief Check if all sections are valid.
+     * @param results Validation results to inspect.
+     * @return true when no result reports an error.
+     */
     bool allValid(const std::vector<ConfigValidationResult>& results) const {
         for (const auto& r : results) {
             if (!r.valid) return false;
@@ -485,9 +523,11 @@ public:
         return true;
     }
 
-    /// @brief Get all errors as a single string.
-    /// @param results Validation results to format.
-    /// @return Human-readable error summary (empty when all valid).
+    /**
+     * @brief Get all errors as a single string.
+     * @param results Validation results to format.
+     * @return Human-readable error summary (empty when all valid).
+     */
     std::string formatErrors(const std::vector<ConfigValidationResult>& results) const {
         std::ostringstream ss;
         for (const auto& r : results) {

@@ -51,28 +51,36 @@
 
 namespace tether::klipper::motion {
 
-/// @brief Real-time step scheduler executing StepCommands against a
-///        monotonic timer.
+/**
+ * @brief Real-time step scheduler executing StepCommands against a
+ *        monotonic timer.
+ */
 class StepScheduler {
 public:
-    /// @brief Callback fired for each step taken.
-    /// @param oid The stepper OID.
-    /// @param dir The step direction (+1 or -1).
+    /**
+     * @brief Callback fired for each step taken.
+     * @param oid The stepper OID.
+     * @param dir The step direction (+1 or -1).
+     */
     using StepCallback = std::function<void(uint8_t oid, int8_t dir)>;
 
-    /// @brief Construct with a clock frequency.
-    /// @param clockFreqHz MCU clock frequency in Hz (ticks per second).
+    /**
+     * @brief Construct with a clock frequency.
+     * @param clockFreqHz MCU clock frequency in Hz (ticks per second).
+     */
     explicit StepScheduler(uint32_t clockFreqHz = 180000000)
         : clockFreqHz_(clockFreqHz) {}
 
-    /// @brief Set the per-step callback.
+    /**@brief Set the per-step callback. */
     void setStepCallback(StepCallback cb) {
         std::lock_guard<std::mutex> lock(mutex_);
         stepCb_ = std::move(cb);
     }
 
-    /// @brief Set the clock anchor: (wallTime, mcuTick). Allows aligning
-    ///        the scheduler's clock to an externally-synchronised reference.
+    /**
+     * @brief Set the clock anchor: (wallTime, mcuTick). Allows aligning
+     *        the scheduler's clock to an externally-synchronised reference.
+     */
     void setClockAnchor(std::chrono::steady_clock::time_point wallTime,
                         uint32_t mcuTick) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -81,8 +89,10 @@ public:
         anchored_ = true;
     }
 
-    /// @brief Anchor the clock to the current wall time and MCU tick 0.
-    ///        Subsequent schedule() calls use MCU ticks relative to this anchor.
+    /**
+     * @brief Anchor the clock to the current wall time and MCU tick 0.
+     *        Subsequent schedule() calls use MCU ticks relative to this anchor.
+     */
     void start() {
         std::lock_guard<std::mutex> lock(mutex_);
         anchorWall_ = std::chrono::steady_clock::now();
@@ -90,7 +100,7 @@ public:
         anchored_ = true;
     }
 
-    /// @brief Reset the scheduler: clear all pending steps and re-anchor.
+    /**@brief Reset the scheduler: clear all pending steps and re-anchor. */
     void reset() {
         std::lock_guard<std::mutex> lock(mutex_);
         entries_.clear();
@@ -99,10 +109,12 @@ public:
         anchored_ = true;
     }
 
-    /// @brief Schedule a step sequence for a given stepper OID.
-    /// @param oid The stepper OID.
-    /// @param cmd The step command (interval, count, add, dir).
-    /// @param startClock The MCU clock tick at which this sequence begins.
+    /**
+     * @brief Schedule a step sequence for a given stepper OID.
+     * @param oid The stepper OID.
+     * @param cmd The step command (interval, count, add, dir).
+     * @param startClock The MCU clock tick at which this sequence begins.
+     */
     void schedule(uint8_t oid, const objects::StepCommand& cmd,
                   uint32_t startClock) {
         if (cmd.count == 0) return;
@@ -117,10 +129,12 @@ public:
         entries_.push_back(std::move(e));
     }
 
-    /// @brief Schedule multiple step sequences (one per OID).
-    /// @param oid The stepper OID.
-    /// @param cmds The step commands to schedule in order.
-    /// @param startClock The MCU clock tick at which the first sequence begins.
+    /**
+     * @brief Schedule multiple step sequences (one per OID).
+     * @param oid The stepper OID.
+     * @param cmds The step commands to schedule in order.
+     * @param startClock The MCU clock tick at which the first sequence begins.
+     */
     void scheduleSequence(uint8_t oid,
                           const std::vector<objects::StepCommand>& cmds,
                           uint32_t startClock) {
@@ -139,9 +153,11 @@ public:
         }
     }
 
-    /// @brief Process due steps. Call this periodically (e.g. from a timer
-    ///        ISR or RTOS thread at a high rate).
-    /// @return Number of steps fired in this call.
+    /**
+     * @brief Process due steps. Call this periodically (e.g. from a timer
+     *        ISR or RTOS thread at a high rate).
+     * @return Number of steps fired in this call.
+     */
     size_t tick() {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!anchored_ || !stepCb_) return 0;
@@ -174,9 +190,11 @@ public:
         return fired;
     }
 
-    /// @brief Block until all scheduled steps have fired.
-    /// @param maxWaitMs Maximum wait time in milliseconds (0 = no limit).
-    /// @return True if all steps completed, false on timeout.
+    /**
+     * @brief Block until all scheduled steps have fired.
+     * @param maxWaitMs Maximum wait time in milliseconds (0 = no limit).
+     * @return True if all steps completed, false on timeout.
+     */
     bool wait(uint32_t maxWaitMs = 0) {
         auto deadline = std::chrono::steady_clock::now()
             + std::chrono::milliseconds(maxWaitMs);
@@ -192,19 +210,19 @@ public:
         return true;
     }
 
-    /// @return True if there are no pending steps.
+    /**@return True if there are no pending steps. */
     bool idle() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return entries_.empty();
     }
 
-    /// @return Number of pending step commands (not individual steps).
+    /**@return Number of pending step commands (not individual steps). */
     size_t pendingCommands() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return entries_.size();
     }
 
-    /// @return Number of individual steps still pending across all commands.
+    /**@return Number of individual steps still pending across all commands. */
     size_t pendingSteps() const {
         std::lock_guard<std::mutex> lock(mutex_);
         size_t total = 0;
@@ -214,11 +232,11 @@ public:
         return total;
     }
 
-    /// @return The clock frequency in Hz.
+    /**@return The clock frequency in Hz. */
     uint32_t clockFrequency() const { return clockFreqHz_; }
 
 private:
-    /// @brief Convert a wall time to an MCU clock tick (32-bit).
+    /**@brief Convert a wall time to an MCU clock tick (32-bit). */
     uint32_t wallToMcu(std::chrono::steady_clock::time_point wall) const {
         auto delta = std::chrono::duration<double>(wall - anchorWall_).count();
         uint64_t ticks = anchorTick_

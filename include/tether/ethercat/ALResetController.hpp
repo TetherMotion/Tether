@@ -25,14 +25,14 @@ class Master;
  * @brief Per-slave result of an AL reset operation
  */
 struct ALResetResult {
-    bool success = false;          ///< True if target state reached without error
-    uint16_t slave_index = 0;      ///< Slave index that was reset
-    uint8_t target_state = 0;      ///< Requested target ESM state
-    int iterations_used = 0;       ///< Number of iterations actually performed
-    int max_iterations = 0;        ///< Max iterations that were allowed
-    uint16_t final_al_status = 0;  ///< Final AL_STATUS value (host byte order)
-    uint16_t final_al_status_code = 0; ///< Final AL_STATUS_CODE (host byte order)
-    std::string message;           ///< Human-readable summary
+    bool success = false; /**< True if target state reached without error */
+    uint16_t slave_index = 0; /**< Slave index that was reset */
+    uint8_t target_state = 0; /**< Requested target ESM state */
+    int iterations_used = 0; /**< Number of iterations actually performed */
+    int max_iterations = 0; /**< Max iterations that were allowed */
+    uint16_t final_al_status = 0; /**< Final AL_STATUS value (host byte order) */
+    uint16_t final_al_status_code = 0; /**< Final AL_STATUS_CODE (host byte order) */
+    std::string message; /**< Human-readable summary */
 };
 
 // ============================================================================

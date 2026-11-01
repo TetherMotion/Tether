@@ -275,9 +275,9 @@ public:
      * @brief Set rule complexity
      */
     enum class RuleComplexity {
-        Simple,     ///< 3x3 rule base
-        Medium,     ///< 5x5 rule base
-        Complex     ///< 7x7 rule base
+        Simple, /**< 3x3 rule base */
+        Medium, /**< 5x5 rule base */
+        Complex /**< 7x7 rule base */
     };
     void setRuleComplexity(RuleComplexity c) { m_complexity = c; }
     
@@ -326,11 +326,11 @@ public:
      * @param n Number of individuals per generation.
      */
     void setPopulationSize(int n) { m_popSize = n; }
-    /// @param n Number of generations to evolve.
+    /**@param n Number of generations to evolve. */
     void setGenerations(int n) { m_generations = n; }
-    /// @param r Per-gene mutation probability.
+    /**@param r Per-gene mutation probability. */
     void setMutationRate(double r) { m_mutationRate = r; }
-    /// @param r Per-pair crossover probability.
+    /**@param r Per-pair crossover probability. */
     void setCrossoverRate(double r) { m_crossoverRate = r; }
     
     /**
@@ -407,13 +407,13 @@ public:
      * @param n Number of particles in the swarm.
      */
     void setSwarmSize(int n) { m_swarmSize = n; }
-    /// @param n Number of swarm iterations.
+    /**@param n Number of swarm iterations. */
     void setIterations(int n) { m_iterations = n; }
-    /// @param w Inertia weight (velocity retention).
+    /**@param w Inertia weight (velocity retention). */
     void setInertia(double w) { m_w = w; }
-    /// @param c1 Cognitive (personal-best) acceleration coefficient.
+    /**@param c1 Cognitive (personal-best) acceleration coefficient. */
     void setCognitiveCoeff(double c1) { m_c1 = c1; }
-    /// @param c2 Social (global-best) acceleration coefficient.
+    /**@param c2 Social (global-best) acceleration coefficient. */
     void setSocialCoeff(double c2) { m_c2 = c2; }
     
     /**

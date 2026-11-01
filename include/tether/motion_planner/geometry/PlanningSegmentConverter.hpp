@@ -34,28 +34,30 @@
 
 namespace tether::motion {
 
-/// @brief A dwell point: a position on the path where motion pauses.
+/**@brief A dwell point: a position on the path where motion pauses. */
 struct DwellPoint {
-    double arcLength = 0.0;  ///< Arc length along the path (mm)
-    double duration = 0.0;   ///< Dwell duration (seconds)
+    double arcLength = 0.0; /**< Arc length along the path (mm) */
+    double duration = 0.0; /**< Dwell duration (seconds) */
 };
 
-/// @brief Result of converting PlanningSegments to a NURBS path.
+/**@brief Result of converting PlanningSegments to a NURBS path. */
 struct PlanningSegmentNurbsResult {
-    PiecewiseNurbsPath path;                ///< The assembled NURBS path
-    std::vector<float> deviations;          ///< Per-piece corner deviation % (0–100)
-    std::vector<float> extruderSpeeds;      ///< Per-piece extruder speed (mm/s)
-    std::vector<double> feedRates;          ///< Per-piece feed rate (mm/s, converted from mm/min)
-    std::vector<DwellPoint> dwellPoints;    ///< Dwell points (G4 commands), in arc-length order
+    PiecewiseNurbsPath path; /**< The assembled NURBS path */
+    std::vector<float> deviations; /**< Per-piece corner deviation % (0–100) */
+    std::vector<float> extruderSpeeds; /**< Per-piece extruder speed (mm/s) */
+    std::vector<double> feedRates; /**< Per-piece feed rate (mm/s, converted from mm/min) */
+    std::vector<DwellPoint> dwellPoints; /**< Dwell points (G4 commands), in arc-length order */
 };
 
-/// @brief Build a PiecewiseNurbsPath from a vector of PlanningSegments.
-///
-/// @param segments Planning segments (from PlanningSegmentBuilder or similar)
-/// @return Result containing the NURBS path and per-piece attributes.
-///         The deviations and extruderSpeeds vectors have one entry per
-///         piece in the path (zero-length segments are skipped).
-/// @throws std::invalid_argument if all segments are zero-length (empty path).
+/**
+ * @brief Build a PiecewiseNurbsPath from a vector of PlanningSegments.
+ *
+ * @param segments Planning segments (from PlanningSegmentBuilder or similar)
+ * @return Result containing the NURBS path and per-piece attributes.
+ *         The deviations and extruderSpeeds vectors have one entry per
+ *         piece in the path (zero-length segments are skipped).
+ * @throws std::invalid_argument if all segments are zero-length (empty path).
+ */
 PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
     const std::vector<GCode::PlanningSegment>& segments);
 

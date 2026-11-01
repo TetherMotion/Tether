@@ -47,7 +47,7 @@ enum class ControlWord : uint16_t {
     FaultReset        = 0x0080,
 };
 
-/// Bits 0-3 and 7 of the controlword carry the state-transition command.
+/**Bits 0-3 and 7 of the controlword carry the state-transition command. */
 inline constexpr uint16_t ControlWordTransitionMask = 0x008F;
 
 enum class Register : uint16_t {

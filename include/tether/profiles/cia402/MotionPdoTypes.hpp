@@ -34,12 +34,12 @@ namespace CiA402 {
  */
 #pragma pack(push, 1)
 struct MotionCommand {
-    uint16_t controlword = 0;           ///< 0x6040 — shutdown/enable/fault-reset
-    int8_t   modes_of_operation = 0;    ///< 0x6060 — e.g. 8 = CSP
-    int16_t  target_torque = 0;         ///< 0x6071 — per-mille (CST)
-    int32_t  target_position = 0;       ///< 0x607A — counts (CSP/PP)
-    int32_t  target_velocity = 0;       ///< 0x60FF — counts/s (CSV / feed-fwd)
-    int16_t  torque_offset = 0;         ///< 0x60B2 — per-mille feed-forward
+    uint16_t controlword = 0; /**< 0x6040 — shutdown/enable/fault-reset */
+    int8_t   modes_of_operation = 0; /**< 0x6060 — e.g. 8 = CSP */
+    int16_t  target_torque = 0; /**< 0x6071 — per-mille (CST) */
+    int32_t  target_position = 0; /**< 0x607A — counts (CSP/PP) */
+    int32_t  target_velocity = 0; /**< 0x60FF — counts/s (CSV / feed-fwd) */
+    int16_t  torque_offset = 0; /**< 0x60B2 — per-mille feed-forward */
 };
 #pragma pack(pop)
 static_assert(sizeof(MotionCommand) == 15);
@@ -50,11 +50,11 @@ static_assert(std::is_trivially_copyable_v<MotionCommand>);
  */
 #pragma pack(push, 1)
 struct MotionFeedback {
-    uint16_t statusword = 0;                  ///< 0x6041
-    int8_t   modes_of_operation_display = 0;  ///< 0x6061
-    int32_t  position_actual = 0;             ///< 0x6064 — counts
-    int32_t  velocity_actual = 0;             ///< 0x606C — counts/s
-    int16_t  torque_actual = 0;               ///< 0x6077 — per-mille
+    uint16_t statusword = 0; /**< 0x6041 */
+    int8_t   modes_of_operation_display = 0; /**< 0x6061 */
+    int32_t  position_actual = 0; /**< 0x6064 — counts */
+    int32_t  velocity_actual = 0; /**< 0x606C — counts/s */
+    int16_t  torque_actual = 0; /**< 0x6077 — per-mille */
 };
 #pragma pack(pop)
 static_assert(sizeof(MotionFeedback) == 13);

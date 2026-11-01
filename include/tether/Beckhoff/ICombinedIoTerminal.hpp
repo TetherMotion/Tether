@@ -30,28 +30,28 @@ public:
 
     // -- Identity --------------------------------------------------------------
 
-    /// Zero-based bus position of this device.
+    /**Zero-based bus position of this device. */
     virtual uint16_t slaveIndex() const = 0;
 
-    /// Number of 1-bit input/output channels on this device.
+    /**Number of 1-bit input/output channels on this device. */
     virtual size_t inputChannelCount()  const = 0;
     virtual size_t outputChannelCount() const = 0;
 
-    /// Device name for logging/UI.
+    /**Device name for logging/UI. */
     virtual const char* deviceName() const = 0;
 
     // -- I/O ---------------------------------------------------------------------
 
-    /// Latest state of packed input bit `i`.
+    /**Latest state of packed input bit `i`. */
     virtual bool input(size_t i) const = 0;
 
-    /// Write packed output bit `i`.
+    /**Write packed output bit `i`. */
     virtual void setOutput(size_t i, bool on) = 0;
 
-    /// Read-back of packed output bit `i`.
+    /**Read-back of packed output bit `i`. */
     virtual bool output(size_t i) const = 0;
 
-    /// Clear the whole output image.
+    /**Clear the whole output image. */
     virtual void allOutputsOff() = 0;
 
     // -- Chained bring-up (called by MultiCombinedIoTerminal) ---------------------
@@ -71,7 +71,7 @@ public:
      */
     virtual Result<> mapLogicalAndEnterSafeOp() = 0;
 
-    /// Request the OP state and wait for confirmation (or cancellation).
+    /**Request the OP state and wait for confirmation (or cancellation). */
     virtual Result<> requestOp(int timeout_ms) = 0;
 };
 

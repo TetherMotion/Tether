@@ -1,9 +1,11 @@
-/// @file KlippyInstanceCallbacks.ipp
-/// @brief G-code callback setup for KlippyInstance (included into class body).
-///
-/// This file is included inside the KlippyInstance class definition.
-/// It contains the setupCallbacks() method which wires all G-code
-/// executor callbacks to the appropriate hardware/software backends.
+/**
+ * @file KlippyInstanceCallbacks.ipp
+ * @brief G-code callback setup for KlippyInstance (included into class body).
+ *
+ * This file is included inside the KlippyInstance class definition.
+ * It contains the setupCallbacks() method which wires all G-code
+ * executor callbacks to the appropriate hardware/software backends.
+ */
 
     void setupCallbacks() {
         GcodeCallbacks cb;

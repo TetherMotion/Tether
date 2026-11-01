@@ -14,10 +14,10 @@
 
 namespace EtherCAT { namespace SDO {
 
-/// SDO Server Parameters (0x1200 - 0x127F)
+/**SDO Server Parameters (0x1200 - 0x127F) */
 constexpr uint16_t kSDOServerParameterBase = 0x1200;
 
-/// SDO Client Parameters (0x1280 - 0x12FF)
+/**SDO Client Parameters (0x1280 - 0x12FF) */
 constexpr uint16_t kSDOClientParameterBase = 0x1280;
 
 namespace ParameterSub {

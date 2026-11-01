@@ -18,31 +18,33 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Convert PrinterState to string (extended version with all states).
+/**@brief Convert PrinterState to string (extended version with all states). */
 inline std::string printerStateToString(PrinterState s) {
     return stateToString(s);
 }
 
-/// @brief Printer state machine.
+/**@brief Printer state machine. */
 class PrinterStateMachine {
 public:
     using StateChangeCallback = std::function<void(PrinterState, PrinterState)>;
 
     PrinterStateMachine() = default;
 
-    /// @brief Set the state change callback.
+    /**@brief Set the state change callback. */
     void setStateChangeCallback(StateChangeCallback cb) {
         stateChangeCb_ = std::move(cb);
     }
 
-    /// @brief Get the current state.
+    /**@brief Get the current state. */
     PrinterState state() const { return state_; }
 
-    /// @brief Get the state message.
+    /**@brief Get the state message. */
     const std::string& message() const { return message_; }
 
-    /// @brief Transition to a new state.
-    /// @return True if the transition was valid.
+    /**
+     * @brief Transition to a new state.
+     * @return True if the transition was valid.
+     */
     bool transition(PrinterState newState, const std::string& message = "") {
         if (!isValidTransition(state_, newState)) return false;
 
@@ -56,7 +58,7 @@ public:
         return true;
     }
 
-    /// @brief Check if a transition is valid.
+    /**@brief Check if a transition is valid. */
     static bool isValidTransition(PrinterState from, PrinterState to) {
         // From any state to shutdown is always valid (emergency stop)
         if (to == PrinterState::Shutdown) return true;
@@ -87,17 +89,17 @@ public:
         return false;
     }
 
-    /// @brief Check if the printer is ready for commands.
+    /**@brief Check if the printer is ready for commands. */
     bool isOperational() const {
         return state_ == PrinterState::Ready ||
                state_ == PrinterState::Printing ||
                state_ == PrinterState::Paused;
     }
 
-    /// @brief Check if the printer is printing.
+    /**@brief Check if the printer is printing. */
     bool isPrinting() const { return state_ == PrinterState::Printing; }
 
-    /// @brief Check if the printer is in a terminal state.
+    /**@brief Check if the printer is in a terminal state. */
     bool isTerminal() const {
         return state_ == PrinterState::Shutdown ||
                state_ == PrinterState::Error;

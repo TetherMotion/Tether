@@ -20,10 +20,12 @@ namespace EtherCAT {
 namespace Emulator {
 
 namespace {
-/// Per-SM data buffer cap.  The SM length register is wire-writable and the
-/// emulator resizes sm.buffer to match; real ESC DPRAM is only a few KB in
-/// total, so bound the emulation buffer to stop a hostile master from
-/// growing memory (up to 64KB per SM, repeated writes included).
+/**
+ * Per-SM data buffer cap.  The SM length register is wire-writable and the
+ * emulator resizes sm.buffer to match; real ESC DPRAM is only a few KB in
+ * total, so bound the emulation buffer to stop a hostile master from
+ * growing memory (up to 64KB per SM, repeated writes included).
+ */
 constexpr size_t kMaxSmBufferBytes = 8 * 1024;
 }
 

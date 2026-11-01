@@ -81,40 +81,40 @@ namespace GCode {
  * @brief Configuration for a single axis
  */
 struct AxisConfig {
-    /// Axis enabled
+    /**Axis enabled */
     bool enabled{true};
     
-    /// Soft limits
+    /**Soft limits */
     double minLimit{-1e9};
     double maxLimit{1e9};
     bool limitsEnabled{false};
     
-    /// Velocity limits (units/min)
+    /**Velocity limits (units/min) */
     double maxVelocity{10000.0};
     double defaultRapidVelocity{5000.0};
     
-    /// Acceleration (units/s²)
+    /**Acceleration (units/s²) */
     double maxAcceleration{500.0};
     
-    /// Jerk limit (units/s³), 0 = unlimited
+    /**Jerk limit (units/s³), 0 = unlimited */
     double maxJerk{0.0};
     
-    /// Home position
+    /**Home position */
     double homePosition{0.0};
     int8_t homeSequence{0};  // 0 = no home, negative = simultaneous
     
-    /// Backlash compensation
+    /**Backlash compensation */
     double backlash{0.0};
     
-    /// Steps per unit (for step-based systems)
+    /**Steps per unit (for step-based systems) */
     double stepsPerUnit{200.0};
     
-    /// Rotary axis specific
+    /**Rotary axis specific */
     bool isRotary{false};
     bool isWrapped{false};      // Wraps 0-360
     double wrapAngle{360.0};
     
-    /// Secondary axis mapping (for U/V/W to X/Y/Z)
+    /**Secondary axis mapping (for U/V/W to X/Y/Z) */
     int8_t mappedAxis{-1};      // -1 = not mapped
 };
 
@@ -126,43 +126,43 @@ struct AxisConfig {
  * @brief Motion planning configuration
  */
 struct MotionConfig {
-    /// Default feed rate (units/min)
+    /**Default feed rate (units/min) */
     double defaultFeedRate{100.0};
     
-    /// Maximum feed rate override (percentage/100)
+    /**Maximum feed rate override (percentage/100) */
     double maxFeedOverride{2.0};
     
-    /// Rapid rate (percentage of max velocity)
+    /**Rapid rate (percentage of max velocity) */
     double rapidRate{1.0};
     
-    /// Arc/spline linearization tolerance
+    /**Arc/spline linearization tolerance */
     double arcTolerance{0.001};
     
-    /// Path blending tolerance (G64 P default)
+    /**Path blending tolerance (G64 P default) */
     double defaultBlendTolerance{0.01};
     
-    /// Naive CAM tolerance (G64 Q default)
+    /**Naive CAM tolerance (G64 Q default) */
     double defaultNaiveCamTolerance{0.0};
     
-    /// Corner rounding radius limit
+    /**Corner rounding radius limit */
     double maxCornerRadius{100.0};
     
-    /// Lookahead buffer depth
+    /**Lookahead buffer depth */
     size_t lookaheadDepth{MAX_LOOKAHEAD};
     
-    /// Lookbehind for reverse feed rates
+    /**Lookbehind for reverse feed rates */
     size_t lookbehindDepth{MAX_LOOKBEHIND};
     
-    /// Enable adaptive feedrate control
+    /**Enable adaptive feedrate control */
     bool adaptiveFeedEnabled{true};
     
-    /// Minimum feedrate (never go below this)
+    /**Minimum feedrate (never go below this) */
     double minimumFeedRate{1.0};
     
-    /// Acceleration time constant (for S-curve)
+    /**Acceleration time constant (for S-curve) */
     double accelerationTimeConstant{0.0};
     
-    /// Trajectory cycle time (seconds)
+    /**Trajectory cycle time (seconds) */
     double cycleTime{0.001};
 };
 
@@ -174,22 +174,22 @@ struct MotionConfig {
  * @brief Coordinate system configuration
  */
 struct CoordinateConfig {
-    /// Default coordinate system
+    /**Default coordinate system */
     CoordSystem defaultSystem{CoordSystem::G54};
     
-    /// Persist G92 offsets
+    /**Persist G92 offsets */
     bool persistG92{true};
     
-    /// Default distance mode
+    /**Default distance mode */
     DistanceMode defaultDistanceMode{DistanceMode::ABSOLUTE};
     
-    /// Default arc distance mode
+    /**Default arc distance mode */
     ArcDistanceMode defaultArcMode{ArcDistanceMode::INCREMENTAL};
     
-    /// Default units
+    /**Default units */
     Units defaultUnits{Units::MM};
     
-    /// Units conversion factor (internal units/mm)
+    /**Units conversion factor (internal units/mm) */
     double unitsPerMM{1.0};
 };
 
@@ -197,11 +197,11 @@ struct CoordinateConfig {
  * @brief Scaling (G51) configuration
  */
 struct ScalingConfig {
-    /// Minimum allowed scale factor (per axis)
+    /**Minimum allowed scale factor (per axis) */
     double minScale{0.01};
-    /// Maximum allowed scale factor (per axis)
+    /**Maximum allowed scale factor (per axis) */
     double maxScale{100.0};
-    /// Reject zero scale (would collapse an axis to a point)
+    /**Reject zero scale (would collapse an axis to a point) */
     bool rejectZeroScale{true};
 };
 
@@ -213,27 +213,27 @@ struct ScalingConfig {
  * @brief Tool and compensation configuration
  */
 struct ToolConfig {
-    /// Maximum tool number
+    /**Maximum tool number */
     size_t maxTools{MAX_TOOLS};
     
-    /// Random tool changer mode
+    /**Random tool changer mode */
     bool randomToolChanger{false};
     
-    /// Tool change position (G30)
+    /**Tool change position (G30) */
     Position toolChangePosition{};
     bool moveToToolChangePos{true};
     
-    /// Default tool length offset axis
+    /**Default tool length offset axis */
     Axis toolLengthAxis{Axis::Z};
     
-    /// Cutter compensation entry distance
+    /**Cutter compensation entry distance */
     double cutterCompEntryDist{10.0};
     
-    /// Cutter compensation corner handling
+    /**Cutter compensation corner handling */
     enum class CornerMode : uint8_t {
-        SHARP,      ///< Keep sharp corners
-        ROUNDED,    ///< Round outside corners
-        LOOPED      ///< Loop around outside corners
+        SHARP, /**< Keep sharp corners */
+        ROUNDED, /**< Round outside corners */
+        LOOPED /**< Loop around outside corners */
     };
     CornerMode cornerMode{CornerMode::ROUNDED};
 };
@@ -250,32 +250,32 @@ struct ToolConfig {
  * `GCodeParser.hpp`.
  */
 struct LanguageConfig {
-    /// LinuxCNC compatibility mode
+    /**LinuxCNC compatibility mode */
     bool linuxCNCMode{true};
     
-    /// Enable Fanuc-style (M98/M99) subroutines
+    /**Enable Fanuc-style (M98/M99) subroutines */
     bool enableFanucSubs{true};
     
-    /// Enable named subroutines
+    /**Enable named subroutines */
     bool enableNamedSubs{true};
     
-    /// Case insensitive parsing
+    /**Case insensitive parsing */
     bool caseInsensitive{true};
     
-    /// Allow spaces in numbers (e.g., "1 000" = 1000)
+    /**Allow spaces in numbers (e.g., "1 000" = 1000) */
     bool allowSpacesInNumbers{false};
     
-    /// Comment styles
+    /**Comment styles */
     bool enableParenComments{true};    // ( comment )
     bool enableSemicolonComments{true}; // ; comment
     
-    /// Maximum expression nesting
+    /**Maximum expression nesting */
     size_t maxExpressionDepth{10};
     
-    /// Subroutine search paths (null-terminated)
+    /**Subroutine search paths (null-terminated) */
     std::array<const char*, 8> subroutinePaths{};
     
-    /// Program file path
+    /**Program file path */
     const char* programPath{nullptr};
 };
 
@@ -287,25 +287,25 @@ struct LanguageConfig {
  * @brief Probing configuration
  */
 struct ProbeConfig {
-    /// Default probe feed rate
+    /**Default probe feed rate */
     double defaultProbeFeedRate{100.0};
     
-    /// Probe search distance
+    /**Probe search distance */
     double searchDistance{50.0};
     
-    /// Second touch backoff
+    /**Second touch backoff */
     double backoff{2.0};
     
-    /// Second touch feed rate (slower)
+    /**Second touch feed rate (slower) */
     double fineFeedRate{10.0};
     
-    /// Probe input signal
+    /**Probe input signal */
     int32_t probeInput{0};
     
-    /// Probe signal active state
+    /**Probe signal active state */
     bool probeActiveHigh{true};
     
-    /// Probe protection (minimum height)
+    /**Probe protection (minimum height) */
     double minProbeHeight{-100.0};
 };
 
@@ -319,25 +319,25 @@ struct ProbeConfig {
  * @brief Spindle configuration
  */
 struct SpindleConfig {
-    /// Number of spindles
+    /**Number of spindles */
     size_t numSpindles{1};
     
-    /// Maximum spindle speed
+    /**Maximum spindle speed */
     double maxSpeed{24000.0};
     
-    /// Minimum spindle speed
+    /**Minimum spindle speed */
     double minSpeed{0.0};
     
-    /// Speed at which at-speed is considered true
+    /**Speed at which at-speed is considered true */
     double atSpeedTolerance{50.0};
     
-    /// Spindle up time (seconds)
+    /**Spindle up time (seconds) */
     double spinUpTime{2.0};
     
-    /// CSS maximum RPM (G96 D)
+    /**CSS maximum RPM (G96 D) */
     double cssMaxRPM{3000.0};
     
-    /// Default orient angle (M19)
+    /**Default orient angle (M19) */
     double orientAngle{0.0};
 };
 
@@ -349,47 +349,47 @@ struct SpindleConfig {
  * @brief Feature enable flags
  */
 struct FeatureFlags {
-    /// G-code features
+    /**G-code features */
     bool cutterCompensation{true};
     bool toolLengthOffset{true};
-    bool coordinateRotation{true};      ///< G68/G69 coordinate rotation
+    bool coordinateRotation{true}; /**< G68/G69 coordinate rotation */
     bool polarCoordinates{false};
-    bool localOffset{true};             ///< G52 local coordinate offset
-    bool scaling{true};                 ///< G51/G50 coordinate scaling
+    bool localOffset{true}; /**< G52 local coordinate offset */
+    bool scaling{true}; /**< G51/G50 coordinate scaling */
     
-    /// Motion features
+    /**Motion features */
     bool pathBlending{true};
     bool naiveCamDetector{true};
     bool cornerRounding{true};
     bool jerkLimit{false};
     bool sCurveAccel{false};
     
-    /// Compensation features
+    /**Compensation features */
     bool backlashCompensation{false};
     bool volumetricCompensation{false};
     bool thermalCompensation{false};
     
-    /// Advanced features
+    /**Advanced features */
     bool adaptiveFeedrate{true};
     bool dynamicFeedOverride{true};
     bool negativeFeeds{false};      // Lookbehind for reverse
     bool splineInterpolation{true};
     bool nurbsInterpolation{true};
     
-    /// Cycles
+    /**Cycles */
     bool cannedCycles{true};
     bool threadingCycles{true};
     bool probing{true};
     bool rigidTapping{true};
     bool trochoidalMilling{false};
     
-    /// Lathe features
+    /**Lathe features */
     bool latheMode{false};
     bool diameterMode{false};
     bool constantSurfaceSpeed{true};
     bool roughingCycles{true};
     
-    /// Safety features
+    /**Safety features */
     bool softLimits{true};
     bool feedHold{true};
     bool blockDelete{true};
@@ -404,27 +404,27 @@ struct FeatureFlags {
  * @brief Volumetric compensation grid point
  */
 struct VolumetricPoint {
-    Position nominal;       ///< Nominal position
-    Position correction;    ///< Correction to apply
+    Position nominal; /**< Nominal position */
+    Position correction; /**< Correction to apply */
 };
 
 /**
  * @brief Volumetric compensation configuration
  */
 struct VolumetricConfig {
-    /// Enable volumetric compensation
+    /**Enable volumetric compensation */
     bool enabled{false};
     
-    /// Grid dimensions
+    /**Grid dimensions */
     std::array<size_t, 3> gridSize{10, 10, 10};
     
-    /// Grid origin
+    /**Grid origin */
     Position gridOrigin{};
     
-    /// Grid spacing
+    /**Grid spacing */
     Position gridSpacing{};
     
-    /// Interpolation method
+    /**Interpolation method */
     enum class InterpMethod : uint8_t {
         NEAREST,
         TRILINEAR,
@@ -432,7 +432,7 @@ struct VolumetricConfig {
     };
     InterpMethod interpolation{InterpMethod::TRILINEAR};
     
-    /// Compensation data pointer (external storage)
+    /**Compensation data pointer (external storage) */
     const VolumetricPoint* data{nullptr};
     size_t dataSize{0};
 };
@@ -445,19 +445,19 @@ struct VolumetricConfig {
  * @brief Trochoidal milling parameters
  */
 struct TrochoidalConfig {
-    /// Default stepover (percentage of tool diameter)
+    /**Default stepover (percentage of tool diameter) */
     double defaultStepover{0.1};
     
-    /// Default engagement angle (degrees)
+    /**Default engagement angle (degrees) */
     double defaultEngagement{60.0};
     
-    /// Minimum arc radius
+    /**Minimum arc radius */
     double minArcRadius{0.5};
     
-    /// Entry helix pitch
+    /**Entry helix pitch */
     double helixPitch{1.0};
     
-    /// Retract height for slot entry
+    /**Retract height for slot entry */
     double entryRetract{2.0};
 };
 
@@ -469,22 +469,22 @@ struct TrochoidalConfig {
  * @brief Engraving/text configuration
  */
 struct EngravingConfig {
-    /// Default character height
+    /**Default character height */
     double defaultHeight{10.0};
     
-    /// Default character spacing (percentage of height)
+    /**Default character spacing (percentage of height) */
     double charSpacing{0.8};
     
-    /// Default line spacing (percentage of height)
+    /**Default line spacing (percentage of height) */
     double lineSpacing{1.5};
     
-    /// Default engraving depth
+    /**Default engraving depth */
     double defaultDepth{0.5};
     
-    /// Mirror text
+    /**Mirror text */
     bool mirror{false};
     
-    /// Font selection
+    /**Font selection */
     enum class Font : uint8_t {
         SIMPLE,
         GOTHIC,
@@ -502,37 +502,37 @@ struct EngravingConfig {
  * @brief Complete G-Code interpreter configuration
  */
 struct Config {
-    /// Axis configurations
+    /**Axis configurations */
     std::array<AxisConfig, MAX_AXES> axes{};
     
-    /// Motion planning
+    /**Motion planning */
     MotionConfig motion{};
     
-    /// Coordinate systems
+    /**Coordinate systems */
     CoordinateConfig coordinates{};
     
-    /// Tool handling
+    /**Tool handling */
     ToolConfig tools{};
     
-    /// Language / compatibility settings
+    /**Language / compatibility settings */
     LanguageConfig language{};
     
-    /// Probing
+    /**Probing */
     ProbeConfig probe{};
     
-    /// Spindle
+    /**Spindle */
     SpindleConfig spindle{};
     
-    /// Feature flags
+    /**Feature flags */
     FeatureFlags features{};
     
-    /// Volumetric compensation
+    /**Volumetric compensation */
     VolumetricConfig volumetric{};
     
-    /// Trochoidal milling
+    /**Trochoidal milling */
     TrochoidalConfig trochoidal{};
     
-    /// Engraving
+    /**Engraving */
     EngravingConfig engraving{};
     
     /**

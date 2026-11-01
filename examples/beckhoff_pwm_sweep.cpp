@@ -60,7 +60,7 @@ static std::atomic<bool> g_cancel{false};
 static std::atomic<bool> g_paused{false};
 static std::atomic<int>  g_period_ms{4000};
 
-/// Triangle wave duty for channel `ch` at time `ms` (0..kDutyFullScale).
+/**Triangle wave duty for channel `ch` at time `ms` (0..kDutyFullScale). */
 static uint16_t sweepDuty(size_t ch, int64_t ms) {
     const int period = g_period_ms.load();
     if (period <= 0) return 0;

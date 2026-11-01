@@ -190,7 +190,7 @@ struct PacketFilter {
  */
 class TransactionRouter {
 public:
-    /// Number of slots (one per possible idx value, 0–255)
+    /**Number of slots (one per possible idx value, 0–255) */
     static constexpr size_t kNumSlots = 256;
 
     TransactionRouter();
@@ -312,9 +312,9 @@ public:
      * @brief Result of a waitForAny() call.
      */
     struct AnyWaitResult {
-        size_t   slot_index{0};  ///< Index of the completed slot (in the input array)
-        WaitResult result;        ///< The completion result
-        bool    timed_out{true};  ///< true if no slot completed before timeout
+        size_t   slot_index{0}; /**< Index of the completed slot (in the input array) */
+        WaitResult result; /**< The completion result */
+        bool    timed_out{true}; /**< true if no slot completed before timeout */
     };
 
     /**
@@ -376,22 +376,26 @@ public:
         stats_registration_failures_.store(0, std::memory_order_relaxed);
     }
 
-    /// Maximum concurrent waiters (kept for backward compat with ConditionalPacketRouter::kMaxWaiters)
+    /**Maximum concurrent waiters (kept for backward compat with ConditionalPacketRouter::kMaxWaiters) */
     static constexpr size_t kMaxWaiters = kNumSlots;
 
 private:
     struct Slot {
-        /// Guards the registration/delivery handshake (pending, buffer,
-        /// response).  NOT held while waiting — waits are atomic-wait on
-        /// `seq`, bumped (release) after `completed` is set and also on
-        /// cancel/shutdown so every waiter wakes.
+        /**
+         * Guards the registration/delivery handshake (pending, buffer,
+         * response).  NOT held while waiting — waits are atomic-wait on
+         * `seq`, bumped (release) after `completed` is set and also on
+         * cancel/shutdown so every waiter wakes.
+         */
         std::mutex              mtx;
         std::atomic<uint32_t>   seq{0};
-        /// Registration generation — bumped whenever the slot is (re)armed
-        /// and when it is purged/cancelled.  A waiter owns the registration
-        /// only while reg_gen matches the value captured at wait start; a
-        /// stale waiter neither wakes into success nor clears a NEW
-        /// registration's pending flag on its way out.
+        /**
+         * Registration generation — bumped whenever the slot is (re)armed
+         * and when it is purged/cancelled.  A waiter owns the registration
+         * only while reg_gen matches the value captured at wait start; a
+         * stale waiter neither wakes into success nor clears a NEW
+         * registration's pending flag on its way out.
+         */
         std::atomic<uint32_t>   reg_gen{0};
         std::atomic<bool>       pending{false};
         std::atomic<bool>       completed{false};
@@ -400,8 +404,10 @@ private:
         RxDatagram              response{};
     };
 
-    /// Timed wait for a slot's completion/cancel/shutdown via atomicWait()
-    /// on slot.seq.  Returns the extracted WaitResult and clears the slot.
+    /**
+     * Timed wait for a slot's completion/cancel/shutdown via atomicWait()
+     * on slot.seq.  Returns the extracted WaitResult and clears the slot.
+     */
     WaitResult waitForSlotCompletion(Slot& slot, uint32_t timeout_ms);
 
     std::array<Slot, kNumSlots> slots_;

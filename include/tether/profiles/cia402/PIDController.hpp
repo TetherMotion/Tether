@@ -58,30 +58,30 @@ namespace CiA402 {
  * @brief PID gains structure
  */
 struct PIDGains {
-    double Kp{0.0};     ///< Proportional gain
-    double Ki{0.0};     ///< Integral gain
-    double Kd{0.0};     ///< Derivative gain
-    double Kff{0.0};    ///< Feed-forward gain
+    double Kp{0.0}; /**< Proportional gain */
+    double Ki{0.0}; /**< Integral gain */
+    double Kd{0.0}; /**< Derivative gain */
+    double Kff{0.0}; /**< Feed-forward gain */
 };
 
 /**
  * @brief PID controller limits
  */
 struct PIDLimits {
-    double outputMin{-1000.0};  ///< Minimum output
-    double outputMax{1000.0};   ///< Maximum output
-    double integralMin{-100.0}; ///< Minimum integral accumulator
-    double integralMax{100.0};  ///< Maximum integral accumulator
+    double outputMin{-1000.0}; /**< Minimum output */
+    double outputMax{1000.0}; /**< Maximum output */
+    double integralMin{-100.0}; /**< Minimum integral accumulator */
+    double integralMax{100.0}; /**< Maximum integral accumulator */
 };
 
 /**
  * @brief Anti-windup method
  */
 enum class AntiWindupMethod {
-    None,           ///< No anti-windup
-    Clamping,       ///< Simple integral clamping
-    BackCalculation,///< Back-calculation method
-    ConditionalIntegration  ///< Disable integration when saturated
+    None, /**< No anti-windup */
+    Clamping, /**< Simple integral clamping */
+    BackCalculation, /**< Back-calculation method */
+    ConditionalIntegration /**< Disable integration when saturated */
 };
 
 /**

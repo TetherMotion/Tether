@@ -47,13 +47,13 @@ namespace MotionPlanner {
  * @brief S-curve phase type
  */
 enum class SCurvePhase : uint8_t {
-    JerkAccelUp = 0,    ///< Phase 1: j = +j_max (increasing accel)
-    ConstAccel = 1,     ///< Phase 2: j = 0, a = +a_max
-    JerkAccelDown = 2,  ///< Phase 3: j = -j_max (decreasing accel)
-    Cruise = 3,         ///< Phase 4: j = 0, a = 0, v = v_max
-    JerkDecelUp = 4,    ///< Phase 5: j = -j_max (start decel)
-    ConstDecel = 5,     ///< Phase 6: j = 0, a = -a_max
-    JerkDecelDown = 6   ///< Phase 7: j = +j_max (reducing decel)
+    JerkAccelUp = 0, /**< Phase 1: j = +j_max (increasing accel) */
+    ConstAccel = 1, /**< Phase 2: j = 0, a = +a_max */
+    JerkAccelDown = 2, /**< Phase 3: j = -j_max (decreasing accel) */
+    Cruise = 3, /**< Phase 4: j = 0, a = 0, v = v_max */
+    JerkDecelUp = 4, /**< Phase 5: j = -j_max (start decel) */
+    ConstDecel = 5, /**< Phase 6: j = 0, a = -a_max */
+    JerkDecelDown = 6 /**< Phase 7: j = +j_max (reducing decel) */
 };
 
 constexpr size_t NUM_SCURVE_PHASES = 7;
@@ -85,19 +85,19 @@ inline const char* phaseName(SCurvePhase phase) {
  */
 template<typename T = double>
 struct SCurvePhaseData {
-    /// Duration of this phase (seconds)
+    /**Duration of this phase (seconds) */
     T duration = T(0);
     
-    /// Jerk during this phase (constant)
+    /**Jerk during this phase (constant) */
     T jerk = T(0);
     
-    /// Acceleration at start of phase
+    /**Acceleration at start of phase */
     T startAccel = T(0);
     
-    /// Velocity at start of phase
+    /**Velocity at start of phase */
     T startVelocity = T(0);
     
-    /// Position at start of phase
+    /**Position at start of phase */
     T startPosition = T(0);
     
     /**
@@ -157,9 +157,9 @@ struct SCurvePhaseData {
      * @return Position at the end of the phase.
      */
     T endPosition() const { return positionAt(duration); }
-    /// @return Velocity at the end of the phase.
+    /**@return Velocity at the end of the phase. */
     T endVelocity() const { return velocityAt(duration); }
-    /// @return Acceleration at the end of the phase.
+    /**@return Acceleration at the end of the phase. */
     T endAcceleration() const { return accelerationAt(duration); }
 
     /**
@@ -178,16 +178,16 @@ struct SCurvePhaseData {
  */
 template<typename T = double>
 struct SCurveConstraints {
-    /// Maximum velocity (units/second)
+    /**Maximum velocity (units/second) */
     T maxVelocity = T(100);
     
-    /// Maximum acceleration (units/second²)
+    /**Maximum acceleration (units/second²) */
     T maxAcceleration = T(500);
     
-    /// Maximum jerk (units/second³)
+    /**Maximum jerk (units/second³) */
     T maxJerk = T(5000);
     
-    /// Minimum duration for a phase to be considered active
+    /**Minimum duration for a phase to be considered active */
     T minPhaseDuration = T(1e-9);
     
     /**
@@ -344,8 +344,10 @@ public:
         return phases_[static_cast<size_t>(p)]; 
     }
     
-    /// @param i Phase index (0..NUM_SCURVE_PHASES-1).
-    /// @return Phase data at that index.
+    /**
+     * @param i Phase index (0..NUM_SCURVE_PHASES-1).
+     * @return Phase data at that index.
+     */
     const Phase& phase(size_t i) const { return phases_[i]; }
 
     /**
@@ -1286,7 +1288,7 @@ public:
      * @return Mutable constraints used for the next build.
      */
     Constraints& constraints() { return constraints_; }
-    /// @return Constraints used for the next build.
+    /**@return Constraints used for the next build. */
     const Constraints& constraints() const { return constraints_; }
 
 private:

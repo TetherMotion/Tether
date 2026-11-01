@@ -52,30 +52,34 @@ public:
     using TimeFunc   = std::function<uint64_t()>;
     using SchedClass = CyclicExecutive::SchedClass;
 
-    /// How TxPDOs are collected relative to triggered RxPDO sends.
+    /**How TxPDOs are collected relative to triggered RxPDO sends. */
     enum class CollectMode : uint8_t {
-        OnSend,    ///< collect with every send (TxPDO-synchronous)
-        Periodic,  ///< collect on collect_period_us, independent of sends
+        OnSend, /**< collect with every send (TxPDO-synchronous) */
+        Periodic, /**< collect on collect_period_us, independent of sends */
     };
 
     struct Config {
         CollectMode collect_mode      = CollectMode::OnSend;
-        uint32_t    collect_period_us = 1000;   ///< Periodic tick (µs)
+        uint32_t    collect_period_us = 1000; /**< Periodic tick (µs) */
 
-        /// Send rate limiter: triggers closer than this coalesce into one
-        /// trailing send carrying the latest committed image.  0 = a send
-        /// per trigger.
+        /**
+         * Send rate limiter: triggers closer than this coalesce into one
+         * trailing send carrying the latest committed image.  0 = a send
+         * per trigger.
+         */
         uint32_t min_send_interval_ns = 0;
 
-        /// OnSend only: collect at least this often while no triggers
-        /// arrive — a wire keep-alive so slaves' watchdogs stay fed.
-        /// 0 = no keep-alive.
+        /**
+         * OnSend only: collect at least this often while no triggers
+         * arrive — a wire keep-alive so slaves' watchdogs stay fed.
+         * 0 = no keep-alive.
+         */
         uint32_t max_idle_ns = 0;
 
         // ---- RT plumbing (same knobs as CyclicExecutive) ----
         int        priority       = 80;
         SchedClass sched_class    = SchedClass::Fifo;
-        /// SCHED_DEADLINE budget (ns); 0 → derive from collect period.
+        /**SCHED_DEADLINE budget (ns); 0 → derive from collect period. */
         uint64_t   dl_runtime_ns  = 0;
         uint64_t   dl_deadline_ns = 0;
         int        cpu_affinity   = -1;
@@ -85,28 +89,32 @@ public:
         bool       continue_on_error = true;
 
         // ---- DC synchronisation (independent thread — Q23) ----
-        /// DC sync frame period (µs).  0 = disabled.  When >0 a
-        /// dedicated thread emits EtherCATDC::sendSyncFrame() on its own
-        /// deadline — independent of the trigger/send loop.
+        /**
+         * DC sync frame period (µs).  0 = disabled.  When >0 a
+         * dedicated thread emits EtherCATDC::sendSyncFrame() on its own
+         * deadline — independent of the trigger/send loop.
+         */
         uint32_t dc_interval_us = 0;
         int      dc_priority    = 90;
         int      dc_cpu_affinity = -1;
     };
 
     struct Stats {
-        uint64_t wakes            = 0;   ///< trigger wakes observed
+        uint64_t wakes            = 0; /**< trigger wakes observed */
         uint64_t sends            = 0;
         uint64_t send_errors      = 0;
-        uint64_t sends_coalesced  = 0;   ///< triggers merged by rate limiter
+        uint64_t sends_coalesced  = 0; /**< triggers merged by rate limiter */
         uint64_t collects         = 0;
         uint64_t collect_errors   = 0;
-        uint64_t idle_collects    = 0;   ///< max_idle keep-alive collects
-        uint32_t max_send_work_ns    = 0;///< longest send burst
-        uint32_t max_collect_work_ns = 0;///< longest collect burst
-        /// Q24: triggerSend() → wire-send latency (worst observed).
-        /// Measures the newest trigger's queueing delay, incl. coalescing.
+        uint64_t idle_collects    = 0; /**< max_idle keep-alive collects */
+        uint32_t max_send_work_ns    = 0; /**< longest send burst */
+        uint32_t max_collect_work_ns = 0; /**< longest collect burst */
+        /**
+         * Q24: triggerSend() → wire-send latency (worst observed).
+         * Measures the newest trigger's queueing delay, incl. coalescing.
+         */
         uint32_t max_send_latency_ns = 0;
-        uint64_t dc_sync_count    = 0;   ///< dedicated DC thread syncs
+        uint64_t dc_sync_count    = 0; /**< dedicated DC thread syncs */
         uint64_t dc_sync_errors   = 0;
     };
 
@@ -142,7 +150,7 @@ private:
     uint64_t nowNs() const { return time_source_ ? time_source_()
                                                  : platformNowNs(); }
     static uint64_t platformNowNs();
-    static uint64_t monoNowNs();   ///< CLOCK_MONOTONIC — stamp domain
+    static uint64_t monoNowNs(); /**< CLOCK_MONOTONIC — stamp domain */
 
     ProcessImage& image_;
     TaskFn        send_;
@@ -153,9 +161,11 @@ private:
 
     std::unique_ptr<HAL::IThread> thread_;
     std::atomic<bool>             running_{false};
-    /// Send-request seq sampled in start() — the loop's first waitSend
-    /// compares against it so a trigger fired after start() returns is
-    /// never absorbed into the initial snapshot (lost wakeup).
+    /**
+     * Send-request seq sampled in start() — the loop's first waitSend
+     * compares against it so a trigger fired after start() returns is
+     * never absorbed into the initial snapshot (lost wakeup).
+     */
     uint32_t                      start_seq_ = 0;
 
     // Dedicated DC thread (dc_interval_us > 0) — Q23

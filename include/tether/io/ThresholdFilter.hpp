@@ -22,20 +22,20 @@
 
 namespace tether { namespace io {
 
-/// A single name=string / type / value primitive for custom threshold config.
+/**A single name=string / type / value primitive for custom threshold config. */
 struct ConfigPrimitive {
     std::string name;
     ValueType   type;
-    std::vector<uint8_t> value;     ///< Raw bytes (valueTypeSize bytes for fixed types)
+    std::vector<uint8_t> value; /**< Raw bytes (valueTypeSize bytes for fixed types) */
 
-    /// Helper to set a float value.
+    /**Helper to set a float value. */
     void setFloat(float v) {
         type = ValueType::F32;
         value.resize(4);
         std::memcpy(value.data(), &v, 4);
     }
 
-    /// Helper to get a float value.
+    /**Helper to get a float value. */
     float getFloat() const {
         if (type != ValueType::F32 || value.size() < 4) return 0.0f;
         float v;
@@ -43,28 +43,28 @@ struct ConfigPrimitive {
         return v;
     }
 
-    /// Helper to set a string value.
+    /**Helper to set a string value. */
     void setString(const std::string& s) {
         type = ValueType::String;
         value.assign(s.begin(), s.end());
     }
 
-    /// Helper to get a string value.
+    /**Helper to get a string value. */
     std::string getString() const {
         if (type != ValueType::String) return {};
         return std::string(value.begin(), value.end());
     }
 };
 
-/// Configuration for a single threshold rule.
+/**Configuration for a single threshold rule. */
 struct ThresholdRule {
-    uint64_t        entryId;        ///< 0 = default rule for all entries
+    uint64_t        entryId; /**< 0 = default rule for all entries */
     ThresholdType   type;
-    double          threshold;      ///< For Absolute/Relative types
-    std::string     customName;     ///< For Custom type: logic name
-    std::vector<ConfigPrimitive> customConfig;  ///< For Custom type
+    double          threshold; /**< For Absolute/Relative types */
+    std::string     customName; /**< For Custom type: logic name */
+    std::vector<ConfigPrimitive> customConfig; /**< For Custom type */
 
-    /// Encode this rule into a buffer.
+    /**Encode this rule into a buffer. */
     void encode(BufWriter& w) const {
         w.putU64(entryId);
         w.putU8(static_cast<uint8_t>(type));
@@ -79,7 +79,7 @@ struct ThresholdRule {
         }
     }
 
-    /// Decode a rule from a buffer. Returns true on success.
+    /**Decode a rule from a buffer. Returns true on success. */
     static bool decode(BufReader& r, ThresholdRule& out) {
         out.entryId = r.getU64();
         out.type = static_cast<ThresholdType>(r.getU8());
@@ -107,14 +107,14 @@ struct ThresholdRule {
     }
 };
 
-/// A named set of threshold rules for filtering stream data.
+/**A named set of threshold rules for filtering stream data. */
 struct ThresholdConfig {
-    std::string name;               ///< Config name (e.g. "fast_mode", "precision")
+    std::string name; /**< Config name (e.g. "fast_mode", "precision") */
     std::vector<ThresholdRule> rules;
-    bool isWhitelist = true;        ///< true = only entries matching rules are included
-                                    ///< false = entries matching rules are excluded
+    bool isWhitelist = true; /**< true = only entries matching rules are included */
+                                    /**< false = entries matching rules are excluded */
 
-    /// Encode the full config.
+    /**Encode the full config. */
     void encode(BufWriter& w) const {
         w.putStr16(name.c_str(), name.size());
         w.putU8(isWhitelist ? 1 : 0);
@@ -124,7 +124,7 @@ struct ThresholdConfig {
         }
     }
 
-    /// Decode a config. Returns true on success.
+    /**Decode a config. Returns true on success. */
     static bool decode(BufReader& r, ThresholdConfig& out) {
         uint16_t nl = r.getU16();
         auto* nb = r.getBytes(nl);
@@ -141,9 +141,11 @@ struct ThresholdConfig {
     }
 };
 
-/// Custom threshold evaluation callback type.
-/// Receives: entry ID, old value ptr, new value ptr, value size, config primitives.
-/// Returns true if the change should be reported.
+/**
+ * Custom threshold evaluation callback type.
+ * Receives: entry ID, old value ptr, new value ptr, value size, config primitives.
+ * Returns true if the change should be reported.
+ */
 using CustomThresholdFn = std::function<bool(
     uint64_t entryId, const void* oldVal, const void* newVal,
     size_t valSize, const std::vector<ConfigPrimitive>& config)>;
@@ -158,26 +160,28 @@ using CustomThresholdFn = std::function<bool(
  */
 class ThresholdFilter {
 public:
-    /// Set the active threshold configuration.
+    /**Set the active threshold configuration. */
     void setConfig(const ThresholdConfig& config) { config_ = config; }
 
-    /// Get the active threshold configuration.
+    /**Get the active threshold configuration. */
     const ThresholdConfig& config() const { return config_; }
 
-    /// Register a custom threshold evaluator by name.
+    /**Register a custom threshold evaluator by name. */
     void registerCustom(const std::string& name, CustomThresholdFn fn) {
         customEvaluators_[name] = std::move(fn);
     }
 
-    /// Check if a value change passes the threshold for the given entry.
-    /// @param entryId  The parameter or signal ID.
-    /// @param oldVal   Pointer to the previous value bytes.
-    /// @param newVal   Pointer to the new value bytes.
-    /// @param valSize  Byte size of the value.
-    /// @return true if the new value should be transmitted.
+    /**
+     * Check if a value change passes the threshold for the given entry.
+     * @param entryId  The parameter or signal ID.
+     * @param oldVal   Pointer to the previous value bytes.
+     * @param newVal   Pointer to the new value bytes.
+     * @param valSize  Byte size of the value.
+     * @return true if the new value should be transmitted.
+     */
     bool passes(uint64_t entryId, const void* oldVal, const void* newVal, size_t valSize) const;
 
-    /// Reset all last-sent value state.
+    /**Reset all last-sent value state. */
     void reset();
 
 private:

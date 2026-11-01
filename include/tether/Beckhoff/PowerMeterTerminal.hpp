@@ -65,7 +65,7 @@ inline constexpr DeviceIdentity EL3483{0x00000002, 0x0D9B3052, 3, "EL3483"};
 // EKM1101 energy-measurement coupler (status + packed fields).
 inline constexpr DeviceIdentity EKM1101{0x00000002, 0x4FE17CD9, 1, "EKM1101"};
 
-/// Every known power-measurement terminal.
+/**Every known power-measurement terminal. */
 inline constexpr std::array kPowerMeterTerminals{
     EL3403, EL3413, EL3423, EL3433, EL3443, EL3453, EL3475, EL3483,
     EKM1101,
@@ -95,12 +95,12 @@ public:
     PowerMeterTerminal(const PowerMeterTerminal&)                = delete;
     PowerMeterTerminal& operator=(const PowerMeterTerminal&)     = delete;
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
 
-    /// Scan the bus for the first slave matching `identity`.
+    /**Scan the bus for the first slave matching `identity`. */
     static Result<PowerMeterTerminal> findFirst(
         Master& master, const DeviceIdentity& identity);
     static Result<PowerMeterTerminal> findFirst(
@@ -109,28 +109,30 @@ public:
 
     // -- Bring-up ------------------------------------------------------------------
 
-    /// Standalone bring-up to SAFE-OP (position addressing).
+    /**Standalone bring-up to SAFE-OP (position addressing). */
     Result<> configure();
 
-    /// configure() then OP (+ managed realtime loop by default).
+    /**configure() then OP (+ managed realtime loop by default). */
     Result<> start() { return start(StartOptions()); }
     Result<> start(const StartOptions& opts);
 
-    /// Chained-operation contract (shared logical address space).
+    /**Chained-operation contract (shared logical address space). */
     Result<> prepareForLogicalExchange();
     Result<> mapLogicalAndEnterSafeOp();
     Result<> requestOp(int timeout_ms);
 
     // -- Phases / status --------------------------------------------------------------
 
-    /// Number of resolved measurement phases (0 before prepare()).
+    /**Number of resolved measurement phases (0 before prepare()). */
     size_t phaseCount() const { return phases_.size(); }
 
-    /// Raw per-phase status word (16 bit) — over/undervoltage,
-    /// overcurrent, guard warnings, inaccurate-flags.
+    /**
+     * Raw per-phase status word (16 bit) — over/undervoltage,
+     * overcurrent, guard warnings, inaccurate-flags.
+     */
     uint16_t statusWord(size_t phase) const;
 
-    /// Sync-error flag inside the phase status PDO, when mapped.
+    /**Sync-error flag inside the phase status PDO, when mapped. */
     bool syncError(size_t phase) const;
 
     // -- Measurements (families A and B) -----------------------------------------------
@@ -145,27 +147,29 @@ public:
 
     // -- Index-addressed measurements (family C) -----------------------------------------
 
-    /// Number of index selectors (RX "Index" fields, EL3413-class).
+    /**Number of index selectors (RX "Index" fields, EL3413-class). */
     size_t indexSelectors() const { return selectors_.size(); }
 
-    /// Write the 8-bit measurement index for selector `sel`.
+    /**Write the 8-bit measurement index for selector `sel`. */
     void setIndexSelector(size_t sel, uint8_t index);
 
-    /// The value returned for selector `sel` (32-bit REAL), and the
-    /// echoed Index/Channel bytes when mapped.
+    /**
+     * The value returned for selector `sel` (32-bit REAL), and the
+     * echoed Index/Channel bytes when mapped.
+     */
     std::optional<float>   indexedValue(size_t sel)   const;
     std::optional<uint8_t> indexedIndexEcho(size_t sel) const;
     std::optional<uint8_t> indexedChannelEcho(size_t sel) const;
 
     // -- Generic access ------------------------------------------------------------------
 
-    /// Read a 32-bit REAL input entry by (object, subindex, occurrence).
+    /**Read a 32-bit REAL input entry by (object, subindex, occurrence). */
     std::optional<float> valueReal(uint16_t index, int subindex,
                                    uint32_t occurrence = 0) const;
-    /// Read any input entry zero-extended (up to 64 bit).
+    /**Read any input entry zero-extended (up to 64 bit). */
     bool valueRaw(uint16_t index, int subindex, uint32_t occurrence,
                   uint64_t& out) const;
-    /// Write an output entry (up to 32 bit, byte-aligned).
+    /**Write an output entry (up to 32 bit, byte-aligned). */
     bool fieldOut(uint16_t index, int subindex, uint32_t occurrence,
                   uint64_t value);
 
@@ -179,22 +183,22 @@ private:
         uint8_t  subindex = 0;
     };
 
-    /// Per-phase resolved layout.
+    /**Per-phase resolved layout. */
     struct Phase {
-        uint16_t stat_obj   = 0;        ///< 0x6000+i*0x10 status object
-        uint32_t off_status = kInvalid; ///< first status bit
-        uint32_t off_sync   = kInvalid; ///< sync-error bit (varies)
+        uint16_t stat_obj   = 0; /**< 0x6000+i*0x10 status object */
+        uint32_t off_status = kInvalid; /**< first status bit */
+        uint32_t off_sync   = kInvalid; /**< sync-error bit (varies) */
         // semantic value fields (family A/B)
         Field voltage, current, active_power,
               apparent_power, reactive_power, power_factor;
     };
 
-    /// Index-addressed selector (family C).
+    /**Index-addressed selector (family C). */
     struct Selector {
-        Field    index_out;     ///< RX 8-bit "Index" field
-        Field    value_in;      ///< TX 32-bit result value
-        Field    index_echo;    ///< TX 8-bit echoed index
-        Field    channel_echo;  ///< TX 8-bit echoed channel
+        Field    index_out; /**< RX 8-bit "Index" field */
+        Field    value_in; /**< TX 32-bit result value */
+        Field    index_echo; /**< TX 8-bit echoed index */
+        Field    channel_echo; /**< TX 8-bit echoed channel */
     };
 
     bool resolveLayout();

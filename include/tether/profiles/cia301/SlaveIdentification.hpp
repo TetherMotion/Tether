@@ -86,10 +86,10 @@ constexpr size_t kMaxIdentifiedSlaves = ECAT_CIA301_MAX_IDENTIFIED_SLAVES;
  * Contains the standard identity information from object 0x1018.
  */
 struct IdentityRecord {
-    uint32_t vendor_id{0};       ///< Vendor ID (ETG assigned)
-    uint32_t product_code{0};    ///< Vendor-specific product code
-    uint32_t revision_number{0}; ///< Revision (major.minor in high.low words)
-    uint32_t serial_number{0};   ///< Device serial number
+    uint32_t vendor_id{0}; /**< Vendor ID (ETG assigned) */
+    uint32_t product_code{0}; /**< Vendor-specific product code */
+    uint32_t revision_number{0}; /**< Revision (major.minor in high.low words) */
+    uint32_t serial_number{0}; /**< Device serial number */
     
     /**
      * @brief Get major revision (high word)
@@ -122,7 +122,7 @@ struct IdentityRecord {
  * @brief CiA 301 Device Type structure (0x1000)
  */
 struct DeviceTypeInfo {
-    uint32_t raw_value{0};       ///< Raw device type value
+    uint32_t raw_value{0}; /**< Raw device type value */
     
     /**
      * @brief Get device profile number (e.g., 402 for drives)

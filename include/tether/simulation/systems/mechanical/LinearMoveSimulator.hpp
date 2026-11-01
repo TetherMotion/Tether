@@ -1,13 +1,15 @@
 #pragma once
 
-/// @file LinearMoveSimulator.hpp
-/// @brief S-curve-based linear move simulator for the emulated printer.
-///
-/// Replaces the previous "jump to target" behavior in the Klipper emulation
-/// with a full 7-phase S-curve velocity profile.  The toolhead is animated
-/// from the current position to the requested target with jerk-limited
-/// acceleration and deceleration, which is what Mainsail/Fluidd display
-/// when connected to a real printer.
+/**
+ * @file LinearMoveSimulator.hpp
+ * @brief S-curve-based linear move simulator for the emulated printer.
+ *
+ * Replaces the previous "jump to target" behavior in the Klipper emulation
+ * with a full 7-phase S-curve velocity profile.  The toolhead is animated
+ * from the current position to the requested target with jerk-limited
+ * acceleration and deceleration, which is what Mainsail/Fluidd display
+ * when connected to a real printer.
+ */
 
 #include "tether/motion_planner/SCurveProfile.hpp"
 
@@ -17,7 +19,7 @@
 
 namespace Simulation {
 
-/// @brief Result of one step of a linear move simulation.
+/**@brief Result of one step of a linear move simulation. */
 struct LinearMoveStepResult {
     std::array<double, 4> position = {0, 0, 0, 0};
     double velocity = 0.0;
@@ -25,20 +27,24 @@ struct LinearMoveStepResult {
     bool complete = false;
 };
 
-/// @brief S-curve planner for a point-to-point 4D move.
-///
-/// Builds a 1D S-curve along the straight-line path from start to target,
-/// then interpolates the X/Y/Z/E components proportionally.  Start and end
-/// velocity are zero (each move is treated as a standalone point-to-point
-/// segment).
+/**
+ * @brief S-curve planner for a point-to-point 4D move.
+ *
+ * Builds a 1D S-curve along the straight-line path from start to target,
+ * then interpolates the X/Y/Z/E components proportionally.  Start and end
+ * velocity are zero (each move is treated as a standalone point-to-point
+ * segment).
+ */
 class LinearMoveSimulator {
 public:
-    /// @brief Configure and start a linear move.
-    /// @param start Starting position (X, Y, Z, E) in machine coordinates.
-    /// @param end Target position (X, Y, Z, E) in machine coordinates.
-    /// @param maxVelocity Requested cruise velocity (mm/s).
-    /// @param maxAcceleration Maximum acceleration (mm/s^2).
-    /// @param maxJerk Maximum jerk (mm/s^3).
+    /**
+     * @brief Configure and start a linear move.
+     * @param start Starting position (X, Y, Z, E) in machine coordinates.
+     * @param end Target position (X, Y, Z, E) in machine coordinates.
+     * @param maxVelocity Requested cruise velocity (mm/s).
+     * @param maxAcceleration Maximum acceleration (mm/s^2).
+     * @param maxJerk Maximum jerk (mm/s^3).
+     */
     void start(const std::array<double, 4>& start,
                const std::array<double, 4>& end,
                double maxVelocity,
@@ -78,7 +84,7 @@ public:
         }
     }
 
-    /// @brief Advance the move by dt seconds.
+    /**@brief Advance the move by dt seconds. */
     LinearMoveStepResult step(double dt) {
         if (complete_ || dt <= 0.0) {
             return {current_, velocity_, elapsedTime_, complete_};
@@ -102,23 +108,23 @@ public:
         return {current_, velocity_, elapsedTime_, complete_};
     }
 
-    /// @brief Jump to the final position and mark complete.
+    /**@brief Jump to the final position and mark complete. */
     void finish() {
         complete_ = true;
         current_ = end_;
         velocity_ = 0.0;
     }
 
-    /// @brief Check if the move has reached the target.
+    /**@brief Check if the move has reached the target. */
     bool isComplete() const { return complete_; }
 
-    /// @brief Current position.
+    /**@brief Current position. */
     const std::array<double, 4>& position() const { return current_; }
 
-    /// @brief Current path velocity.
+    /**@brief Current path velocity. */
     double velocity() const { return velocity_; }
 
-    /// @brief Elapsed time since start.
+    /**@brief Elapsed time since start. */
     double elapsedTime() const { return elapsedTime_; }
 
 private:

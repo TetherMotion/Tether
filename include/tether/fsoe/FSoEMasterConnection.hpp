@@ -48,52 +48,58 @@ struct MasterConnectionConfig {
     uint16_t conn_timeout_ms = 1000;
     uint16_t session_timeout_ms = 5000;
     uint16_t recovery_delay_ms = 500;
-    uint16_t reset_timeout_ms = 500;   ///< Reset state fallback timeout;
-                                       ///< 0 = wait forever for slave response
+    uint16_t reset_timeout_ms = 500; /**< Reset state fallback timeout; */
+                                       /**< 0 = wait forever for slave response */
     uint8_t  safety_level = SIL::SIL2;
     uint8_t  input_size = 0;
     uint8_t  output_size = 0;
     std::array<uint8_t, 16> fail_safe_values = {0};
 
-    /// Safety-related application parameters transferred in the Parameter
-    /// state (ETG.5100 S (D) V1.2.0, §8.2.2.5, Table 18, octets 6+).
-    /// Device-specific parameters configured via the safety configurator.
-    /// Empty = no application parameters (app param length = 0).
-    /// See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
+    /**
+     * Safety-related application parameters transferred in the Parameter
+     * state (ETG.5100 S (D) V1.2.0, §8.2.2.5, Table 18, octets 6+).
+     * Device-specific parameters configured via the safety configurator.
+     * Empty = no application parameters (app param length = 0).
+     * See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
+     */
     std::vector<uint8_t> app_parameters;
 
     bool auto_recovery_enabled = true;
     bool auto_fail_safe_on_error = true;
 
-    /// Number of PDO cycles the slave's FSoE response is delayed relative
-    /// to the master's TX command.  In EtherCAT, the slave's TxPDO is
-    /// always at least one cycle behind the master's RxPDO (master TX in
-    /// cycle N → slave processes → slave TX in cycle N+1).  Some slaves
-    /// have additional internal processing delay (e.g. the Synapticon
-    /// SOMANET runs FSoE at a lower rate, resulting in ~8 cycles of
-    /// delay).  When the master transitions to a new state (changing the
-    /// TX command byte), the slave's TxPDO still contains the response
-    /// to the PREVIOUS command for this many cycles.  The master skips
-    /// RX processing during this period to avoid triggering a spurious
-    /// "unexpected command" fail-safe from the stale response.
-    /// Set to 0 to disable command-change skipping (useful for tests
-    /// with an immediate-response slave).  Default is 1 (standard
-    /// one-cycle EtherCAT pipeline delay).
+    /**
+     * Number of PDO cycles the slave's FSoE response is delayed relative
+     * to the master's TX command.  In EtherCAT, the slave's TxPDO is
+     * always at least one cycle behind the master's RxPDO (master TX in
+     * cycle N → slave processes → slave TX in cycle N+1).  Some slaves
+     * have additional internal processing delay (e.g. the Synapticon
+     * SOMANET runs FSoE at a lower rate, resulting in ~8 cycles of
+     * delay).  When the master transitions to a new state (changing the
+     * TX command byte), the slave's TxPDO still contains the response
+     * to the PREVIOUS command for this many cycles.  The master skips
+     * RX processing during this period to avoid triggering a spurious
+     * "unexpected command" fail-safe from the stale response.
+     * Set to 0 to disable command-change skipping (useful for tests
+     * with an immediate-response slave).  Default is 1 (standard
+     * one-cycle EtherCAT pipeline delay).
+     */
     uint8_t slave_response_delay_cycles = 1;
 
-    /// Initial sequence number used for the Reset frame and the
-    /// expected slave Reset response.  ETG.5100 §8.1.3.4 says
-    /// sequence numbers start at 1 (0 is never used), but some
-    /// slaves (e.g. Synapticon SOMANET) expect seq=0 for the
-    /// initial Reset frame.  Default is 0 (Synapticon convention).
+    /**
+     * Initial sequence number used for the Reset frame and the
+     * expected slave Reset response.  ETG.5100 §8.1.3.4 says
+     * sequence numbers start at 1 (0 is never used), but some
+     * slaves (e.g. Synapticon SOMANET) expect seq=0 for the
+     * initial Reset frame.  Default is 0 (Synapticon convention).
+     */
     uint16_t initial_seq_no = 0;
 };
 
 struct MasterConnectionStatus {
     uint8_t  state = ConnectionState::Reset;
     uint16_t error_code = ErrorCode::NoError;
-    uint16_t session_id = 0;          ///< Master Session ID (generated locally)
-    uint16_t slave_session_id = 0;    ///< Slave Session ID (received from slave)
+    uint16_t session_id = 0; /**< Master Session ID (generated locally) */
+    uint16_t slave_session_id = 0; /**< Slave Session ID (received from slave) */
     uint8_t  sequence_number = 0;
     bool     data_valid = false;
     bool     fail_safe_active = false;
@@ -115,79 +121,89 @@ using ErrorCallback = std::function<void(uint16_t error_code, const FSoEErrorDet
 using FailSafeCallback = std::function<void()>;
 using DataCallback = std::function<void(const uint8_t* data, size_t len)>;
 
-/// Human-readable protocol trace callback.
-///
-/// When installed via setTraceCallback(), the connection emits high-level
-/// descriptions of protocol decisions, e.g.:
-///   "TX Reset(0x2A): forcing slave to initial state"
-///   "RX Session(0x4E): slave accepted session, moving to Connection"
-/// This is the "what is the FSoE master trying to do and what did it get
-/// back" view — no raw frame bytes.  For raw frame dumps, use the
-/// txFrameEvents()/rxFrameEvents() event sources.
-///
-/// The callback is invoked synchronously from within prepareTxFrame() /
-/// processRxFrame() while the connection's recursive mutex is held.
+/**
+ * Human-readable protocol trace callback.
+ *
+ * When installed via setTraceCallback(), the connection emits high-level
+ * descriptions of protocol decisions, e.g.:
+ *   "TX Reset(0x2A): forcing slave to initial state"
+ *   "RX Session(0x4E): slave accepted session, moving to Connection"
+ * This is the "what is the FSoE master trying to do and what did it get
+ * back" view — no raw frame bytes.  For raw frame dumps, use the
+ * txFrameEvents()/rxFrameEvents() event sources.
+ *
+ * The callback is invoked synchronously from within prepareTxFrame() /
+ * processRxFrame() while the connection's recursive mutex is held.
+ */
 using TraceCallback = std::function<void(const char* message)>;
 
-/// Per-cycle sequence trace info (--debug fsoe-sequence).
-///
-/// When installed via setSequenceTraceCallback(), the connection emits one
-/// structured summary per exchangeViaPDO() call, describing:
-///   - whether the RX frame was accepted or rejected (and why)
-///   - whether the TX frame was rebuilt this cycle
-///   - whether the FSoE state changed as a result
-///
-/// This is the "every cycle, what happened" view — useful for debugging
-/// handshake stalls and understanding why the master is stuck in a state.
+/**
+ * Per-cycle sequence trace info (--debug fsoe-sequence).
+ *
+ * When installed via setSequenceTraceCallback(), the connection emits one
+ * structured summary per exchangeViaPDO() call, describing:
+ *   - whether the RX frame was accepted or rejected (and why)
+ *   - whether the TX frame was rebuilt this cycle
+ *   - whether the FSoE state changed as a result
+ *
+ * This is the "every cycle, what happened" view — useful for debugging
+ * handshake stalls and understanding why the master is stuck in a state.
+ */
 struct SequenceTraceInfo {
-    uint32_t cycle;           ///< PDO cycle count (1-based)
-    uint8_t  state_before;    ///< FSoE state at start of cycle
-    uint8_t  state_after;     ///< FSoE state at end of cycle
-    bool     state_changed;   ///< true if state_before != state_after
-    bool     frame_accepted;  ///< true if RX frame was processed by processRxFrame
-    bool     tx_rebuilt;      ///< true if TX frame was rebuilt (state change or output change)
-    uint8_t  rx_cmd;          ///< Command byte from RX frame (0 if no RX processed)
-    const char* reason;       ///< Short reason string for accept/reject
+    uint32_t cycle; /**< PDO cycle count (1-based) */
+    uint8_t  state_before; /**< FSoE state at start of cycle */
+    uint8_t  state_after; /**< FSoE state at end of cycle */
+    bool     state_changed; /**< true if state_before != state_after */
+    bool     frame_accepted; /**< true if RX frame was processed by processRxFrame */
+    bool     tx_rebuilt; /**< true if TX frame was rebuilt (state change or output change) */
+    uint8_t  rx_cmd; /**< Command byte from RX frame (0 if no RX processed) */
+    const char* reason; /**< Short reason string for accept/reject */
 };
 
 using SequenceTraceCallback = std::function<void(const SequenceTraceInfo&)>;
 
-/// CRC trace info (--debug fsoe-crc).
-///
-/// When installed via setCrcTraceCallback(), the connection emits the
-/// exact CRC parameters used when building (TX) and checking (RX) every
-/// FSoE frame.  This is the low-level "what CRC inputs did the master
-/// use" view — essential for diagnosing CRC/seq synchronization issues
-/// with real slaves.
-///
-/// For TX frames, the callback is invoked from prepareTxFrame() after the
-/// frame is built.  For RX frames, it is invoked from processRxFrame()
-/// after the CRC check (whether it passed or failed).
+/**
+ * CRC trace info (--debug fsoe-crc).
+ *
+ * When installed via setCrcTraceCallback(), the connection emits the
+ * exact CRC parameters used when building (TX) and checking (RX) every
+ * FSoE frame.  This is the low-level "what CRC inputs did the master
+ * use" view — essential for diagnosing CRC/seq synchronization issues
+ * with real slaves.
+ *
+ * For TX frames, the callback is invoked from prepareTxFrame() after the
+ * frame is built.  For RX frames, it is invoked from processRxFrame()
+ * after the CRC check (whether it passed or failed).
+ */
 struct CrcTraceInfo {
     enum class Direction : uint8_t { TX, RX };
-    Direction direction;      ///< TX (master building) or RX (master checking)
-    uint8_t  command;         ///< FSoE command byte (0x2A, 0x4E, 0x64, ...)
-    uint8_t  state;           ///< FSoE state when this frame was built/checked
-    uint16_t start_crc;       ///< start_crc used for CRC computation (inheritance)
-    uint16_t seq_expected;    ///< seq initially tried (before collision avoidance)
-    uint16_t seq_used;        ///< seq that actually matched/was used (after CA)
-    uint16_t crc0;            ///< resulting CRC0 (0 if parse failed and no fallback)
-    bool     crc_ok;          ///< true if CRC verified (RX) or frame built (TX)
-    bool     fallback_used;   ///< true if seq±1 fallback was used (RX only)
-    int      fallback_delta;  ///< -1, 0, or +1 (RX only; 0 = no fallback)
-    uint16_t conn_id;         ///< Connection ID in the frame
-    size_t   data_len;        ///< SafeData length in bytes
-    /// SafeData bytes that flow into the CRC computation (first data_len
-    /// entries are valid).  The CRC is computed over: start_crc(Lo,Hi),
-    /// conn_id(Lo,Hi), seq(Lo,Hi), command, data[0..data_len-1].
-    uint8_t  data[18];        ///< SafeData payload (max MAX_PARSE_DATA_SIZE = 18)
+    Direction direction; /**< TX (master building) or RX (master checking) */
+    uint8_t  command; /**< FSoE command byte (0x2A, 0x4E, 0x64, ...) */
+    uint8_t  state; /**< FSoE state when this frame was built/checked */
+    uint16_t start_crc; /**< start_crc used for CRC computation (inheritance) */
+    uint16_t seq_expected; /**< seq initially tried (before collision avoidance) */
+    uint16_t seq_used; /**< seq that actually matched/was used (after CA) */
+    uint16_t crc0; /**< resulting CRC0 (0 if parse failed and no fallback) */
+    bool     crc_ok; /**< true if CRC verified (RX) or frame built (TX) */
+    bool     fallback_used; /**< true if seq±1 fallback was used (RX only) */
+    int      fallback_delta; /**< -1, 0, or +1 (RX only; 0 = no fallback) */
+    uint16_t conn_id; /**< Connection ID in the frame */
+    size_t   data_len; /**< SafeData length in bytes */
+    /**
+     * SafeData bytes that flow into the CRC computation (first data_len
+     * entries are valid).  The CRC is computed over: start_crc(Lo,Hi),
+     * conn_id(Lo,Hi), seq(Lo,Hi), command, data[0..data_len-1].
+     */
+    uint8_t  data[18]; /**< SafeData payload (max MAX_PARSE_DATA_SIZE = 18) */
 };
 
 using CrcTraceCallback = std::function<void(const CrcTraceInfo&)>;
 
-/// Event source for FSoE frame events.  Each listener receives an immutable
-/// shared_ptr<const std::vector<uint8_t>> copy of the frame bytes.  When no
-/// listeners are registered, emit() performs no allocation.
+/**
+ * Event source for FSoE frame events.  Each listener receives an immutable
+ * shared_ptr<const std::vector<uint8_t>> copy of the frame bytes.  When no
+ * listeners are registered, emit() performs no allocation.
+ */
 using FrameEventSource = Tether::Utils::EventSource<std::vector<uint8_t>>;
 
 // ============================================================================
@@ -227,21 +243,23 @@ public:
     // --- Simulation helper (for testing with FSoESlave) ---
     bool exchangeWith(FSoESlave& slave, uint64_t current_time_ms);
 
-    /// Exchange FSoE frames via EtherCAT PDO buffers (real drive communication).
-    ///
-    /// Runs the FSoE state machine, builds the master→slave frame into
-    /// @p rx_pdo_out (the RxPDO buffer the master writes each cycle), and
-    /// processes the slave→master frame from @p tx_pdo_in (the TxPDO buffer
-    /// the drive populates each cycle).  This is the generic FSoE-over-PDO
-    /// master exchange used by any drive profile that maps FSoE PDUs onto
-    /// EtherCAT PDOs.
-    ///
-    /// @param rx_pdo_out      Output buffer for the master→slave FSoE frame
-    /// @param rx_pdo_max      Capacity of rx_pdo_out
-    /// @param tx_pdo_in       Input buffer with the slave→master FSoE frame
-    /// @param tx_pdo_len      Number of valid bytes in tx_pdo_in
-    /// @param current_time_ms Monotonic time in milliseconds
-    /// @return true if the frame was processed successfully
+    /**
+     * Exchange FSoE frames via EtherCAT PDO buffers (real drive communication).
+     *
+     * Runs the FSoE state machine, builds the master→slave frame into
+     * @p rx_pdo_out (the RxPDO buffer the master writes each cycle), and
+     * processes the slave→master frame from @p tx_pdo_in (the TxPDO buffer
+     * the drive populates each cycle).  This is the generic FSoE-over-PDO
+     * master exchange used by any drive profile that maps FSoE PDUs onto
+     * EtherCAT PDOs.
+     *
+     * @param rx_pdo_out      Output buffer for the master→slave FSoE frame
+     * @param rx_pdo_max      Capacity of rx_pdo_out
+     * @param tx_pdo_in       Input buffer with the slave→master FSoE frame
+     * @param tx_pdo_len      Number of valid bytes in tx_pdo_in
+     * @param current_time_ms Monotonic time in milliseconds
+     * @return true if the frame was processed successfully
+     */
     bool exchangeViaPDO(uint8_t* rx_pdo_out, size_t rx_pdo_max,
                         const uint8_t* tx_pdo_in, size_t tx_pdo_len,
                         uint64_t current_time_ms);
@@ -264,20 +282,24 @@ public:
     void resetStats();
     std::string getDiagnostics() const;
 
-    /// Get the TX CRC state: the start_crc that the master chains from
-    /// when building its next TX frame.  With cross-direction inheritance,
-    /// this is the slave's last TX CRC0 (last_rx_crc0_).
-    /// Tests that parse a master TX frame should use this as start_crc.
+    /**
+     * Get the TX CRC state: the start_crc that the master chains from
+     * when building its next TX frame.  With cross-direction inheritance,
+     * this is the slave's last TX CRC0 (last_rx_crc0_).
+     * Tests that parse a master TX frame should use this as start_crc.
+     */
     uint16_t getTxLastCrc0() const { return last_rx_crc0_; }
     uint16_t getTxSeqNo() const { return tx_seq_no_; }
-    /// Get the RX CRC state: the start_crc that the master uses to verify
-    /// incoming slave TX frames.  With cross-direction inheritance, the
-    /// slave's TX chains from the master's last TX CRC0 (last_tx_crc0_).
-    /// Tests that build frames simulating slave→master TX should use this
-    /// as start_crc.
-    /// The expected slave TX seq is last_tx_seq_no_ (the seq the master
-    /// used in its last TX — the slave's independent counter happens to
-    /// match this value).
+    /**
+     * Get the RX CRC state: the start_crc that the master uses to verify
+     * incoming slave TX frames.  With cross-direction inheritance, the
+     * slave's TX chains from the master's last TX CRC0 (last_tx_crc0_).
+     * Tests that build frames simulating slave→master TX should use this
+     * as start_crc.
+     * The expected slave TX seq is last_tx_seq_no_ (the seq the master
+     * used in its last TX — the slave's independent counter happens to
+     * match this value).
+     */
     uint16_t getRxLastCrc0() const { return last_tx_crc0_; }
     uint16_t getRxSeqNo() const { return last_tx_seq_no_; }
 
@@ -324,14 +346,18 @@ private:
 
     // State transitions
     void transitionTo(uint8_t new_state);
-    /// Initialize connection_tx_buf_ with Connection ID + Slave Address
-    /// and reset connection TX/RX indices.  Called when entering the
-    /// Connection state.
+    /**
+     * Initialize connection_tx_buf_ with Connection ID + Slave Address
+     * and reset connection TX/RX indices.  Called when entering the
+     * Connection state.
+     */
     void initConnectionTxBuf();
-    /// Initialize param_tx_buf_ with the ETG.5100 §8.2.2.5 Table 18
-    /// parameter payload (comm param len + watchdog + app param len +
-    /// app param bytes) and reset TX/RX indices.  Called when entering
-    /// the Parameter state.
+    /**
+     * Initialize param_tx_buf_ with the ETG.5100 §8.2.2.5 Table 18
+     * parameter payload (comm param len + watchdog + app param len +
+     * app param bytes) and reset TX/RX indices.  Called when entering
+     * the Parameter state.
+     */
     void initParameterTxBuf();
     void handleError(uint16_t error_code, const FSoEErrorDetail& detail);
     void checkWatchdog(uint64_t current_time_ms);
@@ -384,12 +410,12 @@ private:
     //   - Reset breaks the chain: both sides reset to start_crc=0
     //   - The slave echoes the master's last TX seq (no independent increment).
     //     Exception: the slave's Reset response uses seq = initialSeqNo+1.
-    uint16_t last_tx_crc0_ = 0;   ///< CRC0 of the last frame we sent (for RX parsing)
-    uint16_t last_rx_crc0_ = 0;   ///< CRC0 of the last frame we received (startCrc for TX)
-    uint16_t tx_seq_no_ = 1;      ///< Master's OWN TX seq counter (used for TX, then incremented)
-    uint16_t rx_seq_no_ = 1;      ///< Kept for diagnostics (expected slave TX seq = last_tx_seq_no_)
-    uint16_t last_tx_seq_no_ = 0; ///< Seq used in the last TX (expected slave TX seq for RX)
-    uint16_t last_rx_seq_no_ = 0; ///< Seq used by slave in its last TX (for diagnostics)
+    uint16_t last_tx_crc0_ = 0; /**< CRC0 of the last frame we sent (for RX parsing) */
+    uint16_t last_rx_crc0_ = 0; /**< CRC0 of the last frame we received (startCrc for TX) */
+    uint16_t tx_seq_no_ = 1; /**< Master's OWN TX seq counter (used for TX, then incremented) */
+    uint16_t rx_seq_no_ = 1; /**< Kept for diagnostics (expected slave TX seq = last_tx_seq_no_) */
+    uint16_t last_tx_seq_no_ = 0; /**< Seq used in the last TX (expected slave TX seq for RX) */
+    uint16_t last_rx_seq_no_ = 0; /**< Seq used by slave in its last TX (for diagnostics) */
 
     // Background connID recovery: on a CRC error, the rejected frame is
     // handed to addr_resolver_ which brute-forces the connID under which
@@ -422,13 +448,13 @@ private:
     // Transferred in ceil(payload_len / output_size) cycles.
     // The slave echoes each cycle's SafeData back; the master validates.
     // See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
-    uint8_t current_param_index_ = 0;   ///< Legacy: parameter cycle count
-    uint16_t parameter_crc_ = 0;        ///< Legacy: parameter CRC (diagnostics)
-    uint16_t param_tx_idx_ = 0;         ///< TX byte offset into param_tx_buf_
-    uint16_t param_rx_idx_ = 0;         ///< RX echo byte offset into param_rx_buf_
-    static constexpr uint16_t PARAM_BUF_SIZE = 256 + 6;  ///< 6-byte header + max app params
-    std::vector<uint8_t> param_tx_buf_;  ///< Full parameter payload to send
-    std::vector<uint8_t> param_rx_buf_;  ///< Accumulated echo from slave
+    uint8_t current_param_index_ = 0; /**< Legacy: parameter cycle count */
+    uint16_t parameter_crc_ = 0; /**< Legacy: parameter CRC (diagnostics) */
+    uint16_t param_tx_idx_ = 0; /**< TX byte offset into param_tx_buf_ */
+    uint16_t param_rx_idx_ = 0; /**< RX echo byte offset into param_rx_buf_ */
+    static constexpr uint16_t PARAM_BUF_SIZE = 256 + 6; /**< 6-byte header + max app params */
+    std::vector<uint8_t> param_tx_buf_; /**< Full parameter payload to send */
+    std::vector<uint8_t> param_rx_buf_; /**< Accumulated echo from slave */
 
     // Recovery state
     uint64_t fail_safe_entered_ms_ = 0;
@@ -457,10 +483,10 @@ private:
     //   2 octets → 2 cycles
     //   1 octet  → 4 cycles
     // See: https://techoverflow.net/2026/08/12/fsoe-connection-pdu-master-and-slave-structure/
-    uint8_t connection_tx_idx_ = 0;       ///< TX byte offset (advances by output_size)
-    uint8_t connection_rx_idx_ = 0;       ///< RX byte offset (advances by input_size)
-    uint8_t connection_tx_buf_[4] = {0};  ///< TX payload: ConnID_lo, ConnID_hi, Addr_lo, Addr_hi
-    uint8_t connection_rx_buf_[4] = {0};  ///< RX echo accumulation buffer
+    uint8_t connection_tx_idx_ = 0; /**< TX byte offset (advances by output_size) */
+    uint8_t connection_rx_idx_ = 0; /**< RX byte offset (advances by input_size) */
+    uint8_t connection_tx_buf_[4] = {0}; /**< TX payload: ConnID_lo, ConnID_hi, Addr_lo, Addr_hi */
+    uint8_t connection_rx_buf_[4] = {0}; /**< RX echo accumulation buffer */
 
     // PDO startup state: number of Tx frames sent via exchangeViaPDO.
     // The slave cannot respond until it has received at least one frame,
@@ -477,8 +503,8 @@ private:
     // The frame is rebuilt only when the state transitions or safe outputs
     // change (tx_cache_dirty_).
     std::vector<uint8_t> cached_tx_pdo_;
-    uint8_t cached_tx_pdo_state_ = 0xFF;  ///< State when cached frame was built
-    bool tx_cache_dirty_ = true;  ///< True when safe outputs changed (rebuild needed)
+    uint8_t cached_tx_pdo_state_ = 0xFF; /**< State when cached frame was built */
+    bool tx_cache_dirty_ = true; /**< True when safe outputs changed (rebuild needed) */
 
     // --- PDO exchange: RX change detection ---
     // In a simultaneous PDO exchange, the RxPDO frame CANNOT be the
@@ -501,10 +527,10 @@ private:
     //
     // No hardcoded frame-count assumptions are made beyond the configured
     // FSoE timeout and the configurable stale-frame budget.
-    std::vector<uint8_t> baseline_rx_;       ///< RX captured when TX changed (stale baseline)
-    std::vector<uint8_t> last_rx_frame_;     ///< Last RX frame received (for diagnostics)
-    bool expecting_rx_change_ = false;       ///< True when waiting for RX to reflect new TX
-    uint32_t stale_rx_count_ = 0;            ///< Consecutive stale RX frames since TX change
+    std::vector<uint8_t> baseline_rx_; /**< RX captured when TX changed (stale baseline) */
+    std::vector<uint8_t> last_rx_frame_; /**< Last RX frame received (for diagnostics) */
+    bool expecting_rx_change_ = false; /**< True when waiting for RX to reflect new TX */
+    uint32_t stale_rx_count_ = 0; /**< Consecutive stale RX frames since TX change */
 
     // Last raw TxPDO bytes received from the slave, for timeout diagnostics.
     // Updated on every exchangeViaPDO call, even when the frame is skipped

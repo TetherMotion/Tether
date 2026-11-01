@@ -47,24 +47,24 @@ namespace GCode {
  * @brief Corner blending mode for G64 path control
  */
 enum class G64CornerMode : uint8_t {
-    Centered = 0,           ///< Traditional G64 - blend may be inside or outside
-    InsideStrict = 1,       ///< Stay strictly inside corner (I0)
-    InsideApproximate = 2,  ///< Stay approximately inside (I with tolerance)
-    OutsideStrict = 3,      ///< Stay strictly outside corner (O0)
-    OutsideApproximate = 4, ///< Stay approximately outside (O with tolerance)
-    Balanced = 5,           ///< Balance inside and outside constraints
-    Teardrop = 6,           ///< Teardrop strategy - continue past corner and make (360° - corner angle) turn
-    ExactStop = 7,          ///< Exact stop mode - no blending
+    Centered = 0, /**< Traditional G64 - blend may be inside or outside */
+    InsideStrict = 1, /**< Stay strictly inside corner (I0) */
+    InsideApproximate = 2, /**< Stay approximately inside (I with tolerance) */
+    OutsideStrict = 3, /**< Stay strictly outside corner (O0) */
+    OutsideApproximate = 4, /**< Stay approximately outside (O with tolerance) */
+    Balanced = 5, /**< Balance inside and outside constraints */
+    Teardrop = 6, /**< Teardrop strategy - continue past corner and make (360° - corner angle) turn */
+    ExactStop = 7, /**< Exact stop mode - no blending */
 };
 
 /**
  * @brief Corner geometry classification
  */
 enum class CornerType : uint8_t {
-    Convex = 0,             ///< Outside corner (turn < 180°, e.g., turning left on exterior)
-    Concave = 1,            ///< Inside corner (turn > 180°, e.g., pocket corner)
-    Straight = 2,           ///< No corner (segments collinear)
-    Cusp = 3,               ///< Sharp reversal (180° turn)
+    Convex = 0, /**< Outside corner (turn < 180°, e.g., turning left on exterior) */
+    Concave = 1, /**< Inside corner (turn > 180°, e.g., pocket corner) */
+    Straight = 2, /**< No corner (segments collinear) */
+    Cusp = 3, /**< Sharp reversal (180° turn) */
 };
 
 // ============================================================================
@@ -76,40 +76,40 @@ enum class CornerType : uint8_t {
  */
 struct G64CornerConfig {
     // Traditional G64 parameters
-    double pathTolerance = 0.05;            ///< G64 P value (mm) - max path deviation
-    double naiveCamTolerance = 0.0;         ///< G64 Q value (mm) - naive cam
+    double pathTolerance = 0.05; /**< G64 P value (mm) - max path deviation */
+    double naiveCamTolerance = 0.0; /**< G64 Q value (mm) - naive cam */
 
     // Extended corner mode parameters
     G64CornerMode cornerMode = G64CornerMode::Centered;
-    double insideTolerance = 0.0;           ///< I parameter - inside tolerance (mm)
-    double outsideTolerance = 0.0;          ///< O parameter - outside tolerance (mm)
+    double insideTolerance = 0.0; /**< I parameter - inside tolerance (mm) */
+    double outsideTolerance = 0.0; /**< O parameter - outside tolerance (mm) */
     
     // Strategy string (e.g., "inside", "dogbone", "teardrop", "exact-stop")
-    std::string strategyString;             ///< Optional strategy parameter
+    std::string strategyString; /**< Optional strategy parameter */
     
     // Tangential margin for outside/inside modes
     // When > 0, allows blend curve to come within this distance of corner point
     // When = 0, blend must be strictly tangent to corner point
-    double tangentialMargin = 0.0;          ///< T parameter - tangential margin (mm)
+    double tangentialMargin = 0.0; /**< T parameter - tangential margin (mm) */
 
     // Corner detection parameters
-    double minCornerAngle = 5.0;            ///< Minimum angle to treat as corner (degrees)
-    double maxBlendAngle = 175.0;           ///< Maximum angle for blending (degrees)
+    double minCornerAngle = 5.0; /**< Minimum angle to treat as corner (degrees) */
+    double maxBlendAngle = 175.0; /**< Maximum angle for blending (degrees) */
 
     // Blend curve parameters
-    double blendRadiusFactor = 1.0;         ///< Multiplier for blend radius
-    bool useBezierBlend = true;             ///< Use Bézier curves for smooth blends
-    int bezierOrder = 5;                    ///< Bézier curve order (2=quadratic, 3=cubic, 5=quintic C2)
-    double maxBlendFraction = 0.5;          ///< Max fraction of segment length consumed by blend
+    double blendRadiusFactor = 1.0; /**< Multiplier for blend radius */
+    bool useBezierBlend = true; /**< Use Bézier curves for smooth blends */
+    int bezierOrder = 5; /**< Bézier curve order (2=quadratic, 3=cubic, 5=quintic C2) */
+    double maxBlendFraction = 0.5; /**< Max fraction of segment length consumed by blend */
 
     // Velocity handling at corners
-    bool reduceVelocityAtCorners = true;    ///< Slow down at sharp corners
-    double cornerVelocityFactor = 0.8;      ///< Velocity reduction factor at corners
+    bool reduceVelocityAtCorners = true; /**< Slow down at sharp corners */
+    double cornerVelocityFactor = 0.8; /**< Velocity reduction factor at corners */
     
     // Kinematic limits for velocity planning
-    double maxVelocity = 100.0;             ///< Maximum feed velocity (mm/s)
-    double maxAcceleration = 1000.0;        ///< Maximum acceleration (mm/s²)
-    double maxJerk = 50000.0;               ///< Maximum jerk (mm/s³)
+    double maxVelocity = 100.0; /**< Maximum feed velocity (mm/s) */
+    double maxAcceleration = 1000.0; /**< Maximum acceleration (mm/s²) */
+    double maxJerk = 50000.0; /**< Maximum jerk (mm/s³) */
 
     /**
      * @brief Parse G64 command parameters
@@ -202,27 +202,29 @@ struct G64CornerConfig {
  */
 struct CornerAnalysis {
     CornerType type = CornerType::Straight;
-    double angle = 0.0;                     ///< Corner angle (degrees, 0-180)
-    double turnAngle = 0.0;                 ///< Direction change (degrees, -180 to +180)
-    bool isCW = false;                      ///< True if clockwise turn (right turn)
+    double angle = 0.0; /**< Corner angle (degrees, 0-180) */
+    double turnAngle = 0.0; /**< Direction change (degrees, -180 to +180) */
+    bool isCW = false; /**< True if clockwise turn (right turn) */
 
-    Position cornerPoint;                    ///< The corner vertex
-    Position incomingDir;                    ///< Unit vector of incoming direction
-    Position outgoingDir;                    ///< Unit vector of outgoing direction
-    Position bisector;                       ///< Corner bisector direction
+    Position cornerPoint; /**< The corner vertex */
+    Position incomingDir; /**< Unit vector of incoming direction */
+    Position outgoingDir; /**< Unit vector of outgoing direction */
+    Position bisector; /**< Corner bisector direction */
 
-    double blendRadius = 0.0;               ///< Computed blend radius
-    Position blendCenter;                    ///< Center of blend arc
-    Position blendEntry;                     ///< Where blend starts (on incoming segment)
-    Position blendExit;                      ///< Where blend ends (on outgoing segment)
+    double blendRadius = 0.0; /**< Computed blend radius */
+    Position blendCenter; /**< Center of blend arc */
+    Position blendEntry; /**< Where blend starts (on incoming segment) */
+    Position blendExit; /**< Where blend ends (on outgoing segment) */
 
-    double maxInsideDeviation = 0.0;        ///< Maximum deviation toward inside
-    double maxOutsideDeviation = 0.0;       ///< Maximum deviation toward outside
+    double maxInsideDeviation = 0.0; /**< Maximum deviation toward inside */
+    double maxOutsideDeviation = 0.0; /**< Maximum deviation toward outside */
 
-    /// Corner sharpness as a percentage of the blend tolerance (0–100).
-    /// 100 % = straight-through (no corner), 0 % = full reversal (180° turn).
-    /// Computed as cos(halfAngle) × 100 where halfAngle = angle / 2.
-    /// Useful for color-mapping corner severity in visualization tools.
+    /**
+     * Corner sharpness as a percentage of the blend tolerance (0–100).
+     * 100 % = straight-through (no corner), 0 % = full reversal (180° turn).
+     * Computed as cos(halfAngle) × 100 where halfAngle = angle / 2.
+     * Useful for color-mapping corner severity in visualization tools.
+     */
     double deviationPercentage = 100.0;
 };
 

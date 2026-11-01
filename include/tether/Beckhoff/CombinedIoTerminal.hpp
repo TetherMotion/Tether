@@ -155,7 +155,7 @@ inline constexpr DeviceIdentity EPP2349{0x00000002, 0x647658D9, 0x0808, "EPP2349
 inline constexpr DeviceIdentity EPP2596{0x00000002, 0x64766849, 0x0506, "EPP2596"};
 inline constexpr DeviceIdentity EPP2839{0x00000002, 0x64767779, 0x1005, "EPP2839"};
 
-/// Every known combined packed-bit device.
+/**Every known combined packed-bit device. */
 inline constexpr std::array kCombinedIoTerminals{
     EL1852, EL1859, EJ1859, EP1859,
     EL2014, EL2032, EL2034, EL2044, EL2068, EL2212, EL2262C, EL2642,
@@ -181,7 +181,7 @@ inline constexpr std::array kCombinedIoTerminals{
 
 class CombinedIoTerminal : public TerminalBase, public ICombinedIoTerminal {
 public:
-    /// Maximum channels per direction.
+    /**Maximum channels per direction. */
     static constexpr size_t kMaxBits = 256;
 
     CombinedIoTerminal(Master& master, uint16_t slave_index,
@@ -195,7 +195,7 @@ public:
     CombinedIoTerminal(const CombinedIoTerminal&)                = delete;
     CombinedIoTerminal& operator=(const CombinedIoTerminal&)     = delete;
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
@@ -206,11 +206,13 @@ public:
         Master& master, const DeviceIdentity& identity,
         std::span<const DiscoveredSlave> scan);
 
-    /// Standalone bring-up: SII, identity, SM registers, mailbox, PRE-OP,
-    /// PDO registration (position addressing), SAFE-OP.
+    /**
+     * Standalone bring-up: SII, identity, SM registers, mailbox, PRE-OP,
+     * PDO registration (position addressing), SAFE-OP.
+     */
     Result<> configure();
 
-    /// configure() then OP; starts the master's RT loop by default.
+    /**configure() then OP; starts the master's RT loop by default. */
     Result<> start() { return start(StartOptions()); }
     Result<> start(const StartOptions& opts);
 
@@ -223,7 +225,7 @@ public:
         return TerminalBase::deviceName();
     }
 
-    /// Chained-operation contract (shared logical address space).
+    /**Chained-operation contract (shared logical address space). */
     Result<> prepareForLogicalExchange() override;
     Result<> mapLogicalAndEnterSafeOp() override;
     Result<> requestOp(int timeout_ms) override;
@@ -235,10 +237,10 @@ public:
 
     // -- Packed-bit access -------------------------------------------------------
 
-    /// Read input channel i (the i-th 1-bit TxPDO entry).
+    /**Read input channel i (the i-th 1-bit TxPDO entry). */
     bool input(size_t i) const override;
 
-    /// Write output channel i (the i-th 1-bit RxPDO entry).
+    /**Write output channel i (the i-th 1-bit RxPDO entry). */
     void setOutput(size_t i, bool on) override;
     bool output(size_t i) const override;
 
@@ -254,12 +256,14 @@ public:
     bool fieldIn(uint16_t index, int subindex, uint32_t occurrence,
                  uint64_t& value) const;
 
-    /// Like fieldIn() for the output image.
+    /**Like fieldIn() for the output image. */
     bool fieldOut(uint16_t index, int subindex, uint32_t occurrence,
                   uint64_t value);
 
-    /// Bit offset of an input entry (index/subindex/occurrence), for
-    /// applications that want to poll raw fields directly.
+    /**
+     * Bit offset of an input entry (index/subindex/occurrence), for
+     * applications that want to poll raw fields directly.
+     */
     bool findInputField(uint16_t index, int subindex, uint32_t occurrence,
                         uint32_t& bit_off) const;
     bool findOutputField(uint16_t index, int subindex, uint32_t occurrence,
@@ -269,7 +273,7 @@ private:
     bool resolveLayout();
     Result<> prepare(PDO::PDOAddressMode mode);
 
-    /// Resolved absolute bit offsets of each 1-bit channel.
+    /**Resolved absolute bit offsets of each 1-bit channel. */
     std::vector<uint32_t> in_offs_;
     std::vector<uint32_t> out_offs_;
 };

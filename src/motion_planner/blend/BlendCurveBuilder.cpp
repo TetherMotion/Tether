@@ -16,8 +16,10 @@ namespace tether::motion {
 
 namespace {
 
-/// Build a single-span Bézier NURBS from control points (weights 1,
-/// clamped knots {0×(n+1), 1×(n+1)}).
+/**
+ * Build a single-span Bézier NURBS from control points (weights 1,
+ * clamped knots {0×(n+1), 1×(n+1)}).
+ */
 NurbsCurve makeBezier(std::vector<RVec> cps) {
     const int n = static_cast<int>(cps.size()) - 1;
     std::vector<double> w(cps.size(), 1.0);

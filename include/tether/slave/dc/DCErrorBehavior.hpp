@@ -77,35 +77,35 @@ namespace DCError {
  */
 struct DCErrorConfig {
     // Clock limits
-    int64_t maxClockDriftNsPerSecond = 100000;   ///< Max drift in ns/s (100 ppm)
-    int64_t maxClockJumpNs = 1000000;            ///< Max allowed clock jump (1ms)
-    uint64_t minClockJumpNs = 100000;            ///< Min jump to detect (100us)
+    int64_t maxClockDriftNsPerSecond = 100000; /**< Max drift in ns/s (100 ppm) */
+    int64_t maxClockJumpNs = 1000000; /**< Max allowed clock jump (1ms) */
+    uint64_t minClockJumpNs = 100000; /**< Min jump to detect (100us) */
     
     // Sync signal limits
-    int32_t maxSync0DeviationNs = 50000;         ///< Max SYNC0 timing deviation (50us)
-    int32_t maxSync1DeviationNs = 50000;         ///< Max SYNC1 timing deviation (50us)
-    uint32_t maxMissedSync0 = 3;                 ///< Max consecutive missed SYNC0
-    uint32_t maxMissedSync1 = 3;                 ///< Max consecutive missed SYNC1
+    int32_t maxSync0DeviationNs = 50000; /**< Max SYNC0 timing deviation (50us) */
+    int32_t maxSync1DeviationNs = 50000; /**< Max SYNC1 timing deviation (50us) */
+    uint32_t maxMissedSync0 = 3; /**< Max consecutive missed SYNC0 */
+    uint32_t maxMissedSync1 = 3; /**< Max consecutive missed SYNC1 */
     
     // Jitter limits
-    uint32_t maxJitterNs = 100000;               ///< Maximum allowed jitter (100us)
-    uint32_t jitterWindowSamples = 100;          ///< Samples for jitter calculation
+    uint32_t maxJitterNs = 100000; /**< Maximum allowed jitter (100us) */
+    uint32_t jitterWindowSamples = 100; /**< Samples for jitter calculation */
     
     // Packet timing
-    uint32_t maxPacketDelayUs = 500;             ///< Max packet delay (500us)
-    uint32_t packetTimeoutMs = 100;              ///< Packet timeout (100ms)
+    uint32_t maxPacketDelayUs = 500; /**< Max packet delay (500us) */
+    uint32_t packetTimeoutMs = 100; /**< Packet timeout (100ms) */
     
     // Propagation
-    uint32_t maxPropagationDelayNs = 10000000;   ///< Max propagation delay (10ms)
-    uint32_t maxOffsetCorrectionNs = 1000000000; ///< Max offset correction (1s)
+    uint32_t maxPropagationDelayNs = 10000000; /**< Max propagation delay (10ms) */
+    uint32_t maxOffsetCorrectionNs = 1000000000; /**< Max offset correction (1s) */
     
     // Error handling
-    bool driftErrorCritical = false;             ///< Is drift error critical?
-    bool jumpErrorCritical = true;               ///< Is jump error critical?
-    bool syncMissingCritical = true;             ///< Is sync missing critical?
-    bool jitterErrorCritical = false;            ///< Is jitter error critical?
-    bool packetErrorCritical = true;             ///< Is packet error critical?
-    bool configErrorCritical = true;             ///< Is config error critical?
+    bool driftErrorCritical = false; /**< Is drift error critical? */
+    bool jumpErrorCritical = true; /**< Is jump error critical? */
+    bool syncMissingCritical = true; /**< Is sync missing critical? */
+    bool jitterErrorCritical = false; /**< Is jitter error critical? */
+    bool packetErrorCritical = true; /**< Is packet error critical? */
+    bool configErrorCritical = true; /**< Is config error critical? */
 };
 
 // ============================================================================
@@ -120,11 +120,11 @@ struct DCErrorInjection {
     
     // Clock manipulation
     bool injectClockDrift = false;
-    int64_t driftRateNsPerSecond = 0;           ///< Injected drift rate
+    int64_t driftRateNsPerSecond = 0; /**< Injected drift rate */
     
     bool injectClockJump = false;
-    int64_t jumpAmountNs = 0;                   ///< Clock jump amount
-    uint64_t jumpAfterMs = 0;                   ///< Inject jump after this time
+    int64_t jumpAmountNs = 0; /**< Clock jump amount */
+    uint64_t jumpAfterMs = 0; /**< Inject jump after this time */
     bool jumpInjected = false;
     
     // Sync manipulation

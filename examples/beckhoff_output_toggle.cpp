@@ -76,7 +76,7 @@ static const char* TAG = "beckhoff_output_toggle";
 
 namespace Beckhoff = EtherCAT::Beckhoff;
 
-/// The "EL200x" detection set  -  x = channel count.
+/**The "EL200x" detection set  -  x = channel count. */
 constexpr Beckhoff::DeviceIdentity kEl200x[] = {
     Beckhoff::Devices::EL2002,
     Beckhoff::Devices::EL2004,
@@ -86,7 +86,7 @@ constexpr Beckhoff::DeviceIdentity kEl200x[] = {
 static std::atomic<bool> g_cancel{false};
 // SignalHandler sets this to true on SIGINT/SIGTERM.
 
-/// Compact per-module bit rendering: "s3:0100 s4:0000".
+/**Compact per-module bit rendering: "s3:0100 s4:0000". */
 static std::string moduleStates(const Beckhoff::MultiOutputTerminal<>& outs) {
     std::string out;
     for (size_t m = 0; m < outs.moduleCount(); ++m) {
@@ -99,7 +99,7 @@ static std::string moduleStates(const Beckhoff::MultiOutputTerminal<>& outs) {
     return out;
 }
 
-/// Which module+channel a flat chain bit belongs to.
+/**Which module+channel a flat chain bit belongs to. */
 static void locateBit(const Beckhoff::MultiOutputTerminal<>& outs,
                       size_t bit, size_t& mod, size_t& ch) {
     mod = 0;

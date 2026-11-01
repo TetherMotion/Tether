@@ -80,13 +80,13 @@ inline ALState alStateBase(ALState state) {
  * @brief State transition event information
  */
 struct StateTransition {
-    uint16_t slaveIndex;        ///< Slave index (0-based)
-    uint16_t configuredAddress; ///< Configured address (if known)
-    ALState previousState;      ///< Previous state
-    ALState newState;           ///< New state
-    uint16_t alStatusCode;      ///< AL Status Code (error details)
-    Timestamp timestamp;        ///< Transition timestamp
-    bool requested;             ///< Transition was requested (vs spontaneous)
+    uint16_t slaveIndex; /**< Slave index (0-based) */
+    uint16_t configuredAddress; /**< Configured address (if known) */
+    ALState previousState; /**< Previous state */
+    ALState newState; /**< New state */
+    uint16_t alStatusCode; /**< AL Status Code (error details) */
+    Timestamp timestamp; /**< Transition timestamp */
+    bool requested; /**< Transition was requested (vs spontaneous) */
     
     /**
      * @brief Check if transition represents an error
@@ -156,11 +156,11 @@ using StateTransitionCallback = std::function<void(const StateTransition& transi
  * @brief State machine logger configuration
  */
 struct StateMachineLoggerConfig {
-    LogLevel logLevel = LogLevel::Info;  ///< Minimum level to log
-    bool logAllTransitions = true;       ///< Log all transitions (not just errors)
-    bool logTimestamps = true;           ///< Include timestamps
-    bool includeStatusCodes = true;      ///< Include AL status codes
-    size_t historySize = 100;            ///< Number of transitions to keep
+    LogLevel logLevel = LogLevel::Info; /**< Minimum level to log */
+    bool logAllTransitions = true; /**< Log all transitions (not just errors) */
+    bool logTimestamps = true; /**< Include timestamps */
+    bool includeStatusCodes = true; /**< Include AL status codes */
+    size_t historySize = 100; /**< Number of transitions to keep */
 };
 
 /**
@@ -295,7 +295,7 @@ public:
     /**
      * @brief Check if in error state
      */
-    /// @return true when the current state carries the error bit.
+    /**@return true when the current state carries the error bit. */
     bool hasError() const { return alStateHasError(m_currentState); }
     
     /**

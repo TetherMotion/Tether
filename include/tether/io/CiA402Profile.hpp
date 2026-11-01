@@ -24,7 +24,7 @@ inline SchemaKey driveSnapshotSchemaKey(uint8_t id) {
     return key;
 }
 
-/// Quality flags carried by DriveSnapshotV1::qualityFlags.
+/**Quality flags carried by DriveSnapshotV1::qualityFlags. */
 enum class DriveQuality : uint32_t {
     None = 0,
     Stale = 1u << 0,
@@ -126,8 +126,10 @@ struct DriveSnapshotV1 {
 
 static_assert(DriveSnapshotV1::kEncodedSize == 64);
 
-/// Returns the dependency-closed V6 graph for the packed DriveSnapshotV1.
-/// Its final node is the snapshot root; all prior nodes are reusable scalars.
+/**
+ * Returns the dependency-closed V6 graph for the packed DriveSnapshotV1.
+ * Its final node is the snapshot root; all prior nodes are reusable scalars.
+ */
 inline SchemaGraph driveSnapshotSchemaGraph() {
     const auto makeScalar = [](uint8_t id, ValueType type) {
         SchemaNode node;

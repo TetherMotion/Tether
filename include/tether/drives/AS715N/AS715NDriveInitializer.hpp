@@ -69,7 +69,7 @@ public:
     // Individual steps
     // ------------------------------------------------------------------
 
-    /// @brief Reset the slave to INIT if it is not already there.
+    /**@brief Reset the slave to INIT if it is not already there. */
     bool resetToInit() {
         uint8_t current_state = 0;
         if (!master_.ethercatMaster().readSlaveApplicationLayerState(slave_idx_, current_state)) {
@@ -108,7 +108,7 @@ public:
         return true;
     }
 
-    /// @brief Configure the mailbox (SM0/SM1) from SII automatically.
+    /**@brief Configure the mailbox (SM0/SM1) from SII automatically. */
     bool configureMailbox() {
         TETHER_LOGI(tag_, "Configuring mailbox for {}...", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
 
@@ -123,7 +123,7 @@ public:
         return true;
     }
 
-    /// @brief Transition the slave to PRE_OP.
+    /**@brief Transition the slave to PRE_OP. */
     bool transitionToPreOp() {
         auto& slave = master_.ethercatMaster().slave(slave_idx_);
         const auto err = slave.transitionToPreOp();
@@ -136,17 +136,19 @@ public:
         return true;
     }
 
-    /// @brief Configure PDOs and transition to OP.
-    ///
-    /// Uses CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment&), which:
-    ///   - ensures the slave is in PRE_OP
-    ///   - calls Slave::configureMultiPDOs (SM2/SM3 + 0x1C12/0x1C13 + FMMU)
-    ///   - registers the process-data buffers
-    ///   - transitions SAFE_OP -> OP
-    ///
-    /// @param assignment  Multi-PDO assignment (use makeDefaultPDOAssignment()
-    ///                    or a custom one)
-    /// @return true on success
+    /**
+     * @brief Configure PDOs and transition to OP.
+     *
+     * Uses CiA402Drive::transitionToOp(const Slave::MultiPDOAssignment&), which:
+     *   - ensures the slave is in PRE_OP
+     *   - calls Slave::configureMultiPDOs (SM2/SM3 + 0x1C12/0x1C13 + FMMU)
+     *   - registers the process-data buffers
+     *   - transitions SAFE_OP -> OP
+     *
+     * @param assignment  Multi-PDO assignment (use makeDefaultPDOAssignment()
+     *                    or a custom one)
+     * @return true on success
+     */
     bool configurePDOsAndOp(const Slave::MultiPDOAssignment& assignment) {
         auto& drive = master_.ensureDrive(slave_idx_);
         drive.setSDOTimeout(3000);
@@ -172,40 +174,56 @@ public:
         return true;
     }
 
-    /// Which fault-reset procedure the fault handler runs for a given
-    /// condition.  Installed via setFaultResetPolicy().
+    /**
+     * Which fault-reset procedure the fault handler runs for a given
+     * condition.  Installed via setFaultResetPolicy().
+     */
     enum class FaultResetAction : uint8_t {
-        /// Do nothing — leave the fault latched (enable() keeps retrying
-        /// until its timeout).
+        /**
+         * Do nothing — leave the fault latched (enable() keeps retrying
+         * until its timeout).
+         */
         None,
-        /// Benign controlword FLTR (bit-7) toggle with Enable Operation
-        /// kept asserted (0x0F -> 0x8F -> 0x0F).  The AS715N probably
-        /// ignores it, but it is safe while the drive still runs.
+        /**
+         * Benign controlword FLTR (bit-7) toggle with Enable Operation
+         * kept asserted (0x0F -> 0x8F -> 0x0F).  The AS715N probably
+         * ignores it, but it is safe while the drive still runs.
+         */
         FltrToggle,
-        /// CiA402 standard bit-7 edge on the current controlword.
+        /**CiA402 standard bit-7 edge on the current controlword. */
         FltrStandard,
-        /// AS715N F31.00 (0x2031:01) sequence — clears S-ON first per the
-        /// A6-EC manual, so it briefly disables the drive.
+        /**
+         * AS715N F31.00 (0x2031:01) sequence — clears S-ON first per the
+         * A6-EC manual, so it briefly disables the drive.
+         */
         F31Sequence,
     };
 
-    /// Policy controlling which reset procedure runs when.  The fault
-    /// handler is invoked from CiA402Drive::enable()'s fault loop; the
-    /// condition is evaluated on every invocation.
+    /**
+     * Policy controlling which reset procedure runs when.  The fault
+     * handler is invoked from CiA402Drive::enable()'s fault loop; the
+     * condition is evaluated on every invocation.
+     */
     struct FaultResetPolicy {
-        /// Action for real manufacturer faults (0x203F external != 0).
+        /**Action for real manufacturer faults (0x203F external != 0). */
         FaultResetAction mfr_error_action = FaultResetAction::F31Sequence;
-        /// Action for phantom faults (statusword fault bit set but
-        /// 0x203F = NoError) while the drive is not provably stuck.
+        /**
+         * Action for phantom faults (statusword fault bit set but
+         * 0x203F = NoError) while the drive is not provably stuck.
+         */
         FaultResetAction phantom_action = FaultResetAction::FltrToggle;
-        /// Action for a stuck phantom fault: fault bit set AND the drive
-        /// disabled (Fault / FaultReactionActive / SwitchOnDisabled /
-        /// NotReadyToSwitchOn) even though the enable controlword
-        /// (0x000F) was commanded.
+        /**
+         * Action for a stuck phantom fault: fault bit set AND the drive
+         * disabled (Fault / FaultReactionActive / SwitchOnDisabled /
+         * NotReadyToSwitchOn) even though the enable controlword
+         * (0x000F) was commanded.
+         */
         FaultResetAction stuck_action = FaultResetAction::F31Sequence;
-        /// Also treat a phantom fault as stuck after this many handler
-        /// invocations (0 = disabled — only the statusword condition
-        /// counts).
+        /**
+         * Also treat a phantom fault as stuck after this many handler
+         * invocations (0 = disabled — only the statusword condition
+         * counts).
+         */
         uint32_t stuck_after_attempts = 0;
     };
 
@@ -214,15 +232,17 @@ public:
     }
     const FaultResetPolicy& faultResetPolicy() const { return fault_reset_policy_; }
 
-    /// @brief Enable the drive (CiA 402 state machine).
-    ///
-    /// Installs the AS715N fault reset as the drive's fault-reset handler:
-    /// the AS715N does NOT clear faults via the CiA402 controlword bit-7
-    /// edge, so enable()'s fault loop would otherwise retry a no-op until
-    /// timeout.  Which procedure runs for which condition is controlled
-    /// by setFaultResetPolicy().
-    /// @param timeout_ms  Timeout for each state transition (default 5000)
-    /// @return true on success
+    /**
+     * @brief Enable the drive (CiA 402 state machine).
+     *
+     * Installs the AS715N fault reset as the drive's fault-reset handler:
+     * the AS715N does NOT clear faults via the CiA402 controlword bit-7
+     * edge, so enable()'s fault loop would otherwise retry a no-op until
+     * timeout.  Which procedure runs for which condition is controlled
+     * by setFaultResetPolicy().
+     * @param timeout_ms  Timeout for each state transition (default 5000)
+     * @return true on success
+     */
     bool enableDrive(uint32_t timeout_ms = 5000) {
         fault_reset_attempts_ = 0;
         auto& drive = master_.ensureDrive(slave_idx_);
@@ -237,8 +257,10 @@ public:
         return true;
     }
 
-    /// @brief Disable the drive.
-    /// @return true on success
+    /**
+     * @brief Disable the drive.
+     * @return true on success
+     */
     bool disableDrive() {
         if (!master_.disableDrive(slave_idx_)) {
             TETHER_LOGW(tag_, "Drive disable failed for {}", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
@@ -251,20 +273,24 @@ public:
     // Convenience: full init sequences
     // ------------------------------------------------------------------
 
-    /// @brief Full init: reset -> mailbox -> PRE_OP -> default PDOs -> OP.
-    ///
-    /// Uses makeDefaultPDOAssignment() (RxPDO 0x1705, TxPDO 0x1B04).
-    /// Does NOT enable the drive -- call enableDrive() after setting the
-    /// desired operating mode.
-    /// @return true on success
+    /**
+     * @brief Full init: reset -> mailbox -> PRE_OP -> default PDOs -> OP.
+     *
+     * Uses makeDefaultPDOAssignment() (RxPDO 0x1705, TxPDO 0x1B04).
+     * Does NOT enable the drive -- call enableDrive() after setting the
+     * desired operating mode.
+     * @return true on success
+     */
     bool init() {
         return init(AS715N_pdo::makeDefaultPDOAssignment());
     }
 
-    /// @brief Full init: reset -> mailbox -> PRE_OP -> custom PDOs -> OP.
-    ///
-    /// @param assignment  Multi-PDO assignment for this drive
-    /// @return true on success
+    /**
+     * @brief Full init: reset -> mailbox -> PRE_OP -> custom PDOs -> OP.
+     *
+     * @param assignment  Multi-PDO assignment for this drive
+     * @return true on success
+     */
     bool init(const Slave::MultiPDOAssignment& assignment) {
         if (!resetToInit()) return false;
         if (!configureMailbox()) return false;
@@ -277,22 +303,24 @@ public:
     // Accessors
     // ------------------------------------------------------------------
 
-    /// @brief Get the CiA402Drive handle (created by configurePDOsAndOp).
+    /**@brief Get the CiA402Drive handle (created by configurePDOsAndOp). */
     CiA402Drive& drive() { return master_.ensureDrive(slave_idx_); }
 
-    /// @brief Get the raw EtherCAT Slave.
+    /**@brief Get the raw EtherCAT Slave. */
     EtherCAT::Slave& slave() { return master_.ethercatMaster().slave(slave_idx_); }
 
-    /// @brief Get the CoE/SDO manager for this slave.
+    /**@brief Get the CoE/SDO manager for this slave. */
     CoE::CoEManager& sdo() { return master_.ethercatMaster().sdoManager(slave_idx_); }
 
-    /// @brief Get the slave index.
+    /**@brief Get the slave index. */
     uint16_t slaveIndex() const { return slave_idx_; }
 
 private:
-    /// Fault reset invoked from CiA402Drive::enable()'s fault loop.
-    /// Evaluates the fault condition (manufacturer error vs. phantom vs.
-    /// stuck phantom) and runs the procedure selected by the policy.
+    /**
+     * Fault reset invoked from CiA402Drive::enable()'s fault loop.
+     * Evaluates the fault condition (manufacturer error vs. phantom vs.
+     * stuck phantom) and runs the procedure selected by the policy.
+     */
     bool as715nFaultReset(CiA402Drive& drive) {
         auto& sdo_mgr = sdo();
         const uint16_t mfr =

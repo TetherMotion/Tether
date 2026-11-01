@@ -1,16 +1,20 @@
-/// @file KlippyInstanceExtendedCommands.ipp
-/// @brief Extended G-code command handlers for KlippyInstance (included into class body).
-///
-/// This file is included inside the KlippyInstance class definition.
-/// It contains the handleExtendedCommand() method and the probeBedGrid()
-/// helper, which together implement all extended Klipper G-code commands.
+/**
+ * @file KlippyInstanceExtendedCommands.ipp
+ * @brief Extended G-code command handlers for KlippyInstance (included into class body).
+ *
+ * This file is included inside the KlippyInstance class definition.
+ * It contains the handleExtendedCommand() method and the probeBedGrid()
+ * helper, which together implement all extended Klipper G-code commands.
+ */
 
     // ------------------------------------------------------------------
     // Extended command dispatch (Klipper module commands)
     // ------------------------------------------------------------------
 
-    /// @brief Handle a Klipper extended command (SET_SERVO, BED_MESH_CALIBRATE, etc.)
-    /// @return true if the command was recognized and handled.
+    /**
+     * @brief Handle a Klipper extended command (SET_SERVO, BED_MESH_CALIBRATE, etc.)
+     * @return true if the command was recognized and handled.
+     */
     bool handleExtendedCommand(const GcodeLine& g) {
         const std::string& cmd = g.code;
 
@@ -1492,8 +1496,10 @@
         return false;
     }
 
-    /// @brief Probe the bed in a grid pattern and fill the mesh.
-    /// Used by BED_MESH_CALIBRATE and G29.
+    /**
+     * @brief Probe the bed in a grid pattern and fill the mesh.
+     * Used by BED_MESH_CALIBRATE and G29.
+     */
     int probeBedGrid() {
         if (!probe_) return 0;
         int probed = 0;

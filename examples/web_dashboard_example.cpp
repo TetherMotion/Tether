@@ -71,7 +71,7 @@ std::stop_source g_stopSource;
 std::condition_variable_any g_stopCv;
 std::mutex g_stopMutex;
 
-/// Called by Drogon's SIGINT/SIGTERM dispatch (from a safe context).
+/**Called by Drogon's SIGINT/SIGTERM dispatch (from a safe context). */
 void onStopSignal() {
     g_stopSource.request_stop();
     g_stopCv.notify_all();
@@ -88,7 +88,7 @@ uint64_t nowUs() {
             std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
-/// LogFn callback  -  prints to stderr when --verbose is enabled.
+/**LogFn callback  -  prints to stderr when --verbose is enabled. */
 void verboseLog(const char* tag, const char* fmt, ...) {
     if (!g_verbose) return;
     const auto now = std::chrono::steady_clock::now();

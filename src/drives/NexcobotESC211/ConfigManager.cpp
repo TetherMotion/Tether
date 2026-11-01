@@ -309,11 +309,13 @@ bool ConfigManager::ensureLoaded() {
 
 namespace {
 
-/// Read 256-byte sections (subindex 1..N) from an SDO data object.
-/// The section bound is the object's own subindex-0 (highest supported
-/// subindex) when readable — newer firmware exposes more sections than
-/// info.maxSections was sized for (e.g. SDD rev 0x1201 needs ~43, not
-/// 25) — otherwise info.maxSections.  Stops early on read error.
+/**
+ * Read 256-byte sections (subindex 1..N) from an SDO data object.
+ * The section bound is the object's own subindex-0 (highest supported
+ * subindex) when readable — newer firmware exposes more sections than
+ * info.maxSections was sized for (e.g. SDD rev 0x1201 needs ~43, not
+ * 25) — otherwise info.maxSections.  Stops early on read error.
+ */
 std::vector<uint8_t> readConfigSections(EtherCAT::Slave& slave,
                                       const ConfigDataTypeInfo& info,
                                       uint16_t index,

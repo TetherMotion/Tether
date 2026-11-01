@@ -13,7 +13,7 @@
 namespace CiA402 {
 
 namespace {
-constexpr uint32_t kStallWindowCapacity = 256; ///< Max samples in stall window
+constexpr uint32_t kStallWindowCapacity = 256; /**< Max samples in stall window */
 }
 
 TorqueHomingController::TorqueHomingController() {

@@ -11,8 +11,10 @@ namespace EtherCAT {
 namespace Drives {
 namespace ESC211 {
 
-/// Polled table size — every data sub-entry of 0x4100-0x4115.
-/// Free-standing because the class needs it in its base-specifier.
+/**
+ * Polled table size — every data sub-entry of 0x4100-0x4115.
+ * Free-standing because the class needs it in its base-specifier.
+ */
 inline constexpr size_t kRSAPMonitoringPollObjects = 104;
 
 /**
@@ -30,7 +32,7 @@ struct RSAPMonitoringSnapshot
      */
     std::optional<uint32_t> get(uint16_t index, uint8_t subindex = 0) const;
 
-    /// Signed interpretation of get() for DINT objects.
+    /**Signed interpretation of get() for DINT objects. */
     std::optional<int32_t> getSigned(uint16_t index,
                                      uint8_t subindex = 0) const;
 };
@@ -86,15 +88,15 @@ class RSAPMonitoringProcessor
 public:
     using Snapshot = RSAPMonitoringSnapshot;
 
-    /// Object dictionary metadata for one polled (sub)object.
+    /**Object dictionary metadata for one polled (sub)object. */
     struct ObjectInfo {
-        uint16_t    index;     ///< CoE index (0x4100..0x4115)
-        uint8_t     subindex;  ///< CoE subindex (0 for scalars, 1..n records)
-        const char* name;      ///< ESI object name
-        bool        is_signed; ///< DINT when true, UDINT otherwise
+        uint16_t    index; /**< CoE index (0x4100..0x4115) */
+        uint8_t     subindex; /**< CoE subindex (0 for scalars, 1..n records) */
+        const char* name; /**< ESI object name */
+        bool        is_signed; /**< DINT when true, UDINT otherwise */
     };
 
-    /// All polled objects (every data sub-entry of 0x4100-0x4115).
+    /**All polled objects (every data sub-entry of 0x4100-0x4115). */
     static constexpr size_t kObjectCount = kRSAPMonitoringPollObjects;
     static const std::array<ObjectInfo, kObjectCount> kObjects;
 

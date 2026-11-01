@@ -80,7 +80,7 @@ inline constexpr DeviceIdentity EP7047{0x00000002, 0x1B874052, 1, "EP7047"};
 // interface on hardware.
 inline constexpr DeviceIdentity EPP7041{0x00000002, 0x64777E19, 1, "EPP7041"};
 
-/// Every known POS-interface stepper terminal.
+/**Every known POS-interface stepper terminal. */
 inline constexpr std::array kStepperTerminals{
     EL7031, EL7037, EL7041, EL7047,
     EJ7031, EJ7037, EJ7041, EJ7047, EP7041, ER7041, EP7047, EPP7041,
@@ -108,12 +108,12 @@ public:
     StepperTerminal(const StepperTerminal&)                = delete;
     StepperTerminal& operator=(const StepperTerminal&)     = delete;
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
 
-    /// Scan the bus for the first slave matching `identity`.
+    /**Scan the bus for the first slave matching `identity`. */
     static Result<StepperTerminal> findFirst(Master& master,
                                              const DeviceIdentity& identity);
     static Result<StepperTerminal> findFirst(
@@ -122,26 +122,28 @@ public:
 
     // -- Bring-up ------------------------------------------------------------------
 
-    /// Standalone bring-up to SAFE-OP (position addressing).
+    /**Standalone bring-up to SAFE-OP (position addressing). */
     Result<> configure();
 
-    /// configure() then OP (+ managed realtime loop by default).
+    /**configure() then OP (+ managed realtime loop by default). */
     Result<> start() { return start(StartOptions()); }
     Result<> start(const StartOptions& opts);
 
-    /// Chained-operation contract (shared logical address space):
-    /// same semantics as the other terminal drivers.
+    /**
+     * Chained-operation contract (shared logical address space):
+     * same semantics as the other terminal drivers.
+     */
     Result<> prepareForLogicalExchange();
     Result<> mapLogicalAndEnterSafeOp();
     Result<> requestOp(int timeout_ms);
 
     // -- Drive control (SM2 image) ---------------------------------------------------
 
-    /// STM Control :01 — power-stage enable.
+    /**STM Control :01 — power-stage enable. */
     void setEnable(bool on);
-    /// STM Control :02 — fault reset (write 1, then clear).
+    /**STM Control :02 — fault reset (write 1, then clear). */
     void setReset(bool on);
-    /// STM Control :03 — reduced motor torque.
+    /**STM Control :03 — reduced motor torque. */
     void setReduceTorque(bool on);
 
     /**
@@ -164,65 +166,67 @@ public:
      *        32 bit).  Latched into the counter while setCounter(true).
      */
     void setCounterValue(int32_t v);
-    /// ENC Control :03 — "Set counter" command bit.
+    /**ENC Control :03 — "Set counter" command bit. */
     void setSetCounter(bool on);
-    /// ENC Control :02 — enable external latch on positive edge.
+    /**ENC Control :02 — enable external latch on positive edge. */
     void setLatchExtPos(bool on);
-    /// ENC Control :04 — enable external latch on negative edge.
+    /**ENC Control :04 — enable external latch on negative edge. */
     void setLatchExtNeg(bool on);
-    /// ENC Control :01 — enable latch C (present on EL7041/EL7047 only).
+    /**ENC Control :01 — enable latch C (present on EL7041/EL7047 only). */
     void setLatchC(bool on);
     bool hasLatchC() const { return kInvalid != off_enc_latch_c_; }
 
-    /// Raw STM control word (16 bit) — for bits not wrapped above.
+    /**Raw STM control word (16 bit) — for bits not wrapped above. */
     uint16_t stmControlWord() const;
-    /// Raw ENC control word (16 bit).
+    /**Raw ENC control word (16 bit). */
     uint16_t encControlWord() const;
 
     // -- Drive status (SM3 image) ------------------------------------------------------
 
-    /// STM Status :01 — ready to enable.
+    /**STM Status :01 — ready to enable. */
     bool readyToEnable() const;
-    /// STM Status :02 — ready (power stage active).
+    /**STM Status :02 — ready (power stage active). */
     bool ready() const;
-    /// STM Status :03 — warning present.
+    /**STM Status :03 — warning present. */
     bool warning() const;
-    /// STM Status :04 — error present (reset via setReset()).
+    /**STM Status :04 — error present (reset via setReset()). */
     bool error() const;
-    /// STM Status :05/:06 — currently moving in +/- direction.
+    /**STM Status :05/:06 — currently moving in +/- direction. */
     bool movingPositive() const;
     bool movingNegative() const;
-    /// STM Status :07 — running at reduced torque.
+    /**STM Status :07 — running at reduced torque. */
     bool torqueReduced() const;
-    /// STM Status :12/:13 — digital inputs 1/2.
+    /**STM Status :12/:13 — digital inputs 1/2. */
     bool digitalInput1() const;
     bool digitalInput2() const;
 
-    /// ENC Status :02 — external latch captured a value.
+    /**ENC Status :02 — external latch captured a value. */
     bool latchValid() const;
-    /// ENC Status :03 — a setCounter() command completed.
+    /**ENC Status :03 — a setCounter() command completed. */
     bool setCounterDone() const;
-    /// ENC Status :04/:05 — counter wrapped.
+    /**ENC Status :04/:05 — counter wrapped. */
     bool counterUnderflow() const;
     bool counterOverflow() const;
-    /// Sync error flag (object 0x1C32:32, DC-related).
+    /**Sync error flag (object 0x1C32:32, DC-related). */
     bool syncError() const;
 
-    /// ENC counter value (object 0x6000:17, 16 or 32 bit, signed).
+    /**ENC counter value (object 0x6000:17, 16 or 32 bit, signed). */
     int32_t counterValue() const;
-    /// ENC latch value (object 0x6000:18, 16 or 32 bit, signed).
+    /**ENC latch value (object 0x6000:18, 16 or 32 bit, signed). */
     int32_t latchValue() const;
 
-    /// Raw STM status word (16 bit).
+    /**Raw STM status word (16 bit). */
     uint16_t stmStatusWord() const;
-    /// Raw ENC status word (16 bit).
+    /**Raw ENC status word (16 bit). */
     uint16_t encStatusWord() const;
 
 private:
     static constexpr uint32_t kInvalid = ~0u;
 
-    /// One resolved field — absolute bit offset in its process image +
-    /// width.  bit_len == 0 marks "not present".
+    /**
+     * One resolved field — absolute bit offset in its process image +
+     * width.  bit_len == 0 marks "not present".
+     */
     struct Field {
         uint32_t bit_off = kInvalid;
         uint8_t  bit_len = 0;

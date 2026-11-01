@@ -142,10 +142,10 @@ namespace tether::control {
  * @brief Approximation method for fractional operators
  */
 enum class FractionalApproximation {
-    GrunwaldLetnikov,  ///< Direct GL discretization (time domain)
-    Oustaloup,         ///< Oustaloup recursive filter (frequency domain)
-    Matsuda,           ///< Matsuda fitting method
-    ShortMemory        ///< GL with short memory principle
+    GrunwaldLetnikov, /**< Direct GL discretization (time domain) */
+    Oustaloup, /**< Oustaloup recursive filter (frequency domain) */
+    Matsuda, /**< Matsuda fitting method */
+    ShortMemory /**< GL with short memory principle */
 };
 
 /**

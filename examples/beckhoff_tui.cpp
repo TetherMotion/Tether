@@ -199,11 +199,13 @@ struct Drivers {
     std::vector<std::unique_ptr<Beckhoff::OversamplingTerminal>> overs;
     std::vector<std::unique_ptr<Beckhoff::CommTerminal>>         comms;
 
-    /// Chain PDO groups needing an explicit exchangeAll() in the RT loop
-    /// (single terminals ride on the default master_.pdo() group).
+    /**
+     * Chain PDO groups needing an explicit exchangeAll() in the RT loop
+     * (single terminals ride on the default master_.pdo() group).
+     */
     std::vector<EtherCAT::PDOManager*> groups;
 
-    /// slave index -> bring-up error text (empty = OK or unmanaged).
+    /**slave index -> bring-up error text (empty = OK or unmanaged). */
     std::map<uint16_t, std::string> errors;
 };
 
@@ -214,7 +216,7 @@ static typename Vec::value_type::element_type* findBySlave(Vec& v,
     return nullptr;
 }
 
-/// Module index of `slave` inside a Multi chain, or SIZE_MAX.
+/**Module index of `slave` inside a Multi chain, or SIZE_MAX. */
 template <typename Chain>
 static size_t moduleOf(const Chain& c, uint16_t slave) {
     for (size_t m = 0; m < c.moduleCount(); ++m)
@@ -222,10 +224,12 @@ static size_t moduleOf(const Chain& c, uint16_t slave) {
     return SIZE_MAX;
 }
 
-/// Bring every classified slave to OP.  Phase A configures all chains and
-/// single terminals to SAFE-OP; phase B starts one realtime loop that
-/// exchanges the default PDO group (single terminals) plus every chain's
-/// dedicated group; phase C requests OP on all devices.
+/**
+ * Bring every classified slave to OP.  Phase A configures all chains and
+ * single terminals to SAFE-OP; phase B starts one realtime loop that
+ * exchanges the default PDO group (single terminals) plus every chain's
+ * dedicated group; phase C requests OP on all devices.
+ */
 static void bringUp(EtherCAT::Master& master,
                     std::span<const DiscoveredSlave> slaves,
                     const std::map<uint16_t, SlaveClass>& assignments,
@@ -413,9 +417,9 @@ const char* driveStateName(Beckhoff::DriveState s) {
 // -- per-family detail renderers ----------------------------------------------
 
 struct UiState {
-    /// Selected channel/axis per slave (for '[',']' selection).
+    /**Selected channel/axis per slave (for '[',']' selection). */
     std::map<uint16_t, size_t> sel;
-    /// Input transition counters, per slave then channel.
+    /**Input transition counters, per slave then channel. */
     std::map<uint16_t, std::vector<uint32_t>> transitions;
     std::map<uint16_t, uint64_t>              prevBits;
 };

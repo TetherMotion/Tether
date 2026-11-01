@@ -762,8 +762,10 @@ private:
         return len;
     }
 
-    /// Fill VLAN fields of a RxFrameInfo from inline bytes or, when the
-    /// kernel stripped the tag, from PACKET_AUXDATA metadata.
+    /**
+     * Fill VLAN fields of a RxFrameInfo from inline bytes or, when the
+     * kernel stripped the tag, from PACKET_AUXDATA metadata.
+     */
     static void fillVlanInfo(const uint8_t* buf, ssize_t len,
                              const tpacket_auxdata& aux,
                              bool& hasVlan, uint16_t& vlanId,
@@ -794,8 +796,10 @@ private:
     // ---- NIC kernel error-counter monitor (sysfs, non-RT thread) ---------
 
     static constexpr auto kErrorMonInterval = std::chrono::milliseconds(500);
-    /// Log threshold: an interval is reported when the error delta reaches
-    /// this absolute count OR the error percentage exceeds kErrorMonWarnPct.
+    /**
+     * Log threshold: an interval is reported when the error delta reaches
+     * this absolute count OR the error percentage exceeds kErrorMonWarnPct.
+     */
     static constexpr uint64_t kErrorMonMinDelta = 4;
     static constexpr double kErrorMonWarnPct = 0.1;
 

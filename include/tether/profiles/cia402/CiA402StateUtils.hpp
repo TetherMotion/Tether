@@ -36,7 +36,7 @@ enum class ECState : uint8_t {
     Unknown   = 0x00
 };
 
-/// Map an EtherCAT state code to a human-readable string.
+/**Map an EtherCAT state code to a human-readable string. */
 const char* getECStateName(ECState state);
 
 // ============================================================================
@@ -55,22 +55,26 @@ enum class DriveState : uint8_t {
     Unknown
 };
 
-/// Map a CiA 402 drive state to a human-readable string.
+/**Map a CiA 402 drive state to a human-readable string. */
 const char* getDriveStateName(DriveState state);
 
-/// Decode a CiA 402 drive state from a statusword.
+/**Decode a CiA 402 drive state from a statusword. */
 DriveState decodeDriveState(uint16_t statusword);
 
-/// Format a statusword into a human-readable diagnostic string.
-/// Format: "0x1637: OpEn,Volt,QS,Remote,TR,Bit12 | STATE"
+/**
+ * Format a statusword into a human-readable diagnostic string.
+ * Format: "0x1637: OpEn,Volt,QS,Remote,TR,Bit12 | STATE"
+ */
 const char* formatStatuswordDiagnostics(uint16_t sw, char* buffer, size_t buffer_size);
 
 } // namespace EtherCAT
 
 namespace CiA402 {
 
-/// Map a CiA 402 operating mode code (0x6060) to its standard abbreviation.
-/// Returns "PP", "VL", "PV", "PT", "HM", "IP", "CSP", "CSV", "CST", or "Mode N".
+/**
+ * Map a CiA 402 operating mode code (0x6060) to its standard abbreviation.
+ * Returns "PP", "VL", "PV", "PT", "HM", "IP", "CSP", "CSV", "CST", or "Mode N".
+ */
 const char* getOperatingModeName(int8_t mode);
 
 /**

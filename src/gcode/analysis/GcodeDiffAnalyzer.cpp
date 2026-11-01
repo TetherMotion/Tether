@@ -1,5 +1,7 @@
-/// @file GcodeDiffAnalyzer.cpp
-/// @brief Naive line-by-line G-code diff with word-level change detection.
+/**
+ * @file GcodeDiffAnalyzer.cpp
+ * @brief Naive line-by-line G-code diff with word-level change detection.
+ */
 
 #include "tether/gcode/analysis/GcodeDiffAnalyzer.hpp"
 #include "AnalysisUtil.hpp"

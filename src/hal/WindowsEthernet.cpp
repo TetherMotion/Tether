@@ -46,8 +46,10 @@ namespace HAL {
 
 namespace {
 
-/// Resolve a friendly name ("Ethernet0") or GUID to the Npcap device path
-/// ("\\Device\\NPF_{...}").  Returns empty string when not found.
+/**
+ * Resolve a friendly name ("Ethernet0") or GUID to the Npcap device path
+ * ("\\Device\\NPF_{...}").  Returns empty string when not found.
+ */
 std::string resolveNpcapDevice(const char* ifname) {
     if (!ifname || !ifname[0]) return {};
     std::string name(ifname);
@@ -70,9 +72,11 @@ std::string resolveNpcapDevice(const char* ifname) {
     return result;
 }
 
-/// MAC + link state via GetAdaptersAddresses; key is the {GUID} substring
-/// of the Npcap device path (adapter names are "Ethernet {GUID}"-style —
-/// the GUID is what survives in both listings).
+/**
+ * MAC + link state via GetAdaptersAddresses; key is the {GUID} substring
+ * of the Npcap device path (adapter names are "Ethernet {GUID}"-style —
+ * the GUID is what survives in both listings).
+ */
 bool queryAdapter(const std::string& npcap_name, MacAddress& mac,
                   bool& link_up) {
     // Extract {GUID} — the token between "NPF_" and the end.
@@ -343,7 +347,7 @@ public:
     const char* getInterfaceName() const override { return m_ifname; }
 
 private:
-    /// Drain all queued frames through the Rx callback (poll() path).
+    /**Drain all queued frames through the Rx callback (poll() path). */
     int drainOnce() {
         int count = 0;
         uint8_t buf[kMaxFrameSizeVlan];

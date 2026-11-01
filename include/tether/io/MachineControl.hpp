@@ -66,8 +66,10 @@ struct AuthorityEvent {
     TimePoint timestamp{};
 };
 
-/// Server-owned control ownership. Calls are intended for an application executor,
-/// never from the EtherCAT cyclic thread.
+/**
+ * Server-owned control ownership. Calls are intended for an application executor,
+ * never from the EtherCAT cyclic thread.
+ */
 class ControlAuthority final {
 public:
     using Audit = std::function<void(const AuthorityEvent&)>;
@@ -180,10 +182,12 @@ public:
         return released;
     }
 
-    /// Force-take a scope lease from its current owner. Restricted to
-    /// ControlsEngineer and Administrator — an operator must wait for expiry
-    /// or a cooperative release. The evicted owner is recorded in the audit
-    /// event reason so takeovers are attributable.
+    /**
+     * Force-take a scope lease from its current owner. Restricted to
+     * ControlsEngineer and Administrator — an operator must wait for expiry
+     * or a cooperative release. The evicted owner is recorded in the audit
+     * event reason so takeovers are attributable.
+     */
     AuthorityResult takeover(const std::string& scope, const SessionIdentity& identity,
                              Duration requested, TimePoint now = SteadyClock::now()) {
         AuthorityResult result;
@@ -244,8 +248,10 @@ public:
                lease->ownerSession == identity.sessionId;
     }
 
-    /// Snapshot of every active lease, ordered by scope (for the
-    /// machine.authority snapshot signal).
+    /**
+     * Snapshot of every active lease, ordered by scope (for the
+     * machine.authority snapshot signal).
+     */
     std::vector<AuthorityLease> leases(TimePoint now = SteadyClock::now()) {
         std::lock_guard lock(mutex_);
         std::vector<AuthorityLease> out;
@@ -258,8 +264,10 @@ public:
         return out;
     }
 
-    /// Force-release every lease owned by a session (disconnect/expiry stop
-    /// semantics). Returns the number released; each emits an audit event.
+    /**
+     * Force-release every lease owned by a session (disconnect/expiry stop
+     * semantics). Returns the number released; each emits an audit event.
+     */
     size_t releaseAll(const std::string& sessionId, TimePoint now = SteadyClock::now()) {
         std::vector<AuthorityEvent> events;
         size_t released = 0;
@@ -358,9 +366,11 @@ struct CommandPolicy {
     std::unordered_map<Action, std::unordered_set<Role>> actionRoles;
 };
 
-/// Validates and atomically queues application commands outside the real-time loop.
-/// The application-provided dispatcher must enqueue work to its native motion executor;
-/// it must not perform blocking EtherCAT/mailbox work on the caller thread.
+/**
+ * Validates and atomically queues application commands outside the real-time loop.
+ * The application-provided dispatcher must enqueue work to its native motion executor;
+ * it must not perform blocking EtherCAT/mailbox work on the caller thread.
+ */
 class MachineCommandGate final {
 public:
     using StateProvider = std::function<std::optional<CommandEnvironment>(const CommandRequest&)>;

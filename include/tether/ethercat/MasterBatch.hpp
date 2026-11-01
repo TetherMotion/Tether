@@ -32,16 +32,16 @@ public:
 
     ~BatchTransaction();
 
-    /// Get result for datagram at index i (blocks up to timeout_ms)
+    /**Get result for datagram at index i (blocks up to timeout_ms) */
     BatchReadResult getResult(size_t i, uint32_t timeout_ms);
 
-    /// Wait for all results (blocks up to timeout_ms per datagram)
+    /**Wait for all results (blocks up to timeout_ms per datagram) */
     bool waitAll(uint32_t timeout_ms, std::vector<BatchReadResult>& out);
 
-    /// Cancel any pending waits
+    /**Cancel any pending waits */
     void cancel();
 
-    /// Number of datagrams in this transaction
+    /**Number of datagrams in this transaction */
     size_t count() const { return idxs_.size(); }
 
 private:

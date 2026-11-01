@@ -219,14 +219,14 @@ protected:
  */
 class GradientDescent : public OptimizationAlgorithm {
 public:
-    /// Gradient-descent update rule variants.
+    /**Gradient-descent update rule variants. */
     enum class Variant {
-        Standard,       ///< Basic gradient descent
-        Momentum,       ///< With momentum term
-        Nesterov,       ///< Nesterov accelerated gradient
-        Adam,           ///< Adaptive moment estimation
-        AdaGrad,        ///< Adaptive gradient
-        RMSprop         ///< Root mean square propagation
+        Standard, /**< Basic gradient descent */
+        Momentum, /**< With momentum term */
+        Nesterov, /**< Nesterov accelerated gradient */
+        Adam, /**< Adaptive moment estimation */
+        AdaGrad, /**< Adaptive gradient */
+        RMSprop /**< Root mean square propagation */
     };
     
     explicit GradientDescent(Variant variant = Variant::Adam);
@@ -431,11 +431,11 @@ private:
  */
 class ParticleSwarmOptimization : public OptimizationAlgorithm {
 public:
-    /// Neighborhood topology controlling information sharing.
+    /**Neighborhood topology controlling information sharing. */
     enum class Topology {
-        Global,     ///< All particles are neighbors (gbest)
-        Ring,       ///< Each particle has 2 neighbors (lbest)
-        VonNeumann  ///< 2D grid topology
+        Global, /**< All particles are neighbors (gbest) */
+        Ring, /**< Each particle has 2 neighbors (lbest) */
+        VonNeumann /**< 2D grid topology */
     };
     
     std::string getName() const override { return "Particle Swarm Optimization"; }
@@ -494,12 +494,12 @@ private:
  */
 class SimulatedAnnealing : public OptimizationAlgorithm {
 public:
-    /// Temperature decay schedules.
+    /**Temperature decay schedules. */
     enum class CoolingSchedule {
-        Exponential,    ///< T(k) = T0 * alpha^k
-        Linear,         ///< T(k) = T0 - k * delta
-        Logarithmic,    ///< T(k) = T0 / log(1 + k)
-        Adaptive        ///< Adjust based on acceptance rate
+        Exponential, /**< T(k) = T0 * alpha^k */
+        Linear, /**< T(k) = T0 - k * delta */
+        Logarithmic, /**< T(k) = T0 / log(1 + k) */
+        Adaptive /**< Adjust based on acceptance rate */
     };
     
     std::string getName() const override { return "Simulated Annealing"; }
@@ -547,14 +547,14 @@ private:
  */
 class DifferentialEvolution : public OptimizationAlgorithm {
 public:
-    /// Mutation/crossover strategies (DE/... notation).
+    /**Mutation/crossover strategies (DE/... notation). */
     enum class Strategy {
-        Best1Bin,       ///< DE/best/1/bin
-        Rand1Bin,       ///< DE/rand/1/bin
-        RandToBest1Bin, ///< DE/rand-to-best/1/bin
-        Best2Bin,       ///< DE/best/2/bin
-        Rand2Bin,       ///< DE/rand/2/bin
-        CurrentToPBest  ///< DE/current-to-pbest
+        Best1Bin, /**< DE/best/1/bin */
+        Rand1Bin, /**< DE/rand/1/bin */
+        RandToBest1Bin, /**< DE/rand-to-best/1/bin */
+        Best2Bin, /**< DE/best/2/bin */
+        Rand2Bin, /**< DE/rand/2/bin */
+        CurrentToPBest /**< DE/current-to-pbest */
     };
     
     std::string getName() const override { return "Differential Evolution"; }
@@ -600,19 +600,19 @@ private:
  */
 class BayesianOptimization : public OptimizationAlgorithm {
 public:
-    /// Acquisition functions selecting the next sample point.
+    /**Acquisition functions selecting the next sample point. */
     enum class AcquisitionFunction {
-        ExpectedImprovement,    ///< EI
-        ProbabilityOfImprovement, ///< PI
-        LowerConfidenceBound,   ///< LCB/UCB
-        ThompsonSampling        ///< TS
+        ExpectedImprovement, /**< EI */
+        ProbabilityOfImprovement, /**< PI */
+        LowerConfidenceBound, /**< LCB/UCB */
+        ThompsonSampling /**< TS */
     };
     
-    /// Gaussian-process kernel families.
+    /**Gaussian-process kernel families. */
     enum class KernelType {
-        SquaredExponential,     ///< RBF kernel
-        Matern32,               ///< Matern 3/2
-        Matern52                ///< Matern 5/2
+        SquaredExponential, /**< RBF kernel */
+        Matern32, /**< Matern 3/2 */
+        Matern52 /**< Matern 5/2 */
     };
     
     std::string getName() const override { return "Bayesian Optimization"; }

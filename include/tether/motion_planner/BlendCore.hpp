@@ -76,13 +76,13 @@ inline BlendVec cross(const BlendVec& a, const BlendVec& b) {
 // ============================================================================
 
 struct CornerGeometry {
-    double angleRad = 0;       ///< Angle between directions (0..π)
-    double turnAngleRad = 0;   ///< Signed turn (negative=CW/right, positive=CCW/left)
+    double angleRad = 0; /**< Angle between directions (0..π) */
+    double turnAngleRad = 0; /**< Signed turn (negative=CW/right, positive=CCW/left) */
     bool isCW = false;
-    BlendVec bisector;         ///< Unit bisector pointing into the corner
+    BlendVec bisector; /**< Unit bisector pointing into the corner */
     BlendVec cornerPoint;
-    BlendVec incomingDir;      ///< Unit vector
-    BlendVec outgoingDir;      ///< Unit vector
+    BlendVec incomingDir; /**< Unit vector */
+    BlendVec outgoingDir; /**< Unit vector */
 };
 
 inline CornerGeometry analyzeCorner(const BlendVec& cornerPoint,

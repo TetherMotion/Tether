@@ -35,7 +35,7 @@
 
 namespace FSoE {
 
-/// Returns true when `cmd` is a recognised FSoE command byte.
+/**Returns true when `cmd` is a recognised FSoE command byte. */
 inline bool isValidCommandByte(uint8_t cmd) {
     return cmd == Command::ProcessData ||
            cmd == Command::Reset ||
@@ -45,13 +45,15 @@ inline bool isValidCommandByte(uint8_t cmd) {
            cmd == Command::FailSafeData;
 }
 
-/// Offset returned by findFrameOffset() when no frame matched.
+/**Offset returned by findFrameOffset() when no frame matched. */
 inline constexpr size_t kFrameOffsetNotFound = ~size_t{0};
 
-/// Scan `region` for a wire frame of `frame_len` whose first byte is a
-/// valid FSoE command and whose trailing two bytes (little-endian) equal
-/// `conn_id`.  Returns the first matching offset or kFrameOffsetNotFound.
-/// conn_id == 0 never matches.
+/**
+ * Scan `region` for a wire frame of `frame_len` whose first byte is a
+ * valid FSoE command and whose trailing two bytes (little-endian) equal
+ * `conn_id`.  Returns the first matching offset or kFrameOffsetNotFound.
+ * conn_id == 0 never matches.
+ */
 inline size_t findFrameOffset(const uint8_t* region, size_t region_len,
                               size_t frame_len, uint16_t conn_id) {
     if (conn_id == 0 || frame_len < 3 || frame_len > region_len) {
@@ -67,8 +69,10 @@ inline size_t findFrameOffset(const uint8_t* region, size_t region_len,
     return kFrameOffsetNotFound;
 }
 
-/// Mailbox + wire-window state for one channel.  MaxFrame bounds the
-/// wire frames (FSoE spec max is well below 64 bytes).
+/**
+ * Mailbox + wire-window state for one channel.  MaxFrame bounds the
+ * wire frames (FSoE spec max is well below 64 bytes).
+ */
 template <size_t MaxFrame = 64>
 class EmulatedChannel {
 public:
@@ -76,7 +80,7 @@ public:
 
     // --- PDO-exchange side -------------------------------------------------
 
-    /// Publish the newest master→slave frame for the emulator thread.
+    /**Publish the newest master→slave frame for the emulator thread. */
     void publishMasterFrame(const uint8_t* data, size_t len) {
         std::lock_guard<std::mutex> g(rx_mtx_);
         const size_t n = len < MaxFrame ? len : MaxFrame;
@@ -86,9 +90,11 @@ public:
         ++master_frame_seq_;
     }
 
-    /// Clear the published master frame (e.g. after a session reset).
-    /// Resets both sequence counters so a republished frame can never
-    /// collide with an already-consumed sequence number.
+    /**
+     * Clear the published master frame (e.g. after a session reset).
+     * Resets both sequence counters so a republished frame can never
+     * collide with an already-consumed sequence number.
+     */
     void clearMasterFrame() {
         std::lock_guard<std::mutex> g(rx_mtx_);
         master_frame_valid_ = false;
@@ -96,8 +102,10 @@ public:
         last_consumed_seq_ = 0;
     }
 
-    /// Copy the latest slave→master response into `out`.
-    /// Returns false when nothing has been published yet.
+    /**
+     * Copy the latest slave→master response into `out`.
+     * Returns false when nothing has been published yet.
+     */
     bool readSlaveResponse(uint8_t* out, size_t cap, size_t& len) const {
         std::lock_guard<std::mutex> g(tx_mtx_);
         if (!slave_response_valid_) return false;
@@ -106,10 +114,12 @@ public:
         return true;
     }
 
-    /// Cmd-offset auto-detect: call each cycle while !cmd_locked.load().
-    /// Locks cmd_offset after the same candidate matches on two
-    /// consecutive calls (single PDO-side caller — no atomics needed for
-    /// the bookkeeping).  Returns true on the call that locks.
+    /**
+     * Cmd-offset auto-detect: call each cycle while !cmd_locked.load().
+     * Locks cmd_offset after the same candidate matches on two
+     * consecutive calls (single PDO-side caller — no atomics needed for
+     * the bookkeeping).  Returns true on the call that locks.
+     */
     bool detectCmdOffset(const uint8_t* region, size_t region_len) {
         const size_t p =
             findFrameOffset(region, region_len, cmd_len, conn_id);
@@ -132,8 +142,10 @@ public:
 
     // --- Emulator side -----------------------------------------------------
 
-    /// Fetch the newest master→slave frame if one arrived since the last
-    /// call.  Returns true (frame in `out`, wire length in `len`).
+    /**
+     * Fetch the newest master→slave frame if one arrived since the last
+     * call.  Returns true (frame in `out`, wire length in `len`).
+     */
     bool takeMasterFrame(uint8_t* out, size_t cap, size_t& len) {
         std::lock_guard<std::mutex> g(rx_mtx_);
         if (!master_frame_valid_ || master_frame_seq_ == last_consumed_seq_) {
@@ -145,7 +157,7 @@ public:
         return true;
     }
 
-    /// Publish a new slave→master response (from prepareTxFrame()).
+    /**Publish a new slave→master response (from prepareTxFrame()). */
     void publishSlaveResponse(const uint8_t* data, size_t len) {
         std::lock_guard<std::mutex> g(tx_mtx_);
         const size_t n = len < MaxFrame ? len : MaxFrame;
@@ -154,24 +166,26 @@ public:
         slave_response_valid_ = true;
     }
 
-    /// Result of one tick().
+    /**Result of one tick(). */
     struct TickResult {
-        bool new_frame = false;    ///< a fresh master frame was processed
-        uint8_t master_cmd = 0;    ///< command byte of that frame
-        bool process_ok = true;    ///< processRxFrame() result
-        size_t frame_len = 0;      ///< processed wire length (0 on invalid cmd)
-        size_t wire_len = 0;       ///< raw received wire length
-        uint8_t master_frame[MaxFrame] = {};  ///< copy of that frame
+        bool new_frame = false; /**< a fresh master frame was processed */
+        uint8_t master_cmd = 0; /**< command byte of that frame */
+        bool process_ok = true; /**< processRxFrame() result */
+        size_t frame_len = 0; /**< processed wire length (0 on invalid cmd) */
+        size_t wire_len = 0; /**< raw received wire length */
+        uint8_t master_frame[MaxFrame] = {}; /**< copy of that frame */
     };
 
-    /// One emulator tick: consume the newest master frame (if any) through
-    /// slave.processRxFrame(), advance slave.update(time_ms), run `sync`
-    /// (e.g. emulator->synchronizeCommandAndStatus()), then prepareTxFrame()
-    /// and publish the slave→master response.
-    ///
-    /// On a new frame with an invalid command byte the frame is NOT fed to
-    /// the slave (process_ok=false, frame_len=0) — matching the behaviour
-    /// the callers implemented by hand.
+    /**
+     * One emulator tick: consume the newest master frame (if any) through
+     * slave.processRxFrame(), advance slave.update(time_ms), run `sync`
+     * (e.g. emulator->synchronizeCommandAndStatus()), then prepareTxFrame()
+     * and publish the slave→master response.
+     *
+     * On a new frame with an invalid command byte the frame is NOT fed to
+     * the slave (process_ok=false, frame_len=0) — matching the behaviour
+     * the callers implemented by hand.
+     */
     TickResult tick(FSoESlave& slave, uint64_t time_ms,
                     const std::function<void()>& sync = {}) {
         TickResult r;
@@ -201,15 +215,15 @@ public:
     // --- Wire-window state ---------------------------------------------------
     // Atomics: written by the PDO-exchange side / FNI setup, read by both.
 
-    std::atomic<uint16_t> cmd_offset{0};   ///< cmd frame offset in RX window
+    std::atomic<uint16_t> cmd_offset{0}; /**< cmd frame offset in RX window */
     std::atomic<bool>     cmd_locked{false};
-    std::atomic<uint16_t> resp_offset{0};  ///< response offset in TX window
+    std::atomic<uint16_t> resp_offset{0}; /**< response offset in TX window */
     std::atomic<bool>     resp_locked{false};
 
-    size_t cmd_len = 0;      ///< master→slave wire length
-    size_t resp_len = 0;     ///< slave→master wire length
-    uint16_t conn_id = 0;    ///< FSoE connection ID (drives auto-detect)
-    size_t index = 0;        ///< channel index (for logging)
+    size_t cmd_len = 0; /**< master→slave wire length */
+    size_t resp_len = 0; /**< slave→master wire length */
+    uint16_t conn_id = 0; /**< FSoE connection ID (drives auto-detect) */
+    size_t index = 0; /**< channel index (for logging) */
 
 private:
     // master→slave mailbox (PDO thread writes, emulator thread reads)

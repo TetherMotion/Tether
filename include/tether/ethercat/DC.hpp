@@ -33,45 +33,49 @@ namespace DC {
  * @brief DC synchronization state for a single slave
  */
 struct SlaveTimeInfo {
-    uint64_t system_time_ns;        ///< Slave's DC system time (64-bit)
-    uint64_t receive_time_ns;       ///< Port 0 receive time for delay measurement
-    int64_t  offset_to_master_ns;   ///< Calculated offset from master reference
-    uint32_t propagation_delay_ns;  ///< Propagation delay to this slave
-    uint64_t sync0_start_time_ns;   ///< SYNC0 start time (from slave if fixed)
-    bool     dc_supported;          ///< Slave supports DC (has 64-bit local time)
-    bool     dc_active;             ///< DC synchronization is actively running
+    uint64_t system_time_ns; /**< Slave's DC system time (64-bit) */
+    uint64_t receive_time_ns; /**< Port 0 receive time for delay measurement */
+    int64_t  offset_to_master_ns; /**< Calculated offset from master reference */
+    uint32_t propagation_delay_ns; /**< Propagation delay to this slave */
+    uint64_t sync0_start_time_ns; /**< SYNC0 start time (from slave if fixed) */
+    bool     dc_supported; /**< Slave supports DC (has 64-bit local time) */
+    bool     dc_active; /**< DC synchronization is actively running */
 };
 
 /**
  * @brief DC loop statistics
  */
 struct DCLoopStats {
-    uint64_t cycle_count;           ///< Total cycles executed
-    uint64_t sync_count;            ///< Number of synchronization frames sent
-    uint64_t pdo_error_count;       ///< Number of PDO exchange errors
-    uint32_t max_jitter_us;         ///< Maximum observed jitter in microseconds
-    uint32_t avg_jitter_us;         ///< Average jitter in microseconds
-    int64_t  last_drift_ns;         ///< Last measured clock drift in nanoseconds
-    uint64_t last_master_time_ns;   ///< Last master time used for sync
+    uint64_t cycle_count; /**< Total cycles executed */
+    uint64_t sync_count; /**< Number of synchronization frames sent */
+    uint64_t pdo_error_count; /**< Number of PDO exchange errors */
+    uint32_t max_jitter_us; /**< Maximum observed jitter in microseconds */
+    uint32_t avg_jitter_us; /**< Average jitter in microseconds */
+    int64_t  last_drift_ns; /**< Last measured clock drift in nanoseconds */
+    uint64_t last_master_time_ns; /**< Last master time used for sync */
 };
 
 /**
  * @brief DC synchronization configuration
  */
 struct DCConfig {
-    uint32_t cycle_period_us;       ///< Realtime loop period in microseconds (default 1000 = 1kHz)
-    uint32_t sync_interval_cycles;  ///< Number of cycles between full DC sync (default 10)
-    uint32_t sync0_cycle_time_ns;   ///< SYNC0 cycle time in nanoseconds (0 = disabled)
-    uint32_t sync1_cycle_time_ns;   ///< SYNC1 cycle time in nanoseconds (0 = disabled)
-    int32_t  sync0_shift_ns;        ///< SYNC0 shift time in nanoseconds
-    bool     enable_sync0;          ///< Enable SYNC0 signal generation
-    bool     enable_sync1;          ///< Enable SYNC1 signal generation
-    /// Slave indices that should NOT receive SYNC0/SYNC1 activation.
-    /// All other DC-capable slaves get SYNC signals as normal.
-    /// Empty by default (all slaves enabled).
+    uint32_t cycle_period_us; /**< Realtime loop period in microseconds (default 1000 = 1kHz) */
+    uint32_t sync_interval_cycles; /**< Number of cycles between full DC sync (default 10) */
+    uint32_t sync0_cycle_time_ns; /**< SYNC0 cycle time in nanoseconds (0 = disabled) */
+    uint32_t sync1_cycle_time_ns; /**< SYNC1 cycle time in nanoseconds (0 = disabled) */
+    int32_t  sync0_shift_ns; /**< SYNC0 shift time in nanoseconds */
+    bool     enable_sync0; /**< Enable SYNC0 signal generation */
+    bool     enable_sync1; /**< Enable SYNC1 signal generation */
+    /**
+     * Slave indices that should NOT receive SYNC0/SYNC1 activation.
+     * All other DC-capable slaves get SYNC signals as normal.
+     * Empty by default (all slaves enabled).
+     */
     std::vector<uint16_t> sync_disabled_slaves;
-    /// CPU affinity for the DC realtime loop's threads (-1 = unpinned).
-    /// Typically filled from a Tether::Platform::CpuIsolation claim.
+    /**
+     * CPU affinity for the DC realtime loop's threads (-1 = unpinned).
+     * Typically filled from a Tether::Platform::CpuIsolation claim.
+     */
     int pdo_cpu_affinity = -1;
     int dc_cpu_affinity  = -1;
 
@@ -93,12 +97,12 @@ struct DCConfig {
  * @brief DC synchronization state machine states
  */
 enum class DCState : uint8_t {
-    Disabled = 0,       ///< DC not initialized
-    Initializing,       ///< Reading slave DC capabilities
-    PropagationCalc,    ///< Calculating propagation delays
-    DriftCompensation,  ///< Initial drift compensation
-    Running,            ///< Normal operation with periodic sync
-    Error               ///< Error state, needs reset
+    Disabled = 0, /**< DC not initialized */
+    Initializing, /**< Reading slave DC capabilities */
+    PropagationCalc, /**< Calculating propagation delays */
+    DriftCompensation, /**< Initial drift compensation */
+    Running, /**< Normal operation with periodic sync */
+    Error /**< Error state, needs reset */
 };
 
 /**

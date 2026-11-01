@@ -25,35 +25,43 @@ namespace HAL {
  * @brief Ethernet interface configuration
  */
 struct EthernetConfig {
-    const char* interfaceName = nullptr;  ///< Interface name ("eth0", "enp0s3", etc.)
-    MacAddress macAddress;                 ///< MAC address (zero = use default)
-    bool promiscuous = false;              ///< Enable promiscuous mode
-    bool enableVlan = false;               ///< Enable 802.1q VLAN processing
-    uint16_t vlanId = 0;                   ///< Default VLAN ID (1-4094)
-    uint8_t vlanPriority = 0;              ///< Default VLAN priority (0-7)
-    size_t rxBufferSize = 32;              ///< Number of RX buffers
-    size_t txBufferSize = 16;              ///< Number of TX buffers
-    uint16_t ethertypeFilter = 0;          ///< Filter by EtherType (0 = all)
-    /// Poll kernel NIC error counters (sysfs) on a low-priority thread and
-    /// log significant error deltas.  Zero per-frame cost; opt-in only —
-    /// on filtered/ancillary-delivery setups the counters include packets
-    /// the kernel deliberately dropped or stripped, so the deltas are
-    /// diagnostic noise unless actively debugging.
+    const char* interfaceName = nullptr; /**< Interface name ("eth0", "enp0s3", etc.) */
+    MacAddress macAddress; /**< MAC address (zero = use default) */
+    bool promiscuous = false; /**< Enable promiscuous mode */
+    bool enableVlan = false; /**< Enable 802.1q VLAN processing */
+    uint16_t vlanId = 0; /**< Default VLAN ID (1-4094) */
+    uint8_t vlanPriority = 0; /**< Default VLAN priority (0-7) */
+    size_t rxBufferSize = 32; /**< Number of RX buffers */
+    size_t txBufferSize = 16; /**< Number of TX buffers */
+    uint16_t ethertypeFilter = 0; /**< Filter by EtherType (0 = all) */
+    /**
+     * Poll kernel NIC error counters (sysfs) on a low-priority thread and
+     * log significant error deltas.  Zero per-frame cost; opt-in only —
+     * on filtered/ancillary-delivery setups the counters include packets
+     * the kernel deliberately dropped or stripped, so the deltas are
+     * diagnostic noise unless actively debugging.
+     */
     bool nicErrorMonitor = false;
-    /// Largest frame (excluding FCS) the interface will accept/carry.
-    /// 0 → standard kMaxFrameSize (1514).  Raise for jumbo links; the NIC
-    /// MTU must be raised separately (e.g. `ip link set mtu 9000`).
+    /**
+     * Largest frame (excluding FCS) the interface will accept/carry.
+     * 0 → standard kMaxFrameSize (1514).  Raise for jumbo links; the NIC
+     * MTU must be raised separately (e.g. `ip link set mtu 9000`).
+     */
     uint32_t maxFrameSize = 0;
-    /// Probe the NIC for latency-hostile settings at init (EEE LPI, RX
-    /// interrupt coalescing) via ethtool ioctls — the ethtool binary is
-    /// NOT required.  One-time, zero per-frame cost, never fatal:
-    /// drivers without the ops are skipped silently.
+    /**
+     * Probe the NIC for latency-hostile settings at init (EEE LPI, RX
+     * interrupt coalescing) via ethtool ioctls — the ethtool binary is
+     * NOT required.  One-time, zero per-frame cost, never fatal:
+     * drivers without the ops are skipped silently.
+     */
     bool nicLatencyCheck = true;
-    /// When the latency check finds Energy-Efficient Ethernet enabled,
-    /// attempt to turn it off (ETHTOOL_SEEE — needs CAP_NET_ADMIN;
-    /// failure degrades to a warning suggesting the ethtool command).
-    /// EEE's LPI exit latency is pure jitter on a dedicated motion bus,
-    /// so disabling is the right default here.
+    /**
+     * When the latency check finds Energy-Efficient Ethernet enabled,
+     * attempt to turn it off (ETHTOOL_SEEE — needs CAP_NET_ADMIN;
+     * failure degrades to a warning suggesting the ethtool command).
+     * EEE's LPI exit latency is pure jitter on a dedicated motion bus,
+     * so disabling is the right default here.
+     */
     bool nicDisableEee = true;
 };
 
@@ -61,46 +69,48 @@ struct EthernetConfig {
  * @brief Ethernet link status
  */
 struct LinkStatus {
-    bool up = false;                ///< Link is up
-    uint32_t speedMbps = 0;         ///< Link speed in Mbps
-    bool fullDuplex = false;        ///< Full duplex mode
-    bool autoneg = false;           ///< Autonegotiation enabled
+    bool up = false; /**< Link is up */
+    uint32_t speedMbps = 0; /**< Link speed in Mbps */
+    bool fullDuplex = false; /**< Full duplex mode */
+    bool autoneg = false; /**< Autonegotiation enabled */
 };
 
 /**
  * @brief Ethernet statistics
  */
 struct EthernetStats {
-    uint64_t txFrames = 0;      ///< Frames transmitted
-    uint64_t txBytes = 0;       ///< Bytes transmitted
-    uint64_t txErrors = 0;      ///< Transmit errors
-    uint64_t txDropped = 0;     ///< Frames dropped (buffer full)
+    uint64_t txFrames = 0; /**< Frames transmitted */
+    uint64_t txBytes = 0; /**< Bytes transmitted */
+    uint64_t txErrors = 0; /**< Transmit errors */
+    uint64_t txDropped = 0; /**< Frames dropped (buffer full) */
     
-    uint64_t rxFrames = 0;      ///< Frames received
-    uint64_t rxBytes = 0;       ///< Bytes received
-    uint64_t rxErrors = 0;      ///< Receive errors
-    uint64_t rxDropped = 0;     ///< Frames dropped (buffer full)
-    uint64_t rxFiltered = 0;    ///< Frames filtered by EtherType
+    uint64_t rxFrames = 0; /**< Frames received */
+    uint64_t rxBytes = 0; /**< Bytes received */
+    uint64_t rxErrors = 0; /**< Receive errors */
+    uint64_t rxDropped = 0; /**< Frames dropped (buffer full) */
+    uint64_t rxFiltered = 0; /**< Frames filtered by EtherType */
     
-    uint64_t collisions = 0;    ///< Collision count (half-duplex)
+    uint64_t collisions = 0; /**< Collision count (half-duplex) */
 };
 
 /**
  * @brief Received frame metadata
  */
 struct RxFrameInfo {
-    Timestamp timestamp = 0;           ///< Receive timestamp (microseconds)
-    uint16_t vlanId = 0;               ///< VLAN ID (valid when vlanTagPresent)
-    uint8_t vlanPriority = 0;          ///< VLAN priority
-    /// VLAN tag was present on the wire.  Note the tag bytes may NOT be
-    /// in the frame buffer: the kernel strips inbound tags before packet
-    /// sockets see them (rx-vlan-offload / generic untag), and the tag is
-    /// then reported only via this metadata (PACKET_AUXDATA internally).
-    /// When vlanTagPresent is set but data[12..13] is not 0x8100, the tag
-    /// was stripped and the frame data starts with the inner EtherType.
+    Timestamp timestamp = 0; /**< Receive timestamp (microseconds) */
+    uint16_t vlanId = 0; /**< VLAN ID (valid when vlanTagPresent) */
+    uint8_t vlanPriority = 0; /**< VLAN priority */
+    /**
+     * VLAN tag was present on the wire.  Note the tag bytes may NOT be
+     * in the frame buffer: the kernel strips inbound tags before packet
+     * sockets see them (rx-vlan-offload / generic untag), and the tag is
+     * then reported only via this metadata (PACKET_AUXDATA internally).
+     * When vlanTagPresent is set but data[12..13] is not 0x8100, the tag
+     * was stripped and the frame data starts with the inner EtherType.
+     */
     bool vlanTagPresent = false;
-    bool checksumValid = false;        ///< Hardware checksum validated
-    uint32_t hwTimestampNs = 0;        ///< Hardware timestamp (if available)
+    bool checksumValid = false; /**< Hardware checksum validated */
+    uint32_t hwTimestampNs = 0; /**< Hardware timestamp (if available) */
 };
 
 // ============================================================================
@@ -411,13 +421,13 @@ private:
  * @brief Traffic filter rule
  */
 struct TrafficRule {
-    uint16_t ethertype = 0;       ///< Match EtherType (0 = don't match)
-    MacAddress dstMac;            ///< Match destination MAC
-    bool matchDstMac = false;     ///< Enable MAC matching
-    uint16_t vlanId = 0;          ///< Match VLAN ID (0 = don't match)
-    int priority = 0;             ///< Rule priority (higher = first)
-    RxCallback callback;          ///< Callback for matched frames
-    void* userData = nullptr;     ///< User data for callback
+    uint16_t ethertype = 0; /**< Match EtherType (0 = don't match) */
+    MacAddress dstMac; /**< Match destination MAC */
+    bool matchDstMac = false; /**< Enable MAC matching */
+    uint16_t vlanId = 0; /**< Match VLAN ID (0 = don't match) */
+    int priority = 0; /**< Rule priority (higher = first) */
+    RxCallback callback; /**< Callback for matched frames */
+    void* userData = nullptr; /**< User data for callback */
 };
 
 /**

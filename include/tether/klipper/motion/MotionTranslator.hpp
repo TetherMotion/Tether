@@ -54,86 +54,90 @@
 
 namespace tether::klipper::motion {
 
-/// @brief Per-axis translation config.
+/**@brief Per-axis translation config. */
 struct AxisConfig {
-    /// Steps per millimeter for this axis.
+    /**Steps per millimeter for this axis. */
     double stepsPerMm = 80.0;
-    /// Direction invert (true = reverse direction).
+    /**Direction invert (true = reverse direction). */
     bool invertDirection = false;
 };
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-/// @brief Compensation model selector. `Linear` reproduces classic Klipper PA.
+/**@brief Compensation model selector. `Linear` reproduces classic Klipper PA. */
 enum class ExtrusionCompensationModel {
-    Linear,    ///< Classic Newtonian PA: δe = PA · v_e (default)
-    PowerLaw,  ///< Power-law: δe = K_base · (v_e·A_f)^n
-    CrossWlf   ///< Cross-WLF LUT: δe = (βV_m/A_f) · P_LUT(Q, T)
+    Linear, /**< Classic Newtonian PA: δe = PA · v_e (default) */
+    PowerLaw, /**< Power-law: δe = K_base · (v_e·A_f)^n */
+    CrossWlf /**< Cross-WLF LUT: δe = (βV_m/A_f) · P_LUT(Q, T) */
 };
 
-/// @brief Pressure advance / extrusion-compensation configuration.
-///
-/// This extends the classic Klipper PA with non-Newtonian models. The default
-/// model is `Linear` with `pressureAdvance = 0`, which reproduces the existing
-/// behavior exactly (zero compensation). PA is applied only when `enabled`
-/// is true AND the model's effective gain is non-zero.
-///
-/// For `PowerLaw`:
-///   - `powerLawBaseGain` = K_base = βV_m·C_n/A_f [filament-mm / (mm³/s)^n]
-///   - `flowIndex` = n (1 = Newtonian limit → equivalent to Linear)
-/// For `CrossWlf`:
-///   - `crossWlfCompressibilityOverArea` = βV_m/A_f [mm/Pa]
-///   - `lut` must be set to a built {Q,T}→P table
-///   - `meltTempC` is the melt-temperature estimate used for the LUT lookup
-///     (typically fed from a MeltZoneThermalObserver at runtime).
+/**
+ * @brief Pressure advance / extrusion-compensation configuration.
+ *
+ * This extends the classic Klipper PA with non-Newtonian models. The default
+ * model is `Linear` with `pressureAdvance = 0`, which reproduces the existing
+ * behavior exactly (zero compensation). PA is applied only when `enabled`
+ * is true AND the model's effective gain is non-zero.
+ *
+ * For `PowerLaw`:
+ *   - `powerLawBaseGain` = K_base = βV_m·C_n/A_f [filament-mm / (mm³/s)^n]
+ *   - `flowIndex` = n (1 = Newtonian limit → equivalent to Linear)
+ * For `CrossWlf`:
+ *   - `crossWlfCompressibilityOverArea` = βV_m/A_f [mm/Pa]
+ *   - `lut` must be set to a built {Q,T}→P table
+ *   - `meltTempC` is the melt-temperature estimate used for the LUT lookup
+ *     (typically fed from a MeltZoneThermalObserver at runtime).
+ */
 struct PressureAdvanceConfig {
-    bool enabled = false;            ///< Runtime enable/disable (default: off)
-    double pressureAdvance = 0.0;    ///< Linear PA amount in seconds
-    double smoothTime = 0.0;         ///< Smoothing window in seconds (0 = no smoothing)
-    size_t extruderAxis = 3;         ///< Axis index of the extruder (typically 3 = E)
+    bool enabled = false; /**< Runtime enable/disable (default: off) */
+    double pressureAdvance = 0.0; /**< Linear PA amount in seconds */
+    double smoothTime = 0.0; /**< Smoothing window in seconds (0 = no smoothing) */
+    size_t extruderAxis = 3; /**< Axis index of the extruder (typically 3 = E) */
 
-    /// @brief Compensation model (default Linear = classic PA).
+    /**@brief Compensation model (default Linear = classic PA). */
     ExtrusionCompensationModel model = ExtrusionCompensationModel::Linear;
 
-    /// @brief Filament diameter [mm] (used for PowerLaw/CrossWlf flow).
+    /**@brief Filament diameter [mm] (used for PowerLaw/CrossWlf flow). */
     double filamentDiameterMm = 1.75;
 
     // --- PowerLaw model parameters ---
-    /// @brief K_base for the power-law model [filament-mm / (mm³/s)^n].
+    /**@brief K_base for the power-law model [filament-mm / (mm³/s)^n]. */
     double powerLawBaseGain = 0.0;
-    /// @brief Flow index n (1 = Newtonian limit).
+    /**@brief Flow index n (1 = Newtonian limit). */
     double flowIndex = 1.0;
-    /// @brief Maximum absolute compensation [mm] (safety clamp).
+    /**@brief Maximum absolute compensation [mm] (safety clamp). */
     double maxCompensation = 0.5;
 
     // --- CrossWlf model parameters ---
-    /// @brief βV_m/A_f for the Cross-WLF model [mm/Pa].
+    /**@brief βV_m/A_f for the Cross-WLF model [mm/Pa]. */
     double crossWlfCompressibilityOverArea = 0.0;
-    /// @brief Melt-temperature estimate [°C] for the LUT lookup.
+    /**@brief Melt-temperature estimate [°C] for the LUT lookup. */
     double meltTempC = 210.0;
-    /// @brief Shared {Q,T}→P lookup table (must be built before use).
+    /**@brief Shared {Q,T}→P lookup table (must be built before use). */
     std::shared_ptr<tether::control::extrusion::PressureFlowLut> lut;
 };
 #endif
 
-/// @brief A translated step sequence for one axis.
+/**@brief A translated step sequence for one axis. */
 struct AxisStepSequence {
     uint8_t oid = 0;
     uint32_t startClock = 0;
     std::vector<objects::StepCommand> steps;
 };
 
-/// @brief Safely look up an axis step sequence by OID in a translation result.
-///
-/// `MotionTranslator::translate()` skips axes that produce no steps, so the
-/// returned vector's indices do NOT correspond to axis numbers.  Direct
-/// indexing (e.g. `seqs[3]`) is an unchecked out-of-bounds hazard and has
-/// caused ASAN heap-use-after-free failures.  Use this helper instead — it
-/// performs an OID-based lookup and returns nullptr when the axis is absent,
-/// forcing the caller to handle the not-found case explicitly.
-///
-/// @param seqs The translation result (from `MotionTranslator::translate()`).
-/// @param oid  The axis OID to find.
-/// @return Pointer to the matching sequence, or nullptr if not found.
+/**
+ * @brief Safely look up an axis step sequence by OID in a translation result.
+ *
+ * `MotionTranslator::translate()` skips axes that produce no steps, so the
+ * returned vector's indices do NOT correspond to axis numbers.  Direct
+ * indexing (e.g. `seqs[3]`) is an unchecked out-of-bounds hazard and has
+ * caused ASAN heap-use-after-free failures.  Use this helper instead — it
+ * performs an OID-based lookup and returns nullptr when the axis is absent,
+ * forcing the caller to handle the not-found case explicitly.
+ *
+ * @param seqs The translation result (from `MotionTranslator::translate()`).
+ * @param oid  The axis OID to find.
+ * @return Pointer to the matching sequence, or nullptr if not found.
+ */
 inline const AxisStepSequence* findAxisByOid(
     std::span<const AxisStepSequence> seqs, uint8_t oid) noexcept {
     for (const auto& seq : seqs) {
@@ -157,7 +161,7 @@ using KinematicsTransform = ::tether::kinematics::KinematicsTransform;
 template<size_t Dim, typename T = double>
 class MotionTranslator {
 public:
-    /// @brief Construct with per-axis configs and OIDs.
+    /**@brief Construct with per-axis configs and OIDs. */
     MotionTranslator(std::array<AxisConfig, Dim> axisConfigs,
                       std::array<uint8_t, Dim> axisOids)
         : axisConfigs_(std::move(axisConfigs)), axisOids_(std::move(axisOids)) {}
@@ -177,23 +181,23 @@ public:
         double sampleIntervalSec,
         uint32_t startClock) const;
 
-    /// @brief Set the source label for emitted blocks (traceability).
+    /**@brief Set the source label for emitted blocks (traceability). */
     void setSourceLabel(std::string label) { sourceLabel_ = std::move(label); }
 
-    /// @brief Get the source label.
+    /**@brief Get the source label. */
     const std::string& sourceLabel() const { return sourceLabel_; }
 
-    /// @brief Set the kinematics transform.
+    /**@brief Set the kinematics transform. */
     void setKinematicsTransform(const KinematicsTransform& kt) { kinematics_ = kt; }
 
-    /// @brief Get the kinematics transform.
+    /**@brief Get the kinematics transform. */
     const KinematicsTransform& kinematicsTransform() const { return kinematics_; }
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-    /// @brief Set pressure advance configuration for extruder step generation.
+    /**@brief Set pressure advance configuration for extruder step generation. */
     void setPressureAdvanceConfig(const PressureAdvanceConfig& pa) { paConfig_ = pa; }
 
-    /// @brief Get the current pressure advance configuration.
+    /**@brief Get the current pressure advance configuration. */
     const PressureAdvanceConfig& pressureAdvanceConfig() const { return paConfig_; }
 #endif
 

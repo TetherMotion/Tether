@@ -33,24 +33,28 @@ class ISpiDriver {
 public:
     virtual ~ISpiDriver() = default;
 
-    /// Open the SPI device. Returns true on success.
-    /// @param device Device path (e.g. "/dev/spidev0.0").
-    /// @param mode SPI mode (0-3).
-    /// @param speedHz Clock speed in Hz.
-    /// @param bitsPerWord Bits per word (usually 8).
+    /**
+     * Open the SPI device. Returns true on success.
+     * @param device Device path (e.g. "/dev/spidev0.0").
+     * @param mode SPI mode (0-3).
+     * @param speedHz Clock speed in Hz.
+     * @param bitsPerWord Bits per word (usually 8).
+     */
     virtual bool open(const char* device, uint8_t mode, uint32_t speedHz,
                       uint8_t bitsPerWord = 8) = 0;
 
-    /// Close the SPI device.
+    /**Close the SPI device. */
     virtual void close() = 0;
 
-    /// Full-duplex transfer: writes txLen bytes and reads back the same count.
-    /// @param tx Data to send.
-    /// @param rx Buffer for received data (must be at least tx.size() bytes).
-    /// @return Number of bytes transferred, or 0 on error.
+    /**
+     * Full-duplex transfer: writes txLen bytes and reads back the same count.
+     * @param tx Data to send.
+     * @param rx Buffer for received data (must be at least tx.size() bytes).
+     * @return Number of bytes transferred, or 0 on error.
+     */
     virtual size_t transfer(std::span<const uint8_t> tx, uint8_t* rx) = 0;
 
-    /// Convenience: full-duplex transfer returning a vector.
+    /**Convenience: full-duplex transfer returning a vector. */
     std::vector<uint8_t> transfer(std::span<const uint8_t> tx) {
         std::vector<uint8_t> rx(tx.size());
         size_t n = transfer(tx, rx.data());
@@ -58,7 +62,7 @@ public:
         return rx;
     }
 
-    /// Returns true if the device is open.
+    /**Returns true if the device is open. */
     virtual bool isOpen() const = 0;
 };
 

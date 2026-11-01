@@ -160,8 +160,10 @@ inline constexpr DeviceIdentity ELX2008{0x00000002, 0x970B7B89, 8,  "ELX2008"};
 inline constexpr DeviceIdentity ELX2792{0x00000002, 0x970BAC89, 2,  "ELX2792"};
 inline constexpr DeviceIdentity EPX2004{0x00000002, 0x98096349, 4,  "EPX2004"};
 
-/// Every known packed-output terminal — the default detection set used by
-/// MultiOutputTerminal::detect().
+/**
+ * Every known packed-output terminal — the default detection set used by
+ * MultiOutputTerminal::detect().
+ */
 inline constexpr std::array kOutputTerminals{
     EL2002, EL2004, EL2008, EL2022, EL2024, EL2042, EL2084, EL2088,
     EL2124, EL2202, EL2262, EL2407, EL2602, EL2612, EL2622, EL2624,
@@ -184,7 +186,7 @@ inline constexpr std::array kOutputTerminals{
 
 class OutputTerminal : public IOutputTerminal {
 public:
-    /// Maximum output bits supported per device (one 64-bit field).
+    /**Maximum output bits supported per device (one 64-bit field). */
     static constexpr size_t kMaxBits = 64;
 
     // -- Construction ----------------------------------------------------------
@@ -221,7 +223,7 @@ public:
 
     // -- Factories ---------------------------------------------------------------
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
@@ -234,7 +236,7 @@ public:
     static Result<OutputTerminal> findFirst(Master& master,
                                           const DeviceIdentity& identity);
 
-    /// Like findFirst(master, identity) but reuses an existing scan.
+    /**Like findFirst(master, identity) but reuses an existing scan. */
     static Result<OutputTerminal> findFirst(
         Master& master, const DeviceIdentity& identity,
         std::span<const DiscoveredSlave> scan);
@@ -288,52 +290,58 @@ public:
 
     // -- Convenience ------------------------------------------------------------
 
-    /// Set exactly one output bit on, all others off.
+    /**Set exactly one output bit on, all others off. */
     void setOnly(size_t bit) {
         setBits(bit < num_outputs_ ? (uint64_t{1} << bit) : 0);
     }
 
-    /// All output bits on.
+    /**All output bits on. */
     void allOn() { setBits(mask()); }
 
     // -- Status -------------------------------------------------------------------
 
-    /// True after configure()/mapLogicalAndEnterSafeOp() succeeded.
+    /**True after configure()/mapLogicalAndEnterSafeOp() succeeded. */
     bool configured() const { return configured_; }
 
-    /// Live-read the application-layer (ESM) state register.
+    /**Live-read the application-layer (ESM) state register. */
     SlaveState alState();
 
-    /// True when the terminal is in OP.
+    /**True when the terminal is in OP. */
     bool operational() { return alState() == SlaveState::OP; }
 
-    /// AL status code captured by the last failed state transition (0 = none).
+    /**AL status code captured by the last failed state transition (0 = none). */
     uint16_t lastAlStatusCode() const { return last_al_status_code_; }
 
-    /// The declared/resolved device identity.
+    /**The declared/resolved device identity. */
     const DeviceIdentity& identity() const { return identity_; }
 
-    /// Logical address assigned to this device's output field (chained
-    /// operation only; 0 when unmapped).
+    /**
+     * Logical address assigned to this device's output field (chained
+     * operation only; 0 when unmapped).
+     */
     uint32_t logicalAddress() const { return logical_addr_; }
 
 private:
-    /// Poll AL status until `target` or timeout; honours master cancellation.
+    /**Poll AL status until `target` or timeout; honours master cancellation. */
     bool waitAlState(SlaveState target, int timeout_ms);
 
-    /// Resolve the process-output SM (channel, address, length, control)
-    /// and the output bit width from the bound discovery data / SII.
+    /**
+     * Resolve the process-output SM (channel, address, length, control)
+     * and the output bit width from the bound discovery data / SII.
+     */
     void resolveOutputSm();
 
-    /// Shared bring-up: SII, identity check, output SM registers, PRE-OP,
-    /// PDO registration in the given address mode, finalizeMapping().
-    /// Ends before SAFE-OP so the chain can interpose FMMU programming.
+    /**
+     * Shared bring-up: SII, identity check, output SM registers, PRE-OP,
+     * PDO registration in the given address mode, finalizeMapping().
+     * Ends before SAFE-OP so the chain can interpose FMMU programming.
+     */
     Result<> prepare(PDO::PDOAddressMode mode);
 
-    /// assumePDOAlreadyConfigured() + SAFE-OP transition.
+    /**assumePDOAlreadyConfigured() + SAFE-OP transition. */
     Result<> enterSafeOp();
 
-    /// Bit mask covering num_outputs_ bits.
+    /**Bit mask covering num_outputs_ bits. */
     uint64_t mask() const {
         return num_outputs_ >= kMaxBits ? ~uint64_t{0}
                                         : (uint64_t{1} << num_outputs_) - 1;
@@ -344,14 +352,16 @@ private:
     DeviceIdentity                 identity_;
     std::optional<DiscoveredSlave> info_;
 
-    /// Registered PDO buffer.  Heap-allocated so the pointer stays valid
-    /// when the driver object is moved (e.g. returned from findFirst()).
-    /// Bit N maps to output N (little-endian byte order).
-    /// PDO state word — points at the mapping entry's storage after
-    /// prepare(), or at *state_local_ before registration (Q1).
-    /// Same lifetime rule as TerminalBase::out_buf_: entry removal
-    /// invalidates it.
-    /// unique_ptr keeps the terminal movable.
+    /**
+     * Registered PDO buffer.  Heap-allocated so the pointer stays valid
+     * when the driver object is moved (e.g. returned from findFirst()).
+     * Bit N maps to output N (little-endian byte order).
+     * PDO state word — points at the mapping entry's storage after
+     * prepare(), or at *state_local_ before registration (Q1).
+     * Same lifetime rule as TerminalBase::out_buf_: entry removal
+     * invalidates it.
+     * unique_ptr keeps the terminal movable.
+     */
     std::unique_ptr<std::atomic<uint64_t>> state_local_ =
         std::make_unique<std::atomic<uint64_t>>(0);
     std::atomic<uint64_t>* state_ = state_local_.get();

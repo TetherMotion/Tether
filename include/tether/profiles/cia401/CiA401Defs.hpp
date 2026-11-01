@@ -482,11 +482,11 @@ inline const char* getModuleTypeName(ModuleType type) {
  * @brief Configuration for a digital input channel block
  */
 struct DigitalInputConfig {
-    uint8_t polarity;      ///< Polarity inversion mask (1 = inverted)
-    uint8_t filter;        ///< Filter constant (see FilterConstant namespace)
-    uint8_t int_any;       ///< Interrupt mask for any change
-    uint8_t int_l2h;       ///< Interrupt mask for low-to-high
-    uint8_t int_h2l;       ///< Interrupt mask for high-to-low
+    uint8_t polarity; /**< Polarity inversion mask (1 = inverted) */
+    uint8_t filter; /**< Filter constant (see FilterConstant namespace) */
+    uint8_t int_any; /**< Interrupt mask for any change */
+    uint8_t int_l2h; /**< Interrupt mask for low-to-high */
+    uint8_t int_h2l; /**< Interrupt mask for high-to-low */
     
     DigitalInputConfig() : polarity(0), filter(0), int_any(0), int_l2h(0), int_h2l(0) {}
 };
@@ -495,10 +495,10 @@ struct DigitalInputConfig {
  * @brief Configuration for a digital output channel block
  */
 struct DigitalOutputConfig {
-    uint8_t polarity;      ///< Polarity inversion mask (1 = inverted)
-    uint8_t error_mode;    ///< Error mode (see ErrorMode namespace)
-    uint8_t error_value;   ///< Value to output on error
-    uint8_t filter_pwm;    ///< Filter or PWM setting
+    uint8_t polarity; /**< Polarity inversion mask (1 = inverted) */
+    uint8_t error_mode; /**< Error mode (see ErrorMode namespace) */
+    uint8_t error_value; /**< Value to output on error */
+    uint8_t filter_pwm; /**< Filter or PWM setting */
     
     DigitalOutputConfig() : polarity(0), error_mode(0), error_value(0), filter_pwm(0) {}
 };
@@ -511,13 +511,13 @@ struct DigitalOutputConfig {
  * @brief Configuration for an analog input channel
  */
 struct AnalogInputConfig {
-    int32_t offset;        ///< Offset value for scaling
-    int32_t scaling;       ///< Scaling factor (fixed point)
-    uint32_t si_unit;      ///< SI unit code
-    uint8_t trigger;       ///< Interrupt trigger selection
-    int16_t upper_limit;   ///< Upper limit for interrupt
-    int16_t lower_limit;   ///< Lower limit for interrupt
-    int16_t delta;         ///< Delta for interrupt
+    int32_t offset; /**< Offset value for scaling */
+    int32_t scaling; /**< Scaling factor (fixed point) */
+    uint32_t si_unit; /**< SI unit code */
+    uint8_t trigger; /**< Interrupt trigger selection */
+    int16_t upper_limit; /**< Upper limit for interrupt */
+    int16_t lower_limit; /**< Lower limit for interrupt */
+    int16_t delta; /**< Delta for interrupt */
     
     AnalogInputConfig() 
         : offset(0), scaling(0x10000), si_unit(0), trigger(0),
@@ -528,11 +528,11 @@ struct AnalogInputConfig {
  * @brief Configuration for an analog output channel
  */
 struct AnalogOutputConfig {
-    int32_t offset;        ///< Offset value for scaling
-    int32_t scaling;       ///< Scaling factor (fixed point)
-    uint32_t si_unit;      ///< SI unit code
-    uint8_t error_mode;    ///< Error mode
-    int16_t error_value;   ///< Value on communication error
+    int32_t offset; /**< Offset value for scaling */
+    int32_t scaling; /**< Scaling factor (fixed point) */
+    uint32_t si_unit; /**< SI unit code */
+    uint8_t error_mode; /**< Error mode */
+    int16_t error_value; /**< Value on communication error */
     
     AnalogOutputConfig()
         : offset(0), scaling(0x10000), si_unit(0), error_mode(0), error_value(0) {}
@@ -546,58 +546,58 @@ struct AnalogOutputConfig {
  * @brief TxPDO for basic 8-bit digital inputs (up to 4 blocks = 32 inputs)
  */
 struct __attribute__((packed)) TxPDO_DigitalInputs8 {
-    uint8_t inputs[4];     ///< Up to 4 blocks of 8-bit inputs
+    uint8_t inputs[4]; /**< Up to 4 blocks of 8-bit inputs */
 };
 
 /**
  * @brief TxPDO for 16-bit digital inputs (up to 2 blocks = 32 inputs)
  */
 struct __attribute__((packed)) TxPDO_DigitalInputs16 {
-    uint16_t inputs[2];    ///< Up to 2 blocks of 16-bit inputs
+    uint16_t inputs[2]; /**< Up to 2 blocks of 16-bit inputs */
 };
 
 /**
  * @brief TxPDO for 32-bit digital inputs (1 block = 32 inputs)
  */
 struct __attribute__((packed)) TxPDO_DigitalInputs32 {
-    uint32_t inputs;       ///< 1 block of 32-bit inputs
+    uint32_t inputs; /**< 1 block of 32-bit inputs */
 };
 
 /**
  * @brief RxPDO for basic 8-bit digital outputs (up to 4 blocks = 32 outputs)
  */
 struct __attribute__((packed)) RxPDO_DigitalOutputs8 {
-    uint8_t outputs[4];    ///< Up to 4 blocks of 8-bit outputs
+    uint8_t outputs[4]; /**< Up to 4 blocks of 8-bit outputs */
 };
 
 /**
  * @brief TxPDO for analog inputs (up to 4 channels, 16-bit each)
  */
 struct __attribute__((packed)) TxPDO_AnalogInputs16 {
-    int16_t inputs[4];     ///< Up to 4 analog inputs
+    int16_t inputs[4]; /**< Up to 4 analog inputs */
 };
 
 /**
  * @brief RxPDO for analog outputs (up to 4 channels, 16-bit each)
  */
 struct __attribute__((packed)) RxPDO_AnalogOutputs16 {
-    int16_t outputs[4];    ///< Up to 4 analog outputs
+    int16_t outputs[4]; /**< Up to 4 analog outputs */
 };
 
 /**
  * @brief Combined TxPDO with digital and analog inputs
  */
 struct __attribute__((packed)) TxPDO_Combined {
-    uint8_t digital_inputs[2];   ///< 16 digital inputs
-    int16_t analog_inputs[2];    ///< 2 analog inputs
+    uint8_t digital_inputs[2]; /**< 16 digital inputs */
+    int16_t analog_inputs[2]; /**< 2 analog inputs */
 };
 
 /**
  * @brief Combined RxPDO with digital and analog outputs
  */
 struct __attribute__((packed)) RxPDO_Combined {
-    uint8_t digital_outputs[2];  ///< 16 digital outputs
-    int16_t analog_outputs[2];   ///< 2 analog outputs
+    uint8_t digital_outputs[2]; /**< 16 digital outputs */
+    int16_t analog_outputs[2]; /**< 2 analog outputs */
 };
 
 } // namespace CiA401

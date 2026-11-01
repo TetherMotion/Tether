@@ -338,8 +338,10 @@ public:
      * @return Entry, or nullptr when the tool is not defined.
      */
     const ToolEntry* getTool(int32_t toolNumber) const;
-    /// @param toolNumber Tool number (T word value).
-    /// @return Mutable entry, or nullptr when the tool is not defined.
+    /**
+     * @param toolNumber Tool number (T word value).
+     * @return Mutable entry, or nullptr when the tool is not defined.
+     */
     ToolEntry* getTool(int32_t toolNumber);
     
     /**
@@ -550,9 +552,9 @@ private:
  * @brief Cutter compensation side
  */
 enum class CutterCompSide {
-    OFF,    ///< G40
-    LEFT,   ///< G41
-    RIGHT   ///< G42
+    OFF, /**< G40 */
+    LEFT, /**< G41 */
+    RIGHT /**< G42 */
 };
 
 /**
@@ -579,25 +581,25 @@ struct CutterCompState {
  * @brief Configuration for cutter compensation
  */
 struct CutterCompConfig {
-    /// Entry move minimum length (multiple of radius)
+    /**Entry move minimum length (multiple of radius) */
     double minEntryLength{2.0};
     
-    /// Exit move minimum length
+    /**Exit move minimum length */
     double minExitLength{2.0};
     
-    /// Enable gouge checking
+    /**Enable gouge checking */
     bool checkGouging{true};
     
-    /// Error on gouge vs. limit depth
+    /**Error on gouge vs. limit depth */
     bool errorOnGouge{true};
     
-    /// Arc step for outside corner arcs
+    /**Arc step for outside corner arcs */
     double cornerArcStep{0.1};  // mm
     
-    /// Enable lookahead for corner calculation
+    /**Enable lookahead for corner calculation */
     bool useLookahead{true};
     
-    /// Lookahead moves for corner planning
+    /**Lookahead moves for corner planning */
     int lookaheadMoves{2};
 };
 

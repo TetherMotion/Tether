@@ -38,14 +38,14 @@ namespace detail {
 // unconditional: the no-SII fallback paths resolve offsets differently but
 // read and write the process image identically.
 
-/// Read bit `bit_off` from a process image; false when out of range.
+/**Read bit `bit_off` from a process image; false when out of range. */
 inline bool imageBit(std::span<const uint8_t> image, uint32_t bit_off) {
     const size_t byte = bit_off / 8;
     return byte < image.size() &&
            ((image[byte] >> (bit_off % 8)) & 1u) != 0;
 }
 
-/// Write bit `bit_off` in a process image; no-op when out of range.
+/**Write bit `bit_off` in a process image; no-op when out of range. */
 inline void setImageBit(std::span<uint8_t> image, uint32_t bit_off, bool v) {
     const size_t byte = bit_off / 8;
     if (byte >= image.size()) return;
@@ -53,8 +53,10 @@ inline void setImageBit(std::span<uint8_t> image, uint32_t bit_off, bool v) {
     else   image[byte] &= ~static_cast<uint8_t>(1u << (bit_off % 8));
 }
 
-/// Sign-extend a `bits`-wide raw value to int64.  Bits above `bits` in
-/// `raw` are masked off first, so callers may pass unmasked extractions.
+/**
+ * Sign-extend a `bits`-wide raw value to int64.  Bits above `bits` in
+ * `raw` are masked off first, so callers may pass unmasked extractions.
+ */
 inline int64_t signExtend64(uint64_t raw, uint8_t bits) {
     if (bits == 0)  return 0;
     if (bits >= 64) return static_cast<int64_t>(raw);
@@ -63,9 +65,11 @@ inline int64_t signExtend64(uint64_t raw, uint8_t bits) {
     return static_cast<int64_t>((raw ^ sign) - sign);
 }
 
-/// Read a little-endian field of `bits` bits starting at `data` and
-/// sign-extend it to int64.  Reads ceil(bits/8) bytes — the caller must
-/// have bounds-checked `data` against the image.
+/**
+ * Read a little-endian field of `bits` bits starting at `data` and
+ * sign-extend it to int64.  Reads ceil(bits/8) bytes — the caller must
+ * have bounds-checked `data` against the image.
+ */
 inline int64_t signExtendLE(const uint8_t* data, uint8_t bits) {
     uint64_t raw = 0;
     std::memcpy(&raw, data, (bits + 7) / 8);
@@ -74,24 +78,28 @@ inline int64_t signExtendLE(const uint8_t* data, uint8_t bits) {
 
 #if TETHER_ENABLE_SII
 
-/// A resolved >=16-bit value entry inside one channel PDO.
+/**A resolved >=16-bit value entry inside one channel PDO. */
 struct ResolvedEntry {
-    uint16_t byte_off = 0;    ///< byte offset within the SM image
-    uint8_t  bit_len  = 0;    ///< entry width in bits (clamped to 64)
-    uint16_t index    = 0;    ///< object dictionary index
-    uint8_t  subindex = 0;    ///< object dictionary subindex
+    uint16_t byte_off = 0; /**< byte offset within the SM image */
+    uint8_t  bit_len  = 0; /**< entry width in bits (clamped to 64) */
+    uint16_t index    = 0; /**< object dictionary index */
+    uint8_t  subindex = 0; /**< object dictionary subindex */
 };
 
-/// One channel PDO resolved into value entries plus a status prefix.
+/**One channel PDO resolved into value entries plus a status prefix. */
 struct ResolvedChannel {
-    /// All >= min_value_bits entries, in PDO order.  For a standard
-    /// analog channel this is a single measurement; an encoder PDO
-    /// typically resolves to {counter, latch}.
+    /**
+     * All >= min_value_bits entries, in PDO order.  For a standard
+     * analog channel this is a single measurement; an encoder PDO
+     * typically resolves to {counter, latch}.
+     */
     std::vector<ResolvedEntry> values;
-    /// Byte offset of the status prefix (the >=16-bit region between the
-    /// channel start and the first value entry); -1 when absent.
+    /**
+     * Byte offset of the status prefix (the >=16-bit region between the
+     * channel start and the first value entry); -1 when absent.
+     */
     int16_t status_off = -1;
-    /// PDO index this channel was resolved from.
+    /**PDO index this channel was resolved from. */
     uint16_t pdo_index = 0;
 };
 
@@ -137,14 +145,16 @@ void resolveBitChannels(std::span<const SII::SIIPDO> pdos,
                         std::vector<uint32_t>& bit_offs,
                         uint32_t& image_bits);
 
-/// One resolved byte-FIFO channel inside a process-data SM image —
-/// a leading 8/16-bit control/status register followed by N 8-bit
-/// data entries (the EL6xxx serial/IO-Link shape).
+/**
+ * One resolved byte-FIFO channel inside a process-data SM image —
+ * a leading 8/16-bit control/status register followed by N 8-bit
+ * data entries (the EL6xxx serial/IO-Link shape).
+ */
 struct ResolvedFifo {
-    uint16_t ctrl_off = 0;    ///< byte offset of the ctrl/status field
-    uint8_t  ctrl_bits = 0;   ///< ctrl/status width (0 = data-only PDO)
-    uint16_t data_off = 0;    ///< byte offset of the first data byte
-    uint16_t data_len = 0;    ///< data byte count
+    uint16_t ctrl_off = 0; /**< byte offset of the ctrl/status field */
+    uint8_t  ctrl_bits = 0; /**< ctrl/status width (0 = data-only PDO) */
+    uint16_t data_off = 0; /**< byte offset of the first data byte */
+    uint16_t data_len = 0; /**< data byte count */
 };
 
 /**

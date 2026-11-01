@@ -91,10 +91,10 @@ public:
 
     // ----- Log Prefix (set by Master from per-slave name) -----
 
-    /// @brief Set the log prefix string (e.g. "Slave X-Axis (#0)").
+    /**@brief Set the log prefix string (e.g. "Slave X-Axis (#0)"). */
     void setLogPrefix(std::string prefix) { log_prefix_ = std::move(prefix); }
 
-    /// @brief Get the current log prefix string.
+    /**@brief Get the current log prefix string. */
     const std::string& logPrefix() const { return log_prefix_; }
 
     // ----- Mailbox Configuration -----
@@ -160,16 +160,18 @@ public:
 
     // ----- Object-Dictionary Entry API -----
 
-    /// Synchronous read/write driven by a register definition
-    /// (ObjectDictionaryEntry / device RegisterEntry): index, subindex and
-    /// transfer width all come from entry.data_type, so no sizes or indices
-    /// are hard-coded at the call site.
-    ///
-    /// Values are passed as raw bits in a uint64_t — signed Integer types are
-    /// sign-extended, so `static_cast<int64_t>` recovers the signed value and
-    /// unsigned values are used as-is. Real32/Real64 return their bit pattern.
-    /// Variable-length types (VisibleString, OctetString, Domain, ...) are
-    /// unsupported here and fail with CoEErrorCode::NotConfigured.
+    /**
+     * Synchronous read/write driven by a register definition
+     * (ObjectDictionaryEntry / device RegisterEntry): index, subindex and
+     * transfer width all come from entry.data_type, so no sizes or indices
+     * are hard-coded at the call site.
+     *
+     * Values are passed as raw bits in a uint64_t — signed Integer types are
+     * sign-extended, so `static_cast<int64_t>` recovers the signed value and
+     * unsigned values are used as-is. Real32/Real64 return their bit pattern.
+     * Variable-length types (VisibleString, OctetString, Domain, ...) are
+     * unsupported here and fail with CoEErrorCode::NotConfigured.
+     */
     CoEResult<uint64_t> readEntry(
         const ObjectDictionary::ObjectDictionaryEntry& entry,
         CoETransactionOptions opts = {});
@@ -177,9 +179,11 @@ public:
         const ObjectDictionary::ObjectDictionaryEntry& entry,
         uint64_t value, CoETransactionOptions opts = {});
 
-    /// Record-member variants: `subindex` overrides entry.subindex, so a
-    /// record object (e.g. a list whose members all share the same type)
-    /// needs only one register definition for all of its subindices.
+    /**
+     * Record-member variants: `subindex` overrides entry.subindex, so a
+     * record object (e.g. a list whose members all share the same type)
+     * needs only one register definition for all of its subindices.
+     */
     CoEResult<uint64_t> readEntry(
         const ObjectDictionary::ObjectDictionaryEntry& entry,
         uint8_t subindex,
@@ -189,9 +193,11 @@ public:
         uint8_t subindex, uint64_t value,
         CoETransactionOptions opts = {});
 
-    /// Async (queued) variants of readEntry/writeEntry — the upload is
-    /// executed on the CoE worker thread and decoded against
-    /// entry.data_type; the caller waits on the returned future.
+    /**
+     * Async (queued) variants of readEntry/writeEntry — the upload is
+     * executed on the CoE worker thread and decoded against
+     * entry.data_type; the caller waits on the returned future.
+     */
     std::future<CoEResult<uint64_t>> readEntryAsync(
         const ObjectDictionary::ObjectDictionaryEntry& entry,
         CoETransactionOptions opts = {});
@@ -224,41 +230,49 @@ public:
     void setBehaviourOptions(const BehaviourOptions& opts) { behaviour_options_ = opts; }
     const BehaviourOptions& behaviourOptions() const { return behaviour_options_; }
 
-    /// Raise a caller-supplied transaction timeout to the behaviour floor
-    /// (min_transaction_timeout_ms).  Applied both where transactions are
-    /// enqueued (so the worker's transport sees it) and where synchronous
-    /// callers wait on the result future.
+    /**
+     * Raise a caller-supplied transaction timeout to the behaviour floor
+     * (min_transaction_timeout_ms).  Applied both where transactions are
+     * enqueued (so the worker's transport sees it) and where synchronous
+     * callers wait on the result future.
+     */
     uint32_t effectiveTimeoutMs(uint32_t timeout_ms) const {
         const uint32_t floor = behaviour_options_.min_transaction_timeout_ms;
         return (floor != 0 && timeout_ms < floor) ? floor : timeout_ms;
     }
 
-    /// @brief Return the CoE SDO abort code reported by the slave on the most
-    /// recent sdoUploadWithRetry/sdoDownloadWithRetry call. 0 means no abort
-    /// (success or a non-abort failure such as a transport/timeout error).
-    /// Read this immediately after a sync read/write returns false to
-    /// distinguish a definitive slave rejection (e.g. 0x06070010 length
-    /// mismatch) from a transport issue. When this is non-zero the retry
-    /// wrapper does NOT retry the operation.
+    /**
+     * @brief Return the CoE SDO abort code reported by the slave on the most
+     * recent sdoUploadWithRetry/sdoDownloadWithRetry call. 0 means no abort
+     * (success or a non-abort failure such as a transport/timeout error).
+     * Read this immediately after a sync read/write returns false to
+     * distinguish a definitive slave rejection (e.g. 0x06070010 length
+     * mismatch) from a transport issue. When this is non-zero the retry
+     * wrapper does NOT retry the operation.
+     */
     uint32_t lastSdoAbortCode() const { return last_sdo_abort_code_.load(std::memory_order_relaxed); }
 
-    /// @brief Direction of the most recent SDO operation that recorded an
-    /// abort code via lastSdoAbortCode(). Returns false for "upload" (read)
-    /// and true for "download" (write). Undefined when lastSdoAbortCode()==0.
+    /**
+     * @brief Direction of the most recent SDO operation that recorded an
+     * abort code via lastSdoAbortCode(). Returns false for "upload" (read)
+     * and true for "download" (write). Undefined when lastSdoAbortCode()==0.
+     */
     bool lastSdoWasDownload() const { return last_sdo_was_download_.load(std::memory_order_relaxed); }
 
-    /// @brief Return the payload length that was attempted on the most recent
-    /// SDO operation that recorded an abort code via lastSdoAbortCode().
-    ///
-    /// For a download (write) this is the number of bytes that were sent to
-    /// the slave; for an upload (read) it is the capacity of the receive
-    /// buffer that was offered. Returns 0 when lastSdoAbortCode()==0.
-    ///
-    /// This is most useful for the length-mismatch abort family
-    /// (0x06070010 / 0x06070012 / 0x06070013) where the slave rejects the
-    /// request because the payload size does not match what the object
-    /// dictionary expects — the attempted length lets the user compare
-    /// against the ESI-specified size.
+    /**
+     * @brief Return the payload length that was attempted on the most recent
+     * SDO operation that recorded an abort code via lastSdoAbortCode().
+     *
+     * For a download (write) this is the number of bytes that were sent to
+     * the slave; for an upload (read) it is the capacity of the receive
+     * buffer that was offered. Returns 0 when lastSdoAbortCode()==0.
+     *
+     * This is most useful for the length-mismatch abort family
+     * (0x06070010 / 0x06070012 / 0x06070013) where the slave rejects the
+     * request because the payload size does not match what the object
+     * dictionary expects — the attempted length lets the user compare
+     * against the ESI-specified size.
+     */
     size_t lastSdoAttemptedLength() const { return last_sdo_attempted_length_.load(std::memory_order_relaxed); }
 
     // ----- Debug flags -----

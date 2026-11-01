@@ -91,24 +91,24 @@ namespace SII {
  * and the asynchronous reactor share the same definitions.
  */
 struct EEPROMProtocol {
-    static constexpr uint16_t REG_EEPCFG  = 0x0500;  ///< EEPROM configuration
-    static constexpr uint16_t REG_EEPCTL  = 0x0502;  ///< EEPROM control/status
-    static constexpr uint16_t REG_EEPSTAT = 0x0502;  ///< Same as EEPCTL
-    static constexpr uint16_t REG_EEPADDR = 0x0504;  ///< EEPROM word address
-    static constexpr uint16_t REG_EEPDAT  = 0x0508;  ///< EEPROM data (32-bit)
+    static constexpr uint16_t REG_EEPCFG  = 0x0500; /**< EEPROM configuration */
+    static constexpr uint16_t REG_EEPCTL  = 0x0502; /**< EEPROM control/status */
+    static constexpr uint16_t REG_EEPSTAT = 0x0502; /**< Same as EEPCTL */
+    static constexpr uint16_t REG_EEPADDR = 0x0504; /**< EEPROM word address */
+    static constexpr uint16_t REG_EEPDAT  = 0x0508; /**< EEPROM data (32-bit) */
 
-    static constexpr uint16_t ECMD_NOP   = 0x0000;  ///< No operation
-    static constexpr uint16_t ECMD_READ  = 0x0100;  ///< Read command
+    static constexpr uint16_t ECMD_NOP   = 0x0000; /**< No operation */
+    static constexpr uint16_t ECMD_READ  = 0x0100; /**< Read command */
 
-    static constexpr uint16_t ESTAT_BUSY    = 0x8000;  ///< Bit 15: busy
-    static constexpr uint16_t ESTAT_EMASK   = 0x7800;  ///< Bits 14-11: errors
-    static constexpr uint16_t ESTAT_NACK    = 0x2000;  ///< Bit 13: not acknowledged
-    static constexpr uint16_t ESTAT_CRC_ERR = 0x0800;  ///< Bit 11: CRC error
+    static constexpr uint16_t ESTAT_BUSY    = 0x8000; /**< Bit 15: busy */
+    static constexpr uint16_t ESTAT_EMASK   = 0x7800; /**< Bits 14-11: errors */
+    static constexpr uint16_t ESTAT_NACK    = 0x2000; /**< Bit 13: not acknowledged */
+    static constexpr uint16_t ESTAT_CRC_ERR = 0x0800; /**< Bit 11: CRC error */
 
-    /// Maximum busy-poll iterations before declaring timeout.
+    /**Maximum busy-poll iterations before declaring timeout. */
     static constexpr int MAX_BUSY_POLLS = 100;
 
-    /// Maximum NACK retries per word read.
+    /**Maximum NACK retries per word read. */
     static constexpr int MAX_NACK_RETRIES = 3;
 };
 
@@ -137,13 +137,13 @@ struct EEPROMProtocol {
  * @endcode
  */
 enum class EEPROMState : uint8_t {
-    IDLE,               ///< Not started
-    WRITE_EEPADDR,      ///< Writing the EEPROM word address to 0x0504
-    WRITE_EEPCTL_READ,  ///< Writing the READ command to 0x0502
-    POLL_EEPSTAT,       ///< Reading EEPSTAT (0x0502) to check busy bit
-    READ_EEPDAT,        ///< Reading 32-bit data from 0x0508
-    DONE,               ///< Word-pair read successfully
-    FAILED,             ///< Error or timeout
+    IDLE, /**< Not started */
+    WRITE_EEPADDR, /**< Writing the EEPROM word address to 0x0504 */
+    WRITE_EEPCTL_READ, /**< Writing the READ command to 0x0502 */
+    POLL_EEPSTAT, /**< Reading EEPSTAT (0x0502) to check busy bit */
+    READ_EEPDAT, /**< Reading 32-bit data from 0x0508 */
+    DONE, /**< Word-pair read successfully */
+    FAILED, /**< Error or timeout */
 };
 
 /**
@@ -190,15 +190,15 @@ public:
      */
     void reset();
 
-    /// Current state.
+    /**Current state. */
     EEPROMState state() const { return state_; }
 
-    /// True if the state machine has finished (DONE or FAILED).
+    /**True if the state machine has finished (DONE or FAILED). */
     bool isFinished() const {
         return state_ == EEPROMState::DONE || state_ == EEPROMState::FAILED;
     }
 
-    /// True if the state machine needs a datagram to be sent.
+    /**True if the state machine needs a datagram to be sent. */
     bool needsSend() const {
         return !in_flight_ &&
                (state_ == EEPROMState::WRITE_EEPADDR ||
@@ -207,29 +207,29 @@ public:
                 state_ == EEPROMState::READ_EEPDAT);
     }
 
-    /// True if this state machine has a datagram currently in flight.
+    /**True if this state machine has a datagram currently in flight. */
     bool isInFlight() const { return in_flight_; }
 
-    /// Mark this state machine as having a datagram in flight.
+    /**Mark this state machine as having a datagram in flight. */
     void markInFlight() { in_flight_ = true; }
 
-    /// Slave index this state machine reads from.
+    /**Slave index this state machine reads from. */
     uint16_t slaveIndex() const { return slave_index_; }
 
-    /// Router slot index for the current in-flight datagram.
+    /**Router slot index for the current in-flight datagram. */
     size_t slot() const { return slot_; }
 
-    /// Response buffer (owned by this state machine).
+    /**Response buffer (owned by this state machine). */
     RxDatagram& response() { return response_; }
     const RxDatagram& response() const { return response_; }
 
-    /// Number of word-pairs remaining to read.
+    /**Number of word-pairs remaining to read. */
     size_t remaining() const { return word_pairs_.size() - current_index_; }
 
-    /// Number of word-pairs already read.
+    /**Number of word-pairs already read. */
     size_t wordsRead() const { return current_index_; }
 
-    /// Total number of word-pairs in the current batch.
+    /**Total number of word-pairs in the current batch. */
     size_t totalWords() const { return word_pairs_.size(); }
 
     /**
@@ -262,7 +262,7 @@ public:
      */
     void cancel();
 
-    /// Current EEPROM word address being read (even).
+    /**Current EEPROM word address being read (even). */
     uint16_t currentWord() const {
         return current_index_ < word_pairs_.size()
             ? word_pairs_[current_index_] : 0xFFFF;
@@ -270,26 +270,26 @@ public:
 
 private:
     uint16_t     slave_index_{0};
-    std::vector<uint16_t> word_pairs_{};  ///< Pending word-pair addresses
-    size_t       current_index_{0};       ///< Index into word_pairs_
+    std::vector<uint16_t> word_pairs_{}; /**< Pending word-pair addresses */
+    size_t       current_index_{0}; /**< Index into word_pairs_ */
 
-    int          nack_count_{0};      ///< NACK retries for current word
-    int          busy_polls_{0};       ///< Busy-poll iterations for current step
+    int          nack_count_{0}; /**< NACK retries for current word */
+    int          busy_polls_{0}; /**< Busy-poll iterations for current step */
 
     EEPROMState  state_{EEPROMState::IDLE};
-    bool         in_flight_{false};   ///< True when a datagram is pending
-    size_t       slot_{0};            ///< Router slot for current datagram
-    RxDatagram   response_{};          ///< Response buffer (owned, stable address)
+    bool         in_flight_{false}; /**< True when a datagram is pending */
+    size_t       slot_{0}; /**< Router slot for current datagram */
+    RxDatagram   response_{}; /**< Response buffer (owned, stable address) */
 
-    /// Write payload for EEPADDR (kept as member to avoid stack-lifetime issues).
+    /**Write payload for EEPADDR (kept as member to avoid stack-lifetime issues). */
     uint16_t     eepaddr_payload_{0};
-    /// Write payload for EEPCTL (kept as member).
+    /**Write payload for EEPCTL (kept as member). */
     uint16_t     eepctl_payload_{0};
 
-    /// Transition to FAILED state.
+    /**Transition to FAILED state. */
     void fail() { state_ = EEPROMState::FAILED; in_flight_ = false; }
 
-    /// Advance to the next word-pair, or DONE if all read.
+    /**Advance to the next word-pair, or DONE if all read. */
     void advanceWord();
 };
 
@@ -384,10 +384,10 @@ public:
      */
     bool run(uint32_t timeout_ms = 500);
 
-    /// Number of slaves that completed successfully.
+    /**Number of slaves that completed successfully. */
     size_t successCount() const { return success_count_; }
 
-    /// Number of slaves that failed.
+    /**Number of slaves that failed. */
     size_t failureCount() const { return failure_count_; }
 
     /**
@@ -405,11 +405,11 @@ public:
         return slaves_[i].sm;
     }
 
-    /// Number of slaves in the reactor.
+    /**Number of slaves in the reactor. */
     size_t slaveCount() const { return slaves_.size(); }
 
 private:
-    /// Per-slave state: demand parser + state machine.
+    /**Per-slave state: demand parser + state machine. */
     struct SlaveEntry {
         uint16_t                  slave_index{0};
         SIIDemandParser           parser{};
@@ -423,7 +423,7 @@ private:
     size_t success_count_{0};
     size_t failure_count_{0};
 
-    /// Cancel all pending router slots (called on destruction and error).
+    /**Cancel all pending router slots (called on destruction and error). */
     void cancelAllPending();
 
     /**

@@ -23,19 +23,23 @@ class MailboxRecovery {
 public:
     explicit MailboxRecovery(Master& master) : master_(master) {}
 
-    /// Drain stale mailbox data from SM1 (slave→master).  Returns false when
-    /// the mailbox is unconfigured or stays full after max_drain reads.
+    /**
+     * Drain stale mailbox data from SM1 (slave→master).  Returns false when
+     * the mailbox is unconfigured or stays full after max_drain reads.
+     */
     bool drain(uint16_t slave_index, unsigned int max_drain);
 
-    /// Cycle the SM1 activate register to clear a stuck WRITE_BUF_FULL.
+    /**Cycle the SM1 activate register to clear a stuck WRITE_BUF_FULL. */
     bool resetSM1(uint16_t slave_index);
 
-    /// Cycle the SM0 activate register to clear a stuck mailbox-full.
+    /**Cycle the SM0 activate register to clear a stuck mailbox-full. */
     bool resetSM0(uint16_t slave_index);
 
 private:
-    /// Write the SMx activate register with a few retries — on a lossy link a
-    /// single dropped frame must not abort the whole mailbox reset.
+    /**
+     * Write the SMx activate register with a few retries — on a lossy link a
+     * single dropped frame must not abort the whole mailbox reset.
+     */
     bool writeActivateWithRetry(uint16_t slave_index, uint16_t activate_addr,
                                 uint8_t value, const char* what,
                                 const char* local_tag);

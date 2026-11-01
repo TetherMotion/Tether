@@ -587,14 +587,14 @@ public:
      * @brief Tuning method for auto-tuning
      */
     enum class TuningMethod {
-        ZieglerNichols,     ///< Classic, aggressive
-        ZieglerNicholsPI,   ///< Z-N for PI only
-        ZieglerNicholsPID,  ///< Z-N for full PID
-        CohenCoon,          ///< Better for dead time
-        Lambda,             ///< IMC-based (specify lambda)
-        AMIGO,              ///< Robustness-optimized
-        SIMC,               ///< Skogestad IMC
-        TyreusLuyben        ///< Conservative
+        ZieglerNichols, /**< Classic, aggressive */
+        ZieglerNicholsPI, /**< Z-N for PI only */
+        ZieglerNicholsPID, /**< Z-N for full PID */
+        CohenCoon, /**< Better for dead time */
+        Lambda, /**< IMC-based (specify lambda) */
+        AMIGO, /**< Robustness-optimized */
+        SIMC, /**< Skogestad IMC */
+        TyreusLuyben /**< Conservative */
     };
     
     ControllerType getType() const override { return ControllerType::PID; }

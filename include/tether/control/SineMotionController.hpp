@@ -37,20 +37,20 @@ public:
      * @brief Configuration parameters
      */
     struct Config {
-        double amplitude = 1.0;          ///< Peak amplitude
-        double frequency = 1.0;          ///< Frequency in Hz
-        double offset = 0.0;             ///< DC offset
-        double phaseOffset = 0.0;        ///< Phase offset in radians
-        double startPhase = 0.0;         ///< Initial phase when started
+        double amplitude = 1.0; /**< Peak amplitude */
+        double frequency = 1.0; /**< Frequency in Hz */
+        double offset = 0.0; /**< DC offset */
+        double phaseOffset = 0.0; /**< Phase offset in radians */
+        double startPhase = 0.0; /**< Initial phase when started */
         
         // Ramping configuration
-        double parameterRampTime = 1.0;  ///< Time to ramp parameters (seconds)
-        bool useSmoothing = true;        ///< Use sigmoidal smoothing for params
+        double parameterRampTime = 1.0; /**< Time to ramp parameters (seconds) */
+        bool useSmoothing = true; /**< Use sigmoidal smoothing for params */
         
         // Envelope
-        bool useEnvelope = false;        ///< Apply amplitude envelope
-        double attackTime = 0.5;         ///< Envelope attack time
-        double releaseTime = 0.5;        ///< Envelope release time
+        bool useEnvelope = false; /**< Apply amplitude envelope */
+        double attackTime = 0.5; /**< Envelope attack time */
+        double releaseTime = 0.5; /**< Envelope release time */
         
         static Config getDefault() {
             return Config{1.0, 1.0, 0.0, 0.0, 0.0, 1.0, true, false, 0.5, 0.5};
@@ -61,12 +61,12 @@ public:
      * @brief Current state
      */
     struct State {
-        double position{0.0};           ///< Current position
-        double velocity{0.0};           ///< Current velocity
-        double acceleration{0.0};       ///< Current acceleration
-        double phase{0.0};              ///< Current phase (radians)
-        double time{0.0};               ///< Time since start
-        bool running{false};            ///< Is oscillation active
+        double position{0.0}; /**< Current position */
+        double velocity{0.0}; /**< Current velocity */
+        double acceleration{0.0}; /**< Current acceleration */
+        double phase{0.0}; /**< Current phase (radians) */
+        double time{0.0}; /**< Time since start */
+        bool running{false}; /**< Is oscillation active */
     };
     
     SineMotionController() : SineMotionController(Config::getDefault()) {}
@@ -249,13 +249,13 @@ class MultiAxisSineController {
 public:
     struct AxisConfig {
         double amplitude{1.0};
-        double phaseOffset{0.0};        ///< Phase offset relative to master
+        double phaseOffset{0.0}; /**< Phase offset relative to master */
         double offset{0.0};
         bool enabled{true};
     };
     
     struct Config {
-        double frequency{1.0};          ///< Master frequency (shared)
+        double frequency{1.0}; /**< Master frequency (shared) */
         double rampTime{1.0};
         std::array<AxisConfig, NumAxes> axes;
     };
@@ -410,20 +410,20 @@ private:
  */
 class FrequencySweepGenerator {
 public:
-    /// @brief How sweep frequency evolves over time.
+    /**@brief How sweep frequency evolves over time. */
     enum class SweepType {
-        Linear,             ///< Linear frequency sweep
-        Logarithmic,        ///< Logarithmic (exponential) sweep
-        Sine               ///< Sinusoidal frequency modulation
+        Linear, /**< Linear frequency sweep */
+        Logarithmic, /**< Logarithmic (exponential) sweep */
+        Sine /**< Sinusoidal frequency modulation */
     };
     
     struct Config {
         double startFrequency = 0.1;
         double endFrequency = 10.0;
         double amplitude = 1.0;
-        double sweepDuration = 60.0;     ///< Total sweep time
+        double sweepDuration = 60.0; /**< Total sweep time */
         SweepType type = SweepType::Logarithmic;
-        int cycles = 0;                  ///< 0 = one-shot, >0 = repeat
+        int cycles = 0; /**< 0 = one-shot, >0 = repeat */
         
         static Config getDefault() {
             return Config{0.1, 10.0, 1.0, 60.0, SweepType::Logarithmic, 0};

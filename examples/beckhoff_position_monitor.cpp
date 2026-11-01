@@ -72,7 +72,7 @@ namespace Platform = Tether::Platform;
 static std::atomic<bool> g_cancel{false};
 // SignalHandler sets this to true on SIGINT/SIGTERM.
 
-/// Compact per-module value rendering: "s1:+1234/-7 s2:...".
+/**Compact per-module value rendering: "s1:+1234/-7 s2:...". */
 static std::string moduleStates(
     const Beckhoff::MultiPositionInputTerminal<>& encs) {
     std::string out;

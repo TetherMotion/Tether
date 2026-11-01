@@ -23,7 +23,7 @@
 
 namespace EtherCAT {
 
-/// Monotonic nanoseconds for inline transport helpers (no Platform dep).
+/**Monotonic nanoseconds for inline transport helpers (no Platform dep). */
 inline uint64_t monoNowNsFallback() {
     timespec ts{};
     ::clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -32,11 +32,11 @@ inline uint64_t monoNowNsFallback() {
 }
 
 struct PDOSliceSpec {
-    /// Mapping entry indices (LogicalAddressManager::describeEntries order).
+    /**Mapping entry indices (LogicalAddressManager::describeEntries order). */
     std::vector<uint16_t> entries;
-    /// Explicit image-space ranges, used when `entries` is empty.
+    /**Explicit image-space ranges, used when `entries` is empty. */
     std::vector<std::pair<uint32_t, uint32_t>> ranges;
-    /// Exchange every Nth cyclic cycle (1 = every cycle).
+    /**Exchange every Nth cyclic cycle (1 = every cycle). */
     uint32_t every_n = 1;
     /**
      * @brief Optional per-run completion callback — invoked on the
@@ -132,8 +132,8 @@ enum class PDOAddressMode : uint8_t {
 // ============================================================================
 
 enum class PDODirection : uint8_t {
-    TxPDO = 0,  ///< Slave→Master
-    RxPDO = 1   ///< Master→Slave
+    TxPDO = 0, /**< Slave→Master */
+    RxPDO = 1 /**< Master→Slave */
 };
 
 struct PDOEntry {
@@ -155,9 +155,11 @@ struct PDOEntry {
      * Fixed inline storage keeps PDOEntry trivially copyable and makes the
      * buffered path allocation-free after registration.
      */
-    /// `mutable`: the exchange writes wire data here through const
-    /// PDOMapping& — storage is I/O state, not mapping metadata (same
-    /// const-escape the old app_buffer pointee had).
+    /**
+     * `mutable`: the exchange writes wire data here through const
+     * PDOMapping& — storage is I/O state, not mapping metadata (same
+     * const-escape the old app_buffer pointee had).
+     */
     alignas(8) mutable uint8_t storage[kMaxPDOSize];
     uint16_t data_size;
 
@@ -186,16 +188,18 @@ struct PDOEntry {
     uint32_t success_count;
 };
 
-/// Logical placement of one enabled PDO entry within the process image,
-/// using the layout of the logical LRW exchange.  Lets a caller compose
-/// partial-read slices (e.g. group the FSoE PDOs apart from the RSAP/debug
-/// PDOs) without knowing the internal address map.
+/**
+ * Logical placement of one enabled PDO entry within the process image,
+ * using the layout of the logical LRW exchange.  Lets a caller compose
+ * partial-read slices (e.g. group the FSoE PDOs apart from the RSAP/debug
+ * PDOs) without knowing the internal address map.
+ */
 struct LogicalEntrySlice {
-    size_t       entry_index{0};   ///< index into PDOMapping
+    size_t       entry_index{0}; /**< index into PDOMapping */
     uint16_t     slave_index{0};
     uint16_t     pdo_index{0};
     PDODirection direction{PDODirection::RxPDO};
-    uint32_t     offset{0};        ///< byte offset from the base logical address
+    uint32_t     offset{0}; /**< byte offset from the base logical address */
     uint16_t     length{0};
 };
 
@@ -206,8 +210,10 @@ struct LogicalEntrySlice {
 struct SlaveConfig {
     uint16_t slave_index;
     uint16_t configured_address;
-    /// True once configured_address has been read from the slave (reg
-    /// 0x0010) or set explicitly — finalizeMapping() resolves it lazily.
+    /**
+     * True once configured_address has been read from the slave (reg
+     * 0x0010) or set explicitly — finalizeMapping() resolves it lazily.
+     */
     bool     configured_address_known = false;
     uint32_t vendor_id;
     uint32_t product_code;

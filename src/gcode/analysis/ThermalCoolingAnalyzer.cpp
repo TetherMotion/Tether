@@ -1,5 +1,7 @@
-/// @file ThermalCoolingAnalyzer.cpp
-/// @brief Per-layer thermal and cooling time analysis.
+/**
+ * @file ThermalCoolingAnalyzer.cpp
+ * @brief Per-layer thermal and cooling time analysis.
+ */
 
 #include "tether/gcode/analysis/ThermalCoolingAnalyzer.hpp"
 #include "AnalysisUtil.hpp"

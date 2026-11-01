@@ -453,7 +453,7 @@ private:
     ProfileType m_defaultProfileType{ProfileType::Trapezoidal};
     std::unique_ptr<MotionProfile> m_activeProfile;
     MotionState m_profileState;
-    double m_profileTime{0.0};  ///< Current time in profile [s]
+    double m_profileTime{0.0}; /**< Current time in profile [s] */
     
     // Homing
     std::unique_ptr<HomingHandler> m_homingHandler;

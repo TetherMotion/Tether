@@ -31,25 +31,25 @@
 
 namespace tether { namespace io {
 
-/// Describes one field in a binary datalog record.
+/**Describes one field in a binary datalog record. */
 struct DatalogField {
-    uint64_t    entryId;    ///< Parameter or signal ID
-    std::string name;       ///< Human-readable name
-    uint64_t    schemaEpoch;///< Schema epoch for this field
-    uint32_t    schemaSlot; ///< Session-local schema slot
-    uint16_t    offset;     ///< Byte offset in the record
-    uint16_t    size;       ///< Byte size of this field in the record
-    EntryKind   kind;       ///< Parameter or Signal
+    uint64_t    entryId; /**< Parameter or signal ID */
+    std::string name; /**< Human-readable name */
+    uint64_t    schemaEpoch; /**< Schema epoch for this field */
+    uint32_t    schemaSlot; /**< Session-local schema slot */
+    uint16_t    offset; /**< Byte offset in the record */
+    uint16_t    size; /**< Byte size of this field in the record */
+    EntryKind   kind; /**< Parameter or Signal */
 };
 
-/// Metadata describing the binary layout of a datalog.
+/**Metadata describing the binary layout of a datalog. */
 struct DatalogMetadata {
-    std::string       logName;      ///< Name/identifier for this log
-    uint32_t          recordSize;   ///< Total bytes per record (including timestamp)
-    uint32_t          sampleRateHz; ///< Nominal sample rate
+    std::string       logName; /**< Name/identifier for this log */
+    uint32_t          recordSize; /**< Total bytes per record (including timestamp) */
+    uint32_t          sampleRateHz; /**< Nominal sample rate */
     std::vector<DatalogField> fields;
 
-    /// Encode metadata to a buffer (for DatalogStatusResp or log file header).
+    /**Encode metadata to a buffer (for DatalogStatusResp or log file header). */
     void encode(BufWriter& w) const {
         w.putStr16(logName.c_str(), logName.size());
         w.putU32(recordSize);
@@ -66,7 +66,7 @@ struct DatalogMetadata {
         }
     }
 
-    /// Decode metadata from a buffer. Returns true on success.
+    /**Decode metadata from a buffer. Returns true on success. */
     static bool decode(BufReader& r, DatalogMetadata& out) {
         uint16_t nl = r.getU16();
         auto* nb = r.getBytes(nl);
@@ -93,12 +93,12 @@ struct DatalogMetadata {
     }
 };
 
-/// Datalog configuration (sent via ConfigureDatalogReq).
+/**Datalog configuration (sent via ConfigureDatalogReq). */
 struct DatalogConfig {
     std::string logName;
     uint32_t    sampleRateHz = 1000;
     bool        enabled = false;
-    std::vector<uint64_t> entryIds;     ///< IDs to log (empty = all)
+    std::vector<uint64_t> entryIds; /**< IDs to log (empty = all) */
 
     void encode(BufWriter& w) const {
         w.putStr16(logName.c_str(), logName.size());
@@ -127,7 +127,7 @@ struct DatalogConfig {
     }
 };
 
-/// Datalog status (sent via DatalogStatusResp).
+/**Datalog status (sent via DatalogStatusResp). */
 struct DatalogStatus {
     DatalogState state = DatalogState::Idle;
     uint64_t     recordsWritten = 0;
@@ -150,7 +150,7 @@ struct DatalogStatus {
     }
 };
 
-/// Output sink callback: receives a raw binary record of recordSize bytes.
+/**Output sink callback: receives a raw binary record of recordSize bytes. */
 using DatalogSinkFn = std::function<void(const uint8_t* record, size_t size)>;
 
 /**
@@ -166,29 +166,31 @@ public:
     using TimestampFn = std::function<uint64_t()>;
     using ReadEntryFn = std::function<bool(uint64_t entryId, void* dest, size_t maxSize)>;
 
-    /// Configure the recorder. Builds the record layout.
-    /// @param config   Logging configuration
-    /// @param readFn   Callback to read an entry value by ID
-    /// @param tsFn     Timestamp callback (microseconds)
-    /// @param sink     Output sink for binary records
+    /**
+     * Configure the recorder. Builds the record layout.
+     * @param config   Logging configuration
+     * @param readFn   Callback to read an entry value by ID
+     * @param tsFn     Timestamp callback (microseconds)
+     * @param sink     Output sink for binary records
+     */
     void configure(const DatalogConfig& config,
                    ReadEntryFn readFn,
                    TimestampFn tsFn,
                    DatalogSinkFn sink);
 
-    /// Sample all configured entries once and write a record.
+    /**Sample all configured entries once and write a record. */
     void sampleOnce();
 
-    /// Start recording.
+    /**Start recording. */
     void start();
 
-    /// Stop recording.
+    /**Stop recording. */
     void stop();
 
-    /// Get current metadata.
+    /**Get current metadata. */
     const DatalogMetadata& metadata() const { return metadata_; }
 
-    /// Get current status.
+    /**Get current status. */
     DatalogStatus status() const;
 
 private:

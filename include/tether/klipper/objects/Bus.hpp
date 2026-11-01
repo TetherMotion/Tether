@@ -16,7 +16,7 @@ namespace tether::klipper::objects {
 // SPI
 // ============================================================================
 
-/// @brief SPI peripheral.
+/**@brief SPI peripheral. */
 class Spi {
 public:
     using TransferFunc = std::function<std::vector<uint8_t>(std::span<const uint8_t>)>;
@@ -58,7 +58,7 @@ private:
     TransferFunc transfer_;
 };
 
-/// @brief Proxy for SPI that echoes or stores data.
+/**@brief Proxy for SPI that echoes or stores data. */
 class SpiProxy {
 public:
     explicit SpiProxy(uint8_t oid) : oid_(oid) {}
@@ -81,7 +81,7 @@ private:
 // I2C
 // ============================================================================
 
-/// @brief I2C peripheral.
+/**@brief I2C peripheral. */
 class I2c {
 public:
     using ReadFunc = std::function<std::vector<uint8_t>(uint8_t addr, uint8_t reg, size_t len)>;
@@ -202,7 +202,7 @@ private:
     Write16Func write16Func_;
 };
 
-/// @brief Proxy for I2C that stores data.
+/**@brief Proxy for I2C that stores data. */
 class I2cProxy {
 public:
     explicit I2cProxy(uint8_t oid) : oid_(oid) {}

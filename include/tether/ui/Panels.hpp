@@ -33,16 +33,16 @@ namespace UI {
 // ---------------------------------------------------------------------------
 
 struct SlaveEntity {
-    uint16_t index = 0;          ///< position on the bus / app index
-    std::string name;            ///< human-readable name (may be empty)
-    std::string state;           ///< e.g. "OP", "SAFE-OP", "DATA"
-    uint16_t status_code = 0;    ///< AL status / error code, 0 = none
-    bool error = false;          ///< error flag set
-    bool suspended = false;      ///< supervisor-suspended / offline
-    std::string detail;          ///< free-form extra info column
+    uint16_t index = 0; /**< position on the bus / app index */
+    std::string name; /**< human-readable name (may be empty) */
+    std::string state; /**< e.g. "OP", "SAFE-OP", "DATA" */
+    uint16_t status_code = 0; /**< AL status / error code, 0 = none */
+    bool error = false; /**< error flag set */
+    bool suspended = false; /**< supervisor-suspended / offline */
+    std::string detail; /**< free-form extra info column */
 };
 
-/// Application-supplied snapshot source for the entity table.
+/**Application-supplied snapshot source for the entity table. */
 struct ISlaveEntityProvider {
     virtual ~ISlaveEntityProvider() = default;
     virtual std::vector<SlaveEntity> entities() = 0;
@@ -56,29 +56,33 @@ struct NamedRegister {
     uint16_t index = 0;
     uint8_t subindex = 0;
     std::string name;
-    uint8_t bits = 0;            ///< size hint; 0 = unknown (read raw)
+    uint8_t bits = 0; /**< size hint; 0 = unknown (read raw) */
 };
 
 struct RegisterResult {
     bool ok = false;
-    std::string value;           ///< formatted value, e.g. "0x00000008"
-    std::string error;           ///< failure text when !ok
+    std::string value; /**< formatted value, e.g. "0x00000008" */
+    std::string error; /**< failure text when !ok */
 };
 
-/// Application-injected register read transport (SDO under a mutex,
-/// ESC register read, cache lookup — the model doesn't care).
+/**
+ * Application-injected register read transport (SDO under a mutex,
+ * ESC register read, cache lookup — the model doesn't care).
+ */
 struct IRegisterReader {
     virtual ~IRegisterReader() = default;
     virtual RegisterResult read(uint16_t entity_index,
                                 const NamedRegister& reg) = 0;
 };
 
-/// Which register list applies to which entity.  Default: fixed list.
+/**Which register list applies to which entity.  Default: fixed list. */
 using RegisterSelector =
     std::function<std::vector<NamedRegister>(const SlaveEntity&)>;
 
-/// Common CoE identity/communication registers — a sensible default for
-/// any EtherCAT slave; apps typically append device-specific entries.
+/**
+ * Common CoE identity/communication registers — a sensible default for
+ * any EtherCAT slave; apps typically append device-specific entries.
+ */
 inline std::vector<NamedRegister> standardRegisters() {
     return {
         {0x1000, 0, "Device type",        32},
@@ -128,8 +132,10 @@ public:
         return nullptr;
     }
 
-    /// Re-poll the provider into the entity table.  Call from the render
-    /// tick — the provider decides how expensive a poll is.
+    /**
+     * Re-poll the provider into the entity table.  Call from the render
+     * tick — the provider decides how expensive a poll is.
+     */
     void refresh() {
         if (!provider_) return;
         entities_list_ = provider_->entities();
@@ -164,9 +170,11 @@ public:
         entities_.setRows(std::move(rows));
     }
 
-    /// Re-read the named registers of the currently selected entity via
-    /// the injected reader.  Only call on user request or a slow poll —
-    /// the transport may be a live SDO channel.
+    /**
+     * Re-read the named registers of the currently selected entity via
+     * the injected reader.  Only call on user request or a slow poll —
+     * the transport may be a live SDO channel.
+     */
     void refreshRegisters() {
         registers_.setRows({});
         reg_status_.clear();
@@ -201,14 +209,14 @@ public:
                       std::to_string(e->index);
     }
 
-    /// True when the selected entity changed since the last register read.
+    /**True when the selected entity changed since the last register read. */
     bool registersStale() const {
         const SlaveEntity* e = selectedEntity();
         return e && reg_slave_ >= 0 &&
                e->index != static_cast<uint16_t>(reg_slave_);
     }
 
-    /// True when registers were never read for the selected entity.
+    /**True when registers were never read for the selected entity. */
     bool registersUnread() const {
         const SlaveEntity* e = selectedEntity();
         return e && reg_slave_ != static_cast<int>(e->index);

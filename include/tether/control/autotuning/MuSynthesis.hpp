@@ -97,23 +97,23 @@ namespace tether::control {
  * @brief Type of uncertainty block in Δ structure
  */
 enum class MuBlockType {
-    Full,           ///< Full complex block Δᵢ ∈ C^(n×n)
-    Scalar,         ///< Scalar uncertainty δᵢ ∈ C
-    RepeatedScalar, ///< Repeated scalar δᵢ*I
-    Real,           ///< Real parametric uncertainty δᵢ ∈ R
-    RepeatedReal    ///< Repeated real scalar
+    Full, /**< Full complex block Δᵢ ∈ C^(n×n) */
+    Scalar, /**< Scalar uncertainty δᵢ ∈ C */
+    RepeatedScalar, /**< Repeated scalar δᵢ*I */
+    Real, /**< Real parametric uncertainty δᵢ ∈ R */
+    RepeatedReal /**< Repeated real scalar */
 };
 
 /**
  * @brief Description of one uncertainty block
  */
 struct UncertaintyBlock {
-    std::string name;           ///< Block name for identification
+    std::string name; /**< Block name for identification */
     MuBlockType type{MuBlockType::Full};
-    int rows{1};                ///< Block row dimension
-    int cols{1};                ///< Block column dimension
-    int repetitions{1};         ///< Number of repetitions (for repeated scalars)
-    double bound{1.0};          ///< Uncertainty bound (|Δ| ≤ bound)
+    int rows{1}; /**< Block row dimension */
+    int cols{1}; /**< Block column dimension */
+    int repetitions{1}; /**< Number of repetitions (for repeated scalars) */
+    double bound{1.0}; /**< Uncertainty bound (|Δ| ≤ bound) */
     
     int totalRows() const { 
         return (type == MuBlockType::RepeatedScalar || type == MuBlockType::RepeatedReal) 
@@ -133,9 +133,9 @@ struct UncertaintyBlock {
  * @brief D-scale fitting result
  */
 struct DScaleFit {
-    std::vector<double> frequencies;    ///< Frequency points [rad/s]
-    std::vector<std::vector<std::complex<double>>> D;  ///< D(jω) values
-    int order{2};                       ///< Order of rational fit
+    std::vector<double> frequencies; /**< Frequency points [rad/s] */
+    std::vector<std::vector<std::complex<double>>> D; /**< D(jω) values */
+    int order{2}; /**< Order of rational fit */
     
     // Rational fit coefficients (for state-space realization)
     std::vector<double> numeratorCoeffs;
@@ -151,11 +151,11 @@ struct DScaleFit {
  */
 struct MuAnalysisResult {
     std::vector<double> frequencies;
-    std::vector<double> muUpper;        ///< Upper bounds
-    std::vector<double> muLower;        ///< Lower bounds
-    double peakMuUpper{0.0};           ///< Peak upper bound
-    double peakMuLower{0.0};           ///< Peak lower bound
-    double peakFrequency{0.0};         ///< Frequency of peak
+    std::vector<double> muUpper; /**< Upper bounds */
+    std::vector<double> muLower; /**< Lower bounds */
+    double peakMuUpper{0.0}; /**< Peak upper bound */
+    double peakMuLower{0.0}; /**< Peak lower bound */
+    double peakFrequency{0.0}; /**< Frequency of peak */
     
     bool robustStability() const { return peakMuUpper < 1.0; }
     bool robustPerformance() const { return peakMuUpper < 1.0; }
@@ -283,13 +283,13 @@ public:
      * @brief Configuration for D-K iteration
      */
     struct SynthesisConfig {
-        int maxIterations = 10;          ///< Max D-K iterations
-        double convergenceTol = 0.01;    ///< Convergence tolerance
-        int dScaleOrder = 2;             ///< Order of D-scale fits
-        int numFrequencies = 100;        ///< Frequency points for analysis
-        double freqMin = 1e-3;           ///< Minimum frequency [rad/s]
-        double freqMax = 1e3;            ///< Maximum frequency [rad/s]
-        bool verbose = false;            ///< Print iteration info
+        int maxIterations = 10; /**< Max D-K iterations */
+        double convergenceTol = 0.01; /**< Convergence tolerance */
+        int dScaleOrder = 2; /**< Order of D-scale fits */
+        int numFrequencies = 100; /**< Frequency points for analysis */
+        double freqMin = 1e-3; /**< Minimum frequency [rad/s] */
+        double freqMax = 1e3; /**< Maximum frequency [rad/s] */
+        bool verbose = false; /**< Print iteration info */
     };
     
     /**

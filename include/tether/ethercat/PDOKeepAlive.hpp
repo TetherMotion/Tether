@@ -25,7 +25,7 @@ public:
     PDOKeepAlive(PDOKeepAlive&&)                 = delete;
     PDOKeepAlive& operator=(PDOKeepAlive&&)      = delete;
 
-    /// Stop the worker thread (idempotent; also runs on destruction).
+    /**Stop the worker thread (idempotent; also runs on destruction). */
     void stop();
     bool running() const { return !stop_.load(std::memory_order_acquire); }
 

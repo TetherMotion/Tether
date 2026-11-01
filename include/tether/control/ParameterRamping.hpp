@@ -135,8 +135,8 @@ public:
      * @brief Configuration
      */
     struct Config {
-        double rampTime = 1.0;           ///< Time to reach target (seconds)
-        double minRampTime = 0.01;       ///< Minimum ramp time
+        double rampTime = 1.0; /**< Time to reach target (seconds) */
+        double minRampTime = 0.01; /**< Minimum ramp time */
         
         static Config getDefault() { return Config{1.0, 0.01}; }
     };
@@ -197,8 +197,10 @@ public:
         m_wasComplete = true;
     }
     
-    /// Set ramp time
-    /// @param time Ramp duration [s]; clamped to `minRampTime`
+    /**
+     * Set ramp time
+     * @param time Ramp duration [s]; clamped to `minRampTime`
+     */
     void setRampTime(double time) {
         m_config.rampTime = std::max(m_config.minRampTime, time);
     }
@@ -223,8 +225,8 @@ private:
 class SigmoidalRamper : public ParameterRamperBase {
 public:
     struct Config {
-        double duration = 1.0;           ///< Total transition time
-        double steepness = 5.0;          ///< Sigmoid steepness (higher = sharper)
+        double duration = 1.0; /**< Total transition time */
+        double steepness = 5.0; /**< Sigmoid steepness (higher = sharper) */
         double tolerance = 1e-6;
         
         static Config getDefault() { return Config{1.0, 5.0, 1e-6}; }
@@ -334,9 +336,9 @@ private:
 class SCurveRamper : public ParameterRamperBase {
 public:
     struct Config {
-        double maxVelocity = 10.0;       ///< Maximum velocity (rad/s) – default increased by 10x
-        double maxAcceleration = 20.0;   ///< Maximum acceleration (rad/s²) – default increased by 10x
-        double maxJerk = 100.0;          ///< Maximum jerk (rad/s³) – default increased by 10x
+        double maxVelocity = 10.0; /**< Maximum velocity (rad/s) – default increased by 10x */
+        double maxAcceleration = 20.0; /**< Maximum acceleration (rad/s²) – default increased by 10x */
+        double maxJerk = 100.0; /**< Maximum jerk (rad/s³) – default increased by 10x */
         double tolerance = 1e-9;
         
         // NOTE: original defaults (1/2/10) were too slow for many demo use-cases.

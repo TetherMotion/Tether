@@ -141,14 +141,14 @@ private:
     size_t m_{0};
     size_t p_{0};
 
-    Eigen::MatrixXd A_; ///< State transition matrix
-    Eigen::MatrixXd B_; ///< Input matrix
-    Eigen::MatrixXd C_; ///< Output matrix
-    Eigen::MatrixXd W_; ///< Process noise covariance
-    Eigen::MatrixXd V_; ///< Measurement noise covariance
-    Eigen::MatrixXd P_; ///< Error covariance
-    Eigen::MatrixXd L_; ///< Kalman gain
-    Eigen::VectorXd x_; ///< State estimate
+    Eigen::MatrixXd A_; /**< State transition matrix */
+    Eigen::MatrixXd B_; /**< Input matrix */
+    Eigen::MatrixXd C_; /**< Output matrix */
+    Eigen::MatrixXd W_; /**< Process noise covariance */
+    Eigen::MatrixXd V_; /**< Measurement noise covariance */
+    Eigen::MatrixXd P_; /**< Error covariance */
+    Eigen::MatrixXd L_; /**< Kalman gain */
+    Eigen::VectorXd x_; /**< State estimate */
 
     bool gain_computed_{false};
 };

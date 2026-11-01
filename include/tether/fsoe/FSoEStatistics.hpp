@@ -93,22 +93,22 @@ class FSoEStatistics {
 public:
     FSoEStatistics() = default;
 
-    /// @brief Enable/disable diagnostic logging.
+    /**@brief Enable/disable diagnostic logging. */
     void setDiagnosticsEnabled(bool enabled) { enableDiagnostics_ = enabled; }
 
-    /// @brief Set max number of diagnostic entries before oldest are evicted.
+    /**@brief Set max number of diagnostic entries before oldest are evicted. */
     void setMaxEntries(uint32_t max) { maxEntries_ = max; }
 
-    /// @brief Set current timestamp for diagnostic entries.
+    /**@brief Set current timestamp for diagnostic entries. */
     void setCurrentTimestamp(uint64_t ts) { currentTimestamp_ = ts; }
 
-    /// @brief Set current state for diagnostic entries.
+    /**@brief Set current state for diagnostic entries. */
     void setCurrentState(uint8_t state) { currentState_ = state; }
 
-    /// @brief Set current sequence number for diagnostic entries.
+    /**@brief Set current sequence number for diagnostic entries. */
     void setCurrentSequence(uint8_t seq) { currentSequence_ = seq; }
 
-    /// @brief Set current connection ID for diagnostic entries.
+    /**@brief Set current connection ID for diagnostic entries. */
     void setCurrentConnectionId(uint16_t connId) { currentConnectionId_ = connId; }
 
     // ---- Counter increments ------------------------------------------------
@@ -128,14 +128,14 @@ public:
     void onRecoveryAttempt() { stats_.recoveryAttempts++; }
     void onSuccessfulRecovery() { stats_.successfulRecoveries++; }
 
-    /// @brief Update cycle time statistics.
+    /**@brief Update cycle time statistics. */
     void updateCycleTime(uint32_t cycleUs) {
         if (cycleUs < stats_.minCycleTimeUs) stats_.minCycleTimeUs = cycleUs;
         if (cycleUs > stats_.maxCycleTimeUs) stats_.maxCycleTimeUs = cycleUs;
         stats_.avgCycleTimeUs = (stats_.avgCycleTimeUs * 7 + cycleUs) / 8;
     }
 
-    /// @brief Update gap timing (time since last valid frame).
+    /**@brief Update gap timing (time since last valid frame). */
     void updateGap(uint64_t gapMs) {
         if (gapMs > stats_.longestGapMs) {
             stats_.longestGapMs = gapMs;
@@ -144,7 +144,7 @@ public:
 
     // ---- Diagnostic logging ------------------------------------------------
 
-    /// @brief Log a diagnostic entry.
+    /**@brief Log a diagnostic entry. */
     void logDiagnostic(uint16_t errorCode, const char* message);
 
     // ---- Accessors ---------------------------------------------------------

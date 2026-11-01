@@ -27,7 +27,7 @@ namespace EtherCAT { namespace slave {
 
 class SIIEmulator {
 public:
-    /// @param registers  Pointer to the ESC register bank (SlaveCore::registers_).
+    /**@param registers  Pointer to the ESC register bank (SlaveCore::registers_). */
     explicit SIIEmulator(std::array<uint8_t, 4096>* registers)
         : registers_(registers) {}
 
@@ -62,19 +62,21 @@ public:
 
     // ---- Command processing -----------------------------------------------
 
-    /// @brief Process the current SII control command (read or write op).
+    /**@brief Process the current SII control command (read or write op). */
     void processCommand();
 
-    /// @brief Handle a register write that targets SIIControl or SIIAddress.
-    /// Called from SlaveCore::writeRegister for SII-related register addresses.
+    /**
+     * @brief Handle a register write that targets SIIControl or SIIAddress.
+     * Called from SlaveCore::writeRegister for SII-related register addresses.
+     */
     void handleRegisterWrite(uint16_t addr, const uint8_t* data, uint16_t len);
 
     // ---- Initialization ----------------------------------------------------
 
-    /// @brief Create minimal SII/EEPROM data from a slave identity.
+    /**@brief Create minimal SII/EEPROM data from a slave identity. */
     void initializeFromIdentity(const SlaveIdentity& identity);
 
-    /// @brief Direct access to the SII state (for SlaveCore compatibility).
+    /**@brief Direct access to the SII state (for SlaveCore compatibility). */
     SIIState& state() { return siiState_; }
     const SIIState& state() const { return siiState_; }
 

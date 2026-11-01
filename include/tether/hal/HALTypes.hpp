@@ -32,43 +32,45 @@ namespace HAL {
 // Ethernet Constants
 // ============================================================================
 
-/// Maximum Ethernet frame size (without FCS)
+/**Maximum Ethernet frame size (without FCS) */
 constexpr size_t kMaxFrameSize = 1514;
 
-/// Minimum Ethernet frame size (without FCS)
+/**Minimum Ethernet frame size (without FCS) */
 constexpr size_t kMinFrameSize = 60;
 
-/// Ethernet header size
+/**Ethernet header size */
 constexpr size_t kEthernetHeaderSize = 14;
 
-/// 802.1Q VLAN tag size
+/**802.1Q VLAN tag size */
 constexpr size_t kVlanTagSize = 4;
 
-/// Maximum frame size with VLAN tag
+/**Maximum frame size with VLAN tag */
 constexpr size_t kMaxFrameSizeVlan = kMaxFrameSize + kVlanTagSize;
 
-/// Maximum jumbo Ethernet frame size (9000-byte MTU + 14-byte header,
-/// excluding FCS).  Buffers that must hold the largest configurable frame
-/// use this ceiling.
+/**
+ * Maximum jumbo Ethernet frame size (9000-byte MTU + 14-byte header,
+ * excluding FCS).  Buffers that must hold the largest configurable frame
+ * use this ceiling.
+ */
 constexpr size_t kMaxJumboFrameSize = 9014;
 constexpr size_t kMaxJumboFrameSizeVlan = kMaxJumboFrameSize + kVlanTagSize;
 
-/// EtherType for EtherCAT
+/**EtherType for EtherCAT */
 constexpr uint16_t kEtherTypeEtherCAT = 0x88A4;
 
-/// EtherType for IPv4
+/**EtherType for IPv4 */
 constexpr uint16_t kEtherTypeIPv4 = 0x0800;
 
-/// EtherType for IPv6
+/**EtherType for IPv6 */
 constexpr uint16_t kEtherTypeIPv6 = 0x86DD;
 
-/// EtherType for ARP
+/**EtherType for ARP */
 constexpr uint16_t kEtherTypeARP = 0x0806;
 
-/// EtherType for 802.1Q VLAN
+/**EtherType for 802.1Q VLAN */
 constexpr uint16_t kEtherType8021Q = 0x8100;
 
-/// MAC address size
+/**MAC address size */
 constexpr size_t kMacAddressSize = 6;
 
 // ============================================================================
@@ -122,14 +124,18 @@ struct MacAddress {
         return (bytes[0] & 0x02) != 0;
     }
     
-    /// EtherCAT broadcast MAC
-    /// @return FF:FF:FF:FF:FF:FF
+    /**
+     * EtherCAT broadcast MAC
+     * @return FF:FF:FF:FF:FF:FF
+     */
     static MacAddress etherCATBroadcast() {
         return MacAddress(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
     }
     
-    /// EtherCAT multicast MAC (used by some implementations)
-    /// @return 01:01:05:00:00:00
+    /**
+     * EtherCAT multicast MAC (used by some implementations)
+     * @return 01:01:05:00:00:00
+     */
     static MacAddress etherCATMulticast() {
         return MacAddress(0x01, 0x01, 0x05, 0x00, 0x00, 0x00);
     }
@@ -139,16 +145,16 @@ struct MacAddress {
 // Time Types
 // ============================================================================
 
-/// Time duration in microseconds
+/**Time duration in microseconds */
 using Microseconds = int64_t;
 
-/// Time duration in milliseconds
+/**Time duration in milliseconds */
 using Milliseconds = int64_t;
 
-/// Time duration in nanoseconds
+/**Time duration in nanoseconds */
 using Nanoseconds = int64_t;
 
-/// Timestamp (microseconds since epoch or system start)
+/**Timestamp (microseconds since epoch or system start) */
 using Timestamp = uint64_t;
 
 // ============================================================================

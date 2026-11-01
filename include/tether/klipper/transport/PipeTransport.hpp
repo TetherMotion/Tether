@@ -29,15 +29,15 @@ namespace tether::klipper::transport {
  * @brief Configuration for a pipe/serial transport.
  */
 struct PipeTransportConfig {
-    /// Device path for a serial device (e.g. "/dev/ttyUSB0"). Empty for raw fd mode.
+    /**Device path for a serial device (e.g. "/dev/ttyUSB0"). Empty for raw fd mode. */
     std::string devicePath;
-    /// Baud rate (e.g. 115200). Ignored if 0 or for raw fd mode.
+    /**Baud rate (e.g. 115200). Ignored if 0 or for raw fd mode. */
     uint32_t baudRate = 115200;
-    /// Read file descriptor (raw fd mode). If <0, derived from devicePath.
+    /**Read file descriptor (raw fd mode). If <0, derived from devicePath. */
     int readFd = -1;
-    /// Write file descriptor (raw fd mode). If <0, derived from devicePath.
+    /**Write file descriptor (raw fd mode). If <0, derived from devicePath. */
     int writeFd = -1;
-    /// If true, the transport owns the fds and closes them on close().
+    /**If true, the transport owns the fds and closes them on close(). */
     bool ownsFds = true;
 };
 

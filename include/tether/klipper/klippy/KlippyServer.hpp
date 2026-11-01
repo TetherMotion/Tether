@@ -1,12 +1,14 @@
 #pragma once
 
-/// @file KlippyServer.hpp
-/// @brief Core business-logic layer for the Klipper/Moonraker-compatible API.
-///
-/// KlippyServer contains all endpoint handlers, data stores, state management,
-/// and printer-object registration. It is transport-agnostic: both
-/// KlippyUdsServer (Unix domain socket) and KlippyHttpServer (HTTP/WebSocket)
-/// delegate to a shared KlippyServer instance.
+/**
+ * @file KlippyServer.hpp
+ * @brief Core business-logic layer for the Klipper/Moonraker-compatible API.
+ *
+ * KlippyServer contains all endpoint handlers, data stores, state management,
+ * and printer-object registration. It is transport-agnostic: both
+ * KlippyUdsServer (Unix domain socket) and KlippyHttpServer (HTTP/WebSocket)
+ * delegate to a shared KlippyServer instance.
+ */
 
 #include "tether/klipper/klippy/JsonValue.hpp"
 #include "tether/klipper/klippy/PrinterState.hpp"
@@ -30,19 +32,21 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Core business-logic server for the Klipper/Moonraker-compatible API.
-///
-/// This class owns all endpoint handlers, data stores (database, job queue,
-/// job history, announcements, webcams, services, users, bots, etc.), printer
-/// state, printer objects, and configuration. It is independent of any
-/// transport (UDS, HTTP, WebSocket).
-///
-/// @section server_threading Thread safety
-///
-/// All public methods are safe to call from any thread. Internal state is
-/// protected by `mutex_` (a `std::recursive_mutex`). Event callbacks are
-/// invoked *outside* the mutex to avoid deadlocks when a transport layer
-/// needs to acquire its own lock inside a callback.
+/**
+ * @brief Core business-logic server for the Klipper/Moonraker-compatible API.
+ *
+ * This class owns all endpoint handlers, data stores (database, job queue,
+ * job history, announcements, webcams, services, users, bots, etc.), printer
+ * state, printer objects, and configuration. It is independent of any
+ * transport (UDS, HTTP, WebSocket).
+ *
+ * @section server_threading Thread safety
+ *
+ * All public methods are safe to call from any thread. Internal state is
+ * protected by `mutex_` (a `std::recursive_mutex`). Event callbacks are
+ * invoked *outside* the mutex to avoid deadlocks when a transport layer
+ * needs to acquire its own lock inside a callback.
+ */
 class KlippyServer {
 public:
     explicit KlippyServer(UdsServerConfig cfg = {});
@@ -55,40 +59,54 @@ public:
     // State management
     // ------------------------------------------------------------------
 
-    /// @brief Transition to a new printer state.
-    /// @param state New state (Startup, Ready, Error, Shutdown)
-    /// @param message Optional state detail reported via stateMessage()
+    /**
+     * @brief Transition to a new printer state.
+     * @param state New state (Startup, Ready, Error, Shutdown)
+     * @param message Optional state detail reported via stateMessage()
+     */
     void setState(PrinterState state, const std::string& message = "");
 
-    /// @brief Get current printer state.
-    /// @return Active state
+    /**
+     * @brief Get current printer state.
+     * @return Active state
+     */
     PrinterState state() const;
 
-    /// @brief Get current state message.
-    /// @return Human-readable state detail
+    /**
+     * @brief Get current state message.
+     * @return Human-readable state detail
+     */
     std::string stateMessage() const;
 
     // ------------------------------------------------------------------
     // Endpoint registration
     // ------------------------------------------------------------------
 
-    /// @brief Register an endpoint handler.
-    /// @param method Endpoint name (e.g. "server/info")
-    /// @param handler Callable invoked with (params) -> result
+    /**
+     * @brief Register an endpoint handler.
+     * @param method Endpoint name (e.g. "server/info")
+     * @param handler Callable invoked with (params) -> result
+     */
     void registerEndpoint(const std::string& method, EndpointHandler handler);
 
-    /// @brief Unregister an endpoint.
-    /// @param method Endpoint name to remove
+    /**
+     * @brief Unregister an endpoint.
+     * @param method Endpoint name to remove
+     */
     void unregisterEndpoint(const std::string& method);
 
-    /// @brief List all registered endpoints.
-    /// @return Registered endpoint names
+    /**
+     * @brief List all registered endpoints.
+     * @return Registered endpoint names
+     */
     std::vector<std::string> listEndpoints() const;
 
-    /// @brief Invoke a registered endpoint by name.
-    /// @param method Endpoint name
-    /// @param params Request parameters
-    /// @return The result from the endpoint handler, or error JSON if not found.
+    /**
+     * @brief Invoke a registered endpoint by name.
+     * @param method Endpoint name
+     * @param params Request parameters
+     * @return The result from the endpoint handler, or error JSON if not found.
+     */
     JsonValue callEndpoint(const std::string& method, const JsonValue& params);
 
     // ------------------------------------------------------------------
@@ -99,10 +117,12 @@ public:
     void unregisterObject(const std::string& name);
     std::vector<std::string> listObjects() const;
 
-    /// @brief Query object status.
-    /// @param objects Map of object name -> requested field names (empty
-    ///        = all fields)
-    /// @return Object name -> field -> value map
+    /**
+     * @brief Query object status.
+     * @param objects Map of object name -> requested field names (empty
+     *        = all fields)
+     * @return Object name -> field -> value map
+     */
     std::map<std::string, std::map<std::string, JsonValue>> queryObjects(
         const std::map<std::string, std::vector<std::string>>& objects) const;
 
@@ -110,9 +130,11 @@ public:
     // G-code output
     // ------------------------------------------------------------------
 
-    /// @brief Emit a G-code response line.
-    /// Records in the gcode store and notifies all registered observers.
-    /// @param response Line text (e.g. "// Done", "!! Error")
+    /**
+     * @brief Emit a G-code response line.
+     * Records in the gcode store and notifies all registered observers.
+     * @param response Line text (e.g. "// Done", "!! Error")
+     */
     void emitGcodeResponse(const std::string& response);
 
     // ------------------------------------------------------------------
@@ -121,18 +143,24 @@ public:
 
     const UdsServerConfig& config() const { return config_; }
 
-    /// @brief Load printer configuration from a file.
-    /// @param path Config file path
-    /// @return `true` on successful parse
+    /**
+     * @brief Load printer configuration from a file.
+     * @param path Config file path
+     * @return `true` on successful parse
+     */
     bool loadConfigFile(const std::string& path);
 
-    /// @brief Load printer configuration from the config file path
-    /// stored in UdsServerConfig::configFile.
-    /// @return `true` on successful parse
+    /**
+     * @brief Load printer configuration from the config file path
+     * stored in UdsServerConfig::configFile.
+     * @return `true` on successful parse
+     */
     bool loadConfig();
 
-    /// @brief Get the loaded configuration parser.
-    /// @return Parser holding the active configuration
+    /**
+     * @brief Get the loaded configuration parser.
+     * @return Parser holding the active configuration
+     */
     const config::ConfigParser& configParser() const { return configParser_; }
 
     // ------------------------------------------------------------------
@@ -452,7 +480,7 @@ private:
     // Internal helpers
     // ------------------------------------------------------------------
 
-    /// @brief Notify filelist change callbacks (called outside mutex).
+    /**@brief Notify filelist change callbacks (called outside mutex). */
     void notifyFilelistChanged(const std::string& action,
                                const std::string& path,
                                const std::string& root);
@@ -589,7 +617,7 @@ private:
     // Access / user management
     std::map<std::string, User> users_;
     std::string apiKey_ = "tether_default_api_key";
-    /// Oneshot tokens with creation timestamp for expiry (5 minute TTL)
+    /**Oneshot tokens with creation timestamp for expiry (5 minute TTL) */
     struct OneshotToken {
         std::string token;
         std::chrono::steady_clock::time_point createdAt;

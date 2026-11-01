@@ -56,50 +56,62 @@
 
 namespace tether::motion::replanner {
 
-/// Configuration for the certified suggestion solver.
+/**Configuration for the certified suggestion solver. */
 struct SuggestionSolverConfig {
-    /// The tolerance threshold for the contour error (mm).
-    /// The solver finds the max feed whose predicted error ≤ this.
+    /**
+     * The tolerance threshold for the contour error (mm).
+     * The solver finds the max feed whose predicted error ≤ this.
+     */
     double contourErrorThreshold = 0.01; // 10 µm
 
-    /// The feed tolerance for the bisection (mm/min).
-    /// The search converges to within this of the true maximum.
+    /**
+     * The feed tolerance for the bisection (mm/min).
+     * The search converges to within this of the true maximum.
+     */
     double feedTolerance = 1.0;
 
-    /// Maximum number of bisection iterations.
+    /**Maximum number of bisection iterations. */
     int maxIterations = 50;
 
-    /// Minimum feed rate to consider (mm/min).
+    /**Minimum feed rate to consider (mm/min). */
     double minFeedRate = 1.0;
 
-    /// Maximum feed rate to consider (mm/min).
+    /**Maximum feed rate to consider (mm/min). */
     double maxFeedRate = 60000.0;
 
-    /// Safety factor applied to the final accepted feed (0..1).
-    /// A value of 0.95 means the suggested feed is 95% of the maximum
-    /// accepted feed, providing a 5% safety margin.
+    /**
+     * Safety factor applied to the final accepted feed (0..1).
+     * A value of 0.95 means the suggested feed is 95% of the maximum
+     * accepted feed, providing a 5% safety margin.
+     */
     double safetyFactor = 0.95;
 };
 
-/// Result of the certified suggestion solver.
+/**Result of the certified suggestion solver. */
 struct CertifiedSuggestion {
-    /// The suggested feed rate (mm/min) — guaranteed to keep the
-    /// predicted contour error ≤ contourErrorThreshold (T3 analog).
+    /**
+     * The suggested feed rate (mm/min) — guaranteed to keep the
+     * predicted contour error ≤ contourErrorThreshold (T3 analog).
+     */
     double suggestedFeedRate = 0.0;
 
-    /// The predicted contour error at the suggested feed rate (mm).
+    /**The predicted contour error at the suggested feed rate (mm). */
     double predictedError = 0.0;
 
-    /// Whether the solver found an acceptable feed rate.
-    /// If false, suggestedFeedRate is set to minFeedRate and
-    /// predictedError may still exceed the threshold.
+    /**
+     * Whether the solver found an acceptable feed rate.
+     * If false, suggestedFeedRate is set to minFeedRate and
+     * predictedError may still exceed the threshold.
+     */
     bool accepted = false;
 
-    /// The number of bisection iterations performed.
+    /**The number of bisection iterations performed. */
     int iterations = 0;
 
-    /// Human-readable diagnostic (e.g. "Bisection converged",
-    /// "All feeds rejected — using minimum", "No error data").
+    /**
+     * Human-readable diagnostic (e.g. "Bisection converged",
+     * "All feeds rejected — using minimum", "No error data").
+     */
     std::string reason;
 };
 

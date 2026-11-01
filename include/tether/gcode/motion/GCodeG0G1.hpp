@@ -221,74 +221,74 @@ class VariableSystem;
 struct LinearMotionConfig {
     // === Rapid (G0) Settings ===
     
-    /// Coordinate rapids (straight line) vs independent axis motion
+    /**Coordinate rapids (straight line) vs independent axis motion */
     bool coordinatedRapids{false};
     
-    /// Rapid override minimum (0.0 to 1.0)
+    /**Rapid override minimum (0.0 to 1.0) */
     double rapidOverrideMin{0.0};
     
-    /// Rapid override maximum (0.0 to 1.0)
+    /**Rapid override maximum (0.0 to 1.0) */
     double rapidOverrideMax{1.0};
     
-    /// Safe Z height for rapid retract
+    /**Safe Z height for rapid retract */
     double safeZHeight{50.0};  // mm
     
     // === Feed (G1) Settings ===
     
-    /// Default feed rate (if none specified)
+    /**Default feed rate (if none specified) */
     double defaultFeedRate{100.0};  // mm/min
     
-    /// Minimum allowed feed rate
+    /**Minimum allowed feed rate */
     double minFeedRate{0.1};  // mm/min
     
-    /// Maximum allowed feed rate
+    /**Maximum allowed feed rate */
     double maxFeedRate{10000.0};  // mm/min
     
-    /// Plunge feed limit (Z negative direction)
+    /**Plunge feed limit (Z negative direction) */
     double maxPlungeFeed{500.0};  // mm/min
     
-    /// Auto-limit plunge feed when Z is descending
+    /**Auto-limit plunge feed when Z is descending */
     bool limitPlungeFeed{true};
     
     // === Path Blending ===
     
-    /// Enable path blending (G64 default)
+    /**Enable path blending (G64 default) */
     bool pathBlendingDefault{true};
     
-    /// Default path blend tolerance
+    /**Default path blend tolerance */
     double blendToleranceP{0.05};  // mm
     
-    /// Default blend threshold Q (start blend at Q distance)
+    /**Default blend threshold Q (start blend at Q distance) */
     double blendToleranceQ{0.1};  // mm
     
-    /// Maximum acceleration for blending
+    /**Maximum acceleration for blending */
     double maxBlendAccel{500.0};  // mm/s²
     
     // === Feed Mode ===
     
-    /// Default feed mode (G93/G94/G95)
+    /**Default feed mode (G93/G94/G95) */
     FeedMode defaultFeedMode{FeedMode::UNITS_PER_MIN};
     
-    /// Require F word after G93 (inverse time) on every line
+    /**Require F word after G93 (inverse time) on every line */
     bool requireFInG93{true};
     
     // === Multi-axis ===
     
-    /// Include rotary axes in feed calculation
+    /**Include rotary axes in feed calculation */
     bool includeRotaryInFeed{true};
     
-    /// Rotation factor for rotary contribution (radius equivalent)
+    /**Rotation factor for rotary contribution (radius equivalent) */
     double rotationFactor{1.0};
     
     // === Safety ===
     
-    /// Require F word before first G1
+    /**Require F word before first G1 */
     bool requireInitialFeed{true};
     
-    /// Warn if G0 plunges into work
+    /**Warn if G0 plunges into work */
     bool warnRapidPlunge{true};
     
-    /// Maximum safe rapid plunge depth
+    /**Maximum safe rapid plunge depth */
     double maxSafeRapidPlunge{5.0};  // mm from current Z
 };
 
@@ -394,8 +394,8 @@ inline double calculateMoveTime(double distance, double feedRate) {
  */
 struct PathBlendParams {
     GCode::PathMode mode{GCode::PathMode::BLEND};
-    double toleranceP{0.05};  ///< Path deviation tolerance
-    double toleranceQ{0.1};   ///< Naive CAM tolerance
+    double toleranceP{0.05}; /**< Path deviation tolerance */
+    double toleranceQ{0.1}; /**< Naive CAM tolerance */
 };
 
 /**

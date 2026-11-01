@@ -1,11 +1,13 @@
-/// @file KlippyInstanceConfigProcessing.ipp
-/// @brief Config processing and settings persistence for KlippyInstance (included into class body).
-///
-/// This file is included inside the KlippyInstance class definition.
-/// It contains processConfigSections() and the settings persistence methods
-/// (saveSettingsToFile, loadSettingsFromFile, reportSettings).
+/**
+ * @file KlippyInstanceConfigProcessing.ipp
+ * @brief Config processing and settings persistence for KlippyInstance (included into class body).
+ *
+ * This file is included inside the KlippyInstance class definition.
+ * It contains processConfigSections() and the settings persistence methods
+ * (saveSettingsToFile, loadSettingsFromFile, reportSettings).
+ */
 
-    /// @brief Load config from file and process sections.
+    /**@brief Load config from file and process sections. */
     bool loadConfig(const std::string& path) {
         if (!server_.loadConfigFile(path)) return false;
         processConfigSections();
@@ -13,9 +15,11 @@
         return true;
     }
 
-    /// @brief Apply parsed settings to runtime objects.
-    /// Called after processConfigSections() to wire config values
-    /// into the toolhead, motion translator, printer objects, etc.
+    /**
+     * @brief Apply parsed settings to runtime objects.
+     * Called after processConfigSections() to wire config values
+     * into the toolhead, motion translator, printer objects, etc.
+     */
     void applySettings() {
         // --- Motion limits ---
         if (toolheadObj_) {
@@ -330,14 +334,16 @@
         }
     }
 
-    /// @brief Process parsed config sections into KlippyInstance state.
-    /// Handles: printer, stepper, extruder, heater_bed, fan, probe, bed_mesh,
-    /// mcu, virtual_sdcard, safe_z_home, idle_timeout, pause_resume,
-    /// display_status, output_pin, servo, temperature_sensor, temperature_fan,
-    /// heater_fan, controller_fan, tmc*, adxl345, input_shaper, skew_correction,
-    /// z_tilt, quad_gantry_level, bed_screws, screws_tilt_adjust,
-    /// gcode_macro, delayed_gcode, firmware_retraction, exclude_object,
-    /// save_variables, force_move, homing_override, endstop_phase, menu, palette2.
+    /**
+     * @brief Process parsed config sections into KlippyInstance state.
+     * Handles: printer, stepper, extruder, heater_bed, fan, probe, bed_mesh,
+     * mcu, virtual_sdcard, safe_z_home, idle_timeout, pause_resume,
+     * display_status, output_pin, servo, temperature_sensor, temperature_fan,
+     * heater_fan, controller_fan, tmc*, adxl345, input_shaper, skew_correction,
+     * z_tilt, quad_gantry_level, bed_screws, screws_tilt_adjust,
+     * gcode_macro, delayed_gcode, firmware_retraction, exclude_object,
+     * save_variables, force_move, homing_override, endstop_phase, menu, palette2.
+     */
     void processConfigSections() {
         const auto& parser = server_.configParser();
         for (const auto& section : parser.sections()) {

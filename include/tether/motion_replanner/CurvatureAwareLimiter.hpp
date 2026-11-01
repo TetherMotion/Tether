@@ -47,53 +47,61 @@
 
 namespace tether::motion::replanner {
 
-/// Configuration for the curvature-aware limiter.
+/**Configuration for the curvature-aware limiter. */
 struct CurvatureLimiterConfig {
-    /// Maximum allowed centripetal acceleration (mm/s²).
-    /// The feed limit is v = sqrt(a_cent / kappa).
+    /**
+     * Maximum allowed centripetal acceleration (mm/s²).
+     * The feed limit is v = sqrt(a_cent / kappa).
+     */
     double maxCentripetalAcceleration = 500.0;
 
-    /// Maximum absolute feed rate (mm/min). The curvature-aware limit
-    /// is capped at this value on straight segments (kappa → 0).
+    /**
+     * Maximum absolute feed rate (mm/min). The curvature-aware limit
+     * is capped at this value on straight segments (kappa → 0).
+     */
     double maxFeedRate = 6000.0; // 100 mm/s
 
-    /// Minimum curvature below which the segment is treated as straight
-    /// (1/mm). Below this, the feed rate is capped at maxFeedRate.
+    /**
+     * Minimum curvature below which the segment is treated as straight
+     * (1/mm). Below this, the feed rate is capped at maxFeedRate.
+     */
     double minCurvature = 1e-9;
 
-    /// Safety factor applied to the computed limit (0..1).
-    /// A value of 0.9 means the suggested feed is 90% of the theoretical
-    /// maximum, providing a 10% safety margin.
+    /**
+     * Safety factor applied to the computed limit (0..1).
+     * A value of 0.9 means the suggested feed is 90% of the theoretical
+     * maximum, providing a 10% safety margin.
+     */
     double safetyFactor = 0.9;
 };
 
-/// A feed rate limit at one point along the path.
+/**A feed rate limit at one point along the path. */
 struct FeedLimitPoint {
-    /// Arc length along the path (mm).
+    /**Arc length along the path (mm). */
     double arcLength = 0.0;
 
-    /// Certified curvature at this point (1/mm), or 0 if straight.
+    /**Certified curvature at this point (1/mm), or 0 if straight. */
     double curvature = 0.0;
 
-    /// Curvature-aware velocity limit (mm/s).
+    /**Curvature-aware velocity limit (mm/s). */
     double velocityLimit = 0.0;
 
-    /// Curvature-aware feed rate limit (mm/min) = velocityLimit * 60.
+    /**Curvature-aware feed rate limit (mm/min) = velocityLimit * 60. */
     double feedRateLimit = 0.0;
 };
 
-/// Result of computing the curvature-aware feed limit curve.
+/**Result of computing the curvature-aware feed limit curve. */
 struct CurvatureAwareFeedLimits {
-    /// One FeedLimitPoint per sample point along the path.
+    /**One FeedLimitPoint per sample point along the path. */
     std::vector<FeedLimitPoint> points;
 
-    /// The minimum feed rate across all points (mm/min).
+    /**The minimum feed rate across all points (mm/min). */
     double minFeedRate = 0.0;
 
-    /// The maximum feed rate across all points (mm/min).
+    /**The maximum feed rate across all points (mm/min). */
     double maxFeedRate = 0.0;
 
-    /// The arc length at which the minimum feed rate occurs (mm).
+    /**The arc length at which the minimum feed rate occurs (mm). */
     double minFeedRateArcLength = 0.0;
 };
 

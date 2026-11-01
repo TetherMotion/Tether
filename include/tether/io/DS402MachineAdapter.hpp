@@ -33,23 +33,25 @@
 
 namespace tether::io::machine {
 
-/// Application-owned description of one DS402-managed axis.
+/**Application-owned description of one DS402-managed axis. */
 struct DS402AxisConfig {
-    std::string stableId;      ///< Position-independent resource id (required)
-    std::string name;          ///< Human-readable axis name
-    std::string groupId;       ///< Motion-group resource id, may be empty
-    uint16_t slaveIndex = 0;   ///< EtherCAT slave position
-    uint16_t displayOrder = 0; ///< Preferred fleet display order
+    std::string stableId; /**< Position-independent resource id (required) */
+    std::string name; /**< Human-readable axis name */
+    std::string groupId; /**< Motion-group resource id, may be empty */
+    uint16_t slaveIndex = 0; /**< EtherCAT slave position */
+    uint16_t displayOrder = 0; /**< Preferred fleet display order */
     std::string positionUnit;
     std::string velocityUnit;
-    double positionScale = 1.0; ///< Application units per drive-native count
-    double velocityScale = 1.0; ///< Application units per drive-native count/s
+    double positionScale = 1.0; /**< Application units per drive-native count */
+    double velocityScale = 1.0; /**< Application units per drive-native count/s */
     bool supportsHoming = false;
 
-    /// Optional per-axis extractor for cyclic PDO data (positions,
-    /// velocities, torques, following error, modes). Called while holding
-    /// the adapter's snapshot mutex; must be non-blocking and only read the
-    /// drive's TxPDO buffer / cached values.
+    /**
+     * Optional per-axis extractor for cyclic PDO data (positions,
+     * velocities, torques, following error, modes). Called while holding
+     * the adapter's snapshot mutex; must be non-blocking and only read the
+     * drive's TxPDO buffer / cached values.
+     */
     std::function<void(const EtherCAT::CiA402Drive&, cia402::DriveSnapshotV1&)>
         fillProcessData;
 };
@@ -108,7 +110,7 @@ public:
         return snapshotFor(*axis, const_cast<EtherCAT::DS402Master&>(master_));
     }
 
-    /// Coherent aggregate; EtherCAT-wide health fields are best-effort.
+    /**Coherent aggregate; EtherCAT-wide health fields are best-effort. */
     cia402::MachineSnapshotV1 machineSnapshot() {
         std::lock_guard lock(mutex_);
         cia402::MachineSnapshotV1 snapshot;
@@ -280,8 +282,10 @@ private:
         return nullptr;
     }
 
-    /// Assemble a snapshot from AL state/status code + CiA 402 statusword.
-    /// Register read failures degrade the snapshot rather than throwing.
+    /**
+     * Assemble a snapshot from AL state/status code + CiA 402 statusword.
+     * Register read failures degrade the snapshot rather than throwing.
+     */
     cia402::DriveSnapshotV1 snapshotFor(const DS402AxisConfig& axis,
                                       EtherCAT::DS402Master& master) const {
         cia402::DriveSnapshotV1 snapshot;
@@ -317,8 +321,10 @@ private:
         return snapshot;
     }
 
-    /// Bump the machine state generation — call after any adapter-observed
-    /// state change (the cyclic loop or supervisor should invoke this).
+    /**
+     * Bump the machine state generation — call after any adapter-observed
+     * state change (the cyclic loop or supervisor should invoke this).
+     */
     void bumpGeneration() {
         generation_.fetch_add(1, std::memory_order_acq_rel);
     }
@@ -353,8 +359,10 @@ private:
         actions.insert(Action::AcknowledgeAlarm);
     }
 
-    /// Extract a tagged little-endian parameter (tag, width, value) matching
-    /// SimulatedCommandParameters' wire shape.
+    /**
+     * Extract a tagged little-endian parameter (tag, width, value) matching
+     * SimulatedCommandParameters' wire shape.
+     */
     static std::optional<int8_t> parameterI8(const std::vector<uint8_t>& bytes,
                                            uint8_t wantedTag) {
         size_t position = 0;

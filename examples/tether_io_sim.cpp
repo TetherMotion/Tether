@@ -57,8 +57,10 @@ void simLog(const char* level, const char* msg, ...) {
     va_end(ap);
 }
 
-/// A few writable scalar params so `set`/`get`/`stream` have something
-/// mutable to work with. Values live in a shared store.
+/**
+ * A few writable scalar params so `set`/`get`/`stream` have something
+ * mutable to work with. Values live in a shared store.
+ */
 struct ParamStore {
     double   targetSpeed = 0.0;
     double   kp = 1.0;
@@ -67,10 +69,12 @@ struct ParamStore {
     std::atomic<uint64_t> counter{0};   // ticks in the updater thread
 };
 
-/// The machine-profile manifest only covers the composite roots — plain
-/// scalars live in the graph without a slot.  Add dedicated demo scalar
-/// nodes (custom keys) to the graph and manifest before installing so the
-/// params/signals have real slots.
+/**
+ * The machine-profile manifest only covers the composite roots — plain
+ * scalars live in the graph without a slot.  Add dedicated demo scalar
+ * nodes (custom keys) to the graph and manifest before installing so the
+ * params/signals have real slots.
+ */
 struct DemoSchemas {
     SchemaGraph graph;
     std::vector<SchemaManifestEntry> manifest;

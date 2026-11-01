@@ -47,7 +47,7 @@
 namespace Tether {
 namespace Platform {
 
-/// Wake every thread blocked in atomicWait() on @p word.
+/**Wake every thread blocked in atomicWait() on @p word. */
 inline void atomicWakeAll(std::atomic<uint32_t>* word) {
 #if defined(__linux__)
     ::syscall(SYS_futex, reinterpret_cast<uint32_t*>(word),
@@ -59,7 +59,7 @@ inline void atomicWakeAll(std::atomic<uint32_t>* word) {
 #endif
 }
 
-/// Wake at most one waiter on @p word.
+/**Wake at most one waiter on @p word. */
 inline void atomicWakeOne(std::atomic<uint32_t>* word) {
 #if defined(__linux__)
     ::syscall(SYS_futex, reinterpret_cast<uint32_t*>(word),

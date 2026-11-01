@@ -68,63 +68,71 @@
 
 namespace tether::motion::profile_renurbs {
 
-/// Result of a single spline fit.
+/**Result of a single spline fit. */
 struct SplineFitResult {
-    /// Control points of the fitted B-spline (scalar values).
+    /**Control points of the fitted B-spline (scalar values). */
     std::vector<double> controlPoints;
 
-    /// Knot vector of the fitted B-spline (clamped, non-decreasing).
+    /**Knot vector of the fitted B-spline (clamped, non-decreasing). */
     std::vector<double> knots;
 
-    /// Degree of the fitted B-spline.
+    /**Degree of the fitted B-spline. */
     int degree = 0;
 
-    /// Maximum residual |B(u_i) − q_i| over all samples (after refinement).
+    /**Maximum residual |B(u_i) − q_i| over all samples (after refinement). */
     double maxResidual = 0.0;
 
-    /// Maximum residual on the dense test grid (inter-sample).
+    /**Maximum residual on the dense test grid (inter-sample). */
     double maxInterSampleResidual = 0.0;
 
-    /// True if the fit achieved maxResidual ≤ epsilon.
+    /**True if the fit achieved maxResidual ≤ epsilon. */
     bool withinEpsilon = false;
 
-    /// True if the constraint clamp was applied.
+    /**True if the constraint clamp was applied. */
     bool constraintClamped = false;
 
-    /// True if the max control point cap was hit (graceful degradation).
+    /**True if the max control point cap was hit (graceful degradation). */
     bool controlPointCapHit = false;
 
-    /// The achieved continuity class inside a segment: C^(degree−1).
-    /// (Reported as an integer for simplicity; 0 = C⁰, 1 = C¹, etc.)
+    /**
+     * The achieved continuity class inside a segment: C^(degree−1).
+     * (Reported as an integer for simplicity; 0 = C⁰, 1 = C¹, etc.)
+     */
     int achievedContinuity = 0;
 };
 
-/// Configuration for the spline fitter.
+/**Configuration for the spline fitter. */
 struct SplineFitterConfig {
-    /// B-spline degree (p ≥ 1). p=1 → linear, p=3 → cubic (C²),
-    /// p=5 → quintic (C⁴). Higher = smoother but more control points.
+    /**
+     * B-spline degree (p ≥ 1). p=1 → linear, p=3 → cubic (C²),
+     * p=5 → quintic (C⁴). Higher = smoother but more control points.
+     */
     int degree = 5;
 
-    /// Interpolation tolerance: |B(u_i) − q_i| must be ≤ this.
+    /**Interpolation tolerance: |B(u_i) − q_i| must be ≤ this. */
     double epsilon = 1e-4;
 
-    /// Safety margin below the limit envelope for constraint preservation.
+    /**Safety margin below the limit envelope for constraint preservation. */
     double safetyMargin = 1e-4;
 
-    /// Maximum control points per segment (adaptive refinement cap).
+    /**Maximum control points per segment (adaptive refinement cap). */
     std::size_t maxControlPoints = 64;
 
-    /// Dense test grid multiplier (test grid = multiplier × sample count).
+    /**Dense test grid multiplier (test grid = multiplier × sample count). */
     std::size_t refinementGridMultiplier = 10;
 
-    /// Optional: clamp the lower bound of the spline (e.g. velocity ≥ 0).
-    /// If set, control points are clamped to be ≥ this value.
+    /**
+     * Optional: clamp the lower bound of the spline (e.g. velocity ≥ 0).
+     * If set, control points are clamped to be ≥ this value.
+     */
     std::optional<double> lowerBound = std::nullopt;
 
-    /// Optional: upper limit function — if set, the spline is clamped to
-    /// be ≤ limit(u) − safetyMargin everywhere. The limit is provided as
-    /// a vector sampled at the same u_i as the data (linearly interpolated
-    /// between samples for inter-sample evaluation).
+    /**
+     * Optional: upper limit function — if set, the spline is clamped to
+     * be ≤ limit(u) − safetyMargin everywhere. The limit is provided as
+     * a vector sampled at the same u_i as the data (linearly interpolated
+     * between samples for inter-sample evaluation).
+     */
     std::optional<std::vector<double>> upperLimit = std::nullopt;
 };
 

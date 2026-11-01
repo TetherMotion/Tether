@@ -22,14 +22,14 @@ namespace Axia80_pdo {
 // ============================================================================
 
 struct Axia80_TxPDO {
-    int32_t  fx = 0;       ///< Force X (counts)
-    int32_t  fy = 0;       ///< Force Y (counts)
-    int32_t  fz = 0;       ///< Force Z (counts)
-    int32_t  tx = 0;       ///< Torque X (counts)
-    int32_t  ty = 0;       ///< Torque Y (counts)
-    int32_t  tz = 0;       ///< Torque Z (counts)
-    uint32_t status = 0;   ///< Status code (0x6010)
-    uint32_t counter = 0;  ///< Sample counter (0x6020)
+    int32_t  fx = 0; /**< Force X (counts) */
+    int32_t  fy = 0; /**< Force Y (counts) */
+    int32_t  fz = 0; /**< Force Z (counts) */
+    int32_t  tx = 0; /**< Torque X (counts) */
+    int32_t  ty = 0; /**< Torque Y (counts) */
+    int32_t  tz = 0; /**< Torque Z (counts) */
+    uint32_t status = 0; /**< Status code (0x6010) */
+    uint32_t counter = 0; /**< Sample counter (0x6020) */
 } __attribute__((packed));
 
 static_assert(sizeof(Axia80_TxPDO) == 32, "Axia80_TxPDO size mismatch");
@@ -39,8 +39,8 @@ static_assert(sizeof(Axia80_TxPDO) == 32, "Axia80_TxPDO size mismatch");
 // ============================================================================
 
 struct Axia80_RxPDO {
-    uint32_t control1 = 0; ///< Control register 1 (0x7010.1)
-    uint32_t control2 = 0; ///< Control register 2 (0x7010.2)
+    uint32_t control1 = 0; /**< Control register 1 (0x7010.1) */
+    uint32_t control2 = 0; /**< Control register 2 (0x7010.2) */
 } __attribute__((packed));
 
 static_assert(sizeof(Axia80_RxPDO) == 8, "Axia80_RxPDO size mismatch");

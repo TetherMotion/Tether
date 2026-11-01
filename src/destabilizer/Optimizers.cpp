@@ -1,5 +1,7 @@
-/// @file Optimizers.cpp
-/// @brief All 8 optimizer implementations for the Destabilizer.
+/**
+ * @file Optimizers.cpp
+ * @brief All 8 optimizer implementations for the Destabilizer.
+ */
 
 #include "tether/destabilizer/Optimizers.hpp"
 #include <algorithm>

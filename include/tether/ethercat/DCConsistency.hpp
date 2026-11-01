@@ -70,34 +70,34 @@ std::string dc_format_time(uint64_t time_ns);
  */
 struct SlaveDCState {
     // System time registers
-    uint64_t system_time;          ///< Current DC system time (0x0910)
-    uint64_t system_time_offset;   ///< System time offset (0x0920)
-    uint32_t system_time_diff;     ///< System time difference (0x092C)
-    uint32_t speed_counter;        ///< Speed counter (0x0930)
-    uint16_t time_loop_filter;     ///< Time loop filter (0x0934)
+    uint64_t system_time; /**< Current DC system time (0x0910) */
+    uint64_t system_time_offset; /**< System time offset (0x0920) */
+    uint32_t system_time_diff; /**< System time difference (0x092C) */
+    uint32_t speed_counter; /**< Speed counter (0x0930) */
+    uint16_t time_loop_filter; /**< Time loop filter (0x0934) */
 
     // Receive times (for propagation delay)
-    uint32_t receive_time_port0;   ///< Port 0 receive time (0x0900)
-    uint32_t receive_time_port1;   ///< Port 1 receive time (0x0904)
-    uint32_t receive_time_port2;   ///< Port 2 receive time (0x0908)
-    uint32_t receive_time_port3;   ///< Port 3 receive time (0x090C)
+    uint32_t receive_time_port0; /**< Port 0 receive time (0x0900) */
+    uint32_t receive_time_port1; /**< Port 1 receive time (0x0904) */
+    uint32_t receive_time_port2; /**< Port 2 receive time (0x0908) */
+    uint32_t receive_time_port3; /**< Port 3 receive time (0x090C) */
 
     // SYNC configuration
-    uint8_t cyclic_unit_control;   ///< Cyclic unit control (0x0980)
-    uint8_t sync_activation;       ///< Sync activation (0x0981)
-    uint64_t sync0_start_time;     ///< SYNC0 start time (0x0990)
-    uint32_t sync0_cycle_time;     ///< SYNC0 cycle time (0x09A0)
-    uint32_t sync1_cycle_time;     ///< SYNC1 cycle time (0x09A4)
+    uint8_t cyclic_unit_control; /**< Cyclic unit control (0x0980) */
+    uint8_t sync_activation; /**< Sync activation (0x0981) */
+    uint64_t sync0_start_time; /**< SYNC0 start time (0x0990) */
+    uint32_t sync0_cycle_time; /**< SYNC0 cycle time (0x09A0) */
+    uint32_t sync1_cycle_time; /**< SYNC1 cycle time (0x09A4) */
 
     // Status
-    bool dc_supported;             ///< Slave supports DC
-    bool dc_active;                ///< DC is currently active
-    bool sync0_active;             ///< SYNC0 is enabled
-    bool sync1_active;             ///< SYNC1 is enabled
+    bool dc_supported; /**< Slave supports DC */
+    bool dc_active; /**< DC is currently active */
+    bool sync0_active; /**< SYNC0 is enabled */
+    bool sync1_active; /**< SYNC1 is enabled */
 
     // Calculated values
-    int64_t offset_to_master;      ///< Offset relative to master
-    uint32_t propagation_delay;    ///< Propagation delay from master
+    int64_t offset_to_master; /**< Offset relative to master */
+    uint32_t propagation_delay; /**< Propagation delay from master */
 };
 
 // ============================================================================
@@ -108,11 +108,11 @@ struct SlaveDCState {
  * @brief Result of a consistency check
  */
 struct ConsistencyCheckResult {
-    bool passed;                   ///< Check passed
-    const char* check_name;        ///< Name of the check
-    const char* description;       ///< Description of failure (if any)
-    int64_t expected_value;        ///< Expected value (for comparisons)
-    int64_t actual_value;          ///< Actual value found
+    bool passed; /**< Check passed */
+    const char* check_name; /**< Name of the check */
+    const char* description; /**< Description of failure (if any) */
+    int64_t expected_value; /**< Expected value (for comparisons) */
+    int64_t actual_value; /**< Actual value found */
 };
 
 /**

@@ -32,9 +32,11 @@ namespace HAL {
 
 namespace {
 
-/// Send an RTM_GETLINK dump request and collect all RTM_NEWLINK replies.
-/// Returns the raw message buffer; each datagram may contain multiple
-/// netlink messages back-to-back.
+/**
+ * Send an RTM_GETLINK dump request and collect all RTM_NEWLINK replies.
+ * Returns the raw message buffer; each datagram may contain multiple
+ * netlink messages back-to-back.
+ */
 bool sendDumpRequest(int sock_fd) {
     struct {
         struct nlmsghdr nlh;
@@ -55,16 +57,18 @@ bool sendDumpRequest(int sock_fd) {
     return sendmsg(sock_fd, &msg, 0) >= 0;
 }
 
-/// Check whether /sys/class/net/<name>/wireless exists.
-/// This is the reliable way to detect Wi-Fi adapters — rtnetlink does
-/// not include a "is wireless" flag in dump replies.
+/**
+ * Check whether /sys/class/net/<name>/wireless exists.
+ * This is the reliable way to detect Wi-Fi adapters — rtnetlink does
+ * not include a "is wireless" flag in dump replies.
+ */
 bool isWirelessInterface(const std::string& name) {
     std::string path = "/sys/class/net/" + name + "/wireless";
     struct stat st{};
     return stat(path.c_str(), &st) == 0;
 }
 
-/// Classify an interface based on arpType, kind string, and wireless flag.
+/**Classify an interface based on arpType, kind string, and wireless flag. */
 InterfaceType classifyType(uint16_t arpType,
                            const std::string& kind,
                            bool isWireless) {
@@ -97,7 +101,7 @@ InterfaceType classifyType(uint16_t arpType,
     return InterfaceType::Unknown;
 }
 
-/// Determine whether an interface is physical or virtual.
+/**Determine whether an interface is physical or virtual. */
 InterfaceCategory classifyCategory(InterfaceType type) {
     switch (type) {
         case InterfaceType::Ethernet:
@@ -117,7 +121,7 @@ InterfaceCategory classifyCategory(InterfaceType type) {
     }
 }
 
-/// Parse a single RTM_NEWLINK message into a NetworkInterface.
+/**Parse a single RTM_NEWLINK message into a NetworkInterface. */
 NetworkInterface parseLinkMessage(struct nlmsghdr* nlh) {
     auto* ifi = reinterpret_cast<struct ifinfomsg*>(NLMSG_DATA(nlh));
     int attr_len = IFLA_PAYLOAD(nlh);

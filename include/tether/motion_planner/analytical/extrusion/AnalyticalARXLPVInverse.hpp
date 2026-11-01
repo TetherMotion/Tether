@@ -54,23 +54,23 @@ namespace MotionPlanner::analytical::extrusion {
  * @brief ARX model identified at a single operating point (continuous-time).
  */
 struct AnalyticalARXModelPoint {
-    double parameter = 0.0;            ///< Scheduling parameter p
-    std::vector<double> aCoeffs;       ///< A: [a1, a2, ..., aNa] (continuous-time)
-    std::vector<double> bCoeffs;       ///< B: [b0, b1, ..., bNb] (continuous-time)
-    double delay = 0.0;                ///< Transport delay [s]
+    double parameter = 0.0; /**< Scheduling parameter p */
+    std::vector<double> aCoeffs; /**< A: [a1, a2, ..., aNa] (continuous-time) */
+    std::vector<double> bCoeffs; /**< B: [b0, b1, ..., bNb] (continuous-time) */
+    double delay = 0.0; /**< Transport delay [s] */
 };
 
 /**
  * @brief Parameters for analytical ARX LPV inverse filter.
  */
 struct AnalyticalARXLPVParams {
-    /// Order of A (autoregressive part)
+    /**Order of A (autoregressive part) */
     int na = 1;
 
-    /// Order of B (exogenous part, excluding delay)
+    /**Order of B (exogenous part, excluding delay) */
     int nb = 0;
 
-    /// If true, use extruder position as y(t); if false, use velocity
+    /**If true, use extruder position as y(t); if false, use velocity */
     bool usePosition = false;
 };
 

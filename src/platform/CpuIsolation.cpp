@@ -275,8 +275,10 @@ bool CpuIsolation::createCpusetPartition(int cpu) {
 #endif
 }
 
-/// Post-grant hardening — the claim is already recorded; failures degrade
-/// to the affinity-only claim with a warning (never deny the claim).
+/**
+ * Post-grant hardening — the claim is already recorded; failures degrade
+ * to the affinity-only claim with a warning (never deny the claim).
+ */
 CpuIsolation::Claim CpuIsolation::finishClaim(Claim cl, const Spec& spec) {
     if (!cl.valid()) return cl;
     if (spec.create_cpuset) {

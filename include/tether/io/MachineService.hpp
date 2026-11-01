@@ -99,9 +99,11 @@ inline std::vector<uint8_t> fieldBytes(const std::vector<uint8_t>& value) {
     return bytes;
 }
 
-/// Encode a tagged struct: field-count varint then [key varint][len varint][bytes].
-/// @param fields Key/value byte fields in emission order.
-/// @return Wire encoding of the tagged struct.
+/**
+ * Encode a tagged struct: field-count varint then [key varint][len varint][bytes].
+ * @param fields Key/value byte fields in emission order.
+ * @return Wire encoding of the tagged struct.
+ */
 inline std::vector<uint8_t> encodeTagged(const FieldList& fields) {
     std::vector<uint8_t> encoded;
     putVarint(encoded, fields.size());
@@ -113,9 +115,11 @@ inline std::vector<uint8_t> encodeTagged(const FieldList& fields) {
     return encoded;
 }
 
-/// Encode a dynamic array of already-encoded elements.
-/// @param elements Pre-encoded element payloads.
-/// @return Length-prefixed array encoding.
+/**
+ * Encode a dynamic array of already-encoded elements.
+ * @param elements Pre-encoded element payloads.
+ * @return Length-prefixed array encoding.
+ */
 inline std::vector<uint8_t> encodeArray(const std::vector<std::vector<uint8_t>>& elements) {
     std::vector<uint8_t> encoded;
     putVarint(encoded, elements.size());
@@ -126,10 +130,12 @@ inline std::vector<uint8_t> encodeArray(const std::vector<std::vector<uint8_t>>&
     return encoded;
 }
 
-/// Parse a tagged struct into key → bytes. Returns false on malformed input.
-/// @param bytes Wire bytes to decode.
-/// @param fields Receives the decoded key/value pairs.
-/// @return false when the input is truncated or malformed.
+/**
+ * Parse a tagged struct into key → bytes. Returns false on malformed input.
+ * @param bytes Wire bytes to decode.
+ * @param fields Receives the decoded key/value pairs.
+ * @return false when the input is truncated or malformed.
+ */
 inline bool parseTagged(const std::vector<uint8_t>& bytes,
                         std::map<uint32_t, std::vector<uint8_t>>& fields) {
     size_t position = 0;
@@ -214,42 +220,50 @@ struct AlarmPageV1 {
     std::vector<AlarmRecordV1> alarms;
 };
 
-/// External notification event kinds (plan item 90).
+/**External notification event kinds (plan item 90). */
 enum class AlarmNotification : uint8_t { Raised, Escalated, Acknowledged, Cleared };
 
-/// Notification policy: which severities notify, when an unacknowledged
-/// alarm escalates, and how often escalation repeats.
+/**
+ * Notification policy: which severities notify, when an unacknowledged
+ * alarm escalates, and how often escalation repeats.
+ */
 struct AlarmNotifyPolicy {
     EventSeverity minSeverity = EventSeverity::Warning;
-    uint64_t escalationDelayUs = 300'000'000;    ///< unacked for 5 min → escalate
-    uint64_t escalationIntervalUs = 60'000'000;  ///< repeat every 1 min
+    uint64_t escalationDelayUs = 300'000'000; /**< unacked for 5 min → escalate */
+    uint64_t escalationIntervalUs = 60'000'000; /**< repeat every 1 min */
     uint8_t maxEscalations = 3;
 };
 
-/// Pluggable sink for external alarm notification (pager, webhook, e-mail).
-/// The sink is invoked outside the alarm lock; it must not re-enter the
-/// AlarmService from the notification call itself.
+/**
+ * Pluggable sink for external alarm notification (pager, webhook, e-mail).
+ * The sink is invoked outside the alarm lock; it must not re-enter the
+ * AlarmService from the notification call itself.
+ */
 class IAlarmNotifier {
 public:
     virtual ~IAlarmNotifier() = default;
     virtual void notify(const AlarmRecordV1& alarm, AlarmNotification kind) = 0;
 };
 
-/// Bounded alarm lifecycle store. Raising the same source+code while an
-/// alarm is active/acknowledged reuses the existing record (no duplicates)
-/// and never re-notifies — deduplication is inherent to the store.
+/**
+ * Bounded alarm lifecycle store. Raising the same source+code while an
+ * alarm is active/acknowledged reuses the existing record (no duplicates)
+ * and never re-notifies — deduplication is inherent to the store.
+ */
 class AlarmService final {
 public:
     explicit AlarmService(size_t capacity = 512) : capacity_(capacity) {
         if (capacity_ == 0) throw std::invalid_argument("alarm capacity must be nonzero");
     }
 
-    /// Attach an external notifier. `audit` is an optional EventJournal that
-    /// records every emitted notification as `alarm.notify.*` — the durable
-    /// evidence for escalation and acknowledgement delivery attempts.
-    /// @param notifier Sink for alarm notifications; null detaches.
-    /// @param policy Rate/dedup policy applied to notifications.
-    /// @param audit Optional journal recording delivery attempts.
+    /**
+     * Attach an external notifier. `audit` is an optional EventJournal that
+     * records every emitted notification as `alarm.notify.*` — the durable
+     * evidence for escalation and acknowledgement delivery attempts.
+     * @param notifier Sink for alarm notifications; null detaches.
+     * @param policy Rate/dedup policy applied to notifications.
+     * @param audit Optional journal recording delivery attempts.
+     */
     void setNotifier(IAlarmNotifier* notifier, AlarmNotifyPolicy policy = {},
                      EventJournal* audit = nullptr) {
         std::lock_guard lock(mutex_);
@@ -258,12 +272,14 @@ public:
         auditJournal_ = audit;
     }
 
-    /// Escalation scan: notifies `Escalated` for alarms that stayed Active
-    /// past `escalationDelayUs`, repeating at `escalationIntervalUs` up to
-    /// `maxEscalations`. Called opportunistically from `readAfter`; hosts may
-    /// also invoke it on a timer.
-    ///
-    /// @param nowUs Current time in microseconds (injectable for tests).
+    /**
+     * Escalation scan: notifies `Escalated` for alarms that stayed Active
+     * past `escalationDelayUs`, repeating at `escalationIntervalUs` up to
+     * `maxEscalations`. Called opportunistically from `readAfter`; hosts may
+     * also invoke it on a timer.
+     *
+     * @param nowUs Current time in microseconds (injectable for tests).
+     */
     void tick(uint64_t nowUs = detail::nowUs()) {
         std::vector<std::pair<AlarmRecordV1, AlarmNotification>> pending;
         {
@@ -319,10 +335,12 @@ public:
         return id;
     }
 
-    /// Returns 0 on success, 1 when absent/already terminal, 2 when denied.
-    /// @param alarmId Alarm to acknowledge.
-    /// @param identity Session performing the acknowledgement (role checked).
-    /// @param nowUs Current time in microseconds.
+    /**
+     * Returns 0 on success, 1 when absent/already terminal, 2 when denied.
+     * @param alarmId Alarm to acknowledge.
+     * @param identity Session performing the acknowledgement (role checked).
+     * @param nowUs Current time in microseconds.
+     */
     uint8_t acknowledge(uint64_t alarmId, const SessionIdentity& identity,
                         uint64_t nowUs = detail::nowUs()) {
         if (!identity.authenticated || identity.role == Role::Observer) return 2;
@@ -398,8 +416,10 @@ private:
         return it == alarms_.end() ? nullptr : &*it;
     }
 
-    /// Deliver a notification outside the alarm lock: external sink first,
-    /// then the audit journal (`alarm.notify.<kind>`). Sinks must not throw.
+    /**
+     * Deliver a notification outside the alarm lock: external sink first,
+     * then the audit journal (`alarm.notify.<kind>`). Sinks must not throw.
+     */
     void emit(const AlarmRecordV1& alarm, AlarmNotification kind) {
         if (notifier_) {
             try { notifier_->notify(alarm, kind); } catch (...) {}
@@ -459,9 +479,11 @@ inline bool isTerminal(OperationState state) {
            state == OperationState::Cancelled;
 }
 
-/// Bounded operation ledger. Dispatchers create a record on acceptance and
-/// drive it to a terminal state; clients read progress through
-/// machine.operation.* functions.
+/**
+ * Bounded operation ledger. Dispatchers create a record on acceptance and
+ * drive it to a terminal state; clients read progress through
+ * machine.operation.* functions.
+ */
 class OperationTracker final {
 public:
     explicit OperationTracker(size_t capacity = 256) : capacity_(capacity) {}
@@ -510,12 +532,14 @@ public:
         return true;
     }
 
-    /// Cancel a non-terminal operation. Dispatchers that cannot abort return
-    /// false via `tryCancel`; this only marks the record.
-    /// @param id Operation identifier.
-    /// @param identity Session requesting the cancel (owner or privileged).
-    /// @param allowOwnerOrPrivileged false to require a privileged role.
-    /// @return true when the record was marked cancelled.
+    /**
+     * Cancel a non-terminal operation. Dispatchers that cannot abort return
+     * false via `tryCancel`; this only marks the record.
+     * @param id Operation identifier.
+     * @param identity Session requesting the cancel (owner or privileged).
+     * @param allowOwnerOrPrivileged false to require a privileged role.
+     * @return true when the record was marked cancelled.
+     */
     bool tryCancel(const std::string& id, const SessionIdentity& identity,
                    bool allowOwnerOrPrivileged = true) {
         std::lock_guard lock(mutex_);
@@ -533,10 +557,12 @@ public:
         return true;
     }
 
-    /// Cancel every non-terminal operation owned by a disconnecting session.
-    /// @param sessionId Session whose operations are cancelled.
-    /// @param reason Message stored on each cancelled record.
-    /// @return Number of operations cancelled.
+    /**
+     * Cancel every non-terminal operation owned by a disconnecting session.
+     * @param sessionId Session whose operations are cancelled.
+     * @param reason Message stored on each cancelled record.
+     * @return Number of operations cancelled.
+     */
     size_t cancelAllForSession(const std::string& sessionId, std::string_view reason) {
         std::lock_guard lock(mutex_);
         size_t count = 0;
@@ -580,37 +606,47 @@ private:
 // Application adapters
 // ---------------------------------------------------------------------------
 
-/// Read-only machine state the command gate validates against.
+/**Read-only machine state the command gate validates against. */
 class IMachineStateSource {
 public:
     virtual ~IMachineStateSource() = default;
-    /// Stable resource identifiers of all commandable axes.
-    /// @return Axis IDs accepted in CommandRequest targets.
+    /**
+     * Stable resource identifiers of all commandable axes.
+     * @return Axis IDs accepted in CommandRequest targets.
+     */
     virtual std::vector<std::string> axisIds() const = 0;
     virtual std::optional<cia402::DriveSnapshotV1> driveSnapshot(
         std::string_view stableId) const = 0;
-    /// Current command environment (generations, supported actions, blockers).
-    /// @param request Command whose environment is requested.
-    /// @return Environment, or nullopt when the request cannot be evaluated.
+    /**
+     * Current command environment (generations, supported actions, blockers).
+     * @param request Command whose environment is requested.
+     * @return Environment, or nullopt when the request cannot be evaluated.
+     */
     virtual std::optional<CommandEnvironment> commandEnvironment(
         const CommandRequest& request) = 0;
-    /// Machine-wide configuration revision checked by the gate.
-    /// @return Revision counter; stale clients are rejected.
+    /**
+     * Machine-wide configuration revision checked by the gate.
+     * @return Revision counter; stale clients are rejected.
+     */
     virtual uint64_t configurationRevision() const = 0;
 };
 
-/// Dispatches a preflight-validated command to native motion/EtherCAT code.
-/// Implementations must create an operation in the tracker, enqueue bounded
-/// work off the real-time loop, and return immediately.
+/**
+ * Dispatches a preflight-validated command to native motion/EtherCAT code.
+ * Implementations must create an operation in the tracker, enqueue bounded
+ * work off the real-time loop, and return immediately.
+ */
 class IMachineDispatcher {
 public:
     virtual ~IMachineDispatcher() = default;
     virtual DispatchResult dispatch(const CommandRequest& request,
                                     const SessionIdentity& identity,
                                     OperationTracker& operations) = 0;
-    /// Attempt to abort an in-flight operation. Returns false when the
-    /// operation cannot be interrupted (the tracker still marks it cancelled).
-    /// @param operationId Operation to abort.
+    /**
+     * Attempt to abort an in-flight operation. Returns false when the
+     * operation cannot be interrupted (the tracker still marks it cancelled).
+     * @param operationId Operation to abort.
+     */
     virtual bool cancelOperation(std::string_view operationId) = 0;
 };
 
@@ -618,10 +654,12 @@ public:
 // Capture service — server-side recording control
 // ---------------------------------------------------------------------------
 
-/// Trigger rule for a capture: when `entryId`'s numeric value crosses
-/// `level` (op 0 = above, 1 = below, 2 = |value| above), `preRecords` records
-/// already in the ring are kept and `postRecords` more are collected before
-/// the recorder stops. This is a diagnostic aid, not a protection function.
+/**
+ * Trigger rule for a capture: when `entryId`'s numeric value crosses
+ * `level` (op 0 = above, 1 = below, 2 = |value| above), `preRecords` records
+ * already in the ring are kept and `postRecords` more are collected before
+ * the recorder stops. This is a diagnostic aid, not a protection function.
+ */
 struct CaptureTrigger {
     uint64_t entryId = 0;
     uint8_t op = 0;
@@ -634,7 +672,7 @@ enum class CaptureTriggerState : uint8_t {
     None = 0, Armed = 1, PostTrigger = 2, Complete = 3,
 };
 
-/// One paginated export chunk from the retained record buffer.
+/**One paginated export chunk from the retained record buffer. */
 struct CaptureExportChunk {
     uint64_t offset = 0;
     uint64_t totalRecords = 0;
@@ -643,10 +681,12 @@ struct CaptureExportChunk {
     std::vector<uint8_t> payload;
 };
 
-/// Binds a DatalogRecorder to registry reads with a bounded in-memory sink.
-/// The application owns both objects; this class only adapts them for the
-/// machine.capture.* functions. Recorded bytes stay on the server — exports
-/// are explicit, paginated, access-controlled, and audited.
+/**
+ * Binds a DatalogRecorder to registry reads with a bounded in-memory sink.
+ * The application owns both objects; this class only adapts them for the
+ * machine.capture.* functions. Recorded bytes stay on the server — exports
+ * are explicit, paginated, access-controlled, and audited.
+ */
 class MachineCaptureService final {
 public:
     static constexpr size_t kMaxExportChunkBytes = 65536;
@@ -658,15 +698,17 @@ public:
             throw std::invalid_argument("capture retention must be nonzero");
     }
 
-    /// Configure the recorder; entryIds empty = all fixed-size entries.
-    /// An optional trigger switches the sink into pre/post-trigger mode.
-    /// @param logName Journal log name (<= 128 chars).
-    /// @param sampleRateHz Sampling rate [Hz] (1..100000).
-    /// @param enabled true to start recording immediately.
-    /// @param entryIds Entries to capture; empty means all fixed-size entries.
-    /// @param trigger Optional pre/post-trigger rule.
-    /// @return false when the parameters are out of range or an entry is
-    ///         unknown/variable-length.
+    /**
+     * Configure the recorder; entryIds empty = all fixed-size entries.
+     * An optional trigger switches the sink into pre/post-trigger mode.
+     * @param logName Journal log name (<= 128 chars).
+     * @param sampleRateHz Sampling rate [Hz] (1..100000).
+     * @param enabled true to start recording immediately.
+     * @param entryIds Entries to capture; empty means all fixed-size entries.
+     * @param trigger Optional pre/post-trigger rule.
+     * @return false when the parameters are out of range or an entry is
+     *         unknown/variable-length.
+     */
     bool configure(std::string logName, uint32_t sampleRateHz, bool enabled,
                    std::vector<uint64_t> entryIds,
                    std::optional<CaptureTrigger> trigger = std::nullopt) {
@@ -713,7 +755,7 @@ public:
         return true;
     }
 
-    /// Stop recording and discard retained records.
+    /**Stop recording and discard retained records. */
     void cancel() {
         recorder_.stop();
         std::lock_guard lock(mutex_);
@@ -730,8 +772,10 @@ public:
         return triggerState_;
     }
 
-    /// Records currently retained and exportable.
-    /// @return Number of records in the retention ring.
+    /**
+     * Records currently retained and exportable.
+     * @return Number of records in the retention ring.
+     */
     uint64_t recordsAvailable() const {
         std::lock_guard lock(mutex_);
         return records_.size();
@@ -742,18 +786,22 @@ public:
         return droppedRecords_;
     }
 
-    /// Records retained in memory (test/support-bundle access).
-    /// @return Copy of the retained record deque.
+    /**
+     * Records retained in memory (test/support-bundle access).
+     * @return Copy of the retained record deque.
+     */
     std::deque<std::vector<uint8_t>> records() const {
         std::lock_guard lock(mutex_);
         return records_;
     }
 
-    /// Concatenate up to `maxBytes` of records starting at `recordOffset`.
-    /// Chunk size is hard-capped at kMaxExportChunkBytes.
-    /// @param recordOffset Index of the first record to export.
-    /// @param maxBytes Upper bound on exported payload bytes.
-    /// @return Chunk with records and bookkeeping (offset, totals, drops).
+    /**
+     * Concatenate up to `maxBytes` of records starting at `recordOffset`.
+     * Chunk size is hard-capped at kMaxExportChunkBytes.
+     * @param recordOffset Index of the first record to export.
+     * @param maxBytes Upper bound on exported payload bytes.
+     * @return Chunk with records and bookkeeping (offset, totals, drops).
+     */
     CaptureExportChunk exportChunk(uint64_t recordOffset, uint32_t maxBytes) const {
         CaptureExportChunk chunk;
         std::lock_guard lock(mutex_);
@@ -802,8 +850,10 @@ private:
         }
     }
 
-    /// Read the trigger entry and compare its numeric value to the level.
-    /// Caller holds mutex_.
+    /**
+     * Read the trigger entry and compare its numeric value to the level.
+     * Caller holds mutex_.
+     */
     bool evaluateTrigger() const {
         EntryView entry = registry_.find(trigger_->entryId);
         if (!entry || entry.isVariableLength() || entry.valueSize() > 8) return false;
@@ -846,7 +896,7 @@ private:
 // Staged configuration service — stage/validate/commit/rollback transactions
 // ---------------------------------------------------------------------------
 
-/// One staged parameter write (ConfigEntryV1).
+/**One staged parameter write (ConfigEntryV1). */
 struct ConfigWrite {
     uint64_t entryId = 0;
     std::vector<uint8_t> value;
@@ -864,17 +914,19 @@ struct ConfigTxnStatus {
     std::vector<ConfigWrite> staged;
 };
 
-/// Transactional, staged parameter writes. Stage performs structural checks
-/// (entry exists, is a writable parameter, size constraints); an optional
-/// application validator runs on validate(); commit applies the writes in
-/// order and bumps the configuration revision; rollback discards the
-/// transaction. Nothing is written before commit.
+/**
+ * Transactional, staged parameter writes. Stage performs structural checks
+ * (entry exists, is a writable parameter, size constraints); an optional
+ * application validator runs on validate(); commit applies the writes in
+ * order and bumps the configuration revision; rollback discards the
+ * transaction. Nothing is written before commit.
+ */
 class StagedConfigService final {
 public:
-    /// Application cross-field validator: returns an error string or nullopt.
+    /**Application cross-field validator: returns an error string or nullopt. */
     using Validator = std::function<std::optional<std::string>(
         const std::vector<ConfigWrite>&)>;
-    /// Revision provider/bump callbacks supplied by the state source.
+    /**Revision provider/bump callbacks supplied by the state source. */
     using RevisionFn = std::function<uint64_t()>;
     using BumpFn = std::function<void()>;
 
@@ -994,8 +1046,10 @@ private:
         return end != copy.c_str() && *end == '\0';
     }
 
-    /// Decode a fixed-size numeric parameter value to double; false when the
-    /// type is non-numeric or the size does not match.
+    /**
+     * Decode a fixed-size numeric parameter value to double; false when the
+     * type is non-numeric or the size does not match.
+     */
     static bool decodeNumericValue(ValueType type, const std::vector<uint8_t>& bytes,
                                    double& out) {
         if (bytes.size() != valueTypeSize(type)) return false;
@@ -1027,29 +1081,31 @@ private:
 // SDO inspection — pluggable backend interface + role/audit policy
 // ---------------------------------------------------------------------------
 
-/// One known object-dictionary entry as reported by machine.sdo.list.
+/**One known object-dictionary entry as reported by machine.sdo.list. */
 struct SdoObjectInfoV1 {
     uint16_t index = 0;
     uint8_t subindex = 0;
-    uint16_t dataType = 0;          ///< CiA 301 data type code
-    uint8_t access = 3;             ///< 1 read-only, 3 read/write
+    uint16_t dataType = 0; /**< CiA 301 data type code */
+    uint8_t access = 3; /**< 1 read-only, 3 read/write */
     std::string name;
-    std::string description;        ///< ESI/device-profile description (may be empty)
+    std::string description; /**< ESI/device-profile description (may be empty) */
     double minValue = std::numeric_limits<double>::quiet_NaN();
     double maxValue = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct SdoTransferResult {
     bool ok = false;
-    uint32_t abortCode = 0;         ///< CoE SDO abort code when the slave aborts
-    std::vector<uint8_t> data;      ///< Read payload (reads only)
-    std::vector<uint8_t> readback;  ///< Post-write verification payload (writes only)
-    std::string error;              ///< Transport/adapter failure text
+    uint32_t abortCode = 0; /**< CoE SDO abort code when the slave aborts */
+    std::vector<uint8_t> data; /**< Read payload (reads only) */
+    std::vector<uint8_t> readback; /**< Post-write verification payload (writes only) */
+    std::string error; /**< Transport/adapter failure text */
 };
 
-/// CiA 301 / ETG.1000-6 SDO abort-code names for operator-facing display.
-/// @param code CoE SDO abort code.
-/// @return Static description, or "Unknown abort code" when unrecognized.
+/**
+ * CiA 301 / ETG.1000-6 SDO abort-code names for operator-facing display.
+ * @param code CoE SDO abort code.
+ * @return Static description, or "Unknown abort code" when unrecognized.
+ */
 inline const char* sdoAbortName(uint32_t code) {
     switch (code) {
         case 0x00000000: return "";
@@ -1079,19 +1135,23 @@ inline const char* sdoAbortName(uint32_t code) {
     }
 }
 
-/// Pluggable backend for the SDO inspector. Implementations must document
-/// their threading contract — EtherCatSdoAccess performs mailbox round-trips
-/// on the calling IO session thread and must not be invoked while holding a
-/// lock shared with the realtime loop.
+/**
+ * Pluggable backend for the SDO inspector. Implementations must document
+ * their threading contract — EtherCatSdoAccess performs mailbox round-trips
+ * on the calling IO session thread and must not be invoked while holding a
+ * lock shared with the realtime loop.
+ */
 class IMachineSdoAccess {
 public:
     virtual ~IMachineSdoAccess() = default;
 
-    /// Objects known for `slave`, typically from a static device profile.
-    /// An empty list means no object table is available; explicit-index
-    /// reads and writes remain possible.
-    /// @param slave Slave index.
-    /// @return Known object dictionary entries for that slave.
+    /**
+     * Objects known for `slave`, typically from a static device profile.
+     * An empty list means no object table is available; explicit-index
+     * reads and writes remain possible.
+     * @param slave Slave index.
+     * @return Known object dictionary entries for that slave.
+     */
     virtual std::vector<SdoObjectInfoV1> listObjects(uint16_t slave) = 0;
 
     virtual SdoTransferResult read(uint16_t slave, uint16_t index,
@@ -1100,12 +1160,14 @@ public:
                                     uint8_t subindex, const std::vector<uint8_t>& data) = 0;
 };
 
-/// Role/audit policy around a pluggable IMachineSdoAccess.
+/**Role/audit policy around a pluggable IMachineSdoAccess. */
 class MachineSdoService final {
 public:
     static constexpr size_t kMaxTransferBytes = 512;
-    /// One write per 50 ms server-wide — SDO writes are commissioning
-    /// operations; this bounds mailbox pressure and replayed bursts.
+    /**
+     * One write per 50 ms server-wide — SDO writes are commissioning
+     * operations; this bounds mailbox pressure and replayed bursts.
+     */
     static constexpr uint64_t kWriteMinIntervalUs = 50'000;
 
     explicit MachineSdoService(IMachineSdoAccess& access,
@@ -1140,10 +1202,12 @@ public:
         });
     }
 
-    /// machine.sdo.list — any authenticated session; empty when the backend
-    /// has no object table for the slave.
-    /// @param slave Slave index.
-    /// @param identity Session identity (must be authenticated).
+    /**
+     * machine.sdo.list — any authenticated session; empty when the backend
+     * has no object table for the slave.
+     * @param slave Slave index.
+     * @param identity Session identity (must be authenticated).
+     */
     FunctionCallResult list(uint16_t slave, const SessionIdentity& identity) const {
         FunctionCallResult result;
         if (!identity.authenticated) {
@@ -1156,9 +1220,11 @@ public:
         return result;
     }
 
-    /// machine.sdo.read — any authenticated session.
-    /// @param request Encoded request (slave, index, subindex, max_bytes).
-    /// @param identity Session identity (must be authenticated).
+    /**
+     * machine.sdo.read — any authenticated session.
+     * @param request Encoded request (slave, index, subindex, max_bytes).
+     * @param identity Session identity (must be authenticated).
+     */
     FunctionCallResult read(const std::vector<uint8_t>& request,
                             const SessionIdentity& identity) const {
         FunctionCallResult result;
@@ -1185,11 +1251,13 @@ public:
         return result;
     }
 
-    /// machine.sdo.write — technician-or-above only; journaled, rate-limited,
-    /// and followed by a verification read on success. Optional request field
-    /// 5 (`verify_readback`, bool) disables the readback (default on).
-    /// @param request Encoded request (slave, index, subindex, data, ...).
-    /// @param identity Session identity (technician or above).
+    /**
+     * machine.sdo.write — technician-or-above only; journaled, rate-limited,
+     * and followed by a verification read on success. Optional request field
+     * 5 (`verify_readback`, bool) disables the readback (default on).
+     * @param request Encoded request (slave, index, subindex, data, ...).
+     * @param identity Session identity (technician or above).
+     */
     FunctionCallResult write(const std::vector<uint8_t>& request,
                              const SessionIdentity& identity) {
         FunctionCallResult result;
@@ -1275,9 +1343,11 @@ private:
 // Machine diagnostics — pluggable cyclic-loop / DC / mailbox / link counters
 // ---------------------------------------------------------------------------
 
-/// Wire layout of machine.diagnostics (tagged MachineDiagnosticsV1). All
-/// counters are cumulative since the source started; a source that cannot
-/// observe a counter reports zero.
+/**
+ * Wire layout of machine.diagnostics (tagged MachineDiagnosticsV1). All
+ * counters are cumulative since the source started; a source that cannot
+ * observe a counter reports zero.
+ */
 struct MachineDiagnosticsV1 {
     uint64_t timestampUs = 0;
     uint64_t cycleCount = 0;
@@ -1301,9 +1371,11 @@ struct MachineDiagnosticsV1 {
     uint32_t lastWkc = 0;
 };
 
-/// Pluggable source for machine.diagnostics. EtherCatDiagnosticsAdapter
-/// reads Master's real counters; the sim stack fabricates plausible ones.
-/// Not safety-rated — these are observability counters, never interlocks.
+/**
+ * Pluggable source for machine.diagnostics. EtherCatDiagnosticsAdapter
+ * reads Master's real counters; the sim stack fabricates plausible ones.
+ * Not safety-rated — these are observability counters, never interlocks.
+ */
 class IMachineDiagnosticsSource {
 public:
     virtual ~IMachineDiagnosticsSource() = default;
@@ -1339,20 +1411,22 @@ inline std::vector<uint8_t> encodeDiagnostics(const MachineDiagnosticsV1& d) {
 // PDO map + slave-supervisor surfaces — pluggable backends
 // ---------------------------------------------------------------------------
 
-/// Logical placement of one enabled PDO mapping entry (machine.pdo.map).
+/**Logical placement of one enabled PDO mapping entry (machine.pdo.map). */
 struct PdoEntryV1 {
     uint16_t slaveIndex = 0;
     uint16_t pdoIndex = 0;
-    uint8_t direction = 0;          ///< 0 = RxPDO (outputs), 1 = TxPDO (inputs)
-    uint32_t offset = 0;            ///< byte offset in the logical image
+    uint8_t direction = 0; /**< 0 = RxPDO (outputs), 1 = TxPDO (inputs) */
+    uint32_t offset = 0; /**< byte offset in the logical image */
     uint16_t length = 0;
     uint16_t entryIndex = 0;
 };
 
-/// Pluggable source for machine.pdo.map — e.g. EtherCatPdoAdapter over
-/// LogicalAddressManager::describeEntries.
+/**
+ * Pluggable source for machine.pdo.map — e.g. EtherCatPdoAdapter over
+ * LogicalAddressManager::describeEntries.
+ */
 
-/// One evaluated commissioning-checklist item (ChecklistItemV1).
+/**One evaluated commissioning-checklist item (ChecklistItemV1). */
 struct ChecklistItem {
     uint32_t itemId = 0;
     std::string label;
@@ -1361,17 +1435,21 @@ struct ChecklistItem {
     std::string evidence;
 };
 
-/// Pluggable checklist provider. The application evaluates requirements
-/// against live state and returns the current verdict for every item.
+/**
+ * Pluggable checklist provider. The application evaluates requirements
+ * against live state and returns the current verdict for every item.
+ */
 class IMachineChecklistSource {
 public:
     virtual ~IMachineChecklistSource() = default;
     virtual std::vector<ChecklistItem> evaluate() = 0;
 };
 
-/// Server-verified application profile document (AppProfileV1). The document
-/// and its keyed-BLAKE3 MAC are served verbatim; integrity is verified when
-/// the profile is attached (see ApplicationProfile.hpp).
+/**
+ * Server-verified application profile document (AppProfileV1). The document
+ * and its keyed-BLAKE3 MAC are served verbatim; integrity is verified when
+ * the profile is attached (see ApplicationProfile.hpp).
+ */
 struct MachineAppProfile {
     std::string name;
     std::string version;
@@ -1379,23 +1457,27 @@ struct MachineAppProfile {
     std::array<uint8_t, 32> mac{};
 };
 
-/// Pluggable provider for the machine.app.profile signal. The surface is
-/// absent entirely when no profile source is attached.
+/**
+ * Pluggable provider for the machine.app.profile signal. The surface is
+ * absent entirely when no profile source is attached.
+ */
 class IMachineAppProfileSource {
 public:
     virtual ~IMachineAppProfileSource() = default;
     virtual const MachineAppProfile& profile() = 0;
 };
 
-/// One recipe descriptor (RecipeInfoV1).
+/**One recipe descriptor (RecipeInfoV1). */
 struct RecipeInfo {
     std::string name;
     std::string description;
     uint32_t entryCount = 0;
 };
 
-/// Pluggable store of named parameter sets. `recipe` fills `writes` with the
-/// ConfigWrite list to stage; returns false when the name is unknown.
+/**
+ * Pluggable store of named parameter sets. `recipe` fills `writes` with the
+ * ConfigWrite list to stage; returns false when the name is unknown.
+ */
 class IMachineRecipeStore {
 public:
     virtual ~IMachineRecipeStore() = default;
@@ -1409,33 +1491,35 @@ public:
     virtual std::vector<PdoEntryV1> entries() = 0;
 };
 
-/// SlaveSupervisor recovery state for one slave (machine.supervisor.status).
+/**SlaveSupervisor recovery state for one slave (machine.supervisor.status). */
 struct SupervisorEntryV1 {
     uint16_t slaveIndex = 0;
-    uint8_t state = 0;              ///< SlaveRecoveryState ordinals
+    uint8_t state = 0; /**< SlaveRecoveryState ordinals */
     bool suspended = false;
     bool recovering = false;
     uint16_t attemptCount = 0;
 };
 
-/// Pluggable backend for machine.supervisor.* — e.g. EtherCatSupervisorAdapter.
+/**Pluggable backend for machine.supervisor.* — e.g. EtherCatSupervisorAdapter. */
 class IMachineSupervisorAccess {
 public:
     virtual ~IMachineSupervisorAccess() = default;
     virtual std::vector<SupervisorEntryV1> slaves() = 0;
 
-    /// Controlled retry: reset a failed/critical slave's recovery state and
-    /// trigger a bounded recovery pass. Returns false with `error` when the
-    /// backend cannot retry (not supervised, recovery in progress).
-    /// @param slave Slave index to retry.
-    /// @param error Receives the reason when the retry is refused.
+    /**
+     * Controlled retry: reset a failed/critical slave's recovery state and
+     * trigger a bounded recovery pass. Returns false with `error` when the
+     * backend cannot retry (not supervised, recovery in progress).
+     * @param slave Slave index to retry.
+     * @param error Receives the reason when the retry is refused.
+     */
     virtual bool retry(uint16_t slave, std::string& error) = 0;
 };
 
-/// Role/audit/rate-limit policy around a pluggable IMachineSupervisorAccess.
+/**Role/audit/rate-limit policy around a pluggable IMachineSupervisorAccess. */
 class MachineSupervisorService final {
 public:
-    /// Retries are commissioning actions: at most one per second server-wide.
+    /**Retries are commissioning actions: at most one per second server-wide. */
     static constexpr uint64_t kRetryMinIntervalUs = 1'000'000;
 
     explicit MachineSupervisorService(IMachineSupervisorAccess& access,
@@ -1456,9 +1540,11 @@ public:
         return detail::encodeArray(entries);
     }
 
-    /// machine.supervisor.retry — technician-or-above, rate-limited, audited.
-    /// @param slave Slave index to retry.
-    /// @param identity Session identity (technician or above).
+    /**
+     * machine.supervisor.retry — technician-or-above, rate-limited, audited.
+     * @param slave Slave index to retry.
+     * @param identity Session identity (technician or above).
+     */
     FunctionCallResult retry(uint16_t slave, const SessionIdentity& identity) {
         FunctionCallResult result;
         if (!identity.authenticated || identity.role < Role::Technician) {
@@ -1558,49 +1644,65 @@ public:
           gate_(gate), alarms_(alarms), operations_(operations),
           auditJournal_(auditJournal), capture_(capture), config_(config) {}
 
-    /// Attach optional services before install() when they depend on a
-    /// registry that does not exist at construction time.
+    /**
+     * Attach optional services before install() when they depend on a
+     * registry that does not exist at construction time.
+     */
     void setAuxiliaryServices(MachineCaptureService* capture,
                               StagedConfigService* config) {
         capture_ = capture;
         config_ = config;
     }
 
-    /// Attach an optional pluggable SDO backend. When unset, machine.sdo.*
-    /// functions are not registered at all — the surface is absent, not
-    /// merely failing.
+    /**
+     * Attach an optional pluggable SDO backend. When unset, machine.sdo.*
+     * functions are not registered at all — the surface is absent, not
+     * merely failing.
+     */
     void setSdoService(MachineSdoService* sdo) { sdo_ = sdo; }
 
-    /// Attach a pluggable diagnostics source before install(). Without one
-    /// the machine.diagnostics signal is not registered.
+    /**
+     * Attach a pluggable diagnostics source before install(). Without one
+     * the machine.diagnostics signal is not registered.
+     */
     void setDiagnosticsSource(IMachineDiagnosticsSource* source) {
         diagnostics_ = source;
     }
 
-    /// Attach a PDO-map source / supervisor backend before install(); the
-    /// corresponding machine.pdo.map / machine.supervisor.* functions are
-    /// only registered when set.
+    /**
+     * Attach a PDO-map source / supervisor backend before install(); the
+     * corresponding machine.pdo.map / machine.supervisor.* functions are
+     * only registered when set.
+     */
     void setPdoSource(IMachinePdoSource* source) { pdo_ = source; }
-    /// Attach a commissioning checklist provider before install(); without
-    /// one the machine.checklist.* functions are not registered.
+    /**
+     * Attach a commissioning checklist provider before install(); without
+     * one the machine.checklist.* functions are not registered.
+     */
     void setChecklistSource(IMachineChecklistSource* source) {
         checklist_ = source;
     }
     void setSupervisor(MachineSupervisorService* supervisor) {
         supervisor_ = supervisor;
     }
-    /// Attach an application profile source before install(); without one
-    /// the machine.app.profile signal is not registered.
+    /**
+     * Attach an application profile source before install(); without one
+     * the machine.app.profile signal is not registered.
+     */
     void setAppProfileSource(IMachineAppProfileSource* source) {
         appProfile_ = source;
     }
-    /// Attach a recipe store before install(). Recipes are staged through the
-    /// staged-config service, so the machine.recipe.* functions require
-    /// setAuxiliaryServices() as well and are absent without it.
+    /**
+     * Attach a recipe store before install(). Recipes are staged through the
+     * staged-config service, so the machine.recipe.* functions require
+     * setAuxiliaryServices() as well and are absent without it.
+     */
     void setRecipeStore(IMachineRecipeStore* store) { recipes_ = store; }
 
-    /// Register every typed machine function/signal. Requires the full
-    /// machine-profile schema graph to be installed in `catalog`.
+    /**
+     * Register every typed machine function/signal. Requires the full
+     * machine-profile schema graph to be installed in `catalog`.
+     */
     bool install(Registry& registry, const SchemaCatalog& catalog) {
         const auto* graph = catalog.graph();
         if (!graph) return false;
@@ -1785,8 +1887,10 @@ public:
         return true;
     }
 
-    /// Called when a session disconnects: force-release its leases and
-    /// cancel its in-flight operations (disconnect/expiry stop semantics).
+    /**
+     * Called when a session disconnects: force-release its leases and
+     * cancel its in-flight operations (disconnect/expiry stop semantics).
+     */
     void sessionEnded(const std::string& sessionId) {
         authority_.releaseAll(sessionId);
         operations_.cancelAllForSession(sessionId, "Owner session disconnected");
@@ -3113,7 +3217,7 @@ private:
         return registry.addFunction(std::move(function));
     }
 
-    /// Decode a Bytes field payload: varint length + bytes, fully consumed.
+    /**Decode a Bytes field payload: varint length + bytes, fully consumed. */
     static std::optional<std::vector<uint8_t>> decodeLengthPrefixed(
         const std::vector<uint8_t>& bytes) {
         size_t position = 0;
@@ -3132,7 +3236,7 @@ private:
             bytes.begin() + static_cast<ptrdiff_t>(position + length));
     }
 
-    /// Decode a dynamic array into raw element payloads.
+    /**Decode a dynamic array into raw element payloads. */
     static std::optional<std::vector<std::vector<uint8_t>>> decodeElementArray(
         const std::vector<uint8_t>& bytes) {
         size_t position = 0;
@@ -3162,8 +3266,10 @@ private:
         return elements;
     }
 
-    /// machine.diagnostics — registered only when a pluggable
-    /// IMachineDiagnosticsSource has been attached via setDiagnosticsSource().
+    /**
+     * machine.diagnostics — registered only when a pluggable
+     * IMachineDiagnosticsSource has been attached via setDiagnosticsSource().
+     */
     template <typename SlotFor>
     bool addDiagnosticsSignal(Registry& registry, const SlotFor& slotFor) {
         SchemaRef diagnosticsRef;
@@ -3191,8 +3297,10 @@ private:
         return registry.addSignal(std::move(signal));
     }
 
-    /// machine.sdo.list / read / write — registered only when a pluggable
-    /// IMachineSdoAccess backend has been attached via setSdoService().
+    /**
+     * machine.sdo.list / read / write — registered only when a pluggable
+     * IMachineSdoAccess backend has been attached via setSdoService().
+     */
     template <typename SlotFor>
     bool addSdoFunctions(Registry& registry, const SlotFor& slotFor) {
         SchemaRef listRef, requestRef, writeRequestRef, resultRef;
@@ -3496,8 +3604,10 @@ private:
         return out;
     }
 
-    /// Append a typed audit event (`audit.<surface>`) for non-authority
-    /// actions like config import or checklist reports.
+    /**
+     * Append a typed audit event (`audit.<surface>`) for non-authority
+     * actions like config import or checklist reports.
+     */
     void audit(const SessionIdentity& identity, std::string_view eventType,
                std::string_view description) {
         if (!auditJournal_) return;
@@ -3517,8 +3627,10 @@ private:
         ++metrics_.auditsWritten;
     }
 
-    /// machine.pdo.map — registered only when an IMachinePdoSource is
-    /// attached via setPdoSource().
+    /**
+     * machine.pdo.map — registered only when an IMachinePdoSource is
+     * attached via setPdoSource().
+     */
     template <typename SlotFor>
     bool addPdoFunctions(Registry& registry, const SlotFor& slotFor) {
         SchemaRef entriesRef;
@@ -3567,8 +3679,10 @@ private:
         return registry.addFunction(std::move(function));
     }
 
-    /// machine.supervisor.status / retry — registered only when a
-    /// MachineSupervisorService is attached via setSupervisor().
+    /**
+     * machine.supervisor.status / retry — registered only when a
+     * MachineSupervisorService is attached via setSupervisor().
+     */
     template <typename SlotFor>
     bool addSupervisorFunctions(Registry& registry, const SlotFor& slotFor) {
         SchemaRef statusRef, resultRef;

@@ -185,7 +185,7 @@ bool setCurrentThreadDeadline(uint64_t runtime_ns, uint64_t deadline_ns,
 
 namespace {
 
-/// Read a small file into a string; returns empty on failure.
+/**Read a small file into a string; returns empty on failure. */
 std::string readFileToString(const char* path) {
     std::ifstream f(path);
     if (!f.is_open()) return {};
@@ -194,7 +194,7 @@ std::string readFileToString(const char* path) {
     return content;
 }
 
-/// Map uname.version substring to PreemptModel (build model).
+/**Map uname.version substring to PreemptModel (build model). */
 PreemptModel parseBuildModel(const std::string& version) {
     if (version.find("PREEMPT_RT") != std::string::npos)
         return PreemptModel::PreemptRt;
@@ -207,7 +207,7 @@ PreemptModel parseBuildModel(const std::string& version) {
     return PreemptModel::PreemptNone;
 }
 
-/// Map a mode string to PreemptModel.
+/**Map a mode string to PreemptModel. */
 PreemptModel modeStringToModel(const std::string& mode) {
     if (mode == "full")  return PreemptModel::PreemptFull;
     if (mode == "lazy")  return PreemptModel::PreemptFull; // lazy is a relaxed full
@@ -216,9 +216,11 @@ PreemptModel modeStringToModel(const std::string& mode) {
     return PreemptModel::Unknown;
 }
 
-/// For PREEMPT_DYNAMIC kernels, resolve the currently active preempt mode.
-/// Tries /sys/kernel/debug/sched/preempt first (format: "(full) lazy"),
-/// then falls back to the preempt= boot parameter in /proc/cmdline.
+/**
+ * For PREEMPT_DYNAMIC kernels, resolve the currently active preempt mode.
+ * Tries /sys/kernel/debug/sched/preempt first (format: "(full) lazy"),
+ * then falls back to the preempt= boot parameter in /proc/cmdline.
+ */
 std::string parseActiveDynamicMode(std::string& source_out) {
     // 1. debugfs: /sys/kernel/debug/sched/preempt
     //    Format: "(full) lazy" — parenthesized token is the active mode.
@@ -256,7 +258,7 @@ std::string parseActiveDynamicMode(std::string& source_out) {
     return "unknown";
 }
 
-/// Classify the realtime level from build model and active mode string.
+/**Classify the realtime level from build model and active mode string. */
 RealtimeClass classifyRealtime(PreemptModel build_model,
                                const std::string& active_mode_str) {
     if (build_model == PreemptModel::PreemptRt)

@@ -17,7 +17,7 @@ namespace tether::klipper::objects {
 // Filament sensors
 // ============================================================================
 
-/// @brief Filament runout sensor.
+/**@brief Filament runout sensor. */
 class FilamentSensor {
 public:
     using PinReadFunc = std::function<bool()>;
@@ -40,7 +40,7 @@ public:
      */
     bool runout() const { return pinRead_(); }
 
-    /// @brief Update sensor state (call periodically).
+    /**@brief Update sensor state (call periodically). */
     void update() {
         bool current = pinRead_();
         if (current && !lastState_) {
@@ -75,7 +75,7 @@ private:
     double minEventTime_ = 0.0;
 };
 
-/// @brief Hall effect filament width sensor.
+/**@brief Hall effect filament width sensor. */
 class HallFilamentSensor {
 public:
     using AdcReadFunc = std::function<double()>;
@@ -116,7 +116,7 @@ private:
 // Pulse counter / encoder
 // ============================================================================
 
-/// @brief Pulse counter (quadrature encoder or simple pulse counting).
+/**@brief Pulse counter (quadrature encoder or simple pulse counting). */
 class PulseCounter {
 public:
     using PinReadFunc = std::function<bool()>;
@@ -165,7 +165,7 @@ public:
         return static_cast<double>(count_ - lastCount_) / sampleTime_;
     }
 
-    /// @brief Update rate calculation (call at sample interval).
+    /**@brief Update rate calculation (call at sample interval). */
     void updateRate() {
         lastCount_ = count_;
     }
@@ -181,13 +181,13 @@ private:
 // ADXL345 accelerometer
 // ============================================================================
 
-/// @brief ADXL345 accelerometer for resonance measurement.
+/**@brief ADXL345 accelerometer for resonance measurement. */
 class Adxl345 {
 public:
     using SpiTransferFunc = std::function<std::vector<uint8_t>(std::span<const uint8_t>)>;
 
     struct Acceleration {
-        double x, y, z; ///< in g (9.81 m/s²)
+        double x, y, z; /**< in g (9.81 m/s²) */
     };
 
     Adxl345(uint8_t oid, SpiTransferFunc spiTransfer)
@@ -227,13 +227,13 @@ public:
         return {x * 0.0039, y * 0.0039, z * 0.0039};
     }
 
-    /// @brief Start data collection for resonance measurement.
+    /**@brief Start data collection for resonance measurement. */
     void startMeasurement() { measuring_ = true; samples_.clear(); }
 
-    /// @brief Stop data collection.
+    /**@brief Stop data collection. */
     void stopMeasurement() { measuring_ = false; }
 
-    /// @brief Collect a sample (call periodically during measurement).
+    /**@brief Collect a sample (call periodically during measurement). */
     void collectSample() {
         if (!measuring_) return;
         samples_.push_back(read());
@@ -267,20 +267,22 @@ private:
 // TSL1401CL filament width sensor
 // ============================================================================
 
-/// @brief TSL1401CL linear CCD-based filament width sensor.
-/// Measures filament width by reading a 128-pixel CCD array and
-/// detecting the shadow cast by the filament.
+/**
+ * @brief TSL1401CL linear CCD-based filament width sensor.
+ * Measures filament width by reading a 128-pixel CCD array and
+ * detecting the shadow cast by the filament.
+ */
 class Tsl1401clFilamentSensor {
 public:
     using AdcReadFunc = std::function<double()>;
 
     struct Params {
-        double nominalWidth = 1.75;    ///< Nominal filament width (mm)
-        double tolerance = 0.1;        ///< Width tolerance (mm)
-        double minWidth = 1.5;         ///< Minimum valid width (mm)
-        double maxWidth = 2.0;         ///< Maximum valid width (mm)
-        int pixelCount = 128;          ///< CCD pixel count
-        double pixelSpacing = 0.1;     ///< mm per pixel (calibrated)
+        double nominalWidth = 1.75; /**< Nominal filament width (mm) */
+        double tolerance = 0.1; /**< Width tolerance (mm) */
+        double minWidth = 1.5; /**< Minimum valid width (mm) */
+        double maxWidth = 2.0; /**< Maximum valid width (mm) */
+        int pixelCount = 128; /**< CCD pixel count */
+        double pixelSpacing = 0.1; /**< mm per pixel (calibrated) */
     };
 
     Tsl1401clFilamentSensor(uint8_t oid, Params params, AdcReadFunc adcRead)
@@ -290,10 +292,12 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Read the ADC value and compute filament width.
-    /// The ADC reading represents the total light intensity, which
-    /// correlates with the filament shadow width.
-    /// @return Filament width in mm, or NaN on error.
+    /**
+     * @brief Read the ADC value and compute filament width.
+     * The ADC reading represents the total light intensity, which
+     * correlates with the filament shadow width.
+     * @return Filament width in mm, or NaN on error.
+     */
     double readWidth() const {
         double adcValue = adcRead_();
         if (adcValue < 0) return NAN;

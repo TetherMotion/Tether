@@ -49,7 +49,7 @@ struct TrajectoryPoint;
 // Constants
 // ============================================================================
 
-/// Mathematical constants
+/**Mathematical constants */
 namespace InterpolationConstants {
     constexpr double PI = 3.14159265358979323846;
     constexpr double TWO_PI = 2.0 * PI;
@@ -66,53 +66,53 @@ namespace InterpolationConstants {
  * @brief Available interpolation strategies
  */
 enum class InterpolationStrategyType : uint8_t {
-    FixedTime = 0,          ///< Fixed time step interpolation
-    FixedDeviation = 1,     ///< Adaptive chord deviation
-    RKF45 = 2,              ///< Runge-Kutta-Fehlberg 4(5)
-    DOPRI = 3,              ///< Dormand-Prince 5(4)
-    AdaptiveMidpoint = 4,   ///< Recursive midpoint subdivision
-    DeCasteljau = 5,        ///< Bézier de Casteljau algorithm
+    FixedTime = 0, /**< Fixed time step interpolation */
+    FixedDeviation = 1, /**< Adaptive chord deviation */
+    RKF45 = 2, /**< Runge-Kutta-Fehlberg 4(5) */
+    DOPRI = 3, /**< Dormand-Prince 5(4) */
+    AdaptiveMidpoint = 4, /**< Recursive midpoint subdivision */
+    DeCasteljau = 5, /**< Bézier de Casteljau algorithm */
 };
 
 /**
  * @brief Path control mode (G61/G61.1/G64)
  */
 enum class PathControlMode : uint8_t {
-    ExactStop = 0,          ///< G61 - Full stop at each endpoint
-    ExactPath = 1,          ///< G61.1 - Exact path, may not stop
-    Blending = 2,           ///< G64 - Path blending/corner rounding
+    ExactStop = 0, /**< G61 - Full stop at each endpoint */
+    ExactPath = 1, /**< G61.1 - Exact path, may not stop */
+    Blending = 2, /**< G64 - Path blending/corner rounding */
 };
 
 /**
  * @brief Contour offset mode
  */
 enum class ContourOffsetMode : uint8_t {
-    None = 0,               ///< No offset (on path)
-    Left = 1,               ///< Offset left of path direction
-    Right = 2,              ///< Offset right of path direction
+    None = 0, /**< No offset (on path) */
+    Left = 1, /**< Offset left of path direction */
+    Right = 2, /**< Offset right of path direction */
 };
 
 /**
  * @brief Motion type for segments
  */
 enum class SegmentMotionType : uint8_t {
-    Rapid = 0,              ///< G0 - Rapid positioning
-    Linear = 1,             ///< G1 - Linear interpolation
-    ArcCW = 2,              ///< G2 - Clockwise arc
-    ArcCCW = 3,             ///< G3 - Counter-clockwise arc
-    CubicSpline = 4,        ///< G5 - Cubic spline
-    QuadraticSpline = 5,    ///< G5.1 - Quadratic spline
-    NURBS = 6,              ///< G5.2/G5.3 - NURBS
-    Dwell = 7,              ///< G4 - Dwell
+    Rapid = 0, /**< G0 - Rapid positioning */
+    Linear = 1, /**< G1 - Linear interpolation */
+    ArcCW = 2, /**< G2 - Clockwise arc */
+    ArcCCW = 3, /**< G3 - Counter-clockwise arc */
+    CubicSpline = 4, /**< G5 - Cubic spline */
+    QuadraticSpline = 5, /**< G5.1 - Quadratic spline */
+    NURBS = 6, /**< G5.2/G5.3 - NURBS */
+    Dwell = 7, /**< G4 - Dwell */
 };
 
 /**
  * @brief Plane selection for arc interpolation
  */
 enum class InterpolationPlane : uint8_t {
-    XY = 0,                 ///< G17 - XY plane (Z perpendicular)
-    XZ = 1,                 ///< G18 - XZ plane (Y perpendicular)
-    YZ = 2,                 ///< G19 - YZ plane (X perpendicular)
+    XY = 0, /**< G17 - XY plane (Z perpendicular) */
+    XZ = 1, /**< G18 - XZ plane (Y perpendicular) */
+    YZ = 2, /**< G19 - YZ plane (X perpendicular) */
 };
 
 // ============================================================================
@@ -123,14 +123,14 @@ enum class InterpolationPlane : uint8_t {
  * @brief Kinematic limits for motion planning
  */
 struct KinematicLimits {
-    double maxVelocityLinear = 6000.0;      ///< Maximum linear velocity (mm/min)
-    double maxVelocityAngular = 3600.0;     ///< Maximum angular velocity (deg/min)
-    double maxAcceleration = 1000.0;        ///< Maximum acceleration (mm/s²)
-    double maxDeceleration = 1000.0;        ///< Maximum deceleration (mm/s²)
-    double maxJerk = 10000.0;               ///< Maximum jerk (mm/s³)
-    double maxCentripetalAccel = 500.0;     ///< Maximum centripetal acceleration (mm/s²)
+    double maxVelocityLinear = 6000.0; /**< Maximum linear velocity (mm/min) */
+    double maxVelocityAngular = 3600.0; /**< Maximum angular velocity (deg/min) */
+    double maxAcceleration = 1000.0; /**< Maximum acceleration (mm/s²) */
+    double maxDeceleration = 1000.0; /**< Maximum deceleration (mm/s²) */
+    double maxJerk = 10000.0; /**< Maximum jerk (mm/s³) */
+    double maxCentripetalAccel = 500.0; /**< Maximum centripetal acceleration (mm/s²) */
 
-    /// Per-axis limits (X, Y, Z, A, B, C, U, V, W)
+    /**Per-axis limits (X, Y, Z, A, B, C, U, V, W) */
     std::array<double, MAX_AXES> axisMaxVelocity{};
     std::array<double, MAX_AXES> axisMaxAcceleration{};
     std::array<double, MAX_AXES> axisMaxJerk{};
@@ -150,43 +150,43 @@ struct InterpolationConfig {
     InterpolationStrategyType strategy = InterpolationStrategyType::FixedDeviation;
 
     // === Common Parameters ===
-    double timeResolution = 0.001;          ///< Time step for fixed-time (seconds)
-    double maxChordDeviation = 0.01;        ///< Maximum chord error (mm)
-    double velocityTolerance = 0.01;        ///< Velocity continuity tolerance (mm/s)
-    double positionTolerance = 1e-6;        ///< Position tolerance for comparisons (mm)
+    double timeResolution = 0.001; /**< Time step for fixed-time (seconds) */
+    double maxChordDeviation = 0.01; /**< Maximum chord error (mm) */
+    double velocityTolerance = 0.01; /**< Velocity continuity tolerance (mm/s) */
+    double positionTolerance = 1e-6; /**< Position tolerance for comparisons (mm) */
 
     // === Adaptive Method Parameters ===
-    double minStepSize = 1e-8;              ///< Minimum step size (parameter or time)
-    double maxStepSize = 0.1;               ///< Maximum step size
-    double errorTolerance = 1e-6;           ///< Local error tolerance
-    double safetyFactor = 0.9;              ///< Step size safety factor (0.8-0.95)
-    int maxIterations = 1000;               ///< Maximum iterations per segment
-    int maxSubdivisionDepth = 20;           ///< Maximum recursion depth
+    double minStepSize = 1e-8; /**< Minimum step size (parameter or time) */
+    double maxStepSize = 0.1; /**< Maximum step size */
+    double errorTolerance = 1e-6; /**< Local error tolerance */
+    double safetyFactor = 0.9; /**< Step size safety factor (0.8-0.95) */
+    int maxIterations = 1000; /**< Maximum iterations per segment */
+    int maxSubdivisionDepth = 20; /**< Maximum recursion depth */
 
     // === Kinematic Limits ===
     KinematicLimits limits;
 
     // === Path Control Mode (G61/G64) ===
     PathControlMode pathMode = PathControlMode::Blending;
-    double blendTolerance = 0.05;           ///< G64 P value (mm)
-    double naiveCAMTolerance = 0.0;         ///< G64 Q value (mm)
+    double blendTolerance = 0.05; /**< G64 P value (mm) */
+    double naiveCAMTolerance = 0.0; /**< G64 Q value (mm) */
 
     // === Contour Offset ===
     ContourOffsetMode offsetMode = ContourOffsetMode::None;
-    double offsetDistance = 0.0;            ///< Offset distance (mm, positive=left)
+    double offsetDistance = 0.0; /**< Offset distance (mm, positive=left) */
 
     // === Lookahead/Lookbehind ===
-    size_t lookaheadDepth = 50;             ///< Number of segments to look ahead
-    size_t lookbehindDepth = 20;            ///< Number of segments to look behind
+    size_t lookaheadDepth = 50; /**< Number of segments to look ahead */
+    size_t lookbehindDepth = 20; /**< Number of segments to look behind */
 
     // === S-Curve Acceleration ===
-    bool useSCurve = true;                  ///< Enable S-curve (jerk limited) profiles
-    bool enableJerkLimit = true;            ///< Apply jerk limiting
+    bool useSCurve = true; /**< Enable S-curve (jerk limited) profiles */
+    bool enableJerkLimit = true; /**< Apply jerk limiting */
 
     // === Arc Parameters ===
-    double arcRadiusTolerance = 0.005;      ///< Arc endpoint radius match tolerance (mm)
-    double minArcRadius = 0.001;            ///< Minimum arc radius (mm)
-    double minArcSegmentAngle = 0.01;       ///< Minimum arc segment (radians)
+    double arcRadiusTolerance = 0.005; /**< Arc endpoint radius match tolerance (mm) */
+    double minArcRadius = 0.001; /**< Minimum arc radius (mm) */
+    double minArcSegmentAngle = 0.01; /**< Minimum arc segment (radians) */
 };
 
 // ============================================================================
@@ -197,36 +197,40 @@ struct InterpolationConfig {
  * @brief A point along the interpolated trajectory
  */
 struct TrajectoryPoint {
-    double time = 0.0;                      ///< Time from trajectory start (seconds)
-    Position position;                       ///< Position at this time
-    Position velocity;                       ///< Velocity (units/s)
-    Position acceleration;                   ///< Acceleration (units/s²)
-    Position jerk;                          ///< Jerk (units/s³)
+    double time = 0.0; /**< Time from trajectory start (seconds) */
+    Position position; /**< Position at this time */
+    Position velocity; /**< Velocity (units/s) */
+    Position acceleration; /**< Acceleration (units/s²) */
+    Position jerk; /**< Jerk (units/s³) */
 
-    int32_t blockIndex = -1;                ///< Source G-code block index
-    int32_t segmentIndex = -1;              ///< Segment index within trajectory
+    int32_t blockIndex = -1; /**< Source G-code block index */
+    int32_t segmentIndex = -1; /**< Segment index within trajectory */
     SegmentMotionType motionType = SegmentMotionType::Linear;
 
-    double parameter = 0.0;                 ///< Curve parameter (0-1) within segment
-    double pathLength = 0.0;                ///< Arc length from segment start
-    double curvature = 0.0;                 ///< Local curvature (1/radius)
+    double parameter = 0.0; /**< Curve parameter (0-1) within segment */
+    double pathLength = 0.0; /**< Arc length from segment start */
+    double curvature = 0.0; /**< Local curvature (1/radius) */
 
-    bool isInterpolated = false;            ///< True if interpolated (vs endpoint)
-    bool isBlendPoint = false;              ///< True if part of corner blend
-    bool atVelocityLimit = false;           ///< True if velocity-limited
-    bool atAccelerationLimit = false;       ///< True if acceleration-limited
-    bool atJerkLimit = false;               ///< True if jerk-limited
+    bool isInterpolated = false; /**< True if interpolated (vs endpoint) */
+    bool isBlendPoint = false; /**< True if part of corner blend */
+    bool atVelocityLimit = false; /**< True if velocity-limited */
+    bool atAccelerationLimit = false; /**< True if acceleration-limited */
+    bool atJerkLimit = false; /**< True if jerk-limited */
 
-    /// Default constructor
+    /**Default constructor */
     TrajectoryPoint() = default;
 
-    /// Create from position
-    /// @param pos Position to wrap
+    /**
+     * Create from position
+     * @param pos Position to wrap
+     */
     explicit TrajectoryPoint(const Position& pos) : position(pos) {}
 
-    /// Euclidean distance to another point
-    /// @param other Point to measure against
-    /// @return Distance between the positions [mm]
+    /**
+     * Euclidean distance to another point
+     * @param other Point to measure against
+     * @return Distance between the positions [mm]
+     */
     double distanceTo(const TrajectoryPoint& other) const {
         return position.linearDistance(other.position);
     }
@@ -240,71 +244,81 @@ struct TrajectoryPoint {
  * @brief A motion segment between two points
  */
 struct PlanningSegment {
-    Position start;                         ///< Start position
-    Position end;                           ///< End position
-    Position center;                        ///< Arc center (for arcs)
+    Position start; /**< Start position */
+    Position end; /**< End position */
+    Position center; /**< Arc center (for arcs) */
 
     SegmentMotionType motionType = SegmentMotionType::Linear;
     InterpolationPlane plane = InterpolationPlane::XY;
 
-    double feedRate = 1000.0;               ///< Feed rate (mm/min)
-    double arcRadius = 0.0;                 ///< Arc radius (mm)
-    double arcSweep = 0.0;                  ///< Arc sweep angle (radians)
-    double segmentLength = 0.0;             ///< Total path length (mm)
-    double segmentTime = 0.0;               ///< Segment duration (seconds)
+    double feedRate = 1000.0; /**< Feed rate (mm/min) */
+    double arcRadius = 0.0; /**< Arc radius (mm) */
+    double arcSweep = 0.0; /**< Arc sweep angle (radians) */
+    double segmentLength = 0.0; /**< Total path length (mm) */
+    double segmentTime = 0.0; /**< Segment duration (seconds) */
 
-    int32_t blockIndex = -1;                ///< Source G-code block
-    bool isRapid = false;                   ///< True for G0 moves
+    int32_t blockIndex = -1; /**< Source G-code block */
+    bool isRapid = false; /**< True for G0 moves */
 
-    /// G64 path blending tolerance (P value, mm). 0 = no blending (G61).
-    /// Used by the viewer to color by corner deviation percentage.
+    /**
+     * G64 path blending tolerance (P value, mm). 0 = no blending (G61).
+     * Used by the viewer to color by corner deviation percentage.
+     */
     double blendTolerance = 0.0;
 
     // Spline control points (for G5, NURBS)
     std::vector<Position> controlPoints;
-    std::vector<double> weights;            ///< NURBS weights
-    std::vector<double> knots;              ///< NURBS knot vector
+    std::vector<double> weights; /**< NURBS weights */
+    std::vector<double> knots; /**< NURBS knot vector */
 
     // Velocity planning results
-    double entryVelocity = 0.0;             ///< Planned entry velocity (mm/s)
-    double exitVelocity = 0.0;              ///< Planned exit velocity (mm/s)
-    double maxVelocity = 0.0;               ///< Maximum velocity in segment
+    double entryVelocity = 0.0; /**< Planned entry velocity (mm/s) */
+    double exitVelocity = 0.0; /**< Planned exit velocity (mm/s) */
+    double maxVelocity = 0.0; /**< Maximum velocity in segment */
 
-    /// Default constructor
+    /**Default constructor */
     PlanningSegment() = default;
 
-    /// Check if this is an arc segment
-    /// @return `true` for ArcCW/ArcCCW motion types
+    /**
+     * Check if this is an arc segment
+     * @return `true` for ArcCW/ArcCCW motion types
+     */
     bool isArc() const {
         return motionType == SegmentMotionType::ArcCW ||
                motionType == SegmentMotionType::ArcCCW;
     }
 
-    /// Check if this is a spline segment
-    /// @return `true` for CubicSpline/QuadraticSpline/NURBS motion types
+    /**
+     * Check if this is a spline segment
+     * @return `true` for CubicSpline/QuadraticSpline/NURBS motion types
+     */
     bool isSpline() const {
         return motionType == SegmentMotionType::CubicSpline ||
                motionType == SegmentMotionType::QuadraticSpline ||
                motionType == SegmentMotionType::NURBS;
     }
 
-    /// Get arc direction (1 for CCW, -1 for CW)
-    /// @return +1 for counter-clockwise, -1 otherwise
+    /**
+     * Get arc direction (1 for CCW, -1 for CW)
+     * @return +1 for counter-clockwise, -1 otherwise
+     */
     int arcDirection() const {
         return (motionType == SegmentMotionType::ArcCCW) ? 1 : -1;
     }
 
-    /// Compute segment duration from feed rate and segment length.
-    /// Stores the result in @ref segmentTime.
-    ///
-    /// Feed rate is in mm/min (standard G-code F word); it is converted to
-    /// mm/s internally. Rapid moves (G0) use a minimum effective speed of
-    /// 200 mm/s so that rapids are not unrealistically slow when the feed
-    /// rate is low. Zero-length segments get a minimum 1 ms duration to
-    /// avoid division-by-zero downstream.
-    ///
-    /// @param minRapidSpeed  Minimum effective speed for rapid moves (mm/s).
-    /// @param minSegmentTime Minimum segment duration (seconds).
+    /**
+     * Compute segment duration from feed rate and segment length.
+     * Stores the result in @ref segmentTime.
+     *
+     * Feed rate is in mm/min (standard G-code F word); it is converted to
+     * mm/s internally. Rapid moves (G0) use a minimum effective speed of
+     * 200 mm/s so that rapids are not unrealistically slow when the feed
+     * rate is low. Zero-length segments get a minimum 1 ms duration to
+     * avoid division-by-zero downstream.
+     *
+     * @param minRapidSpeed  Minimum effective speed for rapid moves (mm/s).
+     * @param minSegmentTime Minimum segment duration (seconds).
+     */
     void computeTimeFromFeedRate(double minRapidSpeed = 200.0,
                                  double minSegmentTime = 0.001) {
         if (segmentLength <= 0.0) {
@@ -351,8 +365,10 @@ struct InterpolationContext {
         }
     }
 
-    /// Update bounds with a position
-    /// @param p Position folded into the per-axis min/max bounds
+    /**
+     * Update bounds with a position
+     * @param p Position folded into the per-axis min/max bounds
+     */
     void updateBounds(const Position& p) {
         for (size_t i = 0; i < MAX_AXES; ++i) {
             minBounds[i] = std::min(minBounds[i], p[i]);
@@ -360,9 +376,11 @@ struct InterpolationContext {
         }
     }
 
-    /// Get segment at offset from current (negative = lookbehind, positive = lookahead)
-    /// @param offset Segment offset relative to currentSegmentIndex
-    /// @return Segment pointer, or nullptr when out of range
+    /**
+     * Get segment at offset from current (negative = lookbehind, positive = lookahead)
+     * @param offset Segment offset relative to currentSegmentIndex
+     * @return Segment pointer, or nullptr when out of range
+     */
     const PlanningSegment* getSegment(int offset) const {
         int idx = static_cast<int>(currentSegmentIndex) + offset;
         if (idx < 0 || idx >= static_cast<int>(segments.size())) {
@@ -371,16 +389,20 @@ struct InterpolationContext {
         return &segments[idx];
     }
 
-    /// Check if we have lookahead available
-    /// @param count Number of segments ahead required
-    /// @return `true` if at least `count` segments remain after the current one
+    /**
+     * Check if we have lookahead available
+     * @param count Number of segments ahead required
+     * @return `true` if at least `count` segments remain after the current one
+     */
     bool hasLookahead(size_t count) const {
         return (currentSegmentIndex + count) < segments.size();
     }
 
-    /// Check if we have lookbehind available
-    /// @param count Number of segments behind required
-    /// @return `true` if at least `count` segments precede the current one
+    /**
+     * Check if we have lookbehind available
+     * @param count Number of segments behind required
+     * @return `true` if at least `count` segments precede the current one
+     */
     bool hasLookbehind(size_t count) const {
         return currentSegmentIndex >= count;
     }

@@ -74,36 +74,38 @@ class DCManager;
  * @brief Detailed error codes returned by Slave methods.
  */
 enum class SlaveError : uint8_t {
-    Ok = 0,                         ///< Operation completed successfully
+    Ok = 0, /**< Operation completed successfully */
 
     // -- Configuration guards --
-    MailboxNotConfigured,           ///< Mailbox (SM0/SM1) must be configured before PRE_OP
-    PDONotConfigured,               ///< PDO sync-managers must be configured before SAFE_OP
-    InvalidStateTransition,         ///< Requested transition violates the ESM state machine
-    SlaveNotFound,                  ///< Slave index out of range — returned by NonExistingSlave
+    MailboxNotConfigured, /**< Mailbox (SM0/SM1) must be configured before PRE_OP */
+    PDONotConfigured, /**< PDO sync-managers must be configured before SAFE_OP */
+    InvalidStateTransition, /**< Requested transition violates the ESM state machine */
+    SlaveNotFound, /**< Slave index out of range — returned by NonExistingSlave */
 
     // -- Communication errors --
-    TransportError,                 ///< Low-level send/receive failure
-    Timeout,                        ///< Slave did not respond in time
-    ALStatusError,                  ///< Slave reported an AL Status error code
-    WorkingCounterMismatch,         ///< Unexpected WKC value
+    TransportError, /**< Low-level send/receive failure */
+    Timeout, /**< Slave did not respond in time */
+    ALStatusError, /**< Slave reported an AL Status error code */
+    WorkingCounterMismatch, /**< Unexpected WKC value */
 
     // -- Mailbox / SDO errors --
-    MailboxConfigFailed,            ///< Failed to write SM0/SM1 configuration registers
-    SDOError,                       ///< SDO read/write failed (transport/timeout)
-    SDOAborted,                     ///< Slave explicitly aborted the SDO (definitive
-                                    ///< rejection — read lastSdoAbortCode() for the
-                                    ///< CoE abort code, e.g. 0x06070010 length mismatch)
-    SIIReadError,                   ///< SII EEPROM read failure
+    MailboxConfigFailed, /**< Failed to write SM0/SM1 configuration registers */
+    SDOError, /**< SDO read/write failed (transport/timeout) */
+    SDOAborted, /**< Slave explicitly aborted the SDO (definitive */
+                                    /**< 
+                                     * rejection — read lastSdoAbortCode() for the
+                                     * CoE abort code, e.g. 0x06070010 length mismatch)
+                                     */
+    SIIReadError, /**< SII EEPROM read failure */
 
     // -- PDO errors --
-    PDOConfigFailed,                ///< Failed to configure process-data sync managers
-    PDOMappingFailed,               ///< Mapping finalization failed
+    PDOConfigFailed, /**< Failed to configure process-data sync managers */
+    PDOMappingFailed, /**< Mapping finalization failed */
 
     // -- Generic --
-    NotInitialized,                 ///< Master not started
-    InternalError,                  ///< Unexpected internal error
-    Cancelled,                      ///< Operation cancelled by requestCancel() / signal
+    NotInitialized, /**< Master not started */
+    InternalError, /**< Unexpected internal error */
+    Cancelled, /**< Operation cancelled by requestCancel() / signal */
 };
 
 /**
@@ -228,13 +230,15 @@ public:
 
     bool apwr(uint16_t ado, const void* data, uint16_t len, unsigned int timeout_ms) override;
     bool aprd(uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms) override;
-    /// Packs all writes into a single multi-datagram frame.
-    /// @param ados Register addresses (ADOs) to write.
-    /// @param datas Payload pointers, one per address.
-    /// @param lens Payload lengths in bytes, one per address.
-    /// @param count Number of writes in the batch.
-    /// @param timeout_ms Transaction timeout [ms].
-    /// @return true when all writes were acknowledged.
+    /**
+     * Packs all writes into a single multi-datagram frame.
+     * @param ados Register addresses (ADOs) to write.
+     * @param datas Payload pointers, one per address.
+     * @param lens Payload lengths in bytes, one per address.
+     * @param count Number of writes in the batch.
+     * @param timeout_ms Transaction timeout [ms].
+     * @return true when all writes were acknowledged.
+     */
     bool apwrBatch(const uint16_t* ados, const void* const* datas,
                    const uint16_t* lens, size_t count,
                    unsigned int timeout_ms) override;
@@ -670,19 +674,23 @@ public:
      */
     virtual SlaveError readALStatusCode(uint16_t& code);
 
-    /// Firmware hint: some firmware-driven ESCs (e.g. SOMANET >= 5.6.x)
-    /// stop servicing the mailbox while the slave is in SAFE_OP.  The
-    /// device driver sets this after reading the firmware version
-    /// (0x100A) in PRE_OP; mailbox-dependent diagnostics check
-    /// mailboxAvailable() before issuing SDO traffic.
-    /// @param v true when the firmware services the mailbox in SAFE_OP.
+    /**
+     * Firmware hint: some firmware-driven ESCs (e.g. SOMANET >= 5.6.x)
+     * stop servicing the mailbox while the slave is in SAFE_OP.  The
+     * device driver sets this after reading the firmware version
+     * (0x100A) in PRE_OP; mailbox-dependent diagnostics check
+     * mailboxAvailable() before issuing SDO traffic.
+     * @param v true when the firmware services the mailbox in SAFE_OP.
+     */
     void setMailboxServicedInSafeOp(bool v) { mailbox_serviced_in_safeop_ = v; }
-    /// @return Firmware hint recorded by setMailboxServicedInSafeOp().
+    /**@return Firmware hint recorded by setMailboxServicedInSafeOp(). */
     bool mailboxServicedInSafeOp() const { return mailbox_serviced_in_safeop_; }
 
-    /// Whether an SDO transaction can be serviced right now — combines
-    /// the firmware hint above with the slave's current AL state.
-    /// @return true when an SDO exchange is expected to succeed.
+    /**
+     * Whether an SDO transaction can be serviced right now — combines
+     * the firmware hint above with the slave's current AL state.
+     * @return true when an SDO exchange is expected to succeed.
+     */
     bool mailboxAvailable();
 
     /**
@@ -955,10 +963,12 @@ protected:
     SlaveError registerExistingPDO(uint16_t pdo_index,
                                    PDO::PDODirection direction);
 
-    /// One-frame register snapshot for OP-transition diagnostics: FMMU
-    /// map, SM2 data buffer, watchdog status+counters, SM2/SM3 register
-    /// blocks, plus a mailbox liveness probe.  Called on each OP re-issue
-    /// and once on final transition failure.
+    /**
+     * One-frame register snapshot for OP-transition diagnostics: FMMU
+     * map, SM2 data buffer, watchdog status+counters, SM2/SM3 register
+     * blocks, plus a mailbox liveness probe.  Called on each OP re-issue
+     * and once on final transition failure.
+     */
     void dumpOpDiagnostics();
 };
 

@@ -23,20 +23,20 @@
 namespace Tether {
 namespace UI {
 
-/// Semantic row colors (renderer maps them to palette entries).
+/**Semantic row colors (renderer maps them to palette entries). */
 enum RowColor : int {
     RowNone  = 0,
-    RowOk    = 1,   ///< green — good/live state
-    RowWarn  = 2,   ///< yellow — degraded/attention
-    RowErr   = 3,   ///< red — error state
-    RowMuted = 4,   ///< gray — inactive/invalid
-    RowInfo  = 5,   ///< blue/cyan — informational
+    RowOk    = 1, /**< green — good/live state */
+    RowWarn  = 2, /**< yellow — degraded/attention */
+    RowErr   = 3, /**< red — error state */
+    RowMuted = 4, /**< gray — inactive/invalid */
+    RowInfo  = 5, /**< blue/cyan — informational */
 };
 
 struct Row {
-    std::vector<std::string> cells;   ///< rendered columns (strings only)
-    FieldSet fields;                  ///< filterable named fields
-    int tag = -1;                     ///< app payload (e.g. slave index)
+    std::vector<std::string> cells; /**< rendered columns (strings only) */
+    FieldSet fields; /**< filterable named fields */
+    int tag = -1; /**< app payload (e.g. slave index) */
     int color = RowNone;
 };
 
@@ -45,7 +45,7 @@ public:
     void setColumns(std::vector<std::string> cols) { columns_ = std::move(cols); }
     const std::vector<std::string>& columns() const { return columns_; }
 
-    /// Replace rows; tries to keep the selection on the same `tag`.
+    /**Replace rows; tries to keep the selection on the same `tag`. */
     void setRows(std::vector<Row> rows) {
         const int tag = selectedTag();
         rows_ = std::move(rows);
@@ -69,17 +69,17 @@ public:
         return visible_.size();
     }
 
-    /// Row at visible index `vi` (nullptr out of range).
+    /**Row at visible index `vi` (nullptr out of range). */
     const Row* visibleRow(size_t vi) {
         recompute();
         return vi < visible_.size() ? &rows_[visible_[vi]] : nullptr;
     }
 
-    /// Scroll offset expressed in visible rows (for the renderer).
+    /**Scroll offset expressed in visible rows (for the renderer). */
     size_t scrollOffset() const { return scroll_; }
     void setScroll(size_t s) { scroll_ = s; }
 
-    /// Keep `sel_` inside `height` visible rows.
+    /**Keep `sel_` inside `height` visible rows. */
     void ensureVisible(int height) {
         if (height <= 0) return;
         if (sel_ < scroll_) scroll_ = sel_;
@@ -140,7 +140,7 @@ public:
     }
     bool hasFilter() const { return filter_.active() || !search_.empty(); }
 
-    /// Incremental quicksearch (type-ahead).  Called per keystroke.
+    /**Incremental quicksearch (type-ahead).  Called per keystroke. */
     void setSearch(const std::string& s) {
         search_ = s;
         sel_ = scroll_ = 0;

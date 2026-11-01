@@ -176,7 +176,7 @@ inline void appendRef(std::vector<uint8_t>& out, const SchemaRef& ref) {
 }
 }
 
-/// Canonical descriptor bytes used as the input to the protocol digest.
+/**Canonical descriptor bytes used as the input to the protocol digest. */
 inline std::vector<uint8_t> canonicalDescriptor(const SchemaNode& node) {
     std::vector<uint8_t> out;
     detail::appendKey(out, node.key);
@@ -328,11 +328,13 @@ inline SchemaValidationResult validateReferences(const SchemaGraph& graph, const
     return SchemaValidationResult::success();
 }
 
-/// Wire size of a node whose encoding is fixed-length, or nullopt when the
-/// subtree contains any variable-length member. Varint scalar types
-/// (UVarint/IVarint/Enum) are variable; FixedString is `fixedCount` bytes;
-/// Optional is 1 byte + the element's fixed size when the element is
-/// fixed-layout. Memoized over `sizes`.
+/**
+ * Wire size of a node whose encoding is fixed-length, or nullopt when the
+ * subtree contains any variable-length member. Varint scalar types
+ * (UVarint/IVarint/Enum) are variable; FixedString is `fixedCount` bytes;
+ * Optional is 1 byte + the element's fixed size when the element is
+ * fixed-layout. Memoized over `sizes`.
+ */
 inline std::optional<size_t> fixedWireSize(
     const SchemaGraph& graph, const SchemaKey& key,
     std::unordered_map<SchemaKey, std::optional<size_t>, SchemaKeyHash>& sizes,
@@ -395,7 +397,7 @@ inline std::optional<size_t> fixedWireSize(
     return result;
 }
 
-/// Single-call convenience over fixedWireSize (own memo map).
+/**Single-call convenience over fixedWireSize (own memo map). */
 inline std::optional<size_t> fixedWireSizeOf(const SchemaGraph& graph,
                                              const SchemaNode& node,
                                              const SchemaLimits& limits = {}) {
@@ -403,10 +405,12 @@ inline std::optional<size_t> fixedWireSizeOf(const SchemaGraph& graph,
     return fixedWireSize(graph, node.key, sizes, limits);
 }
 
-/// Packed-struct ordering rule: every fixed-layout field must be declared
-/// before every variable-layout field, so all fixed fields sit at
-/// computable wire offsets (the "static head") and the variable tail
-/// decodes sequentially.
+/**
+ * Packed-struct ordering rule: every fixed-layout field must be declared
+ * before every variable-layout field, so all fixed fields sit at
+ * computable wire offsets (the "static head") and the variable tail
+ * decodes sequentially.
+ */
 inline SchemaValidationResult validatePackedFieldOrdering(
     const SchemaGraph& graph, const SchemaNode& node, const SchemaLimits& limits) {
     if (node.kind != SchemaKind::Struct || node.structEncoding != StructEncoding::Packed)
@@ -485,9 +489,11 @@ inline SchemaValidationResult validateSchemaGraph(const SchemaGraph& graph,
     return SchemaValidationResult::success();
 }
 
-/// Wire size of `root` when its entire subtree is fixed-layout, else
-/// nullopt. Computes the same layout as detail::fixedWireSize after
-/// validating the graph.
+/**
+ * Wire size of `root` when its entire subtree is fixed-layout, else
+ * nullopt. Computes the same layout as detail::fixedWireSize after
+ * validating the graph.
+ */
 inline std::optional<size_t> fixedSchemaSize(const SchemaGraph& graph,
                                              const SchemaKey& root,
                                              const SchemaLimits& limits = {}) {

@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file PrinterObjectsTmc.hpp
-/// @brief TMC driver printer objects (tmc_uart, tmc_driver)
+/**
+ * @file PrinterObjectsTmc.hpp
+ * @brief TMC driver printer objects (tmc_uart, tmc_driver)
+ */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 #include "tether/klipper/objects/TmcUart.hpp"
@@ -17,7 +19,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief TMC UART printer object.
+/**@brief TMC UART printer object. */
 class TmcUartObject : public PrinterObject {
 public:
     explicit TmcUartObject(std::shared_ptr<objects::TmcUart> dev,
@@ -71,7 +73,7 @@ private:
     std::string name_;
 };
 
-/// @brief TMC driver printer object (tmc2209, tmc2208, tmc5160, etc.).
+/**@brief TMC driver printer object (tmc2209, tmc2208, tmc5160, etc.). */
 class TmcDriverObject : public PrinterObject {
 public:
     explicit TmcDriverObject(const std::string& name) : name_(name) {}

@@ -72,7 +72,7 @@ static constexpr uint16_t REG_DC_START0       = EtherCAT::toUInt16(EtherCAT::DCR
 // Helpers  -  direct ESC register access via position-addressed datagrams
 // ---------------------------------------------------------------------------
 
-/// Read a 1-byte ESC register from a slave by position.
+/**Read a 1-byte ESC register from a slave by position. */
 static bool readRegU8(EtherCAT::Master& m, uint16_t slave_idx,
                       uint16_t addr, uint8_t& out) {
     return m.readRegister(EtherCAT::SlaveAddress(slave_idx),
@@ -80,7 +80,7 @@ static bool readRegU8(EtherCAT::Master& m, uint16_t slave_idx,
                           &out, 1, 200);
 }
 
-/// Read a 2-byte ESC register (little-endian) from a slave by position.
+/**Read a 2-byte ESC register (little-endian) from a slave by position. */
 static bool readRegU16(EtherCAT::Master& m, uint16_t slave_idx,
                        uint16_t addr, uint16_t& out) {
     uint8_t buf[2] = {0};
@@ -92,7 +92,7 @@ static bool readRegU16(EtherCAT::Master& m, uint16_t slave_idx,
     return true;
 }
 
-/// Read a 4-byte ESC register (little-endian) from a slave by position.
+/**Read a 4-byte ESC register (little-endian) from a slave by position. */
 static bool readRegU32(EtherCAT::Master& m, uint16_t slave_idx,
                        uint16_t addr, uint32_t& out) {
     uint8_t buf[4] = {0};
@@ -105,7 +105,7 @@ static bool readRegU32(EtherCAT::Master& m, uint16_t slave_idx,
     return true;
 }
 
-/// Write a 1-byte ESC register to a slave by position.
+/**Write a 1-byte ESC register to a slave by position. */
 static bool writeRegU8(EtherCAT::Master& m, uint16_t slave_idx,
                        uint16_t addr, uint8_t val) {
     return m.writeRegister(EtherCAT::SlaveAddress(slave_idx),
@@ -113,7 +113,7 @@ static bool writeRegU8(EtherCAT::Master& m, uint16_t slave_idx,
                            &val, 1, 200);
 }
 
-/// Write a 4-byte ESC register (little-endian) to a slave by position.
+/**Write a 4-byte ESC register (little-endian) to a slave by position. */
 static bool writeRegU32(EtherCAT::Master& m, uint16_t slave_idx,
                         uint16_t addr, uint32_t val) {
     uint8_t buf[4] = {
@@ -127,7 +127,7 @@ static bool writeRegU32(EtherCAT::Master& m, uint16_t slave_idx,
                            buf, 4, 200);
 }
 
-/// Write an 8-byte ESC register (little-endian) to a slave by position.
+/**Write an 8-byte ESC register (little-endian) to a slave by position. */
 static bool writeRegU64(EtherCAT::Master& m, uint16_t slave_idx,
                         uint16_t addr, uint64_t val) {
     uint8_t buf[8];
@@ -163,11 +163,13 @@ static bool alHasError(const ALStatusSnapshot& s) {
 // SYNC activation register helpers
 // ---------------------------------------------------------------------------
 
-/// Write the DC Sync Activation register (0x0981).
-/// @param enable      DC unit enable (bit 0)
-/// @param sync0       SYNC0 enable (bit 1)
-/// @param sync1       SYNC1 enable (bit 2)
-/// @param auto_act    Auto-activation (bit 3)
+/**
+ * Write the DC Sync Activation register (0x0981).
+ * @param enable      DC unit enable (bit 0)
+ * @param sync0       SYNC0 enable (bit 1)
+ * @param sync1       SYNC1 enable (bit 2)
+ * @param auto_act    Auto-activation (bit 3)
+ */
 static bool writeSyncActivation(EtherCAT::Master& m, uint16_t slave_idx,
                                 bool enable, bool sync0, bool sync1,
                                 bool auto_act) {
@@ -183,7 +185,7 @@ static bool writeSyncActivation(EtherCAT::Master& m, uint16_t slave_idx,
 // SYNC0 cycle-time sweep
 // ---------------------------------------------------------------------------
 
-/// Generate a geometric sweep of cycle times from @p start_ns down to @p stop_ns.
+/**Generate a geometric sweep of cycle times from @p start_ns down to @p stop_ns. */
 static std::vector<uint32_t> generateSweep(uint32_t start_ns, uint32_t stop_ns,
                                            int steps) {
     std::vector<uint32_t> times;

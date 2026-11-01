@@ -587,55 +587,55 @@ namespace CiA402 {
  * @brief Control word bit definitions (0x6040)
  */
 enum class ControlWordBit : uint16_t {
-    SwitchOn            = 0x0001,   ///< Bit 0: Switch on
-    EnableVoltage       = 0x0002,   ///< Bit 1: Enable voltage
-    QuickStop           = 0x0004,   ///< Bit 2: Quick stop (active low!)
-    EnableOperation     = 0x0008,   ///< Bit 3: Enable operation
+    SwitchOn            = 0x0001, /**< Bit 0: Switch on */
+    EnableVoltage       = 0x0002, /**< Bit 1: Enable voltage */
+    QuickStop           = 0x0004, /**< Bit 2: Quick stop (active low!) */
+    EnableOperation     = 0x0008, /**< Bit 3: Enable operation */
     // Bits 4-6: Operation mode specific
-    NewSetpoint         = 0x0010,   ///< Bit 4: New setpoint (PP mode)
-    ChangeSetImmed      = 0x0020,   ///< Bit 5: Change set immediately (PP)
-    AbsRel              = 0x0040,   ///< Bit 6: Absolute/Relative (PP)
-    FaultReset          = 0x0080,   ///< Bit 7: Fault reset
-    Halt                = 0x0100,   ///< Bit 8: Halt
+    NewSetpoint         = 0x0010, /**< Bit 4: New setpoint (PP mode) */
+    ChangeSetImmed      = 0x0020, /**< Bit 5: Change set immediately (PP) */
+    AbsRel              = 0x0040, /**< Bit 6: Absolute/Relative (PP) */
+    FaultReset          = 0x0080, /**< Bit 7: Fault reset */
+    Halt                = 0x0100, /**< Bit 8: Halt */
     // Bits 9-10: Reserved
-    HomingStart         = 0x0010,   ///< Bit 4: Start homing (HM mode)
+    HomingStart         = 0x0010, /**< Bit 4: Start homing (HM mode) */
 };
 
 /**
  * @brief Status word bit definitions (0x6041)
  */
 enum class StatusWordBit : uint16_t {
-    ReadyToSwitchOn     = 0x0001,   ///< Bit 0: Ready to switch on
-    SwitchedOn          = 0x0002,   ///< Bit 1: Switched on
-    OperationEnabled    = 0x0004,   ///< Bit 2: Operation enabled
-    Fault               = 0x0008,   ///< Bit 3: Fault
-    VoltageEnabled      = 0x0010,   ///< Bit 4: Voltage enabled
-    QuickStop           = 0x0020,   ///< Bit 5: Quick stop (active low!)
-    SwitchOnDisabled    = 0x0040,   ///< Bit 6: Switch on disabled
-    Warning             = 0x0080,   ///< Bit 7: Warning
+    ReadyToSwitchOn     = 0x0001, /**< Bit 0: Ready to switch on */
+    SwitchedOn          = 0x0002, /**< Bit 1: Switched on */
+    OperationEnabled    = 0x0004, /**< Bit 2: Operation enabled */
+    Fault               = 0x0008, /**< Bit 3: Fault */
+    VoltageEnabled      = 0x0010, /**< Bit 4: Voltage enabled */
+    QuickStop           = 0x0020, /**< Bit 5: Quick stop (active low!) */
+    SwitchOnDisabled    = 0x0040, /**< Bit 6: Switch on disabled */
+    Warning             = 0x0080, /**< Bit 7: Warning */
     // Bits 8-9: Mode specific
-    Remote              = 0x0200,   ///< Bit 9: Remote (drive is in remote control)
-    TargetReached       = 0x0400,   ///< Bit 10: Target reached
-    InternalLimitActive = 0x0800,   ///< Bit 11: Internal limit active
+    Remote              = 0x0200, /**< Bit 9: Remote (drive is in remote control) */
+    TargetReached       = 0x0400, /**< Bit 10: Target reached */
+    InternalLimitActive = 0x0800, /**< Bit 11: Internal limit active */
     // Bits 12-13: Operation mode specific
-    HomingAttained      = 0x1000,   ///< Bit 12: Homing attained (HM mode)
-    HomingError         = 0x2000,   ///< Bit 13: Homing error (HM mode)
-    SetpointAck         = 0x1000,   ///< Bit 12: Setpoint acknowledge (PP)
-    FollowingError      = 0x2000,   ///< Bit 13: Following error (PP/PV)
+    HomingAttained      = 0x1000, /**< Bit 12: Homing attained (HM mode) */
+    HomingError         = 0x2000, /**< Bit 13: Homing error (HM mode) */
+    SetpointAck         = 0x1000, /**< Bit 12: Setpoint acknowledge (PP) */
+    FollowingError      = 0x2000, /**< Bit 13: Following error (PP/PV) */
 };
 
 /**
  * @brief CiA 402 state machine states
  */
 enum class State : uint8_t {
-    NotReadyToSwitchOn  = 0,    ///< Initial state after power on
-    SwitchOnDisabled    = 1,    ///< High voltage may be present
-    ReadyToSwitchOn     = 2,    ///< High voltage present, drive function disabled
-    SwitchedOn          = 3,    ///< Drive function disabled, ready
-    OperationEnabled    = 4,    ///< Drive function enabled
-    QuickStopActive     = 5,    ///< Quick stop in progress
-    FaultReactionActive = 6,    ///< Fault reaction in progress
-    Fault               = 7,    ///< Fault state
+    NotReadyToSwitchOn  = 0, /**< Initial state after power on */
+    SwitchOnDisabled    = 1, /**< High voltage may be present */
+    ReadyToSwitchOn     = 2, /**< High voltage present, drive function disabled */
+    SwitchedOn          = 3, /**< Drive function disabled, ready */
+    OperationEnabled    = 4, /**< Drive function enabled */
+    QuickStopActive     = 5, /**< Quick stop in progress */
+    FaultReactionActive = 6, /**< Fault reaction in progress */
+    Fault               = 7, /**< Fault state */
 };
 
 /**
@@ -652,13 +652,13 @@ enum class HomingMethod : int8_t {
     NoHoming                            = 0,
     
     // Methods with index pulse
-    NegLimitIndex                       = 1,    ///< Negative limit switch & index
-    PosLimitIndex                       = 2,    ///< Positive limit switch & index
-    HomeSwitchPosIndex                  = 3,    ///< Home switch positive & index
-    HomeSwitchPosIndex2                 = 4,    ///< Home switch positive & index (alt)
-    HomeSwitchNegIndex                  = 5,    ///< Home switch negative & index
-    HomeSwitchNegIndex2                 = 6,    ///< Home switch negative & index (alt)
-    HomeSwitchPosIndexPos               = 7,    ///< Home switch pos, positive dir & index
+    NegLimitIndex                       = 1, /**< Negative limit switch & index */
+    PosLimitIndex                       = 2, /**< Positive limit switch & index */
+    HomeSwitchPosIndex                  = 3, /**< Home switch positive & index */
+    HomeSwitchPosIndex2                 = 4, /**< Home switch positive & index (alt) */
+    HomeSwitchNegIndex                  = 5, /**< Home switch negative & index */
+    HomeSwitchNegIndex2                 = 6, /**< Home switch negative & index (alt) */
+    HomeSwitchPosIndexPos               = 7, /**< Home switch pos, positive dir & index */
     HomeSwitchPosIndexPos2              = 8,
     HomeSwitchPosIndexNeg               = 9,
     HomeSwitchPosIndexNeg2              = 10,
@@ -668,11 +668,11 @@ enum class HomingMethod : int8_t {
     HomeSwitchNegIndexNeg2              = 14,
     
     // Methods without index pulse
-    NegLimitOnly                        = 17,   ///< Negative limit switch only
-    PosLimitOnly                        = 18,   ///< Positive limit switch only
-    HomeSwitchPos                       = 19,   ///< Home switch positive only
+    NegLimitOnly                        = 17, /**< Negative limit switch only */
+    PosLimitOnly                        = 18, /**< Positive limit switch only */
+    HomeSwitchPos                       = 19, /**< Home switch positive only */
     HomeSwitchPos2                      = 20,
-    HomeSwitchNeg                       = 21,   ///< Home switch negative only
+    HomeSwitchNeg                       = 21, /**< Home switch negative only */
     HomeSwitchNeg2                      = 22,
     HomeSwitchPosPos                    = 23,
     HomeSwitchPosPos2                   = 24,
@@ -684,12 +684,12 @@ enum class HomingMethod : int8_t {
     HomeSwitchNegNeg2                   = 30,
     
     // Index pulse only
-    NegDirIndexPulse                    = 33,   ///< Negative direction, index pulse
-    PosDirIndexPulse                    = 34,   ///< Positive direction, index pulse
+    NegDirIndexPulse                    = 33, /**< Negative direction, index pulse */
+    PosDirIndexPulse                    = 34, /**< Positive direction, index pulse */
     
     // Current position
-    CurrentPosition                     = 35,   ///< Set current position as home
-    CurrentPositionIndex                = 37,   ///< Current position + index
+    CurrentPosition                     = 35, /**< Set current position as home */
+    CurrentPositionIndex                = 37, /**< Current position + index */
 };
 
 /**
@@ -796,7 +796,7 @@ using VelocityCommand = tether::common::VelocityCommand;
 using TorqueCommand  = tether::common::TorqueCommand;
 using HomingCommand  = tether::common::HomingCommand;
 
-/// Convert a CiA 402 error code to a human-readable string.
+/**Convert a CiA 402 error code to a human-readable string. */
 const char* errorToString(uint16_t errorCode);
 
 } // namespace CiA402

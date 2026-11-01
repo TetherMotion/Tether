@@ -34,10 +34,12 @@ constexpr double kTorqueAmplitude   = 1000.0;    // 0.1% of rated torque
 
 using CyclicTarget = EtherCAT::DS402Master::CyclicTarget;
 
-/// Wraps a motion controller and writes the full Rx/Tx PDO contents to a
-/// CSV file once per control cycle.  Uses a 1 MiB output buffer so the
-/// realtime loop is not blocked by the host filesystem.  This example
-/// targets the AS715N 0x1704 / 0x1B04 mapping, but the wrapper is generic.
+/**
+ * Wraps a motion controller and writes the full Rx/Tx PDO contents to a
+ * CSV file once per control cycle.  Uses a 1 MiB output buffer so the
+ * realtime loop is not blocked by the host filesystem.  This example
+ * targets the AS715N 0x1704 / 0x1B04 mapping, but the wrapper is generic.
+ */
 template<typename RxPDO, typename TxPDO>
 class CsvLogController : public EtherCAT::DS402Master::IDriveMotionController {
 public:
@@ -143,10 +145,12 @@ CyclicTarget modeToTarget(const std::string& mode)
     return CyclicTarget::Velocity;
 }
 
-/// Polls the AS715N fault registers via CoE once per second while the motion
-/// loop runs.  Prints a report only when the statusword fault bit is set (or
-/// the SDO read itself fails), de-duplicated so a persistent fault is reported
-/// once per value change rather than once per second.  Silent while healthy.
+/**
+ * Polls the AS715N fault registers via CoE once per second while the motion
+ * loop runs.  Prints a report only when the statusword fault bit is set (or
+ * the SDO read itself fails), de-duplicated so a persistent fault is reported
+ * once per value change rather than once per second.  Silent while healthy.
+ */
 void faultMonitorLoop(EtherCAT::DS402Master& master,
                       uint16_t slave_index,
                       const std::atomic<bool>& stop)
@@ -290,10 +294,12 @@ int runSineMotion(EtherCAT::DS402Master& master,
     return 0;
 }
 
-/// Reads the drive's actual 0x1B04 TxPDO mapping via SDO and checks that the
-/// statusword (0x6041) sits at byte offset 2 — the position the wire logger
-/// and CiA402Drive decode it from.  The mapping is never rewritten by
-/// configureMultiPDOs(), so this verifies the drive's factory layout.
+/**
+ * Reads the drive's actual 0x1B04 TxPDO mapping via SDO and checks that the
+ * statusword (0x6041) sits at byte offset 2 — the position the wire logger
+ * and CiA402Drive decode it from.  The mapping is never rewritten by
+ * configureMultiPDOs(), so this verifies the drive's factory layout.
+ */
 bool verifyTxPDOMapping(EtherCAT::DS402Master& master, uint16_t slave_index)
 {
     auto& sdo = master.ethercatMaster().sdoManager(slave_index);

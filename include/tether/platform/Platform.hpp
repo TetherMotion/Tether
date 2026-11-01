@@ -160,11 +160,11 @@ bool setCurrentThreadDeadline(uint64_t runtime_ns, uint64_t deadline_ns,
  * @brief Preempt model compiled into the kernel (from uname)
  */
 enum class PreemptModel {
-    PreemptRt,        ///< PREEMPT_RT (hard realtime)
-    PreemptDynamic,   ///< PREEMPT_DYNAMIC (mode selectable at runtime)
-    PreemptFull,      ///< Static PREEMPT (full preempt, low-latency desktop)
-    PreemptVoluntary, ///< PREEMPT_VOLUNTARY
-    PreemptNone,      ///< PREEMPT_NONE
+    PreemptRt, /**< PREEMPT_RT (hard realtime) */
+    PreemptDynamic, /**< PREEMPT_DYNAMIC (mode selectable at runtime) */
+    PreemptFull, /**< Static PREEMPT (full preempt, low-latency desktop) */
+    PreemptVoluntary, /**< PREEMPT_VOLUNTARY */
+    PreemptNone, /**< PREEMPT_NONE */
     Unknown,
 };
 
@@ -172,31 +172,31 @@ enum class PreemptModel {
  * @brief Classified realtime level (lowest to highest)
  */
 enum class RealtimeClass {
-    None,          ///< preempt=none or unknown
-    Voluntary,     ///< preempt=voluntary or lazy
-    LowLatency,    ///< full preempt (desktop low-latency, not hard RT)
-    HardRealtime,  ///< PREEMPT_RT
+    None, /**< preempt=none or unknown */
+    Voluntary, /**< preempt=voluntary or lazy */
+    LowLatency, /**< full preempt (desktop low-latency, not hard RT) */
+    HardRealtime, /**< PREEMPT_RT */
 };
 
 /**
  * @brief Caller-selectable realtime requirement level
  */
 enum class RealtimeRequirement {
-    None,          ///< Detect and log only, never exit
-    LowLatency,    ///< Require at least full preempt; error if below
-    HardRealtime,  ///< Require PREEMPT_RT; warn if only low-latency, error if below
+    None, /**< Detect and log only, never exit */
+    LowLatency, /**< Require at least full preempt; error if below */
+    HardRealtime, /**< Require PREEMPT_RT; warn if only low-latency, error if below */
 };
 
 /**
  * @brief Result of realtime kernel detection
  */
 struct RealtimeKernelInfo {
-    bool is_realtime = false;             ///< true only for PREEMPT_RT
-    bool is_low_latency = false;          ///< true for full preempt or PREEMPT_RT
+    bool is_realtime = false; /**< true only for PREEMPT_RT */
+    bool is_low_latency = false; /**< true for full preempt or PREEMPT_RT */
     RealtimeClass realtime_class = RealtimeClass::None;
-    PreemptModel build_model = PreemptModel::Unknown;   ///< from uname
-    PreemptModel active_model = PreemptModel::Unknown;  ///< active mode
-    std::string active_preempt_mode;      ///< "full", "lazy", "voluntary", "none", "unknown", "n/a"
+    PreemptModel build_model = PreemptModel::Unknown; /**< from uname */
+    PreemptModel active_model = PreemptModel::Unknown; /**< active mode */
+    std::string active_preempt_mode; /**< "full", "lazy", "voluntary", "none", "unknown", "n/a" */
     std::string sysname;
     std::string kernel_release;
     std::string kernel_version;

@@ -87,7 +87,7 @@ inline constexpr DeviceIdentity EP7402{0x00000002, 0x1CEA4052, 1, "EP7402"};
 // Note: EP7342/ER7342 are DC-motor boxes — they use the MOT interface,
 // not DRV, and are registered under DcMotorTerminal instead.
 
-/// Every known DRV-interface compact-drive terminal.
+/**Every known DRV-interface compact-drive terminal. */
 inline constexpr std::array kCompactDriveTerminals{
     EL7062, EL7411, EL7201, EL7211, EL7221,
     ELM7211, ELM7212, ELM7221, ELM7222, ELM7231,
@@ -100,7 +100,7 @@ inline constexpr std::array kCompactDriveTerminals{
 // CompactDriveTerminal
 // ============================================================================
 
-/// CiA402 finite-state-automaton state decoded from the statusword.
+/**CiA402 finite-state-automaton state decoded from the statusword. */
 enum class DriveState : uint8_t {
     NotReadyToSwitchOn,
     SwitchOnDisabled,
@@ -115,7 +115,7 @@ enum class DriveState : uint8_t {
 
 class CompactDriveTerminal : public TerminalBase {
 public:
-    /// Maximum axes per device (ELM72x2 carry two).
+    /**Maximum axes per device (ELM72x2 carry two). */
     static constexpr size_t kMaxAxes = 4;
 
     // -- Construction / factories ------------------------------------------------
@@ -132,12 +132,12 @@ public:
     CompactDriveTerminal(const CompactDriveTerminal&)                = delete;
     CompactDriveTerminal& operator=(const CompactDriveTerminal&)     = delete;
 
-    /// True when `s` carries the given vendor/product identity.
+    /**True when `s` carries the given vendor/product identity. */
     static bool matches(const DiscoveredSlave& s, const DeviceIdentity& id) {
         return s.hasVendorAndProduct(id.vendor_id, id.product_code);
     }
 
-    /// Scan the bus for the first slave matching `identity`.
+    /**Scan the bus for the first slave matching `identity`. */
     static Result<CompactDriveTerminal> findFirst(
         Master& master, const DeviceIdentity& identity);
     static Result<CompactDriveTerminal> findFirst(
@@ -146,21 +146,21 @@ public:
 
     // -- Bring-up ----------------------------------------------------------------------
 
-    /// Standalone bring-up to SAFE-OP (position addressing).
+    /**Standalone bring-up to SAFE-OP (position addressing). */
     Result<> configure();
 
-    /// configure() then OP (+ managed realtime loop by default).
+    /**configure() then OP (+ managed realtime loop by default). */
     Result<> start() { return start(StartOptions()); }
     Result<> start(const StartOptions& opts);
 
-    /// Chained-operation contract.
+    /**Chained-operation contract. */
     Result<> prepareForLogicalExchange();
     Result<> mapLogicalAndEnterSafeOp();
     Result<> requestOp(int timeout_ms);
 
     // -- Axes -----------------------------------------------------------------------------
 
-    /// Number of axes resolved from the SII layout (1 or 2).
+    /**Number of axes resolved from the SII layout (1 or 2). */
     size_t axisCount() const { return axes_.size(); }
 
     // -- Control (SM2 image) ----------------------------------------------------------------
@@ -169,9 +169,11 @@ public:
     uint16_t controlword(size_t axis) const;
     bool     hasControlword(size_t axis) const;
 
-    /// Modes-of-operation command (object :03, 8 bit) — only present when
-    /// the PDO assignment maps it (ELM72xx maps it; EL72xx usually sets
-    /// the mode via SDO instead).
+    /**
+     * Modes-of-operation command (object :03, 8 bit) — only present when
+     * the PDO assignment maps it (ELM72xx maps it; EL72xx usually sets
+     * the mode via SDO instead).
+     */
     void setModesOfOperation(size_t axis, int8_t mode);
     bool hasModesOfOperation(size_t axis) const;
 
@@ -206,33 +208,35 @@ public:
 
     // -- CiA402 helpers --------------------------------------------------------------------------
 
-    /// Decode the statusword into the CiA402 FSA state.
+    /**Decode the statusword into the CiA402 FSA state. */
     DriveState driveState(size_t axis) const;
     static DriveState decodeState(uint16_t statusword);
 
-    /// Statusword bit helpers (CiA402 semantics).
+    /**Statusword bit helpers (CiA402 semantics). */
     bool fault(size_t axis) const;
     bool operationEnabled(size_t axis) const;
     bool warningPresent(size_t axis) const;
-    bool targetReached(size_t axis) const;   ///< statusword bit 10
+    bool targetReached(size_t axis) const; /**< statusword bit 10 */
 
     // Controlword command sequences — write the command into the PDO
     // image; it is transmitted with the next cyclic exchange.  The FSA
     // needs each step to be observed by the slave, so step through them
     // one call per cycle (or call driveState() to track progress).
 
-    /// "Shutdown" (0x06) — first step of the enable sequence.
+    /**"Shutdown" (0x06) — first step of the enable sequence. */
     void requestShutdown(size_t axis);
-    /// "Switch on" (0x07).
+    /**"Switch on" (0x07). */
     void requestSwitchOn(size_t axis);
-    /// "Enable operation" (0x0F) — final step of the enable sequence.
+    /**"Enable operation" (0x0F) — final step of the enable sequence. */
     void requestEnableOperation(size_t axis);
-    /// "Disable voltage" (0x00) — immediate coast-down.
+    /**"Disable voltage" (0x00) — immediate coast-down. */
     void requestDisableVoltage(size_t axis);
-    /// "Quick stop" (0x02).
+    /**"Quick stop" (0x02). */
     void requestQuickStop(size_t axis);
-    /// "Fault reset" (controlword bit 7 set) — clear with clearFaultReset()
-    /// once the fault clears.
+    /**
+     * "Fault reset" (controlword bit 7 set) — clear with clearFaultReset()
+     * once the fault clears.
+     */
     void requestFaultReset(size_t axis);
     void clearFaultReset(size_t axis);
 
@@ -245,7 +249,7 @@ private:
         bool present() const { return bit_off != kInvalid && bit_len != 0; }
     };
 
-    /// All resolved fields of one axis.
+    /**All resolved fields of one axis. */
     struct Axis {
         Field controlword, modes, target_pos, target_vel, target_torque;
         Field statusword, modes_disp, following_err, vel_act, torque_act;

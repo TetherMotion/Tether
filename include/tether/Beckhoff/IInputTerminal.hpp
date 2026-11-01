@@ -49,23 +49,23 @@ public:
 
     // -- Topology / identity -------------------------------------------------
 
-    /// Zero-based bus position of the bound slave.
+    /**Zero-based bus position of the bound slave. */
     virtual uint16_t slaveIndex() const = 0;
 
-    /// Number of input bits this device contributes to the chain.
+    /**Number of input bits this device contributes to the chain. */
     virtual size_t bitCount() const = 0;
 
-    /// Human-readable device name (identity name or discovered name).
+    /**Human-readable device name (identity name or discovered name). */
     virtual const char* deviceName() const = 0;
 
     // -- Bit access ----------------------------------------------------------
     // Reads observe the registered PDO buffer as last written by the cyclic
     // exchange — they reflect the inputs as of the most recent cycle.
 
-    /// Current state of an input bit (0-based within this device).
+    /**Current state of an input bit (0-based within this device). */
     virtual bool bit(size_t bit) const = 0;
 
-    /// Current input bits (bit N = input N).
+    /**Current input bits (bit N = input N). */
     virtual uint64_t bits() const = 0;
 
     // -- Chained bring-up (called by MultiInputTerminal) -----------------------------

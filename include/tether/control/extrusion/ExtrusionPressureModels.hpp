@@ -50,38 +50,40 @@
 
 namespace tether::control::extrusion {
 
-/// @brief Compensation model selector. `Linear` reproduces classic Klipper PA.
+/**@brief Compensation model selector. `Linear` reproduces classic Klipper PA. */
 enum class ExtrusionCompensationModel {
-    Off,       ///< No compensation (δe = 0)
-    Linear,    ///< Newtonian / classic PA: δe = PA · v_e
-    PowerLaw,  ///< Power-law: δe = K_base · (v_e·A_f)^n
-    CrossWlf   ///< Cross-WLF LUT: δe = (βV_m/A_f) · P_LUT(Q, T)
+    Off, /**< No compensation (δe = 0) */
+    Linear, /**< Newtonian / classic PA: δe = PA · v_e */
+    PowerLaw, /**< Power-law: δe = K_base · (v_e·A_f)^n */
+    CrossWlf /**< Cross-WLF LUT: δe = (βV_m/A_f) · P_LUT(Q, T) */
 };
 
-/// @brief Filament cross-section parameters shared by all models.
+/**@brief Filament cross-section parameters shared by all models. */
 struct FilamentGeometry {
-    double filamentDiameterMm = 1.75; ///< Filament diameter [mm]
-    /// @brief Filament cross-sectional area [mm²] = π·d²/4.
+    double filamentDiameterMm = 1.75; /**< Filament diameter [mm] */
+    /**@brief Filament cross-sectional area [mm²] = π·d²/4. */
     double areaMm2() const {
         return M_PI * filamentDiameterMm * filamentDiameterMm / 4.0;
     }
 };
 
-/// @brief Power-law pressure-advance position-offset model.
-///
-/// δe = K_base · Q^n, Q = v_e · A_filament
-/// Newtonian limit n=1 with K_base = PA·A_filament/A_f reduces to δe = PA·v_e.
+/**
+ * @brief Power-law pressure-advance position-offset model.
+ *
+ * δe = K_base · Q^n, Q = v_e · A_filament
+ * Newtonian limit n=1 with K_base = PA·A_filament/A_f reduces to δe = PA·v_e.
+ */
 class PowerLawPressureAdvance {
 public:
-    /// @brief Model parameters.
+    /**@brief Model parameters. */
     struct Params {
-        /// K_base = βV_m·C_n/A_f [filament-mm / (mm³/s)^n].
+        /**K_base = βV_m·C_n/A_f [filament-mm / (mm³/s)^n]. */
         double baseGain = 0.0;
-        /// Flow index n [-] (1 = Newtonian).
+        /**Flow index n [-] (1 = Newtonian). */
         double flowIndex = 1.0;
-        /// Smoothing window in seconds (0 = no smoothing).
+        /**Smoothing window in seconds (0 = no smoothing). */
         double smoothTime = 0.040;
-        /// Maximum absolute compensation [mm] (safety clamp).
+        /**Maximum absolute compensation [mm] (safety clamp). */
         double maxCompensation = 0.5;
     };
 
@@ -97,10 +99,12 @@ public:
     const FilamentGeometry& filament() const { return filament_; }
     void setFilament(FilamentGeometry f) { filament_ = f; }
 
-    /// @brief Compute the position offset for a single (already-smoothed)
-    /// extruder velocity sample. Pure function, no state.
-    /// @param velMmPerS Extruder-axis velocity [mm/s].
-    /// @return Position offset δe [mm] (clamped to ±maxCompensation).
+    /**
+     * @brief Compute the position offset for a single (already-smoothed)
+     * extruder velocity sample. Pure function, no state.
+     * @param velMmPerS Extruder-axis velocity [mm/s].
+     * @return Position offset δe [mm] (clamped to ±maxCompensation).
+     */
     double offsetForVelocity(double velMmPerS) const {
         const double Q = velMmPerS * filament_.areaMm2();
         if (Q <= 0.0 || params_.baseGain <= 0.0) return 0.0;
@@ -110,9 +114,11 @@ public:
         return off;
     }
 
-    /// @brief Smooth a velocity series with a centered moving average over
-    /// `smoothTime`, using `sampleIntervalSec` as the per-sample spacing.
-    /// @returns Smoothed velocity series (same length as input).
+    /**
+     * @brief Smooth a velocity series with a centered moving average over
+     * `smoothTime`, using `sampleIntervalSec` as the per-sample spacing.
+     * @returns Smoothed velocity series (same length as input).
+     */
     std::vector<double> smoothVelocity(
         const std::vector<double>& velMmPerS,
         double sampleIntervalSec) const {
@@ -137,11 +143,13 @@ public:
         return out;
     }
 
-    /// @brief Compute the per-sample position-offset series for a velocity
-    /// series. Applies smoothing then the offset law.
-    /// @param velMmPerS Raw extruder velocity per sample [mm/s].
-    /// @param sampleIntervalSec Per-sample interval [s].
-    /// @returns Offset series δe[i] [mm] (same length as input).
+    /**
+     * @brief Compute the per-sample position-offset series for a velocity
+     * series. Applies smoothing then the offset law.
+     * @param velMmPerS Raw extruder velocity per sample [mm/s].
+     * @param sampleIntervalSec Per-sample interval [s].
+     * @returns Offset series δe[i] [mm] (same length as input).
+     */
     std::vector<double> offsetSeries(const std::vector<double>& velMmPerS,
                                      double sampleIntervalSec) const {
         auto smoothed = smoothVelocity(velMmPerS, sampleIntervalSec);
@@ -157,19 +165,21 @@ private:
     FilamentGeometry filament_;
 };
 
-/// @brief Cross-WLF pressure-advance position-offset model.
-///
-/// δe = (βV_m / A_f) · P_LUT(Q, T_est), Q = v_e · A_filament.
+/**
+ * @brief Cross-WLF pressure-advance position-offset model.
+ *
+ * δe = (βV_m / A_f) · P_LUT(Q, T_est), Q = v_e · A_filament.
+ */
 class CrossWlfPressureAdvance {
 public:
     struct Params {
-        /// βV_m / A_f [mm/Pa] — melt compressibility over filament area.
+        /**βV_m / A_f [mm/Pa] — melt compressibility over filament area. */
         double compressibilityOverArea = 0.0;
-        /// Smoothing window in seconds (0 = no smoothing).
+        /**Smoothing window in seconds (0 = no smoothing). */
         double smoothTime = 0.040;
-        /// Maximum absolute compensation [mm] (safety clamp).
+        /**Maximum absolute compensation [mm] (safety clamp). */
         double maxCompensation = 0.5;
-        /// Default melt temperature used when no observer is wired.
+        /**Default melt temperature used when no observer is wired. */
         double defaultTempC = 210.0;
     };
 
@@ -188,8 +198,10 @@ public:
     void setFilament(FilamentGeometry f) { filament_ = f; }
     void setLut(std::shared_ptr<PressureFlowLut> lut) { lut_ = std::move(lut); }
 
-    /// @brief Compute the position offset for a single (already-smoothed)
-    /// extruder velocity and melt-temperature estimate.
+    /**
+     * @brief Compute the position offset for a single (already-smoothed)
+     * extruder velocity and melt-temperature estimate.
+     */
     double offsetForVelocity(double velMmPerS, double tempC) const {
         if (!lut_ || lut_->empty() ||
             params_.compressibilityOverArea <= 0.0) {
@@ -204,7 +216,7 @@ public:
         return off;
     }
 
-    /// @brief Smooth a velocity series (centered moving average).
+    /**@brief Smooth a velocity series (centered moving average). */
     std::vector<double> smoothVelocity(
         const std::vector<double>& velMmPerS,
         double sampleIntervalSec) const {
@@ -229,8 +241,10 @@ public:
         return out;
     }
 
-    /// @brief Per-sample offset series given velocity and temperature series.
-    /// @param tempC Per-sample melt-temperature estimate [°C] (same length).
+    /**
+     * @brief Per-sample offset series given velocity and temperature series.
+     * @param tempC Per-sample melt-temperature estimate [°C] (same length).
+     */
     std::vector<double> offsetSeries(const std::vector<double>& velMmPerS,
                                      const std::vector<double>& tempC,
                                      double sampleIntervalSec) const {

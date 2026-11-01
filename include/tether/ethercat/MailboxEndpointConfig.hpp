@@ -22,17 +22,21 @@ struct MailboxAddressConfig {
     uint16_t outAddress = 0x1200;
 };
 
-/// Parse a mailbox-size spec.  Single number sets both; `in:X,out:Y` sets
-/// independently (values are decimal or 0x-hex, range 1-65535).
-/// Returns false and prints to stderr on invalid input.
+/**
+ * Parse a mailbox-size spec.  Single number sets both; `in:X,out:Y` sets
+ * independently (values are decimal or 0x-hex, range 1-65535).
+ * Returns false and prints to stderr on invalid input.
+ */
 bool parseMailboxSize(const std::string& str, MailboxSizeConfig& out);
 
-/// Parse a mailbox-address spec.  Expected format: `in:<hex>,out:<hex>`.
-/// Validates that in-address != out-address.
-/// Returns false and prints to stderr on invalid input.
+/**
+ * Parse a mailbox-address spec.  Expected format: `in:<hex>,out:<hex>`.
+ * Validates that in-address != out-address.
+ * Returns false and prints to stderr on invalid input.
+ */
 bool parseMailboxAddress(const std::string& str, MailboxAddressConfig& out);
 
-/// Log the mailbox configuration via TETHER_LOGI.
+/**Log the mailbox configuration via TETHER_LOGI. */
 void logMailboxConfig(const MailboxSizeConfig& size,
                       const MailboxAddressConfig& addr,
                       const char* tag);

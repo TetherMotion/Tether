@@ -47,33 +47,37 @@ namespace EtherCAT {
 
 class RealtimeLoop {
 public:
-    /// Callback signatures
+    /**Callback signatures */
     using ExchangeFunc = std::function<bool()>;
     using SyncFunc     = std::function<bool()>;
     using TimeFunc     = std::function<uint64_t()>;
 
-    /// Loop configuration
+    /**Loop configuration */
     struct Config {
-        uint32_t cycle_period_us      = 1000;  ///< PDO timer period in µs (default 1 kHz)
-        uint32_t sync_interval_cycles = 10;    ///< DC sync period = cycle_period_us × this
+        uint32_t cycle_period_us      = 1000; /**< PDO timer period in µs (default 1 kHz) */
+        uint32_t sync_interval_cycles = 10; /**< DC sync period = cycle_period_us × this */
 
-        /// SCHED_FIFO priorities (-1 = use platform default of 80).
-        /// The DC thread should have higher priority than the PDO thread
-        /// because it is CPU-light but time-critical (SYNC0 window).
-        int pdo_priority = 80;   ///< PDO thread SCHED_FIFO priority
-        int dc_priority  = 90;   ///< DC thread SCHED_FIFO priority (higher = more urgent)
+        /**
+         * SCHED_FIFO priorities (-1 = use platform default of 80).
+         * The DC thread should have higher priority than the PDO thread
+         * because it is CPU-light but time-critical (SYNC0 window).
+         */
+        int pdo_priority = 80; /**< PDO thread SCHED_FIFO priority */
+        int dc_priority  = 90; /**< DC thread SCHED_FIFO priority (higher = more urgent) */
 
-        /// CPU affinity for the RT threads (-1 = unpinned).  On the
-        /// managed cyclic path these come from Master::CpuIsolationConfig;
-        /// standalone users (e.g. EtherCATDC's internal loop) set them
-        /// directly — typically from a Tether::Platform::CpuIsolation
-        /// claim.
+        /**
+         * CPU affinity for the RT threads (-1 = unpinned).  On the
+         * managed cyclic path these come from Master::CpuIsolationConfig;
+         * standalone users (e.g. EtherCATDC's internal loop) set them
+         * directly — typically from a Tether::Platform::CpuIsolation
+         * claim.
+         */
         int pdo_cpu_affinity = -1;
         int dc_cpu_affinity  = -1;
 
-        /// Jitter thresholds for the PDO thread (auto-derived from cycle_period_us)
+        /**Jitter thresholds for the PDO thread (auto-derived from cycle_period_us) */
         JitterConfig pdo_jitter = JitterConfig::defaults(1000);
-        /// Jitter thresholds for the DC thread (auto-derived from sync period)
+        /**Jitter thresholds for the DC thread (auto-derived from sync period) */
         JitterConfig dc_jitter  = JitterConfig::defaults(10000);
 
         /**
@@ -92,19 +96,19 @@ public:
         }
     };
 
-    /// Legacy loop statistics (backward-compatible snapshot via getStats())
+    /**Legacy loop statistics (backward-compatible snapshot via getStats()) */
     struct Stats {
-        uint64_t cycle_count     = 0;   ///< PDO thread cycle count
-        uint64_t sync_count      = 0;   ///< DC thread sync count
-        uint64_t pdo_error_count = 0;   ///< PDO exchange error count
-        uint32_t max_jitter_us   = 0;   ///< Max jitter of the PDO thread
-        uint32_t avg_jitter_us   = 0;   ///< Avg jitter of the PDO thread
+        uint64_t cycle_count     = 0; /**< PDO thread cycle count */
+        uint64_t sync_count      = 0; /**< DC thread sync count */
+        uint64_t pdo_error_count = 0; /**< PDO exchange error count */
+        uint32_t max_jitter_us   = 0; /**< Max jitter of the PDO thread */
+        uint32_t avg_jitter_us   = 0; /**< Avg jitter of the PDO thread */
     };
 
-    /// Extended per-thread diagnostics
+    /**Extended per-thread diagnostics */
     struct ThreadDiagnostics {
-        JitterStats pdo_jitter;  ///< Full jitter statistics for the PDO thread
-        JitterStats dc_jitter;   ///< Full jitter statistics for the DC thread
+        JitterStats pdo_jitter; /**< Full jitter statistics for the PDO thread */
+        JitterStats dc_jitter; /**< Full jitter statistics for the DC thread */
     };
 
     /**
@@ -144,26 +148,28 @@ public:
      */
     void stop();
 
-    /// Check if the loop is currently running (both threads)
+    /**Check if the loop is currently running (both threads) */
     bool isRunning() const { return running_.load(std::memory_order_acquire); }
 
-    /// Enable / disable PDO exchange in the PDO thread
+    /**Enable / disable PDO exchange in the PDO thread */
     void setPDOEnabled(bool enable) { pdo_enabled_.store(enable, std::memory_order_release); }
 
-    /// Enable / disable verbose shutdown logging for this loop
+    /**Enable / disable verbose shutdown logging for this loop */
     void setShutdownDebug(bool enable) { shutdown_debug_ = enable; }
 
-    /// Enable / disable verbose startup logging (task started / loop
-    /// started) — driven by the 'dc' master debug flag.
+    /**
+     * Enable / disable verbose startup logging (task started / loop
+     * started) — driven by the 'dc' master debug flag.
+     */
     void setVerbose(bool enable) { verbose_ = enable; }
 
-    /// Check if PDO exchange is enabled
+    /**Check if PDO exchange is enabled */
     bool isPDOEnabled() const { return pdo_enabled_.load(std::memory_order_acquire); }
 
-    /// Thread-safe snapshot of current statistics (backward-compatible)
+    /**Thread-safe snapshot of current statistics (backward-compatible) */
     Stats getStats() const;
 
-    /// Thread-safe snapshot of per-thread jitter diagnostics
+    /**Thread-safe snapshot of per-thread jitter diagnostics */
     ThreadDiagnostics getDiagnostics() const;
 
 private:

@@ -33,8 +33,10 @@
 
 namespace tether::io::machine {
 
-/// PDO map surface over LogicalAddressManager::describeEntries + the master's
-/// active PDOMapping.
+/**
+ * PDO map surface over LogicalAddressManager::describeEntries + the master's
+ * active PDOMapping.
+ */
 class EtherCatPdoAccess final : public IMachinePdoSource {
 public:
     explicit EtherCatPdoAccess(EtherCAT::Master& master) : master_(master) {}
@@ -62,9 +64,11 @@ private:
     EtherCAT::Master& master_;
 };
 
-/// Supervisor surface over Master::slaveSupervisor(). When an EventJournal is
-/// supplied, an IRecoveryEventListener mirrors recovery events into the audit
-/// trail as `recovery.*` records.
+/**
+ * Supervisor surface over Master::slaveSupervisor(). When an EventJournal is
+ * supplied, an IRecoveryEventListener mirrors recovery events into the audit
+ * trail as `recovery.*` records.
+ */
 class EtherCatSupervisorAccess final : public IMachineSupervisorAccess {
 public:
     EtherCatSupervisorAccess(EtherCAT::Master& master,
@@ -114,7 +118,7 @@ public:
     }
 
 private:
-    /// Mirrors supervisor recovery events into the audit journal.
+    /**Mirrors supervisor recovery events into the audit journal. */
     class JournalListener final : public EtherCAT::IRecoveryEventListener {
     public:
         explicit JournalListener(EventJournal& journal) : journal_(journal) {}

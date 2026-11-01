@@ -227,64 +227,64 @@ class VariableSystem;
 struct SplineConfig {
     // === General ===
     
-    /// Enable G5/G5.1 cubic/quadratic splines
+    /**Enable G5/G5.1 cubic/quadratic splines */
     bool enableCubicSpline{true};
     bool enableQuadraticSpline{true};
     
-    /// Enable G5.2/G5.3 NURBS
+    /**Enable G5.2/G5.3 NURBS */
     bool enableNURBS{true};
     
-    /// Output native spline segments (vs linear approximation)
+    /**Output native spline segments (vs linear approximation) */
     bool outputNativeSplines{false};
     
     // === Discretization ===
     
-    /// Maximum chord error for linearization
+    /**Maximum chord error for linearization */
     double maxChordError{0.001};  // mm
     
-    /// Minimum segment length
+    /**Minimum segment length */
     double minSegmentLength{0.01};  // mm
     
-    /// Maximum segment length
+    /**Maximum segment length */
     double maxSegmentLength{5.0};  // mm
     
-    /// Minimum points per spline
+    /**Minimum points per spline */
     int32_t minPoints{4};
     
-    /// Maximum points per spline
+    /**Maximum points per spline */
     int32_t maxPoints{10000};
     
     // === NURBS ===
     
-    /// Default NURBS order (3 = cubic)
+    /**Default NURBS order (3 = cubic) */
     int32_t defaultNURBSOrder{3};
     
-    /// Maximum NURBS order
+    /**Maximum NURBS order */
     int32_t maxNURBSOrder{6};
     
-    /// Maximum control points
+    /**Maximum control points */
     int32_t maxControlPoints{1000};
     
-    /// Auto-clamp knot vector
+    /**Auto-clamp knot vector */
     bool autoClampKnots{true};
     
     // === Feed Rate ===
     
-    /// Use arc length parameterization for feed
+    /**Use arc length parameterization for feed */
     bool arcLengthParam{true};
     
-    /// Maximum curvature for feed limit
+    /**Maximum curvature for feed limit */
     double maxCurvature{100.0};  // 1/mm
     
-    /// Feed reduction factor at max curvature
+    /**Feed reduction factor at max curvature */
     double curvatureFeedFactor{0.5};
     
     // === Continuity ===
     
-    /// Check G1 continuity at junctions
+    /**Check G1 continuity at junctions */
     bool checkContinuity{true};
     
-    /// Tangent angle tolerance for continuity warning
+    /**Tangent angle tolerance for continuity warning */
     double continuityTolerance{0.1};  // radians
 };
 
@@ -298,7 +298,7 @@ struct SplineConfig {
 struct ControlPoint2D {
     double x{0};
     double y{0};
-    double weight{1.0};  ///< NURBS weight (1.0 for B-spline)
+    double weight{1.0}; /**< NURBS weight (1.0 for B-spline) */
     
     ControlPoint2D() = default;
     ControlPoint2D(double x_, double y_, double w = 1.0)
@@ -360,22 +360,22 @@ struct QuadraticSplineSpec {
  * @brief NURBS specification (G5.2/G5.3)
  */
 struct NURBSSpec {
-    /// Control points
+    /**Control points */
     std::vector<ControlPoint3D> controlPoints;
     
-    /// Knot vector (size = controlPoints.size() + order)
+    /**Knot vector (size = controlPoints.size() + order) */
     std::vector<double> knots;
     
-    /// Spline order (degree + 1)
+    /**Spline order (degree + 1) */
     int32_t order{3};
     
-    /// Feed rate
+    /**Feed rate */
     double feedRate{0};
     
-    /// Computed length
+    /**Computed length */
     double length{0};
     
-    /// Is closed curve
+    /**Is closed curve */
     bool closed{false};
 };
 

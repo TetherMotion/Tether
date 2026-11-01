@@ -65,32 +65,34 @@ namespace EtherCAT { namespace SyncManager {
 // ESC physical register constants
 // ---------------------------------------------------------------------------
 
-/// Base address of SM0 in the ESC register space.
+/**Base address of SM0 in the ESC register space. */
 constexpr uint16_t kRegisterBase   = 0x0800;
-/// Number of bytes each SM occupies in the ESC register space.
+/**Number of bytes each SM occupies in the ESC register space. */
 constexpr uint8_t  kRegisterStride = 8;
-/// Maximum number of Sync Managers defined by the EtherCAT standard.
+/**Maximum number of Sync Managers defined by the EtherCAT standard. */
 constexpr uint8_t  kMaxCount       = 32;
 
-/// Byte offset within an SM register block: physical start address (16-bit LE).
+/**Byte offset within an SM register block: physical start address (16-bit LE). */
 constexpr uint8_t kRegOffsetStartAddr = 0;
-/// Byte offset within an SM register block: length (16-bit LE).
+/**Byte offset within an SM register block: length (16-bit LE). */
 constexpr uint8_t kRegOffsetLength    = 2;
-/// Byte offset within an SM register block: control register.
+/**Byte offset within an SM register block: control register. */
 constexpr uint8_t kRegOffsetControl   = 4;
-/// Byte offset within an SM register block: status register.
+/**Byte offset within an SM register block: status register. */
 constexpr uint8_t kRegOffsetStatus    = 5;
-/// Byte offset within an SM register block: activate register.
+/**Byte offset within an SM register block: activate register. */
 constexpr uint8_t kRegOffsetActivate  = 6;
-/// Byte offset within an SM register block: PDI control register.
+/**Byte offset within an SM register block: PDI control register. */
 constexpr uint8_t kRegOffsetPDICtrl   = 7;
 
-/// SM Watchdog status register address (process-data WD expired flag).
+/**SM Watchdog status register address (process-data WD expired flag). */
 constexpr uint16_t kWatchdogStatusReg = 0x0440;
 
-/// Return the physical ESC register base address for SM @p smIndex.
-/// @param smIndex Zero-based sync-manager index
-/// @return ESC register address of the SM block
+/**
+ * Return the physical ESC register base address for SM @p smIndex.
+ * @param smIndex Zero-based sync-manager index
+ * @return ESC register address of the SM block
+ */
 constexpr uint16_t registerBase(uint8_t smIndex) {
     return static_cast<uint16_t>(kRegisterBase + smIndex * kRegisterStride);
 }
@@ -99,25 +101,29 @@ constexpr uint16_t registerBase(uint8_t smIndex) {
 // CiA 301 object dictionary indices
 // ---------------------------------------------------------------------------
 
-/// 0x1C00 – SM Communication Types array (subindex n = SM(n-1) type).
+/**0x1C00 – SM Communication Types array (subindex n = SM(n-1) type). */
 constexpr uint16_t kCommTypeIndex   = 0x1C00;
-/// 0x1C10 – base of SM PDO Assignment array indices (0x1C10 = SM0, …, 0x1C2F = SM31).
+/**0x1C10 – base of SM PDO Assignment array indices (0x1C10 = SM0, …, 0x1C2F = SM31). */
 constexpr uint16_t kPDOAssignBase   = 0x1C10;
-/// 0x1C32 – SM2 Synchronization parameter object.
+/**0x1C32 – SM2 Synchronization parameter object. */
 constexpr uint16_t kSyncParamSM2    = 0x1C32;
-/// 0x1C33 – SM3 Synchronization parameter object.
+/**0x1C33 – SM3 Synchronization parameter object. */
 constexpr uint16_t kSyncParamSM3    = 0x1C33;
 
-/// Return the PDO Assignment OD index for SM @p smIndex (0x1C10 + smIndex).
-/// @param smIndex Zero-based sync-manager index
-/// @return Object-dictionary index of the SM's assign array
+/**
+ * Return the PDO Assignment OD index for SM @p smIndex (0x1C10 + smIndex).
+ * @param smIndex Zero-based sync-manager index
+ * @return Object-dictionary index of the SM's assign array
+ */
 constexpr uint16_t pdoAssignIndex(uint8_t smIndex) {
     return static_cast<uint16_t>(kPDOAssignBase + smIndex);
 }
 
-/// Return the SM Synchronization OD index for SM @p smIndex (valid for SM2/SM3 → 0x1C32/0x1C33).
-/// @param smIndex Sync-manager index (2 or 3)
-/// @return Object-dictionary index of the sync parameter object
+/**
+ * Return the SM Synchronization OD index for SM @p smIndex (valid for SM2/SM3 → 0x1C32/0x1C33).
+ * @param smIndex Sync-manager index (2 or 3)
+ * @return Object-dictionary index of the sync parameter object
+ */
 constexpr uint16_t syncParamIndex(uint8_t smIndex) {
     return static_cast<uint16_t>(0x1C30 + smIndex);
 }
@@ -130,11 +136,11 @@ constexpr uint16_t syncParamIndex(uint8_t smIndex) {
  * @brief SM Communication Type byte values read from/written to 0x1C00 : n.
  */
 namespace CommType {
-    constexpr uint8_t NotUsed           = 0x00; ///< Not used / disabled
-    constexpr uint8_t MailboxReceive    = 0x01; ///< Mailbox receive (Master → Slave)
-    constexpr uint8_t MailboxSend       = 0x02; ///< Mailbox send (Slave → Master)
-    constexpr uint8_t ProcessDataOutput = 0x03; ///< Process data output / RxPDO (Master → Slave)
-    constexpr uint8_t ProcessDataInput  = 0x04; ///< Process data input / TxPDO (Slave → Master)
+    constexpr uint8_t NotUsed           = 0x00; /**< Not used / disabled */
+    constexpr uint8_t MailboxReceive    = 0x01; /**< Mailbox receive (Master → Slave) */
+    constexpr uint8_t MailboxSend       = 0x02; /**< Mailbox send (Slave → Master) */
+    constexpr uint8_t ProcessDataOutput = 0x03; /**< Process data output / RxPDO (Master → Slave) */
+    constexpr uint8_t ProcessDataInput  = 0x04; /**< Process data input / TxPDO (Slave → Master) */
     // Shorter aliases
     constexpr uint8_t ProcessOutput = ProcessDataOutput;
     constexpr uint8_t ProcessInput  = ProcessDataInput;
@@ -148,20 +154,20 @@ namespace CommType {
  * @brief Subindex definitions for SM Synchronization objects (0x1C32 / 0x1C33).
  */
 namespace SyncSub {
-    constexpr uint8_t SyncMode             = 0x01; ///< Sync mode (0=free-run, 1=SM, 2=DC SYNC0, 3=DC SYNC1)
-    constexpr uint8_t CycleTime           = 0x02; ///< Cycle time in ns
-    constexpr uint8_t ShiftTime           = 0x03; ///< Output / input shift time
-    constexpr uint8_t SupportedSyncTypes  = 0x04; ///< Supported sync types bitmask
-    constexpr uint8_t MinimumCycleTime    = 0x05; ///< Minimum cycle time
-    constexpr uint8_t CalcAndCopyTime     = 0x06; ///< Calculation and copy time
+    constexpr uint8_t SyncMode             = 0x01; /**< Sync mode (0=free-run, 1=SM, 2=DC SYNC0, 3=DC SYNC1) */
+    constexpr uint8_t CycleTime           = 0x02; /**< Cycle time in ns */
+    constexpr uint8_t ShiftTime           = 0x03; /**< Output / input shift time */
+    constexpr uint8_t SupportedSyncTypes  = 0x04; /**< Supported sync types bitmask */
+    constexpr uint8_t MinimumCycleTime    = 0x05; /**< Minimum cycle time */
+    constexpr uint8_t CalcAndCopyTime     = 0x06; /**< Calculation and copy time */
     constexpr uint8_t Reserved7           = 0x07;
-    constexpr uint8_t CommandRegister     = 0x08; ///< Command register
-    constexpr uint8_t DelayTime           = 0x09; ///< Delay time
-    constexpr uint8_t Sync0CycleTime      = 0x0A; ///< Sync0 cycle time
-    constexpr uint8_t SMEventMissedCounter = 0x0B; ///< SM event missed counter
-    constexpr uint8_t CycleTimeTooSmall   = 0x0C; ///< Cycle time too small flag
-    constexpr uint8_t ShiftTimeTooShort   = 0x0D; ///< Shift time too short flag
-    constexpr uint8_t SyncError           = 0x20; ///< Sync error flag
+    constexpr uint8_t CommandRegister     = 0x08; /**< Command register */
+    constexpr uint8_t DelayTime           = 0x09; /**< Delay time */
+    constexpr uint8_t Sync0CycleTime      = 0x0A; /**< Sync0 cycle time */
+    constexpr uint8_t SMEventMissedCounter = 0x0B; /**< SM event missed counter */
+    constexpr uint8_t CycleTimeTooSmall   = 0x0C; /**< Cycle time too small flag */
+    constexpr uint8_t ShiftTimeTooShort   = 0x0D; /**< Shift time too short flag */
+    constexpr uint8_t SyncError           = 0x20; /**< Sync error flag */
 } // namespace SyncSub
 
 // ---------------------------------------------------------------------------
@@ -181,23 +187,29 @@ constexpr uint32_t makeMappingEntry(uint16_t index, uint8_t subindex, uint8_t bi
             static_cast<uint32_t>(bits);
 }
 
-/// Extract the object index from a PDO mapping entry.
-/// @param entry Packed mapping entry
-/// @return Object-dictionary index
+/**
+ * Extract the object index from a PDO mapping entry.
+ * @param entry Packed mapping entry
+ * @return Object-dictionary index
+ */
 constexpr uint16_t mappingIndex(uint32_t entry) {
     return static_cast<uint16_t>((entry >> 16) & 0xFFFFU);
 }
 
-/// Extract the subindex from a PDO mapping entry.
-/// @param entry Packed mapping entry
-/// @return Object subindex
+/**
+ * Extract the subindex from a PDO mapping entry.
+ * @param entry Packed mapping entry
+ * @return Object subindex
+ */
 constexpr uint8_t mappingSubindex(uint32_t entry) {
     return static_cast<uint8_t>((entry >> 8) & 0xFFU);
 }
 
-/// Extract the bit length from a PDO mapping entry.
-/// @param entry Packed mapping entry
-/// @return Bit length of the mapped object
+/**
+ * Extract the bit length from a PDO mapping entry.
+ * @param entry Packed mapping entry
+ * @return Bit length of the mapped object
+ */
 constexpr uint8_t mappingBits(uint32_t entry) {
     return static_cast<uint8_t>(entry & 0xFFU);
 }
@@ -329,8 +341,8 @@ public:
      * @brief Result of a SM validation check.
      */
     struct ValidationResult {
-        bool        valid   = false; ///< true if the SM matches expectations
-        std::string message;         ///< Human-readable description of the mismatch (empty if valid)
+        bool        valid   = false; /**< true if the SM matches expectations */
+        std::string message; /**< Human-readable description of the mismatch (empty if valid) */
     };
 
     // -----------------------------------------------------------------------
@@ -518,8 +530,8 @@ public:
     void dumpPDOAssignments(const char* tag = "SM") const;
 
 private:
-    Slave& slave_; ///< Owning slave
-    uint8_t        index_; ///< SM index (0-based)
+    Slave& slave_; /**< Owning slave */
+    uint8_t        index_; /**< SM index (0-based) */
 };
 
 /**

@@ -152,23 +152,23 @@ namespace GCode {
  * @brief Call stack frame for subroutine execution
  */
 struct CallFrame {
-    /// O-code number or name
+    /**O-code number or name */
     int32_t oNumber{-1};
     std::string oName;
     bool isNamed{false};
     
-    /// Return address (source position)
+    /**Return address (source position) */
     size_t returnAddress{0};
     uint32_t returnLine{0};
     
-    /// File context (for external file calls)
+    /**File context (for external file calls) */
     std::string fileName;
     Parser* fileParser{nullptr};  // Parser for external file
     
-    /// Local parameter frame index
+    /**Local parameter frame index */
     size_t paramFrameIndex{0};
     
-    /// Modal state save (for M73)
+    /**Modal state save (for M73) */
     bool hasModalSave{false};
     MachineState savedModal{};
 };
@@ -177,25 +177,25 @@ struct CallFrame {
  * @brief Loop stack frame
  */
 struct LoopFrame {
-    /// O-code number
+    /**O-code number */
     int32_t oNumber{-1};
     
-    /// Loop type
+    /**Loop type */
     enum class Type : uint8_t {
-        WHILE,      ///< o<n> while / o<n> endwhile
-        DO_WHILE,   ///< o<n> do / o<n> while
-        REPEAT      ///< o<n> repeat / o<n> endrepeat
+        WHILE, /**< o<n> while / o<n> endwhile */
+        DO_WHILE, /**< o<n> do / o<n> while */
+        REPEAT /**< o<n> repeat / o<n> endrepeat */
     } type{Type::WHILE};
     
-    /// Loop start address (for while) or repeat count
+    /**Loop start address (for while) or repeat count */
     size_t startAddress{0};
     uint32_t startLine{0};
     
-    /// For repeat: current iteration and max
+    /**For repeat: current iteration and max */
     int32_t currentIteration{0};
     int32_t maxIterations{0};
     
-    /// Condition expression (for while)
+    /**Condition expression (for while) */
     std::string condition;
 };
 
@@ -203,14 +203,14 @@ struct LoopFrame {
  * @brief Fanuc M98 call stack frame (subprogram call via M98 or G65/G66)
  */
 struct M98Frame {
-    /// Source offset of the subprogram body start (first line after label)
+    /**Source offset of the subprogram body start (first line after label) */
     size_t subStart{0};
     uint32_t subLine{0};
 
-    /// Source offset to jump back to (line after the M98/G65 call)
+    /**Source offset to jump back to (line after the M98/G65 call) */
     size_t returnAddress{0};
 
-    /// Remaining L-word repetitions (first run already executing)
+    /**Remaining L-word repetitions (first run already executing) */
     int32_t remaining{0};
 };
 
@@ -218,16 +218,16 @@ struct M98Frame {
  * @brief Conditional (if/else) stack frame
  */
 struct ConditionalFrame {
-    /// O-code number
+    /**O-code number */
     int32_t oNumber{-1};
     
-    /// Has a branch been taken?
+    /**Has a branch been taken? */
     bool branchTaken{false};
     
-    /// Currently in else block?
+    /**Currently in else block? */
     bool inElse{false};
     
-    /// Address of endif (for skipping)
+    /**Address of endif (for skipping) */
     size_t endifAddress{0};
     uint32_t endifLine{0};
 };
@@ -240,23 +240,23 @@ struct ConditionalFrame {
  * @brief Information about a registered subroutine
  */
 struct SubroutineInfo {
-    /// O-code number or name
+    /**O-code number or name */
     int32_t oNumber{-1};
     std::string name;
     bool isNamed{false};
     
-    /// Source file (empty if inline)
+    /**Source file (empty if inline) */
     std::string fileName;
     
-    /// Position of 'sub' keyword
+    /**Position of 'sub' keyword */
     size_t startAddress{0};
     uint32_t startLine{0};
     
-    /// Position of 'endsub' keyword
+    /**Position of 'endsub' keyword */
     size_t endAddress{0};
     uint32_t endLine{0};
     
-    /// Is this Fanuc-style (M98/M99)?
+    /**Is this Fanuc-style (M98/M99)? */
     bool isFanucStyle{false};
 };
 
@@ -301,8 +301,10 @@ public:
      * @return true when a numbered subroutine is registered.
      */
     bool exists(int32_t oNumber) const;
-    /// @param name Subroutine name to test.
-    /// @return true when a named subroutine is registered.
+    /**
+     * @param name Subroutine name to test.
+     * @return true when a named subroutine is registered.
+     */
     bool exists(const std::string& name) const;
     
     /**
@@ -337,25 +339,25 @@ private:
  * @brief Configuration for O-code execution
  */
 struct OCodeConfig {
-    /// Maximum call stack depth
+    /**Maximum call stack depth */
     size_t maxCallDepth{MAX_CALL_DEPTH};
     
-    /// Maximum loop iterations (infinite loop prevention)
+    /**Maximum loop iterations (infinite loop prevention) */
     size_t maxLoopIterations{1000000};
     
-    /// Subroutine search paths
+    /**Subroutine search paths */
     std::vector<std::string> searchPaths;
     
-    /// Enable Fanuc-style M98/M99
+    /**Enable Fanuc-style M98/M99 */
     bool enableFanucStyle{true};
     
-    /// Enable named subroutines
+    /**Enable named subroutines */
     bool enableNamedSubs{true};
     
-    /// Case insensitive names
+    /**Case insensitive names */
     bool caseInsensitive{true};
     
-    /// File extension for subroutines
+    /**File extension for subroutines */
     std::string subFileExtension{".ngc"};
 };
 
@@ -384,14 +386,14 @@ public:
      * @return Error if execution failed
      */
     enum class NextAction {
-        CONTINUE,       ///< Continue to next line
-        JUMP,           ///< Jump to new address (use getJumpAddress)
-        SKIP_TO_ENDIF,  ///< Skip to matching endif
-        SKIP_TO_ELSE,   ///< Skip to matching else/elseif/endif
-        SKIP_TO_ENDWHILE, ///< Skip to matching endwhile
-        SKIP_TO_ENDREPEAT, ///< Skip to matching endrepeat
-        EXIT_PROGRAM,   ///< Program end
-        RETURN          ///< Return from subroutine
+        CONTINUE, /**< Continue to next line */
+        JUMP, /**< Jump to new address (use getJumpAddress) */
+        SKIP_TO_ENDIF, /**< Skip to matching endif */
+        SKIP_TO_ELSE, /**< Skip to matching else/elseif/endif */
+        SKIP_TO_ENDWHILE, /**< Skip to matching endwhile */
+        SKIP_TO_ENDREPEAT, /**< Skip to matching endrepeat */
+        EXIT_PROGRAM, /**< Program end */
+        RETURN /**< Return from subroutine */
     };
     
     Error execute(const Block& block, NextAction& nextAction);
@@ -642,7 +644,7 @@ public:
      * @return Mutable registry of known subroutines.
      */
     SubroutineRegistry& getRegistry() { return m_registry; }
-    /// @return Read-only registry of known subroutines.
+    /**@return Read-only registry of known subroutines. */
     const SubroutineRegistry& getRegistry() const { return m_registry; }
     
     /**
@@ -704,19 +706,23 @@ private:
     Error evaluateCondition(const std::string& condition, bool& result);
     Error findEndOfBlock(int32_t oNumber, OCodeType blockType, 
                          size_t& address, uint32_t& line);
-    /// Scan forward (opener already consumed) for the matching block closer
-    /// at depth 0 — `if`→`endif`, `while`→`endwhile`, `do`→`while`,
-    /// `repeat`→`endrepeat`, `sub`→`endsub`. On return, getLastBlockStart/
-    /// End describe the closer's line.
+    /**
+     * Scan forward (opener already consumed) for the matching block closer
+     * at depth 0 — `if`→`endif`, `while`→`endwhile`, `do`→`while`,
+     * `repeat`→`endrepeat`, `sub`→`endsub`. On return, getLastBlockStart/
+     * End describe the closer's line.
+     */
     Error scanForEnder(int32_t oNumber, OCodeType opener, Block& endBlock);
-    /// Scan forward to the next same-depth ELSEIF/ELSE/ENDIF for oNumber and
-    /// set the jump target to that block's start (it re-executes normally).
+    /**
+     * Scan forward to the next same-depth ELSEIF/ELSE/ENDIF for oNumber and
+     * set the jump target to that block's start (it re-executes normally).
+     */
     Error scanToBranchPoint(int32_t oNumber);
-    /// Scan forward to the matching ENDIF and jump to its start.
+    /**Scan forward to the matching ENDIF and jump to its start. */
     Error scanToEndif(int32_t oNumber);
-    /// Find the matching block closer and jump past it.
+    /**Find the matching block closer and jump past it. */
     Error jumpPastEnder(int32_t oNumber, OCodeType opener);
-    /// Find the matching block closer and jump to its start (re-executes it).
+    /**Find the matching block closer and jump to its start (re-executes it). */
     Error jumpToEnder(int32_t oNumber, OCodeType opener);
     Error loadExternalSubroutine(const std::string& name);
     std::string findSubroutineFile(const std::string& name);
@@ -770,9 +776,11 @@ OCodeType getMatchingCloser(OCodeType opener);
  * @return Human-readable form such as "o100 while".
  */
 std::string formatOCode(int32_t oNumber, OCodeType type);
-/// @param name Subroutine name.
-/// @param type O-code type.
-/// @return Human-readable form such as "o<name> call".
+/**
+ * @param name Subroutine name.
+ * @param type O-code type.
+ * @return Human-readable form such as "o<name> call".
+ */
 std::string formatOCode(const std::string& name, OCodeType type);
 
 } // namespace GCode

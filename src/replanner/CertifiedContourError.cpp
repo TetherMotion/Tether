@@ -15,8 +15,10 @@ namespace tether::motion::replanner {
 
 namespace {
 
-/// Compute the certified contour error against a single piece, with
-/// the desired arc length for lag decomposition.
+/**
+ * Compute the certified contour error against a single piece, with
+ * the desired arc length for lag decomposition.
+ */
 CertifiedContourError computeAgainstPiece(
     const PiecewiseNurbsPath& path,
     std::size_t pieceIndex,
@@ -69,25 +71,27 @@ CertifiedContourError computeAgainstPiece(
     return result;
 }
 
-/// Lower bound on the distance from a point to a NURBS curve, computed
-/// from the axis-aligned bounding box (AABB) of the curve's control
-/// points. A NURBS curve lies within the convex hull of its control
-/// points (a consequence of the partition-of-unity property of B-spline
-/// basis functions), so the true minimum distance from any point to the
-/// curve is ≥ the distance from that point to the AABB of the control
-/// points.
-///
-/// This is the key pruning optimization for computeCertifiedContourError:
-/// on long paths with many pieces, most pieces are far from the actual
-/// position. The AABB distance is a cheap O(n·dim) computation (just
-/// min/max over control points + a clamped-distance calculation), while
-/// pointCurveDistance is expensive (Bézier decomposition + Bernstein
-/// root isolation per span). If the AABB lower bound already exceeds
-/// the current best distance, the piece cannot improve the result and
-/// can be skipped.
-///
-/// @return A non-negative lower bound on the true distance, or 0.0 if
-///         the point is inside the AABB (no useful pruning possible).
+/**
+ * Lower bound on the distance from a point to a NURBS curve, computed
+ * from the axis-aligned bounding box (AABB) of the curve's control
+ * points. A NURBS curve lies within the convex hull of its control
+ * points (a consequence of the partition-of-unity property of B-spline
+ * basis functions), so the true minimum distance from any point to the
+ * curve is ≥ the distance from that point to the AABB of the control
+ * points.
+ *
+ * This is the key pruning optimization for computeCertifiedContourError:
+ * on long paths with many pieces, most pieces are far from the actual
+ * position. The AABB distance is a cheap O(n·dim) computation (just
+ * min/max over control points + a clamped-distance calculation), while
+ * pointCurveDistance is expensive (Bézier decomposition + Bernstein
+ * root isolation per span). If the AABB lower bound already exceeds
+ * the current best distance, the piece cannot improve the result and
+ * can be skipped.
+ *
+ * @return A non-negative lower bound on the true distance, or 0.0 if
+ *         the point is inside the AABB (no useful pruning possible).
+ */
 double aabbDistanceLowerBound(const NurbsCurve& curve, const RVec& p) {
     const std::size_t dim = curve.dim();
     const auto& cps = curve.controlPoints();

@@ -34,18 +34,18 @@ public:
      * new position for 
      */
     struct Step {
-        double displacement = 0.0;               ///< Relative move (radians)
-        double holdTime = 0.5;                   ///< Wait time after move (s)
-        SCurveRamper::Config profile{};          ///< SCurve parameters (0 = use default)
+        double displacement = 0.0; /**< Relative move (radians) */
+        double holdTime = 0.5; /**< Wait time after move (s) */
+        SCurveRamper::Config profile{}; /**< SCurve parameters (0 = use default) */
     };
 
     /**
      * @brief Global configuration for the controller
      */
     struct Config {
-        std::vector<Step> steps;                 ///< Ordered list of steps
-        double initialPosition = 0.0;            ///< Starting position (radians)
-        bool loop = false;                       ///< Repeat sequence when finished
+        std::vector<Step> steps; /**< Ordered list of steps */
+        double initialPosition = 0.0; /**< Starting position (radians) */
+        bool loop = false; /**< Repeat sequence when finished */
 
         SCurveRamper::Config defaultProfile = SCurveRamper::Config::getDefault();
 

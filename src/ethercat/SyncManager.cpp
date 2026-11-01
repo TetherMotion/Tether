@@ -23,7 +23,7 @@ namespace EtherCAT {
 // Internal helpers
 // ============================================================================
 
-/// Return a human-readable name for a CommType byte.
+/**Return a human-readable name for a CommType byte. */
 static const char* commTypeName(uint8_t type) {
     using namespace EtherCAT::SyncManager::CommType;
     switch (type) {

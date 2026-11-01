@@ -60,21 +60,21 @@ namespace probe {
 // Case model
 // ---------------------------------------------------------------------------
 
-/// One PDO mapping entry: object index : subindex : bit length.
+/**One PDO mapping entry: object index : subindex : bit length. */
 struct EntrySpec {
     uint16_t index = 0;
     uint8_t sub = 0;
     uint16_t bits = 0;
 };
 
-/// One PDO mapping object (e.g. 0x1601) with its entries.
+/**One PDO mapping object (e.g. 0x1601) with its entries. */
 struct PdoSpec {
     uint16_t pdo_index = 0;
     EtherCAT::PDO::PDODirection dir = EtherCAT::PDO::PDODirection::RxPDO;
     std::vector<EntrySpec> entries;
 };
 
-/// A complete probe case: the set of PDOs written before SAFE-OP.
+/**A complete probe case: the set of PDOs written before SAFE-OP. */
 struct CaseSpec {
     std::string name;
     std::vector<PdoSpec> pdos;
@@ -97,12 +97,12 @@ struct CaseSpec {
 // ---------------------------------------------------------------------------
 
 enum class Outcome {
-    SafeOpOk,             ///< slave reached SAFE-OP
-    InvalidInputMapping,  ///< AL status code 0x0024
-    OtherAlError,         ///< any other AL status code
-    Timeout,              ///< no confirmation within the probe timeout
-    SetupError,           ///< INIT/mailbox/PRE-OP/write failed before SAFE-OP
-    HostRejected,         ///< Tether refused the mapping client-side
+    SafeOpOk, /**< slave reached SAFE-OP */
+    InvalidInputMapping, /**< AL status code 0x0024 */
+    OtherAlError, /**< any other AL status code */
+    Timeout, /**< no confirmation within the probe timeout */
+    SetupError, /**< INIT/mailbox/PRE-OP/write failed before SAFE-OP */
+    HostRejected, /**< Tether refused the mapping client-side */
 };
 
 struct CaseResult {
@@ -110,7 +110,7 @@ struct CaseResult {
     Outcome outcome = Outcome::SetupError;
     uint16_t al_status = 0;
     uint16_t al_status_code = 0;
-    bool baseline_confirmed = true;  ///< A-B-A: last-good case still passed
+    bool baseline_confirmed = true; /**< A-B-A: last-good case still passed */
     std::string note;
 };
 
@@ -144,13 +144,13 @@ class Probe {
 public:
     explicit Probe(ProbeConfig cfg) : cfg_(std::move(cfg)) {}
 
-    /// Bring up the host Ethernet, master, discovery and select the slave.
+    /**Bring up the host Ethernet, master, discovery and select the slave. */
     bool connect(const char* tag);
 
-    /// Set the known-good case used for the A-B-A integrity re-check.
+    /**Set the known-good case used for the A-B-A integrity re-check. */
     void setBaseline(CaseSpec c) { last_good_ = std::move(c); }
 
-    /// Run one case with the A-B-A re-check.  Updates last_good_ on PASS.
+    /**Run one case with the A-B-A re-check.  Updates last_good_ on PASS. */
     CaseResult runCase(const CaseSpec& c);
 
     void shutdown();
@@ -159,18 +159,22 @@ public:
     EtherCAT::Master& master() { return *master_; }
 
 private:
-    /// Force INIT (two-step AL reset), configure mailbox, enter PRE-OP.
+    /**Force INIT (two-step AL reset), configure mailbox, enter PRE-OP. */
     bool prepSlave();
 
-    /// Write the case's PDO mappings, apply custom PDOs, configure SMs.
-    /// Returns Outcome::SetupError on any write failure.
+    /**
+     * Write the case's PDO mappings, apply custom PDOs, configure SMs.
+     * Returns Outcome::SetupError on any write failure.
+     */
     Outcome writePdos(const CaseSpec& c, std::string& note);
 
-    /// Request SAFE-OP and poll; fills AL status + code on failure.
+    /**Request SAFE-OP and poll; fills AL status + code on failure. */
     Outcome probeSafeOp(uint16_t& al_status, uint16_t& al_code);
 
-    /// Translate an ObjectDictionaryEntry for configureCustomTxPDO,
-    /// keeping the synthesized object alive for the whole probe session.
+    /**
+     * Translate an ObjectDictionaryEntry for configureCustomTxPDO,
+     * keeping the synthesized object alive for the whole probe session.
+     */
     const EtherCAT::ObjectDictionary::ObjectDictionaryEntry* synthEntry(
         uint16_t index, uint8_t sub);
 
@@ -393,7 +397,7 @@ CaseResult Probe::runCase(const CaseSpec& c) {
 // CLI parsing helpers
 // ---------------------------------------------------------------------------
 
-/// Parse "1601:rx:7010:0:32,7020:0:32" into a PdoSpec.
+/**Parse "1601:rx:7010:0:32,7020:0:32" into a PdoSpec. */
 std::optional<PdoSpec> parsePdoSpec(const std::string& s) {
     auto parts = [&](const std::string& str, char sep) {
         std::vector<std::string> out;
@@ -437,7 +441,7 @@ std::optional<PdoSpec> parsePdoSpec(const std::string& s) {
     return pdo;
 }
 
-/// Parse "name=1601:rx:...;1A01:tx:..." into a CaseSpec.
+/**Parse "name=1601:rx:...;1A01:tx:..." into a CaseSpec. */
 std::optional<CaseSpec> parseCaseSpec(const std::string& s) {
     CaseSpec c;
     auto eq = s.find('=');
@@ -462,7 +466,7 @@ std::optional<CaseSpec> parseCaseSpec(const std::string& s) {
     return c;
 }
 
-/// Build a CaseSpec from one PDO whose entries are generated by `gen`.
+/**Build a CaseSpec from one PDO whose entries are generated by `gen`. */
 CaseSpec generatedCase(const std::string& name, PdoSpec base,
                        const std::vector<EntrySpec>& entries) {
     base.entries = entries;

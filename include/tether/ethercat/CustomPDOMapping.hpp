@@ -7,8 +7,10 @@
 
 namespace EtherCAT {
 
-/// Infer the byte size of an object-dictionary entry from its data type.
-/// Returns 0 if the size cannot be inferred (e.g. OctetString, Domain).
+/**
+ * Infer the byte size of an object-dictionary entry from its data type.
+ * Returns 0 if the size cannot be inferred (e.g. OctetString, Domain).
+ */
 inline uint8_t inferByteSize(ObjectDictionary::ObjectDictionaryDataType dt) noexcept {
     using D = ObjectDictionary::ObjectDictionaryDataType;
     switch (dt) {
@@ -43,10 +45,12 @@ inline uint8_t inferByteSize(ObjectDictionary::ObjectDictionaryDataType dt) noex
     }
 }
 
-/// Encode a PDO mapping entry value as a uint32_t:
-///   bits 31..16 = object index
-///   bits 15..8  = subindex
-///   bits 7..0   = bit length
+/**
+ * Encode a PDO mapping entry value as a uint32_t:
+ *   bits 31..16 = object index
+ *   bits 15..8  = subindex
+ *   bits 7..0   = bit length
+ */
 inline uint32_t encodePDOMappingValue(const ObjectDictionary::ObjectDictionaryEntry* entry,
                                        uint8_t byte_size) noexcept {
     return (static_cast<uint32_t>(entry->index) << 16) |
@@ -54,34 +58,36 @@ inline uint32_t encodePDOMappingValue(const ObjectDictionary::ObjectDictionaryEn
            static_cast<uint32_t>(byte_size * 8);
 }
 
-/// A single entry in a custom PDO mapping.
-///
-/// Constructed from a pointer to an ObjectDictionaryEntry (i.e. a register
-/// definition).  The byte size is inferred from the entry's data_type unless
-/// \p byte_size is explicitly provided (needed for OctetString etc.).
+/**
+ * A single entry in a custom PDO mapping.
+ *
+ * Constructed from a pointer to an ObjectDictionaryEntry (i.e. a register
+ * definition).  The byte size is inferred from the entry's data_type unless
+ * \p byte_size is explicitly provided (needed for OctetString etc.).
+ */
 struct CustomPDOMappingEntry {
     const ObjectDictionary::ObjectDictionaryEntry* entry;
-    uint8_t byte_size;  ///< 0 = infer from entry->data_type
+    uint8_t byte_size; /**< 0 = infer from entry->data_type */
 
-    /// Implicit from a register pointer — infers size from data_type.
+    /**Implicit from a register pointer — infers size from data_type. */
     CustomPDOMappingEntry(const ObjectDictionary::ObjectDictionaryEntry* e)
         : entry(e), byte_size(inferByteSize(e->data_type)) {}
 
-    /// Explicit byte size override (for OctetString, Domain, etc.).
+    /**Explicit byte size override (for OctetString, Domain, etc.). */
     CustomPDOMappingEntry(const ObjectDictionary::ObjectDictionaryEntry* e, uint8_t sz)
         : entry(e), byte_size(sz) {}
 
-    /// Resolved byte size (inferred if byte_size was 0).
+    /**Resolved byte size (inferred if byte_size was 0). */
     uint8_t resolvedSize() const noexcept {
         return byte_size != 0 ? byte_size : inferByteSize(entry->data_type);
     }
 };
 
-/// Layout of a single field within a custom PDO after offsets are computed.
+/**Layout of a single field within a custom PDO after offsets are computed. */
 struct CustomPDOFieldLayout {
     const ObjectDictionary::ObjectDictionaryEntry* entry;
-    uint16_t offset;  ///< Byte offset within the PDO buffer
-    uint8_t size;      ///< Resolved byte size
+    uint16_t offset; /**< Byte offset within the PDO buffer */
+    uint8_t size; /**< Resolved byte size */
 };
 
 } // namespace EtherCAT

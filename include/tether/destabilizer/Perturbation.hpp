@@ -1,6 +1,8 @@
 #pragma once
-/// @file Perturbation.hpp
-/// @brief Perturbation signal parameterizations for the Destabilizer.
+/**
+ * @file Perturbation.hpp
+ * @brief Perturbation signal parameterizations for the Destabilizer.
+ */
 
 #include "DestabilizerTypes.hpp"
 #include <vector>
@@ -13,45 +15,55 @@
 
 namespace Destabilizer {
 
-/// Abstract base for perturbation signal generators.
-/// Maps a parameter vector θ to a time-domain signal u_p(t).
+/**
+ * Abstract base for perturbation signal generators.
+ * Maps a parameter vector θ to a time-domain signal u_p(t).
+ */
 class PerturbationSignal {
 public:
     virtual ~PerturbationSignal() = default;
 
-    /// Number of free parameters in θ.
-    /// @return Size of the theta vector the optimizer searches over.
+    /**
+     * Number of free parameters in θ.
+     * @return Size of the theta vector the optimizer searches over.
+     */
     virtual int parameterCount() const = 0;
 
-    /// Evaluate the perturbation signal at time t given parameters θ.
-    /// For state-dependent parameterizations (e.g., MLP), state is provided.
-    /// @param t Time [s].
-    /// @param theta Free parameters, size parameterCount().
-    /// @param state Optional system state for state-dependent signals.
-    /// @return Perturbation value at @p t.
+    /**
+     * Evaluate the perturbation signal at time t given parameters θ.
+     * For state-dependent parameterizations (e.g., MLP), state is provided.
+     * @param t Time [s].
+     * @param theta Free parameters, size parameterCount().
+     * @param state Optional system state for state-dependent signals.
+     * @return Perturbation value at @p t.
+     */
     virtual double evaluate(double t, const std::vector<double>& theta,
                             const std::vector<double>& state = {}) const = 0;
 
-    /// Generate the full signal on a time grid.
-    /// @param times Time samples [s].
-    /// @param theta Free parameters, size parameterCount().
-    /// @param states Optional per-sample system states.
-    /// @return Signal value at each time sample.
+    /**
+     * Generate the full signal on a time grid.
+     * @param times Time samples [s].
+     * @param theta Free parameters, size parameterCount().
+     * @param states Optional per-sample system states.
+     * @return Signal value at each time sample.
+     */
     std::vector<double> generateSignal(const std::vector<double>& times,
                                         const std::vector<double>& theta,
                                         const std::vector<std::vector<double>>& states = {}) const;
 
-    /// Create a perturbation signal of the given type.
-    /// @param type Signal family to instantiate.
-    /// @param config Signal configuration (amplitudes, frequencies, ...).
-    /// @param horizon Optimization horizon the signal is defined over [s].
-    /// @return Newly constructed signal.
+    /**
+     * Create a perturbation signal of the given type.
+     * @param type Signal family to instantiate.
+     * @param config Signal configuration (amplitudes, frequencies, ...).
+     * @param horizon Optimization horizon the signal is defined over [s].
+     * @return Newly constructed signal.
+     */
     static std::unique_ptr<PerturbationSignal> create(PerturbationType type,
                                                        const PerturbationConfig& config,
                                                        double horizon);
 };
 
-/// Piecewise-constant: N segments of constant amplitude over [0, T].
+/**Piecewise-constant: N segments of constant amplitude over [0, T]. */
 class PiecewiseConstantPerturbation : public PerturbationSignal {
 public:
     PiecewiseConstantPerturbation(int numSegments, double horizon);
@@ -64,7 +76,7 @@ private:
     double segmentDuration_;
 };
 
-/// Piecewise-linear: N breakpoints with linear interpolation.
+/**Piecewise-linear: N breakpoints with linear interpolation. */
 class PiecewiseLinearPerturbation : public PerturbationSignal {
 public:
     PiecewiseLinearPerturbation(int numBreakpoints, double horizon);
@@ -76,8 +88,10 @@ private:
     double horizon_;
 };
 
-/// Fourier/spectral: sum of K sinusoids with amplitude, frequency, phase.
-/// θ = [a1, f1, φ1, a2, f2, φ2, ...]
+/**
+ * Fourier/spectral: sum of K sinusoids with amplitude, frequency, phase.
+ * θ = [a1, f1, φ1, a2, f2, φ2, ...]
+ */
 class FourierPerturbation : public PerturbationSignal {
 public:
     FourierPerturbation(int numHarmonics, double horizon);
@@ -89,8 +103,10 @@ private:
     double horizon_;
 };
 
-/// MLP policy: small neural network mapping state → perturbation.
-/// θ = flattened network weights and biases.
+/**
+ * MLP policy: small neural network mapping state → perturbation.
+ * θ = flattened network weights and biases.
+ */
 class MLPPerturbation : public PerturbationSignal {
 public:
     MLPPerturbation(int stateDim, int hiddenSize, int numLayers);
@@ -104,8 +120,10 @@ private:
     int paramCount_;
 };
 
-/// Impulse train: M impulses with (time, amplitude, duration).
-/// θ = [t1, a1, d1, t2, a2, d2, ...]
+/**
+ * Impulse train: M impulses with (time, amplitude, duration).
+ * θ = [t1, a1, d1, t2, a2, d2, ...]
+ */
 class ImpulseTrainPerturbation : public PerturbationSignal {
 public:
     ImpulseTrainPerturbation(int numImpulses, double horizon);
@@ -117,9 +135,11 @@ private:
     double horizon_;
 };
 
-/// Bang-bang: switching times between +A_max and -A_max.
-/// θ = N switching times (sorted); amplitude alternates between +1 and -1.
-/// Actual amplitude is scaled by ChannelConstraints.amplitudeMax at projection time.
+/**
+ * Bang-bang: switching times between +A_max and -A_max.
+ * θ = N switching times (sorted); amplitude alternates between +1 and -1.
+ * Actual amplitude is scaled by ChannelConstraints.amplitudeMax at projection time.
+ */
 class BangBangPerturbation : public PerturbationSignal {
 public:
     BangBangPerturbation(int numSwitches, double horizon);

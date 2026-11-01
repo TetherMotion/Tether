@@ -33,10 +33,10 @@ public:
     struct Config {
         uint32_t rx_blocks  = 128;
         uint32_t tx_blocks  = 16;
-        uint32_t rx_spin_ns = 0;   ///< busy-poll window inside rxPoll()
+        uint32_t rx_spin_ns = 0; /**< busy-poll window inside rxPoll() */
         bool     rx_v3      = false;
-        uint32_t rx_v3_retire_us = 10'000;   ///< tp_retire_blk_tov
-        uint32_t frame_size = 1600;          ///< per-slot frame bytes
+        uint32_t rx_v3_retire_us = 10'000; /**< tp_retire_blk_tov */
+        uint32_t frame_size = 1600; /**< per-slot frame bytes */
     };
 
     LinuxRingChannel(int fd, int ifindex, const Config& cfg)
@@ -114,10 +114,12 @@ public:
         return true;
     }
 
-    /// Test seam: adopt caller-provided ring buffers instead of kernel
-    /// PACKET_MMAP rings.  Lets tests exercise the walk/hold/cursor
-    /// mechanics on synthetic tpacket2_hdr layouts without CAP_NET_RAW.
-    /// The memory is borrowed — teardownRings() does not unmap it.
+    /**
+     * Test seam: adopt caller-provided ring buffers instead of kernel
+     * PACKET_MMAP rings.  Lets tests exercise the walk/hold/cursor
+     * mechanics on synthetic tpacket2_hdr layouts without CAP_NET_RAW.
+     * The memory is borrowed — teardownRings() does not unmap it.
+     */
     void adoptRingsForTest(uint8_t* rx, uint32_t rx_frame_size,
                            uint32_t rx_frames,
                            uint8_t* tx, uint32_t tx_frame_size,
@@ -139,9 +141,11 @@ public:
         rings_borrowed_ = true;
     }
 
-    /// V3 test seam: adopt a caller-provided block-mode RX ring
-    /// (tpacket_block_desc array).  `rx` holds `blocks` blocks of
-    /// `block_size` bytes each; TX is disabled.
+    /**
+     * V3 test seam: adopt a caller-provided block-mode RX ring
+     * (tpacket_block_desc array).  `rx` holds `blocks` blocks of
+     * `block_size` bytes each; TX is disabled.
+     */
     void adoptV3RingForTest(uint8_t* rx, uint32_t block_size,
                             uint32_t blocks) {
         cfg_.rx_v3       = true;
@@ -276,7 +280,7 @@ public:
                           : walkRing(views, max_views);
     }
 
-    /// Any surfaced-but-unconsumed slot?  Pure memory reads — spin-safe.
+    /**Any surfaced-but-unconsumed slot?  Pure memory reads — spin-safe. */
     bool rxPending() const override {
         if (!rx_ring_) return false;
         if (cfg_.rx_v3) {
@@ -614,8 +618,8 @@ private:
     size_t   rx_ring_len_ = 0;
     uint32_t rx_frame_size_ = 0;
     uint32_t rx_frames_ = 0;
-    uint32_t rx_block_size_ = 0;  ///< V2: page-rounded block stride
-    uint32_t rx_fpb_        = 1;  ///< V2: frames per block
+    uint32_t rx_block_size_ = 0; /**< V2: page-rounded block stride */
+    uint32_t rx_fpb_        = 1; /**< V2: frames per block */
     std::unique_ptr<std::atomic<int>[]>  rx_holds_;
     std::unique_ptr<std::atomic<bool>[]> rx_consumed_;
 

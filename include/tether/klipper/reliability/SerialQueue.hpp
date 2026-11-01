@@ -38,12 +38,12 @@ namespace tether::klipper::reliability {
 using Clock = std::chrono::steady_clock;
 using TimePoint = Clock::time_point;
 
-/// @brief A pending block awaiting acknowledgement.
+/**@brief A pending block awaiting acknowledgement. */
 struct PendingBlock {
     uint8_t sequence = 0;
-    std::vector<uint8_t> wireBytes;     ///< Complete block bytes for retransmit
-    TimePoint sendTime;                 ///< When the block was last sent
-    uint8_t retransmitCount = 0;         ///< Number of retransmits so far
+    std::vector<uint8_t> wireBytes; /**< Complete block bytes for retransmit */
+    TimePoint sendTime; /**< When the block was last sent */
+    uint8_t retransmitCount = 0; /**< Number of retransmits so far */
 };
 
 /**
@@ -51,23 +51,23 @@ struct PendingBlock {
  */
 class SerialQueue {
 public:
-    /// @brief Callback invoked when a block's ack is received (for RTT measurement).
+    /**@brief Callback invoked when a block's ack is received (for RTT measurement). */
     using AckCallback = std::function<void(double rttSample)>;
 
     explicit SerialQueue(transport::IByteStreamTransport& transport,
                          uint8_t maxPending = protocol::kDefaultMaxPendingBlocks)
         : transport_(transport), maxPending_(maxPending) {}
 
-    /// @return The next sequence number that will be assigned.
+    /**@return The next sequence number that will be assigned. */
     uint8_t nextSequence() const { std::lock_guard<std::mutex> lk(mutex_); return sendSeq_.value(); }
 
-    /// @return Number of blocks currently pending acknowledgement.
+    /**@return Number of blocks currently pending acknowledgement. */
     size_t pendingCount() const { std::lock_guard<std::mutex> lk(mutex_); return pending_.size(); }
 
-    /// @return True if the window allows sending another block.
+    /**@return True if the window allows sending another block. */
     bool canSend() const { std::lock_guard<std::mutex> lk(mutex_); return pending_.size() < maxPending_; }
 
-    /// @brief Set the ack callback (for RTT measurement).
+    /**@brief Set the ack callback (for RTT measurement). */
     void setAckCallback(AckCallback cb) { std::lock_guard<std::mutex> lk(mutex_); ackCb_ = std::move(cb); }
 
     /**
@@ -102,16 +102,16 @@ public:
      */
     void checkTimeouts(TimePoint now = Clock::now());
 
-    /// @brief Reset the queue (e.g. on connection re-establishment).
+    /**@brief Reset the queue (e.g. on connection re-establishment). */
     void reset();
 
-    /// @return The RTO estimator (for inspection/tuning). Not thread-safe; call from same thread as checkTimeouts.
+    /**@return The RTO estimator (for inspection/tuning). Not thread-safe; call from same thread as checkTimeouts. */
     const RtoEstimator& rtoEstimator() const { return rto_; }
 
 private:
     transport::IByteStreamTransport& transport_;
     uint8_t maxPending_;
-    static constexpr uint8_t kMaxRetransmits = 5; ///< Max retransmits before dropping
+    static constexpr uint8_t kMaxRetransmits = 5; /**< Max retransmits before dropping */
     SequenceCounter sendSeq_;
     SequenceCounter ackSeq_; // last acked sequence (starts behind sendSeq)
     std::deque<PendingBlock> pending_;

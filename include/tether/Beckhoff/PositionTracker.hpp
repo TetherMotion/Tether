@@ -73,18 +73,22 @@ public:
         return position_;
     }
 
-    /// Reset the tracker so the next update() becomes the new origin.
+    /**Reset the tracker so the next update() becomes the new origin. */
     void reset() { initialized_ = false; }
 
-    /// Shift the accumulated position by `delta` without touching the
-    /// raw-sample tracking (e.g. after homing: adjust(-position())).
+    /**
+     * Shift the accumulated position by `delta` without touching the
+     * raw-sample tracking (e.g. after homing: adjust(-position())).
+     */
     void adjust(int64_t delta) { position_ += delta; }
 
-    /// The accumulated (unwrapped) position of the last update().
+    /**The accumulated (unwrapped) position of the last update(). */
     int64_t position() const { return position_; }
 
-    /// Number of full modulus turns in the accumulated position
-    /// (meaningful only for counters narrower than 64 bits).
+    /**
+     * Number of full modulus turns in the accumulated position
+     * (meaningful only for counters narrower than 64 bits).
+     */
     int32_t turns() const {
         if (bits_ >= 64) return 0;
         const int64_t mod = static_cast<int64_t>(mask_) + 1;
@@ -93,7 +97,7 @@ public:
             : -((-position_ - 1) / mod) - 1);
     }
 
-    /// The configured field width in bits.
+    /**The configured field width in bits. */
     uint8_t bits() const { return bits_; }
 
 private:

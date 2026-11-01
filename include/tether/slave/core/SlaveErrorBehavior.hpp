@@ -37,16 +37,16 @@ namespace slave {
  */
 enum class ErrorCategory : uint8_t {
     None = 0,
-    Communication,   ///< Frame/packet level errors
-    StateMachine,    ///< AL state machine errors
-    DC,              ///< Distributed Clock errors
-    FSoE,            ///< Safety protocol errors
-    Profile,         ///< Profile-specific errors (CiA402, etc.)
-    Watchdog,        ///< Watchdog timeout errors
-    Memory,          ///< Memory/buffer errors
-    Configuration,   ///< Configuration errors
-    Hardware,        ///< Hardware-related errors
-    Application      ///< Application-level errors
+    Communication, /**< Frame/packet level errors */
+    StateMachine, /**< AL state machine errors */
+    DC, /**< Distributed Clock errors */
+    FSoE, /**< Safety protocol errors */
+    Profile, /**< Profile-specific errors (CiA402, etc.) */
+    Watchdog, /**< Watchdog timeout errors */
+    Memory, /**< Memory/buffer errors */
+    Configuration, /**< Configuration errors */
+    Hardware, /**< Hardware-related errors */
+    Application /**< Application-level errors */
 };
 
 /**
@@ -202,12 +202,12 @@ struct ErrorEntry {
  * @brief Error severity configuration
  */
 struct ErrorSeverityConfig {
-    bool isCritical = true;          ///< Is this error critical?
-    bool triggerFailSafe = true;     ///< Trigger fail-safe on this error?
-    bool logError = true;            ///< Log this error?
-    bool notifyCallback = true;      ///< Call error callback?
-    uint8_t maxOccurrences = 0;      ///< Max occurrences before critical (0 = immediate)
-    uint16_t cooldownMs = 0;         ///< Cooldown between error reports
+    bool isCritical = true; /**< Is this error critical? */
+    bool triggerFailSafe = true; /**< Trigger fail-safe on this error? */
+    bool logError = true; /**< Log this error? */
+    bool notifyCallback = true; /**< Call error callback? */
+    uint8_t maxOccurrences = 0; /**< Max occurrences before critical (0 = immediate) */
+    uint16_t cooldownMs = 0; /**< Cooldown between error reports */
 };
 
 /**

@@ -65,12 +65,12 @@ constexpr size_t kMaxTransfers = ECAT_FOE_MAX_TRANSFERS;
  * @brief FoE operation codes
  */
 enum class FoEOpcode : uint8_t {
-    RRQ   = 1,  ///< Read request (download from slave)
-    WRQ   = 2,  ///< Write request (upload to slave)
-    DATA  = 3,  ///< Data block
-    ACK   = 4,  ///< Acknowledge
-    ERROR = 5,  ///< Error
-    BUSY  = 6,  ///< Slave busy
+    RRQ   = 1, /**< Read request (download from slave) */
+    WRQ   = 2, /**< Write request (upload to slave) */
+    DATA  = 3, /**< Data block */
+    ACK   = 4, /**< Acknowledge */
+    ERROR = 5, /**< Error */
+    BUSY  = 6, /**< Slave busy */
 };
 
 /**
@@ -88,28 +88,28 @@ const char* foe_opcode_string(FoEOpcode op);
  * @brief FoE error codes returned by slaves
  */
 enum class FoEError : uint32_t {
-    SUCCESS          = 0x0000,  ///< No error
-    NOT_FOUND        = 0x8001,  ///< File not found
-    ACCESS_DENIED    = 0x8002,  ///< Access denied
-    DISK_FULL        = 0x8003,  ///< Disk/storage full
-    ILLEGAL_OP       = 0x8004,  ///< Illegal operation
-    PACKET_NUM       = 0x8005,  ///< Wrong packet number
-    ALREADY_EXISTS   = 0x8006,  ///< File already exists
-    NO_USER          = 0x8007,  ///< No user logged in
-    BOOTSTRAP_ONLY   = 0x8008,  ///< Only available in bootstrap
-    NOT_BOOTSTRAP    = 0x8009,  ///< Not in bootstrap state
-    NO_RIGHTS        = 0x800A,  ///< Insufficient rights
-    PROGRAM_ERROR    = 0x800B,  ///< Programming error
-    CHECKSUM_ERROR   = 0x800C,  ///< Checksum mismatch
+    SUCCESS          = 0x0000, /**< No error */
+    NOT_FOUND        = 0x8001, /**< File not found */
+    ACCESS_DENIED    = 0x8002, /**< Access denied */
+    DISK_FULL        = 0x8003, /**< Disk/storage full */
+    ILLEGAL_OP       = 0x8004, /**< Illegal operation */
+    PACKET_NUM       = 0x8005, /**< Wrong packet number */
+    ALREADY_EXISTS   = 0x8006, /**< File already exists */
+    NO_USER          = 0x8007, /**< No user logged in */
+    BOOTSTRAP_ONLY   = 0x8008, /**< Only available in bootstrap */
+    NOT_BOOTSTRAP    = 0x8009, /**< Not in bootstrap state */
+    NO_RIGHTS        = 0x800A, /**< Insufficient rights */
+    PROGRAM_ERROR    = 0x800B, /**< Programming error */
+    CHECKSUM_ERROR   = 0x800C, /**< Checksum mismatch */
     
     // Internal errors (not from slave)
-    TIMEOUT          = 0xFF01,  ///< Communication timeout
-    MAILBOX_ERROR    = 0xFF02,  ///< Mailbox communication failed
-    LOCAL_FILE_ERROR = 0xFF03,  ///< Local filesystem error
-    INVALID_STATE    = 0xFF04,  ///< Invalid protocol state
-    BUFFER_OVERFLOW  = 0xFF05,  ///< Buffer too small
-    CANCELLED        = 0xFF06,  ///< Transfer cancelled
-    NOT_INITIALIZED  = 0xFF07,  ///< FoE not initialized
+    TIMEOUT          = 0xFF01, /**< Communication timeout */
+    MAILBOX_ERROR    = 0xFF02, /**< Mailbox communication failed */
+    LOCAL_FILE_ERROR = 0xFF03, /**< Local filesystem error */
+    INVALID_STATE    = 0xFF04, /**< Invalid protocol state */
+    BUFFER_OVERFLOW  = 0xFF05, /**< Buffer too small */
+    CANCELLED        = 0xFF06, /**< Transfer cancelled */
+    NOT_INITIALIZED  = 0xFF07, /**< FoE not initialized */
 };
 
 /**
@@ -127,13 +127,13 @@ const char* foe_error_string(FoEError error);
  * @brief Transfer progress information
  */
 struct FoEProgress {
-    uint16_t slave_index;       ///< Slave being accessed
-    const char* filename;       ///< File being transferred
-    uint32_t bytes_transferred; ///< Bytes transferred so far
-    uint32_t total_bytes;       ///< Total file size (0 if unknown)
-    uint32_t block_number;      ///< Current block number
-    bool is_upload;             ///< true = upload to slave, false = download
-    float throughput_bps;       ///< Current throughput in bytes/sec
+    uint16_t slave_index; /**< Slave being accessed */
+    const char* filename; /**< File being transferred */
+    uint32_t bytes_transferred; /**< Bytes transferred so far */
+    uint32_t total_bytes; /**< Total file size (0 if unknown) */
+    uint32_t block_number; /**< Current block number */
+    bool is_upload; /**< true = upload to slave, false = download */
+    float throughput_bps; /**< Current throughput in bytes/sec */
 };
 
 /**
@@ -151,11 +151,11 @@ using FoEProgressCallback = std::function<bool(const FoEProgress&)>;
  * @brief FoE transfer configuration
  */
 struct FoETransferConfig {
-    uint16_t slave_index;           ///< Target slave (0-based index)
-    const char* filename;           ///< Remote filename on slave
-    uint32_t password;              ///< Password (0 if none)
-    uint32_t timeout_ms;            ///< Per-block timeout (default: ECAT_FOE_TIMEOUT_MS)
-    FoEProgressCallback progress_callback;  ///< Optional progress callback
+    uint16_t slave_index; /**< Target slave (0-based index) */
+    const char* filename; /**< Remote filename on slave */
+    uint32_t password; /**< Password (0 if none) */
+    uint32_t timeout_ms; /**< Per-block timeout (default: ECAT_FOE_TIMEOUT_MS) */
+    FoEProgressCallback progress_callback; /**< Optional progress callback */
     
     /** @brief Default constructor with sensible defaults */
     FoETransferConfig() 
@@ -175,12 +175,12 @@ struct FoETransferConfig {
  * @brief Result of a FoE transfer operation
  */
 struct FoEResult {
-    bool success;               ///< true if transfer completed successfully
-    FoEError error_code;        ///< Error code if failed
-    uint32_t bytes_transferred; ///< Total bytes transferred
-    uint32_t blocks_transferred;///< Number of blocks transferred
-    uint32_t duration_ms;       ///< Transfer duration in milliseconds
-    char error_text[64];        ///< Slave's error text (if provided)
+    bool success; /**< true if transfer completed successfully */
+    FoEError error_code; /**< Error code if failed */
+    uint32_t bytes_transferred; /**< Total bytes transferred */
+    uint32_t blocks_transferred; /**< Number of blocks transferred */
+    uint32_t duration_ms; /**< Transfer duration in milliseconds */
+    char error_text[64]; /**< Slave's error text (if provided) */
     
     /** @brief Check if transfer succeeded */
     operator bool() const { return success; }
@@ -210,11 +210,11 @@ struct FoEResult {
  * @brief Handle for tracking async FoE transfers
  */
 struct FoETransferHandle {
-    uint32_t id;                ///< Unique transfer ID
-    std::atomic<bool> complete; ///< Set when transfer completes
-    std::atomic<bool> cancel;   ///< Set to request cancellation
-    FoEResult result;           ///< Result (valid when complete)
-    FoEProgress progress;       ///< Current progress
+    uint32_t id; /**< Unique transfer ID */
+    std::atomic<bool> complete; /**< Set when transfer completes */
+    std::atomic<bool> cancel; /**< Set to request cancellation */
+    FoEResult result; /**< Result (valid when complete) */
+    FoEProgress progress; /**< Current progress */
     
     FoETransferHandle() : id(0), complete(false), cancel(false) {}
     
@@ -236,14 +236,14 @@ struct FoETransferHandle {
  * @brief FoE transfer statistics
  */
 struct FoEStats {
-    uint32_t uploads_completed;     ///< Successful uploads
-    uint32_t uploads_failed;        ///< Failed uploads
-    uint32_t downloads_completed;   ///< Successful downloads
-    uint32_t downloads_failed;      ///< Failed downloads
-    uint64_t bytes_uploaded;        ///< Total bytes uploaded
-    uint64_t bytes_downloaded;      ///< Total bytes downloaded
-    uint32_t timeouts;              ///< Timeout count
-    uint32_t retries;               ///< Retry count
+    uint32_t uploads_completed; /**< Successful uploads */
+    uint32_t uploads_failed; /**< Failed uploads */
+    uint32_t downloads_completed; /**< Successful downloads */
+    uint32_t downloads_failed; /**< Failed downloads */
+    uint64_t bytes_uploaded; /**< Total bytes uploaded */
+    uint64_t bytes_downloaded; /**< Total bytes downloaded */
+    uint32_t timeouts; /**< Timeout count */
+    uint32_t retries; /**< Retry count */
 };
 
 // ============================================================================

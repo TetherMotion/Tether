@@ -212,60 +212,60 @@ class VariableSystem;
 struct ArcMotionConfig {
     // === Arc Geometry ===
     
-    /// Minimum arc radius (below this, convert to line)
+    /**Minimum arc radius (below this, convert to line) */
     double minArcRadius{0.001};  // mm
     
-    /// Maximum arc radius
+    /**Maximum arc radius */
     double maxArcRadius{100000.0};  // mm
     
-    /// Arc endpoint radius tolerance
+    /**Arc endpoint radius tolerance */
     double arcRadiusTolerance{0.005};  // mm
     
-    /// Use absolute I, J, K (Fanuc style) vs incremental (LinuxCNC)
+    /**Use absolute I, J, K (Fanuc style) vs incremental (LinuxCNC) */
     bool absoluteIJK{false};
     
-    /// Allow arcs > 360° with P word
+    /**Allow arcs > 360° with P word */
     bool allowMultiTurn{true};
     
-    /// Maximum turns for multi-turn arc
+    /**Maximum turns for multi-turn arc */
     int32_t maxTurns{100};
     
     // === Arc Discretization ===
     
-    /// Maximum arc segment length (for output)
+    /**Maximum arc segment length (for output) */
     double maxArcSegmentLength{1.0};  // mm
     
-    /// Maximum deviation for arc linearization
+    /**Maximum deviation for arc linearization */
     double maxArcDeviation{0.01};  // mm
     
-    /// Minimum points per arc
+    /**Minimum points per arc */
     int32_t minArcPoints{8};
     
-    /// Maximum points per arc
+    /**Maximum points per arc */
     int32_t maxArcPoints{10000};
     
     // === Helix ===
     
-    /// Enable helical interpolation
+    /**Enable helical interpolation */
     bool enableHelix{true};
     
-    /// Maximum helix angle (from plane)
+    /**Maximum helix angle (from plane) */
     double maxHelixAngle{89.0};  // degrees
     
     // === Full Circle Detection ===
     
-    /// Tolerance for full circle detection
+    /**Tolerance for full circle detection */
     double fullCircleTolerance{0.0001};  // mm
     
     // === Feed Rate ===
     
-    /// Feed rate applies to arc path (true) or chord (false)
+    /**Feed rate applies to arc path (true) or chord (false) */
     bool feedAlongArc{true};
     
-    /// Maximum tangential acceleration
+    /**Maximum tangential acceleration */
     double maxTangentialAccel{1000.0};  // mm/s²
     
-    /// Maximum centripetal acceleration (limits speed on tight arcs)
+    /**Maximum centripetal acceleration (limits speed on tight arcs) */
     double maxCentripetalAccel{2000.0};  // mm/s²
 };
 
@@ -277,55 +277,55 @@ struct ArcMotionConfig {
  * @brief Arc direction
  */
 enum class ArcDirection {
-    CW,     ///< Clockwise (G2)
-    CCW     ///< Counter-clockwise (G3)
+    CW, /**< Clockwise (G2) */
+    CCW /**< Counter-clockwise (G3) */
 };
 
 /**
  * @brief Arc specification
  */
 struct ArcSpec {
-    /// Start position (full 9-axis)
+    /**Start position (full 9-axis) */
     Position start;
     
-    /// End position (full 9-axis)
+    /**End position (full 9-axis) */
     Position end;
     
-    /// Center position (in arc plane)
+    /**Center position (in arc plane) */
     double centerX{0};
     double centerY{0};
     
-    /// Radius
+    /**Radius */
     double radius{0};
     
-    /// Start angle (radians, from center)
+    /**Start angle (radians, from center) */
     double startAngle{0};
     
-    /// End angle (radians)
+    /**End angle (radians) */
     double endAngle{0};
     
-    /// Swept angle (may be > 2π for multi-turn)
+    /**Swept angle (may be > 2π for multi-turn) */
     double sweepAngle{0};
     
-    /// Direction
+    /**Direction */
     ArcDirection direction{ArcDirection::CW};
     
-    /// Active plane
+    /**Active plane */
     Plane plane{Plane::XY};
     
-    /// Helix linear axis delta
+    /**Helix linear axis delta */
     double helixDelta{0};
     
-    /// Number of full turns (P word)
+    /**Number of full turns (P word) */
     int32_t turns{0};
     
-    /// Arc length (2D)
+    /**Arc length (2D) */
     double arcLength{0};
     
-    /// Total path length (including helix)
+    /**Total path length (including helix) */
     double totalLength{0};
     
-    /// Is full circle
+    /**Is full circle */
     bool isFullCircle{false};
 };
 
@@ -627,11 +627,11 @@ private:
  * @brief Plane axis mapping
  */
 struct PlaneAxes {
-    int primaryAxis;    ///< First arc axis (index)
-    int secondaryAxis;  ///< Second arc axis (index)
-    int normalAxis;     ///< Perpendicular (helix) axis
-    int primaryOffset;  ///< I, J, K index for primary
-    int secondaryOffset; ///< I, J, K index for secondary
+    int primaryAxis; /**< First arc axis (index) */
+    int secondaryAxis; /**< Second arc axis (index) */
+    int normalAxis; /**< Perpendicular (helix) axis */
+    int primaryOffset; /**< I, J, K index for primary */
+    int secondaryOffset; /**< I, J, K index for secondary */
 };
 
 /**

@@ -28,13 +28,13 @@ namespace tether::motion::replanner {
 //=============================================================================
 namespace {
 
-/// Compute mean of a vector.
+/**Compute mean of a vector. */
 double mean(const std::vector<double>& v) {
     if (v.empty()) return 0.0;
     return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size());
 }
 
-/// Compute standard deviation (sample, ddof=1).
+/**Compute standard deviation (sample, ddof=1). */
 double stdDev(const std::vector<double>& v) {
     auto n = v.size();
     if (n < 2) return 0.0;
@@ -44,7 +44,7 @@ double stdDev(const std::vector<double>& v) {
     return std::sqrt(sq / static_cast<double>(n - 1));
 }
 
-/// Compute the q-th quantile of a sorted vector.
+/**Compute the q-th quantile of a sorted vector. */
 double quantileSorted(const std::vector<double>& sorted, double q) {
     if (sorted.empty()) return 0.0;
     if (sorted.size() == 1) return sorted[0];
@@ -56,7 +56,7 @@ double quantileSorted(const std::vector<double>& sorted, double q) {
     return sorted[lo] * (1.0 - frac) + sorted[hi] * frac;
 }
 
-/// Compute skewness (population, g_1).
+/**Compute skewness (population, g_1). */
 double skewness(const std::vector<double>& v) {
     auto n = v.size();
     if (n < 3) return 0.0;
@@ -68,7 +68,7 @@ double skewness(const std::vector<double>& v) {
     return sk / static_cast<double>(n);
 }
 
-/// Compute excess kurtosis (population, g_2 - 3).
+/**Compute excess kurtosis (population, g_2 - 3). */
 double kurtosis(const std::vector<double>& v) {
     auto n = v.size();
     if (n < 4) return 0.0;
@@ -80,7 +80,7 @@ double kurtosis(const std::vector<double>& v) {
     return k / static_cast<double>(n) - 3.0;
 }
 
-/// Rank a vector (average ranks for ties).
+/**Rank a vector (average ranks for ties). */
 std::vector<double> rank(const std::vector<double>& v) {
     auto n = v.size();
     std::vector<std::pair<double, std::size_t>> indexed(n);
@@ -102,22 +102,22 @@ std::vector<double> rank(const std::vector<double>& v) {
     return ranks;
 }
 
-/// Compute the CDF of the standard normal distribution.
+/**Compute the CDF of the standard normal distribution. */
 double normalCdf(double x) {
     return 0.5 * (1.0 + std::erf(x / std::sqrt(2.0)));
 }
 
-/// Compute the PDF of the standard normal distribution.
+/**Compute the PDF of the standard normal distribution. */
 double normalPdf(double x) {
     return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
 }
 
-/// Linear interpolation.
+/**Linear interpolation. */
 double lerp(double a, double b, double t) {
     return a + (b - a) * t;
 }
 
-/// Log-spaced linspace.
+/**Log-spaced linspace. */
 std::vector<double> logLinspace(double min, double max, std::size_t n) {
     std::vector<double> v(n);
     double lmin = std::log(min);
@@ -129,7 +129,7 @@ std::vector<double> logLinspace(double min, double max, std::size_t n) {
     return v;
 }
 
-/// Linear linspace.
+/**Linear linspace. */
 std::vector<double> linspace(double min, double max, std::size_t n) {
     std::vector<double> v(n);
     for (std::size_t i = 0; i < n; ++i) {

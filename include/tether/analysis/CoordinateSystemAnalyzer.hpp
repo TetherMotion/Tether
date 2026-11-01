@@ -12,7 +12,7 @@
 
 namespace tether::analysis {
 
-/// @brief A work offset (G54-G59).
+/**@brief A work offset (G54-G59). */
 struct WorkOffset {
     std::string name;
     int lineNumber = 0;
@@ -20,14 +20,14 @@ struct WorkOffset {
     bool isActive = false;
 };
 
-/// @brief A G10 L2 command setting work offset values.
+/**@brief A G10 L2 command setting work offset values. */
 struct G10Command {
     int lineNumber = 0;
     std::string offset;
     double x = 0, y = 0, z = 0;
 };
 
-/// @brief A coordinate rotation event (G68/G69).
+/**@brief A coordinate rotation event (G68/G69). */
 struct RotationEvent {
     int lineNumber = 0;
     bool activated = false;
@@ -35,14 +35,14 @@ struct RotationEvent {
     double centerX = 0, centerY = 0;
 };
 
-/// @brief A coordinate scaling event (G51/G50).
+/**@brief A coordinate scaling event (G51/G50). */
 struct ScaleEvent {
     int line = 0;
     bool isG51 = false;
     double xScale = 1, yScale = 1, zScale = 1;
 };
 
-/// @brief An origin offset (WCS or G92).
+/**@brief An origin offset (WCS or G92). */
 struct OriginOffset {
     std::string wcs;
     int line = 0;
@@ -50,7 +50,7 @@ struct OriginOffset {
     std::string source;
 };
 
-/// @brief Combined coordinate system analysis result.
+/**@brief Combined coordinate system analysis result. */
 struct CoordinateSystemResult {
     // Work offsets
     std::vector<WorkOffset> offsets;
@@ -88,10 +88,10 @@ struct CoordinateSystemResult {
     std::vector<std::string> recommendations;
 };
 
-/// @brief Analyze coordinate systems: work offsets, rotations, scaling, origins.
+/**@brief Analyze coordinate systems: work offsets, rotations, scaling, origins. */
 class CoordinateSystemAnalyzer {
 public:
-    /// @brief Analyze coordinate systems from G-code.
+    /**@brief Analyze coordinate systems from G-code. */
     CoordinateSystemResult analyze(const std::vector<std::string>& gcodeLines) const;
 };
 

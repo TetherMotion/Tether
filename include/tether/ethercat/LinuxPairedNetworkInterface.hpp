@@ -60,7 +60,7 @@ namespace EtherCAT {
  */
 class LinuxPairedNetworkInterface {
 public:
-    /// Receive callback: (frame data, length)
+    /**Receive callback: (frame data, length) */
     using RxCallback = std::function<void(const uint8_t* data, size_t len)>;
 
     LinuxPairedNetworkInterface() {
@@ -72,12 +72,12 @@ public:
 
     // ---- Interface accessors -----------------------------------------------
 
-    /// Network interface for side A (typically given to the master).
+    /**Network interface for side A (typically given to the master). */
     NetworkInterface& ifaceA() { return iface_a_; }
     const NetworkInterface& ifaceA() const { return iface_a_; }
     NetworkInterface* ifaceAPtr() { return &iface_a_; }
 
-    /// Network interface for side B (typically given to a slave emulator).
+    /**Network interface for side B (typically given to a slave emulator). */
     NetworkInterface& ifaceB() { return iface_b_; }
     const NetworkInterface& ifaceB() const { return iface_b_; }
     NetworkInterface* ifaceBPtr() { return &iface_b_; }
@@ -109,7 +109,7 @@ public:
         std::atomic<uint64_t> tx_bytes{0};
         std::atomic<uint64_t> rx_count{0};
         std::atomic<uint64_t> rx_bytes{0};
-        std::atomic<uint64_t> dropped{0};  ///< Frames with no callback registered
+        std::atomic<uint64_t> dropped{0}; /**< Frames with no callback registered */
     };
 
     const Stats& statsA() const { return stats_a_; }
@@ -162,7 +162,7 @@ private:
     NetworkInterface iface_a_{};
     NetworkInterface iface_b_{};
 
-    std::mutex mtx_;   ///< Guards rx_cb_a_ and rx_cb_b_
+    std::mutex mtx_; /**< Guards rx_cb_a_ and rx_cb_b_ */
     RxCallback rx_cb_a_;
     RxCallback rx_cb_b_;
 

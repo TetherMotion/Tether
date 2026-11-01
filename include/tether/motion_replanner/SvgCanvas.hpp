@@ -74,7 +74,7 @@ public:
 
     //--- Coordinate transforms ---
 
-    /// Transform data coordinates to SVG pixel coordinates.
+    /**Transform data coordinates to SVG pixel coordinates. */
     std::pair<double,double> transform(
         double dataX, double dataY, const AxisBounds& bounds,
         double svgWidth, double svgHeight, double margin) const;

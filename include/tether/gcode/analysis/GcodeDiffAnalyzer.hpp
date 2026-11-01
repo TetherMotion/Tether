@@ -1,5 +1,7 @@
-/// @file GcodeDiffAnalyzer.hpp
-/// @brief Naive line-by-line G-code diff analyzer.
+/**
+ * @file GcodeDiffAnalyzer.hpp
+ * @brief Naive line-by-line G-code diff analyzer.
+ */
 
 #pragma once
 

@@ -166,21 +166,21 @@ struct TuningResult {
  * @brief Process model types
  */
 enum class ProcessModelType {
-    FOPDT,      ///< First Order Plus Dead Time
-    SOPDT,      ///< Second Order Plus Dead Time
-    IPDT,       ///< Integrating Plus Dead Time
-    IFOPDT,     ///< Integrating First Order Plus Dead Time
-    Unstable,   ///< Unstable process
-    Generic     ///< Generic state-space model
+    FOPDT, /**< First Order Plus Dead Time */
+    SOPDT, /**< Second Order Plus Dead Time */
+    IPDT, /**< Integrating Plus Dead Time */
+    IFOPDT, /**< Integrating First Order Plus Dead Time */
+    Unstable, /**< Unstable process */
+    Generic /**< Generic state-space model */
 };
 
 /**
  * @brief First Order Plus Dead Time model: G(s) = K * exp(-L*s) / (τ*s + 1)
  */
 struct FOPDTModel {
-    double K{1.0};      ///< Process gain
-    double tau{1.0};    ///< Time constant
-    double L{0.0};      ///< Dead time (delay)
+    double K{1.0}; /**< Process gain */
+    double tau{1.0}; /**< Time constant */
+    double L{0.0}; /**< Dead time (delay) */
     
     double normalizedDeadTime() const { return L / tau; }
     bool isValid() const { return tau > 0 && L >= 0; }
@@ -195,11 +195,11 @@ struct FOPDTModel {
  * @brief Second Order Plus Dead Time model
  */
 struct SOPDTModel {
-    double K{1.0};      ///< Process gain
-    double tau1{1.0};   ///< First time constant
-    double tau2{0.5};   ///< Second time constant
-    double L{0.0};      ///< Dead time
-    double zeta{0.7};   ///< Damping ratio (for underdamped form)
+    double K{1.0}; /**< Process gain */
+    double tau1{1.0}; /**< First time constant */
+    double tau2{0.5}; /**< Second time constant */
+    double L{0.0}; /**< Dead time */
+    double zeta{0.7}; /**< Damping ratio (for underdamped form) */
     
     bool isValid() const { return tau1 > 0 && tau2 > 0 && L >= 0; }
 };
@@ -208,8 +208,8 @@ struct SOPDTModel {
  * @brief Integrating Plus Dead Time model: G(s) = K * exp(-L*s) / s
  */
 struct IPDTModel {
-    double K{1.0};      ///< Process gain
-    double L{0.0};      ///< Dead time
+    double K{1.0}; /**< Process gain */
+    double L{0.0}; /**< Dead time */
     
     bool isValid() const { return L >= 0; }
 };
@@ -218,30 +218,30 @@ struct IPDTModel {
  * @brief Performance objective for tuning
  */
 enum class PerformanceObjective {
-    SetpointTracking,   ///< Optimize setpoint response
-    DisturbanceRejection, ///< Optimize disturbance rejection
-    Balanced,           ///< Balance both objectives
-    MinimumTime,        ///< Minimize settling time
-    MinimumOvershoot,   ///< Minimize overshoot
-    Robust              ///< Maximize robustness margins
+    SetpointTracking, /**< Optimize setpoint response */
+    DisturbanceRejection, /**< Optimize disturbance rejection */
+    Balanced, /**< Balance both objectives */
+    MinimumTime, /**< Minimize settling time */
+    MinimumOvershoot, /**< Minimize overshoot */
+    Robust /**< Maximize robustness margins */
 };
 
 /**
  * @brief Autotuning mode
  */
 enum class AutotuningMode {
-    Offline,            ///< Offline tuning with recorded data
-    Online,             ///< Online/adaptive tuning
-    Batch               ///< Batch processing of multiple experiments
+    Offline, /**< Offline tuning with recorded data */
+    Online, /**< Online/adaptive tuning */
+    Batch /**< Batch processing of multiple experiments */
 };
 
 /**
  * @brief Controller form for PID-type controllers
  */
 enum class PIDForm {
-    Parallel,           ///< u = Kp*e + Ki*∫e + Kd*de/dt
-    Standard,           ///< u = Kp*(e + 1/Ti*∫e + Td*de/dt)
-    Series              ///< Interacting form
+    Parallel, /**< u = Kp*e + Ki*∫e + Kd*de/dt */
+    Standard, /**< u = Kp*(e + 1/Ti*∫e + Td*de/dt) */
+    Series /**< Interacting form */
 };
 
 // ============================================================================
@@ -640,10 +640,10 @@ private:
  * @brief Calculate step response characteristics
  */
 struct StepResponseMetrics {
-    double riseTime{0.0};       ///< 10% to 90%
-    double settlingTime{0.0};   ///< To within 2%
-    double overshoot{0.0};      ///< Percentage overshoot
-    double peakTime{0.0};       ///< Time to first peak
+    double riseTime{0.0}; /**< 10% to 90% */
+    double settlingTime{0.0}; /**< To within 2% */
+    double overshoot{0.0}; /**< Percentage overshoot */
+    double peakTime{0.0}; /**< Time to first peak */
     double steadyStateValue{0.0};
     double steadyStateError{0.0};
 };
@@ -658,11 +658,11 @@ StepResponseMetrics analyzeStepResponse(
  * @brief Calculate frequency response characteristics
  */
 struct FrequencyResponseMetrics {
-    double gainMargin{0.0};         ///< [dB]
-    double phaseMargin{0.0};        ///< [degrees]
-    double crossoverFrequency{0.0}; ///< [rad/s]
-    double bandwidth{0.0};          ///< [rad/s]
-    double peakMagnitude{0.0};      ///< [dB]
+    double gainMargin{0.0}; /**< [dB] */
+    double phaseMargin{0.0}; /**< [degrees] */
+    double crossoverFrequency{0.0}; /**< [rad/s] */
+    double bandwidth{0.0}; /**< [rad/s] */
+    double peakMagnitude{0.0}; /**< [dB] */
 };
 
 FrequencyResponseMetrics analyzeFrequencyResponse(

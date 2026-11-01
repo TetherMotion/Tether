@@ -30,9 +30,11 @@ namespace EtherCAT {
 static const char* TAG = "discovery";
 
 #if TETHER_ENABLE_SII
-/// Convert a Latin-1 (ISO 8859-1) string to UTF-8.
-/// SII EEPROM strings from Beckhoff use Latin-1 encoding (e.g. µ = 0xB5).
-/// UTF-8 requires 2 bytes for characters 0x80-0xFF.
+/**
+ * Convert a Latin-1 (ISO 8859-1) string to UTF-8.
+ * SII EEPROM strings from Beckhoff use Latin-1 encoding (e.g. µ = 0xB5).
+ * UTF-8 requires 2 bytes for characters 0x80-0xFF.
+ */
 static std::string latin1ToUtf8(const char* str) {
     if (!str) return {};
     std::string out;

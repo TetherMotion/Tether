@@ -44,16 +44,16 @@ public:
     NetworkEmulator();
     ~NetworkEmulator();
 
-    /// Add a slave to the network (takes ownership)
+    /**Add a slave to the network (takes ownership) */
     void addSlave(std::unique_ptr<SlaveEmulator> slave);
 
-    /// Get slave by position (0-based)
+    /**Get slave by position (0-based) */
     SlaveEmulator* getSlave(size_t index);
 
-    /// Get number of slaves
+    /**Get number of slaves */
     size_t getSlaveCount() const { return slaves_.size(); }
 
-    /// Clear all slaves
+    /**Clear all slaves */
     void clearSlaves();
 
     /**
@@ -68,13 +68,13 @@ public:
      */
     std::vector<uint8_t> processFrame(const uint8_t* frame_data, size_t frame_len);
 
-    /// Advance simulation time for all slaves
+    /**Advance simulation time for all slaves */
     void simulate(uint32_t delta_us);
 
-    /// Set global error injection (affects all slaves)
+    /**Set global error injection (affects all slaves) */
     void setGlobalErrorInjection(const ErrorInjection& errors);
 
-    /// Get statistics
+    /**Get statistics */
     struct NetworkStats {
         uint64_t frames_processed = 0;
         uint64_t datagrams_processed = 0;

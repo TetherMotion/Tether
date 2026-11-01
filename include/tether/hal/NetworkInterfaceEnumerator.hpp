@@ -33,26 +33,26 @@ namespace HAL {
 // Interface Classification
 // ============================================================================
 
-/// High-level link-layer type, derived from ARPHRD_* and IFLA_INFO_KIND.
+/**High-level link-layer type, derived from ARPHRD_* and IFLA_INFO_KIND. */
 enum class InterfaceType {
-    Unknown,       ///< Could not be classified
-    Loopback,      ///< Loopback interface (lo)
-    Ethernet,      ///< Physical wired Ethernet adapter
-    Wireless,      ///< Wi-Fi / wireless adapter
-    Bridge,        ///< Software bridge (br0, docker0, ...)
-    Veth,          ///< Virtual ethernet pair endpoint
-    Vlan,          ///< 802.1Q VLAN interface
-    Bond,          ///< Bonding / link aggregation
-    Macvlan,       ///< MAC-based virtual interface
-    Tunnel,        ///< L3 tunnel (WireGuard, TUN, GRE, ...)
-    Other,         ///< Virtual interface of an unknown kind
+    Unknown, /**< Could not be classified */
+    Loopback, /**< Loopback interface (lo) */
+    Ethernet, /**< Physical wired Ethernet adapter */
+    Wireless, /**< Wi-Fi / wireless adapter */
+    Bridge, /**< Software bridge (br0, docker0, ...) */
+    Veth, /**< Virtual ethernet pair endpoint */
+    Vlan, /**< 802.1Q VLAN interface */
+    Bond, /**< Bonding / link aggregation */
+    Macvlan, /**< MAC-based virtual interface */
+    Tunnel, /**< L3 tunnel (WireGuard, TUN, GRE, ...) */
+    Other, /**< Virtual interface of an unknown kind */
 };
 
-/// Whether the interface is backed by physical hardware or is software-created.
+/**Whether the interface is backed by physical hardware or is software-created. */
 enum class InterfaceCategory {
     Unknown,
-    Physical,      ///< Backed by a real network adapter (NIC, Wi-Fi, USB-Ethernet)
-    Virtual,       ///< Created in software (bridge, veth, VLAN, tunnel, ...)
+    Physical, /**< Backed by a real network adapter (NIC, Wi-Fi, USB-Ethernet) */
+    Virtual, /**< Created in software (bridge, veth, VLAN, tunnel, ...) */
 };
 
 // ============================================================================
@@ -66,42 +66,50 @@ enum class InterfaceCategory {
  * some fields may be left at their default values.
  */
 struct NetworkInterface {
-    std::string name;                ///< Interface name (e.g. "eth0", "enp3s0")
-    int ifindex = 0;                 ///< Kernel interface index
+    std::string name; /**< Interface name (e.g. "eth0", "enp3s0") */
+    int ifindex = 0; /**< Kernel interface index */
 
-    /// ARP hardware type (ARPHRD_*).  1 = Ethernet, 772 = Loopback,
-    /// 65534 = ARPHRD_NONE (tunnels).
+    /**
+     * ARP hardware type (ARPHRD_*).  1 = Ethernet, 772 = Loopback,
+     * 65534 = ARPHRD_NONE (tunnels).
+     */
     uint16_t arpType = 0;
 
-    /// Link kind from IFLA_INFO_KIND (e.g. "bridge", "veth", "vlan",
-    /// "wireguard", "tun").  Empty for physical interfaces.
+    /**
+     * Link kind from IFLA_INFO_KIND (e.g. "bridge", "veth", "vlan",
+     * "wireguard", "tun").  Empty for physical interfaces.
+     */
     std::string kind;
 
-    /// Slave kind from IFLA_INFO_SLAVE_KIND (e.g. "bridge" when a veth
-    /// is enslaved to a bridge).  Empty when not enslaved.
+    /**
+     * Slave kind from IFLA_INFO_SLAVE_KIND (e.g. "bridge" when a veth
+     * is enslaved to a bridge).  Empty when not enslaved.
+     */
     std::string slaveKind;
 
-    std::optional<MacAddress> mac;        ///< L2 address (if present)
-    std::optional<MacAddress> broadcast;  ///< Broadcast L2 address (if present)
-    uint32_t mtu = 0;                     ///< Maximum transfer unit
+    std::optional<MacAddress> mac; /**< L2 address (if present) */
+    std::optional<MacAddress> broadcast; /**< Broadcast L2 address (if present) */
+    uint32_t mtu = 0; /**< Maximum transfer unit */
 
-    /// Raw kernel flags bitmask (IFF_* values).
+    /**Raw kernel flags bitmask (IFF_* values). */
     uint32_t flags = 0;
 
-    bool isUp = false;           ///< IFF_UP is set (admin enabled)
-    bool isRunning = false;      ///< IFF_RUNNING is set (operational)
-    bool hasCarrier = false;     ///< IFLA_CARRIER == 1
-    bool isWireless = false;     ///< /sys/class/net/<name>/wireless exists
-    bool isPromiscuous = false;  ///< IFF_PROMISC is set
+    bool isUp = false; /**< IFF_UP is set (admin enabled) */
+    bool isRunning = false; /**< IFF_RUNNING is set (operational) */
+    bool hasCarrier = false; /**< IFLA_CARRIER == 1 */
+    bool isWireless = false; /**< /sys/class/net/<name>/wireless exists */
+    bool isPromiscuous = false; /**< IFF_PROMISC is set */
 
-    /// IfIndex of the parent/underlying device (IFLA_LINK).
-    /// Present for VLANs, veths, macvlans, etc.
+    /**
+     * IfIndex of the parent/underlying device (IFLA_LINK).
+     * Present for VLANs, veths, macvlans, etc.
+     */
     std::optional<int> parentIfindex;
 
-    /// Classified link-layer type.
+    /**Classified link-layer type. */
     InterfaceType type = InterfaceType::Unknown;
 
-    /// Physical vs. virtual classification.
+    /**Physical vs. virtual classification. */
     InterfaceCategory category = InterfaceCategory::Unknown;
 };
 

@@ -153,9 +153,11 @@ using TxPDO = EtherCAT::Drives::SynapticonPDO::SOMANET_TxPDO_1A00;
 template <typename PDO>
 class SineTorqueController final : public EtherCAT::DS402Master::IDriveMotionController {
 public:
-    /// @param amplitude_nm   Peak torque amplitude in Nm (half of peak-to-peak)
-    /// @param frequency_hz   Sine frequency in Hz
-    /// @param rated_torque_mnm  Motor rated torque in mNm (from object 0x6076)
+    /**
+     * @param amplitude_nm   Peak torque amplitude in Nm (half of peak-to-peak)
+     * @param frequency_hz   Sine frequency in Hz
+     * @param rated_torque_mnm  Motor rated torque in mNm (from object 0x6076)
+     */
     SineTorqueController(double amplitude_nm, double frequency_hz,
                          uint32_t rated_torque_mnm)
         : amplitude_nm_(amplitude_nm)
@@ -212,7 +214,7 @@ public:
         return true;
     }
 
-    /// Returns the most recently commanded torque in Nm (for diagnostics)
+    /**Returns the most recently commanded torque in Nm (for diagnostics) */
     double lastTorqueNm() const { return last_torque_nm_; }
 
 private:
@@ -437,18 +439,20 @@ struct Args {
     bool enable_dc_sync = false;
     uint32_t diag_interval_ms = 1000;
     std::string debug;
-    double torque_pp_nm = 0.2;       ///< Peak-to-peak torque amplitude in Nm
-    double freq_hz = 0.5;            ///< Sine wave frequency in Hz
-    uint32_t rated_torque_mnm = 0;   ///< Motor rated torque in mNm (0 = auto-detect from 0x6076)
-    /// Phase-1 stop strategy for the controlled shutdown at exit.
+    double torque_pp_nm = 0.2; /**< Peak-to-peak torque amplitude in Nm */
+    double freq_hz = 0.5; /**< Sine wave frequency in Hz */
+    uint32_t rated_torque_mnm = 0; /**< Motor rated torque in mNm (0 = auto-detect from 0x6076) */
+    /**Phase-1 stop strategy for the controlled shutdown at exit. */
     EtherCAT::CiA402Drive::ShutdownStopMode stop_mode =
         EtherCAT::CiA402Drive::ShutdownStopMode::FixedTimeVelocity;
-    uint32_t stop_time_ms = 500;     ///< Ramp duration for fixed-time stop
-    double   decel_limit = 0.0;      ///< |dv/dt| limit for decel-limit stop (units/s)
-    uint32_t standstill_ms = 25;     ///< Zero-velocity hold before disabling
-    /// When true, release (disengage) the brake after the drive is
-    /// disabled.  Default keeps the brake engaged once stopped — the drive
-    /// auto-engages it on disable, and phase 3 only ensures that state.
+    uint32_t stop_time_ms = 500; /**< Ramp duration for fixed-time stop */
+    double   decel_limit = 0.0; /**< |dv/dt| limit for decel-limit stop (units/s) */
+    uint32_t standstill_ms = 25; /**< Zero-velocity hold before disabling */
+    /**
+     * When true, release (disengage) the brake after the drive is
+     * disabled.  Default keeps the brake engaged once stopped — the drive
+     * auto-engages it on disable, and phase 3 only ensures that state.
+     */
     bool     release_brake = false;
     EtherCAT::EncapsulationConfig encapsulation;
 };

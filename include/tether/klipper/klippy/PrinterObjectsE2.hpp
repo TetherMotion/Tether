@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file PrinterObjectsE2.hpp
-/// @brief Additional printer objects: adxl345, delayed_gcode, save_variables, board_pins.
+/**
+ * @file PrinterObjectsE2.hpp
+ * @brief Additional printer objects: adxl345, delayed_gcode, save_variables, board_pins.
+ */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 
@@ -25,7 +27,7 @@ namespace tether::klipper::klippy {
 // Delayed G-code printer object
 // ============================================================================
 
-/// @brief The delayed_gcode printer object for delayed G-code status.
+/**@brief The delayed_gcode printer object for delayed G-code status. */
 class DelayedGcodeObject : public PrinterObject {
 public:
     explicit DelayedGcodeObject(const std::string& name)
@@ -65,7 +67,7 @@ private:
 // Save variables printer object
 // ============================================================================
 
-/// @brief The save_variables printer object for saved variable state.
+/**@brief The save_variables printer object for saved variable state. */
 class SaveVariablesObject : public PrinterObject {
 public:
     explicit SaveVariablesObject(const std::string& name = "save_variables")
@@ -110,7 +112,7 @@ private:
 // Board pins printer object
 // ============================================================================
 
-/// @brief The board_pins printer object for board pin mapping.
+/**@brief The board_pins printer object for board pin mapping. */
 class BoardPinsObject : public PrinterObject {
 public:
     explicit BoardPinsObject(const std::string& name = "board_pins")
@@ -118,12 +120,12 @@ public:
 
     std::string name() const override { return name_; }
 
-    /// @brief Add a pin alias mapping.
+    /**@brief Add a pin alias mapping. */
     void addAlias(const std::string& alias, const std::string& pin) {
         aliases_[alias] = pin;
     }
 
-    /// @brief Set the MCU name for this board.
+    /**@brief Set the MCU name for this board. */
     void setMcuName(const std::string& mcu) { mcuName_ = mcu; }
 
     std::map<std::string, JsonValue> status(

@@ -33,20 +33,26 @@ class IParameterExposer {
 public:
     virtual ~IParameterExposer() = default;
 
-    /// Register all parameters and signals into the registry.
-    /// @param registry  The registry to add entries to.
-    /// @param idBase    Starting ID for this module's entries (for namespace isolation).
+    /**
+     * Register all parameters and signals into the registry.
+     * @param registry  The registry to add entries to.
+     * @param idBase    Starting ID for this module's entries (for namespace isolation).
+     */
     virtual void expose(Registry& registry, uint64_t idBase) = 0;
 
-    /// Return the module name (e.g. "ethercat", "pid", "motion_planner").
-    /// @return Static module name used for ID namespacing and diagnostics.
+    /**
+     * Return the module name (e.g. "ethercat", "pid", "motion_planner").
+     * @return Static module name used for ID namespacing and diagnostics.
+     */
     virtual const char* moduleName() const = 0;
 };
 
-/// Helper: generate a parameter ID from a module base + local offset.
-/// @param moduleBase Module namespace assigned by the registry.
-/// @param localId Module-local parameter index.
-/// @return 64-bit ID combining both parts.
+/**
+ * Helper: generate a parameter ID from a module base + local offset.
+ * @param moduleBase Module namespace assigned by the registry.
+ * @param localId Module-local parameter index.
+ * @return 64-bit ID combining both parts.
+ */
 inline constexpr uint64_t makeId(uint64_t moduleBase, uint32_t localId) {
     return (moduleBase << 32) | localId;
 }
@@ -74,7 +80,7 @@ namespace ModuleId {
     inline constexpr uint64_t SlaveEmulation   = 0x0011;
     inline constexpr uint64_t AS715NDrive      = 0x0012;
     inline constexpr uint64_t KlipperBridge    = 0x0013;
-    inline constexpr uint64_t User             = 0x1000;  ///< User-defined modules start here
+    inline constexpr uint64_t User             = 0x1000; /**< User-defined modules start here */
 } // namespace ModuleId
 
 }} // namespace tether::io

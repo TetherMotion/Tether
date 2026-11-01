@@ -412,9 +412,9 @@ public:
      * @brief Polynomial order
      */
     enum class Order {
-        Cubic = 3,      ///< Position + velocity boundaries
-        Quintic = 5,    ///< Position + velocity + acceleration boundaries
-        Septic = 7      ///< Position + velocity + acceleration + jerk boundaries
+        Cubic = 3, /**< Position + velocity boundaries */
+        Quintic = 5, /**< Position + velocity + acceleration boundaries */
+        Septic = 7 /**< Position + velocity + acceleration + jerk boundaries */
     };
     
     /**

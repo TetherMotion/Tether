@@ -141,16 +141,16 @@ private:
     size_t size_ = 0;
 };
 
-/// Maximum encoded size of a SLIP frame carrying MAX_MESSAGE_SIZE bytes.
+/**Maximum encoded size of a SLIP frame carrying MAX_MESSAGE_SIZE bytes. */
 inline constexpr size_t MAX_ENCODED_MESSAGE_SIZE =
     MAX_MESSAGE_SIZE > (std::numeric_limits<size_t>::max() - 1) / 2
         ? std::numeric_limits<size_t>::max()
         : MAX_MESSAGE_SIZE * 2 + 1;
 
-/// Default initial encoded receive capacity for a Session.
+/**Default initial encoded receive capacity for a Session. */
 inline constexpr size_t DEFAULT_RECEIVE_BUFFER_CAPACITY = 8192;
 
-/// Factory for an independent receive buffer per Session.
+/**Factory for an independent receive buffer per Session. */
 using ReceiveBufferFactory = std::function<std::unique_ptr<IReceiveBuffer>()>;
 
 } // namespace tether::io

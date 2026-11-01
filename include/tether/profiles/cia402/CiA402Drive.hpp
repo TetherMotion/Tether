@@ -99,9 +99,11 @@ public:
 
     uint16_t slaveIndex() const { return m_slave_index; }
 
-    /// @brief Log prefix for this drive (delegates to Master's per-slave name).
-    /// Returns "Slave <name> (#<index>)" if a name is set, else "Slave <index>".
-    /// @return Prefix string for log lines about this drive.
+    /**
+     * @brief Log prefix for this drive (delegates to Master's per-slave name).
+     * Returns "Slave <name> (#<index>)" if a name is set, else "Slave <index>".
+     * @return Prefix string for log lines about this drive.
+     */
     std::string logPrefix() const {
         if (m_master) return m_master->slaveLogPrefix(m_slave_index);
         return std::format("Slave {}", m_slave_index);
@@ -123,19 +125,21 @@ public:
     bool assignFixedPDOs(uint16_t rxpdo_index, uint16_t txpdo_index,
                          uint16_t rxpdo_size, uint16_t txpdo_size);
 
-    /// Set PDO buffer sizes and indices without writing PDO assignment SDOs.
-    ///
-    /// This is used after configureMultiPDOs() has already written the PDO
-    /// assignments (0x1C12/0x1C13) via the multi-PDO path.  Calling
-    /// assignFixedPDOs() in that case would overwrite the multi-PDO
-    /// assignment with a single-PDO assignment, destroying the FSoE PDO
-    /// mapping.  This method only sets the internal buffer sizes and
-    /// indices so that registerPDOBuffers() can register the correct
-    /// buffer lengths.
-    /// @param rxpdo_index RxPDO object index.
-    /// @param txpdo_index TxPDO object index.
-    /// @param rxpdo_size RxPDO total size in bytes.
-    /// @param txpdo_size TxPDO total size in bytes.
+    /**
+     * Set PDO buffer sizes and indices without writing PDO assignment SDOs.
+     *
+     * This is used after configureMultiPDOs() has already written the PDO
+     * assignments (0x1C12/0x1C13) via the multi-PDO path.  Calling
+     * assignFixedPDOs() in that case would overwrite the multi-PDO
+     * assignment with a single-PDO assignment, destroying the FSoE PDO
+     * mapping.  This method only sets the internal buffer sizes and
+     * indices so that registerPDOBuffers() can register the correct
+     * buffer lengths.
+     * @param rxpdo_index RxPDO object index.
+     * @param txpdo_index TxPDO object index.
+     * @param rxpdo_size RxPDO total size in bytes.
+     * @param txpdo_size TxPDO total size in bytes.
+     */
     void setPDOBufferSizes(uint16_t rxpdo_index, uint16_t txpdo_index,
                            uint16_t rxpdo_size, uint16_t txpdo_size);
 
@@ -316,38 +320,50 @@ public:
     bool disable();
     bool quickStop();
     bool resetFault();
-    /// Fault-reset toggle with Enable Operation (0x000F) kept asserted:
-    /// 0x000F -> 0x008F -> 0x000F.  Benign for drives that ignore the
-    /// bit-7 edge and lets drives that honor it re-enable without the
-    /// enable bits ever dropping.
-    /// @return true when the fault was cleared with the drive left enabled.
+    /**
+     * Fault-reset toggle with Enable Operation (0x000F) kept asserted:
+     * 0x000F -> 0x008F -> 0x000F.  Benign for drives that ignore the
+     * bit-7 edge and lets drives that honor it re-enable without the
+     * enable bits ever dropping.
+     * @return true when the fault was cleared with the drive left enabled.
+     */
     bool resetFaultKeepEnabled();
 
-    /// How enable() clears an active fault before running the enable
-    /// sequence.
+    /**
+     * How enable() clears an active fault before running the enable
+     * sequence.
+     */
     enum class FaultResetMode : uint8_t {
-        /// CiA 402 default: rising edge on controlword bit 7 while the
-        /// current controlword is otherwise unchanged.
+        /**
+         * CiA 402 default: rising edge on controlword bit 7 while the
+         * current controlword is otherwise unchanged.
+         */
         Standard,
-        /// Keep Enable Operation asserted: the fault-reset bit is toggled
-        /// on top of 0x000F, so drives that clear faults on the bit-7 edge
-        /// while enabled (or that re-enable automatically) never see the
-        /// enable bits drop.
+        /**
+         * Keep Enable Operation asserted: the fault-reset bit is toggled
+         * on top of 0x000F, so drives that clear faults on the bit-7 edge
+         * while enabled (or that re-enable automatically) never see the
+         * enable bits drop.
+         */
         KeepEnabled,
-        /// Drive-specific reset installed via setFaultResetCallback()
-        /// (e.g. AS715N, which requires the F31.00 / 0x2031:01 sequence
-        /// instead of the controlword bit).
+        /**
+         * Drive-specific reset installed via setFaultResetCallback()
+         * (e.g. AS715N, which requires the F31.00 / 0x2031:01 sequence
+         * instead of the controlword bit).
+         */
         Custom,
     };
 
     void setFaultResetMode(FaultResetMode mode) { m_fault_reset_mode = mode; }
     FaultResetMode faultResetMode() const { return m_fault_reset_mode; }
 
-    /// Install a drive-specific fault reset.  Called from enable()'s
-    /// fault-clearing loop instead of the controlword bit-7 toggle.
-    /// Setting a callback implies FaultResetMode::Custom; passing nullptr
-    /// reverts to Standard.
-    /// @param cb Callback performing the drive-specific fault reset.
+    /**
+     * Install a drive-specific fault reset.  Called from enable()'s
+     * fault-clearing loop instead of the controlword bit-7 toggle.
+     * Setting a callback implies FaultResetMode::Custom; passing nullptr
+     * reverts to Standard.
+     * @param cb Callback performing the drive-specific fault reset.
+     */
     void setFaultResetCallback(std::function<bool(CiA402Drive&)> cb) {
         m_fault_reset_cb = std::move(cb);
         m_fault_reset_mode = m_fault_reset_cb ? FaultResetMode::Custom
@@ -357,22 +373,28 @@ public:
     bool isFaulted();
     bool isTargetReached();
 
-    /// Phase-1 stop strategy for controlledShutdown().
+    /**Phase-1 stop strategy for controlledShutdown(). */
     enum class ShutdownStopMode : uint8_t {
-        /// Skip phase 1 entirely — go straight to the disable phase.
+        /**Skip phase 1 entirely — go straight to the disable phase. */
         None,
-        /// Demand zero velocity in CSV immediately (step input — the drive
-        /// decelerates at its maximum rate), then hold standstill_ms
-        /// before disabling.
+        /**
+         * Demand zero velocity in CSV immediately (step input — the drive
+         * decelerates at its maximum rate), then hold standstill_ms
+         * before disabling.
+         */
         InstantHardStop,
-        /// Linear CSV velocity ramp from the current velocity to zero over
-        /// stop_time_ms, then hold standstill_ms at zero velocity before
-        /// disabling.
+        /**
+         * Linear CSV velocity ramp from the current velocity to zero over
+         * stop_time_ms, then hold standstill_ms at zero velocity before
+         * disabling.
+         */
         FixedTimeVelocity,
-        /// CSV velocity ramp from the current velocity to zero at
-        /// decel_limit (velocity units per second) — the ramp duration
-        /// varies with the speed at shutdown entry.  Then hold
-        /// standstill_ms at zero velocity before disabling.
+        /**
+         * CSV velocity ramp from the current velocity to zero at
+         * decel_limit (velocity units per second) — the ramp duration
+         * varies with the speed at shutdown entry.  Then hold
+         * standstill_ms at zero velocity before disabling.
+         */
         AccelerationLimited,
     };
 
@@ -402,23 +424,29 @@ public:
      * write).
      */
     struct ControlledShutdownConfig {
-        /// Phase-1 stop strategy.
+        /**Phase-1 stop strategy. */
         ShutdownStopMode stop_mode{ShutdownStopMode::InstantHardStop};
-        /// Ramp duration for FixedTimeVelocity.
+        /**Ramp duration for FixedTimeVelocity. */
         uint32_t stop_time_ms{500};
-        /// Zero-velocity hold appended after the ramp / step (the
-        /// "complete standstill" reserve).  Applies to all stop modes
-        /// except None.
+        /**
+         * Zero-velocity hold appended after the ramp / step (the
+         * "complete standstill" reserve).  Applies to all stop modes
+         * except None.
+         */
         uint32_t standstill_ms{25};
-        /// Deceleration limit for AccelerationLimited, in velocity units
-        /// per second (|dv/dt|).  <= 0 collapses to InstantHardStop.
+        /**
+         * Deceleration limit for AccelerationLimited, in velocity units
+         * per second (|dv/dt|).  <= 0 collapses to InstantHardStop.
+         */
         double   decel_limit{0.0};
-        /// Controlword written in phase 2 (0x0000 = Disable Voltage).
+        /**Controlword written in phase 2 (0x0000 = Disable Voltage). */
         uint16_t shutdown_controlword{0x0000};
-        /// Delay between disabling the drive and the brake action.
+        /**Delay between disabling the drive and the brake action. */
         uint32_t brake_delay_ms{250};
-        /// Optional brake action executed after brake_delay_ms while
-        /// PDO/mailbox are still alive (e.g. SOMANET 0x2004 release).
+        /**
+         * Optional brake action executed after brake_delay_ms while
+         * PDO/mailbox are still alive (e.g. SOMANET 0x2004 release).
+         */
         std::function<bool()> brake_action;
     };
 
@@ -460,51 +488,61 @@ public:
     // back to the SDO-based path (setOperatingModeSDO).
     // ========================================================================
 
-    /// Set the RxPDO byte offset of the modes_of_operation (0x6060) field.
-    /// Call this after PDO buffer sizes are known (e.g. after
-    /// assignFixedPDOs / setPDOBufferSizes).  Use -1 to disable PDO-based
-    /// mode setting and force SDO.
-    /// @param offset RxPDO byte offset of the modes_of_operation field.
+    /**
+     * Set the RxPDO byte offset of the modes_of_operation (0x6060) field.
+     * Call this after PDO buffer sizes are known (e.g. after
+     * assignFixedPDOs / setPDOBufferSizes).  Use -1 to disable PDO-based
+     * mode setting and force SDO.
+     * @param offset RxPDO byte offset of the modes_of_operation field.
+     */
     void setOpmodePDOOffset(int offset) { m_opmode_pdo_offset = offset; }
     int  opmodePDOOffset() const { return m_opmode_pdo_offset; }
 
-    /// Set the RxPDO byte offset of the controlword (0x6040) field.
-    /// In a combined multi-PDO buffer (e.g. FSoE + motion), the controlword
-    /// is not at offset 0 — it's at the start of the motion PDO region.
-    /// Default 0 = controlword is at the start of the RxPDO buffer.
-    /// @param offset RxPDO byte offset of the controlword field.
+    /**
+     * Set the RxPDO byte offset of the controlword (0x6040) field.
+     * In a combined multi-PDO buffer (e.g. FSoE + motion), the controlword
+     * is not at offset 0 — it's at the start of the motion PDO region.
+     * Default 0 = controlword is at the start of the RxPDO buffer.
+     * @param offset RxPDO byte offset of the controlword field.
+     */
     void setControlwordPDOOffset(int offset) { m_controlword_pdo_offset = offset; }
     int  controlwordPDOOffset() const { return m_controlword_pdo_offset; }
 
-    /// Set the TxPDO byte offset of the statusword (0x6041) field.
-    /// In a combined multi-PDO buffer (e.g. FSoE + motion), the statusword
-    /// is not at offset 0 — it's at the start of the motion PDO region.
-    /// Default 0 = statusword is at the start of the TxPDO buffer.
-    /// @param offset TxPDO byte offset of the statusword field.
+    /**
+     * Set the TxPDO byte offset of the statusword (0x6041) field.
+     * In a combined multi-PDO buffer (e.g. FSoE + motion), the statusword
+     * is not at offset 0 — it's at the start of the motion PDO region.
+     * Default 0 = statusword is at the start of the TxPDO buffer.
+     * @param offset TxPDO byte offset of the statusword field.
+     */
     void setStatuswordPDOOffset(int offset) { m_statusword_pdo_offset = offset; }
     int  statuswordPDOOffset() const { return m_statusword_pdo_offset; }
 
-    /// Set the RxPDO byte offset of the target_velocity (0x60FF) field and
-    /// the TxPDO byte offset of the velocity_actual (0x606C) field.
-    /// Used by controlledShutdown() for the velocity-stop phase.
-    /// -1 disables the PDO fast-path (SDO fallback is used instead).
-    /// @param offset RxPDO byte offset of the target_velocity field.
+    /**
+     * Set the RxPDO byte offset of the target_velocity (0x60FF) field and
+     * the TxPDO byte offset of the velocity_actual (0x606C) field.
+     * Used by controlledShutdown() for the velocity-stop phase.
+     * -1 disables the PDO fast-path (SDO fallback is used instead).
+     * @param offset RxPDO byte offset of the target_velocity field.
+     */
     void setTargetVelocityPDOOffset(int offset) { m_target_velocity_pdo_offset = offset; }
-    /// @param offset TxPDO byte offset of the velocity_actual field.
+    /**@param offset TxPDO byte offset of the velocity_actual field. */
     void setActualVelocityPDOOffset(int offset) { m_actual_velocity_pdo_offset = offset; }
     int  targetVelocityPDOOffset() const { return m_target_velocity_pdo_offset; }
     int  actualVelocityPDOOffset() const { return m_actual_velocity_pdo_offset; }
 
-    /// Idiomatic offset registration: pass member pointers into the PDO
-    /// structs and the byte offsets are computed automatically — no
-    /// hand-maintained offsetof numbers at the call site.
-    ///
-    /// @code
-    ///   drive.setVelocityPDOFields(&RxPDO::target_velocity,
-    ///                              &TxPDO::velocity_actual);
-    /// @endcode
-    /// @param target_velocity Member pointer to the RxPDO target velocity.
-    /// @param actual_velocity Member pointer to the TxPDO actual velocity.
+    /**
+     * Idiomatic offset registration: pass member pointers into the PDO
+     * structs and the byte offsets are computed automatically — no
+     * hand-maintained offsetof numbers at the call site.
+     *
+     * @code
+     *   drive.setVelocityPDOFields(&RxPDO::target_velocity,
+     *                              &TxPDO::velocity_actual);
+     * @endcode
+     * @param target_velocity Member pointer to the RxPDO target velocity.
+     * @param actual_velocity Member pointer to the TxPDO actual velocity.
+     */
     template<typename RxPDO, typename TxPDO>
     void setVelocityPDOFields(int32_t RxPDO::* target_velocity,
                               int32_t TxPDO::* actual_velocity) {
@@ -512,22 +550,28 @@ public:
         m_actual_velocity_pdo_offset = memberByteOffset(actual_velocity);
     }
 
-    /// Set operating mode.  Uses PDO by default (if offset configured),
-    /// otherwise falls back to SDO.
-    /// @param mode CiA 402 operating mode (CSP, CSV, CST, HM, ...).
-    /// @return true when the mode was accepted.
+    /**
+     * Set operating mode.  Uses PDO by default (if offset configured),
+     * otherwise falls back to SDO.
+     * @param mode CiA 402 operating mode (CSP, CSV, CST, HM, ...).
+     * @return true when the mode was accepted.
+     */
     bool setOperatingMode(int8_t mode);
 
-    /// Set operating mode via SDO (0x6060).  Use when PDO-based mode
-    /// setting is not available or explicit SDO verification is needed.
-    /// @param mode CiA 402 operating mode.
-    /// @return true when the SDO write succeeded.
+    /**
+     * Set operating mode via SDO (0x6060).  Use when PDO-based mode
+     * setting is not available or explicit SDO verification is needed.
+     * @param mode CiA 402 operating mode.
+     * @return true when the SDO write succeeded.
+     */
     bool setOperatingModeSDO(int8_t mode);
 
-    /// Set operating mode via PDO buffer.  Returns false if the PDO
-    /// offset has not been configured.
-    /// @param mode CiA 402 operating mode.
-    /// @return true when the mode was written into the RxPDO buffer.
+    /**
+     * Set operating mode via PDO buffer.  Returns false if the PDO
+     * offset has not been configured.
+     * @param mode CiA 402 operating mode.
+     * @return true when the mode was written into the RxPDO buffer.
+     */
     bool setOperatingModePDO(int8_t mode);
 
     int8_t getOperatingMode();
@@ -551,16 +595,22 @@ private:
     bool writeControlword(uint16_t controlword);
     bool readStatusword(uint16_t& statusword);
     bool waitForDriveState(DriveState target, uint32_t timeout_ms);
-    /// Fault reset used by enable()'s fault-clearing loop; dispatches on
-    /// m_fault_reset_mode (Standard/KeepEnabled/Custom).
+    /**
+     * Fault reset used by enable()'s fault-clearing loop; dispatches on
+     * m_fault_reset_mode (Standard/KeepEnabled/Custom).
+     */
     bool performFaultReset();
 
-    /// Common SAFE_OP → OP tail: DC reconfig, PDO enable, diagnostics, OP request.
-    /// Called by both transitionToOp() variants after SM/FMMU configuration.
+    /**
+     * Common SAFE_OP → OP tail: DC reconfig, PDO enable, diagnostics, OP request.
+     * Called by both transitionToOp() variants after SM/FMMU configuration.
+     */
     bool transitionSafeOpToOp();
 
-    /// SAFE_OP transition + PDO-enable part of transitionSafeOpToOp()
-    /// (everything except the final OP request) — used by prepareForOp().
+    /**
+     * SAFE_OP transition + PDO-enable part of transitionSafeOpToOp()
+     * (everything except the final OP request) — used by prepareForOp().
+     */
     bool prepareSafeOpForOp();
 
     uint16_t       m_slave_index;
@@ -610,9 +660,11 @@ private:
     int m_target_velocity_pdo_offset{-1};
     int m_actual_velocity_pdo_offset{-1};
 
-    /// Compute the byte offset of a member within its struct — the
-    /// offsetof()-equivalent expressed through a member pointer so call
-    /// sites can't mistype field names.
+    /**
+     * Compute the byte offset of a member within its struct — the
+     * offsetof()-equivalent expressed through a member pointer so call
+     * sites can't mistype field names.
+     */
     template<typename T, typename M>
     static int memberByteOffset(M T::* member) {
         alignas(T) unsigned char buf[sizeof(T)]{};

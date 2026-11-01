@@ -18,12 +18,12 @@
 
 namespace tether::motion {
 
-/// (p, T, κ⃗, j⃗) at one trim point — the boundary data for a blend end.
+/**(p, T, κ⃗, j⃗) at one trim point — the boundary data for a blend end. */
 struct BoundaryConditions {
-    RVec position;  ///< Point on the neighbor curve at the trim location.
-    RVec tangent;   ///< Unit tangent T = dp/ds.
-    RVec curvature; ///< Curvature vector κ⃗ = d²p/ds² (⊥ T by construction).
-    RVec jounce;    ///< Jounce vector j⃗ = d³p/ds³ (valid iff hasJounce).
+    RVec position; /**< Point on the neighbor curve at the trim location. */
+    RVec tangent; /**< Unit tangent T = dp/ds. */
+    RVec curvature; /**< Curvature vector κ⃗ = d²p/ds² (⊥ T by construction). */
+    RVec jounce; /**< Jounce vector j⃗ = d³p/ds³ (valid iff hasJounce). */
     bool hasJounce = false;
 };
 

@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file GCodeMacro.hpp
-/// @brief G-code macro definition and registry
+/**
+ * @file GCodeMacro.hpp
+ * @brief G-code macro definition and registry
+ */
 
 #include <algorithm>
 #include <map>
@@ -14,53 +16,55 @@ namespace tether::klipper::klippy {
 // G-code Macro System
 // ============================================================================
 
-/// @brief A G-code macro definition.
+/**@brief A G-code macro definition. */
 struct GcodeMacro {
-    std::string name;                           ///< Macro name (e.g. "START_PRINT")
-    std::string gcode;                          ///< G-code template
-    std::map<std::string, std::string> defaults; ///< Default parameter values
-    std::string description;                    ///< Help text
+    std::string name; /**< Macro name (e.g. "START_PRINT") */
+    std::string gcode; /**< G-code template */
+    std::map<std::string, std::string> defaults; /**< Default parameter values */
+    std::string description; /**< Help text */
 };
 
-/// @brief G-code macro registry and expansion.
+/**@brief G-code macro registry and expansion. */
 class GcodeMacroRegistry {
 public:
-    /// @brief Register a macro.
+    /**@brief Register a macro. */
     void registerMacro(const GcodeMacro& macro) {
         std::string upperName = toUpper(macro.name);
         macros_[upperName] = macro;
     }
 
-    /// @brief Unregister a macro.
+    /**@brief Unregister a macro. */
     void unregisterMacro(const std::string& name) {
         std::string upperName = toUpper(name);
         macros_.erase(upperName);
     }
 
-    /// @brief Check if a macro exists.
+    /**@brief Check if a macro exists. */
     bool hasMacro(const std::string& name) const {
         std::string upperName = toUpper(name);
         return macros_.find(upperName) != macros_.end();
     }
 
-    /// @brief Get a macro by name.
+    /**@brief Get a macro by name. */
     const GcodeMacro* getMacro(const std::string& name) const {
         std::string upperName = toUpper(name);
         auto it = macros_.find(upperName);
         return it == macros_.end() ? nullptr : &it->second;
     }
 
-    /// @brief List all registered macros.
+    /**@brief List all registered macros. */
     std::vector<std::string> listMacros() const {
         std::vector<std::string> result;
         for (const auto& [name, _] : macros_) result.push_back(name);
         return result;
     }
 
-    /// @brief Expand a macro call into G-code.
-    /// @param name Macro name.
-    /// @param params Parameters from the G-code line (e.g. TEMP=200).
-    /// @return Expanded G-code string, or empty if macro not found.
+    /**
+     * @brief Expand a macro call into G-code.
+     * @param name Macro name.
+     * @param params Parameters from the G-code line (e.g. TEMP=200).
+     * @return Expanded G-code string, or empty if macro not found.
+     */
     std::string expandMacro(const std::string& name,
                             const std::map<std::string, std::string>& params) const {
         std::string upperName = toUpper(name);

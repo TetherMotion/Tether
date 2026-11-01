@@ -7,7 +7,7 @@
 
 namespace Simulation {
 
-/// Simulation recording
+/**Simulation recording */
 struct SimulationRecord {
     std::vector<double> times;
     std::vector<StateVector> states;
@@ -26,7 +26,7 @@ struct SimulationRecord {
     size_t size() const { return times.size(); }
 };
 
-/// Performance metrics computed from simulation
+/**Performance metrics computed from simulation */
 struct PerformanceMetrics {
     double riseTime = 0.0;
     double settlingTime = 0.0;
@@ -42,7 +42,7 @@ struct PerformanceMetrics {
     double gainMargin = 0.0;
 };
 
-/// Controller interface for the simulation engine
+/**Controller interface for the simulation engine */
 class SimController {
 public:
     virtual ~SimController() = default;
@@ -70,7 +70,7 @@ public:
     virtual const char* name() const = 0;
 };
 
-/// Main simulation engine
+/**Main simulation engine */
 class SimulationEngine {
 public:
     SimulationEngine();
@@ -137,7 +137,7 @@ public:
      */
     SimulationRecord run();
 
-    /// Step-by-step simulation
+    /**Step-by-step simulation */
     void initialize();
     SimStepResult step();
     bool isFinished() const;

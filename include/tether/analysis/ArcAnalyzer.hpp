@@ -12,30 +12,30 @@
 
 namespace tether::analysis {
 
-/// @brief An arc fitting candidate (linear segments that could be replaced by G2/G3).
+/**@brief An arc fitting candidate (linear segments that could be replaced by G2/G3). */
 struct ArcFittingCandidate {
     int startLine = 0;
     int endLine = 0;
     double centerX = 0, centerY = 0;
     double radius = 0;
-    bool isCW = false; ///< true=G2, false=G3
+    bool isCW = false; /**< true=G2, false=G3 */
     int segmentCount = 0;
-    double estimatedSavings = 0; ///< bytes
+    double estimatedSavings = 0; /**< bytes */
     double fitError = 0;
 };
 
-/// @brief Arc quality info for an existing G2/G3 command.
+/**@brief Arc quality info for an existing G2/G3 command. */
 struct ArcQualityInfo {
     int line = 0;
     double radius = 0;
-    double angle = 0;  ///< degrees
-    double length = 0; ///< mm
+    double angle = 0; /**< degrees */
+    double length = 0; /**< mm */
     bool isCW = false;
     bool hasIssue = false;
     std::string issue;
 };
 
-/// @brief Arc data with full geometry.
+/**@brief Arc data with full geometry. */
 struct ArcData {
     int line = 0;
     bool isCW = false;
@@ -44,10 +44,10 @@ struct ArcData {
     double centerX = 0, centerY = 0;
     double radius = 0;
     double arcLength = 0;
-    double sweepAngle = 0; ///< degrees
+    double sweepAngle = 0; /**< degrees */
 };
 
-/// @brief Combined arc analysis result.
+/**@brief Combined arc analysis result. */
 struct ArcAnalysisResult {
     // Arc fitting candidates
     std::vector<ArcFittingCandidate> candidates;
@@ -74,7 +74,7 @@ struct ArcAnalysisResult {
     std::vector<std::string> recommendations;
 };
 
-/// @brief Analyze arc interpolation: quality, fitting candidates, arc length.
+/**@brief Analyze arc interpolation: quality, fitting candidates, arc length. */
 class ArcAnalyzer {
 public:
     struct Params {
@@ -85,7 +85,7 @@ public:
     explicit ArcAnalyzer() : params_() {}
     explicit ArcAnalyzer(Params params) : params_(params) {}
 
-    /// @brief Analyze arc-related properties of G-code.
+    /**@brief Analyze arc-related properties of G-code. */
     ArcAnalysisResult analyze(const std::vector<std::string>& gcodeLines) const;
 
     const Params& params() const { return params_; }
@@ -94,7 +94,7 @@ public:
 private:
     Params params_;
 
-    /// Fit a circle through 3 points. Returns nullopt if collinear.
+    /**Fit a circle through 3 points. Returns nullopt if collinear. */
     struct CircleFit { double cx, cy, radius; };
     static std::optional<CircleFit> fitCircle(
         double x1, double y1, double x2, double y2,

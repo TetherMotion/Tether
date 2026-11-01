@@ -47,8 +47,10 @@ public:
 private:
     friend Base;
 
-    /// Find the first and last local times [s] within an arc where
-    /// v(τ) > vThresh, by solving the polynomial roots analytically.
+    /**
+     * Find the first and last local times [s] within an arc where
+     * v(τ) > vThresh, by solving the polynomial roots analytically.
+     */
     static std::pair<double, double> flowInterval(
         const ExtrusionArc& a, double vThresh) {
 

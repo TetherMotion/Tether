@@ -129,43 +129,47 @@ struct FSoEErrorInjection {
  */
 struct FSoESlaveConfig {
     // Identity
-    uint16_t slaveAddress = 0;         ///< EtherCAT slave address
-    uint16_t connectionId = 0;         ///< FSoE connection ID (assigned by master)
-    uint16_t safetyAddress = 0;        ///< FSoE safety address
+    uint16_t slaveAddress = 0; /**< EtherCAT slave address */
+    uint16_t connectionId = 0; /**< FSoE connection ID (assigned by master) */
+    uint16_t safetyAddress = 0; /**< FSoE safety address */
     
     // Safety level
-    uint8_t safetyLevel = SIL::SIL2;   ///< Required SIL level
+    uint8_t safetyLevel = SIL::SIL2; /**< Required SIL level */
     
     // Timing
-    uint16_t watchdogTimeoutMs = 100;  ///< Watchdog timeout (ms)
-    uint16_t connectionTimeoutMs = 1000; ///< Connection timeout (ms)
-    uint16_t sessionTimeoutMs = 5000;  ///< Session establishment timeout (ms)
+    uint16_t watchdogTimeoutMs = 100; /**< Watchdog timeout (ms) */
+    uint16_t connectionTimeoutMs = 1000; /**< Connection timeout (ms) */
+    uint16_t sessionTimeoutMs = 5000; /**< Session establishment timeout (ms) */
     
     // Data configuration
-    uint8_t safeInputSize = 0;         ///< Safe input data size (bytes)
-    uint8_t safeOutputSize = 0;        ///< Safe output data size (bytes)
-    std::array<uint8_t, 16> failSafeInputs{};   ///< Fail-safe input values
-    std::array<uint8_t, 16> failSafeOutputs{};  ///< Fail-safe output values
+    uint8_t safeInputSize = 0; /**< Safe input data size (bytes) */
+    uint8_t safeOutputSize = 0; /**< Safe output data size (bytes) */
+    std::array<uint8_t, 16> failSafeInputs{}; /**< Fail-safe input values */
+    std::array<uint8_t, 16> failSafeOutputs{}; /**< Fail-safe output values */
 
-    /// Expected safety-related application parameters received from the
-    /// master in the Parameter state (ETG.5100 S (D) V1.2.0, §8.2.2.5,
-    /// Table 18, octets 6+).  The slave validates that the received app
-    /// parameters match these expected values.  Empty = no app parameters
-    /// expected (app param length = 0).
-    /// See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
+    /**
+     * Expected safety-related application parameters received from the
+     * master in the Parameter state (ETG.5100 S (D) V1.2.0, §8.2.2.5,
+     * Table 18, octets 6+).  The slave validates that the received app
+     * parameters match these expected values.  Empty = no app parameters
+     * expected (app param length = 0).
+     * See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
+     */
     std::vector<uint8_t> expectedAppParameters;
     
     // Behavior configuration
-    bool autoRecoveryEnabled = true;   ///< Automatically recover from fail-safe
-    uint32_t recoveryDelayMs = 1000;   ///< Delay before attempting recovery
-    bool strictCrcCheck = true;        ///< Reject all CRC errors (always enforced)
-    bool strictSequenceCheck = true;   ///< Reject sequence errors (deprecated, no-op)
+    bool autoRecoveryEnabled = true; /**< Automatically recover from fail-safe */
+    uint32_t recoveryDelayMs = 1000; /**< Delay before attempting recovery */
+    bool strictCrcCheck = true; /**< Reject all CRC errors (always enforced) */
+    bool strictSequenceCheck = true; /**< Reject sequence errors (deprecated, no-op) */
 
-    /// Initial sequence number used for the Reset response and the
-    /// expected master Reset frame.  ETG.5100 §8.1.3.4 says
-    /// sequence numbers start at 1 (0 is never used), but some
-    /// masters (e.g. for Synapticon SOMANET) use seq=0 for the
-    /// initial Reset frame.  Default is 0 (Synapticon convention).
+    /**
+     * Initial sequence number used for the Reset response and the
+     * expected master Reset frame.  ETG.5100 §8.1.3.4 says
+     * sequence numbers start at 1 (0 is never used), but some
+     * masters (e.g. for Synapticon SOMANET) use seq=0 for the
+     * initial Reset frame.  Default is 0 (Synapticon convention).
+     */
     uint16_t initialSeqNo = 0;
     
     // Error handling
@@ -174,11 +178,13 @@ struct FSoESlaveConfig {
     bool treatTimeoutAsCritical = true;
     bool treatConnIdErrorAsCritical = true;
 
-    /// When true, the slave adopts whatever Connection ID and Safety Address
-    /// the master sends during the Connection phase, instead of validating
-    /// them against config_.connectionId / config_.safetyAddress.  This is
-    /// useful for emulator/test setups that must interoperate with any
-    /// safety controller without knowing its FNI configuration in advance.
+    /**
+     * When true, the slave adopts whatever Connection ID and Safety Address
+     * the master sends during the Connection phase, instead of validating
+     * them against config_.connectionId / config_.safetyAddress.  This is
+     * useful for emulator/test setups that must interoperate with any
+     * safety controller without knowing its FNI configuration in advance.
+     */
     bool acceptAnyConnectionId = false;
 
     // CRC model for state-transition responses (Session, Connection,
@@ -189,25 +195,27 @@ struct FSoESlaveConfig {
     // the Synapticon master's behavior.
     bool resetCrcOnStateTransition = false;
 
-    /// Native CRC-chain resynchronization (opt-in, default off).
-    ///
-    /// When a received frame fails CRC verification, the slave solves the
-    /// (startCrc, seqNo) seed directly from the frame's own stored CRCs —
-    /// computeAllCrcs() is affine in the 32 seed bits, so the seed is a
-    /// GF(2) linear solve (CRC::resyncSolveSeed).  The solved seed is then
-    /// used for the full frame verification, and the slave's sequence
-    /// tracking is updated to the recovered seqNo so subsequent frames
-    /// verify normally again.
-    ///
-    /// Use this when the slave may join a running connection mid-stream or
-    /// miss a state-transition frame: without resync the inherited CRC
-    /// chain is permanently desynced and every frame is rejected.
-    ///
-    /// Security/robustness note: for frames with fewer than 3 CRC segments
-    /// (data_len ≤ 4) the solve consumes every equation, so the resynced
-    /// frame is accepted on structural consistency alone — see the
-    /// resyncSolveSeed() documentation in FSoECRC.hpp.  The mode is
-    /// intended for emulators/test setups, not fail-safe production use.
+    /**
+     * Native CRC-chain resynchronization (opt-in, default off).
+     *
+     * When a received frame fails CRC verification, the slave solves the
+     * (startCrc, seqNo) seed directly from the frame's own stored CRCs —
+     * computeAllCrcs() is affine in the 32 seed bits, so the seed is a
+     * GF(2) linear solve (CRC::resyncSolveSeed).  The solved seed is then
+     * used for the full frame verification, and the slave's sequence
+     * tracking is updated to the recovered seqNo so subsequent frames
+     * verify normally again.
+     *
+     * Use this when the slave may join a running connection mid-stream or
+     * miss a state-transition frame: without resync the inherited CRC
+     * chain is permanently desynced and every frame is rejected.
+     *
+     * Security/robustness note: for frames with fewer than 3 CRC segments
+     * (data_len ≤ 4) the solve consumes every equation, so the resynced
+     * frame is accepted on structural consistency alone — see the
+     * resyncSolveSeed() documentation in FSoECRC.hpp.  The mode is
+     * intended for emulators/test setups, not fail-safe production use.
+     */
     bool crcResyncEnabled = false;
 
     // Parameter CRC verification (0 = skip verification)
@@ -445,29 +453,39 @@ public:
      */
     FSoESlaveStats getStats() const;
 
-    /// Get the RX CRC state that the MASTER should chain from when
-    /// building frames to send TO this slave (cross-direction inheritance).
-    /// The master's TX start_crc = the slave's own last TX CRC0.
-    /// Tests that simulate master→slave TX should use this as start_crc.
-    /// @return CRC0 of the last frame this slave transmitted
+    /**
+     * Get the RX CRC state that the MASTER should chain from when
+     * building frames to send TO this slave (cross-direction inheritance).
+     * The master's TX start_crc = the slave's own last TX CRC0.
+     * Tests that simulate master→slave TX should use this as start_crc.
+     * @return CRC0 of the last frame this slave transmitted
+     */
     uint16_t getRxLastCrc0() const { return last_tx_crc0_; }
-    /// @brief Expected next master TX sequence number (RX validation)
-    /// @return Sequence number the next master frame is expected to carry
+    /**
+     * @brief Expected next master TX sequence number (RX validation)
+     * @return Sequence number the next master frame is expected to carry
+     */
     uint16_t getRxSeqNo() const { return rx_seq_no_; }
-    /// Get the TX CRC state that this slave chains from when building
-    /// its own TX frames (cross-direction: slave TX inherits from the
-    /// master's last TX CRC0 = last_rx_crc0_).
-    /// startCrc = last_rx_crc0_, seqNo = last_rx_seq_no_ (echoes master's
-    /// last TX seq; Reset response uses seq=initialSeqNo, same as master)
-    /// @return CRC0 of the master's last transmitted frame
+    /**
+     * Get the TX CRC state that this slave chains from when building
+     * its own TX frames (cross-direction: slave TX inherits from the
+     * master's last TX CRC0 = last_rx_crc0_).
+     * startCrc = last_rx_crc0_, seqNo = last_rx_seq_no_ (echoes master's
+     * last TX seq; Reset response uses seq=initialSeqNo, same as master)
+     * @return CRC0 of the master's last transmitted frame
+     */
     uint16_t getTxLastCrc0() const { return last_rx_crc0_; }
-    /// @brief Sequence number echoed in slave TX (master's last TX seq)
-    /// @return Sequence number placed in the slave's next TX frame
+    /**
+     * @brief Sequence number echoed in slave TX (master's last TX seq)
+     * @return Sequence number placed in the slave's next TX frame
+     */
     uint16_t getTxSeqNo() const { return last_rx_seq_no_; }
 
-    /// Get the slave's own Session ID (ETG.5100 §8.2.2.3: the slave
-    /// generates its own random Session ID, independent of the master's).
-    /// @return Random session identifier generated at initialization
+    /**
+     * Get the slave's own Session ID (ETG.5100 §8.2.2.3: the slave
+     * generates its own random Session ID, independent of the master's).
+     * @return Random session identifier generated at initialization
+     */
     uint16_t getSessionId() const { return sessionId_; }
 
     /**
@@ -515,10 +533,12 @@ private:
     // Internal Methods
     // ========================================================================
     
-    /// Transition to a new connection state.
-    /// @note Invariant: caller must hold mutex_. All state-correlated fields
-    ///       (stateEntryTimeMs_, lastError_, failSafeActive_, dataValid_)
-    ///       are updated atomically with state_ under that lock.
+    /**
+     * Transition to a new connection state.
+     * @note Invariant: caller must hold mutex_. All state-correlated fields
+     *       (stateEntryTimeMs_, lastError_, failSafeActive_, dataValid_)
+     *       are updated atomically with state_ under that lock.
+     */
     void transitionTo(uint8_t newState);
     bool validateFrame(const uint8_t* data, size_t len);
     bool validateCRC(const uint8_t* data, size_t len);
@@ -578,8 +598,8 @@ private:
     // single PDU and this index stays at 0.
     // See: https://techoverflow.net/2026/08/12/fsoe-session-pdu-master-and-slave-structure/
     uint8_t sessionOctetIdx_ = 0;
-    bool sessionOctetAdvancePending_ = false;  ///< Advance sessionOctetIdx_ after next buildSessionResponse
-    bool sessionFirstRxDone_ = false;  ///< True after first Session RX (state-transition reset only on first)
+    bool sessionOctetAdvancePending_ = false; /**< Advance sessionOctetIdx_ after next buildSessionResponse */
+    bool sessionFirstRxDone_ = false; /**< True after first Session RX (state-transition reset only on first) */
 
     // Connection state multi-cycle transfer.
     // ETG.5100 S (D) V1.2.0, §8.2.2.4, Table 15:
@@ -588,10 +608,10 @@ private:
     // is less than 4 octets, multiple cycles are needed:
     //   4 octets → 1 cycle, 2 octets → 2 cycles, 1 octet → 4 cycles
     // See: https://techoverflow.net/2026/08/12/fsoe-connection-pdu-master-and-slave-structure/
-    uint8_t connectionRxIdx_ = 0;       ///< RX byte offset (advances by safeOutputSize)
-    uint8_t connectionTxIdx_ = 0;       ///< TX echo byte offset (advances by safeInputSize)
-    uint8_t connectionBuf_[4] = {0};    ///< Accumulated RX / echo buffer
-    bool connectionTxAdvancePending_ = false;  ///< Advance connectionTxIdx_ after next buildConnectionResponse
+    uint8_t connectionRxIdx_ = 0; /**< RX byte offset (advances by safeOutputSize) */
+    uint8_t connectionTxIdx_ = 0; /**< TX echo byte offset (advances by safeInputSize) */
+    uint8_t connectionBuf_[4] = {0}; /**< Accumulated RX / echo buffer */
+    bool connectionTxAdvancePending_ = false; /**< Advance connectionTxIdx_ after next buildConnectionResponse */
 
     // Parameter state multi-cycle transfer.
     // ETG.5100 S (D) V1.2.0, §8.2.2.5, Table 18:
@@ -603,10 +623,10 @@ private:
     // The slave accumulates received bytes and echoes them back each cycle.
     // See: https://techoverflow.net/2026/08/12/fsoe-parameter-pdu-master-and-slave-structure/
     static constexpr uint16_t PARAM_BUF_SIZE = 256 + 6;
-    uint16_t paramRxIdx_ = 0;           ///< RX byte offset (advances by safeOutputSize)
-    uint16_t paramTxIdx_ = 0;           ///< TX echo byte offset (advances by safeInputSize)
-    std::vector<uint8_t> paramBuf_;     ///< Accumulated RX / echo buffer
-    bool paramTxAdvancePending_ = false; ///< Advance paramTxIdx_ after next buildParameterResponse
+    uint16_t paramRxIdx_ = 0; /**< RX byte offset (advances by safeOutputSize) */
+    uint16_t paramTxIdx_ = 0; /**< TX echo byte offset (advances by safeInputSize) */
+    std::vector<uint8_t> paramBuf_; /**< Accumulated RX / echo buffer */
+    bool paramTxAdvancePending_ = false; /**< Advance paramTxIdx_ after next buildParameterResponse */
 
     // FSoE CRC inheritance and sequence number tracking.
     // See: https://techoverflow.net/2026/08/09/fsoe-how-does-crc-inheritance-work/
@@ -622,12 +642,12 @@ private:
     //   - Reset breaks the chain: both sides reset to start_crc=0
     //   - The slave echoes the master's last TX seq (no independent increment).
     //     The master expects slave TX seq = last_tx_seq_no_ (the seq it just used).
-    uint16_t last_tx_crc0_ = 0;   ///< CRC0 of the last frame we sent (for RX parsing)
-    uint16_t last_rx_crc0_ = 0;   ///< CRC0 of the master's last TX (startCrc for slave TX)
-    uint16_t tx_seq_no_ = 1;      ///< Kept for diagnostics (TX uses last_rx_seq_no_)
-    uint16_t rx_seq_no_ = 1;      ///< Expected next master TX seq (for RX validation)
-    uint16_t last_tx_seq_no_ = 0; ///< Seq used in the last TX (for diagnostics)
-    uint16_t last_rx_seq_no_ = 0; ///< Seq used by master in its last TX (echoed in slave TX)
+    uint16_t last_tx_crc0_ = 0; /**< CRC0 of the last frame we sent (for RX parsing) */
+    uint16_t last_rx_crc0_ = 0; /**< CRC0 of the master's last TX (startCrc for slave TX) */
+    uint16_t tx_seq_no_ = 1; /**< Kept for diagnostics (TX uses last_rx_seq_no_) */
+    uint16_t rx_seq_no_ = 1; /**< Expected next master TX seq (for RX validation) */
+    uint16_t last_tx_seq_no_ = 0; /**< Seq used in the last TX (for diagnostics) */
+    uint16_t last_rx_seq_no_ = 0; /**< Seq used by master in its last TX (echoed in slave TX) */
     
     // Timing
     uint64_t lastValidFrameMs_ = 0;
@@ -657,9 +677,9 @@ private:
     // response is rebuilt only when the state transitions or the fail-safe
     // flag changes.
     std::vector<uint8_t> cached_tx_response_;
-    uint8_t cached_tx_state_ = 0xFF;       ///< State when cached response was built
-    bool cached_tx_fail_safe_ = false;     ///< Fail-safe flag when cached
-    bool tx_cache_valid_ = false;          ///< True when cache should be used (after RX duplicate)
+    uint8_t cached_tx_state_ = 0xFF; /**< State when cached response was built */
+    bool cached_tx_fail_safe_ = false; /**< Fail-safe flag when cached */
+    bool tx_cache_valid_ = false; /**< True when cache should be used (after RX duplicate) */
     
     // Callbacks
     FSoEStateCallback stateCallback_;

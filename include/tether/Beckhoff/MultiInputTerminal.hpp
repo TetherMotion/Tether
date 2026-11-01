@@ -67,7 +67,7 @@ namespace Beckhoff {
 template <size_t MaxBits = 256>
 class MultiInputTerminal {
 public:
-    /// Flat input bitset type — bit i = global channel i.
+    /**Flat input bitset type — bit i = global channel i. */
     using Bitset       = std::bitset<MaxBits>;
     using StartOptions = Beckhoff::StartOptions;
     using Error        = Beckhoff::Error;
@@ -104,7 +104,7 @@ public:
     MultiInputTerminal(const MultiInputTerminal&)            = delete;
     MultiInputTerminal& operator=(const MultiInputTerminal&) = delete;
 
-    /// All packed-input terminals known to this driver (ESI-verified).
+    /**All packed-input terminals known to this driver (ESI-verified). */
     static std::span<const DeviceIdentity> knownDevices() {
         return std::span<const DeviceIdentity>(
             Devices::kInputTerminals.data(),
@@ -122,12 +122,12 @@ public:
         return detect(knownDevices(), shallowScan());
     }
 
-    /// Detect only the given identities (own bus scan).
+    /**Detect only the given identities (own bus scan). */
     Result<size_t> detect(std::span<const DeviceIdentity> devices) {
         return detect(devices, shallowScan());
     }
 
-    /// Detect with custom matchers (own bus scan).
+    /**Detect with custom matchers (own bus scan). */
     Result<size_t> detect(std::span<const DeviceMatcher> matchers) {
         return detect(matchers, shallowScan());
     }
@@ -143,14 +143,14 @@ public:
         return detect(knownDevices(), scan);
     }
 
-    /// Detect only the given identities, reusing an existing scan.
+    /**Detect only the given identities, reusing an existing scan. */
     Result<size_t> detect(std::span<const DeviceIdentity> devices,
                           std::span<const DiscoveredSlave> scan) {
         const auto matchers = makeMatchers(devices);
         return detect(std::span<const DeviceMatcher>(matchers), scan);
     }
 
-    /// Detect with custom matchers, reusing an existing scan.
+    /**Detect with custom matchers, reusing an existing scan. */
     Result<size_t> detect(std::span<const DeviceMatcher> matchers,
                           std::span<const DiscoveredSlave> scan) {
         modules_.clear();
@@ -186,20 +186,20 @@ public:
 
     // -- Chain layout ----------------------------------------------------------
 
-    /// Number of devices in the chain.
+    /**Number of devices in the chain. */
     size_t moduleCount() const { return modules_.size(); }
 
-    /// Total number of input bits across all devices.
+    /**Total number of input bits across all devices. */
     size_t channelCount() const { return total_bits_; }
 
-    /// Access one chain device (throws std::out_of_range).
+    /**Access one chain device (throws std::out_of_range). */
     IInputTerminal&       module(size_t i)       { return *modules_.at(i); }
     const IInputTerminal& module(size_t i) const { return *modules_.at(i); }
 
-    /// Bus position of chain device `i`.
+    /**Bus position of chain device `i`. */
     uint16_t slaveIndex(size_t i) const { return modules_.at(i)->slaveIndex(); }
 
-    /// Flat bit offset where device `i`'s inputs begin.
+    /**Flat bit offset where device `i`'s inputs begin. */
     size_t bitOffset(size_t i) const { return bit_offsets_.at(i); }
 
     // -- Bring-up --------------------------------------------------------------
@@ -252,7 +252,7 @@ public:
         return {};
     }
 
-    /// Stops the RT loop if we started it.  Inputs need no shutdown write.
+    /**Stops the RT loop if we started it.  Inputs need no shutdown write. */
     void stop() {
         if (loop_started_) {
             master_.stopMotionControlLoop();
@@ -260,20 +260,22 @@ public:
         }
     }
 
-    /// Index of the device that produced the last error (SIZE_MAX if none).
+    /**Index of the device that produced the last error (SIZE_MAX if none). */
     size_t lastErrorModule() const { return last_error_module_; }
 
     // -- Introspection for app-managed loops -----------------------------------
 
-    /// The chain's dedicated PDO manager (created by configure()/start()).
-    /// Exchange it from your own cyclic loop when StartOptions::
-    /// manage_realtime_loop is false: `ins.pdoManager()->exchangeAll()`.
+    /**
+     * The chain's dedicated PDO manager (created by configure()/start()).
+     * Exchange it from your own cyclic loop when StartOptions::
+     * manage_realtime_loop is false: `ins.pdoManager()->exchangeAll()`.
+     */
     PDOManager* pdoManager() const { return group_pdo_; }
 
-    /// The chain's logical address manager (same lifetime as pdoManager()).
+    /**The chain's logical address manager (same lifetime as pdoManager()). */
     LogicalAddressManager* logicalAddressManager() const { return group_lam_; }
 
-    /// Base of the chain's logical address space (0 before configure()).
+    /**Base of the chain's logical address space (0 before configure()). */
     uint32_t baseLogicalAddress() const {
         return group_lam_ ? group_lam_->getBaseLogicalAddress() : 0;
     }
@@ -284,13 +286,13 @@ public:
     // the PDO buffers as last written by the cyclic exchange — lock-free
     // and safe from any thread while the RT loop runs.
 
-    /// Read one global channel bit (throws std::out_of_range).
+    /**Read one global channel bit (throws std::out_of_range). */
     bool bit(size_t channel) const {
         const size_t m = locate(channel);
         return modules_[m]->bit(channel - bit_offsets_[m]);
     }
 
-    /// Current inputs as a flat bitset (bits >= channelCount() are 0).
+    /**Current inputs as a flat bitset (bits >= channelCount() are 0). */
     Bitset bits() const {
         Bitset b;
         for (size_t i = 0; i < modules_.size(); ++i) {
@@ -304,13 +306,13 @@ public:
     }
 
 protected:
-    /// Shallow vendor/product scan used by detect() variants and subclasses.
+    /**Shallow vendor/product scan used by detect() variants and subclasses. */
     std::vector<DiscoveredSlave> shallowScan() {
         return master_.discovery().discover(
             {DiscoveryOption::VendorId, DiscoveryOption::ProductCode});
     }
 
-    /// Bound master (for subclasses).
+    /**Bound master (for subclasses). */
     Master& master() { return master_; }
 
 private:
@@ -322,8 +324,10 @@ private:
         return out;
     }
 
-    /// Sort devices by bus position and rebuild the flat bit layout,
-    /// dropping devices that would overflow MaxBits.
+    /**
+     * Sort devices by bus position and rebuild the flat bit layout,
+     * dropping devices that would overflow MaxBits.
+     */
     void rebuildLayout() {
         std::stable_sort(modules_.begin(), modules_.end(),
             [](const auto& a, const auto& b) {
@@ -343,7 +347,7 @@ private:
         bit_offsets_.resize(used);
     }
 
-    /// Find the device covering flat bit `channel` (throws std::out_of_range).
+    /**Find the device covering flat bit `channel` (throws std::out_of_range). */
     size_t locate(size_t channel) const {
         if (channel >= total_bits_) {
             throw std::out_of_range("MultiInputTerminal bit index");
@@ -354,7 +358,7 @@ private:
             std::distance(bit_offsets_.begin(), it)) - 1;
     }
 
-    /// Group + shared logical map + FMMU programming, up to SAFE-OP.
+    /**Group + shared logical map + FMMU programming, up to SAFE-OP. */
     Result<> configureChain(const StartOptions& opts) {
         if (configured_) return {};
         if (modules_.empty()) return std::unexpected(Error::NoDeviceFound);

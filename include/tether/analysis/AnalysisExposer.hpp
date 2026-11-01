@@ -35,18 +35,20 @@
 
 namespace tether::analysis {
 
-/// @brief Module ID for the G-code analysis component.
+/**@brief Module ID for the G-code analysis component. */
 inline constexpr uint64_t ModuleIdAnalysis = 0x0012;
 
-/// @brief Holds the latest analysis results and exposes them via IO protocol.
-///
-/// Usage:
-/// @code
-///   AnalysisExposer exposer;
-///   exposer.expose(registry, ModuleIdAnalysis);
-///   exposer.analyze(gcodeLines);  // Run all 10 analyses
-///   // External client reads signals via IO protocol
-/// @endcode
+/**
+ * @brief Holds the latest analysis results and exposes them via IO protocol.
+ *
+ * Usage:
+ * @code
+ *   AnalysisExposer exposer;
+ *   exposer.expose(registry, ModuleIdAnalysis);
+ *   exposer.analyze(gcodeLines);  // Run all 10 analyses
+ *   // External client reads signals via IO protocol
+ * @endcode
+ */
 class AnalysisExposer : public tether::io::IParameterExposer {
 public:
     AnalysisExposer() {
@@ -62,7 +64,7 @@ public:
         analyzers_.continuity = std::make_unique<PathContinuityChecker>();
     }
 
-    /// @brief Run all 10 analyses on the given G-code and store results.
+    /**@brief Run all 10 analyses on the given G-code and store results. */
     void analyze(const std::vector<std::string>& gcodeLines) {
         std::lock_guard lock(mutex_);
         results_.machineLimit = analyzers_.machineLimit->check(gcodeLines);

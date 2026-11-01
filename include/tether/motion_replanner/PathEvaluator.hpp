@@ -64,33 +64,37 @@ struct SpectralEvaluation; // defined in PathRelativeFFT.hpp
 // Quantitative metric structs
 //=============================================================================
 
-/// Integral-based error metrics.
-///
-/// Computed via trapezoidal integration over arc length (spatial) or time
-/// (temporal). These are the classical control-theory performance indices,
-/// adapted to path-following analysis.
-///
-/// @note Units: integrals over arc length have units of mm² (IAE) or mm³
-///       (ISE); integrals over time have units of mm·s (ITAE) or mm²·s
-///       (ITSE).
+/**
+ * Integral-based error metrics.
+ *
+ * Computed via trapezoidal integration over arc length (spatial) or time
+ * (temporal). These are the classical control-theory performance indices,
+ * adapted to path-following analysis.
+ *
+ * @note Units: integrals over arc length have units of mm² (IAE) or mm³
+ *       (ISE); integrals over time have units of mm·s (ITAE) or mm²·s
+ *       (ITSE).
+ */
 struct IntegralErrorMetrics {
-    double iae_s = 0.0;   ///< ∫|e_contour(s)| ds — spatial IAE (mm²)
-    double ise_s = 0.0;   ///< ∫e_contour(s)² ds — spatial ISE (mm³)
-    double itae_t = 0.0;  ///< ∫t·|e_combined(t)| dt — time-weighted IAE (mm·s)
-    double itse_t = 0.0;  ///< ∫t·e_combined(t)² dt — time-weighted ISE (mm²·s)
-    double iae_lag = 0.0; ///< ∫|e_lag(s)| ds — lag IAE (mm²)
-    double ise_lag = 0.0; ///< ∫e_lag(s)² ds — lag ISE (mm³)
+    double iae_s = 0.0; /**< ∫|e_contour(s)| ds — spatial IAE (mm²) */
+    double ise_s = 0.0; /**< ∫e_contour(s)² ds — spatial ISE (mm³) */
+    double itae_t = 0.0; /**< ∫t·|e_combined(t)| dt — time-weighted IAE (mm·s) */
+    double itse_t = 0.0; /**< ∫t·e_combined(t)² dt — time-weighted ISE (mm²·s) */
+    double iae_lag = 0.0; /**< ∫|e_lag(s)| ds — lag IAE (mm²) */
+    double ise_lag = 0.0; /**< ∫e_lag(s)² ds — lag ISE (mm³) */
 };
 
-/// Norm-based error metrics for each error component.
-///
-/// L1 = ∫|e|ds, L2 = sqrt(∫e²ds), L∞ = max|e|.
-/// These are the standard Lebesgue norms of the error function over the
-/// path arc length.
+/**
+ * Norm-based error metrics for each error component.
+ *
+ * L1 = ∫|e|ds, L2 = sqrt(∫e²ds), L∞ = max|e|.
+ * These are the standard Lebesgue norms of the error function over the
+ * path arc length.
+ */
 struct NormMetrics {
-    double l1_contour = 0.0;    ///< ∫|e_contour| ds (mm²)
-    double l2_contour = 0.0;    ///< sqrt(∫e_contour² ds) (mm^3/2)
-    double linf_contour = 0.0;  ///< max|e_contour| (mm)
+    double l1_contour = 0.0; /**< ∫|e_contour| ds (mm²) */
+    double l2_contour = 0.0; /**< sqrt(∫e_contour² ds) (mm^3/2) */
+    double linf_contour = 0.0; /**< max|e_contour| (mm) */
     double l1_lag = 0.0;
     double l2_lag = 0.0;
     double linf_lag = 0.0;
@@ -99,90 +103,112 @@ struct NormMetrics {
     double linf_combined = 0.0;
 };
 
-/// Shape-distance metrics measuring geometric fidelity between the desired
-/// and actual paths.
-///
-/// These metrics treat the trajectories as geometric curves and measure
-/// how different their shapes are, independent of timing.
+/**
+ * Shape-distance metrics measuring geometric fidelity between the desired
+ * and actual paths.
+ *
+ * These metrics treat the trajectories as geometric curves and measure
+ * how different their shapes are, independent of timing.
+ */
 struct ShapeDistanceMetrics {
-    /// Hausdorff distance: max over actual points of min distance to
-    /// desired path. Measures the worst-case geometric deviation (mm).
+    /**
+     * Hausdorff distance: max over actual points of min distance to
+     * desired path. Measures the worst-case geometric deviation (mm).
+     */
     double hausdorff = 0.0;
 
-    /// Discrete Frechet distance: the minimum over all monotone
-    /// reparameterizations of the max pointwise distance (mm).
+    /**
+     * Discrete Frechet distance: the minimum over all monotone
+     * reparameterizations of the max pointwise distance (mm).
+     */
     double frechet = 0.0;
 
-    /// Dynamic time warping distance: the minimum total cost of aligning
-    /// the two sequences, normalized by path length (mm).
+    /**
+     * Dynamic time warping distance: the minimum total cost of aligning
+     * the two sequences, normalized by path length (mm).
+     */
     double dtw = 0.0;
 
-    /// Ratio of actual path length to desired path length.
-    /// 1.0 = perfect length match; >1 = actual is longer (overshoot);
-    /// <1 = actual is shorter (cutting corners).
+    /**
+     * Ratio of actual path length to desired path length.
+     * 1.0 = perfect length match; >1 = actual is longer (overshoot);
+     * <1 = actual is shorter (cutting corners).
+     */
     double pathLengthRatio = 0.0;
 
-    /// Maximum absolute curvature difference between actual and desired
-    /// at corresponding arc-length positions (1/mm).
+    /**
+     * Maximum absolute curvature difference between actual and desired
+     * at corresponding arc-length positions (1/mm).
+     */
     double curvatureErrorMax = 0.0;
 
-    /// RMS curvature difference (1/mm).
+    /**RMS curvature difference (1/mm). */
     double curvatureErrorRms = 0.0;
 };
 
-/// Kinematic tracking metrics: how well the actual velocity, acceleration,
-/// and jerk profiles match the desired.
+/**
+ * Kinematic tracking metrics: how well the actual velocity, acceleration,
+ * and jerk profiles match the desired.
+ */
 struct KinematicTrackingMetrics {
-    /// RMS of |v_actual - v_desired| (mm/s).
+    /**RMS of |v_actual - v_desired| (mm/s). */
     double velocityTrackingRms = 0.0;
-    /// Max of |v_actual - v_desired| (mm/s).
+    /**Max of |v_actual - v_desired| (mm/s). */
     double velocityTrackingMax = 0.0;
-    /// RMS of |a_actual - a_desired| (mm/s²).
+    /**RMS of |a_actual - a_desired| (mm/s²). */
     double accelTrackingRms = 0.0;
-    /// Max of |a_actual - a_desired| (mm/s²).
+    /**Max of |a_actual - a_desired| (mm/s²). */
     double accelTrackingMax = 0.0;
-    /// Maximum actual jerk magnitude (mm/s³).
+    /**Maximum actual jerk magnitude (mm/s³). */
     double jerkActualMax = 0.0;
-    /// RMS actual jerk magnitude (mm/s³).
+    /**RMS actual jerk magnitude (mm/s³). */
     double jerkActualRms = 0.0;
-    /// Smoothness index: ∫jerk² dt — the jerk-cost functional (mm²/s⁵).
-    /// Lower = smoother motion.
+    /**
+     * Smoothness index: ∫jerk² dt — the jerk-cost functional (mm²/s⁵).
+     * Lower = smoother motion.
+     */
     double smoothnessIndex = 0.0;
 };
 
-/// Surface finish estimates derived from the contour error profile.
-///
-/// These approximate the surface roughness parameters from ISO 4287,
-/// treating the contour error as the surface profile. Values are in
-/// micrometers (µm).
+/**
+ * Surface finish estimates derived from the contour error profile.
+ *
+ * These approximate the surface roughness parameters from ISO 4287,
+ * treating the contour error as the surface profile. Values are in
+ * micrometers (µm).
+ */
 struct SurfaceFinishMetrics {
-    /// Arithmetic mean roughness Ra = (1/L)∫|e_contour|ds (µm).
+    /**Arithmetic mean roughness Ra = (1/L)∫|e_contour|ds (µm). */
     double ra = 0.0;
-    /// Root-mean-square roughness Rq = sqrt((1/L)∫e_contour²ds) (µm).
+    /**Root-mean-square roughness Rq = sqrt((1/L)∫e_contour²ds) (µm). */
     double rq = 0.0;
-    /// Maximum peak-to-valley Rz = max(e) - min(e) of detrended contour (µm).
+    /**Maximum peak-to-valley Rz = max(e) - min(e) of detrended contour (µm). */
     double rz = 0.0;
-    /// Number of zero-crossings of the detrended contour error.
+    /**Number of zero-crossings of the detrended contour error. */
     std::size_t peakCount = 0;
 };
 
-/// Following/timing error metrics.
+/**Following/timing error metrics. */
 struct FollowingErrorMetrics {
-    /// Maximum |lag error| (mm) — the worst following error.
+    /**Maximum |lag error| (mm) — the worst following error. */
     double maxFollowingError = 0.0;
-    /// Mean |lag error| (mm).
+    /**Mean |lag error| (mm). */
     double meanFollowingError = 0.0;
-    /// Arc length to settle within tolerance after the worst corner (mm).
-    /// 0 if no corner or never settles.
+    /**
+     * Arc length to settle within tolerance after the worst corner (mm).
+     * 0 if no corner or never settles.
+     */
     double settlingDistance = 0.0;
-    /// Peak cross-correlation value between desired and actual velocity
-    /// profiles (0–1).
+    /**
+     * Peak cross-correlation value between desired and actual velocity
+     * profiles (0–1).
+     */
     double crossCorrelationPeak = 0.0;
-    /// Lag at peak cross-correlation (seconds).
+    /**Lag at peak cross-correlation (seconds). */
     double crossCorrelationLag = 0.0;
 };
 
-/// Aggregate of all quantitative metrics.
+/**Aggregate of all quantitative metrics. */
 struct QuantitativeEvaluation {
     IntegralErrorMetrics integrals;
     NormMetrics norms;
@@ -191,16 +217,16 @@ struct QuantitativeEvaluation {
     SurfaceFinishMetrics surface;
     FollowingErrorMetrics following;
 
-    /// Statistical summaries (reuses the existing ErrorStatistics struct).
+    /**Statistical summaries (reuses the existing ErrorStatistics struct). */
     MotionReplanner::ErrorStatistics contourStats;
     MotionReplanner::ErrorStatistics lagStats;
     MotionReplanner::ErrorStatistics combinedStats;
 
-    /// Number of samples evaluated.
+    /**Number of samples evaluated. */
     std::size_t sampleCount = 0;
-    /// Total desired path length (mm).
+    /**Total desired path length (mm). */
     double pathLength = 0.0;
-    /// Total duration (seconds).
+    /**Total duration (seconds). */
     double duration = 0.0;
 };
 
@@ -208,57 +234,63 @@ struct QuantitativeEvaluation {
 // PathEvaluator class
 //=============================================================================
 
-/// Computes quantitative and qualitative evaluations of actual vs desired
-/// path.
-///
-/// Usage:
-/// ```cpp
-/// PathEvaluator evaluator;
-/// auto quant = evaluator.evaluateQuantitative(desired, actual);
-/// // spectral eval from PathRelativeFFT...
-/// auto qual = evaluator.evaluateQualitative(quant, spectral);
-/// ```
+/**
+ * Computes quantitative and qualitative evaluations of actual vs desired
+ * path.
+ *
+ * Usage:
+ * ```cpp
+ * PathEvaluator evaluator;
+ * auto quant = evaluator.evaluateQuantitative(desired, actual);
+ * // spectral eval from PathRelativeFFT...
+ * auto qual = evaluator.evaluateQualitative(quant, spectral);
+ * ```
+ */
 class PathEvaluator {
 public:
     explicit PathEvaluator(EvaluatorConfig config = {});
 
-    /// Evaluate quantitative metrics from raw desired/actual trajectory
-    /// samples.
-    ///
-    /// Internally:
-    /// 1. Builds a PiecewiseNurbsPath from the desired samples.
-    /// 2. Computes per-sample Frenet-decomposed errors (contour/lag/combined).
-    /// 3. Aggregates all metric groups.
-    ///
-    /// @param desired The desired trajectory samples (ordered by time).
-    /// @param actual The actual measured trajectory samples (ordered by time).
-    /// @return The complete quantitative evaluation.
+    /**
+     * Evaluate quantitative metrics from raw desired/actual trajectory
+     * samples.
+     *
+     * Internally:
+     * 1. Builds a PiecewiseNurbsPath from the desired samples.
+     * 2. Computes per-sample Frenet-decomposed errors (contour/lag/combined).
+     * 3. Aggregates all metric groups.
+     *
+     * @param desired The desired trajectory samples (ordered by time).
+     * @param actual The actual measured trajectory samples (ordered by time).
+     * @return The complete quantitative evaluation.
+     */
     QuantitativeEvaluation evaluateQuantitative(
         const std::vector<GCodeExport::TrajectorySample>& desired,
         const std::vector<GCodeExport::TrajectorySample>& actual) const;
 
-    /// Generate qualitative grades from quantitative results and (optional)
-    /// spectral evaluation.
-    ///
-    /// @param quant The quantitative evaluation.
-    /// @param spectral Pointer to spectral evaluation (may be nullptr if
-    ///        FFT analysis was not performed; oscillation grade will be
-    ///        "not assessed").
+    /**
+     * Generate qualitative grades from quantitative results and (optional)
+     * spectral evaluation.
+     *
+     * @param quant The quantitative evaluation.
+     * @param spectral Pointer to spectral evaluation (may be nullptr if
+     *        FFT analysis was not performed; oscillation grade will be
+     *        "not assessed").
+     */
     QualitativeEvaluation evaluateQualitative(
         const QuantitativeEvaluation& quant,
         const SpectralEvaluation* spectral) const;
 
     //--- Grading helpers (public for testing and external use) ---
 
-    /// Map a value to a grade given A/B/C/D thresholds (lower = better).
+    /**Map a value to a grade given A/B/C/D thresholds (lower = better). */
     Grade gradeFromThresholds(double value,
                               double threshA, double threshB,
                               double threshC, double threshD) const;
 
-    /// Map a grade to a score in [0, 1].
+    /**Map a grade to a score in [0, 1]. */
     double gradeToScore(Grade g) const;
 
-    /// Build a QualitativeAssessment from a grade and a description template.
+    /**Build a QualitativeAssessment from a grade and a description template. */
     QualitativeAssessment makeAssessment(
         Grade g, const std::string& aspect,
         double value, const std::string& unit) const;
@@ -269,26 +301,26 @@ private:
 
     //--- Internal helpers ---
 
-    /// Determine active axes from the desired trajectory.
+    /**Determine active axes from the desired trajectory. */
     std::vector<int> detectActiveAxes(
         const std::vector<GCodeExport::TrajectorySample>& desired) const;
 
-    /// Compute per-sample Frenet-decomposed errors.
+    /**Compute per-sample Frenet-decomposed errors. */
     struct PerSampleErrors {
-        std::vector<double> arcLengths;  ///< Desired arc length per sample
-        std::vector<double> times;       ///< Time per sample
-        std::vector<double> contour;     ///< Contour error per sample
-        std::vector<double> lag;         ///< Lag error per sample
-        std::vector<double> combined;    ///< Combined 3D error per sample
-        std::vector<double> actualPos3d; ///< Actual 3D positions (interleaved x,y,z)
-        std::vector<double> desiredPos3d;///< Desired 3D positions
-        std::vector<double> actualVel;   ///< Actual velocity magnitudes
-        std::vector<double> desiredVel;  ///< Desired velocity magnitudes
-        std::vector<double> actualAccel; ///< Actual accel magnitudes
-        std::vector<double> desiredAccel;///< Desired accel magnitudes
-        std::vector<double> actualJerk;  ///< Actual jerk magnitudes
-        std::vector<double> desiredCurv; ///< Desired curvature
-        std::vector<double> actualCurv;  ///< Actual curvature (finite diff)
+        std::vector<double> arcLengths; /**< Desired arc length per sample */
+        std::vector<double> times; /**< Time per sample */
+        std::vector<double> contour; /**< Contour error per sample */
+        std::vector<double> lag; /**< Lag error per sample */
+        std::vector<double> combined; /**< Combined 3D error per sample */
+        std::vector<double> actualPos3d; /**< Actual 3D positions (interleaved x,y,z) */
+        std::vector<double> desiredPos3d; /**< Desired 3D positions */
+        std::vector<double> actualVel; /**< Actual velocity magnitudes */
+        std::vector<double> desiredVel; /**< Desired velocity magnitudes */
+        std::vector<double> actualAccel; /**< Actual accel magnitudes */
+        std::vector<double> desiredAccel; /**< Desired accel magnitudes */
+        std::vector<double> actualJerk; /**< Actual jerk magnitudes */
+        std::vector<double> desiredCurv; /**< Desired curvature */
+        std::vector<double> actualCurv; /**< Actual curvature (finite diff) */
     };
 
     PerSampleErrors computeErrors(
@@ -315,7 +347,7 @@ private:
 // Combined evaluation (convenience)
 //=============================================================================
 
-/// Complete evaluation result: quantitative + qualitative + spectral.
+/**Complete evaluation result: quantitative + qualitative + spectral. */
 struct CompleteEvaluation {
     QuantitativeEvaluation quantitative;
     QualitativeEvaluation qualitative;

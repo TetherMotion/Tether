@@ -20,9 +20,11 @@ inline constexpr std::string_view kMachineSnapshotSchemaName =
     "tether.machine.cia402.MachineSnapshotV1";
 inline constexpr size_t kMaximumProfileAxes = 16;
 
-/// Slot identifiers for every node in the machine-profile schema graph.
-/// Ids 1–8 belong to the packed DriveSnapshotV1 subgraph and 9–13/19 are
-/// shared primitives; the enum names document every remaining assignment.
+/**
+ * Slot identifiers for every node in the machine-profile schema graph.
+ * Ids 1–8 belong to the packed DriveSnapshotV1 subgraph and 9–13/19 are
+ * shared primitives; the enum names document every remaining assignment.
+ */
 enum class MachineSchemaId : uint8_t {
     String128 = 9,
     Bool = 10,
@@ -895,7 +897,7 @@ inline SchemaGraph machineProfileSchemaGraph() {
     return graph;
 }
 
-/// Manifest roots every machine.cia402.v1 endpoint must commit.
+/**Manifest roots every machine.cia402.v1 endpoint must commit. */
 inline std::vector<SchemaManifestEntry> machineProfileManifest(const SchemaGraph& graph) {
     std::vector<SchemaManifestEntry> manifest;
     for (const auto& key : {driveSnapshotSchemaKey(8), schemaKey(MachineSchemaId::MachineDescriptor),

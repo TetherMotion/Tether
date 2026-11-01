@@ -40,17 +40,17 @@ namespace slave {
  * @brief CiA profile identifiers
  */
 enum class CiAProfile : uint16_t {
-    Generic     = 0,      ///< No specific profile
-    CiA301      = 301,    ///< CANopen communication profile
-    CiA401      = 401,    ///< Generic I/O modules
-    CiA402      = 402,    ///< Drives and motion control
-    CiA404      = 404,    ///< Measuring devices
-    CiA405      = 405,    ///< Programmable devices (PLCs)
-    CiA406      = 406,    ///< Encoders
-    CiA408      = 408,    ///< Hydraulic drives
-    CiA410      = 410,    ///< Inclinometers
-    CiA417      = 417,    ///< Lift controllers
-    CiA430      = 430,    ///< Power supplies
+    Generic     = 0, /**< No specific profile */
+    CiA301      = 301, /**< CANopen communication profile */
+    CiA401      = 401, /**< Generic I/O modules */
+    CiA402      = 402, /**< Drives and motion control */
+    CiA404      = 404, /**< Measuring devices */
+    CiA405      = 405, /**< Programmable devices (PLCs) */
+    CiA406      = 406, /**< Encoders */
+    CiA408      = 408, /**< Hydraulic drives */
+    CiA410      = 410, /**< Inclinometers */
+    CiA417      = 417, /**< Lift controllers */
+    CiA430      = 430, /**< Power supplies */
 };
 
 // ============================================================================

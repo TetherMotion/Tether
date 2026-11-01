@@ -87,19 +87,19 @@ struct GCodeModalState {
     FeedMode feedMode = FeedMode::UnitsPerMinute;
     MotionMode motionMode = MotionMode::Rapid;
     
-    /// Current position (all axes)
+    /**Current position (all axes) */
     std::array<double, MAX_MOTION_AXES> currentPosition{};
     
-    /// Current feed rate (units/min)
+    /**Current feed rate (units/min) */
     double feedRate = 100.0;
     
-    /// Current spindle speed
+    /**Current spindle speed */
     double spindleSpeed = 0.0;
     
-    /// Current tool number
+    /**Current tool number */
     int currentTool = 0;
     
-    /// Units: true = metric (mm), false = imperial (inches)
+    /**Units: true = metric (mm), false = imperial (inches) */
     bool isMetric = true;
 };
 
@@ -114,55 +114,55 @@ struct GCodeModalState {
  * different G-code parsers.
  */
 struct ParsedGCodeCommand {
-    /// Line number in source file (1-based)
+    /**Line number in source file (1-based) */
     size_t lineNumber = 0;
     
-    /// Original line text
+    /**Original line text */
     std::string lineText;
     
-    /// G command number (-1 if none)
+    /**G command number (-1 if none) */
     int gCode = -1;
     
-    /// M command number (-1 if none)
+    /**M command number (-1 if none) */
     int mCode = -1;
     
-    /// Axis coordinates (NaN if not specified)
+    /**Axis coordinates (NaN if not specified) */
     std::array<double, MAX_MOTION_AXES> coordinates;
     
-    /// Arc center offsets (I, J, K) - relative to start point
+    /**Arc center offsets (I, J, K) - relative to start point */
     std::array<double, 3> arcOffsets{0, 0, 0};
     
-    /// Arc radius (R word) - alternative to I, J, K
+    /**Arc radius (R word) - alternative to I, J, K */
     std::optional<double> arcRadius;
     
-    /// Feed rate (F word)
+    /**Feed rate (F word) */
     std::optional<double> feedRate;
     
-    /// Spindle speed (S word)
+    /**Spindle speed (S word) */
     std::optional<double> spindleSpeed;
     
-    /// Tool number (T word)
+    /**Tool number (T word) */
     std::optional<int> toolNumber;
     
-    /// Dwell time in seconds (P word)
+    /**Dwell time in seconds (P word) */
     std::optional<double> dwellTime;
     
-    /// N line number (from G-code)
+    /**N line number (from G-code) */
     std::optional<int> nLineNumber;
     
-    /// Is this a comment-only line?
+    /**Is this a comment-only line? */
     bool isComment = false;
     
-    /// Comment text
+    /**Comment text */
     std::string comment;
     
-    /// BSPLINE/NURBS parameters (Siemens/Heidenhain)
-    std::vector<double> bsplineKnots;    ///< KNOT= values
-    std::vector<double> bsplinePoles;    ///< POLES= values (flat: x0,y0,z0,x1,y1,z1,...)
-    std::vector<double> bsplineWeights;  ///< WEIGHTS= values
-    size_t bsplineDegree = 0;            ///< DEGREE= value
-    bool isBSPLINE = false;              ///< Siemens BSPLINE command
-    bool isNURBSCmd = false;             ///< Heidenhain NURBS command
+    /**BSPLINE/NURBS parameters (Siemens/Heidenhain) */
+    std::vector<double> bsplineKnots; /**< KNOT= values */
+    std::vector<double> bsplinePoles; /**< POLES= values (flat: x0,y0,z0,x1,y1,z1,...) */
+    std::vector<double> bsplineWeights; /**< WEIGHTS= values */
+    size_t bsplineDegree = 0; /**< DEGREE= value */
+    bool isBSPLINE = false; /**< Siemens BSPLINE command */
+    bool isNURBSCmd = false; /**< Heidenhain NURBS command */
     
     ParsedGCodeCommand() {
         coordinates.fill(std::nan(""));

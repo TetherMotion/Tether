@@ -57,19 +57,25 @@ public:
     enum class PassAggregation { Mean, Sum };
     enum class PassState { Approaching, BackingOff, Done };
 
-    /// How a stall (axis reached the mechanical stop) is detected.
+    /**How a stall (axis reached the mechanical stop) is detected. */
     enum class StallDetection {
-        /// |speed_feedback| stays below stall_velocity for stall_time.
-        /// Noisy on drives whose 0x606C is derived from position at the
-        /// cycle rate — kept for compatibility and drives with clean
-        /// velocity estimation.
+        /**
+         * |speed_feedback| stays below stall_velocity for stall_time.
+         * Noisy on drives whose 0x606C is derived from position at the
+         * cycle rate — kept for compatibility and drives with clean
+         * velocity estimation.
+         */
         Speed,
-        /// Position does not change by more than stall_position_counts
-        /// within stall_window, sustained for stall_time.  position_actual
-        /// is a clean counter, so this is the most noise-immune method.
+        /**
+         * Position does not change by more than stall_position_counts
+         * within stall_window, sustained for stall_time.  position_actual
+         * is a clean counter, so this is the most noise-immune method.
+         */
         Position,
-        /// |torque_actual| stays at/above stall_torque_permille for
-        /// stall_time — the drive is pressing against the stop.
+        /**
+         * |torque_actual| stays at/above stall_torque_permille for
+         * stall_time — the drive is pressing against the stop.
+         */
         Torque,
     };
 
@@ -407,22 +413,22 @@ public:
         return true;
     }
 
-    /// True once the final pass is complete.
+    /**True once the final pass is complete. */
     bool isHomed() const { return homed_.load(std::memory_order_acquire); }
 
-    /// True if the virtual homing switch is active (same as isHomed()).
+    /**True if the virtual homing switch is active (same as isHomed()). */
     bool isVirtualSwitchActive() const { return virtual_switch_active_.load(std::memory_order_acquire); }
 
-    /// True if a computed home position is available.
+    /**True if a computed home position is available. */
     bool hasHomePosition() const { return home_position_valid_.load(std::memory_order_acquire); }
 
-    /// True if a virtual switch position is available.
+    /**True if a virtual switch position is available. */
     bool hasVirtualSwitchPosition() const { return virtual_switch_position_valid_.load(std::memory_order_acquire); }
 
-    /// The computed home position (mean or sum of the recorded pass positions).
+    /**The computed home position (mean or sum of the recorded pass positions). */
     int64_t homePosition() const { return home_position_.load(std::memory_order_acquire); }
 
-    /// Position reported by the virtual homing switch (same as homePosition()).
+    /**Position reported by the virtual homing switch (same as homePosition()). */
     int64_t virtualSwitchPosition() const { return virtual_switch_position_.load(std::memory_order_acquire); }
 
     bool hasFailed() const { return failed_.load(std::memory_order_acquire); }
@@ -431,8 +437,10 @@ public:
     ~SensorlessTorqueHomingController() override { flushTrace(); }
 
 private:
-    /// Current axis speed in counts/s.  Uses the PDO's speed_feedback when
-    /// present; otherwise differentiates position_actual over dt.
+    /**
+     * Current axis speed in counts/s.  Uses the PDO's speed_feedback when
+     * present; otherwise differentiates position_actual over dt.
+     */
     double speedOf(const TxPDO* tx, double dt_seconds)
     {
         if constexpr (requires(TxPDO& p) { p.speed_feedback; }) {
@@ -524,8 +532,10 @@ private:
         }
     }
 
-    /// Position change over the trailing stall_window seconds
-    /// (or the oldest available sample while the window fills).
+    /**
+     * Position change over the trailing stall_window seconds
+     * (or the oldest available sample while the window fills).
+     */
     double windowedPositionDelta(int64_t pos_now) const
     {
         if (pos_hist_count_ == 0) {
@@ -553,8 +563,10 @@ private:
         }
     }
 
-    /// Mean of the last home_position_avg_samples positions, or pos_now if
-    /// averaging is disabled / no samples collected yet.
+    /**
+     * Mean of the last home_position_avg_samples positions, or pos_now if
+     * averaging is disabled / no samples collected yet.
+     */
     int64_t averagedPosition(int64_t pos_now) const
     {
         if (pos_avg_count_ == 0) {

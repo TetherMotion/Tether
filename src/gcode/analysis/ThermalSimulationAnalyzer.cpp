@@ -1,5 +1,7 @@
-/// @file ThermalSimulationAnalyzer.cpp
-/// @brief Basic layer-wise thermal and warping simulation.
+/**
+ * @file ThermalSimulationAnalyzer.cpp
+ * @brief Basic layer-wise thermal and warping simulation.
+ */
 
 #include "tether/gcode/analysis/ThermalSimulationAnalyzer.hpp"
 #include "AnalysisUtil.hpp"

@@ -72,11 +72,11 @@ public:
      * @brief Target specifications
      */
     struct Specifications {
-        double settlingTime{1.0};      ///< Desired settling time [s]
-        double overshoot{0.1};         ///< Max overshoot (fraction)
-        double riseTime{0.3};          ///< Desired rise time [s]
-        double steadyStateError{0.01}; ///< Acceptable SS error
-        double controlEffort{1.0};     ///< Max control input
+        double settlingTime{1.0}; /**< Desired settling time [s] */
+        double overshoot{0.1}; /**< Max overshoot (fraction) */
+        double riseTime{0.3}; /**< Desired rise time [s] */
+        double steadyStateError{0.01}; /**< Acceptable SS error */
+        double controlEffort{1.0}; /**< Max control input */
     };
     void setSpecifications(const Specifications& specs) { m_specs = specs; }
     
@@ -393,9 +393,9 @@ public:
      * @brief Current iteration phase
      */
     enum class Phase {
-        Normal,         ///< Normal experiment
-        Gradient,       ///< Gradient experiment
-        Idle           ///< Between experiments
+        Normal, /**< Normal experiment */
+        Gradient, /**< Gradient experiment */
+        Idle /**< Between experiments */
     };
     Phase getCurrentPhase() const { return m_phase; }
     
@@ -473,9 +473,11 @@ public:
      * @param tau Time constant [s] (first-order model).
      */
     void setReferenceModel(double K, double tau);  // First order
-    /// @param K Model gain.
-    /// @param wn Natural frequency [rad/s].
-    /// @param zeta Damping ratio.
+    /**
+     * @param K Model gain.
+     * @param wn Natural frequency [rad/s].
+     * @param zeta Damping ratio.
+     */
     void setReferenceModel(double K, double wn, double zeta);  // Second order
     
     /**
@@ -574,9 +576,11 @@ public:
      * @param tau Time constant [s] (first-order model).
      */
     void setReferenceModel(double K, double tau);
-    /// @param K Model gain.
-    /// @param wn Natural frequency [rad/s].
-    /// @param zeta Damping ratio.
+    /**
+     * @param K Model gain.
+     * @param wn Natural frequency [rad/s].
+     * @param zeta Damping ratio.
+     */
     void setReferenceModel(double K, double wn, double zeta);
     
     /**

@@ -1,5 +1,7 @@
-/// @file AnalysisUtil.hpp
-/// @brief Small shared helpers for G-code analysis.
+/**
+ * @file AnalysisUtil.hpp
+ * @brief Small shared helpers for G-code analysis.
+ */
 
 #pragma once
 
@@ -20,7 +22,7 @@ constexpr double kFilamentDiameterMm = 1.75;
 constexpr double kFilamentDensityGPerCm3 = 1.24; // PLA
 constexpr double kLayerZSnap = 0.01;              // layer grouping resolution (mm)
 
-/// Remove comments and whitespace, leaving just the G-code words for parsing.
+/**Remove comments and whitespace, leaving just the G-code words for parsing. */
 inline std::string stripGcodeComments(const std::string& raw) {
     std::string out;
     out.reserve(raw.size());
@@ -54,7 +56,7 @@ inline std::string trim(std::string_view s) {
     return std::string(s.substr(start, end - start));
 }
 
-/// Find the first word starting with `letter` and parse the numeric value.
+/**Find the first word starting with `letter` and parse the numeric value. */
 inline std::optional<double> findWordValue(const std::string& line, char letter) {
     const char uc = static_cast<char>(std::toupper(static_cast<unsigned char>(letter)));
     for (size_t i = 0; i < line.size(); ++i) {
@@ -76,7 +78,7 @@ inline std::optional<double> findWordValue(const std::string& line, char letter)
     return std::nullopt;
 }
 
-/// Extract a slicer feature-type comment value (e.g. ;TYPE:PERIMETER).
+/**Extract a slicer feature-type comment value (e.g. ;TYPE:PERIMETER). */
 inline std::optional<std::string> extractFeatureTag(std::string_view raw, std::string_view prefix) {
     std::string_view s = raw;
     size_t i = 0;
@@ -90,7 +92,7 @@ inline std::optional<std::string> extractFeatureTag(std::string_view raw, std::s
     return toUpper(trim(s.substr(i)));
 }
 
-/// Per-line signed E-axis delta (mm). Tracks M82/M83, G90/G91, G92 E, etc.
+/**Per-line signed E-axis delta (mm). Tracks M82/M83, G90/G91, G92 E, etc. */
 inline std::vector<double> computeEdeltas(const std::vector<std::string>& gcodeLines) {
     std::vector<double> deltas(gcodeLines.size(), 0.0);
     double currentE = 0.0;
@@ -133,7 +135,7 @@ inline std::vector<double> computeEdeltas(const std::vector<std::string>& gcodeL
     return deltas;
 }
 
-/// Per-line active slicer feature type, derived from TYPE/MESH/FEATURE comments.
+/**Per-line active slicer feature type, derived from TYPE/MESH/FEATURE comments. */
 inline std::vector<std::string> computeFeatures(const std::vector<std::string>& gcodeLines) {
     std::vector<std::string> features(gcodeLines.size(), "UNKNOWN");
     std::string current = "UNKNOWN";
@@ -152,7 +154,7 @@ inline std::vector<std::string> computeFeatures(const std::vector<std::string>& 
     return features;
 }
 
-/// Map an interpolation plane to the ordered axis indices.
+/**Map an interpolation plane to the ordered axis indices. */
 inline void getPlaneAxes(GCode::InterpolationPlane plane, int& u, int& v, int& w) {
     switch (plane) {
         case GCode::InterpolationPlane::XY:
@@ -166,7 +168,7 @@ inline void getPlaneAxes(GCode::InterpolationPlane plane, int& u, int& v, int& w
     }
 }
 
-/// Access a Position coordinate by integer axis index.
+/**Access a Position coordinate by integer axis index. */
 inline double posCoord(const GCode::Position& p, int axis) {
     return p[static_cast<std::size_t>(axis)];
 }

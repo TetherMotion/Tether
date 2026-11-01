@@ -158,9 +158,11 @@ protected:
         return nullptr;
     }
 
-    /// recvmsg() drain: kernel RX timestamp via SCM_TIMESTAMPNS cmsg when
-    /// the socket provides it (SO_TIMESTAMPNS/PACKET_TIMESTAMP), else a
-    /// monotonic userspace stamp.
+    /**
+     * recvmsg() drain: kernel RX timestamp via SCM_TIMESTAMPNS cmsg when
+     * the socket provides it (SO_TIMESTAMPNS/PACKET_TIMESTAMP), else a
+     * monotonic userspace stamp.
+     */
     int drainSocket(CyclicFrameView* views, int max_views) {
         int n = 0;
         while (n < max_views) {

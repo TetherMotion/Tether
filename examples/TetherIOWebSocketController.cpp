@@ -11,7 +11,7 @@ namespace tether::io::example {
 
 namespace {
 
-/// Human-readable name for a MessageType value (for verbose logging).
+/**Human-readable name for a MessageType value (for verbose logging). */
 const char* msgTypeName(uint8_t type) {
     switch (type) {
         case 0x01: return "ListParamsReq";
@@ -46,13 +46,15 @@ const char* msgTypeName(uint8_t type) {
     }
 }
 
-/// Inbound per-session queue bounds (plan item 24): a client that floods
-/// faster than the session loop drains would otherwise grow memory without
-/// limit.  Exceeding either bound fails closed — the transport is closed and
-/// the session ends.
+/**
+ * Inbound per-session queue bounds (plan item 24): a client that floods
+ * faster than the session loop drains would otherwise grow memory without
+ * limit.  Exceeding either bound fails closed — the transport is closed and
+ * the session ends.
+ */
 constexpr size_t kMaxInboundQueueMessages = 256;
 constexpr size_t kMaxInboundQueueBytes = 4 * 1024 * 1024;
-/// Single-message bound, matching the negotiated V6 maxMessageBytes.
+/**Single-message bound, matching the negotiated V6 maxMessageBytes. */
 constexpr size_t kMaxMessageBytes = 1 * 1024 * 1024;
 
 } // namespace
@@ -103,8 +105,10 @@ public:
         return true;
     }
 
-    /// Queue one inbound message; returns false when the per-session queue
-    /// bounds were exceeded and the transport was closed (fail closed).
+    /**
+     * Queue one inbound message; returns false when the per-session queue
+     * bounds were exceeded and the transport was closed (fail closed).
+     */
     bool push(std::string_view bytes) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!connected_) return false;

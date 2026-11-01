@@ -1,9 +1,11 @@
 #pragma once
-/// @file InstabilityMetrics.hpp
-/// @brief Instability metric computations for the Destabilizer.
-///
-/// Each metric maps a closed-loop rollout trajectory to a scalar "how unstable"
-/// score. The optimizer maximizes the combined weighted sum of selected metrics.
+/**
+ * @file InstabilityMetrics.hpp
+ * @brief Instability metric computations for the Destabilizer.
+ *
+ * Each metric maps a closed-loop rollout trajectory to a scalar "how unstable"
+ * score. The optimizer maximizes the combined weighted sum of selected metrics.
+ */
 
 #include "DestabilizerTypes.hpp"
 #include <vector>
@@ -16,48 +18,56 @@
 
 namespace Destabilizer {
 
-/// Trajectory data from a single simulation rollout.
+/**Trajectory data from a single simulation rollout. */
 struct RolloutTrajectory {
     std::vector<double> times;
-    std::vector<std::vector<double>> states;       ///< states[step][stateIdx]
-    std::vector<std::vector<double>> outputs;      ///< outputs[step][outputIdx]
-    std::vector<std::vector<double>> controlInputs;///< controlInputs[step][inputIdx]
-    std::vector<double> referenceState;            ///< x_ref
+    std::vector<std::vector<double>> states; /**< states[step][stateIdx] */
+    std::vector<std::vector<double>> outputs; /**< outputs[step][outputIdx] */
+    std::vector<std::vector<double>> controlInputs; /**< controlInputs[step][inputIdx] */
+    std::vector<double> referenceState; /**< x_ref */
     double dt = 0.001;
     int stateDim = 0;
     int outputDim = 0;
     int inputDim = 0;
 };
 
-/// Abstract base for instability metrics.
+/**Abstract base for instability metrics. */
 class InstabilityMetric {
 public:
     virtual ~InstabilityMetric() = default;
 
-    /// Compute the metric value from a rollout trajectory.
-    /// @param traj Rollout to score (state history plus reference).
-    /// @return Metric value; lower means more stable.
+    /**
+     * Compute the metric value from a rollout trajectory.
+     * @param traj Rollout to score (state history plus reference).
+     * @return Metric value; lower means more stable.
+     */
     virtual double compute(const RolloutTrajectory& traj) const = 0;
 
-    /// Get the metric type.
-    /// @return Enumerated metric kind for serialization/lookup.
+    /**
+     * Get the metric type.
+     * @return Enumerated metric kind for serialization/lookup.
+     */
     virtual MetricType type() const = 0;
 
-    /// Human-readable name.
-    /// @return Static display name of the metric.
+    /**
+     * Human-readable name.
+     * @return Static display name of the metric.
+     */
     virtual const char* name() const = 0;
 };
 
-/// Create a metric instance by type, with optional parameters.
-/// @param wm Metric specification (type, weight, parameters).
-/// @return Metric instance for wm.type, or nullptr for unknown types.
+/**
+ * Create a metric instance by type, with optional parameters.
+ * @param wm Metric specification (type, weight, parameters).
+ * @return Metric instance for wm.type, or nullptr for unknown types.
+ */
 std::unique_ptr<InstabilityMetric> createMetric(const WeightedMetric& wm);
 
 // ---------------------------------------------------------------------------
 // Concrete Metric Implementations
 // ---------------------------------------------------------------------------
 
-/// 1. Peak state deviation: max_t ||x(t) - x_ref||_2
+/**1. Peak state deviation: max_t ||x(t) - x_ref||_2 */
 class PeakStateDeviationMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -65,7 +75,7 @@ public:
     const char* name() const override { return "Peak State Deviation"; }
 };
 
-/// 2. Terminal state deviation: ||x(T) - x_ref||_2
+/**2. Terminal state deviation: ||x(T) - x_ref||_2 */
 class TerminalStateDeviationMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -73,7 +83,7 @@ public:
     const char* name() const override { return "Terminal State Deviation"; }
 };
 
-/// 3. Integrated squared error: ∫ ||x - x_ref||² dt
+/**3. Integrated squared error: ∫ ||x - x_ref||² dt */
 class ISEMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -81,7 +91,7 @@ public:
     const char* name() const override { return "ISE"; }
 };
 
-/// 4. Integrated absolute error: ∫ ||x - x_ref|| dt
+/**4. Integrated absolute error: ∫ ||x - x_ref|| dt */
 class IAEMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -89,7 +99,7 @@ public:
     const char* name() const override { return "IAE"; }
 };
 
-/// 5. Time-weighted ISE: ∫ t · ||x - x_ref||² dt
+/**5. Time-weighted ISE: ∫ t · ||x - x_ref||² dt */
 class ITSEMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -97,7 +107,7 @@ public:
     const char* name() const override { return "ITSE"; }
 };
 
-/// 6. Exponential divergence rate (Lyapunov-like exponent estimate)
+/**6. Exponential divergence rate (Lyapunov-like exponent estimate) */
 class ExponentialDivergenceMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -105,7 +115,7 @@ public:
     const char* name() const override { return "Exponential Divergence Rate"; }
 };
 
-/// 7. Region-of-attraction escape (soft)
+/**7. Region-of-attraction escape (soft) */
 class ROAEscapeMetric : public InstabilityMetric {
 public:
     explicit ROAEscapeMetric(const std::vector<SafeSetBound>& bounds);
@@ -116,7 +126,7 @@ private:
     std::vector<SafeSetBound> bounds_;
 };
 
-/// 8. Control effort saturation time
+/**8. Control effort saturation time */
 class ControlSaturationMetric : public InstabilityMetric {
 public:
     ControlSaturationMetric(double satMin, double satMax);
@@ -127,7 +137,7 @@ private:
     double satMin_, satMax_;
 };
 
-/// 9. Oscillation amplitude growth
+/**9. Oscillation amplitude growth */
 class OscillationGrowthMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -135,7 +145,7 @@ public:
     const char* name() const override { return "Oscillation Amplitude Growth"; }
 };
 
-/// 10. Limit-cycle escape count
+/**10. Limit-cycle escape count */
 class LimitCycleEscapeMetric : public InstabilityMetric {
 public:
     explicit LimitCycleEscapeMetric(double threshold = 1.0);
@@ -146,7 +156,7 @@ private:
     double threshold_;
 };
 
-/// 11. Phase-space volume expansion (finite-time Lyapunov exponent)
+/**11. Phase-space volume expansion (finite-time Lyapunov exponent) */
 class PhaseSpaceExpansionMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -154,7 +164,7 @@ public:
     const char* name() const override { return "Phase-Space Volume Expansion"; }
 };
 
-/// 12. Spectral radius of trajectory-sensitivity matrix
+/**12. Spectral radius of trajectory-sensitivity matrix */
 class SpectralRadiusMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -162,7 +172,7 @@ public:
     const char* name() const override { return "Spectral Radius Sensitivity"; }
 };
 
-/// 13. Settling-time violation
+/**13. Settling-time violation */
 class SettlingTimeViolationMetric : public InstabilityMetric {
 public:
     explicit SettlingTimeViolationMetric(double settlingSpec = 1.0);
@@ -173,7 +183,7 @@ private:
     double settlingSpec_;
 };
 
-/// 14. Overshoot magnitude
+/**14. Overshoot magnitude */
 class OvershootMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -181,7 +191,7 @@ public:
     const char* name() const override { return "Overshoot Magnitude"; }
 };
 
-/// 15. Energy injected into plant
+/**15. Energy injected into plant */
 class EnergyInjectedMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -189,7 +199,7 @@ public:
     const char* name() const override { return "Energy Injected"; }
 };
 
-/// 16. Constraint-violation integral
+/**16. Constraint-violation integral */
 class ConstraintViolationMetric : public InstabilityMetric {
 public:
     explicit ConstraintViolationMetric(const std::vector<SafeSetBound>& bounds);
@@ -200,7 +210,7 @@ private:
     std::vector<SafeSetBound> bounds_;
 };
 
-/// 17. Time-to-instability: T - t* where t* is first divergence time
+/**17. Time-to-instability: T - t* where t* is first divergence time */
 class TimeToInstabilityMetric : public InstabilityMetric {
 public:
     explicit TimeToInstabilityMetric(double threshold = 10.0);
@@ -211,7 +221,7 @@ private:
     double threshold_;
 };
 
-/// 18. Controller bandwidth exceedance
+/**18. Controller bandwidth exceedance */
 class BandwidthExceedanceMetric : public InstabilityMetric {
 public:
     explicit BandwidthExceedanceMetric(double bandwidth = 100.0);
@@ -222,7 +232,7 @@ private:
     double bandwidth_;
 };
 
-/// 19. Covariance growth
+/**19. Covariance growth */
 class CovarianceGrowthMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -230,7 +240,7 @@ public:
     const char* name() const override { return "Covariance Growth"; }
 };
 
-/// 20. Nonlinear distortion metric
+/**20. Nonlinear distortion metric */
 class NonlinearDistortionMetric : public InstabilityMetric {
 public:
     double compute(const RolloutTrajectory& traj) const override;
@@ -242,28 +252,34 @@ public:
 // Combined Metric Evaluator
 // ---------------------------------------------------------------------------
 
-/// Evaluates a weighted combination of multiple metrics.
+/**Evaluates a weighted combination of multiple metrics. */
 class CombinedMetricEvaluator {
 public:
     CombinedMetricEvaluator() = default;
 
-    /// Configure from weighted metric specifications and safe-set bounds.
-    /// @param metrics Metrics to evaluate, with their weights.
-    /// @param safeSet Safe-set bounds applied to the trajectory states.
-    /// @param controlSatMin Lower actuator saturation limit.
-    /// @param controlSatMax Upper actuator saturation limit.
+    /**
+     * Configure from weighted metric specifications and safe-set bounds.
+     * @param metrics Metrics to evaluate, with their weights.
+     * @param safeSet Safe-set bounds applied to the trajectory states.
+     * @param controlSatMin Lower actuator saturation limit.
+     * @param controlSatMax Upper actuator saturation limit.
+     */
     void configure(const std::vector<WeightedMetric>& metrics,
                    const std::vector<SafeSetBound>& safeSet,
                    double controlSatMin, double controlSatMax);
 
-    /// Evaluate J(trajectory) = Σ w_i · m_i(trajectory).
-    /// @param traj Rollout to score.
-    /// @return Weighted sum of all metric values.
+    /**
+     * Evaluate J(trajectory) = Σ w_i · m_i(trajectory).
+     * @param traj Rollout to score.
+     * @return Weighted sum of all metric values.
+     */
     double evaluate(const RolloutTrajectory& traj) const;
 
-    /// Evaluate and return per-metric breakdown.
-    /// @param traj Rollout to score.
-    /// @return Unweighted value of each metric, in configuration order.
+    /**
+     * Evaluate and return per-metric breakdown.
+     * @param traj Rollout to score.
+     * @return Unweighted value of each metric, in configuration order.
+     */
     std::vector<double> evaluateBreakdown(const RolloutTrajectory& traj) const;
 
     int metricCount() const { return static_cast<int>(metrics_.size()); }
@@ -276,48 +292,62 @@ private:
 // Utility Functions
 // ---------------------------------------------------------------------------
 
-/// Compute L2 norm of a vector.
-/// @param v Input vector.
-/// @return Euclidean norm.
+/**
+ * Compute L2 norm of a vector.
+ * @param v Input vector.
+ * @return Euclidean norm.
+ */
 double vectorNorm(const std::vector<double>& v);
 
-/// Compute L-infinity norm.
-/// @param v Input vector.
-/// @return Largest absolute component.
+/**
+ * Compute L-infinity norm.
+ * @param v Input vector.
+ * @return Largest absolute component.
+ */
 double vectorNormInf(const std::vector<double>& v);
 
-/// Compute difference vector: a - b.
-/// @param a Minuend.
-/// @param b Subtrahend.
-/// @return Component-wise a - b.
+/**
+ * Compute difference vector: a - b.
+ * @param a Minuend.
+ * @param b Subtrahend.
+ * @return Component-wise a - b.
+ */
 std::vector<double> vectorDiff(const std::vector<double>& a,
                                 const std::vector<double>& b);
 
-/// Simple FFT (Cooley-Tukey) for power spectrum estimation.
-/// Input: real-valued signal. Output: magnitude spectrum (positive frequencies).
-/// @param signal Time-domain samples.
-/// @param dt Sample interval [s].
-/// @return Magnitude spectrum of the positive frequencies.
+/**
+ * Simple FFT (Cooley-Tukey) for power spectrum estimation.
+ * Input: real-valued signal. Output: magnitude spectrum (positive frequencies).
+ * @param signal Time-domain samples.
+ * @param dt Sample interval [s].
+ * @return Magnitude spectrum of the positive frequencies.
+ */
 std::vector<double> computeFFTMagnitude(const std::vector<double>& signal, double dt);
 
-/// Compute power spectral density.
-/// @param signal Time-domain samples.
-/// @param dt Sample interval [s].
-/// @return (frequency, PSD) pairs for the positive frequencies.
+/**
+ * Compute power spectral density.
+ * @param signal Time-domain samples.
+ * @param dt Sample interval [s].
+ * @return (frequency, PSD) pairs for the positive frequencies.
+ */
 std::vector<std::pair<double, double>> computePSD(const std::vector<double>& signal,
                                                     double dt);
 
-/// Linear least-squares fit: y = a + b*x. Returns {a, b}.
-/// @param x Sample x coordinates.
-/// @param y Sample y coordinates (same size as @p x).
-/// @return (a, b) of the best-fit line.
+/**
+ * Linear least-squares fit: y = a + b*x. Returns {a, b}.
+ * @param x Sample x coordinates.
+ * @param y Sample y coordinates (same size as @p x).
+ * @return (a, b) of the best-fit line.
+ */
 std::pair<double, double> linearFit(const std::vector<double>& x,
                                      const std::vector<double>& y);
 
-/// Estimate dominant eigenvalue magnitude from a sequence of states.
-/// @param states State snapshots in time order.
-/// @param dt Sample interval [s].
-/// @return Estimated spectral radius of the linearized dynamics.
+/**
+ * Estimate dominant eigenvalue magnitude from a sequence of states.
+ * @param states State snapshots in time order.
+ * @param dt Sample interval [s].
+ * @return Estimated spectral radius of the linearized dynamics.
+ */
 double estimateSpectralRadius(const std::vector<std::vector<double>>& states, double dt);
 
 } // namespace Destabilizer

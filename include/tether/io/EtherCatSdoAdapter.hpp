@@ -32,14 +32,18 @@
 
 namespace tether::io::machine {
 
-/// Supplies the object list shown by machine.sdo.list for a slave. Returning
-/// an empty vector is valid — explicit-index transfers still work.
+/**
+ * Supplies the object list shown by machine.sdo.list for a slave. Returning
+ * an empty vector is valid — explicit-index transfers still work.
+ */
 using SdoObjectTableProvider =
     std::function<std::vector<EtherCAT::ObjectDictionary::ObjectDictionaryEntry>(
         uint16_t slave)>;
 
-/// Common CiA 301 + CiA 402 objects, usable as the default listing for DS402
-/// drives. Device vendors may supply richer tables via the provider argument.
+/**
+ * Common CiA 301 + CiA 402 objects, usable as the default listing for DS402
+ * drives. Device vendors may supply richer tables via the provider argument.
+ */
 inline std::vector<EtherCAT::ObjectDictionary::ObjectDictionaryEntry>
 cia402SdoObjectTable(uint16_t /*slave*/) {
     using namespace EtherCAT::ObjectDictionary;
@@ -70,10 +74,12 @@ cia402SdoObjectTable(uint16_t /*slave*/) {
 
 class EtherCatSdoAccess final : public IMachineSdoAccess {
 public:
-    /// @param master   Running EtherCAT master (must outlive this adapter).
-    /// @param objects  Known-OD provider for machine.sdo.list; defaults to
-    ///                 the common CiA 402 table. Swap in a device-specific
-    ///                 table for non-drive slaves.
+    /**
+     * @param master   Running EtherCAT master (must outlive this adapter).
+     * @param objects  Known-OD provider for machine.sdo.list; defaults to
+     *                 the common CiA 402 table. Swap in a device-specific
+     *                 table for non-drive slaves.
+     */
     explicit EtherCatSdoAccess(EtherCAT::Master& master,
                                SdoObjectTableProvider objects = cia402SdoObjectTable)
         : master_(master), objects_(std::move(objects)) {}

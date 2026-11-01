@@ -1,7 +1,9 @@
 #pragma once
 
-/// @file PrinterObjectsFans.hpp
-/// @brief Fan printer objects (temperature_fan, controller_fan, heater_fan, fan_generic)
+/**
+ * @file PrinterObjectsFans.hpp
+ * @brief Fan printer objects (temperature_fan, controller_fan, heater_fan, fan_generic)
+ */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 #include "tether/klipper/objects/Peripherals.hpp"
@@ -17,7 +19,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Temperature fan printer object (temperature_fan).
+/**@brief Temperature fan printer object (temperature_fan). */
 class TemperatureFanObject : public PrinterObject {
 public:
     explicit TemperatureFanObject(const std::string& name) : name_(name) {}
@@ -48,7 +50,7 @@ private:
     double speed_ = 0.0;
 };
 
-/// @brief Controller fan printer object (controller_fan).
+/**@brief Controller fan printer object (controller_fan). */
 class ControllerFanObject : public PrinterObject {
 public:
     explicit ControllerFanObject(const std::string& name) : name_(name) {}
@@ -74,7 +76,7 @@ private:
     double rpm_ = 0.0;
 };
 
-/// @brief Heater fan printer object (heater_fan).
+/**@brief Heater fan printer object (heater_fan). */
 class HeaterFanObject : public PrinterObject {
 public:
     explicit HeaterFanObject(const std::string& name) : name_(name) {}
@@ -100,7 +102,7 @@ private:
     double rpm_ = 0.0;
 };
 
-/// @brief Generic fan printer object (fan_generic).
+/**@brief Generic fan printer object (fan_generic). */
 class FanGenericObject : public PrinterObject {
 public:
     explicit FanGenericObject(const std::string& name) : name_(name) {}

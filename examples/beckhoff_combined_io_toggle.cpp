@@ -64,7 +64,7 @@ using Chain = Beckhoff::MultiCombinedIoTerminal<>;
 
 static std::atomic<bool> g_cancel{false};
 
-/// Compact per-module rendering: "s3 in:01001100 out:0001".
+/**Compact per-module rendering: "s3 in:01001100 out:0001". */
 static std::string moduleStates(const Chain& io) {
     std::string out;
     for (size_t m = 0; m < io.moduleCount(); ++m) {

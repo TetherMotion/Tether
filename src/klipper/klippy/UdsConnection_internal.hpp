@@ -1,11 +1,13 @@
 #pragma once
 
-/// @file UdsConnection_internal.hpp
-/// @brief Internal UDS connection class (not part of public API).
-///
-/// This header is included by the split KlippyUdsServer*.cpp files that
-/// need access to the UdsConnection class. It is an implementation detail
-/// and should not be included by external code.
+/**
+ * @file UdsConnection_internal.hpp
+ * @brief Internal UDS connection class (not part of public API).
+ *
+ * This header is included by the split KlippyUdsServer*.cpp files that
+ * need access to the UdsConnection class. It is an implementation detail
+ * and should not be included by external code.
+ */
 
 #include <cerrno>
 #include <fcntl.h>
@@ -15,7 +17,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Internal class representing a single UDS client connection.
+/**@brief Internal class representing a single UDS client connection. */
 class UdsConnection {
 public:
     explicit UdsConnection(int fd, int id) : fd_(fd), id_(id) {}
@@ -30,7 +32,7 @@ public:
         closed_ = true;
     }
 
-    /// @brief Read available data and return complete frames.
+    /**@brief Read available data and return complete frames. */
     std::vector<std::string> readFrames() {
         std::vector<std::string> frames;
         char buf[4096];
@@ -60,7 +62,7 @@ public:
         return frames;
     }
 
-    /// @brief Write data to the socket.
+    /**@brief Write data to the socket. */
     bool write(const std::string& data) {
         if (closed_ || fd_ < 0) return false;
         size_t total = 0;
@@ -76,12 +78,12 @@ public:
         return true;
     }
 
-    /// @brief Send a JSON frame terminated by ETX.
+    /**@brief Send a JSON frame terminated by ETX. */
     bool sendFrame(const std::string& json) {
         return write(json + "\x03");
     }
 
-    /// @brief Set non-blocking mode.
+    /**@brief Set non-blocking mode. */
     void setNonBlocking() {
         int flags = fcntl(fd_, F_GETFL, 0);
         if (flags >= 0) fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
@@ -91,7 +93,7 @@ private:
     int fd_;
     int id_;
     bool closed_ = false;
-    std::string partial_; ///< Accumulator for partial frames.
+    std::string partial_; /**< Accumulator for partial frames. */
 };
 
 } // namespace tether::klipper::klippy

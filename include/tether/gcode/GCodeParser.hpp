@@ -134,23 +134,23 @@ namespace GCode {
  * @brief Modal groups for G-codes
  */
 enum class ModalGroup : uint8_t {
-    NON_MODAL = 0,      ///< G4, G10, G28, G30, G53, G92, etc.
-    MOTION = 1,         ///< G0, G1, G2, G3, G33, G38.x, G73, G76, G80-G89
-    PLANE = 2,          ///< G17, G18, G19, G17.1, G18.1, G19.1
-    DISTANCE = 3,       ///< G90, G91
-    ARC_DISTANCE = 4,   ///< G90.1, G91.1
-    FEED_MODE = 5,      ///< G93, G94, G95
-    UNITS = 6,          ///< G20, G21
-    CUTTER_COMP = 7,    ///< G40, G41, G42, G41.1, G42.1
-    TOOL_LENGTH = 8,    ///< G43, G43.1, G43.2, G49
-    CANNED_RETURN = 10, ///< G98, G99
-    COORD_SYSTEM = 12,  ///< G54-G59.3
-    PATH_MODE = 13,     ///< G61, G61.1, G64
-    SPINDLE_MODE = 14,  ///< G96, G97
-    LATHE_DIAMETER = 15, ///< G7, G8
-    LOCAL_OFFSET = 16,  ///< G52 (local coordinate offset)
-    COORD_ROTATION = 17, ///< G68, G69 (coordinate system rotation)
-    SCALING = 18        ///< G51, G50 (scaling on/off)
+    NON_MODAL = 0, /**< G4, G10, G28, G30, G53, G92, etc. */
+    MOTION = 1, /**< G0, G1, G2, G3, G33, G38.x, G73, G76, G80-G89 */
+    PLANE = 2, /**< G17, G18, G19, G17.1, G18.1, G19.1 */
+    DISTANCE = 3, /**< G90, G91 */
+    ARC_DISTANCE = 4, /**< G90.1, G91.1 */
+    FEED_MODE = 5, /**< G93, G94, G95 */
+    UNITS = 6, /**< G20, G21 */
+    CUTTER_COMP = 7, /**< G40, G41, G42, G41.1, G42.1 */
+    TOOL_LENGTH = 8, /**< G43, G43.1, G43.2, G49 */
+    CANNED_RETURN = 10, /**< G98, G99 */
+    COORD_SYSTEM = 12, /**< G54-G59.3 */
+    PATH_MODE = 13, /**< G61, G61.1, G64 */
+    SPINDLE_MODE = 14, /**< G96, G97 */
+    LATHE_DIAMETER = 15, /**< G7, G8 */
+    LOCAL_OFFSET = 16, /**< G52 (local coordinate offset) */
+    COORD_ROTATION = 17, /**< G68, G69 (coordinate system rotation) */
+    SCALING = 18 /**< G51, G50 (scaling on/off) */
 };
 
 /**
@@ -176,31 +176,31 @@ ModalGroup getModalGroup(int gcode, int decimal);
  * @brief Parser configuration
  */
 struct ParserConfig {
-    /// Maximum blocks in lookahead queue
+    /**Maximum blocks in lookahead queue */
     size_t maxLookahead{MAX_LOOKAHEAD};
     
-    /// Maximum blocks in lookbehind queue
+    /**Maximum blocks in lookbehind queue */
     size_t maxLookbehind{MAX_LOOKBEHIND};
     
-    /// Strict modal group checking
+    /**Strict modal group checking */
     bool strictModalGroups{true};
     
-    /// Allow multiple G-codes from same modal group
+    /**Allow multiple G-codes from same modal group */
     bool allowMultipleSameModal{false};
     
-    /// Allow omitting axis words when motion mode is active
+    /**Allow omitting axis words when motion mode is active */
     bool allowOmittedAxisWords{true};
     
-    /// Enable expression evaluation in word values
+    /**Enable expression evaluation in word values */
     bool evaluateExpressions{true};
     
-    /// Copy original line text into block
+    /**Copy original line text into block */
     bool preserveOriginalText{true};
     
-    /// LinuxCNC compatibility mode
+    /**LinuxCNC compatibility mode */
     bool linuxCNCMode{true};
     
-    /// Fanuc compatibility mode
+    /**Fanuc compatibility mode */
     bool fanucMode{false};
 };
 
@@ -215,63 +215,89 @@ class BlockQueue {
 public:
     BlockQueue(size_t maxSize = MAX_LOOKAHEAD);
     
-    /// Add block to front (for lookbehind)
-    /// @param block Block inserted at the front.
+    /**
+     * Add block to front (for lookbehind)
+     * @param block Block inserted at the front.
+     */
     void pushFront(const Block& block);
     
-    /// Add block to back (for lookahead)
-    /// @param block Block appended at the back.
+    /**
+     * Add block to back (for lookahead)
+     * @param block Block appended at the back.
+     */
     void pushBack(const Block& block);
     
-    /// Remove block from front
-    /// @return Removed block; undefined when the queue is empty.
+    /**
+     * Remove block from front
+     * @return Removed block; undefined when the queue is empty.
+     */
     Block popFront();
     
-    /// Remove block from back
-    /// @return Removed block; undefined when the queue is empty.
+    /**
+     * Remove block from back
+     * @return Removed block; undefined when the queue is empty.
+     */
     Block popBack();
     
-    /// Get block at index (0 = front)
-    /// @param index Position from the front.
-    /// @return Mutable block reference.
+    /**
+     * Get block at index (0 = front)
+     * @param index Position from the front.
+     * @return Mutable block reference.
+     */
     Block& operator[](size_t index);
-    /// @param index Position from the front.
-    /// @return Read-only block reference.
+    /**
+     * @param index Position from the front.
+     * @return Read-only block reference.
+     */
     const Block& operator[](size_t index) const;
     
-    /// Get front block
-    /// @return Mutable reference to the front block.
+    /**
+     * Get front block
+     * @return Mutable reference to the front block.
+     */
     Block& front();
-    /// @return Read-only reference to the front block.
+    /**@return Read-only reference to the front block. */
     const Block& front() const;
     
-    /// Get back block
-    /// @return Mutable reference to the back block.
+    /**
+     * Get back block
+     * @return Mutable reference to the back block.
+     */
     Block& back();
-    /// @return Read-only reference to the back block.
+    /**@return Read-only reference to the back block. */
     const Block& back() const;
     
-    /// Number of blocks in queue
-    /// @return Current queue length.
+    /**
+     * Number of blocks in queue
+     * @return Current queue length.
+     */
     size_t size() const { return m_blocks.size(); }
     
-    /// Check if empty
-    /// @return true when no blocks are queued.
+    /**
+     * Check if empty
+     * @return true when no blocks are queued.
+     */
     bool empty() const { return m_blocks.empty(); }
     
-    /// Check if full
-    /// @return true when the queue reached its maximum size.
+    /**
+     * Check if full
+     * @return true when the queue reached its maximum size.
+     */
     bool full() const { return m_blocks.size() >= m_maxSize; }
     
-    /// Clear all blocks
+    /**Clear all blocks */
     void clear() { m_blocks.clear(); }
     
-    /// Get maximum size
-    /// @return Configured capacity of the queue.
+    /**
+     * Get maximum size
+     * @return Configured capacity of the queue.
+     */
     size_t maxSize() const { return m_maxSize; }
     
-    /// Iterator support
-    /// @return Iterator to the front block.
+    /**
+     * Iterator support
+     * @return Iterator to the front block.
+     */
     auto begin() { return m_blocks.begin(); }
     auto end() { return m_blocks.end(); }
     auto begin() const { return m_blocks.begin(); }
@@ -427,7 +453,7 @@ public:
      * @return Mutable lexer used by the parser.
      */
     Lexer& getLexer() { return m_lexer; }
-    /// @return Read-only lexer used by the parser.
+    /**@return Read-only lexer used by the parser. */
     const Lexer& getLexer() const { return m_lexer; }
 
     /**

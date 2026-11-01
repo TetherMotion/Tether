@@ -45,19 +45,19 @@ namespace MotionPlanner::analytical::extrusion {
  * @brief Parameters for analytical power-law pressure advance.
  */
 struct AnalyticalPowerLawPressureAdvanceParams {
-    /// K_base = βV_m·C_n/A_f [filament-mm / (mm³/s)^n]
+    /**K_base = βV_m·C_n/A_f [filament-mm / (mm³/s)^n] */
     double baseGain = 0.0;
 
-    /// Flow index n (1 = Newtonian, <1 = shear-thinning, >1 = shear-thickening)
+    /**Flow index n (1 = Newtonian, <1 = shear-thinning, >1 = shear-thickening) */
     double flowIndex = 1.0;
 
-    /// Filament diameter [mm]
+    /**Filament diameter [mm] */
     double filamentDiameterMm = 1.75;
 
-    /// Smoothing window [s] (0 = no smoothing)
+    /**Smoothing window [s] (0 = no smoothing) */
     double smoothTime = 0.0;
 
-    /// Maximum absolute compensation [mm] (safety clamp, 0 = no clamp)
+    /**Maximum absolute compensation [mm] (safety clamp, 0 = no clamp) */
     double maxCompensation = 0.0;
 };
 

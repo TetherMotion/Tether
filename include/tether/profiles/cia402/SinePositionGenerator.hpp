@@ -145,9 +145,9 @@ public:
         cmd.torque_offset = 0;
     }
 
-    /// Peak-to-peak swing in encoder counts (for diagnostics).
+    /**Peak-to-peak swing in encoder counts (for diagnostics). */
     double amplitudeCounts() const { return amplitude_counts_; }
-    /// Encoder counts per shaft revolution.
+    /**Encoder counts per shaft revolution. */
     double countsPerRev() const { return counts_per_rev_; }
 
 private:

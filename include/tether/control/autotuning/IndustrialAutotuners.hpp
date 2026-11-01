@@ -67,10 +67,10 @@ public:
      * @brief Relay types
      */
     enum class RelayType {
-        Standard,       ///< Symmetric on/off
-        Hysteresis,     ///< With deadband
-        Asymmetric,     ///< Different up/down amplitudes
-        Integrating     ///< Biased for integrating processes
+        Standard, /**< Symmetric on/off */
+        Hysteresis, /**< With deadband */
+        Asymmetric, /**< Different up/down amplitudes */
+        Integrating /**< Biased for integrating processes */
     };
     void setRelayType(RelayType type) { m_relayType = type; }
     
@@ -109,8 +109,8 @@ public:
     enum class TuningRule {
         ZieglerNichols,
         TyreusLuyben,
-        SomeTimes,      ///< Some-times oscillatory
-        NoOvershoot,    ///< Critically damped
+        SomeTimes, /**< Some-times oscillatory */
+        NoOvershoot, /**< Critically damped */
         IMC_Aggressive,
         IMC_Moderate,
         IMC_Conservative
@@ -121,12 +121,12 @@ public:
      * @brief Get oscillation characteristics
      */
     struct OscillationData {
-        double amplitude{0.0};     ///< Peak-to-peak amplitude
-        double period{0.0};        ///< Period [s]
-        double ultimateGain{0.0};  ///< Ku
-        double ultimatePeriod{0.0}; ///< Tu
-        int cycles{0};             ///< Number of complete cycles
-        bool stable{false};        ///< Stable oscillation achieved
+        double amplitude{0.0}; /**< Peak-to-peak amplitude */
+        double period{0.0}; /**< Period [s] */
+        double ultimateGain{0.0}; /**< Ku */
+        double ultimatePeriod{0.0}; /**< Tu */
+        int cycles{0}; /**< Number of complete cycles */
+        bool stable{false}; /**< Stable oscillation achieved */
     };
     OscillationData getOscillationData() const { return m_oscData; }
     
@@ -229,10 +229,10 @@ public:
      * @brief Set identification method
      */
     enum class IdMethod {
-        Tangent,        ///< Maximum slope tangent
-        Area,           ///< Area-based
-        TwoPoint,       ///< 28-63% or 35-85%
-        Optimization    ///< Least squares fit
+        Tangent, /**< Maximum slope tangent */
+        Area, /**< Area-based */
+        TwoPoint, /**< 28-63% or 35-85% */
+        Optimization /**< Least squares fit */
     };
     void setIdMethod(IdMethod method) { m_idMethod = method; }
     
@@ -339,22 +339,22 @@ public:
      */
     enum class Pattern {
         Unknown,
-        Oscillatory,    ///< Too much overshoot/oscillation
-        Sluggish,       ///< Too slow response
-        Underdamped,    ///< Acceptable but oscillatory
-        Overdamped,     ///< Acceptable but slow
-        Good,           ///< Within specs
-        Unstable        ///< Growing oscillation
+        Oscillatory, /**< Too much overshoot/oscillation */
+        Sluggish, /**< Too slow response */
+        Underdamped, /**< Acceptable but oscillatory */
+        Overdamped, /**< Acceptable but slow */
+        Good, /**< Within specs */
+        Unstable /**< Growing oscillation */
     };
     
     /**
      * @brief Set target specifications
      */
     struct Specifications {
-        double maxOvershoot{0.1};     ///< Max overshoot (fraction)
-        double maxSettlingTime{10.0}; ///< Max settling time [s]
-        double maxRiseTime{2.0};      ///< Max rise time [s]
-        double settleBand{0.02};      ///< Settling band (±fraction)
+        double maxOvershoot{0.1}; /**< Max overshoot (fraction) */
+        double maxSettlingTime{10.0}; /**< Max settling time [s] */
+        double maxRiseTime{2.0}; /**< Max rise time [s] */
+        double settleBand{0.02}; /**< Settling band (±fraction) */
     };
     void setSpecifications(const Specifications& specs) { m_specs = specs; }
     
@@ -718,12 +718,12 @@ public:
      */
     enum class ProcessCategory {
         Unknown,
-        FastStable,      ///< Fast, well-damped
-        SlowStable,      ///< Slow, well-damped
-        Integrating,     ///< Integrating (level, etc)
-        Oscillatory,     ///< Poorly damped
-        DelayDominant,   ///< Large dead time
-        Nonlinear        ///< Significant nonlinearity
+        FastStable, /**< Fast, well-damped */
+        SlowStable, /**< Slow, well-damped */
+        Integrating, /**< Integrating (level, etc) */
+        Oscillatory, /**< Poorly damped */
+        DelayDominant, /**< Large dead time */
+        Nonlinear /**< Significant nonlinearity */
     };
     
     /**

@@ -30,16 +30,16 @@ public:
      */
     explicit McuClock(uint32_t freqHz = 180000000) : freqHz_(freqHz) {}
 
-    /// @return The clock frequency in Hz.
+    /**@return The clock frequency in Hz. */
     uint32_t frequency() const { return freqHz_; }
 
-    /// @return The 32-bit tick count (wraps at 2^32).
+    /**@return The 32-bit tick count (wraps at 2^32). */
     uint32_t ticks32() const { return ticks32_; }
 
-    /// @return The 64-bit monotonic tick count (accumulates across wraps).
+    /**@return The 64-bit monotonic tick count (accumulates across wraps). */
     uint64_t ticks64() const { return ticks64_; }
 
-    /// @return The elapsed time in seconds (from 64-bit ticks).
+    /**@return The elapsed time in seconds (from 64-bit ticks). */
     double seconds() const {
         return static_cast<double>(ticks64_) / static_cast<double>(freqHz_);
     }
@@ -83,7 +83,7 @@ public:
         return static_cast<double>(toTicks64(ticks32)) / static_cast<double>(freqHz_);
     }
 
-    /// @brief Reset the clock to zero.
+    /**@brief Reset the clock to zero. */
     void reset() { ticks32_ = 0; ticks64_ = 0; }
 
 private:

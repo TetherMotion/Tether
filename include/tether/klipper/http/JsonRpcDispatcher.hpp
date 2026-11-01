@@ -1,12 +1,14 @@
 #pragma once
 
-/// @file JsonRpcDispatcher.hpp
-/// @brief JSON-RPC 2.0 dispatcher that maps dotted method names to UDS endpoints.
-///
-/// Moonraker's JSON-RPC protocol uses dotted method names (e.g. "server.info",
-/// "printer.objects.query") while the existing KlippyUdsServer uses slash-style
-/// method names (e.g. "server/info", "objects/query"). This dispatcher converts
-/// between the two and delegates to KlippyUdsServer::callEndpoint().
+/**
+ * @file JsonRpcDispatcher.hpp
+ * @brief JSON-RPC 2.0 dispatcher that maps dotted method names to UDS endpoints.
+ *
+ * Moonraker's JSON-RPC protocol uses dotted method names (e.g. "server.info",
+ * "printer.objects.query") while the existing KlippyUdsServer uses slash-style
+ * method names (e.g. "server/info", "objects/query"). This dispatcher converts
+ * between the two and delegates to KlippyUdsServer::callEndpoint().
+ */
 
 #include "tether/klipper/klippy/JsonValue.hpp"
 #include "tether/klipper/klippy/UdsTypes.hpp"
@@ -19,25 +21,33 @@
 
 namespace tether::klipper::http {
 
-/// @brief Type of the endpoint call function.
-/// Takes a method name and params, returns the result JsonValue.
+/**
+ * @brief Type of the endpoint call function.
+ * Takes a method name and params, returns the result JsonValue.
+ */
 using EndpointCallable = std::function<klippy::JsonValue(
     const std::string& method, const klippy::JsonValue& params)>;
 
-/// @brief JSON-RPC 2.0 dispatcher.
-///
-/// Converts dotted JSON-RPC method names to slash-style UDS method names
-/// and dispatches to the provided endpoint callable.
+/**
+ * @brief JSON-RPC 2.0 dispatcher.
+ *
+ * Converts dotted JSON-RPC method names to slash-style UDS method names
+ * and dispatches to the provided endpoint callable.
+ */
 class JsonRpcDispatcher {
 public:
-    /// @brief Construct with an endpoint callable.
-    /// @param endpointCall Function that takes (method, params) and returns result.
+    /**
+     * @brief Construct with an endpoint callable.
+     * @param endpointCall Function that takes (method, params) and returns result.
+     */
     explicit JsonRpcDispatcher(EndpointCallable endpointCall)
         : endpointCall_(std::move(endpointCall)) {}
 
-    /// @brief Convert a dotted JSON-RPC method name to a slash-style UDS method.
-    /// @param dotted The dotted method name (e.g. "server.info").
-    /// @return The slash-style method name (e.g. "server/info").
+    /**
+     * @brief Convert a dotted JSON-RPC method name to a slash-style UDS method.
+     * @param dotted The dotted method name (e.g. "server.info").
+     * @return The slash-style method name (e.g. "server/info").
+     */
     static std::string dottedToSlash(const std::string& dotted) {
         std::string result = dotted;
         for (auto& c : result) {
@@ -46,9 +56,11 @@ public:
         return result;
     }
 
-    /// @brief Convert a slash-style UDS method name to a dotted JSON-RPC method.
-    /// @param slash The slash-style method name (e.g. "server/info").
-    /// @return The dotted method name (e.g. "server.info").
+    /**
+     * @brief Convert a slash-style UDS method name to a dotted JSON-RPC method.
+     * @param slash The slash-style method name (e.g. "server/info").
+     * @return The dotted method name (e.g. "server.info").
+     */
     static std::string slashToDotted(const std::string& slash) {
         std::string result = slash;
         for (auto& c : result) {
@@ -57,9 +69,11 @@ public:
         return result;
     }
 
-    /// @brief Dispatch a JSON-RPC 2.0 request.
-    /// @param json The raw JSON-RPC request string.
-    /// @return The JSON-RPC 2.0 response string.
+    /**
+     * @brief Dispatch a JSON-RPC 2.0 request.
+     * @param json The raw JSON-RPC request string.
+     * @return The JSON-RPC 2.0 response string.
+     */
     std::string dispatch(std::string_view json) {
         auto parsed = parseJson(json);
         if (!parsed || !parsed->isObject()) {
@@ -183,9 +197,11 @@ public:
         }
     }
 
-    /// @brief Dispatch a JSON-RPC 2.0 request from an already-parsed JsonValue.
-    /// @param frame The parsed JSON-RPC request object.
-    /// @return The JSON-RPC 2.0 response string, or empty for notifications.
+    /**
+     * @brief Dispatch a JSON-RPC 2.0 request from an already-parsed JsonValue.
+     * @param frame The parsed JSON-RPC request object.
+     * @return The JSON-RPC 2.0 response string, or empty for notifications.
+     */
     std::string dispatchParsed(const klippy::JsonValue& frame) {
         return dispatch(frame.dump());
     }

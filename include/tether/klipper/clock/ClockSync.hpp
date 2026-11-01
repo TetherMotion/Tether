@@ -29,7 +29,7 @@ namespace tether::klipper::clock {
 using HostClock = std::chrono::steady_clock;
 using HostTime = HostClock::time_point;
 
-/// @brief A clock-sync sample: (hostSendTime, hostRecvTime, mcuClock32).
+/**@brief A clock-sync sample: (hostSendTime, hostRecvTime, mcuClock32). */
 struct ClockSample {
     HostTime sendTime;
     HostTime recvTime;
@@ -65,13 +65,13 @@ public:
         updateFit();
     }
 
-    /// @return True if the fit has enough samples to be usable.
+    /**@return True if the fit has enough samples to be usable. */
     bool isSynchronised() const { return samples_.size() >= 2 && slope_ != 0.0; }
 
-    /// @return The estimated slope (MCU ticks per host second).
+    /**@return The estimated slope (MCU ticks per host second). */
     double slope() const { return slope_; }
 
-    /// @return The estimated offset (MCU ticks at host time zero).
+    /**@return The estimated offset (MCU ticks at host time zero). */
     double offset() const { return offset_; }
 
     /**
@@ -100,10 +100,10 @@ public:
         return static_cast<uint32_t>(sec * slope_);
     }
 
-    /// @brief Reset all samples and the fit.
+    /**@brief Reset all samples and the fit. */
     void reset() { samples_.clear(); slope_ = 0; offset_ = 0; }
 
-    /// @return The number of samples retained.
+    /**@return The number of samples retained. */
     size_t sampleCount() const { return samples_.size(); }
 
 private:

@@ -24,12 +24,12 @@ namespace tether::klipper::objects {
 // Homing state
 // ============================================================================
 
-/// @brief Phase of a homing sequence.
+/**@brief Phase of a homing sequence. */
 enum class HomingPhase {
     Idle,
-    Seeking,    ///< Moving towards endstop at search speed
-    Bouncing,   ///< Moved back after trigger, re-approaching at slower speed
-    Settling,   ///< Setting position after homing
+    Seeking, /**< Moving towards endstop at search speed */
+    Bouncing, /**< Moved back after trigger, re-approaching at slower speed */
+    Settling, /**< Setting position after homing */
     Complete,
     Failed
 };
@@ -60,19 +60,19 @@ struct EndstopState {
 // Homing sequence
 // ============================================================================
 
-/// @brief Configuration for a single-axis homing sequence.
+/**@brief Configuration for a single-axis homing sequence. */
 struct HomingAxisConfig {
-    std::string name;              ///< Axis name (e.g. "x", "y", "z")
-    int stepperIndex = 0;          ///< Stepper index for this axis
-    double searchSpeed = 50.0;     ///< mm/s, speed for initial seek
-    double bounceSpeed = 10.0;     ///< mm/s, speed for second approach
-    double bounceDistance = 5.0;   ///< mm, distance to back off after trigger
-    double homePosition = 0.0;     ///< Position to set after homing
-    bool positiveDirection = false; ///< True if home is at positive end
-    double endstopThreshold = 0.1; ///< Position threshold for endstop detection
+    std::string name; /**< Axis name (e.g. "x", "y", "z") */
+    int stepperIndex = 0; /**< Stepper index for this axis */
+    double searchSpeed = 50.0; /**< mm/s, speed for initial seek */
+    double bounceSpeed = 10.0; /**< mm/s, speed for second approach */
+    double bounceDistance = 5.0; /**< mm, distance to back off after trigger */
+    double homePosition = 0.0; /**< Position to set after homing */
+    bool positiveDirection = false; /**< True if home is at positive end */
+    double endstopThreshold = 0.1; /**< Position threshold for endstop detection */
 };
 
-/// @brief Result of a homing operation.
+/**@brief Result of a homing operation. */
 struct HomingResult {
     bool success = false;
     std::string axis;
@@ -81,13 +81,15 @@ struct HomingResult {
     std::string errorMessage;
 };
 
-/// @brief Homing sequence orchestrator.
-///
-/// Coordinates multi-axis homing by:
-/// 1. Moving each axis towards its endstop at search speed
-/// 2. When endstop triggers, backing off by bounceDistance
-/// 3. Re-approaching at bounceSpeed for precision
-/// 4. Setting the axis position to homePosition
+/**
+ * @brief Homing sequence orchestrator.
+ *
+ * Coordinates multi-axis homing by:
+ * 1. Moving each axis towards its endstop at search speed
+ * 2. When endstop triggers, backing off by bounceDistance
+ * 3. Re-approaching at bounceSpeed for precision
+ * 4. Setting the axis position to homePosition
+ */
 class HomingSequence {
 public:
     using EndstopCheckFunc = std::function<bool(const std::string& axis)>;
@@ -109,9 +111,11 @@ public:
         , getPosition_(std::move(getPosition))
         , wait_(std::move(wait)) {}
 
-    /// @brief Home a single axis.
-    /// @param config Axis homing parameters (speeds, position)
-    /// @return Outcome: success flag and final position
+    /**
+     * @brief Home a single axis.
+     * @param config Axis homing parameters (speeds, position)
+     * @return Outcome: success flag and final position
+     */
     HomingResult homeAxis(const HomingAxisConfig& config) {
         HomingResult result;
         result.axis = config.name;
@@ -164,9 +168,11 @@ public:
         return result;
     }
 
-    /// @brief Home multiple axes (sequentially).
-    /// @param configs Homing config per axis, in order
-    /// @return Result per axis; stops at the first failure
+    /**
+     * @brief Home multiple axes (sequentially).
+     * @param configs Homing config per axis, in order
+     * @return Result per axis; stops at the first failure
+     */
     std::vector<HomingResult> homeAxes(const std::vector<HomingAxisConfig>& configs) {
         std::vector<HomingResult> results;
         for (const auto& cfg : configs) {
@@ -176,8 +182,10 @@ public:
         return results;
     }
 
-    /// @brief Get current homing phase.
-    /// @return Active phase
+    /**
+     * @brief Get current homing phase.
+     * @return Active phase
+     */
     HomingPhase phase() const { return phase_; }
 
 private:
@@ -193,7 +201,7 @@ private:
 // Probe peripheral
 // ============================================================================
 
-/// @brief Probe peripheral for bed leveling and Z homing.
+/**@brief Probe peripheral for bed leveling and Z homing. */
 class Probe {
 public:
     using PinReadFunc = std::function<bool()>;
@@ -204,34 +212,46 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Check if probe is currently triggered.
-    /// @return `true` while the probe pin reads triggered
+    /**
+     * @brief Check if probe is currently triggered.
+     * @return `true` while the probe pin reads triggered
+     */
     bool triggered() const { return pinRead_(); }
 
-    /// @brief Probe at a specific XY position.
-    /// @param zSpeed Z speed in mm/s (negative = down).
-    /// @param zMaxDistance Maximum Z travel distance.
-    /// @param zMove Function to move Z axis: (speed, distance) -> triggered
-    /// @return Probe result: Z position where probe triggered, or NaN if not triggered.
+    /**
+     * @brief Probe at a specific XY position.
+     * @param zSpeed Z speed in mm/s (negative = down).
+     * @param zMaxDistance Maximum Z travel distance.
+     * @param zMove Function to move Z axis: (speed, distance) -> triggered
+     * @return Probe result: Z position where probe triggered, or NaN if not triggered.
+     */
     double probe(double zSpeed, double zMaxDistance,
                  std::function<double(double, double)> zMove) {
         return zMove(zSpeed, zMaxDistance);
     }
 
-    /// @brief Set Z offset (calibrated probe-to-nozzle offset).
-    /// @param offset Probe-trigger Z minus true nozzle Z [mm]
+    /**
+     * @brief Set Z offset (calibrated probe-to-nozzle offset).
+     * @param offset Probe-trigger Z minus true nozzle Z [mm]
+     */
     void setZOffset(double offset) { zOffset_ = offset; }
 
-    /// @brief Get Z offset.
-    /// @return Calibrated offset [mm]
+    /**
+     * @brief Get Z offset.
+     * @return Calibrated offset [mm]
+     */
     double zOffset() const { return zOffset_; }
 
-    /// @brief Set probe as virtual endstop for Z homing.
-    /// @param enabled `true` uses the probe as the Z endstop
+    /**
+     * @brief Set probe as virtual endstop for Z homing.
+     * @param enabled `true` uses the probe as the Z endstop
+     */
     void setVirtualEndstop(bool enabled) { virtualEndstop_ = enabled; }
 
-    /// @brief Check if probe is used as virtual endstop.
-    /// @return `true` while configured as Z endstop
+    /**
+     * @brief Check if probe is used as virtual endstop.
+     * @return `true` while configured as Z endstop
+     */
     bool isVirtualEndstop() const { return virtualEndstop_; }
 
 private:

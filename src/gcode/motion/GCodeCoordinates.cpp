@@ -16,8 +16,10 @@ namespace GCode {
 
 namespace {
 
-/// Helper to construct an Error with a message string (copied into the
-/// fixed-size char array).
+/**
+ * Helper to construct an Error with a message string (copied into the
+ * fixed-size char array).
+ */
 Error makeError(ErrorCode code, const char* msg) {
     Error err;
     err.code = code;

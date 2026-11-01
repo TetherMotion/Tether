@@ -205,16 +205,16 @@ constexpr size_t kMinFrameSize = 60;
  * @brief EoE frame type codes
  */
 enum class EoEFrameType : uint8_t {
-    FRAGMENT_REQ    = 0,   ///< Ethernet frame fragment
-    TIMESTAMP_RES   = 1,   ///< Timestamp response
-    INIT_REQ        = 2,   ///< Initialize request
-    INIT_RES        = 3,   ///< Initialize response
-    SET_IP_REQ      = 4,   ///< Set IP parameters request
-    SET_IP_RES      = 5,   ///< Set IP parameters response
-    SET_FILTER_REQ  = 6,   ///< Set address filter request
-    SET_FILTER_RES  = 7,   ///< Set address filter response
-    GET_IP_REQ      = 8,   ///< Get IP parameters request
-    GET_IP_RES      = 9,   ///< Get IP parameters response
+    FRAGMENT_REQ    = 0, /**< Ethernet frame fragment */
+    TIMESTAMP_RES   = 1, /**< Timestamp response */
+    INIT_REQ        = 2, /**< Initialize request */
+    INIT_RES        = 3, /**< Initialize response */
+    SET_IP_REQ      = 4, /**< Set IP parameters request */
+    SET_IP_RES      = 5, /**< Set IP parameters response */
+    SET_FILTER_REQ  = 6, /**< Set address filter request */
+    SET_FILTER_RES  = 7, /**< Set address filter response */
+    GET_IP_REQ      = 8, /**< Get IP parameters request */
+    GET_IP_RES      = 9, /**< Get IP parameters response */
 };
 
 /**
@@ -230,16 +230,16 @@ const char* eoe_frame_type_string(EoEFrameType type);
  * @brief EoE error codes
  */
 enum class EoEError : uint32_t {
-    SUCCESS             = 0x0000,  ///< No error
-    TIMEOUT             = 0x0001,  ///< Communication timeout
-    MAILBOX_ERROR       = 0x0002,  ///< Mailbox communication failed
-    FRAGMENT_ERROR      = 0x0003,  ///< Fragment reassembly failed
-    FRAME_TOO_LARGE     = 0x0004,  ///< Frame exceeds maximum size
-    BUFFER_FULL         = 0x0005,  ///< No buffer available
-    INVALID_STATE       = 0x0006,  ///< Invalid protocol state
-    NOT_INITIALIZED     = 0x0007,  ///< EoE not initialized
-    SLAVE_NOT_SUPPORTED = 0x0008,  ///< Slave doesn't support EoE
-    IP_ERROR            = 0x0009,  ///< IP configuration error
+    SUCCESS             = 0x0000, /**< No error */
+    TIMEOUT             = 0x0001, /**< Communication timeout */
+    MAILBOX_ERROR       = 0x0002, /**< Mailbox communication failed */
+    FRAGMENT_ERROR      = 0x0003, /**< Fragment reassembly failed */
+    FRAME_TOO_LARGE     = 0x0004, /**< Frame exceeds maximum size */
+    BUFFER_FULL         = 0x0005, /**< No buffer available */
+    INVALID_STATE       = 0x0006, /**< Invalid protocol state */
+    NOT_INITIALIZED     = 0x0007, /**< EoE not initialized */
+    SLAVE_NOT_SUPPORTED = 0x0008, /**< Slave doesn't support EoE */
+    IP_ERROR            = 0x0009, /**< IP configuration error */
 };
 
 /**
@@ -255,9 +255,9 @@ const char* eoe_error_string(EoEError error);
  * @brief EoE slave configuration
  */
 struct EoESlaveConfig {
-    uint16_t slave_index;       ///< Slave index (0-based)
-    uint8_t mac_address[6];     ///< Virtual MAC address for slave
-    bool enabled;               ///< Enable EoE for this slave
+    uint16_t slave_index; /**< Slave index (0-based) */
+    uint8_t mac_address[6]; /**< Virtual MAC address for slave */
+    bool enabled; /**< Enable EoE for this slave */
     
     EoESlaveConfig()
         : slave_index(0)
@@ -277,12 +277,12 @@ struct EoESlaveConfig {
  * @brief EoE IP configuration
  */
 struct EoEIPConfig {
-    uint16_t slave_index;   ///< Slave index
-    uint32_t ip_address;    ///< IP address (network byte order)
-    uint32_t subnet_mask;   ///< Subnet mask (network byte order)
-    uint32_t gateway;       ///< Default gateway (network byte order)
-    uint32_t dns_server;    ///< DNS server (network byte order)
-    char hostname[32];      ///< Hostname (optional)
+    uint16_t slave_index; /**< Slave index */
+    uint32_t ip_address; /**< IP address (network byte order) */
+    uint32_t subnet_mask; /**< Subnet mask (network byte order) */
+    uint32_t gateway; /**< Default gateway (network byte order) */
+    uint32_t dns_server; /**< DNS server (network byte order) */
+    char hostname[32]; /**< Hostname (optional) */
     
     EoEIPConfig()
         : slave_index(0)
@@ -313,8 +313,8 @@ static inline uint32_t IP4_ADDR(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
  * @brief EoE operation result
  */
 struct EoEResult {
-    bool success;           ///< true if operation succeeded
-    EoEError error_code;    ///< Error code if failed
+    bool success; /**< true if operation succeeded */
+    EoEError error_code; /**< Error code if failed */
     
     operator bool() const { return success; }
 };
@@ -498,15 +498,15 @@ void* eoe_get_netif(uint16_t slave_index);
  * @brief EoE statistics
  */
 struct EoEStats {
-    uint32_t frames_sent;           ///< Complete frames sent
-    uint32_t frames_received;       ///< Complete frames received
-    uint32_t fragments_sent;        ///< Total fragments sent
-    uint32_t fragments_received;    ///< Total fragments received
-    uint32_t fragment_errors;       ///< Fragment reassembly errors
-    uint32_t timeouts;              ///< Timeout count
-    uint64_t bytes_sent;            ///< Total bytes sent
-    uint64_t bytes_received;        ///< Total bytes received
-    uint32_t dropped_frames;        ///< Frames dropped (buffer full)
+    uint32_t frames_sent; /**< Complete frames sent */
+    uint32_t frames_received; /**< Complete frames received */
+    uint32_t fragments_sent; /**< Total fragments sent */
+    uint32_t fragments_received; /**< Total fragments received */
+    uint32_t fragment_errors; /**< Fragment reassembly errors */
+    uint32_t timeouts; /**< Timeout count */
+    uint64_t bytes_sent; /**< Total bytes sent */
+    uint64_t bytes_received; /**< Total bytes received */
+    uint32_t dropped_frames; /**< Frames dropped (buffer full) */
 };
 
 /**

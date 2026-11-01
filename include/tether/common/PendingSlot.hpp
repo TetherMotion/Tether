@@ -67,13 +67,13 @@ class PendingSlot {
    * pending slot is non-empty), gets = hits + misses.
    */
   struct Stats {
-    uint64_t puts = 0;          ///< total post() calls
-    uint64_t gets = 0;          ///< total take() calls
-    uint64_t hits = 0;          ///< takes that returned a value
-    uint64_t misses = 0;        ///< takes that found the slot empty (starved get)
-    uint64_t overruns = 0;      ///< posts that dropped an untaken value
-    uint64_t maxPutStreak = 0;  ///< longest run of posts without a take
-    uint64_t maxGetStreak = 0;  ///< longest run of takes without a post
+    uint64_t puts = 0; /**< total post() calls */
+    uint64_t gets = 0; /**< total take() calls */
+    uint64_t hits = 0; /**< takes that returned a value */
+    uint64_t misses = 0; /**< takes that found the slot empty (starved get) */
+    uint64_t overruns = 0; /**< posts that dropped an untaken value */
+    uint64_t maxPutStreak = 0; /**< longest run of posts without a take */
+    uint64_t maxGetStreak = 0; /**< longest run of takes without a post */
   };
 
   PendingSlot() = default;
@@ -120,13 +120,13 @@ class PendingSlot {
     return std::nullopt;
   }
 
-  /// @brief Whether a value is currently pending (non-consuming probe).
+  /**@brief Whether a value is currently pending (non-consuming probe). */
   bool hasPending() const {
     std::lock_guard lk(mtx_);
     return pending_.has_value();
   }
 
-  /// @brief Consistent snapshot of all counters and streak maxima.
+  /**@brief Consistent snapshot of all counters and streak maxima. */
   Stats stats() const {
     std::lock_guard lk(mtx_);
     return Stats{puts_,     gets_,         hits_,
@@ -134,7 +134,7 @@ class PendingSlot {
                  maxGetStreak_};
   }
 
-  /// @brief Drop the pending value and zero all counters/streaks.
+  /**@brief Drop the pending value and zero all counters/streaks. */
   void reset() {
     std::lock_guard lk(mtx_);
     pending_.reset();

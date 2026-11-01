@@ -74,91 +74,91 @@ namespace SII {
  */
 enum SIIWordAddress : uint16_t {
     // EEPROM Configuration Area (0x0000-0x0007)
-    SII_PDI_CONTROL              = 0x0000,  ///< PDI Control
-    SII_PDI_CONFIG               = 0x0001,  ///< PDI Configuration
-    SII_SYNC_IMPULSE_LEN         = 0x0002,  ///< Sync Impulse Length
-    SII_PDI_CONFIG2              = 0x0003,  ///< PDI Configuration 2
-    SII_ALIAS_ADDRESS            = 0x0004,  ///< Configured Station Alias
-    SII_RESERVED_0005            = 0x0005,  ///< Reserved
-    SII_RESERVED_0006            = 0x0006,  ///< Reserved
-    SII_CHECKSUM                 = 0x0007,  ///< CRC (words 0-6)
+    SII_PDI_CONTROL              = 0x0000, /**< PDI Control */
+    SII_PDI_CONFIG               = 0x0001, /**< PDI Configuration */
+    SII_SYNC_IMPULSE_LEN         = 0x0002, /**< Sync Impulse Length */
+    SII_PDI_CONFIG2              = 0x0003, /**< PDI Configuration 2 */
+    SII_ALIAS_ADDRESS            = 0x0004, /**< Configured Station Alias */
+    SII_RESERVED_0005            = 0x0005, /**< Reserved */
+    SII_RESERVED_0006            = 0x0006, /**< Reserved */
+    SII_CHECKSUM                 = 0x0007, /**< CRC (words 0-6) */
     
     // Device Identity Area (0x0008-0x000F)
-    SII_VENDOR_ID                = 0x0008,  ///< Vendor ID (32-bit, words 0x08-0x09)
-    SII_PRODUCT_CODE             = 0x000A,  ///< Product Code (32-bit, words 0x0A-0x0B)
-    SII_REVISION                 = 0x000C,  ///< Revision Number (32-bit, words 0x0C-0x0D)
-    SII_SERIAL_NUMBER            = 0x000E,  ///< Serial Number (32-bit, words 0x0E-0x0F)
+    SII_VENDOR_ID                = 0x0008, /**< Vendor ID (32-bit, words 0x08-0x09) */
+    SII_PRODUCT_CODE             = 0x000A, /**< Product Code (32-bit, words 0x0A-0x0B) */
+    SII_REVISION                 = 0x000C, /**< Revision Number (32-bit, words 0x0C-0x0D) */
+    SII_SERIAL_NUMBER            = 0x000E, /**< Serial Number (32-bit, words 0x0E-0x0F) */
     
     // Bootstrap Mailbox (0x0014-0x001D)
-    SII_BOOTSTRAP_RX_MBX_OFFSET  = 0x0014,  ///< Bootstrap Receive Mailbox Offset (MbxIn — Master->Slave, SM1)
-    SII_BOOTSTRAP_RX_MBX_SIZE    = 0x0015,  ///< Bootstrap Receive Mailbox Size   (MbxIn — Master->Slave, SM1)
-    SII_BOOTSTRAP_TX_MBX_OFFSET  = 0x0016,  ///< Bootstrap Send Mailbox Offset    (MbxOut — Slave->Master, SM0)
-    SII_BOOTSTRAP_TX_MBX_SIZE    = 0x0017,  ///< Bootstrap Send Mailbox Size      (MbxOut — Slave->Master, SM0)
+    SII_BOOTSTRAP_RX_MBX_OFFSET  = 0x0014, /**< Bootstrap Receive Mailbox Offset (MbxIn — Master->Slave, SM1) */
+    SII_BOOTSTRAP_RX_MBX_SIZE    = 0x0015, /**< Bootstrap Receive Mailbox Size   (MbxIn — Master->Slave, SM1) */
+    SII_BOOTSTRAP_TX_MBX_OFFSET  = 0x0016, /**< Bootstrap Send Mailbox Offset    (MbxOut — Slave->Master, SM0) */
+    SII_BOOTSTRAP_TX_MBX_SIZE    = 0x0017, /**< Bootstrap Send Mailbox Size      (MbxOut — Slave->Master, SM0) */
     
     // Standard Mailbox (0x0018-0x001D)
-    SII_STD_RX_MBX_OFFSET        = 0x0018,  ///< Standard Receive Mailbox Offset (MbxIn — Master->Slave, SM1)
-    SII_STD_RX_MBX_SIZE          = 0x0019,  ///< Standard Receive Mailbox Size   (MbxIn — Master->Slave, SM1)
-    SII_STD_TX_MBX_OFFSET        = 0x001A,  ///< Standard Send Mailbox Offset    (MbxOut — Slave->Master, SM0)
-    SII_STD_TX_MBX_SIZE          = 0x001B,  ///< Standard Send Mailbox Size      (MbxOut — Slave->Master, SM0)
-    SII_MAILBOX_PROTOCOLS        = 0x001C,  ///< Supported Mailbox Protocols
+    SII_STD_RX_MBX_OFFSET        = 0x0018, /**< Standard Receive Mailbox Offset (MbxIn — Master->Slave, SM1) */
+    SII_STD_RX_MBX_SIZE          = 0x0019, /**< Standard Receive Mailbox Size   (MbxIn — Master->Slave, SM1) */
+    SII_STD_TX_MBX_OFFSET        = 0x001A, /**< Standard Send Mailbox Offset    (MbxOut — Slave->Master, SM0) */
+    SII_STD_TX_MBX_SIZE          = 0x001B, /**< Standard Send Mailbox Size      (MbxOut — Slave->Master, SM0) */
+    SII_MAILBOX_PROTOCOLS        = 0x001C, /**< Supported Mailbox Protocols */
     
     // Size Information (0x002E-0x002F)
-    SII_SIZE_INFO                = 0x002E,  ///< Size information
-    SII_VERSION                  = 0x002F,  ///< Version
+    SII_SIZE_INFO                = 0x002E, /**< Size information */
+    SII_VERSION                  = 0x002F, /**< Version */
     
     // Category Area Start
-    SII_CATEGORY_START           = 0x0040,  ///< Start of category area
+    SII_CATEGORY_START           = 0x0040, /**< Start of category area */
 };
 
 /**
  * @brief SII Category Types (from ETG.2010 Table 17)
  */
 enum SIICategoryType : uint16_t {
-    CAT_NOP              = 0,      ///< No operation (padding)
-    CAT_STRINGS          = 10,     ///< Strings category
-    CAT_DATA_TYPES       = 20,     ///< DataTypes (not commonly used)
-    CAT_GENERAL          = 30,     ///< General Device Information
-    CAT_FMMU             = 40,     ///< FMMU Configuration
-    CAT_SYNC_MANAGER     = 41,     ///< Sync Manager Configuration
-    CAT_FMMU_EX          = 42,     ///< FMMU Extended (not commonly used)
-    CAT_SYNC_UNIT        = 43,     ///< Sync Unit (DC)
-    CAT_TXPDO            = 50,     ///< TxPDO Description
-    CAT_RXPDO            = 51,     ///< RxPDO Description
-    CAT_DC               = 60,     ///< Distributed Clocks Configuration
-    CAT_END              = 0xFFFF, ///< End of categories marker
+    CAT_NOP              = 0, /**< No operation (padding) */
+    CAT_STRINGS          = 10, /**< Strings category */
+    CAT_DATA_TYPES       = 20, /**< DataTypes (not commonly used) */
+    CAT_GENERAL          = 30, /**< General Device Information */
+    CAT_FMMU             = 40, /**< FMMU Configuration */
+    CAT_SYNC_MANAGER     = 41, /**< Sync Manager Configuration */
+    CAT_FMMU_EX          = 42, /**< FMMU Extended (not commonly used) */
+    CAT_SYNC_UNIT        = 43, /**< Sync Unit (DC) */
+    CAT_TXPDO            = 50, /**< TxPDO Description */
+    CAT_RXPDO            = 51, /**< RxPDO Description */
+    CAT_DC               = 60, /**< Distributed Clocks Configuration */
+    CAT_END              = 0xFFFF, /**< End of categories marker */
 };
 
 /**
  * @brief Mailbox Protocol Flags (from ETG.2010)
  */
 enum MailboxProtocol : uint16_t {
-    MBX_PROTO_AOE   = 0x0001,  ///< ADS over EtherCAT
-    MBX_PROTO_EOE   = 0x0002,  ///< Ethernet over EtherCAT
-    MBX_PROTO_COE   = 0x0004,  ///< CANopen over EtherCAT
-    MBX_PROTO_FOE   = 0x0008,  ///< File over EtherCAT
-    MBX_PROTO_SOE   = 0x0010,  ///< Servo over EtherCAT
-    MBX_PROTO_VOE   = 0x0020,  ///< Vendor over EtherCAT
+    MBX_PROTO_AOE   = 0x0001, /**< ADS over EtherCAT */
+    MBX_PROTO_EOE   = 0x0002, /**< Ethernet over EtherCAT */
+    MBX_PROTO_COE   = 0x0004, /**< CANopen over EtherCAT */
+    MBX_PROTO_FOE   = 0x0008, /**< File over EtherCAT */
+    MBX_PROTO_SOE   = 0x0010, /**< Servo over EtherCAT */
+    MBX_PROTO_VOE   = 0x0020, /**< Vendor over EtherCAT */
 };
 
 /**
  * @brief Sync Manager Types (from ETG.2010)
  */
 enum SyncManagerType : uint8_t {
-    SM_TYPE_UNUSED      = 0,   ///< Not used
-    SM_TYPE_MBX_WRITE   = 1,   ///< Mailbox Write (master → slave)
-    SM_TYPE_MBX_READ    = 2,   ///< Mailbox Read (slave → master)
-    SM_TYPE_PROCESS_OUT = 3,   ///< Process Data Output (RxPDO)
-    SM_TYPE_PROCESS_IN  = 4,   ///< Process Data Input (TxPDO)
+    SM_TYPE_UNUSED      = 0, /**< Not used */
+    SM_TYPE_MBX_WRITE   = 1, /**< Mailbox Write (master → slave) */
+    SM_TYPE_MBX_READ    = 2, /**< Mailbox Read (slave → master) */
+    SM_TYPE_PROCESS_OUT = 3, /**< Process Data Output (RxPDO) */
+    SM_TYPE_PROCESS_IN  = 4, /**< Process Data Input (TxPDO) */
 };
 
 /**
  * @brief FMMU Types
  */
 enum FMMUType : uint8_t {
-    FMMU_TYPE_UNUSED   = 0,    ///< Not used
-    FMMU_TYPE_OUTPUT   = 1,    ///< Outputs (RxPDO)
-    FMMU_TYPE_INPUT    = 2,    ///< Inputs (TxPDO)
-    FMMU_TYPE_MBX_SYNC = 3,    ///< Mailbox synchronization
+    FMMU_TYPE_UNUSED   = 0, /**< Not used */
+    FMMU_TYPE_OUTPUT   = 1, /**< Outputs (RxPDO) */
+    FMMU_TYPE_INPUT    = 2, /**< Inputs (TxPDO) */
+    FMMU_TYPE_MBX_SYNC = 3, /**< Mailbox synchronization */
 };
 
 // ============================================================================
@@ -169,10 +169,10 @@ enum FMMUType : uint8_t {
  * @brief Device Identity from SII
  */
 struct SIIIdentity {
-    uint32_t vendor_id{0};        ///< Vendor ID (ETG assigned)
-    uint32_t product_code{0};     ///< Vendor-specific product code
-    uint32_t revision_number{0};  ///< Revision (major.minor in high.low words)
-    uint32_t serial_number{0};    ///< Device serial number
+    uint32_t vendor_id{0}; /**< Vendor ID (ETG assigned) */
+    uint32_t product_code{0}; /**< Vendor-specific product code */
+    uint32_t revision_number{0}; /**< Revision (major.minor in high.low words) */
+    uint32_t serial_number{0}; /**< Device serial number */
     
     uint16_t revisionMajor() const { 
         return static_cast<uint16_t>((revision_number >> 16) & 0xFFFF); 
@@ -188,19 +188,19 @@ struct SIIIdentity {
  */
 struct SIIMailboxConfig {
     // Bootstrap mailbox (used during firmware update)
-    uint16_t bootstrap_rx_offset{0};  ///< Bootstrap RX mailbox physical address (MbxIn — Master->Slave, SM1)
-    uint16_t bootstrap_rx_size{0};    ///< Bootstrap RX mailbox size in bytes          (MbxIn — Master->Slave, SM1)
-    uint16_t bootstrap_tx_offset{0};  ///< Bootstrap TX mailbox physical address (MbxOut — Slave->Master, SM0)
-    uint16_t bootstrap_tx_size{0};    ///< Bootstrap TX mailbox size in bytes          (MbxOut — Slave->Master, SM0)
+    uint16_t bootstrap_rx_offset{0}; /**< Bootstrap RX mailbox physical address (MbxIn — Master->Slave, SM1) */
+    uint16_t bootstrap_rx_size{0}; /**< Bootstrap RX mailbox size in bytes          (MbxIn — Master->Slave, SM1) */
+    uint16_t bootstrap_tx_offset{0}; /**< Bootstrap TX mailbox physical address (MbxOut — Slave->Master, SM0) */
+    uint16_t bootstrap_tx_size{0}; /**< Bootstrap TX mailbox size in bytes          (MbxOut — Slave->Master, SM0) */
     
     // Standard mailbox (normal operation)
-    uint16_t std_rx_offset{0};        ///< Standard RX mailbox physical address (MbxIn — Master->Slave, SM1)
-    uint16_t std_rx_size{0};          ///< Standard RX mailbox size in bytes          (MbxIn — Master->Slave, SM1)
-    uint16_t std_tx_offset{0};        ///< Standard TX mailbox physical address (MbxOut — Slave->Master, SM0)
-    uint16_t std_tx_size{0};          ///< Standard TX mailbox size in bytes          (MbxOut — Slave->Master, SM0)
+    uint16_t std_rx_offset{0}; /**< Standard RX mailbox physical address (MbxIn — Master->Slave, SM1) */
+    uint16_t std_rx_size{0}; /**< Standard RX mailbox size in bytes          (MbxIn — Master->Slave, SM1) */
+    uint16_t std_tx_offset{0}; /**< Standard TX mailbox physical address (MbxOut — Slave->Master, SM0) */
+    uint16_t std_tx_size{0}; /**< Standard TX mailbox size in bytes          (MbxOut — Slave->Master, SM0) */
     
     // Supported protocols
-    uint16_t protocols{0};            ///< Mailbox protocol flags
+    uint16_t protocols{0}; /**< Mailbox protocol flags */
     
     bool supportsAoE() const { return (protocols & MBX_PROTO_AOE) != 0; }
     bool supportsEoE() const { return (protocols & MBX_PROTO_EOE) != 0; }
@@ -216,24 +216,24 @@ struct SIIMailboxConfig {
  * @brief General Device Information from CAT_GENERAL (category 30)
  */
 struct SIIGeneralInfo {
-    uint8_t group_idx{0};           ///< Group string index
-    uint8_t image_idx{0};           ///< Image string index
-    uint8_t order_idx{0};           ///< Order number string index
-    uint8_t name_idx{0};            ///< Device name string index
-    uint8_t reserved{0};            ///< Reserved
-    uint8_t coe_details{0};         ///< CoE details flags
-    uint8_t foe_details{0};         ///< FoE details flags
-    uint8_t eoe_details{0};         ///< EoE details flags
-    uint8_t soe_channels{0};        ///< SoE channels (reserved)
-    uint8_t ds402_channels{0};      ///< DS402 channels (reserved)
-    uint8_t sys_man_class{0};       ///< System Manager Class
-    uint8_t flags{0};               ///< General flags
-    int16_t current_ebus{0};        ///< E-Bus current consumption (mA, negative = provides power)
-    uint8_t group_idx2{0};          ///< Group string index (duplicate for compatibility)
-    uint8_t reserved2{0};           ///< Reserved
-    uint16_t phys_port{0};          ///< Physical port configuration
-    uint16_t phys_mem_addr{0};      ///< Physical memory address
-    uint8_t reserved3[12]{0};       ///< Reserved bytes
+    uint8_t group_idx{0}; /**< Group string index */
+    uint8_t image_idx{0}; /**< Image string index */
+    uint8_t order_idx{0}; /**< Order number string index */
+    uint8_t name_idx{0}; /**< Device name string index */
+    uint8_t reserved{0}; /**< Reserved */
+    uint8_t coe_details{0}; /**< CoE details flags */
+    uint8_t foe_details{0}; /**< FoE details flags */
+    uint8_t eoe_details{0}; /**< EoE details flags */
+    uint8_t soe_channels{0}; /**< SoE channels (reserved) */
+    uint8_t ds402_channels{0}; /**< DS402 channels (reserved) */
+    uint8_t sys_man_class{0}; /**< System Manager Class */
+    uint8_t flags{0}; /**< General flags */
+    int16_t current_ebus{0}; /**< E-Bus current consumption (mA, negative = provides power) */
+    uint8_t group_idx2{0}; /**< Group string index (duplicate for compatibility) */
+    uint8_t reserved2{0}; /**< Reserved */
+    uint16_t phys_port{0}; /**< Physical port configuration */
+    uint16_t phys_mem_addr{0}; /**< Physical memory address */
+    uint8_t reserved3[12]{0}; /**< Reserved bytes */
     
     // CoE details flags
     bool coeEnableSdo() const { return (coe_details & 0x01) != 0; }
@@ -253,12 +253,12 @@ struct SIIGeneralInfo {
  * @brief Sync Manager Configuration Entry from CAT_SYNC_MANAGER (category 41)
  */
 struct SIISyncManager {
-    uint16_t phys_start_address{0};  ///< Physical start address in ESC memory
-    uint16_t length{0};              ///< Length in bytes
-    EtherCAT::SyncManager::SMControlReg  control_register{};  ///< Control register
-    EtherCAT::SyncManager::SMStatusReg   status_register{};   ///< Status register (usually 0)
-    EtherCAT::SyncManager::SMActivateReg enable{};            ///< Enable flags
-    uint8_t sm_type{0};              ///< Sync Manager type (SyncManagerType enum)
+    uint16_t phys_start_address{0}; /**< Physical start address in ESC memory */
+    uint16_t length{0}; /**< Length in bytes */
+    EtherCAT::SyncManager::SMControlReg  control_register{}; /**< Control register */
+    EtherCAT::SyncManager::SMStatusReg   status_register{}; /**< Status register (usually 0) */
+    EtherCAT::SyncManager::SMActivateReg enable{}; /**< Enable flags */
+    uint8_t sm_type{0}; /**< Sync Manager type (SyncManagerType enum) */
     
     bool isEnabled() const { return enable.enable; }
     bool isFixedContent() const { return (std::bit_cast<uint8_t>(enable) & 0x02) != 0; }
@@ -283,7 +283,7 @@ struct SIISyncManager {
  * @brief FMMU Configuration Entry from CAT_FMMU (category 40)
  */
 struct SIIFMMU {
-    uint8_t fmmu_type{0};  ///< FMMU type (FMMUType enum)
+    uint8_t fmmu_type{0}; /**< FMMU type (FMMUType enum) */
     
     FMMUType getType() const { return static_cast<FMMUType>(fmmu_type); }
     
@@ -302,25 +302,25 @@ struct SIIFMMU {
  * @brief PDO Entry (object mapping within a PDO)
  */
 struct SIIPDOEntry {
-    uint16_t index{0};      ///< Object dictionary index
-    uint8_t subindex{0};    ///< Object dictionary subindex
-    uint8_t name_idx{0};    ///< String index for entry name (0 = no name)
-    uint8_t data_type{0};   ///< Data type (ETG.1000 types)
-    uint8_t bit_length{0};  ///< Size in bits
-    uint16_t flags{0};      ///< Additional flags
+    uint16_t index{0}; /**< Object dictionary index */
+    uint8_t subindex{0}; /**< Object dictionary subindex */
+    uint8_t name_idx{0}; /**< String index for entry name (0 = no name) */
+    uint8_t data_type{0}; /**< Data type (ETG.1000 types) */
+    uint8_t bit_length{0}; /**< Size in bits */
+    uint16_t flags{0}; /**< Additional flags */
 };
 
 /**
  * @brief PDO Description from CAT_TXPDO/CAT_RXPDO (categories 50/51)
  */
 struct SIIPDO {
-    uint16_t pdo_index{0};           ///< PDO index (0x1600-0x17FF RxPDO, 0x1A00-0x1BFF TxPDO)
-    uint8_t n_entries{0};            ///< Number of entries
-    uint8_t sync_manager{0};         ///< Assigned Sync Manager
-    uint8_t dc_sync{0};              ///< DC Synchronization (0 = free run, 1 = DC Sync 0, 2 = DC Sync 1)
-    uint8_t name_idx{0};             ///< String index for PDO name
-    uint16_t flags{0};               ///< PDO flags
-    std::vector<SIIPDOEntry> entries; ///< PDO entries (object mappings)
+    uint16_t pdo_index{0}; /**< PDO index (0x1600-0x17FF RxPDO, 0x1A00-0x1BFF TxPDO) */
+    uint8_t n_entries{0}; /**< Number of entries */
+    uint8_t sync_manager{0}; /**< Assigned Sync Manager */
+    uint8_t dc_sync{0}; /**< DC Synchronization (0 = free run, 1 = DC Sync 0, 2 = DC Sync 1) */
+    uint8_t name_idx{0}; /**< String index for PDO name */
+    uint16_t flags{0}; /**< PDO flags */
+    std::vector<SIIPDOEntry> entries; /**< PDO entries (object mappings) */
     
     bool isTxPDO() const { return (pdo_index >= 0x1A00 && pdo_index <= 0x1BFF); }
     bool isRxPDO() const { return (pdo_index >= 0x1600 && pdo_index <= 0x17FF); }
@@ -343,15 +343,15 @@ struct SIIPDO {
  * @brief Distributed Clock Configuration from CAT_DC (category 60)
  */
 struct SIIDCConfig {
-    uint32_t cycle_time_0{0};     ///< Cycle time SYNC0 in ns
-    uint32_t shift_time_0{0};     ///< Shift time SYNC0 in ns
-    uint32_t shift_time_1{0};     ///< Shift time SYNC1 in ns
-    int16_t cycle_time_1_factor{0}; ///< Cycle time factor for SYNC1
-    uint16_t assign_activate{0};   ///< DC AssignActivate value
-    int16_t cycle_time_0_factor{0}; ///< Cycle time factor for SYNC0
-    uint8_t name_idx{0};          ///< String index for name
-    uint8_t desc_idx{0};          ///< String index for description
-    uint8_t reserved[4]{0};       ///< Reserved
+    uint32_t cycle_time_0{0}; /**< Cycle time SYNC0 in ns */
+    uint32_t shift_time_0{0}; /**< Shift time SYNC0 in ns */
+    uint32_t shift_time_1{0}; /**< Shift time SYNC1 in ns */
+    int16_t cycle_time_1_factor{0}; /**< Cycle time factor for SYNC1 */
+    uint16_t assign_activate{0}; /**< DC AssignActivate value */
+    int16_t cycle_time_0_factor{0}; /**< Cycle time factor for SYNC0 */
+    uint8_t name_idx{0}; /**< String index for name */
+    uint8_t desc_idx{0}; /**< String index for description */
+    uint8_t reserved[4]{0}; /**< Reserved */
     
     bool sync0Enabled() const { return (assign_activate & 0x0100) != 0; }
     bool sync1Enabled() const { return (assign_activate & 0x0200) != 0; }
@@ -436,13 +436,13 @@ private:
  */
 struct SIIData {
     // Basic configuration
-    uint16_t pdi_control{0};           ///< PDI Control register value
-    uint16_t pdi_config{0};            ///< PDI Configuration
-    uint16_t sync_impulse_len{0};      ///< Sync impulse length (x10ns)
-    uint16_t pdi_config2{0};           ///< Extended PDI configuration
-    uint16_t alias_address{0};         ///< Configured station alias
-    uint16_t checksum{0};              ///< Configuration area CRC
-    bool checksum_ok{false};            ///< CRC-8 (words 0..6) matched low byte of `checksum`
+    uint16_t pdi_control{0}; /**< PDI Control register value */
+    uint16_t pdi_config{0}; /**< PDI Configuration */
+    uint16_t sync_impulse_len{0}; /**< Sync impulse length (x10ns) */
+    uint16_t pdi_config2{0}; /**< Extended PDI configuration */
+    uint16_t alias_address{0}; /**< Configured station alias */
+    uint16_t checksum{0}; /**< Configuration area CRC */
+    bool checksum_ok{false}; /**< CRC-8 (words 0..6) matched low byte of `checksum` */
 
     // Device identity
     SIIIdentity identity;
@@ -474,8 +474,8 @@ struct SIIData {
     
     // Size information
     uint16_t version{0};
-    uint16_t eeprom_size_kbits{0};   ///< EEPROM size in Kbits (from SII_SIZE_INFO word 0x002E)
-    uint16_t eeprom_size_words{0};   ///< EEPROM size in 16-bit words (calculated from kbits)
+    uint16_t eeprom_size_kbits{0}; /**< EEPROM size in Kbits (from SII_SIZE_INFO word 0x002E) */
+    uint16_t eeprom_size_words{0}; /**< EEPROM size in 16-bit words (calculated from kbits) */
     
     // Parsing state
     bool valid{false};
@@ -589,8 +589,8 @@ struct SIIData {
  * @brief SII Category Header (4 bytes)
  */
 struct SIICategoryHeader {
-    uint16_t type;      ///< Category type (SIICategoryType)
-    uint16_t size;      ///< Size in words (not including header)
+    uint16_t type; /**< Category type (SIICategoryType) */
+    uint16_t size; /**< Size in words (not including header) */
 };
 
 // ============================================================================

@@ -76,9 +76,11 @@ using Utils::ColoredBitsetFormatter;
 // which table to use and how to render it (format() for colored ON/OFF,
 // formatActive() for a compact active-only list).
 
-/// Safety flags in the master→slave RxPDO 0x1700 (safety_flags field).
-/// STO/SS1/SS2/SOS/SLS/SBC are zero-active; ErrorAck/RestartAck/ResetPos
-/// are one-active.
+/**
+ * Safety flags in the master→slave RxPDO 0x1700 (safety_flags field).
+ * STO/SS1/SS2/SOS/SLS/SBC are zero-active; ErrorAck/RestartAck/ResetPos
+ * are one-active.
+ */
 inline BitLabel kRxSafetyLabels[] = {
     BitLabel::bitInv("STO",        SynapticonPDO::SOMANET_RxPDO_1700::kSTO),
     BitLabel::bitInv("SS1",        SynapticonPDO::SOMANET_RxPDO_1700::kSS1),
@@ -94,15 +96,19 @@ inline BitLabel kRxSafetyLabels[] = {
     BitLabel::bit(   "ResetPos",   SynapticonPDO::SOMANET_RxPDO_1700::kResetPosition),
 };
 
-/// Safe outputs in the master→slave RxPDO 0x1700 (safe_outputs field).
-/// One-active: bit=1 → output ON.
+/**
+ * Safe outputs in the master→slave RxPDO 0x1700 (safe_outputs field).
+ * One-active: bit=1 → output ON.
+ */
 inline BitLabel kRxSafeOutputLabels[] = {
     BitLabel::bit("OUT1", SynapticonPDO::SOMANET_RxPDO_1700::kSafeOutput1),
     BitLabel::bit("OUT2", SynapticonPDO::SOMANET_RxPDO_1700::kSafeOutput2),
 };
 
-/// Safety state flags in the slave→master TxPDO 0x1B00 (safety_state_flags
-/// field).  All one-active.
+/**
+ * Safety state flags in the slave→master TxPDO 0x1B00 (safety_state_flags
+ * field).  All one-active.
+ */
 inline BitLabel kTxSafetyStateLabels[] = {
     BitLabel::bit("STO",  SynapticonPDO::SOMANET_TxPDO_1B00::kSTOState),
     BitLabel::bit("SS1",  SynapticonPDO::SOMANET_TxPDO_1B00::kSS1State),
@@ -115,8 +121,10 @@ inline BitLabel kTxSafetyStateLabels[] = {
     BitLabel::bit("SLS4", SynapticonPDO::SOMANET_TxPDO_1B00::kSLSInstance4),
 };
 
-/// Diagnostic flags in the slave→master TxPDO 0x1B00 (diagnostic_flags
-/// field).  All one-active.
+/**
+ * Diagnostic flags in the slave→master TxPDO 0x1B00 (diagnostic_flags
+ * field).  All one-active.
+ */
 inline BitLabel kTxDiagnosticLabels[] = {
     BitLabel::bit("SBC",         SynapticonPDO::SOMANET_TxPDO_1B00::kSBCState),
     BitLabel::bit("RestartAckReq", SynapticonPDO::SOMANET_TxPDO_1B00::kRestartAckReq),
@@ -150,7 +158,7 @@ inline BitLabel kTxDiagnosticLabels[] = {
 //
 // The master→slave direction always uses kRxSafetyLabels.
 
-/// Slave→master indicator labels for a real SOMANET slave — all one-active.
+/**Slave→master indicator labels for a real SOMANET slave — all one-active. */
 inline BitLabel kTxIndicatorLabels[] = {
     // safety_state_flags (low 16 bits)
     BitLabel::bit("STO",  SynapticonPDO::SOMANET_TxPDO_1B00::kSTOState),
@@ -178,12 +186,14 @@ inline BitLabel kTxIndicatorLabels[] = {
     BitLabel::bit("AnalogValid", SynapticonPDO::SOMANET_TxPDO_1B00::kAnalogValueValid << 16),
 };
 
-/// Slave→master indicator labels for a verbatim-mirroring slave (the
-/// SafeMotion emulator, which echoes the command bits via
-/// SafeMotion::Codec::kStatusBitMirrors).  The echoed function-state bits
-/// keep the command's zero-active convention — 0 means the function is
-/// active — so they are displayed bitInv.  Genuine slave status bits are
-/// one-active.
+/**
+ * Slave→master indicator labels for a verbatim-mirroring slave (the
+ * SafeMotion emulator, which echoes the command bits via
+ * SafeMotion::Codec::kStatusBitMirrors).  The echoed function-state bits
+ * keep the command's zero-active convention — 0 means the function is
+ * active — so they are displayed bitInv.  Genuine slave status bits are
+ * one-active.
+ */
 inline BitLabel kTxMirroredIndicatorLabels[] = {
     // Function-request echoes — zero-active (verbatim mirror of cmd bits)
     BitLabel::bitInv("STO",  SynapticonPDO::SOMANET_TxPDO_1B00::kSTOState),
@@ -215,14 +225,16 @@ inline BitLabel kTxMirroredIndicatorLabels[] = {
 // Indicator helpers
 // ============================================================================
 
-/// Extract the packed flags word for the indicator from a raw FSoE frame.
-/// The frame layout (both directions) starts with the FSoE command byte;
-/// the safe data follows with CRC words interleaved:
-///   command frame (11 B): [0]=cmd [1-2]=safety_flags [3-4]=crc0 ...
-///   status frame (31 B):  [0]=cmd [1-2]=safety_state [3-4]=crc0
-///                         [5-6]=diagnostic_flags ...
-/// @param data            Raw FSoE frame bytes.
-/// @param slave_to_master true for the slave→master (TxPDO 0x1B00) layout.
+/**
+ * Extract the packed flags word for the indicator from a raw FSoE frame.
+ * The frame layout (both directions) starts with the FSoE command byte;
+ * the safe data follows with CRC words interleaved:
+ *   command frame (11 B): [0]=cmd [1-2]=safety_flags [3-4]=crc0 ...
+ *   status frame (31 B):  [0]=cmd [1-2]=safety_state [3-4]=crc0
+ *                         [5-6]=diagnostic_flags ...
+ * @param data            Raw FSoE frame bytes.
+ * @param slave_to_master true for the slave→master (TxPDO 0x1B00) layout.
+ */
 inline uint32_t indicatorFlags(const uint8_t* data, bool slave_to_master) {
     if (slave_to_master) {
         const auto* f =
@@ -234,9 +246,11 @@ inline uint32_t indicatorFlags(const uint8_t* data, bool slave_to_master) {
     return f->safety_flags;
 }
 
-/// "Known" flag-bit coverage for the opt-in unknown-bits report: the FULL
-/// PDO flag definitions, so defined bits the indicator doesn't display are
-/// not reported as unknown.
+/**
+ * "Known" flag-bit coverage for the opt-in unknown-bits report: the FULL
+ * PDO flag definitions, so defined bits the indicator doesn't display are
+ * not reported as unknown.
+ */
 inline uint32_t indicatorKnownMask(bool slave_to_master) {
     if (slave_to_master) {
         return ColoredBitsetFormatter::labelCoverage(kTxSafetyStateLabels) |
@@ -245,20 +259,22 @@ inline uint32_t indicatorKnownMask(bool slave_to_master) {
     return ColoredBitsetFormatter::labelCoverage(kRxSafetyLabels);
 }
 
-/// Format the safety-flag indicator as a "[NAME=ON NAME=OFF ...]" string.
-/// Unknown set bits (outside the PDO flag definitions) are appended as
-/// "Unknown:i,j,...".  Returns an empty string for non-process-data
-/// frames — Session/Connection/Parameter/Reset carry protocol or
-/// parameter payloads in the safe-data area, not safety flags.
-///
-/// @param data            Raw FSoE frame bytes.
-/// @param slave_to_master Frame direction (selects the PDO layout).
-/// @param tx_labels       Label set for the slave→master direction —
-///                        kTxIndicatorLabels for a real slave,
-///                        kTxMirroredIndicatorLabels for a verbatim-
-///                        mirroring (emulated) slave.
-/// @param color           Emit ANSI colors via ColoredBitsetFormatter
-///                        (pass isatty(STDOUT_FILENO) for stream output).
+/**
+ * Format the safety-flag indicator as a "[NAME=ON NAME=OFF ...]" string.
+ * Unknown set bits (outside the PDO flag definitions) are appended as
+ * "Unknown:i,j,...".  Returns an empty string for non-process-data
+ * frames — Session/Connection/Parameter/Reset carry protocol or
+ * parameter payloads in the safe-data area, not safety flags.
+ *
+ * @param data            Raw FSoE frame bytes.
+ * @param slave_to_master Frame direction (selects the PDO layout).
+ * @param tx_labels       Label set for the slave→master direction —
+ *                        kTxIndicatorLabels for a real slave,
+ *                        kTxMirroredIndicatorLabels for a verbatim-
+ *                        mirroring (emulated) slave.
+ * @param color           Emit ANSI colors via ColoredBitsetFormatter
+ *                        (pass isatty(STDOUT_FILENO) for stream output).
+ */
 inline std::string formatSafetyIndicator(const uint8_t* data,
                                          bool slave_to_master,
                                          std::span<const BitLabel> tx_labels,
@@ -299,7 +315,7 @@ inline std::string formatSafetyIndicator(const uint8_t* data,
 // Low-level formatting helpers
 // ============================================================================
 
-/// Format raw hex bytes from a buffer into a string.
+/**Format raw hex bytes from a buffer into a string. */
 inline void formatHex(char* buf, size_t bufsize, const uint8_t* data, size_t len) {
     size_t pos = 0;
     for (size_t b = 0; b < len && pos + 3 < bufsize; b++) {
@@ -319,13 +335,15 @@ inline void formatHex(char* buf, size_t bufsize, const uint8_t* data, size_t len
 // ColoredBitsetFormatter, then CRCs / safe data values, and finally the
 // raw hex bytes.
 
-/// Decode the master→slave FSoE frame from the Synapticon RxPDO 0x1700 struct.
-///
-/// IMPORTANT: In the master→slave direction, STO/SS1/SS2/SOS/SLS/SBC use
-/// **zero-active** encoding (bit=0 → active/safe, bit=1 → inactive/unsafe).
-/// ErrorAck, RestartAck, ResetPosition use one-active encoding (bit=1 → active).
-/// The display inverts zero-active bits so that "ON" (green) always means
-/// the safety function is active (safe).
+/**
+ * Decode the master→slave FSoE frame from the Synapticon RxPDO 0x1700 struct.
+ *
+ * IMPORTANT: In the master→slave direction, STO/SS1/SS2/SOS/SLS/SBC use
+ * **zero-active** encoding (bit=0 → active/safe, bit=1 → inactive/unsafe).
+ * ErrorAck, RestartAck, ResetPosition use one-active encoding (bit=1 → active).
+ * The display inverts zero-active bits so that "ON" (green) always means
+ * the safety function is active (safe).
+ */
 inline void dumpRxPDO(const char* tag, const SynapticonPDO::SOMANET_RxPDO_1700& rx) {
     ColoredBitsetFormatter safety_fmt{kRxSafetyLabels};
     ColoredBitsetFormatter out_fmt{kRxSafeOutputLabels};
@@ -347,13 +365,15 @@ inline void dumpRxPDO(const char* tag, const SynapticonPDO::SOMANET_RxPDO_1700& 
     TETHER_LOGI(tag, "  raw: {}", hex);
 }
 
-/// Decode the slave→master FSoE frame from a Synapticon TxPDO 0x1B00
-/// struct — works for both variants (SOMANET_TxPDO_1B00 LW2 and
-/// SOMANET_TxPDO_1B00_LW1; the LW1 struct has no safe_torque_actual /
-/// fsoe_crc_7).
-///
-/// In the slave→master direction, all flags use **one-active** encoding
-/// (bit=1 → active, bit=0 → inactive).  No inversion needed.
+/**
+ * Decode the slave→master FSoE frame from a Synapticon TxPDO 0x1B00
+ * struct — works for both variants (SOMANET_TxPDO_1B00 LW2 and
+ * SOMANET_TxPDO_1B00_LW1; the LW1 struct has no safe_torque_actual /
+ * fsoe_crc_7).
+ *
+ * In the slave→master direction, all flags use **one-active** encoding
+ * (bit=1 → active, bit=0 → inactive).  No inversion needed.
+ */
 template<typename TxPDO_t>
 inline void dumpTxPDO(const char* tag, const TxPDO_t& tx) {
     ColoredBitsetFormatter sflags_fmt{kTxSafetyStateLabels};
@@ -415,9 +435,11 @@ inline void dumpTxPDO(const char* tag, const TxPDO_t& tx) {
 // and safe motion data (position/velocity).  No raw hex or CRC details —
 // use --debug fsoe-raw for the full verbose dump.
 
-/// Compact one-line decode of the slave→master TxPDO (0x1B00).
-/// Shows all safety state flags + diagnostic flags + command + safe position + velocity + torque.
-/// Works for both frame variants (LW2 shows trq, LW1 omits it).
+/**
+ * Compact one-line decode of the slave→master TxPDO (0x1B00).
+ * Shows all safety state flags + diagnostic flags + command + safe position + velocity + torque.
+ * Works for both frame variants (LW2 shows trq, LW1 omits it).
+ */
 template<typename TxPDO_t>
 inline void dumpTxPDOFrame(const char* tag,
                            const TxPDO_t& tx) {
@@ -446,8 +468,10 @@ inline void dumpTxPDOFrame(const char* tag,
     }
 }
 
-/// Compact one-line decode of the master→slave RxPDO (0x1700).
-/// Shows all safety flags + safe outputs + command (no safe data in this direction).
+/**
+ * Compact one-line decode of the master→slave RxPDO (0x1700).
+ * Shows all safety flags + safe outputs + command (no safe data in this direction).
+ */
 inline void dumpRxPDOFrame(const char* tag,
                            const SynapticonPDO::SOMANET_RxPDO_1700& rx) {
     ColoredBitsetFormatter safety_fmt{kRxSafetyLabels};
@@ -468,9 +492,11 @@ inline void dumpRxPDOFrame(const char* tag,
 // FSoE command, then the raw hex bytes.  Used for the "on change" raw frame
 // dumps.
 
-/// One-line summary of the slave→master TxPDO (0x1B00).
-/// All flags use one-active encoding (bit=1 → active/safe).
-/// Works for both frame variants (LW1 and LW2).
+/**
+ * One-line summary of the slave→master TxPDO (0x1B00).
+ * All flags use one-active encoding (bit=1 → active/safe).
+ * Works for both frame variants (LW1 and LW2).
+ */
 template<typename TxPDO_t>
 inline void dumpTxPDOSummary(const char* tag,
                              const TxPDO_t& tx) {
@@ -486,8 +512,10 @@ inline void dumpTxPDOSummary(const char* tag,
                 FSoE::fsoeCommandName(tx.fsoe_command), hex);
 }
 
-/// One-line summary of the master→slave RxPDO (0x1700).
-/// Safety flags use zero-active encoding (bit=0 → active/safe).
+/**
+ * One-line summary of the master→slave RxPDO (0x1700).
+ * Safety flags use zero-active encoding (bit=0 → active/safe).
+ */
 inline void dumpRxPDOSummary(const char* tag,
                              const SynapticonPDO::SOMANET_RxPDO_1700& rx) {
     ColoredBitsetFormatter safety_fmt{kRxSafetyLabels};
@@ -506,19 +534,21 @@ inline void dumpRxPDOSummary(const char* tag,
 // Shows both directions in a single log line (meaning first), followed by
 // the full PDO buffer hex (FSoE + motion) for each direction.
 
-/// Per-cycle wire dump showing both directions' safety flags + command, then
-/// the full combined PDO buffer hex for each direction.
-///
-/// @param tag           Log tag.
-/// @param tx_buffer     Pointer to the slave→master FSoE PDO (0x1B00) within
-///                      the combined SM3 buffer.
-/// @param rx_buffer     Pointer to the master→slave FSoE PDO (0x1700) within
-///                      the combined SM2 buffer.
-/// @param sm2_total_len Total SM2 buffer length (FSoE + motion PDOs), for the
-///                      full RxPDO hex dump.
-/// @param sm3_total_len Total SM3 buffer length (FSoE + motion PDOs), for the
-///                      full TxPDO hex dump.
-/// @param cycle_count   Cycle counter to print (caller-managed).
+/**
+ * Per-cycle wire dump showing both directions' safety flags + command, then
+ * the full combined PDO buffer hex for each direction.
+ *
+ * @param tag           Log tag.
+ * @param tx_buffer     Pointer to the slave→master FSoE PDO (0x1B00) within
+ *                      the combined SM3 buffer.
+ * @param rx_buffer     Pointer to the master→slave FSoE PDO (0x1700) within
+ *                      the combined SM2 buffer.
+ * @param sm2_total_len Total SM2 buffer length (FSoE + motion PDOs), for the
+ *                      full RxPDO hex dump.
+ * @param sm3_total_len Total SM3 buffer length (FSoE + motion PDOs), for the
+ *                      full TxPDO hex dump.
+ * @param cycle_count   Cycle counter to print (caller-managed).
+ */
 inline void dumpWire(const char* tag,
                      const uint8_t* tx_buffer,
                      const uint8_t* rx_buffer,

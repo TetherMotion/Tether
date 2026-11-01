@@ -36,24 +36,24 @@ namespace FSoE {
 class SafetyAddressResolver {
 public:
     struct Job {
-        std::vector<uint8_t> frame;      ///< Raw rejected slave frame
-        uint16_t start_crc = 0;          ///< CRC inheritance base used for checking
-        uint16_t seq_no = 0;             ///< Expected sequence number
-        uint16_t seq_window = 4;         ///< Try seq_no ± this many candidates
+        std::vector<uint8_t> frame; /**< Raw rejected slave frame */
+        uint16_t start_crc = 0; /**< CRC inheritance base used for checking */
+        uint16_t seq_no = 0; /**< Expected sequence number */
+        uint16_t seq_window = 4; /**< Try seq_no ± this many candidates */
     };
 
     struct Result {
         bool     found = false;
-        uint16_t conn_id = 0;            ///< connID under which all CRCs validate
-        uint16_t seq_no = 0;             ///< seq under which all CRCs validate
-        uint16_t frame_conn_id = 0;      ///< connID bytes from the frame trailer
-        uint8_t  command = 0;            ///< command byte of the rejected frame
-        int      crc_segments = 0;       ///< number of embedded CRCs compared
-        int      matches = 0;            ///< connID×seq combos that validated (16-bit CRC collisions are possible)
-        uint64_t candidates_tested = 0;  ///< connID×seq combinations tried
+        uint16_t conn_id = 0; /**< connID under which all CRCs validate */
+        uint16_t seq_no = 0; /**< seq under which all CRCs validate */
+        uint16_t frame_conn_id = 0; /**< connID bytes from the frame trailer */
+        uint8_t  command = 0; /**< command byte of the rejected frame */
+        int      crc_segments = 0; /**< number of embedded CRCs compared */
+        int      matches = 0; /**< connID×seq combos that validated (16-bit CRC collisions are possible) */
+        uint64_t candidates_tested = 0; /**< connID×seq combinations tried */
     };
 
-    /// Invoked on the resolver's worker thread with the search outcome.
+    /**Invoked on the resolver's worker thread with the search outcome. */
     using ResultCallback = std::function<void(const Result&)>;
 
     SafetyAddressResolver() = default;
@@ -62,16 +62,20 @@ public:
     SafetyAddressResolver(const SafetyAddressResolver&) = delete;
     SafetyAddressResolver& operator=(const SafetyAddressResolver&) = delete;
 
-    /// Queue a rejected frame for background resolution.  Non-blocking.
-    /// @return false if the resolver is busy with a previous frame (the
-    ///         caller should drop this frame) or the resolver is stopped.
+    /**
+     * Queue a rejected frame for background resolution.  Non-blocking.
+     * @return false if the resolver is busy with a previous frame (the
+     *         caller should drop this frame) or the resolver is stopped.
+     */
     bool submit(Job job, ResultCallback cb);
 
-    /// Stop the worker thread and discard pending jobs.  Safe to call
-    /// multiple times; also invoked by the destructor.
+    /**
+     * Stop the worker thread and discard pending jobs.  Safe to call
+     * multiple times; also invoked by the destructor.
+     */
     void stop();
 
-    /// True while a search is queued or running.
+    /**True while a search is queued or running. */
     bool busy() const;
 
 private:
@@ -83,7 +87,7 @@ private:
     std::deque<std::pair<Job, ResultCallback>> queue_;
     std::thread worker_;
     bool stop_ = false;
-    bool running_ = false;              ///< a search is currently executing
+    bool running_ = false; /**< a search is currently executing */
 };
 
 } // namespace FSoE

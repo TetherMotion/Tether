@@ -181,40 +181,40 @@ using FeedthroughMatrix = Matrix<MAX_OUTPUT_DIM, MAX_CONTROL_DIM>;
  */
 enum class ControllerType {
     // Classical
-    P,                      ///< Proportional only
-    PD,                     ///< Proportional-Derivative
-    PI,                     ///< Proportional-Integral
-    PID,                    ///< Proportional-Integral-Derivative
-    PID2DOF,                ///< Two degree-of-freedom PID
+    P, /**< Proportional only */
+    PD, /**< Proportional-Derivative */
+    PI, /**< Proportional-Integral */
+    PID, /**< Proportional-Integral-Derivative */
+    PID2DOF, /**< Two degree-of-freedom PID */
     
     // Nonlinear classical
-    BangBang,               ///< On-off control
-    PDPlus,                 ///< PD with compensation
+    BangBang, /**< On-off control */
+    PDPlus, /**< PD with compensation */
     
     // Cascaded
-    DualLoopPID,            ///< Position-velocity cascade
+    DualLoopPID, /**< Position-velocity cascade */
     
     // Fractional order
-    FractionalPID,          ///< Fractional order PID (FOPID)
+    FractionalPID, /**< Fractional order PID (FOPID) */
     
     // Optimal control
-    LQR,                    ///< Linear Quadratic Regulator
-    LQG,                    ///< Linear Quadratic Gaussian
-    LQI,                    ///< LQR with Integral action
+    LQR, /**< Linear Quadratic Regulator */
+    LQG, /**< Linear Quadratic Gaussian */
+    LQI, /**< LQR with Integral action */
     
     // Robust control
-    H2,                     ///< H2 optimal control
-    HInfinity,              ///< H-infinity control
+    H2, /**< H2 optimal control */
+    HInfinity, /**< H-infinity control */
     
     // Learning control
-    ILC,                    ///< Iterative Learning Control
+    ILC, /**< Iterative Learning Control */
     
     // Composite
-    Cascade,                ///< Cascaded controllers
-    Parallel,               ///< Parallel sum of controllers
-    Feedforward,            ///< Controller with feedforward
+    Cascade, /**< Cascaded controllers */
+    Parallel, /**< Parallel sum of controllers */
+    Feedforward, /**< Controller with feedforward */
     
-    Custom                  ///< User-defined controller
+    Custom /**< User-defined controller */
 };
 
 /**
@@ -248,43 +248,43 @@ enum class ControllerType {
  * - Cons: More complex implementation
  */
 enum class AntiWindupMethod {
-    None,                   ///< No anti-windup (not recommended)
-    Clamping,               ///< Stop integration at limits
-    BackCalculation,        ///< Back-calculate from saturation
-    Conditional,            ///< Integrate only when appropriate
-    Tracking,               ///< Track with external feedback
-    ObserverBased           ///< Observer-based anti-windup
+    None, /**< No anti-windup (not recommended) */
+    Clamping, /**< Stop integration at limits */
+    BackCalculation, /**< Back-calculate from saturation */
+    Conditional, /**< Integrate only when appropriate */
+    Tracking, /**< Track with external feedback */
+    ObserverBased /**< Observer-based anti-windup */
 };
 
 /**
  * @brief Controller operating mode
  */
 enum class ControllerMode {
-    Disabled,               ///< Controller output is zero
-    Manual,                 ///< Manual output override
-    Automatic,              ///< Normal automatic control
-    Tracking,               ///< Track external setpoint
-    Hold                    ///< Hold current output
+    Disabled, /**< Controller output is zero */
+    Manual, /**< Manual output override */
+    Automatic, /**< Normal automatic control */
+    Tracking, /**< Track external setpoint */
+    Hold /**< Hold current output */
 };
 
 /**
  * @brief Derivative filter type
  */
 enum class DerivativeFilterType {
-    None,                   ///< No filtering (noisy!)
-    FirstOrder,             ///< First-order low-pass
-    SecondOrder,            ///< Second-order low-pass
-    MovingAverage,          ///< Moving average filter
-    Median                  ///< Median filter (outlier rejection)
+    None, /**< No filtering (noisy!) */
+    FirstOrder, /**< First-order low-pass */
+    SecondOrder, /**< Second-order low-pass */
+    MovingAverage, /**< Moving average filter */
+    Median /**< Median filter (outlier rejection) */
 };
 
 /**
  * @brief Setpoint weighting mode
  */
 enum class SetpointWeight {
-    Full,                   ///< Weight = 1.0 (full reference)
-    Partial,                ///< 0 < weight < 1
-    ErrorOnly               ///< Weight = 0 (error only)
+    Full, /**< Weight = 1.0 (full reference) */
+    Partial, /**< 0 < weight < 1 */
+    ErrorOnly /**< Weight = 0 (error only) */
 };
 
 // ============================================================================
@@ -297,45 +297,45 @@ enum class SetpointWeight {
  * Contains all information needed for one control cycle.
  */
 struct ControllerInput {
-    double reference{0.0};          ///< Desired setpoint
-    double measured{0.0};           ///< Measured process variable
-    double dt{0.001};               ///< Time step [s]
+    double reference{0.0}; /**< Desired setpoint */
+    double measured{0.0}; /**< Measured process variable */
+    double dt{0.001}; /**< Time step [s] */
     
     // Optional extended inputs
-    double referenceDerivative{0.0};    ///< Derivative of reference (for 2DOF)
-    double referenceAccel{0.0};         ///< Second derivative of reference (for acceleration feedforward)
-    double feedforward{0.0};            ///< Feedforward term
-    double disturbance{0.0};            ///< Measured disturbance
+    double referenceDerivative{0.0}; /**< Derivative of reference (for 2DOF) */
+    double referenceAccel{0.0}; /**< Second derivative of reference (for acceleration feedforward) */
+    double feedforward{0.0}; /**< Feedforward term */
+    double disturbance{0.0}; /**< Measured disturbance */
     
     // State feedback (for state-space controllers)
-    StateVector state{};                ///< Full state vector
-    size_t stateDim{0};                 ///< Actual state dimension
+    StateVector state{}; /**< Full state vector */
+    size_t stateDim{0}; /**< Actual state dimension */
     
     // Flags
-    bool reset{false};                  ///< Reset controller state
-    bool enable{true};                  ///< Enable controller
+    bool reset{false}; /**< Reset controller state */
+    bool enable{true}; /**< Enable controller */
 };
 
 /**
  * @brief Controller output data
  */
 struct ControllerOutput {
-    double control{0.0};            ///< Primary control signal
+    double control{0.0}; /**< Primary control signal */
     
     // Diagnostic outputs
-    double proportional{0.0};       ///< P term contribution
-    double integral{0.0};           ///< I term contribution  
-    double derivative{0.0};         ///< D term contribution
-    double feedforward{0.0};        ///< Feedforward contribution
+    double proportional{0.0}; /**< P term contribution */
+    double integral{0.0}; /**< I term contribution */
+    double derivative{0.0}; /**< D term contribution */
+    double feedforward{0.0}; /**< Feedforward contribution */
     
     // Status
-    bool saturated{false};          ///< Output is saturated
-    bool integrating{false};        ///< Integrator is active
-    double error{0.0};              ///< Current error
+    bool saturated{false}; /**< Output is saturated */
+    bool integrating{false}; /**< Integrator is active */
+    double error{0.0}; /**< Current error */
     
     // Extended outputs for state-space
-    ControlVector controlVector{};  ///< Multi-dimensional control
-    size_t controlDim{1};           ///< Control dimension
+    ControlVector controlVector{}; /**< Multi-dimensional control */
+    size_t controlDim{1}; /**< Control dimension */
 };
 
 /**
@@ -348,7 +348,7 @@ struct SaturationLimits {
     double integralMax{std::numeric_limits<double>::max()};
     double derivativeMin{-std::numeric_limits<double>::max()};
     double derivativeMax{std::numeric_limits<double>::max()};
-    double rateLimit{std::numeric_limits<double>::max()};  ///< Max output change rate
+    double rateLimit{std::numeric_limits<double>::max()}; /**< Max output change rate */
     
     bool isValid() const {
         return outputMin < outputMax && 
@@ -361,27 +361,27 @@ struct SaturationLimits {
  * @brief Controller tuning parameters (for auto-tuning)
  */
 struct TuningParameters {
-    double settlingTime{1.0};       ///< Desired settling time [s]
-    double overshoot{0.05};         ///< Max overshoot (0-1)
-    double bandwidth{10.0};         ///< Desired bandwidth [rad/s]
-    double phaseMargin{60.0};       ///< Phase margin [degrees]
-    double gainMargin{6.0};         ///< Gain margin [dB]
-    bool aggressive{false};         ///< Aggressive vs conservative tuning
+    double settlingTime{1.0}; /**< Desired settling time [s] */
+    double overshoot{0.05}; /**< Max overshoot (0-1) */
+    double bandwidth{10.0}; /**< Desired bandwidth [rad/s] */
+    double phaseMargin{60.0}; /**< Phase margin [degrees] */
+    double gainMargin{6.0}; /**< Gain margin [dB] */
+    bool aggressive{false}; /**< Aggressive vs conservative tuning */
 };
 
 /**
  * @brief Controller diagnostic information
  */
 struct ControllerDiagnostics {
-    uint64_t cycleCount{0};         ///< Number of control cycles
-    double maxError{0.0};           ///< Maximum error seen
-    double rmsError{0.0};           ///< RMS error
-    double integralValue{0.0};      ///< Current integral state
-    double lastDerivative{0.0};     ///< Last derivative value
-    uint32_t saturationCount{0};    ///< Times output saturated
-    double computeTimeUs{0.0};      ///< Last compute time [µs]
-    bool healthy{true};             ///< Controller health status
-    std::string statusMessage;      ///< Status/error message
+    uint64_t cycleCount{0}; /**< Number of control cycles */
+    double maxError{0.0}; /**< Maximum error seen */
+    double rmsError{0.0}; /**< RMS error */
+    double integralValue{0.0}; /**< Current integral state */
+    double lastDerivative{0.0}; /**< Last derivative value */
+    uint32_t saturationCount{0}; /**< Times output saturated */
+    double computeTimeUs{0.0}; /**< Last compute time [µs] */
+    bool healthy{true}; /**< Controller health status */
+    std::string statusMessage; /**< Status/error message */
 };
 
 // ============================================================================

@@ -148,10 +148,10 @@ public:
      * @brief Get timer statistics
      */
     struct Stats {
-        uint64_t tickCount = 0;     ///< Number of timer ticks
-        Microseconds maxJitter = 0; ///< Maximum jitter observed
-        Microseconds avgJitter = 0; ///< Average jitter
-        uint32_t missedTicks = 0;   ///< Number of missed/late ticks
+        uint64_t tickCount = 0; /**< Number of timer ticks */
+        Microseconds maxJitter = 0; /**< Maximum jitter observed */
+        Microseconds avgJitter = 0; /**< Average jitter */
+        uint32_t missedTicks = 0; /**< Number of missed/late ticks */
     };
     
     virtual Stats getStats() const = 0;

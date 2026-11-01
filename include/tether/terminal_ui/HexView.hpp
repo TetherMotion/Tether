@@ -1,9 +1,11 @@
 #pragma once
 
-/// Hex byte dump with optional field highlighting: `00 11 22 ...` where
-/// byte ranges (e.g. command byte, connection id, CRC) are tinted by
-/// palette attribute.  More useful than a flat bytesToHex for protocol
-/// frames whose field layout is known.
+/**
+ * Hex byte dump with optional field highlighting: `00 11 22 ...` where
+ * byte ranges (e.g. command byte, connection id, CRC) are tinted by
+ * palette attribute.  More useful than a flat bytesToHex for protocol
+ * frames whose field layout is known.
+ */
 
 #include <ncurses.h>
 #include <cstddef>
@@ -16,18 +18,20 @@
 namespace Tether {
 namespace TUI {
 
-/// A highlighted byte range inside a dump line.
+/**A highlighted byte range inside a dump line. */
 struct HexField {
     size_t off = 0;
     size_t len = 0;
     int attrs = COLOR_PAIR(PalHeader);
 };
 
-/// Draw `data` as space-separated hex bytes at (y, x) in window `w`,
-/// clipped to `max_cols` screen columns (appends "…" when truncated).
-/// Bytes inside any `fields` range are drawn with that field's attrs;
-/// first matching field wins.  Plain bytes use `plain_attrs` (0 =
-/// default color).  Returns columns written.
+/**
+ * Draw `data` as space-separated hex bytes at (y, x) in window `w`,
+ * clipped to `max_cols` screen columns (appends "…" when truncated).
+ * Bytes inside any `fields` range are drawn with that field's attrs;
+ * first matching field wins.  Plain bytes use `plain_attrs` (0 =
+ * default color).  Returns columns written.
+ */
 inline int wdrawHexLine(WINDOW* w, int y, int x, int max_cols,
                         std::span<const uint8_t> data,
                         std::span<const HexField> fields = {},
@@ -52,7 +56,7 @@ inline int wdrawHexLine(WINDOW* w, int y, int x, int max_cols,
     return col - x;
 }
 
-/// stdscr convenience — same as wdrawHexLine(stdscr, ...).
+/**stdscr convenience — same as wdrawHexLine(stdscr, ...). */
 inline int drawHexLine(int y, int x, int max_cols,
                        std::span<const uint8_t> data,
                        std::span<const HexField> fields = {},

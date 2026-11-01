@@ -81,8 +81,10 @@ static const char* stateName(DriveState s) {
     }
 }
 
-/// Step the CiA402 FSA one command per cycle toward OperationEnabled.
-/// The slave must observe each controlword before the next is issued.
+/**
+ * Step the CiA402 FSA one command per cycle toward OperationEnabled.
+ * The slave must observe each controlword before the next is issued.
+ */
 static void tickAxis(Beckhoff::CompactDriveTerminal& d, size_t ax) {
     const auto st = d.driveState(ax);
 

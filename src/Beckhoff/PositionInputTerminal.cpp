@@ -31,7 +31,7 @@ static const char* TAG = "PositionInputTerminal";
 
 namespace {
 
-/// Read up to 64 bits little-endian at `p`, zero-extended.
+/**Read up to 64 bits little-endian at `p`, zero-extended. */
 inline uint64_t readRaw(const uint8_t* p, uint8_t bits) {
     uint64_t raw = 0;
     const size_t n = (bits + 7) / 8;
@@ -40,7 +40,7 @@ inline uint64_t readRaw(const uint8_t* p, uint8_t bits) {
     return raw;
 }
 
-/// readRaw + sign extension at `bits` width.
+/**readRaw + sign extension at `bits` width. */
 inline int64_t readSigned(const uint8_t* p, uint8_t bits) {
     return detail::signExtend64(readRaw(p, bits), bits);
 }

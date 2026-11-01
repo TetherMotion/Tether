@@ -50,33 +50,33 @@
 
 namespace tether::motion::profile_renurbs {
 
-/// Configuration for pressure-advance ReNURBS construction.
+/**Configuration for pressure-advance ReNURBS construction. */
 struct PressureAdvanceReNURBSConfig {
-    /// Interpolation tolerance for the offset curve [mm].
+    /**Interpolation tolerance for the offset curve [mm]. */
     double epsilon = 1e-6;
 
-    /// Safety margin below the ±maxCompensation limit [mm].
+    /**Safety margin below the ±maxCompensation limit [mm]. */
     double safetyMargin = 1e-6;
 
-    /// B-spline degree (continuity = degree − 1).
+    /**B-spline degree (continuity = degree − 1). */
     int degree = 5;
 
-    /// Max control points per segment.
+    /**Max control points per segment. */
     std::size_t maxControlPointsPerSegment = 64;
 
-    /// Refinement grid multiplier.
+    /**Refinement grid multiplier. */
     std::size_t refinementGridMultiplier = 10;
 
-    /// Run the certifier after building.
+    /**Run the certifier after building. */
     bool certify = true;
 
-    /// Lipschitz certificate width goal.
+    /**Lipschitz certificate width goal. */
     double certificationEpsilon = 1e-5;
 
-    /// If true, throw on certification failure.
+    /**If true, throw on certification failure. */
     bool certifyThrowOnFailure = false;
 
-    /// Quantity name (default: "pressure_offset").
+    /**Quantity name (default: "pressure_offset"). */
     std::string quantityName = "pressure_offset";
 };
 

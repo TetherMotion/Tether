@@ -78,8 +78,10 @@ struct ProbeConfig {
     uint8_t     srcMac[6] = {};
 };
 
-/// Probe datagrams sent on the wire.  First-idx values are chosen to land
-/// on both sides of the fastpath range.
+/**
+ * Probe datagrams sent on the wire.  First-idx values are chosen to land
+ * on both sides of the fastpath range.
+ */
 struct Probe {
     const char* name;
     uint8_t  cmd;
@@ -101,8 +103,10 @@ constexpr size_t kProbeCount = sizeof(kProbes) / sizeof(kProbes[0]);
 // Argument parsing / interface resolution
 // ============================================================================
 
-/// Parse CLI arguments and resolve the interface (auto-select when omitted).
-/// Exits the process on error, on --help, or on --list-interfaces.
+/**
+ * Parse CLI arguments and resolve the interface (auto-select when omitted).
+ * Exits the process on error, on --help, or on --list-interfaces.
+ */
 ProbeConfig parseArgs(int argc, char** argv) {
     argparse::ArgumentParser program("ec_filter_probe", "1.0",
                                      argparse::default_arguments::help);
@@ -147,7 +151,7 @@ ProbeConfig parseArgs(int argc, char** argv) {
     return cfg;
 }
 
-/// Read the source MAC of @p ifname into @p cfg.srcMac.
+/**Read the source MAC of @p ifname into @p cfg.srcMac. */
 void querySourceMac(ProbeConfig& cfg) {
     int s = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (s < 0) return;
@@ -204,7 +208,7 @@ int openBoundRaw(int ifindex) {
     return fd;
 }
 
-/// Open the helper TX socket used to inject probe frames.
+/**Open the helper TX socket used to inject probe frames. */
 int openTx() {
     int fd = ::socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     if (fd < 0) perror("tx socket");
@@ -215,7 +219,7 @@ int openTx() {
 // Filter programs
 // ============================================================================
 
-/// The three candidate cBPF programs under test.
+/**The three candidate cBPF programs under test. */
 struct FilterPrograms {
     std::vector<EtherCAT::CBPFInsn> encap;
     std::vector<EtherCAT::CBPFInsn> cyclic;
@@ -286,8 +290,10 @@ size_t buildFrame(uint8_t* out, const uint8_t src[6], uint16_t vlan,
 
 struct RxHit { int count = 0; uint16_t last_wkc = 0; size_t last_len = 0; };
 
-/// Open the four candidate RX sockets (bare/encap/cyclic/async).
-/// Returns false if any socket failed.
+/**
+ * Open the four candidate RX sockets (bare/encap/cyclic/async).
+ * Returns false if any socket failed.
+ */
 bool openProbeSockets(int ifindex, const FilterPrograms& progs,
                       ProbeSocket (&socks)[4]) {
     socks[0] = {"bare",   openRx(ifindex)};
@@ -299,8 +305,10 @@ bool openProbeSockets(int ifindex, const FilterPrograms& progs,
     return true;
 }
 
-/// Send one probe frame, wait ~20 ms for the reply to traverse the segment,
-/// then drain all RX sockets and record hits carrying the probe's idx.
+/**
+ * Send one probe frame, wait ~20 ms for the reply to traverse the segment,
+ * then drain all RX sockets and record hits carrying the probe's idx.
+ */
 void sendAndCollect(int tx, const sockaddr_ll& dst,
                     const uint8_t* frame, size_t flen, const Probe& pr,
                     const ProbeSocket (&socks)[4], RxHit (*hits)[kProbeCount],
@@ -337,7 +345,7 @@ void sendAndCollect(int tx, const sockaddr_ll& dst,
     }
 }
 
-/// Print the per-probe × per-socket hit table.
+/**Print the per-probe × per-socket hit table. */
 void printReplyMatrix(uint16_t vlan, const ProbeSocket (&socks)[4],
                       const RxHit (*hits)[kProbeCount]) {
     printf("\n=== reply matrix (vlan=%u) ===\n", vlan);
@@ -359,8 +367,10 @@ void printReplyMatrix(uint16_t vlan, const ProbeSocket (&socks)[4],
            "others only on 'async'.\n");
 }
 
-/// Run the reply matrix: send every probe, collect per-socket replies,
-/// print the result table.
+/**
+ * Run the reply matrix: send every probe, collect per-socket replies,
+ * print the result table.
+ */
 void runReplyMatrix(const ProbeConfig& cfg, const FilterPrograms& progs,
                     int tx, const sockaddr_ll& dst) {
     ProbeSocket socks[4];
@@ -827,8 +837,10 @@ void runCyclicExecutiveTest(const ProbeConfig& cfg) {
     EtherCAT::shutdownHostEthernet(session);
 }
 
-/// Run the kernel packet-ring matrix: TX-ring drain, VLAN auxdata delivery,
-/// and composed-filter RX-ring tests.
+/**
+ * Run the kernel packet-ring matrix: TX-ring drain, VLAN auxdata delivery,
+ * and composed-filter RX-ring tests.
+ */
 void runRingMatrix(const ProbeConfig& cfg, const FilterPrograms& progs,
                    int tx) {
     uint8_t frame[1600];

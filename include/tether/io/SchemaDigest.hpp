@@ -6,10 +6,12 @@ namespace tether::io {
 
 SchemaDigest computeSchemaDigest(const SchemaNode& node);
 
-/// Backfills every schema ref inside the graph with the digest of its target
-/// node, iterating to a fixpoint (child digests feed into parent digests).
-/// Returns false when the graph contains a ref to an unknown node or the
-/// pass limit is exceeded (a dependency cycle would never converge).
+/**
+ * Backfills every schema ref inside the graph with the digest of its target
+ * node, iterating to a fixpoint (child digests feed into parent digests).
+ * Returns false when the graph contains a ref to an unknown node or the
+ * pass limit is exceeded (a dependency cycle would never converge).
+ */
 inline bool resolveSchemaDigests(SchemaGraph& graph) {
     const auto resolveRef = [&graph](SchemaRef& ref) -> bool {
         const auto* target = graph.find(ref.key);

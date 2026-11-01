@@ -6,8 +6,10 @@
 #include "tether/TetherConfig.hpp"
 #endif
 
-/// @file PrinterObjectsCore.hpp
-/// @brief Core printer objects (extruder, heater_bed, fan, toolhead, etc.)
+/**
+ * @file PrinterObjectsCore.hpp
+ * @brief Core printer objects (extruder, heater_bed, fan, toolhead, etc.)
+ */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 #include "tether/klipper/objects/Thermal.hpp"
@@ -24,8 +26,10 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief The extruder printer object.
-/// Exposes hotend temperature, target, power, and pressure advance.
+/**
+ * @brief The extruder printer object.
+ * Exposes hotend temperature, target, power, and pressure advance.
+ */
 class ExtruderObject : public PrinterObject {
 public:
     explicit ExtruderObject(std::shared_ptr<objects::Heater> heater)
@@ -84,7 +88,7 @@ private:
     std::string motionQueue_;
 };
 
-/// @brief The heater_bed printer object.
+/**@brief The heater_bed printer object. */
 class HeaterBedObject : public PrinterObject {
 public:
     explicit HeaterBedObject(std::shared_ptr<objects::Heater> heater)
@@ -112,7 +116,7 @@ private:
     std::shared_ptr<objects::Heater> heater_;
 };
 
-/// @brief The fan printer object (for part cooling fan).
+/**@brief The fan printer object (for part cooling fan). */
 class FanObject : public PrinterObject {
 public:
     explicit FanObject(std::shared_ptr<objects::Fan> fan)
@@ -143,8 +147,10 @@ private:
     double rpm_ = 0.0;
 };
 
-/// @brief The heaters aggregate printer object.
-/// Lists all available heaters and sensors.
+/**
+ * @brief The heaters aggregate printer object.
+ * Lists all available heaters and sensors.
+ */
 class HeatersObject : public PrinterObject {
 public:
     void addHeater(const std::string& name) { heaters_.push_back(name); }
@@ -173,8 +179,10 @@ private:
     std::vector<std::string> sensors_;
 };
 
-/// @brief The mcu printer object.
-/// Exposes MCU version, clock frequency, and statistics.
+/**
+ * @brief The mcu printer object.
+ * Exposes MCU version, clock frequency, and statistics.
+ */
 class McuObject : public PrinterObject {
 public:
     std::string name() const override { return "mcu"; }
@@ -220,7 +228,7 @@ private:
     size_t retransmits_ = 0;
 };
 
-/// @brief The stepper_enable printer object.
+/**@brief The stepper_enable printer object. */
 class StepperEnableObject : public PrinterObject {
 public:
     void setStepperEnabled(const std::string& name, bool enabled) {
@@ -252,7 +260,7 @@ private:
     bool enabled_ = true;
 };
 
-/// @brief The idle_timeout printer object.
+/**@brief The idle_timeout printer object. */
 class IdleTimeoutObject : public PrinterObject {
 public:
     std::string name() const override { return "idle_timeout"; }
@@ -280,7 +288,7 @@ private:
     double timeout_ = 600.0; // 10 minutes default
 };
 
-/// @brief The system_stats printer object.
+/**@brief The system_stats printer object. */
 class SystemStatsObject : public PrinterObject {
 public:
     std::string name() const override { return "system_stats"; }
@@ -311,8 +319,10 @@ private:
     size_t memavail_ = 0;
 };
 
-/// @brief The print_stats printer object.
-/// Tracks print job statistics (filename, duration, filament used, state).
+/**
+ * @brief The print_stats printer object.
+ * Tracks print job statistics (filename, duration, filament used, state).
+ */
 class PrintStatsObject : public PrinterObject {
 public:
     explicit PrintStatsObject(std::shared_ptr<VirtualSdcard> sd)

@@ -16,16 +16,18 @@ namespace EtherCAT {
 namespace Drives {
 namespace ESC211 {
 
-/// Manages the FNI/RSP/SDD configuration data lifecycle on the ESC211:
-///   - Write data sections to temp objects (0xF200/0xF210/0xF220)
-///   - Activate temp data → active (cmd 3: FNI, cmd 4: RSP+SDD)
-///   - Save active data to flash (cmd 5: FNI, cmd 6: RSP+SDD)
-///   - Load from flash to active (cmd 1: FNI, cmd 2: RSP+SDD)
-///   - Verify CRC registers match expected values
-///   - Ensure config data is loaded before starting the safety state machine
-///
-/// This class replaces the duplicated sendCommand lambdas in esc211_fni.cpp
-/// and the ensureConfigDataLoaded() method in SafetyStateMachineManager.
+/**
+ * Manages the FNI/RSP/SDD configuration data lifecycle on the ESC211:
+ *   - Write data sections to temp objects (0xF200/0xF210/0xF220)
+ *   - Activate temp data → active (cmd 3: FNI, cmd 4: RSP+SDD)
+ *   - Save active data to flash (cmd 5: FNI, cmd 6: RSP+SDD)
+ *   - Load from flash to active (cmd 1: FNI, cmd 2: RSP+SDD)
+ *   - Verify CRC registers match expected values
+ *   - Ensure config data is loaded before starting the safety state machine
+ *
+ * This class replaces the duplicated sendCommand lambdas in esc211_fni.cpp
+ * and the ensureConfigDataLoaded() method in SafetyStateMachineManager.
+ */
 class ConfigManager {
 public:
     enum class Result {
@@ -41,8 +43,10 @@ public:
         std::chrono::milliseconds crc_timeout{15000};
         std::chrono::milliseconds crc_poll_interval{200};
         std::chrono::milliseconds post_flash_load_settle{500};
-        /// If true, send CMD=0 after each command (esc211_fni.cpp style).
-        /// If false, only reset before each command (SafetyStateMachineManager style).
+        /**
+         * If true, send CMD=0 after each command (esc211_fni.cpp style).
+         * If false, only reset before each command (SafetyStateMachineManager style).
+         */
         bool post_command_reset{true};
     };
 
@@ -177,12 +181,16 @@ private:
     ControlCommandChannel channel_;
     CrcVerifier crc_verifier_;
 
-    /// Read and log 0xF100/0xF101/0xF102/0xF103 and 0xF110 after an
-    /// FNI command fails, so the operator has immediate diagnostic context.
+    /**
+     * Read and log 0xF100/0xF101/0xF102/0xF103 and 0xF110 after an
+     * FNI command fails, so the operator has immediate diagnostic context.
+     */
     void logFniErrorSnapshot();
 
-    /// Send a command for the given data types.  Groups FNI vs RSP/SDD
-    /// and sends the appropriate command for each group.
+    /**
+     * Send a command for the given data types.  Groups FNI vs RSP/SDD
+     * and sends the appropriate command for each group.
+     */
     Result sendForTypes(std::span<const ConfigDataType> types,
                         ControlCommandChannel::ControlCommandCode fniCmd,
                         ControlCommandChannel::ControlCommandCode rspSddCmd,

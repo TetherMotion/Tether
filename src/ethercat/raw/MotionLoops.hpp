@@ -20,7 +20,7 @@ namespace EtherCAT {
 class DCManager;
 class PDOManager;
 
-/// Common interface for the legacy motion-control loop strategies.
+/**Common interface for the legacy motion-control loop strategies. */
 class IMotionControlLoop {
 public:
     virtual ~IMotionControlLoop() = default;
@@ -30,19 +30,19 @@ public:
     virtual void setShutdownDebug(bool) {}
 };
 
-/// RealtimeLoop-driven loop: callback + optional DC sync per cycle.
+/**RealtimeLoop-driven loop: callback + optional DC sync per cycle. */
 std::unique_ptr<IMotionControlLoop> makeRealtimeMotionControlLoop(
     Master::MotionControlCallback callback,
     Master::RealtimeMotionLoopConfig config,
     DCManager* dc_manager);
 
-/// Plain periodic std::thread loop (non-RT fallback).
+/**Plain periodic std::thread loop (non-RT fallback). */
 std::unique_ptr<IMotionControlLoop> makePollingMotionControlLoop(
     Master::MotionControlCallback callback,
     Master::PollingMotionLoopConfig config,
     DCManager* dc_manager);
 
-/// Queue-mode RT loop: calls PDOManager::queueCycle() each cycle.
+/**Queue-mode RT loop: calls PDOManager::queueCycle() each cycle. */
 std::unique_ptr<IMotionControlLoop> makeQueueMotionControlLoop(
     PDOManager* pdo_manager,
     Master::RealtimeMotionLoopConfig config,

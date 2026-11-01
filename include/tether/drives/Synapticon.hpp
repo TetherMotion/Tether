@@ -74,12 +74,12 @@ inline constexpr bool isKnownProductCode(uint32_t product_code) {
     return false;
 }
 
-/// Outcome of verifySomanetIdentity().
+/**Outcome of verifySomanetIdentity(). */
 enum class SomanetIdentityCheck {
-    Verified,            ///< Vendor + known SOMANET product code
-    VendorUnreadable,    ///< SII identity could not be read
-    VendorMismatch,      ///< Not a Synapticon device
-    UnknownProductCode,  ///< Synapticon vendor, unfamiliar product code
+    Verified, /**< Vendor + known SOMANET product code */
+    VendorUnreadable, /**< SII identity could not be read */
+    VendorMismatch, /**< Not a Synapticon device */
+    UnknownProductCode, /**< Synapticon vendor, unfamiliar product code */
 };
 
 /**
@@ -186,7 +186,7 @@ inline std::optional<std::vector<EtherCAT::DiscoveredSlave>> discoverDrives(
     return discovered;
 }
 
-/// Convert a shaft angle in degrees to encoder increments.
+/**Convert a shaft angle in degrees to encoder increments. */
 inline int32_t degreesToIncrements(double degrees,
                                    uint32_t increments_per_rev) {
     return static_cast<int32_t>(std::lround(
@@ -225,7 +225,7 @@ static constexpr uint32_t kDefaultEncoderResolution = 524288;
 // Firmware version (0x100A "Manufacturer software version")
 // ============================================================================
 
-/// Parsed SOMANET firmware version ("v5.6.4", "5.6.x", …).
+/**Parsed SOMANET firmware version ("v5.6.4", "5.6.x", …). */
 struct FirmwareVersion {
     uint16_t major = 0;
     uint16_t minor = 0;
@@ -240,8 +240,10 @@ struct FirmwareVersion {
     }
 };
 
-/// Parse a SOMANET 0x100A string like "v5.6.4" / "5.6.4" /
-/// "SOMANET 5.6.4-rc1".  Extracts the first X.Y.Z digit run.
+/**
+ * Parse a SOMANET 0x100A string like "v5.6.4" / "5.6.4" /
+ * "SOMANET 5.6.4-rc1".  Extracts the first X.Y.Z digit run.
+ */
 inline FirmwareVersion parseFirmwareVersion(std::string_view s) {
     FirmwareVersion v;
     // Skip to the first digit
@@ -265,10 +267,12 @@ inline FirmwareVersion parseFirmwareVersion(std::string_view s) {
     return v;
 }
 
-/// SOMANET firmware >= 5.6.0 stops servicing the CoE mailbox while the
-/// slave sits in SAFE_OP — every SDO issued in that window times out.
-/// Returns true when the mailbox is expected to work in SAFE_OP (older
-/// firmware, or version unreadable — conservative default).
+/**
+ * SOMANET firmware >= 5.6.0 stops servicing the CoE mailbox while the
+ * slave sits in SAFE_OP — every SDO issued in that window times out.
+ * Returns true when the mailbox is expected to work in SAFE_OP (older
+ * firmware, or version unreadable — conservative default).
+ */
 inline bool mailboxServicedInSafeOp(FirmwareVersion v) {
     return !(v >= FirmwareVersion{5, 6, 0, true});
 }

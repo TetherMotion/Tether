@@ -195,10 +195,10 @@ const char* getCiA402ErrorCodeName(uint16_t code);
  * This structure decodes such formats.
  */
 struct ManufacturerFault {
-    uint16_t raw_code;         ///< Raw fault code
-    uint8_t class_code;        ///< Fault class (e.g., 74 in "Err74.1")
-    uint8_t sub_code;          ///< Fault subcode (e.g., 1 in "Err74.1")
-    const char* description;   ///< Human-readable description
+    uint16_t raw_code; /**< Raw fault code */
+    uint8_t class_code; /**< Fault class (e.g., 74 in "Err74.1") */
+    uint8_t sub_code; /**< Fault subcode (e.g., 1 in "Err74.1") */
+    const char* description; /**< Human-readable description */
 
     /**
      * @brief Parse manufacturer fault code
@@ -232,19 +232,19 @@ struct ManufacturerFault {
 struct SlaveFaultState {
     // Current fault status
     bool has_fault;
-    uint16_t al_status;            ///< Last AL_STATUS value
-    ALStatusCode al_status_code;   ///< Last AL_STATUS_CODE value
-    uint16_t error_code_603f;      ///< Last value of 0x603F
-    ManufacturerFault mfr_fault;   ///< Decoded manufacturer fault
+    uint16_t al_status; /**< Last AL_STATUS value */
+    ALStatusCode al_status_code; /**< Last AL_STATUS_CODE value */
+    uint16_t error_code_603f; /**< Last value of 0x603F */
+    ManufacturerFault mfr_fault; /**< Decoded manufacturer fault */
 
     // Timestamps
-    uint64_t fault_detected_time;  ///< Timestamp when fault was first detected
-    uint64_t last_poll_time;       ///< Last time fault registers were polled
+    uint64_t fault_detected_time; /**< Timestamp when fault was first detected */
+    uint64_t last_poll_time; /**< Last time fault registers were polled */
 
     // Statistics
-    uint32_t fault_count;          ///< Number of faults since startup
-    uint32_t sync_error_count;     ///< Number of sync errors specifically
-    uint32_t watchdog_count;       ///< Number of watchdog timeouts
+    uint32_t fault_count; /**< Number of faults since startup */
+    uint32_t sync_error_count; /**< Number of sync errors specifically */
+    uint32_t watchdog_count; /**< Number of watchdog timeouts */
 
     // Clear fault state
     void clear() {
@@ -439,10 +439,12 @@ public:
 
     // ----- Log Prefix (set by Master from per-slave name) -----
 
-    /// @brief Set a function that returns the log prefix for a given slave index.
-    /// Called by Master to inject per-slave names into fault detection logs.
-    /// @param provider Function mapping slave index to display name; when
-    ///        unset, prefixes default to "Slave &lt;index&gt;"
+    /**
+     * @brief Set a function that returns the log prefix for a given slave index.
+     * Called by Master to inject per-slave names into fault detection logs.
+     * @param provider Function mapping slave index to display name; when
+     *        unset, prefixes default to "Slave &lt;index&gt;"
+     */
     void setPrefixProvider(std::function<std::string(uint16_t)> provider) {
         prefix_provider_ = std::move(provider);
     }
@@ -471,7 +473,7 @@ private:
     FaultCallback fault_callback_;
     std::function<std::string(uint16_t)> prefix_provider_;
 
-    /// Build the log prefix for a slave (uses prefix_provider_ if set, else default)
+    /**Build the log prefix for a slave (uses prefix_provider_ if set, else default) */
     std::string slavePrefix(uint16_t idx) const {
         if (prefix_provider_) return prefix_provider_(idx);
         return std::format("Slave {}", idx);

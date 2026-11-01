@@ -27,15 +27,15 @@ public:
     int stateDim() const override { return 2; } // [x, dx]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
-    /// Evaluate the second-order translational dynamics for the current force input.
+    /**Evaluate the second-order translational dynamics for the current force input. */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
-    /// Report the measured displacement state used by the identification tests.
+    /**Report the measured displacement state used by the identification tests. */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
-    /// Start from rest so transients are driven entirely by the applied excitation.
+    /**Start from rest so transients are driven entirely by the applied excitation. */
     StateVector defaultInitialState() const override;
-    /// Return the tunable physical coefficients used to shape resonance and damping.
+    /**Return the tunable physical coefficients used to shape resonance and damping. */
     std::vector<ParamDescriptor> parameterDescriptors() const override;
-    /// Provide underdamped, critically damped, and high-frequency benchmark presets.
+    /**Provide underdamped, critically damped, and high-frequency benchmark presets. */
     std::vector<Preset> presets() const override;
     void applyPreset(int index) override;
     std::vector<std::string> stateNames() const override;

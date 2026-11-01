@@ -105,15 +105,19 @@ namespace MotionPlanner::analytical {
  *
  */
 struct CostWeights {
-    /// Weight on time (must be > 0). Units: dimensionless.
+    /**Weight on time (must be > 0). Units: dimensionless. */
     double w_t = 1.0;
 
-    /// Weight on jerk energy (≥ 0). Units: time⁵.
-    /// 0 → no jerk penalty; large → very smooth (low jerk).
+    /**
+     * Weight on jerk energy (≥ 0). Units: time⁵.
+     * 0 → no jerk penalty; large → very smooth (low jerk).
+     */
     double w_j = 0.0;
 
-    /// Weight on acceleration energy (≥ 0). Units: time³.
-    /// 0 → no acceleration penalty; large → low peak acceleration.
+    /**
+     * Weight on acceleration energy (≥ 0). Units: time³.
+     * 0 → no acceleration penalty; large → low peak acceleration.
+     */
     double w_a = 0.0;
 
     /**
@@ -145,14 +149,18 @@ struct CostWeights {
 
     // --- Backward compatibility aliases (deprecated) ---
 
-    /// @deprecated Use j_star() instead.
-    /// @param c Costate level.
-    /// @return Jerk level j* for costate c.
+    /**
+     * @deprecated Use j_star() instead.
+     * @param c Costate level.
+     * @return Jerk level j* for costate c.
+     */
     double a_star(double c) const { return j_star(c); }
 
-    /// @deprecated Use costateFromJStar() instead.
-    /// @param a_star Jerk level j*.
-    /// @return Costate level c corresponding to the jerk level.
+    /**
+     * @deprecated Use costateFromJStar() instead.
+     * @param a_star Jerk level j*.
+     * @return Costate level c corresponding to the jerk level.
+     */
     double costateFromAStar(double a_star) const {
         return costateFromJStar(a_star);
     }
@@ -162,11 +170,11 @@ struct CostWeights {
  * @brief Arc type in the weighted switching structure (snapspace).
  */
 enum class WeightedArcType : uint8_t {
-    SNAP_PLUS,    ///< σ = +σ_max (raising jerk toward j*)
-    SNAP_MINUS,   ///< σ = -σ_max (lowering jerk toward j*)
-    SINGULAR,     ///< σ = 0, j = j* (constant jerk cruising)
-    WALL,         ///< v = v_wall(u(s)); acceleration slaved to geometry
-    DWELL,        ///< v = 0, a = 0, j = 0, s = const (G4 dwell pause)
+    SNAP_PLUS, /**< σ = +σ_max (raising jerk toward j*) */
+    SNAP_MINUS, /**< σ = -σ_max (lowering jerk toward j*) */
+    SINGULAR, /**< σ = 0, j = j* (constant jerk cruising) */
+    WALL, /**< v = v_wall(u(s)); acceleration slaved to geometry */
+    DWELL, /**< v = 0, a = 0, j = 0, s = const (G4 dwell pause) */
 };
 
 /**
@@ -200,56 +208,64 @@ inline const char* weightedArcTypeName(WeightedArcType type) {
 struct WeightedArc {
     WeightedArcType type = WeightedArcType::SINGULAR;
 
-    /// Arc-length span [s0, s1]
+    /**Arc-length span [s0, s1] */
     double s0 = 0.0;
     double s1 = 0.0;
 
-    /// Absolute time at s0
+    /**Absolute time at s0 */
     double t0 = 0.0;
 
-    /// State at s0 (4D: velocity, acceleration, jerk)
+    /**State at s0 (4D: velocity, acceleration, jerk) */
     double v0 = 0.0;
     double a0 = 0.0;
     double j0 = 0.0;
 
-    /// Geometric parameter at s0 (NURBS u)
+    /**Geometric parameter at s0 (NURBS u) */
     double u0 = 0.0;
 
-    /// SNAP: constant snap value used (σ = dj/dt)
+    /**SNAP: constant snap value used (σ = dj/dt) */
     double sigma = 0.0;
 
-    /// SINGULAR: constant jerk level (j*)
+    /**SINGULAR: constant jerk level (j*) */
     double j_star = 0.0;
 
-    /// Arc duration (time span), computed during solve
+    /**Arc duration (time span), computed during solve */
     double duration = 0.0;
 
-    /// State at s1, propagated from the stored polynomial. Keeping both
-    /// endpoints makes continuity independently auditable and ensures that a
-    /// consumer never has to re-run a potentially ambiguous inverse solve.
+    /**
+     * State at s1, propagated from the stored polynomial. Keeping both
+     * endpoints makes continuity independently auditable and ensures that a
+     * consumer never has to re-run a potentially ambiguous inverse solve.
+     */
     double v1 = 0.0;
     double a1 = 0.0;
     double j1 = 0.0;
 
-    /// Bit mask describing which constraints supplied this arc's global
-    /// certified-at-grid limits: velocity=1, acceleration=2, jerk=4,
-    /// snap=8. It is diagnostic only; it never changes the trajectory.
+    /**
+     * Bit mask describing which constraints supplied this arc's global
+     * certified-at-grid limits: velocity=1, acceleration=2, jerk=4,
+     * snap=8. It is diagnostic only; it never changes the trajectory.
+     */
     uint8_t activeConstraints = 0;
 
-    /// Check if this arc is valid (non-empty domain)
-    /// @return true when s1 > s0.
+    /**
+     * Check if this arc is valid (non-empty domain)
+     * @return true when s1 > s0.
+     */
     bool valid() const { return s1 > s0; }
 
-    /// Arc length span
-    /// @return s1 - s0 [units].
+    /**
+     * Arc length span
+     * @return s1 - s0 [units].
+     */
     double length() const { return s1 - s0; }
 
     // --- Backward compatibility accessors (deprecated) ---
 
-    /// @deprecated Use sigma instead. Returns snap as "eta" for old code.
+    /**@deprecated Use sigma instead. Returns snap as "eta" for old code. */
     double eta = 0.0;
 
-    /// @deprecated Use j_star instead. Returns singular jerk as "a_star".
+    /**@deprecated Use j_star instead. Returns singular jerk as "a_star". */
     double a_star = 0.0;
 };
 
@@ -265,31 +281,31 @@ struct WeightedArc {
  * It does NOT depend on any backward-pass internals.
  */
 struct ForwardPassResult {
-    /// Produced arc sequence
+    /**Produced arc sequence */
     std::vector<WeightedArc> arcs;
 
-    /// Total cost J = ∫(w_t + w_j·j² + w_a·a²)dt
+    /**Total cost J = ∫(w_t + w_j·j² + w_a·a²)dt */
     double cost = 0.0;
 
-    /// Final arc length reached
+    /**Final arc length reached */
     double finalS = 0.0;
 
-    /// Final velocity
+    /**Final velocity */
     double finalV = 0.0;
 
-    /// Final acceleration
+    /**Final acceleration */
     double finalA = 0.0;
 
-    /// Final jerk
+    /**Final jerk */
     double finalJ = 0.0;
 
-    /// Total traversal time
+    /**Total traversal time */
     double totalTime = 0.0;
 
-    /// Whether the pass reached sEnd with v ≈ vf
+    /**Whether the pass reached sEnd with v ≈ vf */
     bool feasible = false;
 
-    /// If not feasible, human-readable reason
+    /**If not feasible, human-readable reason */
     std::string failureReason;
 };
 
@@ -401,12 +417,14 @@ struct SnapSeg {
                + (1.0 / 24.0) * sigma * tau * tau * tau * tau;
     }
 
-    /// Velocity derivative (for Newton's method): dv/dτ = a(τ)
-    /// @param a0 Initial acceleration [units/s^2].
-    /// @param j0 Initial jerk [units/s^3].
-    /// @param sigma Snap [units/s^4].
-    /// @param tau Time at which the derivative is evaluated [s].
-    /// @return dv/dτ at @p tau.
+    /**
+     * Velocity derivative (for Newton's method): dv/dτ = a(τ)
+     * @param a0 Initial acceleration [units/s^2].
+     * @param j0 Initial jerk [units/s^3].
+     * @param sigma Snap [units/s^4].
+     * @param tau Time at which the derivative is evaluated [s].
+     * @return dv/dτ at @p tau.
+     */
     static double dv_dt(double a0, double j0, double sigma, double tau) {
         return a0 + j0 * tau + 0.5 * sigma * tau * tau;
     }
@@ -822,9 +840,11 @@ struct SnapSeg {
 // Backward compatibility aliases (deprecated)
 // ============================================================================
 
-/// @deprecated Legacy third-order constant-jerk primitive. New snap-space
-/// code must use `SnapSeg` or `SingularJSeg`; this wrapper exists only for
-/// source compatibility with the former jerk-space API.
+/**
+ * @deprecated Legacy third-order constant-jerk primitive. New snap-space
+ * code must use `SnapSeg` or `SingularJSeg`; this wrapper exists only for
+ * source compatibility with the former jerk-space API.
+ */
 struct BangSeg {
     static double a(double a0, double eta, double /*aStar*/, double tau) {
         return a0 + eta * tau;
@@ -844,8 +864,10 @@ struct BangSeg {
     }
 };
 
-/// @deprecated Legacy second-order constant-acceleration primitive. New
-/// snap-space code must use `SnapSeg` or `SingularJSeg`.
+/**
+ * @deprecated Legacy second-order constant-acceleration primitive. New
+ * snap-space code must use `SnapSeg` or `SingularJSeg`.
+ */
 struct SingSeg {
     static double v(double v0, double aStar, double /*unused*/, double tau) {
         return v0 + aStar * tau;
@@ -891,12 +913,14 @@ inline double brake_distance(double v, double a, double j,
     return SnapSeg::terminalMinDistance(v, a, j, sigmaMax, jMax, aMax);
 }
 
-/// @deprecated Old jerkspace brake_distance signature.
-/// @param v Current velocity [units/s].
-/// @param a_star Deceleration level [units/s^2].
-/// @param eta_min Lower jerk level bound (unused).
-/// @param eta_max Upper jerk level bound (unused).
-/// @return Estimated braking distance v²/(2·a*).
+/**
+ * @deprecated Old jerkspace brake_distance signature.
+ * @param v Current velocity [units/s].
+ * @param a_star Deceleration level [units/s^2].
+ * @param eta_min Lower jerk level bound (unused).
+ * @param eta_max Upper jerk level bound (unused).
+ * @return Estimated braking distance v²/(2·a*).
+ */
 inline double brake_distance(double v, double a_star,
                               double eta_min, double eta_max) {
     if (v <= 0.0) return 0.0;
@@ -1159,16 +1183,20 @@ public:
      */
     double optimalAStar() const { return optimalAStar_; }
 
-    /// Exact start state encoded by the first stored arc.
-    /// @return Initial (s, v, a, j) state, or a zero state when empty.
+    /**
+     * Exact start state encoded by the first stored arc.
+     * @return Initial (s, v, a, j) state, or a zero state when empty.
+     */
     WeightedState startState() const {
         if (arcs_.empty()) return {};
         const auto& arc = arcs_.front();
         return {arc.s0, arc.v0, arc.a0, arc.j0};
     }
 
-    /// Exact terminal state encoded by the final stored arc.
-    /// @return Final (s, v, a, j) state, or a zero state when empty.
+    /**
+     * Exact terminal state encoded by the final stored arc.
+     * @return Final (s, v, a, j) state, or a zero state when empty.
+     */
     WeightedState endState() const {
         if (arcs_.empty()) return {};
         const auto& arc = arcs_.back();
@@ -1257,8 +1285,10 @@ public:
         return arcs_[idx].type;
     }
 
-    /// Access the path (kept alive by the WSS).
-    /// @return Path the structure was built for.
+    /**
+     * Access the path (kept alive by the WSS).
+     * @return Path the structure was built for.
+     */
     std::shared_ptr<const Path> path() const { return pathPtr_; }
 
 private:
@@ -1349,7 +1379,7 @@ private:
         }
     }
 
-    /// 8-point Gauss-Legendre quadrature for ∫_{s0}^{s1} 1/v_lim(s) ds.
+    /**8-point Gauss-Legendre quadrature for ∫_{s0}^{s1} 1/v_lim(s) ds. */
     double wallDuration(double s0, double s1) const {
         const double mid = 0.5 * (s0 + s1);
         const double half = 0.5 * (s1 - s0);
@@ -1379,8 +1409,10 @@ private:
         return half * sum;
     }
 
-    /// Invert the wall time integral: find s in [arc.s0, arc.s1] such that
-    /// ∫_{arc.s0}^{s} 1/v_lim(σ) dσ = tau.
+    /**
+     * Invert the wall time integral: find s in [arc.s0, arc.s1] such that
+     * ∫_{arc.s0}^{s} 1/v_lim(σ) dσ = tau.
+     */
     double wallTimeToS(const Arc& arc, double tau) const {
         double s0 = arc.s0;
         double s1 = arc.s1;
@@ -1402,13 +1434,13 @@ private:
         return 0.5 * (lo + hi);
     }
 
-    /// Velocity limit at arc length s.
+    /**Velocity limit at arc length s. */
     double wallVelocityLimit(double s) const {
         return static_cast<double>(
             evaluator_.velocityLimit(static_cast<T>(s), *pathPtr_));
     }
 
-    /// Wall acceleration a = v * dv_lim/ds.
+    /**Wall acceleration a = v * dv_lim/ds. */
     double wallAcceleration(double s) const {
         const double eps = 1e-6;
         double vL = wallVelocityLimit(s - eps);
@@ -1420,8 +1452,10 @@ private:
         return a;
     }
 
-    /// Wall jerk j = v * da/ds, evaluated consistently with the wall's
-    /// finite-difference derivative model. No feasibility clamp is applied.
+    /**
+     * Wall jerk j = v * da/ds, evaluated consistently with the wall's
+     * finite-difference derivative model. No feasibility clamp is applied.
+     */
     double wallJerk(double s) const {
         const double eps = 1e-5;
         const double aL = wallAcceleration(s - eps);
@@ -1641,18 +1675,24 @@ public:
      */
     double optimalJStar() const { return lastJStar_; }
 
-    /// Whether the latest `solve()` call reached all requested boundaries.
-    /// @return true when arcs were produced and no failure was recorded.
+    /**
+     * Whether the latest `solve()` call reached all requested boundaries.
+     * @return true when arcs were produced and no failure was recorded.
+     */
     bool feasible() const { return arcs_.size() > 0 && lastFailure_.empty(); }
 
-    /// Empty on success; otherwise explains why `solve()` returned no arcs.
-    /// @return Failure description (empty on success).
+    /**
+     * Empty on success; otherwise explains why `solve()` returned no arcs.
+     * @return Failure description (empty on success).
+     */
     const std::string& failureReason() const { return lastFailure_; }
 
-    /// @deprecated Use optimalJStar() instead. Returns j* clamped to aMax
-    /// for backward compatibility with callers expecting an acceleration-like
-    /// value bounded by aMax.
-    /// @return j* clamped to the path acceleration limit.
+    /**
+     * @deprecated Use optimalJStar() instead. Returns j* clamped to aMax
+     * for backward compatibility with callers expecting an acceleration-like
+     * value bounded by aMax.
+     * @return j* clamped to the path acceleration limit.
+     */
     double optimalAStar() const {
         double aMax = static_cast<double>(limits_.path.maxPathAcceleration);
         return std::min(lastJStar_, aMax);
@@ -2713,7 +2753,7 @@ private:
         return std::max(jMax, 1e-6);
     }
 
-    /// @deprecated Use estimateMaxReachableJerk() instead.
+    /**@deprecated Use estimateMaxReachableJerk() instead. */
     double estimateMaxReachableAccel() const {
         double aMax = static_cast<double>(limits_.path.maxPathAcceleration);
         if (sTotal_ > 0.0) {
@@ -2726,9 +2766,11 @@ private:
         return std::max(aMax, 1e-6);
     }
 
-    /// Snapspace stopping distance from arbitrary state (v, a, j) to v=0.
-    /// Optimal braking: σ=-σMax until j=-jMax, then j=-jMax until a=-aMax,
-    /// then a=-aMax until v=0. Handles non-zero initial a and j.
+    /**
+     * Snapspace stopping distance from arbitrary state (v, a, j) to v=0.
+     * Optimal braking: σ=-σMax until j=-jMax, then j=-jMax until a=-aMax,
+     * then a=-aMax until v=0. Handles non-zero initial a and j.
+     */
     double sStopFromState(double v, double a, double j) const {
         if (v <= 0.0) return 0.0;
         double sigmaMax = static_cast<double>(limits_.path.maxPathSnap);
@@ -2792,16 +2834,20 @@ private:
         return std::max(sTotal, 0.0);
     }
 
-    /// Snapspace stopping distance from state (v, a=0, j=0) to (0, 0, 0).
-    /// Convenience wrapper around sStopFromState.
+    /**
+     * Snapspace stopping distance from state (v, a=0, j=0) to (0, 0, 0).
+     * Convenience wrapper around sStopFromState.
+     */
     double sStopFromRest(double v) const {
         return sStopFromState(v, 0.0, 0.0);
     }
 
-    /// Inverse of sStopFromRest: given a distance d, find the max v such that
-    /// sStopFromRest(v) <= d. Used in the backward pass.
-    /// By time-reversal symmetry, this is the same as the maximum velocity
-    /// reachable by accelerating from rest over distance d.
+    /**
+     * Inverse of sStopFromRest: given a distance d, find the max v such that
+     * sStopFromRest(v) <= d. Used in the backward pass.
+     * By time-reversal symmetry, this is the same as the maximum velocity
+     * reachable by accelerating from rest over distance d.
+     */
     double sStopFromRestInverse(double d) const {
         if (d <= 0.0) return 0.0;
         // Bisection: find max v such that sStopFromRest(v) <= d
@@ -2814,11 +2860,13 @@ private:
         return lo;
     }
 
-    /// Inverse of sStopFromState with worst-case (aMax, jMax): given a
-    /// distance d, find the max v such that
-    /// sStopFromState(v, aMax, jMax) - sStopFromRest(vCorner) <= d.
-    /// This accounts for the extra braking distance when the solver has
-    /// non-zero (a, j) at the switching point.
+    /**
+     * Inverse of sStopFromState with worst-case (aMax, jMax): given a
+     * distance d, find the max v such that
+     * sStopFromState(v, aMax, jMax) - sStopFromRest(vCorner) <= d.
+     * This accounts for the extra braking distance when the solver has
+     * non-zero (a, j) at the switching point.
+     */
     double sStopFromStateInverse(double d, double vCorner = 0.0) const {
         if (d <= 0.0) return 0.0;
         double aMax = static_cast<double>(limits_.path.maxPathAcceleration);
@@ -2837,9 +2885,11 @@ private:
         return lo;
     }
 
-    /// Snapspace-aware braking distance from state (v, a, j) to vCorner.
-    /// This is sStopFromState(v, a, j) - sStopFromRest(vCorner), which equals
-    /// the distance needed to decelerate from (v, a, j) to (vCorner, 0, 0).
+    /**
+     * Snapspace-aware braking distance from state (v, a, j) to vCorner.
+     * This is sStopFromState(v, a, j) - sStopFromRest(vCorner), which equals
+     * the distance needed to decelerate from (v, a, j) to (vCorner, 0, 0).
+     */
     double brakeDistanceFromState(double v, double a, double j, double vCorner) const {
         return sStopFromState(v, a, j) - sStopFromRest(vCorner);
     }
@@ -3130,7 +3180,7 @@ private:
         // paths where the grid step is much larger than the braking distance.
     }
 
-    /// Interpolate the geometric velocity limit from the coarse grid.
+    /**Interpolate the geometric velocity limit from the coarse grid. */
     double interpolateCoarseVLim(double s) const {
         if (constraintCacheSize_ == 0 || ds_ <= 0.0) {
             return static_cast<double>(
@@ -3145,7 +3195,7 @@ private:
         return vLimGrid_[idx0] * (1.0 - frac) + vLimGrid_[idx1] * frac;
     }
 
-    /// Fine grid index for arc length s (uniform grid, O(1)).
+    /**Fine grid index for arc length s (uniform grid, O(1)). */
     size_t fineGridIndex(double s) const {
         if (dsFine_ <= 0.0) return 0;
         long idx = static_cast<long>(std::floor(s / dsFine_ + 0.5));
@@ -3153,21 +3203,23 @@ private:
             std::clamp(idx, 0L, static_cast<long>(fineGridSize_)));
     }
 
-    /// Analytical TOPPRA backward pass (look-ahead): computes the maximum
-    /// velocity at position s such that the tool can decelerate to the
-    /// corner velocity by the time it reaches each upcoming corner.
-    ///
-    /// For each corner at (s_c, v_c) ahead of s, the required velocity at s
-    /// is: v_req = sqrt(v_c² + 2 * a_max * (s_c - s)).
-    ///
-    /// This is the continuous form of the TOPPRA backward pass, evaluated at
-    /// the exact corner position. It works regardless of grid resolution,
-    /// which is critical for large paths where the grid step can be much
-    /// larger than the braking distance.
-    ///
-    /// @param s Current arc length position
-    /// @param vGridLim Velocity limit from the fine/coarse grid at s
-    /// @return The effective velocity limit (min of grid and look-ahead)
+    /**
+     * Analytical TOPPRA backward pass (look-ahead): computes the maximum
+     * velocity at position s such that the tool can decelerate to the
+     * corner velocity by the time it reaches each upcoming corner.
+     *
+     * For each corner at (s_c, v_c) ahead of s, the required velocity at s
+     * is: v_req = sqrt(v_c² + 2 * a_max * (s_c - s)).
+     *
+     * This is the continuous form of the TOPPRA backward pass, evaluated at
+     * the exact corner position. It works regardless of grid resolution,
+     * which is critical for large paths where the grid step can be much
+     * larger than the braking distance.
+     *
+     * @param s Current arc length position
+     * @param vGridLim Velocity limit from the fine/coarse grid at s
+     * @return The effective velocity limit (min of grid and look-ahead)
+     */
     double lookAheadVLimit(double s, double vGridLim) const {
         if (corners_.empty() || aMaxForLookahead_ <= 0.0) return vGridLim;
 
@@ -3220,7 +3272,7 @@ private:
         return vEff;
     }
 
-    /// Convert a std::vector<double> to Vec<Dim,T> for limits helpers.
+    /**Convert a std::vector<double> to Vec<Dim,T> for limits helpers. */
     Vec<Dim, T> toVec(const std::vector<double>& v) const {
         Vec<Dim, T> result;
         for (size_t i = 0; i < Dim && i < v.size(); ++i) {
@@ -3236,7 +3288,7 @@ private:
             std::clamp(idx, 0L, static_cast<long>(constraintCacheSize_)));
     }
 
-    /// Compute acceleration bounds [a_min, a_max] from cached grid coefficients.
+    /**Compute acceleration bounds [a_min, a_max] from cached grid coefficients. */
     std::pair<double, double> accelBoundsFromCache(size_t idx, double v) const {
         const auto& c = gridCoeffs_[idx];
         double a_min = -static_cast<double>(limits_.path.maxPathAcceleration);
@@ -3263,7 +3315,7 @@ private:
         return {a_min, a_max};
     }
 
-    /// Compute eta bounds [eta_min, eta_max] from cached grid coefficients.
+    /**Compute eta bounds [eta_min, eta_max] from cached grid coefficients. */
     EtaBounds etaBoundsFromCache(size_t idx, double v, double a) const {
         EtaBounds b;
         b.eta_min = -static_cast<double>(limits_.path.maxPathJerk);
@@ -4188,8 +4240,10 @@ public:
         return wss_ ? wss_->optimalAStar() : 0.0;
     }
 
-    /// Empty on success; otherwise the reason the last solve returned empty.
-    /// @return Failure description (empty on success).
+    /**
+     * Empty on success; otherwise the reason the last solve returned empty.
+     * @return Failure description (empty on success).
+     */
     const std::string& failureReason() const { return lastFailure_; }
 
     /**

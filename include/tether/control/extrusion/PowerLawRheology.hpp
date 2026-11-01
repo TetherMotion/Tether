@@ -40,23 +40,25 @@
 
 namespace tether::control::extrusion {
 
-/// @brief Nozzle/melt-channel geometry used by the rheology helpers.
+/**@brief Nozzle/melt-channel geometry used by the rheology helpers. */
 struct NozzleGeometry {
-    double radiusMm = 0.2;   ///< Nozzle radius [mm] (default 0.4 mm diameter)
-    double lengthMm = 10.0;  ///< Nozzle / melt-zone length [mm]
+    double radiusMm = 0.2; /**< Nozzle radius [mm] (default 0.4 mm diameter) */
+    double lengthMm = 10.0; /**< Nozzle / melt-zone length [mm] */
 };
 
-/// @brief Power-law rheology parameters.
+/**@brief Power-law rheology parameters. */
 struct PowerLawParams {
-    double consistencyIndex = 1000.0; ///< K_p [Pa·s^n]
-    double flowIndex = 1.0;           ///< n [-] (1 = Newtonian)
+    double consistencyIndex = 1000.0; /**< K_p [Pa·s^n] */
+    double flowIndex = 1.0; /**< n [-] (1 = Newtonian) */
 };
 
-/// @brief Stateless power-law pipe-flow rheology.
+/**@brief Stateless power-law pipe-flow rheology. */
 class PowerLawRheology {
 public:
-    /// @brief Compute the resistance constant C_n [Pa / (mm³/s)^n].
-    ///   C_n = 2·L·K_p · ((3n+1)/(π·n))^n · R^-(3n+1)
+    /**
+     * @brief Compute the resistance constant C_n [Pa / (mm³/s)^n].
+     *   C_n = 2·L·K_p · ((3n+1)/(π·n))^n · R^-(3n+1)
+     */
     static double resistanceConstant(const PowerLawParams& p,
                                      const NozzleGeometry& g) {
         if (p.flowIndex <= 0.0 || g.radiusMm <= 0.0) {
@@ -70,8 +72,10 @@ public:
                std::pow(factor, n) * rPow;
     }
 
-    /// @brief Pressure drop for a given volumetric flow.
-    ///   ΔP = C_n · Q^n   (Q in mm³/s, returns Pa)
+    /**
+     * @brief Pressure drop for a given volumetric flow.
+     *   ΔP = C_n · Q^n   (Q in mm³/s, returns Pa)
+     */
     static double pressureFromFlow(double flowMm3PerS,
                                    const PowerLawParams& p,
                                    const NozzleGeometry& g) {
@@ -80,8 +84,10 @@ public:
         return Cn * std::pow(flowMm3PerS, p.flowIndex);
     }
 
-    /// @brief Volumetric flow for a given pressure drop (forward solution).
-    ///   Q = (πn/(3n+1)) · (ΔP/(2LK_p))^(1/n) · R^((3n+1)/n)
+    /**
+     * @brief Volumetric flow for a given pressure drop (forward solution).
+     *   Q = (πn/(3n+1)) · (ΔP/(2LK_p))^(1/n) · R^((3n+1)/n)
+     */
     static double flowFromPressure(double pressurePa,
                                    const PowerLawParams& p,
                                    const NozzleGeometry& g) {
@@ -99,9 +105,11 @@ public:
         return coef * drive * rPow;
     }
 
-    /// @brief Apparent viscosity η_app = K_p · γ̇^(n-1) at shear rate γ̇.
-    /// For a circular pipe, the wall shear rate is γ̇_w = 4Q/(πR³) (Newtonian
-    /// approximation; the Rabinowitsch correction is omitted for simplicity).
+    /**
+     * @brief Apparent viscosity η_app = K_p · γ̇^(n-1) at shear rate γ̇.
+     * For a circular pipe, the wall shear rate is γ̇_w = 4Q/(πR³) (Newtonian
+     * approximation; the Rabinowitsch correction is omitted for simplicity).
+     */
     static double apparentViscosity(double flowMm3PerS,
                                     const PowerLawParams& p,
                                     const NozzleGeometry& g) {

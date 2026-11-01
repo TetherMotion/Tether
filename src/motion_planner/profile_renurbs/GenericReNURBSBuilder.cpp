@@ -52,16 +52,17 @@ inline GenericQuantityCurve toQuantityCurves(const SplineFitResult& fit) {
     return q;
 }
 
-/// Collect per-segment samples for one quantity from the generic samples.
-///
-/// Returns normalized parameters u ∈ [0,1] and the quantity values + limits
-/// for samples falling in [paramStart, paramEnd]. Boundary samples are
-/// interpolated if no exact sample falls on the boundary.
-///
+/**
+ * Collect per-segment samples for one quantity from the generic samples.
+ *
+ * Returns normalized parameters u ∈ [0,1] and the quantity values + limits
+ * for samples falling in [paramStart, paramEnd]. Boundary samples are
+ * interpolated if no exact sample falls on the boundary.
+ */
 struct SegmentQuantitySamples {
-    std::vector<double> u;       ///< normalized to [0,1]
-    std::vector<double> q;       ///< quantity values
-    std::vector<double> limit;   ///< per-sample upper limit (may be empty)
+    std::vector<double> u; /**< normalized to [0,1] */
+    std::vector<double> q; /**< quantity values */
+    std::vector<double> limit; /**< per-sample upper limit (may be empty) */
 };
 
 inline SegmentQuantitySamples collectSegmentQuantitySamples(
@@ -140,8 +141,10 @@ inline SegmentQuantitySamples collectSegmentQuantitySamples(
     return seg;
 }
 
-/// Build the SplineFitterConfig for a quantity, based on its QuantitySpec
-/// and the per-segment samples.
+/**
+ * Build the SplineFitterConfig for a quantity, based on its QuantitySpec
+ * and the per-segment samples.
+ */
 inline SplineFitterConfig makeFitterConfig(
     const QuantitySpec& qs,
     std::size_t maxCp,
@@ -194,7 +197,7 @@ inline SplineFitterConfig makeFitterConfig(
     return cfg;
 }
 
-/// Make a constant degree-1 curve for degenerate (single-sample) cases.
+/**Make a constant degree-1 curve for degenerate (single-sample) cases. */
 inline GenericQuantityCurve makeConstantCurve(double val) {
     GenericQuantityCurve q;
     try {

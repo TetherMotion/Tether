@@ -20,7 +20,7 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
-/// Complex square root: √d = √|d| · e^{i·arg(d)/2}. Returns both ± roots.
+/**Complex square root: √d = √|d| · e^{i·arg(d)/2}. Returns both ± roots. */
 std::pair<std::complex<double>, std::complex<double>>
 csqrt(std::complex<double> d) {
     const double r = std::abs(d);
@@ -35,21 +35,23 @@ csqrt(std::complex<double> d) {
     return {root, -root};
 }
 
-/// Convert an ℝᴺ point to a corner-plane complex coordinate.
+/**Convert an ℝᴺ point to a corner-plane complex coordinate. */
 std::complex<double> toComplex(const RVec& p, const RVec& origin,
                                const RVec& e1, const RVec& e2) {
     const RVec d = p - origin;
     return std::complex<double>(d.dot(e1), d.dot(e2));
 }
 
-/// Convert a corner-plane complex coordinate back to ℝᴺ.
+/**Convert a corner-plane complex coordinate back to ℝᴺ. */
 RVec fromComplex(std::complex<double> z, const RVec& origin,
                  const RVec& e1, const RVec& e2) {
     return origin + e1 * z.real() + e2 * z.imag();
 }
 
-/// Hodograph Bernstein coefficients h_k (M16): h₀ = ω₀², h₁ = ω₀ω₁,
-/// h₂ = (2ω₁² + ω₀ω₂)/3, h₃ = ω₁ω₂, h₄ = ω₂².
+/**
+ * Hodograph Bernstein coefficients h_k (M16): h₀ = ω₀², h₁ = ω₀ω₁,
+ * h₂ = (2ω₁² + ω₀ω₂)/3, h₃ = ω₁ω₂, h₄ = ω₂².
+ */
 std::array<std::complex<double>, 5>
 hodographCoeffs(const std::complex<double>& w0,
                 const std::complex<double>& w1,
@@ -61,8 +63,10 @@ hodographCoeffs(const std::complex<double>& w0,
             w2 * w2};
 }
 
-/// Parametric speed σ(ξ) = |ω(ξ)|² = u²+v² as Bernstein coefficients
-/// of degree 4 (M16).
+/**
+ * Parametric speed σ(ξ) = |ω(ξ)|² = u²+v² as Bernstein coefficients
+ * of degree 4 (M16).
+ */
 std::array<double, 5> speedCoeffs(const std::complex<double>& w0,
                                   const std::complex<double>& w1,
                                   const std::complex<double>& w2) {
@@ -77,7 +81,7 @@ std::array<double, 5> speedCoeffs(const std::complex<double>& w0,
             u2 * u2 + v2 * v2};
 }
 
-/// Evaluate a degree-4 Bernstein polynomial at ξ.
+/**Evaluate a degree-4 Bernstein polynomial at ξ. */
 double evalBernstein4(const std::array<double, 5>& c, double xi) {
     // de Casteljau
     double b[5];
@@ -88,7 +92,7 @@ double evalBernstein4(const std::array<double, 5>& c, double xi) {
     return b[0];
 }
 
-/// Check if σ(ξ) touches zero anywhere on [0,1] (degenerate candidate).
+/**Check if σ(ξ) touches zero anywhere on [0,1] (degenerate candidate). */
 bool isDegenerate(const std::array<double, 5>& sigma) {
     // σ ≥ 0 always (it's |ω|²). Degenerate iff min Bernstein coeff ≈ 0
     // AND the curve of σ dips to zero. Conservative: check if all coeffs

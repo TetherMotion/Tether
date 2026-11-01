@@ -12,7 +12,7 @@ namespace tether::motion::replanner {
 
 namespace {
 
-/// Build a BlendSpec from the reblender config.
+/**Build a BlendSpec from the reblender config. */
 BlendSpec buildSpec(const ReblenderConfig& config, bool tight) {
     BlendSpec spec;
     spec.mode = PathMode::Blend;
@@ -25,7 +25,7 @@ BlendSpec buildSpec(const ReblenderConfig& config, bool tight) {
     return spec;
 }
 
-/// Build a summary string from the BlendedPath.
+/**Build a summary string from the BlendedPath. */
 std::string buildSummary(const BlendedPath& bp) {
     std::ostringstream oss;
     oss << "Blended: " << bp.blendedCount

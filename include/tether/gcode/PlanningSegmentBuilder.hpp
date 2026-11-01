@@ -39,42 +39,46 @@ namespace GCode {
 // Forward declaration — full definition in GCodeInterpreter.hpp
 struct InterpreterConfig;
 
-/// @brief Per-block metadata (line number, g-code text, motion type).
+/**@brief Per-block metadata (line number, g-code text, motion type). */
 struct BlockMetadata {
     int32_t blockIndex = -1;
     int32_t lineNumber = -1;
-    uint8_t motionType = 0;  ///< 0=rapid, 1=linear, 2=arcCW, 3=arcCCW, 255=non-motion
+    uint8_t motionType = 0; /**< 0=rapid, 1=linear, 2=arcCW, 3=arcCCW, 255=non-motion */
     std::string gcodeText;
 };
 
-/// @brief Result of building PlanningSegments from G-code text.
+/**@brief Result of building PlanningSegments from G-code text. */
 struct PlanningSegmentResult {
-    std::vector<PlanningSegment> segments;  ///< Parsed motion segments
-    std::vector<BlockMetadata> blocks;      ///< Per-block metadata
-    Error error;                            ///< OK on success
+    std::vector<PlanningSegment> segments; /**< Parsed motion segments */
+    std::vector<BlockMetadata> blocks; /**< Per-block metadata */
+    Error error; /**< OK on success */
 };
 
-/// @brief High-level utility: G-code text → PlanningSegment[].
+/**@brief High-level utility: G-code text → PlanningSegment[]. */
 class PlanningSegmentBuilder {
 public:
-    /// @brief Parse G-code text into PlanningSegments with default config.
-    /// @param gcodeText Raw G-code program text
-    /// @return Result with segments, block metadata, and error status
+    /**
+     * @brief Parse G-code text into PlanningSegments with default config.
+     * @param gcodeText Raw G-code program text
+     * @return Result with segments, block metadata, and error status
+     */
     static PlanningSegmentResult fromText(const std::string& gcodeText);
 
-    /// @brief Parse G-code text into PlanningSegments with custom config.
-    /// @param gcodeText Raw G-code program text
-    /// @param config Interpreter configuration
-    /// @return Result with segments, block metadata, and error status
+    /**
+     * @brief Parse G-code text into PlanningSegments with custom config.
+     * @param gcodeText Raw G-code program text
+     * @param config Interpreter configuration
+     * @return Result with segments, block metadata, and error status
+     */
     static PlanningSegmentResult fromText(
         const std::string& gcodeText,
         const InterpreterConfig& config);
 
 private:
-    /// Map GCode::MotionSegment::Type → SegmentMotionType
+    /**Map GCode::MotionSegment::Type → SegmentMotionType */
     static SegmentMotionType mapMotionType(MotionSegment::Type type);
 
-    /// Map GCode::Plane → InterpolationPlane
+    /**Map GCode::Plane → InterpolationPlane */
     static InterpolationPlane mapPlane(Plane plane);
 };
 

@@ -29,9 +29,9 @@ namespace Platform {
 class IDeadlineTimer {
 public:
     struct Tick {
-        uint64_t deadline_ns = 0;  ///< absolute time the tick was scheduled for
-        uint64_t woke_ns     = 0;  ///< actual wake-up timestamp (monotonic)
-        uint32_t missed      = 0;  ///< deadlines skipped due to overrun
+        uint64_t deadline_ns = 0; /**< absolute time the tick was scheduled for */
+        uint64_t woke_ns     = 0; /**< actual wake-up timestamp (monotonic) */
+        uint32_t missed      = 0; /**< deadlines skipped due to overrun */
     };
 
     virtual ~IDeadlineTimer() = default;

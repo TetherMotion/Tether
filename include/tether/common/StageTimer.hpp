@@ -70,8 +70,10 @@ public:
             .count();
     }
 
-    /// Rebase both marks to now.  Use when resuming after a pause so the
-    /// held interval is not attributed to the next stage.
+    /**
+     * Rebase both marks to now.  Use when resuming after a pause so the
+     * held interval is not attributed to the next stage.
+     */
     void reset() { start_ = last_ = now_(); }
 
 private:

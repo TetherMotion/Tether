@@ -89,7 +89,7 @@ struct DiscoveredModule {
     uint16_t slave_index;
     uint8_t  slot;
     const RP20Mod::ModuleDescriptor* descriptor;
-    /// Views over the PDOMapping entry storage — bound at registration.
+    /**Views over the PDOMapping entry storage — bound at registration. */
     std::span<const uint8_t> tx_buffer;
     std::span<uint8_t>       rx_buffer;
     int tx_pdo_entry = -1;

@@ -41,10 +41,10 @@ public:
      */
     virtual bool open() = 0;
 
-    /// @return true if the transport is open and usable.
+    /**@return true if the transport is open and usable. */
     virtual bool isOpen() const = 0;
 
-    /// @brief Close the transport.
+    /**@brief Close the transport. */
     virtual void close() = 0;
 
     /**

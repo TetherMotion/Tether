@@ -52,18 +52,22 @@ class Master;
  */
 struct SlaveGroupState {
     uint16_t slave_index    = 0;
-    bool     responded      = false;  ///< Both datagrams answered (WKC>0)
-    uint16_t wkc            = 0;      ///< OR of both datagrams' working counters
-    uint16_t al_status      = 0;      ///< Raw AL_STATUS register (0x0130)
-    uint16_t al_status_code = 0;      ///< AL_STATUS_CODE register (0x0134)
+    bool     responded      = false; /**< Both datagrams answered (WKC>0) */
+    uint16_t wkc            = 0; /**< OR of both datagrams' working counters */
+    uint16_t al_status      = 0; /**< Raw AL_STATUS register (0x0130) */
+    uint16_t al_status_code = 0; /**< AL_STATUS_CODE register (0x0134) */
 
-    /// AL state (low nibble of AL_STATUS).
-    /// @return Decoded AL state of the slave.
+    /**
+     * AL state (low nibble of AL_STATUS).
+     * @return Decoded AL state of the slave.
+     */
     SlaveState state() const {
         return static_cast<SlaveState>(al_status & 0x000F);
     }
-    /// AL error flag (bit 4 of AL_STATUS).
-    /// @return true when the slave signals an AL error.
+    /**
+     * AL error flag (bit 4 of AL_STATUS).
+     * @return true when the slave signals an AL error.
+     */
     bool errorFlag() const { return (al_status & 0x0010) != 0; }
 };
 
@@ -75,10 +79,12 @@ struct SlaveGroupState {
  */
 class SlaveGroup {
 public:
-    /// Group over an explicit set of bus indices — writes use one
-    /// APWR-per-slave multi-datagram frame.
-    /// @param master Master owning the bus.
-    /// @param slave_indices Bus indices of the group members.
+    /**
+     * Group over an explicit set of bus indices — writes use one
+     * APWR-per-slave multi-datagram frame.
+     * @param master Master owning the bus.
+     * @param slave_indices Bus indices of the group members.
+     */
     SlaveGroup(Master& master, std::span<const uint16_t> slave_indices)
         : master_(master), indices_(slave_indices.begin(), slave_indices.end()) {}
 
@@ -89,18 +95,22 @@ public:
     SlaveGroup(Master& master, const std::vector<uint16_t>& slave_indices)
         : SlaveGroup(master, std::span<const uint16_t>(slave_indices)) {}
 
-    /// Whole-bus group: requestState*() emits a single BWR datagram;
-    /// readStates() still queries every discovered slave individually
-    /// (broadcast reads return only one merged result).
-    /// @param master Master owning the bus.
-    /// @return Group covering every discovered slave.
+    /**
+     * Whole-bus group: requestState*() emits a single BWR datagram;
+     * readStates() still queries every discovered slave individually
+     * (broadcast reads return only one merged result).
+     * @param master Master owning the bus.
+     * @return Group covering every discovered slave.
+     */
     static SlaveGroup all(Master& master);
 
-    /// Whole-bus group with addressed writes: one APWR datagram per
-    /// discovered slave in a single frame — useful when a broadcast write
-    /// is undesirable (e.g. slaves that must not see the request).
-    /// @param master Master owning the bus.
-    /// @return Group covering every discovered slave, addressed writes.
+    /**
+     * Whole-bus group with addressed writes: one APWR datagram per
+     * discovered slave in a single frame — useful when a broadcast write
+     * is undesirable (e.g. slaves that must not see the request).
+     * @param master Master owning the bus.
+     * @return Group covering every discovered slave, addressed writes.
+     */
     static SlaveGroup allAddressed(Master& master);
 
     // ---- Group description -------------------------------------------------
@@ -108,14 +118,18 @@ public:
     const std::vector<uint16_t>& indices() const { return indices_; }
     size_t size()  const { return indices_.size(); }
     bool   empty() const { return indices_.empty(); }
-    /// True when created via all() — writes go out as one BWR datagram.
-    /// @return true for broadcast groups.
+    /**
+     * True when created via all() — writes go out as one BWR datagram.
+     * @return true for broadcast groups.
+     */
     bool   isBroadcast() const { return broadcast_; }
 
-    /// Build the AL_CONTROL byte: requested state | optional error-ack bit.
-    /// @param target AL state to request.
-    /// @param ack_error true to set the acknowledge-error bit.
-    /// @return Encoded AL_CONTROL byte.
+    /**
+     * Build the AL_CONTROL byte: requested state | optional error-ack bit.
+     * @param target AL state to request.
+     * @param ack_error true to set the acknowledge-error bit.
+     * @return Encoded AL_CONTROL byte.
+     */
     static constexpr uint8_t controlByte(SlaveState target, bool ack_error) {
         return static_cast<uint8_t>(target) | (ack_error ? 0x10u : 0x00u);
     }
@@ -136,11 +150,13 @@ public:
      */
     uint16_t requestAlControl(uint8_t al_control, uint32_t timeout_ms = 200);
 
-    /// Convenience wrapper: request @p target on the whole group.
-    /// @param target AL state to request.
-    /// @param ack_error true to acknowledge existing AL errors.
-    /// @param timeout_ms Response timeout [ms].
-    /// @return Number of slaves that acknowledged the request.
+    /**
+     * Convenience wrapper: request @p target on the whole group.
+     * @param target AL state to request.
+     * @param ack_error true to acknowledge existing AL errors.
+     * @param timeout_ms Response timeout [ms].
+     * @return Number of slaves that acknowledged the request.
+     */
     uint16_t requestState(SlaveState target, bool ack_error = false,
                           uint32_t timeout_ms = 200) {
         return requestAlControl(controlByte(target, ack_error), timeout_ms);
@@ -186,7 +202,7 @@ public:
     // and collect the per-slave results.  For broadcast groups (all()) the
     // member set resolves to every discovered slave, same as readStates().
 
-    /// Per-member outcome of a group SDO read/write.
+    /**Per-member outcome of a group SDO read/write. */
     template<typename T>
     struct SlaveGroupSdoResult {
         uint16_t          slave_index = 0;
@@ -264,11 +280,13 @@ public:
         std::span<const uint64_t> values,
         CoE::CoETransactionOptions opts = {});
 
-    /// Async variant of the per-member writeEntry.
-    /// @param entry Register definition (index, subindex, data type).
-    /// @param values One raw value per member, in indices() order.
-    /// @param opts Transaction options (timeout, diagnostics).
-    /// @return One future per member, in indices() order.
+    /**
+     * Async variant of the per-member writeEntry.
+     * @param entry Register definition (index, subindex, data type).
+     * @param values One raw value per member, in indices() order.
+     * @param opts Transaction options (timeout, diagnostics).
+     * @return One future per member, in indices() order.
+     */
     std::vector<std::future<CoE::CoEResult<void>>> writeEntryAsync(
         const ObjectDictionary::ObjectDictionaryEntry& entry,
         std::span<const uint64_t> values,
@@ -276,9 +294,11 @@ public:
 
     // ---- Result helpers ---------------------------------------------------
 
-    /// True when every member result carries a value.
-    /// @param results Per-member results to inspect.
-    /// @return true when no member failed.
+    /**
+     * True when every member result carries a value.
+     * @param results Per-member results to inspect.
+     * @return true when no member failed.
+     */
     template<typename T>
     static bool allOk(const std::vector<SlaveGroupSdoResult<T>>& results) {
         for (const auto& r : results)
@@ -326,12 +346,14 @@ public:
         const char* log_tag = "SlaveGroup") {
         return logErrors(writeEntry(entry, value, opts), entry, log_tag);
     }
-    /// Per-member-values variant of writeEntryAll().
-    /// @param entry Register definition (index, subindex, data type).
-    /// @param values One raw value per member, in indices() order.
-    /// @param opts Transaction options (timeout, diagnostics).
-    /// @param log_tag Log tag prefixed to each error line.
-    /// @return true when every member acknowledged the write.
+    /**
+     * Per-member-values variant of writeEntryAll().
+     * @param entry Register definition (index, subindex, data type).
+     * @param values One raw value per member, in indices() order.
+     * @param opts Transaction options (timeout, diagnostics).
+     * @param log_tag Log tag prefixed to each error line.
+     * @return true when every member acknowledged the write.
+     */
     bool writeEntryAll(
         const ObjectDictionary::ObjectDictionaryEntry& entry,
         std::span<const uint64_t> values,
@@ -367,10 +389,12 @@ public:
         const char* log_tag,
         CoE::CoETransactionOptions opts = {});
 
-    /// Braced-list convenience overload.
-    /// @param entries Register definitions to read on every member.
-    /// @param log_tag Log tag prefixed to each line.
-    /// @param opts Transaction options (timeout, diagnostics).
+    /**
+     * Braced-list convenience overload.
+     * @param entries Register definitions to read on every member.
+     * @param log_tag Log tag prefixed to each line.
+     * @param opts Transaction options (timeout, diagnostics).
+     */
     void dumpEntries(
         std::initializer_list<const ObjectDictionary::ObjectDictionaryEntry*> entries,
         const char* log_tag,
@@ -399,8 +423,10 @@ public:
                              uint32_t poll_interval_ms = 10);
 
 private:
-    /// Member slave indices — the explicit set, or every discovered slave
-    /// for broadcast groups (SDO has no broadcast primitive).
+    /**
+     * Member slave indices — the explicit set, or every discovered slave
+     * for broadcast groups (SDO has no broadcast primitive).
+     */
     std::vector<uint16_t> memberIndices() const;
 
     Master& master_;

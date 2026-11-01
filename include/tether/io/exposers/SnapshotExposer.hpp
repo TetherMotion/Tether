@@ -36,14 +36,14 @@
 
 namespace tether { namespace io { namespace exposers {
 
-/// One scalar field inside a snapshot POD.
+/**One scalar field inside a snapshot POD. */
 struct SnapshotField {
-    const char* name;              ///< Field name: "<snap>.<name>" + struct member
-    ValueType   type;              ///< Scalar ValueType of the member
-    uint16_t    offset;            ///< Byte offset inside the POD (offsetof)
-    uint16_t    size;              ///< Byte size of the member
-    const char* unit   = "";       ///< Optional unit metadata ("us", "ns", ...)
-    const char* labels = nullptr;  ///< Optional "v=name,..." enum labels
+    const char* name; /**< Field name: "<snap>.<name>" + struct member */
+    ValueType   type; /**< Scalar ValueType of the member */
+    uint16_t    offset; /**< Byte offset inside the POD (offsetof) */
+    uint16_t    size; /**< Byte size of the member */
+    const char* unit   = ""; /**< Optional unit metadata ("us", "ns", ...) */
+    const char* labels = nullptr; /**< Optional "v=name,..." enum labels */
 };
 
 /**
@@ -54,7 +54,7 @@ struct SnapshotField {
  */
 class SnapshotExposer : public IParameterExposer {
 public:
-    /// Largest snapshot POD the per-field scalar reads will copy through.
+    /**Largest snapshot POD the per-field scalar reads will copy through. */
     static constexpr uint16_t kMaxSnapshotSize = 512;
 
     explicit SnapshotExposer(const char* moduleName) : moduleName_(moduleName) {}
@@ -149,7 +149,7 @@ private:
         bool                      exposeScalarFields;
     };
 
-    /// "0=Init,1=PreOp,4=SafeOp" -> metadata["enum.0"]="Init", ...
+    /**"0=Init,1=PreOp,4=SafeOp" -> metadata["enum.0"]="Init", ... */
     static void addEnumLabels(const char* labels,
                               std::map<std::string, std::string>& md) {
         if (!labels) return;

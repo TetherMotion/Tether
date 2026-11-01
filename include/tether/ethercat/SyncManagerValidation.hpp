@@ -12,8 +12,8 @@ namespace EtherCAT {
  * @brief Result of Sync Manager validation
  */
 struct SyncManagerValidationResult {
-    bool valid;                     ///< Whether the configuration is valid
-    std::string error_message;      ///< Error description if invalid, empty if valid
+    bool valid; /**< Whether the configuration is valid */
+    std::string error_message; /**< Error description if invalid, empty if valid */
 };
 
 /**

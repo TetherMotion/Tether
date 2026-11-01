@@ -44,13 +44,13 @@ using namespace tether::klipper;
 using namespace tether::klipper::klippy;
 using namespace tether::klipper::objects;
 
-/// Helper: execute a G-code line and print the response.
+/**Helper: execute a G-code line and print the response. */
 static void execAndPrint(KlippyInstance& inst, const std::string& gcode) {
     std::printf("  > %s\n", gcode.c_str());
     inst.executeGcode(gcode);
 }
 
-/// Helper: print a section header.
+/**Helper: print a section header. */
 static void printSection(const char* title) {
     std::printf("\n=== %s ===\n\n", title);
 }

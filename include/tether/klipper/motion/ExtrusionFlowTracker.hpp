@@ -23,21 +23,25 @@
 
 namespace tether::klipper::motion {
 
-/// @brief Shared recent-extrusion-flow tap.
+/**@brief Shared recent-extrusion-flow tap. */
 class ExtrusionFlowTracker {
 public:
-    /// @brief Set the filament cross-sectional area [mm²] (used to convert
-    /// E-axis velocity to volumetric flow).
+    /**
+     * @brief Set the filament cross-sectional area [mm²] (used to convert
+     * E-axis velocity to volumetric flow).
+     */
     void setFilamentAreaMm2(double area) { filamentAreaMm2_ = area; }
     double filamentAreaMm2() const { return filamentAreaMm2_; }
 
-    /// @brief Set the filament diameter [mm] (convenience; updates the area).
+    /**@brief Set the filament diameter [mm] (convenience; updates the area). */
     void setFilamentDiameterMm(double d) {
         filamentAreaMm2_ = M_PI * d * d / 4.0;
     }
 
-    /// @brief Record the E-axis velocity from the latest move [mm/s].
-    /// Updates the instantaneous and smoothed flow estimates.
+    /**
+     * @brief Record the E-axis velocity from the latest move [mm/s].
+     * Updates the instantaneous and smoothed flow estimates.
+     */
     void setExtruderVelocityMmPerS(double velMmPerS, double dtSec) {
         const double Q = velMmPerS * filamentAreaMm2_;
         instantaneousQ_.store(Q, std::memory_order_relaxed);
@@ -53,17 +57,17 @@ public:
                  std::memory_order_relaxed));
     }
 
-    /// @brief Instantaneous volumetric flow [mm³/s].
+    /**@brief Instantaneous volumetric flow [mm³/s]. */
     double instantaneousFlowMm3PerS() const {
         return instantaneousQ_.load(std::memory_order_relaxed);
     }
 
-    /// @brief Smoothed (EWMA) volumetric flow [mm³/s].
+    /**@brief Smoothed (EWMA) volumetric flow [mm³/s]. */
     double smoothedFlowMm3PerS() const {
         return smoothedQ_.load(std::memory_order_relaxed);
     }
 
-    /// @brief Reset the tracker to zero flow.
+    /**@brief Reset the tracker to zero flow. */
     void reset() {
         instantaneousQ_.store(0.0, std::memory_order_relaxed);
         smoothedQ_.store(0.0, std::memory_order_relaxed);

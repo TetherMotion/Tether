@@ -48,7 +48,7 @@ struct CBPFInsn {
 };
 static_assert(sizeof(CBPFInsn) == 8, "must match struct sock_filter");
 
-/// cBPF opcode constants (Linux/BSD uapi values — stable ABI).
+/**cBPF opcode constants (Linux/BSD uapi values — stable ABI). */
 namespace cbpf {
 // Instruction classes
 inline constexpr uint16_t LD   = 0x00;
@@ -60,9 +60,9 @@ inline constexpr uint16_t JMP  = 0x05;
 inline constexpr uint16_t RET  = 0x06;
 inline constexpr uint16_t MISC = 0x07;
 // Operand sizes (ld/ldx/st/stx)
-inline constexpr uint16_t W    = 0x00;  ///< 32-bit word
-inline constexpr uint16_t H    = 0x08;  ///< 16-bit halfword
-inline constexpr uint16_t B    = 0x10;  ///< 8-bit byte
+inline constexpr uint16_t W    = 0x00; /**< 32-bit word */
+inline constexpr uint16_t H    = 0x08; /**< 16-bit halfword */
+inline constexpr uint16_t B    = 0x10; /**< 8-bit byte */
 // Addressing modes
 inline constexpr uint16_t IMM  = 0x00;
 inline constexpr uint16_t ABS  = 0x20;
@@ -91,16 +91,18 @@ inline constexpr uint16_t JSET = 0x40;
 inline constexpr uint16_t K    = 0x00;
 inline constexpr uint16_t X    = 0x08;
 inline constexpr uint16_t A    = 0x10;
-inline constexpr uint16_t TAX  = 0x00;  ///< MISC: X = A
-inline constexpr uint16_t TXA  = 0x80;  ///< MISC: A = X
+inline constexpr uint16_t TAX  = 0x00; /**< MISC: X = A */
+inline constexpr uint16_t TXA  = 0x80; /**< MISC: A = X */
 } // namespace cbpf
 
-/// EtherCAT-over-UDP destination port (ETG.1000.3) — same value as the
-/// EtherCAT EtherType, 0x88A4 = 34980.
+/**
+ * EtherCAT-over-UDP destination port (ETG.1000.3) — same value as the
+ * EtherCAT EtherType, 0x88A4 = 34980.
+ */
 inline constexpr uint16_t kEtherCATUdpPort = 0x88A4;
-/// 802.1Q VLAN tag protocol identifier.
+/**802.1Q VLAN tag protocol identifier. */
 inline constexpr uint16_t kEtherType8021Q  = 0x8100;
-/// IPv4 EtherType (EtherCAT-over-UDP encapsulation).
+/**IPv4 EtherType (EtherCAT-over-UDP encapsulation). */
 inline constexpr uint16_t kEtherTypeIPv4   = 0x0800;
 
 /**
@@ -125,11 +127,11 @@ inline constexpr uint32_t kSkfAdVlanTagPresent = kSkfAdOff + 48; // 0/1
  * data buffer before delivery.  Pass nullptr (default) for "no tag".
  */
 struct CBPFAuxData {
-    std::optional<uint16_t> vlan_tci;   ///< stripped TCI (set = tag present)
-    uint16_t vlan_tpid = 0;             ///< TPID of the stripped tag
+    std::optional<uint16_t> vlan_tci; /**< stripped TCI (set = tag present) */
+    uint16_t vlan_tpid = 0; /**< TPID of the stripped tag */
 };
 
-/// Inclusive VLAN-ID range for tagged-frame acceptance.
+/**Inclusive VLAN-ID range for tagged-frame acceptance. */
 struct CBPFVlanRange {
     uint16_t start = 0;
     uint16_t end   = 4095;
@@ -143,10 +145,12 @@ struct CBPFVlanRange {
  * UDP) to frames whose 802.1Q VID lies in the range.  Untagged acceptance
  * is independent.
  */
-/// Inclusive datagram-index range (first datagram of a frame).
-/// `hole`, when set, excludes a single index inside the range — used to
-/// keep the 0xFE fire-and-forget index on the async socket even though
-/// it numerically lies inside the reserved cyclic band.
+/**
+ * Inclusive datagram-index range (first datagram of a frame).
+ * `hole`, when set, excludes a single index inside the range — used to
+ * keep the 0xFE fire-and-forget index on the async socket even though
+ * it numerically lies inside the reserved cyclic band.
+ */
 struct CBPFIdxRange {
     uint8_t start = 0;
     uint8_t end   = 0;
@@ -158,11 +162,11 @@ struct CBPFIdxRange {
 };
 
 struct CBPFSpec {
-    bool untagged_ethercat = true;   ///< EtherType 0x88A4 directly
-    bool untagged_udp      = false;  ///< IPv4/UDP dst `udp_port`, untagged
-    bool tagged_ethercat   = true;   ///< TPID `vlan_tpid` + inner 0x88A4
-    bool tagged_udp        = false;  ///< TPID `vlan_tpid` + inner IPv4/UDP
-    std::optional<CBPFVlanRange> vlan_range;  ///< restrict tagged VIDs
+    bool untagged_ethercat = true; /**< EtherType 0x88A4 directly */
+    bool untagged_udp      = false; /**< IPv4/UDP dst `udp_port`, untagged */
+    bool tagged_ethercat   = true; /**< TPID `vlan_tpid` + inner 0x88A4 */
+    bool tagged_udp        = false; /**< TPID `vlan_tpid` + inner IPv4/UDP */
+    std::optional<CBPFVlanRange> vlan_range; /**< restrict tagged VIDs */
     uint16_t udp_port  = kEtherCATUdpPort;
     uint16_t vlan_tpid = kEtherType8021Q;
 
@@ -207,11 +211,13 @@ public:
      */
     static std::vector<CBPFInsn> build(const CBPFSpec& spec);
 
-    /// Accept untagged EtherCAT and 802.1Q-tagged EtherCAT (any VID).
+    /**Accept untagged EtherCAT and 802.1Q-tagged EtherCAT (any VID). */
     static std::vector<CBPFInsn> ethercatFilter();
 
-    /// Like ethercatFilter() but also accepts EtherCAT-over-UDP
-    /// (IPv4/UDP dst @p port), tagged or untagged.
+    /**
+     * Like ethercatFilter() but also accepts EtherCAT-over-UDP
+     * (IPv4/UDP dst @p port), tagged or untagged.
+     */
     static std::vector<CBPFInsn> ethercatFilterWithUdp(
         uint16_t port = kEtherCATUdpPort);
 
@@ -228,7 +234,7 @@ public:
      */
     static std::vector<CBPFInsn> vlanFilter(uint16_t vid);
 
-    /// Range variant of vlanFilter() (--encapsulation vlan:lo-hi).
+    /**Range variant of vlanFilter() (--encapsulation vlan:lo-hi). */
     static std::vector<CBPFInsn> vlanRangeFilter(uint16_t lo, uint16_t hi);
 
     /**

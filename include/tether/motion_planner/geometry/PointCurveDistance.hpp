@@ -33,9 +33,9 @@
 namespace tether::motion {
 
 struct DistanceResult {
-    double distance = 0.0;   ///< min_u |S(u) − p|
-    double u = 0.0;          ///< achieving parameter on the original curve
-    RVec closestPoint;       ///< S(u)
+    double distance = 0.0; /**< min_u |S(u) − p| */
+    double u = 0.0; /**< achieving parameter on the original curve */
+    RVec closestPoint; /**< S(u) */
 };
 
 /**

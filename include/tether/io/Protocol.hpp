@@ -42,17 +42,19 @@ namespace tether { namespace io {
 // ---------------------------------------------------------------------------
 // Framing mode
 // ---------------------------------------------------------------------------
-/// Determines how message boundaries are established on the transport.
-///
-/// - `Slip`: SLIP framing (0xC0 END delimiter) is applied on top of the
-///   byte-stream transport.  Used for serial lines, raw TCP, and other
-///   byte-stream transports that do not provide native message boundaries.
-/// - `None`: No framing — the transport itself provides message boundaries
-///   (e.g. WebSocket, where each frame is a complete message).  The protocol
-///   message is sent/received directly as the transport payload.
+/**
+ * Determines how message boundaries are established on the transport.
+ *
+ * - `Slip`: SLIP framing (0xC0 END delimiter) is applied on top of the
+ *   byte-stream transport.  Used for serial lines, raw TCP, and other
+ *   byte-stream transports that do not provide native message boundaries.
+ * - `None`: No framing — the transport itself provides message boundaries
+ *   (e.g. WebSocket, where each frame is a complete message).  The protocol
+ *   message is sent/received directly as the transport payload.
+ */
 enum class Framing : uint8_t {
-    Slip = 0,  ///< SLIP framing (default, for byte-stream transports)
-    None = 1,  ///< No framing (for message-oriented transports like WebSocket)
+    Slip = 0, /**< SLIP framing (default, for byte-stream transports) */
+    None = 1, /**< No framing (for message-oriented transports like WebSocket) */
 };
 
 // ---------------------------------------------------------------------------
@@ -62,7 +64,7 @@ enum class Framing : uint8_t {
 // after the ClientHello/SchemaCommit bootstrap phase.
 inline constexpr uint8_t PROTOCOL_VERSION = 6;
 
-/// Default TCP port for the tether IO protocol server
+/**Default TCP port for the tether IO protocol server */
 inline constexpr uint16_t DEFAULT_PORT = 4000;
 
 // ---------------------------------------------------------------------------
@@ -117,14 +119,18 @@ enum class MessageType : uint8_t {
     InputStreamData       = 0x3B,
     CloseInputStreamReq   = 0x3C,
     CloseInputStreamResp  = 0x3D,
-    /// Correlated function invocation carrying a request id and deadline.
-    /// Unlike CallFunctionReq it is valid in both directions: a client may
-    /// invoke server functions and the server may invoke functions the
-    /// client published via RegisterFunctionsReq.
+    /**
+     * Correlated function invocation carrying a request id and deadline.
+     * Unlike CallFunctionReq it is valid in both directions: a client may
+     * invoke server functions and the server may invoke functions the
+     * client published via RegisterFunctionsReq.
+     */
     InvokeExReq           = 0x3E,
     InvokeExResp          = 0x3F,
-    /// Client pushes the catalog of functions it hosts (peer functions).
-    /// Session-scoped: the catalog dies with the connection.
+    /**
+     * Client pushes the catalog of functions it hosts (peer functions).
+     * Session-scoped: the catalog dies with the connection.
+     */
     RegisterFunctionsReq  = 0x40,
     RegisterFunctionsResp = 0x41,
 
@@ -167,18 +173,20 @@ enum class ValueType : uint8_t {
     Enum    = 17,
     UVarint = 18,
     IVarint = 19,
-    Struct  = 20,   ///< Tether extension: composite binary struct
-    Array   = 21,   ///< Length-prefixed sequence of values
-    Stream  = 22,   ///< U32 stream handle
-    /// Fixed-capacity string: exactly `SchemaNode::fixedCount` bytes on the
-    /// schema-value wire, content at offset 0, NUL-padded. Keeps the
-    /// containing struct's fields at fixed offsets (SchemaLayout.hpp).
-    /// In the flat v4 param namespace it is treated as variable-length
-    /// (capacity is schema-side metadata, unavailable there).
+    Struct  = 20, /**< Tether extension: composite binary struct */
+    Array   = 21, /**< Length-prefixed sequence of values */
+    Stream  = 22, /**< U32 stream handle */
+    /**
+     * Fixed-capacity string: exactly `SchemaNode::fixedCount` bytes on the
+     * schema-value wire, content at offset 0, NUL-padded. Keeps the
+     * containing struct's fields at fixed offsets (SchemaLayout.hpp).
+     * In the flat v4 param namespace it is treated as variable-length
+     * (capacity is schema-side metadata, unavailable there).
+     */
     FixedString = 23,
 };
 
-/// Returns true for variable-length types in the canonical v4 value namespace.
+/**Returns true for variable-length types in the canonical v4 value namespace. */
 inline constexpr bool isVariableLength(ValueType t) {
     return t == ValueType::String || t == ValueType::Binary ||
            t == ValueType::Enum || t == ValueType::UVarint ||
@@ -186,7 +194,7 @@ inline constexpr bool isVariableLength(ValueType t) {
            t == ValueType::Array || t == ValueType::FixedString;
 }
 
-/// Returns the byte size of a fixed-size ValueType, or 0 for variable-length/unknown.
+/**Returns the byte size of a fixed-size ValueType, or 0 for variable-length/unknown. */
 inline constexpr uint8_t valueTypeSize(ValueType t) {
     switch (t) {
         case ValueType::U8:   case ValueType::I8:  case ValueType::Bool: return 1;
@@ -217,8 +225,8 @@ enum class EntryKind : uint8_t {
 // Stream trigger modes
 // ---------------------------------------------------------------------------
 enum class TriggerMode : uint8_t {
-    Time     = 0,  ///< Periodic sampling at interval_ms on the wire
-    OnChange = 1,  ///< Trigger when the configured trigger entry changes
+    Time     = 0, /**< Periodic sampling at interval_ms on the wire */
+    OnChange = 1, /**< Trigger when the configured trigger entry changes */
 };
 
 // ---------------------------------------------------------------------------
@@ -233,7 +241,7 @@ enum class LogSeverity : uint8_t {
     Critical = 5,
 };
 
-/// A ParameterStream-compatible log subscription.
+/**A ParameterStream-compatible log subscription. */
 struct LogSubscription {
     uint32_t id = 0;
     LogSeverity minSeverity = LogSeverity::Trace;
@@ -242,7 +250,7 @@ struct LogSubscription {
     std::string locationFilter;
 };
 
-/// A log record delivered to matching subscriptions.
+/**A log record delivered to matching subscriptions. */
 struct LogRecord {
     uint64_t timestampUs = 0;
     LogSeverity severity = LogSeverity::Info;
@@ -300,10 +308,10 @@ private:
 // Threshold types for change detection / skip filtering
 // ---------------------------------------------------------------------------
 enum class ThresholdType : uint8_t {
-    None     = 0,  ///< No threshold — always send
-    Absolute = 1,  ///< Send when |new − old| > threshold
-    Relative = 2,  ///< Send when |new − old| / |old| > threshold
-    Custom   = 3,  ///< Implementation-defined logic (name + config primitives)
+    None     = 0, /**< No threshold — always send */
+    Absolute = 1, /**< Send when |new − old| > threshold */
+    Relative = 2, /**< Send when |new − old| / |old| > threshold */
+    Custom   = 3, /**< Implementation-defined logic (name + config primitives) */
 };
 
 // ---------------------------------------------------------------------------
@@ -337,7 +345,7 @@ enum class ErrorCode : uint32_t {
     ThresholdError      = 12,
     FunctionInvocationError = 13,
     ResourceBusy        = 14,
-    Timeout             = 15,   ///< Locally generated when an InvokeEx deadline expires
+    Timeout             = 15, /**< Locally generated when an InvokeEx deadline expires */
 };
 
 // ---------------------------------------------------------------------------
@@ -348,9 +356,11 @@ namespace EntryFlags {
     inline constexpr uint8_t Writable      = 0x02;
     inline constexpr uint8_t VariableLen   = 0x04;
     inline constexpr uint8_t HasEnum       = 0x10;
-    /// Entry must not be polled by a configured stream (e.g. SDO-backed
-    /// reads whose cost is a mailbox round-trip, not a memory read).
-    /// buildCollectPlan resolves such entries out of the collect plan.
+    /**
+     * Entry must not be polled by a configured stream (e.g. SDO-backed
+     * reads whose cost is a mailbox round-trip, not a memory read).
+     * buildCollectPlan resolves such entries out of the collect plan.
+     */
     inline constexpr uint8_t NoStream      = 0x20;
 } // namespace EntryFlags
 
@@ -363,7 +373,7 @@ inline constexpr size_t MAX_MESSAGE_SIZE = 1024 * 1024;
 inline constexpr size_t MAX_STRING_SIZE = UINT16_MAX;
 inline constexpr size_t MAX_VARIABLE_VALUE_SIZE = 1024 * 1024;
 inline constexpr uint32_t MAX_COLLECTION_COUNT = 1'000'000;
-/// Bound on outstanding InvokeEx calls per session; callPeer fails past it.
+/**Bound on outstanding InvokeEx calls per session; callPeer fails past it. */
 inline constexpr size_t MAX_PENDING_INVOKES = 256;
 
 inline uint32_t zigzagEncode32(int32_t value) {
@@ -384,7 +394,7 @@ inline int64_t zigzagDecode64(uint64_t value) {
     return static_cast<int64_t>((value >> 1) ^ -(value & 1));
 }
 
-/// Encode a uint32_t as a varint into buf (max 5 bytes). Returns bytes written, 0 on overflow.
+/**Encode a uint32_t as a varint into buf (max 5 bytes). Returns bytes written, 0 on overflow. */
 inline size_t encodeVarint(uint8_t* buf, size_t cap, uint32_t value) {
     size_t pos = 0;
     while (value >= 0x80) {
@@ -397,7 +407,7 @@ inline size_t encodeVarint(uint8_t* buf, size_t cap, uint32_t value) {
     return pos;
 }
 
-/// Decode a varint from buf. Returns bytes consumed, 0 on error.
+/**Decode a varint from buf. Returns bytes consumed, 0 on error. */
 inline size_t decodeVarint(const uint8_t* buf, size_t len, uint32_t& value) {
     value = 0;
     uint32_t shift = 0;
@@ -460,13 +470,13 @@ struct BufWriter {
         if (pos > cap || n > cap - pos) { overflow = true; return; }
         std::memcpy(buf + pos, d, n); pos += n;
     }
-    /// Write a length-prefixed string (uint16_t length + bytes)
+    /**Write a length-prefixed string (uint16_t length + bytes) */
     void putStr16(const char* s, size_t len) {
         if (len > UINT16_MAX) { overflow = true; return; }
         putU16(static_cast<uint16_t>(len));
         putBytes(s, len);
     }
-    /// Write a varint-encoded uint32_t.
+    /**Write a varint-encoded uint32_t. */
     void putVarint(uint32_t v) {
         uint8_t tmp[MAX_VARINT_SIZE];
         size_t n = encodeVarint(tmp, sizeof(tmp), v);

@@ -34,15 +34,15 @@ namespace tether::klipper::transport {
  * @brief Configuration for a TCP stream transport.
  */
 struct TcpTransportConfig {
-    /// "client" to connect to host:port; "server" to listen on port.
+    /**"client" to connect to host:port; "server" to listen on port. */
     std::string mode{"client"};
-    /// Remote host to connect to (client mode).
+    /**Remote host to connect to (client mode). */
     std::string host{"127.0.0.1"};
-    /// Port (both client and server mode).
+    /**Port (both client and server mode). */
     uint16_t port = 0;
-    /// Listen backlog (server mode).
+    /**Listen backlog (server mode). */
     int backlog = 1;
-    /// Connect/listen timeout in milliseconds.
+    /**Connect/listen timeout in milliseconds. */
     int timeoutMs = 5000;
 };
 

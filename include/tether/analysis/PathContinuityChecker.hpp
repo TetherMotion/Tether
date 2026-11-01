@@ -12,7 +12,7 @@
 
 namespace tether::analysis {
 
-/// @brief A single continuity issue.
+/**@brief A single continuity issue. */
 struct ContinuityIssue {
     int line = 0;
     enum class Type { Gap, Jump, Retract, Plunge, DirectionChange } type = Type::Gap;
@@ -21,7 +21,7 @@ struct ContinuityIssue {
     enum class Severity { Low, Medium, High } severity = Severity::Low;
 };
 
-/// @brief Per-layer continuity data.
+/**@brief Per-layer continuity data. */
 struct LayerContinuity {
     int layer = 0;
     double zHeight = 0;
@@ -31,7 +31,7 @@ struct LayerContinuity {
     double totalGapDistance = 0;
 };
 
-/// @brief Combined continuity analysis result.
+/**@brief Combined continuity analysis result. */
 struct PathContinuityResult {
     // Overall continuity
     std::vector<ContinuityIssue> issues;
@@ -53,18 +53,18 @@ struct PathContinuityResult {
     std::vector<std::string> recommendations;
 };
 
-/// @brief Check toolpath continuity: gaps, jumps, retracts, plunges, per-layer.
+/**@brief Check toolpath continuity: gaps, jumps, retracts, plunges, per-layer. */
 class PathContinuityChecker {
 public:
     struct Params {
-        double gapThresholdMm = 1.0;       ///< For overall continuity
-        double layerGapThresholdMm = 5.0;  ///< For per-layer continuity
+        double gapThresholdMm = 1.0; /**< For overall continuity */
+        double layerGapThresholdMm = 5.0; /**< For per-layer continuity */
     };
 
     explicit PathContinuityChecker() : params_() {}
     explicit PathContinuityChecker(Params params) : params_(params) {}
 
-    /// @brief Check continuity of G-code toolpath.
+    /**@brief Check continuity of G-code toolpath. */
     PathContinuityResult analyze(const std::vector<std::string>& gcodeLines) const;
 
     const Params& params() const { return params_; }

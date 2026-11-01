@@ -6,8 +6,10 @@
 #include "tether/TetherConfig.hpp"
 #endif
 
-/// @file PrinterObjectsMotion.hpp
-/// @brief Motion printer objects (skew_correction, input_shaper, pressure_advance, etc.)
+/**
+ * @file PrinterObjectsMotion.hpp
+ * @brief Motion printer objects (skew_correction, input_shaper, pressure_advance, etc.)
+ */
 
 #include "tether/klipper/klippy/KlippyUdsServer.hpp"
 
@@ -22,7 +24,7 @@
 
 namespace tether::klipper::klippy {
 
-/// @brief Skew correction printer object (skew_correction).
+/**@brief Skew correction printer object (skew_correction). */
 class SkewCorrectionObject : public PrinterObject {
 public:
     std::string name() const override { return "skew_correction"; }
@@ -53,7 +55,7 @@ private:
     std::string currentProfile_ = "";
 };
 
-/// @brief Input shaper printer object (input_shaper).
+/**@brief Input shaper printer object (input_shaper). */
 class InputShaperObject : public PrinterObject {
 public:
     std::string name() const override { return "input_shaper"; }
@@ -85,7 +87,7 @@ private:
 };
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-/// @brief Pressure advance printer object (pressure_advance).
+/**@brief Pressure advance printer object (pressure_advance). */
 class PressureAdvanceObject : public PrinterObject {
 public:
     std::string name() const override { return "pressure_advance"; }
@@ -113,7 +115,7 @@ private:
     std::string model_ = "linear";
 };
 
-/// @brief Deconvolution feedforward controller printer object (deconvolution).
+/**@brief Deconvolution feedforward controller printer object (deconvolution). */
 class DeconvolutionObject : public PrinterObject {
 public:
     std::string name() const override { return "deconvolution"; }
@@ -142,7 +144,7 @@ private:
 };
 #endif // TETHER_ENABLE_PRESSURE_ADVANCE
 
-/// @brief Force move printer object (force_move).
+/**@brief Force move printer object (force_move). */
 class ForceMoveObject : public PrinterObject {
 public:
     std::string name() const override { return "force_move"; }
@@ -164,7 +166,7 @@ private:
     bool enableForceMove_ = false;
 };
 
-/// @brief Dual carriage printer object (dual_carriage).
+/**@brief Dual carriage printer object (dual_carriage). */
 class DualCarriageObject : public PrinterObject {
 public:
     std::string name() const override { return "dual_carriage"; }
@@ -192,7 +194,7 @@ private:
     std::string mode_ = "FULL";
 };
 
-/// @brief Extruder stepper printer object (extruder_stepper).
+/**@brief Extruder stepper printer object (extruder_stepper). */
 class ExtruderStepperObject : public PrinterObject {
 public:
     explicit ExtruderStepperObject(const std::string& name) : name_(name) {}
@@ -223,7 +225,7 @@ private:
     std::string motionQueue_;
 };
 
-/// @brief Manual stepper printer object (manual_stepper).
+/**@brief Manual stepper printer object (manual_stepper). */
 class ManualStepperObject : public PrinterObject {
 public:
     explicit ManualStepperObject(const std::string& name) : name_(name) {}
@@ -249,7 +251,7 @@ private:
     double velocity_ = 0.0;
 };
 
-/// @brief Endstop phase printer object (endstop_phase).
+/**@brief Endstop phase printer object (endstop_phase). */
 class EndstopPhaseObject : public PrinterObject {
 public:
     explicit EndstopPhaseObject(const std::string& name) : name_(name) {}

@@ -48,10 +48,12 @@ namespace EtherCAT {
 template <typename State>
 class StateChangeLogger {
 public:
-    /// Callback invoked when a log entry should be emitted.
-    ///   - `state`    : the current state value
-    ///   - `attempt`  : the caller-supplied attempt / poll counter
-    ///   - `changed`  : true if this update differs from the last logged state
+    /**
+     * Callback invoked when a log entry should be emitted.
+     *   - `state`    : the current state value
+     *   - `attempt`  : the caller-supplied attempt / poll counter
+     *   - `changed`  : true if this update differs from the last logged state
+     */
     using LogFunc = std::function<void(const State& state, int attempt, bool changed)>;
 
     /**
@@ -93,17 +95,19 @@ public:
         }
     }
 
-    /// Reset the logger to its initial state (no previous state; next
-    /// update always fires).
+    /**
+     * Reset the logger to its initial state (no previous state; next
+     * update always fires).
+     */
     void reset() {
         last_state_.reset();
         repeat_count_ = 0;
     }
 
-    /// Check whether the logger has seen at least one update.
+    /**Check whether the logger has seen at least one update. */
     bool hasInitialValue() const { return last_state_.has_value(); }
 
-    /// Get the last logged state (undefined if hasInitialValue() is false).
+    /**Get the last logged state (undefined if hasInitialValue() is false). */
     const State& lastState() const { return *last_state_; }
 
 private:

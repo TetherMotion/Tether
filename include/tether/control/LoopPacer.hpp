@@ -64,21 +64,29 @@ public:
      * @return the scheduled next-tick start (≤ now = fire immediately)
      */
     virtual TimePoint schedule(TimePoint now) = 0;
-    /// Target period in µs; 0 = unbounded (free run). Feeds overrun stats.
-    /// @return Nominal tick period [µs]
+    /**
+     * Target period in µs; 0 = unbounded (free run). Feeds overrun stats.
+     * @return Nominal tick period [µs]
+     */
     virtual double periodUs() const = 0;
-    /// Schedule rebases/drops since construction or reset().
-    /// @return Number of times the schedule was rebased
+    /**
+     * Schedule rebases/drops since construction or reset().
+     * @return Number of times the schedule was rebased
+     */
     virtual uint64_t resyncs() const { return 0; }
-    /// Ticks fired behind their grid point to catch up.
-    /// @return Number of catch-up ticks fired
+    /**
+     * Ticks fired behind their grid point to catch up.
+     * @return Number of catch-up ticks fired
+     */
     virtual uint64_t catchUpTicks() const { return 0; }
-    /// Re-anchor internal state (e.g. after a loop pause/reset).
-    /// @param now Current time to re-anchor the schedule to
+    /**
+     * Re-anchor internal state (e.g. after a loop pause/reset).
+     * @param now Current time to re-anchor the schedule to
+     */
     virtual void reset(TimePoint now) = 0;
 };
 
-/// No pacing — next tick fires immediately. periodUs() == 0.
+/**No pacing — next tick fires immediately. periodUs() == 0. */
 class FreeRunPolicy final : public IPacingPolicy {
 public:
     TimePoint schedule(TimePoint now) override { return now; }
@@ -226,24 +234,28 @@ public:
     using NowFn = std::function<TimePoint()>;
     using SleepFn = std::function<void(TimePoint)>;
 
-    /// Per-tick pacing diagnostics. Snapshot via stats().
+    /**Per-tick pacing diagnostics. Snapshot via stats(). */
     struct LoopStats {
         uint64_t ticks = 0;
-        double lastTickUs = 0;     ///< work duration of the last tick
-        double emaTickUs = 0;      ///< EMA of work duration
+        double lastTickUs = 0; /**< work duration of the last tick */
+        double emaTickUs = 0; /**< EMA of work duration */
         double maxTickUs = 0;
-        uint64_t overruns = 0;     ///< ticks whose work exceeded the period
+        uint64_t overruns = 0; /**< ticks whose work exceeded the period */
         double maxOverrunUs = 0;
-        uint64_t lateStarts = 0;   ///< starts later than lateThresholdUs
+        uint64_t lateStarts = 0; /**< starts later than lateThresholdUs */
         double lastLateStartUs = 0;
         double maxLateStartUs = 0;
-        /// Effective wall rate implied by the EMA tick (Hz; 0 if none).
-        /// @return 1e6/emaTickUs, or 0 before the first tick
+        /**
+         * Effective wall rate implied by the EMA tick (Hz; 0 if none).
+         * @return 1e6/emaTickUs, or 0 before the first tick
+         */
         double effectiveHz() const { return emaTickUs > 0 ? 1e6 / emaTickUs : 0.0; }
-        /// Effective real-time factor for a loop advancing `simDtUs` of
-        /// simulated time per tick (0 if no EMA yet).
-        /// @param simDtUs Simulated time advanced per tick [µs]
-        /// @return simDtUs/emaTickUs — &gt;1 means faster than real time
+        /**
+         * Effective real-time factor for a loop advancing `simDtUs` of
+         * simulated time per tick (0 if no EMA yet).
+         * @param simDtUs Simulated time advanced per tick [µs]
+         * @return simDtUs/emaTickUs — &gt;1 means faster than real time
+         */
         double effectiveRtf(double simDtUs) const {
             return emaTickUs > 0 ? simDtUs / emaTickUs : 0.0;
         }
@@ -321,38 +333,50 @@ public:
         return lateness;
     }
 
-    /// Consistent snapshot of cumulative stats (windows are separate).
-    /// @return Copy of all counters and aggregates
+    /**
+     * Consistent snapshot of cumulative stats (windows are separate).
+     * @return Copy of all counters and aggregates
+     */
     LoopStats stats() const {
         std::lock_guard lk(stats_mtx_);
         return stats_;
     }
 
-    /// Tick-work duration window (p50/p95/p99 via percentile()).
-    /// Copied under the stats mutex — safe to query from any thread.
-    /// @return Copy of the rolling tick-duration window
+    /**
+     * Tick-work duration window (p50/p95/p99 via percentile()).
+     * Copied under the stats mutex — safe to query from any thread.
+     * @return Copy of the rolling tick-duration window
+     */
     common::WindowStats<WindowN> tickWindow() const {
         std::lock_guard lk(stats_mtx_);
         return tickWindow_;
     }
-    /// Start-lateness window.
-    /// @return Copy of the rolling start-lateness window
+    /**
+     * Start-lateness window.
+     * @return Copy of the rolling start-lateness window
+     */
     common::WindowStats<WindowN> lateWindow() const {
         std::lock_guard lk(stats_mtx_);
         return lateWindow_;
     }
 
-    /// Policy-reported schedule rebases.
-    /// @return Rebase count forwarded from the installed policy
+    /**
+     * Policy-reported schedule rebases.
+     * @return Rebase count forwarded from the installed policy
+     */
     uint64_t resyncs() const { return policy_->resyncs(); }
-    /// Policy-reported catch-up fires.
-    /// @return Catch-up count forwarded from the installed policy
+    /**
+     * Policy-reported catch-up fires.
+     * @return Catch-up count forwarded from the installed policy
+     */
     uint64_t catchUpTicks() const { return policy_->catchUpTicks(); }
-    /// Target period of the installed policy (µs; 0 = free run).
-    /// @return Nominal tick period [µs]
+    /**
+     * Target period of the installed policy (µs; 0 = free run).
+     * @return Nominal tick period [µs]
+     */
     double periodUs() const { return policy_->periodUs(); }
 
-    /// Zero all stats and re-anchor the policy at the current time.
+    /**Zero all stats and re-anchor the policy at the current time. */
     void reset() {
         policy_->reset(now_());
         std::lock_guard lk(stats_mtx_);

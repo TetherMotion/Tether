@@ -19,7 +19,7 @@ namespace EtherCAT { namespace PDO {
 // RxPDO Communication Parameters (0x1400 - 0x15FF)
 // ---------------------------------------------------------------------------
 
-/// RxPDO Communication Parameter Base (0x1400 - 0x15FF)
+/**RxPDO Communication Parameter Base (0x1400 - 0x15FF) */
 constexpr uint16_t kRxPDOCommParamBase  = 0x1400;
 constexpr uint16_t kRxPDOCommParamCount = 512;  // 0x1400 - 0x15FF
 
@@ -37,7 +37,7 @@ namespace CommParamSub {
 // RxPDO Mapping Parameters (0x1600 - 0x17FF)
 // ---------------------------------------------------------------------------
 
-/// RxPDO Mapping Parameter Base (0x1600 - 0x17FF)
+/**RxPDO Mapping Parameter Base (0x1600 - 0x17FF) */
 constexpr uint16_t kRxPDOMappingBase   = 0x1600;
 constexpr uint16_t kRxPDOMappingCount  = 512;  // 0x1600 - 0x17FF
 
@@ -57,11 +57,11 @@ namespace MappingSub {
 // TxPDO Communication & Mapping Parameters (0x1800 - 0x1BFF)
 // ---------------------------------------------------------------------------
 
-/// TxPDO Communication Parameter Base (0x1800 - 0x19FF)
+/**TxPDO Communication Parameter Base (0x1800 - 0x19FF) */
 constexpr uint16_t kTxPDOCommParamBase  = 0x1800;
 constexpr uint16_t kTxPDOCommParamCount = 512;  // 0x1800 - 0x19FF
 
-/// TxPDO Mapping Parameter Base (0x1A00 - 0x1BFF)
+/**TxPDO Mapping Parameter Base (0x1A00 - 0x1BFF) */
 constexpr uint16_t kTxPDOMappingBase    = 0x1A00;
 constexpr uint16_t kTxPDOMappingCount   = 512;  // 0x1A00 - 0x1BFF
 

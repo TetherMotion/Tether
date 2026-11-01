@@ -69,7 +69,7 @@ using MotionPlanner::analytical::WeightedArcType;
 
 namespace {
 
-/// Pre-filter Klipper extended commands (same as gcode_path_compare / wss_diag).
+/**Pre-filter Klipper extended commands (same as gcode_path_compare / wss_diag). */
 bool isKlipperCommand(std::string_view line) {
     size_t i = 0;
     while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) i++;
@@ -144,11 +144,13 @@ std::string filterKlipperCommands(const std::string& gcodeText) {
     return result;
 }
 
-/// Evaluate path velocity at time t from WSS arcs (closed-form, snapspace).
-/// SNAP:     v(τ) = v0 + a0·τ + ½j0·τ² + (1/6)σ·τ³
-/// SINGULAR: v(τ) = v0 + a0·τ + ½j*·τ²
-/// WALL:     v(τ) = v0
-/// DWELL:    v = 0
+/**
+ * Evaluate path velocity at time t from WSS arcs (closed-form, snapspace).
+ * SNAP:     v(τ) = v0 + a0·τ + ½j0·τ² + (1/6)σ·τ³
+ * SINGULAR: v(τ) = v0 + a0·τ + ½j*·τ²
+ * WALL:     v(τ) = v0
+ * DWELL:    v = 0
+ */
 double evalVelocity(const WeightedArc& arc, double tau) {
     tau = std::clamp(tau, 0.0, arc.duration);
     switch (arc.type) {
@@ -166,11 +168,13 @@ double evalVelocity(const WeightedArc& arc, double tau) {
     return 0.0;
 }
 
-/// Evaluate path acceleration at time t from WSS arcs (closed-form, snapspace).
-/// SNAP:     a(τ) = a0 + j0·τ + ½σ·τ²
-/// SINGULAR: a(τ) = a0 + j*·τ
-/// WALL:     a(τ) = 0
-/// DWELL:    a = 0
+/**
+ * Evaluate path acceleration at time t from WSS arcs (closed-form, snapspace).
+ * SNAP:     a(τ) = a0 + j0·τ + ½σ·τ²
+ * SINGULAR: a(τ) = a0 + j*·τ
+ * WALL:     a(τ) = 0
+ * DWELL:    a = 0
+ */
 double evalAcceleration(const WeightedArc& arc, double tau) {
     tau = std::clamp(tau, 0.0, arc.duration);
     switch (arc.type) {
@@ -187,7 +191,7 @@ double evalAcceleration(const WeightedArc& arc, double tau) {
     return 0.0;
 }
 
-/// Find the arc containing time t via binary search on t0.
+/**Find the arc containing time t via binary search on t0. */
 const WeightedArc& findArc(const std::vector<WeightedArc>& arcs, double t) {
     size_t lo = 0, hi = arcs.size() - 1;
     while (lo < hi) {
@@ -198,7 +202,7 @@ const WeightedArc& findArc(const std::vector<WeightedArc>& arcs, double t) {
     return arcs[lo];
 }
 
-/// Sample (time, value) pairs from the WSS arcs.
+/**Sample (time, value) pairs from the WSS arcs. */
 struct Sample { double t; double v; double a; };
 
 std::vector<Sample> sampleWss(const std::vector<WeightedArc>& arcs,
@@ -219,8 +223,10 @@ std::vector<Sample> sampleWss(const std::vector<WeightedArc>& arcs,
     return samples;
 }
 
-/// Write a 2D line plot as SVG.
-/// Renders axes, grid, labels, and a polyline for the data.
+/**
+ * Write a 2D line plot as SVG.
+ * Renders axes, grid, labels, and a polyline for the data.
+ */
 bool writePlotSvg(const std::string& filename,
                   const std::string& title,
                   const std::string& yLabel,

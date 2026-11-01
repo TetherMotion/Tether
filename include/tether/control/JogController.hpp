@@ -93,7 +93,7 @@ public:
      * @param position Absolute destination [units]
      */
     virtual void setTarget(double position) = 0;
-    /// Decelerate to rest and hold position.
+    /**Decelerate to rest and hold position. */
     virtual void stop() = 0;
     /**
      * @brief Advance the profile by dt seconds.
@@ -140,9 +140,9 @@ public:
 class TrapezoidJogRamper : public IJogRamper {
 public:
     struct Config {
-        double maxRate = 50.0;   ///< |rate| cap, units/s
-        double accel   = 500.0;  ///< rate slew limit, units/s^2
-        double epsilon = 1e-4;   ///< completion tolerance, units
+        double maxRate = 50.0; /**< |rate| cap, units/s */
+        double accel   = 500.0; /**< rate slew limit, units/s^2 */
+        double epsilon = 1e-4; /**< completion tolerance, units */
     };
 
     explicit TrapezoidJogRamper(const Config& cfg) : m_cfg(cfg) {}
@@ -215,7 +215,7 @@ public:
     }
 
 private:
-    /// Slew m_rate toward cmd at the accel limit.
+    /**Slew m_rate toward cmd at the accel limit. */
     void slew(double cmd, double dt) {
         const double maxStep = m_cfg.accel * dt;
         m_rate += std::clamp(cmd - m_rate, -maxStep, maxStep);
@@ -235,16 +235,16 @@ private:
 // JogSetpoint / JogApplyFn — the application abstraction
 // ============================================================================
 
-/// One cycle of ramped jog output for one axis, handed to the applicator.
+/**One cycle of ramped jog output for one axis, handed to the applicator. */
 struct JogSetpoint {
-    size_t  axis;         ///< Axis index
-    uint8_t mode;         ///< JogController::Mode as uint8_t
-    bool    active;       ///< mode != Idle
-    double  position;     ///< Ramped jog position (units)
-    double  rate;         ///< Ramped jog rate (units/s)
-    double  remaining;    ///< Incremental distance left (units)
-    uint32_t leaseLeftMs; ///< Continuous mode: ms until lease expiry
-    int64_t nowMs;        ///< Controller clock at this update
+    size_t  axis; /**< Axis index */
+    uint8_t mode; /**< JogController::Mode as uint8_t */
+    bool    active; /**< mode != Idle */
+    double  position; /**< Ramped jog position (units) */
+    double  rate; /**< Ramped jog rate (units/s) */
+    double  remaining; /**< Incremental distance left (units) */
+    uint32_t leaseLeftMs; /**< Continuous mode: ms until lease expiry */
+    int64_t nowMs; /**< Controller clock at this update */
 };
 
 /**
@@ -262,46 +262,48 @@ using JogApplyFn = std::function<void(const JogSetpoint&)>;
 
 class JogController {
 public:
-    /// Axis runtime mode (also emitted in the IO state snapshot).
+    /**Axis runtime mode (also emitted in the IO state snapshot). */
     enum class Mode : uint8_t {
-        Idle        = 0, ///< Holding position, no jog command
-        Continuous  = 1, ///< Leased velocity jog in progress
-        Incremental = 2, ///< Bounded displacement in progress
-        Stopping    = 3, ///< Lease expired / stop requested — ramping down
+        Idle        = 0, /**< Holding position, no jog command */
+        Continuous  = 1, /**< Leased velocity jog in progress */
+        Incremental = 2, /**< Bounded displacement in progress */
+        Stopping    = 3, /**< Lease expired / stop requested — ramping down */
     };
 
-    /// Server-enforced limits and UI presets for one axis.
+    /**Server-enforced limits and UI presets for one axis. */
     struct AxisConfig {
-        std::string name;                 ///< "x", "y", "z", "e", ...
-        std::string unit = "mm";          ///< Display/engineering unit
-        double      maxRate = 50.0;       ///< |rate| clamp, units/s
-        double      accel   = 500.0;      ///< Rate slew limit, units/s^2
-        uint32_t    maxLeaseMs = 500;     ///< Hard lease cap, ms
-        double      maxIncrement = 10.0;  ///< |move()| clamp, units
-        std::vector<double> ratePresets      = {1.0, 10.0, 50.0};  ///< UI rate chips
-        std::vector<double> incrementPresets = {0.1, 1.0, 10.0};   ///< UI step chips
+        std::string name; /**< "x", "y", "z", "e", ... */
+        std::string unit = "mm"; /**< Display/engineering unit */
+        double      maxRate = 50.0; /**< |rate| clamp, units/s */
+        double      accel   = 500.0; /**< Rate slew limit, units/s^2 */
+        uint32_t    maxLeaseMs = 500; /**< Hard lease cap, ms */
+        double      maxIncrement = 10.0; /**< |move()| clamp, units */
+        std::vector<double> ratePresets      = {1.0, 10.0, 50.0}; /**< UI rate chips */
+        std::vector<double> incrementPresets = {0.1, 1.0, 10.0}; /**< UI step chips */
     };
 
-    /// Named subset of axes with optional preset overrides (UI grouping).
+    /**Named subset of axes with optional preset overrides (UI grouping). */
     struct Group {
-        std::string          name;              ///< "linear", "extruder", ...
-        std::vector<size_t>  axes;              ///< Indices into Config::axes
-        std::vector<double>  ratePresets;       ///< Empty = inherit per-axis
-        std::vector<double>  incrementPresets;  ///< Empty = inherit per-axis
+        std::string          name; /**< "linear", "extruder", ... */
+        std::vector<size_t>  axes; /**< Indices into Config::axes */
+        std::vector<double>  ratePresets; /**< Empty = inherit per-axis */
+        std::vector<double>  incrementPresets; /**< Empty = inherit per-axis */
     };
 
-    /// Factory creating one ramper per axis.  Default: TrapezoidJogRamper
-    /// built from the axis limits.
+    /**
+     * Factory creating one ramper per axis.  Default: TrapezoidJogRamper
+     * built from the axis limits.
+     */
     using RamperFactory =
         std::function<std::unique_ptr<IJogRamper>(const AxisConfig&)>;
 
     struct Config {
         std::vector<AxisConfig> axes;
         std::vector<Group>      groups;
-        uint32_t defaultLeaseMs = 300;   ///< Lease when client passes 0
-        double   stopEpsilon = 1e-4;     ///< |rate| below which Stopping→Idle
+        uint32_t defaultLeaseMs = 300; /**< Lease when client passes 0 */
+        double   stopEpsilon = 1e-4; /**< |rate| below which Stopping→Idle */
 
-        /// Optional custom ramper factory (empty = TrapezoidJogRamper).
+        /**Optional custom ramper factory (empty = TrapezoidJogRamper). */
         RamperFactory ramperFactory;
 
         static Config getDefault() {
@@ -314,18 +316,18 @@ public:
         }
     };
 
-    /// Read-only per-axis snapshot for IO transport (POD, fixed layout).
+    /**Read-only per-axis snapshot for IO transport (POD, fixed layout). */
     struct AxisSnapshot {
-        uint8_t  mode;          ///< Mode as uint8_t
-        uint8_t  active;        ///< mode != Idle
+        uint8_t  mode; /**< Mode as uint8_t */
+        uint8_t  active; /**< mode != Idle */
         uint8_t  _pad[6];
-        double   rate;          ///< Ramped output rate, units/s
-        double   position;      ///< Accumulated jog position, units
-        double   remaining;     ///< Incremental distance left, units
-        uint32_t leaseLeftMs;   ///< Continuous mode: ms until expiry
-        uint32_t maxLeaseMs;    ///< Configured cap
-        double   maxRate;       ///< Configured cap
-        double   maxIncrement;  ///< Configured cap
+        double   rate; /**< Ramped output rate, units/s */
+        double   position; /**< Accumulated jog position, units */
+        double   remaining; /**< Incremental distance left, units */
+        uint32_t leaseLeftMs; /**< Continuous mode: ms until expiry */
+        uint32_t maxLeaseMs; /**< Configured cap */
+        double   maxRate; /**< Configured cap */
+        double   maxIncrement; /**< Configured cap */
     };
 
     explicit JogController(const Config& cfg) : m_cfg(cfg), m_axes(cfg.axes.size()) {
@@ -415,8 +417,10 @@ public:
         return applied;
     }
 
-    /// Request a ramped stop for one axis (convenience — the lease is the
-    /// real failsafe).  No-op when already Idle.
+    /**
+     * Request a ramped stop for one axis (convenience — the lease is the
+     * real failsafe).  No-op when already Idle.
+     */
     void stop(size_t axis) {
         if (axis >= m_axes.size()) return;
         auto& a = m_axes[axis];
@@ -427,7 +431,7 @@ public:
                          std::memory_order_release);
     }
 
-    /// Stop every axis.
+    /**Stop every axis. */
     void stopAll() {
         for (size_t i = 0; i < m_axes.size(); ++i) stop(i);
     }
@@ -552,11 +556,11 @@ public:
     double axisPosition(size_t axis) const {
         return m_axes.at(axis).position.load(std::memory_order_relaxed);
     }
-    /// Remaining incremental displacement (0 for continuous/idle).
+    /**Remaining incremental displacement (0 for continuous/idle). */
     double axisRemaining(size_t axis) const {
         return m_axes.at(axis).remaining.load(std::memory_order_relaxed);
     }
-    /// Milliseconds until the continuous lease expires (0 when not leased).
+    /**Milliseconds until the continuous lease expires (0 when not leased). */
     uint32_t axisLeaseLeftMs(size_t axis, int64_t nowMs) const {
         const auto& a = m_axes.at(axis);
         if (axisMode(axis) != Mode::Continuous) return 0;
@@ -565,7 +569,7 @@ public:
         return left > 0 ? static_cast<uint32_t>(left) : 0;
     }
 
-    /// Fill a fixed-layout snapshot for IO transport.
+    /**Fill a fixed-layout snapshot for IO transport. */
     void fillSnapshot(size_t axis, AxisSnapshot& out, int64_t nowMs) const {
         const auto& cfg = m_cfg.axes.at(axis);
         out.mode = static_cast<uint8_t>(axisMode(axis));
@@ -629,7 +633,7 @@ public:
     }
 
 private:
-    /// Default ramper factory: trapezoid ramps at the axis limits.
+    /**Default ramper factory: trapezoid ramps at the axis limits. */
     static std::unique_ptr<IJogRamper> makeTrapezoidRamper(const AxisConfig& a) {
         TrapezoidJogRamper::Config rc;
         rc.maxRate = a.maxRate;
@@ -638,16 +642,18 @@ private:
     }
 
     struct AxisState {
-        /// Serializes jog()/move()/stop() writers only — update() never
-        /// takes this lock.
+        /**
+         * Serializes jog()/move()/stop() writers only — update() never
+         * takes this lock.
+         */
         std::mutex           cmdMutex;
         std::atomic<uint8_t> mode{static_cast<uint8_t>(Mode::Idle)};
-        std::atomic<double>  cmdRate{0.0};       ///< Continuous commanded rate
-        std::atomic<int64_t> leaseEndMs{0};      ///< Continuous lease deadline
-        std::atomic<double>  pendingIncrement{0.0};  ///< move() mailbox
-        std::atomic<double>  resetRequest{0.0};  ///< resetPosition() mailbox
+        std::atomic<double>  cmdRate{0.0}; /**< Continuous commanded rate */
+        std::atomic<int64_t> leaseEndMs{0}; /**< Continuous lease deadline */
+        std::atomic<double>  pendingIncrement{0.0}; /**< move() mailbox */
+        std::atomic<double>  resetRequest{0.0}; /**< resetPosition() mailbox */
         std::atomic<bool>    resetPending{false};
-        /// Trajectory generator — update() thread only (single writer).
+        /**Trajectory generator — update() thread only (single writer). */
         std::unique_ptr<IJogRamper> ramper;
         // Mirrors for cross-thread queries (update-thread written):
         std::atomic<double>  position{0.0};
@@ -659,7 +665,7 @@ private:
         AxisState& operator=(const AxisState&) = delete;
     };
 
-    /// Escape characters that would break a JSON string literal.
+    /**Escape characters that would break a JSON string literal. */
     static std::string jsonEscape(const std::string& s) {
         std::string out;
         out.reserve(s.size());
@@ -682,7 +688,7 @@ private:
     }
 
     Config                m_cfg;
-    std::deque<AxisState> m_axes;  ///< Non-movable states; deque = stable addresses
+    std::deque<AxisState> m_axes; /**< Non-movable states; deque = stable addresses */
     JogApplyFn            m_apply;
 };
 

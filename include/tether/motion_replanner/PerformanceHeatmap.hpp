@@ -32,15 +32,15 @@ namespace MotionReplanner {
  * @brief Performance metrics at a spatial location
  */
 struct PerformanceMetrics {
-    double maxAchievedVelocity = 0.0;       ///< mm/min
-    double maxAchievedAccel = 0.0;          ///< mm/s²
-    double maxAchievedJerk = 0.0;           ///< mm/s³
+    double maxAchievedVelocity = 0.0; /**< mm/min */
+    double maxAchievedAccel = 0.0; /**< mm/s² */
+    double maxAchievedJerk = 0.0; /**< mm/s³ */
     
-    double meanTrackingError = 0.0;          ///< mm
-    double maxTrackingError = 0.0;           ///< mm
-    double contourErrorAt95Pct = 0.0;        ///< 95th percentile contour error
+    double meanTrackingError = 0.0; /**< mm */
+    double maxTrackingError = 0.0; /**< mm */
+    double contourErrorAt95Pct = 0.0; /**< 95th percentile contour error */
     
-    double meanFeedRateRatio = 1.0;          ///< achieved/commanded
+    double meanFeedRateRatio = 1.0; /**< achieved/commanded */
     
     size_t sampleCount = 0;
     double lastUpdateTime = 0.0;
@@ -57,12 +57,12 @@ struct PerformanceMetrics {
  * @brief Suggested limits at a spatial location
  */
 struct SuggestedLimits {
-    double maxVelocity = 10000.0;            ///< mm/min
-    double maxAcceleration = 5000.0;         ///< mm/s²
-    double maxJerk = 50000.0;                ///< mm/s³
+    double maxVelocity = 10000.0; /**< mm/min */
+    double maxAcceleration = 5000.0; /**< mm/s² */
+    double maxJerk = 50000.0; /**< mm/s³ */
     
-    double confidence = 0.0;                  ///< 0-1
-    std::string limitingFactor;               ///< What's constraining
+    double confidence = 0.0; /**< 0-1 */
+    std::string limitingFactor; /**< What's constraining */
 };
 
 /**
@@ -74,17 +74,17 @@ struct HeatmapConfig {
     std::array<double, 3> maxBounds = {500.0, 500.0, 400.0};
     
     // Resolution
-    double resolution1D = 10.0;               ///< mm for 1D heatmaps
-    double resolution2D = 20.0;               ///< mm for 2D heatmaps
-    double resolution3D = 50.0;               ///< mm for 3D heatmaps
+    double resolution1D = 10.0; /**< mm for 1D heatmaps */
+    double resolution2D = 20.0; /**< mm for 2D heatmaps */
+    double resolution3D = 50.0; /**< mm for 3D heatmaps */
     
     // Default limits (user configured maximum)
-    double defaultMaxVelocity = 10000.0;      ///< mm/min
-    double defaultMaxAccel = 5000.0;          ///< mm/s²
-    double defaultMaxJerk = 50000.0;          ///< mm/s³
+    double defaultMaxVelocity = 10000.0; /**< mm/min */
+    double defaultMaxAccel = 5000.0; /**< mm/s² */
+    double defaultMaxJerk = 50000.0; /**< mm/s³ */
     
     // Safety margin for suggested limits
-    double safetyMargin = 0.1;                ///< 10%
+    double safetyMargin = 0.1; /**< 10% */
     
     // Minimum samples needed for valid data
     size_t minSamplesForValidity = 5;
@@ -149,9 +149,9 @@ public:
      */
     struct DifferentialData {
         double position;
-        double velocityDiff;          ///< actual - expected
+        double velocityDiff; /**< actual - expected */
         double accelDiff;
-        double performanceRatio;      ///< actual / expected
+        double performanceRatio; /**< actual / expected */
     };
     std::vector<DifferentialData> getDifferential() const;
     
@@ -238,7 +238,7 @@ public:
      * @brief Get all cell data for export
      */
     struct CellData {
-        double u, v;                  ///< Center position
+        double u, v; /**< Center position */
         double width, height;
         PerformanceMetrics metrics;
         SuggestedLimits suggested;
@@ -249,7 +249,7 @@ public:
      * @brief Export as image-friendly format (row-major 2D array)
      */
     struct GridData {
-        std::vector<double> data;     ///< Row-major values
+        std::vector<double> data; /**< Row-major values */
         size_t rows, cols;
         double minU, maxU, minV, maxV;
     };
@@ -322,8 +322,8 @@ public:
      * @brief Get all voxel data for export
      */
     struct VoxelData {
-        std::array<double, 3> position;  ///< Center
-        std::array<double, 3> size;      ///< Dimensions
+        std::array<double, 3> position; /**< Center */
+        std::array<double, 3> size; /**< Dimensions */
         PerformanceMetrics metrics;
         SuggestedLimits suggested;
     };
@@ -346,7 +346,7 @@ public:
      * @brief Export as 3D array
      */
     struct VolumeData {
-        std::vector<double> data;     ///< X-major, then Y, then Z
+        std::vector<double> data; /**< X-major, then Y, then Z */
         size_t nx, ny, nz;
         std::array<double, 3> origin;
         std::array<double, 3> spacing;
@@ -417,11 +417,11 @@ public:
      * @brief Differential at a position
      */
     struct Differential {
-        double velocityRatio;         ///< actual / expected
+        double velocityRatio; /**< actual / expected */
         double accelRatio;
-        double errorRatio;            ///< actual error / acceptable error
-        bool underperforming;         ///< ratio < 1 for velocity/accel
-        bool overErroring;            ///< errorRatio > 1
+        double errorRatio; /**< actual error / acceptable error */
+        bool underperforming; /**< ratio < 1 for velocity/accel */
+        bool overErroring; /**< errorRatio > 1 */
     };
     
     Differential getDifferential(const std::array<double, 3>& position) const;

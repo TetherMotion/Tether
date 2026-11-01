@@ -19,14 +19,16 @@ class TetherIOWebSocketController
 public:
     static void initPathRouting() {}
 
-    /// `machineService` may be null (read-only mode). `roleQueryParam` names
-    /// a development-only query parameter (e.g. `?role=operator`) that maps
-    /// to a session role; production deployments must assign identity from
-    /// the authenticated transport instead and leave `roleQueryParam` empty.
-    ///
-    /// `authProvider`, when set, authenticates the HTTP `Authorization:
-    /// Bearer` header on the upgrade request. Unauthenticated sessions stay
-    /// observer/read-only — every mutation path fails closed on the server.
+    /**
+     * `machineService` may be null (read-only mode). `roleQueryParam` names
+     * a development-only query parameter (e.g. `?role=operator`) that maps
+     * to a session role; production deployments must assign identity from
+     * the authenticated transport instead and leave `roleQueryParam` empty.
+     *
+     * `authProvider`, when set, authenticates the HTTP `Authorization:
+     * Bearer` header on the upgrade request. Unauthenticated sessions stay
+     * observer/read-only — every mutation path fails closed on the server.
+     */
     explicit TetherIOWebSocketController(Registry& registry,
                                          tether::io::LogFn logFn = nullptr,
                                          SchemaCatalog* schemaCatalog = nullptr,

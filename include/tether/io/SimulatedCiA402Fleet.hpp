@@ -368,7 +368,7 @@ public:
     size_t axisCount() const { return descriptor_.axes.size(); }
     const MachineDescriptorV1& descriptor() const { return descriptor_; }
 
-    /// Current coherent snapshot for one axis, or nullopt for unknown ids.
+    /**Current coherent snapshot for one axis, or nullopt for unknown ids. */
     std::optional<DriveSnapshotV1> driveSnapshot(std::string_view stableId) const {
         std::lock_guard lock(mutex_);
         const auto axis = std::find_if(descriptor_.axes.begin(), descriptor_.axes.end(),

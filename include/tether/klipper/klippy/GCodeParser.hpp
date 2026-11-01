@@ -1,14 +1,16 @@
 #pragma once
 
-/// @file GCodeParser.hpp
-/// @brief G-code line parsing (GcodeLine struct and parseGcodeLine function)
-///
-/// @details
-/// The parser uses the shared `GCode::Lexer` from `tether/gcode/GCodeLexer.hpp`
-/// for tokenization of standard G/M/T codes and their parameters. Extended
-/// Klipper commands (SET_SERVO, BED_MESH_CALIBRATE, etc.) are handled by a
-/// lightweight fallback path since the Tether lexer is designed for
-/// RS274/NGC syntax and doesn't recognise multi-letter command names.
+/**
+ * @file GCodeParser.hpp
+ * @brief G-code line parsing (GcodeLine struct and parseGcodeLine function)
+ *
+ * @details
+ * The parser uses the shared `GCode::Lexer` from `tether/gcode/GCodeLexer.hpp`
+ * for tokenization of standard G/M/T codes and their parameters. Extended
+ * Klipper commands (SET_SERVO, BED_MESH_CALIBRATE, etc.) are handled by a
+ * lightweight fallback path since the Tether lexer is designed for
+ * RS274/NGC syntax and doesn't recognise multi-letter command names.
+ */
 
 #include "tether/gcode/GCodeLexer.hpp"
 #include "tether/gcode/GCodeLexerUtils.hpp"
@@ -29,13 +31,13 @@ namespace tether::klipper::klippy {
 // G-code command representation
 // ============================================================================
 
-/// @brief A parsed G-code line.
+/**@brief A parsed G-code line. */
 struct GcodeLine {
-    std::string code;           ///< e.g. "G1", "M104", "G28", "BED_MESH_CALIBRATE"
-    std::string comment;        ///< Comment text (after ;)
-    std::string text;           ///< Remaining text after code (for M117, M23, etc.)
-    std::map<char, double> params; ///< Parameters: X, Y, Z, E, F, S, T, etc.
-    std::map<std::string, std::string> namedParams; ///< Named params: SERVO=..., ANGLE=...
+    std::string code; /**< e.g. "G1", "M104", "G28", "BED_MESH_CALIBRATE" */
+    std::string comment; /**< Comment text (after ;) */
+    std::string text; /**< Remaining text after code (for M117, M23, etc.) */
+    std::map<char, double> params; /**< Parameters: X, Y, Z, E, F, S, T, etc. */
+    std::map<std::string, std::string> namedParams; /**< Named params: SERVO=..., ANGLE=... */
 
     /**
      * @brief Check if a parameter exists.
@@ -199,10 +201,12 @@ inline void parseNamedParams(const std::string& s,
     }
 }
 
-/// @brief Parse a line using the shared GCode::Lexer for standard G/M/T codes.
-/// @param codeOnly The line with comments stripped and trimmed.
-/// @param comment The comment text (may be empty).
-/// @return Parsed GcodeLine, or nullopt if not a valid G-code line.
+/**
+ * @brief Parse a line using the shared GCode::Lexer for standard G/M/T codes.
+ * @param codeOnly The line with comments stripped and trimmed.
+ * @param comment The comment text (may be empty).
+ * @return Parsed GcodeLine, or nullopt if not a valid G-code line.
+ */
 inline std::optional<GcodeLine> parseWithLexer(const std::string& codeOnly,
                                                 const std::string& comment) {
     GCode::Lexer lexer;
@@ -330,10 +334,12 @@ inline std::optional<GcodeLine> parseWithLexer(const std::string& codeOnly,
     return result;
 }
 
-/// @brief Parse a line as an extended Klipper command (SET_SERVO, BED_MESH_CALIBRATE, etc.)
-/// @param codeOnly The line with comments stripped and trimmed.
-/// @param comment The comment text (may be empty).
-/// @return Parsed GcodeLine, or nullopt if not a valid extended command.
+/**
+ * @brief Parse a line as an extended Klipper command (SET_SERVO, BED_MESH_CALIBRATE, etc.)
+ * @param codeOnly The line with comments stripped and trimmed.
+ * @param comment The comment text (may be empty).
+ * @return Parsed GcodeLine, or nullopt if not a valid extended command.
+ */
 inline std::optional<GcodeLine> parseExtendedCommand(const std::string& codeOnly,
                                                       const std::string& comment) {
     GcodeLine result;

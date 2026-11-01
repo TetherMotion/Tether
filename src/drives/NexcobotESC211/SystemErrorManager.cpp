@@ -15,9 +15,11 @@ namespace UserSystem = EtherCAT::Drives::Registers::NexcobotESC211::UserSystem;
 namespace Errors = EtherCAT::Drives::ErrorCodes::NexcobotESC211;
 
 namespace {
-/// The two U32 registers read every poll cycle: system state, error code.
-/// The error message string (0xF103) stays a bespoke raw read — it is only
-/// fetched when the error code is non-zero.
+/**
+ * The two U32 registers read every poll cycle: system state, error code.
+ * The error message string (0xF103) stays a bespoke raw read — it is only
+ * fetched when the error code is non-zero.
+ */
 constexpr std::array<EtherCAT::SdoObjectEntry, 2> kPollObjects = {{
     {UserSystem::SystemCurrentStateIndex, 0x00, 4},
     {UserSystem::SystemErrorCodeIndex,    0x00, 4},

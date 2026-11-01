@@ -56,41 +56,55 @@ public:
 
     // -- Topology / identity -------------------------------------------------
 
-    /// Zero-based bus position of the bound slave.
-    /// @return Slave position
+    /**
+     * Zero-based bus position of the bound slave.
+     * @return Slave position
+     */
     virtual uint16_t slaveIndex() const = 0;
 
-    /// Number of output bits this device contributes to the chain.
-    /// @return Output bit count
+    /**
+     * Number of output bits this device contributes to the chain.
+     * @return Output bit count
+     */
     virtual size_t bitCount() const = 0;
 
-    /// Human-readable device name (identity name or discovered name).
-    /// @return Device name string
+    /**
+     * Human-readable device name (identity name or discovered name).
+     * @return Device name string
+     */
     virtual const char* deviceName() const = 0;
 
     // -- Bit access ----------------------------------------------------------
     // Setters only touch the registered PDO buffer; the cyclic exchange
     // publishes them on the next cycle.
 
-    /// Set one output bit (0-based within this device).
-    /// @param bit Output index
-    /// @param on `true` drives the output high
+    /**
+     * Set one output bit (0-based within this device).
+     * @param bit Output index
+     * @param on `true` drives the output high
+     */
     virtual void setBit(size_t bit, bool on) = 0;
 
-    /// Current requested state of an output bit.
-    /// @param bit Output index
-    /// @return `true` when requested high
+    /**
+     * Current requested state of an output bit.
+     * @param bit Output index
+     * @return `true` when requested high
+     */
     virtual bool bit(size_t bit) const = 0;
 
-    /// Write all output bits at once (bit N = output N).
-    /// @param bits Packed output states
+    /**
+     * Write all output bits at once (bit N = output N).
+     * @param bits Packed output states
+     */
     virtual void setBits(uint64_t bits) = 0;
 
-    /// Currently requested output bits (bit N = output N).
-    /// @return Packed output states
+    /**
+     * Currently requested output bits (bit N = output N).
+     * @return Packed output states
+     */
     virtual uint64_t bits() const = 0;
 
-    /// All output bits off.
+    /**All output bits off. */
     virtual void allOff() = 0;
 
     // -- Chained bring-up (called by MultiOutputTerminal) --------------------

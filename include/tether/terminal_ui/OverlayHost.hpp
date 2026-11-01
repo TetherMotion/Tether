@@ -22,17 +22,21 @@ class OverlayHost {
 public:
     explicit OverlayHost(UI::OverlayStack& stack) : stack_(stack) {}
 
-    /// Render the top overlay centered within [top, bottom).  Call after
-    /// the underlying panel has been drawn.  No-op when the stack is
-    /// empty.  Returns true when an overlay was drawn.
+    /**
+     * Render the top overlay centered within [top, bottom).  Call after
+     * the underlying panel has been drawn.  No-op when the stack is
+     * empty.  Returns true when an overlay was drawn.
+     */
     bool render(int top, int bottom);
 
-    /// Route a key to the top overlay.  Esc pops the stack.  Returns
-    /// true when the stack is non-empty (key consumed either way — the
-    /// underlying panel must not see keys while an overlay is up).
+    /**
+     * Route a key to the top overlay.  Esc pops the stack.  Returns
+     * true when the stack is non-empty (key consumed either way — the
+     * underlying panel must not see keys while an overlay is up).
+     */
     bool handleKey(int key);
 
-    /// Footer hints of the top overlay (or "" when the stack is empty).
+    /**Footer hints of the top overlay (or "" when the stack is empty). */
     std::string keyHints() const;
 
 private:

@@ -1,5 +1,7 @@
-/// @file DestabilizerEngine.cpp
-/// @brief Implementation of ThreadPool and DestabilizerEngine.
+/**
+ * @file DestabilizerEngine.cpp
+ * @brief Implementation of ThreadPool and DestabilizerEngine.
+ */
 
 #include "tether/destabilizer/DestabilizerEngine.hpp"
 #include <algorithm>
