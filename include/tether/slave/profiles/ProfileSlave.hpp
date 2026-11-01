@@ -147,16 +147,19 @@ public:
     
     /**
      * @brief Get profile type
+     * @return CiA profile this slave implements
      */
     CiAProfile getProfile() const { return profile_; }
-    
+
     /**
      * @brief Get profile name
+     * @return Human-readable profile name for logging/ESI
      */
     virtual const char* getProfileName() const = 0;
-    
+
     /**
      * @brief Get device type (object 0x1000)
+     * @return CiA 402/401 device type code for object 0x1000
      */
     virtual uint32_t getDeviceType() const = 0;
     
@@ -208,11 +211,15 @@ protected:
     
     /**
      * @brief Handle state change
+     * @param oldState State the slave transitioned from
+     * @param newState State the slave transitioned into
      */
     virtual void onStateChange(SlaveState oldState, SlaveState newState);
-    
+
     /**
      * @brief Handle SYNC event
+     * @param syncNum Sync Manager event number
+     * @param timestamp Event timestamp [ns]
      */
     virtual void onSync(int syncNum, uint64_t timestamp);
     
@@ -235,14 +242,18 @@ protected:
     
     /**
      * @brief Get pointer to TxPDO data at offset
+     * @param offset Byte offset into the TxPDO process image
+     * @return Typed pointer into the outgoing process data
      */
     template<typename T>
     T* getTxPDOPtr(size_t offset) {
         return reinterpret_cast<T*>(core_->getTxPDOData() + offset);
     }
-    
+
     /**
      * @brief Get pointer to RxPDO data at offset
+     * @param offset Byte offset into the RxPDO process image
+     * @return Typed pointer into the received process data
      */
     template<typename T>
     const T* getRxPDOPtr(size_t offset) const {
