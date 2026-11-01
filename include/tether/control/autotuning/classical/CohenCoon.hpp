@@ -26,33 +26,52 @@ namespace Autotuning {
  */
 class CohenCoon : public AutotunerBase {
 public:
-    /** @brief Human-readable name of the tuner. */
+    /** @brief Human-readable name of the tuner.
+     *  @return Display name ("Cohen-Coon")
+     */
     std::string getName() const override;
 
-    /** @brief Short description for UI or logs. */
+    /** @brief Short description for UI or logs.
+     *  @return One-line description of the Cohen-Coon method
+     */
     std::string getDescription() const override;
 
-    /** @brief Offline/online mode of operation. */
+    /** @brief Offline/online mode of operation.
+     *  @return AutotuningMode::Offline — Cohen-Coon needs a FOPDT model
+     */
     AutotuningMode getMode() const override;
 
-    /** @brief Whether the given controller is compatible with this tuner. */
+    /** @brief Whether the given controller is compatible with this tuner.
+     *  @param controller Controller to check
+     *  @return `true` if the tuner can produce gains for `controller`
+     */
     bool isCompatible(const TunableController& controller) const override;
 
     /**
      * @brief Tune using Cohen-Coon rules based on a FOPDT model.
      * @param controller Controller to update.
-     * @param model Optional process model to use for tuning.
+     * @param model Optional process model to use for tuning; falls back
+     *        to the model set via setModel() when nullptr
+     * @return Tuning outcome including the computed gains and status
      */
     TuningResult tune(TunableController& controller,
                       const ProcessModel* model = nullptr) override;
 
-    /** @brief Compute Cohen-Coon PID gains from a FOPDT model. */
+    /** @brief Compute Cohen-Coon PID gains from a FOPDT model.
+     *  @param model Identified FOPDT process model
+     *  @param form PID gain form the result is expressed in
+     *  @return Computed PID gains
+     */
     static PIDGains calculateGains(const FOPDTModel& model, PIDForm form);
 
-    /** @brief Provide the FOPDT process model to base calculations on. */
+    /** @brief Provide the FOPDT process model to base calculations on.
+     *  @param model Identified process model the design is based on
+     */
     void setModel(const FOPDTModel& model) { m_model = model; }
 
-    /** @brief Set the PID representation to compute gains for. */
+    /** @brief Set the PID representation to compute gains for.
+     *  @param form Gain form (e.g. Parallel, Standard)
+     */
     void setControllerForm(PIDForm form) { m_form = form; }
 
 private:
