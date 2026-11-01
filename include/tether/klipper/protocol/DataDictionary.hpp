@@ -101,25 +101,33 @@ public:
 
     /**
      * @brief Register a response format string and assign it the next msgid.
+     * @param formatStr Klipper response format
+     * @return Assigned msgid, or 0 if invalid/already present
      */
     uint16_t addResponse(std::string_view formatStr);
 
     /**
      * @brief Register an output format string and assign it the next msgid.
+     * @param formatStr Klipper output format
+     * @return Assigned msgid, or 0 if invalid/already present
      */
     uint16_t addOutput(std::string_view formatStr);
 
     // --- Lookups ------------------------------------------------------------
 
+    /// @param msgid Message ID to look up
     /// @return The message entry for a msgid, or nullptr.
     const MessageEntry* lookupMsgid(uint16_t msgid) const;
 
+    /// @param formatStr Command format string
     /// @return The msgid for a command format string, or std::nullopt.
     std::optional<uint16_t> lookupCommand(std::string_view formatStr) const;
 
+    /// @param formatStr Response format string
     /// @return The msgid for a response format string, or std::nullopt.
     std::optional<uint16_t> lookupResponse(std::string_view formatStr) const;
 
+    /// @param formatStr Output format string
     /// @return The msgid for an output format string, or std::nullopt.
     std::optional<uint16_t> lookupOutput(std::string_view formatStr) const;
 
@@ -129,17 +137,28 @@ public:
     // --- Enumerations -------------------------------------------------------
 
     /// @brief Add a simple enumeration entry (key -> value).
+    /// @param enumName Enumeration the value belongs to
+    /// @param key Enumeration key name
+    /// @param value Integer value for `key`
     void addEnumValue(std::string_view enumName, std::string_view key, uint32_t value);
 
     /// @brief Add a range enumeration entry (key -> [start, start+count-1]).
+    /// @param enumName Enumeration the range belongs to
+    /// @param key Base key name for the range
+    /// @param start First value of the range
+    /// @param count Number of values in the range
     void addEnumRange(std::string_view enumName, std::string_view key,
                       uint32_t start, uint32_t count);
 
+    /// @param enumName Enumeration name to look up
     /// @return The enumeration named @p enumName, or nullptr.
     const Enumeration* lookupEnum(std::string_view enumName) const;
 
     /// @brief Resolve a string value to its integer for an enumeration.
     ///        Matches by exact key or by range expansion (e.g. "PA3" -> 3).
+    /// @param enumName Enumeration to resolve in
+    /// @param key Key string (exact or expanded)
+    /// @return Integer value, or std::nullopt when unresolvable
     std::optional<uint32_t> resolveEnum(std::string_view enumName, std::string_view key) const;
 
     /// @return All enumerations.
@@ -148,9 +167,13 @@ public:
     // --- Constants ----------------------------------------------------------
 
     /// @brief Add an integer constant.
+    /// @param name Constant name
+    /// @param value Constant value
     void addConstant(std::string_view name, int64_t value);
 
     /// @brief Add a string constant.
+    /// @param name Constant name
+    /// @param value Constant string value
     void addConstantString(std::string_view name, std::string_view value);
 
     /// @return The constant value, or std::nullopt.
