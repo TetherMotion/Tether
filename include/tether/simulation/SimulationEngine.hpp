@@ -47,14 +47,26 @@ class SimController {
 public:
     virtual ~SimController() = default;
 
-    /// Compute control input from measurement and reference
+    /**
+     * @brief Compute control input from measurement and reference
+     * @param t Current simulation time [s]
+     * @param measured Measured (post-sensor) state vector
+     * @param reference Desired state/setpoint vector
+     * @param dt Integration step size [s]
+     * @return Control input applied to the system's actuators
+     */
     virtual StateVector compute(double t, const StateVector& measured,
                                  const StateVector& reference, double dt) = 0;
 
-    /// Reset controller state
+    /**
+     * @brief Reset controller state
+     */
     virtual void reset() = 0;
 
-    /// Get controller name
+    /**
+     * @brief Get controller name
+     * @return Human-readable name used in simulation logs/records
+     */
     virtual const char* name() const = 0;
 };
 
@@ -64,35 +76,65 @@ public:
     SimulationEngine();
     ~SimulationEngine();
 
-    /// Set the dynamical system to simulate
+    /**
+     * @brief Set the dynamical system to simulate
+     * @param system System model providing derivatives/dynamics
+     */
     void setSystem(std::shared_ptr<DynamicalSystem> system);
 
-    /// Set the controller
+    /**
+     * @brief Set the controller
+     * @param controller Feedback controller evaluated each step;
+     *        nullptr selects open-loop operation
+     */
     void setController(std::shared_ptr<SimController> controller);
 
-    /// Set the reference/setpoint
+    /**
+     * @brief Set the reference/setpoint
+     * @param ref Constant reference passed to the controller
+     */
     void setReference(const StateVector& ref) { reference_ = ref; }
 
-    /// Set external force callback
+    /**
+     * @brief Set external force callback
+     * @param force (t, state) -> disturbance force injected into dynamics
+     */
     void setExternalForce(ForceCallback force) { externalForce_ = std::move(force); }
 
-    /// Configure simulation
+    /**
+     * @brief Configure simulation
+     * @param config Step size, duration, integrator choice
+     */
     void setConfig(const SimConfig& config);
-    const SimConfig& config() const { return config_; }
 
-    /// Configure sensors (one per output)
+    /**
+     * @brief Configure sensors (one per output)
+     * @param configs Noise/bias/quantization per measured channel
+     */
     void setSensorConfigs(const std::vector<SensorConfig>& configs);
 
-    /// Configure actuators (one per input)
+    /**
+     * @brief Configure actuators (one per input)
+     * @param configs Saturation/rate limits per actuated channel
+     */
     void setActuatorConfigs(const std::vector<ActuatorConfig>& configs);
 
-    /// Set initial state (overrides default)
+    /**
+     * @brief Set initial state (overrides default)
+     * @param state State at t=0; defaults to the system's initial state
+     */
     void setInitialState(const StateVector& state) { initialState_ = state; hasInitialState_ = true; }
 
-    /// Set a constant input vector for open-loop simulation.
+    /**
+     * @brief Set a constant input vector for open-loop simulation.
+     * @param input Input applied each step when no controller is set
+     */
     void setInput(const StateVector& input) { input_ = input; }
 
-    /// Run full simulation and return record
+    /**
+     * @brief Run full simulation and return record
+     * @return Time series of states, inputs, and measurements
+     */
     SimulationRecord run();
 
     /// Step-by-step simulation
@@ -100,26 +142,47 @@ public:
     SimStepResult step();
     bool isFinished() const;
 
-    /// Get current state
+    /**
+     * @brief Get current state
+     * @return State vector at the current simulation time
+     */
     const StateVector& currentState() const { return state_; }
-    double currentTime() const { return time_; }
 
-    /// Reset simulation
+    /**
+     * @brief Reset simulation
+     */
     void reset();
 
-    /// Compute performance metrics from a simulation record
+    /**
+     * @brief Compute performance metrics from a simulation record
+     * @param record Simulation output to evaluate
+     * @param reference Reference the output was tracking
+     * @param outputIndex Which output channel to score
+     * @return Rise time, overshoot, settling time, IAE/ISE metrics
+     */
     static PerformanceMetrics computeMetrics(const SimulationRecord& record,
                                                const StateVector& reference,
                                                int outputIndex = 0);
 
-    /// Compute Bode plot data
+    /**
+     * @brief Compute Bode plot data
+     * @param record Simulation output to transform
+     * @param inputIndex Excitation input channel
+     * @param outputIndex Response output channel
+     * @param[out] frequencies Frequency grid [rad/s]
+     * @param[out] magnitudesDb Magnitude per frequency [dB]
+     * @param[out] phasesDeg Phase per frequency [deg]
+     */
     static void computeBodePlot(const SimulationRecord& record,
                                  int inputIndex, int outputIndex,
                                  std::vector<double>& frequencies,
                                  std::vector<double>& magnitudesDb,
                                  std::vector<double>& phasesDeg);
 
-    /// Get system
+    /**
+     * @brief Get system
+     * @return Dynamical system assigned to this engine, or nullptr
+     */
     std::shared_ptr<DynamicalSystem> system() const { return system_; }
 
 private:
