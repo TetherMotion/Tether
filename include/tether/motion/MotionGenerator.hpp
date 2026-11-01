@@ -112,16 +112,19 @@ public:
     
     /**
      * @brief Get current target position
+     * @return Target position in drive units.
      */
     virtual int32_t getPosition() const = 0;
     
     /**
      * @brief Get current target velocity
+     * @return Target velocity in drive units per second.
      */
     virtual int32_t getVelocity() const = 0;
     
     /**
      * @brief Get current target torque/force
+     * @return Target torque in 0.1 % of rated torque (0 when unsupported).
      */
     virtual int16_t getTorque() const { return 0; }
     
@@ -132,11 +135,13 @@ public:
     
     /**
      * @brief Check if generator is running
+     * @return true while the generator is producing motion.
      */
     bool isRunning() const { return m_state == GeneratorState::Running; }
     
     /**
      * @brief Check if motion is complete
+     * @return true when the motion has finished.
      */
     bool isComplete() const { return m_state == GeneratorState::Complete; }
 
@@ -170,46 +175,55 @@ public:
     
     /**
      * @brief Set amplitude in position units
+     * @param amplitude Peak deviation from the offset position.
      */
     void setAmplitude(int32_t amplitude) { m_amplitude = amplitude; }
     
     /**
      * @brief Get amplitude
+     * @return Peak deviation from the offset position.
      */
     int32_t getAmplitude() const { return m_amplitude; }
     
     /**
      * @brief Set frequency in Hz
+     * @param frequency Oscillation frequency [Hz].
      */
     void setFrequency(float frequency) { m_frequency = frequency; }
     
     /**
      * @brief Get frequency
+     * @return Oscillation frequency [Hz].
      */
     float getFrequency() const { return m_frequency; }
     
     /**
      * @brief Set DC offset (center position)
+     * @param offset Center position of the oscillation.
      */
     void setOffset(int32_t offset) { m_offset = offset; }
     
     /**
      * @brief Get offset
+     * @return Center position of the oscillation.
      */
     int32_t getOffset() const { return m_offset; }
     
     /**
      * @brief Set initial phase in radians
+     * @param phase Phase offset at t = 0 [rad].
      */
     void setPhase(float phase) { m_initial_phase = phase; }
     
     /**
      * @brief Get phase
+     * @return Phase offset at t = 0 [rad].
      */
     float getPhase() const { return m_current_phase; }
     
     /**
      * @brief Set number of cycles (0 = infinite)
+     * @param cycles Value to apply.
      */
     void setCycles(uint32_t cycles) { m_target_cycles = cycles; }
     
@@ -277,16 +291,19 @@ public:
     
     /**
      * @brief Get position as floating point
+     * @return Current target position (floating-point units).
      */
     float getPositionFloat() const { return m_position_float; }
     
     /**
      * @brief Get velocity as floating point
+     * @return Current target velocity (floating-point units/s).
      */
     float getVelocityFloat() const { return m_velocity_float; }
     
     /**
      * @brief Get number of completed cycles
+     * @return Completed oscillation cycles since start.
      */
     uint32_t getCompletedCycles() const { return m_completed_cycles; }
 
@@ -345,26 +362,31 @@ public:
     
     /**
      * @brief Set maximum velocity
+     * @param velocity Value to apply.
      */
     void setMaxVelocity(int32_t velocity) { m_max_velocity = velocity; }
     
     /**
      * @brief Set acceleration
+     * @param acceleration Value to apply.
      */
     void setAcceleration(int32_t acceleration) { m_acceleration = acceleration; }
     
     /**
      * @brief Set deceleration (defaults to acceleration if not set)
+     * @param deceleration Value to apply.
      */
     void setDeceleration(int32_t deceleration) { m_deceleration = deceleration; }
     
     /**
      * @brief Set target position
+     * @param position Value to apply.
      */
     void setTargetPosition(int32_t position) { m_target_position = position; }
     
     /**
      * @brief Set start position
+     * @param position Value to apply.
      */
     void setStartPosition(int32_t position) { m_start_position = position; }
     
@@ -445,26 +467,31 @@ public:
     
     /**
      * @brief Set maximum velocity
+     * @param velocity Value to apply.
      */
     void setMaxVelocity(float velocity) { m_max_velocity = velocity; }
     
     /**
      * @brief Set maximum acceleration
+     * @param acceleration Value to apply.
      */
     void setMaxAcceleration(float acceleration) { m_max_acceleration = acceleration; }
     
     /**
      * @brief Set maximum jerk
+     * @param jerk Value to apply.
      */
     void setMaxJerk(float jerk) { m_max_jerk = jerk; }
     
     /**
      * @brief Set target position
+     * @param position Value to apply.
      */
     void setTargetPosition(int32_t position) { m_target_position = position; }
     
     /**
      * @brief Set start position
+     * @param position Value to apply.
      */
     void setStartPosition(int32_t position) { m_start_position = position; }
     
@@ -493,21 +520,25 @@ public:
     
     /**
      * @brief Get floating point position
+     * @return Current target position (floating-point units).
      */
     float getPositionFloat() const { return m_position; }
     
     /**
      * @brief Get floating point velocity
+     * @return Current target velocity (floating-point units/s).
      */
     float getVelocityFloat() const { return m_velocity; }
     
     /**
      * @brief Get current acceleration
+     * @return Current acceleration [units/s^2].
      */
     float getAcceleration() const { return m_acceleration; }
     
     /**
      * @brief Get current jerk
+     * @return Current jerk [units/s^3].
      */
     float getJerk() const { return m_jerk; }
 
