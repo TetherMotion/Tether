@@ -172,6 +172,8 @@ struct Position {
     }
     
     /// Distance considering only linear axes
+    /// @param other Position to measure against
+    /// @return Euclidean distance over the linear (XYZ) axes only
     double linearDistance(const Position& other) const {
         double dx = x() - other.x();
         double dy = y() - other.y();
@@ -180,6 +182,7 @@ struct Position {
     }
 
     /// @brief All-ones position (unity scale factor for every axis).
+    /// @return Position with every axis coordinate set to 1.0
     static Position ones() {
         Position p;
         p.coords.fill(1.0);
@@ -540,6 +543,8 @@ struct Block {
     std::map<std::string, std::string> keyValues{};
 
     /// Helper to check if a word is present
+    /// @param letter Word letter to test (X, F, S, ...)
+    /// @return `true` if the word appears in the block
     bool hasWord(WordLetter letter) const {
         const size_t idx = static_cast<size_t>(letter);
         if (idx >= words.size()) return false;
@@ -547,6 +552,9 @@ struct Block {
     }
 
     /// Helper to get word value
+    /// @param letter Word letter to read
+    /// @param defaultVal Value returned when the word is absent
+    /// @return The word's numeric value or `defaultVal`
     double getWord(WordLetter letter, double defaultVal = 0.0) const {
         const size_t idx = static_cast<size_t>(letter);
         if (idx >= words.size()) return defaultVal;
@@ -555,17 +563,26 @@ struct Block {
     }
 
     /// Check if block has a key/value parameter
+    /// @param key Parameter name to test (case as parsed)
+    /// @return `true` if `key` was collected as a KEY=VALUE pair
     bool hasKeyValue(const std::string& key) const {
         return keyValues.find(key) != keyValues.end();
     }
 
     /// Get raw parameter string (if present) or default
+    /// @param key Parameter name to read
+    /// @param defaultVal Value returned when `key` is absent
+    /// @return Unparsed parameter string or `defaultVal`
     std::string getParamString(const std::string& key, const std::string& defaultVal = "") const {
         auto it = keyValues.find(key);
         return it != keyValues.end() ? it->second : defaultVal;
     }
 
     /// Convenience: parse an integer parameter; return default on parse failure
+    /// @param key Parameter name to read
+    /// @param defaultVal Value returned when `key` is absent, empty, or
+    ///        not a whole integer
+    /// @return Parsed integer or `defaultVal`
     int32_t getParamInt(const std::string& key, int32_t defaultVal = 0) const {
         auto it = keyValues.find(key);
         if (it == keyValues.end()) return defaultVal;
@@ -590,6 +607,10 @@ struct Block {
     }
 
     /// Convenience: parse a double parameter; return default on parse failure
+    /// @param key Parameter name to read
+    /// @param defaultVal Value returned when `key` is absent, empty, or
+    ///        not a valid number
+    /// @return Parsed double or `defaultVal`
     double getParamDouble(const std::string& key, double defaultVal = 0.0) const {
         auto it = keyValues.find(key);
         if (it == keyValues.end()) return defaultVal;
@@ -614,6 +635,8 @@ struct Block {
 
     /// Convenience: parse a vector of doubles from a param value. Supports brackets [1,2,3],
     /// parentheses (1 2 3) or comma-separated unbracketed values. Returns empty vector on parse failure.
+    /// @param key Parameter name to read
+    /// @return Parsed values; empty when `key` is absent or no token parses
     std::vector<double> getParamVector(const std::string& key) const {
         std::vector<double> out;
         auto it = keyValues.find(key);
@@ -644,6 +667,7 @@ struct Block {
     }
     
     /// Check if block contains motion
+    /// @return `true` if any axis word (X/Y/Z/A/B/C/U/V/W) is present
     bool hasMotion() const {
         return hasWord(WordLetter::X) || hasWord(WordLetter::Y) ||
                hasWord(WordLetter::Z) || hasWord(WordLetter::A) ||
@@ -653,6 +677,8 @@ struct Block {
     }
     
     /// Check if a G-code is present in this block
+    /// @param code Integer G-code number (e.g. 0 for G0)
+    /// @return `true` if `code` is among the block's G-codes
     bool hasGCode(int16_t code) const {
         for (uint8_t i = 0; i < gCodeCount; ++i) {
             if (gCodes[i] == code) return true;
@@ -661,6 +687,8 @@ struct Block {
     }
     
     /// Check if a G-code (with decimal) is present (e.g., 382 for G38.2)
+    /// @param code Decimal G-code number (e.g. 38.2 for G38.2)
+    /// @return `true` if `code` is among the block's G-codes
     bool hasGCodeDecimal(double code) const {
         int16_t intCode = static_cast<int16_t>(std::llround(code * 10.0));
         for (uint8_t i = 0; i < gCodeCount; ++i) {
@@ -670,6 +698,8 @@ struct Block {
     }
     
     /// Check if an M-code is present in this block
+    /// @param code Integer M-code number (e.g. 3 for M3)
+    /// @return `true` if `code` is among the block's M-codes
     bool hasMCode(int16_t code) const {
         for (uint8_t i = 0; i < mCodeCount; ++i) {
             if (mCodes[i] == code) return true;
@@ -678,6 +708,7 @@ struct Block {
     }
     
     /// Check if this is an O-code block
+    /// @return `true` if the block is an O-word (subroutine) line
     bool isOCode() const {
         return hasOCode;
     }
@@ -1000,6 +1031,7 @@ struct Error {
     
     bool ok() const { return code == ErrorCode::OK; }
     /// True if this represents end-of-input (not a real error).
+    /// @return `true` when `code` is ErrorCode::END
     bool isEnd() const { return code == ErrorCode::END; }
     operator bool() const { return code != ErrorCode::OK; }
 };
@@ -1012,15 +1044,16 @@ struct Error {
  * @brief Motion segment for output to motion controller
  */
 struct MotionSegment {
+    /// @brief Segment geometry kind
     enum class Type : uint8_t {
-        RAPID,
-        LINEAR,
-        ARC_CW,
-        ARC_CCW,
-        SPLINE,
-        NURBS,
-        DWELL,
-        PROBE,
+        RAPID,      ///< G0 rapid traverse (coordinated, unconstrained feed)
+        LINEAR,     ///< G1 straight line at the programmed feed
+        ARC_CW,     ///< G2 circular arc, clockwise
+        ARC_CCW,    ///< G3 circular arc, counter-clockwise
+        SPLINE,     ///< G5.x spline segment
+        NURBS,      ///< G5.2/G5.3 NURBS segment
+        DWELL,      ///< G4 timed pause
+        PROBE,      ///< G38.x probing move (stops on trigger)
         THREADING              ///< G33/G33.1 — spindle-synchronized feed
     };
     
