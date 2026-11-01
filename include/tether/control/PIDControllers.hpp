@@ -222,6 +222,7 @@ public:
     
     /**
      * @brief Get proportional gain
+     * @return Proportional gain.
      */
     double getGain() const { return m_kp; }
     
@@ -294,11 +295,13 @@ public:
     
     /**
      * @brief Get proportional gain
+     * @return Proportional gain.
      */
     double getKp() const { return m_kp; }
     
     /**
      * @brief Get derivative gain
+     * @return Derivative gain.
      */
     double getKd() const { return m_kd; }
     
@@ -312,6 +315,7 @@ public:
     
     /**
      * @brief Get derivative filter time constant
+     * @return Derivative filter time constant [s].
      */
     double getDerivativeFilter() const { return m_tf; }
     
@@ -422,16 +426,20 @@ public:
     
     /**
      * @brief Get proportional gain
+     * @return Proportional gain.
      */
     double getKp() const { return m_kp; }
     
     /**
      * @brief Get integral gain
+     * @return Integral gain.
      */
     double getKi() const { return m_ki; }
     
     /**
      * @brief Set integral limits
+     * @param min Lower bound for the integral term.
+     * @param max Upper bound for the integral term.
      */
     void setIntegralLimits(double min, double max);
     
@@ -444,11 +452,13 @@ public:
     
     /**
      * @brief Get current integral value
+     * @return Integral term of the last update.
      */
     double getIntegral() const { return m_integral; }
     
     /**
      * @brief Set integral to specific value (for bumpless transfer)
+     * @param value Integral term to preset.
      */
     void setIntegral(double value) { m_integral = value; }
     
@@ -617,6 +627,7 @@ public:
     
     /**
      * @brief Get gains
+     * @return Proportional gain.
      */
     double getKp() const { return m_kp; }
     double getKi() const { return m_ki; }
@@ -668,6 +679,7 @@ public:
     
     /**
      * @brief Get derivative filter time constant
+     * @return Derivative filter time constant [s].
      */
     double getDerivativeFilter() const { return m_tf; }
     
@@ -681,6 +693,7 @@ public:
     
     /**
      * @brief Set derivative filter type
+     * @param type Filter applied to the derivative term.
      */
     void setDerivativeFilterType(DerivativeFilterType type) {
         m_derivFilterType = type;
@@ -702,11 +715,14 @@ public:
     
     /**
      * @brief Get anti-windup method
+     * @return Anti-windup method in use.
      */
     AntiWindupMethod getAntiWindup() const { return m_antiWindup; }
     
     /**
      * @brief Set integral limits
+     * @param min Lower bound for the integral term.
+     * @param max Upper bound for the integral term.
      */
     void setIntegralLimits(double min, double max);
     
@@ -716,16 +732,19 @@ public:
     
     /**
      * @brief Get current integral value
+     * @return Integral term of the last update.
      */
     double getIntegral() const { return m_integral; }
     
     /**
      * @brief Set integral (for bumpless transfer)
+     * @param value Integral term to preset.
      */
     void setIntegral(double value) { m_integral = value; }
     
     /**
      * @brief Get last derivative value
+     * @return Derivative term of the last update.
      */
     double getLastDerivative() const { return m_filteredDerivative; }
     
@@ -839,11 +858,13 @@ public:
     
     /**
      * @brief Get proportional setpoint weight
+     * @return Proportional setpoint weight b.
      */
     double getB() const { return m_b; }
     
     /**
      * @brief Get derivative setpoint weight
+     * @return Derivative setpoint weight c.
      */
     double getC() const { return m_c; }
     
@@ -936,6 +957,7 @@ public:
     
     /**
      * @brief Get hysteresis band
+     * @return Switching hysteresis.
      */
     double getHysteresis() const { return m_hysteresis; }
     
@@ -1045,6 +1067,8 @@ public:
     
     /**
      * @brief Set gains
+     * @param kp Proportional gain.
+     * @param kd Derivative gain.
      */
     void setGains(double kp, double kd);
     
@@ -1069,6 +1093,8 @@ public:
      * 
      * Using desired state is more stable but less accurate.
      * Using actual state gives better accuracy but can cause instability.
+     *
+     * @param onDesired true to evaluate compensation on the desired state.
      */
     void setCompensationOnDesired(bool onDesired) {
         m_compOnDesired = onDesired;
@@ -1076,6 +1102,7 @@ public:
     
     /**
      * @brief Set derivative filter
+     * @param tf Derivative filter time constant [s] (0 = no filter).
      */
     void setDerivativeFilter(double tf) { m_tf = tf; }
     
@@ -1180,21 +1207,31 @@ public:
     
     /**
      * @brief Set outer loop (position) gains
+     * @param kp Proportional gain.
+     * @param ki Integral gain.
+     * @param kd Derivative gain.
      */
     void setOuterGains(double kp, double ki = 0.0, double kd = 0.0);
     
     /**
      * @brief Set inner loop (velocity) gains
+     * @param kp Proportional gain.
+     * @param ki Integral gain.
+     * @param kd Derivative gain.
      */
     void setInnerGains(double kp, double ki, double kd = 0.0);
     
     /**
      * @brief Set velocity limits (inner loop command saturation)
+     * @param min Lower velocity command bound.
+     * @param max Upper velocity command bound.
      */
     void setVelocityLimits(double min, double max);
     
     /**
      * @brief Set torque limits (output saturation)
+     * @param min Lower output bound.
+     * @param max Upper output bound.
      */
     void setTorqueLimits(double min, double max);
     
@@ -1203,31 +1240,40 @@ public:
      * 
      * Must be called each cycle before compute() to provide
      * the inner loop measurement.
+     *
+     * @param velocity Measured velocity for the inner loop.
      */
     void setVelocityFeedback(double velocity) { m_velocity = velocity; }
     
     /**
      * @brief Set outer loop anti-windup
+     * @param method Anti-windup strategy for the position loop.
+     * @param param Method-specific parameter.
      */
     void setOuterAntiWindup(AntiWindupMethod method, double param = 0.0);
     
     /**
      * @brief Set inner loop anti-windup
+     * @param method Anti-windup strategy for the velocity loop.
+     * @param param Method-specific parameter.
      */
     void setInnerAntiWindup(AntiWindupMethod method, double param = 0.0);
     
     /**
      * @brief Get velocity command (outer loop output)
+     * @return Velocity setpoint produced by the position loop.
      */
     double getVelocityCommand() const { return m_velocityCommand; }
     
     /**
      * @brief Access outer loop controller
+     * @return Position loop controller for live tuning.
      */
     PIDController& getOuterController() { return m_outerPID; }
     
     /**
      * @brief Access inner loop controller
+     * @return Velocity loop controller for live tuning.
      */
     PIDController& getInnerController() { return m_innerPID; }
     
