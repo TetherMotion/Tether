@@ -24,6 +24,7 @@ namespace tether::klipper::objects {
 // Homing state
 // ============================================================================
 
+/// @brief Phase of a homing sequence.
 enum class HomingPhase {
     Idle,
     Seeking,    ///< Moving towards endstop at search speed
@@ -109,6 +110,8 @@ public:
         , wait_(std::move(wait)) {}
 
     /// @brief Home a single axis.
+    /// @param config Axis homing parameters (speeds, position)
+    /// @return Outcome: success flag and final position
     HomingResult homeAxis(const HomingAxisConfig& config) {
         HomingResult result;
         result.axis = config.name;
@@ -162,6 +165,8 @@ public:
     }
 
     /// @brief Home multiple axes (sequentially).
+    /// @param configs Homing config per axis, in order
+    /// @return Result per axis; stops at the first failure
     std::vector<HomingResult> homeAxes(const std::vector<HomingAxisConfig>& configs) {
         std::vector<HomingResult> results;
         for (const auto& cfg : configs) {
@@ -172,6 +177,7 @@ public:
     }
 
     /// @brief Get current homing phase.
+    /// @return Active phase
     HomingPhase phase() const { return phase_; }
 
 private:
@@ -199,12 +205,13 @@ public:
     uint8_t oid() const { return oid_; }
 
     /// @brief Check if probe is currently triggered.
+    /// @return `true` while the probe pin reads triggered
     bool triggered() const { return pinRead_(); }
 
     /// @brief Probe at a specific XY position.
     /// @param zSpeed Z speed in mm/s (negative = down).
     /// @param zMaxDistance Maximum Z travel distance.
-    /// @param zFunc Function to move Z axis: (speed, distance) -> triggered
+    /// @param zMove Function to move Z axis: (speed, distance) -> triggered
     /// @return Probe result: Z position where probe triggered, or NaN if not triggered.
     double probe(double zSpeed, double zMaxDistance,
                  std::function<double(double, double)> zMove) {
@@ -212,15 +219,19 @@ public:
     }
 
     /// @brief Set Z offset (calibrated probe-to-nozzle offset).
+    /// @param offset Probe-trigger Z minus true nozzle Z [mm]
     void setZOffset(double offset) { zOffset_ = offset; }
 
     /// @brief Get Z offset.
+    /// @return Calibrated offset [mm]
     double zOffset() const { return zOffset_; }
 
     /// @brief Set probe as virtual endstop for Z homing.
+    /// @param enabled `true` uses the probe as the Z endstop
     void setVirtualEndstop(bool enabled) { virtualEndstop_ = enabled; }
 
     /// @brief Check if probe is used as virtual endstop.
+    /// @return `true` while configured as Z endstop
     bool isVirtualEndstop() const { return virtualEndstop_; }
 
 private:
