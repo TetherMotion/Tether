@@ -79,6 +79,8 @@ struct NativeField {
     std::unique_ptr<NativeValue> value;
     /// Defined below (needs a complete NativeValue) so
     /// `{"name", nv::x}` braced lists build fields directly.
+    /// @param n Field name as declared in the schema.
+    /// @param v Field value (moved into the field).
     NativeField(std::string_view n, NativeValue v);
     NativeField(NativeField&&) = default;
     NativeField& operator=(NativeField&&) = default;
@@ -131,47 +133,85 @@ inline NativeMapEntry::NativeMapEntry(NativeValue k, NativeValue v)
 namespace nv {
 
 /// Boolean scalar (Bool schema only).
+/// @param v Boolean value.
+/// @return NativeValue holding a bool scalar.
 inline NativeValue flag(bool v) { return NativeValue{{v}}; }
 /// Unsigned scalar: U8/U16/U32/U64/UVarint/Enum/Stream, width-checked.
+/// @param v Unsigned value; build fails if it does not fit the schema type.
+/// @return NativeValue holding an unsigned scalar.
 inline NativeValue u(uint64_t v) { return NativeValue{{v}}; }
+/// @param v Unsigned 8-bit value.
+/// @return NativeValue holding an unsigned scalar.
 inline NativeValue u8(uint8_t v) { return u(v); }
+/// @param v Unsigned 16-bit value.
+/// @return NativeValue holding an unsigned scalar.
 inline NativeValue u16(uint16_t v) { return u(v); }
+/// @param v Unsigned 32-bit value.
+/// @return NativeValue holding an unsigned scalar.
 inline NativeValue u32(uint32_t v) { return u(v); }
+/// @param v Unsigned 64-bit value.
+/// @return NativeValue holding an unsigned scalar.
 inline NativeValue u64(uint64_t v) { return u(v); }
 /// Signed scalar: I8/I16/I32/I64/IVarint, width-checked.
+/// @param v Signed value; build fails if it does not fit the schema type.
+/// @return NativeValue holding a signed scalar.
 inline NativeValue i(int64_t v) { return NativeValue{{v}}; }
+/// @param v Signed 32-bit value.
+/// @return NativeValue holding a signed scalar.
 inline NativeValue i32(int32_t v) { return i(v); }
+/// @param v Signed 64-bit value.
+/// @return NativeValue holding a signed scalar.
 inline NativeValue i64(int64_t v) { return i(v); }
 /// Float scalar: F32 (rounds to f32) or F64.
+/// @param v Floating-point value.
+/// @return NativeValue holding a float scalar.
 inline NativeValue f(double v) { return NativeValue{{v}}; }
+/// @param v Floating-point value.
+/// @return NativeValue holding a float scalar.
 inline NativeValue f64(double v) { return f(v); }
 /// String value (embedded NUL rejected at build).
+/// @param v UTF-8 string contents.
+/// @return NativeValue holding a string.
 inline NativeValue str(std::string_view v) { return NativeValue{{v}}; }
 /// Raw bytes.
+/// @param v Byte contents.
+/// @return NativeValue holding a byte string.
 inline NativeValue bytes(std::span<const uint8_t> v) {
     return NativeValue{{v}};
 }
-/// f64 vector for FixedArray<F64>/DynamicArray<F64>.
+/// f64 vector for FixedArray&lt;F64&gt;/DynamicArray&lt;F64&gt;.
+/// @param v Element values.
+/// @return NativeValue holding a float array.
 inline NativeValue f64v(std::span<const double> v) {
     return NativeValue{{v}};
 }
 /// Signed-int vector for arrays of signed scalars.
+/// @param v Element values.
+/// @return NativeValue holding a signed array.
 inline NativeValue i64v(std::span<const int64_t> v) {
     return NativeValue{{v}};
 }
 /// Unsigned-int vector for arrays of unsigned scalars.
+/// @param v Element values.
+/// @return NativeValue holding an unsigned array.
 inline NativeValue u64v(std::span<const uint64_t> v) {
     return NativeValue{{v}};
 }
-/// String vector for DynamicArray<String>.
+/// String vector for DynamicArray&lt;String&gt;.
+/// @param v Element strings.
+/// @return NativeValue holding a string array.
 inline NativeValue strv(std::span<const std::string> v) {
     return NativeValue{{v}};
 }
 /// Generic array contents (nested/heterogeneous element types).
+/// @param v Element values.
+/// @return NativeValue holding the array.
 inline NativeValue items(std::vector<NativeValue> v) {
     return NativeValue{{std::move(v)}};
 }
 /// Variadic array items: items(nv::x, nv::y, ...).
+/// @param vs Element values in order.
+/// @return NativeValue holding the array.
 template <typename... Vs>
 inline NativeValue items(Vs&&... vs) {
     std::vector<NativeValue> v;
@@ -181,16 +221,23 @@ inline NativeValue items(Vs&&... vs) {
 }
 
 /// One struct field (name → value).
+/// @param name Field name as declared in the schema.
+/// @param v Field value.
+/// @return Field ready for fields().
 inline NativeField field(std::string_view name, NativeValue v) {
     return NativeField{name, std::move(v)};
 }
 /// Struct fields by name (a runtime-built list).
+/// @param v Fields in declaration order.
+/// @return NativeValue holding the struct.
 inline NativeValue fields(std::vector<NativeField> v) {
     return NativeValue{{std::move(v)}};
 }
 /// Variadic struct fields: fields(field("a", nv::x), field("b", nv::y)).
 /// NOTE: initializer_list cannot hold move-only NativeField — use this
 /// overload or push_back into a vector.
+/// @param fs Field values produced by field().
+/// @return NativeValue holding the struct.
 template <typename... Fs>
 inline NativeValue fields(Fs&&... fs) {
     std::vector<NativeField> v;
@@ -200,14 +247,21 @@ inline NativeValue fields(Fs&&... fs) {
 }
 
 /// One map entry.
+/// @param k Key value.
+/// @param v Mapped value.
+/// @return Entry ready for map().
 inline NativeMapEntry mapEntry(NativeValue k, NativeValue v) {
     return NativeMapEntry{std::move(k), std::move(v)};
 }
 /// Map entries (a runtime-built list).
+/// @param v Entries in insertion order.
+/// @return NativeValue holding the map.
 inline NativeValue map(std::vector<NativeMapEntry> v) {
     return NativeValue{{std::move(v)}};
 }
 /// Variadic map entries: map(mapEntry(k1, v1), mapEntry(k2, v2)).
+/// @param es Entries produced by mapEntry().
+/// @return NativeValue holding the map.
 template <typename... Es>
 inline NativeValue map(Es&&... es) {
     std::vector<NativeMapEntry> v;
@@ -216,8 +270,12 @@ inline NativeValue map(Es&&... es) {
     return map(std::move(v));
 }
 /// Absent Optional value.
+/// @return NativeValue representing an absent optional.
 inline NativeValue none() { return NativeValue{{NativeValue::None{}}}; }
 /// OneOf member.
+/// @param key Variant key selecting the active OneOf branch.
+/// @param v Value encoded as that branch.
+/// @return NativeValue holding the OneOf value.
 inline NativeValue oneOf(uint32_t key, NativeValue v) {
     return NativeValue{
         {NativeValue::OneOf{key, std::make_unique<NativeValue>(std::move(v))}}};
@@ -593,6 +651,10 @@ buildSchemaValue(const SchemaGraph& graph, const SchemaNode& node,
 }
 
 /// Convenience: build then encode in one call.
+/// @param graph Schema graph owning the node.
+/// @param node Schema node the value must conform to.
+/// @param native Value to build from.
+/// @return Wire bytes, or a diagnostic string on validation failure.
 inline std::expected<std::vector<uint8_t>, std::string>
 encodeNative(const SchemaGraph& graph, const SchemaNode& node,
              const NativeValue& native) {
@@ -606,6 +668,8 @@ encodeNative(const SchemaGraph& graph, const SchemaNode& node,
 // ===========================================================================
 
 /// Any unsigned-width scalar / enum / varint as u64.
+/// @param v Decoded schema value.
+/// @return Scalar bits, or an error when @p v is not a scalar.
 inline std::expected<uint64_t, std::string> asU64(const SchemaValue& v) {
     const auto* s = std::get_if<SchemaValue::Scalar>(&v.payload);
     if (!s || !v.node) return std::unexpected(std::string("not a scalar"));
@@ -613,6 +677,8 @@ inline std::expected<uint64_t, std::string> asU64(const SchemaValue& v) {
 }
 
 /// Any signed scalar as i64 (sign-restored from stored bits).
+/// @param v Decoded schema value.
+/// @return Scalar value, or an error when @p v is not a scalar.
 inline std::expected<int64_t, std::string> asI64(const SchemaValue& v) {
     const auto* s = std::get_if<SchemaValue::Scalar>(&v.payload);
     if (!s || !v.node) return std::unexpected(std::string("not a scalar"));
@@ -620,6 +686,8 @@ inline std::expected<int64_t, std::string> asI64(const SchemaValue& v) {
 }
 
 /// F32/F64 scalar as double.
+/// @param v Decoded schema value.
+/// @return Scalar as double, or an error for non-float scalars.
 inline std::expected<double, std::string> asF64(const SchemaValue& v) {
     const auto* s = std::get_if<SchemaValue::Scalar>(&v.payload);
     if (!s || !v.node) return std::unexpected(std::string("not a scalar"));
@@ -638,6 +706,8 @@ inline std::expected<double, std::string> asF64(const SchemaValue& v) {
 }
 
 /// Bool scalar.
+/// @param v Decoded schema value.
+/// @return Boolean value, or an error when @p v is not a Bool scalar.
 inline std::expected<bool, std::string> asBool(const SchemaValue& v) {
     const auto* s = std::get_if<SchemaValue::Scalar>(&v.payload);
     if (!s || !v.node || v.node->scalarType != ValueType::Bool)
@@ -646,6 +716,8 @@ inline std::expected<bool, std::string> asBool(const SchemaValue& v) {
 }
 
 /// String value.
+/// @param v Decoded schema value.
+/// @return String contents, or an error when @p v is not a string.
 inline std::expected<std::string, std::string> asString(const SchemaValue& v) {
     const auto* s = std::get_if<SchemaValue::Str>(&v.payload);
     if (!s) return std::unexpected(std::string("not a string"));
@@ -653,6 +725,8 @@ inline std::expected<std::string, std::string> asString(const SchemaValue& v) {
 }
 
 /// Array of F64 scalars (fixed or dynamic) → vector<double>.
+/// @param v Decoded schema value.
+/// @return Element values, or an error when an element is not a float.
 inline std::expected<std::vector<double>, std::string>
 asF64Array(const SchemaValue& v) {
     const auto* a = std::get_if<SchemaValue::Array>(&v.payload);
@@ -668,6 +742,8 @@ asF64Array(const SchemaValue& v) {
 }
 
 /// Array of strings → vector<string>.
+/// @param v Decoded schema value.
+/// @return Element strings, or an error when an element is not a string.
 inline std::expected<std::vector<std::string>, std::string>
 asStringArray(const SchemaValue& v) {
     const auto* a = std::get_if<SchemaValue::Array>(&v.payload);
@@ -685,6 +761,9 @@ asStringArray(const SchemaValue& v) {
 /// Named-field lookup inside a decoded struct (by SchemaField::name,
 /// then key). Returns nullptr when `v` is not a struct or the field is
 /// absent (tagged structs may omit optional fields).
+/// @param v Decoded schema value (struct expected).
+/// @param name Field name as declared in the schema.
+/// @return Pointer to the field value, or nullptr when absent.
 inline const SchemaValue* fieldValue(const SchemaValue& v,
                                      std::string_view name) {
     const auto* st = std::get_if<SchemaValue::Struct>(&v.payload);
