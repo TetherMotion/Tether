@@ -28,14 +28,27 @@ struct ConfigPrimitive {
     ValueType   type;
     std::vector<uint8_t> value; /**< Raw bytes (valueTypeSize bytes for fixed types) */
 
-    /**Helper to set a float value. */
+    /**
+     * @brief Store a 32-bit float into this primitive.
+     *
+     * Sets `type` to ValueType::F32 and packs @p v little-endian into
+     * `value` (exactly 4 bytes).
+     *
+     * @param v  Float value to store.
+     */
     void setFloat(float v) {
         type = ValueType::F32;
         value.resize(4);
         std::memcpy(value.data(), &v, 4);
     }
 
-    /**Helper to get a float value. */
+    /**
+     * @brief Read this primitive back as a float.
+     *
+     * @return The stored float when `type` is ValueType::F32 and at least
+     *         4 bytes are present; 0.0f for any other type or truncated
+     *         payload.
+     */
     float getFloat() const {
         if (type != ValueType::F32 || value.size() < 4) return 0.0f;
         float v;
@@ -43,13 +56,26 @@ struct ConfigPrimitive {
         return v;
     }
 
-    /**Helper to set a string value. */
+    /**
+     * @brief Store a UTF-8 string into this primitive.
+     *
+     * Sets `type` to ValueType::String and copies @p s byte-for-byte into
+     * `value` (no trailing NUL is stored).
+     *
+     * @param s  String content to store.
+     */
     void setString(const std::string& s) {
         type = ValueType::String;
         value.assign(s.begin(), s.end());
     }
 
-    /**Helper to get a string value. */
+    /**
+     * @brief Read this primitive back as a string.
+     *
+     * @return The stored bytes as a std::string when `type` is
+     *         ValueType::String; an empty string for any other type —
+     *         indistinguishable from a stored empty string.
+     */
     std::string getString() const {
         if (type != ValueType::String) return {};
         return std::string(value.begin(), value.end());
@@ -64,7 +90,15 @@ struct ThresholdRule {
     std::string     customName; /**< For Custom type: logic name */
     std::vector<ConfigPrimitive> customConfig; /**< For Custom type */
 
-    /**Encode this rule into a buffer. */
+    /**
+     * @brief Encode this rule into a buffer.
+     *
+     * Wire layout: u64 entryId, u8 type, f64 threshold, str16 customName,
+     * u32 customConfig count, then per primitive: str16 name, u8 type,
+     * u32 value size, raw value bytes. decode() reads the same layout.
+     *
+     * @param w  Writer to append the encoded bytes to.
+     */
     void encode(BufWriter& w) const {
         w.putU64(entryId);
         w.putU8(static_cast<uint8_t>(type));
@@ -79,7 +113,20 @@ struct ThresholdRule {
         }
     }
 
-    /**Decode a rule from a buffer. Returns true on success. */
+    /**
+     * @brief Decode a rule from a buffer.
+     *
+     * Reads the layout produced by encode(). Length and count fields are
+     * validated against the remaining buffer and the protocol limits
+     * (MAX_COLLECTION_COUNT, MAX_VARIABLE_VALUE_SIZE) — a malformed or
+     * truncated buffer leaves the reader in its failed state.
+     *
+     * @param r    Reader positioned at an encoded ThresholdRule.
+     * @param out  Rule to overwrite with the decoded contents.
+     * @return true on success; false if the buffer is truncated,
+     *         inconsistent, or exceeds a protocol bound — in which case
+     *         @p out may be partially written.
+     */
     static bool decode(BufReader& r, ThresholdRule& out) {
         out.entryId = r.getU64();
         out.type = static_cast<ThresholdType>(r.getU8());
@@ -114,7 +161,14 @@ struct ThresholdConfig {
     bool isWhitelist = true; /**< true = only entries matching rules are included */
                                     /**< false = entries matching rules are excluded */
 
-    /**Encode the full config. */
+    /**
+     * @brief Encode the full config.
+     *
+     * Wire layout: str16 name, u8 whitelist flag, u32 rule count, then
+     * each ThresholdRule in encode() order.
+     *
+     * @param w  Writer to append the encoded bytes to.
+     */
     void encode(BufWriter& w) const {
         w.putStr16(name.c_str(), name.size());
         w.putU8(isWhitelist ? 1 : 0);
@@ -124,7 +178,18 @@ struct ThresholdConfig {
         }
     }
 
-    /**Decode a config. Returns true on success. */
+    /**
+     * @brief Decode a config. Returns true on success.
+     *
+     * Reads the layout produced by encode(); the rule count is bounded by
+     * MAX_COLLECTION_COUNT and each rule is validated by
+     * ThresholdRule::decode().
+     *
+     * @param r    Reader positioned at an encoded ThresholdConfig.
+     * @param out  Config to overwrite with the decoded contents.
+     * @return true on success; false on truncated/malformed input — in
+     *         which case @p out may be partially written.
+     */
     static bool decode(BufReader& r, ThresholdConfig& out) {
         uint16_t nl = r.getU16();
         auto* nb = r.getBytes(nl);
@@ -160,13 +225,41 @@ using CustomThresholdFn = std::function<bool(
  */
 class ThresholdFilter {
 public:
-    /**Set the active threshold configuration. */
+    /**
+     * @brief Set the active threshold configuration.
+     *
+     * Replaces the rule set used by passes() for subsequent calls. Does
+     * not clear per-entry last-sent state — a rule change is compared
+     * against the values last reported under the old configuration; call
+     * reset() if the new config should start from scratch.
+     *
+     * @param config  ThresholdConfig to copy (name, rules, whitelist
+     *                flag).
+     */
     void setConfig(const ThresholdConfig& config) { config_ = config; }
 
-    /**Get the active threshold configuration. */
+    /**
+     * @brief Get the active threshold configuration.
+     *
+     * @return Const reference to the installed config; valid until the
+     *         next setConfig() call.
+     */
     const ThresholdConfig& config() const { return config_; }
 
-    /**Register a custom threshold evaluator by name. */
+    /**
+     * @brief Register a custom threshold evaluator by name.
+     *
+     * The name is matched against `ThresholdRule::customName` for rules
+     * of type Custom — the callback then decides whether a value change
+     * is significant using the rule's customConfig primitives. A custom
+     * rule whose name has no registered evaluator passes every change
+     * through (permissive default), so unknown evaluators degrade to
+     * "no filtering" rather than blocking the stream. Re-registering a
+     * name replaces the previous evaluator.
+     *
+     * @param name  Evaluator name referenced by custom rules.
+     * @param fn    Callback invoked for matching custom rules.
+     */
     void registerCustom(const std::string& name, CustomThresholdFn fn) {
         customEvaluators_[name] = std::move(fn);
     }
