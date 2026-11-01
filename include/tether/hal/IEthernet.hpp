@@ -155,6 +155,7 @@ public:
     
     /**
      * @brief Check if initialized
+     * @return true after a successful init() and before shutdown().
      */
     virtual bool isInitialized() const = 0;
     
@@ -290,11 +291,14 @@ public:
     
     /**
      * @brief Get current link status
+     * @return Link state, speed and duplex of the interface.
      */
     virtual LinkStatus getLinkStatus() const = 0;
     
     /**
      * @brief Set callback for link state changes
+     * @param callback Invoked when the link goes up or down.
+     * @param userData Opaque pointer passed back to the callback.
      */
     virtual void setLinkCallback(LinkCallback callback, void* userData = nullptr) = 0;
     
@@ -309,6 +313,7 @@ public:
     
     /**
      * @brief Get interface statistics
+     * @return Counters since init() or resetStats().
      */
     virtual EthernetStats getStats() const = 0;
     
@@ -327,6 +332,7 @@ public:
     
     /**
      * @brief Get interface name
+     * @return Platform interface name (e.g. "eth0"), or an empty string.
      */
     virtual const char* getInterfaceName() const = 0;
 };
@@ -437,6 +443,8 @@ public:
     
     /**
      * @brief Set default callback for unmatched frames
+     * @param callback Invoked for frames no rule matched.
+     * @param userData Opaque pointer passed back to the callback.
      */
     void setDefaultCallback(RxCallback callback, void* userData = nullptr);
     
@@ -537,6 +545,7 @@ private:
 
 /**
  * @brief Create platform-appropriate Ethernet implementation
+ * @return Ethernet backend for the build target.
  */
 std::unique_ptr<IEthernet> createDefaultEthernet();
 
@@ -574,17 +583,24 @@ std::unique_ptr<IEthernet> createSTM32Ethernet();
 
 /**
  * @brief Create mock Ethernet implementation (for testing)
+ * @return Mock backend that never touches real hardware.
  */
 std::unique_ptr<IEthernet> createMockEthernet();
 
 /**
  * @brief Create VLAN-wrapped Ethernet
+ * @param inner Inner Ethernet implementation (takes ownership).
+ * @param vlanId VLAN ID applied to outgoing frames.
+ * @param priority VLAN priority (PCP) value.
+ * @return VLAN-tagging wrapper around @p inner.
  */
 std::unique_ptr<IEthernet> createVlanEthernet(std::unique_ptr<IEthernet> inner,
                                                uint16_t vlanId, uint8_t priority = 0);
 
 /**
  * @brief Create traffic splitter
+ * @param inner Inner Ethernet implementation (takes ownership).
+ * @return Splitter that routes frames by callback.
  */
 std::unique_ptr<TrafficSplitter> createTrafficSplitter(std::unique_ptr<IEthernet> inner);
 
@@ -592,6 +608,7 @@ std::unique_ptr<TrafficSplitter> createTrafficSplitter(std::unique_ptr<IEthernet
  * @brief Create logging Ethernet wrapper
  * @param inner Inner Ethernet implementation
  * @param logger Packet logger (must be already initialized)
+ * @return Logging wrapper around @p inner.
  */
 std::unique_ptr<IEthernet> createLoggingEthernet(
     std::unique_ptr<IEthernet> inner,
