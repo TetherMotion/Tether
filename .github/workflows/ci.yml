@@ -910,13 +910,32 @@ jobs:
       # -W --keep-going: treat Sphinx/Breathe warnings (missing toctree
       # entries, unresolved doxygenclass targets, dead myst xrefs) as
       # errors so the docs can't silently rot again.
-      run: sphinx-build -W --keep-going -j 1 -b html docs build/docs/html
+      run: |
+        mkdir -p build
+        sphinx-build -W --keep-going -j 1 -b html docs build/docs/html
+
+    # Stage each artifact under its own parent so every zip has exactly one
+    # top-level directory (documentation/, doc-coverage/) — keeps downloads
+    # tidy and avoids flat 14k-file archives.
+    - name: Package artifacts
+      run: |
+        mkdir -p pkg-site/documentation pkg-cov/doc-coverage
+        cp -a build/docs/html/. pkg-site/documentation/
+        python3 scripts/doc_coverage_report.py \
+            --warnings build/doxygen-warnings.txt \
+            --out pkg-cov/doc-coverage
 
     - name: Upload documentation artifact
       uses: actions/upload-artifact@v7
       with:
         name: documentation
-        path: build/docs/html
+        path: pkg-site
+
+    - name: Upload doc-coverage artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: doc-coverage
+        path: pkg-cov
 
   static-analysis:
     name: Clang-Tidy & Clang Static Analyzer

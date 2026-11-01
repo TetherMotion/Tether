@@ -138,9 +138,15 @@ exhale_args = {
         HAVE_DOT               = NO
         NUM_PROC_THREADS       = 0
         WARNINGS               = YES
-        WARN_IF_UNDOCUMENTED   = NO
         WARN_IF_DOC_ERROR      = YES
-        WARN_NO_PARAMDOC       = NO
+        # All doxygen warnings (coverage + malformed markup) go to
+        # WARN_LOGFILE for the doc-coverage CI artifact
+        # (scripts/doc_coverage_report.py); none fail the sphinx build.
+        WARN_IF_UNDOCUMENTED   = YES
+        WARN_IF_INCOMPLETE_DOC = YES
+        WARN_NO_PARAMDOC       = YES
+        WARN_FORMAT            = "$file:$line: $text"
+        WARN_LOGFILE           = ../build/doxygen-warnings.txt
     ''',
 }
 
