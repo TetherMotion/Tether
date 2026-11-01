@@ -62,6 +62,8 @@ struct FOPDTModel {
     }
     
     /// Simulate step response at time t
+    /// @param t Time since the step was applied [s].
+    /// @return Process output (0 before the dead time).
     double stepResponse(double t) const {
         if (t < L) return 0.0;
         return K * (1.0 - std::exp(-(t - L) / tau));
@@ -162,8 +164,12 @@ struct PIDGains {
     double Tf{0.0};         ///< Derivative filter time constant
     
     // Alternative representation
-    double Ti() const { return (Ki != 0) ? Kp / Ki : 0.0; }  ///< Integral time
-    double Td() const { return (Kp != 0) ? Kd / Kp : 0.0; }  ///< Derivative time
+    /// Integral time Ti = Kp/Ki.
+    /// @return Integral time [s], or 0 when Ki is 0.
+    double Ti() const { return (Ki != 0) ? Kp / Ki : 0.0; }
+    /// Derivative time Td = Kd/Kp.
+    /// @return Derivative time [s], or 0 when Kp is 0.
+    double Td() const { return (Kp != 0) ? Kd / Kp : 0.0; }
     
     void setFromTimeConstants(double kp, double ti, double td) {
         Kp = kp;
@@ -208,6 +214,9 @@ public:
     
     /**
      * @brief Cohen-Coon tuning
+     * @param model Identified FOPDT process model.
+     * @param form Controller form (P/PI/PID).
+     * @return Tuned gains.
      */
     static PIDGains cohenCoon(const FOPDTModel& model, ControllerForm form);
     
@@ -215,26 +224,41 @@ public:
      * @brief Lambda/IMC tuning
      * @param model Process model
      * @param lambdaFactor Ratio of λ to dominant time constant (default 1.0)
+     * @return Tuned gains.
      */
     static PIDGains lambdaTuning(const FOPDTModel& model, double lambdaFactor = 1.0);
     
     /**
      * @brief SIMC tuning (Skogestad IMC)
+     * @param model Identified FOPDT process model.
+     * @param tauC Closed-loop time constant [s]; negative uses the SIMC default.
+     * @return Tuned gains.
      */
     static PIDGains simcTuning(const FOPDTModel& model, double tauC = -1.0);
     
     /**
      * @brief AMIGO tuning
+     * @param model Identified FOPDT process model.
+     * @param form Controller form (P/PI/PID).
+     * @return Tuned gains.
      */
     static PIDGains amigoTuning(const FOPDTModel& model, ControllerForm form);
     
     /**
      * @brief Tyreus-Luyben (conservative)
+     * @param Ku Ultimate gain from an oscillation experiment.
+     * @param Tu Ultimate period [s].
+     * @param form Controller form (P/PI/PID).
+     * @return Tuned gains.
      */
     static PIDGains tyreusLuyben(double Ku, double Tu, ControllerForm form);
     
     /**
      * @brief Chien-Hrones-Reswick
+     * @param model Identified FOPDT process model.
+     * @param form Controller form (P/PI/PID).
+     * @param overshootPercent Target overshoot (0 = no overshoot variant).
+     * @return Tuned gains.
      */
     static PIDGains chienHronesReswick(const FOPDTModel& model, 
                                         ControllerForm form,
@@ -264,6 +288,10 @@ public:
     /**
      * @brief Two-point method for FOPDT identification
      * Uses 28.3% and 63.2% of final value
+     * @param time Sample times [s].
+     * @param response Step-response samples.
+     * @param stepSize Magnitude of the input step.
+     * @return Identified FOPDT model.
      */
     static FOPDTModel twoPointMethod(const std::vector<double>& time,
                                      const std::vector<double>& response,
@@ -271,6 +299,10 @@ public:
     
     /**
      * @brief Area method for FOPDT identification
+     * @param time Sample times [s].
+     * @param response Step-response samples.
+     * @param stepSize Magnitude of the input step.
+     * @return Identified FOPDT model.
      */
     static FOPDTModel areaMethod(const std::vector<double>& time,
                                  const std::vector<double>& response,
@@ -278,6 +310,10 @@ public:
     
     /**
      * @brief Tangent (maximum slope) method
+     * @param time Sample times [s].
+     * @param response Step-response samples.
+     * @param stepSize Magnitude of the input step.
+     * @return Identified FOPDT model.
      */
     static FOPDTModel tangentMethod(const std::vector<double>& time,
                                     const std::vector<double>& response,
@@ -285,6 +321,10 @@ public:
     
     /**
      * @brief Fit SOPDT model to step response
+     * @param time Sample times [s].
+     * @param response Step-response samples.
+     * @param stepSize Magnitude of the input step.
+     * @return Identified SOPDT model.
      */
     static SOPDTModel identifySOPDT(const std::vector<double>& time,
                                     const std::vector<double>& response,
@@ -292,6 +332,10 @@ public:
     
     /**
      * @brief Estimate dead time from correlation
+     * @param input Input samples of the experiment.
+     * @param output Output samples of the experiment.
+     * @param dt Sample time [s].
+     * @return Estimated dead time [s].
      */
     static double estimateDeadTime(const std::vector<double>& input,
                                    const std::vector<double>& output,
@@ -357,11 +401,13 @@ public:
     
     /**
      * @brief Get current state
+     * @return Autotuning lifecycle state.
      */
     State getState() const { return m_state; }
     
     /**
      * @brief Check if complete
+     * @return true once the relay experiment finished successfully.
      */
     bool isComplete() const { return m_state == State::Complete; }
     
@@ -481,6 +527,11 @@ public:
     
     /**
      * @brief Identify Bode plot from multi-frequency data
+     * @param time Sample times [s].
+     * @param input Multi-tone input signal.
+     * @param output System response.
+     * @param frequencies Frequencies to extract [rad/s].
+     * @return Magnitude/phase per requested frequency.
      */
     static std::vector<FreqResponse> identifyBodePlot(
         const std::vector<double>& time,
@@ -490,12 +541,16 @@ public:
     
     /**
      * @brief Estimate critical point (Ku, ωu) from frequency response
+     * @param bode Measured frequency response.
+     * @return (Ku, ωu) where the phase crosses -180 degrees.
      */
     static std::pair<double, double> findCriticalPoint(
         const std::vector<FreqResponse>& bode);
     
     /**
      * @brief Fit FOPDT model to frequency response
+     * @param bode Measured frequency response.
+     * @return Fitted FOPDT model.
      */
     static FOPDTModel fitModelToBode(const std::vector<FreqResponse>& bode);
 };
@@ -522,22 +577,31 @@ public:
     
     /**
      * @brief Update model with new sample
+     * @param input Control input applied at this sample.
+     * @param output Measured output at this sample.
      */
     void update(double input, double output);
     
     /**
      * @brief Get estimated parameters
+     * @return Autoregressive (denominator) coefficients.
      */
     std::vector<double> getARCoeffs() const;
+    /// @return Moving-average (numerator) coefficients.
     std::vector<double> getMACoeffs() const;
     
     /**
      * @brief Convert to continuous FOPDT approximation
+     * @param dt Sample time [s].
+     * @return Equivalent FOPDT model.
      */
     FOPDTModel toFOPDT(double dt) const;
     
     /**
      * @brief Calculate PID gains from estimated model
+     * @param rule Tuning rule to apply.
+     * @param dt Sample time [s].
+     * @return Tuned PID gains.
      */
     PIDGains calculateGains(TuningRule rule, double dt) const;
     
