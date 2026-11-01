@@ -34,6 +34,9 @@ public:
      * Send exactly `len` bytes. Returns true on success.
      * @param data Bytes to send.
      * @param len Number of bytes in @p data.
+     * @return true if all `len` bytes were handed to the underlying link;
+     *         false on disconnect or write error (partial sends are not
+     *         reported — the call is all-or-nothing).
      */
     virtual bool send(const uint8_t* data, size_t len) = 0;
 
@@ -44,6 +47,9 @@ public:
      * @param buf Destination buffer.
      * @param maxLen Capacity of @p buf in bytes.
      * @param timeoutMs Maximum wait time [ms]; 0 polls without blocking.
+     * @return Number of bytes written into @p buf — any short count
+     *         from 1 to @p maxLen; 0 on timeout, disconnect, or error
+     *         (distinguish timeout from disconnect via isConnected()).
      */
     virtual size_t receive(uint8_t* buf, size_t maxLen, uint32_t timeoutMs) = 0;
 
@@ -58,8 +64,12 @@ public:
      * Returns true if a message was received, false on timeout or disconnect.
      * The default implementation returns false (not supported).
      *
-     * @param out Destination buffer receiving the message.
+     * @param out Destination buffer receiving the message; contents are
+     *            replaced on success.
      * @param timeoutMs Maximum wait time [ms]; 0 polls without blocking.
+     * @return true if a complete message was delivered into @p out;
+     *         false on timeout, disconnect, or when the transport is
+     *         byte-stream oriented and does not support message framing.
      */
     virtual bool receiveMessage(std::vector<uint8_t>& out, uint32_t timeoutMs) {
         (void)out; (void)timeoutMs;
