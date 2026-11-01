@@ -88,6 +88,9 @@ public:
 
     /**
      * @brief Construct from an extrusion trajectory and parameters.
+     * @param traj Trajectory supplying the extruder velocity history; must
+     *        outlive this object.
+     * @param params Heater/flow model parameters.
      */
     FlowAdaptiveHeaterBase(const Traj& traj,
                            AnalyticalFlowAdaptiveHeaterParams params)
@@ -102,6 +105,9 @@ public:
      *
      * This is the temperature offset to add to the extruder target
      * temperature to compensate for flow transients.
+     *
+     * @param t Time from trajectory start [s].
+     * @return Temperature offset [degC], clamped to maxHeaterOvershoot.
      */
     double temperatureDeltaAtTime(double t) const {
         double P = excessPowerAtTime(t);
@@ -113,6 +119,8 @@ public:
 
     /**
      * @brief Compute the temperature delta at multiple time points.
+     * @param times Time samples [s].
+     * @return temperatureDeltaAtTime() evaluated at each entry.
      */
     std::vector<double> temperatureDeltaSeries(
         const std::vector<double>& times) const {
@@ -124,20 +132,29 @@ public:
     }
 
     /// Flow onset time [s] (first time Q crosses threshold)
+    /// @return Time of the first flow onset [s]; meaningful only when
+    ///         hasFlowOnset() is true.
     double flowOnsetTime() const { return flowOnsetTime_; }
+    /// @return true when the trajectory contains a flow onset.
     bool hasFlowOnset() const { return hasFlowOnset_; }
 
     /// Flow stop time [s] (last time Q drops below threshold)
+    /// @return Time of the last flow stop [s]; meaningful only when
+    ///         hasFlowStop() is true.
     double flowStopTime() const { return flowStopTime_; }
+    /// @return true when the trajectory contains a flow stop.
     bool hasFlowStop() const { return hasFlowStop_; }
 
     /// Parameters
+    /// @return Heater/flow model parameters in use.
     const AnalyticalFlowAdaptiveHeaterParams& params() const { return params_; }
 
     /// Filament area [mm²]
+    /// @return Cross-section area derived from filamentDiameterMm.
     double filamentAreaMm2() const { return filamentAreaMm2_; }
 
     /// Trajectory
+    /// @return Trajectory this model was built from.
     const Traj& trajectory() const { return *traj_; }
 
 protected:
@@ -151,6 +168,8 @@ protected:
     bool hasFlowStop_ = false;
 
     /// Steady-state enthalpy power required to maintain target at flow Q(t).
+    /// @param t Time from trajectory start [s].
+    /// @return Power required to heat the flowing filament [W].
     double steadyStatePower(double t) const {
         double vE = traj_->extruderVelocityAtTime(t);
         double Q = vE * filamentAreaMm2_;
@@ -159,6 +178,8 @@ protected:
     }
 
     /// Pre-emphasis transient power [W].
+    /// @param t Time from trajectory start [s].
+    /// @return Extra heater power before the flow front reaches the melt zone [W].
     double preEmphasisPower(double t) const {
         if (!hasFlowOnset_ || t < flowOnsetTime_
             || t >= flowOnsetTime_ + params_.preEmphasisDuration)
@@ -176,6 +197,8 @@ protected:
     }
 
     /// Post-emphasis transient power [W].
+    /// @param t Time from trajectory start [s].
+    /// @return Extra heater power compensating the stored-energy debt [W].
     double postEmphasisPower(double t) const {
         if (!hasFlowStop_ || t < flowStopTime_)
             return 0.0;
@@ -195,11 +218,14 @@ protected:
     }
 
     /// Total transient power (pre + post) [W].
+    /// @param t Time from trajectory start [s].
+    /// @return preEmphasisPower(t) + postEmphasisPower(t).
     double excessPowerAtTime(double t) const {
         return preEmphasisPower(t) + postEmphasisPower(t);
     }
 
     /// Sensor coupling factor α = G_sm / (G_hs + G_sm).
+    /// @return Fraction of the melt-zone temperature rise seen by the sensor.
     double sensorCouplingAlpha() const {
         double Gsum = params_.heaterSensorConductance
                     + params_.sensorMeltConductance;
@@ -207,6 +233,7 @@ protected:
     }
 
     /// Effective series conductance from heater block to melt zone [W/K].
+    /// @return Series conductance Ghs*Gsm/(Ghs+Gsm), or 0 when both are zero.
     double effectiveConductance() const {
         double Ghs = params_.heaterSensorConductance;
         double Gsm = params_.sensorMeltConductance;

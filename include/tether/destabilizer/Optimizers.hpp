@@ -24,27 +24,39 @@ public:
     virtual ~Optimizer() = default;
 
     /// Initialize the optimizer with the problem dimension and config.
+    /// @param dim Number of parameters (theta size).
+    /// @param config Step size, iteration budget and method-specific settings.
+    /// @param seed RNG seed for stochastic methods (deterministic when unused).
     virtual void initialize(int dim, const OptimizerConfig& config, uint64_t seed) = 0;
 
     /// Run one optimization step. Updates theta in-place. Returns current J.
+    /// @param theta Current parameter vector, updated in place.
+    /// @param objective Cost function; lower is better.
+    /// @return Objective value at the new theta.
     virtual double step(std::vector<double>& theta, const ObjectiveFunction& objective) = 0;
 
     /// Get current iteration count.
+    /// @return Number of steps taken since initialize().
     virtual int iteration() const = 0;
 
     /// Get current gradient norm (0 for gradient-free methods).
+    /// @return Norm of the last estimated gradient, or 0 when unavailable.
     virtual double gradientNorm() const = 0;
 
     /// Get current step size / learning rate.
+    /// @return Step size used by the next update.
     virtual double currentStepSize() const = 0;
 
     /// Get number of function evaluations used in the last step.
+    /// @return Objective evaluations consumed by the previous step().
     virtual int lastStepEvaluations() const = 0;
 
     /// Reset optimizer state.
     virtual void reset() = 0;
 
     /// Create an optimizer of the given type.
+    /// @param type Optimizer family to instantiate.
+    /// @return Newly constructed optimizer.
     static std::unique_ptr<Optimizer> create(OptimizerType type);
 };
 
