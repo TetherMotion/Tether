@@ -234,6 +234,10 @@ inline BitLabel kTxMirroredIndicatorLabels[] = {
  *                         [5-6]=diagnostic_flags ...
  * @param data            Raw FSoE frame bytes.
  * @param slave_to_master true for the slave→master (TxPDO 0x1B00) layout.
+ * @return Packed flag word: safety flags in bits 0-15; for
+ *         slave→master frames the 16 diagnostic bits are additionally
+ *         shifted into bits 16-31 so both fields can be compared and
+ *         masked as one value.
  */
 inline uint32_t indicatorFlags(const uint8_t* data, bool slave_to_master) {
     if (slave_to_master) {
@@ -250,6 +254,11 @@ inline uint32_t indicatorFlags(const uint8_t* data, bool slave_to_master) {
  * "Known" flag-bit coverage for the opt-in unknown-bits report: the FULL
  * PDO flag definitions, so defined bits the indicator doesn't display are
  * not reported as unknown.
+ *
+ * @param slave_to_master  Frame direction, selecting the PDO layout.
+ * @return Bitmask of all defined flag bits, in the same packing as
+ *         indicatorFlags() — diagnostic bits at 16-31 for
+ *         slave→master, safety flags only for master→slave.
  */
 inline uint32_t indicatorKnownMask(bool slave_to_master) {
     if (slave_to_master) {
@@ -274,6 +283,8 @@ inline uint32_t indicatorKnownMask(bool slave_to_master) {
  *                        mirroring (emulated) slave.
  * @param color           Emit ANSI colors via ColoredBitsetFormatter
  *                        (pass isatty(STDOUT_FILENO) for stream output).
+ * @return "[NAME=ON NAME=OFF ...]" string, or an empty string when
+ *         the frame command is not process/fail-safe data.
  */
 inline std::string formatSafetyIndicator(const uint8_t* data,
                                          bool slave_to_master,
@@ -315,7 +326,19 @@ inline std::string formatSafetyIndicator(const uint8_t* data,
 // Low-level formatting helpers
 // ============================================================================
 
-/**Format raw hex bytes from a buffer into a string. */
+/**
+ * @brief Format raw hex bytes from a buffer into a string.
+ *
+ * Writes uppercase two-digit hex bytes separated by single spaces into
+ * @p buf; output is silently truncated when the buffer fills (at least
+ * one full byte always fits or nothing is written).
+ *
+ * @param buf      Destination buffer; always NUL-terminated when
+ *                 @p bufsize > 0.
+ * @param bufsize  Capacity of @p buf in bytes.
+ * @param data     Bytes to format.
+ * @param len      Number of bytes to format.
+ */
 inline void formatHex(char* buf, size_t bufsize, const uint8_t* data, size_t len) {
     size_t pos = 0;
     for (size_t b = 0; b < len && pos + 3 < bufsize; b++) {
@@ -343,6 +366,11 @@ inline void formatHex(char* buf, size_t bufsize, const uint8_t* data, size_t len
  * ErrorAck, RestartAck, ResetPosition use one-active encoding (bit=1 → active).
  * The display inverts zero-active bits so that "ON" (green) always means
  * the safety function is active (safe).
+ *
+ * @param tag  Log tag passed through to TETHER_LOGI (typically the
+ *             slave or channel name).
+ * @param rx   Decoded RxPDO 0x1700 frame (11-byte master→slave FSoE
+ *             process data).
  */
 inline void dumpRxPDO(const char* tag, const SynapticonPDO::SOMANET_RxPDO_1700& rx) {
     ColoredBitsetFormatter safety_fmt{kRxSafetyLabels};
@@ -373,6 +401,11 @@ inline void dumpRxPDO(const char* tag, const SynapticonPDO::SOMANET_RxPDO_1700& 
  *
  * In the slave→master direction, all flags use **one-active** encoding
  * (bit=1 → active, bit=0 → inactive).  No inversion needed.
+ *
+ * @param tag  Log tag passed through to TETHER_LOGI.
+ * @param tx   Decoded TxPDO 0x1B00 frame — either the LW2 variant or the
+ *             shorter LW1 variant; missing trailing fields are skipped
+ *             via `if constexpr`.
  */
 template<typename TxPDO_t>
 inline void dumpTxPDO(const char* tag, const TxPDO_t& tx) {
@@ -439,6 +472,9 @@ inline void dumpTxPDO(const char* tag, const TxPDO_t& tx) {
  * Compact one-line decode of the slave→master TxPDO (0x1B00).
  * Shows all safety state flags + diagnostic flags + command + safe position + velocity + torque.
  * Works for both frame variants (LW2 shows trq, LW1 omits it).
+ *
+ * @param tag  Log tag passed through to TETHER_LOGI.
+ * @param tx   Decoded TxPDO 0x1B00 frame (either size variant).
  */
 template<typename TxPDO_t>
 inline void dumpTxPDOFrame(const char* tag,
@@ -471,6 +507,9 @@ inline void dumpTxPDOFrame(const char* tag,
 /**
  * Compact one-line decode of the master→slave RxPDO (0x1700).
  * Shows all safety flags + safe outputs + command (no safe data in this direction).
+ *
+ * @param tag  Log tag passed through to TETHER_LOGI.
+ * @param rx   Decoded RxPDO 0x1700 frame.
  */
 inline void dumpRxPDOFrame(const char* tag,
                            const SynapticonPDO::SOMANET_RxPDO_1700& rx) {
@@ -496,6 +535,9 @@ inline void dumpRxPDOFrame(const char* tag,
  * One-line summary of the slave→master TxPDO (0x1B00).
  * All flags use one-active encoding (bit=1 → active/safe).
  * Works for both frame variants (LW1 and LW2).
+ *
+ * @param tag  Log tag passed through to TETHER_LOGI.
+ * @param tx   Decoded TxPDO 0x1B00 frame (either size variant).
  */
 template<typename TxPDO_t>
 inline void dumpTxPDOSummary(const char* tag,
@@ -515,6 +557,9 @@ inline void dumpTxPDOSummary(const char* tag,
 /**
  * One-line summary of the master→slave RxPDO (0x1700).
  * Safety flags use zero-active encoding (bit=0 → active/safe).
+ *
+ * @param tag  Log tag passed through to TETHER_LOGI.
+ * @param rx   Decoded RxPDO 0x1700 frame.
  */
 inline void dumpRxPDOSummary(const char* tag,
                              const SynapticonPDO::SOMANET_RxPDO_1700& rx) {
