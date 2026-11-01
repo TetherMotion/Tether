@@ -51,6 +51,8 @@ enum class ErrorCategory : uint8_t {
 
 /**
  * @brief Get category name
+ * @param cat Error category to convert
+ * @return Static string such as "HARDWARE", for logging
  */
 inline const char* getCategoryName(ErrorCategory cat) {
     switch (cat) {
@@ -232,16 +234,19 @@ struct ErrorBehaviorConfig {
     
     /**
      * @brief Get default configuration
+     * @return Balanced severity/recovery settings for typical use
      */
     static ErrorBehaviorConfig defaults();
-    
+
     /**
      * @brief Get strict configuration (all errors critical)
+     * @return Configuration treating every error as critical
      */
     static ErrorBehaviorConfig strict();
-    
+
     /**
      * @brief Get permissive configuration (only some errors critical)
+     * @return Configuration that only escalates severe error classes
      */
     static ErrorBehaviorConfig permissive();
 };
@@ -347,21 +352,27 @@ public:
     
     /**
      * @brief Set configuration
+     * @param config New behavior configuration
      */
     void setConfig(const ErrorBehaviorConfig& config);
-    
+
     /**
      * @brief Get configuration
+     * @return Active behavior configuration
      */
     const ErrorBehaviorConfig& getConfig() const { return config_; }
-    
+
     /**
      * @brief Configure specific error code
+     * @param errorCode AL/error code to configure
+     * @param severity Severity and recovery policy for this code
      */
     void configureError(uint16_t errorCode, const ErrorSeverityConfig& severity);
-    
+
     /**
      * @brief Configure entire category
+     * @param category Error category to configure
+     * @param severity Severity and recovery policy applied to the category
      */
     void configureCategory(ErrorCategory category, const ErrorSeverityConfig& severity);
     
@@ -380,8 +391,14 @@ public:
     
     /**
      * @brief Report error with context
+     * @param errorCode Error code being reported
+     * @param category Error category
+     * @param context Opaque context bytes stored in the log entry
+     * @param contextLen Length of `context` in bytes
+     * @param message Optional human-readable message
+     * @return `true` if the error was classified critical
      */
-    bool reportErrorWithContext(uint16_t errorCode, ErrorCategory category, 
+    bool reportErrorWithContext(uint16_t errorCode, ErrorCategory category,
                                 const void* context, size_t contextLen,
                                 const char* message = nullptr);
     
@@ -392,21 +409,25 @@ public:
     
     /**
      * @brief Check if error is active
+     * @return `true` while an error is latched (clearError() resets it)
      */
     bool hasError() const { return errorActive_.load(); }
-    
+
     /**
      * @brief Check if fail-safe is active
+     * @return `true` if the handler entered the fail-safe state
      */
     bool isFailSafe() const { return failSafeActive_.load(); }
-    
+
     /**
      * @brief Get last error code
+     * @return Most recently reported error code
      */
     uint16_t getLastError() const { return lastErrorCode_; }
-    
+
     /**
      * @brief Get last error category
+     * @return Category of the most recent error
      */
     ErrorCategory getLastErrorCategory() const { return lastErrorCategory_; }
     
@@ -416,11 +437,13 @@ public:
     
     /**
      * @brief Attempt recovery
+     * @return `true` if a recovery attempt was initiated
      */
     bool attemptRecovery();
-    
+
     /**
      * @brief Check if recovery is possible
+     * @return `true` while attempts remain under `maxRecoveryAttempts`
      */
     bool canRecover() const;
     
@@ -438,6 +461,7 @@ public:
     
     /**
      * @brief Get error statistics
+     * @return Per-category error counts and recovery counters
      */
     const ErrorStatistics& getStatistics() const { return stats_; }
     
@@ -448,6 +472,7 @@ public:
     
     /**
      * @brief Get error log
+     * @return Chronological list of recorded error entries
      */
     const std::vector<ErrorEntry>& getErrorLog() const { return errorLog_; }
     
@@ -462,21 +487,27 @@ public:
     
     /**
      * @brief Get error injection config (mutable)
+     * @return Reference to the active injection configuration
      */
     ErrorInjectionConfig& getErrorInjection() { return injection_; }
-    
+
     /**
      * @brief Check if injection should occur
+     * @param category Category to evaluate against the injection rules
+     * @return `true` if an error should be injected this cycle
      */
     bool shouldInjectError(ErrorCategory category = ErrorCategory::None);
-    
+
     /**
      * @brief Inject an error (for testing)
+     * @param errorCode Error code to report
+     * @param category Category the injected error belongs to
      */
     void injectError(uint16_t errorCode, ErrorCategory category);
-    
+
     /**
      * @brief Update handler (call periodically)
+     * @param currentTimeMs Current time [ms]; drives recovery timing
      */
     void update(uint64_t currentTimeMs);
 
