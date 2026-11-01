@@ -260,6 +260,7 @@ public:
     
     /**
      * @brief Get model type
+     * @return Enumerated model family (FOPDT, SOPDT, ...).
      */
     virtual ProcessModelType getType() const = 0;
     
@@ -282,6 +283,7 @@ public:
     
     /**
      * @brief Get approximate FOPDT model
+     * @return First-order-plus-dead-time approximation of this model.
      */
     virtual FOPDTModel toFOPDT() const = 0;
     
@@ -314,6 +316,7 @@ public:
     
     /**
      * @brief Get current parameter values
+     * @return Current values in getParameterDescriptors() order.
      */
     virtual ParameterVector getParameters() const = 0;
     
@@ -326,6 +329,7 @@ public:
     
     /**
      * @brief Get controller type name
+     * @return Human-readable controller family name.
      */
     virtual std::string getControllerTypeName() const = 0;
     
@@ -348,6 +352,7 @@ public:
     
     /**
      * @brief Clone the controller
+     * @return Independent copy with the same configuration and state.
      */
     virtual std::shared_ptr<TunableController> clone() const = 0;
 };
@@ -381,6 +386,7 @@ public:
     
     /**
      * @brief Check if gradient is available
+     * @return true when gradient() returns a meaningful derivative.
      */
     virtual bool hasGradient() const { return false; }
 };
@@ -394,26 +400,45 @@ class StandardCostFunctions {
 public:
     /**
      * @brief Integral of Squared Error (ISE): ∫e²dt
+     * @param error Error samples.
+     * @param dt Sample interval [s].
+     * @return ISE cost (lower is better).
      */
     static double ISE(const std::vector<double>& error, double dt);
     
     /**
      * @brief Integral of Absolute Error (IAE): ∫|e|dt
+     * @param error Error samples.
+     * @param dt Sample interval [s].
+     * @return IAE cost (lower is better).
      */
     static double IAE(const std::vector<double>& error, double dt);
     
     /**
      * @brief Integral of Time-weighted Absolute Error (ITAE): ∫t|e|dt
+     * @param error Error samples.
+     * @param dt Sample interval [s].
+     * @return ITAE cost (lower is better).
      */
     static double ITAE(const std::vector<double>& error, double dt);
     
     /**
      * @brief Integral of Time-weighted Squared Error (ITSE): ∫te²dt
+     * @param error Error samples.
+     * @param dt Sample interval [s].
+     * @return ITSE cost (lower is better).
      */
     static double ITSE(const std::vector<double>& error, double dt);
     
     /**
      * @brief Combined cost with overshoot penalty
+     * @param response Simulated closed-loop response.
+     * @param reference Reference signal the response tracks.
+     * @param overshootWeight Weight of the overshoot penalty.
+     * @param settlingWeight Weight of the settling-time term.
+     * @param controlEffortWeight Weight of the control-effort term.
+     * @param dt Sample interval [s].
+     * @return Weighted cost (lower is better).
      */
     static double combinedCost(const std::vector<double>& response,
                                const std::vector<double>& reference,
@@ -439,11 +464,13 @@ public:
     
     /**
      * @brief Get autotuner name
+     * @return Short name of the tuning method (e.g. "Ziegler-Nichols").
      */
     virtual std::string getName() const = 0;
     
     /**
      * @brief Get autotuner description
+     * @return One-line description of the tuning method.
      */
     virtual std::string getDescription() const = 0;
     
@@ -455,6 +482,8 @@ public:
     
     /**
      * @brief Check if tuner is compatible with controller type
+     * @param controller Controller the tuner would operate on.
+     * @return true when this tuner supports the controller's parameter set.
      */
     virtual bool isCompatible(const TunableController& controller) const = 0;
     
@@ -470,26 +499,31 @@ public:
     
     /**
      * @brief Set performance objective
+     * @param objective Trade-off profile used when scoring candidate tunings.
      */
     void setObjective(PerformanceObjective objective) { m_objective = objective; }
     
     /**
      * @brief Get performance objective
+     * @return Objective currently used for scoring candidates.
      */
     PerformanceObjective getObjective() const { return m_objective; }
     
     /**
      * @brief Set maximum iterations
+     * @param maxIter Iteration budget for iterative tuners.
      */
     void setMaxIterations(int maxIter) { m_maxIterations = maxIter; }
     
     /**
      * @brief Set convergence tolerance
+     * @param tol Relative change below which tuning is considered converged.
      */
     void setTolerance(double tol) { m_tolerance = tol; }
     
     /**
      * @brief Set verbose output
+     * @param verbose true to log per-iteration progress.
      */
     void setVerbose(bool verbose) { m_verbose = verbose; }
     
@@ -531,6 +565,7 @@ public:
     
     /**
      * @brief Check if tuning is complete
+     * @return true once the online tuner has converged or been stopped.
      */
     virtual bool isComplete() const = 0;
     
@@ -546,6 +581,7 @@ public:
     
     /**
      * @brief Get intermediate results
+     * @return Best parameters found so far, valid while tuning is running.
      */
     virtual TuningResult getIntermediateResult() const = 0;
 };
@@ -576,6 +612,10 @@ public:
     
     /**
      * @brief Set cost weights
+     * @param ise Weight of the ISE term.
+     * @param overshoot Weight of the overshoot penalty.
+     * @param settling Weight of the settling-time term.
+     * @param control Weight of the control-effort term.
      */
     void setWeights(double ise = 1.0, double overshoot = 10.0, 
                     double settling = 1.0, double control = 0.01);
