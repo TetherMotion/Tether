@@ -258,16 +258,20 @@ public:
     
     /**
      * @brief Check if initialized
+     * @return `true` after a successful initialize()
      */
     bool isInitialized() const { return initialized_; }
 
     /**
      * @brief Get configuration
+     * @return Active FSoE slave configuration
      */
     const FSoESlaveConfig& getConfig() const { return config_; }
 
     /**
      * @brief Reconfigure (must be in RESET state)
+     * @param config New configuration to apply
+     * @return `true` if applied; `false` unless the state machine is RESET
      */
     bool reconfigure(const FSoESlaveConfig& config);
 
@@ -277,31 +281,38 @@ public:
 
     /**
      * @brief Get current FSoE state
+     * @return ConnectionState value (Reset, Session, Connection, Parameter,
+     *         Data, FailSafe)
      */
     uint8_t getState() const { return state_.load(); }
 
     /**
      * @brief Get state name
+     * @return Human-readable name of the current state, for logging
      */
     const char* getStateName() const;
 
     /**
      * @brief Check if in operational (DATA) state
+     * @return `true` while exchanging safe process data
      */
     bool isOperational() const { return state_.load() == ConnectionState::Data; }
 
     /**
      * @brief Check if in fail-safe state
+     * @return `true` if the connection entered the fail-safe state
      */
     bool isFailSafe() const;
 
     /**
      * @brief Check if error occurred
+     * @return `true` if a non-zero error code is latched
      */
     bool hasError() const;
 
     /**
      * @brief Get last error code
+     * @return Most recent ErrorCode value; ErrorCode::NoError when clean
      */
     uint16_t getLastError() const;
     
@@ -312,6 +323,7 @@ public:
     
     /**
      * @brief Force transition to fail-safe state
+     * @param errorCode Error code recorded as the cause of the transition
      */
     void triggerFailSafe(uint16_t errorCode = ErrorCode::ApplicationError);
     
@@ -361,6 +373,9 @@ public:
 
     /**
      * @brief Write the raw slave-to-master process image.
+     * @param data Safety input bytes to publish (size must match the
+     *        configured safe input length)
+     * @return `true` if accepted, `false` on size mismatch
      */
     bool writeInputProcessData(std::span<const uint8_t> data);
     
@@ -374,21 +389,27 @@ public:
 
     /**
      * @brief Read the raw master-to-slave process image.
+     * @param[out] data Buffer receiving the last valid safety output frame
+     * @return Bytes written to `data`; 0 if no valid output is available
      */
     size_t readOutputProcessData(std::span<uint8_t> data) const;
 
     /**
      * @brief Return the currently published slave-to-master process image.
+     * @return Copy of the safety input bytes most recently set
      */
     std::vector<uint8_t> inputProcessData() const;
 
     /**
      * @brief Return the last valid master-to-slave process image.
+     * @return Copy of the last valid safety output frame
      */
     std::vector<uint8_t> outputProcessData() const;
-    
+
     /**
      * @brief Check if safe outputs are valid
+     * @return `true` while received frames pass CRC/sequence validation
+     *         and the connection is operational
      */
     bool areSafeOutputsValid() const;
     
@@ -420,6 +441,7 @@ public:
 
     /**
      * @brief Get statistics (thread-safe snapshot by value)
+     * @return Copy of all frame/error/timing counters
      */
     FSoESlaveStats getStats() const;
 
@@ -427,18 +449,25 @@ public:
     /// building frames to send TO this slave (cross-direction inheritance).
     /// The master's TX start_crc = the slave's own last TX CRC0.
     /// Tests that simulate master→slave TX should use this as start_crc.
+    /// @return CRC0 of the last frame this slave transmitted
     uint16_t getRxLastCrc0() const { return last_tx_crc0_; }
+    /// @brief Expected next master TX sequence number (RX validation)
+    /// @return Sequence number the next master frame is expected to carry
     uint16_t getRxSeqNo() const { return rx_seq_no_; }
     /// Get the TX CRC state that this slave chains from when building
     /// its own TX frames (cross-direction: slave TX inherits from the
     /// master's last TX CRC0 = last_rx_crc0_).
     /// startCrc = last_rx_crc0_, seqNo = last_rx_seq_no_ (echoes master's
     /// last TX seq; Reset response uses seq=initialSeqNo, same as master)
+    /// @return CRC0 of the master's last transmitted frame
     uint16_t getTxLastCrc0() const { return last_rx_crc0_; }
+    /// @brief Sequence number echoed in slave TX (master's last TX seq)
+    /// @return Sequence number placed in the slave's next TX frame
     uint16_t getTxSeqNo() const { return last_rx_seq_no_; }
 
     /// Get the slave's own Session ID (ETG.5100 §8.2.2.3: the slave
     /// generates its own random Session ID, independent of the master's).
+    /// @return Random session identifier generated at initialization
     uint16_t getSessionId() const { return sessionId_; }
 
     /**
@@ -448,6 +477,7 @@ public:
 
     /**
      * @brief Get diagnostic log (thread-safe copy by value)
+     * @return All recorded diagnostic entries in chronological order
      */
     std::vector<FSoEDiagnosticEntry> getDiagnostics() const;
 
@@ -463,16 +493,20 @@ public:
     /**
      * @brief Get error injection configuration (mutable, for test setup only)
      * @note Not thread-safe — call before starting cyclic processing.
+     * @return Reference to the active injection configuration
      */
     FSoEErrorInjection& getErrorInjection() { return errorInjection_; }
 
     /**
      * @brief Set error injection configuration
+     * @param injection Fault-injection settings (CRC corruption, frame
+     *        drops, data corruption rates)
      */
     void setErrorInjection(const FSoEErrorInjection& injection);
 
     /**
      * @brief Check if error injection is enabled
+     * @return `true` if any injection mechanism is armed
      */
     bool isErrorInjectionEnabled() const;
 

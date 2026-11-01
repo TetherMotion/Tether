@@ -92,18 +92,21 @@ public:
     // ------------------------------------------------------------------
 
     /// @brief Set the active work coordinate system offset (G54-G59.3).
+    /// @param offset XYZ offset of the active WCS origin [mm]
     void setWCSOffset(const std::array<double, 3>& offset) {
         m_wcsOffset = offset;
         recompute();
     }
 
     /// @brief Set the G92 basic offset (program space).
+    /// @param offset XYZ offset applied before scale/rotation [mm]
     void setG92Offset(const std::array<double, 3>& offset) {
         m_g92Offset = offset;
         recompute();
     }
 
     /// @brief Set the G52 local offset (applied after WCS, per RS274).
+    /// @param offset XYZ local offset applied after WCS+TLO [mm]
     void setG52Offset(const std::array<double, 3>& offset) {
         m_g52Offset = offset;
         recompute();
@@ -111,6 +114,7 @@ public:
 
     /// @brief Set tool length offset (G43/G43.1). Z-axis only.
     /// Applied after WCS offset, before G52.
+    /// @param zOffset Tool length compensation along Z [mm]
     void setToolLengthOffset(double zOffset) {
         m_toolLengthOffset = zOffset;
         recompute();
@@ -124,6 +128,9 @@ public:
 
     /// @brief Set per-axis scale factors (G51). XYZ only; ABC/UVW scale is
     ///        set via @ref setExtendedScale.
+    /// @param sx Scale on X (1.0 = no scaling)
+    /// @param sy Scale on Y
+    /// @param sz Scale on Z
     void setScale(double sx, double sy, double sz) {
         m_scale = {sx, sy, sz};
         recompute();
@@ -131,6 +138,7 @@ public:
 
     /// @brief Set scale factors for the extended axes (A, B, C, U, V, W).
     ///        These are applied as per-axis scaling without rotation.
+    /// @param s Scale factors in axis order A, B, C, U, V, W
     void setExtendedScale(const std::array<double, 6>& s) {
         m_extScale = s;
         // No 4x4 recompute needed — extended scale is applied separately.
@@ -151,6 +159,7 @@ public:
     }
 
     /// @brief Disable mirror on one axis, or all axes when @p axis >= 9.
+    /// @param axis Axis index 0-8 to unmirror; >= 9 clears every axis
     void clearMirror(size_t axis = 9) {
         if (axis >= 9) {
             m_mirror = {false, false, false};
@@ -169,6 +178,8 @@ public:
     }
 
     /// @brief True if axis @p i (0-8) is mirrored.
+    /// @param i Axis index 0-8 (X,Y,Z,A,B,C,U,V,W)
+    /// @return `true` if axis `i` has an active G51.1 mirror
     bool mirrored(size_t i) const {
         return i < 3 ? m_mirror[i] : (i < 9 && m_extMirror[i - 3]);
     }
@@ -183,9 +194,9 @@ public:
     /// @brief Set 2D rotation in the active plane (G68 with R word only).
     /// @param angleDeg Rotation angle in degrees.
     /// @param plane    Active plane (G17=XY, G18=ZX, G19=YZ).
-    /// @param pivotX   Pivot X coordinate (program space).
-    /// @param pivotY   Pivot Y coordinate (program space). For G18/G19 this
-    ///                 is the second in-plane axis.
+    /// @param pivotA   First in-plane pivot coordinate (program space).
+    /// @param pivotB   Second in-plane pivot coordinate (program space).
+    ///                 The pair is mapped into XYZ according to `plane`.
     void setRotation2D(double angleDeg, Plane plane,
                         double pivotA, double pivotB) {
         m_rotationMode = RotationMode::PLANE_2D;
@@ -204,6 +215,10 @@ public:
     }
 
     /// @brief Set 3D rotation via intrinsic XYZ Euler angles (G68 A/B/C).
+    /// @param aDeg Rotation about X [deg]
+    /// @param bDeg Rotation about Y [deg]
+    /// @param cDeg Rotation about Z [deg]
+    /// @param pivot Pivot point in program coordinates [mm]
     void setRotation3DEuler(double aDeg, double bDeg, double cDeg,
                              const std::array<double, 3>& pivot) {
         m_rotationMode = RotationMode::EULER_XYZ;
@@ -215,6 +230,9 @@ public:
     }
 
     /// @brief Set 3D rotation via axis-angle (G68 I/J/K + R).
+    /// @param axis Rotation axis vector (I, J, K words); need not be normalized
+    /// @param angleDeg Rotation angle about `axis` [deg]
+    /// @param pivot Pivot point in program coordinates [mm]
     void setRotation3DAxisAngle(const std::array<double, 3>& axis,
                                  double angleDeg,
                                  const std::array<double, 3>& pivot) {
@@ -261,6 +279,7 @@ public:
     // ------------------------------------------------------------------
 
     /// @brief True if the transform is identity (no offset, rotation, or scale).
+    /// @return `true` when all parameters are at their defaults
     bool isIdentity() const {
         return m_wcsOffset == std::array<double,3>{0,0,0}
             && m_g92Offset == std::array<double,3>{0,0,0}
@@ -293,6 +312,10 @@ public:
     /// @brief Transform XYZ program coordinates to machine coordinates.
     /// @note E (extruder) is NOT part of this call; the caller passes E
     ///       through unchanged.
+    /// @param x Program X coordinate [mm]
+    /// @param y Program Y coordinate [mm]
+    /// @param z Program Z coordinate [mm]
+    /// @return Machine-space XYZ after the full composed transform
     std::array<double, 3> toMachineXYZ(double x, double y, double z) const {
         Eigen::Vector4d p(x, y, z, 1.0);
         Eigen::Vector4d r = m_forward * p;
@@ -301,6 +324,8 @@ public:
 
     /// @brief Transform a full 9-axis Position (program -> machine).
     /// XYZ go through the 4x4 affine; ABC and UVW get per-axis scaling.
+    /// @param programPos Position in program coordinates
+    /// @return Equivalent position in machine coordinates
     Position toMachine(const Position& programPos) const {
         Position out;
         // XYZ: full affine transform
@@ -326,6 +351,10 @@ public:
     // ------------------------------------------------------------------
 
     /// @brief Inverse-transform XYZ machine coordinates to program coordinates.
+    /// @param x Machine X coordinate [mm]
+    /// @param y Machine Y coordinate [mm]
+    /// @param z Machine Z coordinate [mm]
+    /// @return Program-space XYZ after the inverse composed transform
     std::array<double, 3> toProgramXYZ(double x, double y, double z) const {
         Eigen::Vector4d p(x, y, z, 1.0);
         Eigen::Vector4d r = m_inverse * p;
@@ -333,6 +362,8 @@ public:
     }
 
     /// @brief Inverse-transform a full 9-axis Position (machine -> program).
+    /// @param machinePos Position in machine coordinates
+    /// @return Equivalent position in program coordinates
     Position toProgram(const Position& machinePos) const {
         Position out;
         auto xyz = toProgramXYZ(machinePos.x(), machinePos.y(), machinePos.z());
@@ -361,6 +392,10 @@ public:
     /// @brief Transform an XYZ velocity vector (no translation applied).
     /// @note The pivot translation cancels for direction vectors, so this
     ///       is simply `R * S * v`.
+    /// @param vx Velocity component along X [mm/s]
+    /// @param vy Velocity component along Y [mm/s]
+    /// @param vz Velocity component along Z [mm/s]
+    /// @return Rotated/scaled velocity vector in machine space
     std::array<double, 3> transformVelocity(double vx, double vy, double vz) const {
         Eigen::Vector3d v(vx, vy, vz);
         Eigen::Vector3d r = m_linear * v;
