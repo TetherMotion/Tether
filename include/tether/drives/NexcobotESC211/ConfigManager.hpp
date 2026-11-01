@@ -54,10 +54,16 @@ public:
 
     /// Write 256-byte sections to the temp/input object for the given data type.
     /// The sections are written to subindexes 0x01, 0x02, ... (max maxSections).
+    /// @param type FNI/RSP/SDD object to write
+    /// @param sections 256-byte section payloads
+    /// @return Write result; error if a section transfer fails
     Result writeSections(ConfigDataType type, std::span<const std::vector<uint8_t>> sections);
 
     /// Convenience: split raw data into 256-byte zero-padded sections and
     /// write them.  Returns NoData if the raw data exceeds maxSections * 256.
+    /// @param type FNI/RSP/SDD object to write
+    /// @param rawData Contiguous payload to split and write
+    /// @return Write result; NoData when `rawData` exceeds capacity
     Result writeRawData(ConfigDataType type, std::span<const uint8_t> rawData);
 
     // --- Activate ---
@@ -75,6 +81,11 @@ public:
     /// is performed and no flash-load command is issued.
     ///
     /// After activation, optionally verifies CRC if `expected_crcs` is non-empty.
+    /// @param types Data types to activate (FNI/RSP/SDD)
+    /// @param expected_crcs CRC values verified after activation; empty skips
+    /// @param do_flash_workaround Perform the firmware activate/load/activate
+    ///        sequence required before saveToFlash()
+    /// @return Activation result
     Result activate(std::span<const ConfigDataType> types,
                     std::span<const CrcExpectation> expected_crcs = {},
                     bool do_flash_workaround = true);
@@ -84,38 +95,49 @@ public:
     /// Save active data to flash.
     /// If `types` contains FNI, sends cmd 5 (SaveFNIToFlash).
     /// If `types` contains RSP or SDD, sends cmd 6 (SaveRSPAndSDDToFlash).
+    /// @param types Data types to persist
+    /// @return Flash-save result
     Result saveToFlash(std::span<const ConfigDataType> types);
 
     /// Load data from flash to active memory.
     /// If `types` contains FNI, sends cmd 1 (LoadFNIFromFlash).
     /// If `types` contains RSP or SDD, sends cmd 2 (LoadRSPAndSDDFromFlash).
+    /// @param types Data types to load from flash into active memory
+    /// @return Flash-load result
     Result loadFromFlash(std::span<const ConfigDataType> types);
 
     // --- Verify ---
 
     /// Poll CRC registers until they match the expected values or timeout.
+    /// @param expectations Register/value pairs to wait for
+    /// @return `true` when all CRCs match within the timeout
     bool verifyCrc(std::span<const CrcExpectation> expectations);
 
     /// Read a single CRC register.  Returns 0xFFFFFFFF on error.
+    /// @param type FNI/RSP/SDD register to read
+    /// @return CRC value, or 0xFFFFFFFF on read error
     uint32_t readCrc(ConfigDataType type);
 
     // --- Ensure loaded ---
 
     /// Verify that FNI/RSP/SDD config data is loaded by checking CRC registers.
     /// If any CRC is 0x0000, load ALL from flash (cmd 1 + cmd 2), wait for
-    /// settle, then re-verify.  Returns false if any CRC is still 0x0000.
+    /// settle, then re-verify.
+    /// @return `false` if any CRC is still 0x0000 after the flash load
     bool ensureLoaded();
 
     // --- Read data ---
 
     /// Read all sections from the temp/input object for the given data type.
-    /// Returns the concatenated raw data, or an empty vector on error.
+    /// @param type FNI/RSP/SDD object to read
+    /// @return Concatenated raw data, or an empty vector on error
     std::vector<uint8_t> readTempData(ConfigDataType type);
 
     /// Read all sections from the active/output object for the given data
     /// type (0xF201 FNI, 0xF211 RSP, 0xF221 SDD) — the configuration the
     /// safety application is actually running with.
-    /// Returns the concatenated raw data, or an empty vector on error.
+    /// @param type FNI/RSP/SDD object to read
+    /// @return Concatenated raw data, or an empty vector on error
     std::vector<uint8_t> readActiveData(ConfigDataType type);
 
     // --- Accessors ---
