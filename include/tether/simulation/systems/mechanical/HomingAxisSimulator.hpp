@@ -72,6 +72,14 @@ struct HomingStepResult {
  */
 class HomingAxisSimulator {
 public:
+    /**
+     * @brief Stages of a simulated G28 homing run.
+     *
+     * Ordered as executed: Seeking always runs first; Bouncing and
+     * ReApproaching only occur when `secondHomingSpeed > 0` and
+     * `bounceDistance > 0`, otherwise Seeking transitions straight to
+     * Settled.
+     */
     enum class Phase {
         Idle, /**< Not started */
         Seeking, /**< Moving toward endstop at homing speed */
@@ -83,7 +91,20 @@ public:
     explicit HomingAxisSimulator(const HomingAxisConfig& config)
         : config_(config) {}
 
-    /**@brief Start homing from the given initial position. */
+    /**
+     * @brief Start homing from the given initial position.
+     *
+     * Resets all runtime state — position, velocity, elapsed time, the
+     * endstop flag, and the completion flag — and immediately enters the
+     * Seeking phase with an S-curve profile toward `endstopPosition` at
+     * `homingSpeed`. Safe to call again to restart a finished run.
+     *
+     * @param initialPosition  Starting axis position [mm]. May lie on
+     *                         either side of `endstopPosition` — the seek
+     *                         direction is chosen automatically; if it
+     *                         equals the endstop the seek is zero-length
+     *                         and completes on the first step().
+     */
     void start(double initialPosition) {
         currentPosition_ = initialPosition;
         currentVelocity_ = 0.0;
@@ -137,25 +158,79 @@ public:
         return currentPosition_;
     }
 
-    /**@brief Get the current phase. */
+    /**
+     * @brief The current phase of the homing sequence.
+     *
+     * @return Idle before start() (or after start() was never called),
+     *         Seeking/Bouncing/ReApproaching during motion, and Settled
+     *         once isComplete() reports true.
+     */
     Phase phase() const { return phase_; }
 
-    /**@brief Get the current position. */
+    /**
+     * @brief The simulated axis position.
+     *
+     * Follows the active phase's S-curve profile; equals
+     * `endstopPosition` after a completed run.
+     *
+     * @return Current position [mm].
+     */
     double position() const { return currentPosition_; }
 
-    /**@brief Get the current velocity. */
+    /**
+     * @brief The simulated axis velocity.
+     *
+     * Signed in the current phase's travel direction — negative while
+     * seeking toward a lower-position endstop or while bouncing back.
+     * Always zero in Idle and Settled phases and at each phase boundary.
+     *
+     * @return Current velocity [mm/s].
+     */
     double velocity() const { return currentVelocity_; }
 
-    /**@brief Get elapsed time. */
+    /**
+     * @brief Time since start() was called.
+     *
+     * Accumulates dt over every step(); not the phase-local time (each
+     * phase restarts its own profile internally).
+     *
+     * @return Total simulated elapsed time [s].
+     */
     double elapsedTime() const { return elapsedTime_; }
 
-    /**@brief Check if homing is complete. */
+    /**
+     * @brief Whether the homing sequence has finished.
+     *
+     * True once the Settled phase is reached — after a bare seek, or after
+     * the full seek→bounce→re-approach cycle when
+     * `secondHomingSpeed > 0`. step() becomes a no-op returning the final
+     * state once this is true.
+     *
+     * @return true when homing is complete.
+     */
     bool isComplete() const { return complete_; }
 
-    /**@brief Check if endstop was triggered. */
+    /**
+     * @brief Whether the endstop has been triggered.
+     *
+     * Set when the Seeking phase finishes (the carriage has reached
+     * `endstopPosition`); stays true through the optional bounce and
+     * re-approach phases. Remains false if no homing run has started.
+     *
+     * @return true if the endstop switch has been hit during this run.
+     */
     bool endstopTriggered() const { return endstopTriggered_; }
 
-    /**@brief Get the phase as a string (for debugging/status reporting). */
+    /**
+     * @brief The current phase as a lowercase string.
+     *
+     * Matches the Phase enum names in snake_case ("idle", "seeking",
+     * "bouncing", "re_approaching", "settled") for debug output and status
+     * reporting.
+     *
+     * @return Static C-string naming the current phase; "unknown" is
+     *         unreachable for valid states.
+     */
     const char* phaseString() const {
         switch (phase_) {
             case Phase::Idle:          return "idle";
@@ -252,7 +327,16 @@ private:
  */
 class HomingCoordinator {
 public:
-    /**@brief Add an axis to be homed. */
+    /**
+     * @brief Add an axis to be homed.
+     *
+     * Axes are homed in insertion order during run(). The config is copied,
+     * so the caller's object may be reused or destroyed.
+     *
+     * @param config  HomingAxisConfig for the axis — name, endstop
+     *                position, homing speed, optional bounce distance and
+     *                second-homing speed.
+     */
     void addAxis(const HomingAxisConfig& config) {
         axes_.push_back(config);
     }
@@ -280,7 +364,14 @@ public:
         return finalPositions;
     }
 
-    /**@brief Get the list of axis configs. */
+    /**
+     * @brief The registered axis configs in homing order.
+     *
+     * @return Const reference to the vector of HomingAxisConfig objects
+     *         added via addAxis(); empty until axes are registered. The
+     *         reference stays valid until the next addAxis() call or the
+     *         coordinator is destroyed.
+     */
     const std::vector<HomingAxisConfig>& axes() const { return axes_; }
 
 private:
