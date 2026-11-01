@@ -167,6 +167,8 @@ public:
     
     /**
      * @brief Compute statistics for trajectory samples
+     * @param samples Samples whose derivatives must already be filled.
+     * @return Aggregate statistics (duration, peaks, RMS, ...).
      */
     TrajectoryStatistics computeStatistics(const std::vector<TrajectorySample>& samples);
     
@@ -183,6 +185,7 @@ public:
     
     /**
      * @brief Configure analyzer
+     * @param config Derivative order, limit checks and reporting options.
      */
     void configure(const AnalysisConfig& config) { config_ = config; }
     const AnalysisConfig& config() const { return config_; }
@@ -200,6 +203,7 @@ public:
     
     /**
      * @brief Compute combined metrics (linear velocity, curvature, etc.)
+     * @param samples Samples updated in place with the derived metrics.
      */
     void computeCombinedMetrics(std::vector<TrajectorySample>& samples);
     
@@ -223,11 +227,15 @@ public:
     
     /**
      * @brief Get strategy name
+     * @return Static strategy name for diagnostics.
      */
     virtual const char* name() const = 0;
     
     /**
      * @brief Generate trajectory samples from segments
+     * @param segments Planning segments to discretize.
+     * @param limits Kinematic limits the samples must respect.
+     * @return Sampled trajectory with derivatives filled.
      */
     virtual std::vector<TrajectorySample> generateTrajectory(
         const std::vector<GCode::PlanningSegment>& segments,
@@ -236,6 +244,8 @@ public:
     
     /**
      * @brief Configure strategy-specific parameters
+     * @param key Parameter name understood by the strategy.
+     * @param value Parameter value.
      */
     virtual void configure(const std::string& key, double value) = 0;
 };

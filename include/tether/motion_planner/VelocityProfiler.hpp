@@ -141,16 +141,19 @@ public:
 
     /**
      * @brief Get the kinematic limits used by this profiler.
+     * @return Limits the profiler enforces.
      */
     virtual Limits limits() const = 0;
 
     /**
      * @brief Get the profiler type (for logging/debugging).
+     * @return Enumerated profiler kind.
      */
     virtual ProfilerType type() const = 0;
 
     /**
      * @brief Human-readable name of the profiler.
+     * @return Static display name (e.g. "TOPPRA").
      */
     virtual const char* name() const = 0;
 
@@ -160,6 +163,8 @@ public:
      * Mirrors `VelocityProfile::derivativeOrder()` but is queryable on the
      * profiler itself (before a profile has been computed). Defaults to
      * Acceleration (2nd-order); jerk-aware profilers override to return Jerk.
+     *
+     * @return Highest derivative the generated profiles represent.
      */
     virtual ProfileDerivativeOrder derivativeOrder() const {
         return ProfileDerivativeOrder::Acceleration;
