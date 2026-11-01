@@ -25,33 +25,52 @@ namespace Autotuning {
  */
 class SIMCMethod : public AutotunerBase {
 public:
-    /** @brief Human-readable name of the tuner. */
+    /** @brief Human-readable name of the tuner.
+     *  @return Display name ("SIMC")
+     */
     std::string getName() const override;
 
-    /** @brief Short description for UI or logs. */
+    /** @brief Short description for UI or logs.
+     *  @return One-line description of the SIMC method
+     */
     std::string getDescription() const override;
 
-    /** @brief Offline/online mode of operation. */
+    /** @brief Offline/online mode of operation.
+     *  @return AutotuningMode::Offline — SIMC needs a process model
+     */
     AutotuningMode getMode() const override;
 
-    /** @brief Whether the given controller is compatible with this tuner. */
+    /** @brief Whether the given controller is compatible with this tuner.
+     *  @param controller Controller to check
+     *  @return `true` if the tuner can produce gains for `controller`
+     */
     bool isCompatible(const TunableController& controller) const override;
 
     /**
      * @brief Execute the tuner and apply computed parameters to @p controller.
      * @param controller Controller to update with computed parameters.
-     * @param model Optional process model to base the design on.
+     * @param model Optional process model to base the design on; falls
+     *        back to the model set via setModel() when nullptr
+     * @return Tuning outcome including the computed gains and status
      */
     TuningResult tune(TunableController& controller, const ProcessModel* model = nullptr) override;
 
-    /** @brief Compute SIMC PID gains for FOPDT or SOPDT models. */
+    /** @brief Compute SIMC PID gains for FOPDT or SOPDT models.
+     *  @param model Identified process model
+     *  @param tauC Desired closed-loop time constant [s]
+     *  @return Computed PID gains
+     */
     static PIDGains calculateGains(const FOPDTModel& model, double tauC);
     static PIDGains calculateGains(const SOPDTModel& model, double tauC);
 
-    /** @brief Set the closed-loop time constant parameter used by SIMC. */
+    /** @brief Set the closed-loop time constant parameter used by SIMC.
+     *  @param tauC Closed-loop target time constant [s]
+     */
     void setTauC(double tauC) { m_tauC = tauC; }
 
-    /** @brief Provide the FOPDT model for design calculations. */
+    /** @brief Provide the FOPDT model for design calculations.
+     *  @param model Identified process model the design is based on
+     */
     void setModel(const FOPDTModel& model) { m_model = model; }
 
 private:
