@@ -396,37 +396,52 @@ class HomingFactory {
 public:
     /**
      * @brief Create homing config for typical servo motor
+     * @param searchVelocity Speed while searching for the switch [counts/s]
+     * @param zeroVelocity Speed while approaching the index point [counts/s]
+     * @param homeOffset Offset applied to the found home position [counts]
+     * @return Homing config for a servo axis
      */
     static HomingConfig createServoConfig(
         int32_t searchVelocity = 1000,
         int32_t zeroVelocity = 100,
         int32_t homeOffset = 0
     );
-    
+
     /**
      * @brief Create homing config for linear axis
+     * @param maxTravel Physical travel limit used for bounds checking [counts]
+     * @param searchVelocity Speed while searching for the switch [counts/s]
+     * @param zeroVelocity Speed while approaching the index point [counts/s]
+     * @return Homing config for a linear axis
      */
     static HomingConfig createLinearAxisConfig(
         int32_t maxTravel,
         int32_t searchVelocity = 500,
         int32_t zeroVelocity = 50
     );
-    
+
     /**
      * @brief Create homing config for rotary axis
+     * @param searchVelocity Speed while searching for the index [counts/s]
+     * @param useIndex `true` latches on the encoder index pulse
+     * @return Homing config for a rotary axis
      */
     static HomingConfig createRotaryAxisConfig(
         int32_t searchVelocity = 2000,
         bool useIndex = true
     );
-    
+
     /**
      * @brief Create strict config with validation
+     * @param base Config to copy
+     * @return Copy of `base` with strict switch/timeout validation enabled
      */
     static HomingConfig createStrictConfig(const HomingConfig& base);
-    
+
     /**
      * @brief Create lenient config without validation
+     * @param base Config to copy
+     * @return Copy of `base` with relaxed validation
      */
     static HomingConfig createLenientConfig(const HomingConfig& base);
 };
@@ -438,6 +453,8 @@ namespace HomingUtils {
 
 /**
  * @brief Describe a homing method
+ * @param method CiA 402 homing method number
+ * @return Human-readable description for UI/logs
  */
 std::string describeMethod(HomingMethod method);
 
@@ -457,6 +474,11 @@ MethodRequirements getMethodRequirements(HomingMethod method);
 
 /**
  * @brief Suggest best homing method based on available signals
+ * @param hasNegativeLimit Negative limit switch is wired
+ * @param hasPositiveLimit Positive limit switch is wired
+ * @param hasHomeSwitch Home switch is wired
+ * @param hasIndex Encoder index pulse is usable
+ * @return Recommended homing method for the wired signals
  */
 HomingMethod suggestMethod(
     bool hasNegativeLimit,
@@ -467,6 +489,12 @@ HomingMethod suggestMethod(
 
 /**
  * @brief Validate homing method against available signals
+ * @param method Homing method to check
+ * @param hasNegativeLimit Negative limit switch is wired
+ * @param hasPositiveLimit Positive limit switch is wired
+ * @param hasHomeSwitch Home switch is wired
+ * @param hasIndex Encoder index pulse is usable
+ * @return `true` when the method's required inputs are all present
  */
 bool validateMethod(
     HomingMethod method,
