@@ -399,6 +399,8 @@ public:
     /**
      * @brief RAII variant — returns an engaged CyclicLoopGuard on success
      *        (loop stops when it goes out of scope), empty guard on failure.
+     * @param config Cycle time, image mode and exchange placement.
+     * @return Engaged guard while the loop runs; empty guard on failure.
      */
     [[nodiscard]] CyclicLoopGuard startCyclicLoopScoped(
         const CyclicLoopConfig& config) {
@@ -1053,7 +1055,7 @@ public:
      * slaves that retain counter state across restarts (e.g. Synapticon
      * SOMANET) require it to recover without a power cycle.
      *
-     * @param enabled true to enable the probe-and-resync behavior.
+     * @param en true to enable the probe-and-resync behavior.
      *
      * Default: enabled.  Disable to restore the previous behaviour (fail
      * the transaction on counter mismatch; the SM0/SM1 reset fallbacks in

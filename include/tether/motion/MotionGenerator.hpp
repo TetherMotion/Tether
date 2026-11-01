@@ -130,6 +130,7 @@ public:
     
     /**
      * @brief Get generator state
+     * @return Current generator lifecycle state.
      */
     GeneratorState getState() const { return m_state; }
     
@@ -229,6 +230,9 @@ public:
     
     /**
      * @brief Configure generator with common parameters
+     * @param amplitude Peak deviation from the center position.
+     * @param frequency Oscillation frequency [Hz].
+     * @param offset Center position.
      */
     void configure(int32_t amplitude, float frequency, int32_t offset = 0) {
         m_amplitude = amplitude;
@@ -392,6 +396,10 @@ public:
     
     /**
      * @brief Configure profile with common parameters
+     * @param start Start position.
+     * @param target Target position.
+     * @param max_vel Maximum velocity [units/s].
+     * @param accel Acceleration [units/s^2].
      */
     void configure(int32_t start, int32_t target, int32_t max_vel, int32_t accel) {
         m_start_position = start;
@@ -497,6 +505,11 @@ public:
     
     /**
      * @brief Configure profile with common parameters
+     * @param start Start position.
+     * @param target Target position.
+     * @param max_vel Maximum velocity [units/s].
+     * @param max_accel Maximum acceleration [units/s^2].
+     * @param max_jerk Maximum jerk [units/s^3].
      */
     void configure(int32_t start, int32_t target, 
                    float max_vel, float max_accel, float max_jerk) {
@@ -607,21 +620,26 @@ public:
     
     /**
      * @brief Update all axes
+     * @param dt_ms Time since the last update [ms].
      */
     void updateAll(float dt_ms);
     
     /**
      * @brief Check if all axes are complete
+     * @return true when every generator has finished.
      */
     bool allComplete() const;
     
     /**
      * @brief Get axis count
+     * @return Number of axes driven by this generator.
      */
     size_t getAxisCount() const { return m_axis_count; }
     
     /**
      * @brief Get axis generator
+     * @param index Axis index.
+     * @return Generator for that axis, or nullptr when out of range.
      */
     MotionGenerator* getAxis(size_t index) {
         return (index < m_axis_count) ? m_generators[index] : nullptr;

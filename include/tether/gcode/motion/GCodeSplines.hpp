@@ -648,6 +648,11 @@ public:
     
     /**
      * @brief Process G5 (cubic spline)
+     * @param block G-code block.
+     * @param state Machine state (updated).
+     * @param vars Variable system (modal variables updated).
+     * @param segments Motion segments appended for the spline.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG5(
         const Block& block,

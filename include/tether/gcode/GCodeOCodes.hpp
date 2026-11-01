@@ -417,6 +417,7 @@ public:
      * @brief Call a subroutine
      * @param oNumber O-code number
      * @param args Arguments to pass
+     * @return Error::OK, or an unknown-subroutine/argument-count error.
      */
     Error callSubroutine(int32_t oNumber, 
                          const std::vector<double>& args = {});
@@ -446,6 +447,7 @@ public:
     /**
      * @brief Return from current subroutine
      * @param returnValue Optional return value
+     * @return Error::OK, or a return-without-call error.
      */
     Error returnFromSub(std::optional<double> returnValue = std::nullopt);
     
@@ -457,6 +459,7 @@ public:
     
     /**
      * @brief Get current call depth
+     * @return Number of nested subroutine calls (0 = top level).
      */
     size_t getCallDepth() const { return m_callStack.size(); }
     
