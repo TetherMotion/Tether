@@ -264,6 +264,7 @@ set(IO_PROTOCOL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_monitored_remote.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_value_builder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_schema_layout.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_producer_helpers.cpp"
 )
 set(IO_TRANSPORT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_receive_buffer.cpp"

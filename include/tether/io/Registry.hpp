@@ -38,6 +38,27 @@
 namespace tether { namespace io {
 
 // ---------------------------------------------------------------------------
+// Entry ids
+// ---------------------------------------------------------------------------
+
+/// Canonical entry-id derivation: FNV-1a 64 over the dotted entry name
+/// (e.g. "state.frame", "cmd.vx"). Servers that derive ids from names
+/// (instead of numbering manually) should use this so producers and
+/// clients agree on the id↔name mapping by construction. Ids are
+/// negotiated through the entry listing, so the convention only needs to
+/// be consistent, not universal.
+/// @param name dotted entry name.
+/// @return the 64-bit FNV-1a hash.
+inline constexpr uint64_t entryId(std::string_view name) {
+    uint64_t h = 14695981039346656037ull;   // FNV offset basis
+    for (char c : name) {
+        h ^= static_cast<uint8_t>(c);
+        h *= 1099511628211ull;              // FNV prime
+    }
+    return h;
+}
+
+// ---------------------------------------------------------------------------
 // Callback types
 // ---------------------------------------------------------------------------
 
