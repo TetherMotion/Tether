@@ -27,20 +27,37 @@ struct DeltaEndstopAdjust {
 /// @brief Delta printer configuration and kinematics.
 class DeltaPrinter {
 public:
-    /// @brief Set delta geometry (M665).
+    /**
+     * @brief Set delta geometry (M665).
+     * @param geo Tower radius, arm length, tower angles
+     */
     void setGeometry(const DeltaGeometry& geo) { geometry_ = geo; }
 
-    /// @brief Set delta endstop adjustments (M666).
+    /**
+     * @brief Set delta endstop adjustments (M666).
+     * @param adj Per-tower endstop offsets
+     */
     void setEndstopAdjust(const DeltaEndstopAdjust& adj) { endstopAdjust_ = adj; }
 
-    /// @brief Get current geometry.
+    /**
+     * @brief Get current geometry.
+     * @return Active delta geometry
+     */
     const DeltaGeometry& geometry() const { return geometry_; }
 
-    /// @brief Get current endstop adjustments.
+    /**
+     * @brief Get current endstop adjustments.
+     * @return Per-tower endstop offsets
+     */
     const DeltaEndstopAdjust& endstopAdjust() const { return endstopAdjust_; }
 
-    /// @brief Convert Cartesian (X, Y, Z) to tower angles (A, B, C).
-    /// @return Tower positions in steps for each tower.
+    /**
+     * @brief Convert Cartesian (X, Y, Z) to tower positions (A, B, C).
+     * @param x Effector X [mm]
+     * @param y Effector Y [mm]
+     * @param z Effector Z [mm]
+     * @return Tower positions for each tower
+     */
     std::array<double, 3> forwardActuatorKinematics(double x, double y, double z) const {
         // Tower positions at 120-degree intervals with angle offsets
         double angleA = (210.0 + geometry_.towerAngleA) * M_PI / 180.0;
@@ -78,6 +95,10 @@ public:
     /// Uses trilateration: subtract pairs of sphere equations to get two
     /// linear equations, express x and y in terms of z, then substitute
     /// into one sphere equation to get a quadratic in z.
+    /// @param towerA Tower A position
+    /// @param towerB Tower B position
+    /// @param towerC Tower C position
+    /// @return Effector position (X, Y, Z)
     std::array<double, 3> inverseActuatorKinematics(
         double towerA, double towerB, double towerC) const {
         // Tower base positions
