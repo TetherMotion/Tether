@@ -80,32 +80,39 @@ public:
     
     /**
      * @brief Add gain set at operating point
+     * @param operatingPoint Scheduling-variable value this gain set applies at.
+     * @param gains Gains to use at that operating point.
      */
     void addGainSet(double operatingPoint, const ParameterVector& gains);
     
     /**
      * @brief Set gains as function of scheduling variable
+     * @param func Callback mapping the scheduling variable to gains.
      */
     void setGainFunction(std::function<ParameterVector(double)> func);
     
     /**
      * @brief Set scheduling variable function
      * Maps (measured, reference) -> scheduling variable
+     * @param func Callback computing the scheduling variable each cycle.
      */
     void setSchedulingVariable(std::function<double(double, double)> func);
     
     /**
      * @brief Enable interpolation between gain sets
+     * @param enable true to interpolate instead of stepping between sets.
      */
     void enableInterpolation(bool enable) { m_interpolate = enable; }
     
     /**
      * @brief Get current gains
+     * @return Gains selected for the current operating point.
      */
     ParameterVector getCurrentGains() const { return m_currentGains; }
     
     /**
      * @brief Set rate limit for gain changes
+     * @param maxChangePerSecond Maximum gain change per second.
      */
     void setGainRateLimit(double maxChangePerSecond) { m_rateLimit = maxChangePerSecond; }
     
@@ -160,16 +167,22 @@ public:
     /**
      * @brief Set reference model (first order)
      * y_m = K_m / (τ_m * s + 1) * r
+     * @param Km Reference-model gain.
+     * @param taum Reference-model time constant [s].
      */
     void setReferenceModel(double Km, double taum);
     
     /**
      * @brief Set reference model (second order)
+     * @param Km Reference-model gain.
+     * @param wn Natural frequency [rad/s].
+     * @param zeta Damping ratio.
      */
     void setReferenceModel(double Km, double wn, double zeta);
     
     /**
      * @brief Set adaptation gains
+     * @param gamma Adaptation gain per tuned parameter.
      */
     void setAdaptationGain(const std::vector<double>& gamma);
     
@@ -185,17 +198,20 @@ public:
     
     /**
      * @brief Enable parameter projection (bounds)
+     * @param bounds Per-parameter bounds for the projection.
      */
     void setParameterBounds(const std::vector<ParameterBounds>& bounds);
     
     /**
      * @brief Set sigma modification for robustness
      * Prevents parameter drift: θ̂̇ = -Γ*e_m*φ - σ*Γ*θ̂
+     * @param sigma Leakage factor σ.
      */
     void setSigmaModification(double sigma) { m_sigma = sigma; }
     
     /**
      * @brief Get model tracking error
+     * @return Difference between plant and reference-model output.
      */
     double getModelError() const { return m_em; }
     
@@ -279,6 +295,7 @@ public:
     /**
      * @brief Set forgetting factor (for RLS)
      * λ = 1: no forgetting, λ < 1: exponential forgetting
+     * @param lambda Forgetting factor in (0, 1].
      */
     void setForgettingFactor(double lambda) { m_lambda = lambda; }
     
@@ -295,17 +312,21 @@ public:
     /**
      * @brief Set tuning update interval
      * How often to recompute controller gains
+     * @param samples Recompute interval in samples.
      */
     void setUpdateInterval(int samples) { m_updateInterval = samples; }
     
     /**
      * @brief Get estimated model parameters
+     * @return Estimated A (output-lag) coefficients.
      */
     std::vector<double> getEstimatedA() const { return m_aHat; }
+    /// @return Estimated B (input-lag) coefficients.
     std::vector<double> getEstimatedB() const { return m_bHat; }
     
     /**
      * @brief Get estimation covariance
+     * @return Trace of the estimation covariance matrix.
      */
     double getEstimationCovariance() const;
     
@@ -387,32 +408,38 @@ public:
     
     /**
      * @brief Set adaptation gain
+     * @param k Integrator gain of the extremum-seeking loop.
      */
     void setAdaptationGain(double k) { m_k = k; }
     
     /**
      * @brief Set filter cutoff (should be < perturbation freq)
+     * @param wc Demodulation filter cutoff [rad/s].
      */
     void setFilterCutoff(double wc) { m_filterCutoff = wc; }
     
     /**
      * @brief Set cost function
      * Maps (output, reference) -> cost to minimize
+     * @param cost Callback returning the cost for the current output.
      */
     void setCostFunction(std::function<double(double, double)> cost);
     
     /**
      * @brief Set number of parameters to optimize
+     * @param n Dimension of the parameter vector.
      */
     void setNumParameters(int n);
     
     /**
      * @brief Get current parameter estimates
+     * @return Current parameter vector.
      */
     ParameterVector getParameters() const { return m_theta; }
     
     /**
      * @brief Multi-parameter ESC with orthogonal perturbations
+     * @param enable true to perturb all parameters simultaneously.
      */
     void enableMultiParameter(bool enable) { m_multiParam = enable; }
     
@@ -490,21 +517,33 @@ public:
     
     /**
      * @brief Set error universe of discourse
+     * @param min Lower bound of the error universe.
+     * @param max Upper bound of the error universe.
      */
     void setErrorRange(double min, double max);
     
     /**
      * @brief Set error rate universe of discourse
+     * @param min Lower bound of the error-rate universe.
+     * @param max Upper bound of the error-rate universe.
      */
     void setErrorRateRange(double min, double max);
     
     /**
      * @brief Set gain adjustment ranges
+     * @param dKpMax Maximum relative adjustment for Kp.
+     * @param dKiMax Maximum relative adjustment for Ki.
+     * @param dKdMax Maximum relative adjustment for Kd.
      */
     void setGainRanges(double dKpMax, double dKiMax, double dKdMax);
     
     /**
      * @brief Add custom rule
+     * @param errorSet Fuzzy set for the error input.
+     * @param errorRateSet Fuzzy set for the error-rate input.
+     * @param dKp Output adjustment for Kp.
+     * @param dKi Output adjustment for Ki.
+     * @param dKd Output adjustment for Kd.
      */
     void addRule(const std::string& errorSet, const std::string& errorRateSet,
                 double dKp, double dKi, double dKd);
@@ -516,6 +555,9 @@ public:
     
     /**
      * @brief Set base (nominal) gains
+     * @param Kp Nominal proportional gain.
+     * @param Ki Nominal integral gain.
+     * @param Kd Nominal derivative gain.
      */
     void setBaseGains(double Kp, double Ki, double Kd);
     
@@ -597,16 +639,19 @@ public:
     
     /**
      * @brief Set learning rate
+     * @param lr Gradient step size.
      */
     void setLearningRate(double lr) { m_learningRate = lr; }
     
     /**
      * @brief Load pre-trained weights
+     * @param weights Layer weight matrices in order.
      */
     void loadWeights(const std::vector<std::vector<double>>& weights);
     
     /**
      * @brief Enable online learning
+     * @param enable true to keep training while the controller runs.
      */
     void enableOnlineLearning(bool enable) { m_onlineLearning = enable; }
     
@@ -614,6 +659,7 @@ public:
      * @brief Train on batch of data
      * @param inputs Input features [samples x features]
      * @param targets Target outputs [samples x outputs]
+     * @param epochs Number of passes over the batch.
      */
     void trainBatch(const std::vector<std::vector<double>>& inputs,
                    const std::vector<std::vector<double>>& targets,
@@ -678,6 +724,8 @@ public:
     
     /**
      * @brief Add model with associated controller gains
+     * @param model Candidate plant model.
+     * @param gains Controller gains paired with that model.
      */
     void addModel(const FOPDTModel& model, const ParameterVector& gains);
     
@@ -693,16 +741,19 @@ public:
     
     /**
      * @brief Set switching hysteresis
+     * @param h Probability margin required before switching models.
      */
     void setSwitchingHysteresis(double h) { m_hysteresis = h; }
     
     /**
      * @brief Get current model probabilities
+     * @return Posterior probability per model in the bank.
      */
     std::vector<double> getModelProbabilities() const { return m_probabilities; }
     
     /**
      * @brief Get active model index
+     * @return Index of the model currently driving the controller.
      */
     int getActiveModel() const { return m_activeModel; }
     
