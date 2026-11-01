@@ -179,7 +179,7 @@ public:
      * @brief Constructor
      * @param link1 Link 1 properties
      * @param link2 Link 2 properties
-     * @param gravity_direction Gravity direction (default: -Y for vertical plane)
+     * @param gravity_dir Gravity direction (default: -Y for vertical plane)
      */
     Planar2DOFDynamics(const LinkProperties& link1, const LinkProperties& link2,
                        const Position2D& gravity_dir = Position2D(0, -1))
@@ -190,6 +190,9 @@ public:
      * 
      * M = [M11  M12]
      *     [M21  M22]
+     * @param q1 Joint 1 angle [rad]
+     * @param q2 Joint 2 angle [rad]
+     * @param[out] M 2x2 mass matrix
      */
     void computeMassMatrix(float q1, float q2, float M[2][2]) const {
         float m1 = m_link1.mass;
@@ -213,6 +216,11 @@ public:
      * @brief Compute Coriolis/centrifugal matrix C(q, q̇)
      * 
      * Using Christoffel symbols approach
+     * @param q1 Joint 1 angle [rad]
+     * @param q2 Joint 2 angle [rad]
+     * @param dq1 Joint 1 velocity [rad/s]
+     * @param dq2 Joint 2 velocity [rad/s]
+     * @param[out] C 2x2 Coriolis matrix
      */
     void computeCoriolisMatrix(float q1, float q2, float dq1, float dq2, 
                                float C[2][2]) const {
@@ -231,6 +239,9 @@ public:
     
     /**
      * @brief Compute gravity vector g(q)
+     * @param q1 Joint 1 angle [rad]
+     * @param q2 Joint 2 angle [rad]
+     * @param[out] g Gravity torques per joint [Nm]
      */
     void computeGravityVector(float q1, float q2, float g[2]) const {
         float m1 = m_link1.mass;
@@ -300,6 +311,10 @@ public:
      * compute required torques.
      * 
      * τ = M(q)q̈ + C(q,q̇)q̇ + g(q) + f(q̇)
+     * @param q Joint angles [rad]
+     * @param dq Joint velocities [rad/s]
+     * @param ddq Desired joint accelerations [rad/s²]
+     * @param[out] tau Required joint torques [Nm]
      */
     void inverseDynamics(const float q[2], const float dq[2],
                          const float ddq[2], float tau[2]) const {
@@ -330,7 +345,9 @@ public:
     
     /**
      * @brief Compute manipulator energy
-     * @return [kinetic_energy, potential_energy]
+     * @param q Joint angles [rad]
+     * @param dq Joint velocities [rad/s]
+     * @return [kinetic_energy, potential_energy] [J]
      */
     std::array<float, 2> computeEnergy(const float q[2], const float dq[2]) const {
         float M[2][2];
@@ -399,6 +416,8 @@ public:
     
     /**
      * @brief Compute 3x3 mass matrix
+     * @param q Joint coordinates
+     * @param[out] M 3x3 mass matrix
      */
     void computeMassMatrix(const float q[3], float M[3][3]) const {
         // Simplified computation for 3-DOF RRP arm
@@ -435,6 +454,10 @@ public:
     
     /**
      * @brief Forward dynamics
+     * @param q Joint coordinates
+     * @param dq Joint velocities
+     * @param tau Applied joint torques
+     * @param[out] ddq Resulting joint accelerations
      */
     void forwardDynamics(const float q[3], const float dq[3],
                          const float tau[3], float ddq[3]) const {
@@ -565,6 +588,11 @@ public:
     
     /**
      * @brief Inverse dynamics: desired acceleration to torque
+     * @param position Joint angle [rad]
+     * @param velocity Joint velocity [rad/s]
+     * @param acceleration Desired acceleration [rad/s²]
+     * @param load_torque External load opposing motion [Nm]
+     * @return Required joint torque [Nm]
      */
     float inverseDynamics(float position, float velocity,
                           float acceleration, float load_torque = 0) const {
@@ -574,6 +602,11 @@ public:
     
     /**
      * @brief Simulate one time step using Euler integration
+     * @param position Joint angle, updated in place [rad]
+     * @param velocity Joint velocity, updated in place [rad/s]
+     * @param torque Applied torque [Nm]
+     * @param dt Step length [s]
+     * @param load_torque External load [Nm]
      */
     void simulate(float& position, float& velocity, float torque, float dt,
                   float load_torque = 0) {
@@ -584,6 +617,11 @@ public:
     
     /**
      * @brief Simulate with RK4 integration (more accurate)
+     * @param position Joint angle, updated in place [rad]
+     * @param velocity Joint velocity, updated in place [rad/s]
+     * @param torque Applied torque [Nm]
+     * @param dt Step length [s]
+     * @param load_torque External load [Nm]
      */
     void simulateRK4(float& position, float& velocity, float torque, float dt,
                      float load_torque = 0) {
@@ -642,6 +680,10 @@ public:
      * Joint 1, 2: Rotary (coupled planar dynamics)
      * Joint 3: Prismatic (Z axis)
      * Joint 4: Rotary (tool rotation, decoupled)
+     * @param q Joint coordinates (2 rotary, 1 prismatic, 1 tool rotary)
+     * @param dq Joint velocities
+     * @param tau Applied joint torques/force
+     * @param[out] ddq Resulting joint accelerations
      */
     void forwardDynamics(const float q[4], const float dq[4],
                          const float tau[4], float ddq[4]) const {
@@ -734,6 +776,12 @@ public:
     
     /**
      * @brief Simulate robot motion
+     * @param pose Planar pose, updated in place
+     * @param v Linear velocity, updated in place [m/s]
+     * @param omega Angular velocity, updated in place [rad/s]
+     * @param tau_left Left wheel torque [Nm]
+     * @param tau_right Right wheel torque [Nm]
+     * @param dt Step length [s]
      */
     void simulate(Pose2D& pose, float& v, float& omega,
                   float tau_left, float tau_right, float dt) {
