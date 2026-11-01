@@ -101,6 +101,7 @@ public:
 
     /// @brief Log prefix for this drive (delegates to Master's per-slave name).
     /// Returns "Slave <name> (#<index>)" if a name is set, else "Slave <index>".
+    /// @return Prefix string for log lines about this drive.
     std::string logPrefix() const {
         if (m_master) return m_master->slaveLogPrefix(m_slave_index);
         return std::format("Slave {}", m_slave_index);
@@ -131,6 +132,10 @@ public:
     /// mapping.  This method only sets the internal buffer sizes and
     /// indices so that registerPDOBuffers() can register the correct
     /// buffer lengths.
+    /// @param rxpdo_index RxPDO object index.
+    /// @param txpdo_index TxPDO object index.
+    /// @param rxpdo_size RxPDO total size in bytes.
+    /// @param txpdo_size TxPDO total size in bytes.
     void setPDOBufferSizes(uint16_t rxpdo_index, uint16_t txpdo_index,
                            uint16_t rxpdo_size, uint16_t txpdo_size);
 
@@ -158,6 +163,7 @@ public:
     /**
      * @brief Get typed pointer to the RxPDO buffer (master -> slave)
      * @tparam T  Packed struct matching the PDO layout
+     * @return Typed pointer to the output process data.
      */
     template<typename T>
     T* rxPDO() {
@@ -168,6 +174,7 @@ public:
     /**
      * @brief Get typed pointer to the TxPDO buffer (slave -> master)
      * @tparam T  Packed struct matching the PDO layout
+     * @return Typed pointer to the input process data.
      */
     template<typename T>
     const T* txPDO() const {
@@ -199,6 +206,7 @@ public:
      * EtherCAT::SlaveGroup::requestState(SlaveState::SAFE_OP) — one packet
      * requests SAFE_OP on the whole group — then confirm with
      * waitForSafeOp() or SlaveGroup::waitForState().
+     * @return true when the request was written to the slave.
      */
     bool requestSafeOp();
 
@@ -207,6 +215,9 @@ public:
      *
      * Same confirmation loop gotoSafeOp() runs internally: polls AL_STATUS,
      * reports the AL status code on timeout.
+     *
+     * @param timeout_ms Maximum wait time [ms].
+     * @return true when SAFE_OP was reached.
      */
     bool waitForSafeOp(uint32_t timeout_ms = 2000);
 
@@ -218,6 +229,7 @@ public:
      * EtherCAT::SlaveGroup::requestState() — one packet requests OP on
      * the whole group — then confirm with waitForOp() or
      * SlaveGroup::waitForState().
+     * @return true when the request was written to the slave.
      */
     bool requestOp();
 
@@ -227,6 +239,9 @@ public:
      * Same confirmation loop gotoOp() runs internally: polls AL_STATUS,
      * re-issues the request every second, aborts on unexpected states or
      * cancellation.
+     *
+     * @param timeout_ms Maximum wait time [ms].
+     * @return true when OP was reached.
      */
     bool waitForOp(uint32_t timeout_ms = 5000);
 
@@ -238,6 +253,8 @@ public:
      * enable.  Leaves the slave in SAFE_OP ready for a (possibly
      * group-synchronised) OP request via requestOp() or
      * EtherCAT::SlaveGroup.
+     * @param assignment Multi-PDO assignment for the drive.
+     * @return true when the drive is ready for an OP request.
      */
     bool prepareForOp(const Slave::MultiPDOAssignment& assignment);
 
@@ -247,6 +264,8 @@ public:
      *        in PRE_OP so the SAFE_OP request can be issued for a whole
      *        group simultaneously (EtherCAT::SlaveGroup::requestState),
      *        after which postSafeOpForOp() completes the per-slave setup.
+     * @param assignment Multi-PDO assignment for the drive.
+     * @return true when the drive is in PRE_OP and ready for SAFE_OP.
      */
     bool prepareForSafeOp(const Slave::MultiPDOAssignment& assignment);
 
@@ -255,6 +274,7 @@ public:
      *        PDO exchange enable, SM readback diagnostics, error-ack.
      *        Call once the slave has reached SAFE_OP (via gotoSafeOp() or a
      *        group requestState + waitForState), before requesting OP.
+     * @return true when the post-SAFE_OP setup completed.
      */
     bool postSafeOpForOp();
 
@@ -262,6 +282,7 @@ public:
      * @brief Full state sequence: INIT -> PRE_OP -> SAFE_OP -> OP
      * @param configure_sm  If true, configure SM2/SM3 from SII and
      *                      update lengths to match assigned PDO sizes.
+     * @return true when the drive reached OP.
      */
     bool transitionToOp(bool configure_sm = true);
 
@@ -299,6 +320,7 @@ public:
     /// 0x000F -> 0x008F -> 0x000F.  Benign for drives that ignore the
     /// bit-7 edge and lets drives that honor it re-enable without the
     /// enable bits ever dropping.
+    /// @return true when the fault was cleared with the drive left enabled.
     bool resetFaultKeepEnabled();
 
     /// How enable() clears an active fault before running the enable
@@ -325,6 +347,7 @@ public:
     /// fault-clearing loop instead of the controlword bit-7 toggle.
     /// Setting a callback implies FaultResetMode::Custom; passing nullptr
     /// reverts to Standard.
+    /// @param cb Callback performing the drive-specific fault reset.
     void setFaultResetCallback(std::function<bool(CiA402Drive&)> cb) {
         m_fault_reset_cb = std::move(cb);
         m_fault_reset_mode = m_fault_reset_cb ? FaultResetMode::Custom
@@ -406,6 +429,7 @@ public:
      * See ControlledShutdownConfig for the phase details and the required
      * call ordering relative to the PDO loop.
      *
+     * @param cfg Stop strategy, timings and optional brake action.
      * @return true when every configured phase completed; false when any
      *         step failed (the remaining phases are still attempted).
      */
@@ -440,6 +464,7 @@ public:
     /// Call this after PDO buffer sizes are known (e.g. after
     /// assignFixedPDOs / setPDOBufferSizes).  Use -1 to disable PDO-based
     /// mode setting and force SDO.
+    /// @param offset RxPDO byte offset of the modes_of_operation field.
     void setOpmodePDOOffset(int offset) { m_opmode_pdo_offset = offset; }
     int  opmodePDOOffset() const { return m_opmode_pdo_offset; }
 
@@ -447,6 +472,7 @@ public:
     /// In a combined multi-PDO buffer (e.g. FSoE + motion), the controlword
     /// is not at offset 0 — it's at the start of the motion PDO region.
     /// Default 0 = controlword is at the start of the RxPDO buffer.
+    /// @param offset RxPDO byte offset of the controlword field.
     void setControlwordPDOOffset(int offset) { m_controlword_pdo_offset = offset; }
     int  controlwordPDOOffset() const { return m_controlword_pdo_offset; }
 
@@ -454,6 +480,7 @@ public:
     /// In a combined multi-PDO buffer (e.g. FSoE + motion), the statusword
     /// is not at offset 0 — it's at the start of the motion PDO region.
     /// Default 0 = statusword is at the start of the TxPDO buffer.
+    /// @param offset TxPDO byte offset of the statusword field.
     void setStatuswordPDOOffset(int offset) { m_statusword_pdo_offset = offset; }
     int  statuswordPDOOffset() const { return m_statusword_pdo_offset; }
 
@@ -461,7 +488,9 @@ public:
     /// the TxPDO byte offset of the velocity_actual (0x606C) field.
     /// Used by controlledShutdown() for the velocity-stop phase.
     /// -1 disables the PDO fast-path (SDO fallback is used instead).
+    /// @param offset RxPDO byte offset of the target_velocity field.
     void setTargetVelocityPDOOffset(int offset) { m_target_velocity_pdo_offset = offset; }
+    /// @param offset TxPDO byte offset of the velocity_actual field.
     void setActualVelocityPDOOffset(int offset) { m_actual_velocity_pdo_offset = offset; }
     int  targetVelocityPDOOffset() const { return m_target_velocity_pdo_offset; }
     int  actualVelocityPDOOffset() const { return m_actual_velocity_pdo_offset; }
@@ -474,6 +503,8 @@ public:
     ///   drive.setVelocityPDOFields(&RxPDO::target_velocity,
     ///                              &TxPDO::velocity_actual);
     /// @endcode
+    /// @param target_velocity Member pointer to the RxPDO target velocity.
+    /// @param actual_velocity Member pointer to the TxPDO actual velocity.
     template<typename RxPDO, typename TxPDO>
     void setVelocityPDOFields(int32_t RxPDO::* target_velocity,
                               int32_t TxPDO::* actual_velocity) {
@@ -483,14 +514,20 @@ public:
 
     /// Set operating mode.  Uses PDO by default (if offset configured),
     /// otherwise falls back to SDO.
+    /// @param mode CiA 402 operating mode (CSP, CSV, CST, HM, ...).
+    /// @return true when the mode was accepted.
     bool setOperatingMode(int8_t mode);
 
     /// Set operating mode via SDO (0x6060).  Use when PDO-based mode
     /// setting is not available or explicit SDO verification is needed.
+    /// @param mode CiA 402 operating mode.
+    /// @return true when the SDO write succeeded.
     bool setOperatingModeSDO(int8_t mode);
 
     /// Set operating mode via PDO buffer.  Returns false if the PDO
     /// offset has not been configured.
+    /// @param mode CiA 402 operating mode.
+    /// @return true when the mode was written into the RxPDO buffer.
     bool setOperatingModePDO(int8_t mode);
 
     int8_t getOperatingMode();
