@@ -103,6 +103,9 @@ public:
 
     /**
      * @brief Compute the instantaneous position offset δe(t) [mm].
+     * @param t Absolute time along the trajectory [s]
+     * @return Extruder-position lead from melt compressibility; 0 when
+     *         flow is non-positive or no LUT is bound
      */
     double offsetAtTime(double t) const {
         if (!lut_ || lut_->empty() || params_.compressibilityOverArea <= 0.0)
@@ -127,6 +130,8 @@ public:
 
     /**
      * @brief Compute the offset at multiple time points.
+     * @param times Absolute sample times [s]
+     * @return Instantaneous offset at each time [mm]
      */
     std::vector<double> offsetSeries(const std::vector<double>& times) const {
         std::vector<double> result;
@@ -138,6 +143,8 @@ public:
 
     /**
      * @brief Compute the adjusted extruder position at time t.
+     * @param t Absolute time along the trajectory [s]
+     * @return Nominal extruder position plus advance offset [mm]
      */
     double adjustedExtruderPosition(double t) const {
         return traj_->extruderPositionAtTime(t) + offsetAtTime(t);
@@ -145,6 +152,8 @@ public:
 
     /**
      * @brief Compute the adjusted extruder position at multiple times.
+     * @param times Absolute sample times [s]
+     * @return Adjusted extruder position at each time [mm]
      */
     std::vector<double> adjustedExtruderPositionSeries(
         const std::vector<double>& times) const {
@@ -157,6 +166,8 @@ public:
 
     /**
      * @brief Compute the flow rate Q(t) at time t [mm³/s].
+     * @param t Absolute time along the trajectory [s]
+     * @return Volumetric flow (extruder velocity × filament area) [mm³/s]
      */
     double flowAtTime(double t) const {
         double vE = traj_->extruderVelocityAtTime(t);
@@ -165,6 +176,9 @@ public:
 
     /**
      * @brief Compute the pressure P(t) at time t [Pa].
+     * @param t Absolute time along the trajectory [s]
+     * @return Melt pressure from the LUT at the current flow/temperature;
+     *         0 when flow is non-positive or no LUT bound
      */
     double pressureAtTime(double t) const {
         if (!lut_ || lut_->empty()) return 0.0;
@@ -174,18 +188,30 @@ public:
         return lut_->pressure(Q, tempC);
     }
 
-    /// Parameters
+    /**
+     * @brief Parameters in use.
+     * @return Parameters passed at construction
+     */
     const AnalyticalCrossWLFPressureAdvanceParams& params() const { return params_; }
 
-    /// LUT
+    /**
+     * @brief Pressure-flow lookup table backing the model.
+     * @return LUT mapping (flow, temperature) -> melt pressure
+     */
     const tether::control::extrusion::PressureFlowLut& lut() const {
         return *lut_;
     }
 
-    /// Filament area [mm²]
+    /**
+     * @brief Filament cross-sectional area.
+     * @return π·d²/4 derived from the filament diameter [mm²]
+     */
     double filamentAreaMm2() const { return filamentAreaMm2_; }
 
-    /// Trajectory
+    /**
+     * @brief Trajectory the advance was computed for.
+     * @return Referenced extrusion trajectory
+     */
     const Traj& trajectory() const { return *traj_; }
 
 private:
