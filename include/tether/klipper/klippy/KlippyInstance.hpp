@@ -74,7 +74,7 @@ namespace tether::klipper::klippy {
 
 /// @brief Config-based temperature sensor stub.
 /// Reports a configurable temperature until a real hardware backend is set.
-/// Used when [temperature_sensor <name>] is parsed from config but no
+/// Used when `[temperature_sensor &lt;name&gt;]` is parsed from config but no
 /// hardware sensor is registered via registerTemperatureSensor().
 class ConfigTemperatureSensor : public objects::TemperatureSensor {
 public:
@@ -223,6 +223,7 @@ public:
     /// Updates motionState_, toolhead, motion_report, and gcode_move objects.
     /// Use this to place the toolhead at a specific physical position before
     /// homing (G28 will move from this position to the endstop).
+    /// @param pos Machine-space position (X, Y, Z, E).
     void setToolheadPosition(const std::array<double, 4>& pos) {
         motionState_.position = pos;
         if (toolheadObj_) toolheadObj_->setPosition(pos);
@@ -232,11 +233,14 @@ public:
 
     // Heater/Fan/Probe backends
     /// @brief Set the heater for extruder index 0 (single-extruder convenience).
+    /// @param h Heater object backing the extruder.
     void setExtruderHeater(std::shared_ptr<objects::Heater> h) {
         setExtruderHeater(0, h);
     }
     /// @brief Set the heater for a specific extruder index (multi-extruder).
     /// Updates the active extruder object if this index is the active one.
+    /// @param index Extruder index (0-based).
+    /// @param h Heater object backing that extruder.
     void setExtruderHeater(int index, std::shared_ptr<objects::Heater> h) {
         extruderHeaters_[index] = h;
         if (index == activeExtruder_) {
@@ -246,6 +250,7 @@ public:
     }
     /// @brief Select the active extruder by index (T-command).
     /// Updates extruderHeater_ and extruderObj_ to point at this extruder.
+    /// @param index Extruder to activate (0-based).
     void setActiveExtruder(int index) {
         activeExtruder_ = index;
         auto it = extruderHeaters_.find(index);
@@ -255,6 +260,7 @@ public:
     /// @return The active extruder index.
     int activeExtruder() const { return activeExtruder_; }
     /// @return The heater for a given extruder index, or nullptr.
+    /// @param index Extruder index (0-based).
     std::shared_ptr<objects::Heater> extruderHeater(int index) const {
         auto it = extruderHeaters_.find(index);
         return (it != extruderHeaters_.end()) ? it->second : nullptr;
@@ -280,6 +286,8 @@ public:
     }
 
     /// @brief Get the ADC callback for a pin, or nullptr if not registered.
+    /// @param pin ADC pin name as used in the config.
+    /// @return Registered callback, or an empty std::function.
     std::function<double()> adcCallback(const std::string& pin) const {
         auto it = adcCallbacks_.find(pin);
         return (it != adcCallbacks_.end()) ? it->second : nullptr;
@@ -295,6 +303,8 @@ public:
     }
 
     /// @brief Get the SPI callback for a bus, or nullptr if not registered.
+    /// @param bus SPI bus name.
+    /// @return Registered callback, or an empty std::function.
     std::function<std::vector<uint8_t>(std::span<const uint8_t>)>
     spiCallback(const std::string& bus) const {
         auto it = spiCallbacks_.find(bus);
@@ -302,11 +312,14 @@ public:
     }
 
     /// @brief Register an endstop for an axis (for M119/query_endstops).
+    /// @param axis Axis name (e.g. "x", "y", "z").
+    /// @param e Endstop object backing that axis.
     void setEndstop(const std::string& axis, std::shared_ptr<objects::Endstop> e) {
         endstops_[axis] = e;
     }
 
     /// @brief Set the ADXL345 accelerometer (for input shaper calibration).
+    /// @param a Accelerometer backend to expose as the "adxl345" object.
     void setAdxl345(std::shared_ptr<objects::Adxl345> a) {
         adxl345_ = a;
         adxl345Obj_ = std::make_shared<Adxl345Object>(a);
@@ -317,20 +330,25 @@ public:
     /// @brief Set the PID autotuning method to use for M303/PID_CALIBRATE.
     /// Default is RelayFeedback (Åström-Hägglund).  All Tether autotuning
     /// methods are supported (see AutotuneMethod enum).
+    /// @param method Autotuning method used by M303/PID_CALIBRATE.
     void setPIDAutotuneMethod(AutotuneMethod method) {
         pidAutotuneMethod_ = method;
     }
 
     /// @brief Get the currently configured PID autotuning method.
+    /// @return Autotuning method used by M303/PID_CALIBRATE.
     AutotuneMethod pidAutotuneMethod() const { return pidAutotuneMethod_; }
 
     /// @brief Set the I2C bus (for M260/M261 I2C commands).
+    /// @param i2c I2C backend to expose as the "i2c" object.
     void setI2cBus(std::shared_ptr<objects::I2c> i2c) {
         i2cBus_ = i2c;
         server_.registerObject(std::make_shared<I2cObject>(i2c));
     }
 
     /// @brief Register a temperature sensor (e.g. "temperature_sensor chamber").
+    /// @param name Sensor object name as it appears in the config.
+    /// @param sensor Temperature sensor backend to expose.
     void registerTemperatureSensor(const std::string& name,
                                     std::shared_ptr<objects::TemperatureSensor> sensor) {
         auto obj = std::make_shared<TemperatureSensorObject>(name, sensor);
@@ -338,6 +356,8 @@ public:
     }
 
     /// @brief Register a filament switch sensor.
+    /// @param name Sensor object name as it appears in the config.
+    /// @param sensor Filament sensor backend to expose.
     void registerFilamentSwitchSensor(const std::string& name,
                                        std::shared_ptr<objects::FilamentSensor> sensor) {
         auto obj = std::make_shared<FilamentSwitchSensorObject>(name, sensor);
@@ -345,42 +365,56 @@ public:
     }
 
     /// @brief Register a digital output pin.
+    /// @param name Pin object name as it appears in the config.
+    /// @param dev Digital-output backend to expose.
     void registerDigitalOut(const std::string& name,
                              std::shared_ptr<objects::DigitalOut> dev) {
         server_.registerObject(std::make_shared<DigitalOutObject>(dev, name));
     }
 
     /// @brief Register a PWM output pin.
+    /// @param name Pin object name as it appears in the config.
+    /// @param dev PWM-output backend to expose.
     void registerPWMOut(const std::string& name,
                          std::shared_ptr<objects::PWMOut> dev) {
         server_.registerObject(std::make_shared<PWMOutObject>(dev, name));
     }
 
     /// @brief Register an analog input pin.
+    /// @param name Pin object name as it appears in the config.
+    /// @param dev Analog-input backend to expose.
     void registerAnalogIn(const std::string& name,
                            std::shared_ptr<objects::AnalogIn> dev) {
         server_.registerObject(std::make_shared<AnalogInObject>(dev, name));
     }
 
     /// @brief Register a Neopixel LED strip.
+    /// @param name Strip object name as it appears in the config.
+    /// @param dev Neopixel backend to expose.
     void registerNeopixel(const std::string& name,
                            std::shared_ptr<objects::Neopixel> dev) {
         server_.registerObject(std::make_shared<NeopixelObject>(dev, name));
     }
 
     /// @brief Register a pulse counter.
+    /// @param name Counter object name as it appears in the config.
+    /// @param dev Pulse-counter backend to expose.
     void registerPulseCounter(const std::string& name,
                                std::shared_ptr<objects::PulseCounter> dev) {
         server_.registerObject(std::make_shared<PulseCounterObject>(dev, name));
     }
 
     /// @brief Register a Hall filament sensor.
+    /// @param name Sensor object name as it appears in the config.
+    /// @param dev Hall-sensor backend to expose.
     void registerHallFilamentSensor(const std::string& name,
                                      std::shared_ptr<objects::HallFilamentSensor> dev) {
         server_.registerObject(std::make_shared<HallFilamentSensorObject>(dev, name));
     }
 
     /// @brief Register a TMC UART driver.
+    /// @param name Driver object name as it appears in the config.
+    /// @param dev TMC UART backend to expose.
     void registerTmcUart(const std::string& name,
                           std::shared_ptr<objects::TmcUart> dev) {
         server_.registerObject(std::make_shared<TmcUartObject>(dev, name));
@@ -536,12 +570,15 @@ public:
     }
 
     /// @brief Execute a G-code script.
+    /// @param script G-code text (may contain several lines).
+    /// @return true when every block executed without error.
     bool executeGcode(const std::string& script) {
         std::lock_guard<std::recursive_mutex> lock(instanceMutex_);
         return gcode_.execute(script);
     }
 
     /// @brief Register a G-code macro.
+    /// @param macro Macro definition (name, parameters, body).
     void registerMacro(const GcodeMacro& macro) {
         macros_->registerMacro(macro);
         // Register a printer object for the macro
@@ -835,6 +872,7 @@ public:
 
     /// @brief Set a custom system stats provider (for testing).
     /// Pass nullptr to restore the default Linux provider.
+    /// @param provider Stats source to use.
     void setSystemStatsProvider(std::shared_ptr<ISystemStatsProvider> provider) {
         systemStatsProvider_ = std::move(provider);
     }
@@ -851,6 +889,10 @@ public:
     }
 
     /// @brief Update MCU statistics (call periodically with real MCU data).
+    /// @param bytesRead Bytes received from the MCU since the last call.
+    /// @param bytesWrite Bytes sent to the MCU since the last call.
+    /// @param retransmits Retransmissions since the last call.
+    /// @param mcuAwake MCU busy time [s].
     void updateMcuStats(uint32_t bytesRead, uint32_t bytesWrite,
                         uint32_t retransmits, double mcuAwake) {
         if (mcuObj_) {
@@ -859,6 +901,7 @@ public:
     }
 
     /// @brief Set the simulation tick dt (seconds) used for homing steps.
+    /// @param dt Simulation step [s].
     void setSimTickDt(double dt) { simTickDt_ = dt; }
 
     /// @brief Step all active homing axis simulators by simTickDt_.
@@ -921,6 +964,8 @@ public:
     }
 
     /// @brief Start a new S-curve linear move to the given machine target.
+    /// @param target Machine-space target (X, Y, Z, E).
+    /// @param speed Requested feed rate [mm/s] (clamped to the max velocity).
     void startLinearMove(const std::array<double, 4>& target, double speed) {
         activeMove_ = std::make_unique<Simulation::LinearMoveSimulator>();
         double maxV = (settings_.maxVelocity > 0.0) ? settings_.maxVelocity : 300.0;
@@ -976,6 +1021,7 @@ public:
     }
 
     /// @brief Check if idle timeout has expired and execute timeout G-code.
+    /// @param now Current steady-clock time.
     void checkIdleTimeout(std::chrono::steady_clock::time_point now) {
         if (idleTimeout_ <= 0.0) return;
         if (settings_.idleTimeoutGcode.empty()) return;
@@ -1005,11 +1051,14 @@ public:
     }
 
     /// @brief Set fan RPM from tachometer.
+    /// @param rpm Measured fan speed [RPM].
     void setFanRpm(double rpm) {
         if (fanObj_) fanObj_->setRpm(rpm);
     }
 
     /// @brief Set an ADC value (for QUERY_ADC to return).
+    /// @param name ADC pin name as used in the config.
+    /// @param value Raw ADC reading.
     void setAdcValue(const std::string& name, double value) {
         adcValues_[name] = value;
     }
