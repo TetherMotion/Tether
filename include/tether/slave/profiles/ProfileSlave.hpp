@@ -102,12 +102,14 @@ public:
     
     /**
      * @brief Get the underlying SlaveCore
+     * @return Core slave state machine and mailbox plumbing
      */
     SlaveCore& getCore() { return *core_; }
     const SlaveCore& getCore() const { return *core_; }
-    
+
     /**
      * @brief Get the object dictionary
+     * @return CANopen object dictionary backing this profile
      */
     IObjectDictionary& getObjectDictionary() { return *objectDictionary_; }
     const IObjectDictionary& getObjectDictionary() const { return *objectDictionary_; }
@@ -118,21 +120,24 @@ public:
     
     /**
      * @brief Set HAL
+     * @param hal Slave-side hardware abstraction (network, timing)
      */
     void setHAL(std::shared_ptr<ISlaveHAL> hal);
-    
+
     /**
      * @brief Start the slave
+     * @return `true` if the slave entered service
      */
     bool start();
-    
+
     /**
      * @brief Stop the slave
      */
     void stop();
-    
+
     /**
      * @brief Check if running
+     * @return `true` while the slave is in service
      */
     bool isRunning() const;
     

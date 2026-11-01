@@ -98,10 +98,10 @@ namespace GCode {
 enum class LexerTokenType : uint8_t {
     WORD,           ///< Letter + numeric value (G, M, X, Y, etc.)
     OCODE_NUMBER,   ///< O followed by number
-    OCODE_NAME,     ///< O<name>
+    OCODE_NAME,     ///< O&lt;name&gt;
     OCODE_KEYWORD,  ///< sub, endsub, call, if, etc.
-    PARAMETER,      ///< #number or #<name>
-    PARAM_ASSIGN,   ///< #number = expr or #<name> = expr
+    PARAMETER,      ///< #\#number or #&lt;name&gt;
+    PARAM_ASSIGN,   ///< #\#number = expr or #&lt;name&gt; = expr
     EXPRESSION,     ///< [...] bracketed expression
     COMMENT,        ///< ( ) or ; comment
     BLOCK_DELETE,   ///< / at line start
@@ -125,7 +125,7 @@ struct LexerToken {
     double value{0.0};
 
     /// For WORD tokens whose value is an unevaluated expression ([...]) or
-    /// parameter reference (#N / #<name>). When true, the parser must
+    /// parameter reference (#\#N / #&lt;name&gt;). When true, the parser must
     /// evaluate `expression` / `paramNumber` / `paramName` to obtain `value`.
     bool wordNeedsEval{false};
     
@@ -158,11 +158,13 @@ struct LexerToken {
     size_t length{0};  ///< Token length in bytes
     
     /// Check if token is valid
-    bool valid() const { 
-        return type != LexerTokenType::END && type != LexerTokenType::ERROR; 
+    /// @return `true` unless the token is END or ERROR
+    bool valid() const {
+        return type != LexerTokenType::END && type != LexerTokenType::ERROR;
     }
-    
+
     /// Check if token represents end of line or input
+    /// @return `true` for EOL or END token types
     bool isTerminator() const {
         return type == LexerTokenType::EOL || type == LexerTokenType::END;
     }
@@ -258,6 +260,7 @@ public:
     
     /**
      * @brief Constructor with config
+     * @param config Lexer options (comment handling, modes)
      */
     explicit Lexer(const LexerConfig& config);
     
@@ -277,6 +280,7 @@ public:
     
     /**
      * @brief Peek at next token without consuming
+     * @return Copy of the next token; the position is unchanged
      */
     LexerToken peekToken();
     
@@ -321,31 +325,37 @@ public:
     
     /**
      * @brief Get current position
+     * @return Byte offset into the input
      */
     size_t getPosition() const { return m_pos; }
-    
+
     /**
      * @brief Get current line number
+     * @return 1-based line of the current position
      */
     uint32_t getLine() const { return m_line; }
-    
+
     /**
      * @brief Get current column
+     * @return 1-based column of the current position
      */
     uint32_t getColumn() const { return m_column; }
-    
+
     /**
      * @brief Check if at end of input
+     * @return `true` when the read position reached the input end
      */
     bool atEnd() const { return m_pos >= m_len; }
-    
+
     /**
      * @brief Check if at start of input
+     * @return `true` when the read position is at offset 0
      */
     bool atStart() const { return m_pos == 0; }
-    
+
     /**
      * @brief Get remaining input
+     * @return Unconsumed input from the current position to the end
      */
     std::string_view remaining() const;
     
@@ -365,11 +375,13 @@ public:
     
     /**
      * @brief Get current line text
+     * @return Full text of the line containing the current position
      */
     std::string getCurrentLineText() const;
-    
+
     /**
      * @brief Check if current position is start of line
+     * @return `true` when the position sits at a line boundary
      */
     bool atLineStart() const;
     
@@ -379,11 +391,13 @@ public:
     
     /**
      * @brief Get last error
+     * @return Most recent lexer error; ErrorCode::OK when clean
      */
     const Error& getError() const { return m_error; }
-    
+
     /**
      * @brief Check if lexer has error
+     * @return `true` if an error is latched
      */
     bool hasError() const { return m_error.code != ErrorCode::OK; }
     
@@ -398,6 +412,7 @@ public:
     
     /**
      * @brief Get total line count (after full scan)
+     * @return Lines counted by scanLines()
      */
     uint32_t getTotalLines() const { return m_totalLines; }
     
