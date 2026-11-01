@@ -244,6 +244,9 @@ public:
      * @brief Construct a WriteVerifier with default config.
      *
      * The transport reference must outlive the WriteVerifier.
+     *
+     * @param transport Transport implementation used for the write/read-back
+     *                  transactions.
      */
     explicit WriteVerifier(IWriteVerifyTransport& transport);
 
@@ -267,21 +270,26 @@ public:
 
     // ----- Configuration -----
 
-    /** @brief Set the write-verify configuration */
+    /** @brief Set the write-verify configuration
+     *  @param config Retry count, delay and read-back policy. */
     void setConfig(const WriteVerifyConfig& config);
 
-    /** @brief Get the current configuration */
+    /** @brief Get the current configuration
+     *  @return Configuration in use. */
     const WriteVerifyConfig& config() const;
 
-    /** @brief Enable or disable write-verify */
+    /** @brief Enable or disable write-verify
+     *  @param enabled true to read back and compare every write. */
     void setEnabled(bool enabled);
 
-    /** @brief Check if write-verify is enabled */
+    /** @brief Check if write-verify is enabled
+     *  @return true when writes are verified. */
     bool isEnabled() const;
 
     // ----- Statistics -----
 
-    /** @brief Get current statistics */
+    /** @brief Get current statistics
+     *  @return Counters accumulated since construction or resetStats(). */
     const WriteVerifyStats& stats() const;
 
     /** @brief Reset statistics to zero */
@@ -308,18 +316,36 @@ public:
 
     /**
      * @brief Write 16-bit value and verify
+     *
+     * @param adp        Address position (slave)
+     * @param ado        Address offset (register)
+     * @param value      Value to write
+     * @param timeout_ms Timeout for each operation
+     * @return WriteVerifyResult with success status and details
      */
     WriteVerifyResult apwrVerifyU16(uint16_t adp, uint16_t ado,
                                      uint16_t value, unsigned int timeout_ms);
 
     /**
      * @brief Write 32-bit value and verify
+     *
+     * @param adp        Address position (slave)
+     * @param ado        Address offset (register)
+     * @param value      Value to write
+     * @param timeout_ms Timeout for each operation
+     * @return WriteVerifyResult with success status and details
      */
     WriteVerifyResult apwrVerifyU32(uint16_t adp, uint16_t ado,
                                      uint32_t value, unsigned int timeout_ms);
 
     /**
      * @brief Write 64-bit value and verify
+     *
+     * @param adp        Address position (slave)
+     * @param ado        Address offset (register)
+     * @param value      Value to write
+     * @param timeout_ms Timeout for each operation
+     * @return WriteVerifyResult with success status and details
      */
     WriteVerifyResult apwrVerifyU64(uint16_t adp, uint16_t ado,
                                      uint64_t value, unsigned int timeout_ms);
@@ -352,7 +378,14 @@ private:
 // Free-function API (delegates to a WriteVerifier instance)
 // ============================================================================
 
-/** @brief Write and verify via APWR */
+/** @brief Write and verify via APWR
+ *  @param wv Verifier instance to delegate to.
+ *  @param adp Address position (slave).
+ *  @param ado Address offset (register).
+ *  @param data Data to write.
+ *  @param len Data length in bytes.
+ *  @param timeout_ms Timeout for each operation [ms].
+ *  @return Result of the write + verify operation. */
 inline WriteVerifyResult apwr_verify(WriteVerifier& wv,
                                       uint16_t adp, uint16_t ado,
                                       const void* data, uint16_t len,
@@ -360,7 +393,13 @@ inline WriteVerifyResult apwr_verify(WriteVerifier& wv,
     return wv.apwrVerify(adp, ado, data, len, timeout_ms);
 }
 
-/** @brief Write and verify 16-bit value */
+/** @brief Write and verify 16-bit value
+ *  @param wv Verifier instance to delegate to.
+ *  @param adp Address position (slave).
+ *  @param ado Address offset (register).
+ *  @param value Value to write.
+ *  @param timeout_ms Timeout for each operation [ms].
+ *  @return Result of the write + verify operation. */
 inline WriteVerifyResult apwr_verify_u16(WriteVerifier& wv,
                                           uint16_t adp, uint16_t ado,
                                           uint16_t value,
@@ -368,7 +407,13 @@ inline WriteVerifyResult apwr_verify_u16(WriteVerifier& wv,
     return wv.apwrVerifyU16(adp, ado, value, timeout_ms);
 }
 
-/** @brief Write and verify 32-bit value */
+/** @brief Write and verify 32-bit value
+ *  @param wv Verifier instance to delegate to.
+ *  @param adp Address position (slave).
+ *  @param ado Address offset (register).
+ *  @param value Value to write.
+ *  @param timeout_ms Timeout for each operation [ms].
+ *  @return Result of the write + verify operation. */
 inline WriteVerifyResult apwr_verify_u32(WriteVerifier& wv,
                                           uint16_t adp, uint16_t ado,
                                           uint32_t value,
@@ -376,7 +421,13 @@ inline WriteVerifyResult apwr_verify_u32(WriteVerifier& wv,
     return wv.apwrVerifyU32(adp, ado, value, timeout_ms);
 }
 
-/** @brief Write and verify 64-bit value */
+/** @brief Write and verify 64-bit value
+ *  @param wv Verifier instance to delegate to.
+ *  @param adp Address position (slave).
+ *  @param ado Address offset (register).
+ *  @param value Value to write.
+ *  @param timeout_ms Timeout for each operation [ms].
+ *  @return Result of the write + verify operation. */
 inline WriteVerifyResult apwr_verify_u64(WriteVerifier& wv,
                                           uint16_t adp, uint16_t ado,
                                           uint64_t value,
@@ -384,7 +435,14 @@ inline WriteVerifyResult apwr_verify_u64(WriteVerifier& wv,
     return wv.apwrVerifyU64(adp, ado, value, timeout_ms);
 }
 
-/** @brief Broadcast write and verify on specific slave */
+/** @brief Broadcast write and verify on specific slave
+ *  @param wv Verifier instance to delegate to.
+ *  @param slave_to_verify ADP of the slave used for the read-back.
+ *  @param ado Address offset (register).
+ *  @param data Data to write.
+ *  @param len Data length in bytes.
+ *  @param timeout_ms Timeout for each operation [ms].
+ *  @return Result of the broadcast write + verify operation. */
 inline WriteVerifyResult bwr_verify(WriteVerifier& wv,
                                      uint16_t slave_to_verify, uint16_t ado,
                                      const void* data, uint16_t len,
@@ -392,37 +450,49 @@ inline WriteVerifyResult bwr_verify(WriteVerifier& wv,
     return wv.bwrVerify(slave_to_verify, ado, data, len, timeout_ms);
 }
 
-/** @brief Set configuration on a WriteVerifier */
+/** @brief Set configuration on a WriteVerifier
+ *  @param wv Verifier to configure.
+ *  @param config Configuration to apply. */
 inline void set_config(WriteVerifier& wv, const WriteVerifyConfig& config) {
     wv.setConfig(config);
 }
 
-/** @brief Get configuration from a WriteVerifier */
+/** @brief Get configuration from a WriteVerifier
+ *  @param wv Verifier to query.
+ *  @return Configuration in use. */
 inline const WriteVerifyConfig& get_config(WriteVerifier& wv) {
     return wv.config();
 }
 
-/** @brief Enable/disable write-verify on a WriteVerifier */
+/** @brief Enable/disable write-verify on a WriteVerifier
+ *  @param wv Verifier to configure.
+ *  @param enabled true to read back every write. */
 inline void set_enabled(WriteVerifier& wv, bool enabled) {
     wv.setEnabled(enabled);
 }
 
-/** @brief Check if write-verify is enabled on a WriteVerifier */
+/** @brief Check if write-verify is enabled on a WriteVerifier
+ *  @param wv Verifier to query.
+ *  @return true when writes are verified. */
 inline bool is_enabled(WriteVerifier& wv) {
     return wv.isEnabled();
 }
 
-/** @brief Get statistics from a WriteVerifier */
+/** @brief Get statistics from a WriteVerifier
+ *  @param wv Verifier to query.
+ *  @return Counters since construction or reset_stats(). */
 inline const WriteVerifyStats& get_stats(WriteVerifier& wv) {
     return wv.stats();
 }
 
-/** @brief Reset statistics on a WriteVerifier */
+/** @brief Reset statistics on a WriteVerifier
+ *  @param wv Verifier whose counters are cleared. */
 inline void reset_stats(WriteVerifier& wv) {
     wv.resetStats();
 }
 
-/** @brief Log statistics from a WriteVerifier */
+/** @brief Log statistics from a WriteVerifier
+ *  @param wv Verifier whose counters are logged. */
 inline void log_stats(WriteVerifier& wv) {
     wv.logStats();
 }
