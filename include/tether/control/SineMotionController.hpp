@@ -102,26 +102,31 @@ public:
 
     /**
      * @brief Get current state
+     * @return Position/velocity/acceleration/running snapshot
      */
     const State& getState() const { return m_state; }
 
     /**
      * @brief Get current position
+     * @return Sine generator output position
      */
     double getPosition() const override { return m_state.position; }
 
     /**
      * @brief Get current velocity
+     * @return Current output velocity
      */
     double getVelocity() const override { return m_state.velocity; }
 
     /**
      * @brief Get current acceleration
+     * @return Current output acceleration
      */
     double getAcceleration() const override { return m_state.acceleration; }
 
     /**
      * @brief Check if the controller is currently running
+     * @return `true` while the generator is producing output
      */
     bool isRunning() const override { return m_state.running; }
 
@@ -130,6 +135,8 @@ public:
      *
      * Useful when the controller is operating in radians and the caller
      * wants values in encoder counts (scale = counts_per_radian).
+     * @param scale Multiplier applied to the raw position
+     * @return Position scaled to integer counts
      */
     int32_t getPositionScaled(double scale) const {
         return static_cast<int32_t>(m_state.position * scale);
@@ -145,33 +152,47 @@ public:
     
     /**
      * @brief Set amplitude (smoothly ramped)
+     * @param amplitude New amplitude
+     * @param immediate `true` to jump without ramping
      */
     void setAmplitude(double amplitude, bool immediate = false);
-    
+
     /**
      * @brief Set frequency (smoothly ramped)
+     * @param frequency New frequency [Hz]
+     * @param immediate `true` to jump without ramping
      */
     void setFrequency(double frequency, bool immediate = false);
-    
+
     /**
      * @brief Set DC offset (smoothly ramped)
+     * @param offset New DC offset added to the output
+     * @param immediate `true` to jump without ramping
      */
     void setOffset(double offset, bool immediate = false);
-    
+
     /**
      * @brief Set phase offset (smoothly ramped)
+     * @param phase New phase offset [rad]
+     * @param immediate `true` to jump without ramping
      */
     void setPhaseOffset(double phase, bool immediate = false);
-    
+
     /**
      * @brief Set all parameters at once
+     * @param amplitude New amplitude
+     * @param frequency New frequency [Hz]
+     * @param offset New DC offset
+     * @param phaseOffset New phase offset [rad]
+     * @param immediate `true` to jump all parameters without ramping
      */
-    void setParameters(double amplitude, double frequency, 
+    void setParameters(double amplitude, double frequency,
                        double offset, double phaseOffset,
                        bool immediate = false);
-    
+
     /**
      * @brief Set parameter ramp time
+     * @param time Ramp duration for parameter changes [s]
      */
     void setRampTime(double time);
     
@@ -187,6 +208,7 @@ public:
     
     /**
      * @brief Check if all parameter transitions are complete
+     * @return `true` when every ramped parameter has reached its target
      */
     bool isParameterStable() const;
     
@@ -271,7 +293,8 @@ public:
     
     /**
      * @brief Update all axes
-     * @return Positions for all axes
+     * @param dt Time step [s]
+     * @return Positions for all axes (disabled axes report their offset)
      */
     std::array<double, NumAxes> update(double dt) {
         std::array<double, NumAxes> positions;
@@ -287,6 +310,8 @@ public:
     
     /**
      * @brief Set master frequency (affects all axes)
+     * @param freq New frequency [Hz] applied to every axis
+     * @param immediate `true` to jump without ramping
      */
     void setFrequency(double freq, bool immediate = false) {
         m_config.frequency = freq;
@@ -297,6 +322,9 @@ public:
     
     /**
      * @brief Set amplitude for specific axis
+     * @param axis Axis index (silently ignored when >= NumAxes)
+     * @param amplitude New amplitude for that axis
+     * @param immediate `true` to jump without ramping
      */
     void setAxisAmplitude(size_t axis, double amplitude, bool immediate = false) {
         if (axis < NumAxes) {
@@ -307,6 +335,9 @@ public:
     
     /**
      * @brief Set phase offset for specific axis
+     * @param axis Axis index (silently ignored when >= NumAxes)
+     * @param phase New phase offset [rad]
+     * @param immediate `true` to jump without ramping
      */
     void setAxisPhaseOffset(size_t axis, double phase, bool immediate = false) {
         if (axis < NumAxes) {
@@ -329,6 +360,9 @@ public:
     
     /**
      * @brief Configure elliptical motion
+     * @param majorAxis Semi-major axis amplitude
+     * @param minorAxis Semi-minor axis amplitude
+     * @param rotation Ellipse rotation [rad] (currently unused — TODO)
      */
     void configureElliptical(double majorAxis, double minorAxis, double rotation = 0.0) {
         static_assert(NumAxes >= 2, "Need at least 2 axes for elliptical motion");
@@ -341,6 +375,11 @@ public:
     
     /**
      * @brief Configure Lissajous pattern
+     * @param ampX Amplitude on axis 0
+     * @param ampY Amplitude on axis 1
+     * @param freqRatioX Frequency ratio on axis 0
+     * @param freqRatioY Frequency ratio on axis 1
+     * @param phaseDiff Phase difference between the axes [rad]
      */
     void configureLissajous(double ampX, double ampY, int freqRatioX, int freqRatioY,
                             double phaseDiff = 0.0) {
@@ -371,6 +410,7 @@ private:
  */
 class FrequencySweepGenerator {
 public:
+    /// @brief How sweep frequency evolves over time.
     enum class SweepType {
         Linear,             ///< Linear frequency sweep
         Logarithmic,        ///< Logarithmic (exponential) sweep
@@ -513,6 +553,9 @@ public:
     
     /**
      * @brief Configure as square wave approximation
+     * @param fundamentalFreq Fundamental frequency [Hz]
+     * @param amplitude Approximate square-wave amplitude (Fourier series)
+     * @param harmonics Number of odd harmonics to sum (more = sharper edges)
      */
     void configureSquareWave(double fundamentalFreq, double amplitude, int harmonics = 5) {
         clearHarmonics();
@@ -523,6 +566,9 @@ public:
     
     /**
      * @brief Configure as sawtooth wave approximation
+     * @param fundamentalFreq Fundamental frequency [Hz]
+     * @param amplitude Approximate sawtooth amplitude (Fourier series)
+     * @param harmonics Number of harmonics to sum
      */
     void configureSawtoothWave(double fundamentalFreq, double amplitude, int harmonics = 10) {
         clearHarmonics();
@@ -533,6 +579,9 @@ public:
     
     /**
      * @brief Configure as triangle wave approximation
+     * @param fundamentalFreq Fundamental frequency [Hz]
+     * @param amplitude Approximate triangle amplitude (Fourier series)
+     * @param harmonics Number of odd harmonics to sum
      */
     void configureTriangleWave(double fundamentalFreq, double amplitude, int harmonics = 5) {
         clearHarmonics();
