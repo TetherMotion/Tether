@@ -131,36 +131,44 @@ public:
     
     /**
      * @brief Configure homing parameters
+     * @param params Speeds, accelerations, and offsets for the homing cycle
      */
     void configure(const HomingParams& params);
-    
+
     /**
      * @brief Set homing method
+     * @param method CiA 402 homing method number
      */
     void setMethod(HomingMethod method) { m_method = method; }
-    
+
     /**
      * @brief Get current homing method
+     * @return Active homing method
      */
     HomingMethod getMethod() const { return m_method; }
-    
+
     /**
      * @brief Set switch status callback
+     * @param callback Queried for home/limit/index switch states during
+     *        the homing sequence
      */
     void setSwitchCallback(HomingStatusCallback callback);
-    
+
     /**
      * @brief Set completion callback
+     * @param callback Invoked once when homing attains or fails
      */
     void setCompleteCallback(HomingCompleteCallback callback);
-    
+
     /**
      * @brief Set drive backend
+     * @param backend Drive backend used to command the axis
      */
     void setBackend(DriveBackendPtr backend) { m_backend = backend; }
-    
+
     /**
      * @brief Set timeout in milliseconds
+     * @param timeoutMs Maximum homing duration before HomingError::Timeout
      */
     void setTimeout(uint32_t timeoutMs) { m_timeoutMs = timeoutMs; }
     
@@ -192,26 +200,31 @@ public:
     
     /**
      * @brief Check if homing is complete
+     * @return `true` once HomingState::Attained is reached
      */
     bool isComplete() const { return m_state == HomingState::Attained; }
-    
+
     /**
      * @brief Check if error occurred
+     * @return `true` when the homing sequence entered HomingState::Error
      */
     bool hasError() const { return m_state == HomingState::Error; }
-    
+
     /**
      * @brief Get current state
+     * @return HomingState the sequence is currently in
      */
     HomingState getState() const { return m_state; }
-    
+
     /**
      * @brief Get error code
+     * @return HomingError from a failed run; HomingError::None when clean
      */
     HomingError getError() const { return m_error; }
-    
+
     /**
      * @brief Get home position (after homing complete)
+     * @return Position registered as machine zero [counts]
      */
     int32_t getHomePosition() const { return m_homePosition; }
     
@@ -221,16 +234,22 @@ public:
     
     /**
      * @brief Check if method requires limit switch
+     * @param method Homing method to check
+     * @return `true` if the method uses the limit switch input
      */
     static bool methodRequiresLimit(HomingMethod method);
-    
+
     /**
      * @brief Check if method requires home switch
+     * @param method Homing method to check
+     * @return `true` if the method uses the home switch input
      */
     static bool methodRequiresHome(HomingMethod method);
-    
+
     /**
      * @brief Check if method requires index pulse
+     * @param method Homing method to check
+     * @return `true` if the method latches on the encoder index pulse
      */
     static bool methodRequiresIndex(HomingMethod method);
     
