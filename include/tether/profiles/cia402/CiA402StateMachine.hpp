@@ -158,11 +158,13 @@ public:
     
     /**
      * @brief Get current state
+     * @return State decoded from the last update().
      */
     State getCurrentState() const { return m_currentState; }
     
     /**
      * @brief Get previous state
+     * @return State before the most recent transition.
      */
     State getPreviousState() const { return m_previousState; }
     
@@ -182,7 +184,7 @@ public:
     /**
      * @brief Execute single state transition
      * 
-     * @param transition Transition command
+     * @param controlWordMask Control-word bits to drive onto the drive.
      * @return true if command was sent
      */
     bool executeTransition(uint16_t controlWordMask);
@@ -224,11 +226,13 @@ public:
     
     /**
      * @brief Get current operating mode
+     * @return Mode commanded by the master.
      */
     OperatingMode getOperatingMode() const { return m_operatingMode; }
     
     /**
      * @brief Get mode as displayed by drive
+     * @return Mode the drive reports it is actually running.
      */
     OperatingMode getDisplayedMode() const { return m_displayedMode; }
     
@@ -238,41 +242,49 @@ public:
     
     /**
      * @brief Check if drive is in fault state
+     * @return true when the state machine is in Fault or FaultReactionActive.
      */
     bool isFaulted() const;
     
     /**
      * @brief Check if drive is enabled
+     * @return true when the drive is in OperationEnabled.
      */
     bool isEnabled() const;
     
     /**
      * @brief Check if target is reached
+     * @return true when the status word reports target reached.
      */
     bool isTargetReached() const;
     
     /**
      * @brief Check if drive is in motion
+     * @return true when the drive reports a set-point acknowledged motion.
      */
     bool isInMotion() const;
     
     /**
      * @brief Check if warning is active
+     * @return true when the status word reports a warning.
      */
     bool hasWarning() const;
     
     /**
      * @brief Check if internal limit is active
+     * @return true when an internal limit (e.g. torque) is active.
      */
     bool isLimitActive() const;
     
     /**
      * @brief Get raw status word
+     * @return Status word of the last update().
      */
     uint16_t getStatusWord() const { return m_statusWord; }
     
     /**
      * @brief Get raw control word
+     * @return Control word last written to the drive.
      */
     uint16_t getControlWord() const { return m_controlWord; }
     
@@ -282,16 +294,19 @@ public:
     
     /**
      * @brief Check if homing is attained
+     * @return true when the status word reports homing attained.
      */
     bool isHomingAttained() const;
     
     /**
      * @brief Check if homing error occurred
+     * @return true when the status word reports a homing error.
      */
     bool hasHomingError() const;
     
     /**
      * @brief Start homing sequence
+     * @return true when the homing operation bit was set successfully.
      */
     bool startHoming();
     
@@ -349,6 +364,7 @@ namespace ControlWords {
 
 /**
  * @brief Shutdown: go to Ready to Switch On
+ * @return Raw control word for this transition.
  */
 constexpr uint16_t Shutdown() {
     return static_cast<uint16_t>(ControlWord::Shutdown);  // xxxx.xxxx.0xxx.0110
@@ -356,6 +372,7 @@ constexpr uint16_t Shutdown() {
 
 /**
  * @brief Switch On: go to Switched On
+ * @return Raw control word for this transition.
  */
 constexpr uint16_t SwitchOn() {
     return static_cast<uint16_t>(ControlWord::SwitchOn);  // xxxx.xxxx.0xxx.0111
@@ -363,6 +380,7 @@ constexpr uint16_t SwitchOn() {
 
 /**
  * @brief Switch On + Enable: go to Operation Enabled
+ * @return Raw control word for this transition.
  */
 constexpr uint16_t SwitchOnEnable() {
     return static_cast<uint16_t>(ControlWord::EnableOperation);  // xxxx.xxxx.0xxx.1111
@@ -370,6 +388,7 @@ constexpr uint16_t SwitchOnEnable() {
 
 /**
  * @brief Disable Voltage: go to Switch On Disabled
+ * @return Raw control word for this transition.
  */
 constexpr uint16_t DisableVoltage() {
     return static_cast<uint16_t>(ControlWord::DisableVoltage);  // xxxx.xxxx.0xxx.xx0x
@@ -377,6 +396,7 @@ constexpr uint16_t DisableVoltage() {
 
 /**
  * @brief Quick Stop
+ * @return Raw control word for this transition.
  */
 constexpr uint16_t QuickStop() {
     return static_cast<uint16_t>(ControlWord::QuickStop);  // xxxx.xxxx.0xxx.x01x
@@ -384,6 +404,7 @@ constexpr uint16_t QuickStop() {
 
 /**
  * @brief Disable Operation: go to Switched On
+ * @return Raw control word for this transition.
  */
 constexpr uint16_t DisableOperation() {
     return static_cast<uint16_t>(ControlWord::SwitchOn);  // xxxx.xxxx.0xxx.0111
@@ -391,6 +412,7 @@ constexpr uint16_t DisableOperation() {
 
 /**
  * @brief Enable Operation: go to Operation Enabled
+ * @return Raw control word for this transition.
  */
 constexpr uint16_t EnableOperation() {
     return static_cast<uint16_t>(ControlWord::EnableOperation);  // xxxx.xxxx.0xxx.1111
@@ -398,6 +420,7 @@ constexpr uint16_t EnableOperation() {
 
 /**
  * @brief Fault Reset
+ * @return Raw control word for this transition.
  */
 constexpr uint16_t FaultReset() {
     return static_cast<uint16_t>(ControlWord::FaultReset);  // xxxx.xxxx.1xxx.xxxx
@@ -405,6 +428,7 @@ constexpr uint16_t FaultReset() {
 
 /**
  * @brief Mask for state transition bits
+ * @return Raw control word for this transition.
  */
 constexpr uint16_t TransitionMask() {
     return ControlWordTransitionMask;  // Bits 0-3 and 7
@@ -420,6 +444,8 @@ namespace StatusWord {
 
 /**
  * @brief Check if Ready to Switch On
+ * @param sw Status word read from the drive.
+ * @return true when the corresponding bit pattern matches.
  */
 inline bool isReadyToSwitchOn(uint16_t sw) {
     return (sw & 0x006F) == 0x0021;
@@ -427,6 +453,8 @@ inline bool isReadyToSwitchOn(uint16_t sw) {
 
 /**
  * @brief Check if Switched On
+ * @param sw Status word read from the drive.
+ * @return true when the corresponding bit pattern matches.
  */
 inline bool isSwitchedOn(uint16_t sw) {
     return (sw & 0x006F) == 0x0023;
@@ -434,6 +462,8 @@ inline bool isSwitchedOn(uint16_t sw) {
 
 /**
  * @brief Check if Operation Enabled
+ * @param sw Status word read from the drive.
+ * @return true when the corresponding bit pattern matches.
  */
 inline bool isOperationEnabled(uint16_t sw) {
     return (sw & 0x006F) == 0x0027;
@@ -441,6 +471,8 @@ inline bool isOperationEnabled(uint16_t sw) {
 
 /**
  * @brief Check if Fault
+ * @param sw Status word read from the drive.
+ * @return true when the corresponding bit pattern matches.
  */
 inline bool isFault(uint16_t sw) {
     return (sw & 0x004F) == 0x0008;
@@ -448,6 +480,8 @@ inline bool isFault(uint16_t sw) {
 
 /**
  * @brief Check if Fault Reaction Active
+ * @param sw Status word read from the drive.
+ * @return true when the corresponding bit pattern matches.
  */
 inline bool isFaultReactionActive(uint16_t sw) {
     return (sw & 0x004F) == 0x000F;
@@ -455,6 +489,8 @@ inline bool isFaultReactionActive(uint16_t sw) {
 
 /**
  * @brief Check if Switch On Disabled
+ * @param sw Status word read from the drive.
+ * @return true when the corresponding bit pattern matches.
  */
 inline bool isSwitchOnDisabled(uint16_t sw) {
     return (sw & 0x004F) == 0x0040;
@@ -462,6 +498,8 @@ inline bool isSwitchOnDisabled(uint16_t sw) {
 
 /**
  * @brief Check if Quick Stop Active
+ * @param sw Status word read from the drive.
+ * @return true when the corresponding bit pattern matches.
  */
 inline bool isQuickStopActive(uint16_t sw) {
     return (sw & 0x006F) == 0x0007;
@@ -469,6 +507,8 @@ inline bool isQuickStopActive(uint16_t sw) {
 
 /**
  * @brief Check if Target Reached
+ * @param sw Status word read from the drive.
+ * @return true when the corresponding bit pattern matches.
  */
 inline bool isTargetReached(uint16_t sw) {
     return (sw & static_cast<uint16_t>(StatusWordBit::TargetReached)) != 0;
@@ -476,6 +516,8 @@ inline bool isTargetReached(uint16_t sw) {
 
 /**
  * @brief Check if Warning
+ * @param sw Status word read from the drive.
+ * @return true when the corresponding bit pattern matches.
  */
 inline bool hasWarning(uint16_t sw) {
     return (sw & static_cast<uint16_t>(StatusWordBit::Warning)) != 0;
@@ -483,6 +525,8 @@ inline bool hasWarning(uint16_t sw) {
 
 /**
  * @brief Check if Internal Limit Active
+ * @param sw Status word read from the drive.
+ * @return true when the corresponding bit pattern matches.
  */
 inline bool isLimitActive(uint16_t sw) {
     return (sw & static_cast<uint16_t>(StatusWordBit::InternalLimitActive)) != 0;
@@ -490,6 +534,8 @@ inline bool isLimitActive(uint16_t sw) {
 
 /**
  * @brief Check Homing Attained (HM mode)
+ * @param sw Status word read from the drive.
+ * @return true when the corresponding bit pattern matches.
  */
 inline bool isHomingAttained(uint16_t sw) {
     return (sw & static_cast<uint16_t>(StatusWordBit::HomingAttained)) != 0;
@@ -497,6 +543,8 @@ inline bool isHomingAttained(uint16_t sw) {
 
 /**
  * @brief Check Homing Error (HM mode)
+ * @param sw Status word read from the drive.
+ * @return true when the corresponding bit pattern matches.
  */
 inline bool hasHomingError(uint16_t sw) {
     return (sw & static_cast<uint16_t>(StatusWordBit::HomingError)) != 0;
