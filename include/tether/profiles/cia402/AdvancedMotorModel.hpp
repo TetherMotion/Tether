@@ -65,6 +65,8 @@ struct FrictionParams {
     
     /**
      * @brief Check if in stiction (stuck) state
+     * @param velocity Current shaft velocity [rad/s]
+     * @return `true` while |velocity| is below the stiction threshold
      */
     bool isInStiction(double velocity) const {
         return std::abs(velocity) < stictionVelocity;
@@ -476,11 +478,29 @@ public:
     void setControlMode(ControlMode mode);
     ControlMode getControlMode() const { return controlMode_; }
     
-    void setTargetTorque(double torque);       ///< [Nm] at motor
-    void setTargetVelocity(double velocity);   ///< [rad/s] at motor
-    void setTargetPosition(double position);   ///< [rad] at motor
-    
-    void setExternalLoadTorque(double torque); ///< [Nm] at output
+    /**
+     * @brief Set target torque
+     * @param torque Torque command at the motor shaft [Nm]
+     */
+    void setTargetTorque(double torque);
+
+    /**
+     * @brief Set target velocity
+     * @param velocity Velocity command at the motor shaft [rad/s]
+     */
+    void setTargetVelocity(double velocity);
+
+    /**
+     * @brief Set target position
+     * @param position Absolute position command at the motor shaft [rad]
+     */
+    void setTargetPosition(double position);
+
+    /**
+     * @brief Set external load torque
+     * @param torque Load applied at the gearbox output [Nm]
+     */
+    void setExternalLoadTorque(double torque);
     
     // =========================================================================
     // Simulation
@@ -494,6 +514,7 @@ public:
     
     /**
      * @brief Get current system state
+     * @return Simulated state (position, velocity, current, temperature)
      */
     const SystemState& getState() const { return state_; }
     
@@ -630,6 +651,10 @@ namespace Factory {
 
 /**
  * @brief Create parameters for a typical BLDC servo motor
+ * @param ratedTorque Continuous torque rating [Nm]
+ * @param maxSpeed Maximum shaft speed [RPM]
+ * @param encoderBits Encoder resolution [bits/rev]
+ * @return Motor parameter set matching the ratings
  */
 MotorParams createBLDCServoMotor(
     double ratedTorque = 1.0,
@@ -639,6 +664,10 @@ MotorParams createBLDCServoMotor(
 
 /**
  * @brief Create parameters for a stepper motor (modeled as servo)
+ * @param holdingTorque Holding torque at standstill [Nm]
+ * @param stepsPerRev Full steps per revolution
+ * @param microsteps Microstepping divisor
+ * @return Motor parameter set approximating the stepper
  */
 MotorParams createStepperMotor(
     double holdingTorque = 0.5,
@@ -648,6 +677,10 @@ MotorParams createStepperMotor(
 
 /**
  * @brief Create planetary gearbox parameters
+ * @param ratio Overall reduction ratio
+ * @param stages Number of planetary stages
+ * @param highEfficiency `true` applies low-loss efficiency constants
+ * @return Geartrain parameter set
  */
 GeartrainParams createPlanetaryGearbox(
     double ratio = 10.0,
@@ -657,6 +690,8 @@ GeartrainParams createPlanetaryGearbox(
 
 /**
  * @brief Create harmonic drive parameters
+ * @param ratio Overall reduction ratio
+ * @return Geartrain parameter set (strain-wave stiffness/backlash)
  */
 GeartrainParams createHarmonicDrive(
     double ratio = 100.0
@@ -664,6 +699,10 @@ GeartrainParams createHarmonicDrive(
 
 /**
  * @brief Create friction parameters from basic values
+ * @param staticFriction Breakaway torque at standstill [Nm]
+ * @param coulombFriction Constant friction torque during motion [Nm]
+ * @param viscousCoeff Velocity-proportional coefficient [Nm·s/rad]
+ * @return Friction parameter set
  */
 FrictionParams createFrictionParams(
     double staticFriction,
