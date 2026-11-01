@@ -266,12 +266,15 @@ struct CyclicChannelConfig {
  * Returns nullptr when no cyclic socket can be created at all (missing
  * CAP_NET_RAW, bad ifindex) — the caller then keeps the software deposit path.
  * WireMode::Auto falls back from ring to socket with a log line.
+ * @param cfg Channel configuration (interface, mode, ring sizes)
+ * @return New channel, or nullptr when creation fails
  */
 std::unique_ptr<ICyclicChannel> createCyclicChannel(
     const CyclicChannelConfig& cfg);
 
 /**
  * @brief Attach the cyclic-idx accept filter to an AF_PACKET socket (Linux).
+ * @param fd Socket to attach the filter to
  * @return false on unsupported platform / setsockopt failure.
  */
 bool cyclicChannelAttachCyclicFilter(int fd);
@@ -279,6 +282,8 @@ bool cyclicChannelAttachCyclicFilter(int fd);
 /**
  * @brief Attach the mirror filter (drop cyclic-idx frames) to an AF_PACKET
  *        socket — used on the async socket (socket B).
+ * @param fd Socket to attach the filter to
+ * @return `true` on success
  */
 bool cyclicChannelAttachAsyncFilter(int fd);
 
@@ -306,6 +311,8 @@ inline constexpr size_t kCyclicBpfInsnCount = 14;
  * @brief Build the kernel demux filter program.
  * @param accept_cyclic  true → socket-A program (accept iff first-datagram
  *        idx ∈ [0x9C,0xFF] \ {0xFE}); false → socket-B mirror.
+ * @param out Buffer receiving the filter instructions
+ * @param cap Instruction capacity of `out`
  * @return instructions written, or 0 if @p cap is too small.
  */
 size_t cyclicChannelBpfProgram(bool accept_cyclic,
@@ -322,6 +329,7 @@ size_t cyclicChannelBpfProgram(bool accept_cyclic,
  *
  * @param fd       owned by the channel on success (closed on destruction)
  * @param ifindex  used for sockaddr_ll addressing on TX
+ * @return Socket-backend channel over `fd`
  */
 std::unique_ptr<ICyclicChannel> createCyclicSocketChannelForFd(
     int fd, int ifindex);
@@ -330,6 +338,12 @@ std::unique_ptr<ICyclicChannel> createCyclicSocketChannelForFd(
  * @brief Same seam for the PACKET_MMAP ring backend — the fd must be a
  *        bound AF_PACKET socket; returns nullptr when ring setup fails
  *        (no CAP_NET_RAW, kernel without TPACKET_V2, OOM on mmap).
+ * @param fd Bound AF_PACKET socket used by the ring
+ * @param ifindex Interface index for sockaddr_ll addressing
+ * @param rx_ring_blocks RX ring block count
+ * @param tx_ring_blocks TX ring block count
+ * @param rx_spin_ns Busy-wait budget before sleeping [ns]
+ * @return Ring-backend channel, or nullptr when ring setup fails
  */
 std::unique_ptr<ICyclicChannel> createCyclicRingChannelForFd(
     int fd, int ifindex, uint32_t rx_ring_blocks = 128,
@@ -351,6 +365,20 @@ std::unique_ptr<ICyclicChannel> createCyclicRingChannelForFd(
  * `fpb*frame_size < block_size` the block tail is padding and frame i
  * sits at `(i/fpb)*block_size + (i%fpb)*frame_size` — NOT i*frame_size.
  * Passing 0 keeps the legacy flat layout (block_size == frame_size).
+ * @param fd Socket used for TX kick and poll wake-ups
+ * @param ifindex Interface index for sockaddr_ll addressing
+ * @param rx_ring Caller-owned RX ring memory
+ * @param rx_frame_size Bytes per RX frame
+ * @param rx_frames RX frame count
+ * @param tx_ring Caller-owned TX ring memory
+ * @param tx_frame_size Bytes per TX frame
+ * @param tx_frames TX frame count
+ * @param rx_spin_ns Busy-wait budget before sleeping [ns]
+ * @param rx_block_size Kernel block layout; 0 = flat
+ * @param rx_fpb Frames per block; 0 = flat
+ * @param tx_block_size Kernel block layout; 0 = flat
+ * @param tx_fpb Frames per block; 0 = flat
+ * @return Ring channel over the caller memory, or nullptr on bad geometry
  */
 std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
     int fd, int ifindex,
@@ -367,6 +395,12 @@ std::unique_ptr<ICyclicChannel> createCyclicRingChannelForMemory(
  * a `tpacket_block_desc` — tests synthesize block headers + tpacket3_hdr
  * frame chains to exercise the V3 walk/retire path without CAP_NET_RAW.
  * TX falls back to the socket path.  Returns nullptr off-Linux.
+ * @param fd Socket used for TX kick and poll wake-ups
+ * @param ifindex Interface index for sockaddr_ll addressing
+ * @param rx_ring Caller-owned V3 block memory
+ * @param block_size Bytes per block
+ * @param blocks Number of blocks
+ * @return V3 channel over the caller memory, or nullptr off-Linux
  */
 std::unique_ptr<ICyclicChannel> createCyclicRingChannelV3ForMemory(
     int fd, int ifindex,
