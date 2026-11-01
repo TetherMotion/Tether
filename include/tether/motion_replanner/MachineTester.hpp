@@ -239,34 +239,46 @@ public:
     
     /**
      * @brief Run a single-axis test
+     * @param config Axis, trajectory, and sampling parameters
+     * @return Test outcome with measured samples and status
      */
     TestResult runSingleAxisTest(const SingleAxisTestConfig& config);
-    
+
     /**
      * @brief Run a multi-axis test
+     * @param config Coordinated-motion test parameters
+     * @return Test outcome with measured samples and status
      */
     TestResult runMultiAxisTest(const MultiAxisTestConfig& config);
-    
+
     /**
      * @brief Run friction identification
+     * @param config Velocity sweep and measurement parameters
+     * @return Test outcome with friction samples and fitted model
      */
     TestResult runFrictionTest(const FrictionTestConfig& config);
-    
+
     /**
      * @brief Run delay identification
+     * @param config Step/pulse timing parameters
+     * @return Test outcome with measured delay
      */
     TestResult runDelayTest(const DelayTestConfig& config);
-    
+
     /**
      * @brief Run PID tuning analysis
+     * @param config PID test parameters (step amplitude, duration)
+     * @return Test outcome with step-response samples
      */
     TestResult runPIDTest(const PIDTestConfig& config);
-    
+
     /**
      * @brief Run a complete test sequence
+     * @param sequence Ordered list of tests to execute
+     * @return One TestResult per sequence step
      */
     std::vector<TestResult> runTestSequence(const TestSequence& sequence);
-    
+
     /**
      * @brief Create standard test sequences
      */
@@ -274,15 +286,17 @@ public:
     static TestSequence createFullCalibration();
     static TestSequence createAxisCharacterization(int axis);
     static TestSequence createWorkspaceMapping(const HeatmapConfig& heatmapConfig);
-    
+
     /**
      * @brief Get the heatmap built from test results
+     * @return Accumulated performance heatmap
      */
     const HeatmapBuilder& getHeatmapBuilder() const { return heatmapBuilder_; }
     HeatmapBuilder& heatmapBuilder() { return heatmapBuilder_; }
-    
+
     /**
      * @brief Get all test results
+     * @return Results of every test run so far
      */
     const std::vector<TestResult>& getResults() const { return results_; }
     
@@ -346,6 +360,8 @@ struct FrictionModel {
     
     /**
      * @brief Calculate friction force at a given velocity
+     * @param velocity Signed velocity [units/s]
+     * @return Friction force opposing motion (signed)
      */
     double frictionForce(double velocity) const {
         double absVel = std::abs(velocity);
@@ -361,6 +377,9 @@ struct FrictionModel {
     
     /**
      * @brief Fit model to velocity-force data
+     * @param velocities Measured velocities
+     * @param forces Measured friction forces at those velocities
+     * @return Fitted friction model parameters
      */
     static FrictionModel fitFromData(
         const std::vector<double>& velocities,

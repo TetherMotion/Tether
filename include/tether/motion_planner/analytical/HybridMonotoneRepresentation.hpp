@@ -110,6 +110,7 @@ struct LGLElement {
     std::vector<std::vector<double>> deriv_matrix;
 
     /// Initialize the LGL structure (nodes, weights, derivative matrix)
+    /// @param degree Polynomial degree (produces degree+1 LGL nodes)
     void init(int degree) {
         N = degree;
         ref_nodes = lglNodes(N);
@@ -119,16 +120,22 @@ struct LGLElement {
     }
 
     /// Map s to reference coordinate xi in [-1, 1]
+    /// @param s Physical arc-length coordinate
+    /// @return Normalized coordinate ξ on the element
     double sToXi(double s) const {
         return 2.0 * (s - s_left) / (s_right - s_left) - 1.0;
     }
 
     /// Map reference coordinate xi to physical s
+    /// @param xi Normalized coordinate on [-1, 1]
+    /// @return Physical arc-length coordinate
     double xiToS(double xi) const {
         return s_left + (xi + 1.0) * (s_right - s_left) / 2.0;
     }
 
     /// Evaluate f(s) using barycentric interpolation
+    /// @param s Physical arc-length coordinate (clamped to the element)
+    /// @return Interpolated value
     double evaluate(double s) const {
         double xi = sToXi(s);
         xi = std::clamp(xi, -1.0, 1.0);
@@ -136,6 +143,8 @@ struct LGLElement {
     }
 
     /// Evaluate df/ds using barycentric derivative
+    /// @param s Physical arc-length coordinate
+    /// @return Interpolated derivative df/ds
     double evaluateDerivative(double s) const {
         double xi = sToXi(s);
         xi = std::clamp(xi, -1.0, 1.0);
@@ -394,27 +403,36 @@ public:
     // ========================================================================
 
     /// Number of hybrid elements
+    /// @return Element count covering the path
     size_t numElements() const { return elements_.size(); }
 
     /// Get element by index
+    /// @param i Element index
+    /// @return Element i (throws when out of range)
     const HybridElement& element(size_t i) const { return elements_.at(i); }
 
     /// Get all elements
+    /// @return Element list covering the path
     const std::vector<HybridElement>& elements() const { return elements_; }
 
     /// Get the target tolerance
+    /// @return Discretization tolerance used at build time
     double tolerance() const { return tolerance_; }
 
     /// Get the path
+    /// @return Path the representation was built for
     const Path& path() const { return *path_; }
 
     /**
      * @brief Update the path pointer (use after the path is moved).
+     * @param path Path object to point at
      */
     void setPath(const Path& path) { path_ = &path; }
 
     /**
      * @brief Evaluate position at a given arc length (no time inversion needed).
+     * @param s Arc-length coordinate [mm]
+     * @return Cartesian position on the path
      */
     Point positionAtArcLength(T s) const {
         return path_->evaluateAtArcLength(s).position;
@@ -422,6 +440,8 @@ public:
 
     /**
      * @brief Estimate time at a given arc length.
+     * @param s Arc-length coordinate [mm]
+     * @return Interpolated time at s [s]
      */
     T timeAtArcLength(T s) const override {
         // Find the element containing this arc length
