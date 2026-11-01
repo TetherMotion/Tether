@@ -110,12 +110,35 @@ public:
     /**Mark the session as live before its worker thread enters run(). */
     void markRunning() { running_.store(true, std::memory_order_relaxed); }
 
-    /**True while run() is executing. */
+    /**
+     * @brief Whether the event loop is currently executing.
+     *
+     * Set explicitly via markRunning() before entering run() and cleared
+     * when run() returns after requestStop(). Observation is
+     * relaxed-atomic — a false→true edge may lag the actual loop entry
+     * by a few instructions.
+     *
+     * @return true while run() is active.
+     */
     bool isRunning() const { return running_.load(std::memory_order_relaxed); }
 
     /**
      * Publish a log record to all matching subscriptions on this session.
      * Safe to call from a thread other than the session worker.
+     *
+     * The record is queued and emitted from the session worker as a
+     * LogData frame to every subscription whose severity/component/
+     * message/location filters accept it. String arguments are copied,
+     * so views into temporary storage are safe.
+     *
+     * @param severity   Record severity; subscriptions filter on
+     *                   minSeverity.
+     * @param component  Originating component name matched against
+     *                   componentFilter.
+     * @param message    Log message body matched against messageFilter.
+     * @param location   Optional source location matched against
+     *                   locationFilter; empty matches filters expecting
+     *                   no location constraint.
      */
     void publishLog(LogSeverity severity, std::string_view component,
                     std::string_view message, std::string_view location = {});
@@ -151,6 +174,20 @@ public:
      * (MAX_PENDING_INVOKES) or the transport send fails.  Safe to call
      * from any thread; multiple calls may be outstanding concurrently
      * (pipelining).
+     *
+     * @param functionId  ID of the peer function, as published in the
+     *                    client's RegisterFunctionsReq catalog (see
+     *                    findPeerFunctionId() to resolve by name).
+     * @param arguments   Positional arguments serialized into the
+     *                    InvokeExReq frame.
+     * @param deadlineUs  Absolute deadline in getTimestampUs_() units;
+     *                    0 disables the timeout.
+     * @param callback    Invoked exactly once with the InvokeResult —
+     *                    on the worker thread for wire responses, on the
+     *                    sweep thread for deadline expiries.
+     * @return true if the request was queued and sent; false when the
+     *         pending table is full (MAX_PENDING_INVOKES) or the
+     *         transport send failed — @p callback is not invoked then.
      */
     bool callPeer(uint64_t functionId,
                   const std::vector<FunctionArgument>& arguments,
@@ -160,13 +197,35 @@ public:
     /**
      * Copy of the catalog the client published via RegisterFunctionsReq.
      * Safe to call from any thread.
+     *
+     * The catalog is session-scoped — it dies with the connection and is
+     * empty until the client registers.
+     *
+     * @return Snapshot of the peer's published function descriptors; a
+     *         copy, so it stays valid across later registration updates.
      */
     std::vector<FunctionDescriptor> peerFunctions() const;
 
-    /**Registered id for `name`, or nullopt when no peer function matches. */
+    /**
+     * @brief Resolve a peer function's registered ID by name.
+     *
+     * Looks up @p name in the client's published catalog; use the result
+     * as the functionId argument to callPeer().
+     *
+     * @param name  Function name as published via RegisterFunctionsReq.
+     * @return The registered function ID, or std::nullopt when no peer
+     *         function with that name exists (including before any
+     *         registration).
+     */
     std::optional<uint64_t> findPeerFunctionId(std::string_view name) const;
 
-    /**Number of InvokeEx calls currently awaiting a response. */
+    /**
+     * @brief Number of InvokeEx calls currently awaiting a response.
+     *
+     * @return Count of outstanding callPeer() requests — bounded by
+     *         MAX_PENDING_INVOKES; callPeer() fails when this is at the
+     *         limit.
+     */
     size_t pendingInvokeCount() const;
 
     // ---- Session identity (transport-authenticated caller) ----
@@ -174,6 +233,10 @@ public:
     /**
      * Stable identifier for this session, generated at construction.
      * Authority leases and audit records reference it.
+     *
+     * @return The session's unique ID string — constant for the session's
+     *         lifetime and distinct from the transport-authenticated
+     *         identity() (which describes *who* the caller is).
      */
     const std::string& sessionId() const { return sessionId_; }
 
@@ -181,10 +244,22 @@ public:
      * Assign the transport-authenticated identity (e.g. from a WebSocket
      * upgrade's TLS/mTLS credential or an authenticated session cookie).
      * Until called, the session is an unauthenticated observer.
+     *
+     * Function invocations carry this identity into their execution
+     * context for permission checks.
+     *
+     * @param identity  Authenticated identity to associate with the
+     *                  session; replaces any previous value.
      */
     void setIdentity(machine::SessionIdentity identity);
 
-    /**Current session identity as seen by function invocation contexts. */
+    /**
+     * @brief Current session identity as seen by function invocation
+     *        contexts.
+     *
+     * @return The identity installed by the last setIdentity() call, or
+     *         the unauthenticated-observer default when never set.
+     */
     machine::SessionIdentity identity() const;
 
 private:
