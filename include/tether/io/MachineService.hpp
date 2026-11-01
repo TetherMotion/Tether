@@ -100,6 +100,8 @@ inline std::vector<uint8_t> fieldBytes(const std::vector<uint8_t>& value) {
 }
 
 /// Encode a tagged struct: field-count varint then [key varint][len varint][bytes].
+/// @param fields Key/value byte fields in emission order.
+/// @return Wire encoding of the tagged struct.
 inline std::vector<uint8_t> encodeTagged(const FieldList& fields) {
     std::vector<uint8_t> encoded;
     putVarint(encoded, fields.size());
@@ -112,6 +114,8 @@ inline std::vector<uint8_t> encodeTagged(const FieldList& fields) {
 }
 
 /// Encode a dynamic array of already-encoded elements.
+/// @param elements Pre-encoded element payloads.
+/// @return Length-prefixed array encoding.
 inline std::vector<uint8_t> encodeArray(const std::vector<std::vector<uint8_t>>& elements) {
     std::vector<uint8_t> encoded;
     putVarint(encoded, elements.size());
@@ -123,6 +127,9 @@ inline std::vector<uint8_t> encodeArray(const std::vector<std::vector<uint8_t>>&
 }
 
 /// Parse a tagged struct into key → bytes. Returns false on malformed input.
+/// @param bytes Wire bytes to decode.
+/// @param fields Receives the decoded key/value pairs.
+/// @return false when the input is truncated or malformed.
 inline bool parseTagged(const std::vector<uint8_t>& bytes,
                         std::map<uint32_t, std::vector<uint8_t>>& fields) {
     size_t position = 0;
@@ -240,6 +247,9 @@ public:
     /// Attach an external notifier. `audit` is an optional EventJournal that
     /// records every emitted notification as `alarm.notify.*` — the durable
     /// evidence for escalation and acknowledgement delivery attempts.
+    /// @param notifier Sink for alarm notifications; null detaches.
+    /// @param policy Rate/dedup policy applied to notifications.
+    /// @param audit Optional journal recording delivery attempts.
     void setNotifier(IAlarmNotifier* notifier, AlarmNotifyPolicy policy = {},
                      EventJournal* audit = nullptr) {
         std::lock_guard lock(mutex_);
@@ -252,6 +262,8 @@ public:
     /// past `escalationDelayUs`, repeating at `escalationIntervalUs` up to
     /// `maxEscalations`. Called opportunistically from `readAfter`; hosts may
     /// also invoke it on a timer.
+    ///
+    /// @param nowUs Current time in microseconds (injectable for tests).
     void tick(uint64_t nowUs = detail::nowUs()) {
         std::vector<std::pair<AlarmRecordV1, AlarmNotification>> pending;
         {
@@ -308,6 +320,9 @@ public:
     }
 
     /// Returns 0 on success, 1 when absent/already terminal, 2 when denied.
+    /// @param alarmId Alarm to acknowledge.
+    /// @param identity Session performing the acknowledgement (role checked).
+    /// @param nowUs Current time in microseconds.
     uint8_t acknowledge(uint64_t alarmId, const SessionIdentity& identity,
                         uint64_t nowUs = detail::nowUs()) {
         if (!identity.authenticated || identity.role == Role::Observer) return 2;
@@ -497,6 +512,10 @@ public:
 
     /// Cancel a non-terminal operation. Dispatchers that cannot abort return
     /// false via `tryCancel`; this only marks the record.
+    /// @param id Operation identifier.
+    /// @param identity Session requesting the cancel (owner or privileged).
+    /// @param allowOwnerOrPrivileged false to require a privileged role.
+    /// @return true when the record was marked cancelled.
     bool tryCancel(const std::string& id, const SessionIdentity& identity,
                    bool allowOwnerOrPrivileged = true) {
         std::lock_guard lock(mutex_);
@@ -515,6 +534,9 @@ public:
     }
 
     /// Cancel every non-terminal operation owned by a disconnecting session.
+    /// @param sessionId Session whose operations are cancelled.
+    /// @param reason Message stored on each cancelled record.
+    /// @return Number of operations cancelled.
     size_t cancelAllForSession(const std::string& sessionId, std::string_view reason) {
         std::lock_guard lock(mutex_);
         size_t count = 0;
@@ -563,13 +585,17 @@ class IMachineStateSource {
 public:
     virtual ~IMachineStateSource() = default;
     /// Stable resource identifiers of all commandable axes.
+    /// @return Axis IDs accepted in CommandRequest targets.
     virtual std::vector<std::string> axisIds() const = 0;
     virtual std::optional<cia402::DriveSnapshotV1> driveSnapshot(
         std::string_view stableId) const = 0;
     /// Current command environment (generations, supported actions, blockers).
+    /// @param request Command whose environment is requested.
+    /// @return Environment, or nullopt when the request cannot be evaluated.
     virtual std::optional<CommandEnvironment> commandEnvironment(
         const CommandRequest& request) = 0;
     /// Machine-wide configuration revision checked by the gate.
+    /// @return Revision counter; stale clients are rejected.
     virtual uint64_t configurationRevision() const = 0;
 };
 
@@ -584,6 +610,7 @@ public:
                                     OperationTracker& operations) = 0;
     /// Attempt to abort an in-flight operation. Returns false when the
     /// operation cannot be interrupted (the tracker still marks it cancelled).
+    /// @param operationId Operation to abort.
     virtual bool cancelOperation(std::string_view operationId) = 0;
 };
 
@@ -633,6 +660,13 @@ public:
 
     /// Configure the recorder; entryIds empty = all fixed-size entries.
     /// An optional trigger switches the sink into pre/post-trigger mode.
+    /// @param logName Journal log name (<= 128 chars).
+    /// @param sampleRateHz Sampling rate [Hz] (1..100000).
+    /// @param enabled true to start recording immediately.
+    /// @param entryIds Entries to capture; empty means all fixed-size entries.
+    /// @param trigger Optional pre/post-trigger rule.
+    /// @return false when the parameters are out of range or an entry is
+    ///         unknown/variable-length.
     bool configure(std::string logName, uint32_t sampleRateHz, bool enabled,
                    std::vector<uint64_t> entryIds,
                    std::optional<CaptureTrigger> trigger = std::nullopt) {
@@ -697,6 +731,7 @@ public:
     }
 
     /// Records currently retained and exportable.
+    /// @return Number of records in the retention ring.
     uint64_t recordsAvailable() const {
         std::lock_guard lock(mutex_);
         return records_.size();
@@ -708,6 +743,7 @@ public:
     }
 
     /// Records retained in memory (test/support-bundle access).
+    /// @return Copy of the retained record deque.
     std::deque<std::vector<uint8_t>> records() const {
         std::lock_guard lock(mutex_);
         return records_;
@@ -715,6 +751,9 @@ public:
 
     /// Concatenate up to `maxBytes` of records starting at `recordOffset`.
     /// Chunk size is hard-capped at kMaxExportChunkBytes.
+    /// @param recordOffset Index of the first record to export.
+    /// @param maxBytes Upper bound on exported payload bytes.
+    /// @return Chunk with records and bookkeeping (offset, totals, drops).
     CaptureExportChunk exportChunk(uint64_t recordOffset, uint32_t maxBytes) const {
         CaptureExportChunk chunk;
         std::lock_guard lock(mutex_);
@@ -1009,6 +1048,8 @@ struct SdoTransferResult {
 };
 
 /// CiA 301 / ETG.1000-6 SDO abort-code names for operator-facing display.
+/// @param code CoE SDO abort code.
+/// @return Static description, or "Unknown abort code" when unrecognized.
 inline const char* sdoAbortName(uint32_t code) {
     switch (code) {
         case 0x00000000: return "";
@@ -1049,6 +1090,8 @@ public:
     /// Objects known for `slave`, typically from a static device profile.
     /// An empty list means no object table is available; explicit-index
     /// reads and writes remain possible.
+    /// @param slave Slave index.
+    /// @return Known object dictionary entries for that slave.
     virtual std::vector<SdoObjectInfoV1> listObjects(uint16_t slave) = 0;
 
     virtual SdoTransferResult read(uint16_t slave, uint16_t index,
@@ -1099,6 +1142,8 @@ public:
 
     /// machine.sdo.list — any authenticated session; empty when the backend
     /// has no object table for the slave.
+    /// @param slave Slave index.
+    /// @param identity Session identity (must be authenticated).
     FunctionCallResult list(uint16_t slave, const SessionIdentity& identity) const {
         FunctionCallResult result;
         if (!identity.authenticated) {
@@ -1112,6 +1157,8 @@ public:
     }
 
     /// machine.sdo.read — any authenticated session.
+    /// @param request Encoded request (slave, index, subindex, max_bytes).
+    /// @param identity Session identity (must be authenticated).
     FunctionCallResult read(const std::vector<uint8_t>& request,
                             const SessionIdentity& identity) const {
         FunctionCallResult result;
@@ -1141,6 +1188,8 @@ public:
     /// machine.sdo.write — technician-or-above only; journaled, rate-limited,
     /// and followed by a verification read on success. Optional request field
     /// 5 (`verify_readback`, bool) disables the readback (default on).
+    /// @param request Encoded request (slave, index, subindex, data, ...).
+    /// @param identity Session identity (technician or above).
     FunctionCallResult write(const std::vector<uint8_t>& request,
                              const SessionIdentity& identity) {
         FunctionCallResult result;
@@ -1378,6 +1427,8 @@ public:
     /// Controlled retry: reset a failed/critical slave's recovery state and
     /// trigger a bounded recovery pass. Returns false with `error` when the
     /// backend cannot retry (not supervised, recovery in progress).
+    /// @param slave Slave index to retry.
+    /// @param error Receives the reason when the retry is refused.
     virtual bool retry(uint16_t slave, std::string& error) = 0;
 };
 
@@ -1406,6 +1457,8 @@ public:
     }
 
     /// machine.supervisor.retry — technician-or-above, rate-limited, audited.
+    /// @param slave Slave index to retry.
+    /// @param identity Session identity (technician or above).
     FunctionCallResult retry(uint16_t slave, const SessionIdentity& identity) {
         FunctionCallResult result;
         if (!identity.authenticated || identity.role < Role::Technician) {

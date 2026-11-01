@@ -108,6 +108,8 @@ enum class SlaveError : uint8_t {
 
 /**
  * @brief Convert a SlaveError to a human-readable string.
+ * @param e Error code to describe.
+ * @return Static message, including the corrective action where applicable.
  */
 inline const char* slaveErrorToString(SlaveError e) {
     switch (e) {
@@ -173,35 +175,43 @@ public:
 
     // -- Identification -----------------------------------------------------
 
-    /** @brief Slave bus index (0-based). */
+    /** @brief Slave bus index (0-based).
+     *  @return Position of this slave in the discovery order. */
     uint16_t index() const { return index_; }
 
-    /** @brief Auto-increment ADP for this slave. */
+    /** @brief Auto-increment ADP for this slave.
+     *  @return Auto-increment address used for register access. */
     uint16_t adp() const;
 
     // -- Human-readable name ------------------------------------------------
 
-    /** @brief Assign a human-readable name to this slave (used in log messages). */
+    /** @brief Assign a human-readable name to this slave (used in log messages).
+     *  @param name Name to assign (e.g. "X-axis drive"). */
     void setName(std::string name);
 
-    /** @brief The human-readable name assigned to this slave, or empty if unset. */
+    /** @brief The human-readable name assigned to this slave, or empty if unset.
+     *  @return Assigned name. */
     std::string_view name() const;
 
     /**
      * @brief Log prefix for this slave.
      * Returns "Slave <name> (#<index>)" if a name is set, else "Slave <index>".
+     *
+     * @return Prefix string for log lines about this slave.
      */
     std::string logPrefix() const;
 
     // -- Debug flags --------------------------------------------------------
 
-    /** @brief Update the per-slave debug flags distributed by the master. */
+    /** @brief Update the per-slave debug flags distributed by the master.
+     *  @param flags Flag set to store for this slave. */
     void updateDebugFlags(const EtherCATSlaveDebugFlags& flags) {
         std::lock_guard<std::mutex> lock(slave_debug_flags_mutex_);
         slave_debug_flags_ = flags;
     }
 
-    /** @brief Snapshot of the current per-slave debug flags (thread-safe). */
+    /** @brief Snapshot of the current per-slave debug flags (thread-safe).
+     *  @return Copy of the stored flag set. */
     EtherCATSlaveDebugFlags debugFlags() const {
         std::lock_guard<std::mutex> lock(slave_debug_flags_mutex_);
         return slave_debug_flags_;
@@ -209,7 +219,8 @@ public:
 
     // -- FMMU manager ---------------------------------------------------------
 
-    /** @brief Access this slave's FMMU manager. */
+    /** @brief Access this slave's FMMU manager.
+     *  @return Mutable FMMU manager owning this slave's mappings. */
     fmmu::FMMUManager& fmmuManager() { return fmmu_mgr_; }
     const fmmu::FMMUManager& fmmuManager() const { return fmmu_mgr_; }
 
@@ -218,6 +229,12 @@ public:
     bool apwr(uint16_t ado, const void* data, uint16_t len, unsigned int timeout_ms) override;
     bool aprd(uint16_t ado, void* out, uint16_t len, unsigned int timeout_ms) override;
     /// Packs all writes into a single multi-datagram frame.
+    /// @param ados Register addresses (ADOs) to write.
+    /// @param datas Payload pointers, one per address.
+    /// @param lens Payload lengths in bytes, one per address.
+    /// @param count Number of writes in the batch.
+    /// @param timeout_ms Transaction timeout [ms].
+    /// @return true when all writes were acknowledged.
     bool apwrBatch(const uint16_t* ados, const void* const* datas,
                    const uint16_t* lens, size_t count,
                    unsigned int timeout_ms) override;
@@ -261,6 +278,9 @@ public:
      *
      * Use this when SII is unavailable or you want to override EEPROM values.
      *
+     * @param mbox_out Master-to-slave mailbox sync-manager configuration.
+     * @param mbox_in Slave-to-master mailbox sync-manager configuration.
+     * @param protocols Supported mailbox protocol bitmask.
      * @return SlaveError::Ok on success
      */
     virtual SlaveError configureMailbox(
@@ -312,10 +332,12 @@ public:
      */
     virtual void markNoMailbox();
 
-    /** @brief True if mailbox has been configured (or assumed configured). */
+    /** @brief True if mailbox has been configured (or assumed configured).
+     *  @return Mailbox-configured flag. */
     bool isMailboxConfigured() const { return mailbox_configured_; }
 
-    /** @brief True after markNoMailbox(): the slave has no mailbox. */
+    /** @brief True after markNoMailbox(): the slave has no mailbox.
+     *  @return true for mailbox-less slaves (e.g. EL2xxx terminals). */
     bool mailboxAbsent() const { return no_mailbox_; }
 
     /**
@@ -354,6 +376,13 @@ public:
 
     /**
      * @brief Configure SM2/SM3 with explicit parameters.
+     * @param sm2_addr SM2 (outputs) physical start address.
+     * @param sm2_len SM2 length in bytes.
+     * @param sm2_ctrl SM2 control byte (direction, mode).
+     * @param sm3_addr SM3 (inputs) physical start address.
+     * @param sm3_len SM3 length in bytes.
+     * @param sm3_ctrl SM3 control byte (direction, mode).
+     * @return SlaveError::Ok on success.
      */
     virtual SlaveError configurePDOSyncManagers(
         uint16_t sm2_addr, uint16_t sm2_len, uint8_t sm2_ctrl,
@@ -376,7 +405,8 @@ public:
      */
     virtual void assumePDOAlreadyConfigured();
 
-    /** @brief True if PDO sync-managers have been configured. */
+    /** @brief True if PDO sync-managers have been configured.
+     *  @return PDO-configured flag. */
     bool isPDOConfigured() const { return pdo_configured_; }
 
     // -- PDO auto-configuration from SII -------------------------------------
@@ -602,19 +632,24 @@ public:
      */
     virtual SlaveError transitionTo(SlaveState target);
 
-    /** @brief Convenience: transition to INIT. */
+    /** @brief Convenience: transition to INIT.
+     *  @return SlaveError::Ok when the slave reports INIT. */
     virtual SlaveError transitionToInit();
 
-    /** @brief Convenience: transition to PRE_OP (requires mailbox). */
+    /** @brief Convenience: transition to PRE_OP (requires mailbox).
+     *  @return SlaveError::Ok when the slave reports PRE_OP. */
     virtual SlaveError transitionToPreOp();
 
-    /** @brief Convenience: transition to SAFE_OP (requires PDO). */
+    /** @brief Convenience: transition to SAFE_OP (requires PDO).
+     *  @return SlaveError::Ok when the slave reports SAFE_OP. */
     virtual SlaveError transitionToSafeOp();
 
-    /** @brief Convenience: transition to OP. */
+    /** @brief Convenience: transition to OP.
+     *  @return SlaveError::Ok when the slave reports OP. */
     virtual SlaveError transitionToOp();
 
-    /** @brief Convenience: transition to BOOT. */
+    /** @brief Convenience: transition to BOOT.
+     *  @return SlaveError::Ok when the slave reports BOOT. */
     virtual SlaveError transitionToBoot();
 
     // -- State query ---------------------------------------------------------
@@ -640,17 +675,22 @@ public:
     /// device driver sets this after reading the firmware version
     /// (0x100A) in PRE_OP; mailbox-dependent diagnostics check
     /// mailboxAvailable() before issuing SDO traffic.
+    /// @param v true when the firmware services the mailbox in SAFE_OP.
     void setMailboxServicedInSafeOp(bool v) { mailbox_serviced_in_safeop_ = v; }
+    /// @return Firmware hint recorded by setMailboxServicedInSafeOp().
     bool mailboxServicedInSafeOp() const { return mailbox_serviced_in_safeop_; }
 
     /// Whether an SDO transaction can be serviced right now — combines
     /// the firmware hint above with the slave's current AL state.
+    /// @return true when an SDO exchange is expected to succeed.
     bool mailboxAvailable();
 
     /**
      * @brief Convenience accessor that reads and returns the current AL state.
      *
      * Performs a network read and returns `std::nullopt` on error.
+     *
+     * @return Current AL state, or nullopt on transport failure.
      */
     std::optional<SlaveState> ALState();
 
@@ -658,6 +698,8 @@ public:
      * @brief Convenience accessor that reads and returns the current AL status code.
      *
      * Performs a network read and returns `std::nullopt` on error.
+     *
+     * @return Current AL status code, or nullopt on transport failure.
      */
     std::optional<uint16_t> ALCode();
 
@@ -673,7 +715,8 @@ public:
     virtual SlaveError configureWatchdogs(uint16_t pdi_timeout_100us,
                                           uint16_t pdata_timeout_100us);
 
-    /** @brief Disable all watchdogs for this slave. */
+    /** @brief Disable all watchdogs for this slave.
+     *  @return SlaveError::Ok on success. */
     virtual SlaveError disableWatchdogs();
 
     /**
@@ -714,18 +757,43 @@ public:
     virtual SlaveError sdoWrite(uint16_t index, uint8_t subindex,
                                 const void* data, size_t size);
 
-    /** @brief Read a uint8_t via SDO. */
+    /** @brief Read a uint8_t via SDO.
+     *  @param index Object dictionary index.
+     *  @param sub Subindex.
+     *  @param out Receives the value.
+     *  @return SlaveError::Ok, SDOAborted (see lastSdoAbortCode()) or a
+     *          transport error. */
     virtual SlaveError sdoReadU8(uint16_t index, uint8_t sub, uint8_t& out);
-    /** @brief Read a uint16_t via SDO. */
+    /** @brief Read a uint16_t via SDO.
+     *  @param index Object dictionary index.
+     *  @param sub Subindex.
+     *  @param out Receives the value.
+     *  @return SlaveError::Ok or the failure cause. */
     virtual SlaveError sdoReadU16(uint16_t index, uint8_t sub, uint16_t& out);
-    /** @brief Read a uint32_t via SDO. */
+    /** @brief Read a uint32_t via SDO.
+     *  @param index Object dictionary index.
+     *  @param sub Subindex.
+     *  @param out Receives the value.
+     *  @return SlaveError::Ok or the failure cause. */
     virtual SlaveError sdoReadU32(uint16_t index, uint8_t sub, uint32_t& out);
 
-    /** @brief Write a uint8_t via SDO. */
+    /** @brief Write a uint8_t via SDO.
+     *  @param index Object dictionary index.
+     *  @param sub Subindex.
+     *  @param val Value to write.
+     *  @return SlaveError::Ok or the failure cause. */
     virtual SlaveError sdoWriteU8(uint16_t index, uint8_t sub, uint8_t val);
-    /** @brief Write a uint16_t via SDO. */
+    /** @brief Write a uint16_t via SDO.
+     *  @param index Object dictionary index.
+     *  @param sub Subindex.
+     *  @param val Value to write.
+     *  @return SlaveError::Ok or the failure cause. */
     virtual SlaveError sdoWriteU16(uint16_t index, uint8_t sub, uint16_t val);
-    /** @brief Write a uint32_t via SDO. */
+    /** @brief Write a uint32_t via SDO.
+     *  @param index Object dictionary index.
+     *  @param sub Subindex.
+     *  @param val Value to write.
+     *  @return SlaveError::Ok or the failure cause. */
     virtual SlaveError sdoWriteU32(uint16_t index, uint8_t sub, uint32_t val);
 
     /**
@@ -737,6 +805,10 @@ public:
      * returned as raw bits (signed Integer types sign-extended).
      * Variable-length types (VisibleString, OctetString, Domain, ...)
      * are unsupported and return SlaveError::SDOError.
+     *
+     * @param entry Register definition (index, subindex, data type).
+     * @param out Receives the raw bits of the value.
+     * @return SlaveError::Ok or the failure cause.
      */
     SlaveError sdoReadEntry(
         const ObjectDictionary::ObjectDictionaryEntry& entry, uint64_t& out);
@@ -745,6 +817,10 @@ public:
      * @brief Write using the width declared by an ObjectDictionaryEntry's
      *        data_type. `value` carries the raw bits (as returned by
      *        sdoReadEntry); it is truncated to the declared width.
+     *
+     * @param entry Register definition (index, subindex, data type).
+     * @param value Raw bits to write.
+     * @return SlaveError::Ok or the failure cause.
      */
     SlaveError sdoWriteEntry(
         const ObjectDictionary::ObjectDictionaryEntry& entry, uint64_t value);
@@ -753,6 +829,11 @@ public:
      * @brief Record-member variants — `subindex` overrides entry.subindex,
      *        so a record object whose members share one type needs only a
      *        single register definition for all of its subindices.
+     *
+     * @param entry Register definition (index, data type).
+     * @param subindex Subindex to read (overrides entry.subindex).
+     * @param out Receives the raw bits of the value.
+     * @return SlaveError::Ok or the failure cause.
      */
     SlaveError sdoReadEntry(
         const ObjectDictionary::ObjectDictionaryEntry& entry,
@@ -767,6 +848,8 @@ public:
      * failure such as a transport/timeout error). Read this immediately after
      * a call returns SlaveError::SDOAborted to get the exact abort code
      * (e.g. 0x06070010 = "Data type mismatch, length mismatch").
+     *
+     * @return CoE abort code of the most recent SDO call (0 = none).
      */
     uint32_t lastSdoAbortCode() const;
 
@@ -775,6 +858,8 @@ public:
      *        code via lastSdoAbortCode(). Returns false for "upload" (read)
      *        and true for "download" (write). Undefined when
      *        lastSdoAbortCode()==0.
+     *
+     * @return true when the aborted call was a write (download).
      */
     bool lastSdoWasDownload() const;
 
@@ -790,6 +875,8 @@ public:
      * Most useful for the length-mismatch abort family (0x06070010 /
      * 0x06070012 / 0x06070013) where the slave rejects the request because
      * the payload size does not match what the object dictionary expects.
+     *
+     * @return Payload length in bytes of the aborted call (0 = no abort).
      */
     size_t lastSdoAttemptedLength() const;
 
@@ -832,7 +919,8 @@ public:
 
     // -- Link to master ------------------------------------------------------
 
-    /** @brief Access the owning master (must not be used after destruction begins). */
+    /** @brief Access the owning master (must not be used after destruction begins).
+     *  @return Master that owns this slave. */
     Master& master() { return *master_; }
     const Master& master() const { return *master_; }
 
