@@ -60,6 +60,8 @@ constexpr size_t NUM_SCURVE_PHASES = 7;
 
 /**
  * @brief Get phase name for debugging
+ * @param phase Phase to name.
+ * @return Static phase name (e.g. "ConstAccel").
  */
 inline const char* phaseName(SCurvePhase phase) {
     switch (phase) {
@@ -102,6 +104,9 @@ struct SCurvePhaseData {
      * @brief Evaluate position at time t within this phase
      *
      * p(t) = p₀ + v₀·t + ½·a₀·t² + ⅙·j·t³
+     *
+     * @param t Time within the phase [s]; clamped to [0, duration].
+     * @return Position at @p t.
      */
     T positionAt(T t) const {
         t = clamp(t, T(0), duration);
@@ -115,6 +120,9 @@ struct SCurvePhaseData {
      * @brief Evaluate velocity at time t within this phase
      *
      * v(t) = v₀ + a₀·t + ½·j·t²
+     *
+     * @param t Time within the phase [s]; clamped to [0, duration].
+     * @return Velocity at @p t.
      */
     T velocityAt(T t) const {
         t = clamp(t, T(0), duration);
@@ -127,6 +135,9 @@ struct SCurvePhaseData {
      * @brief Evaluate acceleration at time t within this phase
      *
      * a(t) = a₀ + j·t
+     *
+     * @param t Time within the phase [s]; clamped to [0, duration].
+     * @return Acceleration at @p t.
      */
     T accelerationAt(T t) const {
         t = clamp(t, T(0), duration);
@@ -135,20 +146,25 @@ struct SCurvePhaseData {
     
     /**
      * @brief Evaluate jerk at time t (constant within phase)
+     * @return Jerk of this phase (constant).
      */
     T jerkAt(T /*t*/) const {
         return jerk;
     }
-    
+
     /**
      * @brief Get final values at end of phase
+     * @return Position at the end of the phase.
      */
     T endPosition() const { return positionAt(duration); }
+    /// @return Velocity at the end of the phase.
     T endVelocity() const { return velocityAt(duration); }
+    /// @return Acceleration at the end of the phase.
     T endAcceleration() const { return accelerationAt(duration); }
-    
+
     /**
      * @brief Is this phase active (non-zero duration)?
+     * @return true when the phase duration exceeds the epsilon threshold.
      */
     bool isActive() const { return duration > MathConstants::EPSILON; }
 };
@@ -176,6 +192,7 @@ struct SCurveConstraints {
     
     /**
      * @brief Validate constraints
+     * @return true when every limit is positive and finite.
      */
     bool isValid() const {
         return maxVelocity > T(0) && 
@@ -265,6 +282,8 @@ public:
 
     /**
      * @brief Evaluate state at time t
+     * @param t Time from profile start [s].
+     * @return Motion state (position, velocity, acceleration, jerk).
      */
     State evaluateAt(T t) const {
         State state;
@@ -300,6 +319,7 @@ public:
 
     /**
      * @brief Get total duration of profile
+     * @return Sum of all phase durations [s].
      */
     T totalDuration() const {
         T total = T(0);
@@ -311,30 +331,38 @@ public:
 
     /**
      * @brief Get total distance of profile
+     * @return Distance travelled over the whole profile [units].
      */
     T totalDistance() const { return totalDistance_; }
 
     /**
      * @brief Access individual phases
+     * @param p Phase to return.
+     * @return Phase data for @p p.
      */
     const Phase& phase(SCurvePhase p) const { 
         return phases_[static_cast<size_t>(p)]; 
     }
     
+    /// @param i Phase index (0..NUM_SCURVE_PHASES-1).
+    /// @return Phase data at that index.
     const Phase& phase(size_t i) const { return phases_[i]; }
 
     /**
      * @brief Get all phases
+     * @return Phase array indexed by SCurvePhase.
      */
     const std::array<Phase, NUM_SCURVE_PHASES>& phases() const { return phases_; }
 
     /**
      * @brief Check if profile is valid
+     * @return true when the profile was solved successfully.
      */
     bool isValid() const { return valid_; }
 
     /**
      * @brief Get phase boundaries (times)
+     * @return Cumulative start time of each phase, plus the total duration.
      */
     std::array<T, NUM_SCURVE_PHASES + 1> phaseBoundaries() const {
         std::array<T, NUM_SCURVE_PHASES + 1> boundaries;
@@ -349,6 +377,11 @@ public:
      * @brief Find time at which position is reached
      *
      * Uses Newton-Raphson iteration within each phase.
+     *
+     * @param targetPosition Position to find [units].
+     * @param tolerance Convergence tolerance on the position.
+     * @return Time at which the position is reached, or nullopt when
+     *         outside [0, totalDistance()].
      */
     std::optional<T> findTimeAtPosition(T targetPosition, T tolerance = T(1e-9)) const {
         if (targetPosition < T(0) || targetPosition > totalDistance_) {
@@ -461,6 +494,12 @@ public:
      * ramp from a0 to aMax. The cubic is strictly monotone in t for
      * t > 0 (its derivative  v0 + a0·t + ½·j·t²  is positive when
      * v0 > 0), so Newton's method converges in 3–5 iterations.
+     *
+     * @param v0 Initial velocity [units/s].
+     * @param a0 Initial acceleration [units/s^2].
+     * @param jMax Jerk limit [units/s^3].
+     * @param distance Distance to cover [units].
+     * @return Phase duration satisfying the cubic [s].
      */
     static T solveAccelCubic(T v0, T a0, T jMax, T distance) {
         if (distance <= T(0)) return T(0);
@@ -589,6 +628,13 @@ public:
      *
      * By time-reversal symmetry, this equals the acceleration distance
      * from (v1, 0) to (v0, -a0).
+     *
+     * @param v0 Initial velocity [units/s].
+     * @param a0 Initial acceleration [units/s^2].
+     * @param v1 Final velocity [units/s].
+     * @param aMax Acceleration limit [units/s^2].
+     * @param jMax Jerk limit [units/s^3].
+     * @return Distance required to decelerate [units].
      */
     static T computeDecelDistanceWithState(T v0, T a0, T v1,
                                              T aMax, T jMax) {
@@ -824,6 +870,12 @@ public:
      * - Triangular case (Δv ≤ 2·ΔvJerk): dd/dv1 = (3·v1 − v0) / (2·jMax·t)
      *   where t = √(Δv / jMax)
      * - Trapezoidal case: dd/dv1 = (v1 − ΔvJerk) / aMax + tJerk
+     *
+     * @param v0 Initial velocity [units/s].
+     * @param v1 Target velocity [units/s].
+     * @param aMax Acceleration limit [units/s^2].
+     * @param jMax Jerk limit [units/s^3].
+     * @return ∂distance/∂v1 at the given state.
      */
     static T computeAccelDistanceDerivative(T v0, T v1, T aMax, T jMax) {
         if (v1 <= v0) return T(0);
@@ -1167,6 +1219,7 @@ public:
 
     /**
      * @brief Constructor
+     * @param constraints Velocity/acceleration/jerk limits for built profiles.
      */
     explicit SCurveProfileBuilder(Constraints constraints = {})
         : constraints_(std::move(constraints)) {}
@@ -1230,8 +1283,10 @@ public:
 
     /**
      * @brief Get/set constraints
+     * @return Mutable constraints used for the next build.
      */
     Constraints& constraints() { return constraints_; }
+    /// @return Constraints used for the next build.
     const Constraints& constraints() const { return constraints_; }
 
 private:
