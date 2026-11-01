@@ -204,26 +204,54 @@ struct ModuleCapabilities {
           counter_channels(0), frequency_channels(0), pwm_channels(0),
           supports_interrupt(false), supports_filtering(false), supports_polarity(false) {}
     
-    /** Get total digital input count */
+    /**
+     * @brief Total digital input lines summed across all block widths.
+     *
+     * Digital inputs are declared to CiA 401 as groups of 8-, 16-, or
+     * 32-bit blocks; this returns the aggregate bit count
+     * (`8·n8 + 16·n16 + 32·n32`), i.e. the highest usable channel index
+     * for readDigitalInput().
+     *
+     * @return Total digital input count in bits.
+     */
     uint16_t getTotalDigitalInputs() const {
         return digital_input_8bit_blocks * 8 + 
                digital_input_16bit_blocks * 16 +
                digital_input_32bit_blocks * 32;
     }
     
-    /** Get total digital output count */
+    /**
+     * @brief Total digital output lines summed across all block widths.
+     *
+     * Aggregate of `8·n8 + 16·n16 + 32·n32` output-block bits — the
+     * highest usable channel index for writeDigitalOutput().
+     *
+     * @return Total digital output count in bits.
+     */
     uint16_t getTotalDigitalOutputs() const {
         return digital_output_8bit_blocks * 8 +
                digital_output_16bit_blocks * 16 +
                digital_output_32bit_blocks * 32;
     }
     
-    /** Get total analog input count */
+    /**
+     * @brief Total analog input channels.
+     *
+     * Counts channels, not bits: 16- and 32-bit channels each count once
+     * since a single channel carries its full resolution in one object.
+     *
+     * @return Number of usable analog input channel indices.
+     */
     uint16_t getTotalAnalogInputs() const {
         return analog_input_16bit_channels + analog_input_32bit_channels;
     }
     
-    /** Get total analog output count */
+    /**
+     * @brief Total analog output channels.
+     *
+     * @return Number of usable analog output channel indices (16- and
+     *         32-bit channels each counted once).
+     */
     uint16_t getTotalAnalogOutputs() const {
         return analog_output_16bit_channels + analog_output_32bit_channels;
     }
@@ -319,12 +347,26 @@ public:
     bool initialize();
     
     /**
-     * @brief Check if module is initialized
+     * @brief Whether initialize() has completed successfully.
+     *
+     * All I/O and configuration methods expect this to be true; calls made
+     * before initialization operate on the default-constructed (empty)
+     * capability set and will not reach the device.
+     *
+     * @return true after a successful initialize().
      */
     bool isInitialized() const { return initialized_; }
     
     /**
-     * @brief Get module capabilities
+     * @brief The capability set detected during initialize().
+     *
+     * Read from the device's CiA 401 device-type/profile objects. Before
+     * initialize() the returned struct is the default
+     * (DigitalInputOnly, zero counts); the reference stays valid for the
+     * lifetime of this IOModule and is only replaced by re-running
+     * initialize().
+     *
+     * @return Const reference to the detected ModuleCapabilities.
      */
     const ModuleCapabilities& getCapabilities() const { return capabilities_; }
     
@@ -340,7 +382,14 @@ public:
     bool applyPDOMapping(PDOMappingPreset preset);
     
     /**
-     * @brief Get current PDO mapping preset
+     * @brief The PDO mapping preset currently in effect.
+     *
+     * Reflects the last applyPDOMapping() that succeeded (or the default
+     * chosen at initialize()). A failed applyPDOMapping() leaves this
+     * unchanged, so it always describes the mapping actually programmed
+     * into the device.
+     *
+     * @return Active PDOMappingPreset.
      */
     PDOMappingPreset getCurrentMapping() const { return current_mapping_; }
     
@@ -825,7 +874,14 @@ private:
 // ============================================================================
 
 /**
- * @brief Get name of PDO mapping preset
+ * @brief Human-readable name of a PDO mapping preset.
+ *
+ * Returns a static string suitable for logging and UI display; covers
+ * every PDOMappingPreset enumerator and yields "Unknown" for
+ * out-of-range values.
+ *
+ * @param preset  Preset to name.
+ * @return NUL-terminated preset name (static storage, never null).
  */
 inline const char* getPDOMappingName(PDOMappingPreset preset) {
     switch (preset) {
@@ -843,7 +899,14 @@ inline const char* getPDOMappingName(PDOMappingPreset preset) {
 }
 
 /**
- * @brief Get name of I/O event
+ * @brief Human-readable name of an I/O event.
+ *
+ * Returns a static string suitable for logging event-callback
+ * deliveries; covers every IOEvent enumerator and yields "Unknown" for
+ * out-of-range values.
+ *
+ * @param event  Event to name.
+ * @return NUL-terminated event name (static storage, never null).
  */
 inline const char* getIOEventName(IOEvent event) {
     switch (event) {
