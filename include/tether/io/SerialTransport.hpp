@@ -33,19 +33,40 @@ class ISerialDriver {
 public:
     virtual ~ISerialDriver() = default;
 
-    /// Open the serial port. Returns true on success.
+    /**
+     * @brief Open the serial port.
+     * @param port Device path/name (e.g. "/dev/ttyUSB0")
+     * @param baudRate Baud rate [bits/s]
+     * @return `true` on success
+     */
     virtual bool open(const char* port, uint32_t baudRate) = 0;
 
-    /// Close the serial port.
+    /**
+     * @brief Close the serial port.
+     */
     virtual void close() = 0;
 
-    /// Write bytes. Returns number of bytes written.
+    /**
+     * @brief Write bytes.
+     * @param data Bytes to send
+     * @param len Number of bytes
+     * @return Bytes actually written
+     */
     virtual size_t write(const uint8_t* data, size_t len) = 0;
 
-    /// Read bytes with timeout. Returns number of bytes read.
+    /**
+     * @brief Read bytes with timeout.
+     * @param buf Destination buffer
+     * @param maxLen Maximum bytes to read
+     * @param timeoutMs Wait budget [ms]
+     * @return Bytes actually read
+     */
     virtual size_t read(uint8_t* buf, size_t maxLen, uint32_t timeoutMs) = 0;
 
-    /// Returns true if the port is open.
+    /**
+     * @brief Returns true if the port is open.
+     * @return `true` while the port is open
+     */
     virtual bool isOpen() const = 0;
 };
 
