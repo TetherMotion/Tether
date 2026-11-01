@@ -202,25 +202,35 @@ struct KdeGrid {
     std::size_t sampleCount = 0;
 
     /// 2D index lookup.
+    /// @param ix X bin index
+    /// @param iy Y bin index
+    /// @return Flat index into `density` (row-major)
     std::size_t index(std::size_t ix, std::size_t iy) const {
         return iy * xBins.size() + ix;
     }
 
     /// Get density at bin (ix, iy).
+    /// @param ix X bin index
+    /// @param iy Y bin index
+    /// @return Density at that grid cell
     double at(std::size_t ix, std::size_t iy) const {
         return density[index(ix, iy)];
     }
 
     /// Maximum density value.
+    /// @return Highest density across all bins
     double maxDensity() const;
 
     /// Total mass (should be ≈ 1.0 for a proper PDF).
+    /// @return Sum of all bin densities
     double totalMass() const;
 
     /// Marginal density along X (integrate out Y).
+    /// @return Per-column density sums, one per X bin
     std::vector<double> marginalX() const;
 
     /// Marginal density along Y (integrate out X).
+    /// @return Per-row density sums, one per Y bin
     std::vector<double> marginalY() const;
 };
 
@@ -665,24 +675,38 @@ private:
 //=============================================================================
 
 /// Convert a DerivativeAxis to a human-readable string.
+/// @param axis Axis kind to convert
+/// @return Axis name for labels/logging
 std::string toString(DerivativeAxis axis);
 
 /// Convert a DeviationAxis to a human-readable string.
+/// @param axis Deviation axis kind to convert
+/// @return Axis name for labels/logging
 std::string toString(DeviationAxis axis);
 
 /// Convert a KernelType to a human-readable string.
+/// @param kernel Kernel type to convert
+/// @return Kernel name ("Gaussian", "Epanechnikov", ...)
 std::string toString(KernelType kernel);
 
 /// Convert a BandwidthMethod to a human-readable string.
+/// @param method Bandwidth selection method to convert
+/// @return Method name for logging
 std::string toString(BandwidthMethod method);
 
 /// Convert a KdeColormap to a human-readable string.
+/// @param cmap Colormap to convert
+/// @return Colormap name
 std::string toString(KdeColormap cmap);
 
 /// Get the unit string for a DerivativeAxis.
+/// @param axis Axis kind
+/// @return Unit label ("mm/s", "mm/s²", ...)
 std::string unitString(DerivativeAxis axis);
 
 /// Get the unit string for a DeviationAxis.
+/// @param axis Deviation axis kind
+/// @return Unit label for that axis
 std::string unitString(DeviationAxis axis);
 
 } // namespace tether::motion::replanner
