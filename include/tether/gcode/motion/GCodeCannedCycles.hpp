@@ -541,16 +541,19 @@ class CannedCycleHandler {
 public:
     /**
      * @brief Constructor
+     * @param config Default cycle parameters (clearance, retract mode, ...).
      */
     explicit CannedCycleHandler(const CannedCycleConfig& config = {});
     
     /**
      * @brief Set motion callback
+     * @param callback Invoked for each motion produced by a cycle.
      */
     void setMotionCallback(CycleMotionCallback callback);
     
     /**
      * @brief Set spindle callback
+     * @param callback Invoked for spindle start/stop/direction changes.
      */
     void setSpindleCallback(CycleSpindleCallback callback);
     
@@ -560,6 +563,11 @@ public:
     
     /**
      * @brief Process G73 (high-speed peck drill)
+     * @param block G-code block with the cycle parameters.
+     * @param state Machine state (updated with cycle state).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the cycle.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG73(
         const Block& block,
@@ -570,6 +578,11 @@ public:
     
     /**
      * @brief Process G74 (left-hand tap)
+     * @param block G-code block with the cycle parameters.
+     * @param state Machine state (updated with cycle state).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the cycle.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG74(
         const Block& block,
@@ -580,6 +593,11 @@ public:
     
     /**
      * @brief Process G76 (fine boring)
+     * @param block G-code block with the cycle parameters.
+     * @param state Machine state (updated with cycle state).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the cycle.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG76(
         const Block& block,
@@ -590,11 +608,18 @@ public:
     
     /**
      * @brief Process G80 (cancel cycle)
+     * @param state Machine state (cycle state cleared).
+     * @return Error::OK on success.
      */
     Error processG80(MachineState& state);
     
     /**
      * @brief Process G81 (simple drill)
+     * @param block G-code block with the cycle parameters.
+     * @param state Machine state (updated with cycle state).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the cycle.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG81(
         const Block& block,
@@ -605,6 +630,11 @@ public:
     
     /**
      * @brief Process G82 (drill with dwell)
+     * @param block G-code block with the cycle parameters.
+     * @param state Machine state (updated with cycle state).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the cycle.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG82(
         const Block& block,
@@ -615,6 +645,11 @@ public:
     
     /**
      * @brief Process G83 (deep peck drill)
+     * @param block G-code block with the cycle parameters.
+     * @param state Machine state (updated with cycle state).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the cycle.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG83(
         const Block& block,
@@ -625,6 +660,11 @@ public:
     
     /**
      * @brief Process G84 (right-hand tap)
+     * @param block G-code block with the cycle parameters.
+     * @param state Machine state (updated with cycle state).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the cycle.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG84(
         const Block& block,
@@ -635,6 +675,11 @@ public:
     
     /**
      * @brief Process G85 (boring, feed out)
+     * @param block G-code block with the cycle parameters.
+     * @param state Machine state (updated with cycle state).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the cycle.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG85(
         const Block& block,
@@ -645,6 +690,11 @@ public:
     
     /**
      * @brief Process G86 (boring, spindle stop)
+     * @param block G-code block with the cycle parameters.
+     * @param state Machine state (updated with cycle state).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the cycle.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG86(
         const Block& block,
@@ -655,6 +705,11 @@ public:
     
     /**
      * @brief Process G87 (back boring)
+     * @param block G-code block with the cycle parameters.
+     * @param state Machine state (updated with cycle state).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the cycle.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG87(
         const Block& block,
@@ -665,6 +720,11 @@ public:
     
     /**
      * @brief Process G88 (boring, manual retract)
+     * @param block G-code block with the cycle parameters.
+     * @param state Machine state (updated with cycle state).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the cycle.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG88(
         const Block& block,
@@ -675,6 +735,11 @@ public:
     
     /**
      * @brief Process G89 (boring, dwell, feed out)
+     * @param block G-code block with the cycle parameters.
+     * @param state Machine state (updated with cycle state).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the cycle.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG89(
         const Block& block,
@@ -685,11 +750,15 @@ public:
     
     /**
      * @brief Process G98 (retract to initial)
+     * @param state Machine state (cycle state cleared).
+     * @return Error::OK on success.
      */
     Error processG98(MachineState& state);
     
     /**
      * @brief Process G99 (retract to R plane)
+     * @param state Machine state (cycle state cleared).
+     * @return Error::OK on success.
      */
     Error processG99(MachineState& state);
     
@@ -702,6 +771,12 @@ public:
      * 
      * Called when coordinates appear without a new G-code while
      * a cycle is modal.
+     *
+     * @param block G-code block with the new coordinates.
+     * @param state Machine state (updated).
+     * @param vars Variable system (#-parameters updated).
+     * @param segments Motion segments appended for the repeated cycle.
+     * @return Error::OK, or an error when no cycle is modal.
      */
     Error executeRepeat(
         const Block& block,
@@ -712,16 +787,19 @@ public:
     
     /**
      * @brief Check if canned cycle is active
+     * @return true while a canned cycle is modal.
      */
     bool isCycleActive() const;
     
     /**
      * @brief Get active cycle type
+     * @return Currently modal cycle type (None when inactive).
      */
     CannedCycleType getActiveCycle() const;
     
     /**
      * @brief Get cycle state
+     * @return Modal cycle state (plane, retract mode, depth, ...).
      */
     const CannedCycleState& getState() const { return m_state; }
     
@@ -791,6 +869,9 @@ private:
 
 /**
  * @brief Calculate thread pitch from feed and RPM
+ * @param feedRate Feed rate [mm/min].
+ * @param rpm Spindle speed [rev/min].
+ * @return Thread pitch [mm/rev] (0 when @p rpm is zero).
  */
 inline double calculateThreadPitch(double feedRate, double rpm) {
     if (rpm <= 0) return 0;
@@ -799,6 +880,9 @@ inline double calculateThreadPitch(double feedRate, double rpm) {
 
 /**
  * @brief Calculate tapping feed from pitch and RPM
+ * @param pitch Thread pitch [mm/rev].
+ * @param rpm Spindle speed [rev/min].
+ * @return Feed rate [mm/min].
  */
 inline double calculateTapFeed(double pitch, double rpm) {
     return pitch * rpm;  // mm/min
@@ -806,6 +890,8 @@ inline double calculateTapFeed(double pitch, double rpm) {
 
 /**
  * @brief Get string name for cycle type
+ * @param type Cycle type to name.
+ * @return Static name such as "G81".
  */
 const char* cycleTypeName(CannedCycleType type);
 
