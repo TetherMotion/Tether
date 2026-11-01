@@ -28,35 +28,58 @@ public:
     enum class Criterion { ITAE, IAE, ISE };
     enum class ResponseType { Setpoint, Disturbance };
 
-    /** @brief Human-readable name of the tuner. */
+    /** @brief Human-readable name of the tuner.
+     *  @return Display name ("Lopez")
+     */
     std::string getName() const override;
 
-    /** @brief Short description for UI or logs. */
+    /** @brief Short description for UI or logs.
+     *  @return One-line description of the Lopez method
+     */
     std::string getDescription() const override;
 
-    /** @brief Offline/online mode of operation. */
+    /** @brief Offline/online mode of operation.
+     *  @return AutotuningMode::Offline — Lopez needs a FOPDT model
+     */
     AutotuningMode getMode() const override;
 
-    /** @brief Whether the given controller is compatible with this tuner. */
+    /** @brief Whether the given controller is compatible with this tuner.
+     *  @param controller Controller to check
+     *  @return `true` if the tuner can produce gains for `controller`
+     */
     bool isCompatible(const TunableController& controller) const override;
 
     /**
      * @brief Execute the tuner and apply computed parameters to @p controller.
      * @param controller Controller to update with computed parameters.
-     * @param model Optional process model to base the design on.
+     * @param model Optional process model to base the design on; falls
+     *        back to the model set via setModel() when nullptr
+     * @return Tuning outcome including the computed gains and status
      */
     TuningResult tune(TunableController& controller, const ProcessModel* model = nullptr) override;
 
-    /** @brief Compute gains by optimizing the selected criterion for response type. */
+    /** @brief Compute gains by optimizing the selected criterion for response type.
+     *  @param model Identified FOPDT process model
+     *  @param form PID gain form the result is expressed in
+     *  @param criterion Error-integral criterion to optimize (ITAE/IAE/ISE)
+     *  @param response Setpoint-tracking or disturbance-rejection variant
+     *  @return Computed PID gains
+     */
     static PIDGains calculateGains(const FOPDTModel& model, PIDForm form, Criterion criterion, ResponseType response);
 
-    /** @brief Choose the optimization criterion (ITAE, IAE, ISE). */
+    /** @brief Choose the optimization criterion (ITAE, IAE, ISE).
+     *  @param criterion Criterion to optimize
+     */
     void setCriterion(Criterion criterion) { m_criterion = criterion; }
 
-    /** @brief Select setpoint or disturbance response variant. */
+    /** @brief Select setpoint or disturbance response variant.
+     *  @param type Response variant to tune for
+     */
     void setResponseType(ResponseType type) { m_responseType = type; }
 
-    /** @brief Provide the FOPDT model used for optimization. */
+    /** @brief Provide the FOPDT model used for optimization.
+     *  @param model Identified process model the design is based on
+     */
     void setModel(const FOPDTModel& model) { m_model = model; }
 
 private:

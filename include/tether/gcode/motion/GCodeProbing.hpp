@@ -348,16 +348,19 @@ class ProbeHandler {
 public:
     /**
      * @brief Constructor
+     * @param config Probe speeds, backoff distance, and repeat settings
      */
     explicit ProbeHandler(const ProbeConfig& config = {});
-    
+
     /**
      * @brief Set probe input callback
+     * @param callback Function queried for the probe pin state during moves
      */
     void setProbeInputCallback(ProbeInputCallback callback);
-    
+
     /**
      * @brief Set probe motion callback
+     * @param callback Function that performs the physical probe move
      */
     void setProbeMotionCallback(ProbeMotionCallback callback);
     
@@ -367,6 +370,11 @@ public:
     
     /**
      * @brief Process G38.2 (probe toward, error on miss)
+     * @param block Parsed G38.2 block
+     * @param state Machine state updated to the probe end position
+     * @param vars Variable system receiving probe result parameters
+     * @param[out] segments Receives the generated probe move segments
+     * @return Error::OK on trip; probe-miss error otherwise
      */
     Error processG38_2(
         const Block& block,
@@ -374,9 +382,14 @@ public:
         VariableSystem& vars,
         std::vector<MotionSegment>& segments
     );
-    
+
     /**
      * @brief Process G38.3 (probe toward, no error)
+     * @param block Parsed G38.3 block
+     * @param state Machine state updated to the probe end position
+     * @param vars Variable system receiving probe result parameters
+     * @param[out] segments Receives the generated probe move segments
+     * @return Error::OK whether or not the probe tripped
      */
     Error processG38_3(
         const Block& block,
@@ -384,9 +397,14 @@ public:
         VariableSystem& vars,
         std::vector<MotionSegment>& segments
     );
-    
+
     /**
      * @brief Process G38.4 (probe away, error on miss)
+     * @param block Parsed G38.4 block
+     * @param state Machine state updated to the probe end position
+     * @param vars Variable system receiving probe result parameters
+     * @param[out] segments Receives the generated probe move segments
+     * @return Error::OK on release; error if the probe was not released
      */
     Error processG38_4(
         const Block& block,
@@ -394,9 +412,14 @@ public:
         VariableSystem& vars,
         std::vector<MotionSegment>& segments
     );
-    
+
     /**
      * @brief Process G38.5 (probe away, no error)
+     * @param block Parsed G38.5 block
+     * @param state Machine state updated to the probe end position
+     * @param vars Variable system receiving probe result parameters
+     * @param[out] segments Receives the generated probe move segments
+     * @return Error::OK whether or not the probe released
      */
     Error processG38_5(
         const Block& block,
@@ -433,6 +456,13 @@ public:
      * @brief Find edge on axis
      * 
      * Performs probe toward, backs off, probes again for accuracy.
+     * @param axis Axis index to probe along (0=X, 1=Y, 2=Z)
+     * @param direction Search direction (+1 or -1)
+     * @param searchDistance Maximum travel before giving up [mm]
+     * @param feedRate Probe feed rate [mm/min]
+     * @param state Machine state updated to the found edge position
+     * @param vars Variable system receiving probe result parameters
+     * @return Result with the edge position and trip status
      */
     ProbeResult findEdge(
         int axis,
@@ -455,6 +485,7 @@ public:
      * @param[out] centerX Computed center X
      * @param[out] centerY Computed center Y
      * @param[out] measuredDia Measured diameter
+     * @return Error::OK when all four edge probes succeeded
      */
     Error findBoreCenter(
         double diameter,
@@ -468,6 +499,14 @@ public:
     
     /**
      * @brief Find center of boss (outside)
+     * @param width Approximate boss width (for positioning) [mm]
+     * @param feedRate Probe feed rate [mm/min]
+     * @param state Machine state updated during probing
+     * @param vars Variable system receiving probe result parameters
+     * @param[out] centerX Computed center X [mm]
+     * @param[out] centerY Computed center Y [mm]
+     * @param[out] measuredWidth Measured boss width [mm]
+     * @return Error::OK when all edge probes succeeded
      */
     Error findBossCenter(
         double width,
@@ -478,9 +517,19 @@ public:
         double& centerY,
         double& measuredWidth
     );
-    
+
     /**
      * @brief Find corner (inside or outside)
+     * @param inside `true` = inside corner, `false` = outside corner
+     * @param xDirection X search direction (+1 or -1)
+     * @param yDirection Y search direction (+1 or -1)
+     * @param searchDistance Maximum travel before giving up [mm]
+     * @param feedRate Probe feed rate [mm/min]
+     * @param state Machine state updated during probing
+     * @param vars Variable system receiving probe result parameters
+     * @param[out] cornerX Computed corner X [mm]
+     * @param[out] cornerY Computed corner Y [mm]
+     * @return Error::OK when both edge probes succeeded
      */
     Error findCorner(
         bool inside,           // true = inside corner, false = outside
@@ -504,6 +553,7 @@ public:
      * @param state Machine state
      * @param vars Variable system
      * @param[out] toolLength Measured tool length
+     * @return Error::OK when the tool-setter probe tripped
      */
     Error measureToolLength(
         double setterX,
@@ -521,16 +571,20 @@ public:
     
     /**
      * @brief Get last probe result
+     * @return Result of the most recent probe operation
      */
     const ProbeResult& getLastResult() const { return m_lastResult; }
-    
+
     /**
      * @brief Check if probe is currently tripped
+     * @return `true` while the probe input reads tripped
      */
     bool isProbeTripped() const;
-    
+
     /**
      * @brief Update probe result variables (#5061-#5070)
+     * @param vars Variable system to write into
+     * @param result Probe result whose values are published
      */
     void updateProbeVariables(VariableSystem& vars, const ProbeResult& result);
     
