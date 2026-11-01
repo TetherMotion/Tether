@@ -101,6 +101,7 @@ public:
 
     /**
      * @brief Update the path pointer (use after the path is moved).
+     * @param path Path to track (referenced, must outlive this)
      */
     void setPath(const Path& path) { path_ = &path; }
 
@@ -208,20 +209,35 @@ public:
     // Access to internal data
     // ========================================================================
 
-    /// Number of switching arcs
+    /**
+     * @brief Number of switching arcs.
+     * @return Arc count in the structure
+     */
     size_t numArcs() const { return arcs_.size(); }
 
-    /// Get arc by index
+    /**
+     * @brief Get arc by index.
+     * @param i Arc index [0, numArcs())
+     * @return The arc at index i
+     */
     const Arc& arc(size_t i) const { return arcs_.at(i); }
 
-    /// Get all arcs
+    /**
+     * @brief Get all arcs.
+     * @return Full switching-arc sequence
+     */
     const std::vector<Arc>& arcs() const { return arcs_; }
 
-    /// Get the path
+    /**
+     * @brief Get the path.
+     * @return Referenced path
+     */
     const Path& path() const { return *path_; }
 
     /**
      * @brief Evaluate position at a given arc length (no time inversion needed).
+     * @param s Arc length along the path
+     * @return Position at arc length s
      */
     Point positionAtArcLength(T s) const {
         return path_->evaluateAtArcLength(s).position;
@@ -230,6 +246,8 @@ public:
     /**
      * @brief Evaluate path velocity at a given arc length.
      * Uses the arc's initial velocity and integrates to s.
+     * @param s Arc length along the path
+     * @return Path velocity at s
      */
     double pathVelocityAtArcLength(T s) const {
         for (const auto& arc : arcs_) {
@@ -254,6 +272,8 @@ public:
 
     /**
      * @brief Estimate time at a given arc length.
+     * @param s Arc length along the path
+     * @return Estimated traversal time at s [s]
      */
     T timeAtArcLength(T s) const override {
         for (const auto& arc : arcs_) {
@@ -280,10 +300,16 @@ public:
         return T(0);
     }
 
-    /// Get the constraint evaluator
+    /**
+     * @brief Get the constraint evaluator.
+     * @return Evaluator used for limit computation
+     */
     const ConstraintEvaluator<Dim, T>& evaluator() const { return evaluator_; }
 
-    /// Arc start times (for binary search)
+    /**
+     * @brief Arc start times (for binary search).
+     * @return Monotonic start times, one per arc [s]
+     */
     const std::vector<double>& arcStartTimes() const { return arcStartTimes_; }
 
 private:

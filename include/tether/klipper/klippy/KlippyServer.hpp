@@ -56,12 +56,16 @@ public:
     // ------------------------------------------------------------------
 
     /// @brief Transition to a new printer state.
+    /// @param state New state (Startup, Ready, Error, Shutdown)
+    /// @param message Optional state detail reported via stateMessage()
     void setState(PrinterState state, const std::string& message = "");
 
     /// @brief Get current printer state.
+    /// @return Active state
     PrinterState state() const;
 
     /// @brief Get current state message.
+    /// @return Human-readable state detail
     std::string stateMessage() const;
 
     // ------------------------------------------------------------------
@@ -69,15 +73,21 @@ public:
     // ------------------------------------------------------------------
 
     /// @brief Register an endpoint handler.
+    /// @param method Endpoint name (e.g. "server/info")
+    /// @param handler Callable invoked with (params) -> result
     void registerEndpoint(const std::string& method, EndpointHandler handler);
 
     /// @brief Unregister an endpoint.
+    /// @param method Endpoint name to remove
     void unregisterEndpoint(const std::string& method);
 
     /// @brief List all registered endpoints.
+    /// @return Registered endpoint names
     std::vector<std::string> listEndpoints() const;
 
     /// @brief Invoke a registered endpoint by name.
+    /// @param method Endpoint name
+    /// @param params Request parameters
     /// @return The result from the endpoint handler, or error JSON if not found.
     JsonValue callEndpoint(const std::string& method, const JsonValue& params);
 
@@ -90,6 +100,9 @@ public:
     std::vector<std::string> listObjects() const;
 
     /// @brief Query object status.
+    /// @param objects Map of object name -> requested field names (empty
+    ///        = all fields)
+    /// @return Object name -> field -> value map
     std::map<std::string, std::map<std::string, JsonValue>> queryObjects(
         const std::map<std::string, std::vector<std::string>>& objects) const;
 
@@ -99,6 +112,7 @@ public:
 
     /// @brief Emit a G-code response line.
     /// Records in the gcode store and notifies all registered observers.
+    /// @param response Line text (e.g. "// Done", "!! Error")
     void emitGcodeResponse(const std::string& response);
 
     // ------------------------------------------------------------------
@@ -108,13 +122,17 @@ public:
     const UdsServerConfig& config() const { return config_; }
 
     /// @brief Load printer configuration from a file.
+    /// @param path Config file path
+    /// @return `true` on successful parse
     bool loadConfigFile(const std::string& path);
 
     /// @brief Load printer configuration from the config file path
     /// stored in UdsServerConfig::configFile.
+    /// @return `true` on successful parse
     bool loadConfig();
 
     /// @brief Get the loaded configuration parser.
+    /// @return Parser holding the active configuration
     const config::ConfigParser& configParser() const { return configParser_; }
 
     // ------------------------------------------------------------------
