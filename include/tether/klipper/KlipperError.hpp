@@ -49,6 +49,8 @@ enum class ErrorCategory : uint8_t {
 };
 
 /// @brief Convert an error category to a string name.
+/// @param c Category to convert
+/// @return Static category name for logging/diagnostics
 inline std::string_view categoryToString(ErrorCategory c) {
     switch (c) {
         case ErrorCategory::Transport:   return "Transport";
@@ -77,46 +79,73 @@ public:
         : category_(cat), message_(std::move(msg)), code_(code) {}
 
     /// @brief Construct a transport error.
+    /// @param msg Human-readable description
+    /// @param code Optional numeric code (0 = none)
+    /// @return KlipperError with ErrorCategory::Transport
     static KlipperError transport(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Transport, std::move(msg), code};
     }
 
     /// @brief Construct a protocol error.
+    /// @param msg Human-readable description
+    /// @param code Optional numeric code (0 = none)
+    /// @return KlipperError with ErrorCategory::Protocol
     static KlipperError protocol(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Protocol, std::move(msg), code};
     }
 
     /// @brief Construct a dictionary error.
+    /// @param msg Human-readable description
+    /// @param code Optional numeric code (0 = none)
+    /// @return KlipperError with ErrorCategory::Dictionary
     static KlipperError dictionary(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Dictionary, std::move(msg), code};
     }
 
     /// @brief Construct a config error.
+    /// @param msg Human-readable description
+    /// @param code Optional numeric code (0 = none)
+    /// @return KlipperError with ErrorCategory::Config
     static KlipperError config(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Config, std::move(msg), code};
     }
 
     /// @brief Construct a clock sync error.
+    /// @param msg Human-readable description
+    /// @param code Optional numeric code (0 = none)
+    /// @return KlipperError with ErrorCategory::ClockSync
     static KlipperError clockSync(std::string msg, int32_t code = 0) {
         return {ErrorCategory::ClockSync, std::move(msg), code};
     }
 
     /// @brief Construct a G-code error.
+    /// @param msg Human-readable description
+    /// @param code Optional numeric code (0 = none)
+    /// @return KlipperError with ErrorCategory::Gcode
     static KlipperError gcode(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Gcode, std::move(msg), code};
     }
 
     /// @brief Construct a UDS error.
+    /// @param msg Human-readable description
+    /// @param code Optional numeric code (0 = none)
+    /// @return KlipperError with ErrorCategory::Uds
     static KlipperError uds(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Uds, std::move(msg), code};
     }
 
     /// @brief Construct a device error.
+    /// @param msg Human-readable description
+    /// @param code Optional numeric code (0 = none)
+    /// @return KlipperError with ErrorCategory::Device
     static KlipperError device(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Device, std::move(msg), code};
     }
 
     /// @brief Construct a timeout error.
+    /// @param msg Human-readable description
+    /// @param code Optional numeric code (0 = none)
+    /// @return KlipperError with ErrorCategory::Timeout
     static KlipperError timeout(std::string msg, int32_t code = 0) {
         return {ErrorCategory::Timeout, std::move(msg), code};
     }
@@ -145,12 +174,15 @@ public:
     }
 
     /// @brief Check if this is a transport error.
+    /// @return `true` if category is Transport
     bool isTransport() const { return category_ == ErrorCategory::Transport; }
 
     /// @brief Check if this is a protocol error.
+    /// @return `true` if category is Protocol
     bool isProtocol() const { return category_ == ErrorCategory::Protocol; }
 
     /// @brief Check if this is a timeout error.
+    /// @return `true` if category is Timeout
     bool isTimeout() const { return category_ == ErrorCategory::Timeout; }
 
 private:

@@ -127,6 +127,7 @@ public:
     
     /**
      * @brief Set master drive backend
+     * @param backend Drive backend providing master position/velocity
      */
     void setMasterBackend(DriveBackendPtr backend);
     
@@ -152,6 +153,7 @@ public:
     
     /**
      * @brief Remove slave
+     * @param slaveIndex Index of the slave to remove
      */
     void removeSlave(size_t slaveIndex);
     
@@ -162,6 +164,7 @@ public:
     
     /**
      * @brief Get number of slaves
+     * @return Count of configured slave slots
      */
     size_t getSlaveCount() const { return m_slaves.size(); }
     
@@ -174,6 +177,7 @@ public:
     
     /**
      * @brief Set event callback
+     * @param callback Invoked on engage/disengage/error state transitions
      */
     void setEventCallback(GearingEventCallback callback);
     
@@ -191,6 +195,9 @@ public:
     
     /**
      * @brief Engage single slave
+     * @param slaveIndex Slot index of the slave to engage
+     * @param softStart Use ramped engage
+     * @return `true` if engage started
      */
     bool engageSlave(size_t slaveIndex, bool softStart = true);
     
@@ -203,6 +210,8 @@ public:
     
     /**
      * @brief Disengage single slave
+     * @param slaveIndex Slot index of the slave to disengage
+     * @param softStop Use ramped disengage
      */
     void disengageSlave(size_t slaveIndex, bool softStop = true);
     
@@ -215,16 +224,20 @@ public:
     
     /**
      * @brief Check if all slaves are engaged
+     * @return `true` when every configured slave is engaged
      */
     bool isEngaged() const;
-    
+
     /**
      * @brief Check if any slave is engaged
+     * @return `true` when at least one slave is engaged
      */
     bool isAnyEngaged() const;
-    
+
     /**
      * @brief Get slave state
+     * @param slaveIndex Slot index to query
+     * @return Current GearingState for that slave
      */
     GearingState getSlaveState(size_t slaveIndex) const;
     
@@ -253,13 +266,16 @@ public:
     
     /**
      * @brief Set absolute slave offset
+     * @param slaveIndex Slot index of the slave
+     * @param offset Absolute position offset in master counts
      */
     void setOffset(size_t slaveIndex, int32_t offset);
-    
+
     /**
      * @brief Synchronize slave to current master position
-     * 
+     *
      * Resets tracking error.
+     * @param slaveIndex Slot index of the slave to synchronize
      */
     void synchronize(size_t slaveIndex);
     
@@ -274,26 +290,34 @@ public:
     
     /**
      * @brief Get current master position
+     * @return Last master position read by update() [counts]
      */
     int32_t getMasterPosition() const { return m_masterPosition; }
-    
+
     /**
      * @brief Get current master velocity
+     * @return Last master velocity read by update() [counts/s]
      */
     int32_t getMasterVelocity() const { return m_masterVelocity; }
-    
+
     /**
      * @brief Get slave target position
+     * @param slaveIndex Slot index to query
+     * @return Computed target position for that slave [counts]
      */
     int32_t getSlaveTarget(size_t slaveIndex) const;
-    
+
     /**
      * @brief Get slave following error
+     * @param slaveIndex Slot index to query
+     * @return Target minus actual position [counts]
      */
     int32_t getSlaveFollowingError(size_t slaveIndex) const;
-    
+
     /**
      * @brief Get effective gear ratio (during ramping)
+     * @param slaveIndex Slot index to query
+     * @return Current ratio including engage/disengage ramp factor
      */
     double getEffectiveRatio(size_t slaveIndex) const;
     
@@ -355,12 +379,17 @@ public:
     
     /**
      * @brief Add master input
+     * @param backend Drive backend providing this master's position
+     * @param weight Weight of this master in the summed target (0-1)
+     * @param num Gear ratio numerator applied to this master
+     * @param den Gear ratio denominator applied to this master
      */
     void addMaster(DriveBackendPtr backend, double weight = 1.0,
                   int32_t num = 1, int32_t den = 1);
-    
+
     /**
      * @brief Set slave backend
+     * @param backend Drive backend the summed target is written to
      */
     void setSlaveBackend(DriveBackendPtr backend);
     
@@ -371,6 +400,7 @@ public:
     
     /**
      * @brief Get calculated slave position
+     * @return Weighted-sum target position [counts]
      */
     int32_t getSlaveTarget() const { return m_slaveTarget; }
     
