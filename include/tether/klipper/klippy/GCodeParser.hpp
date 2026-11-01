@@ -37,29 +37,52 @@ struct GcodeLine {
     std::map<char, double> params; ///< Parameters: X, Y, Z, E, F, S, T, etc.
     std::map<std::string, std::string> namedParams; ///< Named params: SERVO=..., ANGLE=...
 
-    /// @brief Check if a parameter exists.
+    /**
+     * @brief Check if a parameter exists.
+     * @param key Parameter letter (e.g. 'X', 'F')
+     * @return `true` if the parameter was given on the line
+     */
     bool has(char key) const { return params.count(key) > 0; }
 
-    /// @brief Get a parameter value.
+    /**
+     * @brief Get a parameter value.
+     * @param key Parameter letter
+     * @param defaultVal Returned when the parameter is absent
+     * @return Parameter value or `defaultVal`
+     */
     double get(char key, double defaultVal = 0.0) const {
         auto it = params.find(key);
         return it == params.end() ? defaultVal : it->second;
     }
 
-    /// @brief Check if a named parameter exists (case-insensitive).
+    /**
+     * @brief Check if a named parameter exists (case-insensitive).
+     * @param key Named parameter (e.g. "SERVO")
+     * @return `true` if present among KEY=VALUE parameters
+     */
     bool hasNamed(const std::string& key) const {
         std::string upperKey = toUpperKey(key);
         return namedParams.find(upperKey) != namedParams.end();
     }
 
-    /// @brief Get a named parameter as string (case-insensitive).
+    /**
+     * @brief Get a named parameter as string (case-insensitive).
+     * @param key Named parameter
+     * @param defaultVal Returned when the parameter is absent
+     * @return Raw value string or `defaultVal`
+     */
     std::string getNamed(const std::string& key, const std::string& defaultVal = "") const {
         std::string upperKey = toUpperKey(key);
         auto it = namedParams.find(upperKey);
         return it == namedParams.end() ? defaultVal : it->second;
     }
 
-    /// @brief Get a named parameter as double (case-insensitive).
+    /**
+     * @brief Get a named parameter as double (case-insensitive).
+     * @param key Named parameter
+     * @param defaultVal Returned when absent or non-numeric
+     * @return Parsed value or `defaultVal`
+     */
     double getNamedDouble(const std::string& key, double defaultVal = 0.0) const {
         std::string upperKey = toUpperKey(key);
         auto it = namedParams.find(upperKey);
@@ -67,7 +90,12 @@ struct GcodeLine {
         try { return std::stod(it->second); } catch (...) { return defaultVal; }
     }
 
-    /// @brief Get a named parameter as int (case-insensitive).
+    /**
+     * @brief Get a named parameter as int (case-insensitive).
+     * @param key Named parameter
+     * @param defaultVal Returned when absent or non-numeric
+     * @return Parsed value or `defaultVal`
+     */
     int getNamedInt(const std::string& key, int defaultVal = 0) const {
         std::string upperKey = toUpperKey(key);
         auto it = namedParams.find(upperKey);
@@ -75,7 +103,10 @@ struct GcodeLine {
         try { return std::stoi(it->second); } catch (...) { return defaultVal; }
     }
 
-    /// @brief Check if this is an extended command (uppercase, contains underscore).
+    /**
+     * @brief Check if this is an extended command (uppercase, contains underscore).
+     * @return `true` for Klipper extended commands like SET_SERVO
+     */
     bool isExtendedCommand() const {
         if (code.empty()) return false;
         if (!std::isupper(static_cast<unsigned char>(code[0]))) return false;
@@ -97,8 +128,12 @@ private:
 
 namespace detail {
 
-/// @brief Check if a string starts with a G/M/T code pattern.
-/// @return true if the first non-space char is G/g/M/m/T/t followed by a digit.
+/**
+ * @brief Check if a string starts with a G/M/T code pattern.
+ * @param s Raw input line
+ * @return `true` if the first non-space char is G/g/M/m/T/t followed by
+ *         a digit (or a bare 'T')
+ */
 inline bool startsWithGcodeCommand(const std::string& s) {
     auto first = s.find_first_not_of(" \t");
     if (first == std::string::npos) return false;
@@ -111,8 +146,12 @@ inline bool startsWithGcodeCommand(const std::string& s) {
            (c == 'T' && std::isdigit(static_cast<unsigned char>(s[next])));
 }
 
-/// @brief Parse named parameters (KEY=VALUE) from a string.
-/// Used for extended Klipper commands like SET_SERVO SERVO=foo ANGLE=45.
+/**
+ * @brief Parse named parameters (KEY=VALUE) from a string.
+ * Used for extended Klipper commands like SET_SERVO SERVO=foo ANGLE=45.
+ * @param s Text after the command word
+ * @param[out] out Receives parsed KEY=VALUE pairs (keys uppercased)
+ */
 inline void parseNamedParams(const std::string& s,
                               std::map<std::string, std::string>& out) {
     size_t i = 0;
@@ -396,9 +435,13 @@ inline std::optional<GcodeLine> parseExtendedCommand(const std::string& codeOnly
 
 } // namespace detail
 
-/// @brief Parse a G-code line.
-/// @details Uses the shared GCode::Lexer for standard G/M/T commands and a
-/// lightweight fallback for extended Klipper commands (SET_SERVO, etc.).
+/**
+ * @brief Parse a G-code line.
+ * @details Uses the shared GCode::Lexer for standard G/M/T commands and a
+ * lightweight fallback for extended Klipper commands (SET_SERVO, etc.).
+ * @param line Raw input line (comments are split off)
+ * @return Parsed line, or std::nullopt when the line is empty/comment-only
+ */
 inline std::optional<GcodeLine> parseGcodeLine(std::string_view line) {
     // Strip comments (find semicolon)
     std::string codeOnly;

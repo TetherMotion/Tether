@@ -27,19 +27,30 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Transfer data over SPI.
+    /**
+     * @brief Transfer data over SPI.
+     * @param data Bytes clocked out; the MISO response has the same length
+     * @return Bytes clocked in (zero-filled when no transfer function set)
+     */
     std::vector<uint8_t> transfer(std::span<const uint8_t> data) {
         if (transfer_) return transfer_(data);
         // Default: return same size vector of zeros
         return std::vector<uint8_t>(data.size(), 0);
     }
 
-    /// @brief Transfer data over SPI (vector overload).
+    /**
+     * @brief Transfer data over SPI (vector overload).
+     * @param data Bytes clocked out
+     * @return Bytes clocked in
+     */
     std::vector<uint8_t> transfer(const std::vector<uint8_t>& data) {
         return transfer(std::span<const uint8_t>(data));
     }
 
-    /// @brief Set the transfer function.
+    /**
+     * @brief Set the transfer function.
+     * @param func Backend performing the actual SPI transaction
+     */
     void setTransferFunc(TransferFunc func) { transfer_ = std::move(func); }
 
 private:
@@ -86,22 +97,39 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Read from an I2C device with an 8-bit register address.
+    /**
+     * @brief Read from an I2C device with an 8-bit register address.
+     * @param addr 7-bit device address
+     * @param reg Register to read from
+     * @param len Number of bytes to read
+     * @return Register contents (zero-filled when no backend set)
+     */
     std::vector<uint8_t> read(uint8_t addr, uint8_t reg, size_t len) {
         if (readFunc_) return readFunc_(addr, reg, len);
         return std::vector<uint8_t>(len, 0);
     }
 
-    /// @brief Read from an I2C device without register addressing.
-    /// Some devices (e.g. MLX90614) don't use register addresses.
+    /**
+     * @brief Read from an I2C device without register addressing.
+     * Some devices (e.g. MLX90614) don't use register addresses.
+     * @param addr 7-bit device address
+     * @param len Number of bytes to read
+     * @return Bytes read (zero-filled when no backend set)
+     */
     std::vector<uint8_t> readNoRegister(uint8_t addr, size_t len) {
         if (readNoRegFunc_) return readNoRegFunc_(addr, len);
         if (readFunc_) return readFunc_(addr, 0, len); // Fallback
         return std::vector<uint8_t>(len, 0);
     }
 
-    /// @brief Read from an I2C device with a 16-bit register address.
-    /// Used by devices with many registers (e.g. EEPROM, large sensors).
+    /**
+     * @brief Read from an I2C device with a 16-bit register address.
+     * Used by devices with many registers (e.g. EEPROM, large sensors).
+     * @param addr 7-bit device address
+     * @param reg 16-bit register to read from
+     * @param len Number of bytes to read
+     * @return Register contents (zero-filled when no backend set)
+     */
     std::vector<uint8_t> read16(uint8_t addr, uint16_t reg, size_t len) {
         if (read16Func_) return read16Func_(addr, reg, len);
         // Fallback: split 16-bit reg into two 8-bit writes
@@ -109,20 +137,37 @@ public:
         return std::vector<uint8_t>(len, 0);
     }
 
-    /// @brief Write to an I2C device with an 8-bit register address.
+    /**
+     * @brief Write to an I2C device with an 8-bit register address.
+     * @param addr 7-bit device address
+     * @param reg Register to write
+     * @param data Payload bytes
+     * @return `true` always (no-op when no backend set)
+     */
     bool write(uint8_t addr, uint8_t reg, std::span<const uint8_t> data) {
         if (writeFunc_) { writeFunc_(addr, reg, data); return true; }
         return true; // Return true even without writeFunc (no-op success)
         }
 
-    /// @brief Write to an I2C device without register addressing.
+    /**
+     * @brief Write to an I2C device without register addressing.
+     * @param addr 7-bit device address
+     * @param data Payload bytes
+     * @return `true` always (no-op when no backend set)
+     */
     bool writeNoRegister(uint8_t addr, std::span<const uint8_t> data) {
         if (writeNoRegFunc_) { writeNoRegFunc_(addr, data); return true; }
         if (writeFunc_) { writeFunc_(addr, 0, data); return true; }
         return true;
     }
 
-    /// @brief Write to an I2C device with a 16-bit register address.
+    /**
+     * @brief Write to an I2C device with a 16-bit register address.
+     * @param addr 7-bit device address
+     * @param reg 16-bit register to write
+     * @param data Payload bytes
+     * @return `true` always (no-op when no backend set)
+     */
     bool write16(uint8_t addr, uint16_t reg, std::span<const uint8_t> data) {
         if (write16Func_) { write16Func_(addr, reg, data); return true; }
         if (writeFunc_) { writeFunc_(addr, static_cast<uint8_t>(reg >> 8), data); return true; }
