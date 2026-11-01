@@ -116,6 +116,7 @@ public:
     
     /**
      * @brief Check if file is open
+     * @return `true` while the file handle is valid
      */
     virtual bool is_open() const = 0;
     
@@ -163,6 +164,7 @@ public:
     
     /**
      * @brief Check for end of file
+     * @return `true` when the read position reached the end
      */
     virtual bool eof() = 0;
     
@@ -249,6 +251,8 @@ void fs_deinit();
 
 /**
  * @brief Check if filesystem is available
+ * @return `true` when the platform has a usable filesystem
+ *         (SD card, host FS, etc.)
  */
 bool fs_is_available();
 
@@ -301,16 +305,19 @@ public:
     
     /**
      * @brief Set interface up
+     * @return `true` if the interface was brought up
      */
     virtual bool up() = 0;
-    
+
     /**
      * @brief Set interface down
+     * @return `true` if the interface was brought down
      */
     virtual bool down() = 0;
-    
+
     /**
      * @brief Check if interface is up
+     * @return `true` while the interface is administratively up
      */
     virtual bool is_up() const = 0;
     
@@ -333,20 +340,27 @@ public:
     
     /**
      * @brief Set transmit callback
-     * 
+     *
      * Called when network stack wants to send a frame.
+     * @param callback Function invoked for each outbound frame
+     * @param user_data Opaque context passed back to `callback`
      */
     virtual void set_tx_callback(TxCallback callback, void* user_data) = 0;
-    
+
     /**
      * @brief Set IP configuration
+     * @param ip IPv4 address, host byte order
+     * @param netmask Subnet mask, host byte order
+     * @param gateway Default gateway, host byte order
+     * @return `true` if the configuration was applied
      */
     virtual bool set_ip(uint32_t ip, uint32_t netmask, uint32_t gateway) = 0;
-    
+
     /**
      * @brief Get platform-specific handle
-     * 
+     *
      * Returns platform-specific network interface handle.
+     * @return OS/driver handle (e.g. fd, netif*), platform-defined type
      */
     virtual void* get_handle() = 0;
 };
@@ -361,6 +375,7 @@ PlatformNetif* create_netif(const char* name);
 
 /**
  * @brief Check if network interfaces are supported
+ * @return `true` when the platform implements create_netif()
  */
 bool netif_is_supported();
 
@@ -370,27 +385,31 @@ bool netif_is_supported();
 
 /**
  * @brief Get current time in milliseconds
- * 
+ *
  * Monotonic clock, suitable for measuring elapsed time.
+ * @return Milliseconds since an arbitrary epoch (wraps after ~49 days)
  */
 uint32_t get_time_ms();
 
 /**
  * @brief Get current time in microseconds
+ * @return Microseconds since an arbitrary epoch
  */
 uint64_t get_time_us();
 
 /**
  * @brief Delay for specified milliseconds
- * 
+ *
  * Yields to other tasks if possible.
+ * @param ms Delay duration [ms]
  */
 void delay_ms(uint32_t ms);
 
 /**
  * @brief Delay for specified microseconds
- * 
+ *
  * May be busy-wait for short delays.
+ * @param us Delay duration [µs]
  */
 void delay_us(uint32_t us);
 
@@ -442,6 +461,7 @@ void* alloc_dma_buffer(size_t size);
 
 /**
  * @brief Free DMA-capable memory
+ * @param ptr Buffer previously returned by alloc_dma_buffer()
  */
 void free_dma_buffer(void* ptr);
 
@@ -451,11 +471,13 @@ void free_dma_buffer(void* ptr);
 
 /**
  * @brief Get platform name
+ * @return Platform identifier string (e.g. "linux", "stm32")
  */
 const char* get_platform_name();
 
 /**
  * @brief Get filesystem type name
+ * @return Filesystem implementation name (e.g. "FatFS", "POSIX")
  */
 const char* get_filesystem_name();
 
