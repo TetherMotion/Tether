@@ -28,10 +28,16 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Check if filament is present.
+    /**
+     * @brief Check if filament is present.
+     * @return `true` while filament blocks the sensor
+     */
     bool filamentPresent() const { return !pinRead_(); }
 
-    /// @brief Check if filament has run out.
+    /**
+     * @brief Check if filament has run out.
+     * @return `true` when the sensor reads empty
+     */
     bool runout() const { return pinRead_(); }
 
     /// @brief Update sensor state (call periodically).
@@ -44,14 +50,21 @@ public:
         lastState_ = current;
     }
 
-    /// @brief Check and clear runout event.
+    /**
+     * @brief Check and clear runout event.
+     * @return `true` once per detected runout edge
+     */
     bool consumeRunoutEvent() {
         bool event = runoutEvent_;
         runoutEvent_ = false;
         return event;
     }
 
-    /// @brief Set minimum event time (debounce).
+    /**
+     * @brief Set minimum event time (debounce).
+     * @param seconds Duration the empty state must persist before a
+     *        runout event is raised [s]
+     */
     void setMinEventTime(double seconds) { minEventTime_ = seconds; }
 
 private:
@@ -73,14 +86,22 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Read filament diameter in mm.
+    /**
+     * @brief Read filament diameter in mm.
+     * @return Measured filament diameter [mm]
+     */
     double diameter() const {
         double adc = adcRead_();
         // Linear mapping: 1.75mm at 0V, 2.85mm at 5V (example calibration)
         return 1.75 + adc / 4095.0 * 1.1;
     }
 
-    /// @brief Check if diameter is within tolerance.
+    /**
+     * @brief Check if diameter is within tolerance.
+     * @param nominal Expected diameter [mm]
+     * @param tolerance Allowed deviation [mm]
+     * @return `true` when |measured − nominal| ≤ tolerance
+     */
     bool withinTolerance(double nominal = 1.75, double tolerance = 0.1) const {
         double d = diameter();
         return std::abs(d - nominal) <= tolerance;
@@ -105,7 +126,11 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Process a pin edge (called on interrupt).
+    /**
+     * @brief Process a pin edge (called on interrupt).
+     * @param rising `true` for rising edge (count up), `false` for
+     *        falling (count down)
+     */
     void onEdge(bool rising) {
         if (rising) {
             count_++;
@@ -114,16 +139,27 @@ public:
         }
     }
 
-    /// @brief Get current count.
+    /**
+     * @brief Get current count.
+     * @return Net pulse count since reset()
+     */
     int32_t count() const { return count_; }
 
-    /// @brief Reset count.
+    /**
+     * @brief Reset count.
+     */
     void reset() { count_ = 0; }
 
-    /// @brief Set sample time for rate calculation.
+    /**
+     * @brief Set sample time for rate calculation.
+     * @param seconds Window over which pulseRate() differentiates [s]
+     */
     void setSampleTime(double seconds) { sampleTime_ = seconds; }
 
-    /// @brief Compute pulse rate (pulses per second).
+    /**
+     * @brief Compute pulse rate (pulses per second).
+     * @return Count delta over the sample window [pulses/s]
+     */
     double pulseRate() const {
         if (sampleTime_ <= 0) return 0.0;
         return static_cast<double>(count_ - lastCount_) / sampleTime_;
@@ -160,7 +196,10 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /// @brief Initialize the ADXL345.
+    /**
+     * @brief Initialize the ADXL345.
+     * @return `true` when the DEVID register reads 0xE5
+     */
     bool init() {
         // Read DEVID register (0x00) - should return 0xE5
         std::vector<uint8_t> cmd = {0x80, 0x00}; // Read register 0x00
@@ -169,7 +208,10 @@ public:
         return resp[1] == 0xE5;
     }
 
-    /// @brief Read acceleration values.
+    /**
+     * @brief Read acceleration values.
+     * @return XYZ acceleration [g]; {0,0,0} on SPI error
+     */
     Acceleration read() {
         // Read 6 bytes starting from DATAX0 (0x32)
         // Read multiple bytes: 0x80 | 0x40 | 0x32 = 0xF2
@@ -197,13 +239,21 @@ public:
         samples_.push_back(read());
     }
 
-    /// @brief Get collected samples.
+    /**
+     * @brief Get collected samples.
+     * @return Samples gathered since startMeasurement()
+     */
     const std::vector<Acceleration>& samples() const { return samples_; }
 
-    /// @brief Clear collected samples.
+    /**
+     * @brief Clear collected samples.
+     */
     void clearSamples() { samples_.clear(); }
 
-    /// @brief Check if measurement is in progress.
+    /**
+     * @brief Check if measurement is in progress.
+     * @return `true` between startMeasurement() and stopMeasurement()
+     */
     bool isMeasuring() const { return measuring_; }
 
 private:
@@ -259,14 +309,20 @@ public:
         return width;
     }
 
-    /// @brief Check if filament width is within tolerance.
+    /**
+     * @brief Check if filament width is within tolerance.
+     * @return `true` when a valid width is within [nominal ± tolerance]
+     */
     bool widthOk() const {
         double w = readWidth();
         if (std::isnan(w)) return false;
         return std::abs(w - params_.nominalWidth) <= params_.tolerance;
     }
 
-    /// @brief Get the error from nominal width.
+    /**
+     * @brief Get the error from nominal width.
+     * @return measured − nominal [mm]; NaN on invalid reading
+     */
     double widthError() const {
         double w = readWidth();
         if (std::isnan(w)) return NAN;
