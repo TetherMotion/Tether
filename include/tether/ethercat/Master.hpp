@@ -112,6 +112,8 @@ class Master;
 /// Factory for the private Master::MasterSDOTransport adapter
 /// (defined in src/ethercat/raw/MasterTransports.cpp).  Friended below so
 /// it can name the private nested class.
+/// @param master Master whose raw SDO path the adapter forwards to.
+/// @return Transport usable with CoE::CoEManager / profile objects.
 std::unique_ptr<SDO::ISDOTransport> makeMasterSDOTransport(Master& master);
 
 // ============================================================================
@@ -123,7 +125,39 @@ std::unique_ptr<SDO::ISDOTransport> makeMasterSDOTransport(Master& master);
  *
  * Each instance manages its own network interface, packet routing,
  * slave discovery, and sub-manager objects (PDO, SDO, DC, …).
- * The class is **non-copyable** but can be moved.
+ * The class is **non-copyable** and non-movable: hold it by pointer or
+ * as a stable member so the cyclic loop's captured `this` stays valid.
+ *
+ * ## Typical bring-up sequence
+ *
+ * @code
+ *   EtherCAT::MasterConfig cfg;
+ *   cfg.ifname = "eth0";
+ *   EtherCAT::Master master(cfg);
+ *
+ *   master.start(iface, src_mac);              // 1. open the wire
+ *   auto slaves = master.discovery().discover(); // 2. enumerate
+ *   master.autoConfigureMailbox(0);            // 3. mailbox for SDO
+ *   master.configureProcessDataSyncManagersFromSii(1); // 4. SM2/SM3
+ *   master.pdo().addEntry(...);                // 5. map PDOs (SDO writes)
+ *   master.startCyclicLoop();                  // 6. cyclic exchange
+ *   master.requestSlaveApplicationLayerState(1, 0x08); // 7. OP
+ * @endcode
+ *
+ * ## Choosing a loop model
+ *
+ * - `startCyclicLoop()` — free-running exchange at the configured cycle
+ *   time; use for servo drives and anything with a fixed control period.
+ * - `startAsyncLoop()` — send-on-change; use for I/O that only needs
+ *   updates when the application writes new outputs.  The two models are
+ *   mutually exclusive; starting one stops the other.
+ *
+ * ## Error handling
+ *
+ * Almost every method returns `bool`/`Error`; on failure inspect
+ * `lastWkc()` (0 = slave did not answer) and `lastCoeSdoAbortCode()`
+ * (definitive slave rejection vs. transport error).  Cyclic exchange
+ * health is exposed through `cyclicHealth()`.
  */
 class Master {
 public:
@@ -140,7 +174,9 @@ public:
     using AsyncLoopConfig           = ::EtherCAT::AsyncLoopConfig;
     using BatchTransaction          = ::EtherCAT::BatchTransaction;
 
-    /** Enable or disable the mailbox fallback at runtime. */
+    /** Enable or disable the mailbox fallback at runtime.
+     *  @param enabled true to let the master fall back to conservative
+     *         mailbox defaults when SII probing fails. */
     void setEnableMailboxFallback(bool enabled) { config_.enable_mailbox_fallback = enabled; }
     bool isMailboxFallbackEnabled() const { return config_.enable_mailbox_fallback; }
 
@@ -151,6 +187,8 @@ public:
      * through a pointer captured at construction.  No-op when built with
      * TETHER_ENABLE_UDP_ENCAPSULATION=0; verify with
      * isUdpEncapsulationEnabled().
+     *
+     * @param cfg UDP encapsulation settings (peer address, ports, VLAN).
      */
     void setUdpEncapsulation(const UdpEncapsulationConfig& cfg) {
 #if TETHER_ENABLE_UDP_ENCAPSULATION
@@ -160,7 +198,11 @@ public:
 #endif
     }
 
-    /** Override the PRE_OP retry timing (useful for tests that emulate slaves). */
+    /** Override the PRE_OP retry timing (useful for tests that emulate slaves).
+     *  @param max_attempts Outer retry rounds before the transition fails.
+     *  @param inner_tries Register polls per round.
+     *  @param inner_sleep_ms Delay between inner polls [ms].
+     *  @param backoff_ms Delay between outer rounds [ms]. */
     void setPreopRetryConfig(uint16_t max_attempts, uint16_t inner_tries,
                              uint16_t inner_sleep_ms, uint16_t backoff_ms) {
         config_.preop_max_attempts   = max_attempts;
@@ -184,6 +226,8 @@ public:
      * templates (tagged cyclic sends go straight to the channel socket,
      * no router pass) and the VID range is composed into the socket
      * demux filters together with the fastpath-idx clause.
+     *
+     * @param encap Encapsulation description (VLAN tag, router stub, ...).
      */
     void setWireEncap(const EtherCAT::WireEncap& encap) {
         config_.wire_encap = encap;
@@ -196,13 +240,18 @@ public:
      * Needed under VLAN encapsulation where iface_ is the router stub
      * without a native handle; on the direct path iface_.native_handle
      * is used instead and this may stay -1.  Call before startCyclicLoop().
+     *
+     * @param fd File descriptor of the socket carrying EtherCAT frames.
      */
     void setWireFd(int fd) { config_.wire_fd = fd; }
 
-    /** Set a callback invoked when the master attempts the mailbox fallback for a slave. */
+    /** Set a callback invoked when the master attempts the mailbox fallback for a slave.
+     *  @param cb Called with the slave address whose mailbox fell back to defaults. */
     void setMailboxFallbackCallback(std::function<void(uint16_t)> cb) { mailbox_fallback_cb_ = std::move(cb); }
 
-    /** Test helper: force conservative mailbox defaults for a slave (returns true if applied) */
+    /** Test helper: force conservative mailbox defaults for a slave (returns true if applied)
+     *  @param slave_address Address of the slave to configure.
+     *  @return true when the defaults were applied. */
     bool forceMailboxDefaults(SlaveAddress slave_address);
 
     /**
@@ -211,6 +260,13 @@ public:
      * These values will be applied during discovery *instead* of attempting to
      * read the mailbox configuration from the device EEPROM. This is useful
      * when you want to enforce vendor-supplied ESI values without reading SII.
+     *
+     * @param slave_address Address of the slave to override.
+     * @param wr_addr Mailbox write (master→slave) register address.
+     * @param wr_len Mailbox write buffer length in bytes.
+     * @param rd_addr Mailbox read (slave→master) register address.
+     * @param rd_len Mailbox read buffer length in bytes.
+     * @param proto Mailbox protocol (0 = AoE, 1 = EoE, 2 = CoE, ...).
      */
     void setMailboxOverride(SlaveAddress slave_address, uint16_t wr_addr, uint16_t wr_len,
                              uint16_t rd_addr, uint16_t rd_len, uint16_t proto);
@@ -226,7 +282,9 @@ public:
 
     // ---- Lifecycle ---------------------------------------------------------
 
-    /** Start master task using hardware-independent NetworkInterface. */
+    /** Start master task using hardware-independent NetworkInterface.
+     *  @param iface Wire interface (send/receive hooks) to use.
+     *  @param src_mac 6-byte source MAC address for outgoing frames. */
     void start(const NetworkInterface& iface, const uint8_t src_mac[6]);
 
     /** Stop the master task and shut down all sub-systems. */
@@ -333,6 +391,7 @@ public:
     /// Process image — valid once the cyclic loop is running with an
     /// image_mode other than Buffered.  Safe to cache the reference;
     /// epoch() changes on re-configuration.
+    /// @return Mutable process image shared with the cyclic loop.
     ProcessImage&       processImage();
     const ProcessImage& processImage() const;
     bool startCyclicLoop() { return startCyclicLoop(CyclicLoopConfig{}); }
@@ -390,14 +449,20 @@ public:
      * NOT reentrant — every suspend must be paired with exactly one
      * resumeCyclicExchange().  Suspension does not survive a loop
      * restart (start clears the flag).
+     *
+     * @param timeout_us Maximum time to wait for the loop thread to reach a
+     *        quiesce point [us].
+     * @return true when the exchange is suspended (or no loop is running).
      */
     bool suspendCyclicExchange(uint32_t timeout_us = 20'000);
     void resumeCyclicExchange();
     /// True while the exchange is suspended by suspendCyclicExchange().
+    /// @return true between a successful suspend and its resume.
     bool cyclicExchangeSuspended() const;
 
     /// Async send-on-change loop — see AsyncLoopConfig.  Explicitly
     /// separate from startCyclicLoop: the user chooses the loop model.
+    /// @return true when the async loop started.
     bool startAsyncLoop() { return startAsyncLoop(AsyncLoopConfig{}); }
     bool startAsyncLoop(const AsyncLoopConfig& config);
     void stopAsyncLoop();
@@ -406,7 +471,9 @@ public:
 
     // ---- Frame handling ----------------------------------------------------
 
-    /** Route a received Ethernet frame to the internal parser. */
+    /** Route a received Ethernet frame to the internal parser.
+     *  @param frame Raw Ethernet frame bytes.
+     *  @param length Frame length in bytes. */
     void handleRxFrame(const uint8_t* frame, size_t length);
 
     /**
@@ -422,6 +489,9 @@ public:
      * `recvmmsg()` dequeues a whole batch per syscall instead of one
      * frame per recv — a stall backlog of hundreds of frames empties
      * without paying a syscall each on the cyclic thread.
+     *
+     * @param max_frames Upper bound on frames drained in one call.
+     * @return Number of frames actually drained (0 when no hook is wired).
      */
     int drainWire(int max_frames);
 
@@ -433,10 +503,12 @@ public:
      * Called by the LAM's non-RT diagnostic worker — safe to sleep,
      * perform ioctls and read sysfs.  Empty string = no diagnosis
      * available (non-Linux, or no resolvable TX fd).
+     *
+     * @return Multi-line diagnosis text; empty when unavailable.
      */
     std::string txFailureDiagnostics();
 
-    /// errno of the most recent failed TX send attempt (0 = none so far).
+    /// @return errno of the most recent failed TX send attempt (0 = none so far).
     /// The kernel's own verdict: ENOBUFS = TX ring wedged / carrier lost,
     /// ENETDOWN = interface down, ENODEV = interface gone.
     int lastTxErrno() const {
@@ -480,7 +552,8 @@ public:
      */
     SlaveDiscoveryManager& discovery();
 
-    /** @brief Number of slaves discovered by the last BRD scan. */
+    /** @brief Number of slaves discovered by the last BRD scan.
+     *  @return Slave count recorded by discovery(). */
     uint16_t getDiscoveredSlaveCount() const;
 
     /**
@@ -490,16 +563,23 @@ public:
      * working counter.  It does not read any slave attributes (vendor/product
      * ID, SII, etc.) and does not create Slave objects, so it is much faster
      * than discovery().discover() or discoverSlaves().
+     *
+     * @return Number of slaves answering the BRD scan.
      */
     uint16_t discoverSlaveCount();
 
-    /** @brief Quick check: at least one slave is present on the bus. */
+    /** @brief Quick check: at least one slave is present on the bus.
+     *  @return true when a BRD scan counts >= 1 slave. */
     bool hasAnySlaves();
 
-    /** @brief Quick check: at least @p n slaves are present on the bus. */
+    /** @brief Quick check: at least @p n slaves are present on the bus.
+     *  @param n Minimum expected slave count.
+     *  @return true when at least @p n slaves answer. */
     bool hasAtLeastNSlaves(uint16_t n);
 
-    /** @brief Quick check: exactly @p n slaves are present on the bus. */
+    /** @brief Quick check: exactly @p n slaves are present on the bus.
+     *  @param n Expected slave count.
+     *  @return true when exactly @p n slaves answer. */
     bool hasExactlyNSlaves(uint16_t n);
 
     // ---- Slave access -------------------------------------------------------
@@ -537,6 +617,7 @@ public:
 
     /**
      * @brief Get the human-readable name assigned to a slave.
+     * @param idx Slave index (0-based).
      * @return The name, or an empty string_view if no name is set.
      */
     std::string_view slaveName(uint16_t idx) const;
@@ -546,6 +627,9 @@ public:
      *
      * Returns "Slave <name> (#<index>)" if a name is set,
      * or "Slave <index>" if no name is set.
+     *
+     * @param idx Slave index (0-based).
+     * @return Prefix string for log lines about that slave.
      */
     std::string slaveLogPrefix(uint16_t idx) const;
 
@@ -603,7 +687,7 @@ public:
      * requesting SAFE_OP, because the slave validates SM2/SM3 configuration
      * during the PRE_OP → SAFE_OP transition.
      * 
-     * @param slave_index Slave index (0-based)
+     * @param slave_address Address of the slave to configure
      * @return true if SM2/SM3 were configured and written successfully
      */
     bool configureProcessDataSyncManagersFromSii(SlaveAddress slave_address);
@@ -759,6 +843,8 @@ public:
      *
      * Useful for callers that need to distinguish WKC==0 (slave did not
      * respond) from other transport failures.
+     *
+     * @return Working counter of the last register operation.
      */
     uint16_t lastWkc() const { return last_wkc_; }
 
@@ -771,6 +857,8 @@ public:
      * so the piggybacked read both "kicks" the slave's state machine
      * and confirms the request's effect in a single round-trip.
      * Default: off.
+     *
+     * @param enabled true to append the status read to AL_CONTROL writes.
      */
     void setAlControlStatusKick(bool enabled) {
         al_control_status_kick_ = enabled;
@@ -810,6 +898,8 @@ public:
      * This convenience helper reads SII/identity information for every
      * discovered slave and prints a short diagnostic summary. It is
      * useful for examples and diagnostics.
+     *
+     * @param tag Log tag prefixed to each summary line.
      */
     void logDiscoveredSlavesSummary(const char* tag = "EtherCAT");
 
@@ -827,7 +917,7 @@ public:
      * 3. Configures the SDO subsystem with the mailbox parameters
      * 4. Falls back to sane defaults if SII read fails
      * 
-     * @param slave_index Slave index (0-based)
+     * @param slave_address Address of the slave to configure
      * @param log_level Log level for diagnostics (Debug, Info, etc.)
      *                  Use LogLevel::Debug for verbose output
      * @return true if mailbox was configured successfully, false on critical failure
@@ -926,7 +1016,8 @@ public:
 
     // ---- Debug flags -------------------------------------------------------
 
-    /** @brief Access the master's debug flags (read/write). */
+    /** @brief Access the master's debug flags (read/write).
+     *  @return Mutable flag set consulted by the logging paths. */
     EtherCATMasterDebugFlags& debugFlags() { return debug_flags_; }
     const EtherCATMasterDebugFlags& debugFlags() const { return debug_flags_; }
 
@@ -938,12 +1029,16 @@ public:
      */
     void updateDebugFlags();
 
-    /** @brief Convenience: is a named debug flag enabled for a slave? */
+    /** @brief Convenience: is a named debug flag enabled for a slave?
+     *  @param name Flag name (see EtherCATMasterDebugFlags).
+     *  @param slave_index Slave index the flag is evaluated for.
+     *  @return true when the flag is enabled for that slave. */
     bool isDebugEnabled(const std::string& name, uint16_t slave_index) const {
         return debug_flags_.isEnabled(name, slave_index);
     }
 
-    /** @brief Access the master's debug gate (for conditional debugging). */
+    /** @brief Access the master's debug gate (for conditional debugging).
+     *  @return Gate that callers use to guard expensive debug formatting. */
     DebugGate& debugGate() { return *debug_gate_; }
     const DebugGate& debugGate() const { return *debug_gate_; }
 
@@ -957,6 +1052,8 @@ public:
      * counters on INIT->PRE_OP never emit this error and are unaffected;
      * slaves that retain counter state across restarts (e.g. Synapticon
      * SOMANET) require it to recover without a power cycle.
+     *
+     * @param enabled true to enable the probe-and-resync behavior.
      *
      * Default: enabled.  Disable to restore the previous behaviour (fail
      * the transaction on counter mismatch; the SM0/SM1 reset fallbacks in
@@ -995,6 +1092,7 @@ public:
     /// immediately after a call returns false to distinguish a definitive
     /// slave rejection (e.g. 0x06070010 length mismatch) from a transport
     /// issue.
+    /// @return CoE abort code of the most recent SDO call (0 = none).
     uint32_t lastCoeSdoAbortCode() const;
 
     // ---- Utilities (stateless) ---------------------------------------------
@@ -1042,11 +1140,15 @@ public:
     /// Returns the PDOManager that covers the given slave.
     /// By default this is the default pdo(); after createPdoGroup() it
     /// may be a group-specific manager.
+    /// @param slave_index Slave index (0-based).
+    /// @return Manager owning that slave's PDO mapping.
     PDOManager&     pdoForSlave(uint16_t slave_index);
 
     /// Returns the LogicalAddressManager that covers the given slave.
     /// By default this is the default logicalAddressManager(); after
     /// createPdoGroup() it may be a group-specific LAM.
+    /// @param slave_index Slave index (0-based).
+    /// @return Manager owning that slave's logical address space.
     LogicalAddressManager& logicalAddressManagerForSlave(uint16_t slave_index);
 
     /// Create a new PDOManager + LogicalAddressManager pair with its
@@ -1114,6 +1216,9 @@ public:
      * 
      * Used by unit tests to verify that `fault_diagnose()` was called when
      * AL_STATUS error conditions were observed.
+     *
+     * @param slave_index Slave index (0-based).
+     * @return true when a fault diagnosis was issued for that slave.
      */
     bool wasFaultDiagnosed(uint16_t slave_index) const;
 
@@ -1151,6 +1256,8 @@ public:
     /// Generation bit of the last datagram sent on @p slot — the echo
     /// distinguishes a fresh response from a stale deposit that outlived
     /// its cycle's timeout (stale-deposit ABA guard).
+    /// @param slot Cyclic slot index.
+    /// @return Generation bit of the last datagram sent on @p slot.
     uint8_t  cyclicSlotGen(uint8_t slot) const;
     bool     sendCyclicDatagram(Command cmd, uint8_t slot,
                                 uint16_t adp, uint16_t ado,
@@ -1161,18 +1268,27 @@ public:
      *        (Rotating image mode — the LAM wrote the header at
      *        frame_base, the application wrote the payload at
      *        frame_base+kCyclicFramePayloadOff).
+     *
+     * @param frame_len Total frame length in bytes (header + payload).
+     * @return true when the frame was handed to the wire.
      */
     bool     sendCyclicFrame(uint32_t frame_len);
     /// Wire-offset of the first datagram's payload in a cyclic frame
     /// (eth 14 + ecat-hdr 2 + dg-hdr 10).
     static constexpr uint32_t kCyclicFramePayloadOff = 26;
     /// Acquire the channel's next TX frame (Rotating mode).
+    /// @return Pointer to the frame buffer, or nullptr when none is free.
     uint8_t* acquireCyclicTxFrame();
 
     bool     waitCyclicSlot(uint8_t slot, uint64_t token,
                             uint32_t timeout_ns, RxDatagram& out);
     /// View-returning variant — payload points into the slot's inline
     /// buffer (copy path) or into channel ring/bank memory (view path).
+    /// @param slot Cyclic slot index to wait on.
+    /// @param token Sequence token the deposit must be newer than.
+    /// @param timeout_ns Deadline in nanoseconds.
+    /// @param out Receives the deposited datagram view on success.
+    /// @return true when a fresh deposit arrived before the deadline.
     bool     waitCyclicSlotView(uint8_t slot, uint64_t token,
                                 uint32_t timeout_ns, CyclicSlotView& out);
     /**
@@ -1194,13 +1310,22 @@ public:
                                 uint32_t timeout_ns, CyclicSlotView* views);
     /// Compose [eth][ecat][dg-hdr] into an acquired frame buffer
     /// (Rotating image mode).
+    /// @param frame Frame buffer from acquireCyclicTxFrame().
+    /// @param cmd EtherCAT command (usually LRW).
+    /// @param slot Cyclic slot index baked into the header.
+    /// @param adp Auto-increment position (0 for logical addressing).
+    /// @param ado Auto-increment offset / logical address.
+    /// @param datalen Payload length in bytes.
+    /// @param roundtrip true to request the reply in the same frame.
     void     composeCyclicHeader(uint8_t* frame, Command cmd, uint8_t slot,
                                  uint16_t adp, uint16_t ado, uint16_t datalen,
                                  bool roundtrip);
     /// Byte offset of the first datagram's payload in a composed cyclic
     /// frame — 26 untagged, 30 when a TX VLAN tag is baked into headers.
+    /// @return Payload offset in bytes.
     uint32_t cyclicPayloadOffset() const;
     /// Channel accessor for the process image / transport adapter.
+    /// @return Active cyclic channel, or nullptr when none is configured.
     ICyclicChannel* cyclicChannel() const;
 
     /**
@@ -1210,6 +1335,10 @@ public:
      * by the pooled LRW exchange to append the 64-bit counter trailer
      * and to read the DC timepoint of the configured slave in the same
      * frame as the PDO data.  Every `idx` must satisfy isSlotIdx().
+     *
+     * @param dgs Datagram descriptors to chain into one frame.
+     * @param count Number of descriptors in @p dgs.
+     * @return true when the frame was sent.
      */
     bool     sendCyclicPoolFrame(const CyclicDgramSpec* dgs, size_t count);
     /**
@@ -1252,6 +1381,12 @@ public:
      *        multi-run slice exchange.  Same semantics as
      *        waitCyclicSlotMask() over the slice index space
      *        [0, kNumSliceSlots).
+     *
+     * @param slice_mask Bitmask over slice slots to wait for.
+     * @param tokens Per-slot seq tokens, indexed by slice number.
+     * @param timeout_ns Shared deadline budget for the whole mask.
+     * @param views Output array indexed by slice number.
+     * @return Subset of @p slice_mask that arrived before the deadline.
      */
     uint32_t waitSliceSlotMask(uint32_t slice_mask, const uint64_t* tokens,
                                uint32_t timeout_ns, CyclicSlotView* views);

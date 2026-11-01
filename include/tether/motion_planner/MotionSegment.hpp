@@ -96,6 +96,7 @@ struct SegmentKinematicLimits {
     
     /**
      * @brief Check if any limit is finite
+     * @return true when at least one limit is not infinity.
      */
     bool hasFiniteLimits() const {
         return std::isfinite(maxVelocity) || std::isfinite(maxAcceleration) ||
@@ -104,6 +105,8 @@ struct SegmentKinematicLimits {
     
     /**
      * @brief Merge with other limits (take minimum)
+     * @param other Limits to merge with.
+     * @return Element-wise minimum of both limit sets.
      */
     SegmentKinematicLimits merge(const SegmentKinematicLimits& other) const {
         SegmentKinematicLimits result;
@@ -325,6 +328,11 @@ struct MotionSegment {
     
     /**
      * @brief Create a linear motion segment
+     * @param start Start position (first N axes).
+     * @param end End position (first N axes).
+     * @param feedrate Feed rate [units/s].
+     * @param sourceRef G-code source location for traceability.
+     * @return Linear segment ready to append to a MotionSegmentList.
      */
     template<size_t N>
     static MotionSegment linear(const Vec<N>& start, const Vec<N>& end,
@@ -465,6 +473,10 @@ struct MotionSegment {
 
     /**
      * @brief Create a dwell segment
+     * @param seconds Dwell duration [s].
+     * @param position Position held during the dwell.
+     * @param sourceRef G-code source location for traceability.
+     * @return Dwell segment (zero length).
      */
     static MotionSegment dwell(double seconds, const std::array<double, MAX_MOTION_AXES>& position,
                                SourceReference sourceRef = {}) {
@@ -493,9 +505,10 @@ struct MotionSegment {
      * @param poles Control points (NURBS poles)
      * @param weights NURBS weights (empty for uniform B-spline)
      * @param knots NURBS knot vector
-     * @param degree NURBS curve degree
+     * @param nurbsDegree NURBS curve degree
      * @param feedrate Feed rate in units/sec
      * @param sourceRef Source reference for traceability
+     * @return NURBS segment with the control polygon as a length estimate.
      */
     static MotionSegment nurbs(const std::array<double, MAX_MOTION_AXES>& start,
                                const std::array<double, MAX_MOTION_AXES>& end,
@@ -538,6 +551,7 @@ struct MotionSegment {
     
     /**
      * @brief Check if this is an arc segment
+     * @return true for clockwise or counter-clockwise arcs.
      */
     bool isArc() const {
         return type == MotionSegmentType::ArcCW || type == MotionSegmentType::ArcCCW;
@@ -545,6 +559,7 @@ struct MotionSegment {
     
     /**
      * @brief Check if this is a spline segment
+     * @return true for cubic/quadratic splines and NURBS.
      */
     bool isSpline() const {
         return type == MotionSegmentType::CubicSpline ||
@@ -554,6 +569,7 @@ struct MotionSegment {
 
     /**
      * @brief Check if this is a linear segment (legacy)
+     * @return true for G1-style linear moves.
      */
     bool isLinear() const {
         return type == MotionSegmentType::Linear;
@@ -561,6 +577,7 @@ struct MotionSegment {
     
     /**
      * @brief Check if this is a rapid move
+     * @return true for G0-style rapid moves.
      */
     bool isRapid() const {
         return type == MotionSegmentType::Rapid;
@@ -568,6 +585,7 @@ struct MotionSegment {
     
     /**
      * @brief Check if this requires exact stop
+     * @return true when the path mode forces a full stop at the end.
      */
     bool requiresExactStop() const {
         return pathMode == PathMode::ExactStop;
@@ -575,6 +593,7 @@ struct MotionSegment {
     
     /**
      * @brief Get arc direction (1 for CCW, -1 for CW)
+     * @return +1 for counter-clockwise, -1 otherwise.
      */
     int arcDirection() const {
         return (type == MotionSegmentType::ArcCCW) ? 1 : -1;
@@ -582,6 +601,7 @@ struct MotionSegment {
     
     /**
      * @brief Get 3D start position
+     * @return XYZ of the segment start.
      */
     Vec3 start3D() const {
         return Vec3{startPosition[0], startPosition[1], startPosition[2]};
@@ -589,6 +609,7 @@ struct MotionSegment {
     
     /**
      * @brief Get 3D end position
+     * @return XYZ of the segment end.
      */
     Vec3 end3D() const {
         return Vec3{endPosition[0], endPosition[1], endPosition[2]};
@@ -596,6 +617,7 @@ struct MotionSegment {
     
     /**
      * @brief Get 3D arc center
+     * @return XYZ of the arc center (meaningful for arc segments).
      */
     Vec3 center3D() const {
         return Vec3{arcCenter[0], arcCenter[1], arcCenter[2]};
@@ -735,6 +757,7 @@ public:
     
     /**
      * @brief Append segment to end
+     * @param segment Segment moved to the back of the list.
      */
     void append(MotionSegment segment) {
         auto* node = new Node(std::move(segment));
@@ -755,6 +778,7 @@ public:
     
     /**
      * @brief Prepend segment to beginning
+     * @param segment Segment moved to the front of the list.
      */
     void prepend(MotionSegment segment) {
         auto* node = new Node(std::move(segment));
@@ -773,6 +797,8 @@ public:
     
     /**
      * @brief Insert segment after the given node
+     * @param after Node to insert behind; null prepends instead.
+     * @param segment Segment moved into the list.
      */
     void insertAfter(Node* after, MotionSegment segment) {
         if (!after) {
@@ -798,6 +824,7 @@ public:
     
     /**
      * @brief Remove a node
+     * @param node Node to unlink and delete; null is a no-op.
      */
     void remove(Node* node) {
         if (!node) return;
@@ -839,16 +866,20 @@ public:
     
     /**
      * @brief Get number of segments
+     * @return Segment count.
      */
     size_t size() const noexcept { return size_; }
     
     /**
      * @brief Check if empty
+     * @return true when the list holds no segments.
      */
     bool empty() const noexcept { return size_ == 0; }
     
     /**
      * @brief Get segment by index (O(1) with cache)
+     * @param index Segment index.
+     * @return Segment reference; throws when out of range.
      */
     const MotionSegment& operator[](size_t index) const {
         return at(index);
@@ -856,6 +887,8 @@ public:
     
     /**
      * @brief Get segment by index with bounds checking
+     * @param index Segment index.
+     * @return Segment reference; throws std::out_of_range when invalid.
      */
     const MotionSegment& at(size_t index) const {
         if (index >= size_) {
@@ -866,6 +899,8 @@ public:
     
     /**
      * @brief Get mutable segment by index
+     * @param index Segment index.
+     * @return Mutable segment reference; throws when invalid.
      */
     MotionSegment& at(size_t index) {
         if (index >= size_) {
@@ -876,6 +911,8 @@ public:
     
     /**
      * @brief Get node by index
+     * @param index Node index.
+     * @return Node pointer, or nullptr when out of range.
      */
     Node* nodeAt(size_t index) {
         if (index >= size_) return nullptr;
@@ -889,6 +926,7 @@ public:
     
     /**
      * @brief Get first segment
+     * @return Front segment; throws when the list is empty.
      */
     const MotionSegment& front() const {
         if (!head_) throw std::out_of_range("Empty list");
@@ -897,6 +935,7 @@ public:
     
     /**
      * @brief Get last segment
+     * @return Back segment; throws when the list is empty.
      */
     const MotionSegment& back() const {
         if (!tail_) throw std::out_of_range("Empty list");
@@ -905,12 +944,14 @@ public:
     
     /**
      * @brief Get head node
+     * @return First node, or nullptr when empty.
      */
     Node* head() noexcept { return head_; }
     const Node* head() const noexcept { return head_; }
     
     /**
      * @brief Get tail node
+     * @return Last node, or nullptr when empty.
      */
     Node* tail() noexcept { return tail_; }
     const Node* tail() const noexcept { return tail_; }
@@ -965,6 +1006,9 @@ public:
     
     /**
      * @brief Check if lookahead is available
+     * @param index Current segment index.
+     * @param count Number of segments to look ahead.
+     * @return true when at least @p count segments follow @p index.
      */
     bool hasLookahead(size_t index, size_t count) const {
         return (index + count) <= size_;
@@ -972,6 +1016,9 @@ public:
     
     /**
      * @brief Check if lookbehind is available
+     * @param index Current segment index.
+     * @param count Number of segments to look behind.
+     * @return true when at least @p count segments precede @p index.
      */
     bool hasLookbehind(size_t index, size_t count) const {
         return index >= count;
@@ -998,6 +1045,8 @@ public:
     
     /**
      * @brief Find all segments from a G-code line
+     * @param lineNumber Source line number to find.
+     * @return Indices of every segment originating from that line.
      */
     std::vector<size_t> findAllByLineNumber(uint32_t lineNumber) const {
         std::vector<size_t> result;
@@ -1084,6 +1133,7 @@ public:
     
     /**
      * @brief Apply function to each segment
+     * @param fn Callback invoked with (segment, index) in order.
      */
     void forEach(std::function<void(MotionSegment&, size_t)> fn) {
         Node* node = head_;
@@ -1109,6 +1159,7 @@ public:
     
     /**
      * @brief Compute total path length
+     * @return Sum of all segment lengths [units].
      */
     double totalLength() const {
         double total = 0.0;
@@ -1120,6 +1171,7 @@ public:
     
     /**
      * @brief Count segments by type
+     * @return Counts indexed by MotionSegmentType value.
      */
     std::array<size_t, 8> countByType() const {
         std::array<size_t, 8> counts{};
