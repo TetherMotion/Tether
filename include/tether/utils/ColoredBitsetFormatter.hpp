@@ -153,6 +153,10 @@ public:
     ShowWhen show_when;      ///< Condition for the label to appear in output
 
     BitLabel() = default;
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @param active_when Condition under which the label counts as active.
+    /// @param show_when Condition under which the label appears in output.
     BitLabel(const char* name, uint32_t mask, ActiveWhen active_when,
              ShowWhen show_when = ShowWhen::Always)
         : name(name), mask(mask), active_when(active_when),
@@ -161,6 +165,8 @@ public:
 
     /// Check whether this label is active for the given bitset value.
     /// Override in subclasses for custom behavior.
+    /// @param value Bitset value being rendered.
+    /// @return true when the label's active condition holds for @p value.
     virtual bool isActive(uint32_t value) const {
         switch (active_when) {
             case ActiveWhen::AllSet:   return (value & mask) == mask;
@@ -173,6 +179,8 @@ public:
 
     /// Check whether this label should appear in output for the given
     /// bitset value.  Override in subclasses for custom visibility logic.
+    /// @param value Bitset value being rendered.
+    /// @return true when the label passes the show_when condition.
     virtual bool shouldShow(uint32_t value) const {
         switch (show_when) {
             case ShowWhen::Always:       return true;
@@ -185,10 +193,16 @@ public:
     // --- Single-bit factories (always shown) ---
 
     /// One-active single bit: active when the bit is set (bit=1 → ON).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when the single bit is set. (ShowWhen preset per the brief).
     static BitLabel bit(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AllSet, ShowWhen::Always};
     }
     /// Zero-active single bit: active when the bit is clear (bit=0 → ON).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when the single bit is clear. (ShowWhen preset per the brief).
     static BitLabel bitInv(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AllClear, ShowWhen::Always};
     }
@@ -196,10 +210,16 @@ public:
     // --- Single-bit factories (show only when ON) ---
 
     /// One-active single bit, shown only when active (ON).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when the bit is set, shown only while ON. (ShowWhen preset per the brief).
     static BitLabel bitIfOn(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AllSet, ShowWhen::WhenActive};
     }
     /// Zero-active single bit, shown only when active (ON).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when the bit is clear, shown only while ON. (ShowWhen preset per the brief).
     static BitLabel bitInvIfOn(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AllClear, ShowWhen::WhenActive};
     }
@@ -207,10 +227,16 @@ public:
     // --- Single-bit factories (show only when OFF) ---
 
     /// One-active single bit, shown only when inactive (OFF).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when the bit is set, shown only while OFF. (ShowWhen preset per the brief).
     static BitLabel bitIfOff(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AllSet, ShowWhen::WhenInactive};
     }
     /// Zero-active single bit, shown only when inactive (OFF).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when the bit is clear, shown only while OFF. (ShowWhen preset per the brief).
     static BitLabel bitInvIfOff(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AllClear, ShowWhen::WhenInactive};
     }
@@ -218,18 +244,30 @@ public:
     // --- Multi-bit factories (always shown) ---
 
     /// Multi-bit label: active when ALL bits in mask are set.
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when all mask bits are set. (ShowWhen preset per the brief).
     static BitLabel bits(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AllSet, ShowWhen::Always};
     }
     /// Multi-bit label: active when ALL bits in mask are clear.
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when all mask bits are clear. (ShowWhen preset per the brief).
     static BitLabel bitsInv(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AllClear, ShowWhen::Always};
     }
     /// Multi-bit label: active when ANY bit in mask is set.
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when any mask bit is set. (ShowWhen preset per the brief).
     static BitLabel anyBit(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AnySet, ShowWhen::Always};
     }
     /// Multi-bit label: active when ANY bit in mask is clear.
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when any mask bit is clear. (ShowWhen preset per the brief).
     static BitLabel anyBitInv(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AnyClear, ShowWhen::Always};
     }
@@ -237,18 +275,30 @@ public:
     // --- Multi-bit factories (show only when ON) ---
 
     /// Multi-bit label (all-set), shown only when active (ON).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when all mask bits are set, shown only while ON. (ShowWhen preset per the brief).
     static BitLabel bitsIfOn(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AllSet, ShowWhen::WhenActive};
     }
     /// Multi-bit label (all-clear), shown only when active (ON).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when all mask bits are clear, shown only while ON. (ShowWhen preset per the brief).
     static BitLabel bitsInvIfOn(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AllClear, ShowWhen::WhenActive};
     }
     /// Multi-bit label (any-set), shown only when active (ON).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when any mask bit is set, shown only while ON. (ShowWhen preset per the brief).
     static BitLabel anyBitIfOn(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AnySet, ShowWhen::WhenActive};
     }
     /// Multi-bit label (any-clear), shown only when active (ON).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when any mask bit is clear, shown only while ON. (ShowWhen preset per the brief).
     static BitLabel anyBitInvIfOn(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AnyClear, ShowWhen::WhenActive};
     }
@@ -256,18 +306,30 @@ public:
     // --- Multi-bit factories (show only when OFF) ---
 
     /// Multi-bit label (all-set), shown only when inactive (OFF).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when all mask bits are set, shown only while OFF. (ShowWhen preset per the brief).
     static BitLabel bitsIfOff(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AllSet, ShowWhen::WhenInactive};
     }
     /// Multi-bit label (all-clear), shown only when inactive (OFF).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when all mask bits are clear, shown only while OFF. (ShowWhen preset per the brief).
     static BitLabel bitsInvIfOff(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AllClear, ShowWhen::WhenInactive};
     }
     /// Multi-bit label (any-set), shown only when inactive (OFF).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when any mask bit is set, shown only while OFF. (ShowWhen preset per the brief).
     static BitLabel anyBitIfOff(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AnySet, ShowWhen::WhenInactive};
     }
     /// Multi-bit label (any-clear), shown only when inactive (OFF).
+    /// @param name Display name; must outlive the formatter.
+    /// @param mask Bit mask covered by this label.
+    /// @return Label active when any mask bit is clear, shown only while OFF. (ShowWhen preset per the brief).
     static BitLabel anyBitInvIfOff(const char* name, uint32_t mask) {
         return {name, mask, ActiveWhen::AnyClear, ShowWhen::WhenInactive};
     }
@@ -287,6 +349,7 @@ class ColoredBitsetFormatter {
 public:
     /// Construct from a C array of `BitLabel` values (simple case).
     /// The array must outlive the formatter.
+    /// @param labels Label values; the formatter stores their addresses.
     ColoredBitsetFormatter(std::span<const BitLabel> labels) {
         ptrs_.reserve(labels.size());
         for (const auto& label : labels) {
@@ -296,6 +359,8 @@ public:
 
     /// Construct from a C array of `const BitLabel*` pointers (subclassing
     /// case).  The array and the pointed-to labels must outlive the formatter.
+    /// @param labels Label pointers; both they and their targets must outlive
+    ///        the formatter.
     ColoredBitsetFormatter(std::span<const BitLabel* const> labels) {
         ptrs_.reserve(labels.size());
         for (const auto* ptr : labels) {
@@ -309,6 +374,7 @@ public:
     // -- Query --
 
     /// Number of labels in this formatter.
+    /// @return Count of labels registered at construction.
     size_t size() const { return ptrs_.size(); }
 
     // -- Formatting --
@@ -320,6 +386,12 @@ public:
     /// Opt-in unknown-bits report: when `known_mask` is non-zero, set
     /// bits of `value` outside it are appended as a yellow
     /// "Unknown:i,j,..." tag listing their bit indices.
+    /// @param value Bitset value to render.
+    /// @param sep Separator inserted between labels.
+    /// @param known_mask Bit positions considered known; 0 disables the
+    ///        unknown-bits tag.
+    /// @return ANSI-colored "NAME=ON"/"NAME=OFF" sequence (plus the
+    ///         unknown-bits tag when applicable).
     std::string format(uint32_t value, std::string_view sep = "  ",
                        uint32_t known_mask = 0) const {
         std::string result;
@@ -341,6 +413,9 @@ public:
     /// Format only the ACTIVE (and visible) labels as a space-separated
     /// list of names (no color).  Returns `empty_text` (default "(none)")
     /// if no labels are both active and visible.
+    /// @param value Bitset value to render.
+    /// @param empty_text Text returned when no label is active and visible.
+    /// @return Space-separated active label names, or @p empty_text.
     std::string formatActive(uint32_t value,
                              std::string_view empty_text = "(none)") const {
         std::string result;
@@ -359,6 +434,9 @@ public:
     /// in `value` that are not covered by `known_mask`, rendered as
     /// "Unknown:i,j,...".  Returns an empty string when `known_mask` is
     /// 0 (feature disabled) or when no unknown bits are set.
+    /// @param value Bitset value to inspect.
+    /// @param known_mask Bit positions considered known; 0 disables the report.
+    /// @return "Unknown:i,j,..." tag, or an empty string.
     static std::string formatUnknownBits(uint32_t value, uint32_t known_mask) {
         if (known_mask == 0) return {};
         uint32_t unknown = value & ~known_mask;
@@ -378,6 +456,8 @@ public:
     /// by a label.  Use it to build the `known_mask` for
     /// `format()`/`formatUnknownBits()` when the displayed label set is a
     /// subset of the defined bit positions.
+    /// @param labels Labels whose masks are unioned.
+    /// @return Bit mask of every position covered by a label.
     static uint32_t labelCoverage(std::span<const BitLabel> labels) {
         uint32_t m = 0;
         for (const auto& label : labels) {
@@ -388,6 +468,9 @@ public:
 
     /// Format a single bit as colored "NAME=ON" or "NAME=OFF".
     /// Green (active) or red (inactive), bold, with ANSI reset.
+    /// @param active true renders ON (green), false renders OFF (red).
+    /// @param name Label name shown before the state word.
+    /// @return ANSI-colored "NAME=ON"/"NAME=OFF" string.
     static std::string formatBit(bool active, std::string_view name) {
         if (active) {
             return std::format("\033[32m{}=\033[1mON\033[0m", name);

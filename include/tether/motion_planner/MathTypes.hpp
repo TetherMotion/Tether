@@ -60,6 +60,10 @@ namespace MathConstants {
 
 /**
  * @brief Safe floating-point comparison with tolerance
+ * @param a First value.
+ * @param b Second value.
+ * @param tolerance Maximum absolute difference still considered equal.
+ * @return true when |a - b| <= tolerance.
  */
 template<typename T>
 constexpr bool nearEqual(T a, T b, T tolerance = static_cast<T>(MathConstants::EPSILON)) {
@@ -68,6 +72,10 @@ constexpr bool nearEqual(T a, T b, T tolerance = static_cast<T>(MathConstants::E
 
 /**
  * @brief Clamp value to range
+ * @param value Input value.
+ * @param minVal Lower bound.
+ * @param maxVal Upper bound.
+ * @return value limited to [minVal, maxVal].
  */
 template<typename T>
 constexpr T clamp(T value, T minVal, T maxVal) {
@@ -76,6 +84,10 @@ constexpr T clamp(T value, T minVal, T maxVal) {
 
 /**
  * @brief Linear interpolation
+ * @param a Value at t = 0.
+ * @param b Value at t = 1.
+ * @param t Interpolation parameter (not clamped).
+ * @return a + t * (b - a).
  */
 template<typename T>
 constexpr T lerp(T a, T b, T t) {
@@ -84,6 +96,8 @@ constexpr T lerp(T a, T b, T t) {
 
 /**
  * @brief Square of a value
+ * @param x Input value.
+ * @return x * x.
  */
 template<typename T>
 constexpr T sqr(T x) {
@@ -92,6 +106,8 @@ constexpr T sqr(T x) {
 
 /**
  * @brief Cube of a value
+ * @param x Input value.
+ * @return x * x * x.
  */
 template<typename T>
 constexpr T cube(T x) {
@@ -103,6 +119,10 @@ constexpr T cube(T x) {
  *
  * Implemented with an iterative multiplicative algorithm to avoid overflow
  * where possible and to keep the function constexpr-friendly.
+ *
+ * @param n Number of items to choose from.
+ * @param k Number of items chosen.
+ * @return n choose k, or 0 when k is outside [0, n].
  */
 constexpr int binomial(int n, int k) {
     if (k < 0 || k > n) return 0;
@@ -117,6 +137,8 @@ constexpr int binomial(int n, int k) {
 
 /**
  * @brief Sign of a value (-1, 0, or 1)
+ * @param x Input value.
+ * @return -1 for negative, 0 for zero, 1 for positive.
  */
 template<typename T>
 constexpr int sign(T x) {
@@ -176,6 +198,7 @@ public:
 
     /**
      * @brief Fill constructor - all elements set to same value
+     * @param value Value assigned to every component.
      */
     constexpr explicit Vec(T value) noexcept : data_{} {
         for (size_t i = 0; i < N; ++i) {
@@ -185,6 +208,8 @@ public:
 
     /**
      * @brief Initializer list constructor
+     * @param init Components in order; missing trailing components stay zero,
+     *        surplus entries are ignored.
      */
     constexpr Vec(std::initializer_list<T> init) noexcept : data_{} {
         size_t i = 0;
@@ -195,11 +220,13 @@ public:
 
     /**
      * @brief Array constructor
+     * @param arr Components in order.
      */
     constexpr explicit Vec(const std::array<T, N>& arr) noexcept : data_(arr) {}
 
     /**
      * @brief Variadic constructor for exact dimension match
+     * @param args Exactly N component values.
      */
     template<typename... Args,
              typename = std::enable_if_t<sizeof...(Args) == N &&
@@ -208,6 +235,7 @@ public:
 
     /**
      * @brief Copy from different scalar type
+     * @param other Vector whose components are converted to T.
      */
     template<typename U>
     constexpr explicit Vec(const Vec<N, U>& other) noexcept : data_{} {
@@ -233,27 +261,32 @@ public:
     }
 
     /// Named accessors for common dimensions
+    /// @return Reference to component 0.
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 1), T&> x() noexcept { return data_[0]; }
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 1), const T&> x() const noexcept { return data_[0]; }
 
+    /// @return Reference to component 1.
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 2), T&> y() noexcept { return data_[1]; }
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 2), const T&> y() const noexcept { return data_[1]; }
 
+    /// @return Reference to component 2.
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 3), T&> z() noexcept { return data_[2]; }
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 3), const T&> z() const noexcept { return data_[2]; }
 
+    /// @return Reference to component 3.
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 4), T&> w() noexcept { return data_[3]; }
     template<size_t M = N>
     constexpr std::enable_if_t<(M >= 4), const T&> w() const noexcept { return data_[3]; }
 
     /// Size and data access
+    /// @return Vector dimension N.
     constexpr size_t size() const noexcept { return N; }
     constexpr T* data() noexcept { return data_.data(); }
     constexpr const T* data() const noexcept { return data_.data(); }
@@ -264,12 +297,15 @@ public:
     // ========================================================================
 
     /// Convert to Eigen vector (floating-point types only)
+    /// @return Eigen column vector with the same components.
     template<typename U = T, typename = std::enable_if_t<std::is_floating_point_v<U>>>
     Eigen::Matrix<U, N, 1> toEigen() const noexcept {
         return Eigen::Matrix<U, N, 1>(data_.data());
     }
 
     /// Convert from Eigen vector (floating-point types only)
+    /// @param v Eigen column vector to copy.
+    /// @return Vec with components converted to T.
     template<typename U = T, typename = std::enable_if_t<std::is_floating_point_v<U>>>
     static Vec fromEigen(const Eigen::Matrix<U, N, 1>& v) noexcept {
         Vec result;
@@ -280,6 +316,7 @@ public:
     }
 
     /// Iterator support
+    /// @return Iterator to the first component.
     constexpr auto begin() noexcept { return data_.begin(); }
     constexpr auto end() noexcept { return data_.end(); }
     constexpr auto begin() const noexcept { return data_.begin(); }
@@ -292,6 +329,7 @@ public:
     // ========================================================================
 
     /// Negation
+    /// @return Component-wise negation.
     constexpr Vec operator-() const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -301,6 +339,8 @@ public:
     }
 
     /// Addition
+    /// @param other Vector added component-wise.
+    /// @return Sum vector.
     constexpr Vec operator+(const Vec& other) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -317,6 +357,8 @@ public:
     }
 
     /// Subtraction
+    /// @param other Vector subtracted component-wise.
+    /// @return Difference vector.
     constexpr Vec operator-(const Vec& other) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -333,6 +375,8 @@ public:
     }
 
     /// Scalar multiplication
+    /// @param scalar Factor applied to every component.
+    /// @return Scaled vector.
     constexpr Vec operator*(T scalar) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -349,6 +393,8 @@ public:
     }
 
     /// Scalar division
+    /// @param scalar Divisor applied to every component; must be non-zero.
+    /// @return Scaled vector.
     constexpr Vec operator/(T scalar) const noexcept {
         Vec result;
         T inv = T(1) / scalar;
@@ -367,6 +413,8 @@ public:
     }
 
     /// Element-wise multiplication (Hadamard product)
+    /// @param other Vector multiplied component-wise.
+    /// @return Hadamard product.
     constexpr Vec elementMul(const Vec& other) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -376,6 +424,8 @@ public:
     }
 
     /// Element-wise division
+    /// @param other Vector divided component-wise; components must be non-zero.
+    /// @return Quotient vector.
     constexpr Vec elementDiv(const Vec& other) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -385,6 +435,8 @@ public:
     }
 
     /// Element-wise minimum
+    /// @param other Vector providing the second operand.
+    /// @return Component-wise min(*this, other).
     constexpr Vec elementMin(const Vec& other) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -394,6 +446,8 @@ public:
     }
 
     /// Element-wise maximum
+    /// @param other Vector providing the second operand.
+    /// @return Component-wise max(*this, other).
     constexpr Vec elementMax(const Vec& other) const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -403,6 +457,7 @@ public:
     }
 
     /// Element-wise absolute value
+    /// @return Vector with |component| of every entry.
     constexpr Vec abs() const noexcept {
         Vec result;
         for (size_t i = 0; i < N; ++i) {
@@ -417,6 +472,8 @@ public:
 
     /**
      * @brief Dot product
+     * @param other Vector providing the second operand.
+     * @return Scalar sum of component products.
      */
     constexpr T dot(const Vec& other) const noexcept {
         T result = T(0);
@@ -428,6 +485,8 @@ public:
 
     /**
      * @brief Cross product (3D vectors only)
+     * @param other Vector providing the second operand.
+     * @return Perpendicular vector (right-hand rule).
      */
     template<size_t M = N>
     constexpr std::enable_if_t<M == 3, Vec> cross(const Vec& other) const noexcept {
@@ -440,6 +499,8 @@ public:
 
     /**
      * @brief 2D cross product (returns scalar z-component)
+     * @param other Vector providing the second operand.
+     * @return z-component of the 3D cross product.
      */
     template<size_t M = N>
     constexpr std::enable_if_t<M == 2, T> cross(const Vec& other) const noexcept {
@@ -448,6 +509,7 @@ public:
 
     /**
      * @brief Squared magnitude (avoids sqrt)
+     * @return Dot product with itself.
      */
     constexpr T magnitudeSq() const noexcept {
         return dot(*this);
@@ -455,6 +517,7 @@ public:
 
     /**
      * @brief Magnitude (Euclidean length)
+     * @return sqrt(magnitudeSq()).
      */
     T magnitude() const noexcept {
         if constexpr (std::is_floating_point_v<T>) {
@@ -508,6 +571,8 @@ public:
 
     /**
      * @brief Check if this is a zero vector
+     * @param tolerance Maximum absolute value of each component to count as zero.
+     * @return true when every component is within @p tolerance of zero.
      */
     constexpr bool isZero(T tolerance = static_cast<T>(MathConstants::EPSILON)) const noexcept {
         for (size_t i = 0; i < N; ++i) {
@@ -520,6 +585,8 @@ public:
 
     /**
      * @brief Check if this is a unit vector
+     * @param tolerance Tolerance on the squared magnitude around 1.
+     * @return true when the length is 1 within @p tolerance.
      */
     bool isUnit(T tolerance = static_cast<T>(MathConstants::EPSILON)) const noexcept {
         return nearEqual(magnitudeSq(), T(1), tolerance);
@@ -527,6 +594,8 @@ public:
 
     /**
      * @brief Distance to another vector
+     * @param other Target vector.
+     * @return Euclidean distance |*this - other|.
      */
     T distanceTo(const Vec& other) const noexcept {
         if constexpr (std::is_floating_point_v<T>) {
@@ -538,6 +607,8 @@ public:
 
     /**
      * @brief Squared distance to another vector
+     * @param other Target vector.
+     * @return Squared Euclidean distance (avoids sqrt).
      */
     constexpr T distanceSqTo(const Vec& other) const noexcept {
         return (*this - other).magnitudeSq();
@@ -545,6 +616,9 @@ public:
 
     /**
      * @brief Linear interpolation between vectors
+     * @param other Vector returned at t = 1.
+     * @param t Interpolation parameter (not clamped).
+     * @return *this + t * (other - *this).
      */
     constexpr Vec lerp(const Vec& other, T t) const noexcept {
         return *this + (other - *this) * t;
@@ -552,6 +626,9 @@ public:
 
     /**
      * @brief Project this vector onto another vector
+     * @param other Vector defining the projection direction.
+     * @return Component of *this parallel to @p other (zero when @p other is
+     *         (near) zero).
      */
     Vec projectOnto(const Vec& other) const noexcept {
         T otherMagSq = other.magnitudeSq();
@@ -570,6 +647,8 @@ public:
 
     /**
      * @brief Reject this vector from another (perpendicular component)
+     * @param other Vector defining the projection direction.
+     * @return Component of *this perpendicular to @p other.
      */
     Vec rejectFrom(const Vec& other) const noexcept {
         return *this - projectOnto(other);
@@ -577,6 +656,8 @@ public:
 
     /**
      * @brief Reflect this vector about a normal
+     * @param normal Unit normal of the reflection plane.
+     * @return Mirrored vector.
      */
     constexpr Vec reflect(const Vec& normal) const noexcept {
         return *this - normal * (T(2) * dot(normal));
@@ -584,6 +665,8 @@ public:
 
     /**
      * @brief Angle between this vector and another (radians)
+     * @param other Vector providing the second direction.
+     * @return Angle in [0, pi], or 0 when either vector is (near) zero.
      */
     T angleTo(const Vec& other) const noexcept {
         if constexpr (std::is_floating_point_v<T>) {
@@ -607,6 +690,7 @@ public:
 
     /**
      * @brief Minimum component value
+     * @return Smallest component.
      */
     constexpr T minComponent() const noexcept {
         T result = data_[0];
@@ -618,6 +702,7 @@ public:
 
     /**
      * @brief Maximum component value
+     * @return Largest component.
      */
     constexpr T maxComponent() const noexcept {
         T result = data_[0];
@@ -629,6 +714,7 @@ public:
 
     /**
      * @brief Sum of all components
+     * @return Sum of every component.
      */
     constexpr T sum() const noexcept {
         T result = T(0);
@@ -640,6 +726,7 @@ public:
 
     /**
      * @brief Product of all components
+     * @return Product of every component.
      */
     constexpr T product() const noexcept {
         T result = T(1);
@@ -668,6 +755,9 @@ public:
 
     /**
      * @brief Near-equality comparison with tolerance
+     * @param other Vector compared against.
+     * @param tolerance Maximum absolute difference per component.
+     * @return true when every component differs by at most @p tolerance.
      */
     bool nearEqual(const Vec& other, T tolerance = static_cast<T>(MathConstants::EPSILON)) const noexcept {
         for (size_t i = 0; i < N; ++i) {
@@ -684,6 +774,7 @@ public:
 
     /**
      * @brief Create zero vector
+     * @return Vector with all components zero.
      */
     static constexpr Vec zero() noexcept {
         return Vec{};
@@ -691,6 +782,7 @@ public:
 
     /**
      * @brief Create vector with all components set to one
+     * @return Vector with all components equal to 1.
      */
     static constexpr Vec one() noexcept {
         return Vec{T(1)};
@@ -698,6 +790,8 @@ public:
 
     /**
      * @brief Create unit vector along axis i
+     * @param i Axis index; values >= N produce the zero vector.
+     * @return Vector with component @p i set to 1, others zero.
      */
     static constexpr Vec unit(size_t i) noexcept {
         Vec result;
@@ -708,6 +802,7 @@ public:
     }
 
     /// Common unit vectors for 2D/3D
+    /// @return Unit vector along the x axis.
     template<size_t M = N>
     static constexpr std::enable_if_t<(M >= 1), Vec> unitX() noexcept { return unit(0); }
     template<size_t M = N>
@@ -724,6 +819,9 @@ private:
 // ============================================================================
 
 /// Scalar * Vector
+/// @param scalar Factor applied to every component.
+/// @param v Vector to scale.
+/// @return Scaled vector.
 template<size_t N, typename T>
 constexpr Vec<N, T> operator*(T scalar, const Vec<N, T>& v) noexcept {
     return v * scalar;
@@ -800,6 +898,8 @@ public:
      * @brief Construct from initializer list of coefficients
      *
      * Coefficients are in order [a_0, a_1, a_2, ...] (constant term first)
+     *
+     * @param init Coefficients, constant term first.
      */
     Polynomial(std::initializer_list<T> init) : coeffs_{}, degree_(0) {
         size_t i = 0;
@@ -812,8 +912,8 @@ public:
     /**
      * @brief Construct from coefficient array
      *
-     * @param coeffs Coefficients [a_0, a_1, ..., a_n]
-     * @param n Number of coefficients (degree = n-1)
+     * @param coeffs Coefficients [a_0, a_1, ..., a_n]; degree becomes the
+     *        index of the last non-zero entry.
      */
     template<size_t N>
     explicit Polynomial(const std::array<T, N>& coeffs) : coeffs_{}, degree_(0) {
@@ -826,6 +926,7 @@ public:
 
     /**
      * @brief Construct constant polynomial
+     * @param constant Value of the constant term a_0.
      */
     explicit Polynomial(T constant) : coeffs_{}, degree_(0) {
         coeffs_[0] = constant;
@@ -838,6 +939,8 @@ public:
 
     /**
      * @brief Get coefficient at index
+     * @param i Coefficient index (0 = constant term).
+     * @return Coefficient a_i, or 0 for indices beyond MaxCoefficients.
      */
     constexpr T operator[](size_t i) const noexcept {
         return (i < MaxCoefficients) ? coeffs_[i] : T(0);
@@ -845,6 +948,8 @@ public:
 
     /**
      * @brief Set coefficient at index
+     * @param i Coefficient index (0 = constant term); ignored when out of range.
+     * @param value New coefficient value.
      */
     void setCoefficient(size_t i, T value) {
         if (i < MaxCoefficients) {
@@ -855,11 +960,13 @@ public:
 
     /**
      * @brief Get current degree
+     * @return Index of the highest non-zero coefficient.
      */
     constexpr size_t degree() const noexcept { return degree_; }
 
     /**
      * @brief Check if polynomial is zero
+     * @return true when the polynomial is (near) identically zero.
      */
     constexpr bool isZero() const noexcept {
         return degree_ == 0 && std::abs(coeffs_[0]) < static_cast<T>(MathConstants::EPSILON);
@@ -867,6 +974,7 @@ public:
 
     /**
      * @brief Check if polynomial is constant
+     * @return true when the degree is zero.
      */
     constexpr bool isConstant() const noexcept { return degree_ == 0; }
 
@@ -897,6 +1005,8 @@ public:
 
     /**
      * @brief Evaluate polynomial (operator form)
+     * @param x Evaluation point.
+     * @return p(x).
      */
     T operator()(T x) const noexcept {
         return evaluate(x);
@@ -932,6 +1042,8 @@ public:
      * @brief Compute derivative polynomial
      *
      * If p(x) = sum(a_i * x^i), then p'(x) = sum(i * a_i * x^(i-1))
+     *
+     * @return First derivative of this polynomial.
      */
     Polynomial derivative() const noexcept {
         Polynomial result;
@@ -948,6 +1060,8 @@ public:
 
     /**
      * @brief Compute n-th derivative polynomial
+     * @param n Derivative order; 0 returns a copy.
+     * @return n-th derivative (zero once the degree is exhausted).
      */
     Polynomial derivative(size_t n) const noexcept {
         Polynomial result = *this;
@@ -964,6 +1078,7 @@ public:
      *
      * @param constant Integration constant (default: 0)
      */
+    /// @return Antiderivative with the given integration constant.
     Polynomial<MaxDegree + 1, T> integral(T constant = T(0)) const noexcept {
         Polynomial<MaxDegree + 1, T> result;
         result.setCoefficient(0, constant);
@@ -976,6 +1091,9 @@ public:
 
     /**
      * @brief Compute definite integral from a to b
+     * @param a Lower integration bound.
+     * @param b Upper integration bound.
+     * @return Integral of p over [a, b].
      */
     T integrate(T a, T b) const noexcept {
         auto F = integral();
@@ -988,6 +1106,7 @@ public:
 
     /**
      * @brief Negate polynomial
+     * @return Polynomial with all coefficients negated.
      */
     Polynomial operator-() const noexcept {
         Polynomial result;
@@ -1000,6 +1119,8 @@ public:
 
     /**
      * @brief Add polynomials
+     * @param other Polynomial added coefficient-wise.
+     * @return Sum polynomial.
      */
     Polynomial operator+(const Polynomial& other) const noexcept {
         Polynomial result;
@@ -1018,6 +1139,8 @@ public:
 
     /**
      * @brief Subtract polynomials
+     * @param other Polynomial subtracted coefficient-wise.
+     * @return Difference polynomial.
      */
     Polynomial operator-(const Polynomial& other) const noexcept {
         Polynomial result;
@@ -1036,6 +1159,8 @@ public:
 
     /**
      * @brief Multiply by scalar
+     * @param scalar Factor applied to every coefficient.
+     * @return Scaled polynomial.
      */
     Polynomial operator*(T scalar) const noexcept {
         Polynomial result;
@@ -1056,6 +1181,8 @@ public:
 
     /**
      * @brief Divide by scalar
+     * @param scalar Divisor applied to every coefficient; must be non-zero.
+     * @return Scaled polynomial.
      */
     Polynomial operator/(T scalar) const noexcept {
         return *this * (T(1) / scalar);
@@ -1070,6 +1197,9 @@ public:
      *
      * Note: Result degree is sum of input degrees. If this exceeds MaxDegree,
      * higher-order terms are truncated.
+     *
+     * @param other Polynomial multiplied coefficient-wise (convolution).
+     * @return Product polynomial.
      */
     Polynomial operator*(const Polynomial& other) const noexcept {
         Polynomial result;
@@ -1144,6 +1274,8 @@ public:
 
     /**
      * @brief Compatibility: quadraticRoots() -> returns pair of roots if real
+     * @return Both real roots (repeated root returned twice), or nullopt when
+     *         the polynomial is not quadratic or has complex roots.
      */
     std::optional<std::pair<T, T>> quadraticRoots() const {
         if (degree_ < 2) return std::nullopt;
@@ -1159,6 +1291,8 @@ public:
 
     /**
      * @brief Compatibility: cubicRoots() -> returns all real roots for cubic
+     * @return Real roots of the cubic, or an empty vector when the degree is
+     *         below 3.
      */
     std::vector<T> cubicRoots() const {
         if (degree_ < 3) return {};
@@ -1346,6 +1480,9 @@ private:
 // ============================================================================
 
 /// Scalar * Polynomial
+/// @param scalar Factor applied to every coefficient.
+/// @param p Polynomial to scale.
+/// @return Scaled polynomial.
 template<size_t N, typename T>
 Polynomial<N, T> operator*(T scalar, const Polynomial<N, T>& p) noexcept {
     return p * scalar;

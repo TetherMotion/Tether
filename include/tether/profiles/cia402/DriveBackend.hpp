@@ -217,11 +217,13 @@ public:
     /**
      * @brief Check if backend is connected and operational
      */
+    /// @return true when the drive link is up and the drive is operational.
     virtual bool isConnected() const = 0;
     
     /**
      * @brief Get backend identifier/name
      */
+    /// @return Backend implementation identifier (e.g. "ethercat").
     virtual std::string getName() const = 0;
     
     // ========================================================================
@@ -249,6 +251,7 @@ public:
     /**
      * @brief Get current drive state
      */
+    /// @return Current CiA 402 state machine state.
     virtual DriveState getState() const = 0;
     
     // ========================================================================
@@ -258,16 +261,19 @@ public:
     /**
      * @brief Read status word
      */
+    /// @return Status word read in the last input update.
     virtual uint16_t readStatusWord() = 0;
     
     /**
      * @brief Write control word
      */
+    /// @param controlWord Status word bits to send on the next output update.
     virtual void writeControlWord(uint16_t controlWord) = 0;
     
     /**
      * @brief Read control word (last written)
      */
+    /// @return Control word last written by writeControlWord().
     virtual uint16_t readControlWord() const = 0;
     
     // ========================================================================
@@ -285,11 +291,13 @@ public:
     /**
      * @brief Get current operating mode
      */
+    /// @return Operating mode last requested via setOperatingMode().
     virtual OperatingMode getOperatingMode() const = 0;
     
     /**
      * @brief Get displayed operating mode (from drive)
      */
+    /// @return Operating mode reported by the drive (mode display object).
     virtual OperatingMode getDisplayedMode() const = 0;
     
     // ========================================================================
@@ -299,26 +307,31 @@ public:
     /**
      * @brief Set target position (PP, CSP modes)
      */
+    /// @param position Target position in drive position units.
     virtual void setTargetPosition(int32_t position) = 0;
     
     /**
      * @brief Get actual position
      */
+    /// @return Actual position in drive position units.
     virtual int32_t getActualPosition() const = 0;
     
     /**
      * @brief Get position demand
      */
+    /// @return Internal position demand (setpoint) in drive position units.
     virtual int32_t getPositionDemand() const = 0;
     
     /**
      * @brief Get following error
      */
+    /// @return Position following error in drive position units.
     virtual int32_t getFollowingError() const = 0;
     
     /**
      * @brief Set position offset (CSP mode)
      */
+    /// @param offset Position offset added in cyclic sync position mode.
     virtual void setPositionOffset(int32_t offset) = 0;
     
     // ========================================================================
@@ -328,21 +341,25 @@ public:
     /**
      * @brief Set target velocity (PV, CSV modes)
      */
+    /// @param velocity Target velocity in drive velocity units.
     virtual void setTargetVelocity(int32_t velocity) = 0;
     
     /**
      * @brief Get actual velocity
      */
+    /// @return Actual velocity in drive velocity units.
     virtual int32_t getActualVelocity() const = 0;
     
     /**
      * @brief Get velocity demand
      */
+    /// @return Internal velocity demand (setpoint) in drive velocity units.
     virtual int32_t getVelocityDemand() const = 0;
     
     /**
      * @brief Set velocity offset (CSV mode)
      */
+    /// @param offset Velocity offset added in cyclic sync velocity mode.
     virtual void setVelocityOffset(int32_t offset) = 0;
     
     // ========================================================================
@@ -359,11 +376,13 @@ public:
     /**
      * @brief Get actual torque
      */
+    /// @return Actual torque in 0.1% of rated torque.
     virtual int16_t getActualTorque() const = 0;
     
     /**
      * @brief Set torque offset (CST mode)
      */
+    /// @param offset Torque offset added in cyclic sync torque mode (0.1% of rated torque).
     virtual void setTorqueOffset(int16_t offset) = 0;
     
     // ========================================================================
@@ -373,16 +392,19 @@ public:
     /**
      * @brief Set profile velocity for position mode
      */
+    /// @param velocity Profile velocity in drive velocity units.
     virtual void setProfileVelocity(uint32_t velocity) = 0;
     
     /**
      * @brief Set profile acceleration
      */
+    /// @param acceleration Profile acceleration in drive acceleration units.
     virtual void setProfileAcceleration(uint32_t acceleration) = 0;
     
     /**
      * @brief Set profile deceleration
      */
+    /// @param deceleration Profile deceleration in drive acceleration units.
     virtual void setProfileDeceleration(uint32_t deceleration) = 0;
     
     /**
@@ -399,11 +421,14 @@ public:
     /**
      * @brief Configure homing parameters
      */
+    /// @param params Homing method, speeds and offsets to program.
+    /// @return true when the drive accepted the parameters.
     virtual bool configureHoming(const HomingParams& params) = 0;
     
     /**
      * @brief Get homing parameters
      */
+    /// @return Homing parameters currently configured in the drive.
     virtual HomingParams getHomingParams() const = 0;
     
     // ========================================================================
@@ -413,11 +438,15 @@ public:
     /**
      * @brief Configure interpolation parameters
      */
+    /// @param params Interpolation period and buffer settings.
+    /// @return true when the drive accepted the parameters.
     virtual bool configureInterpolation(const InterpolationParams& params) = 0;
     
     /**
      * @brief Add point to interpolation buffer
      */
+    /// @param position Interpolation setpoint in drive position units.
+    /// @return true when the point was buffered (false when full).
     virtual bool addInterpolationPoint(int32_t position) = 0;
     
     /**
@@ -460,21 +489,26 @@ public:
     /**
      * @brief Apply drive configuration
      */
+    /// @param config Drive configuration to apply.
+    /// @return true when all settings were applied successfully.
     virtual bool configure(const DriveConfig& config) = 0;
     
     /**
      * @brief Get current drive configuration
      */
+    /// @return Configuration currently active in the drive.
     virtual DriveConfig getConfiguration() const = 0;
     
     /**
      * @brief Store parameters to drive NVM
      */
+    /// @return true when the drive confirmed parameter storage.
     virtual bool storeParameters() = 0;
     
     /**
      * @brief Restore parameters from drive NVM
      */
+    /// @return true when the drive confirmed parameter restore.
     virtual bool restoreParameters() = 0;
     
     // ========================================================================
@@ -484,21 +518,25 @@ public:
     /**
      * @brief Get active error code
      */
+    /// @return Active CiA 402 error code (0 when no error).
     virtual uint16_t getErrorCode() const = 0;
     
     /**
      * @brief Get error register
      */
+    /// @return Error register byte of the last error.
     virtual uint8_t getErrorRegister() const = 0;
     
     /**
      * @brief Get error history
      */
+    /// @return Error codes recorded in the drive's history buffer.
     virtual std::vector<uint16_t> getErrorHistory() const = 0;
     
     /**
      * @brief Clear error history
      */
+    /// @return true when the history buffer was cleared.
     virtual bool clearErrorHistory() = 0;
     
     // ========================================================================
@@ -508,21 +546,25 @@ public:
     /**
      * @brief Set state change callback
      */
+    /// @param callback Invoked whenever the CiA 402 state machine changes state.
     virtual void setStateChangeCallback(StateChangeCallback callback) = 0;
     
     /**
      * @brief Set error callback
      */
+    /// @param callback Invoked when the drive reports an error.
     virtual void setErrorCallback(ErrorCallback callback) = 0;
     
     /**
      * @brief Set warning callback
      */
+    /// @param callback Invoked when the drive reports a warning.
     virtual void setWarningCallback(WarningCallback callback) = 0;
     
     /**
      * @brief Set sync callback (called on each cycle)
      */
+    /// @param callback Invoked on every cyclic update.
     virtual void setSyncCallback(SyncCallback callback) = 0;
     
     // ========================================================================
@@ -532,16 +574,20 @@ public:
     /**
      * @brief Get cycle time in microseconds
      */
+    /// @return Configured cycle time [us].
     virtual uint32_t getCycleTimeUs() const = 0;
     
     /**
      * @brief Set desired cycle time
      */
+    /// @param cycleTimeUs Desired cycle time [us].
+    /// @return true when the new cycle time was accepted.
     virtual bool setCycleTimeUs(uint32_t cycleTimeUs) = 0;
     
     /**
      * @brief Get timestamp of last update
      */
+    /// @return Timestamp of the last successful input update.
     virtual uint64_t getLastUpdateTimestamp() const = 0;
 };
 

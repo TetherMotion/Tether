@@ -41,6 +41,10 @@ constexpr float RAD_TO_DEG = 180.0f / PI;
 
 /**
  * @brief Clamp value to range
+ * @param val Input value.
+ * @param min_val Lower bound.
+ * @param max_val Upper bound.
+ * @return val limited to [min_val, max_val].
  */
 inline float clamp(float val, float min_val, float max_val) {
     return (val < min_val) ? min_val : ((val > max_val) ? max_val : val);
@@ -48,6 +52,8 @@ inline float clamp(float val, float min_val, float max_val) {
 
 /**
  * @brief Normalize angle to [-PI, PI]
+ * @param angle Angle in radians (any magnitude).
+ * @return Equivalent angle wrapped into [-PI, PI].
  */
 inline float normalizeAngle(float angle) {
     while (angle > PI) angle -= TWO_PI;
@@ -171,17 +177,23 @@ struct Quaternion {
     Quaternion(float w_, float x_, float y_, float z_) : w(w_), x(x_), y(y_), z(z_) {}
 
     /// Convert to Eigen quaternion
+    /// @return Eigen quaternion with the same w, x, y, z components.
     Eigen::Quaternionf toEigen() const {
         return Eigen::Quaternionf(w, x, y, z);
     }
 
     /// Convert from Eigen quaternion
+    /// @param q Eigen quaternion to copy.
+    /// @return Quaternion with the same components.
     static Quaternion fromEigen(const Eigen::Quaternionf& q) {
         return Quaternion(q.w(), q.x(), q.y(), q.z());
     }
 
     /**
      * @brief Create quaternion from axis-angle representation
+     * @param axis Rotation axis; normalized internally (zero axis yields NaN).
+     * @param angle Rotation angle in radians.
+     * @return Rotation quaternion.
      */
     static Quaternion fromAxisAngle(const Position3D& axis, float angle) {
         Eigen::AngleAxisf aa(angle, Eigen::Vector3f(axis.x, axis.y, axis.z).normalized());
@@ -190,6 +202,8 @@ struct Quaternion {
 
     /**
      * @brief Create quaternion from Euler angles (ZYX convention)
+     * @param euler Roll, pitch and yaw in radians.
+     * @return Rotation quaternion for R = Rz(yaw) * Ry(pitch) * Rx(roll).
      */
     static Quaternion fromEuler(const EulerAngles& euler) {
         // ZYX intrinsic convention: R = Rz(yaw) * Ry(pitch) * Rx(roll)
@@ -201,6 +215,7 @@ struct Quaternion {
 
     /**
      * @brief Convert to Euler angles
+     * @return Intrinsic ZYX (yaw, pitch, roll) decomposition in radians.
      */
     EulerAngles toEuler() const {
         Eigen::Quaternionf q = toEigen();
@@ -231,6 +246,8 @@ struct Quaternion {
 
     /**
      * @brief Rotate a vector by this quaternion
+     * @param v Vector to rotate.
+     * @return Rotated vector.
      */
     Position3D rotate(const Position3D& v) const {
         Eigen::Vector3f rotated = toEigen() * Eigen::Vector3f(v.x, v.y, v.z);
@@ -251,6 +268,7 @@ struct Pose6D {
     
     /**
      * @brief Get Euler angles for orientation
+     * @return Intrinsic ZYX decomposition of the orientation quaternion.
      */
     EulerAngles euler() const {
         return orientation.toEuler();
@@ -304,6 +322,8 @@ struct Transform4x4 {
 
     /**
      * @brief Create rotation about X axis
+     * @param angle Rotation angle in radians.
+     * @return Rigid transform rotating about X.
      */
     static Transform4x4 rotX(float angle) {
         return fromEigen(Eigen::Affine3f(Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitX())).matrix());
@@ -311,6 +331,8 @@ struct Transform4x4 {
 
     /**
      * @brief Create rotation about Y axis
+     * @param angle Rotation angle in radians.
+     * @return Rigid transform rotating about Y.
      */
     static Transform4x4 rotY(float angle) {
         return fromEigen(Eigen::Affine3f(Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitY())).matrix());
@@ -318,6 +340,8 @@ struct Transform4x4 {
 
     /**
      * @brief Create rotation about Z axis
+     * @param angle Rotation angle in radians.
+     * @return Rigid transform rotating about Z.
      */
     static Transform4x4 rotZ(float angle) {
         return fromEigen(Eigen::Affine3f(Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitZ())).matrix());
@@ -325,6 +349,10 @@ struct Transform4x4 {
 
     /**
      * @brief Create translation matrix
+     * @param x Translation along X [m].
+     * @param y Translation along Y [m].
+     * @param z Translation along Z [m].
+     * @return Pure-translation rigid transform.
      */
     static Transform4x4 translation(float x, float y, float z) {
         Eigen::Affine3f t = Eigen::Affine3f::Identity();
@@ -341,6 +369,12 @@ struct Transform4x4 {
      *
      * Standard DH convention:
      * T = Rz(theta) * Tz(d) * Tx(a) * Rx(alpha)
+     *
+     * @param theta Joint angle [rad].
+     * @param d Link offset along Z [m].
+     * @param a Link length along X [m].
+     * @param alpha Link twist [rad].
+     * @return DH transform for one joint.
      */
     static Transform4x4 DH(float theta, float d, float a, float alpha) {
         Eigen::Affine3f t =
@@ -353,6 +387,8 @@ struct Transform4x4 {
 
     /**
      * @brief Matrix multiplication (using Eigen)
+     * @param other Right-hand transform.
+     * @return Combined transform (this applied after @p other).
      */
     Transform4x4 operator*(const Transform4x4& other) const {
         return fromEigen(toEigen() * other.toEigen());
@@ -360,6 +396,8 @@ struct Transform4x4 {
 
     /**
      * @brief Transform a point (using Eigen)
+     * @param p Point in local coordinates.
+     * @return Point in parent coordinates (translation included).
      */
     Position3D transformPoint(const Position3D& p) const {
         Eigen::Vector4f homogeneous(p.x, p.y, p.z, 1.0f);
@@ -369,6 +407,8 @@ struct Transform4x4 {
 
     /**
      * @brief Transform a direction (no translation, using Eigen)
+     * @param d Direction in local coordinates.
+     * @return Direction in parent coordinates (rotation only).
      */
     Position3D transformDirection(const Position3D& d) const {
         Eigen::Matrix3f rotation = toEigen().topLeftCorner<3, 3>();
@@ -378,6 +418,7 @@ struct Transform4x4 {
 
     /**
      * @brief Get translation component
+     * @return Translation of the transform [m].
      */
     Position3D getTranslation() const {
         return Position3D(at(0, 3), at(1, 3), at(2, 3));
@@ -385,6 +426,7 @@ struct Transform4x4 {
 
     /**
      * @brief Get rotation as quaternion (using Eigen)
+     * @return Normalized rotation quaternion of the transform.
      */
     Quaternion getRotation() const {
         Eigen::Matrix3f rotation = toEigen().topLeftCorner<3, 3>();
@@ -393,6 +435,7 @@ struct Transform4x4 {
 
     /**
      * @brief Get as 6-DOF pose
+     * @return Position and orientation of the transform.
      */
     Pose6D toPose() const {
         return Pose6D(getTranslation(), getRotation());
@@ -400,6 +443,7 @@ struct Transform4x4 {
 
     /**
      * @brief Matrix inverse (using Eigen Affine3f for proper rigid transform inverse)
+     * @return Inverse rigid transform.
      */
     Transform4x4 inverse() const {
         Eigen::Affine3f affine(toEigen());
@@ -420,6 +464,7 @@ public:
     
     /**
      * @brief Get number of degrees of freedom
+     * @return Number of joint values forwardKinematics() consumes.
      */
     virtual size_t getDOF() const = 0;
     
@@ -432,6 +477,8 @@ public:
     
     /**
      * @brief Get transformation matrix
+     * @param joint_positions Array of getDOF() joint values (radians or meters).
+     * @return Base-to-end-effector rigid transform.
      */
     virtual Transform4x4 getTransform(const float* joint_positions) const = 0;
 };
@@ -481,6 +528,9 @@ public:
     
     /**
      * @brief Compute end-effector position
+     * @param q1 First joint angle [rad].
+     * @param q2 Second joint angle [rad].
+     * @return End-effector position in the XY plane (z = 0).
      */
     Position3D computePosition(float q1, float q2) const {
         float c1 = std::cos(q1);
@@ -497,6 +547,8 @@ public:
     
     /**
      * @brief Compute elbow position
+     * @param q1 First joint angle [rad].
+     * @return Elbow joint position in the XY plane.
      */
     Position3D computeElbowPosition(float q1) const {
         return Position3D(m_L1 * std::cos(q1), m_L1 * std::sin(q1), 0);
@@ -504,11 +556,13 @@ public:
     
     /**
      * @brief Get workspace radius (maximum reach)
+     * @return Maximum end-effector distance from the base [m].
      */
     float getMaxReach() const { return m_L1 + m_L2; }
     
     /**
      * @brief Get minimum reach (inner boundary of annular workspace)
+     * @return Minimum end-effector distance from the base [m].
      */
     float getMinReach() const { return std::abs(m_L1 - m_L2); }
     
@@ -606,6 +660,7 @@ public:
     
     /**
      * @brief Set DH parameters for all joints
+     * @param params Six DH rows in base-to-tool order.
      */
     void setDHParameters(const DHParameters params[6]) {
         for (int i = 0; i < 6; ++i) {
@@ -658,7 +713,9 @@ public:
     
     /**
      * @brief Get transformation to a specific joint frame
+     * @param q Six joint angles [rad].
      * @param joint_index Joint index (0-5), returns T_{0 to joint}
+     * @return Base-to-joint transform.
      */
     Transform4x4 getJointTransform(const float* q, int joint_index) const {
         Transform4x4 T;
@@ -805,8 +862,10 @@ public:
     
     /**
      * @brief Get workspace boundary (maximum reach in XY plane)
+     * @return Maximum end-effector distance from the base [m].
      */
     float getMaxReach() const { return m_L1 + m_L2; }
+    /// @return Minimum end-effector distance from the base [m].
     float getMinReach() const { return std::abs(m_L1 - m_L2); }
     
 private:
@@ -852,6 +911,7 @@ public:
      * This involves solving a trilateration problem.
      * 
      * @param theta Array of 3 actuator angles (radians)
+     * @return Platform pose (orientation stays parallel to the base).
      */
     Pose6D forwardKinematics(const float* theta) const override {
         Position3D pos = computePosition(theta);
@@ -865,6 +925,8 @@ public:
     
     /**
      * @brief Compute end-effector position
+     * @param theta Array of 3 actuator angles (radians).
+     * @return End-effector position from trilateration.
      */
     Position3D computePosition(const float* theta) const {
         // Angles for 3 arms (120° apart)
@@ -1059,6 +1121,9 @@ public:
     
     /**
      * @brief Inverse kinematics: body velocity to wheel velocities
+     * @param v Forward body velocity [m/s].
+     * @param omega Yaw rate [rad/s].
+     * @return (left, right) wheel angular velocities [rad/s].
      */
     std::array<float, 2> bodyToWheel(float v, float omega) const {
         float v_left = v - omega * m_wheel_base / 2.0f;
@@ -1116,6 +1181,10 @@ public:
     
     /**
      * @brief Inverse kinematics: body twist to wheel velocities
+     * @param vx Body x velocity [m/s].
+     * @param vy Body y velocity [m/s].
+     * @param omega_z Yaw rate [rad/s].
+     * @return Wheel angular velocities [rad/s], wheel order 0..2.
      */
     std::array<float, 3> bodyToWheel(float vx, float vy, float omega_z) const {
         constexpr float phi1 = 0;
@@ -1131,6 +1200,12 @@ public:
     
     /**
      * @brief Update pose from body velocities
+     * @param pose Current pose.
+     * @param vx Body x velocity [m/s].
+     * @param vy Body y velocity [m/s].
+     * @param omega Yaw rate [rad/s].
+     * @param dt Integration step [s].
+     * @return Pose after one step (theta normalized).
      */
     Pose2D updatePose(const Pose2D& pose, float vx, float vy, float omega, float dt) const {
         // Transform velocities to world frame
@@ -1186,6 +1261,10 @@ public:
     
     /**
      * @brief Inverse kinematics: body twist to wheel velocities
+     * @param vx Body x velocity [m/s].
+     * @param vy Body y velocity [m/s].
+     * @param omega_z Yaw rate [rad/s].
+     * @return Wheel angular velocities [rad/s] in FL, FR, RL, RR order.
      */
     std::array<float, 4> bodyToWheel(float vx, float vy, float omega_z) const {
         float L = m_Lx + m_Ly;
@@ -1270,6 +1349,7 @@ public:
      * Uses Newton-Raphson iteration starting from initial guess.
      * 
      * @param leg_lengths Array of 6 leg lengths
+     * @return Platform pose found by iteration.
      */
     Pose6D forwardKinematics(const float* leg_lengths) const override {
         // Initial guess: platform directly above base
@@ -1322,6 +1402,8 @@ public:
     
     /**
      * @brief Inverse kinematics: compute leg lengths from pose
+     * @param pose Desired platform pose.
+     * @param leg_lengths Output array of 6 leg lengths (must have 6 elements).
      */
     void inverseKinematics(const Pose6D& pose, float* leg_lengths) const {
         for (int i = 0; i < 6; ++i) {

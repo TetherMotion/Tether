@@ -414,16 +414,19 @@ public:
     
     /**
      * @brief Get controller type
+     * @return Enumerated controller family used for UI grouping and lookup.
      */
     virtual ControllerType getType() const = 0;
     
     /**
      * @brief Get controller name
+     * @return Short human-readable controller name.
      */
     virtual const char* getName() const = 0;
     
     /**
      * @brief Get detailed description
+     * @return Multi-word description of the control law; empty when none.
      */
     virtual const char* getDescription() const { return ""; }
     
@@ -451,11 +454,13 @@ public:
     
     /**
      * @brief Set controller operating mode
+     * @param mode Mode to switch to (Automatic, Manual, Disabled).
      */
     void setMode(ControllerMode mode) { m_mode = mode; }
     
     /**
      * @brief Get current operating mode
+     * @return Mode last set via setMode() or setEnabled().
      */
     ControllerMode getMode() const { return m_mode; }
     
@@ -465,6 +470,7 @@ public:
     
     /**
      * @brief Set output saturation limits
+     * @param limits Lower/upper output bounds and the optional rate limit.
      */
     void setSaturationLimits(const SaturationLimits& limits) {
         m_limits = limits;
@@ -472,21 +478,27 @@ public:
     
     /**
      * @brief Get current saturation limits
+     * @return Limits applied by saturate()/rateLimit().
      */
     const SaturationLimits& getSaturationLimits() const { return m_limits; }
     
     /**
      * @brief Set manual output value (for Manual mode)
+     * @param output Output returned while the controller is in Manual mode.
      */
     void setManualOutput(double output) { m_manualOutput = output; }
     
     /**
      * @brief Get manual output value
+     * @return Output returned while the controller is in Manual mode.
      */
     double getManualOutput() const { return m_manualOutput; }
     
     /**
      * @brief Enable/disable controller
+     *
+     * Enabling switches to Automatic mode, disabling to Disabled mode.
+     * @param enabled true to enable, false to disable.
      */
     void setEnabled(bool enabled) { 
         m_mode = enabled ? ControllerMode::Automatic : ControllerMode::Disabled;
@@ -494,6 +506,7 @@ public:
     
     /**
      * @brief Check if controller is enabled
+     * @return true unless the controller is in Disabled mode.
      */
     bool isEnabled() const { return m_mode != ControllerMode::Disabled; }
     
@@ -515,11 +528,13 @@ public:
     
     /**
      * @brief Get backend controller
+     * @return Backend controller set via setBackendController(), or null.
      */
     ControllerPtr getBackendController() const { return m_backendController; }
     
     /**
      * @brief Check if controller has a backend
+     * @return true when a backend controller is attached.
      */
     bool hasBackend() const { return m_backendController != nullptr; }
     
@@ -529,6 +544,7 @@ public:
     
     /**
      * @brief Get diagnostic information
+     * @return Counters and last-call statistics maintained by compute().
      */
     const ControllerDiagnostics& getDiagnostics() const { return m_diagnostics; }
     
@@ -539,12 +555,15 @@ public:
     
     /**
      * @brief Get last output
+     * @return Output produced by the most recent compute() call.
      */
     const ControllerOutput& getLastOutput() const { return m_lastOutput; }
     
 protected:
     /**
      * @brief Implementation-specific compute (must override)
+     * @param input Controller input data (setpoint, measurement, dt, ...).
+     * @return Raw control output before saturation/rate limiting.
      */
     virtual ControllerOutput computeImpl(const ControllerInput& input) = 0;
     
@@ -555,16 +574,24 @@ protected:
     
     /**
      * @brief Apply saturation to output
+     * @param value Raw output value.
+     * @return Value clamped to getSaturationLimits().
      */
     double saturate(double value) const;
     
     /**
      * @brief Apply rate limiting
+     * @param value Raw output value.
+     * @param dt Time since the previous call [s]; the maximum change per
+     *           call is the configured rate limit multiplied by @p dt.
+     * @return Rate-limited output value.
      */
     double rateLimit(double value, double dt);
     
     /**
      * @brief Update diagnostics
+     * @param input Input of the compute() call being recorded.
+     * @param output Output produced for that call.
      */
     void updateDiagnostics(const ControllerInput& input, 
                           const ControllerOutput& output);
@@ -607,6 +634,7 @@ public:
     
     /**
      * @brief Get current state estimate
+     * @return Latest estimate produced by estimate().
      */
     virtual StateVector getState() const = 0;
     
@@ -617,6 +645,7 @@ public:
     
     /**
      * @brief Get state dimension
+     * @return Number of estimated states, i.e. size of getState().
      */
     virtual size_t getStateDim() const = 0;
 };
@@ -638,36 +667,43 @@ public:
     
     /**
      * @brief Get state dimension
+     * @return Number of states n in the state vector.
      */
     virtual size_t getStateDim() const = 0;
     
     /**
      * @brief Get input dimension
+     * @return Number of inputs m in the control vector.
      */
     virtual size_t getInputDim() const = 0;
     
     /**
      * @brief Get output dimension
+     * @return Number of outputs p in the measurement vector.
      */
     virtual size_t getOutputDim() const = 0;
     
     /**
      * @brief Get A matrix (state transition)
+     * @return n x n state-transition matrix.
      */
     virtual const StateMatrix& getA() const = 0;
     
     /**
      * @brief Get B matrix (input)
+     * @return n x m input matrix.
      */
     virtual const InputMatrix& getB() const = 0;
     
     /**
      * @brief Get C matrix (output)
+     * @return p x n output matrix.
      */
     virtual const OutputMatrix& getC() const = 0;
     
     /**
      * @brief Get D matrix (feedthrough)
+     * @return p x m feedthrough matrix.
      */
     virtual const FeedthroughMatrix& getD() const = 0;
     
@@ -690,6 +726,9 @@ public:
 
 /**
  * @brief Matrix-vector multiplication
+ * @param mat Matrix of Rows x Cols entries.
+ * @param vec Vector of Cols entries.
+ * @return Vector of Rows entries, mat * vec.
  */
 template<size_t Rows, size_t Cols>
 std::array<double, Rows> matVecMul(const Matrix<Rows, Cols>& mat,
@@ -705,6 +744,9 @@ std::array<double, Rows> matVecMul(const Matrix<Rows, Cols>& mat,
 
 /**
  * @brief Vector addition
+ * @param a Left addend.
+ * @param b Right addend.
+ * @return Element-wise a + b.
  */
 template<size_t N>
 std::array<double, N> vecAdd(const std::array<double, N>& a,
@@ -718,6 +760,9 @@ std::array<double, N> vecAdd(const std::array<double, N>& a,
 
 /**
  * @brief Vector subtraction
+ * @param a Minuend.
+ * @param b Subtrahend.
+ * @return Element-wise a - b.
  */
 template<size_t N>
 std::array<double, N> vecSub(const std::array<double, N>& a,
@@ -731,6 +776,9 @@ std::array<double, N> vecSub(const std::array<double, N>& a,
 
 /**
  * @brief Scalar-vector multiplication
+ * @param vec Vector to scale.
+ * @param scale Scalar factor.
+ * @return Element-wise vec * scale.
  */
 template<size_t N>
 std::array<double, N> vecScale(const std::array<double, N>& vec, double scale) {
@@ -743,6 +791,9 @@ std::array<double, N> vecScale(const std::array<double, N>& vec, double scale) {
 
 /**
  * @brief Vector dot product
+ * @param a Left operand.
+ * @param b Right operand.
+ * @return Sum of a[i] * b[i].
  */
 template<size_t N>
 double vecDot(const std::array<double, N>& a, const std::array<double, N>& b) {
@@ -755,6 +806,8 @@ double vecDot(const std::array<double, N>& a, const std::array<double, N>& b) {
 
 /**
  * @brief Vector norm (Euclidean)
+ * @param vec Input vector.
+ * @return sqrt(vec . vec).
  */
 template<size_t N>
 double vecNorm(const std::array<double, N>& vec) {
@@ -763,6 +816,8 @@ double vecNorm(const std::array<double, N>& vec) {
 
 /**
  * @brief Sign function
+ * @param x Input value.
+ * @return 1.0 for positive, -1.0 for negative, 0.0 for zero.
  */
 inline double sign(double x) {
     return (x > 0.0) ? 1.0 : ((x < 0.0) ? -1.0 : 0.0);
@@ -770,6 +825,10 @@ inline double sign(double x) {
 
 /**
  * @brief Clamp value to range
+ * @param value Input value.
+ * @param min Lower bound.
+ * @param max Upper bound.
+ * @return value limited to [min, max].
  */
 inline double clamp(double value, double min, double max) {
     return std::max(min, std::min(max, value));
@@ -777,6 +836,9 @@ inline double clamp(double value, double min, double max) {
 
 /**
  * @brief Dead band function
+ * @param value Input value.
+ * @param threshold Half-width of the zero region; must be non-negative.
+ * @return 0.0 inside the band, otherwise value shifted by threshold.
  */
 inline double deadband(double value, double threshold) {
     if (std::abs(value) < threshold) return 0.0;

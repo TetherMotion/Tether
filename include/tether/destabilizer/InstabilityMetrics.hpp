@@ -35,16 +35,22 @@ public:
     virtual ~InstabilityMetric() = default;
 
     /// Compute the metric value from a rollout trajectory.
+    /// @param traj Rollout to score (state history plus reference).
+    /// @return Metric value; lower means more stable.
     virtual double compute(const RolloutTrajectory& traj) const = 0;
 
     /// Get the metric type.
+    /// @return Enumerated metric kind for serialization/lookup.
     virtual MetricType type() const = 0;
 
     /// Human-readable name.
+    /// @return Static display name of the metric.
     virtual const char* name() const = 0;
 };
 
 /// Create a metric instance by type, with optional parameters.
+/// @param wm Metric specification (type, weight, parameters).
+/// @return Metric instance for wm.type, or nullptr for unknown types.
 std::unique_ptr<InstabilityMetric> createMetric(const WeightedMetric& wm);
 
 // ---------------------------------------------------------------------------
@@ -242,14 +248,22 @@ public:
     CombinedMetricEvaluator() = default;
 
     /// Configure from weighted metric specifications and safe-set bounds.
+    /// @param metrics Metrics to evaluate, with their weights.
+    /// @param safeSet Safe-set bounds applied to the trajectory states.
+    /// @param controlSatMin Lower actuator saturation limit.
+    /// @param controlSatMax Upper actuator saturation limit.
     void configure(const std::vector<WeightedMetric>& metrics,
                    const std::vector<SafeSetBound>& safeSet,
                    double controlSatMin, double controlSatMax);
 
     /// Evaluate J(trajectory) = Σ w_i · m_i(trajectory).
+    /// @param traj Rollout to score.
+    /// @return Weighted sum of all metric values.
     double evaluate(const RolloutTrajectory& traj) const;
 
     /// Evaluate and return per-metric breakdown.
+    /// @param traj Rollout to score.
+    /// @return Unweighted value of each metric, in configuration order.
     std::vector<double> evaluateBreakdown(const RolloutTrajectory& traj) const;
 
     int metricCount() const { return static_cast<int>(metrics_.size()); }
@@ -263,28 +277,47 @@ private:
 // ---------------------------------------------------------------------------
 
 /// Compute L2 norm of a vector.
+/// @param v Input vector.
+/// @return Euclidean norm.
 double vectorNorm(const std::vector<double>& v);
 
 /// Compute L-infinity norm.
+/// @param v Input vector.
+/// @return Largest absolute component.
 double vectorNormInf(const std::vector<double>& v);
 
 /// Compute difference vector: a - b.
+/// @param a Minuend.
+/// @param b Subtrahend.
+/// @return Component-wise a - b.
 std::vector<double> vectorDiff(const std::vector<double>& a,
                                 const std::vector<double>& b);
 
 /// Simple FFT (Cooley-Tukey) for power spectrum estimation.
 /// Input: real-valued signal. Output: magnitude spectrum (positive frequencies).
+/// @param signal Time-domain samples.
+/// @param dt Sample interval [s].
+/// @return Magnitude spectrum of the positive frequencies.
 std::vector<double> computeFFTMagnitude(const std::vector<double>& signal, double dt);
 
 /// Compute power spectral density.
+/// @param signal Time-domain samples.
+/// @param dt Sample interval [s].
+/// @return (frequency, PSD) pairs for the positive frequencies.
 std::vector<std::pair<double, double>> computePSD(const std::vector<double>& signal,
                                                     double dt);
 
 /// Linear least-squares fit: y = a + b*x. Returns {a, b}.
+/// @param x Sample x coordinates.
+/// @param y Sample y coordinates (same size as @p x).
+/// @return (a, b) of the best-fit line.
 std::pair<double, double> linearFit(const std::vector<double>& x,
                                      const std::vector<double>& y);
 
 /// Estimate dominant eigenvalue magnitude from a sequence of states.
+/// @param states State snapshots in time order.
+/// @param dt Sample interval [s].
+/// @return Estimated spectral radius of the linearized dynamics.
 double estimateSpectralRadius(const std::vector<std::vector<double>>& states, double dt);
 
 } // namespace Destabilizer

@@ -20,7 +20,8 @@ sys.path.insert(0, str(project_root))
 project = 'Tether'
 copyright = '2026, Tether Contributors'
 author = 'Tether Contributors'
-release = '2.0.0'
+version = '1.0.0'
+release = '1.0.0-dev'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
