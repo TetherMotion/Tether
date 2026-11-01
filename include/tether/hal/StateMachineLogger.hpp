@@ -42,6 +42,8 @@ enum class ALState : uint8_t {
 
 /**
  * @brief Convert AL state to string
+ * @param state AL state to name.
+ * @return State name, with "+Error" appended when the error bit is set.
  */
 inline std::string alStateToString(ALState state) {
     auto base = static_cast<ALState>(static_cast<uint8_t>(state) & 0x0F);
@@ -54,6 +56,8 @@ inline std::string alStateToString(ALState state) {
 
 /**
  * @brief Check if state has error flag
+ * @param state AL state to test.
+ * @return true when the error bit is set.
  */
 inline bool alStateHasError(ALState state) {
     return (static_cast<uint8_t>(state) & 0x10) != 0;
@@ -61,6 +65,8 @@ inline bool alStateHasError(ALState state) {
 
 /**
  * @brief Get base state (without error flag)
+ * @param state AL state to mask.
+ * @return State with the error bit cleared.
  */
 inline ALState alStateBase(ALState state) {
     return static_cast<ALState>(static_cast<uint8_t>(state) & 0x0F);
@@ -84,6 +90,7 @@ struct StateTransition {
     
     /**
      * @brief Check if transition represents an error
+     * @return true when the new state or status code indicates an error.
      */
     bool isError() const {
         return alStateHasError(newState) || alStatusCode != 0;
@@ -91,6 +98,7 @@ struct StateTransition {
     
     /**
      * @brief Check if transition is a recovery from error
+     * @return true when an error state was left.
      */
     bool isRecovery() const {
         return alStateHasError(previousState) && !alStateHasError(newState);
@@ -98,6 +106,7 @@ struct StateTransition {
     
     /**
      * @brief Check if state went down (towards Init)
+     * @return true when the new state is below the previous one.
      */
     bool isDowngrade() const {
         return static_cast<uint8_t>(alStateBase(newState)) < 
@@ -129,6 +138,8 @@ enum class ALStatusCode : uint16_t {
 
 /**
  * @brief Get description for AL Status Code
+ * @param code AL status code from the slave.
+ * @return Static description, or "Unknown" when unrecognized.
  */
 const char* alStatusCodeToString(uint16_t code);
 
@@ -161,32 +172,44 @@ public:
     
     /**
      * @brief Initialize the logger
+     * @param config History size, filtering and timestamp options.
+     * @return Error::OK on success.
      */
     virtual Error init(const StateMachineLoggerConfig& config = {}) = 0;
     
     /**
      * @brief Record a state transition
+     * @param transition Transition to store and forward to the callback.
      */
     virtual void recordTransition(const StateTransition& transition) = 0;
     
     /**
      * @brief Convenience method to record transition
+     * @param slaveIndex Slave that changed state.
+     * @param previous State before the transition.
+     * @param next State after the transition.
+     * @param statusCode AL status code accompanying the transition.
+     * @param requested true when the master requested the change.
      */
     void recordTransition(uint16_t slaveIndex, ALState previous, ALState next,
                           uint16_t statusCode = 0, bool requested = false);
     
     /**
      * @brief Set callback for transitions
+     * @param callback Invoked for every recorded transition; null clears it.
      */
     virtual void setCallback(StateTransitionCallback callback) = 0;
     
     /**
      * @brief Get transition history for a slave
+     * @param slaveIndex Slave whose history is requested.
+     * @return Recorded transitions, oldest first.
      */
     virtual std::vector<StateTransition> getHistory(uint16_t slaveIndex) const = 0;
     
     /**
      * @brief Get all recent transitions
+     * @return Transitions across all slaves, oldest first.
      */
     virtual std::vector<StateTransition> getAllHistory() const = 0;
     
@@ -197,11 +220,14 @@ public:
     
     /**
      * @brief Get current state for a slave
+     * @param slaveIndex Slave whose state is requested.
+     * @return Last recorded AL state for that slave.
      */
     virtual ALState getCurrentState(uint16_t slaveIndex) const = 0;
     
     /**
      * @brief Get number of slaves being tracked
+     * @return Count of slaves with recorded state.
      */
     virtual size_t getSlaveCount() const = 0;
     
@@ -218,6 +244,7 @@ public:
     
     /**
      * @brief Set log level
+     * @param level Minimum severity that is logged.
      */
     virtual void setLogLevel(LogLevel level) = 0;
 };
@@ -243,51 +270,61 @@ public:
     
     /**
      * @brief Request state change (master-initiated)
+     * @param state AL state to request from the slave.
      */
     void requestState(ALState state);
     
     /**
      * @brief Get current state
+     * @return Last observed AL state.
      */
     ALState getCurrentState() const { return m_currentState; }
     
     /**
      * @brief Get last requested state
+     * @return AL state most recently requested by the master.
      */
     ALState getRequestedState() const { return m_requestedState; }
     
     /**
      * @brief Get last status code
+     * @return AL status code accompanying the last transition.
      */
     uint16_t getLastStatusCode() const { return m_lastStatusCode; }
     
     /**
      * @brief Check if in error state
      */
+    /// @return true when the current state carries the error bit.
     bool hasError() const { return alStateHasError(m_currentState); }
     
     /**
      * @brief Get slave index
+     * @return Bus index this tracker follows.
      */
     uint16_t getSlaveIndex() const { return m_slaveIndex; }
     
     /**
      * @brief Get configured address
+     * @return Configured station address of the slave.
      */
     uint16_t getConfiguredAddress() const { return m_configuredAddress; }
     
     /**
      * @brief Set configured address
+     * @param addr Configured station address to record.
      */
     void setConfiguredAddress(uint16_t addr) { m_configuredAddress = addr; }
     
     /**
      * @brief Get last transition
+     * @return Most recent state transition for this slave.
      */
     const StateTransition& getLastTransition() const { return m_lastTransition; }
     
     /**
      * @brief Set transition callback
+     * @param callback Invoked on every transition; null clears it.
      */
     void setCallback(StateTransitionCallback callback) { m_callback = callback; }
     
@@ -307,6 +344,7 @@ private:
 
 /**
  * @brief Create state machine logger
+ * @return Logger instance with default configuration.
  */
 std::unique_ptr<IStateMachineLogger> createStateMachineLogger();
 
