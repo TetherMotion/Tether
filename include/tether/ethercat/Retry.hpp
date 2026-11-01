@@ -44,6 +44,7 @@ struct RetryPolicy {
     bool use_exponential_backoff = true;   ///< Enable exponential backoff
 
     /// Default fast retry (for real-time operations)
+    /// @return 2 retries, 5 ms base timeout, 1.5x backoff.
     static RetryPolicy fast() {
         return RetryPolicy{
             .max_retries = 2,
@@ -55,6 +56,7 @@ struct RetryPolicy {
     }
 
     /// Default standard retry
+    /// @return 3 retries, 10 ms base timeout, 2x backoff.
     static RetryPolicy standard() {
         return RetryPolicy{
             .max_retries = 3,
@@ -66,6 +68,7 @@ struct RetryPolicy {
     }
 
     /// Slow retry (for configuration operations)
+    /// @return 5 retries, 50 ms base timeout, 2x backoff.
     static RetryPolicy slow() {
         return RetryPolicy{
             .max_retries = 5,
@@ -77,6 +80,7 @@ struct RetryPolicy {
     }
 
     /// Single attempt, no retry
+    /// @return Policy with max_retries = 0.
     static RetryPolicy none() {
         return RetryPolicy{
             .max_retries = 0,
@@ -88,6 +92,8 @@ struct RetryPolicy {
     }
 
     /// Calculate timeout for a given attempt number
+    /// @param attempt Zero-based attempt index.
+    /// @return Timeout for that attempt [ms], clamped to max_timeout_ms.
     uint32_t getTimeoutForAttempt(uint32_t attempt) const {
         if (!use_exponential_backoff || attempt == 0) {
             return initial_timeout_ms;
@@ -119,6 +125,12 @@ struct StoredDatagram {
     StoredDatagram() = default;
 
     /// Create with command info
+    /// @param c EtherCAT command (APRD, LRW, ...).
+    /// @param i Datagram index.
+    /// @param ap Auto-increment position (ADP).
+    /// @param ao Auto-increment offset (ADO) or logical address.
+    /// @param d Payload bytes (may be null for reads).
+    /// @param len Payload length in bytes.
     StoredDatagram(EtherCATCommand c, uint8_t i, uint16_t ap, uint16_t ao, 
                    const uint8_t* d, uint16_t len)
         : cmd(c), idx(i), adp(ap), ado(ao), datalen(len)
@@ -129,6 +141,7 @@ struct StoredDatagram {
     }
 
     /// Check if valid
+    /// @return true when the command is not NOP and a payload is present.
     bool isValid() const {
         return cmd != EtherCATCommand::NOP && datalen > 0;
     }
@@ -151,6 +164,8 @@ struct RetryResult {
     uint8_t idx = 0;                ///< Index from response
 
     /// Check if this was a WKC error (got response but WKC was wrong)
+    /// @param expected_wkc Working counter the operation required.
+    /// @return true when the exchange succeeded but the WKC differs.
     bool isWkcError(uint16_t expected_wkc) const {
         return success && wkc != expected_wkc;
     }
@@ -173,6 +188,7 @@ struct RetryStats {
     uint64_t max_retries_used = 0;     ///< Maximum retries needed for success
 
     /// Calculate success rate
+    /// @return Fraction of requests that eventually succeeded.
     float successRate() const {
         return total_requests > 0 
             ? static_cast<float>(first_try_success + retry_success) / total_requests 
@@ -180,6 +196,7 @@ struct RetryStats {
     }
 
     /// Calculate first-try success rate
+    /// @return Fraction of requests that succeeded on the first attempt.
     float firstTryRate() const {
         return total_requests > 0
             ? static_cast<float>(first_try_success) / total_requests
@@ -192,32 +209,77 @@ struct RetryStats {
 // ============================================================================
 
 /// Build APRD (Auto-increment Physical Read) datagram
+/// @param idx Datagram index.
+/// @param slave_position Slave position on the bus.
+/// @param ado Register offset.
+/// @param length Number of bytes to read.
+/// @return Ready-to-send datagram.
 StoredDatagram buildAPRD(uint8_t idx, uint16_t slave_position, uint16_t ado, uint16_t length);
 
 /// Build APWR (Auto-increment Physical Write) datagram
+/// @param idx Datagram index.
+/// @param slave_position Slave position on the bus.
+/// @param ado Register offset.
+/// @param data Payload to write.
+/// @param length Payload length in bytes.
+/// @return Ready-to-send datagram.
 StoredDatagram buildAPWR(uint8_t idx, uint16_t slave_position, uint16_t ado, 
                           const uint8_t* data, uint16_t length);
 
 /// Build FPRD (Configured Address Physical Read) datagram
+/// @param idx Datagram index.
+/// @param configured_addr Configured station address.
+/// @param ado Register offset.
+/// @param length Number of bytes to read.
+/// @return Ready-to-send datagram.
 StoredDatagram buildFPRD(uint8_t idx, uint16_t configured_addr, uint16_t ado, uint16_t length);
 
 /// Build FPWR (Configured Address Physical Write) datagram
+/// @param idx Datagram index.
+/// @param configured_addr Configured station address.
+/// @param ado Register offset.
+/// @param data Payload to write.
+/// @param length Payload length in bytes.
+/// @return Ready-to-send datagram.
 StoredDatagram buildFPWR(uint8_t idx, uint16_t configured_addr, uint16_t ado,
                           const uint8_t* data, uint16_t length);
 
 /// Build BRD (Broadcast Read) datagram
+/// @param idx Datagram index.
+/// @param ado Register offset.
+/// @param length Number of bytes to read from every slave.
+/// @return Ready-to-send datagram.
 StoredDatagram buildBRD(uint8_t idx, uint16_t ado, uint16_t length);
 
 /// Build BWR (Broadcast Write) datagram
+/// @param idx Datagram index.
+/// @param ado Register offset.
+/// @param data Payload to write to every slave.
+/// @param length Payload length in bytes.
+/// @return Ready-to-send datagram.
 StoredDatagram buildBWR(uint8_t idx, uint16_t ado, const uint8_t* data, uint16_t length);
 
 /// Build LRW (Logical Read/Write) datagram
+/// @param idx Datagram index.
+/// @param logical_addr Logical (FMMU-mapped) address.
+/// @param data Payload: outputs written, inputs overwritten on reply.
+/// @param length Payload length in bytes.
+/// @return Ready-to-send datagram.
 StoredDatagram buildLRW(uint8_t idx, uint32_t logical_addr, const uint8_t* data, uint16_t length);
 
 /// Build LRD (Logical Read) datagram
+/// @param idx Datagram index.
+/// @param logical_addr Logical (FMMU-mapped) address.
+/// @param length Number of bytes to read.
+/// @return Ready-to-send datagram.
 StoredDatagram buildLRD(uint8_t idx, uint32_t logical_addr, uint16_t length);
 
 /// Build LWR (Logical Write) datagram
+/// @param idx Datagram index.
+/// @param logical_addr Logical (FMMU-mapped) address.
+/// @param data Payload to write.
+/// @param length Payload length in bytes.
+/// @return Ready-to-send datagram.
 StoredDatagram buildLWR(uint8_t idx, uint32_t logical_addr, const uint8_t* data, uint16_t length);
 
 // ============================================================================
@@ -288,6 +350,13 @@ public:
      * @brief Execute request expecting specific WKC
      * 
      * Same as execute(), but also validates working counter
+     * @param request Datagram to send.
+     * @param filter Filter matching the expected response.
+     * @param buffer Buffer receiving the response payload.
+     * @param buffer_size Capacity of @p buffer.
+     * @param expected_wkc Working counter the operation requires.
+     * @param policy Retry policy.
+     * @return RetryResult including the observed working counter.
      */
     RetryResult executeWithWkc(const StoredDatagram& request,
                                const PacketFilter& filter,
@@ -297,6 +366,7 @@ public:
                                const RetryPolicy& policy = RetryPolicy::standard());
 
     /// Get statistics
+    /// @return Counters accumulated since construction or resetStats().
     RetryStats getStats() const { return stats_; }
 
     /// Reset statistics
@@ -351,6 +421,14 @@ RetryResult retryAPWRVerify(RetryExecutor& executor, uint8_t idx, uint16_t slave
 
 /**
  * @brief Execute BRD with retry
+ * @param executor Retry executor to use.
+ * @param idx Datagram index.
+ * @param ado Register address.
+ * @param buffer Output buffer.
+ * @param length Number of bytes to read.
+ * @param expected_wkc Working counter required (0 = any).
+ * @param policy Retry policy.
+ * @return RetryResult for the exchange.
  */
 RetryResult retryBRD(RetryExecutor& executor, uint8_t idx, uint16_t ado,
                      uint8_t* buffer, uint16_t length, uint16_t expected_wkc = 0,
@@ -358,6 +436,14 @@ RetryResult retryBRD(RetryExecutor& executor, uint8_t idx, uint16_t ado,
 
 /**
  * @brief Execute BWR with retry
+ * @param executor Retry executor to use.
+ * @param idx Datagram index.
+ * @param ado Register address.
+ * @param data Data to broadcast.
+ * @param length Length of @p data in bytes.
+ * @param expected_wkc Working counter required (0 = any).
+ * @param policy Retry policy.
+ * @return RetryResult for the exchange.
  */
 RetryResult retryBWR(RetryExecutor& executor, uint8_t idx, uint16_t ado,
                      const uint8_t* data, uint16_t length, uint16_t expected_wkc = 0,
@@ -367,6 +453,16 @@ RetryResult retryBWR(RetryExecutor& executor, uint8_t idx, uint16_t ado,
  * @brief Execute LRW with retry for cyclic PDO exchange
  * 
  * Uses fast retry policy by default for real-time performance
+ *
+ * @param executor Retry executor to use.
+ * @param idx Datagram index.
+ * @param logical_addr Logical (FMMU-mapped) address.
+ * @param tx_data Outputs to write.
+ * @param rx_buffer Buffer receiving the inputs.
+ * @param length Payload length in bytes.
+ * @param expected_wkc Working counter required.
+ * @param policy Retry policy (fast by default).
+ * @return RetryResult for the exchange.
  */
 RetryResult retryLRW(RetryExecutor& executor, uint8_t idx, uint32_t logical_addr,
                      const uint8_t* tx_data, uint8_t* rx_buffer, uint16_t length,
