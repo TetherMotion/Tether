@@ -306,6 +306,7 @@ struct ToolEntry {
     
     /**
      * @brief Get effective radius (including wear)
+     * @return (diameter + diameterWear) / 2.
      */
     double getEffectiveRadius() const {
         return (diameter + diameterWear) / 2.0;
@@ -313,6 +314,7 @@ struct ToolEntry {
     
     /**
      * @brief Get effective Z offset (including wear)
+     * @return zOffset + zWear.
      */
     double getEffectiveZOffset() const {
         return zOffset + zWear;
@@ -332,42 +334,58 @@ public:
     
     /**
      * @brief Get tool entry
+     * @param toolNumber Tool number (T word value).
+     * @return Entry, or nullptr when the tool is not defined.
      */
     const ToolEntry* getTool(int32_t toolNumber) const;
+    /// @param toolNumber Tool number (T word value).
+    /// @return Mutable entry, or nullptr when the tool is not defined.
     ToolEntry* getTool(int32_t toolNumber);
     
     /**
      * @brief Set tool entry
+     * @param toolNumber Tool number to define or replace.
+     * @param entry Tool geometry, offsets and wear values.
+     * @return Error::OK, or an out-of-range error.
      */
     Error setTool(int32_t toolNumber, const ToolEntry& entry);
     
     /**
      * @brief Get tool by pocket
+     * @param pocket Pocket (slot) number.
+     * @return Entry loaded in that pocket, or nullptr when empty.
      */
     const ToolEntry* getToolByPocket(int32_t pocket) const;
     
     /**
      * @brief Get current tool number
+     * @return Tool number selected by the last M6 (0 = none).
      */
     int32_t getCurrentTool() const { return m_currentTool; }
     
     /**
      * @brief Set current tool (after M6)
+     * @param toolNumber Tool number that is now in the spindle.
      */
     void setCurrentTool(int32_t toolNumber);
     
     /**
      * @brief Get current tool entry
+     * @return Entry of the tool in the spindle, or nullptr when none.
      */
     const ToolEntry* getCurrentToolEntry() const;
     
     /**
      * @brief Load tool table from file
+     * @param filename Path of the tool table file.
+     * @return Error::OK, or a file/parse error.
      */
     Error loadFromFile(const std::string& filename);
     
     /**
      * @brief Save tool table to file
+     * @param filename Destination path.
+     * @return Error::OK, or a file I/O error.
      */
     Error saveToFile(const std::string& filename) const;
     
@@ -378,6 +396,7 @@ public:
     
     /**
      * @brief Get number of defined tools
+     * @return Count of non-empty tool slots.
      */
     size_t getToolCount() const;
     
@@ -414,6 +433,7 @@ struct ToolLengthCompState {
     
     /**
      * @brief Get total Z offset
+     * @return Signed tool-length offset plus the additional (G43.2) offset.
      */
     double getTotalZOffset() const {
         double sign = isNegative ? -1.0 : 1.0;
@@ -428,11 +448,16 @@ class ToolLengthComp {
 public:
     /**
      * @brief Constructor
+     * @param toolTable Table supplying tool lengths; must outlive this object.
      */
     explicit ToolLengthComp(ToolTable& toolTable);
     
     /**
      * @brief Process G43 (TLO positive)
+     * @param block G-code block (H word selects the tool slot).
+     * @param state Machine state (TLO state updated).
+     * @param vars Variable system (#5400-#5413 updated).
+     * @return Error::OK, or an unknown-tool error.
      */
     Error processG43(
         const Block& block,
@@ -442,6 +467,10 @@ public:
     
     /**
      * @brief Process G43.1 (dynamic TLO)
+     * @param block G-code block with axis words giving the offset directly.
+     * @param state Machine state (TLO state updated).
+     * @param vars Variable system (#5400-#5413 updated).
+     * @return Error::OK on success.
      */
     Error processG43_1(
         const Block& block,
@@ -451,6 +480,10 @@ public:
     
     /**
      * @brief Process G43.2 (additional offset)
+     * @param block G-code block with the additional offset axis words.
+     * @param state Machine state (TLO state updated).
+     * @param vars Variable system (#5400-#5413 updated).
+     * @return Error::OK on success.
      */
     Error processG43_2(
         const Block& block,
@@ -460,6 +493,10 @@ public:
     
     /**
      * @brief Process G44 (TLO negative)
+     * @param block G-code block (H word selects the tool slot).
+     * @param state Machine state (TLO state updated).
+     * @param vars Variable system (#5400-#5413 updated).
+     * @return Error::OK, or an unknown-tool error.
      */
     Error processG44(
         const Block& block,
@@ -469,26 +506,34 @@ public:
     
     /**
      * @brief Process G49 (cancel TLO)
+     * @param state Machine state (TLO cleared).
+     * @return Error::OK on success.
      */
     Error processG49(MachineState& state);
     
     /**
      * @brief Apply TLO to position
+     * @param programPos Program coordinates.
+     * @return Machine coordinates with the tool-length offset applied.
      */
     Position applyOffset(const Position& programPos) const;
     
     /**
      * @brief Remove TLO from position
+     * @param machinePos Machine coordinates.
+     * @return Program coordinates with the tool-length offset removed.
      */
     Position removeOffset(const Position& machinePos) const;
     
     /**
      * @brief Get current state
+     * @return Active TLO state (offset, source, sign).
      */
     const ToolLengthCompState& getState() const { return m_state; }
     
     /**
      * @brief Check if TLO is active
+     * @return true when a G43/G44 offset is currently applied.
      */
     bool isActive() const { return m_state.active; }
     
@@ -563,12 +608,18 @@ class CutterRadiusComp {
 public:
     /**
      * @brief Constructor
+     * @param toolTable Table supplying tool radii; must outlive this object.
+     * @param config Corner handling and gouge-check settings.
      */
     explicit CutterRadiusComp(ToolTable& toolTable,
                               const CutterCompConfig& config = {});
     
     /**
      * @brief Process G40 (cancel)
+     * @param block G-code block (unused axis words ignored).
+     * @param state Machine state (compensation state cleared).
+     * @param segments Motion segments appended for the lead-out move.
+     * @return Error::OK on success.
      */
     Error processG40(
         const Block& block,
@@ -578,6 +629,10 @@ public:
     
     /**
      * @brief Process G41 (left compensation)
+     * @param block G-code block (D word selects the tool).
+     * @param state Machine state (compensation state updated).
+     * @param vars Variable system (#5400-#5413 updated).
+     * @return Error::OK, or an unknown-tool error.
      */
     Error processG41(
         const Block& block,
@@ -587,6 +642,10 @@ public:
     
     /**
      * @brief Process G41.1 (dynamic left)
+     * @param block G-code block with the D radius word.
+     * @param state Machine state (compensation state updated).
+     * @param vars Variable system (#5400-#5413 updated).
+     * @return Error::OK on success.
      */
     Error processG41_1(
         const Block& block,
@@ -596,6 +655,10 @@ public:
     
     /**
      * @brief Process G42 (right compensation)
+     * @param block G-code block (D word selects the tool).
+     * @param state Machine state (compensation state updated).
+     * @param vars Variable system (#5400-#5413 updated).
+     * @return Error::OK, or an unknown-tool error.
      */
     Error processG42(
         const Block& block,
@@ -605,6 +668,10 @@ public:
     
     /**
      * @brief Process G42.1 (dynamic right)
+     * @param block G-code block with the D radius word.
+     * @param state Machine state (compensation state updated).
+     * @param vars Variable system (#5400-#5413 updated).
+     * @return Error::OK on success.
      */
     Error processG42_1(
         const Block& block,
@@ -615,8 +682,10 @@ public:
     /**
      * @brief Apply compensation to motion segment
      * 
-     * @param programPath Programmed path (start and end)
-     * @param nextPath Next path (for corner calculation, optional)
+     * @param start Programmed path start point.
+     * @param end Programmed path end point.
+     * @param nextEnd Next path's end point (corner calculation); nullptr when
+     *        unknown.
      * @param[out] compensatedPath Output compensated segments
      * @return Error if compensation fails (gouge, etc.)
      */
@@ -629,25 +698,29 @@ public:
     
     /**
      * @brief Get current state
+     * @return Active compensation state (side, radius, corner mode).
      */
     const CutterCompState& getState() const { return m_state; }
     
     /**
      * @brief Check if compensation is active
+     * @return true when G41/G42 is in effect.
      */
     bool isActive() const { return m_state.side != CutterCompSide::OFF; }
     
     /**
      * @brief Get active radius
+     * @return Effective tool radius used for compensation.
      */
     double getRadius() const { return m_state.radius; }
     
     /**
      * @brief Check for gouging
      * 
-     * @param path1 First path segment
-     * @param path2 Second path segment
-     * @param radius Tool radius
+     * @param p1_start First path segment start point.
+     * @param p1_end First path segment end point.
+     * @param p2_end Second path segment end point.
+     * @param radius Tool radius.
      * @return true if gouge would occur
      */
     bool checkGouge(
@@ -713,6 +786,10 @@ using ToolChangeCallback = std::function<Error(
 
 /**
  * @brief Process T word (tool select)
+ * @param toolNumber Tool number from the T word.
+ * @param state Machine state (selected tool updated).
+ * @param toolTable Table used to validate the selection.
+ * @return Error::OK, or an unknown-tool error.
  */
 Error processTWord(
     int32_t toolNumber,
@@ -722,6 +799,10 @@ Error processTWord(
 
 /**
  * @brief Process M6 (tool change)
+ * @param state Machine state (current tool updated on success).
+ * @param toolTable Table providing the new tool's geometry.
+ * @param callback Optional machine-specific change sequence (ATC moves).
+ * @return Error::OK, or the callback's error.
  */
 Error processM6(
     MachineState& state,
@@ -735,6 +816,10 @@ Error processM6(
 
 /**
  * @brief Update tool-related variables (#5400-#5413)
+ * @param vars Variable system receiving the values.
+ * @param toolTable Table supplying the tool data.
+ * @param tloState Active tool-length compensation state.
+ * @param cutterState Active cutter-radius compensation state.
  */
 void updateToolVariables(
     VariableSystem& vars,
