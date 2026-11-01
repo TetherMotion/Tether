@@ -403,6 +403,11 @@ ControlPoint2D evaluateCubicBezier(
 
 /**
  * @brief Evaluate quadratic Bezier curve
+ * @param p0 Start point.
+ * @param p1 Control point.
+ * @param p2 End point.
+ * @param t Curve parameter in [0, 1].
+ * @return Point on the curve.
  */
 ControlPoint2D evaluateQuadraticBezier(
     const ControlPoint2D& p0,
@@ -415,6 +420,13 @@ ControlPoint2D evaluateQuadraticBezier(
  * @brief Evaluate cubic Bezier derivative
  * 
  * Returns tangent vector at parameter t.
+ *
+ * @param p0 Start point.
+ * @param p1 First control point.
+ * @param p2 Second control point.
+ * @param p3 End point.
+ * @param t Curve parameter in [0, 1].
+ * @return dC/dt at @p t.
  */
 ControlPoint2D evaluateCubicBezierDerivative(
     const ControlPoint2D& p0,
@@ -426,6 +438,12 @@ ControlPoint2D evaluateCubicBezierDerivative(
 
 /**
  * @brief Evaluate cubic Bezier second derivative
+ * @param p0 Start point.
+ * @param p1 First control point.
+ * @param p2 Second control point.
+ * @param p3 End point.
+ * @param t Curve parameter in [0, 1].
+ * @return d²C/dt² at @p t.
  */
 ControlPoint2D evaluateCubicBezierSecondDerivative(
     const ControlPoint2D& p0,
@@ -437,6 +455,9 @@ ControlPoint2D evaluateCubicBezierSecondDerivative(
 
 /**
  * @brief Calculate curvature at parameter t
+ * @param tangent First derivative (velocity direction).
+ * @param secondDeriv Second derivative.
+ * @return Curvature κ = |C' × C''| / |C'|³.
  */
 double calculateCurvature(
     const ControlPoint2D& tangent,
@@ -467,6 +488,10 @@ double evaluateBasisFunction(
  * @brief Evaluate NURBS curve
  * 
  * C(u) = Σ (N_{i,p}(u) * w_i * P_i) / Σ (N_{i,p}(u) * w_i)
+ *
+ * @param nurbs NURBS definition (control points, weights, knots, degree).
+ * @param u Curve parameter, clamped to the knot domain.
+ * @return Point on the curve.
  */
 ControlPoint3D evaluateNURBS(
     const NURBSSpec& nurbs,
@@ -475,6 +500,9 @@ ControlPoint3D evaluateNURBS(
 
 /**
  * @brief Evaluate NURBS derivative
+ * @param nurbs NURBS definition.
+ * @param u Curve parameter, clamped to the knot domain.
+ * @return dC/du at @p u.
  */
 ControlPoint3D evaluateNURBSDerivative(
     const NURBSSpec& nurbs,
@@ -498,16 +526,23 @@ std::vector<double> generateClampedKnots(int32_t n, int32_t order);
  * @brief Calculate cubic spline arc length
  * 
  * Uses Gaussian quadrature for numerical integration.
+ *
+ * @param spec Cubic spline definition.
+ * @return Approximate arc length [units].
  */
 double calculateCubicSplineLength(const CubicSplineSpec& spec);
 
 /**
  * @brief Calculate quadratic spline arc length
+ * @param spec Quadratic spline definition.
+ * @return Approximate arc length [units].
  */
 double calculateQuadraticSplineLength(const QuadraticSplineSpec& spec);
 
 /**
  * @brief Calculate NURBS arc length
+ * @param nurbs NURBS definition.
+ * @return Approximate arc length [units].
  */
 double calculateNURBSLength(const NURBSSpec& nurbs);
 
@@ -529,6 +564,10 @@ double findParameterForLength(
 
 /**
  * @brief Discretize cubic spline into line segments
+ * @param spec Cubic spline definition.
+ * @param config Discretization tolerance/step settings.
+ * @param points Output polyline points.
+ * @return Error::OK, or a configuration error.
  */
 Error discretizeCubicSpline(
     const CubicSplineSpec& spec,
@@ -538,6 +577,10 @@ Error discretizeCubicSpline(
 
 /**
  * @brief Discretize quadratic spline
+ * @param spec Quadratic spline definition.
+ * @param config Discretization tolerance/step settings.
+ * @param points Output polyline points.
+ * @return Error::OK, or a configuration error.
  */
 Error discretizeQuadraticSpline(
     const QuadraticSplineSpec& spec,
@@ -547,6 +590,10 @@ Error discretizeQuadraticSpline(
 
 /**
  * @brief Discretize NURBS
+ * @param nurbs NURBS definition.
+ * @param config Discretization tolerance/step settings.
+ * @param points Output polyline points.
+ * @return Error::OK, or a configuration error.
  */
 Error discretizeNURBS(
     const NURBSSpec& nurbs,
@@ -560,6 +607,11 @@ Error discretizeNURBS(
 
 /**
  * @brief Generate motion segments for G5 (cubic spline)
+ * @param block G-code block carrying the spline words.
+ * @param state Machine state (units, plane, modal values).
+ * @param config Discretization settings.
+ * @param segments Output motion segments.
+ * @return Error::OK, or a parse/geometry error.
  */
 Error generateG5Segments(
     const Block& block,
@@ -570,6 +622,11 @@ Error generateG5Segments(
 
 /**
  * @brief Generate motion segments for G5.1 (quadratic spline)
+ * @param block G-code block carrying the spline words.
+ * @param state Machine state (units, plane, modal values).
+ * @param config Discretization settings.
+ * @param segments Output motion segments.
+ * @return Error::OK, or a parse/geometry error.
  */
 Error generateG5_1Segments(
     const Block& block,
@@ -601,6 +658,11 @@ public:
     
     /**
      * @brief Process G5.1 (quadratic spline)
+     * @param block G-code block.
+     * @param state Machine state (updated).
+     * @param vars Variable system (modal variables updated).
+     * @param segments Motion segments appended for the spline.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG5_1(
         const Block& block,
@@ -611,6 +673,10 @@ public:
     
     /**
      * @brief Process G5.2 (start NURBS block)
+     * @param block G-code block with the NURBS header words.
+     * @param state Machine state (updated).
+     * @param vars Variable system (modal variables updated).
+     * @return Error::OK, or a parse error.
      */
     Error processG5_2(
         const Block& block,
@@ -622,6 +688,11 @@ public:
      * @brief Add NURBS control point
      * 
      * Called for each line between G5.2 and G5.3.
+     *
+     * @param block Control-point block.
+     * @param state Machine state (updated).
+     * @param vars Variable system (modal variables updated).
+     * @return Error::OK, or an error when not inside a NURBS block.
      */
     Error addNURBSControlPoint(
         const Block& block,
@@ -631,6 +702,11 @@ public:
     
     /**
      * @brief Process G5.3 (end NURBS block)
+     * @param block G-code block closing the NURBS definition.
+     * @param state Machine state (updated).
+     * @param vars Variable system (modal variables updated).
+     * @param segments Motion segments appended for the NURBS curve.
+     * @return Error::OK, or a parse/geometry error.
      */
     Error processG5_3(
         const Block& block,
@@ -641,26 +717,31 @@ public:
     
     /**
      * @brief Check if in NURBS block
+     * @return true between G5.2 and G5.3.
      */
     bool inNURBSBlock() const { return m_inNURBS; }
     
     /**
      * @brief Update configuration
+     * @param config Discretization and tolerance settings.
      */
     void setConfig(const SplineConfig& config) { m_config = config; }
     
     /**
      * @brief Get current configuration
+     * @return Active discretization settings.
      */
     const SplineConfig& getConfig() const { return m_config; }
     
     /**
      * @brief Get last G5 spline (for continuity checking)
+     * @return Most recently executed cubic spline.
      */
     const CubicSplineSpec& getLastCubicSpline() const { return m_lastCubic; }
     
     /**
      * @brief Get current NURBS being built
+     * @return NURBS accumulating control points since G5.2.
      */
     const NURBSSpec& getCurrentNURBS() const { return m_currentNURBS; }
     
@@ -689,6 +770,10 @@ private:
  * @brief Check G1 continuity between two splines
  * 
  * Returns angle between exit tangent of first and entry tangent of second.
+ *
+ * @param first Preceding spline.
+ * @param second Following spline.
+ * @return Angle between the tangents [rad]; 0 = G1-continuous.
  */
 double checkSplineContinuity(
     const CubicSplineSpec& first,
@@ -699,6 +784,9 @@ double checkSplineContinuity(
  * @brief Convert quadratic to cubic spline
  * 
  * Any quadratic Bezier can be exactly represented as a cubic.
+ *
+ * @param quad Quadratic spline to convert.
+ * @return Equivalent cubic spline.
  */
 CubicSplineSpec quadraticToCubic(const QuadraticSplineSpec& quad);
 
@@ -707,6 +795,10 @@ CubicSplineSpec quadraticToCubic(const QuadraticSplineSpec& quad);
  * 
  * Given a series of pass-through points, estimate cubic spline
  * control points using Catmull-Rom or similar.
+ *
+ * @param points Pass-through points in order.
+ * @param tension Catmull-Rom tension (0 = uniform, 1 = tight).
+ * @return One cubic spline per point interval.
  */
 std::vector<CubicSplineSpec> fitCubicSplines(
     const std::vector<Position>& points,
