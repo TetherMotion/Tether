@@ -35,7 +35,8 @@ struct PIDGains {
     /** @brief Convert stored gains to parallel form. */
     void toParallelForm();
 
-    /** @brief Return true if the gains represent a valid controller. */
+    /** @brief Return true if the gains represent a valid controller.
+     *  @return false when any gain is non-finite or negative where invalid. */
     bool isValid() const;
 };
 
@@ -47,34 +48,58 @@ struct PIDGains {
  */
 class ProcessIdentification {
 public:
-    /** @brief Tangent (inflection) method for FOPDT estimation. */
+    /** @brief Tangent (inflection) method for FOPDT estimation.
+     *  @param time Sample times [s].
+     *  @param response Step-response samples.
+     *  @param stepSize Height of the input step.
+     *  @return Identified FOPDT model. */
     static FOPDTModel tangentMethod(const std::vector<double>& time,
                                     const std::vector<double>& response,
                                     double stepSize);
 
-    /** @brief Area method for FOPDT estimation (integral approach). */
+    /** @brief Area method for FOPDT estimation (integral approach).
+     *  @param time Sample times [s].
+     *  @param response Step-response samples.
+     *  @param stepSize Height of the input step.
+     *  @return Identified FOPDT model. */
     static FOPDTModel areaMethod(const std::vector<double>& time,
                                  const std::vector<double>& response,
                                  double stepSize);
 
-    /** @brief Two-point method using fractional time constants. */
+    /** @brief Two-point method using fractional time constants.
+     *  @param time Sample times [s].
+     *  @param response Step-response samples.
+     *  @param stepSize Height of the input step.
+     *  @param t1Fraction First time fraction (default 28.3% of final value).
+     *  @param t2Fraction Second time fraction (default 63.2% of final value).
+     *  @return Identified FOPDT model. */
     static FOPDTModel twoPointMethod(const std::vector<double>& time,
                                      const std::vector<double>& response,
                                      double stepSize,
                                      double t1Fraction = 0.283,
                                      double t2Fraction = 0.632);
 
-    /** @brief Least-squares fit of a FOPDT model to step response data. */
+    /** @brief Least-squares fit of a FOPDT model to step response data.
+     *  @param time Sample times [s].
+     *  @param response Step-response samples.
+     *  @param stepSize Height of the input step.
+     *  @return Fitted FOPDT model. */
     static FOPDTModel leastSquaresFit(const std::vector<double>& time,
                                       const std::vector<double>& response,
                                       double stepSize);
 
-    /** @brief Identify a SOPDT model from step response data. */
+    /** @brief Identify a SOPDT model from step response data.
+     *  @param time Sample times [s].
+     *  @param response Step-response samples.
+     *  @param stepSize Height of the input step.
+     *  @return Identified SOPDT model. */
     static SOPDTModel identifySOPDT(const std::vector<double>& time,
                                     const std::vector<double>& response,
                                     double stepSize);
 
-    /** @brief Estimate ultimate gain and period from a FOPDT model. */
+    /** @brief Estimate ultimate gain and period from a FOPDT model.
+     *  @param model Identified FOPDT model.
+     *  @return (Ku, Tu) pair for Ziegler-Nichols-style rules. */
     static std::pair<double, double> estimateUltimate(const FOPDTModel& model);
 };
 

@@ -20,19 +20,32 @@ public:
     virtual ~PerturbationSignal() = default;
 
     /// Number of free parameters in θ.
+    /// @return Size of the theta vector the optimizer searches over.
     virtual int parameterCount() const = 0;
 
     /// Evaluate the perturbation signal at time t given parameters θ.
     /// For state-dependent parameterizations (e.g., MLP), state is provided.
+    /// @param t Time [s].
+    /// @param theta Free parameters, size parameterCount().
+    /// @param state Optional system state for state-dependent signals.
+    /// @return Perturbation value at @p t.
     virtual double evaluate(double t, const std::vector<double>& theta,
                             const std::vector<double>& state = {}) const = 0;
 
     /// Generate the full signal on a time grid.
+    /// @param times Time samples [s].
+    /// @param theta Free parameters, size parameterCount().
+    /// @param states Optional per-sample system states.
+    /// @return Signal value at each time sample.
     std::vector<double> generateSignal(const std::vector<double>& times,
                                         const std::vector<double>& theta,
                                         const std::vector<std::vector<double>>& states = {}) const;
 
     /// Create a perturbation signal of the given type.
+    /// @param type Signal family to instantiate.
+    /// @param config Signal configuration (amplitudes, frequencies, ...).
+    /// @param horizon Optimization horizon the signal is defined over [s].
+    /// @return Newly constructed signal.
     static std::unique_ptr<PerturbationSignal> create(PerturbationType type,
                                                        const PerturbationConfig& config,
                                                        double horizon);

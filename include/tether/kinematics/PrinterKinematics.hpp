@@ -35,6 +35,8 @@ enum class PrinterKinematics {
 };
 
 /// @brief Convert kinematics string to enum.
+/// @param s Config-file name such as "corexy" or "delta".
+/// @return Matching enum value; Cartesian for unknown strings.
 inline PrinterKinematics printerKinematicsFromString(const std::string& s) {
     if (s == "cartesian") return PrinterKinematics::Cartesian;
     if (s == "corexy") return PrinterKinematics::CoreXY;
@@ -51,6 +53,8 @@ inline PrinterKinematics printerKinematicsFromString(const std::string& s) {
 }
 
 /// @brief Convert kinematics enum to string.
+/// @param k Kinematics kind.
+/// @return Config-file name such as "corexy" or "delta".
 inline std::string printerKinematicsToString(PrinterKinematics k) {
     switch (k) {
         case PrinterKinematics::Cartesian:    return "cartesian";
