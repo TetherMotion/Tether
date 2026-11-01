@@ -42,6 +42,8 @@ inline double clamp(double v, double lo, double hi) {
 
 /**
  * @brief Square of a number
+ * @param x Input value.
+ * @return x * x.
  */
 inline double sq(double x) {
     return x * x;
@@ -52,6 +54,7 @@ inline double sq(double x) {
  * @param a Start value
  * @param b End value
  * @param t Parameter [0, 1]
+ * @return a + (b - a) * t.
  */
 inline double lerp(double a, double b, double t) {
     return a + (b - a) * t;
@@ -59,6 +62,8 @@ inline double lerp(double a, double b, double t) {
 
 /**
  * @brief Normalize angle to range [-π, π]
+ * @param angle Angle in radians (any magnitude).
+ * @return Equivalent angle in [-π, π].
  */
 inline double normalizeAngle(double angle) {
     while (angle > M_PI) angle -= M_2_PI;
@@ -68,6 +73,8 @@ inline double normalizeAngle(double angle) {
 
 /**
  * @brief Normalize angle to range [0, 2π]
+ * @param angle Angle in radians (any magnitude).
+ * @return Equivalent angle in [0, 2π).
  */
 inline double normalizeAnglePositive(double angle) {
     while (angle >= M_2_PI) angle -= M_2_PI;
@@ -77,6 +84,9 @@ inline double normalizeAnglePositive(double angle) {
 
 /**
  * @brief Check if value is approximately zero
+ * @param v Value to test.
+ * @param epsilon Magnitude below which @p v counts as zero.
+ * @return true when |v| < epsilon.
  */
 inline bool isNearZero(double v, double epsilon = 1e-12) {
     return std::fabs(v) < epsilon;
@@ -84,6 +94,10 @@ inline bool isNearZero(double v, double epsilon = 1e-12) {
 
 /**
  * @brief Check if two values are approximately equal
+ * @param a First value.
+ * @param b Second value.
+ * @param epsilon Maximum absolute difference.
+ * @return true when |a - b| < epsilon.
  */
 inline bool nearEqual(double a, double b, double epsilon = 1e-12) {
     return std::fabs(a - b) < epsilon;
@@ -91,6 +105,10 @@ inline bool nearEqual(double a, double b, double epsilon = 1e-12) {
 
 /**
  * @brief Safe division with zero check
+ * @param num Numerator.
+ * @param denom Denominator.
+ * @param defaultVal Value returned when the denominator is (near) zero.
+ * @return num / denom, or @p defaultVal.
  */
 inline double safeDivide(double num, double denom, double defaultVal = 0.0) {
     return isNearZero(denom) ? defaultVal : num / denom;
@@ -98,6 +116,8 @@ inline double safeDivide(double num, double denom, double defaultVal = 0.0) {
 
 /**
  * @brief Safe square root (returns 0 for negative input)
+ * @param x Input value.
+ * @return sqrt(x), or 0 when @p x is negative.
  */
 inline double safeSqrt(double x) {
     return (x <= 0.0) ? 0.0 : std::sqrt(x);
@@ -105,6 +125,8 @@ inline double safeSqrt(double x) {
 
 /**
  * @brief Safe acos (clamped to [-1, 1])
+ * @param x Input value (clamped before evaluation).
+ * @return acos of the clamped value [rad].
  */
 inline double safeAcos(double x) {
     return std::acos(clamp(x, -1.0, 1.0));
@@ -112,6 +134,8 @@ inline double safeAcos(double x) {
 
 /**
  * @brief Safe asin (clamped to [-1, 1])
+ * @param x Input value (clamped before evaluation).
+ * @return asin of the clamped value [rad].
  */
 inline double safeAsin(double x) {
     return std::asin(clamp(x, -1.0, 1.0));
@@ -168,6 +192,10 @@ inline void planeAxes(uint8_t plane, int& u, int& v, int& w) {
 
 /**
  * @brief Overload accepting Plane enum
+ * @param plane Active interpolation plane.
+ * @param u Receives the index of the in-plane U axis.
+ * @param v Receives the index of the in-plane V axis.
+ * @param w Receives the index of the normal axis.
  */
 inline void planeAxes(Plane plane, int& u, int& v, int& w) {
     planeAxes(static_cast<uint8_t>(plane), u, v, w);
@@ -449,6 +477,12 @@ inline double cubicBezier(double p0, double p1, double p2, double p3, double t) 
 
 /**
  * @brief First derivative of cubic Bezier
+ * @param p0 Control point 0.
+ * @param p1 Control point 1.
+ * @param p2 Control point 2.
+ * @param p3 Control point 3.
+ * @param t Parameter [0, 1].
+ * @return dC/dt at @p t.
  */
 inline double cubicBezierDerivative(double p0, double p1, double p2, double p3, double t) {
     const double s = 1.0 - t;
@@ -459,6 +493,12 @@ inline double cubicBezierDerivative(double p0, double p1, double p2, double p3, 
 
 /**
  * @brief Second derivative of cubic Bezier
+ * @param p0 Control point 0.
+ * @param p1 Control point 1.
+ * @param p2 Control point 2.
+ * @param p3 Control point 3.
+ * @param t Parameter [0, 1].
+ * @return d²C/dt² at @p t.
  */
 inline double cubicBezierSecondDerivative(double p0, double p1, double p2, double p3, double t) {
     const double s = 1.0 - t;
@@ -516,6 +556,11 @@ inline void arcToBezier(
 
 /**
  * @brief Distance between two 2D points
+ * @param x1 First point X.
+ * @param y1 First point Y.
+ * @param x2 Second point X.
+ * @param y2 Second point Y.
+ * @return Euclidean distance.
  */
 inline double distance2D(double x1, double y1, double x2, double y2) {
     const double dx = x2 - x1;
@@ -525,6 +570,13 @@ inline double distance2D(double x1, double y1, double x2, double y2) {
 
 /**
  * @brief Distance between two 3D points
+ * @param x1 First point X.
+ * @param y1 First point Y.
+ * @param z1 First point Z.
+ * @param x2 Second point X.
+ * @param y2 Second point Y.
+ * @param z2 Second point Z.
+ * @return Euclidean distance.
  */
 inline double distance3D(double x1, double y1, double z1, double x2, double y2, double z2) {
     const double dx = x2 - x1;
@@ -535,6 +587,12 @@ inline double distance3D(double x1, double y1, double z1, double x2, double y2, 
 
 /**
  * @brief Point on line segment at parameter t
+ * @param x1,y1,z1 Segment start point.
+ * @param x2,y2,z2 Segment end point.
+ * @param t Interpolation parameter [0, 1].
+ * @param outX Receives the X coordinate.
+ * @param outY Receives the Y coordinate.
+ * @param outZ Receives the Z coordinate.
  */
 inline void linePoint(
     double x1, double y1, double z1,
@@ -549,6 +607,11 @@ inline void linePoint(
 
 /**
  * @brief Unit vector from point 1 to point 2
+ * @param x1,y1,z1 Start point.
+ * @param x2,y2,z2 End point.
+ * @param ux Receives the X component of the unit vector.
+ * @param uy Receives the Y component of the unit vector.
+ * @param uz Receives the Z component of the unit vector.
  */
 inline void unitVector(
     double x1, double y1, double z1,
