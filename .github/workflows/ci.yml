@@ -937,6 +937,43 @@ jobs:
         name: doc-coverage
         path: pkg-cov
 
+  deploy-docs:
+    name: Deploy documentation to netcup
+    runs-on: ubuntu-latest
+    needs: docs
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    steps:
+    - name: Download documentation artifact
+      uses: actions/download-artifact@v8
+      with:
+        name: documentation
+        path: site
+
+    # The artifact carries the pkg-site staging dir: site/documentation/
+    # here is the complete sphinx HTML tree.
+    - name: Install lftp
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y lftp
+
+    # netcup webhosting has no SSH/rsync for this account — mirror over
+    # FTPS instead. --delete removes remote files that no longer exist so
+    # renamed/deleted pages can't linger. .well-known is excluded: it
+    # holds the live ACME/Let's Encrypt challenges, deleting it would
+    # break TLS renewal for tether.techoverflow.net.
+    - name: Mirror site to netcup via FTPS
+      run: |
+        lftp -u "$NETCUP_FTP_USER","$NETCUP_FTP_PASSWORD" \
+          -e "set ftp:ssl-force true; set net:max-retries 3; \
+              mirror --reverse --delete --verbose --parallel=8 \
+                --exclude '^\.well-known(/|$)' \
+                site/documentation httpdocs; bye" \
+          "$NETCUP_FTP_HOST"
+      env:
+        NETCUP_FTP_HOST: ${{ secrets.NETCUP_FTP_HOST }}
+        NETCUP_FTP_USER: ${{ secrets.NETCUP_FTP_USER }}
+        NETCUP_FTP_PASSWORD: ${{ secrets.NETCUP_FTP_PASSWORD }}
+
   static-analysis:
     name: Clang-Tidy & Clang Static Analyzer
     runs-on: ubuntu-latest
