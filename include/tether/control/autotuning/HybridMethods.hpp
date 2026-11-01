@@ -86,26 +86,32 @@ public:
     
     /**
      * @brief Set cost function for optimization
+     * @param cost Cost function to minimise (takes ownership).
      */
     void setCostFunction(std::unique_ptr<CostFunction> cost);
     
     /**
      * @brief Set optimization bounds (relative to initial)
+     * @param lower Lower bound as a fraction of the initial gain.
+     * @param upper Upper bound as a fraction of the initial gain.
      */
     void setRelativeBounds(double lower, double upper);
     
     /**
      * @brief Set maximum optimization iterations
+     * @param n Iteration budget.
      */
     void setMaxIterations(int n) { m_maxIterations = n; }
     
     /**
      * @brief Get initial (Z-N) gains
+     * @return Gains produced by the Ziegler-Nichols seed step.
      */
     PIDGains getInitialGains() const { return m_initialGains; }
     
     /**
      * @brief Get improvement ratio
+     * @return Final cost divided by the initial (Z-N) cost; < 1 is better.
      */
     double getImprovementRatio() const;
     
@@ -159,21 +165,25 @@ public:
     
     /**
      * @brief Set relay amplitude
+     * @param d Relay output amplitude (must stay within the safe range).
      */
     void setRelayAmplitude(double d) { m_relayAmplitude = d; }
     
     /**
      * @brief Set relay hysteresis
+     * @param h Switching hysteresis; must exceed the noise amplitude.
      */
     void setRelayHysteresis(double h) { m_hysteresis = h; }
     
     /**
      * @brief Set IMC time constant factor
+     * @param lambda Closed-loop time constant multiplier relative to dead time.
      */
     void setIMCFactor(double lambda) { m_lambdaFactor = lambda; }
     
     /**
      * @brief Get identified model
+     * @return FOPDT model identified from the relay experiment.
      */
     FOPDTModel getIdentifiedModel() const { return m_identifiedModel; }
     
@@ -235,21 +245,29 @@ public:
     
     /**
      * @brief Set base PID gains
+     * @param Kp Proportional gain.
+     * @param Ki Integral gain.
+     * @param Kd Derivative gain.
      */
     void setBaseGains(double Kp, double Ki, double Kd);
     
     /**
      * @brief Set gain adjustment factors
+     * @param alphaKp Maximum relative adjustment applied to Kp.
+     * @param alphaKi Maximum relative adjustment applied to Ki.
+     * @param alphaKd Maximum relative adjustment applied to Kd.
      */
     void setAdjustmentFactors(double alphaKp, double alphaKi, double alphaKd);
     
     /**
      * @brief Set error scaling
+     * @param scale Normalisation applied to the error before fuzzification.
      */
     void setErrorScale(double scale) { m_errorScale = scale; }
     
     /**
      * @brief Get current effective gains
+     * @return Gains after the latest fuzzy adjustment.
      */
     PIDGains getCurrentGains() const;
     
@@ -305,14 +323,24 @@ public:
     
     /**
      * @brief Set GA parameters
+     * @param n Number of individuals per generation.
      */
     void setPopulationSize(int n) { m_popSize = n; }
+    /// @param n Number of generations to evolve.
     void setGenerations(int n) { m_generations = n; }
+    /// @param r Per-gene mutation probability.
     void setMutationRate(double r) { m_mutationRate = r; }
+    /// @param r Per-pair crossover probability.
     void setCrossoverRate(double r) { m_crossoverRate = r; }
     
     /**
      * @brief Set parameter bounds
+     * @param KpMin Lower bound for Kp.
+     * @param KpMax Upper bound for Kp.
+     * @param KiMin Lower bound for Ki.
+     * @param KiMax Upper bound for Ki.
+     * @param KdMin Lower bound for Kd.
+     * @param KdMax Upper bound for Kd.
      */
     void setBounds(double KpMin, double KpMax,
                   double KiMin, double KiMax,
@@ -320,16 +348,19 @@ public:
     
     /**
      * @brief Set cost function
+     * @param cost Cost function evaluating each candidate (takes ownership).
      */
     void setCostFunction(std::unique_ptr<CostFunction> cost);
     
     /**
      * @brief Set elitism (% of best to keep)
+     * @param fraction Fraction of the best individuals carried over unchanged.
      */
     void setElitism(double fraction) { m_elitism = fraction; }
     
     /**
      * @brief Get evolution history
+     * @return Best fitness per generation.
      */
     std::vector<double> getBestFitnessHistory() const { return m_fitnessHistory; }
     
@@ -373,15 +404,26 @@ public:
     
     /**
      * @brief Set PSO parameters
+     * @param n Number of particles in the swarm.
      */
     void setSwarmSize(int n) { m_swarmSize = n; }
+    /// @param n Number of swarm iterations.
     void setIterations(int n) { m_iterations = n; }
+    /// @param w Inertia weight (velocity retention).
     void setInertia(double w) { m_w = w; }
+    /// @param c1 Cognitive (personal-best) acceleration coefficient.
     void setCognitiveCoeff(double c1) { m_c1 = c1; }
+    /// @param c2 Social (global-best) acceleration coefficient.
     void setSocialCoeff(double c2) { m_c2 = c2; }
     
     /**
      * @brief Set parameter bounds
+     * @param KpMin Lower bound for Kp.
+     * @param KpMax Upper bound for Kp.
+     * @param KiMin Lower bound for Ki.
+     * @param KiMax Upper bound for Ki.
+     * @param KdMin Lower bound for Kd.
+     * @param KdMax Upper bound for Kd.
      */
     void setBounds(double KpMin, double KpMax,
                   double KiMin, double KiMax,
@@ -389,6 +431,7 @@ public:
     
     /**
      * @brief Set cost function
+     * @param cost Cost function evaluating each particle (takes ownership).
      */
     void setCostFunction(std::unique_ptr<CostFunction> cost);
     
@@ -445,37 +488,47 @@ public:
     
     /**
      * @brief Set base PID gains
+     * @param Kp Proportional gain.
+     * @param Ki Integral gain.
+     * @param Kd Derivative gain.
      */
     void setBaseGains(double Kp, double Ki, double Kd);
     
     /**
      * @brief Set neural network architecture
+     * @param hiddenLayers Neuron count per hidden layer.
      */
     void setNetworkArchitecture(const std::vector<int>& hiddenLayers);
     
     /**
      * @brief Set learning rate
+     * @param lr Gradient step size for online learning.
      */
     void setLearningRate(double lr) { m_learningRate = lr; }
     
     /**
      * @brief Set NN contribution limit
+     * @param limit Maximum magnitude of the NN correction term.
      */
     void setNNLimit(double limit) { m_nnLimit = limit; }
     
     /**
      * @brief Enable/disable online learning
+     * @param enable true to keep adapting the network while running.
      */
     void enableOnlineLearning(bool enable) { m_onlineLearning = enable; }
     
     /**
      * @brief Pre-train network on data
+     * @param inputs Training input samples.
+     * @param targets Target outputs (same length as @p inputs).
      */
     void pretrain(const std::vector<std::vector<double>>& inputs,
                  const std::vector<double>& targets);
     
     /**
      * @brief Get neural network contribution
+     * @return Current NN correction term added to the PID output.
      */
     double getNNOutput() const { return m_nnOutput; }
     
@@ -520,27 +573,32 @@ public:
     
     /**
      * @brief Set inner loop tuning method
+     * @param tuner Autotuner applied to the inner (fast) loop.
      */
     void setInnerTuner(std::unique_ptr<OfflineAutotuner> tuner);
     
     /**
      * @brief Set outer loop tuning method
+     * @param tuner Autotuner applied to the outer (slow) loop.
      */
     void setOuterTuner(std::unique_ptr<OfflineAutotuner> tuner);
     
     /**
      * @brief Set bandwidth ratio (outer/inner)
      * Typically 0.1-0.2 for good separation
+     * @param ratio Outer-loop bandwidth divided by inner-loop bandwidth.
      */
     void setBandwidthRatio(double ratio) { m_bandwidthRatio = ratio; }
     
     /**
      * @brief Get inner loop gains
+     * @return Gains produced for the inner loop.
      */
     PIDGains getInnerGains() const { return m_innerGains; }
     
     /**
      * @brief Get outer loop gains
+     * @return Gains produced for the outer loop.
      */
     PIDGains getOuterGains() const { return m_outerGains; }
     
@@ -577,36 +635,43 @@ public:
     
     /**
      * @brief Set process gain matrix
+     * @param K Steady-state gain matrix (outputs × inputs).
      */
     void setGainMatrix(const std::vector<std::vector<double>>& K);
     
     /**
      * @brief Set time constant matrix
+     * @param tau Time constant matrix (outputs × inputs) [s].
      */
     void setTimeConstantMatrix(const std::vector<std::vector<double>>& tau);
     
     /**
      * @brief Set delay matrix
+     * @param theta Dead-time matrix (outputs × inputs) [s].
      */
     void setDelayMatrix(const std::vector<std::vector<double>>& theta);
     
     /**
      * @brief Set SISO tuning method
+     * @param tuner Autotuner applied to each decoupled loop.
      */
     void setSISOTuner(std::unique_ptr<OfflineAutotuner> tuner);
     
     /**
      * @brief Set detuning factor for interaction
+     * @param f Gain reduction applied to counter loop interaction (0-1).
      */
     void setDetuningFactor(double f) { m_detuningFactor = f; }
     
     /**
      * @brief Get Relative Gain Array
+     * @return RGA matrix computed from the gain matrix.
      */
     std::vector<std::vector<double>> getRGA() const { return m_RGA; }
     
     /**
      * @brief Get loop pairing
+     * @return (output, input) index pairs chosen from the RGA.
      */
     std::vector<std::pair<int, int>> getLoopPairing() const { return m_pairing; }
     
