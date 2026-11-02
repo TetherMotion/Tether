@@ -22,12 +22,18 @@ namespace {
 
 bool validateCatalogValue(const SchemaCatalog* catalog, const EntryView& entry,
                  const uint8_t* data, size_t size) {
+#if TETHER_IO_SCHEMA_ENABLED
     if (!catalog || entry.schemaRef().key == SchemaKey{} || !catalog->graph()) return true;
     BufReader reader(data, size);
     return validateSchemaValue(*catalog->graph(), entry.schemaRef().key, reader) &&
         reader.remaining() == 0;
+#else
+    (void)catalog; (void)entry; (void)data; (void)size;
+    return true;
+#endif
 }
 
+#if TETHER_IO_FUNCTIONS_ENABLED
 void validateFunctionReturn(const SchemaCatalog* catalog, const FunctionReturn& signature,
                             FunctionCallResult& result) {
     if (!result.success || !signature.present || signature.schema.key == SchemaKey{}) return;
@@ -49,9 +55,11 @@ void validateFunctionReturn(const SchemaCatalog* catalog, const FunctionReturn& 
         result.returnValue.clear();
     }
 }
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
 } // namespace
 
+#if TETHER_IO_FUNCTIONS_ENABLED
 // Peer (client-hosted) function invocation
 // --------------------------------------------------------------------------
 
@@ -189,7 +197,9 @@ void Session::finishPendingInvokes() {
     }
     for (auto& [callback, result] : drained) callback(result);
 }
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
+#if TETHER_IO_INPUT_STREAMS_ENABLED
 void Session::handleCreateInputStreamReq(const uint8_t* body, size_t len) {
     if (!inputStreamCreateFn_) {
         sendError(ErrorCode::FeatureNotSupported, "Input streams not supported");
@@ -285,6 +295,17 @@ void Session::handleCloseInputStreamReq(const uint8_t* body, size_t len) {
     inputStreams_.erase(stream);
     sendInputStreamResponse(MessageType::CloseInputStreamResp, streamId, true);
 }
+#else
+void Session::handleCreateInputStreamReq(const uint8_t*, size_t) {
+    sendError(ErrorCode::FeatureNotSupported, "Input streams not supported");
+}
+void Session::handleInputStreamData(const uint8_t*, size_t) {
+    sendError(ErrorCode::FeatureNotSupported, "Input streams not supported");
+}
+void Session::handleCloseInputStreamReq(const uint8_t*, size_t) {
+    sendError(ErrorCode::FeatureNotSupported, "Input streams not supported");
+}
+#endif // TETHER_IO_INPUT_STREAMS_ENABLED
 
 // --------------------------------------------------------------------------
 // Response senders
@@ -319,6 +340,7 @@ void Session::sendPongResp(uint32_t nonce) {
     if (w.ok()) sendRaw(buf, w.pos);
 }
 
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 void Session::sendSubscribeLogResp(uint32_t subscriptionId, bool success,
                                    std::string_view error) {
     const size_t errorLength = std::min(error.size(), static_cast<size_t>(UINT16_MAX));
@@ -373,7 +395,9 @@ void Session::sendLogData(const LogRecord& record) {
     w.putStr16(record.location.data(), locationLength);
     if (w.ok()) sendRaw(raw.data(), w.pos);
 }
+#endif // TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 
+#if TETHER_IO_FUNCTIONS_ENABLED
 void Session::sendFunctionCallResponse(uint64_t functionId,
                                        const FunctionReturn& returnValue,
                                        const FunctionCallResult& result) {
@@ -442,7 +466,9 @@ void Session::sendRegisterFunctionsResp(uint32_t count, bool success) {
     writer.putU8(success ? 0 : 1);
     if (writer.ok()) sendRaw(buffer, writer.pos);
 }
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
+#if TETHER_IO_INPUT_STREAMS_ENABLED
 void Session::sendInputStreamResponse(MessageType type, uint32_t streamId, bool success) {
     uint8_t buffer[1 + 4 + 1];
     BufWriter writer(buffer, sizeof(buffer));
@@ -451,7 +477,9 @@ void Session::sendInputStreamResponse(MessageType type, uint32_t streamId, bool 
     writer.putU8(success ? 0 : 1);
     if (writer.ok()) sendRaw(buffer, writer.pos);
 }
+#endif // TETHER_IO_INPUT_STREAMS_ENABLED
 
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 void Session::publishLog(LogSeverity severity, std::string_view component,
                          std::string_view message, std::string_view location) {
     LogRecord record;
@@ -475,6 +503,7 @@ void Session::publishLog(LogSeverity severity, std::string_view component,
     }
     if (matched) sendLogData(record);
 }
+#endif // TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 
 void Session::sendError(ErrorCode code, const char* msg) {
     if (logFn_) logFn_("TetherIO", "← TX Error: code=%u msg=%s",
@@ -492,6 +521,7 @@ void Session::sendError(ErrorCode code, const char* msg) {
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
 }
 
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
 void Session::sendCatalogChanged() {
     uint8_t buf[5];
     BufWriter w(buf, sizeof(buf));
@@ -499,6 +529,7 @@ void Session::sendCatalogChanged() {
     w.putU32(registry_.revision());
     if (w.ok()) sendRaw(buf, w.pos);
 }
+#endif // TETHER_IO_CATALOG_NOTIFY_ENABLED
 
 // --------------------------------------------------------------------------
 }} // namespace tether::io

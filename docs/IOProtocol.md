@@ -417,6 +417,45 @@ target_link_libraries(my_app PRIVATE tether_io_protocol)
 
 The component automatically builds `libSLIPspeed` as a static library and links it.
 
+### Compile-time feature slicing
+
+Every protocol capability can be compiled out independently — an MCU
+peer that only implements parameters and signals turns off what it does
+not need and the code is simply absent. All flags are `TETHER_IO_ENABLE_*`
+CMake options (default **ON** for full compatibility) and matching
+`CONFIG_TETHER_IO_ENABLE_*` Kconfig symbols for ESP-IDF; the effective
+macros (`TETHER_IO_*_ENABLED`) and dependency rules live in
+`include/tether/io/IoConfig.hpp`.
+
+| Flag | Compiles out |
+|---|---|
+| `SCHEMA` | Schema catalog/manifest/slots, SchemaRequest serving, BLAKE3 digests, schema-value validation |
+| `DYNAMIC_SCHEMA` | Variable-layout schema kinds (strings, maps, oneofs, varints) — keeps only fixed-layout "flat" schemata |
+| `STREAMING` | ConfigureStream/Start/Stop/StreamData, collect plan, ring sources |
+| `STREAM_FILTERS` | Schema-typed filter entries in ConfigureStream (needs SCHEMA + STREAMING) |
+| `THRESHOLDS` | Per-entry change thresholds (needs STREAMING) |
+| `SNAPSHOTS` | SnapshotParams/Signals requests |
+| `FUNCTIONS` | Function registry, CallFunction/InvokeEx, peer calls, the invoke sweep thread (needs SCHEMA) |
+| `INPUT_STREAMS` | CreateInputStream/InputStreamData/CloseInputStream (needs SCHEMA) |
+| `DATALOG` | ConfigureDatalog/DatalogStatus and DatalogRecorder |
+| `LOG_SUBSCRIPTIONS` | Subscribe/Unsubscribe/LogData, Session::publishLog |
+| `METADATA` | GetMetadata + the per-entry metadata map |
+| `CATALOG_NOTIFY` | CatalogChanged push and the registry listener list |
+| `SERVER` / `CLIENT` | Session/Server vs TetherIOClient translation units |
+| `TRANSPORT_TCP` / `SERIAL` / `WS` | The respective transport sources |
+
+Sizing knobs `TETHER_IO_MAX_MESSAGE_SIZE` (default 1 MiB — e.g. 512 on
+MCU), `TETHER_IO_MAX_STREAM_ENTRIES`, `TETHER_IO_MAX_PENDING_INVOKES` and
+`TETHER_IO_MAX_LOG_SUBSCRIPTIONS` bound memory use and feed the
+negotiated `SchemaNegotiationLimits` hello fields.
+
+Requests for disabled-but-known message types are answered
+`Error(FeatureNotSupported)`; genuinely unknown IDs still get
+`UnknownMessageType`. The V6 bootstrap (ClientHello → ServerHello →
+SchemaCommit) is always required: a schema-less server advertises an
+empty manifest and the client simply commits the epoch — no
+SchemaRequest traffic ever occurs.
+
 ## Wire format
 
 See [IOProtocolWireFormat.md](IOProtocolWireFormat.md) for the complete byte-level specification.

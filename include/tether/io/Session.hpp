@@ -23,12 +23,20 @@
 #include "tether/io/Registry.hpp"
 #include "tether/io/Transport.hpp"
 #include "tether/io/ReceiveBuffer.hpp"
+#if TETHER_IO_FUNCTIONS_ENABLED
+#include "tether/io/Function.hpp"
+#endif
+#if TETHER_IO_THRESHOLDS_ENABLED
 #include "tether/io/ThresholdFilter.hpp"
+#endif
+#if TETHER_IO_DATALOG_ENABLED
 #include "tether/io/Datalogging.hpp"
+#endif
+#if TETHER_IO_STREAMING_ENABLED
 #include "tether/io/RingStreamSource.hpp"
+#endif
 #include <cstdint>
 #include <cstddef>
-#include <condition_variable>
 #include <functional>
 #include <vector>
 #include <atomic>
@@ -38,9 +46,19 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#if TETHER_IO_FUNCTIONS_ENABLED
+#include <condition_variable>
 #include <thread>
+#endif
 
 namespace tether { namespace io {
+
+#if !TETHER_IO_DATALOG_ENABLED
+class DatalogRecorder; /**< Forward decl for the gated ctor param. */
+#endif
+#if !TETHER_IO_STREAMING_ENABLED
+class IRingStreamSource; /**< Forward decl for the gated ctor param. */
+#endif
 
 /**Precomputed slot for efficient per-cycle data collection. */
 struct CollectSlot {
@@ -122,6 +140,7 @@ public:
      */
     bool isRunning() const { return running_.load(std::memory_order_relaxed); }
 
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
     /**
      * Publish a log record to all matching subscriptions on this session.
      * Safe to call from a thread other than the session worker.
@@ -142,7 +161,9 @@ public:
      */
     void publishLog(LogSeverity severity, std::string_view component,
                     std::string_view message, std::string_view location = {});
+#endif // TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 
+#if TETHER_IO_FUNCTIONS_ENABLED
     // ---- Peer (client-hosted) function invocation ----
 
     /**
@@ -247,6 +268,7 @@ public:
     uint32_t consecutiveInvokeTimeouts() const {
         return consecutiveInvokeTimeouts_.load(std::memory_order_relaxed);
     }
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
     // ---- Session identity (transport-authenticated caller) ----
 
@@ -288,6 +310,9 @@ private:
     void onMessage(const uint8_t* data, size_t len);
 
     // ---- Protocol message handlers ----
+    // All handlers remain declared regardless of feature flags: a compiled-out
+    // handler answers Error(FeatureNotSupported) so the dispatch table stays
+    // uniform and disabled wire operations are rejected gracefully.
     void handleListParamsReq(const uint8_t* body, size_t len);
     void handleListSignalsReq(const uint8_t* body, size_t len);
     void handleGetParamReq(const uint8_t* body, size_t len);
@@ -320,21 +345,30 @@ private:
     // ---- Response senders ----
     bool sendRaw(const uint8_t* data, size_t len);
     void sendError(ErrorCode code, const char* msg);
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     void sendCatalogChanged();
+#endif
     void sendPongResp(uint32_t nonce);
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
     void sendSubscribeLogResp(uint32_t subscriptionId, bool success,
                               std::string_view error = {});
     void sendUnsubscribeLogResp(uint32_t subscriptionId, bool found);
     bool matchesLog(const LogSubscription& subscription,
                     const LogRecord& record) const;
     void sendLogData(const LogRecord& record);
+#endif
+#if TETHER_IO_FUNCTIONS_ENABLED
     void sendFunctionCallResponse(uint64_t functionId, const FunctionReturn& returnValue,
                                   const FunctionCallResult& result);
     void sendInvokeExResponse(uint64_t requestId, const FunctionReturn& returnValue,
                               const FunctionCallResult& result);
-    void sendInputStreamResponse(MessageType type, uint32_t streamId, bool success);
     void sendRegisterFunctionsResp(uint32_t count, bool success);
+#endif
+#if TETHER_IO_INPUT_STREAMS_ENABLED
+    void sendInputStreamResponse(MessageType type, uint32_t streamId, bool success);
+#endif
 
+#if TETHER_IO_FUNCTIONS_ENABLED
     // ---- Peer invocation internals ----
     /**
      * Deadline-enforcement thread: sleeps until the earliest pending
@@ -349,12 +383,16 @@ private:
     void sweepInvokeDeadlines();
     /**Complete every pending call with an error (session teardown). */
     void finishPendingInvokes();
+#endif
 
+#if TETHER_IO_STREAMING_ENABLED
     // ---- Streaming internals ----
     void buildCollectPlan();
     void collectOneRow();
     bool shouldTrigger();
+#if TETHER_IO_STREAM_FILTERS_ENABLED
     bool passesStreamFilters(const std::vector<std::vector<uint8_t>>& values) const;
+#endif
     void handleStreamingCycle();
     void sendStreamData();
 
@@ -376,6 +414,7 @@ private:
      * session end).
      */
     void releaseRingSource();
+#endif // TETHER_IO_STREAMING_ENABLED
 
     /**
      * Serialized getTimestampUs_() — the user callback may not be
@@ -393,15 +432,20 @@ private:
     TimestampFn      getTimestampUs_;
     std::mutex       timestampMutex_;
     LogFn            logFn_;
+#if TETHER_IO_DATALOG_ENABLED
     DatalogRecorder* datalogRecorder_;
+#endif
+#if TETHER_IO_INPUT_STREAMS_ENABLED
     InputStreamCreateFn inputStreamCreateFn_;
     InputStreamDataFn inputStreamDataFn_;
+#endif
     Framing          framing_ = Framing::Slip;
 
     // ==== Run state ====
     std::atomic<bool> running_{false};
     std::atomic<bool> stopRequested_{false};
 
+#if TETHER_IO_STREAMING_ENABLED
     // ==== Stream configuration ====
     bool         configured_      = false;
     bool         streaming_       = false;
@@ -412,7 +456,9 @@ private:
     uint64_t     triggerEntryId_  = 0;
     uint32_t     specId_          = 0;
     std::vector<uint64_t> configuredEntryIds_;
+#if TETHER_IO_STREAM_FILTERS_ENABLED
     std::vector<FilterProperty> streamFilters_;
+#endif
 
     // ==== Collection plan ====
     std::vector<CollectSlot> collectPlan_;
@@ -426,11 +472,17 @@ private:
     std::vector<uint8_t> chunkBuf_;
     size_t   chunkWritePos_   = 0;
     bool     hasVariableEntries_ = false;
+#endif // TETHER_IO_STREAMING_ENABLED
 
+#if TETHER_IO_THRESHOLDS_ENABLED
     // ==== Threshold filtering ====
     ThresholdFilter thresholdFilter_;
+#endif
+#if TETHER_IO_STREAMING_ENABLED
     std::vector<std::vector<uint8_t>> lastValues_; /**< Per-slot last value */
+#endif
 
+#if TETHER_IO_INPUT_STREAMS_ENABLED
     struct InputStreamState {
         uint32_t id = 0;
         SchemaRef schema;
@@ -441,7 +493,9 @@ private:
     };
     std::vector<InputStreamState> inputStreams_;
     uint32_t nextInputStreamId_ = 1;
+#endif // TETHER_IO_INPUT_STREAMS_ENABLED
 
+#if TETHER_IO_FUNCTIONS_ENABLED
     // ==== Peer (client-registered) function catalog ====
     /**
      * Written by the session worker on RegisterFunctionsReq; read by
@@ -477,11 +531,19 @@ private:
      * to prefer healthy providers when duplicate peer functions exist.
      */
     std::atomic<uint32_t> consecutiveInvokeTimeouts_{0};
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
+    /**
+     * Read-only schema catalog; nullptr in schema-less builds. Kept
+     * unconditional — it is a single pointer and every call site would
+     * otherwise need its own feature guard.
+     */
+    const SchemaCatalog* schemaCatalog_ = nullptr;
+
+#if TETHER_IO_STREAMING_ENABLED
     // ==== Ring-buffered streaming ====
     /**Sources registered by the server; consulted in bindRingSource(). */
     const std::vector<IRingStreamSource*>* ringSources_ = nullptr;
-    const SchemaCatalog* schemaCatalog_ = nullptr;
     /**
      * Timestamp (getTimestampUs_) of the last ring drain that produced rows.
      * Used to flush a partial chunk when the producer goes quiet.
@@ -496,10 +558,13 @@ private:
 
     // ==== OnChange trigger state ====
     std::vector<uint8_t> lastTriggerValue_;
+#endif // TETHER_IO_STREAMING_ENABLED
 
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     // ==== Catalog change listener ====
     size_t catalogListenerHandle_ = 0;
     std::atomic<bool> catalogDirty_{false};
+#endif
 
     // ==== Session identity ====
     std::string sessionId_;
@@ -510,10 +575,14 @@ private:
     bool schemaHelloReceived_ = false;
     bool schemaCommitted_ = false;
     SchemaEpoch schemaEpoch_ = 0;
+    /**Negotiated encoding_features intersection from the V6 hello. */
+    uint32_t negotiatedFeatures_ = 0;
 
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
     // ==== Log subscriptions ====
     std::vector<LogSubscription> logSubscriptions_;
     uint32_t nextLogSubscriptionId_ = 1;
+#endif
     mutable std::mutex sendMutex_;
 
     // ==== SLIP receive buffers ====

@@ -21,12 +21,18 @@ namespace {
 
 bool validateCatalogValue(const SchemaCatalog* catalog, const EntryView& entry,
                  const uint8_t* data, size_t size) {
+#if TETHER_IO_SCHEMA_ENABLED
     if (!catalog || entry.schemaRef().key == SchemaKey{} || !catalog->graph()) return true;
     BufReader reader(data, size);
     return validateSchemaValue(*catalog->graph(), entry.schemaRef().key, reader) &&
         reader.remaining() == 0;
+#else
+    (void)catalog; (void)entry; (void)data; (void)size;
+    return true;
+#endif
 }
 
+#if TETHER_IO_FUNCTIONS_ENABLED
 void validateFunctionReturn(const SchemaCatalog* catalog, const FunctionReturn& signature,
                             FunctionCallResult& result) {
     if (!result.success || !signature.present || signature.schema.key == SchemaKey{}) return;
@@ -48,6 +54,7 @@ void validateFunctionReturn(const SchemaCatalog* catalog, const FunctionReturn& 
         result.returnValue.clear();
     }
 }
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
 } // namespace
 
@@ -71,11 +78,17 @@ Session::Session(std::unique_ptr<ITransport> transport,
     , registry_(registry)
     , getTimestampUs_(tsFn)
     , logFn_(logFn)
+#if TETHER_IO_DATALOG_ENABLED
     , datalogRecorder_(datalogRecorder)
+#endif
+#if TETHER_IO_INPUT_STREAMS_ENABLED
     , inputStreamCreateFn_(std::move(inputStreamCreateFn))
     , inputStreamDataFn_(std::move(inputStreamDataFn))
+#endif
     , framing_(framing)
+#if TETHER_IO_STREAMING_ENABLED
     , ringSources_(ringSources)
+#endif
     , schemaCatalog_(schemaCatalog)
     , slipRxBuf_(encodedBufferFactory ? encodedBufferFactory()
                                       : std::make_unique<DynamicReceiveBuffer>(
@@ -86,6 +99,16 @@ Session::Session(std::unique_ptr<ITransport> transport,
                                             DEFAULT_RECEIVE_BUFFER_CAPACITY,
                                             MAX_MESSAGE_SIZE))
 {
+#if !TETHER_IO_DATALOG_ENABLED
+    (void)datalogRecorder;
+#endif
+#if !TETHER_IO_INPUT_STREAMS_ENABLED
+    (void)inputStreamCreateFn;
+    (void)inputStreamDataFn;
+#endif
+#if !TETHER_IO_STREAMING_ENABLED
+    (void)ringSources;
+#endif
     // Stable random session identifier used by authority leases, audit
     // records, and disconnect cleanup.
     std::random_device rd;
@@ -102,9 +125,11 @@ Session::Session(std::unique_ptr<ITransport> transport,
 }
 
 Session::~Session() {
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     if (catalogListenerHandle_ != 0) {
         registry_.removeChangeListener(catalogListenerHandle_);
     }
+#endif
     if (transport_) transport_->close();
 }
 
@@ -124,7 +149,9 @@ void Session::log(const char* fmt, ...) {
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     if (logFn_) logFn_("TetherIOSession", "%s", buf);
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
     publishLog(LogSeverity::Info, "TetherIOSession", buf);
+#endif
 }
 
 void Session::setIdentity(machine::SessionIdentity identity) {
@@ -145,26 +172,33 @@ machine::SessionIdentity Session::identity() const {
 void Session::run() {
     running_ = true;
 
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     // Register for catalog change notifications
     catalogListenerHandle_ = registry_.addChangeListener([this]() {
         catalogDirty_.store(true, std::memory_order_relaxed);
     });
+#endif
 
     log("Session started");
 
+#if TETHER_IO_FUNCTIONS_ENABLED
     // Deadline enforcement for outbound peer calls runs on its own
     // thread: expiry must not depend on wire traffic waking this loop.
     sweepStop_.store(false, std::memory_order_relaxed);
     invokeSweepThread_ = std::thread([this] { invokeSweepLoop(); });
+#endif
 
     while (!stopRequested_.load(std::memory_order_relaxed)) {
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
         // Check for catalog changes
         if (catalogDirty_.exchange(false, std::memory_order_relaxed)) {
             sendCatalogChanged();
         }
+#endif
 
         // Calculate timeout
         uint32_t timeoutMs;
+#if TETHER_IO_STREAMING_ENABLED
         if (streaming_) {
             uint64_t now = nowUs();
             uint64_t elapsed = (now >= lastSampleTimeUs_) ? (now - lastSampleTimeUs_) : 0;
@@ -178,7 +212,9 @@ void Session::run() {
                 timeoutMs = static_cast<uint32_t>(waitUs / 1000);
                 if (timeoutMs == 0) timeoutMs = 1;
             }
-        } else {
+        } else
+#endif
+        {
             timeoutMs = 500;
         }
 
@@ -208,12 +244,16 @@ void Session::run() {
         }
     }
 
+#if TETHER_IO_STREAMING_ENABLED
     releaseRingSource();
     streaming_ = false;
+#endif
+#if TETHER_IO_FUNCTIONS_ENABLED
     sweepStop_.store(true, std::memory_order_relaxed);
     invokeSweepCv_.notify_all();
     if (invokeSweepThread_.joinable()) invokeSweepThread_.join();
     finishPendingInvokes();
+#endif
     running_ = false;
     log("Session ended");
 }
@@ -371,9 +411,17 @@ void Session::handleClientHello(const uint8_t* body, size_t len) {
 
     ServerHelloV6 response;
     response.selectedVersion = SCHEMA_PROTOCOL_VERSION;
+    // Negotiate encoding features: echo only the bits both sides support.
+    negotiatedFeatures_ = hello.encodingFeatures &
+                          ENCODING_FEATURE_TYPED_DESCRIPTORS;
+    response.encodingFeatures = negotiatedFeatures_;
+#if TETHER_IO_SCHEMA_ENABLED
     response.epoch = schemaCatalog_ && schemaCatalog_->epoch() != 0
         ? schemaCatalog_->epoch() : 1;
     if (schemaCatalog_) response.schemas = schemaCatalog_->manifest();
+#else
+    response.epoch = 1;
+#endif
     schemaEpoch_ = response.epoch;
     schemaHelloReceived_ = true;
     schemaCommitted_ = false;
@@ -388,6 +436,11 @@ void Session::handleClientHello(const uint8_t* body, size_t len) {
 }
 
 void Session::handleSchemaRequest(const uint8_t* body, size_t len) {
+#if !TETHER_IO_SCHEMA_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Schema negotiation disabled");
+    return;
+#else
     if (!schemaHelloReceived_) {
         sendError(ErrorCode::InvalidMessage, "SchemaRequest before ClientHello");
         return;
@@ -435,6 +488,7 @@ void Session::handleSchemaRequest(const uint8_t* body, size_t len) {
         encodeSchemaDefinitionV6(writer, {schemaEpoch_, *node});
         if (writer.ok()) sendRaw(txRawBuf_.data(), writer.pos);
     }
+#endif // TETHER_IO_SCHEMA_ENABLED
 }
 
 void Session::handleSchemaCommit(const uint8_t* body, size_t len) {

@@ -23,7 +23,9 @@
 
 #include "tether/io/Protocol.hpp"
 #include "tether/io/Schema.hpp"
+#if TETHER_IO_FUNCTIONS_ENABLED
 #include "tether/io/Function.hpp"
+#endif
 #include <cstdint>
 #include <cstddef>
 #include <string>
@@ -33,7 +35,9 @@
 #include <map>
 #include <functional>
 #include <mutex>
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
 #include <condition_variable>
+#endif
 
 namespace tether { namespace io {
 
@@ -84,15 +88,21 @@ struct ParamEntry {
     std::string description;
     std::string group; /**< Logical group (e.g. "pid.axis0", "ethercat.slave1") */
     ValueType   valueType;
+    /**Element type when valueType == Array (None otherwise). */
+    ValueType   elementType = ValueType::None;
     ReadFn      readFn;
     WriteFn     writeFn; /**< nullptr = read-only parameter */
     VarReadFn   varReadFn; /**< For String/Binary */
     VarWriteFn  varWriteFn; /**< For String/Binary */
     uint16_t    maxValueSize = 0; /**< 0 for fixed-size; max bytes for variable-length */
+#if TETHER_IO_METADATA_ENABLED
     std::map<std::string, std::string> metadata;
+#endif
     uint8_t     extraFlags = 0; /**< Additional EntryFlags bits (e.g. NoStream) */
+#if TETHER_IO_SCHEMA_ENABLED
     SchemaRef   schema;
     uint32_t    schemaSlot = 0;
+#endif
 
     uint8_t valueSize() const { return valueTypeSize(valueType); }
     bool isVariableLength() const { return tether::io::isVariableLength(valueType) || valueType == ValueType::Struct; }
@@ -117,13 +127,19 @@ struct SignalEntry {
     std::string description;
     std::string group;
     ValueType   valueType;
+    /**Element type when valueType == Array (None otherwise). */
+    ValueType   elementType = ValueType::None;
     ReadFn      readFn;
     VarReadFn   varReadFn;
     uint16_t    maxValueSize = 0;
+#if TETHER_IO_METADATA_ENABLED
     std::map<std::string, std::string> metadata;
+#endif
     uint8_t     extraFlags = 0; /**< Additional EntryFlags bits (e.g. NoStream) */
+#if TETHER_IO_SCHEMA_ENABLED
     SchemaRef   schema;
     uint32_t    schemaSlot = 0;
+#endif
 
     uint8_t valueSize() const { return valueTypeSize(valueType); }
     bool isVariableLength() const { return tether::io::isVariableLength(valueType) || valueType == ValueType::Struct; }
@@ -150,9 +166,23 @@ public:
     EntryKind kind() const { return param_ ? EntryKind::Parameter : EntryKind::Signal; }
     uint64_t id() const { return param_ ? param_->id : signal_->id; }
     ValueType valueType() const { return param_ ? param_->valueType : signal_->valueType; }
+    ValueType elementType() const { return param_ ? param_->elementType : signal_->elementType; }
     uint8_t valueSize() const { return param_ ? param_->valueSize() : signal_->valueSize(); }
-    const SchemaRef& schemaRef() const { return param_ ? param_->schema : signal_->schema; }
-    uint32_t schemaSlot() const { return param_ ? param_->schemaSlot : signal_->schemaSlot; }
+    const SchemaRef& schemaRef() const {
+#if TETHER_IO_SCHEMA_ENABLED
+        return param_ ? param_->schema : signal_->schema;
+#else
+        static const SchemaRef empty{};
+        return empty;
+#endif
+    }
+    uint32_t schemaSlot() const {
+#if TETHER_IO_SCHEMA_ENABLED
+        return param_ ? param_->schemaSlot : signal_->schemaSlot;
+#else
+        return 0;
+#endif
+    }
     bool writable() const { return param_ ? param_->writable() : false; }
     uint8_t flags() const { return param_ ? param_->flags() : signal_->flags(); }
     bool isVariableLength() const { return param_ ? param_->isVariableLength() : signal_->isVariableLength(); }
@@ -188,15 +218,23 @@ public:
     }
 
     size_t metadataCount() const {
+#if TETHER_IO_METADATA_ENABLED
         return param_ ? param_->metadata.size() : signal_->metadata.size();
+#else
+        return 0;
+#endif
     }
 
     template<typename Fn>
     void forEachMetadata(Fn&& fn) const {
+#if TETHER_IO_METADATA_ENABLED
         const auto& md = param_ ? param_->metadata : signal_->metadata;
         for (const auto& [k, v] : md) {
             fn(std::string_view(k), std::string_view(v));
         }
+#else
+        (void)fn;
+#endif
     }
 
     const ParamEntry* asParam() const { return param_; }
@@ -211,8 +249,10 @@ private:
 // Catalog change listener
 // ---------------------------------------------------------------------------
 
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
 /**Callback invoked when the catalog changes (entries added/removed). */
 using CatalogChangeListener = std::function<void()>;
+#endif
 
 // ---------------------------------------------------------------------------
 // Registry
@@ -304,6 +344,7 @@ public:
      */
     EntryView findSignal(uint64_t id) const;
 
+#if TETHER_IO_FUNCTIONS_ENABLED
     /**
      * Register a fully annotated function. IDs are unique across all catalogs.
      * @param entry Function descriptor to add; must have a unique ID
@@ -333,7 +374,9 @@ public:
      *         unknown or names a param/signal
      */
     FunctionView findFunction(uint64_t id) const;
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     /**
      * Register a catalog change listener. Returns a handle for removal.
      * @param listener Callback invoked whenever the catalog changes
@@ -348,6 +391,7 @@ public:
      *        of this listener completes.
      */
     void removeChangeListener(size_t handle);
+#endif // TETHER_IO_CATALOG_NOTIFY_ENABLED
 
     /**
      * Get a monotonically increasing revision counter (incremented on each add).
@@ -364,6 +408,7 @@ public:
      */
     void clear();
 
+#if TETHER_IO_STREAM_FILTERS_ENABLED
     /**
      * Configure the declarative stream-filter properties supported by this registry.
      * @param definition Filter property to declare; subsequent
@@ -371,21 +416,34 @@ public:
      */
     void defineStreamFilterProperty(FilterPropertyDef definition);
     StreamFilterSchema::Result validateStreamFilter(const FilterProperty& property) const;
+#endif
+    /**
+     * Whether the registry accepts schema-typed stream filters.
+     * @return true when stream filter properties may be registered; always
+     *         false when the feature is compiled out.
+     */
     bool supportsStreamFilters() const;
 
 private:
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     void notifyChange();
+#endif
 
     mutable std::mutex mutex_;
     // EntryView intentionally contains non-owning pointers. Deque storage
     // keeps those pointers valid when entries are appended dynamically.
     std::deque<ParamEntry>  params_;
     std::deque<SignalEntry> signals_;
+#if TETHER_IO_FUNCTIONS_ENABLED
     std::deque<FunctionEntry> functions_;
+#endif
     std::map<uint64_t, EntryKind> idMap_; /**< id → kind for fast lookup */
+#if TETHER_IO_STREAM_FILTERS_ENABLED
     StreamFilterSchema filterSchema_;
+#endif
     uint32_t revision_ = 0;
 
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     std::map<size_t, CatalogChangeListener> listeners_;
     size_t nextListenerHandle_ = 1;
 
@@ -399,6 +457,7 @@ private:
      */
     mutable std::condition_variable notifyCv_;
     uint32_t notifyInFlight_ = 0;
+#endif // TETHER_IO_CATALOG_NOTIFY_ENABLED
 };
 
 }} // namespace tether::io

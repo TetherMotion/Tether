@@ -119,6 +119,126 @@ menu "Tether Library Configuration"
             Enable Klipper CAN transport using Linux SocketCAN.
             Not available on ESP32.
 
+    config TETHER_ENABLE_IO
+        bool "Enable Tether IO protocol"
+        default n
+        help
+            Enable the Tether IO protocol (SLIP-framed parameter/signal
+            access and streaming). Compile-time capability flags below
+            slice the implementation — disabling a feature compiles it out
+            and its wire requests are answered Error(FeatureNotSupported).
+
+    menu "IO Protocol Capabilities"
+        depends on TETHER_ENABLE_IO
+
+        config TETHER_IO_ENABLE_SCHEMA
+            bool "Schema negotiation machinery"
+            default y
+            help
+                Catalog, manifest, schema definitions and digest
+                verification. Disable for peers with only simple flat
+                ValueType values (no schema machinery at all).
+
+        config TETHER_IO_ENABLE_DYNAMIC_SCHEMA
+            bool "Variable-layout schema kinds"
+            default y
+            depends on TETHER_IO_ENABLE_SCHEMA
+            help
+                String, Bytes, DynamicArray, Map, OneOf, tagged structs
+                and varint scalars in the value codec. Disable to keep
+                only fixed-layout ("flat") schemata whose wire image is
+                a packed little-endian C struct.
+
+        config TETHER_IO_ENABLE_STREAMING
+            bool "Streaming"
+            default y
+            help
+                ConfigureStream/Start/Stop/StreamData with the collect
+                plan and ring source machinery.
+
+        config TETHER_IO_ENABLE_STREAM_FILTERS
+            bool "Schema-typed stream filters"
+            default y
+            depends on TETHER_IO_ENABLE_SCHEMA && TETHER_IO_ENABLE_STREAMING
+
+        config TETHER_IO_ENABLE_THRESHOLDS
+            bool "Stream change thresholds"
+            default y
+            depends on TETHER_IO_ENABLE_STREAMING
+
+        config TETHER_IO_ENABLE_SNAPSHOTS
+            bool "Atomic snapshot reads"
+            default y
+
+        config TETHER_IO_ENABLE_FUNCTIONS
+            bool "Function invocation"
+            default y
+            depends on TETHER_IO_ENABLE_SCHEMA
+            help
+                Function registry, CallFunction/InvokeEx/RegisterFunctions
+                and the per-session invoke-deadline sweep thread.
+
+        config TETHER_IO_ENABLE_INPUT_STREAMS
+            bool "Client-to-server input streams"
+            default y
+            depends on TETHER_IO_ENABLE_SCHEMA
+
+        config TETHER_IO_ENABLE_DATALOG
+            bool "Binary datalogging"
+            default y
+
+        config TETHER_IO_ENABLE_LOG_SUBSCRIPTIONS
+            bool "Log subscriptions"
+            default y
+
+        config TETHER_IO_ENABLE_METADATA
+            bool "Entry metadata"
+            default y
+            help
+                Per-entry metadata map and GetMetadataReq/Resp. Disabling
+                removes the metadata map from every registry entry.
+
+        config TETHER_IO_ENABLE_CATALOG_NOTIFY
+            bool "CatalogChanged push"
+            default y
+
+        config TETHER_IO_ENABLE_SERVER
+            bool "Server role (Session/Server)"
+            default y
+
+        config TETHER_IO_ENABLE_CLIENT
+            bool "Client role (TetherIOClient)"
+            default y
+
+        config TETHER_IO_TRANSPORT_TCP
+            bool "TCP transport"
+            default y
+
+        config TETHER_IO_TRANSPORT_SERIAL
+            bool "Serial transport"
+            default y
+
+        config TETHER_IO_TRANSPORT_WS
+            bool "WebSocket transport"
+            default n
+
+        config TETHER_IO_MAX_MESSAGE_SIZE
+            int "Maximum decoded message size (bytes)"
+            default 1048576
+
+        config TETHER_IO_MAX_STREAM_ENTRIES
+            int "Maximum entries per stream request"
+            default 65536
+
+        config TETHER_IO_MAX_PENDING_INVOKES
+            int "Maximum outstanding InvokeEx calls per session"
+            default 256
+
+        config TETHER_IO_MAX_LOG_SUBSCRIPTIONS
+            int "Maximum log subscriptions per session"
+            default 16
+    endmenu
+
     config TETHER_ENABLE_PRESSURE_ADVANCE
         bool "Enable pressure advance for extruders"
         default y

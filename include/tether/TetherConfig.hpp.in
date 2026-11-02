@@ -88,6 +88,75 @@
 #cmakedefine01 TETHER_ENABLE_PRESSURE_ADVANCE
 #endif
 
+// IO protocol feature enables (compile-time capability slicing; see
+// include/tether/io/IoConfig.hpp for semantics and dependency rules)
+#ifndef TETHER_IO_ENABLE_SCHEMA
+#cmakedefine01 TETHER_IO_ENABLE_SCHEMA
+#endif
+#ifndef TETHER_IO_ENABLE_DYNAMIC_SCHEMA
+#cmakedefine01 TETHER_IO_ENABLE_DYNAMIC_SCHEMA
+#endif
+#ifndef TETHER_IO_ENABLE_STREAMING
+#cmakedefine01 TETHER_IO_ENABLE_STREAMING
+#endif
+#ifndef TETHER_IO_ENABLE_STREAM_FILTERS
+#cmakedefine01 TETHER_IO_ENABLE_STREAM_FILTERS
+#endif
+#ifndef TETHER_IO_ENABLE_THRESHOLDS
+#cmakedefine01 TETHER_IO_ENABLE_THRESHOLDS
+#endif
+#ifndef TETHER_IO_ENABLE_SNAPSHOTS
+#cmakedefine01 TETHER_IO_ENABLE_SNAPSHOTS
+#endif
+#ifndef TETHER_IO_ENABLE_FUNCTIONS
+#cmakedefine01 TETHER_IO_ENABLE_FUNCTIONS
+#endif
+#ifndef TETHER_IO_ENABLE_INPUT_STREAMS
+#cmakedefine01 TETHER_IO_ENABLE_INPUT_STREAMS
+#endif
+#ifndef TETHER_IO_ENABLE_DATALOG
+#cmakedefine01 TETHER_IO_ENABLE_DATALOG
+#endif
+#ifndef TETHER_IO_ENABLE_LOG_SUBSCRIPTIONS
+#cmakedefine01 TETHER_IO_ENABLE_LOG_SUBSCRIPTIONS
+#endif
+#ifndef TETHER_IO_ENABLE_METADATA
+#cmakedefine01 TETHER_IO_ENABLE_METADATA
+#endif
+#ifndef TETHER_IO_ENABLE_CATALOG_NOTIFY
+#cmakedefine01 TETHER_IO_ENABLE_CATALOG_NOTIFY
+#endif
+#ifndef TETHER_IO_ENABLE_SERVER
+#cmakedefine01 TETHER_IO_ENABLE_SERVER
+#endif
+#ifndef TETHER_IO_ENABLE_CLIENT
+#cmakedefine01 TETHER_IO_ENABLE_CLIENT
+#endif
+#ifndef TETHER_IO_TRANSPORT_TCP
+#cmakedefine01 TETHER_IO_TRANSPORT_TCP
+#endif
+#ifndef TETHER_IO_TRANSPORT_SERIAL
+#cmakedefine01 TETHER_IO_TRANSPORT_SERIAL
+#endif
+#ifndef TETHER_IO_TRANSPORT_WS
+#cmakedefine01 TETHER_IO_TRANSPORT_WS
+#endif
+
+// IO sizing knobs (defaults live in IoConfig.hpp; these only override
+// when a non-empty CMake value was provided)
+#ifndef TETHER_IO_MAX_MESSAGE_SIZE
+#cmakedefine TETHER_IO_MAX_MESSAGE_SIZE @TETHER_IO_MAX_MESSAGE_SIZE@
+#endif
+#ifndef TETHER_IO_MAX_STREAM_ENTRIES
+#cmakedefine TETHER_IO_MAX_STREAM_ENTRIES @TETHER_IO_MAX_STREAM_ENTRIES@
+#endif
+#ifndef TETHER_IO_MAX_PENDING_INVOKES
+#cmakedefine TETHER_IO_MAX_PENDING_INVOKES @TETHER_IO_MAX_PENDING_INVOKES@
+#endif
+#ifndef TETHER_IO_MAX_LOG_SUBSCRIPTIONS
+#cmakedefine TETHER_IO_MAX_LOG_SUBSCRIPTIONS @TETHER_IO_MAX_LOG_SUBSCRIPTIONS@
+#endif
+
 // Platform flags
 #ifndef TETHER_PLATFORM_LINUX
 #cmakedefine01 TETHER_PLATFORM_LINUX

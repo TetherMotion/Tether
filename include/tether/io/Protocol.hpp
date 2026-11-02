@@ -26,6 +26,8 @@
  */
 #pragma once
 
+#include "tether/io/IoConfig.hpp"
+
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -35,7 +37,6 @@
 #include <vector>
 #include <map>
 #include <limits>
-#include <magic_enum/magic_enum.hpp>
 
 namespace tether { namespace io {
 
@@ -173,6 +174,12 @@ enum class MessageType : uint8_t {
  * isVariableLength() classifies them.
  */
 enum class ValueType : uint8_t {
+    /**
+     * No type — used as the "not specified" sentinel in type-union
+     * fields (element_type of non-array entries, the value_type slot of
+     * schema-typed descriptors). Never a valid entry type.
+     */
+    None    = 0,
     U8      = 1,
     U16     = 2,
     U32     = 3,
@@ -261,6 +268,30 @@ enum class EntryKind : uint8_t {
 };
 
 // ---------------------------------------------------------------------------
+// Entry type tag (how an entry's type is described on the wire)
+// ---------------------------------------------------------------------------
+/**
+ * @brief Discriminant for the type union in catalog/stream/snapshot
+ * descriptors.
+ *
+ * Every entry describes its value type one of two ways:
+ *  - `Schema`: the entry is schema-typed. `schema_slot` resolves against
+ *    the negotiated manifest/graph and is authoritative; the flat
+ *    `value_type`/`value_size`/`max_value_size` fields are 0.
+ *  - `Flat`: the entry carries a plain `ValueType`. `value_type`,
+ *    `value_size` and `max_value_size` are authoritative and
+ *    `schema_slot` is 0. Flat values use the flat encodings (scalars
+ *    fixed-width LE, variable types varint-length-prefixed).
+ *
+ * This makes schema_slot=0 unambiguous: a flat entry in a mixed catalog
+ * can no longer be mistaken for the schema at manifest slot 0.
+ */
+enum class EntryTypeTag : uint8_t {
+    Schema = 0, /**< schema_slot is authoritative */
+    Flat   = 1, /**< value_type/value_size are authoritative */
+};
+
+// ---------------------------------------------------------------------------
 // Stream trigger modes
 // ---------------------------------------------------------------------------
 /**
@@ -305,6 +336,7 @@ struct LogRecord {
     std::string location;
 };
 
+#if TETHER_IO_STREAM_FILTERS_ENABLED
 enum class FilterPropertyErrorType : uint8_t {
     ParameterUnknown = 0,
     NotImplemented = 1,
@@ -349,6 +381,7 @@ public:
 private:
     std::map<std::string, FilterPropertyDef> definitions_;
 };
+#endif // TETHER_IO_STREAM_FILTERS_ENABLED
 
 // ---------------------------------------------------------------------------
 // Threshold types for change detection / skip filtering
@@ -431,12 +464,12 @@ namespace EntryFlags {
 // ---------------------------------------------------------------------------
 
 inline constexpr size_t MAX_VARINT_SIZE = 5;
-inline constexpr size_t MAX_MESSAGE_SIZE = 1024 * 1024;
+inline constexpr size_t MAX_MESSAGE_SIZE = TETHER_IO_MAX_MESSAGE_SIZE;
 inline constexpr size_t MAX_STRING_SIZE = UINT16_MAX;
-inline constexpr size_t MAX_VARIABLE_VALUE_SIZE = 1024 * 1024;
+inline constexpr size_t MAX_VARIABLE_VALUE_SIZE = TETHER_IO_MAX_MESSAGE_SIZE;
 inline constexpr uint32_t MAX_COLLECTION_COUNT = 1'000'000;
 /**Bound on outstanding InvokeEx calls per session; callPeer fails past it. */
-inline constexpr size_t MAX_PENDING_INVOKES = 256;
+inline constexpr size_t MAX_PENDING_INVOKES = TETHER_IO_MAX_PENDING_INVOKES;
 
 inline uint32_t zigzagEncode32(int32_t value) {
     return (static_cast<uint32_t>(value) << 1) ^

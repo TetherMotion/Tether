@@ -16,18 +16,25 @@
 #include <limits>
 #include <random>
 
+#if TETHER_IO_STREAMING_ENABLED
 namespace tether { namespace io {
 
 namespace {
 
 bool validateCatalogValue(const SchemaCatalog* catalog, const EntryView& entry,
                  const uint8_t* data, size_t size) {
+#if TETHER_IO_SCHEMA_ENABLED
     if (!catalog || entry.schemaRef().key == SchemaKey{} || !catalog->graph()) return true;
     BufReader reader(data, size);
     return validateSchemaValue(*catalog->graph(), entry.schemaRef().key, reader) &&
         reader.remaining() == 0;
+#else
+    (void)catalog; (void)entry; (void)data; (void)size;
+    return true;
+#endif
 }
 
+#if TETHER_IO_FUNCTIONS_ENABLED
 void validateFunctionReturn(const SchemaCatalog* catalog, const FunctionReturn& signature,
                             FunctionCallResult& result) {
     if (!result.success || !signature.present || signature.schema.key == SchemaKey{}) return;
@@ -49,6 +56,7 @@ void validateFunctionReturn(const SchemaCatalog* catalog, const FunctionReturn& 
         result.returnValue.clear();
     }
 }
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
 } // namespace
 
@@ -93,7 +101,9 @@ void Session::buildCollectPlan() {
 
 void Session::collectOneRow() {
     std::vector<std::vector<uint8_t>> currentValues;
+#if TETHER_IO_STREAM_FILTERS_ENABLED
     if (!streamFilters_.empty()) currentValues.resize(collectPlan_.size());
+#endif
     if (hasVariableEntries_) {
         // Ensure buffer has room
         if (chunkWritePos_ + fullRowSize_ > chunkBuf_.size()) {
@@ -129,10 +139,12 @@ void Session::collectOneRow() {
             }
         }
 
+#if TETHER_IO_STREAM_FILTERS_ENABLED
         if (!passesStreamFilters(currentValues)) {
             chunkWritePos_ = static_cast<size_t>(rowStart - chunkBuf_.data());
             return;
         }
+#endif
 
         chunkWritePos_ = static_cast<size_t>(row - chunkBuf_.data());
         rowsInChunk_++;
@@ -155,12 +167,14 @@ void Session::collectOneRow() {
         }
 
         // Threshold check
+#if TETHER_IO_THRESHOLDS_ENABLED
         if (!lastValues_[i].empty()) {
             if (!thresholdFilter_.passes(slot.paramId, lastValues_[i].data(), row, slot.valueSize)) {
                 // Value didn't change enough — copy last value
                 std::memcpy(row, lastValues_[i].data(), slot.valueSize);
             }
         }
+#endif
         // Update last value
         if (lastValues_[i].size() != slot.valueSize) {
             lastValues_[i].resize(slot.valueSize);
@@ -170,14 +184,17 @@ void Session::collectOneRow() {
         row += slot.valueSize;
     }
 
+#if TETHER_IO_STREAM_FILTERS_ENABLED
     if (!passesStreamFilters(currentValues)) {
         std::memset(rowStart, 0, fullRowSize_);
         return;
     }
+#endif
 
     rowsInChunk_++;
 }
 
+#if TETHER_IO_STREAM_FILTERS_ENABLED
 bool Session::passesStreamFilters(const std::vector<std::vector<uint8_t>>& values) const {
     if (streamFilters_.empty()) return true;
     for (const auto& filter : streamFilters_) {
@@ -193,6 +210,7 @@ bool Session::passesStreamFilters(const std::vector<std::vector<uint8_t>>& value
     }
     return true;
 }
+#endif // TETHER_IO_STREAM_FILTERS_ENABLED
 
 bool Session::shouldTrigger() {
     if (triggerMode_ == TriggerMode::Time) return true;
@@ -349,7 +367,9 @@ void Session::collectRingRows() {
         ringScratch_.resize(space * srcRowSize);
 
     std::vector<std::vector<uint8_t>> currentValues;
+#if TETHER_IO_STREAM_FILTERS_ENABLED
     if (!streamFilters_.empty()) currentValues.resize(collectPlan_.size());
+#endif
 
     const size_t got = ringSource_->drainRows(ringScratch_.data(), space);
     if (got > 0) lastRingRowUs_ = nowUs();
@@ -373,6 +393,7 @@ void Session::collectRingRows() {
         if (skipCounter_ > 0) { skipCounter_--; continue; }
         skipCounter_ = skipCount_;
 
+#if TETHER_IO_STREAM_FILTERS_ENABLED
         // Stream filters evaluate the producer's raw field values (same
         // inputs as the polled path's currentValues).
         if (!currentValues.empty()) {
@@ -383,6 +404,7 @@ void Session::collectRingRows() {
             }
             if (!passesStreamFilters(currentValues)) continue;
         }
+#endif
 
         uint8_t* row = chunkBuf_.data() +
                        static_cast<size_t>(rowsInChunk_) * fullRowSize_;
@@ -394,11 +416,14 @@ void Session::collectRingRows() {
             const uint8_t* f = srow + ringFieldOffsets_[i];
             // Threshold compression mirrors collectOneRow(): fields that
             // didn't pass the filter are sent as their last value.
+#if TETHER_IO_THRESHOLDS_ENABLED
             if (!lastValues_[i].empty() &&
                 !thresholdFilter_.passes(slot.paramId, lastValues_[i].data(),
                                          f, slot.valueSize)) {
                 std::memcpy(row, lastValues_[i].data(), slot.valueSize);
-            } else {
+            } else
+#endif
+            {
                 std::memcpy(row, f, slot.valueSize);
             }
             if (lastValues_[i].size() != slot.valueSize)
@@ -421,3 +446,4 @@ void Session::releaseRingSource() {
     ringFieldOffsets_.clear();
 }
 }} // namespace tether::io
+#endif // TETHER_IO_STREAMING_ENABLED

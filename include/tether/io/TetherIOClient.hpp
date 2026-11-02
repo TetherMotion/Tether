@@ -21,10 +21,14 @@
 #include "tether/io/Protocol.hpp"
 #include "tether/io/Transport.hpp"
 #include "tether/io/Registry.hpp"
+#if TETHER_IO_FUNCTIONS_ENABLED
 #include "tether/io/Function.hpp"
+#endif
 #include "tether/io/SchemaCatalog.hpp"
 #include "tether/io/SchemaNegotiation.hpp"
+#if TETHER_IO_SCHEMA_ENABLED
 #include "tether/io/SchemaValue.hpp"
+#endif
 
 #include <atomic>
 #include <cstdint>
@@ -43,15 +47,31 @@ namespace tether { namespace io {
 struct ClientCatalogEntry {
     uint64_t id = 0;
     uint64_t schemaEpoch = 0;
+    /**
+     * How this entry's type is described: Schema — schemaSlot is
+     * authoritative (resolve via the negotiated graph); Flat — type/
+     * valueSize/maxValueSize are authoritative and schemaSlot is 0.
+     */
+    EntryTypeTag typeTag = EntryTypeTag::Schema;
     uint32_t schemaSlot = 0;
+    /**Flat entries only: the entry's ValueType. */
     ValueType type = ValueType::F64;
+    /**Flat entries only: element type when type == Array (None otherwise). */
+    ValueType elementType = ValueType::None;
+    /**Flat entries only: canonical byte size (0 = variable-length). */
     uint8_t valueSize = 0;
+    /**Flat entries only: byte cap for variable-length values (0 = fixed). */
+    uint16_t maxValueSize = 0;
     uint32_t flags = 0;
     std::string name;
     std::string description;
     std::string group;
+
+    bool schemaTyped() const { return typeTag == EntryTypeTag::Schema; }
+    bool flat() const { return typeTag == EntryTypeTag::Flat; }
 };
 
+#if TETHER_IO_FUNCTIONS_ENABLED
 /**Function parameter descriptor. */
 struct ClientFunctionParam {
     uint32_t key = 0;
@@ -77,14 +97,23 @@ struct ClientFunctionEntry {
     ValueType returnType = ValueType::F64;
     uint32_t returnSchemaSlot = 0;
 };
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
+#if TETHER_IO_STREAMING_ENABLED
 /**Stream layout entry from ConfigureStreamAck. */
 struct ClientStreamLayoutEntry {
     uint64_t id = 0;
     uint64_t schemaEpoch = 0;
+    /**Schema — schemaSlot is authoritative; Flat — type/valueSize are. */
+    EntryTypeTag typeTag = EntryTypeTag::Schema;
     uint32_t schemaSlot = 0;
+    /**Flat entries only: the entry's ValueType. */
     ValueType type = ValueType::F64;
+    /**Flat entries only: element type when type == Array. */
+    ValueType elementType = ValueType::None;
     uint8_t valueSize = 0;
+
+    bool schemaTyped() const { return typeTag == EntryTypeTag::Schema; }
 };
 
 /**A single stream data row. */
@@ -93,21 +122,34 @@ struct ClientStreamRow {
     uint64_t timestampUs = 0;
     std::vector<std::vector<uint8_t>> values;
 };
+#endif // TETHER_IO_STREAMING_ENABLED
 
+#if TETHER_IO_METADATA_ENABLED
 /**Metadata key-value pair. */
 struct ClientMetadata {
     std::string key;
     std::string value;
 };
+#endif
 
+#if TETHER_IO_SNAPSHOTS_ENABLED
 /**Snapshot value entry. */
 struct ClientSnapshotValue {
     uint64_t id = 0;
     uint64_t schemaEpoch = 0;
+    /**Schema — schemaSlot is authoritative; Flat — type/valueSize are. */
+    EntryTypeTag typeTag = EntryTypeTag::Schema;
     uint32_t schemaSlot = 0;
+    /**Flat entries only: the entry's ValueType. */
+    ValueType type = ValueType::F64;
+    /**Flat entries only: element type when type == Array. */
+    ValueType elementType = ValueType::None;
     uint8_t valueSize = 0;
     std::vector<uint8_t> value;
+
+    bool schemaTyped() const { return typeTag == EntryTypeTag::Schema; }
 };
+#endif
 
 /**Error from the server or client. */
 struct ClientError {
@@ -115,6 +157,7 @@ struct ClientError {
     std::string message;
 };
 
+#if TETHER_IO_FUNCTIONS_ENABLED
 /**Result of a CallFunction request. */
 struct ClientCallResult {
     uint64_t functionId = 0;
@@ -124,7 +167,9 @@ struct ClientCallResult {
     bool hasReturnValue = false;
     std::vector<uint8_t> returnValue;
 };
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 /**Result of a SubscribeLog request. */
 struct ClientLogSubscription {
     uint32_t subscriptionId = 0;
@@ -139,23 +184,32 @@ struct ClientLogRecord {
     std::string message;
     std::string location;
 };
+#endif // TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 
+#if TETHER_IO_STREAMING_ENABLED
 /**Stream data callback. */
 using StreamDataCallback = std::function<void(const ClientStreamRow&)>;
+#endif
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 /**Log data callback. */
 using LogDataCallback = std::function<void(const ClientLogRecord&)>;
+#endif
 
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
 /**
  * Fired when the server pushes CatalogChanged (0x2C) — the catalog is
  * stale; call the list/catalog APIs again to refresh.
  */
 using CatalogChangedCallback = std::function<void()>;
+#endif
 
+#if TETHER_IO_SCHEMA_ENABLED
 /**
  * Fired when the server pushes SchemaUpdate (0x56) mid-session — the
  * schema epoch changed; previously negotiated slots are stale.
  */
 using SchemaUpdateCallback = std::function<void()>;
+#endif
 
 /**
  * Fired for any other unhandled unsolicited message type (async error
@@ -197,6 +251,7 @@ public:
      * @return Negotiated schema epoch.
      */
     uint64_t schemaEpoch() const { return schemaEpoch_; }
+#if TETHER_IO_SCHEMA_ENABLED
     /**
      * Schema graph fetched during bootstrap; empty when the server
      * advertised no schemas. All V6 value decoding goes through this.
@@ -210,6 +265,7 @@ public:
     const std::vector<SchemaManifestEntry>& schemaManifest() const {
         return manifest_;
     }
+#endif // TETHER_IO_SCHEMA_ENABLED
     /**
      * Negotiated protocol limits from ServerHello.
      * @return Limits the client must respect (max message size, counts, ...).
@@ -221,6 +277,7 @@ public:
      */
     uint32_t negotiatedFeatures() const { return negotiatedFeatures_; }
 
+#if TETHER_IO_SCHEMA_ENABLED
     /**
      * Resolve a wire schema slot to a node in the negotiated graph.
      * Returns nullptr for out-of-range slots or missing definitions.
@@ -254,13 +311,22 @@ public:
         }
         return std::move(*v);
     }
+#endif // TETHER_IO_SCHEMA_ENABLED
 
     // ---- Callbacks ----
 
+#if TETHER_IO_STREAMING_ENABLED
     void setStreamDataCallback(StreamDataCallback cb);
+#endif
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
     void setLogDataCallback(LogDataCallback cb);
+#endif
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     void setCatalogChangedCallback(CatalogChangedCallback cb);
+#endif
+#if TETHER_IO_SCHEMA_ENABLED
     void setSchemaUpdateCallback(SchemaUpdateCallback cb);
+#endif
     void setAsyncMessageCallback(AsyncMessageCallback cb);
 
     // ---- Ping ----
@@ -330,6 +396,7 @@ public:
     std::expected<std::vector<uint8_t>, ClientError>
     getSignal(uint64_t id);
 
+#if TETHER_IO_METADATA_ENABLED
     // ---- Metadata ----
 
     /**
@@ -339,7 +406,9 @@ public:
      */
     std::expected<std::vector<ClientMetadata>, ClientError>
     getMetadata(uint64_t id);
+#endif // TETHER_IO_METADATA_ENABLED
 
+#if TETHER_IO_FUNCTIONS_ENABLED
     // ---- Functions ----
 
     /**
@@ -405,7 +474,9 @@ public:
     using InvokeHandler = std::function<ClientCallResult(
         uint64_t functionId, const std::vector<FunctionArg>& args)>;
     void setInvokeHandler(InvokeHandler cb);
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
+#if TETHER_IO_STREAMING_ENABLED
     // ---- Streaming ----
 
     /**Configure a stream. Returns {specId, layout}. */
@@ -432,7 +503,9 @@ public:
      * @return Empty on success, or an error.
      */
     std::expected<void, ClientError> stopStream();
+#endif // TETHER_IO_STREAMING_ENABLED
 
+#if TETHER_IO_SNAPSHOTS_ENABLED
     // ---- Snapshots ----
 
     /**
@@ -451,7 +524,9 @@ public:
      */
     std::expected<std::pair<uint64_t, std::vector<ClientSnapshotValue>>, ClientError>
     snapshotSignals(const std::vector<uint64_t>& ids = {});
+#endif // TETHER_IO_SNAPSHOTS_ENABLED
 
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
     // ---- Log Subscription ----
 
     std::expected<ClientLogSubscription, ClientError>
@@ -462,7 +537,9 @@ public:
 
     std::expected<uint32_t, ClientError>
     unsubscribeLog(uint32_t subscriptionId);
+#endif // TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 
+#if TETHER_IO_DATALOG_ENABLED
     // ---- Datalog ----
 
     std::expected<bool, ClientError>
@@ -470,14 +547,18 @@ public:
                      uint32_t sampleRateHz,
                      bool enabled,
                      const std::vector<uint64_t>& entryIds = {});
+#endif // TETHER_IO_DATALOG_ENABLED
 
+#if TETHER_IO_THRESHOLDS_ENABLED
     // ---- Threshold ----
 
     std::expected<bool, ClientError>
     configureThreshold(const std::string& name,
                        bool isWhitelist,
                        const std::vector<uint8_t>& encodedRules);
+#endif // TETHER_IO_THRESHOLDS_ENABLED
 
+#if TETHER_IO_INPUT_STREAMS_ENABLED
     // ---- Input Streams ----
 
     struct CreateInputStreamResult {
@@ -494,6 +575,7 @@ public:
 
     std::expected<std::pair<uint32_t, bool>, ClientError>
     closeInputStream(uint32_t streamId);
+#endif // TETHER_IO_INPUT_STREAMS_ENABLED
 
     // ---- Low-level access ----
 
@@ -533,14 +615,24 @@ public:
 private:
     std::unique_ptr<ITransport> transport_;
     uint32_t defaultTimeoutMs_;
+#if TETHER_IO_STREAMING_ENABLED
     StreamDataCallback streamCallback_;
+    std::vector<ClientStreamLayoutEntry> streamLayout_;
+#endif
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
     LogDataCallback logCallback_;
+#endif
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     CatalogChangedCallback catalogChangedCb_;
+#endif
+#if TETHER_IO_SCHEMA_ENABLED
     SchemaUpdateCallback schemaUpdateCb_;
+#endif
     AsyncMessageCallback asyncMessageCb_;
+#if TETHER_IO_FUNCTIONS_ENABLED
     InvokeHandler invokeHandler_;
     std::vector<FunctionEntry> localFunctions_;
-    std::vector<ClientStreamLayoutEntry> streamLayout_;
+#endif
     /**
      * Recursive: request() holds it while receiveMessage() dispatches an
      * InvokeExReq whose handler sends the InvokeExResp.
@@ -548,18 +640,22 @@ private:
     std::recursive_mutex mutex_;
     std::atomic<uint64_t> nextRequestId_{1};
     uint64_t schemaEpoch_ = 0;
+#if TETHER_IO_SCHEMA_ENABLED
     SchemaGraph schemaGraph_;
     std::vector<SchemaManifestEntry> manifest_;
+#endif
     SchemaNegotiationLimits serverLimits_{};
     uint32_t negotiatedFeatures_ = 0;
 
     // Internal helpers
     ClientError makeError(ErrorCode code, std::string msg);
     ClientError parseError(const std::vector<uint8_t>& frame);
+#if TETHER_IO_FUNCTIONS_ENABLED
     void handleInvokeExReq(const std::vector<uint8_t>& msg);
     void sendInvokeExResponse(uint64_t requestId, bool success, uint32_t errorCode,
                               std::string_view errorMessage, bool hasReturn,
                               const std::vector<uint8_t>& returnValue);
+#endif
     std::vector<uint8_t> encodeVarint(uint32_t value);
     uint32_t decodeVarint(const uint8_t* data, size_t len, size_t& consumed);
     std::string readString16(const uint8_t* data, size_t len, size_t& offset);

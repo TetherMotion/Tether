@@ -16,7 +16,9 @@ bool Registry::addParam(ParamEntry entry) {
         params_.push_back(std::move(entry));
         ++revision_;
     }
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     notifyChange();
+#endif
     return true;
 }
 
@@ -28,10 +30,13 @@ bool Registry::addSignal(SignalEntry entry) {
         signals_.push_back(std::move(entry));
         ++revision_;
     }
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     notifyChange();
+#endif
     return true;
 }
 
+#if TETHER_IO_FUNCTIONS_ENABLED
 bool Registry::addFunction(FunctionEntry entry) {
     if (!entry.validSignature()) return false;
     {
@@ -41,20 +46,27 @@ bool Registry::addFunction(FunctionEntry entry) {
         functions_.push_back(std::move(entry));
         ++revision_;
     }
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     notifyChange();
+#endif
     return true;
 }
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
 void Registry::clear() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         params_.clear();
         signals_.clear();
+#if TETHER_IO_FUNCTIONS_ENABLED
         functions_.clear();
+#endif
         idMap_.clear();
         ++revision_;
     }
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
     notifyChange();
+#endif
 }
 
 uint32_t Registry::paramCount() const {
@@ -67,6 +79,7 @@ uint32_t Registry::signalCount() const {
     return static_cast<uint32_t>(signals_.size());
 }
 
+#if TETHER_IO_FUNCTIONS_ENABLED
 uint32_t Registry::functionCount() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return static_cast<uint32_t>(functions_.size());
@@ -92,12 +105,14 @@ FunctionView Registry::findFunction(uint64_t id) const {
     }
     return FunctionView();
 }
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
 uint32_t Registry::totalCount() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return static_cast<uint32_t>(params_.size() + signals_.size());
 }
 
+#if TETHER_IO_STREAM_FILTERS_ENABLED
 void Registry::defineStreamFilterProperty(FilterPropertyDef definition) {
     std::lock_guard<std::mutex> lock(mutex_);
     filterSchema_.defineProperty(std::move(definition));
@@ -107,10 +122,15 @@ StreamFilterSchema::Result Registry::validateStreamFilter(const FilterProperty& 
     std::lock_guard<std::mutex> lock(mutex_);
     return filterSchema_.validate(property);
 }
+#endif // TETHER_IO_STREAM_FILTERS_ENABLED
 
 bool Registry::supportsStreamFilters() const {
+#if TETHER_IO_STREAM_FILTERS_ENABLED
     std::lock_guard<std::mutex> lock(mutex_);
     return !filterSchema_.empty();
+#else
+    return false;
+#endif
 }
 
 std::vector<EntryView> Registry::paramPage(uint32_t offset, uint32_t maxCount) const {
@@ -175,6 +195,7 @@ EntryView Registry::findSignal(uint64_t id) const {
     return EntryView();
 }
 
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
 size_t Registry::addChangeListener(CatalogChangeListener listener) {
     std::lock_guard<std::mutex> lock(mutex_);
     size_t handle = nextListenerHandle_++;
@@ -216,5 +237,6 @@ void Registry::notifyChange() {
     }
     notifyCv_.notify_all();
 }
+#endif // TETHER_IO_CATALOG_NOTIFY_ENABLED
 
 }} // namespace tether::io

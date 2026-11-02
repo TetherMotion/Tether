@@ -18,10 +18,12 @@ Server::Server(Registry& registry,
 
 Server::~Server() {
     stop();
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
     if (loggerHandlerId_ != 0) {
         Tether::Platform::Logger::instance().removeHandler(loggerHandlerId_);
         loggerHandlerId_ = 0;
     }
+#endif
 }
 
 bool Server::start() {
@@ -32,6 +34,7 @@ bool Server::start() {
 
     running_ = true;
 
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
     if (loggerHandlerId_ == 0) {
         loggerHandlerId_ = Tether::Platform::Logger::instance().addHandler(
             [this](Tether::Platform::LogLevel level, const char* tag, const char* message) {
@@ -47,6 +50,7 @@ bool Server::start() {
                 publishLog(severity, tag ? tag : "", message ? message : "");
             });
     }
+#endif
 
     acceptThread_ = std::thread([this]() { acceptLoop(); });
 
@@ -61,10 +65,12 @@ void Server::stop() {
     if (!running_) return;
     running_ = false;
 
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
     if (loggerHandlerId_ != 0) {
         Tether::Platform::Logger::instance().removeHandler(loggerHandlerId_);
         loggerHandlerId_ = 0;
     }
+#endif
 
     transportServer_->stop();
 
@@ -103,6 +109,7 @@ size_t Server::activeSessionCount() const {
     return count;
 }
 
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 void Server::publishLog(LogSeverity severity, std::string_view component,
                         std::string_view message, std::string_view location) {
     std::vector<std::shared_ptr<Session>> sessions;
@@ -117,7 +124,9 @@ void Server::publishLog(LogSeverity severity, std::string_view component,
         session->publishLog(severity, component, message, location);
     }
 }
+#endif // TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 
+#if TETHER_IO_FUNCTIONS_ENABLED
 bool Server::callPeerFunction(std::string_view functionName,
                               const std::vector<FunctionArgument>& arguments,
                               uint64_t deadlineUs,
@@ -162,6 +171,7 @@ std::vector<std::pair<std::string, uint64_t>> Server::peerFunctions() const {
     }
     return out;
 }
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
 void Server::acceptLoop() {
     while (running_.load(std::memory_order_relaxed)) {
@@ -188,10 +198,24 @@ void Server::acceptLoop() {
         auto session = std::make_shared<Session>(
             std::move(transport), registry_,
             config_.timestampFn, config_.logFn,
+#if TETHER_IO_DATALOG_ENABLED
             &datalogRecorder_,
+#else
+            nullptr,
+#endif
+#if TETHER_IO_INPUT_STREAMS_ENABLED
             config_.inputStreamCreateFn, config_.inputStreamDataFn,
+#else
+            nullptr, nullptr,
+#endif
             config_.encodedBufferFactory, config_.decodedBufferFactory,
-            config_.framing, &config_.ringSources, config_.schemaCatalog);
+            config_.framing,
+#if TETHER_IO_STREAMING_ENABLED
+            &config_.ringSources,
+#else
+            nullptr,
+#endif
+            config_.schemaCatalog);
 
         std::shared_ptr<Session> sessionPtr = session;
 

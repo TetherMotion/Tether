@@ -50,32 +50,66 @@ endif()
 # ---------------------------------------------------------------------------
 # Core IO protocol sources
 # ---------------------------------------------------------------------------
+# Feature slicing: TETHER_IO_ENABLE_* options (default ON) drop whole
+# translation units. Dependency normalization mirrors IoConfig.hpp:
+# effective THRESHOLDS = STREAMING && THRESHOLDS, etc.
 set(TETHER_IO_PROTOCOL_SOURCES
     ${TETHER_ROOT}/src/io/Protocol.cpp
-    ${TETHER_ROOT}/src/io/SchemaDigest.cpp
-    ${TETHER_ROOT}/dependencies/blake3/c/blake3.c
-    ${TETHER_ROOT}/dependencies/blake3/c/blake3_dispatch.c
-    ${TETHER_ROOT}/dependencies/blake3/c/blake3_portable.c
     ${TETHER_ROOT}/src/io/Registry.cpp
-    ${TETHER_ROOT}/src/io/ThresholdFilter.cpp
-    ${TETHER_ROOT}/src/io/Datalogging.cpp
-    ${TETHER_ROOT}/src/io/Session.cpp
-    ${TETHER_ROOT}/src/io/Session_handlers.cpp
-    ${TETHER_ROOT}/src/io/Session_peer.cpp
-    ${TETHER_ROOT}/src/io/Session_streaming.cpp
-    ${TETHER_ROOT}/src/io/Server.cpp
-    ${TETHER_ROOT}/src/io/TetherIOClient.cpp
     ${TETHER_ROOT}/src/io/SlipTransport.cpp
-    ${TETHER_ROOT}/src/io/WsTransport.cpp
 )
 
-# Transport: TCP is always available; serial only on non-ESP (or with own
-# driver on ESP)
-list(APPEND TETHER_IO_PROTOCOL_SOURCES
-    ${TETHER_ROOT}/src/io/TcpTransport.cpp
-)
+if(TETHER_IO_ENABLE_SCHEMA)
+    list(APPEND TETHER_IO_PROTOCOL_SOURCES
+        ${TETHER_ROOT}/src/io/SchemaDigest.cpp
+        ${TETHER_ROOT}/dependencies/blake3/c/blake3.c
+        ${TETHER_ROOT}/dependencies/blake3/c/blake3_dispatch.c
+        ${TETHER_ROOT}/dependencies/blake3/c/blake3_portable.c
+    )
+endif()
 
-if(NOT ESP_PLATFORM)
+if(TETHER_IO_ENABLE_STREAMING AND TETHER_IO_ENABLE_THRESHOLDS)
+    list(APPEND TETHER_IO_PROTOCOL_SOURCES
+        ${TETHER_ROOT}/src/io/ThresholdFilter.cpp
+    )
+endif()
+
+if(TETHER_IO_ENABLE_DATALOG)
+    list(APPEND TETHER_IO_PROTOCOL_SOURCES
+        ${TETHER_ROOT}/src/io/Datalogging.cpp
+    )
+endif()
+
+if(TETHER_IO_ENABLE_SERVER)
+    list(APPEND TETHER_IO_PROTOCOL_SOURCES
+        ${TETHER_ROOT}/src/io/Session.cpp
+        ${TETHER_ROOT}/src/io/Session_handlers.cpp
+        ${TETHER_ROOT}/src/io/Session_peer.cpp
+        ${TETHER_ROOT}/src/io/Session_streaming.cpp
+        ${TETHER_ROOT}/src/io/Server.cpp
+    )
+endif()
+
+if(TETHER_IO_ENABLE_CLIENT)
+    list(APPEND TETHER_IO_PROTOCOL_SOURCES
+        ${TETHER_ROOT}/src/io/TetherIOClient.cpp
+    )
+endif()
+
+if(TETHER_IO_TRANSPORT_TCP)
+    list(APPEND TETHER_IO_PROTOCOL_SOURCES
+        ${TETHER_ROOT}/src/io/TcpTransport.cpp
+    )
+endif()
+
+if(TETHER_IO_TRANSPORT_WS)
+    list(APPEND TETHER_IO_PROTOCOL_SOURCES
+        ${TETHER_ROOT}/src/io/WsTransport.cpp
+    )
+endif()
+
+# Serial transport: only on non-ESP (or with own driver on ESP)
+if(TETHER_IO_TRANSPORT_SERIAL AND NOT ESP_PLATFORM)
     list(APPEND TETHER_IO_PROTOCOL_SOURCES
         ${TETHER_ROOT}/src/io/SerialTransport.cpp
         ${TETHER_ROOT}/src/io/SpiDriver.cpp

@@ -14,7 +14,9 @@
 #include "tether/io/Transport.hpp"
 #include "tether/io/Datalogging.hpp"
 #include "tether/io/RingStreamSource.hpp"
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 #include "logging/Logger.hpp"
+#endif
 #include <cstdint>
 #include <cstddef>
 #include <string_view>
@@ -31,11 +33,14 @@ struct ServerConfig {
     size_t      maxClients   = 4; /**< Max concurrent sessions */
     TimestampFn timestampFn  = nullptr; /**< Required: µs timestamp */
     LogFn       logFn        = nullptr; /**< Optional logging callback */
+#if TETHER_IO_INPUT_STREAMS_ENABLED
     InputStreamCreateFn inputStreamCreateFn;
     InputStreamDataFn inputStreamDataFn;
+#endif
     ReceiveBufferFactory encodedBufferFactory;
     ReceiveBufferFactory decodedBufferFactory;
     Framing     framing      = Framing::Slip; /**< Message framing mode */
+#if TETHER_IO_STREAMING_ENABLED
     /**
      * Ring-buffered stream sources (producer-driven).  A configured stream
      * whose entries are all covered by a source's schema drains that source
@@ -43,6 +48,7 @@ struct ServerConfig {
      * caller and must outlive the Server.
      */
     std::vector<IRingStreamSource*> ringSources;
+#endif
     /**
      * Active V6 schemas shared by every session. Entries, functions, and
      * input streams resolve their session-local slots against this catalog.
@@ -88,13 +94,16 @@ public:
      */
     bool isRunning() const { return running_.load(std::memory_order_relaxed); }
 
+#if TETHER_IO_DATALOG_ENABLED
     /**
      * @brief Access the server's datalogging recorder (may be null).
      * @return pointer to the embedded recorder; never null here but
      *         recording itself may be disabled by config.
      */
     DatalogRecorder* datalogRecorder() { return &datalogRecorder_; }
+#endif
 
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
     /**
      * @brief Publish a log record to all matching client subscriptions.
      * @param severity   Record severity.
@@ -104,7 +113,9 @@ public:
      */
     void publishLog(LogSeverity severity, std::string_view component,
                     std::string_view message, std::string_view location = {});
+#endif
 
+#if TETHER_IO_FUNCTIONS_ENABLED
     // ---- Peer function invocation ----
 
     /**
@@ -142,6 +153,7 @@ public:
      * @return snapshot of registered function names and ids.
      */
     std::vector<std::pair<std::string, uint64_t>> peerFunctions() const;
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
 private:
     void acceptLoop();
@@ -160,8 +172,12 @@ private:
     std::vector<SessionInfo> sessions_;
     std::thread acceptThread_;
 
+#if TETHER_IO_DATALOG_ENABLED
     DatalogRecorder datalogRecorder_;
+#endif
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
     Tether::Platform::Logger::HandlerId loggerHandlerId_ = 0;
+#endif
 };
 
 }} // namespace tether::io

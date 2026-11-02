@@ -46,6 +46,34 @@ foreach(_f IN ITEMS
     endif()
 endforeach()
 
+# IO protocol capability flags (bool, default y under CONFIG_TETHER_ENABLE_IO)
+foreach(_f IN ITEMS
+        SCHEMA DYNAMIC_SCHEMA STREAMING STREAM_FILTERS THRESHOLDS
+        SNAPSHOTS FUNCTIONS INPUT_STREAMS DATALOG LOG_SUBSCRIPTIONS
+        METADATA CATALOG_NOTIFY SERVER CLIENT)
+    if(CONFIG_TETHER_IO_ENABLE_${_f})
+        set(TETHER_IO_ENABLE_${_f} ON)
+    else()
+        set(TETHER_IO_ENABLE_${_f} OFF)
+    endif()
+endforeach()
+foreach(_f IN ITEMS TCP SERIAL WS)
+    if(CONFIG_TETHER_IO_TRANSPORT_${_f})
+        set(TETHER_IO_TRANSPORT_${_f} ON)
+    else()
+        set(TETHER_IO_TRANSPORT_${_f} OFF)
+    endif()
+endforeach()
+# IO sizing knobs are ints — pass them through verbatim so #cmakedefine
+# emits the numeric value (not a 0/1).
+foreach(_v IN ITEMS
+        MAX_MESSAGE_SIZE MAX_STREAM_ENTRIES MAX_PENDING_INVOKES
+        MAX_LOG_SUBSCRIPTIONS)
+    if(DEFINED CONFIG_TETHER_IO_${_v})
+        set(TETHER_IO_${_v} ${CONFIG_TETHER_IO_${_v}})
+    endif()
+endforeach()
+
 # Platform / HAL selection on ESP32
 set(TETHER_ENABLE_HAL       ON)
 set(TETHER_ENABLE_ESP32_HAL ON)
@@ -169,6 +197,53 @@ if(CONFIG_TETHER_ENABLE_KLIPPER)
     list(APPEND TETHER_SRCS ${KLIPPER_SRCS})
 endif()
 
+# Tether IO protocol (SLIP-framed param/signal access + streaming).
+# Source selection mirrors cmake/components/io_protocol.cmake; POSIX-only
+# transports (SerialTransport/SpiDriver) and blake3 SIMD paths stay out.
+if(CONFIG_TETHER_ENABLE_IO)
+    set(LIBSLIPSPEED_SRC "${CMAKE_CURRENT_LIST_DIR}/dependencies/libSLIPspeed/src")
+    list(APPEND TETHER_SRCS
+        ${LIBSLIPSPEED_SRC}/Buffer.cpp
+        ${LIBSLIPSPEED_SRC}/Decoder.cpp
+        ${LIBSLIPSPEED_SRC}/Encoder.cpp
+        src/io/Protocol.cpp
+        src/io/Registry.cpp
+        src/io/SlipTransport.cpp
+    )
+    if(CONFIG_TETHER_IO_ENABLE_SCHEMA)
+        list(APPEND TETHER_SRCS
+            src/io/SchemaDigest.cpp
+            dependencies/blake3/c/blake3.c
+            dependencies/blake3/c/blake3_dispatch.c
+            dependencies/blake3/c/blake3_portable.c
+        )
+    endif()
+    if(CONFIG_TETHER_IO_ENABLE_STREAMING AND CONFIG_TETHER_IO_ENABLE_THRESHOLDS)
+        list(APPEND TETHER_SRCS src/io/ThresholdFilter.cpp)
+    endif()
+    if(CONFIG_TETHER_IO_ENABLE_DATALOG)
+        list(APPEND TETHER_SRCS src/io/Datalogging.cpp)
+    endif()
+    if(CONFIG_TETHER_IO_ENABLE_SERVER)
+        list(APPEND TETHER_SRCS
+            src/io/Session.cpp
+            src/io/Session_handlers.cpp
+            src/io/Session_peer.cpp
+            src/io/Session_streaming.cpp
+            src/io/Server.cpp
+        )
+    endif()
+    if(CONFIG_TETHER_IO_ENABLE_CLIENT)
+        list(APPEND TETHER_SRCS src/io/TetherIOClient.cpp)
+    endif()
+    if(CONFIG_TETHER_IO_TRANSPORT_TCP)
+        list(APPEND TETHER_SRCS src/io/TcpTransport.cpp)
+    endif()
+    if(CONFIG_TETHER_IO_TRANSPORT_WS)
+        list(APPEND TETHER_SRCS src/io/WsTransport.cpp)
+    endif()
+endif()
+
 # HAL - ESP32 implementation
 file(GLOB HAL_COMMON_SRCS "src/hal/*.cpp")
 file(GLOB HAL_ESP32_SRCS "src/hal/esp32/*.cpp")
@@ -224,8 +299,12 @@ idf_component_register(
 )
 
 # The AS715N register/PDO list headers use C++20 facilities (std::span).
-# Ensure the ESP-IDF component target is also built as C++20.
+# Ensure the ESP-IDF component target is also built as C++20. The IO
+# protocol sources require C++23 (std::expected) — bump when enabled.
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 20)
+if(CONFIG_TETHER_ENABLE_IO)
+    set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 23)
+endif()
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_EXTENSIONS ON)
 
