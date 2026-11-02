@@ -64,7 +64,11 @@ public:
     explicit AccelerationProfileAnalyzer() : params_() {}
     explicit AccelerationProfileAnalyzer(Params params) : params_(params) {}
 
-    /**@brief Analyze acceleration profile from G-code. */
+    /**
+     * @brief Analyze acceleration profile from G-code.
+     * @param gcodeLines  Raw G-code lines.
+     * @return populated result struct.
+     */
     AccelerationProfileResult analyze(const std::vector<std::string>& gcodeLines) const;
 
     const Params& params() const { return params_; }

@@ -68,7 +68,11 @@ public:
     explicit CurvatureAnalyzer() : params_() {}
     explicit CurvatureAnalyzer(Params params) : params_(params) {}
 
-    /**@brief Analyze curvature of G-code toolpath. */
+    /**
+     * @brief Analyze curvature of G-code toolpath.
+     * @param gcodeLines  Raw G-code lines.
+     * @return populated result struct.
+     */
     CurvatureResult analyze(const std::vector<std::string>& gcodeLines) const;
 
     const Params& params() const { return params_; }

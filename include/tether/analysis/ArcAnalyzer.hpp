@@ -85,7 +85,11 @@ public:
     explicit ArcAnalyzer() : params_() {}
     explicit ArcAnalyzer(Params params) : params_(params) {}
 
-    /**@brief Analyze arc-related properties of G-code. */
+    /**
+     * @brief Analyze arc-related properties of G-code.
+     * @param gcodeLines  Raw G-code lines.
+     * @return populated result struct.
+     */
     ArcAnalysisResult analyze(const std::vector<std::string>& gcodeLines) const;
 
     const Params& params() const { return params_; }

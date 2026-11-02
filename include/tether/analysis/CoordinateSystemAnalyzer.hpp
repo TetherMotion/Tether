@@ -91,7 +91,11 @@ struct CoordinateSystemResult {
 /**@brief Analyze coordinate systems: work offsets, rotations, scaling, origins. */
 class CoordinateSystemAnalyzer {
 public:
-    /**@brief Analyze coordinate systems from G-code. */
+    /**
+     * @brief Analyze coordinate systems from G-code.
+     * @param gcodeLines  Raw G-code lines.
+     * @return populated result struct.
+     */
     CoordinateSystemResult analyze(const std::vector<std::string>& gcodeLines) const;
 };
 

@@ -86,7 +86,11 @@ public:
     explicit PathTopologyDetector() : params_() {}
     explicit PathTopologyDetector(Params params) : params_(params) {}
 
-    /**@brief Detect all topology features in G-code. */
+    /**
+     * @brief Detect all topology features in G-code.
+     * @param gcodeLines  Raw G-code lines.
+     * @return populated result struct.
+     */
     PathTopologyResult analyze(const std::vector<std::string>& gcodeLines) const;
 
     const Params& params() const { return params_; }
