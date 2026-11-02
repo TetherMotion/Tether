@@ -952,9 +952,11 @@ void Session::handleInvokeExResp(const uint8_t* body, size_t len) {
         result.timedOut = true;
         result.error = ErrorCode::Timeout;
         result.errorMessage = "InvokeEx deadline exceeded";
+        consecutiveInvokeTimeouts_.fetch_add(1, std::memory_order_relaxed);
         pending.callback(result);
         return;
     }
+    consecutiveInvokeTimeouts_.store(0, std::memory_order_relaxed);
     result.success = (status == 0);
     result.error = static_cast<ErrorCode>(errorCode);
     result.errorMessage.assign(reinterpret_cast<const char*>(errorBytes), errorLength);
