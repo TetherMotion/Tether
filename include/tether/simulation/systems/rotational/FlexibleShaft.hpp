@@ -45,11 +45,17 @@ public:
      * @return Output vector, size outputDim().
      */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
-    /**Start with aligned shafts and zero angular velocity. */
+    /**Start with aligned shafts and zero angular velocity.
+     * @return state vector, size stateDim().
+     */
     StateVector defaultInitialState() const override;
-    /**Return the inertial, damping, and shaft-coupling coefficients. */
+    /**Return the inertial, damping, and shaft-coupling coefficients.
+     * @return descriptor list for tunable parameters.
+     */
     std::vector<ParamDescriptor> parameterDescriptors() const override;
-    /**Provide presets spanning moderately flexible to strongly resonant shafts. */
+    /**Provide presets spanning moderately flexible to strongly resonant shafts.
+     * @return named preset list.
+     */
     std::vector<Preset> presets() const override;
     void applyPreset(int index) override;
     std::vector<std::string> stateNames() const override;

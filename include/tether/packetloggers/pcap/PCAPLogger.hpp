@@ -53,11 +53,14 @@ private:
 
 /**
  * @brief Create a PCAP-backed PacketLogger
+ * @return logger with default configuration.
  */
 std::shared_ptr<PacketLogger> createPCAPLogger();
 
 /**
  * @brief Create a PCAP-backed PacketLogger with the specified configuration
+ * @param config  Output path/snapshot options.
+ * @return configured logger.
  */
 std::shared_ptr<PacketLogger> createPCAPLogger(const PCAPLoggerConfig& config);
 
