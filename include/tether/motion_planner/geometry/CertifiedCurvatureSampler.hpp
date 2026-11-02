@@ -108,12 +108,18 @@ public:
      *
      * For polyline pieces (degree 1) the curvature is exactly zero and
      * no sampling is performed.
+     *
+     * @param pieceIndex  Piece index into the path.
+     * @return certified curvature bound for that piece.
      */
     CertifiedCurvature maxCurvature(std::size_t pieceIndex) const;
 
     /**
      * @brief Certified maximum curvature over the piece containing arc
      *        length s. Convenience wrapper around `locate` + `maxCurvature`.
+     *
+     * @param s  Arc length along the path.
+     * @return certified curvature bound of the containing piece.
      */
     CertifiedCurvature maxCurvatureAtArcLength(double s) const {
         return maxCurvature(path_.locate(s).piece);
@@ -158,10 +164,16 @@ public:
         return result;
     }
 
-    /**Number of spans actually sampled so far (laziness diagnostic). */
+    /**
+     * @brief Number of spans actually sampled so far (laziness diagnostic).
+     * @return count of pieces evaluated.
+     */
     std::size_t spansSampled() const;
 
-    /**Total number of κ evaluations across all sampled spans. */
+    /**
+     * @brief Total number of κ evaluations across all sampled spans.
+     * @return cumulative evaluation count.
+     */
     std::size_t totalCurvatureEvaluations() const;
 
 private:

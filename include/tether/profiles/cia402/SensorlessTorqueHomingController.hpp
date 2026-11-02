@@ -413,22 +413,40 @@ public:
         return true;
     }
 
-    /**True once the final pass is complete. */
+    /**
+     * @brief True once the final pass is complete.
+     * @return homed flag (atomic).
+     */
     bool isHomed() const { return homed_.load(std::memory_order_acquire); }
 
-    /**True if the virtual homing switch is active (same as isHomed()). */
+    /**
+     * @brief True if the virtual homing switch is active (same as isHomed()).
+     * @return virtual-switch flag (atomic).
+     */
     bool isVirtualSwitchActive() const { return virtual_switch_active_.load(std::memory_order_acquire); }
 
-    /**True if a computed home position is available. */
+    /**
+     * @brief True if a computed home position is available.
+     * @return validity flag for homePosition().
+     */
     bool hasHomePosition() const { return home_position_valid_.load(std::memory_order_acquire); }
 
-    /**True if a virtual switch position is available. */
+    /**
+     * @brief True if a virtual switch position is available.
+     * @return validity flag for virtualSwitchPosition().
+     */
     bool hasVirtualSwitchPosition() const { return virtual_switch_position_valid_.load(std::memory_order_acquire); }
 
-    /**The computed home position (mean or sum of the recorded pass positions). */
+    /**
+     * @brief The computed home position (mean or sum of the recorded pass positions).
+     * @return home position in encoder increments.
+     */
     int64_t homePosition() const { return home_position_.load(std::memory_order_acquire); }
 
-    /**Position reported by the virtual homing switch (same as homePosition()). */
+    /**
+     * @brief Position reported by the virtual homing switch (same as homePosition()).
+     * @return switch position in encoder increments.
+     */
     int64_t virtualSwitchPosition() const { return virtual_switch_position_.load(std::memory_order_acquire); }
 
     bool hasFailed() const { return failed_.load(std::memory_order_acquire); }

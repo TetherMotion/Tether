@@ -84,7 +84,11 @@ public:
         }
     }
 
-    /**@brief Advance the move by dt seconds. */
+    /**
+     * @brief Advance the move by dt seconds.
+     * @param dt  Step size in seconds (non-positive = no advance).
+     * @return {position, velocity, elapsed, complete} snapshot.
+     */
     LinearMoveStepResult step(double dt) {
         if (complete_ || dt <= 0.0) {
             return {current_, velocity_, elapsedTime_, complete_};
@@ -115,16 +119,28 @@ public:
         velocity_ = 0.0;
     }
 
-    /**@brief Check if the move has reached the target. */
+    /**
+     * @brief Check if the move has reached the target.
+     * @return true after the profile finished (or finish() was called).
+     */
     bool isComplete() const { return complete_; }
 
-    /**@brief Current position. */
+    /**
+     * @brief Current position.
+     * @return 4-axis position in mm.
+     */
     const std::array<double, 4>& position() const { return current_; }
 
-    /**@brief Current path velocity. */
+    /**
+     * @brief Current path velocity.
+     * @return scalar path velocity in mm/s.
+     */
     double velocity() const { return velocity_; }
 
-    /**@brief Elapsed time since start. */
+    /**
+     * @brief Elapsed time since start.
+     * @return seconds since the move began.
+     */
     double elapsedTime() const { return elapsedTime_; }
 
 private:
