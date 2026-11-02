@@ -55,7 +55,12 @@ inline uint64_t steadyClockUs() {
             .count());
 }
 
-/**stderr logger — drop-in ServerConfig::logFn. */
+/**
+ * @brief stderr logger — drop-in ServerConfig::logFn.
+ * @param level  Severity.
+ * @param tag    Component tag.
+ * @param msg    Message text.
+ */
 inline void stderrLog(const char* tag, const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -71,6 +76,8 @@ inline void stderrLog(const char* tag, const char* fmt, ...) {
 
 /**
  * Maps a C++ scalar to its wire ValueType.
+ * @tparam T  Scalar type.
+ * @return matching ValueType.
  * @tparam T fixed-width scalar (bool, integers, float, double).
  */
 template <typename T>

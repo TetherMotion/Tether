@@ -17,7 +17,11 @@ struct PlanningSegment;
 
 namespace tether::gcode::analysis {
 
-/**@brief Analyze Z-seam positions and consistency from aligned planning data. */
+/**
+ * @brief Analyze Z-seam positions and consistency from aligned planning data.
+ * @param segments  Aligned planning segments.
+ * @return seam analysis result.
+ */
 Section analyzeZSeam(const std::vector<GCode::PlanningSegment>& planningSegments,
                      const std::vector<tether::gcode::SegmentSpeed>& segmentSpeeds,
                      const std::vector<std::string>& gcodeLines,

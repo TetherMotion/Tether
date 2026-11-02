@@ -897,7 +897,11 @@ inline SchemaGraph machineProfileSchemaGraph() {
     return graph;
 }
 
-/**Manifest roots every machine.cia402.v1 endpoint must commit. */
+/**
+ * @brief Manifest roots every machine.cia402.v1 endpoint must commit.
+ * @param driveCount  Drives on the profile.
+ * @return manifest descriptor.
+ */
 inline std::vector<SchemaManifestEntry> machineProfileManifest(const SchemaGraph& graph) {
     std::vector<SchemaManifestEntry> manifest;
     for (const auto& key : {driveSnapshotSchemaKey(8), schemaKey(MachineSchemaId::MachineDescriptor),

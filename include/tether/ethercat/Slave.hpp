@@ -250,6 +250,8 @@ public:
      * @brief Access the per-slave SII manager.
      *
      * The SIIManager provides cached and thread-safe SII EEPROM reads for this
+     * slave.
+     * @return this slave's SII manager.
      * slave. Different slaves may be accessed concurrently.
      *
      * @code
@@ -899,7 +901,10 @@ public:
      */
     virtual SlaveError readSII(SII::SIIData& data);
 
-    /** @brief Log a one-line SII summary for this slave. */
+    /**
+     * @brief Log a one-line SII summary for this slave.
+     * @param level  Log level to emit at.
+     */
     virtual void logSIISummary(const char* tag = "EtherCAT");
 #endif
 
