@@ -52,12 +52,20 @@ using ::tether::kinematics::RotaryDeltaPrinter;
  */
 using Kinematics = PrinterKinematics;
 
-/**@brief Backward-compatible alias for the string-to-enum converter. */
+/**
+ * @brief Backward-compatible alias for the string-to-enum converter.
+ * @param s  Kinematics name.
+ * @return matching enum (default cartesian for unknown).
+ */
 inline Kinematics kinematicsFromString(const std::string& s) {
     return printerKinematicsFromString(s);
 }
 
-/**@brief Backward-compatible alias for the enum-to-string converter. */
+/**
+ * @brief Backward-compatible alias for the enum-to-string converter.
+ * @param k  Kinematics enum.
+ * @return lowercase name string.
+ */
 inline std::string kinematicsToString(Kinematics k) {
     return printerKinematicsToString(k);
 }

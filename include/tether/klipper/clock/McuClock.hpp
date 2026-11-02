@@ -63,6 +63,9 @@ public:
     /**
      * @brief Convert a 32-bit tick value to a 64-bit tick value, assuming it
      *        is near the current clock reading (within half a wrap).
+     *
+     * @param ticks32  32-bit tick sample.
+     * @return best-fit 64-bit tick value.
      */
     uint64_t toTicks64(uint32_t ticks32) const {
         // Forward delta (wraps naturally). If the result would be a large
@@ -78,6 +81,8 @@ public:
 
     /**
      * @brief Convert a 32-bit tick value to seconds (64-bit precision).
+     * @param ticks32  32-bit tick sample.
+     * @return seconds.
      */
     double toSeconds(uint32_t ticks32) const {
         return static_cast<double>(toTicks64(ticks32)) / static_cast<double>(freqHz_);

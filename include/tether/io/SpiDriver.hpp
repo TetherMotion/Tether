@@ -56,7 +56,11 @@ public:
      */
     virtual size_t transfer(std::span<const uint8_t> tx, uint8_t* rx) = 0;
 
-    /**Convenience: full-duplex transfer returning a vector. */
+    /**
+     * @brief Convenience: full-duplex transfer returning a vector.
+     * @param tx  Transmit bytes.
+     * @return received bytes.
+     */
     std::vector<uint8_t> transfer(std::span<const uint8_t> tx) {
         std::vector<uint8_t> rx(tx.size());
         size_t n = transfer(tx, rx.data());

@@ -41,7 +41,10 @@ class UdsConnection;
  */
 class KlippyUdsServer {
 public:
-    /**@brief Construct a UDS transport with its own KlippyServer. */
+    /**
+     * @brief Construct a UDS transport with its own KlippyServer.
+     * @param cfg  Socket path and subscription config.
+     */
     explicit KlippyUdsServer(UdsServerConfig cfg = {});
 
     /**
@@ -68,7 +71,10 @@ public:
     // Access to the underlying KlippyServer
     // ------------------------------------------------------------------
 
-    /**@brief Get the shared KlippyServer instance. */
+    /**
+     * @brief Get the shared KlippyServer instance.
+     * @return reference to the owned or injected server.
+     */
     KlippyServer& server() { return ownsServer_ ? *ownedServer_ : *externalServer_; }
     const KlippyServer& server() const { return ownsServer_ ? *ownedServer_ : *externalServer_; }
 
@@ -76,10 +82,17 @@ public:
     // UDS-specific operations
     // ------------------------------------------------------------------
 
-    /**@brief Invoke a remote method (Server -> Client push over UDS). */
+    /**
+     * @brief Invoke a remote method (Server -> Client push over UDS).
+     * @param method  Dotted method name.
+     * @param params  Method arguments.
+     */
     void invokeRemoteMethod(const std::string& method, const JsonValue& params);
 
-    /**@brief Get number of active UDS subscriptions. */
+    /**
+     * @brief Get number of active UDS subscriptions.
+     * @return subscription count.
+     */
     size_t subscriptionCount() const;
 
     /**@brief Manually trigger a subscription refresh (for testing). */

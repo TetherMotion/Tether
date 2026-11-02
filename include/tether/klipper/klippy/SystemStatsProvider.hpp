@@ -30,7 +30,10 @@ class ISystemStatsProvider {
 public:
     virtual ~ISystemStatsProvider() = default;
 
-    /**@brief Read current system statistics. */
+    /**
+     * @brief Read current system statistics.
+     * @return snapshot of load/memory/temperature stats.
+     */
     virtual SystemStatsSnapshot readStats() = 0;
 };
 
@@ -50,7 +53,10 @@ public:
 
     SystemStatsSnapshot readStats() override { return snapshot; }
 
-    /**@brief Set the values to be returned by readStats(). */
+    /**
+     * @brief Set the values to be returned by readStats().
+     * @param snap  Snapshot to replay.
+     */
     void setStats(SystemStatsSnapshot snap) { snapshot = std::move(snap); }
 };
 
