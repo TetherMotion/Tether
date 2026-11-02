@@ -49,7 +49,10 @@ struct DatalogMetadata {
     uint32_t          sampleRateHz; /**< Nominal sample rate */
     std::vector<DatalogField> fields;
 
-    /**Encode metadata to a buffer (for DatalogStatusResp or log file header). */
+    /**
+     * @brief Encode metadata to a buffer (for DatalogStatusResp or log file header).
+     * @param w  Destination writer.
+     */
     void encode(BufWriter& w) const {
         w.putStr16(logName.c_str(), logName.size());
         w.putU32(recordSize);
@@ -66,7 +69,12 @@ struct DatalogMetadata {
         }
     }
 
-    /**Decode metadata from a buffer. Returns true on success. */
+    /**
+     * @brief Decode metadata from a buffer. Returns true on success.
+     * @param r    Source reader.
+     * @param out  out: decoded metadata.
+     * @return true when the buffer decoded cleanly.
+     */
     static bool decode(BufReader& r, DatalogMetadata& out) {
         uint16_t nl = r.getU16();
         auto* nb = r.getBytes(nl);
@@ -187,10 +195,16 @@ public:
     /**Stop recording. */
     void stop();
 
-    /**Get current metadata. */
+    /**
+     * @brief Get current metadata.
+     * @return recording metadata (fields, record size, log name).
+     */
     const DatalogMetadata& metadata() const { return metadata_; }
 
-    /**Get current status. */
+    /**
+     * @brief Get current status.
+     * @return recorder state (active/stopped, record count).
+     */
     DatalogStatus status() const;
 
 private:

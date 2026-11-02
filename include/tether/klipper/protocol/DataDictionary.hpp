@@ -105,6 +105,7 @@ public:
 
     /**
      * @brief Register a command format string and assign it the next msgid.
+     * @param formatStr  Klipper command format (e.g. "queue_step ...").
      * @return The assigned msgid, or 0 if the format is invalid / already present.
      */
     uint16_t addCommand(std::string_view formatStr);
@@ -206,7 +207,10 @@ public:
      */
     void addConstantString(std::string_view name, std::string_view value);
 
-    /**@return The constant value, or std::nullopt. */
+    /**
+     * @param name  Constant name.
+     * @return The constant value, or std::nullopt.
+     */
     std::optional<ConstantValue> lookupConstant(std::string_view name) const;
 
     /**@return All constants. */
@@ -216,6 +220,7 @@ public:
 
     /**
      * @brief Serialise the dictionary to a JSON string (uncompressed).
+     * @return JSON text.
  *
      * The format matches the protocol's data-dictionary JSON schema:
      *   { "app", "version", "build_versions", "license",
@@ -228,6 +233,7 @@ public:
     /**
      * @brief Parse a JSON dictionary string into this object (replacing
      *        current contents).
+     * @param json  Serialised dictionary.
      * @return true on success.
      */
     bool fromJson(std::string_view json);
@@ -242,6 +248,7 @@ public:
 
     /**
      * @brief Decompress the wire-format bytes back to JSON.
+     * @param wire  Bytes produced by toWire().
      * @return JSON string, or empty on error.
      */
     static std::string fromWire(std::span<const uint8_t> wire);

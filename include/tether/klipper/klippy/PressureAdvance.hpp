@@ -45,19 +45,34 @@ public:
     explicit PressureAdvance(PressureAdvanceParams params = {})
         : params_(params) {}
 
-    /**@brief Set the pressure advance parameters. */
+    /**
+     * @brief Set the pressure advance parameters.
+     * @param params  PA gain, smoothing time, extrude velocity offsets.
+     */
     void setParams(PressureAdvanceParams params) { params_ = params; }
 
-    /**@brief Get the current parameters. */
+    /**
+     * @brief Get the current parameters.
+     * @return reference to the active params.
+     */
     const PressureAdvanceParams& params() const { return params_; }
 
-    /**@brief Enable or disable pressure advance at runtime. */
+    /**
+     * @brief Enable or disable pressure advance at runtime.
+     * @param enabled  Runtime gate (independent of param values).
+     */
     void setEnabled(bool enabled) { enabled_ = enabled; }
 
-    /**@brief Check if pressure advance is enabled at runtime. */
+    /**
+     * @brief Check if pressure advance is enabled at runtime.
+     * @return runtime gate state.
+     */
     bool isEnabled() const { return enabled_; }
 
-    /**@brief Check if pressure advance is active (enabled AND non-zero PA). */
+    /**
+     * @brief Check if pressure advance is active (enabled AND non-zero PA).
+     * @return true when PA actually modifies extrusion.
+     */
     bool isActive() const { return enabled_ && params_.pressureAdvance > 0.0; }
 
     /**
