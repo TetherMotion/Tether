@@ -16,6 +16,8 @@ namespace EtherCAT {
  *
  * Returns a std::string containing the formatted description. Example output:
  *   "0x000F (EnableOperation) [SwitchOn,EnVolt,!QStop,EnOp]"
+ * @param cw  Raw controlword.
+ * @return formatted description.
  */
 std::string describeControlword(uint16_t cw);
 

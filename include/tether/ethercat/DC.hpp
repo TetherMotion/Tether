@@ -107,6 +107,8 @@ enum class DCState : uint8_t {
 
 /**
  * @brief Convert DCState to string for logging
+ * @param state  DC state.
+ * @return static name string.
  */
 inline const char* dc_state_name(DCState state) {
     switch (state) {

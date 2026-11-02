@@ -65,7 +65,13 @@ public:
 
     /**
      * @brief Send a single datagram on a reserved cyclic slot index.
+     * @param cmd    EtherCAT command (typically LRW).
      * @param slot   Slot number in [0, kNumCyclicSlots)
+     * @param adp    Auto-increment/address parameter.
+     * @param ado    Data offset parameter.
+     * @param data   Payload.
+     * @param datalen  Payload length.
+     * @param roundtrip  Collect WKC when true.
      * @return true if the frame was handed to the wire.
      */
     virtual bool sendCyclicDatagram(Command cmd, uint8_t slot,
@@ -83,6 +89,11 @@ public:
      * On Linux this blocks in ppoll() on the socket + a deposit eventfd —
      * the calling thread sleeps until either the response lands or the
      * deadline passes.  Without a receive path it falls back to a bounded
+     * spin.
+     * @param slot        Cyclic slot.
+     * @param token       Correlation token.
+     * @param timeout_ns  Wait bound.
+     * @param out         out: received datagram.
      * sequence-counter spin.
      *
      * @param timeout_ns  Maximum wait in nanoseconds (sub-ms scale).

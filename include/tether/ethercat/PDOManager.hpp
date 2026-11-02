@@ -250,6 +250,8 @@ public:
      * cyclicSend() emits the LRW slice datagram(s); cyclicCollect()
      * waits/publishes/scatters against the deadline anchored at send
      * time.  Collect mirrors the per-slave PDO counters.  Without a
+     * @param deadline_ns  Cycle deadline anchor.
+     * @return true when the slice was emitted.
      * logical address manager cyclicSend falls back to the atomic
      * exchangeAll() and cyclicCollect() is a no-op.
      */

@@ -44,6 +44,7 @@ struct DriveSafetySnapshot {
     /**
      * Pack all fields into one integer — `a.key() != b.key()` iff any
      * sampled value changed (for last-seen change detection).
+     * @return packed comparison key.
      */
     uint64_t key() const {
         return (static_cast<uint64_t>(safety_sw1) << 40) |
@@ -57,6 +58,7 @@ struct DriveSafetySnapshot {
     /**
      * True when a hardware safe input is low — the drive's local SMM
      * demands a stop function regardless of the FSoE master's commands.
+     * @return true when a safe input reads low.
      */
     bool safeInputsLow() const { return safe_in1 == 0 || safe_in2 == 0; }
 };

@@ -57,7 +57,7 @@ public:
     /**
      * Read a single CRC register (0x####:0x00).
      * Returns 0xFFFFFFFF on read error.
-     * @param index  OD index of the CRC object.
+     * @param crcIndex  OD index of the CRC object.
      * @return register value.
      */
     uint32_t readCrc(uint16_t crcIndex);

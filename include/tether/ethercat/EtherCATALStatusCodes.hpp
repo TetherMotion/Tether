@@ -72,7 +72,11 @@ constexpr uint16_t SLAVE_RESTARTED        = 0x0060;
 constexpr uint16_t DEVICE_ID_UPDATE_ERR   = 0x0061;
 constexpr uint16_t APPLICATION_CTRL_ERR   = 0x00F0;
 
-/**Get string description for AL status code */
+/**
+ * @brief Get string description for AL status code.
+ * @param code  AL status code.
+ * @return static description string.
+ */
 inline const char* alStatusCodeToString(uint16_t code) {
     switch (code) {
         case NO_ERROR: return "No error";
