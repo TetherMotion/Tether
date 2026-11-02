@@ -45,11 +45,17 @@ public:
      * @return Output vector, size outputDim().
      */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
-    /**Start from rest so transients are driven entirely by the applied excitation. */
+    /**Start from rest so transients are driven entirely by the applied excitation.
+     * @return state vector, size stateDim().
+     */
     StateVector defaultInitialState() const override;
-    /**Return the tunable physical coefficients used to shape resonance and damping. */
+    /**Return the tunable physical coefficients used to shape resonance and damping.
+     * @return descriptor list for tunable parameters.
+     */
     std::vector<ParamDescriptor> parameterDescriptors() const override;
-    /**Provide underdamped, critically damped, and high-frequency benchmark presets. */
+    /**Provide underdamped, critically damped, and high-frequency benchmark presets.
+     * @return named preset list.
+     */
     std::vector<Preset> presets() const override;
     void applyPreset(int index) override;
     std::vector<std::string> stateNames() const override;

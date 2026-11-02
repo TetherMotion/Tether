@@ -256,12 +256,15 @@ public:
     /**
      * @brief Get initial search direction for method
      * 
+     * @param method  Homing method.
      * @return +1 for positive, -1 for negative
      */
     static int getInitialDirection(HomingMethod method);
     
     /**
      * @brief Get method description
+     * @param method  Homing method.
+     * @return static description string.
      */
     static const char* getMethodDescription(HomingMethod method);
     

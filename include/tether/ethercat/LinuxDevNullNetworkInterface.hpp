@@ -46,17 +46,29 @@ public:
 
     ~LinuxDevNullNetworkInterface() = default;
 
-    /**Get a reference to the underlying NetworkInterface. */
+    /**
+     * @brief Get a reference to the underlying NetworkInterface.
+     * @return reference to the discard interface.
+     */
     NetworkInterface& iface() { return iface_; }
     const NetworkInterface& iface() const { return iface_; }
 
-    /**Get a pointer to the underlying NetworkInterface. */
+    /**
+     * @brief Get a pointer to the underlying NetworkInterface.
+     * @return pointer to the discard interface.
+     */
     NetworkInterface* ifacePtr() { return &iface_; }
 
-    /**Number of frames "sent" (discarded). */
+    /**
+     * @brief Number of frames "sent" (discarded).
+     * @return frame counter.
+     */
     uint64_t txCount() const { return tx_count_.load(std::memory_order_relaxed); }
 
-    /**Total bytes "sent" (discarded). */
+    /**
+     * @brief Total bytes "sent" (discarded).
+     * @return byte counter.
+     */
     uint64_t txBytes() const { return tx_bytes_.load(std::memory_order_relaxed); }
 
     /**Reset counters. */

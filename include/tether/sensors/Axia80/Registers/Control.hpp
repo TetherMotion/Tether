@@ -18,7 +18,9 @@ namespace Control {
 
 static constexpr uint16_t ControlCodesIndex = 0x7010;
 
-// Filter select options (bits 4–7 of Control 1)
+/**
+ * Filter select options (bits 4–7 of Control 1).
+ */
 enum class ControlFilterSelect : uint8_t {
     NoFilter = 0, /**< Digital filtering bypassed */
     Filter1 = 1, /**< Light filtering */
@@ -31,13 +33,17 @@ enum class ControlFilterSelect : uint8_t {
     Filter8 = 8, /**< Maximum filtering */
 };
 
-// Calibration slot select (bits 8–11 of Control 1)
+/**
+ * Calibration slot select (bits 8–11 of Control 1).
+ */
 enum class ControlCalibrationSlot : uint8_t {
     Slot0 = 0, /**< Calibration stored in hardware slot 0 */
     Slot1 = 1, /**< Calibration stored in hardware slot 1 */
 };
 
-// Sample rate select (bits 12–15 of Control 1)
+/**
+ * Sample rate select (bits 12–15 of Control 1).
+ */
 enum class ControlSampleRate : uint8_t {
     Rate488Hz = 0, /**< 488 Hz */
     Rate976Hz = 1, /**< 976 Hz */

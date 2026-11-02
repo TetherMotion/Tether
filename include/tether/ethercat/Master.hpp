@@ -675,13 +675,21 @@ public:
      *   if (master.slave(0).sii().readWord(0x0008, vendor)) { ... }
      *   #endif
      * @endcode
+     * @param slave_index  Discovered slave index.
+     * @return the slave's SII manager.
      */
     SII::SIIManager& sii(uint16_t slave_index);
 
-    /** @brief Default timeout (ms) used for per-slave SII bus reads. */
+    /**
+     * @brief Default timeout (ms) used for per-slave SII bus reads.
+     * @return timeout in milliseconds.
+     */
     uint32_t siiTimeoutMs() const { return sii_timeout_ms_; }
 
-    /** @brief Set the default timeout for per-slave SII bus reads. */
+    /**
+     * @brief Set the default timeout for per-slave SII bus reads.
+     * @param timeout_ms  New timeout in milliseconds.
+     */
     void setSiiTimeoutMs(uint32_t timeout_ms) { sii_timeout_ms_ = timeout_ms; }
 #endif
 

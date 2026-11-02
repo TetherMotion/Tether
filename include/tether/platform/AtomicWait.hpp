@@ -47,7 +47,10 @@
 namespace Tether {
 namespace Platform {
 
-/**Wake every thread blocked in atomicWait() on @p word. */
+/**
+ * @brief Wake every thread blocked in atomicWait() on @p word.
+ * @param word  Futex-style wait word.
+ */
 inline void atomicWakeAll(std::atomic<uint32_t>* word) {
 #if defined(__linux__)
     ::syscall(SYS_futex, reinterpret_cast<uint32_t*>(word),
@@ -59,7 +62,10 @@ inline void atomicWakeAll(std::atomic<uint32_t>* word) {
 #endif
 }
 
-/**Wake at most one waiter on @p word. */
+/**
+ * @brief Wake at most one waiter on @p word.
+ * @param word  Futex-style wait word.
+ */
 inline void atomicWakeOne(std::atomic<uint32_t>* word) {
 #if defined(__linux__)
     ::syscall(SYS_futex, reinterpret_cast<uint32_t*>(word),
@@ -73,6 +79,9 @@ inline void atomicWakeOne(std::atomic<uint32_t>* word) {
 
 /**
  * @brief Block while `*word == expected`, up to @p timeout_ns (<0 = forever).
+ * @param word        Wait word.
+ * @param expected    Value to wait-unequal against.
+ * @param timeout_ns  Timeout in ns; negative waits forever.
  * @return true if the wait ended because the word may have changed
  *         (or spuriously — futex semantics), false on timeout.
  */
