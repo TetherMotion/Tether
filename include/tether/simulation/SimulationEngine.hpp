@@ -149,6 +149,12 @@ public:
     const StateVector& currentState() const { return state_; }
 
     /**
+     * @brief Get current simulation time
+     * @return Elapsed simulation time in seconds
+     */
+    double currentTime() const { return time_; }
+
+    /**
      * @brief Reset simulation
      */
     void reset();
