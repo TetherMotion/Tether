@@ -33,6 +33,7 @@ public:
     
     /**
      * @brief Get the name of this strategy
+     * @return human-readable strategy identifier (e.g. "fixed_time").
      */
     virtual std::string name() const = 0;
     
@@ -87,6 +88,7 @@ public:
     explicit FixedTimeStrategy(double timeStep = 0.01)
         : timeStep_(timeStep) {}
     
+    /**Strategy name (InterpolationStrategy::name). */
     std::string name() const override { return "FixedTime"; }
     
     void interpolateLinear(
@@ -126,6 +128,7 @@ public:
     explicit FixedDeviationStrategy(double maxDeviation = 0.1)
         : maxDeviation_(maxDeviation) {}
     
+    /**Strategy name (InterpolationStrategy::name). */
     std::string name() const override { return "FixedDeviation"; }
     
     void interpolateLinear(
@@ -165,6 +168,7 @@ public:
     AdaptiveStrategy(double minStep = 0.001, double maxStep = 0.1, double tolerance = 0.01)
         : minStep_(minStep), maxStep_(maxStep), tolerance_(tolerance) {}
     
+    /**Strategy name (InterpolationStrategy::name). */
     std::string name() const override { return "Adaptive"; }
     
     void interpolateLinear(
@@ -251,11 +255,15 @@ public:
     
     /**
      * @brief Set the interpolation strategy
+     * @param strategy  Strategy instance; ownership transfers to the
+     *                  precomputer and it is used by subsequent
+     *                  precompute() calls.
      */
     void setStrategy(std::unique_ptr<InterpolationStrategy> strategy);
     
     /**
      * @brief Get the current strategy name
+     * @return name() of the installed strategy.
      */
     std::string strategyName() const;
     
@@ -269,21 +277,26 @@ public:
     
     /**
      * @brief Get statistics from last precomputation
+     * @return reference to the stats accumulated by the most recent
+     *         precompute() call; valid until the next call.
      */
     const PrecomputeStats& stats() const { return stats_; }
     
     /**
      * @brief Set rapid feed rate (used when segment has isRapid=true and feedRate=0)
+     * @param rate  Rapid traverse feed rate in mm/min.
      */
     void setRapidFeedRate(double rate) { rapidFeedRate_ = rate; }
     
     /**
      * @brief Enable/disable velocity calculation
+     * @param enable  true to fill each TrajectoryPoint's velocity field.
      */
     void setCalculateVelocity(bool enable) { calcVelocity_ = enable; }
     
     /**
      * @brief Enable/disable acceleration calculation
+     * @param enable  true to fill each TrajectoryPoint's acceleration field.
      */
     void setCalculateAcceleration(bool enable) { calcAcceleration_ = enable; }
     

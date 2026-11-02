@@ -80,7 +80,11 @@ public:
 
     // --- PDO-exchange side -------------------------------------------------
 
-    /**Publish the newest master→slave frame for the emulator thread. */
+    /**
+     * @brief Publish the newest master→slave frame for the emulator thread.
+     * @param data  Wire bytes of the FSoE master frame.
+     * @param len   Wire length; truncated to MaxFrame when longer.
+     */
     void publishMasterFrame(const uint8_t* data, size_t len) {
         std::lock_guard<std::mutex> g(rx_mtx_);
         const size_t n = len < MaxFrame ? len : MaxFrame;
@@ -105,6 +109,11 @@ public:
     /**
      * Copy the latest slave→master response into `out`.
      * Returns false when nothing has been published yet.
+     *
+     * @param out   Destination buffer.
+     * @param cap   Buffer capacity; response is truncated to cap.
+     * @param len   out: number of bytes copied.
+     * @return true when a response was copied; false when none exists.
      */
     bool readSlaveResponse(uint8_t* out, size_t cap, size_t& len) const {
         std::lock_guard<std::mutex> g(tx_mtx_);
@@ -119,6 +128,11 @@ public:
      * Locks cmd_offset after the same candidate matches on two
      * consecutive calls (single PDO-side caller — no atomics needed for
      * the bookkeeping).  Returns true on the call that locks.
+     *
+     * @param region      PDO process-image region to search.
+     * @param region_len  Region length in bytes.
+     * @return true on the call that locks cmd_offset; false while still
+     *         hunting (new candidate or not found).
      */
     bool detectCmdOffset(const uint8_t* region, size_t region_len) {
         const size_t p =
@@ -145,6 +159,11 @@ public:
     /**
      * Fetch the newest master→slave frame if one arrived since the last
      * call.  Returns true (frame in `out`, wire length in `len`).
+     *
+     * @param out  Destination buffer.
+     * @param cap  Buffer capacity; frame is truncated to cap.
+     * @param len  out: number of bytes copied.
+     * @return true when a not-yet-consumed frame was copied.
      */
     bool takeMasterFrame(uint8_t* out, size_t cap, size_t& len) {
         std::lock_guard<std::mutex> g(rx_mtx_);
@@ -157,7 +176,11 @@ public:
         return true;
     }
 
-    /**Publish a new slave→master response (from prepareTxFrame()). */
+    /**
+     * @brief Publish a new slave→master response (from prepareTxFrame()).
+     * @param data  Wire bytes produced by the emulated slave.
+     * @param len   Wire length; truncated to MaxFrame when longer.
+     */
     void publishSlaveResponse(const uint8_t* data, size_t len) {
         std::lock_guard<std::mutex> g(tx_mtx_);
         const size_t n = len < MaxFrame ? len : MaxFrame;
@@ -185,6 +208,12 @@ public:
      * On a new frame with an invalid command byte the frame is NOT fed to
      * the slave (process_ok=false, frame_len=0) — matching the behaviour
      * the callers implemented by hand.
+     *
+     * @param slave    Emulated FSoE slave state machine to drive.
+     * @param time_ms  Monotonic time passed to slave.update().
+     * @param sync     Optional hook run between update() and
+     *                 prepareTxFrame() (e.g. synchronizeCommandAndStatus).
+     * @return TickResult describing what happened this cycle.
      */
     TickResult tick(FSoESlave& slave, uint64_t time_ms,
                     const std::function<void()>& sync = {}) {

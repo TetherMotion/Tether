@@ -340,6 +340,7 @@ public:
      * @param alarmId Alarm to acknowledge.
      * @param identity Session performing the acknowledgement (role checked).
      * @param nowUs Current time in microseconds.
+     * @return 0 on success, 1 when absent/already terminal, 2 when denied.
      */
     uint8_t acknowledge(uint64_t alarmId, const SessionIdentity& identity,
                         uint64_t nowUs = detail::nowUs()) {
@@ -646,6 +647,8 @@ public:
      * Attempt to abort an in-flight operation. Returns false when the
      * operation cannot be interrupted (the tracker still marks it cancelled).
      * @param operationId Operation to abort.
+     * @return true when the operation was actually interrupted; false when
+     *         it could not be aborted (already terminal or uninterruptible).
      */
     virtual bool cancelOperation(std::string_view operationId) = 0;
 };
@@ -1207,6 +1210,8 @@ public:
      * has no object table for the slave.
      * @param slave Slave index.
      * @param identity Session identity (must be authenticated).
+     * @return FunctionCallResult carrying the encoded object list, or an
+     *         errorMessage when the session is unauthenticated.
      */
     FunctionCallResult list(uint16_t slave, const SessionIdentity& identity) const {
         FunctionCallResult result;
@@ -1224,6 +1229,8 @@ public:
      * machine.sdo.read — any authenticated session.
      * @param request Encoded request (slave, index, subindex, max_bytes).
      * @param identity Session identity (must be authenticated).
+     * @return FunctionCallResult with the encoded SDO read result, or an
+     *         errorMessage on unauthenticated session or malformed request.
      */
     FunctionCallResult read(const std::vector<uint8_t>& request,
                             const SessionIdentity& identity) const {
@@ -1257,6 +1264,7 @@ public:
      * 5 (`verify_readback`, bool) disables the readback (default on).
      * @param request Encoded request (slave, index, subindex, data, ...).
      * @param identity Session identity (technician or above).
+     * @return FunctionCallResult with the encoded write/verify outcome.
      */
     FunctionCallResult write(const std::vector<uint8_t>& request,
                              const SessionIdentity& identity) {
@@ -1512,6 +1520,7 @@ public:
      * backend cannot retry (not supervised, recovery in progress).
      * @param slave Slave index to retry.
      * @param error Receives the reason when the retry is refused.
+     * @return true when the recovery pass was scheduled; false on refusal.
      */
     virtual bool retry(uint16_t slave, std::string& error) = 0;
 };
@@ -1544,6 +1553,8 @@ public:
      * machine.supervisor.retry — technician-or-above, rate-limited, audited.
      * @param slave Slave index to retry.
      * @param identity Session identity (technician or above).
+     * @return FunctionCallResult describing the outcome; errorMessage is
+     *         set on auth, rate-limit, or backend refusal.
      */
     FunctionCallResult retry(uint16_t slave, const SessionIdentity& identity) {
         FunctionCallResult result;

@@ -31,14 +31,23 @@ enum class RpcErrorCode : int {
     ServiceUnavailable = 503,
 };
 
-/**@brief Build a Moonraker-style success response envelope: {"result": ...} */
+/**
+ * @brief Build a Moonraker-style success response envelope: {"result": ...}
+ * @param result  JSON payload placed under the "result" key.
+ * @return serialized JSON object string.
+ */
 inline std::string buildSuccessResponse(const klippy::JsonValue& result) {
     std::map<std::string, klippy::JsonValue> envelope;
     envelope["result"] = result;
     return dumpJson(klippy::JsonValue(envelope));
 }
 
-/**@brief Build a Moonraker-style error response envelope: {"error": {...}} */
+/**
+ * @brief Build a Moonraker-style error response envelope: {"error": {...}}
+ * @param code     Numeric error code placed under error.code.
+ * @param message  Human-readable error text placed under error.message.
+ * @return serialized JSON object string.
+ */
 inline std::string buildErrorResponse(int code, const std::string& message) {
     std::map<std::string, klippy::JsonValue> err;
     err["code"] = klippy::JsonValue(static_cast<int64_t>(code));
@@ -48,7 +57,12 @@ inline std::string buildErrorResponse(int code, const std::string& message) {
     return dumpJson(klippy::JsonValue(envelope));
 }
 
-/**@brief Build a JSON-RPC 2.0 success response. */
+/**
+ * @brief Build a JSON-RPC 2.0 success response.
+ * @param id      Request id echoed back verbatim (JsonValue null for none).
+ * @param result  Result payload.
+ * @return serialized {"jsonrpc":"2.0","id":...,"result":...} string.
+ */
 inline std::string buildJsonRpcSuccess(const klippy::JsonValue& id,
                                         const klippy::JsonValue& result) {
     std::map<std::string, klippy::JsonValue> resp;
@@ -58,7 +72,13 @@ inline std::string buildJsonRpcSuccess(const klippy::JsonValue& id,
     return dumpJson(klippy::JsonValue(resp));
 }
 
-/**@brief Build a JSON-RPC 2.0 error response. */
+/**
+ * @brief Build a JSON-RPC 2.0 error response.
+ * @param id       Request id echoed back verbatim.
+ * @param code     JSON-RPC error code.
+ * @param message  Human-readable error text.
+ * @return serialized {"jsonrpc":"2.0","id":...,"error":{...}} string.
+ */
 inline std::string buildJsonRpcError(const klippy::JsonValue& id,
                                       int code, const std::string& message) {
     std::map<std::string, klippy::JsonValue> err;
@@ -71,7 +91,12 @@ inline std::string buildJsonRpcError(const klippy::JsonValue& id,
     return dumpJson(klippy::JsonValue(resp));
 }
 
-/**@brief Build a JSON-RPC 2.0 notification (no id, method + params). */
+/**
+ * @brief Build a JSON-RPC 2.0 notification (no id, method + params).
+ * @param method  Dotted method name (e.g. "notify_status_update").
+ * @param params  Notification params array/object.
+ * @return serialized {"jsonrpc":"2.0","method":...,"params":...} string.
+ */
 inline std::string buildJsonRpcNotification(const std::string& method,
                                              const klippy::JsonValue& params) {
     std::map<std::string, klippy::JsonValue> msg;

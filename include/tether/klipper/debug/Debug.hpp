@@ -63,33 +63,52 @@ public:
 
     DebugManager() = default;
 
-    /**@brief Set debug flags. */
+    /**
+     * @brief Set debug flags.
+     * @param flags  Complete flag mask replacing the current set.
+     */
     void setFlags(DebugFlag flags) { flags_ = flags; }
 
-    /**@brief Get current debug flags. */
+    /**
+     * @brief Get current debug flags.
+     * @return the active DebugFlag bitmask.
+     */
     DebugFlag flags() const { return flags_; }
 
-    /**@brief Enable a specific debug flag. */
+    /**
+     * @brief Enable a specific debug flag.
+     * @param flag  Flag to OR into the active mask.
+     */
     void enable(DebugFlag flag) { flags_ = flags_ | flag; }
 
-    /**@brief Disable a specific debug flag. */
+    /**
+     * @brief Disable a specific debug flag.
+     * @param flag  Flag to clear from the active mask.
+     */
     void disable(DebugFlag flag) {
         flags_ = static_cast<DebugFlag>(
             static_cast<uint32_t>(flags_) & ~static_cast<uint32_t>(flag));
     }
 
-    /**@brief Check if a flag is enabled. */
+    /**
+     * @brief Check if a flag is enabled.
+     * @param flag  Flag to test.
+     * @return true when every bit of `flag` is set in the active mask.
+     */
     bool isEnabled(DebugFlag flag) const { return hasFlag(flags_, flag); }
 
     /**
      * @brief Set a legacy log callback (optional, for backward compatibility).
      * If set, log() messages are also delivered to this callback.
+     * @param cb  Callback invoked with the formatted message; nullptr to clear.
      */
     void setLogCallback(LogCallback cb) { logCb_ = std::move(cb); }
 
     /**
      * @brief Log a message if the corresponding flag is enabled.
      * Forwards to Tether::Platform::Logger at Debug level with tag "klipper".
+     * @param flag     Gate flag; message is dropped when it is not enabled.
+     * @param message  Message text forwarded to the Logger and legacy callback.
      */
     void log(DebugFlag flag, std::string_view message) {
         if (!isEnabled(flag)) return;
@@ -100,7 +119,12 @@ public:
         if (logCb_) logCb_(message);
     }
 
-    /**@brief Check if logging is enabled for a flag. */
+    /**
+     * @brief Check if logging is enabled for a flag.
+     * @param flag  Flag to test.
+     * @return same as isEnabled(flag); lets callers skip expensive
+     *         formatting before calling log().
+     */
     bool shouldLog(DebugFlag flag) const {
         return isEnabled(flag);
     }
