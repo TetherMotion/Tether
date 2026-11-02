@@ -70,7 +70,7 @@ bool CoEManager::init() {
     }
 
     initialized_.store(true);
-    if (debug_flags_.mailboxConfiguration) {
+    if (debugFlags().mailboxConfiguration) {
         TETHER_LOGI(TAG, "{}: CoEManager initialized", log_prefix_.c_str());
     }
     return true;
@@ -129,7 +129,7 @@ void CoEManager::deinit() {
     next_request_id_.store(1);
     state_.shutdown_requested.store(false);
 
-    if (debug_flags_.shutdown) {
+    if (debugFlags().shutdown) {
         TETHER_LOGI(TAG, "{}: CoEManager deinitialized", log_prefix_.c_str());
     }
 }
@@ -151,7 +151,7 @@ void CoEManager::configureMailbox(uint16_t mbx_write_addr, uint16_t mbx_write_le
     mbx_.mbx_counter = 1;
     mbx_.configured  = true;
 
-    if (debug_flags_.mailboxConfiguration) {
+    if (debugFlags().mailboxConfiguration) {
         TETHER_LOGI(TAG, "{}: mailbox: Receive(SM0/MbxIn)=0x{:04x}/{}, Send(SM1/MbxOut)=0x{:04x}/{}",
                  log_prefix_.c_str(), mbx_write_addr, mbx_write_len, mbx_read_addr, mbx_read_len);
     }
@@ -201,7 +201,7 @@ bool CoEManager::resolveMailbox(uint16_t& wr_addr, uint16_t& wr_len,
 std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
                                                 const void* data, size_t size,
                                                 CoETransactionOptions options) {
-    if (debug_flags_.coeWrites) {
+    if (debugFlags().coeWrites) {
         TETHER_LOGI(TAG, "{}: CoE write START index=0x{:04X}:{} size={}",
                     log_prefix_.c_str(), index, subindex, size);
     }
@@ -241,7 +241,7 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
             return fail_txn.promise.get_future();
         }
         if (state_.write_queue.size() >= kMaxQueueDepth) {
-            if (debug_flags_.coeWrites) {
+            if (debugFlags().coeWrites) {
                 TETHER_LOGI(TAG,
                     "{}: CoE write QUEUE FULL (index=0x{:04X}:{}, "
                     "Tether max={} pending). This is a Tether limit, not a slave limit. "
@@ -256,7 +256,7 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
     }
     state_.work_cv.notify_one();
 
-    if (debug_flags_.coeWrites) {
+    if (debugFlags().coeWrites) {
         TETHER_LOGI(TAG, "{}: CoE write ENQUEUED index=0x{:04X}:{}",
                     log_prefix_.c_str(), index, subindex);
     }
@@ -270,7 +270,7 @@ std::future<CoEResult<void>> CoEManager::write(uint16_t index, uint8_t subindex,
 CoEResult<void> CoEManager::writeSync(uint16_t index, uint8_t subindex,
                                        const void* data, size_t size,
                                        CoETransactionOptions options) {
-    if (debug_flags_.coeWrites) {
+    if (debugFlags().coeWrites) {
         TETHER_LOGI(TAG, "{}: CoE writeSync index=0x{:04X}:{} size={}",
                     log_prefix_.c_str(), index, subindex, size);
     }
@@ -280,7 +280,7 @@ CoEResult<void> CoEManager::writeSync(uint16_t index, uint8_t subindex,
 bool CoEManager::readSync(uint16_t index, uint8_t subindex,
                            void* data, size_t max_size, uint32_t timeout_ms,
                            size_t* actual_size) {
-    if (debug_flags_.coeReads) {
+    if (debugFlags().coeReads) {
         TETHER_LOGI(TAG, "{}: CoE readSync index=0x{:04X}:{} max_size={}",
                     log_prefix_.c_str(), index, subindex, max_size);
     }
