@@ -222,6 +222,7 @@ protected:
 
     struct SessionContext {
         std::unique_ptr<PipeTransport> client;
+        std::unique_ptr<Session> ownedSession;
         Session* session;
         std::thread thread;
 
@@ -254,8 +255,9 @@ protected:
             nullptr, nullptr, std::move(encodedBufferFactory),
             std::move(decodedBufferFactory));
         ctx->session = sess.get();
+        ctx->ownedSession = std::move(sess);
 
-        ctx->thread = std::thread([s = std::move(sess)]() mutable {
+        ctx->thread = std::thread([s = ctx->session] {
             s->run();
         });
 
