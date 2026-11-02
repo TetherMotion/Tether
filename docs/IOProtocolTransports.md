@@ -3,7 +3,7 @@
 Transports move protocol *messages*, not the protocol itself — the
 same `Server`/`TetherIOClient`/`Session` stack runs over TCP, serial,
 WebSocket, or an in-process pipe unchanged. Wire/framing details:
-[IOProtocolWireFormat.md](IOProtocolWireFormat.md#link-framing).
+[IOProtocolWireFormat.md](IOProtocolWireFormat.md#transport-and-framing).
 
 ## The contract
 

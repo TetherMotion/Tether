@@ -131,18 +131,22 @@ protected:
     void SetUp() override {
         registry_.addSignal({
             kIdA, "test.a", "field a", "test", ValueType::U16,
+            ValueType::None,
             [](void* d) { uint16_t v = 0xAAAA; std::memcpy(d, &v, 2); }
         });
         registry_.addSignal({
             kIdB, "test.b", "field b", "test", ValueType::U32,
+            ValueType::None,
             [](void* d) { uint32_t v = 0xBBBBBBBB; std::memcpy(d, &v, 4); }
         });
         registry_.addSignal({
             kIdC, "test.c", "field c", "test", ValueType::I8,
+            ValueType::None,
             [](void* d) { int8_t v = -7; std::memcpy(d, &v, 1); }
         });
         registry_.addSignal({
             kIdOther, "test.other", "not in ring", "test", ValueType::U8,
+            ValueType::None,
             [](void* d) { uint8_t v = 0x55; std::memcpy(d, &v, 1); }
         });
         // SDO-style entry: readable but excluded from streams.
