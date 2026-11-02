@@ -21,7 +21,7 @@ namespace EoE {
  * 
  * 4-byte header at the start of each EoE mailbox message.
  */
-struct __attribute__((packed)) EoEHeader {
+struct EoEHeader {
     // First 16 bits
     uint16_t fragment_number : 6; /**< Fragment number (0-63) */
     uint16_t offset_buffer : 6; /**< Offset or buffer */
@@ -34,7 +34,7 @@ struct __attribute__((packed)) EoEHeader {
     uint16_t time_request : 1; /**< Timestamp requested */
     uint16_t reserved : 5; /**< Reserved */
     uint16_t frame_type : 4; /**< Frame type (EoEFrameType) */
-};
+} __attribute__((packed));
 static_assert(sizeof(EoEHeader) == 4, "EoEHeader must be 4 bytes");
 
 /**

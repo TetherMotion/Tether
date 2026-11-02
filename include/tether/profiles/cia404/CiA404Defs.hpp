@@ -788,38 +788,38 @@ struct CalibrationData {
 /**
  * @brief TxPDO for process data input with status
  */
-struct __attribute__((packed)) TxPDO_ProcessInput {
+struct TxPDO_ProcessInput {
     int32_t value; /**< Process input value */
     uint8_t status; /**< Input status */
-};
+} __attribute__((packed));
 
 /**
  * @brief TxPDO for multiple process inputs
  */
-struct __attribute__((packed)) TxPDO_MultiInput {
+struct TxPDO_MultiInput {
     int16_t input1; /**< Process input 1 (16-bit) */
     int16_t input2; /**< Process input 2 */
     int16_t input3; /**< Process input 3 */
     int16_t input4; /**< Process input 4 */
-};
+} __attribute__((packed));
 
 /**
  * @brief RxPDO for process data output
  */
-struct __attribute__((packed)) RxPDO_ProcessOutput {
+struct RxPDO_ProcessOutput {
     int32_t value; /**< Process output value */
     uint8_t command; /**< Output command */
-};
+} __attribute__((packed));
 
 /**
  * @brief TxPDO for controller status
  */
-struct __attribute__((packed)) TxPDO_ControllerStatus {
+struct TxPDO_ControllerStatus {
     int32_t actual_value; /**< Process variable */
     int32_t output; /**< Controller output */
     int32_t deviation; /**< Control deviation */
     uint16_t status; /**< Controller status */
-};
+} __attribute__((packed));
 
 /**
  * @brief RxPDO for controller setpoint
@@ -827,10 +827,10 @@ struct __attribute__((packed)) TxPDO_ControllerStatus {
 /**
  * @brief RxPDO carrying controller setpoint and mode.
  */
-struct __attribute__((packed)) RxPDO_ControllerSetpoint {
+struct RxPDO_ControllerSetpoint {
     int32_t setpoint; /**< Controller setpoint */
     uint8_t mode; /**< Controller mode */
-};
+} __attribute__((packed));
 
 /**
  * @brief TxPDO for alarm status

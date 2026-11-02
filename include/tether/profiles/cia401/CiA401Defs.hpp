@@ -547,44 +547,44 @@ struct AnalogOutputConfig {
 /**
  * @brief TxPDO for basic 8-bit digital inputs (up to 4 blocks = 32 inputs)
  */
-struct __attribute__((packed)) TxPDO_DigitalInputs8 {
+struct TxPDO_DigitalInputs8 {
     uint8_t inputs[4]; /**< Up to 4 blocks of 8-bit inputs */
-};
+} __attribute__((packed));
 
 /**
  * @brief TxPDO for 16-bit digital inputs (up to 2 blocks = 32 inputs)
  */
-struct __attribute__((packed)) TxPDO_DigitalInputs16 {
+struct TxPDO_DigitalInputs16 {
     uint16_t inputs[2]; /**< Up to 2 blocks of 16-bit inputs */
-};
+} __attribute__((packed));
 
 /**
  * @brief TxPDO for 32-bit digital inputs (1 block = 32 inputs)
  */
-struct __attribute__((packed)) TxPDO_DigitalInputs32 {
+struct TxPDO_DigitalInputs32 {
     uint32_t inputs; /**< 1 block of 32-bit inputs */
-};
+} __attribute__((packed));
 
 /**
  * @brief RxPDO for basic 8-bit digital outputs (up to 4 blocks = 32 outputs)
  */
-struct __attribute__((packed)) RxPDO_DigitalOutputs8 {
+struct RxPDO_DigitalOutputs8 {
     uint8_t outputs[4]; /**< Up to 4 blocks of 8-bit outputs */
-};
+} __attribute__((packed));
 
 /**
  * @brief TxPDO for analog inputs (up to 4 channels, 16-bit each)
  */
-struct __attribute__((packed)) TxPDO_AnalogInputs16 {
+struct TxPDO_AnalogInputs16 {
     int16_t inputs[4]; /**< Up to 4 analog inputs */
-};
+} __attribute__((packed));
 
 /**
  * @brief RxPDO for analog outputs (up to 4 channels, 16-bit each)
  */
-struct __attribute__((packed)) RxPDO_AnalogOutputs16 {
+struct RxPDO_AnalogOutputs16 {
     int16_t outputs[4]; /**< Up to 4 analog outputs */
-};
+} __attribute__((packed));
 
 /**
  * @brief Combined TxPDO with digital and analog inputs
@@ -592,10 +592,10 @@ struct __attribute__((packed)) RxPDO_AnalogOutputs16 {
 /**
  * @brief Combined TxPDO with digital and analog inputs
  */
-struct __attribute__((packed)) TxPDO_Combined {
+struct TxPDO_Combined {
     uint8_t digital_inputs[2]; /**< 16 digital inputs */
     int16_t analog_inputs[2]; /**< 2 analog inputs */
-};
+} __attribute__((packed));
 
 /**
  * @brief Combined RxPDO with digital and analog outputs

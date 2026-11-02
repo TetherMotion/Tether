@@ -25,9 +25,9 @@ bool SyncManagerValidation::checkOverlap(const SyncManagerConfig& a, const SyncM
 }
 
 /**
- * @copydoc SyncManagerValidation::validate(const std::vector<SyncManagerConfig>&)
+ * @copydoc SyncManagerValidation::validate
  */
-SyncManagerValidationResult SyncManagerValidation::validate(const std::vector<SyncManagerConfig>& configs) {
+SyncManagerValidationResult SyncManagerValidation::validate(const std::vector<EtherCAT::PDO::SyncManagerConfig>& configs) {
     SyncManagerValidationResult result{true, ""};
     std::stringstream ss;
 
