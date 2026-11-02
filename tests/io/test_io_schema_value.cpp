@@ -29,6 +29,7 @@ SchemaRef refOf(uint8_t v) { return SchemaRef{keyOf(v), {}}; }
 //   7 u32 | 8 packed struct {1:f64 x, 2:f64 y}
 //   9 dyn array u16 | 10 fixed array f64[4] | 11 map string->i32
 //   12 optional f64 | 13 oneof {1:f64,2:string} | 14 alias->f64
+//   15 unbounded dyn array u16 | 16 unbounded map string->i32 (maxCount == 0)
 class SchemaValueCodecTest : public ::testing::Test {
 protected:
     SchemaGraph graph_;
@@ -89,11 +90,19 @@ protected:
         alias.key = keyOf(14); alias.kind = SchemaKind::Alias;
         alias.name = "alias_f64"; alias.target = refOf(1);
 
+        SchemaNode dynUnbounded;
+        dynUnbounded.key = keyOf(15); dynUnbounded.kind = SchemaKind::DynamicArray;
+        dynUnbounded.element = refOf(5);   // maxCount left 0 = unbounded
+
+        SchemaNode mapUnbounded;
+        mapUnbounded.key = keyOf(16); mapUnbounded.kind = SchemaKind::Map;
+        mapUnbounded.mapKey = refOf(2); mapUnbounded.mapValue = refOf(4);
+
         graph_.nodes = {
             scalar(1, ValueType::F64, "f64"), str, bytes,
             scalar(4, ValueType::I32, "i32"), scalar(5, ValueType::U16, "u16"),
             tagged, scalar(7, ValueType::U32, "u32"), packed,
-            dyn, fixed, map, opt, one, alias,
+            dyn, fixed, map, opt, one, alias, dynUnbounded, mapUnbounded,
         };
         ASSERT_TRUE(validateSchemaGraph(graph_)) << "fixture graph invalid";
     }
@@ -223,6 +232,36 @@ TEST_F(SchemaValueCodecTest, MapCanonicalOrderRoundTrip) {
     EXPECT_EQ(formatSchemaValueText(*dv), "{\"a\": 1, \"ab\": 2, \"b\": -7}");
     EXPECT_EQ(schemaValueToJson(*dv, &graph_),
               "[[\"a\",1],[\"ab\",2],[\"b\",-7]]");
+}
+
+TEST_F(SchemaValueCodecTest, UnboundedArrayAndMapValidate) {
+    // maxCount == 0 means unbounded (validateSchemaGraph convention); the
+    // value validator must accept any element count.
+    std::vector<SchemaValue> elems;
+    for (uint16_t x : {1, 2, 3, 4, 5}) elems.push_back(makeScalarValue(node(5), x));
+    auto enc = encodeSchemaValue(graph_, makeArrayValue(node(15), std::move(elems)));
+    ASSERT_TRUE(enc) << enc.error();
+    BufReader vr(enc->data(), enc->size());
+    ASSERT_TRUE(validateSchemaValue(graph_, keyOf(15), vr));
+    EXPECT_EQ(vr.remaining(), 0u);
+
+    std::vector<SchemaValue::Map::Entry> entries;
+    entries.push_back(makeMapEntry(makeStringValue(node(2), "k"),
+                                   makeScalarValue(node(4), 7)));
+    auto menc = encodeSchemaValue(graph_, makeMapValue(node(16), std::move(entries)));
+    ASSERT_TRUE(menc) << menc.error();
+    BufReader mvr(menc->data(), menc->size());
+    ASSERT_TRUE(validateSchemaValue(graph_, keyOf(16), mvr));
+}
+
+TEST_F(SchemaValueCodecTest, BoundedArrayStillEnforcesCap) {
+    // Node 9 has maxCount = 16; 17 elements must still fail validation.
+    std::vector<SchemaValue> elems;
+    for (uint16_t x = 0; x < 17; ++x) elems.push_back(makeScalarValue(node(5), x));
+    auto enc = encodeSchemaValue(graph_, makeArrayValue(node(9), std::move(elems)));
+    ASSERT_TRUE(enc) << enc.error();   // encode does not enforce caps
+    BufReader vr(enc->data(), enc->size());
+    EXPECT_FALSE(validateSchemaValue(graph_, keyOf(9), vr));
 }
 
 TEST_F(SchemaValueCodecTest, OptionalAndOneOf) {
