@@ -76,6 +76,10 @@ public:
      *
      * Extracts tangents, curvatures, and jounce from the neighbors' exact
      * NURBS derivatives, computes θ, classifies the corner, and builds the
+ * analysis record.
+ * @param in    Incoming piece.
+ * @param out   Outgoing piece.
+ * @return corner analysis.
      * (e₁, e₂) plane basis (M13). For `Corner` and `Cusp` kinds the basis
      * is always valid (θ is bounded away from 0 and π by construction).
      * For `Straight` the basis may be degenerate (t_out ≈ t_in) and is

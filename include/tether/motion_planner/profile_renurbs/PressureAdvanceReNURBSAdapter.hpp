@@ -150,6 +150,11 @@ inline GenericReNURBSProfile buildPressureAdvanceReNURBS(
  * This overload produces a 2-quantity profile:
  * - "pressure_offset": the PA offset (SymmetricUniform ±maxCompensation)
  * - "extruder_velocity": the extruder velocity (no constraint)
+ * @param paOffsets      PA offset series.
+ * @param velocities    Extruder velocity series.
+ * @param segments     Segment descriptors.
+ * @param maxCompensation  Symmetric PA bound.
+ * @return built ReNURBS profile.
  *
  * Both are parameterized by time.
  */

@@ -164,7 +164,7 @@ SplineFitResult fitSplineThroughSamples(
  * @param controlPoints Control point values (scalar).
  * @param knots Knot vector (clamped, non-decreasing).
  * @param degree B-spline degree p ≥ 1.
- * @param u Parameter in [knots[degree], knots[n+1]] where n = #CP − 1.
+ * @param u Parameter in [knots[degree], knots[n+1]] where n = num control points − 1.
  * @return B(u).
  */
 double evaluateBSpline(const std::vector<double>& controlPoints,
@@ -176,6 +176,10 @@ double evaluateBSpline(const std::vector<double>& controlPoints,
  *
  * Uses the derivative formula for B-splines (Piegl & Tiller §3.4).
  *
+ * @param controlPoints  B-spline control points.
+ * @param knots          Knot vector.
+ * @param degree         B-spline degree.
+ * @param u              Parameter to evaluate.
  * @return dB/du at u.
  */
 double evaluateBSplineDerivative(const std::vector<double>& controlPoints,
