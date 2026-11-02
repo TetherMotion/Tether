@@ -534,6 +534,12 @@ endif()
 if(TARGET tether_io_protocol)
 add_tether_example(tether_io_sim
     LIBRARIES tether_io_protocol tether_common)
+
+# Client-hosted processing function (peer RPC): a client publishes `scale`
+# via RegisterFunctionsReq, an embedded server invokes it back over the
+# same SLIP/TCP connection. Demonstrates the hosted-filter pattern.
+add_tether_example(tether_io_peer_function
+    LIBRARIES tether_io_protocol tether_common)
 endif()
 
 add_custom_target(examples DEPENDS ${TETHER_EXAMPLE_TARGETS})
