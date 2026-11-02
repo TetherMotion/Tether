@@ -227,6 +227,8 @@ inline const OD::ObjectDictionaryEntry kCoeObjects[] = {
 /**
  * RegisterList view of kCoeObjects so exposeSdoCatalog can treat the
  * standard objects exactly like a vendor register group.
+ *
+ * @return singleton register list covering the standard CoE objects.
  */
 inline const ::EtherCAT::Drives::Registers::RegisterList&
     kCoeObjectList() {
@@ -267,6 +269,8 @@ public:
     /**
      * Ring stream source covering all pdo.* signals — register into
      * ServerConfig::ringSources after calling expose().
+     *
+     * @return reference to the owned ring source.
      */
     IRingStreamSource& ringSource() { return ringSource_; }
 
@@ -274,6 +278,9 @@ public:
      * Producer side — call once per PDO update cycle from the realtime
      * thread.  Cheap when no session is streaming (single atomic load);
      * never blocks; drops (counted) when the ring is full.
+     *
+     * @param emit  Sink invoked with the produced row.
+     * @return rows emitted.
      */
     template <typename F>
     bool produceRow(F&& fill) { return ringSource_.produce(std::forward<F>(fill)); }
@@ -295,6 +302,8 @@ public:
      *
      * Shared with NamedSdoExposer when slug-named aliases are wanted for the
      * same objects — pass this list to its constructor.
+     *
+     * @return span over all exposed SDO register groups.
      */
     static const ::EtherCAT::Drives::Registers::RegisterListOfLists&
         sdoCatalog() {

@@ -20,7 +20,7 @@
  *   x            clear filter+search on the focused table
  *   a            toggle auto-read of registers on selection change
  *   R            re-read registers without changing focus
- *   <actions>    app-registered PanelAction hotkeys (see addAction)
+ *   &lt;actions&gt;    app-registered PanelAction hotkeys (see addAction)
  *
  * Custom actions: addAction({key, label, invoke}) registers a hotkey.
  * invoke() typically calls pushOverlay() to open a modal overlay panel

@@ -75,7 +75,10 @@ public:
         return it->second.clockSync;
     }
 
-    /**@brief Get all registered MCU IDs. */
+    /**
+     * @brief Get all registered MCU IDs.
+     * @return ID list (unordered).
+     */
     std::vector<uint8_t> mcuIds() const {
         std::lock_guard<std::mutex> lock(mutex_);
         std::vector<uint8_t> ids;
@@ -84,20 +87,31 @@ public:
         return ids;
     }
 
-    /**@brief Get the number of registered MCUs. */
+    /**
+     * @brief Get the number of registered MCUs.
+     * @return MCU count.
+     */
     size_t mcuCount() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return mcus_.size();
     }
 
-    /**@brief Convert a host timestamp to MCU clock for a specific MCU. */
+    /**
+     * @brief Convert a host timestamp to MCU clock for a specific MCU.
+     * @param mcuId     MCU id.
+     * @param hostTime  Host-side timestamp.
+     * @return MCU clock ticks, or 0 when the MCU is unknown.
+     */
     uint32_t hostToMcu(uint8_t mcuId, HostTime hostTime) const {
         auto sync = getMcu(mcuId);
         if (!sync) return 0;
         return sync->hostToMcu(hostTime);
     }
 
-    /**@brief Find the MCU with the most delayed clock (for print time alignment). */
+    /**
+     * @brief Find the MCU with the most delayed clock (for print time alignment).
+     * @return primary MCU id.
+     */
     uint8_t primaryMcu() const {
         std::lock_guard<std::mutex> lock(mutex_);
         if (mcus_.empty()) return 0;

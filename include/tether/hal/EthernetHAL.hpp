@@ -84,6 +84,7 @@ public:
 
     /**
      * @brief Check if interface is initialized
+     * @return true after successful open/bind.
      */
     virtual bool isInitialized() const = 0;
 
@@ -175,6 +176,8 @@ public:
  * - ESP32HAL on ESP32
  * - LinuxRawSocketHAL on Linux
  * - MockHAL in unit tests
+ *
+ * @return owned HAL instance.
  */
 std::unique_ptr<IEthernetHAL> createDefaultHAL();
 
@@ -194,6 +197,7 @@ std::unique_ptr<IEthernetHAL> createLinuxRawSocketHAL();
 
 /**
  * @brief Create mock/loopback HAL for testing
+ * @return owned mock HAL instance.
  */
 std::unique_ptr<IEthernetHAL> createMockHAL();
 
@@ -224,6 +228,8 @@ uint16_t getEtherType(const uint8_t* frame);
 
 /**
  * @brief Check if frame is an EtherCAT frame
+ * @param frame  Start of an Ethernet frame.
+ * @return true when EtherType is 0x88A4.
  */
 inline bool isEtherCATFrame(const uint8_t* frame) {
     return getEtherType(frame) == kEtherTypeEtherCAT;

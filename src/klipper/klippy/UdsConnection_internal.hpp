@@ -32,7 +32,10 @@ public:
         closed_ = true;
     }
 
-    /**@brief Read available data and return complete frames. */
+    /**
+     * @brief Read available data and return complete frames.
+     * @return ETX-terminated frames parsed from the socket.
+     */
     std::vector<std::string> readFrames() {
         std::vector<std::string> frames;
         char buf[4096];
@@ -62,7 +65,11 @@ public:
         return frames;
     }
 
-    /**@brief Write data to the socket. */
+    /**
+     * @brief Write data to the socket.
+     * @param data  Bytes to send.
+     * @return false once the socket is closed/errors.
+     */
     bool write(const std::string& data) {
         if (closed_ || fd_ < 0) return false;
         size_t total = 0;
@@ -78,7 +85,11 @@ public:
         return true;
     }
 
-    /**@brief Send a JSON frame terminated by ETX. */
+    /**
+     * @brief Send a JSON frame terminated by ETX.
+     * @param json  Serialised message.
+     * @return write() result.
+     */
     bool sendFrame(const std::string& json) {
         return write(json + "\x03");
     }

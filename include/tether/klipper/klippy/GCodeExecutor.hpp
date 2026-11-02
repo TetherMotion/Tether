@@ -1246,7 +1246,10 @@ public:
      */
     const PrinterMotionState& state() const { return *state_; }
 
-    /**@brief Get mutable printer state. */
+    /**
+     * @brief Get mutable printer state.
+     * @return reference to the printer state.
+     */
     PrinterMotionState& state() { return *state_; }
 
     /**
@@ -1266,8 +1269,6 @@ private:
      * ratio by transforming the direction vector and scales the feed rate
      * accordingly. If the transform is identity, the speed is unchanged.
      *
-     * @param progStartX/Y/Z  Program-space start position.
-     * @param progEndX/Y/Z    Program-space end position.
      * @param progStartX  Segment start X in program space [mm].
      * @param progStartY  Segment start Y in program space [mm].
      * @param progStartZ  Segment start Z in program space [mm].
