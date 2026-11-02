@@ -26,17 +26,17 @@ namespace Raw {
 /**
  * @brief Ethernet frame header
  */
-struct __attribute__((packed)) EthernetHeader {
+struct EthernetHeader {
     uint8_t dst[6]; /**< Destination MAC address */
     uint8_t src[6]; /**< Source MAC address */
     uint16_t etherType_be; /**< EtherType in big-endian */
-};
+} __attribute__((packed));
 static_assert(sizeof(EthernetHeader) == 14, "EthernetHeader must be 14 bytes");
 
 /**
  * @brief EtherCAT frame header (2 bytes after Ethernet header)
  */
-struct __attribute__((packed)) FrameHeader {
+struct FrameHeader {
     uint16_t raw_le; /**< [0:10]=length, [11]=reserved, [12:15]=type (must be 1) */
     
     uint16_t length() const { return raw_le & 0x07FF; }
@@ -51,7 +51,7 @@ struct __attribute__((packed)) FrameHeader {
     void set(uint16_t len, uint16_t type = 1) {
         raw_le = (len & 0x07FF) | ((type & 0x0F) << 12);
     }
-};
+} __attribute__((packed));
 static_assert(sizeof(FrameHeader) == 2, "FrameHeader must be 2 bytes");
 
 /**

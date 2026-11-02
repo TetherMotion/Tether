@@ -5,6 +5,7 @@
 #include "tether/ethercat/Master.hpp"
 #include "tether/platform/Platform.hpp"
 #include "raw/internal.hpp"
+#include "raw/SDODownloadInternal.hpp"
 #include <chrono>
 #include <thread>
 #include <cstring>
@@ -15,9 +16,6 @@ namespace Raw {
 
 static const char* TAG = "ethercat";
 
-static uint16_t slaveIndexFromADP(uint16_t adp) {
-    return Master::slaveAddressFromADP(adp).slavePosition();
-}
 
 SDOTransactionBase::SDOTransactionBase(SDOErrorDecoder& errorDecoder,
                                        SDOMailboxIO& mailboxIO,

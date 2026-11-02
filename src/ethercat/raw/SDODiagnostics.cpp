@@ -3,6 +3,7 @@
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/platform/Platform.hpp"
 #include "raw/internal.hpp"
+#include "raw/SDODownloadInternal.hpp"
 #include <bit>
 #include <cstdio>
 #include <cstring>
@@ -12,9 +13,6 @@ namespace Raw {
 
 static const char* TAG = "ethercat";
 
-static uint16_t slaveIndexFromADP(uint16_t adp) {
-    return Master::slaveAddressFromADP(adp).slavePosition();
-}
 
 void SDODiagnostics::smControlStr(uint8_t ctrlByte, char* buf, size_t bufLen) const {
     const auto ctrl = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(ctrlByte);

@@ -19,11 +19,11 @@ namespace FoE {
 /**
  * @brief FoE header structure
  */
-struct __attribute__((packed)) FoEHeader {
+struct FoEHeader {
     uint8_t opcode; /**< FoE opcode */
     uint8_t reserved; /**< Reserved (0) */
     uint32_t packet_no_le; /**< Packet/block number (little-endian) */
-};
+} __attribute__((packed));
 static_assert(sizeof(FoEHeader) == 6, "FoEHeader must be 6 bytes");
 
 /**

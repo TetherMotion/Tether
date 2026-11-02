@@ -6,6 +6,7 @@
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/platform/Platform.hpp"
 #include "raw/internal.hpp"
+#include "raw/SDODownloadInternal.hpp"
 #include <cstring>
 #include <cstdio>
 #include <chrono>
@@ -19,9 +20,6 @@ namespace Raw {
 
 static const char* TAG = "ethercat";
 
-static uint16_t slaveIndexFromADP(uint16_t adp) {
-    return Master::slaveAddressFromADP(adp).slavePosition();
-}
 
 bool SDOUpload::execute(Master& master, uint16_t adp,
                         uint8_t* inoutMbxCnt,
