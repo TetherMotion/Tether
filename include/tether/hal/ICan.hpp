@@ -74,7 +74,11 @@ class ICan {
 public:
     virtual ~ICan() = default;
 
-    /**@brief Open and configure the CAN interface. */
+    /**
+     * @brief Open and configure the CAN interface.
+     * @param bitrate  Bus bitrate in bit/s.
+     * @return true on success.
+     */
     virtual bool open(const CanConfig& config) = 0;
 
     /**@brief Close the interface. */

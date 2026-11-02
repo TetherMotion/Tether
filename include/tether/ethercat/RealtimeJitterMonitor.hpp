@@ -50,7 +50,9 @@ struct JitterConfig {
      * @brief Construct defaults for a given nominal period
      *
      * - Warning  = 50 % of the period
-     * - Critical = 200 % of the period
+     *
+     * @param period_us  Nominal cycle period.
+     * @return default config. - Critical = 200 % of the period
      * - Log every 10 000 cycles (≈ 10 s at 1 kHz)
      *
      * @param period_us  Nominal cycle period in microseconds
@@ -117,6 +119,7 @@ public:
 
     /**
      * @brief Thread-safe snapshot of accumulated statistics
+     * @return jitter stats copy.
      */
     JitterStats getStats() const;
 

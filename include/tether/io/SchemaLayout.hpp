@@ -119,7 +119,12 @@ inline bool isVarintScalar(ValueType t) {
            t == ValueType::Enum;
 }
 
-/**Recursive fixed-size/memcpy-image probe; memoized over `seen`. */
+/**
+ * @brief Recursive fixed-size/memcpy-image probe; memoized over `seen`.
+ * @param t     Value type.
+ * @param seen  Visited types (cycle guard).
+ * @return true when a fixed wire size exists.
+ */
 inline Probe probe(const SchemaGraph& g, const SchemaNode& node,
                    std::unordered_map<const SchemaNode*, Probe>& seen) {
     if (const auto it = seen.find(&node); it != seen.end()) return it->second;

@@ -104,7 +104,7 @@ public:
  * @brief Evaluates nonparametric black-box spectral models via the Empirical Transfer Function Estimate (ETFE).
  *
  * The ETFE applies Fast Fourier Transforms (FFT or DFT) directly to time-domain input
- * and output vectors to estimate the frequency response, $ G(e^{j\omega}) = \frac{Y(\omega)}{U(\omega)} $.
+ * and output vectors to estimate the frequency response, $ G(e^{jw}) = Y(w)/U(w) $.
  */
 class ETFEEstimator {
 public:

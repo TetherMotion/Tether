@@ -96,7 +96,11 @@ public:
     using NameOfFn  = const char* (*)(size_t);
 
     /**
+     * @param slave    Owning slave.
      * @param entries  poll table — must outlive the poller (a static
+     *                 array is typical).
+     * @param name_of  Optional name lookup for error logs.
+     * @param log_tag  Logger tag.
      *                 table built alongside the ObjectInfo list is the
      *                 intended shape).
      */
@@ -144,7 +148,10 @@ public:
         return next.read_ok;
     }
 
-    /**Copy of the latest snapshot (empty generation until first poll). */
+    /**
+     * @brief Copy of the latest snapshot (empty generation until first poll).
+     * @return last polled snapshot.
+     */
     Snapshot snapshot() const {
         std::lock_guard<std::mutex> lock(mtx_);
         return snap_;
