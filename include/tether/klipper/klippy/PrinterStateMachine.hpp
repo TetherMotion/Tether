@@ -18,7 +18,14 @@
 
 namespace tether::klipper::klippy {
 
-/**@brief Convert PrinterState to string (extended version with all states). */
+/**
+ * @brief Convert PrinterState to a lowercase state name.
+ *
+ * Forwards to the canonical stateToString(); kept for API symmetry in
+ * klippy code paths.
+ * @param s  State to name.
+ * @return State name string for reporting/status output.
+ */
 inline std::string printerStateToString(PrinterState s) {
     return stateToString(s);
 }
@@ -30,19 +37,41 @@ public:
 
     PrinterStateMachine() = default;
 
-    /**@brief Set the state change callback. */
+    /**
+     * @brief Set the state change callback.
+     *
+     * Invoked synchronously from transition() after a valid state change
+     * with (old, new). Keep it non-blocking.
+     * @param cb  Callback taking (oldState, newState); empty disables it.
+     */
     void setStateChangeCallback(StateChangeCallback cb) {
         stateChangeCb_ = std::move(cb);
     }
 
-    /**@brief Get the current state. */
+    /**
+     * @brief Get the current state.
+     * @return Active PrinterState (Startup until first transition).
+     */
     PrinterState state() const { return state_; }
 
-    /**@brief Get the state message. */
+    /**
+     * @brief Get the state message.
+     *
+     * The human-readable reason text supplied with the last successful
+     * transition; defaults to "Printer is not ready" at startup.
+     * @return Current message string, valid until the next transition.
+     */
     const std::string& message() const { return message_; }
 
     /**
      * @brief Transition to a new state.
+     *
+     * Validated against isValidTransition() — an invalid transition
+     * leaves state and message untouched and returns false. On success
+     * the state-change callback fires and @p message, when non-empty,
+     * replaces the current message.
+     * @param newState  Target state; Shutdown is always accepted (E-stop).
+     * @param message   Optional reason text to store for message().
      * @return True if the transition was valid.
      */
     bool transition(PrinterState newState, const std::string& message = "") {
@@ -58,7 +87,16 @@ public:
         return true;
     }
 
-    /**@brief Check if a transition is valid. */
+    /**
+     * @brief Check if a transition is valid.
+     *
+     * Shutdown is reachable from every state (emergency stop); Error and
+     * Shutdown are terminal. Startup->Ready|Error, Ready->Printing,
+     * Printing->Ready|Paused, Paused->Printing|Ready.
+     * @param from  Source state.
+     * @param to    Target state.
+     * @return true if the transition is allowed.
+     */
     static bool isValidTransition(PrinterState from, PrinterState to) {
         // From any state to shutdown is always valid (emergency stop)
         if (to == PrinterState::Shutdown) return true;
@@ -89,17 +127,28 @@ public:
         return false;
     }
 
-    /**@brief Check if the printer is ready for commands. */
+    /**
+     * @brief Check if the printer is ready for commands.
+     * @return true in Ready, Printing, or Paused — i.e. not Startup,
+     *         Error, or Shutdown.
+     */
     bool isOperational() const {
         return state_ == PrinterState::Ready ||
                state_ == PrinterState::Printing ||
                state_ == PrinterState::Paused;
     }
 
-    /**@brief Check if the printer is printing. */
+    /**
+     * @brief Check if the printer is printing.
+     * @return true only in the Printing state (Paused reports false).
+     */
     bool isPrinting() const { return state_ == PrinterState::Printing; }
 
-    /**@brief Check if the printer is in a terminal state. */
+    /**
+     * @brief Check if the printer is in a terminal state.
+     * @return true in Shutdown or Error — no further transitions are
+     *         possible (Error can only exit to Shutdown).
+     */
     bool isTerminal() const {
         return state_ == PrinterState::Shutdown ||
                state_ == PrinterState::Error;
