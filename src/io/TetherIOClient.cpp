@@ -9,6 +9,7 @@
 #include <array>
 #include <chrono>
 
+#if TETHER_IO_CLIENT_ENABLED
 namespace tether { namespace io {
 
 namespace {
@@ -146,7 +147,9 @@ TetherIOClient::TetherIOClient(std::unique_ptr<ITransport> transport,
     std::array<uint8_t, 1024> helloBuffer{};
     BufWriter helloWriter(helloBuffer.data(), helloBuffer.size());
     helloWriter.putU8(static_cast<uint8_t>(MessageType::ClientHello));
-    encodeClientHelloV6(helloWriter, {});
+    ClientHelloV6 hello;
+    hello.encodingFeatures = ENCODING_FEATURE_TYPED_DESCRIPTORS;
+    encodeClientHelloV6(helloWriter, hello);
     if (!helloWriter.ok() || !transport_->send(helloBuffer.data(), helloWriter.pos)) {
         transport_->close();
         return;
@@ -167,6 +170,7 @@ TetherIOClient::TetherIOClient(std::unique_ptr<ITransport> transport,
     }
     schemaEpoch_ = serverHello.epoch;
 
+#if TETHER_IO_SCHEMA_ENABLED
     if (!serverHello.schemas.empty()) {
         SchemaGraph graph;
         std::vector<SchemaRef> pending;
@@ -237,6 +241,14 @@ TetherIOClient::TetherIOClient(std::unique_ptr<ITransport> transport,
     // slot order (slots are assigned by ascending schema key), so slot i
     // resolves through manifest_[i].
     manifest_ = serverHello.schemas;
+#else
+    // A schema-less client cannot interpret schema-typed entries: refuse
+    // to connect rather than silently mis-decode values.
+    if (!serverHello.schemas.empty()) {
+        transport_->close();
+        return;
+    }
+#endif // TETHER_IO_SCHEMA_ENABLED
     serverLimits_ = serverHello.limits;
     negotiatedFeatures_ = serverHello.encodingFeatures;
 
@@ -261,21 +273,29 @@ void TetherIOClient::close() {
     if (transport_) transport_->close();
 }
 
+#if TETHER_IO_STREAMING_ENABLED
 void TetherIOClient::setStreamDataCallback(StreamDataCallback cb) {
     streamCallback_ = std::move(cb);
 }
+#endif
 
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 void TetherIOClient::setLogDataCallback(LogDataCallback cb) {
     logCallback_ = std::move(cb);
 }
+#endif
 
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
 void TetherIOClient::setCatalogChangedCallback(CatalogChangedCallback cb) {
     catalogChangedCb_ = std::move(cb);
 }
+#endif
 
+#if TETHER_IO_SCHEMA_ENABLED
 void TetherIOClient::setSchemaUpdateCallback(SchemaUpdateCallback cb) {
     schemaUpdateCb_ = std::move(cb);
 }
+#endif
 
 void TetherIOClient::setAsyncMessageCallback(AsyncMessageCallback cb) {
     asyncMessageCb_ = std::move(cb);
@@ -342,6 +362,7 @@ TetherIOClient::receiveMessage(uint32_t timeoutMs) {
 
         // Dispatch StreamData and LogData to callbacks, return everything else
         uint8_t type = msg[0];
+#if TETHER_IO_STREAMING_ENABLED
         if (type == static_cast<uint8_t>(MessageType::StreamData)) {
             if (streamCallback_) {
                 // Parse StreamData: type(1) + specId(u32) + count(u32) + rows
@@ -363,6 +384,8 @@ TetherIOClient::receiveMessage(uint32_t timeoutMs) {
             }
             continue;
         }
+#endif
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
         if (type == static_cast<uint8_t>(MessageType::LogData)) {
             if (logCallback_) {
                 ClientBufReader r(msg.data(), msg.size());
@@ -377,21 +400,28 @@ TetherIOClient::receiveMessage(uint32_t timeoutMs) {
             }
             continue;
         }
+#endif
+#if TETHER_IO_FUNCTIONS_ENABLED
         // A server-originated call: dispatch to the local catalog and answer,
         // then keep waiting for the pending response.
         if (type == static_cast<uint8_t>(MessageType::InvokeExReq)) {
             handleInvokeExReq(msg);
             continue;
         }
+#endif
         // Server push notifications — fire callbacks and keep waiting.
+#if TETHER_IO_CATALOG_NOTIFY_ENABLED
         if (type == static_cast<uint8_t>(MessageType::CatalogChanged)) {
             if (catalogChangedCb_) catalogChangedCb_();
             continue;
         }
+#endif
+#if TETHER_IO_SCHEMA_ENABLED
         if (type == static_cast<uint8_t>(MessageType::SchemaUpdate)) {
             if (schemaUpdateCb_) schemaUpdateCb_();
             continue;
         }
+#endif
         // Any other unsolicited message: hand to the generic async hook if
         // registered, then keep waiting (only when a callback consumed it —
         // otherwise return so callers can still see unexpected frames).
@@ -491,13 +521,23 @@ TetherIOClient::listParams(uint32_t offset, uint32_t maxCount) {
     }
     (void)total; (void)returnedOffset;
 
+    const bool typed = negotiatedFeatures_ & ENCODING_FEATURE_TYPED_DESCRIPTORS;
     std::vector<ClientCatalogEntry> entries;
     entries.reserve(count);
     for (uint32_t i = 0; i < count && r.ok(); ++i) {
         ClientCatalogEntry e;
         e.id = r.getU64();
         e.schemaEpoch = epoch;
-        e.schemaSlot = r.getU32();
+        if (typed) {
+            e.typeTag = static_cast<EntryTypeTag>(r.getU8());
+            e.schemaSlot = r.getU32();
+            e.type = static_cast<ValueType>(r.getU8());
+            e.elementType = static_cast<ValueType>(r.getU8());
+            e.valueSize = r.getU8();
+            e.maxValueSize = r.getU16();
+        } else {
+            e.schemaSlot = r.getU32();
+        }
         e.flags = r.getU32();
         e.name = r.getString16();
         e.description = r.getString16();
@@ -588,11 +628,21 @@ TetherIOClient::listSignals(uint32_t offset, uint32_t maxCount) {
 
     std::vector<ClientCatalogEntry> entries;
     entries.reserve(count);
+    const bool typed = negotiatedFeatures_ & ENCODING_FEATURE_TYPED_DESCRIPTORS;
     for (uint32_t i = 0; i < count && r.ok(); ++i) {
         ClientCatalogEntry e;
         e.id = r.getU64();
         e.schemaEpoch = epoch;
-        e.schemaSlot = r.getU32();
+        if (typed) {
+            e.typeTag = static_cast<EntryTypeTag>(r.getU8());
+            e.schemaSlot = r.getU32();
+            e.type = static_cast<ValueType>(r.getU8());
+            e.elementType = static_cast<ValueType>(r.getU8());
+            e.valueSize = r.getU8();
+            e.maxValueSize = r.getU16();
+        } else {
+            e.schemaSlot = r.getU32();
+        }
         e.flags = r.getU32();
         e.name = r.getString16();
         e.description = r.getString16();
@@ -627,6 +677,7 @@ TetherIOClient::getSignal(uint64_t id) {
 
 // ---- Get Metadata ----
 
+#if TETHER_IO_METADATA_ENABLED
 std::expected<std::vector<ClientMetadata>, ClientError>
 TetherIOClient::getMetadata(uint64_t id) {
     ClientBufWriter w(9);
@@ -657,6 +708,9 @@ TetherIOClient::getMetadata(uint64_t id) {
 
 // ---- List Functions ----
 
+#endif // TETHER_IO_METADATA_ENABLED
+
+#if TETHER_IO_FUNCTIONS_ENABLED
 std::expected<std::vector<ClientFunctionEntry>, ClientError>
 TetherIOClient::listFunctions(uint32_t offset, uint32_t maxCount) {
     ClientBufWriter w(9);
@@ -777,9 +831,11 @@ TetherIOClient::callFunction(uint64_t functionId, const std::vector<FunctionArg>
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed CallFunctionResp"));
     return cr;
 }
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
 // ---- Configure Stream ----
 
+#if TETHER_IO_STREAMING_ENABLED
 std::expected<TetherIOClient::ConfigureStreamResult, ClientError>
 TetherIOClient::configureStream(const std::vector<uint64_t>& entryIds,
                                 uint32_t intervalMs,
@@ -814,11 +870,19 @@ TetherIOClient::configureStream(const std::vector<uint64_t>& entryIds,
         return std::unexpected(makeError(ErrorCode::InvalidMessage, "Stale stream schema epoch"));
     }
     (void)rowSize;
+    const bool typed = negotiatedFeatures_ & ENCODING_FEATURE_TYPED_DESCRIPTORS;
     for (uint32_t i = 0; i < count && r.ok(); ++i) {
         ClientStreamLayoutEntry e;
         e.id = r.getU64();
         e.schemaEpoch = epoch;
-        e.schemaSlot = r.getU32();
+        if (typed) {
+            e.typeTag = static_cast<EntryTypeTag>(r.getU8());
+            e.schemaSlot = r.getU32();
+            e.type = static_cast<ValueType>(r.getU8());
+            e.elementType = static_cast<ValueType>(r.getU8());
+        } else {
+            e.schemaSlot = r.getU32();
+        }
         e.valueSize = r.getU8();
         cr.layout.push_back(std::move(e));
     }
@@ -845,9 +909,11 @@ std::expected<void, ClientError> TetherIOClient::stopStream() {
     }
     return {};
 }
+#endif // TETHER_IO_STREAMING_ENABLED
 
 // ---- Snapshots ----
 
+#if TETHER_IO_SNAPSHOTS_ENABLED
 std::expected<std::pair<uint64_t, std::vector<ClientSnapshotValue>>, ClientError>
 TetherIOClient::snapshotParams(const std::vector<uint64_t>& ids) {
     ClientBufWriter w(6 + ids.size() * 8);
@@ -869,11 +935,19 @@ TetherIOClient::snapshotParams(const std::vector<uint64_t>& ids) {
     }
     std::vector<ClientSnapshotValue> values;
     values.reserve(count);
+    const bool typed = negotiatedFeatures_ & ENCODING_FEATURE_TYPED_DESCRIPTORS;
     for (uint32_t i = 0; i < count && r.ok(); ++i) {
         ClientSnapshotValue v;
         v.id = r.getU64();
         v.schemaEpoch = epoch;
-        v.schemaSlot = r.getU32();
+        if (typed) {
+            v.typeTag = static_cast<EntryTypeTag>(r.getU8());
+            v.schemaSlot = r.getU32();
+            v.type = static_cast<ValueType>(r.getU8());
+            v.elementType = static_cast<ValueType>(r.getU8());
+        } else {
+            v.schemaSlot = r.getU32();
+        }
         v.valueSize = r.getU8();
         size_t actualSize = v.valueSize;
         if (v.valueSize == 0) actualSize = r.getVarint();
@@ -905,11 +979,19 @@ TetherIOClient::snapshotSignals(const std::vector<uint64_t>& ids) {
     }
     std::vector<ClientSnapshotValue> values;
     values.reserve(count);
+    const bool typed = negotiatedFeatures_ & ENCODING_FEATURE_TYPED_DESCRIPTORS;
     for (uint32_t i = 0; i < count && r.ok(); ++i) {
         ClientSnapshotValue v;
         v.id = r.getU64();
         v.schemaEpoch = epoch;
-        v.schemaSlot = r.getU32();
+        if (typed) {
+            v.typeTag = static_cast<EntryTypeTag>(r.getU8());
+            v.schemaSlot = r.getU32();
+            v.type = static_cast<ValueType>(r.getU8());
+            v.elementType = static_cast<ValueType>(r.getU8());
+        } else {
+            v.schemaSlot = r.getU32();
+        }
         v.valueSize = r.getU8();
         size_t actualSize = v.valueSize;
         if (v.valueSize == 0) actualSize = r.getVarint();
@@ -919,9 +1001,11 @@ TetherIOClient::snapshotSignals(const std::vector<uint64_t>& ids) {
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed SnapshotSignalsResp"));
     return std::make_pair(ts, std::move(values));
 }
+#endif // TETHER_IO_SNAPSHOTS_ENABLED
 
 // ---- Log Subscription ----
 
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 std::expected<ClientLogSubscription, ClientError>
 TetherIOClient::subscribeLog(uint8_t minSeverity,
                              const std::string& componentFilter,
@@ -968,9 +1052,11 @@ TetherIOClient::unsubscribeLog(uint32_t subscriptionId) {
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed UnsubscribeLogResp"));
     return respId;
 }
+#endif // TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 
 // ---- Datalog ----
 
+#if TETHER_IO_DATALOG_ENABLED
 std::expected<bool, ClientError>
 TetherIOClient::configureDatalog(const std::string& logName,
                                  uint32_t sampleRateHz,
@@ -994,9 +1080,11 @@ TetherIOClient::configureDatalog(const std::string& logName,
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed ConfigureDatalogResp"));
     return success;
 }
+#endif // TETHER_IO_DATALOG_ENABLED
 
 // ---- Threshold ----
 
+#if TETHER_IO_THRESHOLDS_ENABLED
 std::expected<bool, ClientError>
 TetherIOClient::configureThreshold(const std::string& name,
                                    bool isWhitelist,
@@ -1018,9 +1106,11 @@ TetherIOClient::configureThreshold(const std::string& name,
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed ConfigureThresholdResp"));
     return success;
 }
+#endif // TETHER_IO_THRESHOLDS_ENABLED
 
 // ---- Input Streams ----
 
+#if TETHER_IO_INPUT_STREAMS_ENABLED
 std::expected<TetherIOClient::CreateInputStreamResult, ClientError>
 TetherIOClient::createInputStream(uint32_t schemaSlot, uint32_t maxValueSize,
                                   uint32_t maxBatchSize) {
@@ -1083,9 +1173,11 @@ TetherIOClient::closeInputStream(uint32_t streamId) {
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed CloseInputStreamResp"));
     return std::make_pair(respId, success);
 }
+#endif // TETHER_IO_INPUT_STREAMS_ENABLED
 
 // ---- Peer functions + correlated invocation ----
 
+#if TETHER_IO_FUNCTIONS_ENABLED
 void TetherIOClient::setInvokeHandler(InvokeHandler cb) {
     invokeHandler_ = std::move(cb);
 }
@@ -1274,5 +1366,7 @@ void TetherIOClient::sendInvokeExResponse(uint64_t requestId, bool success,
     }
     if (w.ok()) sendRaw(buf.data(), w.pos);
 }
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
 }} // namespace tether::io
+#endif // TETHER_IO_CLIENT_ENABLED

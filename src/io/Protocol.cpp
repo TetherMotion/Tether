@@ -1,5 +1,6 @@
 #include "tether/io/Protocol.hpp"
 
+#if TETHER_IO_STREAM_FILTERS_ENABLED
 #include <format>
 
 namespace tether::io {
@@ -32,3 +33,4 @@ bool StreamFilterSchema::empty() const {
 }
 
 } // namespace tether::io
+#endif // TETHER_IO_STREAM_FILTERS_ENABLED

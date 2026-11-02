@@ -22,12 +22,18 @@ namespace {
 
 bool validateCatalogValue(const SchemaCatalog* catalog, const EntryView& entry,
                  const uint8_t* data, size_t size) {
+#if TETHER_IO_SCHEMA_ENABLED
     if (!catalog || entry.schemaRef().key == SchemaKey{} || !catalog->graph()) return true;
     BufReader reader(data, size);
     return validateSchemaValue(*catalog->graph(), entry.schemaRef().key, reader) &&
         reader.remaining() == 0;
+#else
+    (void)catalog; (void)entry; (void)data; (void)size;
+    return true;
+#endif
 }
 
+#if TETHER_IO_FUNCTIONS_ENABLED
 void validateFunctionReturn(const SchemaCatalog* catalog, const FunctionReturn& signature,
                             FunctionCallResult& result) {
     if (!result.success || !signature.present || signature.schema.key == SchemaKey{}) return;
@@ -49,11 +55,33 @@ void validateFunctionReturn(const SchemaCatalog* catalog, const FunctionReturn& 
         result.returnValue.clear();
     }
 }
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 
 } // namespace
 
 // Message handlers
 // --------------------------------------------------------------------------
+
+namespace {
+
+/**
+ * Emit the type-union fields shared by all entry descriptors.
+ * Wire form: [type_tag U8][schema_slot U32][value_type U8]
+ *            [element_type U8][value_size U8][max_value_size U16].
+ * Used only when ENCODING_FEATURE_TYPED_DESCRIPTORS was negotiated.
+ */
+void putEntryType(BufWriter& w, const EntryView& e) {
+    const bool schemaTyped = e.schemaRef().key != SchemaKey{};
+    w.putU8(static_cast<uint8_t>(
+        schemaTyped ? EntryTypeTag::Schema : EntryTypeTag::Flat));
+    w.putU32(schemaTyped ? e.schemaSlot() : 0);
+    w.putU8(schemaTyped ? 0 : static_cast<uint8_t>(e.valueType()));
+    w.putU8(schemaTyped ? 0 : static_cast<uint8_t>(e.elementType()));
+    w.putU8(schemaTyped ? 0 : e.valueSize());
+    w.putU16(schemaTyped ? 0 : e.maxValueSize());
+}
+
+} // namespace
 
 void Session::handleListParamsReq(const uint8_t* body, size_t len) {
     if (len < 8) { sendError(ErrorCode::InvalidMessage, "ListParamsReq too short"); return; }
@@ -64,10 +92,14 @@ void Session::handleListParamsReq(const uint8_t* body, size_t len) {
 
     auto entries = registry_.paramPage(offset, maxCount);
     uint32_t total = registry_.paramCount();
+    const bool typed = negotiatedFeatures_ & ENCODING_FEATURE_TYPED_DESCRIPTORS;
+    // Per-entry fixed part: legacy slot U32, or the 10-byte type union.
+    const size_t typeBytes = typed ? 10 : 4;
 
     size_t sz = 1 + 4 + 4 + 4 + 8;
     for (const auto& e : entries) {
-        sz += 8 + 4 + 4 + 2 + e.name().size() + 2 + e.description().size() + 2 + e.group().size();
+        sz += 8 + typeBytes + 4 + 2 + e.name().size() +
+              2 + e.description().size() + 2 + e.group().size();
     }
     if (txRawBuf_.size() < sz) txRawBuf_.resize(sz);
 
@@ -79,7 +111,8 @@ void Session::handleListParamsReq(const uint8_t* body, size_t len) {
     w.putU64(schemaEpoch_);
     for (const auto& e : entries) {
         w.putU64(e.id());
-        w.putU32(e.schemaSlot());
+        if (typed) putEntryType(w, e);
+        else       w.putU32(e.schemaSlot());
         w.putU32(e.flags());
         w.putStr16(e.name().data(), e.name().size());
         w.putStr16(e.description().data(), e.description().size());
@@ -97,10 +130,13 @@ void Session::handleListSignalsReq(const uint8_t* body, size_t len) {
 
     auto entries = registry_.signalPage(offset, maxCount);
     uint32_t total = registry_.signalCount();
+    const bool typed = negotiatedFeatures_ & ENCODING_FEATURE_TYPED_DESCRIPTORS;
+    const size_t typeBytes = typed ? 10 : 4;
 
     size_t sz = 1 + 4 + 4 + 4 + 8;
     for (const auto& e : entries) {
-        sz += 8 + 4 + 4 + 2 + e.name().size() + 2 + e.description().size() + 2 + e.group().size();
+        sz += 8 + typeBytes + 4 + 2 + e.name().size() +
+              2 + e.description().size() + 2 + e.group().size();
     }
     if (txRawBuf_.size() < sz) txRawBuf_.resize(sz);
 
@@ -112,7 +148,8 @@ void Session::handleListSignalsReq(const uint8_t* body, size_t len) {
     w.putU64(schemaEpoch_);
     for (const auto& e : entries) {
         w.putU64(e.id());
-        w.putU32(e.schemaSlot());
+        if (typed) putEntryType(w, e);
+        else       w.putU32(e.schemaSlot());
         w.putU32(e.flags());
         w.putStr16(e.name().data(), e.name().size());
         w.putStr16(e.description().data(), e.description().size());
@@ -229,6 +266,11 @@ void Session::handleGetSignalReq(const uint8_t* body, size_t len) {
 }
 
 void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
+#if !TETHER_IO_STREAMING_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Streaming disabled");
+    return;
+#else
     if (logFn_) logFn_("TetherIO", "handleConfigureStreamReq (bodyLen=%zu, streaming=%d)",
                         len, streaming_);
     if (streaming_) {
@@ -257,8 +299,7 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
     constexpr uint32_t MAX_STREAM_CHUNK = 4096;
     if (chunk > MAX_STREAM_CHUNK) chunk = MAX_STREAM_CHUNK;
     if (intervalMs == 0) intervalMs = 1;
-    constexpr uint32_t MAX_STREAM_ENTRIES = 65536;
-    if (entryCount > MAX_STREAM_ENTRIES) {
+    if (entryCount > TETHER_IO_MAX_STREAM_ENTRIES) {
         sendError(ErrorCode::TooManyEntries, "Too many stream entries");
         return;
     }
@@ -271,10 +312,12 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
         entryIds.push_back(eid);
     }
 
+#if TETHER_IO_STREAM_FILTERS_ENABLED
     std::vector<FilterProperty> streamFilters;
+#endif
     uint32_t filterCount = r.getU32();
     if (!r.ok()) { sendError(ErrorCode::InvalidMessage, "Truncated filter count"); return; }
-    if (filterCount > MAX_STREAM_ENTRIES) {
+    if (filterCount > TETHER_IO_MAX_STREAM_ENTRIES) {
         sendError(ErrorCode::TooManyEntries, "Too many stream filters");
         return;
     }
@@ -282,6 +325,7 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
         sendError(ErrorCode::FeatureNotSupported, "Stream filters are not supported");
         return;
     }
+#if TETHER_IO_STREAM_FILTERS_ENABLED
     streamFilters.reserve(filterCount);
     for (uint32_t i = 0; i < filterCount; ++i) {
         uint8_t nameLen = r.getU8();
@@ -324,6 +368,7 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
         }
         streamFilters.push_back(std::move(property));
     }
+#endif // TETHER_IO_STREAM_FILTERS_ENABLED
     if (!r.ok() || r.remaining() != 0) {
         sendError(ErrorCode::InvalidMessage, "Trailing ConfigureStream data");
         return;
@@ -337,7 +382,9 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
     skipCount_        = skip;
     triggerEntryId_   = triggerEntryId;
     configuredEntryIds_ = std::move(entryIds);
+#if TETHER_IO_STREAM_FILTERS_ENABLED
     streamFilters_ = std::move(streamFilters);
+#endif
     specId_++;
 
     releaseRingSource();
@@ -356,7 +403,8 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
 
     // Send ParameterStream ConfigureAck. Tether deliberately retains 32-bit
     // resolved-count and row-size fields to support larger catalogs/chunks.
-    size_t sz = 1 + 4 + 4 + 4 + 8 + collectPlan_.size() * 13;
+    const bool typed = negotiatedFeatures_ & ENCODING_FEATURE_TYPED_DESCRIPTORS;
+    size_t sz = 1 + 4 + 4 + 4 + 8 + collectPlan_.size() * (typed ? 16 : 13);
     if (txRawBuf_.size() < sz) txRawBuf_.resize(sz);
 
     BufWriter w(txRawBuf_.data(), sz);
@@ -367,16 +415,30 @@ void Session::handleConfigureStreamReq(const uint8_t* body, size_t len) {
     w.putU64(schemaEpoch_);
     for (const auto& slot : collectPlan_) {
         w.putU64(slot.paramId);
-        w.putU32(slot.entry.schemaSlot());
+        if (typed) {
+            const bool schemaTyped = slot.entry.schemaRef().key != SchemaKey{};
+            w.putU8(static_cast<uint8_t>(
+                schemaTyped ? EntryTypeTag::Schema : EntryTypeTag::Flat));
+            w.putU32(schemaTyped ? slot.entry.schemaSlot() : 0);
+            w.putU8(schemaTyped ? 0 : static_cast<uint8_t>(slot.entry.valueType()));
+            w.putU8(schemaTyped ? 0 : static_cast<uint8_t>(slot.entry.elementType()));
+        } else {
+            w.putU32(slot.entry.schemaSlot());
+        }
         w.putU8(slot.valueSize);
     }
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
     if (logFn_) logFn_("TetherIO", "ConfigureStream OK: specId=%u, %zu entries, rowSize=%u, intervalMs=%u, chunk=%u, skip=%u, trigger=%s",
                         specId_, collectPlan_.size(), rowSize_, intervalMs, chunk, skip,
                         trigMode == 0 ? "Time" : "OnChange");
+#endif // TETHER_IO_STREAMING_ENABLED
 }
 
 void Session::handleStartStream() {
+#if !TETHER_IO_STREAMING_ENABLED
+    sendError(ErrorCode::FeatureNotSupported, "Streaming disabled");
+    return;
+#else
     if (!configured_) { sendError(ErrorCode::StreamNotConfigured, "Not configured"); return; }
     if (streaming_) { sendError(ErrorCode::AlreadyStreaming, "Already streaming"); return; }
     streaming_ = true;
@@ -393,14 +455,20 @@ void Session::handleStartStream() {
     }
     if (logFn_) logFn_("TetherIO", "StartStream: streaming started (interval=%uus, chunk=%u, %zu entries)",
                         intervalUs_, chunkSize_, collectPlan_.size());
+#endif // TETHER_IO_STREAMING_ENABLED
 }
 
 void Session::handleStopStream() {
+#if !TETHER_IO_STREAMING_ENABLED
+    sendError(ErrorCode::FeatureNotSupported, "Streaming disabled");
+    return;
+#else
     if (!streaming_) { sendError(ErrorCode::NotStreaming, "Not streaming"); return; }
     if (rowsInChunk_ > 0) sendStreamData();
     streaming_ = false;
     releaseRingSource();
     if (logFn_) logFn_("TetherIO", "StopStream: streaming stopped");
+#endif // TETHER_IO_STREAMING_ENABLED
 }
 
 void Session::handlePingReq(const uint8_t* body, size_t len) {
@@ -414,6 +482,11 @@ void Session::handlePingReq(const uint8_t* body, size_t len) {
 }
 
 void Session::handleSubscribeLogReq(const uint8_t* body, size_t len) {
+#if !TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Log subscriptions disabled");
+    return;
+#else
     BufReader r(body, len);
     const auto severity = static_cast<LogSeverity>(r.getU8());
     auto readFilter = [&r](std::string& out) {
@@ -438,7 +511,7 @@ void Session::handleSubscribeLogReq(const uint8_t* body, size_t len) {
     bool capacityExceeded = false;
     {
         std::lock_guard<std::mutex> lock(sendMutex_);
-        if (logSubscriptions_.size() >= 16) {
+        if (logSubscriptions_.size() >= TETHER_IO_MAX_LOG_SUBSCRIPTIONS) {
             capacityExceeded = true;
         } else {
             subscription.id = nextLogSubscriptionId_++;
@@ -452,9 +525,15 @@ void Session::handleSubscribeLogReq(const uint8_t* body, size_t len) {
         return;
     }
     sendSubscribeLogResp(subscriptionId, true);
+#endif // TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 }
 
 void Session::handleUnsubscribeLogReq(const uint8_t* body, size_t len) {
+#if !TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Log subscriptions disabled");
+    return;
+#else
     BufReader r(body, len);
     const uint32_t id = r.getVarint();
     if (!r.ok() || r.remaining() != 0) {
@@ -471,9 +550,15 @@ void Session::handleUnsubscribeLogReq(const uint8_t* body, size_t len) {
         if (found) logSubscriptions_.erase(it);
     }
     sendUnsubscribeLogResp(id, found);
+#endif // TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
 }
 
 void Session::handleGetMetadataReq(const uint8_t* body, size_t len) {
+#if !TETHER_IO_METADATA_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Metadata disabled");
+    return;
+#else
     if (len < 8) { sendError(ErrorCode::InvalidMessage, "too short"); return; }
     BufReader r(body, len);
     uint64_t id = r.getU64();
@@ -497,9 +582,15 @@ void Session::handleGetMetadataReq(const uint8_t* body, size_t len) {
         w.putStr16(v.data(), v.size());
     });
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
+#endif // TETHER_IO_METADATA_ENABLED
 }
 
 void Session::handleSnapshotParamsReq(const uint8_t* body, size_t len) {
+#if !TETHER_IO_SNAPSHOTS_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Snapshots disabled");
+    return;
+#else
     BufReader r(body, len);
     uint32_t count = r.getU32();
     if (!r.ok()) { sendError(ErrorCode::InvalidMessage, "parse error"); return; }
@@ -519,9 +610,13 @@ void Session::handleSnapshotParamsReq(const uint8_t* body, size_t len) {
 
     uint64_t ts = nowUs();
 
+    const bool typed = negotiatedFeatures_ & ENCODING_FEATURE_TYPED_DESCRIPTORS;
     struct SnapshotValue {
         uint64_t id;
         uint32_t schemaSlot;
+        uint8_t typeTag;
+        uint8_t valueType;
+        uint8_t elementType;
         uint8_t valueSize;
         std::vector<uint8_t> bytes;
         bool variable = false;
@@ -533,20 +628,26 @@ void Session::handleSnapshotParamsReq(const uint8_t* body, size_t len) {
     for (uint64_t id : ids) {
         EntryView e = registry_.findParam(id);
         if (!e) continue;
+        const bool schemaTyped = e.schemaRef().key != SchemaKey{};
         SnapshotValue value{};
         value.id = id;
-        value.schemaSlot = e.schemaSlot();
+        value.typeTag = static_cast<uint8_t>(
+            schemaTyped ? EntryTypeTag::Schema : EntryTypeTag::Flat);
+        value.schemaSlot = schemaTyped ? e.schemaSlot() : 0;
+        value.valueType = schemaTyped ? 0 : static_cast<uint8_t>(e.valueType());
+        value.elementType = schemaTyped ? 0 : static_cast<uint8_t>(e.elementType());
         value.valueSize = e.valueSize();
         value.variable = e.isVariableLength();
+        const size_t header = typed ? 7 : 5;
         if (value.variable) {
             value.bytes.resize(e.maxValueSize());
             const size_t actual = e.readVar(value.bytes.data(), value.bytes.size());
             value.bytes.resize(actual);
-            sz += 8 + 4 + 1 + MAX_VARINT_SIZE + actual;
+            sz += 8 + header + MAX_VARINT_SIZE + actual;
         } else {
             value.bytes.resize(value.valueSize);
             e.read(value.bytes.data());
-            sz += 8 + 4 + 1 + value.valueSize;
+            sz += 8 + header + value.valueSize;
         }
         values.push_back(std::move(value));
     }
@@ -559,7 +660,14 @@ void Session::handleSnapshotParamsReq(const uint8_t* body, size_t len) {
     w.putU64(schemaEpoch_);
     for (const auto& value : values) {
         w.putU64(value.id);
-        w.putU32(value.schemaSlot);
+        if (typed) {
+            w.putU8(value.typeTag);
+            w.putU32(value.schemaSlot);
+            w.putU8(value.valueType);
+            w.putU8(value.elementType);
+        } else {
+            w.putU32(value.schemaSlot);
+        }
         w.putU8(value.valueSize);
         if (value.variable) {
             w.putVarint(static_cast<uint32_t>(value.bytes.size()));
@@ -567,9 +675,15 @@ void Session::handleSnapshotParamsReq(const uint8_t* body, size_t len) {
         w.putBytes(value.bytes.data(), value.bytes.size());
     }
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
+#endif // TETHER_IO_SNAPSHOTS_ENABLED
 }
 
 void Session::handleSnapshotSignalsReq(const uint8_t* body, size_t len) {
+#if !TETHER_IO_SNAPSHOTS_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Snapshots disabled");
+    return;
+#else
     BufReader r(body, len);
     uint32_t count = r.getU32();
     if (!r.ok()) { sendError(ErrorCode::InvalidMessage, "parse error"); return; }
@@ -588,9 +702,13 @@ void Session::handleSnapshotSignalsReq(const uint8_t* body, size_t len) {
 
     uint64_t ts = nowUs();
 
+    const bool typed = negotiatedFeatures_ & ENCODING_FEATURE_TYPED_DESCRIPTORS;
     struct SnapshotValue {
         uint64_t id;
         uint32_t schemaSlot;
+        uint8_t typeTag;
+        uint8_t valueType;
+        uint8_t elementType;
         uint8_t valueSize;
         std::vector<uint8_t> bytes;
         bool variable = false;
@@ -602,20 +720,26 @@ void Session::handleSnapshotSignalsReq(const uint8_t* body, size_t len) {
     for (uint64_t id : ids) {
         EntryView e = registry_.findSignal(id);
         if (!e) continue;
+        const bool schemaTyped = e.schemaRef().key != SchemaKey{};
         SnapshotValue value{};
         value.id = id;
+        value.typeTag = static_cast<uint8_t>(
+            schemaTyped ? EntryTypeTag::Schema : EntryTypeTag::Flat);
+        value.schemaSlot = schemaTyped ? e.schemaSlot() : 0;
+        value.valueType = schemaTyped ? 0 : static_cast<uint8_t>(e.valueType());
+        value.elementType = schemaTyped ? 0 : static_cast<uint8_t>(e.elementType());
         value.valueSize = e.valueSize();
-        value.schemaSlot = e.schemaSlot();
         value.variable = e.isVariableLength();
+        const size_t header = typed ? 7 : 5;
         if (value.variable) {
             value.bytes.resize(e.maxValueSize());
             const size_t actual = e.readVar(value.bytes.data(), value.bytes.size());
             value.bytes.resize(actual);
-            sz += 8 + 4 + 1 + MAX_VARINT_SIZE + actual;
+            sz += 8 + header + MAX_VARINT_SIZE + actual;
         } else {
             value.bytes.resize(value.valueSize);
             e.read(value.bytes.data());
-            sz += 8 + 4 + 1 + value.valueSize;
+            sz += 8 + header + value.valueSize;
         }
         values.push_back(std::move(value));
     }
@@ -628,7 +752,14 @@ void Session::handleSnapshotSignalsReq(const uint8_t* body, size_t len) {
     w.putU64(schemaEpoch_);
     for (const auto& value : values) {
         w.putU64(value.id);
-        w.putU32(value.schemaSlot);
+        if (typed) {
+            w.putU8(value.typeTag);
+            w.putU32(value.schemaSlot);
+            w.putU8(value.valueType);
+            w.putU8(value.elementType);
+        } else {
+            w.putU32(value.schemaSlot);
+        }
         w.putU8(value.valueSize);
         if (value.variable) {
             w.putVarint(static_cast<uint32_t>(value.bytes.size()));
@@ -636,9 +767,15 @@ void Session::handleSnapshotSignalsReq(const uint8_t* body, size_t len) {
         w.putBytes(value.bytes.data(), value.bytes.size());
     }
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
+#endif // TETHER_IO_SNAPSHOTS_ENABLED
 }
 
 void Session::handleConfigureDatalogReq(const uint8_t* body, size_t len) {
+#if !TETHER_IO_DATALOG_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Datalogging disabled");
+    return;
+#else
     if (!datalogRecorder_) {
         sendError(ErrorCode::FeatureNotSupported, "Datalogging not available");
         return;
@@ -672,9 +809,14 @@ void Session::handleConfigureDatalogReq(const uint8_t* body, size_t len) {
     w.putU8(static_cast<uint8_t>(MessageType::ConfigureDatalogResp));
     w.putU8(0);  // success
     if (w.ok()) sendRaw(buf, w.pos);
+#endif // TETHER_IO_DATALOG_ENABLED
 }
 
 void Session::handleDatalogStatusReq() {
+#if !TETHER_IO_DATALOG_ENABLED
+    sendError(ErrorCode::FeatureNotSupported, "Datalogging disabled");
+    return;
+#else
     DatalogStatus status;
     if (datalogRecorder_) {
         status = datalogRecorder_->status();
@@ -687,9 +829,15 @@ void Session::handleDatalogStatusReq() {
     w.putU8(static_cast<uint8_t>(MessageType::DatalogStatusResp));
     status.encode(w);
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
+#endif // TETHER_IO_DATALOG_ENABLED
 }
 
 void Session::handleConfigureThresholdReq(const uint8_t* body, size_t len) {
+#if !TETHER_IO_THRESHOLDS_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Thresholds disabled");
+    return;
+#else
     BufReader r(body, len);
     ThresholdConfig config;
     if (!ThresholdConfig::decode(r, config)) {
@@ -704,9 +852,15 @@ void Session::handleConfigureThresholdReq(const uint8_t* body, size_t len) {
     w.putU8(static_cast<uint8_t>(MessageType::ConfigureThresholdResp));
     w.putU8(0);  // success
     if (w.ok()) sendRaw(buf, w.pos);
+#endif // TETHER_IO_THRESHOLDS_ENABLED
 }
 
 void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
+#if !TETHER_IO_FUNCTIONS_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Functions disabled");
+    return;
+#else
     if (len != 8) {
         sendError(ErrorCode::InvalidMessage, "Invalid ListFunctions request");
         return;
@@ -859,9 +1013,15 @@ void Session::handleListFunctionsReq(const uint8_t* body, size_t len) {
         }
     }
     if (w.ok()) sendRaw(txRawBuf_.data(), w.pos);
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 }
 
 void Session::handleCallFunctionReq(const uint8_t* body, size_t len) {
+#if !TETHER_IO_FUNCTIONS_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Functions disabled");
+    return;
+#else
     if (len < 12) {
         sendError(ErrorCode::InvalidMessage, "Invalid CallFunction request");
         return;
@@ -883,9 +1043,15 @@ void Session::handleCallFunctionReq(const uint8_t* body, size_t len) {
     FunctionCallResult result = invokeFunctionChecked(function, argumentCount, r, &context);
     validateFunctionReturn(schemaCatalog_, function.returnValue(), result);
     sendFunctionCallResponse(functionId, function.returnValue(), result);
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 }
 
 void Session::handleInvokeExReq(const uint8_t* body, size_t len) {
+#if !TETHER_IO_FUNCTIONS_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Functions disabled");
+    return;
+#else
     BufReader r(body, len);
     const uint64_t requestId = r.getU64();
     const uint64_t functionId = r.getU64();
@@ -915,9 +1081,15 @@ void Session::handleInvokeExReq(const uint8_t* body, size_t len) {
     FunctionCallResult result = invokeFunctionChecked(function, argumentCount, r, &context);
     validateFunctionReturn(schemaCatalog_, function.returnValue(), result);
     sendInvokeExResponse(requestId, function.returnValue(), result);
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 }
 
 void Session::handleInvokeExResp(const uint8_t* body, size_t len) {
+#if !TETHER_IO_FUNCTIONS_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Functions disabled");
+    return;
+#else
     BufReader r(body, len);
     const uint64_t requestId = r.getU64();
     const uint8_t status = r.getU8();
@@ -980,9 +1152,15 @@ void Session::handleInvokeExResp(const uint8_t* body, size_t len) {
         result.returnValue.clear();
     }
     pending.callback(result);
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 }
 
 void Session::handleRegisterFunctionsReq(const uint8_t* body, size_t len) {
+#if !TETHER_IO_FUNCTIONS_ENABLED
+    (void)body; (void)len;
+    sendError(ErrorCode::FeatureNotSupported, "Functions disabled");
+    return;
+#else
     BufReader r(body, len);
     const uint32_t count = r.getU32();
     if (!r.ok() || count > MAX_COLLECTION_COUNT) {
@@ -1010,6 +1188,7 @@ void Session::handleRegisterFunctionsReq(const uint8_t* body, size_t len) {
     }
     log("Client registered %u peer functions", count);
     sendRegisterFunctionsResp(count, true);
+#endif // TETHER_IO_FUNCTIONS_ENABLED
 }
 
 // --------------------------------------------------------------------------

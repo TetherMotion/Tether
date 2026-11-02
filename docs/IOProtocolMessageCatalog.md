@@ -36,8 +36,20 @@ Conventions below:
 ListParamsReq   := offset U32 max_count U32
 ListParamsResp  := total U32 offset U32 count U32 schema_epoch U64
                    * param_descriptor
-param_descriptor := id U64 schema_slot U32 flags U32
+param_descriptor := id U64
+                    entry_type
+                    flags U32
                     name str16 description str16 group str16
+
+// entry_type — depends on negotiated ENCODING_FEATURE_TYPED_DESCRIPTORS:
+//   negotiated:   type_tag U8        // 0 = Schema, 1 = Flat
+//                 schema_slot U32    // type_tag=0: authoritative; else 0
+//                 value_type U8      // type_tag=1: ValueType; else 0
+//                 element_type U8    // type_tag=1 & Array: elem ValueType; else 0
+//                 value_size U8      // type_tag=1: canonical bytes; else 0
+//                 max_value_size U16 // type_tag=1: var-len cap; else 0
+//   legacy V6:    schema_slot U32    // (flat entries are indistinguishable
+//                                    //  from manifest slot 0)
 
 GetParamReq     := id U64
 GetParamResp    := id U64 value_length varuint value[value_length]
@@ -46,6 +58,44 @@ SetParameterReq := id U64 value_length varuint value[value_length]
 SetParameterResp:= id U64                // no status — errors use Error
 ```
 
+`type_tag` is a discriminated union over how the entry's type is
+described: `Schema`(0) — `schema_slot` resolves in the negotiated
+manifest/graph; `Flat`(1) — the entry carries a plain `ValueType` and
+`value_type`/`element_type`/`value_size`/`max_value_size` describe the
+encoding. Flat values use the flat encodings — fixed-width
+little-endian scalars, `varuint`-length-prefixed variable values —
+regardless of whether the session negotiated a schema manifest.
+The inapplicable half of the union is always 0 on the wire, so
+`schema_slot == 0` unambiguously means "no schema".
+
+The full `ValueType` set usable in flat descriptors:
+
+| Tag | Name | Encoding |
+|----:|---|---|
+| 1–4 | `U8`/`U16`/`U32`/`U64` | fixed-width LE uint |
+| 5–8 | `I8`/`I16`/`I32`/`I64` | fixed-width LE int |
+| 9–10 | `F32`/`F64` | fixed-width LE IEEE-754 |
+| 11 | `Bool` | 1 byte, 0/1 |
+| 12 | `String` | `varuint` len + UTF-8 bytes |
+| 13 | `Binary` | `varuint` len + raw bytes |
+| 14 | `IPv4` | 4 bytes |
+| 15 | `IPv6` | 16 bytes |
+| 16 | `MAC` | 6 bytes |
+| 17 | `Enum` | `varuint` ordinal (max_value_size = max ordinal bytes) |
+| 18 | `UVarint` | protobuf-style varuint |
+| 19 | `IVarint` | zigzag varint |
+| 20 | `Struct` | `varuint` len + opaque bytes |
+| 21 | `Array` | `varuint` count + element_type-encoded values |
+| 22 | `FixedString` | `varuint` len + bytes (cap in max_value_size) |
+| 23 | `Stream` | `varuint` len + chunked bytes |
+
+`value_size` is the canonical byte size for fixed-width types (1–11,
+14–16); it is 0 for the variable-length types (12, 13, 17–23), whose
+per-value byte length travels with the value itself. `max_value_size`
+carries the byte cap for variable-length entries. `element_type` is
+only meaningful for `Array` (element ValueType, including nested
+`Array`); it is 0 (`None`) otherwise.
+
 `setParam` and `setParamVar` emit the same message; the server
 validates `value_length` against the entry (exact `valueSize` for
 fixed-size entries, `<= maxValueSize` for variable-length) and
@@ -53,8 +103,8 @@ validates the payload against the catalog schema when one is
 installed.
 
 ```
-PingReq         := nonce U32
-PongResp        := nonce U32
+PingReq         := nonce varint
+PongResp        := nonce varint
 
 GetMetadataReq  := id U64
 GetMetadataResp := id U64 count U32 * (key str16 value str16)
@@ -86,7 +136,13 @@ stream_filter   := name_length U8 name[name_length]
 
 ConfigureAck    := spec_id U32 resolved_count U32 row_size U32
                    schema_epoch U64
-                   * (entry_id U64 schema_slot U32 value_size U8)
+                   * stream_layout_entry
+
+// stream_layout_entry — negotiated (16 bytes):
+//     entry_id U64 type_tag U8 schema_slot U32
+//     value_type U8 element_type U8 value_size U8
+//   legacy V6 (13 bytes):
+//     entry_id U64 schema_slot U32 value_size U8
 
 StartStream/StopStream := (empty body)     // one stream per session
 
@@ -147,9 +203,13 @@ GetSignalResp    := id U64 value_length varuint value[value_length]
 
 SnapshotParamsReq  := count U32 * (id U64)     // count 0 = all params
 SnapshotParamsResp := timestamp_us U64 count U32 schema_epoch U64
-                      * (id U64 schema_slot U32 value_size U8 value)
-                     // value_size 0 = variable: value is
-                     // [length varuint][bytes]
+                      * snapshot_value
+// snapshot_value — negotiated:
+//     id U64 type_tag U8 schema_slot U32
+//     value_type U8 element_type U8 value_size U8 value
+//   legacy V6:
+//     id U64 schema_slot U32 value_size U8 value
+// value_size 0 = variable: value is [length varuint][bytes]
 SnapshotSignalsReq/Resp — same layout over signals.
 
 CatalogChanged   := (empty body)         // re-list to observe changes

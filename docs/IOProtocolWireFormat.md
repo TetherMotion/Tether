@@ -67,10 +67,23 @@ SchemaUpdate     := epoch U32 manifest
 schema_ref       := schema_key[16] schema_digest[32]
 ```
 
-The current V6 implementation uses encoding features zero and defaults to a
+The current V6 implementation defaults to a
 1 MiB message/value limit, 64 KiB descriptor limit, 1,024 definitions, value
 depth 32, and 1,000,000 collection entries. A server supports V6 only. If V6
 is not in the client range, it sends `SchemaReject(UnsupportedVersion)`.
+
+`encoding_features` negotiates optional wire extensions: the client
+advertises the bits it supports in `ClientHello`; `ServerHello` returns the
+intersection (bits supported by both sides). Defined bits:
+
+| Bit | Feature |
+|----:|---|
+| `0x01` | `ENCODING_FEATURE_TYPED_DESCRIPTORS` — catalog descriptors, stream layout entries, and snapshot values carry the entry-type union (`type_tag`/`schema_slot`/`value_type`/`element_type`/`value_size`/`max_value_size`) instead of a bare `schema_slot`. |
+
+When the bit is not negotiated (e.g. a peer that pre-dates the feature
+sends `encoding_features = 0`), all descriptor forms fall back to the
+legacy V6 layout — the type-union fields are simply absent. This keeps
+old V6 peers fully functional against newer servers and vice versa.
 
 `SchemaReject` codes are `UnsupportedVersion` (1), `LimitMismatch` (2),
 `InvalidManifest` (3), `InvalidDefinition` (4), `MissingDependency` (5), and
@@ -163,11 +176,23 @@ The retained parameter, signal, stream, function, and input-stream message
 IDs are usable only after V6 commit. Application values must validate against
 their catalog schema.
 
-`ConfigureAck` identifies its layout with an epoch and slots:
+Catalog descriptors carry an entry type union (`type_tag U8`) when
+`ENCODING_FEATURE_TYPED_DESCRIPTORS` was negotiated; otherwise only a
+bare `schema_slot` is sent (legacy V6). In the union form, `Schema`(0)
+makes `schema_slot` authoritative and leaves `value_type`/`element_type`/
+`value_size`/`max_value_size` zero; `Flat`(1) describes the value directly
+with a plain `ValueType` and leaves `schema_slot` zero. Flat-typed
+entries work with or without a negotiated schema manifest — a
+schema-less peer reports every entry as `Flat`.
+
+`ConfigureAck` identifies its layout with an epoch and per-entry type
+tags (negotiated form shown; the legacy form is
+`[entry_id U64][schema_slot U32][value_size U8]`):
 
 ```
 [type][spec_id U32][resolved_count U32][row_size U32][schema_epoch U64]
-  * [entry_id U64][schema_slot U32][value_size U8]
+  * [entry_id U64][type_tag U8][schema_slot U32]
+    [value_type U8][element_type U8][value_size U8]
 ```
 
 Each configured stream filter is:

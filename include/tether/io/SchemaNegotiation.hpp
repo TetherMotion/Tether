@@ -10,6 +10,20 @@ namespace tether::io {
 
 inline constexpr uint8_t SCHEMA_PROTOCOL_VERSION = 6;
 
+// ---------------------------------------------------------------------------
+// encoding_features bits (ClientHello advertises support; ServerHello returns
+// the negotiated intersection = features supported by BOTH sides).
+// ---------------------------------------------------------------------------
+/**
+ * Catalog descriptors (param/signal descriptors, ConfigureAck layout
+ * entries, snapshot values) carry the entry type union:
+ * [type_tag U8][schema_slot U32][value_type U8][element_type U8]
+ * [value_size U8][max_value_size U16]. When this bit is not negotiated,
+ * the legacy V6 layout is used instead ([schema_slot U32] only — flat
+ * entries are then indistinguishable from manifest slot 0).
+ */
+inline constexpr uint32_t ENCODING_FEATURE_TYPED_DESCRIPTORS = 0x01;
+
 enum class SchemaRejectCode : uint8_t {
     UnsupportedVersion = 1,
     LimitMismatch = 2,
@@ -38,6 +52,8 @@ struct ClientHelloV6 {
 
 struct ServerHelloV6 {
     uint8_t selectedVersion = SCHEMA_PROTOCOL_VERSION;
+    /**Negotiated feature set: intersection of the client's advertised
+     * bits and the server's supported bits. */
     uint32_t encodingFeatures = 0;
     SchemaNegotiationLimits limits;
     SchemaEpoch epoch = 0;
