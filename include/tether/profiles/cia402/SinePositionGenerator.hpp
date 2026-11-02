@@ -93,7 +93,7 @@ public:
      * @param cmd             Motion command buffer to fill; unused
      *                        fields are zeroed.
      */
-    void update(double /*dt_seconds*/, uint16_t statusword,
+    void update(double dt_seconds, uint16_t statusword,
                 int32_t position_actual, MotionCommand& cmd) {
         if (epoch_ == std::chrono::steady_clock::time_point{}) {
             epoch_ = std::chrono::steady_clock::now();

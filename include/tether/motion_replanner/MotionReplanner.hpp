@@ -329,6 +329,7 @@ public:
      *
      * Returns a copy rather than a const reference so the caller cannot
      * observe the deque while another thread is mutating it.
+     * @return copy of the actual-sample buffer.
      */
     std::deque<PositionSample> getActualSamples() const {
         std::lock_guard<std::mutex> lk(samples_mutex_);

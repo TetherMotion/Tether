@@ -11,7 +11,7 @@
  *   | body (renderBody hook draws rows [1, sepY) on stdscr)        |
  *   |--------------------------------------------------------------|
  *   | log lines ...                                                |
- *   | q: quit   <keyHints>                                         |
+ *   | q: quit   &lt;keyHints&gt;                                         |
  *   +--------------------------------------------------------------+
  *
  * Unlike TreeScreen there is no widget in the body — the app draws it

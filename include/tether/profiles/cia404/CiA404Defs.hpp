@@ -824,6 +824,9 @@ struct __attribute__((packed)) TxPDO_ControllerStatus {
 /**
  * @brief RxPDO for controller setpoint
  */
+/**
+ * @brief RxPDO carrying controller setpoint and mode.
+ */
 struct __attribute__((packed)) RxPDO_ControllerSetpoint {
     int32_t setpoint; /**< Controller setpoint */
     uint8_t mode; /**< Controller mode */

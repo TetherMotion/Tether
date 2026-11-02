@@ -50,6 +50,9 @@ enum class ControlWord : uint16_t {
 /**Bits 0-3 and 7 of the controlword carry the state-transition command. */
 inline constexpr uint16_t ControlWordTransitionMask = 0x008F;
 
+/**
+ * @brief CiA 402 object-dictionary register indices.
+ */
 enum class Register : uint16_t {
     // ========================================================================
     // Device Control (0x6000 - 0x607F)

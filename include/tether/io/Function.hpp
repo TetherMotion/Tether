@@ -344,6 +344,7 @@ struct FunctionEntry {
      * Functions use positional calls. Once an optional argument appears,
      * every subsequent argument must also be optional. Optional arguments
      * must carry a default because omitted positions are materialized locally.
+     * @return true when the signature is well-formed.
      */
     bool validSignature() const {
         bool optionalSeen = false;

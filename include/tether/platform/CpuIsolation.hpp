@@ -67,7 +67,10 @@ public:
         bool cpuset_isolated = false; /**< cgroup2 partition created (Q8) */
         bool irqs_steered    = false; /**< IRQ affinities moved off (Q9) */
         bool valid() const { return cpu >= 0; }
-        /**True when the CPU is hard-isolated by either mechanism. */
+        /**
+         * @brief True when the CPU is hard-isolated by either mechanism.
+         * @return true for kernel or cpuset isolation.
+         */
         bool hardIsolated() const { return kernel_isolated || cpuset_isolated; }
     };
 

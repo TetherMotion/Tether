@@ -51,6 +51,9 @@ enum class Error {
 // Frame Direction
 // ============================================================================
 
+/**
+ * @brief Frame direction on the wire.
+ */
 enum class FrameDirection {
     Rx, /**< Received frame */
     Tx, /**< Transmitted frame */
