@@ -34,8 +34,8 @@ int main(int argc, char** argv) {
             port = static_cast<uint16_t>(std::stoi(argv[++i]));
 
     std::mutex mtx;
-    std::string devName = "vesoma-01";
-    const std::string serial = "VSM-2026-0042";
+    std::string devName = "tether-01";
+    const std::string serial = "TTH-2026-0042";
 
     Registry registry;
     {
@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
             std::printf("[client] device.name   = %s\n", getStr(1).c_str());
             std::printf("[client] device.serial = %s\n", getStr(2).c_str());
 
-            const std::string nn = "vesoma-lab";
+            const std::string nn = "tether-lab";
             if (!client.setParamVar(1, nn.data(), nn.size())) {
                 std::fprintf(stderr, "setParamVar(device.name) failed\n");
                 rc = 1;

@@ -114,7 +114,7 @@ TEST(PendingSlot, MoveOnlyPayload) {
   EXPECT_FALSE(slot.take().has_value());
 }
 
-TEST(PendingSlot, SharedPtrPayloadVesomaShape) {
+TEST(PendingSlot, SharedPtrPayloadDeferredSwap) {
   // The deferred-swap pattern: a shared_ptr parked by one thread, claimed
   // at the consumer's tick boundary.
   PendingSlot<std::shared_ptr<int>> slot;
