@@ -69,7 +69,10 @@ public:
     // Individual steps
     // ------------------------------------------------------------------
 
-    /**@brief Reset the slave to INIT if it is not already there. */
+    /**
+     * @brief Reset the slave to INIT if it is not already there.
+     * @return true on success or non-fatal read failure.
+     */
     bool resetToInit() {
         uint8_t current_state = 0;
         if (!master_.ethercatMaster().readSlaveApplicationLayerState(slave_idx_, current_state)) {
@@ -108,7 +111,10 @@ public:
         return true;
     }
 
-    /**@brief Configure the mailbox (SM0/SM1) from SII automatically. */
+    /**
+     * @brief Configure the mailbox (SM0/SM1) from SII automatically.
+     * @return true when the mailbox configuration write succeeded.
+     */
     bool configureMailbox() {
         TETHER_LOGI(tag_, "Configuring mailbox for {}...", master_.ethercatMaster().slaveLogPrefix(slave_idx_).c_str());
 
@@ -123,7 +129,10 @@ public:
         return true;
     }
 
-    /**@brief Transition the slave to PRE_OP. */
+    /**
+     * @brief Transition the slave to PRE_OP.
+     * @return true when the slave reached PRE_OP.
+     */
     bool transitionToPreOp() {
         auto& slave = master_.ethercatMaster().slave(slave_idx_);
         const auto err = slave.transitionToPreOp();
@@ -303,16 +312,28 @@ public:
     // Accessors
     // ------------------------------------------------------------------
 
-    /**@brief Get the CiA402Drive handle (created by configurePDOsAndOp). */
+    /**
+     * @brief Get the CiA402Drive handle (created by configurePDOsAndOp).
+     * @return reference to the drive registered on the master.
+     */
     CiA402Drive& drive() { return master_.ensureDrive(slave_idx_); }
 
-    /**@brief Get the raw EtherCAT Slave. */
+    /**
+     * @brief Get the raw EtherCAT Slave.
+     * @return reference to the underlying slave object.
+     */
     EtherCAT::Slave& slave() { return master_.ethercatMaster().slave(slave_idx_); }
 
-    /**@brief Get the CoE/SDO manager for this slave. */
+    /**
+     * @brief Get the CoE/SDO manager for this slave.
+     * @return reference to the slave's CoE manager.
+     */
     CoE::CoEManager& sdo() { return master_.ethercatMaster().sdoManager(slave_idx_); }
 
-    /**@brief Get the slave index. */
+    /**
+     * @brief Get the slave index.
+     * @return 0-based slave position on the bus.
+     */
     uint16_t slaveIndex() const { return slave_idx_; }
 
 private:

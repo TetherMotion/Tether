@@ -105,7 +105,10 @@ struct MultiPDOSyncManagerConfig {
     SyncManagerType type{SyncManagerType::ProcessOutput};
     std::vector<PDOMappingRegion> pdo_mappings;
 
-    /**Sum of all PDO mapping sizes — the total SM length. */
+    /**
+     * @brief Sum of all PDO mapping sizes — the total SM length.
+     * @return total mapped bytes (fixed + writable).
+     */
     uint16_t totalLength() const {
         uint16_t total = 0;
         for (const auto& p : pdo_mappings) {
@@ -118,6 +121,8 @@ struct MultiPDOSyncManagerConfig {
      * Sum of writable (non-fixed) PDO mapping sizes only.
      * This is the SM length that the master should write to the SM
      * length register — the drive firmware adds fixed PDOs itself.
+     *
+     * @return writable mapped bytes only.
      */
     uint16_t writableLength() const {
         uint16_t total = 0;
@@ -140,6 +145,10 @@ struct MultiPDOSyncManagerConfig {
     /**
      * Create a ProcessOutput (RxPDO) SM config with multiple PDO mappings.
      * Defaults to SM2 with standard buffered-write control register.
+     *
+     * @param addr   SM2 physical start address.
+     * @param pdos   PDO mapping regions to assign.
+     * @return populated SM config.
      */
     static MultiPDOSyncManagerConfig process_output(
         uint16_t addr,
@@ -157,6 +166,10 @@ struct MultiPDOSyncManagerConfig {
     /**
      * Create a ProcessInput (TxPDO) SM config with multiple PDO mappings.
      * Defaults to SM3 with standard buffered-read control register.
+     *
+     * @param addr   SM3 physical start address.
+     * @param pdos   PDO mapping regions to assign.
+     * @return populated SM config.
      */
     static MultiPDOSyncManagerConfig process_input(
         uint16_t addr,
@@ -171,7 +184,10 @@ struct MultiPDOSyncManagerConfig {
         return cfg;
     }
 
-    /**Convert to a legacy SyncManagerConfig (single PDO, total length). */
+    /**
+     * @brief Convert to a legacy SyncManagerConfig (single PDO, total length).
+     * @return equivalent legacy config for single-PDO consumers.
+     */
     SyncManagerConfig toLegacyConfig() const {
         SyncManagerConfig leg;
         leg.phys_start_addr = phys_start_addr;

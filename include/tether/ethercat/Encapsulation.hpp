@@ -25,11 +25,11 @@ namespace HAL { class IEthernet; }
  *
  * Grammar (comma-separated tokens):
  *   raw | none                      — plain EtherCAT (default)
- *   vlan:<vid>                      — RX filter + TX tag on <vid> (1-4095)
- *   vlan:<lo>-<hi>                  — RX VID range; TX tag = <lo>
+ *   vlan:&lt;vid&gt;                      — RX filter + TX tag on &lt;vid&gt; (1-4095)
+ *   vlan:&lt;lo&gt;-&lt;hi&gt;                  — RX VID range; TX tag = &lt;lo&gt;
  *   vlan:any                        — RX catch-all for tagged frames
- *   vlantx:<vid|off>                — override/disable TX tag
- *   udp[:<port>]                    — EtherCAT-over-UDP (ETG.1000.3, port 34980)
+ *   vlantx:&lt;vid|off&gt;                — override/disable TX tag
+ *   udp[:&lt;port&gt;]                    — EtherCAT-over-UDP (ETG.1000.3, port 34980)
  *
  * Examples: "vlan:1999", "udp", "vlan:100,udp", "vlan:100-200,vlantx:off".
  */
@@ -43,11 +43,17 @@ struct EncapsulationConfig {
     bool     udp     = false;
     uint16_t udpPort = kEtherCATUdpPort;
 
-    /**VLAN routing/tagging is in use. */
+    /**
+     * @brief VLAN routing/tagging is in use.
+     * @return true when any RX/TX VLAN option is configured.
+     */
     bool vlanActive() const {
         return rxAny || rxRange.has_value() || txVlan.has_value();
     }
-    /**Any encapsulation (VLAN or UDP) is in use. */
+    /**
+     * @brief Any encapsulation (VLAN or UDP) is in use.
+     * @return true when VLAN or UDP encapsulation is configured.
+     */
     bool enabled() const { return vlanActive() || udp; }
 };
 
@@ -110,6 +116,9 @@ void attachEncapsulationBpfFilter(
  * @return the NetworkInterface the master should start() on — the router's
  *         per-master view under VLAN, or `&backend` otherwise; nullptr on
  *         failure (e.g. UDP encapsulation not compiled in).
+ *
+ * @param encapsulation  Parsed encapsulation config.
+ * @param tag            Logger tag for diagnostics.
  */
 NetworkInterface* setupEncapsulation(
     HAL::IEthernet& eth,

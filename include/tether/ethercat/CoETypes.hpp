@@ -62,17 +62,28 @@ struct CoEError {
     uint32_t     abort_code = 0;
 
     constexpr CoEError() = default;
-    /**Implicit: a bare category means "no abort detail". */
+    /**
+     * @brief Implicit: a bare category means "no abort detail".
+     * @param c  Error category.
+     */
     constexpr CoEError(CoEErrorCode c) : code(c) {}
     constexpr CoEError(CoEErrorCode c, SDOAbortCode a, uint32_t raw)
         : code(c), abort(a), abort_code(raw) {}
 
-    /**Build an Aborted error carrying the slave's raw abort code. */
+    /**
+     * @brief Build an Aborted error carrying the slave's raw abort code.
+     * @param raw  SDO abort code returned by the slave.
+     * @return CoEError with code=Aborted and abort details filled.
+     */
     static constexpr CoEError aborted(uint32_t raw) {
         return CoEError(CoEErrorCode::Aborted, static_cast<SDOAbortCode>(raw), raw);
     }
 
-    /**Compare against a bare category: `err == CoEErrorCode::Timeout`. */
+    /**
+     * @brief Compare against a bare category: `err == CoEErrorCode::Timeout`.
+     * @param c  Category to compare against.
+     * @return true when this error's code equals `c`.
+     */
     constexpr bool operator==(CoEErrorCode c) const { return code == c; }
     bool operator==(const CoEError&) const = default;
 };
@@ -82,6 +93,9 @@ struct CoEError {
  *
  * For aborts this returns the decoded abort string (e.g. "Object does not
  * exist") so callers can print one informative line with abort_code.
+ *
+ * @param error  The CoEError to describe.
+ * @return static description string.
  */
 const char* coeErrorStr(CoEError error);
 

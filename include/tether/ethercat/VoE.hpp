@@ -157,6 +157,8 @@ enum class VoEError : uint32_t {
 
 /**
  * @brief Get error string
+ * @param error  VoEError code.
+ * @return static description string, or "Unknown" for unlisted codes.
  */
 const char* voe_error_string(VoEError error);
 
@@ -257,6 +259,7 @@ void voe_deinit();
 
 /**
  * @brief Check if VoE is initialized
+ * @return true between voe_init() and voe_deinit().
  */
 bool voe_is_initialized();
 
@@ -305,6 +308,7 @@ bool voe_queue_request(const VoERequest& request);
 
 /**
  * @brief Get number of pending VoE requests
+ * @return requests queued but not yet sent.
  */
 size_t voe_pending_count();
 
@@ -325,6 +329,7 @@ bool voe_register_handler(uint32_t vendor_id, VoEHandler handler);
 
 /**
  * @brief Unregister vendor handler
+ * @param vendor_id  Vendor ID previously registered (0 = the wildcard).
  */
 void voe_unregister_handler(uint32_t vendor_id);
 
@@ -346,6 +351,7 @@ struct VoEStats {
 
 /**
  * @brief Get VoE statistics
+ * @return snapshot of the global VoE counters.
  */
 VoEStats voe_get_stats();
 
