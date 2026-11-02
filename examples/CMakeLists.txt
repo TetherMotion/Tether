@@ -540,6 +540,60 @@ add_tether_example(tether_io_sim
 # same SLIP/TCP connection. Demonstrates the hosted-filter pattern.
 add_tether_example(tether_io_peer_function
     LIBRARIES tether_io_protocol tether_common)
+
+# One-feature Tether IO examples — each self-contained (embedded server +
+# client over loopback TCP/SLIP) and named for the single protocol
+# feature it exercises.
+add_tether_example(tether_io_minimal_server
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_client_basics
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_server_function
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_polled_signal
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_ring_stream
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_invoke_ex
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_schema_packed
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_schema_tagged
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_schema_negotiation
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_peer_monitor
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_peer_failover
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_input_stream
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_log_subscription
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_snapshots
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_datalog
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_threshold
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_metadata
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_param_varlen
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_catalog_changes
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_pipe_transport
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_serial_transport
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_multi_client
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_invoke_handler
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_machine_profile
+    LIBRARIES tether_io_protocol tether_common)
+add_tether_example(tether_io_machine_auth
+    LIBRARIES tether_io_protocol tether_common)
 endif()
 
 add_custom_target(examples DEPENDS ${TETHER_EXAMPLE_TARGETS})
