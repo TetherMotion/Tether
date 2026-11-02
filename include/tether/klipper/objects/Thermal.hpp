@@ -387,6 +387,9 @@ public:
      * When set, control() feeds the current flow (from the tracker) into
      * the controller and adds its feed-forward output to the PID PWM.
      * Pass nullptr to disable.
+     *
+     * @param controller  Flow-adaptive heater controller (shared).
+     * @param tracker     Extrusion flow tracker feeding it (shared).
      */
     void setFlowCompensation(
         std::shared_ptr<tether::control::extrusion::FlowAdaptiveHeaterController>
@@ -403,15 +406,21 @@ public:
     /**
      * @brief Estimated melt-zone temperature from the flow controller's
      * internal observer (0.0 if no controller is wired).
-     */
+     * @return melt-zone estimate [°C].
     double meltTempEstimate() const {
         return flowController_ ? flowController_->meltTempEst() : 0.0;
     }
-    /**@brief Last pre-emphasis PWM contribution (0.0 if none). */
+    /**
+     * @brief Last pre-emphasis PWM contribution (0.0 if none).
+     * @return feed-forward pre-emphasis term.
+     */
     double preEmphasisPWM() const {
         return flowController_ ? flowController_->emphasis().preEmphasisPWM : 0.0;
     }
-    /**@brief Last post-emphasis PWM contribution (0.0 if none). */
+    /**
+     * @brief Last post-emphasis PWM contribution (0.0 if none).
+     * @return feed-forward post-emphasis term.
+     */
     double postEmphasisPWM() const {
         return flowController_ ? flowController_->emphasis().postEmphasisPWM : 0.0;
     }
