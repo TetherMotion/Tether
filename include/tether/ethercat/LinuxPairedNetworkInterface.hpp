@@ -72,12 +72,18 @@ public:
 
     // ---- Interface accessors -----------------------------------------------
 
-    /**Network interface for side A (typically given to the master). */
+    /**
+     * @brief Network interface for side A (typically given to the master).
+     * @return reference to side A.
+     */
     NetworkInterface& ifaceA() { return iface_a_; }
     const NetworkInterface& ifaceA() const { return iface_a_; }
     NetworkInterface* ifaceAPtr() { return &iface_a_; }
 
-    /**Network interface for side B (typically given to a slave emulator). */
+    /**
+     * @brief Network interface for side B (typically given to a slave emulator).
+     * @return reference to side B.
+     */
     NetworkInterface& ifaceB() { return iface_b_; }
     const NetworkInterface& ifaceB() const { return iface_b_; }
     NetworkInterface* ifaceBPtr() { return &iface_b_; }
@@ -87,6 +93,7 @@ public:
     /**
      * @brief Set callback invoked when a frame arrives on side A
      *        (i.e. when side B sends a frame).
+     * @param cb  Frame callback (moved).
      */
     void setRxCallbackA(RxCallback cb) {
         std::lock_guard<std::mutex> lock(mtx_);
@@ -96,6 +103,7 @@ public:
     /**
      * @brief Set callback invoked when a frame arrives on side B
      *        (i.e. when side A sends a frame).
+     * @param cb  Frame callback (moved).
      */
     void setRxCallbackB(RxCallback cb) {
         std::lock_guard<std::mutex> lock(mtx_);

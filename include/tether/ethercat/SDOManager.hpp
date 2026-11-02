@@ -229,6 +229,9 @@ public:
      * @param out            Output data buffer
      * @param out_cap        Buffer capacity
      * @param out_len        Actual bytes read
+     * @param diag_enabled   Enable diagnostics logging.
+     * @param poll_interval_ms       Mailbox poll interval.
+     * @param transaction_timeout_ms Overall SDO timeout.
      * @return true on success
      */
     virtual bool sdoUpload(uint16_t slave_index, uint8_t* mbx_counter,
@@ -253,6 +256,9 @@ public:
      * @param sub            Object dictionary subindex
      * @param data           Data to write
      * @param data_len       Data length
+     * @param diag_enabled   Enable diagnostics logging.
+     * @param poll_interval_ms       Mailbox poll interval.
+     * @param transaction_timeout_ms Overall SDO timeout.
      * @return true on success
      */
     virtual bool sdoDownload(uint16_t slave_index, uint8_t* mbx_counter,
@@ -266,6 +272,7 @@ public:
 
     /**
      * @brief Get current monotonic time in microseconds
+     * @return monotonic µs timestamp.
      */
     virtual uint64_t getMicroseconds() = 0;
 
@@ -318,6 +325,7 @@ public:
      *
      * The default implementation returns false, so mock transports used in
      * unit tests do not need to override it.
+     * @return true when master-level cancellation was requested.
      */
     virtual bool isCancelRequested() const { return false; }
 };

@@ -117,7 +117,11 @@ inline const std::vector<const PDO*> kTxPDOs = {
     &TxPDO_1A00,
 };
 
-/**@brief Find a PDO descriptor by its index value (PBLR81FGF-specific). */
+/**
+ * @brief Find a PDO descriptor by its index value (PBLR81FGF-specific).
+ * @param idx  PDO index.
+ * @return descriptor, or nullptr when unknown.
+ */
 inline constexpr const PDO* findPDOByIndex(uint16_t idx) noexcept
 {
     return EtherCAT::Utils::findPDOByIndex(kAllPDOs, idx);
@@ -136,6 +140,10 @@ inline constexpr const PDO* findPDOByIndex(uint16_t idx) noexcept
  * the value from the raw buffer and appending a human-readable line with
  * the field name and value.  If the index is unknown, the returned string
  * will still include the numeric PDO index.
+ *
+ * @param drive  CiA402 drive (supplies PDO index/size).
+ * @param tx     true = TxPDO buffer, false = RxPDO.
+ * @return multi-line human-readable dump.
  */
 inline std::string dumpUsingDescriptors(CiA402Drive& drive, bool tx)
 {

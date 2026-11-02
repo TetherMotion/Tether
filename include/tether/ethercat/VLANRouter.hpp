@@ -164,6 +164,9 @@ public:
 
     /**
      * @brief Convenience overload: register a master with a single RX VLAN.
+     * @param master   Master to register.
+     * @param rx_vlan  RX VLAN id, or nullopt for untagged.
+     * @param tx_vlan  TX VLAN id, or nullopt.
      */
     void addMaster(std::shared_ptr<Master> master,
                    std::optional<uint16_t> rx_vlan,
@@ -171,6 +174,7 @@ public:
 
     /**
      * @brief Register an EtherCAT master with no RX VLAN (untagged only).
+     * @param master  Master to register.
      */
     void addMaster(std::shared_ptr<Master> master,
                    std::nullopt_t,
@@ -256,6 +260,7 @@ public:
 
     /**
      * @brief Return the number of registered masters.
+     * @return master count.
      */
     size_t masterCount() const;
 
@@ -294,6 +299,7 @@ public:
 
     /**
      * @brief Return the current undefined target master, or nullptr.
+     * @return catch-all target, or nullptr when unset.
      */
     std::shared_ptr<Master> undefinedTarget() const;
 
