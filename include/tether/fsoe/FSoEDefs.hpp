@@ -253,6 +253,9 @@ inline uint16_t calculateCRC16(const uint8_t* data, size_t len, uint16_t init_cr
 
 /**
  * @brief Verify FSoE CRC-16 (delegates to shared implementation)
+ * @param data  Frame bytes including the trailing 2-byte CRC.
+ * @param len   Total length.
+ * @return true when the stored CRC matches the computed one.
  */
 inline bool verifyCRC16(const uint8_t* data, size_t len)
 {
@@ -265,6 +268,10 @@ inline bool verifyCRC16(const uint8_t* data, size_t len)
 
 /**
  * @brief Verify FSoE CRC-16 against an explicit expected value
+ * @param data          Frame bytes (CRC not included).
+ * @param len           Data length.
+ * @param expected_crc  CRC to compare against.
+ * @return true on match.
  */
 inline bool verifyCRC16(const uint8_t* data, size_t len, uint16_t expected_crc)
 {

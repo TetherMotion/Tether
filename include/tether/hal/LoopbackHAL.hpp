@@ -138,11 +138,13 @@ public:
     
     /**
      * @brief Get the configured station address of this target
+     * @return station address.
      */
     virtual uint16_t getConfiguredAddress() const = 0;
     
     /**
      * @brief Check if target is operational
+     * @return true when the target reached OP-equivalent state.
      */
     virtual bool isOperational() const = 0;
 };
