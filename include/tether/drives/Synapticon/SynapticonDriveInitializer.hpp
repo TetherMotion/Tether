@@ -150,6 +150,8 @@ public:
      * Per-slave fallback used when a group INIT request
      * (EtherCAT::SlaveGroup::requestState) could not be confirmed —
      * e.g. a member slave stuck with a latched AL error.
+     * @param inits  Initializers to reset, one per member slave of the
+     *              group that failed the group INIT request.
      * @return true when every initializer's slave is in INIT.
      */
     static bool resetAllToInit(std::span<SynapticonDriveInitializer> inits) {
@@ -284,6 +286,10 @@ public:
      * per slave, issue the SAFE_OP request for the whole group in one
      * packet (EtherCAT::SlaveGroup::requestState), then run
      * postSafeOpPrepare() per slave before the group OP request.
+     * @param assignment  PDO assignment to program (0x1C12/0x1C13 +
+     *                    SM/FMMU config) via configureMultiPDOs.
+     * @return true if the drive accepted the PDO configuration;
+     *         false on prepareForSafeOp() failure (logged).
      */
     bool configurePDOsInPreOp(const Slave::MultiPDOAssignment& assignment) {
         auto& drive = master_.ensureDrive(slave_idx_);
@@ -303,6 +309,8 @@ public:
      *        enable, diagnostics, error-ack.  Call once the slave has
      *        reached SAFE_OP (e.g. after a group requestState +
      *        waitForState), before the (group) OP request.
+     * @return true when DC reconfig, PDO-exchange enable, diagnostics,
+     *         and error-ack all succeeded; false otherwise (logged).
      */
     bool postSafeOpPrepare() {
         auto& drive = master_.ensureDrive(slave_idx_);
@@ -416,6 +424,10 @@ public:
      * configuration should be applied next (e.g. via SlaveGroup
      * writeEntryAll) before bringGroupToSafeOp().
      *
+     * @param inits  Per-slave initializers (one per group member), used
+     *               for the resetAllToInit() fallback and drive setup.
+     * @param group  Slave group spanning the same slaves; all AL
+     *               transitions are issued through it as single packets.
      * @return true when every slave reached PRE_OP with a working mailbox.
      */
     static bool initGroupToPreOp(std::span<SynapticonDriveInitializer> inits,
@@ -484,6 +496,17 @@ public:
      * via @p on_safe_op, which is invoked immediately after the group
      * reaches SAFE_OP and before postSafeOpPrepare().
      *
+     * @param inits        Per-slave initializers (one per group member).
+     * @param assignment   PDO assignment applied via configurePDOsInPreOp().
+     * @param group        Slave group used for the single-packet SAFE_OP
+     *                     request.
+     * @param on_safe_op   Optional hook invoked right after the group
+     *                     reaches SAFE_OP — start the PDO keep-alive
+     *                     exchange here.
+     * @param pre_safe_op  Optional hook invoked just before the SAFE_OP
+     *                     request, in the last window where the mailbox
+     *                     is guaranteed serviced (firmware >= 5.6 drops
+     *                     SDO service in SAFE_OP).
      * @return true when every slave is ready for the OP request.
      */
     static bool bringGroupToSafeOp(
@@ -521,6 +544,9 @@ public:
 
     /**
      * @brief OP request + confirmation for a group — ONE EtherCAT packet.
+     * @param group       Slave group whose members all transition to OP.
+     * @param tag         Log tag for messages.
+     * @param timeout_ms  Wait budget for the OP confirmation [ms].
      * @return true when every member reached OP.
      */
     static bool requestGroupOp(EtherCAT::SlaveGroup& group,
@@ -588,16 +614,32 @@ public:
     // Accessors
     // ------------------------------------------------------------------
 
-    /**@brief Get the CiA402Drive handle (created by configurePDOsAndOp). */
+    /**
+     * @brief Get the CiA402Drive handle (created by configurePDOsAndOp).
+     * @return Drive object for this slave; created on first access if it
+     *         did not exist yet — reference stays valid while the master
+     *         owns the slave.
+     */
     CiA402Drive& drive() { return master_.ensureDrive(slave_idx_); }
 
-    /**@brief Get the raw EtherCAT Slave. */
+    /**
+     * @brief Get the raw EtherCAT Slave.
+     * @return Underlying slave object for direct register/SDO access;
+     *         owned by the master — valid for the master's lifetime.
+     */
     EtherCAT::Slave& slave() { return master_.ethercatMaster().slave(slave_idx_); }
 
-    /**@brief Get the CoE/SDO manager for this slave. */
+    /**
+     * @brief Get the CoE/SDO manager for this slave.
+     * @return Per-slave SDO channel used for object-dictionary reads and
+     *         writes; owned by the master.
+     */
     CoE::CoEManager& sdo() { return master_.ethercatMaster().sdoManager(slave_idx_); }
 
-    /**@brief Get the slave index. */
+    /**
+     * @brief Get the slave index.
+     * @return 0-based ring position this initializer is bound to.
+     */
     uint16_t slaveIndex() const { return slave_idx_; }
 
     /**
@@ -638,6 +680,8 @@ public:
     /**
      * Parsed firmware version — valid only after
      * readAndApplyFirmwareVersion() ran (initGroupToPreOp does it).
+     * @return Cached FirmwareVersion; `valid == false` when the SDO read
+     *         or version parse failed (or was never run).
      */
     FirmwareVersion firmwareVersion() const { return firmware_version_; }
 
