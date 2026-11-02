@@ -153,6 +153,9 @@ std::vector<std::pair<std::string, uint64_t>> Server::peerFunctions() const {
     std::vector<std::pair<std::string, uint64_t>> out;
     std::lock_guard<std::mutex> lock(sessionsMutex_);
     for (const auto& info : sessions_) {
+        // Dead sessions linger in sessions_ until the accept loop's next
+        // cleanup; their catalogs no longer count.
+        if (!info.session->isRunning()) continue;
         for (const auto& descriptor : info.session->peerFunctions()) {
             out.emplace_back(descriptor.name, descriptor.id);
         }
