@@ -407,31 +407,37 @@ public:
     
     /**
      * @brief Get last reset result
+     * @return reference to the most recent ResetResult.
      */
     const ResetResult& getLastResult() const { return last_result_; }
     
     /**
      * @brief Set progress callback
+     * @param callback  Invoked on each reset step; nullptr clears.
      */
     void setProgressCallback(ResetProgressCallback callback);
     
     /**
      * @brief Get reset attempt count
+     * @return total reset attempts.
      */
     uint32_t getResetAttemptCount() const { return reset_attempt_count_; }
     
     /**
      * @brief Get successful reset count
+     * @return count of completed resets.
      */
     uint32_t getSuccessfulResetCount() const { return successful_reset_count_; }
     
     /**
      * @brief Check if slave is currently in error state
+     * @return true when the slave reports an AL error.
      */
     bool isInErrorState();
     
     /**
      * @brief Get detailed error description
+     * @return human-readable error text.
      */
     std::string getErrorDescription();
     

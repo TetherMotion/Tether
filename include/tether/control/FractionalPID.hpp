@@ -188,11 +188,13 @@ public:
     
     /**
      * @brief Get integral order
+     * @return integral order λ (0..2).
      */
     double getLambda() const { return m_lambda; }
     
     /**
-     * @brief Get derivative order  
+     * @brief Get derivative order
+     * @return derivative order μ (0..2).
      */
     double getMu() const { return m_mu; }
     
@@ -216,6 +218,7 @@ public:
     
     /**
      * @brief Get memory length
+     * @return number of past samples retained by the approximation.
      */
     size_t getMemoryLength() const { return m_memoryLength; }
     
@@ -247,6 +250,9 @@ public:
     
     /**
      * @brief Auto-tune using SIMC-like rules adapted for FOPID
+     * @param processGain   Plant gain.
+     * @param timeConstant  Plant time constant (seconds).
+     * @param deadTime      Plant dead time (seconds).
      */
     void autoTuneSIMC(double processGain, double timeConstant, double deadTime);
     
@@ -256,11 +262,15 @@ public:
     
     /**
      * @brief Set anti-windup method
+     * @param method  Anti-windup strategy.
+     * @param param   Method-specific parameter (e.g. back-calculation gain).
      */
     void setAntiWindup(AntiWindupMethod method, double param = 0.0);
     
     /**
      * @brief Set integral limits
+     * @param min  Lower integral clamp.
+     * @param max  Upper integral clamp.
      */
     void setIntegralLimits(double min, double max);
     

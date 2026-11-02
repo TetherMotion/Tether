@@ -431,18 +431,38 @@ private:
 // Factory Functions for Common Slave Profiles
 // ============================================================================
 
-/**Create a generic I/O slave (CiA 401 style) */
+/**
+ * @brief Create a generic I/O slave (CiA 401 style)
+ * @param vendor_id    SII vendor ID.
+ * @param product_code SII product code.
+ * @param digital_inputs   Number of digital input channels.
+ * @param digital_outputs  Number of digital output channels.
+ * @param analog_inputs    Number of analog input channels.
+ * @param analog_outputs   Number of analog output channels.
+ * @return configured slave emulator.
+ */
 std::unique_ptr<SlaveEmulator> createGenericIOSlave(
     uint16_t vendor_id, uint16_t product_code,
     uint8_t digital_inputs, uint8_t digital_outputs,
     uint8_t analog_inputs = 0, uint8_t analog_outputs = 0);
 
-/**Create a CiA 402 servo drive */
+/**
+ * @brief Create a CiA 402 servo drive
+ * @param vendor_id    SII vendor ID.
+ * @param product_code SII product code.
+ * @param name         Display name.
+ * @return configured drive emulator.
+ */
 std::unique_ptr<SlaveEmulator> createCiA402Drive(
     uint16_t vendor_id, uint16_t product_code,
     const std::string& name = "Emulated Drive");
 
-/**Create a simple slave with configurable PDOs */
+/**
+ * @brief Create a simple slave with configurable PDOs
+ * @param vendor_id    SII vendor ID.
+ * @param product_code SII product code.
+ * @return configured slave emulator.
+ */
 std::unique_ptr<SlaveEmulator> createSimpleSlave(
     uint16_t vendor_id, uint16_t product_code,
     uint16_t input_bytes, uint16_t output_bytes);

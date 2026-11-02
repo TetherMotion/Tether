@@ -42,6 +42,9 @@ public:
      * The first call establishes the origin (returns the raw value as a
      * signed offset from 0).  Subsequent calls accumulate ±modulus per
      * detected wrap.
+     *
+     * @param raw  Raw counter sample (masked to the field width).
+     * @return unwrapped accumulated position.
      */
     int64_t update(uint64_t raw) {
         const uint64_t cur = raw & mask_;
@@ -79,15 +82,22 @@ public:
     /**
      * Shift the accumulated position by `delta` without touching the
      * raw-sample tracking (e.g. after homing: adjust(-position())).
+     *
+     * @param delta  Signed offset added to position_.
      */
     void adjust(int64_t delta) { position_ += delta; }
 
-    /**The accumulated (unwrapped) position of the last update(). */
+    /**
+     * @brief The accumulated (unwrapped) position of the last update().
+     * @return unwrapped position.
+     */
     int64_t position() const { return position_; }
 
     /**
      * Number of full modulus turns in the accumulated position
      * (meaningful only for counters narrower than 64 bits).
+     *
+     * @return full modulus turn count.
      */
     int32_t turns() const {
         if (bits_ >= 64) return 0;
@@ -97,7 +107,10 @@ public:
             : -((-position_ - 1) / mod) - 1);
     }
 
-    /**The configured field width in bits. */
+    /**
+     * @brief The configured field width in bits.
+     * @return counter width.
+     */
     uint8_t bits() const { return bits_; }
 
 private:

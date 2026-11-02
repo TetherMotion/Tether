@@ -44,13 +44,23 @@ public:
     NetworkEmulator();
     ~NetworkEmulator();
 
-    /**Add a slave to the network (takes ownership) */
+    /**
+     * @brief Add a slave to the network (takes ownership)
+     * @param slave  Slave emulator appended at the next bus position.
+     */
     void addSlave(std::unique_ptr<SlaveEmulator> slave);
 
-    /**Get slave by position (0-based) */
+    /**
+     * @brief Get slave by position (0-based)
+     * @param index  Bus position.
+     * @return slave pointer (borrowed), or nullptr out of range.
+     */
     SlaveEmulator* getSlave(size_t index);
 
-    /**Get number of slaves */
+    /**
+     * @brief Get number of slaves
+     * @return slaves on the emulated bus.
+     */
     size_t getSlaveCount() const { return slaves_.size(); }
 
     /**Clear all slaves */
@@ -68,10 +78,16 @@ public:
      */
     std::vector<uint8_t> processFrame(const uint8_t* frame_data, size_t frame_len);
 
-    /**Advance simulation time for all slaves */
+    /**
+     * @brief Advance simulation time for all slaves
+     * @param delta_us  Time step in microseconds.
+     */
     void simulate(uint32_t delta_us);
 
-    /**Set global error injection (affects all slaves) */
+    /**
+     * @brief Set global error injection (affects all slaves)
+     * @param errors  Error-injection config applied network-wide.
+     */
     void setGlobalErrorInjection(const ErrorInjection& errors);
 
     /**Get statistics */
