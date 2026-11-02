@@ -90,6 +90,7 @@ public:
      * @param in_len Length of @p in in bytes.
      * @param out Destination buffer for the rewritten frame.
      * @param out_cap Capacity of @p out in bytes.
+     * @return output length; 0 = no valid frame (emit fail-safe).
      */
     virtual size_t filterSlaveToMaster(const uint8_t* in, size_t in_len,
                                        uint8_t* out, size_t out_cap) = 0;
@@ -101,6 +102,7 @@ public:
      * @param in_len Length of @p in in bytes.
      * @param out Destination buffer for the slave-facing frame.
      * @param out_cap Capacity of @p out in bytes.
+     * @return output length in bytes.
      */
     virtual size_t filterMasterToSlave(const uint8_t* in, size_t in_len,
                                        uint8_t* out, size_t out_cap) = 0;

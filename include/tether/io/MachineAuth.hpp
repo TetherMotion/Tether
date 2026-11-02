@@ -27,7 +27,11 @@ namespace tether::io::machine {
 class IMachineAuthProvider {
 public:
     virtual ~IMachineAuthProvider() = default;
-    /**Returns an authenticated identity for `credential`, or nullopt. */
+    /**
+     * @brief Returns an authenticated identity for `credential`, or nullopt.
+     * @param credential  Bearer token as presented by the client.
+     * @return authenticated identity, or nullopt when rejected.
+     */
     virtual std::optional<SessionIdentity> authenticate(std::string_view credential) const = 0;
 };
 
@@ -112,6 +116,9 @@ private:
 /**
  * Extracts a bearer credential from an HTTP Authorization header value.
  * Returns nullopt for absent/malformed/non-Bearer values.
+ *
+ * @param authorization  HTTP Authorization header value.
+ * @return credential string after "Bearer ", or nullopt.
  */
 inline std::optional<std::string> bearerCredential(std::string_view authorization) {
     constexpr std::string_view prefix = "Bearer ";
