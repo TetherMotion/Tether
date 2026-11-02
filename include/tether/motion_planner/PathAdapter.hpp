@@ -100,6 +100,8 @@ public:
     /**
      * Construct from a `tether::motion::PiecewiseNurbsPath` and a list
      * of source references (one per piece).
+     * @param path      Source path (borrowed).
+     * @param sources   Per-piece source references.
      */
     explicit PathAdapter(tether::motion::PiecewiseNurbsPath path,
                          std::vector<SourceReference> sourceRefs = {})
@@ -733,6 +735,10 @@ struct PathAdapterBuildResult {
  * space, placing the active-axis components at their correct positions
  * and filling the inactive axes with zeros. This is needed because
  * SegmentConverter extracts only the active axes, producing minimal-dim
+ * curves.
+ * @param curve       Low-dimensional curve.
+ * @param axisMapping Maps curve dims to axis positions.
+ * @return embedded curve in full axis space.
  * curves whose component indices don't correspond to the global axis
  * indices.
  */

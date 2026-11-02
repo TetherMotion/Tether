@@ -456,6 +456,8 @@ enum class ModuleType : uint8_t {
 
 /**
  * @brief Get human-readable name for module type
+ * @param type  Module type.
+ * @return static name string.
  */
 inline const char* getModuleTypeName(ModuleType type) {
     switch (type) {
@@ -584,6 +586,9 @@ struct __attribute__((packed)) RxPDO_AnalogOutputs16 {
     int16_t outputs[4]; /**< Up to 4 analog outputs */
 };
 
+/**
+ * @brief Combined TxPDO with digital and analog inputs
+ */
 /**
  * @brief Combined TxPDO with digital and analog inputs
  */

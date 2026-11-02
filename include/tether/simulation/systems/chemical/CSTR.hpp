@@ -49,11 +49,17 @@ public:
      * @return Output vector, size outputDim().
      */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
-    /**Start from a moderate conversion operating point near the nominal feed temperature. */
+    /**Start from a moderate conversion operating point near the nominal feed temperature.
+     * @return state vector, size stateDim().
+     */
     StateVector defaultInitialState() const override;
-    /**Return kinetic, thermal, and transport coefficients for operating-point studies. */
+    /**Return kinetic, thermal, and transport coefficients for operating-point studies.
+     * @return descriptor list for tunable parameters.
+     */
     std::vector<ParamDescriptor> parameterDescriptors() const override;
-    /**Provide standard and high-gain operating points for nonlinear identification experiments. */
+    /**Provide standard and high-gain operating points for nonlinear identification experiments.
+     * @return named preset list.
+     */
     std::vector<Preset> presets() const override;
     void applyPreset(int index) override;
     std::vector<std::string> stateNames() const override;

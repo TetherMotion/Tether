@@ -80,6 +80,9 @@ inline size_t buildBlock(uint8_t sequence, std::span<const uint8_t> content, uin
 
 /**
  * @brief Build a complete message block into a std::vector.
+ * @param sequence  4-bit sequence counter.
+ * @param content   Block payload.
+ * @return serialized block bytes.
  */
 inline std::vector<uint8_t> buildBlockVec(uint8_t sequence, std::span<const uint8_t> content) {
     std::vector<uint8_t> out(kMaxBlockLength);
@@ -91,6 +94,7 @@ inline std::vector<uint8_t> buildBlockVec(uint8_t sequence, std::span<const uint
 /**
  * @brief Build an empty ack/nak block (5 bytes).
  * @param sequence 4-bit sequence counter.
+ * @return serialized ack block.
  */
 inline std::vector<uint8_t> buildAckBlock(uint8_t sequence) {
     return buildBlockVec(sequence, {});
