@@ -181,6 +181,7 @@ public:
      * @param piece   Curve to search.
      * @param center  Circle center.
      * @param radius  Circle radius.
+     * @param fromEnd  Search backward from the arc end when true.
      * @return arc-length root estimate.
      */
     static std::optional<double> numericalIntersection(
@@ -212,8 +213,8 @@ public:
     /**
      * @brief Determine the plane (axis1, axis2) spanned by two direction
      *        vectors at a corner.
-     * @param dir1,dir2  Corner direction vectors.
-     * @return plane axis indices.
+     * @param d1,d2      Corner direction vectors.
+     * @param outAxis1,outAxis2  out: dominant plane axes.
      */
     static void computePlaneAxes(
         const RVec& d1, const RVec& d2,

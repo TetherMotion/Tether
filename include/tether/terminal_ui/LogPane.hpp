@@ -78,7 +78,7 @@ struct LogFilter {
      *   "tag=fsoe" / "+tag=fsoe"      — include module tag (repeatable)
      *   "!tag=mailbox" / "-tag=x"     — exclude module tag (repeatable)
      *   "text=stuck"                  — substring
-     *   <bare word>                   — substring (same as text=word)
+     *   &lt;bare word&gt;                   — substring (same as text=word)
      * Unknown level names / malformed terms are ignored.
      */
     static LogFilter parse(const std::string& expr);
