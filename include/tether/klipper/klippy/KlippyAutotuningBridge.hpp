@@ -97,7 +97,11 @@ enum class AutotuneMethod {
     LopezISE, /**< ISE-optimal tuning (offline) */
 };
 
-/**@brief Convert method enum to string name. */
+/**
+ * @brief Convert method enum to string name.
+ * @param m  AutotuneMethod enumerator.
+ * @return snake_case method name ("unknown" for unlisted).
+ */
 inline std::string autotuneMethodName(AutotuneMethod m) {
     switch (m) {
         case AutotuneMethod::RelayFeedback:          return "relay_feedback";
@@ -118,6 +122,7 @@ inline std::string autotuneMethodName(AutotuneMethod m) {
 
 /**
  * @brief Parse a method name string to enum.
+ * @param name  Method name (aliases accepted: "relay", "zn_step", ...).
  * @return Method enum, or RelayFeedback if unknown.
  */
 inline AutotuneMethod parseAutotuneMethod(const std::string& name) {
@@ -136,7 +141,10 @@ inline AutotuneMethod parseAutotuneMethod(const std::string& name) {
     return AutotuneMethod::RelayFeedback;
 }
 
-/**@brief Get a list of all supported autotuning method names. */
+/**
+ * @brief Get a list of all supported autotuning method names.
+ * @return canonical method names parseable by parseAutotuneMethod().
+ */
 inline std::vector<std::string> listAutotuneMethods() {
     return {
         "relay_feedback", "ziegler_nichols_step", "ziegler_nichols_ultimate",
@@ -179,7 +187,9 @@ public:
     /**
      * @brief Construct the bridge for a specific heater.
      * @param heater The heater to tune (must have sensor + PWM callbacks wired).
-     * @param settingsPID Reference to settings PID params (to store results).
+     * @param settingsKp Reference to the Kp slot receiving tuned gains.
+     * @param settingsKi Reference to the Ki slot receiving tuned gains.
+     * @param settingsKd Reference to the Kd slot receiving tuned gains.
      */
     HeaterAutotuneBridge(objects::Heater& heater,
                           double& settingsKp, double& settingsKi, double& settingsKd)

@@ -112,13 +112,22 @@ public:
      */
     virtual void onUpdateRefreshed(const klippy::JsonValue& status) = 0;
 
-    /**@brief Called when a user is created. */
+    /**
+     * @brief Called when a user is created.
+     * @param username  Affected user name.
+     */
     virtual void onUserCreated(const std::string& username) = 0;
 
-    /**@brief Called when a user is deleted. */
+    /**
+     * @brief Called when a user is deleted.
+     * @param username  Affected user name.
+     */
     virtual void onUserDeleted(const std::string& username) = 0;
 
-    /**@brief Called when a user is logged out. */
+    /**
+     * @brief Called when a user is logged out.
+     * @param username  Affected user name.
+     */
     virtual void onUserLoggedOut(const std::string& username) = 0;
 
     /**

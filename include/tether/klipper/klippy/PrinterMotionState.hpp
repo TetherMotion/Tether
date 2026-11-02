@@ -50,27 +50,42 @@ struct PrinterMotionState {
 
     // --- Backward-compatible bool accessors ---
 
-    /**@brief True if absolute coordinates (G90). Backward compat. */
+    /**
+     * @brief True if absolute coordinates (G90). Backward compat.
+     * @return true in absolute mode.
+     */
     bool absoluteCoordinates() const {
         return distanceMode == GCode::DistanceMode::ABSOLUTE;
     }
-    /**@brief Set absolute/relative mode. Backward compat. */
+    /**
+     * @brief Set absolute/relative mode. Backward compat.
+     * @param abs  true = G90 absolute, false = G91 incremental.
+     */
     void setAbsoluteCoordinates(bool abs) {
         distanceMode = abs ? GCode::DistanceMode::ABSOLUTE
                            : GCode::DistanceMode::INCREMENTAL;
     }
 
-    /**@brief True if units are inches (G20). Backward compat. */
+    /**
+     * @brief True if units are inches (G20). Backward compat.
+     * @return true in inch mode.
+     */
     bool unitsInches() const {
         return units == GCode::Units::INCH;
     }
-    /**@brief Set units to inches/mm. Backward compat. */
+    /**
+     * @brief Set units to inches/mm. Backward compat.
+     * @param inches  true = G20 inches, false = G21 millimeters.
+     */
     void setUnitsInches(bool inches) {
         units = inches ? GCode::Units::INCH
                        : GCode::Units::MM;
     }
 
-    /**@brief Arc plane as int (0=XY, 1=XZ, 2=YZ). Backward compat. */
+    /**
+     * @brief Arc plane as int (0=XY, 1=XZ, 2=YZ). Backward compat.
+     * @return plane index.
+     */
     int arcPlane() const {
         switch (plane) {
             case GCode::Plane::XY: return 0;
@@ -79,7 +94,10 @@ struct PrinterMotionState {
             default: return 0;
         }
     }
-    /**@brief Set arc plane from int. Backward compat. */
+    /**
+     * @brief Set arc plane from int. Backward compat.
+     * @param p  0=XY, 1=XZ, 2=YZ.
+     */
     void setArcPlane(int p) {
         switch (p) {
             case 1:  plane = GCode::Plane::ZX; break;
