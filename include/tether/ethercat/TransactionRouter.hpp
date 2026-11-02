@@ -273,6 +273,12 @@ public:
      *
      * This maps to `sendAndWait()` but with the send step already done.
      * Prefer `sendAndWait()` for new code to avoid race conditions.
+     *
+     * @param filter       Packet filter to match.
+     * @param buffer       Response destination buffer.
+     * @param buffer_size  Buffer capacity.
+     * @param timeout_ms   Wait bound in milliseconds.
+     * @return WaitResult with the matched response or timeout/error.
      */
     WaitResult waitForPacket(const PacketFilter& filter,
                              uint8_t* buffer, size_t buffer_size,
@@ -280,6 +286,9 @@ public:
 
     /**
      * @brief Pre-register a waiter (legacy API for backward compat).
+     * @param filter       Packet filter to match.
+     * @param buffer       Response destination buffer (kept until wait).
+     * @param buffer_size  Buffer capacity.
      * @return Slot index (== idx), or kNumSlots on failure.
      */
     size_t preRegisterWaiter(const PacketFilter& filter,
@@ -287,11 +296,15 @@ public:
 
     /**
      * @brief Wait for a pre-registered slot (legacy API).
+     * @param slot        Slot returned by preRegisterWaiter().
+     * @param timeout_ms  Wait bound in milliseconds.
+     * @return WaitResult for that slot.
      */
     WaitResult waitForPreRegistered(size_t slot, uint32_t timeout_ms);
 
     /**
      * @brief Cancel a pre-registered waiter.
+     * @param slot  Slot to release.
      */
     void cancelPreRegistered(size_t slot);
 

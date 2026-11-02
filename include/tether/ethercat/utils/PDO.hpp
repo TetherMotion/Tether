@@ -41,8 +41,7 @@ struct PDOMappingEntry {
  * were retrieved.  Byte offsets are computed assuming contiguous packing (8
  * bits per byte) and truncated when `bit_length` is not a multiple of 8.
  *
- * @param sdo        Reference to an initialized SDOManager
- * @param slave      Slave address/alias to query
+ * @param coe        Reference to an initialized CoE manager
  * @param pdo_index  PDO mapping object index (e.g. 0x1705 or 0x1B04)
  * @param out_entries Vector to fill with mapping entries
  * @param timeout_ms Timeout passed to individual SDO reads
@@ -71,8 +70,7 @@ std::string pdoMappingToString(bool is_tx,
  * modules (SyncManager/Utils, DC/Utils) and lets examples perform a
  * one-line diagnostic dump.
  *
- * @param sdo        Reference to an SDO manager.
- * @param slave      Slave address/alias to query.
+ * @param coe        Reference to a CoE manager.
  * @param is_tx      True if the PDO is a TxPDO (process data sent by the
  *                   slave), false for RxPDO.
  * @param pdo_index  PDO mapping index (e.g. 0x1705 or 0x1B04).
