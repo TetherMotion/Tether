@@ -39,6 +39,10 @@ inline constexpr int kDialogNo = 2;
 class Dialog : public Overlay {
 public:
     /**
+     * @param title    Dialog title bar text.
+     * @param lines    Message body, one entry per line.
+     * @param buttons  Button row (label, result id, hotkey).
+     * @param onResult Called with the fired button's id.
      * @param cancel_index button fired by Esc (default: last button).
      *        Use -1 for "Esc closes without a result".
      */
@@ -129,6 +133,11 @@ private:
  * Single-button message box — [ OK ].  `text` is word-wrapped by the
  * caller if needed (pass pre-split lines via `TUI::wrapText` or a plain
  * string with '\n' separators, which are split here).
+ *
+ * @param title    Dialog title.
+ * @param text     Body text (`\n` splits into lines).
+ * @param onClose  Optional callback fired on dismissal.
+ * @return dialog overlay ready to push onto an OverlayStack.
  */
 inline std::unique_ptr<Dialog>
 makeMessageBox(std::string title, std::string text,
@@ -150,6 +159,12 @@ makeMessageBox(std::string title, std::string text,
 /**
  * Two-button confirm — [ Yes ] [ No ], Esc = No.
  * `onNo` is optional; both results close the dialog.
+ *
+ * @param title    Dialog title.
+ * @param text     Body text.
+ * @param onYes    Callback for the Yes result.
+ * @param onNo     Optional callback for the No result.
+ * @return dialog overlay ready to push onto an OverlayStack.
  */
 inline std::unique_ptr<Dialog>
 makeConfirmDialog(std::string title, std::string text,

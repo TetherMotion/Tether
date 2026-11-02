@@ -59,12 +59,18 @@ public:
         Hybrid, /**< Hybrid Monotone Representation (certified) */
     };
 
-    /**Construct from SSR */
+    /**
+     * @brief Construct from SSR
+     * @param ssr  Shared switching-structure representation.
+     */
     explicit TrajectorySampler(std::shared_ptr<SSR> ssr)
         : type_(RepresentationType::SSR)
         , ssr_(std::move(ssr)) {}
 
-    /**Construct from Hybrid */
+    /**
+     * @brief Construct from Hybrid
+     * @param hybrid  Shared hybrid monotone representation.
+     */
     explicit TrajectorySampler(std::shared_ptr<Hybrid> hybrid)
         : type_(RepresentationType::Hybrid)
         , hybrid_(std::move(hybrid)) {}
@@ -156,6 +162,7 @@ public:
 
     /**
      * @brief Get complete state [position, velocity, acceleration] at time t.
+     * @param t  Time in seconds.
      * @return Array of 3 points: {position, velocity, acceleration}
      */
     std::array<Point, 3> state(T t) const {
@@ -174,6 +181,7 @@ public:
     /**
      * @brief Update the path pointer in the underlying representation.
      * Call this after the path has been moved to a new location.
+     * @param path  New path reference (borrowed).
      */
     void setPath(const typename SSR::Path& path) {
         if (type_ == RepresentationType::SSR && ssr_) {
@@ -185,6 +193,7 @@ public:
 
     /**
      * @brief Get error certificate (only meaningful for Hybrid representation).
+     * @param t  Time to certify.
      * @return Error certificate; zeros for SSR (which is exact)
      */
     ErrorCertificate certify(T t) const {
