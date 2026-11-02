@@ -7,11 +7,11 @@
  * Generates small, fixed-shape kernel socket filters that reject
  * non-EtherCAT traffic before it reaches userspace:
  *
- *   - @ref ethercatFilter         untagged EtherCAT + 802.1Q-tagged EtherCAT
+ *   - @ref EtherCAT::CBPFProgramFactory::ethercatFilter         untagged EtherCAT + 802.1Q-tagged EtherCAT
  *                                 (any VID)
- *   - @ref ethercatFilterWithUdp  additionally accepts EtherCAT-over-UDP
+ *   - @ref EtherCAT::CBPFProgramFactory::ethercatFilterWithUdp  additionally accepts EtherCAT-over-UDP
  *                                 (IPv4/UDP dst port 34980, ETG.1000.3)
- *   - @ref vlanFilter / @ref vlanRangeFilter  accept ONLY 802.1Q frames whose
+ *   - @ref EtherCAT::CBPFProgramFactory::vlanFilter / @ref EtherCAT::CBPFProgramFactory::vlanRangeFilter  accept ONLY 802.1Q frames whose
  *                                 VID lies in the given range AND whose inner
  *                                 EtherType is EtherCAT.  In VLAN mode
  *                                 untagged frames — including untagged
@@ -21,7 +21,7 @@
  * The generated programs are portable (plain data, no Linux headers
  * required); attach() wires them to a socket via SO_ATTACH_FILTER on Linux.
  *
- * @ref cbpfExecute is a user-space interpreter implementing kernel cBPF
+ * @ref EtherCAT::cbpfExecute is a user-space interpreter implementing kernel cBPF
  * semantics — used by unit tests to run synthesized packets through
  * generated programs without CAP_NET_RAW, and usable by embedders for
  * verification.
@@ -268,6 +268,11 @@ public:
  * @param aux  Optional stripped-tag metadata — when set, SKF_AD_VLAN_*
  *             loads report it; when nullptr they report "no tag present",
  *             matching a socket that receives a genuinely untagged frame.
+ * @param prog   Program instructions.
+ * @param count  Instruction count.
+ * @param data   Packet bytes.
+ * @param len    Packet length.
+ * @return 0 = reject, non-zero = accepted byte count.
  */
 uint32_t cbpfExecute(const CBPFInsn* prog, size_t count,
                      const uint8_t* data, size_t len,

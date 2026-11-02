@@ -47,6 +47,9 @@ const char* toString(VlanTagDelivery d);
  * Map a detected delivery mode to the filter-generation hint used by
  * CBPFSpec / WireEncap.  Ambiguous results (NoReply, Untagged) map to
  * Auto — the safe both-legs program.
+ *
+ * @param d  Detected delivery mode.
+ * @return filter hint (StrippedOnly/InlineOnly/Auto).
  */
 inline VlanDeliveryHint vlanDeliveryHint(VlanTagDelivery d) {
     switch (d) {
@@ -73,6 +76,7 @@ struct VlanProbeResult {
  * @param aux_tpid       auxdata tp_vlan_tpid when TP_STATUS_VLAN_TPID_VALID
  * @param out_vid        receives the observed VID (0 when none)
  * @param out_tpid       receives the observed TPID (0 when none)
+ * @return detected delivery mode for this frame.
  */
 VlanTagDelivery classifyVlanReply(const uint8_t* frame, size_t len,
                                   bool aux_vlan_valid, uint16_t aux_tci,
@@ -82,8 +86,8 @@ VlanTagDelivery classifyVlanReply(const uint8_t* frame, size_t len,
 /**
  * @brief Send a bogus-logical-address LRW probe and wait for its return.
  *
- * Sends one LRW datagram (idx @ref kVlanProbeIdx, logical address
- * @ref kVlanProbeLogicalAddr — deliberately unmapped so slaves forward it
+ * Sends one LRW datagram (idx `kVlanProbeIdx`, logical address
+ * `kVlanProbeLogicalAddr` — deliberately unmapped so slaves forward it
  * untouched with WKC=0), optionally 802.1Q-tagged with @p vid (vid == 0
  * sends untagged).  Waits up to @p timeout_ms (default 10) for a matching
  * reply, then classifies the tag delivery.
@@ -110,6 +114,11 @@ std::optional<VlanProbeResult> probeVlanTagDelivery(
 /**
  * @brief Convenience overload: derive fd, ifindex and source MAC from an
  *        initialized HAL device.  Same contract as the fd overload.
+ *
+ * @param eth         Bound Ethernet device (supplies fd/ifindex/src MAC).
+ * @param vid         VLAN id to tag the probe with; 0 = untagged probe.
+ * @param timeout_ms  Reply window in milliseconds.
+ * @return probe result, or std::nullopt when the probe could not run.
  */
 std::optional<VlanProbeResult> probeVlanTagDelivery(
     HAL::IEthernet& eth, uint16_t vid, uint32_t timeout_ms = 10);

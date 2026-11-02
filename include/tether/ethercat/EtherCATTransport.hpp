@@ -60,6 +60,8 @@ public:
 
     /**
      * @brief Send a raw frame, applying UDP encapsulation if enabled.
+     * @param frame  Frame bytes (Ethernet + EtherCAT).
+     * @param len    Frame length.
      * @return true if the network interface accepted the frame.
      */
     bool send(const uint8_t* frame, size_t len) const {
@@ -70,7 +72,10 @@ public:
 #endif
     }
 
-    /**@brief Maximum EtherCAT payload bytes per frame, accounting for UDP overhead. */
+    /**
+     * @brief Maximum EtherCAT payload bytes per frame, accounting for UDP overhead.
+     * @return payload capacity in bytes.
+     */
     size_t maxEtherCATPayloadPerFrame() const {
 #if TETHER_ENABLE_UDP_ENCAPSULATION
         if (udp_config_ && udp_config_->enabled) {
@@ -84,6 +89,8 @@ public:
      * @brief Set the Ethernet frame size (excluding FCS) the transport
      *        may emit.  Default is the standard 1514; raise for jumbo
      *        links (requires NIC MTU and slave support).
+     *
+     * @param frame_size  Maximum frame size excluding FCS.
      */
     void setMaxFrameSize(size_t frame_size) {
         // 14 Ethernet + 2 EtherCAT header; the EtherCAT frame header's
@@ -97,7 +104,11 @@ public:
     }
 
 #if TETHER_ENABLE_UDP_ENCAPSULATION
-    /**@brief Compute the IPv4 header checksum (ones-complement sum over 20-byte header). */
+    /**
+     * @brief Compute the IPv4 header checksum (ones-complement sum over 20-byte header).
+     * @param ip_header  Start of the 20-byte IPv4 header.
+     * @return checksum value in network order.
+     */
     static uint16_t computeIpChecksum(const uint8_t* ip_header);
 
     /**
@@ -112,7 +123,12 @@ public:
     bool encapsulateFrame(const uint8_t* in_frame, size_t in_len,
                           uint8_t* out_buf, size_t out_cap, size_t* out_len) const;
 
-    /**@brief Send a frame, applying UDP encapsulation if enabled. */
+    /**
+     * @brief Send a frame, applying UDP encapsulation if enabled.
+     * @param frame  Frame bytes.
+     * @param len    Frame length.
+     * @return true if the interface accepted the (possibly encapsulated) frame.
+     */
     bool sendWithEncapsulation(const uint8_t* frame, size_t len) const;
 #endif
 
