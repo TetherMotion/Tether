@@ -100,6 +100,9 @@ private:
 /**
  * Helper for the common "show full entity details" action — builds a
  * TextOverlay dumping every field of the currently selected entity.
+ *
+ * @param b  Browser holding the selection.
+ * @return overlay ready to push.
  */
 std::unique_ptr<UI::Overlay> makeEntityInfoOverlay(UI::EntityBrowser& b);
 
@@ -108,6 +111,9 @@ std::unique_ptr<UI::Overlay> makeEntityInfoOverlay(UI::EntityBrowser& b);
  * renderBody/onKey/keyHintsFn to the panel.  Replaces the identical
  * ~5-line view registration in every PanelScreen app:
  *   hooks.views.push_back(TUI::entityBrowserView(entity_panel));
+ *
+ * @param panel  Panel to host (shared ownership).
+ * @return view descriptor for PanelScreen registration.
  */
 inline PanelView entityBrowserView(EntityBrowserPanel& panel,
                                    std::string name = "Entities") {

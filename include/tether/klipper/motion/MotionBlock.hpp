@@ -33,13 +33,19 @@ struct MotionBlock {
     std::vector<objects::StepCommand> steps;
     /**Starting MCU clock for the first step. */
     uint32_t startClock = 0;
-    /**Total number of steps in this block. */
+    /**
+     * @brief Total number of steps in this block.
+     * @return summed step counts.
+     */
     uint32_t totalSteps() const {
         uint32_t n = 0;
         for (const auto& s : steps) n += s.count;
         return n;
     }
-    /**Total duration in clock ticks. */
+    /**
+     * @brief Total duration in clock ticks.
+     * @return block duration (arithmetic-series per segment).
+     */
     uint32_t totalDuration() const {
         if (steps.empty()) return 0;
         uint32_t dur = 0;
@@ -56,7 +62,10 @@ struct MotionBlock {
         }
         return dur;
     }
-    /**Average step rate (steps per clock tick). */
+    /**
+     * @brief Average step rate (steps per clock tick).
+     * @return totalSteps()/totalDuration() ratio.
+     */
     double averageStepRate() const {
         uint32_t dur = totalDuration();
         if (dur == 0) return 0;

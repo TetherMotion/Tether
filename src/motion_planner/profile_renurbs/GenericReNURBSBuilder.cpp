@@ -144,6 +144,10 @@ inline SegmentQuantitySamples collectSegmentQuantitySamples(
 /**
  * Build the SplineFitterConfig for a quantity, based on its QuantitySpec
  * and the per-segment samples.
+ *
+ * @param spec     Quantity spec (limits, fit settings).
+ * @param samples  Per-segment sample data.
+ * @return populated fitter config.
  */
 inline SplineFitterConfig makeFitterConfig(
     const QuantitySpec& qs,
@@ -197,7 +201,11 @@ inline SplineFitterConfig makeFitterConfig(
     return cfg;
 }
 
-/**Make a constant degree-1 curve for degenerate (single-sample) cases. */
+/**
+ * @brief Make a constant degree-1 curve for degenerate (single-sample) cases.
+ * @param val  Constant value.
+ * @return trivial curve.
+ */
 inline GenericQuantityCurve makeConstantCurve(double val) {
     GenericQuantityCurve q;
     try {

@@ -35,6 +35,7 @@ public:
 
     /**
      * @brief Allocate a contiguous block of @p count OIDs; returns the first.
+     * @param count  Block size.
      * @return The first OID in the block, or std::nullopt if not enough remain.
      */
     std::optional<uint8_t> allocateBlock(uint8_t count) {
@@ -44,12 +45,19 @@ public:
         return first;
     }
 
-    /**@brief Record an OID -> type mapping (for bookkeeping). */
+    /**
+     * @brief Record an OID -> type mapping (for bookkeeping).
+     * @param oid   Object id.
+     * @param type  Type name (moved).
+     */
     void assign(uint8_t oid, std::string type) {
         types_[oid] = std::move(type);
     }
 
-    /**@return The type string for an OID, or empty if unknown. */
+    /**
+     * @param oid  Object id.
+     * @return The type string for an OID, or empty if unknown.
+     */
     std::string typeOf(uint8_t oid) const {
         auto it = types_.find(oid);
         return it == types_.end() ? std::string{} : it->second;

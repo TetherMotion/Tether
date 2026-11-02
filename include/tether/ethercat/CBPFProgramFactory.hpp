@@ -7,11 +7,11 @@
  * Generates small, fixed-shape kernel socket filters that reject
  * non-EtherCAT traffic before it reaches userspace:
  *
- *   - @ref EtherCAT::CBPFProgramFactory::ethercatFilter         untagged EtherCAT + 802.1Q-tagged EtherCAT
+ *   - `CBPFProgramFactory::ethercatFilter`         untagged EtherCAT + 802.1Q-tagged EtherCAT
  *                                 (any VID)
- *   - @ref EtherCAT::CBPFProgramFactory::ethercatFilterWithUdp  additionally accepts EtherCAT-over-UDP
+ *   - `CBPFProgramFactory::ethercatFilter`WithUdp  additionally accepts EtherCAT-over-UDP
  *                                 (IPv4/UDP dst port 34980, ETG.1000.3)
- *   - @ref EtherCAT::CBPFProgramFactory::vlanFilter / @ref EtherCAT::CBPFProgramFactory::vlanRangeFilter  accept ONLY 802.1Q frames whose
+ *   - `CBPFProgramFactory::vlanFilter` / `CBPFProgramFactory::vlanRangeFilter`  accept ONLY 802.1Q frames whose
  *                                 VID lies in the given range AND whose inner
  *                                 EtherType is EtherCAT.  In VLAN mode
  *                                 untagged frames — including untagged
@@ -21,7 +21,7 @@
  * The generated programs are portable (plain data, no Linux headers
  * required); attach() wires them to a socket via SO_ATTACH_FILTER on Linux.
  *
- * @ref EtherCAT::cbpfExecute is a user-space interpreter implementing kernel cBPF
+ * `cbpfExecute` is a user-space interpreter implementing kernel cBPF
  * semantics — used by unit tests to run synthesized packets through
  * generated programs without CAP_NET_RAW, and usable by embedders for
  * verification.
