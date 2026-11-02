@@ -513,6 +513,7 @@ struct SIIData {
     
     /**
      * @brief Get device name from strings
+     * @return name string, or nullptr/empty when the index is unset.
      */
     const char* deviceName() const {
         return strings.getString(general.name_idx);
@@ -520,6 +521,7 @@ struct SIIData {
     
     /**
      * @brief Get group name from strings
+     * @return group name, or nullptr/empty when the index is unset.
      */
     const char* groupName() const {
         return strings.getString(general.group_idx);
@@ -527,6 +529,7 @@ struct SIIData {
     
     /**
      * @brief Get order code from strings
+     * @return order code, or nullptr/empty when the index is unset.
      */
     const char* orderCode() const {
         return strings.getString(general.order_idx);
@@ -560,6 +563,7 @@ struct SIIData {
     
     /**
      * @brief Get total RxPDO size in bytes
+     * @return sum of every RxPDO's mapped byte count.
      */
     size_t totalRxPDOBytes() const {
         size_t total = 0;
@@ -571,6 +575,7 @@ struct SIIData {
     
     /**
      * @brief Get total TxPDO size in bytes
+     * @return sum of every TxPDO's mapped byte count.
      */
     size_t totalTxPDOBytes() const {
         size_t total = 0;
@@ -602,6 +607,8 @@ class SIIParser;
 
 /**
  * @brief Format vendor ID as human-readable string
+ * @param vendor_id  32-bit vendor ID from the SII identity block.
+ * @return formatted vendor name/hex string.
  */
 const char* formatVendorId(uint32_t vendor_id);
 

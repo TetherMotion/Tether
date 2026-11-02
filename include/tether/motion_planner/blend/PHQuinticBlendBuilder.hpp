@@ -89,6 +89,7 @@ public:
      * @param entry  Boundary conditions at the entry trim point.
      * @param exit   Boundary conditions at the exit trim point.
      * @param planeE1, planeE2  Orthonormal basis of the corner plane (M13).
+     * @return all four Hermite candidates; degenerate ones flagged.
      */
     static std::vector<Result> buildCandidates(const BoundaryConditions& entry,
                                                const BoundaryConditions& exit,
@@ -100,16 +101,30 @@ public:
      * @{
      */
 
-    /**Arc length s(ξ) = ∫₀^ξ σ(τ) dτ — a polynomial (M16). */
+    /**
+     * @brief Arc length s(ξ) = ∫₀^ξ σ(τ) dτ — a polynomial (M16).
+     * @param ph  Pythagorean-hodograph data.
+     * @param xi  Curve parameter.
+     * @return arc length from 0 to ξ.
+     */
     static double arcLength(const PHData& ph, double xi);
 
     /**
      * Invert s → ξ by Newton–Raphson on the polynomial s(ξ) (M19).
      * Bracketed by bisection on [0,1] for safety (σ > 0 ⇒ monotone).
+     *
+     * @param ph  Pythagorean-hodograph data.
+     * @param s   Target arc length.
+     * @return parameter ξ with s(ξ) = s.
      */
     static double invertArcLength(const PHData& ph, double s);
 
-    /**Curvature κ(ξ) = 2(u v' − u' v) / σ²(ξ) — closed form (M16). */
+    /**
+     * @brief Curvature κ(ξ) = 2(u v' − u' v) / σ²(ξ) — closed form (M16).
+     * @param ph  Pythagorean-hodograph data.
+     * @param xi  Curve parameter.
+     * @return curvature at ξ.
+     */
     static double curvature(const PHData& ph, double xi);
 
     /**@} */
