@@ -23,8 +23,8 @@
  *   });
  *   sched.start();                   // anchors clock to now
  *   // ... enqueue steps ...
- *   objects::StepCommand cmd{1000, 100, 0, 1};
- *   sched.schedule(oid, cmd, startClock);
+ *   objects::StepCommand stepCmd{1000, 100, 0, 1};
+ *   sched.schedule(oid, stepCmd, startClock);
  *   // ... call tick() periodically from a timer ISR / RTOS thread ...
  *   sched.tick();                    // fires due steps
  *   sched.wait();                    // blocks until all steps done
