@@ -20,13 +20,23 @@
 
 namespace tether::klipper::transport {
 
-/**@brief Attempt to open a transport. Returns error on failure. */
+/**
+ * @brief Attempt to open a transport. Returns error on failure.
+ * @param t  Transport to open.
+ * @return empty expected on success; KlipperError::transport on failure.
+ */
 inline std::expected<void, KlipperError> tryOpen(IByteStreamTransport& t) {
     if (t.open()) return {};
     return std::unexpected(KlipperError::transport("Transport::open() failed"));
 }
 
-/**@brief Attempt to write bytes. Returns the number of bytes written, or error. */
+/**
+ * @brief Attempt to write bytes. Returns the number of bytes written, or error.
+ * @param t     Open transport.
+ * @param data  Bytes to write.
+ * @return bytes written (may be a short write), or KlipperError::transport
+ *         when the transport is closed or writes 0 bytes.
+ */
 inline std::expected<size_t, KlipperError>
 tryWrite(IByteStreamTransport& t, std::span<const uint8_t> data) {
     if (!t.isOpen()) {
@@ -40,7 +50,13 @@ tryWrite(IByteStreamTransport& t, std::span<const uint8_t> data) {
     return n;
 }
 
-/**@brief Attempt to read bytes. Returns the bytes read, or error. */
+/**
+ * @brief Attempt to read bytes. Returns the bytes read, or error.
+ * @param t         Open transport.
+ * @param maxBytes  Maximum bytes to return; reads at most available().
+ * @return bytes read (empty when nothing available), or
+ *         KlipperError::transport when the transport is closed.
+ */
 inline std::expected<std::vector<uint8_t>, KlipperError>
 tryRead(IByteStreamTransport& t, size_t maxBytes) {
     if (!t.isOpen()) {
@@ -55,7 +71,12 @@ tryRead(IByteStreamTransport& t, size_t maxBytes) {
     return buf;
 }
 
-/**@brief Attempt to read all available bytes. Returns the bytes, or error. */
+/**
+ * @brief Attempt to read all available bytes. Returns the bytes, or error.
+ * @param t  Open transport.
+ * @return every byte currently buffered, or KlipperError::transport when
+ *         the transport is closed.
+ */
 inline std::expected<std::vector<uint8_t>, KlipperError>
 tryReadAll(IByteStreamTransport& t) {
     if (!t.isOpen()) {

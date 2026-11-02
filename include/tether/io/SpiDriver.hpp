@@ -39,6 +39,8 @@ public:
      * @param mode SPI mode (0-3).
      * @param speedHz Clock speed in Hz.
      * @param bitsPerWord Bits per word (usually 8).
+     * @return true on success; false when the device cannot be opened
+     *         or configured.
      */
     virtual bool open(const char* device, uint8_t mode, uint32_t speedHz,
                       uint8_t bitsPerWord = 8) = 0;
@@ -62,7 +64,10 @@ public:
         return rx;
     }
 
-    /**Returns true if the device is open. */
+    /**
+     * @brief Returns true if the device is open.
+     * @return true between successful open() and close().
+     */
     virtual bool isOpen() const = 0;
 };
 

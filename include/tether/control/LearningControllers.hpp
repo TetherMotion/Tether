@@ -189,6 +189,7 @@ public:
     
     /**
      * @brief Get trajectory length
+     * @return samples per trial as set by setTrajectoryLength().
      */
     size_t getTrajectoryLength() const { return m_trajLength; }
     
@@ -217,16 +218,19 @@ public:
     
     /**
      * @brief Get current trial number
+     * @return iteration count (increments on each endTrial()).
      */
     int getTrialNumber() const { return m_trialNum; }
     
     /**
      * @brief Get RMS error of last completed trial
+     * @return RMS tracking error over the last endTrial().
      */
     double getRMSError() const { return m_rmsError; }
     
     /**
      * @brief Get max absolute error of last trial
+     * @return peak |error| over the last endTrial().
      */
     double getMaxError() const { return m_maxError; }
     
@@ -241,6 +245,7 @@ public:
     
     /**
      * @brief Enable/disable Q-filtering
+     * @param enabled  true to smooth the learned signal each trial.
      */
     void setQFilterEnabled(bool enabled) { m_useQFilter = enabled; }
     
@@ -256,6 +261,8 @@ public:
     
     /**
      * @brief Get feedforward signal at time index
+     * @param timeIndex  Sample index within the trial (0..trajLength-1).
+     * @return learned feedforward value at that index.
      */
     double getFeedforward(size_t timeIndex) const;
     
@@ -335,6 +342,7 @@ public:
     
     /**
      * @brief Get learning gain
+     * @return gain γ applied to the learning update.
      */
     double getLearningGain() const { return m_gamma; }
     
@@ -703,6 +711,7 @@ public:
     
     /**
      * @brief Set sample rate
+     * @param rate  Sampling frequency in Hz used for the internal model.
      */
     void setSampleRate(double rate);
     
