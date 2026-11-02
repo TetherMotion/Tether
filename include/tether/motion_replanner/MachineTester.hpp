@@ -281,6 +281,7 @@ public:
 
     /**
      * @brief Create standard test sequences
+     * @return quick calibration sequence.
      */
     static TestSequence createQuickCalibration();
     static TestSequence createFullCalibration();

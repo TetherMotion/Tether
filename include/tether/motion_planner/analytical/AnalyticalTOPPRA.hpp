@@ -22,7 +22,12 @@
  * interface. Its `computeProfile()` method:
  * 1. Solves the time-optimal problem → produces SSR (switching arcs)
  * 2. Samples the SSR at uniform arc-length intervals → produces a
- *    `VelocityProfile<T>` (tabulated, compatible with MotionPlan)
+ *    `VelocityProfile<T>` (tabulated
+ * @param path              Geometric path.
+ * @param feedRate          Programmed feed rate.
+ * @param startVelocity,endVelocity  Boundary velocities.
+ * @param numSamples        Output sample count.
+ * @param startAcceleration,startJerk  Optional boundary derivatives., compatible with MotionPlan)
  * 3. Stores the SSR and optionally builds the Hybrid representation
  *    for later exact/certified sampling
  *

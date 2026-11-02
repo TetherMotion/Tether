@@ -111,7 +111,10 @@ public:
         sensorEnabled_[sensor] = enabled;
     }
 
-    /**@brief Report filament sensor state (M708). */
+    /**
+     * @brief Report filament sensor state (M708).
+     * @return status string.
+     */
     std::string reportSensorState() const {
         std::ostringstream ss;
         ss << "Filament sensors:";

@@ -19,7 +19,9 @@
  * identities, (M9) root isolation by variation-diminishing subdivision.
  * See docs/motion/BlendingAlgorithm.md for proofs.
  *
- * `isolateRoots` exploits both by recursive subdivision: it never misses a
+ * @param coeffs    Bernstein coefficients.
+ * @param intervals out: isolated root intervals.
+ * @return isolated roots.isolateRoots` exploits both by recursive subdivision: it never misses a
  * root (certified isolation) and needs no sampling. Near-multiple or
  * clustered roots that cannot be separated at the requested tolerance are
  * reported as one merged interval covering the cluster (documented

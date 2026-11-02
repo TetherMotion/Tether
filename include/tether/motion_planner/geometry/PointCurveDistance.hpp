@@ -43,6 +43,7 @@ struct DistanceResult {
  * @param c any NurbsCurve (rational or not, dimension 1..5)
  * @param p query point, same dimension as c
  * @throws std::invalid_argument on dimension mismatch
+ * @return certified distance + achieving parameter + closest point.
  */
 DistanceResult pointCurveDistance(const NurbsCurve& c, const RVec& p);
 
