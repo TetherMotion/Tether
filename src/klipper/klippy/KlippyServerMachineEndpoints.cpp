@@ -1,5 +1,5 @@
 /**
- * @file KlippyUdsServerMachineEndpoints.cpp
+ * @file KlippyServerMachineEndpoints.cpp
  * @brief Machine control endpoints and helper methods
  */
 

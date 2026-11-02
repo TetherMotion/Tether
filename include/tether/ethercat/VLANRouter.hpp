@@ -174,7 +174,8 @@ public:
 
     /**
      * @brief Register an EtherCAT master with no RX VLAN (untagged only).
-     * @param master  Master to register.
+     * @param master   Master to register.
+     * @param tx_vlan  VLAN tag for outgoing frames, if any.
      */
     void addMaster(std::shared_ptr<Master> master,
                    std::nullopt_t,

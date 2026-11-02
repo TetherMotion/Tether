@@ -250,10 +250,11 @@ public:
      * cyclicSend() emits the LRW slice datagram(s); cyclicCollect()
      * waits/publishes/scatters against the deadline anchored at send
      * time.  Collect mirrors the per-slave PDO counters.  Without a
-     * @param deadline_ns  Cycle deadline anchor.
-     * @return true when the slice was emitted.
      * logical address manager cyclicSend falls back to the atomic
      * exchangeAll() and cyclicCollect() is a no-op.
+     * @param image         Process image to use; nullptr selects the default.
+     * @param rx_timeout_ns Response wait budget in ns for the send phase.
+     * @return true when the slice was emitted.
      */
     bool cyclicSend(ProcessImage* image, uint32_t rx_timeout_ns = 200'000);
     bool cyclicCollect(ProcessImage* image);

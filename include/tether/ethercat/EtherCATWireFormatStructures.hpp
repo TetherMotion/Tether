@@ -57,7 +57,7 @@ static_assert(sizeof(FrameHeader) == 2, "FrameHeader must be 2 bytes");
 /**
  * @brief EtherCAT datagram header (10 bytes)
  */
-struct __attribute__((packed)) DatagramHeader {
+struct DatagramHeader {
     Command cmd; /**< Command type */
     uint8_t idx; /**< Index for request/response matching */
     uint16_t adp_le; /**< Address Position */
@@ -90,7 +90,7 @@ struct __attribute__((packed)) DatagramHeader {
         adp_le = addr & 0xFFFF;
         ado_le = (addr >> 16) & 0xFFFF;
     }
-};
+} __attribute__((packed));
 static_assert(sizeof(DatagramHeader) == 10, "DatagramHeader must be 10 bytes");
 
 /**

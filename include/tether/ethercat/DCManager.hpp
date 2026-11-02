@@ -57,6 +57,7 @@ public:
      *
      * When DC is not configured this returns an instance of
      * `NoDistributedClockConfigured` which logs a CRITICAL error on use.
+     * @return Non-null DC implementation pointer.
      */
     EtherCATDC* get() { return dc_instance_ ? dc_instance_.get() : sentinel_.get(); }
     const EtherCATDC* get() const { return dc_instance_ ? dc_instance_.get() : sentinel_.get(); }

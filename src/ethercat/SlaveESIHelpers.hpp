@@ -21,8 +21,8 @@ class Master;
  * Find a SyncManagerEntry by name substring (e.g. "MBoxOut", "MBoxIn",
  * "Outputs", "Inputs").
  *
- * @param entries  Sync-manager entry list.
- * @param name     Name substring to match.
+ * @param dev      ESI device whose sync-manager entries are searched.
+ * @param needle   Name substring to match.
  * @return matching entry, or nullptr.
  */
 inline const ESI::SyncManagerEntry* findSmByName(const ESI::DeviceInfo& dev,

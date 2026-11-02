@@ -903,7 +903,7 @@ public:
 
     /**
      * @brief Log a one-line SII summary for this slave.
-     * @param level  Log level to emit at.
+     * @param tag  Log tag prefix for emitted lines.
      */
     virtual void logSIISummary(const char* tag = "EtherCAT");
 #endif

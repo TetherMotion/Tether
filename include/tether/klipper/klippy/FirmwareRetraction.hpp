@@ -29,7 +29,10 @@ public:
      */
     void setParams(FirmwareRetractionParams params) { params_ = params; }
 
-    /**@brief Get the current parameters. */
+    /**
+     * @brief Get the current parameters.
+     * @return Active firmware-retraction parameter set.
+     */
     const FirmwareRetractionParams& params() const { return params_; }
 
     /**

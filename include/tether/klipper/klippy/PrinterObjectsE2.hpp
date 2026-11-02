@@ -120,12 +120,19 @@ public:
 
     std::string name() const override { return name_; }
 
-    /**@brief Add a pin alias mapping. */
+    /**
+     * @brief Add a pin alias mapping.
+     * @param alias  Alias name (as referenced in pin strings).
+     * @param pin    Physical pin the alias resolves to.
+     */
     void addAlias(const std::string& alias, const std::string& pin) {
         aliases_[alias] = pin;
     }
 
-    /**@brief Set the MCU name for this board. */
+    /**
+     * @brief Set the MCU name for this board.
+     * @param mcu  MCU name advertised by this board_pins object.
+     */
     void setMcuName(const std::string& mcu) { mcuName_ = mcu; }
 
     std::map<std::string, JsonValue> status(

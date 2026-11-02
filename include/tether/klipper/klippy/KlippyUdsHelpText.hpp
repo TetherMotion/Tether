@@ -138,7 +138,10 @@ inline constexpr std::array<GcodeHelpEntry, 85> GcodeHelpTable = {{
     {"M600", "Filament change"},
 }};
 
-/**@brief Build the G-code help JSON map from the static table. */
+/**
+ * @brief Build the G-code help JSON map from the static table.
+ * @return JsonValue object mapping each G/M-code to its description.
+ */
 inline JsonValue getGcodeHelpJson() {
     std::map<std::string, JsonValue> result;
     for (const auto& entry : GcodeHelpTable) {

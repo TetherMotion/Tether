@@ -107,6 +107,7 @@ public:
     /**
      * @brief Analyse a G-code program for flow-rate consistency.
      * @param gcodeLines The G-code text, one entry per line.
+     * @return Aggregated flow-rate analysis result.
      */
     FlowRateAnalysisResult analyse(const std::vector<std::string>& gcodeLines) const;
 

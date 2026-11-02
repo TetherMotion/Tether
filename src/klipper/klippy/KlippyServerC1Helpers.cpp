@@ -1,5 +1,5 @@
 /**
- * @file KlippyUdsServerC1Helpers.cpp
+ * @file KlippyServerC1Helpers.cpp
  * @brief C1 helper methods (registration, database, job queue, etc.)
  */
 

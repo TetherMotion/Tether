@@ -1015,8 +1015,8 @@ private:
      *        G73 pattern repeat: traces the contour R times with the
      *        U/W relief divided across passes.
      *        G70 finishing: traces the contour once at feed rate.
-     *        Words: P/Q<block range>, U<X allowance>, W<Z allowance>,
-     *        D<depth of cut>, R<divisions> (G73), F<feed>, S<rpm>.
+     *        Words: P/Q (block range), U (X allowance), W (Z allowance),
+     *        D (depth of cut), R (divisions, G73), F (feed), S (rpm).
      */
     Error dispatchG70(const Block& block, std::vector<MotionSegment>& segments);
     Error dispatchG71(const Block& block, std::vector<MotionSegment>& segments);

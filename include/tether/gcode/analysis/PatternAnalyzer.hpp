@@ -26,7 +26,7 @@ namespace tether::gcode::analysis {
  */
 Section analyzePatterns(const std::vector<GCode::PlanningSegment>& planningSegments,
                         const std::vector<tether::gcode::SegmentSpeed>& segmentSpeeds,
-                        const std::vector<std::string>& /*gcodeLines*/,
+                        const std::vector<std::string>& gcodeLines,
                         const Options& options = {});
 
 } // namespace tether::gcode::analysis

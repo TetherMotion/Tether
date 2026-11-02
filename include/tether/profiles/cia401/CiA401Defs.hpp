@@ -600,9 +600,9 @@ struct __attribute__((packed)) TxPDO_Combined {
 /**
  * @brief Combined RxPDO with digital and analog outputs
  */
-struct __attribute__((packed)) RxPDO_Combined {
+struct RxPDO_Combined {
     uint8_t digital_outputs[2]; /**< 16 digital outputs */
     int16_t analog_outputs[2]; /**< 2 analog outputs */
-};
+} __attribute__((packed));
 
 } // namespace CiA401

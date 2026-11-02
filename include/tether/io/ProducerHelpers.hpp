@@ -57,9 +57,9 @@ inline uint64_t steadyClockUs() {
 
 /**
  * @brief stderr logger — drop-in ServerConfig::logFn.
- * @param level  Severity.
- * @param tag    Component tag.
- * @param msg    Message text.
+ * @param tag  Component tag.
+ * @param fmt  printf-style format string.
+ * @param ...  Format arguments.
  */
 inline void stderrLog(const char* tag, const char* fmt, ...) {
     va_list ap;

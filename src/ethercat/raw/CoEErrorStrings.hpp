@@ -16,7 +16,7 @@ namespace CoE {
  * Map a CoEError to the closest SDO abort code (preserving the slave's own
  * abort code when it carries one).
  *
- * @param error  CoEError to map.
+ * @param err  CoEError to map.
  * @return closest SDO abort code.
  */
 SDOAbortCode coeErrorToAbortCode(CoEError err);

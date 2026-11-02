@@ -113,6 +113,7 @@ std::unique_ptr<UI::Overlay> makeEntityInfoOverlay(UI::EntityBrowser& b);
  *   hooks.views.push_back(TUI::entityBrowserView(entity_panel));
  *
  * @param panel  Panel to host (shared ownership).
+ * @param name   View/tab title (default "Entities").
  * @return view descriptor for PanelScreen registration.
  */
 inline PanelView entityBrowserView(EntityBrowserPanel& panel,

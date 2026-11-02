@@ -40,14 +40,14 @@ static_assert(sizeof(EoEHeader) == 4, "EoEHeader must be 4 bytes");
 /**
  * @brief EoE Set IP request structure
  */
-struct __attribute__((packed)) EoESetIPRequest {
+struct EoESetIPRequest {
     uint32_t flags; /**< Which parameters to set */
     uint32_t ip_address; /**< IP address */
     uint32_t subnet_mask; /**< Subnet mask */
     uint32_t gateway; /**< Default gateway */
     uint32_t dns_server; /**< DNS server */
     char dns_name[32]; /**< DNS name */
-};
+} __attribute__((packed));
 
 /**
  * @brief EoE Set IP flags

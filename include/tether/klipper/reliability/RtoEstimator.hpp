@@ -32,7 +32,10 @@ public:
     /**@return The current smoothed RTT in seconds. */
     double srtt() const { return srtt_; }
 
-    /**@brief Update the estimator with a new RTT sample (seconds). */
+    /**
+     * @brief Update the estimator with a new RTT sample (seconds).
+     * @param rttSample  Measured round-trip time in seconds.
+     */
     void update(double rttSample) {
         if (!initialized_) {
             srtt_ = rttSample;

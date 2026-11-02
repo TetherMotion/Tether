@@ -121,8 +121,6 @@ public:
      * @brief Compute a jerk-limited velocity profile for the given path.
      *
      * The profile respects:
-     * @param path   Geometric path.
-     * @return computed profile.
      * - Per-axis velocity, acceleration, and jerk limits (WI-2)
      * - Path-level velocity, acceleration, and jerk limits
      * - Centripetal acceleration (curvature) limits
@@ -132,6 +130,15 @@ public:
      * Acceleration is continuous throughout; jerk is bounded by j_max.
      * The acceleration and jerk fields are reported truthfully (WI-3:
      * no clamping of stored jerk).
+     *
+     * @param path   Geometric path.
+     * @param feedRate       Commanded feed rate along the path.
+     * @param startVelocity  Velocity at the path start (default 0).
+     * @param endVelocity    Velocity at the path end (default 0).
+     * @param numSamples     Number of samples in the tabulated profile.
+     * @param startAcceleration  Initial acceleration (default 0).
+     * @param startJerk      Initial jerk (default 0).
+     * @return computed profile.
      */
     std::unique_ptr<VelocityProfile> computeProfile(
         const Path& path,

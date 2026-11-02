@@ -145,8 +145,10 @@ inline SegmentQuantitySamples collectSegmentQuantitySamples(
  * Build the SplineFitterConfig for a quantity, based on its QuantitySpec
  * and the per-segment samples.
  *
- * @param spec     Quantity spec (limits, fit settings).
- * @param samples  Per-segment sample data.
+ * @param qs       Quantity spec (limits, fit settings).
+ * @param maxCp    Maximum control-point count allowed for the fit.
+ * @param gridMult Sampling-grid multiplier over the sample count.
+ * @param perSampleLimit  Per-sample limit values for the quantity.
  * @return populated fitter config.
  */
 inline SplineFitterConfig makeFitterConfig(

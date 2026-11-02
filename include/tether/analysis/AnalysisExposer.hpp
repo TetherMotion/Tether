@@ -64,7 +64,10 @@ public:
         analyzers_.continuity = std::make_unique<PathContinuityChecker>();
     }
 
-    /**@brief Run all 10 analyses on the given G-code and store results. */
+    /**
+     * @brief Run all 10 analyses on the given G-code and store results.
+     * @param gcodeLines G-code text, one entry per line.
+     */
     void analyze(const std::vector<std::string>& gcodeLines) {
         std::lock_guard lock(mutex_);
         results_.machineLimit = analyzers_.machineLimit->check(gcodeLines);

@@ -37,8 +37,8 @@ namespace tether::klipper::protocol {
  *          types (uint8_t, int16_t, uint16_t, etc.). Out-of-range values
  *          are clamped to the nearest representable value.
  *
- * @param v  Source value.
- * @return `v` clamped to Target's range.
+ * @param value  Source value.
+ * @return `value` clamped to Target's range.
  */
 template <typename Target, typename Source>
 constexpr Target clampCast(Source value) noexcept {

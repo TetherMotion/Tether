@@ -175,15 +175,21 @@ public:
      * This method:
      * 1. Solves the time-optimal problem in arc-length space
      * 2. Produces switching arcs (SSR)
-     *
-     * @param path   Geometric path to profile.
-     * @return computed profile artifacts (SSR/Hybrid + sampler).
      * 3. Samples the SSR to produce a tabulated VelocityProfile
      * 4. Optionally builds the Hybrid representation
      *
      * The returned VelocityProfile is compatible with MotionPlan and all
      * existing downstream consumers. The SSR and Hybrid representations
      * are accessible via `analyticalSource()` and `hybridSource()`.
+     *
+     * @param path   Geometric path to profile.
+     * @param feedRate       Commanded feed rate along the path.
+     * @param startVelocity  Velocity at the path start (default 0).
+     * @param endVelocity    Velocity at the path end (default 0).
+     * @param numSamples     Number of samples in the tabulated profile.
+     * @param startAcceleration  Initial acceleration (default 0).
+     * @param startJerk      Initial jerk (default 0).
+     * @return computed profile artifacts (SSR/Hybrid + sampler).
      */
     std::unique_ptr<VelocityProfile> computeProfile(
         const Path& path,

@@ -44,6 +44,11 @@ const char* getECStateName(ECState state) {
  *
  * Returns a complete bit-by-bit breakdown of the CiA 402 statusword.
  * Format: "0x1637: OpEn,Volt,QS,Remote,TR,Bit12 | STATE"
+ * @param sw          Raw statusword value.
+ * @param buffer      Destination buffer for the formatted string.
+ * @param buffer_size Capacity of `buffer` in bytes.
+ * @return `buffer`, or an empty string literal when `buffer` is null or
+ *         `buffer_size` is 0.
  */
 const char* formatStatuswordDiagnostics(uint16_t sw, char* buffer, size_t buffer_size) {
     if (!buffer || buffer_size == 0) return "";

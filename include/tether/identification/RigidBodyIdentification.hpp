@@ -96,6 +96,7 @@ public:
      * 
      * @param regressor The full dynamic regression matrix $W$.
      * @param torque Measured joint exertion effort.
+     * @return Identified base parameters and quality metrics.
      * @param tolerance Threshold detecting numerical column dependency during orthogonalization.
      */
     static BaseParameterIdentificationResult estimateQR(const Matrix& regressor,

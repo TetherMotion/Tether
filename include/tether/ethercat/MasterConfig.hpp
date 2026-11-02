@@ -121,6 +121,10 @@ struct MemoryLockConfig {
     uint32_t stack_prefault_bytes = 0; /**< 0 → conservative default */
 };
 
+/**
+ * @brief Where in the cyclic loop the exchange datagram's send/receive
+ *        pair is placed.
+ */
 enum class ExchangePlacement : uint8_t {
     Atomic, /**< send+wait in the Exchange phase (default) */
     Split, /**< send at Exchange; collect at PostExchange — the wire */

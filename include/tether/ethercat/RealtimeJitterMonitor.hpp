@@ -50,12 +50,11 @@ struct JitterConfig {
      * @brief Construct defaults for a given nominal period
      *
      * - Warning  = 50 % of the period
-     *
-     * @param period_us  Nominal cycle period.
-     * @return default config. - Critical = 200 % of the period
+     * - Critical = 200 % of the period
      * - Log every 10 000 cycles (≈ 10 s at 1 kHz)
      *
      * @param period_us  Nominal cycle period in microseconds
+     * @return default config.
      */
     static JitterConfig defaults(uint32_t period_us = 1000) {
         return JitterConfig{

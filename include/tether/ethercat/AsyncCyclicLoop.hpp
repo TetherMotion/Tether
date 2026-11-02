@@ -127,6 +127,7 @@ public:
      * @param dc_sync      One DC sync emission (EtherCATDC::sendSyncFrame).
      *                     Used only when Config::dc_interval_us > 0.
      * @param time_source  Monotonic ns (may be null → platform clock).
+     * @param config       Cycle timing/DC-placement configuration.
      */
     AsyncCyclicLoop(ProcessImage& image, TaskFn send, TaskFn collect,
                     TaskFn dc_sync, TimeFunc time_source,

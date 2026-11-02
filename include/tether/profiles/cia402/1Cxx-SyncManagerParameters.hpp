@@ -91,7 +91,7 @@ enum class SupportedSyncTypes : uint16_t {
 
 /**
  * @brief Format the Supported Synchronization Types bitmask as a comma-separated string.
- * @param types  SupportedSyncTypes bitmask.
+ * @param mask   SupportedSyncTypes bitmask.
  * @return comma-separated list (e.g. "FreeRun, SM2, DC Sync0").
  *
  * Example: `"FreeRun, DC-SYNC0"` for a value of 0x0005.

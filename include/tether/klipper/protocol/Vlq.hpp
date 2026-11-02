@@ -152,9 +152,9 @@ inline std::optional<int32_t> decodeParam(const uint8_t*& p, const uint8_t* end)
 /**
  * @brief Decode a parameter and return it as an unsigned 32-bit value
  *        (masking to 32 bits, for %u/%hu/%c types).
- * @param it    Byte cursor (advanced past the param).
- * @param type  Parameter type tag.
- * @return decoded value.
+ * @param p    Byte cursor (advanced past the param).
+ * @param end  End of the input buffer.
+ * @return decoded value, or std::nullopt on truncation.
  */
 inline std::optional<uint32_t> decodeParamUnsigned(const uint8_t*& p, const uint8_t* end) {
     auto r = decodeParam(p, end);

@@ -80,6 +80,9 @@ struct LogFilter {
      *   "text=stuck"                  — substring
      *   &lt;bare word&gt;                   — substring (same as text=word)
      * Unknown level names / malformed terms are ignored.
+     * @param expr  Filter expression as typed in the prompt.
+     * @return Populated LogFilter; an empty expression yields a
+     *         pass-all filter.
      */
     static LogFilter parse(const std::string& expr);
 };

@@ -194,11 +194,13 @@ public:
 
     /**
      * Verify + validate + install the profile document. Returns false when
-     * malformed.
-     * @param doc  Profile document.
-     * @return true on successful install.
      * `mac` does not match `document` under this source's key or the
      * document violates the profile contract.
+     * @param name      Profile name advertised to clients.
+     * @param version   Profile version string.
+     * @param document  Raw profile document bytes.
+     * @param mac       MAC over `document` under this source's key.
+     * @return true on successful install.
      */
     bool install(std::string name, std::string version,
                  std::vector<uint8_t> document, const ProfileMac& mac) {

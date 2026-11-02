@@ -505,7 +505,9 @@ public:
 
     /**
      * @brief Adjust blend geometry for corner mode constraints
-     * @param c  Corner context.
+     * @param analysis  Corner analysis whose blend geometry is adjusted
+     *        in place.
+     * @param config    Active G64 corner configuration.
      */
     static void adjustForConstraints(CornerAnalysis& analysis, const G64CornerConfig& config) {
         const double tolerance = InterpolationConstants::EPSILON;

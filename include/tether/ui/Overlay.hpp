@@ -159,8 +159,8 @@ public:
      * callback (lets one handler serve the whole menu).
      *
      * @param title     Menu title.
-     * @param items     Menu items (labels, ids, optional callbacks).
-     * @param onResult  Fallback result handler.
+     * @param onResult  Fallback result handler; items are added after
+     *        construction via the item list API.
      */
     explicit MenuOverlay(std::string title,
                          std::function<void(int id)> onResult = {})

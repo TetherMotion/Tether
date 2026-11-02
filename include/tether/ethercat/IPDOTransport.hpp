@@ -90,14 +90,14 @@ public:
      * the calling thread sleeps until either the response lands or the
      * deadline passes.  Without a receive path it falls back to a bounded
      * spin.
-     * @param slot        Cyclic slot.
-     * @param token       Correlation token.
-     * @param timeout_ns  Wait bound.
-     * @param out         out: received datagram.
+     * Without a deposit path it falls back to a bounded
      * sequence-counter spin.
      *
+     * @param slot        Cyclic slot.
+     * @param token       Correlation token.
      * @param timeout_ns  Maximum wait in nanoseconds (sub-ms scale).
-     * @return true and fills @p out on success; false on timeout/cancel.
+     * @param out         out: received datagram.
+     * @return true and fills `out` on success; false on timeout/cancel.
      */
     virtual bool waitCyclicSlot(uint8_t slot, uint64_t token,
                                 uint32_t timeout_ns, RxDatagram& out) {

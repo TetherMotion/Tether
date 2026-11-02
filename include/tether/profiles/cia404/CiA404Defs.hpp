@@ -835,10 +835,10 @@ struct __attribute__((packed)) RxPDO_ControllerSetpoint {
 /**
  * @brief TxPDO for alarm status
  */
-struct __attribute__((packed)) TxPDO_AlarmStatus {
+struct TxPDO_AlarmStatus {
     int32_t value; /**< Current value */
     uint16_t alarm_status; /**< Alarm status bits */
     uint16_t warning_status; /**< Warning status bits */
-};
+} __attribute__((packed));
 
 } // namespace CiA404

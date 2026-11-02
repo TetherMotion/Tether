@@ -129,6 +129,7 @@ static_assert(DriveSnapshotV1::kEncodedSize == 64);
 /**
  * Returns the dependency-closed V6 graph for the packed DriveSnapshotV1.
  * Its final node is the snapshot root; all prior nodes are reusable scalars.
+ * @return Constructed schema graph.
  */
 inline SchemaGraph driveSnapshotSchemaGraph() {
     const auto makeScalar = [](uint8_t id, ValueType type) {

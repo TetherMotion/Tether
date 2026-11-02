@@ -3,13 +3,13 @@
  * @brief Stateful message-block parser with error recovery and statistics.
  *
  * @details
- * This header provides a @ref BlockParser class that wraps the stateless
+ * This header provides a `BlockParser` class that wraps the stateless
  * parseBlock() function with:
  *   - **Error-recovery mode**: when enabled, corrupt blocks (bad CRC, bad
  *     sync, bad length) are skipped instead of being returned as errors.
  *     An optional error callback is invoked for each skipped block, and a
  *     skipped-block counter is maintained.
- *   - **Statistics tracking**: @ref BlockParseStats records how many blocks
+ *   - **Statistics tracking**: `BlockParseStats` records how many blocks
  *     were parsed successfully, how many had bad CRC/sync/length, and how
  *     many bytes were skipped during resynchronisation.
  *   - **Reset**: clears accumulated state and statistics without

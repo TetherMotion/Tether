@@ -32,20 +32,20 @@ struct BoundaryConditions {
  *
  * `s = 0` gives the start of the curve; `s = curve.length()` gives the
  * end.
+ * `s = curve.length()` gives the end. The tangent is normalized;
+ * curvature and jounce come from `arcDerivatives` (G.19)–(G.20).
+ * `hasJounce` is true unless the curve lacks a usable 3rd derivative
+ * (which the caller may treat as j⃗ = 0 for lines — `boundaryAt` sets it
+ * explicitly in that case).
+ *
  * @param curve  Source curve.
  * @param s      Arc length on it.
- * @param atEnd  Evaluate the end boundary when true.
+ * @param atEnd  If true, the tangent is flipped to point *out of* the
+ *        curve (toward the junction); this is the convention for the
+ *        incoming piece's end. If false, the tangent points *into* the
+ *        curve (away from the junction), the convention for the outgoing
+ *        piece's start.
  * @return extracted boundary conditions.
- * end. The tangent is normalized; curvature and jounce come from
- * `arcDerivatives` (G.19)–(G.20). `hasJounce` is true unless the curve
- * lacks a usable 3rd derivative (which the caller may treat as j⃗ = 0
- * for lines — `boundaryAt` sets it explicitly in that case).
- *
- * @param atEnd If true, `s` is measured from the start but the tangent
- *        is flipped to point *out of* the curve (toward the junction);
- *        this is the convention for the incoming piece's end. If false,
- *        the tangent points *into* the curve (away from the junction),
- *        the convention for the outgoing piece's start.
  *
  * @throws std::domain_error if the curve has a degenerate parameterization
  *         at the trim point (|C'| ≈ 0).

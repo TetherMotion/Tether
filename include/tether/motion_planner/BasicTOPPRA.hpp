@@ -293,6 +293,7 @@ public:
 
     /**
      * @brief Get/set kinematic limits
+     * @return mutable reference to the configured kinematic limits.
      */
     Limits& limits() { return limits_; }
     Limits limits() const override { return limits_; }

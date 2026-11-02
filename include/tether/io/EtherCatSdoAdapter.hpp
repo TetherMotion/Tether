@@ -43,6 +43,8 @@ using SdoObjectTableProvider =
 /**
  * Common CiA 301 + CiA 402 objects, usable as the default listing for DS402
  * drives. Device vendors may supply richer tables via the provider argument.
+ * @return Table of common CiA 301/402 object-dictionary entries (same for
+ *         every slave index).
  */
 inline std::vector<EtherCAT::ObjectDictionary::ObjectDictionaryEntry>
 cia402SdoObjectTable(uint16_t /*slave*/) {

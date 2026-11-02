@@ -23,7 +23,10 @@
 
 namespace EtherCAT {
 
-/**Monotonic nanoseconds for inline transport helpers (no Platform dep). */
+/**
+ * @brief Monotonic nanoseconds for inline transport helpers (no Platform dep).
+ * @return CLOCK_MONOTONIC time in nanoseconds.
+ */
 inline uint64_t monoNowNsFallback() {
     timespec ts{};
     ::clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -131,6 +134,9 @@ enum class PDOAddressMode : uint8_t {
 // PDO Entry Definition
 // ============================================================================
 
+/**
+ * @brief PDO transfer direction, from the master's perspective.
+ */
 enum class PDODirection : uint8_t {
     TxPDO = 0, /**< Slave→Master */
     RxPDO = 1 /**< Master→Slave */
