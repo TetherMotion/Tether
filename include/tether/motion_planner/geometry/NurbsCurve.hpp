@@ -139,6 +139,7 @@ public:
 
     /**
      * @brief Arc-length derivatives at u (eq. (G.18)–(G.21)).
+     * @param u     Parameter on the curve.
      * @param order 0..3, see ArcDerivatives for field validity
      * @throws std::domain_error if order ≥ 1 and |C'(u)| is (near-)zero
      *         (degenerate parameterization — diagnostic, not UB)

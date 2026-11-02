@@ -94,7 +94,10 @@ public:
     double totalTime() const override { return totalTime_; }
     double totalLength() const override { return totalLength_; }
 
-    /**Access the underlying ReNURBS profile. */
+    /**
+     * @brief Access the underlying ReNURBS profile.
+     * @return shared profile.
+     */
     const std::shared_ptr<const ReNURBSProfile>& profile() const { return profile_; }
 
 private:

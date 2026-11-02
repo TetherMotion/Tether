@@ -53,7 +53,13 @@ public:
 
     /**
      * Binned KDE for large N (histogram + kernel convolution).
+     * @param derivatives,deviations  Sample pairs.
+     * @param hX,hY                    Kernel bandwidths.
+     * @param xMin,xMax,yMin,yMax      Grid bounds.
+     * @param nX,nY                    Grid resolution.
+     * @param kernel                   Kernel shape.
      * @param histSize Internal histogram resolution (typically 256).
+     * @return KDE grid.
      */
     static KdeGrid binnedEvaluate(
         const std::vector<double>& derivatives,

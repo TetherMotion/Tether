@@ -76,6 +76,7 @@ public:
 
     /**
      * @brief Convenience: read all currently-available bytes into a vector.
+     * @return buffered bytes.
      */
     std::vector<uint8_t> readAll() {
         size_t n = available();

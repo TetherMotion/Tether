@@ -5,7 +5,8 @@
  * @details
  * Implements an RFC 6298-style SRTT/RTTVAR/RTO estimator adapted for the
  * Klipper protocol's millisecond-scale command/response exchange. The RTO is
- * clamped to [kMinRtoSeconds, kMaxRtoSeconds]. The estimator is updated each
+ * clamped to [kMinRtoSeconds, kMaxRtoSeconds]. The estimator is
+ * @param rttSeconds  Observed round-trip time.updated each
  * time a block is acknowledged with a measured RTT sample.
  */
 

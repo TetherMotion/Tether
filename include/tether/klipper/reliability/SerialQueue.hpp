@@ -67,7 +67,10 @@ public:
     /**@return True if the window allows sending another block. */
     bool canSend() const { std::lock_guard<std::mutex> lk(mutex_); return pending_.size() < maxPending_; }
 
-    /**@brief Set the ack callback (for RTT measurement). */
+    /**
+     * @brief Set the ack callback (for RTT measurement).
+     * @param cb  Invoked per acknowledged block.
+     */
     void setAckCallback(AckCallback cb) { std::lock_guard<std::mutex> lk(mutex_); ackCb_ = std::move(cb); }
 
     /**

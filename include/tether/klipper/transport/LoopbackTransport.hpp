@@ -70,7 +70,11 @@ public:
         return n;
     }
 
-    /**@brief Wire this endpoint: writes go to @p writeTarget, reads come from @p readSource. */
+    /**
+     * @brief Wire this endpoint: writes go to @p writeTarget, reads come from @p readSource.
+     * @param writeTarget  Shared buffer receiving outgoing bytes.
+     * @param readSource   Shared buffer supplying incoming bytes.
+     */
     void wire(std::shared_ptr<SharedBuffer> writeTarget,
               std::shared_ptr<SharedBuffer> readSource) {
         writeTarget_ = std::move(writeTarget);
