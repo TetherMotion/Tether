@@ -29,29 +29,57 @@ struct SIIMailboxConfig;
 // Utility Functions
 // ============================================================================
 
-/**Map an SII category type code to a human-readable string. */
+/**
+ * @brief Map an SII category type code to a human-readable string.
+ * @param type  Category type field from the SII category header.
+ * @return static category name, or "Unknown" for unlisted codes.
+ */
 const char* getCategoryTypeName(uint16_t type);
 
-/**Map a mailbox protocol bitfield to a human-readable string. */
+/**
+ * @brief Map a mailbox protocol bitfield to a human-readable string.
+ * @param protocol  Protocol support bits from the SII mailbox config.
+ * @return static protocol name, or "Unknown" for unlisted values.
+ */
 const char* getMailboxProtocolName(uint16_t protocol);
 
 // ============================================================================
 // Logging Functions
 // ============================================================================
 
-/**Log complete SII data (identity, mailbox, SMs, FMMUs, PDOs, DC). */
+/**
+ * @brief Log complete SII data (identity, mailbox, SMs, FMMUs, PDOs, DC).
+ * @param data  Parsed SII data.
+ * @param tag   Logger tag prefix.
+ */
 void logSIIData(const SIIData& data, const char* tag);
 
-/**Log SII identity (vendor ID, product code, revision, serial). */
+/**
+ * @brief Log SII identity (vendor ID, product code, revision, serial).
+ * @param identity  Parsed identity block.
+ * @param tag       Logger tag prefix.
+ */
 void logSIIIdentity(const SIIIdentity& identity, const char* tag);
 
-/**Log SII mailbox configuration (standard + bootstrap, protocols). */
+/**
+ * @brief Log SII mailbox configuration (standard + bootstrap, protocols).
+ * @param mailbox  Parsed mailbox config.
+ * @param tag      Logger tag prefix.
+ */
 void logSIIMailbox(const SIIMailboxConfig& mailbox, const char* tag);
 
-/**Log SII Sync Manager configuration. */
+/**
+ * @brief Log SII Sync Manager configuration.
+ * @param data  Parsed SII data (uses its sync-manager list).
+ * @param tag   Logger tag prefix.
+ */
 void logSIISyncManagers(const SIIData& data, const char* tag);
 
-/**Log SII PDO configuration (TxPDO and RxPDO entries). */
+/**
+ * @brief Log SII PDO configuration (TxPDO and RxPDO entries).
+ * @param data  Parsed SII data (uses both PDO lists).
+ * @param tag   Logger tag prefix.
+ */
 void logSIIPDOs(const SIIData& data, const char* tag);
 
 /**

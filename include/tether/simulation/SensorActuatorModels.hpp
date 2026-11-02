@@ -10,7 +10,13 @@ public:
     NoiseGenerator();
     explicit NoiseGenerator(uint64_t seed);
 
-    /**Generate noise sample given configuration and current time */
+    /**
+     * @brief Generate noise sample given configuration and current time.
+     * @param params          Noise characteristics (type, amplitude, color).
+     * @param time            Sample time in seconds.
+     * @param actuatorOutput  Coupled actuator output for dependent noise.
+     * @return noise value to add to a measurement.
+     */
     double generate(const NoiseParams& params, double time, double actuatorOutput = 0.0);
 
     /**Reset internal state */
@@ -30,10 +36,19 @@ public:
     SensorModel();
     explicit SensorModel(const SensorConfig& config);
 
-    /**Process a true measurement through sensor model */
+    /**
+     * @brief Process a true measurement through sensor model.
+     * @param trueValue       Ideal measurement before degradation.
+     * @param time            Sample time in seconds.
+     * @param actuatorOutput  Coupled actuator output fed to the noise model.
+     * @return measured value after noise, delay, quantization, saturation.
+     */
     double measure(double trueValue, double time, double actuatorOutput = 0.0);
 
-    /**Configure sensor */
+    /**
+     * @brief Configure sensor.
+     * @param config  New sensor configuration; applies to the next measure().
+     */
     void setConfig(const SensorConfig& config) { config_ = config; }
     const SensorConfig& config() const { return config_; }
 
@@ -54,14 +69,25 @@ public:
     ActuatorModel();
     explicit ActuatorModel(const ActuatorConfig& config);
 
-    /**Process a control command through actuator model */
+    /**
+     * @brief Process a control command through actuator model.
+     * @param command  Commanded output.
+     * @param dt       Step duration in seconds.
+     * @return effective actuator output after nonlinearities/failure.
+     */
     double apply(double command, double dt);
 
-    /**Configure actuator */
+    /**
+     * @brief Configure actuator.
+     * @param config  New actuator configuration; applies to the next apply().
+     */
     void setConfig(const ActuatorConfig& config) { config_ = config; }
     const ActuatorConfig& config() const { return config_; }
 
-    /**Check if actuator has failed */
+    /**
+     * @brief Check if actuator has failed.
+     * @return true while the injected failure is active.
+     */
     bool hasFailed() const { return failed_; }
 
     void reset();
