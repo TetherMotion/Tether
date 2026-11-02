@@ -190,15 +190,24 @@ public:
      */
     void reset();
 
-    /**Current state. */
+    /**
+     * @brief Current state.
+     * @return EEPROMState enumerator (IDLE .. DONE/FAILED).
+     */
     EEPROMState state() const { return state_; }
 
-    /**True if the state machine has finished (DONE or FAILED). */
+    /**
+     * @brief True if the state machine has finished (DONE or FAILED).
+     * @return true in either terminal state.
+     */
     bool isFinished() const {
         return state_ == EEPROMState::DONE || state_ == EEPROMState::FAILED;
     }
 
-    /**True if the state machine needs a datagram to be sent. */
+    /**
+     * @brief True if the state machine needs a datagram to be sent.
+     * @return true when in a bus-step state with no datagram in flight.
+     */
     bool needsSend() const {
         return !in_flight_ &&
                (state_ == EEPROMState::WRITE_EEPADDR ||
@@ -207,29 +216,51 @@ public:
                 state_ == EEPROMState::READ_EEPDAT);
     }
 
-    /**True if this state machine has a datagram currently in flight. */
+    /**
+     * @brief True if this state machine has a datagram currently in flight.
+     * @return true between buildDatagram() dispatch and onComplete().
+     */
     bool isInFlight() const { return in_flight_; }
 
     /**Mark this state machine as having a datagram in flight. */
     void markInFlight() { in_flight_ = true; }
 
-    /**Slave index this state machine reads from. */
+    /**
+     * @brief Slave index this state machine reads from.
+     * @return 0-based slave position on the bus.
+     */
     uint16_t slaveIndex() const { return slave_index_; }
 
-    /**Router slot index for the current in-flight datagram. */
+    /**
+     * @brief Router slot index for the current in-flight datagram.
+     * @return slot assigned by setSlot(); meaningful only in flight.
+     */
     size_t slot() const { return slot_; }
 
-    /**Response buffer (owned by this state machine). */
+    /**
+     * @brief Response buffer (owned by this state machine).
+     * @return reference to the stable, member-owned RxDatagram the router
+     *         writes the reply into; valid for the state machine's lifetime.
+     */
     RxDatagram& response() { return response_; }
     const RxDatagram& response() const { return response_; }
 
-    /**Number of word-pairs remaining to read. */
+    /**
+     * @brief Number of word-pairs remaining to read.
+     * @return pending count (word_pairs_.size() - current_index_).
+     */
     size_t remaining() const { return word_pairs_.size() - current_index_; }
 
-    /**Number of word-pairs already read. */
+    /**
+     * @brief Number of word-pairs already read.
+     * @return completed count (current_index_).
+     */
     size_t wordsRead() const { return current_index_; }
 
-    /**Total number of word-pairs in the current batch. */
+    /**
+     * @brief Total number of word-pairs in the current batch.
+     * @return size of the queue given to init()/refill.
+     */
     size_t totalWords() const { return word_pairs_.size(); }
 
     /**
@@ -241,6 +272,7 @@ public:
 
     /**
      * @brief Set the router slot for the current in-flight datagram.
+     * @param slot  TransactionRouter slot index that will carry the reply.
      */
     void setSlot(size_t slot) { slot_ = slot; }
 
@@ -262,7 +294,10 @@ public:
      */
     void cancel();
 
-    /**Current EEPROM word address being read (even). */
+    /**
+     * @brief Current EEPROM word address being read (even).
+     * @return current word-pair address, or 0xFFFF when the batch is done.
+     */
     uint16_t currentWord() const {
         return current_index_ < word_pairs_.size()
             ? word_pairs_[current_index_] : 0xFFFF;
@@ -384,10 +419,16 @@ public:
      */
     bool run(uint32_t timeout_ms = 500);
 
-    /**Number of slaves that completed successfully. */
+    /**
+     * @brief Number of slaves that completed successfully.
+     * @return count of slaves whose demand parser reached COMPLETE.
+     */
     size_t successCount() const { return success_count_; }
 
-    /**Number of slaves that failed. */
+    /**
+     * @brief Number of slaves that failed.
+     * @return count of slaves that hit FAILED or timed out in run().
+     */
     size_t failureCount() const { return failure_count_; }
 
     /**
@@ -400,12 +441,16 @@ public:
     /**
      * @brief Get the state machine for a slave (for diagnostics).
      * @param i  Index in the add order (not slave_index).
+     * @return const reference to that slave's EEPROMReadStateMachine.
      */
     const EEPROMReadStateMachine& stateMachine(size_t i) const {
         return slaves_[i].sm;
     }
 
-    /**Number of slaves in the reactor. */
+    /**
+     * @brief Number of slaves in the reactor.
+     * @return count of slaves added via addSlave().
+     */
     size_t slaveCount() const { return slaves_.size(); }
 
 private:

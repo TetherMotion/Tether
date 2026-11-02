@@ -38,14 +38,24 @@ namespace detail {
 // unconditional: the no-SII fallback paths resolve offsets differently but
 // read and write the process image identically.
 
-/**Read bit `bit_off` from a process image; false when out of range. */
+/**
+ * @brief Read bit `bit_off` from a process image; false when out of range.
+ * @param image    Process-image bytes (SM image).
+ * @param bit_off  Absolute bit offset (LSB-first within each byte).
+ * @return bit value; false when `bit_off` lies past the image end.
+ */
 inline bool imageBit(std::span<const uint8_t> image, uint32_t bit_off) {
     const size_t byte = bit_off / 8;
     return byte < image.size() &&
            ((image[byte] >> (bit_off % 8)) & 1u) != 0;
 }
 
-/**Write bit `bit_off` in a process image; no-op when out of range. */
+/**
+ * @brief Write bit `bit_off` in a process image; no-op when out of range.
+ * @param image    Process-image bytes (SM image).
+ * @param bit_off  Absolute bit offset (LSB-first within each byte).
+ * @param v        Bit value to write.
+ */
 inline void setImageBit(std::span<uint8_t> image, uint32_t bit_off, bool v) {
     const size_t byte = bit_off / 8;
     if (byte >= image.size()) return;
@@ -56,6 +66,10 @@ inline void setImageBit(std::span<uint8_t> image, uint32_t bit_off, bool v) {
 /**
  * Sign-extend a `bits`-wide raw value to int64.  Bits above `bits` in
  * `raw` are masked off first, so callers may pass unmasked extractions.
+ *
+ * @param raw   Raw unsigned field value.
+ * @param bits  Field width in bits (0 -> 0, >=64 -> reinterpret as int64).
+ * @return signed value sign-extended to int64.
  */
 inline int64_t signExtend64(uint64_t raw, uint8_t bits) {
     if (bits == 0)  return 0;
@@ -69,6 +83,10 @@ inline int64_t signExtend64(uint64_t raw, uint8_t bits) {
  * Read a little-endian field of `bits` bits starting at `data` and
  * sign-extend it to int64.  Reads ceil(bits/8) bytes — the caller must
  * have bounds-checked `data` against the image.
+ *
+ * @param data  Pointer to the field's first byte inside the image.
+ * @param bits  Field width in bits.
+ * @return signed value sign-extended to int64.
  */
 inline int64_t signExtendLE(const uint8_t* data, uint8_t bits) {
     uint64_t raw = 0;
@@ -137,6 +155,9 @@ bool resolveValueChannels(std::span<const SII::SIIPDO> pdos,
  * Padding entries (index 0) are skipped, so `bit_offs[i]` is the offset
  * of the i-th real channel.
  *
+ * @param pdos        SII PDO list for the direction (tx_pdos for inputs,
+ *                    rx_pdos for outputs).
+ * @param sm_channel  process-data SM channel index.
  * @param bit_offs    out: absolute bit offset per channel
  * @param image_bits  out: total image size in bits
  */
@@ -165,7 +186,10 @@ struct ResolvedFifo {
  * entry is one FIFO byte.  Padding entries (index 0) are skipped.
  * PDOs carrying only data entries produce channels with ctrl_bits = 0.
  *
+ * @param pdos        SII PDO list for the direction.
+ * @param sm_channel  process-data SM channel index.
  * @param max_data  cap on data bytes per channel (0 = unlimited)
+ * @return resolved FIFO channels in PDO order.
  */
 std::vector<ResolvedFifo> resolveFifoChannels(
     std::span<const SII::SIIPDO> pdos, uint8_t sm_channel,
@@ -173,6 +197,9 @@ std::vector<ResolvedFifo> resolveFifoChannels(
 
 /**
  * @brief First PDO index assigned to `sm_channel` in `pdos`, 0 when none.
+ * @param pdos        SII PDO list for the direction.
+ * @param sm_channel  process-data SM channel index.
+ * @return first matching PDO index, or 0 when none is assigned.
  */
 uint16_t firstPdoIndex(std::span<const SII::SIIPDO> pdos,
                        uint8_t sm_channel);
@@ -188,6 +215,12 @@ uint16_t firstPdoIndex(std::span<const SII::SIIPDO> pdos,
  * byte_offset = bit_off / 8, bit-in-byte = bit_off % 8 — so it addresses
  * packed 1-bit flags and wide fields uniformly.
  *
+ * @param pdos        SII PDO list for the direction.
+ * @param sm_channel  process-data SM channel index.
+ * @param index       Object dictionary index of the entry.
+ * @param subindex    Subindex to match, or -1 to ignore.
+ * @param occurrence  0-based occurrence among matching entries.
+ * @param bit_off     out: absolute bit offset in the SM image.
  * @return false when no such entry is assigned to `sm_channel`.
  */
 bool findEntryBitOffset(std::span<const SII::SIIPDO> pdos,
@@ -200,8 +233,15 @@ bool findEntryBitOffset(std::span<const SII::SIIPDO> pdos,
  * @brief Locate the `occurrence`-th entry with object `index` that is at
  *        least `min_bits` wide (the value/command fields).
  *
+ * @param pdos        SII PDO list for the direction.
+ * @param sm_channel  process-data SM channel index.
+ * @param index       Object dictionary index of the entry.
+ * @param subindex    Subindex to match, or -1 to ignore.
+ * @param occurrence  0-based occurrence among matching entries.
+ * @param min_bits    Minimum entry width in bits.
  * @param bit_off  out: absolute bit offset in the SM image
  * @param bit_len  out: entry width in bits
+ * @return false when no matching entry is assigned to `sm_channel`.
  */
 bool findValueEntry(std::span<const SII::SIIPDO> pdos,
                     uint8_t sm_channel,

@@ -91,7 +91,19 @@ public:
     // decodeTriggered()), pause() aborts between objects so no SDO
     // read overlaps safety state machine command sequences (0xF100).
 
-    /**True if any bitfield object has a set bit or the error code != 0. */
+    /**
+     * @brief True if any bitfield object has a set bit or the error code != 0.
+     *
+     * This is the "something needs attention" predicate: every bitfield
+     * object in the poll set represents a set of states/flags where any
+     * set bit is semantically active, and a non-zero 0x4002 Error code
+     * object counts as triggered. Objects that failed to read (!ok) are
+     * ignored — a failed poll does not itself report triggered.
+     *
+     * @param snap  Snapshot of one poll cycle.
+     * @return true when at least one readable object indicates an active
+     *         state or error.
+     */
     static bool anyTriggered(const Snapshot& snap);
 
     /**
@@ -100,6 +112,10 @@ public:
      * One line per object: bitfields show the set bit indices
      * ("… State: 0x05 [bits 0,2]"), scalars show the plain value.
      * Only objects that were read successfully appear.
+     *
+     * @param snap  Snapshot of one poll cycle.
+     * @return one formatted string per successfully read object, in
+     *         kObjects index order; empty when every object failed.
      */
     static std::vector<std::string> decodeAll(const Snapshot& snap);
 
@@ -112,6 +128,10 @@ public:
      * "0x400B:0 Emergency stop input state [BasicEmergencyStopState(0)]".
      * Scalars: only 0x4002 Error code counts as triggered when non-zero.
      * Empty when nothing is triggered.
+     *
+     * @param snap  Snapshot of one poll cycle.
+     * @return one summary line per triggered object; empty vector when
+     *         nothing is active or all reads failed.
      */
     static std::vector<std::string> decodeTriggered(const Snapshot& snap);
 
@@ -120,6 +140,11 @@ public:
      * RSAP state 1 -> "MONITORING", op mode 0 -> "T1", error code
      * -202 -> "Drive does not switch to STO status within the
      * specified time".  Empty string when no decode exists.
+     *
+     * @param index  CoE object index (e.g. 0x4000 RSAP state).
+     * @param value  Raw object value from the snapshot.
+     * @return human-readable name for the value, or "" if the index has
+     *         no decode table or the value is unlisted.
      */
     static std::string scalarName(uint16_t index, uint32_t value);
 
@@ -127,6 +152,10 @@ public:
      * Error-code description from the vendor manual's Error Code
      * table (covers the RSAP/CONFIG/SAFETY/SYSMGR/FSoE ranges).
      * nullptr for unknown codes.
+     *
+     * @param code  Signed error code as read from object 0x4002.
+     * @return static string literal describing the code, or nullptr when
+     *         the code is not in the table.
      */
     static const char* errorCodeName(int32_t code);
 
@@ -165,6 +194,7 @@ public:
     /**
      * @brief Build the color-coded multi-panel display model of a snapshot.
      *
+     * @param snap  Snapshot of one poll cycle.
      * @param expected_drives number of configured FSoE drives; bits for
      *        these drives are expected set in the 0x4008 records and are
      *        highlighted Missing when clear.  0 = derive the count from

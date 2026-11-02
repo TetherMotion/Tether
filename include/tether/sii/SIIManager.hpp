@@ -216,7 +216,10 @@ public:
         words_.clear();
     }
 
-    /** @brief Number of cached words. */
+    /**
+     * @brief Number of cached words.
+     * @return count of word-addressed entries currently held in the cache.
+     */
     size_t size() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return words_.size();
@@ -263,39 +266,76 @@ public:
      */
     void init(Master& master, uint16_t slave_index);
 
-    /** @brief Slave index this manager is bound to. */
+    /**
+     * @brief Slave index this manager is bound to.
+     * @return 0-based slave position on the bus; valid after init().
+     */
     uint16_t slaveIndex() const { return slave_index_; }
 
-    /** @brief True if the manager has been bound to a master and slave index. */
+    /**
+     * @brief True if the manager has been bound to a master and slave index.
+     * @return true after init() (or the binding constructor) succeeded.
+     */
     bool isInitialised() const { return master_ != nullptr; }
 
-    /** @brief Alias for isInitialised(). */
+    /**
+     * @brief Alias for isInitialised().
+     * @return same value as isInitialised().
+     */
     bool isInitialized() const { return isInitialised(); }
 
-    /** @brief Access the word cache directly. */
+    /**
+     * @brief Access the word cache directly.
+     * @return reference to the internally owned cache; the reference stays
+     *         valid for the manager's lifetime.
+     */
     SIISlaveCache& cache() { return cache_; }
     const SIISlaveCache& cache() const { return cache_; }
 
-    /** @brief Read a 16-bit word from SII (cached). */
+    /**
+     * @brief Read a 16-bit word from SII (cached).
+     * @param word_addr  EEPROM word address (16-bit units).
+     * @param[out] out   Receives the word value on success.
+     * @return true on success; false on SII bus error or timeout.
+     */
     bool readWord(uint16_t word_addr, uint16_t& out);
 
-    /** @brief Read a 32-bit double-word from SII (cached as two words). */
+    /**
+     * @brief Read a 32-bit double-word from SII (cached as two words).
+     * @param word_addr  EEPROM word address of the first word.
+     * @param[out] out   Receives the 32-bit value (little-endian word order).
+     * @return true on success; false on SII bus error or timeout.
+     */
     bool readDWord(uint16_t word_addr, uint32_t& out);
 
     /**
      * @brief Read multiple contiguous words.
-     * @return Number of words successfully read.
+     * @param word_addr   First EEPROM word address.
+     * @param[out] buffer Destination for word_count words.
+     * @param word_count  Number of words requested.
+     * @return Number of words successfully read; may be less than
+     *         word_count on bus error.
      */
     size_t readWords(uint16_t word_addr, uint16_t* buffer, size_t word_count);
 
     /**
      * @brief Read a contiguous block of bytes from SII.
-     * @return Number of bytes successfully read.
+     * @param byte_addr   First EEPROM byte address.
+     * @param[out] buffer Destination for byte_count bytes.
+     * @param byte_count  Number of bytes requested.
+     * @return Number of bytes successfully read; may be less than
+     *         byte_count on bus error.
      */
     size_t readBytes(uint16_t byte_addr, uint8_t* buffer, size_t byte_count);
 
     /**
      * @brief Prefetch a contiguous block of words into the cache.
+     *
+     * Populates the word cache so later readWord()/parse calls do not
+     * hit the SII bus. Does not mark the words as parsed.
+     *
+     * @param word_addr   First EEPROM word address.
+     * @param word_count  Number of words to prefetch.
      * @return Number of words successfully prefetched.
      */
     size_t prefetchWords(uint16_t word_addr, uint16_t word_count);
@@ -344,10 +384,16 @@ public:
     /** @brief Invalidate the word cache and parsed SII cache. */
     void invalidateCache();
 
-    /** @brief Set the timeout used for SII bus operations. */
+    /**
+     * @brief Set the timeout used for SII bus operations.
+     * @param timeout_ms  Per-operation timeout in milliseconds.
+     */
     void setTimeoutMs(uint32_t timeout_ms) { timeout_ms_ = timeout_ms; }
 
-    /** @brief Current SII bus operation timeout, in milliseconds. */
+    /**
+     * @brief Current SII bus operation timeout, in milliseconds.
+     * @return timeout in ms as set by setTimeoutMs() (or the default).
+     */
     uint32_t timeoutMs() const { return timeout_ms_; }
 
     // -------------------------------------------------------------------------
@@ -355,22 +401,43 @@ public:
     // per-manager and therefore strictly per-slave).
     // -------------------------------------------------------------------------
 
-    /** @brief Cached configured station address, or 0 if not yet determined. */
+    /**
+     * @brief Cached configured station address, or 0 if not yet determined.
+     * @return station address cached by setConfiguredStationAddr(); 0 when
+     *         the address has not been read from the slave yet.
+     */
     uint16_t configuredStationAddr() const;
 
-    /** @brief Set the cached configured station address. */
+    /**
+     * @brief Set the cached configured station address.
+     * @param addr  Station address previously read from the slave.
+     */
     void setConfiguredStationAddr(uint16_t addr);
 
-    /** @brief True if this slave should use FPWR for EEPROM control writes. */
+    /**
+     * @brief True if this slave should use FPWR for EEPROM control writes.
+     * @return true when configured-position (FPWR) writes are required for
+     *         this slave's EEPROM control register instead of APRW.
+     */
     bool useFpwr() const;
 
-    /** @brief Mark this slave as needing FPWR for EEPROM control writes. */
+    /**
+     * @brief Mark this slave as needing FPWR for EEPROM control writes.
+     * @param use  true to use FPWR; false for the default APRW path.
+     */
     void setUseFpwr(bool use);
 
-    /** @brief True if the EEPROM has already been forced to ECAT control. */
+    /**
+     * @brief True if the EEPROM has already been forced to ECAT control.
+     * @return true once the EEPCTL ownership bit has been assigned to the
+     *         ECAT side; avoids repeating the PDI->ECAT handover write.
+     */
     bool eepromForcedToEcat() const;
 
-    /** @brief Mark the EEPROM as forced to ECAT control. */
+    /**
+     * @brief Mark the EEPROM as forced to ECAT control.
+     * @param forced  true after the ownership handover write succeeded.
+     */
     void setEepromForcedToEcat(bool forced);
 
 private:

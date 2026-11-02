@@ -110,27 +110,47 @@ bool parseStringsFromBuffer(const uint8_t* data, size_t size_bytes, SIIData& out
 
 /**
  * @brief Parse the general device info category from a raw byte buffer.
+ * @param data        Raw category bytes (size_bytes long).
+ * @param size_bytes  Number of bytes in the buffer.
+ * @param out         Output SII data (general info fields are populated).
+ * @return true on success.
  */
 bool parseGeneralFromBuffer(const uint8_t* data, size_t size_bytes, SIIData& out);
 
 /**
  * @brief Parse the FMMU category from a raw byte buffer.
+ * @param data        Raw category bytes (size_bytes long).
+ * @param size_bytes  Number of bytes in the buffer.
+ * @param out         Output SII data (FMMU list is populated).
+ * @return true on success.
  */
 bool parseFMMUFromBuffer(const uint8_t* data, size_t size_bytes, SIIData& out);
 
 /**
  * @brief Parse the sync manager category from a raw byte buffer.
+ * @param data        Raw category bytes (size_bytes long).
+ * @param size_bytes  Number of bytes in the buffer.
+ * @param out         Output SII data (sync manager list is populated).
+ * @return true on success.
  */
 bool parseSyncManagerFromBuffer(const uint8_t* data, size_t size_bytes, SIIData& out);
 
 /**
  * @brief Parse a PDO category (TxPDO or RxPDO) from a raw byte buffer.
+ * @param data        Raw category bytes (size_bytes long).
+ * @param size_bytes  Number of bytes in the buffer.
+ * @param out         Output SII data (PDO list is populated).
  * @param is_tx  true for TxPDO, false for RxPDO.
+ * @return true on success.
  */
 bool parsePDOFromBuffer(const uint8_t* data, size_t size_bytes, SIIData& out, bool is_tx);
 
 /**
  * @brief Parse the distributed clocks category from a raw byte buffer.
+ * @param data        Raw category bytes (size_bytes long).
+ * @param size_bytes  Number of bytes in the buffer.
+ * @param out         Output SII data (DC fields are populated).
+ * @return true on success.
  */
 bool parseDCFromBuffer(const uint8_t* data, size_t size_bytes, SIIData& out);
 
@@ -156,13 +176,22 @@ struct SIIDemandResult {
      */
     std::vector<uint16_t> needed_word_pairs;
 
-    /**True if parsing is complete. */
+    /**
+     * @brief True if parsing is complete.
+     * @return true when status == COMPLETE (out_data is valid).
+     */
     bool isComplete() const { return status == COMPLETE; }
 
-    /**True if parsing failed. */
+    /**
+     * @brief True if parsing failed.
+     * @return true when status == FAILED (permanent error).
+     */
     bool isFailed() const { return status == FAILED; }
 
-    /**True if more words are needed. */
+    /**
+     * @brief True if more words are needed.
+     * @return true when status == NEED_WORDS (see needed_word_pairs).
+     */
     bool needsWords() const { return status == NEED_WORDS; }
 };
 
@@ -208,16 +237,29 @@ public:
      */
     SIIDemandResult parse(const SIISlaveCache& cache, SIIData& out_data);
 
-    /**True if parsing is complete (all phases done). */
+    /**
+     * @brief True if parsing is complete (all phases done).
+     * @return true after parse() finished every phase.
+     */
     bool isComplete() const { return phase_ == Phase::COMPLETE; }
 
-    /**True if parsing failed. */
+    /**
+     * @brief True if parsing failed.
+     * @return true after a permanent parse error; see lastError().
+     */
     bool isFailed() const { return phase_ == Phase::FAILED; }
 
-    /**Current phase (for diagnostics). */
+    /**
+     * @brief Current phase (for diagnostics).
+     * @return numeric Phase enumerator value.
+     */
     uint8_t phase() const { return static_cast<uint8_t>(phase_); }
 
-    /**Last error message (if failed). */
+    /**
+     * @brief Last error message (if failed).
+     * @return static string describing the failure, or nullptr when no
+     *         error has been recorded.
+     */
     const char* lastError() const { return last_error_; }
 
     // ----------------------------------------------------------------
