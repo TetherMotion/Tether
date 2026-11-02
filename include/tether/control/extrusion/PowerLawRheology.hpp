@@ -58,6 +58,10 @@ public:
     /**
      * @brief Compute the resistance constant C_n [Pa / (mm³/s)^n].
      *   C_n = 2·L·K_p · ((3n+1)/(π·n))^n · R^-(3n+1)
+     *
+     * @param p  Power-law parameters (consistency index, flow index).
+     * @param g  Nozzle geometry (length, radius in mm).
+     * @return resistance constant; infinity for non-positive index/radius.
      */
     static double resistanceConstant(const PowerLawParams& p,
                                      const NozzleGeometry& g) {
@@ -75,6 +79,11 @@ public:
     /**
      * @brief Pressure drop for a given volumetric flow.
      *   ΔP = C_n · Q^n   (Q in mm³/s, returns Pa)
+     *
+     * @param flowMm3PerS  Volumetric flow in mm³/s.
+     * @param p            Power-law parameters.
+     * @param g            Nozzle geometry.
+     * @return pressure drop in Pa (0 for non-positive flow).
      */
     static double pressureFromFlow(double flowMm3PerS,
                                    const PowerLawParams& p,
@@ -87,6 +96,11 @@ public:
     /**
      * @brief Volumetric flow for a given pressure drop (forward solution).
      *   Q = (πn/(3n+1)) · (ΔP/(2LK_p))^(1/n) · R^((3n+1)/n)
+     *
+     * @param pressurePa  Pressure drop in Pa.
+     * @param p           Power-law parameters.
+     * @param g           Nozzle geometry.
+     * @return volumetric flow in mm³/s (0 for invalid inputs).
      */
     static double flowFromPressure(double pressurePa,
                                    const PowerLawParams& p,
@@ -109,6 +123,11 @@ public:
      * @brief Apparent viscosity η_app = K_p · γ̇^(n-1) at shear rate γ̇.
      * For a circular pipe, the wall shear rate is γ̇_w = 4Q/(πR³) (Newtonian
      * approximation; the Rabinowitsch correction is omitted for simplicity).
+     *
+     * @param flowMm3PerS  Volumetric flow in mm³/s.
+     * @param p            Power-law parameters.
+     * @param g            Nozzle geometry.
+     * @return apparent viscosity in Pa·s.
      */
     static double apparentViscosity(double flowMm3PerS,
                                     const PowerLawParams& p,

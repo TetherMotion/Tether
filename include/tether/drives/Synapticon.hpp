@@ -92,6 +92,7 @@ enum class SomanetIdentityCheck {
  * @param slave     DiscoveredSlave entry (request DiscoveryOption::VendorId
  *                  and ProductCode during discovery for a reliable check).
  * @param log_tag   Log tag, or nullptr to suppress logging.
+ * @return the identity check outcome (Verified on match).
  */
 inline SomanetIdentityCheck verifySomanetIdentity(
     const EtherCAT::DiscoveredSlave& slave,
@@ -148,6 +149,10 @@ inline SomanetIdentityCheck verifySomanetIdentity(
  * @return The full discovery result, or std::nullopt when the bus is
  *         empty, an index is out of range, or a listed slave is not a
  *         Synapticon drive.
+ *
+ * @param discovery      Discovery manager to run the scan through.
+ * @param drive_indices  Expected drive positions to verify.
+ * @param log_tag        Log tag for diagnostics.
  */
 inline std::optional<std::vector<EtherCAT::DiscoveredSlave>> discoverDrives(
     EtherCAT::SlaveDiscoveryManager& discovery,
@@ -186,7 +191,12 @@ inline std::optional<std::vector<EtherCAT::DiscoveredSlave>> discoverDrives(
     return discovered;
 }
 
-/**Convert a shaft angle in degrees to encoder increments. */
+/**
+ * @brief Convert a shaft angle in degrees to encoder increments.
+ * @param degrees              Shaft angle in degrees.
+ * @param increments_per_rev   Encoder counts per revolution.
+ * @return nearest encoder increment count.
+ */
 inline int32_t degreesToIncrements(double degrees,
                                    uint32_t increments_per_rev) {
     return static_cast<int32_t>(std::lround(
@@ -243,6 +253,9 @@ struct FirmwareVersion {
 /**
  * Parse a SOMANET 0x100A string like "v5.6.4" / "5.6.4" /
  * "SOMANET 5.6.4-rc1".  Extracts the first X.Y.Z digit run.
+ *
+ * @param s  Raw 0x100A string.
+ * @return parsed FirmwareVersion (valid=false when no X.Y run found).
  */
 inline FirmwareVersion parseFirmwareVersion(std::string_view s) {
     FirmwareVersion v;
@@ -272,6 +285,9 @@ inline FirmwareVersion parseFirmwareVersion(std::string_view s) {
  * slave sits in SAFE_OP — every SDO issued in that window times out.
  * Returns true when the mailbox is expected to work in SAFE_OP (older
  * firmware, or version unreadable — conservative default).
+ *
+ * @param v  Firmware version read from 0x100A.
+ * @return true when CoE SDOs are expected to work in SAFE_OP.
  */
 inline bool mailboxServicedInSafeOp(FirmwareVersion v) {
     return !(v >= FirmwareVersion{5, 6, 0, true});

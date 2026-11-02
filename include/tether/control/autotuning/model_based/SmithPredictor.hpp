@@ -32,10 +32,19 @@ public:
     }
     AutotuningMode getMode() const override { return AutotuningMode::Offline; }
 
-    /** @brief Check compatibility for Smith-predictor design. */
+    /**
+     * @brief Check compatibility for Smith-predictor design.
+     * @param controller  Controller whose structure is validated.
+     * @return true when the controller can host a predictor-compensated PID.
+     */
     bool isCompatible(const TunableController& controller) const override;
     
-    /** @brief Design Smith predictor and apply inner controller gains. */
+    /**
+     * @brief Design Smith predictor and apply inner controller gains.
+     * @param controller  Controller receiving the inner gains.
+     * @param model       Optional process model overriding setModel().
+     * @return TuningResult with applied gains or an error.
+     */
     TuningResult tune(TunableController& controller,
                      const ProcessModel* model = nullptr) override;
     
@@ -45,13 +54,24 @@ public:
         double delay;
     };
 
-    /** @brief Compute inner controller and predictor parameters for given model and λ. */
+    /**
+     * @brief Compute inner controller and predictor parameters for given model and λ.
+     * @param model   FOPDT process model.
+     * @param lambda  Closed-loop speed parameter (smaller = faster).
+     * @return predictor structure (inner gains + model + delay).
+     */
     static SmithPredictorStructure design(const FOPDTModel& model, double lambda);
 
-    /** @brief Set the process model used for Smith predictor design. */
+    /**
+     * @brief Set the process model used for Smith predictor design.
+     * @param model  FOPDT model (gain, time constant, dead time).
+     */
     void setModel(const FOPDTModel& model) { m_model = model; }
 
-    /** @brief Set design filter parameter λ used in Smith predictor design. */
+    /**
+     * @brief Set design filter parameter λ used in Smith predictor design.
+     * @param lambda  Closed-loop speed parameter (seconds).
+     */
     void setLambda(double lambda) { m_lambda = lambda; }
 
 private:

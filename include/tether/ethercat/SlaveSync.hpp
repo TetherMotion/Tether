@@ -180,6 +180,7 @@ public:
 
     /**
      * @brief The slave index this handler manages.
+     * @return 0-based slave position on the bus.
      */
     virtual uint16_t slaveIndex() const = 0;
 };
@@ -320,22 +321,37 @@ public:
     /**
      * Register a slot.  The coordinator does not take ownership.
      * The slot must outlive the coordinator.
+     *
+     * @param slot  Slot to register (borrowed, not owned).
      */
     void registerSlot(SlaveSyncSlot& slot);
 
-    /**Unregister a slot by slave index. */
+    /**
+     * @brief Unregister a slot by slave index.
+     * @param slave_index  Slave whose slot is removed; no-op when absent.
+     */
     void unregisterSlot(uint16_t slave_index);
 
-    /**Get all registered slots. */
+    /**
+     * @brief Get all registered slots.
+     * @return registered slots in registration order (borrowed pointers).
+     */
     const std::vector<SlaveSyncSlot*>& slots() const { return slots_; }
 
-    /**Find a slot by slave index.  Returns nullptr if not found. */
+    /**
+     * @brief Find a slot by slave index.  Returns nullptr if not found.
+     * @param slave_index  Slave to look up.
+     * @return the slot, or nullptr when not registered.
+     */
     SlaveSyncSlot* findSlot(uint16_t slave_index) const;
 
     /**Clear the ready flag for all slots (before re-initialization). */
     void clearAllReady();
 
-    /**Clear the ready flag for one slot. */
+    /**
+     * @brief Clear the ready flag for one slot.
+     * @param slave_index  Slave whose ready flag is cleared.
+     */
     void clearReady(uint16_t slave_index);
 
     /**
@@ -416,7 +432,10 @@ private:
  */
 class SyncRecoveryHandler : public ISlaveRecoveryHandler {
 public:
-    /**Construct with a reference to the coordinator. */
+    /**
+     * @brief Construct with a reference to the coordinator.
+     * @param coord  Coordinator whose slots are recovered (borrowed).
+     */
     explicit SyncRecoveryHandler(SlaveSyncCoordinator& coord);
 
     /**
