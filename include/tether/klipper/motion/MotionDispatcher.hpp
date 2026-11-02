@@ -102,13 +102,24 @@ public:
 #endif
     }
 
-    /**@brief Set the callback that sends step sequences to the device. */
+    /**
+     * @brief Set the callback that sends step sequences to the device.
+     * @param cb  Invoked once per translated move with the encoded
+     *            queue_step commands; called from move()'s context.
+     */
     void setSendCallback(SendCallback cb) { send_ = std::move(cb); }
 
-    /**@brief Set the clock provider (returns current MCU clock in ticks). */
+    /**
+     * @brief Set the clock provider (returns current MCU clock in ticks).
+     * @param cp  Callable producing the device's MCU clock ticks; used to
+     *            schedule the first step time of each sequence.
+     */
     void setClockProvider(ClockProvider cp) { clock_ = std::move(cp); }
 
-    /**@brief Set the kinematics transform (Cartesian/CoreXY/Delta/...). */
+    /**
+     * @brief Set the kinematics transform (Cartesian/CoreXY/Delta/...).
+     * @param kt  Copied transform applied before motion segmentation.
+     */
     void setKinematicsTransform(const KinematicsTransform& kt) {
         translator_.setKinematicsTransform(kt);
     }
@@ -118,30 +129,42 @@ public:
      * @brief Update pressure advance config at runtime.
      * Allows G-code (M900 / SET_PRESSURE_ADVANCE) to enable/disable
      * and tune PA without recreating the dispatcher.
+     * @param pa  New config (enable flag, coefficient, smoothing).
      */
     void setPressureAdvanceConfig(const PressureAdvanceConfig& pa) {
         translator_.setPressureAdvanceConfig(pa);
     }
 
-    /**@brief Get the current pressure advance config. */
+    /**
+     * @brief Get the current pressure advance config.
+     * @return reference to the translator's live config; remains valid
+     *         until the translator is destroyed or reconfigured.
+     */
     const PressureAdvanceConfig& pressureAdvanceConfig() const {
         return translator_.pressureAdvanceConfig();
     }
 #endif
 
-    /**@brief Set/override the current position (mm). Used after homing/G92. */
+    /**
+     * @brief Set/override the current position (mm). Used after homing/G92.
+     * @param pos  Logical (x, y, z, e) position in mm.
+     */
     void setPosition(std::array<double, 4> pos) { current_ = pos; }
 
     /**
      * @brief Set the shared extrusion-flow tracker. When set, each move
      * updates the tracker with the per-move E-axis velocity so the
      * flow-adaptive heater compensation can react to flow changes.
+     * @param tracker  Shared tracker; nullptr detaches it.
      */
     void setFlowTracker(std::shared_ptr<ExtrusionFlowTracker> tracker) {
         flowTracker_ = std::move(tracker);
     }
 
-    /**@brief Get the flow tracker (may be null). */
+    /**
+     * @brief Get the flow tracker (may be null).
+     * @return the installed tracker, or nullptr when none is set.
+     */
     std::shared_ptr<ExtrusionFlowTracker> flowTracker() const {
         return flowTracker_;
     }
@@ -151,6 +174,11 @@ public:
 
     /**
      * @brief Execute a linear move to (x, y, z, e) at speed_mm_s (mm/s).
+     * @param x           Target X position in mm.
+     * @param y           Target Y position in mm.
+     * @param z           Target Z position in mm.
+     * @param e           Target extruder position in mm.
+     * @param speed_mm_s  Move speed in mm/s.
      * @return Number of queue_step commands dispatched, or 0 if no send
      *         callback is set / no motion is needed.
      */

@@ -84,7 +84,13 @@ inline std::optional<SimulatedCommandParameters> decodeSimulatedParameters(
     return out;
 }
 
-/**TLV helper matching decodeSimulatedParameters. */
+/**
+ * @brief TLV helper matching decodeSimulatedParameters.
+ * @param bytes  Output buffer appended to.
+ * @param tag    Parameter tag byte.
+ * @param value  Parameter value, emitted little-endian.
+ * @param width  Byte width of the encoded value.
+ */
 inline void putParameter(std::vector<uint8_t>& bytes, uint8_t tag, uint64_t value,
                          size_t width) {
     bytes.push_back(tag);
@@ -686,6 +692,13 @@ struct SimulatedMachineStack {
      * are opt-in; pass false (or leave a real stack without setSdoService)
      * to keep machine.sdo.* off the catalog entirely. `enableExtension`
      * attaches the application-profile + recipe surfaces (Phase 7).
+     *
+     * @param registry           Function registry to populate.
+     * @param catalog            Schema catalog describing the surfaces.
+     * @param enableSdo          Attach the in-memory SDO inspector backend.
+     * @param enableDiagnostics  Attach the diagnostics surface.
+     * @param enableExtension    Attach app-profile + recipe surfaces.
+     * @return true when all requested surfaces were registered.
      */
     bool install(Registry& registry, const SchemaCatalog& catalog,
                  bool enableSdo = true, bool enableDiagnostics = true,
@@ -771,6 +784,9 @@ struct SimulatedMachineStack {
     /**
      * CiA 301 data type code → Tether value type + fixed byte size (0 for
      * variable-length types).
+     *
+     * @param dataType  CiA 301 data type code (e.g. 0x0007 = U32).
+     * @return {ValueType, byte size}; unlisted codes map to {Binary, 0}.
      */
     static std::pair<ValueType, size_t> odTypeInfo(uint16_t dataType) {
         switch (dataType) {
@@ -793,6 +809,11 @@ struct SimulatedMachineStack {
     /**
      * Live snapshot fields surfaced as OD objects: measured objects read the
      * current snapshot; writable command objects also mirror writes back.
+     *
+     * @param s      Drive snapshot to read from.
+     * @param index  OD index to look up (e.g. 0x6040 controlword).
+     * @param value  out: field value when mapped.
+     * @return true when the index maps to a snapshot field.
      */
     static bool liveObjectValue(const cia402::DriveSnapshotV1& s, uint16_t index,
                                 int64_t& value) {
@@ -826,6 +847,8 @@ struct SimulatedMachineStack {
      * CiA 402 parameter surface. Read-only objects read live from the drive
      * snapshot where a mapping exists; writable objects update both the OD
      * store and the snapshot (which journals a DriveStateChanged event).
+     *
+     * @param registry  Function registry receiving the per-axis OD objects.
      */
     void registerObjectDictionary(Registry& registry) {
         static constexpr uint64_t kIdBase = 0x5400'0000'0000'0000ULL;
@@ -912,7 +935,10 @@ struct SimulatedMachineStack {
         }
     }
 
-    /**Common CiA 402 object table shown by machine.sdo.list in simulation. */
+    /**
+     * @brief Common CiA 402 object table shown by machine.sdo.list in simulation.
+     * @return static descriptor list (index, subindex, type, access, name).
+     */
     static std::vector<SdoObjectInfoV1> simulatedObjectTable() {
         return {
             {0x1000, 0, 0x0007, 1, "Device type"},

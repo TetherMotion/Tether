@@ -104,6 +104,9 @@ struct MCodeParameters {
 
     /**
      * @brief Get axis value by index
+     * @param index  0=X, 1=Y, 2=Z, 3=A, 4=B, 5=C, 6=U, 7=V, 8=W.
+     * @return the axis parameter value, or nullopt for out-of-range index
+     *         or an unset axis letter.
      */
     std::optional<double> getAxis(size_t index) const {
         switch (index) {
@@ -122,6 +125,7 @@ struct MCodeParameters {
 
     /**
      * @brief Check if this is a motion-related M-code
+     * @return true for M201/M203/M204/M205 (accel/velocity/jerk limits).
      */
     bool isMotionRelated() const {
         return mCode == 201 || mCode == 203 || mCode == 204 || mCode == 205;
@@ -260,16 +264,21 @@ public:
 
     /**
      * @brief Check if a callback is registered for an M-code
+     * @param mCode  M-code number.
+     * @return true when a handler callback exists for it.
      */
     bool hasCallback(int mCode) const;
 
     /**
      * @brief Get description for an M-code
+     * @param mCode  M-code number.
+     * @return registered description, or empty for unknown codes.
      */
     std::string getDescription(int mCode) const;
 
     /**
      * @brief Get list of all registered M-codes
+     * @return M-code numbers with registered callbacks.
      */
     std::vector<int> registeredMCodes() const;
 
@@ -298,6 +307,7 @@ public:
 
     /**
      * @brief Get current machine state reference
+     * @return mutable reference to the internal machine state.
      */
     MarlinMachineState& state() { return internalState_; }
     const MarlinMachineState& state() const { return internalState_; }
