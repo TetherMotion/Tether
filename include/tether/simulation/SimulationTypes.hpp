@@ -73,9 +73,15 @@ struct GeometryDesc {
     double innerRadius = 0.0;
     double density = 7850.0; // steel
 
-    /**Compute moment of inertia about primary axis */
+    /**
+     * @brief Compute moment of inertia about primary axis.
+     * @return inertia in kg·mm².
+     */
     double computeInertia() const;
-    /**Compute cross-sectional area */
+    /**
+     * @brief Compute cross-sectional area.
+     * @return area in mm².
+     */
     double computeArea() const;
 };
 
@@ -104,7 +110,13 @@ struct FrictionParams {
     double sigma2 = 0.0;     // viscous
     double lugreState = 0.0; // internal state z
 
-    /**Compute friction force given velocity */
+    /**
+     * @brief Compute friction force given velocity.
+     * @param velocity      Surface velocity [mm/s].
+     * @param normalForce   Normal force [N].
+     * @param dt            Step size [s] (advances the LuGre state).
+     * @return friction force [N].
+     */
     double compute(double velocity, double normalForce, double dt);
 };
 

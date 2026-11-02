@@ -18,10 +18,18 @@ class IPDOTransport;
 class IFaultTransport;
 namespace SDO { class ISDOTransport; }
 
-/**Adapt Master to the PDO-manager transport interface. */
+/**
+ * @brief Adapt Master to the PDO-manager transport interface.
+ * @param master  Master instance (borrowed).
+ * @return transport adapter.
+ */
 std::unique_ptr<IPDOTransport> makeMasterPDOTransport(Master& master);
 
-/**Adapt Master to the fault-detector transport interface. */
+/**
+ * @brief Adapt Master to the fault-detector transport interface.
+ * @param master  Master instance (borrowed).
+ * @return transport adapter.
+ */
 std::unique_ptr<IFaultTransport> makeMasterFaultTransport(Master& master);
 
 /**Adapt Master to the CoE SDO transport interface. */
