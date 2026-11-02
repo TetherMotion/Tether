@@ -469,8 +469,10 @@ inline bool validateNode(const SchemaGraph& graph, const SchemaNode& node,
         case SchemaKind::DynamicArray: {
             if (!node.element) return fail(reader);
             uint64_t count = 0;
+            // maxCount == 0 is unbounded (same convention as validateSchemaGraph).
             if (!schema_value_wire_detail::getU64Varint(reader, count) ||
-                count < node.minCount || count > node.maxCount || count > limits.maxElements) {
+                count < node.minCount || (node.maxCount != 0 && count > node.maxCount) ||
+                count > limits.maxElements) {
                 return fail(reader);
             }
             for (uint64_t index = 0; index < count; ++index) {
@@ -487,8 +489,10 @@ inline bool validateNode(const SchemaGraph& graph, const SchemaNode& node,
         case SchemaKind::Map: {
             if (!node.mapKey || !node.mapValue) return fail(reader);
             uint64_t count = 0;
+            // maxCount == 0 is unbounded (same convention as validateSchemaGraph).
             if (!schema_value_wire_detail::getU64Varint(reader, count) ||
-                count < node.minCount || count > node.maxCount || count > limits.maxElements) {
+                count < node.minCount || (node.maxCount != 0 && count > node.maxCount) ||
+                count > limits.maxElements) {
                 return fail(reader);
             }
             std::vector<uint8_t> previousKey;
