@@ -49,23 +49,39 @@ public:
 
     // -- Topology / identity -------------------------------------------------
 
-    /**Zero-based bus position of the bound slave. */
+    /**
+     * @brief Zero-based bus position of the bound slave.
+     * @return slave position on the EtherCAT bus.
+     */
     virtual uint16_t slaveIndex() const = 0;
 
-    /**Number of input bits this device contributes to the chain. */
+    /**
+     * @brief Number of input bits this device contributes to the chain.
+     * @return input channel count.
+     */
     virtual size_t bitCount() const = 0;
 
-    /**Human-readable device name (identity name or discovered name). */
+    /**
+     * @brief Human-readable device name (identity name or discovered name).
+     * @return static string valid for the device's lifetime.
+     */
     virtual const char* deviceName() const = 0;
 
     // -- Bit access ----------------------------------------------------------
     // Reads observe the registered PDO buffer as last written by the cyclic
     // exchange — they reflect the inputs as of the most recent cycle.
 
-    /**Current state of an input bit (0-based within this device). */
+    /**
+     * @brief Current state of an input bit (0-based within this device).
+     * @param bit  Channel index; must be < bitCount().
+     * @return sampled bit value from the last cyclic exchange.
+     */
     virtual bool bit(size_t bit) const = 0;
 
-    /**Current input bits (bit N = input N). */
+    /**
+     * @brief Current input bits (bit N = input N).
+     * @return all channel states packed into a 64-bit mask.
+     */
     virtual uint64_t bits() const = 0;
 
     // -- Chained bring-up (called by MultiInputTerminal) -----------------------------
@@ -78,6 +94,8 @@ public:
      *
      * The chain calls this for every device BEFORE building the shared
      * logical address map.
+     *
+     * @return success or the first failing step's error.
      */
     virtual Result<> prepareForLogicalExchange() = 0;
 
@@ -88,11 +106,15 @@ public:
      *
      * The chain calls this for every device AFTER the shared logical
      * address map has been built.
+     *
+     * @return success or the FMMU/state-transition error.
      */
     virtual Result<> mapLogicalAndEnterSafeOp() = 0;
 
     /**
      * @brief Request the SAFE-OP -> OP transition and wait for confirmation.
+     * @param timeout_ms  Maximum wait for the OP state in milliseconds.
+     * @return success, or timeout/error when the slave refuses OP.
      */
     virtual Result<> requestOp(int timeout_ms) = 0;
 };

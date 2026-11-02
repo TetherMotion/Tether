@@ -34,32 +34,64 @@ public:
     }
     AutotuningMode getMode() const override { return AutotuningMode::Offline; }
 
-    /** @brief Check controller compatibility for pole-placement approaches. */
+    /**
+     * @brief Check controller compatibility for pole-placement approaches.
+     * @param controller  Controller whose structure is validated.
+     * @return true when the controller accepts PID gains derived from
+     *         state feedback.
+     */
     bool isCompatible(const TunableController& controller) const override;
     
     /**
      * @brief Compute gains via pole placement and convert to controller parameters.
+     * @param controller  Controller receiving the computed gains.
+     * @param model       Optional process model used to derive system
+     *                    matrices when none were set explicitly.
+     * @return TuningResult with applied gains or an error.
      */
     TuningResult tune(TunableController& controller,
                      const ProcessModel* model = nullptr) override;
     
-    /** @brief Supply desired closed-loop poles explicitly. */
+    /**
+     * @brief Supply desired closed-loop poles explicitly.
+     * @param poles  Desired pole locations (s-plane); count must match
+     *               the system order used in tune().
+     */
     void setDesiredPoles(const std::vector<std::complex<double>>& poles);
 
-    /** @brief Compute pole locations from desired settling time and overshoot. */
+    /**
+     * @brief Compute pole locations from desired settling time and overshoot.
+     * @param settlingTime  2% settling time in seconds.
+     * @param overshoot     Fractional overshoot (0..1, e.g. 0.1 = 10%).
+     */
     void setPolesFromSpecs(double settlingTime, double overshoot);
 
     /**
      * @brief Compute state-feedback gain for linear system (A,B) and desired poles.
+     * @param A      n×n system matrix (row-major).
+     * @param B      n×1 input matrix.
+     * @param n      System order.
+     * @param poles  Desired pole locations.
      * @return Vector of gains K.
      */
     static std::vector<double> computeGain(const double* A, const double* B,
                                           int n, const std::vector<std::complex<double>>& poles);
 
-    /** @brief Convert state-feedback gains into PID gains for a controller of given order. */
+    /**
+     * @brief Convert state-feedback gains into PID gains for a controller of given order.
+     * @param K      State-feedback gain vector from computeGain().
+     * @param order  Target controller order (2 = PI, 3 = PID).
+     * @return equivalent PIDGains.
+     */
     static PIDGains stateFeedbackToPID(const std::vector<double>& K, int order);
 
-    /** @brief Provide system matrices for state-space-based design. */
+    /**
+     * @brief Provide system matrices for state-space-based design.
+     * @param A  n×n system matrix (row-major, copied).
+     * @param B  n×m input matrix (row-major, copied).
+     * @param n  State dimension.
+     * @param m  Input dimension.
+     */
     void setSystemMatrices(const double* A, const double* B, int n, int m);
     
 private:

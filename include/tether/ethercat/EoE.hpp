@@ -219,6 +219,9 @@ enum class EoEFrameType : uint8_t {
 
 /**
  * @brief Get frame type string
+ * @param type  EoEFrameType value.
+ * @return static name string (e.g. "EoE Frag Req"), or "Unknown" for
+ *         out-of-range values.
  */
 const char* eoe_frame_type_string(EoEFrameType type);
 
@@ -244,6 +247,8 @@ enum class EoEError : uint32_t {
 
 /**
  * @brief Get error string
+ * @param error  EoEError code.
+ * @return static description string, or "Unknown" for unlisted codes.
  */
 const char* eoe_error_string(EoEError error);
 
@@ -366,6 +371,7 @@ void eoe_deinit();
 
 /**
  * @brief Check if EoE is initialized
+ * @return true between eoe_init() and eoe_deinit().
  */
 bool eoe_is_initialized();
 
@@ -451,6 +457,7 @@ void eoe_unregister_frame_callback();
 
 /**
  * @brief Register link state callback
+ * @param callback  Invoked when a slave's EoE link state changes.
  */
 void eoe_register_link_callback(EoELinkCallback callback);
 
@@ -511,6 +518,7 @@ struct EoEStats {
 
 /**
  * @brief Get EoE statistics
+ * @return snapshot of the global EoE counters (frames, bytes, drops).
  */
 EoEStats eoe_get_stats();
 
@@ -521,6 +529,9 @@ void eoe_reset_stats();
 
 /**
  * @brief Get EoE statistics for specific slave
+ * @param slave_index  0-based slave position.
+ * @return snapshot of that slave's counters; zeroed when the slave has
+ *         no recorded traffic.
  */
 EoEStats eoe_get_slave_stats(uint16_t slave_index);
 
@@ -548,6 +559,7 @@ void eoe_set_enabled(bool enabled);
 
 /**
  * @brief Check if EoE is enabled in realtime loop
+ * @return true when EoE mailbox processing runs inside the cyclic loop.
  */
 bool eoe_is_enabled();
 
