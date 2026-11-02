@@ -407,6 +407,7 @@ public:
      * @brief Estimated melt-zone temperature from the flow controller's
      * internal observer (0.0 if no controller is wired).
      * @return melt-zone estimate [°C].
+     */
     double meltTempEstimate() const {
         return flowController_ ? flowController_->meltTempEst() : 0.0;
     }
