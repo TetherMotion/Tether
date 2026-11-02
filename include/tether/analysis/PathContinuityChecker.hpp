@@ -64,7 +64,11 @@ public:
     explicit PathContinuityChecker() : params_() {}
     explicit PathContinuityChecker(Params params) : params_(params) {}
 
-    /**@brief Check continuity of G-code toolpath. */
+    /**
+     * @brief Check continuity of G-code toolpath.
+     * @param gcodeLines  Raw G-code lines.
+     * @return populated result struct.
+     */
     PathContinuityResult analyze(const std::vector<std::string>& gcodeLines) const;
 
     const Params& params() const { return params_; }

@@ -60,7 +60,11 @@ public:
                                   KinematicLimits kinematic = {})
         : envelope_(envelope), kinematic_(kinematic) {}
 
-    /**@brief Check G-code lines for all limit violations. */
+    /**
+     * @brief Check G-code lines for all limit violations.
+     * @param gcodeLines  Raw G-code lines.
+     * @return populated result struct.
+     */
     MachineLimitResult check(const std::vector<std::string>& gcodeLines) const;
 
     const Envelope& envelope() const { return envelope_; }

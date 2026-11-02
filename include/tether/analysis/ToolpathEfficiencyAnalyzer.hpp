@@ -62,7 +62,11 @@ public:
     explicit ToolpathEfficiencyAnalyzer() : params_() {}
     explicit ToolpathEfficiencyAnalyzer(Params params) : params_(params) {}
 
-    /**@brief Analyze toolpath efficiency from G-code. */
+    /**
+     * @brief Analyze toolpath efficiency from G-code.
+     * @param gcodeLines  Raw G-code lines.
+     * @return populated result struct.
+     */
     ToolpathEfficiencyResult analyze(const std::vector<std::string>& gcodeLines) const;
 
     const Params& params() const { return params_; }

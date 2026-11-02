@@ -79,7 +79,11 @@ struct ModalStateResult {
 /**@brief Track and analyze modal state changes in G-code. */
 class ModalStateAnalyzer {
 public:
-    /**@brief Analyze modal states, groups, and transitions. */
+    /**
+     * @brief Analyze modal states, groups, and transitions.
+     * @param gcodeLines  Raw G-code lines.
+     * @return populated result struct.
+     */
     ModalStateResult analyze(const std::vector<std::string>& gcodeLines) const;
 
 private:

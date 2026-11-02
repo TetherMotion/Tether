@@ -104,7 +104,11 @@ public:
     explicit RetractionAnalyzer() : params_() {}
     explicit RetractionAnalyzer(Params params) : params_(params) {}
 
-    /**@brief Analyze retraction settings from G-code. */
+    /**
+     * @brief Analyze retraction settings from G-code.
+     * @param gcodeLines  Raw G-code lines.
+     * @return populated result struct.
+     */
     RetractionResult analyze(const std::vector<std::string>& gcodeLines) const;
 
     const Params& params() const { return params_; }
