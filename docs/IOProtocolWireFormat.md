@@ -1,7 +1,11 @@
 # Tether IO Protocol - Wire Contract
 
 The typed CiA 402 application profile built on these primitives is documented
-in [IOProtocolMachineProfile.md](IOProtocolMachineProfile.md).
+in [IOProtocolMachineProfile.md](IOProtocolMachineProfile.md). For the
+per-message payloads see
+[IOProtocolMessageCatalog.md](IOProtocolMessageCatalog.md); for building the
+schemas this contract encodes see
+[IOProtocolSchemaAuthoring.md](IOProtocolSchemaAuthoring.md).
 
 **Protocol Version:** 6
 

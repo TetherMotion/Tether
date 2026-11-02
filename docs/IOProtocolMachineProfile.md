@@ -204,3 +204,7 @@ A profile implementation must test:
 - Authority acquisition, renewal, expiry, conflict, and release.
 - Event cursor pagination, retention gaps, and reconnect resynchronization.
 - `InvokeEx` deadline expiry without claiming that server work was cancelled.
+
+The credential→identity→authority-lease enforcement behind the mutating
+`machine.*` calls is documented in
+[IOProtocolMachineControl.md](IOProtocolMachineControl.md).
