@@ -267,13 +267,22 @@ struct GenericReNURBSProfile {
     /**Quantity names (mirrors QuantitySpec::name for convenience). */
     std::vector<std::string> quantityNames;
 
-    /**True if the profile is empty. */
+    /**
+     * @brief True if the profile is empty.
+     * @return true when no segments have been added.
+     */
     bool empty() const noexcept { return perSegment.empty(); }
 
-    /**Number of segments. */
+    /**
+     * @brief Number of segments.
+     * @return per-segment curve count.
+     */
     std::size_t numSegments() const noexcept { return perSegment.size(); }
 
-    /**Number of quantities. */
+    /**
+     * @brief Number of quantities.
+     * @return per-segment quantity count (all segments share the list).
+     */
     std::size_t numQuantities() const noexcept { return quantityNames.size(); }
 };
 
@@ -287,15 +296,26 @@ struct GenericReNURBSProfile {
  * This is used by the velocity adapter to maintain backward compatibility.
  * The generic profile must have exactly 4 quantities named (in order)
  * "velocity", "acceleration", "jerk", "time".
+ *
+ * @param generic  Generic profile to convert.
+ * @return velocity-specific profile; behavior is undefined when the
+ *         required quantity names/order do not match.
  */
 ReNURBSProfile toVelocityProfile(const GenericReNURBSProfile& generic);
 
-/**Convert a velocity-specific ReNURBSProfile to a generic one. */
+/**
+ * @brief Convert a velocity-specific ReNURBSProfile to a generic one.
+ * @param velocity  Velocity profile to convert.
+ * @return generic profile with velocity/acceleration/jerk/time quantities.
+ */
 GenericReNURBSProfile fromVelocityProfile(const ReNURBSProfile& velocity);
 
 /**
  * Convert a GenericCertificate to a velocity-specific
  * ProfileConstraintCertificate.
+ *
+ * @param generic  Generic certificate to convert.
+ * @return velocity-specific certificate.
  */
 ProfileConstraintCertificate toVelocityCertificate(
     const GenericCertificate& generic);

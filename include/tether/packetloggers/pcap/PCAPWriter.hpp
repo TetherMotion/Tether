@@ -303,22 +303,30 @@ private:
 
 /**
  * Create a standard PCAPNG writer
+ * @return writer using default configuration; caller owns it.
  */
 std::unique_ptr<IPCAPWriter> createPCAPWriter();
 
 /**
  * Create a PCAPNG writer with specified configuration
+ * @param filename     Output .pcapng path.
+ * @param sectionInfo  Section-header metadata (app name, OS, hardware).
+ * @return configured writer; caller owns it.
  */
 std::unique_ptr<IPCAPWriter> createPCAPWriter(const std::string& filename,
                                               const SectionHeaderInfo& sectionInfo);
 
 /**
  * Create a null writer (discards all packets)
+ * @return writer that accepts packets and drops them (testing/benchmarks).
  */
 std::unique_ptr<IPCAPWriter> createNullPCAPWriter();
 
 /**
  * Create a memory-based writer (stores in memory, can be retrieved)
+ * @param maxBytes  Maximum retained bytes; older packets are dropped
+ *                  past the cap.
+ * @return in-memory writer; caller owns it.
  */
 std::unique_ptr<IPCAPWriter> createMemoryPCAPWriter(size_t maxBytes = 10 * 1024 * 1024);
 
@@ -328,11 +336,15 @@ std::unique_ptr<IPCAPWriter> createMemoryPCAPWriter(size_t maxBytes = 10 * 1024 
 
 /**
  * Get current nanosecond timestamp
+ * @return wall-clock timestamp in ns, suitable for PCAPNG packet records.
  */
 uint64_t getPCAPTimestampNs();
 
 /**
  * Convert EtherCAT frame to metadata
+ * @param frame   Raw EtherCAT frame bytes.
+ * @param length  Frame length.
+ * @return extracted PacketMetadata (commands, addresses, protocol hints).
  */
 PacketMetadata extractEtherCATMetadata(const uint8_t* frame, size_t length);
 
