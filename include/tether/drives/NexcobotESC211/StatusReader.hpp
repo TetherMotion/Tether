@@ -39,7 +39,11 @@ public:
         bool error_message_ok = false;
     };
 
-    /**Read the four system-state objects into `snap` (best effort). */
+    /**
+     * @brief Read the four system-state objects into `snap` (best effort).
+     * @param slave  Slave to query.
+     * @param snap   out: populated snapshot.
+     */
     static void readSystemState(EtherCAT::Slave& slave,
                                 SystemStateSnapshot& snap);
 
@@ -47,6 +51,8 @@ public:
      * Read the 0xF110 debug message table into `out` (one string per
      * entry; read failures are pushed as "read failed" lines so the
      * caller can display them verbatim).
+     * @param slave  Slave to query.
+     * @param out    out: one string per table entry.
      */
     static void readDebugMessages(EtherCAT::Slave& slave,
                                   std::vector<std::string>& out);

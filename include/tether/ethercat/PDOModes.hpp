@@ -22,6 +22,9 @@ namespace EtherCAT {
 // Mode enum
 // ============================================================================
 
+/**
+ * @brief PDO update dispatch mode.
+ */
 enum class PDOMode : uint8_t {
     Direct = 0, /**< Default: user calls sendAll()/receiveAll() or exchangeAll() */
     Callback = 1, /**< Per-entry callbacks fire during send/receive */
@@ -66,6 +69,9 @@ struct PDOFrame {
 
 /**Event notification for queue-based async mode */
 struct PDOEvent {
+    /**
+     * @brief PDO event kind.
+     */
     enum class Type : uint8_t {
         TxSent, /**< TX frame was sent to the NIC */
         RxReceived, /**< RX frame was received from the bus */

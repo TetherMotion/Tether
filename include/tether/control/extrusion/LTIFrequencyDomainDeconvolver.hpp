@@ -69,7 +69,10 @@ class LTIFrequencyDomainDeconvolver {
 public:
     explicit LTIFrequencyDomainDeconvolver(LTIDeconvolutionParams params = {});
 
-    /**@brief Set the measured LTI impulse response h[n]. */
+    /**
+     * @brief Set the measured LTI impulse response h[n].
+     * @param h  Impulse response samples.
+     */
     void setImpulseResponse(const std::vector<double>& h);
 
     /**
@@ -103,7 +106,10 @@ public:
     /**@return The current parameters. */
     const LTIDeconvolutionParams& params() const { return params_; }
 
-    /**@brief Update the regularization parameter and recompute the inverse. */
+    /**
+     * @brief Update the regularization parameter and recompute the inverse.
+     * @param lambda  Non-negative regularization weight.
+     */
     void setLambda(double lambda);
 
     /**@brief Reset all state. */

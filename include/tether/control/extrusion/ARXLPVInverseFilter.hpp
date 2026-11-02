@@ -71,10 +71,19 @@ public:
      */
     ARXLPVInverseFilter(int na = 0, int nb = 0);
 
-    /**@brief Add an identified ARX model at operating point p. */
+    /**
+     * @brief Add an identified ARX model at operating point p.
+     * @param point  Model + operating point.
+     */
     void addModelPoint(const ARXLPVModelPoint& point);
 
-    /**@brief Add an identified ARX model (convenience overload). */
+    /**
+     * @brief Add an identified ARX model (convenience overload).
+     * @param p      Operating point.
+     * @param a      Denominator coefficients.
+     * @param b      Numerator coefficients.
+     * @param delay  Input delay.
+     */
     void addModelPoint(double p, std::vector<double> a,
                        std::vector<double> b, int delay = 0);
 
