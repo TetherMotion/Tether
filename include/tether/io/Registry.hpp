@@ -88,8 +88,6 @@ struct ParamEntry {
     std::string description;
     std::string group; /**< Logical group (e.g. "pid.axis0", "ethercat.slave1") */
     ValueType   valueType;
-    /**Element type when valueType == Array (None otherwise). */
-    ValueType   elementType = ValueType::None;
     ReadFn      readFn;
     WriteFn     writeFn; /**< nullptr = read-only parameter */
     VarReadFn   varReadFn; /**< For String/Binary */
@@ -103,6 +101,9 @@ struct ParamEntry {
     SchemaRef   schema;
     uint32_t    schemaSlot = 0;
 #endif
+    /**Element type when valueType == Array (None otherwise). Trailing so
+     * positional aggregate initializers stay valid. */
+    ValueType   elementType = ValueType::None;
 
     uint8_t valueSize() const { return valueTypeSize(valueType); }
     bool isVariableLength() const { return tether::io::isVariableLength(valueType) || valueType == ValueType::Struct; }
@@ -127,8 +128,6 @@ struct SignalEntry {
     std::string description;
     std::string group;
     ValueType   valueType;
-    /**Element type when valueType == Array (None otherwise). */
-    ValueType   elementType = ValueType::None;
     ReadFn      readFn;
     VarReadFn   varReadFn;
     uint16_t    maxValueSize = 0;
@@ -140,6 +139,9 @@ struct SignalEntry {
     SchemaRef   schema;
     uint32_t    schemaSlot = 0;
 #endif
+    /**Element type when valueType == Array (None otherwise). Trailing so
+     * positional aggregate initializers stay valid. */
+    ValueType   elementType = ValueType::None;
 
     uint8_t valueSize() const { return valueTypeSize(valueType); }
     bool isVariableLength() const { return tether::io::isVariableLength(valueType) || valueType == ValueType::Struct; }
