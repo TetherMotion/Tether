@@ -796,7 +796,11 @@ using VelocityCommand = tether::common::VelocityCommand;
 using TorqueCommand  = tether::common::TorqueCommand;
 using HomingCommand  = tether::common::HomingCommand;
 
-/**Convert a CiA 402 error code to a human-readable string. */
+/**
+ * @brief Convert a CiA 402 error code to a human-readable string.
+ * @param errorCode  0x603F error register value.
+ * @return static description string.
+ */
 const char* errorToString(uint16_t errorCode);
 
 } // namespace CiA402

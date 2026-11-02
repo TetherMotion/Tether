@@ -1,5 +1,5 @@
 /**
- * @file MotionControllerPath.cpp
+ * @file Cia402MotionController.cpp
  * @brief MotionController implementation - Multi-axis coordination and path execution
  * 
  * This file contains the MotionController class implementation including:

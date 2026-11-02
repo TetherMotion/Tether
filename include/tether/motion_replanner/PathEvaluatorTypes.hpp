@@ -25,7 +25,11 @@ namespace tether::motion::replanner {
 /**Letter grade for a single aspect of path fidelity. */
 enum class Grade { A, B, C, D, F };
 
-/**Convert a grade to a string ("A", "B", etc.). */
+/**
+ * @brief Convert a grade to a string ("A", "B", etc.).
+ * @param g  Grade.
+ * @return letter string.
+ */
 inline std::string gradeToString(Grade g) {
     switch (g) {
         case Grade::A: return "A";

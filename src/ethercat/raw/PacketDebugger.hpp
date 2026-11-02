@@ -27,6 +27,9 @@ namespace PacketDebugger {
 /**
  * Map an EtherType value to a human-readable string.
  * Returns nullptr for unknown EtherTypes.
+ *
+ * @param ether_type  16-bit EtherType.
+ * @return static name, or nullptr.
  */
 const char* etherTypeToString(uint16_t ether_type);
 
