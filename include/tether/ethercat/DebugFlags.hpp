@@ -184,6 +184,8 @@ public:
 
     /**
      * @brief Check if any debug flag is enabled at all (ignoring gate).
+     * @return true when at least one category flag is set; fast bail-out
+     *         used to skip all debug bookkeeping.
      */
     bool isAnyFlagEnabled() const {
         return rxPDO || txPDO || stateMachine || txPackets || rxPackets ||
@@ -199,6 +201,13 @@ public:
 
     /**
      * @brief Compute the pre-computed flags for a single slave.
+     *
+     * Each per-slave flag is the master flag ANDed with that flag's
+     * SlaveFilter. When a DebugGate is installed and closed for this
+     * slave, an all-false set is returned.
+     *
+     * @param slave_index  0-based slave position.
+     * @return resolved flag set for that slave.
      */
     EtherCATSlaveDebugFlags computeForSlave(uint16_t slave_index) const {
         // If a gate is set and it's closed for this slave, return all-false
@@ -240,16 +249,23 @@ public:
 
     /**
      * @brief Convenience: is a named flag enabled for a given slave?
+     * @param name         Flag name (see allDebugFlags()).
+     * @param slave_index  0-based slave position.
+     * @return true when the flag is set and its filter allows the slave.
      */
     bool isEnabled(const std::string& name, uint16_t slave_index) const;
 
     /**
      * @brief Enable/disable a flag by name (no filter).
+     * @param name     Flag name; unknown names are ignored.
+     * @param enabled  New flag state.
      */
     void setFlag(const std::string& name, bool enabled);
 
     /**
      * @brief Set the filter for a named flag.
+     * @param name    Flag name; unknown names are ignored.
+     * @param filter  Per-slave filter replacing the current one.
      */
     void setFilter(const std::string& name, const SlaveFilter& filter);
 
@@ -261,11 +277,16 @@ public:
      *
      * Examples:
      *   --debug rx-pdo,stateMachine:(slaves:0,2,5),coe-reads:(slaves:1-3)
+     *
+     * @param spec         Comma-separated flag/filter specification.
+     * @param slave_count  Bus slave count, used to size filters.
+     * @param tag          Optional log tag for parse diagnostics.
      */
     void applyFromString(const std::string& spec, uint16_t slave_count, const char* tag = nullptr);
 
     /**
      * @brief Set filters for all flags from the current slave count.
+     * @param slave_count  Bus slave count; resizes every flag's filter.
      */
     void resizeFilters(uint16_t slave_count);
 };
@@ -282,6 +303,7 @@ struct DebugFlagInfo {
 
 /**
  * @brief Registry of all available debug flags.
+ * @return static list of every flag's name and description.
  */
 const std::vector<DebugFlagInfo>& allDebugFlags();
 

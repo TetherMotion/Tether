@@ -69,6 +69,10 @@ struct DisplayPanel {
  * A row whose first cell is a muted label — the common shape of
  * chip-panel rows ("EStop In1 In2 …").
  */
+/**
+ * @param label  Row label rendered as the first, muted cell.
+ * @return DisplayRow with one muted label cell; callers append chips.
+ */
 inline DisplayRow labeledRow(std::string_view label) {
     return DisplayRow{{{std::string(label), DisplayTone::Muted}}};
 }
@@ -83,6 +87,11 @@ enum class ChipSemantics {
 /**
  * True when any label's mask covers @p bit — used to suppress "bitN"
  * chips for labeled bits while still reporting *unknown* set bits.
+ */
+/**
+ * @param labels  Bit-label table (BitLabel{name, mask}).
+ * @param bit     Bit index to test.
+ * @return true when some label's mask covers `bit`.
  */
 inline bool bitIsLabeled(std::span<const EtherCAT::Utils::BitLabel> labels,
                          uint32_t bit) {
@@ -166,6 +175,11 @@ inline void appendBitfieldChips(
  * Append one scalar chip: `text` when the value was read, muted "n/a"
  * otherwise.
  */
+/**
+ * @param row   Row to append to.
+ * @param text  Cell text when the value was read; nullopt shows "n/a".
+ * @param tone  Tone applied to the value cell (default Ok).
+ */
 inline void appendScalarChip(DisplayRow& row,
                              std::optional<std::string> text,
                              DisplayTone tone = DisplayTone::Ok) {
@@ -178,7 +192,11 @@ inline void appendScalarChip(DisplayRow& row,
 // TUI::drawChips in tether/terminal_ui/Chips.hpp)
 // ---------------------------------------------------------------------------
 
-/**ANSI SGR parameter for a tone ("0" resets). */
+/**
+ * @brief ANSI SGR parameter for a tone ("0" resets).
+ * @param t  DisplayTone to map.
+ * @return SGR parameter string (e.g. "32" for Ok).
+ */
 inline const char* toneToAnsi(DisplayTone t) {
     switch (t) {
         case DisplayTone::Ok:      return "32";    // green
@@ -198,6 +216,11 @@ inline const char* toneToAnsi(DisplayTone t) {
  * status element looks identical in the TUI, the --stream output and
  * log dumps.  When `ansi` is true each cell is wrapped in the SGR code
  * for its tone (pass `isatty(STDOUT_FILENO)`).
+ *
+ * @param cells  Chip cells to render.
+ * @param brackets  true to wrap the list in [ ] (default).
+ * @param ansi   true to wrap each cell in ANSI color codes.
+ * @return rendered "[a b c]" string.
  */
 inline std::string formatChips(std::span<const DisplayCell> cells,
                                bool brackets = true, bool ansi = false) {
