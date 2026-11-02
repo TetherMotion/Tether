@@ -53,6 +53,11 @@ public:
      *
      * δ = max( max_t dist(B(t), Ω),  max_{q∈Ω} dist(q, B) )
      * where Ω = trimmedIn ∪ trimmedOut.
+ * @param blend       Blend curve.
+ * @param trimmedIn   Trimmed incoming piece.
+ * @param trimmedOut  Trimmed outgoing piece.
+ * @param cutDirection  Optional cut-plane normal for directional certify.
+ * @return deviation certificate.
      *
      * Both terms use the (M10) Lipschitz certificate: sample on a grid
      * fine enough that the Lipschitz bound (‖B'‖ or 1) times half the

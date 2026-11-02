@@ -76,6 +76,8 @@ public:
 
     /**
      * @brief Compute a basic S-curve velocity profile for the given path.
+     * @param path   Geometric path.
+     * @return computed profile.
      */
     std::unique_ptr<VelocityProfile> computeProfile(
         const Path& path,

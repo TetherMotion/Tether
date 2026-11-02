@@ -121,6 +121,8 @@ public:
      * @brief Compute a jerk-limited velocity profile for the given path.
      *
      * The profile respects:
+     * @param path   Geometric path.
+     * @return computed profile.
      * - Per-axis velocity, acceleration, and jerk limits (WI-2)
      * - Path-level velocity, acceleration, and jerk limits
      * - Centripetal acceleration (curvature) limits

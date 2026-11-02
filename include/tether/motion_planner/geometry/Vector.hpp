@@ -229,7 +229,12 @@ private:
     std::uint8_t dim_;
 };
 
-/**Scalar * vector (convenience non-member). */
+/**
+ * @brief Scalar * vector (convenience non-member).
+ * @param s  Scalar.
+ * @param v  Vector.
+ * @return scaled vector.
+ */
 inline RVec operator*(double s, const RVec& v) { return v * s; }
 
 } // namespace tether::motion

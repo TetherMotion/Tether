@@ -125,10 +125,16 @@ struct ReNURBSProfile {
     /**Optional constraint certificate (populated if config.certify == true). */
     std::optional<ProfileConstraintCertificate> certificate;
 
-    /**True if the profile is empty (no segments / no samples). */
+    /**
+     * @brief True if the profile is empty (no segments / no samples).
+     * @return true when no segment profiles exist.
+     */
     bool empty() const noexcept { return perSegment.empty(); }
 
-    /**Number of segments. */
+    /**
+     * @brief Number of segments.
+     * @return segment count.
+     */
     std::size_t numSegments() const noexcept { return perSegment.size(); }
 };
 

@@ -31,6 +31,11 @@ struct BoundaryConditions {
  * @brief Extract boundary conditions from `curve` at arc length `s`.
  *
  * `s = 0` gives the start of the curve; `s = curve.length()` gives the
+ * end.
+ * @param curve  Source curve.
+ * @param s      Arc length on it.
+ * @param atEnd  Evaluate the end boundary when true.
+ * @return extracted boundary conditions.
  * end. The tangent is normalized; curvature and jounce come from
  * `arcDerivatives` (G.19)–(G.20). `hasJounce` is true unless the curve
  * lacks a usable 3rd derivative (which the caller may treat as j⃗ = 0
