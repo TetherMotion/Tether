@@ -17,13 +17,23 @@
 
 namespace Simulation {
 
-/**Factory for creating systems by ID */
+/**
+ * @brief Factory for creating systems by ID.
+ * @param systemId  ID from listSystems().
+ * @return new system instance (null for unknown IDs).
+ */
 std::unique_ptr<DynamicalSystem> createSystem(int systemId);
 
-/**Get list of all available systems */
+/**
+ * @brief Get list of all available systems.
+ * @return (id, name) pairs for every registered system.
+ */
 std::vector<std::pair<int, const char*>> listSystems();
 
-/**Get the total number of systems */
+/**
+ * @brief Get the total number of systems.
+ * @return registered system count.
+ */
 int systemCount();
 
 } // namespace Simulation

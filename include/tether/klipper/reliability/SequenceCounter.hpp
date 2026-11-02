@@ -26,7 +26,10 @@ public:
     /**@return Current sequence value (0..15). */
     uint8_t value() const { return value_; }
 
-    /**@brief Advance to the next sequence number (wraps at 16). */
+    /**
+     * @brief Advance to the next sequence number (wraps at 16).
+     * @return counter with value+1 (4-bit wrap).
+     */
     SequenceCounter next() const {
         return SequenceCounter{static_cast<uint8_t>((value_ + 1) & 0x0F)};
     }
@@ -34,12 +37,18 @@ public:
     /**@brief Advance this counter to the next value. */
     void advance() { value_ = (value_ + 1) & 0x0F; }
 
-    /**@brief Set the counter value (masked to 4 bits). */
+    /**
+     * @brief Set the counter value (masked to 4 bits).
+     * @param v  New value.
+     */
     void set(uint8_t v) { value_ = v & 0x0F; }
 
     /**
      * @brief Number of pending (unacknowledged) sequence numbers between
      *        @p acked (exclusive) and @p sent (inclusive), modulo 16.
+     * @param acked  Last acknowledged counter.
+     * @param sent   Latest sent counter.
+     * @return pending count (0-15).
      */
     static uint8_t pending(uint8_t sent, uint8_t acked) {
         return static_cast<uint8_t>((sent - acked) & 0x0F);

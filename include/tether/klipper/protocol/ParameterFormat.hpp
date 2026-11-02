@@ -50,7 +50,11 @@ enum class ParamType : uint8_t {
     ProgmemBuf, /**< %.*s */
 };
 
-/**@brief Whether a parameter is an integer (VLQ) or a string/buffer. */
+/**
+ * @brief Whether a parameter is an integer (VLQ) or a string/buffer.
+ * @param t  Parameter type tag.
+ * @return true for integer-typed params.
+ */
 inline bool isIntegerType(ParamType t) {
     return t != ParamType::String && t != ParamType::Buffer && t != ParamType::ProgmemBuf;
 }
@@ -78,6 +82,8 @@ struct FormatSpec {
  *
  * Accepts strings like "update_digital_out oid=%c value=%c" or
  * "queue_step oid=%c interval=%u count=%hu add=%hi".
+ * @param fmt  Format string.
+ * @return parsed spec.
  *
  * @return Parsed spec, or std::nullopt if the string is malformed.
  */
@@ -105,6 +111,11 @@ size_t encodeParamValue(ParamType type, int32_t intValue,
  * Advances @p past the decoded parameter. For integer types the value is
  * returned in @p intValue (sign-extended; mask to 32 bits for unsigned). For
  * string/buffer types the raw bytes are returned in @p str.
+ * @param type      Parameter type.
+ * @param it        Byte cursor (advanced).
+ * @param intValue  out: integer value (sign-extended).
+ * @param str       out: raw bytes for string/buffer types.
+ * @return true when decoding succeeded.
  *
  * @return true on success, false on truncation.
  */

@@ -23,7 +23,10 @@ public:
     explicit FirmwareRetraction(FirmwareRetractionParams params = {})
         : params_(params) {}
 
-    /**@brief Set the retraction parameters. */
+    /**
+     * @brief Set the retraction parameters.
+     * @param params  Lengths, speeds, Z hop, extra unretract.
+     */
     void setParams(FirmwareRetractionParams params) { params_ = params; }
 
     /**@brief Get the current parameters. */
@@ -47,10 +50,16 @@ public:
         return params_.retractLength + params_.unretractLength;
     }
 
-    /**@brief Check if currently retracted. */
+    /**
+     * @brief Check if currently retracted.
+     * @return true between G10 and G11.
+     */
     bool isRetracted() const { return isRetracted_; }
 
-    /**@brief Get the Z hop amount. */
+    /**
+     * @brief Get the Z hop amount.
+     * @return configured Z hop while retracted, else 0.
+     */
     double zHop() const { return isRetracted_ ? params_.zHop : 0.0; }
 
 private:

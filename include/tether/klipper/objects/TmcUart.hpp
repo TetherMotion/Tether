@@ -86,7 +86,14 @@ public:
         return resp.size() >= 4; // Simple ACK check
     }
 
-    /**@brief Set a field within a register. */
+    /**
+     * @brief Set a field within a register.
+     * @param reg     Register address.
+     * @param offset  LSB offset of the field.
+     * @param width   Field width in bits.
+     * @param value   Field value (masked to width).
+     * @return true on successful read-modify-write.
+     */
     bool setField(uint8_t reg, uint8_t offset, uint8_t width, uint32_t value) {
         int64_t current = readRegister(reg);
         if (current < 0) return false;
@@ -95,7 +102,13 @@ public:
         return writeRegister(reg, newVal);
     }
 
-    /**@brief Get a field within a register. */
+    /**
+     * @brief Get a field within a register.
+     * @param reg     Register address.
+     * @param offset  LSB offset of the field.
+     * @param width   Field width in bits.
+     * @return field value, or -1 on read error.
+     */
     int32_t getField(uint8_t reg, uint8_t offset, uint8_t width) {
         int64_t current = readRegister(reg);
         if (current < 0) return -1;

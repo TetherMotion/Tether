@@ -165,6 +165,8 @@ public:
     /**
      * @brief Extract the underlying circle (center, radius, plane axes)
      *        from a rational quadratic NURBS arc piece.
+     * @param piece     Rational quadratic NURBS piece.
+     * @param outCenter,outRadius,outAxis1,outAxis2  out: circle frame.
      * @return true if extraction succeeded, false if the piece is not
      *         a simple circular arc.
      */
@@ -176,6 +178,10 @@ public:
     /**
      * @brief Numerical fallback: find s where |position(s) - center| = radius
      *        using bisection on the arc-length parameter.
+     * @param piece   Curve to search.
+     * @param center  Circle center.
+     * @param radius  Circle radius.
+     * @return arc-length root estimate.
      */
     static std::optional<double> numericalIntersection(
         const NurbsCurve& piece,
@@ -206,6 +212,8 @@ public:
     /**
      * @brief Determine the plane (axis1, axis2) spanned by two direction
      *        vectors at a corner.
+     * @param dir1,dir2  Corner direction vectors.
+     * @return plane axis indices.
      */
     static void computePlaneAxes(
         const RVec& d1, const RVec& d2,

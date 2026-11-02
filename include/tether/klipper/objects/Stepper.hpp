@@ -55,15 +55,22 @@ public:
     /**@return Current step position (signed). */
     int32_t position() const { return position_.load(std::memory_order_relaxed); }
 
-    /**@brief Set the current step position (signed). */
+    /**
+     * @brief Set the current step position (signed).
+     * @param p  New position in steps.
+     */
     void setPosition(int32_t p) { position_.store(p, std::memory_order_relaxed); }
 
-    /**@brief Set the step direction invert mask. */
+    /**
+     * @brief Set the step direction invert mask.
+     * @param invert  Non-zero inverts the DIR pin.
+     */
     void setStepInvert(uint8_t invert) { stepInvert_ = invert; }
 
     /**
      * @brief Set the active step direction (+1 forward, -1 reverse).
      * Applied to subsequent enqueued step commands as they execute.
+     * @param dir  Sign selects direction (normalized to ±1).
      */
     void setDirection(int8_t dir) { dir_ = (dir < 0) ? -1 : 1; }
 
@@ -81,6 +88,7 @@ public:
      * @brief Execute a single step in the given direction (real-time path).
      * Advances the position counter by +1 or -1. Used by the StepScheduler
      * to fire individual steps without going through the queue.
+     * @param dir  Step direction (sign only).
      */
     void step(int8_t dir) {
         position_.fetch_add((dir < 0) ? -1 : 1, std::memory_order_relaxed);
