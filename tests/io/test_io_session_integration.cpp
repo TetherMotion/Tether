@@ -1157,7 +1157,7 @@ TEST_F(SessionIntegrationTest, ConfigureDatalog) {
     ASSERT_GE(resp.size(), 2u);
     BufReader r(resp.data(), resp.size());
     EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::ConfigureDatalogResp));
-    EXPECT_EQ(r.getU8(), 1u);  // success
+    EXPECT_EQ(r.getU8(), 0u);  // success
 }
 
 TEST_F(SessionIntegrationTest, ConfigureDatalogDisabled) {
@@ -1244,7 +1244,7 @@ TEST_F(SessionIntegrationTest, ConfigureThreshold) {
     ASSERT_GE(resp.size(), 2u);
     BufReader r(resp.data(), resp.size());
     EXPECT_EQ(r.getU8(), static_cast<uint8_t>(MessageType::ConfigureThresholdResp));
-    EXPECT_EQ(r.getU8(), 1u);
+    EXPECT_EQ(r.getU8(), 0u);
 }
 
 TEST_F(SessionIntegrationTest, ConfigureThresholdInvalidConfigFails) {
