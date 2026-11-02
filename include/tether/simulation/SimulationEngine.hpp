@@ -155,6 +155,12 @@ public:
     double currentTime() const { return time_; }
 
     /**
+     * @brief Get the active simulation configuration
+     * @return Config previously passed to setConfig()
+     */
+    const SimConfig& config() const { return config_; }
+
+    /**
      * @brief Reset simulation
      */
     void reset();
