@@ -112,11 +112,19 @@ public:
     explicit MeltZoneThermalObserver(MeltZoneThermalParams params = MeltZoneThermalParams{})
         : params_(params) {}
 
-    /**@brief Set the parameters. */
+    /**
+     * @brief Set the parameters.
+     * @param p  New thermal model parameters; applies to the next update().
+     */
     void setParams(MeltZoneThermalParams p) { params_ = p; }
     const MeltZoneThermalParams& params() const { return params_; }
 
-    /**@brief Initialize all three states to known temperatures. */
+    /**
+     * @brief Initialize all three states to known temperatures.
+     * @param heaterBlockTempC  Heater-block state [°C].
+     * @param sensorTempC       Sensor-point state [°C].
+     * @param meltTempC         Melt-zone state [°C].
+     */
     void initialize(double heaterBlockTempC, double sensorTempC,
                     double meltTempC) {
         heaterBlockTemp_ = heaterBlockTempC;
@@ -127,6 +135,7 @@ public:
     /**
      * @brief Convenience: initialize all states to the same temperature
      * (e.g. from a single sensor reading at startup).
+     * @param tempC  Temperature applied to all three states [°C].
      */
     void initialize(double tempC) {
         initialize(tempC, tempC, tempC);
@@ -135,6 +144,7 @@ public:
     /**
      * @brief Seed the sensor state from a measured thermistor reading.
      * The heater-block and melt states are left as-is.
+     * @param tempC  Measured thermistor temperature [°C].
      */
     void setSensorTemp(double tempC) { sensorTemp_ = tempC; }
 
@@ -157,13 +167,22 @@ public:
     void updateWithMeasurement(double heaterPWM, double flowMm3PerS,
                                double measuredSensorTempC, double dt);
 
-    /**@brief Estimated melt-zone temperature [°C]. */
+    /**
+     * @brief Estimated melt-zone temperature [°C].
+     * @return current melt-zone state estimate.
+     */
     double meltTempEst() const { return meltTemp_; }
 
-    /**@brief Heater-block state [°C]. */
+    /**
+     * @brief Heater-block state [°C].
+     * @return current heater-block state estimate.
+     */
     double heaterBlockTemp() const { return heaterBlockTemp_; }
 
-    /**@brief Sensor-point state [°C]. */
+    /**
+     * @brief Sensor-point state [°C].
+     * @return current sensor-point state estimate.
+     */
     double sensorTemp() const { return sensorTemp_; }
 
     /**@brief Reset state to inlet temperature. */

@@ -32,21 +32,39 @@ public:
     }
     AutotuningMode getMode() const override { return AutotuningMode::Offline; }
 
-    /** @brief Check compatibility for Dahlin's discrete-time design. */
+    /**
+     * @brief Check compatibility for Dahlin's discrete-time design.
+     * @param controller  Controller whose structure is validated.
+     * @return true when the controller accepts discrete Dahlin gains.
+     */
     bool isCompatible(const TunableController& controller) const override;
     
-    /** @brief Design digital controller and apply discrete gains to controller. */
+    /**
+     * @brief Design digital controller and apply discrete gains to controller.
+     * @param controller  Controller receiving the computed gains.
+     * @param model       Optional process model to design against.
+     * @return TuningResult with applied gains or an error.
+     */
     TuningResult tune(TunableController& controller,
                      const ProcessModel* model = nullptr) override;
     
-    /** @brief Set sample time used for discrete design. */
+    /**
+     * @brief Set sample time used for discrete design.
+     * @param Ts  Sampling period in seconds.
+     */
     void setSampleTime(double Ts) { m_Ts = Ts; }
 
-    /** @brief Set lambda parameter used in discrete design mapping. */
+    /**
+     * @brief Set lambda parameter used in discrete design mapping.
+     * @param lambda  Desired closed-loop time constant (seconds).
+     */
     void setLambda(double lambda) { m_lambda = lambda; }
 
     /** @brief Return digital controller coefficients (e.g., numerator array).
      *  
+     *  @param model   FOPDT process model.
+     *  @param Ts      Sampling period in seconds.
+     *  @param lambda  Desired closed-loop time constant (seconds).
      *  @return Array of 3 coefficients usable in discrete controller realization.
      */
     static std::array<double, 3> designDigital(const FOPDTModel& model, 

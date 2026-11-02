@@ -98,6 +98,10 @@ public:
 
     /**
      * @brief StateEstimator interface implementation
+     * @param measurement  Latest output measurement.
+     * @param control      Applied control input.
+     * @param dt           Step duration in seconds.
+     * @return updated state estimate.
      */
     StateVector estimate(const OutputVector& measurement,
                          const ControlVector& control,
@@ -105,26 +109,31 @@ public:
 
     /**
      * @brief Get current state estimate (StateEstimator interface)
+     * @return current state estimate.
      */
     StateVector getState() const override;
 
     /**
      * @brief Get current state estimate as Eigen vector
+     * @return internal state vector x.
      */
     Eigen::VectorXd getStateVector() const { return x_; }
 
     /**
      * @brief Get current error covariance
+     * @return reference to the covariance matrix P.
      */
     const Eigen::MatrixXd& getCovariance() const { return P_; }
 
     /**
      * @brief Get computed (or set) Kalman gain
+     * @return reference to the gain matrix L.
      */
     const Eigen::MatrixXd& getGain() const { return L_; }
 
     /**
      * @brief Get state dimension
+     * @return number of states.
      */
     size_t getStateDim() const override { return n_; }
 

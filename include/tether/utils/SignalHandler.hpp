@@ -65,6 +65,7 @@ public:
      * Create with an externally-owned stop_source (e.g. one shared with
      * jthreads created before the SignalHandler).  On signal,
      * externalSource.request_stop() is called.
+     * @param externalSource  Shared stop source requested on signal.
      */
     explicit SignalHandler(std::stop_source& externalSource)
         : stop_source_(externalSource) {
@@ -78,6 +79,8 @@ public:
      * handling (the atomic is still set if a signal was already delivered
      * via a previously installed handler — but typically install_signals
      * should be true).
+     * @param cancel_flag      Atomic flag set to true on signal.
+     * @param install_signals  Install SIGINT/SIGTERM handlers (default).
      */
     explicit SignalHandler(std::atomic<bool>& cancel_flag,
                            bool install_signals = true)
@@ -95,7 +98,10 @@ public:
     SignalHandler(SignalHandler&&) = delete;
     SignalHandler& operator=(SignalHandler&&) = delete;
 
-    /**Returns true if stop was requested (signal received). */
+    /**
+     * @brief Returns true if stop was requested (signal received).
+     * @return true after a signal or requestStop().
+     */
     bool stop_requested() const {
         return stop_source_.stop_requested();
     }
@@ -103,12 +109,17 @@ public:
     /**
      * Returns the stop_token for this stop_source.  Pass this to
      * std::jthread lambdas or use it directly in polling loops.
+     *
+     * @return stop_token bound to this handler's stop_source.
      */
     std::stop_token stopToken() const {
         return stop_source_.get_token();
     }
 
-    /**Returns a reference to the stop_source, allowing manual request_stop(). */
+    /**
+     * @brief Returns a reference to the stop_source, allowing manual request_stop().
+     * @return mutable reference to the underlying stop_source.
+     */
     std::stop_source& stopSource() { return stop_source_; }
 
     /**Request stop manually (same effect as receiving a signal). */
@@ -119,6 +130,7 @@ public:
      * request_stop()).  Use this to call Master::requestCancel() etc.
      * Must be set before the signal arrives; not thread-safe with respect
      * to signal delivery.
+     * @param cb  Function invoked from the signal handler context.
      */
     void setCancelCallback(std::function<void()> cb) {
         callback_ = std::move(cb);

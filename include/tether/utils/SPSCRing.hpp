@@ -55,7 +55,11 @@ public:
         return true;
     }
 
-    /**Producer side: copy a record into the ring.  false if full. */
+    /**
+     * @brief Producer side: copy a record into the ring.  false if full.
+     * @param value  Record to enqueue.
+     * @return true when enqueued; false when full (value dropped+counted).
+     */
     bool push(const T& value) {
         return produce([&](T& slot) { slot = value; });
     }
@@ -63,6 +67,8 @@ public:
     /**
      * Consumer side: invoke consume(const T&) for up to maxRecords published
      * records, oldest first, then release the consumed slots.
+     * @param consume     Callable invoked per record.
+     * @param maxRecords  Maximum records to consume this call.
      * @return number of records consumed.
      * Single consumer thread only.
      */
@@ -82,6 +88,7 @@ public:
     /**
      * Consumer side: invoke consume(const T&) for every published record,
      * oldest first, then release the consumed slots.
+     * @param consume  Callable invoked per record.
      * @return number of records consumed.
      * Single consumer thread only.
      */
@@ -90,10 +97,16 @@ public:
         return drain(std::forward<F>(consume), UINT64_MAX);
     }
 
-    /**Records dropped because the ring was full (producer side). */
+    /**
+     * @brief Records dropped because the ring was full (producer side).
+     * @return monotonic drop counter.
+     */
     uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
 
-    /**Records currently visible to the consumer. */
+    /**
+     * @brief Records currently visible to the consumer.
+     * @return published-but-unconsumed count.
+     */
     size_t size() const {
         const uint64_t head = head_.load(std::memory_order_acquire);
         const uint64_t tail = tail_.load(std::memory_order_acquire);

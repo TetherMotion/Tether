@@ -57,12 +57,21 @@ public:
     /**
      * @brief Zero-shear viscosity at temperature T (WLF shift).
      *   η₀(T) = η_ref · 10^(-C1·(T-T_ref)/(C2+(T-T_ref)))
+     *
+     * @param tempC  Melt temperature [°C].
+     * @param p      Cross-WLF parameters (η_ref, T_ref, C1, C2).
+     * @return zero-shear viscosity in Pa·s.
      */
     static double zeroShearViscosity(double tempC, const CrossWlfParams& p);
 
     /**
      * @brief Full Cross-WLF viscosity at (shear rate, temperature).
      *   η(γ̇,T) = η₀(T) / (1 + (γ̇·η₀(T)/τ*)^(1-n))
+     *
+     * @param shearRate  Shear rate γ̇ [1/s].
+     * @param tempC      Melt temperature [°C].
+     * @param p          Cross-WLF parameters.
+     * @return apparent viscosity in Pa·s.
      */
     static double viscosity(double shearRate, double tempC,
                             const CrossWlfParams& p);
@@ -73,6 +82,8 @@ public:
      * the radial shear-rate distribution) and inverts by bisection.
      * @param flowMm3PerS Volumetric flow [mm³/s].
      * @param tempC Melt temperature [°C].
+     * @param p     Cross-WLF parameters.
+     * @param g     Nozzle geometry.
      * @return Pressure drop [Pa].
      */
     static double pressureFromFlow(double flowMm3PerS, double tempC,
@@ -82,6 +93,12 @@ public:
     /**
      * @brief Volumetric flow for a given pressure drop and temperature.
      * Inverts pressureFromFlow by bisection.
+     *
+     * @param pressurePa  Pressure drop [Pa].
+     * @param tempC       Melt temperature [°C].
+     * @param p           Cross-WLF parameters.
+     * @param g           Nozzle geometry.
+     * @return volumetric flow in mm³/s.
      */
     static double flowFromPressure(double pressurePa, double tempC,
                                    const CrossWlfParams& p,
