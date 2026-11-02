@@ -78,7 +78,11 @@ public:
         : callbacks_(std::move(callbacks))
         , state_(state ? state : &internalState_) {}
 
-    /**@brief Set the macro registry for macro expansion. */
+    /**
+     * @brief Set the macro registry for macro expansion.
+     * @param registry  Registry consulted for user-defined macros;
+     *                  borrowed, not owned — nullptr disables expansion.
+     */
     void setMacroRegistry(GcodeMacroRegistry* registry) { macroRegistry_ = registry; }
 
     /**
@@ -106,7 +110,15 @@ public:
         return success;
     }
 
-    /**@brief Execute a single G-code line. */
+    /**
+     * @brief Execute a single G-code line.
+     *
+     * Parses, dispatches to the matching handler, and updates motion
+     * state. Empty and comment-only lines are accepted as no-ops.
+     * @param line  Raw G-code line (comments stripped internally).
+     * @return true if the line was accepted/dispatched; unknown commands
+     *         are ignored and return true.
+     */
     bool executeLine(const std::string& line) {
         auto parsed = parseGcodeLine(line);
         if (!parsed) return true; // Empty/comment lines are OK
@@ -1226,13 +1238,22 @@ public:
         return true;
     }
 
-    /**@brief Get the current printer state. */
+    /**
+     * @brief Get the current printer state.
+     * @return Const reference to the motion state (external if injected
+     *         at construction, otherwise the internal default); valid for
+     *         the executor's lifetime.
+     */
     const PrinterMotionState& state() const { return *state_; }
 
     /**@brief Get mutable printer state. */
     PrinterMotionState& state() { return *state_; }
 
-    /**@brief Get the callbacks (for extended command dispatch). */
+    /**
+     * @brief Get the callbacks (for extended command dispatch).
+     * @return Mutable callback table; extend or override handlers before
+     *         executing lines.
+     */
     GcodeCallbacks& callbacks() { return callbacks_; }
     const GcodeCallbacks& callbacks() const { return callbacks_; }
 
@@ -1247,6 +1268,12 @@ private:
      *
      * @param progStartX/Y/Z  Program-space start position.
      * @param progEndX/Y/Z    Program-space end position.
+     * @param progStartX  Segment start X in program space [mm].
+     * @param progStartY  Segment start Y in program space [mm].
+     * @param progStartZ  Segment start Z in program space [mm].
+     * @param progEndX    Segment end X in program space [mm].
+     * @param progEndY    Segment end Y in program space [mm].
+     * @param progEndZ    Segment end Z in program space [mm].
      * @param feedRate        Program-space feed rate (mm/min).
      * @return Machine-space speed (mm/s).
      */
@@ -1452,7 +1479,7 @@ private:
      * The I/J/K center offsets are relative to the start position in
      * program space and define the arc geometry in program space. The
      * transform is applied to each interpolated point via the move
-     * callback (through @ref CoordinateTransform::toMachineXYZ).
+     * callback (through `CoordinateTransform::toMachineXYZ`).
      *
      * For G17 (XY plane): I=X offset, J=Y offset
      * For G18 (ZX plane): I=X offset, K=Z offset
