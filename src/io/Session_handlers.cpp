@@ -638,7 +638,7 @@ void Session::handleSnapshotParamsReq(const uint8_t* body, size_t len) {
         value.elementType = schemaTyped ? 0 : static_cast<uint8_t>(e.elementType());
         value.valueSize = e.valueSize();
         value.variable = e.isVariableLength();
-        const size_t header = typed ? 7 : 5;
+        const size_t header = typed ? 8 : 5;
         if (value.variable) {
             value.bytes.resize(e.maxValueSize());
             const size_t actual = e.readVar(value.bytes.data(), value.bytes.size());
@@ -730,7 +730,7 @@ void Session::handleSnapshotSignalsReq(const uint8_t* body, size_t len) {
         value.elementType = schemaTyped ? 0 : static_cast<uint8_t>(e.elementType());
         value.valueSize = e.valueSize();
         value.variable = e.isVariableLength();
-        const size_t header = typed ? 7 : 5;
+        const size_t header = typed ? 8 : 5;
         if (value.variable) {
             value.bytes.resize(e.maxValueSize());
             const size_t actual = e.readVar(value.bytes.data(), value.bytes.size());
