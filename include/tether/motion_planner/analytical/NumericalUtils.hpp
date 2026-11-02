@@ -429,6 +429,8 @@ public:
 
     /**
      * @brief Evaluate R(x) = P(x) / Q(x).
+     * @param x  Evaluation point.
+     * @return R(x).
      */
     double evaluate(double x) const {
         double num = 0.0;
@@ -448,6 +450,8 @@ public:
 
     /**
      * @brief Evaluate R'(x) = (P'Q - PQ') / Q^2.
+     * @param x  Evaluation point.
+     * @return R'(x).
      */
     double evaluateDerivative(double x) const {
         // P(x) and P'(x)
@@ -474,6 +478,9 @@ public:
      *
      * R'' = [(P''Q - PQ'')*Q^2 - 2*(P'Q - PQ')*Q*Q'] / Q^4
      *      = [(P''Q - PQ'')*Q - 2*(P'Q - PQ')*Q'] / Q^3
+     *
+     * @param x  Evaluation point.
+     * @return R''(x).
      */
     double evaluate2ndDerivative(double x) const {
         // P, P', P''

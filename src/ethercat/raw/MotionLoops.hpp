@@ -30,19 +30,37 @@ public:
     virtual void setShutdownDebug(bool) {}
 };
 
-/**RealtimeLoop-driven loop: callback + optional DC sync per cycle. */
+/**
+ * @brief RealtimeLoop-driven loop: callback + optional DC sync per cycle.
+ * @param callback    Invoked every cycle with the master.
+ * @param config      Cycle timing/priority configuration.
+ * @param dc_manager  Optional DC manager (may be nullptr).
+ * @return loop instance; caller owns it.
+ */
 std::unique_ptr<IMotionControlLoop> makeRealtimeMotionControlLoop(
     Master::MotionControlCallback callback,
     Master::RealtimeMotionLoopConfig config,
     DCManager* dc_manager);
 
-/**Plain periodic std::thread loop (non-RT fallback). */
+/**
+ * @brief Plain periodic std::thread loop (non-RT fallback).
+ * @param callback    Invoked every cycle with the master.
+ * @param config      Polling period configuration.
+ * @param dc_manager  Optional DC manager (may be nullptr).
+ * @return loop instance; caller owns it.
+ */
 std::unique_ptr<IMotionControlLoop> makePollingMotionControlLoop(
     Master::MotionControlCallback callback,
     Master::PollingMotionLoopConfig config,
     DCManager* dc_manager);
 
-/**Queue-mode RT loop: calls PDOManager::queueCycle() each cycle. */
+/**
+ * @brief Queue-mode RT loop: calls PDOManager::queueCycle() each cycle.
+ * @param pdo_manager  PDO manager driven per cycle (borrowed).
+ * @param config       Cycle timing configuration.
+ * @param dc_manager   Optional DC manager (may be nullptr).
+ * @return loop instance; caller owns it.
+ */
 std::unique_ptr<IMotionControlLoop> makeQueueMotionControlLoop(
     PDOManager* pdo_manager,
     Master::RealtimeMotionLoopConfig config,

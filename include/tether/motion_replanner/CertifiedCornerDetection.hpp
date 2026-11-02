@@ -58,6 +58,8 @@ struct CertifiedJunction {
     /**
      * Human-readable classification string for backward compatibility
      * with the old MotionReplanner criticalPointType field.
+     *
+     * @return classification string for this junction's kind.
      */
     std::string kindString() const;
 };
@@ -75,6 +77,9 @@ struct CertifiedCornerDetection {
     /**
      * Find the junction at the boundary between pieceInIndex and
      * pieceOutIndex, or nullopt if not found.
+     *
+     * @param pieceInIndex  Incoming piece index.
+     * @return the junction, or nullopt when none is recorded there.
      */
     std::optional<CertifiedJunction> junctionAt(
         std::size_t pieceInIndex) const;

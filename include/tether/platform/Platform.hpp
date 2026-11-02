@@ -34,22 +34,26 @@ public:
     
     /**
      * @brief Get current time in microseconds since boot
+     * @return monotonic microseconds.
      */
     int64_t getMicroseconds() const;
     
     /**
      * @brief Get current time in milliseconds since boot
+     * @return monotonic milliseconds.
      */
     int64_t getMilliseconds() const;
     
     /**
      * @brief Blocking delay in microseconds
+     * @param us  Delay in microseconds.
      * @note May be approximate on non-RTOS systems
      */
     void delayMicroseconds(uint32_t us) const;
     
     /**
      * @brief Blocking delay in milliseconds
+     * @param ms  Delay in milliseconds.
      */
     void delayMilliseconds(uint32_t ms) const;
     
@@ -118,11 +122,13 @@ void initialize();
 
 /**
  * @brief Check if running on ESP32
+ * @return true on ESP32 builds.
  */
 bool isEsp32();
 
 /**
  * @brief Check if running on Linux
+ * @return true on Linux builds.
  */
 bool isLinux();
 
