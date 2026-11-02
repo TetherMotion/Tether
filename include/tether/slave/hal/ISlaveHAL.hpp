@@ -302,6 +302,8 @@ std::unique_ptr<ISlaveHAL> createDirectSlaveHAL();
  *
  * This HAL uses POSIX FIFOs for inter-process communication.
  * Useful for testing with separate master and slave processes.
+ *
+ * @return new FIFO-backed slave HAL.
  */
 std::unique_ptr<ISlaveHAL> createFIFOSlaveHAL();
 
@@ -310,6 +312,8 @@ std::unique_ptr<ISlaveHAL> createFIFOSlaveHAL();
  *
  * This HAL uses real network interfaces via raw sockets.
  * For hardware-in-the-loop testing.
+ *
+ * @return new network-backed slave HAL.
  */
 std::unique_ptr<ISlaveHAL> createNetworkSlaveHAL();
 

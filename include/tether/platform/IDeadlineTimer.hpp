@@ -60,6 +60,8 @@ public:
  *
  * Linux : clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME) — one syscall/cycle.
  * ESP32 : vTaskDelayUntil() — same absolute-deadline semantics.
+ *
+ * @return platform deadline timer.
  */
 std::unique_ptr<IDeadlineTimer> createDeadlineTimer();
 
@@ -73,6 +75,7 @@ std::unique_ptr<IDeadlineTimer> createDeadlineTimer();
  *
  * @param spin_window_ns  Spin duration at the tail of each period
  *                        (e.g. 50'000 for the last 50 µs).  0 == pure sleep.
+ * @return hybrid sleep+spin timer.
  */
 std::unique_ptr<IDeadlineTimer> createHybridDeadlineTimer(uint64_t spin_window_ns);
 

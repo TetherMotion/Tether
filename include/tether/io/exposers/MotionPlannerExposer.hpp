@@ -25,7 +25,8 @@ namespace tether { namespace io { namespace exposers {
  *  - `is_paused` (Bool): Whether the plan is paused.
  *  - `is_reverse` (Bool): Whether reverse motion is active.
  *
- * The plan pointer can be updated at runtime via setPlan() when a new plan
+ * The plan pointer can be updated at runtime via
+ * @param plan  New plan (borrowed). setPlan() when a new plan
  * is built; readers will get the latest values.
  */
 class MotionPlanExposer3D : public IParameterExposer {

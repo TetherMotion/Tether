@@ -104,7 +104,11 @@ private:
     bool hasPrev_ = false;
 };
 
-/**Factory for creating integrators */
+/**
+ * @brief Factory for creating integrators.
+ * @param type  Integrator type id.
+ * @return new integrator instance.
+ */
 std::unique_ptr<Integrator> createIntegrator(IntegrationMethod method,
                                                double atol = 1e-6,
                                                double rtol = 1e-6);

@@ -26,7 +26,7 @@ static const char *TAG = "ethercat_sii";
  * - SM1 = Send mailbox (MbxOut) = Slave→Master = std_tx in SII
  * 
  * @param master Master instance for network I/O
- * @param adp Auto-increment address (slave position)
+ * @param slave_index Zero-based slave index
  * @param out_wr_addr Receive mailbox address (MbxIn, Master→Slave, SM0, std_rx)
  * @param out_wr_len Receive mailbox size in bytes
  * @param out_rd_addr Send mailbox address (MbxOut, Slave→Master, SM1, std_tx)
