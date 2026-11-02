@@ -97,7 +97,7 @@ struct NetworkInterface {
     bool isUp = false; /**< IFF_UP is set (admin enabled) */
     bool isRunning = false; /**< IFF_RUNNING is set (operational) */
     bool hasCarrier = false; /**< IFLA_CARRIER == 1 */
-    bool isWireless = false; /**< /sys/class/net/<name>/wireless exists */
+    bool isWireless = false; /**< /sys/class/net/&lt;name&gt;/wireless exists */
     bool isPromiscuous = false; /**< IFF_PROMISC is set */
 
     /**
@@ -133,7 +133,7 @@ std::vector<NetworkInterface> enumerateNetworkInterfaces();
  * Applies three criteria:
  *  1. arpType == ARPHRD_ETHER (1)
  *  2. No IFLA_LINKINFO (not a virtual interface)
- *  3. No /sys/class/net/<name>/wireless (not Wi-Fi)
+ *  3. No /sys/class/net/&lt;name&gt;/wireless (not Wi-Fi)
  *
  * @return Subset of enumerateNetworkInterfaces() matching all criteria.
  */
@@ -157,11 +157,15 @@ std::vector<NetworkInterface> getInterfacesByCategory(InterfaceCategory category
 
 /**
  * @brief Convert an InterfaceType to a human-readable string.
+ * @param type  InterfaceType enumerator.
+ * @return static name string.
  */
 const char* interfaceTypeToString(InterfaceType type);
 
 /**
  * @brief Convert an InterfaceCategory to a human-readable string.
+ * @param category  InterfaceCategory enumerator.
+ * @return static name string.
  */
 const char* interfaceCategoryToString(InterfaceCategory category);
 
