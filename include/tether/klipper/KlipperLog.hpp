@@ -32,19 +32,37 @@ enum class Level {
 /**@brief Log callback type. Receives level, file, line, and message. */
 using LogCallback = std::function<void(Level, std::string_view, int, std::string_view)>;
 
-/**@brief Set a custom log callback. Pass nullptr to restore default (stderr). */
+/**
+ * @brief Set a custom log callback. Pass nullptr to restore default (stderr).
+ * @param cb  Callback (level, file, line, message) or nullptr.
+ */
 void setLogCallback(LogCallback cb);
 
-/**@brief Get the current log callback (or nullptr for default). */
+/**
+ * @brief Get the current log callback (or nullptr for default).
+ * @return installed callback.
+ */
 LogCallback getLogCallback();
 
-/**@brief Set the minimum log level. Messages below this level are dropped. */
+/**
+ * @brief Set the minimum log level. Messages below this level are dropped.
+ * @param level  Threshold level.
+ */
 void setLogLevel(Level level);
 
-/**@brief Get the current minimum log level. */
+/**
+ * @brief Get the current minimum log level.
+ * @return threshold level.
+ */
 Level getLogLevel();
 
-/**@brief Internal: emit a log message. */
+/**
+ * @brief Internal: emit a log message.
+ * @param level  Record level.
+ * @param file   Source file.
+ * @param line   Source line.
+ * @param msg    Formatted message.
+ */
 void emit(Level level, std::string_view file, int line, std::string_view msg);
 
 } // namespace tether::klipper::logging
