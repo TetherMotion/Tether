@@ -46,11 +46,17 @@ public:
      * @return Output vector, size outputDim().
      */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
-    /**Start near the origin with a small displacement to avoid trivial zero motion. */
+    /**Start near the origin with a small displacement to avoid trivial zero motion.
+     * @return state vector, size stateDim().
+     */
     StateVector defaultInitialState() const override;
-    /**Return the forcing and stiffness coefficients that shape the nonlinear response. */
+    /**Return the forcing and stiffness coefficients that shape the nonlinear response.
+     * @return descriptor list for tunable parameters.
+     */
     std::vector<ParamDescriptor> parameterDescriptors() const override;
-    /**Provide both the classic chaotic regime and a milder hardening-spring regime. */
+    /**Provide both the classic chaotic regime and a milder hardening-spring regime.
+     * @return named preset list.
+     */
     std::vector<Preset> presets() const override;
     void applyPreset(int index) override;
     std::vector<std::string> stateNames() const override;

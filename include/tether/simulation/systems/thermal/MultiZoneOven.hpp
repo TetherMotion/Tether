@@ -43,8 +43,17 @@ public:
      * @return Output vector, size outputDim().
      */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
+    /**Start from a physically meaningful rest state.
+     * @return state vector, size stateDim().
+    */
     StateVector defaultInitialState() const override;
+    /**Describe the tunable physical parameters exposed to experiment sweeps.
+     * @return descriptor list.
+    */
     std::vector<ParamDescriptor> parameterDescriptors() const override;
+    /**Provide preset parameter sets for common study cases.
+     * @return named preset list.
+    */
     std::vector<Preset> presets() const override;
     void applyPreset(int index) override;
     std::vector<std::string> stateNames() const override;

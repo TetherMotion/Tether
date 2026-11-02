@@ -39,7 +39,10 @@ namespace tether::klipper::protocol {
  */
 class IdentifyServer {
 public:
-    /**@brief Construct with the wire-format (compressed) dictionary blob. */
+    /**
+     * @brief Construct with the wire-format (compressed) dictionary blob.
+     * @param wireBlob  Compressed dictionary payload (moved).
+     */
     explicit IdentifyServer(std::vector<uint8_t> wireBlob)
         : blob_(std::move(wireBlob)) {}
 
@@ -72,6 +75,7 @@ public:
     /**
      * @brief Build the content for an `identify` request for the next chunk.
      * @param count Maximum chunk size to request.
+     * @return request payload bytes.
      */
     std::vector<uint8_t> buildRequestContent(uint8_t count = kDefaultIdentifyChunkSize) const;
 
@@ -80,6 +84,7 @@ public:
 
     /**
      * @brief Consume an `identify_response` content payload.
+     * @param content  Response payload chunk.
      * @return true if the response offset matched the expected next offset.
      */
     bool consumeResponseContent(std::span<const uint8_t> content);

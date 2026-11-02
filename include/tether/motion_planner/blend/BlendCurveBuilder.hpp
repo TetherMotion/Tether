@@ -38,6 +38,8 @@ public:
      *   B(0) = p_A,  B'(0) = α₁ T_A,  B''(0) = α₁² κ⃗_A
      *   B(1) = p_B,  B'(1) = β₁ T_B,  B''(1) = β₁² κ⃗_B
      *
+     * @return quintic curve matching the G² boundary data.
+     *
      * Control points (closed form, n=5, n(n−1)=20):
      *   P0 = p_A
      *   P1 = P0 + (α₁/5) T_A
@@ -71,6 +73,11 @@ public:
      *   P5 = 2P6 − P7 + (β₁²/42) κ⃗_B
      *   P4 = 3P5 − 3P6 + P7 − (β₁³/210) j⃗_B   ← note the MINUS sign
      *
+     * @param entry    Entry-side boundary conditions.
+     * @param exit     Exit-side boundary conditions.
+     * @param alpha1   Tangent scale at entry.
+     * @param beta1    Tangent scale at exit.
+     * @return septic curve matching the G³ boundary data.
      * @throws std::invalid_argument if α₁ or β₁ ≤ 0, dimensions differ,
      *         or either boundary lacks jounce (`hasJounce == false`).
      */

@@ -88,6 +88,8 @@ public:
 
     /**
      * @brief Construct with kinematic limits and feed rate.
+     * @param limits    Kinematic limits (accel/jerk/decel).
+     * @param feedRate  Programmed feed rate.
      */
     ConstraintEvaluator(Limits limits, T feedRate)
         : limits_(std::move(limits))
@@ -346,11 +348,13 @@ public:
 
     /**
      * @brief Get the kinematic limits.
+     * @return limits used by the evaluator.
      */
     const Limits& limits() const { return limits_; }
 
     /**
      * @brief Get the feed rate.
+     * @return programmed feed rate.
      */
     T feedRate() const { return feedRate_; }
 
