@@ -420,3 +420,18 @@ The component automatically builds `libSLIPspeed` as a static library and links 
 ## Wire format
 
 See [IOProtocolWireFormat.md](IOProtocolWireFormat.md) for the complete byte-level specification.
+
+## Reference guides
+
+| Guide | Covers |
+|---|---|
+| [IOProtocolWireFormat.md](IOProtocolWireFormat.md) | Byte-level encoding, framing, bootstrap, limits |
+| [IOProtocolMessageCatalog.md](IOProtocolMessageCatalog.md) | Every message type ID + payload layout |
+| [IOProtocolClient.md](IOProtocolClient.md) | `TetherIOClient` — the client API end to end |
+| [IOProtocolServer.md](IOProtocolServer.md) | `Registry`/`Server`/`Session` + producer helpers |
+| [IOProtocolStreaming.md](IOProtocolStreaming.md) | Streams, snapshots, input streams, datalog, thresholds |
+| [IOProtocolFunctions.md](IOProtocolFunctions.md) | `CallFunction`/`InvokeEx`, peer calls, monitoring |
+| [IOProtocolSchemaAuthoring.md](IOProtocolSchemaAuthoring.md) | Schema nodes, encodings, catalogs, slots, epochs |
+| [IOProtocolTransports.md](IOProtocolTransports.md) | Transport contract + TCP/serial/WS/custom |
+| [IOProtocolMachineProfile.md](IOProtocolMachineProfile.md) | CiA 402 typed profile over the primitives |
+| [IOProtocolMachineControl.md](IOProtocolMachineControl.md) | Auth, roles, authority leases, machine service |
