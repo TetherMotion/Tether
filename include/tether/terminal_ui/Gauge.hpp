@@ -35,6 +35,10 @@ namespace TUI {
 /**
  * Fill ratio -> palette pair for utilization bars: muted for n/a,
  * green/yellow/red thresholds, red when the row is flagged violated.
+ *
+ * @param ratio     Fill fraction (0..1; <0 = n/a, >1 = overflow).
+ * @param violated  Force error color regardless of ratio.
+ * @return ncurses color-pair number.
  */
 inline short gaugeRatioPair(double ratio, bool violated) {
     if (ratio < 0) return PalMuted;
@@ -48,6 +52,12 @@ inline short gaugeRatioPair(double ratio, bool violated) {
  * `win`.  `ratio` 0..1 fills left to right; >1 clamps and draws a red
  * `>` overflow marker after the bar; <0 renders an empty muted bar.
  * `violated` forces the bar red+bold regardless of the ratio.
+ *
+ * @param win       Curses window.
+ * @param y,x       Top-left cell of the bar.
+ * @param w         Total bar width including brackets.
+ * @param ratio     Fill fraction.
+ * @param violated  Force error styling.
  */
 inline void wdrawGauge(WINDOW* win, int y, int x, int w,
                        double ratio, bool violated) {
@@ -74,7 +84,13 @@ inline void wdrawGauge(WINDOW* win, int y, int x, int w,
     }
 }
 
-/**stdscr convenience — same as wdrawGauge(stdscr, ...). */
+/**
+ * @brief stdscr convenience — same as wdrawGauge(stdscr, ...).
+ * @param y,x       Top-left cell.
+ * @param w         Total bar width including brackets.
+ * @param ratio     Fill fraction.
+ * @param violated  Force error styling.
+ */
 inline void drawGauge(int y, int x, int w, double ratio, bool violated) {
     wdrawGauge(stdscr, y, x, w, ratio, violated);
 }
@@ -87,6 +103,14 @@ inline void drawGauge(int y, int x, int w, double ratio, bool violated) {
  * span), red when outside or `violated`.  Without a value only the
  * empty track shows.  Falls back to printing "low/high" when the track
  * does not fit.
+ *
+ * @param win     Curses window.
+ * @param y,x     Top-left cell of the track.
+ * @param w       Total track width including brackets.
+ * @param low     Low end of the allowed span.
+ * @param high    High end of the allowed span.
+ * @param value   Value to mark, or nullopt to hide the marker.
+ * @param violated  Force error styling.
  */
 inline void wdrawRangeTrack(WINDOW* win, int y, int x, int w,
                             int64_t low, int64_t high,
@@ -121,7 +145,15 @@ inline void wdrawRangeTrack(WINDOW* win, int y, int x, int w,
     wattroff(win, COLOR_PAIR(pair) | A_BOLD);
 }
 
-/**stdscr convenience — same as wdrawRangeTrack(stdscr, ...). */
+/**
+ * @brief stdscr convenience — same as wdrawRangeTrack(stdscr, ...).
+ * @param y,x     Top-left cell.
+ * @param w       Total track width including brackets.
+ * @param low     Low end of the allowed span.
+ * @param high    High end of the allowed span.
+ * @param value   Value to mark, or nullopt to hide the marker.
+ * @param violated  Force error styling.
+ */
 inline void drawRangeTrack(int y, int x, int w, int64_t low, int64_t high,
                            std::optional<int64_t> value, bool violated) {
     wdrawRangeTrack(stdscr, y, x, w, low, high, value, violated);

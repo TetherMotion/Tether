@@ -33,21 +33,40 @@ public:
     }
     AutotuningMode getMode() const override { return AutotuningMode::Offline; }
 
-    /** @brief Check compatibility for deadbeat controller design. */
+    /**
+     * @brief Check compatibility for deadbeat controller design.
+     * @param controller  Controller whose structure is validated.
+     * @return true when the controller accepts discrete deadbeat gains.
+     */
     bool isCompatible(const TunableController& controller) const override;
     
-    /** @brief Compute deadbeat controller coefficients and apply to controller. */
+    /**
+     * @brief Compute deadbeat controller coefficients and apply to controller.
+     * @param controller  Controller receiving the computed coefficients.
+     * @param model       Optional process model to design against.
+     * @return TuningResult with applied coefficients or an error.
+     */
     TuningResult tune(TunableController& controller,
                      const ProcessModel* model = nullptr) override;
     
-    /** @brief Set sample time for discrete deadbeat design. */
+    /**
+     * @brief Set sample time for discrete deadbeat design.
+     * @param Ts  Sampling period in seconds.
+     */
     void setSampleTime(double Ts) { m_Ts = Ts; }
 
-    /** @brief Set desired number of settling samples for deadbeat design. */
+    /**
+     * @brief Set desired number of settling samples for deadbeat design.
+     * @param N  Samples until the output should settle (0 = minimum-time).
+     */
     void setSettlingSamples(int N) { m_settlingN = N; }
 
     /**
      * @brief Compute deadbeat controller coefficients for given plant polynomials.
+     * @param A,B,C       Plant model coefficient arrays.
+     * @param n,m,p       Model dimensions.
+     * @param Ts          Sampling period in seconds.
+     * @param settlingN   Settling samples (0 = minimum-time).
      * @return Vector of controller coefficients.
      */
     static std::vector<double> design(const double* A, const double* B,
