@@ -670,10 +670,12 @@ TEST_F(IOPeerDispatchTest, InFlightCallFailsFastOnSessionEnd) {
 
     host.client->close();  // session death must not wait out the deadline
 
+    // Session teardown drains pending invokes before the catalog entry
+    // disappears — once peerFunctions() is empty the callback has fired.
+    ASSERT_TRUE(waitFor([&] { return server_->peerFunctions().empty(); },
+                        30'000));
     auto f = p->get_future();
-    // Generous bound: teardown propagation is immediate under light load but
-    // contended under coverage/sanitizer parallelism.
-    ASSERT_EQ(f.wait_for(15s), std::future_status::ready);
+    ASSERT_EQ(f.wait_for(5s), std::future_status::ready);
     auto res = f.get();
     EXPECT_FALSE(res.success);
     EXPECT_FALSE(res.timedOut);
