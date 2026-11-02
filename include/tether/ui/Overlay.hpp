@@ -157,6 +157,10 @@ public:
     /**
      * `onResult` fires with the item's `id` when it has no invoke
      * callback (lets one handler serve the whole menu).
+     *
+     * @param title     Menu title.
+     * @param items     Menu items (labels, ids, optional callbacks).
+     * @param onResult  Fallback result handler.
      */
     explicit MenuOverlay(std::string title,
                          std::function<void(int id)> onResult = {})

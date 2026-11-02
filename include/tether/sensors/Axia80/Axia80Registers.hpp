@@ -255,6 +255,9 @@ static constexpr uint32_t STATUS_SENSING_RANGE_EXCEEDED = 0x40000000u; /**< Bit 
 // Status Message Error Priority Hierarchy (from manual section 2.4)
 // ============================================================================
 
+/**
+ * @brief Status message error priority hierarchy (manual §2.4).
+ */
 enum class StatusMessagePriority : uint8_t {
     SUPPLY_VOLTAGE_OUT_OF_RANGE = 1, /**< Input voltage < 12V or > 30V */
     GAGE_TEMPERATURE_OUT_OF_RANGE = 2, /**< Temperature outside -5°C to +70°C */

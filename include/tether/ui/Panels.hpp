@@ -82,6 +82,8 @@ using RegisterSelector =
 /**
  * Common CoE identity/communication registers — a sensible default for
  * any EtherCAT slave; apps typically append device-specific entries.
+ *
+ * @return standard register list.
  */
 inline std::vector<NamedRegister> standardRegisters() {
     return {

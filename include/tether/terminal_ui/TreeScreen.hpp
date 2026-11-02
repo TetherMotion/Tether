@@ -13,7 +13,7 @@
  *   |    +- EL1014                      |                          |
  *   |-----------------------------------+--------------------------|
  *   | log lines ...                                                |
- *   | arrows: navigate   left/right: fold   q: quit   <keyHints>   |
+ *   | arrows: navigate   left/right: fold   q: quit   &lt;keyHints&gt;   |
  *   +--------------------------------------------------------------+
  *
  * The application provides hooks: renderDetail draws the right pane for
