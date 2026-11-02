@@ -49,16 +49,27 @@ public:
     /**
      * @brief Bilinear interpolation of pressure at (Q, T).
      * Out-of-range arguments are clamped to the nearest axis endpoint.
+     * @param flowMm3PerS  Volumetric flow [mm³/s].
+     * @param tempC        Melt temperature [°C].
      * @returns Pressure [Pa], or 0 if the table is empty.
      */
     double pressure(double flowMm3PerS, double tempC) const;
 
-    /**@brief Whether the table contains any data. */
+    /**
+     * @brief Whether the table contains any data.
+     * @return true when no grid is loaded.
+     */
     bool empty() const { return values_.empty(); }
 
-    /**@brief Number of flow grid points. */
+    /**
+     * @brief Number of flow grid points.
+     * @return flow axis size.
+     */
     size_t numFlow() const { return flowAxis_.size(); }
-    /**@brief Number of temperature grid points. */
+    /**
+     * @brief Number of temperature grid points.
+     * @return temperature axis size.
+     */
     size_t numTemp() const { return tempAxis_.size(); }
 
     const std::vector<double>& flowAxis() const { return flowAxis_; }
@@ -69,6 +80,10 @@ public:
      * @brief Replace the table contents directly (e.g. from a serialized
      * table). Axes must be ascending; values must be temp-major with
      * size = tempAxis.size() * flowAxis.size().
+     *
+     * @param flowAxis  Ascending flow grid [mm³/s].
+     * @param tempAxis  Ascending temperature grid [°C].
+     * @param values    Pressure values, temp-major.
      */
     void assign(std::vector<double> flowAxis,
                 std::vector<double> tempAxis,

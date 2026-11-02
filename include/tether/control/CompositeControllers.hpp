@@ -372,11 +372,13 @@ public:
     
     /**
      * @brief Set default controller (when no conditions match)
+     * @param controller  Fallback controller (borrowed).
      */
     void setDefaultController(ControllerBase* controller) { m_default = controller; }
     
     /**
      * @brief Enable/disable bumpless transfer
+     * @param enable  Blend outputs on switching when true.
      */
     void enableBumplessTransfer(bool enable) { m_bumpless = enable; }
     
@@ -388,6 +390,7 @@ public:
     
     /**
      * @brief Get index of currently active controller
+     * @return controller index, or -1 when the default is active.
      */
     int getActiveIndex() const { return m_activeIndex; }
     
@@ -444,6 +447,7 @@ public:
     
     /**
      * @brief Set inner controller
+     * @param controller  Wrapped controller (borrowed).
      */
     void setController(ControllerBase* controller) { m_inner = controller; }
     
@@ -576,6 +580,7 @@ public:
     
     /**
      * @brief Set filter order (1 or 2)
+     * @param order  Filter order (clamped to [1,2]).
      */
     void setFilterOrder(int order) { m_order = std::clamp(order, 1, 2); }
     

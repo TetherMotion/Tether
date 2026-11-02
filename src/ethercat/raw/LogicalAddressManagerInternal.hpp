@@ -39,13 +39,20 @@ inline void healthStore(uint64_t& p, const CyclicSliceHealth& h) {
 /**
  * Change last_status only (Stale marking keeps wkc/consec for the
  * following timeout classification).
+ *
+ * @param p   Packed health word.
+ * @param st  New slice status.
  */
 inline void healthMarkStatus(uint64_t& p, CyclicSliceStatus st) {
     auto h = healthLoad(p);
     h.last_status = st;
     healthStore(p, h);
 }
-/**Unconditional failure: set status and bump the failure streak. */
+/**
+ * @brief Unconditional failure: set status and bump the failure streak.
+ * @param p   Packed health word.
+ * @param st  Failure status.
+ */
 inline void healthFail(uint64_t& p, CyclicSliceStatus st) {
     auto h = healthLoad(p);
     h.last_status = st;
@@ -56,6 +63,9 @@ inline void healthFail(uint64_t& p, CyclicSliceStatus st) {
  * Timeout: keeps a Stale classification (the late echo IS the story)
  * but still bumps the consecutive-failure streak.  `expected` refreshes
  * the published expectation so diagnostics stay current.
+ *
+ * @param p         Packed health word.
+ * @param expected  Expected WKC for the timed-out command.
  */
 inline void healthTimeout(uint64_t& p, uint16_t expected) {
     auto h = healthLoad(p);
@@ -65,7 +75,13 @@ inline void healthTimeout(uint64_t& p, uint16_t expected) {
     ++h.consecutive_failures;
     healthStore(p, h);
 }
-/**Full outcome write: status + WKC pair + failure-streak bookkeeping. */
+/**
+ * @brief Full outcome write: status + WKC pair + failure-streak bookkeeping.
+ * @param p         Packed health word.
+ * @param st        Outcome status.
+ * @param wkc       Working counter observed.
+ * @param expected  Expected WKC (0xFFFF = unset).
+ */
 inline void markRunStatus(uint64_t& p, CyclicSliceStatus st,
                           uint16_t wkc = 0, uint16_t expected = 0xFFFF) {
     auto h = healthLoad(p);

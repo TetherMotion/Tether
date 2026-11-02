@@ -39,7 +39,10 @@ class SeqLockBuffer {
 public:
     SeqLockBuffer() = default;
 
-    /**Writer side: publish a new value.  Not re-entrant. */
+    /**
+     * @brief Writer side: publish a new value.  Not re-entrant.
+     * @param value  Value to publish.
+     */
     void write(const T& value) {
         const uint64_t seq = seq_.load(std::memory_order_relaxed);
         seq_.store(seq + 1, std::memory_order_release);  // odd → writing
@@ -73,6 +76,9 @@ public:
      * times if a concurrent write is detected.  Returns the last good
      * value (or the default-constructed value if no write has occurred
      * yet).
+     *
+     * @param max_retries  Read attempts before returning best effort.
+     * @return last good value.
      */
     T read_retry(unsigned max_retries = 4) const {
         T tmp{};
@@ -82,7 +88,10 @@ public:
         return tmp;  // best effort — may be stale
     }
 
-    /**Current sequence number (even = stable, odd = writing). */
+    /**
+     * @brief Current sequence number (even = stable, odd = writing).
+     * @return seqlock counter.
+     */
     uint64_t sequence() const {
         return seq_.load(std::memory_order_acquire);
     }

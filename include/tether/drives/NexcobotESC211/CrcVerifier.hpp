@@ -40,12 +40,16 @@ public:
     /**
      * Set a stop token for cooperative cancellation.  When stop is requested,
      * waitUntilMatch() returns false immediately (after the current poll).
+     * @param st  Stop token (copied).
      */
     void setStopToken(std::stop_token st) { stop_token_ = st; }
 
     /**
      * Poll all expectations until every CRC matches or the timeout expires.
      * Returns true if all matched, false on timeout, read error, or cancellation.
+     * @param expectations  CRC registers with expected values.
+     * @param timeout       Overall wait bound.
+     * @return true when every expectation matched.
      */
     bool waitUntilMatch(std::span<const CrcExpectation> expectations,
                         std::chrono::milliseconds timeout);
@@ -53,6 +57,8 @@ public:
     /**
      * Read a single CRC register (0x####:0x00).
      * Returns 0xFFFFFFFF on read error.
+     * @param index  OD index of the CRC object.
+     * @return register value.
      */
     uint32_t readCrc(uint16_t crcIndex);
 

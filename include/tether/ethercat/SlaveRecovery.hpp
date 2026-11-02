@@ -106,7 +106,11 @@ enum class RecoveryEventType : uint8_t {
     SlaveResumed      = 6,
 };
 
-/**Human-readable name for a recovery event type */
+/**
+ * @brief Human-readable name for a recovery event type.
+ * @param type  Event enumerator.
+ * @return static name string.
+ */
 const char* recoveryEventTypeName(RecoveryEventType type);
 
 /**
@@ -176,6 +180,7 @@ public:
 
     /**
      * @brief Called when a recovery event occurs.
+     * @param event  Event record (type, slave, timing).
      */
     virtual void onRecoveryEvent(const RecoveryEvent& event) = 0;
 };
@@ -238,6 +243,8 @@ struct RecoveryConfig {
 
     /**
      * @brief Check if a given AL status code should trigger recovery.
+     * @param code  AL status code.
+     * @return true when the code is in the critical set.
      */
     bool isCriticalALCode(uint16_t code) const {
         // Standard critical codes
