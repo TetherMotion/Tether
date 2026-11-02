@@ -33,16 +33,28 @@ public:
     }
     AutotuningMode getMode() const override { return AutotuningMode::Offline; }
 
-    /** @brief Check compatibility for minimum-variance design (controller supports ARMAX). */
+    /**
+     * @brief Check compatibility for minimum-variance design (controller supports ARMAX).
+     * @param controller  Controller whose structure is validated.
+     * @return true when MVC coefficients can be applied.
+     */
     bool isCompatible(const TunableController& controller) const override;
     
-    /** @brief Design an MVC controller from ARMAX model and apply parameters. */
+    /**
+     * @brief Design an MVC controller from ARMAX model and apply parameters.
+     * @param controller  Controller receiving the coefficients.
+     * @param model       Optional process model.
+     * @return TuningResult or an error.
+     */
     TuningResult tune(TunableController& controller,
                      const ProcessModel* model = nullptr) override;
     
     /**
      * @brief Set ARMAX model polynomials
      * y(t) = B(q)/A(q) * u(t-k) + C(q)/A(q) * e(t)
+     *
+     * @param A,B,C  ARMAX polynomials.
+     * @param k      Input delay in samples.
      */
     void setARMAXModel(const std::vector<double>& A,
                       const std::vector<double>& B,
@@ -51,6 +63,8 @@ public:
     
     /** @brief Set penalty on control variance (generalized MVC)
      *  J = E[(y - r)² + λu²]
+     *
+     * @param lambda  Control-variance penalty weight.
      */
     void setControlWeight(double lambda) { m_lambda = lambda; }
     

@@ -18,14 +18,14 @@
  *
  *   - **double-put-single-get** (producer lapped the consumer): a post()
  *     landing while a value is still pending drops the pending value and
- *     counts one @ref Stats::overruns. The stale value never reaches the
+ *     counts one `Stats::overruns`. The stale value never reaches the
  *     consumer — usually fine for "latest wins" semantics, still worth
  *     seeing.
  *   - **double-get-single-put** (consumer starved): a take() finding the
- *     slot empty counts one @ref Stats::misses. The consumer sampled
+ *     slot empty counts one `Stats::misses`. The consumer sampled
  *     faster than the producer supplied.
- *   - Run-length maxima: @ref Stats::maxPutStreak /
- *     @ref Stats::maxGetStreak record the worst observed run of
+ *   - Run-length maxima: `Stats::maxPutStreak` /
+ *     `Stats::maxGetStreak` record the worst observed run of
  *     consecutive same-side operations, i.e. how far the phases can drift.
  *
  * Only take() counts as a get; hasPending() is a non-consuming probe and

@@ -118,29 +118,49 @@ public:
         return "PID + three-state model-based pre/post-emphasis feed-forward.";
     }
 
-    /**@brief Set the PID gains of the internal backend. */
+    /**
+     * @brief Set the PID gains of the internal backend.
+     * @param kp  Proportional gain.
+     * @param ki  Integral gain.
+     * @param kd  Derivative gain.
+     */
     void setGains(double kp, double ki, double kd) {
         pid_.setGains(kp, ki, kd);
     }
 
-    /**@brief Set the flow rate for the next control cycle [mm³/s]. */
+    /**
+     * @brief Set the flow rate for the next control cycle [mm³/s].
+     * @param flowMm3PerS  Volumetric melt flow estimate.
+     */
     void setFlow(double flowMm3PerS) { flowMm3PerS_ = flowMm3PerS; }
     double flow() const { return flowMm3PerS_; }
 
-    /**@brief Set the parameters (also resets the observer params). */
+    /**
+     * @brief Set the parameters (also resets the observer params).
+     * @param p  New controller parameters; observer params are derived.
+     */
     void setParams(FlowAdaptiveHeaterParams p) {
         params_ = p;
         observer_.setParams(toObserverParams(p));
     }
     const FlowAdaptiveHeaterParams& params() const { return params_; }
 
-    /**@brief Estimated melt-zone temperature from the internal observer. */
+    /**
+     * @brief Estimated melt-zone temperature from the internal observer.
+     * @return melt-zone estimate [°C].
+     */
     double meltTempEst() const { return observer_.meltTempEst(); }
 
-    /**@brief Heater-block state from the internal observer. */
+    /**
+     * @brief Heater-block state from the internal observer.
+     * @return heater-block estimate [°C].
+     */
     double heaterBlockTemp() const { return observer_.heaterBlockTemp(); }
 
-    /**@brief Sensor-point state from the internal observer. */
+    /**
+     * @brief Sensor-point state from the internal observer.
+     * @return sensor-point estimate [°C].
+     */
     double sensorTemp() const { return observer_.sensorTemp(); }
 
     /**@brief Last computed feed-forward contributions (diagnostics). */
