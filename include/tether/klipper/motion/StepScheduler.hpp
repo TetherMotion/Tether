@@ -71,7 +71,10 @@ public:
     explicit StepScheduler(uint32_t clockFreqHz = 180000000)
         : clockFreqHz_(clockFreqHz) {}
 
-    /**@brief Set the per-step callback. */
+    /**
+     * @brief Set the per-step callback.
+     * @param cb  Invoked per executed step (moved).
+     */
     void setStepCallback(StepCallback cb) {
         std::lock_guard<std::mutex> lock(mutex_);
         stepCb_ = std::move(cb);
@@ -80,6 +83,8 @@ public:
     /**
      * @brief Set the clock anchor: (wallTime, mcuTick). Allows aligning
      *        the scheduler's clock to an externally-synchronised reference.
+     * @param wallTime  Host wall time at the anchor.
+     * @param mcuTick   MCU tick at the anchor.
      */
     void setClockAnchor(std::chrono::steady_clock::time_point wallTime,
                         uint32_t mcuTick) {

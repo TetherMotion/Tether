@@ -53,10 +53,16 @@ public:
     void close() override;
     bool isConnected() const override;
 
-    /**Access the wrapped byte-stream transport. */
+    /**
+     * @brief Access the wrapped byte-stream transport.
+     * @return inner transport pointer.
+     */
     ITransport* inner() const { return inner_.get(); }
 
-    /**Statistics — useful for `stream --stats` and diagnostics. */
+    /**
+     * @brief Statistics — useful for `stream --stats` and diagnostics.
+     * @return dropped-frame counter.
+     */
     size_t droppedFrames() const { return droppedFrames_; }
     size_t decodedFrames() const { return decodedFrames_; }
 

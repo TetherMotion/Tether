@@ -38,12 +38,17 @@ public:
     /**@brief Pump the event loop: read transport, parse blocks, dispatch, ack. */
     virtual void pump() = 0;
 
-    /**@brief Advance the MCU clock by @p deltaTicks. */
+    /**
+     * @brief Advance the MCU clock by @p deltaTicks.
+     * @param deltaTicks  Ticks to advance.
+     */
     virtual void advanceClock(uint32_t deltaTicks) = 0;
 
     /**
      * @brief Register a Stepper peripheral and auto-wire the queue_step /
      *        set_next_step_dir / reset_step_clock handlers for its OID.
+     * @param stepper  Stepper to register.
+     * @param oid      Object id to assign.
      * @return The OID passed in, for chaining.
      */
     virtual uint8_t registerStepper(std::shared_ptr<objects::Stepper> stepper) = 0;

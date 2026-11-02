@@ -23,7 +23,11 @@ enum class PrinterState : uint8_t {
     Shutdown  = 5,
 };
 
-/**@brief Convert PrinterState to string. */
+/**
+ * @brief Convert PrinterState to string.
+ * @param s  State value.
+ * @return static name string.
+ */
 inline const char* stateToString(PrinterState s) {
     switch (s) {
         case PrinterState::Startup:  return "startup";

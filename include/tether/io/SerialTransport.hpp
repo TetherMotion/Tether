@@ -76,7 +76,10 @@ public:
  */
 class SerialTransport : public ITransport {
 public:
-    /**Construct with an already-opened serial driver (takes ownership). */
+    /**
+     * @brief Construct with an already-opened serial driver (takes ownership).
+     * @param driver  Opened serial driver (moved).
+     */
     explicit SerialTransport(std::unique_ptr<ISerialDriver> driver);
     ~SerialTransport() override;
 
@@ -110,6 +113,7 @@ public:
     /**
      * @brief Get the underlying file descriptor (for advanced use cases
      * like PipeTransport that need raw fd access). Returns -1 if not open.
+     * @return file descriptor.
      */
     int fd() const { return fd_; }
 

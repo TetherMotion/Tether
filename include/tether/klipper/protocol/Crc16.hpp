@@ -55,6 +55,8 @@ inline uint16_t crc16Ccitt(const uint8_t* data, size_t length) {
 
 /**
  * @brief Convenience overload for std::span.
+ * @param data  Bytes to checksum.
+ * @return CRC-16-CCITT value.
  */
 inline uint16_t crc16Ccitt(std::span<const uint8_t> data) {
     return crc16Ccitt(data.data(), data.size());

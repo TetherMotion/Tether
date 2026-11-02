@@ -30,7 +30,10 @@ public:
     explicit VirtualSdcard(std::string rootDir)
         : rootDir_(std::move(rootDir)) {}
 
-    /**@brief List files in the virtual SD card root. */
+    /**
+     * @brief List files in the virtual SD card root.
+     * @return file info records.
+     */
     std::vector<FileInfo> listFiles() const {
         std::vector<FileInfo> result;
         if (!std::filesystem::exists(rootDir_)) return result;
@@ -136,7 +139,10 @@ public:
         filePosition_ = 0;
     }
 
-    /**@brief Seek to a specific position in the file. */
+    /**
+     * @brief Seek to a specific position in the file.
+     * @param position  Byte offset.
+     */
     void seek(size_t position) {
         std::lock_guard<std::mutex> lock(mutex_);
         filePosition_ = std::min(position, fileSize_);
