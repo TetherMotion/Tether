@@ -88,7 +88,10 @@ public:
     /**@brief Stop the HTTP server. */
     void stop();
 
-    /**@brief Check if the server is running. */
+    /**
+     * @brief Check if the server is running.
+     * @return true while the server loop is active.
+     */
     bool isRunning() const { return running_.load(); }
 
     // ------------------------------------------------------------------
@@ -97,10 +100,16 @@ public:
 
     const HttpServerConfig& config() const { return config_; }
 
-    /**@brief Get the JSON-RPC dispatcher (for testing). */
+    /**
+     * @brief Get the JSON-RPC dispatcher (for testing).
+     * @return dispatcher used for method routing.
+     */
     JsonRpcDispatcher& dispatcher() { return dispatcher_; }
 
-    /**@brief Get the NotificationSink for this server (for registering with UDS server). */
+    /**
+     * @brief Get the NotificationSink for this server (for registering with UDS server).
+     * @return sink receiving KlippyServer notifications.
+     */
     NotificationSink* notificationSink() { return notificationBridge_.get(); }
 
 #ifdef TETHER_KLIPPER_HTTP_INTERNAL

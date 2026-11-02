@@ -29,10 +29,17 @@ struct RSAPMonitoringSnapshot
      * @brief Raw value of one object by (index, subindex).
      * @return the value, or nullopt when the object is not in the
      *         table or its last read failed.
+     * @param index     Object index.
+     * @param subindex  Object subindex.
      */
     std::optional<uint32_t> get(uint16_t index, uint8_t subindex = 0) const;
 
-    /**Signed interpretation of get() for DINT objects. */
+    /**
+     * @brief Signed interpretation of get() for DINT objects.
+     * @param index     Object index.
+     * @param subindex  Object subindex.
+     * @return signed value, or nullopt.
+     */
     std::optional<int32_t> getSigned(uint16_t index,
                                      uint8_t subindex = 0) const;
 };

@@ -53,6 +53,9 @@ namespace FSoE::Synapticon {
  *
  * The frame interleaves a 2-byte CRC after every 2 safe-data bytes:
  * byte i maps to `1 + i + 2*(i/2)` (1 = the leading command byte).
+ *
+ * @param i  Safe-data byte index.
+ * @return byte offset inside the wire frame.
  */
 inline constexpr size_t safeDataByteOffset(size_t i) {
     return 1 + i + 2 * (i / 2);
@@ -84,6 +87,9 @@ inline constexpr uint16_t kMotionGatingSafetyFlags =
  * @return The flags word, or `std::nullopt` for non-ProcessData commands
  *         (handshake frames carry no live demands) or a frame too short
  *         to hold the flags.
+ *
+ * @param frame  Serialized master→slave frame.
+ * @param len    Frame length.
  */
 inline std::optional<uint16_t> masterSafetyFlags(const uint8_t* frame,
                                                  size_t len) {

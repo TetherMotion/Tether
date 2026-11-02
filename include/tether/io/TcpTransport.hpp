@@ -24,7 +24,10 @@ namespace tether { namespace io {
  */
 class TcpTransport : public ITransport {
 public:
-    /**Construct from an already-connected socket fd (takes ownership). */
+    /**
+     * @brief Construct from an already-connected socket fd (takes ownership).
+     * @param fd  Connected socket.
+     */
     explicit TcpTransport(int fd);
     ~TcpTransport() override;
 
@@ -44,6 +47,10 @@ private:
  * Resolves `host` (name or IPv4/IPv6 literal) via getaddrinfo and tries
  * each address in order with a per-attempt deadline bounded by
  * `timeoutMs`.  Returns nullptr when no address connects in time.
+ * @param host       Host name or IP literal.
+ * @param port       TCP port.
+ * @param timeoutMs  Per-attempt connect deadline.
+ * @return connected transport, or nullptr on failure.
  */
 std::unique_ptr<TcpTransport> tcpConnect(const char* host, uint16_t port,
                                          uint32_t timeoutMs = 5000);

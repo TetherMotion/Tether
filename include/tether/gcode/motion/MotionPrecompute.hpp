@@ -88,7 +88,10 @@ public:
     explicit FixedTimeStrategy(double timeStep = 0.01)
         : timeStep_(timeStep) {}
     
-    /**Strategy name (InterpolationStrategy::name). */
+    /**
+     * @brief Strategy name (InterpolationStrategy::name).
+     * @return "FixedTime".
+     */
     std::string name() const override { return "FixedTime"; }
     
     void interpolateLinear(
@@ -128,7 +131,10 @@ public:
     explicit FixedDeviationStrategy(double maxDeviation = 0.1)
         : maxDeviation_(maxDeviation) {}
     
-    /**Strategy name (InterpolationStrategy::name). */
+    /**
+     * @brief Strategy name (InterpolationStrategy::name).
+     * @return "FixedDeviation".
+     */
     std::string name() const override { return "FixedDeviation"; }
     
     void interpolateLinear(
@@ -168,7 +174,10 @@ public:
     AdaptiveStrategy(double minStep = 0.001, double maxStep = 0.1, double tolerance = 0.01)
         : minStep_(minStep), maxStep_(maxStep), tolerance_(tolerance) {}
     
-    /**Strategy name (InterpolationStrategy::name). */
+    /**
+     * @brief Strategy name (InterpolationStrategy::name).
+     * @return "Adaptive".
+     */
     std::string name() const override { return "Adaptive"; }
     
     void interpolateLinear(

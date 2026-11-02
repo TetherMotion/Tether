@@ -82,12 +82,16 @@ public:
      * @param stateDim Dimension of the state vector v.
      * @param inputDim Dimension of the input x (1 for SISO).
      * @param outputDim Dimension of the output y (1 for SISO).
+     * @param params    Estimator parameters (lambda, limits).
      */
     StateSpaceLPVInputEstimator(int stateDim, int inputDim = 1,
                                 int outputDim = 1,
                                 StateSpaceLPVParams params = {});
 
-    /**@brief Add a state-space model at operating point p. */
+    /**
+     * @brief Add a state-space model at operating point p.
+     * @param point  Model matrices + operating point.
+     */
     void addModelPoint(const StateSpaceLPVModelPoint& point);
 
     /**
@@ -117,7 +121,10 @@ public:
     /**@return Number of model points in the LUT. */
     size_t numModelPoints() const { return modelLut_.size(); }
 
-    /**@brief Set the Tikhonov regularization parameter. */
+    /**
+     * @brief Set the Tikhonov regularization parameter.
+     * @param lambda  Non-negative regularization weight.
+     */
     void setLambda(double lambda) { params_.lambda = lambda; }
 
 private:

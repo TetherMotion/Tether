@@ -133,12 +133,14 @@ public:
      * Set a callback invoked after each command-response poll (0xF100:0x02).
      * Useful for logging PDO/TxPDU contents alongside the poll to correlate
      * the safety state machine progress with live FSoE frame traffic.
+     * @param observer  Callback invoked after each poll.
      */
     void setPollObserver(std::function<void()> observer);
 
     /**
      * Set a stop_token for cooperative cancellation.  When stop is
      * requested on the token, all polling loops abort immediately.
+     * @param token  Stop token (copied).
      */
     void setStopToken(std::stop_token token);
 
@@ -146,6 +148,7 @@ public:
      * Set the admin password on both command channels (0xF100 command
      * channel and the ConfigManager's channel).  Overrides
      * Config::admin_password.
+     * @param password  Admin password to set.
      */
     void setAdminPassword(std::string password);
 

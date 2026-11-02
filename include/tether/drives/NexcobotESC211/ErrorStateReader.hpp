@@ -70,6 +70,7 @@ public:
      * `EtherCAT::reportSdoAbort` (when available) and the snapshot
      * is marked invalid, but the remaining fields are still attempted so
      * the operator gets as much diagnostic context as possible.
+     * @return populated snapshot (fields marked invalid on failure).
      */
     Snapshot readAndLog();
 
@@ -79,6 +80,8 @@ public:
      *
      * A non-empty diagnostic message alone does NOT count as an error —
      * the ESC debug log frequently carries informational text.
+     * @param snap  Snapshot to evaluate.
+     * @return true when the device reports a clean state.
      */
     static bool isOk(const Snapshot& s);
 

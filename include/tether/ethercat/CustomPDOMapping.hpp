@@ -69,15 +69,25 @@ struct CustomPDOMappingEntry {
     const ObjectDictionary::ObjectDictionaryEntry* entry;
     uint8_t byte_size; /**< 0 = infer from entry->data_type */
 
-    /**Implicit from a register pointer — infers size from data_type. */
+    /**
+     * @brief Implicit from a register pointer — infers size from data_type.
+     * @param e  Object-dictionary entry (borrowed).
+     */
     CustomPDOMappingEntry(const ObjectDictionary::ObjectDictionaryEntry* e)
         : entry(e), byte_size(inferByteSize(e->data_type)) {}
 
-    /**Explicit byte size override (for OctetString, Domain, etc.). */
+    /**
+     * @brief Explicit byte size override (for OctetString, Domain, etc.).
+     * @param e   Object-dictionary entry (borrowed).
+     * @param sz  Explicit wire size.
+     */
     CustomPDOMappingEntry(const ObjectDictionary::ObjectDictionaryEntry* e, uint8_t sz)
         : entry(e), byte_size(sz) {}
 
-    /**Resolved byte size (inferred if byte_size was 0). */
+    /**
+     * @brief Resolved byte size (inferred if byte_size was 0).
+     * @return wire byte width.
+     */
     uint8_t resolvedSize() const noexcept {
         return byte_size != 0 ? byte_size : inferByteSize(entry->data_type);
     }
