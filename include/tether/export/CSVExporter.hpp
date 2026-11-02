@@ -66,16 +66,24 @@ public:
     
     /**
      * @brief Export trajectory samples to stream
+     * @param samples  Sampled trajectory points.
+     * @param out      Destination stream.
      */
     void exportToStream(const std::vector<TrajectorySample>& samples, std::ostream& out);
     
     /**
      * @brief Export statistics to CSV
+     * @param stats     Trajectory statistics record.
+     * @param filename  Output .csv path.
+     * @return true on successful write.
      */
     bool exportStatistics(const TrajectoryStatistics& stats, const std::string& filename);
     
     /**
      * @brief Export limit violations to CSV
+     * @param violations  Violation records.
+     * @param filename    Output .csv path.
+     * @return true on successful write.
      */
     bool exportViolations(const std::vector<LimitViolation>& violations, const std::string& filename);
     
@@ -124,6 +132,7 @@ public:
     
     /**
      * @brief Get list of created files
+     * @return filenames produced by the last export run.
      */
     const std::vector<std::string>& createdFiles() const { return createdFiles_; }
     

@@ -13,7 +13,12 @@ namespace tether::motion::profile_renurbs {
 
 namespace detail {
 
-/**Evaluate a 1-D NurbsCurve at parameter u, returning the scalar value. */
+/**
+ * @brief Evaluate a 1-D NurbsCurve at parameter u, returning the scalar value.
+ * @param curve  Optional curve (nullopt -> 0).
+ * @param u      Parameter, clamped to the curve's knot range.
+ * @return scalar curve value.
+ */
 inline double evalScalarCurve(const std::optional<NurbsCurve>& curve, double u) {
     if (!curve) return 0.0;
     const double uMin = curve->knotMin();
@@ -24,7 +29,13 @@ inline double evalScalarCurve(const std::optional<NurbsCurve>& curve, double u) 
     return curve->evaluate(uu)[0];
 }
 
-/**Interpolate a value at normalized parameter u from sample arrays. */
+/**
+ * @brief Interpolate a value at normalized parameter u from sample arrays.
+ * @param sampleU    Sample parameter positions (sorted).
+ * @param sampleVal  Sample values (parallel to sampleU).
+ * @param u          Query parameter.
+ * @return linearly interpolated value (endpoint-clamped).
+ */
 inline double interpAtU(
     const std::vector<double>& sampleU,
     const std::vector<double>& sampleVal,
@@ -39,7 +50,12 @@ inline double interpAtU(
     return sampleVal[idx-1] * (1.0 - alpha) + sampleVal[idx] * alpha;
 }
 
-/**Check a quantity curve against its limit on a dense grid. */
+/**
+ * @brief Check a quantity curve against its limit on a dense grid.
+ * @param seg            Segment profile to check.
+ * @param quantityIndex  Which quantity to evaluate.
+ * @return violations found on the grid.
+ */
 inline std::vector<GenericViolation> checkQuantityConstraint(
     const GenericSegmentProfile& seg,
     std::size_t quantityIndex,

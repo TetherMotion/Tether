@@ -78,18 +78,26 @@ public:
     
     /**
      * @brief Export trajectory samples to stream
+     * @param samples  Sampled trajectory points.
+     * @param out      Destination stream.
      */
     void exportToStream(const std::vector<TrajectorySample>& samples, std::ostream& out);
     
     /**
      * @brief Export from motion segments directly
+     * @param segments  Planning segments to render.
+     * @param filename  Output .svg path.
+     * @return true on successful write.
      */
     bool exportSegments(const std::vector<GCode::PlanningSegment>& segments, const std::string& filename);
 
     void configure(const SVGConfig& config) { config_ = config; }
 
     /**
-     * @brief Export Bezier paths to SVG (Direct <path> elements)
+     * @brief Export Bezier paths to SVG (Direct &lt;path&gt; elements)
+     * @param paths     Renderable Bezier paths.
+     * @param filename  Output .svg path.
+     * @return true on successful write.
      */
     bool exportBezierPaths(const std::vector<struct RenderableBezierPath>& paths, const std::string& filename);
 
