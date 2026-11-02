@@ -54,13 +54,21 @@ public:
         size_t maxMessageSize = MAX_MESSAGE_SIZE;
     };
 
-    /**Wrap a connected byte-stream transport (takes ownership). */
+    /**
+     * @brief Wrap a connected byte-stream transport (takes ownership).
+     * @param byteTransport  Connected transport to wrap.
+     */
     explicit WsClientTransport(std::unique_ptr<ITransport> byteTransport);
     ~WsClientTransport() override;
 
     /**
      * Convenience: TCP-connect then handshake. Returns the failure reason
      * on error.
+     *
+     * @param host  Server host.
+     * @param port  Server port.
+     * @param opts  Handshake options.
+     * @return ready transport, or error string.
      */
     static std::expected<std::unique_ptr<WsClientTransport>, std::string>
     connect(const char* host, uint16_t port, const Options& opts);
@@ -72,6 +80,9 @@ public:
     /**
      * Perform the HTTP/1.1 Upgrade handshake (sends GET, verifies the
      * 101 response and Sec-WebSocket-Accept).
+     *
+     * @param opts  Handshake options (path, headers, timeouts).
+     * @return empty expected on success; error string on failure.
      */
     std::expected<void, std::string> handshake(const Options& opts);
 
@@ -81,7 +92,10 @@ public:
     void close() override;
     bool isConnected() const override;
 
-    /**The wrapped byte-stream transport. */
+    /**
+     * @brief The wrapped byte-stream transport.
+     * @return pointer to the owned inner transport.
+     */
     ITransport* inner() const { return inner_.get(); }
 
 private:

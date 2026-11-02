@@ -36,6 +36,9 @@ namespace tether::klipper::protocol {
  * @details Prevents silent truncation when narrowing int32_t to smaller
  *          types (uint8_t, int16_t, uint16_t, etc.). Out-of-range values
  *          are clamped to the nearest representable value.
+ *
+ * @param v  Source value.
+ * @return `v` clamped to Target's range.
  */
 template <typename Target, typename Source>
 constexpr Target clampCast(Source value) noexcept {
@@ -106,16 +109,30 @@ class CommandTable {
 public:
     explicit CommandTable(const DataDictionary& dict) : dict_(dict) {}
 
-    /**@brief Register a command handler (device side). */
+    /**
+     * @brief Register a command handler (device side).
+     * @param msgid    Message id from the data dictionary.
+     * @param handler  Invoked on dispatchCommand().
+     */
     void registerCommand(uint16_t msgid, CommandHandler handler);
 
-    /**@brief Register a response handler (host side). */
+    /**
+     * @brief Register a response handler (host side).
+     * @param msgid    Message id from the data dictionary.
+     * @param handler  Invoked on dispatchResponse().
+     */
     void registerResponse(uint16_t msgid, ResponseHandler handler);
 
-    /**@brief Dispatch a decoded command (device side). No-op if unregistered. */
+    /**
+     * @brief Dispatch a decoded command (device side). No-op if unregistered.
+     * @param msg  Decoded incoming command.
+     */
     void dispatchCommand(const DecodedMessage& msg) const;
 
-    /**@brief Dispatch a decoded response (host side). No-op if unregistered. */
+    /**
+     * @brief Dispatch a decoded response (host side). No-op if unregistered.
+     * @param msg  Decoded incoming response.
+     */
     void dispatchResponse(const DecodedMessage& msg) const;
 
     /**@return The bound data dictionary. */

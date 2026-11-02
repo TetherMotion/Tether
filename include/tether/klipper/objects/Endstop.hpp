@@ -25,22 +25,40 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /**@brief Check if endstop is currently triggered. */
+    /**
+     * @brief Check if endstop is currently triggered.
+     * @return live pin state (false when no read function is set).
+     */
     bool triggered() const { return pinRead_ ? pinRead_() : false; }
 
-    /**@brief Set the pin read function. */
+    /**
+     * @brief Set the pin read function.
+     * @param func  Callable returning the live pin state.
+     */
     void setPinReadFunc(PinReadFunc func) { pinRead_ = std::move(func); }
 
-    /**@brief Set the sample count for debouncing. */
+    /**
+     * @brief Set the sample count for debouncing.
+     * @param count  Consecutive samples required to change state.
+     */
     void setSampleCount(int count) { sampleCount_ = count; }
 
-    /**@brief Get the sample count. */
+    /**
+     * @brief Get the sample count.
+     * @return configured debounce sample count.
+     */
     int sampleCount() const { return sampleCount_; }
 
-    /**@brief Set the endstop state directly (for testing/simulation). */
+    /**
+     * @brief Set the endstop state directly (for testing/simulation).
+     * @param triggered  Non-zero = triggered.
+     */
     void setState(uint32_t triggered) { state_ = triggered != 0; }
 
-    /**@brief Get the endstop state. */
+    /**
+     * @brief Get the endstop state.
+     * @return 1 when triggered, 0 otherwise.
+     */
     uint32_t state() const { return state_ ? 1u : 0u; }
 
 private:

@@ -187,6 +187,12 @@ public:
      * ControlsEngineer and Administrator — an operator must wait for expiry
      * or a cooperative release. The evicted owner is recorded in the audit
      * event reason so takeovers are attributable.
+     *
+     * @param scope      Lease scope to take.
+     * @param identity   Requesting session (role checked).
+     * @param requested  Requested lease duration.
+     * @param now        Current time (injectable for tests).
+     * @return takeover result with audit details.
      */
     AuthorityResult takeover(const std::string& scope, const SessionIdentity& identity,
                              Duration requested, TimePoint now = SteadyClock::now()) {
@@ -251,6 +257,9 @@ public:
     /**
      * Snapshot of every active lease, ordered by scope (for the
      * machine.authority snapshot signal).
+     *
+     * @param now  Current time (expired leases are pruned).
+     * @return active leases sorted by scope.
      */
     std::vector<AuthorityLease> leases(TimePoint now = SteadyClock::now()) {
         std::lock_guard lock(mutex_);
@@ -267,6 +276,10 @@ public:
     /**
      * Force-release every lease owned by a session (disconnect/expiry stop
      * semantics). Returns the number released; each emits an audit event.
+     *
+     * @param sessionId  Session whose leases are released.
+     * @param now        Current time.
+     * @return number of leases released.
      */
     size_t releaseAll(const std::string& sessionId, TimePoint now = SteadyClock::now()) {
         std::vector<AuthorityEvent> events;

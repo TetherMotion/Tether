@@ -9,16 +9,16 @@
  *     jog.describe                -> String  JSON: axes, groups, limits,
  *                                            presets (UIs render from this)
  *     jog.stop_all                -> Bool
- *     jog.<axis>.jog(rate, lease) -> Bool    continuous jog; rate clamped to
+ *     jog.&lt;axis&gt;.jog(rate, lease) -> Bool    continuous jog; rate clamped to
  *                                            maxRate, lease to maxLeaseMs
- *     jog.<axis>.move(distance)   -> F64     bounded increment; returns the
+ *     jog.&lt;axis&gt;.move(distance)   -> F64     bounded increment; returns the
  *                                            applied (clamped) distance
- *     jog.<axis>.stop             -> Bool    ramped stop (convenience — the
+ *     jog.&lt;axis&gt;.stop             -> Bool    ramped stop (convenience — the
  *                                            lease is the real failsafe)
  *
  *   Signals (per axis)
- *     jog.<axis>.state            Binary snapshot
- *     jog.<axis>.state.<field>    scalar: mode, active, rate, position,
+ *     jog.&lt;axis&gt;.state            Binary snapshot
+ *     jog.&lt;axis&gt;.state.&lt;field&gt;    scalar: mode, active, rate, position,
  *                                 remaining, leaseLeftMs
  *
  * All commands take the current time from a caller-provided nowMs clock so
