@@ -990,7 +990,7 @@ TetherIOClient::configureDatalog(const std::string& logName,
 
     ClientBufReader r(result->data(), result->size());
     r.getU8(); // type
-    bool success = r.getU8() != 0;
+    bool success = (r.getU8() == 0);
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed ConfigureDatalogResp"));
     return success;
 }
@@ -1014,7 +1014,7 @@ TetherIOClient::configureThreshold(const std::string& name,
 
     ClientBufReader r(result->data(), result->size());
     r.getU8(); // type
-    bool success = r.getU8() != 0;
+    bool success = (r.getU8() == 0);
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed ConfigureThresholdResp"));
     return success;
 }

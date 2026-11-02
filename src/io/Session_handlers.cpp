@@ -670,7 +670,7 @@ void Session::handleConfigureDatalogReq(const uint8_t* body, size_t len) {
     uint8_t buf[2];
     BufWriter w(buf, sizeof(buf));
     w.putU8(static_cast<uint8_t>(MessageType::ConfigureDatalogResp));
-    w.putU8(1);  // success
+    w.putU8(0);  // success
     if (w.ok()) sendRaw(buf, w.pos);
 }
 
@@ -702,7 +702,7 @@ void Session::handleConfigureThresholdReq(const uint8_t* body, size_t len) {
     uint8_t buf[2];
     BufWriter w(buf, sizeof(buf));
     w.putU8(static_cast<uint8_t>(MessageType::ConfigureThresholdResp));
-    w.putU8(1);  // success
+    w.putU8(0);  // success
     if (w.ok()) sendRaw(buf, w.pos);
 }
 

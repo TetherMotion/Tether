@@ -111,7 +111,7 @@ ConfigureThresholdReq := name str16 is_whitelist U8 rule_count U32
 threshold_rule := entry_id U64 threshold_type U8 threshold F64
                   custom_name str16 config_count U32
                   * (name str16 type U8 value_length U32 value)
-ConfigureThresholdResp := success U8   // 1 = success (boolean)
+ConfigureThresholdResp := status U8   // 0 = success
 ```
 
 `threshold_type` is `None`(0), `Absolute`(1), `Relative`(2),
@@ -163,7 +163,7 @@ changed.
 ```
 ConfigureDatalogReq  := log_name str16 sample_rate_hz U32 enabled U8
                         entry_count U32 * (entry_id U64)  // 0 = all
-ConfigureDatalogResp := success U8                         // 1 = success (boolean)
+ConfigureDatalogResp := status U8                          // 0 = success
 
 DatalogStatusReq     := (empty body)
 DatalogStatusResp    := state U8 records_written U64 bytes_written U64
@@ -330,13 +330,10 @@ Error := code U32 message str16
 `FunctionInvocationError`(13), `ResourceBusy`(14), `Timeout`(15 —
 locally synthesized on InvokeEx deadline expiry; never on the wire).
 
-Status-byte conventions differ by family — check per message:
-
-- `0 = success` (status semantics): `InvokeExResp`,
-  `CallFunctionResp`, `InputStreamCreateResp`, `InputStreamCloseResp`.
-- `1 = success` (boolean semantics): `ConfigureDatalogResp`,
-  `ConfigureThresholdResp`.
-- `SetParameterResp` carries no status — failures arrive as `Error`.
-- `UnsubscribeLogResp` carries `not_found` — `0` means the
-  subscription existed and was closed.
-- `SubscribeLogResp` carries `failed` — `0` means subscribed.
+Status-byte convention is uniform: **every response status byte uses
+`0 = success`** — `InvokeExResp`, `CallFunctionResp`,
+`InputStreamCreateResp`, `InputStreamCloseResp`,
+`ConfigureDatalogResp`, `ConfigureThresholdResp`. Failure detail for
+these arrives as an `Error` message or a nonzero status; the
+`failed`/`not_found`/`has_return_value` flag bytes elsewhere are
+booleans, not statuses (`0` = good/false throughout).
