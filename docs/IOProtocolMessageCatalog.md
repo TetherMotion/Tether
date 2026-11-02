@@ -86,11 +86,11 @@ The full `ValueType` set usable in flat descriptors:
 | 19 | `IVarint` | zigzag varint |
 | 20 | `Struct` | `varuint` len + opaque bytes |
 | 21 | `Array` | `varuint` count + element_type-encoded values |
-| 22 | `FixedString` | `varuint` len + bytes (cap in max_value_size) |
-| 23 | `Stream` | `varuint` len + chunked bytes |
+| 22 | `Stream` | 4-byte input-stream handle |
+| 23 | `FixedString` | `varuint` len + bytes (cap in max_value_size) |
 
 `value_size` is the canonical byte size for fixed-width types (1–11,
-14–16); it is 0 for the variable-length types (12, 13, 17–23), whose
+14–16, 22); it is 0 for the variable-length types (12, 13, 17–21, 23), whose
 per-value byte length travels with the value itself. `max_value_size`
 carries the byte cap for variable-length entries. `element_type` is
 only meaningful for `Array` (element ValueType, including nested
