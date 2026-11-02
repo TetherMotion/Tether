@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief DC-motor position-servo benchmark.
- *
- * Models shaft position, shaft speed, and armature current for a voltage-driven
- * DC motor. The current implementation adds the integrated position state on top
- * of the basic electromechanical motor dynamics used in servo positioning.
- *
- * Control is difficult because position regulation adds another level of phase
- * lag on top of the speed dynamics, so fast tracking and robustness conflict.
- *
- * The current implementation models one rigid shaft and one armature circuit. It
- * does not model encoder quantization, backlash, shaft compliance, load torque
- * disturbances beyond the plant equations, or current-controller hierarchy.
- */
+     * @brief DC-motor position-servo benchmark.
+     *
+     * Models shaft position, shaft speed, and armature current for a voltage-driven
+     * DC motor. The current implementation adds the integrated position state on top
+     * of the basic electromechanical motor dynamics used in servo positioning.
+     *
+     * Control is difficult because position regulation adds another level of phase
+     * lag on top of the speed dynamics, so fast tracking and robustness conflict.
+     *
+     * The current implementation models one rigid shaft and one armature circuit. It
+     * does not model encoder quantization, backlash, shaft compliance, load torque
+     * disturbances beyond the plant equations, or current-controller hierarchy.
+     */
 class DCMotorPosition : public ParametricSystem {
 public:
     DCMotorPosition();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 3; } // [theta, omega, i]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

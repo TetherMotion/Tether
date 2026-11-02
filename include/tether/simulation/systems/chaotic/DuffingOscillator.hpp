@@ -4,20 +4,20 @@
 namespace Simulation {
 
 /**
- * @brief Forced Duffing-oscillator benchmark.
- *
- * Models a forced nonlinear oscillator with linear damping, linear stiffness,
- * and a cubic spring term. The current implementation preserves amplitude-
- * dependent resonance shift, multi-well behavior, and forcing-driven branch
- * transitions in a compact second-order model.
- *
- * Control is difficult because the plant is strongly amplitude dependent, so a
- * controller tuned around one regime can perform poorly after larger motion.
- *
- * The current implementation models one dominant nonlinear mode and one forcing
- * channel. It does not model higher structural modes, frictional hysteresis,
- * distributed beam dynamics, or true stochastic excitation.
- */
+     * @brief Forced Duffing-oscillator benchmark.
+     *
+     * Models a forced nonlinear oscillator with linear damping, linear stiffness,
+     * and a cubic spring term. The current implementation preserves amplitude-
+     * dependent resonance shift, multi-well behavior, and forcing-driven branch
+     * transitions in a compact second-order model.
+     *
+     * Control is difficult because the plant is strongly amplitude dependent, so a
+     * controller tuned around one regime can perform poorly after larger motion.
+     *
+     * The current implementation models one dominant nonlinear mode and one forcing
+     * channel. It does not model higher structural modes, frictional hysteresis,
+     * distributed beam dynamics, or true stochastic excitation.
+     */
 class DuffingOscillator : public ParametricSystem {
 public:
     DuffingOscillator();
@@ -28,9 +28,23 @@ public:
     int stateDim() const override { return 2; }
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
-    /**Evaluate the nonlinear forced oscillator with linear damping and cubic spring stiffness. */
+    /**
+     * Evaluate the nonlinear forced oscillator with linear damping and cubic spring stiffness.
+     *
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
-    /**Report oscillator displacement for direct comparison with ETFE estimates. */
+    /**
+     * Report oscillator displacement for direct comparison with ETFE estimates.
+     *
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     /**Start near the origin with a small displacement to avoid trivial zero motion. */
     StateVector defaultInitialState() const override;

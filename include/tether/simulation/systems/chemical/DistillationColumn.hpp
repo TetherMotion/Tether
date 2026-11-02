@@ -4,22 +4,22 @@
 namespace Simulation {
 
 /**
- * @brief Simplified two-product distillation column benchmark.
- *
- * Models interacting composition dynamics for a reduced-order distillation
- * column driven by reflux and boilup. The current implementation preserves the
- * strong MIMO interaction between top and bottom quality variables without
- * resolving every tray explicitly.
- *
- * Control is difficult because the manipulated variables affect both outputs in
- * competing directions and with different delays. High interaction and poor
- * input pairing make naive decentralized control fragile.
- *
- * The current implementation models a compact set of dominant composition states
- * and two manipulated flows. It does not model full tray-by-tray hydraulics,
- * pressure dynamics, composition measurement delay, condenser/reboiler utility
- * limits, or startup and flooding behavior.
- */
+     * @brief Simplified two-product distillation column benchmark.
+     *
+     * Models interacting composition dynamics for a reduced-order distillation
+     * column driven by reflux and boilup. The current implementation preserves the
+     * strong MIMO interaction between top and bottom quality variables without
+     * resolving every tray explicitly.
+     *
+     * Control is difficult because the manipulated variables affect both outputs in
+     * competing directions and with different delays. High interaction and poor
+     * input pairing make naive decentralized control fragile.
+     *
+     * The current implementation models a compact set of dominant composition states
+     * and two manipulated flows. It does not model full tray-by-tray hydraulics,
+     * pressure dynamics, composition measurement delay, condenser/reboiler utility
+     * limits, or startup and flooding behavior.
+     */
 class DistillationColumn : public ParametricSystem {
 public:
     DistillationColumn();
@@ -30,7 +30,19 @@ public:
     int stateDim() const override { return 4; } // simplified tray compositions
     int inputDim() const override { return 2; } // [L, V] (reflux, boilup)
     int outputDim() const override { return 2; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

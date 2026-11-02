@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Furuta-pendulum benchmark.
- *
- * Models a rotary arm driven in the horizontal plane with a pendulum free to
- * swing in the vertical plane. The current implementation preserves the main
- * inertial coupling between the actuated arm and passive pendulum.
- *
- * Control is difficult because the pendulum cannot be actuated directly and the
- * controller must coordinate arm motion to swing up and stabilize it.
- *
- * The current implementation models one rigid arm and one rigid pendulum. It
- * does not model motor current dynamics, bearing friction, arm flex, or encoder
- * quantization.
- */
+     * @brief Furuta-pendulum benchmark.
+     *
+     * Models a rotary arm driven in the horizontal plane with a pendulum free to
+     * swing in the vertical plane. The current implementation preserves the main
+     * inertial coupling between the actuated arm and passive pendulum.
+     *
+     * Control is difficult because the pendulum cannot be actuated directly and the
+     * controller must coordinate arm motion to swing up and stabilize it.
+     *
+     * The current implementation models one rigid arm and one rigid pendulum. It
+     * does not model motor current dynamics, bearing friction, arm flex, or encoder
+     * quantization.
+     */
 class FurutaPendulum : public ParametricSystem {
 public:
     FurutaPendulum();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 4; }
     int inputDim() const override { return 1; }
     int outputDim() const override { return 2; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

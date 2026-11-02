@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Flywheel energy-storage benchmark.
- *
- * Models flywheel rotor speed and electrical current for a motor-generator based
- * storage system. The current implementation keeps the dominant electromechanical
- * energy-storage path needed for charge-discharge regulation studies.
- *
- * Control is difficult because the plant must regulate speed over a wide energy
- * range while respecting electrical and mechanical stress limits.
- *
- * The current implementation models one rigid rotor and one drive circuit. It
- * does not model magnetic bearings, vacuum losses, thermal growth, containment
- * limits, or grid-side converter coordination.
- */
+     * @brief Flywheel energy-storage benchmark.
+     *
+     * Models flywheel rotor speed and electrical current for a motor-generator based
+     * storage system. The current implementation keeps the dominant electromechanical
+     * energy-storage path needed for charge-discharge regulation studies.
+     *
+     * Control is difficult because the plant must regulate speed over a wide energy
+     * range while respecting electrical and mechanical stress limits.
+     *
+     * The current implementation models one rigid rotor and one drive circuit. It
+     * does not model magnetic bearings, vacuum losses, thermal growth, containment
+     * limits, or grid-side converter coordination.
+     */
 class FlywheelEnergyStorage : public ParametricSystem {
 public:
     FlywheelEnergyStorage();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 2; } // [omega, i]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

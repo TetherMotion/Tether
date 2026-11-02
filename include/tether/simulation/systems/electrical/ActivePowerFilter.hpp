@@ -4,21 +4,21 @@
 namespace Simulation {
 
 /**
- * @brief Active power-filter benchmark.
- *
- * Models an active filter that injects compensating current while regulating a
- * DC-link state. The current implementation keeps one dominant filter-current
- * channel and DC-link energy state so harmonic-compensation control can be
- * studied with a reduced-order plant.
- *
- * Control is difficult because the target signals are periodic, high bandwidth,
- * and often contaminated by switching ripple and measurement noise. The plant
- * must reject harmonics without destabilizing the DC link.
- *
- * The current implementation models one equivalent compensation channel and a
- * lumped DC bus. It does not model individual phases, PWM switching details,
- * grid unbalance, current sensor saturation, or semiconductor constraints.
- */
+     * @brief Active power-filter benchmark.
+     *
+     * Models an active filter that injects compensating current while regulating a
+     * DC-link state. The current implementation keeps one dominant filter-current
+     * channel and DC-link energy state so harmonic-compensation control can be
+     * studied with a reduced-order plant.
+     *
+     * Control is difficult because the target signals are periodic, high bandwidth,
+     * and often contaminated by switching ripple and measurement noise. The plant
+     * must reject harmonics without destabilizing the DC link.
+     *
+     * The current implementation models one equivalent compensation channel and a
+     * lumped DC bus. It does not model individual phases, PWM switching details,
+     * grid unbalance, current sensor saturation, or semiconductor constraints.
+     */
 class ActivePowerFilter : public ParametricSystem {
 public:
     ActivePowerFilter();
@@ -29,7 +29,19 @@ public:
     int stateDim() const override { return 2; } // [i_f, v_dc]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

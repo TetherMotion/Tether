@@ -1,15 +1,15 @@
 #pragma once
 
 /**
- * @file LinearMoveSimulator.hpp
- * @brief S-curve-based linear move simulator for the emulated printer.
- *
- * Replaces the previous "jump to target" behavior in the Klipper emulation
- * with a full 7-phase S-curve velocity profile.  The toolhead is animated
- * from the current position to the requested target with jerk-limited
- * acceleration and deceleration, which is what Mainsail/Fluidd display
- * when connected to a real printer.
- */
+     * @file LinearMoveSimulator.hpp
+     * @brief S-curve-based linear move simulator for the emulated printer.
+     *
+     * Replaces the previous "jump to target" behavior in the Klipper emulation
+     * with a full 7-phase S-curve velocity profile.  The toolhead is animated
+     * from the current position to the requested target with jerk-limited
+     * acceleration and deceleration, which is what Mainsail/Fluidd display
+     * when connected to a real printer.
+     */
 
 #include "tether/motion_planner/SCurveProfile.hpp"
 
@@ -28,13 +28,13 @@ struct LinearMoveStepResult {
 };
 
 /**
- * @brief S-curve planner for a point-to-point 4D move.
- *
- * Builds a 1D S-curve along the straight-line path from start to target,
- * then interpolates the X/Y/Z/E components proportionally.  Start and end
- * velocity are zero (each move is treated as a standalone point-to-point
- * segment).
- */
+     * @brief S-curve planner for a point-to-point 4D move.
+     *
+     * Builds a 1D S-curve along the straight-line path from start to target,
+     * then interpolates the X/Y/Z/E components proportionally.  Start and end
+     * velocity are zero (each move is treated as a standalone point-to-point
+     * segment).
+     */
 class LinearMoveSimulator {
 public:
     /**

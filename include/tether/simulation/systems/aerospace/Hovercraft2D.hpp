@@ -4,21 +4,21 @@
 namespace Simulation {
 
 /**
- * @brief Planar hovercraft benchmark.
- *
- * Models a hovercraft in the horizontal plane with x and y translation, heading,
- * and their corresponding rates. The current implementation uses net thrust and
- * yaw torque as the two control inputs so the underactuated body-frame coupling
- * remains explicit.
- *
- * Control is difficult because the craft cannot command independent forces in
- * all planar directions. Heading must be changed before thrust aligns with the
- * desired path, and the low-friction environment makes drift and overshoot easy.
- *
- * The current implementation models planar rigid-body motion with minimal drag.
- * It does not model skirt dynamics, wave interaction, actuator saturation maps,
- * ground-effect airflow, or three-dimensional hovercraft motion.
- */
+     * @brief Planar hovercraft benchmark.
+     *
+     * Models a hovercraft in the horizontal plane with x and y translation, heading,
+     * and their corresponding rates. The current implementation uses net thrust and
+     * yaw torque as the two control inputs so the underactuated body-frame coupling
+     * remains explicit.
+     *
+     * Control is difficult because the craft cannot command independent forces in
+     * all planar directions. Heading must be changed before thrust aligns with the
+     * desired path, and the low-friction environment makes drift and overshoot easy.
+     *
+     * The current implementation models planar rigid-body motion with minimal drag.
+     * It does not model skirt dynamics, wave interaction, actuator saturation maps,
+     * ground-effect airflow, or three-dimensional hovercraft motion.
+     */
 class Hovercraft2D : public ParametricSystem {
 public:
     Hovercraft2D();
@@ -29,7 +29,19 @@ public:
     int stateDim() const override { return 6; } // [x, dx, y, dy, theta, dtheta]
     int inputDim() const override { return 2; } // [thrust, torque]
     int outputDim() const override { return 3; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

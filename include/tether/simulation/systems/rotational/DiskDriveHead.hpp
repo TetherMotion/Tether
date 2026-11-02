@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Disk-drive head-positioning benchmark.
- *
- * Models voice-coil positioning of a read/write head with one dominant flexible
- * structural mode. The current implementation keeps the rigid positioning motion
- * and one resonance state pair that limits servo bandwidth.
- *
- * Control is difficult because the plant is extremely fast yet resonance limited,
- * so tight settling time requires operating close to a flexible mode.
- *
- * The current implementation models one dominant resonance and one actuator
- * channel. It does not model full suspension mode families, track-following
- * disturbances, spindle eccentricity, or discrete-time sampling effects.
- */
+     * @brief Disk-drive head-positioning benchmark.
+     *
+     * Models voice-coil positioning of a read/write head with one dominant flexible
+     * structural mode. The current implementation keeps the rigid positioning motion
+     * and one resonance state pair that limits servo bandwidth.
+     *
+     * Control is difficult because the plant is extremely fast yet resonance limited,
+     * so tight settling time requires operating close to a flexible mode.
+     *
+     * The current implementation models one dominant resonance and one actuator
+     * channel. It does not model full suspension mode families, track-following
+     * disturbances, spindle eccentricity, or discrete-time sampling effects.
+     */
 class DiskDriveHead : public ParametricSystem {
 public:
     DiskDriveHead();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 4; }
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

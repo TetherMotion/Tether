@@ -4,22 +4,22 @@
 namespace Simulation {
 
 /**
- * @brief Fed-batch bioreactor benchmark.
- *
- * Models biomass, substrate, and reactor volume in a fed-batch fermentation
- * process with Monod-style growth and dilution from feed addition. The current
- * implementation uses feed rate as the single manipulated input so productivity,
- * substrate limitation, and dilution remain tightly coupled.
- *
- * Control is difficult because the process is slow, nonlinear, and strongly
- * state dependent. The same feed action that stimulates growth can also dilute
- * the reactor and alter future dynamic response.
- *
- * The current implementation models one dominant microbial population, one
- * limiting substrate, and simple volume growth. It does not model oxygen
- * transfer, temperature control, pH control, product inhibition, contamination,
- * or multi-phase broth rheology.
- */
+     * @brief Fed-batch bioreactor benchmark.
+     *
+     * Models biomass, substrate, and reactor volume in a fed-batch fermentation
+     * process with Monod-style growth and dilution from feed addition. The current
+     * implementation uses feed rate as the single manipulated input so productivity,
+     * substrate limitation, and dilution remain tightly coupled.
+     *
+     * Control is difficult because the process is slow, nonlinear, and strongly
+     * state dependent. The same feed action that stimulates growth can also dilute
+     * the reactor and alter future dynamic response.
+     *
+     * The current implementation models one dominant microbial population, one
+     * limiting substrate, and simple volume growth. It does not model oxygen
+     * transfer, temperature control, pH control, product inhibition, contamination,
+     * or multi-phase broth rheology.
+     */
 class Bioreactor : public ParametricSystem {
 public:
     Bioreactor();
@@ -30,7 +30,19 @@ public:
     int stateDim() const override { return 3; } // [X, S, V] (biomass, substrate, volume)
     int inputDim() const override { return 1; } // [F] (feed rate)
     int outputDim() const override { return 2; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

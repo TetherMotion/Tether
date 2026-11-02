@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Single-gimbal control-moment-gyroscope benchmark.
- *
- * Models a spinning rotor that generates body torque through gimbal motion. The
- * current implementation preserves the nonlinear gyroscopic coupling between
- * gimbal angle, stored momentum, and resulting attitude torque.
- *
- * Control is difficult because usable torque depends on state-dependent geometry,
- * and singular configurations sharply reduce controllability.
- *
- * The current implementation models one gimbal and one equivalent body axis. It
- * does not model multi-CMG steering laws, gimbal rate limits, bearing losses, or
- * full spacecraft attitude kinematics.
- */
+     * @brief Single-gimbal control-moment-gyroscope benchmark.
+     *
+     * Models a spinning rotor that generates body torque through gimbal motion. The
+     * current implementation preserves the nonlinear gyroscopic coupling between
+     * gimbal angle, stored momentum, and resulting attitude torque.
+     *
+     * Control is difficult because usable torque depends on state-dependent geometry,
+     * and singular configurations sharply reduce controllability.
+     *
+     * The current implementation models one gimbal and one equivalent body axis. It
+     * does not model multi-CMG steering laws, gimbal rate limits, bearing losses, or
+     * full spacecraft attitude kinematics.
+     */
 class ControlMomentGyroscope : public ParametricSystem {
 public:
     ControlMomentGyroscope();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 4; }
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

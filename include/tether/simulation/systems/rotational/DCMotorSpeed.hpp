@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief DC-motor speed-control benchmark.
- *
- * Models rotor speed and armature current for a voltage-driven DC motor. The
- * current implementation keeps the coupled electrical and mechanical energy
- * storage that dominates speed-loop design.
- *
- * Control is difficult because current evolves much faster than speed, so the
- * plant contains separated time scales and easily saturates under fast commands.
- *
- * The current implementation models one rotor inertia, viscous friction, and a
- * simple armature circuit. It does not model commutation ripple, backlash,
- * current limits, temperature dependence, or load-side elasticity.
- */
+     * @brief DC-motor speed-control benchmark.
+     *
+     * Models rotor speed and armature current for a voltage-driven DC motor. The
+     * current implementation keeps the coupled electrical and mechanical energy
+     * storage that dominates speed-loop design.
+     *
+     * Control is difficult because current evolves much faster than speed, so the
+     * plant contains separated time scales and easily saturates under fast commands.
+     *
+     * The current implementation models one rotor inertia, viscous friction, and a
+     * simple armature circuit. It does not model commutation ripple, backlash,
+     * current limits, temperature dependence, or load-side elasticity.
+     */
 class DCMotorSpeed : public ParametricSystem {
 public:
     DCMotorSpeed();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 2; } // [omega, i]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

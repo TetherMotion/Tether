@@ -4,23 +4,23 @@
 namespace Simulation {
 
 /**
- * @brief Pharmacokinetic and pharmacodynamic anesthesia benchmark.
- *
- * Models drug distribution through central and peripheral compartments together
- * with an effect-site state that drives a BIS-like depth-of-anesthesia output.
- * The current implementation treats infusion rate as the single control input
- * and captures the delayed conversion from delivered drug to observed effect.
- *
- * Control is difficult because the input-output delay is long and state
- * dependent. Drug can accumulate in unmeasured compartments, so aggressive
- * regulation based only on the current BIS error can overdose the patient or
- * produce very long recovery transients.
- *
- * The current implementation models three PK compartments, one PD effect site,
- * and a static Hill nonlinearity for the BIS output. It does not model blood
- * pressure interactions, multiple simultaneous drugs, airway events, surgical
- * stimulation, or patient-specific adaptation beyond parameter tuning.
- */
+     * @brief Pharmacokinetic and pharmacodynamic anesthesia benchmark.
+     *
+     * Models drug distribution through central and peripheral compartments together
+     * with an effect-site state that drives a BIS-like depth-of-anesthesia output.
+     * The current implementation treats infusion rate as the single control input
+     * and captures the delayed conversion from delivered drug to observed effect.
+     *
+     * Control is difficult because the input-output delay is long and state
+     * dependent. Drug can accumulate in unmeasured compartments, so aggressive
+     * regulation based only on the current BIS error can overdose the patient or
+     * produce very long recovery transients.
+     *
+     * The current implementation models three PK compartments, one PD effect site,
+     * and a static Hill nonlinearity for the BIS output. It does not model blood
+     * pressure interactions, multiple simultaneous drugs, airway events, surgical
+     * stimulation, or patient-specific adaptation beyond parameter tuning.
+     */
 class AnesthesiaControl : public ParametricSystem {
 public:
     AnesthesiaControl();
@@ -31,7 +31,19 @@ public:
     int stateDim() const override { return 4; } // [c1, c2, c3, ce] (compartments + effect site)
     int inputDim() const override { return 1; } // [infusion_rate]
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

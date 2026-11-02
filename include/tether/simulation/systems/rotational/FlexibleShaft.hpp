@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Two-inertia flexible-shaft benchmark.
- *
- * Models a motor inertia and load inertia connected by a compliant, damped
- * shaft. The current implementation keeps motor-side and load-side positions and
- * speeds so torsional windup and resonance remain explicit.
- *
- * Control is difficult because torque applied at the motor is not transmitted
- * rigidly to the load, so fast control action can excite torsional resonance.
- *
- * The current implementation models one dominant shaft mode and lumped viscous
- * losses. It does not model gear backlash, multiple flexible shafts, bearing
- * nonlinearities, or high-order structural torsion modes.
- */
+     * @brief Two-inertia flexible-shaft benchmark.
+     *
+     * Models a motor inertia and load inertia connected by a compliant, damped
+     * shaft. The current implementation keeps motor-side and load-side positions and
+     * speeds so torsional windup and resonance remain explicit.
+     *
+     * Control is difficult because torque applied at the motor is not transmitted
+     * rigidly to the load, so fast control action can excite torsional resonance.
+     *
+     * The current implementation models one dominant shaft mode and lumped viscous
+     * losses. It does not model gear backlash, multiple flexible shafts, bearing
+     * nonlinearities, or high-order structural torsion modes.
+     */
 class FlexibleShaft : public ParametricSystem {
 public:
     FlexibleShaft();
@@ -27,9 +27,23 @@ public:
     int stateDim() const override { return 4; } // [theta_m, omega_m, theta_l, omega_l]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
-    /**Evaluate the coupled motor-load dynamics through the compliant shaft. */
+    /**
+     * Evaluate the coupled motor-load dynamics through the compliant shaft.
+     *
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
-    /**Report load-side position, which is the most common measured signal in drive systems. */
+    /**
+     * Report load-side position, which is the most common measured signal in drive systems.
+     *
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     /**Start with aligned shafts and zero angular velocity. */
     StateVector defaultInitialState() const override;

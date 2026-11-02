@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Classic cart-pole benchmark.
- *
- * Models a translating cart and one inverted pendulum link driven by a single
- * horizontal force input. The current implementation keeps the dominant rigid-
- * body cart-pole geometry and open-loop instability.
- *
- * Control is difficult because the upright equilibrium is unstable and the same
- * cart force must both reposition the base and catch the falling pendulum.
- *
- * The current implementation models one rigid pendulum and one rigid cart. It
- * does not model wheel slip, actuator saturation, rail compliance, or frictional
- * contact effects.
- */
+     * @brief Classic cart-pole benchmark.
+     *
+     * Models a translating cart and one inverted pendulum link driven by a single
+     * horizontal force input. The current implementation keeps the dominant rigid-
+     * body cart-pole geometry and open-loop instability.
+     *
+     * Control is difficult because the upright equilibrium is unstable and the same
+     * cart force must both reposition the base and catch the falling pendulum.
+     *
+     * The current implementation models one rigid pendulum and one rigid cart. It
+     * does not model wheel slip, actuator saturation, rail compliance, or frictional
+     * contact effects.
+     */
 class InvertedPendulumCart : public ParametricSystem {
 public:
     InvertedPendulumCart();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 4; } // [x, dx, theta, dtheta]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 2; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

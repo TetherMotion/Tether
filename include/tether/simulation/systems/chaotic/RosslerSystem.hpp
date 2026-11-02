@@ -4,20 +4,20 @@
 namespace Simulation {
 
 /**
- * @brief Rössler-attractor control benchmark.
- *
- * Models the three-state Rössler chaotic oscillator with a single perturbation
- * input. The current implementation preserves the spiral attractor and nonlinear
- * reinjection mechanism that make long-horizon trajectory shaping difficult.
- *
- * Control is difficult because the plant combines smooth local motion with a
- * global nonlinear fold, so behavior that looks benign over short windows can
- * diverge qualitatively over longer horizons.
- *
- * The current implementation models the standard three-state Rössler system. It
- * does not model measurement noise, stochastic forcing, or any higher-order
- * physical realization beyond the benchmark ODE.
- */
+     * @brief Rössler-attractor control benchmark.
+     *
+     * Models the three-state Rössler chaotic oscillator with a single perturbation
+     * input. The current implementation preserves the spiral attractor and nonlinear
+     * reinjection mechanism that make long-horizon trajectory shaping difficult.
+     *
+     * Control is difficult because the plant combines smooth local motion with a
+     * global nonlinear fold, so behavior that looks benign over short windows can
+     * diverge qualitatively over longer horizons.
+     *
+     * The current implementation models the standard three-state Rössler system. It
+     * does not model measurement noise, stochastic forcing, or any higher-order
+     * physical realization beyond the benchmark ODE.
+     */
 class RosslerSystem : public ParametricSystem {
 public:
     RosslerSystem();
@@ -28,7 +28,19 @@ public:
     int stateDim() const override { return 3; }
     int inputDim() const override { return 1; }
     int outputDim() const override { return 3; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

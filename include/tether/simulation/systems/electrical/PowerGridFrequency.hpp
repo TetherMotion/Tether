@@ -4,20 +4,20 @@
 namespace Simulation {
 
 /**
- * @brief Single-area power-grid frequency benchmark.
- *
- * Models a generator-load area with frequency deviation, turbine power, and
- * valve/governor dynamics. The current implementation uses one equivalent area
- * so secondary regulation action can be studied without a full network model.
- *
- * Control is difficult because frequency deviation integrates system imbalance
- * and actuation is filtered by governor and turbine dynamics. Disturbances can
- * be persistent, so disturbance rejection and oscillatory behavior compete.
- *
- * The current implementation models one equivalent machine and one governor
- * chain. It does not model multiple areas, transmission constraints, renewable
- * intermittency, protection actions, or market-dispatch coordination.
- */
+     * @brief Single-area power-grid frequency benchmark.
+     *
+     * Models a generator-load area with frequency deviation, turbine power, and
+     * valve/governor dynamics. The current implementation uses one equivalent area
+     * so secondary regulation action can be studied without a full network model.
+     *
+     * Control is difficult because frequency deviation integrates system imbalance
+     * and actuation is filtered by governor and turbine dynamics. Disturbances can
+     * be persistent, so disturbance rejection and oscillatory behavior compete.
+     *
+     * The current implementation models one equivalent machine and one governor
+     * chain. It does not model multiple areas, transmission constraints, renewable
+     * intermittency, protection actions, or market-dispatch coordination.
+     */
 class PowerGridFrequency : public ParametricSystem {
 public:
     PowerGridFrequency();
@@ -28,7 +28,19 @@ public:
     int stateDim() const override { return 3; } // [delta_f, P_m, P_valve]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

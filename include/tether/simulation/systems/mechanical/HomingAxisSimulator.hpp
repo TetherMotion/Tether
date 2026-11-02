@@ -1,24 +1,24 @@
 #pragma once
 
 /**
- * @file HomingAxisSimulator.hpp
- * @brief Kinematic simulator for single-axis homing motion.
- *
- * Simulates the physical motion of a single printer axis during G28 homing.
- * The axis uses a jerk-limited S-curve velocity profile for each phase:
- * acceleration, cruise, and deceleration to the endstop. An optional
- * second-pass (bounce) moves back and re-approaches at a slower speed for
- * precision.
- *
- * This is a kinematic (velocity-profile) simulation, not a dynamical system
- * in the control-theory sense — it models position vs. time under a
- * 7-phase S-curve, which is how real stepper-driven axes behave during
- * controlled homing moves.
- *
- * Used by the Klipper G28 handler to produce realistic position updates
- * during homing so that Mainsail/Fluidd see the toolhead move to the
- * endstop position over time, just like a real printer.
- */
+     * @file HomingAxisSimulator.hpp
+     * @brief Kinematic simulator for single-axis homing motion.
+     *
+     * Simulates the physical motion of a single printer axis during G28 homing.
+     * The axis uses a jerk-limited S-curve velocity profile for each phase:
+     * acceleration, cruise, and deceleration to the endstop. An optional
+     * second-pass (bounce) moves back and re-approaches at a slower speed for
+     * precision.
+     *
+     * This is a kinematic (velocity-profile) simulation, not a dynamical system
+     * in the control-theory sense — it models position vs. time under a
+     * 7-phase S-curve, which is how real stepper-driven axes behave during
+     * controlled homing moves.
+     *
+     * Used by the Klipper G28 handler to produce realistic position updates
+     * during homing so that Mainsail/Fluidd see the toolhead move to the
+     * endstop position over time, just like a real printer.
+     */
 
 #include "tether/motion_planner/SCurveProfile.hpp"
 
@@ -55,21 +55,21 @@ struct HomingStepResult {
 };
 
 /**
- * @brief Kinematic simulator for single-axis homing.
- *
- * Models the S-curve velocity profile motion of a stepper-driven axis
- * during G28 homing. The simulation proceeds in phases:
- *
- * 1. **Seek**: S-curve from current position to the endstop, starting and
- *    ending at rest.
- * 2. **Bounce** (if `secondHomingSpeed > 0`): S-curve back by
- *    `bounceDistance`, then S-curve re-approach at `secondHomingSpeed`.
- * 3. **Settle**: Final position is `endstopPosition`.
- *
- * The simulator is stepped forward in time with `step(dt)`. Each step
- * returns the current position, velocity, and whether the endstop has
- * been triggered.
- */
+     * @brief Kinematic simulator for single-axis homing.
+     *
+     * Models the S-curve velocity profile motion of a stepper-driven axis
+     * during G28 homing. The simulation proceeds in phases:
+     *
+     * 1. **Seek**: S-curve from current position to the endstop, starting and
+     *    ending at rest.
+     * 2. **Bounce** (if `secondHomingSpeed > 0`): S-curve back by
+     *    `bounceDistance`, then S-curve re-approach at `secondHomingSpeed`.
+     * 3. **Settle**: Final position is `endstopPosition`.
+     *
+     * The simulator is stepped forward in time with `step(dt)`. Each step
+     * returns the current position, velocity, and whether the endstop has
+     * been triggered.
+     */
 class HomingAxisSimulator {
 public:
     /**
@@ -319,12 +319,12 @@ private:
 };
 
 /**
- * @brief Multi-axis homing coordinator.
- *
- * Homes axes sequentially (X, then Y, then Z) using HomingAxisSimulator
- * instances. This mirrors how Klipper homes axes one time by default
- * (unless multi-axis homing is configured).
- */
+     * @brief Multi-axis homing coordinator.
+     *
+     * Homes axes sequentially (X, then Y, then Z) using HomingAxisSimulator
+     * instances. This mirrors how Klipper homes axes one time by default
+     * (unless multi-axis homing is configured).
+     */
 class HomingCoordinator {
 public:
     /**

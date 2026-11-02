@@ -4,21 +4,21 @@
 namespace Simulation {
 
 /**
- * @brief Lorenz-attractor control benchmark.
- *
- * Models the classic three-state Lorenz attractor with one external control
- * input acting as a perturbation channel. The current implementation preserves
- * the convective-style nonlinear coupling and sensitive dependence on initial
- * conditions that define the benchmark.
- *
- * Control is difficult because nearby trajectories separate rapidly and the
- * plant naturally revisits unstable regions, so long-horizon behavior is very
- * sensitive to small errors.
- *
- * The current implementation models the standard three-state Lorenz equations.
- * It does not model sensor noise, actuator saturation, or any spatial fluid
- * dynamics beyond the reduced chaotic ODE benchmark.
- */
+     * @brief Lorenz-attractor control benchmark.
+     *
+     * Models the classic three-state Lorenz attractor with one external control
+     * input acting as a perturbation channel. The current implementation preserves
+     * the convective-style nonlinear coupling and sensitive dependence on initial
+     * conditions that define the benchmark.
+     *
+     * Control is difficult because nearby trajectories separate rapidly and the
+     * plant naturally revisits unstable regions, so long-horizon behavior is very
+     * sensitive to small errors.
+     *
+     * The current implementation models the standard three-state Lorenz equations.
+     * It does not model sensor noise, actuator saturation, or any spatial fluid
+     * dynamics beyond the reduced chaotic ODE benchmark.
+     */
 class LorenzSystem : public ParametricSystem {
 public:
     LorenzSystem();
@@ -29,7 +29,19 @@ public:
     int stateDim() const override { return 3; } // [x, y, z]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 3; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

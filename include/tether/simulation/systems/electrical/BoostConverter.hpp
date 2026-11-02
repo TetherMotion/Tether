@@ -4,20 +4,20 @@
 namespace Simulation {
 
 /**
- * @brief Averaged boost-converter benchmark.
- *
- * Models a step-up converter with inductor current and output voltage states.
- * The current implementation uses an averaged duty-cycle model that preserves
- * the characteristic inverse-response behavior of boost voltage regulation.
- *
- * Control is difficult because the output-voltage path is non-minimum phase.
- * An increase in duty cycle can initially move the output in the wrong
- * direction before the stored-energy benefit appears.
- *
- * The current implementation models the dominant LC dynamics and load coupling.
- * It does not model switching ripple, diode recovery, current-limit logic,
- * discrete PWM effects, or converter mode changes at very light load.
- */
+     * @brief Averaged boost-converter benchmark.
+     *
+     * Models a step-up converter with inductor current and output voltage states.
+     * The current implementation uses an averaged duty-cycle model that preserves
+     * the characteristic inverse-response behavior of boost voltage regulation.
+     *
+     * Control is difficult because the output-voltage path is non-minimum phase.
+     * An increase in duty cycle can initially move the output in the wrong
+     * direction before the stored-energy benefit appears.
+     *
+     * The current implementation models the dominant LC dynamics and load coupling.
+     * It does not model switching ripple, diode recovery, current-limit logic,
+     * discrete PWM effects, or converter mode changes at very light load.
+     */
 class BoostConverter : public ParametricSystem {
 public:
     BoostConverter();
@@ -28,7 +28,19 @@ public:
     int stateDim() const override { return 2; }
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     StateVector defaultInput() const override;

@@ -4,20 +4,20 @@
 namespace Simulation {
 
 /**
- * @brief Precision vibration-isolation platform benchmark.
- *
- * Models a platform with translational and rotational rigid-body motion supported
- * by multiple actuators. The current implementation preserves the main geometric
- * coupling between translation and rotation in a reduced 2D isolation stage.
- *
- * Control is difficult because disturbance rejection in one direction can inject
- * moment into another mode, and high isolation performance operates near lightly
- * damped resonance.
- *
- * The current implementation models one reduced planar platform with three input
- * channels. It does not model full six-DOF structural compliance, sensor fusion,
- * floor anisotropy, or high-frequency flexible modes of the stage.
- */
+     * @brief Precision vibration-isolation platform benchmark.
+     *
+     * Models a platform with translational and rotational rigid-body motion supported
+     * by multiple actuators. The current implementation preserves the main geometric
+     * coupling between translation and rotation in a reduced 2D isolation stage.
+     *
+     * Control is difficult because disturbance rejection in one direction can inject
+     * moment into another mode, and high isolation performance operates near lightly
+     * damped resonance.
+     *
+     * The current implementation models one reduced planar platform with three input
+     * channels. It does not model full six-DOF structural compliance, sensor fusion,
+     * floor anisotropy, or high-frequency flexible modes of the stage.
+     */
 class VibrationIsolationPlatform : public ParametricSystem {
 public:
     VibrationIsolationPlatform();
@@ -28,7 +28,19 @@ public:
     int stateDim() const override { return 6; } // [x, dx, y, dy, theta, dtheta]
     int inputDim() const override { return 3; }
     int outputDim() const override { return 3; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

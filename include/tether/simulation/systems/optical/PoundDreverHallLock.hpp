@@ -4,22 +4,22 @@
 namespace Simulation {
 
 /**
- * @brief Reduced-order optical cavity frequency-locking benchmark.
- *
- * Models a Pound-Drever-Hall style frequency-locking loop using cavity detuning,
- * piezo actuator dynamics, thermal drift, acoustic disturbance, and the sharp
- * nonlinear error signal generated near cavity resonance.
- *
- * Control is difficult because the useful linear region around resonance is very
- * small, while environmental disturbances and laser noise push the system across
- * steep gain variation. High bandwidth helps disturbance rejection but can also
- * amplify sensor noise and destabilize the piezo-mechanical path.
- *
- * The current implementation models one dominant cavity mode, one piezo axis,
- * and lumped acoustic and thermal disturbances. It does not model modulation
- * sidebands explicitly, photodetector shot noise, cavity higher-order modes, or
- * the full RF demodulation chain used in laboratory PDH hardware.
- */
+     * @brief Reduced-order optical cavity frequency-locking benchmark.
+     *
+     * Models a Pound-Drever-Hall style frequency-locking loop using cavity detuning,
+     * piezo actuator dynamics, thermal drift, acoustic disturbance, and the sharp
+     * nonlinear error signal generated near cavity resonance.
+     *
+     * Control is difficult because the useful linear region around resonance is very
+     * small, while environmental disturbances and laser noise push the system across
+     * steep gain variation. High bandwidth helps disturbance rejection but can also
+     * amplify sensor noise and destabilize the piezo-mechanical path.
+     *
+     * The current implementation models one dominant cavity mode, one piezo axis,
+     * and lumped acoustic and thermal disturbances. It does not model modulation
+     * sidebands explicitly, photodetector shot noise, cavity higher-order modes, or
+     * the full RF demodulation chain used in laboratory PDH hardware.
+     */
 class PoundDreverHallLock : public ParametricSystem {
 public:
     PoundDreverHallLock();
@@ -30,7 +30,19 @@ public:
     int stateDim() const override { return 5; }
     int inputDim() const override { return 1; }
     int outputDim() const override { return 2; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

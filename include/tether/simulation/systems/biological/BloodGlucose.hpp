@@ -4,23 +4,23 @@
 namespace Simulation {
 
 /**
- * @brief Compact blood-glucose regulation benchmark.
- *
- * Models glucose concentration, remote insulin action, and plasma insulin using
- * a Bergman-style minimal patient model. The current implementation represents
- * insulin infusion as the single manipulated input and blood glucose as the
- * regulated output for closed-loop artificial-pancreas style experiments.
- *
- * Control is difficult because the plant is slow, delayed, and patient
- * dependent. Insulin acts long after delivery, so a controller that only reacts
- * to the current glucose error can easily over-correct and create delayed
- * hypoglycemia.
- *
- * The current implementation models basal insulin dynamics, delayed insulin
- * action, and simple endogenous pancreatic response. It does not model meals,
- * exercise, sensor calibration drift, subcutaneous absorption compartments, or
- * patient-to-patient variability beyond manual parameter changes.
- */
+     * @brief Compact blood-glucose regulation benchmark.
+     *
+     * Models glucose concentration, remote insulin action, and plasma insulin using
+     * a Bergman-style minimal patient model. The current implementation represents
+     * insulin infusion as the single manipulated input and blood glucose as the
+     * regulated output for closed-loop artificial-pancreas style experiments.
+     *
+     * Control is difficult because the plant is slow, delayed, and patient
+     * dependent. Insulin acts long after delivery, so a controller that only reacts
+     * to the current glucose error can easily over-correct and create delayed
+     * hypoglycemia.
+     *
+     * The current implementation models basal insulin dynamics, delayed insulin
+     * action, and simple endogenous pancreatic response. It does not model meals,
+     * exercise, sensor calibration drift, subcutaneous absorption compartments, or
+     * patient-to-patient variability beyond manual parameter changes.
+     */
 class BloodGlucose : public ParametricSystem {
 public:
     BloodGlucose();
@@ -31,7 +31,19 @@ public:
     int stateDim() const override { return 3; } // [G, X, I] (glucose, remote insulin, plasma insulin)
     int inputDim() const override { return 1; } // [insulin_rate]
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

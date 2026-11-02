@@ -4,20 +4,20 @@
 namespace Simulation {
 
 /**
- * @brief Quadruple-tank MIMO benchmark.
- *
- * Models the Johansson four-tank process with four interacting water levels and
- * two pump inputs. The current implementation keeps the configurable routing
- * that yields either minimum-phase or non-minimum-phase multivariable behavior.
- *
- * Control is difficult because the input-output pairing can change character
- * with operating configuration, and upper-tank routing introduces slow inverse
- * response and strong interaction.
- *
- * The current implementation models four lumped tank levels and two pumps. It
- * does not model pump saturation curves, pipe-network delay, overflow, or more
- * detailed hydraulic losses beyond the benchmark formulation.
- */
+     * @brief Quadruple-tank MIMO benchmark.
+     *
+     * Models the Johansson four-tank process with four interacting water levels and
+     * two pump inputs. The current implementation keeps the configurable routing
+     * that yields either minimum-phase or non-minimum-phase multivariable behavior.
+     *
+     * Control is difficult because the input-output pairing can change character
+     * with operating configuration, and upper-tank routing introduces slow inverse
+     * response and strong interaction.
+     *
+     * The current implementation models four lumped tank levels and two pumps. It
+     * does not model pump saturation curves, pipe-network delay, overflow, or more
+     * detailed hydraulic losses beyond the benchmark formulation.
+     */
 class FourTankSystem : public ParametricSystem {
 public:
     FourTankSystem();
@@ -28,7 +28,19 @@ public:
     int stateDim() const override { return 4; }
     int inputDim() const override { return 2; }
     int outputDim() const override { return 2; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

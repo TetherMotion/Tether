@@ -1,9 +1,9 @@
 #pragma once
 
 /**
- * @file AerospaceSystems.hpp
- * @brief Aggregated include for aerospace and underactuated vehicle plants.
- */
+     * @file AerospaceSystems.hpp
+     * @brief Aggregated include for aerospace and underactuated vehicle plants.
+     */
 
 #include "aerospace/PlanarQuadrotor.hpp"
 #include "aerospace/RocketLanding2D.hpp"
