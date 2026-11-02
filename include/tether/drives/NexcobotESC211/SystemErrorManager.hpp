@@ -63,7 +63,10 @@ public:
     /** Stop the background polling thread. */
     void stop();
 
-    /** Whether the background thread is running. */
+    /**
+     * @brief Whether the background thread is running.
+     * @return true between start() and stop().
+     */
     bool isRunning() const;
 
     /**
@@ -72,6 +75,8 @@ public:
      * Returns true if the system state (0xF101) transitioned to the
      * configured trigger state (default 3) since the last call.
      * The flag is atomically cleared on read.
+     *
+     * @return true once per detected transition; false otherwise.
      */
     bool consumeRestartRequest();
 
@@ -81,22 +86,41 @@ public:
      * When the background poll sees 0xF101 transition to this value
      * (and it was not this value on the previous poll), the restart
      * flag is set.  Use 0xFFFFFFFF to disable (default).
+     *
+     * @param state  0xF101 value that requests a restart, or 0xFFFFFFFF
+     *               to disable triggering.
      */
     void setRestartTriggerState(uint32_t state);
 
-    /** True if the last check found a non-zero current error code (0xF102). */
+    /**
+     * @brief True if the last check found a non-zero current error code (0xF102).
+     * @return true while the polled error code is non-zero.
+     */
     bool hasError() const;
 
-    /** Last system error code read from 0xF102:0x00 (0 if none). */
+    /**
+     * @brief Last system error code read from 0xF102:0x00 (0 if none).
+     * @return most recently polled error code.
+     */
     int32_t lastErrorCode() const;
 
-    /** Last system current state read from 0xF101:0x00. */
+    /**
+     * @brief Last system current state read from 0xF101:0x00.
+     * @return most recently polled system state value.
+     */
     uint32_t lastSystemState() const;
 
-    /** Last system error message read from 0xF103:0x00 (empty if none). */
+    /**
+     * @brief Last system error message read from 0xF103:0x00 (empty if none).
+     * @return most recently polled error string ("" when none/never read).
+     */
     std::string lastErrorMessage() const;
 
-    /** Human-readable result string. */
+    /**
+     * @brief Human-readable result string.
+     * @param result  Result code from a manager call.
+     * @return static description string.
+     */
     static const char* resultToString(Result result);
 
 private:

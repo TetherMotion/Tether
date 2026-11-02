@@ -6,19 +6,19 @@
  * A target refreshed at a low cadence (every Nth tick, or on any producer
  * event) is emitted every tick through a selectable IConditionLaw:
  *
- *   - @ref ZeroOrderHold   — snap to the newest target (the classic
+ *   - @ref tether::control::ZeroOrderHold   — snap to the newest target (the classic
  *                            sample&hold)
- *   - @ref FirstOrderLag   — held += α·(target − held); α=1 degenerates
+ *   - @ref tether::control::FirstOrderLag   — held += α·(target − held); α=1 degenerates
  *                            to ZOH
- *   - @ref LinearRampHold  — linear move from the last output to the
+ *   - @ref tether::control::LinearRampHold  — linear move from the last output to the
  *                            target over a fixed tick count (a simple
  *                            trajectory generator)
- *   - @ref SlewRateHold    — move ≤ maxDelta per step toward the target
- *   - user-defined         — subclass @ref IConditionLaw
+ *   - @ref tether::control::SlewRateHold    — move ≤ maxDelta per step toward the target
+ *   - user-defined         — subclass @ref tether::control::IConditionLaw
  *
  * Per-channel behavior is per-Value: use one conditioner per member (e.g.
  * positions smoothed, gains snapped) or a custom Value type with a
- * @ref ConditionerOps specialization.
+ * @ref tether::control::ConditionerOps specialization.
  *
  * ## Usage
  *
@@ -360,11 +360,20 @@ class SetpointConditioner {
     law_->reset(initial);
   }
 
-  /**Newest refreshed target. */
+  /**
+   * @brief Newest refreshed target.
+   * @return reference to the most recently set target value.
+   */
   const Value& target() const { return target_; }
-  /**The installed condition law (read-only). */
+  /**
+   * @brief The installed condition law (read-only).
+   * @return reference to the law installed at construction.
+   */
   const IConditionLaw<Value>& law() const { return *law_; }
-  /**Refresh gate divisor (1 = every tick due). */
+  /**
+   * @brief Refresh gate divisor (1 = every tick due).
+   * @return tick divisor between target refreshes.
+   */
   uint64_t refreshDivisor() const { return divisor_; }
 
  private:

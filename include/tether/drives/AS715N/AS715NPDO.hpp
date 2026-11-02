@@ -331,6 +331,10 @@ static_assert(TxPDO_1B04.field_count == TxPDO_1B04_Fields.size(), "TxPDO1B04 fie
  * the value from the raw buffer and appending a human-readable line with
  * the field name and value.  If the index is unknown, the returned string
  * will still include the numeric PDO index.
+ *
+ * @param drive  Drive whose current PDO index selects the descriptor.
+ * @param tx     true to dump the TxPDO buffer, false for RxPDO.
+ * @return multi-line human-readable dump (one line per field).
  */
 inline std::string dumpUsingDescriptors(CiA402Drive& drive, bool tx)
 {
@@ -414,6 +418,9 @@ inline const std::vector<const PDO*> kTxPDOs = {
  * Internally forwards to the generic helper in `EtherCAT::Utils`.  Keeping
  * a small drive-specific function ensures existing code continues to compile
  * unmodified.
+ *
+ * @param idx  PDO index (e.g. 0x1705).
+ * @return pointer to the descriptor in kAllPDOs, or nullptr when unknown.
  */
 inline constexpr const PDO* findPDOByIndex(uint16_t idx) noexcept
 {
@@ -579,6 +586,12 @@ static_assert(sizeof(AS715N_TxPDO_1B02) == TxPDO_1B02.size,
  * The default SM2/SM3 addresses (0x1800 / 0x1C00) and control bytes
  * (0x64 / 0x20) come from the AS715N SII.  They can be overridden when the
  * drive is configured with non-standard sync-manager addresses.
+ *
+ * @param rx        RxPDO descriptor to map into SM2.
+ * @param tx        TxPDO descriptor to map into SM3.
+ * @param sm2_addr  SM2 physical start address (default 0x1800).
+ * @param sm3_addr  SM3 physical start address (default 0x1C00).
+ * @return populated MultiPDOAssignment.
  */
 inline ::EtherCAT::Slave::MultiPDOAssignment makePDOAssignment(
     const PDO& rx,
@@ -606,6 +619,7 @@ inline ::EtherCAT::Slave::MultiPDOAssignment makePDOAssignment(
 /**
  * @brief Default motion PDO assignment used by the native examples:
  *        RxPDO 0x1705 (19 bytes) and TxPDO 0x1B04 (29 bytes).
+ * @return MultiPDOAssignment equivalent to makePDOAssignment(0x1705, 0x1B04).
  */
 inline ::EtherCAT::Slave::MultiPDOAssignment makeDefaultPDOAssignment()
 {
@@ -614,6 +628,7 @@ inline ::EtherCAT::Slave::MultiPDOAssignment makeDefaultPDOAssignment()
 
 /**
  * @brief Byte offset of the ModesOfOperation field in the given RxPDO.
+ * @param rxpdo_index  RxPDO index (0x1702..0x1705).
  * @return Byte offset, or -1 if the RxPDO has no mode field.
  */
 constexpr int opmodeOffsetFor(uint16_t rxpdo_index) {
@@ -628,6 +643,7 @@ constexpr int opmodeOffsetFor(uint16_t rxpdo_index) {
 
 /**
  * @brief Byte offset of the Statusword field in the given TxPDO.
+ * @param txpdo_index  TxPDO index (0x1B01..0x1B04).
  * @return Byte offset, or -1 if the TxPDO has no statusword.
  */
 constexpr int statuswordOffsetFor(uint16_t txpdo_index) {
