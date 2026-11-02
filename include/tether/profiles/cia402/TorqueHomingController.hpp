@@ -72,7 +72,7 @@
  * ctrl.setCallbacks(cbs);
  * ctrl.start();
  *
- * while (ctrl.update()) { /* cyclic *\/ }
+ * while (ctrl.update()) { // cyclic }
  * ```
  */
 
@@ -292,16 +292,23 @@ public:
     /**
      * @brief Set the drive backend (used for callback fallbacks and mode
      *        restore). Optional if all required callbacks are populated.
+     *
+     * @param backend  Shared drive backend (borrowed for the sequence).
      */
     void setBackend(DriveBackendPtr backend) { m_backend = backend; }
 
-    /**@brief Set homing configuration. Must be called before start(). */
+    /**
+     * @brief Set homing configuration. Must be called before start().
+     * @param config  Passes, torque limits, timeouts, deviation cap.
+     */
     void setConfig(const TorqueHomingConfig& config) { m_config = config; }
     const TorqueHomingConfig& getConfig() const { return m_config; }
 
     /**
      * @brief Set callbacks. Required: getActualPosition, setTargetTorque,
      *        setOperatingMode, stopMotion (or a backend providing them).
+     *
+     * @param callbacks  Callback table copied into the controller.
      */
     void setCallbacks(const TorqueHomingCallbacks& callbacks) { m_callbacks = callbacks; }
 
@@ -346,7 +353,10 @@ public:
     TorqueHomingError getLastError() const { return m_lastError; }
     const std::string& getLastErrorMessage() const { return m_lastErrorMsg; }
     int32_t getHomePosition() const { return m_homePosition; }
-    /**0 = coarse pass, 1..N = fine pass index (1-based). */
+    /**
+     * @brief 0 = coarse pass, 1..N = fine pass index (1-based).
+     * @return current pass index (-1 before start).
+     */
     int getCurrentPass() const { return m_currentPass; }
     bool isComplete() const { return m_state == TorqueHomingState::Attained; }
     bool hasError() const { return m_state == TorqueHomingState::Error; }

@@ -21,7 +21,12 @@
 namespace Tether {
 namespace TUI {
 
-/**Display width of a chip list as drawn by drawChips(). */
+/**
+ * @brief Display width of a chip list as drawn by drawChips().
+ * @param cells     Cells to measure.
+ * @param brackets  Include the surrounding [ ] in the width.
+ * @return display columns the list would occupy.
+ */
 inline int chipsWidth(std::span<const UI::DisplayCell> cells,
                       bool brackets = true) {
     int w = brackets ? 2 : 0;
@@ -39,6 +44,11 @@ inline int chipsWidth(std::span<const UI::DisplayCell> cells,
  * `chipTonePair`.  Cells are separated by single spaces; pass
  * `brackets=false` to draw just the space-separated cell texts.
  *
+ * @param w       Curses window.
+ * @param y       Row.
+ * @param col     Starting column.
+ * @param cells   Cells to draw.
+ * @param brackets  Wrap the list in [ ].
  * @return the column after the last character drawn (for chaining
  *         more content on the same line).
  */
@@ -63,7 +73,14 @@ inline int wdrawChips(WINDOW* w, int y, int col,
     return col;
 }
 
-/**stdscr convenience — same as wdrawChips(stdscr, ...). */
+/**
+ * @brief stdscr convenience — same as wdrawChips(stdscr, ...).
+ * @param y       Row.
+ * @param col     Starting column.
+ * @param cells   Cells to draw.
+ * @param brackets  Wrap the list in [ ].
+ * @return column after the last character drawn.
+ */
 inline int drawChips(int y, int col,
                      std::span<const UI::DisplayCell> cells,
                      bool brackets = true) {
