@@ -48,11 +48,15 @@ enum class ResetLevel : uint8_t {
 
 /**
  * @brief Get human-readable name for reset level
+ * @param level  ResetLevel enumerator.
+ * @return static name string.
  */
 const char* getResetLevelName(ResetLevel level);
 
 /**
  * @brief Get detailed description for reset level
+ * @param level  ResetLevel enumerator.
+ * @return static description of what the reset does.
  */
 const char* getResetLevelDescription(ResetLevel level);
 
@@ -91,6 +95,8 @@ namespace ALControl {
 
 /**
  * @brief Get human-readable name for AL Status Code
+ * @param code  AL status/error code value.
+ * @return static code name, or "Unknown" for unlisted values.
  */
 const char* getALStatusCodeName(uint16_t code);
 
@@ -187,10 +193,16 @@ struct ResetResult {
     uint32_t duration_us; /**< Time taken for reset in microseconds */
     std::string error_message; /**< Human-readable error if failed */
     
-    /**Check if reset fully completed at requested level */
+    /**
+     * @brief Check if reset fully completed at requested level.
+     * @return true when the achieved level equals the requested one.
+     */
     bool isComplete() const { return success && (achieved_level == requested_level); }
     
-    /**Check if partial reset achieved (less than requested but non-zero) */
+    /**
+     * @brief Check if partial reset achieved (less than requested but non-zero).
+     * @return true on a successful-but-shallower-than-requested reset.
+     */
     bool isPartial() const { return success && (achieved_level != requested_level); }
 };
 

@@ -89,17 +89,27 @@ public:
 
     /**
      * Read the current brake status from 0x2004:7.
+     * @param sdo         CoE manager for the SDO read.
+     * @param timeout_ms  SDO timeout (0 = default).
      * @return the BrakeStatusValue on success, or std::nullopt on SDO failure.
      */
     static std::optional<BrakeStatusValue> readBrakeStatus(
         EtherCAT::CoE::CoEManager& sdo,
         uint32_t timeout_ms = 0);
 
-    /**@return true when the brake reports Disengaged (0x2004:7 == 2). */
+    /**
+     * @param sdo         CoE manager for the SDO read.
+     * @param timeout_ms  SDO timeout (0 = default).
+     * @return true when the brake reports Disengaged (0x2004:7 == 2).
+     */
     static bool isDisengaged(EtherCAT::CoE::CoEManager& sdo,
                              uint32_t timeout_ms = 0);
 
-    /**@return true when the brake reports Engaged (0x2004:7 == 1). */
+    /**
+     * @param sdo         CoE manager for the SDO read.
+     * @param timeout_ms  SDO timeout (0 = default).
+     * @return true when the brake reports Engaged (0x2004:7 == 1).
+     */
     static bool isEngaged(EtherCAT::CoE::CoEManager& sdo,
                           uint32_t timeout_ms = 0);
 
@@ -107,6 +117,9 @@ public:
      * Configure the automatic release strategy (0x2004:4).
      * Use this to switch from manual output voltage (0) to Pin brake (2) or
      * Clutch-style brake (1) control before disengaging.
+     * @param sdo          CoE manager for the SDO write.
+     * @param strategy     Release strategy value for 0x2004:4.
+     * @param timeout_ms   SDO timeout (0 = default).
      * @return true on successful SDO write.
      */
     static bool setReleaseStrategy(
@@ -150,11 +163,20 @@ public:
      * Read every kConfigEntries object into a Config snapshot.
      * Transfer widths come from the register definitions — firmware that
      * declares the U16 subs rejects oversized reads.
+     *
+     * @param sdo         CoE manager for the SDO reads.
+     * @param timeout_ms  Per-read SDO timeout (0 = default).
+     * @return Config snapshot; failed reads keep default values.
      */
     static Config readConfig(EtherCAT::CoE::CoEManager& sdo,
                              uint32_t timeout_ms = 0);
 
-    /**Log the full 0x2004 configuration, one line per object. */
+    /**
+     * @brief Log the full 0x2004 configuration, one line per object.
+     * @param sdo         CoE manager for the SDO reads.
+     * @param tag         Logger tag prefix.
+     * @param timeout_ms  Per-read SDO timeout (0 = default).
+     */
     static void dumpConfig(EtherCAT::CoE::CoEManager& sdo,
                            const char* tag, uint32_t timeout_ms = 0);
 
@@ -162,8 +184,11 @@ public:
      * Cross-check the authoritative brake status (0x2004:7) against the
      * statusword brake bit (SOMANET TxPDO statusword bit 15, 1=disengaged)
      * and log one combined diagnostic line.
+     * @param sdo                    CoE manager for the SDO read.
      * @param statusword_disengaged  bit-15 decode from the cyclic
      *        statusword, or std::nullopt when no PDO sample is available.
+     * @param tag                    Logger tag prefix.
+     * @param timeout_ms             SDO timeout (0 = default).
      * @return true when 0x2004:7 reports Disengaged.
      */
     static bool verifyDisengaged(

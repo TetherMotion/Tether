@@ -18,8 +18,7 @@ namespace Utils {
 /**
  * @brief Read the synchronization mode for a given SyncManager (SM2/SM3).
  *
- * @param sdo        Reference to an SDO manager (usual master.sdoManager()).
- * @param slave_idx  EtherCAT slave index (0-based)
+ * @param coe        Reference to a CoE manager (usually master.coeManager()).
  * @param sm_index   Sync manager index (2 for SM2 / 3 for SM3)
  * @param out_mode   Output variable filled with the raw mode value.
  * @param timeout_ms SDO timeout, defaults to 2000 ms.
@@ -34,6 +33,13 @@ namespace Utils {
  *
  * This simply forwards to `SDOManager::readSync` using the index/subindex
  * stored in @p entry.  The caller must supply a buffer of appropriate size.
+ *
+ * @param coe         CoE manager used for the SDO read.
+ * @param entry       Object-dictionary entry (provides index/subindex).
+ * @param buffer      Destination buffer, at least `len` bytes.
+ * @param len         Bytes to read.
+ * @param timeout_ms  SDO timeout in milliseconds.
+ * @return true on a successful read.
  */
 inline bool readSyncEntry(CoE::CoEManager& coe,
                           const ::EtherCAT::ObjectDictionary::ObjectDictionaryEntry& entry,
@@ -107,8 +113,7 @@ inline void printSyncEntry(CoE::CoEManager& coe,
 /**
  * @brief Read the synchronization mode for a given SyncManager (SM2/SM3).
  *
- * @param sdo        Reference to an SDO manager (usual master.sdoManager()).
- * @param slave_idx  EtherCAT slave index (0-based)
+ * @param coe        Reference to a CoE manager (usually master.coeManager()).
  * @param sm_index   Sync manager index (2 for SM2 / 3 for SM3)
  * @param out_mode   Output variable filled with the raw mode value.
  * @param timeout_ms SDO timeout, defaults to 2000 ms.

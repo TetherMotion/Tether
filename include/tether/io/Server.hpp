@@ -66,22 +66,42 @@ public:
            ServerConfig config);
     ~Server();
 
-    /**Start the accept loop. Returns false on failure. */
+    /**
+     * @brief Start the accept loop. Returns false on failure.
+     * @return true when the transport listener bound and the accept
+     *         thread started.
+     */
     bool start();
 
     /**Shut down all sessions and the accept loop. */
     void stop();
 
-    /**Number of active sessions. */
+    /**
+     * @brief Number of active sessions.
+     * @return count of currently connected client sessions.
+     */
     size_t activeSessionCount() const;
 
-    /**Returns true if the server is accepting connections. */
+    /**
+     * @brief Returns true if the server is accepting connections.
+     * @return true between start() and stop().
+     */
     bool isRunning() const { return running_.load(std::memory_order_relaxed); }
 
-    /**Access the server's datalogging recorder (may be null). */
+    /**
+     * @brief Access the server's datalogging recorder (may be null).
+     * @return pointer to the embedded recorder; never null here but
+     *         recording itself may be disabled by config.
+     */
     DatalogRecorder* datalogRecorder() { return &datalogRecorder_; }
 
-    /**Publish a log record to all matching client subscriptions. */
+    /**
+     * @brief Publish a log record to all matching client subscriptions.
+     * @param severity   Record severity.
+     * @param component  Component tag (e.g. "master", "sii").
+     * @param message    Log message text.
+     * @param location   Optional source location string.
+     */
     void publishLog(LogSeverity severity, std::string_view component,
                     std::string_view message, std::string_view location = {});
 
@@ -94,6 +114,12 @@ public:
      * Session::callPeer).  Returns false when no connected peer hosts
      * that function or the call could not be queued.  The callback runs
      * on the session worker thread.
+     *
+     * @param functionName  Registered function name.
+     * @param arguments     Encoded argument list.
+     * @param deadlineUs    Absolute deadline for the response (µs).
+     * @param callback      Invoked with the invoke result.
+     * @return true when the call was queued to a hosting peer.
      */
     bool callPeerFunction(std::string_view functionName,
                           const std::vector<FunctionArgument>& arguments,
@@ -103,6 +129,8 @@ public:
     /**
      * (name, id) of every function currently registered by connected
      * clients, across all sessions.
+     *
+     * @return snapshot of registered function names and ids.
      */
     std::vector<std::pair<std::string, uint64_t>> peerFunctions() const;
 

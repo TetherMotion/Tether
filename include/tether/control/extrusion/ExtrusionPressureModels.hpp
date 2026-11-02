@@ -61,7 +61,10 @@ enum class ExtrusionCompensationModel {
 /**@brief Filament cross-section parameters shared by all models. */
 struct FilamentGeometry {
     double filamentDiameterMm = 1.75; /**< Filament diameter [mm] */
-    /**@brief Filament cross-sectional area [mm²] = π·d²/4. */
+    /**
+     * @brief Filament cross-sectional area [mm²] = π·d²/4.
+     * @return cross-sectional area from filamentDiameterMm.
+     */
     double areaMm2() const {
         return M_PI * filamentDiameterMm * filamentDiameterMm / 4.0;
     }
@@ -117,6 +120,8 @@ public:
     /**
      * @brief Smooth a velocity series with a centered moving average over
      * `smoothTime`, using `sampleIntervalSec` as the per-sample spacing.
+     * @param velMmPerS         Input velocity samples in mm/s.
+     * @param sampleIntervalSec Time between samples in seconds.
      * @returns Smoothed velocity series (same length as input).
      */
     std::vector<double> smoothVelocity(
@@ -201,6 +206,10 @@ public:
     /**
      * @brief Compute the position offset for a single (already-smoothed)
      * extruder velocity and melt-temperature estimate.
+     * @param velMmPerS  Smoothed extruder velocity in mm/s.
+     * @param tempC      Melt temperature estimate in °C.
+     * @return extruder position offset in mm, clamped to
+     *         ±maxCompensation; 0 when the LUT is absent.
      */
     double offsetForVelocity(double velMmPerS, double tempC) const {
         if (!lut_ || lut_->empty() ||
@@ -216,7 +225,12 @@ public:
         return off;
     }
 
-    /**@brief Smooth a velocity series (centered moving average). */
+    /**
+     * @brief Smooth a velocity series (centered moving average).
+     * @param velMmPerS         Input velocity samples in mm/s.
+     * @param sampleIntervalSec Time between samples in seconds.
+     * @return smoothed series (same length as input).
+     */
     std::vector<double> smoothVelocity(
         const std::vector<double>& velMmPerS,
         double sampleIntervalSec) const {
@@ -243,7 +257,10 @@ public:
 
     /**
      * @brief Per-sample offset series given velocity and temperature series.
+     * @param velMmPerS         Extruder velocity samples in mm/s.
      * @param tempC Per-sample melt-temperature estimate [°C] (same length).
+     * @param sampleIntervalSec Time between samples in seconds.
+     * @return per-sample position offsets in mm.
      */
     std::vector<double> offsetSeries(const std::vector<double>& velMmPerS,
                                      const std::vector<double>& tempC,
