@@ -249,6 +249,9 @@ TEST(IOWsTransport, HandshakeAndEchoRoundTrip) {
     auto hs = f.client->handshake(opts);
     ASSERT_TRUE(hs) << hs.error();
     ASSERT_TRUE(f.client->isConnected());
+    // handshakeOk is set asynchronously on the server accept thread — poll.
+    for (int i = 0; i < 200 && !f.server->handshakeOk; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     EXPECT_TRUE(f.server->handshakeOk);
 
     // Small payload (short form length).
