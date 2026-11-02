@@ -155,12 +155,15 @@ std::unique_ptr<OfflineAutotuner> createOfflineAutotuner(const std::string& name
 
 /**
  * @brief List available autotuners
+ * @return tuner names runnable online.
  */
 std::vector<std::string> listOnlineAutotuners();
 std::vector<std::string> listOfflineAutotuners();
 
 /**
  * @brief Get autotuner description
+ * @param name  Tuner name.
+ * @return human-readable description.
  */
 std::string getAutotunerDescription(const std::string& name);
 

@@ -20,10 +20,16 @@ struct SkewParams {
 /**@brief Skew correction manager. */
 class SkewCorrection {
 public:
-    /**@brief Set skew parameters (M852). */
+    /**
+     * @brief Set skew parameters (M852).
+     * @param params  XY/XZ/YZ skew factors [degrees].
+     */
     void setParams(const SkewParams& params) { params_ = params; }
 
-    /**@brief Get current skew parameters. */
+    /**
+     * @brief Get current skew parameters.
+     * @return reference to active params.
+     */
     const SkewParams& params() const { return params_; }
 
     /**
@@ -48,7 +54,10 @@ public:
         return {correctedX, correctedY, correctedZ};
     }
 
-    /**@brief Check if skew correction is active. */
+    /**
+     * @brief Check if skew correction is active.
+     * @return true when any skew factor is non-zero.
+     */
     bool isActive() const {
         return params_.xy != 0.0 || params_.xz != 0.0 || params_.yz != 0.0;
     }

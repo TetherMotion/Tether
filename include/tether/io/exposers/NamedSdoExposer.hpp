@@ -89,6 +89,8 @@ public:
     /**
      * Append another register group after construction.  The list must
      * outlive the exposer (pass the address of a static kRegisterList).
+     *
+     * @param list  Register group (borrowed, must outlive *this).
      */
     void addRegisterList(
         const ::EtherCAT::Drives::Registers::RegisterList* list) {
@@ -100,6 +102,10 @@ public:
     /**
      * Parameter id of the named alias for a given object — shared idBase
      * safe: tag 0x02 never collides with the 0x01-tagged index scheme.
+     *
+     * @param index  Object-dictionary index.
+     * @param sub    Object-dictionary subindex.
+     * @return computed named-alias parameter id.
      */
     static constexpr uint64_t namedId(uint64_t idBase, uint16_t index,
                                       uint8_t sub) {

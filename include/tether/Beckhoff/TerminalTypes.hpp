@@ -28,6 +28,9 @@ namespace Beckhoff {
 // Shared error type
 // ============================================================================
 
+/**
+ * @brief Terminal bring-up error codes.
+ */
 enum class Error : uint8_t {
     Ok = 0,
     NoDeviceFound, /**< detect()/findFirst(): no matching device on the bus */
@@ -47,7 +50,11 @@ enum class Error : uint8_t {
     Cancelled, /**< aborted via master.requestCancel() */
 };
 
-/**Human-readable description of an Error value. */
+/**
+ * @brief Human-readable description of an Error value.
+ * @param e  Error code.
+ * @return static description string.
+ */
 const char* errorToString(Error e);
 
 /**Expected-like result type used by all fallible operations. */
