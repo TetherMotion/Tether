@@ -1039,7 +1039,7 @@ TetherIOClient::createInputStream(uint32_t schemaSlot, uint32_t maxValueSize,
     r.getU8(); // type
     CreateInputStreamResult cr;
     cr.streamId = r.getU32();
-    cr.success = r.getU8() != 0;
+    cr.success = r.getU8() == 0;  // status byte: 0 = success
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed CreateInputStreamResp"));
     return cr;
 }
@@ -1079,7 +1079,7 @@ TetherIOClient::closeInputStream(uint32_t streamId) {
     ClientBufReader r(result->data(), result->size());
     r.getU8(); // type
     uint32_t respId = r.getU32();
-    bool success = r.getU8() != 0;
+    bool success = r.getU8() == 0;  // status byte: 0 = success
     if (!r.ok()) return std::unexpected(makeError(ErrorCode::InvalidMessage, "Malformed CloseInputStreamResp"));
     return std::make_pair(respId, success);
 }
