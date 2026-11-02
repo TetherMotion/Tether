@@ -275,6 +275,7 @@ public:
      * @param spectral Pointer to spectral evaluation (may be nullptr if
      *        FFT analysis was not performed; oscillation grade will be
      *        "not assessed").
+     * @return per-aspect grades plus an overall score.
      */
     QualitativeEvaluation evaluateQualitative(
         const QuantitativeEvaluation& quant,
@@ -282,15 +283,34 @@ public:
 
     //--- Grading helpers (public for testing and external use) ---
 
-    /**Map a value to a grade given A/B/C/D thresholds (lower = better). */
+    /**
+     * @brief Map a value to a grade given A/B/C/D thresholds (lower = better).
+     * @param value     Metric value to grade.
+     * @param threshA   Boundary for grade A.
+     * @param threshB   Boundary for grade B.
+     * @param threshC   Boundary for grade C.
+     * @param threshD   Boundary for grade D (above → F).
+     * @return the grade bucket containing `value`.
+     */
     Grade gradeFromThresholds(double value,
                               double threshA, double threshB,
                               double threshC, double threshD) const;
 
-    /**Map a grade to a score in [0, 1]. */
+    /**
+     * @brief Map a grade to a score in [0, 1].
+     * @param g  Grade to convert.
+     * @return normalized score (A=1 … F=0).
+     */
     double gradeToScore(Grade g) const;
 
-    /**Build a QualitativeAssessment from a grade and a description template. */
+    /**
+     * @brief Build a QualitativeAssessment from a grade and a description template.
+     * @param g       Computed grade.
+     * @param aspect  Human-readable aspect name (e.g. "Jerk").
+     * @param value   Raw metric value embedded in the description.
+     * @param unit    Unit string appended to the value.
+     * @return populated assessment record.
+     */
     QualitativeAssessment makeAssessment(
         Grade g, const std::string& aspect,
         double value, const std::string& unit) const;

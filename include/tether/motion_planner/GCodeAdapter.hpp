@@ -170,6 +170,8 @@ struct ParsedGCodeCommand {
     
     /**
      * @brief Check if coordinate is specified
+     * @param axis  Axis index into the coordinates array.
+     * @return true when a finite value was parsed for that axis.
      */
     bool hasCoordinate(size_t axis) const {
         return axis < coordinates.size() && !std::isnan(coordinates[axis]);
@@ -177,6 +179,7 @@ struct ParsedGCodeCommand {
     
     /**
      * @brief Check if any coordinate is specified
+     * @return true when at least one axis has a finite value.
      */
     bool hasAnyCoordinate() const {
         for (size_t i = 0; i < coordinates.size(); ++i) {
@@ -304,12 +307,14 @@ public:
 
     /**
      * @brief Access modal state
+     * @return reference to the converter's live modal state.
      */
     const GCodeModalState& state() const { return state_; }
     GCodeModalState& state() { return state_; }
 
     /**
      * @brief Set source file
+     * @param file  Source file used for traceability diagnostics.
      */
     void setSourceFile(std::shared_ptr<SourceFile> file) {
         sourceFile_ = std::move(file);
@@ -741,6 +746,8 @@ public:
 
     /**
      * @brief Constructor
+     * @param limits  Motion limits forwarded to the plan builder.
+     * @param config  Builder configuration.
      */
     GCodeToMotionPlan(Limits limits = {}, Config config = {})
         : builder_(limits, config) {}
@@ -765,6 +772,7 @@ public:
 
     /**
      * @brief Access builder for configuration
+     * @return mutable reference to the underlying plan builder.
      */
     Builder& builder() { return builder_; }
     const Builder& builder() const { return builder_; }

@@ -81,13 +81,20 @@ public:
         }
         return true;
     }
-    /**@copydoc produce(uint64_t,const uint8_t*,size_t) */
+    /**
+     * @brief Produce one row from a byte span (see the pointer overload).
+     * @param tsUs  Timestamp in microseconds.
+     * @param data  Row payload bytes.
+     * @return true on success.
+     */
     bool produce(uint64_t tsUs, std::span<const uint8_t> data) {
         return produce(tsUs, data.data(), data.size());
     }
 
     /**
      * Polled-read side: copy the latest snapshot into `dest`.
+     * @param dest    Destination buffer.
+     * @param maxLen  Buffer capacity in bytes.
      * @return bytes written (<= maxLen).
      */
     size_t readLatest(uint8_t* dest, size_t maxLen) const {
@@ -96,7 +103,10 @@ public:
         std::memcpy(dest, latest_.data(), n);
         return n;
     }
-    /**Current latest snapshot size in bytes. */
+    /**
+     * @brief Current latest snapshot size in bytes.
+     * @return byte size of the most recent produce() payload.
+     */
     size_t latestSize() const {
         std::lock_guard lk(mtx_);
         return latest_.size();
@@ -104,6 +114,8 @@ public:
     /**
      * A VarReadFn bound to this signal — assign to SignalEntry::varReadFn.
      * The function object captures `this` (see file-level lifetime rule).
+     *
+     * @return VarReadFn bound to this signal.
      */
     VarReadFn varReadFn() {
         return [this](void* dest, size_t maxLen) {
@@ -111,11 +123,21 @@ public:
         };
     }
 
-    /**The ring source handed to ServerConfig::ringSources. */
+    /**
+     * @brief The ring source handed to ServerConfig::ringSources.
+     * @return reference to the underlying ring.
+     */
     Ring& source() { return ring_; }
-    /**Producer-side count of rows dropped because the ring was full. */
+    /**
+     * @brief Producer-side count of rows dropped because the ring was full.
+     * @return monotonic drop counter.
+     */
     uint64_t dropped() const { return ring_.dropped(); }
-    /**(Re)install the row-field schema. Setup-time only. */
+    /**
+     * @brief (Re)install the row-field schema. Setup-time only.
+     * @param entryIds    Signal entry ids per row field.
+     * @param fieldSizes  Byte size of each row field (parallel to entryIds).
+     */
     void setSchema(std::vector<uint64_t> entryIds,
                    std::vector<uint16_t> fieldSizes) {
         ring_.setSchema(std::move(entryIds), std::move(fieldSizes));

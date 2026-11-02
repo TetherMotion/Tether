@@ -28,14 +28,21 @@ public:
 
     uint8_t oid() const { return oid_; }
 
-    /**@brief Arm the trsync. */
+    /**
+     * @brief Arm the trsync.
+     * @param timeoutClock  MCU clock at which it expires.
+     */
     void arm(uint32_t timeoutClock) {
         state_ = TrsyncState::Armed;
         timeoutClock_ = timeoutClock;
         triggerClock_ = 0;
     }
 
-    /**@brief Arm with a report clock and timeout. */
+    /**
+     * @brief Arm with a report clock and timeout.
+     * @param reportClock   MCU clock to report back.
+     * @param timeoutClock  MCU clock at which it expires.
+     */
     void arm(uint32_t reportClock, uint32_t timeoutClock) {
         state_ = TrsyncState::Armed;
         timeoutClock_ = timeoutClock;
@@ -43,14 +50,21 @@ public:
         triggerClock_ = 0;
     }
 
-    /**@brief Process a tick at a given clock. */
+    /**
+     * @brief Process a tick at a given clock.
+     * @param clock  Current MCU clock; expires the trsync when armed and
+     *              clock >= timeout.
+     */
     void tick(uint32_t clock) {
         if (state_ == TrsyncState::Armed && clock >= timeoutClock_) {
             expire();
         }
     }
 
-    /**@brief Trigger the trsync. */
+    /**
+     * @brief Trigger the trsync.
+     * @param clock  MCU clock recorded as the trigger time.
+     */
     void trigger(uint32_t clock) {
         if (state_ == TrsyncState::Armed) {
             state_ = TrsyncState::Triggered;
@@ -73,13 +87,22 @@ public:
         }
     }
 
-    /**@brief Get the current state. */
+    /**
+     * @brief Get the current state.
+     * @return TrsyncState (Idle/Armed/Triggered/Sent).
+     */
     TrsyncState state() const { return state_; }
 
-    /**@brief Get the trigger clock. */
+    /**
+     * @brief Get the trigger clock.
+     * @return MCU clock at trigger/expire time.
+     */
     uint32_t triggerClock() const { return triggerClock_; }
 
-    /**@brief Get the timeout clock. */
+    /**
+     * @brief Get the timeout clock.
+     * @return MCU clock set at arm() time.
+     */
     uint32_t timeoutClock() const { return timeoutClock_; }
 
     /**@brief Reset to idle. */

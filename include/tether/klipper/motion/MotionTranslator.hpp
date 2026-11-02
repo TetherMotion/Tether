@@ -161,7 +161,11 @@ using KinematicsTransform = ::tether::kinematics::KinematicsTransform;
 template<size_t Dim, typename T = double>
 class MotionTranslator {
 public:
-    /**@brief Construct with per-axis configs and OIDs. */
+    /**
+     * @brief Construct with per-axis configs and OIDs.
+     * @param axisConfigs  Per-axis stepper configuration (steps/mm, etc.).
+     * @param axisOids     MCU object IDs for each axis.
+     */
     MotionTranslator(std::array<AxisConfig, Dim> axisConfigs,
                       std::array<uint8_t, Dim> axisOids)
         : axisConfigs_(std::move(axisConfigs)), axisOids_(std::move(axisOids)) {}
@@ -181,23 +185,41 @@ public:
         double sampleIntervalSec,
         uint32_t startClock) const;
 
-    /**@brief Set the source label for emitted blocks (traceability). */
+    /**
+     * @brief Set the source label for emitted blocks (traceability).
+     * @param label  Label attached to emitted step sequences.
+     */
     void setSourceLabel(std::string label) { sourceLabel_ = std::move(label); }
 
-    /**@brief Get the source label. */
+    /**
+     * @brief Get the source label.
+     * @return label set by setSourceLabel() (empty default).
+     */
     const std::string& sourceLabel() const { return sourceLabel_; }
 
-    /**@brief Set the kinematics transform. */
+    /**
+     * @brief Set the kinematics transform.
+     * @param kt  Copied transform applied before step generation.
+     */
     void setKinematicsTransform(const KinematicsTransform& kt) { kinematics_ = kt; }
 
-    /**@brief Get the kinematics transform. */
+    /**
+     * @brief Get the kinematics transform.
+     * @return reference to the installed transform.
+     */
     const KinematicsTransform& kinematicsTransform() const { return kinematics_; }
 
 #if TETHER_ENABLE_PRESSURE_ADVANCE
-    /**@brief Set pressure advance configuration for extruder step generation. */
+    /**
+     * @brief Set pressure advance configuration for extruder step generation.
+     * @param pa  PA config (coefficient, smoothing) copied in.
+     */
     void setPressureAdvanceConfig(const PressureAdvanceConfig& pa) { paConfig_ = pa; }
 
-    /**@brief Get the current pressure advance configuration. */
+    /**
+     * @brief Get the current pressure advance configuration.
+     * @return reference to the installed config.
+     */
     const PressureAdvanceConfig& pressureAdvanceConfig() const { return paConfig_; }
 #endif
 

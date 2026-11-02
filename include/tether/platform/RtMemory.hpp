@@ -53,11 +53,18 @@ bool lockAllMemory();
 /**
  * @brief mlock() a region — pins the pages so they can neither fault nor
  *        be evicted.  Best-effort: logs + returns false on failure.
+ *
+ * @param addr  Region start (page-aligned recommended).
+ * @param len   Region length in bytes.
+ * @return true on success; false on failure (logged).
  */
 bool lockMemory(const void* addr, size_t len);
 
 /**
  * @brief munlock() a previously locked region (cleanup counterpart).
+ * @param addr  Region start.
+ * @param len   Region length in bytes.
+ * @return true on success.
  */
 bool unlockMemory(const void* addr, size_t len);
 
@@ -65,6 +72,9 @@ bool unlockMemory(const void* addr, size_t len);
  * @brief Pre-fault a region by writing one byte per page — forces demand
  *        paging NOW (at configuration time) instead of mid-cycle.  Works
  *        without any privilege; combine with lockMemory() for permanence.
+ *
+ * @param addr  Region start.
+ * @param len   Region length in bytes.
  */
 void prefaultMemory(void* addr, size_t len);
 
@@ -72,6 +82,8 @@ void prefaultMemory(void* addr, size_t len);
  * @brief Pre-fault the calling thread's stack by descending ~bytes deep.
  *        Uses alloca() to extend the frame — each touched page becomes
  *        resident.  Call at the top of an RT thread's main function.
+ *
+ * @param bytes  Approximate stack depth to pre-touch.
  */
 void prefaultCurrentStack(uint32_t bytes);
 
@@ -80,6 +92,7 @@ void prefaultCurrentStack(uint32_t bytes);
  *        slack applied to nanosleep/poll timeouts for non-RT threads.
  *        No-op under SCHED_FIFO (kernel skips slack for RT tasks) but
  *        critical on the degraded non-RT fallback path.
+ * @param slack_ns  Requested timer slack in nanoseconds.
  * @return true on success / unsupported platform.
  */
 bool setCurrentThreadTimerSlack(uint64_t slack_ns);

@@ -27,32 +27,51 @@ struct GcodeMacro {
 /**@brief G-code macro registry and expansion. */
 class GcodeMacroRegistry {
 public:
-    /**@brief Register a macro. */
+    /**
+     * @brief Register a macro.
+     * @param macro  Macro to store; keyed by uppercase name (replaces any
+     *              existing macro with the same name).
+     */
     void registerMacro(const GcodeMacro& macro) {
         std::string upperName = toUpper(macro.name);
         macros_[upperName] = macro;
     }
 
-    /**@brief Unregister a macro. */
+    /**
+     * @brief Unregister a macro.
+     * @param name  Macro name (case-insensitive); no-op when absent.
+     */
     void unregisterMacro(const std::string& name) {
         std::string upperName = toUpper(name);
         macros_.erase(upperName);
     }
 
-    /**@brief Check if a macro exists. */
+    /**
+     * @brief Check if a macro exists.
+     * @param name  Macro name (case-insensitive).
+     * @return true when registered.
+     */
     bool hasMacro(const std::string& name) const {
         std::string upperName = toUpper(name);
         return macros_.find(upperName) != macros_.end();
     }
 
-    /**@brief Get a macro by name. */
+    /**
+     * @brief Get a macro by name.
+     * @param name  Macro name (case-insensitive).
+     * @return pointer to the stored macro, or nullptr when absent; the
+     *         pointer is valid until the macro is unregistered.
+     */
     const GcodeMacro* getMacro(const std::string& name) const {
         std::string upperName = toUpper(name);
         auto it = macros_.find(upperName);
         return it == macros_.end() ? nullptr : &it->second;
     }
 
-    /**@brief List all registered macros. */
+    /**
+     * @brief List all registered macros.
+     * @return uppercase macro names in registry order.
+     */
     std::vector<std::string> listMacros() const {
         std::vector<std::string> result;
         for (const auto& [name, _] : macros_) result.push_back(name);

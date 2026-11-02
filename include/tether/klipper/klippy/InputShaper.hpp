@@ -42,19 +42,32 @@ public:
         computeCoefficients();
     }
 
-    /**@brief Set the shaper parameters and recompute coefficients. */
+    /**
+     * @brief Set the shaper parameters and recompute coefficients.
+     * @param params  New params (type, frequency, damping); coefficients
+     *                are recomputed immediately.
+     */
     void setParams(InputShaperParams params) {
         params_ = params;
         computeCoefficients();
     }
 
-    /**@brief Get the current parameters. */
+    /**
+     * @brief Get the current parameters.
+     * @return reference to the installed params.
+     */
     const InputShaperParams& params() const { return params_; }
 
-    /**@brief Check if the shaper is active. */
+    /**
+     * @brief Check if the shaper is active.
+     * @return true when a shaper type is selected with positive frequency.
+     */
     bool isActive() const { return params_.type != ShaperType::None && params_.freq > 0.0; }
 
-    /**@brief Get the shaping coefficients (A_i, t_i pairs). */
+    /**
+     * @brief Get the shaping coefficients (A_i, t_i pairs).
+     * @return impulse amplitude/delay pairs computed from params.
+     */
     const std::vector<std::pair<double, double>>& coefficients() const {
         return coeffs_;
     }
@@ -77,7 +90,10 @@ public:
         return result;
     }
 
-    /**@brief Get the total shaping delay (seconds). */
+    /**
+     * @brief Get the total shaping delay (seconds).
+     * @return largest t_i among the coefficients (0 when inactive).
+     */
     double shapingDelay() const {
         if (coeffs_.empty()) return 0.0;
         return coeffs_.back().second;
@@ -133,7 +149,11 @@ private:
     std::vector<std::pair<double, double>> coeffs_; /**< (A_i, t_i) impulse pairs */
 };
 
-/**@brief Convert ShaperType to string representation. */
+/**
+ * @brief Convert ShaperType to string representation.
+ * @param type  ShaperType enumerator.
+ * @return static name string ("none", "ZV", ...).
+ */
 inline const char* shaperTypeToString(ShaperType type) {
     switch (type) {
         case ShaperType::None:      return "none";
