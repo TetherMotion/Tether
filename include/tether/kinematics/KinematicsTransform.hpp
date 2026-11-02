@@ -37,21 +37,37 @@ namespace tether::kinematics {
  */
 class KinematicsTransform {
 public:
-    /**@brief Set the kinematics type. */
+    /**
+     * @brief Set the kinematics type.
+     * @param k  Machine kinematics (cartesian/delta/rotary-delta/winch/...).
+     */
     void setKinematics(PrinterKinematics k) { kinematics_ = k; }
 
-    /**@brief Get the kinematics type. */
+    /**
+     * @brief Get the kinematics type.
+     * @return active kinematics.
+     */
     PrinterKinematics kinematics() const { return kinematics_; }
 
-    /**@brief Set the delta printer (for delta kinematics). */
+    /**
+     * @brief Set the delta printer (for delta kinematics).
+     * @param dp  Delta geometry source (borrowed, may be nullptr).
+     */
     void setDeltaPrinter(const DeltaPrinter* dp) { deltaPrinter_ = dp; }
 
-    /**@brief Set the rotary delta printer (for rotary delta kinematics). */
+    /**
+     * @brief Set the rotary delta printer (for rotary delta kinematics).
+     * @param rdp  Rotary-delta geometry source (borrowed).
+     */
     void setRotaryDeltaPrinter(const RotaryDeltaPrinter* rdp) {
         rotaryDeltaPrinter_ = rdp;
     }
 
-    /**@brief Set winch anchor parameters (for winch kinematics). */
+    /**
+     * @brief Set winch anchor parameters (for winch kinematics).
+     * @param anchorRadius  Anchor ring radius [mm].
+     * @param anchorHeight  Anchor height above the bed [mm].
+     */
     void setWinchParams(double anchorRadius, double anchorHeight) {
         winchAnchorRadius_ = anchorRadius;
         winchAnchorHeight_ = anchorHeight;

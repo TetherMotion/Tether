@@ -29,11 +29,16 @@ public:
     /**
      * @brief Set the filament cross-sectional area [mm²] (used to convert
      * E-axis velocity to volumetric flow).
+     *
+     * @param area  Filament cross-section in mm².
      */
     void setFilamentAreaMm2(double area) { filamentAreaMm2_ = area; }
     double filamentAreaMm2() const { return filamentAreaMm2_; }
 
-    /**@brief Set the filament diameter [mm] (convenience; updates the area). */
+    /**
+     * @brief Set the filament diameter [mm] (convenience; updates the area).
+     * @param d  Filament diameter in mm.
+     */
     void setFilamentDiameterMm(double d) {
         filamentAreaMm2_ = M_PI * d * d / 4.0;
     }
@@ -41,6 +46,9 @@ public:
     /**
      * @brief Record the E-axis velocity from the latest move [mm/s].
      * Updates the instantaneous and smoothed flow estimates.
+     *
+     * @param velMmPerS  Current E-axis velocity [mm/s].
+     * @param dtSec      Interval since the previous sample (for the EWMA).
      */
     void setExtruderVelocityMmPerS(double velMmPerS, double dtSec) {
         const double Q = velMmPerS * filamentAreaMm2_;
@@ -57,12 +65,18 @@ public:
                  std::memory_order_relaxed));
     }
 
-    /**@brief Instantaneous volumetric flow [mm³/s]. */
+    /**
+     * @brief Instantaneous volumetric flow [mm³/s].
+     * @return latest unsmoothed flow.
+     */
     double instantaneousFlowMm3PerS() const {
         return instantaneousQ_.load(std::memory_order_relaxed);
     }
 
-    /**@brief Smoothed (EWMA) volumetric flow [mm³/s]. */
+    /**
+     * @brief Smoothed (EWMA) volumetric flow [mm³/s].
+     * @return ~0.5 s time-constant average flow.
+     */
     double smoothedFlowMm3PerS() const {
         return smoothedQ_.load(std::memory_order_relaxed);
     }
