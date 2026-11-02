@@ -4,21 +4,21 @@
 namespace Simulation {
 
 /**
- * @brief Reduced-order buck-boost converter benchmark.
- *
- * Models a bidirectional buck-boost stage with coupled current and voltage
- * dynamics and two control channels. The current implementation captures the
- * dominant multivariable interaction across step-up and step-down regimes using
- * an averaged state-space model.
- *
- * Control is difficult because the plant changes character with operating mode,
- * and current and voltage loops cannot be tuned independently. Cross coupling
- * and duty-ratio limits make robust multivariable control substantially harder.
- *
- * The current implementation models lumped current and voltage states with two
- * control inputs. It does not model switching harmonics, hard mode boundaries,
- * device protection logic, or parasitic network detail of real hardware.
- */
+     * @brief Reduced-order buck-boost converter benchmark.
+     *
+     * Models a bidirectional buck-boost stage with coupled current and voltage
+     * dynamics and two control channels. The current implementation captures the
+     * dominant multivariable interaction across step-up and step-down regimes using
+     * an averaged state-space model.
+     *
+     * Control is difficult because the plant changes character with operating mode,
+     * and current and voltage loops cannot be tuned independently. Cross coupling
+     * and duty-ratio limits make robust multivariable control substantially harder.
+     *
+     * The current implementation models lumped current and voltage states with two
+     * control inputs. It does not model switching harmonics, hard mode boundaries,
+     * device protection logic, or parasitic network detail of real hardware.
+     */
 class BuckBoostConverter : public ParametricSystem {
 public:
     BuckBoostConverter();
@@ -29,7 +29,19 @@ public:
     int stateDim() const override { return 2; }
     int inputDim() const override { return 2; }
     int outputDim() const override { return 2; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     StateVector defaultInput() const override;

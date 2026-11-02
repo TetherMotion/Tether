@@ -1,9 +1,9 @@
 #pragma once
 
 /**
- * @file OpticalSystems.hpp
- * @brief Aggregated include for optical and photonic benchmark plants.
- */
+     * @file OpticalSystems.hpp
+     * @brief Aggregated include for optical and photonic benchmark plants.
+     */
 
 #include "optical/AdaptiveOpticsTelescope.hpp"
 #include "optical/FastSteeringMirror.hpp"

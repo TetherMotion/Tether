@@ -1,9 +1,9 @@
 #pragma once
 
 /**
- * @file ElectricalSystems.hpp
- * @brief Aggregated include for electrical power-electronics benchmark plants.
- */
+     * @file ElectricalSystems.hpp
+     * @brief Aggregated include for electrical power-electronics benchmark plants.
+     */
 
 #include "electrical/BuckConverter.hpp"
 #include "electrical/BoostConverter.hpp"

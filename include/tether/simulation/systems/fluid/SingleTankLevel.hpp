@@ -4,20 +4,20 @@
 namespace Simulation {
 
 /**
- * @brief Single gravity-drained tank benchmark.
- *
- * Models the liquid level in one gravity-drained tank with inlet flow as the
- * manipulated variable. The current implementation keeps one lumped level state
- * and the dominant square-root outflow nonlinearity.
- *
- * Control is difficult because the effective gain changes with operating level,
- * so a controller tuned near one fill level can become sluggish or aggressive
- * at another.
- *
- * The current implementation models one perfectly mixed tank and one inlet. It
- * does not model sensor delay, valve stiction, foaming, pipe dynamics, or any
- * distributed hydraulics inside the vessel.
- */
+     * @brief Single gravity-drained tank benchmark.
+     *
+     * Models the liquid level in one gravity-drained tank with inlet flow as the
+     * manipulated variable. The current implementation keeps one lumped level state
+     * and the dominant square-root outflow nonlinearity.
+     *
+     * Control is difficult because the effective gain changes with operating level,
+     * so a controller tuned near one fill level can become sluggish or aggressive
+     * at another.
+     *
+     * The current implementation models one perfectly mixed tank and one inlet. It
+     * does not model sensor delay, valve stiction, foaming, pipe dynamics, or any
+     * distributed hydraulics inside the vessel.
+     */
 class SingleTankLevel : public ParametricSystem {
 public:
     SingleTankLevel();
@@ -28,7 +28,19 @@ public:
     int stateDim() const override { return 1; } // [h]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

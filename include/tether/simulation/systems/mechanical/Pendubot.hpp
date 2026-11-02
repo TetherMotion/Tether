@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Pendubot underactuated-manipulator benchmark.
- *
- * Models a two-link planar robot actuated only at the shoulder joint. The
- * current implementation preserves the underactuated rigid-link coupling needed
- * for energy-shaping and swing-up studies.
- *
- * Control is difficult because one joint is passive, so missing actuation must
- * be recovered through momentum transfer and dynamic coupling.
- *
- * The current implementation models two rigid links and one actuator. It does
- * not model motor dynamics, joint backlash, elastic links, or contact with any
- * environment.
- */
+     * @brief Pendubot underactuated-manipulator benchmark.
+     *
+     * Models a two-link planar robot actuated only at the shoulder joint. The
+     * current implementation preserves the underactuated rigid-link coupling needed
+     * for energy-shaping and swing-up studies.
+     *
+     * Control is difficult because one joint is passive, so missing actuation must
+     * be recovered through momentum transfer and dynamic coupling.
+     *
+     * The current implementation models two rigid links and one actuator. It does
+     * not model motor dynamics, joint backlash, elastic links, or contact with any
+     * environment.
+     */
 class Pendubot : public ParametricSystem {
 public:
     Pendubot();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 4; }
     int inputDim() const override { return 1; }
     int outputDim() const override { return 2; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

@@ -33,6 +33,8 @@ enum class LogLevel {
 
 /**
  * @brief Convert log level to string
+ * @param level  LogLevel enumerator.
+ * @return static uppercase name ("ERROR", "WARN", ...; "?" unknown).
  */
 inline const char* logLevelToString(LogLevel level) {
     switch (level) {
@@ -48,6 +50,8 @@ inline const char* logLevelToString(LogLevel level) {
 
 /**
  * @brief Convert log level to single character
+ * @param level  LogLevel enumerator.
+ * @return single-letter code ('E', 'W', 'I', 'D', 'V', 'N').
  */
 inline char logLevelToChar(LogLevel level) {
     switch (level) {
@@ -83,6 +87,10 @@ public:
     
     /**
      * @brief Log with format string (convenience)
+     * @param level   Severity of the record.
+     * @param tag     Component tag.
+     * @param format  printf-style format string.
+     * @param ...     Format arguments.
      */
     void logf(LogLevel level, const char* tag, const char* format, ...) {
         va_list args;
@@ -93,6 +101,9 @@ public:
     
     /**
      * @brief Error level log
+     * @param tag     Component tag.
+     * @param format  printf-style format string.
+     * @param ...     Format arguments.
      */
     void error(const char* tag, const char* format, ...) {
         va_list args;
@@ -254,6 +265,7 @@ std::unique_ptr<ILogger> createFileLogger(const char* filename);
 
 /**
  * @brief Create null logger (discards all output)
+ * @return logger that accepts and drops every record.
  */
 std::unique_ptr<ILogger> createNullLogger();
 

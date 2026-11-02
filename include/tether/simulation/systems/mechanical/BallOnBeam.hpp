@@ -4,18 +4,18 @@
 namespace Simulation {
 
 /**
- * @brief Ball-on-beam benchmark.
- *
- * Models a ball rolling along a beam whose angle is indirectly actuated. The
- * current implementation preserves the non-collocated coupling between beam tilt
- * and ball translation.
- *
- * Control is difficult because the actuator moves the beam angle, not the ball
- * position directly, so tilt commands first affect acceleration through gravity.
- *
- * The current implementation models one rolling ball and one beam angle. It does
- * not model contact slip, actuator saturation, end stops, or beam flexibility.
- */
+     * @brief Ball-on-beam benchmark.
+     *
+     * Models a ball rolling along a beam whose angle is indirectly actuated. The
+     * current implementation preserves the non-collocated coupling between beam tilt
+     * and ball translation.
+     *
+     * Control is difficult because the actuator moves the beam angle, not the ball
+     * position directly, so tilt commands first affect acceleration through gravity.
+     *
+     * The current implementation models one rolling ball and one beam angle. It does
+     * not model contact slip, actuator saturation, end stops, or beam flexibility.
+     */
 class BallOnBeam : public ParametricSystem {
 public:
     BallOnBeam();
@@ -26,7 +26,19 @@ public:
     int stateDim() const override { return 4; } // [r, dr, theta, dtheta]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

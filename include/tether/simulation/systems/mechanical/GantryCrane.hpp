@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Gantry-crane sway benchmark.
- *
- * Models a translating trolley with a suspended pendulum-like payload. The
- * current implementation preserves the main underactuated sway mode excited by
- * trolley motion.
- *
- * Control is difficult because rapid trolley motion naturally excites payload
- * oscillation, so travel time and swing suppression conflict.
- *
- * The current implementation models one trolley axis and one pendulum payload.
- * It does not model cable elasticity, hoist length variation, hook dynamics, or
- * three-dimensional swing.
- */
+     * @brief Gantry-crane sway benchmark.
+     *
+     * Models a translating trolley with a suspended pendulum-like payload. The
+     * current implementation preserves the main underactuated sway mode excited by
+     * trolley motion.
+     *
+     * Control is difficult because rapid trolley motion naturally excites payload
+     * oscillation, so travel time and swing suppression conflict.
+     *
+     * The current implementation models one trolley axis and one pendulum payload.
+     * It does not model cable elasticity, hoist length variation, hook dynamics, or
+     * three-dimensional swing.
+     */
 class GantryCrane : public ParametricSystem {
 public:
     GantryCrane();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 4; } // [x, dx, theta, dtheta]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 2; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

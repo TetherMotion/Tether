@@ -4,20 +4,20 @@
 namespace Simulation {
 
 /**
- * @brief Nonlinear phase-locked loop benchmark.
- *
- * Models a phase detector, loop integrator, and VCO frequency state driven by a
- * reference phase or frequency input. The current implementation keeps the core
- * nonlinear phase-wrap behavior and loop-filter dynamics in a compact form.
- *
- * Control is difficult because the plant is nonlinear in phase and operates on
- * wrapped angular quantities. Large phase errors and noisy inputs make tuning a
- * tradeoff between fast lock acquisition and low steady-state jitter.
- *
- * The current implementation models one loop filter and one VCO path. It does
- * not model charge-pump nonidealities, divider quantization, reference spurs,
- * RF front-end distortion, or digital clock-domain effects.
- */
+     * @brief Nonlinear phase-locked loop benchmark.
+     *
+     * Models a phase detector, loop integrator, and VCO frequency state driven by a
+     * reference phase or frequency input. The current implementation keeps the core
+     * nonlinear phase-wrap behavior and loop-filter dynamics in a compact form.
+     *
+     * Control is difficult because the plant is nonlinear in phase and operates on
+     * wrapped angular quantities. Large phase errors and noisy inputs make tuning a
+     * tradeoff between fast lock acquisition and low steady-state jitter.
+     *
+     * The current implementation models one loop filter and one VCO path. It does
+     * not model charge-pump nonidealities, divider quantization, reference spurs,
+     * RF front-end distortion, or digital clock-domain effects.
+     */
 class PhaseLockLoop : public ParametricSystem {
 public:
     PhaseLockLoop();
@@ -28,7 +28,19 @@ public:
     int stateDim() const override { return 3; } // [phase_error, integrator, vco_freq]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

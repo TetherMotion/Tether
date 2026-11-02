@@ -4,18 +4,18 @@
 namespace Simulation {
 
 /**
- * @brief Acrobot underactuated-manipulator benchmark.
- *
- * Models a two-link planar robot actuated only at the elbow with a passive base
- * joint. The current implementation preserves the rigid-link geometry and elbow-
- * driven energy transfer that distinguishes the Acrobot from the Pendubot.
- *
- * Control is difficult because the actuator cannot directly control the global
- * orientation of the chain, so swing-up relies on nonlinear internal coupling.
- *
- * The current implementation models two rigid links and one elbow actuator. It
- * does not model motor limits, friction, flexible links, or collisions.
- */
+     * @brief Acrobot underactuated-manipulator benchmark.
+     *
+     * Models a two-link planar robot actuated only at the elbow with a passive base
+     * joint. The current implementation preserves the rigid-link geometry and elbow-
+     * driven energy transfer that distinguishes the Acrobot from the Pendubot.
+     *
+     * Control is difficult because the actuator cannot directly control the global
+     * orientation of the chain, so swing-up relies on nonlinear internal coupling.
+     *
+     * The current implementation models two rigid links and one elbow actuator. It
+     * does not model motor limits, friction, flexible links, or collisions.
+     */
 class Acrobot : public ParametricSystem {
 public:
     Acrobot();
@@ -26,7 +26,19 @@ public:
     int stateDim() const override { return 4; }
     int inputDim() const override { return 1; }
     int outputDim() const override { return 2; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

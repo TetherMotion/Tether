@@ -4,23 +4,23 @@
 namespace Simulation {
 
 /**
- * @brief Exothermic continuous stirred-tank reactor benchmark.
- *
- * Models concentration and temperature in a continuously stirred reactor with
- * feed-flow and cooling inputs. The current implementation couples material and
- * energy balances through Arrhenius kinetics so thermal runaway sensitivity and
- * conversion tradeoffs remain explicit.
- *
- * Control is difficult because the reactor can be highly nonlinear, stiff, and
- * multi-steady-state. Small temperature changes can cause large rate changes,
- * and one manipulated input often affects conversion and thermal safety at the
- * same time.
- *
- * The current implementation models one well-mixed reactor volume, one dominant
- * reaction, and lumped cooling action. It does not model spatial gradients,
- * jacket dynamics, catalyst deactivation, feed composition noise, or detailed
- * safety interlocks beyond what a user injects externally.
- */
+     * @brief Exothermic continuous stirred-tank reactor benchmark.
+     *
+     * Models concentration and temperature in a continuously stirred reactor with
+     * feed-flow and cooling inputs. The current implementation couples material and
+     * energy balances through Arrhenius kinetics so thermal runaway sensitivity and
+     * conversion tradeoffs remain explicit.
+     *
+     * Control is difficult because the reactor can be highly nonlinear, stiff, and
+     * multi-steady-state. Small temperature changes can cause large rate changes,
+     * and one manipulated input often affects conversion and thermal safety at the
+     * same time.
+     *
+     * The current implementation models one well-mixed reactor volume, one dominant
+     * reaction, and lumped cooling action. It does not model spatial gradients,
+     * jacket dynamics, catalyst deactivation, feed composition noise, or detailed
+     * safety interlocks beyond what a user injects externally.
+     */
 class CSTR : public ParametricSystem {
 public:
     CSTR();
@@ -31,9 +31,23 @@ public:
     int stateDim() const override { return 2; } // [C_A, T]
     int inputDim() const override { return 2; } // [F, Q_cool]
     int outputDim() const override { return 2; }
-    /**Evaluate coupled species and energy balances for an exothermic reactor. */
+    /**
+     * Evaluate coupled species and energy balances for an exothermic reactor.
+     *
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
-    /**Report concentration and temperature, which are the usual process measurements. */
+    /**
+     * Report concentration and temperature, which are the usual process measurements.
+     *
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     /**Start from a moderate conversion operating point near the nominal feed temperature. */
     StateVector defaultInitialState() const override;

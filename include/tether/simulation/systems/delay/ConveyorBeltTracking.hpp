@@ -4,21 +4,21 @@
 namespace Simulation {
 
 /**
- * @brief Conveyor transport-delay benchmark.
- *
- * Models material transport on a conveyor where an upstream control action is
- * only observed after the part has moved through a processing zone. The current
- * implementation uses a reduced internal transport state plus downstream
- * measurement, preserving the core industrial dead-time behavior.
- *
- * Control is difficult because the controller acts on material that has not yet
- * reached the sensor. Disturbances introduced upstream may only become visible
- * much later, so feedback alone is slow and predictive action is needed.
- *
- * The current implementation models one dominant transport path and one delayed
- * downstream measurement. It does not model conveyor slip, part-to-part
- * variation, multiple processing stations, queueing logic, or vision latency.
- */
+     * @brief Conveyor transport-delay benchmark.
+     *
+     * Models material transport on a conveyor where an upstream control action is
+     * only observed after the part has moved through a processing zone. The current
+     * implementation uses a reduced internal transport state plus downstream
+     * measurement, preserving the core industrial dead-time behavior.
+     *
+     * Control is difficult because the controller acts on material that has not yet
+     * reached the sensor. Disturbances introduced upstream may only become visible
+     * much later, so feedback alone is slow and predictive action is needed.
+     *
+     * The current implementation models one dominant transport path and one delayed
+     * downstream measurement. It does not model conveyor slip, part-to-part
+     * variation, multiple processing stations, queueing logic, or vision latency.
+     */
 class ConveyorBeltTracking : public ParametricSystem {
 public:
     ConveyorBeltTracking();
@@ -29,7 +29,19 @@ public:
     int stateDim() const override { return 2; }
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

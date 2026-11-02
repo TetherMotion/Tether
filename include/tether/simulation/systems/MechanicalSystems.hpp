@@ -3,13 +3,13 @@
 #include "../DynamicalSystem.hpp"
 
 /**
- * @file MechanicalSystems.hpp
- * @brief Aggregated include for translational mechanical benchmark systems.
- *
- * Include this header when you want the complete mechanical benchmark catalog.
- * Include the per-system headers under `systems/mechanical/` for narrower
- * compile dependencies and module-focused tests.
- */
+     * @file MechanicalSystems.hpp
+     * @brief Aggregated include for translational mechanical benchmark systems.
+     *
+     * Include this header when you want the complete mechanical benchmark catalog.
+     * Include the per-system headers under `systems/mechanical/` for narrower
+     * compile dependencies and module-focused tests.
+     */
 
 #include "mechanical/MassSpringDamper.hpp"
 #include "mechanical/CoupledMassSpringDamper.hpp"

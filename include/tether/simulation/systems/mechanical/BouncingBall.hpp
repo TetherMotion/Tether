@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Bouncing-ball hybrid benchmark.
- *
- * Models a ball interacting with a moving plate through free flight and impact
- * events. The current implementation preserves smooth gravitational motion plus
- * discontinuous impact behavior at contact.
- *
- * Control is difficult because the system is hybrid rather than purely smooth,
- * so small timing errors near impact can produce large rebound changes.
- *
- * The current implementation models one ball, one plate, and restitution-style
- * impacts. It does not model contact deformation, frictional contact, plate
- * flexibility, or random surface roughness.
- */
+     * @brief Bouncing-ball hybrid benchmark.
+     *
+     * Models a ball interacting with a moving plate through free flight and impact
+     * events. The current implementation preserves smooth gravitational motion plus
+     * discontinuous impact behavior at contact.
+     *
+     * Control is difficult because the system is hybrid rather than purely smooth,
+     * so small timing errors near impact can produce large rebound changes.
+     *
+     * The current implementation models one ball, one plate, and restitution-style
+     * impacts. It does not model contact deformation, frictional contact, plate
+     * flexibility, or random surface roughness.
+     */
 class BouncingBall : public ParametricSystem {
 public:
     BouncingBall();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 4; } // [y_ball, dy_ball, y_plate, dy_plate]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

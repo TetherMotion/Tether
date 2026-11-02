@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Canonical single-DOF mass-spring-damper benchmark.
- *
- * Models one translational mass attached to a spring and viscous damper with a
- * force input. The current implementation keeps the dominant second-order energy
- * exchange between inertia and elasticity that defines the standard benchmark.
- *
- * Control is difficult mainly when damping is low, because the plant stores and
- * exchanges energy between inertia and elasticity and easily resonates.
- *
- * The current implementation models one linear spring, one viscous damper, and
- * one rigid mass. It does not model friction nonlinearities, backlash, actuator
- * saturation, or higher structural modes.
- */
+     * @brief Canonical single-DOF mass-spring-damper benchmark.
+     *
+     * Models one translational mass attached to a spring and viscous damper with a
+     * force input. The current implementation keeps the dominant second-order energy
+     * exchange between inertia and elasticity that defines the standard benchmark.
+     *
+     * Control is difficult mainly when damping is low, because the plant stores and
+     * exchanges energy between inertia and elasticity and easily resonates.
+     *
+     * The current implementation models one linear spring, one viscous damper, and
+     * one rigid mass. It does not model friction nonlinearities, backlash, actuator
+     * saturation, or higher structural modes.
+     */
 class MassSpringDamper : public ParametricSystem {
 public:
     MassSpringDamper();
@@ -27,9 +27,23 @@ public:
     int stateDim() const override { return 2; } // [x, dx]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
-    /**Evaluate the second-order translational dynamics for the current force input. */
+    /**
+     * Evaluate the second-order translational dynamics for the current force input.
+     *
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
-    /**Report the measured displacement state used by the identification tests. */
+    /**
+     * Report the measured displacement state used by the identification tests.
+     *
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     /**Start from rest so transients are driven entirely by the applied excitation. */
     StateVector defaultInitialState() const override;

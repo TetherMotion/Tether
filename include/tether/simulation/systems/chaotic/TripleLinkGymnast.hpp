@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Triple-link underactuated gymnast benchmark.
- *
- * Models a three-link acrobatic chain driven by a single input, representing bar
- * gymnastics or aggressive multi-link swing-up. The current implementation keeps
- * all three link angles and rates so internal energy transfer dominates motion.
- *
- * Control is difficult because there are more generalized coordinates than
- * actuators, with strong nonlinear coupling and large energy swings.
- *
- * The current implementation models three rigid links and one actuator. It does
- * not model bar compliance, grip changes, contact events, muscle-like actuation,
- * or full humanoid whole-body dynamics.
- */
+     * @brief Triple-link underactuated gymnast benchmark.
+     *
+     * Models a three-link acrobatic chain driven by a single input, representing bar
+     * gymnastics or aggressive multi-link swing-up. The current implementation keeps
+     * all three link angles and rates so internal energy transfer dominates motion.
+     *
+     * Control is difficult because there are more generalized coordinates than
+     * actuators, with strong nonlinear coupling and large energy swings.
+     *
+     * The current implementation models three rigid links and one actuator. It does
+     * not model bar compliance, grip changes, contact events, muscle-like actuation,
+     * or full humanoid whole-body dynamics.
+     */
 class TripleLinkGymnast : public ParametricSystem {
 public:
     TripleLinkGymnast();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 6; } // [theta1..3, dtheta1..3]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 3; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

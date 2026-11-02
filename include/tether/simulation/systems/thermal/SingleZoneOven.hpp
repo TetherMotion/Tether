@@ -4,20 +4,20 @@
 namespace Simulation {
 
 /**
- * @brief Single-zone oven benchmark.
- *
- * Models one lumped thermal chamber with heater input and heat loss to ambient.
- * The current implementation uses a single dominant temperature state so basic
- * thermal setpoint regulation and disturbance rejection can be studied directly.
- *
- * Control is difficult because thermal plants are slow and integrate energy over
- * long time horizons. Large dead-time-like transients make aggressive tuning
- * prone to overshoot and conservative tuning overly sluggish.
- *
- * The current implementation models one equivalent chamber temperature. It does
- * not model spatial gradients, heater saturation dynamics, fan recirculation,
- * radiation exchange detail, or door-opening disturbances.
- */
+     * @brief Single-zone oven benchmark.
+     *
+     * Models one lumped thermal chamber with heater input and heat loss to ambient.
+     * The current implementation uses a single dominant temperature state so basic
+     * thermal setpoint regulation and disturbance rejection can be studied directly.
+     *
+     * Control is difficult because thermal plants are slow and integrate energy over
+     * long time horizons. Large dead-time-like transients make aggressive tuning
+     * prone to overshoot and conservative tuning overly sluggish.
+     *
+     * The current implementation models one equivalent chamber temperature. It does
+     * not model spatial gradients, heater saturation dynamics, fan recirculation,
+     * radiation exchange detail, or door-opening disturbances.
+     */
 class SingleZoneOven : public ParametricSystem {
 public:
     SingleZoneOven();
@@ -28,7 +28,19 @@ public:
     int stateDim() const override { return 1; } // [T]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

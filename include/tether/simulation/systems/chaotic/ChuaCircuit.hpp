@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Chua-circuit chaos benchmark.
- *
- * Models Chua's circuit using three coupled states and a piecewise-linear
- * nonlinear resistor characteristic. The current implementation preserves the
- * double-scroll style regime switching that makes the benchmark difficult.
- *
- * Control is difficult because the nonlinearity changes slope across operating
- * regions, so local linear behavior is only valid in small neighborhoods.
- *
- * The current implementation models the canonical reduced-order Chua circuit. It
- * does not model parasitic capacitance, real op-amp bandwidth limits, switching
- * noise, or detailed circuit implementation nonidealities.
- */
+     * @brief Chua-circuit chaos benchmark.
+     *
+     * Models Chua's circuit using three coupled states and a piecewise-linear
+     * nonlinear resistor characteristic. The current implementation preserves the
+     * double-scroll style regime switching that makes the benchmark difficult.
+     *
+     * Control is difficult because the nonlinearity changes slope across operating
+     * regions, so local linear behavior is only valid in small neighborhoods.
+     *
+     * The current implementation models the canonical reduced-order Chua circuit. It
+     * does not model parasitic capacitance, real op-amp bandwidth limits, switching
+     * noise, or detailed circuit implementation nonidealities.
+     */
 class ChuaCircuit : public ParametricSystem {
 public:
     ChuaCircuit();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 3; }
     int inputDim() const override { return 1; }
     int outputDim() const override { return 3; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;

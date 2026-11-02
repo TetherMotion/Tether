@@ -28,6 +28,11 @@ namespace tether { namespace io { namespace exposers { namespace detail {
 /**
  * Map an object-dictionary data type to an IO value type.
  * Returns false for types with no meaningful scalar representation.
+ *
+ * @param t    Object-dictionary data type.
+ * @param out  out: mapped IO value type.
+ * @return true when a mapping exists (Binary is the fallback for
+ *         unmapped-but-storable types).
  */
 inline bool odToValueType(
     ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType t,
@@ -51,7 +56,11 @@ inline bool odToValueType(
     }
 }
 
-/**Fixed wire size for scalar OD types; 0 for variable-length / odd types. */
+/**
+ * @brief Fixed wire size for scalar OD types; 0 for variable-length / odd types.
+ * @param t  Object-dictionary data type.
+ * @return byte width, or 0 when the type has no fixed size.
+ */
 inline uint8_t odFixedSize(
     ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType t) {
     using T = ::EtherCAT::ObjectDictionary::ObjectDictionaryDataType;
@@ -125,6 +134,9 @@ inline std::string odHexU8(uint8_t v) {
  * trimmed: "1st speed loop gain" -> "1st_speed_loop_gain",
  * "Identity: vendor ID" -> "identity_vendor_id".  ASCII-only by design so
  * results are locale-independent.  May return an empty string.
+ *
+ * @param name  Object-dictionary display name.
+ * @return slug suitable for protocol identifiers.
  */
 inline std::string slugifyName(std::string_view name) {
     std::string out;
@@ -166,6 +178,7 @@ inline std::string slugifyName(std::string_view name) {
  * @param id     Fully-computed parameter ID (module base | local id).
  * @param name   Parameter name (decided by the caller's naming scheme).
  * @param group  Logical group string (e.g. "as715n.drive0.sdo").
+ * @return populated ParamEntry with read/write lambdas wired to `coe`.
  */
 inline ParamEntry makeSdoParam(
     ::EtherCAT::CoE::CoEManager& coe,

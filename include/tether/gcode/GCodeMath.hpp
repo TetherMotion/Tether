@@ -352,14 +352,9 @@ struct BoundingBox {
 
 /**
  * @brief Calculate arc sweep angle from center
- * 
- * @param startU Start U coordinate in plane
- * @param startV Start V coordinate in plane
- * @param endU End U coordinate in plane
- * @param endV End V coordinate in plane
- * @param centerU Center U coordinate in plane
- * @param centerV Center V coordinate in plane
- * @param clockwise True for CW arc, false for CCW
+ *
+ * Full parameter documentation lives on the canonical declaration in
+ * gcode/motion/GCodeMath.hpp — the two headers duplicate this inline.
  * @return Sweep angle in radians (negative for CW)
  */
 inline double arcSweepFromCenter(

@@ -4,19 +4,19 @@
 namespace Simulation {
 
 /**
- * @brief Single-axis reaction-wheel benchmark.
- *
- * Models body angle, body rate, wheel speed, and drive current for a single-axis
- * reaction-wheel attitude-control system. The current implementation preserves
- * the internal momentum-exchange nature of the actuator.
- *
- * Control is difficult because total angular momentum is internally redistributed
- * rather than removed, so wheel saturation can accumulate under persistent bias.
- *
- * The current implementation models one rigid body axis and one wheel. It does
- * not model three-axis spacecraft coupling, desaturation thrusters, frictional
- * wheel imbalance, or sensor fusion in the attitude estimator.
- */
+     * @brief Single-axis reaction-wheel benchmark.
+     *
+     * Models body angle, body rate, wheel speed, and drive current for a single-axis
+     * reaction-wheel attitude-control system. The current implementation preserves
+     * the internal momentum-exchange nature of the actuator.
+     *
+     * Control is difficult because total angular momentum is internally redistributed
+     * rather than removed, so wheel saturation can accumulate under persistent bias.
+     *
+     * The current implementation models one rigid body axis and one wheel. It does
+     * not model three-axis spacecraft coupling, desaturation thrusters, frictional
+     * wheel imbalance, or sensor fusion in the attitude estimator.
+     */
 class ReactionWheelSingleAxis : public ParametricSystem {
 public:
     ReactionWheelSingleAxis();
@@ -27,7 +27,19 @@ public:
     int stateDim() const override { return 4; } // [theta, omega, omega_w, i]
     int inputDim() const override { return 1; }
     int outputDim() const override { return 1; }
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return State derivative vector, size stateDim().
+     */
     StateVector dynamics(double t, const StateVector& state, const StateVector& input) const override;
+/**
+     * @param t Current simulation time [s].
+     * @param state Current state vector, size stateDim().
+     * @param input Current input vector, size inputDim().
+     * @return Output vector, size outputDim().
+     */
     StateVector output(double t, const StateVector& state, const StateVector& input) const override;
     StateVector defaultInitialState() const override;
     std::vector<ParamDescriptor> parameterDescriptors() const override;
