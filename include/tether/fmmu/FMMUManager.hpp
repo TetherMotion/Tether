@@ -203,9 +203,6 @@ public:
      * @brief Configure FMMUs with separate output/input logical addresses.
      *
      * Unlike the single-base overload (which places the input FMMU
-     * @param output_phys,output_len,output_logical_addr  Output FMMU region.
-     * @param input_phys,input_len,input_logical_addr     Input FMMU region.
-     * @param fmmu_debug  Enable debug logging.
      * contiguously after the output FMMU), this variant allows the output
      * and input FMMU regions to live at independent logical addresses.
      * This is required for buses that use Position-Based Logical Routing
@@ -229,9 +226,6 @@ public:
      * @brief Configure FMMUs from multiple PDO sync manager configs.
      *
      * Creates one FMMU per SM (output/input), with per-PDO logical address
-     * @param sm_configs        Multi-PDO SM configs.
-     * @param base_logical_addr  Base logical address.
-     * @param fmmu_debug        Enable debug logging.
      * tracking.  Each PDO mapping within an SM gets its own logical address
      * offset within the FMMU region.
      *
