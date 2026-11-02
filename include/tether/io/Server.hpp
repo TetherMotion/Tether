@@ -110,14 +110,23 @@ public:
     /**
      * Invoke a function hosted by a connected client.  Routes to the
      * session whose RegisterFunctionsReq catalog contains
-     * `functionName`.  `deadlineUs` bounds the response wait (see
+     * `functionName`; sessions that never registered the name (including
+     * clients with no functions at all) are never candidates.  When
+     * several sessions offer the same name, the provider with the fewest
+     * consecutive invoke timeouts wins — a peer that stalls (connected
+     * but not answering) yields to a healthier duplicate, and a
+     * disconnected peer is skipped outright, so failover to a
+     * re-registered provider is automatic.
+     *
+     * `deadlineUs` bounds the response wait as a relative budget (see
      * Session::callPeer).  Returns false when no connected peer hosts
      * that function or the call could not be queued.  The callback runs
      * on the session worker thread.
      *
      * @param functionName  Registered function name.
      * @param arguments     Encoded argument list.
-     * @param deadlineUs    Absolute deadline for the response (µs).
+     * @param deadlineUs    Relative deadline budget for the response (µs);
+     *                      0 waits forever.
      * @param callback      Invoked with the invoke result.
      * @return true when the call was queued to a hosting peer.
      */

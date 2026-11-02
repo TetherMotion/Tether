@@ -169,18 +169,22 @@ public:
 
     /**
      * Invoke a function the client published via RegisterFunctionsReq.
-     * `deadlineUs` bounds the wait in getTimestampUs_() units; 0 waits
+     * `deadlineUs` bounds the wait as a relative budget in
+     * getTimestampUs_() units (added to the send timestamp); 0 waits
      * forever.  Returns false when the pending table is full
      * (MAX_PENDING_INVOKES) or the transport send fails.  Safe to call
      * from any thread; multiple calls may be outstanding concurrently
      * (pipelining).
+     *
+     * The callback fires exactly once per queued call — on wire response,
+     * on deadline expiry (sweep thread), or when the session ends.
      *
      * @param functionId  ID of the peer function, as published in the
      *                    client's RegisterFunctionsReq catalog (see
      *                    findPeerFunctionId() to resolve by name).
      * @param arguments   Positional arguments serialized into the
      *                    InvokeExReq frame.
-     * @param deadlineUs  Absolute deadline in getTimestampUs_() units;
+     * @param deadlineUs  Relative deadline budget in µs;
      *                    0 disables the timeout.
      * @param callback    Invoked exactly once with the InvokeResult —
      *                    on the worker thread for wire responses, on the
@@ -227,6 +231,22 @@ public:
      *         limit.
      */
     size_t pendingInvokeCount() const;
+
+    /**
+     * @brief Consecutive peer-call outcomes that breached their deadline.
+     *
+     * Incremented by the sweep thread on expiry and when a response
+     * arrives past its deadline; reset to zero whenever the peer answers
+     * a call within its deadline.  Server::callPeerFunction() uses this
+     * as the health score when several sessions host the same function:
+     * the provider with the fewest consecutive timeouts wins, ties break
+     * by connection order.
+     *
+     * @return Current count; 0 for a responsive or never-called peer.
+     */
+    uint32_t consecutiveInvokeTimeouts() const {
+        return consecutiveInvokeTimeouts_.load(std::memory_order_relaxed);
+    }
 
     // ---- Session identity (transport-authenticated caller) ----
 
@@ -449,6 +469,14 @@ private:
     std::thread invokeSweepThread_;
     std::condition_variable invokeSweepCv_;
     std::atomic<bool> sweepStop_{false};
+    /**
+     * Consecutive peer-call outcomes that ended in a deadline breach —
+     * sweep expiry or a response arriving past its deadline.  Reset by
+     * handleInvokeExResp() on any in-deadline response (the peer is
+     * responsive even when it answers with an error).  Server uses this
+     * to prefer healthy providers when duplicate peer functions exist.
+     */
+    std::atomic<uint32_t> consecutiveInvokeTimeouts_{0};
 
     // ==== Ring-buffered streaming ====
     /**Sources registered by the server; consulted in bindRingSource(). */

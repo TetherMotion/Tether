@@ -122,16 +122,26 @@ bool Server::callPeerFunction(std::string_view functionName,
                               const std::vector<FunctionArgument>& arguments,
                               uint64_t deadlineUs,
                               Session::InvokeResultFn callback) {
+    // Pick the *responsive* provider: among running sessions offering the
+    // name, the one with the fewest consecutive invoke timeouts wins.
+    // A peer that stalls (connected but not answering) accumulates
+    // timeouts and yields to a healthier duplicate; a disconnected peer
+    // is skipped outright — dead sessions' catalogs no longer count.
     std::shared_ptr<Session> target;
     uint64_t functionId = 0;
+    uint32_t bestTimeouts = UINT32_MAX;
     {
         std::lock_guard<std::mutex> lock(sessionsMutex_);
         for (const auto& info : sessions_) {
             if (!info.session->isRunning()) continue;
-            if (auto id = info.session->findPeerFunctionId(functionName)) {
+            auto id = info.session->findPeerFunctionId(functionName);
+            if (!id) continue;
+            const uint32_t timeouts = info.session->consecutiveInvokeTimeouts();
+            if (timeouts < bestTimeouts) {
+                bestTimeouts = timeouts;
                 target = info.session;
                 functionId = *id;
-                break;
+                if (timeouts == 0) break;  // a responsive peer cannot be beaten
             }
         }
     }

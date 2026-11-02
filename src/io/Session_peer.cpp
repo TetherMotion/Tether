@@ -85,9 +85,16 @@ bool Session::callPeer(uint64_t functionId,
             return false;
         }
     }
-    if (!w.ok() || !sendRaw(message.data(), w.pos)) return false;
+    if (!w.ok()) return false;
+    // Register before sending: a response can be dispatched by the worker
+    // thread microseconds after send() — the pending entry must exist or
+    // the reply is dropped and the call burns to deadline.
     pendingInvokes_.emplace(requestId,
                             PendingInvoke{functionId, now, deadlineAtUs, std::move(callback)});
+    if (!sendRaw(message.data(), w.pos)) {
+        pendingInvokes_.erase(requestId);
+        return false;
+    }
     invokeSweepCv_.notify_one();
     return true;
 }
@@ -159,6 +166,8 @@ void Session::sweepInvokeDeadlines() {
             it = pendingInvokes_.erase(it);
         }
     }
+    consecutiveInvokeTimeouts_.fetch_add(static_cast<uint32_t>(expired.size()),
+                                         std::memory_order_relaxed);
     // Callbacks run on the sweep thread, outside the lock — a callback may
     // re-enter callPeer() without deadlocking.
     for (auto& [callback, result] : expired) callback(result);
