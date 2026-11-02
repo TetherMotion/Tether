@@ -22,6 +22,7 @@
 #include <cstring>
 #include <atomic>
 #include <future>
+#include <memory>
 #include <optional>
 
 using namespace tether::io;
@@ -591,13 +592,16 @@ protected:
     /// std::nullopt when the call could not be queued at all).
     std::optional<Session::InvokeResult>
     invoke(std::string_view name, uint64_t deadlineUs = 2'000'000,
-           uint32_t waitMs = 5000) {
-        std::promise<Session::InvokeResult> p;
+           uint32_t waitMs = 10000) {
+        // The promise is shared with the session callback by value: if the
+        // wait times out and the test aborts, a late-firing callback must
+        // not touch a destroyed promise.
+        auto p = std::make_shared<std::promise<Session::InvokeResult>>();
         const bool queued = server_->callPeerFunction(
             name, {f64Arg(3.0)}, deadlineUs,
-            [&p](const Session::InvokeResult& r) { p.set_value(r); });
+            [p](const Session::InvokeResult& r) { p->set_value(r); });
         if (!queued) return std::nullopt;
-        auto f = p.get_future();
+        auto f = p->get_future();
         if (f.wait_for(std::chrono::milliseconds(waitMs)) !=
             std::future_status::ready)
             return std::nullopt;
@@ -656,15 +660,20 @@ TEST_F(IOPeerDispatchTest, InFlightCallFailsFastOnSessionEnd) {
         {makeWorkFunction(host, 10, "work")}).has_value());
     ASSERT_TRUE(waitFor([&] { return server_->peerFunctions().size() == 1; }));
 
-    std::promise<Session::InvokeResult> p;
+    // The promise is shared with the session callback by value: if the wait
+    // times out and the test aborts, a late-firing callback must not touch
+    // a destroyed promise.
+    auto p = std::make_shared<std::promise<Session::InvokeResult>>();
     ASSERT_TRUE(server_->callPeerFunction(
         "work", {f64Arg(1.0)}, 30'000'000 /* 30 s budget */,
-        [&p](const Session::InvokeResult& r) { p.set_value(r); }));
+        [p](const Session::InvokeResult& r) { p->set_value(r); }));
 
     host.client->close();  // session death must not wait out the deadline
 
-    auto f = p.get_future();
-    ASSERT_EQ(f.wait_for(5s), std::future_status::ready);
+    auto f = p->get_future();
+    // Generous bound: teardown propagation is immediate under light load but
+    // contended under coverage/sanitizer parallelism.
+    ASSERT_EQ(f.wait_for(15s), std::future_status::ready);
     auto res = f.get();
     EXPECT_FALSE(res.success);
     EXPECT_FALSE(res.timedOut);

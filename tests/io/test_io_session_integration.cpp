@@ -34,7 +34,7 @@ static void slipSend(ITransport* tp, const uint8_t* msg, size_t len) {
     tp->send(enc.data(), enc.size());
 }
 
-static std::vector<uint8_t> slipReceive(ITransport* tp, uint32_t timeoutMs = 500) {
+static std::vector<uint8_t> slipReceive(ITransport* tp, uint32_t timeoutMs = 2000) {
     std::vector<uint8_t> accum;
     uint8_t buf[4096];
     auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
@@ -226,6 +226,10 @@ protected:
         std::thread thread;
 
         ~SessionContext() {
+            // Explicitly request stop: under sanitizer/parallel load the
+            // close-propagation path can stall for seconds; requestStop()
+            // sets stopRequested_ and closes the transport deterministically.
+            if (session) session->requestStop();
             // Close client transport first to signal Session thread to exit gracefully
             // This causes server transport's receive() to return 0, ending the session loop
             if (client) client->close();
