@@ -130,6 +130,7 @@ protected:
 
     /**
      * Called to build the current status from the command + internal state.
+     * @param out  out: status fields to populate.
      * Must be overridden by every concrete profile.
      */
     virtual void buildStatus(Status& out) = 0;
@@ -213,6 +214,8 @@ protected:
 
     /**
      * Mark a specific `status_bit` as an inverted mirror: the status
+     * @param status_bit  Bit position to toggle.
+     * @param invert      True to mirror-invert.
      * bit is set to the logical NOT of the corresponding command bit
      * instead of a verbatim echo.  Use this for runtime polarity toggles.
      */
@@ -226,7 +229,11 @@ protected:
         }
     }
 
-    /**Query whether a specific `status_bit` is currently inverted. */
+    /**
+     * @brief Query whether a specific `status_bit` is currently inverted.
+     * @param status_bit  Bit position.
+     * @return true when mirrored-inverted.
+     */
     bool getStatusBitMirrorInvert(uint8_t status_bit) const
     {
         return (status_mirror_invert_mask_ >> status_bit) & 1u;

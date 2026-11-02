@@ -23,6 +23,9 @@ namespace EtherCAT {
  * not listed here (e.g. a vendor-specific abort code) can be carried as
  * static_cast<SDOAbortCode>(raw); sdoAbortCodeStr() maps it to
  * "Unknown abort code".
+ *
+ * @param code  SDOAbortCode enumerator.
+ * @return static description string.
  */
 enum class SDOAbortCode : uint32_t {
     Success                  = 0x00000000, /**< No error */
@@ -64,10 +67,17 @@ enum class SDOAbortCode : uint32_t {
  *
  * Never returns null; unlisted (vendor-specific) codes map to
  * "Unknown abort code".
+ *
+ * @param code  SDOAbortCode enumerator.
+ * @return static description string.
  */
 const char* sdoAbortCodeStr(SDOAbortCode code);
 
-/**@brief Overload taking the raw 32-bit abort code. */
+/**
+ * @brief Overload taking the raw 32-bit abort code.
+ * @param code  Raw abort code.
+ * @return static description string.
+ */
 inline const char* sdoAbortCodeStr(uint32_t code) {
     return sdoAbortCodeStr(static_cast<SDOAbortCode>(code));
 }

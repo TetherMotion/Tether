@@ -48,21 +48,25 @@ public:
 
     /**
      * @brief Get the current position
+     * @return position [mm].
      */
     virtual double getPosition() const = 0;
 
     /**
      * @brief Get the current velocity
+     * @return velocity [mm/s] (0 by default).
      */
     virtual double getVelocity() const { return 0.0; }
 
     /**
      * @brief Get the current acceleration
+     * @return acceleration [mm/s²] (0 by default).
      */
     virtual double getAcceleration() const { return 0.0; }
 
     /**
      * @brief Check whether the source is currently running
+     * @return true while generating setpoints.
      */
     virtual bool isRunning() const = 0;
 };

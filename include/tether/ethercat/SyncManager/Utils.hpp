@@ -15,15 +15,6 @@ namespace EtherCAT {
 namespace SyncManager {
 namespace Utils {
 
-/**
- * @brief Read the synchronization mode for a given SyncManager (SM2/SM3).
- *
- * @param coe        Reference to a CoE manager (usually master.coeManager()).
- * @param sm_index   Sync manager index (2 for SM2 / 3 for SM3)
- * @param out_mode   Output variable filled with the raw mode value.
- * @param timeout_ms SDO timeout, defaults to 2000 ms.
- * @return true if the read succeeded, false otherwise.
- */
 // ---------------------------------------------------------------------------
 // Generic helpers that work with ObjectDictionaryEntry
 // ---------------------------------------------------------------------------

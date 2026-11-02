@@ -127,6 +127,7 @@ public:
     /**
      * @brief Analyse a G-code program and produce a PA recommendation.
      * @param gcodeLines The G-code text, one entry per line.
+     * @return calibration recommendation result.
      */
     PaCalibrationResult analyse(const std::vector<std::string>& gcodeLines) const;
 
@@ -142,11 +143,17 @@ public:
      */
     static double fitTuningCurve(const std::vector<CalibrationPoint>& points);
 
-    /**@brief Convert a filament name string to the enum. */
+    /**
+     * @brief Convert a filament name string to the enum.
+     * @param name  Material name (case-insensitive).
+     * @return matching FilamentMaterial (default for unknown).
+     */
     static FilamentMaterial parseMaterial(const std::string& name);
 
     /**
      * @brief Get the heuristic PA recommendation for a material + extruder combo.
+     * @param material  Filament material.
+     * @param extruder  Extruder type.
      * @return Recommended PA [s].
      */
     static double heuristicPa(FilamentMaterial material, ExtruderType extruder);
