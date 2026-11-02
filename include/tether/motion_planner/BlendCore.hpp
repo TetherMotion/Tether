@@ -126,6 +126,9 @@ inline double blendRadiusFromTolerance(double tolerance, double halfAngle) {
 
 /**
  * @brief Compute tangent distance from radius and half-angle
+ * @param radius     Blend arc radius.
+ * @param halfAngle  Half of the corner deflection angle (radians).
+ * @return distance from the corner point to each tangent point.
  */
 inline double tangentDistance(double radius, double halfAngle) {
     return radius * std::tan(halfAngle);
@@ -133,6 +136,10 @@ inline double tangentDistance(double radius, double halfAngle) {
 
 /**
  * @brief Compute blend entry and exit points
+ * @param cg         Corner geometry (corner point, in/out directions).
+ * @param entryDist  Distance back along the incoming direction.
+ * @param exitDist   Distance forward along the outgoing direction.
+ * @return {entry, exit} points on the two segments.
  */
 inline std::pair<BlendVec, BlendVec> blendEntryExit(
     const CornerGeometry& cg, double entryDist, double exitDist) {
@@ -143,6 +150,10 @@ inline std::pair<BlendVec, BlendVec> blendEntryExit(
 
 /**
  * @brief Compute blend center (for arc-based fallback)
+ * @param cg       Corner geometry (uses cornerPoint and bisector).
+ * @param radius   Blend arc radius.
+ * @param sinHalf  sin(halfAngle); guards the division (returns {} near 0).
+ * @return arc center point along the corner bisector.
  */
 inline BlendVec blendCenter(const CornerGeometry& cg, double radius, double sinHalf) {
     if (sinHalf < 1e-12) return {};
@@ -241,6 +252,9 @@ inline std::array<BlendVec, 6> quinticC2ControlPoints(
 
 /**
  * @brief Evaluate quintic Bézier at parameter t
+ * @param cp  Six control points of the quintic curve.
+ * @param t   Parameter in [0,1].
+ * @return interpolated point on the curve.
  */
 inline BlendVec evalQuintic(const std::array<BlendVec, 6>& cp, double t) {
     double mt = 1.0 - t;

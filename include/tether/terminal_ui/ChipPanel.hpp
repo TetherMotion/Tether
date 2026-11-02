@@ -31,12 +31,20 @@
 namespace Tether {
 namespace TUI {
 
-/**Map a chip-panel DisplayTone to a TUI palette index (Pal*). */
+/**
+ * @brief Map a chip-panel DisplayTone to a TUI palette index (Pal*).
+ * @param tone  Chip tone.
+ * @return ncurses color-pair number for that tone.
+ */
 short chipTonePair(UI::DisplayTone tone);
 
 /**
  * Number of inner (wrapped) text lines a panel needs at width
  * `inner_w` — the box adds a top and bottom border line on top.
+ *
+ * @param panel    Panel whose rows are wrapped.
+ * @param inner_w  Usable inner width in columns (w-2).
+ * @return number of wrapped content lines.
  */
 int chipPanelContentLines(const UI::DisplayPanel& panel, int inner_w);
 
@@ -46,6 +54,13 @@ int chipPanelContentLines(const UI::DisplayPanel& panel, int inner_w);
  * rows and padded with empty lines to `min_lines` content rows so
  * panels in a grid row line up.  Returns the rows consumed (0 when
  * `max_h < 3` or `w < 4`).
+ *
+ * @param x,y        Top-left corner in screen columns/rows.
+ * @param w          Total box width including borders.
+ * @param panel      Panel to render.
+ * @param max_h      Maximum total rows (clip above this).
+ * @param min_lines  Minimum content rows (pad below this).
+ * @return rows consumed (0 when too small to draw).
  */
 int drawChipPanelBox(int x, int y, int w,
                      const UI::DisplayPanel& panel,
@@ -57,6 +72,11 @@ int drawChipPanelBox(int x, int y, int w,
  * stretches to the screen edge.  Panels in a grid row share the height
  * of the tallest one (clipped to the remaining rows).  Returns the
  * rows consumed.
+ *
+ * @param top     First screen row.
+ * @param bottom  One past the last usable row.
+ * @param panels  Panels to lay out left-to-right, top-to-bottom.
+ * @return rows consumed.
  */
 int drawChipPanelGrid(int top, int bottom,
                       const std::vector<UI::DisplayPanel>& panels);

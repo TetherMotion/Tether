@@ -55,7 +55,10 @@ public:
                   KlipperDeviceConfig config = {});
     ~KlipperDevice() override;
 
-    /**@brief Open the transport and start serving. */
+    /**
+     * @brief Open the transport and start serving.
+     * @return true when the transport opened successfully.
+     */
     bool start() override;
 
     /**@brief Pump the event loop: read transport, parse blocks, dispatch, ack. */
@@ -73,7 +76,10 @@ public:
      */
     void reset();
 
-    /**@brief Advance the MCU clock by @p deltaTicks. */
+    /**
+     * @brief Advance the MCU clock by @p deltaTicks.
+     * @param deltaTicks  Tick increment added to the simulated clock.
+     */
     void advanceClock(uint32_t deltaTicks) override;
 
     /**@return The MCU clock. */
@@ -82,12 +88,17 @@ public:
     /**@return The data dictionary. */
     const protocol::DataDictionary& dictionary() const { return dict_; }
 
-    /**@brief Register a peripheral object by OID. */
+    /**
+     * @brief Register a peripheral object by OID.
+     * @param oid         Object identifier used in command dispatch.
+     * @param peripheral  Shared object kept alive by the device.
+     */
     void registerPeripheral(uint8_t oid, std::shared_ptr<void> peripheral);
 
     /**
      * @brief Register a Stepper peripheral and auto-wire the queue_step /
      *        set_next_step_dir / reset_step_clock handlers for its OID.
+     * @param stepper  Stepper object; its OID comes from the stepper itself.
      * @return The OID passed in, for chaining.
      */
     uint8_t registerStepper(std::shared_ptr<objects::Stepper> stepper) override;
@@ -128,10 +139,19 @@ public:
         return stepScheduler_->wait(maxWaitMs);
     }
 
-    /**@brief Register a command handler for a format string. */
+    /**
+     * @brief Register a command handler for a format string.
+     * @param formatStr  Command format string to dispatch on.
+     * @param handler    Invoked with the decoded parameters.
+     */
     void onCommand(const std::string& formatStr, protocol::CommandHandler handler);
 
-    /**@brief Send a response block. */
+    /**
+     * @brief Send a response block.
+     * @param formatStr  Response format string.
+     * @param params     Encoded parameter values.
+     * @return true when the frame was written to the transport.
+     */
     bool sendResponse(const std::string& formatStr,
                       const std::vector<protocol::ParamValue>& params);
 
@@ -162,6 +182,9 @@ public:
      * @brief Enable error-recovery mode on the internal BlockReader.
      * When enabled, corrupt blocks are skipped (with optional callback)
      * instead of causing pump() to silently drop remaining data.
+     *
+     * @param enabled  true to enable skip-and-callback recovery.
+     * @param cb       Optional callback invoked per skipped corrupt block.
      */
     void setBlockRecoveryMode(bool enabled,
                               protocol::BlockReader::ErrorCallback cb = nullptr) {

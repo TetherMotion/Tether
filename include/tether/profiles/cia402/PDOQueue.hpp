@@ -83,6 +83,9 @@ public:
      * @brief Push an RxPDO frame into the outbound queue.
      *
      * Called from the **user thread**.  Returns false if the ring is full.
+     *
+     * @param frame  Frame to enqueue (copied into the ring).
+     * @return true when enqueued; false when the ring is full (frame dropped).
      */
     bool pushRx(const RxPDO& frame) {
         const size_t w = m_write.load(std::memory_order_relaxed);
@@ -97,6 +100,9 @@ public:
      * @brief Pop the next RxPDO frame from the queue.
      *
      * Called from the **cyclic realtime loop**.  Returns false if empty.
+     *
+     * @param frame  out: oldest queued frame.
+     * @return true when a frame was popped; false when empty.
      */
     bool popRx(RxPDO& frame) {
         const size_t r = m_read.load(std::memory_order_relaxed);
@@ -109,6 +115,7 @@ public:
 
     /**
      * @brief Number of RxPDO frames currently queued.
+     * @return write-minus-read count (0..Depth).
      */
     size_t rxPending() const {
         return m_write.load(std::memory_order_acquire)
@@ -132,6 +139,8 @@ public:
      *
      * Uses a sequence-lock pattern: the reader retries when it detects a
      * torn write.  The writer (cyclic loop) is wait-free.
+     *
+     * @param frame  Snapshot to publish (copied).
      */
     void publishTx(const TxPDO& frame) {
         m_tx_seq.fetch_add(1, std::memory_order_release);   // odd  → write in progress
@@ -143,6 +152,8 @@ public:
      * @brief Read the latest TxPDO snapshot (called from any thread).
      *
      * Retries automatically on torn reads.
+     *
+     * @return most recently published TxPDO snapshot (by value).
      */
     TxPDO latestTx() const {
         TxPDO tmp;
@@ -157,6 +168,7 @@ public:
 
     /**
      * @brief Check whether at least one TxPDO has been published.
+     * @return true after the first publishTx().
      */
     bool hasTxData() const {
         return m_tx_seq.load(std::memory_order_acquire) >= 2;

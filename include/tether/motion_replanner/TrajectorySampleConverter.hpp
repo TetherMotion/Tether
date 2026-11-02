@@ -61,7 +61,12 @@ struct SegmentToPieceMap {
     /**(segmentIndex, pieceIndex) pairs, sorted by segmentIndex. */
     std::vector<std::pair<int32_t, std::size_t>> entries;
 
-    /**Look up the piece index for a given segment index, or nullopt. */
+    /**
+     * @brief Look up the piece index for a given segment index, or nullopt.
+     * @param segmentIndex  Source trajectory segment index.
+     * @return mapped piece index, or nullopt when the segment produced
+     *         no piece (e.g. merged or dropped).
+     */
     std::optional<std::size_t> pieceForSegment(int32_t segmentIndex) const;
 };
 
@@ -91,6 +96,7 @@ struct ConverterConfig {
  * @brief Convert a dense sampled trajectory to a piecewise NURBS path.
  *
  * @param samples The trajectory samples, ordered by time.
+ * @param config  Converter tuning (arc tolerance, merge behavior).
  * @return A PiecewiseNurbsPath with one piece per segment.
  * @throws std::invalid_argument if samples is empty or no segment has
  *         a valid geometry (e.g. all segments are zero-length).
@@ -102,6 +108,13 @@ PiecewiseNurbsPath convertTrajectory(
 /**
  * @brief Convert a dense sampled trajectory to a piecewise NURBS path,
  *        also returning the segment-to-piece mapping.
+ *
+ * @param samples  Trajectory samples, ordered by time.
+ * @param map      out: segment→piece mapping for callers needing to
+ *                 correlate results back to segments.
+ * @param config   Converter tuning.
+ * @return PiecewiseNurbsPath; throws std::invalid_argument on empty or
+ *         fully degenerate input.
  */
 PiecewiseNurbsPath convertTrajectory(
     const std::vector<GCodeExport::TrajectorySample>& samples,
