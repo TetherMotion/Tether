@@ -1,5 +1,5 @@
 /**
- * @file KlippyUdsServerE1Helpers.cpp
+ * @file KlippyServerE1Helpers.cpp
  * @brief E1 public helper methods (user/bot/notepad/spoolman registration, etc.)
  */
 

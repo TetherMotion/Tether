@@ -1,5 +1,5 @@
 /**
- * @file raw_eoe.cpp
+ * @file EoE.cpp
  * @brief Ethernet over EtherCAT (EoE) protocol implementation
  */
 

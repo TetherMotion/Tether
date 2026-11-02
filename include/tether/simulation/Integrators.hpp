@@ -106,7 +106,9 @@ private:
 
 /**
  * @brief Factory for creating integrators.
- * @param type  Integrator type id.
+ * @param method  Integration method to instantiate.
+ * @param atol    Absolute error tolerance for adaptive methods.
+ * @param rtol    Relative error tolerance for adaptive methods.
  * @return new integrator instance.
  */
 std::unique_ptr<Integrator> createIntegrator(IntegrationMethod method,

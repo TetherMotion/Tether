@@ -16,13 +16,24 @@
 namespace EtherCAT {
 namespace Raw {
 
+/**
+ * @brief Extract the slave's position index from an ADP auto-increment address.
+ * @param adp 16-bit auto-increment address from a request datagram.
+ * @return Slave position counter value (0 = first slave).
+ */
 inline uint16_t slaveIndexFromADP(uint16_t adp) {
     return Master::slaveAddressFromADP(adp).slavePosition();
 }
 
-// Build a diagnostic upload functor bound to a specific SDOUpload instance.
-// Returns a no-op functor (returns false) when @p upload is null, so callers
-// can unconditionally pass the result to SDODiagnostics without null checks.
+/**
+ * @brief Build a diagnostic upload functor bound to a specific SDOUpload
+ *        instance.
+ * @param upload SDO upload engine to forward diagnostic requests to; may be
+ *        null.
+ * @return UploadFn forwarding every call to `upload->execute`, or a no-op
+ *         functor returning false when `upload` is null — callers can pass
+ *         the result to SDODiagnostics unconditionally.
+ */
 inline SDODiagnostics::UploadFn makeUploadDiagFn(SDOUpload* upload) {
     return [upload](Master& m, uint16_t a, uint8_t* c,
                     uint16_t wwa, uint16_t wwl, uint16_t rwa, uint16_t rwl,

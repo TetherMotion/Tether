@@ -651,6 +651,7 @@ public:
      * Slave::setMailboxServicedInSafeOp() then makes every
      * mailbox-dependent diagnostic skip that window instead of
      * burning seconds in guaranteed timeouts.
+     * @return Firmware version read from 0x100A (zeros when unread).
      */
     FirmwareVersion readAndApplyFirmwareVersion() {
         auto& slave = master_.ethercatMaster().slave(slave_idx_);

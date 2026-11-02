@@ -161,6 +161,7 @@ public:
      * @param dc_sync     Called per DCPlacement (may be null when Disabled).
      * @param time_source Monotonic nanoseconds for jitter stats (may be null —
      *                    falls back to the platform clock).
+     * @param config      Cycle timing/DC-placement configuration.
      */
     CyclicExecutive(TaskFn exchange, TaskFn dc_sync, TimeFunc time_source,
                     const Config& config = Config::defaults());

@@ -1463,6 +1463,14 @@ inline bool resyncSolveSeed(const uint8_t* frame, size_t frame_len,
  * verification; shorter frames are accepted on structural validity
  * alone (documented in resyncSolveSeed).
  *
+ * @param frame      Raw FSoE frame bytes.
+ * @param frame_len  Length of `frame` in bytes.
+ * @param out_cmd    out: parsed command byte.
+ * @param out_data   out: buffer receiving the frame payload.
+ * @param out_data_len  out: payload bytes written to `out_data`.
+ * @param out_conn_id   out: parsed connection id.
+ * @param out_crc0   If non-null, receives the frame's CRC0.
+ * @param out_crc_error  If non-null, receives failure detail on error.
  * @param out_start_crc  If non-null, receives the equivalent startCrc
  *                       (always 0 — see resyncSolveSeed).
  * @param out_seq_used   If non-null, receives the equivalent seqNo.

@@ -103,6 +103,7 @@ public:
      * Parameter id of the named alias for a given object — shared idBase
      * safe: tag 0x02 never collides with the 0x01-tagged index scheme.
      *
+     * @param idBase Shared id base allocated by the exposer.
      * @param index  Object-dictionary index.
      * @param sub    Object-dictionary subindex.
      * @return computed named-alias parameter id.

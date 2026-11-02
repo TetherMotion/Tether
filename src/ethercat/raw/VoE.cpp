@@ -1,5 +1,5 @@
 /**
- * @file raw_voe.cpp
+ * @file VoE.cpp
  * @brief Vendor over EtherCAT (VoE) protocol implementation
  */
 

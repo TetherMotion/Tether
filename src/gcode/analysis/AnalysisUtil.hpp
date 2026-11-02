@@ -147,10 +147,11 @@ inline std::optional<std::string> extractFeatureTag(std::string_view raw, std::s
  *   ordering where M82/M83 override the G90/G91 E-mode inheritance).
  * - **G90 / G91**: absolute / relative positioning, which also selects
  *   the E-mode when no explicit M82/M83 has been seen on the line.
- * - **G92 E<n>**: resets the accumulated E reference so the next
- *   absolute move deltas are measured from <n>.
- * - **G0–G3 E<n>**: the line's delta is `E - currentE` in absolute mode
- *   or `E` in relative mode; negative deltas (retractions) are preserved.
+ * - **G92 E\<n\>**: resets the accumulated E reference so the next
+ *   absolute move deltas are measured from that value.
+ * - **G0–G3 E\<n\>**: the line's delta is `E - currentE` in absolute
+ *   mode or `E` in relative mode; negative deltas (retractions) are
+ *   preserved.
  *
  * Non-extruding lines (moves without an E word, and all other commands)
  * produce 0.0 at their index.

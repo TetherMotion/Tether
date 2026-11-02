@@ -1,5 +1,5 @@
 /**
- * @file KlippyUdsServerGcodeEndpoints.cpp
+ * @file KlippyServerGcodeEndpoints.cpp
  * @brief G-code, query, and print control endpoint handlers
  */
 

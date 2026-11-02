@@ -121,9 +121,10 @@ inline bool isVarintScalar(ValueType t) {
 
 /**
  * @brief Recursive fixed-size/memcpy-image probe; memoized over `seen`.
- * @param t     Value type.
- * @param seen  Visited types (cycle guard).
- * @return true when a fixed wire size exists.
+ * @param g     Schema graph the node belongs to.
+ * @param node  Schema node currently being probed.
+ * @param seen  Visited nodes (memo table and cycle guard).
+ * @return Probe result for `node` (fixed-size flag and byte size).
  */
 inline Probe probe(const SchemaGraph& g, const SchemaNode& node,
                    std::unordered_map<const SchemaNode*, Probe>& seen) {

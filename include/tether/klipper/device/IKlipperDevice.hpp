@@ -47,9 +47,9 @@ public:
     /**
      * @brief Register a Stepper peripheral and auto-wire the queue_step /
      *        set_next_step_dir / reset_step_clock handlers for its OID.
-     * @param stepper  Stepper to register.
-     * @param oid      Object id to assign.
-     * @return The OID passed in, for chaining.
+     * @param stepper  Stepper to register; its assigned OID is used for
+     *        the wired handlers.
+     * @return The OID assigned to the stepper, for chaining.
      */
     virtual uint8_t registerStepper(std::shared_ptr<objects::Stepper> stepper) = 0;
 

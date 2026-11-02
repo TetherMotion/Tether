@@ -461,6 +461,8 @@ std::unique_ptr<SlaveEmulator> createCiA402Drive(
  * @brief Create a simple slave with configurable PDOs
  * @param vendor_id    SII vendor ID.
  * @param product_code SII product code.
+ * @param input_bytes  TxPDO (slave-to-master) process data size in bytes.
+ * @param output_bytes RxPDO (master-to-slave) process data size in bytes.
  * @return configured slave emulator.
  */
 std::unique_ptr<SlaveEmulator> createSimpleSlave(

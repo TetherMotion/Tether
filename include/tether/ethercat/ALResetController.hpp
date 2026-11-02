@@ -106,6 +106,8 @@ public:
      * before writing AL_CONTROL. It receives the current values and
      * whether the target has already been reached (in which case no
      * further writes will occur).
+     * @param cb  Callback invoked each poll iteration; may be empty to
+     *        clear a previously installed callback.
      */
     void setProgressCallback(ALResetProgressCallback cb);
 

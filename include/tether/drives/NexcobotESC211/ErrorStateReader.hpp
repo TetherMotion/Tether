@@ -80,7 +80,7 @@ public:
      *
      * A non-empty diagnostic message alone does NOT count as an error —
      * the ESC debug log frequently carries informational text.
-     * @param snap  Snapshot to evaluate.
+     * @param s  Snapshot to evaluate.
      * @return true when the device reports a clean state.
      */
     static bool isOk(const Snapshot& s);

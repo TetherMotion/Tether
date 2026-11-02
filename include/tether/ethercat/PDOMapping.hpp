@@ -22,7 +22,7 @@ public:
     /**
      * Register an RxPDO (master→slave).  Storage is manager-owned — the
      * caller receives an entry index and accesses the bytes through
-     * entryDataMut()/entryDataAs<T>() or an epoch-checked entryHandle().
+     * entryDataMut()/entryDataAs\<T\>() or an epoch-checked entryHandle().
      */
     int  add_rxpdo(uint16_t slave_index, uint16_t size,
                    uint16_t pdo_index = 0x1600,

@@ -370,11 +370,11 @@ void voe_reset_stats();
  * The header format is implementation-specific. This is a common layout.
  * Some vendors use different headers.
  */
-struct __attribute__((packed)) VoEHeader {
+struct VoEHeader {
     uint32_t vendor_id_le; /**< Vendor ID (little-endian) */
     uint16_t vendor_type; /**< Vendor-specific message type */
     // Followed by vendor-specific payload
-};
+} __attribute__((packed));
 static_assert(sizeof(VoEHeader) == 6, "VoEHeader size check");
 
 } // namespace VoE

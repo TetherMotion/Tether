@@ -1,5 +1,5 @@
 /**
- * @file KlippyUdsServerE2Endpoints.cpp
+ * @file KlippyServerE2Endpoints.cpp
  * @brief E2 additional Moonraker-compatible endpoint handlers.
  */
 

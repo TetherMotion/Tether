@@ -15,6 +15,21 @@ public:
         : SDOTransactionBase(ed, mio, diag) {}
 
     /**
+     * @brief Perform a CoE SDO download (master → slave write).
+     * @param master      Master to issue the mailbox transaction on.
+     * @param adp         Auto-increment/slave address of the target.
+     * @param inoutMbxCnt Mailbox toggle counter; updated in place.
+     * @param mbxWriteAddr  Slave mailbox write (master→slave) address.
+     * @param mbxWriteLen   Slave mailbox write area length in bytes.
+     * @param mbxReadAddr   Slave mailbox read (slave→master) address.
+     * @param mbxReadLen    Slave mailbox read area length in bytes.
+     * @param index       CoE object index to write.
+     * @param sub         CoE object subindex.
+     * @param data        Object data to download.
+     * @param dataLen     Length of `data` in bytes.
+     * @param diagEnabled Enable diagnostic logging of mailbox traffic.
+     * @param pollIntervalMs      Milliseconds between mailbox polls.
+     * @param transactionTimeoutMs  Overall transaction timeout (ms).
      * @param outAbortCode  If non-null, set to the CoE SDO abort code (0 on
      *                      success or non-abort failure) reported by the slave.
      *                      Callers can use this to distinguish a definitive
@@ -24,6 +39,7 @@ public:
      *                       follow-up read when a PDO-mapping subindex abort
      *                       is observed, so a richer diagnostic can be logged.
      *                       May be nullptr to skip the diagnostic read.
+     * @return true when the download completed; false on abort/timeout.
      */
     virtual bool execute(Master& master, uint16_t adp,
                          uint8_t* inoutMbxCnt,

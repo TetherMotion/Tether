@@ -251,6 +251,7 @@ public:
      * Thin wrapper over waitForSdoValues() with this channel's
      * poll interval, stop token and tag.
      * @param expectations (index, subindex, value) tuples to satisfy
+     * @param timeout      Overall wait budget for the whole set.
      * @return `true` when all expectations matched in time
      */
     bool waitUntilMatch(std::span<const SdoExpectation> expectations,

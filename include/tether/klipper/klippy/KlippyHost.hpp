@@ -91,10 +91,11 @@ public:
      *
      * Emits (per axis, in order):
      *   - reset_step_clock oid=%c clock=&lt;startClock&gt;  (once at the start)
-     *   - set_next_step_dir oid=%c dir=<0|1>          (when direction changes)
+     *   - set_next_step_dir oid=%c dir=&lt;0|1&gt;    (when direction changes)
      *   - queue_step oid=%c interval=%u count=%hu add=%hi  (per StepCommand)
      *
      * The host must have completed downloadDictionary() first.
+     * @param seq  Translated per-axis step sequence to emit.
      * @param pump Optional callback invoked when the serial-queue window is
      *        full (should pump the device side + host side so acks flow back
      *        and free window space). If null, excess commands are dropped.
@@ -161,6 +162,7 @@ public:
      * When enabled, corrupt blocks are skipped (with optional callback)
      * instead of causing pump() to silently drop remaining data.
      * @param enabled `true` to skip corrupt blocks
+     * @param cb      Optional callback invoked for each skipped block.
      */
     void setBlockRecoveryMode(bool enabled,
                               protocol::BlockReader::ErrorCallback cb = nullptr) {

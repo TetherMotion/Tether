@@ -179,6 +179,8 @@ public:
      * @param mapping        PDOMapping with all PDO entries
      * @param rx_timeout_ns  Response wait budget in ns (default 200 µs).
      *                       Must fit inside the caller's cycle budget.
+     * @param image          Process image to use; nullptr selects the
+     *                       default image.
      * @return true on success
      */
     bool exchangeAllLRWCyclic(const PDO::PDOMapping& mapping,

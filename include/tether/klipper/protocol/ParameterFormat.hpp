@@ -108,15 +108,14 @@ size_t encodeParamValue(ParamType type, int32_t intValue,
 /**
  * @brief Decode a single parameter value from a byte stream.
  *
- * Advances @p past the decoded parameter. For integer types the value is
- * returned in @p intValue (sign-extended; mask to 32 bits for unsigned). For
- * string/buffer types the raw bytes are returned in @p str.
+ * Advances the cursor past the decoded parameter. For integer types the
+ * value is returned in `intValue` (sign-extended; mask to 32 bits for
+ * unsigned). For string/buffer types the raw bytes are returned in `str`.
  * @param type      Parameter type.
- * @param it        Byte cursor (advanced).
+ * @param p         Byte cursor (advanced past the parameter).
+ * @param end       End of the input buffer.
  * @param intValue  out: integer value (sign-extended).
  * @param str       out: raw bytes for string/buffer types.
- * @return true when decoding succeeded.
- *
  * @return true on success, false on truncation.
  */
 bool decodeParamValue(ParamType type, const uint8_t*& p, const uint8_t* end,

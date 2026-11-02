@@ -39,7 +39,11 @@ private:
                                           const std::vector<int>& widths);
 };
 
-/**Map a UI::RowColor to a Session palette index. */
+/**
+ * @brief Map a UI::RowColor to a Session palette index.
+ * @param color RowColor enum value (as int).
+ * @return ncurses color-pair index for the row.
+ */
 inline short rowPalette(int color) {
     switch (color) {
         case UI::RowOk:    return PalValue;

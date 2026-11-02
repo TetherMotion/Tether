@@ -1,5 +1,5 @@
 /**
- * @file KlippyUdsServerE1Endpoints.cpp
+ * @file KlippyServerE1Endpoints.cpp
  * @brief E1 additional endpoint handlers (job queue, webcams, power, access, bots, notepad, spoolman, devices)
  */
 

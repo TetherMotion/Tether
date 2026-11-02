@@ -1,5 +1,5 @@
 /**
- * @file KlippyUdsServerPrinterObjects.cpp
+ * @file KlippyServerPrinterObjects.cpp
  * @brief Built-in printer object status implementations
  */
 

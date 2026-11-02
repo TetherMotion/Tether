@@ -7,7 +7,6 @@
 
 #include "tether/io/ParameterExposer.hpp"
 #include "tether/motion_planner/MotionPlan.hpp"
-#include "tether/motion_planner/MotionPlanBuilder.hpp"
 
 namespace tether { namespace io { namespace exposers {
 
@@ -40,7 +39,10 @@ public:
     explicit MotionPlanExposer3D(Builder& builder)
         : builder_(builder) {}
 
-    /**Set (or update) the active plan pointer. */
+    /**
+     * @brief Set (or update) the active plan pointer.
+     * @param plan  Plan whose data is exposed; non-owning.
+     */
     void setPlan(Plan* plan) { plan_ = plan; }
 
     const char* moduleName() const override { return "motion_planner"; }

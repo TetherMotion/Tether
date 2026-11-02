@@ -250,8 +250,11 @@ public:
 
     /**
      * @brief Read a wider field from the input image by (object, subindex).
+     * @param index       CoE object index of the entry.
+     * @param subindex    CoE subindex of the entry.
      * @param occurrence  n-th matching entry (per-channel objects repeat)
-     * @return the zero-extended field value, or false when not found.
+     * @param value       out: the zero-extended field value.
+     * @return true when the entry was found and `value` written.
      */
     bool fieldIn(uint16_t index, int subindex, uint32_t occurrence,
                  uint64_t& value) const;

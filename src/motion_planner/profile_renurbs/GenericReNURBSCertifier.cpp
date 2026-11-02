@@ -54,6 +54,11 @@ inline double interpAtU(
  * @brief Check a quantity curve against its limit on a dense grid.
  * @param seg            Segment profile to check.
  * @param quantityIndex  Which quantity to evaluate.
+ * @param quantityName   Quantity name (used in violation messages).
+ * @param qs             Quantity spec supplying the constraint kind.
+ * @param sampleU        Per-sample parameter values.
+ * @param sampleLimit    Per-sample limit values.
+ * @param gridPoints     Dense-grid point count used for the check.
  * @return violations found on the grid.
  */
 inline std::vector<GenericViolation> checkQuantityConstraint(

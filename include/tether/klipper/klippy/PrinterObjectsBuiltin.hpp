@@ -135,6 +135,7 @@ public:
     /**
      * Set the parsed config settings (section name -> key -> value).
      * Keys should be lowercase as Mainsail expects.
+     * @param s  Settings map replacing the current settings.
      */
     void setSettings(std::map<std::string, JsonValue> s) { settings_ = std::move(s); }
     void setConfig(std::map<std::string, JsonValue> c) { config_ = std::move(c); }
@@ -174,7 +175,10 @@ private:
  */
 class VirtualSdcardObject : public PrinterObject {
 public:
-    /**@brief Construct with a VirtualSdcard backend. */
+    /**
+     * @brief Construct with a VirtualSdcard backend.
+     * @param sd  Shared virtual-sd implementation backing this object.
+     */
     explicit VirtualSdcardObject(std::shared_ptr<class VirtualSdcard> sd)
         : sd_(std::move(sd)) {}
 

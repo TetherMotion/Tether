@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 namespace EtherCAT {
@@ -68,7 +69,12 @@ struct ShmImageLayout {
     static constexpr uint32_t kHeaderPadded = 256;
     static uint32_t outputOff()                { return kHeaderPadded; }
     static uint32_t inputOff(uint32_t rx)      { return kHeaderPadded + rx; }
-    /**Byte offset where the exported entry table begins (when present). */
+    /**
+     * @brief Byte offset where the exported entry table begins (when present).
+     * @param rx RxPDO region size in bytes.
+     * @param tx TxPDO region size in bytes.
+     * @return Offset of the entry table within the shared image.
+     */
     static uint32_t entryTableOff(uint32_t rx, uint32_t tx) {
         return kHeaderPadded + rx + tx;
     }

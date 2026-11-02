@@ -19,10 +19,8 @@
  * identities, (M9) root isolation by variation-diminishing subdivision.
  * See docs/motion/BlendingAlgorithm.md for proofs.
  *
- * @param coeffs    Bernstein coefficients.
- * @param intervals out: isolated root intervals.
- * @return isolated roots.isolateRoots` exploits both by recursive subdivision: it never misses a
- * root (certified isolation) and needs no sampling. Near-multiple or
+ * `isolateRoots` exploits both properties by recursive subdivision: it never
+ * misses a root (certified isolation) and needs no sampling. Near-multiple or
  * clustered roots that cannot be separated at the requested tolerance are
  * reported as one merged interval covering the cluster (documented
  * behavior — the interval still provably contains the roots).
@@ -115,6 +113,8 @@ std::vector<double> bernsteinToPower(const std::vector<double>& coeffs);
  * @param tol interval width goal (must be > 0); degenerate all-zero
  *        coefficient vectors return a single interval [0,1] (a zero
  *        polynomial — every point is a "root"; callers must special-case).
+ * @return Disjoint intervals, each of width < 2·tol, covering all roots
+ *         of p in [0,1]; empty if the interval-wise sign checks prove no root.
  */
 std::vector<Interval> isolateRoots(const std::vector<double>& coeffs,
                                    double tol);

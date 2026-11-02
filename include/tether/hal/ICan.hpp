@@ -76,7 +76,7 @@ public:
 
     /**
      * @brief Open and configure the CAN interface.
-     * @param bitrate  Bus bitrate in bit/s.
+     * @param config  Bus configuration (bitrate, mode, filters).
      * @return true on success.
      */
     virtual bool open(const CanConfig& config) = 0;

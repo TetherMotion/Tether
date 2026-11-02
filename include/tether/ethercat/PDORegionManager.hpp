@@ -40,9 +40,17 @@ struct PDORegion {
 class IPDORegionProvider {
 public:
     virtual ~IPDORegionProvider() = default;
-    /**Called before sendAll(): fill the Tx region with data to send */
+    /**
+     * @brief Called before sendAll(): fill the Tx region with data to send.
+     * @param region Region descriptor (offset/length within the image).
+     * @param buffer Destination buffer covering `region`.
+     */
     virtual void fillTxRegion(const PDORegion& region, uint8_t* buffer) = 0;
-    /**Called after receiveAll(): consume Rx data from the region */
+    /**
+     * @brief Called after receiveAll(): consume Rx data from the region.
+     * @param region Region descriptor (offset/length within the image).
+     * @param buffer Source buffer covering `region`.
+     */
     virtual void consumeRxRegion(const PDORegion& region, const uint8_t* buffer) = 0;
 };
 

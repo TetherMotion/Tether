@@ -1,5 +1,5 @@
 /**
- * @file KlippyUdsServerFileEndpoints.cpp
+ * @file KlippyServerFileEndpoints.cpp
  * @brief File operation and server info endpoint handlers
  */
 

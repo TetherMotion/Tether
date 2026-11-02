@@ -19,7 +19,10 @@ namespace tether::gcode::analysis {
 
 /**
  * @brief Analyze Z-seam positions and consistency from aligned planning data.
- * @param segments  Aligned planning segments.
+ * @param planningSegments Aligned planning segments.
+ * @param segmentSpeeds    Per-segment speed results.
+ * @param gcodeLines       Raw G-code lines for reporting context.
+ * @param options          Analyzer options.
  * @return seam analysis result.
  */
 Section analyzeZSeam(const std::vector<GCode::PlanningSegment>& planningSegments,

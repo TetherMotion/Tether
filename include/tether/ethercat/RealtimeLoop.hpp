@@ -85,6 +85,7 @@ public:
          *
          * @param cycle_us  PDO cycle period in µs
          * @param sync_cyc  Number of PDO cycles between DC sync frames
+         * @return default-initialized Config with derived jitter thresholds.
          */
         static Config defaults(uint32_t cycle_us = 1000, uint32_t sync_cyc = 10) {
             Config c;

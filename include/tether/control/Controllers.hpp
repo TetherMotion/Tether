@@ -207,6 +207,7 @@ constexpr const char* CONTROLLER_VERSION = "1.0.0";
 
 /**
  * @brief Get controller framework version
+ * @return NUL-terminated version string ("1.0.0"); static storage.
  */
 inline const char* getVersion() { return CONTROLLER_VERSION; }
 

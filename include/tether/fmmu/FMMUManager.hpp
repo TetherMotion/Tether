@@ -214,6 +214,7 @@ public:
      * @param input_phys         Physical start address of the input SM (SM3)
      * @param input_len          Input PDO length in bytes (0 to skip)
      * @param input_logical_addr Logical start address for the input FMMU
+     * @param fmmu_debug         Emit per-FMMU configuration debug output.
      * @return true if at least one FMMU was configured
      */
     bool configureManual(uint16_t output_phys, uint16_t output_len,
@@ -231,6 +232,7 @@ public:
      *
      * @param sm_configs       Vector of multi-PDO sync manager configs
      * @param base_logical_addr Base logical address for this slave's FMMU region
+     * @param fmmu_debug         Emit per-FMMU configuration debug output.
      * @return true if at least one FMMU was configured
      */
     bool configureFromMultiPDO(const std::vector<PDO::MultiPDOSyncManagerConfig>& sm_configs,

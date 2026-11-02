@@ -279,7 +279,7 @@ public:
      * thread.  Cheap when no session is streaming (single atomic load);
      * never blocks; drops (counted) when the ring is full.
      *
-     * @param emit  Sink invoked with the produced row.
+     * @param fill  Sink invoked with the produced row.
      * @return rows emitted.
      */
     template <typename F>

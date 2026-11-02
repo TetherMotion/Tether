@@ -463,6 +463,7 @@ Error validateG1(const Block& block, const MachineState& state,
  * @brief Check for rapid plunge warning
  * @param current Start position
  * @param target Destination position
+ * @param config  Linear-motion config supplying the warning thresholds
  * @return `true` when the rapid move descends into the work zone
  */
 bool checkRapidPlungeWarning(

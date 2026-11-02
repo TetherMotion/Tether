@@ -120,13 +120,19 @@ class PendingSlot {
     return std::nullopt;
   }
 
-  /**@brief Whether a value is currently pending (non-consuming probe). */
+  /**
+   * @brief Whether a value is currently pending (non-consuming probe).
+   * @return true when a value is waiting to be consumed.
+   */
   bool hasPending() const {
     std::lock_guard lk(mtx_);
     return pending_.has_value();
   }
 
-  /**@brief Consistent snapshot of all counters and streak maxima. */
+  /**
+   * @brief Consistent snapshot of all counters and streak maxima.
+   * @return Stats snapshot taken under the slot mutex.
+   */
   Stats stats() const {
     std::lock_guard lk(mtx_);
     return Stats{puts_,     gets_,         hits_,

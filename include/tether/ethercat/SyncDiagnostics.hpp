@@ -124,8 +124,12 @@ class SyncDiagnostics {
 public:
     /**
      * Collect all sync diagnostics for one slave.
+     * @param slave_index  Position index of the slave to inspect.
+     * @param coe          CoE manager used for the object-dictionary reads.
      * @param reg_read  Register access for the DC section; pass nullptr
      *                  (or set Options::read_dc_regs=false) to skip it.
+     * @param opts         Collection options (sections, thresholds).
+     * @return collected diagnostic report.
      */
     static SyncDiagReport collect(uint16_t slave_index,
                                   CoE::CoEManager& coe,
