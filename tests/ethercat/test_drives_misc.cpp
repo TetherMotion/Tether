@@ -8,6 +8,9 @@
 #include <gtest/gtest.h>
 
 #include "mocks/EmulatedBus.hpp"
+#include "tether/drives/AS715N.hpp"
+#include "tether/drives/AS715NRegisters.hpp"
+#include "tether/drives/AS715N/Registers/C00-Parameters.hpp"
 #include "tether/drives/DynaDrive.hpp"
 #include "tether/drives/DynaDrive/Registers/Statusword.hpp"
 #include "tether/drives/Synapticon/BrakeControl.hpp"
@@ -71,9 +74,10 @@ protected:
         auto add = [this](uint8_t sub, uint64_t v, uint8_t bytes) {
             std::vector<uint8_t> d(bytes);
             for (uint8_t i = 0; i < bytes; ++i) d[i] = uint8_t(v >> (8 * i));
-            slave_->addODEntry({0x2004, sub,
-                                bytes == 1 ? 0x0005 : bytes == 2 ? 0x0006 : 0x0007,
-                                uint16_t(bytes * 8), 0x03, d, "brk"});
+            const uint16_t dt =
+                bytes == 1 ? 0x0005 : bytes == 2 ? 0x0006 : 0x0007;
+            slave_->addODEntry(
+                {0x2004, sub, dt, uint16_t(bytes * 8), 0x03, d, "brk"});
         };
         add(0x01, 24000, 4);   // pull voltage (mV)
         add(0x02, 12000, 4);   // hold voltage
@@ -207,6 +211,111 @@ TEST_F(BrakeControlTest, ConfigEntriesTableListsSixObjects) {
     static_assert(BrakeControl::kConfigEntries.size() == 6);
     for (const auto* e : BrakeControl::kConfigEntries)
         EXPECT_NE(e, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// AS715N — manufacturer fault parsing + bleeder config over emulated CoE
+// ---------------------------------------------------------------------------
+
+class AS715NTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        auto slave = Emulator::createCiA402Drive(0x00000E59, 0x7150, "as715n");
+        slave_ = slave.get();
+        bus_.net.addSlave(std::move(slave));
+        bus_.attach(master_);
+        master_.start(bus_.iface, kEmulatedMac);
+        auto found = master_.discovery().discover(DiscoveryOptions{});
+        ASSERT_EQ(found.size(), 1u);
+        master_.sdoManager(0).configureMailbox(0x1000, 128, 0x1080, 128);
+    }
+    void TearDown() override {
+        bus_.shutdown();
+        master_.packetRouter().shutdown();
+    }
+
+    Master master_;
+    EmulatedBus bus_;
+    SlaveEmulator* slave_ = nullptr;
+};
+
+TEST_F(AS715NTest, ManufacturerFaultParsesU32) {
+    // 0x203F as U32: high16 = internal code, low16 = external code.
+    slave_->addODEntry({0x203F, 0x00, 0x0007, 32, 0x01,
+                        {0x34, 0x12, 0x78, 0x56}, "fault"});
+    auto& sdo = master_.sdoManager(0);
+
+    auto ext = Drives::AS715NFaultHandler::readManufacturerFaultExtended(sdo, 0);
+    EXPECT_EQ(ext.external_code, 0x1234);
+    EXPECT_EQ(ext.internal_code, 0x5678);
+    EXPECT_EQ(Drives::AS715NFaultHandler::readManufacturerFault(sdo, 0),
+              0x1234);
+}
+
+TEST_F(AS715NTest, ManufacturerFaultParsesU16FirmwareVariant) {
+    // Some firmware exposes 0x203F as U16 (external only).
+    slave_->addODEntry({0x203F, 0x00, 0x0006, 16, 0x01, {0x42, 0x00}, "f"});
+    auto& sdo = master_.sdoManager(0);
+
+    auto ext = Drives::AS715NFaultHandler::readManufacturerFaultExtended(sdo, 0);
+    EXPECT_EQ(ext.external_code, 0x42);
+    EXPECT_EQ(ext.internal_code, 0);
+}
+
+TEST_F(AS715NTest, ManufacturerFaultMissingObjectReturnsDefault) {
+    auto& sdo = master_.sdoManager(0);
+    auto ext = Drives::AS715NFaultHandler::readManufacturerFaultExtended(sdo, 0);
+    EXPECT_EQ(ext.external_code, 0);
+    EXPECT_EQ(ext.internal_code, 0);
+    EXPECT_EQ(Drives::AS715NFaultHandler::readManufacturerFault(sdo, 0), 0);
+}
+
+TEST_F(AS715NTest, CiA402ErrorReadsU16) {
+    // 0x603F is owned by the emulator's CiA402 layer — set the fault there.
+    slave_->getDriveState().error_code = 0x2210;
+    auto& sdo = master_.sdoManager(0);
+    EXPECT_EQ(Drives::AS715NFaultHandler::readCiA402Error(sdo, 0), 0x2210);
+}
+
+TEST_F(AS715NTest, CiA402ErrorNoFaultReturnsZero) {
+    // CiA402 slaves always expose 0x603F; a fault-free drive reports 0.
+    auto& sdo = master_.sdoManager(0);
+    EXPECT_EQ(Drives::AS715NFaultHandler::readCiA402Error(sdo, 0), 0);
+}
+
+TEST_F(AS715NTest, BleederResistorWritesAllThreeSubs) {
+    namespace C00 = Drives::Registers::AS715N::C00;
+    // C00 object 0x2000: selection=0x11, power=0x12, resistance=0x13 (U16).
+    slave_->addODEntry({0x2000, 0x11, 0x0006, 16, 0x03, {0, 0}, "sel"});
+    slave_->addODEntry({0x2000, 0x12, 0x0006, 16, 0x03, {0, 0}, "pwr"});
+    slave_->addODEntry({0x2000, 0x13, 0x0006, 16, 0x03, {0, 0}, "res"});
+    auto& sdo = master_.sdoManager(0);
+
+    EXPECT_TRUE(Drives::AS715NConfig::configureBleederResistor(
+        sdo, C00::BleederResistorSelectionOptions::ExternalBleederResistor,
+        /*power_w=*/100, /*resistance_ohm=*/47));
+
+    auto get = [this](uint8_t sub) -> uint16_t {
+        const auto* e = slave_->odEntry(0x2000, sub);
+        return e ? uint16_t(e->data[0] | (e->data[1] << 8)) : 0xFFFF;
+    };
+    EXPECT_EQ(get(0x11), uint16_t(C00::BleederResistorSelectionOptions::
+                                  ExternalBleederResistor));
+    EXPECT_EQ(get(0x12), 100);
+    EXPECT_EQ(get(0x13), 47);
+}
+
+TEST_F(AS715NTest, BleederResistorReportsPartialFailure) {
+    // Only 2 of 3 entries exist → write fails for missing sub → returns false.
+    slave_->addODEntry({0x2000, 0x11, 0x0006, 16, 0x03, {0, 0}, "sel"});
+    slave_->addODEntry({0x2000, 0x12, 0x0006, 16, 0x03, {0, 0}, "pwr"});
+    auto& sdo = master_.sdoManager(0);
+    EXPECT_FALSE(Drives::AS715NConfig::configureBleederResistor(
+        sdo, Drives::Registers::AS715N::C00::
+                 BleederResistorSelectionOptions::InternalBleederResistor,
+        50, 20));
+    // Successful writes still applied.
+    EXPECT_EQ(slave_->odEntry(0x2000, 0x12)->data[0], 50);
 }
 
 TEST_F(BrakeControlTest, SdoFailurePathsReturnErrors) {
