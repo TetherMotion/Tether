@@ -12,6 +12,8 @@
 
 #include <gtest/gtest.h>
 #include <cmath>
+#include <cstdio>
+#include <fstream>
 #include <vector>
 
 using namespace GCode;
@@ -1079,4 +1081,354 @@ TEST_F(InterpreterTestBase, BitwiseOperators) {
     // Fractional operands stay logical
     EXPECT_TRUE(interp.executeLine("#1 = [0.5 AND 0.5]").ok());
     EXPECT_NEAR(interp.getVariables().get(1), 1.0, 0.001);
+}
+
+// ============================================================================
+// Coverage additions — interpreter control paths
+// ============================================================================
+
+TEST_F(InterpreterTestBase, LoadStringRunFinish) {
+    EXPECT_TRUE(interp.loadString("G1 X10 F100\nG1 Y5\n").ok());
+    EXPECT_TRUE(interp.isProgramLoaded());
+    EXPECT_TRUE(interp.run().ok());
+    EXPECT_TRUE(interp.isFinished());
+    EXPECT_EQ(interp.getState(), InterpreterState::FINISHED);
+}
+
+TEST_F(InterpreterTestBase, UnloadClearsProgram) {
+    interp.loadString("G1 X10\n");
+    interp.unload();
+    EXPECT_FALSE(interp.isProgramLoaded());
+    EXPECT_EQ(interp.getState(), InterpreterState::IDLE);
+}
+
+TEST_F(InterpreterTestBase, RunWithoutProgramErrors) {
+    EXPECT_FALSE(interp.run().ok());
+    EXPECT_FALSE(interp.step().ok());
+}
+
+TEST_F(InterpreterTestBase, StepThroughProgram) {
+    interp.loadString("G1 X10 F100\nG1 Y5\n");
+    EXPECT_TRUE(interp.step().ok());
+    EXPECT_TRUE(interp.step().ok());
+    EXPECT_TRUE(interp.step().ok());  // END → FINISHED
+    EXPECT_TRUE(interp.isFinished());
+}
+
+TEST_F(InterpreterTestBase, PauseResumeStop) {
+    interp.loadString("G1 X10\n");
+    interp.run();  // finishes — IDLE path not RUNNING
+    interp.loadString("G1 X10\nM2\n");
+    // pause() only acts on RUNNING
+    interp.pause();
+    EXPECT_FALSE(interp.resume().ok());  // not paused → error
+    interp.stop();
+    EXPECT_EQ(interp.getState(), InterpreterState::STOPPED);
+    interp.reset();
+    EXPECT_EQ(interp.getState(), InterpreterState::IDLE);
+}
+
+TEST_F(InterpreterTestBase, RealtimeCommands) {
+    std::vector<char> rt;
+    interp.setRealtimeCallback([&rt](char c) { rt.push_back(c); return Error{}; });
+
+    EXPECT_TRUE(interp.processRealtimeChar('!').ok());   // feed hold
+    EXPECT_TRUE(interp.processRealtimeChar('~').ok());   // cycle resume
+    EXPECT_TRUE(interp.processRealtimeChar('\x18').ok()); // soft reset
+    EXPECT_TRUE(interp.processRealtimeChar('\x85').ok()); // jog cancel
+    EXPECT_TRUE(interp.processRealtimeChar('?').ok());   // status query
+    EXPECT_FALSE(interp.processRealtimeChar('\x01').ok()); // unknown
+
+    EXPECT_TRUE(interp.feedHold().ok());
+    EXPECT_TRUE(interp.cycleResume().ok());
+    EXPECT_TRUE(interp.softReset().ok());
+    EXPECT_TRUE(interp.jogCancel().ok());
+}
+
+TEST_F(InterpreterTestBase, StatusReportStates) {
+    interp.loadString("G1 X1\n");
+    EXPECT_NE(interp.statusReport().find("Ready"), std::string::npos);
+    interp.run();
+    EXPECT_NE(interp.statusReport().find("Idle"), std::string::npos);
+    interp.reset();
+    interp.loadString("G1 X1\n");
+    interp.stop();
+    EXPECT_NE(interp.statusReport().find("Alarm"), std::string::npos);
+}
+
+TEST_F(InterpreterTestBase, SystemCommands) {
+    std::vector<std::string> messages;
+    interp.setMessageCallback([&messages](const std::string& m) {
+        messages.push_back(m);
+    });
+    std::vector<char> rt;
+    interp.setRealtimeCallback([&rt](char c) { rt.push_back(c); return Error{}; });
+
+    EXPECT_TRUE(interp.systemCommand("$$").ok());   // $$ — list settings
+    EXPECT_TRUE(interp.systemCommand("$G").ok());   // modal group report
+    EXPECT_TRUE(interp.systemCommand("I").ok());    // build info
+    EXPECT_TRUE(interp.systemCommand("#").ok());    // offset report
+    EXPECT_TRUE(interp.systemCommand("X").ok());    // unlock
+    EXPECT_TRUE(interp.systemCommand("H").ok());    // home → realtime cb
+    EXPECT_TRUE(interp.systemCommand("J=X10").ok()); // jog → realtime cb
+    EXPECT_TRUE(interp.systemCommand("C").ok());    // toggle check mode
+    EXPECT_TRUE(interp.isDryRun());
+    EXPECT_TRUE(interp.systemCommand("C").ok());    // back off
+    EXPECT_TRUE(interp.systemCommand("N").ok());    // startup lines
+    EXPECT_TRUE(interp.systemCommand("N0=G21").ok()); // set N0
+    EXPECT_TRUE(interp.systemCommand("$1=100").ok()); // $1=100 setting write
+    EXPECT_FALSE(interp.systemCommand("$1=abc").ok()); // bad value
+    EXPECT_FALSE(interp.systemCommand("$ZZZ").ok());  // unknown
+}
+
+TEST_F(InterpreterTestBase, VerifyAndDryRun) {
+    interp.loadString("G1 X10 F100\nG1 Y5\n");
+    interp.setDryRun(true);
+    EXPECT_TRUE(interp.isDryRun());
+    EXPECT_TRUE(interp.verify().ok());
+}
+
+TEST_F(InterpreterTestBase, VerifyWithError) {
+    interp.loadString("O100 endif\n");  // endif without if → execute error
+    Error err = interp.verify();
+    EXPECT_FALSE(err.ok());
+}
+
+TEST_F(InterpreterTestBase, LoadFilePaths) {
+    EXPECT_FALSE(interp.loadFile("/nonexistent/program.ngc").ok());
+
+    const char* path = "/tmp/tether_interp_cov.ngc";
+    {
+        std::ofstream f(path);
+        f << "G1 X10\n";
+    }
+    EXPECT_TRUE(interp.loadFile(path).ok());
+    EXPECT_TRUE(interp.isProgramLoaded());
+    std::remove(path);
+}
+
+TEST_F(InterpreterTestBase, LoadFileOversize) {
+    InterpreterConfig cfg;
+    cfg.maxProgramSize = 4;
+    Interpreter small(cfg);
+    const char* path = "/tmp/tether_interp_big.ngc";
+    {
+        std::ofstream f(path);
+        f << "G1 X10 Y20 Z30 F500\n";
+    }
+    EXPECT_FALSE(small.loadFile(path).ok());
+    std::remove(path);
+}
+
+TEST_F(InterpreterTestBase, ExecuteLineParseError) {
+    Error err = interp.executeLine("%&*bogus");
+    EXPECT_FALSE(err.ok());
+}
+
+TEST_F(InterpreterTestBase, DwellG4Variants) {
+    EXPECT_TRUE(interp.executeLine("G4 P500").ok());   // P in ms
+    EXPECT_TRUE(interp.executeLine("G4 S2").ok());     // S in seconds
+    EXPECT_EQ(dwells.size(), 2u);
+}
+
+TEST_F(InterpreterTestBase, WcsOffsetsG10) {
+    EXPECT_TRUE(interp.executeLine("G10 L2 P1 X10 Y20").ok());
+    EXPECT_TRUE(interp.executeLine("G10 L20 P1 X5").ok());
+    // G10 without L → user G-code callback path
+    int called = -1;
+    interp.setUserGCodeCallback([&called](int32_t g, const Block&) {
+        called = g;
+        return Error{};
+    });
+    EXPECT_TRUE(interp.executeLine("G10").ok());
+    EXPECT_EQ(called, 10);
+    // G10 with unsupported L → error
+    EXPECT_FALSE(interp.executeLine("G10 L99").ok());
+}
+
+TEST_F(InterpreterTestBase, UserGCodeStubs) {
+    std::vector<int> seen;
+    interp.setUserGCodeCallback([&seen](int32_t g, const Block&) {
+        seen.push_back(g);
+        return Error{};
+    });
+    EXPECT_TRUE(interp.executeLine("G11").ok());
+    EXPECT_TRUE(interp.executeLine("G29").ok());
+    EXPECT_EQ(seen.size(), 2u);
+}
+
+TEST_F(InterpreterTestBase, ReferencePointsG28G30) {
+    EXPECT_TRUE(interp.executeLine("G28").ok());
+    EXPECT_TRUE(interp.executeLine("G30").ok());
+    EXPECT_GE(segments.size(), 2u);
+}
+
+TEST_F(InterpreterTestBase, G30ProbeFeature) {
+    interp.enableFeature(Feature::G30_PROBE);
+    interp.setProbeCallback(
+        [](const Position&, double, ProbeType, ProbeResult& result) {
+            result.tripped = true;
+            result.success = true;
+            result.tripPosition = Position{1.0, 2.0, 3.0};
+            return Error{};
+        });
+    EXPECT_TRUE(interp.executeLine("G30 X5 Y6 Z-1 F100").ok());
+}
+
+TEST_F(InterpreterTestBase, MachineCoordsG53) {
+    EXPECT_TRUE(interp.executeLine("G53 G0 X10 Y20").ok());
+}
+
+TEST_F(InterpreterTestBase, MacroCallsG65G66G67) {
+    // G65 without subprogram defined → error is fine, path covered.
+    interp.executeLine("G65 P1000 A1 B2");
+    interp.executeLine("G66 P1000 X1");
+    interp.executeLine("G67").ok();
+}
+
+TEST_F(InterpreterTestBase, LatheCyclesAndUnits) {
+    // Without the units feature these are unsupported Fanuc lathe cycles.
+    EXPECT_FALSE(interp.executeLine("G70").ok());
+    EXPECT_FALSE(interp.executeLine("G71").ok());
+    EXPECT_FALSE(interp.executeLine("G72").ok());
+    interp.enableFeature(Feature::G70_G71_UNITS);
+    EXPECT_TRUE(interp.executeLine("G70").ok());   // inch units
+    EXPECT_TRUE(interp.executeLine("G71").ok());   // metric units
+}
+
+TEST_F(InterpreterTestBase, HaasCycles) {
+    interp.executeLine("G12 I10 D1 F100");
+    interp.executeLine("G13 I10 D1 F100");
+    interp.executeLine("G150 X10 Y10");
+    interp.executeLine("G187 P1");
+}
+
+TEST_F(InterpreterTestBase, G92Family) {
+    EXPECT_TRUE(interp.executeLine("G92 X10").ok());
+    EXPECT_TRUE(interp.executeLine("G92.1").ok());
+    EXPECT_TRUE(interp.executeLine("G92.2").ok());
+    EXPECT_TRUE(interp.executeLine("G92.3").ok());
+}
+
+TEST_F(InterpreterTestBase, PlaneVariants) {
+    EXPECT_TRUE(interp.executeLine("G17").ok());
+    EXPECT_TRUE(interp.executeLine("G18").ok());
+    EXPECT_TRUE(interp.executeLine("G19").ok());
+    EXPECT_TRUE(interp.executeLine("G17.1").ok());  // UV
+    EXPECT_TRUE(interp.executeLine("G18.1").ok());  // WU
+    EXPECT_TRUE(interp.executeLine("G19.1").ok());  // VW
+}
+
+TEST_F(InterpreterTestBase, ToolLengthComp) {
+    ToolEntry e;
+    e.toolNumber = 2;
+    e.zOffset = 5.0;
+    e.diameter = 4.0;
+    ASSERT_TRUE(interp.getToolTable().setTool(2, e).ok());
+    e.toolNumber = 3;
+    ASSERT_TRUE(interp.getToolTable().setTool(3, e).ok());
+
+    EXPECT_TRUE(interp.executeLine("G49").ok());       // cancel
+    EXPECT_TRUE(interp.executeLine("G43.1 X1 Z1").ok()); // dynamic offset
+    EXPECT_TRUE(interp.executeLine("G43 H2").ok());      // tool table
+    EXPECT_TRUE(interp.executeLine("G43.2 H3").ok());    // additional offset
+    EXPECT_TRUE(interp.executeLine("G49").ok());
+}
+
+TEST_F(InterpreterTestBase, CutterComp) {
+    ToolEntry e;
+    e.toolNumber = 1;
+    e.diameter = 4.0;
+    ASSERT_TRUE(interp.getToolTable().setTool(1, e).ok());
+    e.toolNumber = 2;
+    ASSERT_TRUE(interp.getToolTable().setTool(2, e).ok());
+
+    EXPECT_TRUE(interp.executeLine("G40").ok());
+    EXPECT_TRUE(interp.executeLine("G41 D1").ok());
+    EXPECT_TRUE(interp.executeLine("G40").ok());
+    EXPECT_TRUE(interp.executeLine("G42 D1").ok());
+    EXPECT_TRUE(interp.executeLine("G40").ok());
+    EXPECT_TRUE(interp.executeLine("G41.1 D2").ok());
+    EXPECT_TRUE(interp.executeLine("G40").ok());
+    EXPECT_TRUE(interp.executeLine("G42.1 D2").ok());
+    EXPECT_TRUE(interp.executeLine("G40").ok());
+}
+
+// ============================================================================
+// Coverage additions — M-code paths
+// ============================================================================
+
+TEST_F(InterpreterTestBase, ProgramControlMCodes) {
+    EXPECT_TRUE(interp.executeLine("M0").ok());
+    EXPECT_TRUE(interp.executeLine("M1").ok());
+    EXPECT_TRUE(interp.executeLine("M2").ok());
+    EXPECT_TRUE(interp.executeLine("M30").ok());
+    EXPECT_TRUE(interp.executeLine("M60").ok());
+    EXPECT_GE(programControls.size(), 1u);
+}
+
+TEST_F(InterpreterTestBase, CoolantMCodes) {
+    EXPECT_TRUE(interp.executeLine("M7").ok());
+    EXPECT_TRUE(interp.executeLine("M8").ok());
+    EXPECT_TRUE(interp.executeLine("M9").ok());
+    EXPECT_EQ(coolantCommands.size(), 3u);
+}
+
+TEST_F(InterpreterTestBase, ToolChangeM6) {
+    EXPECT_TRUE(interp.executeLine("M6 T2").ok());
+}
+
+TEST_F(InterpreterTestBase, SpindleOrientM19) {
+    interp.executeLine("M19 R90 S500 P1");
+}
+
+TEST_F(InterpreterTestBase, HaasGearRanges) {
+    EXPECT_TRUE(interp.executeLine("M41").ok());
+    EXPECT_TRUE(interp.executeLine("M42").ok());
+    EXPECT_TRUE(interp.executeLine("M43").ok());
+    EXPECT_TRUE(interp.executeLine("M44").ok());
+}
+
+TEST_F(InterpreterTestBase, OverrideMCodes) {
+    EXPECT_TRUE(interp.executeLine("M48").ok());
+    EXPECT_TRUE(interp.executeLine("M49").ok());
+    EXPECT_TRUE(interp.executeLine("M50 P1").ok());
+    EXPECT_TRUE(interp.executeLine("M51 P1").ok());
+    EXPECT_TRUE(interp.executeLine("M52 P1").ok());
+    EXPECT_TRUE(interp.executeLine("M53").ok());
+}
+
+TEST_F(InterpreterTestBase, MotorMCodes) {
+    EXPECT_TRUE(interp.executeLine("M17").ok());
+    EXPECT_TRUE(interp.executeLine("M18").ok());
+    EXPECT_TRUE(interp.executeLine("M84").ok());
+}
+
+TEST_F(InterpreterTestBase, TemperatureMCodes) {
+    EXPECT_TRUE(interp.executeLine("M104 S200").ok());
+    EXPECT_TRUE(interp.executeLine("M109 S200").ok());
+    EXPECT_TRUE(interp.executeLine("M140 S60").ok());
+    EXPECT_TRUE(interp.executeLine("M190 S60").ok());
+    EXPECT_TRUE(interp.executeLine("M141 S40").ok());
+    EXPECT_TRUE(interp.executeLine("M191 S40").ok());
+}
+
+TEST_F(InterpreterTestBase, FanMCodes) {
+    EXPECT_TRUE(interp.executeLine("M106 S255").ok());
+    EXPECT_TRUE(interp.executeLine("M107").ok());
+}
+
+TEST_F(InterpreterTestBase, MiscMCodes) {
+    EXPECT_TRUE(interp.executeLine("M400").ok());
+    EXPECT_TRUE(interp.executeLine("M600").ok());
+    EXPECT_TRUE(interp.executeLine("M70").ok());   // save modal
+    EXPECT_TRUE(interp.executeLine("M71").ok());   // invalidate
+    EXPECT_TRUE(interp.executeLine("M72").ok());   // restore
+    EXPECT_TRUE(interp.executeLine("M73").ok());   // auto-restore
+}
+
+TEST_F(InterpreterTestBase, M98M99ViaInterpreter) {
+    // M98 without the subprogram → error path covered.
+    interp.executeLine("M98 P1000 L2");
+    interp.executeLine("M99");
 }
