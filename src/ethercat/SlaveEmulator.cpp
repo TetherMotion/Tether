@@ -476,6 +476,7 @@ void SlaveEmulator::advanceDCTime(uint64_t delta_ns) {
 void SlaveEmulator::enableCiA402(bool enable) {
     cia402_enabled_ = enable;
     if (enable) {
+        std::lock_guard<std::mutex> lk(od_mutex_);
         // Add CiA 402 objects to dictionary
         // Control word 0x6040
         object_dictionary_.push_back({0x6040, 0, 0x0006, 16, 0x03, {0, 0}, "Controlword"});
@@ -650,6 +651,9 @@ void SlaveEmulator::coeSdoAbort(uint8_t index_hi, uint8_t index_lo,
 }
 
 void SlaveEmulator::processMailboxRequest() {
+    // The OD can be mutated from a test thread (addODEntry) while this
+    // runs on the wire thread — serialize dictionary access.
+    std::lock_guard<std::mutex> od_lk(od_mutex_);
     SyncManager& sm0 = sync_managers_[0];
     SyncManager& sm1 = sync_managers_[1];
     if (sm0.buffer.size() < sizeof(Raw::MbxHeader) + sizeof(Raw::CoeHeader) + 8 ||

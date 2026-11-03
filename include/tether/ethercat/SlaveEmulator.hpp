@@ -401,6 +401,7 @@ public:
     /// Register or replace an object-dictionary entry (tests that need
     /// OD objects beyond the built-in set — e.g. PDO mapping records).
     void addODEntry(const ODEntry& entry) {
+        std::lock_guard<std::mutex> lk(od_mutex_);
         if (ODEntry* e = findODEntry(entry.index, entry.subindex)) {
             *e = entry;
         } else {
@@ -409,6 +410,7 @@ public:
     }
     /// Read back an OD entry's stored data (nullptr when absent).
     const ODEntry* odEntry(uint16_t index, uint8_t subindex) const {
+        std::lock_guard<std::mutex> lk(od_mutex_);
         for (const auto& e : object_dictionary_) {
             if (e.index == index && e.subindex == subindex) return &e;
         }
@@ -463,6 +465,9 @@ private:
 
     // Object dictionary
     std::vector<ODEntry> object_dictionary_;
+    // Guards object_dictionary_ — test threads mutate the OD (addODEntry)
+    // while a wire thread runs SDO handling (processMailboxRequest).
+    mutable std::mutex od_mutex_;
 
     // CiA 402
     bool cia402_enabled_ = false;
