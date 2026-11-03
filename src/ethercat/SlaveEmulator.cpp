@@ -719,13 +719,20 @@ void SlaveEmulator::processMailboxRequest() {
         if (expedited) {
             data_len = size_indicated ? (4u - unused) : 4u;
         } else {
-            // Normal initiate: first 4 bytes declare the total size.
+            // Normal initiate: first 4 bytes declare the total size;
+            // inline bytes may follow, remainder arrives via segments.
             uint32_t declared = 0;
             std::memcpy(&declared, sdo + 4, 4);
             declared = Raw::le32_to_host(declared);
             payload = sdo + 8;
             data_len = (sdo_avail >= 8)
                      ? std::min<size_t>(declared, sdo_avail - 8) : 0;
+            // Arm segmented-download state: if data_len < declared the
+            // master follows up with 0x00-class segments that append here.
+            download_index_  = index;
+            download_sub_    = sub;
+            download_toggle_ = false;
+            download_active_ = true;
         }
 
         ODEntry* entry = findODEntry(index, sub);
@@ -795,6 +802,34 @@ void SlaveEmulator::processMailboxRequest() {
             upload_offset_ = 0;
             upload_toggle_ = false;
         }
+        finish_response();
+        return;
+    }
+
+    if (req_class == Raw::EC_SDO_DOWN_SEG_REQ) {
+        // Segmented download: append chunks to the object the initiate armed.
+        ODEntry* entry = findODEntry(download_index_, download_sub_);
+        const bool req_toggle = (cmd & 0x10u) != 0;
+        if (!download_active_ || !entry || req_toggle != download_toggle_) {
+            coeSdoAbort(index_hi, index_lo, sub, kSdoAbortGeneral);
+            return;
+        }
+        const size_t seg_bytes = 7u - ((cmd >> 1) & 0x07u);
+        const bool last = (cmd & 0x01u) != 0;
+        const size_t avail = (sdo_avail >= 8)
+            ? std::min(seg_bytes, sdo_avail - 1) : 0;
+        entry->data.insert(entry->data.end(),
+                           sdo + 1, sdo + 1 + avail);
+        if (last) {
+            download_active_ = false;
+            syncDriveFromOD(download_index_, download_sub_,
+                            entry->data.data(), entry->data.size());
+        }
+
+        uint8_t* rsp = begin_response(8);
+        if (!rsp) return;
+        rsp[0] = static_cast<uint8_t>(0x20 | (req_toggle ? 0x10u : 0x00u));
+        download_toggle_ = !download_toggle_;
         finish_response();
         return;
     }

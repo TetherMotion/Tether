@@ -477,6 +477,11 @@ private:
     uint8_t  upload_sub_ = 0;
     size_t   upload_offset_ = 0;
     bool     upload_toggle_ = false;
+    // Pending segmented DOWNLOAD (initiate declared the object; segments append)
+    uint16_t download_index_ = 0;
+    uint8_t  download_sub_ = 0;
+    bool     download_toggle_ = false;
+    bool     download_active_ = false;
 
     // Error injection
     ErrorInjection errors_;
