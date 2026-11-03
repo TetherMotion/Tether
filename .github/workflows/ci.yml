@@ -696,7 +696,13 @@ jobs:
           --ignore-errors unused,inconsistent
         lcov --remove coverage.info '*/_deps/*' --output-file coverage.info \
           --ignore-errors unused,inconsistent
+        lcov --remove coverage.info '*/dependencies/*' --output-file coverage.info \
+          --ignore-errors unused,inconsistent
         lcov --remove coverage.info '*/tests/*' --output-file coverage.info \
+          --ignore-errors unused,inconsistent
+        lcov --remove coverage.info '*/examples/*' --output-file coverage.info \
+          --ignore-errors unused,inconsistent
+        lcov --remove coverage.info '*/tools/*' --output-file coverage.info \
           --ignore-errors unused,inconsistent
         lcov --list coverage.info --ignore-errors inconsistent
 
@@ -708,10 +714,15 @@ jobs:
         # --gcov-ignore-parse-errors works around a gcov tool bug that
         # emits negative hit values (branch taken -1), see
         # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=68080.
+        # Same exclusions as the lcov report above: no test code, vendored
+        # or fetched deps, examples, tools — coverage measures src/+include/.
+        GCOVR_EXCLUDE="--exclude tests/.* --exclude _deps/.* \
+          --exclude dependencies/.* --exclude examples/.* \
+          --exclude tools/.* --exclude /usr/.*"
         gcovr --root . --xml --output coverage.xml build-asan \
-          --gcov-ignore-parse-errors negative_hits.warn
+          ${GCOVR_EXCLUDE} --gcov-ignore-parse-errors negative_hits.warn
         gcovr --root . --html --output coverage.html build-asan \
-          --gcov-ignore-parse-errors negative_hits.warn
+          ${GCOVR_EXCLUDE} --gcov-ignore-parse-errors negative_hits.warn
 
     - name: Upload coverage to Codecov
       if: always()
