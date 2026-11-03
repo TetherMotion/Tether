@@ -43,6 +43,19 @@ PiecewiseNurbsPath makeLPath() {
     return convertTrajectory(samples);
 }
 
+/// Build a straight path that varies on `dim` axes (0..dim-1).
+PiecewiseNurbsPath makeDimPath(std::size_t dim) {
+    std::vector<TrajectorySample> samples;
+    for (int i = 0; i <= 10; ++i) {
+        TrajectorySample s = makeSample(i * 0.01, 0, 0, 0, 1, i * 4.0);
+        for (std::size_t a = 0; a < dim; ++a) {
+            s.position[a] = i * 4.0 * (1.0 + 0.25 * static_cast<double>(a));
+        }
+        samples.push_back(s);
+    }
+    return convertTrajectory(samples);
+}
+
 } // anonymous namespace
 
 //=============================================================================
@@ -101,6 +114,43 @@ TEST(ProfileReplanner, SummaryString) {
     ProfileReplanResult result = replanProfile(path, 6000.0, {}, 20);
     EXPECT_NE(result.summary.find("Profile:"), std::string::npos);
 }
+
+// replanProfile dispatches to a templated profiler per path dimension;
+// exercise every supported dimension plus the dim>5 guard.
+TEST(ProfileReplanner, Replan1DPath) {
+    PiecewiseNurbsPath path = makeDimPath(1);
+    ASSERT_EQ(path.dim(), 1u);
+    ProfileReplanResult result = replanProfile(path, 6000.0, {}, 30);
+    EXPECT_GT(result.points.size(), 0u);
+    EXPECT_GT(result.maxVelocity, 0.0);
+}
+
+TEST(ProfileReplanner, Replan3DPath) {
+    PiecewiseNurbsPath path = makeDimPath(3);
+    ASSERT_EQ(path.dim(), 3u);
+    ProfileReplanResult result = replanProfile(path, 6000.0, {}, 30);
+    EXPECT_GT(result.points.size(), 0u);
+    EXPECT_GT(result.totalTime, 0.0);
+}
+
+TEST(ProfileReplanner, Replan4DPath) {
+    PiecewiseNurbsPath path = makeDimPath(4);
+    ASSERT_EQ(path.dim(), 4u);
+    ProfileReplanResult result = replanProfile(path, 6000.0, {}, 30);
+    EXPECT_GT(result.points.size(), 0u);
+    EXPECT_GT(result.maxVelocity, 0.0);
+}
+
+TEST(ProfileReplanner, Replan5DPath) {
+    PiecewiseNurbsPath path = makeDimPath(5);
+    ASSERT_EQ(path.dim(), 5u);
+    ProfileReplanResult result = replanProfile(path, 6000.0, {}, 30);
+    EXPECT_GT(result.points.size(), 0u);
+    EXPECT_GT(result.totalTime, 0.0);
+}
+
+// Note: the dim>5 guard in replanProfile is unreachable — RVec rejects
+// dimensions outside 1..5 at curve construction time.
 
 //=============================================================================
 // computeSCurveTransition tests
