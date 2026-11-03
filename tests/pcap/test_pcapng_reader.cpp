@@ -10,8 +10,11 @@
 #include "tether/packetloggers/pcap/FrameFormatter.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <vector>
+
+#include <unistd.h>
 
 using namespace Tether::PacketLoggers::PCAP;
 using namespace EtherCAT;
@@ -1421,4 +1424,384 @@ TEST(PCAPNGReader, QinQ8021adDoubleVlanDecodesEtherCAT) {
     EXPECT_TRUE(frames[0].isEtherCAT);
     ASSERT_EQ(frames[0].datagrams.size(), 1u);
     EXPECT_EQ(frames[0].datagrams[0].cmd, Command::APRD);
+}
+
+// ============================================================================
+// Option-table + recovery-mode coverage additions
+// ============================================================================
+
+// open(path) — file-based input path.
+TEST(PCAPNGReader, OpenFromFilePath) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock("FileHW", "FileOS", "FileApp");
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    char tmpl[] = "/tmp/tether_pcapng_reader_testXXXXXX";
+    int fd = mkstemp(tmpl);
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(write(fd, data.data(), data.size()),
+              static_cast<ssize_t>(data.size()));
+    close(fd);
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(std::string(tmpl)));
+    ASSERT_TRUE(reader.readAll([](const InterpretedFrame&) {}));
+    EXPECT_EQ(reader.interfaces().size(), 1u);
+    EXPECT_EQ(reader.sectionInfo().application, "FileApp");
+    std::remove(tmpl);
+
+    // Missing file fails cleanly.
+    PCAPNGReader missing;
+    EXPECT_FALSE(missing.open("/tmp/tether_pcapng_no_such_file.bin"));
+}
+
+// SHB comment option.
+TEST(PCAPNGReader, ShbCommentOption) {
+    std::vector<uint8_t> data;
+    std::vector<uint8_t> body;
+    appendU32(body, 0x1A2B3C4D);
+    appendU16(body, 1);
+    appendU16(body, 0);
+    appendU64(body, 0xFFFFFFFFFFFFFFFFull);
+    std::vector<uint8_t> opts;
+    appendStringOption(opts, PCAPNG::OPT_COMMENT, "section comment");
+    appendEndOption(opts);
+    appendBytes(body, opts.data(), opts.size());
+    appendBlockHeader(data, PCAPNG::BLOCK_TYPE_SHB, body);
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    ASSERT_TRUE(reader.readAll([](const InterpretedFrame&) {}));
+    EXPECT_EQ(reader.sectionInfo().comment, "section comment");
+}
+
+// IDB os / tsoffset / comment options.
+TEST(PCAPNGReader, IdbOsTsOffsetComment) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    appendBytes(data, shb.data(), shb.size());
+
+    std::vector<uint8_t> body;
+    appendU16(body, 1);
+    appendU16(body, 0);
+    appendU32(body, 65535);
+    std::vector<uint8_t> opts;
+    appendStringOption(opts, PCAPNG::IDB_OS, "Linux 6.9");
+    appendU16(opts, PCAPNG::IDB_TSOFFSET);
+    appendU16(opts, 8);
+    appendU64(opts, 777);
+    appendStringOption(opts, PCAPNG::OPT_COMMENT, "iface comment");
+    appendEndOption(opts);
+    appendBytes(body, opts.data(), opts.size());
+    appendBlockHeader(data, PCAPNG::BLOCK_TYPE_IDB, body);
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    ASSERT_TRUE(reader.readAll([](const InterpretedFrame&) {}));
+    ASSERT_EQ(reader.interfaces().size(), 1u);
+    EXPECT_EQ(reader.interfaces()[0].os, "Linux 6.9");
+    EXPECT_EQ(reader.interfaces()[0].tsOffset, 777);
+    EXPECT_EQ(reader.interfaces()[0].comment, "iface comment");
+}
+
+// EPB epb_flags direction decode — all four values + a comment option.
+TEST(PCAPNGReader, EpbDirectionAndCommentOptions) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+
+    auto epbOpts = [](uint32_t flags, const std::string& comment) {
+        std::vector<uint8_t> opts;
+        appendU16(opts, PCAPNG::EPB_FLAGS);
+        appendU16(opts, 4);
+        appendU32(opts, flags);
+        if (!comment.empty()) {
+            appendStringOption(opts, PCAPNG::OPT_COMMENT, comment);
+        }
+        appendEndOption(opts);
+        return opts;
+    };
+    for (auto [ts, flags, comment] : {
+             std::tuple<uint64_t, uint32_t, const char*>{100, 1, "in"},
+             {200, 3, ""},
+             {300, 0, ""},
+         }) {
+        auto epb = makeEnhancedPacketBlock(0, ts, frame.data(), frame.size(),
+                                           epbOpts(flags, comment));
+        appendBytes(data, epb.data(), epb.size());
+    }
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 3u);
+    EXPECT_EQ(frames[0].direction, PacketDirection::Inbound);
+    EXPECT_EQ(frames[0].comment, "in");
+    EXPECT_EQ(frames[1].direction, PacketDirection::Loopback);
+    EXPECT_EQ(frames[2].direction, PacketDirection::Unknown);
+}
+
+// Legacy Packet Block options — flags/dropcount/comment use the EPB set.
+TEST(PCAPNGReader, PacketBlockOptionsDecoded) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+
+    std::vector<uint8_t> opts;
+    appendU16(opts, PCAPNG::EPB_FLAGS);
+    appendU16(opts, 4);
+    appendU32(opts, 2);                    // direction = outbound
+    appendU16(opts, PCAPNG::EPB_DROPCOUNT);
+    appendU16(opts, 8);
+    appendU64(opts, 42);
+    appendStringOption(opts, PCAPNG::OPT_COMMENT, "legacy packet");
+    appendEndOption(opts);
+
+    auto pb = makePacketBlock(0, 0, 9, frame.data(), frame.size(), opts);
+    appendBytes(data, pb.data(), pb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+    EXPECT_EQ(frames[0].direction, PacketDirection::Outbound);
+    EXPECT_EQ(frames[0].comment, "legacy packet");
+}
+
+// Simple Packet Block (type 3) — fixed body, padded data.
+TEST(PCAPNGReader, SimplePacketBlock) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+
+    std::vector<uint8_t> body;
+    appendU32(body, static_cast<uint32_t>(frame.size()));  // original len
+    appendBytes(body, frame.data(), frame.size());
+    while (body.size() % 4 != 0) body.push_back(0);
+    appendBlockHeader(data, PCAPNG::BLOCK_TYPE_SPB, body);
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    auto frames = reader.readAll();
+    ASSERT_EQ(frames.size(), 1u);
+    EXPECT_EQ(frames[0].originalLength, frame.size());
+    EXPECT_TRUE(frames[0].isEtherCAT);
+}
+
+// ISB full option sweep — every kIsb* code + comment.
+TEST(PCAPNGReader, IsbAllOptions) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    std::vector<uint8_t> opts;
+    auto opt8 = [&opts](uint16_t code, uint64_t v) {
+        appendU16(opts, code);
+        appendU16(opts, 8);
+        appendU64(opts, v);
+    };
+    opt8(2, 11);  // starttime
+    opt8(3, 22);  // endtime
+    opt8(4, 33);  // ifrecv
+    opt8(5, 44);  // ifdrop
+    opt8(6, 55);  // filteraccept
+    opt8(7, 66);  // filterdrop
+    opt8(8, 77);  // osdrop
+    opt8(9, 88);  // usrdeliv
+    appendEndOption(opts);
+    auto isb = makeInterfaceStatsBlock(0, 999, opts);
+    appendBytes(data, isb.data(), isb.size());
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    ASSERT_TRUE(reader.readAll([](const InterpretedFrame&) {}));
+    ASSERT_EQ(reader.interfaceStats().size(), 1u);
+    const auto& s = reader.interfaceStats()[0];
+    EXPECT_EQ(s.startTime, 11u);
+    EXPECT_EQ(s.endTime, 22u);
+    EXPECT_EQ(s.ifRecv, 33u);
+    EXPECT_EQ(s.ifDrop, 44u);
+    EXPECT_EQ(s.filterAccept, 55u);
+    EXPECT_EQ(s.filterDrop, 66u);
+    EXPECT_EQ(s.osDrop, 77u);
+    EXPECT_EQ(s.usrDeliv, 88u);
+}
+
+// NRB with an IPv6 record alongside IPv4.
+TEST(PCAPNGReader, NameResolutionIpv6Record) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    appendBytes(data, shb.data(), shb.size());
+
+    std::vector<uint8_t> body;
+    // ipv6 record: type=2, len=16+name
+    appendU16(body, 2);
+    const std::string name = "drive-ipv6";
+    appendU16(body, static_cast<uint16_t>(16 + name.size()));
+    std::array<uint8_t,16> ip6 = {0xfe,0x80,0,0,0,0,0,0,0,0,0,0,0,0,0,0x42};
+    appendBytes(body, ip6.data(), 16);
+    appendBytes(body, reinterpret_cast<const uint8_t*>(name.data()), name.size());
+    while (body.size() % 4 != 0) body.push_back(0);
+    appendU16(body, 0);   // nrb_end_record
+    appendU16(body, 0);
+    appendEndOption(body);
+    appendBlockHeader(data, PCAPNG::BLOCK_TYPE_NRB, body);
+
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    ASSERT_TRUE(reader.readAll([](const InterpretedFrame&) {}));
+    const auto& nr = reader.nameResolutionRecords();
+    ASSERT_EQ(nr.size(), 1u);
+    EXPECT_EQ(nr[0].type, PCAPNGNameResolutionRecord::Type::Ipv6);
+    EXPECT_EQ(nr[0].ipv6[15], 0x42);
+    EXPECT_EQ(nr[0].name, "drive-ipv6");
+}
+
+// readAll(cb): a block whose header parses but whose body fails
+// (EPB declaring capLen beyond the block) is skipped in recovery mode.
+TEST(PCAPNGReader, ReadAllCallbackRecoverySkipsParseError) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    // Malformed EPB: capLen=0x1000 but the block is only 32 bytes.
+    {
+        std::vector<uint8_t> body;
+        appendU32(body, 0);      // interface id
+        appendU32(body, 0);      // ts hi
+        appendU32(body, 0);      // ts lo
+        appendU32(body, 0x1000); // captured length (impossible)
+        appendU32(body, 0x1000); // original length
+        std::vector<uint8_t> bad;
+        appendBlockHeader(bad, PCAPNG::BLOCK_TYPE_EPB, body);
+        appendBytes(data, bad.data(), bad.size());
+    }
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+    auto epb = makeEnhancedPacketBlock(0, 7, frame.data(), frame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    size_t errors = 0, delivered = 0;
+    PCAPNGReader reader;
+    reader.setRecoveryMode(true, [&errors](size_t, const std::string&) {
+        ++errors;
+    });
+    ASSERT_TRUE(reader.open(data));
+    EXPECT_TRUE(reader.readAll(
+        [&delivered](const InterpretedFrame&) { ++delivered; }));
+    EXPECT_EQ(reader.skippedBlockCount(), 1u);
+    EXPECT_GE(errors, 1u);
+    EXPECT_EQ(delivered, 1u);
+}
+
+// Same malformed EPB without recovery aborts readAll(cb).
+TEST(PCAPNGReader, ReadAllCallbackStrictAbortsOnParseError) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+    {
+        std::vector<uint8_t> body;
+        appendU32(body, 0);
+        appendU32(body, 0);
+        appendU32(body, 0);
+        appendU32(body, 0x1000);
+        appendU32(body, 0x1000);
+        std::vector<uint8_t> bad;
+        appendBlockHeader(bad, PCAPNG::BLOCK_TYPE_EPB, body);
+        appendBytes(data, bad.data(), bad.size());
+    }
+    PCAPNGReader reader;
+    ASSERT_TRUE(reader.open(data));
+    EXPECT_FALSE(reader.readAll([](const InterpretedFrame&) {}));
+}
+
+// readNext(): recovery skips a bad header and a body-parse failure.
+TEST(PCAPNGReader, ReadNextRecoveryPaths) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    auto idb = makeInterfaceDescriptionBlock();
+    appendBytes(data, shb.data(), shb.size());
+    appendBytes(data, idb.data(), idb.size());
+
+    // Malformed EPB (body parse failure -> readNext recovery path).
+    {
+        std::vector<uint8_t> body;
+        appendU32(body, 0);
+        appendU32(body, 0);
+        appendU32(body, 0);
+        appendU32(body, 0x1000);
+        appendU32(body, 0x1000);
+        std::vector<uint8_t> bad;
+        appendBlockHeader(bad, PCAPNG::BLOCK_TYPE_EPB, body);
+        appendBytes(data, bad.data(), bad.size());
+    }
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+    auto epb = makeEnhancedPacketBlock(0, 9, frame.data(), frame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    PCAPNGReader reader;
+    reader.setRecoveryMode(true, nullptr);
+    ASSERT_TRUE(reader.open(data));
+    InterpretedFrame out;
+    ASSERT_TRUE(reader.readNext(out));
+    EXPECT_EQ(out.timestampNs, 9u);
+    EXPECT_TRUE(out.isEtherCAT);
+    EXPECT_GE(reader.skippedBlockCount(), 1u);
+}
+
+// readNext(): a truncated trailing header is skipped in recovery mode.
+TEST(PCAPNGReader, ReadNextSkipsTruncatedHeader) {
+    std::vector<uint8_t> data;
+    auto shb = makeSectionHeaderBlock();
+    appendBytes(data, shb.data(), shb.size());
+
+    std::array<uint8_t, 6> dst = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::array<uint8_t, 6> src = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    auto frame = makeEtherCATFrame(dst, src, std::nullopt);
+    auto epb = makeEnhancedPacketBlock(0, 9, frame.data(), frame.size());
+    appendBytes(data, epb.data(), epb.size());
+
+    // Trailing 4-byte fragment — a block type with no length field.
+    data.push_back(0xAA); data.push_back(0xBB);
+    data.push_back(0xCC); data.push_back(0xDD);
+
+    PCAPNGReader reader;
+    reader.setRecoveryMode(true, nullptr);
+    ASSERT_TRUE(reader.open(data));
+    InterpretedFrame out;
+    ASSERT_TRUE(reader.readNext(out));
+    EXPECT_TRUE(out.isEtherCAT);
+    EXPECT_FALSE(reader.readNext(out));   // fragment skipped, then EOF
+    EXPECT_GE(reader.skippedBlockCount(), 1u);
 }
