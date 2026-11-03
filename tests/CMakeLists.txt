@@ -1263,6 +1263,7 @@ create_ethercat_test(coverage
         ethercat/test_packet_debugger.cpp
         ethercat/test_cyclic_task_scheduler.cpp
         ethercat/test_sync_diagnostics.cpp
+        ethercat/test_write_verify.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/SlaveEmulator_CiA402.cpp
