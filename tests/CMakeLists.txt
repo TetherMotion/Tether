@@ -1234,6 +1234,7 @@ create_ethercat_test(coverage
         ethercat/test_cia402_emulator.cpp
         ethercat/test_slave_groups.cpp
         ethercat/test_encapsulation.cpp
+        ethercat/test_esc211_coverage.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/SlaveEmulator_CiA402.cpp
@@ -1241,7 +1242,7 @@ create_ethercat_test(coverage
         ../src/ethercat/ConditionalPacketRouter.cpp
         ../src/ethercat/TransactionRouter.cpp
         ../src/ethercat/SdoCommandChannel.cpp
-    LIBS tether_ethercat_master;tether_cia_profiles
+    LIBS tether_ethercat_master;tether_cia_profiles;tether_device_drivers
     DEFS TETHER_COMPILE_MASTER=1
 )
 
