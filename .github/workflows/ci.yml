@@ -544,7 +544,8 @@ jobs:
   asan-tests:
     name: Run Module Tests with ASAN + Coverage
     runs-on: ubuntu-latest
-    needs: compile
+    # Builds its own instrumented tree; no debug-build artifact needed.
+    # Running in parallel with `compile` saves the full compile duration.
     
     steps:
     - name: Checkout code
@@ -748,7 +749,7 @@ jobs:
   tsan-tests:
     name: Run Module Tests with TSAN
     runs-on: ubuntu-latest
-    needs: compile
+    # Builds its own instrumented tree; no debug-build artifact needed.
     
     steps:
     - name: Checkout code
