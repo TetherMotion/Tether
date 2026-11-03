@@ -855,3 +855,206 @@ TEST(HomingSwitchStatusCovTest, DefaultValues) {
     EXPECT_FALSE(status.homeSwitchActive);
     EXPECT_FALSE(status.indexPulseDetected);
 }
+
+// ============================================================================
+// FSM coverage — start/update/abort/timeout and per-method process paths
+// ============================================================================
+
+class HomingFsmCovTest : public ::testing::Test {
+protected:
+    HomingHandler handler_;
+    std::shared_ptr<CiA402::mock::FakeDriveBackend> backend_ =
+        std::make_shared<CiA402::mock::FakeDriveBackend>();
+    HomingSwitchStatus status_{};
+    int completes_{0};
+    bool last_success_{false};
+    HomingError last_error_{HomingError::None};
+
+    void SetUp() override {
+        handler_.setBackend(backend_);
+        handler_.setSwitchCallback([this] { return status_; });
+        handler_.setCompleteCallback([this](bool ok, HomingError e) {
+            ++completes_;
+            last_success_ = ok;
+            last_error_ = e;
+        });
+        HomingParams p;
+        p.method = static_cast<int8_t>(HomingMethod::NoHoming);
+        p.speedSwitch = 200;
+        p.speedZero = 50;
+        p.offset = 10;
+        handler_.configure(p);
+    }
+    void use(HomingMethod m) { handler_.setMethod(m); }
+};
+
+TEST_F(HomingFsmCovTest, UpdateFromIdleReturnsFalse) {
+    EXPECT_FALSE(handler_.update(0));
+}
+
+TEST_F(HomingFsmCovTest, StartTwiceFails) {
+    use(HomingMethod::NegLimitIndex);
+    ASSERT_TRUE(handler_.start());
+    EXPECT_EQ(handler_.getState(), HomingState::SearchingSwitch);
+    EXPECT_FALSE(handler_.start());
+}
+
+TEST_F(HomingFsmCovTest, AbortFromIdleIsNoop) {
+    handler_.abort();
+    EXPECT_EQ(handler_.getState(), HomingState::Idle);
+    EXPECT_EQ(completes_, 0);
+}
+
+TEST_F(HomingFsmCovTest, AbortWhileSearching) {
+    use(HomingMethod::NegLimitIndex);
+    ASSERT_TRUE(handler_.start());
+    handler_.abort();
+    EXPECT_EQ(handler_.getState(), HomingState::Error);
+    EXPECT_EQ(completes_, 1);
+    EXPECT_FALSE(last_success_);
+    EXPECT_EQ(last_error_, HomingError::Aborted);
+    EXPECT_EQ(backend_->lastTargetVelocity(), 0);  // stop() zeroed it
+}
+
+TEST_F(HomingFsmCovTest, TimeoutWhileSearching) {
+    use(HomingMethod::NegLimitIndex);
+    handler_.setTimeout(1);  // 1 ms
+    ASSERT_TRUE(handler_.start());
+    // Spin until elapsed > 1 ms — bounded by a generous iteration cap.
+    bool done = false;
+    for (int i = 0; i < 100000 && !done; ++i) {
+        done = !handler_.update(i);
+    }
+    EXPECT_TRUE(done);
+    EXPECT_EQ(last_error_, HomingError::Timeout);
+    EXPECT_TRUE(handler_.hasError());
+}
+
+TEST_F(HomingFsmCovTest, Method1FullCycle) {
+    use(HomingMethod::NegLimitIndex);
+    ASSERT_TRUE(handler_.start());
+    EXPECT_LT(backend_->lastTargetVelocity(), 0);  // negative search dir
+    status_.negativeLimitActive = true;
+    EXPECT_TRUE(handler_.update(-500));
+    EXPECT_EQ(handler_.getState(), HomingState::SearchingIndex);
+    EXPECT_EQ(backend_->lastTargetVelocity(), 50);  // speedZero, reversed
+    status_.negativeLimitActive = false;
+    status_.indexPulseDetected = true;
+    EXPECT_FALSE(handler_.update(-100));
+    EXPECT_TRUE(handler_.isComplete());
+    EXPECT_EQ(handler_.getHomePosition(), -100 + 10);
+    EXPECT_EQ(completes_, 1);
+    EXPECT_TRUE(last_success_);
+}
+
+TEST_F(HomingFsmCovTest, Method2FullCycle) {
+    use(HomingMethod::PosLimitIndex);
+    ASSERT_TRUE(handler_.start());
+    EXPECT_GT(backend_->lastTargetVelocity(), 0);  // positive search dir
+    status_.positiveLimitActive = true;
+    EXPECT_TRUE(handler_.update(500));
+    EXPECT_EQ(handler_.getState(), HomingState::SearchingIndex);
+    EXPECT_EQ(backend_->lastTargetVelocity(), -50);  // -speedZero
+    status_.positiveLimitActive = false;
+    status_.indexPulseDetected = true;
+    EXPECT_FALSE(handler_.update(100));
+    EXPECT_TRUE(handler_.isComplete());
+    EXPECT_EQ(handler_.getHomePosition(), 110);
+}
+
+TEST_F(HomingFsmCovTest, HomeSwitchWithIndexMethod3) {
+    use(HomingMethod::HomeSwitchPosIndex);  // method 3 — no reverseOnSwitch
+    ASSERT_TRUE(handler_.start());
+    status_.homeSwitchActive = true;
+    EXPECT_TRUE(handler_.update(50));
+    EXPECT_EQ(handler_.getState(), HomingState::SearchingIndex);
+    status_.indexPulseDetected = true;
+    EXPECT_FALSE(handler_.update(60));
+    EXPECT_TRUE(handler_.isComplete());
+    EXPECT_EQ(handler_.getHomePosition(), 70);
+}
+
+TEST_F(HomingFsmCovTest, HomeSwitchWithIndexMethod4Reverses) {
+    use(HomingMethod::HomeSwitchPosIndex2);  // method 4 — reverseOnSwitch
+    ASSERT_TRUE(handler_.start());
+    const int32_t before = backend_->lastTargetVelocity();
+    status_.homeSwitchActive = true;
+    EXPECT_TRUE(handler_.update(50));
+    // Direction flipped relative to the initial search direction.
+    const int32_t after = backend_->lastTargetVelocity();
+    EXPECT_EQ(after, (before < 0 ? 50 : -50));
+    status_.indexPulseDetected = true;
+    EXPECT_FALSE(handler_.update(60));
+    EXPECT_TRUE(handler_.isComplete());
+}
+
+TEST_F(HomingFsmCovTest, HomeSwitchOnlyRisingEdge) {
+    use(HomingMethod::HomeSwitchPosIndexPos);  // method 7 — stopOnRising
+    ASSERT_TRUE(handler_.start());
+    status_.homeSwitchActive = true;
+    EXPECT_FALSE(handler_.update(42));
+    EXPECT_TRUE(handler_.isComplete());
+    EXPECT_EQ(handler_.getHomePosition(), 52);
+}
+
+TEST_F(HomingFsmCovTest, HomeSwitchOnlyFallingEdge) {
+    use(HomingMethod::HomeSwitchPosIndexPos2);  // method 8 — falling edge
+    ASSERT_TRUE(handler_.start());
+    status_.homeSwitchActive = true;
+    EXPECT_TRUE(handler_.update(100));
+    EXPECT_EQ(handler_.getState(), HomingState::Reversing);
+    status_.homeSwitchActive = false;  // falling edge
+    EXPECT_FALSE(handler_.update(120));
+    EXPECT_TRUE(handler_.isComplete());
+    EXPECT_EQ(handler_.getHomePosition(), 130);
+}
+
+TEST_F(HomingFsmCovTest, BlockHomingNegLimit) {
+    use(HomingMethod::NegLimitOnly);  // method 17 — block homing
+    ASSERT_TRUE(handler_.start());
+    status_.negativeLimitActive = true;
+    EXPECT_FALSE(handler_.update(-300));
+    EXPECT_TRUE(handler_.isComplete());
+    EXPECT_EQ(handler_.getHomePosition(), -290);
+}
+
+TEST_F(HomingFsmCovTest, BlockHomingPosLimit) {
+    use(HomingMethod::PosLimitOnly);  // method 18
+    ASSERT_TRUE(handler_.start());
+    status_.positiveLimitActive = true;
+    EXPECT_FALSE(handler_.update(300));
+    EXPECT_TRUE(handler_.isComplete());
+}
+
+TEST_F(HomingFsmCovTest, IndexOnlyMethod34) {
+    use(HomingMethod::PosDirIndexPulse);
+    ASSERT_TRUE(handler_.start());
+    status_.indexPulseDetected = true;
+    EXPECT_FALSE(handler_.update(77));
+    EXPECT_TRUE(handler_.isComplete());
+    EXPECT_EQ(handler_.getHomePosition(), 87);
+}
+
+TEST_F(HomingFsmCovTest, CurrentPositionMethod35) {
+    use(HomingMethod::CurrentPosition);
+    ASSERT_TRUE(handler_.start());  // no motion commanded
+    EXPECT_EQ(backend_->lastTargetVelocity(), 0);
+    EXPECT_FALSE(handler_.update(999));
+    EXPECT_TRUE(handler_.isComplete());
+    EXPECT_EQ(handler_.getHomePosition(), 1009);
+}
+
+TEST_F(HomingFsmCovTest, InvalidMethodErrors) {
+    use(static_cast<HomingMethod>(40));
+    ASSERT_TRUE(handler_.start());
+    EXPECT_FALSE(handler_.update(0));
+    EXPECT_EQ(handler_.getState(), HomingState::Error);
+    EXPECT_EQ(last_error_, HomingError::InvalidMethod);
+}
+
+TEST_F(HomingFsmCovTest, UpdateAfterCompleteIsFalse) {
+    use(HomingMethod::CurrentPosition);
+    ASSERT_TRUE(handler_.start());
+    ASSERT_FALSE(handler_.update(0));
+    EXPECT_FALSE(handler_.update(0));  // Attained → false
+}
