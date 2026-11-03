@@ -42,6 +42,7 @@ protected:
     }
     void TearDown() override {
         drive_.reset();
+        bus_.shutdown();  // drain thread calls back into master_
         master_.packetRouter().shutdown();
     }
 

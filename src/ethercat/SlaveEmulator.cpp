@@ -382,51 +382,64 @@ bool SlaveEmulator::writeRegister(uint16_t addr, const uint8_t* data, uint16_t l
 }
 
 bool SlaveEmulator::processLogicalRead(uint32_t logical_addr, uint8_t* data, uint16_t len) {
-    // Find FMMU that handles this address
+    // Each FMMU serves only the bytes inside its own logical window —
+    // a multi-slave LRW image overlaps each slave's window partially.
+    bool any = false;
+    const uint64_t req_end = uint64_t(logical_addr) + len;
     for (auto& fmmu : fmmus_) {
-        if (fmmu.containsLogicalAddress(logical_addr, len) && fmmu.read_enable) {
-            uint16_t phys = fmmu.translateToPhysical(logical_addr);
-            
-            // Find which SM contains this physical address
-            for (auto& sm : sync_managers_) {
-                if (sm.isEnabled() && phys >= sm.start_addr &&
-                    phys + len <= sm.start_addr + sm.length) {
-                    uint16_t offset = phys - sm.start_addr;
-                    // buffer may be capped below sm.length (kMaxSmBufferBytes)
-                    if (static_cast<size_t>(offset) + len > sm.buffer.size()) {
-                        return false;
-                    }
-                    std::memcpy(data, &sm.buffer[offset], len);
-                    return true;
-                }
+        if (!fmmu.read_enable || !fmmu.enabled || fmmu.length == 0) continue;
+        const uint64_t win_lo = std::max<uint64_t>(
+            logical_addr, fmmu.logical_start);
+        const uint64_t win_hi = std::min<uint64_t>(
+            req_end, uint64_t(fmmu.logical_start) + fmmu.length);
+        if (win_lo >= win_hi) continue;
+        const uint16_t phys = static_cast<uint16_t>(
+            fmmu.physical_start + (win_lo - fmmu.logical_start));
+        const uint16_t wlen = static_cast<uint16_t>(win_hi - win_lo);
+        for (auto& sm : sync_managers_) {
+            if (sm.isEnabled() && phys >= sm.start_addr &&
+                phys + wlen <= sm.start_addr + sm.length) {
+                const uint16_t offset = phys - sm.start_addr;
+                // buffer may be capped below sm.length (kMaxSmBufferBytes)
+                if (static_cast<size_t>(offset) + wlen > sm.buffer.size())
+                    break;
+                std::memcpy(data + (win_lo - logical_addr),
+                            &sm.buffer[offset], wlen);
+                any = true;
+                break;
             }
         }
     }
-    return false;
+    return any;
 }
 
 bool SlaveEmulator::processLogicalWrite(uint32_t logical_addr, const uint8_t* data, uint16_t len) {
-    // Find FMMU that handles this address
+    bool any = false;
+    const uint64_t req_end = uint64_t(logical_addr) + len;
     for (auto& fmmu : fmmus_) {
-        if (fmmu.containsLogicalAddress(logical_addr, len) && fmmu.write_enable) {
-            uint16_t phys = fmmu.translateToPhysical(logical_addr);
-            
-            // Find which SM contains this physical address
-            for (auto& sm : sync_managers_) {
-                if (sm.isEnabled() && phys >= sm.start_addr &&
-                    phys + len <= sm.start_addr + sm.length) {
-                    uint16_t offset = phys - sm.start_addr;
-                    // buffer may be capped below sm.length (kMaxSmBufferBytes)
-                    if (static_cast<size_t>(offset) + len > sm.buffer.size()) {
-                        return false;
-                    }
-                    std::memcpy(&sm.buffer[offset], data, len);
-                    return true;
-                }
+        if (!fmmu.write_enable || !fmmu.enabled || fmmu.length == 0) continue;
+        const uint64_t win_lo = std::max<uint64_t>(
+            logical_addr, fmmu.logical_start);
+        const uint64_t win_hi = std::min<uint64_t>(
+            req_end, uint64_t(fmmu.logical_start) + fmmu.length);
+        if (win_lo >= win_hi) continue;
+        const uint16_t phys = static_cast<uint16_t>(
+            fmmu.physical_start + (win_lo - fmmu.logical_start));
+        const uint16_t wlen = static_cast<uint16_t>(win_hi - win_lo);
+        for (auto& sm : sync_managers_) {
+            if (sm.isEnabled() && phys >= sm.start_addr &&
+                phys + wlen <= sm.start_addr + sm.length) {
+                const uint16_t offset = phys - sm.start_addr;
+                if (static_cast<size_t>(offset) + wlen > sm.buffer.size())
+                    break;
+                std::memcpy(&sm.buffer[offset],
+                            data + (win_lo - logical_addr), wlen);
+                any = true;
+                break;
             }
         }
     }
-    return false;
+    return any;
 }
 
 bool SlaveEmulator::processSIIRead(uint32_t word_addr, uint16_t* data) {

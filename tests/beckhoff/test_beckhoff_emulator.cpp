@@ -16,6 +16,8 @@
 #include "mocks/EmulatedBus.hpp"
 #include "tether/Beckhoff/EL1014.hpp"
 #include "tether/Beckhoff/EL2004.hpp"
+#include "tether/Beckhoff/MultiInputTerminal.hpp"
+#include "tether/Beckhoff/MultiOutputTerminal.hpp"
 #include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 
@@ -89,13 +91,14 @@ DiscoveredSlave makeDiscovered(uint32_t vendor, uint32_t product,
 class BeckhoffEmulatorTest : public ::testing::Test {
 protected:
     void TearDown() override {
+        bus_.shutdown();  // drain thread calls back into master_
         master_.packetRouter().shutdown();
     }
 
-    void bringUp() {
+    void bringUp(uint16_t slave_count = 1) {
         bus_.attach(master_);
         master_.start(bus_.iface, kEmulatedMac);
-        master_.initSlaves(1);
+        master_.initSlaves(slave_count);
     }
 
     EmulatedBus bus_;
@@ -188,4 +191,78 @@ TEST_F(BeckhoffEmulatorTest, EL1014InputBitsReadFromSmBuffer) {
     EXPECT_FALSE(term.bit(2));
     EXPECT_TRUE(term.bit(3));
     EXPECT_EQ(term.bits() & 0x0F, 0x0Au);
+}
+
+// ============================================================================
+// Multi-terminal chains — 2 slaves, logical (FMMU/LRW) PDO group
+// ============================================================================
+
+TEST_F(BeckhoffEmulatorTest, MultiOutputChainReachesOpAndDrivesBits) {
+    auto* s0 = addElSlave(bus_, 0x00000002, 0x07D43052, 0x1100, 1, true);
+    auto* s1 = addElSlave(bus_, 0x00000002, 0x07D43052, 0x1100, 1, true);
+    bringUp(2);
+
+    std::vector<DiscoveredSlave> scan;
+    auto ds0 = makeDiscovered(0x00000002, 0x07D43052, "EL2004",
+                              true, 0x1100, 0, 4);
+    auto ds1 = ds0;
+    ds1.index = 1;
+    scan.push_back(ds0);
+    scan.push_back(ds1);
+
+    Beckhoff::MultiOutputTerminal<> outs(master_);
+    auto det = outs.detect(scan);
+    ASSERT_TRUE(det.has_value());
+    EXPECT_EQ(*det, 2u);
+
+    Beckhoff::StartOptions opts;
+    opts.manage_realtime_loop = false;
+    ASSERT_TRUE(outs.start(opts).has_value());
+    EXPECT_EQ(s0->getState(), SlaveState::OP);
+    EXPECT_EQ(s1->getState(), SlaveState::OP);
+
+    // Flat channel index spanning both devices.
+    outs.setBit(0, true);   // device 0 ch 0
+    outs.setBit(5, true);   // device 1 ch 1
+    ASSERT_TRUE(outs.pdoManager()->exchangeAll());
+    EXPECT_EQ(s0->smBufferByteForTest(0, 0), 0x01);
+    EXPECT_EQ(s1->smBufferByteForTest(0, 0), 0x02);
+
+    outs.allOff();
+    ASSERT_TRUE(outs.pdoManager()->exchangeAll());
+    EXPECT_EQ(s0->smBufferByteForTest(0, 0), 0x00);
+    EXPECT_EQ(s1->smBufferByteForTest(0, 0), 0x00);
+    outs.stop();
+}
+
+TEST_F(BeckhoffEmulatorTest, MultiInputChainReadsBothSlaves) {
+    auto* s0 = addElSlave(bus_, 0x00000002, 0x03F63052, 0x1180, 1, false);
+    auto* s1 = addElSlave(bus_, 0x00000002, 0x03F63052, 0x1180, 1, false);
+    bringUp(2);
+
+    std::vector<DiscoveredSlave> scan;
+    auto ds0 = makeDiscovered(0x00000002, 0x03F63052, "EL1014",
+                              false, 0x1180, 0, 4);
+    auto ds1 = ds0;
+    ds1.index = 1;
+    scan.push_back(ds0);
+    scan.push_back(ds1);
+
+    Beckhoff::MultiInputTerminal<> ins(master_);
+    auto det = ins.detect(scan);
+    ASSERT_TRUE(det.has_value());
+    EXPECT_EQ(*det, 2u);
+
+    Beckhoff::StartOptions opts;
+    opts.manage_realtime_loop = false;
+    ASSERT_TRUE(ins.start(opts).has_value());
+
+    s0->setSmBufferByteForTest(0, 0x03);
+    s1->setSmBufferByteForTest(0, 0x0C);
+    ASSERT_TRUE(ins.pdoManager()->exchangeAll());
+    EXPECT_TRUE(ins.bit(0));
+    EXPECT_TRUE(ins.bit(1));
+    EXPECT_FALSE(ins.bit(2));
+    EXPECT_TRUE(ins.bit(6));   // device 1 ch 2
+    EXPECT_TRUE(ins.bit(7));   // device 1 ch 3
 }

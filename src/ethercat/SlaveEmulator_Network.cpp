@@ -134,7 +134,10 @@ uint16_t NetworkEmulator::processDatagram(Command cmd, uint8_t idx,
         case Command::LWR:
         case Command::LRW:
         {
-            uint32_t logical_addr = (static_cast<uint32_t>(adp) << 16) | ado;
+            // The 4-byte logical address travels little-endian across the
+            // two 16-bit wire fields: adp = low word, ado = high word.
+            uint32_t logical_addr = static_cast<uint32_t>(adp) |
+                                    (static_cast<uint32_t>(ado) << 16);
             return processLogical(cmd, logical_addr, data, datalen);
         }
             
