@@ -517,7 +517,7 @@ bool SlaveEmulator::smBufferRead(uint16_t addr, uint8_t* data, uint16_t len) {
             static_cast<size_t>(addr - sm.start_addr) + len <= sm.buffer.size()) {
             std::memcpy(data, &sm.buffer[addr - sm.start_addr], len);
             sm.status.read_event = 1;
-            if (i == 1) {
+            if (i == 1 && sii_config_.mailbox_protocol != 0) {
                 // SM1 = slave -> master mailbox: reading drains the response.
                 sm.status.mailbox_full = 0;
                 sm.status.read_buf_full = 0;
@@ -536,13 +536,14 @@ bool SlaveEmulator::smBufferWrite(uint16_t addr, const uint8_t* data, uint16_t l
             static_cast<size_t>(addr - sm.start_addr) + len <= sm.buffer.size()) {
             std::memcpy(&sm.buffer[addr - sm.start_addr], data, len);
             sm.status.write_event = 1;
-            if (i == 0) {
+            if (i == 0 && sii_config_.mailbox_protocol != 0) {
                 // SM0 = master -> slave mailbox: the PDI drains it
                 // synchronously and posts the response into SM1.
                 processMailboxRequest();
-            } else if (cia402_enabled_ && sm.isOutput() &&
+            } else if (cia402_enabled_ && i >= 2 &&
                        sm.buffer.size() >= 2) {
-                // RxPDO: bytes 0-1 carry the controlword on CiA402 drives.
+                // Process-data SM (RxPDO): bytes 0-1 carry the controlword
+                // on CiA402 drives.
                 const uint16_t cw = static_cast<uint16_t>(
                     sm.buffer[0] | (sm.buffer[1] << 8));
                 drive_state_.processControlWord(cw);
