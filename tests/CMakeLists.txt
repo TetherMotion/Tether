@@ -1236,6 +1236,7 @@ create_ethercat_test(coverage
         ethercat/test_encapsulation.cpp
         ethercat/test_esc211_coverage.cpp
         ethercat/test_esc211_managers.cpp
+        ethercat/test_rp20_device.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/SlaveEmulator_CiA402.cpp
