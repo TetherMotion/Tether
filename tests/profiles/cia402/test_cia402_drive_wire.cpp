@@ -381,3 +381,24 @@ TEST_F(DS402MasterWireTest, RecoveryHandlerReinitialize) {
     ds402_.enableSlaveRecovery(rcfg, {cfg});
     ds402_.disableSlaveRecovery();
 }
+
+TEST_F(CiA402DriveWireTest, DriveManagerOverBus) {
+    DriveManager mgr;
+    EXPECT_EQ(mgr.getDriveCount(), 0u);
+    EXPECT_EQ(mgr.getDrive(0), nullptr);
+    EXPECT_EQ(mgr.getDriveBySlaveIndex(0), nullptr);
+
+    EXPECT_EQ(mgr.initializeDrives(master_, 1), 1u);
+    EXPECT_EQ(mgr.getDriveCount(), 1u);
+    EXPECT_NE(mgr.getDrive(0), nullptr);
+    EXPECT_EQ(mgr.getDrive(7), nullptr);              // out of range
+    EXPECT_NE(mgr.getDriveBySlaveIndex(0), nullptr);
+    EXPECT_EQ(mgr.getDriveBySlaveIndex(9), nullptr);  // unknown index
+
+    // transitionAllToOp drives the AL state transition over the bus.
+    mgr.transitionAllToOp();
+    // enable/disable run the CiA402 FSM over the bus; on the emulator's
+    // fault-free slave these complete.
+    mgr.enableAll();
+    mgr.disableAll();
+}
