@@ -1239,6 +1239,7 @@ create_ethercat_test(coverage
         ethercat/test_esc211_managers.cpp
         ethercat/test_rp20_device.cpp
         ethercat/test_drives_misc.cpp
+        ethercat/test_reset_controller.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/SlaveEmulator_CiA402.cpp
