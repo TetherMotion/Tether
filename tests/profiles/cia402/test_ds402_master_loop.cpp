@@ -220,3 +220,183 @@ TEST_F(DS402LoopTest, RoleChangeWhileRunningDefersDriveErase) {
 }
 
 } // namespace
+
+// ============================================================================
+// Coverage additions — lifecycle, roles, accessors, tasks, recovery
+// ============================================================================
+
+TEST_F(DS402LoopTest, ConfigConstructor) {
+    Master::Config cfg;
+    DS402Master configured(cfg);
+    EXPECT_FALSE(configured.isRunning());
+}
+
+TEST_F(DS402LoopTest, IsRunningAndCounts) {
+    EXPECT_TRUE(ds402_.isRunning());
+    EXPECT_EQ(ds402_.discoveredDriveCount(), 0);
+    // Short timeout on a stub bus — polls then returns false.
+    EXPECT_FALSE(ds402_.waitForDriveCount(1, 30));
+    ds402_.stop();
+    EXPECT_FALSE(ds402_.isRunning());
+}
+
+TEST_F(DS402LoopTest, DistributedClockPaths) {
+    DC::DCConfig dc = DC::DCConfig::defaults();
+    // Stub master — these reach Master::dc() and fail gracefully.
+    ds402_.initializeDistributedClocks(dc, 1);
+    ds402_.startDistributedClocks();
+    ds402_.startDistributedClocks(dc, 1);
+    ds402_.stopDistributedClocks();
+    SUCCEED();
+}
+
+TEST_F(DS402LoopTest, SlaveRolesAndAccessors) {
+    ds402_.setSlaveAsDynaDrive(2);
+    EXPECT_EQ(ds402_.slaveRole(2), DS402Master::SlaveRole::DynaDrive);
+    EXPECT_TRUE(ds402_.isManagedDrive(2));
+    EXPECT_FALSE(ds402_.isDS402Slave(2));
+
+    ds402_.setSlaveAsNonDS402(2);
+    EXPECT_EQ(ds402_.slaveRole(2), DS402Master::SlaveRole::NonDS402);
+    EXPECT_FALSE(ds402_.isManagedDrive(2));
+
+    // Out-of-range index → NonDS402 without touching the vector.
+    EXPECT_EQ(ds402_.slaveRole(60000), DS402Master::SlaveRole::NonDS402);
+    EXPECT_TRUE(ds402_.isDS402Slave(0));  // fixture set slave 0 DS402
+}
+
+TEST_F(DS402LoopTest, RoleChangeWithoutLoopErasesDrive) {
+    // Fixture ensured drive 0. Non-running loop → demoting to NonDS402
+    // erases the drive object synchronously (removeMotionController +
+    // drives_ erase in the non-loop branch).
+    EXPECT_NE(ds402_.driveBySlaveIndex(0), nullptr);
+    ds402_.setSlaveAsNonDS402(0);
+    EXPECT_EQ(ds402_.driveAt(0), nullptr);
+    EXPECT_EQ(ds402_.slaveRole(0), DS402Master::SlaveRole::NonDS402);
+}
+
+TEST_F(DS402LoopTest, DriveAccessors) {
+    EXPECT_NE(ds402_.driveAt(0), nullptr);
+    const DS402Master& c = ds402_;
+    EXPECT_NE(c.driveAt(0), nullptr);
+    EXPECT_EQ(c.driveAt(9), nullptr);
+    EXPECT_EQ(ds402_.driveAt(42), nullptr);
+
+    // ensureDrive on an unmanaged index promotes it to DS402.
+    auto& d = ds402_.ensureDrive(5);
+    EXPECT_EQ(d.slaveIndex(), 5);
+    EXPECT_TRUE(ds402_.isDS402Slave(5));
+    EXPECT_EQ(&ds402_.ensureDrive(5), &d);  // second call returns same
+
+    EXPECT_NE(ds402_.driveBySlaveIndex(5), nullptr);
+    EXPECT_NE(c.driveBySlaveIndex(5), nullptr);
+    EXPECT_EQ(ds402_.driveBySlaveIndex(9), nullptr);   // unmanaged
+    EXPECT_EQ(c.driveBySlaveIndex(9), nullptr);
+}
+
+TEST_F(DS402LoopTest, RemoveControllerPaths) {
+    ControllerStats st;
+    ASSERT_TRUE(ds402_.addMotionController(
+        0, std::make_unique<MockController>(st)));
+    // No loop running → removal drains eraseController immediately.
+    EXPECT_TRUE(ds402_.removeMotionController(0));
+    EXPECT_EQ(st.stops.load(), 1);
+    EXPECT_FALSE(ds402_.removeMotionController(0));   // already gone
+    EXPECT_FALSE(ds402_.removeMotionController(42));  // never existed
+}
+
+TEST_F(DS402LoopTest, AddCyclicTaskOverloads) {
+    struct DummyTask : EtherCAT::ICyclicTask {
+        bool update(DS402Master&, double) override { return true; }
+    };
+    EXPECT_FALSE(ds402_.addCyclicTask(nullptr));
+    EXPECT_FALSE(ds402_.addCyclicTask(nullptr, EtherCAT::TaskPhase::MotionControl, 1));
+    EXPECT_TRUE(ds402_.addCyclicTask(std::make_unique<DummyTask>()));
+    EXPECT_TRUE(ds402_.addCyclicTask(std::make_unique<DummyTask>(),
+                                     EtherCAT::TaskPhase::MotionControl, 7));
+    ds402_.clearCyclicTasks();
+}
+
+TEST_F(DS402LoopTest, UpdateMotionControllersBranches) {
+    // No controllers at all → true, no work.
+    EXPECT_TRUE(ds402_.updateMotionControllers(0.001));
+
+    ControllerStats st;
+    ASSERT_TRUE(ds402_.addMotionController(
+        0, std::make_unique<MockController>(st)));
+    EXPECT_TRUE(ds402_.updateMotionControllers(0.001));
+    EXPECT_EQ(st.updates.load(), 1);
+
+    // Controller update returning false propagates.
+    ControllerStats st2;
+    ds402_.ensureDrive(5);  // promote to DS402 so the controller is managed
+    auto* ctrl = new MockController(st2);
+    ctrl->update_result = false;
+    ASSERT_TRUE(ds402_.addMotionController(
+        5, std::unique_ptr<DS402Master::IDriveMotionController>(ctrl)));
+    EXPECT_FALSE(ds402_.updateMotionControllers(0.001));
+}
+
+TEST_F(DS402LoopTest, SlaveSupervisorAndRecovery) {
+    EXPECT_NO_THROW(ds402_.slaveSupervisor());
+
+    EtherCAT::RecoveryConfig rcfg;
+    std::vector<DS402Master::DriveConfiguration> cfgs = {
+        {.slave_index = 0, .auto_configure_mailbox = false,
+         .transition_to_operational = false}};
+    // configure + install handler + start on the stub master.
+    ds402_.enableSlaveRecovery(rcfg, cfgs);
+    ds402_.disableSlaveRecovery();
+}
+
+TEST_F(DS402LoopTest, EnableDisableWithoutDrive) {
+    // No drive objects for these indices → false.
+    EXPECT_FALSE(ds402_.enableDrive(9, 50));
+    EXPECT_FALSE(ds402_.disableDrive(9));
+    // A master with zero drives: the all-drives loops are trivially true.
+    DS402Master fresh;
+    EXPECT_TRUE(fresh.disableAllDrives());
+    EXPECT_TRUE(fresh.enableAllDrives(10));
+}
+
+TEST_F(DS402LoopTest, StartAndStopLoopVariants) {
+    // All three loop entry points install the motion-control callback
+    // then delegate to Master — on the stub bus they start and stop.
+    if (ds402_.startRealtimeMotionControlLoop()) {
+        ds402_.stopMotionControlLoop();
+    }
+    if (ds402_.startPollingMotionControlLoop()) {
+        ds402_.stopMotionControlLoop();
+    }
+    if (ds402_.startCyclicLoop(loopCfg())) {
+        ds402_.stopCyclicLoop();
+    }
+    // Post-stop: adding a controller applies immediately again.
+    ControllerStats st;
+    EXPECT_TRUE(ds402_.addMotionController(
+        0, std::make_unique<MockController>(st)));
+}
+
+TEST_F(DS402LoopTest, DeferredEraseDrainsOnLoopStop) {
+    ControllerStats st;
+    ASSERT_TRUE(ds402_.addMotionController(
+        0, std::make_unique<MockController>(st)));
+    auto guard = ds402_.startCyclicLoopScoped(loopCfg());
+    ASSERT_TRUE(guard);
+    // Demote while the loop runs → EraseDrive op is queued.
+    ds402_.setSlaveAsNonDS402(0);
+    guard.stop();
+    ds402_.stopCyclicLoop();  // drainControllerOps applies the erase
+    EXPECT_EQ(ds402_.driveAt(0), nullptr);
+}
+
+TEST_F(DS402LoopTest, ClearMotionControllersWhileRunning) {
+    ControllerStats st;
+    ASSERT_TRUE(ds402_.addMotionController(
+        0, std::make_unique<MockController>(st)));
+    auto guard = ds402_.startCyclicLoopScoped(loopCfg());
+    ASSERT_TRUE(guard);
+    ds402_.clearMotionControllers();  // drains stop() on the loop thread
+    guard.stop();
+    ds402_.stopCyclicLoop();
+}

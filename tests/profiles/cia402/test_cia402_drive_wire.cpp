@@ -20,6 +20,7 @@
 #include "tether/ethercat/SlaveEmulator.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/profiles/cia402/CiA402Drive.hpp"
+#include "tether/profiles/cia402/DS402Master.hpp"
 
 using namespace EtherCAT;
 using namespace EtherCAT::Emulator;
@@ -286,4 +287,97 @@ TEST_F(CiA402DriveWireTest, GetECState) {
     EXPECT_TRUE(s == ECState::Init || s == ECState::PreOp ||
                 s == ECState::SafeOp || s == ECState::Op ||
                 s == ECState::Bootstrap || s == ECState::Unknown);
+}
+
+// ============================================================================
+// DS402Master over the emulated bus — configure/enable/disable paths
+// ============================================================================
+
+class DS402MasterWireTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        slave_ = addDriveSlave(bus_);
+        bus_.attach(ds402_.ethercatMaster());
+        ds402_.start(bus_.iface, kEmulatedMac);
+        auto found = ds402_.ethercatMaster().discovery().discover(
+            DiscoveryOptions{});
+        ASSERT_EQ(found.size(), 1u);
+        ds402_.setSlaveAsDS402(0);
+    }
+    void TearDown() override {
+        ds402_.stop();
+        bus_.shutdown();
+        ds402_.ethercatMaster().packetRouter().shutdown();
+    }
+
+    EmulatedBus bus_;
+    DS402Master ds402_;
+    SlaveEmulator* slave_ = nullptr;
+};
+
+TEST_F(DS402MasterWireTest, IsRunningAndDriveCount) {
+    EXPECT_TRUE(ds402_.isRunning());
+    EXPECT_EQ(ds402_.discoveredDriveCount(), 1);
+    EXPECT_TRUE(ds402_.waitForDriveCount(1, 100));
+    EXPECT_FALSE(ds402_.waitForDriveCount(2, 30));
+}
+
+TEST_F(DS402MasterWireTest, ConfigureDriveSuccess) {
+    DS402Master::DriveConfiguration cfg;
+    cfg.slave_index = 0;
+    cfg.auto_configure_mailbox = true;
+    cfg.transition_to_operational = false;
+    cfg.operating_mode = 0;
+    EXPECT_TRUE(ds402_.configureDrive(cfg));
+    EXPECT_NE(ds402_.driveBySlaveIndex(0), nullptr);
+}
+
+TEST_F(DS402MasterWireTest, ConfigureDrivesBatch) {
+    DS402Master::DriveConfiguration cfg;
+    cfg.slave_index = 0;
+    cfg.auto_configure_mailbox = true;
+    cfg.transition_to_operational = false;
+    EXPECT_TRUE(ds402_.configureDrives({cfg}));
+
+    DS402Master::DriveConfiguration bad;
+    bad.slave_index = 7;  // no such slave on the bus
+    bad.auto_configure_mailbox = true;
+    EXPECT_FALSE(ds402_.configureDrives({bad}));
+}
+
+TEST_F(DS402MasterWireTest, EnableDisableDrive) {
+    DS402Master::DriveConfiguration cfg;
+    cfg.slave_index = 0;
+    cfg.auto_configure_mailbox = true;
+    cfg.transition_to_operational = false;
+    ASSERT_TRUE(ds402_.configureDrive(cfg));
+
+    EXPECT_TRUE(ds402_.enableDrive(0, 500));
+    EXPECT_TRUE(ds402_.disableDrive(0));
+}
+
+TEST_F(DS402MasterWireTest, EnableDisableAllDrives) {
+    DS402Master::DriveConfiguration cfg;
+    cfg.slave_index = 0;
+    cfg.auto_configure_mailbox = true;
+    cfg.transition_to_operational = false;
+    ASSERT_TRUE(ds402_.configureDrive(cfg));
+
+    EXPECT_TRUE(ds402_.enableAllDrives(500));
+    EXPECT_TRUE(ds402_.disableAllDrives());
+}
+
+TEST_F(DS402MasterWireTest, RecoveryHandlerReinitialize) {
+    DS402Master::DriveConfiguration cfg;
+    cfg.slave_index = 0;
+    cfg.auto_configure_mailbox = true;
+    cfg.transition_to_operational = false;
+    ASSERT_TRUE(ds402_.configureDrive(cfg));
+
+    EtherCAT::RecoveryConfig rcfg;
+    rcfg.enabled = false;
+    // enableSlaveRecovery installs a DS402RecoveryHandler; starting the
+    // supervisor on the stub-scope master exercises configure/start.
+    ds402_.enableSlaveRecovery(rcfg, {cfg});
+    ds402_.disableSlaveRecovery();
 }
