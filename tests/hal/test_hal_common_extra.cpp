@@ -22,6 +22,7 @@
 #include "tether/hal/ILogger.hpp"
 #include "tether/hal/InterfaceHelpers.hpp"
 #include "tether/hal/StateMachineLogger.hpp"
+#include "logging/DeduplicatingLogger.hpp"
 
 namespace {
 
@@ -436,6 +437,65 @@ TEST(LinuxOneShotTimerTest, CancelWhenNotPendingReturnsFalse) {
     auto timer = getClockFactory().createOneShotTimer();
     EXPECT_FALSE(timer->isPending());
     EXPECT_FALSE(timer->cancel());
+}
+
+// ---------------------------------------------------------------------------
+// DeduplicatingLogger (src/logging/DeduplicatingLogger.cpp)
+// ---------------------------------------------------------------------------
+
+TEST(DeduplicatingLoggerTest, AllowsUpToWindowLimit) {
+    Tether::Logging::DedupLogConfig cfg;
+    cfg.max_per_window = 2;
+    cfg.window_ms = 60000;
+    Tether::Logging::DeduplicatingLogger log("grp", cfg);
+
+    EXPECT_TRUE(log.log(Tether::Platform::LogLevel::Info, "t", "m1"));
+    EXPECT_TRUE(log.log(Tether::Platform::LogLevel::Info, "t", "m2"));
+    EXPECT_FALSE(log.log(Tether::Platform::LogLevel::Info, "t", "m3"));
+    EXPECT_FALSE(log.log(Tether::Platform::LogLevel::Info, "t", "m4"));
+}
+
+TEST(DeduplicatingLoggerTest, LegacyLevelMapping) {
+    Tether::Logging::DedupLogConfig cfg;
+    cfg.max_per_window = 10;
+    Tether::Logging::DeduplicatingLogger log("grp", cfg);
+    // 0=Info, 1=Warn, 2=Error, default=Debug
+    EXPECT_TRUE(log.logLegacy(0, "t", "i"));
+    EXPECT_TRUE(log.logLegacy(1, "t", "w"));
+    EXPECT_TRUE(log.logLegacy(2, "t", "e"));
+    EXPECT_TRUE(log.logLegacy(99, "t", "d"));
+}
+
+TEST(DeduplicatingLoggerTest, ResetRestoresWindow) {
+    Tether::Logging::DedupLogConfig cfg;
+    cfg.max_per_window = 1;
+    Tether::Logging::DeduplicatingLogger log("grp", cfg);
+    EXPECT_TRUE(log.log(Tether::Platform::LogLevel::Info, "t", "a"));
+    EXPECT_FALSE(log.log(Tether::Platform::LogLevel::Info, "t", "b"));
+    log.reset();
+    EXPECT_TRUE(log.log(Tether::Platform::LogLevel::Info, "t", "c"));
+}
+
+TEST(DeduplicatingLoggerTest, FlushEmitsSummaryAndResets) {
+    Tether::Logging::DedupLogConfig cfg;
+    cfg.max_per_window = 1;
+    cfg.emit_summary = true;
+    Tether::Logging::DeduplicatingLogger log("grp", cfg);
+    log.log(Tether::Platform::LogLevel::Info, "t", "a");
+    log.log(Tether::Platform::LogLevel::Info, "t", "b");  // suppressed
+    log.flush("t");  // emits "suppressed 1" line
+    // After flush the suppression count resets.
+    EXPECT_TRUE(log.log(Tether::Platform::LogLevel::Info, "t", "c"));
+}
+
+TEST(DeduplicatingLoggerTest, WindowExpiryAllowsAgain) {
+    Tether::Logging::DedupLogConfig cfg;
+    cfg.max_per_window = 1;
+    cfg.window_ms = 1;  // 1ms window
+    Tether::Logging::DeduplicatingLogger log("grp", cfg);
+    EXPECT_TRUE(log.log(Tether::Platform::LogLevel::Info, "t", "a"));
+    usleep(2000);  // 2ms > window
+    EXPECT_TRUE(log.log(Tether::Platform::LogLevel::Info, "t", "b"));
 }
 
 }  // namespace
