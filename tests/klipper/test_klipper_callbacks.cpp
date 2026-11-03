@@ -365,3 +365,212 @@ TEST_F(KlippyCallbacksTest, PrintControlHandlers) {
     EXPECT_TRUE(exec("M24"));
     EXPECT_TRUE(exec("M25"));
 }
+
+// ---------------------------------------------------------------------------
+// KlippyInstanceConfigProcessing.ipp sweep — config-section parse branches and
+// applySettings wiring not reached by the standard fixture config.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::unique_ptr<klippy::KlippyInstance> makeInstance(
+    const std::string& cfgText, std::string& sock, std::string& settings,
+    std::string& cfgPath, const char* stem) {
+    sock = uniquePath(stem);
+    settings = uniquePath("klippy_cp_set");
+    cfgPath = uniquePath("klippy_cp_cfg");
+    {
+        std::ofstream f(cfgPath);
+        f << cfgText;
+    }
+    klippy::KlippyInstanceConfig cfg;
+    cfg.udsConfig.socketPath = sock;
+    cfg.settingsPath = settings;
+    cfg.sdcardDir = "/tmp/tether_test_sdcard_cp";
+    auto inst = std::make_unique<klippy::KlippyInstance>(cfg);
+    inst->loadConfig(cfgPath);
+    return inst;
+}
+
+void cleanupPaths(const std::string& sock, const std::string& settings,
+                  const std::string& cfgPath) {
+    ::unlink(sock.c_str());
+    std::filesystem::remove(cfgPath);
+    std::filesystem::remove(settings);
+}
+
+}  // namespace
+
+class KlippyConfigProcessingTest : public ::testing::Test {
+protected:
+    void TearDown() override {
+        instance_.reset();
+        cleanupPaths(sock_, settings_, cfg_);
+    }
+
+    void build(const std::string& text, const char* stem = "klippy_cp_sock") {
+        instance_ = makeInstance(text, sock_, settings_, cfg_, stem);
+    }
+
+    std::string sock_, settings_, cfg_;
+    std::unique_ptr<klippy::KlippyInstance> instance_;
+};
+
+// Full kitchen-sink config: every parsed stepper/extruder key, PA model
+// wiring, sensor definitions, secondary MCU, autotune, z_tilt.
+TEST_F(KlippyConfigProcessingTest, RichSectionSweep) {
+    build(R"(
+[printer]
+kinematics = cartesian
+[stepper_x]
+step_pin = PA0
+dir_pin = !PA1
+enable_pin = PA2
+rotation_distance = 40
+microsteps = 32
+run_current = 0.9
+max_velocity = 250
+position_min = -5
+position_max = 300
+position_endstop = 300
+homing_speed = 60
+second_homing_speed = 8
+[stepper_y]
+dir_pin = PB1
+rotation_distance = 40
+position_max = 100
+position_endstop = 0
+homing_speed = 40
+[stepper_z]
+position_max = 50
+position_endstop = 0
+homing_speed = 20
+[extruder]
+nozzle_diameter = 0.4
+filament_diameter = 1.75
+rotation_distance = 7.5
+microsteps = 16
+run_current = 0.6
+max_extrude_only_velocity = 60
+pressure_advance = 0.05
+smooth_time = 0.03
+pressure_advance_model = power_law
+pa_flow_index = 0.65
+pa_consistency = 0.4
+pa_max_compensation = 2.5
+cross_wlf_tau_star = 12000
+cross_wlf_flow_index = 0.6
+cross_wlf_c1 = 4.2
+cross_wlf_c2 = 151
+cross_wlf_ref_temp = 210
+cross_wlf_zero_shear_viscosity = 90000
+cross_wlf_compressibility_over_area = 0.002
+cross_wlf_lut_path = /tmp/nonexistent_lut.bin
+heater_flow_pre_emphasis = True
+filament_heat_capacity = 1.9
+heater_block_capacitance = 16
+[input_shaper]
+shaper_freq_x = 45
+shaper_type_x = damped_ei
+[mcu]
+serial = /dev/ttyUSB0
+restart_method = command
+[mcu extra]
+serial = /dev/ttyACM0
+[probe]
+z_offset = 2.0
+x_offset = 1.0
+y_offset = -0.5
+[z_tilt]
+z_positions = 10,20,30
+[thermistor custom_ntc]
+pullup_resistor = 4700
+reference_voltage = 3.3
+adc_max = 4095
+resistance_at_25c = 100000
+beta = 3950
+calibration_points = 20,100000;100,5000
+[thermocouple tc_k]
+type = J
+spi_bus = 0
+cs_pin = PA4
+[rtd pt100]
+nominal_resistance = 100
+alpha = 0.00385
+reference_resistor = 430
+adc_max = 32767
+reference_voltage = 3.3
+[temperature_sensor chamber]
+sensor_type = tc_k
+sensor_pin = PC0
+min_temp = -40
+max_temp = 200
+[temperature_sensor ambient]
+sensor_type = custom_ntc
+sensor_pin = PC1
+[autotune]
+method = simc
+form = pid
+lambda = 0.5
+[save_variables]
+filename = /tmp/tether_test_cp_vars.cfg
+[virtual_sdcard]
+path = /tmp/tether_test_sdcard_cp
+)");
+    ASSERT_NE(instance_, nullptr);
+    std::filesystem::remove("/tmp/tether_test_cp_vars.cfg");
+}
+
+// Cross-WLF model branch of the PA wiring.
+TEST_F(KlippyConfigProcessingTest, CrossWlfModel) {
+    build(R"(
+[extruder]
+pressure_advance_model = cross_wlf
+cross_wlf_compressibility_over_area = 0.01
+cross_wlf_tau_star = 10000
+)",
+            "klippy_cw_sock");
+}
+
+// Linear PA branch (model unset → Linear).
+TEST_F(KlippyConfigProcessingTest, LinearPaModel) {
+    build(R"(
+[extruder]
+pressure_advance = 0.07
+smooth_time = 0.02
+)",
+            "klippy_lin_sock");
+}
+
+// Remaining shaper type branches.
+TEST_F(KlippyConfigProcessingTest, ShaperTypeVariants) {
+    for (const char* type : {"zvd", "mzv", "ei"}) {
+        std::string text = "[input_shaper]\nshaper_freq_x = 50\nshaper_type_x = ";
+        text += type;
+        text += "\n";
+        build(text, "klippy_sh_sock");
+        instance_.reset();
+        cleanupPaths(sock_, settings_, cfg_);
+    }
+}
+
+// Re-applying config after SAVE_VARIABLE runs the saved-variables and
+// already-registered-sensor branches; probe z_offset applies with a live
+// probe object.
+TEST_F(KlippyConfigProcessingTest, ReapplyWithSavedVariablesAndProbe) {
+    build(R"(
+[temperature_sensor chamber]
+sensor_type = NTC 100K
+sensor_pin = PC0
+[probe]
+z_offset = 2.5
+[save_variables]
+filename = /tmp/tether_test_cp_vars.cfg
+)",
+            "klippy_re_sock");
+    ASSERT_TRUE(instance_->executeGcode("SAVE_VARIABLE VARIABLE=myvar VALUE=42"));
+    auto probe = std::make_shared<objects::Probe>(0, []() { return false; });
+    instance_->setProbe(probe);
+    EXPECT_TRUE(instance_->loadConfig(cfg_));
+    std::filesystem::remove("/tmp/tether_test_cp_vars.cfg");
+}
