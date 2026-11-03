@@ -395,6 +395,10 @@ TEST_F(DiagnosticsEmulatorTest, MailboxConfigurationDumpRuns) {
     debugMailboxConfiguration(master_, 0, "test");
 }
 
+TEST_F(DiagnosticsEmulatorTest, PdoSyncManagerConfigurationDumpRuns) {
+    debugPDOSyncManagerConfiguration(master_, 0, "test");
+}
+
 TEST_F(DiagnosticsEmulatorTest, ApplicationLayerDiagnosticsRuns) {
     Diagnostics::logSlaveApplicationLayerDiagnostics(master_, 0, "test");
 }
