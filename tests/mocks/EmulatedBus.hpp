@@ -110,7 +110,10 @@ public:
 private:
     void drainLoop() {
         while (running_.load(std::memory_order_relaxed)) {
-            if (master_) master_->drainWire(64);
+            // drainWire touches Master::iface_, which Master::start() is
+            // still writing while attach() has already spawned this
+            // thread — only drain once the master reports running.
+            if (master_ && master_->isRunning()) master_->drainWire(64);
             std::this_thread::sleep_for(std::chrono::microseconds(50));
         }
     }
