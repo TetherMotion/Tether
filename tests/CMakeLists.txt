@@ -1246,6 +1246,7 @@ create_ethercat_test(coverage
         ethercat/test_mailbox_endpoint_config.cpp
         ethercat/test_sdo_abort_report.cpp
         ethercat/test_motion_loops.cpp
+        ethercat/test_pdo_region_manager.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/SlaveEmulator_CiA402.cpp
