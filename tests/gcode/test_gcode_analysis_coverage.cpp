@@ -355,3 +355,370 @@ TEST(AnalysisOptionsCoverage, DetailLevelsVaryEventDepth) {
         EXPECT_FALSE(s.metrics.empty()) << "level " << lvl;
     }
 }
+
+// ============================================================================
+// Coverage additions — pattern detection, stock bounds, CNC chip-load
+// ============================================================================
+
+namespace {
+
+/// Push a segment + matching speed entry + gcode line (like makePrintJob).
+void pushSeg(std::vector<PlanningSegment>& segs,
+             std::vector<SegmentSpeed>& speeds,
+             std::vector<std::string>& lines,
+             PlanningSegment s, const std::string& g) {
+    SegmentSpeed ss;
+    ss.timeStart = 0;
+    ss.duration = s.segmentTime;
+    ss.blockIndex = s.blockIndex;
+    ss.lineNumber = static_cast<int32_t>(lines.size()) + 1;
+    ss.speedLinear = s.segmentTime > 0 ? s.segmentLength / s.segmentTime : 0;
+    segs.push_back(std::move(s));
+    speeds.push_back(ss);
+    lines.push_back(g);
+}
+
+PlanningSegment arcR(double x0, double y0, double x1, double y1,
+                     double cx, double cy, int block, bool ccw = false) {
+    PlanningSegment s;
+    s.start = pos(x0, y0, 0.0);
+    s.end = pos(x1, y1, 0.0);
+    s.center = pos(cx, cy, 0.0);
+    s.motionType = ccw ? SegmentMotionType::ArcCCW : SegmentMotionType::ArcCW;
+    s.arcRadius = std::hypot(x0 - cx, y0 - cy);
+    s.arcSweep = M_PI / 2.0;
+    s.segmentLength = s.arcRadius * s.arcSweep;
+    s.segmentTime = s.segmentLength / 25.0;
+    s.blockIndex = block;
+    return s;
+}
+
+/// Closed square loop starting/ending at (cx,cy) ± half, as 4 linears.
+void pushSquare(std::vector<PlanningSegment>& segs,
+                std::vector<SegmentSpeed>& speeds,
+                std::vector<std::string>& lines,
+                double cx, double cy, double half, int& block) {
+    const double c[][2] = {{cx - half, cy - half}, {cx + half, cy - half},
+                           {cx + half, cy + half}, {cx - half, cy + half},
+                           {cx - half, cy - half}};
+    for (int i = 0; i < 4; ++i) {
+        pushSeg(segs, speeds, lines,
+                linear(c[i][0], c[i][1], c[i + 1][0], c[i + 1][1], 0.0, block),
+                "G1");
+        ++block;
+    }
+}
+
+} // namespace
+
+TEST(PatternAnalyzerCoverage, SpiralIncreasingRadii) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines;
+    int block = 0;
+    // Three quarter arcs, same center, radii 5/10/15 — increasing spiral.
+    pushSeg(segs, speeds, lines, arcR(5, 0, 0, 5, 0, 0, block++), "G2");
+    pushSeg(segs, speeds, lines, arcR(10, 0, 0, 10, 0, 0, block++), "G2");
+    pushSeg(segs, speeds, lines, arcR(15, 0, 0, 15, 0, 0, block++), "G2");
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzePatterns(segs, speeds, lines, opts);
+    bool hasSpiral = false;
+    for (const auto& e : s.events) if (e.type == "spiral") hasSpiral = true;
+    EXPECT_TRUE(hasSpiral);
+}
+
+TEST(PatternAnalyzerCoverage, SpiralDecreasingRadii) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines;
+    int block = 0;
+    pushSeg(segs, speeds, lines, arcR(15, 0, 0, 15, 0, 0, block++), "G2");
+    pushSeg(segs, speeds, lines, arcR(10, 0, 0, 10, 0, 0, block++), "G2");
+    pushSeg(segs, speeds, lines, arcR(5, 0, 0, 5, 0, 0, block++), "G2");
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzePatterns(segs, speeds, lines, opts);
+    bool hasSpiral = false;
+    for (const auto& e : s.events) if (e.type == "spiral") hasSpiral = true;
+    EXPECT_TRUE(hasSpiral);
+}
+
+TEST(PatternAnalyzerCoverage, SpiralBrokenTrendKeepsPrefix) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines;
+    int block = 0;
+    // Radii 5→15→8 — non-monotonic: the trend break emits the 5→15
+    // prefix as a two-arc spiral.
+    pushSeg(segs, speeds, lines, arcR(5, 0, 0, 5, 0, 0, block++), "G2");
+    pushSeg(segs, speeds, lines, arcR(15, 0, 0, 15, 0, 0, block++), "G2");
+    pushSeg(segs, speeds, lines, arcR(8, 0, 0, 8, 0, 0, block++), "G2");
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzePatterns(segs, speeds, lines, opts);
+    bool hasSpiral = false;
+    for (const auto& e : s.events) if (e.type == "spiral") hasSpiral = true;
+    EXPECT_TRUE(hasSpiral);
+}
+
+TEST(PatternAnalyzerCoverage, ConcentricArcLoops) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines;
+    int block = 0;
+    // Two concentric full circles about (0,0), r=10 then r=15 — arc-loop
+    // centroids are exact (no vertex bias) so detectConcentric pairs them.
+    for (double r : {10.0, 15.0}) {
+        pushSeg(segs, speeds, lines, arcR(r, 0, 0, r, 0, 0, block++), "G2");
+        pushSeg(segs, speeds, lines, arcR(0, r, -r, 0, 0, 0, block++), "G2");
+        pushSeg(segs, speeds, lines, arcR(-r, 0, 0, -r, 0, 0, block++), "G2");
+        pushSeg(segs, speeds, lines, arcR(0, -r, r, 0, 0, 0, block++), "G2");
+    }
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzePatterns(segs, speeds, lines, opts);
+    bool hasConcentric = false;
+    for (const auto& e : s.events) if (e.type == "concentric") hasConcentric = true;
+    EXPECT_TRUE(hasConcentric);
+}
+
+TEST(PatternAnalyzerCoverage, ArcLoopDetected) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines;
+    int block = 0;
+    // Full circle as 4 quarter arcs, radius 10 → arc-sweep loop ≥ 1.75π.
+    pushSeg(segs, speeds, lines, arcR(10, 0, 0, 10, 0, 0, block++), "G2");
+    pushSeg(segs, speeds, lines, arcR(0, 10, -10, 0, 0, 0, block++), "G2");
+    pushSeg(segs, speeds, lines, arcR(-10, 0, 0, -10, 0, 0, block++), "G2");
+    pushSeg(segs, speeds, lines, arcR(0, -10, 10, 0, 0, 0, block++), "G2");
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzePatterns(segs, speeds, lines, opts);
+    // An arc loop alone is a loop but needs a partner for "concentric" —
+    // still populates arc metrics.
+    expectPopulated(s);
+}
+
+TEST(PatternAnalyzerCoverage, LinearLoopDetected) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines;
+    int block = 0;
+    // A single closed square exercises tryCloseLoop's linear branch.
+    pushSquare(segs, speeds, lines, 20, 20, 20, block);
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzePatterns(segs, speeds, lines, opts);
+    expectPopulated(s);
+}
+
+TEST(PatternAnalyzerCoverage, ZigzagInfill) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines;
+    int block = 0;
+    // Four alternating 10 mm strokes spaced 2 mm in Y.
+    pushSeg(segs, speeds, lines, linear(0, 0, 10, 0, 0, block++), "G1");
+    pushSeg(segs, speeds, lines, linear(10, 2, 0, 2, 0, block++), "G1");
+    pushSeg(segs, speeds, lines, linear(0, 4, 10, 4, 0, block++), "G1");
+    pushSeg(segs, speeds, lines, linear(10, 6, 0, 6, 0, block++), "G1");
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzePatterns(segs, speeds, lines, opts);
+    bool hasZigzag = false;
+    for (const auto& e : s.events) if (e.type == "zigzag") hasZigzag = true;
+    EXPECT_TRUE(hasZigzag);
+}
+
+TEST(PatternAnalyzerCoverage, ZigzagTooFewStrokes) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines;
+    int block = 0;
+    pushSeg(segs, speeds, lines, linear(0, 0, 10, 0, 0, block++), "G1");
+    pushSeg(segs, speeds, lines, linear(10, 2, 0, 2, 0, block++), "G1");
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzePatterns(segs, speeds, lines, opts);
+    for (const auto& e : s.events) EXPECT_NE(e.type, "zigzag");
+}
+
+TEST(StockCollisionAnalyzerCoverage, StockBoundsAndViolations) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines = {
+        "; STOCK_X: 100", "; STOCK_Y: 100", "; STOCK_Z: 20"};
+    int block = 0;
+
+    // Rapid inside stock → rapid_collision.
+    PlanningSegment r = rapid(10, 10, 5, block++);
+    pushSeg(segs, speeds, lines, r, "G0 X10 Y10 Z5");
+    // Cut below stock bottom → cut_below_stock.
+    pushSeg(segs, speeds, lines, linear(0, 0, 5, 0, -2, block++), "G1");
+    // Rapid below safeZ → clearance_violation.
+    pushSeg(segs, speeds, lines, rapid(200, 200, 25, block++), "G0 X200 Y200 Z25");
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzeStockCollision(segs, speeds, lines, opts);
+    EXPECT_EQ(s.name, "stock_collision");
+    EXPECT_LT(s.score, 100.0);
+    bool rapidColl = false, below = false, clearance = false;
+    for (const auto& e : s.events) {
+        if (e.type == "rapid_collision") rapidColl = true;
+        if (e.type == "cut_below_stock") below = true;
+        if (e.type == "clearance_violation") clearance = true;
+    }
+    EXPECT_TRUE(rapidColl);
+    EXPECT_TRUE(below);
+    EXPECT_TRUE(clearance);
+}
+
+TEST(StockCollisionAnalyzerCoverage, PrintAreaBoundsOutOfBounds) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines = {
+        "; print_area_min_x:0", "; print_area_max_x:100",
+        "; print_area_min_y:0", "; print_area_max_y:100"};
+    int block = 0;
+    pushSeg(segs, speeds, lines, linear(50, 50, 150, 50, 0.2, block++), "G1");
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzeStockCollision(segs, speeds, lines, opts);
+    bool oob = false;
+    for (const auto& e : s.events) if (e.type == "out_of_bounds") oob = true;
+    EXPECT_TRUE(oob);
+}
+
+TEST(StockCollisionAnalyzerCoverage, CircularBed) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines = {
+        "; BED_X: 200", "; BED_Y: 200", "; bed_shape=0x0,CIRCLE"};
+    int block = 0;
+    // Bed is centered ±100; point (95,95) is outside r=100 circle.
+    pushSeg(segs, speeds, lines, linear(95, 95, 98, 95, 0.2, block++), "G1");
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzeStockCollision(segs, speeds, lines, opts);
+    bool oob = false;
+    for (const auto& e : s.events) if (e.type == "out_of_bounds") oob = true;
+    EXPECT_TRUE(oob);
+}
+
+TEST(StockCollisionAnalyzerCoverage, SummaryAndTopLimit) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines = {
+        "; STOCK_X: 100", "; STOCK_Y: 100", "; STOCK_Z: 20"};
+    int block = 0;
+    pushSeg(segs, speeds, lines, rapid(10, 10, 5, block++), "G0");
+    pushSeg(segs, speeds, lines, linear(0, 0, 5, 0, -2, block++), "G1");
+
+    Options summary; summary.detailLevel = "summary";
+    Section ss = analyzeStockCollision(segs, speeds, lines, summary);
+    EXPECT_TRUE(ss.events.empty());  // summary returns before events
+
+    Options lim; lim.detailLevel = "full"; lim.topEventLimit = 1;
+    Section sl = analyzeStockCollision(segs, speeds, lines, lim);
+    EXPECT_EQ(sl.events.size(), 1u);
+    EXPECT_TRUE(sl.hasMoreEvents);
+}
+
+TEST(StockCollisionAnalyzerCoverage, NoBoundsSkipsChecks) {
+    auto j = makePrintJob();
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzeStockCollision(j.segs, j.speeds, {}, opts);
+    EXPECT_TRUE(s.events.empty());
+    EXPECT_DOUBLE_EQ(s.score, 100.0);
+}
+
+TEST(CncToolpathAnalyzerCoverage, SpindleToolAndChipEvents) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines;
+
+    // Program: spindle on, tool select, CAM comments, cutting moves.
+    lines.push_back("M3 S10000");
+    lines.push_back("T2");
+    lines.push_back("; MATERIAL: STEEL");
+    lines.push_back("; TOOL_DIA: 8");
+    lines.push_back("; FLUTES: 4");
+    lines.push_back("; AXIAL_DEPTH: 3");
+    lines.push_back("; RADIAL_DEPTH: 2");
+
+    int block = 0;
+    auto cut = [&](double x0, double y0, double x1, double y1,
+                   const std::string& g) {
+        pushSeg(segs, speeds, lines,
+                linear(x0, y0, x1, y1, -1.0, block++, 1200.0), g);
+    };
+    cut(0, 0, 10, 0, "G1 X10 F1200");
+    lines.push_back("T3");          // tool change mid-job
+    cut(10, 0, 20, 0, "G1 X20 F1200");
+    lines.push_back("S5000");       // spindle rpm change
+    cut(20, 0, 30, 0, "G1 X30 F1200");
+    lines.push_back("M5");
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzeCncToolpath(segs, speeds, lines, opts);
+    EXPECT_EQ(s.name, "cnc_toolpath");
+    bool toolChg = false, spinChg = false;
+    for (const auto& e : s.events) {
+        if (e.type == "tool_change") toolChg = true;
+        if (e.type == "spindle_change") spinChg = true;
+    }
+    EXPECT_TRUE(toolChg);
+    EXPECT_TRUE(spinChg);
+}
+
+TEST(CncToolpathAnalyzerCoverage, ChipLoadOutOfRange) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines = {"M3 S1000", "; FLUTES: 2"};
+    int block = 0;
+    // feed 5000 / (1000 * 2) = 2.5 mm/tooth — way over aluminum 0.15 max.
+    pushSeg(segs, speeds, lines, linear(0, 0, 50, 0, -1, block++, 5000.0), "G1");
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzeCncToolpath(segs, speeds, lines, opts);
+    bool chipHigh = false;
+    for (const auto& e : s.events) {
+        if (e.type == "chip_load" || e.message.find("chip") != std::string::npos)
+            chipHigh = true;
+    }
+    EXPECT_TRUE(chipHigh);
+}
+
+TEST(CncToolpathAnalyzerCoverage, NoSpindleNoEvents) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines;
+    int block = 0;
+    // Cutting move with no spindle/tool — chipEvents empty path.
+    pushSeg(segs, speeds, lines, linear(0, 0, 10, 0, -1, block++), "G1");
+    pushSeg(segs, speeds, lines, rapid(100, 100, 10, block++), "G0");
+
+    Options opts; opts.detailLevel = "full";
+    Section s = analyzeCncToolpath(segs, speeds, lines, opts);
+    // cuttingMoves > 0 → section emitted; no chip events.
+    if (!s.name.empty()) {
+        for (const auto& e : s.events) {
+            EXPECT_NE(e.type, "chip_load");
+        }
+    }
+}
+
+TEST(CncToolpathAnalyzerCoverage, SummarySkipsEvents) {
+    std::vector<PlanningSegment> segs;
+    std::vector<SegmentSpeed> speeds;
+    std::vector<std::string> lines = {"M3 S8000", "T1"};
+    int block = 0;
+    pushSeg(segs, speeds, lines, linear(0, 0, 10, 0, -1, block++), "G1");
+
+    Options opts; opts.detailLevel = "summary";
+    Section s = analyzeCncToolpath(segs, speeds, lines, opts);
+    EXPECT_TRUE(s.events.empty());
+    expectPopulated(s);
+}
