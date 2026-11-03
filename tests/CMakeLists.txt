@@ -1261,6 +1261,7 @@ create_ethercat_test(coverage
         ethercat/test_cia402_op_transition.cpp
         ethercat/test_cbpf_interpreter.cpp
         ethercat/test_packet_debugger.cpp
+        ethercat/test_cyclic_task_scheduler.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/SlaveEmulator_CiA402.cpp
