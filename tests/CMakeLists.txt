@@ -1253,6 +1253,7 @@ create_ethercat_test(coverage
         ethercat/test_encapsulation.cpp
         ethercat/test_esc211_coverage.cpp
         ethercat/test_esc211_managers.cpp
+        ethercat/test_rsap_information_processor.cpp
         ethercat/test_rp20_device.cpp
         ethercat/test_drives_misc.cpp
         ethercat/test_reset_controller.cpp
