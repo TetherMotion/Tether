@@ -56,8 +56,8 @@ jobs:
           libboost-dev \
           make \
           ccache \
-          lld
-          mold
+          lld \
+          mold \
           ninja-build
     
     - name: Cache googletest source
@@ -169,8 +169,8 @@ jobs:
           libboost-dev \
           make \
           ccache \
-          lld
-          mold
+          lld \
+          mold \
           ninja-build
 
     - name: Cache googletest source
@@ -285,8 +285,8 @@ jobs:
           libboost-dev \
           make \
           ccache \
-          lld
-          mold
+          lld \
+          mold \
           ninja-build
 
     - name: Show toolchain versions
@@ -588,8 +588,8 @@ jobs:
           lcov \
           gcovr \
           ccache \
-          lld
-          mold
+          lld \
+          mold \
           ninja-build
     
     - name: Cache googletest source
@@ -761,8 +761,8 @@ jobs:
           libc6-dev \
           make \
           ccache \
-          lld
-          mold
+          lld \
+          mold \
           ninja-build
     
     - name: Restore ccache
@@ -902,8 +902,8 @@ jobs:
           libc6-dev \
           make \
           ccache \
-          lld
-          mold
+          lld \
+          mold \
           ninja-build
     
     - name: Restore ccache
