@@ -17,7 +17,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
 
     - name: Hash submodule pins
       id: submod-key
@@ -25,7 +25,7 @@ jobs:
 
     - name: Restore submodule object cache
       id: submodule-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: .git/modules
         # Key on the pinned submodule commits (gitlinks), not the commit
@@ -39,7 +39,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: Save submodule object cache
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
@@ -61,7 +61,7 @@ jobs:
           ninja-build
     
     - name: Cache googletest source
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .deps-src/googletest
         key: googletest-v1.14.0
@@ -75,7 +75,7 @@ jobs:
         echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
 
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cache/ccache
         key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-${{ github.sha }}
@@ -130,7 +130,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
 
     - name: Hash submodule pins
       id: submod-key
@@ -138,7 +138,7 @@ jobs:
 
     - name: Restore submodule object cache
       id: submodule-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: .git/modules
         # Key on the pinned submodule commits (gitlinks), not the commit
@@ -152,7 +152,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: Save submodule object cache
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
@@ -174,7 +174,7 @@ jobs:
           ninja-build
 
     - name: Cache googletest source
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .deps-src/googletest
         key: googletest-v1.14.0
@@ -188,7 +188,7 @@ jobs:
         echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
 
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cache/ccache
         key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-${{ github.sha }}
@@ -246,7 +246,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
 
     - name: Hash submodule pins
       id: submod-key
@@ -254,7 +254,7 @@ jobs:
 
     - name: Restore submodule object cache
       id: submodule-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: .git/modules
         # Key on the pinned submodule commits (gitlinks), not the commit
@@ -268,7 +268,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: Save submodule object cache
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
@@ -297,7 +297,7 @@ jobs:
         cmake --version | head -1
 
     - name: Cache googletest source
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .deps-src/googletest
         key: googletest-v1.14.0
@@ -311,7 +311,7 @@ jobs:
         echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
 
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cache/ccache
         key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-${{ github.sha }}
@@ -358,7 +358,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
 
     - name: Hash submodule pins
       id: submod-key
@@ -366,7 +366,7 @@ jobs:
 
     - name: Restore submodule object cache
       id: submodule-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: .git/modules
         # Key on the pinned submodule commits (gitlinks), not the commit
@@ -380,7 +380,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: Save submodule object cache
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
@@ -417,7 +417,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
 
     - name: Hash submodule pins
       id: submod-key
@@ -425,7 +425,7 @@ jobs:
 
     - name: Restore submodule object cache
       id: submodule-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: .git/modules
         # Key on the pinned submodule commits (gitlinks), not the commit
@@ -439,7 +439,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: Save submodule object cache
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
@@ -488,7 +488,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
 
     - name: Hash submodule pins
       id: submod-key
@@ -496,7 +496,7 @@ jobs:
 
     - name: Restore submodule object cache
       id: submodule-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: .git/modules
         # Key on the pinned submodule commits (gitlinks), not the commit
@@ -510,7 +510,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: Save submodule object cache
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
@@ -548,7 +548,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
 
     - name: Hash submodule pins
       id: submod-key
@@ -556,7 +556,7 @@ jobs:
 
     - name: Restore submodule object cache
       id: submodule-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: .git/modules
         # Key on the pinned submodule commits (gitlinks), not the commit
@@ -570,7 +570,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: Save submodule object cache
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
@@ -593,7 +593,7 @@ jobs:
           ninja-build
     
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cache/ccache
         key: ccache-${{ github.job }}-${{ github.sha }}
@@ -606,7 +606,7 @@ jobs:
         ccache -s
     
     - name: Cache googletest source
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .deps-src/googletest
         key: googletest-v1.14.0
@@ -714,7 +714,7 @@ jobs:
 
     - name: Upload coverage to Codecov
       if: always()
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v7
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.info,./coverage.xml
@@ -752,7 +752,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
 
     - name: Hash submodule pins
       id: submod-key
@@ -760,7 +760,7 @@ jobs:
 
     - name: Restore submodule object cache
       id: submodule-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: .git/modules
         # Key on the pinned submodule commits (gitlinks), not the commit
@@ -774,7 +774,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: Save submodule object cache
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
@@ -795,7 +795,7 @@ jobs:
           ninja-build
     
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cache/ccache
         key: ccache-${{ github.job }}-${{ github.sha }}
@@ -808,7 +808,7 @@ jobs:
         ccache -s
     
     - name: Cache googletest source
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .deps-src/googletest
         key: googletest-v1.14.0
@@ -893,7 +893,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
 
     - name: Hash submodule pins
       id: submod-key
@@ -901,7 +901,7 @@ jobs:
 
     - name: Restore submodule object cache
       id: submodule-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: .git/modules
         # Key on the pinned submodule commits (gitlinks), not the commit
@@ -915,7 +915,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: Save submodule object cache
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
@@ -950,7 +950,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
       # No submodules needed: Doxygen only scans include/tether and src.
 
     - name: Install dependencies
@@ -1040,7 +1040,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
 
     - name: Hash submodule pins
       id: submod-key
@@ -1048,7 +1048,7 @@ jobs:
 
     - name: Restore submodule object cache
       id: submodule-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: .git/modules
         # Key on the pinned submodule commits (gitlinks), not the commit
@@ -1062,7 +1062,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: Save submodule object cache
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
@@ -1084,7 +1084,7 @@ jobs:
           python3
 
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cache/ccache
         key: ccache-${{ github.job }}-${{ github.sha }}
