@@ -1233,6 +1233,7 @@ create_ethercat_test(coverage
         ethercat/test_sdo_polling.cpp
         ethercat/test_cia402_emulator.cpp
         ethercat/test_slave_groups.cpp
+        ethercat/test_encapsulation.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/SlaveEmulator_CiA402.cpp
