@@ -517,6 +517,15 @@ if(CONTROL_AUTOTUNING_METHODS_SOURCES)
     create_module_test(control_autotuning_methods "${CONTROL_AUTOTUNING_METHODS_SOURCES}" "${CONTROL_TEST_LIBS}" "")
 endif()
 
+# Terminal UI helper tests (pure UTF-8/ANSI helpers; no ncurses session)
+if(TARGET tether_terminal_ui)
+    set(TERMINAL_UI_TEST_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/terminal_ui/test_ansi_line.cpp"
+    )
+    create_module_test(terminal_ui "${TERMINAL_UI_TEST_SOURCES}"
+                       "tether_common;tether_terminal_ui" "")
+endif()
+
 # Analysis tests (G-code / motion path analysis)
 set(ANALYSIS_TEST_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/analysis/test_analysis.cpp"
