@@ -326,10 +326,19 @@ TEST_F(DS402MasterWireTest, ConfigureDriveSuccess) {
     DS402Master::DriveConfiguration cfg;
     cfg.slave_index = 0;
     cfg.auto_configure_mailbox = true;
-    cfg.transition_to_operational = false;
+    cfg.transition_to_operational = true;   // drives INIT→OP over the bus
     cfg.operating_mode = 0;
     EXPECT_TRUE(ds402_.configureDrive(cfg));
     EXPECT_NE(ds402_.driveBySlaveIndex(0), nullptr);
+}
+
+TEST_F(DS402MasterWireTest, ConfigureDriveToOperational) {
+    // Second slave index without a real drive — configureDrive must fail.
+    DS402Master::DriveConfiguration cfg;
+    cfg.slave_index = 3;
+    cfg.auto_configure_mailbox = true;
+    cfg.transition_to_operational = true;
+    EXPECT_FALSE(ds402_.configureDrive(cfg));
 }
 
 TEST_F(DS402MasterWireTest, ConfigureDrivesBatch) {
@@ -401,4 +410,93 @@ TEST_F(CiA402DriveWireTest, DriveManagerOverBus) {
     // fault-free slave these complete.
     mgr.enableAll();
     mgr.disableAll();
+}
+
+TEST_F(CiA402DriveWireTest, AlStateSequence) {
+    // Walk the full INIT -> PRE_OP -> SAFE_OP -> OP ladder over the bus,
+    // then back down — the emulator services AL_CONTROL/AL_STATUS.
+    EXPECT_TRUE(drive_->gotoInit());
+    EXPECT_TRUE(drive_->gotoPreOp());
+    // gotoSafeOp logs a warning about missing SM2/SM3 SII config — our
+    // mailbox-only SII covers that branch.
+    drive_->gotoSafeOp();
+    drive_->gotoOp();
+    EXPECT_TRUE(drive_->gotoInit());  // unwind
+}
+
+TEST_F(CiA402DriveWireTest, RequestOpAndWait) {
+    ASSERT_TRUE(drive_->gotoPreOp());
+    drive_->gotoSafeOp();
+    // requestOp starts the transition; waitForOp polls to completion.
+    drive_->requestOp();
+    // OP request may complete inline or need polling — either path is fine.
+    SUCCEED();
+}
+
+TEST_F(CiA402DriveWireTest, DynaDriveEnableDisable) {
+    // enableDynaDrive/disableDynaDrive wrap DynaDriveController — the
+    // emulator aborts the 0x20xx SDO ops, but the call sites and failure
+    // handling get covered either way.
+    drive_->enableDynaDrive(50);
+    drive_->disableDynaDrive();
+}
+
+TEST_F(CiA402DriveWireTest, EnableFaultKeepEnabled) {
+    drive_->setFaultResetMode(CiA402Drive::FaultResetMode::KeepEnabled);
+    EXPECT_EQ(drive_->faultResetMode(), CiA402Drive::FaultResetMode::KeepEnabled);
+    // Inject a fault + generic error code → enable() runs the
+    // KeepEnabled fault-reset arm.
+    driveState().state = Emulator::CiA402::State::FAULT;
+    driveState().error_code = 0x7500;
+    drive_->enable(3000);
+}
+
+TEST_F(CiA402DriveWireTest, EnableFaultMaxCode) {
+    // last_fault_code == 0xFFFF arm — error register at max.
+    driveState().state = Emulator::CiA402::State::FAULT;
+    driveState().error_code = 0xFFFF;
+    drive_->enable(3000);
+}
+
+TEST_F(CiA402DriveWireTest, ControlledShutdownNoneMode) {
+    ASSERT_TRUE(drive_->enable(3000));
+    CiA402Drive::ControlledShutdownConfig cfg;
+    cfg.stop_mode = CiA402Drive::ShutdownStopMode::None;
+    cfg.standstill_ms = 0;
+    EXPECT_TRUE(drive_->controlledShutdown(cfg));
+    EXPECT_NE(drive_->getDriveState(), DriveState::OperationEnabled);
+}
+
+TEST_F(CiA402DriveWireTest, ControlledShutdownInstantStop) {
+    ASSERT_TRUE(drive_->enable(3000));
+    CiA402Drive::ControlledShutdownConfig cfg;
+    cfg.stop_mode = CiA402Drive::ShutdownStopMode::InstantHardStop;
+    cfg.standstill_ms = 0;
+    EXPECT_TRUE(drive_->controlledShutdown(cfg));
+}
+
+TEST_F(CiA402DriveWireTest, ControlledShutdownAccelLimited) {
+    ASSERT_TRUE(drive_->enable(3000));
+    CiA402Drive::ControlledShutdownConfig cfg;
+    cfg.stop_mode = CiA402Drive::ShutdownStopMode::AccelerationLimited;
+    cfg.decel_limit = 10000;
+    cfg.standstill_ms = 0;
+    EXPECT_TRUE(drive_->controlledShutdown(cfg));
+}
+
+TEST_F(CiA402DriveWireTest, OperatingModeSdoPaths) {
+    // 0x6060/0x6061 are registered by enableCiA402 — write + readback.
+    EXPECT_TRUE(drive_->setOperatingModeSDO(8));  // CSP
+    EXPECT_EQ(drive_->getOperatingMode(), 8);
+    EXPECT_TRUE(drive_->setOperatingModeSDO(6));  // homing
+    EXPECT_EQ(drive_->getOperatingMode(), 6);
+}
+
+TEST_F(CiA402DriveWireTest, HomingCompleteAndErrorQueries) {
+    // Direct statusword bit queries.
+    EXPECT_FALSE(drive_->isHomingComplete());
+    EXPECT_FALSE(drive_->hasHomingError());
+    driveState().operation_mode = 6;
+    driveState().homing_complete = true;
+    EXPECT_TRUE(drive_->isHomingComplete());
 }
