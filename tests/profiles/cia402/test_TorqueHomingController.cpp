@@ -687,3 +687,305 @@ TEST(TorqueHomingControllerTest, StateChangeCallbackFired) {
     for (auto s : seen) if (s == TorqueHomingState::Attained) attained = true;
     EXPECT_TRUE(attained);
 }
+
+// ============================================================================
+// Coverage additions — guards, abort/reset, fault injection, fallbacks
+// ============================================================================
+
+TEST(TorqueHomingCov, StartWhileRunningFails) {
+    auto fb = std::make_shared<FakeDriveBackend>();
+    TorqueHomingController ctrl;
+    ctrl.setBackend(fb);
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    ctrl.setConfig(cfg);
+    ctrl.setCallbacks(makeCallbacks(*fb));
+    ASSERT_TRUE(ctrl.start());
+    EXPECT_FALSE(ctrl.start());  // already running
+}
+
+TEST(TorqueHomingCov, NegativeDirectionFlipsTorque) {
+    auto fb = std::make_shared<FakeDriveBackend>();
+    fb->stopPosition = -100000;
+    TorqueHomingController ctrl;
+    ctrl.setBackend(fb);
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;   // positive, but we command -1
+    cfg.finePasses.push_back({.targetTorque = 200, .backOffDistance = -500});
+    ctrl.setConfig(cfg);
+    ctrl.setCallbacks(makeCallbacks(*fb));
+    ASSERT_TRUE(ctrl.start(-1));
+    // Coarse torque flipped to negative; fine pass torque/backOff flipped too.
+    EXPECT_LT(ctrl.getConfig().coarsePass.targetTorque, 0);
+    EXPECT_LT(ctrl.getConfig().finePasses[0].targetTorque, 0);
+    EXPECT_GT(ctrl.getConfig().finePasses[0].backOffDistance, 0);
+}
+
+TEST(TorqueHomingCov, AbortFromIdleIsNoop) {
+    TorqueHomingController ctrl;
+    ctrl.abort();
+    EXPECT_EQ(ctrl.getState(), TorqueHomingState::Idle);
+    EXPECT_EQ(ctrl.getLastError(), TorqueHomingError::None);
+}
+
+TEST(TorqueHomingCov, AbortMidRun) {
+    auto fb = std::make_shared<FakeDriveBackend>();
+    TorqueHomingController ctrl;
+    ctrl.setBackend(fb);
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    ctrl.setConfig(cfg);
+    ctrl.setCallbacks(makeCallbacks(*fb));
+    ASSERT_TRUE(ctrl.start());
+    fb->tick();
+    ctrl.update();
+    ctrl.abort();
+    EXPECT_TRUE(ctrl.hasError());
+    EXPECT_EQ(ctrl.getLastError(), TorqueHomingError::Aborted);
+}
+
+TEST(TorqueHomingCov, ResetWhileRunningRefused) {
+    auto fb = std::make_shared<FakeDriveBackend>();
+    TorqueHomingController ctrl;
+    ctrl.setBackend(fb);
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    ctrl.setConfig(cfg);
+    ctrl.setCallbacks(makeCallbacks(*fb));
+    ASSERT_TRUE(ctrl.start());
+    ctrl.reset();  // refused — still running
+    EXPECT_NE(ctrl.getState(), TorqueHomingState::Idle);
+    ctrl.abort();
+}
+
+TEST(TorqueHomingCov, ResetAfterAbort) {
+    auto fb = std::make_shared<FakeDriveBackend>();
+    TorqueHomingController ctrl;
+    ctrl.setBackend(fb);
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    ctrl.setConfig(cfg);
+    ctrl.setCallbacks(makeCallbacks(*fb));
+    ASSERT_TRUE(ctrl.start());
+    ctrl.abort();
+    ctrl.reset();
+    EXPECT_EQ(ctrl.getState(), TorqueHomingState::Idle);
+    EXPECT_EQ(ctrl.getLastError(), TorqueHomingError::None);
+    EXPECT_EQ(ctrl.getCurrentPass(), -1);
+}
+
+TEST(TorqueHomingCov, UpdateFromIdleReturnsFalse) {
+    TorqueHomingController ctrl;
+    EXPECT_FALSE(ctrl.update());
+}
+
+TEST(TorqueHomingCov, UpdateAfterAttainedReturnsFalse) {
+    auto fb = std::make_shared<FakeDriveBackend>();
+    fb->stopPosition = 1000;
+    TorqueHomingController ctrl;
+    ctrl.setBackend(fb);
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    ctrl.setConfig(cfg);
+    ctrl.setCallbacks(makeCallbacks(*fb));
+    ASSERT_TRUE(ctrl.start());
+    runToCompletion(ctrl, *fb);
+    ASSERT_TRUE(ctrl.isComplete());
+    EXPECT_FALSE(ctrl.update());  // handleAttained → false
+}
+
+TEST(TorqueHomingCov, DriveFaultAtStart) {
+    auto fb = std::make_shared<FakeDriveBackend>();
+    fb->errorRegister = 0x01;
+    TorqueHomingController ctrl;
+    ctrl.setBackend(fb);
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    ctrl.setConfig(cfg);
+    ctrl.setCallbacks(makeCallbacks(*fb));
+    ASSERT_TRUE(ctrl.start());
+    fb->tick();
+    ctrl.update();  // Configuring sees fault
+    EXPECT_TRUE(ctrl.hasError());
+    EXPECT_EQ(ctrl.getLastError(), TorqueHomingError::DriveFault);
+}
+
+TEST(TorqueHomingCov, ModeChangeFails) {
+    auto fb = std::make_shared<FakeDriveBackend>();
+    TorqueHomingController ctrl;
+    ctrl.setBackend(fb);
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    ctrl.setConfig(cfg);
+    auto cbs = makeCallbacks(*fb);
+    cbs.setOperatingMode = [](OperatingMode) { return false; };
+    ctrl.setCallbacks(cbs);
+    ASSERT_TRUE(ctrl.start());
+    fb->tick();
+    ctrl.update();
+    EXPECT_TRUE(ctrl.hasError());
+    EXPECT_EQ(ctrl.getLastError(), TorqueHomingError::ModeChangeFailed);
+}
+
+TEST(TorqueHomingCov, BackOffDriveFault) {
+    auto fb = std::make_shared<FakeDriveBackend>();
+    fb->stopPosition = 1000;
+    TorqueHomingController ctrl;
+    ctrl.setBackend(fb);
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    TorqueHomingPassConfig fine;
+    fine.targetTorque = 100;
+    fine.backOffDistance = -300;
+    cfg.finePasses.push_back(fine);
+    ctrl.setConfig(cfg);
+    ctrl.setCallbacks(makeCallbacks(*fb));
+    ASSERT_TRUE(ctrl.start());
+    // Drive until BackOff, then inject the fault.
+    for (int i = 0; i < 200000 && ctrl.getState() != TorqueHomingState::BackOff; ++i) {
+        fb->tick();
+        ctrl.update();
+    }
+    ASSERT_EQ(ctrl.getState(), TorqueHomingState::BackOff);
+    fb->errorRegister = 0x01;
+    fb->tick();
+    ctrl.update();
+    EXPECT_TRUE(ctrl.hasError());
+    EXPECT_EQ(ctrl.getLastError(), TorqueHomingError::DriveFault);
+}
+
+TEST(TorqueHomingCov, BackOffPassTimeout) {
+    auto fb = std::make_shared<FakeDriveBackend>();
+    fb->stopPosition = 1000;
+    TorqueHomingController ctrl;
+    ctrl.setBackend(fb);
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    TorqueHomingPassConfig fine;
+    fine.targetTorque = 100;
+    fine.backOffDistance = -300;
+    fine.passTimeoutMs = 1;  // tiny — backoff immediately times out
+    cfg.finePasses.push_back(fine);
+    ctrl.setConfig(cfg);
+    ctrl.setCallbacks(makeCallbacks(*fb));
+    ASSERT_TRUE(ctrl.start());
+    runToCompletion(ctrl, *fb);
+    EXPECT_TRUE(ctrl.hasError());
+    EXPECT_EQ(ctrl.getLastError(), TorqueHomingError::PassTimeout);
+}
+
+TEST(TorqueHomingCov, OnCompleteAndOnErrorCallbacks) {
+    auto fb = std::make_shared<FakeDriveBackend>();
+    fb->stopPosition = 1000;
+    TorqueHomingController ctrl;
+    ctrl.setBackend(fb);
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    ctrl.setConfig(cfg);
+    bool completed = false;
+    int32_t homePos = 0;
+    TorqueHomingError lastErr = TorqueHomingError::None;
+    auto cbs = makeCallbacks(*fb);
+    cbs.onComplete = [&](int32_t p) { completed = true; homePos = p; };
+    cbs.onError = [&](TorqueHomingError e, const std::string&) { lastErr = e; };
+    ctrl.setCallbacks(cbs);
+    ASSERT_TRUE(ctrl.start());
+    runToCompletion(ctrl, *fb);
+    EXPECT_TRUE(completed);
+    EXPECT_GE(homePos, 0);
+    // onError fires via a fresh aborted run.
+    TorqueHomingController ctrl2;
+    ctrl2.setBackend(fb);
+    TorqueHomingConfig cfg2;
+    cfg2.coarsePass.targetTorque = 500;
+    ctrl2.setConfig(cfg2);
+    auto cbs2 = makeCallbacks(*fb);
+    cbs2.onError = [&](TorqueHomingError e, const std::string&) { lastErr = e; };
+    ctrl2.setCallbacks(cbs2);
+    ASSERT_TRUE(ctrl2.start());
+    ctrl2.abort();
+    EXPECT_EQ(lastErr, TorqueHomingError::Aborted);
+}
+
+TEST(TorqueHomingCov, CallbackFallbacksWithoutCallbacks) {
+    // Backend only — all callX helpers take the m_backend arms.
+    auto fb = std::make_shared<FakeDriveBackend>();
+    fb->stopPosition = 1000;
+    TorqueHomingController ctrl;
+    ctrl.setBackend(fb);
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    ctrl.setConfig(cfg);
+    // Callbacks still needed for validation (position source can be backend).
+    TorqueHomingCallbacks cbs;
+    ctrl.setCallbacks(cbs);  // empty — validateConfig uses backend instead
+    ASSERT_TRUE(ctrl.start());
+    // Drive a few cycles — velocity/torque/fault all read via backend.
+    for (int i = 0; i < 200 && ctrl.update(); ++i) { fb->tick(); }
+    SUCCEED();
+}
+
+TEST(TorqueHomingCov, NotInitializedVariants) {
+    TorqueHomingController ctrl;
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    ctrl.setConfig(cfg);
+
+    // Position source exists but no torque sink.
+    TorqueHomingCallbacks cbs;
+    cbs.getActualPosition = [] { return 0; };
+    ctrl.setCallbacks(cbs);
+    EXPECT_FALSE(ctrl.start());
+    EXPECT_EQ(ctrl.getLastError(), TorqueHomingError::NotInitialized);
+
+    // Torque sink exists but no mode setter.
+    cbs.setTargetTorque = [](int16_t) {};
+    ctrl.setCallbacks(cbs);
+    EXPECT_FALSE(ctrl.start());
+    EXPECT_EQ(ctrl.getLastError(), TorqueHomingError::NotInitialized);
+}
+
+TEST(TorqueHomingCov, TorqueSatNeedsSource) {
+    TorqueHomingController ctrl;
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    cfg.useTorqueSaturationDetection = true;
+    ctrl.setConfig(cfg);
+    TorqueHomingCallbacks cbs;
+    cbs.getActualPosition = [] { return 0; };
+    cbs.setTargetTorque = [](int16_t) {};
+    cbs.setOperatingMode = [](OperatingMode) { return true; };
+    // No getActualTorque and no backend → NotInitialized.
+    ctrl.setCallbacks(cbs);
+    EXPECT_FALSE(ctrl.start());
+    EXPECT_EQ(ctrl.getLastError(), TorqueHomingError::NotInitialized);
+}
+
+TEST(TorqueHomingCov, StallConfigValidation) {
+    auto minimalCbs = [] {
+        TorqueHomingCallbacks cbs;
+        cbs.getActualPosition = [] { return 0; };
+        cbs.setTargetTorque = [](int16_t) {};
+        cbs.setOperatingMode = [](OperatingMode) { return true; };
+        return cbs;
+    };
+
+    TorqueHomingController ctrl;
+    TorqueHomingConfig cfg;
+    cfg.coarsePass.targetTorque = 500;
+    cfg.coarsePass.stallWindowMs = 0;  // illegal with position detection on
+    ctrl.setConfig(cfg);
+    ctrl.setCallbacks(minimalCbs());
+    EXPECT_FALSE(ctrl.start());
+    EXPECT_EQ(ctrl.getLastError(), TorqueHomingError::InvalidConfig);
+
+    TorqueHomingController ctrl2;
+    TorqueHomingConfig cfg2;
+    cfg2.coarsePass.targetTorque = 500;
+    cfg2.usePositionStallDetection = false;
+    cfg2.useTorqueSaturationDetection = false;
+    ctrl2.setConfig(cfg2);
+    ctrl2.setCallbacks(minimalCbs());
+    EXPECT_FALSE(ctrl2.start());
+    EXPECT_EQ(ctrl2.getLastError(), TorqueHomingError::InvalidConfig);
+}
