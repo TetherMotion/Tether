@@ -561,3 +561,253 @@ TEST(CiA402ConfigTest, ModeToStringInline) {
 }
 
 // PDO preset tests are in test_CiA402DrivePDO.cpp — skipped here to avoid namespace conflicts
+
+// ============================================================================
+// Cia402MotionController over a fake IAxis (coordinated-motion coverage)
+// ============================================================================
+
+namespace {
+
+class FakeAxis : public tether::common::IAxis {
+public:
+    bool enabled{false};
+    bool homed{false};
+    bool fault{false};
+    int32_t position{0};
+    int32_t velocity{0};
+    int16_t torque{0};
+    bool enableResult{true};
+    bool disableResult{true};
+    bool homeResult{true};
+    bool waitHomingResult{true};
+    int enableCalls{0};
+    int stopCalls{0};
+    int clearFaultCalls{0};
+    int updateCalls{0};
+    int setTargetPositionCalls{0};
+    int32_t lastTargetPosition{0};
+
+    bool enable(uint32_t) override { ++enableCalls; enabled = enableResult; return enableResult; }
+    bool disable(uint32_t) override { enabled = false; return disableResult; }
+    bool stop() override { ++stopCalls; return true; }
+    bool clearFault() override { ++clearFaultCalls; fault = false; return true; }
+    bool hasFault() const override { return fault; }
+    bool isEnabled() const override { return enabled; }
+    bool isHomed() const override { return homed; }
+    int32_t getActualPosition() const override { return position; }
+    int32_t getActualVelocity() const override { return velocity; }
+    int16_t getActualTorque() const override { return torque; }
+    bool setTargetPosition(int32_t target, const tether::common::MotionCommand&) override {
+        ++setTargetPositionCalls; lastTargetPosition = target; return true;
+    }
+    bool setTargetVelocity(int32_t, const tether::common::VelocityCommand&) override { return true; }
+    bool setTargetTorque(int16_t, const tether::common::TorqueCommand&) override { return true; }
+    bool home(const tether::common::HomingCommand&) override { homed = homeResult; return homeResult; }
+    bool waitMotionComplete(uint32_t) override { return true; }
+    bool waitHomingComplete(uint32_t) override { return waitHomingResult; }
+    void setMotionLimits(const tether::common::MotionLimits&) override {}
+    tether::common::MotionLimits getMotionLimits() const override { return {}; }
+    void update(double) override { ++updateCalls; }
+};
+
+class Cia402MotionControllerTest : public ::testing::Test {
+protected:
+    tether::motion::Cia402MotionController ctrl;
+    std::shared_ptr<FakeAxis> axis0{std::make_shared<FakeAxis>()};
+    std::shared_ptr<FakeAxis> axis1{std::make_shared<FakeAxis>()};
+    std::shared_ptr<FakeAxis> axis2{std::make_shared<FakeAxis>()};
+
+    void addThreeAxes() {
+        ctrl.addAxis(0, axis0);
+        ctrl.addAxis(1, axis1);
+        ctrl.addAxis(2, axis2);
+    }
+};
+
+} // namespace
+
+TEST_F(Cia402MotionControllerTest, AddGetRemoveAxis) {
+    EXPECT_EQ(ctrl.getAxis(0), nullptr);
+    EXPECT_EQ(ctrl.addAxis(0, axis0), axis0);
+    EXPECT_EQ(ctrl.getAxis(0), axis0);
+    // replacing an axis returns the new one
+    auto other = std::make_shared<FakeAxis>();
+    EXPECT_EQ(ctrl.addAxis(0, other), other);
+    EXPECT_EQ(ctrl.getAxis(0), other);
+    EXPECT_TRUE(ctrl.removeAxis(0));
+    EXPECT_FALSE(ctrl.removeAxis(0));
+    EXPECT_EQ(ctrl.getAxis(0), nullptr);
+}
+
+TEST_F(Cia402MotionControllerTest, EnableAllAndAllEnabled) {
+    addThreeAxes();
+    EXPECT_FALSE(ctrl.allEnabled());
+    EXPECT_TRUE(ctrl.enableAll());
+    EXPECT_TRUE(ctrl.allEnabled());
+    EXPECT_EQ(axis0->enableCalls, 1);
+
+    axis1->enableResult = false;
+    EXPECT_FALSE(ctrl.enableAll());
+}
+
+TEST_F(Cia402MotionControllerTest, DisableAllPartialFailure) {
+    addThreeAxes();
+    ctrl.enableAll();
+    axis2->disableResult = false;
+    EXPECT_FALSE(ctrl.disableAll());
+    // first two still disabled
+    EXPECT_FALSE(axis0->isEnabled());
+}
+
+TEST_F(Cia402MotionControllerTest, QuickStopAndClearFaults) {
+    addThreeAxes();
+    axis0->fault = true;
+    axis1->fault = true;
+    EXPECT_TRUE(ctrl.anyFault());
+    ctrl.quickStopAll();
+    EXPECT_EQ(axis0->stopCalls, 1);
+    EXPECT_EQ(axis2->stopCalls, 1);
+    ctrl.clearAllFaults();
+    EXPECT_EQ(axis0->clearFaultCalls, 1);
+    EXPECT_FALSE(ctrl.anyFault());
+}
+
+TEST_F(Cia402MotionControllerTest, MoveLinearCountMismatch) {
+    addThreeAxes();
+    ctrl.setCoordinatedAxes({0, 1});
+    EXPECT_FALSE(ctrl.moveLinear({1.0, 2.0, 3.0}, 100.0));  // 3 targets vs 2 axes
+}
+
+TEST_F(Cia402MotionControllerTest, MoveLinearMissingAxis) {
+    addThreeAxes();
+    ctrl.setCoordinatedAxes({0, 9});  // axis 9 not registered
+    EXPECT_FALSE(ctrl.moveLinear({1.0, 2.0}, 100.0));
+}
+
+TEST_F(Cia402MotionControllerTest, MoveLinearStartsPath) {
+    addThreeAxes();
+    ctrl.setCoordinatedAxes({0, 1});
+    EXPECT_TRUE(ctrl.moveLinear({100.0, 200.0}, 50.0));
+    EXPECT_TRUE(ctrl.isPathExecuting());
+    ctrl.stopPath();
+    EXPECT_FALSE(ctrl.isPathExecuting());
+}
+
+TEST_F(Cia402MotionControllerTest, MoveCircularGuards) {
+    addThreeAxes();
+    ctrl.setCoordinatedAxes({0});                    // < 2 axes
+    EXPECT_FALSE(ctrl.moveCircular(0, 0, 10, 10, true, 50.0));
+    ctrl.setCoordinatedAxes({0, 9});                 // axis 9 missing
+    EXPECT_FALSE(ctrl.moveCircular(0, 0, 10, 10, true, 50.0));
+    ctrl.setCoordinatedAxes({0, 1});
+    EXPECT_TRUE(ctrl.moveCircular(0, 0, 10, 10, true, 50.0));
+    EXPECT_TRUE(ctrl.isPathExecuting());
+    ctrl.stopPath();
+    // counter-clockwise arm
+    EXPECT_TRUE(ctrl.moveCircular(0, 0, 10, 10, false, 50.0));
+    ctrl.stopPath();
+}
+
+TEST_F(Cia402MotionControllerTest, MoveHelicalGuards) {
+    addThreeAxes();
+    axis0->position = 100;
+    ctrl.setCoordinatedAxes({0, 1});                 // < 3 axes
+    EXPECT_FALSE(ctrl.moveHelical(0, 0, 50, 50, 5.0, true, 50.0));
+    ctrl.setCoordinatedAxes({0, 1, 9});              // axis 9 missing
+    EXPECT_FALSE(ctrl.moveHelical(0, 0, 50, 50, 5.0, true, 50.0));
+    ctrl.setCoordinatedAxes({0, 1, 2});
+    EXPECT_TRUE(ctrl.moveHelical(0, 0, 0, 100, 5.0, true, 50.0));   // CW wrap arm
+    ctrl.stopPath();
+    EXPECT_TRUE(ctrl.moveHelical(0, 0, 0, -100, 5.0, false, 50.0)); // CCW wrap arm
+    ctrl.stopPath();
+}
+
+TEST_F(Cia402MotionControllerTest, ExecutePathAndAddSegmentStartPath) {
+    // startPath with no accumulated path fails
+    EXPECT_FALSE(ctrl.startPath(50.0));
+
+    // addPathSegment then startPath
+    CiA402::LinearConfig cfg;
+    cfg.numAxes = 2;
+    cfg.start[0] = 0.0; cfg.end[0] = 10.0;
+    cfg.start[1] = 0.0; cfg.end[1] = 20.0;
+    EXPECT_TRUE(ctrl.addPathSegment(std::make_unique<CiA402::LinearPath>(cfg)));
+    EXPECT_TRUE(ctrl.startPath(50.0));
+    EXPECT_TRUE(ctrl.isPathExecuting());
+    ctrl.stopPath();
+
+    // executePath moves a MultiSegmentPath directly
+    CiA402::MultiSegmentPath path;
+    path.addSegment(std::make_unique<CiA402::LinearPath>(cfg));
+    EXPECT_TRUE(ctrl.executePath(path, 25.0));
+    EXPECT_TRUE(ctrl.isPathExecuting());
+    ctrl.stopPath();
+}
+
+TEST_F(Cia402MotionControllerTest, UpdateDrivesPathAndAxes) {
+    addThreeAxes();
+    ctrl.setCoordinatedAxes({0, 1});
+    EXPECT_TRUE(ctrl.moveLinear({100.0, 200.0}, 1000.0));
+    // advance until path completes — exercises updatePathExecution + applyPathPoint
+    for (int i = 0; i < 100 && ctrl.isPathExecuting(); ++i) {
+        ctrl.update(0.01);
+    }
+    EXPECT_FALSE(ctrl.isPathExecuting());
+    EXPECT_GT(axis0->updateCalls, 0);
+    EXPECT_GT(axis0->setTargetPositionCalls, 0);
+
+    // update with no path executing still updates axes
+    int before = axis0->updateCalls;
+    ctrl.update(0.01);
+    EXPECT_EQ(axis0->updateCalls, before + 1);
+}
+
+TEST_F(Cia402MotionControllerTest, SpeedFactorClamping) {
+    tether::motion::Cia402MotionController::GlobalParams params;
+    params.minSpeedFactor = 0.1f;
+    params.maxSpeedFactor = 2.0f;
+    params.allowNegativeSpeed = false;
+    ctrl.setGlobalParams(params);
+    ctrl.setSpeedFactor(5.0f);   // clamps to max
+    ctrl.setSpeedFactor(-1.0f);  // clamps to min (no negative allowed)
+
+    params.allowNegativeSpeed = true;
+    ctrl.setGlobalParams(params);
+    ctrl.setSpeedFactor(-5.0f);  // clamps to -max
+}
+
+TEST_F(Cia402MotionControllerTest, HomeAxisPaths) {
+    addThreeAxes();
+    tether::common::HomingCommand cmd;
+    cmd.timeoutMs = 100;
+    EXPECT_FALSE(ctrl.homeAxis(9, cmd));             // missing axis
+    EXPECT_TRUE(ctrl.homeAxis(0, cmd));
+
+    // sequential: missing axis and failed home
+    EXPECT_TRUE(ctrl.homeAxesSequential({0, 1}, cmd));
+    EXPECT_FALSE(ctrl.homeAxesSequential({9}, cmd));
+    axis0->homeResult = false;
+    EXPECT_FALSE(ctrl.homeAxesSequential({0}, cmd));
+    axis0->homeResult = true;
+    axis1->waitHomingResult = false;
+    EXPECT_FALSE(ctrl.homeAxesSequential({0, 1}, cmd));
+
+    // simultaneous: all homed immediately after home() -> true
+    axis1->waitHomingResult = true;
+    axis0->homed = true; axis1->homed = true;
+    EXPECT_TRUE(ctrl.homeAxesSimultaneous({0, 1}, cmd));
+    axis0->homeResult = false;
+    EXPECT_FALSE(ctrl.homeAxesSimultaneous({0, 9}, cmd));
+
+    // allHomed
+    axis0->homed = true; axis1->homed = true; axis2->homed = true;
+    EXPECT_TRUE(ctrl.allHomed());
+    axis2->homed = false;
+    EXPECT_FALSE(ctrl.allHomed());
+}
+
+TEST_F(Cia402MotionControllerTest, CycleTimeAccessors) {
+    EXPECT_EQ(ctrl.getCycleTimeUs(), 1000u);
+    ctrl.setCycleTimeUs(500);
+    EXPECT_EQ(ctrl.getCycleTimeUs(), 500u);
+}
