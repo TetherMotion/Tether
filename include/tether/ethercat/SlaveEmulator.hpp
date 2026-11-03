@@ -370,6 +370,20 @@ public:
     // Simulation
     void simulate(uint32_t delta_us);
 
+    // Test introspection: peek/poke a byte inside an SM data buffer.
+    // Returns 0 for out-of-range access so tests can distinguish "no
+    // write arrived" (0) — write accessors assert bounds via return.
+    uint8_t smBufferByteForTest(size_t sm_index, size_t offset) const {
+        if (sm_index >= sync_managers_.size()) return 0;
+        const auto& buf = sync_managers_[sm_index].buffer;
+        return offset < buf.size() ? buf[offset] : 0;
+    }
+    void setSmBufferByteForTest(size_t sm_index, uint8_t value) {
+        if (sm_index >= sync_managers_.size()) return;
+        auto& buf = sync_managers_[sm_index].buffer;
+        if (!buf.empty()) buf[0] = value;
+    }
+
     // Debug
     void dumpRegisters() const;
     void dumpFMMUs() const;
