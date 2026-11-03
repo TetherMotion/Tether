@@ -14,10 +14,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <stop_token>
 #include <thread>
 
 #include "mocks/EmulatedBus.hpp"
 #include "tether/drives/NexcobotESC211/ConfigManager.hpp"
+#include "tether/drives/NexcobotESC211/ConfigRecoveryHandler.hpp"
 #include "tether/drives/NexcobotESC211/ControlCommandChannel.hpp"
 #include "tether/drives/NexcobotESC211/CrcVerifier.hpp"
 #include "tether/drives/NexcobotESC211/ErrorStateReader.hpp"
@@ -583,4 +585,130 @@ TEST_F(ESC211ManagersTest, ConfigManagerResultToString) {
     EXPECT_NE(ESC211::ConfigManager::resultToString(R::Timeout), nullptr);
     EXPECT_NE(ESC211::ConfigManager::resultToString(R::SDOError), nullptr);
     EXPECT_NE(ESC211::ConfigManager::resultToString(R::NoData), nullptr);
+}
+
+// ============================================================================
+// ConfigRecoveryHandler — stored config re-write + re-activate
+// ============================================================================
+
+TEST_F(ESC211ManagersTest, RecoveryReWriteAndActivateFullFlow) {
+    addCommandRegs();
+    setResponse(2);  // Done
+    addSection(0xF200, 1);
+    addSection(0xF200, 2);
+    addU(0xF202, 0x00, 0xDEADBEEF, 4);  // FNI CRC register
+
+    ESC211::ConfigManager::Config mgr_cfg;
+    mgr_cfg.post_command_reset = false;
+    mgr_cfg.command_timeout = std::chrono::milliseconds(500);
+    mgr_cfg.crc_timeout = std::chrono::milliseconds(500);
+    mgr_cfg.crc_poll_interval = std::chrono::milliseconds(10);
+    ESC211::ConfigManager mgr(master_.slave(0), mgr_cfg);
+
+    ESC211::ConfigRecoveryHandler::Config rcfg;
+    ESC211::ConfigRecoveryHandler recovery(mgr, rcfg);
+
+    ESC211::ConfigRecoveryHandler::Entry entry;
+    entry.type = ESC211::ConfigDataType::FNI;
+    entry.sections = {std::vector<uint8_t>(256, 0x5A),
+                      std::vector<uint8_t>(256, 0xA5)};
+    entry.crc = {0xF202, 0xDEADBEEF, "FNI"};
+    const ESC211::ConfigRecoveryHandler::Entry entries[] = {entry};
+    recovery.storeData(entries);
+
+    EXPECT_TRUE(recovery.hasData());
+    EXPECT_EQ(recovery.entryCount(), 1u);
+    EXPECT_EQ(recovery.recoveryCount(), 0u);
+
+    int cb_hits = 0;
+    recovery.setPostRecoveryCallback([&] { ++cb_hits; });
+
+    ASSERT_TRUE(recovery.reWriteAndActivate());
+    EXPECT_EQ(recovery.recoveryCount(), 1u);
+    EXPECT_EQ(cb_hits, 1);
+
+    // Sections landed in the temp FNI object via segmented download.
+    const auto* s1 = slave_->odEntry(0xF200, 1);
+    const auto* s2 = slave_->odEntry(0xF200, 2);
+    ASSERT_NE(s1, nullptr);
+    ASSERT_NE(s2, nullptr);
+    EXPECT_EQ(s1->data[0], 0x5A);
+    EXPECT_EQ(s2->data[0], 0xA5);
+
+    // Activation command (3 = UpdateFNIFromObject) was issued.
+    const auto* cmd = slave_->odEntry(0xF100, 0x01);
+    ASSERT_NE(cmd, nullptr);
+    uint32_t v = 0;
+    for (size_t i = 0; i < cmd->data.size() && i < 4; ++i)
+        v |= static_cast<uint32_t>(cmd->data[i]) << (8 * i);
+    EXPECT_EQ(v, 3u);
+}
+
+TEST_F(ESC211ManagersTest, RecoveryFailsWithoutStoredData) {
+    ESC211::ConfigManager mgr(master_.slave(0), {});
+    ESC211::ConfigRecoveryHandler recovery(mgr, {});
+    EXPECT_FALSE(recovery.hasData());
+    EXPECT_FALSE(recovery.reWriteAndActivate());
+    EXPECT_EQ(recovery.recoveryCount(), 0u);  // early-out before counter bump
+}
+
+TEST_F(ESC211ManagersTest, RecoveryFailsWhenSdoWriteAborts) {
+    // Section objects intentionally not injected → write aborts.
+    ESC211::ConfigManager mgr(master_.slave(0), {});
+    ESC211::ConfigRecoveryHandler recovery(mgr, {});
+
+    ESC211::ConfigRecoveryHandler::Entry entry;
+    entry.type = ESC211::ConfigDataType::FNI;
+    entry.sections = {std::vector<uint8_t>(256, 0x11)};
+    entry.crc = {0xF202, 0, "FNI"};
+    const ESC211::ConfigRecoveryHandler::Entry entries[] = {entry};
+    recovery.storeData(entries);
+
+    EXPECT_FALSE(recovery.reWriteAndActivate());
+}
+
+TEST_F(ESC211ManagersTest, RecoverySkipsActivationWhenDisabled) {
+    addCommandRegs();
+    addSection(0xF200, 1);
+
+    ESC211::ConfigManager::Config mgr_cfg;
+    mgr_cfg.post_command_reset = false;
+    ESC211::ConfigManager mgr(master_.slave(0), mgr_cfg);
+
+    ESC211::ConfigRecoveryHandler::Config rcfg;
+    rcfg.re_activate = false;
+    ESC211::ConfigRecoveryHandler recovery(mgr, rcfg);
+
+    ESC211::ConfigRecoveryHandler::Entry entry;
+    entry.type = ESC211::ConfigDataType::FNI;
+    entry.sections = {std::vector<uint8_t>(256, 0x77)};
+    entry.crc = {0xF202, 0, "FNI"};
+    const ESC211::ConfigRecoveryHandler::Entry entries[] = {entry};
+    recovery.storeData(entries);
+
+    ASSERT_TRUE(recovery.reWriteAndActivate());
+    // No activation command issued: command register stays 0.
+    const auto* cmd = slave_->odEntry(0xF100, 0x01);
+    ASSERT_NE(cmd, nullptr);
+    EXPECT_EQ(cmd->data[0], 0);
+}
+
+TEST_F(ESC211ManagersTest, RecoveryStopTokenAbortsBeforeWrite) {
+    addSection(0xF200, 1);
+
+    ESC211::ConfigManager mgr(master_.slave(0), {});
+    ESC211::ConfigRecoveryHandler recovery(mgr, {});
+
+    ESC211::ConfigRecoveryHandler::Entry entry;
+    entry.type = ESC211::ConfigDataType::FNI;
+    entry.sections = {std::vector<uint8_t>(256, 0x01)};
+    entry.crc = {0xF202, 0, "FNI"};
+    const ESC211::ConfigRecoveryHandler::Entry entries[] = {entry};
+    recovery.storeData(entries);
+
+    std::stop_source src;
+    recovery.setStopToken(src.get_token());
+    src.request_stop();
+
+    EXPECT_FALSE(recovery.reWriteAndActivate());
 }
