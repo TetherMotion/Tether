@@ -541,8 +541,8 @@ jobs:
         name: test-svg-paths
         path: test_svgs/
 
-  coverage:
-    name: Generate Code Coverage
+  asan-tests:
+    name: Run Module Tests with ASAN + Coverage
     runs-on: ubuntu-latest
     needs: compile
     
@@ -587,180 +587,6 @@ jobs:
           make \
           lcov \
           gcovr \
-          ccache \
-          lld \
-          mold \
-          ninja-build
-    
-    - name: Cache googletest source
-      uses: actions/cache@v4
-      with:
-        path: .deps-src/googletest
-        key: googletest-v1.14.0
-
-    - name: Provide googletest to FetchContent
-      run: |
-        if [ ! -d .deps-src/googletest ]; then
-          git clone --depth 1 --branch v1.14.0 \
-            https://github.com/google/googletest.git .deps-src/googletest
-        fi
-        echo "FETCHCONTENT_SOURCE_DIR_GOOGLETEST=${{ github.workspace }}/.deps-src/googletest" >> "$GITHUB_ENV"
-
-    - name: Restore ccache
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/ccache
-        key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-${{ github.sha }}
-        restore-keys: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-
-
-    - name: Configure ccache
-      run: |
-        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
-        ccache -M 5G
-        ccache -s
-
-    - name: Configure and build with coverage
-      run: |
-        # mold is the fastest supported linker (needs GCC 12+/clang);
-        # GCC 11 (ubuntu-22.04) rejects -fuse-ld=mold, so fall back to lld.
-        if echo 'int main(){}' | ${CXX:-c++} -x c++ - -fuse-ld=mold -o /tmp/ldprobe 2>/dev/null; then
-          LINKER_FLAG=-fuse-ld=mold
-        else
-          LINKER_FLAG=-fuse-ld=lld
-        fi
-        echo "Using linker: $LINKER_FLAG"
-        echo "LINKER_FLAG=$LINKER_FLAG" >> "$GITHUB_ENV"
-        cmake -S . -B build-coverage \
-          -G Ninja \
-          -DCMAKE_BUILD_TYPE=Debug \
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-          -DCMAKE_EXE_LINKER_FLAGS="$LINKER_FLAG" \
-          -DCMAKE_SHARED_LINKER_FLAGS="$LINKER_FLAG" \
-          -DCMAKE_MODULE_LINKER_FLAGS="$LINKER_FLAG" \
-          -DTETHER_BUILD_TESTS=ON \
-          -DTETHER_BUILD_SIMULATION=ON \
-          -DTETHER_BUILD_ETHERCAT_MASTER=ON \
-          -DTETHER_BUILD_DESTABILIZER=ON \
-          -DTETHER_ENABLE_COVERAGE=ON \
-          -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
-          -DTETHER_BUILD_EXTRACT_ESI=OFF
-        cmake --build build-coverage --parallel $(nproc)
-        # Test executables are EXCLUDE_FROM_ALL; build them explicitly so
-        # ctest can run them instead of <name>_NOT_BUILT placeholders.
-        cmake --build build-coverage --target tests --parallel $(nproc)
-    
-    - name: Run tests
-      run: .github/scripts/run_ctest.sh build-coverage
-
-    - name: Upload test results
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: unit-test-results
-        path: |
-          build-coverage/Testing/
-          build-coverage/ctest_full.log
-
-    - name: Generate coverage report with lcov
-      if: always()
-      run: |
-        # lcov 2.0 is strict about gcov warnings/negative counts/mismatched
-        # line ranges emitted for system headers (libstdc++) and optimized
-        # test bodies. --ignore-errors lets the capture proceed and
-        # --rc geninfo_unexecuted_blocks=1 silences the noisy warnings.
-        # 'inconsistent' covers the bogus function end lines GCC's .gcno
-        # emits for gtest TEST bodies (end line = macro invocation line).
-        lcov --directory build-coverage --capture --output-file coverage.info \
-          --ignore-errors gcov,negative,gcov_warnings,mismatch,inconsistent \
-          --rc geninfo_unexecuted_blocks=1
-        # --remove also needs 'inconsistent': the captured .info carries
-        # duplicate libstdc++ function entries (same symbol attributed to
-        # different start lines in different TUs) that fail on re-load.
-        lcov --remove coverage.info '/usr/*' --output-file coverage.info \
-          --ignore-errors unused,inconsistent
-        lcov --remove coverage.info '*/_deps/*' --output-file coverage.info \
-          --ignore-errors unused,inconsistent
-        lcov --remove coverage.info '*/tests/*' --output-file coverage.info \
-          --ignore-errors unused,inconsistent
-        lcov --list coverage.info --ignore-errors inconsistent
-    
-    - name: Generate coverage report with gcovr
-      if: always()
-      run: |
-        # gcovr 6.x (Ubuntu 24.04) removed --build-directory; the build
-        # directory is now a positional argument.
-        # --gcov-ignore-parse-errors works around a gcov tool bug that
-        # emits negative hit values (branch taken -1), see
-        # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=68080.
-        gcovr --root . --xml --output coverage.xml build-coverage \
-          --gcov-ignore-parse-errors negative_hits.warn
-        gcovr --root . --html --output coverage.html build-coverage \
-          --gcov-ignore-parse-errors negative_hits.warn
-    
-    - name: Upload coverage to Codecov
-      if: always()
-      uses: codecov/codecov-action@v5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ./coverage.info,./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-        fail_ci_if_error: false
-    
-    - name: Upload coverage artifacts
-      uses: actions/upload-artifact@v7
-      with:
-        name: coverage-reports
-        path: |
-          coverage.info
-          coverage.xml
-          coverage.html
-
-  asan-tests:
-    name: Run Module Tests with ASAN
-    runs-on: ubuntu-latest
-    needs: compile
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v5
-
-    - name: Hash submodule pins
-      id: submod-key
-      run: echo "hash=$(git ls-tree HEAD dependencies | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
-
-    - name: Restore submodule object cache
-      id: submodule-cache
-      uses: actions/cache/restore@v4
-      with:
-        path: .git/modules
-        # Key on the pinned submodule commits (gitlinks), not the commit
-        # SHA: one cache entry per submodule pin-set instead of one per
-        # commit per job. Per-SHA entries wrote ~123 MB x N jobs every
-        # push, exceeding the 10 GB quota and evicting the ccache entries.
-        key: submodules-${{ steps.submod-key.outputs.hash }}
-        restore-keys: submodules-
-
-    - name: Update submodules
-      run: git submodule update --init --recursive
-
-    - name: Save submodule object cache
-      uses: actions/cache/save@v4
-      if: steps.submodule-cache.outputs.cache-hit != 'true'
-      with:
-        path: .git/modules
-        key: submodules-${{ steps.submod-key.outputs.hash }}
-    
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          cmake \
-          g++ \
-          gcc \
-          libc6-dev \
-          make \
           ccache \
           lld \
           mold \
@@ -814,6 +640,7 @@ jobs:
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_BUILD_MODULE_TESTS=ON \
           -DTETHER_BUILD_DESTABILIZER=ON \
+          -DTETHER_ENABLE_COVERAGE=ON \
           -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
           -DTETHER_BUILD_EXTRACT_ESI=OFF \
           -DCMAKE_CXX_FLAGS="${SANITIZER_FLAGS}" \
@@ -845,6 +672,56 @@ jobs:
           --parallel $(nproc) \
           -E "ThermalIntegrationTest|CertifiedBoundDominatesBruteForce"
 
+    # Coverage is collected from this ASAN run: one build+test pass
+    # produces both sanitizer results and gcov data instead of a second
+    # instrumented build. The ASAN exclusions above also exclude those
+    # suites from coverage — acceptable, they contribute little.
+    - name: Generate coverage report with lcov
+      if: always()
+      run: |
+        # lcov 2.0 is strict about gcov warnings/negative counts/mismatched
+        # line ranges emitted for system headers (libstdc++) and optimized
+        # test bodies. --ignore-errors lets the capture proceed and
+        # --rc geninfo_unexecuted_blocks=1 silences the noisy warnings.
+        # 'inconsistent' covers the bogus function end lines GCC's .gcno
+        # emits for gtest TEST bodies (end line = macro invocation line).
+        lcov --directory build-asan --capture --output-file coverage.info \
+          --ignore-errors gcov,negative,gcov_warnings,mismatch,inconsistent \
+          --rc geninfo_unexecuted_blocks=1
+        # --remove also needs 'inconsistent': the captured .info carries
+        # duplicate libstdc++ function entries (same symbol attributed to
+        # different start lines in different TUs) that fail on re-load.
+        lcov --remove coverage.info '/usr/*' --output-file coverage.info \
+          --ignore-errors unused,inconsistent
+        lcov --remove coverage.info '*/_deps/*' --output-file coverage.info \
+          --ignore-errors unused,inconsistent
+        lcov --remove coverage.info '*/tests/*' --output-file coverage.info \
+          --ignore-errors unused,inconsistent
+        lcov --list coverage.info --ignore-errors inconsistent
+
+    - name: Generate coverage report with gcovr
+      if: always()
+      run: |
+        # gcovr 6.x (Ubuntu 24.04) removed --build-directory; the build
+        # directory is now a positional argument.
+        # --gcov-ignore-parse-errors works around a gcov tool bug that
+        # emits negative hit values (branch taken -1), see
+        # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=68080.
+        gcovr --root . --xml --output coverage.xml build-asan \
+          --gcov-ignore-parse-errors negative_hits.warn
+        gcovr --root . --html --output coverage.html build-asan \
+          --gcov-ignore-parse-errors negative_hits.warn
+
+    - name: Upload coverage to Codecov
+      if: always()
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage.info,./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
     - name: Show ccache stats
       if: always()
       run: ccache -s
@@ -857,6 +734,16 @@ jobs:
         path: |
           asan_all.log
           build-asan/ctest_full.log
+
+    - name: Upload coverage artifacts
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: coverage-reports
+        path: |
+          coverage.info
+          coverage.xml
+          coverage.html
 
   tsan-tests:
     name: Run Module Tests with TSAN
