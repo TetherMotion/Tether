@@ -388,6 +388,18 @@ private:
     void initObjectDictionary();
     ODEntry* findODEntry(uint16_t index, uint8_t subindex);
 
+    // SM-buffer data path (mailbox + PDO areas by physical address)
+    bool smBufferRead(uint16_t addr, uint8_t* data, uint16_t len);
+    bool smBufferWrite(uint16_t addr, const uint8_t* data, uint16_t len);
+
+    // CoE mailbox: parse SM0 request -> produce SM1 response
+    void processMailboxRequest();
+    void coeSdoAbort(uint8_t index_hi, uint8_t index_lo,
+                     uint8_t sub, uint32_t abort_code);
+    void syncDriveFromOD(uint16_t index, uint8_t sub,
+                         const uint8_t* data, size_t len);
+    void syncODFromDrive(ODEntry& entry);
+
     // Position/address
     uint16_t position_ = 0;
     uint16_t configured_addr_ = 0;
@@ -419,6 +431,12 @@ private:
     // Mailbox
     std::vector<uint8_t> mailbox_request_;
     std::vector<uint8_t> mailbox_response_;
+
+    // Segmented-upload state (CoE)
+    uint16_t upload_index_ = 0;
+    uint8_t  upload_sub_ = 0;
+    size_t   upload_offset_ = 0;
+    bool     upload_toggle_ = false;
 
     // Error injection
     ErrorInjection errors_;
