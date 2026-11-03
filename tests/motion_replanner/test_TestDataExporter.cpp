@@ -11,6 +11,9 @@
 #include <tether/motion_replanner/PerformanceHeatmap.hpp>
 #include <tether/motion_replanner/MachineTester.hpp>
 #include <tether/motion_replanner/SystemIdentifier.hpp>
+#include <tether/motion_replanner/KdeDerivativeAnalyzer.hpp>
+#include <tether/motion_replanner/PathEvaluator.hpp>
+#include <tether/motion_replanner/PathRelativeFFT.hpp>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -671,6 +674,62 @@ TEST_F(BatchExporterTest, ExportIdentificationData) {
     FrictionIdentificationResult friction;
     PIDTuningAssessment pid{};
     exp.exportIdentificationData(si, delay, friction, pid);
+}
+
+TEST_F(BatchExporterTest, ExportReplannerData) {
+    BatchExporter exp(outputDir_);
+    MotionReplanner::MotionReplanner replanner;  // empty — exports empty tables
+    exp.exportReplannerData(replanner);
+    EXPECT_FALSE(exp.generatedFiles().empty());
+}
+
+TEST_F(BatchExporterTest, ExportHeatmapData) {
+    BatchExporter exp(outputDir_);
+    HeatmapBuilder builder;  // empty builder — exports empty heatmaps
+    exp.exportHeatmapData(builder);
+    EXPECT_FALSE(exp.generatedFiles().empty());
+}
+
+TEST_F(BatchExporterTest, ExportEvaluationData) {
+    BatchExporter exp(outputDir_);
+    std::vector<GCodeExport::TrajectorySample> desired(4), actual(4);
+    for (size_t i = 0; i < 4; ++i) {
+        desired[i].time = static_cast<double>(i) * 0.01;
+        desired[i].pathPosition = static_cast<double>(i);
+        desired[i].position[0] = static_cast<double>(i);
+        desired[i].velocity[0] = 10.0;
+        actual[i] = desired[i];
+        actual[i].position[0] += 0.01;  // small tracking error
+    }
+    tether::motion::replanner::QuantitativeEvaluation quant{};
+    quant.sampleCount = desired.size();
+    tether::motion::replanner::SpectralEvaluation spectral{};
+    tether::motion::replanner::QualitativeEvaluation qual{};
+    qual.diagnosticMessages.push_back("test diagnostic");
+    SvgConfig svg;
+    exp.exportEvaluationData(desired, actual, quant, spectral, qual, svg);
+    EXPECT_FALSE(exp.generatedFiles().empty());
+}
+
+TEST_F(BatchExporterTest, ExportKdeData) {
+    BatchExporter exp(outputDir_);
+    tether::motion::replanner::KdeEvaluation kde{};
+    kde.derivatives = {1.0, 2.0, 3.0};
+    kde.deviations = {0.1, 0.2, 0.15};
+    kde.arcLengths = {0.0, 1.0, 2.0};
+    kde.times = {0.0, 0.01, 0.02};
+    kde.grid.xBins = {0.5, 1.5};
+    kde.grid.yBins = {0.5, 1.5};
+    kde.grid.density = {0.4, 0.1, 0.1, 0.4};
+    kde.grid.bandwidthX = 1.0;
+    kde.grid.bandwidthY = 1.0;
+    kde.grid.sampleCount = 3;
+    tether::motion::replanner::ConditionalStats cs{};
+    cs.xValue = 1.0; cs.meanY = 0.1; cs.mass = 1.0; cs.valid = true;
+    kde.conditional.push_back(cs);
+    SvgConfig svg;
+    exp.exportKdeData(kde, svg);
+    EXPECT_FALSE(exp.generatedFiles().empty());
 }
 
 // ============================================================================
