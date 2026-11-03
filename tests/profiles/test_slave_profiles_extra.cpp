@@ -9,6 +9,10 @@
 #include "slave/profiles/CiA405Slave.hpp"
 #include "slave/profiles/CiA406Slave.hpp"
 #include "slave/profiles/CiA408Slave.hpp"
+#include "slave/profiles/CiA401Slave.hpp"
+#include "slave/profiles/CiA404Slave.hpp"
+#include "slave/profiles/CiA417Slave.hpp"
+#include "slave/profiles/CiA430Slave.hpp"
 #include "slave/logging/SlaveLogger.hpp"
 
 using namespace EtherCAT::slave;
@@ -548,4 +552,490 @@ TEST_F(SlaveLoggerTest, LogWithoutStart) {
 
 TEST_F(SlaveLoggerTest, FlushWithoutStart) {
     logger->flush(); // should not crash
+}
+
+// ############################################################################
+//  Object-dictionary sweep helper — drives every registered read/write
+//  callback (including undersized-buffer and missing-object abort paths).
+// ############################################################################
+
+static void sweepOD(IObjectDictionary& od, std::initializer_list<uint16_t> idxs) {
+    for (uint16_t idx : idxs) {
+        uint8_t subs = od.getSubindexCount(idx);
+        for (uint8_t sub = 0; sub <= subs + 1; ++sub) {
+            uint8_t buf[64];
+            size_t len = sizeof(buf);
+            od.read(idx, sub, buf, len);
+            size_t shortLen = 0;
+            od.read(idx, sub, buf, shortLen);
+            od.write(idx, sub, buf, 4);
+            od.write(idx, sub, buf, 1);
+            od.write(idx, sub, buf, 0);
+        }
+        ODEntryInfo info{};
+        od.getObjectInfo(idx, 0, info);
+        od.hasObject(idx, 0);
+    }
+}
+
+// ############################################################################
+//  CiA 404 — Measuring Device / Closed-Loop Controller
+// ############################################################################
+
+class CiA404SlaveFullTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        CiA404SlaveConfig cfg{};
+        cfg.processInputChannels = 4;
+        cfg.controllerChannels = 4;
+        slave = std::make_unique<CiA404Slave>(cfg);
+        slave->start();
+    }
+    std::unique_ptr<CiA404Slave> slave;
+};
+
+TEST_F(CiA404SlaveFullTest, ProfileNameAndType) {
+    EXPECT_STREQ(slave->getProfileName(), "CiA 404");
+    EXPECT_EQ(slave->getDeviceType(), 0x00000194u);
+}
+
+TEST_F(CiA404SlaveFullTest, ProcessValueRoundTrip) {
+    slave->setProcessValue(0, 1234);
+    slave->setProcessValue(3, -5678);
+    EXPECT_EQ(slave->getProcessValue(0), 1234);
+    EXPECT_EQ(slave->getProcessValue(3), -5678);
+    slave->setProcessValue(99, 1);  // out of range ignored
+    EXPECT_EQ(slave->getProcessValue(99), 0);
+}
+
+TEST_F(CiA404SlaveFullTest, SetpointAndOutputOutOfRange) {
+    EXPECT_EQ(slave->getSetpoint(99), 0);
+    EXPECT_EQ(slave->getControllerOutput(99), 0);
+}
+
+TEST_F(CiA404SlaveFullTest, PIDParameters) {
+    slave->setPIDParameters(1, 2.5f, 0.1f, 0.05f);
+    float kp = 0, ki = 0, kd = 0;
+    slave->getPIDParameters(1, kp, ki, kd);
+    EXPECT_FLOAT_EQ(kp, 2.5f);
+    EXPECT_FLOAT_EQ(ki, 0.1f);
+    EXPECT_FLOAT_EQ(kd, 0.05f);
+    slave->getPIDParameters(99, kp, ki, kd);  // OOB zeros
+    EXPECT_FLOAT_EQ(kp, 0.0f);
+    EXPECT_FLOAT_EQ(ki, 0.0f);
+    EXPECT_FLOAT_EQ(kd, 0.0f);
+    slave->setPIDParameters(99, 1, 1, 1);     // ignored
+}
+
+TEST_F(CiA404SlaveFullTest, ControllerEnable) {
+    EXPECT_FALSE(slave->isControllerEnabled(0));
+    slave->setControllerEnabled(0, true);
+    EXPECT_TRUE(slave->isControllerEnabled(0));
+    slave->setControllerEnabled(0, false);  // resets integral state
+    EXPECT_FALSE(slave->isControllerEnabled(0));
+    slave->setControllerEnabled(99, true);  // ignored
+    EXPECT_FALSE(slave->isControllerEnabled(99));
+}
+
+TEST_F(CiA404SlaveFullTest, PIDLoopAndAlarms) {
+    slave->setPIDParameters(0, 2.0f, 0.5f, 0.1f);
+    slave->setControllerEnabled(0, true);
+    slave->setProcessValue(0, 100);
+    slave->setAlarmLimits(0, -50, 50);
+    slave->simulate(1000000);  // 1 ms
+    // error = setpoint(0) - pv(100) = -100; output = kp*e + ... < 0
+    EXPECT_LT(slave->getControllerOutput(0), 0);
+    EXPECT_TRUE(slave->isAlarmActive(0));
+    slave->setAlarmLimits(0, -500, 500);
+    slave->simulate(0);  // dt=0 → derivative guard
+    EXPECT_FALSE(slave->isAlarmActive(0));
+    EXPECT_FALSE(slave->isAlarmActive(99));
+}
+
+TEST_F(CiA404SlaveFullTest, DisabledControllerSkipsUpdate) {
+    slave->setProcessValue(1, 500);
+    slave->simulate(1000000);  // ch1 not enabled → output stays 0
+    EXPECT_EQ(slave->getControllerOutput(1), 0);
+}
+
+TEST_F(CiA404SlaveFullTest, PdoStubs) {
+    slave->updateTxPDO();
+    slave->processRxPDO();
+}
+
+TEST(CiA404FactoryTest, Create) {
+    CiA404SlaveConfig cfg{};
+    auto s = createCiA404Slave(cfg);
+    EXPECT_NE(s, nullptr);
+}
+
+// ############################################################################
+//  CiA 401 — Digital/Analog I/O: public API + OD sweep
+// ############################################################################
+
+class CiA401SlaveFullTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        CiA401SlaveConfig cfg{};
+        cfg.digitalInputs8 = 2;
+        cfg.digitalOutputs8 = 2;
+        cfg.analogInputs = 2;
+        cfg.analogOutputs = 2;
+        slave = std::make_unique<CiA401Slave>(cfg);
+        slave->start();
+    }
+    std::unique_ptr<CiA401Slave> slave;
+};
+
+TEST_F(CiA401SlaveFullTest, DigitalInputRoundTrip) {
+    slave->setDigitalInput8(0, 0xA5);
+    slave->setDigitalInput8(1, 0x3C);
+    EXPECT_EQ(slave->getDigitalInput8(0), 0xA5);
+    EXPECT_EQ(slave->getDigitalInput8(1), 0x3C);
+    slave->setDigitalInput8(99, 1);  // ignored
+}
+
+TEST_F(CiA401SlaveFullTest, DigitalInput16AndBit) {
+    slave->setDigitalInput16(0, 0xBEEF);
+    EXPECT_EQ(slave->getDigitalInput16(0), 0xBEEF);
+    slave->setDigitalInputBit(3, true);
+    EXPECT_TRUE(slave->getDigitalInputBit(3));
+    EXPECT_EQ(slave->getDigitalInput8(0) & 0x08, 0x08);
+    slave->setDigitalInputBit(3, false);
+    EXPECT_FALSE(slave->getDigitalInputBit(3));
+    slave->setDigitalInputBit(999, true);  // ignored
+    EXPECT_FALSE(slave->getDigitalInputBit(999));
+}
+
+TEST_F(CiA401SlaveFullTest, DigitalOutputsViaOD) {
+    auto& od = slave->getObjectDictionary();
+    uint8_t v = 0x5A;
+    size_t wlen = 1;
+    EXPECT_EQ(od.write(0x6200, 1, &v, wlen), EtherCAT::SDOAbortCode::Success);
+    EXPECT_EQ(slave->getDigitalOutput8(0), 0x5A);
+    EXPECT_EQ(slave->getDigitalOutput16(0) & 0xFF, 0x5A);
+    EXPECT_TRUE(slave->getDigitalOutputBit(1));
+}
+
+TEST_F(CiA401SlaveFullTest, DigitalOutputCallback) {
+    bool fired = false;
+    slave->setDigitalOutputCallback([&](const uint8_t*, size_t) { fired = true; });
+    // Output callbacks fire on the PDO path — fill the RxPDO buffer then exchange.
+    if (auto* rx = slave->getCore().getRxPDOData()) {
+        std::memset(rx, 0x5A, slave->getCore().getRxPDOSize());
+    }
+    slave->processRxPDO();
+    EXPECT_TRUE(fired);
+}
+
+TEST_F(CiA401SlaveFullTest, AnalogScalingAndReadback) {
+    slave->setAnalogInput(0, 1000);
+    slave->setAnalogInput(1, -2000);
+    slave->setAnalogInputScaling(0, 100, 2.0f);
+    EXPECT_NE(slave->getAnalogInput(0), 0);
+    EXPECT_EQ(slave->getAnalogInput(1), -2000);
+    slave->setAnalogInput(99, 1);
+    EXPECT_EQ(slave->getAnalogInput(99), 0);
+    EXPECT_EQ(slave->getAnalogInputCount(), 2u);
+    EXPECT_EQ(slave->getAnalogOutputCount(), 2u);
+}
+
+TEST_F(CiA401SlaveFullTest, AnalogOutputViaOD) {
+    bool fired = false;
+    slave->setAnalogOutputCallback([&](size_t, int16_t) { fired = true; });
+    if (auto* rx = slave->getCore().getRxPDOData()) {
+        std::memset(rx, 0x10, slave->getCore().getRxPDOSize());
+    }
+    slave->processRxPDO();
+    EXPECT_TRUE(fired);
+    EXPECT_EQ(slave->getAnalogOutput(99), 0);
+}
+
+TEST_F(CiA401SlaveFullTest, DigitalInterrupts) {
+    bool fired = false;
+    size_t firedGroup = 99;
+    slave->setInterruptCallback([&](size_t g, uint8_t) {
+        fired = true;
+        firedGroup = g;
+    });
+    slave->configureDigitalInterrupt(0, 0xFF, 1);
+    slave->setDigitalInput8(0, 0x01);  // change on masked bits → fire
+    slave->simulate(1000);           // checkInterrupts runs in simulate
+    EXPECT_TRUE(fired);
+    EXPECT_EQ(firedGroup, 0u);
+    slave->configureDigitalInterrupt(0, 0x00, 1);  // mask off → no fire
+    fired = false;
+    slave->setDigitalInput8(0, 0x02);
+    slave->simulate(1000);
+    slave->configureDigitalInterrupt(99, 0xFF, 1);  // ignored
+}
+
+TEST_F(CiA401SlaveFullTest, ErrorValuesOnCommLoss) {
+    slave->setDigitalOutputErrorMode(0, 1);
+    slave->setDigitalOutputErrorValue(0, 0xEE);
+    slave->triggerCommunicationError();
+    slave->setDigitalOutputErrorMode(99, 1);   // ignored
+    slave->setDigitalOutputErrorValue(99, 1);  // ignored
+}
+
+TEST_F(CiA401SlaveFullTest, ODSweep) {
+    sweepOD(slave->getObjectDictionary(),
+            {0x6000, 0x6010, 0x6020, 0x6200, 0x6210, 0x6220,
+             0x6400, 0x6410, 0x6510, 0x6520});
+}
+
+TEST_F(CiA401SlaveFullTest, PdoAndSimulate) {
+    slave->setDigitalInput8(0, 0x77);
+    slave->updateTxPDO();
+    slave->processRxPDO();
+    slave->simulate(1000000);
+}
+
+TEST(CiA401FactoryTest, Create) {
+    CiA401SlaveConfig cfg{};
+    auto s = createCiA401Slave(cfg);
+    EXPECT_NE(s, nullptr);
+    EXPECT_STREQ(s->getProfileName(), "CiA 401");
+    EXPECT_EQ(s->getDeviceType(), 0x00000191u);
+}
+
+// ############################################################################
+//  CiA 405/406/408 — object-dictionary callback sweeps
+// ############################################################################
+
+TEST_F(CiA405SlaveFullTest, ODSweep) {
+    sweepOD(plc->getObjectDictionary(),
+            {0x4000, 0x4001, 0x4002, 0x4003, 0x4010, 0x4011, 0x4012, 0x4013,
+             0x4100, 0x4101, 0x4200, 0x4201, 0x4300, 0x4301,
+             0x4400, 0x4401, 0x4402, 0x4403, 0x4410,
+             0x4500, 0x4510, 0x4520, 0x4530});
+}
+
+TEST_F(CiA406SlaveFullTest, ODSweep) {
+    sweepOD(enc->getObjectDictionary(),
+            {0x6000, 0x6001, 0x6002, 0x6003, 0x6004, 0x6010, 0x6011,
+             0x6030, 0x6031, 0x6032, 0x6040,
+             0x6100, 0x6101, 0x6102,
+             0x6200, 0x6201, 0x6202,
+             0x6500, 0x6501, 0x6502, 0x6503, 0x6504, 0x6510, 0x6600});
+}
+
+TEST_F(CiA408SlaveFullTest, ODSweep) {
+    sweepOD(valve->getObjectDictionary(),
+            {0x6000, 0x6001, 0x6002, 0x6003,
+             0x6100, 0x6101, 0x6102, 0x6103, 0x6104,
+             0x6110, 0x6111, 0x6112,
+             0x6200, 0x6201, 0x6202, 0x6203, 0x6204, 0x6210,
+             0x6300, 0x6301, 0x6302, 0x6303, 0x6304, 0x6310, 0x6311,
+             0x6400, 0x6401, 0x6402, 0x6410, 0x6411, 0x6420, 0x6421,
+             0x6500, 0x6501, 0x6502, 0x6503, 0x6510, 0x6511, 0x6520});
+}
+
+// ############################################################################
+//  CiA 417 — Lift controller state machine
+// ############################################################################
+
+class CiA417SlaveFullTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        CiA417SlaveConfig cfg{};
+        cfg.numberOfFloors = 4;
+        cfg.numberOfDoors = 2;
+        cfg.floorHeight = 1000;
+        cfg.nominalSpeed = 1000;
+        cfg.levelingTolerance = 5;
+        lift = std::make_unique<CiA417Slave>(cfg);
+        lift->start();
+    }
+    // Drive the lift through the whole FSM.
+    void runCycles(int n) {
+        for (int i = 0; i < n; ++i) lift->simulate(100000000);  // 100 ms
+    }
+    std::unique_ptr<CiA417Slave> lift;
+};
+
+TEST_F(CiA417SlaveFullTest, ProfileNameAndType) {
+    EXPECT_STREQ(lift->getProfileName(), "CiA 417");
+    EXPECT_EQ(lift->getDeviceType(), 0x000001A1u);
+}
+
+TEST_F(CiA417SlaveFullTest, MoveToUpperFloor) {
+    lift->setTargetFloor(2);
+    EXPECT_TRUE(lift->isMoving());
+    runCycles(60);
+    EXPECT_EQ(lift->getCurrentFloor(), 2);
+    EXPECT_TRUE(lift->isAtFloor());
+    EXPECT_FALSE(lift->isMoving());
+    EXPECT_EQ(lift->getDoorState(0), DoorState::Open);
+}
+
+TEST_F(CiA417SlaveFullTest, MoveDownAndDoors) {
+    lift->setTargetFloor(3);
+    EXPECT_TRUE(lift->isMovingUp());
+    runCycles(60);
+    EXPECT_EQ(lift->getLiftState(), LiftState::DoorOpen);
+    // closeDoor only touches doorStates_; liftState stays DoorOpen and
+    // setTargetFloor is ignored outside Idle/DoorClosed.
+    lift->closeDoor(0);
+    lift->closeDoor(1);
+    EXPECT_EQ(lift->getDoorState(0), DoorState::Closing);
+    lift->setTargetFloor(0);
+    EXPECT_FALSE(lift->isMoving());
+    runCycles(60);
+    EXPECT_EQ(lift->getPosition(), 3000);
+}
+
+TEST_F(CiA417SlaveFullTest, FloorRequests) {
+    lift->addFloorRequest(3);
+    lift->addFloorRequest(1);
+    lift->addFloorRequest(99);  // ignored
+    EXPECT_TRUE(lift->hasFloorRequest(3));
+    EXPECT_FALSE(lift->hasFloorRequest(2));
+    EXPECT_FALSE(lift->hasFloorRequest(99));
+    lift->clearFloorRequest(3);
+    lift->clearFloorRequest(99);  // ignored
+    EXPECT_FALSE(lift->hasFloorRequest(3));
+    runCycles(60);  // Idle → selectNextTarget picks floor 1
+    EXPECT_EQ(lift->getCurrentFloor(), 1);
+}
+
+TEST_F(CiA417SlaveFullTest, DoorsBlockedAndOOB) {
+    lift->openDoor(0);
+    EXPECT_EQ(lift->getDoorState(0), DoorState::Opening);
+    EXPECT_EQ(lift->getDoorState(9), DoorState::Fault);  // OOB
+    lift->openDoor(9);                                   // ignored
+    lift->closeDoor(0);
+    EXPECT_EQ(lift->getDoorState(0), DoorState::Closing);
+    lift->setDoorBlocked(0, true);   // blocked while Closing → Blocked
+    EXPECT_EQ(lift->getDoorState(0), DoorState::Blocked);
+    lift->setDoorBlocked(9, true);  // ignored
+}
+
+TEST_F(CiA417SlaveFullTest, EmergencyAndSafety) {
+    lift->setTargetFloor(2);
+    lift->setEmergencyStop(true);
+    EXPECT_EQ(lift->getLiftState(), LiftState::Emergency);
+    EXPECT_EQ(lift->getSpeed(), 0);
+    lift->setEmergencyStop(false);
+    lift->setSafetyCircuit(false);
+    EXPECT_EQ(lift->getLiftState(), LiftState::Emergency);
+    lift->setSafetyCircuit(true);
+}
+
+TEST_F(CiA417SlaveFullTest, LoadCallbackAndTargetValidation) {
+    lift->setLoad(500);
+    lift->setTargetFloor(99);  // ignored
+    EXPECT_FALSE(lift->isMoving());
+    lift->setPosition(1500);
+    EXPECT_EQ(lift->getPosition(), 1500);
+    EXPECT_EQ(lift->getCurrentFloor(), 1);
+    bool cb = false;
+    lift->setPositionCallback([&](int32_t, int32_t) { cb = true; });
+    lift->simulate(1000);
+    EXPECT_TRUE(cb);
+}
+
+// ############################################################################
+//  CiA 430 — Programmable power supply: ramps, protection, callbacks
+// ############################################################################
+
+class CiA430SlaveFullTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        CiA430SlaveConfig cfg{};
+        cfg.numberOfChannels = 2;
+        psu = std::make_unique<CiA430Slave>(cfg);
+        psu->start();
+    }
+    std::unique_ptr<CiA430Slave> psu;
+};
+
+TEST_F(CiA430SlaveFullTest, ProfileNameAndType) {
+    EXPECT_STREQ(psu->getProfileName(), "CiA 430");
+    EXPECT_EQ(psu->getDeviceType(), 0x000001AEu);
+}
+
+TEST_F(CiA430SlaveFullTest, EnableAndVoltageRamp) {
+    psu->setOutputEnable(0, true);
+    psu->setTargetVoltage(0, 24000);
+    EXPECT_TRUE(psu->isOutputEnabled(0));
+    EXPECT_EQ(psu->getTargetVoltage(0), 24000);
+    for (int i = 0; i < 200; ++i) psu->simulate(1000000);  // ramp 1V/ms
+    EXPECT_EQ(psu->getActualVoltage(0), 24000u);
+    // Ramp back down
+    psu->setTargetVoltage(0, 0);
+    for (int i = 0; i < 200; ++i) psu->simulate(1000000);
+    EXPECT_EQ(psu->getActualVoltage(0), 0u);
+}
+
+TEST_F(CiA430SlaveFullTest, DisabledChannelSkipsRamp) {
+    psu->setTargetVoltage(1, 12000);
+    psu->simulate(1000000);  // not enabled → no ramp
+    EXPECT_EQ(psu->getActualVoltage(1), 0u);
+    psu->setAllOutputs(true);
+    EXPECT_TRUE(psu->isOutputEnabled(1));
+}
+
+TEST_F(CiA430SlaveFullTest, ProtectionTripAndClear) {
+    psu->setOutputEnable(0, true);   // disabled channels get zeroed each cycle
+    psu->setOutputEnable(1, true);
+    psu->setActualVoltage(0, 29500);  // stays above OVP after one ramp-down step
+    psu->setActualCurrent(0, 6000);   // above default OCP 5500
+    psu->simulate(1000000);
+    EXPECT_TRUE(psu->isProtectionTripped(0, ProtectionType::OVP));
+    EXPECT_TRUE(psu->isProtectionTripped(0, ProtectionType::OCP));
+    EXPECT_EQ(psu->getChannelState(0), PowerSupplyState::Fault);
+    EXPECT_EQ(psu->getState(), PowerSupplyState::Fault);
+    psu->setActualVoltage(0, 10000);
+    psu->setActualCurrent(0, 100);
+    psu->clearProtection(0);
+    EXPECT_FALSE(psu->isProtectionTripped(0, ProtectionType::OVP));
+    psu->setActualCurrent(1, 9999);
+    psu->simulate(1000000);
+    psu->clearAllProtection();
+    psu->clearProtection(9);  // ignored
+}
+
+TEST_F(CiA430SlaveFullTest, UvpAndOtp) {
+    psu->setOutputEnable(0, true);
+    psu->setTargetVoltage(0, 24000);
+    psu->setActualVoltage(0, 10000);  // below UVP 20000 while enabled
+    psu->simulate(1000000);
+    EXPECT_TRUE(psu->isProtectionTripped(0, ProtectionType::UVP));
+    psu->setTemperature(90);          // above maxTemperature 70
+    psu->simulate(1000000);
+    EXPECT_TRUE(psu->isProtectionTripped(0, ProtectionType::OTP));
+    EXPECT_EQ(psu->getTemperature(), 90);
+}
+
+TEST_F(CiA430SlaveFullTest, PowerCurrentCallbackAndStatus) {
+    psu->setActualVoltage(0, 24000);
+    psu->setActualCurrent(0, 2000);
+    EXPECT_EQ(psu->getActualPower(0), 48000u);   // mV*mA/1000 → mW
+    EXPECT_EQ(psu->getTotalPower(), 48000u);
+    psu->setCurrentLimit(0, 5000);
+    EXPECT_EQ(psu->getCurrentLimit(0), 5000u);
+    EXPECT_EQ(psu->getActualCurrent(0), 2000u);
+    bool cb = false;
+    psu->setChannelCallback([&](uint8_t, uint32_t&, uint32_t&) { cb = true; });
+    psu->simulate(1000000);
+    EXPECT_TRUE(cb);
+    psu->updateTxPDO();
+    psu->processRxPDO();
+    EXPECT_TRUE(psu->isACOk());
+    EXPECT_EQ(psu->getACVoltage(), 230u);
+}
+
+TEST_F(CiA430SlaveFullTest, OOBChannels) {
+    psu->setOutputEnable(9, true);    // ignored
+    EXPECT_FALSE(psu->isOutputEnabled(9));
+    psu->setTargetVoltage(9, 1);      // ignored
+    EXPECT_EQ(psu->getTargetVoltage(9), 0u);
+    EXPECT_EQ(psu->getActualVoltage(9), 0u);
+    psu->setCurrentLimit(9, 1);       // ignored
+    EXPECT_EQ(psu->getCurrentLimit(9), 0u);
+    EXPECT_EQ(psu->getActualCurrent(9), 0u);
+    EXPECT_EQ(psu->getActualPower(9), 0u);
+    EXPECT_EQ(psu->getProtectionStatus(9), 0);
+    EXPECT_EQ(psu->getChannelState(9), PowerSupplyState::Off);
 }
