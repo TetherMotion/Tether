@@ -14,8 +14,12 @@
 #include <sys/timerfd.h>
 #include <poll.h>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <cerrno>
+#include <mutex>
+#include <thread>
 
 namespace EtherCAT {
 namespace HAL {
@@ -197,45 +201,55 @@ private:
 
 class LinuxOneShotTimer : public IOneShotTimer {
 public:
-    LinuxOneShotTimer() {
-        m_timerFd = timerfd_create(CLOCK_MONOTONIC, 0);
-    }
+    LinuxOneShotTimer() = default;
 
     ~LinuxOneShotTimer() override {
         cancel();
-        if (m_timerFd >= 0) {
-            close(m_timerFd);
-        }
+        joinWaiter();
     }
 
     bool start(Microseconds delayUs, TimerCallback callback) override {
-        if (m_timerFd < 0 || delayUs <= 0) return false;
+        if (delayUs <= 0) return false;
 
-        m_callback = callback;
-        m_expiryTime = LinuxClock().nowMicros() + delayUs;
+        cancel();
+        joinWaiter();
 
-        struct itimerspec its;
-        its.it_value.tv_sec = delayUs / 1000000;
-        its.it_value.tv_nsec = (delayUs % 1000000) * 1000;
-        its.it_interval.tv_sec = 0;
-        its.it_interval.tv_nsec = 0;
-
-        if (timerfd_settime(m_timerFd, 0, &its, nullptr) != 0) {
-            return false;
+        {
+            std::lock_guard<std::mutex> lk(m_mutex);
+            m_callback = std::move(callback);
+            m_cancelled = false;
+            m_expiryTime = LinuxClock().nowMicros() + delayUs;
+            m_expiry = std::chrono::steady_clock::now() +
+                       std::chrono::microseconds(delayUs);
         }
-
         m_pending = true;
+
+        m_waiter = std::thread([this] {
+            TimerCallback cb;
+            {
+                std::unique_lock<std::mutex> lk(m_mutex);
+                // wait_until returns true only when the predicate holds
+                // (cancelled); false means the deadline was reached.
+                const bool cancelled =
+                    m_cv.wait_until(lk, m_expiry, [this] { return m_cancelled; });
+                if (cancelled) return;
+                m_pending = false;
+                cb = m_callback;
+            }
+            if (cb) cb();
+        });
         return true;
     }
 
     bool cancel() override {
-        if (!m_pending) return false;
-
-        struct itimerspec its;
-        memset(&its, 0, sizeof(its));
-        timerfd_settime(m_timerFd, 0, &its, nullptr);
-
-        m_pending = false;
+        {
+            std::lock_guard<std::mutex> lk(m_mutex);
+            if (!m_pending) return false;
+            m_cancelled = true;
+            m_pending = false;
+        }
+        m_cv.notify_one();
+        joinWaiter();
         return true;
     }
 
@@ -252,7 +266,15 @@ public:
     }
 
 private:
-    int m_timerFd = -1;
+    void joinWaiter() {
+        if (m_waiter.joinable()) m_waiter.join();
+    }
+
+    std::mutex m_mutex;
+    std::condition_variable m_cv;
+    std::thread m_waiter;
+    std::chrono::steady_clock::time_point m_expiry;
+    bool m_cancelled = false;
     TimerCallback m_callback;
     Timestamp m_expiryTime = 0;
     std::atomic<bool> m_pending{false};

@@ -8,13 +8,17 @@
 
 #include <gtest/gtest.h>
 
+#include <unistd.h>
+
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <memory>
 #include <vector>
 
 #include "tether/hal/EthernetHAL.hpp"
 #include "tether/hal/HALTypes.hpp"
+#include "tether/hal/IClock.hpp"
 #include "tether/hal/ILogger.hpp"
 #include "tether/hal/InterfaceHelpers.hpp"
 #include "tether/hal/StateMachineLogger.hpp"
@@ -253,6 +257,185 @@ TEST(InterfaceHelpersTest, ResolvePassthroughReturnsRequested) {
 TEST(InterfaceHelpersTest, ListPhysicalInterfacesDoesNotCrash) {
     listPhysicalInterfaces("test-hal");
     SUCCEED();
+}
+
+// ---------------------------------------------------------------------------
+// LinuxClock via getSystemClock() (real CLOCK_MONOTONIC/CLOCK_REALTIME)
+// ---------------------------------------------------------------------------
+
+class LinuxClockTest : public ::testing::Test {
+protected:
+    IClock& clock_ = getSystemClock();
+};
+
+TEST_F(LinuxClockTest, MonotonicTimeAdvances) {
+    const Timestamp a = clock_.nowMicros();
+    const Timestamp b = clock_.nowMicros();
+    EXPECT_GE(b, a);  // CLOCK_MONOTONIC never goes backward
+    EXPECT_GT(a, 0u);
+}
+
+TEST_F(LinuxClockTest, NowNanosConsistentWithMicros) {
+    const Timestamp us = clock_.nowMicros();
+    const Timestamp ns = clock_.nowNanos();
+    // ns/1000 should be >= us (ns sampled later or equal).
+    EXPECT_GE(ns / 1000, us);
+    // And within a generous bound (clock calls are fast).
+    EXPECT_LT(ns / 1000 - us, 100000u);  // <100ms skew
+}
+
+TEST_F(LinuxClockTest, SystemTimeMillisIsWallClock) {
+    const Timestamp t = clock_.systemTimeMillis();
+    // Wall clock well past epoch (>2020).
+    EXPECT_GT(t, 1577836800000u);
+}
+
+TEST_F(LinuxClockTest, ResolutionIsPositive) {
+    EXPECT_GT(clock_.resolution(), 0u);
+    EXPECT_LT(clock_.resolution(), 1000000u);  // <1ms resolution
+}
+
+TEST_F(LinuxClockTest, DelayMicrosActuallyWaits) {
+    const Timestamp before = clock_.nowMicros();
+    clock_.delayMicros(500);   // nanosleep path
+    const Timestamp after = clock_.nowMicros();
+    EXPECT_GE(after - before, 500u);
+}
+
+TEST_F(LinuxClockTest, DelayMicrosBusyWaitPath) {
+    const Timestamp before = clock_.nowMicros();
+    clock_.delayMicros(50);    // <100us → busy-wait path
+    const Timestamp after = clock_.nowMicros();
+    EXPECT_GE(after - before, 50u);
+}
+
+TEST_F(LinuxClockTest, DelayMicrosZeroIsNoop) {
+    const Timestamp before = clock_.nowMicros();
+    clock_.delayMicros(0);
+    clock_.delayMillis(0);
+    const Timestamp after = clock_.nowMicros();
+    EXPECT_LT(after - before, 50000u);  // returns immediately
+}
+
+TEST_F(LinuxClockTest, DelayMillisWaits) {
+    const Timestamp before = clock_.nowMicros();
+    clock_.delayMillis(2);
+    const Timestamp after = clock_.nowMicros();
+    EXPECT_GE(after - before, 2000u);
+}
+
+// ---------------------------------------------------------------------------
+// Clock factory lifecycle
+// ---------------------------------------------------------------------------
+
+TEST(ClockFactoryTest, GetClockFactoryReturnsSameInstance) {
+    IClockFactory& a = getClockFactory();
+    IClockFactory& b = getClockFactory();
+    EXPECT_EQ(&a, &b);
+}
+
+TEST(ClockFactoryTest, GetSystemClockIsSingleton) {
+    IClock& a = getSystemClock();
+    IClock& b = getSystemClock();
+    EXPECT_EQ(&a, &b);
+}
+
+TEST(ClockFactoryTest, ResetRecreatesFactory) {
+    // Address comparison is unreliable — the allocator may hand back the
+    // same block. Verify reset leaves a working factory instead.
+    getClockFactory();
+    resetClockFactory();
+    IClockFactory& f = getClockFactory();
+    EXPECT_NE(f.createPeriodicTimer(), nullptr);
+    EXPECT_NE(f.createOneShotTimer(), nullptr);
+    EXPECT_GT(f.getSystemClock().nowMicros(), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// LinuxPeriodicTimer (timerfd) and LinuxOneShotTimer (thread-based)
+// ---------------------------------------------------------------------------
+
+TEST(LinuxPeriodicTimerTest, InitStartStopCycles) {
+    auto timer = getClockFactory().createPeriodicTimer();
+    ASSERT_NE(timer, nullptr);
+    EXPECT_TRUE(timer->init(1000));  // 1kHz → 1ms period
+    EXPECT_FALSE(timer->isRunning());
+    timer->start();
+    EXPECT_TRUE(timer->isRunning());
+    timer->waitForCycle();
+    timer->waitForCycle();
+    auto stats = timer->getStats();
+    EXPECT_GE(stats.tickCount, 1u);
+    timer->stop();
+    EXPECT_FALSE(timer->isRunning());
+}
+
+TEST(LinuxPeriodicTimerTest, CallbackFiresOnCycles) {
+    auto timer = getClockFactory().createPeriodicTimer();
+    ASSERT_TRUE(timer->init(1000));
+    std::atomic<int> ticks{0};
+    timer->setCallback([&ticks] { ++ticks; });
+    timer->start();
+    for (int i = 0; i < 3; ++i) timer->waitForCycle();
+    timer->stop();
+    EXPECT_GE(ticks.load(), 1);
+}
+
+TEST(LinuxPeriodicTimerTest, GetPeriodAndResetStats) {
+    auto timer = getClockFactory().createPeriodicTimer();
+    ASSERT_TRUE(timer->init(2000));  // 2kHz → 500us
+    EXPECT_EQ(timer->getPeriodMicros(), 500);
+    timer->start();
+    timer->waitForCycle();
+    timer->waitForCycle();
+    EXPECT_GT(timer->getStats().tickCount, 0u);
+    timer->resetStats();
+    EXPECT_EQ(timer->getStats().tickCount, 0u);
+    timer->stop();
+}
+
+TEST(LinuxPeriodicTimerTest, InvalidFrequencyRejected) {
+    auto timer = getClockFactory().createPeriodicTimer();
+    EXPECT_FALSE(timer->init(0));
+}
+
+TEST(LinuxOneShotTimerTest, FiresCallbackAfterDelay) {
+    auto timer = getClockFactory().createOneShotTimer();
+    ASSERT_NE(timer, nullptr);
+    std::atomic<bool> fired{false};
+    EXPECT_TRUE(timer->start(2000, [&fired] { fired = true; }));
+    EXPECT_TRUE(timer->isPending());
+    // Wait for expiry.
+    for (int i = 0; i < 100 && !fired.load(); ++i) usleep(1000);
+    EXPECT_TRUE(fired.load());
+    EXPECT_FALSE(timer->isPending());
+}
+
+TEST(LinuxOneShotTimerTest, CancelPreventsCallback) {
+    auto timer = getClockFactory().createOneShotTimer();
+    std::atomic<bool> fired{false};
+    EXPECT_TRUE(timer->start(50000, [&fired] { fired = true; }));
+    EXPECT_TRUE(timer->isPending());
+    EXPECT_TRUE(timer->cancel());
+    EXPECT_FALSE(timer->isPending());
+    usleep(60000);
+    EXPECT_FALSE(fired.load());
+}
+
+TEST(LinuxOneShotTimerTest, RemainingCountsDown) {
+    auto timer = getClockFactory().createOneShotTimer();
+    timer->start(50000, [] {});
+    const Microseconds r = timer->remaining();
+    EXPECT_GT(r, 0);
+    EXPECT_LE(r, 50000);
+    timer->cancel();
+    EXPECT_EQ(timer->remaining(), 0);
+}
+
+TEST(LinuxOneShotTimerTest, CancelWhenNotPendingReturnsFalse) {
+    auto timer = getClockFactory().createOneShotTimer();
+    EXPECT_FALSE(timer->isPending());
+    EXPECT_FALSE(timer->cancel());
 }
 
 }  // namespace
