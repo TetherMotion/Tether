@@ -383,6 +383,15 @@ public:
         auto& buf = sync_managers_[sm_index].buffer;
         if (!buf.empty()) buf[0] = value;
     }
+    /// Write len bytes into an SM data buffer at offset (input injection —
+    /// the slave side "producing" process data).
+    void setSmBufferForTest(size_t sm_index, size_t offset,
+                            const uint8_t* data, size_t len) {
+        if (sm_index >= sync_managers_.size()) return;
+        auto& buf = sync_managers_[sm_index].buffer;
+        if (offset + len > buf.size()) return;
+        std::memcpy(&buf[offset], data, len);
+    }
 
     // Debug
     void dumpRegisters() const;

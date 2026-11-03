@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include "mocks/EmulatedBus.hpp"
+#include "tether/Beckhoff/AnalogInputTerminal.hpp"
 #include "tether/Beckhoff/EL1014.hpp"
 #include "tether/Beckhoff/EL2004.hpp"
 #include "tether/Beckhoff/MultiInputTerminal.hpp"
@@ -51,6 +52,85 @@ SlaveEmulator* addElSlave(EmulatedBus& bus,
     auto* raw = slave.get();
     bus.net.addSlave(std::move(slave));
     return raw;
+}
+
+/// CoE analog slave: mailbox pair + process-input SM on channel 3
+/// (EL3xxx layout: SM0/SM1 mailbox, SM2 unused, SM3 inputs).
+SlaveEmulator* addAnalogSlave(EmulatedBus& bus,
+                              uint32_t vendor, uint32_t product,
+                              uint16_t in_addr, uint16_t in_len) {
+    auto slave = std::make_unique<SlaveEmulator>();
+    EtherCAT::Emulator::SIIConfig cfg;
+    cfg.vendor_id = vendor;
+    cfg.product_code = product;
+    cfg.mailbox_protocol = 0x04;  // CoE
+    auto addSm = [&cfg](uint16_t addr, uint16_t len, uint8_t ctrl) {
+        EtherCAT::Emulator::SIIConfig::SMConfig sm{};
+        sm.start_addr = addr;
+        sm.length     = len;
+        sm.control    = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(ctrl);
+        sm.enable     = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(
+            static_cast<uint8_t>(0x01));
+        cfg.sync_managers.push_back(sm);
+    };
+    addSm(0x1000, 128, 0x26);  // SM0 mailbox out (master -> slave)
+    addSm(0x1080, 128, 0x22);  // SM1 mailbox in  (slave -> master)
+    addSm(0,       0,   0x00); // SM2 unused
+    addSm(in_addr, in_len, 0x40);  // SM3 process inputs
+    slave->setSIIConfig(cfg);
+    auto* raw = slave.get();
+    bus.net.addSlave(std::move(slave));
+    return raw;
+}
+
+/// DiscoveredSlave for a CoE analog-input terminal: mailbox SMs plus a
+/// process-input SM whose TxPDOs carry [8 status bits, 16-bit value]
+/// per channel — the classic EL3xxx per-channel layout.
+DiscoveredSlave makeAnalogDiscovered(uint32_t vendor, uint32_t product,
+                                     const char* name, uint16_t in_addr,
+                                     uint16_t in_len, uint8_t n_channels) {
+    DiscoveredSlave s;
+    s.index = 0;
+    s.vendor_id = vendor;
+    s.product_code = product;
+    s.device_name = name;
+
+    auto mkSm = [](uint16_t addr, uint16_t len, uint8_t type) {
+        SII::SIISyncManager sm{};
+        sm.phys_start_address = addr;
+        sm.length = len;
+        sm.sm_type = type;
+        sm.enable = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(
+            static_cast<uint8_t>(0x01));
+        return sm;
+    };
+    s.sync_managers = std::vector<SII::SIISyncManager>{
+        mkSm(0x1000, 128, SII::SM_TYPE_MBX_WRITE),
+        mkSm(0x1080, 128, SII::SM_TYPE_MBX_READ),
+        mkSm(0,       0,   SII::SM_TYPE_UNUSED),
+        mkSm(in_addr, in_len, SII::SM_TYPE_PROCESS_IN),
+    };
+
+    std::vector<SII::SIIPDO> pdos;
+    for (uint8_t ch = 0; ch < n_channels; ++ch) {
+        SII::SIIPDO pdo{};
+        pdo.pdo_index = static_cast<uint16_t>(0x1A00 + ch);
+        pdo.n_entries = 2;
+        pdo.sync_manager = 3;
+        SII::SIIPDOEntry status{};
+        status.index = 0x6000 + ch;
+        status.subindex = 1;
+        status.bit_length = 8;
+        pdo.entries.push_back(status);
+        SII::SIIPDOEntry value{};
+        value.index = 0x6010 + ch;
+        value.subindex = 0x11;
+        value.bit_length = 16;
+        pdo.entries.push_back(value);
+        pdos.push_back(pdo);
+    }
+    s.tx_pdos = pdos;
+    return s;
 }
 
 DiscoveredSlave makeDiscovered(uint32_t vendor, uint32_t product,
@@ -265,4 +345,38 @@ TEST_F(BeckhoffEmulatorTest, MultiInputChainReadsBothSlaves) {
     EXPECT_FALSE(ins.bit(2));
     EXPECT_TRUE(ins.bit(6));   // device 1 ch 2
     EXPECT_TRUE(ins.bit(7));   // device 1 ch 3
+}
+
+// ============================================================================
+// EL3002 — 2-channel analog input (CoE mailbox + SM3 process image)
+// ============================================================================
+
+TEST_F(BeckhoffEmulatorTest, EL3002ConfigureResolvesChannelLayout) {
+    auto* slave = addAnalogSlave(bus_, 0x00000002, 0x0BBA3052, 0x1180, 6);
+    bringUp();
+    auto ds = makeAnalogDiscovered(0x00000002, 0x0BBA3052, "EL3002",
+                                   0x1180, 6, 2);
+    Beckhoff::AnalogInputTerminal term(master_, ds, Beckhoff::Devices::EL3002);
+    ASSERT_TRUE(term.configure().has_value());
+    EXPECT_TRUE(term.configured());
+    EXPECT_EQ(term.channelCount(), 2u);
+    EXPECT_EQ(slave->getState(), SlaveState::SAFE_OP);
+}
+
+TEST_F(BeckhoffEmulatorTest, EL3002ValuesReadFromSmBuffer) {
+    auto* slave = addAnalogSlave(bus_, 0x00000002, 0x0BBA3052, 0x1180, 6);
+    bringUp();
+    auto ds = makeAnalogDiscovered(0x00000002, 0x0BBA3052, "EL3002",
+                                   0x1180, 6, 2);
+    Beckhoff::AnalogInputTerminal term(master_, ds, Beckhoff::Devices::EL3002);
+    ASSERT_TRUE(term.configure().has_value());
+
+    // Channel layout per PDO: [status byte][int16 value].  Two channels.
+    // ch0: status=0x00 value=0x1234; ch1: status=0x00 value=-1.
+    const uint8_t img[6] = {0x00, 0x34, 0x12, 0x00, 0xFF, 0xFF};
+    slave->setSmBufferForTest(3, 0, img, sizeof(img));
+
+    ASSERT_TRUE(master_.pdoForSlave(0).exchangePhysical(1));
+    EXPECT_EQ(term.value(0), 0x1234);
+    EXPECT_EQ(term.value(1), -1);
 }
