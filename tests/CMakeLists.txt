@@ -525,6 +525,7 @@ if(TARGET tether_terminal_ui)
         "${CMAKE_CURRENT_SOURCE_DIR}/terminal_ui/test_ncurses_widgets.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/terminal_ui/test_ncurses_panels.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/terminal_ui/test_ncurses_screens.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/terminal_ui/test_ui_models.cpp"
     )
     create_module_test(terminal_ui "${TERMINAL_UI_TEST_SOURCES}"
                        "tether_common;tether_terminal_ui" "")
