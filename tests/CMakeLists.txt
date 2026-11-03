@@ -1268,6 +1268,7 @@ create_ethercat_test(coverage
         ethercat/test_cyclic_task_scheduler.cpp
         ethercat/test_sync_diagnostics.cpp
         ethercat/test_write_verify.cpp
+        ethercat/test_ethercat_panels_coverage.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/SlaveEmulator_CiA402.cpp
