@@ -119,7 +119,11 @@ TEST(HybridDeadlineTimerTest, CreateAndRun) {
     IDeadlineTimer::Tick a{}, b{};
     ASSERT_TRUE(timer->waitNext(a));
     ASSERT_TRUE(timer->waitNext(b));
-    EXPECT_EQ(b.deadline_ns - a.deadline_ns, kPeriodNs);
+    // The schedule advances by (missed + 1) periods when the first wait wakes
+    // late — under sanitizer/CI load that can skip deadlines, so assert the
+    // invariant rather than a fixed one-period delta.
+    EXPECT_EQ(b.deadline_ns - a.deadline_ns,
+              kPeriodNs * static_cast<uint64_t>(a.missed + 1));
     timer->requestStop();
     EXPECT_FALSE(timer->waitNext(a));
 }
