@@ -173,6 +173,7 @@ set(CONTROL_TEST_LIBS "tether_common;tether_hal;tether_gcode;tether_motion_contr
 set(CONTROL_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/ControlTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/FractionalPIDTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/PIDControllersTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/MatrixUtilsTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_controllers.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_scurve_ramper.cpp"
