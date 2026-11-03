@@ -16,25 +16,34 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Hash submodule pins
+      id: submod-key
+      run: echo "hash=$(git ls-tree HEAD dependencies | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
     - name: Restore submodule object cache
       id: submodule-cache
       uses: actions/cache/restore@v4
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        # Key on the pinned submodule commits (gitlinks), not the commit
+        # SHA: one cache entry per submodule pin-set instead of one per
+        # commit per job. Per-SHA entries wrote ~123 MB x N jobs every
+        # push, exceeding the 10 GB quota and evicting the ccache entries.
+        key: submodules-${{ steps.submod-key.outputs.hash }}
         restore-keys: submodules-
 
-    - name: Checkout code
-      uses: actions/checkout@v5
-      with:
-        submodules: recursive
+    - name: Update submodules
+      run: git submodule update --init --recursive
 
     - name: Save submodule object cache
       uses: actions/cache/save@v4
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        key: submodules-${{ steps.submod-key.outputs.hash }}
     
     - name: Install dependencies
       run: |
@@ -106,25 +115,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Hash submodule pins
+      id: submod-key
+      run: echo "hash=$(git ls-tree HEAD dependencies | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
     - name: Restore submodule object cache
       id: submodule-cache
       uses: actions/cache/restore@v4
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        # Key on the pinned submodule commits (gitlinks), not the commit
+        # SHA: one cache entry per submodule pin-set instead of one per
+        # commit per job. Per-SHA entries wrote ~123 MB x N jobs every
+        # push, exceeding the 10 GB quota and evicting the ccache entries.
+        key: submodules-${{ steps.submod-key.outputs.hash }}
         restore-keys: submodules-
 
-    - name: Checkout code
-      uses: actions/checkout@v5
-      with:
-        submodules: recursive
+    - name: Update submodules
+      run: git submodule update --init --recursive
 
     - name: Save submodule object cache
       uses: actions/cache/save@v4
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        key: submodules-${{ steps.submod-key.outputs.hash }}
 
     - name: Install dependencies
       run: |
@@ -199,25 +217,34 @@ jobs:
         os: [ubuntu-22.04, ubuntu-24.04]
 
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Hash submodule pins
+      id: submod-key
+      run: echo "hash=$(git ls-tree HEAD dependencies | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
     - name: Restore submodule object cache
       id: submodule-cache
       uses: actions/cache/restore@v4
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        # Key on the pinned submodule commits (gitlinks), not the commit
+        # SHA: one cache entry per submodule pin-set instead of one per
+        # commit per job. Per-SHA entries wrote ~123 MB x N jobs every
+        # push, exceeding the 10 GB quota and evicting the ccache entries.
+        key: submodules-${{ steps.submod-key.outputs.hash }}
         restore-keys: submodules-
 
-    - name: Checkout code
-      uses: actions/checkout@v5
-      with:
-        submodules: recursive
+    - name: Update submodules
+      run: git submodule update --init --recursive
 
     - name: Save submodule object cache
       uses: actions/cache/save@v4
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        key: submodules-${{ steps.submod-key.outputs.hash }}
 
     - name: Install dependencies
       run: |
@@ -288,25 +315,34 @@ jobs:
     needs: compile
     
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Hash submodule pins
+      id: submod-key
+      run: echo "hash=$(git ls-tree HEAD dependencies | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
     - name: Restore submodule object cache
       id: submodule-cache
       uses: actions/cache/restore@v4
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        # Key on the pinned submodule commits (gitlinks), not the commit
+        # SHA: one cache entry per submodule pin-set instead of one per
+        # commit per job. Per-SHA entries wrote ~123 MB x N jobs every
+        # push, exceeding the 10 GB quota and evicting the ccache entries.
+        key: submodules-${{ steps.submod-key.outputs.hash }}
         restore-keys: submodules-
 
-    - name: Checkout code
-      uses: actions/checkout@v5
-      with:
-        submodules: recursive
+    - name: Update submodules
+      run: git submodule update --init --recursive
 
     - name: Save submodule object cache
       uses: actions/cache/save@v4
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        key: submodules-${{ steps.submod-key.outputs.hash }}
     
     - name: Download build artifact
       uses: actions/download-artifact@v8
@@ -338,25 +374,34 @@ jobs:
     needs: compile
 
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Hash submodule pins
+      id: submod-key
+      run: echo "hash=$(git ls-tree HEAD dependencies | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
     - name: Restore submodule object cache
       id: submodule-cache
       uses: actions/cache/restore@v4
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        # Key on the pinned submodule commits (gitlinks), not the commit
+        # SHA: one cache entry per submodule pin-set instead of one per
+        # commit per job. Per-SHA entries wrote ~123 MB x N jobs every
+        # push, exceeding the 10 GB quota and evicting the ccache entries.
+        key: submodules-${{ steps.submod-key.outputs.hash }}
         restore-keys: submodules-
 
-    - name: Checkout code
-      uses: actions/checkout@v5
-      with:
-        submodules: recursive
+    - name: Update submodules
+      run: git submodule update --init --recursive
 
     - name: Save submodule object cache
       uses: actions/cache/save@v4
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        key: submodules-${{ steps.submod-key.outputs.hash }}
 
     - name: Download build artifact
       uses: actions/download-artifact@v8
@@ -400,25 +445,34 @@ jobs:
     needs: compile
 
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Hash submodule pins
+      id: submod-key
+      run: echo "hash=$(git ls-tree HEAD dependencies | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
     - name: Restore submodule object cache
       id: submodule-cache
       uses: actions/cache/restore@v4
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        # Key on the pinned submodule commits (gitlinks), not the commit
+        # SHA: one cache entry per submodule pin-set instead of one per
+        # commit per job. Per-SHA entries wrote ~123 MB x N jobs every
+        # push, exceeding the 10 GB quota and evicting the ccache entries.
+        key: submodules-${{ steps.submod-key.outputs.hash }}
         restore-keys: submodules-
 
-    - name: Checkout code
-      uses: actions/checkout@v5
-      with:
-        submodules: recursive
+    - name: Update submodules
+      run: git submodule update --init --recursive
 
     - name: Save submodule object cache
       uses: actions/cache/save@v4
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        key: submodules-${{ steps.submod-key.outputs.hash }}
 
     - name: Download build artifact
       uses: actions/download-artifact@v8
@@ -451,25 +505,34 @@ jobs:
     needs: compile
     
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Hash submodule pins
+      id: submod-key
+      run: echo "hash=$(git ls-tree HEAD dependencies | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
     - name: Restore submodule object cache
       id: submodule-cache
       uses: actions/cache/restore@v4
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        # Key on the pinned submodule commits (gitlinks), not the commit
+        # SHA: one cache entry per submodule pin-set instead of one per
+        # commit per job. Per-SHA entries wrote ~123 MB x N jobs every
+        # push, exceeding the 10 GB quota and evicting the ccache entries.
+        key: submodules-${{ steps.submod-key.outputs.hash }}
         restore-keys: submodules-
 
-    - name: Checkout code
-      uses: actions/checkout@v5
-      with:
-        submodules: recursive
+    - name: Update submodules
+      run: git submodule update --init --recursive
 
     - name: Save submodule object cache
       uses: actions/cache/save@v4
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        key: submodules-${{ steps.submod-key.outputs.hash }}
     
     - name: Install dependencies
       run: |
@@ -603,25 +666,34 @@ jobs:
     needs: compile
     
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Hash submodule pins
+      id: submod-key
+      run: echo "hash=$(git ls-tree HEAD dependencies | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
     - name: Restore submodule object cache
       id: submodule-cache
       uses: actions/cache/restore@v4
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        # Key on the pinned submodule commits (gitlinks), not the commit
+        # SHA: one cache entry per submodule pin-set instead of one per
+        # commit per job. Per-SHA entries wrote ~123 MB x N jobs every
+        # push, exceeding the 10 GB quota and evicting the ccache entries.
+        key: submodules-${{ steps.submod-key.outputs.hash }}
         restore-keys: submodules-
 
-    - name: Checkout code
-      uses: actions/checkout@v5
-      with:
-        submodules: recursive
+    - name: Update submodules
+      run: git submodule update --init --recursive
 
     - name: Save submodule object cache
       uses: actions/cache/save@v4
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        key: submodules-${{ steps.submod-key.outputs.hash }}
     
     - name: Install dependencies
       run: |
@@ -722,25 +794,34 @@ jobs:
     needs: compile
     
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Hash submodule pins
+      id: submod-key
+      run: echo "hash=$(git ls-tree HEAD dependencies | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
     - name: Restore submodule object cache
       id: submodule-cache
       uses: actions/cache/restore@v4
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        # Key on the pinned submodule commits (gitlinks), not the commit
+        # SHA: one cache entry per submodule pin-set instead of one per
+        # commit per job. Per-SHA entries wrote ~123 MB x N jobs every
+        # push, exceeding the 10 GB quota and evicting the ccache entries.
+        key: submodules-${{ steps.submod-key.outputs.hash }}
         restore-keys: submodules-
 
-    - name: Checkout code
-      uses: actions/checkout@v5
-      with:
-        submodules: recursive
+    - name: Update submodules
+      run: git submodule update --init --recursive
 
     - name: Save submodule object cache
       uses: actions/cache/save@v4
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        key: submodules-${{ steps.submod-key.outputs.hash }}
     
     - name: Install dependencies
       run: |
@@ -841,25 +922,34 @@ jobs:
     needs: compile
 
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Hash submodule pins
+      id: submod-key
+      run: echo "hash=$(git ls-tree HEAD dependencies | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
     - name: Restore submodule object cache
       id: submodule-cache
       uses: actions/cache/restore@v4
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        # Key on the pinned submodule commits (gitlinks), not the commit
+        # SHA: one cache entry per submodule pin-set instead of one per
+        # commit per job. Per-SHA entries wrote ~123 MB x N jobs every
+        # push, exceeding the 10 GB quota and evicting the ccache entries.
+        key: submodules-${{ steps.submod-key.outputs.hash }}
         restore-keys: submodules-
 
-    - name: Checkout code
-      uses: actions/checkout@v5
-      with:
-        submodules: recursive
+    - name: Update submodules
+      run: git submodule update --init --recursive
 
     - name: Save submodule object cache
       uses: actions/cache/save@v4
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        key: submodules-${{ steps.submod-key.outputs.hash }}
 
     - name: Download build artifact
       uses: actions/download-artifact@v8
@@ -979,25 +1069,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Hash submodule pins
+      id: submod-key
+      run: echo "hash=$(git ls-tree HEAD dependencies | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
     - name: Restore submodule object cache
       id: submodule-cache
       uses: actions/cache/restore@v4
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        # Key on the pinned submodule commits (gitlinks), not the commit
+        # SHA: one cache entry per submodule pin-set instead of one per
+        # commit per job. Per-SHA entries wrote ~123 MB x N jobs every
+        # push, exceeding the 10 GB quota and evicting the ccache entries.
+        key: submodules-${{ steps.submod-key.outputs.hash }}
         restore-keys: submodules-
 
-    - name: Checkout code
-      uses: actions/checkout@v5
-      with:
-        submodules: recursive
+    - name: Update submodules
+      run: git submodule update --init --recursive
 
     - name: Save submodule object cache
       uses: actions/cache/save@v4
       if: steps.submodule-cache.outputs.cache-hit != 'true'
       with:
         path: .git/modules
-        key: submodules-${{ github.sha }}
+        key: submodules-${{ steps.submod-key.outputs.hash }}
 
     - name: Install dependencies
       run: |
