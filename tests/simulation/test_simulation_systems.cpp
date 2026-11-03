@@ -196,6 +196,20 @@ TEST_P(SystemInterfaceTest, PresetsAreValid) {
     }
 }
 
+TEST_P(SystemInterfaceTest, SetParametersIgnoresUnknownKeys) {
+    auto sys = Simulation::createSystem(GetParam());
+    ASSERT_NE(sys, nullptr);
+    // ParametricSystem::setParameters only applies keys already in the
+    // map — unknown names are silently dropped.
+    Simulation::ParamMap params;
+    params["__definitely_not_a_param__"] = 42.0;
+    sys->setParameters(params);
+    EXPECT_DOUBLE_EQ(sys->getParameter("__definitely_not_a_param__"), 0.0);
+    // But setParameter (singular) inserts any key.
+    sys->setParameter("__definitely_not_a_param__", 1.5);
+    EXPECT_DOUBLE_EQ(sys->getParameter("__definitely_not_a_param__"), 1.5);
+}
+
 TEST_P(SystemInterfaceTest, GetParametersAndSetParametersRoundTrip) {
     auto sys = Simulation::createSystem(GetParam());
     ASSERT_NE(sys, nullptr);
