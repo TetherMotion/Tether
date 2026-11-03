@@ -1350,4 +1350,346 @@ TEST(NoiseTests, DefaultFallthrough) {
     EXPECT_DOUBLE_EQ(gen.generate(np, 0.0, 0.0), 0.0);
 }
 
+
+// ============================================================================
+// Coverage batch: integrators, system UI helpers, sensors/actuators, engine
+// ============================================================================
+
+static Simulation::OdeFunction constantOde(double slope) {
+    return [slope](double, const Simulation::StateVector& y) {
+        return Simulation::StateVector(y.size(), slope);
+    };
+}
+
+TEST(IntegratorCoverage, AllMethodsStep) {
+    const Simulation::StateVector y0{1.0, 2.0};
+    // f returns constant 1.0 -> exact answer is y0 + dt
+    Simulation::EulerForwardIntegrator eu;
+    Simulation::RungeKutta4Integrator rk;
+    Simulation::DormandPrinceRK45Integrator dp;
+    Simulation::BogackiShampineRK23Integrator bs;
+    Simulation::ImplicitTrapezoidalIntegrator it;
+    Simulation::BDF2Integrator bd;
+    const std::vector<Simulation::Integrator*> igs{&eu, &rk, &dp, &bs, &it, &bd};
+    for (Simulation::Integrator* ig : igs) {
+        auto r = ig->step(constantOde(1.0), 0.0, y0, 0.1);
+        ASSERT_EQ(r.state.size(), 2u);
+        EXPECT_NEAR(r.state[0], 1.1, 1e-9) << ig->name();
+        EXPECT_TRUE(std::isfinite(r.error_estimate));
+    }
+    EXPECT_STREQ(eu.name(), "Forward Euler");
+    EXPECT_FALSE(eu.isAdaptive());
+    EXPECT_TRUE(dp.isAdaptive());
+    EXPECT_TRUE(it.isImplicit());
+    EXPECT_TRUE(bd.isImplicit());
+}
+
+TEST(IntegratorCoverage, AdaptiveRejectsLargeError) {
+    // stiff ODE -> error estimate exceeds tolerance -> accepted=false
+    Simulation::DormandPrinceRK45Integrator dp(1e-12, 1e-12);
+    Simulation::OdeFunction stiff = [](double, const Simulation::StateVector& y) {
+        return Simulation::StateVector{-1000.0 * y[0]};
+    };
+    auto r = dp.step(stiff, 0.0, {1.0}, 1.0);
+    EXPECT_FALSE(r.accepted);
+    EXPECT_GT(r.error_estimate, 1.0);
+
+    // gentle decay at sane tolerances accepts
+    Simulation::DormandPrinceRK45Integrator dp2;
+    Simulation::OdeFunction gentle = [](double, const Simulation::StateVector& y) {
+        return Simulation::StateVector{-y[0]};
+    };
+    auto ok = dp2.step(gentle, 0.0, {1.0}, 0.01);
+    EXPECT_TRUE(ok.accepted);
+}
+
+TEST(IntegratorCoverage, BogackiShampineAdaptive) {
+    Simulation::BogackiShampineRK23Integrator bs(1e-12, 1e-12);
+    Simulation::OdeFunction stiff = [](double, const Simulation::StateVector& y) {
+        return Simulation::StateVector{-1000.0 * y[0]};
+    };
+    auto r = bs.step(stiff, 0.0, {1.0}, 1.0);
+    EXPECT_FALSE(r.accepted);
+    Simulation::BogackiShampineRK23Integrator bs2;
+    Simulation::OdeFunction gentle = [](double, const Simulation::StateVector& y) {
+        return Simulation::StateVector{-y[0]};
+    };
+    auto ok = bs2.step(gentle, 0.0, {1.0}, 0.01);
+    EXPECT_TRUE(ok.accepted);
+}
+
+TEST(IntegratorCoverage, ImplicitTrapezoidalConverges) {
+    // nonlinear-ish ODE exercises the fixed-point iteration loop
+    Simulation::ImplicitTrapezoidalIntegrator it(50, 1e-12);
+    Simulation::OdeFunction f = [](double, const Simulation::StateVector& y) {
+        return Simulation::StateVector{-y[0] * y[0]};
+    };
+    auto r = it.step(f, 0.0, {1.0}, 0.1);
+    ASSERT_EQ(r.state.size(), 1u);
+    EXPECT_GT(r.state[0], 0.0);
+    EXPECT_LT(r.state[0], 1.0);
+}
+
+TEST(IntegratorCoverage, BDF2WithPreviousState) {
+    Simulation::BDF2Integrator bd;
+    bd.setPreviousState({1.0});
+    auto r = bd.step(constantOde(1.0), 0.0, {1.1}, 0.1);
+    EXPECT_TRUE(std::isfinite(r.state[0]));
+    // without previous state it falls back to an implicit-Euler guess path
+    Simulation::BDF2Integrator bd2;
+    auto r2 = bd2.step(constantOde(1.0), 0.0, {1.0}, 0.1);
+    EXPECT_NEAR(r2.state[0], 1.1, 1e-9);
+}
+
+TEST(IntegratorCoverage, FactoryAllArms) {
+    EXPECT_NE(Simulation::createIntegrator(Simulation::IntegrationMethod::EulerForward, 1e-6, 1e-6), nullptr);
+    EXPECT_NE(Simulation::createIntegrator(Simulation::IntegrationMethod::RungeKutta4, 1e-6, 1e-6), nullptr);
+    EXPECT_NE(Simulation::createIntegrator(Simulation::IntegrationMethod::DormandPrinceRK45, 1e-6, 1e-6), nullptr);
+    EXPECT_NE(Simulation::createIntegrator(Simulation::IntegrationMethod::BogackiShampineRK23, 1e-6, 1e-6), nullptr);
+    EXPECT_NE(Simulation::createIntegrator(Simulation::IntegrationMethod::ImplicitTrapezoidal, 1e-6, 1e-6), nullptr);
+    EXPECT_NE(Simulation::createIntegrator(Simulation::IntegrationMethod::BDF2, 1e-6, 1e-6), nullptr);
+    // unimplemented enum values fall through to RK4
+    auto d = Simulation::createIntegrator(Simulation::IntegrationMethod::SDIRK4, 1e-6, 1e-6);
+    EXPECT_STREQ(d->name(), "RK4");
+    auto d2 = Simulation::createIntegrator(Simulation::IntegrationMethod::EulerBackward, 1e-6, 1e-6);
+    EXPECT_STREQ(d2->name(), "RK4");
+}
+
+TEST(DynamicalSystemCoverage, ParameterDescriptorsDetailed) {
+    auto sys = Simulation::createSystem(1);
+    auto detailed = sys->parameterDescriptorsDetailed();
+    auto base = sys->parameterDescriptors();
+    ASSERT_EQ(detailed.size(), base.size());
+    // detailed description appends range/current-value context
+    EXPECT_GT(detailed[0].description.size(), 0u);
+    EXPECT_NE(detailed[0].description.find(detailed[0].unit == "" ? "" : detailed[0].unit), std::string::npos);
+}
+
+TEST(DynamicalSystemCoverage, DefaultInitialStateForUi) {
+    auto sys = Simulation::createSystem(1);
+    auto ui = sys->defaultInitialStateForUi();
+    auto def = sys->defaultInitialState();
+    ASSERT_EQ(ui.size(), def.size());
+    for (double v : ui) EXPECT_TRUE(std::isfinite(v));
+}
+
+TEST(DynamicalSystemCoverage, Linearize) {
+    auto sys = Simulation::createSystem(1);
+    const int n = sys->stateDim();
+    const int m = sys->inputDim();
+    const int p = sys->outputDim();
+    std::vector<double> A(n * n), B(n * m), C(p * n), D(p * m);
+    sys->linearize(sys->defaultInitialState(), sys->defaultInput(), A, B, C, D);
+    // mass-spring-damper: A[1] = d(v)/dx is finite and nonzero (spring term)
+    bool anyNonzero = false;
+    for (double v : A) anyNonzero = anyNonzero || (v != 0.0);
+    EXPECT_TRUE(anyNonzero);
+    for (double v : B) EXPECT_TRUE(std::isfinite(v));
+}
+
+TEST(NoiseCoverage, AllNoiseTypes) {
+    const Simulation::NoiseType types[] = {
+        Simulation::NoiseType::White, Simulation::NoiseType::Brown,
+        Simulation::NoiseType::Purple, Simulation::NoiseType::Grey,
+        Simulation::NoiseType::PeriodicGSM, Simulation::NoiseType::ActuatorDependent};
+    for (auto t : types) {
+        Simulation::NoiseParams np;
+        np.type = t;
+        np.amplitude = 1.0;
+        np.frequency = 2.0;
+        np.actuatorGain = 1.0;
+        Simulation::NoiseGenerator gen(123);
+        double v = gen.generate(np, 0.25, 3.0);
+        EXPECT_TRUE(std::isfinite(v));
+    }
+    // None / zero amplitude short-circuit
+    Simulation::NoiseGenerator gen;
+    Simulation::NoiseParams np;
+    np.type = Simulation::NoiseType::White;
+    np.amplitude = 0.0;
+    EXPECT_DOUBLE_EQ(gen.generate(np, 0.0, 0.0), 0.0);
+    // deterministic with the same seed, diverges after setSeed
+    Simulation::NoiseGenerator g1(7), g2(7);
+    Simulation::NoiseParams w;
+    w.type = Simulation::NoiseType::White;
+    w.amplitude = 1.0;
+    EXPECT_DOUBLE_EQ(g1.generate(w, 0.1, 0.0), g2.generate(w, 0.1, 0.0));
+    g2.setSeed(8);
+    EXPECT_NE(g1.generate(w, 0.2, 0.0), g2.generate(w, 0.2, 0.0));
+    g1.reset();
+}
+
+TEST(SensorCoverage, MeasureQuantizationSaturationDelay) {
+    Simulation::SensorConfig cfg;
+    cfg.quantization = 0.5;
+    cfg.saturationMin = -2.0;
+    cfg.saturationMax = 2.0;
+    Simulation::SensorModel s(cfg);
+    EXPECT_DOUBLE_EQ(s.measure(5.0, 0.0, 0.0), 2.0);       // saturates high
+    EXPECT_DOUBLE_EQ(s.measure(-5.0, 0.0, 0.0), -2.0);     // saturates low
+    EXPECT_DOUBLE_EQ(s.measure(1.26, 0.0, 0.0), 1.5);      // quantizes to 0.5 grid
+
+    // sample rate holds the previous reading between samples
+    Simulation::SensorConfig cfg2;
+    cfg2.sampleRate = 1.0;  // 1 Hz -> 1 s hold
+    Simulation::SensorModel s2(cfg2);
+    s2.measure(10.0, 0.0, 0.0);
+    EXPECT_DOUBLE_EQ(s2.measure(99.0, 0.5, 0.0), 10.0);    // within sample window
+    EXPECT_DOUBLE_EQ(s2.measure(99.0, 1.1, 0.0), 99.0);    // next sample
+
+    // fixed delay + variance paths
+    Simulation::SensorConfig cfg3;
+    cfg3.delay = 0.1;
+    cfg3.delayVariance = 0.05;
+    Simulation::SensorModel s3(cfg3);
+    EXPECT_TRUE(std::isfinite(s3.measure(1.0, 0.0, 0.0)));
+    EXPECT_TRUE(std::isfinite(s3.measure(1.0, 1.0, 0.0)));
+}
+
+TEST(ActuatorCoverage, SaturationRateDeadzone) {
+    Simulation::ActuatorConfig cfg;
+    cfg.maxOutput = 2.0;
+    cfg.minOutput = -2.0;
+    cfg.maxRate = 5.0;
+    cfg.deadZone = 0.1;
+    Simulation::ActuatorModel a(cfg);
+    EXPECT_DOUBLE_EQ(a.apply(10.0, 0.1), 0.5);   // rate-limited up (5/s * 0.1)
+    double step2 = a.apply(10.0, 1.0);
+    EXPECT_LE(step2, 2.0);                        // output ceiling
+    Simulation::ActuatorModel dz(cfg);
+    EXPECT_DOUBLE_EQ(dz.apply(0.05, 0.1), 0.0);   // inside dead zone
+    a.reset();
+}
+
+TEST(ActuatorCoverage, BacklashHysteresisFailure) {
+    Simulation::ActuatorConfig cfg;
+    cfg.backlash = 0.5;
+    cfg.hysteresis = 0.2;
+    Simulation::ActuatorModel a(cfg);
+    a.apply(1.0, 0.1);
+    a.apply(-1.0, 0.1);   // direction reversal engages backlash
+    EXPECT_TRUE(std::isfinite(a.apply(0.5, 0.1)));
+
+    Simulation::ActuatorConfig fail;
+    fail.failOnLimit = true;
+    Simulation::ActuatorModel b(fail);
+    b.apply(1e9, 0.1);    // over limit -> failed actuator outputs 0
+    EXPECT_TRUE(b.hasFailed());
+    EXPECT_DOUBLE_EQ(b.apply(1e9, 0.1), 0.0);
+    b.reset();
+    EXPECT_FALSE(b.hasFailed());
+
+    Simulation::ActuatorConfig rp;
+    rp.reducedPerfNearLimits = true;
+    rp.maxOutput = 10.0;
+    rp.minOutput = -10.0;
+    Simulation::ActuatorModel c(rp);
+    EXPECT_TRUE(std::isfinite(c.apply(9.9, 0.1)));
+}
+
+TEST(EngineCoverage, AdaptiveStepAndSubStep) {
+    auto sys = Simulation::createSystem(1);
+    Simulation::SimulationEngine engine;
+    engine.setSystem(std::shared_ptr<Simulation::DynamicalSystem>(std::move(sys)));
+    Simulation::SimConfig cfg;
+    cfg.dt = 0.05;
+    cfg.totalTime = 0.2;
+    cfg.method = Simulation::IntegrationMethod::DormandPrinceRK45;
+    cfg.adaptiveStep = true;
+    cfg.maxStepSize = 0.01;   // forces the sub-step loop
+    engine.setConfig(cfg);
+    engine.setInitialState({0.5, 0.0});
+    auto record = engine.run();
+    EXPECT_GT(record.size(), 0u);
+    EXPECT_TRUE(engine.isFinished());
+    // dt history records one entry per macro step
+    EXPECT_TRUE(std::all_of(record.dtHistory.begin(), record.dtHistory.end(),
+                            [](double d) { return d <= 0.05 + 1e-12; }));
+}
+
+TEST(EngineCoverage, SensorAndActuatorConfigs) {
+    auto sys = Simulation::createSystem(1);
+    Simulation::SimulationEngine engine;
+    engine.setSystem(std::shared_ptr<Simulation::DynamicalSystem>(std::move(sys)));
+    Simulation::SimConfig cfg;
+    cfg.dt = 0.05;
+    cfg.totalTime = 0.1;
+    engine.setConfig(cfg);
+    Simulation::SensorConfig sc;
+    sc.quantization = 0.5;
+    engine.setSensorConfigs({sc});
+    Simulation::ActuatorConfig ac;
+    ac.maxOutput = 1.0;
+    ac.minOutput = -1.0;
+    engine.setActuatorConfigs({ac});
+    engine.setExternalForce([](double, const Simulation::StateVector&) {
+        return Simulation::StateVector{0.0, 0.0};
+    });
+    engine.setInitialState({1.0, 0.0});
+    auto record = engine.run();
+    EXPECT_GT(record.outputs.size(), 0u);
+    for (const auto& m : record.outputs) {
+        for (double v : m) EXPECT_TRUE(std::isfinite(v));
+    }
+}
+
+TEST(EngineCoverage, StepResetAndCurrentTime) {
+    auto sys = Simulation::createSystem(1);
+    Simulation::SimulationEngine engine;
+    engine.setSystem(std::shared_ptr<Simulation::DynamicalSystem>(std::move(sys)));
+    Simulation::SimConfig cfg;
+    cfg.dt = 0.05;
+    cfg.totalTime = 0.2;
+    engine.setConfig(cfg);
+    engine.initialize();
+    EXPECT_FALSE(engine.isFinished());
+    auto step1 = engine.step();
+    EXPECT_NEAR(step1.time, 0.05, 1e-9);
+    EXPECT_GT(engine.currentTime(), 0.0);
+    engine.reset();
+    EXPECT_DOUBLE_EQ(engine.currentTime(), 0.0);
+    EXPECT_FALSE(engine.isFinished());
+}
+
+TEST(EngineCoverage, ComputeMetricsOnRecord) {
+    Simulation::SimulationRecord rec;
+    // step response: rises past 90%, overshoots, dips below ref, settles
+    const double ref[] = {0.0, 0.5, 0.9, 1.2, 0.95, 1.0, 1.0, 1.0, 1.0, 1.0};
+    const double ctrl[] = {1.0, 1.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    for (int i = 0; i < 10; ++i) {
+        rec.times.push_back(i * 0.1);
+        rec.states.push_back({ref[i]});
+        rec.outputs.push_back({ref[i]});
+        rec.controlInputs.push_back({ctrl[i]});
+        rec.dtHistory.push_back(0.1);
+    }
+    auto m = Simulation::SimulationEngine::computeMetrics(rec, {1.0});
+    EXPECT_GE(m.riseTime, 0.0);
+    EXPECT_GT(m.overshoot, 0.0);
+    EXPECT_GT(m.undershoot, 0.0);
+    EXPECT_GT(m.iae, 0.0);
+    EXPECT_GT(m.ise, 0.0);
+    EXPECT_GT(m.itae, 0.0);
+    EXPECT_DOUBLE_EQ(m.maxControl, 1.0);
+    EXPECT_GE(m.settlingTime, 0.0);
+}
+
+TEST(EngineCoverage, ComputeBodePlot) {
+    Simulation::SimulationRecord rec;
+    // 16 samples of sinusoid in/out so the DFT has content
+    for (int i = 0; i < 16; ++i) {
+        double t = i * 0.1;
+        rec.times.push_back(t);
+        rec.controlInputs.push_back({std::sin(t)});
+        rec.outputs.push_back({0.5 * std::sin(t)});
+        rec.dtHistory.push_back(0.1);
+    }
+    std::vector<double> freqs, mags, phases;
+    Simulation::SimulationEngine::computeBodePlot(rec, 0, 0, freqs, mags, phases);
+    ASSERT_EQ(freqs.size(), mags.size());
+    ASSERT_EQ(mags.size(), phases.size());
+    EXPECT_GT(freqs.size(), 0u);
+    for (double v : mags) EXPECT_TRUE(std::isfinite(v));
+}
+
 } // anonymous namespace
