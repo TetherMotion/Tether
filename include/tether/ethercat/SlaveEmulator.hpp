@@ -398,6 +398,23 @@ public:
     void dumpFMMUs() const;
     void dumpSyncManagers() const;
 
+    /// Register or replace an object-dictionary entry (tests that need
+    /// OD objects beyond the built-in set — e.g. PDO mapping records).
+    void addODEntry(const ODEntry& entry) {
+        if (ODEntry* e = findODEntry(entry.index, entry.subindex)) {
+            *e = entry;
+        } else {
+            object_dictionary_.push_back(entry);
+        }
+    }
+    /// Read back an OD entry's stored data (nullptr when absent).
+    const ODEntry* odEntry(uint16_t index, uint8_t subindex) const {
+        for (const auto& e : object_dictionary_) {
+            if (e.index == index && e.subindex == subindex) return &e;
+        }
+        return nullptr;
+    }
+
 private:
     // Internal register read/write
     bool readRegister(uint16_t addr, uint8_t* data, uint16_t len);
