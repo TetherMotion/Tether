@@ -799,7 +799,7 @@ create_module_test(profiles_cia402_coverage "${CIA402_COVERAGE_SOURCES}" "${CIA4
 if(CIA404_TEST_SOURCES)
     create_module_test(profiles_cia404
         "${CIA404_TEST_SOURCES}"
-        "tether_common;tether_ethercat_common;tether_ethercat_master;tether_cia_profiles"
+        "tether_common;tether_ethercat_common;tether_ethercat_slave;tether_ethercat_master;tether_cia_profiles"
         ""
     )
 endif()
