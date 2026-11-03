@@ -15,6 +15,8 @@
 
 #include "mocks/EmulatedBus.hpp"
 #include "tether/Beckhoff/AnalogInputTerminal.hpp"
+#include "tether/Beckhoff/AnalogOutputTerminal.hpp"
+#include "tether/Beckhoff/CombinedIoTerminal.hpp"
 #include "tether/Beckhoff/EL1014.hpp"
 #include "tether/Beckhoff/EL2004.hpp"
 #include "tether/Beckhoff/MultiInputTerminal.hpp"
@@ -379,4 +381,181 @@ TEST_F(BeckhoffEmulatorTest, EL3002ValuesReadFromSmBuffer) {
     ASSERT_TRUE(master_.pdoForSlave(0).exchangePhysical(1));
     EXPECT_EQ(term.value(0), 0x1234);
     EXPECT_EQ(term.value(1), -1);
+}
+
+// ============================================================================
+// EL4002 — 2-channel analog output (CoE mailbox + SM2 process image)
+// ============================================================================
+
+/// CoE analog-output slave: mailbox pair + process-output SM on
+/// channel 2 (canonical RxPDO slot that exchangePhysical() writes).
+SlaveEmulator* addAnalogOutSlave(EmulatedBus& bus,
+                                 uint32_t vendor, uint32_t product,
+                                 uint16_t out_addr, uint16_t out_len) {
+    auto slave = std::make_unique<SlaveEmulator>();
+    EtherCAT::Emulator::SIIConfig cfg;
+    cfg.vendor_id = vendor;
+    cfg.product_code = product;
+    cfg.mailbox_protocol = 0x04;  // CoE
+    auto addSm = [&cfg](uint16_t addr, uint16_t len, uint8_t ctrl) {
+        EtherCAT::Emulator::SIIConfig::SMConfig sm{};
+        sm.start_addr = addr;
+        sm.length     = len;
+        sm.control    = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(ctrl);
+        sm.enable     = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(
+            static_cast<uint8_t>(0x01));
+        cfg.sync_managers.push_back(sm);
+    };
+    addSm(0x1000, 128, 0x26);       // SM0 mailbox out
+    addSm(0x1080, 128, 0x22);       // SM1 mailbox in
+    addSm(out_addr, out_len, 0x44); // SM2 process outputs
+    slave->setSIIConfig(cfg);
+    auto* raw = slave.get();
+    bus.net.addSlave(std::move(slave));
+    return raw;
+}
+
+DiscoveredSlave makeAnalogOutDiscovered(uint32_t vendor, uint32_t product,
+                                        const char* name, uint16_t out_addr,
+                                        uint16_t out_len, uint8_t n_channels) {
+    DiscoveredSlave s;
+    s.index = 0;
+    s.vendor_id = vendor;
+    s.product_code = product;
+    s.device_name = name;
+
+    auto mkSm = [](uint16_t addr, uint16_t len, uint8_t type) {
+        SII::SIISyncManager sm{};
+        sm.phys_start_address = addr;
+        sm.length = len;
+        sm.sm_type = type;
+        sm.enable = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(
+            static_cast<uint8_t>(0x01));
+        return sm;
+    };
+    s.sync_managers = std::vector<SII::SIISyncManager>{
+        mkSm(0x1000, 128, SII::SM_TYPE_MBX_WRITE),
+        mkSm(0x1080, 128, SII::SM_TYPE_MBX_READ),
+        mkSm(out_addr, out_len, SII::SM_TYPE_PROCESS_OUT),
+    };
+
+    std::vector<SII::SIIPDO> pdos;
+    for (uint8_t ch = 0; ch < n_channels; ++ch) {
+        SII::SIIPDO pdo{};
+        pdo.pdo_index = static_cast<uint16_t>(0x1600 + ch);
+        pdo.n_entries = 1;
+        pdo.sync_manager = 2;
+        SII::SIIPDOEntry value{};
+        value.index = 0x7010 + ch;
+        value.subindex = 0x11;
+        value.bit_length = 16;
+        pdo.entries.push_back(value);
+        pdos.push_back(pdo);
+    }
+    s.rx_pdos = pdos;
+    return s;
+}
+
+TEST_F(BeckhoffEmulatorTest, EL4002ValuesWrittenToSmBuffer) {
+    auto* slave = addAnalogOutSlave(bus_, 0x00000002, 0x0FA23052, 0x1100, 4);
+    bringUp();
+    auto ds = makeAnalogOutDiscovered(0x00000002, 0x0FA23052, "EL4002",
+                                      0x1100, 4, 2);
+    Beckhoff::AnalogOutputTerminal term(master_, ds,
+                                        Beckhoff::Devices::EL4002);
+    ASSERT_TRUE(term.configure().has_value());
+    EXPECT_EQ(term.channelCount(), 2u);
+
+    term.setValue(0, 0x1234);
+    term.setValue(1, -2);
+    ASSERT_TRUE(master_.pdoForSlave(0).exchangePhysical(1));
+    EXPECT_EQ(slave->smBufferByteForTest(2, 0), 0x34);
+    EXPECT_EQ(slave->smBufferByteForTest(2, 1), 0x12);
+    EXPECT_EQ(slave->smBufferByteForTest(2, 2), 0xFE);
+    EXPECT_EQ(slave->smBufferByteForTest(2, 3), 0xFF);
+}
+
+// ============================================================================
+// EL2034-style combined terminal — 4 in / 4 out on SM2 + SM3
+// ============================================================================
+
+TEST_F(BeckhoffEmulatorTest, CombinedIoReadsInputsDrivesOutputs) {
+    auto slave = std::make_unique<SlaveEmulator>();
+    EtherCAT::Emulator::SIIConfig cfg;
+    // SIIConfig truncates to 16-bit; identity verification reads the
+    // full 32-bit codes from the DiscoveredSlave below.
+    cfg.vendor_id = 0x0002;
+    cfg.product_code = 0x3052;
+    cfg.mailbox_protocol = 0;
+    auto addSm = [&cfg](uint16_t addr, uint16_t len, uint8_t ctrl) {
+        EtherCAT::Emulator::SIIConfig::SMConfig sm{};
+        sm.start_addr = addr;
+        sm.length     = len;
+        sm.control    = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(ctrl);
+        sm.enable     = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(
+            static_cast<uint8_t>(0x01));
+        cfg.sync_managers.push_back(sm);
+    };
+    addSm(0, 0, 0);            // SM0 unused
+    addSm(0, 0, 0);            // SM1 unused
+    addSm(0x1100, 1, 0x44);    // SM2 outputs
+    addSm(0x1180, 1, 0x40);    // SM3 inputs
+    slave->setSIIConfig(cfg);
+    auto* es = slave.get();
+    bus_.net.addSlave(std::move(slave));
+    bringUp();
+
+    DiscoveredSlave ds;
+    ds.index = 0;
+    ds.vendor_id = 0x00000002;
+    ds.product_code = 0x07F23052;
+    ds.device_name = "EL2034";
+    auto mkSm = [](uint16_t addr, uint16_t len, uint8_t type) {
+        SII::SIISyncManager sm{};
+        sm.phys_start_address = addr;
+        sm.length = len;
+        sm.sm_type = type;
+        sm.enable = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(
+            static_cast<uint8_t>(0x01));
+        return sm;
+    };
+    ds.sync_managers = std::vector<SII::SIISyncManager>{
+        mkSm(0, 0, SII::SM_TYPE_UNUSED),
+        mkSm(0, 0, SII::SM_TYPE_UNUSED),
+        mkSm(0x1100, 1, SII::SM_TYPE_PROCESS_OUT),
+        mkSm(0x1180, 1, SII::SM_TYPE_PROCESS_IN),
+    };
+    // Bit-packed PDOs: one 4-bit input entry, one 4-bit output entry.
+    SII::SIIPDO txpdo{};
+    txpdo.pdo_index = 0x1A00; txpdo.sync_manager = 3; txpdo.n_entries = 1;
+    SII::SIIPDOEntry tin{};
+    tin.index = 0x6000; tin.subindex = 1; tin.bit_length = 4;
+    txpdo.entries.push_back(tin);
+    ds.tx_pdos = {txpdo};
+    SII::SIIPDO rxpdo{};
+    rxpdo.pdo_index = 0x1600; rxpdo.sync_manager = 2; rxpdo.n_entries = 1;
+    SII::SIIPDOEntry tout{};
+    tout.index = 0x7000; tout.subindex = 1; tout.bit_length = 4;
+    rxpdo.entries.push_back(tout);
+    ds.rx_pdos = {rxpdo};
+
+    Beckhoff::CombinedIoTerminal term(master_, ds,
+                                      Beckhoff::Devices::EL2034);
+    ASSERT_TRUE(term.configure().has_value());
+    EXPECT_TRUE(term.configured());
+
+    // Outputs: flat bit index -> SM2 buffer.
+    term.setOutput(0, true);
+    term.setOutput(2, true);
+    ASSERT_TRUE(master_.pdoForSlave(0).exchangePhysical(1));
+    EXPECT_EQ(es->smBufferByteForTest(2, 0), 0x05);
+
+    // Inputs: SM3 buffer -> flat bit index.
+    const uint8_t in_byte = 0x0A;
+    es->setSmBufferForTest(3, 0, &in_byte, 1);
+    ASSERT_TRUE(master_.pdoForSlave(0).exchangePhysical(1));
+    EXPECT_FALSE(term.input(0));
+    EXPECT_TRUE(term.input(1));
+    EXPECT_FALSE(term.input(2));
+    EXPECT_TRUE(term.input(3));
 }
