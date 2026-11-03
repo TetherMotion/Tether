@@ -357,6 +357,7 @@ set(MOTION_REPLANNER_CORE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_PathEvaluator.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_PathRelativeFFT.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_KdeDerivativeAnalyzer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_kde_coverage.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_dependence_analyzer.cpp"
 )
 set(MOTION_REPLANNER_MACHINE_SOURCES
