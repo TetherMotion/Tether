@@ -1,0 +1,16 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 100%
+        threshold: 0.01%
+
+ignore:
+  - "examples"
+  - "examples/**/*"
+  - "tools"
+  - "tools/**/*"
+
+comment:
+  layout: "diff, flags, files"
+  behavior: default
