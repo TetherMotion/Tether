@@ -56,6 +56,8 @@ jobs:
           libboost-dev \
           make \
           ccache \
+          lld
+          mold
           ninja-build
     
     - name: Cache googletest source
@@ -87,11 +89,23 @@ jobs:
 
     - name: Configure and build
       run: |
+        # mold is the fastest supported linker (needs GCC 12+/clang);
+        # GCC 11 (ubuntu-22.04) rejects -fuse-ld=mold, so fall back to lld.
+        if echo 'int main(){}' | ${CXX:-c++} -x c++ - -fuse-ld=mold -o /tmp/ldprobe 2>/dev/null; then
+          LINKER_FLAG=-fuse-ld=mold
+        else
+          LINKER_FLAG=-fuse-ld=lld
+        fi
+        echo "Using linker: $LINKER_FLAG"
+        echo "LINKER_FLAG=$LINKER_FLAG" >> "$GITHUB_ENV"
         cmake -S . -B build \
           -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_EXE_LINKER_FLAGS="$LINKER_FLAG" \
+          -DCMAKE_SHARED_LINKER_FLAGS="$LINKER_FLAG" \
+          -DCMAKE_MODULE_LINKER_FLAGS="$LINKER_FLAG" \
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_BUILD_SIMULATION=ON \
           -DTETHER_BUILD_ETHERCAT_MASTER=ON \
@@ -155,6 +169,8 @@ jobs:
           libboost-dev \
           make \
           ccache \
+          lld
+          mold
           ninja-build
 
     - name: Cache googletest source
@@ -186,11 +202,23 @@ jobs:
 
     - name: Configure and build (static only)
       run: |
+        # mold is the fastest supported linker (needs GCC 12+/clang);
+        # GCC 11 (ubuntu-22.04) rejects -fuse-ld=mold, so fall back to lld.
+        if echo 'int main(){}' | ${CXX:-c++} -x c++ - -fuse-ld=mold -o /tmp/ldprobe 2>/dev/null; then
+          LINKER_FLAG=-fuse-ld=mold
+        else
+          LINKER_FLAG=-fuse-ld=lld
+        fi
+        echo "Using linker: $LINKER_FLAG"
+        echo "LINKER_FLAG=$LINKER_FLAG" >> "$GITHUB_ENV"
         cmake -S . -B build-static \
           -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_EXE_LINKER_FLAGS="$LINKER_FLAG" \
+          -DCMAKE_SHARED_LINKER_FLAGS="$LINKER_FLAG" \
+          -DCMAKE_MODULE_LINKER_FLAGS="$LINKER_FLAG" \
           -DTETHER_BUILD_SHARED_LIBS=OFF \
           -DTETHER_BUILD_STATIC_LIBS=ON \
           -DTETHER_BUILD_TESTS=ON \
@@ -257,6 +285,8 @@ jobs:
           libboost-dev \
           make \
           ccache \
+          lld
+          mold
           ninja-build
 
     - name: Show toolchain versions
@@ -295,11 +325,23 @@ jobs:
 
     - name: Configure and build
       run: |
+        # mold is the fastest supported linker (needs GCC 12+/clang);
+        # GCC 11 (ubuntu-22.04) rejects -fuse-ld=mold, so fall back to lld.
+        if echo 'int main(){}' | ${CXX:-c++} -x c++ - -fuse-ld=mold -o /tmp/ldprobe 2>/dev/null; then
+          LINKER_FLAG=-fuse-ld=mold
+        else
+          LINKER_FLAG=-fuse-ld=lld
+        fi
+        echo "Using linker: $LINKER_FLAG"
+        echo "LINKER_FLAG=$LINKER_FLAG" >> "$GITHUB_ENV"
         cmake -S . -B build \
           -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_EXE_LINKER_FLAGS="$LINKER_FLAG" \
+          -DCMAKE_SHARED_LINKER_FLAGS="$LINKER_FLAG" \
+          -DCMAKE_MODULE_LINKER_FLAGS="$LINKER_FLAG" \
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_BUILD_SIMULATION=ON \
           -DTETHER_BUILD_ETHERCAT_MASTER=ON \
@@ -546,6 +588,8 @@ jobs:
           lcov \
           gcovr \
           ccache \
+          lld
+          mold
           ninja-build
     
     - name: Cache googletest source
@@ -577,11 +621,23 @@ jobs:
 
     - name: Configure and build with coverage
       run: |
+        # mold is the fastest supported linker (needs GCC 12+/clang);
+        # GCC 11 (ubuntu-22.04) rejects -fuse-ld=mold, so fall back to lld.
+        if echo 'int main(){}' | ${CXX:-c++} -x c++ - -fuse-ld=mold -o /tmp/ldprobe 2>/dev/null; then
+          LINKER_FLAG=-fuse-ld=mold
+        else
+          LINKER_FLAG=-fuse-ld=lld
+        fi
+        echo "Using linker: $LINKER_FLAG"
+        echo "LINKER_FLAG=$LINKER_FLAG" >> "$GITHUB_ENV"
         cmake -S . -B build-coverage \
           -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_EXE_LINKER_FLAGS="$LINKER_FLAG" \
+          -DCMAKE_SHARED_LINKER_FLAGS="$LINKER_FLAG" \
+          -DCMAKE_MODULE_LINKER_FLAGS="$LINKER_FLAG" \
           -DTETHER_BUILD_TESTS=ON \
           -DTETHER_BUILD_SIMULATION=ON \
           -DTETHER_BUILD_ETHERCAT_MASTER=ON \
@@ -705,6 +761,8 @@ jobs:
           libc6-dev \
           make \
           ccache \
+          lld
+          mold
           ninja-build
     
     - name: Restore ccache
@@ -736,6 +794,15 @@ jobs:
 
     - name: Configure and build with ASAN
       run: |
+        # mold is the fastest supported linker (needs GCC 12+/clang);
+        # GCC 11 (ubuntu-22.04) rejects -fuse-ld=mold, so fall back to lld.
+        if echo 'int main(){}' | ${CXX:-c++} -x c++ - -fuse-ld=mold -o /tmp/ldprobe 2>/dev/null; then
+          LINKER_FLAG=-fuse-ld=mold
+        else
+          LINKER_FLAG=-fuse-ld=lld
+        fi
+        echo "Using linker: $LINKER_FLAG"
+        echo "LINKER_FLAG=$LINKER_FLAG" >> "$GITHUB_ENV"
         SANITIZER_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g"
         
         cmake -S . -B build-asan \
@@ -750,7 +817,9 @@ jobs:
           -DTETHER_BUILD_EXTRACT_ESI=OFF \
           -DCMAKE_CXX_FLAGS="${SANITIZER_FLAGS}" \
           -DCMAKE_C_FLAGS="${SANITIZER_FLAGS}" \
-          -DCMAKE_EXE_LINKER_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_EXE_LINKER_FLAGS="${SANITIZER_FLAGS} ${LINKER_FLAG}" \
+          -DCMAKE_SHARED_LINKER_FLAGS="$LINKER_FLAG" \
+          -DCMAKE_MODULE_LINKER_FLAGS="$LINKER_FLAG" \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           
@@ -833,6 +902,8 @@ jobs:
           libc6-dev \
           make \
           ccache \
+          lld
+          mold
           ninja-build
     
     - name: Restore ccache
@@ -864,6 +935,15 @@ jobs:
 
     - name: Configure and build with TSAN
       run: |
+        # mold is the fastest supported linker (needs GCC 12+/clang);
+        # GCC 11 (ubuntu-22.04) rejects -fuse-ld=mold, so fall back to lld.
+        if echo 'int main(){}' | ${CXX:-c++} -x c++ - -fuse-ld=mold -o /tmp/ldprobe 2>/dev/null; then
+          LINKER_FLAG=-fuse-ld=mold
+        else
+          LINKER_FLAG=-fuse-ld=lld
+        fi
+        echo "Using linker: $LINKER_FLAG"
+        echo "LINKER_FLAG=$LINKER_FLAG" >> "$GITHUB_ENV"
         SANITIZER_FLAGS="-fsanitize=thread -g"
         
         cmake -S . -B build-tsan \
@@ -878,7 +958,9 @@ jobs:
           -DTETHER_BUILD_EXTRACT_ESI=OFF \
           -DCMAKE_CXX_FLAGS="${SANITIZER_FLAGS}" \
           -DCMAKE_C_FLAGS="${SANITIZER_FLAGS}" \
-          -DCMAKE_EXE_LINKER_FLAGS="${SANITIZER_FLAGS}" \
+          -DCMAKE_EXE_LINKER_FLAGS="${SANITIZER_FLAGS} ${LINKER_FLAG}" \
+          -DCMAKE_SHARED_LINKER_FLAGS="$LINKER_FLAG" \
+          -DCMAKE_MODULE_LINKER_FLAGS="$LINKER_FLAG" \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           
@@ -1106,6 +1188,8 @@ jobs:
           clang \
           clang-tidy \
           clang-tools \
+          lld \
+          mold \
           ninja-build \
           ccache \
           libboost-dev \
@@ -1122,6 +1206,15 @@ jobs:
     # analysis surface is the library itself (src/, include/ via headers).
     - name: Configure with clang
       run: |
+        # mold is the fastest supported linker (needs GCC 12+/clang);
+        # GCC 11 (ubuntu-22.04) rejects -fuse-ld=mold, so fall back to lld.
+        if echo 'int main(){}' | clang++ -x c++ - -fuse-ld=mold -o /tmp/ldprobe 2>/dev/null; then
+          LINKER_FLAG=-fuse-ld=mold
+        else
+          LINKER_FLAG=-fuse-ld=lld
+        fi
+        echo "Using linker: $LINKER_FLAG"
+        echo "LINKER_FLAG=$LINKER_FLAG" >> "$GITHUB_ENV"
         cmake -S . -B build-sa -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_C_COMPILER=clang \
@@ -1129,6 +1222,9 @@ jobs:
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_EXE_LINKER_FLAGS="$LINKER_FLAG" \
+          -DCMAKE_SHARED_LINKER_FLAGS="$LINKER_FLAG" \
+          -DCMAKE_MODULE_LINKER_FLAGS="$LINKER_FLAG" \
           -DTETHER_BUILD_TESTS=OFF \
           -DTETHER_BUILD_EXAMPLES=OFF \
           -DTETHER_BUILD_PYTHON_BINDINGS=OFF \
@@ -1167,6 +1263,9 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_EXE_LINKER_FLAGS="$LINKER_FLAG" \
+            -DCMAKE_SHARED_LINKER_FLAGS="$LINKER_FLAG" \
+            -DCMAKE_MODULE_LINKER_FLAGS="$LINKER_FLAG" \
             -DTETHER_BUILD_TESTS=OFF \
             -DTETHER_BUILD_EXAMPLES=OFF \
             -DTETHER_BUILD_PYTHON_BINDINGS=OFF
