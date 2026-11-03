@@ -201,37 +201,28 @@ bool SlaveEmulator::readRegister(uint16_t addr, uint8_t* data, uint16_t len) {
             return true;
     }
     
-    // Sync Manager registers (0x0800 - 0x087F)
-    if (addr >= 0x0800 && addr < 0x0880) {
-        uint8_t sm_num = (addr - 0x0800) / 8;
-        uint8_t sm_offset = (addr - 0x0800) % 8;
-        
-        if (sm_num < 8) {
+    // Sync Manager registers (0x0800 - 0x087F): serve any subrange of the
+    // 8-byte register block field-by-field — drivers commonly read/write
+    // whole blocks (or several) in one datagram.
+    if (addr >= 0x0800 && addr < 0x0880 && addr + len <= 0x0880) {
+        for (uint16_t i = 0; i < len; ++i) {
+            const uint16_t a = static_cast<uint16_t>(addr + i);
+            const uint8_t sm_num = (a - 0x0800) / 8;
+            const uint8_t off = (a - 0x0800) % 8;
+            if (sm_num >= 8) { data[i] = 0; continue; }
             SyncManager& sm = sync_managers_[sm_num];
-            switch (sm_offset) {
-                case 0:  // Start Address (2 bytes)
-                    if (len >= 2) {
-                        data[0] = sm.start_addr & 0xFF;
-                        data[1] = (sm.start_addr >> 8) & 0xFF;
-                    }
-                    return true;
-                case 2:  // Length (2 bytes)
-                    if (len >= 2) {
-                        data[0] = sm.length & 0xFF;
-                        data[1] = (sm.length >> 8) & 0xFF;
-                    }
-                    return true;
-                case 4:  // Control
-                    data[0] = std::bit_cast<uint8_t>(sm.control);
-                    return true;
-                case 5:  // Status
-                    data[0] = std::bit_cast<uint8_t>(sm.status);
-                    return true;
-                case 6:  // Enable
-                    data[0] = std::bit_cast<uint8_t>(sm.enable);
-                    return true;
+            switch (off) {
+                case 0: data[i] = sm.start_addr & 0xFF; break;
+                case 1: data[i] = sm.start_addr >> 8; break;
+                case 2: data[i] = sm.length & 0xFF; break;
+                case 3: data[i] = sm.length >> 8; break;
+                case 4: data[i] = std::bit_cast<uint8_t>(sm.control); break;
+                case 5: data[i] = std::bit_cast<uint8_t>(sm.status); break;
+                case 6: data[i] = std::bit_cast<uint8_t>(sm.enable); break;
+                default: data[i] = 0; break;
             }
         }
+        return true;
     }
     
     // FMMU registers (0x0600 - 0x06FF)
@@ -314,34 +305,47 @@ bool SlaveEmulator::writeRegister(uint16_t addr, const uint8_t* data, uint16_t l
             return true;
     }
     
-    // Sync Manager registers
-    if (addr >= 0x0800 && addr < 0x0880) {
-        uint8_t sm_num = (addr - 0x0800) / 8;
-        uint8_t sm_offset = (addr - 0x0800) % 8;
-        
-        if (sm_num < 8) {
+    // Sync Manager registers: per-byte field updates so multi-byte and
+    // multi-block writes behave like a real ESC.
+    if (addr >= 0x0800 && addr < 0x0880 && addr + len <= 0x0880) {
+        for (uint16_t i = 0; i < len; ++i) {
+            const uint16_t a = static_cast<uint16_t>(addr + i);
+            const uint8_t sm_num = (a - 0x0800) / 8;
+            const uint8_t off = (a - 0x0800) % 8;
+            if (sm_num >= 8) continue;
             SyncManager& sm = sync_managers_[sm_num];
-            switch (sm_offset) {
+            switch (off) {
                 case 0:
-                    if (len >= 2) {
-                        sm.start_addr = data[0] | (data[1] << 8);
-                    }
-                    return true;
+                    sm.start_addr = (sm.start_addr & 0xFF00) | data[i];
+                    break;
+                case 1:
+                    sm.start_addr = (sm.start_addr & 0x00FF)
+                                  | (static_cast<uint16_t>(data[i]) << 8);
+                    break;
                 case 2:
-                    if (len >= 2) {
-                        sm.length = data[0] | (data[1] << 8);
-                        sm.buffer.resize(
-                            std::min<size_t>(sm.length, kMaxSmBufferBytes), 0);
-                    }
-                    return true;
+                    sm.length = (sm.length & 0xFF00) | data[i];
+                    sm.buffer.resize(
+                        std::min<size_t>(sm.length, kMaxSmBufferBytes), 0);
+                    break;
+                case 3:
+                    sm.length = (sm.length & 0x00FF)
+                              | (static_cast<uint16_t>(data[i]) << 8);
+                    sm.buffer.resize(
+                        std::min<size_t>(sm.length, kMaxSmBufferBytes), 0);
+                    break;
                 case 4:
-                    sm.control = std::bit_cast<EtherCAT::SyncManager::SMControlReg>(data[0]);
-                    return true;
+                    sm.control = std::bit_cast<
+                        EtherCAT::SyncManager::SMControlReg>(data[i]);
+                    break;
                 case 6:
-                    sm.enable = std::bit_cast<EtherCAT::SyncManager::SMActivateReg>(data[0]);
-                    return true;
+                    sm.enable = std::bit_cast<
+                        EtherCAT::SyncManager::SMActivateReg>(data[i]);
+                    break;
+                default:
+                    break;  // status + reserved: read-only / ignored
             }
         }
+        return true;
     }
     
     // FMMU registers
