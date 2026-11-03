@@ -63,7 +63,7 @@ FOPDTModel ProcessIdentification::areaMethod(const std::vector<double>& time,
                                               const std::vector<double>& response,
                                               double stepSize) {
     FOPDTModel model;
-    if (time.size() < 3) return model;
+    if (time.size() < 3 || response.size() < 3) return model;
 
     double y0 = response[0];
     double yFinal = response.back();
@@ -91,7 +91,7 @@ FOPDTModel ProcessIdentification::twoPointMethod(const std::vector<double>& time
                                                   double t1Fraction,
                                                   double t2Fraction) {
     FOPDTModel model;
-    if (time.size() < 3) return model;
+    if (time.size() < 3 || response.size() < 3) return model;
     double y0 = response[0];
     double yFinal = response.back();
     model.K = (yFinal - y0) / stepSize;
@@ -120,6 +120,7 @@ FOPDTModel ProcessIdentification::leastSquaresFit(const std::vector<double>& tim
                                                    const std::vector<double>& response,
                                                    double stepSize) {
     FOPDTModel best;
+    if (time.size() < 3 || response.size() < 3) return best;
     double y0 = response[0];
     double yFinal = response.back();
     best.K = (yFinal - y0) / stepSize;
@@ -155,7 +156,9 @@ FOPDTModel ProcessIdentification::leastSquaresFit(const std::vector<double>& tim
 SOPDTModel ProcessIdentification::identifySOPDT(const std::vector<double>& time,
                                                  const std::vector<double>& response,
                                                  double stepSize) {
-    SOPDTModel model; FOPDTModel fopdt = leastSquaresFit(time, response, stepSize);
+    SOPDTModel model;
+    if (time.size() < 3 || response.size() < 3) return model;
+    FOPDTModel fopdt = leastSquaresFit(time, response, stepSize);
     model.K = fopdt.K; model.L = fopdt.L; model.tau1 = fopdt.tau * 0.7; model.tau2 = fopdt.tau * 0.3;
     return model;
 }
