@@ -1256,6 +1256,7 @@ create_ethercat_test(coverage
         ethercat/test_sdo_abort_report.cpp
         ethercat/test_motion_loops.cpp
         ethercat/test_pdo_region_manager.cpp
+        ethercat/test_discovery_state_coverage.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/SlaveEmulator_CiA402.cpp
