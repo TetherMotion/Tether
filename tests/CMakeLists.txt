@@ -234,6 +234,7 @@ set(GCODE_INTERPOLATION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/ProjectionRegressionTests.cpp"
 )
 set(GCODE_TYPES_VARIABLES_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_gcode_analysis_coverage.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/GCodeTypesTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/GCodeVariablesTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gcode/test_CoordinateTransform.cpp"
