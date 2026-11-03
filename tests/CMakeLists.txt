@@ -518,10 +518,13 @@ if(CONTROL_AUTOTUNING_METHODS_SOURCES)
     create_module_test(control_autotuning_methods "${CONTROL_AUTOTUNING_METHODS_SOURCES}" "${CONTROL_TEST_LIBS}" "")
 endif()
 
-# Terminal UI helper tests (pure UTF-8/ANSI helpers; no ncurses session)
+# Terminal UI helper + widget tests (headless ncurses via newterm)
 if(TARGET tether_terminal_ui)
     set(TERMINAL_UI_TEST_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/terminal_ui/test_ansi_line.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/terminal_ui/test_ncurses_widgets.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/terminal_ui/test_ncurses_panels.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/terminal_ui/test_ncurses_screens.cpp"
     )
     create_module_test(terminal_ui "${TERMINAL_UI_TEST_SOURCES}"
                        "tether_common;tether_terminal_ui" "")
