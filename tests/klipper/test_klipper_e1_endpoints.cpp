@@ -176,6 +176,12 @@ TEST_F(E1EndpointsTest, MachineServicesAndUpdateEndpoints) {
     call("machine/procstats");
 }
 
+TEST_F(E1EndpointsTest, MachineRebootShutdownEndpoints) {
+    // These only set printer state + invoke optional handlers (unset here).
+    call("machine/reboot");
+    call("machine/shutdown");
+}
+
 // ---------------------------------------------------------------------------
 // webcams + server/webcams (both registered spellings)
 // ---------------------------------------------------------------------------

@@ -371,6 +371,7 @@ set(MOTION_REPLANNER_IDENTIFICATION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_PerformanceHeatmap.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_TestDataExporter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_SvgExporter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_replanner/test_KdeSvgRenderer.cpp"
 )
 # Simulation test sources split by sub-area
 set(SIMULATION_SYSTEMS_SOURCES
@@ -1237,6 +1238,7 @@ create_ethercat_test(coverage
         ethercat/test_esc211_coverage.cpp
         ethercat/test_esc211_managers.cpp
         ethercat/test_rp20_device.cpp
+        ethercat/test_drives_misc.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/SlaveEmulator_CiA402.cpp
