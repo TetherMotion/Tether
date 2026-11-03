@@ -1240,6 +1240,7 @@ create_ethercat_test(coverage
         ethercat/test_rp20_device.cpp
         ethercat/test_drives_misc.cpp
         ethercat/test_reset_controller.cpp
+        ethercat/test_debug_gate_coverage.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/SlaveEmulator_CiA402.cpp
