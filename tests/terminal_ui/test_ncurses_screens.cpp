@@ -32,6 +32,98 @@ namespace UI = Tether::UI;
 
 namespace {
 
+// ungetch() pushes to the *front* of the input queue (LIFO): push the
+// sequence reversed so the first listed key is delivered first.
+static void pushKeys(std::initializer_list<int> keys) {
+    for (auto it = keys.end(); it != keys.begin();) ungetch(*--it);
+}
+
+// ============================================================================
+// Session — pollKeyDecoded escape-tail decoding (CSI / SS3 / lone ESC)
+// ============================================================================
+
+TEST_F(NcursesWidgetTest, SessionDecodesCsiArrows) {
+    Session s;
+    pushKeys({27, '[', 'B'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_DOWN);
+    pushKeys({27, '[', 'A'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_UP);
+    pushKeys({27, '[', 'C'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_RIGHT);
+    pushKeys({27, '[', 'D'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_LEFT);
+}
+
+TEST_F(NcursesWidgetTest, SessionDecodesCsiSpecials) {
+    Session s;
+    pushKeys({27, '[', 'H'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_HOME);
+    pushKeys({27, '[', 'F'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_END);
+    pushKeys({27, '[', 'Z'});           // Shift-Tab
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_BTAB);
+}
+
+TEST_F(NcursesWidgetTest, SessionDecodesCsiTildeParams) {
+    Session s;
+    pushKeys({27, '[', '2', '~'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_IC);
+    pushKeys({27, '[', '3', '~'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_DC);
+    pushKeys({27, '[', '5', '~'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_PPAGE);
+    pushKeys({27, '[', '6', '~'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_NPAGE);
+    pushKeys({27, '[', '1', '~'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_HOME);
+    pushKeys({27, '[', '4', '~'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_END);
+    pushKeys({27, '[', '1', '5', '~'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_F(5));
+    pushKeys({27, '[', '2', '4', '~'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_F(12));
+    pushKeys({27, '[', '9', '9', '~'}); // unknown param → swallowed
+    EXPECT_EQ(s.pollKeyDecoded(0), -1);
+}
+
+TEST_F(NcursesWidgetTest, SessionDecodesSs3Keys) {
+    Session s;
+    pushKeys({27, 'O', 'A'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_UP);
+    pushKeys({27, 'O', 'B'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_DOWN);
+    pushKeys({27, 'O', 'H'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_HOME);
+    pushKeys({27, 'O', 'P'});
+    EXPECT_EQ(s.pollKeyDecoded(0), KEY_F(1));
+    pushKeys({27, 'O', 'X'});           // unknown SS3 final → swallowed
+    EXPECT_EQ(s.pollKeyDecoded(0), -1);
+}
+
+TEST_F(NcursesWidgetTest, SessionDecodesLoneAndDoubleEsc) {
+    Session s;
+    pushKeys({27});                      // no tail → lone ESC (30ms wait)
+    EXPECT_EQ(s.pollKeyDecoded(0), 27);
+    pushKeys({27, 27});                  // ESC ESC → still quit
+    EXPECT_EQ(s.pollKeyDecoded(0), 27);
+}
+
+TEST_F(NcursesWidgetTest, SessionSwallowsUnknownSequences) {
+    Session s;
+    pushKeys({27, '[', 'X'});            // unrecognized CSI final
+    EXPECT_EQ(s.pollKeyDecoded(0), -1);
+    pushKeys({27, 'x'});                 // non-CSI/SS3 tail byte
+    EXPECT_EQ(s.pollKeyDecoded(0), -1);
+}
+
+TEST_F(NcursesWidgetTest, SessionPollKeyBasics) {
+    Session s;
+    pushKeys({'a'});
+    EXPECT_EQ(s.pollKeyDecoded(0), 'a');  // plain byte passes through
+    EXPECT_EQ(s.pollKey(0), ERR);         // empty queue → ERR
+    EXPECT_EQ(s.pollKeyDecoded(0), -1);
+}
+
 // ============================================================================
 // PanelScreen — draw loop, views, key routing
 // ============================================================================
@@ -168,6 +260,159 @@ TEST_F(NcursesWidgetTest, PanelScreenCancelStopsImmediately) {
     EXPECT_EQ(frames, 0);
 }
 
+TEST_F(NcursesWidgetTest, PanelScreenDigitSwitchesViews) {
+    bool v2 = false;
+    PanelView a, b;
+    a.name = "A";
+    a.renderBody = [](int, int) {};
+    b.name = "B";
+    b.renderBody = [&](int, int) { v2 = true; };
+    PanelScreenHooks hooks;
+    hooks.views = {a, b};
+    PanelScreen screen("T", hooks);
+    pushKeys({'2', 'q'});               // '2' → selectView(1), then quit
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.1);
+    EXPECT_TRUE(v2);
+}
+
+TEST_F(NcursesWidgetTest, PanelScreenFKeySwitchesViews) {
+    bool v2 = false;
+    PanelView a, b;
+    a.name = "A";
+    a.renderBody = [](int, int) {};
+    b.name = "B";
+    b.renderBody = [&](int, int) { v2 = true; };
+    PanelScreenHooks hooks;
+    hooks.views = {a, b};
+    PanelScreen screen("T", hooks);
+    pushKeys({KEY_F(2), 'q'});          // F2 → selectView(1)
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.1);
+    EXPECT_TRUE(v2);
+}
+
+TEST_F(NcursesWidgetTest, PanelScreenViewPreDispatchClaimsKeys) {
+    int claimed = 0, global = 0;
+    PanelView a;
+    a.name = "A";
+    a.renderBody = [](int, int) {};
+    a.wantsKey = [](int k) { return k == 'z'; };
+    a.onKey = [&](int k) {
+        if (k == 'z') { claimed = k; return true; }
+        return false;                   // unclaimed → hooks.onKey
+    };
+    PanelScreenHooks hooks;
+    hooks.views = {a};
+    hooks.onKey = [&](int k) { global = k; return true; };
+    PanelScreen screen("T", hooks);
+    pushKeys({'z', 'y', 'q'});          // 'z'→view, 'y'→view.onKey, 'q'→quit
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.1);
+    EXPECT_EQ(claimed, 'z');            // claimed before screen dispatch
+    EXPECT_EQ(global, 'y');             // unclaimed falls to view/global onKey
+}
+
+TEST_F(NcursesWidgetTest, PanelScreenKeysOverlayOpensAndCloses) {
+    PanelScreenHooks hooks;
+    hooks.renderBody = [](int, int) {};
+    PanelScreen screen("T", hooks);
+    pushKeys({'?'});                    // opens the keys help overlay
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.1);            // stays open → exits by duration
+    bool found = false;
+    for (int y = 0; y < LINES; ++y)
+        if (rowText(stdscr, y, 0, COLS).find("switch view") != std::string::npos)
+            found = true;
+    EXPECT_TRUE(found);                 // overlay rendered its help lines
+}
+
+TEST_F(NcursesWidgetTest, PanelScreenKeysOverlayEscCloses) {
+    PanelScreenHooks hooks;
+    hooks.renderBody = [](int, int) {};
+    PanelScreen screen("T", hooks);
+    // '?' opens the overlay; Esc must be LAST in the queue — a queued byte
+    // after ESC would be swallowed as an escape tail instead.
+    pushKeys({'?', 27});
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.15);           // Esc pops the overlay → duration exit
+    bool found = false;
+    for (int y = 0; y < LINES; ++y)
+        if (rowText(stdscr, y, 0, COLS).find("switch view") != std::string::npos)
+            found = true;
+    EXPECT_FALSE(found);                // overlay closed before the last frame
+}
+
+TEST_F(NcursesWidgetTest, PanelScreenFilterEditorCommits) {
+    PanelScreenHooks hooks;
+    hooks.renderBody = [](int, int) {};
+    PanelScreen screen("T", hooks);
+    pushKeys({'f', 'w', 'a', 'r', 'n', '\n', 'q'});
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.2);
+    const auto& f = screen.log().viewFilter();
+    EXPECT_TRUE(f.active());
+    EXPECT_EQ(f.contains, "warn");      // bare word → substring filter
+}
+
+TEST_F(NcursesWidgetTest, PanelScreenFilterEditorEscCancels) {
+    PanelScreenHooks hooks;
+    hooks.renderBody = [](int, int) {};
+    PanelScreen screen("T", hooks);
+    pushKeys({'f', 'x', 27});           // Esc LAST — cancels without committing
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.15);
+    EXPECT_FALSE(screen.log().viewFilter().active());
+}
+
+TEST_F(NcursesWidgetTest, PanelScreenFilterEditorFooterShowsBuffer) {
+    PanelScreenHooks hooks;
+    hooks.renderBody = [](int, int) {};
+    PanelScreen screen("T", hooks);
+    pushKeys({'f', 'w', 'a'});          // stays editing → duration exit
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.1);
+    bool found = false;
+    for (int y = 0; y < LINES; ++y)
+        if (rowText(stdscr, y, 0, COLS).find("filter: wa") != std::string::npos)
+            found = true;
+    EXPECT_TRUE(found);
+}
+
+TEST_F(NcursesWidgetTest, PanelScreenLogScrollKeys) {
+    PanelScreenHooks hooks;
+    hooks.renderBody = [](int, int) {};
+    PanelScreen screen("T", hooks);
+    for (int i = 0; i < 30; ++i)
+        screen.log().addLine("line " + std::to_string(i));
+    pushKeys({KEY_PPAGE, KEY_NPAGE, KEY_END, KEY_PPAGE, 'q'});
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.15);
+    // Exercising scroll paths; the screen must still quit cleanly on 'q'.
+}
+
+TEST_F(NcursesWidgetTest, PanelScreenLogViewArrowScroll) {
+    PanelScreenHooks hooks;
+    hooks.showLogView = true;           // adds the log view as the last tab
+    hooks.renderBody = [](int, int) {};
+    PanelScreen screen("T", hooks);
+    for (int i = 0; i < 30; ++i)
+        screen.log().addLine("line " + std::to_string(i));
+    pushKeys({'1', KEY_UP, KEY_DOWN, KEY_HOME, 'q'});
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.15);
+    // '1' selects the (only) view = log view → arrows/Home scroll it.
+}
+
+TEST_F(NcursesWidgetTest, PanelScreenResizeRelayouts) {
+    PanelScreenHooks hooks;
+    hooks.renderBody = [](int, int) {};
+    PanelScreen screen("T", hooks);
+    pushKeys({KEY_RESIZE, 'q'});        // re-runs layout() then quits
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.1);
+}
+
 // ============================================================================
 // TreeScreen — tree + detail + log panes in a live frame
 // ============================================================================
@@ -266,6 +511,139 @@ TEST_F(NcursesWidgetTest, TreeScreenFlashAndOverlay) {
     ungetch('q');
     std::atomic<bool> cancel{false};
     screen.run(cancel, 0.05);
+}
+
+TEST_F(NcursesWidgetTest, TreeScreenFoldAndToggleKeys) {
+    TreeNode root;
+    TreeNode c; c.label = "n";
+    root.children = {c};
+    TreeScreen screen("T", root, TreeScreenHooks{});
+    pushKeys({KEY_LEFT, KEY_RIGHT, ' ', KEY_HOME, KEY_END, 'q'});
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.15);
+    // fold/unfold/toggle/Home/End all consumed by the tree view.
+}
+
+TEST_F(NcursesWidgetTest, TreeScreenLogScrollKeys) {
+    TreeNode root;
+    TreeNode c; c.label = "n";
+    root.children = {c};
+    TreeScreen screen("T", root, TreeScreenHooks{});
+    for (int i = 0; i < 30; ++i)
+        screen.log().addLine("line " + std::to_string(i));
+    pushKeys({KEY_SR, KEY_SF, KEY_END, 'q'});   // Shift-Up/Down + End
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.15);
+}
+
+TEST_F(NcursesWidgetTest, TreeScreenDetailScrollKeys) {
+    TreeNode root;
+    TreeNode c; c.label = "n";
+    root.children = {c};
+    // No custom renderDetail → 'u'/'d'/PgUp/PgDn scroll the detail pane.
+    TreeScreen screen("T", root, TreeScreenHooks{});
+    pushKeys({'u', 'd', KEY_PPAGE, KEY_NPAGE, 'q'});
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.15);
+}
+
+TEST_F(NcursesWidgetTest, TreeScreenPreKeyConsumes) {
+    TreeNode root;
+    TreeNode c; c.label = "n";
+    root.children = {c};
+    int pre = 0;
+    TreeScreenHooks hooks;
+    hooks.preKey = [&](int k) { pre = k; return true; };
+    TreeScreen screen("T", root, hooks);
+    pushKeys({'x', 'q'});   // 'x' claimed by preKey; 'q' quits (pre-key order)
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.1);
+    EXPECT_EQ(pre, 'x');
+}
+
+TEST_F(NcursesWidgetTest, TreeScreenResizeRelayouts) {
+    TreeNode root;
+    TreeNode c; c.label = "n";
+    root.children = {c};
+    TreeScreen screen("T", root, TreeScreenHooks{});
+    pushKeys({KEY_RESIZE, 'q'});
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.1);
+}
+
+TEST_F(NcursesWidgetTest, TreeScreenLinePromptCommitsOnEnter) {
+    TreeNode root;
+    TreeNode c; c.label = "n";
+    root.children = {c};
+    std::string committed;
+    int changes = 0;
+    TreeScreen screen("T", root, TreeScreenHooks{});
+    screen.openLinePrompt({
+        .label = "find",
+        .on_commit = [&](const std::string& s) { committed = s; },
+        .on_change = [&](const std::string&) { ++changes; },
+    });
+    pushKeys({'a', 'b', '\n', 'q'});    // pops a,b,Enter → commit, 'q' → quit
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.2);
+    EXPECT_EQ(committed, "ab");
+    EXPECT_EQ(changes, 2);              // on_change per typed char
+}
+
+TEST_F(NcursesWidgetTest, TreeScreenLinePromptEscCancels) {
+    TreeNode root;
+    TreeNode c; c.label = "n";
+    root.children = {c};
+    bool cancelled = false;
+    TreeScreen screen("T", root, TreeScreenHooks{});
+    screen.openLinePrompt({
+        .label = "find",
+        .on_cancel = [&] { cancelled = true; },
+    });
+    // Esc must be the only queued key — a byte after it would be eaten as
+    // an escape tail by pollKeyDecoded before the prompt sees Esc.
+    pushKeys({27});
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.15);           // prompt closes → duration exit
+    EXPECT_TRUE(cancelled);
+}
+
+TEST_F(NcursesWidgetTest, TreeScreenLinePromptSwallowsQ) {
+    TreeNode root;
+    TreeNode c; c.label = "n";
+    root.children = {c};
+    std::string committed;
+    TreeScreen screen("T", root, TreeScreenHooks{});
+    screen.openLinePrompt({
+        .label = "x",
+        .initial = "a",
+        .on_commit = [&](const std::string& s) { committed = s; },
+    });
+    // First 'q' is printable input for the modal prompt (buffer "aq"),
+    // Enter commits it, the second 'q' — after the prompt closed — quits.
+    pushKeys({'q', '\n', 'q'});
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.2);
+    EXPECT_EQ(committed, "aq");
+}
+
+TEST_F(NcursesWidgetTest, TreeScreenLinePromptSuppressesDetail) {
+    TreeNode root;
+    TreeNode c; c.label = "n";
+    root.children = {c};
+    bool detail_called = false;
+    TreeScreenHooks hooks;
+    hooks.renderDetail = [&](TermWindow*, const TreeNode&) {
+        detail_called = true;
+    };
+    TreeScreen screen("T", root, hooks);
+    screen.openLinePrompt({.label = "x"});
+    pushKeys({'x'});                    // prompt stays open → duration exit
+    std::atomic<bool> cancel{false};
+    screen.run(cancel, 0.1);
+    // While the prompt is active the detail pane renders the prompt,
+    // never the node detail.
+    EXPECT_FALSE(detail_called);
 }
 
 TEST_F(NcursesWidgetTest, TreeScreenKeyHintsInFooter) {
