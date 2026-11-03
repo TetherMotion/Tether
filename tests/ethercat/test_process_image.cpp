@@ -867,7 +867,10 @@ TEST_F(ProcessImageTest, StaleDepositRejectedThenRealResponseCollected) {
     for (int i = 0; i < 16; ++i) transport.resp_data[i] =
         static_cast<uint8_t>(0x40 + i);
 
-    ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 200'000, nullptr));
+    // 5 ms budget: the stale→re-wait path must fit inside rx_timeout_ns.
+    // 200 us was enough bare, but sanitizer+coverage instrumentation plus
+    // a loaded runner can deschedule past it between the two waits.
+    ASSERT_TRUE(mgr.exchangeAllLRWCyclic(mapping, 5'000'000, nullptr));
     EXPECT_EQ(mgr.getStats().stale_responses, 1u);
     EXPECT_EQ(mgr.getStats().timeout_errors, 0u);
     EXPECT_EQ(mgr.getStats().success, 1u);
