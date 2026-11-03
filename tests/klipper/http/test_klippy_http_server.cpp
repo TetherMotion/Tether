@@ -12,7 +12,12 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <atomic>
+#include <functional>
+#include <condition_variable>
+#include <deque>
 #include <future>
+#include <mutex>
 #include <memory>
 #include <string>
 #include <thread>
@@ -21,6 +26,7 @@
 #include <drogon/HttpClient.h>
 #include <drogon/HttpRequest.h>
 #include <drogon/HttpResponse.h>
+#include <drogon/WebSocketClient.h>
 
 #include "tether/klipper/http/KlippyHttpServer.hpp"
 #include "tether/klipper/klippy/KlippyServer.hpp"
@@ -361,6 +367,122 @@ TEST_F(KlippyHttpServerE2ETest, MalformedJsonRpcHandled) {
 TEST_F(KlippyHttpServerE2ETest, OptionsPreflightResponds) {
     auto [code, body] = request(drogon::Options, "/server/options");
     EXPECT_TRUE(code == 200 || code == 204) << code;
+}
+// ============================================================================
+// WebSocket — KlippyWsController / handleWsMessage / WsSessionManager wire
+// ============================================================================
+
+/// Connect a WebSocket to /websocket and hand the connection + a
+/// "next message" receiver to `exchange`.  The connection is shut down
+/// only after exchange returns, so exchanges can await responses.
+static void withWebSocket(
+    const std::function<void(
+        const drogon::WebSocketConnectionPtr&,
+        const std::function<std::string(std::chrono::milliseconds)>&)>&
+        exchange) {
+    auto ws = drogon::WebSocketClient::newWebSocketClient(
+        "127.0.0.1", kPort, false);
+    std::promise<bool> connP;
+    auto queue = std::make_shared<std::mutex>();
+    auto cv = std::make_shared<std::condition_variable>();
+    auto messages = std::make_shared<std::deque<std::string>>();
+    ws->setMessageHandler(
+        [queue, cv, messages](std::string&& msg,
+                              const drogon::WebSocketClientPtr&,
+                              const drogon::WebSocketMessageType&) {
+            std::lock_guard lk(*queue);
+            messages->push_back(std::move(msg));
+            cv->notify_all();
+        });
+    auto req = drogon::HttpRequest::newHttpRequest();
+    req->setPath("/websocket");
+    ws->connectToServer(
+        req, [&](drogon::ReqResult r, const drogon::HttpResponsePtr&,
+                 const drogon::WebSocketClientPtr&) {
+            connP.set_value(r == drogon::ReqResult::Ok);
+        });
+    auto fut = connP.get_future();
+    EXPECT_EQ(fut.wait_for(10s), std::future_status::ready);
+    EXPECT_TRUE(fut.get());
+    auto conn = ws->getConnection();
+    EXPECT_NE(conn, nullptr);
+    if (!conn) return;
+
+    // Pop the next server message, waiting up to `timeout`.  Returns ""
+    // on timeout.
+    auto nextMessage = [queue, cv, messages](
+                           std::chrono::milliseconds timeout) -> std::string {
+        std::unique_lock lk(*queue);
+        if (!cv->wait_for(lk, timeout, [&] { return !messages->empty(); }))
+            return {};
+        auto m = std::move(messages->front());
+        messages->pop_front();
+        return m;
+    };
+
+    exchange(conn, nextMessage);
+    conn->shutdown();
+    ws->stop();
+    // Let the close handshake propagate before the client destructs.
+    std::this_thread::sleep_for(50ms);
+}
+
+TEST_F(KlippyHttpServerE2ETest, WsIdentifyGetsJsonRpcResponse) {
+    withWebSocket(
+        [](const drogon::WebSocketConnectionPtr& conn, auto next) {
+            conn->send(R"({"jsonrpc":"2.0","method":"server.connection.identify","params":{"client_name":"e2e","version":"1.0"},"id":7})");
+            const std::string resp = next(5s);
+            ASSERT_FALSE(resp.empty());
+            EXPECT_NE(resp.find("\"id\":7"), std::string::npos);
+        });
+}
+
+TEST_F(KlippyHttpServerE2ETest, WsObjectsSubscribeGetsResponse) {
+    withWebSocket(
+        [](const drogon::WebSocketConnectionPtr& conn, auto next) {
+            conn->send(R"({"jsonrpc":"2.0","method":"printer.objects.subscribe","params":{"objects":{"gcode_macro":null}},"id":9})");
+            const std::string resp = next(5s);
+            ASSERT_FALSE(resp.empty());
+            EXPECT_NE(resp.find("\"id\":9"), std::string::npos);
+        });
+}
+
+TEST_F(KlippyHttpServerE2ETest, WsServerInfoRoundTrips) {
+    withWebSocket(
+        [](const drogon::WebSocketConnectionPtr& conn, auto next) {
+            conn->send(R"({"jsonrpc":"2.0","method":"server.info","id":13})");
+            const std::string resp = next(5s);
+            ASSERT_FALSE(resp.empty());
+            EXPECT_NE(resp.find("klippy_connected"), std::string::npos);
+        });
+}
+
+TEST_F(KlippyHttpServerE2ETest, WsDisconnectRemovesSession) {
+    // Connect + immediately close; the server must not crash or leak —
+    // a subsequent connection still works.
+    {
+        auto ws = drogon::WebSocketClient::newWebSocketClient(
+            "127.0.0.1", kPort, false);
+        std::promise<bool> connP;
+        auto req = drogon::HttpRequest::newHttpRequest();
+        req->setPath("/websocket");
+        ws->connectToServer(
+            req, [&](drogon::ReqResult r, const drogon::HttpResponsePtr&,
+                     const drogon::WebSocketClientPtr&) {
+                connP.set_value(r == drogon::ReqResult::Ok);
+            });
+        EXPECT_TRUE(connP.get_future().get());
+        ws->getConnection()->shutdown();
+        ws->stop();
+    }
+    std::this_thread::sleep_for(100ms);
+    withWebSocket(
+        [](const drogon::WebSocketConnectionPtr& conn, auto next) {
+            conn->send(R"({"jsonrpc":"2.0","method":"server.info","id":14})");
+            const std::string resp = next(5s);
+            ASSERT_FALSE(resp.empty());
+            EXPECT_NE(resp.find("\"id\":14"), std::string::npos);
+        });
 }
 
 } // namespace
