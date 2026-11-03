@@ -1235,6 +1235,7 @@ create_ethercat_test(coverage
         ethercat/test_slave_groups.cpp
         ethercat/test_encapsulation.cpp
         ethercat/test_esc211_coverage.cpp
+        ethercat/test_esc211_managers.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
         ../src/ethercat/SlaveEmulator_CiA402.cpp

@@ -170,6 +170,31 @@ TEST_F(ESC211EmulatorTest, RestartTriggerFiresOnEdgeThenStaysLatched) {
     EXPECT_FALSE(mgr.consumeRestartRequest());
 }
 
+TEST_F(ESC211EmulatorTest, SegmentedDownloadRoundTripsLargeWrite) {
+    // Config-data section object: writable, variable length.
+    slave_->addODEntry({0xF200, 1, 0x0000, 0, 0x03, {}, "sec"});
+
+    std::vector<uint8_t> payload(256);
+    for (size_t i = 0; i < payload.size(); ++i) {
+        payload[i] = static_cast<uint8_t>(i ^ 0xA5);
+    }
+    auto err = master_.slave(0).sdoWrite(0xF200, 1,
+                                         payload.data(), payload.size());
+    EXPECT_EQ(err, SlaveError::Ok);
+
+    const auto* e = slave_->odEntry(0xF200, 1);
+    ASSERT_NE(e, nullptr);
+    EXPECT_EQ(e->data, payload);
+}
+
+TEST_F(ESC211EmulatorTest, SegmentedDownloadShortObjectNoSegments) {
+    // 4-byte write fits the expedited/initiate path — no segments follow.
+    slave_->addODEntry({0xF200, 2, 0x0007, 32, 0x03, {0, 0, 0, 0}, "x"});
+    uint32_t v = 0xDEADBEEF;
+    auto err = master_.slave(0).sdoWrite(0xF200, 2, &v, sizeof(v));
+    EXPECT_EQ(err, SlaveError::Ok);
+}
+
 TEST_F(ESC211EmulatorTest, BackgroundPollThreadPicksUpNewError) {
     addU32(0xF101, 4);
     addU32(0xF102, 0);
