@@ -685,8 +685,12 @@ void SlaveEmulator::processMailboxRequest() {
         const size_t total = sizeof(Raw::MbxHeader) + sizeof(Raw::CoeHeader) + sdo_rsp_len;
         if (total > sm1.buffer.size()) return nullptr;
         Raw::MbxHeader r{};
-        r.length_le = Raw::host_to_le16(
-            static_cast<uint16_t>(sizeof(Raw::CoeHeader) + sdo_rsp_len));
+        // Slaves pad short SDO responses to 8 bytes — the master's segment
+        // parser rejects CoE payloads below that minimum.
+        const size_t declared = std::max<size_t>(
+            sizeof(Raw::CoeHeader) + sdo_rsp_len,
+            sizeof(Raw::CoeHeader) + 8);
+        r.length_le = Raw::host_to_le16(static_cast<uint16_t>(declared));
         r.address_le = mbx.address_le;
         r.priority = mbx.priority;
         r.mbxtype = Raw::mbx_type_with_cnt(Raw::EC_MBXT_COE, mbx_cnt);
@@ -803,10 +807,10 @@ void SlaveEmulator::processMailboxRequest() {
             coeSdoAbort(index_hi, index_lo, sub, kSdoAbortGeneral);
             return;
         }
-        const size_t max_seg = sm1.buffer.size()
-            - sizeof(Raw::MbxHeader) - sizeof(Raw::CoeHeader) - 1;
         const size_t remaining = entry->data.size() - upload_offset_;
-        const size_t seg = std::min(remaining, max_seg);
+        // CoE SDO segments carry at most 7 data bytes — the unused-count
+        // field in the command byte is only 3 bits wide.
+        const size_t seg = std::min(remaining, size_t{7});
         const bool last = (upload_offset_ + seg >= entry->data.size());
 
         uint8_t* rsp = begin_response(1 + seg);
