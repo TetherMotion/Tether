@@ -6,6 +6,8 @@
 #include "SlaveEmulator.hpp"
 #include "tether/ethercat/DCClass.hpp"
 #include "tether/platform/EspCompat.hpp"
+#include "raw/RawConstants.hpp"
+#include "raw/RawWireFormat.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -255,6 +257,11 @@ bool SlaveEmulator::readRegister(uint16_t addr, uint8_t* data, uint16_t len) {
         }
     }
     
+    // SM-buffer data access by physical address (mailbox + PDO areas)
+    if (smBufferRead(addr, data, len)) {
+        return true;
+    }
+
     // Generic register read
     if (addr + len <= registers_.size()) {
         std::memcpy(data, &registers_[addr], len);
@@ -360,6 +367,11 @@ bool SlaveEmulator::writeRegister(uint16_t addr, const uint8_t* data, uint16_t l
         }
     }
     
+    // SM-buffer data access by physical address (mailbox + PDO areas)
+    if (smBufferWrite(addr, data, len)) {
+        return true;
+    }
+
     // Generic register write
     if (addr + len <= registers_.size()) {
         std::memcpy(&registers_[addr], data, len);
@@ -458,6 +470,12 @@ void SlaveEmulator::enableCiA402(bool enable) {
         object_dictionary_.push_back({0x607A, 0, 0x0004, 32, 0x03, {0, 0, 0, 0}, "Target position"});
         // Actual position 0x6064
         object_dictionary_.push_back({0x6064, 0, 0x0004, 32, 0x01, {0, 0, 0, 0}, "Actual position"});
+        // Modes of operation display 0x6061
+        object_dictionary_.push_back({0x6061, 0, 0x0002, 8, 0x01, {0}, "Modes of operation display"});
+        // Actual velocity 0x606C
+        object_dictionary_.push_back({0x606C, 0, 0x0004, 32, 0x01, {0, 0, 0, 0}, "Actual velocity"});
+        // Error code 0x603F
+        object_dictionary_.push_back({0x603F, 0, 0x0006, 16, 0x01, {0, 0}, "Error code"});
     }
 }
 
@@ -485,6 +503,307 @@ ODEntry* SlaveEmulator::findODEntry(uint16_t index, uint8_t subindex) {
         }
     }
     return nullptr;
+}
+
+// ============================================================================
+// SM-buffer data path + CoE mailbox
+// ============================================================================
+
+bool SlaveEmulator::smBufferRead(uint16_t addr, uint8_t* data, uint16_t len) {
+    for (size_t i = 0; i < sync_managers_.size(); ++i) {
+        SyncManager& sm = sync_managers_[i];
+        if (!sm.isEnabled() || sm.buffer.empty()) continue;
+        if (addr >= sm.start_addr &&
+            static_cast<size_t>(addr - sm.start_addr) + len <= sm.buffer.size()) {
+            std::memcpy(data, &sm.buffer[addr - sm.start_addr], len);
+            sm.status.read_event = 1;
+            if (i == 1) {
+                // SM1 = slave -> master mailbox: reading drains the response.
+                sm.status.mailbox_full = 0;
+                sm.status.read_buf_full = 0;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SlaveEmulator::smBufferWrite(uint16_t addr, const uint8_t* data, uint16_t len) {
+    for (size_t i = 0; i < sync_managers_.size(); ++i) {
+        SyncManager& sm = sync_managers_[i];
+        if (!sm.isEnabled() || sm.buffer.empty()) continue;
+        if (addr >= sm.start_addr &&
+            static_cast<size_t>(addr - sm.start_addr) + len <= sm.buffer.size()) {
+            std::memcpy(&sm.buffer[addr - sm.start_addr], data, len);
+            sm.status.write_event = 1;
+            if (i == 0) {
+                // SM0 = master -> slave mailbox: the PDI drains it
+                // synchronously and posts the response into SM1.
+                processMailboxRequest();
+            } else if (cia402_enabled_ && sm.isOutput() &&
+                       sm.buffer.size() >= 2) {
+                // RxPDO: bytes 0-1 carry the controlword on CiA402 drives.
+                const uint16_t cw = static_cast<uint16_t>(
+                    sm.buffer[0] | (sm.buffer[1] << 8));
+                drive_state_.processControlWord(cw);
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+void SlaveEmulator::syncDriveFromOD(uint16_t index, uint8_t sub,
+                                    const uint8_t* data, size_t len) {
+    if (!cia402_enabled_ || sub != 0) return;
+    auto u16 = [&] { return static_cast<uint16_t>(data[0] | (data[1] << 8)); };
+    auto u32 = [&] {
+        return static_cast<uint32_t>(data[0] | (data[1] << 8) |
+                                   (data[2] << 16) | (data[3] << 24));
+    };
+    switch (index) {
+        case 0x6040: if (len >= 2) drive_state_.processControlWord(u16()); break;
+        case 0x6060: if (len >= 1) {
+                drive_state_.target_mode = static_cast<int8_t>(data[0]);
+                drive_state_.operation_mode = drive_state_.target_mode;
+            }
+            break;
+        case 0x607A: if (len >= 4) drive_state_.target_position = static_cast<int32_t>(u32()); break;
+        case 0x60FF: if (len >= 4) drive_state_.target_velocity = static_cast<int32_t>(u32()); break;
+        case 0x6071: if (len >= 2) drive_state_.target_torque = static_cast<int16_t>(u16()); break;
+        default: break;
+    }
+}
+
+void SlaveEmulator::syncODFromDrive(ODEntry& entry) {
+    if (!cia402_enabled_ || entry.subindex != 0) return;
+    auto put16 = [&](uint16_t v) {
+        entry.data.assign({static_cast<uint8_t>(v & 0xFF),
+                           static_cast<uint8_t>((v >> 8) & 0xFF)});
+    };
+    auto put32 = [&](uint32_t v) {
+        entry.data.assign({static_cast<uint8_t>(v & 0xFF),
+                           static_cast<uint8_t>((v >> 8) & 0xFF),
+                           static_cast<uint8_t>((v >> 16) & 0xFF),
+                           static_cast<uint8_t>((v >> 24) & 0xFF)});
+    };
+    switch (entry.index) {
+        case 0x603F: put16(drive_state_.error_code); break;
+        case 0x6041: put16(drive_state_.getStatusWord()); break;
+        case 0x6061: entry.data = {static_cast<uint8_t>(drive_state_.operation_mode)}; break;
+        case 0x6064: put32(static_cast<uint32_t>(drive_state_.actual_position)); break;
+        case 0x606C: put32(static_cast<uint32_t>(drive_state_.actual_velocity)); break;
+        default: break;
+    }
+}
+
+namespace {
+constexpr uint32_t kSdoAbortNoObject      = 0x06020000;
+constexpr uint32_t kSdoAbortNotReadable   = 0x06010001;
+constexpr uint32_t kSdoAbortNotWritable   = 0x06010002;
+constexpr uint32_t kSdoAbortGeneral       = 0x08000000;
+}
+
+void SlaveEmulator::coeSdoAbort(uint8_t index_hi, uint8_t index_lo,
+                                uint8_t sub, uint32_t abort_code) {
+    SyncManager& sm1 = sync_managers_[1];
+    Raw::MbxHeader mbx{};
+    mbx.length_le = Raw::host_to_le16(sizeof(Raw::CoeHeader) + 8);
+    mbx.address_le = 0;
+    mbx.priority = 0;
+    mbx.mbxtype = Raw::mbx_type_with_cnt(Raw::EC_MBXT_COE, 0);
+    Raw::CoeHeader coe{};
+    coe.raw_le = Raw::host_to_le16(Raw::coe_make_raw(0, Raw::EC_COES_SDORES));
+    const size_t total = sizeof(mbx) + sizeof(coe) + 8;
+    if (total > sm1.buffer.size()) return;
+    uint8_t* p = sm1.buffer.data();
+    std::memcpy(p, &mbx, sizeof(mbx));
+    p += sizeof(mbx);
+    std::memcpy(p, &coe, sizeof(coe));
+    p += sizeof(coe);
+    p[0] = Raw::EC_SDO_ABORT;
+    p[1] = index_lo;
+    p[2] = index_hi;
+    p[3] = sub;
+    const uint32_t le_code = Raw::host_to_le32(abort_code);
+    std::memcpy(p + 4, &le_code, 4);
+    sm1.status.mailbox_full = 1;
+    sm1.status.read_buf_full = 1;
+}
+
+void SlaveEmulator::processMailboxRequest() {
+    SyncManager& sm0 = sync_managers_[0];
+    SyncManager& sm1 = sync_managers_[1];
+    if (sm0.buffer.size() < sizeof(Raw::MbxHeader) + sizeof(Raw::CoeHeader) + 8 ||
+        sm1.buffer.empty()) {
+        return;
+    }
+
+    const uint8_t* req = sm0.buffer.data();
+    Raw::MbxHeader mbx{};
+    std::memcpy(&mbx, req, sizeof(mbx));
+    const uint8_t mbx_type = mbx.mbxtype & 0x0F;
+    const uint8_t mbx_cnt = (mbx.mbxtype >> 4) & 0x07;
+
+    // Only CoE SDO requests are emulated.
+    if (mbx_type != Raw::EC_MBXT_COE) return;
+    Raw::CoeHeader coe{};
+    std::memcpy(&coe, req + sizeof(mbx), sizeof(coe));
+    const uint8_t service = static_cast<uint8_t>(
+        (Raw::le16_to_host(coe.raw_le) >> 12) & 0x0F);
+    if (service != Raw::EC_COES_SDOREQ) return;
+
+    const uint8_t* sdo = req + sizeof(mbx) + sizeof(coe);
+    const size_t sdo_avail =
+        sm0.buffer.size() - sizeof(Raw::MbxHeader) - sizeof(Raw::CoeHeader);
+    const uint8_t cmd = sdo[0];
+    const uint16_t index = static_cast<uint16_t>(sdo[1] | (sdo[2] << 8));
+    const uint8_t sub = sdo[3];
+    const uint8_t index_lo = sdo[1];
+    const uint8_t index_hi = sdo[2];
+
+    // Response scaffolding: same mailbox counter as the request.
+    auto begin_response = [&](size_t sdo_rsp_len) -> uint8_t* {
+        const size_t total = sizeof(Raw::MbxHeader) + sizeof(Raw::CoeHeader) + sdo_rsp_len;
+        if (total > sm1.buffer.size()) return nullptr;
+        Raw::MbxHeader r{};
+        r.length_le = Raw::host_to_le16(
+            static_cast<uint16_t>(sizeof(Raw::CoeHeader) + sdo_rsp_len));
+        r.address_le = mbx.address_le;
+        r.priority = mbx.priority;
+        r.mbxtype = Raw::mbx_type_with_cnt(Raw::EC_MBXT_COE, mbx_cnt);
+        Raw::CoeHeader c{};
+        c.raw_le = Raw::host_to_le16(Raw::coe_make_raw(0, Raw::EC_COES_SDORES));
+        uint8_t* p = sm1.buffer.data();
+        std::memset(p, 0, total);
+        std::memcpy(p, &r, sizeof(r));
+        std::memcpy(p + sizeof(r), &c, sizeof(c));
+        return p + sizeof(r) + sizeof(c);
+    };
+    auto finish_response = [&] {
+        sm1.status.mailbox_full = 1;
+        sm1.status.read_buf_full = 1;
+    };
+
+    const uint8_t req_class = cmd & 0xE0u;
+
+    if (req_class == Raw::EC_SDO_DOWN_REQ) {
+        // Initiate download: expedited when bit1 set; size-indicated bit0.
+        const bool expedited = (cmd & 0x02u) != 0;
+        const bool size_indicated = (cmd & 0x01u) != 0;
+        const uint8_t unused = (cmd >> 2) & 0x03;
+        size_t data_len = 0;
+        const uint8_t* payload = sdo + 4;
+        if (expedited) {
+            data_len = size_indicated ? (4u - unused) : 4u;
+        } else {
+            // Normal initiate: first 4 bytes declare the total size.
+            uint32_t declared = 0;
+            std::memcpy(&declared, sdo + 4, 4);
+            declared = Raw::le32_to_host(declared);
+            payload = sdo + 8;
+            data_len = (sdo_avail >= 8)
+                     ? std::min<size_t>(declared, sdo_avail - 8) : 0;
+        }
+
+        ODEntry* entry = findODEntry(index, sub);
+        if (!entry) {
+            coeSdoAbort(index_hi, index_lo, sub, kSdoAbortNoObject);
+            return;
+        }
+        if (!entry->isWritable()) {
+            coeSdoAbort(index_hi, index_lo, sub, kSdoAbortNotWritable);
+            return;
+        }
+        const size_t avail = expedited
+            ? std::min<size_t>(data_len, sdo_avail - 4)
+            : data_len;
+        if (entry->bit_length && avail != (entry->bit_length + 7) / 8) {
+            // Tolerate size mismatches: real drives store what fits.
+            entry->data.assign(payload, payload + avail);
+        } else {
+            entry->data.assign(payload, payload + avail);
+        }
+        syncDriveFromOD(index, sub, entry->data.data(), entry->data.size());
+
+        uint8_t* rsp = begin_response(8);
+        if (!rsp) return;
+        rsp[0] = 0x60;  // Download response
+        rsp[1] = index_lo;
+        rsp[2] = index_hi;
+        rsp[3] = sub;
+        finish_response();
+        return;
+    }
+
+    if (req_class == Raw::EC_SDO_UP_REQ) {
+        ODEntry* entry = findODEntry(index, sub);
+        if (!entry) {
+            coeSdoAbort(index_hi, index_lo, sub, kSdoAbortNoObject);
+            return;
+        }
+        if (!entry->isReadable()) {
+            coeSdoAbort(index_hi, index_lo, sub, kSdoAbortNotReadable);
+            return;
+        }
+        syncODFromDrive(*entry);
+
+        const size_t n = entry->data.size();
+        if (n <= 4) {
+            uint8_t* rsp = begin_response(8);
+            if (!rsp) return;
+            const uint8_t unused = static_cast<uint8_t>(4 - n);
+            rsp[0] = static_cast<uint8_t>(0x40 | 0x02 | 0x01 | (unused << 2));
+            rsp[1] = index_lo;
+            rsp[2] = index_hi;
+            rsp[3] = sub;
+            std::memcpy(rsp + 4, entry->data.data(), n);
+        } else {
+            // Normal upload: report size; segments served below.
+            uint8_t* rsp = begin_response(8);
+            if (!rsp) return;
+            rsp[0] = 0x41;
+            rsp[1] = index_lo;
+            rsp[2] = index_hi;
+            rsp[3] = sub;
+            const uint32_t le_n = Raw::host_to_le32(static_cast<uint32_t>(n));
+            std::memcpy(rsp + 4, &le_n, 4);
+            upload_index_ = index;
+            upload_sub_ = sub;
+            upload_offset_ = 0;
+            upload_toggle_ = false;
+        }
+        finish_response();
+        return;
+    }
+
+    if (req_class == Raw::EC_SDO_SEG_UP_REQ) {
+        // Segmented upload: serve chunks of the OD entry declared earlier.
+        ODEntry* entry = findODEntry(upload_index_, upload_sub_);
+        const bool req_toggle = (cmd & 0x10u) != 0;
+        if (!entry || req_toggle != upload_toggle_) {
+            coeSdoAbort(index_hi, index_lo, sub, kSdoAbortGeneral);
+            return;
+        }
+        const size_t max_seg = sm1.buffer.size()
+            - sizeof(Raw::MbxHeader) - sizeof(Raw::CoeHeader) - 1;
+        const size_t remaining = entry->data.size() - upload_offset_;
+        const size_t seg = std::min(remaining, max_seg);
+        const bool last = (upload_offset_ + seg >= entry->data.size());
+
+        uint8_t* rsp = begin_response(1 + seg);
+        if (!rsp) return;
+        rsp[0] = static_cast<uint8_t>((upload_toggle_ ? 0x10 : 0x00) |
+                                      (((7 - seg) & 0x07) << 1) |
+                                      (last ? 0x01 : 0x00));
+        std::memcpy(rsp + 1, entry->data.data() + upload_offset_, seg);
+        upload_offset_ += seg;
+        upload_toggle_ = !upload_toggle_;
+        finish_response();
+        return;
+    }
+
+    coeSdoAbort(index_hi, index_lo, sub, kSdoAbortGeneral);
 }
 
 void SlaveEmulator::dumpRegisters() const {
