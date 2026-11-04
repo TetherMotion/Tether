@@ -9,6 +9,7 @@
 
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/ProcessImage.hpp"
 
 using namespace EtherCAT;
 using namespace EtherCAT::PDO;
@@ -1613,4 +1614,138 @@ TEST_F(PdoSliceTest, SliceRunHealthReportsTimeoutThenRecovery) {
     EXPECT_EQ(ph[0].expected_wkc, 2u);
     EXPECT_EQ(ph[0].last_wkc, 2u);
     EXPECT_EQ(ph[0].consecutive_failures, 0u);
+}
+
+// ============================================================================
+// PDOManager cyclic/​slice wrapper coverage
+// ============================================================================
+
+namespace {
+
+class PDOManagerCyclicTest : public ::testing::Test {
+protected:
+    static constexpr uint32_t kInvalid = 0xFFFFFFFFu;
+    CyclicStubTransport transport;
+    PDOManager pdo_mgr{transport};
+    LogicalAddressManager lam{transport};
+
+    void SetUp() override {
+        lam.init();
+        SlaveConfig configs[kMaxPDOSlaves] = {};
+        configs[0].configured = true;
+        configs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 4);
+        configs[0].rxpdo_size = 4;
+        configs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 8);
+        configs[0].txpdo_size = 8;
+        ASSERT_TRUE(lam.buildAddressMap(configs, 1));
+        std::memcpy(pdo_mgr.slaveConfigs(), configs, sizeof(configs));
+        pdo_mgr.mapping().add_rxpdo(0, 4, 0x1600, PDOAddressMode::Logical);
+        pdo_mgr.mapping().add_txpdo(0, 8, 0x1A00, PDOAddressMode::Logical);
+        pdo_mgr.setLogicalAddressManager(&lam);
+        transport.resp_len_[0] = 12;
+        transport.resp_wkc_[0] = 3;
+        transport.single_resp_wkc_ = 3;
+        transport.single_resp_len_ = 12;
+    }
+};
+
+}  // namespace
+
+TEST_F(PDOManagerCyclicTest, ExchangeLRWSliceRequiresLAM) {
+    CyclicStubTransport lone_transport;
+    PDOManager lone{lone_transport};
+    EXPECT_FALSE(lone.exchangeLRWSlice(0, 4));
+}
+
+TEST_F(PDOManagerCyclicTest, ExchangeLRWSliceDelegatesAndCountsEntries) {
+    EXPECT_TRUE(pdo_mgr.exchangeLRWSlice(0, 4));
+    // Slice [0,4) covers only the RxPDO entry → request counter only.
+    EXPECT_GE(pdo_mgr.getSlavePDORequestCount(0), 1u);
+    EXPECT_EQ(pdo_mgr.getSlavePDOReplyCount(0), 0u);
+}
+
+TEST_F(PDOManagerCyclicTest, ExchangeConfiguredSlaveWindowsDelegates) {
+    EXPECT_TRUE(pdo_mgr.exchangeConfiguredSlaveWindows());
+    EXPECT_GE(pdo_mgr.getSlavePDORequestCount(0), 1u);
+    EXPECT_GE(pdo_mgr.getSlavePDOReplyCount(0), 1u);
+}
+
+TEST_F(PDOManagerCyclicTest, ExchangeConfiguredSlaveWindowsFallsBackWithoutLAM) {
+    CyclicStubTransport lone_transport;
+    PDOManager lone{lone_transport};
+    // No LAM: falls back to exchangeAll(), which is a no-op without a
+    // configured process-image window.
+    EXPECT_TRUE(lone.exchangeConfiguredSlaveWindows());
+}
+
+TEST_F(PDOManagerCyclicTest, ExchangeAllLRWCyclicDelegatesAndCounts) {
+    EXPECT_TRUE(pdo_mgr.exchangeAllLRWCyclic(1'000'000, nullptr));
+    EXPECT_GE(pdo_mgr.getSlavePDORequestCount(0), 1u);
+    EXPECT_GE(pdo_mgr.getSlavePDOReplyCount(0), 1u);
+}
+
+TEST_F(PDOManagerCyclicTest, ExchangeAllLRWCyclicFallsBackWithoutLAM) {
+    CyclicStubTransport lone_transport;
+    PDOManager lone{lone_transport};
+    EXPECT_TRUE(lone.exchangeAllLRWCyclic(1'000'000, nullptr));
+}
+
+TEST_F(PDOManagerCyclicTest, CyclicSendCollectAndPending) {
+    EXPECT_TRUE(pdo_mgr.cyclicSend(nullptr, 1'000'000));
+    EXPECT_TRUE(pdo_mgr.cyclicExchangePending());
+    EXPECT_TRUE(pdo_mgr.cyclicCollect(nullptr));
+    EXPECT_FALSE(pdo_mgr.cyclicExchangePending());
+    EXPECT_GE(pdo_mgr.getSlavePDORequestCount(0), 1u);
+    EXPECT_GE(pdo_mgr.getSlavePDOReplyCount(0), 1u);
+}
+
+TEST_F(PDOManagerCyclicTest, CyclicSendCollectWithoutLAM) {
+    CyclicStubTransport lone_transport;
+    PDOManager lone{lone_transport};
+    EXPECT_TRUE(lone.cyclicSend(nullptr, 1'000'000));
+    EXPECT_FALSE(lone.cyclicExchangePending());
+    EXPECT_TRUE(lone.cyclicCollect(nullptr));
+}
+
+TEST_F(PDOManagerCyclicTest, PDOSliceLifecycle) {
+    EXPECT_EQ(pdo_mgr.pdoSliceCount(), 0u);
+    PDOSliceSpec spec;
+    spec.entries = {0};
+    ASSERT_NE(pdo_mgr.definePDOSlice(spec), kInvalid);
+    EXPECT_EQ(pdo_mgr.pdoSliceCount(), 1u);
+    EXPECT_TRUE(pdo_mgr.exchangePDOSlice(spec));
+    EXPECT_TRUE(pdo_mgr.clearPDOSlices());
+    EXPECT_EQ(pdo_mgr.pdoSliceCount(), 0u);
+}
+
+TEST_F(PDOManagerCyclicTest, PDOSliceCallsFailWithoutLAM) {
+    CyclicStubTransport lone_transport;
+    PDOManager lone{lone_transport};
+    PDOSliceSpec spec;
+    spec.entries = {0};
+    EXPECT_EQ(lone.definePDOSlice(spec), kInvalid);
+    EXPECT_FALSE(lone.exchangePDOSlice(spec));
+    EXPECT_FALSE(lone.clearPDOSlices());
+    EXPECT_EQ(lone.pdoSliceCount(), 0u);
+}
+
+TEST_F(PDOManagerCyclicTest, CyclicKnobsAndAccessors) {
+    pdo_mgr.setImageExchangeDecimation(4);
+    pdo_mgr.setCyclicStrictWkc(true);
+    EXPECT_GT(pdo_mgr.maxLogicalSliceLength(), 0u);
+    EXPECT_EQ(pdo_mgr.describeLogicalEntries().size(), 2u);
+
+    CyclicStubTransport lone_transport;
+    PDOManager lone{lone_transport};
+    lone.setImageExchangeDecimation(4);
+    lone.setCyclicStrictWkc(false);
+    EXPECT_EQ(lone.maxLogicalSliceLength(), 0u);
+    EXPECT_TRUE(lone.describeLogicalEntries().empty());
+}
+
+TEST_F(PDOManagerCyclicTest, ConfigureProcessImageRequiresLAM) {
+    CyclicStubTransport lone_transport;
+    PDOManager lone{lone_transport};
+    ProcessImage image;
+    EXPECT_FALSE(lone.configureProcessImage(image, ImageMode::Buffered, nullptr));
 }
