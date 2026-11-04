@@ -16,6 +16,7 @@
 #include "tether/ethercat/ESIFile.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/SDOErrorDecoder.hpp"
 #include "tether/ethercat/SlaveEmulator.hpp"
 #include "tether/ethercat/SlaveGroup.hpp"
 #include "tether/profiles/cia402/CiA402Config.hpp"
@@ -108,6 +109,29 @@ TEST(StateUtilsCoverageTest, FormatStatuswordDiagnosticsBits) {
     char buf[512];
     formatStatuswordDiagnostics(0xFFFF, buf, sizeof(buf));
     EXPECT_NE(std::strstr(buf, "OpEn"), nullptr);
+}
+
+
+TEST(StateUtilsCoverageTest, SdoErrorDecoderTables) {
+    Raw::SDOErrorDecoder dec;
+    EXPECT_STREQ(dec.mbxErrorCodeStr(0x0000), "No error");
+    EXPECT_STREQ(dec.mbxErrorCodeStr(0x0001), "Syntax error in mailbox message");
+    EXPECT_STREQ(dec.mbxErrorCodeStr(0x0002), "Unsupported protocol");
+    EXPECT_STREQ(dec.mbxErrorCodeStr(0x0003), "Invalid channel");
+    EXPECT_STREQ(dec.mbxErrorCodeStr(0x0004), "Service not supported");
+    EXPECT_STREQ(dec.mbxErrorCodeStr(0x0005), "Invalid header");
+    EXPECT_STREQ(dec.mbxErrorCodeStr(0x0006), "Size too short");
+    EXPECT_STREQ(dec.mbxErrorCodeStr(0x0007), "No more memory");
+    EXPECT_STREQ(dec.mbxErrorCodeStr(0x0008), "Invalid size");
+    EXPECT_STREQ(dec.mbxErrorCodeStr(0x0009), "Service in work");
+    EXPECT_STREQ(dec.mbxErrorCodeStr(0xDEAD), "Unknown mailbox error");
+
+    EXPECT_STREQ(dec.mbxErrorDetailStr(0x0001, 3), "offset in mailbox header");
+    EXPECT_STREQ(dec.mbxErrorDetailStr(0x0001, 7), "offset in CoE header");
+    EXPECT_STREQ(dec.mbxErrorDetailStr(0x0001, 9), "offset in SDO payload");
+    EXPECT_STREQ(dec.mbxErrorDetailStr(0x0002, 3), "protocol-specific detail");
+
+    EXPECT_NE(dec.sdoAbortCodeStr(0x06020000), nullptr);
 }
 
 // ============================================================================
