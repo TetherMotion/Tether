@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include "sii/SIIReader.hpp"
 #include "sii/SIIParser.hpp"
+#include "tether/sii/SIILogger.hpp"
 #include "ethercat/raw/internal.hpp"
 #include "tether/ethercat/Master.hpp"
 
@@ -187,6 +188,21 @@ protected:
     MockSIIEEPROM mock_eeprom_;
     EtherCAT::Master master_;
 };
+
+// ============================================================================
+// SII logger derivation debug (exercises debugSIIMailboxDerivation)
+// ============================================================================
+
+TEST_F(SIIMailboxParserTest, DebugMailboxDerivationLogsAllSteps) {
+    mock_eeprom_.setValidMailbox(0x1000, 128, 0x1400, 64,
+                                 MBX_PROTO_COE | MBX_PROTO_EOE);
+    EtherCAT::SII::debugSIIMailboxDerivation(master_, 0, "SII");
+}
+
+TEST_F(SIIMailboxParserTest, DebugMailboxDerivationReadFailures) {
+    mock_eeprom_.setSimulateFailure(true);
+    EtherCAT::SII::debugSIIMailboxDerivation(master_, 0, "SII");
+}
 
 // ============================================================================
 // Basic Functionality Tests
