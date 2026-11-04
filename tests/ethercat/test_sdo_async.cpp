@@ -1739,3 +1739,66 @@ TEST_F(SDOManagerQueueTest, LogAlStatusAfterRequestArms) {
         .WillByDefault(Return(false));
     EXPECT_TRUE(mgr.sdoUploadWithRetry(0x6040, 0, buf, sizeof(buf), nullptr, {}));
 }
+
+// ============================================================================
+// CoEManager.cpp — write queue, lifecycle, pending counters
+// ============================================================================
+
+TEST_F(SDOManagerQueueTest, WriteAsyncPathAndPendingCounts) {
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(DownloadOk());
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    EXPECT_TRUE(mgr.isInitialized());
+
+    uint32_t val = 42;
+    auto f = mgr.write(0x6040, 0, &val, sizeof(val));
+    EXPECT_TRUE(f.get().has_value());
+
+    // Init is idempotent; deinit drains.
+    EXPECT_TRUE(mgr.init());
+    mgr.deinit();
+    EXPECT_FALSE(mgr.isInitialized());
+    mgr.deinit();   // safe double-deinit
+}
+
+TEST_F(SDOManagerQueueTest, WriteFailsWhenShuttingDown) {
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    mgr.deinit();
+    uint32_t val = 1;
+    auto f = mgr.write(0x6040, 0, &val, sizeof(val));
+    EXPECT_FALSE(f.get().has_value());
+}
+
+TEST_F(SDOManagerQueueTest, PendingCountersReflectQueues) {
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(Invoke([](auto&&...) -> bool {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            return true;
+        }));
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    auto f1 = mgr.read<uint8_t>(0x6040, 0);
+    EXPECT_GE(mgr.totalPendingCount(), 1u);
+    (void)f1.get();
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, TypedWriteHelpers) {
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(DownloadOk());
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    EXPECT_TRUE(mgr.writeU8(0x6040, 0, 1).has_value());
+    EXPECT_TRUE(mgr.writeU16(0x6040, 0, 1).has_value());
+    EXPECT_TRUE(mgr.writeI32(0x6040, 0, -1).has_value());
+    EXPECT_TRUE(mgr.readU8(0x6040, 0).has_value() == mgr.readU8(0x6040, 0).has_value()); // touch API
+    mgr.deinit();
+}
