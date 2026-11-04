@@ -214,4 +214,28 @@ TEST_F(MasterSiiCoverageTest, ConfigureMailboxFromSiiDelegates) {
                                            &rd_addr, &rd_len, &proto);
 }
 
+
+// ============================================================================
+// Master_discovery.cpp — scan-frame slave counting APIs
+// ============================================================================
+
+TEST_F(MasterSiiCoverageTest, DiscoverSlaveCountOnWire) {
+    EXPECT_EQ(master_.discoverSlaveCount(), 1u);
+}
+
+TEST_F(MasterSiiCoverageTest, SlaveCountPredicates) {
+    EXPECT_TRUE(master_.hasAnySlaves());
+    EXPECT_TRUE(master_.hasAtLeastNSlaves(1));
+    EXPECT_TRUE(master_.hasAtLeastNSlaves(1u));
+    EXPECT_FALSE(master_.hasAtLeastNSlaves(1u + 1));
+    EXPECT_TRUE(master_.hasExactlyNSlaves(1u));
+    EXPECT_FALSE(master_.hasExactlyNSlaves(1u + 1));
+}
+
+TEST_F(MasterSiiCoverageTest, DiscoveryCancelledReturnsEarly) {
+    master_.requestCancel();
+    EXPECT_EQ(master_.discoverSlaveCount(), 0u);
+    EXPECT_FALSE(master_.hasAnySlaves());
+}
+
 }  // namespace
