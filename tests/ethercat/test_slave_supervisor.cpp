@@ -848,3 +848,158 @@ TEST_F(SlaveSupervisorTest, RecoveryWithoutSuspendLeavesExchangeUngated) {
     master_.stopCyclicLoop();
     master_.stop();
 }
+
+// ============================================================================
+// Error-path coverage: init/start guards, give-up flows
+// ============================================================================
+
+TEST_F(SlaveSupervisorTest, InitRejectsOversizedCount) {
+    auto& sup = master_.slaveSupervisor();
+    EXPECT_FALSE(sup.init(0xFFFF));
+}
+
+TEST_F(SlaveSupervisorTest, StartTwiceFailsSecondTime) {
+    auto& sup = master_.slaveSupervisor();
+    sup.configure(defaultConfig());
+    sup.setRecoveryHandler(std::make_unique<MockRecoveryHandler>());
+    ASSERT_TRUE(sup.start());
+    EXPECT_TRUE(sup.isRunning());
+    EXPECT_FALSE(sup.start());            // already running
+    sup.stop();
+    EXPECT_FALSE(sup.isRunning());
+}
+
+TEST_F(SlaveSupervisorTest, StartFailsWithNoDiscoveredSlaves) {
+    Master fresh;
+    fresh.setPreopRetryConfig(1, 3, 1, 1);
+    auto& sup = fresh.slaveSupervisor();
+    sup.configure(defaultConfig());
+    EXPECT_FALSE(sup.start());            // getDiscoveredSlaveCount() == 0
+}
+
+TEST_F(SlaveSupervisorTest, EventEntryPointsEarlyOut) {
+    auto& sup = master_.slaveSupervisor();
+    sup.configure(defaultConfig());
+    sup.setRecoveryHandler(std::make_unique<MockRecoveryHandler>());
+
+    SlaveStatusEvent ev{};
+    ev.slave_index = 0;
+    ev.old_state = SlaveState::OP;
+    ev.new_state = SlaveState::INIT;
+    ev.new_error_flag = true;
+    ev.al_status_code = 0x0016;
+
+    // Not running — everything is a no-op.
+    sup.handleStatusEvent(ev);
+    sup.handleTransitionFailure(0, "x", 0x0016);
+    sup.markCritical(0, "x");
+    EXPECT_EQ(sup.slaveState(0), SlaveRecoveryState::Normal);
+
+    ASSERT_TRUE(sup.start());
+
+    // Out-of-range index — rejected before evaluation.
+    ev.slave_index = 99;
+    sup.handleStatusEvent(ev);
+    sup.handleTransitionFailure(99, "x", 0x0016);
+    sup.markCritical(99, "x");
+    sup.stop();
+}
+
+TEST_F(SlaveSupervisorTest, NonCriticalAlCodeDoesNotRecover) {
+    auto& sup = master_.slaveSupervisor();
+    auto cfg = defaultConfig();
+    cfg.triggers = CriticalTrigger::ALStatusCodes;
+    sup.configure(cfg);
+    sup.setRecoveryHandler(std::make_unique<MockRecoveryHandler>());
+    RecordingEventListener listener;
+    ASSERT_TRUE(sup.addEventListener(&listener));
+    ASSERT_TRUE(sup.start());
+
+    SlaveStatusEvent ev{};
+    ev.slave_index = 0;
+    ev.new_error_flag = true;
+    ev.al_status_code = 0x1234;          // not a critical AL code
+    sup.handleStatusEvent(ev);
+
+    EXPECT_EQ(sup.slaveState(0), SlaveRecoveryState::Normal);
+    EXPECT_EQ(listener.eventCount(), 0u);
+    sup.stop();
+}
+
+TEST_F(SlaveSupervisorTest, RecoveryGivesUpWithoutHandler) {
+    auto& sup = master_.slaveSupervisor();
+    sup.configure(defaultConfig());
+    sup.setRecoveryHandler(std::make_unique<MockRecoveryHandler>());
+    RecordingEventListener listener;
+    ASSERT_TRUE(sup.addEventListener(&listener));
+    ASSERT_TRUE(sup.start());
+    // Remove the handler mid-run — the attempt must fail permanently.
+    sup.setRecoveryHandler(nullptr);
+
+    // No recovery handler installed -> attempt fails permanently.
+    sup.markCritical(0, "test-critical");
+
+    EXPECT_EQ(sup.slaveState(0), SlaveRecoveryState::Failed);
+    EXPECT_TRUE(listener.hasEvent(RecoveryEventType::RecoveryGaveUp));
+    sup.stop();
+}
+
+TEST_F(SlaveSupervisorTest, RecoveryGivesUpWhenHandlerKeepsFailing) {
+    auto& sup = master_.slaveSupervisor();
+    auto cfg = defaultConfig();
+    cfg.max_attempts = 2;
+    sup.configure(cfg);
+
+    auto handler = std::make_unique<MockRecoveryHandler>();
+    ON_CALL(*handler, reinitializeSlave(_)).WillByDefault(Return(false));
+    sup.setRecoveryHandler(std::move(handler));
+
+    RecordingEventListener listener;
+    ASSERT_TRUE(sup.addEventListener(&listener));
+    ASSERT_TRUE(sup.start());
+
+    sup.markCritical(0, "test-critical");
+
+    EXPECT_EQ(sup.slaveState(0), SlaveRecoveryState::Failed);
+    EXPECT_TRUE(sup.isSlaveSuspended(0));
+    EXPECT_TRUE(listener.hasEvent(RecoveryEventType::RecoveryGaveUp));
+    EXPECT_EQ(sup.slaveAttemptCount(0), 2);
+    sup.stop();
+}
+
+TEST_F(SlaveSupervisorTest, ForceToInitFailureCountsAsFailedAttempt) {
+    auto& sup = master_.slaveSupervisor();
+    auto cfg = defaultConfig();
+    cfg.max_attempts = 1;
+    sup.configure(cfg);
+
+    auto handler = std::make_unique<MockRecoveryHandler>();
+    ON_CALL(*handler, reinitializeSlave(_)).WillByDefault(Return(false));
+    sup.setRecoveryHandler(std::move(handler));
+
+    ASSERT_TRUE(sup.start());
+    sup.markCritical(0, "test-critical");
+
+    EXPECT_EQ(sup.slaveState(0), SlaveRecoveryState::Failed);
+    sup.stop();
+}
+
+TEST_F(SlaveSupervisorTest, StateQueryAccessorsClamp) {
+    auto& sup = master_.slaveSupervisor();
+    EXPECT_FALSE(sup.isSlaveSuspended(0xFFFF));
+    EXPECT_FALSE(sup.isSlaveRecovering(0xFFFF));
+    EXPECT_EQ(sup.slaveState(0xFFFF), SlaveRecoveryState::Normal);
+    EXPECT_EQ(sup.slaveAttemptCount(0xFFFF), 0);
+    sup.resetSlaveState(0xFFFF);          // no-op, no crash
+}
+
+TEST_F(SlaveSupervisorTest, EventListenerManagement) {
+    auto& sup = master_.slaveSupervisor();
+    RecordingEventListener listener;
+    EXPECT_TRUE(sup.addEventListener(&listener));
+    EXPECT_FALSE(sup.addEventListener(nullptr));
+    EXPECT_TRUE(sup.removeEventListener(&listener));
+    EXPECT_FALSE(sup.removeEventListener(&listener));
+    sup.addEventListener(&listener);
+    sup.clearEventListeners();
+}
