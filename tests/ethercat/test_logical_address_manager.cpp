@@ -3073,3 +3073,98 @@ TEST(TxFailureDiagnosticsTest, ProbeRealPacketSocketIfAvailable) {
     EXPECT_FALSE(report.empty());
 }
 #endif
+
+// ============================================================================
+// PDOManager single-entry transfer coverage
+// ============================================================================
+
+TEST_F(PDOManagerBulkTest, SingleEntryRejectsBadIndexAndDirection) {
+    buildSixEntryMap();
+    EXPECT_FALSE(pdo_mgr.sendRxPDO(99));          // out of range
+    EXPECT_FALSE(pdo_mgr.sendRxPDO(3));           // TxPDO entry
+    EXPECT_FALSE(pdo_mgr.receiveTxPDO(0));        // RxPDO entry
+    EXPECT_FALSE(pdo_mgr.receiveTxPDO(99));
+    pdo_mgr.mapping().get_entry_mut(0)->enabled = false;
+    EXPECT_FALSE(pdo_mgr.sendRxPDO(0));           // disabled
+}
+
+TEST_F(PDOManagerBulkTest, SingleEntryAllAddressModes) {
+    buildSixEntryMap();
+    transport.single_respond_ = true;
+    transport.single_resp_wkc_ = 1;
+    transport.single_resp_len_ = 4;
+    std::memset(transport.single_resp_buf_, 0x7E, 4);
+
+    // Rx: Position (confirmed first call, fire-and-forget after),
+    // ConfiguredAddress FPWR, Broadcast BWR.
+    EXPECT_TRUE(pdo_mgr.sendRxPDO(0));
+    EXPECT_TRUE(pdo_mgr.sendRxPDO(0));
+    EXPECT_TRUE(pdo_mgr.sendRxPDO(1));
+    EXPECT_TRUE(pdo_mgr.sendRxPDO(2));
+
+    // Tx: Position APRD, ConfiguredAddress FPRD (+storage copy), Broadcast.
+    EXPECT_TRUE(pdo_mgr.receiveTxPDO(3));
+    EXPECT_TRUE(pdo_mgr.receiveTxPDO(4));
+    EXPECT_EQ(pdo_mgr.mapping().get_entry(4)->storage[0], 0x7E);
+    EXPECT_TRUE(pdo_mgr.receiveTxPDO(5));
+
+    EXPECT_GT(pdo_mgr.getSlavePDORequestCount(0), 0u);
+    EXPECT_GT(pdo_mgr.getSlavePDOReplyCount(0), 0u);
+}
+
+TEST_F(PDOManagerBulkTest, SingleEntryFailurePaths) {
+    buildSixEntryMap();
+
+    transport.single_send_ok_ = false;
+    EXPECT_TRUE(pdo_mgr.sendRxPDO(0));   // confirmed-path failure only counts
+    EXPECT_FALSE(pdo_mgr.sendRxPDO(0));  // fire-and-forget send failure
+    EXPECT_FALSE(pdo_mgr.receiveTxPDO(3));        // APRD send fails
+    EXPECT_FALSE(pdo_mgr.sendRxPDO(1));           // FPWR send fails
+    EXPECT_FALSE(pdo_mgr.sendRxPDO(2));           // BWR send fails
+    transport.single_send_ok_ = true;
+
+    // Response timeout / zero WKC / short data.
+    transport.single_respond_ = false;
+    EXPECT_TRUE(pdo_mgr.sendRxPDO(0));   // fire-and-forget: no wait at all
+    EXPECT_FALSE(pdo_mgr.sendRxPDO(1));
+    EXPECT_FALSE(pdo_mgr.receiveTxPDO(4));
+    EXPECT_FALSE(pdo_mgr.receiveTxPDO(5));
+    transport.single_respond_ = true;
+
+    transport.single_resp_wkc_ = 0;
+    EXPECT_FALSE(pdo_mgr.sendRxPDO(1));
+    EXPECT_FALSE(pdo_mgr.receiveTxPDO(4));
+    transport.single_resp_wkc_ = 1;
+
+    transport.single_resp_len_ = 2;               // < data_size 4
+    EXPECT_FALSE(pdo_mgr.receiveTxPDO(4));
+    EXPECT_FALSE(pdo_mgr.receiveTxPDO(5));
+    transport.single_resp_len_ = 4;
+
+    // Error counters accumulated across the failures.
+    EXPECT_GT(pdo_mgr.mapping().get_entry(1)->error_count, 0u);
+    EXPECT_GT(pdo_mgr.mapping().get_entry(4)->error_count, 0u);
+}
+
+TEST_F(PDOManagerBulkTest, SingleEntryDebugLogging) {
+    debug_flags.rxPDO = true;
+    debug_flags.txPDO = true;
+    pdo_mgr.setDebugFlags(&debug_flags);
+    buildSixEntryMap();
+    transport.single_respond_ = true;
+    transport.single_resp_wkc_ = 1;
+    transport.single_resp_len_ = 4;
+    std::memset(transport.single_resp_buf_, 0x5A, 4);
+
+    EXPECT_TRUE(pdo_mgr.sendRxPDO(0));
+    EXPECT_TRUE(pdo_mgr.sendRxPDO(1));
+    EXPECT_TRUE(pdo_mgr.sendRxPDO(2));
+    EXPECT_TRUE(pdo_mgr.receiveTxPDO(3));
+    EXPECT_TRUE(pdo_mgr.receiveTxPDO(4));
+    EXPECT_TRUE(pdo_mgr.receiveTxPDO(5));
+
+    // Debug arms on the failure side too.
+    transport.single_respond_ = false;
+    EXPECT_FALSE(pdo_mgr.sendRxPDO(1));
+    EXPECT_FALSE(pdo_mgr.receiveTxPDO(4));
+}
