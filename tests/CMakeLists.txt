@@ -1123,6 +1123,7 @@ create_ethercat_test(pdo
         ethercat/test_fmmu_manager.cpp
         ethercat/test_pdo_api.cpp
         ethercat/test_pdo_to_string.cpp
+        ethercat/test_pdo_utils.cpp
         ethercat/test_sync_manager_validation.cpp
         ethercat/test_custom_pdo_mapping.cpp
         ethercat/test_multi_pdo_mapping.cpp
