@@ -1275,6 +1275,7 @@ create_ethercat_test(coverage
         ethercat/test_slave_mailbox_coverage.cpp
         ethercat/test_slave_sdo_coverage.cpp
         ethercat/test_slave_state_coverage.cpp
+        ethercat/test_master_sii_coverage.cpp
         ethercat/test_slavegroup_coe_coverage.cpp
         ethercat/test_mailbox_recovery.cpp
         ethercat/test_slave_pdo_registration.cpp
