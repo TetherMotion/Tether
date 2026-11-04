@@ -279,3 +279,69 @@ TEST(HostSetupTest, GuardSetOnExitReplacesAction) {
     EXPECT_EQ(first, 0);
     EXPECT_EQ(second, 1);
 }
+
+// ============================================================================
+// setupEncapsulation — probe-failure and direct-callback paths
+// ============================================================================
+
+TEST(HostSetupTest, SetupEncapsulationVlanAbortsOnSilentProbe) {
+    // The fake has no native socket — probeVlanTagDelivery returns
+    // nullopt, so a VLAN config must fail startup rather than spin.
+    FakeEthernet eth;
+    Master master;
+    NetworkInterface backend;
+    std::unique_ptr<VLANRouter> router;
+    EncapsulationConfig cfg;
+    ASSERT_TRUE(parseEncapsulationSpec("vlan:100", cfg, "test"));
+    EXPECT_EQ(setupEncapsulation(eth, backend, master, router, cfg, "test"),
+              nullptr);
+    EXPECT_FALSE(router);
+}
+
+TEST(HostSetupTest, SetupEncapsulationUntaggedInstallsDirectCallback) {
+    auto eth = std::make_unique<FakeEthernet>();
+    auto* raw = eth.get();
+    Master master;
+    NetworkInterface backend;
+    std::unique_ptr<VLANRouter> router;
+    EncapsulationConfig cfg;   // disabled — bare EtherCAT link
+    ASSERT_TRUE(parseEncapsulationSpec("raw", cfg, "test"));
+
+    NetworkInterface* ni =
+        setupEncapsulation(*raw, backend, master, router, cfg, "test");
+    ASSERT_EQ(ni, &backend);
+    EXPECT_FALSE(router);
+    ASSERT_TRUE(static_cast<bool>(raw->rx_cb));
+
+    // The installed callback forwards frames to the master.
+    uint8_t frame[64] = {};
+    HAL::RxFrameInfo info{};
+    raw->rx_cb(frame, sizeof(frame), info, raw->rx_ud);
+}
+
+TEST(HostSetupTest, SetupEncapsulationVlanCatchAllAlsoAborts) {
+    FakeEthernet eth;
+    Master master;
+    NetworkInterface backend;
+    std::unique_ptr<VLANRouter> router;
+    EncapsulationConfig cfg;
+    ASSERT_TRUE(parseEncapsulationSpec("vlan:any", cfg, "test"));
+    EXPECT_EQ(setupEncapsulation(eth, backend, master, router, cfg, "test"),
+              nullptr);
+}
+
+TEST(HostSetupTest, ParserSkipsEmptyTokens) {
+    EncapsulationConfig cfg;
+    EXPECT_TRUE(parseEncapsulationSpec("vlan:100,,udp", cfg, "test"));
+    EXPECT_TRUE(cfg.udp);
+    EXPECT_TRUE(parseEncapsulationSpec(" vlan:100 , udp ", cfg, "test"));
+}
+
+TEST(HostSetupTest, LogEncapsulationConfigUntaggedRx) {
+    EncapsulationConfig cfg;
+    ASSERT_TRUE(parseEncapsulationSpec("vlantx:200", cfg, "test"));
+    logEncapsulationConfig(cfg, "test");
+    // Disabled config logs nothing but must not crash.
+    EncapsulationConfig off;
+    logEncapsulationConfig(off, "test");
+}
