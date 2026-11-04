@@ -3168,3 +3168,28 @@ TEST_F(PDOManagerBulkTest, SingleEntryDebugLogging) {
     EXPECT_FALSE(pdo_mgr.sendRxPDO(1));
     EXPECT_FALSE(pdo_mgr.receiveTxPDO(4));
 }
+
+// ============================================================================
+// PDOMapping — add logging, size validation, slave-entry compaction
+// ============================================================================
+
+TEST(PDOMappingCoverageTest, AddLoggingAndSizeValidation) {
+    PDO::PDOMapping m;
+    m.setAddLogging(true);
+    EXPECT_GE(m.add_rxpdo(0, 4, 0x1600), 0);
+    EXPECT_GE(m.add_txpdo(0, 4, 0x1A00), 0);
+    // size==0 and oversized both reject.
+    EXPECT_EQ(m.add_rxpdo(0, 0, 0x1600), -1);
+    EXPECT_EQ(m.add_txpdo(0, 0, 0x1A00), -1);
+    EXPECT_EQ(m.add_rxpdo(0, PDO::kMaxPDOSize + 1, 0x1600), -1);
+}
+
+TEST(PDOMappingCoverageTest, RemoveEntriesForSlaveCompactsMiddle) {
+    PDO::PDOMapping m;
+    m.add_rxpdo(0, 4, 0x1600);
+    m.add_rxpdo(1, 4, 0x1600);   // middle entry — removed
+    m.add_rxpdo(2, 4, 0x1600);   // compacts left over slot 1
+    m.remove_entries_for_slave(1);
+    ASSERT_EQ(m.entry_count(), 2u);
+    EXPECT_EQ(m.get_entry(1)->slave_index, 2u);
+}
