@@ -1909,6 +1909,7 @@ public:
         last_multi_adp.clear();
         last_multi_ado.clear();
         last_multi_data.clear();
+        last_multi_payloads.clear();
         for (size_t i = 0; i < count; ++i) {
             last_multi_adp.push_back(specs[i].adp);
             last_multi_ado.push_back(specs[i].ado);
@@ -1916,12 +1917,29 @@ public:
                 specs[i].data
                     ? *static_cast<const uint8_t*>(specs[i].data)
                     : 0xFF);
+            if (specs[i].data && specs[i].datalen)
+                last_multi_payloads.emplace_back(
+                    static_cast<const uint8_t*>(specs[i].data),
+                    static_cast<const uint8_t*>(specs[i].data) +
+                        specs[i].datalen);
+            else
+                last_multi_payloads.emplace_back();
         }
         return count;
     }
     bool waitForPreRegistered(size_t slot, unsigned int,
-                              RxDatagram&) override {
+                              RxDatagram& out) override {
         confirmed_slots.push_back(slot);
+        if (wait_prereg_ok_) {
+            const size_t call = prereg_wait_calls_++;
+            const uint16_t wkc =
+                (call < prereg_wkc_plan_.size()) ? prereg_wkc_plan_[call]
+                                                : prereg_wkc_;
+            out.wkc     = wkc;
+            out.datalen = prereg_resp_len_;
+            if (prereg_resp_len_)
+                std::memcpy(out.data, prereg_resp_buf_, prereg_resp_len_);
+        }
         return wait_prereg_ok_;
     }
     void cancelPreRegistered(size_t slot) override {
@@ -1945,9 +1963,15 @@ public:
     std::vector<size_t>   waited_slots;
     std::vector<size_t>   confirmed_slots;
     std::vector<size_t>   cancelled_slots;
+    size_t                prereg_wait_calls_ = 0;
+    uint16_t              prereg_wkc_ = 1;
+    std::vector<uint16_t> prereg_wkc_plan_;
+    uint16_t              prereg_resp_len_ = 0;
+    uint8_t               prereg_resp_buf_[512]{};
     std::vector<uint16_t> last_multi_adp;
     std::vector<uint16_t> last_multi_ado;
     std::vector<uint8_t>  last_multi_data;
+    std::vector<std::vector<uint8_t>> last_multi_payloads;
 };
 
 class PDOManagerSMConfigTest : public ::testing::Test {
@@ -2136,4 +2160,224 @@ TEST_F(PDOManagerSMConfigTest, DebugFlagsExerciseLoggingArms) {
 
     EXPECT_TRUE(pdo_mgr.configureSlavesSMs(0));
     EXPECT_EQ(transport.writes.size(), 12u);
+}
+
+// ============================================================================
+// PDOManager physical (FPWR/FPRD) exchange coverage
+// ============================================================================
+
+namespace {
+
+class PDOManagerPhysicalTest : public ::testing::Test {
+protected:
+    SMConfigStubTransport transport;
+    PDOManager pdo_mgr{transport};
+    EtherCATMasterDebugFlags debug_flags;
+
+    void SetUp() override {
+        auto* cfgs = pdo_mgr.slaveConfigs();
+        cfgs[0].configured = true;
+        cfgs[0].configured_address = 0x2000;
+        cfgs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 16);
+        cfgs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 12);
+        cfgs[0].rxpdo_size = 16;
+        cfgs[0].txpdo_size = 12;
+
+        ASSERT_GE(pdo_mgr.mapping().add_rxpdo(0, 16, 0x1704), 0);
+        ASSERT_GE(pdo_mgr.mapping().add_txpdo(0, 12, 0x1B03), 0);
+        pdo_mgr.mapping().get_entry_mut(0)->physical_offset = 0x1800;
+        pdo_mgr.mapping().get_entry_mut(1)->physical_offset = 0x1C00;
+
+        transport.prereg_ok_ = true;
+        transport.prereg_wkc_ = 1;
+        transport.prereg_resp_len_ = 12;
+        for (size_t i = 0; i < 12; ++i)
+            transport.prereg_resp_buf_[i] = static_cast<uint8_t>(0xA0 + i);
+    }
+};
+
+}  // namespace
+
+TEST_F(PDOManagerPhysicalTest, ExchangePhysicalZeroCountSucceeds) {
+    EXPECT_TRUE(pdo_mgr.exchangePhysical(0));
+    EXPECT_TRUE(transport.writes.empty());
+}
+
+TEST_F(PDOManagerPhysicalTest, BatchedWriteReadRoundTrip) {
+    ASSERT_TRUE(pdo_mgr.exchangePhysical(1));
+
+    ASSERT_EQ(transport.last_multi_ado.size(), 2u);
+    EXPECT_EQ(transport.last_multi_adp[0], 0x2000);   // configured address
+    EXPECT_EQ(transport.last_multi_ado[0], 0x1800);   // FPWR -> SM2 phys
+    EXPECT_EQ(transport.last_multi_ado[1], 0x1C00);   // FPRD -> SM3 phys
+    EXPECT_EQ(transport.confirmed_slots.size(), 2u);
+
+    // The FPRD payload landed in the TxPDO entry's storage.
+    const auto* e = pdo_mgr.mapping().get_entry(1);
+    ASSERT_NE(e, nullptr);
+    EXPECT_EQ(std::memcmp(e->storage, transport.prereg_resp_buf_, 12), 0);
+    EXPECT_EQ(e->success_count, 1u);
+}
+
+TEST_F(PDOManagerPhysicalTest, RxStorageGatheredIntoWriteFrame) {
+    auto* e = pdo_mgr.mapping().get_entry_mut(0);
+    std::memset(e->storage, 0, 16);
+    e->storage[0] = 0x5A;
+    e->storage[15] = 0xA5;
+
+    ASSERT_TRUE(pdo_mgr.exchangePhysical(1));
+    ASSERT_EQ(transport.last_multi_payloads.size(), 2u);
+    ASSERT_EQ(transport.last_multi_payloads[0].size(), 16u);
+    EXPECT_EQ(transport.last_multi_payloads[0][0], 0x5A);
+    EXPECT_EQ(transport.last_multi_payloads[0][15], 0xA5);
+}
+
+TEST_F(PDOManagerPhysicalTest, MultiSendFailureCountsBothErrors) {
+    transport.multi_send_ok_ = false;
+    EXPECT_FALSE(pdo_mgr.exchangePhysical(1));
+    // Both preregistered waiters were drained as cancellation.
+    EXPECT_EQ(transport.confirmed_slots.size(), 2u);
+}
+
+TEST_F(PDOManagerPhysicalTest, WaitTimeoutFailsExchange) {
+    transport.wait_prereg_ok_ = false;
+    EXPECT_FALSE(pdo_mgr.exchangePhysical(1));
+    const auto* e = pdo_mgr.mapping().get_entry(1);
+    EXPECT_EQ(e->success_count, 0u);
+}
+
+TEST_F(PDOManagerPhysicalTest, ZeroWkcFailsExchange) {
+    transport.prereg_wkc_ = 0;
+    EXPECT_FALSE(pdo_mgr.exchangePhysical(1));
+}
+
+TEST_F(PDOManagerPhysicalTest, WriteWkcZeroStillCopiesRead) {
+    // Write datagram WKC 0 fails the write side but the read side still
+    // scatters its payload into entry storage.
+    transport.prereg_wkc_plan_ = {0, 1};
+    EXPECT_FALSE(pdo_mgr.exchangePhysical(1));
+    const auto* e = pdo_mgr.mapping().get_entry(1);
+    EXPECT_EQ(std::memcmp(e->storage, transport.prereg_resp_buf_, 12), 0);
+}
+
+TEST_F(PDOManagerPhysicalTest, NonPreregWaitPath) {
+    transport.prereg_ok_ = false;   // falls back to waitForResponseIdx
+    transport.single_resp_wkc_ = 1;
+    transport.single_resp_len_ = 12;
+    std::memcpy(transport.single_resp_buf_, transport.prereg_resp_buf_, 12);
+    EXPECT_TRUE(pdo_mgr.exchangePhysical(1));
+}
+
+TEST_F(PDOManagerPhysicalTest, NonPreregWaitTimeoutFails) {
+    transport.prereg_ok_ = false;
+    transport.single_respond_ = false;
+    EXPECT_FALSE(pdo_mgr.exchangePhysical(1));
+}
+
+TEST_F(PDOManagerPhysicalTest, WriteOnlyUsesWriteRegister) {
+    auto* cfgs = pdo_mgr.slaveConfigs();
+    cfgs[0].sm[3].type = SyncManagerType::Unused;
+    ASSERT_TRUE(pdo_mgr.exchangePhysical(1));
+    ASSERT_EQ(transport.writes.size(), 1u);
+    EXPECT_EQ(transport.writes[0].ado, 0x1800);
+    EXPECT_EQ(transport.writes[0].len, 16u);
+    EXPECT_EQ(transport.writes[0].adp, 0x1000);   // adpForSlaveIndex
+}
+
+TEST_F(PDOManagerPhysicalTest, WriteOnlyFailure) {
+    auto* cfgs = pdo_mgr.slaveConfigs();
+    cfgs[0].sm[3].type = SyncManagerType::Unused;
+    transport.fail_writes = {1};
+    EXPECT_FALSE(pdo_mgr.exchangePhysical(1));
+}
+
+TEST_F(PDOManagerPhysicalTest, ReadOnlyUsesReadRegister) {
+    auto* cfgs = pdo_mgr.slaveConfigs();
+    cfgs[0].sm[2].type = SyncManagerType::Unused;
+    transport.read_byte_ = 0x7B;
+    ASSERT_TRUE(pdo_mgr.exchangePhysical(1));
+    ASSERT_EQ(transport.reads.size(), 1u);
+    EXPECT_EQ(transport.reads[0].ado, 0x1C00);
+    const auto* e = pdo_mgr.mapping().get_entry(1);
+    EXPECT_EQ(e->storage[0], 0x7B);
+    EXPECT_EQ(e->success_count, 1u);
+}
+
+TEST_F(PDOManagerPhysicalTest, ReadOnlyFailure) {
+    auto* cfgs = pdo_mgr.slaveConfigs();
+    cfgs[0].sm[2].type = SyncManagerType::Unused;
+    transport.read_ok_ = false;
+    EXPECT_FALSE(pdo_mgr.exchangePhysical(1));
+}
+
+TEST_F(PDOManagerPhysicalTest, SkipsUnconfiguredSlaves) {
+    auto* cfgs = pdo_mgr.slaveConfigs();
+    cfgs[0].configured = false;
+    EXPECT_TRUE(pdo_mgr.exchangePhysical(1));
+    EXPECT_TRUE(transport.writes.empty());
+    EXPECT_TRUE(transport.reads.empty());
+}
+
+TEST_F(PDOManagerPhysicalTest, PeriodicWireLogDecodesPdoFields) {
+    // should_log_wire fires on the 1000th successful cycle with debug
+    // flags set — exercises the CiA402 controlword/statusword decode,
+    // the RxPDO-layout switch (0x1704: tq@10 opmode@12), the mode arms,
+    // and the digital-input TxPDO arm (0x1B03).
+    debug_flags.rxPDO = true;
+    debug_flags.txPDO = true;
+    pdo_mgr.setDebugFlags(&debug_flags);
+
+    auto* rx = pdo_mgr.mapping().get_entry_mut(0);
+    std::memset(rx->storage, 0, 16);
+    rx->storage[0] = 0x0F;                    // controlword bits
+    rx->storage[12] = 8;                      // opmode = CSP
+
+    for (int i = 0; i < 1000; ++i)
+        ASSERT_TRUE(pdo_mgr.exchangePhysical(1));
+
+    // Second 1000-cycle block with a different mode byte hits another
+    // mode arm (CSV) of the interpreter log.
+    rx->storage[12] = 9;
+    for (int i = 0; i < 1000; ++i)
+        ASSERT_TRUE(pdo_mgr.exchangePhysical(1));
+}
+
+TEST_F(PDOManagerPhysicalTest, WireLogRemainingDecodeArms) {
+    debug_flags.rxPDO = true;
+    debug_flags.txPDO = true;
+    pdo_mgr.setDebugFlags(&debug_flags);
+
+    // Rebuild the mapping with a 0x1705 RxPDO (opmode @10) + 0x1B04
+    // TxPDO (trailing field = velocity, not digital inputs).
+    pdo_mgr.mapping().clear();
+    ASSERT_GE(pdo_mgr.mapping().add_rxpdo(0, 16, 0x1705), 0);
+    ASSERT_GE(pdo_mgr.mapping().add_txpdo(0, 12, 0x1B04), 0);
+    pdo_mgr.mapping().get_entry_mut(0)->physical_offset = 0x1800;
+    pdo_mgr.mapping().get_entry_mut(1)->physical_offset = 0x1C00;
+
+    auto* rx = pdo_mgr.mapping().get_entry_mut(0);
+    std::memset(rx->storage, 0, 16);
+    rx->storage[10] = 10;                     // opmode = CST
+    for (int i = 0; i < 1000; ++i)
+        ASSERT_TRUE(pdo_mgr.exchangePhysical(1));
+
+    rx->storage[10] = 4;                      // unrecognized mode arm
+    for (int i = 0; i < 1000; ++i)
+        ASSERT_TRUE(pdo_mgr.exchangePhysical(1));
+}
+
+TEST_F(PDOManagerPhysicalTest, WireLogNoModeFieldLayout) {
+    debug_flags.rxPDO = true;
+    debug_flags.txPDO = true;
+    pdo_mgr.setDebugFlags(&debug_flags);
+
+    // 0x1701: no mode field, no target velocity — the raw-targets arm.
+    pdo_mgr.mapping().clear();
+    ASSERT_GE(pdo_mgr.mapping().add_rxpdo(0, 16, 0x1701), 0);
+    ASSERT_GE(pdo_mgr.mapping().add_txpdo(0, 12, 0x1B02), 0);
+    pdo_mgr.mapping().get_entry_mut(0)->physical_offset = 0x1800;
+    pdo_mgr.mapping().get_entry_mut(1)->physical_offset = 0x1C00;
+
+    for (int i = 0; i < 1000; ++i)
+        ASSERT_TRUE(pdo_mgr.exchangePhysical(1));
 }
