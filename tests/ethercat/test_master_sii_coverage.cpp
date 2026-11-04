@@ -238,4 +238,47 @@ TEST_F(MasterSiiCoverageTest, DiscoveryCancelledReturnsEarly) {
     EXPECT_FALSE(master_.hasAnySlaves());
 }
 
+
+// ============================================================================
+// Master_cyclic slot accessors + async/motion/queue loop lifecycle
+// ============================================================================
+
+TEST_F(MasterSiiCoverageTest, CyclicSlotTokenAndGen) {
+    EXPECT_EQ(master_.cyclicSlotToken(0), master_.cyclicSlotToken(0));
+    EXPECT_EQ(master_.cyclicSlotGen(0), master_.cyclicSlotGen(0));
+    EXPECT_EQ(master_.sliceSlotToken(0), master_.sliceSlotToken(0));
+    EXPECT_EQ(master_.sliceSlotGen(0), master_.sliceSlotGen(0));
+}
+
+TEST_F(MasterSiiCoverageTest, AcquireAndReleaseSliceSlot) {
+    int slot = master_.acquireSliceSlot();
+    if (slot >= 0) {
+        master_.releaseSliceSlot(static_cast<uint8_t>(slot));
+    }
+}
+
+TEST_F(MasterSiiCoverageTest, AsyncLoopStartStop) {
+    AsyncLoopConfig cfg{};
+    const bool started = master_.startAsyncLoop(cfg);
+    EXPECT_EQ(master_.isAsyncLoopRunning(), started);
+    if (started) {
+        (void)master_.getAsyncLoopStats();
+    }
+    master_.stopAsyncLoop();
+    EXPECT_FALSE(master_.isAsyncLoopRunning());
+}
+
+TEST_F(MasterSiiCoverageTest, MotionAndQueueLoopStartStop) {
+    master_.setMotionControlCallback([](double) { return true; });
+    const bool polling = master_.startPollingMotionControlLoop();
+    EXPECT_EQ(master_.isMotionControlLoopRunning(), polling);
+    master_.stopMotionControlLoop();
+    EXPECT_FALSE(master_.isMotionControlLoopRunning());
+
+    const bool queue = master_.startQueueModeLoop();
+    EXPECT_EQ(master_.isQueueModeLoopRunning(), queue);
+    master_.stopQueueModeLoop();
+    EXPECT_FALSE(master_.isQueueModeLoopRunning());
+}
+
 }  // namespace
