@@ -2,6 +2,7 @@
 
 #include "tether/ethercat/FaultDetection.hpp"
 #include "tether/ethercat/SlaveEmulator.hpp"
+#include <cstring>
 
 using namespace EtherCAT;
 using namespace EtherCAT::Emulator;
@@ -69,4 +70,51 @@ TEST(EtherCATFaultDetection, EmulatorTransport_ReadTimeoutDoesNotCrash) {
     // Poll should handle transport read failures gracefully (no fault reported)
     auto s = fd.poll(0);
     EXPECT_FALSE(s.has_fault);
+}
+
+// ============================================================================
+// Status-code name tables and manufacturer fault decoding
+// ============================================================================
+
+#include <magic_enum/magic_enum.hpp>
+
+TEST(FaultDetectionNames, AllALStatusCodes) {
+    for (auto code : magic_enum::enum_values<EtherCAT::ALStatusCode>()) {
+        const char* name = EtherCAT::getALStatusCodeName(static_cast<uint16_t>(code));
+        EXPECT_NE(name, nullptr);
+        EXPECT_GT(std::strlen(name), 0u);
+    }
+    // unknown code falls through
+    EXPECT_STREQ(EtherCAT::getALStatusCodeName(0xFFFE), "Unknown error");
+}
+
+TEST(FaultDetectionNames, AllCiA402ErrorCodes) {
+    for (auto code : magic_enum::enum_values<EtherCAT::CiA402ErrorCode>()) {
+        const char* name = EtherCAT::getCiA402ErrorCodeName(static_cast<uint16_t>(code));
+        EXPECT_NE(name, nullptr);
+        EXPECT_GT(std::strlen(name), 0u);
+    }
+    EXPECT_STREQ(EtherCAT::getCiA402ErrorCodeName(0x1234), "Unknown CiA 402 error");
+}
+
+TEST(FaultDetectionNames, ManufacturerFaultParse) {
+    // known descriptions
+    EXPECT_EQ(EtherCAT::ManufacturerFault::parse(741).description, std::string("No Sync (Err74.1)"));
+    EXPECT_EQ(EtherCAT::ManufacturerFault::parse(740).description, std::string("DC Sync Error (Err74.0)"));
+    EXPECT_EQ(EtherCAT::ManufacturerFault::parse(200).description, std::string("Over current"));
+    EXPECT_EQ(EtherCAT::ManufacturerFault::parse(300).description, std::string("Over voltage"));
+    EXPECT_EQ(EtherCAT::ManufacturerFault::parse(500).description, std::string("Encoder error"));
+    // class/subcode split: >= 100 -> class = code/10, sub = code%10
+    auto f = EtherCAT::ManufacturerFault::parse(741);
+    EXPECT_EQ(f.class_code, 74);
+    EXPECT_EQ(f.sub_code, 1);
+    EXPECT_EQ(f.raw_code, 741);
+    // < 100 -> class = code, sub = 0
+    auto g = EtherCAT::ManufacturerFault::parse(42);
+    EXPECT_EQ(g.class_code, 42);
+    EXPECT_EQ(g.sub_code, 0);
+    // unknown code with vendor/product hints takes the fallback arm
+    auto u = EtherCAT::ManufacturerFault::parse(9999, 0x00000002, 0x044C2C52);
+    EXPECT_EQ(u.raw_code, 9999);
+    EXPECT_NE(u.description, nullptr);
 }
