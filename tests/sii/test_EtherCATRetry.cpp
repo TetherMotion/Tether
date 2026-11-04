@@ -117,3 +117,78 @@ TEST_F(SiiRetryTest, SendFailureThenRetrySucceeds_andLogStatsCallable) {
     // Ensure logStats() is callable (exercise coverage) and does not throw
     EXPECT_NO_THROW(exec.logStats());
 }
+
+// ============================================================================
+// Datagram builders + policy/result helpers (pure functions)
+// ============================================================================
+
+TEST(RetryBuilders, AprdApwr) {
+    auto rd = EtherCAT::Raw::buildAPRD(1, 3, 0x0130, 2);
+    EXPECT_EQ(rd.cmd, EtherCAT::Raw::EtherCATCommand::APRD);
+    EXPECT_EQ(rd.idx, 1);
+    EXPECT_EQ(rd.ado, 0x0130);
+    EXPECT_EQ(rd.datalen, 2);
+    EXPECT_EQ(rd.adp, static_cast<uint16_t>(-static_cast<int16_t>(3) - 1));
+    EXPECT_TRUE(rd.isValid());
+
+    const uint8_t payload[2] = {0xAA, 0xBB};
+    auto wr = EtherCAT::Raw::buildAPWR(2, 3, 0x0120, payload, 2);
+    EXPECT_EQ(wr.cmd, EtherCAT::Raw::EtherCATCommand::APWR);
+    EXPECT_EQ(wr.data[0], 0xAA);
+    EXPECT_EQ(wr.data[1], 0xBB);
+    // oversized payload is rejected (no copy, length kept)
+    auto over = EtherCAT::Raw::buildAPWR(0, 0, 0, payload, 2000);
+    EXPECT_EQ(over.datalen, 2000);
+}
+
+TEST(RetryBuilders, FprdFpwr) {
+    auto rd = EtherCAT::Raw::buildFPRD(0, 0x03E9, 0x0130, 4);
+    EXPECT_EQ(rd.cmd, EtherCAT::Raw::EtherCATCommand::FPRD);
+    EXPECT_EQ(rd.adp, 0x03E9);
+    EXPECT_EQ(rd.datalen, 4);
+    const uint8_t p[4] = {1, 2, 3, 4};
+    auto wr = EtherCAT::Raw::buildFPWR(0, 0x03E9, 0x0120, p, 4);
+    EXPECT_EQ(wr.cmd, EtherCAT::Raw::EtherCATCommand::FPWR);
+    EXPECT_EQ(wr.data[3], 4);
+}
+
+TEST(RetryBuilders, BroadcastAndLogical) {
+    auto brd = EtherCAT::Raw::buildBRD(0, 0x0130, 2);
+    EXPECT_EQ(brd.cmd, EtherCAT::Raw::EtherCATCommand::BRD);
+    EXPECT_EQ(brd.adp, 0);
+    const uint8_t p[2] = {7, 8};
+    auto bwr = EtherCAT::Raw::buildBWR(0, 0x0120, p, 2);
+    EXPECT_EQ(bwr.cmd, EtherCAT::Raw::EtherCATCommand::BWR);
+    EXPECT_EQ(bwr.data[0], 7);
+
+    auto lrw = EtherCAT::Raw::buildLRW(0, 0x00001000, p, 2);
+    EXPECT_EQ(lrw.cmd, EtherCAT::Raw::EtherCATCommand::LRW);
+    EXPECT_EQ(lrw.ado, 0x1000);
+    auto lrd = EtherCAT::Raw::buildLRD(0, 0x00001000, 2);
+    EXPECT_EQ(lrd.cmd, EtherCAT::Raw::EtherCATCommand::LRD);
+    auto lwr = EtherCAT::Raw::buildLWR(0, 0x00001000, p, 2);
+    EXPECT_EQ(lwr.cmd, EtherCAT::Raw::EtherCATCommand::LWR);
+    EXPECT_EQ(lwr.data[1], 8);
+}
+
+TEST(RetryPolicyHelpers, TimeoutBackoff) {
+    EtherCAT::Raw::RetryPolicy pol;
+    pol.initial_timeout_ms = 10;
+    pol.max_timeout_ms = 100;
+    pol.backoff_multiplier = 2.0f;
+    pol.use_exponential_backoff = true;
+    EXPECT_EQ(pol.getTimeoutForAttempt(0), 10u);
+    EXPECT_EQ(pol.getTimeoutForAttempt(1), 20u);
+    EXPECT_EQ(pol.getTimeoutForAttempt(2), 40u);
+    EXPECT_EQ(pol.getTimeoutForAttempt(5), 100u);  // clamped
+    pol.use_exponential_backoff = false;
+    EXPECT_EQ(pol.getTimeoutForAttempt(5), 10u);
+}
+
+TEST(RetryResultHelpers, WkcError) {
+    EtherCAT::Raw::RetryResult r;
+    r.success = true;
+    r.wkc = 1;
+    EXPECT_FALSE(r.isWkcError(1));
+    EXPECT_TRUE(r.isWkcError(2));
+}
