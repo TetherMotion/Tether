@@ -689,7 +689,9 @@ TEST_F(LogicalAddressManagerTest, OutOfRangeQueries) {
 class CyclicStubTransport : public IPDOTransport {
 public:
     // ---- fast-path surface ----
-    bool supportsCyclicFastPath() const override { return true; }
+    bool supportsCyclicFastPath() const override {
+        return fast_path_;
+    }
     size_t maxEtherCATPayloadPerFrame() const override { return payload_; }
     uint64_t cyclicSlotToken(uint8_t slot) override {
         return slot <= kCyclicDcPoolPos ? tokens_[slot] : 0;
@@ -780,6 +782,7 @@ private:
             return;
         const Command cmd = sent_cmd_[pos];
         v.gen = gens_[pos];
+        v.stamp_ns = stamp_ns_;
         if (cmd == Command::LRD) {          // counter trailer — echo back
             if (!cnt_respond_) return;
             v.payload = cnt_corrupt_ ? corrupt_buf_ : sent_buf_[pos];
@@ -798,7 +801,7 @@ private:
             v.wkc     = resp_wkc_[s];
             if (stale_[s]) {                // echo previous generation
                 v.gen ^= 1;
-                stale_[s] = false;
+                stale_[s]--;
             }
         }
         arrived = true;
@@ -891,6 +894,7 @@ public:
                 ? static_cast<uint8_t>(slice_gen_[s] ^ 1)
                 : slice_gen_[s];
             slice_stale_[s] = false;
+            views[s].stamp_ns = stamp_ns_;
             arrived |= 1u << s;
         }
         return arrived;
@@ -907,7 +911,9 @@ public:
     uint16_t sent_len_[kCyclicDcPoolPos + 1]{};
     uint8_t  sent_buf_[kCyclicDcPoolPos + 1][64]{};
     bool     respond_[kMaxScripted];
-    bool     stale_[kMaxScripted]{};
+    int      stale_[kMaxScripted]{};        // stale echoes remaining
+    bool     fast_path_ = true;
+    uint64_t stamp_ns_ = 0;                 // scripted deposit stamp
     uint8_t  resp_buf_[kMaxScripted][64]{};
     uint16_t resp_len_[kMaxScripted]{};
     uint16_t resp_wkc_[kMaxScripted]{};
@@ -1898,6 +1904,8 @@ public:
     // waiter per SM then sends a single multi-datagram frame).
     size_t preRegisterResponseWaiter(uint8_t, uint8_t*,
                                      size_t) override {
+        if (prereg_busy_)
+            return IPDOTransport::kPreRegBusy;
         if (waited_slots.size() == prereg_fail_at ||
             !prereg_ok_)
             return IPDOTransport::kPreRegInvalid;
@@ -1957,6 +1965,7 @@ public:
     uint8_t               read_byte_ = 0;
 
     bool   prereg_ok_      = false;         // support the batched path?
+    bool   prereg_busy_    = false;         // every claim returns busy
     bool   multi_send_ok_  = true;
     bool   wait_prereg_ok_ = true;
     size_t prereg_fail_at  = SIZE_MAX;      // slot index that fails prereg
@@ -2670,4 +2679,264 @@ TEST_F(PDOManagerBulkTest, SlaveCountSetterAndCounts) {
     EXPECT_EQ(pdo_mgr.slaveCount(), 7u);
     EXPECT_EQ(pdo_mgr.getSlavePDORequestCount(PDO::kMaxPDOSlaves), 0u);
     EXPECT_EQ(pdo_mgr.getSlavePDOReplyCount(PDO::kMaxPDOSlaves), 0u);
+}
+
+// ============================================================================
+// LogicalAddressManager polled-path error coverage
+// ============================================================================
+
+namespace {
+
+class LAMErrorPathsTest : public ::testing::Test {
+protected:
+    SMConfigStubTransport transport;
+    LogicalAddressManager lam{transport};
+    PDOMapping mapping;
+    EtherCATMasterDebugFlags debug_flags;
+
+    void buildMap() {
+        lam.init();
+        SlaveConfig configs[kMaxPDOSlaves] = {};
+        configs[0].configured = true;
+        configs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 4);
+        configs[0].rxpdo_size = 4;
+        configs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 8);
+        configs[0].txpdo_size = 8;
+        ASSERT_TRUE(lam.buildAddressMap(configs, 1));
+        mapping.add_rxpdo(0, 4, 0x1600, PDOAddressMode::Logical);
+        mapping.add_txpdo(0, 8, 0x1A00, PDOAddressMode::Logical);
+        transport.single_resp_wkc_ = 3;
+        transport.single_resp_len_ = 12;
+    }
+};
+
+}  // namespace
+
+TEST_F(LAMErrorPathsTest, ExchangeFailsWhenNotInitialized) {
+    // exchangeAllLRW early-outs on a zero-byte image; the slice and
+    // per-slave entry points reject up front.
+    EXPECT_FALSE(lam.exchangeLRWSlice(mapping, 0, 4));
+    lam.init();
+    EXPECT_FALSE(lam.exchangeLRWSlice(mapping, 0, 4));   // no slaves built
+    EXPECT_GT(lam.getStats().send_errors, 0u);
+}
+
+TEST_F(LAMErrorPathsTest, ExchangeLRWForSlavesFailsWhenNotInitialized) {
+    lam.init();
+    EXPECT_FALSE(lam.exchangeLRWForSlaves(mapping, 1));
+}
+
+TEST_F(LAMErrorPathsTest, BuildAddressMapRejectsEmptyInput) {
+    lam.init();
+    SlaveConfig configs[kMaxPDOSlaves] = {};
+    EXPECT_FALSE(lam.buildAddressMap(configs, 0));
+}
+
+TEST_F(LAMErrorPathsTest, InitDeinitWithShutdownFlag) {
+    debug_flags.shutdown = true;
+    lam.setDebugFlags(&debug_flags);
+    buildMap();
+    EXPECT_TRUE(lam.isInitialized());
+    lam.deinit();
+    EXPECT_FALSE(lam.isInitialized());
+    // Sliced/per-slave exchanges reject after deinit.
+    EXPECT_FALSE(lam.exchangeLRWSlice(mapping, 0, 4));
+    EXPECT_FALSE(lam.exchangeLRWForSlaves(mapping, 1));
+}
+
+TEST_F(LAMErrorPathsTest, SliceOutOfRangeAndOversizeRejected) {
+    buildMap();
+    EXPECT_FALSE(lam.exchangeLRWSlice(mapping, 20, 4));     // past image
+    EXPECT_FALSE(lam.exchangeLRWSlice(mapping, 0,
+                                      lam.maxSliceLength() + 1));
+    EXPECT_TRUE(lam.exchangeLRWSlice(mapping, 0, 0));       // empty ok
+    EXPECT_EQ(lam.getStats().send_errors, 2u);
+}
+
+TEST_F(LAMErrorPathsTest, SendFailureCountsAndCancelsSlot) {
+    buildMap();
+    transport.prereg_ok_ = true;           // take the claimed-slot arm
+    transport.single_send_ok_ = false;
+    EXPECT_FALSE(lam.exchangeAllLRW(mapping));
+    EXPECT_EQ(lam.getStats().send_errors, 1u);
+}
+
+TEST_F(LAMErrorPathsTest, ResponseTimeoutCountsAndDrains) {
+    buildMap();
+    transport.single_respond_ = false;
+    EXPECT_FALSE(lam.exchangeAllLRW(mapping));
+    EXPECT_EQ(lam.getStats().timeout_errors, 1u);
+    EXPECT_EQ(lam.getStats().consecutive_timeouts, 1u);
+}
+
+TEST_F(LAMErrorPathsTest, ZeroWkcCountsAsError) {
+    buildMap();
+    transport.single_resp_wkc_ = 0;
+    EXPECT_FALSE(lam.exchangeAllLRW(mapping));
+    EXPECT_EQ(lam.getStats().wkc_errors, 1u);
+}
+
+TEST_F(LAMErrorPathsTest, SuccessResetsConsecutiveTimeouts) {
+    buildMap();
+    transport.single_respond_ = false;
+    EXPECT_FALSE(lam.exchangeAllLRW(mapping));
+    transport.single_respond_ = true;
+    EXPECT_TRUE(lam.exchangeAllLRW(mapping));
+    EXPECT_EQ(lam.getStats().consecutive_timeouts, 0u);
+}
+
+TEST_F(LAMErrorPathsTest, BusyWaiterSlotFailsExchange) {
+    buildMap();
+    transport.prereg_busy_ = true;
+    EXPECT_FALSE(lam.exchangeAllLRW(mapping));
+    EXPECT_EQ(lam.getStats().send_errors, 1u);
+}
+
+TEST_F(LAMErrorPathsTest, ForSlavesPaths) {
+    buildMap();
+    EXPECT_TRUE(lam.exchangeLRWForSlaves(mapping, 0));   // empty mask
+
+    transport.single_send_ok_ = false;
+    EXPECT_FALSE(lam.exchangeLRWForSlaves(mapping, 1));
+    transport.single_send_ok_ = true;
+
+    transport.single_respond_ = false;
+    EXPECT_FALSE(lam.exchangeLRWForSlaves(mapping, 1));
+    transport.single_respond_ = true;
+
+    transport.single_resp_wkc_ = 0;
+    EXPECT_FALSE(lam.exchangeLRWForSlaves(mapping, 1));
+    transport.single_resp_wkc_ = 3;
+
+    // Success: tx region copied into entry storage.
+    std::memset(transport.single_resp_buf_, 0x33, 12);
+    EXPECT_TRUE(lam.exchangeLRWForSlaves(mapping, 1));
+    EXPECT_EQ(mapping.get_entry(1)->storage[0], 0x33);
+}
+
+TEST_F(LAMErrorPathsTest, ForSlavesInactiveMaskSucceedsTrivially) {
+    buildMap();
+    // Mask hits a slave with no active map region.
+    EXPECT_TRUE(lam.exchangeLRWForSlaves(mapping, 1u << 5));
+}
+
+TEST_F(LAMErrorPathsTest, KnobAccessors) {
+    lam.setLrwResponseTimeoutMs(20);
+    EXPECT_EQ(lam.lrwResponseTimeoutMs(), 20u);
+    lam.setLrwResponseTimeoutMs(0);
+    EXPECT_EQ(lam.lrwResponseTimeoutMs(), 1u);
+    lam.setStallDetectionGapUs(1234);
+    EXPECT_EQ(lam.stallDetectionGapUs(), 1234u);
+    lam.setEscalateAfterTimeouts(4);
+}
+
+// ============================================================================
+// LAM cyclic/slice error-path coverage
+// ============================================================================
+
+TEST_F(LAMErrorPathsTest, CyclicSendRejectsWhenUninitialized) {
+    lam.init();   // initialized but no slaves
+    EXPECT_FALSE(lam.cyclicSend(mapping, nullptr, 1'000'000));
+}
+
+TEST_F(LAMErrorPathsTest, CyclicSendFallsBackWithoutFastPath) {
+    transport.fast_path_ = false;
+    buildMap();
+    // Legacy path: single polled LRW datagram.
+    EXPECT_TRUE(lam.cyclicSend(mapping, nullptr, 1'000'000));
+    // Collect is a no-op true on the non-fast-path transport.
+    EXPECT_TRUE(lam.cyclicCollect(mapping, nullptr));
+}
+
+TEST_F(LAMErrorPathsTest, CyclicSendDatagramFailure) {
+    buildMap();
+    transport.send_ok_ = false;
+    EXPECT_FALSE(lam.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_EQ(lam.getStats().send_errors, 1u);
+}
+
+TEST_F(LAMErrorPathsTest, CyclicCollectWithNothingPending) {
+    buildMap();
+    EXPECT_TRUE(lam.cyclicCollect(mapping, nullptr));
+}
+
+TEST_F(LAMErrorPathsTest, CyclicStaleEchoRetriesAndRecovers) {
+    buildMap();
+    transport.resp_len_[0] = 12;
+    transport.resp_wkc_[0] = 3;
+    transport.stale_[0] = 1;    // first deposit echoes the previous gen
+    ASSERT_TRUE(lam.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_TRUE(lam.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(lam.getStats().stale_responses, 1u);
+}
+
+TEST_F(LAMErrorPathsTest, CyclicDoubleStaleCountsMiss) {
+    buildMap();
+    transport.resp_len_[0] = 12;
+    transport.resp_wkc_[0] = 3;
+    transport.stale_[0] = 2;    // both deposits stale -> slice times out
+    ASSERT_TRUE(lam.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_FALSE(lam.cyclicCollect(mapping, nullptr));
+    EXPECT_EQ(lam.getStats().stale_responses, 2u);
+    EXPECT_EQ(lam.getStats().timeout_errors, 1u);
+}
+
+TEST_F(LAMErrorPathsTest, CyclicMissingResponseTimesOut) {
+    buildMap();
+    transport.respond_[0] = false;
+    ASSERT_TRUE(lam.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_FALSE(lam.cyclicCollect(mapping, nullptr));
+    EXPECT_GE(lam.getStats().timeout_errors, 1u);
+}
+
+TEST_F(LAMErrorPathsTest, CyclicRttStatsAccumulate) {
+    buildMap();
+    transport.stamp_ns_ = UINT64_MAX;
+    transport.resp_len_[0] = 12;
+    transport.resp_wkc_[0] = 3;
+    ASSERT_TRUE(lam.cyclicSend(mapping, nullptr, 1'000'000));
+    EXPECT_TRUE(lam.cyclicCollect(mapping, nullptr));
+    EXPECT_GE(lam.getStats().rtt_samples, 1u);
+}
+
+TEST_F(LAMErrorPathsTest, DefinePDOSliceRejectsBadSpecs) {
+    // Not initialized.
+    PDOSliceSpec spec;
+    spec.entries = {0};
+    EXPECT_EQ(lam.definePDOSlice(mapping, spec), 0xFFFFFFFFu);
+
+    buildMap();
+    // Empty spec.
+    PDOSliceSpec empty;
+    EXPECT_EQ(lam.definePDOSlice(mapping, empty), 0xFFFFFFFFu);
+    // Spec selecting a nonexistent entry resolves to zero runs.
+    PDOSliceSpec bogus;
+    bogus.entries = {42};
+    EXPECT_EQ(lam.definePDOSlice(mapping, bogus), 0xFFFFFFFFu);
+}
+
+TEST_F(LAMErrorPathsTest, ExchangePDOSliceFailures) {
+    buildMap();
+    PDOSliceSpec spec;
+    spec.entries = {0};
+    ASSERT_NE(lam.definePDOSlice(mapping, spec), 0xFFFFFFFFu);
+
+    // One-off slices ride the polled path (sendSingleDatagram +
+    // waitForResponseIdx) — send failure and timeout both fail it.
+    transport.single_send_ok_ = false;
+    EXPECT_FALSE(lam.exchangePDOSlice(mapping, spec));
+    transport.single_send_ok_ = true;
+
+    transport.single_respond_ = false;
+    EXPECT_FALSE(lam.exchangePDOSlice(mapping, spec));
+    transport.single_respond_ = true;
+
+    // A spec that resolves to zero runs fails immediately.
+    PDOSliceSpec bogus;
+    bogus.entries = {99};
+    EXPECT_FALSE(lam.exchangePDOSlice(mapping, bogus));
+
+    transport.single_resp_wkc_ = 3;
+    transport.single_resp_len_ = 12;
+    EXPECT_TRUE(lam.exchangePDOSlice(mapping, spec));
 }
