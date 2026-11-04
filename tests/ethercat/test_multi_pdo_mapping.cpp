@@ -21,6 +21,7 @@
 
 #include "tether/ethercat/PDOMappingConfig.hpp"
 #include "tether/fmmu/FMMUConfiguration.hpp"
+#include "tether/sii/SIIParser.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/LogicalAddressManager.hpp"
 
@@ -569,4 +570,147 @@ TEST(FMMUPDOEntryTest, ValidEntry) {
     entry.pdo_index = 0x1600;
     entry.size_bytes = 8;
     EXPECT_TRUE(entry.isValid());
+}
+
+// ============================================================================
+// FMMUManager: configureFromSii / configureManual / type-name coverage
+// ============================================================================
+
+namespace {
+
+SII::SIIData makeSiiWithFmmus(std::initializer_list<uint8_t> types) {
+    SII::SIIData d;
+    size_t i = 0;
+    for (uint8_t t : types) {
+        d.fmmus[i].fmmu_type = t;
+        ++i;
+    }
+    d.fmmu_count = i;
+    return d;
+}
+
+}  // namespace
+
+TEST_F(FMMUMultiPDOTest, ConfigureFromSiiAllTypeArms) {
+    auto sii = makeSiiWithFmmus({
+        SII::FMMU_TYPE_OUTPUT, SII::FMMU_TYPE_INPUT,
+        SII::FMMU_TYPE_MBX_SYNC, SII::FMMU_TYPE_UNUSED, 99 /*default*/});
+    PDO::SlaveConfig sm{};
+    sm.sm[2].phys_start_addr = 0x1800;
+    sm.sm[2].length = 16;
+    sm.sm[3].phys_start_addr = 0x1C00;
+    sm.sm[3].length = 24;
+    EXPECT_TRUE(mgr_->configureFromSii(&sii, &sm, 0x10000));
+    auto& cfg = mgr_->config();
+    EXPECT_EQ(cfg.fmmu_count, 2u);  // one output, one input
+    EXPECT_EQ(cfg.fmmus[0].length, 16u);
+    EXPECT_EQ(cfg.fmmus[1].length, 24u);
+}
+
+TEST_F(FMMUMultiPDOTest, ConfigureFromSiiDefaultsFromPdoSizes) {
+    // No SII FMMU hints -> falls back to SM2/SM3 defaults from rxpdo/txpdo sizes
+    PDO::SlaveConfig sm{};
+    sm.rxpdo_size = 8;
+    sm.txpdo_size = 12;
+    EXPECT_TRUE(mgr_->configureFromSii(nullptr, &sm, 0x20000));
+    auto& cfg = mgr_->config();
+    EXPECT_EQ(cfg.fmmu_count, 2u);
+    EXPECT_EQ(cfg.fmmus[0].physical_start_addr, 0x1800u);  // default SM2 addr
+    EXPECT_EQ(cfg.fmmus[1].physical_start_addr, 0x1C00u);  // default SM3 addr
+}
+
+TEST_F(FMMUMultiPDOTest, ConfigureFromSiiNothingToConfigure) {
+    // no hints, no sizes -> no FMMUs
+    EXPECT_FALSE(mgr_->configureFromSii(nullptr, nullptr, 0));
+    EXPECT_EQ(mgr_->config().fmmu_count, 0u);
+}
+
+TEST_F(FMMUMultiPDOTest, ConfigureFromSiiDebugArm) {
+    auto sii = makeSiiWithFmmus({SII::FMMU_TYPE_OUTPUT, SII::FMMU_TYPE_INPUT});
+    PDO::SlaveConfig sm{};
+    sm.sm[2].phys_start_addr = 0x1800;
+    sm.sm[2].length = 4;
+    sm.sm[3].phys_start_addr = 0x1C00;
+    sm.sm[3].length = 4;
+    EXPECT_TRUE(mgr_->configureFromSii(&sii, &sm, 0x10000, /*fmmu_debug=*/true));
+}
+
+TEST_F(FMMUMultiPDOTest, ConfigureManualBothOverloads) {
+    // single-base overload places input after output
+    EXPECT_TRUE(mgr_->configureManual(0x1800, 8, 0x1C00, 4, 0x10000));
+    auto& cfg = mgr_->config();
+    EXPECT_EQ(cfg.fmmu_count, 2u);
+    EXPECT_EQ(cfg.fmmus[0].physical_start_addr, 0x1800u);
+    EXPECT_EQ(cfg.fmmus[1].logical_start_addr, 0x10008u);
+
+    // separate-logical overload with debug on
+    EXPECT_TRUE(mgr_->configureManual(0x1800, 8, 0x30000, 0x1C00, 4, 0x40000, true));
+    EXPECT_EQ(mgr_->config().fmmu_count, 2u);
+
+    // zero lengths -> nothing configured (but the call itself succeeds)
+    EXPECT_TRUE(mgr_->configureManual(0x1800, 0, 0x1C00, 0, 0x10000));
+    EXPECT_EQ(mgr_->config().fmmu_count, 0u);
+}
+
+TEST(FMMUTypeNames, AllArms) {
+    EXPECT_STREQ(getFMMUTypeName(FMMUType::Unused), "Unused");
+    EXPECT_STREQ(getFMMUTypeName(FMMUType::Output), "Output");
+    EXPECT_STREQ(getFMMUTypeName(FMMUType::Input), "Input");
+    EXPECT_STREQ(getFMMUTypeName(FMMUType::MboxSync), "MboxSync");
+    EXPECT_STREQ(getFMMUTypeName(static_cast<FMMUType>(77)), "Unknown");
+}
+// ============================================================================
+// configureFromMultiPDO: debug logging, mailbox-SM warning, skip arms
+// ============================================================================
+
+TEST_F(FMMUMultiPDOTest, ConfigureFromMultiPDODebugArm) {
+    std::vector<MultiPDOSyncManagerConfig> configs;
+    configs.push_back(MultiPDOSyncManagerConfig::process_output(0x1800, {
+        {0x1600, 8},
+        {0x1601, 4},
+    }));
+    configs.push_back(MultiPDOSyncManagerConfig::process_input(0x1C00, {
+        {0x1A00, 16},
+    }));
+
+    EXPECT_TRUE(mgr_->configureFromMultiPDO(configs, 0x10000, /*fmmu_debug=*/true));
+    EXPECT_EQ(mgr_->config().fmmu_count, 2u);
+    EXPECT_EQ(mgr_->config().pdo_entry_count, 3u);
+    EXPECT_EQ(mgr_->config().next_logical_addr, 0x1001Cu);
+}
+
+TEST_F(FMMUMultiPDOTest, ConfigureFromMultiPDOMailboxSmStillConfigures) {
+    std::vector<MultiPDOSyncManagerConfig> configs;
+    auto cfg = MultiPDOSyncManagerConfig::process_output(0x1000, {{0x1600, 8}});
+    cfg.sm_index = 1;  // mailbox SM -> warning, but proceeds
+    configs.push_back(cfg);
+
+    EXPECT_TRUE(mgr_->configureFromMultiPDO(configs, 0, /*fmmu_debug=*/true));
+    ASSERT_EQ(mgr_->config().fmmu_count, 1u);
+    EXPECT_EQ(mgr_->config().fmmus[0].associated_sm, 1u);
+}
+
+TEST_F(FMMUMultiPDOTest, ConfigureFromMultiPDOSkipsNonProcessDataSm) {
+    std::vector<MultiPDOSyncManagerConfig> configs;
+    auto out = MultiPDOSyncManagerConfig::process_output(0x1800, {{0x1600, 8}});
+    configs.push_back(out);
+
+    auto mbx = MultiPDOSyncManagerConfig::process_output(0x1000, {{0x1601, 4}});
+    mbx.sm_index = 0;
+    mbx.type = SyncManagerType::MailboxWrite;
+    configs.push_back(mbx);
+
+    EXPECT_TRUE(mgr_->configureFromMultiPDO(configs, 0, /*fmmu_debug=*/true));
+    EXPECT_EQ(mgr_->config().fmmu_count, 1u);  // mailbox SM skipped
+}
+
+TEST_F(FMMUMultiPDOTest, ConfigureFromMultiPDOSlotsExhaustedReturnsFalse) {
+    // kMaxFMMUs == 8, so a 9th process-data SM cannot be added.
+    std::vector<MultiPDOSyncManagerConfig> configs;
+    for (uint8_t i = 0; i < 9; ++i) {
+        configs.push_back(MultiPDOSyncManagerConfig::process_output(0x1800, {{0x1600, 4}}));
+    }
+
+    EXPECT_FALSE(mgr_->configureFromMultiPDO(configs, 0));
+    EXPECT_EQ(mgr_->config().fmmu_count, 8u);
 }
