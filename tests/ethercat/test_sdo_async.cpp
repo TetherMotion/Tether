@@ -74,6 +74,11 @@ public:
     // returns 0, so existing tests that do not care about aborts are
     // unaffected.
     MOCK_METHOD(uint32_t, lastAbortCode, (), (const, override));
+    MOCK_METHOD(bool, isCancelRequested, (), (const, override));
+    MOCK_METHOD(bool, readSlaveRegister,
+                (uint16_t slave_index, uint16_t reg_addr, void* out,
+                 uint16_t len, unsigned int timeout_ms),
+                (override));
 };
 
 } // anonymous namespace
@@ -1646,4 +1651,91 @@ TEST_F(SDOManagerQueueTest, RawBufferReadArms) {
     EXPECT_EQ(out_len, 3u);
     EXPECT_EQ(buf[0], 0xAA);
     mgr.deinit();
+}
+
+// ============================================================================
+// CoEManager_retry.cpp — cancel/mailbox/complete-access/AL-status arms
+// ============================================================================
+
+TEST_F(SDOManagerQueueTest, RetryBailsWhenCancelRequestedUpFront) {
+    ON_CALL(transport_, isCancelRequested()).WillByDefault(Return(true));
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    uint8_t buf[8];
+    EXPECT_FALSE(mgr.sdoUploadWithRetry(0x6040, 0, buf, sizeof(buf), nullptr, {}));
+    EXPECT_FALSE(mgr.sdoDownloadWithRetry(0x6040, 0, buf, sizeof(buf), {}));
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, RetryFailsWithoutMailboxConfig) {
+    CoEManager mgr(0, transport_);
+    uint8_t buf[8];
+    EXPECT_FALSE(mgr.sdoUploadWithRetry(0x6040, 0, buf, sizeof(buf), nullptr, {}));
+    EXPECT_FALSE(mgr.sdoDownloadWithRetry(0x6040, 0, buf, sizeof(buf), {}));
+}
+
+TEST_F(SDOManagerQueueTest, RetryCompleteAccessAndRetryLoop) {
+    std::atomic<int> calls{0};
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(Invoke([&](auto&&...) -> bool { ++calls; return false; }));
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(Invoke([&](auto&&...) -> bool { ++calls; return false; }));
+    ON_CALL(transport_, lastAbortCode()).WillByDefault(Return(0u));
+
+    CoEManager mgr(0, transport_);
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    uint8_t buf[8];
+
+    CoETransactionOptions opts{};
+    opts.max_retries = 2;
+    opts.complete_access = true;          // covers the CA log + marker arm
+    EXPECT_FALSE(mgr.sdoUploadWithRetry(0x6040, 0, buf, sizeof(buf), nullptr, opts));
+    EXPECT_GE(calls.load(), 3);
+    EXPECT_FALSE(mgr.sdoDownloadWithRetry(0x6040, 0, buf, sizeof(buf), opts));
+}
+
+TEST_F(SDOManagerQueueTest, RetryAbortsOnMidLoopCancel) {
+    std::atomic<bool> cancelled{false};
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(Invoke([&](auto&&...) -> bool {
+            cancelled.store(true);
+            return false;
+        }));
+    ON_CALL(transport_, isCancelRequested())
+        .WillByDefault(Invoke([&] { return cancelled.load(); }));
+
+    CoEManager mgr(0, transport_);
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    uint8_t buf[8];
+    EXPECT_FALSE(mgr.sdoUploadWithRetry(0x6040, 0, buf, sizeof(buf), nullptr, {}));
+}
+
+TEST_F(SDOManagerQueueTest, LogAlStatusAfterRequestArms) {
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(UploadOk("\x01", 1));
+    std::atomic<int> reg_calls{0};
+    ON_CALL(transport_, readSlaveRegister(_, _, _, _, _))
+        .WillByDefault(Invoke([&](uint16_t, uint16_t addr, void* out,
+                                  uint16_t, unsigned int) {
+            ++reg_calls;
+            if (addr == 0x0130) *static_cast<uint16_t*>(out) = 0x0019;  // error bit
+            if (addr == 0x0134) *static_cast<uint16_t*>(out) = 0x0016;
+            return true;
+        }));
+
+    CoEManager mgr(0, transport_);
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    BehaviourOptions bo{};
+    bo.request_al_status_after_coe_requests = true;
+    mgr.setBehaviourOptions(bo);
+
+    uint8_t buf[8];
+    EXPECT_TRUE(mgr.sdoUploadWithRetry(0x6040, 0, buf, sizeof(buf), nullptr, {}));
+    EXPECT_GE(reg_calls.load(), 2);
+
+    // AL_STATUS read fails outright → warn arm.
+    ON_CALL(transport_, readSlaveRegister(_, _, _, _, _))
+        .WillByDefault(Return(false));
+    EXPECT_TRUE(mgr.sdoUploadWithRetry(0x6040, 0, buf, sizeof(buf), nullptr, {}));
 }
