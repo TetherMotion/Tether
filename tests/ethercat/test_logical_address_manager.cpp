@@ -2940,3 +2940,136 @@ TEST_F(LAMErrorPathsTest, ExchangePDOSliceFailures) {
     transport.single_resp_len_ = 12;
     EXPECT_TRUE(lam.exchangePDOSlice(mapping, spec));
 }
+
+// ============================================================================
+// TxFailureDiagnostics — worker categories, escalation, wire probe
+// ============================================================================
+
+#include "raw/TxFailureDiagnostics.hpp"
+#if defined(__linux__)
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#endif
+
+namespace {
+
+// Drain one worker poll (~10 ms cadence) — returns when `seen` hits target
+// or after ~2 s.
+bool waitFor(std::atomic<int>& seen, int target) {
+    for (int i = 0; i < 400 && seen.load() < target; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    return seen.load() >= target;
+}
+
+}  // namespace
+
+TEST(TxFailureDiagnosticsTest, StartIsIdempotentAndStopsCleanly) {
+    TxFailureDiagnostics diag(nullptr, nullptr, nullptr, "txdiag_test");
+    diag.start();
+    diag.start();      // already running — no second spawn
+    EXPECT_EQ(diag.spawns(), 1u);
+    diag.stop();
+    diag.start();      // restart reaps the stopped worker
+    EXPECT_EQ(diag.spawns(), 2u);
+    diag.stop();
+}
+
+TEST(TxFailureDiagnosticsTest, WorkerDrainsAllLogCategories) {
+    std::atomic<int> probes{0};
+    std::atomic<int> escalations{0};
+    TxFailureDiagnostics diag(
+        [&] { ++probes; return std::string("r | DIAGNOSIS: x"); },
+        [] { return 111; /* ECONNREFUSED */ },
+        [&] { ++escalations; return std::string("ALIVE"); },
+        "txdiag_test");
+    diag.setEscalateAfterTimeouts(2);
+    diag.start();
+
+    // Every category with a suppressed second hit.
+    for (int i = 0; i < 2; ++i) {
+        diag.noteSendFailure(0x3);
+        diag.noteSendFailure(0);        // mask-less arm
+        diag.noteNoResponseSlot();
+        diag.noteTimeout("exchangeLRW");
+        diag.noteWkcZero("exchangeLRW");
+        diag.noteStall(5'000'000);
+    }
+    // First emits happen immediately (rate-limit baseline is "never");
+    // give the worker two polls, then feed the suppressed-count arms.
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    for (int i = 0; i < 3; ++i) {
+        diag.noteSendFailure(0x1);
+        diag.noteNoResponseSlot();
+        diag.noteTimeout("exchangeLRWForSlaves");
+        diag.noteWkcZero("exchangeLRWForSlaves");
+        diag.noteStall(9'000'000);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    // Escalation fires when the timeout streak crosses the threshold.
+    diag.noteTimeout("esc");
+    diag.noteTimeout("esc");
+    EXPECT_TRUE(waitFor(escalations, 1));
+    diag.noteSuccess();               // resets the streak
+    diag.noteTimeout("esc");
+    diag.noteTimeout("esc");
+    EXPECT_TRUE(waitFor(escalations, 2));
+
+    // Send-fail streak of 10 fires the wire probe.
+    for (int i = 0; i < 10; ++i) diag.noteSendFailure();
+    EXPECT_TRUE(waitFor(probes, 1));
+    diag.noteSendOk();                // streak reset
+    diag.stop();
+}
+
+TEST(TxFailureDiagnosticsTest, EscalationVerdictChangeAndEmpty) {
+    std::atomic<int> calls{0};
+    std::atomic<bool> empty{false};
+    TxFailureDiagnostics diag(
+        nullptr, nullptr,
+        [&] {
+            ++calls;
+            return empty.load() ? std::string() : std::string("OK");
+        },
+        "txdiag_test");
+    diag.setEscalateAfterTimeouts(1);
+    diag.start();
+    diag.noteTimeout("x");            // ct=1 >= esc=1 -> verdict emit
+    EXPECT_TRUE(waitFor(calls, 1));
+    empty = true;
+    diag.noteSuccess();
+    // The worker must observe ct==0 before the next streak or the
+    // escalation quotient never resets.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    diag.noteTimeout("x");            // empty verdict -> no log but called
+    EXPECT_TRUE(waitFor(calls, 2));
+    diag.stop();
+}
+
+#if defined(__linux__)
+TEST(TxFailureDiagnosticsTest, ProbeRejectsBadAndNonPacketFds) {
+    EXPECT_NE(TxFailureDiagnostics::probe(-1).find("no TX socket fd"),
+              std::string::npos);
+
+    int udp = ::socket(AF_INET, SOCK_DGRAM, 0);
+    ASSERT_GE(udp, 0);
+    EXPECT_NE(TxFailureDiagnostics::probe(udp).find("no interface"),
+              std::string::npos);
+    ::close(udp);
+}
+
+TEST(TxFailureDiagnosticsTest, ProbeRealPacketSocketIfAvailable) {
+    // Needs CAP_NET_RAW — degrade to a soft check when unavailable.
+    int fd = ::socket(AF_PACKET, SOCK_RAW, 0);
+    if (fd < 0) {
+        GTEST_SKIP() << "no CAP_NET_RAW";
+    }
+    const std::string report = TxFailureDiagnostics::probe(fd);
+    ::close(fd);
+    // Either unbound (no interface) or a full report — both are
+    // deterministic outcomes of the environment.
+    EXPECT_FALSE(report.empty());
+}
+#endif
