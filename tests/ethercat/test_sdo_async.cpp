@@ -1550,3 +1550,100 @@ TEST_F(SDOManagerQueueTest, ReadEntryTransportErrorPropagates) {
     EXPECT_FALSE(r.has_value());
     mgr.deinit();
 }
+
+// ============================================================================
+// CoEManager_worker.cpp — transaction error/edge arms
+// ============================================================================
+
+TEST_F(SDOManagerQueueTest, TypedReadWithoutMailboxIsNotConfigured) {
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(UploadOk("\x01\x02\x03\x04", 4));
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    // No configureMailbox() — execute() must surface NotConfigured.
+    auto r = mgr.readU32(0x6040, 0);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, CoEErrorCode::NotConfigured);
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, TypedReadShortResponseIsInternalError) {
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(UploadOk("\x01", 1));   // fewer than sizeof(uint32_t)
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    auto r = mgr.readU32(0x6040, 0);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, CoEErrorCode::InternalError);
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, TypedReadTrailingBytesWarnsButSucceeds) {
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(UploadOk("\x78\x56\x34\x12\xAA\xBB", 6));
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    auto r = mgr.readU32(0x6040, 0);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(*r, 0x12345678u);
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, TypedReadAbortCodeSurfacesAbort) {
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(UploadFail());
+    ON_CALL(transport_, lastAbortCode()).WillByDefault(Return(0x06020000u));
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    auto r = mgr.readU32(0x6040, 0);
+    ASSERT_FALSE(r.has_value());
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, TypedWriteErrorArms) {
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(DownloadFail());
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+
+    // Unconfigured mailbox → NotConfigured.
+    auto w = mgr.writeU32(0x6040, 0, 42);
+    ASSERT_FALSE(w.has_value());
+    EXPECT_EQ(w.error().code, CoEErrorCode::NotConfigured);
+
+    // Configured but transport fails → TransportError.
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    w = mgr.writeU32(0x6040, 0, 42);
+    ASSERT_FALSE(w.has_value());
+    EXPECT_EQ(w.error().code, CoEErrorCode::TransportError);
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, RawBufferReadArms) {
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(UploadOk("\xAA\xBB\xCC", 3));
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+
+    // Raw-buffer specialization — NotConfigured without mailbox.
+    std::vector<uint8_t> buf(64);
+    size_t out_len = 0;
+    EXPECT_FALSE(mgr.readSync(0x6040, 0, buf.data(), buf.size(),
+                              100, &out_len));
+
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+    EXPECT_TRUE(mgr.readSync(0x6040, 0, buf.data(), buf.size(),
+                             100, &out_len));
+    EXPECT_EQ(out_len, 3u);
+    EXPECT_EQ(buf[0], 0xAA);
+    mgr.deinit();
+}
