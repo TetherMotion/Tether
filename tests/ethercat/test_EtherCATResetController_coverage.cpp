@@ -5,6 +5,7 @@
  */
 
 #include "tether/ethercat/Reset.hpp"
+#include "tether/ethercat/CoEManager.hpp"
 #include "tether/ethercat/SDOManager.hpp"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -39,14 +40,18 @@ public:
                  uint16_t mbx_wr_addr, uint16_t mbx_wr_len,
                  uint16_t mbx_rd_addr, uint16_t mbx_rd_len,
                  uint16_t index, uint8_t sub,
-                 uint8_t* out, size_t out_cap, size_t* out_len),
+                 uint8_t* out, size_t out_cap, size_t* out_len,
+                 bool diag_enabled, unsigned int poll_interval_ms,
+                 unsigned int transaction_timeout_ms),
                 (override));
     MOCK_METHOD(bool, sdoDownload,
                 (uint16_t slave_index, uint8_t* mbx_counter,
                  uint16_t mbx_wr_addr, uint16_t mbx_wr_len,
                  uint16_t mbx_rd_addr, uint16_t mbx_rd_len,
                  uint16_t index, uint8_t sub,
-                 const uint8_t* data, size_t data_len),
+                 const uint8_t* data, size_t data_len,
+                 bool diag_enabled, unsigned int poll_interval_ms,
+                 unsigned int transaction_timeout_ms),
                 (override));
     MOCK_METHOD(uint64_t, getMicroseconds, (), (override));
 };
@@ -54,7 +59,8 @@ public:
 // Helper: make sdoUpload populate output buffer
 auto UploadOk(const void* data, size_t len) {
     return [data, len](uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
-                       uint16_t, uint8_t, uint8_t* out, size_t, size_t* out_len) -> bool {
+                       uint16_t, uint8_t, uint8_t* out, size_t, size_t* out_len,
+                       bool, unsigned int, unsigned int) -> bool {
         memcpy(out, data, len);
         if (out_len) *out_len = len;
         return true;
@@ -63,14 +69,16 @@ auto UploadOk(const void* data, size_t len) {
 
 auto DownloadOk() {
     return [](uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
-              uint16_t, uint8_t, const uint8_t*, size_t) -> bool {
+              uint16_t, uint8_t, const uint8_t*, size_t,
+              bool, unsigned int, unsigned int) -> bool {
         return true;
     };
 }
 
 auto DownloadFail() {
     return [](uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
-              uint16_t, uint8_t, const uint8_t*, size_t) -> bool {
+              uint16_t, uint8_t, const uint8_t*, size_t,
+              bool, unsigned int, unsigned int) -> bool {
         return false;
     };
 }
@@ -84,15 +92,15 @@ protected:
     void SetUp() override {
         ON_CALL(transport_, getMicroseconds()).WillByDefault(Invoke(realMicros));
         // Default: all SDO calls succeed
-        ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _))
+        ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
             .WillByDefault(Invoke(DownloadOk()));
         // Default: uploads return zeros
         uint16_t zero = 0;
-        ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _))
+        ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
             .WillByDefault(Invoke(UploadOk(&zero, sizeof(zero))));
 
-        sdo_ = std::make_unique<SDOManager>(transport_);
-        sdo_->configureSlaveMailbox(0, 0x1000, 128, 0x1400, 128);
+        sdo_ = std::make_unique<CoE::CoEManager>(0, transport_);
+        sdo_->configureMailbox(0x1000, 128, 0x1400, 128);
         sdo_->init();
     }
     void TearDown() override {
@@ -100,7 +108,7 @@ protected:
     }
 
     NiceMock<MockSDOTransportRaw> transport_;
-    std::unique_ptr<SDOManager> sdo_;
+    std::unique_ptr<CoE::CoEManager> sdo_;
 };
 
 } // anonymous namespace
@@ -116,9 +124,10 @@ TEST_F(ResetCtrlCovTest, ConstructWithPosition) {
     EXPECT_FALSE(ctrl.getLastResult().success);
 }
 
-TEST_F(ResetCtrlCovTest, ConstructWithConfiguredAddr) {
-    SlaveResetController ctrl(*sdo_, 0x1001, true);
+TEST_F(ResetCtrlCovTest, ConstructForSecondSlave) {
+    SlaveResetController ctrl(*sdo_, 1);
     EXPECT_EQ(ctrl.getResetAttemptCount(), 0u);
+    EXPECT_EQ(ctrl.getSuccessfulResetCount(), 0u);
 }
 
 TEST_F(ResetCtrlCovTest, SetProgressCallback) {
@@ -136,9 +145,9 @@ TEST_F(ResetCtrlCovTest, ReadALStatus) {
     // Return status=0x08 (OP) and code=0x0000
     uint16_t status = 0x0008;
     uint16_t code = 0x0000;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&status, sizeof(status))));
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&code, sizeof(code))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -154,9 +163,10 @@ TEST_F(ResetCtrlCovTest, AcknowledgeError_Success) {
     uint16_t noErr = 0x0001; // Init, no error flag
 
     int readCount = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke([&](uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
-                                   uint16_t, uint8_t, uint8_t* out, size_t, size_t* ol) -> bool {
+                                   uint16_t, uint8_t, uint8_t* out, size_t, size_t* ol,
+                                   bool, unsigned int, unsigned int) -> bool {
             if (readCount++ == 0) {
                 memcpy(out, &errStatus, 2);
             } else {
@@ -166,7 +176,7 @@ TEST_F(ResetCtrlCovTest, AcknowledgeError_Success) {
             return true;
         }));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -176,10 +186,10 @@ TEST_F(ResetCtrlCovTest, AcknowledgeError_Success) {
 TEST_F(ResetCtrlCovTest, AcknowledgeError_Persistent) {
     // Error flag stays set after acknowledge
     uint16_t errStatus = 0x0011;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&errStatus, sizeof(errStatus))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -189,10 +199,10 @@ TEST_F(ResetCtrlCovTest, AcknowledgeError_Persistent) {
 TEST_F(ResetCtrlCovTest, TransitionToState) {
     // Simulated: write AL control, then wait reads target state
     uint16_t opState = static_cast<uint16_t>(ALState::Op);
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&opState, sizeof(opState))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -201,10 +211,10 @@ TEST_F(ResetCtrlCovTest, TransitionToState) {
 
 TEST_F(ResetCtrlCovTest, ForceToInit) {
     uint16_t initState = static_cast<uint16_t>(ALState::Init);
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&initState, sizeof(initState))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -245,21 +255,23 @@ TEST_F(ResetCtrlCovTest, FullReinitialize) {
     // Each readALStatus returns the state we just wrote
     int writeCount = 0;
     uint16_t currentState = static_cast<uint16_t>(ALState::Init);
-    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, 0x0120, 0, _, _))
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, 0x0120, 0, _, _, _, _, _))
         .WillByDefault(Invoke([&](uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
-                                   uint16_t, uint8_t, const uint8_t* data, size_t) -> bool {
+                                   uint16_t, uint8_t, const uint8_t* data, size_t,
+                                   bool, unsigned int, unsigned int) -> bool {
             memcpy(&currentState, data, 2);
             return true;
         }));
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke([&](uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
-                                   uint16_t, uint8_t, uint8_t* out, size_t, size_t* ol) -> bool {
+                                   uint16_t, uint8_t, uint8_t* out, size_t, size_t* ol,
+                                   bool, unsigned int, unsigned int) -> bool {
             memcpy(out, &currentState, 2);
             if (ol) *ol = 2;
             return true;
         }));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -300,7 +312,7 @@ TEST_F(ResetCtrlCovTest, ClearErrorHistory) {
 
 TEST_F(ResetCtrlCovTest, ReadStatusword) {
     uint16_t sw = 0x0237;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6041, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6041, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&sw, sizeof(sw))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -328,7 +340,7 @@ TEST_F(ResetCtrlCovTest, Halt) {
     // Need to mock readStatusword (0x6041) for halt to read current controlword
     // Actually halt reads controlword (0x6040), not statusword
     uint16_t cw = 0x000F;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6040, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6040, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&cw, sizeof(cw))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -337,7 +349,7 @@ TEST_F(ResetCtrlCovTest, Halt) {
 
 TEST_F(ResetCtrlCovTest, ResumeFromHalt) {
     uint16_t cw = 0x010F; // Halt bit set
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6040, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6040, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&cw, sizeof(cw))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -347,7 +359,7 @@ TEST_F(ResetCtrlCovTest, ResumeFromHalt) {
 TEST_F(ResetCtrlCovTest, FaultReset_NotInFault) {
     // Statusword without fault bit
     uint16_t sw = 0x0040; // SwitchOnDisabled, no fault
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6041, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6041, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&sw, sizeof(sw))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -360,9 +372,10 @@ TEST_F(ResetCtrlCovTest, FaultReset_ClearedSuccessfully) {
     uint16_t faultSw = 0x0008;  // Fault bit set
     uint16_t clearSw = 0x0040;  // SwitchOnDisabled after clear
 
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6041, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6041, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke([&](uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
-                                   uint16_t, uint8_t, uint8_t* out, size_t, size_t* ol) -> bool {
+                                   uint16_t, uint8_t, uint8_t* out, size_t, size_t* ol,
+                                   bool, unsigned int, unsigned int) -> bool {
             if (readCount++ < 1) {
                 memcpy(out, &faultSw, 2);
             } else {
@@ -380,7 +393,7 @@ TEST_F(ResetCtrlCovTest, FaultReset_ClearedSuccessfully) {
 TEST_F(ResetCtrlCovTest, FaultReset_Persistent) {
     // Fault stays set after reset attempt
     uint16_t faultSw = 0x0008;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6041, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6041, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&faultSw, sizeof(faultSw))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -419,10 +432,10 @@ TEST_F(ResetCtrlCovTest, VoeReset) {
 TEST_F(ResetCtrlCovTest, ResetToLevel_SoftReset) {
     // Make readALStatus return no-error state after reset
     uint16_t okState = static_cast<uint16_t>(ALState::Op);
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&okState, sizeof(okState))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -433,10 +446,10 @@ TEST_F(ResetCtrlCovTest, ResetToLevel_SoftReset) {
 
 TEST_F(ResetCtrlCovTest, ResetToLevel_StateMachineReset) {
     uint16_t initState = static_cast<uint16_t>(ALState::Init);
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&initState, sizeof(initState))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -446,10 +459,10 @@ TEST_F(ResetCtrlCovTest, ResetToLevel_StateMachineReset) {
 
 TEST_F(ResetCtrlCovTest, ResetToLevel_ESCHardwareReset) {
     uint16_t initState = static_cast<uint16_t>(ALState::Init);
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&initState, sizeof(initState))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -459,13 +472,13 @@ TEST_F(ResetCtrlCovTest, ResetToLevel_ESCHardwareReset) {
 
 TEST_F(ResetCtrlCovTest, ResetToLevel_CommunicationReset) {
     uint16_t sw = 0x0040; // Not in fault
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6041, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x6041, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&sw, sizeof(sw))));
     uint16_t okState = static_cast<uint16_t>(ALState::Op);
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&okState, sizeof(okState))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -475,10 +488,10 @@ TEST_F(ResetCtrlCovTest, ResetToLevel_CommunicationReset) {
 
 TEST_F(ResetCtrlCovTest, ResetToLevel_ApplicationReset) {
     uint16_t initState = static_cast<uint16_t>(ALState::Init);
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&initState, sizeof(initState))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -492,9 +505,10 @@ TEST_F(ResetCtrlCovTest, ProgressiveReset) {
     uint16_t errState = 0x0011; // Init + Error flag
     uint16_t okState = 0x0001;  // Init, no error
 
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke([&](uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
-                                   uint16_t, uint8_t, uint8_t* out, size_t, size_t* ol) -> bool {
+                                   uint16_t, uint8_t, uint8_t* out, size_t, size_t* ol,
+                                   bool, unsigned int, unsigned int) -> bool {
             // After a few reads, clear the error
             if (alReadCount++ < 3)
                 memcpy(out, &errState, 2);
@@ -504,7 +518,7 @@ TEST_F(ResetCtrlCovTest, ProgressiveReset) {
             return true;
         }));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -514,10 +528,10 @@ TEST_F(ResetCtrlCovTest, ProgressiveReset) {
 
 TEST_F(ResetCtrlCovTest, EmergencyStopAndReset) {
     uint16_t okState = static_cast<uint16_t>(ALState::Init);
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&okState, sizeof(okState))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -531,10 +545,10 @@ TEST_F(ResetCtrlCovTest, EmergencyStopAndReset) {
 
 TEST_F(ResetCtrlCovTest, IsInErrorState_Yes) {
     uint16_t errStatus = 0x0011; // Init + ErrorFlag
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&errStatus, sizeof(errStatus))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -543,10 +557,10 @@ TEST_F(ResetCtrlCovTest, IsInErrorState_Yes) {
 
 TEST_F(ResetCtrlCovTest, IsInErrorState_No) {
     uint16_t okStatus = 0x0008; // OP, no error
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&okStatus, sizeof(okStatus))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -556,9 +570,9 @@ TEST_F(ResetCtrlCovTest, IsInErrorState_No) {
 TEST_F(ResetCtrlCovTest, GetErrorDescription_InError) {
     uint16_t errStatus = 0x0011;
     uint16_t errCode = 0x0017; // InvalidSMConfig
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&errStatus, sizeof(errStatus))));
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&errCode, sizeof(errCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -569,9 +583,9 @@ TEST_F(ResetCtrlCovTest, GetErrorDescription_InError) {
 TEST_F(ResetCtrlCovTest, GetErrorDescription_NoError) {
     uint16_t okStatus = 0x0008;
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&okStatus, sizeof(okStatus))));
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -586,10 +600,10 @@ TEST_F(ResetCtrlCovTest, GetErrorDescription_NoError) {
 
 TEST_F(ResetCtrlCovTest, ApplyResetPolicy_Default) {
     uint16_t okStatus = static_cast<uint16_t>(ALState::Op);
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&okStatus, sizeof(okStatus))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -605,10 +619,10 @@ TEST_F(ResetCtrlCovTest, ApplyResetPolicy_Default) {
 
 TEST_F(ResetCtrlCovTest, ApplyResetPolicy_WithCallback) {
     uint16_t okStatus = static_cast<uint16_t>(ALState::Init);
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&okStatus, sizeof(okStatus))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -630,7 +644,7 @@ TEST_F(ResetCtrlCovTest, ApplyResetPolicy_WithCallback) {
 // ============================================================================
 
 TEST_F(ResetCtrlCovTest, ReadALStatus_Failure) {
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Return(false));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -639,7 +653,7 @@ TEST_F(ResetCtrlCovTest, ReadALStatus_Failure) {
 }
 
 TEST_F(ResetCtrlCovTest, WriteControlword_Failure) {
-    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, 0x6040, 0, _, _))
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, 0x6040, 0, _, _, _, _, _))
         .WillByDefault(Invoke(DownloadFail()));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -647,7 +661,7 @@ TEST_F(ResetCtrlCovTest, WriteControlword_Failure) {
 }
 
 TEST_F(ResetCtrlCovTest, ResetSyncManagerWatchdog_Failure) {
-    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, 0x0806, 0, _, _))
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, 0x0806, 0, _, _, _, _, _))
         .WillByDefault(Invoke(DownloadFail()));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -660,10 +674,10 @@ TEST_F(ResetCtrlCovTest, ResetSyncManagerWatchdog_Failure) {
 
 TEST_F(ResetCtrlCovTest, ProgressCallbackDuringReset) {
     uint16_t okState = static_cast<uint16_t>(ALState::Op);
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&okState, sizeof(okState))));
     uint16_t zeroCode = 0;
-    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _))
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
         .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
 
     SlaveResetController ctrl(*sdo_, 0);
@@ -674,4 +688,125 @@ TEST_F(ResetCtrlCovTest, ProgressCallbackDuringReset) {
 
     ctrl.resetToLevel(ResetLevel::SoftReset, 500);
     EXPECT_FALSE(stages.empty());
+}
+
+// ============================================================================
+// ESM failure paths
+// ============================================================================
+
+TEST_F(ResetCtrlCovTest, AcknowledgeErrorReadStatusFails) {
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
+        .WillByDefault(Return(false));
+
+    SlaveResetController ctrl(*sdo_, 0);
+    EXPECT_FALSE(ctrl.acknowledgeError());
+    EXPECT_FALSE(ctrl.getLastResult().error_message.empty());
+}
+
+TEST_F(ResetCtrlCovTest, AcknowledgeErrorWriteControlFails) {
+    uint16_t errStatus = 0x0011;
+    uint16_t zeroCode = 0;
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
+        .WillByDefault(Invoke(UploadOk(&errStatus, sizeof(errStatus))));
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
+        .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, 0x0120, 0, _, _, _, _, _))
+        .WillByDefault(DownloadFail());
+
+    SlaveResetController ctrl(*sdo_, 0);
+    EXPECT_FALSE(ctrl.acknowledgeError());
+    EXPECT_NE(ctrl.getLastResult().error_message.find("error acknowledge"),
+              std::string::npos);
+}
+
+TEST_F(ResetCtrlCovTest, AcknowledgeErrorSecondReadFails) {
+    uint16_t errStatus = 0x0011;
+    uint16_t zeroCode = 0;
+    int readCount = 0;
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
+        .WillByDefault(Invoke([&](uint16_t, uint8_t*, uint16_t, uint16_t, uint16_t, uint16_t,
+                                  uint16_t, uint8_t, uint8_t* out, size_t, size_t* ol,
+                                  bool, unsigned int, unsigned int) -> bool {
+            if (readCount++ == 0) {
+                std::memcpy(out, &errStatus, 2);
+                if (ol) *ol = 2;
+                return true;
+            }
+            return false;
+        }));
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
+        .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
+
+    SlaveResetController ctrl(*sdo_, 0);
+    EXPECT_FALSE(ctrl.acknowledgeError());
+}
+
+TEST_F(ResetCtrlCovTest, ReadALStatusWithoutStatusCode) {
+    uint16_t status = 0x0008;
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
+        .WillByDefault(Invoke(UploadOk(&status, sizeof(status))));
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
+        .WillByDefault(Return(false));
+
+    SlaveResetController ctrl(*sdo_, 0);
+    uint16_t s = 0, c = 0xFFFF;
+    EXPECT_TRUE(ctrl.readALStatus(s, c));
+    EXPECT_EQ(s, 0x0008);
+    EXPECT_EQ(c, 0x0000);  // status code is zeroed when unreadable
+}
+
+TEST_F(ResetCtrlCovTest, ForceToInitWriteFails) {
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, 0x0120, 0, _, _, _, _, _))
+        .WillByDefault(DownloadFail());
+
+    SlaveResetController ctrl(*sdo_, 0);
+    EXPECT_FALSE(ctrl.forceToInit(50));
+    EXPECT_NE(ctrl.getLastResult().error_message.find("INIT"),
+              std::string::npos);
+}
+
+TEST_F(ResetCtrlCovTest, RequestESCResetWriteFails) {
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, 0x0120, 0, _, _, _, _, _))
+        .WillByDefault(DownloadFail());
+
+    SlaveResetController ctrl(*sdo_, 0);
+    EXPECT_FALSE(ctrl.requestESCReset());
+    EXPECT_NE(ctrl.getLastResult().error_message.find("ESC reset"),
+              std::string::npos);
+}
+
+TEST_F(ResetCtrlCovTest, TransitionToStateWriteFails) {
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, 0x0120, 0, _, _, _, _, _))
+        .WillByDefault(DownloadFail());
+
+    SlaveResetController ctrl(*sdo_, 0);
+    EXPECT_FALSE(ctrl.transitionToState(ALState::Op, 50));
+    EXPECT_NE(ctrl.getLastResult().error_message.find("transition request"),
+              std::string::npos);
+}
+
+TEST_F(ResetCtrlCovTest, FullReinitializeFailsAtFirstStep) {
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, 0x0120, 0, _, _, _, _, _))
+        .WillByDefault(DownloadFail());
+
+    SlaveResetController ctrl(*sdo_, 0);
+    const auto result = ctrl.fullReinitialize(false);
+    EXPECT_FALSE(result.success);
+    EXPECT_NE(result.error_message.find("INIT"), std::string::npos);
+}
+
+TEST_F(ResetCtrlCovTest, FullReinitializeFailsAtPreOp) {
+    // forceToInit succeeds (slave already in INIT) but the PRE-OP wait never
+    // observes the requested state.
+    uint16_t initState = static_cast<uint16_t>(ALState::Init);
+    uint16_t zeroCode = 0;
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0130, 0, _, _, _, _, _, _))
+        .WillByDefault(Invoke(UploadOk(&initState, sizeof(initState))));
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, 0x0134, 0, _, _, _, _, _, _))
+        .WillByDefault(Invoke(UploadOk(&zeroCode, sizeof(zeroCode))));
+
+    SlaveResetController ctrl(*sdo_, 0);
+    const auto result = ctrl.fullReinitialize(false);
+    EXPECT_FALSE(result.success);
+    EXPECT_NE(result.error_message.find("PRE-OP"), std::string::npos);
 }
