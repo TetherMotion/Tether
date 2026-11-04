@@ -401,6 +401,13 @@ jobs:
     - name: Run integration tests
       run: .github/scripts/run_ctest.sh build "" -R "integration|ethercat|simulation"
 
+    - name: Upload test results to Codecov
+      if: ${{ !cancelled() }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: build/junit.xml
+
     - name: Upload integration test results
       if: always()
       uses: actions/upload-artifact@v7
@@ -468,11 +475,18 @@ jobs:
           echo "::notice::Running under rootless user+net namespace"
           # Fresh netns: full CAP_NET_RAW/CAP_NET_ADMIN over it —
           # veth pairs and AF_PACKET work; RT scheduling self-skips.
-          unshare -rn bash -c "ip link set lo up; $BIN"
+          unshare -rn bash -c "ip link set lo up; $BIN --gtest_output=xml:junit.xml"
         else
           echo "::notice::userns unavailable — running under sudo"
-          sudo -E "$BIN"
+          sudo -E "$BIN" --gtest_output=xml:junit.xml
         fi
+
+    - name: Upload test results to Codecov
+      if: ${{ !cancelled() }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: junit.xml
 
     - name: Upload privileged test results
       if: always()
@@ -533,6 +547,13 @@ jobs:
       env:
         BLEND_SVG_DIR: ${{ github.workspace }}/test_svgs
         TEST_SVG_DIR: ${{ github.workspace }}/test_svgs
+
+    - name: Upload test results to Codecov
+      if: ${{ !cancelled() }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: build/junit.xml
 
     - name: Upload test SVG paths
       if: always()
@@ -734,6 +755,14 @@ jobs:
         name: codecov-umbrella
         fail_ci_if_error: false
 
+    - name: Upload test results to Codecov
+      if: ${{ !cancelled() }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: build-asan/junit.xml
+        flags: unittests
+
     - name: Show ccache stats
       if: always()
       run: ccache -s
@@ -884,6 +913,14 @@ jobs:
         .github/scripts/run_ctest.sh build-tsan tsan_all.log \
           --parallel $(nproc) \
           -E "ThermalIntegrationTest|CertifiedBoundDominatesBruteForce"
+
+    - name: Upload test results to Codecov
+      if: ${{ !cancelled() }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: build-tsan/junit.xml
+        flags: unittests
 
     - name: Show ccache stats
       if: always()
