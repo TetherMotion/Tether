@@ -2587,3 +2587,87 @@ TEST_F(PDOManagerBulkTest, LrwSlicedSendForLargeImage) {
     // LRW mode -> receiveAll returns the send phase result.
     EXPECT_TRUE(pdo_mgr.receiveAll());
 }
+
+// ============================================================================
+// PDOManager core accessors and pdo_* test hooks
+// ============================================================================
+
+TEST_F(PDOManagerBulkTest, CoreAccessorsAndWrappers) {
+    buildSixEntryMap();
+
+    // Free-function test hooks.
+    EXPECT_EQ(pdo_get_mapping(pdo_mgr).entry_count(), 6u);
+    EXPECT_NE(pdo_get_slave_configs(pdo_mgr), nullptr);
+    EXPECT_TRUE(pdo_configure_slave_sms(pdo_mgr, 0));
+    EXPECT_EQ(pdo_configure_all_slave_sms(pdo_mgr, 1), 1u);
+    EXPECT_TRUE(pdo_exchange_all(pdo_mgr));
+    EXPECT_FALSE(pdo_exchange_lrw(pdo_mgr, 1));   // no LAM -> error
+    EXPECT_TRUE(pdo_exchange_lrw(pdo_mgr, 0));
+
+    pdo_set_separate_mode(pdo_mgr, true);
+    EXPECT_TRUE(pdo_get_separate_mode(pdo_mgr));
+    pdo_set_separate_mode(pdo_mgr, false);
+    EXPECT_FALSE(pdo_get_separate_mode(pdo_mgr));
+    EXPECT_FALSE(pdo_exchange_separate(pdo_mgr, 1));
+    EXPECT_TRUE(pdo_exchange_separate(pdo_mgr, 0));
+
+    pdo_set_physical_mode(pdo_mgr, true);
+    EXPECT_TRUE(pdo_get_physical_mode(pdo_mgr));
+
+    uint32_t a = 0, b = 0, c = 0, d = 0;
+    pdo_get_lrw_stats(pdo_mgr, &a, &b, &c, &d);
+    EXPECT_EQ(c, 1u);   // the failed LRW attempt above
+    pdo_get_lrw_stats(pdo_mgr, nullptr, nullptr, nullptr, nullptr);
+    pdo_get_separate_stats(pdo_mgr, &a, &b, &c, &d);   // all zero
+    pdo_get_separate_stats(pdo_mgr, nullptr, nullptr, nullptr, nullptr);
+
+    // Physical exchange via the wrapper drives FPWR/FPRD stats.
+    auto* cfgs = pdo_mgr.slaveConfigs();
+    cfgs[0].configured = true;
+    cfgs[0].configured_address = 0x2000;
+    cfgs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 4);
+    cfgs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 4);
+    for (size_t i = 0; i < 6; ++i)
+        pdo_mgr.mapping().get_entry_mut(i)->physical_offset =
+            (i < 3) ? static_cast<uint16_t>(0x1800 + i)
+                    : static_cast<uint16_t>(0x1C00 + i - 3);
+    EXPECT_TRUE(pdo_exchange_physical(pdo_mgr, 1));
+    pdo_get_physical_stats(pdo_mgr, &a, &b, &c, &d);
+    EXPECT_EQ(a, 1u);
+    EXPECT_EQ(c, 1u);
+    pdo_get_physical_stats(pdo_mgr, nullptr, nullptr, nullptr, nullptr);
+
+    EXPECT_TRUE(pdo_finalize_mapping(pdo_mgr, 0));
+
+    PDOStats stats = pdo_get_stats(pdo_mgr);
+    EXPECT_GT(stats.total_cycles, 0u);
+    pdo_reset_stats(pdo_mgr);
+    EXPECT_EQ(pdo_get_stats(pdo_mgr).total_cycles, 0u);
+}
+
+TEST_F(PDOManagerBulkTest, SendRecvSingleEntryAndEntryLookup) {
+    buildSixEntryMap();
+    EXPECT_TRUE(pdo_mgr.hasSlavePDOEntries(0));
+    EXPECT_FALSE(pdo_mgr.hasSlavePDOEntries(5));
+
+    // Single-entry helpers are wrappers over the same transport.
+    pdo_send_rxpdo(pdo_mgr, 0);
+    pdo_receive_txpdo(pdo_mgr, 3);
+}
+
+TEST_F(PDOManagerBulkTest, DumpStatsAndDeinitShutdown) {
+    debug_flags.shutdown = true;
+    pdo_mgr.setDebugFlags(&debug_flags);
+    pdo_mgr.init();
+    pdo_mgr.dumpStats("test");
+    EXPECT_TRUE(pdo_mgr.isInitialized());
+    pdo_mgr.deinit();
+    EXPECT_FALSE(pdo_mgr.isInitialized());
+}
+
+TEST_F(PDOManagerBulkTest, SlaveCountSetterAndCounts) {
+    pdo_mgr.setSlaveCount(7);
+    EXPECT_EQ(pdo_mgr.slaveCount(), 7u);
+    EXPECT_EQ(pdo_mgr.getSlavePDORequestCount(PDO::kMaxPDOSlaves), 0u);
+    EXPECT_EQ(pdo_mgr.getSlavePDOReplyCount(PDO::kMaxPDOSlaves), 0u);
+}
