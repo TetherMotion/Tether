@@ -480,3 +480,90 @@ TEST_F(DebugHelpersMasterTest, ApplyFlagsEmptySet) {
 }
 
 #endif  // TETHER_DEBUG_GATE_ENABLED
+
+// ============================================================================
+// DebugConditions.cpp — per-condition firing semantics
+// ============================================================================
+
+TEST(DebugConditionImplTest, StateConditionFiresOnMatch) {
+    StateCondition cond(SlaveState::OP);
+    cond.onCheckpoint("state:pre_op", 0);
+    EXPECT_FALSE(cond.hasFired());
+    cond.onCheckpoint("state:op", 0);
+    EXPECT_TRUE(cond.hasFired());
+    cond.reset();
+    EXPECT_FALSE(cond.hasFired());
+}
+
+TEST(DebugConditionImplTest, StateConditionSlaveFilter) {
+    StateCondition cond(SlaveState::OP, /*slave_index=*/2);
+    cond.onCheckpoint("state:op", 1);
+    EXPECT_FALSE(cond.hasFired());          // wrong slave
+    cond.onCheckpoint("state:op", 2);
+    EXPECT_TRUE(cond.hasFired());
+}
+
+TEST(DebugConditionImplTest, CheckpointConditionFiresOnName) {
+    CheckpointCondition cond("before-pdo");
+    cond.onCheckpoint("other", 0);
+    EXPECT_FALSE(cond.hasFired());
+    cond.onCheckpoint("before-pdo", 0);
+    EXPECT_TRUE(cond.hasFired());
+}
+
+TEST(DebugConditionImplTest, RegisterInterceptArms) {
+    RegisterInterceptCondition cond(0x0130, CompareOp::Eq, 0x0008);
+    uint8_t data[2] = {0x08, 0x00};
+
+    cond.onRegisterRead(0, 0x0134, data, 2);     // wrong addr
+    EXPECT_FALSE(cond.hasFired());
+    cond.onRegisterRead(0, 0x0130, data, 0);     // zero len
+    EXPECT_FALSE(cond.hasFired());
+    uint8_t wrong[2] = {0x09, 0x00};
+    cond.onRegisterRead(0, 0x0130, wrong, 2);    // value mismatch
+    EXPECT_FALSE(cond.hasFired());
+    cond.onRegisterRead(1, 0x0130, data, 2);     // match (any slave)
+    EXPECT_TRUE(cond.hasFired());
+}
+
+TEST(DebugConditionImplTest, RegisterInterceptSlaveFilter) {
+    RegisterInterceptCondition cond(0x0130, CompareOp::Ge, 0x0008, 2);
+    uint8_t data[2] = {0x10, 0x00};
+    cond.onRegisterRead(1, 0x0130, data, 2);     // wrong slave
+    EXPECT_FALSE(cond.hasFired());
+    cond.onRegisterRead(2, 0x0130, data, 2);
+    EXPECT_TRUE(cond.hasFired());
+}
+
+TEST(DebugConditionImplTest, CoEInterceptArms) {
+    CoEInterceptCondition cond(0x6040, 0, true, CompareOp::Eq, 0x06);
+    uint8_t data[1] = {0x06};
+
+    cond.onCoERead(0, 0x6041, 0, data, 1);       // wrong index
+    EXPECT_FALSE(cond.hasFired());
+    cond.onCoERead(0, 0x6040, 1, data, 1);       // wrong sub (has_sub)
+    EXPECT_FALSE(cond.hasFired());
+    cond.onCoERead(0, 0x6040, 0, data, 0);       // zero len
+    EXPECT_FALSE(cond.hasFired());
+    cond.onCoERead(0, 0x6040, 0, data, 1);       // match
+    EXPECT_TRUE(cond.hasFired());
+}
+
+TEST(DebugConditionImplTest, CoEInterceptNoSubMatchesAny) {
+    CoEInterceptCondition cond(0x6040, 0, false, CompareOp::Ne, 0x00);
+    uint8_t data[1] = {0x42};
+    cond.onCoERead(0, 0x6040, 7, data, 1);       // any subindex
+    EXPECT_TRUE(cond.hasFired());
+}
+
+TEST(DebugConditionImplTest, CustomConditionCallbackFires) {
+    int calls = 0;
+    CustomCondition cond([&] { ++calls; return calls >= 2; });
+    EXPECT_FALSE(cond.hasFired());               // first call → not yet
+    EXPECT_TRUE(cond.hasFired());                // second → fires
+    EXPECT_TRUE(cond.hasFired());                // latched, no more calls
+    EXPECT_EQ(calls, 2);
+
+    CustomCondition noop(nullptr);
+    EXPECT_FALSE(noop.hasFired());               // null cb → never fires
+}
