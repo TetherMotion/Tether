@@ -1269,6 +1269,7 @@ create_ethercat_test(coverage
         ethercat/test_discovery_state_coverage.cpp
         ethercat/test_cia402_op_transition.cpp
         ethercat/test_cbpf_interpreter.cpp
+        ethercat/test_foe_manager.cpp
         ethercat/test_packet_debugger.cpp
         ethercat/test_cyclic_task_scheduler.cpp
         ethercat/test_sync_diagnostics.cpp
