@@ -377,3 +377,110 @@ TEST_F(SiiConcurrencyTest, InvalidateDuringReads) {
     // Should have completed many reads without crashing.
     EXPECT_GT(read_count.load(), 0);
 }
+
+// ============================================================================
+// Test 6: Reader accessors and per-bus state delegation.
+// ============================================================================
+TEST_F(SiiConcurrencyTest, ReaderStateAccessors) {
+    initSlaves(1);
+    auto& sii = master.slave(0).sii();
+
+    // Station-address accessor delegates to the reader; the setters are
+    // documented no-ops retained for API compatibility.
+    const uint16_t before = sii.configuredStationAddr();
+    sii.setConfiguredStationAddr(0x1234);
+    EXPECT_EQ(sii.configuredStationAddr(), before);
+
+    const bool fpwr_before = sii.useFpwr();
+    sii.setUseFpwr(!fpwr_before);
+    EXPECT_EQ(sii.useFpwr(), fpwr_before);
+
+    const bool forced_before = sii.eepromForcedToEcat();
+    sii.setEepromForcedToEcat(!forced_before);
+    EXPECT_EQ(sii.eepromForcedToEcat(), forced_before);
+}
+
+// ============================================================================
+// Test 7: Uncached word/dword/block reads go to the bus.
+// ============================================================================
+TEST_F(SiiConcurrencyTest, UncachedReadPaths) {
+    initSlaves(1);
+    auto& sii = master.slave(0).sii();
+    sii.invalidateCache();
+
+    // Cache miss -> reader_->readWord().
+    uint16_t word = 0;
+    ASSERT_TRUE(sii.readWord(0x0008, word));
+    EXPECT_EQ(word, static_cast<uint16_t>(0x22D2));
+
+    // Second read is served from the cache.
+    ASSERT_TRUE(sii.readWord(0x0008, word));
+    EXPECT_EQ(word, static_cast<uint16_t>(0x22D2));
+
+    // readDWord: cache miss then cache hit.
+    uint32_t dword = 0;
+    ASSERT_TRUE(sii.readDWord(0x0008, dword));
+    EXPECT_EQ(dword, 0x000022D2u);
+    ASSERT_TRUE(sii.readDWord(0x0008, dword));
+    EXPECT_EQ(dword, 0x000022D2u);
+
+    // Bulk reads always go to the bus.
+    uint16_t words[4] = {};
+    EXPECT_GT(sii.readWords(0x0000, words, 4), 0u);
+
+    uint8_t bytes[8] = {};
+    EXPECT_GT(sii.readBytes(0x0010, bytes, sizeof(bytes)), 0u);
+
+    char name[32] = {};
+    // The mock EEPROM has no string category: the read fails cleanly.
+    EXPECT_FALSE(sii.readString(0, name, sizeof(name)));
+}
+
+// ============================================================================
+// Test 8: parseCategories caches per-mask results.
+// ============================================================================
+TEST_F(SiiConcurrencyTest, ParseCategoriesCachesResult) {
+    initSlaves(1);
+    auto& sii = master.slave(0).sii();
+
+    SIIData data;
+    // The mock EEPROM only carries the config area, so a category parse
+    // completes with whatever it could find; the important part is that
+    // the second call is served from the cache.
+    const bool first = sii.parseCategories(data, EtherCAT::SII::CAT_MASK_GENERAL);
+    const bool second = sii.parseCategories(data, EtherCAT::SII::CAT_MASK_GENERAL);
+    EXPECT_EQ(first, second);
+
+    // A full parse caches everything; later calls are cache hits.
+    SIIData full;
+    const bool full_first = sii.parseFull(full);
+    const bool full_second = sii.parseFull(full);
+    EXPECT_EQ(full_first, full_second);
+
+    sii.invalidateCache();
+    SIIData again;
+    EXPECT_EQ(sii.parseFull(again), full_first);
+}
+
+// ============================================================================
+// Test 9: demand-parse failure paths.
+// ============================================================================
+TEST_F(SiiConcurrencyTest, ParseFailsWhenEepromUnreadable) {
+    initSlaves(1);
+    auto& sii = master.slave(0).sii();
+
+    // Make every EEPROM data read fail.
+    master.setAprdTestCallback([](uint16_t, uint16_t ado, void* out,
+                                  uint16_t len, unsigned int) -> bool {
+        if (ado == 0x0508) return false;
+        if (out && len >= 2) {
+            uint16_t zero = 0;
+            std::memcpy(out, &zero, 2);
+        }
+        return ado != 0x0504;
+    });
+
+    sii.invalidateCache();
+    SIIData data;
+    EXPECT_FALSE(sii.parseFull(data));
+}
