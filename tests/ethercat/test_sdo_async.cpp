@@ -1447,3 +1447,106 @@ TEST_F(SDOManagerQueueTest, WaitForResponseTimesOutOnStalledWorker) {
 
     mgr.deinit();
 }
+
+// ============================================================================
+// CoEManager object-dictionary entry API (CoEEntryTransactions.cpp)
+// ============================================================================
+
+namespace {
+
+ObjectDictionary::ObjectDictionaryEntry makeEntry(
+    uint16_t index, uint8_t sub,
+    ObjectDictionary::ObjectDictionaryDataType type) {
+    return ObjectDictionary::ObjectDictionaryEntry{
+        .index = index,
+        .subindex = sub,
+        .name = "test_entry",
+        .data_type = type,
+        .default_value = 0,
+        .unit = ObjectDictionary::Unit_None,
+        .options_enum = nullptr,
+        .min_value = 0,
+        .max_value = 0,
+        .modification_mode = ObjectDictionary::ModificationMode::ReadOnly,
+        .effective_time = ObjectDictionary::EffectiveTime::Immediately};
+}
+
+}  // namespace
+
+TEST_F(SDOManagerQueueTest, ReadEntryUnsupportedTypeFailsFast) {
+    CoEManager mgr(0, transport_);
+    auto result = mgr.readEntry(
+        makeEntry(0x6040, 0, ObjectDictionary::ObjectDictionaryDataType::VisibleString));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, CoEErrorCode::NotConfigured);
+}
+
+TEST_F(SDOManagerQueueTest, WriteEntryUnsupportedTypeFailsFast) {
+    CoEManager mgr(0, transport_);
+    auto result = mgr.writeEntry(
+        makeEntry(0x6040, 0, ObjectDictionary::ObjectDictionaryDataType::Domain), 0);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, CoEErrorCode::NotConfigured);
+}
+
+TEST_F(SDOManagerQueueTest, EntryApiFailsWhenNotInitialized) {
+    CoEManager mgr(0, transport_);
+    auto r = mgr.readEntryAsync(
+        makeEntry(0x6040, 0, ObjectDictionary::ObjectDictionaryDataType::Unsigned8), {});
+    ASSERT_EQ(r.get().error().code, CoEErrorCode::NotConfigured);
+    auto w = mgr.writeEntryAsync(
+        makeEntry(0x6040, 0, ObjectDictionary::ObjectDictionaryDataType::Unsigned8),
+        1, {});
+    ASSERT_EQ(w.get().error().code, CoEErrorCode::NotConfigured);
+}
+
+TEST_F(SDOManagerQueueTest, ReadEntrySuccessAndSignExtension) {
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(UploadOk("\x80", 1));   // Integer8 -128
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    auto r = mgr.readEntry(
+        makeEntry(0x6040, 0, ObjectDictionary::ObjectDictionaryDataType::Integer8));
+    ASSERT_TRUE(r.has_value());
+    // Negative Integer8 sign-extends into the uint64_t result.
+    EXPECT_EQ(static_cast<int64_t>(*r), -128);
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, WriteEntrySuccessAndSubindexOverride) {
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(DownloadOk());
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    auto w = mgr.writeEntry(
+        makeEntry(0x6040, 0, ObjectDictionary::ObjectDictionaryDataType::Unsigned16),
+        0x1234);
+    EXPECT_TRUE(w.has_value());
+
+    // Record-member overloads route entry.subindex <- explicit subindex.
+    auto w2 = mgr.writeEntry(
+        makeEntry(0x6099, 0, ObjectDictionary::ObjectDictionaryDataType::Unsigned8),
+        static_cast<uint8_t>(7), 42);
+    EXPECT_TRUE(w2.has_value());
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, ReadEntryTransportErrorPropagates) {
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(UploadFail());
+
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    auto r = mgr.readEntry(
+        makeEntry(0x6040, 0, ObjectDictionary::ObjectDictionaryDataType::Unsigned8));
+    EXPECT_FALSE(r.has_value());
+    mgr.deinit();
+}
