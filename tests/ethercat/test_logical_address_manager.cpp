@@ -5,6 +5,8 @@
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <set>
+#include <vector>
 #include <cstring>
 
 #include "tether/ethercat/LogicalAddressManager.hpp"
@@ -1854,4 +1856,284 @@ TEST_F(PDOManagerCyclicTest, CallbackModeConfigures) {
     pdo_mgr.setRxReceivedCallback(PDO::kMaxPDOEntries + 5,
                                   [](uint16_t, const uint8_t*, size_t,
                                      uint32_t, uint64_t) {});
+}
+
+// ============================================================================
+// PDOManager SM configuration coverage
+// ============================================================================
+
+namespace {
+
+class SMConfigStubTransport : public CyclicStubTransport {
+public:
+    struct RegWrite {
+        uint16_t adp;
+        uint16_t ado;
+        uint16_t len;
+        uint8_t  data[8];
+    };
+    struct RegRead {
+        uint16_t adp;
+        uint16_t ado;
+    };
+
+    bool writeRegister(uint16_t adp, uint16_t ado, const void* data,
+                       uint16_t len, unsigned int) override {
+        RegWrite w{adp, ado, len, {}};
+        if (data && len)
+            std::memcpy(w.data, data,
+                        std::min<size_t>(len, sizeof(w.data)));
+        writes.push_back(w);
+        return fail_writes.count(writes.size()) == 0;
+    }
+    bool readRegister(uint16_t adp, uint16_t ado, void* data,
+                      uint16_t len, unsigned int) override {
+        reads.push_back({adp, ado});
+        if (data && len) std::memset(data, read_byte_, len);
+        return read_ok_;
+    }
+
+    // Batched SM-activation surface (configureSlavesSMs pre-registers one
+    // waiter per SM then sends a single multi-datagram frame).
+    size_t preRegisterResponseWaiter(uint8_t, uint8_t*,
+                                     size_t) override {
+        if (waited_slots.size() == prereg_fail_at ||
+            !prereg_ok_)
+            return IPDOTransport::kPreRegInvalid;
+        waited_slots.push_back(next_slot_);
+        return next_slot_++;
+    }
+    size_t sendMultiDatagram(const MultiDatagramSpec* specs,
+                             size_t count) override {
+        if (!multi_send_ok_) return 0;
+        last_multi_adp.clear();
+        last_multi_ado.clear();
+        last_multi_data.clear();
+        for (size_t i = 0; i < count; ++i) {
+            last_multi_adp.push_back(specs[i].adp);
+            last_multi_ado.push_back(specs[i].ado);
+            last_multi_data.push_back(
+                specs[i].data
+                    ? *static_cast<const uint8_t*>(specs[i].data)
+                    : 0xFF);
+        }
+        return count;
+    }
+    bool waitForPreRegistered(size_t slot, unsigned int,
+                              RxDatagram&) override {
+        confirmed_slots.push_back(slot);
+        return wait_prereg_ok_;
+    }
+    void cancelPreRegistered(size_t slot) override {
+        cancelled_slots.push_back(slot);
+    }
+    uint16_t adpForSlaveIndex(uint16_t i) override {
+        return static_cast<uint16_t>(0x1000 + i);
+    }
+
+    std::vector<RegWrite> writes;
+    std::vector<RegRead>  reads;
+    std::set<size_t>      fail_writes;      // 1-based call indices to fail
+    bool                  read_ok_  = true;
+    uint8_t               read_byte_ = 0;
+
+    bool   prereg_ok_      = false;         // support the batched path?
+    bool   multi_send_ok_  = true;
+    bool   wait_prereg_ok_ = true;
+    size_t prereg_fail_at  = SIZE_MAX;      // slot index that fails prereg
+    size_t next_slot_      = 0;
+    std::vector<size_t>   waited_slots;
+    std::vector<size_t>   confirmed_slots;
+    std::vector<size_t>   cancelled_slots;
+    std::vector<uint16_t> last_multi_adp;
+    std::vector<uint16_t> last_multi_ado;
+    std::vector<uint8_t>  last_multi_data;
+};
+
+class PDOManagerSMConfigTest : public ::testing::Test {
+protected:
+    static constexpr uint16_t kAdp = 0x1000;
+    SMConfigStubTransport transport;
+    PDOManager pdo_mgr{transport};
+
+    void SetUp() override {
+        auto* cfgs = pdo_mgr.slaveConfigs();
+        cfgs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 4);
+        cfgs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 8);
+        cfgs[0].rxpdo_size = 4;
+        cfgs[0].txpdo_size = 8;
+    }
+};
+
+}  // namespace
+
+TEST_F(PDOManagerSMConfigTest, ConfigureSlavesSMsRejectsInvalidIndex) {
+    EXPECT_FALSE(pdo_mgr.configureSlavesSMs(
+        static_cast<uint16_t>(PDO::kMaxPDOSlaves)));
+    EXPECT_TRUE(transport.writes.empty());
+}
+
+TEST_F(PDOManagerSMConfigTest, ProgramsAndActivatesSequentially) {
+    // No pre-registered waiters -> sequential activate fallback.
+    ASSERT_TRUE(pdo_mgr.configureSlavesSMs(0));
+    ASSERT_EQ(transport.writes.size(), 6u);
+
+    // SM2 (base 0x0810, process output): disable then block.
+    EXPECT_EQ(transport.writes[0].adp, kAdp);
+    EXPECT_EQ(transport.writes[0].ado, 0x0816);
+    EXPECT_EQ(transport.writes[0].len, 1u);
+    EXPECT_EQ(transport.writes[0].data[0], 0x00);
+
+    EXPECT_EQ(transport.writes[1].ado, 0x0810);
+    ASSERT_EQ(transport.writes[1].len, 5u);
+    EXPECT_EQ(transport.writes[1].data[0], 0x00);   // phys addr LE
+    EXPECT_EQ(transport.writes[1].data[1], 0x18);
+    EXPECT_EQ(transport.writes[1].data[2], 0x04);   // length LE
+    EXPECT_EQ(transport.writes[1].data[3], 0x00);
+    EXPECT_EQ(transport.writes[1].data[4], 0x44);   // buffered|dir-write|repeat
+
+    // SM3 (base 0x0818, process input): disable then block.
+    EXPECT_EQ(transport.writes[2].ado, 0x081E);
+    EXPECT_EQ(transport.writes[2].data[0], 0x00);
+    EXPECT_EQ(transport.writes[3].ado, 0x0818);
+    EXPECT_EQ(transport.writes[3].data[0], 0x00);
+    EXPECT_EQ(transport.writes[3].data[1], 0x1C);
+    EXPECT_EQ(transport.writes[3].data[2], 0x08);
+    EXPECT_EQ(transport.writes[3].data[4], 0x40);   // buffered|dir-read|repeat
+
+    // Activation phase comes after all SMs are programmed.
+    EXPECT_EQ(transport.writes[4].ado, 0x0816);
+    EXPECT_EQ(transport.writes[4].data[0], 0x01);   // SM_ACT_ENABLE
+    EXPECT_EQ(transport.writes[5].ado, 0x081E);
+    EXPECT_EQ(transport.writes[5].data[0], 0x01);
+
+    EXPECT_TRUE(pdo_mgr.slaveConfigs()[0].configured);
+}
+
+TEST_F(PDOManagerSMConfigTest, DisableFailureIsNonFatal) {
+    transport.fail_writes = {1, 3};   // both SM disable writes
+    EXPECT_TRUE(pdo_mgr.configureSlavesSMs(0));
+    EXPECT_EQ(transport.writes.size(), 6u);   // kept going
+}
+
+TEST_F(PDOManagerSMConfigTest, BlockWriteFailureAborts) {
+    transport.fail_writes = {2};              // SM2 register block
+    EXPECT_FALSE(pdo_mgr.configureSlavesSMs(0));
+    EXPECT_EQ(transport.writes.size(), 2u);   // nothing past the block
+    EXPECT_FALSE(pdo_mgr.slaveConfigs()[0].configured);
+}
+
+TEST_F(PDOManagerSMConfigTest, ActivateWriteFailureAborts) {
+    transport.fail_writes = {5};              // SM2 sequential activate
+    EXPECT_FALSE(pdo_mgr.configureSlavesSMs(0));
+    EXPECT_EQ(transport.writes.size(), 5u);
+    EXPECT_FALSE(pdo_mgr.slaveConfigs()[0].configured);
+}
+
+TEST_F(PDOManagerSMConfigTest, BatchedActivationFrame) {
+    transport.prereg_ok_ = true;
+    ASSERT_TRUE(pdo_mgr.configureSlavesSMs(0));
+
+    // Per SM: disable + block only — activation went out in one frame.
+    ASSERT_EQ(transport.writes.size(), 4u);
+    EXPECT_EQ(transport.writes[1].ado, 0x0810);
+    EXPECT_EQ(transport.writes[3].ado, 0x0818);
+
+    ASSERT_EQ(transport.last_multi_ado.size(), 2u);
+    EXPECT_EQ(transport.last_multi_adp[0], kAdp);
+    EXPECT_EQ(transport.last_multi_ado[0], 0x0816);
+    EXPECT_EQ(transport.last_multi_ado[1], 0x081E);
+    EXPECT_EQ(transport.last_multi_data[0], 0x01);
+    EXPECT_EQ(transport.last_multi_data[1], 0x01);
+    EXPECT_EQ(transport.confirmed_slots.size(), 2u);
+    EXPECT_TRUE(transport.cancelled_slots.empty());
+}
+
+TEST_F(PDOManagerSMConfigTest, BatchSendFailureFallsBackToSequential) {
+    transport.prereg_ok_     = true;
+    transport.multi_send_ok_ = false;
+    EXPECT_TRUE(pdo_mgr.configureSlavesSMs(0));
+
+    EXPECT_EQ(transport.cancelled_slots.size(), 2u);
+    ASSERT_EQ(transport.writes.size(), 6u);
+    EXPECT_EQ(transport.writes[4].ado, 0x0816);   // sequential activates
+    EXPECT_EQ(transport.writes[5].ado, 0x081E);
+}
+
+TEST_F(PDOManagerSMConfigTest, BatchWaitFailureFallsBackToSequential) {
+    transport.prereg_ok_      = true;
+    transport.wait_prereg_ok_ = false;
+    EXPECT_TRUE(pdo_mgr.configureSlavesSMs(0));
+
+    EXPECT_EQ(transport.cancelled_slots.size(), 2u);
+    EXPECT_EQ(transport.writes.size(), 6u);
+}
+
+TEST_F(PDOManagerSMConfigTest, MidBatchPreregFailureFallsBack) {
+    transport.prereg_ok_     = true;
+    transport.prereg_fail_at = 1;    // SM3's preRegister fails
+    EXPECT_TRUE(pdo_mgr.configureSlavesSMs(0));
+
+    EXPECT_EQ(transport.cancelled_slots.size(), 1u);   // only SM2's slot
+    EXPECT_EQ(transport.writes.size(), 6u);
+}
+
+TEST_F(PDOManagerSMConfigTest, ConfigureAllCountsSuccesses) {
+    auto* cfgs = pdo_mgr.slaveConfigs();
+    cfgs[1].sm[0] = SyncManagerConfig::mailbox_write(0x1000, 0x80);
+    cfgs[1].sm[1] = SyncManagerConfig::mailbox_read(0x1080, 0x80);
+
+    EXPECT_EQ(pdo_mgr.configureAllSlaveSMs(2), 2u);
+    EXPECT_EQ(pdo_mgr.slaveCount(), 2u);
+
+    // Slave 1's mailbox SMs went to SM0/SM1 bases under adp 0x1001.
+    bool saw_sm0 = false, saw_sm1 = false;
+    for (const auto& w : transport.writes) {
+        if (w.adp == 0x1001 && w.ado == 0x0800) saw_sm0 = true;
+        if (w.adp == 0x1001 && w.ado == 0x0808) saw_sm1 = true;
+    }
+    EXPECT_TRUE(saw_sm0);
+    EXPECT_TRUE(saw_sm1);
+}
+
+TEST_F(PDOManagerSMConfigTest, ConfigureAllCountsPartialFailure) {
+    auto* cfgs = pdo_mgr.slaveConfigs();
+    cfgs[1].sm[2] = SyncManagerConfig::process_output(0x1900, 4);
+
+    transport.fail_writes = {8};    // slave 1's first block write
+    EXPECT_EQ(pdo_mgr.configureAllSlaveSMs(2), 1u);
+    EXPECT_TRUE(pdo_mgr.slaveConfigs()[0].configured);
+    EXPECT_FALSE(pdo_mgr.slaveConfigs()[1].configured);
+}
+
+TEST_F(PDOManagerSMConfigTest, ConfigureAllClampsToMaxSlaves) {
+    // Slaves without SMs configure trivially — returns the clamp count.
+    EXPECT_EQ(pdo_mgr.configureAllSlaveSMs(
+                  static_cast<uint16_t>(PDO::kMaxPDOSlaves + 2)),
+              static_cast<uint16_t>(PDO::kMaxPDOSlaves));
+    EXPECT_EQ(pdo_mgr.slaveCount(),
+              static_cast<size_t>(PDO::kMaxPDOSlaves) + 2);
+}
+
+TEST_F(PDOManagerSMConfigTest, DebugFlagsExerciseLoggingArms) {
+    EtherCATMasterDebugFlags flags;
+    flags.pdoSm = true;
+    flags.rxPDO = true;
+    flags.txPDO = true;
+    flags.mailboxConfiguration = true;
+    flags.pdoConfiguration = true;
+    pdo_mgr.setDebugFlags(&flags);
+
+    // Mailbox SMs hit the is_mbx debug arm; all four SM types plus extra
+    // control bits hit the type-switch and IRQ/watchdog log arms.
+    auto* cfgs = pdo_mgr.slaveConfigs();
+    cfgs[0].sm[0] = SyncManagerConfig::mailbox_write(0x1000, 0x80);
+    cfgs[0].sm[1] = SyncManagerConfig::mailbox_read(0x1080, 0x80);
+    cfgs[0].sm[2].control.ecat_irq = 1;
+    cfgs[0].sm[2].control.pdi_irq  = 1;
+    cfgs[0].sm[2].control.watchdog = 1;
+    cfgs[0].sm[3].control.mode     = 0x3;   // 3-PDO mode string arm
+
+    EXPECT_TRUE(pdo_mgr.configureSlavesSMs(0));
+    EXPECT_EQ(transport.writes.size(), 12u);
 }
