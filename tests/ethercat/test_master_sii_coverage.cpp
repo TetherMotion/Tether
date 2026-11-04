@@ -281,4 +281,66 @@ TEST_F(MasterSiiCoverageTest, MotionAndQueueLoopStartStop) {
     EXPECT_FALSE(master_.isQueueModeLoopRunning());
 }
 
+
+// ============================================================================
+// Master_batch.cpp — batch register transactions
+// ============================================================================
+
+TEST_F(MasterSiiCoverageTest, ReadRegistersBatchOnWire) {
+    SlaveAddress addrs[1] = {Master::slaveAddressFromADP(0)};
+    uint16_t regs[1] = {0x0130};             // AL_STATUS
+    uint16_t lens[1] = {2};
+
+    auto txn = master_.readRegistersBatch(addrs, regs, lens, 1);
+    std::vector<BatchReadResult> results;
+    EXPECT_TRUE(txn.waitAll(500, results));
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success);
+}
+
+TEST_F(MasterSiiCoverageTest, WriteRegistersBatchOnWire) {
+    SlaveAddress addrs[1] = {Master::slaveAddressFromADP(0)};
+    uint16_t regs[1] = {0x0800};             // SM0 phys addr — harmless write
+    uint8_t val[2] = {0x00, 0x10};
+    const void* data[1] = {val};
+    uint16_t lens[1] = {2};
+
+    auto txn = master_.writeRegistersBatch(addrs, regs, data, lens, 1);
+    BatchReadResult r = txn.getResult(0, 500);
+    EXPECT_TRUE(r.success);
+}
+
+TEST_F(MasterSiiCoverageTest, BatchRejectsBadInputs) {
+    SlaveAddress addrs[1] = {Master::slaveAddressFromADP(0)};
+    uint16_t regs[1] = {0x0130};
+    uint16_t lens[1] = {2};
+    uint8_t val[2] = {0, 0};
+    const void* data[1] = {val};
+
+    auto t1 = master_.readRegistersBatch(nullptr, regs, lens, 1);
+    auto t2 = master_.readRegistersBatch(addrs, regs, lens, 0);
+    auto t3 = master_.writeRegistersBatch(addrs, regs, nullptr, lens, 1);
+    // Default-constructed transactions fail getResult.
+    BatchReadResult r = t1.getResult(0, 0);
+    EXPECT_FALSE(r.success);
+    r = t2.getResult(0, 0);
+    EXPECT_FALSE(r.success);
+    r = t3.getResult(0, 0);
+    EXPECT_FALSE(r.success);
+    t1.cancel();   // no-op on default txn, must not crash
+    t2.cancel();
+    t3.cancel();
+}
+
+TEST_F(MasterSiiCoverageTest, BatchGetResultOutOfRange) {
+    SlaveAddress addrs[1] = {Master::slaveAddressFromADP(0)};
+    uint16_t regs[1] = {0x0130};
+    uint16_t lens[1] = {2};
+    auto txn = master_.readRegistersBatch(addrs, regs, lens, 1);
+    BatchReadResult r = txn.getResult(7, 0);    // out of range
+    EXPECT_FALSE(r.success);
+    txn.cancel();
+    master_.resetIdx();
+}
+
 }  // namespace
