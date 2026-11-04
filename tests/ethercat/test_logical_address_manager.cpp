@@ -12,6 +12,7 @@
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/ProcessImage.hpp"
+#include "tether/ethercat/DebugGate.hpp"
 
 using namespace EtherCAT;
 using namespace EtherCAT::PDO;
@@ -2380,4 +2381,209 @@ TEST_F(PDOManagerPhysicalTest, WireLogNoModeFieldLayout) {
 
     for (int i = 0; i < 1000; ++i)
         ASSERT_TRUE(pdo_mgr.exchangePhysical(1));
+}
+
+// ============================================================================
+// PDOManager bulk sendAll/receiveAll (non-LRW batched path)
+// ============================================================================
+
+namespace {
+
+class PDOManagerBulkTest : public ::testing::Test {
+protected:
+    SMConfigStubTransport transport;
+    PDOManager pdo_mgr{transport};
+    EtherCATMasterDebugFlags debug_flags;
+
+    /// Six entries covering every addressing arm on both phases:
+    ///   0 rx Position (fire-and-forget APWR)
+    ///   1 rx ConfiguredAddress (confirmed FPWR)
+    ///   2 rx Broadcast (confirmed BWR)
+    ///   3 tx Position (fire-and-forget APRD)
+    ///   4 tx ConfiguredAddress (confirmed FPRD)
+    ///   5 tx Broadcast (confirmed BRD)
+    void buildSixEntryMap() {
+        pdo_mgr.mapping().clear();
+        ASSERT_GE(pdo_mgr.mapping().add_rxpdo(0, 4, 0x1600,
+                                            PDOAddressMode::Position), 0);
+        ASSERT_GE(pdo_mgr.mapping().add_rxpdo(0, 4, 0x1601,
+                                            PDOAddressMode::ConfiguredAddress), 0);
+        ASSERT_GE(pdo_mgr.mapping().add_rxpdo(0, 4, 0x1602,
+                                            PDOAddressMode::Broadcast), 0);
+        ASSERT_GE(pdo_mgr.mapping().add_txpdo(0, 4, 0x1A00,
+                                            PDOAddressMode::Position), 0);
+        ASSERT_GE(pdo_mgr.mapping().add_txpdo(0, 4, 0x1A01,
+                                            PDOAddressMode::ConfiguredAddress), 0);
+        ASSERT_GE(pdo_mgr.mapping().add_txpdo(0, 4, 0x1A02,
+                                            PDOAddressMode::Broadcast), 0);
+        for (size_t i = 0; i < 6; ++i) {
+            auto* e = pdo_mgr.mapping().get_entry_mut(i);
+            e->physical_offset = static_cast<uint16_t>(0x1800 + i * 0x10);
+            e->configured_address = 0x2000;
+            e->data_size = 4;
+        }
+        transport.prereg_ok_ = true;
+        transport.prereg_wkc_ = 1;
+        transport.prereg_resp_len_ = 4;
+        std::memset(transport.prereg_resp_buf_, 0x5C, 4);
+    }
+};
+
+}  // namespace
+
+TEST_F(PDOManagerBulkTest, SendAllBuildsBatchedRxFrame) {
+    buildSixEntryMap();
+    ASSERT_TRUE(pdo_mgr.sendAll());
+
+    // One multi frame, three Rx specs covering all address modes.
+    ASSERT_EQ(transport.last_multi_adp.size(), 3u);
+    EXPECT_EQ(transport.last_multi_adp[0], 0x1000);   // APWR position
+    EXPECT_EQ(transport.last_multi_ado[0], 0x1800);
+    EXPECT_EQ(transport.last_multi_adp[1], 0x2000);   // FPWR configured
+    EXPECT_EQ(transport.last_multi_ado[1], 0x1810);
+    EXPECT_EQ(transport.last_multi_adp[2], 0x0000);   // BWR broadcast
+    EXPECT_EQ(transport.last_multi_ado[2], 0x1820);
+
+    // Fire-and-forget entry counted immediately; confirmed wait for
+    // receiveAll.
+    const auto* e0 = pdo_mgr.mapping().get_entry(0);
+    const auto* e1 = pdo_mgr.mapping().get_entry(1);
+    EXPECT_EQ(e0->success_count, 1u);
+    EXPECT_EQ(e1->success_count, 0u);
+
+    EXPECT_TRUE(pdo_mgr.receiveAll());
+    EXPECT_EQ(e1->success_count, 1u);
+    // Confirmed tx data scattered into storage.
+    const auto* e4 = pdo_mgr.mapping().get_entry(4);
+    EXPECT_EQ(e4->storage[0], 0x5C);
+    EXPECT_EQ(e4->success_count, 1u);
+}
+
+TEST_F(PDOManagerBulkTest, SendAllSendFailureMarksErrors) {
+    buildSixEntryMap();
+    transport.multi_send_ok_ = false;
+    EXPECT_FALSE(pdo_mgr.sendAll());
+    for (size_t i = 0; i < 3; ++i)
+        EXPECT_EQ(pdo_mgr.mapping().get_entry(i)->error_count, 1u);
+}
+
+TEST_F(PDOManagerBulkTest, SendAllLogicalOnlyEntriesFail) {
+    pdo_mgr.mapping().clear();
+    ASSERT_GE(pdo_mgr.mapping().add_rxpdo(0, 4, 0x1600,
+                                        PDOAddressMode::Logical), 0);
+    EXPECT_FALSE(pdo_mgr.sendAll());
+    EXPECT_EQ(pdo_mgr.mapping().get_entry(0)->error_count, 1u);
+}
+
+TEST_F(PDOManagerBulkTest, SendAllSkipsDisabledEntries) {
+    buildSixEntryMap();
+    pdo_mgr.mapping().get_entry_mut(0)->enabled = false;
+    EXPECT_TRUE(pdo_mgr.sendAll());
+    ASSERT_EQ(transport.last_multi_adp.size(), 2u);
+    EXPECT_TRUE(pdo_mgr.receiveAll());
+}
+
+TEST_F(PDOManagerBulkTest, ReceiveAllConfirmedTimeoutMarksErrors) {
+    buildSixEntryMap();
+    ASSERT_TRUE(pdo_mgr.sendAll());
+    transport.wait_prereg_ok_ = false;
+    EXPECT_FALSE(pdo_mgr.receiveAll());
+    EXPECT_EQ(pdo_mgr.mapping().get_entry(1)->error_count, 1u);
+    EXPECT_EQ(pdo_mgr.mapping().get_entry(4)->error_count, 1u);
+}
+
+TEST_F(PDOManagerBulkTest, ReceiveAllTxSendFailureMarksErrors) {
+    buildSixEntryMap();
+    ASSERT_TRUE(pdo_mgr.sendAll());
+    transport.multi_send_ok_ = false;      // tx frame fails
+    EXPECT_FALSE(pdo_mgr.receiveAll());
+    for (size_t i = 3; i < 6; ++i)
+        EXPECT_EQ(pdo_mgr.mapping().get_entry(i)->error_count, 1u);
+}
+
+TEST_F(PDOManagerBulkTest, ReceiveAllShortResponseMarksError) {
+    buildSixEntryMap();
+    transport.prereg_resp_len_ = 2;        // < data_size (4)
+    ASSERT_TRUE(pdo_mgr.sendAll());
+    EXPECT_FALSE(pdo_mgr.receiveAll());
+    EXPECT_EQ(pdo_mgr.mapping().get_entry(4)->error_count, 1u);
+}
+
+TEST_F(PDOManagerBulkTest, NonPreregWaitPathUsesResponseIdx) {
+    buildSixEntryMap();
+    transport.prereg_ok_ = false;
+    transport.single_resp_wkc_ = 1;
+    transport.single_resp_len_ = 4;
+    std::memset(transport.single_resp_buf_, 0x5C, 4);
+    ASSERT_TRUE(pdo_mgr.sendAll());
+    EXPECT_TRUE(pdo_mgr.receiveAll());
+    EXPECT_EQ(pdo_mgr.mapping().get_entry(4)->storage[0], 0x5C);
+}
+
+TEST_F(PDOManagerBulkTest, ExchangeAllCombines) {
+    buildSixEntryMap();
+    EXPECT_TRUE(pdo_mgr.exchangeAll());
+}
+
+TEST_F(PDOManagerBulkTest, DebugFlagsAndGateCheckpoints) {
+    debug_flags.rxPDO = true;
+    debug_flags.txPDO = true;
+    pdo_mgr.setDebugFlags(&debug_flags);
+    DebugGate gate;
+    pdo_mgr.setDebugGate(&gate);
+    buildSixEntryMap();
+    EXPECT_TRUE(pdo_mgr.exchangeAll());
+    // Second cycle — first-rxpdo/first-txpdo already emitted.
+    EXPECT_TRUE(pdo_mgr.exchangeAll());
+}
+
+TEST_F(PDOManagerBulkTest, CallbackModeFiresOnBulkExchange) {
+    buildSixEntryMap();
+    CallbackModeConfig cbc;
+    pdo_mgr.configureCallbackMode(cbc);
+
+    int tx_sent = 0, rx_received = 0;
+    for (size_t i = 0; i < 6; ++i) {
+        pdo_mgr.setTxSentCallback(i, [&](uint16_t, uint32_t, uint64_t) {
+            ++tx_sent;
+        });
+        pdo_mgr.setRxReceivedCallback(i,
+            [&](uint16_t, const uint8_t*, size_t, uint32_t, uint64_t) {
+                ++rx_received;
+            });
+    }
+
+    EXPECT_TRUE(pdo_mgr.exchangeAll());
+    // 1 fire-and-forget RxPDO + 2 confirmed RxPDOs.
+    EXPECT_EQ(tx_sent, 3);
+    // 1 fire-and-forget TxPDO + 2 confirmed TxPDOs.
+    EXPECT_EQ(rx_received, 3);
+}
+
+TEST_F(PDOManagerBulkTest, LrwSlicedSendForLargeImage) {
+    // Reuse the LAM: shrink the stub's per-frame payload below the
+    // 12-byte image so sendAll() takes the sliced-LRW path.
+    LogicalAddressManager lam{transport};
+    lam.init();
+    SlaveConfig configs[kMaxPDOSlaves] = {};
+    configs[0].configured = true;
+    configs[0].sm[2] = SyncManagerConfig::process_output(0x1800, 4);
+    configs[0].rxpdo_size = 4;
+    configs[0].sm[3] = SyncManagerConfig::process_input(0x1C00, 8);
+    configs[0].txpdo_size = 8;
+    ASSERT_TRUE(lam.buildAddressMap(configs, 1));
+
+    pdo_mgr.mapping().clear();
+    pdo_mgr.mapping().add_rxpdo(0, 4, 0x1600, PDOAddressMode::Logical);
+    pdo_mgr.mapping().add_txpdo(0, 8, 0x1A00, PDOAddressMode::Logical);
+    pdo_mgr.setLogicalAddressManager(&lam);
+
+    transport.payload_ = 16;    // max slice = 4 bytes < 12-byte image
+    for (size_t s = 0; s < 4; ++s) {
+        transport.resp_len_[s] = 4;
+        transport.resp_wkc_[s] = 3;
+    }
+    EXPECT_TRUE(pdo_mgr.sendAll());
+    // LRW mode -> receiveAll returns the send phase result.
+    EXPECT_TRUE(pdo_mgr.receiveAll());
 }
