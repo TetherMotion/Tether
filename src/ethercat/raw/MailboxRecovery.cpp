@@ -73,7 +73,7 @@ bool MailboxRecovery::drain(uint16_t slave_index, unsigned int max_drain)
             if (drained_any) {
                 TETHER_LOGI(local_tag, "{}: SM1 drained successfully", master_.slaveLogPrefix(slave_index).c_str());
             }
-            break;
+            return true;
         }
 
         if (!drained_any) {
