@@ -13,6 +13,7 @@
 
 #include "mocks/EmulatedBus.hpp"
 #include "tether/ethercat/CoEManager.hpp"
+#include "raw/CoEErrorStrings.hpp"
 #include "tether/ethercat/ESIFile.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/PDOManager.hpp"
@@ -168,4 +169,57 @@ TEST_F(KeepAliveCoverageTest, DestructorStopsThread) {
         auto keepalive = master_.pdo().startKeepAlive(std::chrono::milliseconds{5});
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }  // destructor stops the worker
+}
+
+// ============================================================================
+// CoEErrorStrings — coeErrorStr + coeErrorToAbortCode
+// ============================================================================
+
+TEST(StateUtilsCoverageTest, CoeErrorStrAllCodes) {
+    EXPECT_STREQ(CoE::coeErrorStr(CoE::CoEError{CoE::CoEErrorCode::Ok}), "Ok");
+    EXPECT_STREQ(CoE::coeErrorStr(CoE::CoEError{CoE::CoEErrorCode::Timeout}), "Timeout");
+    EXPECT_STREQ(CoE::coeErrorStr(CoE::CoEError{CoE::CoEErrorCode::Aborted}), "Aborted");
+    EXPECT_STREQ(CoE::coeErrorStr(CoE::CoEError{CoE::CoEErrorCode::TransportError}),
+                 "Transport error");
+    EXPECT_STREQ(CoE::coeErrorStr(CoE::CoEError{CoE::CoEErrorCode::QueueFull}),
+                 "Queue full");
+    EXPECT_STREQ(CoE::coeErrorStr(CoE::CoEError{CoE::CoEErrorCode::NotConfigured}),
+                 "Mailbox not configured");
+    EXPECT_STREQ(CoE::coeErrorStr(CoE::CoEError{CoE::CoEErrorCode::ShuttingDown}),
+                 "Shutting down");
+    EXPECT_STREQ(CoE::coeErrorStr(CoE::CoEError{CoE::CoEErrorCode::SlaveNotFound}),
+                 "Slave not found");
+    EXPECT_STREQ(CoE::coeErrorStr(CoE::CoEError{CoE::CoEErrorCode::InternalError}),
+                 "Internal error");
+    EXPECT_STREQ(CoE::coeErrorStr(
+                     CoE::CoEError{static_cast<CoE::CoEErrorCode>(0xFE)}),
+                 "Unknown error");
+    // An abort carrying a real SDO abort code decodes to its description.
+    EXPECT_STREQ(CoE::coeErrorStr(CoE::CoEError::aborted(0x06020000u)),
+                 "Object does not exist");
+}
+
+TEST(StateUtilsCoverageTest, CoeErrorToAbortCodeMapping) {
+    EXPECT_EQ(CoE::coeErrorToAbortCode(CoE::CoEError{CoE::CoEErrorCode::Ok}),
+              SDOAbortCode::Success);
+    EXPECT_EQ(CoE::coeErrorToAbortCode(CoE::CoEError{CoE::CoEErrorCode::Timeout}),
+              SDOAbortCode::Timeout);
+    EXPECT_EQ(CoE::coeErrorToAbortCode(CoE::CoEError{CoE::CoEErrorCode::NotConfigured}),
+              SDOAbortCode::DeviceStateError);
+    EXPECT_EQ(CoE::coeErrorToAbortCode(CoE::CoEError{CoE::CoEErrorCode::TransportError}),
+              SDOAbortCode::GeneralError);
+    EXPECT_EQ(CoE::coeErrorToAbortCode(CoE::CoEError{CoE::CoEErrorCode::QueueFull}),
+              SDOAbortCode::OutOfMemory);
+    EXPECT_EQ(CoE::coeErrorToAbortCode(CoE::CoEError{CoE::CoEErrorCode::ShuttingDown}),
+              SDOAbortCode::DeviceStateError);
+    EXPECT_EQ(CoE::coeErrorToAbortCode(CoE::CoEError{CoE::CoEErrorCode::SlaveNotFound}),
+              SDOAbortCode::ObjectNotFound);
+    EXPECT_EQ(CoE::coeErrorToAbortCode(CoE::CoEError{CoE::CoEErrorCode::InternalError}),
+              SDOAbortCode::InternalError);
+    // Aborted without a raw code falls back to TransferAborted; with one,
+    // the slave's real code is preserved.
+    EXPECT_EQ(CoE::coeErrorToAbortCode(CoE::CoEError{CoE::CoEErrorCode::Aborted}),
+              SDOAbortCode::TransferAborted);
+    EXPECT_EQ(CoE::coeErrorToAbortCode(CoE::CoEError::aborted(0x06020000u)),
+              SDOAbortCode::ObjectNotFound);
 }
