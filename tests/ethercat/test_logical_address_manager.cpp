@@ -1749,3 +1749,109 @@ TEST_F(PDOManagerCyclicTest, ConfigureProcessImageRequiresLAM) {
     ProcessImage image;
     EXPECT_FALSE(lone.configureProcessImage(image, ImageMode::Buffered, nullptr));
 }
+
+// ============================================================================
+// PDOManager queue mode (Mode 2) and callback mode (Mode 3)
+// ============================================================================
+
+TEST_F(PDOManagerCyclicTest, QueueCycleRequiresQueueMode) {
+    EXPECT_FALSE(pdo_mgr.queueCycle());
+}
+
+TEST_F(PDOManagerCyclicTest, QueueCyclePushesRxAndUnderrunEvents) {
+    QueueModeConfig cfg;
+    pdo_mgr.configureQueueMode(cfg);
+
+    int underruns = 0;
+    pdo_mgr.setUnderrunCallback([&](uint16_t, uint32_t) { ++underruns; });
+
+    EXPECT_TRUE(pdo_mgr.queueCycle());
+    EXPECT_EQ(underruns, 1);   // empty TX queue → underrun fired once
+
+    // One RxReceived + one Underrun event on the event queue.
+    std::shared_ptr<PDOEvent> ev;
+    std::vector<PDOEvent::Type> seen;
+    while (pdo_mgr.tryPollEvent(ev)) seen.push_back(ev->type);
+    EXPECT_TRUE(std::find(seen.begin(), seen.end(),
+                          PDOEvent::Type::RxReceived) != seen.end());
+    EXPECT_TRUE(std::find(seen.begin(), seen.end(),
+                          PDOEvent::Type::Underrun) != seen.end());
+
+    // The TxPDO entry's storage was pushed to the RX queue.
+    std::shared_ptr<PDOFrame> frame;
+    ASSERT_TRUE(pdo_mgr.tryDequeueRx(1, frame));
+    EXPECT_EQ(frame->data.size(), 8u);
+}
+
+TEST_F(PDOManagerCyclicTest, QueueCycleDequeuesTxIntoStorage) {
+    QueueModeConfig cfg;
+    pdo_mgr.configureQueueMode(cfg);
+
+    auto frame = std::make_shared<PDOFrame>();
+    frame->data = {0xDE, 0xAD, 0xBE, 0xEF};
+    ASSERT_TRUE(pdo_mgr.enqueueTx(0, frame));
+
+    EXPECT_TRUE(pdo_mgr.queueCycle());
+    const auto* e = pdo_mgr.mapping().get_entry(0);
+    ASSERT_NE(e, nullptr);
+    EXPECT_EQ(std::memcmp(e->storage, "\xDE\xAD\xBE\xEF", 4), 0);
+
+    // Second cycle with an empty queue: RepeatLastFrame keeps the data.
+    EXPECT_TRUE(pdo_mgr.queueCycle());
+    EXPECT_EQ(std::memcmp(e->storage, "\xDE\xAD\xBE\xEF", 4), 0);
+}
+
+TEST_F(PDOManagerCyclicTest, QueueUnderrunPolicies) {
+    QueueModeConfig cfg;
+    cfg.safe_state_buffer = {0xAA, 0xBB, 0xCC, 0xDD};
+
+    // SafeState
+    cfg.underrun_policy = UnderrunPolicy::SafeState;
+    pdo_mgr.configureQueueMode(cfg);
+    EXPECT_TRUE(pdo_mgr.queueCycle());
+    const auto* e = pdo_mgr.mapping().get_entry(0);
+    EXPECT_EQ(std::memcmp(e->storage, "\xAA\xBB\xCC\xDD", 4), 0);
+
+    // SkipCycle disables then re-enables the entry for the cycle
+    cfg.underrun_policy = UnderrunPolicy::SkipCycle;
+    pdo_mgr.configureQueueMode(cfg);
+    EXPECT_TRUE(pdo_mgr.queueCycle());
+    EXPECT_TRUE(pdo_mgr.mapping().get_entry(0)->enabled);
+
+    // Custom — user callback decides; storage untouched
+    cfg.underrun_policy = UnderrunPolicy::Custom;
+    pdo_mgr.configureQueueMode(cfg);
+    pdo_mgr.setUnderrunCallback([](uint16_t, uint32_t) {});
+    e->storage[0] = 0x55;
+    EXPECT_TRUE(pdo_mgr.queueCycle());
+    EXPECT_EQ(e->storage[0], 0x55);
+}
+
+TEST_F(PDOManagerCyclicTest, EnqueueDequeueBounds) {
+    QueueModeConfig cfg;
+    cfg.tx_queue_capacity = 1;
+    pdo_mgr.configureQueueMode(cfg);
+
+    auto f1 = std::make_shared<PDOFrame>();
+    f1->data = {1, 2, 3, 4};
+    EXPECT_TRUE(pdo_mgr.enqueueTx(0, f1));
+
+    std::shared_ptr<PDOFrame> frame;
+    EXPECT_FALSE(pdo_mgr.tryDequeueRx(0, frame));   // nothing received yet
+    std::shared_ptr<PDOEvent> ev;
+    EXPECT_FALSE(pdo_mgr.tryPollEvent(ev));
+}
+
+TEST_F(PDOManagerCyclicTest, CallbackModeConfigures) {
+    CallbackModeConfig cfg;
+    pdo_mgr.configureCallbackMode(cfg);
+    pdo_mgr.setTxSentCallback(0, [](uint16_t, uint32_t, uint64_t) {});
+    pdo_mgr.setRxReceivedCallback(1, [](uint16_t, const uint8_t*, size_t,
+                                       uint32_t, uint64_t) {});
+    // Out-of-range indices are ignored.
+    pdo_mgr.setTxSentCallback(PDO::kMaxPDOEntries + 5,
+                              [](uint16_t, uint32_t, uint64_t) {});
+    pdo_mgr.setRxReceivedCallback(PDO::kMaxPDOEntries + 5,
+                                  [](uint16_t, const uint8_t*, size_t,
+                                     uint32_t, uint64_t) {});
+}
