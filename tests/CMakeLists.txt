@@ -1179,6 +1179,7 @@ create_ethercat_test(protocol
         ethercat/test_ethercat_retry.cpp
         ethercat/test_ethercat_retry_smoke.cpp
         ethercat/test_host_stubs.cpp
+        ethercat/test_misc_state_utils.cpp
         ethercat/test_slave_status_poller.cpp
         ${ETHERCAT_COMMON_STUBS}
         ../src/ethercat/SlaveEmulator.cpp
@@ -1275,6 +1276,7 @@ create_ethercat_test(coverage
         ethercat/test_slave_mailbox_coverage.cpp
         ethercat/test_slave_sdo_coverage.cpp
         ethercat/test_slave_state_coverage.cpp
+        ethercat/test_misc_state_utils.cpp
         ethercat/test_slave_status_poller.cpp
         ethercat/test_master_sii_coverage.cpp
         ethercat/test_slavegroup_coe_coverage.cpp
