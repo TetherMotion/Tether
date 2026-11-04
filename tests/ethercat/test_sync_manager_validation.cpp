@@ -144,3 +144,12 @@ TEST_F(SyncManagerValidationTest, DisablesAreIgnored) {
     auto result2 = SyncManagerValidation::validate(configs);
     EXPECT_TRUE(result2.valid) << "Disabled SM shouldn't cause overlap error";
 }
+
+TEST_F(SyncManagerValidationTest, WarnsWhenSm1BelowSm0) {
+    auto configs = getValidConfigs();
+    configs[1].phys_start_addr = 0x0800;   // SM1 below SM0 — unusual
+    configs[1].length = 32;
+    auto result = SyncManagerValidation::validate(configs);
+    EXPECT_TRUE(result.valid);             // warning, not an error
+    EXPECT_NE(result.error_message.find("unusual"), std::string::npos);
+}

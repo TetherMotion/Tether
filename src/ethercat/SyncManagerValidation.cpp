@@ -103,7 +103,7 @@ SyncManagerValidationResult SyncManagerValidation::validate(const std::vector<Et
         }
     }
 
-    return {true, ""};
+    return {true, ss.str()};
 }
 
 } // namespace EtherCAT
