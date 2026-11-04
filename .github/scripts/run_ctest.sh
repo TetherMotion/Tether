@@ -31,7 +31,9 @@ fi
 FULL_LOG="${BUILD_DIR}/ctest_full.log"
 
 # Run ctest, capturing all output.  Don't let set -e catch the exit code.
-ctest --test-dir "$BUILD_DIR" --output-on-failure "$@" > "$FULL_LOG" 2>&1 || ctest_exit=$?
+# --output-junit emits a JUnit XML report for Codecov Test Analytics.
+ctest --test-dir "$BUILD_DIR" --output-on-failure \
+    --output-junit "$BUILD_DIR/junit.xml" "$@" > "$FULL_LOG" 2>&1 || ctest_exit=$?
 ctest_exit=${ctest_exit:-0}
 
 # Copy the full log to the requested artifact name (if provided).
