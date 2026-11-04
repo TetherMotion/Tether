@@ -1275,3 +1275,175 @@ TEST_F(SDOManagerInFlightTest, FlagSetDuringTransportCall) {
 
     mgr.deinit();
 }
+
+// ============================================================================
+// Legacy queueRequest pending-future coverage tests
+// ============================================================================
+
+TEST_F(SDOManagerQueueTest, QueueDownloadRequestCompletesWithEcho) {
+    const uint32_t written = 0x12345678u;
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(Return(true));
+
+    CoEManager mgr(0, transport_);
+    ASSERT_TRUE(mgr.init());
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    SDORequest req{};
+    req.operation = SDOOperation::Download;
+    req.index = 0x6040;
+    req.subindex = 0;
+    std::memcpy(req.data, &written, sizeof(written));
+    req.data_size = sizeof(written);
+
+    uint32_t id = mgr.queueRequest(req);
+    ASSERT_NE(id, 0u);
+
+    SDOResponse resp{};
+    ASSERT_TRUE(waitForResponse(mgr, id, resp));
+    EXPECT_TRUE(resp.success());
+    EXPECT_EQ(resp.operation, SDOOperation::Download);
+    EXPECT_EQ(resp.index, 0x6040);
+    EXPECT_EQ(resp.data_size, sizeof(written));
+    EXPECT_EQ(std::memcmp(resp.data, &written, sizeof(written)), 0);
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, QueueDownloadRequestFailureReportsFailed) {
+    ON_CALL(transport_, sdoDownload(_, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(Return(false));
+    ON_CALL(transport_, lastAbortCode()).WillByDefault(Return(0));
+
+    CoEManager mgr(0, transport_);
+    ASSERT_TRUE(mgr.init());
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    SDORequest req{};
+    req.operation = SDOOperation::Download;
+    req.index = 0x6040;
+    req.data_size = 4;
+
+    uint32_t id = mgr.queueRequest(req);
+    ASSERT_NE(id, 0u);
+
+    SDOResponse resp{};
+    ASSERT_TRUE(waitForResponse(mgr, id, resp));
+    EXPECT_EQ(resp.status, SDOStatus::Failed);
+    EXPECT_NE(resp.abort_code, SDOAbortCode::Success);
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, QueueUploadRequestFailureReportsFailed) {
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault(Return(false));
+    ON_CALL(transport_, lastAbortCode()).WillByDefault(Return(0));
+
+    CoEManager mgr(0, transport_);
+    ASSERT_TRUE(mgr.init());
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    SDORequest req{};
+    req.operation = SDOOperation::Upload;
+    req.index = 0x6040;
+
+    uint32_t id = mgr.queueRequest(req);
+    ASSERT_NE(id, 0u);
+
+    SDOResponse resp{};
+    ASSERT_TRUE(waitForResponse(mgr, id, resp));
+    EXPECT_EQ(resp.status, SDOStatus::Failed);
+    EXPECT_NE(resp.abort_code, SDOAbortCode::Success);
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, QueueUploadWhenNotInitializedStoresFailure) {
+    CoEManager mgr(0, transport_);
+    // No init(), no configureMailbox — read() completes immediately with error.
+
+    SDORequest req{};
+    req.operation = SDOOperation::Upload;
+    req.index = 0x6040;
+
+    uint32_t id = mgr.queueRequest(req);
+    ASSERT_NE(id, 0u);
+
+    SDOResponse resp{};
+    ASSERT_TRUE(mgr.getResponse(id, resp));
+    EXPECT_EQ(resp.status, SDOStatus::Failed);
+    EXPECT_EQ(resp.index, 0x6040);
+}
+
+TEST_F(SDOManagerQueueTest, QueueDownloadWhenNotInitializedStoresFailure) {
+    CoEManager mgr(0, transport_);
+    // No init() — write() completes immediately with error.
+
+    const uint32_t payload = 0xABCDu;
+    SDORequest req{};
+    req.operation = SDOOperation::Download;
+    req.index = 0x6040;
+    req.subindex = 2;
+    std::memcpy(req.data, &payload, sizeof(payload));
+    req.data_size = sizeof(payload);
+
+    uint32_t id = mgr.queueRequest(req);
+    ASSERT_NE(id, 0u);
+
+    SDOResponse resp{};
+    ASSERT_TRUE(mgr.getResponse(id, resp));
+    EXPECT_EQ(resp.status, SDOStatus::Failed);
+    EXPECT_EQ(resp.operation, SDOOperation::Download);
+    EXPECT_EQ(resp.subindex, 2);
+    // Echo of the requested write data is preserved in the stored response.
+    EXPECT_EQ(resp.data_size, sizeof(payload));
+    EXPECT_EQ(std::memcmp(resp.data, &payload, sizeof(payload)), 0);
+}
+
+TEST_F(SDOManagerQueueTest, GetResponseUnknownIdReturnsFalse) {
+    CoEManager mgr(0, transport_);
+    mgr.init();
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    SDOResponse resp{};
+    EXPECT_FALSE(mgr.getResponse(0xDEADBEEFu, resp));
+
+    mgr.deinit();
+}
+
+TEST_F(SDOManagerQueueTest, WaitForResponseTimesOutOnStalledWorker) {
+    std::mutex block_mutex;
+    std::unique_lock<std::mutex> block_lock(block_mutex);
+    std::atomic<bool> worker_started{false};
+
+    ON_CALL(transport_, sdoUpload(_, _, _, _, _, _, _, _, _, _, _, _, _, _))
+        .WillByDefault([&block_mutex, &worker_started](uint16_t, uint8_t*, uint16_t, uint16_t,
+                                       uint16_t, uint16_t, uint16_t, uint8_t,
+                                       uint8_t*, size_t, size_t*, bool, unsigned int, unsigned int) -> bool {
+            worker_started.store(true, std::memory_order_release);
+            std::lock_guard<std::mutex> lk(block_mutex);
+            return true;
+        });
+
+    CoEManager mgr(0, transport_);
+    ASSERT_TRUE(mgr.init());
+    mgr.configureMailbox(0x1000, 128, 0x1400, 128);
+
+    SDORequest req{};
+    req.operation = SDOOperation::Upload;
+    req.index = 0x6040;
+
+    uint32_t id = mgr.queueRequest(req);
+    ASSERT_NE(id, 0u);
+    ASSERT_TRUE(waitFor(std::function<bool()>{[&]{ return worker_started.load(std::memory_order_acquire); }}, 1000));
+
+    SDOResponse resp{};
+    EXPECT_FALSE(mgr.waitForResponse(id, resp, 20));
+    EXPECT_GE(mgr.pendingCount(), 1u);
+
+    block_lock.unlock();
+    ASSERT_TRUE(waitForResponse(mgr, id, resp));
+
+    mgr.deinit();
+}
