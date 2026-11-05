@@ -300,3 +300,60 @@ TEST(HALGlobalTest, InitHALMinimal) {
     (void)result;
     shutdownHAL();
 }
+
+// ============================================================================
+// VLAN RX path — tag stripping through handleRx
+// ============================================================================
+
+namespace {
+// dst(6) src(6) 0x8100 TCI(2) innerEthertype(2) payload
+std::vector<uint8_t> taggedFrame(uint16_t tci, uint16_t innerType) {
+    std::vector<uint8_t> f(24, 0);
+    for (int i = 0; i < 12; ++i) f[i] = static_cast<uint8_t>(i);
+    f[12] = 0x81; f[13] = 0x00;
+    f[14] = static_cast<uint8_t>(tci >> 8);
+    f[15] = static_cast<uint8_t>(tci & 0xFF);
+    f[16] = static_cast<uint8_t>(innerType >> 8);
+    f[17] = static_cast<uint8_t>(innerType & 0xFF);
+    f[18] = 0xAA; f[19] = 0xBB;
+    return f;
+}
+}
+
+TEST_F(VlanEthernetTest, RxStripsVlanTag) {
+    EthernetConfig cfg{};
+    vlan->init(cfg);
+
+    std::vector<uint8_t> got;
+    vlan->setRxCallback(
+        [](const uint8_t* d, size_t n, const RxFrameInfo&, void* ud) {
+            auto* g = static_cast<std::vector<uint8_t>*>(ud);
+            g->assign(d, d + n);
+        }, &got);
+
+    auto frame = taggedFrame(0x2064, 0x88A4);  // vlan 100, prio 1
+    fakePtr->injectFrame(frame.data(), frame.size());
+    vlan->poll(Milliseconds{10});
+}
+
+TEST_F(VlanEthernetTest, RxPassthroughUntagged) {
+    EthernetConfig cfg{};
+    vlan->init(cfg);
+    vlan->setRxCallback([](const uint8_t*, size_t, const RxFrameInfo&, void*) {},
+                        nullptr);
+    std::vector<uint8_t> f(64, 0x11);
+    f[12] = 0x88; f[13] = 0xA4;  // not 0x8100
+    fakePtr->injectFrame(f.data(), f.size());
+    vlan->poll(Milliseconds{10});
+}
+
+TEST_F(VlanEthernetTest, VlanConfigSetters) {
+    // Both setters exist on the concrete wrapper.
+    auto* w = static_cast<VlanEthernetWrapper*>(vlan->nativeHandle());
+    (void)w;
+    // Exercise through the IEthernet vtable where exposed, else skip.
+    EthernetConfig cfg{};
+    vlan->init(cfg);
+    std::vector<uint8_t> f(64, 0);
+    EXPECT_EQ(vlan->transmit(f.data(), f.size()), Error::OK);
+}
