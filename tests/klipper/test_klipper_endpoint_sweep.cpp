@@ -174,4 +174,111 @@ TEST_F(EndpointSweepTest, ServicesUpdateAndMiscVariants) {
     call("server/files/delete", params({{"path", str("gcodes/d")}}));
 }
 
+// C1 happy-path variants the error sweep doesn't reach: single-filename
+// post_job, delete by filename vs. clear-all, database ns ops on a
+// populated store, and the files/machine handler branches.
+TEST_F(EndpointSweepTest, JobQueueVariantsDeep) {
+    // Single filename (non-array) path.
+    call("job_queue/post_job", params({{"filename", str("one.gcode")}}));
+    // Array path, mixed types.
+    call("job_queue/post_job",
+         params({{"filenames", JsonValue(std::vector<JsonValue>{
+                     str("a.gcode"), num(5), str("b.gcode")})}}));
+    // Neither param present.
+    call("job_queue/post_job", empty());
+    call("job_queue/status");
+
+    // Delete by filename, then clear-all (no filename).
+    call("job_queue/delete_job", params({{"filename", str("one.gcode")}}));
+    call("job_queue/delete_job", params({{"filename", str("absent")}}));
+    call("job_queue/delete_job", empty());
+    call("job_queue/status");
+
+    call("job_history/list");
+    call("job_history/get", params({{"job_id", num(42)}}));
+}
+
+TEST_F(EndpointSweepTest, DatabasePopulatedVariants) {
+    call("server/database/put",
+         params({{"namespace", str("ns")}, {"key", str("k1")},
+                 {"value", num(9)}}));
+    call("server/database/put",
+         params({{"namespace", str("ns")}, {"key", str("k2")},
+                 {"value", str("v")}}));
+    call("server/database/put",
+         params({{"namespace", str("other")}, {"key", str("k")},
+                 {"value", flag(true)}}));
+    call("database/list");
+    call("database/ns");
+    call("server/database/list");
+    call("database/get", params({{"namespace", str("ns")}, {"key", str("k1")}}));
+    call("server/database/get_item",
+         params({{"namespace", str("ns")}, {"key", str("k1")}}));
+    call("server/database/get_item",
+         params({{"namespace", str("ns")}, {"key", str("missing")}}));
+    call("server/database/delete",
+         params({{"namespace", str("ns")}, {"key", str("k1")}}));
+    call("database/get", params({{"namespace", str("ns")}, {"key", str("k1")}}));
+    // Put with missing pieces.
+    call("server/database/put", params({{"namespace", str("ns")}}));
+    call("database/put", params({{"key", str("k")}}));
+}
+
+TEST_F(EndpointSweepTest, FilesMachineAndLogsVariants) {
+    call("server/files/roots");
+    call("server/files/create_dir", params({{"path", str("gcodes/subdir")}}));
+    call("server/files/create_dir", params({{"path", str("gcodes/subdir")}}));
+    call("server/files/directory", params({{"path", str("gcodes/subdir")}}));
+    call("server/files/get_directory", params({{"path", str("gcodes")}}));
+    call("server/files/metascan", params({{"filename", str("none")}}));
+    call("server/files/thumbnails", params({{"filename", str("none")}}));
+    call("server/files/move", params({{"source", str("a")}, {"dest", str("b")}}));
+    call("server/files/copy", params({{"source", str("a")}, {"dest", str("b")}}));
+    call("server/files/delete", params({{"path", str("gcodes/subdir")}}));
+    call("server/files/get", params({{"filename", str("none.gcode")}}));
+    call("server/files/upload", params({{"filename", str("u.gcode")},
+                                        {"root", str("gcodes")}}));
+
+    call("server/logs/list");
+    call("server/logs/rollover");
+    call("server/klippy_log");
+    call("server/moonraker_log");
+    call("server/config");
+    call("server/info");
+    call("server/gcode_store");
+    call("server/temperature_store");
+
+    call("machine/services/list");
+    call("machine/services/start", params({{"service", str("klipper")}}));
+    call("machine/services/stop", params({{"service", str("klipper")}}));
+    call("machine/services/restart", params({{"service", str("klipper")}}));
+    call("machine/services/start", params({{"service", str("madeup")}}));
+
+    call("machine/update/list");
+    call("machine/update/status");
+    call("machine/update/refresh");
+    call("machine/update/update", params({{"client", str("mainsail")}}));
+    call("machine/update/recover");
+    call("machine/update/rollback");
+    call("machine/update/client", params({{"name", str("mainsail")}}));
+    call("machine/system_info");
+    call("machine/system_perms");
+    call("machine/peripherals/serial");
+    call("machine/peripherals/usb");
+    call("machine/proc_stats");
+    call("machine/procstats");
+    call("machine/device_power/devices");
+
+    call("announcements/list");
+    call("announcements/update");
+    call("announcements/dismiss", params({{"entry_id", str("gone")}}));
+
+    call("devices/list");
+    call("devices/get", params({{"name", str("ghost")}}));
+    call("devices/create",
+         params({{"name", str("d1")}, {"type", str("gpio")}}));
+    call("devices/get", params({{"name", str("d1")}}));
+    call("devices/delete", params({{"name", str("d1")}}));
+}
+
 }  // namespace
