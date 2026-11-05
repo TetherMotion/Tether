@@ -403,10 +403,11 @@ jobs:
 
     - name: Upload test results to Codecov
       if: ${{ !cancelled() }}
-      uses: codecov/test-results-action@v1
+      uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: build/junit.xml
+        report_type: test_results
 
     - name: Upload integration test results
       if: always()
@@ -483,10 +484,11 @@ jobs:
 
     - name: Upload test results to Codecov
       if: ${{ !cancelled() }}
-      uses: codecov/test-results-action@v1
+      uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: junit.xml
+        report_type: test_results
 
     - name: Upload privileged test results
       if: always()
@@ -550,10 +552,11 @@ jobs:
 
     - name: Upload test results to Codecov
       if: ${{ !cancelled() }}
-      uses: codecov/test-results-action@v1
+      uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: build/junit.xml
+        report_type: test_results
 
     - name: Upload test SVG paths
       if: always()
@@ -757,11 +760,12 @@ jobs:
 
     - name: Upload test results to Codecov
       if: ${{ !cancelled() }}
-      uses: codecov/test-results-action@v1
+      uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: build-asan/junit.xml
         flags: unittests
+        report_type: test_results
 
     - name: Show ccache stats
       if: always()
@@ -916,11 +920,12 @@ jobs:
 
     - name: Upload test results to Codecov
       if: ${{ !cancelled() }}
-      uses: codecov/test-results-action@v1
+      uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: build-tsan/junit.xml
         flags: unittests
+        report_type: test_results
 
     - name: Show ccache stats
       if: always()
