@@ -712,3 +712,221 @@ TEST_F(ESC211ManagersTest, RecoveryStopTokenAbortsBeforeWrite) {
 
     EXPECT_FALSE(recovery.reWriteAndActivate());
 }
+
+// ============================================================================
+// ConfigManager — section writes, raw-data chunking, activate/flash flows,
+// CRC verification, temp/active reads and the FNI error snapshot dump.
+// ============================================================================
+
+namespace {
+
+ESC211::ConfigManager::Config fastConfig() {
+    ESC211::ConfigManager::Config cfg;
+    cfg.command_timeout        = std::chrono::milliseconds(500);
+    cfg.crc_timeout            = std::chrono::milliseconds(60);
+    cfg.crc_poll_interval      = std::chrono::milliseconds(5);
+    cfg.post_flash_load_settle = std::chrono::milliseconds(1);
+    cfg.post_command_reset     = false;  // skip the extra CMD=0 round-trip
+    return cfg;
+}
+
+} // namespace
+
+TEST_F(ESC211ManagersTest, ConfigWriteSectionsSuccessAndTooMany) {
+    const auto& info =
+        ESC211::configDataTypeInfo(ESC211::ConfigDataType::FNI);
+    for (uint16_t i = 1; i <= info.maxSections; ++i)
+        slave_->addODEntry({info.inputIndex, static_cast<uint8_t>(i),
+                            0x0000, 0, 0x03, {}, "s"});
+
+    ESC211::ConfigManager mgr(master_.slave(0), fastConfig());
+    std::vector<std::vector<uint8_t>> secs{std::vector<uint8_t>(256, 0x11),
+                                           {0x01, 0x02}};
+    EXPECT_EQ(mgr.writeSections(ESC211::ConfigDataType::FNI, secs),
+              ESC211::ConfigManager::Result::Success);
+
+    std::vector<std::vector<uint8_t>> too_many(info.maxSections + 1);
+    EXPECT_EQ(mgr.writeSections(ESC211::ConfigDataType::FNI, too_many),
+              ESC211::ConfigManager::Result::NoData);
+}
+
+TEST_F(ESC211ManagersTest, ConfigWriteSectionsSdoError) {
+    // No section objects — the first sdoWrite aborts.
+    ESC211::ConfigManager mgr(master_.slave(0), fastConfig());
+    std::vector<std::vector<uint8_t>> secs{std::vector<uint8_t>(4, 0xAA)};
+    EXPECT_EQ(mgr.writeSections(ESC211::ConfigDataType::FNI, secs),
+              ESC211::ConfigManager::Result::SDOError);
+}
+
+TEST_F(ESC211ManagersTest, ConfigWriteRawDataChunksAndLimits) {
+    const auto& info =
+        ESC211::configDataTypeInfo(ESC211::ConfigDataType::FNI);
+    for (uint16_t i = 1; i <= info.maxSections; ++i)
+        slave_->addODEntry({info.inputIndex, static_cast<uint8_t>(i),
+                            0x0000, 0, 0x03, {}, "s"});
+
+    ESC211::ConfigManager mgr(master_.slave(0), fastConfig());
+
+    // Empty input is rejected up front.
+    EXPECT_EQ(mgr.writeRawData(ESC211::ConfigDataType::FNI, {}),
+              ESC211::ConfigManager::Result::NoData);
+
+    // 300 bytes → two 256-byte sections (second zero-padded).
+    std::vector<uint8_t> raw(300, 0xAB);
+    EXPECT_EQ(mgr.writeRawData(ESC211::ConfigDataType::FNI, raw),
+              ESC211::ConfigManager::Result::Success);
+
+    // Overflowing maxSections * 256 bytes → NoData.
+    std::vector<uint8_t> huge(info.maxSections * 256 + 1, 0x00);
+    EXPECT_EQ(mgr.writeRawData(ESC211::ConfigDataType::FNI, huge),
+              ESC211::ConfigManager::Result::NoData);
+}
+
+TEST_F(ESC211ManagersTest, ConfigActivateSinglePass) {
+    addCommandRegs();
+    setResponse(2);  // Done latched
+
+    ESC211::ConfigManager mgr(master_.slave(0), fastConfig());
+    const ESC211::ConfigDataType fni[]{ESC211::ConfigDataType::FNI};
+    EXPECT_EQ(mgr.activate(fni), ESC211::ConfigManager::Result::Success);
+
+    const ESC211::ConfigDataType rsp[]{ESC211::ConfigDataType::RSP};
+    EXPECT_EQ(mgr.activate(rsp), ESC211::ConfigManager::Result::Success);
+}
+
+TEST_F(ESC211ManagersTest, ConfigActivateFailureDumpsErrorSnapshot) {
+    addCommandRegs();
+    setResponse(3);  // Failed
+    // FNI failure dumps the system error state — populate it.
+    addU(0xF102, 0x00, 0x00010002, 4);        // system error code
+    addStr(0xF103, 0x00, "boom");             // error message
+    addU(0xF110, 0x00, 2, 1);                 // 2 debug entries
+    addStr(0xF110, 0x01, "dbg one");
+    addStr(0xF110, 0x02, "");                 // empty entry
+
+    ESC211::ConfigManager mgr(master_.slave(0), fastConfig());
+    const ESC211::ConfigDataType fni[]{ESC211::ConfigDataType::FNI};
+    EXPECT_EQ(mgr.activate(fni), ESC211::ConfigManager::Result::Failed);
+}
+
+TEST_F(ESC211ManagersTest, ConfigActivateFlashWorkaroundRunsThreePasses) {
+    addCommandRegs();
+    setResponse(2);
+
+    ESC211::ConfigManager mgr(master_.slave(0), fastConfig());
+    const ESC211::ConfigDataType all[]{
+        ESC211::ConfigDataType::FNI, ESC211::ConfigDataType::RSP};
+    EXPECT_EQ(mgr.activate(all, {}, /*do_flash_workaround=*/true),
+              ESC211::ConfigManager::Result::Success);
+}
+
+TEST_F(ESC211ManagersTest, ConfigActivateCrcVerification) {
+    addCommandRegs();
+    setResponse(2);
+    const auto& info =
+        ESC211::configDataTypeInfo(ESC211::ConfigDataType::FNI);
+    addU(info.crcIndex, 0x00, 0xDEADBEEF, 4);
+
+    ESC211::ConfigManager mgr(master_.slave(0), fastConfig());
+    const ESC211::ConfigDataType fni[]{ESC211::ConfigDataType::FNI};
+
+    CrcExpectation ok{info.crcIndex, 0xDEADBEEF, "FNI"};
+    EXPECT_EQ(mgr.activate(fni, {&ok, 1}),
+              ESC211::ConfigManager::Result::Success);
+
+    CrcExpectation bad{info.crcIndex, 0x12345678, "FNI"};
+    EXPECT_EQ(mgr.activate(fni, {&bad, 1}),
+              ESC211::ConfigManager::Result::Failed);
+}
+
+TEST_F(ESC211ManagersTest, ConfigSaveAndLoadFlash) {
+    addCommandRegs();
+    setResponse(2);
+
+    ESC211::ConfigManager mgr(master_.slave(0), fastConfig());
+    const ESC211::ConfigDataType all[]{
+        ESC211::ConfigDataType::FNI, ESC211::ConfigDataType::RSP,
+        ESC211::ConfigDataType::SDD};
+    EXPECT_EQ(mgr.saveToFlash(all), ESC211::ConfigManager::Result::Success);
+    EXPECT_EQ(mgr.loadFromFlash(all), ESC211::ConfigManager::Result::Success);
+
+    setResponse(3);
+    const ESC211::ConfigDataType fni[]{ESC211::ConfigDataType::FNI};
+    EXPECT_EQ(mgr.saveToFlash(fni), ESC211::ConfigManager::Result::Failed);
+    EXPECT_EQ(mgr.loadFromFlash(fni), ESC211::ConfigManager::Result::Failed);
+}
+
+TEST_F(ESC211ManagersTest, ConfigReadCrcAndVerify) {
+    const auto& info =
+        ESC211::configDataTypeInfo(ESC211::ConfigDataType::RSP);
+    addU(info.crcIndex, 0x00, 0xA5A5A5A5, 4);
+
+    ESC211::ConfigManager mgr(master_.slave(0), fastConfig());
+    EXPECT_EQ(mgr.readCrc(ESC211::ConfigDataType::RSP), 0xA5A5A5A5u);
+
+    CrcExpectation ok{info.crcIndex, 0xA5A5A5A5, "RSP"};
+    EXPECT_TRUE(mgr.verifyCrc({&ok, 1}));
+    CrcExpectation alt{info.crcIndex, 0x11111111, "RSP", 0xA5A5A5A5};
+    EXPECT_TRUE(mgr.verifyCrc({&alt, 1}));
+    CrcExpectation bad{info.crcIndex, 0x11111111, "RSP"};
+    EXPECT_FALSE(mgr.verifyCrc({&bad, 1}));
+
+    // Missing register → sentinel value.
+    EXPECT_EQ(mgr.readCrc(ESC211::ConfigDataType::SDD), 0xFFFFFFFFu);
+}
+
+TEST_F(ESC211ManagersTest, ConfigEnsureLoaded) {
+    ESC211::ConfigManager mgr(master_.slave(0), fastConfig());
+    const auto& fni = ESC211::configDataTypeInfo(ESC211::ConfigDataType::FNI);
+    const auto& rsp = ESC211::configDataTypeInfo(ESC211::ConfigDataType::RSP);
+    const auto& sdd = ESC211::configDataTypeInfo(ESC211::ConfigDataType::SDD);
+
+    // Missing CRC objects read as 0xFFFFFFFF (nonzero) → already loaded.
+    EXPECT_TRUE(mgr.ensureLoaded());
+
+    // One zero CRC triggers the flash-load path; it stays zero afterwards.
+    addU(fni.crcIndex, 0x00, 0x00000000, 4);
+    addU(rsp.crcIndex, 0x00, 1, 4);
+    addU(sdd.crcIndex, 0x00, 1, 4);
+    addCommandRegs();
+    setResponse(2);
+    EXPECT_FALSE(mgr.ensureLoaded());  // load "succeeds" but CRC stays 0
+}
+
+TEST_F(ESC211ManagersTest, ConfigReadTempAndActiveData) {
+    const auto& info =
+        ESC211::configDataTypeInfo(ESC211::ConfigDataType::FNI);
+    // Highest-subindex object says 2; two 256-byte sections exist.
+    addU(info.inputIndex, 0x00, 2, 1);
+    addU(info.outputIndex, 0x00, 2, 1);
+    std::vector<uint8_t> s1(256, 0x11), s2(256, 0x22);
+    slave_->addODEntry({info.inputIndex, 1, 0x0000, 2048, 0x03, s1, "s"});
+    slave_->addODEntry({info.inputIndex, 2, 0x0000, 2048, 0x03, s2, "s"});
+    slave_->addODEntry({info.outputIndex, 1, 0x0000, 2048, 0x03, s2, "s"});
+    slave_->addODEntry({info.outputIndex, 2, 0x0000, 2048, 0x03, s1, "s"});
+
+    ESC211::ConfigManager mgr(master_.slave(0), fastConfig());
+    auto temp = mgr.readTempData(ESC211::ConfigDataType::FNI);
+    ASSERT_EQ(temp.size(), 512u);
+    EXPECT_EQ(temp[0], 0x11);
+    EXPECT_EQ(temp[256], 0x22);
+
+    auto active = mgr.readActiveData(ESC211::ConfigDataType::FNI);
+    ASSERT_EQ(active.size(), 512u);
+    EXPECT_EQ(active[0], 0x22);
+    EXPECT_EQ(active[256], 0x11);
+
+    // Advertised subindex beyond the populated range stops the read early.
+    slave_->addODEntry({info.inputIndex, 0, 0x0005, 8, 0x01, {4}, "s"});
+    auto partial = mgr.readTempData(ESC211::ConfigDataType::FNI);
+    EXPECT_EQ(partial.size(), 512u);
+}
+
+TEST_F(ESC211ManagersTest, ConfigResultToStringCoversAll) {
+    using R = ESC211::ConfigManager::Result;
+    EXPECT_STREQ(ESC211::ConfigManager::resultToString(R::Success), "Success");
+    EXPECT_STREQ(ESC211::ConfigManager::resultToString(R::Failed), "Failed");
+    EXPECT_STREQ(ESC211::ConfigManager::resultToString(R::Timeout), "Timeout");
+    EXPECT_STREQ(ESC211::ConfigManager::resultToString(R::SDOError), "SDOError");
+    EXPECT_STREQ(ESC211::ConfigManager::resultToString(R::NoData), "NoData");
+}

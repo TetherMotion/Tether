@@ -8,6 +8,8 @@ coverage:
 ignore:
   - "examples"
   - "examples/**/*"
+  - "tests"
+  - "tests/**/*"
   - "tools"
   - "tools/**/*"
 
