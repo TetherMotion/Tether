@@ -295,6 +295,7 @@ set(IO_SERVICES_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_machine_control.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_machine_service.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_machine_fuzz.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/io/test_io_simulated_params.cpp"
 )
 set(IO_TEST_SOURCES ${IO_PROTOCOL_SOURCES} ${IO_TRANSPORT_SOURCES} ${IO_SERVICES_SOURCES})
 file(GLOB_RECURSE MOTION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/motion/*.cpp")
