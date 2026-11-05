@@ -14,7 +14,10 @@ jobs:
   compile:
     name: Compile Debug Build
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: read
+      actions: write  # prune old ccache entries
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -78,13 +81,13 @@ jobs:
       uses: actions/cache@v6
       with:
         path: ~/.cache/ccache
-        key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-${{ github.sha }}
-        restore-keys: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-
+        key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}--${{ github.sha }}
+        restore-keys: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}--
 
     - name: Configure ccache
       run: |
-        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
-        ccache -M 5G
+        echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
+        ccache -M 1G
         ccache -s
 
     - name: Configure and build
@@ -124,9 +127,28 @@ jobs:
         name: debug-build
         path: build/
 
+    # Runs before the post-job cache save, so the entry just restored and
+    # used is the newest on disk — keep it, delete everything older for
+    # this job. Steady state: ~2 entries per job (saved + previous).
+    - name: Prune old ccache entries
+      if: always()
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CCACHE_PREFIX: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}--
+      run: |
+        gh api "repos/${{ github.repository }}/actions/caches?per_page=100" > caches.json
+        jq -r --arg p "$CCACHE_PREFIX" \
+          '[.actions_caches[] | select(.key | startswith($p))] | sort_by(.created_at) | reverse | .[1:] | .[].id' \
+          caches.json | while read -r id; do
+          gh api -X DELETE "repos/${{ github.repository }}/actions/caches/$id" || true
+        done
+
   compile-static:
     name: Compile Static Build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write  # prune old ccache entries
 
     steps:
     - name: Checkout code
@@ -191,13 +213,13 @@ jobs:
       uses: actions/cache@v6
       with:
         path: ~/.cache/ccache
-        key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-${{ github.sha }}
-        restore-keys: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-
+        key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}--${{ github.sha }}
+        restore-keys: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}--
 
     - name: Configure ccache
       run: |
-        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
-        ccache -M 5G
+        echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
+        ccache -M 1G
         ccache -s
 
     - name: Configure and build (static only)
@@ -236,6 +258,19 @@ jobs:
         name: static-build
         path: build-static/
 
+    - name: Prune old ccache entries
+      if: always()
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CCACHE_PREFIX: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}--
+      run: |
+        gh api "repos/${{ github.repository }}/actions/caches?per_page=100" > caches.json
+        jq -r --arg p "$CCACHE_PREFIX" \
+          '[.actions_caches[] | select(.key | startswith($p))] | sort_by(.created_at) | reverse | .[1:] | .[].id' \
+          caches.json | while read -r id; do
+          gh api -X DELETE "repos/${{ github.repository }}/actions/caches/$id" || true
+        done
+
   compile-matrix:
     name: Compile (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -243,6 +278,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
+    permissions:
+      contents: read
+      actions: write  # prune old ccache entries
 
     steps:
     - name: Checkout code
@@ -314,13 +352,13 @@ jobs:
       uses: actions/cache@v6
       with:
         path: ~/.cache/ccache
-        key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-${{ github.sha }}
-        restore-keys: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}-
+        key: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}--${{ github.sha }}
+        restore-keys: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}--
 
     - name: Configure ccache
       run: |
-        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
-        ccache -M 5G
+        echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
+        ccache -M 1G
         ccache -s
 
     - name: Configure and build
@@ -350,6 +388,19 @@ jobs:
           -DTETHER_BUILD_EXTRACT_ESI=OFF
         cmake --build build --parallel $(nproc)
         cmake --build build --target tests --parallel $(nproc)
+
+    - name: Prune old ccache entries
+      if: always()
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CCACHE_PREFIX: ccache-${{ github.job }}${{ matrix.os && format('-{0}', matrix.os) || '' }}--
+      run: |
+        gh api "repos/${{ github.repository }}/actions/caches?per_page=100" > caches.json
+        jq -r --arg p "$CCACHE_PREFIX" \
+          '[.actions_caches[] | select(.key | startswith($p))] | sort_by(.created_at) | reverse | .[1:] | .[].id' \
+          caches.json | while read -r id; do
+          gh api -X DELETE "repos/${{ github.repository }}/actions/caches/$id" || true
+        done
 
   integration-tests:
     name: Run Integration Tests
@@ -570,7 +621,10 @@ jobs:
     runs-on: ubuntu-latest
     # Builds its own instrumented tree; no debug-build artifact needed.
     # Running in parallel with `compile` saves the full compile duration.
-    
+    permissions:
+      contents: read
+      actions: write  # prune old ccache entries
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -621,13 +675,13 @@ jobs:
       uses: actions/cache@v6
       with:
         path: ~/.cache/ccache
-        key: ccache-${{ github.job }}-${{ github.sha }}
-        restore-keys: ccache-${{ github.job }}-
+        key: ccache-${{ github.job }}--${{ github.sha }}
+        restore-keys: ccache-${{ github.job }}--
 
     - name: Configure ccache
       run: |
-        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
-        ccache -M 5G
+        echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
+        ccache -M 1G
         ccache -s
     
     - name: Cache googletest source
@@ -790,11 +844,27 @@ jobs:
           coverage.xml
           coverage.html
 
+    - name: Prune old ccache entries
+      if: always()
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CCACHE_PREFIX: ccache-${{ github.job }}--
+      run: |
+        gh api "repos/${{ github.repository }}/actions/caches?per_page=100" > caches.json
+        jq -r --arg p "$CCACHE_PREFIX" \
+          '[.actions_caches[] | select(.key | startswith($p))] | sort_by(.created_at) | reverse | .[1:] | .[].id' \
+          caches.json | while read -r id; do
+          gh api -X DELETE "repos/${{ github.repository }}/actions/caches/$id" || true
+        done
+
   tsan-tests:
     name: Run Module Tests with TSAN
     runs-on: ubuntu-latest
     # Builds its own instrumented tree; no debug-build artifact needed.
-    
+    permissions:
+      contents: read
+      actions: write  # prune old ccache entries
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -843,13 +913,13 @@ jobs:
       uses: actions/cache@v6
       with:
         path: ~/.cache/ccache
-        key: ccache-${{ github.job }}-${{ github.sha }}
-        restore-keys: ccache-${{ github.job }}-
+        key: ccache-${{ github.job }}--${{ github.sha }}
+        restore-keys: ccache-${{ github.job }}--
 
     - name: Configure ccache
       run: |
-        echo "CCACHE_DIR=~/.cache/ccache" >> $GITHUB_ENV
-        ccache -M 5G
+        echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
+        ccache -M 1G
         ccache -s
     
     - name: Cache googletest source
@@ -939,6 +1009,19 @@ jobs:
         path: |
           tsan_all.log
           build-tsan/ctest_full.log
+
+    - name: Prune old ccache entries
+      if: always()
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CCACHE_PREFIX: ccache-${{ github.job }}--
+      run: |
+        gh api "repos/${{ github.repository }}/actions/caches?per_page=100" > caches.json
+        jq -r --arg p "$CCACHE_PREFIX" \
+          '[.actions_caches[] | select(.key | startswith($p))] | sort_by(.created_at) | reverse | .[1:] | .[].id' \
+          caches.json | while read -r id; do
+          gh api -X DELETE "repos/${{ github.repository }}/actions/caches/$id" || true
+        done
 
   analyze-test-timing:
     name: Analyze Test Timing
@@ -1133,16 +1216,8 @@ jobs:
           lld \
           mold \
           ninja-build \
-          ccache \
           libboost-dev \
           python3
-
-    - name: Restore ccache
-      uses: actions/cache@v6
-      with:
-        path: ~/.cache/ccache
-        key: ccache-${{ github.job }}-${{ github.sha }}
-        restore-keys: ccache-${{ github.job }}-
 
     # compile_commands.json drives clang-tidy; tests/examples off — the
     # analysis surface is the library itself (src/, include/ via headers).
@@ -1162,8 +1237,6 @@ jobs:
           -DCMAKE_C_COMPILER=clang \
           -DCMAKE_CXX_COMPILER=clang++ \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -DCMAKE_EXE_LINKER_FLAGS="$LINKER_FLAG" \
           -DCMAKE_SHARED_LINKER_FLAGS="$LINKER_FLAG" \
           -DCMAKE_MODULE_LINKER_FLAGS="$LINKER_FLAG" \
@@ -1173,8 +1246,6 @@ jobs:
           -DTETHER_BUILD_EXTRACT_ESI=OFF
         # The build also proves the tree compiles under clang (libstdc++).
         cmake --build build-sa -j8
-      env:
-        CCACHE_DIR: ~/.cache/ccache
 
     - name: Run clang-tidy
       run: |
