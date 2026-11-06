@@ -363,6 +363,25 @@ option(TETHER_DRIVE_RP20             "Build Kinco RP20 I/O module helper"       
 option(TETHER_DRIVER_BECKHOFF         "Build Beckhoff terminal drivers (EL200x, EL1xxx)" ON)
 option(TETHER_DRIVE_PBLR81FGF        "Build PBLR81FGF drive helper"             ON)
 option(TETHER_DRIVE_SYNAPTICON       "Build Synapticon SOMANET drive helper"    ON)
+option(TETHER_BUILD_MODBUS "Build Modbus master/slave protocol stack" ON)
+# À-la-carte robust-strategy + protocol feature flags for tether_modbus
+# (independent; see include/tether/modbus/robust/Strategy.hpp). Each flag
+# compiles its strategy in/out; disabled strategies fail loudly.
+option(TETHER_MODBUS_ASCII                  "Modbus ASCII serial mode" OFF)
+option(TETHER_MODBUS_UDP                    "Modbus UDP transport" OFF)
+option(TETHER_MODBUS_ROBUST_READ_TWICE      "Read twice / reread strategies" ON)
+option(TETHER_MODBUS_ROBUST_THRICE_VOTE     "Read thrice majority vote" ON)
+option(TETHER_MODBUS_ROBUST_QUORUM          "N-of-M quorum read" ON)
+option(TETHER_MODBUS_ROBUST_MEDIAN          "Median read" ON)
+option(TETHER_MODBUS_ROBUST_UNTIL_STABLE    "Read-until-stable" ON)
+option(TETHER_MODBUS_ROBUST_STICKY          "Sticky (last-good) read" ON)
+option(TETHER_MODBUS_ROBUST_WRITE_CONFIRM   "Write-and-confirm" ON)
+option(TETHER_MODBUS_ROBUST_WRITE_THRICE_CONFIRM "Write thrice + confirm" ON)
+option(TETHER_MODBUS_ROBUST_WRITE_WATCHDOG  "Write watchdog confirm" ON)
+option(TETHER_MODBUS_ROBUST_BCAST_FOLLOWUP  "Broadcast write + follow-up verify" ON)
+option(TETHER_MODBUS_ROBUST_STATS           "Assurance statistics counters" ON)
+option(TETHER_MODBUS_IO_BRIDGE "Expose Modbus registers via tether::io (needs IO_PROTOCOL)" ON)
+option(TETHER_MODBUS_ESP_UART  "ESP-IDF UART link backend (ESP32 only)" OFF)
 option(TETHER_BUILD_FSOE "Build Fail-Safe over EtherCAT (FSoE)" ON)
 option(TETHER_BUILD_ETHERCAT_SLAVE "Build EtherCAT slave emulation" ON)
 option(TETHER_BUILD_SIMULATION "Build simulation systems" ON)
@@ -858,6 +877,11 @@ endif()
 # Klipper native HTTP/WebSocket server (optional, requires Drogon)
 if(TETHER_BUILD_KLIPPER AND TETHER_ENABLE_KLIPPER_HTTP)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/klipper_http.cmake)
+endif()
+
+# Modbus master/slave protocol stack
+if(TETHER_BUILD_MODBUS)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/components/modbus.cmake)
 endif()
 
 # =============================================================================

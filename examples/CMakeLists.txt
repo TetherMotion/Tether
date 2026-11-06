@@ -84,6 +84,15 @@ function(add_tether_example name)
     target_compile_features(${name} PRIVATE cxx_std_20)
 endfunction()
 
+# --- Modbus examples ---
+if(TARGET tether_modbus)
+    add_tether_example(modbus_rtu_client  LIBRARIES tether_modbus)
+    add_tether_example(modbus_tcp_client  LIBRARIES tether_modbus)
+    add_tether_example(modbus_tcp_server  LIBRARIES tether_modbus)
+    add_tether_example(modbus_sim_demo    LIBRARIES tether_modbus)
+    add_tether_example(modbus_gateway     LIBRARIES tether_modbus)
+endif()
+
 # --- Simple Example ---
 # Demonstrates basic G-code parsing and trajectory generation
 add_tether_example(simple_gcode_example
