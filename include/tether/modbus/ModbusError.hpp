@@ -28,6 +28,7 @@ enum class ErrorCategory : uint8_t {
     Cancelled,   ///< operation cancelled by caller/shutdown
     Assurance,   ///< robust-strategy verdict (mismatch, quorum, confirm)
     Unsupported, ///< feature/function not supported
+    Corrupt,     ///< data arrived but failed integrity check (CRC/mark)
 };
 
 inline std::string_view categoryToString(ErrorCategory c) {
@@ -41,6 +42,7 @@ inline std::string_view categoryToString(ErrorCategory c) {
         case ErrorCategory::Cancelled:   return "Cancelled";
         case ErrorCategory::Assurance:   return "Assurance";
         case ErrorCategory::Unsupported: return "Unsupported";
+        case ErrorCategory::Corrupt:     return "Corrupt";
     }
     return "Unknown";
 }
@@ -100,6 +102,10 @@ public:
     static ModbusError unsupported(std::string msg) {
         return {ErrorCategory::Unsupported, std::move(msg)};
     }
+    /// Frame data arrived but failed integrity validation (bad CRC).
+    static ModbusError corrupt(std::string msg) {
+        return {ErrorCategory::Corrupt, std::move(msg)};
+    }
 
     ErrorCategory category() const { return category_; }
     const std::string& message() const { return message_; }
@@ -113,12 +119,15 @@ public:
     bool isBusy() const { return category_ == ErrorCategory::Busy; }
     bool isCancelled() const { return category_ == ErrorCategory::Cancelled; }
     bool isAssurance() const { return category_ == ErrorCategory::Assurance; }
+    bool isCorrupt() const { return category_ == ErrorCategory::Corrupt; }
 
-    /// True when a retry could plausibly succeed (transport/timeout/busy).
+    /// True when a retry could plausibly succeed (transport/timeout/busy/
+    /// corrupt — a mangled response is worth a re-read).
     bool retryable() const {
         return category_ == ErrorCategory::Transport ||
                category_ == ErrorCategory::TimedOut ||
-               category_ == ErrorCategory::Busy;
+               category_ == ErrorCategory::Busy ||
+               category_ == ErrorCategory::Corrupt;
     }
 
     std::string format() const {

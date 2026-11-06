@@ -89,21 +89,53 @@ ModbusConfig::busFromSection(const IniSection& s, const std::string& name) {
     else c.port = uint16_t(*p);
     if (auto u = toInt(s, "unit", 1); !u) return err<BusConfig>(u.error());
     else c.unit = uint8_t(*u);
-    if (auto t = toInt(s, "timeout_ms", 1000); !t)
+    if (auto t = toInt(s, "timeout_ms", -1); !t)
         return err<BusConfig>(t.error());
-    else c.invoke.timeoutMs = *t;
-    if (auto r = toInt(s, "retries", 0); !r)
+    else c.tx.timeoutMs = *t;
+    if (auto r = toInt(s, "retries", -1); !r)
         return err<BusConfig>(r.error());
-    else c.invoke.retries = *r;
-    if (auto d = toInt(s, "retry_delay_ms", 0); !d)
+    else c.tx.retries = *r;
+    if (auto d = toInt(s, "retry_delay_ms", -1); !d)
         return err<BusConfig>(d.error());
-    else c.invoke.retryDelayMs = *d;
+    else c.tx.retryDelayMs = *d;
     if (auto d = toInt(s, "inter_frame_us", 0); !d)
         return err<BusConfig>(d.error());
     else c.channel.interFrameDelayUs = *d;
     if (auto e = toBool(s, "expect_echo", false); !e)
         return err<BusConfig>(e.error());
     else c.channel.expectEcho = *e;
+    // ---- error-handling strategy (optional; code-first ErrorPolicy) ---
+    if (it = s.find("error_strategy"); it != s.end()) {
+        auto st = errorStrategyFromString(it->second);
+        if (!st) return err<BusConfig>(st.error());
+        c.errors.strategy = *st;
+    }
+    if (auto v = toInt(s, "max_retries", int(c.errors.maxRetries)); !v)
+        return err<BusConfig>(v.error());
+    else c.errors.maxRetries = uint8_t(*v);
+    if (auto v = toInt(s, "backoff_base_ms", c.errors.backoffBaseMs); !v)
+        return err<BusConfig>(v.error());
+    else c.errors.backoffBaseMs = *v;
+    if (auto v = toInt(s, "backoff_max_ms", c.errors.backoffMaxMs); !v)
+        return err<BusConfig>(v.error());
+    else c.errors.backoffMaxMs = *v;
+    if (auto v = toInt(s, "circuit_threshold", c.errors.circuitThreshold); !v)
+        return err<BusConfig>(v.error());
+    else c.errors.circuitThreshold = *v;
+    if (auto v = toInt(s, "circuit_reset_ms", c.errors.circuitResetMs); !v)
+        return err<BusConfig>(v.error());
+    else c.errors.circuitResetMs = *v;
+    if (it = s.find("parity_check"); it != s.end()) {
+        const auto& v = it->second;
+        c.open.parityCheck =
+            v == "passthrough" ? ParityCheck::Passthrough
+          : v == "drop"        ? ParityCheck::Drop
+          : v == "mark"        ? ParityCheck::Mark
+          : ParityCheck::Passthrough;
+        if (v != "passthrough" && v != "drop" && v != "mark")
+            return err<BusConfig>(ModbusError::config(
+                "bad parity_check: " + v));
+    }
     it = s.find("profile"); if (it != s.end()) c.profileId = it->second;
     it = s.find("poll");
     if (it != s.end()) {
@@ -169,8 +201,14 @@ Expected<void> ModbusManager::configure(const ModbusConfig& cfg) {
             return err<void>(ModbusError::config("bad mode: " + bc.mode));
         }
         b->executor = std::make_unique<BusExecutor>(*b->channel);
-        b->client = std::make_unique<ModbusClient>(*b->executor, bc.unit,
-                                                 bc.invoke);
+        // The connection owns the defaults: INI invoke* keys + error
+        // policy fold into the executor's default TransactionOptions.
+        {
+            TransactionOptions def = bc.tx;
+            def.errorPolicy = bc.errors;
+            b->executor->setDefaultOptions(std::move(def));
+        }
+        b->client = std::make_unique<ModbusClient>(*b->executor, bc.unit);
         if (!bc.profileId.empty()) {
             const auto* p = reg_.find(bc.profileId);
             if (!p)

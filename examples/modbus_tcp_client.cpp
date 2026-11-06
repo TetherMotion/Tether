@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
     const auto ms   = argc > 6 ? std::stoi(argv[6]) : 500;
 
     auto m = makeTcpMaster(host, port, unit, 3000,
-                           InvokeOptions{1000, 1, 0, {}});
+                           TransactionOptions{1000, 1, 0, {}});
     if (!m) { std::print(stderr, "connect: {}\n",
                          m.error().format()); return 1; }
 

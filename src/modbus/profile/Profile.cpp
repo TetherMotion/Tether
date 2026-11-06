@@ -3,7 +3,7 @@
 namespace tether::modbus {
 
 Expected<double> BoundDevice::read(const std::string& name,
-                                   const InvokeOptions& o) const {
+                                   const TransactionOptions& o) const {
     const auto* d = prof_.find(name);
     if (!d)
         return err<double>(ModbusError::config("unknown register: " + name));
@@ -11,7 +11,7 @@ Expected<double> BoundDevice::read(const std::string& name,
 }
 
 Expected<void> BoundDevice::write(const std::string& name, double v,
-                                  const InvokeOptions& o) const {
+                                  const TransactionOptions& o) const {
     const auto* d = prof_.find(name);
     if (!d)
         return err<void>(ModbusError::config("unknown register: " + name));

@@ -107,7 +107,10 @@ TEST(RtuChannel, CorruptCrcTimeout) {
     ASSERT_TRUE(ch.open().has_value());
     auto r = ch.transact(1, std::vector<uint8_t>{0x03,0,0,0,1}, 200);
     ASSERT_FALSE(r.has_value());
-    EXPECT_TRUE(r.error().isTimeout());
+    // A CRC-failed frame is distinguishable from silence: Corrupt, not
+    // TimedOut — error policies retry corruption differently.
+    EXPECT_TRUE(r.error().isCorrupt());
+    EXPECT_FALSE(r.error().isTimeout());
 }
 
 TEST(RtuChannel, LostByteTimeout) {

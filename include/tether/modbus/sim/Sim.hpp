@@ -70,10 +70,10 @@ public:
 
     Expected<Pdu> invoke(uint8_t unit, FunctionCode fc,
                          std::span<const uint8_t> body,
-                         const InvokeOptions& o = {}) override;
+                         const TransactionOptions& o = {}) override;
     Expected<void> invokeBroadcast(
         uint8_t, FunctionCode fc, std::span<const uint8_t> body,
-        const InvokeOptions& o = {}) override {
+        const TransactionOptions& o = {}) override {
         std::vector<uint8_t> pdu(body.size() + 1);
         pdu[0] = uint8_t(fc);
         std::copy(body.begin(), body.end(), pdu.begin() + 1);
@@ -99,7 +99,7 @@ private:
         explicit BusInvoker(SimBus& b) : bus_(b) {}
         Expected<Pdu> invoke(uint8_t u, FunctionCode fc,
                              std::span<const uint8_t> b,
-                             const InvokeOptions& o = {}) override;
+                             const TransactionOptions& o = {}) override;
         SimBus& bus_;
     } inv_{*this};
     std::map<uint8_t, std::unique_ptr<SimSlave>> slaves_;

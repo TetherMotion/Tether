@@ -26,7 +26,7 @@ SimSlave::handlePdu(std::span<const uint8_t> reqPdu) {
 
 Expected<Pdu> SimInvoker::invoke(uint8_t unit, FunctionCode fc,
                                  std::span<const uint8_t> body,
-                                 const InvokeOptions&) {
+                                 const TransactionOptions&) {
     if (checkUnit_ && unit != slave_.unit())
         return err<Pdu>(ModbusError::timedOut("no such unit"));
     std::vector<uint8_t> req(body.size() + 1);
@@ -58,7 +58,7 @@ SimSlave* SimBus::find(uint8_t unit) {
 }
 Expected<Pdu> SimBus::BusInvoker::invoke(uint8_t u, FunctionCode fc,
                                          std::span<const uint8_t> b,
-                                         const InvokeOptions& o) {
+                                         const TransactionOptions& o) {
     auto* s = bus_.find(u);
     if (!s) return err<Pdu>(ModbusError::timedOut("no slave"));
     std::vector<uint8_t> req(b.size() + 1);

@@ -68,7 +68,7 @@ public:
 
     // ---- flush --------------------------------------------------------------
     /// Write all dirty addresses; stops on first error.
-    Expected<void> flush(const InvokeOptions& o = {}) {
+    Expected<void> flush(const TransactionOptions& o = {}) {
         for (const auto& run : dirtyRuns()) {
             const uint16_t addr = run.first;
             if (run.second.size() == 1) {

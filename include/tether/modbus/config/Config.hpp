@@ -10,7 +10,15 @@
  *   port = 502
  *   unit = 1
  *   timeout_ms = 1000
- *   retries = 2
+ *   retries = 2                          (alias for max_retries)
+ *   error_strategy = retry | retry_backoff | fail_fast |
+ *                    drop_and_continue | circuit_breaker
+ *   max_retries = 8
+ *   backoff_base_ms = 2                  (retry_backoff)
+ *   backoff_max_ms = 500
+ *   circuit_threshold = 5                (circuit_breaker)
+ *   circuit_reset_ms = 30000
+ *   parity_check = passthrough | drop | mark   (rtu serial)
  *   profile = generic/vfd
  *   poll = freq_act:100, current:200     (name:ms pairs)
  */
@@ -44,7 +52,8 @@ struct BusConfig {
     uint16_t     port = 502;
     uint8_t      unit = 1;
     int          connectMs = 5000;
-    InvokeOptions invoke;
+    TransactionOptions tx;     //!< connection default options
+    ErrorPolicy  errors;            ///< bus-wide error strategy (code-first)
     ChannelOpts  channel;
     OpenOpts     open;
     std::string  profileId;
