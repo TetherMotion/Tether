@@ -247,6 +247,7 @@ Result<> CompactDriveTerminal::start(const StartOptions& opts) {
 // ---------------------------------------------------------------------------
 
 int64_t CompactDriveTerminal::inSigned(const Field& f) const {
+    const auto lk = pdoIoLock();
     if (!f.present()) return 0;
     const size_t byte = f.bit_off / 8;
     if (byte + (f.bit_len + 7) / 8 > in_buf_.size()) return 0;
@@ -254,6 +255,7 @@ int64_t CompactDriveTerminal::inSigned(const Field& f) const {
 }
 
 void CompactDriveTerminal::outSigned(const Field& f, int32_t v) {
+    const auto lk = pdoIoLock();
     if (!f.present()) return;
     const size_t byte = f.bit_off / 8;
     if (byte + (f.bit_len + 7) / 8 > out_buf_.size()) return;
@@ -276,6 +278,7 @@ uint16_t CompactDriveTerminal::inWord(const Field& f) const {
 // ---------------------------------------------------------------------------
 
 void CompactDriveTerminal::setControlword(size_t axis, uint16_t cw) {
+    const auto lk = pdoIoLock();
     auto* a = axisPtr(axis);
     if (!a || !a->controlword.present()) return;
     const size_t byte = a->controlword.bit_off / 8;
@@ -285,6 +288,7 @@ void CompactDriveTerminal::setControlword(size_t axis, uint16_t cw) {
 }
 
 uint16_t CompactDriveTerminal::controlword(size_t axis) const {
+    const auto lk = pdoIoLock();
     const auto* a = axisPtr(axis);
     if (!a || !a->controlword.present()) return 0;
     const size_t byte = a->controlword.bit_off / 8;
@@ -301,6 +305,7 @@ bool CompactDriveTerminal::hasControlword(size_t axis) const {
 }
 
 void CompactDriveTerminal::setModesOfOperation(size_t axis, int8_t mode) {
+    const auto lk = pdoIoLock();
     auto* a = axisPtr(axis);
     if (!a || !a->modes.present()) return;
     const size_t byte = a->modes.bit_off / 8;

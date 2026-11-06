@@ -4,10 +4,12 @@
  */
 #pragma once
 
+#include <atomic>
 #include <deque>
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <random>
 
 #include "tether/modbus/client/Invoker.hpp"
@@ -138,19 +140,23 @@ public:
           rng_(uint32_t(traits_.seed)) {}
     SimLinkTraits& traits() { return traits_; }
 
-    Expected<void>   open() override { open_ = true; return {}; }
-    void             close() override { open_ = false; }
-    bool             isOpen() const override { return open_; }
+    Expected<void>   open() override { open_.store(true); return {}; }
+    void             close() override { open_.store(false); }
+    bool             isOpen() const override { return open_.load(); }
 
     Expected<void>   write(std::span<const uint8_t> bytes,
                            int timeoutMs) override;
     Expected<size_t> read(std::span<uint8_t> buf, int timeoutMs) override;
 
     Expected<void> flush(Flush f) override {
-        if (f != Flush::Tx) rx_.clear();
+        if (f != Flush::Tx) {
+            std::lock_guard lk(rx_mutex_);
+            rx_.clear();
+        }
         return {};
     }
     Expected<size_t> drain() override {
+        std::lock_guard lk(rx_mutex_);
         const size_t n = rx_.size(); rx_.clear(); return n;
     }
     LinkInfo info() const override {
@@ -161,15 +167,24 @@ public:
         override { tap_ = std::move(t); }
 
     /// Bytes staged for reading (test introspection).
-    size_t rxPending() const { return rx_.size(); }
+    size_t rxPending() const {
+        std::lock_guard lk(rx_mutex_);
+        return rx_.size();
+    }
 
 private:
+    /// rng_ draw under its lock — write() can run on multiple invoker threads.
+    double   rollUniform();
+    uint32_t rollIndex();
+
     SimBus&        bus_;
     bool           rtu_;
     SimLinkTraits  traits_;
     std::mt19937   rng_;
     std::deque<uint8_t> rx_;
-    bool           open_ = false;
+    std::atomic<bool>   open_{false};
+    mutable std::mutex rx_mutex_;
+    std::mutex          rng_mutex_;
     std::function<void(bool, std::span<const uint8_t>)> tap_;
 };
 

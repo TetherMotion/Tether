@@ -34,13 +34,7 @@ static int stateRank(SlaveState s) {
 // ============================================================================
 
 SlaveStatusPoller::SlaveStatusPoller(IFaultTransport& transport)
-    : transport_(transport) {
-    for (auto& c : cache_) {
-        c.state = SlaveState::INIT;
-        c.al_status = 0;
-        c.error_flag = false;
-    }
-}
+    : transport_(transport) {}
 
 SlaveStatusPoller::~SlaveStatusPoller() {
     stop();
@@ -58,9 +52,9 @@ bool SlaveStatusPoller::init(uint16_t slave_count) {
     slave_count_.store(std::min(slave_count, static_cast<uint16_t>(kMaxSlaves)), std::memory_order_release);
 
     for (auto& c : cache_) {
-        c.state = SlaveState::INIT;
-        c.al_status = 0;
-        c.error_flag = false;
+        c.state.store(SlaveState::INIT, std::memory_order_release);
+        c.al_status.store(0, std::memory_order_release);
+        c.error_flag.store(false, std::memory_order_release);
     }
 
     initialized_.store(true, std::memory_order_release);
@@ -148,7 +142,7 @@ SlaveState SlaveStatusPoller::getSlaveState(uint16_t slave_index) const {
     if (!initialized_.load(std::memory_order_acquire) || slave_index >= slave_count_.load(std::memory_order_acquire)) {
         return SlaveState::INIT;
     }
-    return cache_[slave_index].state;
+    return cache_[slave_index].state.load(std::memory_order_acquire);
 }
 
 // ============================================================================
@@ -190,12 +184,15 @@ void SlaveStatusPoller::pollSlave(uint16_t slave_index) {
     SlaveCache& cached = cache_[slave_index];
 
     // Check if anything changed
-    const bool state_changed = (new_state != cached.state);
-    const bool error_changed = (error_flag != cached.error_flag);
+    const SlaveState old_state = cached.state.load(std::memory_order_acquire);
+    const uint16_t old_al_status = cached.al_status.load(std::memory_order_acquire);
+    const bool old_error_flag = cached.error_flag.load(std::memory_order_acquire);
+    const bool state_changed = (new_state != old_state);
+    const bool error_changed = (error_flag != old_error_flag);
 
     if (!state_changed && !error_changed) {
         // Update raw value but no event to dispatch
-        cached.al_status = al_status_val;
+        cached.al_status.store(al_status_val, std::memory_order_release);
         return;
     }
     if (!error_flag) al_code = 0;
@@ -203,18 +200,18 @@ void SlaveStatusPoller::pollSlave(uint16_t slave_index) {
     // Build event
     SlaveStatusEvent event;
     event.slave_index = slave_index;
-    event.old_state = cached.state;
+    event.old_state = old_state;
     event.new_state = new_state;
-    event.old_al_status = cached.al_status;
+    event.old_al_status = old_al_status;
     event.new_al_status = al_status_val;
-    event.old_error_flag = cached.error_flag;
+    event.old_error_flag = old_error_flag;
     event.new_error_flag = error_flag;
     event.al_status_code = al_code;
 
     // Update cache before dispatching (so callbacks see current state)
-    cached.state = new_state;
-    cached.al_status = al_status_val;
-    cached.error_flag = error_flag;
+    cached.state.store(new_state, std::memory_order_release);
+    cached.al_status.store(al_status_val, std::memory_order_release);
+    cached.error_flag.store(error_flag, std::memory_order_release);
 
     // Dispatch to matching callbacks
     dispatchEvent(event);

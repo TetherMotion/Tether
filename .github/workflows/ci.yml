@@ -13,7 +13,7 @@ env:
 jobs:
   compile:
     name: Compile Debug Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       actions: write  # prune old ccache entries
@@ -145,7 +145,7 @@ jobs:
 
   compile-static:
     name: Compile Static Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       actions: write  # prune old ccache entries
@@ -277,7 +277,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
+        os: [ubuntu-22.04, ubuntu-26.04]
     permissions:
       contents: read
       actions: write  # prune old ccache entries
@@ -404,7 +404,7 @@ jobs:
 
   integration-tests:
     name: Run Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: compile
     
     steps:
@@ -454,7 +454,7 @@ jobs:
 
     - name: Upload test results to Codecov
       if: ${{ !cancelled() }}
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v7
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: build/junit.xml
@@ -471,7 +471,7 @@ jobs:
 
   privileged-tests:
     name: Privileged Wire/RT Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: compile
 
     steps:
@@ -535,7 +535,7 @@ jobs:
 
     - name: Upload test results to Codecov
       if: ${{ !cancelled() }}
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v7
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: junit.xml
@@ -550,7 +550,7 @@ jobs:
 
   blend-svg-paths:
     name: Generate Test SVG Paths
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: compile
 
     steps:
@@ -603,7 +603,7 @@ jobs:
 
     - name: Upload test results to Codecov
       if: ${{ !cancelled() }}
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v7
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: build/junit.xml
@@ -618,7 +618,7 @@ jobs:
 
   asan-tests:
     name: Run Module Tests with ASAN + Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Builds its own instrumented tree; no debug-build artifact needed.
     # Running in parallel with `compile` saves the full compile duration.
     permissions:
@@ -787,7 +787,7 @@ jobs:
     - name: Generate coverage report with gcovr
       if: always()
       run: |
-        # gcovr 6.x (Ubuntu 24.04) removed --build-directory; the build
+        # gcovr >= 6 removed --build-directory; the build
         # directory is now a positional argument.
         # --gcov-ignore-parse-errors works around a gcov tool bug that
         # emits negative hit values (branch taken -1), see
@@ -814,7 +814,7 @@ jobs:
 
     - name: Upload test results to Codecov
       if: ${{ !cancelled() }}
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v7
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: build-asan/junit.xml
@@ -859,7 +859,7 @@ jobs:
 
   tsan-tests:
     name: Run Module Tests with TSAN
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Builds its own instrumented tree; no debug-build artifact needed.
     permissions:
       contents: read
@@ -990,7 +990,7 @@ jobs:
 
     - name: Upload test results to Codecov
       if: ${{ !cancelled() }}
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v7
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: build-tsan/junit.xml
@@ -1025,7 +1025,7 @@ jobs:
 
   analyze-test-timing:
     name: Analyze Test Timing
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: compile
 
     steps:
@@ -1083,7 +1083,7 @@ jobs:
 
   docs:
     name: Build Documentation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
     - name: Checkout code
@@ -1136,7 +1136,7 @@ jobs:
 
   deploy-docs:
     name: Deploy documentation to netcup
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: docs
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     steps:
@@ -1173,7 +1173,7 @@ jobs:
 
   static-analysis:
     name: Clang-Tidy & Clang Static Analyzer
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
     - name: Checkout code

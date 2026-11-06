@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <vector>
@@ -83,6 +84,17 @@ public:
     void stop();
 
     virtual ~TerminalBase();
+
+    /**
+     * @brief Lock serialising process-image access against the cyclic
+     *        exchange thread.
+     *
+     * `in_buf_`/`out_buf_` are views into the PDOManager's PDOEntry
+     * storage, which the realtime loop reads/writes every cycle — field
+     * getters/setters must hold this lock while touching the image.
+     * Recursive: derived helpers calling each other stay cheap.
+     */
+    [[nodiscard]] std::unique_lock<std::recursive_mutex> pdoIoLock() const;
 
     TerminalBase(TerminalBase&&) noexcept            = default;
     TerminalBase& operator=(TerminalBase&&) noexcept = default;

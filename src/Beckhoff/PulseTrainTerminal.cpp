@@ -278,14 +278,17 @@ Result<> PulseTrainTerminal::start(const StartOptions& opts) {
 // ---------------------------------------------------------------------------
 
 bool PulseTrainTerminal::inBit(uint32_t bit_off) const {
+    const auto lk = pdoIoLock();
     return bit_off != kInvalid && detail::imageBit(in_buf_, bit_off);
 }
 
 void PulseTrainTerminal::setOutBit(uint32_t bit_off, bool v) {
+    const auto lk = pdoIoLock();
     if (bit_off != kInvalid) detail::setImageBit(out_buf_, bit_off, v);
 }
 
 int64_t PulseTrainTerminal::inSigned(const Field& f) const {
+    const auto lk = pdoIoLock();
     if (!f.present()) return 0;
     const size_t byte = f.bit_off / 8;
     if (byte + (f.bit_len + 7) / 8 > in_buf_.size()) return 0;
@@ -293,6 +296,7 @@ int64_t PulseTrainTerminal::inSigned(const Field& f) const {
 }
 
 void PulseTrainTerminal::outSigned(const Field& f, int32_t v) {
+    const auto lk = pdoIoLock();
     if (!f.present()) return;
     const size_t byte = f.bit_off / 8;
     if (byte + (f.bit_len + 7) / 8 > out_buf_.size()) return;
@@ -305,6 +309,7 @@ void PulseTrainTerminal::outSigned(const Field& f, int32_t v) {
 }
 
 uint16_t PulseTrainTerminal::inWord(const Field& f) const {
+    const auto lk = pdoIoLock();
     if (!f.present()) return 0;
     const size_t byte = f.bit_off / 8;
     uint16_t w = 0;
@@ -315,6 +320,7 @@ uint16_t PulseTrainTerminal::inWord(const Field& f) const {
 }
 
 void PulseTrainTerminal::outWord(const Field& f, uint16_t v) {
+    const auto lk = pdoIoLock();
     if (!f.present()) return;
     const size_t byte = f.bit_off / 8;
     if (byte + 2 <= out_buf_.size()) {
@@ -330,6 +336,7 @@ void PulseTrainTerminal::setFrequency(size_t ch, uint16_t freq) {
     if (ch < channels_.size()) outWord(channels_[ch].freq, freq);
 }
 uint16_t PulseTrainTerminal::frequency(size_t ch) const {
+    const auto lk = pdoIoLock();
     if (ch >= channels_.size()) return 0;
     const Field& f = channels_[ch].freq;
     if (!f.present()) return 0;
@@ -371,6 +378,7 @@ bool PulseTrainTerminal::hasTarget(size_t ch) const {
 }
 
 uint16_t PulseTrainTerminal::rawCtrl(size_t ch) const {
+    const auto lk = pdoIoLock();
     if (ch >= channels_.size()) return 0;
     const Field& f = channels_[ch].raw_ctrl;
     if (!f.present()) return 0;
@@ -385,6 +393,7 @@ void PulseTrainTerminal::setRawCtrl(size_t ch, uint16_t w) {
     if (ch < channels_.size()) outWord(channels_[ch].raw_ctrl, w);
 }
 uint16_t PulseTrainTerminal::rawData(size_t ch) const {
+    const auto lk = pdoIoLock();
     if (ch >= channels_.size()) return 0;
     const Field& f = channels_[ch].raw_data;
     if (!f.present()) return 0;

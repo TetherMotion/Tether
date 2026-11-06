@@ -193,6 +193,7 @@ Result<> AnalogInputTerminal::start(const StartOptions& opts) {
 // ---------------------------------------------------------------------------
 
 int32_t AnalogInputTerminal::value(size_t channel) const {
+    const auto lk = pdoIoLock();
     if (channel >= channels_.size()) return 0;
     const auto& ch = channels_[channel];
     if (ch.value_off + ch.value_bits / 8 > in_buf_.size()) return 0;
@@ -208,6 +209,7 @@ int32_t AnalogInputTerminal::value(size_t channel) const {
 }
 
 uint16_t AnalogInputTerminal::status(size_t channel) const {
+    const auto lk = pdoIoLock();
     if (channel >= channels_.size()) return 0;
     const auto& ch = channels_[channel];
     if (ch.status_off < 0 ||

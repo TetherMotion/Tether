@@ -10,6 +10,7 @@
 //     - retries=0 to disable, per-cause toggles, exponential backoff,
 //       fail-fast, circuit breaker
 #include <chrono>
+#include <format>
 #include <print>
 #include <thread>
 

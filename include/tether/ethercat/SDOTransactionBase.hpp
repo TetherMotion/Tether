@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include "tether/ethercat/EtherCATConfig.hpp"
 
@@ -171,7 +172,8 @@ protected:
     // Per-instance mailbox write counter used to throttle periodic SDO
     // request logging. Formerly a function-local static shared across all
     // transactions (process-global state); now instance-scoped.
-    uint32_t mbx_write_count_ = 0;
+    // Atomic: SlaveGroup parallelizes SDO ops across member threads.
+    std::atomic<uint32_t> mbx_write_count_{0};
 };
 
 } // namespace Raw

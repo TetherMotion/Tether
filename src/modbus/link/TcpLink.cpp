@@ -32,7 +32,7 @@ TcpLink::TcpLink(int fd, std::string peer)
 TcpLink::~TcpLink() { close(); }
 
 Expected<void> TcpLink::open() {
-    if (fd_ >= 0) return {};
+    if (fd_.load() >= 0) return {};
     const int sock = ::socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) return err(sysErr("socket", errno));
 
@@ -70,24 +70,28 @@ Expected<void> TcpLink::open() {
     ::fcntl(sock, F_SETFL, flags | O_NONBLOCK);
     int one = 1;
     ::setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-    fd_ = sock;
+    fd_.store(sock);
     peer_ = host_ + ":" + portStr;
     return {};
 }
 
 void TcpLink::close() {
-    if (fd_ >= 0) { ::shutdown(fd_, SHUT_RDWR); ::close(fd_); fd_ = -1; }
+    // Exchange first so concurrent readers/writers see "closed" immediately;
+    // shutdown() wakes any thread blocked in poll/recv on the old fd.
+    const int f = fd_.exchange(-1);
+    if (f >= 0) { ::shutdown(f, SHUT_RDWR); ::close(f); }
 }
-bool TcpLink::isOpen() const { return fd_ >= 0; }
+bool TcpLink::isOpen() const { return fd_.load() >= 0; }
 
 Expected<void> TcpLink::write(std::span<const uint8_t> bytes,
                               int timeoutMs) {
-    if (fd_ < 0) return err(ModbusError::transport("not open"));
+    const int fd = fd_.load();
+    if (fd < 0) return err(ModbusError::transport("not open"));
     size_t off = 0;
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(timeoutMs);
     while (off < bytes.size()) {
-        const ssize_t n = ::send(fd_, bytes.data() + off,
+        const ssize_t n = ::send(fd, bytes.data() + off,
                                  bytes.size() - off, MSG_NOSIGNAL);
         if (n > 0) { off += size_t(n); continue; }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
@@ -96,7 +100,7 @@ Expected<void> TcpLink::write(std::span<const uint8_t> bytes,
                 deadline - std::chrono::steady_clock::now()).count();
             if (remain <= 0)
                 return err(ModbusError::timedOut("tcp write timeout"));
-            pollfd pfd{fd_, POLLOUT, 0};
+            pollfd pfd{fd, POLLOUT, 0};
             ::poll(&pfd, 1, int(remain));
             continue;
         }
@@ -108,14 +112,15 @@ Expected<void> TcpLink::write(std::span<const uint8_t> bytes,
 }
 
 Expected<size_t> TcpLink::read(std::span<uint8_t> buf, int timeoutMs) {
-    if (fd_ < 0) return err<size_t>(ModbusError::transport("not open"));
-    pollfd pfd{fd_, POLLIN, 0};
+    const int fd = fd_.load();
+    if (fd < 0) return err<size_t>(ModbusError::transport("not open"));
+    pollfd pfd{fd, POLLIN, 0};
     const int rc = ::poll(&pfd, 1, timeoutMs);
     if (rc < 0) return err<size_t>(sysErr("poll", errno));
     if (rc == 0) return size_t{0};
     if (pfd.revents & (POLLERR | POLLNVAL))
         return err<size_t>(sysErr("tcp socket error", EIO));
-    const ssize_t n = ::recv(fd_, buf.data(), buf.size(), 0);
+    const ssize_t n = ::recv(fd, buf.data(), buf.size(), 0);
     if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) return size_t{0};
         return err<size_t>(sysErr("tcp recv", errno));
@@ -133,7 +138,7 @@ LinkInfo TcpLink::info() const {
                                    : "tcp:" + peer_,
             peer_, LinkKind::Tcp, true, true};
 }
-int TcpLink::fd() const { return fd_; }
+int TcpLink::fd() const { return fd_.load(); }
 
 // ---- TcpListener ---------------------------------------------------------------
 TcpListener::TcpListener(std::string bindHost, uint16_t port, int backlog,
@@ -144,7 +149,7 @@ TcpListener::TcpListener(std::string bindHost, uint16_t port, int backlog,
 TcpListener::~TcpListener() { close(); }
 
 Expected<void> TcpListener::listen() {
-    if (fd_ >= 0) return {};
+    if (fd_.load() >= 0) return {};
     const int sock = ::socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) return err(sysErr("socket", errno));
     if (reuseAddr_) {
@@ -172,15 +177,16 @@ Expected<void> TcpListener::listen() {
     }
     int flags = ::fcntl(sock, F_GETFL, 0);
     ::fcntl(sock, F_SETFL, flags | O_NONBLOCK);
-    fd_ = sock;
+    fd_.store(sock);
     return {};
 }
 
 Expected<std::unique_ptr<ILink>> TcpListener::accept(int timeoutMs) {
-    if (fd_ < 0)
+    const int fd = fd_.load();
+    if (fd < 0)
         return err<std::unique_ptr<ILink>>(
             ModbusError::transport("not listening"));
-    pollfd pfd{fd_, POLLIN, 0};
+    pollfd pfd{fd, POLLIN, 0};
     const int rc = ::poll(&pfd, 1, timeoutMs);
     if (rc < 0)
         return err<std::unique_ptr<ILink>>(sysErr("poll", errno));
@@ -188,7 +194,7 @@ Expected<std::unique_ptr<ILink>> TcpListener::accept(int timeoutMs) {
         return err<std::unique_ptr<ILink>>(ModbusError::timedOut("accept"));
     sockaddr_in peer{};
     socklen_t len = sizeof(peer);
-    const int sock = ::accept(fd_, reinterpret_cast<sockaddr*>(&peer), &len);
+    const int sock = ::accept(fd, reinterpret_cast<sockaddr*>(&peer), &len);
     if (sock < 0)
         return err<std::unique_ptr<ILink>>(sysErr("accept", errno));
     int flags = ::fcntl(sock, F_GETFL, 0);
@@ -203,9 +209,10 @@ Expected<std::unique_ptr<ILink>> TcpListener::accept(int timeoutMs) {
 }
 
 void TcpListener::close() {
-    if (fd_ >= 0) { ::close(fd_); fd_ = -1; }
+    const int f = fd_.exchange(-1);
+    if (f >= 0) { ::shutdown(f, SHUT_RDWR); ::close(f); }
 }
-bool TcpListener::isListening() const { return fd_ >= 0; }
+bool TcpListener::isListening() const { return fd_.load() >= 0; }
 std::string TcpListener::boundEndpoint() const {
     return bindHost_ + ":" + std::to_string(port_);
 }

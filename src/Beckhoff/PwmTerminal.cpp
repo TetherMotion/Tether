@@ -205,10 +205,12 @@ Result<> PwmTerminal::start(const StartOptions& opts) {
 // ---------------------------------------------------------------------------
 
 bool PwmTerminal::inBit(uint32_t bit_off) const {
+    const auto lk = pdoIoLock();
     return bit_off != kInvalid && detail::imageBit(in_buf_, bit_off);
 }
 
 void PwmTerminal::setOutBit(uint32_t bit_off, bool v) {
+    const auto lk = pdoIoLock();
     if (bit_off != kInvalid) detail::setImageBit(out_buf_, bit_off, v);
 }
 
@@ -217,6 +219,7 @@ void PwmTerminal::setOutBit(uint32_t bit_off, bool v) {
 // ---------------------------------------------------------------------------
 
 void PwmTerminal::setDuty(size_t ch, uint16_t raw) {
+    const auto lk = pdoIoLock();
     if (ch >= channels_.size()) return;
     const Field& f = channels_[ch].duty;
     if (!f.present()) return;
@@ -233,6 +236,7 @@ void PwmTerminal::setDutyFraction(size_t ch, float fraction) {
 }
 
 uint16_t PwmTerminal::duty(size_t ch) const {
+    const auto lk = pdoIoLock();
     if (ch >= channels_.size()) return 0;
     const Field& f = channels_[ch].duty;
     if (!f.present()) return 0;
@@ -269,6 +273,7 @@ bool PwmTerminal::hasDithering(size_t ch) const {
 }
 
 void PwmTerminal::setMasterGain(uint16_t gain) {
+    const auto lk = pdoIoLock();
     if (!master_gain_.present()) return;
     const uint16_t v = std::min<uint16_t>(gain, kDutyFullScale);
     const size_t byte = master_gain_.bit_off / 8;

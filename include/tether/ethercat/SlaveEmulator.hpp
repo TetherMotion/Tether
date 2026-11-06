@@ -374,11 +374,13 @@ public:
     // Returns 0 for out-of-range access so tests can distinguish "no
     // write arrived" (0) — write accessors assert bounds via return.
     uint8_t smBufferByteForTest(size_t sm_index, size_t offset) const {
+        std::lock_guard lk(sm_mutex_);
         if (sm_index >= sync_managers_.size()) return 0;
         const auto& buf = sync_managers_[sm_index].buffer;
         return offset < buf.size() ? buf[offset] : 0;
     }
     void setSmBufferByteForTest(size_t sm_index, uint8_t value) {
+        std::lock_guard lk(sm_mutex_);
         if (sm_index >= sync_managers_.size()) return;
         auto& buf = sync_managers_[sm_index].buffer;
         if (!buf.empty()) buf[0] = value;
@@ -387,6 +389,7 @@ public:
     /// the slave side "producing" process data).
     void setSmBufferForTest(size_t sm_index, size_t offset,
                             const uint8_t* data, size_t len) {
+        std::lock_guard lk(sm_mutex_);
         if (sm_index >= sync_managers_.size()) return;
         auto& buf = sync_managers_[sm_index].buffer;
         if (offset + len > buf.size()) return;
@@ -468,6 +471,13 @@ private:
     // Guards object_dictionary_ — test threads mutate the OD (addODEntry)
     // while a wire thread runs SDO handling (processMailboxRequest).
     mutable std::mutex od_mutex_;
+
+    // Guards every SyncManager::buffer access (process-data read/write,
+    // FMMU logical transfers, mailbox SM0/SM1) — the wire thread runs
+    // smBufferRead/Write while test threads inject inputs via
+    // setSmBuffer*ForTest.  Recursive: smBufferWrite -> processMailboxRequest
+    // -> coeSdoAbort nests.
+    mutable std::recursive_mutex sm_mutex_;
 
     // CiA 402
     bool cia402_enabled_ = false;

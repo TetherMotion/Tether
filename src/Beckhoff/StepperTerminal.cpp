@@ -234,14 +234,17 @@ Result<> StepperTerminal::start(const StartOptions& opts) {
 // ---------------------------------------------------------------------------
 
 bool StepperTerminal::inBit(uint32_t bit_off) const {
+    const auto lk = pdoIoLock();
     return bit_off != kInvalid && detail::imageBit(in_buf_, bit_off);
 }
 
 void StepperTerminal::setOutBit(uint32_t bit_off, bool v) {
+    const auto lk = pdoIoLock();
     if (bit_off != kInvalid) detail::setImageBit(out_buf_, bit_off, v);
 }
 
 int64_t StepperTerminal::inSigned64(uint32_t bit_off, uint8_t bits) const {
+    const auto lk = pdoIoLock();
     if (bit_off == kInvalid || bits == 0) return 0;
     const size_t byte = bit_off / 8;
     if (byte + (bits + 7) / 8 > in_buf_.size()) return 0;
@@ -253,6 +256,7 @@ int32_t StepperTerminal::inSigned(uint32_t bit_off, uint8_t bits) const {
 }
 
 void StepperTerminal::outSigned(uint32_t bit_off, uint8_t bits, int32_t v) {
+    const auto lk = pdoIoLock();
     if (bit_off == kInvalid || bits == 0) return;
     const size_t byte = bit_off / 8;
     if (byte + (bits + 7) / 8 > out_buf_.size()) return;
@@ -290,6 +294,7 @@ void StepperTerminal::setLatchExtNeg(bool on) { setOutBit(off_latch_neg_, on); }
 void StepperTerminal::setLatchC(bool on)      { setOutBit(off_enc_latch_c_, on); }
 
 uint16_t StepperTerminal::stmControlWord() const {
+    const auto lk = pdoIoLock();
     if (off_stm_enable_ == kInvalid) return 0;
     uint16_t w = 0;
     const size_t byte = off_stm_enable_ / 8;
@@ -300,6 +305,7 @@ uint16_t StepperTerminal::stmControlWord() const {
 }
 
 uint16_t StepperTerminal::encControlWord() const {
+    const auto lk = pdoIoLock();
     if (off_enc_ctrl_ == kInvalid) return 0;
     uint16_t w = 0;
     const size_t byte = off_enc_ctrl_ / 8;
@@ -340,6 +346,7 @@ int32_t StepperTerminal::latchValue() const {
 }
 
 uint16_t StepperTerminal::stmStatusWord() const {
+    const auto lk = pdoIoLock();
     if (off_stm_status_ == kInvalid) return 0;
     uint16_t w = 0;
     const size_t byte = off_stm_status_ / 8;
@@ -350,6 +357,7 @@ uint16_t StepperTerminal::stmStatusWord() const {
 }
 
 uint16_t StepperTerminal::encStatusWord() const {
+    const auto lk = pdoIoLock();
     if (off_enc_status_ == kInvalid) return 0;
     uint16_t w = 0;
     const size_t byte = off_enc_status_ / 8;

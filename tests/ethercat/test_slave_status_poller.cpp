@@ -25,8 +25,9 @@ namespace {
 /// the test mutates between polls; reads can also be failed.
 class ScriptableFaultTransport : public IFaultTransport {
 public:
-    bool fail_reads = false;
-    int read_calls = 0;
+    // Atomics: written by the test thread, read/incremented on the poll thread.
+    std::atomic<bool> fail_reads{false};
+    std::atomic<int> read_calls{0};
 
     void setAlStatus(uint16_t slave, uint16_t status, uint16_t code = 0) {
         std::lock_guard<std::mutex> lk(mu_);
@@ -37,7 +38,7 @@ public:
     bool readRegister(uint16_t slave_index, uint16_t reg_addr,
                       void* data, uint16_t size) override {
         ++read_calls;
-        if (fail_reads) return false;
+        if (fail_reads.load()) return false;
         if (reg_addr != 0x0130 || size < 6) return false;
         std::lock_guard<std::mutex> lk(mu_);
         uint16_t status = al_status_[slave_index];

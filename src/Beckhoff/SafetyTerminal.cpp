@@ -184,6 +184,7 @@ Result<> SafetyTerminal::start(const Config& cfg, const StartOptions& opts) {
 // ---------------------------------------------------------------------------
 
 bool SafetyTerminal::exchange(uint64_t current_time_ms) {
+    const auto lk = pdoIoLock();
     if (!fsoe_) return false;
     return fsoe_->exchangeViaPDO(out_buf_.data(), out_buf_.size(),
                                  in_buf_.data(), in_buf_.size(),

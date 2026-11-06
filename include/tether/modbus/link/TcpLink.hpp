@@ -4,6 +4,8 @@
  */
 #pragma once
 
+#include <atomic>
+
 #include "tether/modbus/link/ILink.hpp"
 
 #if !defined(ESP_PLATFORM)
@@ -37,7 +39,9 @@ private:
     uint16_t    port_ = 0;
     int         connectMs_ = 5000;
     OpenOpts    opts_;
-    int         fd_ = -1;
+    /// Socket fd — atomic: close() runs on the owner thread while
+    /// read()/write()/isOpen() may run on invoker/rx threads.
+    std::atomic<int> fd_{-1};
     std::function<void(bool, std::span<const uint8_t>)> tap_;
 };
 
@@ -58,7 +62,8 @@ private:
     uint16_t    port_ = 0;
     int         backlog_ = 8;
     bool        reuseAddr_ = true;
-    int         fd_ = -1;
+    /// Listen fd — atomic: accept() polls while close() runs elsewhere.
+    std::atomic<int> fd_{-1};
 };
 
 } // namespace tether::modbus

@@ -306,8 +306,10 @@ bool SlaveEmulator::writeRegister(uint16_t addr, const uint8_t* data, uint16_t l
     }
     
     // Sync Manager registers: per-byte field updates so multi-byte and
-    // multi-block writes behave like a real ESC.
+    // multi-block writes behave like a real ESC.  sm_mutex_ guards the
+    // buffer resizes against concurrent wire/test access.
     if (addr >= 0x0800 && addr < 0x0880 && addr + len <= 0x0880) {
+        std::lock_guard lk(sm_mutex_);
         for (uint16_t i = 0; i < len; ++i) {
             const uint16_t a = static_cast<uint16_t>(addr + i);
             const uint8_t sm_num = (a - 0x0800) / 8;
@@ -388,6 +390,7 @@ bool SlaveEmulator::writeRegister(uint16_t addr, const uint8_t* data, uint16_t l
 bool SlaveEmulator::processLogicalRead(uint32_t logical_addr, uint8_t* data, uint16_t len) {
     // Each FMMU serves only the bytes inside its own logical window —
     // a multi-slave LRW image overlaps each slave's window partially.
+    std::lock_guard lk(sm_mutex_);
     bool any = false;
     const uint64_t req_end = uint64_t(logical_addr) + len;
     for (auto& fmmu : fmmus_) {
@@ -418,6 +421,7 @@ bool SlaveEmulator::processLogicalRead(uint32_t logical_addr, uint8_t* data, uin
 }
 
 bool SlaveEmulator::processLogicalWrite(uint32_t logical_addr, const uint8_t* data, uint16_t len) {
+    std::lock_guard lk(sm_mutex_);
     bool any = false;
     const uint64_t req_end = uint64_t(logical_addr) + len;
     for (auto& fmmu : fmmus_) {
@@ -528,6 +532,7 @@ ODEntry* SlaveEmulator::findODEntry(uint16_t index, uint8_t subindex) {
 // ============================================================================
 
 bool SlaveEmulator::smBufferRead(uint16_t addr, uint8_t* data, uint16_t len) {
+    std::lock_guard lk(sm_mutex_);
     for (size_t i = 0; i < sync_managers_.size(); ++i) {
         SyncManager& sm = sync_managers_[i];
         if (!sm.isEnabled() || sm.buffer.empty()) continue;
@@ -547,6 +552,7 @@ bool SlaveEmulator::smBufferRead(uint16_t addr, uint8_t* data, uint16_t len) {
 }
 
 bool SlaveEmulator::smBufferWrite(uint16_t addr, const uint8_t* data, uint16_t len) {
+    std::lock_guard lk(sm_mutex_);
     for (size_t i = 0; i < sync_managers_.size(); ++i) {
         SyncManager& sm = sync_managers_[i];
         if (!sm.isEnabled() || sm.buffer.empty()) continue;
@@ -652,7 +658,9 @@ void SlaveEmulator::coeSdoAbort(uint8_t index_hi, uint8_t index_lo,
 
 void SlaveEmulator::processMailboxRequest() {
     // The OD can be mutated from a test thread (addODEntry) while this
-    // runs on the wire thread — serialize dictionary access.
+    // runs on the wire thread — serialize dictionary access.  sm_mutex_
+    // is already held by the smBufferWrite caller (recursive).
+    std::lock_guard lk(sm_mutex_);
     std::lock_guard<std::mutex> od_lk(od_mutex_);
     SyncManager& sm0 = sync_managers_[0];
     SyncManager& sm1 = sync_managers_[1];

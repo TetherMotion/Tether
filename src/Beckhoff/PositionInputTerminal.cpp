@@ -220,6 +220,7 @@ size_t PositionInputTerminal::valueCount(size_t ch) const {
 }
 
 int64_t PositionInputTerminal::value(size_t ch, size_t i) const {
+    const auto lk = pdoIoLock();
     if (ch >= channels_.size() || i >= channels_[ch].fields.size()) return 0;
     const auto& f = channels_[ch].fields[i];
     if (f.byte_off + (f.bit_len + 7) / 8 > in_buf_.size()) return 0;
@@ -227,6 +228,7 @@ int64_t PositionInputTerminal::value(size_t ch, size_t i) const {
 }
 
 uint64_t PositionInputTerminal::rawValue(size_t ch, size_t i) const {
+    const auto lk = pdoIoLock();
     if (ch >= channels_.size() || i >= channels_[ch].fields.size()) return 0;
     const auto& f = channels_[ch].fields[i];
     if (f.byte_off + (f.bit_len + 7) / 8 > in_buf_.size()) return 0;
@@ -234,6 +236,7 @@ uint64_t PositionInputTerminal::rawValue(size_t ch, size_t i) const {
 }
 
 uint16_t PositionInputTerminal::status(size_t ch) const {
+    const auto lk = pdoIoLock();
     if (ch >= channels_.size()) return 0;
     const auto& c = channels_[ch];
     if (c.status_off < 0 ||
