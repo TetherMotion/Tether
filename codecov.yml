@@ -16,3 +16,135 @@ ignore:
 comment:
   layout: "diff, flags, files"
   behavior: default
+
+# Per-module coverage tracking — mirrors the CMake component layout
+# (cmake/components/*.cmake). Each component_id shows up under
+# app.codecov.io/gh/TetherMotion/Tether/components.
+component_management:
+  individual_components:
+    - component_id: tether_common
+      name: tether_common
+      paths:
+        - src/common/**
+        - src/logging/**
+        - src/platform/**
+        - include/tether/common/**
+        - include/tether/platform/**
+        - include/tether/utils/**
+        - include/tether/Tether.hpp
+    - component_id: tether_io
+      name: tether_io
+      paths:
+        - src/io/**
+        - include/tether/io/**
+    - component_id: tether_ethercat
+      name: tether_ethercat
+      paths:
+        - src/ethercat/**
+        - src/fmmu/**
+        - src/sii/**
+        - src/reset/**
+        - include/tether/ethercat/**
+        - include/tether/fmmu/**
+        - include/tether/sii/**
+        - include/tether/reset/**
+    - component_id: tether_slave
+      name: tether_slave
+      paths:
+        - src/slave/**
+        - include/tether/slave/**
+    - component_id: tether_modbus
+      name: tether_modbus
+      paths:
+        - src/modbus/**
+        - include/tether/modbus/**
+    - component_id: tether_klipper
+      name: tether_klipper
+      paths:
+        - src/klipper/**
+        - include/tether/klipper/**
+    - component_id: tether_gcode
+      name: tether_gcode
+      paths:
+        - src/gcode/**
+        - include/tether/gcode/**
+    - component_id: tether_motion
+      name: tether_motion
+      paths:
+        - src/motion/**
+        - include/tether/motion/**
+        - include/tether/kinematics/**
+    - component_id: tether_motion_planner
+      name: tether_motion_planner
+      paths:
+        - src/motion_planner/**
+        - src/replanner/**
+        - include/tether/motion_planner/**
+        - include/tether/motion_replanner/**
+    - component_id: tether_control
+      name: tether_control
+      paths:
+        - src/control/**
+        - include/tether/control/**
+    - component_id: tether_analysis
+      name: tether_analysis
+      paths:
+        - src/analysis/**
+        - include/tether/analysis/**
+    - component_id: tether_hal
+      name: tether_hal
+      paths:
+        - src/hal/**
+        - include/tether/hal/**
+        - include/tether/sensors/**
+    - component_id: tether_device_drivers
+      name: tether_device_drivers
+      paths:
+        - src/drives/**
+        - src/Beckhoff/**
+        - include/tether/drives/**
+        - include/tether/Beckhoff/**
+    - component_id: tether_profiles
+      name: tether_profiles
+      paths:
+        - src/profiles/**
+        - src/etg5000/**
+        - include/tether/profiles/**
+        - include/tether/etg5000/**
+    - component_id: tether_fsoe
+      name: tether_fsoe
+      paths:
+        - src/fsoe/**
+        - include/tether/fsoe/**
+    - component_id: tether_simulation
+      name: tether_simulation
+      paths:
+        - src/simulation/**
+        - include/tether/simulation/**
+    - component_id: tether_identification
+      name: tether_identification
+      paths:
+        - src/identification/**
+        - include/tether/identification/**
+    - component_id: tether_export
+      name: tether_export
+      paths:
+        - src/export/**
+        - include/tether/export/**
+    - component_id: tether_terminal_ui
+      name: tether_terminal_ui
+      paths:
+        - src/terminal_ui/**
+        - include/tether/terminal_ui/**
+        - include/tether/ui/**
+    - component_id: tether_pcap
+      name: tether_pcap
+      paths:
+        - src/packetloggers/**
+        - include/tether/packetloggers/**
+        - include/tether/packet_interpreters/**
+    - component_id: tether_destabilizer
+      name: tether_destabilizer
+      paths:
+        - src/destabilizer/**
+        - include/tether/destabilizer/**
