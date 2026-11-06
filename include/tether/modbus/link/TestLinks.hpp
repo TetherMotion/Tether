@@ -103,9 +103,16 @@ public:
         return {"pty:" + name_, name_, LinkKind::Pty, true, true};
     }
     int fd() const override { return fd_; }
+    void setTap(std::function<void(bool, std::span<const uint8_t>)> t)
+        override { tap_ = std::move(t); }
+    /// Internal: fire the tap (called by write()/read()).
+    void tap(bool tx, std::span<const uint8_t> b) const {
+        if (tap_) tap_(tx, b);
+    }
 private:
     int fd_;
     std::string name_;
+    std::function<void(bool, std::span<const uint8_t>)> tap_;
 };
 #endif
 

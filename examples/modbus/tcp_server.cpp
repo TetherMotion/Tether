@@ -27,5 +27,6 @@ int main(int argc, char** argv) {
         std::print(stderr, "start: {}\n", e.error().format()); return 1;
     }
     std::print("modbus/tcp on :{} — Ctrl-C to quit\n", port);
+    std::fflush(stdout);
     for (;;) std::this_thread::sleep_for(std::chrono::seconds(60));
 }

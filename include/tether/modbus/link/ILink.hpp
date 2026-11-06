@@ -87,6 +87,14 @@ public:
     /// Best-effort discard of already-arrived bytes (echo removal).
     virtual Expected<size_t> drain() { return size_t{0}; }
 
+    /// Wire-arrival age of the FIRST / LAST byte of the last read()
+    /// batch (ns before now). 0 = no precise timing ("just now").
+    /// ISR-fed links (RxIngress) override with producer timestamps so
+    /// a channel's inter-frame gap detection reflects wire arrival,
+    /// not drain time. Only meaningful just after a non-empty read().
+    virtual int64_t rxBatchFirstAgeNs() const noexcept { return 0; }
+    virtual int64_t rxBatchLastAgeNs()  const noexcept { return 0; }
+
     /// Optional raw tap for capture tooling.
     virtual void setTap(std::function<void(bool tx,
                         std::span<const uint8_t>)>) {}
