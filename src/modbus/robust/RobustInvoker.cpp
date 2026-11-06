@@ -16,7 +16,7 @@ ModbusError RobustInvoker::notCompiled(Strategy s) {
 
 Expected<Pdu> RobustInvoker::readOnce(uint8_t u, FunctionCode fc,
                                       std::span<const uint8_t> b,
-                                      const InvokeOptions& o) {
+                                      const TransactionOptions& o) {
     stats_.samples++;
     return inner_.invoke(u, fc, b, o);
 }
@@ -38,7 +38,7 @@ bool RobustInvoker::same(const Pdu& a, const Pdu& b) const {
 
 Expected<Pdu> RobustInvoker::invoke(uint8_t unit, FunctionCode fc,
                                     std::span<const uint8_t> body,
-                                    const InvokeOptions& o) {
+                                    const TransactionOptions& o) {
     stats_.ops++;
     if (opts_.strategy == Strategy::Direct)
         return inner_.invoke(unit, fc, body, o);
@@ -49,7 +49,7 @@ Expected<Pdu> RobustInvoker::invoke(uint8_t unit, FunctionCode fc,
 
 Expected<Pdu> RobustInvoker::applyRead(uint8_t u, FunctionCode fc,
                                        std::span<const uint8_t> b,
-                                       const InvokeOptions& o) {
+                                       const TransactionOptions& o) {
     auto gap = [&] {
         if (opts_.sampleGapMs > 0)
             std::this_thread::sleep_for(
@@ -175,7 +175,7 @@ Expected<Pdu> RobustInvoker::assuredWrite(
     uint8_t unit, FunctionCode writeFc, std::span<const uint8_t> body,
     FunctionCode readFc, std::span<const uint8_t> confirmBody,
     std::span<const uint8_t> expectedRespBody,
-    const InvokeOptions& o) {
+    const TransactionOptions& o) {
     stats_.ops++;
     if (!strategyCompiled(opts_.strategy))
         return err<Pdu>(notCompiled(opts_.strategy));
@@ -222,7 +222,7 @@ Expected<Pdu> RobustInvoker::assuredWrite(
 
 Expected<void> RobustInvoker::invokeBroadcast(
     uint8_t, FunctionCode fc, std::span<const uint8_t> body,
-    const InvokeOptions& o) {
+    const TransactionOptions& o) {
 #ifdef TETHER_MODBUS_ROBUST_BCAST_FOLLOWUP
     if (opts_.strategy == Strategy::BroadcastFollowup) {
         // caller supplies per-unit confirm reads via assuredWrite instead;

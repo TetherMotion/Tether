@@ -99,14 +99,19 @@ public:
             a.unit = buf_[0];
             a.pdu.assign(buf_.begin() + 1, buf_.end() - 2);
             out.push_back(std::move(a));
+        } else {
+            ++corrupt_;   // frame-sized blob failed CRC → corruption
         }
         buf_.clear();
     }
     const std::vector<uint8_t>& partial() const { return buf_; }
+    /// Frame-sized blobs dropped on CRC failure (corruption evidence).
+    uint64_t corruptFrames() const { return corrupt_; }
 
 private:
     std::vector<uint8_t> buf_;
     uint8_t localUnit_;
+    uint64_t corrupt_ = 0;
 };
 
 // ---- MBAP/TCP --------------------------------------------------------------------

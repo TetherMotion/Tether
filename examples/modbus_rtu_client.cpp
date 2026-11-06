@@ -17,7 +17,7 @@ int main(int argc, char** argv) {
                            cfg.error().format()); return 1; }
 
     auto m = makeRtuMaster(*cfg, unit, {}, {},
-                           InvokeOptions{1000, 2, 20, {}});
+                           TransactionOptions{1000, 2, 20, {}});
     if (!m) { std::print(stderr, "open failed: {}\n",
                          m.error().format()); return 1; }
 

@@ -16,7 +16,7 @@ public:
     TypedRef(ModbusClient& client, Address addr, ScalarSpec spec)
         : client_(client), addr_(addr), spec_(spec) {}
 
-    Expected<double> read(const InvokeOptions& o = {}) const {
+    Expected<double> read(const TransactionOptions& o = {}) const {
         const size_t n = valueSize(spec_.type);
         if (spec_.type == ValueType::Bit) {
             auto bits = addr_.table == TableId::Coil
@@ -32,7 +32,7 @@ public:
         return decodeScalar(*regs, spec_);
     }
 
-    Expected<void> write(double eng, const InvokeOptions& o = {}) const {
+    Expected<void> write(double eng, const TransactionOptions& o = {}) const {
         if (spec_.type == ValueType::Bit)
             return client_.writeCoil(addr_.offset, eng != 0.0, o);
         auto regs = encodeScalar(eng, spec_);
@@ -43,7 +43,7 @@ public:
     }
 
     /// Read the bit sub-field when addr has a bit index ("40001.3").
-    Expected<bool> readBit(const InvokeOptions& o = {}) const {
+    Expected<bool> readBit(const TransactionOptions& o = {}) const {
         if (!addr_.hasBit())
             return err<bool>(ModbusError::config("no bit index"));
         auto v = read(o);

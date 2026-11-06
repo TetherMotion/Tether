@@ -23,7 +23,7 @@ struct AssuranceStats {
  * @brief Wraps an inner invoker and applies an AssuranceOpts strategy to
  * read-style invokes; write-confirm strategies apply via `assuredWrite`.
  *
- * Read strategy is selected per-invoke by InvokeOptions extension? No —
+ * Read strategy is selected per-invoke by TransactionOptions extension? No —
  * the strategy is bound at decoration time (per-endpoint), matching
  * "flexible logic": chain invokers for different policies.
  */
@@ -39,7 +39,7 @@ public:
 
     Expected<Pdu> invoke(uint8_t unit, FunctionCode fc,
                          std::span<const uint8_t> body,
-                         const InvokeOptions& o = {}) override;
+                         const TransactionOptions& o = {}) override;
 
     /// Explicit assured write: sends `body` per strategy then confirms
     /// by re-invoking `confirmBody` (a matching read request).
@@ -48,19 +48,19 @@ public:
                                FunctionCode readFc,
                                std::span<const uint8_t> confirmBody,
                                std::span<const uint8_t> expectedRespBody,
-                               const InvokeOptions& o = {});
+                               const TransactionOptions& o = {});
 
     Expected<void> invokeBroadcast(
         uint8_t unit, FunctionCode fc, std::span<const uint8_t> body,
-        const InvokeOptions& o = {}) override;
+        const TransactionOptions& o = {}) override;
 
 private:
     Expected<Pdu> readOnce(uint8_t u, FunctionCode fc,
                            std::span<const uint8_t> b,
-                           const InvokeOptions& o);
+                           const TransactionOptions& o);
     Expected<Pdu> applyRead(uint8_t u, FunctionCode fc,
                             std::span<const uint8_t> b,
-                            const InvokeOptions& o);
+                            const TransactionOptions& o);
 
     bool same(const Pdu& a, const Pdu& b) const;
     static ModbusError notCompiled(Strategy s);

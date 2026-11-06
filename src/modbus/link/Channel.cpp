@@ -84,6 +84,7 @@ Expected<Adu> RtuChannel::transact(uint8_t unit,
     if (auto e = link_->write(f, writeMs); !e)
         return err<Adu>(e.error());
     lastByteNs_ = nowNs();
+    const uint64_t corruptBefore = framer_.corruptFrames();
 
     if (opts_.expectEcho) {
         // Wait for + discard our own echo (same byte count).
@@ -104,8 +105,14 @@ Expected<Adu> RtuChannel::transact(uint8_t unit,
     const int64_t dl = nowNs() + int64_t(timeoutMs) * kNsPerMs;
     for (;;) {
         const int64_t remainMs = (dl - nowNs()) / kNsPerMs;
-        if (remainMs <= 0)
+        if (remainMs <= 0) {
+            // Distinguish "data arrived but mangled" (Corrupt — parity/
+            // noise worth a re-read) from pure silence (TimedOut).
+            if (framer_.corruptFrames() > corruptBefore)
+                return err<Adu>(ModbusError::corrupt(
+                    "rtu frame crc failed"));
             return err<Adu>(ModbusError::timedOut("rtu response timeout"));
+        }
         auto frames = collect(int(remainMs), int(remainMs));
         if (!frames) return err<Adu>(frames.error());
         // Empty = only noise/garbage arrived so far (CRC-dropped at a

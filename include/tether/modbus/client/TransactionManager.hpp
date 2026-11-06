@@ -57,28 +57,58 @@ public:
 
     Expected<void> invokeBroadcast(uint8_t, FunctionCode fc,
                                    std::span<const uint8_t> body,
-                                   const InvokeOptions& = {}) override {
+                                   const TransactionOptions& = {}) override {
         std::lock_guard g(sendM_);
         return ch_.sendOnly(0, prepend(fc, body));
     }
 
+    /// Connection default options — per-call TransactionOptions merge
+    /// over these (same contract as BusExecutor::setDefaultOptions).
+    void setDefaultOptions(TransactionOptions o) {
+        std::lock_guard g(sendM_);
+        defaults_ = std::move(o);
+    }
+    void setErrorPolicy(ErrorPolicy p) {
+        std::lock_guard g(sendM_);
+        defaults_.errorPolicy = p;
+    }
+    ErrorPolicy errorPolicy() const {
+        std::lock_guard g(sendM_);
+        return defaults_.errorPolicy.value_or(ErrorPolicy{});
+    }
+
     Expected<Pdu> invoke(uint8_t unit, FunctionCode fc,
                          std::span<const uint8_t> body,
-                         const InvokeOptions& o = {}) override {
-        const int attempts = 1 + std::max(0, o.retries);
+                         const TransactionOptions& o = {}) override {
+        TransactionOptions m;
+        ErrorPolicy pol;
+        int timeoutMs;
+        {
+            std::lock_guard g(sendM_);
+            m = overlayOpts(defaults_, o);
+            pol = m.errorPolicy.value_or(ErrorPolicy{});
+            if (m.retries >= 0)      pol.maxRetries   =
+                uint8_t(std::min(m.retries, 255));
+            if (m.retryDelayMs >= 0) pol.retryDelayMs = m.retryDelayMs;
+            timeoutMs = m.timeoutMs >= 0 ? m.timeoutMs : 1000;
+        }
+        const int attempts = policyAttempts(pol);
         ModbusError last = ModbusError::codec("no attempt");
         for (int i = 0; i < attempts; ++i) {
-            if (i > 0 && o.retryDelayMs > 0)
-                std::this_thread::sleep_for(
-                    std::chrono::milliseconds(o.retryDelayMs));
-            auto r = round(unit, fc, body, o.timeoutMs);
+            if (i > 0) {
+                const int delayMs = policyDelayMs(pol, i + 1);
+                if (delayMs > 0)
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(delayMs));
+            }
+            auto r = round(unit, fc, body, timeoutMs);
             if (r) return r;
             last = r.error();
-            const bool retryable = last.retryable() ||
-                (last.isException() &&
+            const bool retryable = policyRetryable(pol, last) ||
+                (pol.retryOnBusy && last.isException() &&
                  exceptionRetryable(uint8_t(last.code() & 0xFF)));
             if (!retryable || i + 1 == attempts) break;
-            if (o.onRetry) o.onRetry(i, last);
+            if (m.onRetry) m.onRetry(i, last);
         }
         return err<Pdu>(last);
     }
@@ -189,7 +219,8 @@ private:
     MbapChannel& ch_;
     int          maxInflight_;
     mutable std::mutex m_;
-    std::mutex   sendM_;
+    mutable std::mutex sendM_;
+    TransactionOptions defaults_{.timeoutMs = 1000};
     std::condition_variable slotCv_;
     std::map<uint16_t, Pending> pending_;
     int             inflight_ = 0;

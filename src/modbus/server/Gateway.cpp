@@ -16,7 +16,7 @@ std::vector<uint8_t> Gateway::forward(uint8_t unit,
     const auto body = reqPdu.subspan(1);
     const uint8_t dunit = opts_.mapUnit ? opts_.mapUnit(unit) : unit;
 
-    InvokeOptions io{opts_.downstreamTimeoutMs, opts_.downstreamRetries,
+    TransactionOptions io{opts_.downstreamTimeoutMs, opts_.downstreamRetries,
                      0, {}};
     auto invoke = [&]() -> Expected<Pdu> {
         if (opts_.serialize) {

@@ -66,9 +66,9 @@ public:
         return TypedRef(client_, applyQuirks(d->addr), d->spec);
     }
     Expected<double> read(const std::string& name,
-                          const InvokeOptions& o = {}) const;
+                          const TransactionOptions& o = {}) const;
     Expected<void> write(const std::string& name, double v,
-                         const InvokeOptions& o = {}) const;
+                         const TransactionOptions& o = {}) const;
 
     /// Suggested PollItems for all registers with pollMs > 0.
     std::vector<std::pair<std::string, RegisterDecl>> pollables() const;

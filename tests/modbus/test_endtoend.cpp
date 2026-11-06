@@ -103,7 +103,7 @@ TEST(EndToEnd, RtuOverPty) {
     RtuChannel clientCh((*pty)->masterLink(), kFast);
     ASSERT_TRUE(clientCh.open().has_value());
     BusExecutor ex(clientCh);
-    ModbusClient cli(ex, 1, InvokeOptions{500, 2, 0, {}});
+    ModbusClient cli(ex, 1, TransactionOptions{500, 2, 0, {}});
 
     auto v = cli.readHoldingOne(0);
     ASSERT_TRUE(v.has_value()) << v.error().format();
@@ -135,7 +135,7 @@ TEST(EndToEnd, TcpLoopback) {
     std::this_thread::sleep_for(50ms);
 
     auto m = makeTcpMaster("127.0.0.1", port, 1, 2000,
-                           InvokeOptions{1000, 1, 0, {}});
+                           TransactionOptions{1000, 1, 0, {}});
     ASSERT_TRUE(m.has_value()) << m.error().format();
     auto v = m->client->readHoldingOne(2);
     ASSERT_TRUE(v.has_value()) << v.error().format();

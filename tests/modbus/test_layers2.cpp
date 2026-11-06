@@ -115,8 +115,8 @@ port = 502
     EXPECT_EQ(press->serial.baud, 19200u);
     EXPECT_EQ(press->serial.parity, Parity::Even);
     EXPECT_EQ(press->unit, 3);
-    EXPECT_EQ(press->invoke.timeoutMs, 750);
-    EXPECT_EQ(press->invoke.retries, 2);
+    EXPECT_EQ(press->tx.timeoutMs, 750);
+    EXPECT_EQ(press->tx.retries, 2);
     EXPECT_EQ(press->profileId, "generic/vfd");
     ASSERT_EQ(press->polls.size(), 2u);
     EXPECT_EQ(press->polls[0].second, 100);
