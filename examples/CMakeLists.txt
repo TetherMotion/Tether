@@ -94,6 +94,7 @@ if(TARGET tether_modbus)
     add_tether_example(modbus_master_resilience SOURCE modbus/master_resilience.cpp LIBRARIES tether_modbus)
     add_tether_example(modbus_master_robust SOURCE modbus/master_robust.cpp LIBRARIES tether_modbus)
     add_tether_example(modbus_vfd_driver    SOURCE modbus/vfd_driver.cpp    LIBRARIES tether_modbus)
+    add_tether_example(modbus_jumo_imago500 SOURCE modbus/jumo_imago500.cpp LIBRARIES tether_modbus)
     # slave role
     add_tether_example(modbus_rtu_slave     SOURCE modbus/rtu_slave.cpp     LIBRARIES tether_modbus)
     add_tether_example(modbus_tcp_server    SOURCE modbus/tcp_server.cpp    LIBRARIES tether_modbus)

@@ -1,4 +1,5 @@
 #include "tether/modbus/profile/Profile.hpp"
+#include "tether/modbus/drivers/JUMO/Imago500Map.hpp"
 
 namespace tether::modbus {
 
@@ -92,6 +93,8 @@ void ProfileRegistry::registerBuiltins() {
         };
         add(std::move(p));
     }
+    // JUMO Imago 500 — complete grouped map lives in the driver header.
+    add(jumo::imago500::imago500Profile());
 }
 
 } // namespace tether::modbus
