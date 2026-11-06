@@ -2,6 +2,7 @@
 //   Demonstrates: ScalarSpec (u16/i16/f32, word orders, scale+offset),
 //   Address notation parsing, TypedRef read/write, BlockPlan merging,
 //   and device profiles (BoundDevice) — all without hardware.
+#include <format>
 #include <print>
 
 #include "tether/modbus/client/ModbusClient.hpp"
@@ -91,8 +92,8 @@ int main() {
                    f.value_or(-1),
                    cli.readHoldingOne(1).value_or(0));
         (void)vfd.write("run", 1.0);               // coil 0 on
-        std::print("  run coil -> {}\n",
-                   cli.readCoils(0, 1).value_or(std::vector<bool>{})[0]);
+        const auto coils = cli.readCoils(0, 1).value_or(std::vector<bool>{});
+        std::print("  run coil -> {}\n", !coils.empty() && coils[0]);
     }
     return 0;
 }

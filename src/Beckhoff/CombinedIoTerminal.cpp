@@ -144,18 +144,22 @@ Result<> CombinedIoTerminal::start(const StartOptions& opts) {
 // ---------------------------------------------------------------------------
 
 bool CombinedIoTerminal::input(size_t i) const {
+    const auto lk = pdoIoLock();
     return i < in_offs_.size() && detail::imageBit(in_buf_, in_offs_[i]);
 }
 
 void CombinedIoTerminal::setOutput(size_t i, bool on) {
+    const auto lk = pdoIoLock();
     if (i < out_offs_.size()) detail::setImageBit(out_buf_, out_offs_[i], on);
 }
 
 bool CombinedIoTerminal::output(size_t i) const {
+    const auto lk = pdoIoLock();
     return i < out_offs_.size() && detail::imageBit(out_buf_, out_offs_[i]);
 }
 
 void CombinedIoTerminal::allOutputsOff() {
+    const auto lk = pdoIoLock();
     std::memset(out_buf_.data(), 0, out_buf_.size());
 }
 
@@ -193,6 +197,7 @@ bool CombinedIoTerminal::findOutputField(uint16_t index, int subindex,
 
 bool CombinedIoTerminal::fieldIn(uint16_t index, int subindex,
                                uint32_t occurrence, uint64_t& value) const {
+    const auto lk = pdoIoLock();
     uint32_t bit_off = 0;
     uint8_t  bit_len = 0;
 #if TETHER_ENABLE_SII
@@ -216,6 +221,7 @@ bool CombinedIoTerminal::fieldIn(uint16_t index, int subindex,
 
 bool CombinedIoTerminal::fieldOut(uint16_t index, int subindex,
                                   uint32_t occurrence, uint64_t value) {
+    const auto lk = pdoIoLock();
     uint32_t bit_off = 0;
     uint8_t  bit_len = 0;
 #if TETHER_ENABLE_SII

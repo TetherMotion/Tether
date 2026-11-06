@@ -334,10 +334,11 @@ TEST_F(ResetControllerTest, ProgressCallbackFires) {
 }
 
 TEST_F(ResetControllerTest, EmergencyStopAndReset) {
-    // emergencyStopAndReset: quickStop (0x6040) + soft reset — needs
-    // CiA402 + AL + error-history objects.
+    // emergencyStopAndReset: quickStop (0x6040) + NMT reset node — needs
+    // CiA402 + AL + error-history + restore-parameters (0x1011:01) objects.
     addAlRegisters(0x0004, 0);
     slave_->addODEntry({0x1003, 0x00, 0x0005, 8, 0x03, {0}, "err"});
+    slave_->addODEntry({0x1011, 0x01, 0x0007, 32, 0x03, {0, 0, 0, 0}, "r1"});
     auto c = ctl();
     auto r = c.emergencyStopAndReset();
     EXPECT_TRUE(r.success);

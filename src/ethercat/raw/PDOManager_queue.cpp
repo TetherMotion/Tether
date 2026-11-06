@@ -85,6 +85,7 @@ void PDOManager::setUnderrunCallback(UnderrunCallback callback) {
 }
 
 bool PDOManager::queueCycle() {
+    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
     if (mode_ != PDOMode::Queue) return false;
 
     const uint64_t cycle_start_ns =

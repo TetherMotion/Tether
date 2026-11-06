@@ -288,6 +288,7 @@ Result<> PowerMeterTerminal::start(const StartOptions& opts) {
 // ---------------------------------------------------------------------------
 
 uint64_t PowerMeterTerminal::inRaw(const Field& f, bool& ok) const {
+    const auto lk = pdoIoLock();
     ok = false;
     if (f.bit_off == kInvalid || f.bit_len == 0) return 0;
     if (f.bit_off % 8 != 0) return 0;   // only byte-aligned fields
@@ -319,6 +320,7 @@ std::optional<float> PowerMeterTerminal::inReal(const Field& f) const {
 // ---------------------------------------------------------------------------
 
 uint16_t PowerMeterTerminal::statusWord(size_t phase) const {
+    const auto lk = pdoIoLock();
     if (phase >= phases_.size() ||
         phases_[phase].off_status == kInvalid) return 0;
     uint16_t w = 0;
@@ -330,6 +332,7 @@ uint16_t PowerMeterTerminal::statusWord(size_t phase) const {
 }
 
 bool PowerMeterTerminal::syncError(size_t phase) const {
+    const auto lk = pdoIoLock();
     if (phase >= phases_.size()) return false;
     const uint32_t off = phases_[phase].off_sync;
     return off != kInvalid && detail::imageBit(in_buf_, off);
@@ -369,6 +372,7 @@ std::optional<float> PowerMeterTerminal::powerFactor(size_t phase) const {
 // ---------------------------------------------------------------------------
 
 void PowerMeterTerminal::setIndexSelector(size_t sel, uint8_t index) {
+    const auto lk = pdoIoLock();
     if (sel >= selectors_.size()) return;
     const Field& f = selectors_[sel].index_out;
     if (f.bit_off == kInvalid || f.bit_off % 8 != 0) return;
@@ -442,6 +446,7 @@ bool PowerMeterTerminal::valueRaw(uint16_t index, int subindex,
 
 bool PowerMeterTerminal::fieldOut(uint16_t index, int subindex,
                                   uint32_t occurrence, uint64_t value) {
+    const auto lk = pdoIoLock();
 #if TETHER_ENABLE_SII
     if (info_ && info_->rx_pdos && sm_out_.enabled) {
         uint32_t off; uint8_t len;

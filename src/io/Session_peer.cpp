@@ -144,7 +144,14 @@ void Session::invokeSweepLoop() {
                            !pendingInvokes_.empty();
                 });
             } else if (waitUs > 0) {
-                invokeSweepCv_.wait_for(lock, std::chrono::microseconds(waitUs));
+                // Predicate form is required: teardown sets sweepStop_ then
+                // notifies — a notify landing between the check above and
+                // wait_for entry would otherwise be lost and the sweep would
+                // sleep out the full deadline, stalling session teardown.
+                invokeSweepCv_.wait_for(lock, std::chrono::microseconds(waitUs),
+                                        [this] {
+                    return sweepStop_.load(std::memory_order_relaxed);
+                });
             }
         }
         if (sweepStop_.load(std::memory_order_relaxed)) return;

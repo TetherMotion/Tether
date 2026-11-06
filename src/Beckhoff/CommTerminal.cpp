@@ -189,6 +189,7 @@ size_t CommTerminal::rxCapacity(size_t ch) const {
 }
 
 uint16_t CommTerminal::ctrlWord(size_t ch) const {
+    const auto lk = pdoIoLock();
     if (ch >= chans_.size() || chans_[ch].ctrl_bits == 0) return 0;
     const auto& c = chans_[ch];
     const size_t len = (c.ctrl_bits + 7) / 8;
@@ -199,6 +200,7 @@ uint16_t CommTerminal::ctrlWord(size_t ch) const {
 }
 
 void CommTerminal::setCtrlWord(size_t ch, uint16_t w) {
+    const auto lk = pdoIoLock();
     if (ch >= chans_.size() || chans_[ch].ctrl_bits == 0) return;
     const auto& c = chans_[ch];
     const size_t len = (c.ctrl_bits + 7) / 8;
@@ -207,16 +209,19 @@ void CommTerminal::setCtrlWord(size_t ch, uint16_t w) {
 }
 
 bool CommTerminal::ctrlBit(size_t ch, uint8_t bit) const {
+    const auto lk = pdoIoLock();
     if (ch >= chans_.size() || bit >= chans_[ch].ctrl_bits) return false;
     return detail::imageBit(out_buf_, chans_[ch].ctrl_off * 8 + bit);
 }
 
 void CommTerminal::setCtrlBit(size_t ch, uint8_t bit, bool v) {
+    const auto lk = pdoIoLock();
     if (ch >= chans_.size() || bit >= chans_[ch].ctrl_bits) return;
     detail::setImageBit(out_buf_, chans_[ch].ctrl_off * 8 + bit, v);
 }
 
 uint16_t CommTerminal::statusWord(size_t ch) const {
+    const auto lk = pdoIoLock();
     if (ch >= chans_.size() || chans_[ch].stat_bits == 0) return 0;
     const auto& c = chans_[ch];
     const size_t len = (c.stat_bits + 7) / 8;
@@ -227,6 +232,7 @@ uint16_t CommTerminal::statusWord(size_t ch) const {
 }
 
 bool CommTerminal::statusBit(size_t ch, uint8_t bit) const {
+    const auto lk = pdoIoLock();
     if (ch >= chans_.size() || bit >= chans_[ch].stat_bits) return false;
     return detail::imageBit(in_buf_, chans_[ch].stat_off * 8 + bit);
 }
@@ -236,6 +242,7 @@ bool CommTerminal::statusBit(size_t ch, uint8_t bit) const {
 // ---------------------------------------------------------------------------
 
 size_t CommTerminal::writeData(size_t ch, std::span<const uint8_t> src) {
+    const auto lk = pdoIoLock();
     if (ch >= chans_.size()) return 0;
     const auto& c = chans_[ch];
     const size_t n = std::min(src.size(), static_cast<size_t>(c.dout_len));
@@ -245,6 +252,7 @@ size_t CommTerminal::writeData(size_t ch, std::span<const uint8_t> src) {
 }
 
 std::span<const uint8_t> CommTerminal::dataIn(size_t ch) const {
+    const auto lk = pdoIoLock();
     if (ch >= chans_.size()) return {};
     const auto& c = chans_[ch];
     if (c.din_off + c.din_len > in_buf_.size()) return {};

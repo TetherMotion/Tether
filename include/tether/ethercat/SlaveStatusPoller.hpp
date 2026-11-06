@@ -274,9 +274,11 @@ private:
     std::atomic<bool> initialized_{false};
 
     struct SlaveCache {
-        SlaveState state;
-        uint16_t al_status;
-        bool error_flag;
+        // Atomics: written by the poll thread, read by getSlaveState()
+        // from any caller thread.
+        std::atomic<SlaveState> state{SlaveState::INIT};
+        std::atomic<uint16_t>   al_status{0};
+        std::atomic<bool>       error_flag{false};
     };
     std::array<SlaveCache, kMaxSlaves> cache_{};
 

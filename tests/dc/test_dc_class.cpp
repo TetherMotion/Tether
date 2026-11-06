@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <chrono>
 #include <vector>
@@ -246,12 +247,43 @@ namespace {
 // (byte vector contents are memcpy'd straight out).
 class FakeDCTransport : public IDCTransport {
 public:
+    FakeDCTransport() = default;
+    FakeDCTransport(FakeDCTransport&& o) noexcept {
+        std::lock_guard lk(o.mu_);
+        reads = std::move(o.reads);
+        writes = std::move(o.writes);
+        syncDatagrams.store(o.syncDatagrams.load());
+        masterTime = o.masterTime;
+    }
+    FakeDCTransport& operator=(FakeDCTransport&& o) noexcept {
+        if (this != &o) {
+            std::scoped_lock lk(mu_, o.mu_);
+            reads = std::move(o.reads);
+            writes = std::move(o.writes);
+            syncDatagrams.store(o.syncDatagrams.load());
+            masterTime = o.masterTime;
+        }
+        return *this;
+    }
+    FakeDCTransport(const FakeDCTransport&)            = delete;
+    FakeDCTransport& operator=(const FakeDCTransport&) = delete;
+
     std::map<std::pair<uint16_t, uint16_t>, std::vector<uint8_t>> reads;
     std::vector<std::tuple<uint16_t, uint16_t, std::vector<uint8_t>>> writes;
-    int syncDatagrams = 0;
+    // Atomics/guards: the DC loop thread calls writeRegister()/
+    // sendSyncDatagram() while the test thread reads them.
+    std::atomic<int> syncDatagrams{0};
     uint64_t masterTime = 5'000'000'000ULL;
 
+    /// Snapshot of recorded writes — safe to iterate while the loop runs.
+    std::vector<std::tuple<uint16_t, uint16_t, std::vector<uint8_t>>>
+    writesSnapshot() const {
+        std::lock_guard lk(mu_);
+        return writes;
+    }
+
     void setReg(uint16_t slave, DCRegisters reg, const void* data, uint16_t size) {
+        std::lock_guard lk(mu_);
         auto& v = reads[{slave, toUInt16(reg)}];
         v.assign(static_cast<const uint8_t*>(data),
                  static_cast<const uint8_t*>(data) + size);
@@ -268,12 +300,14 @@ public:
     }
 
     bool readRegister(uint16_t slave, uint16_t addr, void* data, uint16_t size, unsigned int) override {
+        std::lock_guard lk(mu_);
         auto it = reads.find({slave, addr});
         if (it == reads.end()) { std::memset(data, 0, size); return true; }
         std::memcpy(data, it->second.data(), std::min<uint16_t>(size, it->second.size()));
         return true;
     }
     bool writeRegister(uint16_t slave, uint16_t addr, const void* data, uint16_t size, unsigned int) override {
+        std::lock_guard lk(mu_);
         writes.emplace_back(slave, addr,
             std::vector<uint8_t>(static_cast<const uint8_t*>(data),
                                  static_cast<const uint8_t*>(data) + size));
@@ -284,6 +318,9 @@ public:
     }
     uint64_t getMasterTimeNs() override { return masterTime; }
     void delayMs(uint32_t) override {}
+
+private:
+    mutable std::mutex mu_;
 };
 
 // Linear 2-slave chain on the wire:
@@ -321,7 +358,7 @@ TEST_F(DCInitCoverageTest, InitializeRunsFullSequence) {
     EXPECT_EQ(topo.links[1].parent_port, 1);
     // register writes happened: delay, offset, sync activation
     bool wroteDelay = false, wroteOffset = false, wroteSyncAct = false;
-    for (const auto& [slave, addr, bytes] : t_.writes) {
+    for (const auto& [slave, addr, bytes] : t_.writesSnapshot()) {
         if (addr == toUInt16(DCRegisters::DCSysTxTime)) wroteDelay = true;
         if (addr == toUInt16(DCRegisters::DCSysOffset)) wroteOffset = true;
         if (addr == toUInt16(DCRegisters::DCSyncAct)) wroteSyncAct = true;
@@ -342,7 +379,7 @@ TEST_F(DCInitCoverageTest, SyncDisabledFilter) {
     // slave1 was explicitly disabled, never capability-probed
     EXPECT_FALSE(dc.isSlaveSupported(1));
     bool zeroedSyncAct = false;
-    for (const auto& [slave, addr, bytes] : t_.writes) {
+    for (const auto& [slave, addr, bytes] : t_.writesSnapshot()) {
         if (slave == 1 && addr == toUInt16(DCRegisters::DCSyncAct) &&
             !bytes.empty() && bytes[0] == 0x00) zeroedSyncAct = true;
     }
@@ -369,15 +406,15 @@ TEST_F(DCInitCoverageTest, CapabilityReadFailureIsTolerated) {
 TEST_F(DCInitCoverageTest, StartStopLoopSendsSyncFrames) {
     EtherCATDC dc(t_, 2);
     ASSERT_TRUE(dc.init());
-    int pdoCalls = 0;
+    std::atomic<int> pdoCalls{0};
     EXPECT_TRUE(dc.start([&pdoCalls]() { ++pdoCalls; return true; }));
     // PDO exchange only runs once enabled on the live loop
     EXPECT_TRUE(dc.isPDOEnabled() == false);
     dc.setPDOEnabled(true);
-    for (int i = 0; i < 200 && pdoCalls == 0; ++i) {
+    for (int i = 0; i < 200 && pdoCalls.load() == 0; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    EXPECT_GT(pdoCalls, 0);
+    EXPECT_GT(pdoCalls.load(), 0);
     // the dc sync cycle sends datagrams through the transport
     for (int i = 0; i < 200 && t_.syncDatagrams == 0; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));

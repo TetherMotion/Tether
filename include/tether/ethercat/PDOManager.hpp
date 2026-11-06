@@ -15,6 +15,7 @@
 #include <format>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -382,6 +383,20 @@ public:
 
     IPDOTransport& transport();
 
+    /**
+     * @brief Mutex serialising every PDO exchange entry point.
+     *
+     * All public exchange functions (sendAll/receiveAll/exchangeAll,
+     * exchangePhysical/LRW/Separate, single-entry transfers, cyclic and
+     * slice exchanges, queueCycle) take this mutex so a realtime cyclic
+     * thread and an application/test thread cannot exchange concurrently
+     * on the same mapping.  Process-image writers/readers bound to a
+     * PDOEntry (e.g. Beckhoff terminal drivers) must hold the same mutex
+     * while touching the image — recursive so nested calls on one thread
+     * (e.g. exchangeAll -> sendAll) stay cheap.
+     */
+    std::recursive_mutex& exchangeMutex() { return exchange_mutex_; }
+
     void setLogicalAddressManager(LogicalAddressManager* mgr) { logical_addr_mgr_ = mgr; }
     LogicalAddressManager* logicalAddressManager() const { return logical_addr_mgr_; }
 
@@ -404,6 +419,9 @@ private:
 
     IPDOTransport& transport_;
     std::function<std::string(uint16_t)> prefix_provider_;
+
+    /// Serialises all exchange entry points (see exchangeMutex()).
+    std::recursive_mutex exchange_mutex_;
 
     // Owned state (formerly globals)
     PDO::SlaveConfig slave_configs_[PDO::kMaxPDOSlaves];

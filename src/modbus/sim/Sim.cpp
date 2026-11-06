@@ -77,13 +77,22 @@ Expected<Pdu> SimBus::BusInvoker::invoke(uint8_t u, FunctionCode fc,
 // ---- SimLink --------------------------------------------------------------------
 #include "tether/modbus/protocol/Crc.hpp"
 
+double SimLink::rollUniform() {
+    std::lock_guard lk(rng_mutex_);
+    return std::uniform_real_distribution<double>{0.0, 1.0}(rng_);
+}
+
+uint32_t SimLink::rollIndex() {
+    std::lock_guard lk(rng_mutex_);
+    return rng_();
+}
+
 Expected<void> SimLink::write(std::span<const uint8_t> bytes, int) {
-    if (!open_) return err(ModbusError::transport("sim link closed"));
+    if (!open_.load()) return err(ModbusError::transport("sim link closed"));
     if (tap_) tap_(true, bytes);
     std::vector<uint8_t> wire(bytes.begin(), bytes.end());
     if (traits_.mutateRequest) traits_.mutateRequest(wire);
-    std::uniform_real_distribution<double> uni{0.0, 1.0};
-    if (uni(rng_) < traits_.dropRequest) return {};
+    if (rollUniform() < traits_.dropRequest) return {};
 
     // --- decode one frame -------------------------------------------------
     uint8_t unit = 0;
@@ -105,7 +114,7 @@ Expected<void> SimLink::write(std::span<const uint8_t> bytes, int) {
     auto rsp = slave->handlePdu(pdu);
     if (!rsp || rsp->empty()) return {};          // dropped / broadcast
 
-    if (uni(rng_) < traits_.dropResponse) return {};
+    if (rollUniform() < traits_.dropResponse) return {};
     if (traits_.turnaroundMs > 0)
         std::this_thread::sleep_for(
             std::chrono::milliseconds(traits_.turnaroundMs));
@@ -127,35 +136,46 @@ Expected<void> SimLink::write(std::span<const uint8_t> bytes, int) {
     if (traits_.mutateResponse) traits_.mutateResponse(frame);
     // probabilistic single-byte faults
     if (!frame.empty()) {
-        if (uni(rng_) < traits_.corruptByte)
-            frame[rng_() % frame.size()] ^= 0x55;
-        if (uni(rng_) < traits_.dropByte && frame.size() > 1)
-            frame.erase(frame.begin() + int(rng_() % frame.size()));
-        if (uni(rng_) < traits_.dupByte) {
-            const size_t i = rng_() % frame.size();
+        if (rollUniform() < traits_.corruptByte)
+            frame[rollIndex() % frame.size()] ^= 0x55;
+        if (rollUniform() < traits_.dropByte && frame.size() > 1)
+            frame.erase(frame.begin() + int(rollIndex() % frame.size()));
+        if (rollUniform() < traits_.dupByte) {
+            const size_t i = rollIndex() % frame.size();
             frame.insert(frame.begin() + int(i), frame[i]);
         }
     }
-    for (uint8_t b : frame) rx_.push_back(b);
+    {
+        std::lock_guard lk(rx_mutex_);
+        for (uint8_t b : frame) rx_.push_back(b);
+    }
     return {};
 }
 
 Expected<size_t> SimLink::read(std::span<uint8_t> buf, int timeoutMs) {
-    if (!open_) return err<size_t>(ModbusError::transport("closed"));
-    if (rx_.empty()) {
-        // Nothing staged — responses appear synchronously in write(),
-        // so empty here means "no response": burn a small slice of the
-        // deadline instead of spinning the caller.
+    if (!open_.load()) return err<size_t>(ModbusError::transport("closed"));
+    size_t n;
+    {
+        std::lock_guard lk(rx_mutex_);
+        if (rx_.empty()) {
+            // Nothing staged — responses appear synchronously in write(),
+            // so empty here means "no response": burn a small slice of the
+            // deadline instead of spinning the caller.
+            n = 0;
+        } else {
+            n = std::min(buf.size(), rx_.size());
+            if (traits_.dribbleBytes > 0)
+                n = std::min<size_t>(n, size_t(traits_.dribbleBytes));
+            for (size_t i = 0; i < n; ++i) {
+                buf[i] = rx_.front();
+                rx_.pop_front();
+            }
+        }
+    }
+    if (n == 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(
             std::min(timeoutMs, 5)));
         return size_t{0};
-    }
-    size_t n = std::min(buf.size(), rx_.size());
-    if (traits_.dribbleBytes > 0)
-        n = std::min<size_t>(n, size_t(traits_.dribbleBytes));
-    for (size_t i = 0; i < n; ++i) {
-        buf[i] = rx_.front();
-        rx_.pop_front();
     }
     if (tap_) tap_(false, buf.first(n));
     return n;

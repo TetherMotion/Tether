@@ -124,6 +124,7 @@ bool PDOManager::recvTxPDOBroadcast(PDO::PDOEntry& entry, uint16_t /*expected_wk
 // ============================================================================
 
 bool PDOManager::sendRxPDO(size_t entry_index) {
+    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
     const PDO::PDOEntry* entry = mapping_.get_entry(entry_index);
     if (!entry || !entry->enabled || entry->direction != PDO::PDODirection::RxPDO)
         return false;
@@ -183,6 +184,7 @@ bool PDOManager::sendRxPDO(size_t entry_index) {
 }
 
 bool PDOManager::receiveTxPDO(size_t entry_index) {
+    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
     PDO::PDOEntry* entry = mapping_.get_entry_mut(entry_index);
     if (!entry || !entry->enabled || entry->direction != PDO::PDODirection::TxPDO)
         return false;

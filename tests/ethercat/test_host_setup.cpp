@@ -18,20 +18,32 @@ using namespace EtherCAT;
 
 namespace {
 
+/// Counters kept in shared state so tests can observe shutdown/poll calls
+/// after the session-owned FakeEthernet has already been destroyed (and so
+/// the poll thread's increments are race-free against test reads).
+struct FakeEthernetCounts {
+    std::atomic<int> poll_calls{0};
+    std::atomic<int> shutdown_calls{0};
+    std::atomic<int> transmit_calls{0};
+};
+
 /// Controllable IEthernet stub — records calls, returns scripted results.
 class FakeEthernet : public HAL::IEthernet {
 public:
+    explicit FakeEthernet(std::shared_ptr<FakeEthernetCounts> counts = {})
+        : counts_(counts ? std::move(counts)
+                         : std::make_shared<FakeEthernetCounts>()) {}
+
+    std::shared_ptr<FakeEthernetCounts> counts() const { return counts_; }
+
     HAL::Error init_error = HAL::Error::OK;
     bool link_up = true;
-    int poll_calls = 0;
-    int shutdown_calls = 0;
-    int transmit_calls = 0;
 
     HAL::Error init(const HAL::EthernetConfig&) override {
         initialized_ = (init_error == HAL::Error::OK);
         return init_error;
     }
-    void shutdown() override { ++shutdown_calls; initialized_ = false; }
+    void shutdown() override { counts_->shutdown_calls++; initialized_ = false; }
     bool isInitialized() const override { return initialized_; }
     HAL::Error getMacAddress(HAL::MacAddress& mac) const override {
         std::memset(mac.bytes, 0x5A, 6);
@@ -39,7 +51,7 @@ public:
     }
     HAL::Error setMacAddress(const HAL::MacAddress&) override { return HAL::Error::OK; }
     HAL::Error transmit(const uint8_t*, size_t) override {
-        ++transmit_calls;
+        counts_->transmit_calls++;
         return transmit_error;
     }
     HAL::Error transmitVlan(const uint8_t*, size_t, uint16_t, uint8_t) override {
@@ -50,7 +62,7 @@ public:
         rx_cb = std::move(cb);
         rx_ud = ud;
     }
-    int poll(HAL::Milliseconds) override { ++poll_calls; return 0; }
+    int poll(HAL::Milliseconds) override { counts_->poll_calls++; return 0; }
     void setEthertypeFilter(uint16_t) override {}
     HAL::Error setPromiscuous(bool) override { return HAL::Error::OK; }
     HAL::Error addMulticastAddress(const HAL::MacAddress&) override { return HAL::Error::OK; }
@@ -75,6 +87,9 @@ public:
     HAL::RxCallback rx_cb;
     void* rx_ud = nullptr;
     bool initialized_ = false;
+
+private:
+    std::shared_ptr<FakeEthernetCounts> counts_;
 };
 
 }  // namespace
@@ -125,18 +140,16 @@ TEST(HostSetupTest, ShutdownOnEmptySessionIsSafe) {
 
 TEST(HostSetupTest, ShutdownShutsDownEthernet) {
     HostEtherNetSession session;
-    auto eth = std::make_unique<FakeEthernet>();
-    auto* raw = eth.get();
-    session.eth = std::move(eth);
+    auto counts = std::make_shared<FakeEthernetCounts>();
+    session.eth = std::make_unique<FakeEthernet>(counts);
     shutdownHostEthernet(session);
-    EXPECT_EQ(raw->shutdown_calls, 1);
+    EXPECT_EQ(counts->shutdown_calls, 1);
 }
 
 TEST(HostSetupTest, ShutdownJoinsPollThread) {
     HostEtherNetSession session;
-    auto eth = std::make_unique<FakeEthernet>();
-    auto* raw = eth.get();
-    session.eth = std::move(eth);
+    auto counts = std::make_shared<FakeEthernetCounts>();
+    session.eth = std::make_unique<FakeEthernet>(counts);
     session.pollRunning.store(true);
     session.pollThread = std::thread([&session] {
         while (session.pollRunning.load()) { /* spin */ }
@@ -144,7 +157,7 @@ TEST(HostSetupTest, ShutdownJoinsPollThread) {
     shutdownHostEthernet(session);
     EXPECT_FALSE(session.pollRunning.load());
     EXPECT_FALSE(session.pollThread.joinable());
-    EXPECT_EQ(raw->shutdown_calls, 1);
+    EXPECT_EQ(counts->shutdown_calls, 1);
 }
 
 // ============================================================================
@@ -153,17 +166,16 @@ TEST(HostSetupTest, ShutdownJoinsPollThread) {
 
 TEST(HostSetupTest, PollThreadCallsEthPollUntilStopped) {
     HostEtherNetSession session;
-    auto eth = std::make_unique<FakeEthernet>();
-    auto* raw = eth.get();
-    session.eth = std::move(eth);
+    auto counts = std::make_shared<FakeEthernetCounts>();
+    session.eth = std::make_unique<FakeEthernet>(counts);
 
     startHostPollThread(session, "test");
     // Let the thread tick a few times.
-    for (int i = 0; i < 100 && raw->poll_calls < 3; ++i) {
+    for (int i = 0; i < 100 && counts->poll_calls.load() < 3; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     shutdownHostEthernet(session);
-    EXPECT_GE(raw->poll_calls, 1);
+    EXPECT_GE(counts->poll_calls.load(), 1);
 }
 
 // ============================================================================
@@ -171,18 +183,16 @@ TEST(HostSetupTest, PollThreadCallsEthPollUntilStopped) {
 // ============================================================================
 
 TEST(HostSetupTest, SessionDestructorStopsPollAndShutsDown) {
-    FakeEthernet* raw = nullptr;
+    auto counts = std::make_shared<FakeEthernetCounts>();
     {
         HostEtherNetSession session;
-        auto eth = std::make_unique<FakeEthernet>();
-        raw = eth.get();
-        session.eth = std::move(eth);
+        session.eth = std::make_unique<FakeEthernet>(counts);
         session.pollRunning.store(true);
         session.pollThread = std::thread([&session] {
             while (session.pollRunning.load()) { /* spin */ }
         });
     }  // destructor must stop the poll loop and call eth->shutdown()
-    EXPECT_EQ(raw->shutdown_calls, 1);
+    EXPECT_EQ(counts->shutdown_calls, 1);
 }
 
 // ============================================================================
@@ -241,32 +251,28 @@ TEST(HostSetupTest, SetupEncapsulationVlanBuildsRouter) {
 // ============================================================================
 
 TEST(HostSetupTest, GuardRunsOnExitThenShutsDown) {
-    FakeEthernet* raw = nullptr;
+    auto counts = std::make_shared<FakeEthernetCounts>();
     int exit_calls = 0;
     {
         HostEtherNetSession session;
-        auto eth = std::make_unique<FakeEthernet>();
-        raw = eth.get();
-        session.eth = std::move(eth);
+        session.eth = std::make_unique<FakeEthernet>(counts);
         HostSessionGuard guard(session, [&] { ++exit_calls; });
     }
     EXPECT_EQ(exit_calls, 1);
-    EXPECT_EQ(raw->shutdown_calls, 1);
+    EXPECT_EQ(counts->shutdown_calls, 1);
 }
 
 TEST(HostSetupTest, GuardDismissSkipsOnExitButStillShutsDown) {
-    FakeEthernet* raw = nullptr;
+    auto counts = std::make_shared<FakeEthernetCounts>();
     int exit_calls = 0;
     {
         HostEtherNetSession session;
-        auto eth = std::make_unique<FakeEthernet>();
-        raw = eth.get();
-        session.eth = std::move(eth);
+        session.eth = std::make_unique<FakeEthernet>(counts);
         HostSessionGuard guard(session, [&] { ++exit_calls; });
         guard.dismiss();
     }
     EXPECT_EQ(exit_calls, 0);
-    EXPECT_EQ(raw->shutdown_calls, 1);
+    EXPECT_EQ(counts->shutdown_calls, 1);
 }
 
 TEST(HostSetupTest, GuardSetOnExitReplacesAction) {

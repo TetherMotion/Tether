@@ -186,6 +186,7 @@ Result<> AnalogOutputTerminal::start(const StartOptions& opts) {
 // ---------------------------------------------------------------------------
 
 void AnalogOutputTerminal::setValue(size_t channel, int32_t value) {
+    const auto lk = pdoIoLock();
     if (channel >= channels_.size()) return;
     const auto& ch = channels_[channel];
     if (ch.value_off + ch.value_bits / 8 > out_buf_.size()) return;
@@ -199,6 +200,7 @@ void AnalogOutputTerminal::setValue(size_t channel, int32_t value) {
 }
 
 int32_t AnalogOutputTerminal::value(size_t channel) const {
+    const auto lk = pdoIoLock();
     if (channel >= channels_.size()) return 0;
     const auto& ch = channels_[channel];
     if (ch.value_off + ch.value_bits / 8 > out_buf_.size()) return 0;
@@ -214,6 +216,7 @@ int32_t AnalogOutputTerminal::value(size_t channel) const {
 }
 
 void AnalogOutputTerminal::allZero() {
+    const auto lk = pdoIoLock();
     std::ranges::fill(out_buf_, uint8_t{0});
 }
 

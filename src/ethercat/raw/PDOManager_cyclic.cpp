@@ -19,6 +19,7 @@
 namespace EtherCAT {
 
 bool PDOManager::exchangeConfiguredSlaveWindows() {
+    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
     if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
         return exchangeAll();
     }
@@ -34,6 +35,7 @@ bool PDOManager::exchangeConfiguredSlaveWindows() {
 }
 
 bool PDOManager::exchangeLRWSlice(uint32_t offset, uint32_t length) {
+    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
     if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
         TETHER_LOGW(TAG, "exchangeLRWSlice: no logical address manager");
         return false;
@@ -57,6 +59,7 @@ bool PDOManager::exchangeLRWSlice(uint32_t offset, uint32_t length) {
 
 bool PDOManager::exchangeAllLRWCyclic(uint32_t rx_timeout_ns,
                                       ProcessImage* image) {
+    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
     if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
         return exchangeAll();
     }
@@ -76,6 +79,7 @@ bool PDOManager::exchangeAllLRWCyclic(uint32_t rx_timeout_ns,
 }
 
 bool PDOManager::cyclicSend(ProcessImage* image, uint32_t rx_timeout_ns) {
+    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
     if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
         return exchangeAll();
     }
@@ -83,6 +87,7 @@ bool PDOManager::cyclicSend(ProcessImage* image, uint32_t rx_timeout_ns) {
 }
 
 bool PDOManager::cyclicCollect(ProcessImage* image) {
+    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
     if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized()) {
         return true;
     }
@@ -118,6 +123,7 @@ size_t PDOManager::pdoSliceCount() const {
 }
 
 bool PDOManager::exchangePDOSlice(const PDOSliceSpec& spec) {
+    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
     if (!logical_addr_mgr_ || !logical_addr_mgr_->isInitialized())
         return false;
     return logical_addr_mgr_->exchangePDOSlice(mapping_, spec);

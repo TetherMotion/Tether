@@ -202,6 +202,7 @@ uint8_t OversamplingTerminal::sampleBits(size_t ch) const {
 }
 
 int32_t OversamplingTerminal::sample(size_t ch, size_t i) const {
+    const auto lk = pdoIoLock();
     if (ch >= channels_.size() || i >= channels_[ch].samples.size()) {
         return 0;
     }
@@ -221,6 +222,7 @@ size_t OversamplingTerminal::samples(size_t ch,
 }
 
 uint16_t OversamplingTerminal::statusWord(size_t ch) const {
+    const auto lk = pdoIoLock();
     if (ch >= channels_.size() || channels_[ch].status_off < 0) {
         return 0xffff;
     }

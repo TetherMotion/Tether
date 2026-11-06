@@ -262,14 +262,17 @@ Result<> DcMotorTerminal::start(const StartOptions& opts) {
 // ---------------------------------------------------------------------------
 
 bool DcMotorTerminal::inBit(uint32_t bit_off) const {
+    const auto lk = pdoIoLock();
     return bit_off != kInvalid && detail::imageBit(in_buf_, bit_off);
 }
 
 void DcMotorTerminal::setOutBit(uint32_t bit_off, bool v) {
+    const auto lk = pdoIoLock();
     if (bit_off != kInvalid) detail::setImageBit(out_buf_, bit_off, v);
 }
 
 int64_t DcMotorTerminal::inSigned64(uint32_t bit_off, uint8_t bits) const {
+    const auto lk = pdoIoLock();
     if (bit_off == kInvalid || bits == 0) return 0;
     const size_t byte = bit_off / 8;
     if (byte + (bits + 7) / 8 > in_buf_.size()) return 0;
@@ -281,6 +284,7 @@ int32_t DcMotorTerminal::inSigned(uint32_t bit_off, uint8_t bits) const {
 }
 
 void DcMotorTerminal::outSigned(uint32_t bit_off, uint8_t bits, int32_t v) {
+    const auto lk = pdoIoLock();
     if (bit_off == kInvalid || bits == 0) return;
     const size_t byte = bit_off / 8;
     if (byte + (bits + 7) / 8 > out_buf_.size()) return;
@@ -312,6 +316,7 @@ void DcMotorTerminal::setVelocity(size_t axis, int16_t v) {
 }
 
 uint16_t DcMotorTerminal::motControlWord(size_t axis) const {
+    const auto lk = pdoIoLock();
     const auto* a = axisAt(axis);
     if (!a || a->off_enable == kInvalid) return 0;
     uint16_t w = 0;
@@ -370,6 +375,7 @@ bool DcMotorTerminal::syncError(size_t axis) const {
 }
 
 uint16_t DcMotorTerminal::motStatusWord(size_t axis) const {
+    const auto lk = pdoIoLock();
     const auto* a = axisAt(axis);
     if (!a || a->off_status == kInvalid) return 0;
     uint16_t w = 0;
@@ -437,6 +443,7 @@ void DcMotorTerminal::setLatchExtNeg(size_t axis, bool on) {
 }
 
 uint16_t DcMotorTerminal::encStatusWord(size_t axis) const {
+    const auto lk = pdoIoLock();
     const auto* a = axisAt(axis);
     if (!a || a->off_enc_status == kInvalid) return 0;
     uint16_t w = 0;
