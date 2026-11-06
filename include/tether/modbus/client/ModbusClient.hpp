@@ -1,8 +1,19 @@
 /**
  * @file ModbusClient.hpp
  * @brief Typed client API over IModbusInvoker (plan §8.6).
+ *
+ * Every operation exists in two forms:
+ *  - synchronous ("wait until done"):  readHolding(...)  → Expected<T>
+ *  - std::future async:                readHoldingAsync(...) → future<Expected<T>>
+ *
+ * Async calls run the full sync path (request build → invoke → decode)
+ * on a std::async task. Span arguments are snapshotted at call time, so
+ * the caller may mutate/free them immediately. Futures must be consumed
+ * before the client (and its invoker/channel) is destroyed.
  */
 #pragma once
+
+#include <future>
 
 #include "tether/modbus/client/BusExecutor.hpp"
 #include "tether/modbus/client/Invoker.hpp"
@@ -14,6 +25,16 @@
 #include "tether/modbus/protocol/Responses.hpp"
 
 namespace tether::modbus {
+
+namespace detail {
+/// Launch `f` on a std::async task — the shared implementation behind
+/// every *Async method (invoker-level invokeAsync likewise wraps
+/// invoke() in std::async when not overridden).
+template <typename F>
+auto spawnAsync(F&& f) {
+    return std::async(std::launch::async, std::forward<F>(f));
+}
+} // namespace detail
 
 class ModbusClient {
 public:
@@ -37,6 +58,19 @@ public:
                        const TransactionOptions& o = {}) {
         return readBits(FunctionCode::ReadDiscreteInputs, addr, qty, o);
     }
+    std::future<Expected<std::vector<bool>>>
+    readCoilsAsync(uint16_t addr, uint16_t qty, TransactionOptions o = {}) {
+        return detail::spawnAsync([this, addr, qty, o = std::move(o)] {
+            return readCoils(addr, qty, o);
+        });
+    }
+    std::future<Expected<std::vector<bool>>>
+    readDiscreteInputsAsync(uint16_t addr, uint16_t qty,
+                            TransactionOptions o = {}) {
+        return detail::spawnAsync([this, addr, qty, o = std::move(o)] {
+            return readDiscreteInputs(addr, qty, o);
+        });
+    }
 
     // ---- register reads (FC3/FC4) ---------------------------------------
     Expected<std::vector<uint16_t>>
@@ -53,6 +87,24 @@ public:
         auto r = readHolding(a, 1, o);
         if (!r) return err<uint16_t>(r.error());
         return r->front();
+    }
+    std::future<Expected<std::vector<uint16_t>>>
+    readHoldingAsync(uint16_t addr, uint16_t qty, TransactionOptions o = {}) {
+        return detail::spawnAsync([this, addr, qty, o = std::move(o)] {
+            return readHolding(addr, qty, o);
+        });
+    }
+    std::future<Expected<std::vector<uint16_t>>>
+    readInputAsync(uint16_t addr, uint16_t qty, TransactionOptions o = {}) {
+        return detail::spawnAsync([this, addr, qty, o = std::move(o)] {
+            return readInput(addr, qty, o);
+        });
+    }
+    std::future<Expected<uint16_t>>
+    readHoldingOneAsync(uint16_t a, TransactionOptions o = {}) {
+        return detail::spawnAsync([this, a, o = std::move(o)] {
+            return readHoldingOne(a, o);
+        });
     }
 
     // ---- writes -----------------------------------------------------------
@@ -116,6 +168,63 @@ public:
         return std::get<RegistersResponse>(*r).regs;
     }
 
+    // ---- async writes (span args snapshotted at call time) ---------------
+    std::future<Expected<void>>
+    writeCoilAsync(uint16_t addr, bool on, TransactionOptions o = {}) {
+        return detail::spawnAsync([this, addr, on, o = std::move(o)] {
+            return writeCoil(addr, on, o);
+        });
+    }
+    std::future<Expected<void>>
+    writeRegAsync(uint16_t addr, uint16_t val, TransactionOptions o = {}) {
+        return detail::spawnAsync([this, addr, val, o = std::move(o)] {
+            return writeReg(addr, val, o);
+        });
+    }
+    std::future<Expected<void>>
+    writeCoilsAsync(uint16_t addr, std::span<const bool> bits,
+                    TransactionOptions o = {}) {
+        return detail::spawnAsync([this, addr,
+                      buf = std::vector<bool>(bits.begin(), bits.end()),
+                      o = std::move(o)] {
+            return writeCoils(addr, buf, o);
+        });
+    }
+    std::future<Expected<void>>
+    writeCoilsAsync(uint16_t addr, std::vector<bool> bits,
+                    TransactionOptions o = {}) {
+        return detail::spawnAsync([this, addr, buf = std::move(bits),
+                      o = std::move(o)] {
+            return writeCoils(addr, buf, o);
+        });
+    }
+    std::future<Expected<void>>
+    writeRegsAsync(uint16_t addr, std::span<const uint16_t> regs,
+                   TransactionOptions o = {}) {
+        return detail::spawnAsync([this, addr,
+                      buf = std::vector<uint16_t>(regs.begin(), regs.end()),
+                      o = std::move(o)] {
+            return writeRegs(addr, buf, o);
+        });
+    }
+    std::future<Expected<void>>
+    maskWriteAsync(uint16_t addr, uint16_t andM, uint16_t orM,
+                   TransactionOptions o = {}) {
+        return detail::spawnAsync([this, addr, andM, orM, o = std::move(o)] {
+            return maskWrite(addr, andM, orM, o);
+        });
+    }
+    std::future<Expected<std::vector<uint16_t>>>
+    readWriteMultiAsync(uint16_t raddr, uint16_t rqty, uint16_t waddr,
+                        std::span<const uint16_t> wregs,
+                        TransactionOptions o = {}) {
+        return detail::spawnAsync([this, raddr, rqty, waddr,
+                      buf = std::vector<uint16_t>(wregs.begin(), wregs.end()),
+                      o = std::move(o)] {
+            return readWriteMulti(raddr, rqty, waddr, buf, o);
+        });
+    }
+
     // ---- broadcast -------------------------------------------------------
     Expected<void> broadcastWriteRegs(uint16_t addr,
                                       std::span<const uint16_t> regs) {
@@ -129,6 +238,19 @@ public:
         if (!b) return err<void>(b.error());
         return inv_.invokeBroadcast(0, FunctionCode::WriteSingleRegister,
                                   b->body(), defaults_);
+    }
+    std::future<Expected<void>>
+    broadcastWriteRegsAsync(uint16_t addr, std::span<const uint16_t> regs) {
+        return detail::spawnAsync([this, addr,
+                      buf = std::vector<uint16_t>(regs.begin(), regs.end())] {
+            return broadcastWriteRegs(addr, buf);
+        });
+    }
+    std::future<Expected<void>>
+    broadcastWriteRegAsync(uint16_t addr, uint16_t val) {
+        return detail::spawnAsync([this, addr, val] {
+            return broadcastWriteReg(addr, val);
+        });
     }
 
     // ---- meta -------------------------------------------------------------
@@ -164,12 +286,42 @@ public:
         if (!r) return err<std::vector<uint8_t>>(r.error());
         return std::get<ServerIdResponse>(*r).id;
     }
+    std::future<Expected<DeviceIdentification>>
+    readDeviceIdAsync(uint8_t readCode = 1, uint8_t objectId = 0,
+                      TransactionOptions o = {}) {
+        return detail::spawnAsync([this, readCode, objectId, o = std::move(o)] {
+            return readDeviceId(readCode, objectId, o);
+        });
+    }
+    std::future<Expected<DiagResponse>>
+    diagnosticsAsync(uint16_t sub, std::span<const uint8_t> data = {},
+                     TransactionOptions o = {}) {
+        return detail::spawnAsync([this, sub,
+                      buf = std::vector<uint8_t>(data.begin(), data.end()),
+                      o = std::move(o)] {
+            return diagnostics(sub, buf, o);
+        });
+    }
+    std::future<Expected<std::vector<uint8_t>>>
+    reportServerIdAsync(TransactionOptions o = {}) {
+        return detail::spawnAsync([this, o = std::move(o)] {
+            return reportServerId(o);
+        });
+    }
 
     /// Raw escape hatch. Client-level defaults sit between the call's
     /// TransactionOptions and the connection's (executor) defaults.
     Expected<Pdu> invoke(FunctionCode fc, std::span<const uint8_t> body,
                        const TransactionOptions& o) {
         return inv_.invoke(unit_, fc, body, overlayOpts(defaults_, o));
+    }
+    /// Raw async invoke — body is copied; defaults merge as in invoke().
+    std::future<Expected<Pdu>>
+    invokeAsync(FunctionCode fc, std::span<const uint8_t> body,
+                TransactionOptions o = {}) {
+        return inv_.invokeAsync(unit_, fc,
+            std::vector<uint8_t>(body.begin(), body.end()),
+            overlayOpts(defaults_, o));
     }
 
 private:

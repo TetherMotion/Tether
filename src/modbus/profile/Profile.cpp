@@ -24,6 +24,24 @@ Expected<void> BoundDevice::write(const std::string& name, double v,
     return TypedRef(client_, applyQuirks(d->addr), d->spec).write(v, o);
 }
 
+std::future<Expected<double>>
+BoundDevice::readAsync(const std::string& name,
+                       TransactionOptions o) const {
+    return std::async(std::launch::async,
+                      [this, name, o = std::move(o)] {
+        return read(name, o);
+    });
+}
+
+std::future<Expected<void>>
+BoundDevice::writeAsync(const std::string& name, double v,
+                        TransactionOptions o) const {
+    return std::async(std::launch::async,
+                      [this, name, v, o = std::move(o)] {
+        return write(name, v, o);
+    });
+}
+
 std::vector<std::pair<std::string, RegisterDecl>>
 BoundDevice::pollables() const {
     std::vector<std::pair<std::string, RegisterDecl>> out;

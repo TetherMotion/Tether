@@ -14,6 +14,7 @@
  */
 #pragma once
 
+#include <future>
 #include <map>
 #include <optional>
 #include <vector>
@@ -94,6 +95,14 @@ public:
             }
         }
         return {};
+    }
+
+    /// std::future twin of flush() — stages are snapshot-free, so the
+    /// caller must not mutate the cache until the future resolves.
+    std::future<Expected<void>>
+    flushAsync(TransactionOptions o = {}) {
+        return std::async(std::launch::async,
+                          [this, o = std::move(o)] { return flush(o); });
     }
 
     /// Dirty holding-register runs, each {start, values} (visible for
