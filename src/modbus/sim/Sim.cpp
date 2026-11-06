@@ -11,13 +11,17 @@ SimSlave::handlePdu(std::span<const uint8_t> reqPdu) {
     if (traits_.delayMs > 0)
         std::this_thread::sleep_for(
             std::chrono::milliseconds(traits_.delayMs));
-    if (uni_(rng_) < traits_.dropRequest) return std::nullopt;
-    if (uni_(rng_) < traits_.excBusy)
-        return std::vector<uint8_t>{
-            uint8_t(reqPdu.empty() ? 0x80 : (reqPdu[0] | 0x80)),
-            uint8_t(ExceptionCode::ServerDeviceBusy)};
+    {
+        std::lock_guard lk(rng_mutex_);
+        if (uni_(rng_) < traits_.dropRequest) return std::nullopt;
+        if (uni_(rng_) < traits_.excBusy)
+            return std::vector<uint8_t>{
+                uint8_t(reqPdu.empty() ? 0x80 : (reqPdu[0] | 0x80)),
+                uint8_t(ExceptionCode::ServerDeviceBusy)};
+    }
     auto res = disp_.dispatch(unit_, reqPdu);
     if (!res.respond) return std::vector<uint8_t>{};
+    std::lock_guard lk(rng_mutex_);
     if (uni_(rng_) < traits_.dropResponse) return std::nullopt;
     if (uni_(rng_) < traits_.corrupt && res.pdu.size() > 1)
         res.pdu[1 + rng_() % (res.pdu.size() - 1)] ^= 0x55;

@@ -59,6 +59,8 @@ private:
     uint8_t           unit_;
     SimTraits         traits_;
     std::mt19937      rng_;
+    /// rng_/uni_ draws — handlePdu may run on many invoker threads.
+    mutable std::mutex rng_mutex_;
     DataStore         store_;
     RequestDispatcher disp_;
     std::uniform_real_distribution<double> uni_{0.0, 1.0};
