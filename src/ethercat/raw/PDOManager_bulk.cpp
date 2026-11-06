@@ -143,6 +143,14 @@ bool PDOManager::sendAll() {
                 resp_buf.data, sizeof(resp_buf.data));
         }
 
+        // Confirmed-entry mapping is needed in receiveAll() even when the
+        // send fails — it must mirror rx_confirmed_idxs 1:1 or the wait
+        // loop indexes an empty vector.
+        for (size_t j = 0; j < split_state_.rx_confirmed_idxs.size(); j++) {
+            split_state_.rx_confirmed_entry_idxs.push_back(
+                rx_entry_idx[rx_confirmed_spec_map[j]]);
+        }
+
         size_t frames_sent = transport_.sendMultiDatagram(rx_specs.data(), rx_specs.size());
         if (frames_sent == 0) {
             for (size_t i : rx_entry_idx) {
@@ -166,11 +174,6 @@ bool PDOManager::sendAll() {
                             static_cast<uint64_t>(Tether::Platform::Clock::instance().getMicroseconds()) * 1000ULL);
                     }
                 }
-            }
-            // Store confirmed entry indices for receiveAll() to wait on
-            for (size_t j = 0; j < split_state_.rx_confirmed_idxs.size(); j++) {
-                split_state_.rx_confirmed_entry_idxs.push_back(
-                    rx_entry_idx[rx_confirmed_spec_map[j]]);
             }
         }
     }

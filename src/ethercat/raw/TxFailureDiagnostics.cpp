@@ -220,7 +220,9 @@ void TxFailureDiagnostics::workerMain()
 {
     using clock = std::chrono::steady_clock;
     static constexpr auto kRateLimit = std::chrono::milliseconds(250);  // 4 Hz
-    const auto never = clock::time_point::min();
+    // Epoch (not time_point::min()) — `now - min()` overflows int64 ns and
+    // yields a negative duration, so `>= kRateLimit` could never be true.
+    const auto never = clock::time_point{};
 
     // Pending counts accumulate until the category's rate limit allows
     // an emit — "(N suppressed)" reports everything in between.

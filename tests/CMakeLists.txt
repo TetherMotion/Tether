@@ -403,6 +403,9 @@ set(SLAVE_EMULATION_ETG5000_SOURCES
 set(SLAVE_EMULATION_PROFILES_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/slave_emulation/test_slave_profiles_full.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/slave_emulation/test_PcapLogger_coverage.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/slave_emulation/test_cia4xx_profiles.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/slave_emulation/test_slave_logger.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/slave_emulation/test_watchdog_sii.cpp"
 )
 file(GLOB_RECURSE EXPORT_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/export/*.cpp")
 file(GLOB_RECURSE REPLANNER_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/replanner/*.cpp")
@@ -1035,6 +1038,8 @@ tether_add_test_executable(tether_utils_tests
     common/test_pending_slot.cpp
     common/test_stage_timer.cpp
     common/test_window_stats.cpp
+    common/test_motion_profile.cpp
+    common/test_dedup_logger.cpp
 )
 
 target_include_directories(tether_utils_tests PRIVATE
@@ -1044,6 +1049,7 @@ target_include_directories(tether_utils_tests PRIVATE
 )
 
 target_link_libraries(tether_utils_tests
+    tether_common
     GTest::gtest_main
 )
 
@@ -1285,6 +1291,18 @@ create_ethercat_test(coverage
         ethercat/test_sdo_transaction_base.cpp
         ethercat/test_slave_state_coverage.cpp
         ethercat/test_misc_state_utils.cpp
+        ethercat/test_core_utils_coverage.cpp
+        ethercat/test_coe_pending_futures.cpp
+        ethercat/test_pdo_utils.cpp
+        ethercat/test_sdo_command_channel.cpp
+        ethercat/test_drive_state_cov.cpp
+        ethercat/test_pdo_manager_transfer.cpp
+        ethercat/test_debug_gate.cpp
+        ethercat/test_ecat_misc_utils.cpp
+        ethercat/test_tx_failure_diag.cpp
+        ethercat/test_network_emulator.cpp
+        ethercat/test_process_image.cpp
+        ethercat/test_pdo_queue_keepalive.cpp
         ethercat/test_slave_status_poller.cpp
         ethercat/test_master_sii_coverage.cpp
         ethercat/test_slavegroup_coe_coverage.cpp
