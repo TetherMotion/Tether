@@ -128,3 +128,146 @@ TEST(VlanClassifyTest, ToStringCoversAll) {
     EXPECT_STREQ(EtherCAT::toString(EtherCAT::VlanTagDelivery::StrippedTag),
                  "stripped-tag");
 }
+
+// ============================================================================
+// probeVlanTagDelivery — the socket path (Linux only; guarded where needed)
+// ============================================================================
+
+#if defined(__linux__)
+
+#include <arpa/inet.h>
+#include <linux/if_ether.h>
+#include <net/if.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include "hal/IEthernet.hpp"
+
+namespace {
+
+/// Minimal IEthernet whose nativeHandle()/getInterfaceName() we control.
+class FdEthernet : public EtherCAT::HAL::IEthernet {
+public:
+    int fd = -1;
+    const char* name = "lo";
+
+    EtherCAT::HAL::Error init(const EtherCAT::HAL::EthernetConfig&) override {
+        return EtherCAT::HAL::Error::OK;
+    }
+    void shutdown() override {}
+    bool isInitialized() const override { return true; }
+    EtherCAT::HAL::Error getMacAddress(EtherCAT::HAL::MacAddress&) const override {
+        return EtherCAT::HAL::Error::OK;
+    }
+    EtherCAT::HAL::Error setMacAddress(const EtherCAT::HAL::MacAddress&) override {
+        return EtherCAT::HAL::Error::OK;
+    }
+    EtherCAT::HAL::Error transmit(const uint8_t*, size_t) override {
+        return EtherCAT::HAL::Error::OK;
+    }
+    EtherCAT::HAL::Error transmitVlan(const uint8_t*, size_t, uint16_t, uint8_t) override {
+        return EtherCAT::HAL::Error::OK;
+    }
+    EtherCAT::HAL::Error transmitGather(const BufferDesc*, size_t) override {
+        return EtherCAT::HAL::Error::OK;
+    }
+    void setRxCallback(EtherCAT::HAL::RxCallback cb, void* ud) override {
+        rx_cb = std::move(cb); rx_ud = ud;
+    }
+    int poll(EtherCAT::HAL::Milliseconds) override { return 0; }
+    void setEthertypeFilter(uint16_t) override {}
+    EtherCAT::HAL::Error setPromiscuous(bool) override { return EtherCAT::HAL::Error::OK; }
+    EtherCAT::HAL::Error addMulticastAddress(const EtherCAT::HAL::MacAddress&) override {
+        return EtherCAT::HAL::Error::OK;
+    }
+    EtherCAT::HAL::Error removeMulticastAddress(const EtherCAT::HAL::MacAddress&) override {
+        return EtherCAT::HAL::Error::OK;
+    }
+    EtherCAT::HAL::Error setAllMulticast(bool) override { return EtherCAT::HAL::Error::OK; }
+    EtherCAT::HAL::LinkStatus getLinkStatus() const override { return {}; }
+    void setLinkCallback(EtherCAT::HAL::LinkCallback, void*) override {}
+    EtherCAT::HAL::Error waitForLinkUp(EtherCAT::HAL::Milliseconds) override {
+        return EtherCAT::HAL::Error::OK;
+    }
+    EtherCAT::HAL::EthernetStats getStats() const override { return {}; }
+    void resetStats() override {}
+    void* nativeHandle() override { return reinterpret_cast<void*>(static_cast<intptr_t>(fd)); }
+    const char* getInterfaceName() const override { return name; }
+
+    EtherCAT::HAL::RxCallback rx_cb;
+    void* rx_ud = nullptr;
+};
+
+}  // namespace
+
+TEST(VlanProbeTest, InvalidArgsReturnNullopt) {
+    const uint8_t mac[6] = {};
+    EXPECT_EQ(EtherCAT::probeVlanTagDelivery(-1, 1, mac, 100, 10),
+              std::nullopt);                                   // fd < 0
+    EXPECT_EQ(EtherCAT::probeVlanTagDelivery(0, 0, mac, 100, 10),
+              std::nullopt);                                   // ifindex <= 0
+}
+
+TEST(VlanProbeTest, WrongSocketFamilyFailsSend) {
+    // AF_INET socket: setsockopt(PACKET_AUXDATA) soft-fails, then
+    // sendto() with sockaddr_ll → EINVAL → nullopt.
+    int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    ASSERT_GE(fd, 0);
+    const uint8_t mac[6] = {0x5A, 0x5A, 0x5A, 0x5A, 0x5A, 0x5A};
+    const int ifindex = static_cast<int>(::if_nametoindex("lo"));
+    EXPECT_EQ(EtherCAT::probeVlanTagDelivery(fd, ifindex, mac, 100, 10),
+              std::nullopt);
+    ::close(fd);
+}
+
+TEST(VlanProbeTest, IEthernetOverloadPropagatesNullopt) {
+    FdEthernet eth;
+    eth.fd = -1;                                               // bad native fd
+    eth.name = "lo";
+    EXPECT_EQ(EtherCAT::probeVlanTagDelivery(eth, 100, 10), std::nullopt);
+}
+
+TEST(VlanProbeTest, IEthernetOverloadRunsProbe) {
+    // AF_UNIX SOCK_DGRAM fd: valid handle + real "lo" ifindex → the
+    // overload does the ifindex/MAC lookup, then sendto fails → nullopt.
+    int sv[2];
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+    FdEthernet eth;
+    eth.fd = sv[0];
+    eth.name = "lo";
+    EXPECT_EQ(EtherCAT::probeVlanTagDelivery(eth, 100, 10), std::nullopt);
+    ::close(sv[0]);
+    ::close(sv[1]);
+}
+
+TEST(VlanProbeTest, PacketSocketProbeTimesOutCleanly) {
+    // Full receive-loop coverage needs CAP_NET_RAW; skip without it.
+    int fd = ::socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    if (fd < 0) GTEST_SKIP() << "no CAP_NET_RAW for AF_PACKET";
+    const int ifindex = static_cast<int>(::if_nametoindex("lo"));
+    ASSERT_GT(ifindex, 0);
+    const uint8_t mac[6] = {};
+    // On lo: the outgoing copy is received (PACKET_OUTGOING → skipped),
+    // no slave replies → timeout → delivery stays NoReply.
+    auto res = EtherCAT::probeVlanTagDelivery(fd, ifindex, mac, /*vid=*/0,
+                                              /*timeout_ms=*/30);
+    ::close(fd);
+    ASSERT_TRUE(res.has_value());
+    EXPECT_EQ(res->delivery, EtherCAT::VlanTagDelivery::NoReply);
+}
+
+TEST(VlanProbeTest, PacketSocketProbeWithVid) {
+    int fd = ::socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    if (fd < 0) GTEST_SKIP() << "no CAP_NET_RAW for AF_PACKET";
+    const int ifindex = static_cast<int>(::if_nametoindex("lo"));
+    ASSERT_GT(ifindex, 0);
+    const uint8_t mac[6] = {};
+    // vid != 0 exercises the tagged branch of buildProbeFrame.
+    auto res = EtherCAT::probeVlanTagDelivery(fd, ifindex, mac, /*vid=*/100,
+                                              /*timeout_ms=*/30);
+    ::close(fd);
+    ASSERT_TRUE(res.has_value());
+    EXPECT_EQ(res->delivery, EtherCAT::VlanTagDelivery::NoReply);
+}
+
+#endif  // __linux__
