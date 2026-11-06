@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <future>
 #include <map>
 #include <optional>
 #include <vector>
@@ -69,6 +70,12 @@ public:
                           const TransactionOptions& o = {}) const;
     Expected<void> write(const std::string& name, double v,
                          const TransactionOptions& o = {}) const;
+
+    /// std::future twins — same contract as the sync calls.
+    std::future<Expected<double>> readAsync(
+        const std::string& name, TransactionOptions o = {}) const;
+    std::future<Expected<void>> writeAsync(
+        const std::string& name, double v, TransactionOptions o = {}) const;
 
     /// Suggested PollItems for all registers with pollMs > 0.
     std::vector<std::pair<std::string, RegisterDecl>> pollables() const;

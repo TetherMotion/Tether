@@ -5,6 +5,8 @@
  */
 #pragma once
 
+#include <future>
+
 #include "tether/modbus/client/ModbusClient.hpp"
 #include "tether/modbus/typed/AddressNotation.hpp"
 #include "tether/modbus/typed/ScalarCodec.hpp"
@@ -53,6 +55,25 @@ public:
         if (!regs || regs->empty())
             return err<bool>(ModbusError::codec("bit decode"));
         return ((*regs)[0] >> addr_.bit) & 1;
+    }
+
+    // ---- std::future async twins -----------------------------------------
+    std::future<Expected<double>>
+    readAsync(TransactionOptions o = {}) const {
+        return std::async(std::launch::async,
+                          [*this, o = std::move(o)] { return read(o); });
+    }
+    std::future<Expected<void>>
+    writeAsync(double eng, TransactionOptions o = {}) const {
+        return std::async(std::launch::async,
+                          [*this, eng, o = std::move(o)] {
+                              return write(eng, o);
+                          });
+    }
+    std::future<Expected<bool>>
+    readBitAsync(TransactionOptions o = {}) const {
+        return std::async(std::launch::async,
+                          [*this, o = std::move(o)] { return readBit(o); });
     }
 
     const Address&    address() const { return addr_; }
