@@ -17,7 +17,8 @@ Expected<void> BoundDevice::write(const std::string& name, double v,
         return err<void>(ModbusError::config("unknown register: " + name));
     if (!d->writable)
         return err<void>(ModbusError::config("read-only: " + name));
-    if (v < d->min || v > d->max)
+    // min==max==0 = unclamped (writing a coil to 1 must not trip this).
+    if (!(d->min == 0.0 && d->max == 0.0) && (v < d->min || v > d->max))
         return err<void>(ModbusError::config("out of range: " + name));
     return TypedRef(client_, applyQuirks(d->addr), d->spec).write(v, o);
 }
@@ -43,11 +44,14 @@ void ProfileRegistry::registerBuiltins() {
             {"current",  {TableId::InputRegister, 2},
                          {ValueType::U16, WordOrder::BigEndian, 0.1}, 200,
                          false, 0, 0, "A"},
+            {"fault",    {TableId::InputRegister, 3}, {ValueType::U16}},
             {"cmd",      {TableId::HoldingRegister, 0}, {ValueType::U16},
                          0, true, 0, 65535},
             {"freq_set", {TableId::HoldingRegister, 1},
                          {ValueType::U16, WordOrder::BigEndian, 0.01}, 0,
                          true, 0, 400.0, "Hz"},
+            {"fault_reset", {TableId::HoldingRegister, 2},
+                         {ValueType::U16}, 0, true},
             {"run",      {TableId::Coil, 0}, {ValueType::Bit}, 0, true},
         };
         add(std::move(p));

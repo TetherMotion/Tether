@@ -36,6 +36,11 @@ public:
     /// Feed received bytes; extract any complete ADUs into `out`.
     virtual void feed(std::span<const uint8_t> bytes,
                       std::vector<Adu>& out) = 0;
+    /// Single-byte feed — the ISR-friendly path: one byte arriving per
+    /// interrupt calls this directly.
+    virtual void feedByte(uint8_t b, std::vector<Adu>& out) {
+        feed(std::span<const uint8_t>(&b, 1), out);
+    }
     /// Called when an inter-frame silence elapses (RTU) or link
     /// activity boundary (TCP: no-op).
     virtual void onGap() {}

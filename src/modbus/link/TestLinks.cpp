@@ -209,7 +209,10 @@ PtyPair::open(const SerialConfig& cfg) {
     p->slaveFd_ = sfd;
     p->slavePath_ = name;
     if (cfg.baud != 0) {
-        if (auto e = SerialPortLink::applyTermios(sfd, cfg); !e)
+        // A pty can never *generate* parity-error marks — Passthrough so
+        // the wire is byte-transparent (Mark would escape literal 0xFF).
+        if (auto e = SerialPortLink::applyTermios(sfd, cfg,
+                OpenOpts{.parityCheck = ParityCheck::Passthrough}); !e)
             return err<std::unique_ptr<PtyPair>>(e.error());
     }
     int f = ::fcntl(mfd, F_GETFL, 0); ::fcntl(mfd, F_SETFL, f | O_NONBLOCK);
@@ -224,6 +227,7 @@ std::unique_ptr<ILink> PtyPair::slaveLink() {
 }
 
 Expected<void> FdLink::write(std::span<const uint8_t> b, int) {
+    tap(true, b);
     size_t off = 0;
     while (off < b.size()) {
         const ssize_t n = ::write(fd_, b.data() + off, b.size() - off);
@@ -249,6 +253,7 @@ Expected<size_t> FdLink::read(std::span<uint8_t> buf, int timeoutMs) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) return size_t{0};
         return err<size_t>(ModbusError::transport("pty read", errno));
     }
+    if (n > 0) tap(false, std::span<const uint8_t>(buf.data(), size_t(n)));
     return n > 0 ? size_t(n) : size_t{0};
 }
 Expected<void> FdLink::flush(Flush) { return {}; }

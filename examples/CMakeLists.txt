@@ -84,13 +84,26 @@ function(add_tether_example name)
     target_compile_features(${name} PRIVATE cxx_std_20)
 endfunction()
 
-# --- Modbus examples ---
+# --- Modbus examples (sources live in examples/modbus/) ---
 if(TARGET tether_modbus)
-    add_tether_example(modbus_rtu_client  LIBRARIES tether_modbus)
-    add_tether_example(modbus_tcp_client  LIBRARIES tether_modbus)
-    add_tether_example(modbus_tcp_server  LIBRARIES tether_modbus)
-    add_tether_example(modbus_sim_demo    LIBRARIES tether_modbus)
-    add_tether_example(modbus_gateway     LIBRARIES tether_modbus)
+    # master role
+    add_tether_example(modbus_rtu_client    SOURCE modbus/rtu_client.cpp    LIBRARIES tether_modbus)
+    add_tether_example(modbus_tcp_client    SOURCE modbus/tcp_client.cpp    LIBRARIES tether_modbus)
+    add_tether_example(modbus_master_typed  SOURCE modbus/master_typed.cpp  LIBRARIES tether_modbus)
+    add_tether_example(modbus_master_poller SOURCE modbus/master_poller.cpp LIBRARIES tether_modbus)
+    add_tether_example(modbus_master_resilience SOURCE modbus/master_resilience.cpp LIBRARIES tether_modbus)
+    add_tether_example(modbus_master_robust SOURCE modbus/master_robust.cpp LIBRARIES tether_modbus)
+    add_tether_example(modbus_vfd_driver    SOURCE modbus/vfd_driver.cpp    LIBRARIES tether_modbus)
+    # slave role
+    add_tether_example(modbus_rtu_slave     SOURCE modbus/rtu_slave.cpp     LIBRARIES tether_modbus)
+    add_tether_example(modbus_tcp_server    SOURCE modbus/tcp_server.cpp    LIBRARIES tether_modbus)
+    add_tether_example(modbus_slave_dynamic SOURCE modbus/slave_dynamic.cpp LIBRARIES tether_modbus)
+    # full-stack / infrastructure
+    add_tether_example(modbus_sim_demo      SOURCE modbus/sim_demo.cpp      LIBRARIES tether_modbus)
+    add_tether_example(modbus_rtu_loopback  SOURCE modbus/rtu_loopback.cpp  LIBRARIES tether_modbus)
+    add_tether_example(modbus_gateway       SOURCE modbus/gateway.cpp       LIBRARIES tether_modbus)
+    add_tether_example(modbus_ingress_isr   SOURCE modbus/ingress_isr.cpp   LIBRARIES tether_modbus)
+    add_tether_example(modbus_diag_capture  SOURCE modbus/diag_capture.cpp  LIBRARIES tether_modbus)
 endif()
 
 # --- Simple Example ---

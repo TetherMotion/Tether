@@ -12,7 +12,9 @@ std::vector<uint8_t> excPdu(FunctionCode fc, uint8_t code) {
 RequestDispatcher::Result
 RequestDispatcher::dispatch(uint8_t unit, std::span<const uint8_t> reqPdu) {
     const bool broadcast = (unit == 0);
-    if (!unitOk(unit))
+    // Broadcast (unit 0) addresses every slave on the bus — the unit-id
+    // filter only applies to addressed requests.
+    if (!broadcast && !unitOk(unit))
         return {false, {}};
 
     if (reqPdu.empty())

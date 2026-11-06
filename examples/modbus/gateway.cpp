@@ -39,5 +39,6 @@ int main(int argc, char** argv) {
         std::print(stderr, "listen: {}\n", e.error().format()); return 1;
     }
     std::print("gateway :{} → {} — Ctrl-C to quit\n", port, cfg->describe());
+    std::fflush(stdout);
     for (;;) std::this_thread::sleep_for(std::chrono::seconds(60));
 }

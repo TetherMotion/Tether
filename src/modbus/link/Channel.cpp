@@ -47,9 +47,16 @@ Expected<std::vector<Adu>> RtuChannel::collect(int firstByteTimeoutMs,
             // Bytes arriving after >t3.5 silence start a NEW frame — the
             // stale pending blob (e.g. a noise burst) must be closed out
             // first, else it fuses with the new frame and kills its CRC.
-            if (framer_.pending() > 0 && (after - lastByteNs_) > t35Ns)
+            // rxBatch*AgeNs: ISR-fed links report wire-arrival ages so
+            // the gap is measured between wire arrivals, not drain
+            // times; pull links return 0 → "arrived just now".
+            const int64_t batchArrival =
+                after - link_->rxBatchFirstAgeNs();
+            if (framer_.pending() > 0 &&
+                (batchArrival - lastByteNs_) > t35Ns)
                 framer_.finishFrame(out);
             framer_.feed(std::span(buf, *r), out);
+            lastByteNs_ = after - link_->rxBatchLastAgeNs();
         }
         if (gotAny) {
             if (*r == 0 && framer_.pending() == 0 && !out.empty())
@@ -59,7 +66,6 @@ Expected<std::vector<Adu>> RtuChannel::collect(int firstByteTimeoutMs,
                 framer_.finishFrame(out);
                 return out;
             }
-            if (*r > 0) lastByteNs_ = after;
             if ((after - start) > totalTimeoutMs * kNsPerMs) {
                 framer_.finishFrame(out);
                 return out;
