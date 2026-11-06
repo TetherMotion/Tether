@@ -617,6 +617,12 @@ if(TETHER_BUILD_IO_PROTOCOL)
     endif()
 endif()
 
+if(TETHER_BUILD_MODBUS)
+    file(GLOB MODBUS_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/modbus/*.cpp")
+    create_module_test(modbus "${MODBUS_TEST_SOURCES}"
+        "tether_common;tether_modbus" "")
+endif()
+
 if(MOTION_TEST_SOURCES)
     create_module_test(motion
         "${MOTION_TEST_SOURCES}"
