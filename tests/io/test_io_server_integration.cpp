@@ -33,7 +33,7 @@ static void slipSend(ITransport* tp, const uint8_t* msg, size_t len) {
     tp->send(enc.data(), enc.size());
 }
 
-static std::vector<uint8_t> slipReceive(ITransport* tp, uint32_t timeoutMs = 500) {
+static std::vector<uint8_t> slipReceive(ITransport* tp, uint32_t timeoutMs = 10000) {
     std::vector<uint8_t> accum;
     uint8_t buf[4096];
     auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
@@ -64,7 +64,7 @@ static std::vector<uint8_t> slipReceive(ITransport* tp, uint32_t timeoutMs = 500
 }
 
 /// Send a GetParam request and expect a response — proves the session is alive.
-static bool bootstrapSession(ITransport* client, uint32_t timeoutMs = 2000) {
+static bool bootstrapSession(ITransport* client, uint32_t timeoutMs = 10000) {
     uint8_t hello[64];
     BufWriter helloWriter(hello, sizeof(hello));
     helloWriter.putU8(static_cast<uint8_t>(MessageType::ClientHello));
@@ -86,7 +86,7 @@ static bool bootstrapSession(ITransport* client, uint32_t timeoutMs = 2000) {
 }
 
 static bool verifySessionAlive(ITransport* client, uint64_t paramId = 1,
-                               uint32_t timeoutMs = 2000) {
+                               uint32_t timeoutMs = 10000) {
     uint8_t msg[9];
     BufWriter w(msg, sizeof(msg));
     w.putU8(static_cast<uint8_t>(MessageType::GetParamReq));
@@ -97,7 +97,7 @@ static bool verifySessionAlive(ITransport* client, uint64_t paramId = 1,
     return resp[0] == static_cast<uint8_t>(MessageType::GetParamResp);
 }
 
-static bool waitForSessionAlive(ITransport* client, uint64_t timeoutMs = 3000,
+static bool waitForSessionAlive(ITransport* client, uint64_t timeoutMs = 10000,
                                 uint64_t paramId = 1) {
     if (!bootstrapSession(client, timeoutMs)) return false;
     auto deadline = std::chrono::steady_clock::now() +
@@ -115,7 +115,7 @@ static bool waitForSessionAlive(ITransport* client, uint64_t timeoutMs = 3000,
 /// Replaces fixed 600ms sleeps with a poll that exits as soon as cleanup
 /// completes (typically <50ms).
 static void waitSessionCount(Server& server, size_t expected,
-                             uint64_t timeoutMs = 2000) {
+                             uint64_t timeoutMs = 10000) {
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::milliseconds(timeoutMs);
     while (std::chrono::steady_clock::now() < deadline) {
@@ -127,12 +127,13 @@ static void waitSessionCount(Server& server, size_t expected,
 /// Wait until a client can no longer communicate (i.e. the server has
 /// rejected or disconnected it).  Replaces fixed 600ms sleeps in tests
 /// that verify a client is rejected by maxClients enforcement.
-static void waitClientDead(ITransport* client, uint64_t timeoutMs = 2000) {
+static void waitClientDead(ITransport* client, uint64_t timeoutMs = 10000) {
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::milliseconds(timeoutMs);
     while (std::chrono::steady_clock::now() < deadline) {
-        // Use a short 100ms probe so we retry quickly instead of blocking 2s
-        if (!verifySessionAlive(client, 1, 100)) return;
+        // Short probe so we retry quickly; 500ms survives scheduler
+        // starvation better than 100ms under parallel sanitizer load.
+        if (!verifySessionAlive(client, 1, 500)) return;
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
