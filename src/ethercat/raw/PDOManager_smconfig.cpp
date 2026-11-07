@@ -101,11 +101,6 @@ bool PDOManager::writeSMConfig(uint16_t adp, uint8_t sm_index,
     return true;
 }
 
-bool PDOManager::readSMStatus(uint16_t adp, uint8_t sm_index, uint8_t& status) {
-    const uint16_t addr = static_cast<uint16_t>(sm_base_address(sm_index) + SM_OFF_STATUS);
-    return transport_.readRegister(adp, addr, &status, sizeof(status), 200);
-}
-
 // ============================================================================
 // SM Configuration public API
 // ============================================================================

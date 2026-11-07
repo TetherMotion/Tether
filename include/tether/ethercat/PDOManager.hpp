@@ -445,7 +445,6 @@ private:
     bool writeSMConfig(uint16_t adp, uint8_t sm_index,
                        const PDO::SyncManagerConfig& config,
                        uint16_t slave_index = 0xFFFF);
-    bool readSMStatus(uint16_t adp, uint8_t sm_index, uint8_t& status);
 
     // Transfer helpers
     bool sendRxPDOPosition(const PDO::PDOEntry& entry);

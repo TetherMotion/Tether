@@ -461,4 +461,116 @@ TEST_F(FMMUManagerTest, WriteToSlaveDebugArmSucceeds) {
     EXPECT_TRUE(mgr_->config().configured);
 }
 
+// ============================================================================
+// writeToSlave(): per-FMMU fallback when the batched write is rejected
+// ============================================================================
+
+// The default apwrBatch() forwards to sequential apwr() calls, so failing
+// 16-byte writes make batch_ok=false and drive the per-FMMU probe ladder.
+// The fmmu_debug arm also runs hexDump over each register block here.
+
+TEST_F(FMMUManagerTest, WriteToSlaveFallbackActivateProbeSucceeds) {
+    ASSERT_TRUE(mgr_->configureManual(0x1800, 8, 0, 0, 0x10000));
+
+    EXPECT_CALL(transport_, apwr(_, _, _, _))
+        .WillRepeatedly([](uint16_t, const void*, uint16_t len, unsigned int) {
+            return len == 1;  // 16-byte APWR rejected, 1-byte activate OK
+        });
+
+    EXPECT_FALSE(mgr_->writeToSlave(/*fmmu_debug=*/true));
+}
+
+TEST_F(FMMUManagerTest, WriteToSlaveFallbackProbeApprdWkcZero) {
+    ASSERT_TRUE(mgr_->configureManual(0x1800, 8, 0, 0, 0x10000));
+
+    EXPECT_CALL(transport_, apwr(_, _, _, _)).WillRepeatedly(Return(false));
+    // APRD returns a frame but leaves the probe byte at 0xFF (WKC=0).
+    EXPECT_CALL(transport_, aprd(_, _, _, _)).WillRepeatedly(Return(true));
+
+    EXPECT_FALSE(mgr_->writeToSlave(true));
+}
+
+TEST_F(FMMUManagerTest, WriteToSlaveFallbackProbeApprdReturnsActivate) {
+    ASSERT_TRUE(mgr_->configureManual(0x1800, 8, 0, 0, 0x10000));
+
+    EXPECT_CALL(transport_, apwr(_, _, _, _)).WillRepeatedly(Return(false));
+    EXPECT_CALL(transport_, aprd(_, _, _, _))
+        .WillRepeatedly([](uint16_t, void* out, uint16_t len, unsigned int) {
+            std::memset(out, 0x01, len);  // activate byte read back
+            return true;
+        });
+
+    EXPECT_FALSE(mgr_->writeToSlave(true));
+}
+
+TEST_F(FMMUManagerTest, WriteToSlaveFallbackProbeBothFail) {
+    ASSERT_TRUE(mgr_->configureManual(0x1800, 8, 0, 0, 0x10000));
+
+    EXPECT_CALL(transport_, apwr(_, _, _, _)).WillRepeatedly(Return(false));
+    EXPECT_CALL(transport_, aprd(_, _, _, _)).WillRepeatedly(Return(false));
+
+    EXPECT_FALSE(mgr_->writeToSlave(true));
+}
+
+// ============================================================================
+// configureFromSii(): DEFAULT output/input arms with fmmu_debug
+// ============================================================================
+
+TEST_F(FMMUManagerTest, ConfigureFromSiiDebugDefaultArms) {
+    EtherCAT::PDO::SlaveConfig sm_config{};
+    sm_config.sm[2].phys_start_addr = 0x1800;
+    sm_config.sm[2].length = 12;
+    sm_config.sm[3].phys_start_addr = 0x1C00;
+    sm_config.sm[3].length = 8;
+
+    // No SII data -> the DEFAULT SM2/SM3 FMMU arms emit debug lines.
+    EXPECT_TRUE(mgr_->configureFromSii(nullptr, &sm_config, 0,
+                                       /*fmmu_debug=*/true));
+    EXPECT_GE(mgr_->config().fmmu_count, 2u);
+}
+
+// ============================================================================
+// logConfig / logHardware
+// ============================================================================
+
+TEST_F(FMMUManagerTest, LogConfigDumpsFmmusAndPdoEntries) {
+    ASSERT_TRUE(mgr_->configureManual(0x1800, 8, 0x1C00, 4, 0x10000));
+
+    auto& cfg = mgr_->config();
+    cfg.pdo_entries[0] = FMMUPDOEntry{
+        .pdo_index = 0x1600, .logical_addr = 0x10000,
+        .physical_offset = 0, .size_bytes = 8, .sm_index = 2};
+    cfg.pdo_entry_count = 1;
+
+    mgr_->logConfig("test_fmmu");
+}
+
+TEST_F(FMMUManagerTest, LogHardwareReadsAndSkipsDisabled) {
+    FMMURegBlock enabled{};
+    enabled.logical_start_le = 0x100;
+    enabled.length_le = 8;
+    enabled.physical_start_le = 0x1800;
+    enabled.type = FMMURegType::Write;
+    enabled.activate = FMMUActivate::Enable;
+
+    FMMURegBlock disabled{};  // enable==0 && length==0 -> skipped
+
+    size_t call = 0;
+    EXPECT_CALL(transport_, aprd(_, _, _, _))
+        .WillRepeatedly([&](uint16_t, void* out, uint16_t len, unsigned int) -> bool {
+            if (call == 0) {
+                std::memcpy(out, &enabled, std::min<size_t>(len, sizeof(enabled)));
+            } else if (call == 1) {
+                std::memcpy(out, &disabled, std::min<size_t>(len, sizeof(disabled)));
+            } else {
+                return false;
+            }
+            ++call;
+            return true;
+        });
+
+    mgr_->logHardware("test_fmmu");
+    EXPECT_EQ(call, 2u);
+}
+
 } // anonymous namespace
