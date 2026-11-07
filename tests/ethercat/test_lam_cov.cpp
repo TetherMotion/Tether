@@ -15,8 +15,10 @@
 
 #include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/IPDOTransport.hpp"
+#include "tether/ethercat/PDOManager.hpp"
 #include "tether/ethercat/PDOMapping.hpp"
 #include "tether/ethercat/PDOTypes.hpp"
+#include "tether/ethercat/ProcessImage.hpp"
 
 using namespace EtherCAT;
 
@@ -884,4 +886,105 @@ TEST(LamCov, SliceExchangePendingFlag) {
     EXPECT_TRUE(f.lam.cyclicExchangePending());   // slice in flight
     EXPECT_TRUE(f.lam.cyclicCollect(f.mapping, nullptr));
     EXPECT_FALSE(f.lam.cyclicExchangePending());
+}
+
+// ============================================================================
+// PDOManager_cyclic forwarders — no-LAM early returns + LAM-backed paths.
+// ============================================================================
+
+namespace {
+
+struct PdoCyclicFixture {
+    FakeLamTransport t;
+    LogicalAddressManager lam{t};
+    PDOManager pdo{t};
+
+    void buildOne() {
+        EXPECT_TRUE(lam.init());
+        std::array<PDO::SlaveConfig, 1> cfgs{makeSlave(0, 4, 4)};
+        EXPECT_TRUE(lam.buildAddressMap(cfgs.data(), 1));
+        pdo.mapping().add_rxpdo(0, 4, 0x1600);
+        pdo.mapping().add_txpdo(0, 4, 0x1A00);
+        pdo.setLogicalAddressManager(&lam);
+    }
+};
+
+} // namespace
+
+TEST(PdoCyclicCov, NoLamEarlyReturns) {
+    FakeLamTransport t;
+    PDOManager pdo{t};
+
+    EXPECT_FALSE(pdo.exchangeLRWSlice(0, 4));
+    EXPECT_EQ(pdo.definePDOSlice(PDOSliceSpec{}), 0xFFFFFFFFu);
+    EXPECT_FALSE(pdo.clearPDOSlices());
+    EXPECT_EQ(pdo.pdoSliceCount(), 0u);
+    EXPECT_FALSE(pdo.exchangePDOSlice(PDOSliceSpec{}));
+    EXPECT_FALSE(pdo.cyclicExchangePending());
+    EXPECT_EQ(pdo.cyclicSliceCount(), 0);
+    EXPECT_EQ(pdo.maxLogicalSliceLength(), 0u);
+    EXPECT_TRUE(pdo.describeLogicalEntries().empty());
+    pdo.setImageExchangeDecimation(2);   // no-op without LAM
+    pdo.setCyclicStrictWkc(true);        // no-op without LAM
+
+    ProcessImage image;
+    EXPECT_FALSE(pdo.configureProcessImage(image, ImageMode::Direct));
+
+    // Exchange fallbacks go through the polled sendAll/receiveAll path.
+    EXPECT_TRUE(pdo.exchangeConfiguredSlaveWindows());
+    EXPECT_TRUE(pdo.exchangeAllLRWCyclic(200'000));
+    EXPECT_TRUE(pdo.cyclicSend(nullptr, 200'000));
+    EXPECT_TRUE(pdo.cyclicCollect(nullptr));
+}
+
+TEST(PdoCyclicCov, LamBackedForwarders) {
+    PdoCyclicFixture f;
+    f.buildOne();
+
+    EXPECT_TRUE(f.pdo.exchangeLRWSlice(0, 4));
+    EXPECT_TRUE(f.pdo.exchangeConfiguredSlaveWindows());
+    EXPECT_TRUE(f.pdo.exchangeAllLRWCyclic(200'000));
+    EXPECT_TRUE(f.pdo.cyclicSend(nullptr, 200'000));
+    EXPECT_TRUE(f.pdo.cyclicCollect(nullptr));
+    EXPECT_GE(f.pdo.maxLogicalSliceLength(), 4u);
+    EXPECT_FALSE(f.pdo.describeLogicalEntries().empty());
+    EXPECT_GT(f.pdo.pdoSliceCount() + 1, 0u);   // exists; value-agnostic
+    f.pdo.setImageExchangeDecimation(2);
+    f.pdo.setCyclicStrictWkc(true);
+}
+
+TEST(PdoCyclicCov, LamBackedSliceForwarders) {
+    PdoCyclicFixture f;
+    f.buildOne();
+    f.t.fast_path = true;
+    auto desc = f.lam.describeEntries(f.pdo.mapping());
+    ASSERT_GE(desc.size(), 2u);
+
+    PDOSliceSpec spec{};
+    spec.entries = {static_cast<uint16_t>(desc[0].entry_index)};
+    const uint32_t slot = f.pdo.definePDOSlice(spec);
+    EXPECT_NE(slot, 0xFFFFFFFFu);
+    EXPECT_GE(f.pdo.pdoSliceCount(), 1u);
+    EXPECT_TRUE(f.pdo.exchangePDOSlice(spec));
+    EXPECT_TRUE(f.pdo.clearPDOSlices());
+    EXPECT_EQ(f.pdo.pdoSliceCount(), 0u);
+}
+
+TEST(PdoCyclicCov, LamBackedConfigureProcessImage) {
+    PdoCyclicFixture f;
+    f.buildOne();
+
+    ProcessImage image;
+    EXPECT_TRUE(f.pdo.configureProcessImage(image, ImageMode::Direct));
+    EXPECT_EQ(image.imageBytes(), 8u);   // 4 rx + 4 tx
+}
+
+TEST(PdoCyclicCov, UninitializedLamBehavesLikeNoLam) {
+    PdoCyclicFixture f;
+    // Attach the LAM without init()/buildAddressMap — isInitialized()==false
+    // → forwarders take the same early-return/fallback paths as no-LAM.
+    f.pdo.setLogicalAddressManager(&f.lam);
+    EXPECT_FALSE(f.pdo.exchangeLRWSlice(0, 4));
+    EXPECT_EQ(f.pdo.definePDOSlice(PDOSliceSpec{}), 0xFFFFFFFFu);
+    EXPECT_FALSE(f.pdo.cyclicExchangePending());
 }
