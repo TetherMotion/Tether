@@ -441,6 +441,27 @@ TEST_F(InputStreamErrorTest, CallPeerQueueFullFails) {
 #endif
 }
 
+TEST_F(InputStreamErrorTest, InvokeDeadlineExpires) {
+#if TETHER_IO_FUNCTIONS_ENABLED
+    // 20 ms deadline, peer never answers → sweepInvokeDeadlines marks
+    // the invoke timedOut and fires the callback.
+    std::atomic<bool> gotTimeout{false};
+    FunctionArgument arg{};
+    arg.position = 0;
+    arg.type = ValueType::U64;
+    arg.value = {0, 0, 0, 0, 0, 0, 0, 0};
+    ASSERT_TRUE(session_->callPeer(1, {arg}, /*deadlineUs=*/20'000,
+                                    [&gotTimeout](const Session::InvokeResult& r) {
+                                        if (r.timedOut) gotTimeout.store(true);
+                                    }));
+    // Wait past the deadline + sweep interval.
+    for (int i = 0; i < 100 && !gotTimeout.load(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_TRUE(gotTimeout.load());
+    EXPECT_EQ(session_->pendingInvokeCount(), 0u);
+#endif
+}
+
 // Session without input-stream callbacks → FeatureNotSupported.
 TEST(InputStreamNoCallbacks, CreateReportsNotSupported) {
     Registry registry;
