@@ -602,7 +602,7 @@ endif()
 
 if(TETHER_BUILD_IO_PROTOCOL)
     create_module_test(io_protocol "${IO_PROTOCOL_SOURCES}" "tether_common;tether_io_protocol" "")
-    create_module_test(io_transport "${IO_TRANSPORT_SOURCES}" "tether_common;tether_io_protocol" "")
+    create_module_test_timeout(io_transport "${IO_TRANSPORT_SOURCES}" "tether_common;tether_io_protocol" "" 60)
     create_module_test(io_services "${IO_SERVICES_SOURCES}" "tether_common;tether_io_protocol" "")
 
     # tether_io_client dispatcher-level tests (IoSession + dispatch over an
