@@ -10,6 +10,11 @@
 
 #include <optional>
 
+#include <arpa/inet.h>
+#include <linux/if_ether.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include "tether/ethercat/Encapsulation.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/VLANRouter.hpp"
@@ -125,6 +130,84 @@ TEST(EncapsulationSetupTest, VlanRxAnyNoReplyFails) {
     ASSERT_TRUE(cfg.vlanActive());
     EXPECT_EQ(setupEncapsulation(f.eth, f.backend, f.master, f.router,
                                cfg, "test"),
+              nullptr);
+}
+
+namespace {
+
+// AF_PACKET open is the cheapest capability probe for the loopback tests.
+bool haveRawPacketSocket() {
+    int fd = ::socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    if (fd < 0) return false;
+    ::close(fd);
+    return true;
+}
+
+// Real IEthernet on loopback for answered-probe tests (CAP_NET_RAW).
+struct LoFixture {
+    std::unique_ptr<HAL::IEthernet> eth;
+    Master master;
+    NetworkInterface backend{};
+    std::unique_ptr<VLANRouter> router;
+
+    bool init() {
+        eth = HAL::createDefaultEthernet();
+        if (!eth) return false;
+        HAL::EthernetConfig cfg{};
+        cfg.interfaceName = "lo";
+        cfg.promiscuous = false;
+        return eth->init(cfg) == HAL::Error::OK;
+    }
+    ~LoFixture() { if (eth) eth->shutdown(); }
+};
+
+} // namespace
+
+// Answered wire probe on loopback: outgoing tagged frames echo back →
+// the probe succeeds → VLAN router allocation + direct-encap wiring.
+TEST(EncapsulationSetupTest, VlanAnsweredProbeAllocatesRouter) {
+    if (!haveRawPacketSocket())
+        GTEST_SKIP() << "no CAP_NET_RAW for AF_PACKET on lo";
+    LoFixture f;
+    ASSERT_TRUE(f.init());
+
+    EncapsulationConfig cfg{};
+    cfg.txVlan = 100;
+    NetworkInterface* out = setupEncapsulation(*f.eth, f.backend, f.master,
+                                             f.router, cfg, "test");
+    EXPECT_NE(out, nullptr);
+    EXPECT_NE(f.router, nullptr);
+}
+
+// Catch-all RX mode: undefined-target branch + undefinedNetworkInterface.
+TEST(EncapsulationSetupTest, VlanRxAnyAnsweredProbe) {
+    if (!haveRawPacketSocket())
+        GTEST_SKIP() << "no CAP_NET_RAW for AF_PACKET on lo";
+    LoFixture f;
+    ASSERT_TRUE(f.init());
+
+    EncapsulationConfig cfg{};
+    cfg.rxAny = true;
+    cfg.txVlan = 100;
+    EXPECT_NE(setupEncapsulation(*f.eth, f.backend, f.master, f.router,
+                                 cfg, "test"),
+              nullptr);
+    EXPECT_NE(f.router, nullptr);
+}
+
+// RX-range mode with the probe VID outside the configured range → the
+// "replies carry VID outside the range" warning branch.
+TEST(EncapsulationSetupTest, VlanRxRangeProbeVidOutsideRange) {
+    if (!haveRawPacketSocket())
+        GTEST_SKIP() << "no CAP_NET_RAW for AF_PACKET on lo";
+    LoFixture f;
+    ASSERT_TRUE(f.init());
+
+    EncapsulationConfig cfg{};
+    cfg.txVlan = 100;                            // probe VID = 100
+    cfg.rxRange = VLANRouter::VLANRange{200, 300}; // reply VID ∉ range
+    EXPECT_NE(setupEncapsulation(*f.eth, f.backend, f.master, f.router,
+                                 cfg, "test"),
               nullptr);
 }
 
