@@ -13,7 +13,9 @@
 #include <vector>
 
 #include "mocks/EmulatedBus.hpp"
+#include "raw/RawConstants.hpp"
 #include "tether/ethercat/CoEManager.hpp"
+#include "tether/ethercat/DebugGate.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/Slave.hpp"
 #include "tether/ethercat/SlaveEmulator.hpp"
@@ -134,4 +136,93 @@ TEST_F(SegmentedWireTest, TinyUpload) {
     v = 0;
     EXPECT_EQ(master_.slave(0).sdoReadU16(0x7004, 0, v), SlaveError::Ok);
     EXPECT_EQ(v, 0xCAFE);
+}
+
+// requestCancel() before the upload hits the early isCancelRequested()
+// checks in SDOUpload::execute / the mailbox wait loop.
+TEST_F(SegmentedWireTest, UploadCancelledBeforeStart) {
+    addBigObject(0x7010, 400);
+    master_.requestCancel();
+    std::vector<uint8_t> buf(400, 0);
+    size_t got = buf.size();
+    const auto err = master_.slave(0).sdoRead(0x7010, 0, buf.data(), got);
+    EXPECT_NE(err, SlaveError::Ok);
+    master_.clearCancel();
+}
+
+// Same for the segmented download path.
+TEST_F(SegmentedWireTest, DownloadCancelledBeforeStart) {
+    addBigObject(0x7011, 400);
+    master_.requestCancel();
+    std::vector<uint8_t> wr(400, 0x11);
+    const auto err = master_.slave(0).sdoWrite(0x7011, 0, wr.data(), wr.size());
+    EXPECT_NE(err, SlaveError::Ok);
+    master_.clearCancel();
+}
+
+// An object with a declared size of 0 makes the expedited response report
+// total_size==0 → SDOUpload returns 0 bytes without entering the segment
+// loop.
+TEST_F(SegmentedWireTest, UploadZeroSizeObject) {
+    Emulator::ODEntry e{};
+    e.index = 0x7012;
+    e.subindex = 0;
+    e.data_type = 0x000F;
+    e.bit_length = 0;
+    e.access = 0x03;
+    e.data = {};
+    e.name = "empty";
+    slave_->addODEntry(e);
+
+    std::array<uint8_t, 16> buf{};
+    size_t got = buf.size();
+    const auto err = master_.slave(0).sdoRead(0x7012, 0, buf.data(), got);
+    EXPECT_EQ(err, SlaveError::Ok);
+    EXPECT_LE(got, buf.size());
+}
+
+// Enabling the CoE RX-packet debug flag + a gate condition exercises the
+// logCoeMbxPacket / onCoERead hook calls inside the segment loop.
+TEST_F(SegmentedWireTest, UploadWithCoeRxPacketDebugAndGateCondition) {
+    addBigObject(0x7013, 400);
+    master_.debugFlags().coeRxPackets = true;
+    auto cond = DebugGate::parseCondition("checkpoint:seg-upload");
+    ASSERT_NE(cond, nullptr);
+    master_.debugGate().addGlobalStart(std::move(cond));
+
+    std::vector<uint8_t> buf(400, 0);
+    size_t got = buf.size();
+    ASSERT_EQ(master_.slave(0).sdoRead(0x7013, 0, buf.data(), got),
+              SlaveError::Ok);
+    EXPECT_EQ(got, 400u);
+}
+
+// A mid-transfer mailbox stall (slave stops filling SM1) hits the
+// pollSm1Full timeout / retry tail of the segment loop. inject_timeout
+// drops the emulator's register responses so the SM1-full poll fails.
+TEST_F(SegmentedWireTest, UploadMailboxStallTimesOut) {
+    addBigObject(0x7014, 400);
+    Emulator::ErrorInjection inj;
+    inj.inject_timeout = true;
+    inj.timeout_register = Raw::sm_status_address(1);
+    slave_->setErrorInjection(inj);
+    std::vector<uint8_t> buf(400, 0);
+    size_t got = buf.size();
+    const auto err = master_.slave(0).sdoRead(0x7014, 0, buf.data(), got);
+    EXPECT_NE(err, SlaveError::Ok);
+    slave_->setErrorInjection(Emulator::ErrorInjection{});
+}
+
+// Same stall on the segmented download path — first segment request
+// lands, but the response wait times out.
+TEST_F(SegmentedWireTest, DownloadMailboxStallTimesOut) {
+    addBigObject(0x7015, 400);
+    Emulator::ErrorInjection inj;
+    inj.inject_timeout = true;
+    inj.timeout_register = Raw::sm_status_address(1);
+    slave_->setErrorInjection(inj);
+    std::vector<uint8_t> wr(400, 0x22);
+    const auto err = master_.slave(0).sdoWrite(0x7015, 0, wr.data(), wr.size());
+    EXPECT_NE(err, SlaveError::Ok);
+    slave_->setErrorInjection(Emulator::ErrorInjection{});
 }
