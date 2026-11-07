@@ -2747,6 +2747,106 @@ TEST_F(MasterCyclicTest, CyclicHealthReportCoversLoopAndLam) {
 }
 
 // ============================================================================
+// CyclicDatapath_wait — wait-path internals: bounds, fallbacks, rxPoll,
+// spin arm, cancel drain
+// ============================================================================
+
+TEST_F(MasterCyclicTest, WaitCyclicPoolArgAndBoundsRejects) {
+    uint8_t pos[4] = {0, 1, 2, 3};
+    uint64_t tok[4] = {0, 0, 0, 0};
+    CyclicSlotView views[4]{};
+    bool arrived[4] = {false};
+
+    // Null / zero-count rejections.
+    EXPECT_EQ(master_.waitCyclicPool(nullptr, tok, 4, 0, views, arrived), 0);
+    EXPECT_EQ(master_.waitCyclicPool(pos, nullptr, 4, 0, views, arrived), 0);
+    EXPECT_EQ(master_.waitCyclicPool(pos, tok, 4, 0, nullptr, arrived), 0);
+    EXPECT_EQ(master_.waitCyclicPool(pos, tok, 4, 0, views, nullptr), 0);
+    EXPECT_EQ(master_.waitCyclicPool(pos, tok, 0, 0, views, arrived), 0);
+
+    // count beyond the pool bound, and a position beyond the DC slot.
+    uint8_t pos_big[kCyclicDcPoolPos + 2]{};
+    uint64_t tok_big[kCyclicDcPoolPos + 2]{};
+    CyclicSlotView vbig[kCyclicDcPoolPos + 2]{};
+    bool abig[kCyclicDcPoolPos + 2]{};
+    EXPECT_EQ(master_.waitCyclicPool(pos_big, tok_big,
+                                     kCyclicDcPoolPos + 2, 0, vbig, abig), 0);
+    pos[0] = kCyclicDcPoolPos + 1;   // > kCyclicDcPoolPos → reject
+    EXPECT_EQ(master_.waitCyclicPool(pos, tok, 4, 0, views, arrived), 0);
+}
+
+TEST_F(MasterCyclicTest, SlotWaitFallbackYieldArm) {
+    MasterCyclicTestAccess::setSlotWaitFallback(
+        master_, Master::CyclicLoopConfig::SlotWaitFallback::Yield);
+    CyclicSlotView view{};
+    // Never-arriving slot with a non-zero token → spin→yield→timeout.
+    EXPECT_FALSE(master_.waitCyclicSlotView(0, /*token=*/12345,
+                                            /*timeout_ns=*/5'000'000, view));
+}
+
+TEST_F(MasterCyclicTest, WaitDispatchViaChannelRxPoll) {
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    // Queue one pool reply for the wait loop's rxPoll to dispatch.
+    StubChannel::RxFrame rf{};
+    const uint8_t pay[4] = {0xAA, 0xBB, 0xCC, 0xDD};
+    rf.len = buildEcatFrame(rf.data.data(), 0x0C, cyclicPoolWireIdx(2),
+                            0x1111, 0x2222, pay, 4, 3);
+    rf.cookie = 5;
+    stubp->rxq.push_back(rf);
+
+    CyclicSlotView view{};
+    ASSERT_TRUE(master_.waitCyclicSlotView(2, /*token=*/0,
+                                           /*timeout_ns=*/50'000'000, view));
+    EXPECT_EQ(view.datalen, 4u);
+    EXPECT_EQ(view.adp, 0x1111u);
+    EXPECT_GT(stubp->rx_poll_calls, 0);
+}
+
+TEST_F(MasterCyclicTest, WaitPoolSpinThenRxPollServes) {
+    auto stub = std::make_unique<StubChannel>();
+    StubChannel* stubp = stub.get();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+    MasterCyclicTestAccess::setSlotSpinNs(master_, 100'000);
+
+    StubChannel::RxFrame rf{};
+    const uint8_t pay[2] = {0x5A, 0xA5};
+    rf.len = buildEcatFrame(rf.data.data(), 0x0C, cyclicPoolWireIdx(0),
+                            0x3333, 0x4444, pay, 2, 1);
+    stubp->rxq.push_back(rf);
+
+    uint8_t pos[1] = {0};
+    // Token = the slot's CURRENT sequence — the wait only completes once
+    // the rxPoll-dispatched frame bumps it.
+    uint64_t tok[1] = {master_.cyclicSlotToken(0)};
+    CyclicSlotView views[1]{};
+    bool arrived[1] = {false};
+    const uint8_t got = master_.waitCyclicPool(
+        pos, tok, 1, 50'000'000, views, arrived);
+    EXPECT_EQ(got, 1u);
+    EXPECT_TRUE(arrived[0]);
+    EXPECT_EQ(views[0].datalen, 2u);
+}
+
+TEST_F(MasterCyclicTest, WaitPoolCancelDrainsChannel) {
+    auto stub = std::make_unique<StubChannel>();
+    MasterCyclicTestAccess::setChannel(master_, std::move(stub));
+
+    master_.requestCancel();
+    uint8_t pos[1] = {0};
+    uint64_t tok[1] = {master_.cyclicSlotToken(0)};
+    CyclicSlotView views[1]{};
+    bool arrived[1] = {false};
+    const uint8_t got = master_.waitCyclicPool(
+        pos, tok, 1, 50'000'000, views, arrived);
+    EXPECT_EQ(got, 0u);
+    EXPECT_FALSE(arrived[0]);
+    master_.clearCancel();
+}
+
+// ============================================================================
 // RingChannelV3MemoryTest — TPACKET_V3 block-mode prototype (Q17).
 // Synthetic ring = tpacket_block_desc array; each block chains tpacket3_hdr
 // frames via tp_next_offset.  Cookies are (block << 16 | pkt).
