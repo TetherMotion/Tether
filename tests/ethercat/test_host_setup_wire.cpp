@@ -98,7 +98,7 @@ TEST(HostSetupWireTest, BringUpHostLoopbackUntagged) {
     master.packetRouter().shutdown();
 }
 
-#if !defined(TETHER_ENABLE_UDP_ENCAPSULATION)
+#if !TETHER_ENABLE_UDP_ENCAPSULATION
 // With UDP encapsulation compiled out, a UDP config makes
 // setupEncapsulation fail → bringUpHost runs the shutdown cleanup and
 // returns false. Deterministic once raw sockets are available.
