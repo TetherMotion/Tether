@@ -24,7 +24,9 @@ namespace {
 
 /// Build a frame: Ethernet hdr + EtherCAT hdr + one or more datagrams.
 /// `dgs` entries: {cmd, idx, adp, ado, datalen, fill, more_bit}
-struct DG { uint8_t cmd, idx; uint16_t adp, ado, datalen; uint8_t fill; bool more; };
+/// `bytes` (optional) overrides the uniform `fill` payload.
+struct DG { uint8_t cmd, idx; uint16_t adp, ado, datalen; uint8_t fill; bool more;
+            std::vector<uint8_t> bytes{}; };
 
 std::vector<uint8_t> makeFrame(const std::vector<DG>& dgs) {
     std::vector<uint8_t> f(14, 0);
@@ -46,7 +48,13 @@ std::vector<uint8_t> makeFrame(const std::vector<DG>& dgs) {
         f.push_back(lf & 0xFF);
         f.push_back(lf >> 8);
         f.push_back(0); f.push_back(0);            // IRQ
-        for (uint16_t b = 0; b < d.datalen; ++b) f.push_back(d.fill);
+        if (!d.bytes.empty()) {
+            for (uint8_t b : d.bytes) f.push_back(b);
+            for (uint16_t b = d.bytes.size(); b < d.datalen; ++b)
+                f.push_back(d.fill);
+        } else {
+            for (uint16_t b = 0; b < d.datalen; ++b) f.push_back(d.fill);
+        }
         f.push_back(0); f.push_back(0);            // WKC
     }
     return f;
@@ -190,6 +198,40 @@ TEST(NetworkEmuCov, LogicalCommandsLrdLwrLrw) {
         auto f = makeFrame({{c, 0, 0x0000, 0x0001, 4, 0, false}});
         auto r = net.processFrame(f.data(), f.size());
         ASSERT_EQ(r.size(), f.size());             // dispatch ran (WKC any)
+    }
+}
+
+TEST(NetworkEmuCov, LogicalWkcAfterWireFmmuSmConfig) {
+    NetworkEmulator net;
+    net.addSlave(std::make_unique<SlaveEmulator>());
+
+    auto send = [&](const std::vector<DG>& dgs) {
+        auto f = makeFrame(dgs);
+        return net.processFrame(f.data(), f.size());
+    };
+
+    // SM2 @ 0x0810: start=0x1000, len=0x10, control=0, status=0,
+    // enable=0x01, reserved=0 — one 8-byte APWR.
+    {
+        DG d{0x02, 0, 0x0000, 0x0810, 8, 0, false,
+             {0x00, 0x10, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00}};
+        (void)send({d});
+    }
+    // FMMU0 @ 0x0600: logical_start=0x00010000, len=0x10,
+    // lsb=0, leb=7, phys=0x1000, psb=0, rw=0x03, enabled=0x01.
+    {
+        DG d{0x02, 0, 0x0000, 0x0600, 16, 0, false,
+             {0x00, 0x00, 0x01, 0x00, 0x10, 0x00, 0x00, 0x07,
+              0x00, 0x10, 0x00, 0x03, 0x01, 0x00, 0x00, 0x00}};
+        (void)send({d});
+    }
+
+    // LRD/LWR/LRW on logical 0x00010000 → FMMU0 → SM2 phys 0x1000.
+    // Response layout: 14 eth + 2 ecat + 10 dgram-hdr + 4 data + 2 wkc.
+    for (uint8_t c : {0x0A, 0x0B, 0x0C}) {
+        auto r = send({{c, 0, 0x0000, 0x0001, 4, 0xAA, false}});
+        ASSERT_EQ(r.size(), 14 + 2 + 10 + 4 + 2);
+        EXPECT_GE(r[16 + 10 + 4], 0x01);             // WKC ≥ 1
     }
 }
 
