@@ -752,37 +752,37 @@ TEST_F(PDOManagerTest, TransferStatsInitiallyZero) {
 }
 
 // ============================================================================
-// Backward-Compatible Free Functions (PDOManager& overloads)
+// PDOManager lifecycle + accessor smoke test
 // ============================================================================
 
-TEST(PDOFreeFunctions, DelegateCorrectly) {
+TEST(PDOManagerBasics, LifecycleAndAccessors) {
     NiceMockTransport t;
     ON_CALL(t, adpForSlaveIndex(_)).WillByDefault(Return(0));
     PDOManager m(t);
 
-    EXPECT_TRUE(pdo_init(m));
+    EXPECT_TRUE(m.init());
     EXPECT_TRUE(m.isInitialized());
 
-    auto& mapping = pdo_get_mapping(m);
+    auto& mapping = m.mapping();
     uint32_t buf = 0;
     mapping.add_rxpdo(0, sizeof(buf));
     EXPECT_EQ(mapping.entry_count(), 1u);
 
-    auto* configs = pdo_get_slave_configs(m);
+    auto* configs = m.slaveConfigs();
     EXPECT_NE(configs, nullptr);
 
-    pdo_set_separate_mode(m, true);
-    EXPECT_TRUE(pdo_get_separate_mode(m));
+    m.setSeparateMode(true);
+    EXPECT_TRUE(m.getSeparateMode());
 
-    pdo_set_physical_mode(m, true);
-    EXPECT_TRUE(pdo_get_physical_mode(m));
+    m.setPhysicalMode(true);
+    EXPECT_TRUE(m.getPhysicalMode());
 
-    auto stats = pdo_get_stats(m);
+    auto stats = m.getStats();
     EXPECT_EQ(stats.total_cycles, 0u);
 
-    pdo_reset_stats(m);
+    m.resetStats();
 
-    pdo_deinit(m);
+    m.deinit();
     EXPECT_FALSE(m.isInitialized());
 }
 

@@ -24,56 +24,6 @@
 namespace EtherCAT {
 
 // ============================================================================
-// Backward-compatible free functions → delegate to PDOManager
-// ============================================================================
-
-namespace PDO {
-
-
-bool       pdo_init(PDOManager& m)                        { return m.init(); }
-void       pdo_deinit(PDOManager& m)                      { m.deinit(); }
-PDOMapping& pdo_get_mapping(PDOManager& m)                { return m.mapping(); }
-SlaveConfig* pdo_get_slave_configs(PDOManager& m)         { return m.slaveConfigs(); }
-bool       pdo_configure_slave_sms(PDOManager& m, uint16_t s)     { return m.configureSlavesSMs(s); }
-uint16_t   pdo_configure_all_slave_sms(PDOManager& m, uint16_t n) { return m.configureAllSlaveSMs(n); }
-bool       pdo_exchange_all(PDOManager& m)                { return m.exchangeAll(); }
-bool       pdo_exchange_lrw(PDOManager& m, uint16_t n)    { return m.exchangeLRW(n); }
-void       pdo_get_lrw_stats(PDOManager& m, uint32_t* s, uint32_t* w, uint32_t* se, uint32_t* t) {
-    auto st = m.getLRWStats();
-    if (s) *s = st.lrw_success;
-    if (w) *w = st.lrw_wkc_errors;
-    if (se)*se = st.lrw_send_errors;
-    if (t) *t = st.lrw_timeout_errors;
-}
-void pdo_set_separate_mode(PDOManager& m, bool v) { m.setSeparateMode(v); }
-bool pdo_get_separate_mode(PDOManager& m)          { return m.getSeparateMode(); }
-bool pdo_exchange_separate(PDOManager& m, uint16_t n) { return m.exchangeSeparate(n); }
-void pdo_get_separate_stats(PDOManager& m, uint32_t* a, uint32_t* b, uint32_t* c, uint32_t* d) {
-    auto st = m.getSeparateStats();
-    if (a) *a = st.lwr_success;
-    if (b) *b = st.lwr_wkc_errors;
-    if (c) *c = st.lrd_success;
-    if (d) *d = st.lrd_wkc_errors;
-}
-void pdo_set_physical_mode(PDOManager& m, bool v) { m.setPhysicalMode(v); }
-bool pdo_get_physical_mode(PDOManager& m)          { return m.getPhysicalMode(); }
-bool pdo_exchange_physical(PDOManager& m, uint16_t n) { return m.exchangePhysical(n); }
-void pdo_get_physical_stats(PDOManager& m, uint32_t* a, uint32_t* b, uint32_t* c, uint32_t* d) {
-    auto st = m.getPhysicalStats();
-    if (a) *a = st.fpwr_success;
-    if (b) *b = st.fpwr_wkc_errors;
-    if (c) *c = st.fprd_success;
-    if (d) *d = st.fprd_wkc_errors;
-}
-bool   pdo_send_rxpdo(PDOManager& m, size_t i)     { return m.sendRxPDO(i); }
-bool   pdo_receive_txpdo(PDOManager& m, size_t i)  { return m.receiveTxPDO(i); }
-bool   pdo_finalize_mapping(PDOManager& m, uint16_t s) { return m.finalizeMapping(s); }
-PDOStats pdo_get_stats(PDOManager& m)              { return m.getStats(); }
-void   pdo_reset_stats(PDOManager& m)              { m.resetStats(); }
-
-} // namespace PDO
-
-// ============================================================================
 // PDOManager — constructor / destructor / lifecycle
 // ============================================================================
 

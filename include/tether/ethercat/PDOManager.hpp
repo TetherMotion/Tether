@@ -45,43 +45,6 @@ namespace EtherCAT {
 class PDOManager;
 class LogicalAddressManager;
 
-namespace PDO {
-
-// ============================================================================
-// Backward-compatible free functions (delegate to PDOManager)
-// ============================================================================
-
-bool       pdo_init(PDOManager& mgr);
-void       pdo_deinit(PDOManager& mgr);
-PDOMapping& pdo_get_mapping(PDOManager& mgr);
-SlaveConfig* pdo_get_slave_configs(PDOManager& mgr);
-bool       pdo_configure_slave_sms(PDOManager& mgr, uint16_t slave_index);
-uint16_t   pdo_configure_all_slave_sms(PDOManager& mgr, uint16_t slave_count);
-bool       pdo_exchange_all(PDOManager& mgr);
-bool       pdo_exchange_lrw(PDOManager& mgr, uint16_t slave_count);
-void       pdo_get_lrw_stats(PDOManager& mgr,
-                             uint32_t* success, uint32_t* wkc_errors,
-                             uint32_t* send_errors, uint32_t* timeout_errors);
-void       pdo_set_separate_mode(PDOManager& mgr, bool separate);
-bool       pdo_get_separate_mode(PDOManager& mgr);
-bool       pdo_exchange_separate(PDOManager& mgr, uint16_t slave_count);
-void       pdo_get_separate_stats(PDOManager& mgr,
-                                  uint32_t* lwr_success, uint32_t* lwr_wkc_errors,
-                                  uint32_t* lrd_success, uint32_t* lrd_wkc_errors);
-void       pdo_set_physical_mode(PDOManager& mgr, bool physical);
-bool       pdo_get_physical_mode(PDOManager& mgr);
-bool       pdo_exchange_physical(PDOManager& mgr, uint16_t slave_count);
-void       pdo_get_physical_stats(PDOManager& mgr,
-                                  uint32_t* fpwr_success, uint32_t* fpwr_wkc_errors,
-                                  uint32_t* fprd_success, uint32_t* fprd_wkc_errors);
-bool       pdo_send_rxpdo(PDOManager& mgr, size_t entry_index);
-bool       pdo_receive_txpdo(PDOManager& mgr, size_t entry_index);
-bool       pdo_finalize_mapping(PDOManager& mgr, uint16_t slave_index);
-PDOStats   pdo_get_stats(PDOManager& mgr);
-void       pdo_reset_stats(PDOManager& mgr);
-
-} // namespace PDO
-
 // ============================================================================
 // PDOManager — instance-based, owns all PDO/SM state (no globals)
 // ============================================================================
