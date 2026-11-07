@@ -8,7 +8,13 @@
 
 #include <cstring>
 
+#include <arpa/inet.h>
+#include <linux/if_ether.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include "mocks/EmulatedBus.hpp"
+#include "tether/ethercat/Encapsulation.hpp"
 #include "tether/ethercat/HostSetup.hpp"
 #include "tether/ethercat/Master.hpp"
 #include "tether/ethercat/SlaveEmulator.hpp"
@@ -52,3 +58,58 @@ TEST(HostSetupWireTest, DiscoverEmptyBusFails) {
     bus.shutdown();
     master.packetRouter().shutdown();
 }
+
+// bringUpHost: initHostEthernet fails for a nonexistent interface →
+// early false (needs no privileges).
+TEST(HostSetupWireTest, BringUpHostBadInterface) {
+    HostEtherNetSession session;
+    Master master;
+    EXPECT_FALSE(bringUpHost(session, master, "tether-nosuch-0",
+                             EncapsulationConfig{}, "test"));
+}
+
+namespace {
+
+// AF_PACKET open is the cheapest capability probe for the loopback tests.
+bool haveRawPacketSocket() {
+    int fd = ::socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    if (fd < 0) return false;
+    ::close(fd);
+    return true;
+}
+
+} // namespace
+
+// Full bringUpHost success path on the loopback device: init + untagged
+// encapsulation + poll thread + master start, then RAII teardown via
+// HostSessionGuard. Needs CAP_NET_RAW; skipped otherwise.
+TEST(HostSetupWireTest, BringUpHostLoopbackUntagged) {
+    if (!haveRawPacketSocket())
+        GTEST_SKIP() << "no CAP_NET_RAW for AF_PACKET on lo";
+
+    HostEtherNetSession session;
+    Master master;
+    ASSERT_TRUE(bringUpHost(session, master, "lo", EncapsulationConfig{},
+                            "test"));
+    {
+        HostSessionGuard guard(session, [&master] { master.stop(); });
+    }
+    shutdownHostEthernet(session);
+    master.packetRouter().shutdown();
+}
+
+#if !defined(TETHER_ENABLE_UDP_ENCAPSULATION)
+// With UDP encapsulation compiled out, a UDP config makes
+// setupEncapsulation fail → bringUpHost runs the shutdown cleanup and
+// returns false. Deterministic once raw sockets are available.
+TEST(HostSetupWireTest, BringUpHostUdpGateCleanup) {
+    if (!haveRawPacketSocket())
+        GTEST_SKIP() << "no CAP_NET_RAW for AF_PACKET on lo";
+
+    HostEtherNetSession session;
+    Master master;
+    EncapsulationConfig encap{};
+    encap.udp = true;
+    EXPECT_FALSE(bringUpHost(session, master, "lo", encap, "test"));
+}
+#endif
