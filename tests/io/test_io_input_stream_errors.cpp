@@ -370,3 +370,118 @@ TEST_F(InputStreamErrorTest, CloseUnknownStreamRejected) {
     sendTyped(MessageType::CloseInputStreamReq, body);
     EXPECT_TRUE(sawType(drain(), MessageType::Error));
 }
+
+TEST_F(InputStreamErrorTest, DataSchemaInvalidLengthRejected) {
+    auto s = slot();
+    ASSERT_TRUE(s.has_value());
+    sendTyped(MessageType::CreateInputStreamReq,
+              createReqBody(catalog_.epoch(), *s, 8, 4));
+    drain();
+
+    // valueLength=5 for a U64 schema — validateSchemaValue fails.
+    std::vector<uint8_t> body;
+    auto put32 = [&body](uint32_t v) {
+        for (unsigned i = 0; i < 4; ++i)
+            body.push_back(static_cast<uint8_t>(v >> (8 * i)));
+    };
+    put32(1); put32(1); put32(5);
+    for (int i = 0; i < 5; ++i) body.push_back(0x11);
+    sendTyped(MessageType::InputStreamData, body);
+    EXPECT_TRUE(sawType(drain(), MessageType::Error));
+}
+
+TEST_F(InputStreamErrorTest, UnsubscribeLogResponds) {
+    // UnsubscribeLogReq body = varint subscription id (id=1 → 0x01).
+    std::vector<uint8_t> body{0x01};
+    sendTyped(MessageType::UnsubscribeLogReq, body);
+#if TETHER_IO_LOG_SUBSCRIPTIONS_ENABLED
+    EXPECT_TRUE(sawType(drain(), MessageType::UnsubscribeLogResp));
+#else
+    EXPECT_TRUE(sawType(drain(), MessageType::Error));
+#endif
+}
+
+TEST_F(InputStreamErrorTest, PendingInvokeCountZero) {
+#if TETHER_IO_FUNCTIONS_ENABLED
+    EXPECT_EQ(session_->pendingInvokeCount(), 0u);
+#endif
+}
+
+TEST_F(InputStreamErrorTest, CallPeerEncodeFailure) {
+#if TETHER_IO_FUNCTIONS_ENABLED
+    // position=UINT32_MAX wraps position+1 to key=0 → encodeFunctionValue
+    // rejects the argument and callPeer returns false.
+    FunctionArgument arg{};
+    arg.position = 0xFFFFFFFFu;
+    arg.type = ValueType::U64;
+    arg.value = {0, 0, 0, 0, 0, 0, 0, 0};
+    EXPECT_FALSE(session_->callPeer(1, {arg}, 1'000'000,
+                                    [](const Session::InvokeResult&) {}));
+    EXPECT_EQ(session_->pendingInvokeCount(), 0u);
+#endif
+}
+
+TEST_F(InputStreamErrorTest, CallPeerQueueFullFails) {
+#if TETHER_IO_FUNCTIONS_ENABLED
+    // deadlineUs=0 → no expiry; fill MAX_PENDING_INVOKES, next fails.
+    FunctionArgument arg{};
+    arg.position = 0;
+    arg.type = ValueType::U64;
+    arg.value = {0, 0, 0, 0, 0, 0, 0, 0};
+    size_t accepted = 0;
+    for (int i = 0; i < 300; ++i) {
+        if (session_->callPeer(1, {arg}, /*deadlineUs=*/0,
+                               [](const Session::InvokeResult&) {}))
+            ++accepted;
+        else
+            break;
+    }
+    EXPECT_EQ(accepted, MAX_PENDING_INVOKES);
+    EXPECT_EQ(session_->pendingInvokeCount(), MAX_PENDING_INVOKES);
+#endif
+}
+
+// Session without input-stream callbacks → FeatureNotSupported.
+TEST(InputStreamNoCallbacks, CreateReportsNotSupported) {
+    Registry registry;
+    auto [client, server] = MessagePipeTransport::create();
+    Session session(std::move(server), registry,
+                    [] { return uint64_t{1}; }, noopLogFn,
+                    nullptr, nullptr, nullptr,
+                    nullptr, nullptr, Framing::None, nullptr, nullptr);
+    std::thread t([&session] { session.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+    // Bootstrap schema commit isn't needed — the FeatureNotSupported
+    // check precedes schema validation? No: onMessage gates non-negotiation
+    // types on schemaCommitted_.  Send hello+commit first.
+    std::array<uint8_t, 512> hello{};
+    BufWriter hw(hello.data(), hello.size());
+    hw.putU8(static_cast<uint8_t>(MessageType::ClientHello));
+    encodeClientHelloV6(hw, {});
+    client->send(hello.data(), hw.pos);
+    std::array<uint8_t, 64> commit{};
+    BufWriter cw(commit.data(), commit.size());
+    cw.putU8(static_cast<uint8_t>(MessageType::SchemaCommit));
+    encodeSchemaCommitV6(cw, {1});
+    client->send(commit.data(), cw.pos);
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+    // CreateInputStreamReq with a minimal (still invalid) body — the
+    // !inputStreamCreateFn_ check fires before body parsing.
+    std::vector<uint8_t> msg{static_cast<uint8_t>(MessageType::CreateInputStreamReq)};
+    client->send(msg.data(), msg.size());
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    std::vector<uint8_t> resp;
+    bool sawError = false;
+    for (int i = 0; i < 20 && !sawError; ++i) {
+        if (client->receiveMessage(resp, 20) && !resp.empty() &&
+            resp[0] == static_cast<uint8_t>(MessageType::Error))
+            sawError = true;
+    }
+    EXPECT_TRUE(sawError);
+
+    session.requestStop();
+    t.join();
+}
