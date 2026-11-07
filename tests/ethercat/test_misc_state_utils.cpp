@@ -112,6 +112,28 @@ TEST(StateUtilsCoverageTest, FormatStatuswordDiagnosticsBits) {
     EXPECT_NE(std::strstr(buf, "OpEn"), nullptr);
 }
 
+TEST(StateUtilsCoverageTest, StatuswordStateArms) {
+    char buf[512];
+    // SwitchOn arm: bit1 set, OpEn clear.
+    formatStatuswordDiagnostics(0x0002, buf, sizeof(buf));
+    EXPECT_NE(std::strstr(buf, "SwitchOn"), nullptr);
+    // ReadyToSwitchOn arm: bit0 only.
+    formatStatuswordDiagnostics(0x0021, buf, sizeof(buf));
+    EXPECT_NE(std::strstr(buf, "ReadyToSO"), nullptr);
+    // SwitchOnDisabled arm: bit6 only.
+    formatStatuswordDiagnostics(0x0040, buf, sizeof(buf));
+    EXPECT_NE(std::strstr(buf, "SODisabled"), nullptr);
+    // NoVolt arm: bit4 clear + fault/warn/quickstop/remote extras.
+    formatStatuswordDiagnostics(0x0000, buf, sizeof(buf));
+    EXPECT_NE(std::strstr(buf, "NoVolt"), nullptr);
+    EXPECT_NE(std::strstr(buf, "QSActive"), nullptr);
+    formatStatuswordDiagnostics(0x0208, buf, sizeof(buf));
+    EXPECT_NE(std::strstr(buf, "FAULT"), nullptr);
+    EXPECT_NE(std::strstr(buf, "Remote"), nullptr);
+    formatStatuswordDiagnostics(0x0080, buf, sizeof(buf));
+    EXPECT_NE(std::strstr(buf, "WARN"), nullptr);
+}
+
 
 TEST(StateUtilsCoverageTest, SdoErrorDecoderTables) {
     Raw::SDOErrorDecoder dec;

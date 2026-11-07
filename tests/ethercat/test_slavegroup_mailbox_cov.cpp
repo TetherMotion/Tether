@@ -46,6 +46,26 @@ protected:
     Master master_;
 };
 
+// ---------------------------------------------------------------------------
+// CiA402::setOperatingModeVerified — group write 0x6060 then verify 0x6061
+// on every member over the emulated wire.
+// ---------------------------------------------------------------------------
+
+TEST_F(SlaveGroupMailboxTest, SetOperatingModeVerifiedWire) {
+    SlaveGroup group(master_, {0, 1});
+
+    EtherCAT::CoE::CoETransactionOptions opts{};
+    opts.timeout_ms = 2000;
+    // The emulated CiA402 drive mirrors 0x6060 into 0x6061.
+    EXPECT_TRUE(CiA402::setOperatingModeVerified(
+        group, CiA402::OperatingMode::ProfilePosition, opts,
+        /*settle_ms=*/1, "sg-test"));
+
+    // A mode the OD write rejects would surface as false; a display
+    // readback mismatch likewise — verify the function returns the
+    // aggregate AND result via a successful write+verify round first.
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
