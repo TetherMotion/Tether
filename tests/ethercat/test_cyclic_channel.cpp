@@ -2726,6 +2726,26 @@ TEST_F(MasterCyclicTest, ValidationWarningsDoNotBlockStart) {
     master_.stopCyclicLoop();
 }
 
+TEST_F(MasterCyclicTest, CyclicHealthReportCoversLoopAndLam) {
+    // No loop, no PDO manager → zeroed report, early-return paths.
+    auto h0 = master_.cyclicHealth();
+    EXPECT_EQ(h0.cycles, 0u);
+
+    Master::CyclicLoopConfig cfg{};
+    cfg.cycle_period_us = 2000;
+    ASSERT_TRUE(master_.startCyclicLoop(cfg));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    auto h1 = master_.cyclicHealth();
+    EXPECT_GE(h1.cycles, 1u);
+    master_.stopCyclicLoop();
+
+    // pdoForSlave() forces the PDO manager (and its
+    // LogicalAddressManager) into existence so the LAM-stats block of
+    // cyclicHealth() runs too.
+    (void)master_.pdoForSlave(0);
+    (void)master_.cyclicHealth();
+}
+
 // ============================================================================
 // RingChannelV3MemoryTest — TPACKET_V3 block-mode prototype (Q17).
 // Synthetic ring = tpacket_block_desc array; each block chains tpacket3_hdr
