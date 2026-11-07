@@ -6,6 +6,7 @@
 #include "tether/io/TcpTransport.hpp"
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -288,4 +289,61 @@ TEST(TcpTransportServer, StopWakesBlockedAccept) {
     EXPECT_EQ(acceptFuture.wait_for(std::chrono::seconds(2)),
               std::future_status::ready);
     EXPECT_EQ(acceptFuture.get(), nullptr);
+}
+// ---------------------------------------------------------------------------
+// Coverage additions: tcpConnect error paths + non-socket transport states
+// ---------------------------------------------------------------------------
+
+TEST(TcpTransportCov, ConnectNullAndEmptyHost) {
+    EXPECT_EQ(tcpConnect(nullptr, 80, 10), nullptr);
+    EXPECT_EQ(tcpConnect("", 80, 10), nullptr);
+}
+
+TEST(TcpTransportCov, ConnectUnresolvableHost) {
+    // getaddrinfo fails for a syntactically invalid hostname.
+    EXPECT_EQ(tcpConnect("not a hostname!!!", 80, 50), nullptr);
+}
+
+TEST(TcpTransportCov, ConnectRefusedLoopback) {
+    // Reserve a port then immediately release it: connecting there hits
+    // the poll+SO_ERROR refused path.
+    uint16_t port = reserveLoopbackPort();
+    auto t = tcpConnect("127.0.0.1", port, 200);
+    EXPECT_EQ(t, nullptr);
+}
+
+TEST(TcpTransportCov, TransportOnBadFd) {
+    TcpTransport t(-1);
+    const std::array<uint8_t, 2> data{1, 2};
+    EXPECT_FALSE(t.send(data.data(), data.size()));
+    std::array<uint8_t, 8> buf{};
+    EXPECT_EQ(t.receive(buf.data(), buf.size(), 0), 0u);
+    EXPECT_FALSE(t.isConnected());
+    t.close();   // no-op on bad fd
+    EXPECT_FALSE(t.isConnected());
+}
+
+TEST(TcpTransportCov, SendOnNonSocketFdFails) {
+    // /dev/null accepts ::send with ENOTSOCK → connected_ clears.
+    int fd = ::open("/dev/null", O_RDWR);
+    ASSERT_GE(fd, 0);
+    {
+        TcpTransport t(fd);
+        const std::array<uint8_t, 4> data{1, 2, 3, 4};
+        EXPECT_FALSE(t.send(data.data(), data.size()));
+        EXPECT_FALSE(t.isConnected());
+    }   // dtor closes fd
+}
+
+TEST(TcpTransportCov, ReceiveOnNonSocketFdFails) {
+    int fd = ::open("/dev/null", O_RDWR);
+    ASSERT_GE(fd, 0);
+    {
+        TcpTransport t(fd);
+        std::array<uint8_t, 4> buf{};
+        // select() on /dev/null reports readable; recv() then fails
+        // ENOTSOCK → connected_ clears.
+        EXPECT_EQ(t.receive(buf.data(), buf.size(), 0), 0u);
+        EXPECT_FALSE(t.isConnected());
+    }
 }
