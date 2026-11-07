@@ -1303,6 +1303,7 @@ create_ethercat_test(coverage
         ethercat/test_network_emulator.cpp
         ethercat/test_process_image.cpp
         ethercat/test_pdo_queue_keepalive.cpp
+        ethercat/test_lam_cov.cpp
         ethercat/test_slave_status_poller.cpp
         ethercat/test_master_sii_coverage.cpp
         ethercat/test_slavegroup_coe_coverage.cpp
