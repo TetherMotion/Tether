@@ -1299,6 +1299,8 @@ create_ethercat_test(coverage
         ethercat/test_drive_state_cov.cpp
         ethercat/test_pdo_manager_transfer.cpp
         ethercat/test_pdo_smconfig.cpp
+        ethercat/test_master_transports.cpp
+        ethercat/test_coe_entry_transactions.cpp
         ethercat/test_debug_gate.cpp
         ethercat/test_ecat_misc_utils.cpp
         ethercat/test_tx_failure_diag.cpp
