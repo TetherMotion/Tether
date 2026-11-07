@@ -1308,6 +1308,8 @@ create_ethercat_test(coverage
         ethercat/test_sdo_segmented_wire.cpp
         ethercat/test_slave_pdo_custom_wire.cpp
         ethercat/test_slave_state_wire.cpp
+        ethercat/test_slavegroup_mailbox_cov.cpp
+        ethercat/test_encapsulation_setup.cpp
         ethercat/test_discovery_parallel.cpp
         ethercat/test_slave_status_poller.cpp
         ethercat/test_master_sii_coverage.cpp
