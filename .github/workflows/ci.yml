@@ -1157,12 +1157,14 @@ jobs:
     # FTPS instead. --delete removes remote files that no longer exist so
     # renamed/deleted pages can't linger. .well-known is excluded: it
     # holds the live ACME/Let's Encrypt challenges, deleting it would
-    # break TLS renewal for tether.techoverflow.net.
+    # break TLS renewal for tether.techoverflow.net. --no-perms skips
+    # the post-transfer chmod pass, which races with --delete in
+    # parallel mirror mode and fails on files already removed.
     - name: Mirror site to netcup via FTPS
       run: |
         lftp -u "$NETCUP_FTP_USER","$NETCUP_FTP_PASSWORD" \
           -e "set ftp:ssl-force true; set net:max-retries 3; \
-              mirror --reverse --delete --verbose --parallel=8 \
+              mirror --reverse --delete --no-perms --verbose --parallel=8 \
                 --exclude '^\.well-known(/|$)' \
                 site/documentation httpdocs; bye" \
           "$NETCUP_FTP_HOST"
