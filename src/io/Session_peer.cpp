@@ -18,47 +18,6 @@
 
 namespace tether { namespace io {
 
-namespace {
-
-bool validateCatalogValue(const SchemaCatalog* catalog, const EntryView& entry,
-                 const uint8_t* data, size_t size) {
-#if TETHER_IO_SCHEMA_ENABLED
-    if (!catalog || entry.schemaRef().key == SchemaKey{} || !catalog->graph()) return true;
-    BufReader reader(data, size);
-    return validateSchemaValue(*catalog->graph(), entry.schemaRef().key, reader) &&
-        reader.remaining() == 0;
-#else
-    (void)catalog; (void)entry; (void)data; (void)size;
-    return true;
-#endif
-}
-
-#if TETHER_IO_FUNCTIONS_ENABLED
-void validateFunctionReturn(const SchemaCatalog* catalog, const FunctionReturn& signature,
-                            FunctionCallResult& result) {
-    if (!result.success || !signature.present || signature.schema.key == SchemaKey{}) return;
-    const auto* graph = catalog ? catalog->graph() : nullptr;
-    const auto* node = graph ? graph->find(signature.schema.key) : nullptr;
-    const auto slot = catalog ? catalog->slotFor(signature.schema) : std::nullopt;
-    if (!node || !slot || computeSchemaDigest(*node) != signature.schema.digest) {
-        result.success = false;
-        result.error = ErrorCode::FunctionInvocationError;
-        result.errorMessage = "Function return schema is not installed";
-        result.returnValue.clear();
-        return;
-    }
-    BufReader reader(result.returnValue.data(), result.returnValue.size());
-    if (!validateSchemaValue(*graph, signature.schema.key, reader) || reader.remaining() != 0) {
-        result.success = false;
-        result.error = ErrorCode::FunctionInvocationError;
-        result.errorMessage = "Function return value does not match its schema";
-        result.returnValue.clear();
-    }
-}
-#endif // TETHER_IO_FUNCTIONS_ENABLED
-
-} // namespace
-
 #if TETHER_IO_FUNCTIONS_ENABLED
 // Peer (client-hosted) function invocation
 // --------------------------------------------------------------------------
