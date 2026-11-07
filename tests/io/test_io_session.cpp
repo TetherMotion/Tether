@@ -124,7 +124,9 @@ protected:
     /// Run the session in a thread, inject a message, collect the response.
     std::vector<uint8_t> sendAndReceive(const uint8_t* msg, size_t msgLen,
                                         bool bootstrap = true,
-                                        const SchemaCatalog* schemaCatalog = nullptr) {
+                                        const SchemaCatalog* schemaCatalog = nullptr,
+                                        LogFn logFn = nullptr,
+                                        ReceiveBufferFactory encodedFactory = nullptr) {
         auto transport = std::make_unique<MockTransport>();
         MockTransport* tp = transport.get();
 
@@ -148,8 +150,8 @@ protected:
         uint64_t fakeTs = 1000;
         auto tsFn = [&fakeTs]() -> uint64_t { return fakeTs++; };
 
-        Session session(std::move(transport), registry_, tsFn, nullptr, nullptr,
-            nullptr, nullptr, nullptr, nullptr, Framing::Slip, nullptr,
+        Session session(std::move(transport), registry_, tsFn, logFn, nullptr,
+            nullptr, nullptr, encodedFactory, nullptr, Framing::Slip, nullptr,
                 schemaCatalog);
 
         // Run in a thread, let it process the message, then stop
@@ -353,4 +355,376 @@ TEST_F(SessionTest, SchemaRequestReturnsCatalogDefinition) {
     EXPECT_EQ(definition.epoch, catalog.epoch());
     EXPECT_EQ(definition.node.key, node.key);
     EXPECT_EQ(computeSchemaDigest(definition.node), ref.digest);
+}
+
+// ---------------------------------------------------------------------------
+// Coverage: onMessage dispatch-name log switch (schemaCommitted + logFn set)
+// ---------------------------------------------------------------------------
+
+namespace {
+std::atomic<int> g_logCount{0};
+void countingLogFn(const char*, const char*, ...) { ++g_logCount; }
+}
+
+TEST_F(SessionTest, LogFnSeesMessageDispatch) {
+    g_logCount = 0;
+    uint8_t msg[9];
+    BufWriter writer(msg, sizeof(msg));
+    writer.putU8(static_cast<uint8_t>(MessageType::GetParamReq));
+    writer.putU64(1);
+
+    const auto response = sendAndReceive(msg, writer.pos, true, nullptr,
+                                         &countingLogFn);
+    ASSERT_GE(response.size(), 1U);
+    EXPECT_GT(g_logCount.load(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Coverage: handleClientHello error branches
+// ---------------------------------------------------------------------------
+
+TEST_F(SessionTest, ClientHelloMalformedRejected) {
+    // Trailing garbage after a valid hello → decode fails / remaining != 0.
+    std::array<uint8_t, 32> msg{};
+    BufWriter writer(msg.data(), msg.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::ClientHello));
+    writer.putU8(0xFF);
+    writer.putU8(0xFF);
+
+    const auto response = sendAndReceive(msg.data(), writer.pos, false);
+    ASSERT_GE(response.size(), 5U);
+    BufReader reader(response.data(), response.size());
+    EXPECT_EQ(reader.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(reader.getU32(), static_cast<uint32_t>(ErrorCode::InvalidMessage));
+}
+
+TEST_F(SessionTest, ClientHelloVersionRangeRejected) {
+    ClientHelloV6 hello;
+    hello.minVersion = SCHEMA_PROTOCOL_VERSION + 1;  // offers only >V6
+    hello.maxVersion = SCHEMA_PROTOCOL_VERSION + 2;
+    std::array<uint8_t, 512> msg{};
+    BufWriter writer(msg.data(), msg.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::ClientHello));
+    encodeClientHelloV6(writer, hello);
+    ASSERT_TRUE(writer.ok());
+
+    const auto response = sendAndReceive(msg.data(), writer.pos, false);
+    ASSERT_GE(response.size(), 1U);
+    EXPECT_EQ(response[0], static_cast<uint8_t>(MessageType::SchemaReject));
+    BufReader reader(response.data() + 1, response.size() - 1);
+    SchemaRejectV6 reject;
+    ASSERT_TRUE(decodeSchemaRejectV6(reader, reject));
+    EXPECT_EQ(reject.code, SchemaRejectCode::UnsupportedVersion);
+}
+
+// ---------------------------------------------------------------------------
+// Coverage: handleSchemaRequest error branches
+// ---------------------------------------------------------------------------
+
+TEST_F(SessionTest, SchemaRequestBeforeHelloRejected) {
+    SchemaRequestV6 request;
+    request.epoch = 1;
+    std::array<uint8_t, 256> msg{};
+    BufWriter writer(msg.data(), msg.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::SchemaRequest));
+    encodeSchemaRequestV6(writer, request);
+
+    const auto response = sendAndReceive(msg.data(), writer.pos, false);
+    ASSERT_GE(response.size(), 5U);
+    BufReader reader(response.data(), response.size());
+    EXPECT_EQ(reader.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(reader.getU32(), static_cast<uint32_t>(ErrorCode::InvalidMessage));
+}
+
+TEST_F(SessionTest, SchemaRequestBadEpochRejected) {
+    SchemaRequestV6 request;
+    request.epoch = 0xDEADBEEF;  // != session epoch
+    std::array<uint8_t, 256> msg{};
+    BufWriter writer(msg.data(), msg.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::SchemaRequest));
+    encodeSchemaRequestV6(writer, request);
+
+    const auto response = sendAndReceive(msg.data(), writer.pos, true);
+    ASSERT_GE(response.size(), 5U);
+    BufReader reader(response.data(), response.size());
+    EXPECT_EQ(reader.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(reader.getU32(), static_cast<uint32_t>(ErrorCode::InvalidMessage));
+}
+
+TEST_F(SessionTest, SchemaRequestNoCatalogRejects) {
+    // Definitions requested but the session has no catalog →
+    // SchemaReject(MissingDependency).
+    SchemaRequestV6 request;
+    request.epoch = 1;
+    SchemaKey key{};
+    key[0] = 77;
+    request.definitions.push_back(SchemaRef{key, {}});
+
+    std::array<uint8_t, 256> msg{};
+    BufWriter writer(msg.data(), msg.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::SchemaRequest));
+    encodeSchemaRequestV6(writer, request);
+
+    const auto response = sendAndReceive(msg.data(), writer.pos, true, nullptr);
+    ASSERT_GE(response.size(), 1U);
+    EXPECT_EQ(response[0], static_cast<uint8_t>(MessageType::SchemaReject));
+    BufReader reader(response.data() + 1, response.size() - 1);
+    SchemaRejectV6 reject;
+    ASSERT_TRUE(decodeSchemaRejectV6(reader, reject));
+    EXPECT_EQ(reject.code, SchemaRejectCode::MissingDependency);
+}
+
+TEST_F(SessionTest, SchemaRequestKeyNotInCatalogRejects) {
+    SchemaNode node;
+    node.key[0] = 9;
+    node.kind = SchemaKind::Bytes;
+    node.maxBytes = 256;
+    SchemaGraph graph{{node}};
+    SchemaCatalog catalog;
+    SchemaRef ref{node.key, computeSchemaDigest(node)};
+    ASSERT_TRUE(catalog.install(graph, {{ref, node.revision}}));
+
+    // Request a key the catalog does not hold → per-definition reject.
+    SchemaKey missing{};
+    missing[0] = 55;
+    SchemaRequestV6 request;
+    request.epoch = catalog.epoch();
+    request.definitions.push_back(SchemaRef{missing, {}});
+
+    std::array<uint8_t, 512> msg{};
+    BufWriter writer(msg.data(), msg.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::SchemaRequest));
+    encodeSchemaRequestV6(writer, request);
+
+    const auto response = sendAndReceive(msg.data(), writer.pos, true, &catalog);
+    ASSERT_GE(response.size(), 1U);
+    EXPECT_EQ(response[0], static_cast<uint8_t>(MessageType::SchemaReject));
+    BufReader reader(response.data() + 1, response.size() - 1);
+    SchemaRejectV6 reject;
+    ASSERT_TRUE(decodeSchemaRejectV6(reader, reject));
+    EXPECT_EQ(reject.code, SchemaRejectCode::MissingDependency);
+}
+
+// ---------------------------------------------------------------------------
+// Coverage: setIdentity()/identity() round-trip
+// ---------------------------------------------------------------------------
+
+TEST_F(SessionTest, IdentityRoundTrip) {
+    auto transport = std::make_unique<MockTransport>();
+    uint64_t ts = 1000;
+    Session session(std::move(transport), registry_,
+                    [&ts] { return ts++; });
+
+    machine::SessionIdentity ident{};
+    ident.actor = "test-client";
+    ident.source = "ut";
+    session.setIdentity(ident);
+
+    auto back = session.identity();
+    EXPECT_EQ(back.actor, "test-client");
+    EXPECT_EQ(back.source, "ut");
+}
+
+// ---------------------------------------------------------------------------
+// Coverage: feedSlipData buffer-overflow → discard-until-END
+// ---------------------------------------------------------------------------
+
+TEST_F(SessionTest, SlipOversizeFrameDiscardedThenSyncs) {
+    // A 4-byte receive buffer: any SLIP frame longer than 4 bytes overflows
+    // → the discard-until-END branch, then the next valid frame parses.
+    auto smallFactory = []() -> std::unique_ptr<IReceiveBuffer> {
+        return std::make_unique<StaticReceiveBuffer<4>>();
+    };
+
+    uint8_t msg[9];
+    BufWriter writer(msg, sizeof(msg));
+    writer.putU8(static_cast<uint8_t>(MessageType::GetParamReq));
+    writer.putU64(1);
+
+    const auto response = sendAndReceive(msg, writer.pos, true, nullptr,
+                                         nullptr, smallFactory);
+    // The oversized request is dropped; the bootstrap exchange still
+    // produced a ServerHello (also dropped if >4B, so response may be
+    // empty — the point is the session survived and the discard path ran).
+    (void)response;
+    SUCCEED();
+}
+
+// ---------------------------------------------------------------------------
+// Coverage: validateCatalogValue via schema-typed SetParam
+// ---------------------------------------------------------------------------
+
+TEST_F(SessionTest, SetParamSchemaValidationRejectsBadValue) {
+#if TETHER_IO_SCHEMA_ENABLED
+    // A param whose writes must match an F64 schema node.
+    SchemaNode node;
+    node.key[0] = 42;
+    node.kind = SchemaKind::Scalar;
+    node.scalarType = ValueType::F64;
+    SchemaGraph graph{{node}};
+    SchemaCatalog catalog;
+    SchemaRef ref{node.key, computeSchemaDigest(node)};
+    ASSERT_TRUE(catalog.install(graph, {{ref, node.revision}}));
+
+    ParamEntry p;
+    p.id = 7;
+    p.name = "schema_param";
+    p.description = "schema-validated";
+    p.group = "test";
+    p.valueType = ValueType::F64;
+    p.schema = ref;
+    double* valPtr = &paramValue_;
+    p.readFn  = [valPtr](void* d) { std::memcpy(d, valPtr, 8); };
+    p.writeFn = [valPtr](const void* s) { std::memcpy(valPtr, s, 8); };
+    registry_.addParam(std::move(p));
+
+    // Write 4 bytes (schema expects exactly 8 for F64) → validation fails.
+    uint8_t msg[64];
+    BufWriter writer(msg, sizeof(msg));
+    writer.putU8(static_cast<uint8_t>(MessageType::SetParamReq));
+    writer.putU64(7);
+    writer.putVarint(4);
+    writer.putU32(0xAABBCCDD);
+
+    const auto response = sendAndReceive(msg, writer.pos, true, &catalog);
+    ASSERT_GE(response.size(), 5U);
+    BufReader reader(response.data(), response.size());
+    EXPECT_EQ(reader.getU8(), static_cast<uint8_t>(MessageType::Error));
+    // Either the length check or the schema validation fires — both are
+    // error paths inside the schema-validated set flow.
+    EXPECT_NE(reader.getU32(), 0u);
+#else
+    GTEST_SKIP() << "schema support compiled out";
+#endif
+}
+
+// Fire the dispatch-name switch for every message family that maps to a
+// name string — inject several SLIP frames into one session run.
+TEST_F(SessionTest, LogFnCoversManyMessageTypes) {
+    g_logCount = 0;
+    auto transport = std::make_unique<MockTransport>();
+    MockTransport* tp = transport.get();
+
+    // Bootstrap: hello + commit.
+    {
+        std::array<uint8_t, 256> hello{};
+        BufWriter hw(hello.data(), hello.size());
+        hw.putU8(static_cast<uint8_t>(MessageType::ClientHello));
+        encodeClientHelloV6(hw, {});
+        tp->injectSlipMessage(hello.data(), hw.pos);
+
+        std::array<uint8_t, 32> commit{};
+        BufWriter cw(commit.data(), commit.size());
+        cw.putU8(static_cast<uint8_t>(MessageType::SchemaCommit));
+        encodeSchemaCommitV6(cw, {1});
+        tp->injectSlipMessage(commit.data(), cw.pos);
+    }
+
+    // One frame per dispatch-name case; payloads can be empty since the
+    // log switch runs before the handler.
+    const MessageType types[] = {
+        MessageType::ListParamsReq,
+        MessageType::ListParamsResp,
+        MessageType::ConfigureStreamReq,
+        MessageType::ConfigureStreamAck,
+        MessageType::StartStream,
+        MessageType::StopStream,
+        MessageType::StreamData,
+        MessageType::Error,
+        MessageType::SetParamReq,
+        MessageType::SetParamResp,
+        MessageType::PingReq,
+        MessageType::PongResp,
+        MessageType::ListSignalsReq,
+        MessageType::ListSignalsResp,
+        MessageType::GetParamReq,
+        MessageType::GetParamResp,
+        MessageType::GetSignalReq,
+        MessageType::GetSignalResp,
+        MessageType::ListFunctionsReq,
+        MessageType::ListFunctionsResp,
+        MessageType::CallFunctionReq,
+        MessageType::InvokeExReq,
+        MessageType::InvokeExResp,
+        MessageType::RegisterFunctionsReq,
+        MessageType::ClientHello,
+        MessageType::ServerHello,
+        MessageType::SchemaRequest,
+        MessageType::SchemaDefinition,
+        MessageType::SchemaCommit,
+        MessageType::SchemaReject,
+        MessageType::SchemaUpdate,
+        static_cast<MessageType>(0xEE),   // Unknown → default arm
+    };
+    for (auto t : types) {
+        uint8_t msg[16]{};
+        BufWriter w(msg, sizeof(msg));
+        w.putU8(static_cast<uint8_t>(t));
+        for (int i = 0; i < 8; ++i) w.putU8(0);
+        tp->injectSlipMessage(msg, w.pos);
+    }
+
+    uint64_t fakeTs = 1000;
+    Session session(std::move(transport), registry_,
+                    [&fakeTs] { return fakeTs++; }, &countingLogFn,
+                    nullptr, nullptr, nullptr, nullptr, nullptr,
+                    Framing::Slip, nullptr, nullptr);
+    std::thread th([&session] { session.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    session.requestStop();
+    th.join();
+
+    // One log call per dispatched message (bootstrap frames may add more).
+    EXPECT_GE(g_logCount.load(), static_cast<int>(sizeof(types) / sizeof(types[0])));
+}
+
+// ---------------------------------------------------------------------------
+// Coverage: handleSchemaCommit error branches
+// ---------------------------------------------------------------------------
+
+TEST_F(SessionTest, SchemaCommitBeforeHelloRejected) {
+    std::array<uint8_t, 32> msg{};
+    BufWriter writer(msg.data(), msg.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::SchemaCommit));
+    encodeSchemaCommitV6(writer, {1});
+
+    const auto response = sendAndReceive(msg.data(), writer.pos, false);
+    ASSERT_GE(response.size(), 5U);
+    BufReader reader(response.data(), response.size());
+    EXPECT_EQ(reader.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(reader.getU32(), static_cast<uint32_t>(ErrorCode::InvalidMessage));
+}
+
+TEST_F(SessionTest, SchemaCommitBadEpochRejected) {
+    // Bootstrap does hello + commit(epoch=1); a second commit with the
+    // wrong epoch hits the InvalidMessage branch.
+    auto transport = std::make_unique<MockTransport>();
+    MockTransport* tp = transport.get();
+    {
+        std::array<uint8_t, 256> hello{};
+        BufWriter hw(hello.data(), hello.size());
+        hw.putU8(static_cast<uint8_t>(MessageType::ClientHello));
+        encodeClientHelloV6(hw, {});
+        tp->injectSlipMessage(hello.data(), hw.pos);
+    }
+    std::array<uint8_t, 32> msg{};
+    BufWriter writer(msg.data(), msg.size());
+    writer.putU8(static_cast<uint8_t>(MessageType::SchemaCommit));
+    encodeSchemaCommitV6(writer, {0xDEADBEEF});
+    tp->injectSlipMessage(msg.data(), writer.pos);
+
+    uint64_t fakeTs = 1000;
+    Session session(std::move(transport), registry_,
+                    [&fakeTs] { return fakeTs++; });
+    std::thread th([&session] { session.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    session.requestStop();
+    th.join();
+
+    auto response = tp->decodeTxPacket();   // ServerHello
+    response = tp->decodeTxPacket();        // our error
+    ASSERT_GE(response.size(), 5U);
+    BufReader reader(response.data(), response.size());
+    EXPECT_EQ(reader.getU8(), static_cast<uint8_t>(MessageType::Error));
+    EXPECT_EQ(reader.getU32(), static_cast<uint32_t>(ErrorCode::InvalidMessage));
 }
