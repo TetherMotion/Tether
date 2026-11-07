@@ -22,6 +22,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <thread>
 
@@ -32,7 +33,11 @@
 #endif
 
 #include "tether/ethercat/AsyncCyclicLoop.hpp"
+#include "tether/ethercat/DCManager.hpp"
+#include "tether/ethercat/LogicalAddressManager.hpp"
 #include "tether/ethercat/Master.hpp"
+#include "tether/ethercat/PDOManager.hpp"
+#include "tether/ethercat/PDOTypes.hpp"
 #include "tether/ethercat/ProcessImage.hpp"
 #include "logging/Logger.hpp"
 
@@ -580,6 +585,184 @@ TEST(MasterAsyncLoop, StopCyclicLoopLeavesAsyncDatapathAlive) {
 
     master.stopCyclicLoop();                   // cyclic isn't running —
     EXPECT_TRUE(master.isAsyncLoopRunning());  // async must survive
+
+    master.processImage().triggerSend();
+    ASSERT_TRUE(waitFor([&] {
+        return master.getAsyncLoopStats().sends >= 1;
+    }));
+    master.stop();
+}
+
+// ============================================================================
+// Config-flag arms — CPU isolation, memory lock, DC sync thread
+// ============================================================================
+
+TEST(MasterAsyncLoop, CpuIsolationClaimsAndReleases) {
+    NetworkInterface iface{};
+    iface.send = [](const uint8_t*, size_t) { return true; };
+    Master master;
+    const uint8_t mac[6] = {0x02,0,0,0,0,1};
+    master.start(iface, mac);
+
+    Master::AsyncLoopConfig cfg;
+    cfg.cpu_isolation.enabled    = true;
+    cfg.cpu_isolation.cyclic_cpu = 0;
+    cfg.cpu_isolation.dc_cpu     = 1;   // different CPU → own claim slot
+    // DC interval > 0 makes the DC-CPU claim arm run too.
+    cfg.enable_dc_synchronization = true;
+    cfg.dc_interval_us = 10'000;
+    ASSERT_TRUE(master.startAsyncLoop(cfg));
+    EXPECT_TRUE(master.isAsyncLoopRunning());
+
+    // stopAsyncLoop releases whichever claims were granted.
+    master.stopAsyncLoop();
+    EXPECT_FALSE(master.isAsyncLoopRunning());
+    master.stop();
+}
+
+TEST(MasterAsyncLoop, CpuIsolationDeniedRunsUnpinned) {
+    NetworkInterface iface{};
+    iface.send = [](const uint8_t*, size_t) { return true; };
+    Master master;
+    const uint8_t mac[6] = {0x02,0,0,0,0,1};
+    master.start(iface, mac);
+
+    Master::AsyncLoopConfig cfg;
+    cfg.cpu_isolation.enabled    = true;
+    cfg.cpu_isolation.cyclic_cpu = 9999;   // no such CPU → claim denied
+    cfg.cpu_isolation.dc_cpu     = 9999;
+    cfg.enable_dc_synchronization = true;
+    cfg.dc_interval_us = 10'000;
+    ASSERT_TRUE(master.startAsyncLoop(cfg));
+    EXPECT_TRUE(master.isAsyncLoopRunning());
+    master.stop();
+}
+
+TEST(MasterAsyncLoop, MemoryLockFlagsAccepted) {
+    NetworkInterface iface{};
+    iface.send = [](const uint8_t*, size_t) { return true; };
+    Master master;
+    const uint8_t mac[6] = {0x02,0,0,0,0,1};
+    master.start(iface, mac);
+
+    Master::AsyncLoopConfig cfg;
+    cfg.memory_lock.lock_all_process     = true;   // mlockall — best-effort
+    cfg.memory_lock.stack_prefault_bytes = 4096;
+    cfg.memory_lock.prefault_stack       = false;  // overrides to 0
+    cfg.collect_mode = AsyncCyclicLoop::CollectMode::OnSend;
+    ASSERT_TRUE(master.startAsyncLoop(cfg));
+    EXPECT_TRUE(master.isAsyncLoopRunning());
+    master.stop();
+}
+
+TEST(MasterAsyncLoop, MemoryLockPrefaultPropagates) {
+    NetworkInterface iface{};
+    iface.send = [](const uint8_t*, size_t) { return true; };
+    Master master;
+    const uint8_t mac[6] = {0x02,0,0,0,0,1};
+    master.start(iface, mac);
+
+    Master::AsyncLoopConfig cfg;
+    // exec.stack_prefault_bytes==0 + memory_lock.stack_prefault_bytes>0
+    // propagates the memory_lock value into the exec config.
+    cfg.exec.stack_prefault_bytes        = 0;
+    cfg.memory_lock.stack_prefault_bytes = 4096;
+    cfg.memory_lock.prefault_stack       = true;
+    ASSERT_TRUE(master.startAsyncLoop(cfg));
+    EXPECT_TRUE(master.isAsyncLoopRunning());
+    master.stop();
+}
+
+TEST(MasterAsyncLoop, DcSyncThreadTicksWithoutDc) {
+    NetworkInterface iface{};
+    iface.send = [](const uint8_t*, size_t) { return true; };
+    Master master;
+    const uint8_t mac[6] = {0x02,0,0,0,0,1};
+    master.start(iface, mac);
+
+    Master::AsyncLoopConfig cfg;
+    cfg.collect_mode = AsyncCyclicLoop::CollectMode::OnSend;
+    cfg.enable_dc_synchronization = true;
+    cfg.dc_interval_us = 2'000;    // 2 ms tick
+    ASSERT_TRUE(master.startAsyncLoop(cfg));
+
+    // No DC manager — dc_fn returns true each tick and counts.
+    ASSERT_TRUE(waitFor([&] {
+        return master.getAsyncLoopStats().dc_sync_count >= 1;
+    }));
+    master.stop();
+}
+
+TEST(MasterAsyncLoop, PdoSendFnExchangesAll) {
+    NetworkInterface iface{};
+    std::atomic<uint64_t> wire_sends{0};
+    iface.send = [&](const uint8_t*, size_t) {
+        wire_sends.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    };
+    Master master;
+    const uint8_t mac[6] = {0x02,0,0,0,0,1};
+    master.start(iface, mac);
+
+    Master::AsyncLoopConfig cfg;
+    cfg.collect_mode = AsyncCyclicLoop::CollectMode::OnSend;
+    ASSERT_TRUE(master.startAsyncLoop(cfg));
+
+    // pdo_ exists but no logical address manager → exchangeAll() arm.
+    master.processImage().triggerSend();
+    ASSERT_TRUE(waitFor([&] {
+        return master.getAsyncLoopStats().sends >= 1;
+    }));
+    master.stop();
+}
+
+TEST(MasterAsyncLoop, PdoSendFnCyclicSendWithLam) {
+    NetworkInterface iface{};
+    iface.send = [](const uint8_t*, size_t) { return true; };
+    Master master;
+    const uint8_t mac[6] = {0x02,0,0,0,0,1};
+    master.start(iface, mac);
+
+    // Initialized LAM + PDO mapping → send_fn takes the cyclicSend() arm.
+    auto& lam = master.logicalAddressManager();
+    lam.init();
+    PDO::SlaveConfig configs[PDO::kMaxPDOSlaves] = {};
+    configs[0].configured = true;
+    configs[0].sm[2] = PDO::SyncManagerConfig::process_output(0x1800, 8);
+    configs[0].rxpdo_size = 8;
+    configs[0].sm[3] = PDO::SyncManagerConfig::process_input(0x1C00, 8);
+    configs[0].txpdo_size = 8;
+    ASSERT_TRUE(lam.buildAddressMap(configs, 1));
+
+    auto& pdo = master.pdo();
+    pdo.init();
+    pdo.mapping().add_rxpdo(0, 8);
+    pdo.mapping().add_txpdo(0, 8);
+
+    Master::AsyncLoopConfig cfg;
+    cfg.collect_mode = AsyncCyclicLoop::CollectMode::OnSend;
+    ASSERT_TRUE(master.startAsyncLoop(cfg));
+
+    master.processImage().triggerSend();
+    ASSERT_TRUE(waitFor([&] {
+        return master.getAsyncLoopStats().sends >= 1;
+    }));
+    master.stop();
+}
+
+TEST(MasterAsyncLoop, PdoSendFnIteratesPdoGroups) {
+    NetworkInterface iface{};
+    iface.send = [](const uint8_t*, size_t) { return true; };
+    Master master;
+    const uint8_t mac[6] = {0x02,0,0,0,0,1};
+    master.start(iface, mac);
+
+    // A PDO group gives send_fn the pdo_groups_ loop arm.
+    (void)master.createPdoGroup({0}, 0x20000);
+
+    Master::AsyncLoopConfig cfg;
+    cfg.collect_mode = AsyncCyclicLoop::CollectMode::OnSend;
+    ASSERT_TRUE(master.startAsyncLoop(cfg));
 
     master.processImage().triggerSend();
     ASSERT_TRUE(waitFor([&] {
