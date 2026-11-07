@@ -154,6 +154,45 @@ TEST(NetworkEmuCov, FpwrFprwDispatch) {
     }
 }
 
+TEST(NetworkEmuCov, ConfiguredAddrMatchDispatches) {
+    NetworkEmulator net;
+    net.addSlave(std::make_unique<SlaveEmulator>());
+
+    // APWR AL_CONTROL (0x0120) ← PRE_OP — configured-addr commands skip
+    // slaves still in INIT.
+    auto up = makeFrame({{0x02, 0, 0x0000, 0x0120, 2, 0x02, false}});
+    (void)net.processFrame(up.data(), up.size());
+
+    // FPWR adp=0 (initial configured_addr_) → write 0x0010/0x0011 with
+    // fill=0x10 → configured_addr_ becomes 0x1010.
+    auto setAddr = makeFrame({{0x05, 0, 0x0000, 0x0010, 2, 0x10, false}});
+    (void)net.processFrame(setAddr.data(), setAddr.size());
+
+    // Now FPRD/FPWR/FPRW with adp=0x1010 match → dispatch to the slave.
+    for (uint8_t c : {0x04, 0x05, 0x06}) {
+        auto f = makeFrame({{c, 0, 0x1010, 0x0130, 2, 0, false}});
+        auto r = net.processFrame(f.data(), f.size());
+        ASSERT_EQ(r.size(), f.size());
+        EXPECT_GE(r[16 + 10 + 2], 0x01);           // WKC ≥ 1 on match
+    }
+
+    // Non-matching adp → no dispatch, WKC 0.
+    auto miss = makeFrame({{0x04, 0, 0x9999, 0x0130, 2, 0, false}});
+    auto rm = net.processFrame(miss.data(), miss.size());
+    EXPECT_EQ(rm[16 + 10 + 2], 0x00);
+}
+
+TEST(NetworkEmuCov, LogicalCommandsLrdLwrLrw) {
+    NetworkEmulator net;
+    net.addSlave(std::make_unique<SlaveEmulator>());
+    // logical_addr = adp | (ado << 16) — use 0x00010000.
+    for (uint8_t c : {0x0A, 0x0B, 0x0C}) {
+        auto f = makeFrame({{c, 0, 0x0000, 0x0001, 4, 0, false}});
+        auto r = net.processFrame(f.data(), f.size());
+        ASSERT_EQ(r.size(), f.size());             // dispatch ran (WKC any)
+    }
+}
+
 // ============================================================================
 // Broadcast commands
 // ============================================================================
