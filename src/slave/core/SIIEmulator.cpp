@@ -19,14 +19,20 @@ void SIIEmulator::processCommand() {
         (*registers_)[ESCReg::SIIControl] = ctrlBusy & 0xFF;
         (*registers_)[ESCReg::SIIControl + 1] = (ctrlBusy >> 8) & 0xFF;
 
-        // Read operation
-        uint16_t word = readWord(static_cast<uint16_t>(siiState_.address));
-        siiState_.data[0] = word & 0xFF;
-        siiState_.data[1] = (word >> 8) & 0xFF;
+        // Read operation: EEPDAT is 32-bit and returns the EEPROM word at
+        // the addressed location plus the following word (masters read
+        // word-pairs per command).
+        uint16_t w0 = readWord(static_cast<uint16_t>(siiState_.address));
+        uint16_t w1 = readWord(static_cast<uint16_t>(siiState_.address + 1));
+        siiState_.data[0] = w0 & 0xFF;
+        siiState_.data[1] = (w0 >> 8) & 0xFF;
+        siiState_.data[2] = w1 & 0xFF;
+        siiState_.data[3] = (w1 >> 8) & 0xFF;
 
         // Update data register
-        (*registers_)[ESCReg::SIIData] = siiState_.data[0];
-        (*registers_)[ESCReg::SIIData + 1] = siiState_.data[1];
+        for (int i = 0; i < 4; ++i) {
+            (*registers_)[ESCReg::SIIData + i] = siiState_.data[i];
+        }
 
         // Clear read bit and busy
         siiState_.control.read_op = 0;
@@ -73,8 +79,14 @@ void SIIEmulator::handleRegisterWrite(uint16_t addr, const uint8_t* data, uint16
             static_cast<uint16_t>(data[0] | (data[1] << 8)));
         processCommand();
     }
-    if (addr == ESCReg::SIIAddress && len >= 4) {
-        siiState_.address = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
+    if (addr == ESCReg::SIIAddress && len >= 2) {
+        // Masters write the word address as a 16-bit value; accept 2-4
+        // bytes and zero-extend to the 32-bit internal address.
+        uint32_t a = 0;
+        for (uint16_t i = 0; i < len && i < 4; ++i) {
+            a |= static_cast<uint32_t>(data[i]) << (8 * i);
+        }
+        siiState_.address = a;
     }
 }
 
@@ -101,29 +113,18 @@ void SIIEmulator::initializeFromIdentity(const SlaveIdentity& identity) {
     // Word 5-6: Reserved
     // Word 7: Checksum (calculated later)
 
-    // Words 8-11: Vendor ID (4 bytes)
-    sii[16] = identity.vendorId & 0xFF;
-    sii[17] = (identity.vendorId >> 8) & 0xFF;
-    sii[18] = (identity.vendorId >> 16) & 0xFF;
-    sii[19] = (identity.vendorId >> 24) & 0xFF;
-
-    // Words 12-13: Product Code
-    sii[24] = identity.productCode & 0xFF;
-    sii[25] = (identity.productCode >> 8) & 0xFF;
-    sii[26] = (identity.productCode >> 16) & 0xFF;
-    sii[27] = (identity.productCode >> 24) & 0xFF;
-
-    // Words 14-15: Revision Number
-    sii[28] = identity.revisionNumber & 0xFF;
-    sii[29] = (identity.revisionNumber >> 8) & 0xFF;
-    sii[30] = (identity.revisionNumber >> 16) & 0xFF;
-    sii[31] = (identity.revisionNumber >> 24) & 0xFF;
-
-    // Words 16-17: Serial Number
-    sii[32] = identity.serialNumber & 0xFF;
-    sii[33] = (identity.serialNumber >> 8) & 0xFF;
-    sii[34] = (identity.serialNumber >> 16) & 0xFF;
-    sii[35] = (identity.serialNumber >> 24) & 0xFF;
+    // Identity block: four consecutive 32-bit values at words 0x08-0x0F
+    // (vendor, product, revision, serial — 4 bytes each).
+    auto put32 = [&sii](size_t byte, uint32_t v) {
+        sii[byte + 0] = v & 0xFF;
+        sii[byte + 1] = (v >> 8) & 0xFF;
+        sii[byte + 2] = (v >> 16) & 0xFF;
+        sii[byte + 3] = (v >> 24) & 0xFF;
+    };
+    put32(16, identity.vendorId);
+    put32(20, identity.productCode);
+    put32(24, identity.revisionNumber);
+    put32(28, identity.serialNumber);
 
     siiState_.eepromData = std::move(sii);
 }

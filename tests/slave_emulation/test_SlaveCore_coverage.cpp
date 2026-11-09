@@ -323,6 +323,40 @@ TEST_F(SlaveCoreTest, APRDWrongPositionNoResponse) {
     }
 }
 
+TEST_F(SlaveCoreTest, AutoIncrementIncrementsADPForNextSlave) {
+    // ETG.1000: an ESC adds 1 to the auto-increment address while
+    // forwarding; the slave reading 0 is addressed.  adp=0xFFFF (-1)
+    // therefore targets the second slave on the chain.
+    SlaveConfig cfg2 = core->getConfig();
+    auto slave2 = std::make_unique<SlaveCore>(cfg2);
+    slave2->setPosition(1);
+
+    std::vector<uint8_t> data(2, 0);
+    auto frame = buildFrame(EcCmd::APRD, 0xFFFF, REG_AL_STATUS, data);
+
+    // Slave 0 sees -1, does not answer, forwards adp+1 == 0.
+    auto resp1 = core->processFrame(frame.data(), frame.size());
+    ASSERT_FALSE(resp1.empty());
+    EXPECT_EQ(extractWKC(resp1, data.size()), 0u);
+    EXPECT_EQ(resp1[18] | (resp1[19] << 8), 0u);  // forwarded ADP
+
+    // Slave 1 sees 0 and answers.
+    auto resp2 = slave2->processFrame(resp1.data(), resp1.size());
+    ASSERT_FALSE(resp2.empty());
+    EXPECT_EQ(extractWKC(resp2, data.size()), 1u);
+}
+
+TEST_F(SlaveCoreTest, AutoIncrementFirstSlaveReadsADPZero) {
+    // adp=0 addresses the first slave; it answers and forwards adp=1,
+    // which no later position-0 slave would claim.
+    std::vector<uint8_t> data(2, 0);
+    auto frame = buildFrame(EcCmd::APRD, 0, REG_AL_STATUS, data);
+    auto resp = core->processFrame(frame.data(), frame.size());
+    ASSERT_FALSE(resp.empty());
+    EXPECT_EQ(extractWKC(resp, data.size()), 1u);
+    EXPECT_EQ(resp[18] | (resp[19] << 8), 1u);  // forwarded ADP
+}
+
 TEST_F(SlaveCoreTest, APWRWriteALControl) {
     core->setPosition(0);
     // Write PRE_OP to AL Control
