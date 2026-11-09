@@ -4,7 +4,10 @@
  * @brief EtherCAT master bring-up for the emulated Beckhoff fleet.
  *
  * Drives a tether::ethercat::Master through the full slave lifecycle
- * against the BeckhoffFleet topology over a UdpEthercatLink:
+ * against the BeckhoffFleet topology over a virtual link — either a
+ * UdpEthercatLink (privilege-free, frames as UDP datagrams) or a
+ * PacketEthercatLink (raw L2 frames on a kernel interface such as a
+ * veth pair, needs CAP_NET_RAW):
  *
  *   start -> discover (BRD) -> mailbox config -> PREOP
  *         -> SM2/SM3 + fixed PDO registration -> SAFEOP -> OP
@@ -21,6 +24,7 @@
 #pragma once
 
 #include "UdpEthercatLink.hpp"
+#include "PacketEthercatLink.hpp"
 #include "BeckhoffFleet.hpp"
 
 #include "tether/ethercat/Master.hpp"
@@ -53,10 +57,18 @@ public:
     bool open(const std::string& peerHost, uint16_t peerPort) {
         close();
         if (!link_.open(peerHost, peerPort)) return false;
-        static const uint8_t kSrcMac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
-        master_.start(link_.interface(), kSrcMac);
-        rxRunning_.store(true);
-        rxThread_ = std::thread([this]() { rxLoop(); });
+        startMaster(link_.interface());
+        return true;
+    }
+
+    /**
+     * Open a raw AF_PACKET link on @p ifaceName (e.g. one end of a veth
+     * pair) and start the master.  Requires CAP_NET_RAW.
+     */
+    bool openIface(const std::string& ifaceName) {
+        close();
+        if (!packetLink_.open(ifaceName)) return false;
+        startMaster(packetLink_.interface());
         return true;
     }
 
@@ -67,6 +79,7 @@ public:
         if (rxThread_.joinable()) rxThread_.join();
         if (master_.isRunning()) master_.stop();
         link_.close();
+        packetLink_.close();
     }
 
     EtherCAT::Master& master() { return master_; }
@@ -233,6 +246,13 @@ private:
         return nullptr;
     }
 
+    void startMaster(EtherCAT::NetworkInterface&& iface) {
+        static const uint8_t kSrcMac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+        master_.start(std::move(iface), kSrcMac);
+        rxRunning_.store(true);
+        rxThread_ = std::thread([this]() { rxLoop(); });
+    }
+
     void rxLoop() {
         while (rxRunning_.load(std::memory_order_relaxed)) {
             master_.drainWire(64);
@@ -242,6 +262,7 @@ private:
     }
 
     UdpEthercatLink      link_;
+    PacketEthercatLink   packetLink_;
     EtherCAT::Master     master_;
     std::atomic<bool>    rxRunning_{false};
     std::thread          rxThread_;

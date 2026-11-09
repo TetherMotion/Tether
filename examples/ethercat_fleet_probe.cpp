@@ -3,9 +3,11 @@
  * @file ethercat_fleet_probe.cpp
  * @brief EtherCAT master for the emulated Beckhoff fleet.
  *
- * Connects to beckhoff_slave_chain's UDP "virtual interface" as an
+ * Connects to beckhoff_slave_chain over a virtual link as an
  * EtherCAT master: discovery, AL transitions INIT->PREOP->SAFEOP->OP,
  * SM2/SM3 + fixed PDO registration, then cyclic process-data exchange.
+ * The link is UDP by default (--peer/--port) or raw L2 frames on a
+ * kernel interface with --iface (e.g. a veth end; needs CAP_NET_RAW).
  *
  * Modes:
  *   probe (default)  bring the bus up, verify the 10-node Beckhoff
@@ -22,6 +24,7 @@
  *
  * Usage:
  *   ethercat_fleet_probe [--peer 127.0.0.1] [--port 47820]
+ *                        [--iface NAME]
  *                        [--cycles 100] [--simdir DIR] [--hz 200]
  *                        [--time SEC]
  */
@@ -105,6 +108,11 @@ int main(int argc, char** argv) {
     prog.add_argument("--port")
         .help("slave UDP port")
         .default_value(std::string("47820"));
+    prog.add_argument("--iface")
+        .help("raw-frame mode: kernel interface carrying EtherCAT "
+              "frames (e.g. a veth end; overrides --peer/--port, "
+              "needs CAP_NET_RAW)")
+        .default_value(std::string(""));
     prog.add_argument("--cycles")
         .help("cyclic exchanges in probe mode")
         .default_value(std::string("100"));
@@ -130,6 +138,7 @@ int main(int argc, char** argv) {
     const std::string peer = prog.get<std::string>("--peer");
     const uint16_t port = static_cast<uint16_t>(
         std::stoul(prog.get<std::string>("--port")));
+    const std::string iface = prog.get<std::string>("--iface");
     const uint32_t cycles = std::stoul(prog.get<std::string>("--cycles"));
     const std::string simdir = prog.get<std::string>("--simdir");
     const uint32_t hz = std::stoul(prog.get<std::string>("--hz"));
@@ -138,7 +147,9 @@ int main(int argc, char** argv) {
     const auto infos = fleetInfos();
 
     FleetMaster fm;
-    if (!fm.open(peer, port)) {
+    const bool linkOk = iface.empty() ? fm.open(peer, port)
+                                      : fm.openIface(iface);
+    if (!linkOk) {
         std::fprintf(stderr, "ethercat_fleet_probe: link open failed\n");
         return 1;
     }

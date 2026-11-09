@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: MIT
 /**
  * @file beckhoff_slave_chain.cpp
- * @brief Emulated Beckhoff I/O fleet on a UDP "virtual interface".
+ * @brief Emulated Beckhoff I/O fleet on a virtual EtherCAT interface.
  *
  * Serves the 10-node fleet from BeckhoffFleet.hpp (two EK1100 couplers,
  * each followed by EL1004/EL2004/EL3104/EL4104) as a chain of
  * EtherCAT::slave::CiA401Slave instances.  Complete Ethernet frames
- * (dst MAC + ethertype 0x88A4 + EtherCAT payload) arrive as UDP
- * datagrams; each datagram is run through every slave in chain order
- * and the response frame is sent back to the sender.
+ * (dst MAC + ethertype 0x88A4 + EtherCAT payload) are exchanged one
+ * frame at a time; each frame is run through every slave in chain
+ * order and the response frame is sent back.
  *
- * This is a software test transport: one UDP datagram carries one
- * Ethernet frame.  No CAP_NET_RAW or kernel interface is needed, so the
- * example runs unprivileged on localhost.
+ * Two carriers are supported:
+ *  - UDP (default): one datagram carries one Ethernet frame.  No
+ *    privileges needed; the peer learns the reply address from the
+ *    sender of each datagram.
+ *  - --iface NAME: raw L2 frames via AF_PACKET on a kernel interface,
+ *    typically one end of a veth pair.  Needs CAP_NET_RAW; the peer
+ *    is whatever is attached to the other end.
  *
  * The fleet's I/O is also exposed over Tether IO (tether_io TCP/SLIP):
  *   params  fleet.<key>.di / .ai<i>   (writable slave inputs)
@@ -22,15 +26,18 @@
  *
  * Usage:
  *   beckhoff_slave_chain [--port 47820] [--bind 127.0.0.1]
+ *                        [--iface NAME]
  *                        [--io-port 4001] [--io-bind 127.0.0.1]
  *                        [--hz 1000] [--time SEC]
  *
- * A master connects by sending EtherCAT frames to UDP port --port; the
- * slave replies to the sender's address.  See ethercat_fleet_probe for
+ * A master connects either by sending EtherCAT frames to UDP port
+ * --port (replies go to the datagram sender) or by attaching to the
+ * other end of the --iface interface.  See ethercat_fleet_probe for
  * the matching master side.
  */
 #include "common/BeckhoffFleet.hpp"
 #include "common/UdpEthercatLink.hpp"
+#include "common/PacketEthercatLink.hpp"
 
 #include "tether/io/Registry.hpp"
 #include "tether/io/SchemaCatalog.hpp"
@@ -280,6 +287,11 @@ int main(int argc, char** argv) {
     prog.add_argument("--bind")
         .help("UDP bind address")
         .default_value(std::string("127.0.0.1"));
+    prog.add_argument("--iface")
+        .help("raw-frame mode: kernel interface carrying EtherCAT "
+              "frames (e.g. a veth end; overrides --port/--bind, "
+              "needs CAP_NET_RAW)")
+        .default_value(std::string(""));
     prog.add_argument("--io-port")
         .help("Tether IO TCP port (0 disables the IO server)")
         .default_value(std::string("4001"));
@@ -301,6 +313,7 @@ int main(int argc, char** argv) {
     const uint16_t udpPort = static_cast<uint16_t>(
         std::stoul(prog.get<std::string>("--port")));
     const std::string bind = prog.get<std::string>("--bind");
+    const std::string iface = prog.get<std::string>("--iface");
     const uint16_t ioPort = static_cast<uint16_t>(
         std::stoul(prog.get<std::string>("--io-port")));
     const std::string ioBind = prog.get<std::string>("--io-bind");
@@ -318,9 +331,20 @@ int main(int argc, char** argv) {
     fleet.start();
 
     UdpEthercatLink link;
-    // The peer fields are unused on the server side; replies go to the
-    // sender learned from recvfrom().
-    if (!link.open("127.0.0.1", 0, udpPort, bind)) {
+    PacketEthercatLink packetLink;
+    const bool useIface = !iface.empty();
+    // The peer fields are unused on the server side; UDP replies go to
+    // the sender learned from recvfrom(), packet replies take their
+    // destination MAC from the frame header itself.
+    if (useIface) {
+        if (!packetLink.open(iface)) {
+            std::fprintf(stderr,
+                "beckhoff_slave_chain: AF_PACKET open on %s failed "
+                "(needs CAP_NET_RAW and an existing interface)\n",
+                iface.c_str());
+            return 1;
+        }
+    } else if (!link.open("127.0.0.1", 0, udpPort, bind)) {
         std::fprintf(stderr, "beckhoff_slave_chain: UDP bind %s:%u failed\n",
                      bind.c_str(), udpPort);
         return 1;
@@ -367,15 +391,20 @@ int main(int argc, char** argv) {
               std::chrono::duration<double>(runSecs)
         : std::chrono::steady_clock::time_point::max();
 
-    std::printf("beckhoff_slave_chain: %zu slaves, EtherCAT/UDP on %s:%u",
-                fleet.slaveCount(), bind.c_str(), udpPort);
+    if (useIface) {
+        std::printf("beckhoff_slave_chain: %zu slaves, EtherCAT/raw on %s",
+                    fleet.slaveCount(), iface.c_str());
+    } else {
+        std::printf("beckhoff_slave_chain: %zu slaves, EtherCAT/UDP on %s:%u",
+                    fleet.slaveCount(), bind.c_str(), udpPort);
+    }
     if (ioServer) std::printf(", tether_io on %s:%u", ioBind.c_str(), ioPort);
     std::printf(" (%u Hz)\n", hz);
     std::fflush(stdout);
 
     uint8_t frame[2048];
     auto nextTick = std::chrono::steady_clock::now();
-    pollfd pfd{link.fd(), POLLIN, 0};
+    pollfd pfd{useIface ? packetLink.fd() : link.fd(), POLLIN, 0};
 
     while (!g_stop && std::chrono::steady_clock::now() < deadline) {
         const auto now = std::chrono::steady_clock::now();
@@ -390,14 +419,22 @@ int main(int argc, char** argv) {
 
         const int pr = ::poll(&pfd, 1, timeoutMs);
         if (pr > 0 && (pfd.revents & POLLIN)) {
-            // Drain every pending datagram; each is one Ethernet frame.
+            // Drain every pending frame; each is one Ethernet frame.
             for (;;) {
-                sockaddr_in from{};
                 size_t n = 0;
-                if (!link.recvFrom(frame, sizeof(frame), &n, from)) break;
-                auto resp = fleet.processFrame(frame, n);
-                if (!resp.empty()) {
-                    link.sendTo(resp.data(), resp.size(), from);
+                if (useIface) {
+                    if (!packetLink.recvFrom(frame, sizeof(frame), &n)) break;
+                    auto resp = fleet.processFrame(frame, n);
+                    if (!resp.empty()) {
+                        packetLink.sendFrame(resp.data(), resp.size());
+                    }
+                } else {
+                    sockaddr_in from{};
+                    if (!link.recvFrom(frame, sizeof(frame), &n, from)) break;
+                    auto resp = fleet.processFrame(frame, n);
+                    if (!resp.empty()) {
+                        link.sendTo(resp.data(), resp.size(), from);
+                    }
                 }
             }
         }
