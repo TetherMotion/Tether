@@ -1407,6 +1407,38 @@ target_compile_definitions(tether_ethercat_master_tests PRIVATE
 
 gtest_discover_tests(tether_ethercat_master_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_30})
 
+# Emulated Beckhoff fleet <-> master over the UDP-carried Ethernet-frame
+# transport (examples/common headers; needs both master and slave libs).
+if(TARGET tether_ethercat_slave)
+tether_add_test_executable(tether_ethercat_beckhoff_fleet_tests
+    ethercat/test_beckhoff_fleet.cpp
+)
+
+target_include_directories(tether_ethercat_beckhoff_fleet_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tether
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${CMAKE_SOURCE_DIR}/examples
+)
+
+target_link_libraries(tether_ethercat_beckhoff_fleet_tests
+    tether_ethercat_common
+    tether_ethercat_master
+    tether_ethercat_slave
+    tether_hal
+    tether_common
+    GTest::gtest_main
+    GTest::gmock
+)
+
+target_compile_definitions(tether_ethercat_beckhoff_fleet_tests PRIVATE
+    TETHER_COMPILE_MASTER=1
+)
+
+gtest_discover_tests(tether_ethercat_beckhoff_fleet_tests PROPERTIES TIMEOUT ${TETHER_TEST_TIMEOUT_60})
+endif()
+
 # Privileged realtime integration tests — exercise AF_PACKET / PACKET_MMAP
 # rings / kernel cBPF demux / SCHED_FIFO / SCHED_DEADLINE / CPU isolation /
 # mlock.  Every test auto-skips without the needed capability, so the binary

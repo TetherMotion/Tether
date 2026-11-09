@@ -23,8 +23,10 @@ command a *direct, per-entry* exchange uses:
 
 - `Position` — auto-increment (APRD/APWR). The ADP is `0 − slave_index`
   (`Master::adpForSlaveIndex()`); the frame is consumed by the Nth slave
-  on the wire. This is the default and works regardless of the slave's
-  configured station address.
+  on the wire. Per ETG.1000 each ESC **increments** the position value
+  by one while forwarding, so the slave that receives `0` is the one
+  addressed — `SlaveCore` implements exactly that. This is the default
+  and works regardless of the slave's configured station address.
 - `ConfiguredAddress` — fixed addressing (FPRD/FPWR) against the slave's
   station address (ESC register `0x0010`). Tell the mapping the value
   first with `PDOMapping::set_slave_configured_address()` — it is copied
