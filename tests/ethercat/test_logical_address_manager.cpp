@@ -1902,14 +1902,15 @@ public:
 
     // Batched SM-activation surface (configureSlavesSMs pre-registers one
     // waiter per SM then sends a single multi-datagram frame).
-    size_t preRegisterResponseWaiter(uint8_t, uint8_t*,
-                                     size_t) override {
+    size_t preRegisterResponseWaiter(uint8_t, uint8_t* buf,
+                                     size_t len) override {
         if (prereg_busy_)
             return IPDOTransport::kPreRegBusy;
         if (waited_slots.size() == prereg_fail_at ||
             !prereg_ok_)
             return IPDOTransport::kPreRegInvalid;
         waited_slots.push_back(next_slot_);
+        prereg_bufs_.push_back({buf, len});
         return next_slot_++;
     }
     size_t sendMultiDatagram(const MultiDatagramSpec* specs,
@@ -1946,8 +1947,15 @@ public:
                                                 : prereg_wkc_;
             out.wkc     = wkc;
             out.datalen = prereg_resp_len_;
-            if (prereg_resp_len_)
-                std::memcpy(out.data, prereg_resp_buf_, prereg_resp_len_);
+            // The real transport deposits the payload into the buffer
+            // registered via preRegisterResponseWaiter; out only carries
+            // datagram metadata on this path.
+            if (slot < prereg_bufs_.size() && prereg_bufs_[slot].buf &&
+                prereg_resp_len_) {
+                std::memcpy(prereg_bufs_[slot].buf, prereg_resp_buf_,
+                            std::min<size_t>(prereg_resp_len_,
+                                             prereg_bufs_[slot].len));
+            }
         }
         return wait_prereg_ok_;
     }
@@ -1978,6 +1986,8 @@ public:
     std::vector<uint16_t> prereg_wkc_plan_;
     uint16_t              prereg_resp_len_ = 0;
     uint8_t               prereg_resp_buf_[512]{};
+    struct PreregBuf { uint8_t* buf; size_t len; };
+    std::vector<PreregBuf> prereg_bufs_;   // indexed by slot
     std::vector<uint16_t> last_multi_adp;
     std::vector<uint16_t> last_multi_ado;
     std::vector<uint8_t>  last_multi_data;
