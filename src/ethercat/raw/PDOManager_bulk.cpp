@@ -271,8 +271,11 @@ bool PDOManager::receiveAll() {
             case PDO::PDOAddressMode::Position:
                 cmd = Command::APRD;
                 adp = transport_.adpForSlaveIndex(e->slave_index);
-                idx = IPDOTransport::kFireAndForgetIdx;
-                roundtrip = true;  // APRD always roundtrip
+                // APRD is a roundtrip: the response carries the TxPDO
+                // payload, so it needs a real index for demux.  A
+                // fire-and-forget index would drop the data.
+                idx = transport_.allocIdx();
+                roundtrip = true;
                 break;
             case PDO::PDOAddressMode::ConfiguredAddress:
                 cmd = Command::FPRD;
@@ -347,14 +350,22 @@ bool PDOManager::receiveAll() {
                 PDO::PDOEntry* e = mapping_.get_entry_mut(entry_i);
                 RxDatagram resp;
                 bool got;
-                if (tx_slots[j] != IPDOTransport::kPreRegInvalid) {
+                const bool used_slot =
+                    tx_slots[j] != IPDOTransport::kPreRegInvalid;
+                if (used_slot) {
                     got = transport_.waitForPreRegistered(tx_slots[j], 5, resp);
                 } else {
                     got = transport_.waitForResponseIdx(tx_idxs[j], 5, resp);
                 }
+                // Pre-registered waiters deposit the payload into
+                // tx_responses[j].data; waitForResponseIdx fills
+                // resp.data.  resp itself only carries datagram metadata
+                // on the slot path.
+                const uint8_t* rx_data =
+                    used_slot ? tx_responses[j].data : resp.data;
                 if (got &&
                     resp.wkc > 0 && resp.datalen >= e->data_size) {
-                    std::memcpy(e->storage, resp.data, e->data_size);
+                    std::memcpy(e->storage, rx_data, e->data_size);
                     e->success_count++;
                     stats_.txpdo_frames_recv++;
                     if (e->slave_index < PDO::kMaxPDOSlaves)

@@ -578,11 +578,20 @@ TEST_F(PDOManagerTest, ExchangeAllSendsAndReceives) {
     mgr.mapping().add_rxpdo(0, sizeof(tx_buf), 0x1600, PDOAddressMode::Position);
     mgr.mapping().add_txpdo(0, sizeof(rx_buf), 0x1A00, PDOAddressMode::Position);
 
-    // Position mode uses fire-and-forget, batched into frames via sendMultiDatagram
-    // Called twice: once for RxPDO batch, once for TxPDO batch
+    // Position mode RxPDO writes are fire-and-forget; TxPDO reads are
+    // roundtrips batched into a second frame via sendMultiDatagram.
     EXPECT_CALL(transport, sendMultiDatagram(_, _))
         .Times(2)
         .WillRepeatedly(Return(1));
+
+    // The mock never pre-registers waiters, so the TxPDO read falls back
+    // to waitForResponseIdx — answer it with a valid datagram.
+    RxDatagram resp{};
+    resp.wkc = 1;
+    resp.datalen = sizeof(rx_buf);
+    EXPECT_CALL(transport, waitForResponseIdx(_, _, _))
+        .WillOnce(::testing::DoAll(::testing::SetArgReferee<2>(resp),
+                                   Return(true)));
 
     // exchangeAll should succeed and increment total_cycles
     bool ok = mgr.exchangeAll();

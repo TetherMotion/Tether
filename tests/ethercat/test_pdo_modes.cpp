@@ -167,17 +167,29 @@ TEST_F(PDOModesTest, CallbackFiresOnRxReceived) {
     EXPECT_CALL(transport, sendMultiDatagram(_, _))
         .WillRepeatedly(Return(1));
 
-    // Pre-registration: return valid slot handles
+    // Pre-registration: return valid slot handles and remember the
+    // response buffer — the real transport deposits the payload there.
+    uint8_t* resp_buffer = nullptr;
+    size_t resp_buffer_size = 0;
     EXPECT_CALL(transport, preRegisterResponseWaiter(_, _, _))
-        .WillRepeatedly([](uint8_t, uint8_t*, size_t) -> size_t { return 0; });
+        .WillRepeatedly([&](uint8_t, uint8_t* buf, size_t sz) -> size_t {
+            resp_buffer = buf;
+            resp_buffer_size = sz;
+            return 0;
+        });
 
     RxDatagram resp{};
     resp.wkc = 1;
     resp.datalen = sizeof(uint32_t);
     uint32_t resp_data = 0xCAFEBABE;
-    std::memcpy(resp.data, &resp_data, sizeof(resp_data));
     EXPECT_CALL(transport, waitForPreRegistered(_, _, _))
-        .WillOnce(DoAll(SetArgReferee<2>(resp), Return(true)));
+        .WillOnce(Invoke([&](size_t, unsigned int, RxDatagram& out) {
+            out.wkc = resp.wkc;
+            out.datalen = resp.datalen;
+            if (resp_buffer && resp_buffer_size >= sizeof(resp_data))
+                std::memcpy(resp_buffer, &resp_data, sizeof(resp_data));
+            return true;
+        }));
 
     mgr.sendAll();
     mgr.receiveAll();
@@ -378,17 +390,29 @@ TEST_F(PDOModesTest, QueueModeTryDequeueRx) {
     EXPECT_CALL(transport, sendMultiDatagram(_, _))
         .WillRepeatedly(Return(1));
 
-    // Pre-registration: return valid slot handles
+    // Pre-registration: return valid slot handles and remember the
+    // response buffer — the real transport deposits the payload there.
+    uint8_t* resp_buffer = nullptr;
+    size_t resp_buffer_size = 0;
     EXPECT_CALL(transport, preRegisterResponseWaiter(_, _, _))
-        .WillRepeatedly([](uint8_t, uint8_t*, size_t) -> size_t { return 0; });
+        .WillRepeatedly([&](uint8_t, uint8_t* buf, size_t sz) -> size_t {
+            resp_buffer = buf;
+            resp_buffer_size = sz;
+            return 0;
+        });
 
     RxDatagram resp{};
     resp.wkc = 1;
     resp.datalen = sizeof(uint32_t);
     uint32_t resp_data = 0xDEAD1234;
-    std::memcpy(resp.data, &resp_data, sizeof(resp_data));
     EXPECT_CALL(transport, waitForPreRegistered(_, _, _))
-        .WillOnce(DoAll(SetArgReferee<2>(resp), Return(true)));
+        .WillOnce(Invoke([&](size_t, unsigned int, RxDatagram& out) {
+            out.wkc = resp.wkc;
+            out.datalen = resp.datalen;
+            if (resp_buffer && resp_buffer_size >= sizeof(resp_data))
+                std::memcpy(resp_buffer, &resp_data, sizeof(resp_data));
+            return true;
+        }));
 
     mgr.queueCycle();
 
