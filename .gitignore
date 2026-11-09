@@ -50,3 +50,6 @@ test_output/
 docs/api/
 docs/_doxygen/
 docs/_build/
+
+# clangd local cache
+.cache/

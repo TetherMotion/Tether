@@ -260,10 +260,19 @@ SlaveError Slave::transitionToOp() {
     bool pdo_req_ok = false;
     bool pdo_reply_ok = false;
     bool has_pdo_entries = false;
+    bool need_req = false;    // slave has RxPDO entries (master->slave writes)
+    bool need_reply = false;  // slave has TxPDO entries (slave->master reads)
     {
         auto& pdo_mgr = master_->pdoForSlave(index_);
         has_pdo_entries = pdo_mgr.hasSlavePDOEntries(index_);
         if (has_pdo_entries) {
+            const auto& map = pdo_mgr.mapping();
+            for (size_t i = 0; i < map.entry_count(); ++i) {
+                const auto* e = map.get_entry(i);
+                if (!e || !e->enabled || e->slave_index != index_) continue;
+                if (e->direction == PDO::PDODirection::RxPDO) need_req = true;
+                else need_reply = true;
+            }
             for (int wait_ms = 0; wait_ms < 100; wait_ms++) {
                 if (master_->isCancelRequested()) {
                     TETHER_LOGI(TAG, "{}: OP transition cancelled during PDO counter wait", logPrefix().c_str());
@@ -271,8 +280,10 @@ SlaveError Slave::transitionToOp() {
                 }
                 const uint32_t req   = pdo_mgr.getSlavePDORequestCount(index_);
                 const uint32_t reply = pdo_mgr.getSlavePDOReplyCount(index_);
-                pdo_req_ok   = (req > 0);
-                pdo_reply_ok = (reply > 0);
+                // Only directions with configured entries must show traffic;
+                // input-only or output-only slaves legitimately have one.
+                pdo_req_ok   = !need_req   || req   > 0;
+                pdo_reply_ok = !need_reply || reply > 0;
                 if (pdo_req_ok && pdo_reply_ok) {
                     break;
                 }
@@ -295,9 +306,11 @@ SlaveError Slave::transitionToOp() {
                     pdo_configured_ ? "✓ FULFILLED" : "⚠ NOT FULFILLED (warning only)");
         if (has_pdo_entries) {
             TETHER_LOGI(TAG, "║    - PDO request counter  > 0: {}",
-                        pdo_req_ok ? "✓ FULFILLED" : "✗ NOT FULFILLED");
+                        !need_req ? "N/A (no RxPDO)" :
+                        (pdo_req_ok ? "✓ FULFILLED" : "✗ NOT FULFILLED"));
             TETHER_LOGI(TAG, "║    - PDO reply counter    > 0: {}",
-                        pdo_reply_ok ? "✓ FULFILLED" : "✗ NOT FULFILLED");
+                        !need_reply ? "N/A (no TxPDO)" :
+                        (pdo_reply_ok ? "✓ FULFILLED" : "✗ NOT FULFILLED"));
         } else {
             TETHER_LOGI(TAG, "║    - PDO exchange check:     N/A (no PDO entries for this slave)");
         }

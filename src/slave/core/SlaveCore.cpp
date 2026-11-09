@@ -271,8 +271,10 @@ uint16_t SlaveCore::processDatagram(DatagramHeader& header, uint8_t* data) {
             if (autoIncrement == 0) {
                 addressMatch = true;
             }
-            // Decrement position counter for next slave
-            header.adp_le = static_cast<uint16_t>(autoIncrement - 1);
+            // Increment position counter for next slave (ETG.1000:
+            // the ESC adds 1 to ADP while forwarding; the slave that
+            // reads 0 is addressed)
+            header.adp_le = static_cast<uint16_t>(autoIncrement + 1);
             break;
             
         case FPRD:
