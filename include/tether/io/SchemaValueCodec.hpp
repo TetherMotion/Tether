@@ -345,8 +345,9 @@ inline bool validateFieldRestrictions(const SchemaGraph& graph, const SchemaFiel
                     std::vector<uint8_t> value(allowedPayload, allowedPayload + allowedLength);
                     if (!previous.empty() && !std::lexicographical_compare(
                             previous.begin(), previous.end(), value.begin(), value.end())) return false;
-                    allowed = allowed || value.size() == length &&
-                              std::equal(value.begin(), value.end(), payload);
+                    allowed = allowed ||
+                              (value.size() == length &&
+                               std::equal(value.begin(), value.end(), payload));
                     previous = std::move(value);
                 }
                 if (restrictionReader.remaining() != 0 || !allowed) return false;
