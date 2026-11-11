@@ -45,6 +45,14 @@ uint64_t steadyNowUs() {
         std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
+/* Client-driven sim clock: the mc.time param writes this; the drive
+   advances to it deterministically (PLC --sim replay). --clock realtime
+   uses the wall clock instead. */
+std::atomic<uint64_t> g_simUs{0};
+uint64_t simNowUs() { return g_simUs.load(std::memory_order_relaxed); }
+std::atomic<bool> g_realtime{false};
+uint64_t driveNowUs() { return g_realtime.load() ? steadyNowUs() : simNowUs(); }
+
 void motionLog(const char* level, const char* msg, ...) {
     va_list ap;
     va_start(ap, msg);
@@ -61,8 +69,9 @@ void motionLog(const char* level, const char* msg, ...) {
 struct MotionSchemas {
     SchemaGraph graph;
     std::vector<SchemaManifestEntry> manifest;
-    SchemaRef i8, i16, i32, u16, u32;
-    uint32_t slotI8 = 0, slotI16 = 0, slotI32 = 0, slotU16 = 0, slotU32 = 0;
+    SchemaRef i8, i16, i32, u16, u32, u64;
+    uint32_t slotI8 = 0, slotI16 = 0, slotI32 = 0, slotU16 = 0, slotU32 = 0,
+             slotU64 = 0;
 };
 
 MotionSchemas buildMotionSchemas() {
@@ -86,6 +95,7 @@ MotionSchemas buildMotionSchemas() {
     addScalar(3, ValueType::I32, "mc.I32", d.i32, d.slotI32);
     addScalar(4, ValueType::U16, "mc.U16", d.u16, d.slotU16);
     addScalar(5, ValueType::U32, "mc.U32", d.u32, d.slotU32);
+    addScalar(6, ValueType::U64, "mc.U64", d.u64, d.slotU64);
     return d;
 }
 
@@ -125,6 +135,7 @@ SchemaRef refFor(const MotionSchemas& d, ValueType t) {
         case ValueType::I32: return d.i32;
         case ValueType::U16: return d.u16;
         case ValueType::U32: return d.u32;
+        case ValueType::U64: return d.u64;
         default:             return {};
     }
 }
@@ -135,6 +146,7 @@ uint32_t slotFor(const MotionSchemas& d, ValueType t) {
         case ValueType::I32: return d.slotI32;
         case ValueType::U16: return d.slotU16;
         case ValueType::U32: return d.slotU32;
+        case ValueType::U64: return d.slotU64;
         default:             return 0;
     }
 }
@@ -176,6 +188,30 @@ bool registerAxisObjects(Registry& reg, const MotionSchemas& d,
     return true;
 }
 
+/**Global mc.time param: write sets the deterministic sim clock (us);
+   read returns the last value. Drives advance to it on next access.*/
+bool registerTimeParam(Registry& reg, const MotionSchemas& d,
+                       uint64_t& nextId) {
+    ParamEntry p;
+    p.id = nextId++;
+    p.name = "mc.time";
+    p.description = "Simulated drive clock, microseconds (RW)";
+    p.group = "mc";
+    p.valueType = ValueType::U64;
+    p.schema = d.u64;
+    p.schemaSlot = d.slotU64;
+    p.readFn = [](void* dst) {
+        const uint64_t t = simNowUs();
+        std::memcpy(dst, &t, 8);
+    };
+    p.writeFn = [](const void* src) {
+        uint64_t t;
+        std::memcpy(&t, src, 8);
+        g_simUs.store(t, std::memory_order_relaxed);
+    };
+    return reg.addParam(p);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -184,6 +220,9 @@ int main(int argc, char** argv) {
     prog.add_argument("--bind").default_value(std::string("127.0.0.1"));
     prog.add_argument("--axes").default_value(std::string("4"))
         .help("number of simulated CiA402 axes (slave indices 0..N-1)");
+    prog.add_argument("--clock").default_value(std::string("sim"))
+        .help("sim = client-driven via mc.time (deterministic); "
+              "realtime = wall clock");
     try { prog.parse_args(argc, argv); }
     catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", e.what());
@@ -193,6 +232,7 @@ int main(int argc, char** argv) {
         std::stoul(prog.get<std::string>("--port")));
     const std::string bind = prog.get<std::string>("--bind");
     const int axes = std::max(1, std::stoi(prog.get<std::string>("--axes")));
+    g_realtime.store(prog.get<std::string>("--clock") == "realtime");
 
     signal(SIGINT, onSigint);
     signal(SIGTERM, onSigint);
@@ -206,10 +246,14 @@ int main(int argc, char** argv) {
     }
 
     SimulatedCiA402Drive drive;
-    drive.setClock(steadyNowUs);
+    drive.setClock(driveNowUs);
 
     Registry registry;
     uint64_t nextId = 1;
+    if (!registerTimeParam(registry, schemas, nextId)) {
+        std::fprintf(stderr, "mc.time param registration failed\n");
+        return 1;
+    }
     for (int a = 0; a < axes; ++a) {
         const uint16_t slave = static_cast<uint16_t>(a);
         drive.configure(slave);   // create with defaults
@@ -242,7 +286,7 @@ int main(int argc, char** argv) {
     // continuously between client polls.
     std::thread ticker([&] {
         while (!g_stop) {
-            drive.advanceTo(steadyNowUs());
+            drive.advanceTo(driveNowUs());
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });
