@@ -169,7 +169,7 @@ bool registerAxisObjects(Registry& reg, const MotionSchemas& d,
         p.schemaSlot = slotFor(d, o.type);
         const uint16_t idx = o.index;
         const uint8_t  sz  = o.size;
-        p.readFn = [&, idx, sz](void* dst) {
+        p.readFn = [&drive, slave, idx, sz](void* dst) {
             auto r = drive.read(slave, idx, 0, sz);
             std::memset(dst, 0, sz);
             if (r.ok && !r.data.empty())
@@ -177,7 +177,7 @@ bool registerAxisObjects(Registry& reg, const MotionSchemas& d,
                             std::min<size_t>(r.data.size(), sz));
         };
         if (o.writable) {
-            p.writeFn = [&, idx, sz](const void* src) {
+            p.writeFn = [&drive, slave, idx, sz](const void* src) {
                 const uint8_t* b = static_cast<const uint8_t*>(src);
                 drive.write(slave, idx, 0,
                             std::vector<uint8_t>(b, b + sz));
