@@ -19,6 +19,7 @@ Welcome to the Tether library documentation. Tether is a modular C++ library for
    PDOAddressSpace
    MultiDriveInitialization
    CyclicRealtimeTransport
+   ReducingCyclicJitter
    EtherCATEncapsulation
    EtherCATBPFFiltering
    FSoECrcResync
