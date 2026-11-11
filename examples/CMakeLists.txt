@@ -576,6 +576,11 @@ if(TARGET tether_io_protocol)
 add_tether_example(tether_io_sim
     LIBRARIES tether_io_protocol tether_common)
 
+# Simulated CiA402 drives as cyclic IO params (mc.<slave>.<index>) for
+# PLC-runtime motion clients; SimulatedCiA402Drive backend.
+add_tether_example(tether_io_motion_server
+    LIBRARIES tether_io_protocol tether_common)
+
 # Client-hosted processing function (peer RPC): a client publishes `scale`
 # via RegisterFunctionsReq, an embedded server invokes it back over the
 # same SLIP/TCP connection. Demonstrates the hosted-filter pattern.
