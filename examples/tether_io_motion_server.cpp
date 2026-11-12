@@ -34,10 +34,12 @@
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <mutex>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 using namespace tether::io;
@@ -297,9 +299,50 @@ struct Channel {
     SimulatedCiA402Drive* drive = nullptr;
     int axes = 0;   // configured axis count; the channel drives 0..2
 
-    /* Compile program text into planning segments. READY on success. */
-    bool compile(const std::string& text) {
-        auto r = GCode::PlanningSegmentBuilder::fromText(text);
+    /* FIFO block queue: each nc.fifo write appends one block text;
+       when the active plan finishes the next entry is compiled as a
+       continuation anchored at the last commanded position. */
+    std::deque<std::string> fifoQ;
+    uint32_t fifoSeq = 0;        /* entries consumed since program start */
+    /* M-function handshake: when the executing block carries an
+       M-code outside the program-control set, the channel pauses with
+       pendingM set until nc.confirm clears it. */
+    uint32_t pendingM = 0;
+    int mScan = 0;               /* blocks[] index scanned to */
+    /* blocks[] index of the executing segment comes straight from
+       PlanningSegment.blockIndex (the builder maps it via source
+       line). */
+    /* Injected prefix lines (R-param assigns + G92 zero-shift) — kept
+       out of nc.total/nc.line so the PLC sees program line numbers. */
+    int prefixLines = 0;
+    std::unordered_map<int32_t, double> rparams;
+    double zsx = 0.0, zsy = 0.0, zsz = 0.0;
+    uint32_t ridx = 0;           /* selected R-param index */
+    std::array<double, 3> lastPos{0.0, 0.0, 0.0};
+
+    /* Extract the first M<number> from a block text, or -1. */
+    static int mcodeOf(const std::string& s) {
+        for (size_t i = 0; i < s.size(); ++i) {
+            if (std::toupper(static_cast<unsigned char>(s[i])) != 'M') continue;
+            size_t j = i + 1;
+            int v = 0;
+            while (j < s.size() && std::isdigit(static_cast<unsigned char>(s[j])))
+                v = v * 10 + (s[j++] - '0');
+            if (j > i + 1) return v;
+        }
+        return -1;
+    }
+    /* M-codes the interpreter owns (program control): not handshake. */
+    static bool mcodeHandshake(int m) {
+        return m > 1 && m != 2 && m != 30;
+    }
+
+    /* Compile program text into planning segments. READY on success.
+       prefix is injected BEFORE the program (R-params + G92) and its
+       line count recorded so nc.line stays in program coordinates. */
+    bool compile(const std::string& text, const std::string& prefix = {}) {
+        const std::string full = prefix.empty() ? text : prefix + text;
+        auto r = GCode::PlanningSegmentBuilder::fromText(full);
         std::lock_guard lk(m);
         if (!r.error.ok() && !r.error.isEnd()) {
             errcode = static_cast<uint32_t>(r.error.code);
@@ -308,10 +351,29 @@ struct Channel {
             state = Error;
             return false;
         }
+        prefixLines = 0;
+        if (!prefix.empty()) {
+            std::istringstream ps(prefix);
+            std::string pl;
+            while (std::getline(ps, pl)) {
+                bool content = false;
+                for (char c : pl)
+                    if (!std::isspace(static_cast<unsigned char>(c))) { content = true; break; }
+                if (content) ++prefixLines;
+            }
+        }
+        /* Drop the injected blocks so blocks[] holds only program
+           blocks and line numbers stay in program coordinates. */
+        if (prefixLines > 0 && prefixLines <= static_cast<int>(r.blocks.size()))
+            r.blocks.erase(r.blocks.begin(),
+                           r.blocks.begin() + prefixLines);
         segs = std::move(r.segments);
         blocks = std::move(r.blocks);
+        for (size_t i = 0; i < blocks.size(); ++i)
+            blocks[i].blockIndex = static_cast<int>(i);
         errcode = ErrNone; plan.reset();
-        planT = duration = 0.0; curLine = 0;
+        planT = duration = 0.0; curLine = 0; curSeg = 0;
+        mScan = 0; pendingM = 0; stepTarget = -1;
         state = Ready;
         return true;
     }
@@ -406,12 +468,32 @@ struct Channel {
             drive->write(ax, 0x607A, 0,
                          std::vector<uint8_t>(le, le + 4));
         }
+        lastPos = {st.position[0], st.position[1], st.position[2]};
         curSeg = static_cast<int>(st.segmentIndex);
         if (st.segmentIndex < planSegToSeg.size()) {
             const int si = planSegToSeg[st.segmentIndex];
             const int32_t bi = segs[si].blockIndex;
             if (bi >= 0 && bi < static_cast<int32_t>(blocks.size()))
                 curLine = static_cast<uint32_t>(blocks[bi].lineNumber);
+            scanMFuncs(bi);
+        }
+    }
+
+    /* Scan blocks up to and including the executing one; a block
+       carrying a handshake M-code pauses the channel with pendingM
+       set until nc.confirm. */
+    void scanMFuncs(int32_t upto) {
+        if (pendingM) return;
+        const int n = static_cast<int>(blocks.size());
+        if (upto >= n) upto = n - 1;
+        for (; mScan <= upto && mScan < n; ++mScan) {
+            const int m = mcodeOf(blocks[mScan].gcodeText);
+            if (m >= 0 && mcodeHandshake(m)) {
+                pendingM = static_cast<uint32_t>(m);
+                state = Paused;
+                ++mScan;
+                return;
+            }
         }
     }
 
@@ -420,6 +502,17 @@ struct Channel {
         lastCmd = cmd;
         switch (cmd) {
             case CmdRun:
+                /* FIFO-only program: queued blocks with nothing
+                   loaded run straight from the queue. */
+                if (state == Idle && !fifoQ.empty()) {
+                    if (axes < 3) { errcode = ErrBadState; return; }
+                    if (!advanceFifo()) { errcode = ErrPlan; return; }
+                    enableAxes();
+                    emitTargets();
+                    state = pendingM ? Paused : Running;
+                    errcode = ErrNone;
+                    return;
+                }
                 if (state != Ready && state != Stopped && state != Finished) {
                     errcode = ErrBadState;
                     return;
@@ -436,7 +529,8 @@ struct Channel {
                 enableAxes();
                 emitTargets();
                 stepTarget = -1;
-                state = Running;
+                /* A handshake M-code on the first block holds. */
+                state = pendingM ? Paused : Running;
                 errcode = ErrNone;
                 return;
             case CmdStep:
@@ -461,8 +555,8 @@ struct Channel {
                     enableAxes();
                 }
                 emitTargets();
-                stepTarget = curSeg + 1;
-                state = Running;
+                stepTarget = pendingM ? -1 : curSeg + 1;
+                state = pendingM ? Paused : Running;
                 errcode = ErrNone;
                 return;
             case CmdPause:
@@ -485,6 +579,8 @@ struct Channel {
                 return;
             case CmdReset:
                 segs.clear(); blocks.clear(); plan.reset();
+                fifoQ.clear(); fifoSeq = 0;
+                mScan = 0; pendingM = 0; stepTarget = -1;
                 planT = duration = 0.0; curLine = 0; errcode = ErrNone;
                 state = Idle;
                 return;
@@ -510,14 +606,99 @@ struct Channel {
             planT = duration;
             emitTargets();
             stepTarget = -1;
+            /* FIFO: chain the next queued block as a continuation
+               anchored at the last commanded position. */
+            if (advanceFifo()) return;
             state = Finished;
             return;
         }
         emitTargets();
+        if (pendingM) { state = Paused; return; }
         if (stepTarget >= 0 && curSeg >= stepTarget) {
             stepTarget = -1;
             state = Paused;
         }
+    }
+
+    /* Compile the next FIFO entry as a continuation plan anchored at
+       lastPos; returns true when a new plan is now Running. */
+    bool advanceFifo() {
+        if (fifoQ.empty()) {
+            /* Tail blocks (M-codes after the last motion block) still
+               need scanning before the program can finish. */
+            scanMFuncs(static_cast<int>(blocks.size()));
+            return false;
+        }
+        char anchor[96];
+        std::snprintf(anchor, sizeof(anchor),
+                      "G21 G90\nG1 X%.6f Y%.6f Z%.6f\n",
+                      lastPos[0], lastPos[1], lastPos[2]);
+        const std::string entry = fifoQ.front();
+        fifoQ.pop_front();
+        ++fifoSeq;
+        /* compile() takes the lock; it resets segs/blocks/plan. */
+        const std::string prefix = anchor;
+        {
+            auto r = GCode::PlanningSegmentBuilder::fromText(prefix + entry);
+            if (!r.error.ok() && !r.error.isEnd()) {
+                errcode = static_cast<uint32_t>(r.error.code);
+                segs.clear(); blocks.clear(); plan.reset();
+                state = Error;
+                return false;
+            }
+            /* Drop the two injected blocks (mode line + anchor). */
+            if (r.blocks.size() > 2)
+                r.blocks.erase(r.blocks.begin(), r.blocks.begin() + 2);
+            segs = std::move(r.segments);
+            blocks = std::move(r.blocks);
+            for (size_t i = 0; i < blocks.size(); ++i)
+                blocks[i].blockIndex = static_cast<int>(i);
+            plan.reset(); planT = 0.0; curSeg = 0; mScan = 0;
+            stepTarget = -1;
+        }
+        if (!buildPlan()) return false;
+        state = Running;
+        return true;
+    }
+
+    /* Queue a FIFO block. Trial-parses first so a bad entry reports
+       the compile error immediately instead of poisoning the run. */
+    bool appendFifo(const std::string& entry) {
+        auto r = GCode::PlanningSegmentBuilder::fromText("G21 G90\n" + entry);
+        if (!r.error.ok() && !r.error.isEnd()) {
+            std::lock_guard lk(m);
+            errcode = static_cast<uint32_t>(r.error.code);
+            return false;
+        }
+        std::lock_guard lk(m);
+        fifoQ.push_back(entry);
+        errcode = ErrNone;
+        return true;
+    }
+
+    /* Confirm a pending M-function; resumes a held channel. */
+    void confirm() {
+        std::lock_guard lk(m);
+        if (!pendingM) { errcode = ErrBadState; return; }
+        pendingM = 0;
+        if (state == Paused) state = Running;
+        errcode = ErrNone;
+    }
+
+    /* Compile prefix carrying the R-parameter registers and the
+       zero-shift: the interpreter genuinely evaluates both, so the
+       injected lines count against blocks[]/line numbers. */
+    std::string progPrefix() const {
+        std::ostringstream p;
+        for (const auto& [n, v] : rparams)
+            p << "#" << n << " = " << v << "\n";
+        if (zsx != 0.0 || zsy != 0.0 || zsz != 0.0) {
+            char b[96];
+            std::snprintf(b, sizeof(b), "G92 X%.6f Y%.6f Z%.6f\n",
+                          zsx, zsy, zsz);
+            p << b;
+        }
+        return p.str();
     }
 };
 
@@ -543,7 +724,8 @@ void regU8(Registry& reg, const MotionSchemas& d, uint64_t& nextId,
 
 void regU32(Registry& reg, const MotionSchemas& d, uint64_t& nextId,
             const char* name, const char* desc,
-            std::function<void(void*)> rd) {
+            std::function<void(void*)> rd,
+            std::function<void(const void*)> wr = nullptr) {
     ParamEntry p;
     p.id = nextId++;
     p.name = name;
@@ -553,6 +735,7 @@ void regU32(Registry& reg, const MotionSchemas& d, uint64_t& nextId,
     p.schema = d.u32;
     p.schemaSlot = d.slotU32;
     p.readFn = std::move(rd);
+    if (wr) p.writeFn = std::move(wr);
     reg.addParam(p);
 }
 
@@ -617,7 +800,8 @@ bool registerNciParams(Registry& reg, const MotionSchemas& d,
            "G-code program text; write compiles it (state READY/ERROR)",
            [](void* dst, size_t maxLen) -> size_t { (void)dst; (void)maxLen; return 0; },
            [](const void* src, size_t len) {
-               g_nci.compile(std::string(static_cast<const char*>(src), len));
+               g_nci.compile(std::string(static_cast<const char*>(src), len),
+                             g_nci.progPrefix());
            });
 
     regStr(reg, nextId, "nc.prog_path",
@@ -633,7 +817,7 @@ bool registerNciParams(Registry& reg, const MotionSchemas& d,
                    return;
                }
                std::ostringstream ss; ss << f.rdbuf();
-               g_nci.compile(ss.str());
+               g_nci.compile(ss.str(), g_nci.progPrefix());
            });
 
     regU8(reg, d, nextId, "nc.cmd",
@@ -680,6 +864,61 @@ bool registerNciParams(Registry& reg, const MotionSchemas& d,
                std::lock_guard lk(g_nci.m);
                g_nci.feedOvr = std::max(0.0, std::min(500.0, v));
            });
+    regStr(reg, nextId, "nc.fifo",
+           "FIFO block append: one G-code block queued for chained "
+           "execution after the active plan",
+           [](void* dst, size_t maxLen) -> size_t { (void)dst; (void)maxLen; return 0; },
+           [](const void* src, size_t len) {
+               g_nci.appendFifo(std::string(static_cast<const char*>(src), len));
+           });
+    regU32(reg, d, nextId, "nc.fifolen", "queued FIFO block count",
+           u32rd([] { return static_cast<uint32_t>(g_nci.fifoQ.size()); }));
+    regU32(reg, d, nextId, "nc.fifoseq", "FIFO entries consumed this run",
+           u32rd([] { return g_nci.fifoSeq; }));
+    regU32(reg, d, nextId, "nc.mfunc", "pending M-code (0 = none)",
+           u32rd([] { return g_nci.pendingM; }));
+    regU8(reg, d, nextId, "nc.confirm",
+          "write 1: confirm pending M-function and resume", true,
+          [](void* dst) { std::memset(dst, 0, 1); },
+          [](const void*) { g_nci.confirm(); });
+    regU32(reg, d, nextId, "nc.ridx",
+           "selected R-parameter index (0-5999)",
+           u32rd([] { return g_nci.ridx; }),
+           [](const void* src) {
+               uint32_t v; std::memcpy(&v, src, 4);
+               std::lock_guard lk(g_nci.m);
+               g_nci.ridx = v;
+           });
+    regF64(reg, d, nextId, "nc.rval",
+           "R-parameter value at nc.ridx (applied on next compile)", true,
+           f64rd([] {
+               auto it = g_nci.rparams.find(g_nci.ridx);
+               return it != g_nci.rparams.end() ? it->second : 0.0;
+           }),
+           [](const void* src) {
+               double v;
+               std::memcpy(&v, src, 8);
+               std::lock_guard lk(g_nci.m);
+               g_nci.rparams[g_nci.ridx] = v;
+           });
+    regF64(reg, d, nextId, "nc.zsx", "zero-shift X (G92, next compile)",
+           true, f64rd([] { return g_nci.zsx; }),
+           [](const void* src) { double v; std::memcpy(&v, src, 8);
+               std::lock_guard lk(g_nci.m); g_nci.zsx = v; });
+    regF64(reg, d, nextId, "nc.zsy", "zero-shift Y (G92, next compile)",
+           true, f64rd([] { return g_nci.zsy; }),
+           [](const void* src) { double v; std::memcpy(&v, src, 8);
+               std::lock_guard lk(g_nci.m); g_nci.zsy = v; });
+    regF64(reg, d, nextId, "nc.zsz", "zero-shift Z (G92, next compile)",
+           true, f64rd([] { return g_nci.zsz; }),
+           [](const void* src) { double v; std::memcpy(&v, src, 8);
+               std::lock_guard lk(g_nci.m); g_nci.zsz = v; });
+    regF64(reg, d, nextId, "nc.lastx", "last commanded X (user units)",
+           false, f64rd([] { return g_nci.lastPos[0]; }), nullptr);
+    regF64(reg, d, nextId, "nc.lasty", "last commanded Y (user units)",
+           false, f64rd([] { return g_nci.lastPos[1]; }), nullptr);
+    regF64(reg, d, nextId, "nc.lastz", "last commanded Z (user units)",
+           false, f64rd([] { return g_nci.lastPos[2]; }), nullptr);
     return true;
 }
 
