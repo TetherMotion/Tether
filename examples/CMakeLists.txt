@@ -582,6 +582,28 @@ add_tether_example(tether_io_motion_server
     LIBRARIES tether_io_protocol tether_gcode tether_motion_planner
               tether_motion_geometry tether_common)
 
+# Optional OPC UA endpoint for the motion server via libopen62541
+# (opt-in: -DTETHER_ENABLE_OPCUA=ON, or auto when the dev package is
+# installed; like Drogon/jsoncpp it is silently skipped when missing).
+option(TETHER_ENABLE_OPCUA
+    "Enable the optional OPC UA endpoint on tether_io_motion_server (needs libopen62541-dev)"
+    ON)
+if(TETHER_ENABLE_OPCUA)
+    find_path(OPEN62541_INCLUDE_DIR NAMES open62541/server.h)
+    find_library(OPEN62541_LIBRARY NAMES open62541)
+    if(OPEN62541_INCLUDE_DIR AND OPEN62541_LIBRARY)
+        target_include_directories(tether_io_motion_server
+            PRIVATE ${OPEN62541_INCLUDE_DIR})
+        target_link_libraries(tether_io_motion_server
+            PRIVATE ${OPEN62541_LIBRARY})
+        target_compile_definitions(tether_io_motion_server
+            PRIVATE TETHER_HAVE_OPCUA=1)
+        message(STATUS "tether_io_motion_server: OPC UA endpoint enabled (libopen62541)")
+    else()
+        message(STATUS "tether_io_motion_server: libopen62541 not found; OPC UA endpoint disabled")
+    endif()
+endif()
+
 # Client-hosted processing function (peer RPC): a client publishes `scale`
 # via RegisterFunctionsReq, an embedded server invokes it back over the
 # same SLIP/TCP connection. Demonstrates the hosted-filter pattern.
