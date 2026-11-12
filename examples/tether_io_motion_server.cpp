@@ -1005,6 +1005,7 @@ void serve(uint16_t port, Registry& reg) {
     UA_ServerConfig_setMinimal(UA_Server_getConfig(srv), port, nullptr);
     const uint16_t ns =
         UA_Server_addNamespace(srv, "http://tether.io/params");
+    motionLog("info", "opc ua: namespace index %u", ns);
     /* fold the Registry into UA Variables under ObjectsFolder */
     size_t added = 0, failed = 0;
     for (const auto& v : reg.paramPage(0, 65535)) {
