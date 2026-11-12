@@ -40,6 +40,9 @@
 #include <sstream>
 #include <thread>
 #include <unordered_map>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include <vector>
 
 using namespace tether::io;
@@ -924,6 +927,605 @@ bool registerNciParams(Registry& reg, const MotionSchemas& d,
 
 } // namespace nci
 
+/* ---------------------------------------------------------------------------
+   Minimal OPC UA binary (UASC) server — SecurityPolicy#None, anonymous
+   session. Exposes every Registry param as a Variable node in namespace 2
+   (ns=2;s=<param name>) with Read/Write/Browse/GetEndpoints/FindServers.
+   This is the TF6100-server half of C7; the PLC client FBs come next.
+   --------------------------------------------------------------------------- */
+namespace uasc {
+
+struct Wr {
+    std::vector<uint8_t>& b;
+    void u8(uint8_t v) { b.push_back(v); }
+    void u16(uint16_t v) { u8(v); u8(v >> 8); }
+    void u32(uint32_t v) { u8(v); u8(v>>8); u8(v>>16); u8(v>>24); }
+    void u64(uint64_t v) { for (int i = 0; i < 8; ++i) u8(uint8_t(v >> (8*i))); }
+    void i32(int32_t v) { u32(static_cast<uint32_t>(v)); }
+    void f64(double v) { uint64_t u; std::memcpy(&u, &v, 8); u64(u); }
+    void f32(float v) { uint32_t u; std::memcpy(&u, &v, 4); u32(u); }
+    void str(const char* s) {
+        if (!s) { i32(-1); return; }
+        u32(static_cast<uint32_t>(std::strlen(s)));
+        b.insert(b.end(), s, s + std::strlen(s));
+    }
+    void bytes(const void* p, size_t n) {
+        if (!p) { i32(-1); return; }
+        u32(static_cast<uint32_t>(n));
+        const uint8_t* c = static_cast<const uint8_t*>(p);
+        b.insert(b.end(), c, c + n);
+    }
+    void ltext(const char* s) { u8(0x02); str(s); } // LocalizedText w/ text
+    void qname(uint16_t ns, const char* s) { u16(ns); str(s); }
+};
+
+struct Rd {
+    const uint8_t* p;
+    const uint8_t* end;
+    bool ok = true;
+    uint8_t u8() { if (p+1 > end) { ok=false; return 0; } return *p++; }
+    uint16_t u16() { uint16_t v=u8(); v|=uint16_t(u8())<<8; return v; }
+    uint32_t u32() { uint32_t v=u8(); v|=uint32_t(u8())<<8;
+                     v|=uint32_t(u8())<<16; v|=uint32_t(u8())<<24; return v; }
+    uint64_t u64() { uint64_t v=0; for(int i=0;i<8;++i) v|=uint64_t(u8())<<(8*i); return v; }
+    int32_t i32() { return int32_t(u32()); }
+    double f64() { uint64_t u=u64(); double v; std::memcpy(&v,&u,8); return v; }
+    std::string str() { int32_t n=i32(); if (n<0||p+n>end){ok=false;return{};}
+        std::string s(reinterpret_cast<const char*>(p),n); p+=n; return s; }
+    void skip(int32_t n) { if (n<0) n=0; if (p+n>end){ok=false;p=end;} else p+=n; }
+    void skipStr() { int32_t n=i32(); skip(n); }
+    void skipBytes() { int32_t n=i32(); skip(n); }
+    /* skip an ExpandedNodeId (mask + payload) */
+    void skipNodeId(uint8_t enc) {
+        switch (enc) {
+            case 0x00: u8(); break;
+            case 0x01: u8(); u16(); break;
+            case 0x02: u16(); u32(); break;
+            case 0x03: u16(); skipStr(); break;
+            case 0x04: u16(); u32(); u32(); u32(); break;
+            default: ok=false; break;
+        }
+    }
+    void skipNodeId() { skipNodeId(u8()); }
+    /* skip RequestHeader: token NodeId, timestamp u64, requestHandle,
+       returnDiagnostics, auditEntryId str, timeoutHint, additionalHeader
+       ExtensionObject. */
+    void skipReqHeader() {
+        skipNodeId(); u64(); u32(); u32(); skipStr(); u32();
+        skipNodeId(); u8(); // typeId + encoding
+        skipBytes();
+    }
+};
+
+/* encode a NodeId: ns=2 string ids for params; ns=0 numeric for well-known */
+void nodeIdStr(Wr& w, uint16_t ns, const std::string& s) {
+    w.u8(0x03); w.u16(ns); w.str(s.c_str());
+}
+void nodeIdNum(Wr& w, uint16_t ns, uint32_t i) {
+    if (ns == 0 && i < 256) { w.u8(0x00); w.u8(uint8_t(i)); }
+    else if (ns <= 255 && i < 65536) { w.u8(0x01); w.u8(uint8_t(ns)); w.u16(uint16_t(i)); }
+    else { w.u8(0x02); w.u16(ns); w.u32(i); }
+}
+void extObj(Wr& w, uint16_t ns, uint32_t typeId, const std::vector<uint8_t>& body) {
+    nodeIdNum(w, ns, typeId);
+    w.u8(0x01);                       // ByteString body
+    w.bytes(body.data(), body.size());
+}
+void respHeader(Wr& w, uint32_t reqHandle) {
+    /* timestamp */ w.u64(132834744000000000ULL);
+    w.u32(reqHandle); w.u32(0); /* svcResult ok */
+    /* serviceDiagnostics: nothing */ w.u8(0);
+    w.str(nullptr);                   /* stringTable */
+    /* additionalHeader empty ext obj */ w.u8(0x00); w.u8(0);
+}
+
+/* Variant payloads for our param ValueTypes. */
+void variantScalar(Wr& w, ValueType t, const void* data, size_t n) {
+    switch (t) {
+        case ValueType::Bool: { w.u8(0x01); w.u8(n&&*(const uint8_t*)data); return; }
+        case ValueType::I8:   { w.u8(0x02); w.u8(n?*(const uint8_t*)data:0); return; }
+        case ValueType::U8:   { w.u8(0x03); w.u8(n?*(const uint8_t*)data:0); return; }
+        case ValueType::I16:  { w.u8(0x04); w.u16(n?*(const uint16_t*)data:0); return; }
+        case ValueType::U16:  { w.u8(0x05); w.u16(n?*(const uint16_t*)data:0); return; }
+        case ValueType::I32:  { w.u8(0x06); w.i32(n?*(const int32_t*)data:0); return; }
+        case ValueType::U32:  { w.u8(0x07); w.u32(n?*(const uint32_t*)data:0); return; }
+        case ValueType::I64:  { w.u8(0x08); w.u64(n?*(const uint64_t*)data:0); return; }
+        case ValueType::U64:  { w.u8(0x09); w.u64(n?*(const uint64_t*)data:0); return; }
+        case ValueType::F32:  { w.u8(0x0A); w.f32(n?*(const float*)data:0); return; }
+        case ValueType::F64:  { w.u8(0x0B); w.f64(n?*(const double*)data:0); return; }
+        default:              { w.u8(0x00); return; }
+    }
+}
+
+struct UaConn {
+    int fd;
+    Registry* reg;
+    uint32_t chanId = 0, tokenId = 0;
+    std::string endpointUrl;
+    bool closed = false;
+    bool recv(void* d, size_t n) {
+        size_t got = 0;
+        while (got < n) {
+            ssize_t r = ::read(fd, static_cast<uint8_t*>(d)+got, n-got);
+            if (r <= 0) return false;
+            got += size_t(r);
+        }
+        return true;
+    }
+    void send(const std::vector<uint8_t>& buf) {
+        size_t off = 0;
+        while (off < buf.size()) {
+            ssize_t w = ::write(fd, buf.data()+off, buf.size()-off);
+            if (w <= 0) return;
+            off += size_t(w);
+        }
+    }
+    void msg(uint8_t type, uint32_t chId, uint32_t tokId,
+             const std::vector<uint8_t>& body) {
+        std::vector<uint8_t> out;
+        Wr w{out};
+        w.b.push_back(type); w.b.push_back('F');
+        w.u32(0);
+        if (chId) w.u32(chId);
+        if (tokId) { w.u32(tokId); }
+        out.insert(out.end(), body.begin(), body.end());
+        /* size = header + body (8 or 12) */
+        const uint32_t hdr = (type=='O'||type=='C') ? 12u : 8u;
+        const uint32_t sz = (tokId ? 4u : 0u) + hdr + uint32_t(body.size())
+                          - (chId ? 0u : 0u);
+        /* fix: header is MessageType(3)+Chunk(1)+Size(4)+chanId(4)=12 for
+           OPN/CLO/MSG-secure; then tokenId for MSG. */
+        (void)sz;
+        uint32_t total = (type=='M' ? 12 : 8) + (chId?4:0) + (tokId?4:0)
+                       + uint32_t(body.size());
+        if (type=='M') total = 8 + 4 + 4 + uint32_t(body.size());
+        else if (chId) total = 8 + 4 + uint32_t(body.size());
+        else total = 8 + uint32_t(body.size());
+        uint32_t be = total;
+        out[4]=be; out[5]=be>>8; out[6]=be>>16; out[7]=be>>24;
+        send(out);
+    }
+};
+
+const char* EPN_URL = "http://opcfoundation.org/UA/SecurityPolicy#None";
+
+void hello(UaConn& c, Rd& r) {
+    /* HEL body: protocolVer, recvBuf, sendBuf, maxMsg, maxChunk, url */
+    r.u32(); r.u32(); r.u32(); r.u32(); r.u32();
+    c.endpointUrl = r.str();
+    std::vector<uint8_t> b; Wr w{b};
+    w.u32(0); w.u32(65536); w.u32(65536); w.u32(0); w.u32(0);
+    c.msg('A', 0, 0, b);
+}
+
+void openSecureChannel(UaConn& c, Rd& r, uint32_t reqId) {
+    /* r points at the ExtensionObject body (typeId already read). We
+       don't need the request fields — SecurityPolicy is always None. */
+    (void)r;
+    static uint32_t chanSeq = 1;
+    c.chanId = 0x01000000 | (chanSeq++ & 0xFFFF);
+    c.tokenId = c.chanId ^ 0x5A;
+    /* OPN message: [type+chunk+size][channelId][asymSecHdr][seqHdr]
+       [ext-obj OpenSecureChannelResponse]. The asymmetric security
+       header echoes SecurityPolicy#None with no cert/thumbprint. */
+    std::vector<uint8_t> full; Wr fw{full};
+    fw.b.push_back('O'); fw.b.push_back('F'); fw.u32(0); fw.u32(c.chanId);
+    fw.str(EPN_URL); fw.i32(-1); fw.i32(-1);       /* asym sec hdr */
+    fw.u32(1); fw.u32(reqId);                       /* seq hdr */
+    nodeIdNum(fw, 0, 449); fw.u8(1);                /* ext obj typeId+enc */
+    { std::vector<uint8_t> body; Wr bw{body};
+      bw.u64(132834744000000000ULL); bw.u32(reqId); bw.u32(0);
+      bw.u8(0); bw.i32(-1); bw.u8(0); bw.u8(0);     /* ResponseHeader */
+      bw.u32(0);                                    /* serverProtocolVer */
+      bw.u32(c.chanId); bw.u32(c.tokenId);          /* SecurityToken */
+      bw.u64(132834744000000000ULL); bw.u32(3600000);
+      bw.i32(-1);                                   /* serverNonce */
+      fw.u32(uint32_t(body.size()));
+      fw.b.insert(fw.b.end(), body.begin(), body.end());
+    }
+    uint32_t tot = uint32_t(full.size());
+    full[4]=tot; full[5]=tot>>8; full[6]=tot>>16; full[7]=tot>>24;
+    c.send(full);
+}
+
+void findServers(UaConn& c, uint32_t reqId, uint32_t reqHandle) {
+    std::vector<uint8_t> full; Wr fw{full};
+    fw.b.push_back('M'); fw.b.push_back('F'); fw.u32(0);
+    fw.u32(c.chanId); fw.u32(c.tokenId);
+    fw.u32(reqId); fw.u32(reqId);
+    nodeIdNum(fw, 0, 425); fw.u8(1);                /* FindServersResponse */
+    std::vector<uint8_t> body; Wr bw{body};
+    respHeader(bw, reqHandle);
+    bw.u32(1);                                      /* servers[1] */
+    bw.str("urn:tether:motion");                    /* applicationUri */
+    bw.str("TetherPLC");                            /* productUri */
+    bw.ltext("Tether Motion Server");               /* applicationName */
+    bw.u32(0);                                      /* applicationType Server */
+    bw.i32(-1);                                     /* gatewayServerUri */
+    bw.i32(-1);                                     /* discoveryProfileUri */
+    bw.u32(1); bw.str(c.endpointUrl.c_str());       /* discoveryUrls[1] */
+    bw.str("");                                     /* semaphoreFilePath */
+    bw.u8(1);                                       /* isOnline */
+    /* body done; append as bytestring */
+    fw.u32(uint32_t(body.size()));
+    full.insert(full.end(), body.begin(), body.end());
+    uint32_t tot = uint32_t(full.size());
+    full[4]=tot; full[5]=tot>>8; full[6]=tot>>16; full[7]=tot>>24;
+    c.send(full);
+}
+
+void getEndpoints(UaConn& c, uint32_t reqId, uint32_t reqHandle) {
+    std::vector<uint8_t> full; Wr fw{full};
+    fw.b.push_back('M'); fw.b.push_back('F'); fw.u32(0);
+    fw.u32(c.chanId); fw.u32(c.tokenId);
+    fw.u32(reqId); fw.u32(reqId);
+    nodeIdNum(fw, 0, 431); fw.u8(1);                /* GetEndpointsResponse */
+    std::vector<uint8_t> body; Wr bw{body};
+    respHeader(bw, reqHandle);
+    bw.u32(1);                                      /* endpoints[1] */
+    bw.str(c.endpointUrl.c_str());                  /* endpointUrl */
+    /* server: ApplicationDescription */
+    bw.str("urn:tether:motion"); bw.str("TetherPLC");
+    bw.ltext("Tether Motion Server"); bw.u32(0);
+    bw.i32(-1); bw.i32(-1); bw.u32(1); bw.str(c.endpointUrl.c_str());
+    bw.str("");
+    bw.i32(-1);                                     /* serverCertificate */
+    bw.u32(1);                                      /* securityMode None */
+    bw.str(EPN_URL);                                /* securityPolicyUri */
+    /* userIdentityTokens[1]: anonymous */
+    bw.u32(1);
+    bw.str("anonymous"); bw.u32(0); bw.i32(-1); bw.i32(-1);
+    bw.str("http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary");
+    bw.u8(0);                                       /* securityLevel */
+    fw.u32(uint32_t(body.size()));
+    full.insert(full.end(), body.begin(), body.end());
+    uint32_t tot = uint32_t(full.size());
+    full[4]=tot; full[5]=tot>>8; full[6]=tot>>16; full[7]=tot>>24;
+    c.send(full);
+}
+
+void createSession(UaConn& c, Rd& r, uint32_t reqId, uint32_t reqHandle) {
+    /* skip the request body fields we don't need */
+    (void)r;
+    std::vector<uint8_t> full; Wr fw{full};
+    fw.b.push_back('M'); fw.b.push_back('F'); fw.u32(0);
+    fw.u32(c.chanId); fw.u32(c.tokenId);
+    fw.u32(reqId); fw.u32(reqId);
+    nodeIdNum(fw, 0, 464); fw.u8(1);                /* CreateSessionResponse */
+    std::vector<uint8_t> body; Wr bw{body};
+    respHeader(bw, reqHandle);
+    nodeIdNum(bw, 1, 1);                            /* sessionId ns=1;i=1 */
+    nodeIdNum(bw, 1, 2);                            /* authenticationToken */
+    bw.f64(60000.0);                                /* revisedTimeout */
+    bw.i32(-1);                                     /* serverNonce */
+    bw.i32(-1);                                     /* serverCertificate */
+    /* serverEndpoints[1] same as getEndpoints single entry */
+    bw.u32(1);
+    bw.str(c.endpointUrl.c_str());
+    bw.str("urn:tether:motion"); bw.str("TetherPLC");
+    bw.ltext("Tether Motion Server"); bw.u32(0);
+    bw.i32(-1); bw.i32(-1); bw.u32(1); bw.str(c.endpointUrl.c_str());
+    bw.str("");
+    bw.i32(-1); bw.u32(1); bw.str(EPN_URL);
+    bw.u32(1); bw.str("anonymous"); bw.u32(0); bw.i32(-1); bw.i32(-1);
+    bw.str("http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary");
+    bw.u8(0);
+    bw.u32(0);                                      /* serverSoftwareCerts[0] */
+    bw.i32(-1); bw.i32(-1);                         /* serverSignature */
+    bw.u32(0);                                      /* maxRequestMessageSize */
+    fw.u32(uint32_t(body.size()));
+    full.insert(full.end(), body.begin(), body.end());
+    uint32_t tot = uint32_t(full.size());
+    full[4]=tot; full[5]=tot>>8; full[6]=tot>>16; full[7]=tot>>24;
+    c.send(full);
+}
+
+void activateSession(UaConn& c, Rd& r, uint32_t reqId, uint32_t reqHandle) {
+    (void)r;
+    std::vector<uint8_t> full; Wr fw{full};
+    fw.b.push_back('M'); fw.b.push_back('F'); fw.u32(0);
+    fw.u32(c.chanId); fw.u32(c.tokenId);
+    fw.u32(reqId); fw.u32(reqId);
+    nodeIdNum(fw, 0, 470); fw.u8(1);
+    std::vector<uint8_t> body; Wr bw{body};
+    respHeader(bw, reqHandle);
+    bw.i32(-1);                                     /* serverNonce */
+    bw.u32(0);                                      /* results[0] */
+    bw.u32(0);                                      /* diagnosticInfos[0] */
+    fw.u32(uint32_t(body.size()));
+    full.insert(full.end(), body.begin(), body.end());
+    uint32_t tot = uint32_t(full.size());
+    full[4]=tot; full[5]=tot>>8; full[6]=tot>>16; full[7]=tot>>24;
+    c.send(full);
+}
+
+const ParamEntry* findParam(Registry& reg, Rd& r) {
+    const uint8_t enc = r.u8();
+    if (enc == 0x02) { /* numeric */
+        const uint16_t ns = r.u16(); const uint32_t i = r.u32();
+        if (ns == 0 && i == 85) return nullptr;   /* ObjectsFolder */
+        /* numeric params: i = param index+1 in our flat space */
+        auto lst = reg.paramPage(0, 65535);
+        if (i >= 1 && i <= lst.size()) return lst[i-1].asParam();
+        return nullptr;
+    }
+    if (enc == 0x03) { /* string */
+        const uint16_t ns = r.u16(); const std::string s = r.str();
+        if (ns != 2) return nullptr;
+        for (const auto& v : reg.paramPage(0, 65535))
+            if (v.name() == s) return v.asParam();
+        return nullptr;
+    }
+    if (enc == 0x00) { r.u8(); return nullptr; }
+    if (enc == 0x01) { r.u8(); r.u16(); return nullptr; }
+    r.ok = false; return nullptr;
+}
+
+void readValues(UaConn& c, Rd& body, uint32_t reqId, uint32_t reqHandle) {
+    Rd r = body;
+    r.skipReqHeader();
+    r.f64();                                        /* maxAge */
+    r.u32();                                        /* timestampsToReturn */
+    const uint32_t n = r.u32();                     /* nodesToRead[] */
+    std::vector<const ParamEntry*> ps;
+    for (uint32_t i = 0; i < n && r.ok; ++i)
+        ps.push_back(findParam(*c.reg, r));
+    std::vector<uint8_t> full; Wr fw{full};
+    fw.b.push_back('M'); fw.b.push_back('F'); fw.u32(0);
+    fw.u32(c.chanId); fw.u32(c.tokenId);
+    fw.u32(reqId); fw.u32(reqId);
+    nodeIdNum(fw, 0, 634); fw.u8(1);                /* ReadResponse */
+    std::vector<uint8_t> ob; Wr bw{ob};
+    respHeader(bw, reqHandle);
+    bw.u32(uint32_t(ps.size()));
+    for (const ParamEntry* e : ps) {
+        /* DataValue: value + statusCode + sourceTimestamp */
+        uint8_t mask = 0x01 | 0x02 | 0x04;          /* value+status+sourcets */
+        if (e) {
+            uint8_t tmp[8] = {0}; size_t tn = 0;
+            if (e->readFn) {
+                uint8_t big[4096];
+                e->readFn(big);
+                tn = e->valueType == ValueType::Bool ? 1
+                   : e->valueType == ValueType::I8 || e->valueType == ValueType::U8 ? 1
+                   : e->valueType == ValueType::I16 || e->valueType == ValueType::U16 ? 2
+                   : e->valueType == ValueType::I32 || e->valueType == ValueType::U32 || e->valueType == ValueType::F32 ? 4 : 8;
+                std::memcpy(tmp, big, tn > 8 ? 8 : tn);
+            }
+            bw.u8(mask);
+            variantScalar(bw, e->valueType, tmp, tn);
+            bw.u32(0); bw.u64(132834744000000000ULL);
+        } else {
+            bw.u8(0x01 | 0x02);                     /* value+status only */
+            bw.u8(0x00);                            /* null variant */
+            bw.u32(0x80340000);                     /* BadNodeIdUnknown */
+        }
+    }
+    bw.u32(0);                                      /* diagnosticInfos[0] */
+    fw.u32(uint32_t(ob.size()));
+    full.insert(full.end(), ob.begin(), ob.end());
+    uint32_t tot = uint32_t(full.size());
+    full[4]=tot; full[5]=tot>>8; full[6]=tot>>16; full[7]=tot>>24;
+    c.send(full);
+}
+
+void writeValues(UaConn& c, Rd& body, uint32_t reqId, uint32_t reqHandle) {
+    Rd r = body;
+    r.skipReqHeader();
+    const uint32_t n = r.u32();                     /* nodesToWrite[] */
+    std::vector<uint32_t> results;
+    for (uint32_t i = 0; i < n && r.ok; ++i) {
+        const ParamEntry* e = findParam(*c.reg, r);
+        /* WriteValue: indexRange str, dataValue (mask + variant + ...) */
+        r.skipStr();
+        const uint8_t mask = r.u8();
+        const uint8_t vtype = (mask & 0x01) ? r.u8() : 0x00;
+        uint32_t st = 0x80340000;
+        if (e && e->writeFn) {
+            uint8_t buf[8] = {0};
+            switch (vtype) {
+                case 0x01: buf[0]=r.u8(); st=0; break;
+                case 0x02: case 0x03: buf[0]=r.u8(); st=0; break;
+                case 0x04: case 0x05: *(uint16_t*)buf=r.u16(); st=0; break;
+                case 0x06: case 0x07: case 0x0A: *(uint32_t*)buf=r.u32(); st=0; break;
+                case 0x08: case 0x09: case 0x0B: *(uint64_t*)buf=r.u64(); st=0; break;
+                default: st=0x80350000; r.ok=false; break;
+            }
+            if (st == 0) e->writeFn(buf);
+        } else if (e) {
+            st = 0x803B0000;                        /* BadNotWritable */
+            r.ok = false;
+        }
+        /* skip remaining DataValue fields per mask */
+        if (mask & 0x02) r.u32();
+        if (mask & 0x04) r.u64();
+        if (mask & 0x08) r.u64();
+        if (mask & 0x10) r.u16();
+        if (mask & 0x20) r.u16();
+        results.push_back(st);
+    }
+    std::vector<uint8_t> full; Wr fw{full};
+    fw.b.push_back('M'); fw.b.push_back('F'); fw.u32(0);
+    fw.u32(c.chanId); fw.u32(c.tokenId);
+    fw.u32(reqId); fw.u32(reqId);
+    nodeIdNum(fw, 0, 676); fw.u8(1);                /* WriteResponse */
+    std::vector<uint8_t> ob; Wr bw{ob};
+    respHeader(bw, reqHandle);
+    bw.u32(uint32_t(results.size()));
+    for (uint32_t s : results) bw.u32(s);
+    bw.u32(0);
+    fw.u32(uint32_t(ob.size()));
+    full.insert(full.end(), ob.begin(), ob.end());
+    uint32_t tot = uint32_t(full.size());
+    full[4]=tot; full[5]=tot>>8; full[6]=tot>>16; full[7]=tot>>24;
+    c.send(full);
+}
+
+void browse(UaConn& c, Rd& body, uint32_t reqId, uint32_t reqHandle) {
+    Rd r = body;
+    r.skipReqHeader();
+    /* BrowseDescription: view(ViewDescription: viewId, timestamp,
+       viewVersion), requestedMaxReferencesPerNode, nodesToBrowse[] */
+    r.skipNodeId(); r.u64(); r.u32();
+    r.u32();
+    const uint32_t n = r.u32();
+    std::vector<const ParamEntry*> roots;
+    bool objectsRoot = false;
+    for (uint32_t i = 0; i < n && r.ok; ++i) {
+        /* BrowseDescription: nodeId, browseDir, includeSubtypes,
+           nodeClassMask, resultMask */
+        const uint8_t enc = r.u8();
+        if (enc == 0x00) { const uint8_t id = r.u8(); objectsRoot = (id == 85); }
+        else if (enc == 0x01) { r.u8(); const uint16_t i = r.u16(); objectsRoot = (i == 85); }
+        else if (enc == 0x02) { const uint16_t ns = r.u16(); const uint32_t i = r.u32(); objectsRoot = (ns==0&&i==85); }
+        else { r.ok=false; break; }
+        r.u32(); r.u8(); r.u32(); r.u32();
+    }
+    std::vector<uint8_t> full; Wr fw{full};
+    fw.b.push_back('M'); fw.b.push_back('F'); fw.u32(0);
+    fw.u32(c.chanId); fw.u32(c.tokenId);
+    fw.u32(reqId); fw.u32(reqId);
+    nodeIdNum(fw, 0, 530); fw.u8(1);                /* BrowseResponse */
+    std::vector<uint8_t> ob; Wr bw{ob};
+    respHeader(bw, reqHandle);
+    const auto lst = c.reg->paramPage(0, 65535);
+    if (objectsRoot) {
+        bw.u32(1);                                  /* results[1] */
+        bw.u32(0);                                  /* statusCode ok */
+        bw.i32(-1);                                 /* continuationPoint */
+        bw.u32(uint32_t(lst.size()));               /* references[] */
+        for (const auto& v : lst) {
+            const std::string nm(v.name());
+            nodeIdNum(bw, 0, 47);                   /* referenceType Organizes */
+            bw.u8(0);                               /* isForward */
+            /* expanded node id: ns=2;s=name + serverIndex 0 + nsUri */
+            bw.u8(0x03); bw.u16(2); bw.str(nm.c_str());
+            bw.u32(0);                              /* serverIndex */
+            bw.i32(-1);                             /* namespaceUri */
+            bw.u8(2);                               /* nodeClass Variable */
+            bw.qname(2, nm.c_str());                /* browseName */
+            bw.ltext(nm.c_str());                   /* displayName */
+            nodeIdNum(bw, 0, 63);                   /* typeDefinition BaseDataVariable */
+        }
+    } else {
+        bw.u32(uint32_t(n));                        /* empty results */
+        for (uint32_t i = 0; i < n; ++i) {
+            bw.u32(0x80340000); bw.i32(-1); bw.u32(0);
+        }
+    }
+    bw.u32(0);
+    fw.u32(uint32_t(ob.size()));
+    full.insert(full.end(), ob.begin(), ob.end());
+    uint32_t tot = uint32_t(full.size());
+    full[4]=tot; full[5]=tot>>8; full[6]=tot>>16; full[7]=tot>>24;
+    c.send(full);
+}
+
+void connLoop(UaConn c) {
+    for (;;) {
+        uint8_t hdr[8];
+        if (!c.recv(hdr, 8)) return;
+        const uint8_t type = hdr[0];
+        const uint8_t chunk = hdr[3];
+        uint32_t size = hdr[4] | hdr[5]<<8 | hdr[6]<<16 | hdr[7]<<24;
+        if (size < 8 || size > 1u<<20) return;
+        std::vector<uint8_t> buf(size - 8);
+        if (!c.recv(buf.data(), buf.size())) return;
+        Rd r{buf.data(), buf.data()+buf.size()};
+        if (type == 'H' || type == 'h') {           /* HEL */
+            hello(c, r);
+        } else if (type == 'O') {                   /* OPN */
+            /* [channelId][asymSecHdr: policyUri,senderCert,thumb]
+               [seqHdr: seqNo,reqId][ext-obj OpenSecureChannelRequest] */
+            r.u32();                                /* channelId */
+            r.skipStr(); r.skipBytes(); r.skipBytes(); /* asym hdr */
+            r.u32();                                /* sequenceNumber */
+            const uint32_t reqId = r.u32();
+            openSecureChannel(c, r, reqId);
+        } else if (type == 'M') {                   /* MSG */
+            r.u32();                                /* channelId */
+            const uint32_t tok = r.u32(); (void)tok;/* tokenId */
+            const uint32_t reqId = r.u32();
+            /* body: ExtensionObject = typeId nodeid + encoding byte */
+            const uint8_t enc = r.u8();
+            uint32_t tid = 0; uint16_t tns = 0;
+            if (enc == 0x01) { r.u8(); tid = r.u16(); tns = 0; }
+            else if (enc == 0x02) { tns = r.u16(); tid = r.u32(); }
+            else if (enc == 0x00) { tid = r.u8(); tns = 0; }
+            else { return; }
+            const uint8_t bodyEnc = r.u8();          /* 1=bytestring */
+            if (bodyEnc == 1) r.u32();
+            /* requestHandle sits inside RequestHeader of the body */
+            /* peek: body starts; RequestHeader: token nodeid(1B or more)
+               + timestamp(8) + requestHandle(4) ... */
+            Rd peek{r.p, buf.data()+buf.size()};
+            peek.skipNodeId(); peek.u64();
+            const uint32_t reqHandle = peek.u32();
+            switch (tid) {
+                case 422: findServers(c, reqId, reqHandle); break;
+                case 428: getEndpoints(c, reqId, reqHandle); break;
+                case 461: createSession(c, r, reqId, reqHandle); break;
+                case 467: activateSession(c, r, reqId, reqHandle); break;
+                case 631: readValues(c, r, reqId, reqHandle); break;
+                case 673: writeValues(c, r, reqId, reqHandle); break;
+                case 527: browse(c, r, reqId, reqHandle); break;
+                case 473: /* CloseSession */ {
+                    std::vector<uint8_t> full; Wr fw{full};
+                    fw.b.push_back('M'); fw.b.push_back('F'); fw.u32(0);
+                    fw.u32(c.chanId); fw.u32(c.tokenId);
+                    fw.u32(reqId); fw.u32(reqId);
+                    nodeIdNum(fw, 0, 476); fw.u8(1);
+                    std::vector<uint8_t> ob; Wr bw{ob};
+                    respHeader(bw, reqHandle);
+                    fw.u32(uint32_t(ob.size()));
+                    full.insert(full.end(), ob.begin(), ob.end());
+                    uint32_t tot=uint32_t(full.size());
+                    full[4]=tot;full[5]=tot>>8;full[6]=tot>>16;full[7]=tot>>24;
+                    c.send(full);
+                    break;
+                }
+                default: break;
+            }
+        } else if (type == 'C') {                   /* CLO */
+            return;
+        } else {
+            return;
+        }
+        (void)chunk;
+    }
+}
+
+/* accept loop on an OPC UA TCP port; each conn gets its own thread. */
+void serve(uint16_t port, Registry& reg) {
+    int lfd = ::socket(AF_INET, SOCK_STREAM, 0);
+    int one = 1;
+    setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    sockaddr_in a{}; a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    a.sin_port = htons(port);
+    if (::bind(lfd, reinterpret_cast<sockaddr*>(&a), sizeof(a)) < 0 ||
+        ::listen(lfd, 8) < 0) {
+        motionLog("err", "opc ua listen %u failed", port);
+        ::close(lfd); return;
+    }
+    motionLog("info", "opc ua listening on 127.0.0.1:%u", port);
+    while (!g_stop.load()) {
+        sockaddr_in ca{}; socklen_t cl = sizeof(ca);
+        int fd = ::accept(lfd, reinterpret_cast<sockaddr*>(&ca), &cl);
+        if (fd < 0) { if (g_stop.load()) break; continue; }
+        char url[64];
+        std::snprintf(url, sizeof(url), "opc.tcp://127.0.0.1:%u", port);
+        std::thread([fd, &reg, url] {
+            UaConn c; c.fd = fd; c.reg = &reg; c.endpointUrl = url;
+            connLoop(c);
+            ::close(fd);
+        }).detach();
+    }
+    ::close(lfd);
+}
+
+} // namespace uasc
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -935,6 +1537,9 @@ int main(int argc, char** argv) {
     prog.add_argument("--clock").default_value(std::string("sim"))
         .help("sim = client-driven via mc.time (deterministic); "
               "realtime = wall clock");
+    prog.add_argument("--opcua").default_value(std::string(""))
+        .help("if set to a port, also serve a minimal OPC UA binary "
+              "endpoint exposing all params as ns=2;s=<name> nodes");
     try { prog.parse_args(argc, argv); }
     catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", e.what());
@@ -1015,10 +1620,19 @@ int main(int argc, char** argv) {
         }
     });
 
+    // Optional OPC UA binary endpoint exposing the same Registry.
+    std::thread uaThr;
+    const std::string uaPort = prog.get<std::string>("--opcua");
+    if (!uaPort.empty()) {
+        const uint16_t p = static_cast<uint16_t>(std::stoul(uaPort));
+        uaThr = std::thread([p, &registry] { uasc::serve(p, registry); });
+    }
+
     while (!g_stop) std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     server.stop();
     g_stop = true;
+    if (uaThr.joinable()) uaThr.join();
     ticker.join();
     return 0;
 }
