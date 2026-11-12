@@ -104,7 +104,13 @@ public:
             cpu_set_t cpuset;
             CPU_ZERO(&cpuset);
             CPU_SET(m_config.cpuAffinity, &cpuset);
-            pthread_setaffinity_np(m_thread, sizeof(cpuset), &cpuset);
+            const int aret =
+                pthread_setaffinity_np(m_thread, sizeof(cpuset), &cpuset);
+            if (aret != 0) {
+                fprintf(stderr, "[W] LinuxThread: pthread_setaffinity_np to "
+                        "CPU %d failed (%s) — thread unpinned\n",
+                        m_config.cpuAffinity, strerror(aret));
+            }
         }
 
         return Error::OK;

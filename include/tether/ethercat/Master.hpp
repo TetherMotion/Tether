@@ -65,6 +65,7 @@
 #include "tether/ethercat/ESIFile.hpp"
 #include "tether/platform/MessageQueue.hpp"
 #include "tether/platform/EspCompat.hpp"
+#include "tether/platform/PiMutex.hpp"
 
 namespace EtherCAT {
 
@@ -1546,6 +1547,12 @@ private:
 
 #ifdef __linux__
     /**
+     * Frames pulled per recvmmsg() call in drainWireBatch — shared with
+     * CyclicDatapath::setup(), which pre-sizes/pins drain_buf_ so the
+     * first drain on the cyclic path never allocates or faults.
+     */
+    static constexpr size_t kDrainBatchFrames = 32;
+    /**
      * Batched backlog dequeue for drainWire() — see drainWireBatch().
      * Returns frames drained, or -1 when the fd cannot be drained this
      * way (caller falls back to the per-frame receive path).
@@ -1553,7 +1560,7 @@ private:
     int drainWireBatch(int fd, int max_frames);
     /**
      * Receive scratch for drainWireBatch — sized lazily on first use
-     * (recovery path, not per-cycle).  kDrainBatch × kMaxJumboFrameSize.
+     * (recovery path, not per-cycle).  kDrainBatchFrames × kMaxJumboFrameSize.
      */
     std::vector<uint8_t> drain_buf_;
 #endif
@@ -1729,7 +1736,9 @@ private:
     // not guaranteed to be thread-safe, so all sends are serialised here.
     // The mutex is held only for the actual transmit; callers wait on their
     // own slot condition variable in parallel after releasing it.
-    mutable std::mutex send_mutex_;
+    // Priority-inheriting on Linux: an RT sender blocked behind a non-RT
+    // transmit lends its priority to the holder.
+    mutable Tether::Platform::PiMutex send_mutex_;
 };
 
 // ============================================================================

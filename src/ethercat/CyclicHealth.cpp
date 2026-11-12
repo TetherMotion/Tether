@@ -17,11 +17,11 @@ std::string CyclicHealth::describe() const
         "cycles={} ok={} wire_loss={} wkc_err={} stale={} send_err={} "
         "rx_bank_drops={} tp_drops={} unrouted={} rxq_overflow={} "
         "missed_deadlines={} collect_calls={} wait_calls={} "
-        "dispatched={} disp_unrouted={}",
+        "dispatched={} disp_unrouted={} lock_skips={}",
         cycles, exchanges_ok, wire_loss, wkc_errors, stale_responses,
         send_errors, rx_bank_drops, kernel_rx_drops, unrouted_datagrams,
         rx_queue_overflow, missed_deadlines, collect_calls, wait_calls,
-        dispatch_frames, dispatch_unrouted);
+        dispatch_frames, dispatch_unrouted, exchange_lock_skips);
     // Late-vs-lost split: a stale deposit is a reply that arrived AFTER
     // its cycle deadline (the send counted wire_loss, then the echo
     // surfaced next cycle).  wire_loss - stale ≈ true non-return.

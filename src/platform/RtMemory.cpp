@@ -7,6 +7,7 @@
 
 #ifdef __linux__
 #include <alloca.h>
+#include <malloc.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <unistd.h>
@@ -25,10 +26,30 @@ namespace {
 constexpr size_t kPage = 4096;
 }
 
-bool lockAllMemory() {
+void configureRtAllocator() {
 #ifdef __linux__
-    if (mlockall(MCL_CURRENT | MCL_FUTURE) == 0) {
-        TETHER_LOGI(TAG, "mlockall(MCL_CURRENT|MCL_FUTURE) active");
+    // Keep the allocator from undoing the lock: an mmap'd chunk freed
+    // after mlockall() munmaps the locked page; sbrk-trim returns arena
+    // pages to the kernel.  Both would refault later under memory
+    // pressure — exactly the mid-cycle SD-card stall we are removing.
+    mallopt(M_MMAP_MAX, 0);
+    mallopt(M_TRIM_THRESHOLD, -1);
+    mallopt(M_ARENA_MAX, 1);
+#endif
+}
+
+bool lockAllMemory(bool on_fault) {
+#ifdef __linux__
+    configureRtAllocator();
+    int flags = MCL_CURRENT | MCL_FUTURE;
+#ifdef MCL_ONFAULT
+    if (on_fault) flags |= MCL_ONFAULT;
+#else
+    (void)on_fault;
+#endif
+    if (mlockall(flags) == 0) {
+        TETHER_LOGI(TAG, "mlockall(MCL_CURRENT|MCL_FUTURE{}) active",
+                    on_fault ? "|MCL_ONFAULT" : "");
         return true;
     }
     TETHER_LOGW(TAG,
@@ -37,8 +58,13 @@ bool lockAllMemory() {
         strerror(errno));
     return false;
 #else
+    (void)on_fault;
     return false;
 #endif
+}
+
+bool lockAllMemory() {
+    return lockAllMemory(/*on_fault=*/false);
 }
 
 bool lockMemory(const void* addr, size_t len) {

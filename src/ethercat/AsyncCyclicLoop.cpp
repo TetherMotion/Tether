@@ -11,6 +11,7 @@
 
 #include "tether/ethercat/AsyncCyclicLoop.hpp"
 #include "tether/ethercat/ProcessImage.hpp"
+#include "tether/platform/CpuIsolation.hpp"
 #include "tether/platform/Platform.hpp"
 #include "tether/platform/RtMemory.hpp"
 #include "logging/Logger.hpp"
@@ -159,6 +160,20 @@ bool AsyncCyclicLoop::doCollect() {
 }
 
 void AsyncCyclicLoop::main() {
+    // Deferred logging: log calls on this thread only enqueue bounded
+    // events — no heap, no mutex, no printf on the send/collect path.
+    Tether::Platform::Logger::setThreadDeferred(true);
+    if (config_.cpu_affinity >= 0) {
+        // Join the exclusive cpuset for the claimed CPU first (member-
+        // ship grants the exclusivity), then re-apply the pin — the
+        // spawn-time pthread_setaffinity_np may have raced/failed.
+        Tether::Platform::CpuIsolation::instance().adoptCurrentThread(
+            config_.cpu_affinity);
+        if (!Tether::Platform::setCurrentThreadAffinity(config_.cpu_affinity)) {
+            TETHER_LOGW(TAG, "cyclic thread: CPU {} pin failed — unpinned",
+                        config_.cpu_affinity);
+        }
+    }
     if (config_.low_timer_slack) {
         Tether::Platform::setCurrentThreadTimerSlack(1);
     }
@@ -169,8 +184,50 @@ void AsyncCyclicLoop::main() {
                                    - 16 * 1024));
     }
 
+    // Auto: FIFO only on a hard-isolated CPU — on a shared CPU the global
+    // RT-throttle budget can dequeue the loop for ~50 ms (see exec).
+    const bool isolated =
+        config_.cpu_affinity >= 0
+            ? Tether::Platform::cpuIsHardIsolated(config_.cpu_affinity)
+            : Tether::Platform::currentThreadRunsIsolatedOnly();
+    SchedClass cls = config_.sched_class;
+    if (cls == SchedClass::Auto) {
+        cls = isolated ? SchedClass::Fifo : SchedClass::Deadline;
+        TETHER_LOGI(TAG, "sched_class=Auto → {} (cyclic CPU {} {} isolated)",
+                    isolated ? "SCHED_FIFO" : "SCHED_DEADLINE",
+                    config_.cpu_affinity,
+                    isolated ? "is" : "is NOT");
+    }
+
+    if (config_.disable_rt_throttle) {
+        if (Tether::Platform::disableRtThrottle()) {
+            TETHER_LOGI(TAG, "sched_rt_runtime_us=-1 — global RT throttle "
+                             "disabled");
+            if (!isolated)
+                TETHER_LOGW(TAG, "RT throttle disabled on a NON-isolated "
+                                 "CPU — a runaway RT task can starve the "
+                                 "core");
+        } else {
+            TETHER_LOGW(TAG, "disable_rt_throttle: write to "
+                             "sched_rt_runtime_us failed (needs root)");
+        }
+    }
+    if (cls == SchedClass::Fifo && !isolated &&
+        Tether::Platform::rtThrottleRuntimeUs() >= 0) {
+        TETHER_LOGW(TAG, "SCHED_FIFO on a non-isolated CPU with the kernel "
+                         "RT throttle armed — RT-group overruns can dequeue "
+                         "the loop for ~50 ms; prefer Deadline/Auto or "
+                         "CPU isolation");
+    }
+    if (cls == SchedClass::Deadline && config_.in_cycle_spin_ns > 0) {
+        TETHER_LOGW(TAG, "SCHED_DEADLINE with {} ns/cycle in-cycle spin "
+                         "(rx_spin_ns/slot_spin_ns): every spin ns is "
+                         "charged against the CBS runtime — prefer 0 on "
+                         "shared CPUs", config_.in_cycle_spin_ns);
+    }
+
     bool rt = false;
-    if (config_.sched_class == SchedClass::Deadline) {
+    if (cls == SchedClass::Deadline) {
         const uint64_t period_ns =
             static_cast<uint64_t>(config_.collect_period_us) * 1000ULL;
         const uint64_t runtime = config_.dl_runtime_ns
@@ -272,6 +329,17 @@ void AsyncCyclicLoop::main() {
                 activity |= doCollect();
         }
         if (periodic && t >= collect_due) {
+            // Collect lateness = this loop's wake overshoot (Nanosleep +
+            // reschedule delay past the deadline).
+            const uint64_t late = t - collect_due;
+            uint32_t cur_late =
+                max_collect_late_ns_.load(std::memory_order_relaxed);
+            while (late > cur_late &&
+                   !max_collect_late_ns_.compare_exchange_weak(
+                       cur_late,
+                       static_cast<uint32_t>(
+                           late > UINT32_MAX ? UINT32_MAX : late),
+                       std::memory_order_relaxed)) {}
             activity |= doCollect();
             // Stay phase-aligned: advance by whole periods, never drift.
             collect_due += collect_ns;
@@ -293,6 +361,16 @@ void AsyncCyclicLoop::main() {
 // ============================================================================
 
 void AsyncCyclicLoop::dcMain() {
+    Tether::Platform::Logger::setThreadDeferred(true);
+    if (config_.dc_cpu_affinity >= 0) {
+        Tether::Platform::CpuIsolation::instance().adoptCurrentThread(
+            config_.dc_cpu_affinity);
+        if (!Tether::Platform::setCurrentThreadAffinity(
+                config_.dc_cpu_affinity)) {
+            TETHER_LOGW(TAG, "DC thread: CPU {} pin failed — unpinned",
+                        config_.dc_cpu_affinity);
+        }
+    }
     const bool rt =
         Tether::Platform::setCurrentThreadRealtime(config_.dc_priority);
     if (!rt) {
@@ -328,6 +406,8 @@ AsyncCyclicLoop::Stats AsyncCyclicLoop::getStats() const {
     s.max_send_work_ns    = max_send_work_ns_.load(std::memory_order_relaxed);
     s.max_collect_work_ns = max_collect_work_ns_.load(std::memory_order_relaxed);
     s.max_send_latency_ns = max_send_latency_ns_.load(std::memory_order_relaxed);
+    s.max_collect_late_ns =
+        max_collect_late_ns_.load(std::memory_order_relaxed);
     s.dc_sync_count      = dc_sync_count_.load(std::memory_order_relaxed);
     s.dc_sync_errors     = dc_sync_errors_.load(std::memory_order_relaxed);
     return s;

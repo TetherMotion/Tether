@@ -14,7 +14,10 @@
 #include <sys/utsname.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <sched.h>
+#include <algorithm>
 #include <fstream>
+#include <vector>
 #include <cstdlib>
 #include <cstring>
 #include <cerrno>
@@ -173,6 +176,220 @@ bool setCurrentThreadDeadline(uint64_t runtime_ns, uint64_t deadline_ns,
     return true;
 #else
     (void)runtime_ns; (void)deadline_ns; (void)period_ns;
+    return false;
+#endif
+}
+
+bool setCurrentThreadAffinity(int cpu) {
+#ifdef __linux__
+    if (cpu < 0) return false;
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(cpu, &set);
+    return sched_setaffinity(0, sizeof(set), &set) == 0;
+#else
+    (void)cpu;
+    return false;
+#endif
+}
+
+//=============================================================================
+// CPU Isolation Detection
+//=============================================================================
+
+#ifdef __linux__
+
+namespace {
+
+/**Parse a kernel cpulist ("0,2-3,5") into indices; empty → {}. */
+std::vector<int> parseCpuList(const std::string& list) {
+    std::vector<int> cpus;
+    size_t pos = 0;
+    while (pos < list.size()) {
+        const char* p = list.c_str() + pos;
+        char* end = nullptr;
+        const long first = std::strtol(p, &end, 10);
+        if (end == p) break;
+        long last = first;
+        pos = static_cast<size_t>(end - list.c_str());
+        if (pos < list.size() && list[pos] == '-') {
+            const long hi = std::strtol(list.c_str() + pos + 1, &end, 10);
+            if (end == list.c_str() + pos + 1) break;
+            last = hi;
+            pos = static_cast<size_t>(end - list.c_str());
+        }
+        for (long c = first; c <= last && c < 4096; ++c)
+            cpus.push_back(static_cast<int>(c));
+        if (pos >= list.size() || list[pos] != ',') break;
+        ++pos;
+    }
+    return cpus;
+}
+
+std::string readSmallFile(const char* path) {
+    std::ifstream f(path);
+    if (!f.is_open()) return {};
+    std::string s;
+    std::getline(f, s);
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' ||
+                          s.back() == ' ' || s.back() == '\t'))
+        s.pop_back();
+    return s;
+}
+
+/**
+ * One line of /proc/thread-self/cgroup: "hier:subsys:path".  The v2
+ * unified hierarchy has an empty subsys ("0::/path"); v1 mounts list
+ * comma-separated controllers ("4:cpuset:/tether_rt").  Thread-granular
+ * on purpose: an RT thread migrated into the exclusive cpuset sees its
+ * own membership here — /proc/self/cgroup reports the main thread's.
+ */
+struct OwnCgroup {
+    std::string subsys; /**< "" for the v2 unified hierarchy */
+    std::string path;
+};
+
+std::vector<OwnCgroup> ownCgroups() {
+    std::vector<OwnCgroup> out;
+    std::ifstream f("/proc/thread-self/cgroup");
+    std::string line;
+    while (std::getline(f, line)) {
+        const auto c1 = line.find(':');
+        const auto c2 = c1 == std::string::npos
+            ? std::string::npos : line.find(':', c1 + 1);
+        if (c1 == std::string::npos || c2 == std::string::npos) continue;
+        out.push_back({line.substr(c1 + 1, c2 - c1 - 1),
+                       line.substr(c2 + 1)});
+    }
+    return out;
+}
+
+bool subsysHasCpuset(const std::string& subsys) {
+    return subsys == "cpuset" ||
+           subsys.rfind("cpuset,", 0) == 0 ||
+           subsys.find(",cpuset,") != std::string::npos ||
+           (subsys.size() > 7 &&
+            subsys.compare(subsys.size() - 7, 7, ",cpuset") == 0);
+}
+
+/**
+ * CPUs dedicated to this thread by the cgroups it belongs to:
+ *
+ *  - v2: our own cgroup is an "isolated" partition → its isolated set.
+ *  - v1: we sit inside a cpu_exclusive cpuset (CpuIsolation's tether_rt
+ *    or an admin-made one) → its cpuset.cpus.
+ *
+ * Foreign partitions/exclusive cpusets are deliberately NOT counted —
+ * their CPUs are outside our effective mask, so this thread could never
+ * be scheduled on them anyway.
+ */
+std::vector<int> cpusetIsolatedCpus() {
+    std::vector<int> cpus;
+    auto add = [&](const std::string& list) {
+        for (int cpu : parseCpuList(list)) {
+            if (std::find(cpus.begin(), cpus.end(), cpu) == cpus.end())
+                cpus.push_back(cpu);
+        }
+    };
+    for (const auto& g : ownCgroups()) {
+        if (g.subsys.empty()) {
+            // cgroup v2 unified hierarchy.
+            const std::string dir = "/sys/fs/cgroup" + g.path;
+            if (readSmallFile((dir + "/cpuset.cpus.partition").c_str())
+                    != "isolated")
+                continue;
+            // cpuset.cpus.isolated (newer kernels) is the precise set;
+            // fall back to the partition's effective/requested cpus.
+            std::string c =
+                readSmallFile((dir + "/cpuset.cpus.isolated").c_str());
+            if (c.empty())
+                c = readSmallFile((dir + "/cpuset.cpus.effective").c_str());
+            if (c.empty())
+                c = readSmallFile((dir + "/cpuset.cpus").c_str());
+            add(c);
+        } else if (subsysHasCpuset(g.subsys)) {
+            // cgroup v1 cpuset hierarchy — cpu_exclusive asserts that no
+            // sibling cgroup may schedule on these CPUs.
+            const std::string dir = "/sys/fs/cgroup/cpuset" + g.path;
+            if (readSmallFile((dir + "/cpuset.cpu_exclusive").c_str())
+                    != "1")
+                continue;
+            add(readSmallFile((dir + "/cpuset.cpus").c_str()));
+        }
+    }
+    return cpus;
+}
+
+/**Union of every hard-isolated CPU visible to us. */
+std::vector<int> hardIsolatedCpus() {
+    std::vector<int> cpus = cpusetIsolatedCpus();
+    for (int cpu : parseCpuList(
+             readSmallFile("/sys/devices/system/cpu/isolated"))) {
+        if (std::find(cpus.begin(), cpus.end(), cpu) == cpus.end())
+            cpus.push_back(cpu);
+    }
+    return cpus;
+}
+
+} // anonymous namespace
+
+#endif // __linux__
+
+bool cpuIsHardIsolated(int cpu) {
+#ifdef __linux__
+    if (cpu < 0) return false;
+    const auto iso = hardIsolatedCpus();
+    return std::find(iso.begin(), iso.end(), cpu) != iso.end();
+#else
+    (void)cpu;
+    return false;
+#endif
+}
+
+int64_t rtThrottleRuntimeUs() {
+#ifdef __linux__
+    const std::string v =
+        readSmallFile("/proc/sys/kernel/sched_rt_runtime_us");
+    if (v.empty()) return -2;
+    char* end = nullptr;
+    const long long us = std::strtoll(v.c_str(), &end, 10);
+    if (end == v.c_str()) return -2;
+    return static_cast<int64_t>(us);
+#else
+    return -2;
+#endif
+}
+
+bool disableRtThrottle() {
+#ifdef __linux__
+    std::ofstream f("/proc/sys/kernel/sched_rt_runtime_us");
+    if (!f.is_open()) return false;
+    f << "-1\n";
+    f.flush();
+    return f.good();
+#else
+    return false;
+#endif
+}
+
+bool currentThreadRunsIsolatedOnly() {
+#ifdef __linux__
+    const auto iso = hardIsolatedCpus();
+    if (iso.empty()) return false;
+    // sched_getaffinity already returns the thread's mask intersected
+    // with its cpuset(s) — if every runnable CPU is hard-isolated, the
+    // thread is fully on dedicated cores.
+    cpu_set_t set;
+    if (sched_getaffinity(0, sizeof(set), &set) != 0) return false;
+    bool any = false;
+    for (int c = 0; c < CPU_SETSIZE; ++c) {
+        if (!CPU_ISSET(c, &set)) continue;
+        any = true;
+        if (std::find(iso.begin(), iso.end(), c) == iso.end())
+            return false;
+    }
+    return any;
+#else
     return false;
 #endif
 }

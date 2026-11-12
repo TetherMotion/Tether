@@ -301,6 +301,62 @@ TEST(CyclicExecutive, DeadlineClassExplicitParams) {
     e.stop();
 }
 
+TEST(CyclicExecutive, DeadlineComputedRuntimeFoldsSpinTail) {
+    // With no explicit dl_runtime_ns and auto-measure off, the CBS budget
+    // is period/2 + the HybridSpin tail — recorded in stats whether or
+    // not the kernel admits SCHED_DEADLINE (needs privileges).
+    std::atomic<int> calls{0};
+    auto cfg = fastConfig();
+    cfg.sched_class     = Exec::SchedClass::Deadline;
+    cfg.dl_auto_measure = false;
+    cfg.dl_runtime_ns   = 0;                  // → computed budget
+    cfg.sleep_mode      = Exec::SleepMode::HybridSpin;
+    cfg.spin_window_us  = 100;                // 100 µs busy tail
+    Exec e([&] { ++calls; return true; }, nullptr, nullptr, cfg);
+    ASSERT_TRUE(e.start());
+    ASSERT_TRUE(waitFor([&] { return calls.load() >= 3; }));
+    e.stop();
+    const auto s = e.getStats();
+    // 500 µs period → 250 µs + 100 µs spin tail = 350'000 ns.
+    EXPECT_EQ(s.dl_runtime_ns, 350'000u);
+}
+
+TEST(CyclicExecutive, ExplicitDeadlineRuntimeVerbatim) {
+    // An explicit dl_runtime_ns is never adjusted — the user owns the
+    // spin accounting (the startup warning says so).
+    std::atomic<int> calls{0};
+    auto cfg = fastConfig();
+    cfg.sched_class     = Exec::SchedClass::Deadline;
+    cfg.dl_runtime_ns   = 100'000;
+    cfg.dl_deadline_ns  = 400'000;
+    cfg.sleep_mode      = Exec::SleepMode::HybridSpin;
+    cfg.spin_window_us  = 100;
+    Exec e([&] { ++calls; return true; }, nullptr, nullptr, cfg);
+    ASSERT_TRUE(e.start());
+    ASSERT_TRUE(waitFor([&] { return calls.load() >= 3; }));
+    e.stop();
+    EXPECT_EQ(e.getStats().dl_runtime_ns, 100'000u);
+}
+
+TEST(CyclicExecutive, AutoMeasuredRuntimeIncludesSpinTail) {
+    // Auto-measure brackets wake→work-end only, so the spin tail inside
+    // waitNext() is folded in explicitly: runtime = P99×margin + tail.
+    std::atomic<int> calls{0};
+    auto cfg = fastConfig();
+    cfg.sched_class       = Exec::SchedClass::Deadline;
+    cfg.dl_measure_cycles = 6;              // measure quickly
+    cfg.sleep_mode        = Exec::SleepMode::HybridSpin;
+    cfg.spin_window_us    = 50;             // 50 µs tail
+    Exec e([&] { ++calls; return true; }, nullptr, nullptr, cfg);
+    ASSERT_TRUE(e.start());
+    ASSERT_TRUE(waitFor([&] { return e.getStats().dl_runtime_ns != 0; }));
+    e.stop();
+    const auto s = e.getStats();
+    // runtime ≥ spin tail (work ≥ 0) and clamped below the deadline.
+    EXPECT_GE(s.dl_runtime_ns, 50'000u);
+    EXPECT_LE(s.dl_runtime_ns, 500'000u * 95 / 100);
+}
+
 TEST(CyclicExecutive, CpuAffinityAndSlackAndPrefaultPaths) {
     // Knobs that run at thread start regardless of privilege: affinity
     // (valid CPU), timer slack, stack prefault.
@@ -342,6 +398,20 @@ TEST(CyclicExecutive, StatsAccumulateMaxCycleWork) {
     e.stop();
     const auto s = e.getStats();
     EXPECT_GT(s.max_cycle_work_us, 0u);
+}
+
+TEST(CyclicExecutive, WakeOvershootStatsAccumulate) {
+    // clock_nanosleep(TIMER_ABSTIME) wakes at-or-after the deadline, so a
+    // nonzero max overshoot is virtually guaranteed under normal
+    // scheduling; the EWMA average can never exceed the max.
+    std::atomic<int> calls{0};
+    Exec e([&] { ++calls; return true; }, nullptr, nullptr, fastConfig());
+    ASSERT_TRUE(e.start());
+    ASSERT_TRUE(waitFor([&] { return calls.load() >= 8; }));
+    e.stop();
+    const auto s = e.getStats();
+    EXPECT_GT(s.max_wake_overshoot_ns, 0u);
+    EXPECT_LE(s.avg_wake_overshoot_ns, s.max_wake_overshoot_ns);
 }
 
 TEST(CyclicExecutive, TimeSourceOverrideUsedForJitter) {

@@ -157,6 +157,8 @@ private:
                 {"task_errors",        ValueType::U64, offsetof(Stats, task_errors),        8, "cycles"},
                 {"missed_deadlines",   ValueType::U64, offsetof(Stats, missed_deadlines),   8, "cycles"},
                 {"max_cycle_work_us",  ValueType::U32, offsetof(Stats, max_cycle_work_us),  4, "us"},
+                {"max_wake_overshoot_ns", ValueType::U32, offsetof(Stats, max_wake_overshoot_ns), 4, "ns"},
+                {"avg_wake_overshoot_ns", ValueType::U32, offsetof(Stats, avg_wake_overshoot_ns), 4, "ns"},
                 {"deadline_active",    ValueType::Bool,offsetof(Stats, deadline_active),    1},
                 {"dl_runtime_ns",      ValueType::U64, offsetof(Stats, dl_runtime_ns),      8, "ns"},
                 {"jitter.cycle_count", ValueType::U64, J + offsetof(JS, cycle_count),     8, "cycles"},

@@ -721,6 +721,34 @@ void CyclicDatapath::setup(CyclicWireMode wire_mode,
                                      sizeof(slots_));
         Tether::Platform::lockMemory(tx_buf_,
                                      sizeof(tx_buf_));
+        // Staging buffers the cyclic exchange writes through — a lazy
+        // first touch or an evicted page here is a mid-cycle fault.
+        if (master_.logical_addr_mgr_) {
+            if (const uint8_t* p =
+                    master_.logical_addr_mgr_->cyclicStagingBuffer()) {
+                Tether::Platform::lockMemory(
+                    p, master_.logical_addr_mgr_->cyclicStagingBufferSize());
+            }
+            if (const uint8_t* p =
+                    master_.logical_addr_mgr_->sliceStagingBuffer()) {
+                Tether::Platform::lockMemory(
+                    p, master_.logical_addr_mgr_->sliceStagingBufferSize());
+            }
+        }
+#ifdef __linux__
+        // drainWireBatch() resizes drain_buf_ on first use — pre-size,
+        // prefault and pin it now so the first drain on the cyclic
+        // thread neither allocates nor faults.
+        if (master_.drain_buf_.size() <
+            Master::kDrainBatchFrames * kMaxJumboFrameSize) {
+            master_.drain_buf_.resize(
+                Master::kDrainBatchFrames * kMaxJumboFrameSize);
+        }
+        Tether::Platform::prefaultMemory(master_.drain_buf_.data(),
+                                         master_.drain_buf_.size());
+        Tether::Platform::lockMemory(master_.drain_buf_.data(),
+                                     master_.drain_buf_.size());
+#endif
     }
 }
 

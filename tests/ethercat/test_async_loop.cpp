@@ -270,6 +270,9 @@ TEST(AsyncCyclicLoop, PeriodicCollectsWithoutTriggers) {
     const auto st = loop.getStats();
     EXPECT_GE(st.collects, 3u);
     EXPECT_EQ(st.idle_collects, 0u);   // idle is an OnSend-only concept
+    // Wake-vs-deadline lateness of the collect tick — nonzero under any
+    // normal scheduler (the wake lands at-or-after its due time).
+    EXPECT_GT(st.max_collect_late_ns, 0u);
     loop.stop();
 }
 

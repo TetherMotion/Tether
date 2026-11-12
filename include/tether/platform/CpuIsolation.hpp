@@ -7,8 +7,8 @@
  * What "isolation" means at runtime, honestly:
  *
  *   - True kernel isolation (no other tasks scheduled on the CPU) is only
- *     possible via the `isolcpus=` boot parameter or cgroup cpuset
- *     partitions (root).  This component DETECTS kernel-isolated CPUs via
+ *     possible via the `isolcpus=` boot parameter or a dedicated cpuset
+ *     cgroup.  This component DETECTS kernel-isolated CPUs via
  *     /sys/devices/system/cpu/isolated and prefers them.
  *   - Without kernel isolation, a "claim" is a process-wide reservation
  *     registry: claimed CPUs are handed to realtime threads as affinity
@@ -47,9 +47,16 @@ public:
         bool prefer_isolated = true; /**< prefer /sys-isolated CPUs */
         bool avoid_cpu0      = true; /**< CPU0 takes most default IRQs */
         /**
-         * Q8: running as root → create a cgroup2 cpuset partition
-         * covering the claimed CPU (real isolation without isolcpus=).
-         * Best-effort: failure logs a warning and still grants the claim.
+         * Q8: running as root → create a dedicated cpuset cgroup
+         * (/sys/fs/cgroup/cpuset/tether_rt, cpu_exclusive) covering the
+         * claimed CPUs, then join RT threads via adoptCurrentThread().
+         *
+         * Implemented with cgroup v1 cpuset: only v1 migrates individual
+         * THREADS into a cgroup (tasks file — the `cset shield`
+         * mechanism).  cgroup v2 partitions are process-granular and
+         * cannot dedicate a CPU to one thread inside a process, so on
+         * pure-v2 systems this degrades to an affinity-only claim with a
+         * warning.
          */
         bool create_cpuset   = false;
         /**
@@ -64,7 +71,7 @@ public:
     struct Claim {
         int  cpu = -1; /**< -1 = no CPU granted */
         bool kernel_isolated = false; /**< isolcpus-managed (true isolation) */
-        bool cpuset_isolated = false; /**< cgroup2 partition created (Q8) */
+        bool cpuset_isolated = false; /**< v1 cpu_exclusive cgroup made (Q8) */
         bool irqs_steered    = false; /**< IRQ affinities moved off (Q9) */
         bool valid() const { return cpu >= 0; }
         /**
@@ -97,6 +104,23 @@ public:
      */
     void  releaseAll();
 
+    /**
+     * @brief Move the CALLING thread into the exclusive cpuset created by
+     *        create_cpuset, when @p cpu is covered by it.
+     *
+     * The cgroup v1 tasks file accepts per-thread IDs: the thread gains
+     * the cpuset's exclusive CPUs and loses every other CPU — other
+     * tasks (including this process's remaining threads) can no longer
+     * be scheduled there.  Call once at thread start, then re-apply the
+     * affinity pin: the spawn-time pthread_setaffinity_np may have raced
+     * this and failed while the CPU was still unreachable.
+     *
+     * @return true when the thread was moved into the cpuset;
+     *         false when there is nothing to join (no cpuset, or
+     *         @p cpu is not covered) or the move failed (logged).
+     */
+    bool adoptCurrentThread(int cpu);
+
     // ---- introspection ---------------------------------------------------
 
     int  onlineCount()   const; /**< CPUs in /sys/.../online (or sysconf) */
@@ -124,19 +148,19 @@ private:
 
     // ---- Q8/Q9: root opt-in hardening -------------------------------------
     /**
-     * Apply spec hardening to a granted claim (cpuset partition, IRQ
+     * Apply spec hardening to a granted claim (cpuset cgroup, IRQ
      * steering).  Caller holds mu_.
      */
     Claim finishClaim(Claim cl, const Spec& spec);
     /**
-     * Create/extend the cgroup2 cpuset partition to cover every claimed
-     * CPU.  Returns true when the partition isolates them.
+     * Create/extend the cgroup v1 cpu_exclusive cpuset to cover every
+     * claimed CPU.  Returns true when the cgroup isolates them.
      */
     bool createCpusetPartition(int cpu);
     /**Write (all online CPUs \ claimed) into every IRQ affinity file. */
     void steerIrqsOffClaims();
     /**
-     * Tear down all created partitions / restore IRQ masks.  Called from
+     * Tear down the created cpuset / restore IRQ masks.  Called from
      * releaseAll().
      */
     void teardownPartitions();
@@ -144,9 +168,9 @@ private:
     static bool writeFile(const char* path, const std::string& val);
     static bool readFile(const char* path, std::string& out);
 
-    std::vector<int> cpuset_cpus_; /**< CPUs with created partitions */
-    bool           cgroup_v2_probed_ = false;
-    bool           cgroup_v2_ok_     = false;
+    std::vector<int> cpuset_cpus_; /**< CPUs covered by the v1 cpuset */
+    bool           cpuset_v1_probed_ = false;
+    bool           cpuset_v1_ok_     = false;
     /**IRQ number → original smp_affinity_list text (restore on release). */
     std::vector<std::pair<int, std::string>> irq_orig_masks_;
     bool           irq_steering_active_ = false;

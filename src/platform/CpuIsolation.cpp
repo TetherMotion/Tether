@@ -17,6 +17,7 @@
 #include <dirent.h>
 #include <sched.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #endif
 
@@ -206,7 +207,14 @@ CpuIsolation::Claim CpuIsolation::claim(const Spec& spec) {
 }
 
 // ============================================================================
-// Q8/Q9 — root opt-in hardening: cgroup2 cpuset partitions + IRQ steering
+// Q8/Q9 — root opt-in hardening: cpuset cgroup + IRQ steering
+//
+// cgroup v1 cpuset is used deliberately: only v1 migrates individual
+// THREADS into a cgroup (the tasks file + cpu_exclusive — the `cset
+// shield` mechanism).  cgroup v2 partitions are process-granular: a
+// single thread can only migrate within its own threaded domain, so a v2
+// partition can dedicate CPUs to a whole process but never to one RT
+// thread inside it.
 // ============================================================================
 
 bool CpuIsolation::writeFile(const char* path, const std::string& val) {
@@ -226,29 +234,27 @@ bool CpuIsolation::readFile(const char* path, std::string& out) {
 bool CpuIsolation::createCpusetPartition(int cpu) {
 #ifdef __linux__
     if (geteuid() != 0) return false;    // cpuset ops need CAP_SYS_ADMIN
-    if (!cgroup_v2_probed_) {
-        cgroup_v2_probed_ = true;
+    if (!cpuset_v1_probed_) {
+        cpuset_v1_probed_ = true;
         struct stat st{};
-        cgroup_v2_ok_ =
-            ::stat("/sys/fs/cgroup/cgroup.controllers", &st) == 0;
-        if (!cgroup_v2_ok_)
-            TETHER_LOGW(TAG, "cgroup v2 not detected — cpuset partitions "
-                             "unavailable");
+        cpuset_v1_ok_ =
+            ::stat("/sys/fs/cgroup/cpuset/cpuset.cpus", &st) == 0;
+        if (!cpuset_v1_ok_)
+            TETHER_LOGW(TAG, "cgroup v1 cpuset not mounted — per-thread CPU "
+                             "dedication needs cpuset v1 (hybrid cgroup "
+                             "mount) or isolcpus=; claim degrades to an "
+                             "affinity-only reservation");
     }
-    if (!cgroup_v2_ok_) return false;
+    if (!cpuset_v1_ok_) return false;
 
-    // Enable cpuset delegation on the root (idempotent; EBUSY-ish failures
-    // when already enabled still report write success on most kernels).
-    writeFile("/sys/fs/cgroup/cgroup.subtree_control", "+cpuset");
-
-    const std::string dir = "/sys/fs/cgroup/tether_rt";
+    const std::string dir = "/sys/fs/cgroup/cpuset/tether_rt";
     if (::mkdir(dir.c_str(), 0755) != 0 && errno != EEXIST) {
         TETHER_LOGW(TAG, "cpuset: mkdir {} failed ({})", dir,
                     strerror(errno));
         return false;
     }
-    // The partition covers EVERY claimed CPU — a second claim extends the
-    // group's cpuset rather than competing for the same name.
+    // The cpuset covers EVERY claimed CPU — a second claim extends the
+    // group rather than competing for the same name.
     std::string cpus;
     for (int c : online_) {
         if (!(claimed_[c >> 6] & (1ULL << (c & 63)))) continue;
@@ -259,15 +265,40 @@ bool CpuIsolation::createCpusetPartition(int cpu) {
         TETHER_LOGW(TAG, "cpuset: cannot assign CPUs [{}] to {}", cpus, dir);
         return false;
     }
-    writeFile((dir + "/cpuset.mems").c_str(), "0");
-    if (!writeFile((dir + "/cpuset.cpus.partition").c_str(), "isolated")) {
-        TETHER_LOGW(TAG, "cpuset: partition=isolated rejected for CPU {} "
-                         "(CPU may still be root-domain)", cpu);
-        return false;
+    // cpuset.mems is mandatory in v1 — inherit the root cpuset's nodes.
+    std::string mems;
+    if (!readFile("/sys/fs/cgroup/cpuset/cpuset.mems", mems) ||
+        mems.empty() || mems == "\n") {
+        mems = "0";
     }
+    writeFile((dir + "/cpuset.mems").c_str(), mems);
+    // cpu_exclusive: no sibling cgroup may schedule on these CPUs — that
+    // is the actual isolation property.
+    writeFile((dir + "/cpuset.cpu_exclusive").c_str(), "1");
     if (!listContains(cpuset_cpus_, cpu)) cpuset_cpus_.push_back(cpu);
-    TETHER_LOGI(TAG, "cgroup2 cpuset partition 'tether_rt' isolates [{}]",
-                cpus);
+
+    // Keep OUR non-RT threads off the claimed CPUs too: cpu_exclusive
+    // only fences sibling cgroups — tasks in the root cpuset (us, and
+    // un-cgrouped system tasks) can still schedule there.  Confine the
+    // claiming thread (usually main, which spawns the rest of the app)
+    // to the unclaimed CPUs: pthread_create() inherits the creator's
+    // affinity, so every thread spawned from here on stays off them.
+    // Threads created BEFORE this point keep their old mask — claim
+    // early.  RT threads re-widen by adoptCurrentThread() + pin.
+    {
+        cpu_set_t keep;
+        CPU_ZERO(&keep);
+        bool any = false;
+        for (int c : online_) {
+            if (claimed_[c >> 6] & (1ULL << (c & 63))) continue;
+            CPU_SET(c, &keep);
+            any = true;
+        }
+        if (any)
+            sched_setaffinity(0, sizeof(keep), &keep);
+    }
+    TETHER_LOGI(TAG, "cpuset cgroup 'tether_rt' exclusively isolates [{}] "
+                     "(adoptCurrentThread() joins RT threads)", cpus);
     return true;
 #else
     (void)cpu;
@@ -284,7 +315,7 @@ CpuIsolation::Claim CpuIsolation::finishClaim(Claim cl, const Spec& spec) {
     if (spec.create_cpuset) {
         cl.cpuset_isolated = createCpusetPartition(cl.cpu);
         if (cl.cpuset_isolated) {
-            TETHER_LOGI(TAG, "CPU {} hard-isolated via cgroup2 partition",
+            TETHER_LOGI(TAG, "CPU {} hard-isolated via cpuset cgroup",
                         cl.cpu);
         } else {
             TETHER_LOGW(TAG, "CPU {}: cpuset partition unavailable — "
@@ -341,17 +372,59 @@ void CpuIsolation::steerIrqsOffClaims() {
 #endif
 }
 
+bool CpuIsolation::adoptCurrentThread(int cpu) {
+#ifdef __linux__
+    std::lock_guard<std::mutex> lk(mu_);
+    if (cpu < 0 || !listContains(cpuset_cpus_, cpu)) return false;
+    // cgroup v1 tasks accepts per-thread IDs — the thread gains the
+    // cpuset's exclusive CPUs (and loses every other CPU).
+    const long tid = static_cast<long>(::syscall(SYS_gettid));
+    const char* path = "/sys/fs/cgroup/cpuset/tether_rt/tasks";
+    if (!writeFile(path, std::to_string(tid))) {
+        TETHER_LOGW(TAG, "cpuset: cannot move tid {} into {}", tid, path);
+        return false;
+    }
+    TETHER_LOGI(TAG, "thread {} joined exclusive cpuset 'tether_rt'", tid);
+    return true;
+#else
+    (void)cpu;
+    return false;
+#endif
+}
+
 void CpuIsolation::teardownPartitions() {
 #ifdef __linux__
-    for (int cpu : cpuset_cpus_) {
-        const std::string dir = "/sys/fs/cgroup/tether_rt";
-        writeFile((dir + "/cpuset.cpus.partition").c_str(), "member");
-        if (::rmdir(dir.c_str()) != 0)
-            TETHER_LOGW(TAG, "cpuset: cleanup of {} for CPU {} failed ({})",
-                        dir, cpu, strerror(errno));
-        else
-            TETHER_LOGI(TAG, "cpuset partition for CPU {} removed", cpu);
+    if (cpuset_cpus_.empty()) return;
+    const std::string dir = "/sys/fs/cgroup/cpuset/tether_rt";
+
+    // Move any still-member threads back to the root cpuset — rmdir
+    // fails EBUSY while tasks remain.  Normally RT threads have already
+    // exited (releaseAll runs after loop stop); this is the safety net.
+    {
+        std::string members;
+        if (readFile((dir + "/tasks").c_str(), members) && !members.empty()) {
+            std::istringstream in(members);
+            std::string tid;
+            while (in >> tid)
+                writeFile("/sys/fs/cgroup/cpuset/tasks", tid);
+        }
     }
+
+    // Restore the claiming thread's affinity — createCpusetPartition()
+    // narrowed it to the unclaimed CPUs so spawned threads stay off the
+    // shield; without claims the confinement no longer applies.
+    {
+        cpu_set_t all;
+        CPU_ZERO(&all);
+        for (int c : online_) CPU_SET(c, &all);
+        sched_setaffinity(0, sizeof(all), &all);
+    }
+
+    if (::rmdir(dir.c_str()) != 0)
+        TETHER_LOGW(TAG, "cpuset: cleanup of {} failed ({})", dir,
+                    strerror(errno));
+    else
+        TETHER_LOGI(TAG, "cpuset cgroup 'tether_rt' removed");
     cpuset_cpus_.clear();
 #endif
 }

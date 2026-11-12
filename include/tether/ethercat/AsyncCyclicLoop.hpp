@@ -78,10 +78,25 @@ public:
 
         // ---- RT plumbing (same knobs as CyclicExecutive) ----
         int        priority       = 80;
-        SchedClass sched_class    = SchedClass::Fifo;
+        /**Auto (default): Fifo on hard-isolated CPUs, Deadline elsewhere. */
+        SchedClass sched_class    = SchedClass::Auto;
         /**SCHED_DEADLINE budget (ns); 0 → derive from collect period. */
         uint64_t   dl_runtime_ns  = 0;
         uint64_t   dl_deadline_ns = 0;
+        /**
+         * In-cycle busy-wait budget (ns) forwarded by the owner
+         * (rx_spin_ns + slot_spin_ns).  Under SCHED_DEADLINE every spin
+         * nanosecond is charged against the task's CBS runtime — a
+         * warning is logged when the resolved class is Deadline and this
+         * is nonzero.  Informational only.
+         */
+        uint32_t   in_cycle_spin_ns = 0;
+        /**
+         * Root opt-in: sched_rt_runtime_us = -1 at thread start (disables
+         * the global RT-group throttle).  Only on hard-isolated CPUs —
+         * elsewhere a runaway RT task can starve the core.
+         */
+        bool       disable_rt_throttle = false;
         int        cpu_affinity   = -1;
         size_t     stack_size     = 262144;
         uint32_t   stack_prefault_bytes = 128 * 1024;
@@ -114,6 +129,12 @@ public:
          * Measures the newest trigger's queueing delay, incl. coalescing.
          */
         uint32_t max_send_latency_ns = 0;
+        /**
+         * Periodic-collect lateness (worst observed): how late the loop
+         * woke relative to the collect deadline — the Nanosleep wake
+         * overshoot on this loop.
+         */
+        uint32_t max_collect_late_ns = 0;
         uint64_t dc_sync_count    = 0; /**< dedicated DC thread syncs */
         uint64_t dc_sync_errors   = 0;
     };
@@ -184,6 +205,7 @@ private:
     std::atomic<uint32_t> max_send_work_ns_{0};
     std::atomic<uint32_t> max_collect_work_ns_{0};
     std::atomic<uint32_t> max_send_latency_ns_{0};
+    std::atomic<uint32_t> max_collect_late_ns_{0};
     std::atomic<uint64_t> dc_sync_count_{0};
     std::atomic<uint64_t> dc_sync_errors_{0};
 };

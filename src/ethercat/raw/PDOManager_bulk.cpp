@@ -19,7 +19,7 @@
 namespace EtherCAT {
 
 bool PDOManager::sendAll() {
-    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
+    std::lock_guard lk(exchange_mutex_);
     // LRW path: atomic exchange, can't be split
     if (logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
         split_state_.lrw_mode = true;
@@ -201,7 +201,7 @@ bool PDOManager::sendAll() {
 }
 
 bool PDOManager::receiveAll() {
-    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
+    std::lock_guard lk(exchange_mutex_);
     // LRW path: already done in sendAll(), nothing to receive
     if (split_state_.lrw_mode) {
         return split_state_.send_phase_ok;
@@ -413,7 +413,7 @@ bool PDOManager::receiveAll() {
 }
 
 bool PDOManager::exchangeAll() {
-    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
+    std::lock_guard lk(exchange_mutex_);
     if (!sendAll()) {
         // Even if send phase fails, still try to receive
         // (receiveAll handles the split_state_ correctly)

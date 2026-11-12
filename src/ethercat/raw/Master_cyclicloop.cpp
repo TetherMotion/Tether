@@ -99,6 +99,9 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
     CyclicExecutive::Config exec_cfg = config.exec;
     exec_cfg.cycle_period_us    = config.cycle_period_us;
     exec_cfg.dc_interval_cycles = config.sync_interval_cycles;
+    // Forward the datapath's busy-wait budget so the exec can warn when
+    // it would be charged against a SCHED_DEADLINE runtime.
+    exec_cfg.in_cycle_spin_ns   = config.rx_spin_ns + config.slot_spin_ns;
     datapath_->rx_spin_ns_         = config.rx_spin_ns;
     datapath_->slot_spin_ns_       = config.slot_spin_ns;
     datapath_->slot_wait_fallback_ = config.slot_wait_fallback;
@@ -141,7 +144,7 @@ bool Master::startCyclicLoop(const CyclicLoopConfig& config)
 
     // ---- Memory locking (each section independently opt-out-able) ------
     if (config.memory_lock.lock_all_process) {
-        Tether::Platform::lockAllMemory();
+        Tether::Platform::lockAllMemory(config.memory_lock.lock_on_fault);
     }
     if (exec_cfg.stack_prefault_bytes == 0 &&
         config.memory_lock.stack_prefault_bytes > 0) {
@@ -365,6 +368,7 @@ Master::CyclicHealth Master::cyclicHealth() const
         h.missed_deadlines  = st.missed_deadlines;
     }
     if (pdo_) {
+        h.exchange_lock_skips = pdo_->cyclicLockSkips();
         if (LogicalAddressManager* lam = pdo_->logicalAddressManager()) {
             const auto s = lam->getStats();
             h.exchanges_ok    = s.success;

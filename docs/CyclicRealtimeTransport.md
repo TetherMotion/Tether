@@ -797,9 +797,13 @@ copies the view out — legacy callers keep working.
 1. **CPU claims** (`cpu_isolation.enabled`, opt-in): the runtime allocator
    claims `cyclic_cpu`/`dc_cpu` (explicit or auto-selected, preferring
    kernel-isolated CPUs and never taking the last CPU).  With root +
-   `create_cpuset`, a shared cgroup2 partition (`/sys/fs/cgroup/tether_rt`)
-   is extended to cover every claimed CPU — real isolation without
-   `isolcpus=`; `steer_irqs` rewrites `/proc/irq/*/smp_affinity_list` away
+   `create_cpuset`, a shared exclusive cgroup **v1** cpuset
+   (`/sys/fs/cgroup/cpuset/tether_rt`, `cpu_exclusive=1`) is extended to
+   cover every claimed CPU and the cyclic threads' TIDs are moved into its
+   `tasks` file — real isolation without `isolcpus=` (per-thread cpuset
+   membership needs v1; on a pure-v2 system the claim degrades to
+   affinity-only with a warning); `steer_irqs` rewrites
+   `/proc/irq/*/smp_affinity_list` away
    from claimed CPUs (originals restored on release).  Both are best
    effort: failure degrades to affinity-only with a warning — claims are
    never denied.  Selected CPUs become the executive/DC affinities — §8.
@@ -808,7 +812,9 @@ copies the view out — legacy callers keep working.
    (default) the thread first runs `dl_measure_cycles` (512) on
    SCHED_FIFO, takes the **P99 work duration × (1 + dl_margin_pct/100)**
    as the CBS runtime (clamped below the deadline), then switches —
-   stats report `deadline_active` + the applied `dl_runtime_ns`.  Any
+   stats report `deadline_active` (kernel accepted CBS) +
+   `dl_runtime_ns` (the computed/requested budget — nonzero even when
+   admission failed, so a rejected budget stays diagnosable).  Any
    failure logs and falls back to `SCHED_FIFO`; FIFO failure logs and
    runs unprivileged — never silent.
 3. **Memory hardening** (`memory_lock` opt-outs, all independent):
@@ -930,17 +936,26 @@ remaining jitter sources — all degrade loudly, never silently.
 
 | Config | Effect |
 |---|---|
-| `sleep_mode = Nanosleep` | `clock_nanosleep(TIMER_ABSTIME)` to the next tick — baseline |
-| `sleep_mode = HybridSpin` | sleep until `spin_window_us` before the tick, then busy-poll — wake jitter ≈ 0 at the cost of the spin window's CPU |
-| `sched_class = Fifo` | `SCHED_FIFO` at `priority`; failure logged, thread runs on |
-| `sched_class = Deadline` | `sched_setattr(SCHED_DEADLINE)`: period = cycle, deadline = `dl_deadline_ns` (default period), runtime = `dl_runtime_ns` — or **auto-measured** (`dl_auto_measure`, default on): N=`dl_measure_cycles` cycles on FIFO, runtime = P99_work × (1 + `dl_margin_pct`/100), clamped below deadline.  Failure → FIFO fallback (logged); `deadline_active` in stats |
+| `sleep_mode = Nanosleep` | `clock_nanosleep(TIMER_ABSTIME)` to the next tick — baseline, and the right choice on shared/contended CPUs (a spinning RT thread can itself be preempted) |
+| `sleep_mode = HybridSpin` | sleep until `spin_window_us` before the tick, then busy-poll — wake jitter ≈ 0 at the cost of the spin window's CPU.  **Isolated CPUs only**: under SCHED_DEADLINE the tail is charged to the CBS budget (folded into the auto-measured runtime); on a contended CPU it pays the burn and still gets preempted |
+| `sched_class = Auto` (default) | resolved once at thread start: **Fifo** on a hard-isolated cyclic CPU (`isolcpus=`, own isolated cgroup2 partition, or the exclusive v1 cpuset from `create_cpuset`), **Deadline** elsewhere — a shared CPU exposes FIFO to `sched_rt_runtime_us` (~50 ms RT-group dequeues); the resolution is logged |
+| `sched_class = Fifo` | `SCHED_FIFO` at `priority`; failure logged, thread runs on.  On a non-isolated CPU with the RT throttle armed the exec warns — see `disable_rt_throttle` |
+| `sched_class = Deadline` | `sched_setattr(SCHED_DEADLINE)`: period = cycle, deadline = `dl_deadline_ns` (default period), runtime = `dl_runtime_ns` (+ the HybridSpin tail when configured) — or **auto-measured** (`dl_auto_measure`, default on): N=`dl_measure_cycles` cycles on FIFO, runtime = P99_work × (1 + `dl_margin_pct`/100) + spin tail, clamped below deadline.  Failure → FIFO fallback (logged); `deadline_active` in stats |
+| `disable_rt_throttle` | root: `sched_rt_runtime_us = -1` at thread start, removing the ~50 ms RT-group dequeue risk for FIFO — **isolated CPUs only** (a runaway RT task on a shared CPU then starves the core; warned when written non-isolated) |
 | `low_timer_slack` | `PR_SET_TIMERSLACK=1ns` — removes the ~50 µs default slack on `nanosleep`/`ppoll` timeouts that dominates 250 µs cycles under non-RT scheduling |
 | `stack_prefault_bytes` | per-thread stack pre-touch before the loop starts |
 
 `SCHED_DEADLINE` is the notable option: CBS reserves the cyclic thread's
 budget on a **vanilla** kernel — no PREEMPT_RT needed — and bounds the
 damage if the RT thread itself overruns (it gets throttled, not the
-system).  `HostDeadlineTimer` implements the hybrid sleep/spin boundary.
+system).  `sched_class = Auto` (the default) picks it automatically on
+non-isolated CPUs and picks FIFO on isolated ones.  `HostDeadlineTimer`
+implements the hybrid sleep/spin boundary — note busy-waiting is a
+dedicated-CPU tool: under CBS every spin nanosecond is charged against
+the thread's own runtime, and on a contended CPU the spinner can be
+preempted anyway.  `Stats::max_wake_overshoot_ns`/`avg_wake_overshoot_ns`
+measure the sleep path directly (woke − deadline), separating wake
+latency from work overrun.
 
 ### 8.2 `RtMemory` — granular memory locking
 
@@ -984,10 +999,13 @@ claiming** for systems without boot-time `isolcpus`:
   double-assigning.  It detects *kernel* isolation; without it a claimed
   CPU still runs other tasks' spillover unless the opt-in hardening
   below is used.  Degraded claims are logged as such.
-* **cgroup2 cpuset** (`create_cpuset`, root only): creates one
-  `/sys/fs/cgroup/tether_rt` partition covering *all* claimed CPUs —
-  later claims extend the same group rather than competing partitions —
-  and moves the cyclic threads in.  Real isolation without a reboot.
+* **Exclusive cgroup v1 cpuset** (`create_cpuset`, root only): creates one
+  `/sys/fs/cgroup/cpuset/tether_rt` cpuset with `cpu_exclusive=1`
+  covering *all* claimed CPUs — later claims extend the same group —
+  and moves each cyclic thread's TID into its `tasks` file.  Per-thread
+  cpuset membership is a cgroup **v1** feature (v2 partitions are
+  process-granular); on pure-v2 systems the claim degrades to
+  affinity-only with a warning.  Real isolation without a reboot.
 * **IRQ steering** (`steer_irqs`, root only): rewrites
   `/proc/irq/*/smp_affinity_list` to exclude claimed CPUs; the original
   masks are saved and restored on release.
@@ -1001,7 +1019,7 @@ cfg.cpu_isolation.cyclic_cpu    = 3;      // or -1 → auto
 cfg.cpu_isolation.dc_cpu        = -1;     // auto, prefer isolated
 cfg.cpu_isolation.prefer_isolated = true;
 cfg.cpu_isolation.avoid_cpu0    = true;
-cfg.cpu_isolation.create_cpuset = true;   // root: cgroup2 partition
+cfg.cpu_isolation.create_cpuset = true;   // root: exclusive cgroup v1 cpuset
 cfg.cpu_isolation.steer_irqs    = true;   // root: IRQ affinity away
 ```
 
@@ -1012,7 +1030,9 @@ SCHED_DEADLINE fallback, claimed/isolated core, IRQs steered away,
 performance governor):
 
 ```
-wake:     HybridSpin / deadline      ~0–2 µs   (vs 5–50 µs nanosleep)
+wake:     HybridSpin / deadline      ~0–2 µs   (vs 5–50 µs nanosleep,
+                                               higher under contention —
+                                               see max_wake_overshoot_ns)
 TX:       1 syscall (ring kick/sendmsg)         irreducible
 RX wait:  spin on rxPending          ~0        (vs 2–15 µs sched wake)
 notify:   gated eventfd              0         (vs 1 write per publish)
@@ -1109,8 +1129,11 @@ Invariants that hold on *every* level:
   deadline event worth alarming on.
 * **RX spin window burns CPU.**  `rx_spin_ns` is a busy-poll inside the
   deadline budget — it trades idle CPU for wake latency.  On a shared
-  (non-isolated) core it can starve the very threads you need; pair it
-  with CPU claiming.
+  (non-isolated) core it can starve the very threads you need — and
+  under `SCHED_DEADLINE` (what `sched_class=Auto` picks there) every
+  spin ns is charged against the loop's own CBS runtime, so it can
+  throttle the loop it's meant to help.  Keep spins at 0 unless the
+  CPU is isolated; the exec warns when spins meet a Deadline class.
 
 ### 10.3 Application contract hazards
 
@@ -1140,7 +1163,7 @@ Invariants that hold on *every* level:
 * **CPU claims are reservations unless hardened.**  `CpuIsolation` pins
   threads via affinity and tracks process-local claims; with
   `create_cpuset`/`steer_irqs` + root it *creates* real isolation
-  (cgroup2 partition + IRQ steering, torn down on release).  Without
+  (exclusive cgroup v1 cpuset + IRQ steering, torn down on release).  Without
   root those opt-ins degrade to affinity-only with a warning — the
   allocator always detects and prefers kernel-isolated CPUs when they
   exist.  Every degraded claim is logged.
@@ -1351,7 +1374,7 @@ cfg.shm_image_name = "printer0";                 // export to motion proc
 
 cfg.cpu_isolation.enabled   = true;              // opt-in CPU claiming
 cfg.cpu_isolation.cyclic_cpu = -1;               // auto-select
-cfg.cpu_isolation.create_cpuset = true;          // root: cgroup2 partition
+cfg.cpu_isolation.create_cpuset = true;          // root: exclusive cgroup v1 cpuset
 cfg.cpu_isolation.steer_irqs    = true;          // root: IRQ steering
 cfg.memory_lock.lock_image  = true;              // per-section opt-out
 cfg.memory_lock.lock_all_process = false;        // heaviest, off default
@@ -1436,7 +1459,7 @@ channel for diagnostics (`backendName()`, `zeroCopy()`, `droppedRx()`,
 | `src/ethercat/raw/Master.cpp` | `startCyclicLoop`/`stopCyclicLoop` + `startAsyncLoop`/`stopAsyncLoop` wiring: CPU claims, mlock sections, sched class, split placement, shm name, mutual exclusion, `MasterPDOTransport` forwards |
 | `src/ethercat/raw/LogicalAddressManager.cpp` | `computeImageOffsets`, `cyclicSend`/`cyclicCollect` (multi-slice, mask wait), `deriveExpectedWkc` + sentinel learn/`resetCyclicWkc`, `maxSliceLength` |
 | `include/tether/platform/RtMemory.hpp` / `src/platform/RtMemory.cpp` | `lockAllMemory`, `lockMemory`, `prefault*`, timer slack — best-effort RT hardening |
-| `include/tether/platform/CpuIsolation.hpp` / `src/platform/CpuIsolation.cpp` | runtime CPU claim allocator, RAII `Claim`, `atexit` release, cgroup2 `tether_rt` cpuset, IRQ affinity steering |
+| `include/tether/platform/CpuIsolation.hpp` / `src/platform/CpuIsolation.cpp` | runtime CPU claim allocator, RAII `Claim`, `atexit` release, exclusive cgroup-v1 `tether_rt` cpuset, IRQ affinity steering |
 | `include/tether/platform/Platform.hpp` / `src/platform/Platform.cpp` | `setCurrentThreadDeadline` (`SCHED_DEADLINE` via `sched_setattr`) |
 | `include/tether/ethercat/CyclicExecutive.hpp` / `src/ethercat/CyclicExecutive.cpp` | `SleepMode`, `SchedClass`, phase tasks, prefault + slack at thread start |
 | `include/tether/ethercat/PDOManager.hpp` | `PDOEntry::image_exclude`, `IPDOTransport` cyclic API |
