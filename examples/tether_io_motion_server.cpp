@@ -22,15 +22,23 @@
 #include "tether/io/SchemaCatalog.hpp"
 #include "tether/io/SchemaDigest.hpp"
 #include "tether/io/SimulatedCiA402Drive.hpp"
+#include "tether/gcode/PlanningSegmentBuilder.hpp"
+#include "tether/motion_planner/MotionPlan.hpp"
+#include "tether/motion_planner/MotionSegment.hpp"
 
 #include <argparse/argparse.hpp>
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <mutex>
+#include <sstream>
 #include <thread>
+#include <vector>
 
 using namespace tether::io;
 using namespace tether::io::machine::sim402;
@@ -69,9 +77,9 @@ void motionLog(const char* level, const char* msg, ...) {
 struct MotionSchemas {
     SchemaGraph graph;
     std::vector<SchemaManifestEntry> manifest;
-    SchemaRef i8, i16, i32, u16, u32, u64;
-    uint32_t slotI8 = 0, slotI16 = 0, slotI32 = 0, slotU16 = 0, slotU32 = 0,
-             slotU64 = 0;
+    SchemaRef i8, i16, i32, u8, u16, u32, u64, f64;
+    uint32_t slotI8 = 0, slotI16 = 0, slotI32 = 0, slotU8 = 0, slotU16 = 0,
+             slotU32 = 0, slotU64 = 0, slotF64 = 0;
 };
 
 MotionSchemas buildMotionSchemas() {
@@ -96,6 +104,8 @@ MotionSchemas buildMotionSchemas() {
     addScalar(4, ValueType::U16, "mc.U16", d.u16, d.slotU16);
     addScalar(5, ValueType::U32, "mc.U32", d.u32, d.slotU32);
     addScalar(6, ValueType::U64, "mc.U64", d.u64, d.slotU64);
+    addScalar(7, ValueType::U8,  "mc.U8",  d.u8,  d.slotU8);
+    addScalar(8, ValueType::F64, "mc.F64", d.f64, d.slotF64);
     return d;
 }
 
@@ -188,6 +198,10 @@ bool registerAxisObjects(Registry& reg, const MotionSchemas& d,
     return true;
 }
 
+/* NCI channel (defined below): tick is driven by mc.time writes in
+   sim mode and by the 1 ms wall ticker in realtime mode. */
+namespace nci { void nciTick(uint64_t nowUs); }
+
 /**Global mc.time param: write sets the deterministic sim clock (us);
    read returns the last value. Drives advance to it on next access.*/
 bool registerTimeParam(Registry& reg, const MotionSchemas& d,
@@ -208,9 +222,468 @@ bool registerTimeParam(Registry& reg, const MotionSchemas& d,
         uint64_t t;
         std::memcpy(&t, src, 8);
         g_simUs.store(t, std::memory_order_relaxed);
+        /* The NCI channel runs on this clock: each client time write
+           advances the plan deterministically. */
+        nci::nciTick(t);
     };
     return reg.addParam(p);
 }
+
+// ---------------------------------------------------------------------------
+// NCI channel — G-code program executed by Tether's interpreter and
+// motion planner, streamed as CSP setpoints to the first three axes.
+//
+// Pipeline: program text -> GCode::PlanningSegmentBuilder (the
+// RS274/NGC interpreter emits geometry + feed per block) ->
+// MotionPlanner::MotionPlanBuilder (corner blending + velocity profile)
+// -> per-tick plan.evaluateAt(planT) -> scaled int32 counts written to
+// each axis's 0x607A target. planT advances on the same clock as the
+// drives: mc.time writes under --clock sim (deterministic), the 1 ms
+// wall ticker under --clock realtime.
+//
+// nc.* params:
+//   nc.prog       String  W  program text -> compile (state=READY/ERROR)
+//   nc.prog_path  String  W  server-side file path -> compile
+//   nc.cmd        U8      RW channel command (1 run 2 step 3 pause
+//                            4 resume 5 stop 6 reset 7 verify)
+//   nc.state      U8      R  0 idle 1 ready 2 running 3 paused 4 finished
+//                            5 error 6 stopped (InterpreterState values)
+//   nc.line       U32     R  source line of the executing block
+//   nc.total      U32     R  total parsed blocks
+//   nc.errcode    U32     R  channel error (0 ok, 1 bad cmd, 2 bad state,
+//                            3 compile, 4 plan build, 5 unsupported seg)
+//   nc.progress   F64     R  plan time elapsed, seconds
+//   nc.duration   F64     R  total plan duration, seconds
+//   nc.scale      F64     RW counts per user unit (default 1.0)
+//   nc.feedovr    F64     RW feed override percent (default 100)
+// ---------------------------------------------------------------------------
+
+namespace nci {
+
+enum State : uint8_t {
+    Idle = 0, Ready = 1, Running = 2, Paused = 3,
+    Finished = 4, Error = 5, Stopped = 6
+};
+
+enum Cmd : uint8_t {
+    CmdRun = 1, CmdStep = 2, CmdPause = 3, CmdResume = 4,
+    CmdStop = 5, CmdReset = 6, CmdVerify = 7
+};
+
+enum ChanErr : uint32_t {
+    ErrNone = 0, ErrBadCmd = 1, ErrBadState = 2, ErrCompile = 3,
+    ErrPlan = 4, ErrUnsupported = 5
+};
+
+struct Channel {
+    mutable std::mutex m;
+    State state = Idle;
+    std::vector<GCode::PlanningSegment> segs;
+    std::vector<GCode::BlockMetadata> blocks;
+    /* planner-segment index -> index into segs (zero-length planning
+       segments are dropped before the plan is built) */
+    std::vector<int> planSegToSeg;
+    std::unique_ptr<MotionPlanner::MotionPlan<3, double>> plan;
+    double planT = 0.0;
+    double duration = 0.0;
+    double scale = 1.0;
+    double feedOvr = 100.0;
+    uint64_t lastUs = 0;
+    uint32_t errcode = 0;
+    uint32_t curLine = 0;
+    uint8_t lastCmd = 0;
+    int curSeg = 0;
+    int stepTarget = -1;   /* single-step pause target, or -1 */
+    SimulatedCiA402Drive* drive = nullptr;
+    int axes = 0;   // configured axis count; the channel drives 0..2
+
+    /* Compile program text into planning segments. READY on success. */
+    bool compile(const std::string& text) {
+        auto r = GCode::PlanningSegmentBuilder::fromText(text);
+        std::lock_guard lk(m);
+        if (!r.error.ok() && !r.error.isEnd()) {
+            errcode = static_cast<uint32_t>(r.error.code);
+            segs.clear(); blocks.clear(); plan.reset();
+            planT = duration = 0.0; curLine = 0;
+            state = Error;
+            return false;
+        }
+        segs = std::move(r.segments);
+        blocks = std::move(r.blocks);
+        errcode = ErrNone; plan.reset();
+        planT = duration = 0.0; curLine = 0;
+        state = Ready;
+        return true;
+    }
+
+    /* Enable the channel axes (slaves 0..2) in CSP + OperationEnabled. */
+    void enableAxes() {
+        for (uint16_t s = 0; s < 3 && s < axes; ++s) {
+            drive->write(s, 0x6060, 0, {0x08});
+            drive->write(s, 0x6040, 0, {0x0F, 0x00});
+        }
+    }
+
+    /* PlanningSegments -> planner segments -> MotionPlan. */
+    bool buildPlan() {
+        namespace mp = MotionPlanner;
+        mp::MotionSegmentList list;
+        planSegToSeg.clear();
+        for (size_t si = 0; si < segs.size(); ++si) {
+            const auto& s = segs[si];
+            const mp::Vec3 st{s.start.x(), s.start.y(), s.start.z()};
+            const mp::Vec3 en{s.end.x(), s.end.y(), s.end.z()};
+            const double feed = s.feedRate / 60.0;   // units/min -> units/s
+            const bool moved =
+                std::abs(en[0] - st[0]) > 1e-9 ||
+                std::abs(en[1] - st[1]) > 1e-9 ||
+                std::abs(en[2] - st[2]) > 1e-9;
+            /* The path builder rejects zero-length segments; a move
+               whose start equals its end contributes no path. */
+            if (!moved && s.motionType != GCode::SegmentMotionType::Dwell)
+                continue;
+            switch (s.motionType) {
+                case GCode::SegmentMotionType::Rapid:
+                    list.append(mp::MotionSegment::rapid<3>(st, en));
+                    break;
+                case GCode::SegmentMotionType::Linear:
+                    list.append(mp::MotionSegment::linear<3>(st, en, feed));
+                    break;
+                case GCode::SegmentMotionType::ArcCW:
+                case GCode::SegmentMotionType::ArcCCW: {
+                    const mp::Vec3 c{s.center.x(), s.center.y(), s.center.z()};
+                    const auto pl = static_cast<mp::ArcPlane>(
+                        static_cast<uint8_t>(s.plane));
+                    list.append(s.motionType == GCode::SegmentMotionType::ArcCW
+                        ? mp::MotionSegment::arcCW<3>(st, en, c, feed, pl)
+                        : mp::MotionSegment::arcCCW<3>(st, en, c, feed, pl));
+                    break;
+                }
+                case GCode::SegmentMotionType::Dwell: {
+                    std::array<double, 9> pos{};
+                    pos[0] = s.end.x(); pos[1] = s.end.y(); pos[2] = s.end.z();
+                    list.append(mp::MotionSegment::dwell(s.segmentTime, pos));
+                    break;
+                }
+                default:
+                    errcode = ErrUnsupported;
+                    state = Error;
+                    return false;
+            }
+            planSegToSeg.push_back(static_cast<int>(si));
+        }
+        if (list.empty()) {
+            /* No path segments — a program without motion completes
+               instantly on RUN. */
+            plan.reset();
+            duration = 0.0;
+            return true;
+        }
+        mp::KinematicLimits<3, double> lim;
+        mp::MotionPlanBuilder<3, double> b(lim);
+        plan = std::make_unique<mp::MotionPlan<3, double>>(
+            b.build(list, lim.path.maxPathVelocity));
+        duration = plan->totalDuration();
+        if (duration <= 0.0) {
+            errcode = ErrPlan;
+            state = Error;
+            plan.reset();
+            return false;
+        }
+        return true;
+    }
+
+    /* Write the plan position at planT as scaled 0x607A targets. */
+    void emitTargets() {
+        if (!drive || axes < 3 || !plan) return;
+        const auto st = plan->evaluateAt(planT);
+        for (uint16_t ax = 0; ax < 3; ++ax) {
+            const int32_t counts = static_cast<int32_t>(
+                std::lround(st.position[ax] * scale));
+            const uint8_t le[4] = {
+                uint8_t(counts), uint8_t(counts >> 8),
+                uint8_t(counts >> 16), uint8_t(counts >> 24)};
+            drive->write(ax, 0x607A, 0,
+                         std::vector<uint8_t>(le, le + 4));
+        }
+        curSeg = static_cast<int>(st.segmentIndex);
+        if (st.segmentIndex < planSegToSeg.size()) {
+            const int si = planSegToSeg[st.segmentIndex];
+            const int32_t bi = segs[si].blockIndex;
+            if (bi >= 0 && bi < static_cast<int32_t>(blocks.size()))
+                curLine = static_cast<uint32_t>(blocks[bi].lineNumber);
+        }
+    }
+
+    void command(uint8_t cmd) {
+        std::lock_guard lk(m);
+        lastCmd = cmd;
+        switch (cmd) {
+            case CmdRun:
+                if (state != Ready && state != Stopped && state != Finished) {
+                    errcode = ErrBadState;
+                    return;
+                }
+                if (axes < 3) { errcode = ErrBadState; return; }
+                if (!plan && !segs.empty() && !buildPlan()) return;
+                planT = 0.0;
+                if (!plan) {
+                    /* No motion segments — program done immediately. */
+                    state = Finished;
+                    errcode = ErrNone;
+                    return;
+                }
+                enableAxes();
+                emitTargets();
+                stepTarget = -1;
+                state = Running;
+                errcode = ErrNone;
+                return;
+            case CmdStep:
+                /* Single-block step: run until the active planner
+                   segment advances past the current one, then pause.
+                   Starts a program from Ready/Stopped/Finished or
+                   advances one block from Paused. */
+                if (state != Ready && state != Stopped &&
+                    state != Finished && state != Paused) {
+                    errcode = ErrBadState;
+                    return;
+                }
+                if (axes < 3) { errcode = ErrBadState; return; }
+                if (state != Paused) {
+                    if (!plan && !segs.empty() && !buildPlan()) return;
+                    planT = 0.0;
+                    if (!plan) {
+                        state = Finished;
+                        errcode = ErrNone;
+                        return;
+                    }
+                    enableAxes();
+                }
+                emitTargets();
+                stepTarget = curSeg + 1;
+                state = Running;
+                errcode = ErrNone;
+                return;
+            case CmdPause:
+                if (state == Running) { state = Paused; errcode = ErrNone; }
+                else errcode = ErrBadState;
+                return;
+            case CmdResume:
+                if (state == Paused) { state = Running; errcode = ErrNone; }
+                else errcode = ErrBadState;
+                return;
+            case CmdStop:
+                /* bStop is permissive: any active or completed state
+                   drops to Stopped; only Idle/Error with nothing
+                   loaded is a bad state. */
+                if (state == Idle || state == Error) {
+                    errcode = ErrBadState;
+                } else {
+                    state = Stopped; planT = 0.0; errcode = ErrNone;
+                }
+                return;
+            case CmdReset:
+                segs.clear(); blocks.clear(); plan.reset();
+                planT = duration = 0.0; curLine = 0; errcode = ErrNone;
+                state = Idle;
+                return;
+            case CmdVerify:
+                errcode = (state == Ready) ? ErrNone : ErrBadState;
+                return;
+            default:
+                errcode = ErrBadCmd;
+                return;
+        }
+    }
+
+    /* Advance plan time on the drive clock and stream setpoints. */
+    void tick(uint64_t nowUs) {
+        std::lock_guard lk(m);
+        double dt = 0.0;
+        if (lastUs && nowUs > lastUs)
+            dt = static_cast<double>(nowUs - lastUs) / 1e6;
+        lastUs = nowUs;
+        if (state != Running || !plan) return;
+        planT += dt * feedOvr / 100.0;
+        if (planT >= duration) {
+            planT = duration;
+            emitTargets();
+            stepTarget = -1;
+            state = Finished;
+            return;
+        }
+        emitTargets();
+        if (stepTarget >= 0 && curSeg >= stepTarget) {
+            stepTarget = -1;
+            state = Paused;
+        }
+    }
+};
+
+Channel g_nci;
+
+void nciTick(uint64_t nowUs) { g_nci.tick(nowUs); }
+
+void regU8(Registry& reg, const MotionSchemas& d, uint64_t& nextId,
+           const char* name, const char* desc, bool rw,
+           std::function<void(void*)> rd, std::function<void(const void*)> wr) {
+    ParamEntry p;
+    p.id = nextId++;
+    p.name = name;
+    p.description = desc;
+    p.group = "nc";
+    p.valueType = ValueType::U8;
+    p.schema = d.u8;
+    p.schemaSlot = d.slotU8;
+    p.readFn = std::move(rd);
+    if (rw) p.writeFn = std::move(wr);
+    reg.addParam(p);
+}
+
+void regU32(Registry& reg, const MotionSchemas& d, uint64_t& nextId,
+            const char* name, const char* desc,
+            std::function<void(void*)> rd) {
+    ParamEntry p;
+    p.id = nextId++;
+    p.name = name;
+    p.description = desc;
+    p.group = "nc";
+    p.valueType = ValueType::U32;
+    p.schema = d.u32;
+    p.schemaSlot = d.slotU32;
+    p.readFn = std::move(rd);
+    reg.addParam(p);
+}
+
+void regF64(Registry& reg, const MotionSchemas& d, uint64_t& nextId,
+            const char* name, const char* desc, bool rw,
+            std::function<void(void*)> rd,
+            std::function<void(const void*)> wr) {
+    ParamEntry p;
+    p.id = nextId++;
+    p.name = name;
+    p.description = desc;
+    p.group = "nc";
+    p.valueType = ValueType::F64;
+    p.schema = d.f64;
+    p.schemaSlot = d.slotF64;
+    p.readFn = std::move(rd);
+    if (rw) p.writeFn = std::move(wr);
+    reg.addParam(p);
+}
+
+void regStr(Registry& reg, uint64_t& nextId, const char* name,
+            const char* desc, std::function<size_t(void*, size_t)> rd,
+            std::function<void(const void*, size_t)> wr) {
+    ParamEntry p;
+    p.id = nextId++;
+    p.name = name;
+    p.description = desc;
+    p.group = "nc";
+    p.valueType = ValueType::String;
+    p.maxValueSize = 65535;
+    p.varReadFn = std::move(rd);
+    if (wr) p.varWriteFn = std::move(wr);
+    reg.addParam(p);
+}
+
+/* Register all nc.* channel params. */
+bool registerNciParams(Registry& reg, const MotionSchemas& d,
+                       uint64_t& nextId) {
+    auto u8rd = [](auto fn) {
+        return [fn](void* dst) {
+            std::lock_guard lk(g_nci.m);
+            const uint8_t v = static_cast<uint8_t>(fn());
+            std::memcpy(dst, &v, 1);
+        };
+    };
+    auto u32rd = [](auto fn) {
+        return [fn](void* dst) {
+            std::lock_guard lk(g_nci.m);
+            const uint32_t v = fn();
+            std::memcpy(dst, &v, 4);
+        };
+    };
+    auto f64rd = [](auto fn) {
+        return [fn](void* dst) {
+            std::lock_guard lk(g_nci.m);
+            const double v = fn();
+            std::memcpy(dst, &v, 8);
+        };
+    };
+
+    regStr(reg, nextId, "nc.prog",
+           "G-code program text; write compiles it (state READY/ERROR)",
+           [](void* dst, size_t maxLen) -> size_t { (void)dst; (void)maxLen; return 0; },
+           [](const void* src, size_t len) {
+               g_nci.compile(std::string(static_cast<const char*>(src), len));
+           });
+
+    regStr(reg, nextId, "nc.prog_path",
+           "server-side G-code file path; write loads and compiles it",
+           [](void* dst, size_t maxLen) -> size_t { (void)dst; (void)maxLen; return 0; },
+           [](const void* src, size_t len) {
+               const std::string path(static_cast<const char*>(src), len);
+               std::ifstream f(path);
+               if (!f) {
+                   std::lock_guard lk(g_nci.m);
+                   g_nci.errcode = nci::ErrCompile;
+                   g_nci.state = nci::Error;
+                   return;
+               }
+               std::ostringstream ss; ss << f.rdbuf();
+               g_nci.compile(ss.str());
+           });
+
+    regU8(reg, d, nextId, "nc.cmd",
+          "channel command: 1 run 2 step 3 pause 4 resume 5 stop "
+          "6 reset 7 verify",
+          true,
+          [](void* dst) {
+              std::lock_guard lk(g_nci.m);
+              std::memcpy(dst, &g_nci.lastCmd, 1);
+          },
+          [](const void* src) {
+              uint8_t v;
+              std::memcpy(&v, src, 1);
+              g_nci.command(v);
+          });
+
+    regU8(reg, d, nextId, "nc.state",
+          "channel state: 0 idle 1 ready 2 running 3 paused 4 finished "
+          "5 error 6 stopped", false,
+          u8rd([] { return g_nci.state; }), nullptr);
+    regU32(reg, d, nextId, "nc.line", "executing G-code line number",
+           u32rd([] { return g_nci.curLine; }));
+    regU32(reg, d, nextId, "nc.total", "parsed block count",
+           u32rd([] { return static_cast<uint32_t>(g_nci.blocks.size()); }));
+    regU32(reg, d, nextId, "nc.errcode", "channel error code",
+           u32rd([] { return g_nci.errcode; }));
+    regF64(reg, d, nextId, "nc.progress", "plan time elapsed (s)", false,
+           f64rd([] { return g_nci.planT; }), nullptr);
+    regF64(reg, d, nextId, "nc.duration", "total plan duration (s)", false,
+           f64rd([] { return g_nci.duration; }), nullptr);
+    regF64(reg, d, nextId, "nc.scale", "counts per user unit", true,
+           f64rd([] { return g_nci.scale; }),
+           [](const void* src) {
+               double v;
+               std::memcpy(&v, src, 8);
+               std::lock_guard lk(g_nci.m);
+               if (v > 0.0) g_nci.scale = v;
+           });
+    regF64(reg, d, nextId, "nc.feedovr", "feed override percent", true,
+           f64rd([] { return g_nci.feedOvr; }),
+           [](const void* src) {
+               double v;
+               std::memcpy(&v, src, 8);
+               std::lock_guard lk(g_nci.m);
+               g_nci.feedOvr = std::max(0.0, std::min(500.0, v));
+           });
+    return true;
+}
+
+} // namespace nci
 
 } // namespace
 
@@ -263,6 +736,14 @@ int main(int argc, char** argv) {
         }
     }
 
+    // NCI channel: G-code -> MotionPlan -> CSP setpoints on slaves 0..2.
+    nci::g_nci.drive = &drive;
+    nci::g_nci.axes = axes;
+    if (!nci::registerNciParams(registry, schemas, nextId)) {
+        std::fprintf(stderr, "nci param registration failed\n");
+        return 1;
+    }
+
     // --- server --------------------------------------------------------------
     ServerConfig cfg;
     cfg.framing = Framing::Slip;
@@ -283,10 +764,14 @@ int main(int argc, char** argv) {
                 catalog.size());
 
     // Advance the simulated drives at ~1 kHz so dynamics integrate
-    // continuously between client polls.
+    // continuously between client polls. In realtime mode the NCI
+    // channel also advances here; in sim mode it advances on mc.time
+    // writes instead (dt is 0 between writes, so the call is a no-op).
     std::thread ticker([&] {
         while (!g_stop) {
-            drive.advanceTo(driveNowUs());
+            const uint64_t now = driveNowUs();
+            drive.advanceTo(now);
+            nci::nciTick(now);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });
