@@ -81,6 +81,7 @@ PlanningSegmentResult PlanningSegmentBuilder::fromText(
     // Also build block metadata by re-parsing the text line by line.
     // The Interpreter doesn't expose per-block metadata directly, so we
     // track line numbers and g-code text from the source.
+    std::unordered_map<int, int32_t> lineToBlock;
     {
         std::istringstream stream(gcodeText);
         std::string line;
@@ -134,6 +135,7 @@ PlanningSegmentResult PlanningSegmentBuilder::fromText(
             blk.blockIndex = blockIndex++;
             blk.lineNumber = lineNumber;
             blk.motionType = motionType;
+            lineToBlock[lineNumber] = blk.blockIndex;
             // Trim leading whitespace from the stripped text
             size_t start = stripped.find_first_not_of(" \t");
             if (start != std::string::npos)
@@ -255,7 +257,6 @@ PlanningSegmentResult PlanningSegmentBuilder::fromText(
         }
     }
 
-    int32_t blockIdx = 0;
     for (const auto& mseg : motionSegments) {
         PlanningSegment pseg;
         pseg.start = currentPos;
@@ -263,7 +264,12 @@ PlanningSegmentResult PlanningSegmentBuilder::fromText(
         pseg.motionType = mapMotionType(mseg.type);
         pseg.feedRate = mseg.feedRate;
         pseg.isRapid = (mseg.type == MotionSegment::Type::RAPID);
-        pseg.blockIndex = blockIdx++;
+        /* Source block index via the segment's 1-based source line;
+           -1 when the line produced no metadata block. */
+        {
+            const auto it = lineToBlock.find(mseg.lineNumber);
+            pseg.blockIndex = (it != lineToBlock.end()) ? it->second : -1;
+        }
 
         // Arc geometry
         if (mseg.type == MotionSegment::Type::ARC_CW ||
