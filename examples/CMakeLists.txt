@@ -579,7 +579,8 @@ add_tether_example(tether_io_sim
 # Simulated CiA402 drives as cyclic IO params (mc.<slave>.<index>) for
 # PLC-runtime motion clients; SimulatedCiA402Drive backend.
 add_tether_example(tether_io_motion_server
-    LIBRARIES tether_io_protocol tether_common)
+    LIBRARIES tether_io_protocol tether_gcode tether_motion_planner
+              tether_motion_geometry tether_common)
 
 # Client-hosted processing function (peer RPC): a client publishes `scale`
 # via RegisterFunctionsReq, an embedded server invokes it back over the
