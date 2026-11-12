@@ -93,8 +93,12 @@ public:
      * storage, which the realtime loop reads/writes every cycle — field
      * getters/setters must hold this lock while touching the image.
      * Recursive: derived helpers calling each other stay cheap.
+     * Priority-inheriting on Linux, and the cyclic thread only waits
+     * ~20us for it before skipping the exchange — keep critical
+     * sections short.
      */
-    [[nodiscard]] std::unique_lock<std::recursive_mutex> pdoIoLock() const;
+    [[nodiscard]] std::unique_lock<Tether::Platform::PiRecursiveMutex>
+    pdoIoLock() const;
 
     TerminalBase(TerminalBase&&) noexcept            = default;
     TerminalBase& operator=(TerminalBase&&) noexcept = default;

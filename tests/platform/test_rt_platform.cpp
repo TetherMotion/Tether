@@ -11,7 +11,11 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <fstream>
 #include <thread>
+#ifdef __linux__
+#include <unistd.h>
+#endif
 
 #include "tether/platform/CpuIsolation.hpp"
 #include "tether/platform/RtMemory.hpp"
@@ -163,4 +167,37 @@ TEST(RtMemoryTest, SchedDeadlineFallbackIsGraceful) {
     // is "returns false, caller falls back" — never crash.
     (void)setCurrentThreadDeadline(50'000, 100'000, 100'000);
     SUCCEED();
+}
+
+// ============================================================================
+// RT-throttle probe (sched_rt_runtime_us) — drives the SchedClass::Auto
+// resolution and the FIFO-on-shared-CPU warnings.
+// ============================================================================
+
+TEST(RtThrottleTest, ProbeMatchesKernelSysctl) {
+    const int64_t v = rtThrottleRuntimeUs();
+#ifdef __linux__
+    std::ifstream f("/proc/sys/kernel/sched_rt_runtime_us");
+    if (!f.is_open()) {
+        // No RT throttle knob (non-RT kernel config) — probe must say so.
+        EXPECT_EQ(v, -2);
+        GTEST_SKIP() << "no sched_rt_runtime_us sysctl";
+    }
+    long long kernel = 0;
+    f >> kernel;
+    EXPECT_EQ(v, kernel);
+#else
+    EXPECT_EQ(v, -2);    // unsupported platform sentinel
+#endif
+}
+
+TEST(RtThrottleTest, DisableFailsWithoutRoot) {
+#ifdef __linux__
+    if (geteuid() == 0) {
+        // As root the write would succeed — and flip a host-global kernel
+        // knob.  Never exercise the success path from a unit test.
+        GTEST_SKIP() << "running as root — would mutate host sysctl";
+    }
+#endif
+    EXPECT_FALSE(disableRtThrottle());
 }

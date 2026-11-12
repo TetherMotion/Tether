@@ -115,6 +115,15 @@ struct CpuIsolationConfig {
 struct MemoryLockConfig {
     bool lock_all_process = false; /**< mlockall(CURRENT|FUTURE) — most */
                                     /**< thorough, least selective */
+    /**
+     * With lock_all_process: pass MCL_ONFAULT (Linux ≥ 4.4) — pages are
+     * pinned against eviction/refault but only faulted in on first
+     * touch instead of populating the whole address space up-front.
+     * Keeps the startup fault storm small; the first touch of each
+     * page still faults (cheap — it cannot go to storage), so the
+     * strictest setups keep this false.
+     */
+    bool lock_on_fault    = false;
     bool lock_image       = true; /**< ProcessImage buffers */
     bool lock_slots       = true; /**< cyclic slot bank + TX staging */
     bool prefault_stack   = true; /**< pre-touch cyclic thread stack */
@@ -252,14 +261,18 @@ struct CyclicLoopConfig {
      * Conservative low-latency preset: Split exchange placement (the
      * wire round-trip overlaps the phases between send and collect),
      * Auto wire mode (kernel ring when available), runtime CPU
-     * isolation opt-in, default granular memory locking.  Everything
-     * degrades gracefully on hosts without the capabilities.
+     * isolation opt-in, and whole-process memory locking — code,
+     * libraries and heap are pinned and populated up-front so nothing
+     * the cyclic path touches can page-fault back in from slow storage
+     * mid-cycle.  Everything degrades gracefully on hosts without the
+     * capabilities.
      */
     static CyclicLoopConfig lowLatency(uint32_t cycle_period_us = 1000) {
         CyclicLoopConfig c;
         c.cycle_period_us     = cycle_period_us;
         c.exchange_placement  = ExchangePlacement::Split;
         c.cpu_isolation.enabled = true;
+        c.memory_lock.lock_all_process = true;
         return c;
     }
 };

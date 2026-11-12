@@ -8,7 +8,9 @@
  */
 
 #include "tether/ethercat/RealtimeLoop.hpp"
+#include "tether/platform/CpuIsolation.hpp"
 #include "tether/platform/Platform.hpp"
+#include "logging/Logger.hpp"
 
 #include <algorithm>
 
@@ -218,12 +220,41 @@ void RealtimeLoop::pdoTaskEntry(void* param) {
     auto* loop = static_cast<RealtimeLoop*>(param);
     if (!loop) return;
 
+    // Deferred logging — the PDO exchange loop must never format/lock/print.
+    Tether::Platform::Logger::setThreadDeferred(true);
+
+    if (loop->config_.pdo_cpu_affinity >= 0) {
+        Tether::Platform::CpuIsolation::instance().adoptCurrentThread(
+            loop->config_.pdo_cpu_affinity);
+        if (!Tether::Platform::setCurrentThreadAffinity(
+                loop->config_.pdo_cpu_affinity)) {
+            TETHER_LOGW(TAG, "PDO thread: CPU {} pin failed — unpinned",
+                        loop->config_.pdo_cpu_affinity);
+        }
+    }
+
     if (loop->verbose_.load(std::memory_order_relaxed)) {
         TETHER_LOGI(TAG, "PDO realtime task started");
     }
 
     if (!Tether::Platform::setCurrentThreadRealtime(loop->config_.pdo_priority)) {
         TETHER_LOGW(TAG, "PDO thread could not acquire SCHED_FIFO priority; running with normal scheduling");
+    }
+
+    // This legacy loop is FIFO-only: on a shared CPU the global
+    // sched_rt_runtime_us budget can dequeue it for ~50 ms — warn once.
+    {
+        const bool iso =
+            loop->config_.pdo_cpu_affinity >= 0
+                ? Tether::Platform::cpuIsHardIsolated(
+                      loop->config_.pdo_cpu_affinity)
+                : Tether::Platform::currentThreadRunsIsolatedOnly();
+        if (!iso && Tether::Platform::rtThrottleRuntimeUs() >= 0) {
+            TETHER_LOGW(TAG, "PDO thread on SCHED_FIFO, non-isolated CPU, "
+                             "RT throttle armed — RT-group overruns can "
+                             "dequeue it for ~50 ms (CyclicExecutive's "
+                             "sched_class=Deadline/Auto avoids this)");
+        }
     }
 
     while (loop->running_.load(std::memory_order_acquire)) {
@@ -362,12 +393,38 @@ void RealtimeLoop::dcTaskEntry(void* param) {
     auto* loop = static_cast<RealtimeLoop*>(param);
     if (!loop) return;
 
+    // Deferred logging — the DC sync loop must never format/lock/print.
+    Tether::Platform::Logger::setThreadDeferred(true);
+
+    if (loop->config_.dc_cpu_affinity >= 0) {
+        Tether::Platform::CpuIsolation::instance().adoptCurrentThread(
+            loop->config_.dc_cpu_affinity);
+        if (!Tether::Platform::setCurrentThreadAffinity(
+                loop->config_.dc_cpu_affinity)) {
+            TETHER_LOGW(TAG, "DC thread: CPU {} pin failed — unpinned",
+                        loop->config_.dc_cpu_affinity);
+        }
+    }
+
     if (loop->verbose_.load(std::memory_order_relaxed)) {
         TETHER_LOGI(TAG, "DC realtime task started");
     }
 
     if (!Tether::Platform::setCurrentThreadRealtime(loop->config_.dc_priority)) {
         TETHER_LOGW(TAG, "DC thread could not acquire SCHED_FIFO priority; running with normal scheduling");
+    }
+
+    {
+        const bool iso =
+            loop->config_.dc_cpu_affinity >= 0
+                ? Tether::Platform::cpuIsHardIsolated(
+                      loop->config_.dc_cpu_affinity)
+                : Tether::Platform::currentThreadRunsIsolatedOnly();
+        if (!iso && Tether::Platform::rtThrottleRuntimeUs() >= 0) {
+            TETHER_LOGW(TAG, "DC thread on SCHED_FIFO, non-isolated CPU, "
+                             "RT throttle armed — RT-group overruns can "
+                             "dequeue it mid-sync");
+        }
     }
 
     while (loop->running_.load(std::memory_order_acquire)) {

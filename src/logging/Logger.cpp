@@ -2,12 +2,15 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <chrono>
 #include <mutex>
 #include <algorithm>
 #include <vector>
 #include <unistd.h>
+
+#include "tether/platform/AtomicWait.hpp"
 
 // Determine whether to use ANSI color codes for console output. Colors are
 // enabled when stdout is a TTY and the NO_COLOR environment variable is not set.
@@ -27,6 +30,149 @@ namespace Platform {
 Logger& Logger::instance() {
     static Logger logger;
     return logger;
+}
+
+Logger::Logger() {
+    // Vyukov ring: each slot's sequence starts at its own index.
+    for (uint32_t i = 0; i < kRtQueueCapacity; ++i) {
+        rt_queue_[i].seq.store(i, std::memory_order_relaxed);
+    }
+}
+
+Logger::~Logger() {
+    rt_dead_.store(true, std::memory_order_release);
+    if (flusher_.joinable()) {
+        flusher_stop_.store(true, std::memory_order_release);
+        rt_wake_gen_.fetch_add(1, std::memory_order_release);
+        atomicWakeAll(&rt_wake_gen_);
+        flusher_.join();
+    }
+}
+
+void Logger::setThreadDeferred(bool en) {
+    deferredFlag() = en;
+    if (en) instance().ensureFlusher();
+}
+
+bool Logger::threadDeferred() {
+    return deferredFlag();
+}
+
+void Logger::ensureFlusher() {
+    std::call_once(flusher_once_, [this] {
+        flusher_ = std::thread([this] { rtFlushLoop(); });
+    });
+}
+
+bool Logger::enqueueRt(LogLevel level, const char* tag,
+                       std::string_view msg) {
+    if (rt_dead_.load(std::memory_order_relaxed)) {
+        rt_dropped_.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    ensureFlusher();
+
+    RtLogSlot* cell;
+    uint64_t pos = rt_tail_.load(std::memory_order_relaxed);
+    for (;;) {
+        cell = &rt_queue_[pos & (kRtQueueCapacity - 1)];
+        const uint64_t seq = cell->seq.load(std::memory_order_acquire);
+        const intptr_t dif =
+            static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos);
+        if (dif == 0) {
+            if (rt_tail_.compare_exchange_weak(
+                    pos, pos + 1, std::memory_order_relaxed))
+                break;
+        } else if (dif < 0) {
+            // Ring full — bounded drop instead of blocking or
+            // overwriting an unconsumed message.
+            rt_dropped_.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        } else {
+            pos = rt_tail_.load(std::memory_order_relaxed);
+        }
+    }
+
+    cell->level = level;
+    const size_t tn =
+        tag ? std::min(strlen(tag), static_cast<size_t>(kRtTagSize - 1))
+            : 0;
+    if (tn) std::memcpy(cell->tag, tag, tn);
+    cell->tag[tn] = '\0';
+    const size_t mn =
+        std::min(msg.size(), static_cast<size_t>(kRtTextSize));
+    if (mn) std::memcpy(cell->text, msg.data(), mn);
+    cell->text_len = static_cast<uint32_t>(mn);
+    cell->seq.store(pos + 1, std::memory_order_release);
+
+    rt_wake_gen_.fetch_add(1, std::memory_order_release);
+    atomicWakeAll(&rt_wake_gen_);
+    return true;
+}
+
+bool Logger::dequeueRt(RtLogSlot& out) {
+    RtLogSlot* cell;
+    uint64_t pos = rt_head_.load(std::memory_order_relaxed);
+    for (;;) {
+        cell = &rt_queue_[pos & (kRtQueueCapacity - 1)];
+        const uint64_t seq = cell->seq.load(std::memory_order_acquire);
+        const intptr_t dif =
+            static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
+        if (dif == 0) {
+            if (rt_head_.compare_exchange_weak(
+                    pos, pos + 1, std::memory_order_relaxed))
+                break;
+        } else if (dif < 0) {
+            return false;   // empty
+        } else {
+            pos = rt_head_.load(std::memory_order_relaxed);
+        }
+    }
+    out.level = cell->level;
+    std::memcpy(out.tag, cell->tag, kRtTagSize);
+    out.text_len = cell->text_len;
+    if (out.text_len)
+        std::memcpy(out.text, cell->text, out.text_len);
+    cell->seq.store(pos + kRtQueueCapacity, std::memory_order_release);
+    return true;
+}
+
+void Logger::drainRtQueue() {
+    RtLogSlot s;
+    while (dequeueRt(s)) {
+        logFormatted(s.level, s.tag,
+                     std::string_view(s.text, s.text_len));
+    }
+    const uint64_t d =
+        rt_dropped_.exchange(0, std::memory_order_relaxed);
+    if (d) {
+        char b[96];
+        const int n = std::snprintf(
+            b, sizeof(b),
+            "rt_log: %llu deferred log message(s) dropped (queue full)",
+            static_cast<unsigned long long>(d));
+        logFormatted(LogLevel::Error, "rt_log",
+                     std::string_view(b, static_cast<size_t>(n)));
+    }
+}
+
+void Logger::rtFlushLoop() {
+    for (;;) {
+        drainRtQueue();
+        if (flusher_stop_.load(std::memory_order_acquire)) {
+            drainRtQueue();   // last drain before exit
+            return;
+        }
+        // Wake-stamped wait: enqueueRt bumps rt_wake_gen_ after
+        // publishing a slot, so a missed dequeue can only delay a
+        // message by this poll bound.
+        const uint32_t g = rt_wake_gen_.load(std::memory_order_acquire);
+        atomicWait(&rt_wake_gen_, g, 250'000'000);
+    }
+}
+
+void Logger::flushDeferred() {
+    drainRtQueue();
 }
 
 void Logger::log(LogLevel level, const char* tag, const char* format, ...) {
@@ -61,12 +207,21 @@ void Logger::logv(LogLevel level, const char* tag, const char* format, va_list a
 }
 
 void Logger::logFormatted(LogLevel level, const char* tag, std::string_view message) {
+    // Realtime/deferred threads never run this path inline: format is
+    // already done (bounded, on the producer's stack), so we only copy
+    // the text into the RT ring and return — no heap, no mutex, no I/O.
+    if (deferredFlag()) {
+        enqueueRt(level, tag, message);
+        return;
+    }
+    // Filtered messages bail before touching mutex_ or copying handlers.
+    if (!enabled(level)) return;
+
     LogHandler primaryHandler;
     std::vector<LogHandler> handlers;
     bool timestampEnabled;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (level > level_) return;
         primaryHandler = handler_;
         timestampEnabled = timestampEnabled_;
         handlers.reserve(handlers_.size());

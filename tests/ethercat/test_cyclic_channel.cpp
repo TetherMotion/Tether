@@ -2779,8 +2779,11 @@ TEST_F(MasterCyclicTest, SlotWaitFallbackYieldArm) {
     MasterCyclicTestAccess::setSlotWaitFallback(
         master_, Master::CyclicLoopConfig::SlotWaitFallback::Yield);
     CyclicSlotView view{};
-    // Never-arriving slot with a non-zero token → spin→yield→timeout.
-    EXPECT_FALSE(master_.waitCyclicSlotView(0, /*token=*/12345,
+    // The wait blocks while slot seq == token (no NEW deposit).  Passing
+    // the slot's current seq therefore waits the full budget — a token
+    // the seq never equals (e.g. 12345) is "already changed" and returns
+    // immediately instead.
+    EXPECT_FALSE(master_.waitCyclicSlotView(0, master_.cyclicSlotToken(0),
                                             /*timeout_ns=*/5'000'000, view));
 }
 

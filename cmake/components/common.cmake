@@ -5,6 +5,7 @@ set(TETHER_COMMON_SOURCES
     ${TETHER_ROOT}/src/platform/Platform.cpp
     ${TETHER_ROOT}/src/platform/HostTimer.cpp
     ${TETHER_ROOT}/src/platform/RtMemory.cpp
+    ${TETHER_ROOT}/src/platform/PiMutex.cpp
     ${TETHER_ROOT}/src/platform/CpuIsolation.cpp
     ${TETHER_ROOT}/src/logging/Logger.cpp
     ${TETHER_ROOT}/src/logging/DeduplicatingLogger.cpp

@@ -330,8 +330,9 @@ void TerminalBase::stop() {
     }
 }
 
-std::unique_lock<std::recursive_mutex> TerminalBase::pdoIoLock() const {
-    return std::unique_lock<std::recursive_mutex>(
+std::unique_lock<Tether::Platform::PiRecursiveMutex>
+TerminalBase::pdoIoLock() const {
+    return std::unique_lock<Tether::Platform::PiRecursiveMutex>(
         master_->pdoForSlave(slave_index_).exchangeMutex());
 }
 

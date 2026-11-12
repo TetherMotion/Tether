@@ -447,6 +447,23 @@ public:
     }
     uint32_t imageExchangeDecimation() const { return image_every_n_; }
 
+    // ----- RT exchange staging buffers (for memory locking) -----
+
+    /**
+     * Cyclic LRW gather/staging buffer (allocated by buildAddressMap()
+     * or lazily by the first cyclic exchange).  nullptr/0 when absent.
+     * CyclicDatapath::setup() mlocks it so the hot path never refaults.
+     */
+    const uint8_t* cyclicStagingBuffer() const { return cyclic_payload_.get(); }
+    uint32_t cyclicStagingBufferSize() const { return cyclic_payload_size_; }
+
+    /**
+     * PDO-slice gather staging (lazy — only exists in non-image modes).
+     * nullptr/0 when absent.
+     */
+    const uint8_t* sliceStagingBuffer() const { return slice_payload_.get(); }
+    uint32_t sliceStagingBufferSize() const { return slice_payload_size_; }
+
     // ----- Statistics -----
 
     struct Stats {

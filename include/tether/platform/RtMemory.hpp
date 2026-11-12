@@ -43,12 +43,38 @@ struct MemoryLockSections {
 };
 
 /**
+ * @brief Configure the glibc allocator so it cannot hand locked pages
+ *        back to the kernel and refault them later (Linux only):
+ *
+ *          - M_MMAP_MAX = 0      — never service chunks via mmap, so a
+ *                                  free() can never munmap() a page the
+ *                                  process locked.
+ *          - M_TRIM_THRESHOLD=-1 — never return heap top to the kernel.
+ *          - M_ARENA_MAX = 1     — one arena: bounds allocator lock
+ *                                  scope and arena fragmentation.
+ *
+ *        Called automatically by lockAllMemory(); harmless to call
+ *        standalone before realtime setup.
+ */
+void configureRtAllocator();
+
+/**
  * @brief mlockall(MCL_CURRENT | MCL_FUTURE) — lock all current and future
- *        mappings of this process.  Cannot exclude regions; use the
+ *        mappings of this process.  Faults in every current page at lock
+ *        time (code, libraries, stack, heap — nothing can refault from
+ *        storage mid-cycle).  Cannot exclude regions; use the
  *        per-section flags in MemoryLockSections for granular control.
+ *
+ *        configureRtAllocator() is applied first so the allocator does
+ *        not defeat the lock afterwards.
+ * @param on_fault  Add MCL_ONFAULT (Linux ≥ 4.4): pin against eviction
+ *        but skip the up-front population — first touches still fault
+ *        (cheap, never goes to storage) instead of paying the whole
+ *        fault storm at startup.
  * @return true on success, false (logged) on insufficient privilege.
  */
-bool lockAllMemory();
+bool lockAllMemory(bool on_fault);
+bool lockAllMemory();   ///< Same as lockAllMemory(false).
 
 /**
  * @brief mlock() a region — pins the pages so they can neither fault nor

@@ -37,6 +37,15 @@ struct CyclicHealth {
     uint64_t cycles             = 0; /**< cyclic_loop_ cycle_count */
     uint64_t exchange_errors    = 0; /**< cycles whose exchange returned false */
     uint64_t missed_deadlines   = 0;
+    /**
+     * Exchanges skipped because PDOManager::exchange_mutex_ was held
+     * longer than the cyclic thread's bounded acquisition window
+     * (~20us).  Rising count = a non-RT path is holding the exchange
+     * mutex too long (e.g. a legacy exchange waiting out a wire
+     * timeout) — the cyclic loop skips the exchange rather than
+     * missing its deadline.
+     */
+    uint64_t exchange_lock_skips = 0;
     // --- protocol level (LogicalAddressManager) ---
     uint32_t exchanges_ok       = 0;
     uint32_t wire_loss          = 0; /**< replies that never came back */

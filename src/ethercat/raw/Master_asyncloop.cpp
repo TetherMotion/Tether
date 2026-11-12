@@ -64,6 +64,9 @@ bool Master::startAsyncLoop(const AsyncLoopConfig& config)
     ecfg.max_idle_ns          = config.max_idle_ns;
     ecfg.dc_interval_us       = config.enable_dc_synchronization
                                 ? config.dc_interval_us : 0;
+    // Forward the datapath's busy-wait budget — under SCHED_DEADLINE it
+    // is charged against the loop's CBS runtime (warned about there).
+    ecfg.in_cycle_spin_ns       = config.rx_spin_ns + config.slot_spin_ns;
     datapath_->rx_spin_ns_         = config.rx_spin_ns;
     datapath_->slot_spin_ns_       = config.slot_spin_ns;
     datapath_->slot_wait_fallback_ = config.slot_wait_fallback;
@@ -101,7 +104,7 @@ bool Master::startAsyncLoop(const AsyncLoopConfig& config)
 
     // ---- Memory locking (each section independently opt-out-able) ------
     if (config.memory_lock.lock_all_process) {
-        Tether::Platform::lockAllMemory();
+        Tether::Platform::lockAllMemory(config.memory_lock.lock_on_fault);
     }
     if (ecfg.stack_prefault_bytes == 0 &&
         config.memory_lock.stack_prefault_bytes > 0) {

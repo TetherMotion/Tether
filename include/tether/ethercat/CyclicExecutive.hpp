@@ -60,6 +60,12 @@ public:
 
     /**Kernel scheduling class for the cyclic thread. */
     enum class SchedClass : uint8_t {
+        Auto,  /**< Resolved at thread start: SCHED_FIFO when the cyclic */
+               /**< thread runs on a hard-isolated CPU (isolcpus=, an    */
+               /**< isolated cgroup2 cpuset partition, or an exclusive   */
+               /**< cgroup v1 cpuset via create_cpuset), SCHED_DEADLINE  */
+               /**< otherwise — on a shared CPU, FIFO shares the global  */
+               /**< RT-throttle budget and can be dequeued for ~50 ms.   */
         Fifo, /**< SCHED_FIFO @ priority — needs CAP_SYS_NICE */
         Deadline, /**< SCHED_DEADLINE CBS (runtime/deadline/period) — */
                     /**< 
@@ -80,12 +86,19 @@ public:
         /**
          * Scheduling class for the cyclic thread (DC thread always uses
          * SCHED_FIFO — its budget is a single short frame).
+         *
+         * Auto (default): resolved once at cyclic-thread start — Fifo iff
+         * cpu_affinity targets a hard-isolated CPU or the thread's whole
+         * affinity set is confined to isolated CPUs (Platform::
+         * cpuIsHardIsolated / currentThreadRunsIsolatedOnly); Deadline
+         * otherwise, so a shared CPU never exposes the cyclic thread to
+         * the kernel's global RT-throttle window (sched_rt_runtime_us).
          */
-        SchedClass sched_class = SchedClass::Fifo;
+        SchedClass sched_class = SchedClass::Auto;
 
         /**
-         * SCHED_DEADLINE auto-measure (Q10): when sched_class==Deadline
-         * and dl_runtime_ns==0, the cyclic thread runs its first
+         * SCHED_DEADLINE auto-measure (Q10): when the resolved sched_class
+         * is Deadline and dl_runtime_ns==0, the cyclic thread runs its first
          * dl_measure_cycles on SCHED_FIFO while recording per-cycle work,
          * then switches to CBS with runtime = P99 × (100+margin_pct)/100.
          * Turn off to get the legacy period/2 default immediately.
@@ -96,10 +109,30 @@ public:
         uint32_t dl_margin_pct     = 100;
         /**
          * SCHED_DEADLINE parameters (ns).  0 → runtime = period/2,
-         * deadline = period.  Only used when sched_class == Deadline.
+         * deadline = period.  Only used when the resolved class is
+         * Deadline (explicit Deadline, or Auto on a non-isolated CPU).
          */
         uint64_t dl_runtime_ns  = 0;
         uint64_t dl_deadline_ns = 0;
+
+        /**
+         * Total busy-wait budget (ns) the in-cycle work may burn:
+         * rx_spin_ns + slot_spin_ns + similar datapath spins, forwarded
+         * by the owner (Master).  Under SCHED_DEADLINE every spin
+         * nanosecond is charged against the task's own CBS runtime — the
+         * exec warns when the resolved class is Deadline and this is
+         * nonzero.  Purely informational; does not change behaviour.
+         */
+        uint32_t in_cycle_spin_ns = 0;
+
+        /**
+         * Root opt-in: write -1 to /proc/sys/kernel/sched_rt_runtime_us
+         * at cyclic-thread start, disabling the kernel's global RT-group
+         * throttle.  Only enable when the cyclic thread is pinned to a
+         * hard-isolated CPU — on a shared CPU a runaway RT task can then
+         * starve the core with no recovery window.
+         */
+        bool     disable_rt_throttle = false;
 
         /**
          * Pre-fault the cyclic thread's stack at thread start (avoids
@@ -146,8 +179,23 @@ public:
         uint64_t task_errors        = 0;
         uint64_t missed_deadlines   = 0; /**< skipped deadline count (overruns) */
         uint32_t max_cycle_work_us  = 0; /**< longest in-cycle work burst */
-        bool     deadline_active    = false; /**< SCHED_DEADLINE engaged */
-        uint64_t dl_runtime_ns      = 0; /**< CBS runtime actually applied */
+        /**
+         * Wake overshoot: how late each tick's wake arrived vs its
+         * deadline (max + EWMA).  Directly measures the sleep path —
+         * ~0–2 µs with HybridSpin on an isolated CPU, single- to
+         * tens-of-µs with Nanosleep, larger under CPU contention.
+         */
+        uint32_t max_wake_overshoot_ns = 0;
+        uint32_t avg_wake_overshoot_ns = 0;
+        bool     deadline_active    = false; /**< SCHED_DEADLINE engaged —
+                                              /**<  the kernel accepted CBS */
+        /**
+         * CBS runtime budget the exec computed and requested (explicit
+         * dl_runtime_ns verbatim, or period/2 / measured-P99×margin with
+         * the HybridSpin tail folded in).  Nonzero even when the kernel
+         * rejected the admission — check deadline_active for engagement.
+         */
+        uint64_t dl_runtime_ns      = 0;
         JitterStats jitter; /**< wake-up period jitter (cyclic) */
 
         uint64_t   dc_sync_count    = 0;
@@ -230,9 +278,12 @@ private:
     std::atomic<uint64_t> task_errors_{0};
     std::atomic<uint64_t> missed_deadlines_{0};
     std::atomic<uint32_t> max_cycle_work_us_{0};
+    std::atomic<uint32_t> max_wake_overshoot_ns_{0};
+    std::atomic<uint32_t> avg_wake_overshoot_ns_{0};
     std::atomic<uint64_t> dc_sync_count_{0};
     std::atomic<uint64_t> dc_sync_errors_{0};
-    std::atomic<uint64_t> dl_applied_runtime_ns_{0};
+    std::atomic<uint64_t> dl_runtime_ns_{0};
+    std::atomic<bool>     deadline_engaged_{false};
 };
 
 } // namespace EtherCAT

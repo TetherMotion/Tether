@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "tether/platform/EspCompat.hpp"
+#include "tether/platform/PiMutex.hpp"
 #include "tether/ethercat/CyclicChannel.hpp"
 #include "tether/ethercat/DebugFlags.hpp"
 #include "tether/ethercat/EtherCATConfig.hpp"
@@ -357,8 +358,34 @@ public:
      * PDOEntry (e.g. Beckhoff terminal drivers) must hold the same mutex
      * while touching the image — recursive so nested calls on one thread
      * (e.g. exchangeAll -> sendAll) stay cheap.
+     *
+     * The mutex is priority-inheriting (PTHREAD_PRIO_INHERIT on Linux):
+     * a realtime thread blocked on it lends its priority to the holder,
+     * bounding the inversion to the holder's critical-section length.
+     *
+     * The cyclic entry points (cyclicSend/cyclicCollect/
+     * exchangeAllLRWCyclic) additionally bound their wait — see
+     * cyclicLockSkips().
      */
-    std::recursive_mutex& exchangeMutex() { return exchange_mutex_; }
+    Tether::Platform::PiRecursiveMutex& exchangeMutex() {
+        return exchange_mutex_;
+    }
+
+    /**
+     * @brief Cyclic exchanges skipped because exchange_mutex_ was held
+     *        longer than the bounded acquisition budget.
+     *
+     * The cyclic fast path must never stall behind a long non-RT hold
+     * (e.g. a legacy exchange waiting out a wire timeout): it waits at
+     * most ~20us for the lock — long enough to ride out the microsecond
+     * storage critical sections terminal drivers take via pdoIoLock() —
+     * then skips that exchange instead of missing the cycle deadline.
+     * A rising count means a non-RT holder is retaining the mutex too
+     * long; surfaced in CyclicHealth::exchange_lock_skips.
+     */
+    uint64_t cyclicLockSkips() const {
+        return cyclic_lock_skips_.load(std::memory_order_relaxed);
+    }
 
     void setLogicalAddressManager(LogicalAddressManager* mgr) { logical_addr_mgr_ = mgr; }
     LogicalAddressManager* logicalAddressManager() const { return logical_addr_mgr_; }
@@ -384,7 +411,12 @@ private:
     std::function<std::string(uint16_t)> prefix_provider_;
 
     /// Serialises all exchange entry points (see exchangeMutex()).
-    std::recursive_mutex exchange_mutex_;
+    /// Priority-inheriting on Linux — bounds realtime inversion.
+    Tether::Platform::PiRecursiveMutex exchange_mutex_;
+
+    /// Cyclic exchanges skipped on bounded exchange_mutex_ acquire —
+    /// see cyclicLockSkips().
+    std::atomic<uint64_t> cyclic_lock_skips_{0};
 
     // Owned state (formerly globals)
     PDO::SlaveConfig slave_configs_[PDO::kMaxPDOSlaves];

@@ -67,7 +67,7 @@ int Master::drainWire(int max_frames)
 #ifdef __linux__
 int Master::drainWireBatch(int fd, int max_frames)
 {
-    constexpr int kBatch = 32;
+    constexpr int kBatch = static_cast<int>(kDrainBatchFrames);
     if (drain_buf_.size() <
         static_cast<size_t>(kBatch) * kMaxJumboFrameSize) {
         try {

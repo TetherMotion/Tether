@@ -23,7 +23,7 @@ namespace EtherCAT {
 // ============================================================================
 
 bool PDOManager::exchangeLRW(uint16_t slave_count) {
-    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
+    std::lock_guard lk(exchange_mutex_);
     if (logical_addr_mgr_ && logical_addr_mgr_->isInitialized()) {
         return logical_addr_mgr_->exchangeAllLRW(mapping_);
     }
@@ -34,7 +34,7 @@ bool PDOManager::exchangeLRW(uint16_t slave_count) {
 }
 
 bool PDOManager::exchangeSeparate(uint16_t slave_count) {
-    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
+    std::lock_guard lk(exchange_mutex_);
     if (slave_count == 0) return true;
     separate_stats_.send_errors++;
     TETHER_LOGW(TAG, "Separate exchange requires FMMU; use master-level API");
@@ -42,7 +42,7 @@ bool PDOManager::exchangeSeparate(uint16_t slave_count) {
 }
 
 bool PDOManager::exchangePhysical(uint16_t slave_count) {
-    std::lock_guard<std::recursive_mutex> lk(exchange_mutex_);
+    std::lock_guard lk(exchange_mutex_);
     if (slave_count == 0) return true;
     bool fpwr_ok = true, fprd_ok = true;
 

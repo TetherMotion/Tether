@@ -158,6 +158,75 @@ bool setCurrentThreadRealtime(int priority = -1);
 bool setCurrentThreadDeadline(uint64_t runtime_ns, uint64_t deadline_ns,
                               uint64_t period_ns);
 
+/**
+ * @brief Pin the calling thread to a single CPU (sched_setaffinity self).
+ *
+ * Used to re-apply an affinity that may have raced or failed at spawn
+ * time — e.g. after the thread was moved into a cpuset partition that
+ * made the target CPU schedulable.
+ * @return true on success; false (caller's problem to report) on failure.
+ */
+bool setCurrentThreadAffinity(int cpu);
+
+//=============================================================================
+// CPU Isolation Detection
+//=============================================================================
+
+/**
+ * @brief True when @p cpu is reserved away from the general scheduler AND
+ *        this thread can actually run on it: in the kernel's isolated set
+ *        (isolcpus=), covered by OUR OWN cgroup2 cpuset partition in state
+ *        "isolated", or inside an exclusive cgroup v1 cpuset (e.g.
+ *        CpuIsolation's tether_rt, joined via adoptCurrentThread()).
+ *        Foreign partitions/cpusets are not counted — their CPUs are
+ *        outside our effective mask anyway.
+ * @param cpu  CPU index; < 0 always returns false.
+ *
+ * A cyclic SCHED_FIFO thread is only safe on such CPUs — anywhere else it
+ * shares the global RT-throttle budget (sched_rt_runtime_us) with every
+ * other RT task on the CPU and can be dequeued for up to ~50 ms.
+ */
+bool cpuIsHardIsolated(int cpu);
+
+//=============================================================================
+// RT Bandwidth Throttle (sched_rt_runtime_us)
+//=============================================================================
+
+/**
+ * @brief Read the kernel's global RT-group throttle budget.
+ *
+ * /proc/sys/kernel/sched_rt_runtime_us is shared by ALL SCHED_FIFO/RR
+ * tasks on a CPU; when collective RT usage exceeds the budget within a
+ * sched_rt_period_us window the kernel dequeues every RT task on that
+ * CPU for the remainder — up to ~50 ms once per second by default.
+ * SCHED_DEADLINE tasks are exempt (per-task CBS budget instead).
+ *
+ * @return configured runtime budget in µs;
+ *         -1 when throttling is disabled;
+ *         -2 when the sysctl could not be read.
+ */
+int64_t rtThrottleRuntimeUs();
+
+/**
+ * @brief Disable the global RT-group throttle
+ *        (sched_rt_runtime_us = -1).
+ *
+ * Requires root.  DANGEROUS on shared CPUs — a runaway RT task can then
+ * starve the CPU indefinitely.  Only sensible when the RT threads run
+ * on hard-isolated CPUs.
+ *
+ * @return true when the sysctl was written.
+ */
+bool disableRtThrottle();
+
+/**
+ * @brief True when the calling thread can ONLY run on hard-isolated CPUs:
+ *        its whole affinity set is contained in the isolated set, or its
+ *        own cpuset is an "isolated" partition.  Used by sched_class=Auto
+ *        when no explicit CPU affinity is configured.
+ */
+bool currentThreadRunsIsolatedOnly();
+
 //=============================================================================
 // Realtime Kernel Detection
 //=============================================================================
