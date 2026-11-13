@@ -28,6 +28,7 @@
 
 #include <argparse/argparse.hpp>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -299,6 +300,149 @@ bool registerEcDcParams(Registry& reg, const MotionSchemas& d,
              ValueType::U64, d.u64, d.slotU64, rdRef, nullptr))
         return false;
     return true;
+}
+
+/* ec.coediag.* params: simulated CoE 0x10F3 Diagnosis History for the
+   TetherPLC FB_CoE_DiagHistory_Read surface.  A real master would
+   source these from per-slave SDO reads of object 0x10F3; this server
+   synthesizes deterministic entries.
+
+   Params:
+    - ec.coediag.slave   U16 RW — slave port address selector
+    - ec.coediag.history Binary RO — object dump for the selected slave:
+        u8 max_messages, u8 newest, u8 newest_acked,
+        u8 new_msgs_available, u16 flags, u16 reserved,
+        then `newest` records of 22 bytes each (ETG.1020 DiagMessage,
+        little-endian): u32 diag_code, u16 flags (bits0-1 severity
+        1=info/2=warn/3=err, bit15 emergency), u16 text_id,
+        u64 timestamp_ns, u8 params[6].  Message numbers are 1-based
+        in wire order (oldest first).
+    - ec.coediag.ack     U8 RW — write sets newest_acked for the
+      selected slave (clamped to 0..16). */
+std::atomic<uint16_t> g_diagSlave{0};
+std::array<std::atomic<uint8_t>, 16> g_diagAcked{};
+
+uint8_t diagEntryCount(uint16_t slave) {
+    if (slave == 0) return 3;
+    if (slave == 1) return 2;
+    if (slave == 2) return 1;
+    return 0;
+}
+
+void putU16(uint8_t* p, uint16_t v) {
+    p[0] = uint8_t(v); p[1] = uint8_t(v >> 8);
+}
+void putU32(uint8_t* p, uint32_t v) {
+    for (int i = 0; i < 4; ++i) p[i] = uint8_t(v >> (8 * i));
+}
+void putU64(uint8_t* p, uint64_t v) {
+    for (int i = 0; i < 8; ++i) p[i] = uint8_t(v >> (8 * i));
+}
+
+void diagRecord(uint8_t* r, uint16_t slave, uint8_t idx, uint8_t count) {
+    /* deterministic per-slave entries; newest message last */
+    const uint8_t pos = count - 1 - idx;   /* 0 = newest */
+    uint32_t code = 0x00001000u + slave * 0x100u + idx;
+    uint16_t sev = 1, flags = 0, tid = 0x1100u + idx;
+    uint16_t mod = 0, ch = 0;
+    if (pos == 0) { sev = 3; flags = 0x8000; code = 0xE0008105u;
+                    tid = 0x8105; mod = 1; ch = 2; }
+    else if (pos == 1 && count > 1) { sev = 2; tid = 0x1200u + idx; }
+    flags |= sev;
+    putU32(r + 0, code);
+    putU16(r + 4, flags);
+    putU16(r + 6, tid);
+    /* boot-relative ns: (idx+1) s per message, 1 h offset per slave —
+       keeps ms values small and exactly verifiable */
+    putU64(r + 8, uint64_t(idx + 1) * 1000000000ull +
+              uint64_t(slave) * 3600000000000ull);
+    std::memset(r + 16, 0, 6);
+    putU16(r + 16, mod);
+    putU16(r + 18, ch);
+}
+
+bool registerEcCoeDiagParams(Registry& reg, const MotionSchemas& d,
+                             uint64_t& nextId) {
+    /* default: all but the newest message acknowledged */
+    for (uint16_t s = 0; s < 16; ++s) {
+        const uint8_t n = diagEntryCount(s);
+        g_diagAcked[s].store(n > 0 ? n - 1 : 0,
+                             std::memory_order_relaxed);
+    }
+    auto add = [&](const char* name, const char* desc,
+                   ValueType vt, const SchemaRef& schema, uint32_t slot,
+                   ReadFn rd, WriteFn wr) {
+        ParamEntry p;
+        p.id = nextId++;
+        p.name = name;
+        p.description = desc;
+        p.group = "ec.coediag";
+        p.valueType = vt;
+        p.schema = schema;
+        p.schemaSlot = slot;
+        p.readFn = rd;
+        p.writeFn = wr;
+        return reg.addParam(p);
+    };
+
+    const auto rdSlave = [](void* dst) {
+        const uint16_t v = g_diagSlave.load(std::memory_order_relaxed);
+        std::memcpy(dst, &v, 2);
+    };
+    const auto wrSlave = [](const void* src) {
+        uint16_t v = 0;
+        std::memcpy(&v, src, 2);
+        g_diagSlave.store(v, std::memory_order_relaxed);
+    };
+    if (!add("ec.coediag.slave",
+             "CoE diag-history slave selector (port address, RW)",
+             ValueType::U16, d.u16, d.slotU16, rdSlave, wrSlave))
+        return false;
+
+    ParamEntry hist;
+    hist.id = nextId++;
+    hist.name = "ec.coediag.history";
+    hist.description =
+        "CoE 0x10F3 diag history dump for ec.coediag.slave "
+        "(header + 22-byte ETG.1020 records)";
+    hist.group = "ec.coediag";
+    hist.valueType = ValueType::Binary;
+    hist.maxValueSize = 512;
+    hist.varReadFn = [](void* dst, size_t maxLen) -> size_t {
+        const uint16_t slave = g_diagSlave.load(std::memory_order_relaxed);
+        const uint8_t n = diagEntryCount(slave);
+        const uint8_t acked =
+            g_diagAcked[slave & 15].load(std::memory_order_relaxed);
+        uint8_t* p = static_cast<uint8_t*>(dst);
+        if (maxLen < 8 + size_t(n) * 22) return 0;
+        p[0] = 16;                 /* max_messages */
+        p[1] = n;                  /* newest */
+        p[2] = acked > n ? n : acked;  /* newest_acked */
+        p[3] = n > p[2] ? 1 : 0;    /* new_msgs_available */
+        putU16(p + 4, 0);          /* flags */
+        putU16(p + 6, 0);
+        for (uint8_t i = 0; i < n; ++i)
+            diagRecord(p + 8 + size_t(i) * 22, slave, i, n);
+        return 8 + size_t(n) * 22;
+    };
+    if (!reg.addParam(hist)) return false;
+
+    const auto rdAck = [](void* dst) {
+        const uint16_t s = g_diagSlave.load(std::memory_order_relaxed);
+        const uint8_t v = g_diagAcked[s & 15].load(std::memory_order_relaxed);
+        std::memcpy(dst, &v, 1);
+    };
+    const auto wrAck = [](const void* src) {
+        uint8_t v = 0;
+        std::memcpy(&v, src, 1);
+        const uint16_t s = g_diagSlave.load(std::memory_order_relaxed);
+        const uint8_t n = diagEntryCount(s);
+        g_diagAcked[s & 15].store(v > n ? n : v,
+                                  std::memory_order_relaxed);
+    };
+    return add("ec.coediag.ack",
+               "Newest-acked diag message for selected slave (U8 RW)",
+               ValueType::U8, d.u8, d.slotU8, rdAck, wrAck);
 }
 
 // ---------------------------------------------------------------------------
@@ -1174,6 +1318,10 @@ int main(int argc, char** argv) {
     }
     if (!registerEcDcParams(registry, schemas, nextId)) {
         std::fprintf(stderr, "ec.dc param registration failed\n");
+        return 1;
+    }
+    if (!registerEcCoeDiagParams(registry, schemas, nextId)) {
+        std::fprintf(stderr, "ec.coediag param registration failed\n");
         return 1;
     }
 
