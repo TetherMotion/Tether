@@ -580,7 +580,7 @@ add_tether_example(tether_io_sim
 # PLC-runtime motion clients; SimulatedCiA402Drive backend.
 add_tether_example(tether_io_motion_server
     LIBRARIES tether_io_protocol tether_gcode tether_motion_planner
-              tether_motion_geometry tether_common)
+              tether_motion_geometry tether_kinematics tether_common)
 
 # Optional OPC UA endpoint for the motion server via libopen62541
 # (opt-in: -DTETHER_ENABLE_OPCUA=ON, or auto when the dev package is
