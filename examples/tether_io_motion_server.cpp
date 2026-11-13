@@ -218,6 +218,7 @@ bool registerAxisObjects(Registry& reg, const MotionSchemas& d,
 /* NCI channel (defined below): tick is driven by mc.time writes in
    sim mode and by the 1 ms wall ticker in realtime mode. */
 namespace nci { void nciTick(uint64_t nowUs); }
+namespace fifo { void fifoTick(uint64_t nowUs); }
 
 /**Global mc.time param: write sets the deterministic sim clock (us);
    read returns the last value. Drives advance to it on next access.*/
@@ -239,9 +240,10 @@ bool registerTimeParam(Registry& reg, const MotionSchemas& d,
         uint64_t t;
         std::memcpy(&t, src, 8);
         g_simUs.store(t, std::memory_order_relaxed);
-        /* The NCI channel runs on this clock: each client time write
-           advances the plan deterministically. */
+        /* The NCI channel and FiFo channels run on this clock: each
+           client time write advances plans/FIFOs deterministically. */
         nci::nciTick(t);
+        fifo::fifoTick(t);
     };
     return reg.addParam(p);
 }
@@ -1388,6 +1390,305 @@ bool registerNciParams(Registry& reg, const MotionSchemas& d,
 
 } // namespace nci
 
+/* ------------------------------------------------------------------ */
+/* FiFoAxes channel (fifo.* params): synchronous numeric setpoint
+   streaming. Each channel owns a FIFO of rows; every row holds one
+   LREAL position per integrated axis (group position = column).
+   While running, each drive-clock tick pops one row and writes it
+   as the axis's 0x607A CSP target — the same mechanism the NC
+   channel uses, but driven by explicit PLC writes instead of a
+   G-code plan. fi.fo state: 0 idle 1 running 2 finished 3 error. */
+namespace fifo {
+
+constexpr uint8_t kMaxChan = 4;
+constexpr uint8_t kMaxAxes = 8;
+/* 1000 rows * 8 cols * 8 B + 4 B header = 64004 B, within the
+   uint16 param maxValueSize limit (65535). */
+constexpr uint32_t kMaxRows = 1000;
+
+enum State : uint8_t { Idle = 0, Running = 1, Finished = 2, Error = 3 };
+enum Cmd : uint8_t { CmdStart = 1, CmdStop = 2, CmdReset = 3 };
+
+struct Channel {
+    mutable std::mutex m;
+    State state = Idle;
+    int32_t axes[kMaxAxes];       /* slave index per group position, -1 */
+    uint32_t naxes = 0;
+    std::deque<std::array<double, kMaxAxes>> rows;
+    uint32_t seq = 0;             /* rows consumed since start */
+    double overridePct = 100.0;
+    uint64_t lastUs = 0;          /* last row emission time */
+    SimulatedCiA402Drive* drive = nullptr;
+    int axisCount = 0;
+
+    void clearAxes() {
+        for (auto& a : axes) a = -1;
+        naxes = 0;
+    }
+    Channel() { clearAxes(); }
+
+    /* integrate axis `slave` at group position `gpos` (column). */
+    bool integrate(uint32_t slave, uint32_t gpos) {
+        if (gpos >= kMaxAxes || slave >= static_cast<uint32_t>(axisCount))
+            return false;
+        std::lock_guard lk(m);
+        axes[gpos] = static_cast<int32_t>(slave);
+        uint32_t n = 0;
+        for (auto& a : axes) if (a >= 0) ++n;
+        naxes = n;
+        return true;
+    }
+
+    void disintegrate() {
+        std::lock_guard lk(m);
+        clearAxes();
+        rows.clear();
+        state = Idle; seq = 0; lastUs = 0;
+    }
+
+    /* Append nrows rows; payload = u32 nrows + nrows*kMaxAxes f64 LE
+       (fixed 8-column stride; unused columns ignored). `replace`
+       clears the queue first (FiFoOverwrite). */
+    bool writeRows(const void* src, size_t len, bool replace) {
+        if (len < 4) return false;
+        uint32_t nrows;
+        std::memcpy(&nrows, src, 4);
+        const uint8_t* p = static_cast<const uint8_t*>(src) + 4;
+        const size_t need = 4 + static_cast<size_t>(nrows) * kMaxAxes * 8;
+        if (naxes == 0 || len < need || nrows > kMaxRows) return false;
+        std::lock_guard lk(m);
+        if (replace) rows.clear();
+        if (rows.size() + nrows > kMaxRows) return false;
+        for (uint32_t r = 0; r < nrows; ++r) {
+            std::array<double, kMaxAxes> row{};
+            for (uint32_t c = 0; c < kMaxAxes; ++c) {
+                double v;
+                std::memcpy(&v, p, 8); p += 8;
+                row[c] = v;
+            }
+            rows.push_back(row);
+        }
+        if (state == Finished) state = Idle;
+        return true;
+    }
+
+    void command(uint8_t cmd) {
+        std::lock_guard lk(m);
+        switch (cmd) {
+            case CmdStart:
+                if (state == Running || naxes == 0) { state = Error; return; }
+                if (rows.empty()) { state = Finished; return; }
+                /* CSP enable on every member axis. */
+                for (auto& a : axes) {
+                    if (a < 0 || !drive) continue;
+                    drive->write(static_cast<uint16_t>(a), 0x6060, 0, {0x08});
+                    drive->write(static_cast<uint16_t>(a), 0x6040, 0,
+                                 {0x0F, 0x00});
+                }
+                state = Running; seq = 0; lastUs = 0;
+                return;
+            case CmdStop:
+                state = Idle; lastUs = 0; return;
+            case CmdReset:
+                rows.clear(); seq = 0; state = Idle; lastUs = 0;
+                return;
+            default: state = Error; return;
+        }
+    }
+
+    /* One FIFO row per 1 ms of drive-clock time -> 0x607A targets.
+       Deterministic under --clock sim: mc.time writes advance
+       lastUs and emit floor(dt/1ms) rows (capped by queue depth).
+       The override percent is recorded for the PLC status surface;
+       setpoint rows are absolute positions so it does not rescale
+       them (documented deviation from TwinCAT velocity override). */
+    void tick(uint64_t nowUs) {
+        std::lock_guard lk(m);
+        if (state != Running || !drive) return;
+        if (lastUs == 0) { lastUs = nowUs; return; }
+        if (nowUs <= lastUs) return;
+        const uint64_t dt = nowUs - lastUs;
+        uint64_t steps = dt / 1000;
+        if (steps == 0) return;
+        if (steps > rows.size()) steps = rows.size();
+        lastUs += steps * 1000;
+        for (uint64_t s = 0; s < steps; ++s) {
+            const auto row = rows.front();
+            rows.pop_front();
+            ++seq;
+            for (uint32_t c = 0; c < kMaxAxes; ++c) {
+                const int32_t slave = axes[c];
+                if (slave < 0) continue;
+                const int32_t counts =
+                    static_cast<int32_t>(std::lround(row[c]));
+                const uint8_t le[4] = {
+                    uint8_t(counts), uint8_t(counts >> 8),
+                    uint8_t(counts >> 16), uint8_t(counts >> 24)};
+                drive->write(static_cast<uint16_t>(slave), 0x607A, 0,
+                             std::vector<uint8_t>(le, le + 4));
+            }
+        }
+        if (rows.empty()) state = Finished;
+    }
+};
+
+Channel g_fifo[kMaxChan];
+std::atomic<uint8_t> g_fifoSel{0};   /* fifo.chan selector */
+
+void fifoTick(uint64_t nowUs) {
+    for (auto& c : g_fifo) c.tick(nowUs);
+}
+
+Channel& curChan() { return g_fifo[g_fifoSel.load() % kMaxChan]; }
+
+void regFifoParam(Registry& reg, const MotionSchemas& d, uint64_t& nextId,
+                  const char* name, const char* desc, ValueType vt,
+                  const SchemaRef& schema, uint32_t slot,
+                  ReadFn rd, WriteFn wr = nullptr) {
+    ParamEntry p;
+    p.id = nextId++;
+    p.name = name;
+    p.description = desc;
+    p.group = "fifo";
+    p.valueType = vt;
+    p.schema = schema;
+    p.schemaSlot = slot;
+    p.readFn = std::move(rd);
+    if (wr) p.writeFn = std::move(wr);
+    reg.addParam(p);
+}
+
+bool registerFifoParams(Registry& reg, const MotionSchemas& d,
+                        uint64_t& nextId) {
+    auto u8rd = [](auto fn) {
+        return [fn](void* dst) {
+            const uint8_t v = static_cast<uint8_t>(fn());
+            std::memcpy(dst, &v, 1);
+        };
+    };
+    auto u32rd = [](auto fn) {
+        return [fn](void* dst) {
+            const uint32_t v = fn();
+            std::memcpy(dst, &v, 4);
+        };
+    };
+    auto f64rd = [](auto fn) {
+        return [fn](void* dst) {
+            const double v = fn();
+            std::memcpy(dst, &v, 8);
+        };
+    };
+
+    regFifoParam(reg, d, nextId, "fifo.chan",
+                 "FiFo channel selector 0-3", ValueType::U8, d.u8,
+                 d.slotU8,
+                 u8rd([] {
+                     return static_cast<uint8_t>(g_fifoSel.load());
+                 }),
+                 [](const void* src) {
+                     uint8_t v; std::memcpy(&v, src, 1);
+                     g_fifoSel.store(v % kMaxChan);
+                 });
+    regFifoParam(reg, d, nextId, "fifo.cmd",
+                 "channel command: 1 start 2 stop 3 reset", ValueType::U8,
+                 d.u8, d.slotU8,
+                 u8rd([] { return uint8_t{0}; }),
+                 [](const void* src) {
+                     uint8_t v; std::memcpy(&v, src, 1);
+                     curChan().command(v);
+                 });
+    regFifoParam(reg, d, nextId, "fifo.state",
+                 "channel state: 0 idle 1 running 2 finished 3 error",
+                 ValueType::U8, d.u8, d.slotU8,
+                 u8rd([] {
+                     std::lock_guard lk(curChan().m);
+                     return static_cast<uint8_t>(curChan().state);
+                 }));
+    regFifoParam(reg, d, nextId, "fifo.naxes",
+                 "integrated axis count", ValueType::U8, d.u8, d.slotU8,
+                 u8rd([] {
+                     std::lock_guard lk(curChan().m);
+                     return static_cast<uint8_t>(curChan().naxes);
+                 }));
+    regFifoParam(reg, d, nextId, "fifo.maxrows",
+                 "FIFO row capacity", ValueType::U32, d.u32, d.slotU32,
+                 u32rd([] { return kMaxRows; }));
+    regFifoParam(reg, d, nextId, "fifo.queued",
+                 "queued row count", ValueType::U32, d.u32, d.slotU32,
+                 u32rd([] {
+                     std::lock_guard lk(curChan().m);
+                     return static_cast<uint32_t>(curChan().rows.size());
+                 }));
+    regFifoParam(reg, d, nextId, "fifo.seq",
+                 "rows consumed since start", ValueType::U32, d.u32,
+                 d.slotU32,
+                 u32rd([] {
+                     std::lock_guard lk(curChan().m);
+                     return curChan().seq;
+                 }));
+    regFifoParam(reg, d, nextId, "fifo.override",
+                 "channel override percent (recorded; setpoint rows "
+                 "are absolute so the factor does not rescale them)",
+                 ValueType::F64, d.f64, d.slotF64,
+                 f64rd([] {
+                     std::lock_guard lk(curChan().m);
+                     return curChan().overridePct;
+                 }),
+                 [](const void* src) {
+                     double v; std::memcpy(&v, src, 8);
+                     std::lock_guard lk(curChan().m);
+                     curChan().overridePct =
+                         std::max(0.0, std::min(500.0, v));
+                 });
+    /* fifo.integrate: U32 = slave | (groupPos << 16). */
+    regFifoParam(reg, d, nextId, "fifo.integrate",
+                 "integrate axis: slave | (group position << 16)",
+                 ValueType::U32, d.u32, d.slotU32,
+                 u32rd([] { return 0; }),
+                 [](const void* src) {
+                     uint32_t v; std::memcpy(&v, src, 4);
+                     curChan().integrate(v & 0xFFFF, v >> 16);
+                 });
+    /* fifo.disintegrate: any write removes all axes + queued rows. */
+    regFifoParam(reg, d, nextId, "fifo.disintegrate",
+                 "write any value: remove all axes and queued rows",
+                 ValueType::U8, d.u8, d.slotU8,
+                 u8rd([] { return 0; }),
+                 [](const void*) { curChan().disintegrate(); });
+    /* fifo.write / fifo.overwrite: binary blob u32 nrows +
+       nrows*8 f64 LE rows (fixed 8-column stride). */
+    auto rdQueued = [](void* dst, size_t) -> size_t {
+        std::lock_guard lk(curChan().m);
+        const uint32_t n = static_cast<uint32_t>(curChan().rows.size());
+        std::memcpy(dst, &n, 4);
+        return 4;
+    };
+    ParamEntry w;
+    w.id = nextId++;
+    w.name = "fifo.write";
+    w.description = "append rows: u32 nrows + nrows*8 f64 LE; read = "
+                    "queued row count";
+    w.group = "fifo";
+    w.valueType = ValueType::Binary;
+    w.maxValueSize = 65535;
+    w.varReadFn = rdQueued;
+    w.varWriteFn = [](const void* src, size_t len) {
+        curChan().writeRows(src, len, false);
+    };
+    reg.addParam(w);
+    ParamEntry ow = w;
+    ow.id = nextId++;
+    ow.name = "fifo.overwrite";
+    ow.description = "replace queue with rows (same blob as fifo.write)";
+    ow.varWriteFn = [](const void* src, size_t len) {
+        curChan().writeRows(src, len, true);
+    };
+    reg.addParam(ow);
+    return true;
+}
+
+} // namespace fifo
+
 
 #if TETHER_HAVE_OPCUA
 /* Minimal OPC UA endpoint via open62541: every Registry param becomes
@@ -1566,6 +1867,14 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "nci param registration failed\n");
         return 1;
     }
+    for (auto& c : fifo::g_fifo) {
+        c.drive = &drive;
+        c.axisCount = axes;
+    }
+    if (!fifo::registerFifoParams(registry, schemas, nextId)) {
+        std::fprintf(stderr, "fifo param registration failed\n");
+        return 1;
+    }
     if (!registerEcDcParams(registry, schemas, nextId)) {
         std::fprintf(stderr, "ec.dc param registration failed\n");
         return 1;
@@ -1607,6 +1916,7 @@ int main(int argc, char** argv) {
             const uint64_t now = driveNowUs();
             drive.advanceTo(now);
             nci::nciTick(now);
+            fifo::fifoTick(now);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });
