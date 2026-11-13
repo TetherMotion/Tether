@@ -20,6 +20,7 @@
 #pragma once
 
 #include <cmath>
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -1427,5 +1428,102 @@ private:
         return pose.position + pose.orientation.rotate(m_platform_joints[index]);
     }
 };
+
+// =============================================================================
+// Numeric inverse kinematics (position only)
+// =============================================================================
+
+/**
+ * @brief Damped least-squares position IK over any ForwardKinematicsBase.
+ *
+ * Solves FK(q) position = target by finite-difference Jacobian and a
+ * fixed-iteration damped normal-equations step. Orientation is not
+ * constrained; the returned q is the closest position solution found
+ * from the seed. Deterministic: fixed iteration count, fixed damping,
+ * fixed differencing step.
+ *
+ * @param fk        Forward-kinematics model (position part used).
+ * @param target    Desired end-effector position [m].
+ * @param q         In/out: seed joint values on entry, solution on exit.
+ *                  Must hold at least fk.getDOF() elements.
+ * @param maxIter   Maximum iterations (default 60).
+ * @param damping   Levenberg damping factor lambda (default 1e-3).
+ * @return true when the final position residual is below 1e-4 m.
+ */
+inline bool numericPositionIK(const ForwardKinematicsBase& fk,
+                              const Position3D& target, float* q,
+                              int maxIter = 60, float damping = 1e-3f) {
+    const size_t n = fk.getDOF();
+    if (n == 0 || n > 8) return false;
+    constexpr float kEps = 1e-4f;
+
+    auto residual = [&](const float* jq, float* e) {
+        const Pose6D p = fk.forwardKinematics(jq);
+        e[0] = p.position.x - target.x;
+        e[1] = p.position.y - target.y;
+        e[2] = p.position.z - target.z;
+    };
+
+    float err[3];
+    residual(q, err);
+    for (int it = 0; it < maxIter; ++it) {
+        const float errNorm = std::sqrt(err[0]*err[0] + err[1]*err[1] +
+                                        err[2]*err[2]);
+        if (errNorm < 1e-4f) return true;
+        // Numeric Jacobian J[3][n] via forward differences.
+        float J[3][8];
+        float qp[8];
+        for (size_t i = 0; i < n; ++i) qp[i] = q[i];
+        for (size_t j = 0; j < n; ++j) {
+            const float save = qp[j];
+            qp[j] = save + kEps;
+            float ep[3];
+            residual(qp, ep);
+            qp[j] = save;
+            for (int r = 0; r < 3; ++r) J[r][j] = (ep[r] - err[r]) / kEps;
+        }
+        // Normal equations: (J^T J + lambda I) dq = -J^T e, n x n solve.
+        float A[8][9];
+        for (size_t i = 0; i < n; ++i) {
+            for (size_t j = 0; j < n; ++j) {
+                float s = 0;
+                for (int r = 0; r < 3; ++r) s += J[r][i] * J[r][j];
+                A[i][j] = s + (i == j ? damping : 0.0f);
+            }
+            float s = 0;
+            for (int r = 0; r < 3; ++r) s += J[r][i] * err[r];
+            A[i][n] = -s;
+        }
+        // Gaussian elimination with partial pivoting.
+        for (size_t c = 0; c < n; ++c) {
+            size_t piv = c;
+            for (size_t r = c + 1; r < n; ++r)
+                if (std::fabs(A[r][c]) > std::fabs(A[piv][c])) piv = r;
+            if (piv != c)
+                for (size_t j = c; j <= n; ++j) std::swap(A[c][j], A[piv][j]);
+            const float d = A[c][c];
+            if (std::fabs(d) < 1e-12f) return false;
+            for (size_t r = c + 1; r < n; ++r) {
+                const float f = A[r][c] / d;
+                for (size_t j = c; j <= n; ++j) A[r][j] -= f * A[c][j];
+            }
+        }
+        float dq[8];
+        for (size_t ii = n; ii-- > 0;) {
+            float s = A[ii][n];
+            for (size_t j = ii + 1; j < n; ++j) s -= A[ii][j] * dq[j];
+            dq[ii] = s / A[ii][ii];
+        }
+        // Clamp step for stability.
+        for (size_t i = 0; i < n; ++i) {
+            dq[i] = std::max(-0.5f, std::min(0.5f, dq[i]));
+            q[i] += dq[i];
+        }
+        residual(q, err);
+    }
+    const float errNorm = std::sqrt(err[0]*err[0] + err[1]*err[1] +
+                                    err[2]*err[2]);
+    return errNorm < 1e-4f;
+}
 
 } // namespace tether::kinematics

@@ -25,6 +25,7 @@
 #include "tether/gcode/PlanningSegmentBuilder.hpp"
 #include "tether/motion_planner/MotionPlan.hpp"
 #include "tether/motion_planner/MotionSegment.hpp"
+#include "tether/kinematics/ForwardKinematics.hpp"
 
 #include <argparse/argparse.hpp>
 
@@ -37,6 +38,7 @@
 #include <cstring>
 #include <deque>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -1689,6 +1691,495 @@ bool registerFifoParams(Registry& reg, const MotionSchemas& d,
 
 } // namespace fifo
 
+/* Kinematic transformation objects (kin.* params): each object binds a
+   configured ForwardKinematicsBase chain (type + preset/config blob)
+   to optional ACS (joint) and MCS (Cartesian) axis lists. kin.cmd
+   performs synchronous forward/backward transforms: forward maps
+   kin.in joints to a Pose6D in kin.out; backward runs numeric
+   position IK (kinematics::numericPositionIK) seeded from kin.in[3..]
+   toward the kin.in[0..2] target, with the joint solution in kin.q.
+   kin.locked gates type/preset/cfg writes. kin.rot holds a 3-axis
+   rotation preset; cmd 4/5 save/restore it (extended rotation range). */
+namespace kin {
+
+using namespace tether::kinematics;
+
+constexpr uint8_t kMaxObj = 8;
+constexpr uint32_t kMaxCfg = 32;    /* f64 config values */
+constexpr uint32_t kMaxDim = 8;     /* joints / pose doubles */
+
+enum Type : uint8_t {
+    TCartesian = 0, TPlanar2D = 1, TArticulated3 = 2, TSCARA = 3,
+    TSerial6 = 4, TSerial7 = 5, TGantry5 = 6, TDelta = 7, TStewart = 8,
+};
+enum State : uint8_t { StIdle = 0, StReady = 1, StError = 2 };
+enum Cmd : uint8_t { CmdFwd = 1, CmdInv = 2, CmdReset = 3,
+                     CmdRotSave = 4, CmdRotRestore = 5 };
+enum Preset6 : uint8_t { PreUR5 = 0, PreKUKA = 1 };
+
+struct Obj {
+    std::unique_ptr<ForwardKinematicsBase> model;
+    int32_t type = -1;               /* -1 = unconfigured */
+    uint8_t preset = 0;
+    std::vector<double> cfg;
+    uint8_t locked = 0;
+    std::array<double, kMaxDim> in{};
+    std::array<double, kMaxDim> out{};
+    std::array<double, kMaxDim> q{};
+    uint32_t acs[kMaxDim]{};
+    int32_t nacs = 0;
+    uint32_t mcs[kMaxDim]{};
+    int32_t nmcs = 0;
+    State state = StIdle;
+    uint16_t err = 0;
+    std::array<double, 3> rot{};
+    std::array<double, 3> rotsaved{};
+    uint8_t chn = 0;                 /* NC channel id (kinematic group) */
+};
+
+Obj g_obj[kMaxObj];
+std::atomic<uint8_t> g_objSel{0};
+std::mutex g_objMtx;
+
+Obj& curObj() { return g_obj[g_objSel.load() % kMaxObj]; }
+
+static float cfgAt(const Obj& o, size_t i, float dflt) {
+    return i < o.cfg.size() ? float(o.cfg[i]) : dflt;
+}
+
+/* (Re)build the FK model from type/preset/cfg. */
+bool rebuild(Obj& o) {
+    o.model.reset();
+    if (o.type < 0) { o.state = StIdle; return false; }
+    switch (o.type) {
+        case TCartesian:   o.model = std::make_unique<CartesianRobot>(); break;
+        case TPlanar2D:    o.model = std::make_unique<Planar2DOF>(
+                                cfgAt(o,0,0.5f), cfgAt(o,1,0.5f)); break;
+        case TArticulated3:o.model = std::make_unique<Articulated3DOF>(
+                                cfgAt(o,0,0.3f), cfgAt(o,1,0.4f),
+                                cfgAt(o,2,0.3f)); break;
+        case TSCARA:       o.model = std::make_unique<SCARA>(
+                                cfgAt(o,0,0.35f), cfgAt(o,1,0.35f),
+                                cfgAt(o,2,0.4f), cfgAt(o,3,0.2f)); break;
+        case TSerial6: {
+            auto m = std::make_unique<Serial6DOF>();
+            if (o.preset == PreKUKA) m->setKukaKR6Parameters();
+            else m->setUR5Parameters();
+            if (o.cfg.size() >= 24) {
+                DHParameters dh[6];
+                for (int i = 0; i < 6; ++i)
+                    dh[i] = {float(o.cfg[i*4]),   float(o.cfg[i*4+1]),
+                             float(o.cfg[i*4+2]), float(o.cfg[i*4+3])};
+                m->setDHParameters(dh);
+            }
+            o.model = std::move(m); break;
+        }
+        case TSerial7: {
+            auto m = std::make_unique<Serial7DOF>(); /* Panda default */
+            if (o.cfg.size() >= 28) {
+                DHParameters dh[7];
+                for (int i = 0; i < 7; ++i)
+                    dh[i] = {float(o.cfg[i*4]),   float(o.cfg[i*4+1]),
+                             float(o.cfg[i*4+2]), float(o.cfg[i*4+3])};
+                m->setDHParameters(dh);
+            }
+            o.model = std::move(m); break;
+        }
+        case TGantry5:    o.model = std::make_unique<Gantry5DOF>(); break;
+        case TDelta:      o.model = std::make_unique<DeltaRobot>(
+                                cfgAt(o,0,0.15f), cfgAt(o,1,0.05f),
+                                cfgAt(o,2,0.2f),  cfgAt(o,3,0.4f)); break;
+        case TStewart:    o.model = std::make_unique<StewartPlatform>(
+                                cfgAt(o,0,0.3f), cfgAt(o,1,0.15f),
+                                cfgAt(o,2,10.0*DEG_TO_RAD),
+                                cfgAt(o,3,10.0*DEG_TO_RAD)); break;
+        default: return false;
+    }
+    o.state = StReady; o.err = 0;
+    return true;
+}
+
+void command(uint8_t cmd) {
+    Obj& o = curObj();
+    std::lock_guard lk(g_objMtx);
+    switch (cmd) {
+        case CmdFwd: {
+            if (!o.model) { o.state = StError; o.err = 1; return; }
+            const size_t n = o.model->getDOF();
+            float q[8]{};
+            for (size_t i = 0; i < n && i < kMaxDim; ++i)
+                q[i] = float(o.in[i]);
+            const Pose6D p = o.model->forwardKinematics(q);
+            const EulerAngles e = p.euler();
+            o.out = {double(p.position.x), double(p.position.y),
+                     double(p.position.z), double(e.roll),
+                     double(e.pitch), double(e.yaw), 0, 0};
+            for (size_t i = 0; i < kMaxDim; ++i)
+                o.q[i] = i < n ? double(q[i]) : 0.0;
+            o.state = StReady; o.err = 0;
+            return;
+        }
+        case CmdInv: {
+            if (!o.model) { o.state = StError; o.err = 1; return; }
+            const size_t n = o.model->getDOF();
+            if (n == 0 || n > kMaxDim) { o.state = StError; o.err = 2; return; }
+            /* kin.in[0..2] = target position; kin.in[3..3+n) = seed
+               joints (zero when absent). Position-only IK; orientation
+               of the result is whatever the chain produces. */
+            float q[8]{};
+            for (size_t i = 0; i < n; ++i)
+                q[i] = i + 3 < kMaxDim ? float(o.in[i + 3]) : 0.0f;
+            const Position3D target(float(o.in[0]), float(o.in[1]),
+                                    float(o.in[2]));
+            const bool ok = numericPositionIK(*o.model, target, q);
+            const Pose6D p = o.model->forwardKinematics(q);
+            const EulerAngles e = p.euler();
+            o.out = {double(p.position.x), double(p.position.y),
+                     double(p.position.z), double(e.roll),
+                     double(e.pitch), double(e.yaw),
+                     ok ? 1.0 : 0.0, 0};
+            for (size_t i = 0; i < kMaxDim; ++i)
+                o.q[i] = i < n ? double(q[i]) : 0.0;
+            o.state = ok ? StReady : StError;
+            o.err = ok ? 0 : 3;
+            return;
+        }
+        case CmdReset:
+            o.model.reset(); o.type = -1; o.state = StIdle; o.err = 0;
+            o.nacs = 0; o.nmcs = 0; o.in = {}; o.out = {}; o.q = {};
+            o.rot = {}; o.rotsaved = {};
+            return;
+        case CmdRotSave:   o.rotsaved = o.rot; return;
+        case CmdRotRestore: o.rot = o.rotsaved; return;
+        default: o.state = StError; o.err = 4; return;
+    }
+}
+
+void regKinParam(Registry& reg, const MotionSchemas& d, uint64_t& nextId,
+                 const char* name, const char* desc, ValueType vt,
+                 const SchemaRef& schema, uint32_t slot,
+                 ReadFn rd, WriteFn wr = nullptr) {
+    ParamEntry p;
+    p.id = nextId++;
+    p.name = name;
+    p.description = desc;
+    p.group = "kin";
+    p.valueType = vt;
+    p.schema = schema;
+    p.schemaSlot = slot;
+    p.readFn = std::move(rd);
+    if (wr) p.writeFn = std::move(wr);
+    reg.addParam(p);
+}
+
+/* u32-count-prefixed f64/u32 list blob helpers. */
+bool readF64List(const void* src, size_t len, double* dst, uint32_t cap,
+                 uint32_t& n) {
+    if (len < 4) return false;
+    uint32_t cnt; std::memcpy(&cnt, src, 4);
+    if (cnt > cap || len < 4 + size_t(cnt) * 8) return false;
+    const uint8_t* p = static_cast<const uint8_t*>(src) + 4;
+    for (uint32_t i = 0; i < cnt; ++i) {
+        std::memcpy(&dst[i], p, 8); p += 8;
+    }
+    n = cnt;
+    return true;
+}
+bool readU32List(const void* src, size_t len, uint32_t* dst, uint32_t cap,
+                 uint32_t& n) {
+    if (len < 4) return false;
+    uint32_t cnt; std::memcpy(&cnt, src, 4);
+    if (cnt > cap || len < 4 + size_t(cnt) * 4) return false;
+    const uint8_t* p = static_cast<const uint8_t*>(src) + 4;
+    for (uint32_t i = 0; i < cnt; ++i) {
+        std::memcpy(&dst[i], p, 4); p += 4;
+    }
+    n = cnt;
+    return true;
+}
+
+bool registerKinParams(Registry& reg, const MotionSchemas& d,
+                       uint64_t& nextId) {
+    auto u8rd = [](auto fn) {
+        return [fn](void* dst) {
+            const uint8_t v = static_cast<uint8_t>(fn());
+            std::memcpy(dst, &v, 1);
+        };
+    };
+    auto u16rd = [](auto fn) {
+        return [fn](void* dst) {
+            const uint16_t v = fn();
+            std::memcpy(dst, &v, 2);
+        };
+    };
+
+    regKinParam(reg, d, nextId, "kin.obj",
+                "kinematic object selector 0-7", ValueType::U8, d.u8,
+                d.slotU8,
+                u8rd([] { return g_objSel.load(); }),
+                [](const void* src) {
+                    uint8_t v; std::memcpy(&v, src, 1);
+                    g_objSel.store(v % kMaxObj);
+                });
+    regKinParam(reg, d, nextId, "kin.type",
+                "chain type: 0 cartesian 1 planar2d 2 articulated3 "
+                "3 scara 4 serial6 5 serial7 6 gantry5 7 delta "
+                "8 stewart (-1 unconfigured)", ValueType::I32, d.i32,
+                d.slotI32,
+                [/* read */](void* dst) {
+                    int32_t v;
+                    { std::lock_guard lk(g_objMtx); v = curObj().type; }
+                    std::memcpy(dst, &v, 4);
+                },
+                [](const void* src) {
+                    int32_t v; std::memcpy(&v, src, 4);
+                    Obj& o = curObj();
+                    std::lock_guard lk(g_objMtx);
+                    if (o.locked || v < -1 || v > TStewart) return;
+                    o.type = v;
+                    rebuild(o);
+                });
+    regKinParam(reg, d, nextId, "kin.preset",
+                "chain preset: serial6 0=UR5 1=KUKA; serial7 Panda",
+                ValueType::U8, d.u8, d.slotU8,
+                u8rd([] {
+                    std::lock_guard lk(g_objMtx); return curObj().preset;
+                }),
+                [](const void* src) {
+                    uint8_t v; std::memcpy(&v, src, 1);
+                    Obj& o = curObj();
+                    std::lock_guard lk(g_objMtx);
+                    if (o.locked) return;
+                    o.preset = v;
+                    if (o.model) rebuild(o);
+                });
+    /* kin.cfg: binary u32 n + n f64 (type-specific geometry). */
+    {
+        ParamEntry p;
+        p.id = nextId++;
+        p.name = "kin.cfg";
+        p.description = "chain config: u32 n + n f64 geometry values";
+        p.group = "kin";
+        p.valueType = ValueType::Binary;
+        p.maxValueSize = 4 + kMaxCfg * 8;
+        p.varReadFn = [](void* dst, size_t) -> size_t {
+            std::lock_guard lk(g_objMtx);
+            const Obj& o = curObj();
+            uint8_t* p = static_cast<uint8_t*>(dst);
+            const uint32_t n = uint32_t(o.cfg.size());
+            std::memcpy(p, &n, 4); p += 4;
+            for (double v : o.cfg) { std::memcpy(p, &v, 8); p += 8; }
+            return 4 + n * 8;
+        };
+        p.varWriteFn = [](const void* src, size_t len) {
+            Obj& o = curObj();
+            std::lock_guard lk(g_objMtx);
+            if (o.locked) return;
+            double tmp[kMaxCfg]; uint32_t n = 0;
+            if (!readF64List(src, len, tmp, kMaxCfg, n)) return;
+            o.cfg.assign(tmp, tmp + n);
+            if (o.model) rebuild(o);
+        };
+        reg.addParam(p);
+    }
+    regKinParam(reg, d, nextId, "kin.dof",
+                "configured chain DOF (0 when unconfigured)",
+                ValueType::U8, d.u8, d.slotU8,
+                u8rd([] {
+                    std::lock_guard lk(g_objMtx);
+                    const Obj& o = curObj();
+                    return o.model ? uint8_t(o.model->getDOF()) : 0;
+                }));
+    regKinParam(reg, d, nextId, "kin.locked",
+                "1 = type/preset/cfg writes rejected (param lock)",
+                ValueType::U8, d.u8, d.slotU8,
+                u8rd([] {
+                    std::lock_guard lk(g_objMtx); return curObj().locked;
+                }),
+                [](const void* src) {
+                    uint8_t v; std::memcpy(&v, src, 1);
+                    std::lock_guard lk(g_objMtx);
+                    curObj().locked = v ? 1 : 0;
+                });
+    /* kin.in: binary u32 n + n f64. Forward: joint values. Backward:
+       target x,y,z in [0..2], optional seed joints in [3..3+dof). */
+    {
+        ParamEntry p;
+        p.id = nextId++;
+        p.name = "kin.in";
+        p.description = "transform input: u32 n + n f64 (joints or "
+                        "target pose + seed)";
+        p.group = "kin";
+        p.valueType = ValueType::Binary;
+        p.maxValueSize = 4 + kMaxDim * 8;
+        p.varWriteFn = [](const void* src, size_t len) {
+            Obj& o = curObj();
+            double tmp[kMaxDim]; uint32_t n = 0;
+            if (!readF64List(src, len, tmp, kMaxDim, n)) return;
+            std::lock_guard lk(g_objMtx);
+            for (uint32_t i = 0; i < kMaxDim; ++i)
+                o.in[i] = i < n ? tmp[i] : 0.0;
+        };
+        reg.addParam(p);
+    }
+    /* kin.out / kin.q: fixed 8-f64 read blobs. */
+    {
+        ParamEntry p;
+        p.id = nextId++;
+        p.name = "kin.out";
+        p.description = "last pose: x,y,z,roll,pitch,yaw,ikOk,0 (f64[8])";
+        p.group = "kin";
+        p.valueType = ValueType::Binary;
+        p.maxValueSize = kMaxDim * 8;
+        p.varReadFn = [](void* dst, size_t) -> size_t {
+            std::lock_guard lk(g_objMtx);
+            const auto& a = curObj().out;
+            std::memcpy(dst, a.data(), a.size() * 8);
+            return a.size() * 8;
+        };
+        reg.addParam(p);
+    }
+    {
+        ParamEntry p;
+        p.id = nextId++;
+        p.name = "kin.q";
+        p.description = "joint values: last input (fwd) or IK "
+                        "solution (inv), f64[8]";
+        p.group = "kin";
+        p.valueType = ValueType::Binary;
+        p.maxValueSize = kMaxDim * 8;
+        p.varReadFn = [](void* dst, size_t) -> size_t {
+            std::lock_guard lk(g_objMtx);
+            const auto& a = curObj().q;
+            std::memcpy(dst, a.data(), a.size() * 8);
+            return a.size() * 8;
+        };
+        reg.addParam(p);
+    }
+    regKinParam(reg, d, nextId, "kin.cmd",
+                "command write: 1 forward 2 backward/IK 3 reset "
+                "4 save rotation 5 restore rotation",
+                ValueType::U8, d.u8, d.slotU8,
+                u8rd([] { return uint8_t{0}; }),
+                [](const void* src) {
+                    uint8_t v; std::memcpy(&v, src, 1);
+                    command(v);
+                });
+    regKinParam(reg, d, nextId, "kin.state",
+                "object state: 0 idle 1 ready 2 error", ValueType::U8,
+                d.u8, d.slotU8,
+                u8rd([] {
+                    std::lock_guard lk(g_objMtx);
+                    return static_cast<uint8_t>(curObj().state);
+                }));
+    regKinParam(reg, d, nextId, "kin.err",
+                "last error code (0 none, 1 no model, 2 bad DOF, "
+                "3 IK no convergence, 4 bad cmd)", ValueType::U16,
+                d.u16, d.slotU16,
+                u16rd([] {
+                    std::lock_guard lk(g_objMtx); return curObj().err;
+                }));
+    /* kin.acs / kin.mcs: binary u32 n + n u32 slave indices. */
+    for (int which = 0; which < 2; ++which) {
+        ParamEntry p;
+        p.id = nextId++;
+        p.name = which ? "kin.mcs" : "kin.acs";
+        p.description = which
+            ? "MCS (Cartesian) axis slave list: u32 n + n u32"
+            : "ACS (joint) axis slave list: u32 n + n u32";
+        p.group = "kin";
+        p.valueType = ValueType::Binary;
+        p.maxValueSize = 4 + kMaxDim * 4;
+        p.varReadFn = [which](void* dst, size_t) -> size_t {
+            std::lock_guard lk(g_objMtx);
+            const Obj& o = curObj();
+            const int32_t n = which ? o.nmcs : o.nacs;
+            const uint32_t* a = which ? o.mcs : o.acs;
+            uint8_t* p = static_cast<uint8_t*>(dst);
+            const uint32_t nn = uint32_t(n);
+            std::memcpy(p, &nn, 4); p += 4;
+            for (int32_t i = 0; i < n; ++i) {
+                std::memcpy(p, &a[i], 4); p += 4;
+            }
+            return 4 + nn * 4;
+        };
+        p.varWriteFn = [which](const void* src, size_t len) {
+            Obj& o = curObj();
+            uint32_t tmp[kMaxDim]; uint32_t n = 0;
+            if (!readU32List(src, len, tmp, kMaxDim, n)) return;
+            std::lock_guard lk(g_objMtx);
+            if (which) {
+                o.nmcs = int32_t(n);
+                for (uint32_t i = 0; i < kMaxDim; ++i)
+                    o.mcs[i] = i < n ? tmp[i] : 0;
+            } else {
+                o.nacs = int32_t(n);
+                for (uint32_t i = 0; i < kMaxDim; ++i)
+                    o.acs[i] = i < n ? tmp[i] : 0;
+            }
+        };
+        reg.addParam(p);
+    }
+    regKinParam(reg, d, nextId, "kin.nacs",
+                "configured ACS (joint) axis count", ValueType::U8,
+                d.u8, d.slotU8,
+                u8rd([] {
+                    std::lock_guard lk(g_objMtx);
+                    return uint8_t(std::max(0, curObj().nacs));
+                }));
+    regKinParam(reg, d, nextId, "kin.nmcs",
+                "configured MCS (Cartesian) axis count", ValueType::U8,
+                d.u8, d.slotU8,
+                u8rd([] {
+                    std::lock_guard lk(g_objMtx);
+                    return uint8_t(std::max(0, curObj().nmcs));
+                }));
+    /* kin.rot: fixed 3-f64 rotation preset (rpy, rad). */
+    {
+        ParamEntry p;
+        p.id = nextId++;
+        p.name = "kin.rot";
+        p.description = "rotation preset/state rpy [rad], f64[3]";
+        p.group = "kin";
+        p.valueType = ValueType::Binary;
+        p.maxValueSize = 24;
+        p.varReadFn = [](void* dst, size_t) -> size_t {
+            std::lock_guard lk(g_objMtx);
+            const auto& a = curObj().rot;
+            std::memcpy(dst, a.data(), a.size() * 8);
+            return a.size() * 8;
+        };
+        p.varWriteFn = [](const void* src, size_t len) {
+            Obj& o = curObj();
+            if (len < 24) return;
+            std::lock_guard lk(g_objMtx);
+            std::memcpy(o.rot.data(), src, 24);
+        };
+        reg.addParam(p);
+    }
+    regKinParam(reg, d, nextId, "kin.chn",
+                "NC channel id of the kinematic group", ValueType::U8,
+                d.u8, d.slotU8,
+                u8rd([] {
+                    std::lock_guard lk(g_objMtx); return curObj().chn;
+                }),
+                [](const void* src) {
+                    uint8_t v; std::memcpy(&v, src, 1);
+                    std::lock_guard lk(g_objMtx); curObj().chn = v;
+                });
+    regKinParam(reg, d, nextId, "kin.chnstate",
+                "kinematic channel operation state (0 idle 1 ready "
+                "2 error)", ValueType::U8, d.u8, d.slotU8,
+                u8rd([] {
+                    std::lock_guard lk(g_objMtx);
+                    const Obj& o = curObj();
+                    return o.model ? uint8_t(o.state) : uint8_t(0);
+                }));
+    return true;
+}
+
+} // namespace kin
+
 
 #if TETHER_HAVE_OPCUA
 /* Minimal OPC UA endpoint via open62541: every Registry param becomes
@@ -1873,6 +2364,10 @@ int main(int argc, char** argv) {
     }
     if (!fifo::registerFifoParams(registry, schemas, nextId)) {
         std::fprintf(stderr, "fifo param registration failed\n");
+        return 1;
+    }
+    if (!kin::registerKinParams(registry, schemas, nextId)) {
+        std::fprintf(stderr, "kin param registration failed\n");
         return 1;
     }
     if (!registerEcDcParams(registry, schemas, nextId)) {
