@@ -80,6 +80,10 @@ inline constexpr uint16_t kIdxTorqueActual = 0x6077;
 inline constexpr uint16_t kIdxPosTarget    = 0x607A;
 inline constexpr uint16_t kIdxHomeOffset   = 0x607C;
 inline constexpr uint16_t kIdxVelTarget    = 0x60FF;
+/**Manufacturer-specific probe abort request (sim extension):
+   nonzero while a touch-probe abort is pending; the probing
+   entity clears it after consuming.*/
+inline constexpr uint16_t kIdxProbeAbort   = 0x2001;
 
 inline constexpr double kVelEps = 1e-6;
 inline constexpr double kUsPerSec = 1e6;
@@ -108,6 +112,7 @@ struct Axis {
     int32_t targetPos = 0, targetVel = 0, targetTorque = 0;
     uint32_t followWindowCur = 8;
     int32_t errorCode = 0;
+    int32_t probeAbort = 0;
     bool moveActive = false, targetReached = false, homingDone = false;
     uint64_t lastUs = 0;
     bool started = false;
@@ -358,6 +363,7 @@ public:
             case kIdxPosTarget:    value = a.targetPos; size = 4; break;
             case kIdxHomeOffset:   value = a.homeOffset; size = 4; break;
             case kIdxVelTarget:    value = a.targetVel; size = 4; break;
+            case kIdxProbeAbort:   value = a.probeAbort; size = 4; break;
             default: known = false; break;
         }
         if (!known || subindex != 0) {
@@ -411,6 +417,7 @@ public:
             case kIdxTorqueTarget: a.targetTorque = int32_t(value & 0xFFFF); break;
             case kIdxFollowWin: a.followWindowCur = uint32_t(value < 0 ? 0 : value); break;
             case kIdxHomeOffset: a.homeOffset = int32_t(value); break;
+            case kIdxProbeAbort: a.probeAbort = int32_t(value); break;
             default: known = false; break;
         }
         if (!known) {
@@ -439,6 +446,7 @@ public:
             {kIdxPosTarget, 0, 0x0004, 3, "Target position"},
             {kIdxHomeOffset, 0, 0x0004, 3, "Home offset"},
             {kIdxVelTarget, 0, 0x0004, 3, "Target velocity"},
+            {kIdxProbeAbort, 0, 0x0004, 3, "Probe abort request (sim ext)"},
         };
     }
 

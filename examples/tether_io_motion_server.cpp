@@ -144,6 +144,7 @@ const ObjDef kObjects[] = {
     {0x607A, ValueType::I32, 4, "target_position",   true },
     {0x607C, ValueType::I32, 4, "home_offset",       true },
     {0x60FF, ValueType::I32, 4, "target_velocity",   true },
+    {0x2001, ValueType::I32, 4, "probe_abort",       true },
 };
 
 SchemaRef refFor(const MotionSchemas& d, ValueType t) {
