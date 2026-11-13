@@ -445,6 +445,247 @@ bool registerEcCoeDiagParams(Registry& reg, const MotionSchemas& d,
                ValueType::U8, d.u8, d.slotU8, rdAck, wrAck);
 }
 
+/* ec.soe.* params: simulated Sercos-over-EtherCAT (SoE) mailbox for
+   the TetherPLC FB_SoE* surface (Tc2_Drive general SoE + AX5000
+   blocks).  A real master would bridge these to the drive's SoE
+   mailbox services (S-0-xxxx); this server synthesizes deterministic
+   per-slave state.
+
+   Params:
+    - ec.soe.slave  U16 RW — drive (port address) selector
+    - ec.soe.state  Binary RO — 128-byte read snapshot, LE:
+        u16 status        S-0-0135 drive status word
+                           (bit0 ready, bit1 enabled, bit2 fault,
+                           bit3 warning)
+        u16 cmd_state     command state (0 idle, 1 running,
+                           2 done, 3 error)
+        u32 password      S-0-0267 readback
+        u16 diag_num      diagnosis number
+        u16 classx        class-X diag flags
+        u16 diag_count    valid entries in diag_list
+        u16 diag_list[8]  diagnosis number list
+        f32 amp_temp      amplifier temperature
+        f32 motor_temp    motor temperature
+        f32 dc_volt       DC bus voltage
+        f32 dc_curr       DC bus current
+        f32 ax_mains      AX5000 P-0-0200 mains voltage
+        u16 ax_ctrl       AX5000 motor ctrl word readback
+        u16 ax_park       AX5000 park state (0/1)
+        u16 ax_fw_rev     AX5000 firmware revision
+        u16 ax_fw_build   AX5000 firmware build
+        u16 cmd_ctrl      last command-control write readback
+        char diagmsg[64]  S-0-0095 Sercos string (NUL-terminated)
+        u32 reserved
+    - ec.soe.cmd    Binary RW — 16-byte command mailbox, LE:
+        u16 op            1=password(u32@4) 2=cmd_ctrl(u16@4)
+                          3=cmd_exec(u16 command id @4; id bit15 set
+                          -> error) 4=reset 5=ax_ctrl(u16@4)
+                          6=ax_park(u8@4)
+        u16 reserved
+        u32 payload
+        u32 aux
+      cmd_exec records the sim time; cmd_state reads 1 (running)
+      for the first 100 ms then 2 (done), or 3 (error) plus a fault
+      bit in status when the command id has bit15 set; op 4=reset
+      clears the fault bit. */
+std::atomic<uint16_t> g_soeSlave{0};
+struct SoeSlaveState {
+    std::atomic<uint32_t> password{0};
+    std::atomic<uint16_t> cmdCtrl{0};
+    std::atomic<uint16_t> axCtrl{0};
+    std::atomic<uint16_t> axPark{0};
+    std::atomic<uint64_t> execUs{0};
+    std::atomic<uint16_t> execId{0};
+    std::atomic<uint8_t> execPend{0};
+    std::atomic<uint8_t> fault{0};
+};
+std::array<SoeSlaveState, 16> g_soe{};
+
+void putF32(uint8_t* p, float v) { std::memcpy(p, &v, 4); }
+
+void soeDiag(uint16_t slave, char* msg, size_t cap, uint16_t& num,
+             uint16_t& classx, uint16_t* list, uint16_t& count,
+             float& at, float& mt, float& dv, float& dc) {
+    count = 0; num = 0; classx = 0;
+    if (cap) msg[0] = 0;
+    at = mt = dv = dc = 0.0f;
+    if (slave == 0) {
+        std::snprintf(msg, cap, "OVERLOAD");
+        num = 0x8105; classx = 0x0003;
+        list[0] = 0x8105; list[1] = 0x1200; list[2] = 0x2201;
+        count = 3;
+        at = 61.5f; mt = 58.25f; dv = 565.5f; dc = 12.75f;
+    } else if (slave == 1) {
+        std::snprintf(msg, cap, "OVERTEMP");
+        num = 0x8201; classx = 0x0001;
+        list[0] = 0x8201; count = 1;
+        at = 72.0f; mt = 80.5f; dv = 540.0f; dc = 3.5f;
+    } else if (slave == 2) {
+        std::snprintf(msg, cap, "NMT_STATE_CHANGE");
+        num = 0x0001; classx = 0x0000;
+        list[0] = 0x0001; count = 1;
+        at = 45.0f; mt = 44.0f; dv = 560.0f; dc = 0.5f;
+    }
+}
+
+uint16_t soeStatus(uint16_t slave) {
+    uint16_t s = 0x0003;   /* ready + enabled */
+    if (g_soe[slave & 15].fault.load(std::memory_order_relaxed))
+        s |= 0x0004;
+    return s;
+}
+
+uint16_t soeCmdState(uint16_t slave) {
+    const auto& st = g_soe[slave & 15];
+    if (!st.execPend.load(std::memory_order_relaxed)) return 0;
+    const uint16_t id = st.execId.load(std::memory_order_relaxed);
+    if (id & 0x8000u) return 3;   /* error latched until reset */
+    const uint64_t exec = st.execUs.load(std::memory_order_relaxed);
+    const uint64_t now = driveNowUs();
+    if (now >= exec && now - exec < 100000) return 1;  /* running 100 ms */
+    return 2;                                          /* done */
+}
+
+void soeCmdWrite(uint16_t slave, const uint8_t* p, size_t len) {
+    if (len < 8) return;
+    const uint16_t op = uint16_t(p[0]) | (uint16_t(p[1]) << 8);
+    const uint32_t v32 = uint32_t(p[4]) | (uint32_t(p[5]) << 8) |
+                         (uint32_t(p[6]) << 16) | (uint32_t(p[7]) << 24);
+    auto& st = g_soe[slave & 15];
+    switch (op) {
+    case 1: st.password.store(v32, std::memory_order_relaxed); break;
+    case 2:
+        st.cmdCtrl.store(uint16_t(v32 & 0xFFFF),
+                         std::memory_order_relaxed);
+        break;
+    case 3: {
+        const uint16_t id = uint16_t(v32 & 0xFFFF);
+        st.execUs.store(driveNowUs(), std::memory_order_relaxed);
+        st.execId.store(id, std::memory_order_relaxed);
+        st.execPend.store(1, std::memory_order_relaxed);
+        if (id & 0x8000u)
+            st.fault.store(1, std::memory_order_relaxed);
+        break;
+    }
+    case 4:
+        st.fault.store(0, std::memory_order_relaxed);
+        st.execPend.store(0, std::memory_order_relaxed);
+        break;
+    case 5: st.axCtrl.store(uint16_t(v32 & 0xFFFF),
+                            std::memory_order_relaxed); break;
+    case 6: st.axPark.store(uint8_t(v32 & 0xFF),
+                            std::memory_order_relaxed); break;
+    default: break;
+    }
+}
+
+bool registerEcSoeParams(Registry& reg, const MotionSchemas& d,
+                         uint64_t& nextId) {
+    auto add = [&](const char* name, const char* desc,
+                   ValueType vt, const SchemaRef& schema, uint32_t slot,
+                   ReadFn rd, WriteFn wr) {
+        ParamEntry p;
+        p.id = nextId++;
+        p.name = name;
+        p.description = desc;
+        p.group = "ec.soe";
+        p.valueType = vt;
+        p.schema = schema;
+        p.schemaSlot = slot;
+        p.readFn = rd;
+        p.writeFn = wr;
+        return reg.addParam(p);
+    };
+
+    const auto rdSlave = [](void* dst) {
+        const uint16_t v = g_soeSlave.load(std::memory_order_relaxed);
+        std::memcpy(dst, &v, 2);
+    };
+    const auto wrSlave = [](const void* src) {
+        uint16_t v = 0;
+        std::memcpy(&v, src, 2);
+        g_soeSlave.store(v, std::memory_order_relaxed);
+    };
+    if (!add("ec.soe.slave",
+             "SoE drive selector (port address, RW)",
+             ValueType::U16, d.u16, d.slotU16, rdSlave, wrSlave))
+        return false;
+
+    ParamEntry state;
+    state.id = nextId++;
+    state.name = "ec.soe.state";
+    state.description =
+        "SoE drive state snapshot for ec.soe.slave "
+        "(128-byte LE blob: status/cmd/diag/temps/AX5000 fields)";
+    state.group = "ec.soe";
+    state.valueType = ValueType::Binary;
+    state.maxValueSize = 128;
+    state.varReadFn = [](void* dst, size_t maxLen) -> size_t {
+        if (maxLen < 128) return 0;
+        const uint16_t slave = g_soeSlave.load(std::memory_order_relaxed);
+        const uint16_t s = slave & 15;
+        uint8_t* p = static_cast<uint8_t*>(dst);
+        std::memset(p, 0, 128);
+        const uint16_t status = soeStatus(s);
+        const uint16_t cmdState = soeCmdState(s);
+        p[0] = uint8_t(status); p[1] = uint8_t(status >> 8);
+        p[2] = uint8_t(cmdState); p[3] = uint8_t(cmdState >> 8);
+        const uint32_t pw =
+            g_soe[s].password.load(std::memory_order_relaxed);
+        for (int i = 0; i < 4; ++i) p[4 + i] = uint8_t(pw >> (8 * i));
+        char msg[64];
+        uint16_t num = 0, classx = 0, count = 0;
+        uint16_t list[8] = {};
+        float at = 0, mt = 0, dv = 0, dc = 0;
+        soeDiag(s, msg, sizeof(msg), num, classx, list, count,
+                at, mt, dv, dc);
+        p[8] = uint8_t(num); p[9] = uint8_t(num >> 8);
+        p[10] = uint8_t(classx); p[11] = uint8_t(classx >> 8);
+        p[12] = uint8_t(count); p[13] = uint8_t(count >> 8);
+        for (uint16_t i = 0; i < count && i < 8; ++i) {
+            putU16(p + 14 + i * 2, list[i]);
+        }
+        putF32(p + 30, at);
+        putF32(p + 34, mt);
+        putF32(p + 38, dv);
+        putF32(p + 42, dc);
+        /* AX5000 mains: 230 V + 0.5 V steps on the sim clock */
+        const float mains =
+            230.0f + float((driveNowUs() / 100000) % 10) * 0.5f;
+        putF32(p + 46, mains);
+        const uint16_t axc =
+            g_soe[s].axCtrl.load(std::memory_order_relaxed);
+        putU16(p + 50, axc);
+        const uint16_t axp =
+            g_soe[s].axPark.load(std::memory_order_relaxed);
+        putU16(p + 52, axp);
+        putU16(p + 54, 1);    /* fw rev */
+        putU16(p + 56, 5);    /* fw build */
+        const uint16_t cc =
+            g_soe[s].cmdCtrl.load(std::memory_order_relaxed);
+        putU16(p + 58, cc);
+        std::snprintf(reinterpret_cast<char*>(p + 60), 64, "%s", msg);
+        return 128;
+    };
+    if (!reg.addParam(state)) return false;
+
+    ParamEntry cmd;
+    cmd.id = nextId++;
+    cmd.name = "ec.soe.cmd";
+    cmd.description =
+        "SoE command mailbox for ec.soe.slave "
+        "(16-byte LE blob: op@0, payload@4, aux@8)";
+    cmd.group = "ec.soe";
+    cmd.valueType = ValueType::Binary;
+    cmd.maxValueSize = 16;
+    cmd.varWriteFn = [](const void* src, size_t len) {
+        const uint16_t slave = g_soeSlave.load(std::memory_order_relaxed);
+        soeCmdWrite(slave, static_cast<const uint8_t*>(src), len);
+    };
+    if (!reg.addParam(cmd)) return false;
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // NCI channel — G-code program executed by Tether's interpreter and
 // motion planner, streamed as CSP setpoints to the first three axes.
@@ -1324,6 +1565,10 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "ec.coediag param registration failed\n");
         return 1;
     }
+    if (!registerEcSoeParams(registry, schemas, nextId)) {
+        std::fprintf(stderr, "ec.soe param registration failed\n");
+        return 1;
+    }
 
     // --- server --------------------------------------------------------------
     ServerConfig cfg;
@@ -1331,7 +1576,7 @@ int main(int argc, char** argv) {
     cfg.timestampFn = steadyNowUs;
     cfg.logFn = motionLog;
     cfg.schemaCatalog = &catalog;
-    cfg.maxClients = 4;
+    cfg.maxClients = 16;
 
     Server server(registry,
                   std::make_unique<TcpTransportServer>(port, bind), cfg);
