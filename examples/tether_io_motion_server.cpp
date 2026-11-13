@@ -236,6 +236,71 @@ bool registerTimeParam(Registry& reg, const MotionSchemas& d,
     return reg.addParam(p);
 }
 
+/* ec.dc.* params: simulated EtherCAT DC (distributed-clock) sync
+   state for the TetherPLC FB_EcExtSync* surface. A real master would
+   source these from DCManager/EtherCATDC; this server synthesizes
+   deterministic values on the sim clock so the PLC side can be
+   exercised end to end. */
+std::atomic<uint8_t> g_dcSyncEnabled{1};
+
+bool registerEcDcParams(Registry& reg, const MotionSchemas& d,
+                        uint64_t& nextId) {
+    auto add = [&](const char* name, const char* desc,
+                   ValueType vt, const SchemaRef& schema, uint32_t slot,
+                   ReadFn rd, WriteFn wr) {
+        ParamEntry p;
+        p.id = nextId++;
+        p.name = name;
+        p.description = desc;
+        p.group = "ec.dc";
+        p.valueType = vt;
+        p.schema = schema;
+        p.schemaSlot = slot;
+        p.readFn = rd;
+        p.writeFn = wr;
+        return reg.addParam(p);
+    };
+    const auto rdU8 = [](void* dst) {
+        const uint8_t v = 1;   /* link up whenever the server runs */
+        std::memcpy(dst, &v, 1);
+    };
+    if (!add("ec.dc.connected", "Simulated EtherCAT master link (1=up)",
+             ValueType::U8, d.u8, d.slotU8, rdU8, nullptr))
+        return false;
+    const auto rdEn = [](void* dst) {
+        const uint8_t v = g_dcSyncEnabled.load(std::memory_order_relaxed);
+        std::memcpy(dst, &v, 1);
+    };
+    const auto wrEn = [](const void* src) {
+        uint8_t v = 0;
+        std::memcpy(&v, src, 1);
+        g_dcSyncEnabled.store(v ? 1 : 0, std::memory_order_relaxed);
+    };
+    if (!add("ec.dc.sync_enabled",
+             "Simulated DC sync enable (RW, 1=enabled)",
+             ValueType::U8, d.u8, d.slotU8, rdEn, wrEn))
+        return false;
+    const auto rdDiff = [](void* dst) {
+        /* deterministic +/-1000 ns wobble on the sim clock */
+        const double diff =
+            double(int64_t((simNowUs() / 1000) % 2001)) - 1000.0;
+        std::memcpy(dst, &diff, 8);
+    };
+    if (!add("ec.dc.time_diff_ns",
+             "Simulated internal-vs-external clock diff, ns (F64)",
+             ValueType::F64, d.f64, d.slotF64, rdDiff, nullptr))
+        return false;
+    const auto rdRef = [](void* dst) {
+        const uint64_t t = simNowUs() * 1000;   /* ns */
+        std::memcpy(dst, &t, 8);
+    };
+    if (!add("ec.dc.ref_time_ns",
+             "Simulated reference (external) clock, ns since epoch-ish",
+             ValueType::U64, d.u64, d.slotU64, rdRef, nullptr))
+        return false;
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // NCI channel — G-code program executed by Tether's interpreter and
 // motion planner, streamed as CSP setpoints to the first three axes.
@@ -1105,6 +1170,10 @@ int main(int argc, char** argv) {
     nci::g_nci.axes = axes;
     if (!nci::registerNciParams(registry, schemas, nextId)) {
         std::fprintf(stderr, "nci param registration failed\n");
+        return 1;
+    }
+    if (!registerEcDcParams(registry, schemas, nextId)) {
+        std::fprintf(stderr, "ec.dc param registration failed\n");
         return 1;
     }
 
