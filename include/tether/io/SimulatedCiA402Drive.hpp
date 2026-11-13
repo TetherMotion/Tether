@@ -84,6 +84,14 @@ inline constexpr uint16_t kIdxVelTarget    = 0x60FF;
    nonzero while a touch-probe abort is pending; the probing
    entity clears it after consuming.*/
 inline constexpr uint16_t kIdxProbeAbort   = 0x2001;
+/**Manufacturer-specific drive-profile objects (sim extensions):
+   stored command/state values for the MC2_Drive compatibility
+   surface; the sim records them without physical effect.*/
+inline constexpr uint16_t kIdxPosOffset    = 0x2002;
+inline constexpr uint16_t kIdxBrakeCmd     = 0x2003;
+inline constexpr uint16_t kIdxParkCmd      = 0x2004;
+inline constexpr uint16_t kIdxCoeCmd       = 0x2005;
+inline constexpr uint16_t kIdxSawChar0     = 0x2006;
 
 inline constexpr double kVelEps = 1e-6;
 inline constexpr double kUsPerSec = 1e6;
@@ -113,6 +121,11 @@ struct Axis {
     uint32_t followWindowCur = 8;
     int32_t errorCode = 0;
     int32_t probeAbort = 0;
+    int32_t posOffset = 0;
+    int32_t brakeCmd = 0;
+    int32_t parkCmd = 0;
+    int32_t coeCmd = 0;
+    int32_t sawChar[4] = {1000, 2000, 3000, 4000};
     bool moveActive = false, targetReached = false, homingDone = false;
     uint64_t lastUs = 0;
     bool started = false;
@@ -364,6 +377,13 @@ public:
             case kIdxHomeOffset:   value = a.homeOffset; size = 4; break;
             case kIdxVelTarget:    value = a.targetVel; size = 4; break;
             case kIdxProbeAbort:   value = a.probeAbort; size = 4; break;
+            case kIdxPosOffset:    value = a.posOffset; size = 4; break;
+            case kIdxBrakeCmd:     value = a.brakeCmd; size = 4; break;
+            case kIdxParkCmd:      value = a.parkCmd; size = 4; break;
+            case kIdxCoeCmd:       value = a.coeCmd; size = 4; break;
+            case kIdxSawChar0: case kIdxSawChar0 + 1:
+            case kIdxSawChar0 + 2: case kIdxSawChar0 + 3:
+                value = a.sawChar[index - kIdxSawChar0]; size = 4; break;
             default: known = false; break;
         }
         if (!known || subindex != 0) {
@@ -418,6 +438,13 @@ public:
             case kIdxFollowWin: a.followWindowCur = uint32_t(value < 0 ? 0 : value); break;
             case kIdxHomeOffset: a.homeOffset = int32_t(value); break;
             case kIdxProbeAbort: a.probeAbort = int32_t(value); break;
+            case kIdxPosOffset:  a.posOffset = int32_t(value); break;
+            case kIdxBrakeCmd:   a.brakeCmd = int32_t(value); break;
+            case kIdxParkCmd:    a.parkCmd = int32_t(value); break;
+            case kIdxCoeCmd:     a.coeCmd = int32_t(value); break;
+            case kIdxSawChar0: case kIdxSawChar0 + 1:
+            case kIdxSawChar0 + 2: case kIdxSawChar0 + 3:
+                a.sawChar[index - kIdxSawChar0] = int32_t(value); break;
             default: known = false; break;
         }
         if (!known) {
@@ -447,6 +474,14 @@ public:
             {kIdxHomeOffset, 0, 0x0004, 3, "Home offset"},
             {kIdxVelTarget, 0, 0x0004, 3, "Target velocity"},
             {kIdxProbeAbort, 0, 0x0004, 3, "Probe abort request (sim ext)"},
+            {kIdxPosOffset, 0, 0x0004, 3, "Position offset (sim ext)"},
+            {kIdxBrakeCmd, 0, 0x0004, 3, "Brake command (sim ext)"},
+            {kIdxParkCmd, 0, 0x0004, 3, "Park command (sim ext)"},
+            {kIdxCoeCmd, 0, 0x0004, 3, "CoE command (sim ext)"},
+            {kIdxSawChar0, 0, 0x0004, 3, "Flying-saw characteristic 0 (sim ext)"},
+            {kIdxSawChar0 + 1, 0, 0x0004, 3, "Flying-saw characteristic 1 (sim ext)"},
+            {kIdxSawChar0 + 2, 0, 0x0004, 3, "Flying-saw characteristic 2 (sim ext)"},
+            {kIdxSawChar0 + 3, 0, 0x0004, 3, "Flying-saw characteristic 3 (sim ext)"},
         };
     }
 

@@ -145,6 +145,14 @@ const ObjDef kObjects[] = {
     {0x607C, ValueType::I32, 4, "home_offset",       true },
     {0x60FF, ValueType::I32, 4, "target_velocity",   true },
     {0x2001, ValueType::I32, 4, "probe_abort",       true },
+    {0x2002, ValueType::I32, 4, "pos_offset",        true },
+    {0x2003, ValueType::I32, 4, "brake_cmd",         true },
+    {0x2004, ValueType::I32, 4, "park_cmd",          true },
+    {0x2005, ValueType::I32, 4, "coe_cmd",           true },
+    {0x2006, ValueType::I32, 4, "saw_char0",         true },
+    {0x2007, ValueType::I32, 4, "saw_char1",         true },
+    {0x2008, ValueType::I32, 4, "saw_char2",         true },
+    {0x2009, ValueType::I32, 4, "saw_char3",         true },
 };
 
 SchemaRef refFor(const MotionSchemas& d, ValueType t) {
