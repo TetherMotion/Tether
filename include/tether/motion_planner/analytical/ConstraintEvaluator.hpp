@@ -347,6 +347,51 @@ public:
     }
 
     /**
+     * @brief Clamp an integrated (v, a) state to the feasible region at s.
+     *
+     * Enforces, in order:
+     * - v >= 0 and v <= velocityLimit(s) (feed, path, per-segment,
+     *   centripetal, and per-axis velocity limits);
+     * - a inside accelerationBounds(s, v) — the COUPLED per-axis bound
+     *   |T_i·a + κ_i·v²| <= aMax_i, which shrinks as centripetal
+     *   acceleration consumes axis authority;
+     * - when the bound signals infeasibility (a_min > a_max: per-axis
+     *   κ_i·v² alone exceeds the axis accel budget, e.g. a velocity
+     *   that slipped past the geometric cap), v is walked down until a
+     *   feasible accel window reopens (κv² shrinks quadratically, so
+     *   this terminates quickly); if still infeasible, a collapses to 0.
+     *
+     * All integrators and arc samplers must route their states through
+     * this — clamping a to the path-level cap alone silently violates
+     * the per-axis bound on curved geometry.
+     *
+     * @param s Arc length position
+     * @param v Path velocity
+     * @param a Path acceleration
+     * @param path The path to evaluate
+     * @return (vClamped, aClamped)
+     */
+    std::pair<T, T> enforceStateLimits(
+        T s, T v, T a, const Path& path) const {
+
+        T vClamped = std::clamp(v, T(0), velocityLimit(s, path));
+        auto [aMin, aMax] = accelerationBounds(s, vClamped, path);
+        if (!(aMin <= aMax)) {
+            aMin = aMax = T(0);
+            for (int it = 0; it < 32 && vClamped > T(0); ++it) {
+                vClamped *= T(0.7);
+                auto b = accelerationBounds(s, vClamped, path);
+                if (b.first <= b.second) {
+                    aMin = b.first;
+                    aMax = b.second;
+                    break;
+                }
+            }
+        }
+        return {vClamped, std::clamp(a, aMin, aMax)};
+    }
+
+    /**
      * @brief Get the kinematic limits.
      * @return limits used by the evaluator.
      */

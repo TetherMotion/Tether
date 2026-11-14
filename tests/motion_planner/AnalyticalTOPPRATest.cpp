@@ -378,6 +378,55 @@ TEST(AnalyticalJerkLimitedTOPPRA, ProfileRespectsJerkLimit) {
     }
 }
 
+// Regression: the integrators used to clamp tangential acceleration to
+// the path-level cap only, letting axis acceleration overshoot the
+// coupled bound |T_i·a + κ_i·v²| <= aMax_i by ~1.7x on curved geometry
+// (κv² consumes axis authority). The velocity-limit clamp also leaked
+// between RK4 substeps and through the closed-form SSR fast paths.
+// Sample the SSR densely on a blended corner (real curvature) and
+// require every axis to stay within its budget.
+TEST(AnalyticalJerkLimitedTOPPRA,
+     RespectsCoupledBounds_CornerPath) {
+    auto path = makeCornerPath2D();   // G2 blend: nonzero curvature
+    ASSERT_GT(path.numSegments(), 0u);
+    auto limits = makeLimits2D();     // axisA = 500, axisV = 100
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, false);
+
+    auto profile = profiler.computeProfile(path, 100.0, 0.0, 0.0, 1200);
+    ASSERT_NE(profile, nullptr);
+    ASSERT_GT(profile->totalTime(), 0.0);
+    auto ssr = profiler.ssrSource();
+    ASSERT_NE(ssr, nullptr);
+
+    const double T = ssr->totalTime();
+    const auto len = path.totalLength();
+    for (int i = 0; i <= 2000; ++i) {
+        const double t = T * static_cast<double>(i) / 2000.0;
+        const auto vv = ssr->velocity(t);
+        const auto aa = ssr->acceleration(t);
+        const double s = ssr->arcLength(t);
+        const double v = ssr->pathVelocity(t);
+        for (int ax = 0; ax < 2; ++ax) {
+            ASSERT_TRUE(std::isfinite(vv[ax]) && std::isfinite(aa[ax]));
+            EXPECT_LE(std::abs(vv[ax]),
+                      limits.axis.maxVelocity[ax] * 1.05 + 0.5)
+                << "axis " << ax << " velocity overshoot at t=" << t;
+            EXPECT_LE(std::abs(aa[ax]),
+                      limits.axis.maxAcceleration[ax] * 1.05 + 0.5)
+                << "axis " << ax << " accel overshoot at t=" << t
+                << " s=" << s;
+        }
+        // Centripetal authority: v²κ within the path-level budget.
+        if (s > 0.0 && s < len) {
+            const double kappa =
+                path.evaluateAtArcLength(s).curvature;
+            EXPECT_LE(v * v * kappa,
+                limits.path.maxCentripetalAcceleration * 1.05 + 0.5)
+                << "centripetal overshoot at s=" << s;
+        }
+    }
+}
+
 TEST(AnalyticalJerkLimitedTOPPRA, ProvidesAnalyticalSource) {
     auto path = makeShortLinePath2D();
     auto limits = makeLimits2D();

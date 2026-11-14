@@ -439,6 +439,22 @@ private:
         // path evaluation crashes when durations are numerically huge.
         if (tLocal > arc.duration) tLocal = arc.duration;
 
+        // Clamp a closed-form (s, v, a) result to the feasible region:
+        // the analytic fast paths below bypass the per-step RK4 limit
+        // enforcement, so they must apply the same coupled bounds
+        // (vLim + per-axis |T·a + κv²|) before returning.
+        auto enforce = [this](double s, double v, double a)
+            -> std::tuple<double, double, double> {
+            if (!path_ || !path_->hasInner()) return {s, v, a};
+            double sClamped = std::clamp(s, 0.0,
+                static_cast<double>(path_->totalLength()));
+            auto cl = evaluator_.enforceStateLimits(
+                static_cast<T>(sClamped), static_cast<T>(v),
+                static_cast<T>(a), *path_);
+            return {s, static_cast<double>(cl.first),
+                    static_cast<double>(cl.second)};
+        };
+
         // Special case: DECEL_MAX arc with a0 ≈ 0 decelerating to v=0.
         // Use closed-form with the arc's pre-computed eta:
         // v(t) = v0 + 0.5*eta*t², a(t) = eta*t
@@ -457,7 +473,7 @@ private:
             double s = arc.s_begin + arc.v0 * tLocal +
                        eta * tLocal * tLocal * tLocal / 6.0;
             double a = eta * tLocal;
-            return {s, v, a};
+            return enforce(s, v, a);
         }
         // Special case: DECEL_MAX arc with a0 < 0 and eta > 0
         // (decelerating, jerk bringing acceleration back to 0).
@@ -477,7 +493,7 @@ private:
             double s = static_cast<double>(arc.s_begin) +
                        v0 * tLocal + 0.5 * a0 * tLocal * tLocal +
                        eta * tLocal * tLocal * tLocal / 6.0;
-            return {s, v, a};
+            return enforce(s, v, a);
         }
 
         // Special case: arc starts from rest (v ≈ 0, a ≈ 0) with nonzero
@@ -491,7 +507,7 @@ private:
                 double s = arc.s_begin + t3 / 6.0;
                 double v = 0.5 * eta * tLocal * tLocal;
                 double a = eta * tLocal;
-                return {s, v, a};
+                return enforce(s, v, a);
             }
             // Degenerate: no motion.
             return {arc.s_begin, arc.v0, arc.a0};
@@ -551,16 +567,11 @@ private:
             }
             double sClamped = std::clamp(yNew.s, 0.0,
                 static_cast<double>(path_->totalLength()));
-            double vLim = static_cast<double>(
-                evaluator_.velocityLimit(static_cast<T>(sClamped), *path_));
-            if (yNew.v > vLim) yNew.v = vLim;
-            auto [aMin, aMax] = evaluator_.accelerationBounds(
-                static_cast<T>(sClamped),
-                static_cast<T>(yNew.v),
-                *path_);
-            yNew.a = std::clamp(yNew.a,
-                                static_cast<double>(aMin),
-                                static_cast<double>(aMax));
+            auto cl = evaluator_.enforceStateLimits(
+                static_cast<T>(sClamped), static_cast<T>(yNew.v),
+                static_cast<T>(yNew.a), *path_);
+            yNew.v = static_cast<double>(cl.first);
+            yNew.a = static_cast<double>(cl.second);
 
             y = yNew;
             t += h;
