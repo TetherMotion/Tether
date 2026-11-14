@@ -4633,14 +4633,38 @@ public:
                     if (pc.solver->boundaryTransitionFeasible(
                             vL, vR, len))
                         continue;
-                    const double m = std::min(vL, vR);
-                    if (i > 0 && effB[i - 1] > m) {
-                        effB[i - 1] = m;
-                        changed = true;
+                    // Asymmetric remedy: keep the already-feasible
+                    // side and bisect only the higher boundary down
+                    // to the largest transition the piece can
+                    // actually execute — min(vL,vR) forfeits real
+                    // carry speed on short connectors. Feasibility
+                    // is monotone in the varied side (accel distance
+                    // grows with the exit speed, decel distance with
+                    // the entry speed); len is shrunk so the landed
+                    // value satisfies the stricter solve-time gate.
+                    double lo = std::min(vL, vR);
+                    double hi = std::max(vL, vR);
+                    const double safeLen = len * (1.0 - 1e-6);
+                    for (int k = 0; k < 24; ++k) {
+                        const double mid = 0.5 * (lo + hi);
+                        const double tL = (vR > vL) ? vL : mid;
+                        const double tR = (vR > vL) ? mid : vR;
+                        if (pc.solver->boundaryTransitionFeasible(
+                                tL, tR, safeLen))
+                            lo = mid;
+                        else
+                            hi = mid;
                     }
-                    if (i < sp.size() && effB[i] > m) {
-                        effB[i] = m;
-                        changed = true;
+                    if (vR > vL) {
+                        if (i < sp.size() && effB[i] > lo) {
+                            effB[i] = lo;
+                            changed = true;
+                        }
+                    } else {
+                        if (i > 0 && effB[i - 1] > lo) {
+                            effB[i - 1] = lo;
+                            changed = true;
+                        }
                     }
                 }
                 if (!changed) break;

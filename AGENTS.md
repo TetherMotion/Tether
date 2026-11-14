@@ -198,6 +198,21 @@ corner velocities + dwell points) →
   Pieces get interval bounds first, boundary speeds are equalized
   against `min(boundL, boundR)`, then each piece solves with its own
   length-scaled constraint grid (~0.1 mm/node, floor 32).
+- **Transition consistency**: `intervalBound()` verifies the piece's
+  `(V,A,J)` triple can execute its worst-case attainable boundary
+  transition (`min(request, vLimit(endpoint))` per side — junction and
+  dwell requests are non-negotiable, `+inf` auto markers are capped by
+  the endpoint dips). Phase 2.5's equalizer remedies residual
+  infeasibility by bisecting only the higher boundary to the max
+  executable crossing rather than `min(vL, vR)`.
+- **Pulse-structure floor**: `minimumDistanceForPeak` models the
+  symmetric return-to-zero-acceleration 7-segment pulse, so ANY nonzero
+  Δv across a junction costs `~4·snapTime·v̄` of ramp distance
+  (`snapTime = cbrt(Δv·S²/2)/S`). On dense sub-mm connectors at
+  moderate speeds the floor ≈ the piece length — they are locked to
+  near-constant-speed crossings. Recovering it needs nonzero boundary
+  accelerations (the coupled `#if 0` TOPP-RA machinery), same
+  architectural ceiling as the scalar-bound `3κva` conservatism.
 - **Perf-relevant caches**: `gridCoeffs_` (per-grid-node tangent,
   curvature, jounce — feeds `accelBoundsFromCache`/
   `etaBoundsFromCache`), `vLimGeoGrid_` (geometric velocity limit;
