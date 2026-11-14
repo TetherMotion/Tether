@@ -199,6 +199,10 @@ struct HybridElement {
     double certified_u_error = 0.0;
     double certified_du_error = 0.0;
     double certified_d2u_error = 0.0;
+    /**Midpoint |t_LGL - t_SSR| [s] and |v_LGL - v_SSR| [mm/s]. */
+    double certified_t_error = 0.0;
+    double certified_v_error = 0.0;
+    double certified_a_error = 0.0;
 
     /**Element time span */
     double t_begin = 0.0;
@@ -477,6 +481,15 @@ public:
     }
 
 private:
+    // Dynamics-fit certification tolerances for h-refinement. Time in
+    // seconds, velocity in mm/s, acceleration in mm/s². The t/v bounds
+    // target the sampled-trajectory error through invertT (δs ≈ δt·v):
+    // 2.5e-4 s keeps s error ≲ 0.025 mm at v=100, and the v midpoint
+    // check bounds the v_of_s interpolant directly.
+    static constexpr double kTCertTol = 2.5e-4;   // [s]
+    static constexpr double kVCertTol = 0.25;     // [mm/s]
+    static constexpr double kACertTol = 25.0;     // [mm/s²]
+
     const Path* path_; /**< Non-owning reference to the path */
     ConstraintEvaluator<Dim, T> evaluator_;
     std::vector<HybridElement> elements_;
@@ -498,13 +511,21 @@ private:
             buildElementsForArc(arc, ssr);
         }
 
-        // Ensure element times are consistent
-        if (!elements_.empty()) {
-            elements_.front().t_begin = 0.0;
-            for (size_t i = 1; i < elements_.size(); ++i) {
-                elements_[i].t_begin = elements_[i - 1].t_end;
-            }
-        }
+        // Element times are absolute (sampled from the SSR's
+        // timeAtArcLength): t_begin/t_end gaps between consecutive
+        // elements are real — they are the dwell pauses whose arcs
+        // carry no s-extent. Do NOT chain t_begin to the previous
+        // t_end; that would erase dwells and shift every subsequent
+        // sample earlier in time.
+
+        // The split worklist emits elements in refinement-completion
+        // order, not s-order — a passing right half lands before the
+        // still-splitting left half. findElementByS/findElementByT
+        // binary-search on s order, so sort before use.
+        std::sort(elements_.begin(), elements_.end(),
+                  [](const HybridElement& a, const HybridElement& b) {
+                      return a.s_begin < b.s_begin;
+                  });
     }
 
     /**
@@ -515,7 +536,7 @@ private:
      */
     void buildElementsForArc(const SwitchingArc& arc, const SSR& ssr) {
         const int initialDegree = 4;  // Start with degree-4 LGL
-        const int maxSplits = 4;      // Max h-refinements per arc
+        const int maxSplits = 6;      // Max h-refinements per arc
 
         std::vector<std::pair<double, double>> intervals = {
             {arc.s_begin, arc.s_end}
@@ -527,8 +548,14 @@ private:
             for (const auto& [sLo, sHi] : intervals) {
                 HybridElement elem = buildElement(sLo, sHi, initialDegree, arc, ssr);
 
-                // Check error certificate
-                if (elem.certified_u_error <= tolerance_ ||
+                // Split unless every certificate fits: the geometry
+                // Padé AND the dynamics LGLs — a good u(s) fit says
+                // nothing about the t(s)/v(s) fit, which is where the
+                // invertible-time error actually comes from.
+                if ((elem.certified_u_error <= tolerance_ &&
+                     elem.certified_t_error <= kTCertTol &&
+                     elem.certified_v_error <= kVCertTol &&
+                     elem.certified_a_error <= kACertTol) ||
                     (sHi - sLo) < 1e-8) {
                     elements_.push_back(std::move(elem));
                 } else {
@@ -573,40 +600,59 @@ private:
         elem.a_of_s.s_left = sLo;
         elem.a_of_s.s_right = sHi;
 
-        // Sample t(s), v(s), a(s) at LGL nodes by integrating from arc start
-        // The SSR's integrateArcToTime gives us (s, v, a) at a given time,
-        // but we need (t, v, a) at given s values. We integrate in s-space.
-        double t0 = arc.t0;
-        double v0 = arc.v0;
-        double a0 = arc.a0;
-
-        // Integrate from s_begin to each LGL node
-        double sPrev = arc.s_begin;
-        double tPrev = t0;
-        double vPrev = v0;
-        double aPrev = a0;
-
+        // Sample t(s), v(s), a(s) at LGL nodes from the SSR's exact
+        // inverse queries. The previous implementation integrated the
+        // s-space ODE t'=1/v, v'=a/v, a'=eta/v per element — singular
+        // wherever v -> 0 (stamped junctions, dwells, endpoint stops),
+        // which exploded t to ~1e11 and corrupted every downstream
+        // element. The SSR already carries the monotone s(t) data;
+        // inverting it per node is exact at stops (timeAtArcLength
+        // returns the finite arrival time) and automatically includes
+        // dwell time accumulated across skipped zero-length arcs.
         for (int j = 0; j <= degree; ++j) {
             double sTarget = elem.t_of_s.xiToS(elem.t_of_s.ref_nodes[j]);
             sTarget = std::clamp(sTarget, sLo, sHi);
-
-            // Integrate from sPrev to sTarget in s-space:
-            // t' = 1/v, v' = a/v, a' = eta/v
-            auto [t, v, a] = integrateInSSpace(arc, sPrev, sTarget,
-                                               tPrev, vPrev, aPrev, ssr);
-
-            elem.t_of_s.node_values[j] = t;
-            elem.v_of_s.node_values[j] = std::max(v, 0.0);
-            elem.a_of_s.node_values[j] = a;
-
-            sPrev = sTarget;
-            tPrev = t;
-            vPrev = v;
-            aPrev = a;
+            // timeAtArcLength resolves a shared junction to the FIRST
+            // matching arc — for an element starting right at a dwell
+            // the returned time can be the dwell's start rather than
+            // this arc's. Clamping to the parent arc's own window keeps
+            // each element on the correct side of a pause.
+            const double t_j = std::clamp(
+                static_cast<double>(
+                    ssr.timeAtArcLength(static_cast<T>(sTarget))),
+                arc.t0, arc.t0 + arc.duration);
+            elem.t_of_s.node_values[j] = t_j;
+            elem.v_of_s.node_values[j] = std::max(
+                ssr.pathVelocityAtArcLength(static_cast<T>(sTarget)),
+                0.0);
+            elem.a_of_s.node_values[j] = static_cast<double>(
+                ssr.pathAcceleration(static_cast<T>(t_j)));
         }
 
         elem.t_begin = elem.t_of_s.node_values.front();
         elem.t_end = elem.t_of_s.node_values.back();
+
+        // Certify the dynamics LGLs at the midpoint against the SSR's
+        // exact values — this is what catches a t(s) fit that passes
+        // through its nodes but bows between them (steep 1/v regions).
+        {
+            const double sMidEl = 0.5 * (sLo + sHi);
+            const double tExact = std::clamp(
+                static_cast<double>(ssr.timeAtArcLength(
+                    static_cast<T>(sMidEl))),
+                arc.t0, arc.t0 + arc.duration);
+            const double vExact = std::max(
+                ssr.pathVelocityAtArcLength(static_cast<T>(sMidEl)),
+                0.0);
+            const double aExact = static_cast<double>(
+                ssr.pathAcceleration(static_cast<T>(tExact)));
+            elem.certified_t_error =
+                std::abs(elem.t_of_s.evaluate(sMidEl) - tExact);
+            elem.certified_v_error =
+                std::abs(elem.v_of_s.evaluate(sMidEl) - vExact);
+            elem.certified_a_error =
+                std::abs(elem.a_of_s.evaluate(sMidEl) - aExact);
+        }
 
         // Compute Padé approximant for u(s)
         // We need u(s) at sLo. Get it from the path.
@@ -656,111 +702,6 @@ private:
         elem.certified_d2u_error = std::abs(d2uMidExact - d2uMidPade);
 
         return elem;
-    }
-
-    // ========================================================================
-    // Integration in s-space
-    // ========================================================================
-
-    /**
-     * @brief Integrate arc dynamics in s-space from (sStart) to (sTarget).
- *
-     * Dynamics: t' = 1/v, v' = a/v, a' = eta/v  (where ' = d/ds)
- *
-     * @return (t, v, a) at sTarget
-     */
-    std::tuple<double, double, double> integrateInSSpace(
-        const SwitchingArc& arc,
-        double sStart, double sTarget,
-        double tStart, double vStart, double aStart,
-        const SSR& ssr) const {
-
-        if (std::abs(sTarget - sStart) < 1e-14) {
-            return {tStart, vStart, aStart};
-        }
-
-        struct SState {
-            double t, v, a;
-            SState operator+(const SState& o) const { return {t+o.t, v+o.v, a+o.a}; }
-            SState operator*(double k) const { return {t*k, v*k, a*k}; }
-            std::array<double, 3> components() const { return {t, v, a}; }
-            double norm() const { return std::sqrt(t*t + v*v + a*a); }
-        };
-
-        const ConstraintEvaluator<Dim, T>& ce = evaluator_;
-        const Path& path = *path_;
-
-        auto rhs = [&](double sCur, const SState& y) -> SState {
-            double vSafe = std::max(y.v, 1e-12);
-            // Compute eta for this arc
-            double eta = 0.0;
-            switch (arc.mode) {
-                case ControlMode::ACCEL_MAX: {
-                    auto b = ce.etaBounds(static_cast<T>(sCur),
-                                           static_cast<T>(y.v), static_cast<T>(y.a), path);
-                    eta = b.eta_max;
-                    break;
-                }
-                case ControlMode::DECEL_MAX: {
-                    auto b = ce.etaBounds(static_cast<T>(sCur),
-                                           static_cast<T>(y.v), static_cast<T>(y.a), path);
-                    eta = b.eta_min;
-                    break;
-                }
-                case ControlMode::ZERO_JERK:
-                    eta = 0.0;
-                    break;
-                default:
-                    eta = arc.eta;
-                    break;
-            }
-            return {1.0 / vSafe, y.a / vSafe, eta / vSafe};
-        };
-
-        SState y{tStart, vStart, aStart};
-        double s = sStart;
-        double dsTotal = sTarget - sStart;
-        int nSteps = std::max(1, std::min(100, static_cast<int>(std::abs(dsTotal) / 1e-2)));
-        double ds = dsTotal / nSteps;
-
-        // If starting from rest (v ≈ 0, a ≈ 0), use closed-form for first step.
-        // a(t) = eta*t, v(t) = 0.5*eta*t², s(t) = eta*t³/6
-        // => t = (6*|ds|/|eta|)^(1/3)
-        int startStep = 0;
-        if (std::abs(vStart) < 1e-9 && std::abs(aStart) < 1e-9) {
-            double eta = 0.0;
-            switch (arc.mode) {
-                case ControlMode::ACCEL_MAX: {
-                    auto b = ce.etaBounds(static_cast<T>(sStart), T(0), T(0), path);
-                    eta = b.eta_max;
-                    break;
-                }
-                case ControlMode::DECEL_MAX: {
-                    auto b = ce.etaBounds(static_cast<T>(sStart), T(0), T(0), path);
-                    eta = b.eta_min;
-                    break;
-                }
-                default:
-                    eta = arc.eta;
-                    break;
-            }
-            if (std::abs(eta) > 1e-12 && nSteps > 0) {
-                double tStep = std::cbrt(6.0 * std::abs(ds) / std::abs(eta));
-                y.t = tStart + tStep;
-                y.v = 0.5 * eta * tStep * tStep;
-                y.a = eta * tStep;
-                s += ds;
-                startStep = 1;  // Already did one step
-            }
-        }
-
-        for (int i = startStep; i < nSteps; ++i) {
-            y = rk4Step(rhs, s, y, ds);
-            s += ds;
-            if (y.v < 1e-12) y.v = 1e-12;
-        }
-
-        return {y.t, y.v, y.a};
     }
 
     // ========================================================================

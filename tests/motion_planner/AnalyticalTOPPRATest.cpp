@@ -1228,3 +1228,93 @@ TEST(AnalyticalJerkLimitedTOPPRA, EmptyPathAdapterYieldsEmptyProfile) {
     ASSERT_NE(profile, nullptr);
     EXPECT_EQ(profile->points().size(), 0u);
 }
+
+// C2: dense consistency between the exact SSR and the certified Hybrid
+// (LGL + Padé) representations. The Hybrid is built FROM the SSR, so
+// their sampled states must agree within certification scale. The
+// residual concentrates where dv/ds is steepest (the stamped junction
+// and the terminal stop): position to sub-mm, velocity to a few mm/s
+// localized at the junction, arc length tighter still.
+TEST(AnalyticalJerkLimitedTOPPRA, HybridMatchesSSR_Dense) {
+    auto path = makeCornerPath2D();
+    auto limits = makeLimits2D();
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(
+        limits, /*buildHybrid=*/true);
+    ASSERT_NE(profiler.computeProfile(path, 100.0, 0.0, 0.0, 1200),
+              nullptr);
+    auto ssr = profiler.ssrSource();
+    auto hybrid = profiler.hybridSource();
+    ASSERT_NE(ssr, nullptr);
+    ASSERT_NE(hybrid, nullptr);
+
+    // Element coverage is s-ordered, contiguous, and time-complete.
+    const auto& els = hybrid->elements();
+    ASSERT_GT(els.size(), 0u);
+    EXPECT_DOUBLE_EQ(els.front().s_begin, 0.0);
+    EXPECT_NEAR(els.back().s_end, path.totalLength(), 1e-6);
+    for (size_t i = 1; i < els.size(); ++i) {
+        EXPECT_NEAR(els[i].s_begin, els[i - 1].s_end, 1e-9)
+            << "s-coverage gap before element " << i;
+        EXPECT_GE(els[i].t_begin, els[i - 1].t_end - 1e-9)
+            << "element times not monotone at " << i;
+    }
+    EXPECT_NEAR(hybrid->totalTime(), ssr->totalTime(), 1e-6);
+
+    const double T = ssr->totalTime();
+    double maxDP = 0.0, maxDv = 0.0, maxDs = 0.0;
+    for (int i = 0; i <= 2000; ++i) {
+        const double t = T * static_cast<double>(i) / 2000.0;
+        maxDP = std::max(maxDP,
+            (ssr->position(t) - hybrid->position(t)).length());
+        maxDv = std::max(maxDv,
+            (ssr->velocity(t) - hybrid->velocity(t)).length());
+        maxDs = std::max(maxDs,
+            std::abs(ssr->arcLength(t) - hybrid->arcLength(t)));
+    }
+    EXPECT_LT(maxDs, 0.1);    // arc-length inversion
+    EXPECT_LT(maxDP, 0.5);    // mm — Padé u(s) + element s error
+    EXPECT_LT(maxDv, 5.0);    // mm/s — concentrated at the stamped junction
+}
+
+// The Hybrid skips zero-length dwell arcs (!arc.valid()) but must
+// still carry their pause: absolute element times come from the SSR's
+// timeAtArcLength, so a post-dwell element starts after the pause.
+// Inside the dwell window the sampler clamps to the post-dwell
+// element's s_begin — i.e. stopped at the dwell position, matching
+// the SSR's stationary state.
+TEST(AnalyticalJerkLimitedTOPPRA, HybridCarriesDwellTime) {
+    auto path = makeLinePath2D(20.0);
+    ASSERT_GT(path.numSegments(), 0u);
+    const double dwellS = 10.0, dwellDur = 0.4;
+    path.setDwellPoints({{dwellS, dwellDur}});
+
+    auto limits = makeLimits2D();
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(
+        limits, /*buildHybrid=*/true);
+    ASSERT_NE(profiler.computeProfile(path, 100.0, 0.0, 0.0, 800),
+              nullptr);
+    auto ssr = profiler.ssrSource();
+    auto hybrid = profiler.hybridSource();
+    ASSERT_NE(ssr, nullptr);
+    ASSERT_NE(hybrid, nullptr);
+
+    // Total time must include the pause.
+    EXPECT_NEAR(hybrid->totalTime(), ssr->totalTime(), 1e-6);
+    EXPECT_GT(hybrid->totalTime(), dwellDur);
+
+    // Find the dwell window in the SSR and sample inside it.
+    double tDwell = -1.0;
+    for (const auto& a : ssr->arcs()) {
+        if (a.mode == ControlMode::ZERO_JERK &&
+            std::abs(a.s_begin - dwellS) < 1e-6 &&
+            std::abs(a.s_end - dwellS) < 1e-6) {
+            tDwell = a.t0;
+            break;
+        }
+    }
+    ASSERT_GE(tDwell, 0.0) << "no dwell arc in the SSR";
+    const double tMid = tDwell + 0.5 * dwellDur;
+    EXPECT_NEAR(hybrid->arcLength(tMid), dwellS, 1e-6);
+    EXPECT_NEAR(hybrid->pathVelocity(tMid), 0.0, 1e-9);
+    EXPECT_NEAR(ssr->arcLength(tMid), dwellS, 1e-6);
+}
