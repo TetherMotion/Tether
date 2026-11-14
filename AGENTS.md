@@ -224,21 +224,34 @@ corner velocities + dwell points) →
   accelerations (the coupled TOPP-RA machinery), same architectural
   ceiling as the scalar-bound `3κva` conservatism.
 - **TOPP-RA status** (`AnalyticalJerkLimitedTOPPRA` +
-  `ConstraintEvaluator`): the coupled solver exists and, after the
-  enforcement fix, produces SSR trajectories that respect per-axis
-  velocity/accel and centripetal limits on curved geometry
-  (`enforceStateLimits` clamps every integrated/sampled state to
-  vLim + the coupled `κᵢv²+Tᵢa` window; `eta` selection anticipates
-  the accel wall; the closed-form SSR fast paths and the infeasible-
-  bound UB clamp are covered). Remaining gaps vs production:
-  corner stamps/dwells are NOT consumed (carries ~40 mm/s through a
-  5.3 mm/s junction — needs junction/dwell splitting like
-  `solveSplit`), and it is ~100–1000× slower than the Pareto solve
-  (0.9–15 s per small path after the extra enforcement evals).
-  Honest speedup vs Pareto: ~11% on zero-curvature straights (the
-  nonzero-boundary-acceleration headroom); curved-path advantage is
-  unquantified until stamps are injected.
-  `RespectsCoupledBounds_CornerPath` pins the enforcement.
+  `ConstraintEvaluator`): the coupled solver exists and produces SSR
+  trajectories that respect per-axis velocity/accel and centripetal
+  limits on curved geometry (`enforceStateLimits` clamps every
+  integrated/sampled state to vLim + the coupled `κᵢv²+Tᵢa` window;
+  `eta` selection anticipates the accel wall; the closed-form SSR fast
+  paths and the infeasible-bound UB clamp are covered). Junction
+  stamps and dwells ARE consumed: `computeProfile` splits the path
+  into windows at each finite `cornerVelocities()` entry and each
+  `dwellPoints()` location, solves them with the stamp/dwell as hard
+  boundary velocities (`solveWindow`), and inserts dwell pauses as
+  zero-length `ZERO_JERK` arcs (SSR's rest-state path replays them as
+  hold-position; endpoint dwells become leading/trailing pause arcs).
+  Two merge-stage subtleties matter for correctness: (1) nodes pinned
+  on the coupled accel bound are *sustained* wall-holds — the passes
+  throttle eta asymptotically near the wall, so a node counts only
+  when a neighbor is also in the wall band — and are reclassified to
+  `ZERO_JERK` so arcs split at the real eta discontinuities;
+  (2) `buildSwitchingArcs` must split adjacent `ZERO_JERK` runs whose
+  held acceleration differs, or the arc replays the wrong constant a
+  and creates a velocity step at the switch. Remaining gaps vs
+  production: ~100–1000× slower than the Pareto solve (0.9–15 s per
+  small path after the extra enforcement evals), and window stitching
+  still relies on single-eta arc reconstruction (bounded residual vs
+  the pass profile at boundaries). Honest speedup vs Pareto: ~11% on
+  zero-curvature straights (the nonzero-boundary-acceleration
+  headroom); curved-path advantage still gated by the solve cost.
+  `RespectsCoupledBounds_CornerPath`, `HonorsJunctionVelocityStamps`,
+  and `HonorsDwellPoints` pin the behavior.
 - **Perf-relevant caches**: `gridCoeffs_` (per-grid-node tangent,
   curvature, jounce — feeds `accelBoundsFromCache`/
   `etaBoundsFromCache`), `vLimGeoGrid_` (geometric velocity limit;

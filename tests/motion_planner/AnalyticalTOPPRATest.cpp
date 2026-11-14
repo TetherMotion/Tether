@@ -937,3 +937,143 @@ TEST(AnalyticalCustomProfiler, BuilderAcceptsCustomProfiler) {
     EXPECT_NE(avp, nullptr);
     EXPECT_NE(avp->source(), nullptr);
 }
+
+// ============================================================================
+// 13. Junction stamps and dwell points
+// ============================================================================
+
+namespace {
+
+/// Build a sharp (unblended) L-path: two line pieces meeting at a true
+/// 90-degree tangent discontinuity so corner-velocity stamps stay finite.
+PathAdapter<2, double> makeSharpLPath2D(double legLength) {
+    std::vector<tether::motion::NurbsCurve> pieces;
+    pieces.push_back(tether::motion::NurbsCurve::fromLine(
+        tether::motion::RVec{0.0, 0.0},
+        tether::motion::RVec{legLength, 0.0}));
+    pieces.push_back(tether::motion::NurbsCurve::fromLine(
+        tether::motion::RVec{legLength, 0.0},
+        tether::motion::RVec{legLength, legLength}));
+    return PathAdapter<2, double>(
+        tether::motion::PiecewiseNurbsPath(std::move(pieces)));
+}
+
+} // namespace
+
+// Regression: cornerVelocities() stamps used to be ignored by the
+// forward/backward passes, so a sharp corner was crossed at ~feed speed.
+// computeProfile now splits the solve at each stamped junction and
+// imposes the stamp as a hard boundary velocity. The arc structure must
+// show an arc boundary exactly at the junction, and the sampled velocity
+// at the junction must not exceed the stamped limit.
+TEST(AnalyticalJerkLimitedTOPPRA, HonorsJunctionVelocityStamps) {
+    const double leg = 10.0;
+    auto path = makeSharpLPath2D(leg);
+    ASSERT_GT(path.numSegments(), 0u);
+    const double jd = 0.05, aCent = 500.0;
+    path.computeCornerVelocities(jd, aCent);
+    const double vStamp =
+        std::sqrt(aCent * jd / std::sin(M_PI / 4.0));  // ~5.95
+    ASSERT_LT(path.cornerVelocities()[1],
+              std::numeric_limits<double>::infinity());
+    EXPECT_NEAR(path.cornerVelocities()[1], vStamp, 1e-9);
+
+    auto limits = makeLimits2D();
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, false);
+    auto profile = profiler.computeProfile(path, 100.0, 0.0, 0.0, 800);
+    ASSERT_NE(profile, nullptr);
+    auto ssr = profiler.ssrSource();
+    ASSERT_NE(ssr, nullptr);
+
+    // The junction must be an arc boundary: one arc ends at s=leg, the
+    // next begins there.
+    const auto& arcs = ssr->arcs();
+    bool endsAtJunction = false, startsAtJunction = false;
+    for (const auto& a : arcs) {
+        if (std::abs(a.s_end - leg) < 1e-6) endsAtJunction = true;
+        if (std::abs(a.s_begin - leg) < 1e-6) startsAtJunction = true;
+    }
+    EXPECT_TRUE(endsAtJunction) << "no arc ends at the junction";
+    EXPECT_TRUE(startsAtJunction) << "no arc starts at the junction";
+
+    // Sampled velocity at the junction must respect the stamp.
+    const double T = ssr->totalTime();
+    double bestS = 1e9, vAtJunction = 0.0;
+    double prevV = -1.0, prevT = 0.0;
+    const double dtSample = T / 4000.0;
+    for (int i = 0; i <= 4000; ++i) {
+        const double t = T * static_cast<double>(i) / 4000.0;
+        const double s = ssr->arcLength(t);
+        const double v = ssr->pathVelocity(t);
+        if (std::abs(s - leg) < bestS) {
+            bestS = std::abs(s - leg);
+            vAtJunction = v;
+        }
+        // Velocity must be continuous — an earlier bug merged
+        // accel-hold and decel-hold nodes into one ZERO_JERK arc whose
+        // constant a replayed to a ~57 mm/s step at the switch point.
+        if (prevV >= 0.0) {
+            EXPECT_LE(std::abs(v - prevV),
+                      limits.path.maxPathAcceleration * dtSample + 1.0)
+                << "velocity discontinuity at t=" << t;
+        }
+        prevV = v;
+        prevT = t;
+    }
+    EXPECT_LE(vAtJunction, vStamp * 1.1 + 0.05)
+        << "junction crossed above the stamped corner velocity";
+}
+
+// Regression: dwellPoints() used to be ignored entirely. A mid-path
+// dwell must appear as a zero-velocity pause arc at the requested arc
+// length and extend the total time by the dwell duration.
+TEST(AnalyticalJerkLimitedTOPPRA, HonorsDwellPoints) {
+    auto path = makeLinePath2D(20.0);
+    ASSERT_GT(path.numSegments(), 0u);
+    const double dwellS = 10.0, dwellDur = 0.4;
+    path.setDwellPoints({{dwellS, dwellDur}});
+
+    auto limits = makeLimits2D();
+    // Baseline without the dwell for the total-time comparison.
+    auto pathNoDwell = makeLinePath2D(20.0);
+    {
+        AnalyticalJerkLimitedTOPPRA<2, double> p0(limits, false);
+        p0.computeProfile(pathNoDwell, 100.0, 0.0, 0.0, 800);
+        ASSERT_NE(p0.ssrSource(), nullptr);
+        const double T0 = p0.ssrSource()->totalTime();
+
+        AnalyticalJerkLimitedTOPPRA<2, double> p1(limits, false);
+        p1.computeProfile(path, 100.0, 0.0, 0.0, 800);
+        auto ssr = p1.ssrSource();
+        ASSERT_NE(ssr, nullptr);
+        const double T1 = ssr->totalTime();
+
+        // The forced stop also costs ramp time, so the dwell adds at
+        // least its full duration.
+        EXPECT_GE(T1, T0 + dwellDur * 0.98);
+
+        // A zero-length ZERO_JERK arc carries the pause at the dwell s.
+        bool foundDwellArc = false;
+        for (const auto& a : ssr->arcs()) {
+            if (a.mode == ControlMode::ZERO_JERK &&
+                std::abs(a.s_begin - dwellS) < 1e-6 &&
+                std::abs(a.s_end - dwellS) < 1e-6 &&
+                std::abs(a.duration - dwellDur) < 1e-9) {
+                foundDwellArc = true;
+            }
+        }
+        EXPECT_TRUE(foundDwellArc) << "no dwell pause arc in the SSR";
+
+        // During the pause the path holds position at the dwell point.
+        bool sawStoppedSample = false;
+        for (int i = 0; i <= 4000; ++i) {
+            const double t = T1 * static_cast<double>(i) / 4000.0;
+            if (std::abs(ssr->pathVelocity(t)) < 1e-9 &&
+                std::abs(ssr->arcLength(t) - dwellS) < 1e-6) {
+                sawStoppedSample = true;
+            }
+        }
+        EXPECT_TRUE(sawStoppedSample)
+            << "trajectory never stops at the dwell point";
+    }
+}
