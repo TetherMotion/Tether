@@ -1200,3 +1200,31 @@ TEST(AnalyticalJerkLimitedTOPPRA,
     EXPECT_LT(maxDv, 1e-2);   // mm/s
     EXPECT_LT(maxDa, 1.0);    // mm/s²
 }
+
+// Deliberate limitation: PathAdapter::hasInner() is false only for a
+// default-constructed (empty) adapter — there is no legacy non-NURBS
+// representation. computeProfile rejects it up front (numSegments==0
+// / totalLength<=0), so the !hasInner() fallbacks inside
+// computeCoefficients, velocityLimit and the SSR enforce paths are
+// defensive remnants unreachable through the public entry. Stamps and
+// dwells are path-relative: dwell points can be stored on the adapter
+// but a solve with no path ignores them by construction.
+TEST(AnalyticalJerkLimitedTOPPRA, EmptyPathAdapterYieldsEmptyProfile) {
+    PathAdapter<2, double> empty;
+    ASSERT_FALSE(empty.hasInner());
+    ASSERT_EQ(empty.numSegments(), 0u);
+    ASSERT_EQ(empty.totalLength(), 0.0);
+
+    // Stamps/dwells are metadata on the adapter — dwell points store
+    // even without a path, but there is nothing to solve.
+    empty.setDwellPoints({{0.0, 0.5}, {1.0, 0.25}});
+    ASSERT_EQ(empty.dwellPoints().size(), 2u);
+    empty.setSegmentVelocityLimits({50.0});
+    EXPECT_TRUE(empty.segmentMaxVelocities().empty());  // no path: no-op
+
+    auto limits = makeLimits2D();
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, false);
+    auto profile = profiler.computeProfile(empty, 100.0, 0.0, 0.0, 200);
+    ASSERT_NE(profile, nullptr);
+    EXPECT_EQ(profile->points().size(), 0u);
+}
