@@ -566,9 +566,16 @@ private:
         // Clamp a closed-form (s, v, a) result to the feasible region:
         // the analytic fast paths bypass the per-step RK4 limit
         // enforcement, so they must apply the same coupled bounds
-        // (vLim + per-axis |T·a + κv²|) before returning.
-        auto enforce = [this](double s, double v, double a)
+        // (vLim + per-axis |T·a + κv²|) before returning. The s clamp
+        // to [s_begin, s_end] additionally absorbs the single-eta
+        // replay residual — the closed-form integral can overshoot the
+        // arc's own s_end by ~1e-2 mm near a decel-to-stop end, which
+        // would otherwise surface as a backward arcLength jump at the
+        // boundary (the next arc starts exactly at s_begin).
+        auto enforce = [this, &arc](double s, double v, double a)
             -> std::tuple<double, double, double> {
+            s = std::clamp(s, static_cast<double>(arc.s_begin),
+                           static_cast<double>(arc.s_end));
             if (!path_ || !path_->hasInner()) return {s, v, a};
             double sClamped = std::clamp(s, 0.0,
                 static_cast<double>(path_->totalLength()));

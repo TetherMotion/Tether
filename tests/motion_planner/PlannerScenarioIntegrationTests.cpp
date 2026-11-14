@@ -40,6 +40,7 @@
 #include "tether/motion_planner/PathAdapter.hpp"
 #include "tether/motion_planner/geometry/PlanningSegmentConverter.hpp"
 #include "tether/motion_planner/analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp"
+#include "tether/motion_planner/analytical/AnalyticalTOPPRA.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -128,19 +129,13 @@ struct PlannedRun {
 };
 
 /**
- * Run the full production pipeline on G-code text.
- * @param gcode            Program text (may contain \n lines).
- * @param limits           Machine kinematic limits.
- * @param feedRateMmS      Global feed cap (mm/s) for the profile.
- * @param junctionDev      Junction deviation (mm) for corner velocity model.
- * @param cacheSize        Constraint cache samples; 0 → auto (pieces*20).
+ * Build the PathAdapter from G-code through the real production path
+ * (PlanningSegmentBuilder → piecewise NURBS → adapter + stamps/dwells).
+ * On failure returns with failedAt set.
  */
-PlannedRun runGcode(const std::string& gcode,
-                    const KinematicLimits<3, double>& limits,
-                    double feedRateMmS,
-                    double junctionDev = 0.05,
-                    std::size_t cacheSize = 0,
-                    mpa::CostWeights weights = {}) {
+PlannedRun buildPathFromGcode(const std::string& gcode,
+                              const KinematicLimits<3, double>& limits,
+                              double junctionDev = 0.05) {
     PlannedRun r;
 
     auto parsed = GCode::PlanningSegmentBuilder::fromText(gcode);
@@ -186,6 +181,26 @@ PlannedRun runGcode(const std::string& gcode,
         }
         r.path.setDwellPoints(dwells);
     }
+    r.ok = true;
+    return r;
+}
+
+/**
+ * Run the full production pipeline on G-code text.
+ * @param gcode            Program text (may contain \n lines).
+ * @param limits           Machine kinematic limits.
+ * @param feedRateMmS      Global feed cap (mm/s) for the profile.
+ * @param junctionDev      Junction deviation (mm) for corner velocity model.
+ * @param cacheSize        Constraint cache samples; 0 → auto (pieces*20).
+ */
+PlannedRun runGcode(const std::string& gcode,
+                    const KinematicLimits<3, double>& limits,
+                    double feedRateMmS,
+                    double junctionDev = 0.05,
+                    std::size_t cacheSize = 0,
+                    mpa::CostWeights weights = {}) {
+    PlannedRun r = buildPathFromGcode(gcode, limits, junctionDev);
+    if (!r.failedAt.empty()) return r;
 
     if (cacheSize == 0) {
         cacheSize = std::min<std::size_t>(
@@ -1507,4 +1522,99 @@ TEST(PlannerScenarios_Hard, NegativeHelixCCW) {
     // 10mm rapid lead-in + full-turn helix hypot(2π·10, 4) ≈ 62.96 mm.
     EXPECT_NEAR(r.pathLength,
                 10.0 + std::hypot(2.0 * M_PI * 10.0, 4.0), 3.0);
+}
+
+// ============================================================================
+// TOPP-RA through the real G-code pipeline (E1)
+// ============================================================================
+
+// G-code text → PlanningSegmentBuilder → NURBS → PathAdapter(stamps+dwells)
+// → AnalyticalJerkLimitedTOPPRA → SSR. The program has a G4 dwell sitting
+// exactly on a stamped corner (coincident junction+dwell → merged boundary:
+// forced stop + pause) and a second plain stamped corner.
+TEST(PlannerScenarios_Toppra, GcodePipelineDwellAndStamps) {
+    const auto L = cncLimits();
+    const double jd = 0.05;
+    auto r = buildPathFromGcode(header() +
+        "G1 X10 Y0 F3000\n"     // leg1: X 0→10, corner at (10,0)
+        "G4 P250\n"             // 250 ms dwell on the corner
+        "G1 X10 Y10 F3000\n"    // leg2: Y 0→10, corner at (10,10)
+        "G1 X20 Y10 F3000\n",   // leg3: X 10→20
+        L, jd);
+    ASSERT_TRUE(r.failedAt.empty()) << "pipeline failed at " << r.failedAt;
+
+    // The converter must surface the G4 as a dwell at the leg-1 end.
+    ASSERT_EQ(r.numDwellPoints, 1u);
+    EXPECT_NEAR(r.dwellPoints[0].duration, 0.25, 1e-9);
+    const double dwellS = r.dwellPoints[0].arcLength;
+    EXPECT_NEAR(dwellS, 10.0, 1.0);
+
+    // Both interior junctions must carry finite stamps (90° corners).
+    const auto& cvs = r.path.cornerVelocities();
+    const double stamp =
+        std::sqrt(L.path.maxCentripetalAcceleration * jd / std::sin(M_PI / 4.0));
+    ASSERT_GE(cvs.size(), 3u);
+    // Junction (10,0) is coincident with the G4 dwell — the adapter
+    // forces a full stop there (stamp 0); junction (10,10) carries the
+    // junction-deviation stamp.
+    EXPECT_EQ(cvs[1], 0.0);
+    EXPECT_NEAR(cvs[2], stamp, 1e-6);
+
+    mpa::AnalyticalJerkLimitedTOPPRA<3, double> planner(L);
+    auto profile = planner.computeProfile(r.path, 80.0, 0.0, 0.0, 800);
+    ASSERT_NE(profile, nullptr) << "TOPP-RA rejected the path";
+    auto ssr = planner.ssrSource();
+    ASSERT_NE(ssr, nullptr);
+
+    // A zero-length ZERO_JERK pause arc must carry the dwell.
+    bool foundDwell = false;
+    double dwellT0 = -1.0;
+    for (const auto& a : ssr->arcs()) {
+        if (a.mode == mpa::ControlMode::ZERO_JERK &&
+            std::abs(a.s_begin - dwellS) < 1e-6 &&
+            std::abs(a.s_end - dwellS) < 1e-6 &&
+            std::abs(a.duration - 0.25) < 1e-9) {
+            foundDwell = true;
+            dwellT0 = a.t0;
+        }
+    }
+    ASSERT_TRUE(foundDwell) << "no pause arc for the G4 dwell";
+
+    // Inside the dwell the trajectory is parked at the corner.
+    const double tMid = dwellT0 + 0.125;
+    EXPECT_NEAR(ssr->arcLength(tMid), dwellS, 1e-6);
+    EXPECT_NEAR(ssr->pathVelocity(tMid), 0.0, 1e-9);
+
+    // Both stamped junctions are arc boundaries crossed at/below the
+    // stamp (the first is the dwell junction → exact stop).
+    const auto& arcs = ssr->arcs();
+    for (const double sJunction : {10.0, 20.0}) {
+        bool boundary = false;
+        double vAt = -1.0;
+        for (const auto& a : arcs) {
+            if (std::abs(a.s_end - sJunction) < 1e-6) boundary = true;
+        }
+        EXPECT_TRUE(boundary) << "no arc boundary at s=" << sJunction;
+        const auto st = ssr->locateAndIntegrate(
+            [&](void) { double t = 0; for (const auto& a : arcs)
+                if (std::abs(a.s_end - sJunction) < 1e-6)
+                    t = a.t0 + a.duration; return t; }());
+        vAt = st.v;
+        EXPECT_LE(vAt, stamp * 1.1 + 0.05)
+            << "junction s=" << sJunction << " crossed at " << vAt
+            << " above stamp " << stamp;
+    }
+
+    // Endpoints at rest, full length traversed, monotone s.
+    const double T = ssr->totalTime();
+    EXPECT_GT(T, 0.25);
+    EXPECT_NEAR(ssr->pathVelocity(0.0), 0.0, 1e-9);
+    EXPECT_NEAR(ssr->pathVelocity(T), 0.0, 1e-9);
+    EXPECT_NEAR(ssr->arcLength(T), r.pathLength, 1e-6);
+    double prevS = 0.0;
+    for (int i = 0; i <= 2000; ++i) {
+        const double s = ssr->arcLength(T * i / 2000.0);
+        EXPECT_GE(s, prevS - 1e-9) << "non-monotone s";
+        prevS = s;
+    }
 }
