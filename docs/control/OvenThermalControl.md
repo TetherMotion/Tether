@@ -412,7 +412,53 @@ auto u = gc.compute(measuredTemps, dt);   // u[i] per zone
 injection, and adjacent deltas. An interactive demo runs the
 controller on the `MultiZoneOven` benchmark plant:
 `examples/oven_gradient_tui.cpp` (`oven_gradient_tui` — space run,
-`1`/`2`/`3` switch profile presets, `r` reset).
+`1`/`2`/`3` switch profile presets, `c` cycles the master curve,
+`r` reset).
+
+## Industrial temperature curves (`ThermalCurve`)
+
+`include/tether/control/thermal/ThermalCurve.hpp` provides the
+standard process-curve layer on top of `TemperatureProfile`:
+
+- **Preset library** — `presetProfile(ThermalCurvePreset)` returns
+  ready-made `TemperatureProfile`s for `ReflowSac305`, `ReflowSnPb`,
+  `WaveSolder`, `SelectiveSolder`, `Brazing`, and `Anneal`;
+  `thermalCurvePresetName()` labels them. Each preset is a normal
+  `TemperatureProfile`, so it feeds `OvenController`,
+  `OvenGradientController::GradientSpec::base`, or any other consumer
+  unchanged.
+- **Process windows** — `specForPreset()` returns a
+  `ThermalCurveSpec` describing the acceptance window: liquidus
+  temperature (enables TAL + soak-band metrics), soak band
+  `[soakMinC, soakMaxC]` and minimum soak time, peak range
+  `[peakMinC, peakMaxC]`, TAL range `[talMinS, talMaxS]`, and maximum
+  heating/cooling ramp rates. A field `<= 0` disables that check;
+  `liquidusC == 0` disables TAL/soak-band analysis entirely.
+- **Analysis** — `analyzeProfile(profile, spec)` computes exact
+  piecewise-linear metrics from the profile's segment geometry (no
+  sampling error): peak temperature, total duration, time above
+  liquidus (TAL), soak-band residence time, and max heat/cool ramp
+  rates. `analyzeSamples(times, temps, spec)` computes the same
+  metrics from a measured trajectory using trapezoidal
+  interpolation — use it for run qualification against the spec.
+- **Verdict** — `ThermalCurveReport` carries the metrics, a
+  `violations` list (human-readable strings), and `pass()`. Both
+  analyzers share the same check logic, so a profile and a measured
+  run are judged identically.
+
+The TUI plots the master curve (past solid / future dotted, current
+time marked) and shows the live spec verdict — `oven_gradient_tui`
+presets `1`/`3` use the selected curve preset as the gradient base,
+`c` cycles through all six.
+
+```cpp
+auto prof = presetProfile(ThermalCurvePreset::ReflowSac305);
+auto spec = specForPreset(ThermalCurvePreset::ReflowSac305);
+auto rep  = analyzeProfile(prof, spec);        // reference check
+// ... run the oven, record measured (t, T) ...
+auto meas = analyzeSamples(tHist, THist, spec); // run qualification
+if (!meas.pass()) log(meas.violations.front());
+```
 
 ## Real-time notes
 

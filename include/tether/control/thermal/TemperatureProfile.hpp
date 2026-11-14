@@ -73,6 +73,22 @@ public:
     double initialTemp() const { return m_initialTemp; }
 
     bool empty() const { return m_segs.empty(); }
+
+    /**@brief Read-only view of one linear segment [t0,t1] x [T0,T1]. */
+    struct Segment {
+        double t0, t1;   // [s]
+        double T0, T1;   // [°C]
+    };
+
+    /**@brief Segment list (copy; profiles have tens of segments). Used
+     *        by curve analysis/validation — not an RT path. */
+    std::vector<Segment> segments() const {
+        std::vector<Segment> out;
+        out.reserve(m_segs.size());
+        for (const auto& s : m_segs)
+            out.push_back({s.t0, s.t1, s.T0, s.T1});
+        return out;
+    }
     void clear() {
         m_segs.clear();
         m_tEnd = 0.0;

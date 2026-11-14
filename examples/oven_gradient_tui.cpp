@@ -27,6 +27,7 @@
 // Tether headers first — ncurses macros (OK/ERR/...) collide with
 // Tether identifiers and must never be visible during their parse.
 #include "tether/control/thermal/OvenGradientController.hpp"
+#include "tether/control/thermal/ThermalCurve.hpp"
 #include "tether/simulation/systems/thermal/MultiZoneOven.hpp"
 #include "tether/terminal_ui/Session.hpp"
 #include "tether/ui/Sparkline.hpp"
@@ -64,6 +65,8 @@ struct Sim {
     double simTime{0.0};
     bool running{true};
     int preset{1};
+    int curvePreset{0};   // ThermalCurvePreset index
+    TemperatureProfile master;
 
     Sim() {
         // gamma = 1/(R*C): R12=R23=0.5 K/W, C=3000 J/K -> 6.67e-4 1/s
@@ -87,6 +90,17 @@ struct Sim {
         applyPreset(1);
     }
 
+    TemperatureProfile curveBase() const {
+        return presetProfile(
+            static_cast<ThermalCurvePreset>(curvePreset));
+    }
+
+    void cycleCurve() {
+        curvePreset = (curvePreset + 1) %
+            int(thermalCurvePresetCount);
+        if (preset == 1 || preset == 3) applyPreset(preset);
+    }
+
     void applyPreset(int p) {
         preset = p;
         gc.reset();
@@ -95,26 +109,25 @@ struct Sim {
         for (auto& h : histT) h.clear();
         for (auto& h : histR) h.clear();
         if (p == 1) {
-            // Reflow-style: master ramp+soak, spatial gradient via
+            // Reflow-style: master curve + spatial gradient via
             // per-zone offsets + conveyor time shifts.
-            TemperatureProfile base(25.0);
-            base.addRampSoak(145.0, 0.35, 120.0);
-            base.addRampSoak(60.0, -0.25, 200.0);   // cool-down zone
+            master = curveBase();
             GradientSpec spec;
-            spec.base = base;
+            spec.base = master;
             spec.tempOffsetC = {0.0, 9.0, 18.0};
             spec.timeShiftS = {0.0, 25.0, 50.0};
             spec.maxZoneDeltaC = 15.0;
             gc.setGradientProfile(spec);
         } else if (p == 2) {
             // Fixed gradient hold: zone setpoints 120/132/144.
+            master = TemperatureProfile{};
             gc.setZoneSetpoints({120.0, 132.0, 144.0}, 15.0);
         } else {
-            // Aggressive: steep ramp, tight zones -> delta alarm.
-            TemperatureProfile base(25.0);
-            base.addRampSoak(200.0, 0.8, 100.0);
+            // Aggressive: same master curve stretched hotter via
+            // bigger offsets, tight zones -> delta alarm.
+            master = curveBase();
             GradientSpec spec;
-            spec.base = base;
+            spec.base = master;
             spec.tempOffsetC = {0.0, 20.0, 40.0};
             spec.timeShiftS = {0.0, 10.0, 20.0};
             spec.maxZoneDeltaC = 60.0;   // loose: let deltas grow
@@ -171,6 +184,29 @@ void drawZone(int y, const char* name, const Sim& sim, int zone) {
     std::string spark = renderSparkline(sim.histT[zone].samples(),
                                         60, 0.0, 220.0);
     mvwprintw(w, y + 1, 1, "%s", spark.c_str());
+}
+
+// ASCII temperature-vs-time plot of the master curve. Past portion
+// (profile clock <= tNow) drawn solid, future dotted.
+void drawCurve(int y, int x, int h, int w, const Sim& sim) {
+    if (sim.master.empty() || w < 10 || h < 3) return;
+    const double tMax = std::max(sim.master.duration(), 1.0);
+    double tHi = 0.0;
+    for (double tt = 0.0; tt <= tMax; tt += tMax / 40.0)
+        tHi = std::max(tHi, sim.master.value(tt));
+    tHi = std::max(tHi, 50.0);
+    const double tNow = std::min(sim.simTime, tMax);
+    for (int c = 0; c < w; ++c) {
+        const double t = tMax * c / (w - 1);
+        const double T = sim.master.value(t);
+        const int row = h - 1 - int(T / tHi * (h - 1) + 0.5);
+        mvwaddch(stdscr, y + std::clamp(row, 0, h - 1), x + c,
+                 t <= tNow ? '#' : '.');
+    }
+    // current-time marker column
+    const int mc = int(tNow / tMax * (w - 1) + 0.5);
+    for (int r = 0; r < h; ++r)
+        mvwaddch(stdscr, y + r, x + mc, '|');
 }
 
 } // namespace
@@ -232,10 +268,39 @@ int main() {
                  "max |dT| = %.1fC   max |dRef| = %.1fC",
                  sim.gc.maxMeasuredDelta(), sim.gc.maxSetpointDelta());
 
+        // ---- master curve plot + spec report ----
+        const int cy = gy + kZones + 2;
+        attron(COLOR_PAIR(2) | A_BOLD);
+        mvprintw(cy, 0, " Master curve: %s",
+                 thermalCurvePresetName(
+                     static_cast<ThermalCurvePreset>(sim.curvePreset)));
+        attroff(COLOR_PAIR(2) | A_BOLD);
+        drawCurve(cy + 1, 0, 4, cols - 2, sim);
+        if (!sim.master.empty()) {
+            auto rep = analyzeProfile(
+                sim.master,
+                specForPreset(static_cast<ThermalCurvePreset>(
+                    sim.curvePreset)));
+            // metrics ride on the title line; verdict colors it
+            attron(COLOR_PAIR(rep.pass() ? 1 : 4));
+            mvprintw(cy, 40,
+                     "peak %.0f TAL %.0fs soak %.0fs r %.1f/%.1f %s",
+                     rep.peakC, rep.talS, rep.soakS,
+                     rep.heatRampMax, rep.coolRampMax,
+                     rep.pass() ? "PASS" : "FAIL");
+            attroff(COLOR_PAIR(rep.pass() ? 1 : 4));
+            if (!rep.pass()) {
+                attron(COLOR_PAIR(4));
+                mvprintw(2, 0, " ! %s",
+                         rep.violations.front().c_str());
+                attroff(COLOR_PAIR(4));
+            }
+        }
+
         // ---- footer ----
         attron(COLOR_PAIR(3));
         mvprintw(rows - 1, 0,
-                 "space run/pause  r reset  1 reflow  2 hold  3 aggressive  q quit");
+                 "space run/pause  r reset  1/2/3 preset  c curve  q quit");
         attroff(COLOR_PAIR(3));
 
         refresh();
@@ -247,6 +312,7 @@ int main() {
         if (key == '1') sim.applyPreset(1);
         if (key == '2') sim.applyPreset(2);
         if (key == '3') sim.applyPreset(3);
+        if (key == 'c') sim.cycleCurve();
     }
     return 0;
 }

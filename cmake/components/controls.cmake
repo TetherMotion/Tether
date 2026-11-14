@@ -39,6 +39,8 @@ set(TETHER_CONTROLS_SOURCES
     ${TETHER_ROOT}/src/control/thermal/OvenLQIBackend.cpp
     # Multi-zone temperature-gradient supervisory layer
     ${TETHER_ROOT}/src/control/thermal/OvenGradientController.cpp
+    # Industrial curve presets + process-window validation
+    ${TETHER_ROOT}/src/control/thermal/ThermalCurve.cpp
 )
 
 # Filter to only existing files

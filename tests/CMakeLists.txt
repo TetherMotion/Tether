@@ -205,6 +205,7 @@ set(CONTROL_QFT_SOURCES
 set(CONTROL_THERMAL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/OvenControllerTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/OvenGradientControllerTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/ThermalCurveTests.cpp"
 )
 set(CONTROL_AUTOTUNING_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/autotuning/AdaptiveMethodsTests.cpp"
