@@ -1318,3 +1318,41 @@ TEST(AnalyticalJerkLimitedTOPPRA, HybridCarriesDwellTime) {
     EXPECT_NEAR(hybrid->pathVelocity(tMid), 0.0, 1e-9);
     EXPECT_NEAR(ssr->arcLength(tMid), dwellS, 1e-6);
 }
+
+// C1 measurement, now pinned: the SSR replays each window's
+// forward/backward pass as single-eta switching arcs. The residual
+// between the pass profile and the reconstruction at arc boundaries
+// is bounded by the wall-band reclassification — measured worst-case
+// ~3e-3 mm/s in velocity and ~5 mm/s^2 in acceleration at the last
+// merge boundary. That is two orders of magnitude below the junction
+// stamp scale, so the single-eta approximation is accepted and the
+// bound is pinned structurally here (previously a mis-grouped
+// ZERO_JERK run produced a ~57 mm/s step).
+TEST(AnalyticalJerkLimitedTOPPRA, ArcBoundariesAreContinuous) {
+    const double leg = 10.0;
+    auto path = makeSharpLPath2D(leg);
+    ASSERT_GT(path.numSegments(), 0u);
+    path.computeCornerVelocities(0.05, 500.0);
+    auto limits = makeLimits2D();
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, false);
+    ASSERT_NE(profiler.computeProfile(path, 100.0, 0.0, 0.0, 800),
+              nullptr);
+    auto ssr = profiler.ssrSource();
+    ASSERT_NE(ssr, nullptr);
+    const auto& arcs = ssr->arcs();
+    ASSERT_GT(arcs.size(), 2u);
+
+    double maxDv = 0.0, maxDa = 0.0;
+    for (size_t i = 0; i + 1 < arcs.size(); ++i) {
+        const auto st =
+            ssr->locateAndIntegrate(arcs[i].t0 + arcs[i].duration);
+        maxDv = std::max(maxDv, std::abs(st.v - arcs[i + 1].v0));
+        maxDa = std::max(maxDa, std::abs(st.a - arcs[i + 1].a0));
+        // The boundary arc length must also chain: arc i ends where
+        // arc i+1 begins (a gap or overlap would teleport position).
+        EXPECT_NEAR(arcs[i].s_end, arcs[i + 1].s_begin, 1e-9)
+            << "s discontinuity between arcs " << i << " and " << i + 1;
+    }
+    EXPECT_LT(maxDv, 0.05) << "velocity stitch residual";
+    EXPECT_LT(maxDa, 10.0) << "acceleration stitch residual";
+}
