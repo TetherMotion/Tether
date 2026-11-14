@@ -458,6 +458,27 @@ private:
             8, static_cast<size_t>(std::llround(
                 static_cast<double>(numSamplesTotal) *
                 static_cast<double>(windowLen / pathLength))));
+
+        // Straight single-piece windows are provably grid-independent:
+        // kappa = 0 removes the centripetal term, a single piece keeps
+        // the feed cap and axis projections constant, so every
+        // constraint is s-independent — and constant-eta dynamics
+        // integrate exactly under RK4 at any step size. A small fixed
+        // grid is lossless there regardless of window length; this is
+        // where the proportional density wastes most of its nodes on
+        // real paths (long raster/travel legs).
+        if (numSamples > 32 && path.hasInner()) {
+            const auto& inner = path.inner();
+            auto locA = inner.locate(static_cast<double>(sBegin));
+            auto locB = inner.locate(
+                static_cast<double>(sEnd) - 1e-9 * windowLen);
+            if (locA.piece == locB.piece) {
+                const auto& piece = inner.piece(locA.piece);
+                if (piece.isPolyline() && piece.numControlPoints() == 2) {
+                    numSamples = 32;
+                }
+            }
+        }
         const T ds = windowLen / T(numSamples - 1);
 
         // Per-window geometry table: the passes and state enforcement

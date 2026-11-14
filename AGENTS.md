@@ -245,19 +245,42 @@ corner velocities + dwell points) →
   held acceleration differs, or the arc replays the wrong constant a
   and creates a velocity step at the switch. Performance: the
   constraint queries are served from a per-window geometry table
-  (`buildGeometryGrid` — tangent/κ⃗/j⃗/κ per node, linear interp at
-  substep s, exact eval as fallback) plus removal of a dead
-  locate+invertLength+derivative triple in computeCoefficients —
-  ~30× on curved solves (2.1 s → 69 ms regression-test solve).
-  Remaining gaps vs production: still ~3–30× slower than the Pareto
-  solve depending on geometry (grid build + substep algebra dominate
-  now), and window stitching still relies on single-eta arc
-  reconstruction (bounded residual vs the pass profile at
-  boundaries). Honest speedup vs Pareto: ~11% on zero-curvature
-  straights (the nonzero-boundary-acceleration headroom);
-  curved-path advantage still gated by the solve cost.
+  (`buildGeometryGrid` — tangent/κ⃗/j⃗/κ + vLim per node, linear
+  interp at substep s, exact eval as fallback), coefficient storage
+  is fixed `std::array` (no per-substep heap allocs), and a dead
+  locate+invertLength+derivative triple in computeCoefficients is
+  gone — ~30× on curved solves (2.1 s → 69 ms regression-test
+  solve). SSR sampling has a sequential `SampleCursor` (monotone
+  queries resume integration; ~4× on dense sampling) and every
+  single-eta arc is evaluated closed-form — after the wall-band
+  reclassification the stored `arc.eta` is exact by construction, so
+  the RK4 `etaBounds`-recompute was redundant. `arcLength` is
+  clamped to `[s_begin, s_end]` per arc and snapped to `s_end` at
+  arc end (the single-eta replay residual ~1e-2 mm would otherwise
+  surface as backward s jumps / a short endpoint).
+  `findArcAtS` partition_points `s_end` instead of scanning arcs.
+  Straight single-piece windows (κ≡0, uniform constraints,
+  constant-eta dynamics exact under RK4) solve on a 32-node floor —
+  provably lossless.
+  Measured head-to-head vs Pareto (`HeadToHeadVsPareto`, identical
+  production-pipeline paths): TOPP-RA trajectories are 33% faster on
+  BenchLayer60 (67.4 s vs 100.7 s over 6.1 m / 275 pieces / ~300
+  windows), 23% on SpiralVase, 12% on a CNC drill pattern — the
+  junction-floor and 3κva conservatism eliminations pay off wherever
+  stamps are dense. Solve cost ≈2.4× Pareto (382 ms vs 155 ms on
+  the 6 m layer; ~14–25 ms on dm-scale paths) — dominated by
+  per-node substep work across ~300 windows; adaptive grids are not
+  justified because the proportional density already allocates
+  ~20 nodes/window. The optional Hybrid representation is NOT
+  production-viable at scale: certificates cannot converge where
+  v ~ √s near stops (BenchLayer → ~55k elements, ~30 s build —
+  needs a warped low-v element type, not more h-refinement). Use
+  `buildHybrid=false`; the SSR is the exact source anyway.
   `RespectsCoupledBounds_CornerPath`, `HonorsJunctionVelocityStamps`,
-  and `HonorsDwellPoints` pin the behavior.
+  `HonorsDwellPoints`, `ArcBoundariesAreContinuous`,
+  `HybridMatchesSSR_Dense`, `HybridCarriesDwellTime`,
+  `GcodePipelineDwellAndStamps`, `HeadToHeadVsPareto` pin the
+  behavior.
 - **Perf-relevant caches**: `gridCoeffs_` (per-grid-node tangent,
   curvature, jounce — feeds `accelBoundsFromCache`/
   `etaBoundsFromCache`), `vLimGeoGrid_` (geometric velocity limit;
