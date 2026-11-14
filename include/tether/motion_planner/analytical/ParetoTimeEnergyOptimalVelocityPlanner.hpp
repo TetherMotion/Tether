@@ -2332,40 +2332,61 @@ private:
                                         static_cast<T>(accel), path_);
         };
 
-        // Acceleration constraints depend on speed. A velocity ceiling due
-        // solely to centripetal acceleration can leave zero room for
-        // tangential acceleration, even though a strictly lower speed is
-        // feasible. Find the greatest speed with positive symmetric
-        // tangential authority rather than applying an arbitrary factor.
-        const auto accelerationAtVelocity = [&](double velocity) {
-            double available = static_cast<double>(limits_.path.maxPathAcceleration);
-            for (size_t i = 0; i <= samples; ++i) {
-                const auto [aMin, aMax] = accelBoundsAt(i, velocity);
-                available = std::min(available, std::min(aMax, -aMin));
+        // Acceleration constraints depend on speed. The symmetric
+        // tangential acceleration at a sample shrinks as the centripetal
+        // term κv² eats the axis accel budget; at the worst-curvature
+        // point it can drop to ~0 even though the rest of the path has
+        // full authority. Each sample is therefore evaluated at its
+        // locally feasible velocity min(envelope, vLim(s)), and when the
+        // authority there falls below the headroom floor the envelope is
+        // tightened to the greatest velocity that keeps positive headroom
+        // (a necessary condition — no feasible trajectory can pass that
+        // point faster). This replaces the old behaviour where a single
+        // curvature point could collapse the bound to ~0 and make the
+        // whole path crawl (T ~ 1e6 s on some toolpaths).
+        const double accelHeadroom = std::max(
+            1.0, 0.02 * bounds.acceleration);
+        for (size_t i = 0; i <= samples; ++i) {
+            const double s = sTotal * static_cast<double>(i) /
+                             static_cast<double>(samples);
+            double vLocal = std::min(
+                bounds.velocity, static_cast<double>(vLimit(s)));
+
+            const auto symmetricAt = [&](double v) {
+                const auto [aMin, aMax] = accelBoundsAt(i, v);
+                return std::min(aMax, -aMin);
+            };
+
+            double symmetric = symmetricAt(vLocal);
+            if (symmetric < accelHeadroom) {
+                double lo = 0.0, hi = vLocal;
+                for (int iter = 0; iter < 60; ++iter) {
+                    const double mid = 0.5 * (lo + hi);
+                    if (symmetricAt(mid) >= accelHeadroom) lo = mid;
+                    else hi = mid;
+                }
+                if (lo > 0.0) {
+                    bounds.velocity = std::min(bounds.velocity, lo);
+                    vLocal = lo;
+                    symmetric = symmetricAt(lo);
+                }
+                // Degenerate geometry (no authority even at v → 0): keep
+                // a small positive floor so the trajectory can still pass.
+                if (symmetric <= 0.0) {
+                    symmetric = std::min(bounds.acceleration, 1.0);
+                }
             }
-            return available;
-        };
-        double aAtEnvelope = accelerationAtVelocity(bounds.velocity);
-        if (aAtEnvelope <= 0.0) {
-            if (accelerationAtVelocity(0.0) <= 0.0) {
-                bounds.failureReason = "No symmetric tangential acceleration is feasible";
-                return bounds;
-            }
-            double lo = 0.0;
-            double hi = bounds.velocity;
-            for (int iteration = 0; iteration < 100; ++iteration) {
-                const double mid = 0.5 * (lo + hi);
-                if (accelerationAtVelocity(mid) > 0.0) lo = mid;
-                else hi = mid;
-            }
-            bounds.velocity = lo;
-            aAtEnvelope = accelerationAtVelocity(bounds.velocity);
+            bounds.acceleration = std::min(bounds.acceleration, symmetric);
         }
-        bounds.acceleration = std::min(bounds.acceleration, aAtEnvelope);
         if (!(bounds.acceleration > 0.0) || !std::isfinite(bounds.acceleration)) {
             bounds.failureReason = "No symmetric tangential acceleration is feasible";
             return bounds;
         }
+
+        // Minimum positive symmetric-jerk headroom the pulse plan needs to
+        // remain well-behaved. 2% of the path jerk limit (at least 1 mm/s³)
+        // keeps the centripetal term from consuming the entire axis budget.
+        const double jerkHeadroom = std::max(1.0, 0.02 * bounds.jerk);
 
         for (size_t i = 0; i <= samples; ++i) {
             const T s = static_cast<T>(sTotal * static_cast<double>(i) /
@@ -2376,24 +2397,49 @@ private:
             // and leaving more tangential jerk authority. Using the global
             // envelope velocity here would make corners with high curvature
             // incorrectly drive the jerk bound negative for the entire path.
-            const double vLocal = std::min(
+            double vLocal = std::min(
                 bounds.velocity, static_cast<double>(vLimit(s)));
-            for (const double a : {-bounds.acceleration, 0.0,
-                                   bounds.acceleration}) {
-                const auto interval = etaBoundsAt(i, vLocal, a);
-                double symmetric = std::min(interval.eta_max,
-                                            -interval.eta_min);
-                // At sharp corners the centripetal jerk can consume all
-                // jerk authority, making eta_min > 0 and symmetric < 0.
-                // The pulse plan uses symmetric jerk, so clamp to a small
-                // positive value. The velocity envelope already enforces
-                // the corner speed limit; the small jerk ensures the
-                // trajectory can still transition through the corner.
+
+            // Best (widest) symmetric tangential jerk this sample affords
+            // at a given velocity, over the extreme acceleration levels.
+            const auto symmetricAt = [&](double v) {
+                double sym = bounds.jerk;
+                for (const double a : {-bounds.acceleration, 0.0,
+                                       bounds.acceleration}) {
+                    const auto interval = etaBoundsAt(i, v, a);
+                    sym = std::min(sym, std::min(interval.eta_max,
+                                                 -interval.eta_min));
+                }
+                return sym;
+            };
+
+            double symmetric = symmetricAt(vLocal);
+            if (symmetric <= 0.0) {
+                // The centripetal jerk (~κ²v³) alone exceeds the axis jerk
+                // budget at vLocal — no feasible trajectory can pass this
+                // point at this speed. Tightening the envelope to the
+                // greatest velocity with positive jerk headroom (a
+                // necessary condition) is far better than the previous
+                // token 1 mm/s³ floor, which made the entire path crawl.
+                double lo = 0.0, hi = vLocal;
+                for (int iter = 0; iter < 60; ++iter) {
+                    const double mid = 0.5 * (lo + hi);
+                    if (symmetricAt(mid) >= jerkHeadroom) lo = mid;
+                    else hi = mid;
+                }
+                if (lo > 0.0) {
+                    bounds.velocity = std::min(bounds.velocity, lo);
+                    vLocal = lo;
+                    symmetric = symmetricAt(lo);
+                }
+                // If even v → 0 leaves no headroom (degenerate geometry),
+                // fall back to the small positive floor so the trajectory
+                // can still transition through the corner.
                 if (symmetric <= 0.0) {
                     symmetric = std::min(bounds.jerk, 1.0);
                 }
-                bounds.jerk = std::min(bounds.jerk, symmetric);
             }
+            bounds.jerk = std::min(bounds.jerk, symmetric);
         }
         if (!(bounds.jerk > 0.0) || !std::isfinite(bounds.jerk)) {
             bounds.failureReason = "No symmetric tangential jerk is feasible";
@@ -4002,56 +4048,147 @@ public:
         double optimalAStar = 0.0;
         double costValue = 0.0;
 
-        if (!dwellPoints.empty()) {
-            // Sort dwell points by arc length (defensive — the NURBS
-            // converter emits them in order, but setDwellPoints doesn't
-            // enforce sorting).
-            auto sortedDwells = dwellPoints;
-            std::sort(sortedDwells.begin(), sortedDwells.end(),
-                      [](const auto& a, const auto& b) {
-                          return a.first < b.first;
-                      });
+        // --- Split handling: partition the path into sub-paths ---
+        //
+        // A sub-path solve uses one snap-space pulse under bounds taken as
+        // the *minimum* of the velocity/acceleration/jerk limits over its
+        // interval (see globalBounds). That conservatism is fine for a
+        // homogeneous interval, but collapses a heterogeneous toolpath to
+        // its weakest point: a slow extrusion segment caps adjacent rapids,
+        // a restrictive corner imposes its crossing speed on the whole
+        // path, and a curvature discontinuity drags down jerk everywhere.
+        //
+        // Two kinds of split points localize the min bounds to the
+        // interval they actually govern:
+        //   1. Dwell points (G4): boundary velocity 0 plus a DWELL arc
+        //      (the original splitting mechanism — it also keeps the
+        //      1/v_lim wall-duration integral finite).
+        //   2. Limit discontinuities: piece boundaries where the per-piece
+        //      feed rate changes or where the junction model demands a
+        //      real slowdown (finite, binding corner velocity). The
+        //      enforced boundary velocity is the junction crossing speed
+        //      min(cornerVel, feedL, feedR, machine caps).
+        //
+        // If any sub-path solve fails, the junction splits are dropped and
+        // the code falls back to the previous behaviour (dwell-only splits,
+        // or a single whole-path solve), so correctness is never worse
+        // than before.
+        struct PathSplit {
+            double s;         /**< Arc-length position of the split */
+            double boundaryV; /**< Enforced crossing velocity (0 for dwells) */
+            double dwell;     /**< Dwell duration in seconds (may be 0) */
+            bool isDwell;     /**< True for G4 dwells (even zero-duration),
+                                   false for velocity junctions */
+        };
 
-            // Build split points: [0, s_d1, s_d2, ..., L]
-            // Each consecutive pair defines a sub-path.
-            std::vector<double> splitS;
-            splitS.push_back(0.0);
-            for (const auto& [s, dur] : sortedDwells) {
-                splitS.push_back(s);
+        std::vector<PathSplit> splits;
+        for (const auto& [s, dur] : dwellPoints)
+            splits.push_back({s, 0.0, dur, true});
+        bool haveJunctionSplits = false;
+
+        if (pathCopy->hasPerSegmentVelocityLimits()) {
+            const auto& segs = pathCopy->segments();
+            const auto& feeds = pathCopy->segmentMaxVelocities();
+            const auto& corners = pathCopy->cornerVelocities();
+            const double infD = std::numeric_limits<double>::infinity();
+            const double machineCap = std::min(
+                static_cast<double>(feedRate),
+                static_cast<double>(limits_.path.maxPathVelocity));
+            for (size_t i = 1; i < segs.size(); ++i) {
+                const double fL = (i - 1 < feeds.size()) ? feeds[i - 1] : infD;
+                const double fR = (i < feeds.size()) ? feeds[i] : infD;
+                const double cornerV =
+                    (i < corners.size()) ? corners[i] : infD;
+                const bool feedChange =
+                    (std::isinf(fL) != std::isinf(fR)) ||
+                    (std::isfinite(fL) && std::isfinite(fR) &&
+                     std::abs(fL - fR) > 1e-3 * std::min(fL, fR));
+                const bool bindingCorner =
+                    std::isfinite(cornerV) &&
+                    cornerV < 0.98 * std::min({fL, fR, machineCap});
+                if (!feedChange && !bindingCorner) continue;
+                const double crossV =
+                    std::min({cornerV, fL, fR, machineCap});
+                splits.push_back(
+                    {segs[i].cumulativeArcLength, crossV, 0.0, false});
+                haveJunctionSplits = true;
             }
-            splitS.push_back(static_cast<double>(pathLength));
+        }
 
-            // Helper: create a DWELL arc at position s with duration dur
-            auto makeDwellArc = [](double s, double dur) {
-                typename WSS::Arc arc;
-                arc.type = WeightedArcType::DWELL;
-                arc.s0 = s;
-                arc.s1 = s;
-                arc.v0 = 0.0;
-                arc.a0 = 0.0;
-                arc.eta = 0.0;
-                arc.a_star = 0.0;
-                arc.duration = dur;
-                return arc;
-            };
+        // Sort by arc length and merge coincident points. A dwell always
+        // wins over a junction (its boundary velocity is 0 anyway), but
+        // consecutive dwells at the same position are kept as separate
+        // entries — each G4 produces its own DWELL arc.
+        std::stable_sort(splits.begin(), splits.end(),
+                  [](const PathSplit& a, const PathSplit& b) {
+                      return a.s < b.s;
+                  });
+        {
+            std::vector<PathSplit> merged;
+            merged.reserve(splits.size());
+            for (const auto& sp : splits) {
+                if (!merged.empty() && sp.s - merged.back().s < 1e-9) {
+                    if (sp.isDwell) {
+                        if (merged.back().isDwell) {
+                            merged.push_back(sp);  // dwell after dwell
+                        } else {
+                            // Junction coincident with a dwell: drop it.
+                            merged.back() = sp;
+                        }
+                    } else if (!merged.back().isDwell) {
+                        merged.back().boundaryV = std::min(
+                            merged.back().boundaryV, sp.boundaryV);
+                    }
+                    // else: junction coincident with a dwell -> dropped
+                } else {
+                    merged.push_back(sp);
+                }
+            }
+            splits = std::move(merged);
+        }
+
+        // Helper: create a DWELL arc at position s with duration dur
+        auto makeDwellArc = [](double s, double dur) {
+            typename WSS::Arc arc;
+            arc.type = WeightedArcType::DWELL;
+            arc.s0 = s;
+            arc.s1 = s;
+            arc.v0 = 0.0;
+            arc.a0 = 0.0;
+            arc.eta = 0.0;
+            arc.a_star = 0.0;
+            arc.duration = dur;
+            return arc;
+        };
+
+        // Solve the path split into sub-paths at the given split points.
+        // On success fills `arcs`, `optimalAStar`, `costValue` and returns
+        // true; on failure sets `failReason` and returns false, leaving
+        // the output vectors untouched.
+        const auto solveSplit = [&](const std::vector<PathSplit>& sp,
+                                    std::string& failReason) -> bool {
+            std::vector<typename WSS::Arc> tmpArcs;
+            double tmpCost = 0.0;
+            double tmpAStar = 0.0;
+            bool firstSolve = true;
 
             const auto& originalPath = pathCopy->inner();
 
-            for (size_t i = 0; i + 1 < splitS.size(); ++i) {
-                double sStart = splitS[i];
-                double sEnd = splitS[i + 1];
-                double subLen = sEnd - sStart;
+            for (size_t i = 0; i <= sp.size(); ++i) {
+                const double sStart = (i == 0) ? 0.0 : sp[i - 1].s;
+                const double sEnd = (i == sp.size())
+                    ? static_cast<double>(pathLength) : sp[i].s;
+                const double subLen = sEnd - sStart;
 
-                // Insert DWELL arc at the start of this segment (if not
-                // the very first split, which is the path start).
-                // The dwell at splitS[i] is sortedDwells[i-1] (for i > 0).
-                if (i > 0) {
-                    arcs.push_back(
-                        makeDwellArc(sStart, sortedDwells[i - 1].second));
-                    costValue += wEff.w_t * sortedDwells[i - 1].second;
+                // Insert the DWELL arc that precedes this sub-path
+                // (only when the split point is an actual dwell).
+                if (i > 0 && sp[i - 1].isDwell) {
+                    tmpArcs.push_back(
+                        makeDwellArc(sStart, sp[i - 1].dwell));
+                    tmpCost += wEff.w_t * sp[i - 1].dwell;
                 }
 
-                // Skip zero-length sub-paths (consecutive dwells)
+                // Skip zero-length sub-paths (consecutive splits)
                 if (subLen < 1e-9) continue;
 
                 // Create trimmed sub-path
@@ -4075,9 +4212,9 @@ public:
                     // index. The sub-path's pieces may be trimmed versions
                     // of the original pieces, so we need to find which
                     // original piece each sub-path piece corresponds to.
-                    const auto& origSegs = pathCopy->segments();
+                    const auto& origFeedRates =
+                        pathCopy->segmentMaxVelocities();
                     const auto& subSegs = subPathAdapter.segments();
-                    const auto& origFeedRates = pathCopy->segmentMaxVelocities();
 
                     std::vector<double> subFeedRates;
                     subFeedRates.reserve(subSegs.size());
@@ -4106,8 +4243,8 @@ public:
                     // internal junctions based on the sub-path's geometry.
                     // At the sub-path boundaries (s=0 and s=end), the
                     // corner velocities default to infinity, which is
-                    // correct since the v=0 constraint is enforced by
-                    // the solver's boundary velocities.
+                    // correct since the boundary velocity constraint is
+                    // enforced by the solver's boundary velocities.
                     //
                     // Use the same centripetal acceleration limit as the
                     // planner's kinematic limits. The junction deviation
@@ -4120,11 +4257,12 @@ public:
                             limits_.path.maxCentripetalAcceleration));
                 }
 
-                // Boundary velocities: v=0 at dwell points, original
-                // boundaries at path start/end.
-                T subV0 = (i == 0) ? v0 : T(0);
-                T subVEnd =
-                    (i + 2 == splitS.size()) ? endVelocity : T(0);
+                // Boundary velocities: the split point's crossing speed
+                // (0 for dwells), original boundaries at path start/end.
+                const T subV0 = (i == 0)
+                    ? v0 : static_cast<T>(sp[i - 1].boundaryV);
+                const T subVEnd = (i == sp.size())
+                    ? endVelocity : static_cast<T>(sp[i].boundaryV);
 
                 // Solve sub-path
                 Solver subSolver(subPathAdapter, limits_, wEff, feedRate);
@@ -4132,24 +4270,15 @@ public:
                     subSolver.solve(subV0, subVEnd, constraintCacheSize);
 
                 if (subArcs.empty()) {
-                    // Solver could not find a feasible trajectory for
-                    // this sub-path. This can happen when the sub-path
-                    // is too short for the solver to decelerate to v=0
-                    // and accelerate back within the available distance.
-                    wss_.reset();
-                    pathCopy_.reset();
-                    lastFailure_ = subSolver.failureReason();
-                    return std::make_unique<SampledVelocityProfile>();
+                    failReason = subSolver.failureReason();
+                    return false;
                 }
 
-                // Accumulate cost from sub-solvers. optimalAStar is a
-                // per-sub-problem singular acceleration; we keep the first
-                // sub-solver's value as a representative (it's metadata,
-                // not used in WSS trajectory computation).
-                if (i == 0) {
-                    optimalAStar = subSolver.optimalAStar();
+                if (firstSolve) {
+                    tmpAStar = subSolver.optimalAStar();
+                    firstSolve = false;
                 }
-                costValue += subSolver.costValue();
+                tmpCost += subSolver.costValue();
 
                 // Offset arc positions from sub-path local to global
                 for (auto& arc : subArcs) {
@@ -4157,23 +4286,54 @@ public:
                     arc.s1 += sStart;
                 }
 
-                // Append sub-path arcs
-                arcs.insert(arcs.end(),
-                            std::make_move_iterator(subArcs.begin()),
-                            std::make_move_iterator(subArcs.end()));
+                tmpArcs.insert(tmpArcs.end(),
+                               std::make_move_iterator(subArcs.begin()),
+                               std::make_move_iterator(subArcs.end()));
             }
-        } else {
-            // No dwell points: solve the entire path at once
+
+            arcs = std::move(tmpArcs);
+            optimalAStar = tmpAStar;
+            costValue = tmpCost;
+            return true;
+        };
+
+        const auto solveWhole = [&](std::string& failReason) -> bool {
             Solver solver(*pathCopy, limits_, wEff, feedRate);
             arcs = solver.solve(v0, endVelocity, constraintCacheSize);
             if (arcs.empty()) {
-                wss_.reset();
-                pathCopy_.reset();
-                lastFailure_ = solver.failureReason();
-                return std::make_unique<SampledVelocityProfile>();
+                failReason = solver.failureReason();
+                return false;
             }
             optimalAStar = solver.optimalAStar();
             costValue = solver.costValue();
+            return true;
+        };
+
+        std::string failReason;
+        bool solved;
+        if (!splits.empty()) {
+            solved = solveSplit(splits, failReason);
+            if (!solved && haveJunctionSplits) {
+                // Junction splitting produced an infeasible sub-problem
+                // (e.g. a boundary velocity the neighbours cannot reach).
+                // Fall back to the previous behaviour: dwell-only splits,
+                // or the single whole-path solve when there are no dwells.
+                std::vector<PathSplit> dwellOnly;
+                for (const auto& sp : splits)
+                    if (sp.isDwell) dwellOnly.push_back(sp);
+                solved = dwellOnly.empty()
+                    ? solveWhole(failReason)
+                    : solveSplit(dwellOnly, failReason);
+            }
+        } else {
+            solved = solveWhole(failReason);
+        }
+
+        if (!solved) {
+            wss_.reset();
+            pathCopy_.reset();
+            lastFailure_ = failReason;
+            return std::make_unique<SampledVelocityProfile>();
         }
 
         // Build the WSS.

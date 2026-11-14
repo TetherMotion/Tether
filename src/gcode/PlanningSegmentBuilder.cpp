@@ -284,6 +284,24 @@ PlanningSegmentResult PlanningSegmentBuilder::fromText(
             if (pseg.arcRadius > 1e-9) {
                 pseg.segmentLength = std::abs(pseg.arcSweep) * pseg.arcRadius;
             }
+        } else if (mseg.type == MotionSegment::Type::SPLINE) {
+            // G5/G5.1 spline: copy the Bézier control points. A G5.1
+            // quadratic emits splinePoints[2] == [3] (both equal the
+            // target); represent it with the 3 distinct points so the
+            // downstream converter can build a degree-2 Bézier.
+            pseg.controlPoints.assign(mseg.splinePoints.begin(),
+                                      mseg.splinePoints.end());
+            const auto& sp = mseg.splinePoints;
+            const auto coincide = [](const auto& a, const auto& b) {
+                return std::abs(a[0] - b[0]) < 1e-9 &&
+                       std::abs(a[1] - b[1]) < 1e-9 &&
+                       std::abs(a[2] - b[2]) < 1e-9;
+            };
+            if (coincide(sp[2], sp[3])) {
+                pseg.motionType = SegmentMotionType::QuadraticSpline;
+                pseg.controlPoints.erase(pseg.controlPoints.begin() + 2);
+            }
+            pseg.segmentLength = currentPos.linearDistance(mseg.endPosition);
         } else {
             // Linear / rapid
             pseg.segmentLength = currentPos.linearDistance(mseg.endPosition);
