@@ -1743,3 +1743,66 @@ TEST(PlannerScenarios_Toppra, HeadToHeadVsPareto) {
                   << " maxA=" << r.toppraMaxA << "\n";
     }
 }
+
+// Production-path coverage: MotionPlanBuilder + ProfilerType::
+// AnalyticalJerkLimitedTOPPRA. createProfiler constructs the planner
+// with buildHybrid=false — the returned profile samples from the SSR
+// (exact source); the Hybrid is an opt-in side product whose ~30 s /
+// ~55k-element build on BenchLayer-scale paths nothing here consumes.
+// This test verifies the wiring end-to-end: plan builds, arc length is
+// monotone, endpoints are at rest, the full length is covered — and a
+// dwell survives the whole production path into the plan duration.
+TEST(PlannerScenarios_Toppra, MotionPlanBuilderToppraPath) {
+    auto L = printerLimits();
+
+    auto makeSegs = [](bool withDwell) {
+        MotionSegmentList segs;
+        segs.append(MotionSegment::linear(
+            Vec<3, double>{0, 0, 0}, Vec<3, double>{25, 0, 0}, 100.0));
+        if (withDwell) {
+            segs.append(MotionSegment::dwell(
+                0.4, std::array<double, MAX_MOTION_AXES>{25, 0, 0}));
+        }
+        segs.append(MotionSegment::linear(
+            Vec<3, double>{25, 0, 0}, Vec<3, double>{25, 25, 0}, 100.0));
+        segs.append(MotionSegment::linear(
+            Vec<3, double>{25, 25, 0}, Vec<3, double>{0, 25, 0}, 100.0));
+        return segs;
+    };
+
+    MotionPlanBuilder3D builder(
+        L, {}, ProfilerType::AnalyticalJerkLimitedTOPPRA);
+    auto plan = builder.build(makeSegs(true), 100.0);
+    ASSERT_GT(plan.numSegments(), 0u);
+    const double T = plan.totalDuration();
+    ASSERT_GT(T, 0.0);
+
+    double prevS = -1e-9, maxV = 0.0, maxA = 0.0, endS = 0.0;
+    for (int i = 0; i <= 2000; ++i) {
+        const auto st = plan.evaluateAt(T * i / 2000.0);
+        ASSERT_TRUE(std::isfinite(st.arcLength) &&
+                    std::isfinite(st.pathVelocity))
+            << "nonfinite state at step " << i;
+        EXPECT_GE(st.arcLength, prevS - 1e-6)
+            << "backward arcLength at step " << i;
+        prevS = st.arcLength;
+        maxV = std::max(maxV, std::abs(st.pathVelocity));
+        maxA = std::max(maxA, std::abs(st.pathAcceleration));
+        endS = st.arcLength;
+    }
+    EXPECT_NEAR(endS, plan.totalLength(), 1e-3);
+    EXPECT_LE(maxV, 100.0 * 1.10 + 0.5);
+    EXPECT_LE(maxA, L.path.maxPathAcceleration * 1.05 + 1.0);
+    EXPECT_NEAR(plan.evaluateAt(0.0).pathVelocity, 0.0, 1e-6);
+    EXPECT_NEAR(plan.evaluateAt(T).pathVelocity, 0.0, 1e-6);
+
+    // The 0.4 s dwell must survive into the plan duration: an identical
+    // plan without the dwell is materially shorter.
+    MotionPlanBuilder3D builder2(
+        L, {}, ProfilerType::AnalyticalJerkLimitedTOPPRA);
+    auto plan2 = builder2.build(makeSegs(false), 100.0);
+    ASSERT_GT(plan2.numSegments(), 0u);
+    EXPECT_GT(T, plan2.totalDuration() + 0.35)
+        << "dwell dropped on the TOPP-RA builder path: T=" << T
+        << " no-dwell=" << plan2.totalDuration();
+}
