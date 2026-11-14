@@ -10,6 +10,7 @@ set(TETHER_MOTION_GEOMETRY_SOURCES
     ${TETHER_ROOT}/src/motion_planner/geometry/PointCurveDistance.cpp
     ${TETHER_ROOT}/src/motion_planner/geometry/PiecewiseNurbsPath.cpp
     ${TETHER_ROOT}/src/motion_planner/geometry/CertifiedCurvatureSampler.cpp
+    ${TETHER_ROOT}/src/motion_planner/geometry/PathRecompressor.cpp
 )
 
 # Filter to only existing files

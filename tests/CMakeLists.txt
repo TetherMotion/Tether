@@ -660,6 +660,7 @@ set(MOTION_GEOMETRY_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/PiecewiseNurbsPathTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/CertifiedCurvatureSamplerTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/PlanningSegmentConverterTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/geometry/PathRecompressorTests.cpp"
 )
 tether_add_test_executable(tether_motion_geometry_tests
     main.cpp

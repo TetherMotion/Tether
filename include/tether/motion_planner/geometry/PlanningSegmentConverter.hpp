@@ -61,4 +61,39 @@ struct PlanningSegmentNurbsResult {
 PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
     const std::vector<GCode::PlanningSegment>& segments);
 
+/**
+ * Options for error-bounded geometric recompression of the converted
+ * path (see PathRecompressor.hpp). Disabled by default — the converter
+ * then behaves exactly as before (one piece per segment). When enabled,
+ * runs of tiny degree-1 pieces (slicer-tessellated curves) are merged
+ * into fitted B-spline pieces certified within `tolerance` mm of the
+ * original polyline; corners sharper than `cornerAngleDeg`, non-line
+ * pieces (exact arcs/splines), dwell boundaries, and G0 breaks are
+ * preserved exactly.
+ */
+struct SegmentRecompressOptions {
+    bool enabled = false;              ///< opt-in — off keeps 1:1 pieces
+    double tolerance = 0.02;           ///< certified deviation bound [mm]
+    int degree = 3;                    ///< fitted piece degree
+    double cornerAngleDeg = 10.0;      ///< junction break angle
+    std::size_t maxControlPoints = 48; ///< per-piece CP cap before split
+};
+
+/**
+ * Same as above, with optional geometric recompression applied after
+ * conversion (not applied to outside-circle-blended paths — blending
+ * already restructures the geometry).
+ *
+ * When recompression merges pieces, per-piece attributes are merged
+ * conservatively over each output piece's source range: feed rates
+ * take the minimum positive value (a fitted piece never gets a looser
+ * cap than its tightest source segment), deviations and extruder speeds
+ * take the maximum (conservative for colour-map/planner inspection),
+ * and dwell points keep their piece-boundary positions remapped onto
+ * the output path's arc-length coordinate.
+ */
+PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
+    const std::vector<GCode::PlanningSegment>& segments,
+    const SegmentRecompressOptions& opts);
+
 } // namespace tether::motion

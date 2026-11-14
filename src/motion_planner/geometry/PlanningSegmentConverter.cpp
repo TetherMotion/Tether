@@ -4,6 +4,7 @@
  */
 
 #include "tether/motion_planner/geometry/PlanningSegmentConverter.hpp"
+#include "tether/motion_planner/geometry/PathRecompressor.hpp"
 #include "tether/motion_planner/blend/OutsideCircleBlender.hpp"
 
 #include <algorithm>
@@ -96,7 +97,8 @@ NurbsCurve splineNurbsFromSegment(const PlanningSegment& seg)
 } // namespace
 
 PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
-    const std::vector<PlanningSegment>& segments)
+    const std::vector<PlanningSegment>& segments,
+    const SegmentRecompressOptions& opts)
 {
     std::vector<NurbsCurve> curves;
     std::vector<float> deviations;
@@ -107,6 +109,9 @@ PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
 
     // Track cumulative arc length to record dwell positions.
     double cumulativeArcLength = 0.0;
+    // Piece indices at which a dwell occurs (boundary before the piece) —
+    // recompression must not merge across them.
+    std::vector<std::size_t> dwellBreakPieces;
 
     for (const auto& seg : segments) {
         // Extract 3D start/end positions (XYZ only)
@@ -121,6 +126,7 @@ PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
             dp.arcLength = cumulativeArcLength;
             dp.duration = seg.segmentTime;  // G4 dwell time in seconds
             dwellPoints.push_back(dp);
+            dwellBreakPieces.push_back(curves.size());
             continue;
         }
 
@@ -358,11 +364,83 @@ PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
                 std::move(dwellPoints)};
     }
 
-    return {PiecewiseNurbsPath(std::move(curves)),
+    PiecewiseNurbsPath path(std::move(curves));
+
+    // ── Optional error-bounded geometric recompression ──
+    // Merges runs of tiny degree-1 pieces into fitted B-spline pieces
+    // certified within opts.tolerance of the source polyline.
+    if (opts.enabled && path.numPieces() > 1) {
+        RecompressConfig rcfg;
+        rcfg.tolerance = opts.tolerance;
+        rcfg.degree = opts.degree;
+        rcfg.cornerAngleDeg = opts.cornerAngleDeg;
+        rcfg.maxControlPoints = opts.maxControlPoints;
+        auto rc = recompressPiecewiseNurbs(path, rcfg, dwellBreakPieces);
+
+        // Remap per-piece attributes over each output piece's source
+        // range: feedRate → min positive (tightest cap wins), deviation
+        // and extruder speed → max (conservative for colour-map data).
+        const std::size_t nOut = rc.path.numPieces();
+        std::vector<float> newDev(nOut, 0.0f);
+        std::vector<float> newExt(nOut, 0.0f);
+        std::vector<double> newFeed(nOut, 0.0);
+        for (std::size_t j = 0; j < nOut && j < rc.sourceMap.size(); ++j) {
+            const auto [b, e] = rc.sourceMap[j];
+            double minFeed = 0.0;
+            for (std::size_t i = b; i < e && i < deviations.size(); ++i) {
+                newDev[j] = std::max(newDev[j], deviations[i]);
+                newExt[j] = std::max(newExt[j], extruderSpeeds[i]);
+                if (feedRates[i] > 0.0)
+                    minFeed = (minFeed > 0.0)
+                        ? std::min(minFeed, feedRates[i])
+                        : feedRates[i];
+            }
+            newFeed[j] = minFeed;
+        }
+        deviations = std::move(newDev);
+        extruderSpeeds = std::move(newExt);
+        feedRates = std::move(newFeed);
+
+        // Remap dwell arc lengths: a dwell at source-piece boundary k
+        // sits at the start of the output piece whose source range
+        // begins at k (guaranteed — dwells are hard breaks). A dwell at
+        // the path end maps to the total length.
+        std::vector<double> outPrefix(nOut + 1, 0.0);
+        for (std::size_t j = 0; j < nOut; ++j)
+            outPrefix[j + 1] = outPrefix[j] + rc.path.piece(j).length();
+        const std::size_t nSrc = path.numPieces();
+        for (std::size_t d = 0; d < dwellPoints.size(); ++d) {
+            const std::size_t k = dwellBreakPieces[d];
+            if (k >= nSrc) {
+                dwellPoints[d].arcLength = outPrefix[nOut];
+                continue;
+            }
+            for (std::size_t j = 0; j < nOut; ++j) {
+                if (rc.sourceMap[j].srcBegin == k) {
+                    dwellPoints[d].arcLength = outPrefix[j];
+                    break;
+                }
+            }
+        }
+
+        return {std::move(rc.path),
+                std::move(deviations),
+                std::move(extruderSpeeds),
+                std::move(feedRates),
+                std::move(dwellPoints)};
+    }
+
+    return {std::move(path),
             std::move(deviations),
             std::move(extruderSpeeds),
             std::move(feedRates),
             std::move(dwellPoints)};
+}
+
+PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
+    const std::vector<PlanningSegment>& segments)
+{
+    return piecewiseNurbsFromSegments(segments, SegmentRecompressOptions{});
 }
 
 } // namespace tether::motion

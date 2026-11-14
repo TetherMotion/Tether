@@ -135,7 +135,9 @@ struct PlannedRun {
  */
 PlannedRun buildPathFromGcode(const std::string& gcode,
                               const KinematicLimits<3, double>& limits,
-                              double junctionDev = 0.05) {
+                              double junctionDev = 0.05,
+                              const tether::motion::SegmentRecompressOptions*
+                                  rcOpts = nullptr) {
     PlannedRun r;
 
     auto parsed = GCode::PlanningSegmentBuilder::fromText(gcode);
@@ -151,7 +153,9 @@ PlannedRun buildPathFromGcode(const std::string& gcode,
 
     std::optional<tether::motion::PlanningSegmentNurbsResult> nurbsOpt;
     try {
-        nurbsOpt.emplace(piecewiseNurbsFromSegments(parsed.segments));
+        nurbsOpt.emplace(rcOpts
+            ? piecewiseNurbsFromSegments(parsed.segments, *rcOpts)
+            : piecewiseNurbsFromSegments(parsed.segments));
     } catch (const std::exception& e) {
         r.failedAt = std::string("nurbs: ") + e.what();
         return r;
@@ -1919,4 +1923,69 @@ TEST(PlannerScenarios_Toppra, MotionPlanBuilderToppraPath) {
     EXPECT_GT(T, plan2.totalDuration() + 0.35)
         << "dwell dropped on the TOPP-RA builder path: T=" << T
         << " no-dwell=" << plan2.totalDuration();
+}
+
+// Error-bounded geometric recompression end-to-end: a tessellated bad
+// G-code (perimeter arcs emitted as hundreds of micro-chords, like a
+// slicer without arc fitting) must compress into a few fitted NURBS
+// pieces while staying within the certified tolerance — and the result
+// must still drive the production planner (PathAdapter → Pareto) to a
+// valid, monotone trajectory that reaches the end.
+TEST(PlannerScenarios_Toppra, BadGcodeRecompressionEndToEnd) {
+    // Rounded-square perimeter: 4 corners × 40 chords each + straight
+    // edges — ~200 micro-segments of genuine curve.
+    std::ostringstream os;
+    os << "G90\nM83\nG0 X10 Y0 Z0.3 F18000\n";
+    const double R = 10.0, S = 80.0;
+    const double cx[4] = {S - R, S - R, R, R};
+    const double cy[4] = {R, S - R, S - R, R};
+    const double a0[4] = {1.5 * M_PI, 0.0, 0.5 * M_PI, M_PI};
+    for (int c = 0; c < 4; ++c) {
+        for (int j = 0; j < 40; ++j) {
+            const double a = a0[c] + (j + 1) * (M_PI / 2.0) / 40.0;
+            os << "G1 X" << cx[c] + R * std::cos(a)
+               << " Y" << cy[c] + R * std::sin(a) << " E0.02 F6000\n";
+        }
+        // straight edge to the next corner
+        const int nc = (c + 1) % 4;
+        os << "G1 X" << cx[nc] + R * std::cos(a0[nc])
+           << " Y" << cy[nc] + R * std::sin(a0[nc]) << " E0.1 F6000\n";
+    }
+    const std::string gcode = os.str();
+    const auto limits = printerLimits();
+
+    auto plain = buildPathFromGcode(gcode, limits);
+    ASSERT_TRUE(plain.failedAt.empty()) << plain.failedAt;
+    ASSERT_EQ(plain.numNurbsPieces, 165u);
+
+    tether::motion::SegmentRecompressOptions rcOpts;
+    rcOpts.enabled = true;
+    rcOpts.tolerance = 0.02;
+    auto rc = buildPathFromGcode(gcode, limits, 0.05, &rcOpts);
+    ASSERT_TRUE(rc.failedAt.empty()) << rc.failedAt;
+
+    // ~164 pieces → ~8 (4 corner fits + 4 edges). Path length preserved.
+    EXPECT_LT(rc.numNurbsPieces, 20u);
+    EXPECT_NEAR(rc.pathLength, plain.pathLength, 1.0);
+
+    // The compressed path drives the production planner to a valid plan.
+    mpa::ParetoTimeEnergyOptimalVelocityPlanner<3, double> planner(
+        limits, {});
+    auto profile = planner.computeProfile(rc.path, 200.0, 0.0, 0.0, 4000);
+    ASSERT_NE(profile, nullptr);
+    ASSERT_NE(planner.weightedSource(), nullptr);
+    const auto& wss = planner.weightedSource();
+    const double T = wss->totalTime();
+    ASSERT_GT(T, 0.0);
+
+    double prevS = -1e-9;
+    for (int i = 0; i <= 4000; ++i) {
+        const double s = wss->arcLength(T * i / 4000.0);
+        ASSERT_TRUE(std::isfinite(s));
+        EXPECT_GE(s, prevS - 1e-6) << "backward at step " << i;
+        prevS = s;
+    }
+    EXPECT_NEAR(wss->arcLength(T), rc.pathLength, 1e-3);
+    EXPECT_NEAR(wss->pathVelocity(0.0), 0.0, 1e-6);
+    EXPECT_NEAR(wss->pathVelocity(T), 0.0, 1e-6);
 }

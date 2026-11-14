@@ -187,6 +187,32 @@ corner velocities + dwell points) →
 `ParetoTimeEnergyOptimalVelocityPlanner::computeProfile` →
 `WeightedSwitchingStructure` (WSS) arc list.
 
+- **Geometric recompression** (`geometry/PathRecompressor.*`,
+  `SegmentRecompressOptions` on `piecewiseNurbsFromSegments`, opt-in):
+  merges runs of tiny degree-1 pieces (slicer-tessellated curves — the
+  "bad G-code" case) into fitted cubic B-spline pieces under a
+  *certified* Hausdorff bound `tolerance` mm. Runs break at non-line
+  pieces (arcs/splines stay verbatim), G0 gaps, dwell piece-boundaries
+  (hard breaks), and junctions > `cornerAngleDeg`. Each candidate is
+  certified in both directions: source vertices → `pointCurveDistance`
+  (Bernstein root isolation) and dense curve samples → polyline with a
+  convex-hull |C′| gap bound. Failures grow CPs to `maxControlPoints`,
+  then split at the worst vertex; at the depth cap the source pieces are
+  emitted verbatim, so the output never exceeds `tolerance`. Converter
+  attribute merge is conservative: feedRate → min positive (tightest cap
+  wins), deviations/extruderSpeeds → max, dwells remap onto output
+  boundaries via the returned `sourceMap`. Measured on a real 55k-segment
+  print: ~1.3–1.5× fewer pieces (file is mostly legitimate zigzag/travel
+  geometry that is *correctly* preserved); tessellated curves alone go
+  10–50× (49-piece rounded-square loop → 9 pieces; 200-chord arc → 1
+  piece at 13 µm deviation). Pitfalls learned the hard way: the dir-2 gap
+  bound must use the *final* K-doubling iteration's bound, not the loose
+  early estimate; `lsqKnots` needs strictly-increasing interior knots
+  (duplicate knots → 0/0 basis → NaN CPs); and a boundary split hint must
+  clamp to an interior vertex or the split never happens. Not applied to
+  outside-circle-blended paths. `PathRecompressor*` and
+  `BadGcodeRecompressionEndToEnd` pin it.
+
 - **Solver model**: one scalar `(V, A, J, snap)` bound per piece via
   `globalBounds()` over a sampled grid, then one accel/decel pulse per
   piece (`optimizePulsePlan`). The fine-grid TOPP-RA machinery
