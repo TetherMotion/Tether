@@ -221,8 +221,23 @@ corner velocities + dwell points) →
   (`snapTime = cbrt(Δv·S²/2)/S`). On dense sub-mm connectors at
   moderate speeds the floor ≈ the piece length — they are locked to
   near-constant-speed crossings. Recovering it needs nonzero boundary
-  accelerations (the coupled `#if 0` TOPP-RA machinery), same
-  architectural ceiling as the scalar-bound `3κva` conservatism.
+  accelerations (the coupled TOPP-RA machinery), same architectural
+  ceiling as the scalar-bound `3κva` conservatism.
+- **TOPP-RA status** (`AnalyticalJerkLimitedTOPPRA` +
+  `ConstraintEvaluator`): the coupled solver exists and produces SSR
+  trajectories, but its constraint enforcement is currently BUGGY —
+  head-to-head scenario runs (2025, same PathAdapter inputs) show it
+  faster only by violating limits: axis accel overshoots ~1.7× (the
+  integrator clamps `y.a` to path-level `aCap`, not the per-axis
+  `κᵢv²+Tᵢa` boundary; `eta_max` doesn't anticipate the accel wall),
+  `vLim` clamps leak between RK4 grid steps (axisV 102 > 80 measured),
+  and corner stamps/dwells are not consumed at all (carried 58 mm/s
+  through a 5.3 mm/s junction). The one clean data point: ~11% honest
+  gain on a zero-curvature straight line — that's the true
+  nonzero-boundary-acceleration headroom. Productionizing needs:
+  accel-wall-aware eta selection, between-grid vLim enforcement,
+  stamp/dwell injection into vLim + boundary conditions, and ~100×
+  perf work (0.4–5.8 s per small path vs ms-scale Pareto solves).
 - **Perf-relevant caches**: `gridCoeffs_` (per-grid-node tangent,
   curvature, jounce — feeds `accelBoundsFromCache`/
   `etaBoundsFromCache`), `vLimGeoGrid_` (geometric velocity limit;
