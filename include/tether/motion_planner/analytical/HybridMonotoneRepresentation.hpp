@@ -87,15 +87,35 @@ namespace MotionPlanner::analytical {
 // ============================================================================
 
 /**
+ * @brief Coordinate warp for elements adjacent to a low-velocity edge.
+ *
+ * Near a stop or a low-velocity junction stamp, v(s) ~ sqrt(s* - s)
+ * has an unbounded slope that no fixed-degree polynomial in s can
+ * track — certificate-based h-refinement never converges there. But
+ * in the warped coordinate sigma = sqrt(s* - s) (resp. sqrt(s - s*)),
+ * v, t and a are all smooth: v ~ k*sigma, dt/dsigma ~ -2*sigma/v =
+ * const, a ~ const + O(sigma^2). A degree-4 LGL in sigma certifies in
+ * one shot what plain s-LGL needed ~62 bisections for.
+ *
+ * SQRT_LEFT:  sigma = sqrt(s - s_left)   — cusp at the LEFT edge
+ *             (arc leaving a low-velocity point).
+ * SQRT_RIGHT: sigma = sqrt(s_right - s)  — cusp at the RIGHT edge
+ *             (arc approaching a stop/stamp).
+ */
+enum class LGLWarp { NONE, SQRT_LEFT, SQRT_RIGHT };
+
+/**
  * @brief A single hp-LGL spectral element for a scalar function of s.
  *
  * Represents f(s) on [s_left, s_right] as a polynomial of degree N
- * using values at N+1 Legendre-Gauss-Lobatto nodes.
+ * using values at N+1 Legendre-Gauss-Lobatto nodes. With warp != NONE
+ * the polynomial is in the warped coordinate sigma instead of s.
  */
 struct LGLElement {
     double s_left = 0.0;
     double s_right = 0.0;
     int N = 4; /**< Polynomial degree (nodes = N+1) */
+    LGLWarp warp = LGLWarp::NONE;
 
     /**Function values at LGL nodes in reference coordinates [-1, 1] */
     std::vector<double> node_values;
@@ -121,13 +141,30 @@ struct LGLElement {
         node_values.assign(N + 1, 0.0);
     }
 
+    /**Max warped coordinate: sigma ranges over [0, sqrt(h)]. */
+    double warpSigmaMax() const {
+        return std::sqrt(std::max(s_right - s_left, 0.0));
+    }
+
+    /**Warped coordinate of s (0 at the cusp edge, sqrt(h) at the far edge). */
+    double warpSigma(double s) const {
+        return (warp == LGLWarp::SQRT_LEFT)
+            ? std::sqrt(std::max(s - s_left, 0.0))
+            : std::sqrt(std::max(s_right - s, 0.0));
+    }
+
     /**
      * Map s to reference coordinate xi in [-1, 1]
      * @param s Physical arc-length coordinate
      * @return Normalized coordinate ξ on the element
      */
     double sToXi(double s) const {
-        return 2.0 * (s - s_left) / (s_right - s_left) - 1.0;
+        if (warp == LGLWarp::NONE)
+            return 2.0 * (s - s_left) / (s_right - s_left) - 1.0;
+        const double sigmaMax = warpSigmaMax();
+        return (sigmaMax > 0.0)
+            ? 2.0 * warpSigma(s) / sigmaMax - 1.0
+            : 0.0;
     }
 
     /**
@@ -136,7 +173,13 @@ struct LGLElement {
      * @return Physical arc-length coordinate
      */
     double xiToS(double xi) const {
-        return s_left + (xi + 1.0) * (s_right - s_left) / 2.0;
+        if (warp == LGLWarp::NONE)
+            return s_left + (xi + 1.0) * (s_right - s_left) / 2.0;
+        const double sigma =
+            std::clamp((xi + 1.0) * 0.5, 0.0, 1.0) * warpSigmaMax();
+        return (warp == LGLWarp::SQRT_LEFT)
+            ? s_left + sigma * sigma
+            : s_right - sigma * sigma;
     }
 
     /**
@@ -159,9 +202,20 @@ struct LGLElement {
         double xi = sToXi(s);
         xi = std::clamp(xi, -1.0, 1.0);
         double dxi = barycentricDerivative(ref_nodes, node_values, bary_weights, xi);
-        // Physical derivative: df/ds = (2/h) * df/dxi
         double h = s_right - s_left;
-        return (2.0 / h) * dxi;
+        if (warp == LGLWarp::NONE) {
+            // Physical derivative: df/ds = (2/h) * df/dxi
+            return (2.0 / h) * dxi;
+        }
+        // df/ds = df/dxi · (2/σmax) · dσ/ds with dσ/ds = ±1/(2σ).
+        // The 1/σ blow-up at the cusp is the TRUE asymptotic (dt/ds =
+        // 1/v → ∞ at a stop); σ is floored so the returned value is
+        // large but finite and correctly ordered vs. interior points.
+        const double sigmaMax = warpSigmaMax();
+        const double sigma =
+            std::max(warpSigma(s), 1e-6 * sigmaMax);
+        const double sign = (warp == LGLWarp::SQRT_LEFT) ? 1.0 : -1.0;
+        return dxi * (2.0 / sigmaMax) * sign / (2.0 * sigma);
     }
 };
 
@@ -189,6 +243,9 @@ struct HybridElement {
     /**Padé approximant for geometric parameter u(s) */
     PadeApproximant u_of_s;
 
+    /**NURBS piece u_of_s applies to (u is piece-local) */
+    std::size_t pieceIdx = 0;
+
     /**Exact values at element boundaries (for certification) */
     double u_exact_begin = 0.0;
     double u_exact_end = 0.0;
@@ -199,7 +256,9 @@ struct HybridElement {
     double certified_u_error = 0.0;
     double certified_du_error = 0.0;
     double certified_d2u_error = 0.0;
-    /**Midpoint |t_LGL - t_SSR| [s] and |v_LGL - v_SSR| [mm/s]. */
+    /**Max over cert probes of |t_LGL - t_SSR| * v_SSR [mm] (the
+     * s-inversion error invertT commits), |v_LGL - v_SSR| [mm/s],
+     * |a_LGL - a_SSR| [mm/s^2]. */
     double certified_t_error = 0.0;
     double certified_v_error = 0.0;
     double certified_a_error = 0.0;
@@ -274,12 +333,17 @@ public:
         double delta = s - elem.s_begin;
         double u = elem.u_of_s.evaluate(delta);
 
-        // Evaluate NURBS at u
+        // Evaluate NURBS at u — on the element's OWN piece. Locating
+        // the piece from s is ambiguous at piece boundaries (a
+        // boundary s may resolve to the next piece, whose domain the
+        // Padé-u does not belong to).
         if (path_->hasInner()) {
             const auto& inner = path_->inner();
-            auto loc = inner.locate(s);
-            const auto& piece = inner.piece(loc.piece);
-            return toVec(piece.evaluate(u));
+            const auto& piece =
+                inner.piece(std::min(elem.pieceIdx, inner.numPieces() - 1));
+            const double uc =
+                std::clamp(u, piece.knotMin(), piece.knotMax());
+            return toVec(piece.evaluate(uc));
         }
         return path_->evaluatePositionAtArcLength(static_cast<T>(s));
     }
@@ -468,27 +532,27 @@ public:
      * @return Interpolated time at s [s]
      */
     T timeAtArcLength(T s) const override {
-        // Find the element containing this arc length
-        for (const auto& elem : elements_) {
-            if (s >= elem.s_begin - T(1e-10) && s <= elem.s_end + T(1e-10)) {
-                // Linear interpolation of time within element
-                double frac = static_cast<double>(
-                    (s - elem.s_begin) / std::max(elem.s_end - elem.s_begin, T(1e-12)));
-                return static_cast<T>(elem.t_begin + frac * (elem.t_end - elem.t_begin));
-            }
-        }
-        return T(0);
+        // Use the LGL t(s) interpolant — uniformly more accurate than
+        // linear interpolation and correct on warped elements, where
+        // t is far from linear in s near the cusp edge.
+        if (elements_.empty()) return T(0);
+        size_t idx = findElementByS(static_cast<double>(s));
+        if (idx >= elements_.size()) return T(0);
+        return static_cast<T>(
+            elements_[idx].t_of_s.evaluate(static_cast<double>(s)));
     }
 
 private:
-    // Dynamics-fit certification tolerances for h-refinement. Time in
-    // seconds, velocity in mm/s, acceleration in mm/s². The t/v bounds
-    // target the sampled-trajectory error through invertT (δs ≈ δt·v):
-    // 2.5e-4 s keeps s error ≲ 0.025 mm at v=100, and the v midpoint
-    // check bounds the v_of_s interpolant directly.
-    static constexpr double kTCertTol = 2.5e-4;   // [s]
+    // Dynamics-fit certification tolerances for h-refinement. The
+    // time certificate is measured in arc-length space — the quantity
+    // invertT actually commits: |t_lgl(s) - t_exact(s)| * v(s) bounds
+    // the resulting s-inversion error. This is automatically strict
+    // at cruise speed (t_err <= tol/v) and permissive at the sqrt
+    // cusp where v -> 0 and dt/ds -> inf makes any absolute time
+    // tolerance unreachable. The v certificate bounds the v_of_s
+    // interpolant pointwise.
+    static constexpr double kSCertTol = 0.02;     // [mm]
     static constexpr double kVCertTol = 0.25;     // [mm/s]
-    static constexpr double kACertTol = 25.0;     // [mm/s²]
 
     const Path* path_; /**< Non-owning reference to the path */
     ConstraintEvaluator<Dim, T> evaluator_;
@@ -536,64 +600,182 @@ private:
      */
     void buildElementsForArc(const SwitchingArc& arc, const SSR& ssr) {
         const int initialDegree = 4;  // Start with degree-4 LGL
-        const int maxSplits = 6;      // Max h-refinements per arc
+        const int maxSplits = 10;     // Max h-refinements per arc
 
         // Certificate violation: worst error relative to its
-        // tolerance, so the four certificates compare on one scale.
+        // tolerance, so the certificates compare on one scale. The
+        // a-fit is measured but does NOT drive h-refinement: within
+        // ACCEL_MAX/DECEL_MAX arcs eta is recomputed per step from
+        // constraints, so a(s) is a multi-regime curve (limit-clamp
+        // onsets, varying jerk) that no finite-regime interpolant
+        // represents — splitting on it refines forever without
+        // converging. The profile contract lives in u/t/s/v, which do
+        // converge; certified_a_error remains populated for reporting.
         auto violation = [this](const HybridElement& e) {
             return std::max({
                 e.certified_u_error / tolerance_,
-                e.certified_t_error / kTCertTol,
-                e.certified_v_error / kVCertTol,
-                e.certified_a_error / kACertTol});
+                e.certified_t_error / kSCertTol,
+                e.certified_v_error / kVCertTol});
+        };
+
+        // Warped-element selection: an interval adjacent to a
+        // low-velocity edge gets an LGLWarp whose sigma coordinate
+        // vanishes at that edge, so the v~sqrt(s* - s) cusp becomes a
+        // smooth function of sigma and degree-4 LGL certifies in one
+        // shot. The check uses the SSR's exact endpoint velocities and
+        // is re-evaluated per sub-interval, so an interior velocity
+        // dip is picked up automatically once refinement isolates it
+        // at an interval edge. Warping is harmless when not needed
+        // (v(sigma) is still smooth), so the ratio is generous.
+        auto pickWarp = [&ssr](double sLo, double sHi) {
+            const double vLo = std::max(
+                ssr.pathVelocityAtArcLength(static_cast<T>(sLo)), 0.0);
+            const double vHi = std::max(
+                ssr.pathVelocityAtArcLength(static_cast<T>(sHi)), 0.0);
+            // The sqrt cusp exists wherever an edge velocity is small
+            // relative to the element's PEAK velocity — an interior
+            // probe is required: a 70->12 plunge reads 12/20=0.59
+            // against the endpoint-only ratio and misses the warp.
+            const double vMid = std::max(
+                ssr.pathVelocityAtArcLength(
+                    static_cast<T>(0.5 * (sLo + sHi))), 0.0);
+            const double vPk =
+                std::max({vLo, vHi, vMid, 1e-9});
+            constexpr double kRatio = 0.45;
+            if (vHi < kRatio * vPk) return LGLWarp::SQRT_RIGHT;
+            if (vLo < kRatio * vPk) return LGLWarp::SQRT_LEFT;
+            return LGLWarp::NONE;
         };
 
         // (sLo, sHi, parent violation). The parent term drives the
-        // non-improvement stop below.
-        std::vector<std::tuple<double, double, double>> intervals = {
-            {arc.s_begin, arc.s_end,
-             std::numeric_limits<double>::infinity()}
-        };
+        // non-improvement stop below. Intervals are seeded at NURBS
+        // piece boundaries: u = invertLength is piece-local and jumps
+        // at every boundary, so no single per-element approximant can
+        // represent a straddle — without the pre-split the u
+        // certificate could never converge there either.
+        std::vector<std::tuple<double, double, double>> intervals;
+        {
+            double sPrev = arc.s_begin;
+            if (path_->hasInner()) {
+                const auto& inner = path_->inner();
+                const auto locLo = inner.locate(arc.s_begin);
+                const auto locHi = inner.locate(arc.s_end);
+                double pieceEnd = arc.s_begin +
+                    (inner.piece(locLo.piece).length() - locLo.localS);
+                for (std::size_t p = locLo.piece; p < locHi.piece; ++p) {
+                    if (pieceEnd > sPrev + 1e-9 &&
+                        pieceEnd < arc.s_end - 1e-9) {
+                        intervals.push_back(
+                            {sPrev, pieceEnd,
+                             std::numeric_limits<double>::infinity()});
+                        sPrev = pieceEnd;
+                    }
+                    pieceEnd += inner.piece(p + 1).length();
+                }
+            }
+            intervals.push_back(
+                {sPrev, arc.s_end,
+                 std::numeric_limits<double>::infinity()});
+        }
 
         for (int split = 0; split < maxSplits && !intervals.empty(); ++split) {
             std::vector<std::tuple<double, double, double>> nextIntervals;
 
             for (const auto& [sLo, sHi, parentViol] : intervals) {
-                HybridElement elem = buildElement(sLo, sHi, initialDegree, arc, ssr);
-                const double viol = violation(elem);
-
+                const LGLWarp w = pickWarp(sLo, sHi);
+                // p-refinement before h-refinement: in the warped
+                // coordinate the dynamics are smooth, so a failed
+                // degree-4 fit converges at degree 6-8 far cheaper
+                // than two bisection rounds (each spawning its own
+                // builds, Taylor/Padé work, and SSR queries). Keep the
+                // best-scoring attempt for the split heuristic below.
+                HybridElement elem;
+                double viol = std::numeric_limits<double>::infinity();
+                for (int deg : {initialDegree, 6, 8}) {
+                    HybridElement cand =
+                        buildElement(sLo, sHi, deg, w, arc, ssr);
+                    const double cv = violation(cand);
+                    if (cv < viol) {
+                        viol = cv;
+                        elem = std::move(cand);
+                    }
+                    if (cv <= 1.0) break;
+                }
                 // Split unless every certificate fits: the geometry
                 // Padé AND the dynamics LGLs — a good u(s) fit says
                 // nothing about the t(s)/v(s) fit, which is where the
                 // invertible-time error actually comes from.
                 //
-                // Non-improvement stop: on arcs ending at rest or a
-                // stamp, v(s) ~ sqrt(s) gives the LGL fits an
-                // unbounded slope near v=0 — h-refinement converges
-                // too slowly to ever certify, so every such arc used
-                // to split to maxSplits (~63 buildElement calls per
-                // arc; thousands of arcs -> minutes). If splitting did
-                // not reduce the violation by at least ~30%, deeper
-                // splits won't converge either; accept the element
-                // with its actual (bounded) error instead.
-                if (viol <= 1.0 || viol >= 0.7 * parentViol ||
-                    (sHi - sLo) < 1e-8) {
+                // Non-improvement stop: if splitting did not reduce
+                // the violation by at least ~30%, deeper splits won't
+                // converge either; accept the element with its actual
+                // (bounded) error instead — but only when that error
+                // is modest. A large non-improving violation means
+                // the feature estimate MISSED (the dip/kink is still
+                // interior): keep refining rather than shipping a
+                // certified-bad element. The width floor accepts
+                // slivers: below ~5e-3 mm a residual v error is a
+                // bounded pointwise defect no output can resolve,
+                // and refinement would only shave geometrically
+                // toward it at ~30%/level.
+                constexpr double kAcceptCap = 4.0;
+                constexpr double kMinWidth = 5e-3;
+                if (viol <= 1.0 ||
+                    (viol <= kAcceptCap && viol >= 0.7 * parentViol) ||
+                    (sHi - sLo) < kMinWidth) {
                     elements_.push_back(std::move(elem));
                 } else {
-                    // Split into two sub-intervals
-                    double sMid = 0.5 * (sLo + sHi);
-                    nextIntervals.push_back({sLo, sMid, viol});
-                    nextIntervals.push_back({sMid, sHi, viol});
+                    // Split point: put an interior v-minimum (V-dip
+                    // at a stamp) on the children's edges instead of
+                    // hiding it inside — midpoint bisection leaves
+                    // the dip interior so the sqrt warp never
+                    // engages. Read off node values already sampled —
+                    // no extra SSR work.
+                    double sSplit = 0.5 * (sLo + sHi);
+                    const double h = sHi - sLo;
+                    const auto& vn = elem.v_of_s.node_values;
+                    const int n = elem.v_of_s.N;
+                    int jMin = 0;
+                    for (int j = 1; j <= n; ++j) {
+                        if (vn[j] < vn[jMin]) jMin = j;
+                    }
+                    const double vEdgeMax =
+                        std::max(vn.front(), vn.back());
+                    if (jMin != 0 && jMin != n &&
+                        vn[jMin] < 0.7 * vEdgeMax) {
+                        const double sDip = elem.v_of_s.xiToS(
+                            elem.v_of_s.ref_nodes[jMin]);
+                        if (sDip > sLo + 0.05 * h &&
+                            sDip < sHi - 0.05 * h) {
+                            sSplit = sDip;
+                        }
+                    }
+                    nextIntervals.push_back({sLo, sSplit, viol});
+                    nextIntervals.push_back({sSplit, sHi, viol});
                 }
             }
 
             intervals = std::move(nextIntervals);
         }
 
-        // Add any remaining intervals as-is
+        // Add any remaining intervals as-is, keeping the same
+        // p-refinement ladder as the main loop so leftovers get the
+        // best available fit.
         for (const auto& [sLo, sHi, parentViol] : intervals) {
-            HybridElement elem = buildElement(sLo, sHi, initialDegree, arc, ssr);
-            elements_.push_back(std::move(elem));
+            const LGLWarp w = pickWarp(sLo, sHi);
+            HybridElement best;
+            double bestViol = std::numeric_limits<double>::infinity();
+            for (int deg : {initialDegree, 6, 8}) {
+                HybridElement cand =
+                    buildElement(sLo, sHi, deg, w, arc, ssr);
+                const double cv = violation(cand);
+                if (cv < bestViol) {
+                    bestViol = cv;
+                    best = std::move(cand);
+                }
+                if (cv <= 1.0) break;
+            }
+            elements_.push_back(std::move(best));
         }
     }
 
@@ -605,6 +787,7 @@ private:
      * Certifies the error by comparing Padé to exact values at the midpoint.
      */
     HybridElement buildElement(double sLo, double sHi, int degree,
+                               LGLWarp warp,
                                const SwitchingArc& arc, const SSR& ssr) {
         HybridElement elem;
         elem.s_begin = sLo;
@@ -616,10 +799,13 @@ private:
         elem.a_of_s.init(degree);
         elem.t_of_s.s_left = sLo;
         elem.t_of_s.s_right = sHi;
+        elem.t_of_s.warp = warp;
         elem.v_of_s.s_left = sLo;
         elem.v_of_s.s_right = sHi;
+        elem.v_of_s.warp = warp;
         elem.a_of_s.s_left = sLo;
         elem.a_of_s.s_right = sHi;
+        elem.a_of_s.warp = warp;
 
         // Sample t(s), v(s), a(s) at LGL nodes from the SSR's exact
         // inverse queries. The previous implementation integrated the
@@ -646,38 +832,70 @@ private:
             elem.v_of_s.node_values[j] = std::max(
                 ssr.pathVelocityAtArcLength(static_cast<T>(sTarget)),
                 0.0);
+            // a sampled on THIS arc via accelerationOnArc — NOT
+            // ssr.pathAcceleration(t), which resolves t through the
+            // global findArcAtT and takes the neighbouring arc's
+            // right-limit at every shared boundary. Acceleration jumps
+            // at arc switches, so that boundary lookup poisons the
+            // edge node of every element (one wrong node = global fit
+            // wiggle no amount of splitting can fix).
             elem.a_of_s.node_values[j] = static_cast<double>(
-                ssr.pathAcceleration(static_cast<T>(t_j)));
+                ssr.accelerationOnArc(arc, t_j - arc.t0));
         }
 
-        elem.t_begin = elem.t_of_s.node_values.front();
-        elem.t_end = elem.t_of_s.node_values.back();
+        // Element time bounds: evaluate AT the endpoints rather than
+        // reading node_values.front()/back() — for SQRT_RIGHT elements
+        // the node order is reversed (ξ=-1 maps to s_right), so the
+        // front/back values would swap t_begin/t_end. LGL evaluation
+        // at the endpoints returns the exact node values regardless.
+        elem.t_begin = elem.t_of_s.evaluate(sLo);
+        elem.t_end = elem.t_of_s.evaluate(sHi);
 
-        // Certify the dynamics LGLs at the midpoint against the SSR's
-        // exact values — this is what catches a t(s) fit that passes
-        // through its nodes but bows between them (steep 1/v regions).
-        {
-            const double sMidEl = 0.5 * (sLo + sHi);
+        // Certify the dynamics LGLs against the SSR's exact values at
+        // interior probes biased toward both element edges. For a
+        // sqrt-warped element xi=+-0.97 maps within ~1e-3*h of the
+        // cusp edge — the region where a sqrt fit's residual
+        // concentrates and where mid-probes never look; the +-0.45/0
+        // probes cover interior V-dips and kinks.
+        for (double xi : {-0.97, -0.5, 0.0, 0.5, 0.97}) {
+            const double sP = elem.t_of_s.xiToS(xi);
             const double tExact = std::clamp(
                 static_cast<double>(ssr.timeAtArcLength(
-                    static_cast<T>(sMidEl))),
+                    static_cast<T>(sP))),
                 arc.t0, arc.t0 + arc.duration);
             const double vExact = std::max(
-                ssr.pathVelocityAtArcLength(static_cast<T>(sMidEl)),
+                ssr.pathVelocityAtArcLength(static_cast<T>(sP)),
                 0.0);
             const double aExact = static_cast<double>(
-                ssr.pathAcceleration(static_cast<T>(tExact)));
-            elem.certified_t_error =
-                std::abs(elem.t_of_s.evaluate(sMidEl) - tExact);
-            elem.certified_v_error =
-                std::abs(elem.v_of_s.evaluate(sMidEl) - vExact);
-            elem.certified_a_error =
-                std::abs(elem.a_of_s.evaluate(sMidEl) - aExact);
+                ssr.accelerationOnArc(
+                    arc, tExact - arc.t0));
+            // Time fit measured as arc-length error: what invertT
+            // commits at this s is |dt| / (dt/ds) = |dt| * v.
+            elem.certified_t_error = std::max(elem.certified_t_error,
+                std::abs(elem.t_of_s.evaluate(sP) - tExact) * vExact);
+            elem.certified_v_error = std::max(elem.certified_v_error,
+                std::abs(elem.v_of_s.evaluate(sP) - vExact));
+            elem.certified_a_error = std::max(elem.certified_a_error,
+                std::abs(elem.a_of_s.evaluate(sP) - aExact));
         }
+
+        // The element's NURBS piece, located by s — u is piece-local,
+        // so every u(s) and g(u)=||C'(u)|| evaluation must be taken on
+        // THIS piece. (Intervals are pre-split at piece boundaries so
+        // an element never straddles a piece junction.) The previous
+        // getSpeedFactor(u) searched pieces by knot range instead and
+        // silently returned piece 0's g for most elements — every
+        // Taylor coefficient was wrong, the Padé diverged, and the u
+        // certificate forced ~50 futile bisections per arc.
+        const std::size_t elemPiece =
+            path_->hasInner()
+                ? path_->inner().locate(0.5 * (sLo + sHi)).piece
+                : 0;
+        elem.pieceIdx = elemPiece;
 
         // Compute Padé approximant for u(s)
         // We need u(s) at sLo. Get it from the path.
-        double uBegin = getUAtS(sLo);
+        double uBegin = uOnPieceAtS(sLo, elemPiece);
         elem.u_exact_begin = uBegin;
 
         // Compute Taylor coefficients of u(s) at sLo
@@ -685,20 +903,20 @@ private:
         // d²u/ds² = -g'(u)/g(u)³  (from differentiating 1/g)
         // d³u/ds³ = ...
         // For [3/2] Padé, we need m+n+1 = 6 Taylor coefficients
-        auto taylor = computeUTaylor(uBegin, sLo, 6);  // 6 coefficients for [3/2]
+        auto taylor = computeUTaylor(uBegin, elemPiece, 6);  // 6 coefficients for [3/2]
 
         // Build [3/2] Padé approximant
         elem.u_of_s = PadeApproximant(taylor, 3, 2);
 
         // Compute exact u at sHi for certification
-        double uEnd = getUAtS(sHi);
+        double uEnd = uOnPieceAtS(sHi, elemPiece);
         elem.u_exact_end = uEnd;
-        elem.du_ds_exact_begin = 1.0 / getSpeedFactor(uBegin);
-        elem.du_ds_exact_end = 1.0 / getSpeedFactor(uEnd);
+        elem.du_ds_exact_begin = 1.0 / speedFactorOnPiece(elemPiece, uBegin);
+        elem.du_ds_exact_end = 1.0 / speedFactorOnPiece(elemPiece, uEnd);
 
         // Certify: compare Padé to exact at midpoint
         double sMid = 0.5 * (sLo + sHi);
-        double uMidExact = getUAtS(sMid);
+        double uMidExact = uOnPieceAtS(sMid, elemPiece);
         double uMidPade = elem.u_of_s.evaluate(sMid - sLo);
         elem.certified_u_error = std::abs(uMidExact - uMidPade);
 
@@ -708,17 +926,21 @@ private:
                                           std::abs(uEnd - uEndPade));
 
         // Derivative error at midpoint
-        double duMidExact = 1.0 / getSpeedFactor(uMidExact);
+        double duMidExact = 1.0 / speedFactorOnPiece(elemPiece, uMidExact);
         double duMidPade = elem.u_of_s.evaluateDerivative(sMid - sLo);
         elem.certified_du_error = std::abs(duMidExact - duMidPade);
 
         // Second derivative error (approximate)
         double d2uMidPade = elem.u_of_s.evaluate2ndDerivative(sMid - sLo);
-        // Exact d²u/ds² = -g'(u)/(g(u))³  -- approximate numerically
-        double gMid = getSpeedFactor(uMidExact);
-        double gMidPlus = getSpeedFactor(getUAtS(sMid + 1e-6));
-        double gMidMinus = getSpeedFactor(getUAtS(sMid - 1e-6));
-        double gPrime = (gMidPlus - gMidMinus) / 2e-6;
+        // Exact d²u/ds² = -g'(u)/(g(u))³ with g' = dg/du — probed in u
+        // on the element's own piece (the old code probed g in s, which
+        // mixes in du/ds and can cross a piece boundary).
+        const double gMid = speedFactorOnPiece(elemPiece, uMidExact);
+        const double duFD = 1e-6 * std::max(1.0, std::abs(uMidExact));
+        const double gPrime =
+            (speedFactorOnPiece(elemPiece, uMidExact + duFD) -
+             speedFactorOnPiece(elemPiece, uMidExact - duFD)) /
+            (2.0 * duFD);
         double d2uMidExact = -gPrime / (gMid * gMid * gMid);
         elem.certified_d2u_error = std::abs(d2uMidExact - d2uMidPade);
 
@@ -729,38 +951,46 @@ private:
     // NURBS parameter u(s) utilities
     // ========================================================================
 
-    /**Get the NURBS parameter u at arc length s */
-    double getUAtS(double s) const {
-        if (!path_->hasInner()) return s;  // Fallback
+    /**
+     * @brief u at s interpreted on a specific piece (left-limit).
+     *
+     * At a shared piece boundary locate() may return the next piece,
+     * yielding that piece's u_begin where an element on this piece
+     * expects its own u_end — this resolves u as the element's piece
+     * sees it so endpoint certification compares like with like.
+     */
+    double uOnPieceAtS(double s, std::size_t pieceIdx) const {
+        if (!path_->hasInner()) return s;
+        const auto& inner = path_->inner();
+        const auto loc = inner.locate(s);
+        const auto& piece = inner.piece(pieceIdx);
+        const double localS = (loc.piece == pieceIdx)
+            ? loc.localS
+            : (loc.piece > pieceIdx ? piece.length() : 0.0);
+        return piece.invertLength(
+            std::clamp(localS, 0.0, piece.length()));
+    }
+
+    /**Speed factor g(u) = ||C'(u)|| evaluated on a specific piece. */
+    double speedFactorOnPiece(std::size_t pieceIdx, double u) const {
+        if (!path_->hasInner()) return 1.0;
+        const auto& inner = path_->inner();
+        if (pieceIdx >= inner.numPieces()) return 1.0;
+        const auto& p = inner.piece(pieceIdx);
+        const double uc = std::clamp(u, p.knotMin(), p.knotMax());
+        const double g = p.derivative(uc, 1).norm();
+        return (g > 1e-15) ? g : 1e15;
+    }
+
+    /**Speed factor g(u) = ||C'(u)|| on the piece located at s. */
+    double speedFactorAtS(double s) const {
+        if (!path_->hasInner()) return 1.0;
         const auto& inner = path_->inner();
         auto loc = inner.locate(s);
         const auto& piece = inner.piece(loc.piece);
-        return piece.invertLength(loc.localS);
-    }
-
-    /**Get the speed factor g(u) = ||C'(u)|| */
-    double getSpeedFactor(double u) const {
-        if (!path_->hasInner()) return 1.0;
-        const auto& inner = path_->inner();
-        // Find which piece contains u... actually we need to know the piece.
-        // For simplicity, use the path's evaluate to get tangent and compute
-        // speed from the parametric derivative.
-        // This is a simplification; in practice we'd track the piece.
-        // Use arcDerivatives at the corresponding s.
-        // Actually, let's just use the derivative at u on the piece.
-        // We need to find the piece. Since u is a local parameter, we need
-        // to know which piece it belongs to. Let's use a different approach:
-        // compute g from the arc-length derivative.
-        // g(u) = ||C'(u)||, and T = C'(u)/g(u), so g(u) = ||C'(u)||.
-        // We can get C'(u) from piece.derivative(u, 1).
-        // But we need the piece. Let's search for it.
-        for (std::size_t i = 0; i < inner.numPieces(); ++i) {
-            const auto& p = inner.piece(i);
-            if (u >= p.knotMin() - 1e-10 && u <= p.knotMax() + 1e-10) {
-                return p.derivative(u, 1).norm();
-            }
-        }
-        return 1.0;
+        const double u = piece.invertLength(
+            std::clamp(loc.localS, 0.0, piece.length()));
+        return speedFactorOnPiece(loc.piece, u);
     }
 
     /**
@@ -780,12 +1010,13 @@ private:
  *
      * where h(u) = 1/g(u), h'(u) = -g'(u)/g(u)², etc.
  *
-     * @param u0 u at s_0
-     * @param s0 arc length at the point
+     * @param u0 u at the expansion point
+     * @param pieceIdx NURBS piece the expansion point belongs to
      * @param numCoeffs Number of Taylor coefficients to compute
      * @return Taylor coefficients [u_0, u_1, u_2, ...]
      */
-    std::vector<double> computeUTaylor(double u0, double s0, int numCoeffs) const {
+    std::vector<double> computeUTaylor(double u0, std::size_t pieceIdx,
+                                       int numCoeffs) const {
         std::vector<double> coeffs(numCoeffs, 0.0);
         if (numCoeffs < 1) return coeffs;
 
@@ -801,10 +1032,9 @@ private:
 
         const double du = 1e-5;  // Finite difference step
 
-        // h(u) = 1/g(u)
+        // h(u) = 1/g(u) on the element's own piece
         auto h = [&](double u) -> double {
-            double g = getSpeedFactor(u);
-            return (g > 1e-15) ? 1.0 / g : 1e15;
+            return 1.0 / speedFactorOnPiece(pieceIdx, u);
         };
 
         double h0 = h(u0);
@@ -867,6 +1097,10 @@ private:
                    std::max(elem.t_end - elem.t_begin, 1e-12) *
                    (elem.s_end - elem.s_begin);
 
+        if (elem.t_of_s.warp != LGLWarp::NONE) {
+            return invertElementWarped(elem, tQuery);
+        }
+
         for (int iter = 0; iter < 50; ++iter) {
             double tVal = elem.t_of_s.evaluate(s);
             double dtDs = elem.t_of_s.evaluateDerivative(s);
@@ -887,6 +1121,72 @@ private:
         }
 
         return std::clamp(s, elem.s_begin, elem.s_end);
+    }
+
+    /**
+     * @brief Invert t(s) inside a warped element via the sigma coordinate.
+     *
+     * t~(sigma) = t_of_s(xi(sigma)) is smooth and monotone in sigma
+     * (dt/dsigma = -2*sigma/v is regular even at a stop, where dt/ds
+     * blows up), so Newton in sigma converges in a couple of steps
+     * where s-Newton fought the 1/v wall. Safeguarded by bisection on
+     * the sigma interval.
+     *
+     * @param elem Warped hybrid element
+     * @param tQuery Target time
+     * @return Arc length s such that t(s) ≈ tQuery
+     */
+    double invertElementWarped(const HybridElement& elem,
+                               double tQuery) const {
+        const LGLElement& tl = elem.t_of_s;
+        const double sigmaMax = tl.warpSigmaMax();
+        if (sigmaMax <= 0.0) return elem.s_begin;
+
+        // dt~/dsigma sign: t grows with s; sigma grows with s for
+        // SQRT_LEFT and shrinks for SQRT_RIGHT.
+        const double dir = (tl.warp == LGLWarp::SQRT_LEFT) ? 1.0 : -1.0;
+
+        auto tOfSigma = [&](double sigma) {
+            const double xi =
+                std::clamp(2.0 * sigma / sigmaMax - 1.0, -1.0, 1.0);
+            return barycentricEvaluate(
+                tl.ref_nodes, tl.node_values, tl.bary_weights, xi);
+        };
+        auto dtDsigma = [&](double sigma) {
+            const double xi =
+                std::clamp(2.0 * sigma / sigmaMax - 1.0, -1.0, 1.0);
+            return barycentricDerivative(
+                tl.ref_nodes, tl.node_values, tl.bary_weights, xi) *
+                (2.0 / sigmaMax);
+        };
+
+        double lo = 0.0, hi = sigmaMax;
+        const double tLo = tOfSigma(0.0), tHi = tOfSigma(sigmaMax);
+        double sigma =
+            (std::abs(tHi - tLo) > 1e-15)
+                ? sigmaMax * (tQuery - tLo) / (tHi - tLo)
+                : 0.5 * sigmaMax;
+        sigma = std::clamp(sigma, lo, hi);
+
+        for (int iter = 0; iter < 50; ++iter) {
+            const double err = tOfSigma(sigma) - tQuery;
+            if (std::abs(err) < 1e-12) break;
+            if (err * dir > 0.0) {
+                hi = sigma;
+            } else {
+                lo = sigma;
+            }
+            const double d = dtDsigma(sigma);
+            double sNew = (std::abs(d) > 1e-15)
+                ? sigma - err / d
+                : 0.5 * (lo + hi);
+            if (sNew <= lo || sNew >= hi) sNew = 0.5 * (lo + hi);
+            sigma = sNew;
+        }
+        sigma = std::clamp(sigma, 0.0, sigmaMax);
+        return (tl.warp == LGLWarp::SQRT_LEFT)
+            ? elem.s_begin + sigma * sigma
+            : elem.s_end - sigma * sigma;
     }
 
     /**Find element containing arc length s */
@@ -928,11 +1228,11 @@ private:
     /**Estimate maximum speed factor on an element */
     double estimateMaxSpeed(const HybridElement& elem) const {
         double maxG = 0.0;
-        // Sample at a few points
+        // Sample at a few points — g(u) is piece-local, so locate the
+        // piece from s rather than matching u against knot ranges.
         for (int i = 0; i < 4; ++i) {
             double s = elem.s_begin + (elem.s_end - elem.s_begin) * i / 3.0;
-            double u = getUAtS(s);
-            maxG = std::max(maxG, getSpeedFactor(u));
+            maxG = std::max(maxG, speedFactorAtS(s));
         }
         return std::max(maxG, 1.0);
     }

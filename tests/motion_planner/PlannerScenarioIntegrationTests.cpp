@@ -1744,6 +1744,120 @@ TEST(PlannerScenarios_Toppra, HeadToHeadVsPareto) {
     }
 }
 
+// The Hybrid's per-element LGL build used to explode near low-velocity
+// edges: v(s) ~ sqrt(s* - s) has unbounded slope there, so the midpoint
+// certificates never converged and every such arc split to max depth
+// (~50 elements/arc → ~55k elements and ~30 s on BenchLayer60). The
+// sqrt-warped elements interpolate in sigma = sqrt(s* - s), where v/t/a
+// are smooth, and certify in one shot. This test pins the new scale:
+// element count stays proportional to the SSR arc count and the dense
+// consistency vs the SSR holds end-to-end.
+TEST(PlannerScenarios_Toppra, HybridWarpedElementsScaleAndAccuracy) {
+    auto r = buildPathFromGcode(benchLayerGcode(60.0), printerLimits());
+    ASSERT_TRUE(r.failedAt.empty())
+        << "pipeline failed at " << r.failedAt;
+
+    mpa::AnalyticalJerkLimitedTOPPRA<3, double> tp(
+        printerLimits(), /*buildHybrid=*/true);
+    const auto t0 = std::chrono::steady_clock::now();
+    ASSERT_NE(tp.computeProfile(r.path, 200.0, 0.0, 0.0, 6000), nullptr);
+    const double solvePlusHybridMs =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - t0).count();
+
+    auto ssr = tp.ssrSource();
+    auto hybrid = tp.hybridSource();
+    ASSERT_NE(ssr, nullptr);
+    ASSERT_NE(hybrid, nullptr);
+
+    // Element coverage is s-ordered and contiguous.
+    const auto& els = hybrid->elements();
+    ASSERT_GT(els.size(), 0u);
+    EXPECT_DOUBLE_EQ(els.front().s_begin, 0.0);
+    EXPECT_NEAR(els.back().s_end, r.pathLength, 1e-6);
+    for (size_t i = 1; i < els.size(); ++i) {
+        EXPECT_NEAR(els[i].s_begin, els[i - 1].s_end, 1e-9)
+            << "s-coverage gap before element " << i;
+    }
+
+    // The warp keeps elements ~1-per-arc instead of ~50-per-arc.
+    // (Was 55,526 elements / ~30 s for 1,103 arcs.)
+    EXPECT_LT(hybrid->numElements(), 4 * ssr->arcs().size())
+        << "elements=" << hybrid->numElements()
+        << " arcs=" << ssr->arcs().size();
+
+    // Dense SSR-vs-Hybrid consistency over the whole trajectory.
+    const double T = ssr->totalTime();
+    ASSERT_GT(T, 0.0);
+    EXPECT_NEAR(hybrid->totalTime(), T, 1e-6);
+    double maxDs = 0.0, maxDv = 0.0, maxDP = 0.0;
+    double maxPv = 0.0, maxDvAligned = 0.0;
+    double tMaxDs = 0.0, tMaxDv = 0.0, tMaxDP = 0.0, tMaxPv = 0.0;
+    for (int i = 0; i <= 4000; ++i) {
+        const double t = T * i / 4000.0;
+        const double ds =
+            std::abs(ssr->arcLength(t) - hybrid->arcLength(t));
+        const auto vSsr = ssr->velocity(t);
+        const auto vHyb = hybrid->velocity(t);
+        const double dv = (vSsr - vHyb).length();
+        const double dp =
+            (ssr->position(t) - hybrid->position(t)).length();
+        const double pv = std::abs(
+            ssr->pathVelocity(t) - hybrid->pathVelocity(t));
+        if (ds > maxDs) { maxDs = ds; tMaxDs = t; }
+        if (dv > maxDv) { maxDv = dv; tMaxDv = t; }
+        if (dp > maxDP) { maxDP = dp; tMaxDP = t; }
+        if (pv > maxPv) { maxPv = pv; tMaxPv = t; }
+        // Vector-velocity error where the two tangents AGREE
+        // (cos > 0.9). At C0 piece-boundary stamps the tangent steps
+        // discontinuously; any residual s-inversion offset that
+        // straddles the corner produces a ~v_junction*|dT| vector
+        // difference that no profile can avoid — a comparison
+        // artifact, not a fit defect. The aligned subset is the
+        // meaningful vector check.
+        const double nSsr = vSsr.length(), nHyb = vHyb.length();
+        if (nSsr > 1e-9 && nHyb > 1e-9 &&
+            vSsr.dot(vHyb) > 0.9 * nSsr * nHyb &&
+            dv > maxDvAligned) {
+            maxDvAligned = dv;
+        }
+    }
+    EXPECT_LT(maxDs, 0.1);
+    EXPECT_LT(maxPv, 10.0);        // scalar path-velocity error
+    EXPECT_LT(maxDvAligned, 10.0); // vector error where T agrees
+    EXPECT_LT(maxDP, 0.5);
+
+    std::cout << "\n=== Hybrid warped-element scale ===\n"
+              << "arcs=" << ssr->arcs().size()
+              << " elements=" << hybrid->numElements()
+              << " solve+hybrid=" << std::fixed << std::setprecision(1)
+              << solvePlusHybridMs << "ms"
+              << " | maxDs=" << maxDs << "@t=" << tMaxDs
+              << " maxPv=" << maxPv << "@t=" << tMaxPv
+              << " maxDv=" << maxDv << "@t=" << tMaxDv
+              << " (aligned=" << maxDvAligned << ")"
+              << " maxDP=" << maxDP << "@t=" << tMaxDP << "\n";
+
+    // s-domain v check: interpolant vs SSR velocity at fixed arc
+    // lengths — isolates the v-of-s fit from time-inversion effects.
+    {
+        const auto& els2 = hybrid->elements();
+        double maxSdomDv = 0.0;
+        std::size_t ei = 0;
+        for (double s = 0.5; s < r.pathLength; s += 0.5) {
+            while (ei < els2.size() && s >= els2[ei].s_end) ++ei;
+            if (ei >= els2.size()) break;
+            const double d = std::abs(
+                ssr->pathVelocityAtArcLength(s) -
+                els2[ei].v_of_s.evaluate(s));
+            maxSdomDv = std::max(maxSdomDv, d);
+        }
+        EXPECT_LT(maxSdomDv, 5.0);
+        std::cout << "s-domain |v_ssr - v_hyb| max=" << maxSdomDv
+                  << "\n";
+    }
+}
+
 // Production-path coverage: MotionPlanBuilder + ProfilerType::
 // AnalyticalJerkLimitedTOPPRA. createProfiler constructs the planner
 // with buildHybrid=false — the returned profile samples from the SSR

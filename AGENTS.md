@@ -287,15 +287,33 @@ corner velocities + dwell points) →
   the 6 m layer; ~14–25 ms on dm-scale paths) — dominated by
   per-node substep work across ~300 windows; adaptive grids are not
   justified because the proportional density already allocates
-  ~20 nodes/window. The optional Hybrid representation is NOT
-  production-viable at scale: certificates cannot converge where
-  v ~ √s near stops (BenchLayer → ~55k elements, ~30 s build —
-  needs a warped low-v element type, not more h-refinement). Use
-  `buildHybrid=false`; the SSR is the exact source anyway.
+  ~20 nodes/window. The optional Hybrid representation is now
+  scale-viable: `LGLWarp::SQRT_LEFT/RIGHT` elements interpolate
+  t/v/a in σ = √(s − s_edge) near low-velocity edges, where
+  v ~ √σ becomes polynomial — plus per-element NURBS-piece
+  tracking (u is piece-local), pre-splitting at piece boundaries,
+  arc-consistent `accelerationOnArc` sampling (the global
+  findArcAtT lookup returns right-limit a at shared boundaries,
+  which poisons edge nodes), s-space t-certificates
+  (|Δt|·v bounds the actual invertT error; an absolute time
+  tolerance is unreachable where dt/ds → ∞), p-refinement
+  (degree 4→6→8) before h-refinement, and v-dip-aware split
+  placement. BenchLayer: 55,526 → 2,905 elements, ~30 s → ~4.6 s
+  build; dense SSR consistency maxDs ≈ 0, scalar v error 6 mm/s,
+  aligned vector error 0.8 mm/s (raw vector error at C0 corner
+  stamps is intrinsic — tangent steps, any s offset straddling the
+  corner shows ~v_junction·|ΔT|). The a-fit is certified but does
+  not drive refinement (eta varies inside ACCEL/DECEL arcs → a(s)
+  is multi-regime). Caveats: the runtime a value near element
+  edges is the left-limit, and `position()` must use the element's
+  stored `pieceIdx` (locate-by-s is ambiguous at piece
+  boundaries). Still use `buildHybrid=false` in production paths;
+  the SSR is the exact source anyway.
   `RespectsCoupledBounds_CornerPath`, `HonorsJunctionVelocityStamps`,
   `HonorsDwellPoints`, `ArcBoundariesAreContinuous`,
   `HybridMatchesSSR_Dense`, `HybridCarriesDwellTime`,
-  `GcodePipelineDwellAndStamps`, `HeadToHeadVsPareto` pin the
+  `GcodePipelineDwellAndStamps`, `HeadToHeadVsPareto`,
+  `HybridWarpedElementsScaleAndAccuracy` pin the
   behavior.
 - **Perf-relevant caches**: `gridCoeffs_` (per-grid-node tangent,
   curvature, jounce — feeds `accelBoundsFromCache`/

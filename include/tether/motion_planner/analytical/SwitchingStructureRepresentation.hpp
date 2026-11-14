@@ -282,6 +282,26 @@ public:
     const std::vector<Arc>& arcs() const { return arcs_; }
 
     /**
+     * @brief Acceleration evaluated on a specific arc at a local time.
+     *
+     * Unlike pathAcceleration(t) — which resolves the arc globally by
+     * time and therefore takes the right-limit value at shared
+     * boundaries — this returns the given arc's own state including
+     * per-step limit enforcement, i.e. the consistent left-limit value
+     * the arc actually integrates to. Acceleration jumps at arc
+     * switches, so consumers fitting per-arc data must not sample
+     * through the global boundary lookup.
+     *
+     * @param arc    Arc to evaluate on
+     * @param tLocal Time within the arc (0 to arc.duration, clamped)
+     * @return Path acceleration [mm/s^2]
+     */
+    T accelerationOnArc(const Arc& arc, double tLocal) const {
+        return static_cast<T>(
+            std::get<2>(integrateArcToTime(arc, tLocal)));
+    }
+
+    /**
      * @brief Get the path.
      * @return Referenced path
      */
