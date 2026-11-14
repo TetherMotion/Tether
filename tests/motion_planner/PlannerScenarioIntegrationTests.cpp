@@ -1021,11 +1021,14 @@ TEST(PlannerScenarios_CNC, XZPlaneArc) {
     EXPECT_NEAR(m.endPos[2], 0.0, 0.3);
     // Previously the arc was built in the wrong plane giving T~6.7e5 s.
     EXPECT_LT(m.T, 60.0);
-    // The rapid->arc seam must not collapse to a full stop: the bound
-    // pair is kept self-consistent (stoppable within the piece), so the
-    // junction holds ~38 mm/s (was 0 when the starved accel bound made
-    // every transition look infeasible and got equalized to a stop).
-    EXPECT_GT(m.minInteriorV, 1.0);
+    // The rapid->arc seam is a true 90-degree tangent discontinuity:
+    // the junction-deviation stamp (~5.3 mm/s at aCent=400, jd=0.05)
+    // must be honored — not collapsed to a full stop by a starved
+    // bound, and not carried at ~38 mm/s by an under-estimated corner
+    // angle (mid-tangent heuristic). The arc then accelerates through
+    // its interior on a self-consistent bound pair.
+    EXPECT_GT(m.minInteriorV, 4.0);
+    EXPECT_LT(m.minInteriorV, 8.0);
     EXPECT_LT(m.T, 2.5);
 }
 

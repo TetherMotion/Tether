@@ -179,6 +179,13 @@ corner velocities + dwell points) →
   (forward pass / snapspace) is retained under `#if 0` but inactive —
   the pulse staircase approximates the true continuous optimal
   envelope, it does not reach it.
+- **Corner model**: `PathAdapter::computeCornerVelocities` measures the
+  true junction angle from *endpoint* tangents of adjacent pieces —
+  never midpoint tangents. For arcs/higher-degree pieces the mid-tangent
+  mis-estimates the angle in both directions (a 90° rapid→arc seam
+  looked collinear → `∞` stamp → carried ~38 mm/s through a sharp
+  corner; tangent-continuous blend entries got phantom-limited).
+  Stamps feed `effB`/`boundaryV` requests and are non-negotiable.
 - **Bound semantics**: `globalBounds()` treats first/last grid samples
   as enforced boundary conditions (v0/vf or split-boundary speeds) and
   scans only the open interval for velocity/accel/jerk envelopes;
@@ -199,10 +206,13 @@ corner velocities + dwell points) →
   against `min(boundL, boundR)`, then each piece solves with its own
   length-scaled constraint grid (~0.1 mm/node, floor 32).
 - **Transition consistency**: `intervalBound()` verifies the piece's
-  `(V,A,J)` triple can execute its worst-case attainable boundary
-  transition (`min(request, vLimit(endpoint))` per side — junction and
-  dwell requests are non-negotiable, `+inf` auto markers are capped by
-  the endpoint dips). Phase 2.5's equalizer remedies residual
+  `(V,A,J)` triple is *self-consistent*: `minimumDistanceForPeak(v,
+  vIn, vOut) <= sTotal·(1-1e-6)` — the full pulse through the candidate
+  bound, not merely the endpoint-to-endpoint transition (a `5.3→0`
+  endpoint check trivially passes a `(V=38.7, A=12)` pair that can
+  never reach V). Entry/exit are `min(request, vLimit(endpoint))` —
+  junction/dwell requests non-negotiable, `+inf` auto markers capped
+  by the endpoint dips. Phase 2.5's equalizer remedies residual
   infeasibility by bisecting only the higher boundary to the max
   executable crossing rather than `min(vL, vR)`.
 - **Pulse-structure floor**: `minimumDistanceForPeak` models the
