@@ -91,22 +91,22 @@ public:
 
     Point position(T t) const override {
         return type_ == RepresentationType::SSR
-            ? ssr_->position(t) : hybrid_->position(t);
+            ? ssr_->position(t, &cursor_) : hybrid_->position(t);
     }
 
     Point velocity(T t) const override {
         return type_ == RepresentationType::SSR
-            ? ssr_->velocity(t) : hybrid_->velocity(t);
+            ? ssr_->velocity(t, &cursor_) : hybrid_->velocity(t);
     }
 
     Point acceleration(T t) const override {
         return type_ == RepresentationType::SSR
-            ? ssr_->acceleration(t) : hybrid_->acceleration(t);
+            ? ssr_->acceleration(t, &cursor_) : hybrid_->acceleration(t);
     }
 
     T arcLength(T t) const override {
         return type_ == RepresentationType::SSR
-            ? ssr_->arcLength(t) : hybrid_->arcLength(t);
+            ? ssr_->arcLength(t, &cursor_) : hybrid_->arcLength(t);
     }
 
     T timeAtArcLength(T s) const override {
@@ -116,17 +116,18 @@ public:
 
     T pathVelocity(T t) const override {
         return type_ == RepresentationType::SSR
-            ? ssr_->pathVelocity(t) : hybrid_->pathVelocity(t);
+            ? ssr_->pathVelocity(t, &cursor_) : hybrid_->pathVelocity(t);
     }
 
     T pathAcceleration(T t) const override {
         return type_ == RepresentationType::SSR
-            ? ssr_->pathAcceleration(t) : hybrid_->pathAcceleration(t);
+            ? ssr_->pathAcceleration(t, &cursor_)
+            : hybrid_->pathAcceleration(t);
     }
 
     T pathJerk(T t) const override {
         return type_ == RepresentationType::SSR
-            ? ssr_->pathJerk(t) : hybrid_->pathJerk(t);
+            ? ssr_->pathJerk(t, &cursor_) : hybrid_->pathJerk(t);
     }
 
     T curvature(T t) const override {
@@ -207,6 +208,14 @@ private:
     RepresentationType type_;
     std::shared_ptr<SSR> ssr_;
     std::shared_ptr<Hybrid> hybrid_;
+
+    // Sequential cursor for SSR sampling: monotone time queries resume
+    // integration instead of restarting each arc from t0, and repeated
+    // accessors at the same t share one integration. The cursor lives
+    // in this facade — the SSR itself stays stateless. A sampler is a
+    // single-owner convenience object; concurrent sampling requires
+    // per-thread samplers (or sampling the stateless SSR directly).
+    mutable typename SSR::SampleCursor cursor_;
 };
 
 } // namespace MotionPlanner::analytical

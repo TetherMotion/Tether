@@ -1166,3 +1166,37 @@ TEST(AnalyticalJerkLimitedTOPPRA, MultiWindowJunctionsAndDwells) {
     EXPECT_TRUE(stoppedAtJ2)
         << "no rest sample at the coincident junction dwell";
 }
+
+// The sequential cursor must reproduce random-access sampling within
+// integration tolerance while turning a dense monotone sweep from
+// O(samples × arc-time) into O(total-time) work. Sample the same SSR
+// both ways and compare (s, v, a).
+TEST(AnalyticalJerkLimitedTOPPRA,
+     SequentialCursorMatchesRandomAccess) {
+    auto path = makeCornerPath2D();
+    auto limits = makeLimits2D();
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, false);
+    ASSERT_NE(profiler.computeProfile(path, 100.0, 0.0, 0.0, 1200),
+              nullptr);
+    auto ssr = profiler.ssrSource();
+    ASSERT_NE(ssr, nullptr);
+
+    const double T = ssr->totalTime();
+    typename std::decay_t<decltype(*ssr)>::SampleCursor cursor;
+    double maxDv = 0.0, maxDs = 0.0, maxDa = 0.0;
+    for (int i = 0; i <= 4000; ++i) {
+        const double t = T * static_cast<double>(i) / 4000.0;
+        const auto ref = ssr->locateAndIntegrate(t);
+        const auto seq = ssr->locateAndIntegrate(t, &cursor);
+        EXPECT_EQ(ref.arcIndex, seq.arcIndex);
+        maxDs = std::max(maxDs, std::abs(ref.s - seq.s));
+        maxDv = std::max(maxDv, std::abs(ref.v - seq.v));
+        maxDa = std::max(maxDa, std::abs(ref.a - seq.a));
+    }
+    // Resume integrates from the memoized state — accumulation differs
+    // from a fresh per-arc integration only by accumulated step-phase
+    // round-off, not by anything structural.
+    EXPECT_LT(maxDs, 1e-3);   // mm
+    EXPECT_LT(maxDv, 1e-2);   // mm/s
+    EXPECT_LT(maxDa, 1.0);    // mm/s²
+}

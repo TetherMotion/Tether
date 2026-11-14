@@ -56,6 +56,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace MotionPlanner::analytical {
@@ -77,6 +78,38 @@ public:
     using Path = PathAdapter<Dim, T>;
     using Point = Vec<Dim, T>;
     using Arc = SwitchingArc;
+
+    /**Result of a (s, v, a) integration at one time. */
+    struct IntegratedState {
+        size_t arcIndex;
+        double s;
+        double v;
+        double a;
+    };
+
+    /**
+     * @brief Caller-owned cursor for monotone time-series sampling.
+     *
+     * locateAndIntegrate() normally integrates each arc from its t0 on
+     * every query — dense sequential sampling therefore costs
+     * O(arc duration) per query (quadratic in samples/arc). Passing the
+     * same cursor to successive calls lets the integrator resume from
+     * the previously integrated state, making a monotone sweep O(total
+     * duration) overall.
+     *
+     * The cursor lives with the caller, not inside the SSR — the SSR's
+     * const sampling surface stays stateless and thread-safe; callers
+     * that share one SSR across threads simply pass no cursor (or a
+     * per-thread cursor).
+     */
+    struct SampleCursor {
+        bool valid = false;      ///< false until first locate
+        std::size_t arc = 0;     ///< arc the state was integrated in
+        double t = 0.0;          ///< query time
+        double s = 0.0;          ///< arc-length state at t
+        double v = 0.0;
+        double a = 0.0;
+    };
 
     /**
      * @brief Construct from path, arcs, and constraint evaluator.
@@ -117,16 +150,20 @@ public:
         return path_->totalLength();
     }
 
-    Point position(T t) const override {
-        auto [arcIdx, s, v, a] = locateAndIntegrate(t);
+    Point position(T t) const override { return position(t, nullptr); }
+
+    Point position(T t, SampleCursor* cursor) const {
+        auto [arcIdx, s, v, a] = locateAndIntegrate(t, cursor);
         if (s < 0) return Point{};
         // Evaluate NURBS at arc length s
         auto eval = path_->evaluateAtArcLength(static_cast<T>(s));
         return eval.position;
     }
 
-    Point velocity(T t) const override {
-        auto [arcIdx, s, v, a] = locateAndIntegrate(t);
+    Point velocity(T t) const override { return velocity(t, nullptr); }
+
+    Point velocity(T t, SampleCursor* cursor) const {
+        auto [arcIdx, s, v, a] = locateAndIntegrate(t, cursor);
         if (s < 0) return Point{};
 
         auto eval = path_->evaluateAtArcLength(static_cast<T>(s));
@@ -135,7 +172,11 @@ public:
     }
 
     Point acceleration(T t) const override {
-        auto [arcIdx, s, v, a] = locateAndIntegrate(t);
+        return acceleration(t, nullptr);
+    }
+
+    Point acceleration(T t, SampleCursor* cursor) const {
+        auto [arcIdx, s, v, a] = locateAndIntegrate(t, cursor);
         if (s < 0) return Point{};
 
         auto eval = path_->evaluateAtArcLength(static_cast<T>(s));
@@ -153,23 +194,35 @@ public:
         return tangentialAccel + centripetalAccel;
     }
 
-    T arcLength(T t) const override {
-        auto [arcIdx, s, v, a] = locateAndIntegrate(t);
+    T arcLength(T t) const override { return arcLength(t, nullptr); }
+
+    T arcLength(T t, SampleCursor* cursor) const {
+        auto [arcIdx, s, v, a] = locateAndIntegrate(t, cursor);
         return static_cast<T>(s);
     }
 
     T pathVelocity(T t) const override {
-        auto [arcIdx, s, v, a] = locateAndIntegrate(t);
+        return pathVelocity(t, nullptr);
+    }
+
+    T pathVelocity(T t, SampleCursor* cursor) const {
+        auto [arcIdx, s, v, a] = locateAndIntegrate(t, cursor);
         return static_cast<T>(v);
     }
 
     T pathAcceleration(T t) const override {
-        auto [arcIdx, s, v, a] = locateAndIntegrate(t);
+        return pathAcceleration(t, nullptr);
+    }
+
+    T pathAcceleration(T t, SampleCursor* cursor) const {
+        auto [arcIdx, s, v, a] = locateAndIntegrate(t, cursor);
         return static_cast<T>(a);
     }
 
-    T pathJerk(T t) const override {
-        auto [arcIdx, s, v, a] = locateAndIntegrate(t);
+    T pathJerk(T t) const override { return pathJerk(t, nullptr); }
+
+    T pathJerk(T t, SampleCursor* cursor) const {
+        auto [arcIdx, s, v, a] = locateAndIntegrate(t, cursor);
         if (arcIdx >= arcs_.size()) return T(0);
         // The jerk is the eta value of the current arc
         return static_cast<T>(arcs_[arcIdx].eta);
@@ -334,6 +387,34 @@ public:
      */
     const std::vector<double>& arcStartTimes() const { return arcStartTimes_; }
 
+    // ========================================================================
+    // Sequential sampling cursor
+    // ========================================================================
+
+    /**
+     * @brief Locate the arc containing t and integrate to (s, v, a).
+     *
+     * @param t      Query time (seconds).
+     * @param cursor Optional sequential cursor; pass the same object on
+     *               successive monotone queries to resume integration
+     *               instead of restarting each arc from t0. Backward or
+     *               far-forward jumps fall back to the random-access
+     *               path automatically.
+     */
+    IntegratedState locateAndIntegrate(
+        T t, SampleCursor* cursor = nullptr) const {
+        IntegratedState st = locateCore(t, cursor);
+        if (cursor) {
+            cursor->valid = true;
+            cursor->arc = st.arcIndex;
+            cursor->t = static_cast<double>(t);
+            cursor->s = st.s;
+            cursor->v = st.v;
+            cursor->a = st.a;
+        }
+        return st;
+    }
+
 private:
     const Path* path_; /**< Non-owning pointer to the path */
     std::vector<Arc> arcs_;
@@ -361,14 +442,7 @@ private:
      *
      * @return Tuple (arcIndex, s, v, a) at time t
      */
-    struct IntegratedState {
-        size_t arcIndex;
-        double s;
-        double v;
-        double a;
-    };
-
-    IntegratedState locateAndIntegrate(T t) const {
+    IntegratedState locateCore(T t, SampleCursor* cursor) const {
         if (arcs_.empty()) {
             return {0, -1.0, 0.0, 0.0};
         }
@@ -385,6 +459,35 @@ private:
             const auto& arc = arcs_.back();
             const auto [s, v, a] = integrateArcToTime(arc, arc.duration);
             return {arcs_.size() - 1, s, v, a};
+        }
+
+        // Cursor fast path: a monotone query resumes from the last
+        // integrated state (same arc) or scans arcs forward (a few
+        // hops) instead of binary-searching + re-integrating from t0.
+        if (cursor && cursor->valid && tD >= cursor->t) {
+            std::size_t arcIdx = cursor->arc;
+            while (arcIdx + 1 < arcs_.size() &&
+                   tD >= arcs_[arcIdx].t0 + arcs_[arcIdx].duration) {
+                ++arcIdx;
+            }
+            const Arc& arc = arcs_[arcIdx];
+            std::tuple<double, double, double> st;
+            if (arcIdx == cursor->arc) {
+                // Same arc: resume integration from the cursor state.
+                // Closed-form arcs are evaluated from the anchored
+                // formula instead (O(1), identical to random access).
+                if (auto cf = closedFormState(arc, tD - arc.t0)) {
+                    st = *cf;
+                } else {
+                    st = advanceArc(arc, cursor->s, cursor->v,
+                                    cursor->a, tD - cursor->t,
+                                    /*minSteps=*/1);
+                }
+            } else {
+                st = integrateArcToTime(arc, tD - arc.t0);
+            }
+            const auto [s, v, a] = st;
+            return {arcIdx, s, v, a};
         }
 
         // Binary search for the arc containing t
@@ -434,13 +537,34 @@ private:
         }
         // Clamp tLocal to the arc duration to prevent enormous integration
         // times from WALL arcs with near-zero velocity (duration diverges
-        // as ∫ ds/v). The caller (locateAndIntegrate) should not exceed
+        // as ∫ ds/v). The caller (locateCore) should not exceed
         // arc.duration, but defensive clamping prevents runaway loops and
         // path evaluation crashes when durations are numerically huge.
         if (tLocal > arc.duration) tLocal = arc.duration;
 
+        if (auto cf = closedFormState(arc, tLocal)) return *cf;
+
+        return advanceArc(arc, arc.s_begin, arc.v0, arc.a0, tLocal);
+    }
+
+    /**
+     * @brief Closed-form (s, v, a) when the arc matches a known pattern.
+     *
+     * Anchored at the arc start state; disengaged when the arc's stored
+     * initial conditions don't match a closed-form case (the generic
+     * RK4 path then applies). Used both for random access and by the
+     * sequential cursor — identical results either way.
+     *
+     * @param arc    The switching arc.
+     * @param tLocal Time within the arc (already clamped to duration).
+     * @return (s, v, a) at tLocal, or nullopt if no closed form applies.
+     */
+    std::optional<std::tuple<double, double, double>>
+    closedFormState(const Arc& arc, double tLocal) const {
+        using Opt = std::optional<std::tuple<double, double, double>>;
+
         // Clamp a closed-form (s, v, a) result to the feasible region:
-        // the analytic fast paths below bypass the per-step RK4 limit
+        // the analytic fast paths bypass the per-step RK4 limit
         // enforcement, so they must apply the same coupled bounds
         // (vLim + per-axis |T·a + κv²|) before returning.
         auto enforce = [this](double s, double v, double a)
@@ -468,12 +592,12 @@ private:
             double v = arc.v0 + 0.5 * eta * tLocal * tLocal;
             if (v <= 0.0) {
                 // Reached v=0: clamp to end state
-                return {arc.s_end, 0.0, 0.0};
+                return Opt{{arc.s_end, 0.0, 0.0}};
             }
             double s = arc.s_begin + arc.v0 * tLocal +
                        eta * tLocal * tLocal * tLocal / 6.0;
             double a = eta * tLocal;
-            return enforce(s, v, a);
+            return Opt{enforce(s, v, a)};
         }
         // Special case: DECEL_MAX arc with a0 < 0 and eta > 0
         // (decelerating, jerk bringing acceleration back to 0).
@@ -488,12 +612,12 @@ private:
             double a = a0 + eta * tLocal;
             double v = v0 + a0 * tLocal + 0.5 * eta * tLocal * tLocal;
             if (v <= 0.0) {
-                return {arc.s_end, 0.0, 0.0};
+                return Opt{{arc.s_end, 0.0, 0.0}};
             }
             double s = static_cast<double>(arc.s_begin) +
                        v0 * tLocal + 0.5 * a0 * tLocal * tLocal +
                        eta * tLocal * tLocal * tLocal / 6.0;
-            return enforce(s, v, a);
+            return Opt{enforce(s, v, a)};
         }
 
         // Special case: arc starts from rest (v ≈ 0, a ≈ 0) with nonzero
@@ -507,11 +631,38 @@ private:
                 double s = arc.s_begin + t3 / 6.0;
                 double v = 0.5 * eta * tLocal * tLocal;
                 double a = eta * tLocal;
-                return enforce(s, v, a);
+                return Opt{enforce(s, v, a)};
             }
             // Degenerate: no motion.
-            return {arc.s_begin, arc.v0, arc.a0};
+            return Opt{{arc.s_begin, arc.v0, arc.a0}};
         }
+        return std::nullopt;
+    }
+
+    /**
+     * @brief RK4-advance an arc state by dt from an arbitrary start.
+     *
+     * Shared by random access (start = arc initial state) and the
+     * sequential cursor (start = previously integrated state). Dynamics
+     * are ds/dt = v, dv/dt = a, da/dt = eta; eta is recomputed per step
+     * via computeEta, so the continuation from a mid-arc state matches
+     * the full re-integration.
+     *
+     * @param arc The switching arc (for mode, eta, s_end).
+     * @param s0  Start arc length.
+     * @param v0  Start velocity.
+     * @param a0  Start acceleration.
+     * @param dt  Advance duration.
+     * @param minSteps Floor for the RK4 step count — 8 for a fresh
+     *        whole-arc integration (span boundary transients), 1 for a
+     *        cursor resume (state already valid; RK4 is exact for the
+     *        constant-eta dynamics).
+     * @return (s, v, a) after dt.
+     */
+    std::tuple<double, double, double> advanceArc(
+        const Arc& arc, double s0, double v0, double a0,
+        double dt, int minSteps = 8) const {
+        double tLocal = dt;
 
         // State: [s, v, a]
         struct State {
@@ -535,10 +686,10 @@ private:
         // exactly by RK4 at any step size), so step count scales with
         // duration: ~1 ms nominal step, at least 8 steps to span
         // boundary transients, at most 100 to bound worst-case cost.
-        State y{arc.s_begin, arc.v0, arc.a0};
+        State y{s0, v0, a0};
         double t = 0.0;
         const int nSteps = std::clamp(
-            static_cast<int>(tLocal / 1e-3 + 0.5), 8, 100);
+            static_cast<int>(tLocal / 1e-3 + 0.5), minSteps, 100);
         double h = tLocal / nSteps;
         if (h < 1e-12) h = 1e-12;
         int maxIter = nSteps;  // Safety limit
