@@ -2499,13 +2499,14 @@ private:
             };
 
             double symmetric = symmetricAt(vLocal);
-            if (symmetric <= 0.0) {
-                // The centripetal jerk (~κ²v³) alone exceeds the axis jerk
-                // budget at vLocal — no feasible trajectory can pass this
-                // point at this speed. Tightening the envelope to the
-                // greatest velocity with positive jerk headroom (a
-                // necessary condition) is far better than the previous
-                // token 1 mm/s³ floor, which made the entire path crawl.
+            if (symmetric < jerkHeadroom) {
+                // The geometric jerk terms (jounce·v³ + 3κ·v·a) leave too
+                // little tangential-jerk authority at vLocal. As in the
+                // acceleration loop above, trade a little velocity for
+                // authority: tighten the envelope to the greatest speed
+                // that restores the designed headroom — far better than
+                // letting one tight sample crush bounds.jerk to ~1 mm/s³
+                // and making the whole piece crawl.
                 double lo = 0.0, hi = vLocal;
                 for (int iter = 0; iter < 60; ++iter) {
                     const double mid = 0.5 * (lo + hi);
