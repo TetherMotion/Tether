@@ -243,13 +243,19 @@ corner velocities + dwell points) →
   `ZERO_JERK` so arcs split at the real eta discontinuities;
   (2) `buildSwitchingArcs` must split adjacent `ZERO_JERK` runs whose
   held acceleration differs, or the arc replays the wrong constant a
-  and creates a velocity step at the switch. Remaining gaps vs
-  production: ~100–1000× slower than the Pareto solve (0.9–15 s per
-  small path after the extra enforcement evals), and window stitching
-  still relies on single-eta arc reconstruction (bounded residual vs
-  the pass profile at boundaries). Honest speedup vs Pareto: ~11% on
-  zero-curvature straights (the nonzero-boundary-acceleration
-  headroom); curved-path advantage still gated by the solve cost.
+  and creates a velocity step at the switch. Performance: the
+  constraint queries are served from a per-window geometry table
+  (`buildGeometryGrid` — tangent/κ⃗/j⃗/κ per node, linear interp at
+  substep s, exact eval as fallback) plus removal of a dead
+  locate+invertLength+derivative triple in computeCoefficients —
+  ~30× on curved solves (2.1 s → 69 ms regression-test solve).
+  Remaining gaps vs production: still ~3–30× slower than the Pareto
+  solve depending on geometry (grid build + substep algebra dominate
+  now), and window stitching still relies on single-eta arc
+  reconstruction (bounded residual vs the pass profile at
+  boundaries). Honest speedup vs Pareto: ~11% on zero-curvature
+  straights (the nonzero-boundary-acceleration headroom);
+  curved-path advantage still gated by the solve cost.
   `RespectsCoupledBounds_CornerPath`, `HonorsJunctionVelocityStamps`,
   and `HonorsDwellPoints` pin the behavior.
 - **Perf-relevant caches**: `gridCoeffs_` (per-grid-node tangent,
