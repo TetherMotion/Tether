@@ -1435,12 +1435,14 @@ TEST(PlannerScenarios_Hard, RFormatArcs) {
         EXPECT_NEAR(m.endPos[1], 0.0, 0.15);
         // Regression (jerk-floor poisoning): once bounds.jerk dropped
         // below jerkHeadroom, the headroom bisection could never succeed
-        // and floored the piece to j=1 mm/s³ (T ~ 9.1 s here). A plain
-        // circular arc must keep real jerk authority and finish in ~6 s.
+        // and floored the piece to j=1 mm/s³ (T ~ 9.1 s here). And when
+        // the bisection only ran on sym<=0, a thin-but-positive headroom
+        // sample could still crush jerk to ~0.8 (T ~ 5.9 s). A plain
+        // circular arc must keep real jerk authority and finish in ~1-2 s.
         EXPECT_GT(m.maxAbsJ, 2.0)
             << "jerk bound collapsed to the 1.0 fallback floor";
-        EXPECT_LT(m.T, 8.0)
-            << "jerk-floor collapse made a 23mm arc take >8s";
+        EXPECT_LT(m.T, 3.0)
+            << "jerk bound collapsed — a 23mm arc should take ~1.2s";
         double maxY = -1e9;
         for (int i = 0; i <= 100; ++i) {
             maxY = std::max(maxY,
@@ -1472,6 +1474,10 @@ TEST(PlannerScenarios_Hard, RFormatArcs) {
         }
         EXPECT_GT(maxY, 15.0) << "major R-arc took the minor-arc side";
         EXPECT_GT(minY, -0.5) << "major R-arc dipped below the chord";
+        // Same regression guard as the minor arc: the worst observed
+        // collapse took 12.8 s; correct plan is ~1.9 s.
+        EXPECT_LT(m.T, 4.0)
+            << "jerk bound collapsed — a 52mm arc should take ~2s";
     }
 }
 
