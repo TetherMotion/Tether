@@ -158,6 +158,7 @@ const ObjDef kObjects[] = {
     {0x200A, ValueType::I32, 4, "pos_min",           true },
     {0x200B, ValueType::I32, 4, "pos_max",           true },
     {0x200C, ValueType::I32, 4, "axis_flags",        true },
+    {0x200D, ValueType::I32, 4, "err_inject",        true },
 };
 
 SchemaRef refFor(const MotionSchemas& d, ValueType t) {

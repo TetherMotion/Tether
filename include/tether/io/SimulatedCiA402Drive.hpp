@@ -95,6 +95,7 @@ inline constexpr uint16_t kIdxSawChar0     = 0x2006;
 inline constexpr uint16_t kIdxPosMin       = 0x200A;
 inline constexpr uint16_t kIdxPosMax       = 0x200B;
 inline constexpr uint16_t kIdxAxisFlags    = 0x200C;
+inline constexpr uint16_t kIdxErrInject     = 0x200D;
 
 inline constexpr double kVelEps = 1e-6;
 inline constexpr double kUsPerSec = 1e6;
@@ -407,6 +408,7 @@ public:
             case kIdxPosMin:     value = a.posMin; size = 4; break;
             case kIdxPosMax:     value = a.posMax; size = 4; break;
             case kIdxAxisFlags:  value = int32_t(a.flags); size = 4; break;
+            case kIdxErrInject:  value = a.errorCode; size = 4; break;
             default: known = false; break;
         }
         if (!known || subindex != 0) {
@@ -471,6 +473,10 @@ public:
             case kIdxPosMin:     a.posMin = int32_t(value); break;
             case kIdxPosMax:     a.posMax = int32_t(value); break;
             case kIdxAxisFlags:  a.flags = uint32_t(value); break;
+            case kIdxErrInject:
+                a.errorCode = int32_t(value);
+                if (value != 0) a.state = kFault;
+                break;
             default: known = false; break;
         }
         if (!known) {
