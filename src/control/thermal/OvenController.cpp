@@ -14,10 +14,12 @@ OvenController::OvenController(const OvenControllerConfig& cfg)
     : m_cfg(cfg),
       m_model(cfg.model),
       m_est(cfg.estimator),
-      m_gov(cfg.governor),
-      m_pid() {
+      m_gov(cfg.governor) {
+    installBackend(cfg.feedbackBackend);
+
     // Initial PI gains: explicit config wins, otherwise SIMC from the
-    // nominal physical model.
+    // nominal physical model. (Meaningless for the LQI backend, which
+    // synthesizes its own gains — applyPiGains guards on m_pidBackend.)
     double kp = cfg.kp, ki = cfg.ki;
     if (kp <= 0.0 || ki <= 0.0) {
         const auto [gkp, gki] = simcPiGains(cfg.model.gain(), cfg.model.tau(),
@@ -28,6 +30,8 @@ OvenController::OvenController(const OvenControllerConfig& cfg)
     applyPiGains(kp, ki);
     m_lastKp = kp;
     m_lastKi = ki;
+    m_lastAlpha = cfg.model.alpha;
+    m_lastBeta = cfg.model.beta;
 
     // Outer loop: hard actuator bounds (safety net; computeImpl already
     // clamps). Rate limiting is applied inside computeImpl so the recorded
@@ -38,9 +42,53 @@ OvenController::OvenController(const OvenControllerConfig& cfg)
     setSaturationLimits(lim);
 }
 
+void OvenController::installBackend(OvenFeedbackBackendKind kind) {
+    m_backendKind = kind;
+    if (kind == OvenFeedbackBackendKind::LQI) {
+        auto lb = std::make_unique<OvenLQIBackend>(
+            m_cfg.coupled, m_cfg.lqiQxSensor, m_cfg.lqiQxProduct,
+            m_cfg.lqiQi, m_cfg.lqiR, m_cfg.observerQProc,
+            m_cfg.observerRMeas, m_cfg.backendDt);
+        m_feedbackAdaptive = lb.get();
+        m_pidBackend = nullptr;
+        m_feedback = std::move(lb);
+    } else {
+        auto pid = std::make_unique<PIDController>();
+        m_pidBackend = pid.get();
+        m_feedbackAdaptive = nullptr;
+        m_feedback = std::move(pid);
+    }
+}
+
+void OvenController::setFeedbackBackend(std::unique_ptr<ControllerBase> backend) {
+    if (!backend) {
+        installBackend(m_cfg.feedbackBackend);
+        return;
+    }
+    m_feedbackAdaptive = dynamic_cast<IOvenAdaptiveFeedback*>(backend.get());
+    m_pidBackend = dynamic_cast<PIDController*>(backend.get());
+    if (m_pidBackend) {
+        m_backendKind = OvenFeedbackBackendKind::PI;
+        applyPiGains(m_lastKp, m_lastKi);   // carry over current tuning
+    } else if (m_feedbackAdaptive) {
+        m_backendKind = OvenFeedbackBackendKind::LQI;
+    }
+    m_feedback = std::move(backend);
+}
+
+const char* OvenController::feedbackBackendName() const {
+    if (m_feedbackAdaptive) return m_feedbackAdaptive->backendName();
+    if (m_pidBackend) return "SIMC-PI";
+    return m_feedback ? m_feedback->getName() : "none";
+}
+
 void OvenController::setConfig(const OvenControllerConfig& cfg) {
+    const bool kindChanged =
+        (cfg.feedbackBackend != m_backendKind) ||
+        (m_feedbackAdaptive == nullptr && m_pidBackend == nullptr);
     m_cfg = cfg;
     m_est.setConfig(cfg.estimator);
+    if (kindChanged) installBackend(cfg.feedbackBackend);
     SaturationLimits lim;
     lim.outputMin = cfg.model.uMin;
     lim.outputMax = cfg.model.uMax;
@@ -99,6 +147,13 @@ void OvenController::applyAutotune(const OvenAutotuneResult& result) {
     applyPiGains(result.kp, result.ki);
     m_lastKp = result.kp;
     m_lastKi = result.ki;
+    m_lastAlpha = result.params.alpha;
+    m_lastBeta = result.params.beta;
+    if (m_feedbackAdaptive) {
+        m_feedbackAdaptive->updateThermalParameters(result.params.alpha,
+                                                    result.params.beta,
+                                                    result.params.disturbance);
+    }
     m_lastRetuneWindows = m_est.updatesUsed();
     m_lastRetuneTime = m_time;
 }
@@ -114,6 +169,9 @@ OvenControllerStatus OvenController::status() const {
     s.windowsUsed = m_est.updatesUsed();
     s.overTemp = m_overTemp;
     s.adapting = m_cfg.adaptParams;
+    s.backendName = feedbackBackendName();
+    s.feedforward = m_lastOutput.feedforward;
+    s.feedback = m_lastUfb;
     s.output = m_lastOutput.control;
     return s;
 }
@@ -176,22 +234,29 @@ ControllerOutput OvenController::computeImpl(const ControllerInput& input) {
     const double uFf = m_model.requiredInputClamped(rFf, rDotFf,
                                                   ambient, mp.disturbance);
 
-    // ---- 4. PI feedback on the remaining actuator authority ----
+    // ---- 4. Feedback on the remaining actuator authority ----
+    // The backend is a polymorphic ControllerBase: one virtual call per
+    // cycle (negligible at oven loop rates). piIn.feedforward carries the
+    // feedforward term so adaptive backends (e.g. OvenLQIBackend) can set
+    // their own remaining-authority limits identically to the PI path;
+    // PIDController ignores the field outside Tracking mode.
     ControllerInput piIn;
     piIn.reference = rHat;
     piIn.measured = m_Tf;
     piIn.dt = dt;
     piIn.referenceDerivative = rDot;
+    piIn.feedforward = uFf;
 
     SaturationLimits piLim;
     piLim.outputMin = uMin - uFf;
     piLim.outputMax = uMax - uFf;
     piLim.integralMin = -m_cfg.integralLimit;
     piLim.integralMax = m_cfg.integralLimit;
-    m_pid.setSaturationLimits(piLim);
+    m_feedback->setSaturationLimits(piLim);
 
-    const ControllerOutput piOut = m_pid.compute(piIn);
+    const ControllerOutput piOut = m_feedback->compute(piIn);
     const double uFb = piOut.control;
+    m_lastUfb = uFb;
 
     // ---- 5. Sum, safety interlock, clamp ----
     const double uRaw = uFf + uFb;
@@ -222,6 +287,10 @@ ControllerOutput OvenController::computeImpl(const ControllerInput& input) {
         u = m_lastU + std::clamp(u - m_lastU, -maxD, maxD);
     }
     u = std::clamp(u, uMin, uMax);
+
+    // Report the ACTUALLY applied output (post interlock/rate-limit/
+    // saturation) so observer-based backends predict with the true input.
+    if (m_feedbackAdaptive) m_feedbackAdaptive->notifyAppliedInput(u);
 
     // ---- 6. Online parameter estimation (delayed input) ----
     // The estimator runs on the RAW measurement: its integral-form window
@@ -271,6 +340,32 @@ void OvenController::maybeRetune() {
     if (m_est.updatesUsed() - m_lastRetuneWindows < m_cfg.retuneMinWindows)
         return;
 
+    if (m_feedbackAdaptive) {
+        // Adaptive state-space backend (e.g. LQI+observer): push the
+        // bounded physical parameters; the backend re-derives its observer
+        // gain and LQI gains internally. Gate on the same meaningful-
+        // change rule, evaluated on {alpha, beta}.
+        const double a = m_est.alpha(), b = m_est.beta();
+        const double da = std::abs(a - m_lastAlpha) /
+                          std::max(std::abs(m_lastAlpha), 1e-9);
+        const double db = std::abs(b - m_lastBeta) /
+                          std::max(std::abs(m_lastBeta), 1e-9);
+        if (da < m_cfg.retuneMinDelta && db < m_cfg.retuneMinDelta) {
+            m_lastRetuneWindows = m_est.updatesUsed();
+            m_lastRetuneTime = m_time;
+            return;
+        }
+        m_feedbackAdaptive->updateThermalParameters(a, b,
+                                                     m_est.disturbance());
+        m_lastAlpha = a;
+        m_lastBeta = b;
+        m_lastRetuneWindows = m_est.updatesUsed();
+        m_lastRetuneTime = m_time;
+        return;
+    }
+
+    if (!m_pidBackend) return;   // custom non-adaptive backend: no retune
+
     const double K = m_est.alpha() / std::max(m_est.beta(), 1e-9);
     const double tau = 1.0 / std::max(m_est.beta(), 1e-9);
     const auto [kp, ki] = simcPiGains(K, tau, m_model.params().delay,
@@ -294,24 +389,26 @@ void OvenController::maybeRetune() {
 }
 
 void OvenController::applyPiGains(double kp, double ki) {
-    m_pid.setGains(kp, ki, 0.0);
+    if (!m_pidBackend) return;   // only meaningful for the SIMC-PI backend
+    m_pidBackend->setGains(kp, ki, 0.0);
     // Back-calculation tracking time: explicit config wins, else Ti.
     double Tt = m_cfg.antiWindupTt;
     if (Tt <= 0.0) {
         const double Ti = (ki > 1e-12) ? kp / ki : 1.0;
         Tt = std::max(1.0, Ti);
     }
-    m_pid.setAntiWindup(AntiWindupMethod::BackCalculation, Tt);
-    m_pid.setIntegralLimits(-m_cfg.integralLimit, m_cfg.integralLimit);
-    m_pid.setDerivativeOnMeasurement(true);
+    m_pidBackend->setAntiWindup(AntiWindupMethod::BackCalculation, Tt);
+    m_pidBackend->setIntegralLimits(-m_cfg.integralLimit, m_cfg.integralLimit);
+    m_pidBackend->setDerivativeOnMeasurement(true);
 }
 
 void OvenController::resetImpl() {
-    m_pid.reset();
+    m_feedback->reset();
     m_est.reset();          // keeps learned theta, clears statistics
     m_time = 0.0;
     m_TfInit = false;
     m_lastU = 0.0;
+    m_lastUfb = 0.0;
     m_overTemp = false;
     m_uHist.clear();
     m_lastRetuneTime = -1e9;

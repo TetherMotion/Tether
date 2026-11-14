@@ -7,7 +7,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <functional>
 #include <random>
 #include <deque>
 #include <vector>
@@ -15,6 +17,8 @@
 #include "tether/control/thermal/ActuationGovernor.hpp"
 #include "tether/control/thermal/OvenAutotune.hpp"
 #include "tether/control/thermal/OvenController.hpp"
+#include "tether/control/thermal/OvenCoupledModel.hpp"
+#include "tether/control/thermal/OvenLQIBackend.hpp"
 #include "tether/control/thermal/OvenThermalModel.hpp"
 #include "tether/control/thermal/TemperatureProfile.hpp"
 #include "tether/control/thermal/ThermalParameterEstimator.hpp"
@@ -118,6 +122,121 @@ double maxErrIn(const SimResult& r, double t0, double t1) {
     for (const auto& s : r.samples)
         if (s.t >= t0 && s.t <= t1) m = std::max(m, std::abs(s.temp - s.ref));
     return m;
+}
+
+// ---------------------------------------------------------------------------
+// Two-state coupled plant (non-collocated sensing): the sensor measures
+// zone 1 (chamber air / heater side), the controlled variable is zone 2
+// (product/load). Euler integration with input dead time.
+// ---------------------------------------------------------------------------
+
+OvenCoupledParams coupledPlantParams() {
+    OvenCoupledParams p;
+    p.alpha = 1.2;          // heater coeff into zone 1 [°C/s/u]
+    p.betaSensor = 0.008;   // zone-1 ambient loss [1/s]
+    p.betaProduct = 0.002;  // zone-2 ambient loss [1/s]
+    p.gammaSP = 0.02;       // coupling zone1->zone2 [1/s]
+    p.gammaPS = 0.01;       // coupling zone2->zone1 [1/s]
+    p.delay = 4.0;
+    p.disturbance = 0.0;
+    p.ambient = 25.0;
+    p.uMin = 0.0;
+    p.uMax = 1.0;
+    return p;
+}
+
+struct CoupledPlant {
+    OvenCoupledParams prm;
+    double ts{25.0}, tp{25.0};   // zone-1 (sensor), zone-2 (product) temps
+    double t{0.0};
+    std::deque<std::pair<double, double>> hist;
+
+    explicit CoupledPlant(const OvenCoupledParams& p) : prm(p) {}
+
+    void step(double u, double dt) {
+        hist.emplace_back(t, u);
+        while (hist.size() > 2 &&
+               hist.front().first < t - prm.delay - 2.0)
+            hist.pop_front();
+        double ud = 0.0;
+        for (const auto& [ti, ui] : hist) {
+            if (ti <= t - prm.delay) ud = ui;
+            else break;
+        }
+        const double dx1 = prm.alpha * ud
+            - prm.betaSensor * (ts - prm.ambient)
+            - prm.gammaSP * (ts - tp);
+        const double dx2 = prm.gammaPS * (ts - tp)
+            - prm.betaProduct * (tp - prm.ambient)
+            + prm.disturbance;
+        ts += dx1 * dt;
+        tp += dx2 * dt;
+        t += dt;
+    }
+};
+
+struct CoupledSimResult {
+    std::vector<std::pair<double, double>> prod;  // (t, product temp)
+    std::vector<std::pair<double, double>> sens;  // (t, sensor temp)
+    std::vector<double> refs;
+    double maxProdErr{0.0};
+    double soakProdErr{0.0};
+    double finalProdErr{0.0};
+    double maxSensorProdGap{0.0};
+    OvenControllerStatus lastStatus{};
+};
+
+// Run OvenController (any backend) against the coupled plant. The profile
+// is interpreted as the PRODUCT-temperature trajectory.
+CoupledSimResult simulateCoupled(
+        const OvenCoupledParams& plantP,
+        const OvenControllerConfig& ctrlCfg,
+        const TemperatureProfile& profile,
+        double duration, double dt = 0.5,
+        double noiseSigma = 0.0,
+        const std::function<double(double)>& disturbanceFn = {}) {
+    CoupledPlant plant(plantP);
+    plant.ts = plant.tp = profile.value(0.0);
+
+    OvenController ctrl(ctrlCfg);
+    ctrl.setProfile(profile);
+
+    std::mt19937 rng(42);
+    std::normal_distribution<double> noise(0.0, noiseSigma);
+
+    CoupledSimResult res;
+    ControllerInput in;
+    in.dt = dt;
+    in.reference = 25.0;
+
+    for (double t = 0.0; t < duration; t += dt) {
+        if (disturbanceFn) plant.prm.disturbance = disturbanceFn(t);
+        in.measured = plant.ts + (noiseSigma > 0.0 ? noise(rng) : 0.0);
+        const ControllerOutput out = ctrl.compute(in);
+        plant.step(std::clamp(out.control, plantP.uMin, plantP.uMax), dt);
+
+        const auto st = ctrl.status();
+        res.prod.emplace_back(t, plant.tp);
+        res.sens.emplace_back(t, plant.ts);
+        res.refs.push_back(st.reference);
+        res.maxProdErr = std::max(res.maxProdErr,
+                                  std::abs(plant.tp - st.reference));
+        res.maxSensorProdGap =
+            std::max(res.maxSensorProdGap, std::abs(plant.ts - plant.tp));
+    }
+
+    double sum = 0.0;
+    int n = 0;
+    for (size_t i = 0; i < res.prod.size(); ++i) {
+        if (res.prod[i].first > duration - 120.0) {
+            sum += std::abs(res.prod[i].second - res.refs[i]);
+            ++n;
+        }
+    }
+    res.soakProdErr = n ? sum / n : 0.0;
+    res.finalProdErr = std::abs(res.prod.back().second - res.refs.back());
+    res.lastStatus = ctrl.status();
+    return res;
 }
 
 } // namespace
@@ -446,4 +565,187 @@ TEST(OvenControllerTest, OverTemperatureShutdown) {
     for (const auto& s : res.samples)
         if (s.temp > 90.0 && s.u <= 1e-9) sawShutdown = true;
     EXPECT_TRUE(sawShutdown);
+}
+
+// ---------------------------------------------------------------------------
+// OvenLQIBackend — non-collocated sensing (product vs chamber sensor)
+// ---------------------------------------------------------------------------
+
+// Gentle product-temperature profile: 25 -> 90 C at 0.12 C/s, soak.
+// The product zone cannot follow faster ramps (coupling-limited), so the
+// rate is deliberately conservative; the soak is where precision matters.
+TemperatureProfile coupledProfile() {
+    TemperatureProfile p(25.0);
+    p.addRampSoak(90.0, 0.12, 250.0);
+    return p;
+}
+
+OvenControllerConfig lqiConfig(const OvenCoupledParams& plantP) {
+    OvenControllerConfig cfg;
+    // SISO FOPDT model for the feedforward path — approximate input→sensor
+    // dynamics; the LQI feedback trims the residual.
+    cfg.model.alpha = 1.0;
+    cfg.model.beta = 0.01;
+    cfg.model.delay = plantP.delay;
+    cfg.model.ambient = plantP.ambient;
+    cfg.model.uMin = plantP.uMin;
+    cfg.model.uMax = plantP.uMax;
+    cfg.feedbackBackend = OvenFeedbackBackendKind::LQI;
+    cfg.coupled = plantP;
+    cfg.adaptParams = false;   // isolate control law from adaptation
+    cfg.sensorTau = 3.0;
+    return cfg;
+}
+
+TEST(OvenLQIBackendTest, ControlsUnmeasuredProductTemperature) {
+    const auto plantP = coupledPlantParams();
+    const auto cfg = lqiConfig(plantP);
+
+    const auto res = simulateCoupled(plantP, cfg, coupledProfile(), 800.0);
+
+    EXPECT_STREQ(res.lastStatus.backendName, "LQI+Observer");
+    // Product (zone 2) must track the profile — this is the whole point of
+    // the non-collocated backend.
+    EXPECT_LT(res.soakProdErr, 2.5);
+    EXPECT_LT(res.finalProdErr, 2.5);
+    EXPECT_LT(res.maxProdErr, 15.0);
+    // Non-collocation proof: sensor and product genuinely differ (the
+    // sensor runs hotter to push heat into the product zone).
+    EXPECT_GT(res.maxSensorProdGap, 5.0);
+}
+
+TEST(OvenLQIBackendTest, PIBackendLeavesProductOffset) {
+    // Same plant/profile with the default SIMC-PI backend: the PI regulates
+    // the SENSOR temperature to the profile, so the product settles at a
+    // steady-state offset — motivating the LQI backend.
+    const auto plantP = coupledPlantParams();
+    OvenControllerConfig cfg;
+    cfg.model.alpha = 1.0;
+    cfg.model.beta = 0.01;
+    cfg.model.delay = plantP.delay;
+    cfg.model.ambient = plantP.ambient;
+    cfg.model.uMin = plantP.uMin;
+    cfg.model.uMax = plantP.uMax;
+    cfg.adaptParams = false;
+    cfg.sensorTau = 3.0;
+
+    const auto res = simulateCoupled(plantP, cfg, coupledProfile(), 800.0);
+
+    EXPECT_STREQ(res.lastStatus.backendName, "SIMC-PI");
+    // Sensor tracks the profile; product settles at a steady-state offset
+    // (the coupling gradient needed to feed zone-2 losses) — ~11 C here.
+    // This is exactly the failure mode the LQI backend exists to fix.
+    EXPECT_GT(res.maxSensorProdGap, 5.0);
+    EXPECT_GT(res.finalProdErr, 5.0);
+    EXPECT_LT(res.soakProdErr, res.finalProdErr + 3.0);  // persistent, not transient
+}
+
+TEST(OvenLQIBackendTest, ObserverEstimatesBothZones) {
+    const auto prm = coupledPlantParams();
+    OvenLQIBackend be(prm, 0.01, 0.004, 0.004, 1000.0, 1e-4, 0.09, 0.5);
+    CoupledPlant plant(prm);
+
+    ControllerInput in;
+    in.dt = 0.5;
+    in.reference = 90.0;   // product setpoint
+
+    for (int i = 0; i < 1600; ++i) {   // 800 s
+        in.measured = plant.ts;
+        const auto out = be.compute(in);
+        const double u = std::clamp(out.control, prm.uMin, prm.uMax);
+        plant.step(u, 0.5);
+        be.notifyAppliedInput(u);
+    }
+
+    // Observer must reconstruct BOTH zones from the single sensor channel.
+    EXPECT_NEAR(be.observer().xSensor(), plant.ts, 3.0);
+    EXPECT_NEAR(be.observer().xProduct(), plant.tp, 4.0);
+    // And the loop regulates the (unmeasured) product temperature.
+    EXPECT_NEAR(plant.tp, 90.0, 3.0);
+}
+
+TEST(OvenLQIBackendTest, RejectsProductLoadDisturbance) {
+    const auto plantP = coupledPlantParams();
+    const auto cfg = lqiConfig(plantP);
+
+    // Endothermic load on the product zone: -0.03 °C/s from t=450 on.
+    const auto dist = [](double t) { return t >= 450.0 ? -0.03 : 0.0; };
+    const auto res = simulateCoupled(plantP, cfg, coupledProfile(), 800.0,
+                                     0.5, 0.0, dist);
+
+    // Integral action on the product-temperature error must absorb the
+    // persistent load: steady-state error stays small.
+    EXPECT_LT(res.soakProdErr, 3.0);
+    EXPECT_LT(res.finalProdErr, 3.0);
+}
+
+TEST(OvenLQIBackendTest, AdaptsToParameterMismatch) {
+    // Controller nominal model is wrong; the bounded estimator should push
+    // corrected {alpha,beta,d} into the backend, which redesigns observer
+    // gains and LQI gains online.
+    auto plantP = coupledPlantParams();
+    plantP.alpha = 1.5;          // true plant 25% more responsive
+    plantP.betaSensor = 0.010;   // and loses heat faster
+    plantP.betaProduct = 0.0025;
+
+    auto nominal = plantP;
+    nominal.alpha = 1.2;
+    nominal.betaSensor = 0.008;
+    nominal.betaProduct = 0.002;
+
+    OvenControllerConfig cfg = lqiConfig(nominal);
+    cfg.adaptParams = true;
+    cfg.estimator.windowTime = 10.0;
+    cfg.estimator.memTime = 150.0;
+    cfg.estimator.smoothing = 0.5;
+    cfg.ditherAmp = 0.04;
+
+    const auto res = simulateCoupled(plantP, cfg, coupledProfile(), 1200.0);
+
+    // Smoke-level assertions: loop stays bounded, product converges, and
+    // the estimator actually moved the parameters (retune path exercised).
+    EXPECT_TRUE(std::isfinite(res.lastStatus.output));
+    EXPECT_LT(res.soakProdErr, 4.0);
+    EXPECT_LT(res.finalProdErr, 4.0);
+    EXPECT_GT(res.lastStatus.windowsUsed, 10);
+    EXPECT_NEAR(res.lastStatus.alpha, plantP.alpha, 0.6);
+}
+
+TEST(OvenControllerTest, BackendSwapAtRuntime) {
+    const auto plantP = coupledPlantParams();
+    auto cfg = lqiConfig(plantP);
+    cfg.feedbackBackend = OvenFeedbackBackendKind::PI;   // start on PI
+
+    CoupledPlant plant(plantP);
+    plant.ts = plant.tp = 25.0;
+    OvenController ctrl(cfg);
+    ctrl.setProfile(coupledProfile());
+
+    ControllerInput in;
+    in.dt = 0.5;
+    in.reference = 25.0;
+
+    // Phase 1: PI backend for 300 s.
+    for (double t = 0.0; t < 300.0; t += 0.5) {
+        in.measured = plant.ts;
+        const auto out = ctrl.compute(in);
+        plant.step(std::clamp(out.control, 0.0, 1.0), 0.5);
+    }
+    EXPECT_STREQ(ctrl.feedbackBackendName(), "SIMC-PI");
+
+    // Phase 2: swap to the LQI backend mid-run — no reset, bumpless-ish
+    // handoff (integrator starts at zero; FF keeps supplying bulk power).
+    ctrl.setFeedbackBackend(std::make_unique<OvenLQIBackend>(
+        plantP, cfg.lqiQxSensor, cfg.lqiQxProduct, cfg.lqiQi, cfg.lqiR,
+        cfg.observerQProc, cfg.observerRMeas, cfg.backendDt));
+    EXPECT_STREQ(ctrl.feedbackBackendName(), "LQI+Observer");
+
+    for (double t = 300.0; t < 800.0; t += 0.5) {
+        in.measured = plant.ts;
+        const auto out = ctrl.compute(in);
+        plant.step(std::clamp(out.control, 0.0, 1.0), 0.5);
+    }
+
+    // After the swap the product must still converge to the profile soak.
+    EXPECT_NEAR(plant.tp, 90.0, 4.0);
 }

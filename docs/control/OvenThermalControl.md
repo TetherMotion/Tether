@@ -6,6 +6,14 @@ actuation** (heat-only; cooling is passive). Every user-facing parameter
 is physical — thermal coefficients, dead time, disturbance — never a raw
 PID gain.
 
+The feedback law is a **pluggable backend**: the default SIMC-PI for
+collocated sensing, or an LQI state-feedback backend with a built-in
+Kalman observer for **non-collocated sensing** (sensor measures chamber
+air, the controlled variable is the product/load temperature). Both
+backends share the same feedforward, governor, estimator, dither and
+safety layers, and both support online retuning from the bounded physical
+parameter estimator.
+
 ## Plant model
 
 The controller assumes a lumped first-order-plus-dead-time (FOPDT) model:
@@ -65,6 +73,67 @@ TemperatureProfile ──► ActuationGovernor ──► r̂(t)   (achievable re
   is enabled. In closed loop `u ≈ f(T)` otherwise, leaving `{α,β,d}`
   identifiable only up to a 1-D ambiguity; the dither decorrelates the
   regressors (~0.1–0.3 °C measurement ripple for typical parameters).
+
+## Feedback backends
+
+`cfg.feedbackBackend` selects the feedback block; `setFeedbackBackend()`
+can also swap it at runtime (`nullptr` restores the configured default).
+The swap is one virtual `ControllerBase::compute()` call per cycle —
+negligible at oven loop rates — and the FF/governor/estimator layers are
+untouched.
+
+### `PI` (default) — collocated sensor
+
+SIMC PI on the filtered measurement, as described above. Correct when
+the sensor sees essentially the thermal mass being controlled.
+
+### `LQI` — non-collocated sensor
+
+Use when the sensor does **not** measure what should follow the profile
+(chamber-air thermistor vs. product core). `OvenLQIBackend`
+(`OvenLQIBackend.hpp`) implements:
+
+```
+measured y (zone 1) ──► OvenThermalObserver ──► x̂ = [T̂_s, T̂_p]
+                             ▲                        │
+             total applied u ─┘ (delay line)          ▼
+                                       LQIController, C = [0,1]
+                                       u_fb on deviation states z = x̂ − x_ss(r)
+```
+
+- **Two-state plant** (`OvenCoupledParams`): zone 1 (sensor side,
+  heated directly) coupled to zone 2 (product, controlled). Parameters
+  `alpha, betaSensor, betaProduct, gammaSP, gammaPS, delay,
+  disturbance, ambient, uMin/uMax` — physical RC rates, see
+  `OvenCoupledModel.hpp` for the equations and `makeCoupledParams()` to
+  derive a nominal set from the FOPDT model.
+- **Observer**: steady-state Kalman filter (2×2 predictor Riccati solved
+  once per redesign). It predicts with the *total applied* input —
+  feedforward + feedback + dither, after clamping and rate limiting —
+  reported via `IOvenAdaptiveFeedback::notifyAppliedInput()`, so FF is
+  not misread as process noise. Corrects with the raw measurement.
+- **LQI**: `LQIController` on the augmented (state + integral) system,
+  `C = [0,1]` so the integrator drives the *product* temperature to the
+  reference. It is fed **deviation states** `z = x̂ − x_ss(r)` with
+  `reference = 0`: Tether's LQI penalizes absolute state, and feeding
+  ~100 °C absolutes would create an uncorrectable ~10⁴ bias. The analytic
+  steady-state map `x1_ss = r + (βP·(r−T_amb) − d)/γPS` also gives
+  implicit feedforward during ramps.
+- **Weights** `lqiQxSensor/QxProduct/Qi/R` are performance weights, not
+  physical — defaults are verified non-oscillatory for typical oven time
+  constants; raise `lqiR` for softer action.
+- **Online retune**: the same gated `maybeRetune()` path pushes bounded
+  `{α̂, β̂}` into `updateThermalParameters()`, which re-derives observer
+  gain + LQI gains. `d̂` is deliberately *not* mapped — the FOPDT
+  disturbance estimate conflates true loads with single-vs-two-state
+  structural mismatch; real load disturbances are rejected by the LQI
+  integral instead.
+
+**Limitations:** the feedforward still uses the SISO FOPDT model
+(approximate for the coupled plant — the LQI trims the residual, and the
+governor's feasibility band is sensor-path based); coupled-model
+parameters beyond `{α, β}` (coupling rates, loss split) are
+commissioning constants — there is no coupled-model autotune yet.
 
 ## Commissioning (autotune)
 
@@ -156,28 +225,38 @@ Every control cycle (when `adaptParams`):
 | `integralLimit` | 10 | |I-term| bound in u units. |
 | `antiWindupTt` | 0 → Ti | Back-calc tracking time; default = PI integral time is fine. |
 | `maxTempC` / `overTempHysteresis` | 400 / 5 °C | **Set these for your process.** Hard interlock: output → uMin above the limit, resumes below limit−hysteresis. Residual overshoot is physical coast-down (no active cooling). |
+| `feedbackBackend` | PI | `LQI` for non-collocated sensing (sensor ≠ controlled mass). See "Feedback backends". |
+| `coupled.*` | defaults | LQI backend's two-state plant params. Start from `makeCoupledParams(cfg.model)`; refine coupling/loss-split from commissioning data (empty vs loaded step response). |
+| `lqiQxSensor/QxProduct/Qi/R` | 0.01/0.004/0.004/1000 | LQI performance weights (not physical). Larger `lqiR` → softer/slower; smaller → more aggressive (watch for limit cycle). |
+| `observerQProc` / `observerRMeas` | 1e-4 / 0.09 | Observer bandwidth: larger QProc/RMeas ratio → trusts sensor more (faster state convergence, more noise feedthrough). `observerRMeas` ≈ sensor variance (σ=0.3 °C → 0.09). |
+| `backendDt` | 0.5 s | Observer/LQI design step; set ≈ actual loop dt. |
 
 ## Model selection: FOPDT vs. alternatives
 
-Only the **FOPDT** model is implemented. It is the right choice when a
-single effective lag + dead time describes the plant — i.e. the sensor
-sees roughly the mass being controlled and heater→sensor dynamics are
-dominated by one time constant.
+The estimator and feedforward always assume **FOPDT**
+(`K·e^(−Ls)/(τs+1)`) for the input→sensor path. What changes with plant
+topology is the *feedback backend*:
 
-Consider a richer model (not yet implemented) when the step response
-shows **two distinct lags** — e.g. a fast initial rise (heater element)
-followed by a slow tail (chamber air → product), or when the sensor is
-far upstream of the controlled mass. That is the SOPDT case
-(`K·e^(−Ls)/((τ₁s+1)(τ₂s+2))`); the autotuning stack elsewhere in Tether
-(`ProcessIdentification::identifySOPDT`) can fit it offline, but this
-controller's estimator and feedforward assume first order. IPDT
-(integrating) is **never** correct for an oven — heat loss to ambient
-gives a finite DC gain.
+- **Collocated sensor** (sensor sees the controlled mass) → `PI` backend.
+  Correct whenever a single effective lag + dead time describes the
+  plant.
+- **Non-collocated sensor** (air sensor, product/load is the controlled
+  mass) → `LQI` backend on the two-state coupled model. This is the
+  answer to the "two visible lags" case: instead of fitting SOPDT
+  parameters, the second state *is* the unmeasured product temperature,
+  reconstructed by the observer. It also gives integral action on the
+  product-temperature error, rejecting load disturbances the SISO loop
+  cannot see.
+- **MIMO / multi-zone** → not yet implemented (LQI supports it in
+  principle; the coupled model and estimator are SISO).
 
-If FOPDT tracking shows a persistent lag that grows with profile rate
-beyond what PI trim covers, the likely cause is unmodeled second-order
-dynamics or sensor placement — revisit the model class before raising
-gains.
+IPDT (integrating) is **never** correct for an oven — heat loss to
+ambient gives a finite DC gain.
+
+If tracking shows a persistent lag that grows with profile rate beyond
+what feedback covers, the likely cause is unmodeled higher-order
+dynamics or sensor placement — revisit the backend/model class before
+raising gains.
 
 ## Real-time notes
 

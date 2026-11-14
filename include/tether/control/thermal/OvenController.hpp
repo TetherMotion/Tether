@@ -14,21 +14,22 @@
  *                     │             of the thermal model (one-sided heat)
  *        ┌────────────┴─────────────┐
  *        │                          │
- *  model-inverse FF          PI feedback trim
- *  u_ff = requiredInput(     on (r̂ - T_filt)
- *    r̂(t+θ), ṙ̂, T_amb, d̂)        │
+ *  model-inverse FF          feedback backend
+ *  u_ff = requiredInput(     (pluggable ControllerBase:
+ *    r̂(t+θ), ṙ̂, T_amb, d̂)     SIMC-PI or LQI+observer)
  *        │                          │
  *        └───────────┬──────────────┘
  *                    ▼
- *              u = clamp(u_ff + u_fb, uMin, uMax)
+ *              u = clamp(u_ff + u_fb + dither, uMin, uMax)
  *                    │
  *      ThermalParameterEstimator ──→ bounded {α, β, d} adaptation
- *      (windowed LS, excitation-gated)   ↺ updates model + retunes PI
+ *      (windowed LS, excitation-gated)   ↺ updates model + retunes gains
  * ```
  *
  * Key properties:
- *  - The feedback PI gains are *outputs* of the physical model via SIMC
- *    rules, re-derived whenever the online estimator updates {α, β}.
+ *  - Feedback gains are *outputs* of the physical model — SIMC rules for
+ *    the PI backend, Riccati re-solves for the LQI backend — re-derived
+ *    whenever the online estimator updates {α, β}.
  *  - Delay is handled by previewing the reference `θ` ahead in the
  *    feedforward (power arrives when needed) — conservative IMC-style,
  *    no Smith predictor needed at oven timescales.
@@ -49,6 +50,8 @@
 #include "tether/control/PIDControllers.hpp"
 #include "tether/control/thermal/ActuationGovernor.hpp"
 #include "tether/control/thermal/OvenAutotune.hpp"
+#include "tether/control/thermal/OvenCoupledModel.hpp"
+#include "tether/control/thermal/OvenLQIBackend.hpp"
 #include "tether/control/thermal/OvenThermalModel.hpp"
 #include "tether/control/thermal/TemperatureProfile.hpp"
 #include "tether/control/thermal/ThermalParameterEstimator.hpp"
@@ -58,6 +61,13 @@
 
 namespace tether::control::thermal {
 
+/**@brief Selectable feedback backend for OvenController. */
+enum class OvenFeedbackBackendKind {
+    PI,   /**< Default: SIMC-tuned PID on the filtered measurement */
+    LQI   /**< LQI state feedback + Kalman observer for non-collocated
+               sensing (estimates product-zone temperature) */
+};
+
 /**@brief Configuration for OvenController. */
 struct OvenControllerConfig {
     // --- Plant model (nominal/initial physical parameters) ---
@@ -66,6 +76,23 @@ struct OvenControllerConfig {
     // --- Subsystem configs ---
     GovernorConfig governor;
     EstimatorConfig estimator;
+
+    // --- Feedback backend selection ---
+    OvenFeedbackBackendKind feedbackBackend{OvenFeedbackBackendKind::PI};
+
+    // --- LQI backend (non-collocated sensing) ---
+    OvenCoupledParams coupled;      /**< Nominal 2-state plant params */
+    // LQI weights are performance weights, not physical parameters — the
+    // physical params flow through cfg.coupled. Defaults give a smooth,
+    // non-oscillatory loop for typical oven time constants (verified in
+    // tests); increase lqiR for even softer action, decrease for faster.
+    double lqiQxSensor{0.01};       /**< LQI weight, sensor-zone state */
+    double lqiQxProduct{0.004};     /**< LQI weight, product-zone state */
+    double lqiQi{0.004};            /**< LQI integral weight */
+    double lqiR{1000.0};            /**< LQI control weight */
+    double observerQProc{1e-4};     /**< Observer process-noise density */
+    double observerRMeas{0.09};     /**< Observer measurement variance [°C²] */
+    double backendDt{0.5};          /**< Observer/LQI design step [s] */
 
     // --- Feedback PI ---
     double kp{0.0};           /**< PI proportional gain; 0 = auto (SIMC) */
@@ -109,6 +136,7 @@ struct OvenControllerStatus {
     bool saturated{false};
     bool overTemp{false};
     bool adapting{false};
+    const char* backendName{nullptr}; /**< Active feedback backend id */
 };
 
 class OvenController : public ControllerBase {
@@ -143,6 +171,22 @@ public:
     /**@brief Apply an autotune result: model params + PI gains. */
     void applyAutotune(const OvenAutotuneResult& result);
 
+    /**
+     * @brief Install a custom feedback backend at runtime.
+     *
+     * The backend replaces the SIMC-PI (or configured LQI) feedback block;
+     * the feedforward/governor/estimator/dither layers are unchanged.
+     * Backends implementing IOvenAdaptiveFeedback additionally receive
+     * the applied-input stream and bounded parameter updates. Detection
+     * happens once here (single dynamic_cast) — the per-cycle cost is one
+     * virtual ControllerBase::compute() call, identical to the built-in
+     * path. Pass nullptr to restore the configured default backend.
+     */
+    void setFeedbackBackend(std::unique_ptr<ControllerBase> backend);
+
+    /**@brief Name of the active feedback backend (diagnostics). */
+    const char* feedbackBackendName() const;
+
     // --- Accessors ---
     const OvenThermalModel& model() const { return m_model; }
     const ThermalParameterEstimator& estimator() const { return m_est; }
@@ -159,6 +203,7 @@ private:
     void updateModelFromEstimator();
     void maybeRetune();
     void applyPiGains(double kp, double ki);
+    void installBackend(OvenFeedbackBackendKind kind);
     double delayedInput(double t) const;
     void pushInput(double t, double u);
 
@@ -169,7 +214,14 @@ private:
     OvenThermalModel m_model;
     ThermalParameterEstimator m_est;
     ActuationGovernor m_gov;
-    PIDController m_pid;
+
+    // Feedback backend: polymorphic ControllerBase — one virtual call per
+    // cycle (negligible at oven loop rates); swap via config or
+    // setFeedbackBackend() without touching the rest of the loop.
+    std::unique_ptr<ControllerBase> m_feedback;
+    IOvenAdaptiveFeedback* m_feedbackAdaptive{nullptr};
+    PIDController* m_pidBackend{nullptr};   /**< Non-owning; null for LQI/custom */
+    OvenFeedbackBackendKind m_backendKind{OvenFeedbackBackendKind::PI};
 
     // Runtime state
     double m_time{0.0};
@@ -186,6 +238,8 @@ private:
     double m_lastRetuneTime{-1e9};
     int m_lastRetuneWindows{0};
     double m_lastKp{0.0}, m_lastKi{0.0};
+    double m_lastAlpha{0.0}, m_lastBeta{0.0};
+    double m_lastUfb{0.0};
 };
 
 } // namespace tether::control::thermal

@@ -36,6 +36,7 @@ set(TETHER_CONTROLS_SOURCES
     ${TETHER_ROOT}/src/control/thermal/ThermalParameterEstimator.cpp
     ${TETHER_ROOT}/src/control/thermal/OvenAutotune.cpp
     ${TETHER_ROOT}/src/control/thermal/OvenController.cpp
+    ${TETHER_ROOT}/src/control/thermal/OvenLQIBackend.cpp
 )
 
 # Filter to only existing files
