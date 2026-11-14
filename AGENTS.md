@@ -148,7 +148,65 @@ ESC211Controller build (`cmake --preset rpi5` from the repo root).
 
 # Run with verbose output
 ./build/bin/tests/tether_klipper_tests --gtest_print_time=0
+
+# Motion-planner binaries (Pareto velocity planner is header-heavy —
+# every consumer must be rebuilt after editing its headers)
+cmake --build build --target tether_motion_planner_integration_tests \
+    tether_motion_planner_analytical_extrusion_tests \
+    tether_motion_geometry_tests tether_gcode_interpolation_tests -j8
+./build/bin/tests/tether_motion_planner_integration_tests   # 352 tests, ~9s
+./build/bin/tests/tether_motion_planner_analytical_extrusion_tests
+./build/bin/tests/tether_motion_geometry_tests              # 58 tests
+./build/bin/tests/tether_gcode_interpolation_tests          # 201 tests
 ```
+
+Note: `AnalyticalExtrusionGcodeTest.RealGcode_KissenPunctperi` reads
+`~/dev/kissen_punctperi2_*.gcode` from the local disk and is absent on
+machines without that file (or fails its loose thermal bound if the file
+differs from the calibrated one) — not a CI-grade test.
+
+## Motion planner notes (ParetoTimeEnergyOptimalVelocityPlanner)
+
+Production pipeline: `GCode::PlanningSegmentBuilder::fromText` →
+`piecewiseNurbsFromSegments` → `PathAdapter` (segment feed limits +
+corner velocities + dwell points) →
+`ParetoTimeEnergyOptimalVelocityPlanner::computeProfile` →
+`WeightedSwitchingStructure` (WSS) arc list.
+
+- **Solver model**: one scalar `(V, A, J, snap)` bound per piece via
+  `globalBounds()` over a sampled grid, then one accel/decel pulse per
+  piece (`optimizePulsePlan`). The fine-grid TOPP-RA machinery
+  (forward pass / snapspace) is retained under `#if 0` but inactive —
+  the pulse staircase approximates the true continuous optimal
+  envelope, it does not reach it.
+- **Bound semantics**: `globalBounds()` treats first/last grid samples
+  as enforced boundary conditions (v0/vf or split-boundary speeds) and
+  scans only the open interval for velocity/accel/jerk envelopes;
+  `intervalBound()` returns `min(interior, vLimit(0), vLimit(sTotal))`
+  so a curvature/velocity dip exactly at a split point is enforced via
+  the boundary speed, not smeared across the adjacent pieces.
+- **Jerk bounds**: axis jerk maps as `|T_i·eta + jounce_i·v³ +
+  3·κ_i·v·a| <= jMaxI`. The `±bounds.acceleration` trials are a
+  worst-case accel assumption — tight jerk bounds on mixed-direction
+  axes of curved paths are genuine model conservatism (coupled
+  (v,a,j)-dependent bounds would need the disabled TOPP-RA path), not
+  a bug. The `1 mm/s³` floor is for truly degenerate points only.
+- **Splitting**: junction splits (feed steps), dwell splits, and
+  interior `vLim` deep-dip splits (>2× below flanks, 1024-pt scan).
+  Pieces get interval bounds first, boundary speeds are equalized
+  against `min(boundL, boundR)`, then each piece solves with its own
+  length-scaled constraint grid (~0.1 mm/node, floor 32).
+- **Perf-relevant caches**: `gridCoeffs_` (per-grid-node tangent,
+  curvature, jounce — feeds `accelBoundsFromCache`/
+  `etaBoundsFromCache`), `vLimGeoGrid_` (geometric velocity limit;
+  `velocityLimitAt` = `min(cached, segLimit)` at grid-aligned queries),
+  NURBS arc-length LUT, Newton inversion for `timeAtArcLength`.
+- **Regression pins** (silent quality collapses the WSS-validity
+  checks missed): `RoundedSquareGCodeTest` asserts dense feed-stepped
+  paths produce many arcs and maxV stays off the ~4 mm/s global-min
+  fallback; `PlannerScenarios_Hard.RFormatArcs` asserts jerk stays off
+  the 1 mm/s³ floor; `AnalyticalExtrusionGcodeTest.SyntheticGcode`
+  asserts `totalTime < 30s` on the blended square.
 
 ## Architecture
 
