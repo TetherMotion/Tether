@@ -1531,8 +1531,7 @@ public:
         buildConstraintCache();
 
         const auto vLimit = [this](double s) {
-            return static_cast<double>(evaluator_.velocityLimit(
-                static_cast<T>(std::clamp(s, 0.0, sTotal_)), path_));
+            return velocityLimitAt(s);
         };
         auto result = optimizePulsePlan(vLimit, v0_, vf_);
 
@@ -1732,8 +1731,7 @@ public:
         constraintCacheSize_ = std::max(constraintCacheSize, size_t(10));
         buildConstraintCache();
         const auto vLimit = [this](double s) {
-            return static_cast<double>(evaluator_.velocityLimit(
-                static_cast<T>(std::clamp(s, 0.0, sTotal_)), path_));
+            return velocityLimitAt(s);
         };
         lastIntervalBounds_ = globalBounds(vLimit, sTotal_);
         return lastIntervalBounds_.velocity;
@@ -2808,6 +2806,10 @@ private:
     size_t fineGridSize_ = 0;
     double dsFine_ = 0.0;
     std::vector<double> vLimFineGrid_;
+    std::vector<double> vLimGeoGrid_;  /**< Pre-fold geometric vLim
+        on the coarse grid: equals Evaluator::velocityLimit minus the
+        per-segment term; lets velocityLimitAt() answer bounds-grid
+        samples without re-evaluating the path. */
     PlanningBounds lastIntervalBounds_;
 
     std::vector<std::pair<double, double>> corners_;
@@ -3009,6 +3011,7 @@ private:
         ds_ = sTotal_ / static_cast<double>(constraintCacheSize_);
         gridCoeffs_.resize(constraintCacheSize_ + 1);
         vLimGrid_.resize(constraintCacheSize_ + 1);
+        vLimGeoGrid_.resize(constraintCacheSize_ + 1);
 
         for (size_t i = 0; i <= constraintCacheSize_; ++i) {
             double s = std::min(static_cast<double>(i) * ds_, sTotal_);
@@ -3020,7 +3023,8 @@ private:
             double kappa = gridCoeffs_[i].kappa;
             double vLim = static_cast<double>(
                 std::min(feedRate_, limits_.path.maxPathVelocity));
-            if (kappa > static_cast<double>(MathConstants::EPSILON)) {
+            if (kappa > static_cast<double>(MathConstants::EPSILON) &&
+                limits_.path.maxCentripetalAcceleration > T(0)) {
                 double vCurvature = std::sqrt(
                     static_cast<double>(limits_.path.maxCentripetalAcceleration)
                     / kappa);
@@ -3029,7 +3033,12 @@ private:
             auto maxVel = limits_.maxVelocityForDirection(
                 toVec(gridCoeffs_[i].tangent));
             vLim = std::min(vLim, static_cast<double>(maxVel));
-            vLimGrid_[i] = std::max(vLim, 0.0);
+            // Keep a pre-fold copy: the fine-grid pass folds corner
+            // dips and accel propagation back into vLimGrid_, but the
+            // pure geometric limit is what Evaluator::velocityLimit
+            // reproduces (minus the per-segment term, applied on top
+            // by velocityLimitAt).
+            vLimGeoGrid_[i] = vLimGrid_[i] = std::max(vLim, 0.0);
         }
 
         // --- Fine grid: velocity limit with per-segment constraints ---
@@ -3381,6 +3390,33 @@ private:
     }
 
     /**Compute acceleration bounds [a_min, a_max] from cached grid coefficients. */
+    /**
+     * @brief Velocity limit at arc length s, cache-backed.
+     *
+     * Identical formula to Evaluator::velocityLimit: when s coincides
+     * with a coarse-grid node, the geometric terms come from
+     * vLimGeoGrid_ (same coefficients the evaluator would compute) and
+     * only the cheap per-segment lookup is added. Off-grid queries fall
+     * back to a direct evaluator call. Produces the same values while
+     * skipping the path evaluation that dominates bounds sampling.
+     */
+    double velocityLimitAt(double s) const {
+        s = std::clamp(s, 0.0, sTotal_);
+        if (ds_ > 0.0 && !vLimGeoGrid_.empty()) {
+            const size_t i =
+                static_cast<size_t>(s / ds_ + 0.5);
+            if (i < vLimGeoGrid_.size() &&
+                std::abs(static_cast<double>(i) * ds_ - s) <=
+                    1e-9 * std::max(1.0, sTotal_)) {
+                const double segLim = static_cast<double>(
+                    path_.maxVelocityAtArcLength(static_cast<T>(s)));
+                return std::max(std::min(vLimGeoGrid_[i], segLim), 0.0);
+            }
+        }
+        return static_cast<double>(evaluator_.velocityLimit(
+            static_cast<T>(s), path_));
+    }
+
     std::pair<double, double> accelBoundsFromCache(size_t idx, double v) const {
         const auto& c = gridCoeffs_[idx];
         double a_min = -static_cast<double>(limits_.path.maxPathAcceleration);
