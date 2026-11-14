@@ -938,7 +938,13 @@ TEST(AnalyticalExtrusionTest, FlowAdaptiveHeater_AnalyticalMatchesSampling) {
     for (double t : times) {
         double da = analytical.temperatureDeltaAtTime(t);
         double ds = sampling.temperatureDeltaAtTime(t);
-        EXPECT_NEAR(da, ds, 1e-9)
+        // 1e-3, not tighter: the sampling detector resolves flow
+        // onset/stop at ~1 ms, so its P_ff plateau differs from the
+        // analytical one by a small physical amount (~5e-5 °C). The
+        // 1e-9 bound only ever passed because the heat capacity was
+        // 1000x too large and saturated both sides into identical
+        // clamps.
+        EXPECT_NEAR(da, ds, 1e-3)
             << "analytical and sampling delta differ at t=" << t;
     }
 }

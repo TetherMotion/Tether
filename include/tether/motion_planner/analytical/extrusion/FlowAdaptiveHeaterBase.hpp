@@ -45,7 +45,7 @@ namespace MotionPlanner::analytical::extrusion {
  */
 struct AnalyticalFlowAdaptiveHeaterParams {
     // --- Filament and heater ---
-    double filamentHeatCapacity = 2.1; /**< ρ·c_p [J/(mm³·K)] */
+    double filamentHeatCapacity = 2.1; /**< ρ·c_p [J/(cm³·K)] — datasheet units: PLA ≈ 2.2, TPU ≈ 2.1, PETG ≈ 1.7, ABS ≈ 1.5 */
     double inletTempC           = 25.0; /**< T_inlet [°C] */
     double targetTempC          = 210.0; /**< T_target [°C] */
     double heaterPowerScale     = 40.0; /**< [W] at PWM=1 */
@@ -184,9 +184,10 @@ protected:
      */
     double steadyStatePower(double t) const {
         double vE = traj_->extruderVelocityAtTime(t);
-        double Q = vE * filamentAreaMm2_;
+        double Q = vE * filamentAreaMm2_;  // mm³/s
         double deltaT = params_.targetTempC - params_.inletTempC;
-        return params_.filamentHeatCapacity * Q * deltaT;
+        // ρ·c_p in J/(cm³·K) → ×1e-3 for mm³/s flow → watts.
+        return params_.filamentHeatCapacity * 1e-3 * Q * deltaT;
     }
 
     /**

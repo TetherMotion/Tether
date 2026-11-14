@@ -533,10 +533,24 @@ TEST(AnalyticalExtrusionGcodeTest, RealGcode_KissenPunctperi) {
     }
     EXPECT_GT(finiteCount, 180);
 
-    // Run thermal observer
+    // Run thermal observer. The three-state model has no ambient-loss
+    // term: the only heat sink is filament enthalpy, so a fixed PWM has
+    // no finite steady state — the only physically consistent fixed
+    // input is the holding power that balances the mean enthalpy drain,
+    // P_hold = rhoCp · Q̄ · (T_target - T_inlet). (50% duty was never a
+    // valid input here; it only stayed under the bound while the heat
+    // capacity was 1000x too large and flow arcs absorbed ~kW.)
     AnalyticalThermalParams thParams;
-    thParams.heaterPWM = 0.5;
     thParams.inletTempC = 25.0;
+    {
+        const double filamentArea = M_PI * 1.75 * 1.75 / 4.0;  // mm²
+        const double meanQ = filamentArea *
+            traj.totalExtrudedLength() / totalT;              // mm³/s
+        const double holdW = thParams.filamentHeatCapacity * 1e-3 *
+            meanQ * (230.0 - thParams.inletTempC);            // W
+        thParams.heaterPWM = std::clamp(
+            holdW / thParams.heaterPowerScale, 0.0, 1.0);
+    }
     AnalyticalMeltZoneThermalObserver<2> thermal(traj, thParams);
     thermal.initialize(230.0);  // TPU temp from gcode
 

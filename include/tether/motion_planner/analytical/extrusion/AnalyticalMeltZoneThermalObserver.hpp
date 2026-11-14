@@ -66,7 +66,7 @@ struct AnalyticalThermalParams {
     double sensorMeltConductance   = 1.5; /**< G_sm */
 
     // --- Filament properties ---
-    double filamentHeatCapacity = 2.1; /**< ρ·c_p [J/(mm³·K)] */
+    double filamentHeatCapacity = 2.1; /**< ρ·c_p [J/(cm³·K)] — datasheet units: PLA ≈ 2.2, TPU ≈ 2.1, PETG ≈ 1.7, ABS ≈ 1.5 */
     double inletTempC           = 25.0; /**< T_inlet [°C] */
 
     // --- Heater ---
@@ -336,7 +336,8 @@ private:
         double Cm = params_.meltZoneCapacitance;
         double Ghs = params_.heaterSensorConductance;
         double Gsm = params_.sensorMeltConductance;
-        double rhoCp = params_.filamentHeatCapacity;
+        // ρ·c_p configured in J/(cm³·K); Qbar is mm³/s → cm³→mm³ ×1e-3.
+        double rhoCp = params_.filamentHeatCapacity * 1e-3;
         double Pheater = params_.heaterPWM * params_.heaterPowerScale;
         double Tinlet = params_.inletTempC;
 

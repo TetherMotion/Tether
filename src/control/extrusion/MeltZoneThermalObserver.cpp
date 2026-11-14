@@ -20,7 +20,10 @@ void MeltZoneThermalObserver::predictStep(double heaterPWM,
     const double P_heater = heaterPWM * params_.heaterPowerScale;   // [W]
     const double dT_hs = heaterBlockTemp_ - sensorTemp_;            // [K]
     const double dT_sm = sensorTemp_ - meltTemp_;                   // [K]
-    const double enthalpy = params_.filamentHeatCapacity * flowMm3PerS *
+    // ρ·c_p is configured in J/(cm³·K) (datasheet units, ~2.1 for PLA/TPU);
+    // flow is mm³/s → convert cm³→mm³ so the product is watts.
+    const double enthalpy = params_.filamentHeatCapacity * 1e-3 *
+                            flowMm3PerS *
                             (meltTemp_ - params_.inletTempC);       // [W]
 
     // C_h dT_h/dt = P_heater - G_hs (T_h - T_s)

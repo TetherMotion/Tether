@@ -23,7 +23,8 @@
  * where:
  *   P_heater = heaterPWM × heaterPowerScale  [W]
  *   Q = volumetric flow [mm³/s]
- *   ρ·c_p = filament volumetric heat capacity [J/(mm³·K)]
+ *   ρ·c_p = filament volumetric heat capacity [J/(cm³·K)]
+ *           (converted by 1e-3 at the use site to match mm³ flow)
  *   T_inlet = ambient/cold-filament temperature [°C]
  *
  * The last term in the melt-zone equation is the enthalpy removed by the
@@ -91,7 +92,7 @@ struct MeltZoneThermalParams {
     double sensorMeltConductance   = 1.5; /**< G_sm [W/K] — sensor → melt zone */
 
     // --- Filament properties ---
-    double filamentHeatCapacity   = 2.1; /**< ρ·c_p [J/(mm³·K)] */
+    double filamentHeatCapacity   = 2.1; /**< ρ·c_p [J/(cm³·K)] — datasheet units: PLA ≈ 2.2, TPU ≈ 2.1, PETG ≈ 1.7, ABS ≈ 1.5 */
     double inletTempC             = 25.0; /**< T_inlet [°C] */
 
     // --- Heater ---

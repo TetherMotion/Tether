@@ -77,7 +77,7 @@ namespace tether::control::extrusion {
 /**@brief Parameters for the flow-adaptive heater controller. */
 struct FlowAdaptiveHeaterParams {
     // --- Filament and heater ---
-    double filamentHeatCapacity  = 2.1; /**< ρ·c_p [J/(mm³·K)] */
+    double filamentHeatCapacity  = 2.1; /**< ρ·c_p [J/(cm³·K)] — datasheet units: PLA ≈ 2.2, TPU ≈ 2.1, PETG ≈ 1.7, ABS ≈ 1.5 */
     double inletTempC            = 25.0; /**< T_inlet [°C] */
     double heaterPowerScale      = 40.0; /**< [W] at PWM=1 */
 

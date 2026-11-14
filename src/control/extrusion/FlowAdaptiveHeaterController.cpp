@@ -29,8 +29,9 @@ namespace tether::control::extrusion {
 
     // --- Steady-state enthalpy power required to maintain target at flow Q ---
     // P_ff = ρ c_p Q (T_target - T_inlet)  [W]
+    // ρ·c_p configured in J/(cm³·K); Q is mm³/s → cm³→mm³ factor 1e-3.
     const double P_ff = (target - params_.inletTempC) *
-                        params_.filamentHeatCapacity * Q;
+                        params_.filamentHeatCapacity * 1e-3 * Q;
     const double P_ff_pwm = (params_.heaterPowerScale > 0.0)
         ? P_ff / params_.heaterPowerScale : 0.0;
 

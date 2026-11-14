@@ -177,7 +177,7 @@ struct KlippySettings {
     std::string crossWlfLutPath; /**< optional serialized LUT path */
     // Flow-adaptive heater compensation (three-state thermal model)
     bool heaterFlowPreEmphasis = false; /**< enable flow-adaptive heater ctrl */
-    double filamentHeatCapacity = 2.1; /**< ρ·c_p [J/(mm³·K)] */
+    double filamentHeatCapacity = 2.1; /**< ρ·c_p [J/(cm³·K)] — datasheet units: PLA ≈ 2.2, TPU ≈ 2.1, PETG ≈ 1.7, ABS ≈ 1.5 */
     // Three-state thermal model capacitances
     double heaterBlockCapacitance = 8.0; /**< C_h [J/K] */
     double sensorCapacitance = 1.0; /**< C_s [J/K] */
