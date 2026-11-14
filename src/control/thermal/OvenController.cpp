@@ -122,6 +122,10 @@ void OvenController::setDisturbancePrior(double d) {
     m_est.setPrior(m_est.alpha(), m_est.beta(), d);
 }
 
+void OvenController::setCouplingDisturbance(double d) {
+    m_extDisturb = d;
+}
+
 void OvenController::setModelParams(const OvenModelParams& params) {
     m_model.setParams(params);
     m_model.params().disturbance = params.disturbance;
@@ -200,13 +204,28 @@ ControllerOutput OvenController::computeImpl(const ControllerInput& input) {
     }
 
     // ---- 2. Governed reference ----
+    // Known exogenous disturbance (e.g. neighbor-zone coupling): the
+    // estimator's disturbance estimate already contains its steady-state
+    // value with window lag, so only the deviation from a slow EMA is
+    // added — transient-leading without steady-state double counting.
+    if (!m_extDisturbInit) {
+        m_extDisturbAvg = m_extDisturb;
+        m_extDisturbInit = true;
+    } else {
+        const double tau = std::max(1.0, m_cfg.estimator.windowTime);
+        const double a = 1.0 - std::exp(-dt / tau);
+        m_extDisturbAvg += a * (m_extDisturb - m_extDisturbAvg);
+    }
+    const double ffDisturb =
+        mp.disturbance + (m_extDisturb - m_extDisturbAvg);
+
     double rHat, rDot;
     if (m_hasProfile) {
         // Keep governor physics in sync with (possibly adapted) model.
         GovernorConfig gc = m_cfg.governor;
         gc.alpha = mp.alpha;
         gc.beta = mp.beta;
-        gc.disturbance = mp.disturbance;
+        gc.disturbance = ffDisturb;
         gc.ambient = ambient;
         gc.uMin = uMin;
         gc.uMax = uMax;
@@ -232,7 +251,7 @@ ControllerOutput OvenController::computeImpl(const ControllerInput& input) {
         rDotFf = 0.0;
     }
     const double uFf = m_model.requiredInputClamped(rFf, rDotFf,
-                                                  ambient, mp.disturbance);
+                                                  ambient, ffDisturb);
 
     // ---- 4. Feedback on the remaining actuator authority ----
     // The backend is a polymorphic ControllerBase: one virtual call per
@@ -413,6 +432,9 @@ void OvenController::resetImpl() {
     m_uHist.clear();
     m_lastRetuneTime = -1e9;
     m_lastRetuneWindows = 0;
+    m_extDisturb = 0.0;
+    m_extDisturbAvg = 0.0;
+    m_extDisturbInit = false;
     if (m_hasProfile) m_gov.reset(m_profile.value(0.0));
 }
 

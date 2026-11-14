@@ -46,6 +46,18 @@ TemperatureProfile TemperatureProfile::fromPoints(
     return p;
 }
 
+TemperatureProfile TemperatureProfile::transformed(double tempOffsetC,
+                                                 double timeShiftS) const {
+    TemperatureProfile p(m_initialTemp + tempOffsetC);
+    p.m_segs.reserve(m_segs.size());
+    for (const auto& s : m_segs) {
+        p.m_segs.push_back({s.t0 + timeShiftS, s.t1 + timeShiftS,
+                            s.T0 + tempOffsetC, s.T1 + tempOffsetC});
+    }
+    p.m_tEnd = m_tEnd + timeShiftS;
+    return p;
+}
+
 double TemperatureProfile::value(double t) const {
     if (m_segs.empty()) return m_initialTemp;
     if (t <= m_segs.front().t0) return m_segs.front().T0;

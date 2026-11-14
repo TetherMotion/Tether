@@ -349,8 +349,12 @@ topology is the *feedback backend*:
   reconstructed by the observer. It also gives integral action on the
   product-temperature error, rejecting load disturbances the SISO loop
   cannot see.
-- **MIMO / multi-zone** → not yet implemented (LQI supports it in
-  principle; the coupled model and estimator are SISO).
+- **MIMO / multi-zone** → `OvenGradientController` supervises one
+  `OvenController` per zone with gradient references, inter-zone delta
+  constraints, and coupling feedforward (see "Multi-zone gradient
+  control"). A true MIMO LQI (joint Riccati over all zones) is not
+  implemented — per-zone SISO loops + decoupling covers the common
+  reflow/conveyor cases.
 
 IPDT (integrating) is **never** correct for an oven — heat loss to
 ambient gives a finite DC gain.
@@ -359,6 +363,56 @@ If tracking shows a persistent lag that grows with profile rate beyond
 what feedback covers, the likely cause is unmodeled higher-order
 dynamics or sensor placement — revisit the backend/model class before
 raising gains.
+
+## Multi-zone gradient control (`OvenGradientController`)
+
+For ovens with several spatially ordered thermal zones (reflow /
+conveyor ovens, multi-chamber systems), `OvenGradientController`
+(`OvenGradientController.hpp`) supervises one `OvenController` per
+zone and adds the gradient layer:
+
+- **Gradient references** — `GradientSpec{base, tempOffsetC[],
+  timeShiftS[], maxZoneDeltaC}` builds each zone's profile from one
+  master `TemperatureProfile` via `transformed()`: zone *i* follows
+  `base(t − shift_i) + offset_i`. Static offsets give a spatial
+  gradient; time shifts give conveyor-style stagger. Independent
+  per-zone profiles (`setZoneProfile`) and constant setpoints
+  (`setZoneSetpoints`) are also supported.
+- **Gradient constraint** — `maxZoneDeltaC` clamps adjacent-zone
+  reference offsets (profile build) and setpoints (forward pass from
+  zone 0), enforcing a maximum inter-zone temperature difference.
+  `maxSetpointDelta()`/`maxMeasuredDelta()` report the live deltas;
+  `setGradientAlarmLimit()` raises `gradientAlarm()` when the measured
+  delta exceeds the threshold.
+- **Coupling feedforward** — zones exchange heat through thermal
+  resistances. `couplingLeft/couplingRight` [1/s] (= 1/(R·C_i) in lumped
+  RC terms) inject the instantaneous coupling heat flow
+  `γ·(T_n − T_i)` [°C/s] into each zone's feedforward via
+  `OvenController::setCouplingDisturbance()`. The zone estimator still
+  owns the residual disturbance, so steady-state behavior is exact and
+  transients get immediate decoupling.
+
+```cpp
+OvenGradientController gc;
+for (auto& zc : zoneConfigs) gc.addZone(zc);   // spatial order!
+
+GradientSpec spec;
+spec.base = masterProfile;
+spec.tempOffsetC = {0, 9, 18};     // +9 °C per zone
+spec.timeShiftS   = {0, 25, 50};   // conveyor stagger [s]
+spec.maxZoneDeltaC = 15.0;
+gc.setGradientProfile(spec);
+
+auto u = gc.compute(measuredTemps, dt);   // u[i] per zone
+// or the allocation-free computeInto(measured, dt, outSpan)
+```
+
+`zone(i)` exposes each `OvenController` for per-zone tuning/autotune;
+`zoneStatus()` reports per-zone governed reference, output, coupling
+injection, and adjacent deltas. An interactive demo runs the
+controller on the `MultiZoneOven` benchmark plant:
+`examples/oven_gradient_tui.cpp` (`oven_gradient_tui` — space run,
+`1`/`2`/`3` switch profile presets, `r` reset).
 
 ## Real-time notes
 

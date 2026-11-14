@@ -49,6 +49,15 @@ public:
     static TemperatureProfile fromPoints(
         const std::vector<std::pair<double, double>>& points);
 
+    /**@brief Build a derived profile: every segment shifted later by
+     *        `timeShiftS` seconds and every temperature raised by
+     *        `tempOffsetC` °C. Used to generate per-zone references for
+     *        multi-zone gradient ovens (conveyor/reflow style).
+     *        The initial temperature is shifted identically, so the
+     *        derived profile is continuous with its own t=0. */
+    TemperatureProfile transformed(double tempOffsetC,
+                                   double timeShiftS) const;
+
     /**@brief Reference temperature at time t [°C]. */
     double value(double t) const;
 

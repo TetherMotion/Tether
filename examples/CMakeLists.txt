@@ -672,4 +672,16 @@ add_tether_example(tether_io_ec_server
             tether_examples_common)
 endif()
 
+# --- Multi-zone oven gradient controller TUI ---
+# Interactive ncurses UI: OvenGradientController supervising the
+# MultiZoneOven benchmark plant (3 coupled heater zones).
+if(TARGET tether_terminal_ui)
+    add_tether_example(oven_gradient_tui
+        LIBRARIES tether_controls tether_simulation
+                tether_terminal_ui ${CURSES_LIBRARIES})
+    target_include_directories(oven_gradient_tui PRIVATE ${CURSES_INCLUDE_DIRS})
+else()
+    message(STATUS "tether_terminal_ui unavailable; skipping oven_gradient_tui")
+endif()
+
 add_custom_target(examples DEPENDS ${TETHER_EXAMPLE_TARGETS})

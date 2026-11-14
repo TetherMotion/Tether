@@ -165,6 +165,19 @@ public:
     void setAmbient(double ambientC);
     void setDisturbancePrior(double d);
 
+    /**@brief Inject a known exogenous heat-flow disturbance [°C/s]
+     *        (e.g. neighbor-zone coupling in a multi-zone oven).
+     *
+     *        The estimator's disturbance estimate already converges to
+     *        the TOTAL disturbance (load + coupling) with its window
+     *        lag, so the feedforward adds only the deviation of `d`
+     *        from its recent average — steady-state exact, transient
+     *        leading. Pass 0 to disable. Intended to be called once per
+     *        control cycle by a supervisory multi-zone controller with
+     *        the instantaneous coupling estimate computed from measured
+     *        neighbor temperatures. */
+    void setCouplingDisturbance(double d);
+
     /**@brief Force (re)estimation prior — e.g. after commissioning autotune. */
     void setModelParams(const OvenModelParams& params);
 
@@ -240,6 +253,14 @@ private:
     double m_lastKp{0.0}, m_lastKi{0.0};
     double m_lastAlpha{0.0}, m_lastBeta{0.0};
     double m_lastUfb{0.0};
+
+    // Exogenous (coupling) disturbance injection — see
+    // setCouplingDisturbance(). m_extDisturbAvg is an EMA (~estimator
+    // window) of m_extDisturb; the FF/governor see
+    // model.disturbance + (m_extDisturb - m_extDisturbAvg).
+    double m_extDisturb{0.0};
+    double m_extDisturbAvg{0.0};
+    bool m_extDisturbInit{false};
 };
 
 } // namespace tether::control::thermal
