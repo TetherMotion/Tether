@@ -256,15 +256,29 @@ public:
                 if (s >= arc.s_end - T(1e-10)) {
                     return std::get<1>(integrateArcToTime(arc, arc.duration));
                 }
+                // Safeguarded Newton–bisection on the monotone s(t):
+                // each probe returns (s, v) and v = ds/dt, so Newton
+                // converges in ~5 iterations instead of ~50 bisections.
+                // Each iteration calls integrateArcToTime, so keeping
+                // this low is critical for performance.
                 double lo = 0.0;
                 double hi = arc.duration;
-                for (int i = 0; i < 50; ++i) {
-                    const double mid = 0.5 * (lo + hi);
-                    const double sMid = std::get<0>(integrateArcToTime(arc, mid));
-                    if (sMid < static_cast<double>(s)) lo = mid;
-                    else hi = mid;
+                double t = 0.5 * hi;
+                for (int i = 0; i < 20; ++i) {
+                    const auto [sMid, vMid, aMid] =
+                        integrateArcToTime(arc, t);
+                    if (sMid < static_cast<double>(s)) lo = t;
+                    else hi = t;
+                    const double tNew =
+                        (vMid > 1e-12)
+                            ? t + (static_cast<double>(s) - sMid) / vMid
+                            : 0.5 * (lo + hi);
+                    t = (tNew > lo && tNew < hi)
+                        ? tNew : 0.5 * (lo + hi);
+                    if (hi - lo <= 1e-12 * std::max(1.0, arc.duration))
+                        break;
                 }
-                return std::get<1>(integrateArcToTime(arc, 0.5 * (lo + hi)));
+                return std::get<1>(integrateArcToTime(arc, t));
             }
         }
         return 0.0;
@@ -282,19 +296,27 @@ public:
                 if (s >= arc.s_end - T(1e-10)) {
                     return static_cast<T>(arc.t0 + arc.duration);
                 }
+                // Safeguarded Newton–bisection on the monotone s(t):
+                // each probe returns (s, v) and v = ds/dt, so Newton
+                // converges in ~5 iterations instead of ~50 bisections.
                 double lo = 0.0;
                 double hi = arc.duration;
-                // 50 iterations of bisection gives ~1e-15 relative precision
-                // on the time, which is more than sufficient for trajectory
-                // sampling. Each iteration calls integrateArcToTime, so
-                // keeping this low is critical for performance.
-                for (int i = 0; i < 50; ++i) {
-                    const double mid = 0.5 * (lo + hi);
-                    const double sMid = std::get<0>(integrateArcToTime(arc, mid));
-                    if (sMid < static_cast<double>(s)) lo = mid;
-                    else hi = mid;
+                double t = 0.5 * hi;
+                for (int i = 0; i < 20; ++i) {
+                    const auto [sMid, vMid, aMid] =
+                        integrateArcToTime(arc, t);
+                    if (sMid < static_cast<double>(s)) lo = t;
+                    else hi = t;
+                    const double tNew =
+                        (vMid > 1e-12)
+                            ? t + (static_cast<double>(s) - sMid) / vMid
+                            : 0.5 * (lo + hi);
+                    t = (tNew > lo && tNew < hi)
+                        ? tNew : 0.5 * (lo + hi);
+                    if (hi - lo <= 1e-12 * std::max(1.0, arc.duration))
+                        break;
                 }
-                return static_cast<T>(arc.t0 + 0.5 * (lo + hi));
+                return static_cast<T>(arc.t0 + t);
             }
         }
         return T(0);
