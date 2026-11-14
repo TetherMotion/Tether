@@ -1757,7 +1757,12 @@ public:
         // grid size, halving the split-solve cost per piece.
         intervalBoundsValid_ = true;
         cacheGridSize_ = constraintCacheSize_;
-        return lastIntervalBounds_.velocity;
+        // The stored bounds exclude the enforced endpoints (a pulse owns
+        // the open interval, the boundary speed owns the split point),
+        // but split-boundary clamping must still see a dip sitting
+        // exactly at a split — return the inclusive minimum instead.
+        return std::min({lastIntervalBounds_.velocity,
+                         vLimit(0.0), vLimit(sTotal_)});
     }
 
     /**
@@ -2356,8 +2361,17 @@ private:
         bounds.jerk = static_cast<double>(effectiveJerk);
         bounds.snap = static_cast<double>(effectiveSnap);
 
+        // The first and last grid samples sit on enforced boundaries:
+        // the caller's start/end velocities for a whole path, or the
+        // split-point crossing speeds for a sub-path (which solveSplit
+        // clamps to the interval bounds on BOTH sides). A pointwise dip
+        // exactly at an endpoint is honoured by that boundary speed, so
+        // it must not collapse the interior envelope — otherwise every
+        // piece touching a cusp inherits the cusp's bound for its whole
+        // length. All three constraint loops below therefore scan the
+        // interior samples only (samples >= 32 guarantees >= 31 of them).
         const size_t samples = std::max<size_t>(constraintCacheSize_, 32);
-        for (size_t i = 0; i <= samples; ++i) {
+        for (size_t i = 1; i < samples; ++i) {
             const double s = sTotal * static_cast<double>(i) /
                              static_cast<double>(samples);
             const double v = vLimit(s);
@@ -2412,7 +2426,7 @@ private:
         // whole path crawl (T ~ 1e6 s on some toolpaths).
         const double accelHeadroom = std::max(
             1.0, 0.02 * bounds.acceleration);
-        for (size_t i = 0; i <= samples; ++i) {
+        for (size_t i = 1; i < samples; ++i) {
             const double s = sTotal * static_cast<double>(i) /
                              static_cast<double>(samples);
             double vLocal = std::min(
@@ -2454,7 +2468,7 @@ private:
         // keeps the centripetal term from consuming the entire axis budget.
         const double jerkHeadroom = std::max(1.0, 0.02 * bounds.jerk);
 
-        for (size_t i = 0; i <= samples; ++i) {
+        for (size_t i = 1; i < samples; ++i) {
             const T s = static_cast<T>(sTotal * static_cast<double>(i) /
                                         static_cast<double>(samples));
             // Evaluate jerk bounds at the local velocity limit, not the
@@ -4661,7 +4675,6 @@ public:
             lastFailure_ = failReason;
             return std::make_unique<SampledVelocityProfile>();
         }
-
         // Build the WSS.
         //
         // When dwell points are present, the pathCopy has corner velocities
