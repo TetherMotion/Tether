@@ -1077,3 +1077,92 @@ TEST(AnalyticalJerkLimitedTOPPRA, HonorsDwellPoints) {
             << "trajectory never stops at the dwell point";
     }
 }
+
+// Multi-window stitching: a Z-path has two stamped junctions (three
+// solve windows), plus a dwell coincident with the second junction
+// (exercises the split dedup — it must become a v=0 boundary AND a
+// pause) and a dwell at the path end (trailing pause arc). Every
+// boundary must hold.
+TEST(AnalyticalJerkLimitedTOPPRA, MultiWindowJunctionsAndDwells) {
+    std::vector<tether::motion::NurbsCurve> pieces;
+    pieces.push_back(tether::motion::NurbsCurve::fromLine(
+        tether::motion::RVec{0.0, 0.0}, tether::motion::RVec{8.0, 0.0}));
+    pieces.push_back(tether::motion::NurbsCurve::fromLine(
+        tether::motion::RVec{8.0, 0.0}, tether::motion::RVec{8.0, 8.0}));
+    pieces.push_back(tether::motion::NurbsCurve::fromLine(
+        tether::motion::RVec{8.0, 8.0}, tether::motion::RVec{16.0, 8.0}));
+    PathAdapter<2, double> path(
+        tether::motion::PiecewiseNurbsPath(std::move(pieces)));
+    ASSERT_GT(path.numSegments(), 0u);
+    const double jd = 0.05, aCent = 500.0;
+    path.computeCornerVelocities(jd, aCent);
+    const double vStamp =
+        std::sqrt(aCent * jd / std::sin(M_PI / 4.0));  // ~5.95
+    const double j1 = 8.0, j2 = 16.0, endS = 24.0;
+    ASSERT_LT(path.cornerVelocities()[1],
+              std::numeric_limits<double>::infinity());
+    ASSERT_LT(path.cornerVelocities()[2],
+              std::numeric_limits<double>::infinity());
+
+    // Dwell coincident with junction 2 + a dwell at the path end.
+    const double dwellDur = 0.25, endDwellDur = 0.1;
+    path.setDwellPoints({{j2, dwellDur}, {endS, endDwellDur}});
+
+    auto limits = makeLimits2D();
+    AnalyticalJerkLimitedTOPPRA<2, double> profiler(limits, false);
+    auto profile = profiler.computeProfile(path, 100.0, 0.0, 0.0, 1200);
+    ASSERT_NE(profile, nullptr);
+    auto ssr = profiler.ssrSource();
+    ASSERT_NE(ssr, nullptr);
+    const auto& arcs = ssr->arcs();
+    ASSERT_GT(arcs.size(), 4u);
+
+    // Both junctions are arc boundaries; the coincident dwell appears
+    // as a zero-length pause arc right after junction 2, and the
+    // trailing dwell closes the structure.
+    auto arcBoundaryAt = [&](double s) {
+        bool b = false;
+        for (const auto& a : arcs) {
+            b |= std::abs(a.s_begin - s) < 1e-6;
+        }
+        for (const auto& a : arcs) {
+            b |= std::abs(a.s_end - s) < 1e-6;
+        }
+        return b;
+    };
+    EXPECT_TRUE(arcBoundaryAt(j1));
+    EXPECT_TRUE(arcBoundaryAt(j2));
+
+    int dwellArcs = 0;
+    for (const auto& a : arcs) {
+        if (a.mode == ControlMode::ZERO_JERK &&
+            std::abs(a.s_begin - a.s_end) < 1e-9) {
+            ++dwellArcs;
+            EXPECT_TRUE(
+                (std::abs(a.s_begin - j2) < 1e-6 &&
+                 std::abs(a.duration - dwellDur) < 1e-9) ||
+                (std::abs(a.s_begin - endS) < 1e-6 &&
+                 std::abs(a.duration - endDwellDur) < 1e-9))
+                << "unexpected pause arc at s=" << a.s_begin;
+        }
+    }
+    EXPECT_EQ(dwellArcs, 2) << "expected junction dwell + end dwell";
+
+    // Sampled trajectory: v <= stamp at both junctions, and a genuine
+    // stop at the coincident dwell.
+    const double T = ssr->totalTime();
+    double vJ1 = 1e9, vJ2 = 1e9, d1 = 1e9, d2 = 1e9;
+    bool stoppedAtJ2 = false;
+    for (int i = 0; i <= 6000; ++i) {
+        const double t = T * static_cast<double>(i) / 6000.0;
+        const double s = ssr->arcLength(t);
+        const double v = ssr->pathVelocity(t);
+        if (std::abs(s - j1) < d1) { d1 = std::abs(s - j1); vJ1 = v; }
+        if (std::abs(s - j2) < d2) { d2 = std::abs(s - j2); vJ2 = v; }
+        if (std::abs(s - j2) < 1e-6 && v < 1e-9) stoppedAtJ2 = true;
+    }
+    EXPECT_LE(vJ1, vStamp * 1.1 + 0.05);
+    EXPECT_LE(vJ2, vStamp * 1.1 + 0.05);
+    EXPECT_TRUE(stoppedAtJ2)
+        << "no rest sample at the coincident junction dwell";
+}
