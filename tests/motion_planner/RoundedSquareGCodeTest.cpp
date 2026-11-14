@@ -369,6 +369,20 @@ TEST(RoundedSquareGCodeTest, FullPipeline_ProducesValidWSS) {
     EXPECT_NEAR(totalArcLen, pathLen, 1.0)
         << "Total arc length doesn't match path length";
 
+    // 10. Junction splitting must actually engage on this dense
+    //     per-segment-feed path. A collapsed whole-path fallback
+    //     produces ~9 arcs and an average velocity pinned to the
+    //     global minimum feed (~4 mm/s). Require at least one arc per
+    //     NURBS piece and a materially faster average velocity.
+    EXPECT_GE(arcs.size(), nurbsResult.path.numPieces())
+        << "Junction splits collapsed to a whole-path fallback: "
+        << arcs.size() << " arcs for " << nurbsResult.path.numPieces()
+        << " pieces";
+    EXPECT_GT(pathLen / wss->totalTime(), 8.0)
+        << "Average velocity collapsed toward the minimum feed: "
+        << pathLen / wss->totalTime() << " mm/s over "
+        << wss->totalTime() << " s";
+
     // Print summary for debugging
     std::cout << "RoundedSquareGCodeTest summary:\n"
               << "  Segments: " << segments.size() << "\n"
@@ -469,6 +483,16 @@ TEST(RoundedSquareGCodeTest, LargerGCode_ProducesValidWSS) {
     EXPECT_LT(std::abs(arcs.front().v0), 1e-3);
     double endV = arcEndVelocity(arcs.back());
     EXPECT_LT(std::abs(endV), 1e-3);
+
+    // Junction splits must engage (see FullPipeline test): a collapsed
+    // fallback yields ~9 arcs and average velocity ~4 mm/s.
+    EXPECT_GE(arcs.size(), nurbsResult.path.numPieces())
+        << "Junction splits collapsed to a whole-path fallback: "
+        << arcs.size() << " arcs for " << nurbsResult.path.numPieces()
+        << " pieces";
+    EXPECT_GT(pathAdapter.totalLength() / wss->totalTime(), 8.0)
+        << "Average velocity collapsed toward the minimum feed: "
+        << pathAdapter.totalLength() / wss->totalTime() << " mm/s";
 
     std::cout << "LargerGCode summary:\n"
               << "  Segments: " << segments.size() << "\n"
