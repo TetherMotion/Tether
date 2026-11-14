@@ -808,8 +808,16 @@ public:
         }
 
         // Step 1: Convert segments to NURBS curves.
+        // `curveFeeds` stays parallel to `curves`: the producing
+        // segment's feedrate (mm/s; <= 0 means "no per-segment cap").
+        // `dwells` records (cornerIndex, duration) for G4 segments —
+        // cornerIndex is the index of the preceding curve (-1 when the
+        // dwell precedes all motion) so its arc-length position can be
+        // resolved after blending.
         std::vector<tether::motion::NurbsCurve> curves;
         std::vector<SourceReference> sourceRefs;
+        std::vector<double> curveFeeds;
+        std::vector<std::pair<int, double>> dwells;
         try {
             for (size_t i = 0; i < segments.size(); ++i) {
                 const auto& seg = segments.at(i);
@@ -817,8 +825,15 @@ public:
                 if (curve) {
                     curves.push_back(std::move(*curve));
                     sourceRefs.push_back(seg.sourceRef);
+                    curveFeeds.push_back(seg.feedrate);
+                } else if (seg.type ==
+                           MotionPlanner::MotionSegmentType::Dwell) {
+                    // No geometry, but keep the dwell: the planner must
+                    // still stop and wait dwellTime seconds here.
+                    dwells.emplace_back(
+                        static_cast<int>(curves.size()) - 1,
+                        seg.dwellTime);
                 }
-                // Dwell segments are skipped (no geometry).
             }
         } catch (const std::exception& e) {
             return {false, {}, std::string("SegmentConverter: ") + e.what()};
@@ -855,10 +870,22 @@ public:
         }
 
         if (curves.size() < 2) {
-            // Single piece — no blending needed.
+            // Single piece — no blending needed. Per-segment feed and
+            // dwell positions still apply (dwell corner -1 -> s=0,
+            // corner >= 0 -> s=L).
             tether::motion::PiecewiseNurbsPath path(std::move(curves));
-            return {true, PathAdapter<Dim, T>(std::move(path),
-                                               std::move(sourceRefs)), ""};
+            PathAdapter<Dim, T> adapter(std::move(path),
+                                        std::move(sourceRefs));
+            adapter.setSegmentVelocityLimits(curveFeeds);
+            if (!dwells.empty()) {
+                std::vector<std::pair<double, double>> pts;
+                const double L = static_cast<double>(adapter.totalLength());
+                for (const auto& [corner, dur] : dwells) {
+                    pts.emplace_back(corner < 0 ? 0.0 : L, dur);
+                }
+                adapter.setDwellPoints(pts);
+            }
+            return {true, std::move(adapter), ""};
         }
 
         // Step 2: Build a PiecewiseNurbsPath and blend.
@@ -879,7 +906,21 @@ public:
         // Trimmed original pieces keep their original source ref.
         // Blend curves get a synthetic source ref combining the two
         // adjacent segments.
+        // `blendedFeeds` maps per-piece velocity limits the same way:
+        // trimmed pieces keep their segment's feed, blend pieces get
+        // the tighter of the two neighbors' feeds.
+        // `junctionPieceIdx[c]` records, for original corner c, the
+        // index in the blended piece sequence of the piece that starts
+        // right after the junction (the blend curve when the corner is
+        // blended, otherwise the next trimmed piece) — used to place
+        // dwell points at their junction arc length.
         std::vector<SourceReference> blendedRefs;
+        std::vector<double> blendedFeeds;
+        std::vector<size_t> junctionPieceIdx(
+            curves.size(), std::numeric_limits<size_t>::max());
+        const auto feedOf = [&](size_t i) {
+            return (i < curveFeeds.size()) ? curveFeeds[i] : 0.0;
+        };
         size_t origIdx = 0;
         for (const auto& entry : blended.audit) {
             // The original piece `entry.cornerIndex` is trimmed.
@@ -889,6 +930,9 @@ public:
             } else {
                 blendedRefs.push_back(SourceReference::synthetic("trimmed"));
             }
+            blendedFeeds.push_back(feedOf(entry.cornerIndex));
+            // The piece that follows is where the junction sits.
+            junctionPieceIdx[entry.cornerIndex] = blendedRefs.size();
             // If the corner was blended, the blend curve gets a
             // combined source ref.
             if (entry.geometry.outcome ==
@@ -902,6 +946,15 @@ public:
                 }
                 blendedRefs.push_back(
                     SourceReference::multiple(refs));
+                // Blend limit: the tighter of the two neighbors (a
+                // non-positive feed means "uncapped" here).
+                const double fL = feedOf(entry.cornerIndex);
+                const double fR = feedOf(entry.cornerIndex + 1);
+                const double effL = (fL > 0.0) ? fL
+                    : std::numeric_limits<double>::infinity();
+                const double effR = (fR > 0.0) ? fR
+                    : std::numeric_limits<double>::infinity();
+                blendedFeeds.push_back(std::min(effL, effR));
             }
         }
         // Last original piece (if not consumed).
@@ -910,6 +963,9 @@ public:
             if (lastIdx < sourceRefs.size()) {
                 blendedRefs.push_back(sourceRefs[lastIdx]);
             }
+            if (lastIdx < curves.size()) {
+                blendedFeeds.push_back(feedOf(lastIdx));
+            }
         }
 
         // Fallback: if the source ref mapping didn't produce enough
@@ -917,6 +973,9 @@ public:
         while (blendedRefs.size() < blended.pieces.size()) {
             blendedRefs.push_back(
                 SourceReference::synthetic("blend"));
+        }
+        while (blendedFeeds.size() < blended.pieces.size()) {
+            blendedFeeds.push_back(0.0);  // uncapped
         }
 
         // Ensure the PHData sidecar matches the piece count.
@@ -927,9 +986,39 @@ public:
         tether::motion::PiecewiseNurbsPath blendedPath(
             std::move(blended.pieces));
 
-        return {true, PathAdapter<Dim, T>(std::move(blendedPath),
-                                           std::move(blendedRefs),
-                                           std::move(blended.phData)), ""};
+        PathAdapter<Dim, T> adapter(std::move(blendedPath),
+                                    std::move(blendedRefs),
+                                    std::move(blended.phData));
+        adapter.setSegmentVelocityLimits(blendedFeeds);
+
+        // Resolve each recorded dwell to the arc length of its
+        // junction: corner -1 sits at s=0, a corner past the last
+        // piece at s=L, otherwise at the start of the piece that
+        // junctionPieceIdx points at (the blend curve for blended
+        // corners, the next trimmed piece for exact-stop ones).
+        if (!dwells.empty()) {
+            std::vector<std::pair<double, double>> pts;
+            const auto& segs = adapter.segments();
+            const double L = static_cast<double>(adapter.totalLength());
+            for (const auto& [corner, dur] : dwells) {
+                double s;
+                if (corner < 0) {
+                    s = 0.0;
+                } else if (static_cast<size_t>(corner) >=
+                           junctionPieceIdx.size() ||
+                           junctionPieceIdx[corner] >= segs.size()) {
+                    s = L;
+                } else {
+                    s = static_cast<double>(
+                        segs[junctionPieceIdx[corner]]
+                            .cumulativeArcLength);
+                }
+                pts.emplace_back(s, dur);
+            }
+            adapter.setDwellPoints(pts);
+        }
+
+        return {true, std::move(adapter), ""};
     }
 };
 

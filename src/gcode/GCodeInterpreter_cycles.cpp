@@ -1159,6 +1159,95 @@ Error Interpreter::handleArc(const Block& block, const Position& target,
         sweep = (mode == MotionMode::CW_ARC) ? -2.0 * M_PI : 2.0 * M_PI;
     }
 
+    // Inconsistent IJK arcs: the commanded end should lie on the
+    // commanded circle, but for sloppy G-code it does not. Without
+    // repair every emission path would land radius-distance off `end`
+    // and the next move would jump. If the planar chord fits inside
+    // the diameter, rebuild the circle through start+end with the
+    // requested radius — two candidate centers exist; pick the one
+    // whose sweep best matches the commanded magnitude, tie-broken
+    // toward the commanded center. If the chord exceeds the diameter
+    // no such circle exists: fall back to a straight line, the same
+    // fallback the motion-planner converter applies.
+    if ((hasOffset1 || hasOffset2) && planeDist > 1e-9) {
+        const double dEnd = std::hypot(end[a1] - center1,
+                                       end[a2] - center2);
+        if (std::abs(dEnd - radius) >
+            std::max(1e-6, 1e-4 * radius)) {
+            const double half = 0.5 * planeDist;
+            if (radius < half - 1e-9) {
+                MotionSegment seg;
+                seg.type = MotionSegment::Type::LINEAR;
+                seg.lineNumber = block.sourceLineNumber;
+                seg.feedRate = m_machineState.feedRate;
+                seg.endPosition = m_coordinates.toMachineCoords(end);
+                segments.push_back(seg);
+                m_stats.motionSegments++;
+                m_machineState.workPosition = end;
+                m_machineState.machinePosition =
+                    m_coordinates.toMachineCoords(end);
+                return Error{};
+            }
+            const double du = (end[a1] - start[a1]) / planeDist;
+            const double dv = (end[a2] - start[a2]) / planeDist;
+            const double mu = 0.5 * (start[a1] + end[a1]);
+            const double mv = 0.5 * (start[a2] + end[a2]);
+            const double h = std::sqrt(radius * radius - half * half);
+            const double candU[2] = {mu - dv * h, mu + dv * h};
+            const double candV[2] = {mv + du * h, mv - du * h};
+            const bool cwMode = (mode == MotionMode::CW_ARC);
+            // Signed sweep each candidate produces, computed exactly
+            // like the commanded sweep above (CW < 0, CCW > 0).
+            const auto sweepFor = [&](double cu, double cv) {
+                const double sa = std::atan2(start[a2] - cv,
+                                             start[a1] - cu);
+                const double ea = std::atan2(end[a2] - cv,
+                                             end[a1] - cu);
+                if (cwMode) {
+                    double sw = sa - ea;
+                    while (sw <= 0.0) sw += 2.0 * M_PI;
+                    return -sw;
+                }
+                double sw = ea - sa;
+                while (sw <= 0.0) sw += 2.0 * M_PI;
+                return sw;
+            };
+            const double s0 = sweepFor(candU[0], candV[0]);
+            const double s1 = sweepFor(candU[1], candV[1]);
+            const double e0 = std::abs(std::abs(s0) - std::abs(sweep));
+            const double e1 = std::abs(std::abs(s1) - std::abs(sweep));
+            const double dc0 = std::hypot(candU[0] - center1,
+                                          candV[0] - center2);
+            const double dc1 = std::hypot(candU[1] - center1,
+                                          candV[1] - center2);
+            const int pick =
+                (e0 < e1 - 1e-9 ||
+                 (std::abs(e0 - e1) <= 1e-9 && dc0 <= dc1)) ? 0 : 1;
+            center1 = candU[pick];
+            center2 = candV[pick];
+            startAngle = std::atan2(start[a2] - center2,
+                                    start[a1] - center1);
+            endAngle = std::atan2(end[a2] - center2,
+                                  end[a1] - center1);
+            sweep = (pick == 0) ? s0 : s1;
+        }
+    }
+
+    // P word: number of turns (multi-turn / spiral arcs). `baseSweep`
+    // keeps the ≤2π remainder that lands on the commanded end point;
+    // `sweep` gains the extra full turns so tessellation and the arc
+    // emitter below cover the whole rotation.
+    const double baseSweep = sweep;
+    int turns = 1;
+    if (block.hasWord(WordLetter::P)) {
+        turns = static_cast<int>(block.getWord(WordLetter::P) + 0.5);
+        if (turns < 1) turns = 1;
+        if (turns > 1) {
+            sweep += std::copysign(2.0 * M_PI, sweep) *
+                     static_cast<double>(turns - 1);
+        }
+    }
+
     // Cutter compensation (G41/G42): tessellate the programmed arc and
     // offset each chord through emitCompMove, so entry moves and corner
     // transitions compose with adjacent linear moves.
@@ -1186,47 +1275,81 @@ Error Interpreter::handleArc(const Block& block, const Position& target,
     const bool mirrorFlip =
         m_machineState.axisMirror[a1] != m_machineState.axisMirror[a2];
 
-    // When emit-arc-segments mode is active, emit a single arc MotionSegment
+    // When emit-arc-segments mode is active, emit arc MotionSegments
     // with full ArcParams instead of tessellating into line segments.
+    // A P>1 multi-turn move becomes `turns` segments: turns-1 full
+    // circles (each lands back on its own start in-plane) followed by a
+    // final segment carrying the remainder sweep that reaches `end`.
+    // Keeping each segment ≤2π preserves the invariant downstream
+    // converters rely on, and the helical travel is split in proportion
+    // to each segment's angular share.
     if (m_emitArcSegments) {
         const bool cw = (mode == MotionMode::CW_ARC) != mirrorFlip;
-        MotionSegment seg;
-        seg.type = cw ? MotionSegment::Type::ARC_CW
-                      : MotionSegment::Type::ARC_CCW;
-        seg.endPosition = m_coordinates.toMachineCoords(end);
-        seg.feedRate = m_machineState.feedRate;
-        seg.lineNumber = block.sourceLineNumber;
 
-        // centerOffset is relative to start (in program coordinates)
+        // Center is absolute in program coordinates (offsets are
+        // relative to start).
         Position centerPos = start;
         centerPos[a1] = center1;
         centerPos[a2] = center2;
-        seg.centerOffset = centerPos - start;
+
+        // centerOffset is relative to start (in program coordinates).
+        // Every emitted sub-arc begins at `start`'s in-plane position
+        // (full circles return there), so one offset covers them all.
+        MotionSegment proto;
+        proto.centerOffset = centerPos - start;
         // Mirror negates the offset component along mirrored axes.
         if (m_machineState.axisMirror[a1])
-            seg.centerOffset[a1] = -seg.centerOffset[a1];
+            proto.centerOffset[a1] = -proto.centerOffset[a1];
         if (m_machineState.axisMirror[a2])
-            seg.centerOffset[a2] = -seg.centerOffset[a2];
+            proto.centerOffset[a2] = -proto.centerOffset[a2];
 
-        // Populate ArcParams
-        seg.arc.center = centerPos;
-        seg.arc.startPoint = start;
-        seg.arc.endPoint = end;
-        seg.arc.radius = radius;
-        seg.arc.startAngle = startAngle;
-        seg.arc.endAngle = endAngle;
-        seg.arc.sweepAngle = mirrorFlip ? -sweep : sweep;
-        seg.arc.clockwise = cw;
-        seg.arc.plane = m_machineState.plane;
-        seg.arc.helixDelta = end[ah] - start[ah];
-        seg.arc.valid = true;
+        Position segStart = start;
+        const double totalAbsSweep = std::abs(sweep);
+        double coveredFrac = 0.0;
+        for (int k = 0; k < turns; ++k) {
+            const bool last = (k + 1 == turns);
+            const double subSweep = last
+                ? baseSweep
+                : std::copysign(2.0 * M_PI, sweep);
 
-        segments.push_back(seg);
+            MotionSegment seg;
+            seg.type = cw ? MotionSegment::Type::ARC_CW
+                          : MotionSegment::Type::ARC_CCW;
+            seg.feedRate = m_machineState.feedRate;
+            seg.lineNumber = block.sourceLineNumber;
+            seg.centerOffset = proto.centerOffset;
+
+            coveredFrac += std::abs(subSweep) / totalAbsSweep;
+            Position segEnd = segStart;
+            if (last) {
+                segEnd = end;
+            } else {
+                segEnd[ah] = start[ah] +
+                    (end[ah] - start[ah]) * coveredFrac;
+            }
+            seg.endPosition = m_coordinates.toMachineCoords(segEnd);
+
+            // Populate ArcParams
+            seg.arc.center = centerPos;
+            seg.arc.startPoint = segStart;
+            seg.arc.endPoint = segEnd;
+            seg.arc.radius = radius;
+            seg.arc.startAngle = startAngle;
+            seg.arc.endAngle = last ? endAngle : startAngle;
+            seg.arc.sweepAngle = mirrorFlip ? -subSweep : subSweep;
+            seg.arc.clockwise = cw;
+            seg.arc.plane = m_machineState.plane;
+            seg.arc.helixDelta = segEnd[ah] - segStart[ah];
+            seg.arc.valid = true;
+
+            segments.push_back(seg);
+            m_stats.motionSegments++;
+            segStart = segEnd;
+        }
 
         // Update machine state positions
         m_machineState.workPosition = end;
         m_machineState.machinePosition = m_coordinates.toMachineCoords(end);
-        m_stats.motionSegments++;
         return Error{};
     }
 

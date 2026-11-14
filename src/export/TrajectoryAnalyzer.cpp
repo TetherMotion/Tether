@@ -110,7 +110,7 @@ std::vector<TrajectorySample> TrajectoryAnalyzer::analyze(
                     int u = 0, v = 1, w = 2;
                     switch (seg.plane) {
                         case GCode::InterpolationPlane::XY: u = 0; v = 1; w = 2; break;
-                        case GCode::InterpolationPlane::XZ: u = 0; v = 2; w = 1; break;
+                        case GCode::InterpolationPlane::XZ: u = 2; v = 0; w = 1; break;
                         case GCode::InterpolationPlane::YZ: u = 1; v = 2; w = 0; break;
                     }
                     
@@ -607,7 +607,7 @@ std::vector<TrajectorySample> FixedDeviationApproximation::generateTrajectory(
                 int u = 0, v = 1, w = 2;
                 switch (seg.plane) {
                     case GCode::InterpolationPlane::XY: u = 0; v = 1; w = 2; break;
-                    case GCode::InterpolationPlane::XZ: u = 0; v = 2; w = 1; break;
+                    case GCode::InterpolationPlane::XZ: u = 2; v = 0; w = 1; break;
                     case GCode::InterpolationPlane::YZ: u = 1; v = 2; w = 0; break;
                 }
                 

@@ -91,8 +91,10 @@ TEST_F(InterpolationStrategyBaseTest, GetPlaneAxesXY) {
 TEST_F(InterpolationStrategyBaseTest, GetPlaneAxesXZ) {
     int u, v, w;
     InterpolationStrategy::getPlaneAxes(InterpolationPlane::XZ, u, v, w);
-    EXPECT_EQ(u, 0);
-    EXPECT_EQ(v, 2);
+    // Cyclic Fanuc ordering matching the interpreter's (a1,a2)=(Z,X):
+    // arcs parametrized in (u,v) come out with the correct handedness.
+    EXPECT_EQ(u, 2);
+    EXPECT_EQ(v, 0);
     EXPECT_EQ(w, 1);
 }
 
