@@ -64,6 +64,7 @@
 #include "../PathAdapter.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -96,6 +97,57 @@ public:
         , feedRate_(feedRate) {}
 
     /**
+     * @brief Precompute arc-derivative geometry on a uniform s grid.
+     *
+     * The forward/backward passes query constraint bounds at ~10³–10⁵
+     * substep positions; each query otherwise costs an order-3 NURBS
+     * evaluation (plus locate/invertLength). The geometry is a function
+     * of s only, so a per-window table + linear interpolation serves the
+     * queries at the same accuracy the grid discretization already
+     * commits to. Call once per solve window; queries outside the grid
+     * fall back to direct evaluation.
+     */
+    void buildGeometryGrid(T sBegin, T ds, std::size_t n,
+                           const Path& path) const {
+        geomGrid_.sBegin = static_cast<double>(sBegin);
+        geomGrid_.dsInv = ds > T(0) ? 1.0 / static_cast<double>(ds) : 0.0;
+        geomGrid_.n = n;
+        geomGrid_.tangent.assign(n, {});
+        geomGrid_.curvature.assign(n, {});
+        geomGrid_.jounce.assign(n, {});
+        geomGrid_.kappa.assign(n, 0.0);
+        geomGrid_.active = n >= 2 && path.hasInner();
+        if (!geomGrid_.active) return;
+        const auto& inner = path.inner();
+        for (std::size_t i = 0; i < n; ++i) {
+            const T s = sBegin + T(i) * ds;
+            tether::motion::ArcDerivatives derivs;
+            try {
+                derivs = inner.evaluate(static_cast<double>(s), 3);
+            } catch (...) {
+                try {
+                    derivs = inner.evaluate(static_cast<double>(s), 2);
+                } catch (...) {
+                    continue;
+                }
+            }
+            const std::size_t dMax =
+                std::min<std::size_t>(Dim, derivs.position.dim());
+            for (std::size_t d = 0; d < dMax; ++d) {
+                geomGrid_.tangent[i][d] = derivs.tangent.unchecked(d);
+                geomGrid_.curvature[i][d] = derivs.curvature.unchecked(d);
+                if (derivs.jounce.dim() > d) {
+                    geomGrid_.jounce[i][d] = derivs.jounce.unchecked(d);
+                }
+            }
+            geomGrid_.kappa[i] = derivs.curvature.norm();
+        }
+    }
+
+    /// Deactivate the grid (queries fall back to direct evaluation).
+    void clearGeometryGrid() const { geomGrid_.active = false; }
+
+    /**
      * @brief Compute the velocity limit v_lim at arc length s.
      *
      * The velocity is limited by:
@@ -119,10 +171,20 @@ public:
 
         // Single path evaluation supplies both the curvature (centripetal)
         // limit and the tangent for per-axis limits.
-        auto eval = path.evaluateAtArcLength(s);
+        T kappa;
+        Vec<Dim, T> tangent;
+        if (GridGeom g; interpolateGeometry(s, g)) {
+            kappa = static_cast<T>(g.kappa);
+            for (std::size_t d = 0; d < Dim; ++d) {
+                tangent[d] = static_cast<T>(g.tangent[d]);
+            }
+        } else {
+            auto eval = path.evaluateAtArcLength(s);
+            kappa = eval.curvature;
+            tangent = eval.tangent;
+        }
 
         // Curvature (centripetal) limit
-        T kappa = eval.curvature;
         if (kappa > MathConstants::EPSILON &&
             limits_.path.maxCentripetalAcceleration > T(0)) {
             T curvatureLimit = std::sqrt(
@@ -131,7 +193,7 @@ public:
         }
 
         // Per-axis velocity limits
-        limit = std::min(limit, limits_.maxVelocityForDirection(eval.tangent));
+        limit = std::min(limit, limits_.maxVelocityForDirection(tangent));
 
         return std::max(limit, T(0));
     }
@@ -161,9 +223,16 @@ public:
         const T pathLen = path.totalLength();
         if (s > pathLen) s = pathLen;
 
-        // Get arc-length derivatives from the geometry core
-        // We need order 3 for jounce (j⃗ = d³p/ds³)
-        if (!path.hasInner()) {
+        // Get arc-length derivatives from the geometry core. Prefer the
+        // per-window grid (buildGeometryGrid) — the passes query this
+        // thousands of times and the geometry depends only on s.
+        if (GridGeom g; interpolateGeometry(s, g)) {
+            coeffs.tangent.assign(g.tangent.begin(), g.tangent.end());
+            coeffs.curvature.assign(g.curvature.begin(),
+                                  g.curvature.end());
+            coeffs.jounce.assign(g.jounce.begin(), g.jounce.end());
+            coeffs.kappa = g.kappa;
+        } else if (!path.hasInner()) {
             // Fallback: use the adapter's evaluateAtArcLength (order 2 only)
             auto eval = path.evaluateAtArcLength(s);
             const auto dim = Dim;
@@ -213,13 +282,6 @@ public:
             }
 
             coeffs.kappa = derivs.curvature.norm();
-            // Speed factor: g(u) = ||C'(u)||. In arc-length parameterization,
-            // the tangent T = C'(u)/g(u) is unit, so g(u) = ||C'(u)||.
-            // We can get it from the parametric derivative.
-            auto loc = inner.locate(static_cast<double>(s));
-            const auto& piece = inner.piece(loc.piece);
-            double u = piece.invertLength(loc.localS);
-            coeffs.speedFactor = piece.derivative(u, 1).norm();
         }
 
         // Compute alpha and beta for jerk constraint
@@ -404,8 +466,64 @@ public:
     T feedRate() const { return feedRate_; }
 
 private:
+    /// Interpolated arc-derivative geometry at one s position.
+    struct GridGeom {
+        std::array<double, 3> tangent{};   // unit tangent T (renormalized)
+        std::array<double, 3> curvature{}; // curvature vector κ⃗
+        std::array<double, 3> jounce{};    // jounce vector j⃗
+        double kappa = 0.0;                // |κ⃗|
+    };
+
+    /// Per-window geometry table (see buildGeometryGrid).
+    struct GeometryGrid {
+        bool active = false;
+        double sBegin = 0.0;
+        double dsInv = 0.0;
+        std::size_t n = 0;
+        std::vector<std::array<double, 3>> tangent;
+        std::vector<std::array<double, 3>> curvature;
+        std::vector<std::array<double, 3>> jounce;
+        std::vector<double> kappa;
+    };
+
+    /**
+     * @brief Linearly interpolate grid geometry at s.
+     * @return false when no grid is built or s is outside its range.
+     */
+    bool interpolateGeometry(T s, GridGeom& out) const {
+        if (!geomGrid_.active || geomGrid_.n < 2) return false;
+        const double x = (static_cast<double>(s) - geomGrid_.sBegin) *
+                         geomGrid_.dsInv;
+        if (!(x >= 0.0) || x > static_cast<double>(geomGrid_.n - 1)) {
+            return false;
+        }
+        std::size_t i = static_cast<std::size_t>(x);
+        if (i >= geomGrid_.n - 1) i = geomGrid_.n - 2;
+        const double f = std::clamp(x - static_cast<double>(i), 0.0, 1.0);
+        double tLen = 0.0;
+        for (std::size_t d = 0; d < Dim; ++d) {
+            out.tangent[d] = geomGrid_.tangent[i][d] * (1.0 - f) +
+                             geomGrid_.tangent[i + 1][d] * f;
+            out.curvature[d] = geomGrid_.curvature[i][d] * (1.0 - f) +
+                               geomGrid_.curvature[i + 1][d] * f;
+            out.jounce[d] = geomGrid_.jounce[i][d] * (1.0 - f) +
+                            geomGrid_.jounce[i + 1][d] * f;
+            tLen += out.tangent[d] * out.tangent[d];
+        }
+        // Lerp shortens the unit tangent; renormalize so per-axis
+        // projections keep the correct direction.
+        if (tLen > 1e-24) {
+            const double inv = 1.0 / std::sqrt(tLen);
+            for (std::size_t d = 0; d < Dim; ++d) out.tangent[d] *= inv;
+        }
+        out.kappa = geomGrid_.kappa[i] * (1.0 - f) +
+                    geomGrid_.kappa[i + 1] * f;
+        return true;
+    }
+
     Limits limits_;
     T feedRate_;
+    mutable GeometryGrid geomGrid_;
 };
 
 } // namespace MotionPlanner::analytical

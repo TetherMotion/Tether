@@ -460,6 +460,12 @@ private:
                 static_cast<double>(windowLen / pathLength))));
         const T ds = windowLen / T(numSamples - 1);
 
+        // Per-window geometry table: the passes and state enforcement
+        // query constraint bounds at every RK4 substep — serving them
+        // from a precomputed node table avoids an order-3 NURBS eval
+        // per query.
+        evaluator.buildGeometryGrid(sBegin, ds, numSamples, path);
+
         // Step 1: Compute velocity limit curve v_lim(s)
         std::vector<T> vLim(numSamples);
         for (size_t i = 0; i < numSamples; ++i) {
