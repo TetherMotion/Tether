@@ -304,6 +304,10 @@ int main(int argc, char** argv) {
     prog.add_argument("--time")
         .help("Run for N seconds (0 = until SIGINT/SIGTERM)")
         .default_value(std::string("0"));
+    prog.add_argument("--fleet")
+        .help("fleet description file (EK1100/ELxxxx per line, chain "
+              "order; empty = default two-coupler fleet)")
+        .default_value(std::string(""));
     try { prog.parse_args(argc, argv); }
     catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", e.what());
@@ -319,6 +323,7 @@ int main(int argc, char** argv) {
     const std::string ioBind = prog.get<std::string>("--io-bind");
     const uint32_t hz = std::stoul(prog.get<std::string>("--hz"));
     const double runSecs = std::stod(prog.get<std::string>("--time"));
+    const std::string fleetPath = prog.get<std::string>("--fleet");
     if (hz == 0) {
         std::fprintf(stderr, "--hz must be > 0\n");
         return 2;
@@ -327,7 +332,20 @@ int main(int argc, char** argv) {
     signal(SIGINT, onSigint);
     signal(SIGTERM, onSigint);
 
-    BeckhoffFleet fleet;
+    std::vector<FleetSlaveInfo> infos;
+    if (fleetPath.empty()) {
+        infos = fleetInfos();
+    } else {
+        std::string ferr;
+        infos = tether::examples::detail::fleetInfosFromFile(
+            fleetPath, &ferr);
+        if (infos.empty()) {
+            std::fprintf(stderr, "beckhoff_slave_chain: %s\n",
+                         ferr.c_str());
+            return 1;
+        }
+    }
+    BeckhoffFleet fleet(std::move(infos));
     fleet.start();
 
     UdpEthercatLink link;

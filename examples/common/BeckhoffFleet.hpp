@@ -26,8 +26,13 @@
 #include "slave/profiles/CiA401Slave.hpp"
 #include "slave/mailbox/IMailboxHandler.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
+#include <fstream>
+#include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -38,9 +43,13 @@ namespace beckhoff_ids {
 inline constexpr uint32_t kVendor = 0x00000002;
 inline constexpr uint32_t kEK1100Product = 0x044C2C52;
 inline constexpr uint32_t kEL1004Product = 0x03EC3052;
+inline constexpr uint32_t kEL1014Product = 0x03F63052;
 inline constexpr uint32_t kEL2004Product = 0x07D43052;
+inline constexpr uint32_t kEL2008Product = 0x07D83052;
 inline constexpr uint32_t kEL3104Product = 0x0C203052;
+inline constexpr uint32_t kEL3114Product = 0x0C2A3052;
 inline constexpr uint32_t kEL4104Product = 0x10083052;
+inline constexpr uint32_t kEL4114Product = 0x10123052;
 inline constexpr uint32_t kRevision      = 0x00010000;
 } // namespace beckhoff_ids
 
@@ -142,6 +151,151 @@ inline std::vector<FleetSlaveInfo> fleetInfos() {
     return v;
 }
 
+namespace detail {
+
+/// Beckhoff module type → PDO channel layout.  di/do are whole-byte
+/// counts inside the PDO image; ai/ao are int16 channel counts —
+/// mirrors what CiA401Slave produces for the same counts.
+struct FleetModuleType {
+    const char* name;      ///< part number, e.g. "EL1014"
+    uint32_t    product;   ///< Beckhoff product code
+    uint8_t     di8, do8;  ///< digital in/out bytes
+    uint8_t     ai, ao;    ///< analog in/out channels (int16 each)
+};
+
+/// The module catalog shared by fleetInfosFromText and the WebUI's
+/// terminal presets — keep channel counts/PDO sizes in lockstep.
+inline const FleetModuleType* fleetModuleCatalog(size_t& n) {
+    namespace b = beckhoff_ids;
+    static const FleetModuleType kTypes[] = {
+        {"EL1004", b::kEL1004Product, 1, 0, 0, 0},
+        {"EL1014", b::kEL1014Product, 1, 0, 0, 0},
+        {"EL2004", b::kEL2004Product, 0, 1, 0, 0},
+        {"EL2008", b::kEL2008Product, 0, 1, 0, 0},   // 8 DO → 1 byte
+        {"EL3104", b::kEL3104Product, 0, 0, 4, 0},
+        {"EL3114", b::kEL3114Product, 0, 0, 4, 0},
+        {"EL4104", b::kEL4104Product, 0, 0, 0, 4},
+        {"EL4114", b::kEL4114Product, 0, 0, 0, 4},
+    };
+    n = sizeof(kTypes) / sizeof(kTypes[0]);
+    return kTypes;
+}
+
+inline const FleetModuleType* fleetModuleType(const std::string& name) {
+    size_t n = 0;
+    const FleetModuleType* t = fleetModuleCatalog(n);
+    for (size_t i = 0; i < n; ++i)
+        if (name == t[i].name) return &t[i];
+    return nullptr;
+}
+
+inline std::string lowerStr(std::string s) {
+    for (auto& c : s)
+        c = (char)std::tolower((unsigned char)c);
+    return s;
+}
+
+/**
+ * @brief Fleet topology from a line-based description — one node per
+ *        line in EtherCAT chain order; `EK1100` opens a new coupler
+ *        segment, module lines attach to the current coupler.
+ *
+ *   EK1100
+ *   EL1014
+ *   EL1014
+ *   EL2004
+ *   EL3104
+ *   EK1100
+ *   EL1014
+ *
+ * PDO endpoint keys: the first module of a type on a coupler is
+ * `<type>.c<N>` (e.g. `el1014.c1`); repeats get `.2`, `.3`, … so "a
+ * bunch of EL1014" stays addressable.  `err` receives a message on
+ * failure (unknown type, module before any coupler).
+ */
+inline std::vector<FleetSlaveInfo>
+fleetInfosFromText(const std::string& text, std::string* err = nullptr) {
+    auto fail = [&](const std::string& m) {
+        if (err) *err = m;
+        return std::vector<FleetSlaveInfo>{};
+    };
+    std::vector<FleetSlaveInfo> v;
+    uint8_t coupler = 0;
+    std::map<std::string, int> seen;   // "type.coupler" → occurrence
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line)) {
+        size_t h = line.find('#');
+        if (h != std::string::npos) line.resize(h);
+        std::istringstream ls(line);
+        std::string word;
+        if (!(ls >> word)) continue;
+        word = lowerStr(word);
+        if (word == "ek1100") {
+            ++coupler;
+            FleetSlaveInfo ci;
+            ci.chainIndex  = v.size();
+            ci.isCoupler   = true;
+            ci.coupler     = coupler;
+            ci.key         = "ek1100.c" + std::to_string(coupler);
+            ci.name        = "EK1100 #" + std::to_string(coupler);
+            ci.vendorId    = beckhoff_ids::kVendor;
+            ci.productCode = beckhoff_ids::kEK1100Product;
+            v.push_back(std::move(ci));
+            continue;
+        }
+        if (coupler == 0)
+            return fail("fleet: module '" + word +
+                        "' before any EK1100 coupler");
+        std::string upper = word;
+        for (auto& c : upper) c = (char)std::toupper((unsigned char)c);
+        const FleetModuleType* t = fleetModuleType(upper);
+        if (!t)
+            return fail("fleet: unknown module type '" + word + "'");
+        std::string base = std::string(t->name) + ".c" +
+                           std::to_string(coupler);
+        std::string baseLower = lowerStr(base);
+        int occ = ++seen[baseLower];
+        FleetSlaveInfo mi;
+        mi.chainIndex  = v.size();
+        mi.isCoupler   = false;
+        mi.coupler     = coupler;
+        mi.key         = occ == 1 ? baseLower : baseLower + "." +
+                                  std::to_string(occ);
+        mi.name        = std::string(t->name) + " (EK1100 #" +
+                         std::to_string(coupler) + ")";
+        mi.vendorId    = beckhoff_ids::kVendor;
+        mi.productCode = t->product;
+        mi.diSize      = t->di8;
+        mi.doSize      = t->do8;
+        mi.aiSize      = static_cast<uint16_t>(t->ai * 2);
+        mi.aoSize      = static_cast<uint16_t>(t->ao * 2);
+        mi.txSize      = static_cast<uint16_t>(mi.diSize + mi.aiSize);
+        mi.rxSize      = static_cast<uint16_t>(mi.doSize + mi.aoSize);
+        mi.diOff       = 0;
+        mi.aiOff       = mi.diSize;
+        mi.doOff       = 0;
+        mi.aoOff       = mi.doSize;
+        v.push_back(std::move(mi));
+    }
+    if (v.empty()) return fail("fleet: empty description");
+    return v;
+}
+
+inline std::vector<FleetSlaveInfo>
+fleetInfosFromFile(const std::string& path, std::string* err = nullptr) {
+    std::ifstream f(path);
+    if (!f) {
+        if (err) *err = "fleet: cannot open " + path;
+        return {};
+    }
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return fleetInfosFromText(ss.str(), err);
+}
+
+} // namespace detail
+
 /**
  * @brief The emulated bus: two EK1100 couplers with four I/O modules
  *        behind each, chained in EtherCAT order.
@@ -158,7 +312,13 @@ inline std::vector<FleetSlaveInfo> fleetInfos() {
  */
 class BeckhoffFleet {
 public:
-    BeckhoffFleet() {
+    /// Default two-coupler fleet (fleetInfos()).
+    BeckhoffFleet() : BeckhoffFleet(fleetInfos()) {}
+
+    /// Custom topology — e.g. detail::fleetInfosFromText/File output
+    /// with a bunch of EL1014s behind one coupler.
+    explicit BeckhoffFleet(std::vector<FleetSlaveInfo> infos)
+        : infos_(std::move(infos)) {
         buildTopology();
         for (auto& s : slaves_) s->start();
         wireMailboxAndPdo();
@@ -211,7 +371,6 @@ public:
 
 private:
     void buildTopology() {
-        infos_ = fleetInfos();
         for (const auto& inf : infos_) {
             const uint8_t di8 = static_cast<uint8_t>(inf.diSize);
             const uint8_t do8 = static_cast<uint8_t>(inf.doSize);

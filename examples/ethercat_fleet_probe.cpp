@@ -126,6 +126,10 @@ int main(int argc, char** argv) {
     prog.add_argument("--time")
         .help("pump duration in seconds (0 = until signal)")
         .default_value(std::string("0"));
+    prog.add_argument("--fleet")
+        .help("fleet description file (EK1100/ELxxxx per line, chain "
+              "order; must match the slave chain's --fleet)")
+        .default_value(std::string(""));
     try { prog.parse_args(argc, argv); }
     catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", e.what());
@@ -143,8 +147,21 @@ int main(int argc, char** argv) {
     const std::string simdir = prog.get<std::string>("--simdir");
     const uint32_t hz = std::stoul(prog.get<std::string>("--hz"));
     const double runSecs = std::stod(prog.get<std::string>("--time"));
+    const std::string fleetPath = prog.get<std::string>("--fleet");
 
-    const auto infos = fleetInfos();
+    std::vector<FleetSlaveInfo> infos;
+    if (fleetPath.empty()) {
+        infos = fleetInfos();
+    } else {
+        std::string ferr;
+        infos = tether::examples::detail::fleetInfosFromFile(
+            fleetPath, &ferr);
+        if (infos.empty()) {
+            std::fprintf(stderr, "ethercat_fleet_probe: %s\n",
+                         ferr.c_str());
+            return 1;
+        }
+    }
 
     FleetMaster fm;
     const bool linkOk = iface.empty() ? fm.open(peer, port)
