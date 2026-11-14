@@ -187,10 +187,12 @@ corner velocities + dwell points) →
   the boundary speed, not smeared across the adjacent pieces.
 - **Jerk bounds**: axis jerk maps as `|T_i·eta + jounce_i·v³ +
   3·κ_i·v·a| <= jMaxI`. The `±bounds.acceleration` trials are a
-  worst-case accel assumption — tight jerk bounds on mixed-direction
-  axes of curved paths are genuine model conservatism (coupled
-  (v,a,j)-dependent bounds would need the disabled TOPP-RA path), not
-  a bug. The `1 mm/s³` floor is for truly degenerate points only.
+  worst-case accel assumption. Both accel and jerk scans trade
+  velocity for authority: when a sample's symmetric headroom falls
+  below the designed floor (2% of the limit) the velocity envelope is
+  bisected down to where the floor fits — that knee is why many curved
+  paths land on jMax ~= 0.02·jerkLimit. The `1 mm/s³` floor is for
+  truly degenerate geometry only.
 - **Splitting**: junction splits (feed steps), dwell splits, and
   interior `vLim` deep-dip splits (>2× below flanks, 1024-pt scan).
   Pieces get interval bounds first, boundary speeds are equalized
