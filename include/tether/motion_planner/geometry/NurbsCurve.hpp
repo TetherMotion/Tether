@@ -88,17 +88,24 @@ public:
      *   p(θ) = center + radius·(cos θ·axis1 + sin θ·axis2),
      * θ ∈ [startAngle, startAngle + sweepAngle]  (sweep may be negative).
      *
-     * Construction: per span of ≤ π, three control points with middle weight
-     * cos(span/2) — exact circle, see GeometryFoundations.md proof P0.
-     * Sweeps > π are split into multiple spans joined with single internal
-     * knots (the result is C¹, as the spans lie on one circle).
+     * Construction: per span of ≤ maxSpanSweep (default 2π/3, the largest
+     * sweep keeping the middle weight cos(span/2) safely nonzero), three
+     * control points with middle weight cos(span/2) — exact circle, see
+     * GeometryFoundations.md proof P0. Sweeps > maxSpanSweep are split
+     * into multiple spans joined with single internal knots (the result
+     * is C¹, as the spans lie on one circle). Request a smaller
+     * maxSpanSweep when the control points will be lifted into a helix —
+     * more spans give a tighter linear-in-angle ramp.
      *
      * @throws std::invalid_argument if radius ≤ 0, sweep == 0, |sweep| > 2π,
-     *         or axis1/axis2 are not orthonormal (tol 1e-9).
+     *         maxSpanSweep ≤ 0 or > π, or axis1/axis2 are not orthonormal
+     *         (tol 1e-9).
      */
     static NurbsCurve fromArc(const RVec& center, double radius,
                               const RVec& axis1, const RVec& axis2,
-                              double startAngle, double sweepAngle);
+                              double startAngle, double sweepAngle,
+                              double maxSpanSweep =
+                                  2.09439510239319549231 /* 2π/3 */);
 
     // ========================================================================
     // Properties
@@ -155,7 +162,9 @@ public:
 
     /**
      * Arc length from knotMin() to u (u clamped). Exact for polylines;
-     * adaptive Gauss–Legendre quadrature otherwise (eq. (G.24)).
+     * otherwise the uniform arc-length lookup table is built lazily and
+     * only the residual sub-interval is quadrature-integrated — much
+     * cheaper than integrating [knotMin, u] on every call.
      */
     double arcLengthTo(double u) const;
 
@@ -163,6 +172,8 @@ public:
      * @brief Inverse arc length: parameter u with arcLengthTo(u) == s.
      * Newton–Raphson on f(u) = arcLengthTo(u) − s with ds/du = |C'(u)|,
      * bracketed by bisection on [knotMin, knotMax] (monotone, eq. (G.26)).
+     * The starting u is seeded from the arc-length lookup table, so
+     * convergence typically takes one iteration.
      * s is clamped to [0, length()]. Exact for polylines.
      * @throws std::domain_error on a zero-length curve.
      */
@@ -238,6 +249,16 @@ private:
     double gaussLegendre8(double a, double b) const;
     double speed(double u) const { return derivative(u, 1).norm(); }
 
+    /**
+     * Build the uniform-parameter arc-length lookup table on first use.
+     * `lutU_` is a uniform grid over [knotMin, knotMax]; `lutS_` is the
+     * cumulative arc length at each grid point, computed by per-interval
+     * quadrature at a tolerance tightened in proportion to the interval
+     * count. `lutTol_` is the per-interval tolerance, reused for the
+     * residual interval in arcLengthTo().
+     */
+    void ensureArcLengthLut() const;
+
     std::vector<RVec> controlPoints_;
     std::vector<double> weights_;
     std::vector<double> knots_;
@@ -247,6 +268,9 @@ private:
     // Lazy arc-length cache (mutable; not thread-safe by design).
     mutable double cachedLength_ = -1.0; // < 0 means "not computed"
     mutable std::size_t arcLengthComputations_ = 0;
+    mutable std::vector<double> lutU_;
+    mutable std::vector<double> lutS_;
+    mutable double lutTol_ = 0.0;
 };
 
 } // namespace tether::motion

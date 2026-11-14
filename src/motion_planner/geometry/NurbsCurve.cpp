@@ -99,7 +99,8 @@ NurbsCurve NurbsCurve::fromLine(const RVec& a, const RVec& b) {
 
 NurbsCurve NurbsCurve::fromArc(const RVec& center, double radius,
                                const RVec& axis1, const RVec& axis2,
-                               double startAngle, double sweepAngle) {
+                               double startAngle, double sweepAngle,
+                               double maxSpanSweep) {
     const std::size_t d = center.dim();
     if (axis1.dim() != d || axis2.dim() != d) {
         throw std::invalid_argument("NurbsCurve::fromArc: dim mismatch");
@@ -118,13 +119,16 @@ NurbsCurve NurbsCurve::fromArc(const RVec& center, double radius,
             "NurbsCurve::fromArc: axis1/axis2 must be orthonormal");
     }
 
-    // One span covers at most 120° (2π/3): the middle weight is cos(span/2),
-    // which stays safely away from 0 (cos(60°) = 0.5). At 180° the weight
-    // would be cos(90°) ≈ 0 — numerically degenerate. The plan specifies
-    // ≤ 120° per span (§4.1.2, §M6).
-    constexpr double kMaxSpanSweep = 2.0 * kPi / 3.0;
+    // One span covers at most maxSpanSweep (default 120° = 2π/3): the
+    // middle weight is cos(span/2), which stays safely away from 0
+    // (cos(60°) = 0.5). At 180° the weight would be cos(90°) ≈ 0 —
+    // numerically degenerate, hence the π cap.
+    if (!(maxSpanSweep > 0.0) || maxSpanSweep > kPi) {
+        throw std::invalid_argument(
+            "NurbsCurve::fromArc: maxSpanSweep must be in (0, pi]");
+    }
     const int nSpans =
-        std::max(1, static_cast<int>(std::ceil(std::abs(sweepAngle) / kMaxSpanSweep)));
+        std::max(1, static_cast<int>(std::ceil(std::abs(sweepAngle) / maxSpanSweep)));
     const double spanSweep = sweepAngle / nSpans;
     const double half = spanSweep / 2.0;
     const double w = std::cos(half); // middle weight, proof P0
@@ -492,18 +496,43 @@ double NurbsCurve::length() const {
     return result;
 }
 
+void NurbsCurve::ensureArcLengthLut() const {
+    if (!lutU_.empty()) return;
+    constexpr int N = 128;
+    const double u0 = knotMin(), u1 = knotMax();
+    lutU_.resize(N + 1);
+    lutS_.resize(N + 1);
+    lutU_[0] = u0;
+    lutS_[0] = 0.0;
+    double scale = 0.0;
+    for (std::size_t i = 1; i < controlPoints_.size(); ++i) {
+        scale += controlPoints_[i].distanceTo(controlPoints_[i - 1]);
+    }
+    // Per-interval tolerance, tightened so the cumulative table keeps
+    // the same absolute accuracy as one full-range quadrature call.
+    lutTol_ = 1e-11 * std::max(scale, 1.0) / N;
+    for (int i = 1; i <= N; ++i) {
+        lutU_[i] = u0 + (u1 - u0) * static_cast<double>(i) / N;
+        lutS_[i] = lutS_[i - 1] +
+                   quadrature(lutU_[i - 1], lutU_[i], lutTol_);
+    }
+    // The table's final entry is the best available total length.
+    if (cachedLength_ < 0.0) cachedLength_ = lutS_[N];
+}
+
 double NurbsCurve::arcLengthTo(double u) const {
     u = clampToDomain(u);
     if (u <= knotMin()) return 0.0;
     if (u >= knotMax()) return length();
     if (isPolyline()) return polylineArcLengthTo(u);
 
-    double scale = 0.0;
-    for (std::size_t i = 1; i < controlPoints_.size(); ++i) {
-        scale += controlPoints_[i].distanceTo(controlPoints_[i - 1]);
-    }
-    const double tol = 1e-11 * std::max(scale, 1.0);
-    return quadrature(knotMin(), u, tol);
+    // LUT acceleration: integrate only the residual sub-interval
+    // instead of the full [knotMin, u] range.
+    ensureArcLengthLut();
+    const auto it = std::lower_bound(lutU_.begin() + 1, lutU_.end(), u);
+    const std::size_t i = static_cast<std::size_t>(
+        std::distance(lutU_.begin(), it) - 1);
+    return lutS_[i] + quadrature(lutU_[i], u, lutTol_);
 }
 
 double NurbsCurve::invertLength(double s) const {
@@ -525,7 +554,23 @@ double NurbsCurve::invertLength(double s) const {
 
     double a = knotMin();
     double b = knotMax();
-    double u = a + (b - a) * (s / L);
+
+    // Seed u from the LUT's inverse linear interpolation — lands
+    // within one table interval of the root, so Newton converges in
+    // ~1 iteration instead of ~6.
+    ensureArcLengthLut();
+    const auto it = std::lower_bound(lutS_.begin(), lutS_.end(), s);
+    const std::size_t i0 = (it == lutS_.begin())
+        ? 0
+        : static_cast<std::size_t>(std::distance(lutS_.begin(), it) - 1);
+    const std::size_t i1 = std::min(i0 + 1, lutS_.size() - 1);
+    double u;
+    if (lutS_[i1] > lutS_[i0]) {
+        u = lutU_[i0] + (s - lutS_[i0]) *
+            (lutU_[i1] - lutU_[i0]) / (lutS_[i1] - lutS_[i0]);
+    } else {
+        u = a + (b - a) * (s / L);
+    }
 
     for (int iter = 0; iter < 60; ++iter) {
         const double f = arcLengthTo(u) - s;
