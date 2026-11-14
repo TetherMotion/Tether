@@ -161,9 +161,12 @@ cmake --build build --target tether_motion_planner_integration_tests \
 ```
 
 Note: `AnalyticalExtrusionGcodeTest.RealGcode_KissenPunctperi` reads
-`~/dev/kissen_punctperi2_*.gcode` from the local disk and is absent on
-machines without that file (or fails its loose thermal bound if the file
-differs from the calibrated one) — not a CI-grade test.
+`~/dev/kissen_punctperi2_*.gcode` from the local disk and is skipped on
+machines without that file — not a CI-grade test. Its extrusion ratios
+must be extracted per *path segment* (extruding moves only — travels are
+filtered from the path); a travel-misaligned ratio vector feeds Q≈0
+into the thermal observer and produces an unphysical unbounded
+temperature ramp.
 
 ## Motion planner notes (ParetoTimeEnergyOptimalVelocityPlanner)
 

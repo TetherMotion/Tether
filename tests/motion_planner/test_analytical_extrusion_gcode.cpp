@@ -207,7 +207,12 @@ PathAdapter<2, double> buildPathFromGcode(const GcodeParseResult& gcode,
     return std::move(result.path);
 }
 
-/// Extract per-segment extrusion ratios from G-code
+/// Extract per-segment extrusion ratios from G-code.
+///
+/// Must mirror buildPathFromGcode's move filtering exactly: the returned
+/// vector is indexed by *path segment*, and the path contains one segment
+/// per extruding move (travels are skipped). Emitting entries for
+/// non-extruding moves would misalign ratio[i] ↔ segment i.
 std::vector<double> extractExtrusionRatios(const GcodeParseResult& gcode,
                                              size_t maxMoves = 50) {
     std::vector<double> ratios;
@@ -216,34 +221,23 @@ std::vector<double> extractExtrusionRatios(const GcodeParseResult& gcode,
     size_t count = 0;
 
     for (const auto& move : gcode.moves) {
-        if (first) {
-            prevX = move.x;
-            prevY = move.y;
-            prevE = move.e;
-            first = false;
-            continue;
-        }
-
-        double dist = std::sqrt(
+        // Track position across every move (extruding or travel), same as
+        // buildPathFromGcode, so segment distances match.
+        double dist = first ? 0.0 : std::sqrt(
             (move.x - prevX) * (move.x - prevX) +
             (move.y - prevY) * (move.y - prevY));
-
-        if (dist < 0.001) {
-            prevX = move.x;
-            prevY = move.y;
-            prevE = move.e;
-            continue;
-        }
-
-        double dE = move.e - prevE;
-        double ratio = (dE > 0) ? dE / dist : 0.0;
-        ratios.push_back(ratio);
+        double dE = first ? 0.0 : move.e - prevE;
+        bool extruding = !first && move.extruding && dist >= 0.001;
 
         prevX = move.x;
         prevY = move.y;
         prevE = move.e;
-        ++count;
-        if (count >= maxMoves) break;
+        first = false;
+
+        if (!extruding) continue;
+
+        ratios.push_back(dE / dist);
+        if (++count >= maxMoves) break;
     }
 
     return ratios;
