@@ -139,7 +139,18 @@ ESC211Controller build (`cmake --preset rpi5` from the repo root).
 
 ## Test Commands
 
+> **Test binaries are EXCLUDE_FROM_ALL**: `cmake --build build` does NOT
+> build `tether_*_tests` targets — `bin/tests/` keeps whatever stale
+> binaries were last built explicitly. Running a stale test binary after
+> header changes yields bogus "pre-existing failures" (ABI drift: garbage
+> member reads, `symbol lookup error`, `free(): invalid pointer`, stack
+> smashing). Always `cmake --build build --target <test_binary> -j8` (or
+> list the targets explicitly) before attributing a failure to code.
+
 ```bash
+# Build + run a specific test binary
+cmake --build build --target tether_klipper_tests -j8
+
 # Run specific test suite
 ./build/bin/tests/tether_klipper_tests --gtest_filter='KlippyUdsTest.*'
 
