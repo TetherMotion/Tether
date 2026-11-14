@@ -309,6 +309,14 @@ TEST(AnalyticalExtrusionGcodeTest, SyntheticGcode_AllAlgorithmsFinite) {
     ASSERT_GT(traj.numArcs(), 0u);
     ASSERT_GT(traj.totalTime(), 0.0);
 
+    // Regression (endpoint boundary collapse): the blended corners produce
+    // high-curvature dips exactly at split points. The dip speed must be
+    // enforced by the boundary velocity only — if it leaks into a piece's
+    // interior bound, each ~100mm leg cruises at ~0.4mm/s (T ~ 713s).
+    // Correct plan finishes this square in ~7s.
+    EXPECT_LT(traj.totalTime(), 30.0)
+        << "boundary dip collapsed adjacent piece bounds";
+
     double totalT = traj.totalTime();
     std::vector<double> times = linspace(0, totalT, 100);
 
