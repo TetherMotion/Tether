@@ -224,20 +224,21 @@ corner velocities + dwell points) →
   accelerations (the coupled TOPP-RA machinery), same architectural
   ceiling as the scalar-bound `3κva` conservatism.
 - **TOPP-RA status** (`AnalyticalJerkLimitedTOPPRA` +
-  `ConstraintEvaluator`): the coupled solver exists and produces SSR
-  trajectories, but its constraint enforcement is currently BUGGY —
-  head-to-head scenario runs (2025, same PathAdapter inputs) show it
-  faster only by violating limits: axis accel overshoots ~1.7× (the
-  integrator clamps `y.a` to path-level `aCap`, not the per-axis
-  `κᵢv²+Tᵢa` boundary; `eta_max` doesn't anticipate the accel wall),
-  `vLim` clamps leak between RK4 grid steps (axisV 102 > 80 measured),
-  and corner stamps/dwells are not consumed at all (carried 58 mm/s
-  through a 5.3 mm/s junction). The one clean data point: ~11% honest
-  gain on a zero-curvature straight line — that's the true
-  nonzero-boundary-acceleration headroom. Productionizing needs:
-  accel-wall-aware eta selection, between-grid vLim enforcement,
-  stamp/dwell injection into vLim + boundary conditions, and ~100×
-  perf work (0.4–5.8 s per small path vs ms-scale Pareto solves).
+  `ConstraintEvaluator`): the coupled solver exists and, after the
+  enforcement fix, produces SSR trajectories that respect per-axis
+  velocity/accel and centripetal limits on curved geometry
+  (`enforceStateLimits` clamps every integrated/sampled state to
+  vLim + the coupled `κᵢv²+Tᵢa` window; `eta` selection anticipates
+  the accel wall; the closed-form SSR fast paths and the infeasible-
+  bound UB clamp are covered). Remaining gaps vs production:
+  corner stamps/dwells are NOT consumed (carries ~40 mm/s through a
+  5.3 mm/s junction — needs junction/dwell splitting like
+  `solveSplit`), and it is ~100–1000× slower than the Pareto solve
+  (0.9–15 s per small path after the extra enforcement evals).
+  Honest speedup vs Pareto: ~11% on zero-curvature straights (the
+  nonzero-boundary-acceleration headroom); curved-path advantage is
+  unquantified until stamps are injected.
+  `RespectsCoupledBounds_CornerPath` pins the enforcement.
 - **Perf-relevant caches**: `gridCoeffs_` (per-grid-node tangent,
   curvature, jounce — feeds `accelBoundsFromCache`/
   `etaBoundsFromCache`), `vLimGeoGrid_` (geometric velocity limit;

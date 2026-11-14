@@ -459,7 +459,6 @@ private:
         double dsTotal = static_cast<double>(sCurr - sPrev);
         int nSteps = std::max(1, static_cast<int>(std::abs(dsTotal) / 1e-2));
         double ds = dsTotal / nSteps;
-        double aCap = static_cast<double>(limits_.path.maxPathAcceleration);
 
         // When starting from rest (v ≈ 0, a ≈ 0), the arc-length formulation
         // dv/ds = a/v has a singularity. Use the time-domain closed-form
@@ -479,8 +478,11 @@ private:
             double a = eta * t;
             double v = 0.5 * eta * t * t;
             if (dsStep < 0) v = -v;  // Backward integration
-            a = std::clamp(a, -aCap, aCap);
-            return {v, a};
+            auto cl = evaluator.enforceStateLimits(
+                static_cast<T>(sCur), static_cast<T>(v),
+                static_cast<T>(a), path);
+            return {static_cast<double>(cl.first),
+                    static_cast<double>(cl.second)};
         };
 
         // If starting from rest, use closed-form for the first step
@@ -499,6 +501,24 @@ private:
                     static_cast<T>(s), static_cast<T>(y.v),
                     static_cast<T>(y.a), path);
                 eta = bounds.eta_max;
+                // Accel-wall anticipation: the coupled per-axis bound
+                // |T_i·a + κ_i·v²| <= aMax_i can sit far below the path
+                // cap on curved geometry. da/ds = eta/v, so over one
+                // substep eta is capped at (a_max - a)·v/ds — reach the
+                // wall, don't cross it and rely on the clamp to hide it.
+                auto [aMin, aMax] = evaluator.accelerationBounds(
+                    static_cast<T>(s), static_cast<T>(y.v), path);
+                if (aMin <= aMax) {
+                    if (y.a >= static_cast<double>(aMax)) {
+                        eta = std::min(eta, 0.0);
+                    } else {
+                        eta = std::min(eta,
+                            (static_cast<double>(aMax) - y.a) * vSafe /
+                            std::max(std::abs(ds), 1e-12));
+                    }
+                } else {
+                    eta = std::min(eta, 0.0);
+                }
             } else {
                 // No jerk limit: bang-bang acceleration
                 auto [aMin, aMax] = evaluator.accelerationBounds(
@@ -519,7 +539,13 @@ private:
             y = rk4Step(rhs, s, y, ds);
             s += ds;
             if (std::abs(y.v) < 1e-12) y.v = (y.v < 0) ? -1e-12 : 1e-12;
-            y.a = std::clamp(y.a, -aCap, aCap);
+            // Enforce vLim + the coupled accel bound at every substep —
+            // a path-level clamp alone overshoots on curved geometry.
+            auto cl = evaluator.enforceStateLimits(
+                static_cast<T>(s), static_cast<T>(y.v),
+                static_cast<T>(y.a), path);
+            y.v = static_cast<double>(cl.first);
+            y.a = static_cast<double>(cl.second);
         }
 
         return {static_cast<T>(y.v), static_cast<T>(y.a)};
@@ -553,7 +579,6 @@ private:
         double dsTotal = static_cast<double>(sPrev - sCurr);  // Negative
         int nSteps = std::max(1, static_cast<int>(std::abs(dsTotal) / 1e-2));
         double ds = dsTotal / nSteps;
-        double aCap = static_cast<double>(limits_.path.maxPathAcceleration);
 
         // If starting from rest, use closed-form for the first step.
         // For backward integration from rest at s_end, the arc decelerates
@@ -574,7 +599,12 @@ private:
             if (std::abs(eta) > 1e-12) {
                 double tStep = std::cbrt(6.0 * std::abs(ds) / eta);
                 y.v = 0.5 * eta * tStep * tStep;  // Positive (forward velocity)
-                y.a = std::clamp(-eta * tStep, -aCap, aCap);  // Negative (decelerating)
+                y.a = -eta * tStep;               // Negative (decelerating)
+                auto cl = evaluator.enforceStateLimits(
+                    static_cast<T>(s), static_cast<T>(y.v),
+                    static_cast<T>(y.a), path);
+                y.v = static_cast<double>(cl.first);
+                y.a = static_cast<double>(cl.second);
             }
             s += ds;
         }
@@ -591,6 +621,22 @@ private:
                 // da = (eta/v) * ds and ds < 0, we need eta > 0.
                 // Use eta_max (positive jerk) for backward integration.
                 eta = bounds.eta_max;
+                // Decel-wall anticipation: the coupled lower bound aMin
+                // is the deceleration limit. One backward step changes a
+                // by -eta·|ds|/v, so cap eta at (a - a_min)·v/|ds|.
+                auto [aMin, aMax] = evaluator.accelerationBounds(
+                    static_cast<T>(s), static_cast<T>(y.v), path);
+                if (aMin <= aMax) {
+                    if (y.a <= static_cast<double>(aMin)) {
+                        eta = std::min(eta, 0.0);
+                    } else {
+                        eta = std::min(eta,
+                            (y.a - static_cast<double>(aMin)) * vSafe /
+                            std::max(std::abs(ds), 1e-12));
+                    }
+                } else {
+                    eta = std::min(eta, 0.0);
+                }
             } else {
                 auto [aMin, aMax] = evaluator.accelerationBounds(
                     static_cast<T>(s), static_cast<T>(y.v), path);
@@ -610,7 +656,13 @@ private:
             y = rk4Step(rhs, s, y, ds);
             s += ds;
             if (std::abs(y.v) < 1e-12) y.v = (y.v < 0) ? -1e-12 : 1e-12;
-            y.a = std::clamp(y.a, -aCap, aCap);
+            // Enforce vLim + the coupled accel bound at every substep —
+            // a path-level clamp alone overshoots on curved geometry.
+            auto cl = evaluator.enforceStateLimits(
+                static_cast<T>(s), static_cast<T>(y.v),
+                static_cast<T>(y.a), path);
+            y.v = static_cast<double>(cl.first);
+            y.a = static_cast<double>(cl.second);
         }
 
         return {static_cast<T>(y.v), static_cast<T>(y.a)};
@@ -885,7 +937,6 @@ private:
         double s = sBegin;
         int nSteps = std::max(1, static_cast<int>(std::abs(dsTotal) / 1e-2));
         double ds = dsTotal / nSteps;
-        double aCap = static_cast<double>(limits_.path.maxPathAcceleration);
 
         auto rhs = [&](double s, const State& y) -> State {
             // When v is near zero (starting from rest), 1/v diverges.
@@ -908,7 +959,11 @@ private:
                 y.v = 0.0;
                 break;
             }
-            y.a = std::clamp(y.a, -aCap, aCap);
+            auto cl = evaluator.enforceStateLimits(
+                static_cast<T>(s), static_cast<T>(y.v),
+                static_cast<T>(y.a), path);
+            y.v = static_cast<double>(cl.first);
+            y.a = static_cast<double>(cl.second);
         }
 
         return y.t;
@@ -1050,15 +1105,13 @@ private:
                 a += stepDs * (k1a + 2*k2a + 2*k3a + k4a) / 6.0;
                 t += stepDs * (k1t + 2*k2t + 2*k3t + k4t) / 6.0;
                 v = std::max(v, 0.0);
-                // Clamp velocity to velocity limit at this s
+                // Enforce velocity + coupled accel limits at this s
                 double sCurr = arc.s_begin + (step + 1) * stepDs;
-                double vLim = static_cast<double>(
-                    ssr.evaluator().velocityLimit(
-                        static_cast<T>(sCurr), ssr.path()));
-                v = std::min(v, vLim);
-                // Clamp acceleration to path limit
-                double aCap = static_cast<double>(limits_.path.maxPathAcceleration);
-                a = std::clamp(a, -aCap, aCap);
+                auto cl = ssr.evaluator().enforceStateLimits(
+                    static_cast<T>(sCurr), static_cast<T>(v),
+                    static_cast<T>(a), ssr.path());
+                v = static_cast<double>(cl.first);
+                a = static_cast<double>(cl.second);
             }
 
             Point pt;
