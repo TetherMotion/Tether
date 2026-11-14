@@ -514,14 +514,18 @@ private:
             return {y.v, y.a, eta};
         };
 
-        // Integrate with adaptive RK4
+        // Integrate with fixed-step RK4. The dynamics are smooth
+        // (piecewise constant jerk — constant-eta arcs are integrated
+        // exactly by RK4 at any step size), so step count scales with
+        // duration: ~1 ms nominal step, at least 8 steps to span
+        // boundary transients, at most 100 to bound worst-case cost.
         State y{arc.s_begin, arc.v0, arc.a0};
         double t = 0.0;
-        // Use at most 100 steps for any arc. The dynamics are smooth
-        // (piecewise constant jerk), so 100 RK4 steps give good accuracy.
-        double h = std::min(tLocal, tLocal / 100.0);
+        const int nSteps = std::clamp(
+            static_cast<int>(tLocal / 1e-3 + 0.5), 8, 100);
+        double h = tLocal / nSteps;
         if (h < 1e-12) h = 1e-12;
-        int maxIter = 100;  // Safety limit
+        int maxIter = nSteps;  // Safety limit
 
         while (t < tLocal && maxIter-- > 0) {
             double remaining = tLocal - t;
