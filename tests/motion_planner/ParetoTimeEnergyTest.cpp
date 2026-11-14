@@ -77,6 +77,22 @@ PathAdapter<2, double> makeLPath2D(double legLength) {
     return std::move(result.path);
 }
 
+/// Build a sharp (unblended) L-path: two line pieces meeting at a true
+/// 90-degree tangent discontinuity, so corner-velocity stamps stay
+/// finite. Blended variants are tangent-continuous at both junctions
+/// and correctly get no corner limit.
+PathAdapter<2, double> makeSharpLPath2D(double legLength) {
+    std::vector<tether::motion::NurbsCurve> pieces;
+    pieces.push_back(tether::motion::NurbsCurve::fromLine(
+        tether::motion::RVec{0.0, 0.0},
+        tether::motion::RVec{legLength, 0.0}));
+    pieces.push_back(tether::motion::NurbsCurve::fromLine(
+        tether::motion::RVec{legLength, 0.0},
+        tether::motion::RVec{legLength, legLength}));
+    return PathAdapter<2, double>(
+        tether::motion::PiecewiseNurbsPath(std::move(pieces)));
+}
+
 /// Standard 2D kinematic limits with jerk constraints.
 KinematicLimits<2, double> makeLimits2D() {
     KinematicLimits<2, double> limits;
@@ -1144,7 +1160,7 @@ TEST(ParetoTimeEnergyTest, P31_VelocityContinuity_LPath) {
 // finite corner velocity computed by the junction deviation model.
 
 TEST(ParetoTimeEnergyTest, P32_CornerVelocitySatisfied_LPath) {
-    auto path = makeLPath2D(5.0);
+    auto path = makeSharpLPath2D(5.0);
     ASSERT_GT(path.totalLength(), 0.0);
 
     // Compute corner velocities using the junction deviation model
@@ -1195,7 +1211,7 @@ TEST(ParetoTimeEnergyTest, P32_CornerVelocitySatisfied_LPath) {
 // satisfy: v ≤ sqrt(v_corner² + 2*a_max*d).
 
 TEST(ParetoTimeEnergyTest, P33_LookAheadVelocityLimit_LPath) {
-    auto path = makeLPath2D(10.0);
+    auto path = makeSharpLPath2D(10.0);
     ASSERT_GT(path.totalLength(), 0.0);
 
     path.computeCornerVelocities(0.1, 500.0);

@@ -2448,14 +2448,18 @@ private:
         // stops, caller endpoints) force a crossing speed the piece
         // cannot negotiate down; auto interior-min splits carry +inf
         // requests and impose no requirement — the equalizer can always
-        // lower them. The check below therefore evaluates the minimum
-        // pulse distance between the REQUESTED entry and exit speeds
-        // (capped by the candidate bound): for request-free pieces the
-        // endpoints equal v and the distance is trivially 0, leaving
-        // the bound untouched, while a piece that must e.g. accept a
-        // 40 mm/s junction entry and stop within its length gets a
-        // self-consistent (V, A) pair instead of a starved one whose
-        // only remedy is a full stop at the boundary.
+        // lower them (their attainable crossing is still capped by the
+        // endpoint dips). The check below evaluates the minimum pulse
+        // distance for the piece's FULL transition: enter at the capped
+        // request, reach the candidate bound v, and return to the
+        // capped exit — minDist(min(v,capIn) -> v -> min(v,capOut)).
+        // Requiring only the boundary transition (peak = max(vIn,vOut))
+        // leaves the bound velocity unconstrained: a piece ending at a
+        // 5 mm/s junction would accept a (V=39, A=12) pair that cannot
+        // actually reach — much less stop from — its own bound, so the
+        // solve bisects the peak down to ~14 under the starved accel.
+        // With the full pulse the knee lands on a self-consistent
+        // operating point (~37, ~150) instead.
         const auto pulseFits = [&](double v, double a, double j) {
             const double vIn = std::min(v, entryCap);
             const double vOut = std::min(v, exitCap);
@@ -2468,8 +2472,7 @@ private:
             // a stricter tolerance (1e-10) than this check, so landing
             // exactly at sTotal would leave the piece marginally
             // infeasible and force a whole-path fallback.
-            return minimumDistanceForPeak(std::max(vIn, vOut),
-                                          vIn, vOut, probe) <=
+            return minimumDistanceForPeak(v, vIn, vOut, probe) <=
                    sTotal * (1.0 - 1e-6);
         };
 

@@ -407,37 +407,45 @@ public:
         cornerVelocities_.assign(N + 1,
                                  std::numeric_limits<double>::infinity());
 
-        // Compute tangent for each segment from NURBS control points.
-        // For degree-1 (polyline): tangent = (endPoint - startPoint) / len.
-        // For arcs: tangent = derivative at midpoint, normalized.
-        std::vector<tether::motion::RVec> tangents(N);
+        // Compute start/end tangents for each segment. The junction
+        // angle that matters is the tangent discontinuity AT the
+        // junction — for curved pieces the midpoint tangent can both
+        // hide a real corner (e.g. a rapid entering a semicircle
+        // measures ~0 deg against the arc's mid-tangent while the true
+        // entry is 90 deg) and invent one on a tangent-continuous
+        // blend. For degree-1 (polyline) pieces start/end tangents
+        // are the first/last chord directions; for arcs, derivatives
+        // at the knot ends.
+        std::vector<tether::motion::RVec> tStart(N), tEnd(N);
         for (size_t i = 0; i < N; ++i) {
             const auto& piece = path_->piece(i);
+            const auto fallback = [&]() {
+                tether::motion::RVec t =
+                    tether::motion::RVec::zero(piece.dim());
+                t[0] = 1.0;
+                return t;
+            };
             if (piece.isPolyline() && piece.numControlPoints() >= 2) {
                 const auto& cps = piece.controlPoints();
-                tether::motion::RVec diff = cps.back() - cps.front();
-                double len = diff.norm();
-                if (len > 1e-12) {
-                    tangents[i] = diff / len;
-                } else {
-                    tangents[i] = tether::motion::RVec::zero(piece.dim());
-                    tangents[i][0] = 1.0; // fallback
-                }
+                tether::motion::RVec dIn = cps[1] - cps.front();
+                tether::motion::RVec dOut =
+                    cps.back() - cps[cps.size() - 2];
+                tStart[i] = dIn.norm() > 1e-12
+                    ? dIn.normalized() : fallback();
+                tEnd[i] = dOut.norm() > 1e-12
+                    ? dOut.normalized() : fallback();
             } else {
-                // Arc or higher-degree: evaluate tangent at midpoint.
                 try {
-                    double uMid = 0.5 * (piece.knotMin() + piece.knotMax());
-                    tether::motion::RVec d = piece.derivative(uMid, 1);
-                    double len = d.norm();
-                    if (len > 1e-12) {
-                        tangents[i] = d / len;
-                    } else {
-                        tangents[i] = tether::motion::RVec::zero(piece.dim());
-                        tangents[i][0] = 1.0;
-                    }
+                    tether::motion::RVec dIn =
+                        piece.derivative(piece.knotMin(), 1);
+                    tether::motion::RVec dOut =
+                        piece.derivative(piece.knotMax(), 1);
+                    tStart[i] = dIn.norm() > 1e-12
+                        ? dIn.normalized() : fallback();
+                    tEnd[i] = dOut.norm() > 1e-12
+                        ? dOut.normalized() : fallback();
                 } catch (...) {
-                    tangents[i] = tether::motion::RVec::zero(piece.dim());
-                    tangents[i][0] = 1.0;
+                    tStart[i] = tEnd[i] = fallback();
                 }
             }
         }
@@ -449,7 +457,7 @@ public:
         // Compute corner velocity at each interior junction.
         const double kMinSinHalfTheta = 1e-12;
         for (size_t i = 0; i + 1 < N; ++i) {
-            double dot = tangents[i].dot(tangents[i + 1]);
+            double dot = tEnd[i].dot(tStart[i + 1]);
             // Clamp dot product to [-1, 1] for numerical safety.
             dot = std::clamp(dot, -1.0, 1.0);
             // sin(theta/2) = sqrt((1 - cos(theta)) / 2) = sqrt((1 - dot) / 2)
