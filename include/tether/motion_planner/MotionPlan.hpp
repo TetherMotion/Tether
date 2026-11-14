@@ -905,7 +905,15 @@ private:
             case ProfilerType::AnalyticalTOPPRA:
                 return std::make_unique<analytical::AnalyticalTOPPRA<Dim, T>>(limits_);
             case ProfilerType::AnalyticalJerkLimitedTOPPRA:
-                return std::make_unique<analytical::AnalyticalJerkLimitedTOPPRA<Dim, T>>(limits_);
+                // buildHybrid=false: the returned VelocityProfile samples
+                // from the SSR (exact source); the Hybrid is an optional
+                // side product for s-domain consumers that costs ~30 s /
+                // ~55k elements on BenchLayer-scale paths because its
+                // certificates cannot converge where v ~ sqrt(s) near
+                // stops. Nothing in the MotionPlanBuilder path consumes
+                // hybridSource(), so building it here is pure overhead.
+                return std::make_unique<analytical::AnalyticalJerkLimitedTOPPRA<Dim, T>>(
+                    limits_, /*buildHybrid=*/false);
             case ProfilerType::ParetoTimeEnergy:
             default:
                 return std::make_unique<analytical::ParetoTimeEnergyOptimalVelocityPlanner<Dim, T>>(limits_);
