@@ -1021,6 +1021,12 @@ TEST(PlannerScenarios_CNC, XZPlaneArc) {
     EXPECT_NEAR(m.endPos[2], 0.0, 0.3);
     // Previously the arc was built in the wrong plane giving T~6.7e5 s.
     EXPECT_LT(m.T, 60.0);
+    // The rapid->arc seam must not collapse to a full stop: the bound
+    // pair is kept self-consistent (stoppable within the piece), so the
+    // junction holds ~38 mm/s (was 0 when the starved accel bound made
+    // every transition look infeasible and got equalized to a stop).
+    EXPECT_GT(m.minInteriorV, 1.0);
+    EXPECT_LT(m.T, 2.5);
 }
 
 // 23. G91 incremental mode — relative moves must accumulate correctly.

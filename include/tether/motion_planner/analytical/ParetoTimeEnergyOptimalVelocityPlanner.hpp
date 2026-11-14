@@ -1746,13 +1746,17 @@ public:
      * pieces, so each sub-solve's boundary stays inside the envelope
      * it computes.
      */
-    double intervalBound(size_t constraintCacheSize = 200) {
+    double intervalBound(
+        size_t constraintCacheSize = 200,
+        double entryCap = std::numeric_limits<double>::infinity(),
+        double exitCap = std::numeric_limits<double>::infinity()) {
         constraintCacheSize_ = std::max(constraintCacheSize, size_t(10));
         buildConstraintCache();
         const auto vLimit = [this](double s) {
             return velocityLimitAt(s);
         };
-        lastIntervalBounds_ = globalBounds(vLimit, sTotal_);
+        lastIntervalBounds_ = globalBounds(vLimit, sTotal_,
+                                           entryCap, exitCap);
         // solve() reuses this cache + bounds when called at the same
         // grid size, halving the split-solve cost per piece.
         intervalBoundsValid_ = true;
@@ -2327,7 +2331,9 @@ private:
      */
     PlanningBounds globalBounds(
         const std::function<double(double)>& vLimit,
-        double sTotal) const {
+        double sTotal,
+        double entryCap = std::numeric_limits<double>::infinity(),
+        double exitCap = std::numeric_limits<double>::infinity()) const {
         PlanningBounds bounds;
         if (!(sTotal > 0.0)) {
             bounds.failureReason = "Path has non-positive length";
@@ -2426,6 +2432,38 @@ private:
         // whole path crawl (T ~ 1e6 s on some toolpaths).
         const double accelHeadroom = std::max(
             1.0, 0.02 * bounds.acceleration);
+
+        // The bound pair (V, A) must additionally admit the boundary
+        // transition the piece can actually be asked to perform. Split
+        // boundaries with an explicit request (junction stamps, dwell
+        // stops, caller endpoints) force a crossing speed the piece
+        // cannot negotiate down; auto interior-min splits carry +inf
+        // requests and impose no requirement — the equalizer can always
+        // lower them. The check below therefore evaluates the minimum
+        // pulse distance between the REQUESTED entry and exit speeds
+        // (capped by the candidate bound): for request-free pieces the
+        // endpoints equal v and the distance is trivially 0, leaving
+        // the bound untouched, while a piece that must e.g. accept a
+        // 40 mm/s junction entry and stop within its length gets a
+        // self-consistent (V, A) pair instead of a starved one whose
+        // only remedy is a full stop at the boundary.
+        const auto pulseFits = [&](double v, double a, double j) {
+            const double vIn = std::min(v, entryCap);
+            const double vOut = std::min(v, exitCap);
+            PlanningBounds probe;
+            probe.velocity = v;
+            probe.acceleration = a;
+            probe.jerk = j;
+            probe.snap = bounds.snap;
+            // Margin below the interval length: the piece solve applies
+            // a stricter tolerance (1e-10) than this check, so landing
+            // exactly at sTotal would leave the piece marginally
+            // infeasible and force a whole-path fallback.
+            return minimumDistanceForPeak(std::max(vIn, vOut),
+                                          vIn, vOut, probe) <=
+                   sTotal * (1.0 - 1e-6);
+        };
+
         for (size_t i = 1; i < samples; ++i) {
             const double s = sTotal * static_cast<double>(i) /
                              static_cast<double>(samples);
@@ -2438,11 +2476,18 @@ private:
             };
 
             double symmetric = symmetricAt(vLocal);
-            if (symmetric < accelHeadroom) {
+            if (symmetric < accelHeadroom ||
+                !pulseFits(vLocal,
+                           std::min(symmetric, bounds.acceleration),
+                           bounds.jerk)) {
                 double lo = 0.0, hi = vLocal;
                 for (int iter = 0; iter < 60; ++iter) {
                     const double mid = 0.5 * (lo + hi);
-                    if (symmetricAt(mid) >= accelHeadroom) lo = mid;
+                    const double sym = symmetricAt(mid);
+                    if (sym >= accelHeadroom &&
+                        pulseFits(mid,
+                                  std::min(sym, bounds.acceleration),
+                                  bounds.jerk)) lo = mid;
                     else hi = mid;
                 }
                 if (lo > 0.0) {
@@ -2499,7 +2544,9 @@ private:
             };
 
             double symmetric = symmetricAt(vLocal);
-            if (symmetric < jerkHeadroom) {
+            if (symmetric < jerkHeadroom ||
+                !pulseFits(vLocal, bounds.acceleration,
+                           std::min(symmetric, bounds.jerk))) {
                 // The geometric jerk terms (jounce·v³ + 3κ·v·a) leave too
                 // little tangential-jerk authority at vLocal. As in the
                 // acceleration loop above, trade a little velocity for
@@ -2510,7 +2557,10 @@ private:
                 double lo = 0.0, hi = vLocal;
                 for (int iter = 0; iter < 60; ++iter) {
                     const double mid = 0.5 * (lo + hi);
-                    if (symmetricAt(mid) >= jerkHeadroom) lo = mid;
+                    const double sym = symmetricAt(mid);
+                    if (sym >= jerkHeadroom &&
+                        pulseFits(mid, bounds.acceleration,
+                                  std::min(sym, bounds.jerk))) lo = mid;
                     else hi = mid;
                 }
                 if (lo > 0.0) {
@@ -4524,7 +4574,17 @@ public:
                 // of BOTH adjacent pieces (phase 2), and the
                 // transition-length enforcement (phase 2.5) needs the
                 // same bound — compute it for every non-empty piece.
-                pc.bound = pc.solver->intervalBound(pc.cacheSize);
+                // The bound build also checks that the piece can
+                // execute its worst-case REQUESTED boundary transition:
+                // junction/dwell stamps and the caller endpoints are
+                // non-negotiable, while interior-min splits carry the
+                // +inf auto marker (no requirement).
+                const double entryReq = (i == 0)
+                    ? static_cast<double>(v0) : sp[i - 1].boundaryV;
+                const double exitReq = (i == sp.size())
+                    ? static_cast<double>(endVelocity) : sp[i].boundaryV;
+                pc.bound = pc.solver->intervalBound(
+                    pc.cacheSize, entryReq, exitReq);
                 pc.haveBound = true;
             }
 
