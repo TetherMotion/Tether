@@ -1528,12 +1528,31 @@ public:
         v0_ = static_cast<double>(startVelocity);
         vf_ = static_cast<double>(endVelocity);
         constraintCacheSize_ = std::max(constraintCacheSize, size_t(10));
-        buildConstraintCache();
+        // Reuse intervalBound()'s cache only when it was built at this
+        // grid size — a different size implies different node spacing
+        // and a stale grid would silently misalign velocityLimitAt().
+        const bool haveBounds =
+            intervalBoundsValid_ && cacheGridSize_ == constraintCacheSize_;
+        intervalBoundsValid_ = false;
+        if (!haveBounds) {
+            buildConstraintCache();
+        } else {
+            // The cache was built by intervalBound() before vf_ was
+            // known — patch the terminal corner stamp so look-ahead
+            // consumers see the real end velocity.
+            for (auto it = corners_.rbegin(); it != corners_.rend(); ++it) {
+                if (std::abs(it->first - sTotal_) < 1e-6) {
+                    it->second = vf_;
+                    break;
+                }
+            }
+        }
 
         const auto vLimit = [this](double s) {
             return velocityLimitAt(s);
         };
-        auto result = optimizePulsePlan(vLimit, v0_, vf_);
+        auto result = optimizePulsePlan(
+            vLimit, v0_, vf_, haveBounds ? &lastIntervalBounds_ : nullptr);
 
         arcs_ = std::move(result.arcs);
         lastCost_ = result.cost;
@@ -1734,6 +1753,10 @@ public:
             return velocityLimitAt(s);
         };
         lastIntervalBounds_ = globalBounds(vLimit, sTotal_);
+        // solve() reuses this cache + bounds when called at the same
+        // grid size, halving the split-solve cost per piece.
+        intervalBoundsValid_ = true;
+        cacheGridSize_ = constraintCacheSize_;
         return lastIntervalBounds_.velocity;
     }
 
@@ -2756,7 +2779,8 @@ private:
 
     ForwardPassResult optimizePulsePlan(
         const std::function<double(double)>& vLimit,
-        double startVelocity, double endVelocity) const {
+        double startVelocity, double endVelocity,
+        const PlanningBounds* precomputedBounds = nullptr) const {
         ForwardPassResult best;
         best.failureReason = "No feasible snap-space pulse candidate";
         double bestCost = std::numeric_limits<double>::infinity();
@@ -2767,8 +2791,11 @@ private:
         //
         // The envelope computation depends only on (vLimit, sTotal_), not on
         // the per-candidate limit scale — compute it once instead of inside
-        // every buildPulsePlan call.
-        const auto baseBounds = globalBounds(vLimit, sTotal_);
+        // every buildPulsePlan call. When intervalBound() already produced
+        // the identical envelope, solve() passes it in to skip the rescan.
+        const auto baseBounds = precomputedBounds
+            ? *precomputedBounds
+            : globalBounds(vLimit, sTotal_);
         constexpr size_t kCandidates = 41;
         for (size_t i = 0; i < kCandidates; ++i) {
             const double fraction = static_cast<double>(i) /
@@ -2811,6 +2838,9 @@ private:
         per-segment term; lets velocityLimitAt() answer bounds-grid
         samples without re-evaluating the path. */
     PlanningBounds lastIntervalBounds_;
+    bool intervalBoundsValid_ = false; /**< intervalBound() cache+bounds
+        are fresh for a following solve() at cacheGridSize_. */
+    size_t cacheGridSize_ = 0;
 
     std::vector<std::pair<double, double>> corners_;
     double aMaxForLookahead_ = 0.0;
@@ -4384,6 +4414,7 @@ public:
                 double bound =
                     std::numeric_limits<double>::infinity();
                 bool haveBound = false;  /**< bound was computed */
+                size_t cacheSize = 200;  /**< length-scaled grid size */
             };
             std::deque<PieceCtx> pcs(sp.size() + 1);
             for (size_t i = 0; i <= sp.size(); ++i) {
@@ -4461,20 +4492,20 @@ public:
 
                 pc.solver = std::make_unique<Solver>(
                     *pc.adapter, limits_, wEff, feedRate);
-                // The interval bound is only needed where it can clamp
-                // a boundary: pieces adjacent to an interior-min (auto
-                // boundary) split. Junction/dwell boundaries are
-                // explicit physical constraints that need no bound —
-                // skipping the extra grid build keeps the common
-                // junction-split case at its previous cost.
-                const bool boundNeeded =
-                    (i > 0 && sp[i - 1].interiorMin) ||
-                    (i < sp.size() && sp[i].interiorMin);
-                if (boundNeeded) {
-                    pc.bound =
-                        pc.solver->intervalBound(constraintCacheSize);
-                    pc.haveBound = true;
-                }
+                // Grid density ~0.1 mm/node (capped at the caller's
+                // cache size, floored at 32) keeps the bound build
+                // proportional to piece length: a 1.5 mm sliver between
+                // junctions does not need 200 coefficient evaluations.
+                const double pieceLen = pc.sEnd - pc.sStart;
+                pc.cacheSize = std::max<size_t>(
+                    32, std::min(constraintCacheSize,
+                        static_cast<size_t>(std::ceil(pieceLen / 0.1)) + 1));
+                // Every split boundary is clamped to the interval bound
+                // of BOTH adjacent pieces (phase 2), and the
+                // transition-length enforcement (phase 2.5) needs the
+                // same bound — compute it for every non-empty piece.
+                pc.bound = pc.solver->intervalBound(pc.cacheSize);
+                pc.haveBound = true;
             }
 
             // Phase 2 — effective boundary velocities. Each split's
@@ -4548,7 +4579,7 @@ public:
                     ? endVelocity : static_cast<T>(effB[i]);
 
                 auto subArcs =
-                    pc.solver->solve(subV0, subVEnd, constraintCacheSize);
+                    pc.solver->solve(subV0, subVEnd, pc.cacheSize);
 
                 if (subArcs.empty()) {
                     failReason = pc.solver->failureReason();
