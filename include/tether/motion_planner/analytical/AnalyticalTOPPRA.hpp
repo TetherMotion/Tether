@@ -222,12 +222,123 @@ public:
         // Create constraint evaluator
         Evaluator evaluator(limits_, feedRate);
 
-        // Solve the time-optimal problem
-        auto arcs = solveTimeOptimal(
-            path, evaluator, feedRate,
-            startVelocity, endVelocity,
-            startAcceleration, startJerk,
-            numSamples);
+        // Collect split boundaries: stamped junctions (finite corner
+        // velocities from the junction-deviation model) and dwell points
+        // (forced stops with a pause). Each boundary becomes a hard
+        // velocity constraint between windowed solves — without this the
+        // passes carry unlimited speed through sharp corners.
+        struct Boundary {
+            T s;        // arc length
+            T v;        // required crossing speed
+            T dwell;    // pause duration inserted after this boundary (0 = none)
+        };
+        std::vector<Boundary> boundaries;
+        boundaries.push_back({T(0), startVelocity, T(0)});
+
+        std::vector<Boundary> splits;
+        if (path.hasInner()) {
+            const auto& inner = path.inner();
+            const auto& cvs = path.cornerVelocities();
+            T sAcc = T(0);
+            const std::size_t nPieces = inner.numPieces();
+            for (std::size_t i = 0; i + 1 < nPieces; ++i) {
+                sAcc += static_cast<T>(inner.piece(i).length());
+                if (i + 1 < cvs.size() && std::isfinite(cvs[i + 1])) {
+                    splits.push_back({sAcc, cvs[i + 1], T(0)});
+                }
+            }
+        }
+        for (const auto& [arcLen, dur] : path.dwellPoints()) {
+            if (dur > T(0)) {
+                splits.push_back({static_cast<T>(arcLen), T(0),
+                                  static_cast<T>(dur)});
+            }
+        }
+        std::sort(splits.begin(), splits.end(),
+                  [](const Boundary& a, const Boundary& b) {
+                      return a.s < b.s;
+                  });
+        // Dedupe near-coincident splits: keep the lower speed bound and
+        // accumulate dwell time (a dwell on a stamped junction is both).
+        // Dwells at the path ends can't be window boundaries — they are
+        // collected separately and inserted as pause arcs.
+        T dwellAtStart = T(0), dwellAtEnd = T(0);
+        for (const auto& sp : splits) {
+            if (sp.s <= T(0)) {
+                dwellAtStart += sp.dwell;
+                boundaries.front().v =
+                    std::min(boundaries.front().v, sp.v);
+                continue;
+            }
+            if (sp.s >= pathLength) {
+                dwellAtEnd += sp.dwell;
+                continue;
+            }
+            if (!boundaries.empty() &&
+                std::abs(sp.s - boundaries.back().s) < T(1e-9)) {
+                boundaries.back().v =
+                    std::min(boundaries.back().v, sp.v);
+                boundaries.back().dwell += sp.dwell;
+                continue;
+            }
+            // A stamped junction can exceed the local velocity limit —
+            // the attainable crossing is bounded by vLim at the split.
+            T vCap = evaluator.velocityLimit(sp.s, path);
+            boundaries.push_back({sp.s, std::min(sp.v, vCap), sp.dwell});
+        }
+        boundaries.push_back({pathLength, endVelocity, T(0)});
+
+        auto makeDwellArc = [&](T s, T t0, T dur) {
+            SwitchingArc dwell;
+            dwell.s_begin = dwell.s_end = static_cast<double>(s);
+            dwell.mode = ControlMode::ZERO_JERK;
+            dwell.eta = 0.0;
+            dwell.v0 = 0.0;
+            dwell.a0 = 0.0;
+            dwell.t0 = static_cast<double>(t0);
+            dwell.duration = static_cast<double>(dur);
+            if (path.hasInner()) {
+                auto loc = path.inner().locate(static_cast<double>(s));
+                const auto& piece = path.inner().piece(loc.piece);
+                dwell.u0 = piece.invertLength(loc.localS);
+            }
+            return dwell;
+        };
+
+        // Solve each window with its boundary velocities, then stitch.
+        std::vector<SwitchingArc> arcs;
+        double tCursor = 0.0;
+        if (dwellAtStart > T(0)) {
+            arcs.push_back(makeDwellArc(T(0), T(0), dwellAtStart));
+            tCursor += static_cast<double>(dwellAtStart);
+        }
+        for (std::size_t w = 0; w + 1 < boundaries.size(); ++w) {
+            const auto& wA = boundaries[w];
+            const auto& wB = boundaries[w + 1];
+            if (wB.s - wA.s > T(1e-9)) {
+                auto windowArcs = solveWindow(
+                    path, evaluator, feedRate,
+                    wA.s, wB.s, wA.v, wB.v,
+                    w == 0 ? startAcceleration : T(0),
+                    w == 0 ? startJerk : T(0),
+                    numSamples, pathLength);
+                for (auto& a : windowArcs) {
+                    a.t0 += tCursor;
+                    arcs.push_back(a);
+                }
+                if (!windowArcs.empty()) {
+                    tCursor = static_cast<double>(arcs.back().t0) +
+                              static_cast<double>(arcs.back().duration);
+                }
+            }
+            if (wB.dwell > T(0)) {
+                arcs.push_back(makeDwellArc(wB.s, T(tCursor), wB.dwell));
+                tCursor += static_cast<double>(wB.dwell);
+            }
+        }
+        if (dwellAtEnd > T(0)) {
+            arcs.push_back(makeDwellArc(pathLength, T(tCursor), dwellAtEnd));
+        }
 
         // Build the SSR (stores a const reference to the path)
         auto ssr = std::make_shared<SSR>(
@@ -310,7 +421,7 @@ private:
     // ========================================================================
 
     /**
-     * @brief Solve the time-optimal path-following problem.
+     * @brief Solve the time-optimal path-following problem over a window.
      *
      * Uses forward-backward integration in arc-length space with jerk
      * constraints. The algorithm:
@@ -321,25 +432,38 @@ private:
      * 4. Merge: take min(forward, backward, v_lim) and detect switching points
      * 5. Build switching arcs from the merged profile
      *
-     * @return Vector of switching arcs
+     * The window [sBegin, sEnd] uses absolute arc-length coordinates, so
+     * computeProfile can split the path at stamped junctions/dwells and
+     * solve each piece with its required boundary velocities. Grid
+     * resolution is proportional: numSamplesTotal counts for the whole
+     * path, so the window gets the same node density.
+     *
+     * @return Vector of switching arcs (absolute-s, local t0)
      */
-    std::vector<SwitchingArc> solveTimeOptimal(
+    std::vector<SwitchingArc> solveWindow(
         const Path& path,
         const Evaluator& evaluator,
         T feedRate,
+        T sBegin, T sEnd,
         T startVelocity,
         T endVelocity,
         T startAcceleration,
         T startJerk,
-        size_t numSamples) const {
+        size_t numSamplesTotal,
+        T pathLength) const {
 
-        const T pathLength = path.totalLength();
-        const T ds = pathLength / T(numSamples - 1);
+        const T windowLen = sEnd - sBegin;
+        if (windowLen <= T(0)) return {};
+        size_t numSamples = std::max<size_t>(
+            8, static_cast<size_t>(std::llround(
+                static_cast<double>(numSamplesTotal) *
+                static_cast<double>(windowLen / pathLength))));
+        const T ds = windowLen / T(numSamples - 1);
 
         // Step 1: Compute velocity limit curve v_lim(s)
         std::vector<T> vLim(numSamples);
         for (size_t i = 0; i < numSamples; ++i) {
-            T s = std::min(T(i) * ds, pathLength);
+            T s = std::min(sBegin + T(i) * ds, sEnd);
             vLim[i] = evaluator.velocityLimit(s, path);
         }
 
@@ -352,9 +476,8 @@ private:
         fwdAcc[0] = startAcceleration;
 
         for (size_t i = 1; i < numSamples; ++i) {
-            T sPrev = std::min(T(i - 1) * ds, pathLength);
-            T sCurr = std::min(T(i) * ds, pathLength);
-            T deltaS = sCurr - sPrev;
+            T sPrev = std::min(sBegin + T(i - 1) * ds, sEnd);
+            T sCurr = std::min(sBegin + T(i) * ds, sEnd);
 
             auto [v, a] = integrateForward(
                 evaluator, path, sPrev, sCurr,
@@ -378,9 +501,8 @@ private:
         bwdAcc[numSamples - 1] = T(0);
 
         for (size_t i = numSamples - 1; i > 0; --i) {
-            T sCurr = std::min(T(i) * ds, pathLength);
-            T sPrev = std::min(T(i - 1) * ds, pathLength);
-            T deltaS = sCurr - sPrev;
+            T sCurr = std::min(sBegin + T(i) * ds, sEnd);
+            T sPrev = std::min(sBegin + T(i - 1) * ds, sEnd);
 
             auto [v, a] = integrateBackward(
                 evaluator, path, sCurr, sPrev,
@@ -423,10 +545,48 @@ private:
             }
         }
 
+        // A sustained run of nodes on the coupled acceleration bound is
+        // a wall-hold: the passes pin a near the limit (eta throttled
+        // asymptotically, so nodes sit a band inside the bound rather
+        // than exactly on it), which a single-eta ACCEL/DECEL arc cannot
+        // reproduce — the SSR would replay eta toward zero mid-arc and
+        // break the boundary velocities the pass achieved. Reclassifying
+        // sustained wall nodes as ZERO_JERK splits the switching
+        // structure at the real eta discontinuities (ramp, hold,
+        // release). The neighbor requirement keeps an isolated node on
+        // a ramp crossing the band from becoming a sliver arc.
+        auto inWallBand = [&](size_t i) -> bool {
+            if (modes[i] != ControlMode::ACCEL_MAX &&
+                modes[i] != ControlMode::DECEL_MAX) {
+                return false;
+            }
+            T s = std::min(sBegin + T(i) * ds, sEnd);
+            auto [aMin, aMax] = evaluator.accelerationBounds(
+                s, finalVel[i], path);
+            if (!(aMin <= aMax)) return false;
+            const T band =
+                T(0.02) * (aMax - aMin) + T(1e-9);
+            return finalAcc[i] <= aMin + band ||
+                   finalAcc[i] >= aMax - band;
+        };
+        std::vector<char> wallNodes(numSamples, 0);
+        for (size_t i = 0; i < numSamples; ++i) {
+            wallNodes[i] = inWallBand(i) ? 1 : 0;
+        }
+        for (size_t i = 0; i < numSamples; ++i) {
+            if (!wallNodes[i]) continue;
+            const bool sustained =
+                (i > 0 && wallNodes[i - 1]) ||
+                (i + 1 < numSamples && wallNodes[i + 1]);
+            if (sustained) {
+                modes[i] = ControlMode::ZERO_JERK;
+            }
+        }
+
         // Step 5: Build switching arcs from the merged profile
         return buildSwitchingArcs(
             path, evaluator, finalVel, finalAcc, modes,
-            ds, pathLength, numSamples,
+            ds, sBegin, sEnd, numSamples,
             startVelocity, endVelocity,
             startAcceleration, startJerk);
     }
@@ -685,23 +845,32 @@ private:
         const std::vector<T>& vel,
         const std::vector<T>& acc,
         const std::vector<ControlMode>& modes,
-        T ds, T pathLength, size_t numSamples,
+        T ds, T sBegin, T sEnd, size_t numSamples,
         T startVelocity, T endVelocity,
         T startAcceleration, T startJerk) const {
 
         std::vector<SwitchingArc> arcs;
         if (numSamples == 0) return arcs;
 
-        // Group consecutive samples with the same mode into arcs
+        // Group consecutive samples with the same mode into arcs. A
+        // ZERO_JERK arc replays a constant held acceleration, so runs at
+        // different a-levels (e.g. an accel-hold switching to a
+        // decel-hold at the velocity peak) must split — otherwise the
+        // arc keeps the first node's a0 and produces a velocity jump.
         size_t arcStart = 0;
         ControlMode currentMode = modes[0];
 
         for (size_t i = 1; i < numSamples; ++i) {
-            if (modes[i] != currentMode) {
+            const bool heldAccelChanged =
+                modes[i] == ControlMode::ZERO_JERK &&
+                currentMode == ControlMode::ZERO_JERK &&
+                std::abs(acc[i] - acc[arcStart]) >
+                    T(1e-9) * (T(1) + std::abs(acc[arcStart]));
+            if (modes[i] != currentMode || heldAccelChanged) {
                 // End current arc
                 SwitchingArc arc;
-                arc.s_begin = std::min(T(arcStart) * ds, pathLength);
-                arc.s_end = std::min(T(i) * ds, pathLength);
+                arc.s_begin = std::min(sBegin + T(arcStart) * ds, sEnd);
+                arc.s_end = std::min(sBegin + T(i) * ds, sEnd);
                 arc.mode = currentMode;
                 arc.v0 = vel[arcStart];
                 arc.a0 = acc[arcStart];
@@ -718,25 +887,25 @@ private:
         // Last arc
         {
             SwitchingArc arc;
-            T lastS = std::min(T(numSamples - 1) * ds, pathLength);
+            T lastS = std::min(sBegin + T(numSamples - 1) * ds, sEnd);
             T lastVel = vel[numSamples - 1];
             T lastAcc = acc[numSamples - 1];
             // Add a final decel/accel arc if the last sample's velocity
             // doesn't match the end velocity. Use a generous distance
             // threshold to handle floating-point rounding in lastS.
-            double dRemaining = static_cast<double>(pathLength - lastS);
+            double dRemaining = static_cast<double>(sEnd - lastS);
             bool needsFinalDecel =
                 std::abs(lastVel - endVelocity) > T(1e-6) &&
                 dRemaining > 1e-14;
 
             if (needsFinalDecel) {
                 // Trim the last arc to end at the last sample, then add
-                // a final decel/accel arc from lastS to pathLength.
-                arc.s_begin = std::min(T(arcStart) * ds, pathLength);
+                // a final decel/accel arc from lastS to sEnd.
+                arc.s_begin = std::min(sBegin + T(arcStart) * ds, sEnd);
                 arc.s_end = lastS;
             } else {
-                arc.s_begin = std::min(T(arcStart) * ds, pathLength);
-                arc.s_end = pathLength;
+                arc.s_begin = std::min(sBegin + T(arcStart) * ds, sEnd);
+                arc.s_end = sEnd;
             }
             arc.mode = currentMode;
             arc.v0 = vel[arcStart];
@@ -750,8 +919,8 @@ private:
             if (needsFinalDecel) {
                 SwitchingArc finalArc;
                 finalArc.s_begin = lastS;
-                finalArc.s_end = pathLength;
-                double dArc = static_cast<double>(pathLength - lastS);
+                finalArc.s_end = sEnd;
+                double dArc = static_cast<double>(sEnd - lastS);
                 if (endVelocity < lastVel) {
                     finalArc.mode = ControlMode::DECEL_MAX;
                 } else {
