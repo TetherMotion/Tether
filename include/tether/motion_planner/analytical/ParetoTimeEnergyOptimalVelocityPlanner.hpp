@@ -2482,8 +2482,13 @@ private:
 
             // Best (widest) symmetric tangential jerk this sample affords
             // at a given velocity, over the extreme acceleration levels.
+            // Deliberately NOT seeded with bounds.jerk: the headroom
+            // bisection below asks whether a *lower* velocity re-opens
+            // jerk authority, which it cannot answer while capped by the
+            // running bound (once bounds.jerk < jerkHeadroom every query
+            // fails and the whole piece collapses to the 1 mm/s³ floor).
             const auto symmetricAt = [&](double v) {
-                double sym = bounds.jerk;
+                double sym = std::numeric_limits<double>::max();
                 for (const double a : {-bounds.acceleration, 0.0,
                                        bounds.acceleration}) {
                     const auto interval = etaBoundsAt(i, v, a);
