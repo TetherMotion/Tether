@@ -6,6 +6,7 @@
 #include "tether/motion_planner/geometry/PlanningSegmentConverter.hpp"
 #include "tether/motion_planner/blend/OutsideCircleBlender.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -13,6 +14,85 @@ namespace tether::motion {
 
 using GCode::PlanningSegment;
 using GCode::InterpolationPlane;
+
+namespace {
+
+constexpr double kTwoPi = 2.0 * M_PI;
+
+/**
+ * @brief Lift a planar arc NURBS into a helical arc.
+ *
+ * A true helix is not a NURBS curve, so the perpendicular component is
+ * applied by offsetting each control point along the out-of-plane axis by
+ * `delta * f`, where `f` is the control point's angular fraction of the
+ * total sweep (computed from its direction relative to the arc center —
+ * for a symmetric rational arc span the middle control point lies exactly
+ * on the bisector ray). The planar projection stays an exact circle
+ * (control-point in-plane coordinates and weights are untouched), the
+ * endpoints match exactly, and the perpendicular ramp deviates from a
+ * true linear-in-angle helix only within each ≤π span.
+ */
+NurbsCurve liftArcToHelix(const NurbsCurve& arc, const RVec& center,
+                          int u, int v, int w,
+                          double startAngle, double sweep,
+                          double startW, double delta)
+{
+    auto cps = arc.controlPoints();
+    for (std::size_t i = 0; i < cps.size(); ++i) {
+        double f;
+        if (i == 0) {
+            f = 0.0;
+        } else if (i + 1 == cps.size()) {
+            f = 1.0;
+        } else {
+            double dth = std::atan2(cps[i][v] - center[v],
+                                    cps[i][u] - center[u]) - startAngle;
+            if (sweep > 0.0) {
+                while (dth < -1e-9) dth += kTwoPi;
+            } else {
+                while (dth > 1e-9) dth -= kTwoPi;
+            }
+            f = std::clamp(dth / sweep, 0.0, 1.0);
+        }
+        cps[i][w] = startW + delta * f;
+    }
+    return NurbsCurve(std::move(cps), arc.weights(), arc.knots(),
+                      arc.degree());
+}
+
+/**
+ * @brief Build a Bézier/NURBS piece from a spline PlanningSegment.
+ *
+ * CubicSpline carries 4 control points (degree-3 Bézier),
+ * QuadraticSpline 3 (degree-2), NURBS segments carry their own
+ * knots/weights. Uniform-weight clamped knot vector is synthesised for
+ * the Bézier cases.
+ */
+NurbsCurve splineNurbsFromSegment(const PlanningSegment& seg)
+{
+    std::vector<RVec> cps;
+    cps.reserve(seg.controlPoints.size());
+    for (const auto& p : seg.controlPoints)
+        cps.push_back(RVec{p[0], p[1], p[2]});
+
+    if (seg.motionType == GCode::SegmentMotionType::NURBS &&
+        !seg.knots.empty() &&
+        seg.weights.size() == cps.size() &&
+        seg.knots.size() > cps.size() + 1) {
+        const int degree =
+            static_cast<int>(seg.knots.size() - cps.size() - 1);
+        return NurbsCurve(std::move(cps), seg.weights, seg.knots, degree);
+    }
+
+    const int degree = static_cast<int>(cps.size()) - 1;
+    std::vector<double> weights(cps.size(), 1.0);
+    std::vector<double> knots(2 * (degree + 1), 0.0);
+    std::fill(knots.begin() + degree + 1, knots.end(), 1.0);
+    return NurbsCurve(std::move(cps), std::move(weights),
+                      std::move(knots), degree);
+}
+
+} // namespace
 
 PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
     const std::vector<PlanningSegment>& segments)
@@ -43,12 +123,16 @@ PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
             continue;
         }
 
-        // Skip zero-length or near-zero-length segments
+        // Skip zero-length or near-zero-length segments. An arc whose
+        // chord vanishes is a full circle (start == end): keep it — its
+        // sweep (±2π) and radius carry the real geometry.
         double dx = end[0] - start[0];
         double dy = end[1] - start[1];
         double dz = end[2] - start[2];
         double len = std::sqrt(dx*dx + dy*dy + dz*dz);
-        if (len < 1e-6) continue;
+        const bool validArc = seg.isArc() &&
+            seg.arcRadius > 1e-9 && std::abs(seg.arcSweep) > 1e-9;
+        if (len < 1e-6 && !validArc) continue;
 
         // Per-piece attributes (stored in repurposed velocity fields)
         float segDeviation = static_cast<float>(seg.entryVelocity);
@@ -63,46 +147,62 @@ PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
                 : seg.feedRate / 60.0;
         }
 
-        if (seg.isArc() && seg.arcRadius > 1e-9) {
+        if (validArc) {
             // Build arc NURBS
             RVec center{seg.center[0], seg.center[1], seg.center[2]};
 
-            // Determine arc plane axes
-            RVec axis1, axis2;
-            switch (seg.plane) {
-                case InterpolationPlane::XZ:
-                    axis1 = RVec{1.0, 0.0, 0.0};
-                    axis2 = RVec{0.0, 0.0, 1.0};
-                    break;
-                case InterpolationPlane::YZ:
-                    axis1 = RVec{0.0, 1.0, 0.0};
-                    axis2 = RVec{0.0, 0.0, 1.0};
-                    break;
-                case InterpolationPlane::XY:
-                default:
-                    axis1 = RVec{1.0, 0.0, 0.0};
-                    axis2 = RVec{0.0, 1.0, 0.0};
-                    break;
-            }
+            // In-plane axes (u,v) and perpendicular (w). The interpreter
+            // expresses startAngle/sweep in (u,v) plane coordinates,
+            // matching the fromArc convention
+            //   p(θ) = c + r·(cosθ·û + sinθ·v̂).
+            int u = 0, v = 1, w = 2;
+            GCode::InterpolationStrategy::getPlaneAxes(seg.plane, u, v, w);
+            RVec axis1{0.0, 0.0, 0.0}, axis2{0.0, 0.0, 0.0};
+            axis1[u] = 1.0;
+            axis2[v] = 1.0;
 
-            // Start angle from start position relative to center
-            double startAngle = std::atan2(
-                start[1] - center[1],
-                start[0] - center[0]
-            );
-            double sweepAngle = seg.arcSweep;
+            const double startAngle = std::atan2(
+                start[v] - center[v],
+                start[u] - center[u]);
+            // Helical lead along the perpendicular axis.
+            const double helixDelta = end[w] - start[w];
 
             try {
                 auto curve = NurbsCurve::fromArc(
                     center, seg.arcRadius, axis1, axis2,
-                    startAngle, sweepAngle);
+                    startAngle, seg.arcSweep);
+                if (std::abs(helixDelta) > 1e-12) {
+                    curve = liftArcToHelix(curve, center, u, v, w,
+                                           startAngle, seg.arcSweep,
+                                           start[w], helixDelta);
+                }
                 curves.push_back(std::move(curve));
                 deviations.push_back(segDeviation);
                 extruderSpeeds.push_back(segExtruderSpeed);
                 feedRates.push_back(segFeedRate);
-                cumulativeArcLength += len;
+                cumulativeArcLength += curves.back().length();
             } catch (...) {
                 // Fall back to line if arc construction fails
+                try {
+                    curves.push_back(NurbsCurve::fromLine(start, end));
+                    deviations.push_back(segDeviation);
+                    extruderSpeeds.push_back(segExtruderSpeed);
+                    feedRates.push_back(segFeedRate);
+                    cumulativeArcLength += len;
+                } catch (...) {
+                    // Skip degenerate segments
+                }
+            }
+        } else if (seg.isSpline() && seg.controlPoints.size() >= 2) {
+            // G5/G5.1/G5.2 splines — exact Bézier/NURBS pieces.
+            try {
+                curves.push_back(splineNurbsFromSegment(seg));
+                deviations.push_back(segDeviation);
+                extruderSpeeds.push_back(segExtruderSpeed);
+                feedRates.push_back(segFeedRate);
+                cumulativeArcLength += curves.back().length();
+            } catch (...) {
+                // Fall back to the chord on malformed spline data
                 try {
                     curves.push_back(NurbsCurve::fromLine(start, end));
                     deviations.push_back(segDeviation);

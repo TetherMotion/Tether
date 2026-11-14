@@ -333,6 +333,7 @@ set(MOTION_PLANNER_INTEGRATION_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/VelocityProfileTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/RoundedSquareGCodeTest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/OutsideCircleBlendTest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/motion_planner/PlannerScenarioIntegrationTests.cpp"
 )
 # Analytical extrusion compensation tests (linear PressureAdvance, power-law PressureAdvance, Cross-WLF PressureAdvance,
 # LTI/LPV deconvolution, state-space LPV, flow-adaptive heater, thermal observer).
