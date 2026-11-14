@@ -39,8 +39,12 @@ using namespace InterpolationConstants;
 
 void InterpolationStrategy::getPlaneAxes(InterpolationPlane plane, int& u, int& v, int& w) {
     switch (plane) {
+        // The interpreter computes start/end angles and sweep in the
+        // (a1,a2) order of the Fanuc plane definition — a cyclic,
+        // right-handed ordering: XY→(X,Y), ZX→(Z,X), YZ→(Y,Z).
+        // u/v must match that order or arcs come out mirrored.
         case InterpolationPlane::XZ:
-            u = 0; v = 2; w = 1;
+            u = 2; v = 0; w = 1;
             break;
         case InterpolationPlane::YZ:
             u = 1; v = 2; w = 0;

@@ -552,7 +552,7 @@ private:
     static void getPlaneAxesLocal(InterpolationPlane plane, int& u, int& v, int& w) {
         switch (plane) {
             case InterpolationPlane::XZ:
-                u = 0; v = 2; w = 1;
+                u = 2; v = 0; w = 1;  // interpreter (a1,a2) = (Z,X)
                 break;
             case InterpolationPlane::YZ:
                 u = 1; v = 2; w = 0;

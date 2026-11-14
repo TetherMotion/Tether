@@ -243,7 +243,9 @@ inline std::vector<std::string> computeFeatures(const std::vector<std::string>& 
  *
  * Returns (u, v, w) where u/v are the in-plane axes (first/second arc
  * coordinates for G2/G3) and w is the axis normal to the plane (helical
- * axis). XY→(0,1,2), XZ→(0,2,1), YZ→(1,2,0). Unrecognized planes fall
+ * axis). XY→(0,1,2), XZ→(2,0,1), YZ→(1,2,0). The XZ order is (Z,X) —
+ * the Fanuc "ZX plane" ordering the interpreter uses for arc angles —
+ * not (X,Z); using (X,Z) mirrors G18 arcs. Unrecognized planes fall
  * back to the XY mapping.
  *
  * @param plane  Active G17/G18/G19 plane.
@@ -256,7 +258,7 @@ inline void getPlaneAxes(GCode::InterpolationPlane plane, int& u, int& v, int& w
         case GCode::InterpolationPlane::XY:
             u = 0; v = 1; w = 2; break;
         case GCode::InterpolationPlane::XZ:
-            u = 0; v = 2; w = 1; break;
+            u = 2; v = 0; w = 1; break;
         case GCode::InterpolationPlane::YZ:
             u = 1; v = 2; w = 0; break;
         default:

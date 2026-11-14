@@ -17,6 +17,7 @@ using GCode::InterpolationPlane;
 
 namespace {
 
+constexpr double kPi = M_PI;
 constexpr double kTwoPi = 2.0 * M_PI;
 
 /**
@@ -161,19 +162,93 @@ PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
             axis1[u] = 1.0;
             axis2[v] = 1.0;
 
+            double radius = seg.arcRadius;
+            double sweep = seg.arcSweep;
+
+            // Inconsistent arc: the commanded end does not lie on the
+            // commanded circle (|end-c| ≠ r), so no arc can satisfy
+            // radius, center AND endpoint at once. Rebuild the circle
+            // through start+end with the same radius, choosing the
+            // candidate center/sweep closest to the commanded arc —
+            // this keeps the endpoint exact (the next segment starts
+            // there) instead of landing at the end angle on the wrong
+            // radius.
+            const double dEnd = std::hypot(end[u] - center[u],
+                                           end[v] - center[v]);
+            const double chord2d = std::hypot(end[u] - start[u],
+                                              end[v] - start[v]);
+            if (std::abs(dEnd - radius) >
+                    std::max(1e-6, 1e-4 * radius) && chord2d > 1e-9) {
+                const double half = 0.5 * chord2d;
+                if (radius < half - 1e-9) {
+                    // Chord longer than the diameter: no circle exists —
+                    // force the line fallback below.
+                    sweep = 0.0;
+                } else {
+                    const double du = (end[u] - start[u]) / chord2d;
+                    const double dv = (end[v] - start[v]) / chord2d;
+                    const double mu = 0.5 * (start[u] + end[u]);
+                    const double mv = 0.5 * (start[v] + end[v]);
+                    const double h =
+                        std::sqrt(radius * radius - half * half);
+                    const double c1u = mu - dv * h, c1v = mv + du * h;
+                    const double c2u = mu + dv * h, c2v = mv - du * h;
+                    // Signed sweep each candidate produces (same sign
+                    // convention as the commanded arc).
+                    const auto sweepFor = [&](double cu, double cv) {
+                        double sw = std::atan2(end[v] - cv, end[u] - cu) -
+                                    std::atan2(start[v] - cv,
+                                               start[u] - cu);
+                        if (sweep < 0.0) {
+                            while (sw > 0.0) sw -= kTwoPi;
+                        } else {
+                            while (sw < 0.0) sw += kTwoPi;
+                        }
+                        return sw;
+                    };
+                    const double s1 = sweepFor(c1u, c1v);
+                    const double s2 = sweepFor(c2u, c2v);
+                    // Prefer the candidate whose arc best matches the
+                    // commanded sweep; break ties toward the center
+                    // nearest the commanded one.
+                    const double e1 = std::abs(std::abs(s1) -
+                                             std::abs(sweep));
+                    const double e2 = std::abs(std::abs(s2) -
+                                             std::abs(sweep));
+                    if (e1 < e2 - 1e-9 ||
+                        (std::abs(e1 - e2) <= 1e-9 &&
+                         std::hypot(c1u - center[u], c1v - center[v]) <=
+                         std::hypot(c2u - center[u], c2v - center[v]))) {
+                        center[u] = c1u;
+                        center[v] = c1v;
+                        sweep = s1;
+                    } else {
+                        center[u] = c2u;
+                        center[v] = c2v;
+                        sweep = s2;
+                    }
+                }
+            }
+
             const double startAngle = std::atan2(
                 start[v] - center[v],
                 start[u] - center[u]);
-            // Helical lead along the perpendicular axis.
+            // Helical lead along the perpendicular axis. Helical arcs
+            // get ~30° spans: liftArcToHelix is exact at control points,
+            // so finer spans tighten the linear-in-angle ramp (~16x
+            // smaller deviation than the default 120° spans).
             const double helixDelta = end[w] - start[w];
+            const double maxSpan =
+                std::abs(helixDelta) > 1e-12 ? kPi / 6.0 : kTwoPi / 3.0;
 
             try {
-                auto curve = NurbsCurve::fromArc(
-                    center, seg.arcRadius, axis1, axis2,
-                    startAngle, seg.arcSweep);
-                if (std::abs(helixDelta) > 1e-12) {
+                auto curve = sweep != 0.0
+                    ? NurbsCurve::fromArc(center, radius, axis1, axis2,
+                                          startAngle, sweep, maxSpan)
+                    : NurbsCurve::fromLine(start, end);
+                if (sweep != 0.0 && std::abs(helixDelta) > 1e-12) {
                     curve = liftArcToHelix(curve, center, u, v, w,
-                                           startAngle, seg.arcSweep,
+                                           startAngle, sweep,
                                            start[w], helixDelta);
                 }
                 curves.push_back(std::move(curve));

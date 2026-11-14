@@ -33,6 +33,7 @@
 #include <gtest/gtest.h>
 
 #include "tether/gcode/PlanningSegmentBuilder.hpp"
+#include "tether/gcode/GCodeInterpreter.hpp"
 #include "tether/motion_planner/MotionPlanner.hpp"
 #include "tether/motion_planner/MotionSegment.hpp"
 #include "tether/motion_planner/MotionPlan.hpp"
@@ -944,6 +945,25 @@ TEST(PlannerScenarios_CNC, HelicalArcZDrop) {
     // If this fails, the converter flattened the helix to a planar arc.
     EXPECT_NEAR(m.endPos[2], -3.0, 0.2)
         << "helical G2 lost its Z ramp (planar-arc conversion defect)";
+
+    // Quantify helix fidelity: a true helix has Z linear in the in-plane
+    // angle. The liftArcToHelix ramp is exact at control points; inside
+    // each ≤120° span it deviates slightly. Center = (5,0).
+    double maxDev = 0.0;
+    for (int i = 0; i <= 2000; ++i) {
+        const double s = 10.5 + (r.pathLength - 10.5) * i / 2000.0;
+        const auto p = r.path.evaluateAtArcLength(s);
+        const double ang = std::atan2(p.position[1] - 0.0,
+                                      p.position[0] - 5.0);
+        double frac = -ang / (2.0 * M_PI);  // CW: angle decreases from 0
+        while (frac < 0.0) frac += 1.0;
+        const double zExpected = -3.0 * frac;
+        maxDev = std::max(maxDev, std::abs(p.position[2] - zExpected));
+    }
+    std::cout << "[HelixArc] max Z deviation from true helix: "
+              << maxDev << " mm\n";
+    // ~30° lift spans keep the ramp within a few µm of linear-in-angle.
+    EXPECT_LT(maxDev, 0.01) << "helix Z deviates too far from linear";
 }
 
 // 20. Full 3-axis diagonal move: all axis limits could bind.
@@ -1152,8 +1172,9 @@ TEST(PlannerScenarios_Hard, MotionPlanBuilderPath) {
               << " maxV=" << maxV << "\n";
 }
 
-// 28. Dwell through MotionPlanBuilder — documents that the builder path
-//     drops G4 dwells (SegmentConverter returns no curve for Dwell).
+// 28. Dwell through MotionPlanBuilder: PathBuilderAdapter now keeps
+//     G4 dwells as path dwell points (previously silently dropped),
+//     so the plan's total time includes the 0.5s pause.
 TEST(PlannerScenarios_Hard, DwellViaMotionPlanBuilder) {
     auto L = printerLimits();
 
@@ -1169,14 +1190,41 @@ TEST(PlannerScenarios_Hard, DwellViaMotionPlanBuilder) {
     auto plan = builder.build(segs, 100.0);
     ASSERT_GT(plan.numSegments(), 0u);
 
-    // DESIRED: total time ≥ motion time + 0.5s dwell.
-    // CURRENT BEHAVIOR: dwell segments are silently skipped, so the plan
-    // contains only the two moves.
-    const double motionOnly = plan.totalDuration();
-    std::cout << "[DwellBuilder] totalDuration=" << motionOnly << "s\n";
-    EXPECT_LT(motionOnly, 1.4)
-        << "dwell unexpectedly honored through MotionPlanBuilder";
-    EXPECT_GT(motionOnly, 0.4);  // motion still takes >0.4s
+    const double total = plan.totalDuration();
+    std::cout << "[DwellBuilder] totalDuration=" << total << "s\n";
+    // Motion alone would take well under 1s; with the dwell the plan
+    // must total at least motion + 0.5s.
+    EXPECT_GT(total, 0.9)
+        << "dwell still dropped through MotionPlanBuilder";
+}
+
+// 39. Mixed per-segment feeds through MotionPlanBuilder: per-segment
+//     velocity limits are now plumbed through PathBuilderAdapter, so
+//     the fast leg must reach its own feed (junction split) instead of
+//     collapsing to the global minimum.
+TEST(PlannerScenarios_Hard, MixedFeedsViaMotionPlanBuilder) {
+    auto L = printerLimits();
+
+    MotionSegmentList segs;
+    segs.append(MotionSegment::linear(
+        Vec<3, double>{0, 0, 0}, Vec<3, double>{100, 0, 0}, 20.0));
+    segs.append(MotionSegment::linear(
+        Vec<3, double>{100, 0, 0}, Vec<3, double>{200, 0, 0}, 150.0));
+
+    MotionPlanBuilder3D builder(L);
+    auto plan = builder.build(segs, 150.0);
+    ASSERT_GT(plan.numSegments(), 0u);
+    const double T = plan.totalDuration();
+    double maxV = 0;
+    for (int i = 0; i <= 4000; ++i) {
+        const auto s = plan.evaluateAt(T * i / 4000.0);
+        maxV = std::max(maxV, std::abs(s.pathVelocity));
+    }
+    std::cout << "[MixedFeedBuilder] T=" << T << "s maxV=" << maxV
+              << "\n";
+    EXPECT_GT(maxV, 60.0)
+        << "fast leg collapsed to the slow leg's feed (no split)";
+    EXPECT_LE(maxV, 150.0 * 1.10 + 0.5);
 }
 
 // 29. Cost-weight sweep: heavier energy weight must slow the trajectory
@@ -1217,4 +1265,223 @@ TEST(PlannerScenarios_Hard, TighterLimitsSlowerTime) {
               << "s  cnc T=" << tCnc << "s\n";
     EXPECT_GT(tCnc, tPrint * 1.5)
         << "CNC limits should slow the same path substantially";
+}
+
+// 31. Multi-turn arcs (P word): a P3 full-circle move must cover three
+//     turns of arc length; helical P-turns split the Z travel evenly.
+TEST(PlannerScenarios_Hard, MultiTurnArcPWord) {
+    const auto L = printerLimits();
+    // 3 full turns of an R10 circle: L = 3*2π*10 ≈ 188.5 mm.
+    auto r = runGcode(
+        header() +
+        "G0 X0 Y0 F18000\n"
+        "G2 X0 Y0 Z-9 I10 J0 P3 F6000\n", L, 200.0);
+    ASSERT_TRUE(r.ok) << "pipeline failed at " << r.failedAt;
+    auto m = sampleWss(r.wss);
+    printMetrics("MultiTurn", r, m);
+    EXPECT_NEAR(r.pathLength, 3.0 * 2.0 * M_PI * 10.0, 2.0);
+    // Helical: Z drops 9 mm over 3 turns → end Z = -9.
+    EXPECT_NEAR(m.endPos[2], -9.0, 0.3);
+    // Mid-way through the motion Z should be about half-way down.
+    const auto mid = r.path.evaluateAtArcLength(r.pathLength * 0.5);
+    EXPECT_NEAR(mid.position[2], -4.5, 0.6);
+}
+
+// 32. Arc direction fidelity: the NURBS path must traverse each arc in
+//     the same direction as the interpreter's own tessellation. G18's
+//     (a1,a2) = (Z,X) ordering historically mirrored XZ arcs.
+TEST(PlannerScenarios_Hard, ArcDirectionMatchesTessellation) {
+    struct Case { const char* name; const char* gcode; };
+    const Case cases[] = {
+        {"XY-G2",  "G0 X0 Y0\nG2 X20 Y0 I10 J0 F3000\n"},
+        {"XY-G3",  "G0 X0 Y0\nG3 X20 Y0 I10 J0 F3000\n"},
+        {"XZ-G2",  "G18\nG0 X0 Z0\nG2 X20 Z0 I10 K0 F3000\n"},
+        {"XZ-G3",  "G18\nG0 X0 Z0\nG3 X20 Z0 I10 K0 F3000\n"},
+        {"YZ-G2",  "G19\nG0 Y0 Z0\nG2 Y20 Z0 J10 K0 F3000\n"},
+        {"YZ-G3",  "G19\nG0 Y0 Z0\nG3 Y20 Z0 J10 K0 F3000\n"},
+    };
+    for (const auto& c : cases) {
+        // Tessellated reference (interpreter's own convention)
+        GCode::Interpreter interp;
+        interp.setEmitArcSegments(false);
+        std::vector<GCode::MotionSegment> msegs;
+        interp.setMotionCallback([&](const GCode::MotionSegment& s) {
+            msegs.push_back(s); return GCode::Error{};
+        });
+        ASSERT_TRUE(interp.loadString(c.gcode).ok()) << c.name;
+        ASSERT_TRUE(interp.run().ok()) << c.name;
+        ASSERT_GT(msegs.size(), 4u) << c.name;
+        const auto& mid = msegs[msegs.size() / 2].endPosition;
+
+        // NURBS arc path
+        auto parsed = GCode::PlanningSegmentBuilder::fromText(c.gcode);
+        ASSERT_TRUE(parsed.error.ok()) << c.name;
+        auto nurbs = piecewiseNurbsFromSegments(parsed.segments);
+        const auto p = nurbs.path.evaluatePosition(
+            nurbs.path.totalLength() * 0.5);
+        for (int ax = 0; ax < 3; ++ax) {
+            EXPECT_NEAR(p[ax], mid[ax], 0.5)
+                << c.name << " axis " << ax
+                << " — NURBS arc goes the wrong way around";
+        }
+    }
+}
+
+// 33. Inconsistent IJK arc (end not on the commanded circle): the
+//     interpreter rebuilds a circle through start+end with the
+//     requested radius. The repaired arc must reach the commanded end
+//     exactly and keep the commanded direction/shape.
+TEST(PlannerScenarios_Hard, InconsistentArcRepaired) {
+    const auto L = printerLimits();
+    // Commanded center (5,0), r=5; end (9,1) is sqrt(17)=4.12 away —
+    // off the circle. Repair picks the candidate circle whose CW arc
+    // matches the commanded minor-arc shape (bulges upward).
+    auto r = runGcode(
+        header() +
+        "G0 X0 Y0 F18000\n"
+        "G2 X9 Y1 I5 J0 F3000\n", L, 200.0);
+    ASSERT_TRUE(r.ok) << "pipeline failed at " << r.failedAt;
+    auto m = sampleWss(r.wss);
+    printMetrics("InconsistentArc", r, m);
+    EXPECT_NEAR(m.endPos[0], 9.0, 0.15);
+    EXPECT_NEAR(m.endPos[1], 1.0, 0.15);
+    // Repaired minor arc passes above the chord (peak y > 2).
+    double maxY = -1e9;
+    for (int i = 0; i <= 100; ++i) {
+        const auto p = r.path.evaluateAtArcLength(r.pathLength * i / 100);
+        maxY = std::max(maxY, p.position[1]);
+    }
+    EXPECT_GT(maxY, 2.0)
+        << "arc took the major-arc/major-bulge side — wrong candidate";
+}
+
+// 34. Inconsistent arc where no circle fits (chord > diameter):
+//     fall back to a straight line reaching the commanded end.
+TEST(PlannerScenarios_Hard, InconsistentArcFallsBackToLine) {
+    const auto L = printerLimits();
+    // r=5 but the 20mm chord exceeds the 10mm diameter.
+    auto r = runGcode(
+        header() +
+        "G0 X0 Y0 F18000\n"
+        "G2 X20 Y0 I5 J0 F3000\n", L, 200.0);
+    ASSERT_TRUE(r.ok) << "pipeline failed at " << r.failedAt;
+    auto m = sampleWss(r.wss);
+    printMetrics("InconsistentArcLine", r, m);
+    EXPECT_NEAR(m.endPos[0], 20.0, 0.15);
+    EXPECT_NEAR(m.endPos[1], 0.0, 0.15);
+    // Straight-line fallback, not a curved path.
+    EXPECT_NEAR(r.pathLength, 20.0, 0.5);
+}
+
+// 35. Inconsistent *helical* arc: feasibility must use the in-plane
+//     chord (9.06mm < 10mm diameter → repairable), not the 3D chord
+//     (10.34mm → would wrongly fall back to a line).
+TEST(PlannerScenarios_Hard, InconsistentHelicalArcRepaired) {
+    const auto L = cncLimits();
+    auto r = runGcode(
+        header() +
+        "G0 X0 Y0 Z0 F18000\n"
+        "G2 X9 Y1 Z-5 I5 J0 F2000\n", L, 80.0);
+    ASSERT_TRUE(r.ok) << "pipeline failed at " << r.failedAt;
+    auto m = sampleWss(r.wss);
+    printMetrics("InconsistentHelix", r, m);
+    EXPECT_NEAR(m.endPos[0], 9.0, 0.15);
+    EXPECT_NEAR(m.endPos[1], 1.0, 0.15);
+    EXPECT_NEAR(m.endPos[2], -5.0, 0.15);
+    // Arc (not line fallback) → bulges above the chord.
+    double maxY = -1e9;
+    for (int i = 0; i <= 100; ++i) {
+        const auto p = r.path.evaluateAtArcLength(r.pathLength * i / 100);
+        maxY = std::max(maxY, p.position[1]);
+    }
+    EXPECT_GT(maxY, 2.0)
+        << "helical repair used the 3D chord and fell back to a line";
+}
+
+// 36. G5.1 quadratic spline: one control point (I,J offset from
+//     start), degree-2 Bézier — must not flatten to the chord.
+TEST(PlannerScenarios_Hard, QuadraticSplineG51) {
+    const auto L = printerLimits();
+    auto r = runGcode(
+        header() +
+        "G0 X0 Y0 F18000\n"
+        "G5.1 X40 Y0 I10 J30 E1.0 F6000\n", L, 200.0);
+    ASSERT_TRUE(r.ok) << "pipeline failed at " << r.failedAt;
+    auto m = sampleWss(r.wss);
+    printMetrics("SplineG51", r, m);
+    // Bézier(0.5) = (P0 + 2·P1 + P2)/4 = (15, 15): symmetric curve, so
+    // the arc-length midpoint sits near the parametric midpoint.
+    const auto mid = r.path.evaluateAtArcLength(r.pathLength * 0.5);
+    EXPECT_GT(mid.position[1], 5.0)
+        << "G5.1 quadratic flattened to a chord";
+    EXPECT_NEAR(m.endPos[0], 40.0, 0.15);
+    EXPECT_NEAR(m.endPos[1], 0.0, 0.15);
+}
+
+// 37. R-format arcs: center reconstructed from the radius. R+ picks
+//     the minor arc, R- the major arc — both must reach the commanded
+//     end on the correct side of the chord.
+TEST(PlannerScenarios_Hard, RFormatArcs) {
+    const auto L = printerLimits();
+    {   // R+12: minor CW arc, center below chord → bulges +Y.
+        auto r = runGcode(
+            header() +
+            "G0 X0 Y0 F18000\n"
+            "G2 X20 Y0 R12 F3000\n", L, 200.0);
+        ASSERT_TRUE(r.ok) << "minor R-arc failed at " << r.failedAt;
+        auto m = sampleWss(r.wss);
+        printMetrics("RArcMinor", r, m);
+        EXPECT_NEAR(m.endPos[0], 20.0, 0.15);
+        EXPECT_NEAR(m.endPos[1], 0.0, 0.15);
+        double maxY = -1e9;
+        for (int i = 0; i <= 100; ++i) {
+            maxY = std::max(maxY,
+                r.path.evaluateAtArcLength(r.pathLength * i / 100)
+                    .position[1]);
+        }
+        EXPECT_GT(maxY, 3.0) << "minor R-arc bulged the wrong way";
+    }
+    {   // R-12: major CW arc — center above chord (10,+6.63), so the
+        // >180° traversal goes over the top of the circle (peak
+        // y = 6.63+12 ≈ 18.6) and never dips below the chord.
+        auto r = runGcode(
+            header() +
+            "G0 X0 Y0 F18000\n"
+            "G2 X20 Y0 R-12 F3000\n", L, 200.0);
+        ASSERT_TRUE(r.ok) << "major R-arc failed at " << r.failedAt;
+        auto m = sampleWss(r.wss);
+        printMetrics("RArcMajor", r, m);
+        EXPECT_NEAR(m.endPos[0], 20.0, 0.15);
+        EXPECT_NEAR(m.endPos[1], 0.0, 0.15);
+        // Major arc: L = r · sweep ≈ 12 · 4.31 ≈ 51.7 mm.
+        EXPECT_NEAR(r.pathLength, 51.7, 1.5);
+        double maxY = -1e9, minY = 1e9;
+        for (int i = 0; i <= 100; ++i) {
+            const auto p =
+                r.path.evaluateAtArcLength(r.pathLength * i / 100);
+            maxY = std::max(maxY, p.position[1]);
+            minY = std::min(minY, p.position[1]);
+        }
+        EXPECT_GT(maxY, 15.0) << "major R-arc took the minor-arc side";
+        EXPECT_GT(minY, -0.5) << "major R-arc dipped below the chord";
+    }
+}
+
+// 38. Negative-direction helix: CCW (G3) full turn descending in Z —
+//     exercises helixDelta < 0 on a positive-sweep arc.
+TEST(PlannerScenarios_Hard, NegativeHelixCCW) {
+    const auto L = cncLimits();
+    auto r = runGcode(
+        header() +
+        "G0 X10 Y0 Z0 F18000\n"
+        "G3 X10 Y0 Z-4 I-10 J0 F2000\n", L, 80.0);
+    ASSERT_TRUE(r.ok) << "pipeline failed at " << r.failedAt;
+    auto m = sampleWss(r.wss);
+    printMetrics("NegHelix", r, m);
+    EXPECT_NEAR(m.endPos[0], 10.0, 0.15);
+    EXPECT_NEAR(m.endPos[1], 0.0, 0.15);
+    EXPECT_NEAR(m.endPos[2], -4.0, 0.15);
+    // 10mm rapid lead-in + full-turn helix hypot(2π·10, 4) ≈ 62.96 mm.
+    EXPECT_NEAR(r.pathLength,
+                10.0 + std::hypot(2.0 * M_PI * 10.0, 4.0), 3.0);
 }
