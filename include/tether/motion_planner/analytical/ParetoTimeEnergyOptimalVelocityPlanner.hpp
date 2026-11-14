@@ -81,6 +81,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -1717,6 +1718,50 @@ public:
     const Evaluator& evaluator() const { return evaluator_; }
 
     /**
+     * @brief Velocity envelope over the whole path.
+     *
+     * Builds the constraint cache and runs the same globalBounds
+     * computation solve() uses, storing the result for
+     * boundaryTransitionFeasible() and returning its velocity entry:
+     * the interval-minimum feasible speed. Split-point boundary
+     * velocities are clamped to the interval bounds of BOTH adjacent
+     * pieces, so each sub-solve's boundary stays inside the envelope
+     * it computes.
+     */
+    double intervalBound(size_t constraintCacheSize = 200) {
+        constraintCacheSize_ = std::max(constraintCacheSize, size_t(10));
+        buildConstraintCache();
+        const auto vLimit = [this](double s) {
+            return static_cast<double>(evaluator_.velocityLimit(
+                static_cast<T>(std::clamp(s, 0.0, sTotal_)), path_));
+        };
+        lastIntervalBounds_ = globalBounds(vLimit, sTotal_);
+        return lastIntervalBounds_.velocity;
+    }
+
+    /**
+     * @brief Whether a v0 -> vf transition fits `length` under the
+     * bounds computed by the last intervalBound() call.
+     *
+     * Mirrors the two feasibility gates in buildPulsePlan: both
+     * boundary velocities inside the envelope and the peak-transition
+     * distance not exceeding the piece length.
+     */
+    bool boundaryTransitionFeasible(double v0, double vf,
+                                    double length) const {
+        const auto& bounds = lastIntervalBounds_;
+        if (v0 < 0.0 || vf < 0.0 ||
+            v0 > bounds.velocity + 1e-10 ||
+            vf > bounds.velocity + 1e-10 ||
+            !(bounds.velocity > 0.0)) {
+            return false;
+        }
+        const double peak = std::max(v0, vf);
+        return minimumDistanceForPeak(peak, v0, vf, bounds) <=
+               length + 1e-9;
+    }
+
+    /**
      * @brief Prepare the solver for forward-pass testing.
      *
      * Builds the constraint cache and fine velocity grid, and sets up
@@ -2763,6 +2808,7 @@ private:
     size_t fineGridSize_ = 0;
     double dsFine_ = 0.0;
     std::vector<double> vLimFineGrid_;
+    PlanningBounds lastIntervalBounds_;
 
     std::vector<std::pair<double, double>> corners_;
     double aMaxForLookahead_ = 0.0;
@@ -4079,6 +4125,9 @@ public:
             double dwell;     /**< Dwell duration in seconds (may be 0) */
             bool isDwell;     /**< True for G4 dwells (even zero-duration),
                                    false for velocity junctions */
+            bool interiorMin = false; /**< True for splits at interior
+                                   velocity-limit minima — the newest
+                                   mechanism, dropped first on fallback */
         };
 
         std::vector<PathSplit> splits;
@@ -4112,6 +4161,115 @@ public:
                 splits.push_back(
                     {segs[i].cumulativeArcLength, crossV, 0.0, false});
                 haveJunctionSplits = true;
+            }
+        }
+
+        // 3. Interior level-set splitting: a sub-path's scalar bounds are
+        //    the MINIMUM of its velocity-limit samples, so one low point
+        //    caps the whole interval it sits in. Partition the path into
+        //    pieces where the limit varies by less than a factor of two —
+        //    a staircase approximation of the true envelope: pieces grow
+        //    dense in deep valleys (cusps, hairpins) and vanish on flats.
+        //    Split points carry the +inf "auto" marker: solveSplit
+        //    clamps each to the interval bound of BOTH adjacent pieces,
+        //    so a crossing speed can never exceed what either side's
+        //    own envelope supports.
+        {
+            const double Ltot = static_cast<double>(pathLength);
+            if (Ltot > 0.0) {
+                Evaluator vLimEval(limits_, feedRate);
+                constexpr int nScan = 1024;
+                const double dsScan = Ltot / nScan;
+                std::vector<double> vl(nScan + 1);
+                for (int i = 0; i <= nScan; ++i) {
+                    vl[i] = static_cast<double>(vLimEval.velocityLimit(
+                        static_cast<T>(Ltot * i / nScan), *pathCopy));
+                }
+                // Deep-dip detection: a sample belongs to a bottleneck
+                // when its limit lies below half of BOTH flanking
+                // maxima — the signature of a valley rather than mild
+                // variation. The level-set partition then runs inside
+                // each contiguous deep run only, so gently varying
+                // paths pay the scan cost (~1 ms) but zero extra
+                // sub-solves.
+                constexpr int W = 24;
+                std::vector<int> cutIdx;
+                const int maxCuts = 32;
+                for (int i = 1; i < nScan; ++i) {
+                    double fl = 0.0, fr = 0.0;
+                    for (int k = std::max(0, i - W); k < i; ++k)
+                        fl = std::max(fl, vl[k]);
+                    for (int k = i + 1; k <= std::min(nScan, i + W); ++k)
+                        fr = std::max(fr, vl[k]);
+                    const double flank = std::min(fl, fr);
+                    if (!(flank > 0.0) || vl[i] >= 0.5 * flank) continue;
+                    // Inside a deep run: factor-of-two level set.
+                    double level = vl[i];
+                    cutIdx.push_back(i);
+                    while (i + 1 < nScan) {
+                        const int j = i + 1;
+                        fl = 0.0; fr = 0.0;
+                        for (int k = std::max(0, j - W); k < j; ++k)
+                            fl = std::max(fl, vl[k]);
+                        for (int k = j + 1;
+                             k <= std::min(nScan, j + W); ++k)
+                            fr = std::max(fr, vl[k]);
+                        const double flankJ = std::min(fl, fr);
+                        if (!(flankJ > 0.0) || vl[j] >= 0.5 * flankJ)
+                            break;
+                        ++i;
+                        if (vl[j] < 0.5 * level ||
+                            vl[j] > 2.0 * level) {
+                            level = vl[j];
+                            cutIdx.push_back(j);
+                            if (static_cast<int>(cutIdx.size()) >=
+                                maxCuts)
+                                break;
+                        }
+                    }
+                }
+                // Collapse near-coincident cuts (level-set edges can be
+                // one grid step apart on a narrow valley).
+                {
+                    std::vector<int> filtered;
+                    for (const int idx : cutIdx) {
+                        if (filtered.empty() || idx - filtered.back() > 2)
+                            filtered.push_back(idx);
+                    }
+                    cutIdx = std::move(filtered);
+                }
+                if (!cutIdx.empty()) {
+                    for (const int idx : cutIdx) {
+                        const double sCut = Ltot * idx / nScan;
+                        if (sCut < 4.0 * dsScan ||
+                            sCut > Ltot - 4.0 * dsScan)
+                            continue;
+                        // Skip cuts adjacent to dwell/junction splits —
+                        // that machinery already localises those regions.
+                        // Interior cuts do NOT suppress each other: the
+                        // level-set spacing and the <=2-sample collapse
+                        // above already prevent fragmentation, and a
+                        // narrow valley legitimately needs a cut on each
+                        // side so the dip sits inside its own piece.
+                        bool nearSplit = false;
+                        for (const auto& sp : splits) {
+                            if (sp.interiorMin) continue;
+                            if (std::abs(sp.s - sCut) < 6.0 * dsScan) {
+                                nearSplit = true;
+                                break;
+                            }
+                        }
+                        if (nearSplit) continue;
+                        // +inf boundary is the "auto" marker: solveSplit
+                        // clamps it to min(bound_left, bound_right), the
+                        // optimal consistent crossing speed.
+                        splits.push_back(
+                            {sCut,
+                             std::numeric_limits<double>::infinity(),
+                             0.0, false, true});
+                        haveJunctionSplits = true;
+                    }
+                }
             }
         }
 
@@ -4174,26 +4332,34 @@ public:
 
             const auto& originalPath = pathCopy->inner();
 
+            // Phase 1 — per-piece contexts: trimmed sub-path, feed/corner
+            // mapping, solver, and the piece's own interval bound. The
+            // bounds are needed up front because every split boundary is
+            // clamped to what BOTH adjacent pieces actually support —
+            // a crossing speed either side cannot reach makes the whole
+            // split infeasible, and only the sub-solve's own bound
+            // computation knows it. deque keeps the Path objects at
+            // stable addresses (Solver stores a reference).
+            struct PieceCtx {
+                double sStart = 0.0;
+                double sEnd = 0.0;
+                std::unique_ptr<Path> adapter;
+                std::unique_ptr<Solver> solver;
+                double bound =
+                    std::numeric_limits<double>::infinity();
+                bool haveBound = false;  /**< bound was computed */
+            };
+            std::deque<PieceCtx> pcs(sp.size() + 1);
             for (size_t i = 0; i <= sp.size(); ++i) {
-                const double sStart = (i == 0) ? 0.0 : sp[i - 1].s;
-                const double sEnd = (i == sp.size())
+                auto& pc = pcs[i];
+                pc.sStart = (i == 0) ? 0.0 : sp[i - 1].s;
+                pc.sEnd = (i == sp.size())
                     ? static_cast<double>(pathLength) : sp[i].s;
-                const double subLen = sEnd - sStart;
+                if (pc.sEnd - pc.sStart < 1e-9) continue;  // zero-length
 
-                // Insert the DWELL arc that precedes this sub-path
-                // (only when the split point is an actual dwell).
-                if (i > 0 && sp[i - 1].isDwell) {
-                    tmpArcs.push_back(
-                        makeDwellArc(sStart, sp[i - 1].dwell));
-                    tmpCost += wEff.w_t * sp[i - 1].dwell;
-                }
-
-                // Skip zero-length sub-paths (consecutive splits)
-                if (subLen < 1e-9) continue;
-
-                // Create trimmed sub-path
-                auto subNurbsPath = originalPath.trim(sStart, sEnd);
-                Path subPathAdapter(std::move(subNurbsPath));
+                auto subNurbsPath = originalPath.trim(pc.sStart, pc.sEnd);
+                pc.adapter =
+                    std::make_unique<Path>(std::move(subNurbsPath));
 
                 // Set segment velocity limits and corner velocities on
                 // the sub-path. We need to map the original path's
@@ -4214,7 +4380,7 @@ public:
                     // original piece each sub-path piece corresponds to.
                     const auto& origFeedRates =
                         pathCopy->segmentMaxVelocities();
-                    const auto& subSegs = subPathAdapter.segments();
+                    const auto& subSegs = pc.adapter->segments();
 
                     std::vector<double> subFeedRates;
                     subFeedRates.reserve(subSegs.size());
@@ -4224,7 +4390,7 @@ public:
                         double subMidLocal =
                             subSegs[j].cumulativeArcLength +
                             subSegs[j].arcLength * 0.5;
-                        double globalS = sStart + subMidLocal;
+                        double globalS = pc.sStart + subMidLocal;
                         // Binary search for the original segment containing
                         // globalS. origSegs is sorted by cumulativeArcLength.
                         size_t origIdx = pathCopy->segmentIndexAtArcLength(
@@ -4236,7 +4402,7 @@ public:
                                 std::numeric_limits<double>::infinity());
                         }
                     }
-                    subPathAdapter.setSegmentVelocityLimits(subFeedRates);
+                    pc.adapter->setSegmentVelocityLimits(subFeedRates);
 
                     // Compute corner velocities on the sub-path fresh.
                     // This computes the correct corner velocities at
@@ -4251,39 +4417,118 @@ public:
                     // (0.05 mm) is a fixed default — PathAdapter doesn't
                     // store the value used by the caller, so we use the
                     // same default as GCodeProcessor.
-                    subPathAdapter.computeCornerVelocities(
+                    pc.adapter->computeCornerVelocities(
                         0.05,
                         static_cast<double>(
                             limits_.path.maxCentripetalAcceleration));
                 }
 
-                // Boundary velocities: the split point's crossing speed
-                // (0 for dwells), original boundaries at path start/end.
-                const T subV0 = (i == 0)
-                    ? v0 : static_cast<T>(sp[i - 1].boundaryV);
-                const T subVEnd = (i == sp.size())
-                    ? endVelocity : static_cast<T>(sp[i].boundaryV);
+                pc.solver = std::make_unique<Solver>(
+                    *pc.adapter, limits_, wEff, feedRate);
+                // The interval bound is only needed where it can clamp
+                // a boundary: pieces adjacent to an interior-min (auto
+                // boundary) split. Junction/dwell boundaries are
+                // explicit physical constraints that need no bound —
+                // skipping the extra grid build keeps the common
+                // junction-split case at its previous cost.
+                const bool boundNeeded =
+                    (i > 0 && sp[i - 1].interiorMin) ||
+                    (i < sp.size() && sp[i].interiorMin);
+                if (boundNeeded) {
+                    pc.bound =
+                        pc.solver->intervalBound(constraintCacheSize);
+                    pc.haveBound = true;
+                }
+            }
 
-                // Solve sub-path
-                Solver subSolver(subPathAdapter, limits_, wEff, feedRate);
+            // Phase 2 — effective boundary velocities. Each split's
+            // requested crossing speed is clamped to the interval bounds
+            // of BOTH adjacent pieces: interior-min splits carry the
+            // +inf "auto" marker (becoming min(boundL, boundR), the
+            // optimal consistent crossing), while dwell and junction
+            // requests can only ever be tightened, never raised.
+            std::vector<double> effB(sp.size());
+            for (size_t j = 0; j < sp.size(); ++j) {
+                effB[j] = std::min({sp[j].boundaryV,
+                                    pcs[j].bound, pcs[j + 1].bound});
+            }
+
+            // Phase 2.5 — transition-length enforcement: a piece too
+            // short for its boundary-velocity pulse under its own bounds
+            // would be reported infeasible by its sub-solve (e.g. a
+            // narrow valley-bottom piece whose jerk bound degenerates).
+            // Equalising its two boundary speeds to the lower value
+            // gives a constant-speed crawl that always fits, so the
+            // staircase keeps a slower but feasible solution instead of
+            // dropping to the fallback. Lowering a boundary can demand
+            // more deceleration from the other side, so affected
+            // neighbours are re-checked (bounded passes; values only
+            // decrease).
+            for (int pass = 0; pass < 4; ++pass) {
+                bool changed = false;
+                for (size_t i = 0; i <= sp.size(); ++i) {
+                    auto& pc = pcs[i];
+                    if (!pc.solver || !pc.haveBound) continue;
+                    const double len = pc.sEnd - pc.sStart;
+                    const double vL = (i == 0)
+                        ? static_cast<double>(v0) : effB[i - 1];
+                    const double vR = (i == sp.size())
+                        ? static_cast<double>(endVelocity) : effB[i];
+                    if (pc.solver->boundaryTransitionFeasible(
+                            vL, vR, len))
+                        continue;
+                    const double m = std::min(vL, vR);
+                    if (i > 0 && effB[i - 1] > m) {
+                        effB[i - 1] = m;
+                        changed = true;
+                    }
+                    if (i < sp.size() && effB[i] > m) {
+                        effB[i] = m;
+                        changed = true;
+                    }
+                }
+                if (!changed) break;
+            }
+
+            // Phase 3 — solve each non-empty piece between its effective
+            // boundaries; original boundary velocities at the path ends.
+            for (size_t i = 0; i <= sp.size(); ++i) {
+                auto& pc = pcs[i];
+
+                // Insert the DWELL arc that precedes this sub-path
+                // (only when the split point is an actual dwell).
+                if (i > 0 && sp[i - 1].isDwell) {
+                    tmpArcs.push_back(
+                        makeDwellArc(pc.sStart, sp[i - 1].dwell));
+                    tmpCost += wEff.w_t * sp[i - 1].dwell;
+                }
+
+                // Skip zero-length sub-paths (consecutive splits)
+                if (pc.sEnd - pc.sStart < 1e-9) continue;
+
+                const T subV0 = (i == 0)
+                    ? v0 : static_cast<T>(effB[i - 1]);
+                const T subVEnd = (i == sp.size())
+                    ? endVelocity : static_cast<T>(effB[i]);
+
                 auto subArcs =
-                    subSolver.solve(subV0, subVEnd, constraintCacheSize);
+                    pc.solver->solve(subV0, subVEnd, constraintCacheSize);
 
                 if (subArcs.empty()) {
-                    failReason = subSolver.failureReason();
+                    failReason = pc.solver->failureReason();
                     return false;
                 }
 
                 if (firstSolve) {
-                    tmpAStar = subSolver.optimalAStar();
+                    tmpAStar = pc.solver->optimalAStar();
                     firstSolve = false;
                 }
-                tmpCost += subSolver.costValue();
+                tmpCost += pc.solver->costValue();
 
                 // Offset arc positions from sub-path local to global
                 for (auto& arc : subArcs) {
-                    arc.s0 += sStart;
-                    arc.s1 += sStart;
+                    arc.s0 += pc.sStart;
+                    arc.s1 += pc.sStart;
                 }
 
                 tmpArcs.insert(tmpArcs.end(),
@@ -4313,17 +4558,31 @@ public:
         bool solved;
         if (!splits.empty()) {
             solved = solveSplit(splits, failReason);
-            if (!solved && haveJunctionSplits) {
-                // Junction splitting produced an infeasible sub-problem
-                // (e.g. a boundary velocity the neighbours cannot reach).
-                // Fall back to the previous behaviour: dwell-only splits,
-                // or the single whole-path solve when there are no dwells.
-                std::vector<PathSplit> dwellOnly;
+            if (!solved) {
+                // First fallback: drop the interior-minimum splits (the
+                // newest, least-proven mechanism) and retry with
+                // junctions + dwells.
+                std::vector<PathSplit> noInterior;
                 for (const auto& sp : splits)
-                    if (sp.isDwell) dwellOnly.push_back(sp);
-                solved = dwellOnly.empty()
-                    ? solveWhole(failReason)
-                    : solveSplit(dwellOnly, failReason);
+                    if (!sp.interiorMin) noInterior.push_back(sp);
+                if (noInterior.size() < splits.size()) {
+                    solved = noInterior.empty()
+                        ? solveWhole(failReason)
+                        : solveSplit(noInterior, failReason);
+                }
+                // Second fallback: junction splitting produced an
+                // infeasible sub-problem (e.g. a boundary velocity the
+                // neighbours cannot reach). Drop to the previous
+                // behaviour: dwell-only splits, or the single whole-path
+                // solve when there are no dwells.
+                if (!solved && haveJunctionSplits) {
+                    std::vector<PathSplit> dwellOnly;
+                    for (const auto& sp : splits)
+                        if (sp.isDwell) dwellOnly.push_back(sp);
+                    solved = dwellOnly.empty()
+                        ? solveWhole(failReason)
+                        : solveSplit(dwellOnly, failReason);
+                }
             }
         } else {
             solved = solveWhole(failReason);
