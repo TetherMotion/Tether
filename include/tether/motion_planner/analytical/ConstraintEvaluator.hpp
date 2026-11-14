@@ -116,6 +116,9 @@ public:
         geomGrid_.curvature.assign(n, {});
         geomGrid_.jounce.assign(n, {});
         geomGrid_.kappa.assign(n, 0.0);
+        geomGrid_.vLimNode.assign(n,
+                                  std::numeric_limits<double>::infinity());
+        geomGrid_.cellSegLim.clear();
         geomGrid_.active = n >= 2 && path.hasInner();
         if (!geomGrid_.active) return;
         const auto& inner = path.inner();
@@ -141,6 +144,70 @@ public:
                 }
             }
             geomGrid_.kappa[i] = derivs.curvature.norm();
+
+            // Geometric velocity limit at this node (feed, path cap,
+            // centripetal, per-axis direction) — everything in
+            // velocityLimit() except the per-segment feed, which is
+            // handled per cell below. Reuses the already-evaluated
+            // derivs, so this is ~free relative to the NURBS eval.
+            double vLim = static_cast<double>(feedRate_);
+            vLim = std::min(vLim,
+                            static_cast<double>(limits_.path.maxPathVelocity));
+            const double kappa_i = geomGrid_.kappa[i];
+            if (kappa_i > static_cast<double>(MathConstants::EPSILON) &&
+                limits_.path.maxCentripetalAcceleration > T(0)) {
+                vLim = std::min(vLim,
+                    std::sqrt(static_cast<double>(
+                        limits_.path.maxCentripetalAcceleration) /
+                              kappa_i));
+            }
+            Vec<Dim, T> tangentVec;
+            for (std::size_t d = 0; d < dMax; ++d) {
+                tangentVec[d] = static_cast<T>(geomGrid_.tangent[i][d]);
+            }
+            vLim = std::min(vLim,
+                static_cast<double>(limits_.maxVelocityForDirection(
+                    tangentVec)));
+            geomGrid_.vLimNode[i] = std::max(vLim, 0.0);
+        }
+
+        // Per-cell minimum segment feed. A cell can span several tiny
+        // segments (dense polylines); taking min over every segment
+        // overlapping the cell keeps interior feed drops from leaking
+        // through the endpoint lookup.
+        geomGrid_.cellSegLim.assign(n - 1,
+                                    std::numeric_limits<double>::infinity());
+        const auto& segs = path.segments();
+        const auto& segMaxV = path.segmentMaxVelocities();
+        if (!segMaxV.empty()) {
+            std::size_t segIdx = 0;
+            while (segIdx < segs.size() &&
+                   segs[segIdx].cumulativeArcLength +
+                           segs[segIdx].arcLength <=
+                       sBegin) {
+                ++segIdx;
+            }
+            for (std::size_t i = 0; i + 1 < n && segIdx < segs.size(); ++i) {
+                const double cellLo =
+                    geomGrid_.sBegin + static_cast<double>(i) *
+                    static_cast<double>(ds);
+                const double cellHi = cellLo + static_cast<double>(ds);
+                while (segIdx < segs.size() &&
+                       segs[segIdx].cumulativeArcLength < cellHi) {
+                    const double segHi =
+                        static_cast<double>(segs[segIdx].cumulativeArcLength) +
+                        static_cast<double>(segs[segIdx].arcLength);
+                    if (segHi > cellLo && segIdx < segMaxV.size()) {
+                        geomGrid_.cellSegLim[i] = std::min(
+                            geomGrid_.cellSegLim[i], segMaxV[segIdx]);
+                    }
+                    // A segment extending past the cell still overlaps
+                    // the next cell — leave segIdx on it so the next
+                    // iteration re-examines it.
+                    if (segHi > cellHi) break;
+                    ++segIdx;
+                }
+            }
         }
     }
 
@@ -161,6 +228,27 @@ public:
      * @return Maximum feasible velocity at s
      */
     T velocityLimit(T s, const Path& path) const {
+        // Grid fast path: the node/cell tables were built by
+        // buildGeometryGrid. The cell value is min(endpoint node
+        // limits, min segment feed over the cell) — conservative vs
+        // linear interpolation, and interior feed drops can't leak.
+        // Interior sub-cell curvature spikes are bounded by the same
+        // grid resolution the accel/jerk bound tables commit to.
+        if (geomGrid_.active && geomGrid_.n >= 2) {
+            const double x = (static_cast<double>(s) - geomGrid_.sBegin) *
+                             geomGrid_.dsInv;
+            if (x >= 0.0 && x <= static_cast<double>(geomGrid_.n - 1)) {
+                std::size_t i = static_cast<std::size_t>(x);
+                if (i >= geomGrid_.n - 1) i = geomGrid_.n - 2;
+                double limit = std::min(geomGrid_.vLimNode[i],
+                                        geomGrid_.vLimNode[i + 1]);
+                if (!geomGrid_.cellSegLim.empty()) {
+                    limit = std::min(limit, geomGrid_.cellSegLim[i]);
+                }
+                return static_cast<T>(std::max(limit, 0.0));
+            }
+        }
+
         T limit = feedRate_;
         limit = std::min(limit, limits_.path.maxPathVelocity);
 
@@ -479,6 +567,11 @@ private:
         std::vector<std::array<double, 3>> curvature;
         std::vector<std::array<double, 3>> jounce;
         std::vector<double> kappa;
+        // Node velocity limits (feed/path/centripetal/axis, no segment
+        // feed) and per-cell minimum segment feed — together they let
+        // velocityLimit() answer in O(1) inside the grid range.
+        std::vector<double> vLimNode;
+        std::vector<double> cellSegLim;
     };
 
     /**
