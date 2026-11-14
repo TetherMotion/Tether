@@ -123,27 +123,28 @@ inline const char* controlModeName(ControlMode mode) {
  *   beta_i  = j⃗_i * v³ + 3 * κ⃗_i * v * a  (jounce and curvature terms)
  */
 struct KinematicCoefficients {
+    // Fixed storage — this struct is produced several times per
+    // integration substep, so heap-allocating vectors showed up in
+    // profiles. Capacity matches RVec::kMaxDim (axes never exceed 5).
+    static constexpr std::size_t kMaxDim = 5;
+
     /**Tangent vector T = dp/ds (unit, from arcDerivatives order 1) */
-    std::vector<double> tangent;      // size = dim
+    std::array<double, kMaxDim> tangent{};    // first dim entries valid
 
     /**Curvature vector κ⃗ = d²p/ds² (from arcDerivatives order 2) */
-    std::vector<double> curvature;    // size = dim
+    std::array<double, kMaxDim> curvature{};  // first dim entries valid
 
     /**Jounce vector j⃗ = d³p/ds³ (from arcDerivatives order 3) */
-    std::vector<double> jounce;       // size = dim
+    std::array<double, kMaxDim> jounce{};     // first dim entries valid
 
     /**Per-axis alpha coefficients for jerk: alpha_i = T_i */
-    std::vector<double> alpha_jerk;   // size = dim
+    std::array<double, kMaxDim> alpha_jerk{}; // first dim entries valid
 
     /**Per-axis beta coefficients for jerk: beta_i = j⃗_i*v³ + 3*κ⃗_i*v*a */
-    std::vector<double> beta_jerk;    // size = dim
+    std::array<double, kMaxDim> beta_jerk{};  // first dim entries valid
 
-    /**
-     * Speed factor g(u) = ||C'(u)|| = ||T|| * ... actually for arc-length
-     * parameterization, ds/du = g(u), and T = C'(u)/g(u). So g = ||C'(u)||.
-     * But since we work in s-space, T is already the unit tangent.
-     */
-    double speedFactor = 0.0;  // g(u) = ||C'(u)||
+    /**Logical component count of the vector members above. */
+    std::size_t dim = 0;
 
     /**Path curvature magnitude kappa = ||κ⃗|| */
     double kappa = 0.0;

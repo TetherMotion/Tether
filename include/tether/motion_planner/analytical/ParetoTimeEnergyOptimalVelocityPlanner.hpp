@@ -3485,8 +3485,9 @@ private:
         return vEff;
     }
 
-    /**Convert a std::vector<double> to Vec<Dim,T> for limits helpers. */
-    Vec<Dim, T> toVec(const std::vector<double>& v) const {
+    /**Convert fixed-size coefficient storage to Vec<Dim,T>. */
+    Vec<Dim, T> toVec(
+        const std::array<double, KinematicCoefficients::kMaxDim>& v) const {
         Vec<Dim, T> result;
         for (size_t i = 0; i < Dim && i < v.size(); ++i) {
             result[i] = static_cast<T>(v[i]);

@@ -227,27 +227,27 @@ public:
         // per-window grid (buildGeometryGrid) — the passes query this
         // thousands of times and the geometry depends only on s.
         if (GridGeom g; interpolateGeometry(s, g)) {
-            coeffs.tangent.assign(g.tangent.begin(), g.tangent.end());
-            coeffs.curvature.assign(g.curvature.begin(),
-                                  g.curvature.end());
-            coeffs.jounce.assign(g.jounce.begin(), g.jounce.end());
+            coeffs.dim = Dim;
+            for (std::size_t i = 0; i < Dim; ++i) {
+                coeffs.tangent[i] = g.tangent[i];
+                coeffs.curvature[i] = g.curvature[i];
+                coeffs.jounce[i] = g.jounce[i];
+            }
             coeffs.kappa = g.kappa;
         } else if (!path.hasInner()) {
             // Fallback: use the adapter's evaluateAtArcLength (order 2 only)
             auto eval = path.evaluateAtArcLength(s);
-            const auto dim = Dim;
-            coeffs.tangent.resize(dim);
-            coeffs.curvature.resize(dim);
-            coeffs.jounce.resize(dim, 0.0);
-            for (size_t i = 0; i < dim; ++i) {
+            coeffs.dim = Dim;
+            for (size_t i = 0; i < Dim; ++i) {
                 coeffs.tangent[i] = static_cast<double>(eval.tangent[i]);
+                coeffs.jounce[i] = 0.0;
             }
             // curvature vector = curvature * normal
             T kappa = eval.curvature;
             coeffs.kappa = static_cast<double>(kappa);
             // We don't have the curvature vector directly from the adapter;
             // approximate: κ⃗ ≈ kappa * normal (if available)
-            for (size_t i = 0; i < dim; ++i) {
+            for (size_t i = 0; i < Dim; ++i) {
                 coeffs.curvature[i] = static_cast<double>(eval.normal[i]) *
                                       static_cast<double>(kappa);
             }
@@ -268,12 +268,9 @@ public:
                 }
             }
 
-            const std::size_t dim = derivs.position.dim();
-            coeffs.tangent.resize(dim);
-            coeffs.curvature.resize(dim);
-            coeffs.jounce.resize(dim, 0.0);
-
-            for (std::size_t i = 0; i < dim; ++i) {
+            coeffs.dim = derivs.position.dim();
+            coeffs.jounce.fill(0.0);
+            for (std::size_t i = 0; i < coeffs.dim; ++i) {
                 coeffs.tangent[i] = derivs.tangent.unchecked(i);
                 coeffs.curvature[i] = derivs.curvature.unchecked(i);
                 if (derivs.jounce.dim() > i) {
@@ -288,9 +285,7 @@ public:
         // qddd_i = alpha_i * eta + beta_i
         // alpha_i = T_i
         // beta_i  = j⃗_i * v³ + 3 * κ⃗_i * v * a
-        const std::size_t dim = coeffs.tangent.size();
-        coeffs.alpha_jerk.resize(dim);
-        coeffs.beta_jerk.resize(dim);
+        const std::size_t dim = coeffs.dim;
 
         double v_d = static_cast<double>(v);
         double a_d = static_cast<double>(a);
@@ -326,7 +321,7 @@ public:
         auto coeffs = computeCoefficients(s, v, T(0), path);
         double v2 = static_cast<double>(v) * static_cast<double>(v);
 
-        const std::size_t dim = coeffs.tangent.size();
+        const std::size_t dim = coeffs.dim;
         for (std::size_t i = 0; i < dim && i < Dim; ++i) {
             double Ti = coeffs.tangent[i];
             double kappai_v2 = coeffs.curvature[i] * v2;
@@ -379,7 +374,7 @@ public:
 
         auto coeffs = computeCoefficients(s, v, a, path);
 
-        const std::size_t dim = coeffs.alpha_jerk.size();
+        const std::size_t dim = coeffs.dim;
         for (std::size_t i = 0; i < dim && i < Dim; ++i) {
             double alpha = coeffs.alpha_jerk[i];
             double beta = coeffs.beta_jerk[i];
