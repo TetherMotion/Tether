@@ -1618,3 +1618,128 @@ TEST(PlannerScenarios_Toppra, GcodePipelineDwellAndStamps) {
         prevS = s;
     }
 }
+
+// ============================================================================
+// E2: TOPP-RA vs Pareto head-to-head on real-scenario G-code
+// ============================================================================
+
+namespace {
+struct HeadToHeadRow {
+    const char* name;
+    double len = 0.0;
+    std::size_t pieces = 0;
+    double paretoT = 0.0, paretoMs = 0.0;
+    double toppraT = 0.0, toppraMs = 0.0;
+    double toppraMaxV = 0.0, toppraMaxA = 0.0;
+    bool toppraMonotone = true;
+};
+} // namespace
+
+// Runs BOTH planners on the same production-pipeline path and reports
+// trajectory time + solve time. TOPP-RA validity is asserted; the time
+// comparison is informational (it feeds the scale-work decision).
+TEST(PlannerScenarios_Toppra, HeadToHeadVsPareto) {
+    struct Case {
+        const char* name;
+        std::string gcode;
+        KinematicLimits<3, double> lim;
+        double feed;
+        std::size_t toppraSamples;
+    };
+    const std::vector<Case> cases = {
+        {"BenchLayer60", benchLayerGcode(60.0), printerLimits(), 200.0, 6000},
+        {"SpiralVase", spiralGcode(360, 20.0, 5.0, 4000),
+         printerLimits(), 100.0, 3000},
+        {"CncDrill3x3", drillGcode(3, 3, 20.0, 5.0), cncLimits(), 80.0,
+         1200},
+    };
+
+    std::vector<HeadToHeadRow> rows;
+    for (const auto& c : cases) {
+        HeadToHeadRow row;
+        row.name = c.name;
+        auto r = buildPathFromGcode(c.gcode, c.lim);
+        ASSERT_TRUE(r.failedAt.empty())
+            << c.name << " pipeline failed at " << r.failedAt;
+        row.len = r.pathLength;
+        row.pieces = r.numNurbsPieces;
+
+        // Pareto (production path).
+        {
+            mpa::ParetoTimeEnergyOptimalVelocityPlanner<3, double> p(
+                c.lim, {});
+            const auto t0 = std::chrono::steady_clock::now();
+            auto prof = p.computeProfile(
+                r.path, c.feed, 0.0, 0.0,
+                std::min<std::size_t>(40000,
+                    std::max<std::size_t>(400, r.numNurbsPieces * 20)));
+            row.paretoMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t0).count();
+            ASSERT_NE(prof, nullptr) << c.name << " Pareto failed";
+            ASSERT_NE(p.weightedSource(), nullptr);
+            row.paretoT = p.weightedSource()->totalTime();
+        }
+
+        // TOPP-RA on the identical adapter (SSR source — the optional
+        // Hybrid representation is excluded from the solve timing: on
+        // BenchLayer-scale inputs its per-element LGL build costs ~30 s
+        // because certificates cannot converge where v ~ sqrt(s) near
+        // stops; the SSR is the production source regardless).
+        mpa::AnalyticalJerkLimitedTOPPRA<3, double> tp(
+            c.lim, /*buildHybrid=*/false);
+        const auto t0 = std::chrono::steady_clock::now();
+        auto prof = tp.computeProfile(
+            r.path, c.feed, 0.0, 0.0, c.toppraSamples);
+        row.toppraMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - t0).count();
+        ASSERT_NE(prof, nullptr) << c.name << " TOPP-RA failed";
+        auto ssr = tp.ssrSource();
+        ASSERT_NE(ssr, nullptr);
+        row.toppraT = ssr->totalTime();
+
+        // Sample the SSR for validity: bounded v, rest endpoints,
+        // monotone s.
+        const double T = row.toppraT;
+        ASSERT_GT(T, 0.0);
+        double prevS = 0.0;
+        for (int i = 0; i <= 2000; ++i) {
+            const double t = T * i / 2000.0;
+            const double s = ssr->arcLength(t);
+            const double v = ssr->pathVelocity(t);
+            const double a = ssr->pathAcceleration(t);
+            ASSERT_TRUE(std::isfinite(s) && std::isfinite(v) &&
+                        std::isfinite(a)) << c.name << " nonfinite";
+            row.toppraMaxV = std::max(row.toppraMaxV, v);
+            row.toppraMaxA = std::max(row.toppraMaxA, std::abs(a));
+            if (s < prevS - 1e-6) row.toppraMonotone = false;
+            prevS = s;
+        }
+        EXPECT_TRUE(row.toppraMonotone) << c.name;
+        EXPECT_LE(row.toppraMaxV, c.feed * 1.02 + 0.5)
+            << c.name << " exceeds feed cap";
+        EXPECT_LE(row.toppraMaxA,
+                  c.lim.path.maxPathAcceleration * 1.05 + 1.0)
+            << c.name << " exceeds path accel bound";
+        EXPECT_NEAR(ssr->pathVelocity(0.0), 0.0, 1e-6);
+        EXPECT_NEAR(ssr->pathVelocity(T), 0.0, 1e-6);
+        EXPECT_NEAR(ssr->arcLength(T), r.pathLength, 1e-3)
+            << c.name << " end s=" << ssr->arcLength(T)
+            << " pathLength=" << r.pathLength;
+        rows.push_back(row);
+    }
+
+    std::cout << "\n=== TOPP-RA vs Pareto head-to-head ===\n";
+    for (const auto& r : rows) {
+        std::cout << std::fixed << std::setprecision(3)
+                  << r.name << ": L=" << r.len << "mm"
+                  << " pieces=" << r.pieces
+                  << " | T pareto=" << r.paretoT << "s"
+                  << " toppra=" << r.toppraT << "s"
+                  << " (delta " << std::setprecision(1)
+                  << 100.0 * (r.toppraT - r.paretoT) / r.paretoT << "%)"
+                  << " | solve pareto=" << std::setprecision(1)
+                  << r.paretoMs << "ms toppra=" << r.toppraMs << "ms"
+                  << " | maxV=" << std::setprecision(1) << r.toppraMaxV
+                  << " maxA=" << r.toppraMaxA << "\n";
+    }
+}

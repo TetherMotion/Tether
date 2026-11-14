@@ -303,11 +303,12 @@ public:
      * @return Path velocity at s
      */
     double pathVelocityAtArcLength(T s) const {
-        for (const auto& arc : arcs_) {
-            if (s >= arc.s_begin - T(1e-10) && s <= arc.s_end + T(1e-10)) {
-                if (s <= arc.s_begin + T(1e-10)) return arc.v0;
-                if (s >= arc.s_end - T(1e-10)) {
-                    return std::get<1>(integrateArcToTime(arc, arc.duration));
+        const auto* arc = findArcAtS(s);
+        if (arc) {
+            {
+                if (s <= arc->s_begin + T(1e-10)) return arc->v0;
+                if (s >= arc->s_end - T(1e-10)) {
+                    return std::get<1>(integrateArcToTime(*arc, arc->duration));
                 }
                 // Safeguarded Newton–bisection on the monotone s(t):
                 // each probe returns (s, v) and v = ds/dt, so Newton
@@ -315,11 +316,11 @@ public:
                 // Each iteration calls integrateArcToTime, so keeping
                 // this low is critical for performance.
                 double lo = 0.0;
-                double hi = arc.duration;
+                double hi = arc->duration;
                 double t = 0.5 * hi;
                 for (int i = 0; i < 20; ++i) {
                     const auto [sMid, vMid, aMid] =
-                        integrateArcToTime(arc, t);
+                        integrateArcToTime(*arc, t);
                     if (sMid < static_cast<double>(s)) lo = t;
                     else hi = t;
                     const double tNew =
@@ -328,10 +329,10 @@ public:
                             : 0.5 * (lo + hi);
                     t = (tNew > lo && tNew < hi)
                         ? tNew : 0.5 * (lo + hi);
-                    if (hi - lo <= 1e-12 * std::max(1.0, arc.duration))
+                    if (hi - lo <= 1e-12 * std::max(1.0, arc->duration))
                         break;
                 }
-                return std::get<1>(integrateArcToTime(arc, t));
+                return std::get<1>(integrateArcToTime(*arc, t));
             }
         }
         return 0.0;
@@ -343,21 +344,22 @@ public:
      * @return Estimated traversal time at s [s]
      */
     T timeAtArcLength(T s) const override {
-        for (const auto& arc : arcs_) {
-            if (s >= arc.s_begin - T(1e-10) && s <= arc.s_end + T(1e-10)) {
-                if (s <= arc.s_begin + T(1e-10)) return static_cast<T>(arc.t0);
-                if (s >= arc.s_end - T(1e-10)) {
-                    return static_cast<T>(arc.t0 + arc.duration);
+        const auto* arc = findArcAtS(s);
+        if (arc) {
+            {
+                if (s <= arc->s_begin + T(1e-10)) return static_cast<T>(arc->t0);
+                if (s >= arc->s_end - T(1e-10)) {
+                    return static_cast<T>(arc->t0 + arc->duration);
                 }
                 // Safeguarded Newton–bisection on the monotone s(t):
                 // each probe returns (s, v) and v = ds/dt, so Newton
                 // converges in ~5 iterations instead of ~50 bisections.
                 double lo = 0.0;
-                double hi = arc.duration;
+                double hi = arc->duration;
                 double t = 0.5 * hi;
                 for (int i = 0; i < 20; ++i) {
                     const auto [sMid, vMid, aMid] =
-                        integrateArcToTime(arc, t);
+                        integrateArcToTime(*arc, t);
                     if (sMid < static_cast<double>(s)) lo = t;
                     else hi = t;
                     const double tNew =
@@ -366,10 +368,10 @@ public:
                             : 0.5 * (lo + hi);
                     t = (tNew > lo && tNew < hi)
                         ? tNew : 0.5 * (lo + hi);
-                    if (hi - lo <= 1e-12 * std::max(1.0, arc.duration))
+                    if (hi - lo <= 1e-12 * std::max(1.0, arc->duration))
                         break;
                 }
-                return static_cast<T>(arc.t0 + t);
+                return static_cast<T>(arc->t0 + t);
             }
         }
         return T(0);
@@ -455,10 +457,23 @@ private:
             const auto& arc = arcs_.front();
             return {0, arc.s_begin, arc.v0, arc.a0};
         }
+
+        // Terminal-state snap: the single-eta replay integral can drift
+        // from the arc's authoritative s_end by ~1e-1 mm at the
+        // boundary (overshoot is already clamped inside the
+        // closed-form/RK4 paths; undershoot is not). A query landing on
+        // the arc end returns the grid-exact boundary s so
+        // arcLength(T) == pathLength and no gap opens between arcs.
+        auto finish = [&](std::size_t idx, double s, double v,
+                          double a) {
+            const Arc& arc = arcs_[idx];
+            if (tD >= arc.t0 + arc.duration) s = arc.s_end;
+            return IntegratedState{idx, s, v, a};
+        };
         if (tD >= totalT) {
             const auto& arc = arcs_.back();
             const auto [s, v, a] = integrateArcToTime(arc, arc.duration);
-            return {arcs_.size() - 1, s, v, a};
+            return finish(arcs_.size() - 1, s, v, a);
         }
 
         // Cursor fast path: a monotone query resumes from the last
@@ -487,7 +502,7 @@ private:
                 st = integrateArcToTime(arc, tD - arc.t0);
             }
             const auto [s, v, a] = st;
-            return {arcIdx, s, v, a};
+            return finish(arcIdx, s, v, a);
         }
 
         // Binary search for the arc containing t
@@ -513,7 +528,28 @@ private:
         // Integrate the arc dynamics to find s, v, a at tLocal
         auto [s, v, a] = integrateArcToTime(arc, tLocal);
 
-        return {arcIdx, s, v, a};
+        return finish(arcIdx, s, v, a);
+    }
+
+    /**
+     * @brief First arc whose [s_begin, s_end] span contains s (±1e-10).
+     *
+     * arcs_ is s-ordered (s_end of arc i == s_begin of arc i+1), so a
+     * partition_point on s_end replaces the former O(n) linear scan —
+     * the dominant cost when timeAtArcLength/pathVelocityAtArcLength
+     * are queried per LGL node during Hybrid construction on paths
+     * with thousands of arcs. At a shared junction the earliest
+     * containing arc wins, matching the old scan.
+     */
+    const Arc* findArcAtS(T s) const {
+        if (arcs_.empty()) return nullptr;
+        const double sd = static_cast<double>(s);
+        auto it = std::partition_point(
+            arcs_.begin(), arcs_.end(),
+            [&](const Arc& a) { return a.s_end < sd - 1e-10; });
+        if (it == arcs_.end()) return nullptr;
+        if (sd < static_cast<double>(it->s_begin) - 1e-10) return nullptr;
+        return &*it;
     }
 
     /**
@@ -642,6 +678,43 @@ private:
             }
             // Degenerate: no motion.
             return Opt{{arc.s_begin, arc.v0, arc.a0}};
+        }
+
+        // ZERO_JERK: eta = 0 — a constant-acceleration hold, so the
+        // universal integral s = s0 + v0 t + a0 t^2/2 is exact (the RK4
+        // path recomputes the same eta per step). These arcs carry the
+        // long constant-velocity cruises; without this branch every
+        // timeAtArcLength Newton probe re-integrated them stepwise.
+        if (arc.mode == ControlMode::ZERO_JERK) {
+            const double v = arc.v0 + arc.a0 * tLocal;
+            const double s = static_cast<double>(arc.s_begin) +
+                arc.v0 * tLocal + 0.5 * arc.a0 * tLocal * tLocal;
+            return Opt{enforce(s, std::max(v, 0.0),
+                               static_cast<double>(arc.a0))};
+        }
+
+        // SINGULAR / CONSTRAINT_SURFACE / ACCEL_MAX / DECEL_MAX with a
+        // stored constant eta: the universal integral is exact (the
+        // merge splits arcs at eta discontinuities, so arc.eta is the
+        // arc's jerk by construction; computeEta returns the same
+        // constant for SINGULAR/CONSTRAINT_SURFACE — for ACCEL/DECEL
+        // the RK4 recompute of etaBounds reproduces ~arc.eta within
+        // the arc and is the approximating path, not the other way
+        // round). Serving all single-eta arcs here makes every
+        // inverse query O(1) — the former RK4-per-probe cost was the
+        // Hybrid builder's dominant term on long paths.
+        if ((arc.mode == ControlMode::SINGULAR ||
+             arc.mode == ControlMode::CONSTRAINT_SURFACE ||
+             arc.mode == ControlMode::ACCEL_MAX ||
+             arc.mode == ControlMode::DECEL_MAX) &&
+            std::isfinite(static_cast<double>(arc.eta))) {
+            const double eta = static_cast<double>(arc.eta);
+            const double t2 = tLocal * tLocal;
+            const double a = arc.a0 + eta * tLocal;
+            const double v = arc.v0 + arc.a0 * tLocal + 0.5 * eta * t2;
+            const double s = static_cast<double>(arc.s_begin) +
+                arc.v0 * tLocal + 0.5 * arc.a0 * t2 + eta * t2 * tLocal / 6.0;
+            return Opt{enforce(s, std::max(v, 0.0), a)};
         }
         return std::nullopt;
     }

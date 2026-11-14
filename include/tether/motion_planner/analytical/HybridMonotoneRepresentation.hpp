@@ -538,31 +538,52 @@ private:
         const int initialDegree = 4;  // Start with degree-4 LGL
         const int maxSplits = 6;      // Max h-refinements per arc
 
-        std::vector<std::pair<double, double>> intervals = {
-            {arc.s_begin, arc.s_end}
+        // Certificate violation: worst error relative to its
+        // tolerance, so the four certificates compare on one scale.
+        auto violation = [this](const HybridElement& e) {
+            return std::max({
+                e.certified_u_error / tolerance_,
+                e.certified_t_error / kTCertTol,
+                e.certified_v_error / kVCertTol,
+                e.certified_a_error / kACertTol});
+        };
+
+        // (sLo, sHi, parent violation). The parent term drives the
+        // non-improvement stop below.
+        std::vector<std::tuple<double, double, double>> intervals = {
+            {arc.s_begin, arc.s_end,
+             std::numeric_limits<double>::infinity()}
         };
 
         for (int split = 0; split < maxSplits && !intervals.empty(); ++split) {
-            std::vector<std::pair<double, double>> nextIntervals;
+            std::vector<std::tuple<double, double, double>> nextIntervals;
 
-            for (const auto& [sLo, sHi] : intervals) {
+            for (const auto& [sLo, sHi, parentViol] : intervals) {
                 HybridElement elem = buildElement(sLo, sHi, initialDegree, arc, ssr);
+                const double viol = violation(elem);
 
                 // Split unless every certificate fits: the geometry
                 // Padé AND the dynamics LGLs — a good u(s) fit says
                 // nothing about the t(s)/v(s) fit, which is where the
                 // invertible-time error actually comes from.
-                if ((elem.certified_u_error <= tolerance_ &&
-                     elem.certified_t_error <= kTCertTol &&
-                     elem.certified_v_error <= kVCertTol &&
-                     elem.certified_a_error <= kACertTol) ||
+                //
+                // Non-improvement stop: on arcs ending at rest or a
+                // stamp, v(s) ~ sqrt(s) gives the LGL fits an
+                // unbounded slope near v=0 — h-refinement converges
+                // too slowly to ever certify, so every such arc used
+                // to split to maxSplits (~63 buildElement calls per
+                // arc; thousands of arcs -> minutes). If splitting did
+                // not reduce the violation by at least ~30%, deeper
+                // splits won't converge either; accept the element
+                // with its actual (bounded) error instead.
+                if (viol <= 1.0 || viol >= 0.7 * parentViol ||
                     (sHi - sLo) < 1e-8) {
                     elements_.push_back(std::move(elem));
                 } else {
                     // Split into two sub-intervals
                     double sMid = 0.5 * (sLo + sHi);
-                    nextIntervals.push_back({sLo, sMid});
-                    nextIntervals.push_back({sMid, sHi});
+                    nextIntervals.push_back({sLo, sMid, viol});
+                    nextIntervals.push_back({sMid, sHi, viol});
                 }
             }
 
@@ -570,7 +591,7 @@ private:
         }
 
         // Add any remaining intervals as-is
-        for (const auto& [sLo, sHi] : intervals) {
+        for (const auto& [sLo, sHi, parentViol] : intervals) {
             HybridElement elem = buildElement(sLo, sHi, initialDegree, arc, ssr);
             elements_.push_back(std::move(elem));
         }
