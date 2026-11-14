@@ -92,6 +92,9 @@ inline constexpr uint16_t kIdxBrakeCmd     = 0x2003;
 inline constexpr uint16_t kIdxParkCmd      = 0x2004;
 inline constexpr uint16_t kIdxCoeCmd       = 0x2005;
 inline constexpr uint16_t kIdxSawChar0     = 0x2006;
+inline constexpr uint16_t kIdxPosMin       = 0x200A;
+inline constexpr uint16_t kIdxPosMax       = 0x200B;
+inline constexpr uint16_t kIdxAxisFlags    = 0x200C;
 
 inline constexpr double kVelEps = 1e-6;
 inline constexpr double kUsPerSec = 1e6;
@@ -196,6 +199,18 @@ inline void profileStep(Axis& a, double goal, double dt) {
     }
 }
 
+/**Enforce configured position limits on velocity-integrating modes.*/
+inline void clampAxisPos(Axis& a) {
+    if (!(a.flags & 1u)) return;
+    if (a.pos < double(a.posMin)) {
+        a.pos = double(a.posMin);
+        if (a.vel < 0) a.vel = 0;
+    } else if (a.pos > double(a.posMax)) {
+        a.pos = double(a.posMax);
+        if (a.vel > 0) a.vel = 0;
+    }
+}
+
 inline void stepAxis(Axis& a, double dt) {
     updateState(a);
 
@@ -232,6 +247,7 @@ inline void stepAxis(Axis& a, double dt) {
         case kModeVL:
             a.vel = double(a.targetVel);
             a.pos += a.vel * dt;
+            clampAxisPos(a);
             a.targetReached = (a.targetVel == 0);
             break;
         case kModePV: {
@@ -243,6 +259,7 @@ inline void stepAxis(Axis& a, double dt) {
             else if (dv < -maxDv) dv = -maxDv;
             a.vel += dv;
             a.pos += a.vel * dt;
+            clampAxisPos(a);
             a.targetReached = (std::fabs(a.vel - double(a.targetVel)) < 1.0);
             break;
         }
@@ -252,6 +269,7 @@ inline void stepAxis(Axis& a, double dt) {
             if (a.vel > double(a.maxVelocity)) a.vel = double(a.maxVelocity);
             else if (a.vel < -double(a.maxVelocity)) a.vel = -double(a.maxVelocity);
             a.pos += a.vel * dt;
+            clampAxisPos(a);
             a.targetReached = true;
             break;
         case kModeCSP:
@@ -260,6 +278,7 @@ inline void stepAxis(Axis& a, double dt) {
         case kModeCSV:
             a.vel = double(a.targetVel);
             a.pos += a.vel * dt;
+            clampAxisPos(a);
             a.targetReached = true;
             break;
         case kModeCST:
@@ -268,6 +287,7 @@ inline void stepAxis(Axis& a, double dt) {
             if (a.vel > double(a.maxVelocity)) a.vel = double(a.maxVelocity);
             else if (a.vel < -double(a.maxVelocity)) a.vel = -double(a.maxVelocity);
             a.pos += a.vel * dt;
+            clampAxisPos(a);
             a.targetReached = true;
             break;
         default:
@@ -384,6 +404,9 @@ public:
             case kIdxSawChar0: case kIdxSawChar0 + 1:
             case kIdxSawChar0 + 2: case kIdxSawChar0 + 3:
                 value = a.sawChar[index - kIdxSawChar0]; size = 4; break;
+            case kIdxPosMin:     value = a.posMin; size = 4; break;
+            case kIdxPosMax:     value = a.posMax; size = 4; break;
+            case kIdxAxisFlags:  value = int32_t(a.flags); size = 4; break;
             default: known = false; break;
         }
         if (!known || subindex != 0) {
@@ -445,6 +468,9 @@ public:
             case kIdxSawChar0: case kIdxSawChar0 + 1:
             case kIdxSawChar0 + 2: case kIdxSawChar0 + 3:
                 a.sawChar[index - kIdxSawChar0] = int32_t(value); break;
+            case kIdxPosMin:     a.posMin = int32_t(value); break;
+            case kIdxPosMax:     a.posMax = int32_t(value); break;
+            case kIdxAxisFlags:  a.flags = uint32_t(value); break;
             default: known = false; break;
         }
         if (!known) {
@@ -482,6 +508,9 @@ public:
             {kIdxSawChar0 + 1, 0, 0x0004, 3, "Flying-saw characteristic 1 (sim ext)"},
             {kIdxSawChar0 + 2, 0, 0x0004, 3, "Flying-saw characteristic 2 (sim ext)"},
             {kIdxSawChar0 + 3, 0, 0x0004, 3, "Flying-saw characteristic 3 (sim ext)"},
+            {kIdxPosMin, 0, 0x0004, 3, "Position limit min (sim ext)"},
+            {kIdxPosMax, 0, 0x0004, 3, "Position limit max (sim ext)"},
+            {kIdxAxisFlags, 0, 0x0004, 3, "Axis flags (sim ext)"},
         };
     }
 
