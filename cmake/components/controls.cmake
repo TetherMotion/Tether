@@ -29,6 +29,13 @@ set(TETHER_CONTROLS_SOURCES
     # Pressure-advance calibration + flow-rate analysis
     ${TETHER_ROOT}/src/control/extrusion/PressureAdvanceCalibrator.cpp
     ${TETHER_ROOT}/src/control/extrusion/FlowRateAnalyzer.cpp
+    # Generic oven thermal control (physical-parameter profile tracking)
+    ${TETHER_ROOT}/src/control/thermal/OvenThermalModel.cpp
+    ${TETHER_ROOT}/src/control/thermal/TemperatureProfile.cpp
+    ${TETHER_ROOT}/src/control/thermal/ActuationGovernor.cpp
+    ${TETHER_ROOT}/src/control/thermal/ThermalParameterEstimator.cpp
+    ${TETHER_ROOT}/src/control/thermal/OvenAutotune.cpp
+    ${TETHER_ROOT}/src/control/thermal/OvenController.cpp
 )
 
 # Filter to only existing files

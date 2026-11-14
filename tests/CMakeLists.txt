@@ -202,6 +202,9 @@ set(CONTROL_QFT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/test_QFT_coverage.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/autotuning/QFTTests.cpp"
 )
+set(CONTROL_THERMAL_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/control/OvenControllerTests.cpp"
+)
 set(CONTROL_AUTOTUNING_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/control/autotuning/AdaptiveMethodsTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/control/autotuning/AutotuningFrameworkTests.cpp"
@@ -523,6 +526,7 @@ create_module_test(control_extrusion "${CONTROL_EXTRUSION_SOURCES}" "${CONTROL_T
 create_module_test(control_composite "${CONTROL_COMPOSITE_SOURCES}" "${CONTROL_TEST_LIBS}" "")
 create_module_test(control_robust "${CONTROL_ROBUST_SOURCES}" "${CONTROL_TEST_LIBS}" "")
 create_module_test(control_qft "${CONTROL_QFT_SOURCES}" "${CONTROL_TEST_LIBS}" "")
+create_module_test(control_thermal "${CONTROL_THERMAL_SOURCES}" "${CONTROL_TEST_LIBS}" "")
 create_module_test(control_autotuning "${CONTROL_AUTOTUNING_SOURCES}" "${CONTROL_TEST_LIBS}" "")
 if(CONTROL_AUTOTUNING_METHODS_SOURCES)
     create_module_test(control_autotuning_methods "${CONTROL_AUTOTUNING_METHODS_SOURCES}" "${CONTROL_TEST_LIBS}" "")
