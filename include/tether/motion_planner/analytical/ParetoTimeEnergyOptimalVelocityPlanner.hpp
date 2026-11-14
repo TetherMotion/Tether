@@ -1755,8 +1755,17 @@ public:
         const auto vLimit = [this](double s) {
             return velocityLimitAt(s);
         };
-        lastIntervalBounds_ = globalBounds(vLimit, sTotal_,
-                                           entryCap, exitCap);
+        // Attainable boundary speeds are capped by BOTH the explicit
+        // request and the velocity-limit dip at each interval end:
+        // interior-min splits sit at dips, so an auto crossing can
+        // never exceed the endpoint limit either. Tightening the caps
+        // with vLimit extends the transition-consistency check to
+        // auto-bounded pieces — a bound pair that cannot service the
+        // crossing the dips imply would only get equalized down.
+        lastIntervalBounds_ = globalBounds(
+            vLimit, sTotal_,
+            std::min(entryCap, vLimit(0.0)),
+            std::min(exitCap, vLimit(sTotal_)));
         // solve() reuses this cache + bounds when called at the same
         // grid size, halving the split-solve cost per piece.
         intervalBoundsValid_ = true;
