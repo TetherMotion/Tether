@@ -24,6 +24,7 @@
 #include <memory>
 #include <mutex>
 #include <atomic>
+#include <functional>
 #include <thread>
 
 namespace tether { namespace io {
@@ -54,6 +55,16 @@ struct ServerConfig {
      * input streams resolve their session-local slots against this catalog.
      */
     const SchemaCatalog* schemaCatalog = nullptr;
+    /**
+     * Optional per-session initializer invoked once on the accept thread
+     * right after a Session is constructed and before its run thread
+     * starts. Lets a server assign a transport-authenticated identity
+     * (or other session state) for transports that cannot carry
+     * credentials themselves — plain TCP/SLIP has no auth handshake, so
+     * a dedicated trusted listener (e.g. the PLC bridge) can opt in here.
+     * Must not block; runs synchronously in the accept loop.
+     */
+    std::function<void(Session&)> sessionInitFn;
 };
 
 /**

@@ -217,6 +217,9 @@ void Server::acceptLoop() {
 #endif
             config_.schemaCatalog);
 
+        if (config_.sessionInitFn)
+            config_.sessionInitFn(*session);
+
         std::shared_ptr<Session> sessionPtr = session;
 
         SessionInfo si;

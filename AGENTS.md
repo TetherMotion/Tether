@@ -262,9 +262,11 @@ corner velocities + dwell points) →
   arc end (the single-eta replay residual ~1e-2 mm would otherwise
   surface as backward s jumps / a short endpoint).
   `findArcAtS` partition_points `s_end` instead of scanning arcs.
-  Straight single-piece windows (κ≡0, uniform constraints,
-  constant-eta dynamics exact under RK4) solve on a 32-node floor —
-  provably lossless.
+  (A 32-node floor for straight single-piece windows was tried and
+  REVERTED: grid-independent dynamics are exact, but windows with
+  boundary stamps need interior throttle transitions whose *placement*
+  depends on grid density — a coarse floor produced ~0.4 mm/s stitch
+  residuals and ~1e3 mm/s² accel discontinuities.)
   Measured head-to-head vs Pareto (`HeadToHeadVsPareto`, identical
   production-pipeline paths): TOPP-RA trajectories are 33% faster on
   BenchLayer60 (67.4 s vs 100.7 s over 6.1 m / 275 pieces / ~300

@@ -663,6 +663,13 @@ add_tether_example(tether_io_machine_profile
     LIBRARIES tether_io_protocol tether_common)
 add_tether_example(tether_io_machine_auth
     LIBRARIES tether_io_protocol tether_common)
+# EtherCAT/CoE (CANopen) surface: machine.sdo.*/pdo.map/supervisor/
+# diagnostics over a simulated fleet (--simulate) or a live master
+# (--master-iface/--master-udp via EtherCatSdoAccess & friends).
+add_tether_example(tether_io_ec_server
+    LIBRARIES tether_io_protocol tether_ethercat_master
+            tether_ethercat_common tether_hal tether_common
+            tether_examples_common)
 endif()
 
 add_custom_target(examples DEPENDS ${TETHER_EXAMPLE_TARGETS})
