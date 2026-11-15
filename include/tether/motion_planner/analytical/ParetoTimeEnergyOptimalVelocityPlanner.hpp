@@ -4871,7 +4871,11 @@ public:
                                                   arc.j_star, tau)
                                 : SnapSeg::v(arc.v0, arc.a0,
                                              arc.j0, arc.sigma, tau);
-                        if (vMid > cap) {
+                        // envEase band: the emission lands on the
+                        // margin-scaled envelope — a systematic
+                        // ~1e-9·v excess over a cap folded from
+                        // envAt is at-cap, not a violation.
+                        if (vMid > cap + envEase(vMid)) {
                             if (std::getenv("TETHER_DEBUG_TOPRA"))
                                 std::fprintf(stderr,
                                     "[TOPRA capV] s=[%.4f,%.4f] "
@@ -5395,14 +5399,21 @@ public:
                     // emit-side brake sequence — the solver's
                     // transition model under-prices snap-limited
                     // shedding. cold=true is the conservative bound
-                    // (the shed tail only adds distance).
+                    // (the shed tail only adds distance).  The slack
+                    // margin absorbs hot-entry variance: emission
+                    // enters each piece with the residual (a,j) the
+                    // previous piece's truncated tail left, which
+                    // adds shedding distance the cold model misses.
                     const double am = pc.solver->accelBound();
                     const double jm = pc.solver->jerkBound();
                     const double sm = pc.solver->snapBound();
                     const double bD =
                         brakeDist(HotSt{vL, 0.0, 0.0}, vR, true,
                                   am, jm, sm);
-                    return std::isfinite(bD) && bD <= usable;
+                    const double margin =
+                        std::min(2e-3, 0.05 * usable);
+                    return std::isfinite(bD) &&
+                           bD <= usable - margin;
                 }
                 if (!hardSplit(i) && !hardSplit(i + 1) &&
                     i > 0 && i < nsp) {
@@ -5518,6 +5529,7 @@ public:
                 double sLimit = len;
                 // Append a phase as an arc; `use` may truncate `dur`
                 // at the current target. Returns the used duration.
+                const char* disp = "?";
                 const auto emit = [&](double sigma, double jh,
                                       bool isSnap,
                                       double dur) -> double {
@@ -5526,9 +5538,10 @@ public:
                     if (std::getenv("TETHER_DEBUG_TOPRA") && i < 6)
                         std::fprintf(stderr,
                             "  emit i=%d s=%.4f st=(%.3f,%.3f,%.3f) "
-                            "ph=(%.0f,%.0f,%d,dur=%.4g) lim=%.4f\n",
+                            "ph=(%.0f,%.0f,%d,dur=%.4g) lim=%.4f "
+                            "%s\n",
                             i, sAcc, st.v, st.a, st.j, sigma, jh,
-                            isSnap ? 1 : 0, dur, sLimit);
+                            isSnap ? 1 : 0, dur, sLimit, disp);
                     const double full = isSnap ? dsSnap(st, sigma, dur)
                                                : dsSing(st, jh, dur);
                     if (full > rem) {
@@ -5721,7 +5734,13 @@ public:
                     if (tIdx >= tgts.size()) break;
                     const double envNow = envAt(sOff + sAcc);
                     const double dv = bleedDv(st, am, jm, sm);
-                    // Binding decel target over the remainder.
+                    // Binding decel target over the remainder. The
+                    // ease band matches the consume tolerance: a state
+                    // marginally above a cap (the env certification
+                    // margin) is at-cap, not over-cap.
+                    const auto tgtEase = [](double v) {
+                        return 1e-5 * (1.0 + v);
+                    };
                     double bestSlack =
                         std::numeric_limits<double>::infinity();
                     size_t bind = tgts.size();
@@ -5730,7 +5749,7 @@ public:
                         // Decel targets bind the brake slack; cold
                         // targets also bind when a hot (a,j) must
                         // shed before arrival.
-                        if (st.v > tgts[k].v + 1e-9 ||
+                        if (st.v > tgts[k].v + tgtEase(tgts[k].v) ||
                             (tgts[k].cold &&
                              (std::abs(st.a) > 1e-9 ||
                               std::abs(st.j) > 1e-9))) {
@@ -5797,7 +5816,7 @@ public:
                             // Fail when the bleed lands above the
                             // target and either crosses it mid-
                             // flight or leaves no room to brake.
-                            if (q1.v > tgts[k].v + 1e-9 &&
+                            if (q1.v > tgts[k].v + tgtEase(tgts[k].v) &&
                                 (remK <= 0.0 ||
                                  bD > remK * (1.0 - 1e-6)))
                                 return false;
@@ -5821,11 +5840,12 @@ public:
                             }
                         }
                     }
-                    if (wantBleed && tryBleed())
+                    if (wantBleed && (disp = "bleed", tryBleed()))
                         continue;
                     // B) Brake slack exhausted → max-brake to the
                     // binding target (may span several caps).
                     if (bind < tgts.size() && bestSlack <= 1e-9) {
+                        disp = "brakeB";
                         sLimit = tgts[bind].s;
                         brakeRun(st, tgts[bind].v, tgts[bind].cold,
                                  am, jm, sm, emit);
@@ -5846,15 +5866,18 @@ public:
                                   std::abs(st.j) > 1e-9)) {
                         // Tiny residual (a,j): kill it and land
                         // back on the ceiling.
+                        disp = "killRes";
                         bleedRun(st, emit, am, jm, sm);
                         continue;
                     }
                     if (atCap) {
+                        disp = "cruise";
                         isSnap = false;
                         jh = 0.0;
                         dur = (sLimit - sAcc) /
                             std::max(st.v, 1e-9);
                     } else {
+                        disp = "accel";
                         if (!accelPhase(st, sigma, jh, isSnap, dur))
                             return false;
                         if (!isSnap && jh == 0.0) {
@@ -5875,8 +5898,12 @@ public:
                         const double envQ = envAt(sOff + sAcc + dq);
                         const double dv2 = bleedDv(q, am, jm, sm);
                         // Envelope ceiling: the bleed-back must stay
-                        // under the envelope at every point.
-                        double u = q.v + dv2 - envQ;
+                        // under the envelope at every point. The ease
+                        // band absorbs envAt's certification margin —
+                        // an at-cap state reads ~1e-9·v over the
+                        // margin-scaled envelope, which is not a
+                        // violation and must not bisect the phase.
+                        double u = q.v + dv2 - envQ - envEase(q.v);
                         if (std::getenv("TETHER_DEBUG_TOPRA_B") &&
                             i < 6)
                             std::fprintf(stderr,
@@ -5890,10 +5917,11 @@ public:
                                 tgts[k].s - sAcc - dq;
                             if (remK <= 0.0) {
                                 // crossed target k mid-phase.
-                                u = std::max(u, q.v - tgts[k].v);
+                                u = std::max(u, q.v - tgts[k].v -
+                                    tgtEase(tgts[k].v));
                                 continue;
                             }
-                            if (q.v > tgts[k].v + 1e-9 ||
+                            if (q.v > tgts[k].v + tgtEase(tgts[k].v) ||
                                 (tgts[k].cold &&
                                  (std::abs(q.a) > 1e-9 ||
                                   std::abs(q.j) > 1e-9))) {
@@ -5919,9 +5947,10 @@ public:
                             // Bisected to ~0: the constraint is
                             // binding now — fall to the overdue
                             // dispatch below.
-                            if (tryBleed())
+                            if ((disp = "bleedB0", tryBleed()))
                                 continue;
                             if (bind < tgts.size()) {
+                                disp = "brakeB0";
                                 sLimit = tgts[bind].s;
                                 brakeRun(st, tgts[bind].v,
                                          tgts[bind].cold,
@@ -5936,9 +5965,10 @@ public:
                         // shedding brake to the binding target
                         // regardless of slack — it's the only
                         // remaining legal action.
-                        if (tryBleed())
+                        if ((disp = "bleedOD", tryBleed()))
                             continue;
                         if (bind < tgts.size()) {
+                            disp = "brakeOD";
                             sLimit = tgts[bind].s;
                             brakeRun(st, tgts[bind].v, tgts[bind].cold,
                                      am, jm, sm, emit);
@@ -6118,6 +6148,13 @@ public:
                 topraSplits = std::move(merged);
             }
             solved = solveSplitTopra(topraSplits, failReason);
+            if (std::getenv("TETHER_DEBUG_TOPRA_CANDS"))
+                for (const auto& sp : topraSplits)
+                    std::fprintf(stderr,
+                        "  cand s=%.4f v=%.4f env=%.4f dwell=%d "
+                        "stamp=%d\n",
+                        sp.s, sp.boundaryV, envAt(sp.s),
+                        (int)sp.isDwell, (int)sp.isStamp);
             if (std::getenv("TETHER_DEBUG_TOPRA")) {
                 std::fprintf(stderr,
                     "[TOPRA] splits=%zu solved=%d reason=%s\n",
