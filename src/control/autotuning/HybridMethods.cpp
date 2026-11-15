@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <numeric>
 #include <cmath>
+#include <cctype>
 
 #include <Eigen/Dense>
 
@@ -510,6 +511,162 @@ void NeuralPID::pretrain(const std::vector<std::vector<double>>& inputs,
 // Cascade Autotuner
 // ============================================================================
 
+namespace {
+
+/**
+ * @brief Concrete FOPDT process model for per-loop decentralized tuning.
+ *
+ * The DecentralizedTuning gain/time-constant/delay matrices describe one
+ * FOPDT loop per (output, input) pair; this adapter exposes a single such
+ * loop through the ProcessModel interface.
+ */
+class FOPDTLoopModel : public ProcessModel {
+public:
+    explicit FOPDTLoopModel(const FOPDTModel& model) : m_model(model) {}
+
+    ProcessModelType getType() const override { return ProcessModelType::FOPDT; }
+
+    std::complex<double> evaluate(double omega) const override {
+        return m_model.evaluate(omega);
+    }
+
+    std::vector<std::pair<double, double>> stepResponse(
+        double stepMagnitude, double dt, double duration) const override {
+        std::vector<std::pair<double, double>> result;
+        const int steps = static_cast<int>(duration / dt);
+        result.reserve(steps);
+        double y = 0.0;
+        const int delaySteps = m_model.L > 0.0
+            ? static_cast<int>(std::lround(m_model.L / dt)) : 0;
+        std::vector<double> delay(delaySteps + 1, 0.0);
+        size_t idx = 0;
+        const double a = m_model.tau > 0.0
+            ? 1.0 - std::exp(-dt / m_model.tau) : 1.0;
+        for (int i = 0; i < steps; ++i) {
+            double ud = stepMagnitude;
+            if (delaySteps > 0) {
+                ud = delay[idx];
+                delay[idx] = stepMagnitude;
+                idx = (idx + 1) % delay.size();
+            }
+            y += a * (m_model.K * ud - y);
+            result.emplace_back(i * dt, y);
+        }
+        return result;
+    }
+
+    FOPDTModel toFOPDT() const override { return m_model; }
+
+    std::pair<double, double> getUltimateParams() const override {
+        if (m_model.L <= 0.0 || m_model.K == 0.0) {
+            return {1e6, 4.0 * m_model.tau};
+        }
+        return {m_model.tau / (m_model.K * m_model.L), 4.0 * m_model.L};
+    }
+
+private:
+    FOPDTModel m_model;
+};
+
+/**
+ * @brief Minimal SISO PID TunableController ([Kp, Ki, Kd] parameters).
+ *
+ * Used as the per-loop tuning target inside DecentralizedTuning where no
+ * user-supplied controller object exists for each decoupled loop.
+ */
+class SISO_PID_TunableController : public TunableController {
+public:
+    ParameterDescriptors getParameterDescriptors() const override {
+        return {
+            {"Kp", m_Kp, {1e-4, 1e4}, 1.0, false},
+            {"Ki", m_Ki, {0.0, 1e4}, 1.0, false},
+            {"Kd", m_Kd, {0.0, 1e4}, 1.0, false}
+        };
+    }
+
+    ParameterVector getParameters() const override {
+        return {m_Kp, m_Ki, m_Kd};
+    }
+
+    bool setParameters(const ParameterVector& params) override {
+        if (params.size() < 3) return false;
+        m_Kp = params[0];
+        m_Ki = params[1];
+        m_Kd = params[2];
+        return true;
+    }
+
+    std::string getControllerTypeName() const override { return "PID"; }
+
+    std::vector<double> evaluate(
+        const std::vector<double>& input,
+        const std::vector<double>& reference,
+        double dt) override {
+        m_integral = 0.0;
+        m_prevError = 0.0;
+        m_prevDeriv = 0.0;
+        std::vector<double> output;
+        output.reserve(input.size());
+        for (size_t i = 0; i < input.size(); ++i) {
+            const double r = i < reference.size() ? reference[i] : 0.0;
+            const double e = r - (i < input.size() ? input[i] : 0.0);
+            m_integral += e * dt;
+            const double deriv = (e - m_prevError) / (dt + 1e-10);
+            const double alpha = 0.1;
+            const double d = alpha * deriv + (1.0 - alpha) * m_prevDeriv;
+            m_prevDeriv = d;
+            m_prevError = e;
+            output.push_back(m_Kp * e + m_Ki * m_integral + m_Kd * d);
+        }
+        return output;
+    }
+
+    void reset() override {
+        m_integral = 0.0;
+        m_prevError = 0.0;
+        m_prevDeriv = 0.0;
+    }
+
+    std::shared_ptr<TunableController> clone() const override {
+        auto copy = std::make_shared<SISO_PID_TunableController>();
+        copy->setParameters({m_Kp, m_Ki, m_Kd});
+        return copy;
+    }
+
+private:
+    double m_Kp{1.0}, m_Ki{0.1}, m_Kd{0.0};
+    double m_integral{0.0}, m_prevError{0.0}, m_prevDeriv{0.0};
+};
+
+/** Map the leading entries of a parameter vector onto PIDGains. */
+PIDGains gainsFromParams(const ParameterVector& params) {
+    PIDGains g;
+    if (params.size() > 0) g.Kp = params[0];
+    if (params.size() > 1) g.Ki = params[1];
+    if (params.size() > 2) g.Kd = params[2];
+    if (g.Ti == 0.0 && g.Ki != 0.0 && g.Kp != 0.0) g.Ti = g.Kp / g.Ki;
+    if (g.Td == 0.0) g.Td = (g.Kd != 0.0 && g.Kp != 0.0) ? g.Kd / g.Kp : 0.0;
+    return g;
+}
+
+/** Find the index of the integral-gain parameter by descriptor name. */
+int findIntegralParamIndex(const TunableController& controller) {
+    const auto descs = controller.getParameterDescriptors();
+    for (size_t i = 0; i < descs.size(); ++i) {
+        std::string name = descs[i].name;
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        if (name.find("ki") != std::string::npos ||
+            name.find("integral") != std::string::npos ||
+            name == "i") {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+} // namespace
+
 bool CascadeAutotuner::isCompatible(const TunableController& controller) const {
     return true;  // Cascade works with any controller
 }
@@ -532,9 +689,51 @@ TuningResult CascadeAutotuner::tune(TunableController& controller,
         return result;
     }
     
-    // This is a placeholder - actual cascade tuning requires
-    // access to both inner and outer loops
-    result.message = "Cascade tuning requires separate inner/outer controllers";
+    // Inner (fast) loop first. The caller supplies one controller — treated
+    // as the outer loop — so the inner loop is tuned on an independent
+    // clone with the same parameter structure.
+    auto innerController = controller.clone();
+    if (!innerController) {
+        result.message = "Controller does not support clone(); cannot tune inner loop";
+        return result;
+    }
+    
+    TuningResult innerResult = m_innerTuner->tune(*innerController, model);
+    if (!innerResult.success) {
+        result.message = "Inner loop tuning failed: " + innerResult.message;
+        return result;
+    }
+    m_innerGains = gainsFromParams(innerController->getParameters());
+    
+    // Outer (slow) loop: tune the caller's controller, then detune its
+    // integral gain so the outer bandwidth stays near bandwidthRatio of
+    // the inner loop — the standard cascade separation rule.
+    TuningResult outerResult = m_outerTuner->tune(controller, model);
+    if (!outerResult.success) {
+        result.message = "Outer loop tuning failed: " + outerResult.message;
+        return result;
+    }
+    
+    ParameterVector outerParams = controller.getParameters();
+    const int kiIdx = findIntegralParamIndex(controller);
+    if (kiIdx >= 0 && kiIdx < static_cast<int>(outerParams.size()) &&
+        m_bandwidthRatio > 0.0 && m_bandwidthRatio < 1.0) {
+        outerParams[kiIdx] *= m_bandwidthRatio;
+        if (!controller.setParameters(outerParams)) {
+            result.message = "Outer tuning succeeded but bandwidth detune rejected";
+            return result;
+        }
+    }
+    
+    m_outerGains = gainsFromParams(controller.getParameters());
+    
+    result.parameters = controller.getParameters();
+    result.cost = outerResult.cost;
+    result.iterations = innerResult.iterations + outerResult.iterations;
+    result.functionEvaluations = innerResult.functionEvaluations +
+                                 outerResult.functionEvaluations;
+    result.success = true;
+    result.message = "Cascade tuning complete (inner then bandwidth-detuned outer)";
     return result;
 }
 
@@ -607,6 +806,7 @@ std::vector<std::pair<int, int>> DecentralizedTuning::determinesPairing() const 
 
 TuningResult DecentralizedTuning::tune(TunableController& controller,
                                         const ProcessModel* model) {
+    (void)model;  // Per-loop models come from the K/tau/theta matrices.
     TuningResult result;
     result.success = false;
     
@@ -614,14 +814,86 @@ TuningResult DecentralizedTuning::tune(TunableController& controller,
         result.message = "Gain matrix must be set";
         return result;
     }
+    if (!m_sisoTuner) {
+        result.message = "SISO tuner must be set";
+        return result;
+    }
     
-    // Compute RGA
+    const size_t n = m_K.size();
+    auto square = [&](const std::vector<std::vector<double>>& M) {
+        return M.size() == n &&
+               std::all_of(M.begin(), M.end(),
+                           [n](const auto& row) { return row.size() == n; });
+    };
+    if (!square(m_tau) || !square(m_theta)) {
+        result.message = "Gain, time-constant and delay matrices must be square and equal-sized";
+        return result;
+    }
+    
+    // Compute RGA and loop pairing
     m_RGA = computeRGA();
     m_pairing = determinesPairing();
     
-    // This is a placeholder - full implementation would tune each loop
-    result.message = "Decentralized tuning computed RGA and pairing";
+    if (m_pairing.empty()) {
+        result.message = "RGA pairing produced no loops";
+        return result;
+    }
+    
+    // Tune each paired loop as a SISO FOPDT problem. The detuning factor
+    // scales the proportional gain to account for residual interaction.
+    ParameterVector allParams;
+    int tunedLoops = 0;
+    for (const auto& [outIdx, inIdx] : m_pairing) {
+        if (outIdx < 0 || inIdx < 0 ||
+            static_cast<size_t>(outIdx) >= n || static_cast<size_t>(inIdx) >= n) {
+            continue;
+        }
+        
+        FOPDTModel loop;
+        loop.K = m_K[outIdx][inIdx];
+        loop.tau = m_tau[outIdx][inIdx];
+        loop.L = m_theta[outIdx][inIdx];
+        if (!loop.isValid() || loop.K == 0.0) {
+            continue;
+        }
+        
+        FOPDTLoopModel loopModel(loop);
+        SISO_PID_TunableController loopController;
+        TuningResult loopResult = m_sisoTuner->tune(loopController, &loopModel);
+        if (!loopResult.success || loopResult.parameters.size() < 3) {
+            continue;
+        }
+        
+        ParameterVector lp = loopResult.parameters;
+        lp[0] *= m_detuningFactor;  // detune Kp for loop interaction
+        allParams.insert(allParams.end(), lp.begin(), lp.end());
+        ++tunedLoops;
+        
+        result.iterations += loopResult.iterations;
+        result.functionEvaluations += loopResult.functionEvaluations;
+        result.cost = std::min(result.cost, loopResult.cost);
+    }
+    
+    if (tunedLoops == 0) {
+        result.message = "No paired loop could be tuned";
+        return result;
+    }
+    
+    result.parameters = allParams;
     result.success = true;
+    result.message = "Tuned " + std::to_string(tunedLoops) +
+                     " decoupled loops; parameters are concatenated per-loop "
+                     "[Kp,Ki,Kd,...] in pairing order";
+    
+    // Apply only when the controller's parameter vector matches the
+    // concatenated layout exactly; otherwise leave it untouched so the
+    // caller can distribute the per-loop gains itself.
+    if (controller.getParameters().size() == allParams.size() &&
+        controller.setParameters(allParams)) {
+        result.message += "; applied to controller";
+    } else {
+        result.message += "; not applied (parameter layout mismatch)";
+    }
     
     return result;
 }

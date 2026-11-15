@@ -529,6 +529,26 @@ private:
     // Plant family
     std::vector<TransferFunction> m_plantSamples;
     
+    // Parametric uncertainty specs. `paramIndex` indexes the nominal
+    // plant's coefficient vector in storage order: indices
+    // [0, num.size()) select numerator coefficients, indices
+    // [num.size(), num.size()+den.size()) select denominator
+    // coefficients. minValue/maxValue are absolute coefficient bounds
+    // swept linearly across numSamples variants.
+    struct ParametricUncertainty {
+        int paramIndex{0};
+        double minValue{0.0};
+        double maxValue{0.0};
+        int numSamples{5};
+    };
+    std::vector<ParametricUncertainty> m_parametricUncertainties;
+    
+    // Multiplicative uncertainty weight: P_true = P_nom * (1 + W*Δ),
+    // |Δ| <= 1. Adds Nichols-chart template points for unit-circle
+    // samples of Δ at each design frequency.
+    TransferFunction m_multUncertainty;
+    bool m_hasMultUncertainty{false};
+    
     // FOPDT uncertainty parameters
     struct FOPDTBounds {
         double Kmin{0.5}, Kmax{2.0};
@@ -561,6 +581,7 @@ private:
     
     // Internal methods
     void generateFOPDTSamples(int numSamples);
+    std::vector<TransferFunction> plantSamplesWithParametric() const;
     QFTBound computeTrackingBound(double omega, const PlantTemplate& templ) const;
     QFTBound computeStabilityBound(double omega, const PlantTemplate& templ) const;
     QFTBound computeDisturbanceBound(double omega, const PlantTemplate& templ) const;

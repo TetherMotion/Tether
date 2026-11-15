@@ -214,13 +214,14 @@ void QFTController::setFOPDTUncertainty(double Kmin, double Kmax,
 
 void QFTController::addParametricUncertainty(int paramIndex, double minValue,
                                               double maxValue, int numSamples) {
-    // Store parametric uncertainty for template generation
-    // This is a placeholder - full implementation would track these
+    if (numSamples < 2) numSamples = 2;
+    m_parametricUncertainties.push_back(
+        {paramIndex, minValue, maxValue, numSamples});
 }
 
 void QFTController::setMultiplicativeUncertainty(const TransferFunction& W) {
-    // Store multiplicative uncertainty weight
-    // Full implementation would use this for template generation
+    m_multUncertainty = W;
+    m_hasMultUncertainty = true;
 }
 
 void QFTController::setPlantSamples(const std::vector<TransferFunction>& plants) {
@@ -349,6 +350,36 @@ void QFTController::generateFOPDTSamples(int numSamples) {
     }
 }
 
+std::vector<TransferFunction> QFTController::plantSamplesWithParametric() const {
+    std::vector<TransferFunction> samples = m_plantSamples;
+    if (m_nominalPlant.num.empty() || m_nominalPlant.den.empty()) {
+        return samples;
+    }
+
+    const int numCount = static_cast<int>(m_nominalPlant.num.size());
+    const int denCount = static_cast<int>(m_nominalPlant.den.size());
+    const int totalParams = numCount + denCount;
+
+    for (const auto& spec : m_parametricUncertainties) {
+        if (spec.paramIndex < 0 || spec.paramIndex >= totalParams) continue;
+        for (int s = 0; s < spec.numSamples; ++s) {
+            const double frac = spec.numSamples > 1
+                ? static_cast<double>(s) / (spec.numSamples - 1) : 0.0;
+            const double value = spec.minValue +
+                (spec.maxValue - spec.minValue) * frac;
+
+            TransferFunction variant = m_nominalPlant;
+            if (spec.paramIndex < numCount) {
+                variant.num[spec.paramIndex] = value;
+            } else {
+                variant.den[spec.paramIndex - numCount] = value;
+            }
+            samples.push_back(variant);
+        }
+    }
+    return samples;
+}
+
 void QFTController::computeTemplates() {
     if (m_designFreqs.empty()) {
         autoSelectFrequencies();
@@ -360,13 +391,30 @@ void QFTController::computeTemplates() {
     
     m_templates.clear();
     
+    const std::vector<TransferFunction> samples = plantSamplesWithParametric();
+    // Unit-circle samples of Δ for the multiplicative bound
+    // P_true = P*(1 + W*Δ), |Δ| <= 1.
+    static constexpr double kDeltaRe[] = {1.0, -1.0, 0.0, 0.0};
+    static constexpr double kDeltaIm[] = {0.0, 0.0, 1.0, -1.0};
+    
     for (double omega : m_designFreqs) {
         PlantTemplate templ;
         templ.frequency = omega;
         templ.nominal = NicholsPoint::fromComplex(m_nominalPlant.evaluate(omega));
         
-        for (const auto& plant : m_plantSamples) {
-            templ.points.push_back(NicholsPoint::fromComplex(plant.evaluate(omega)));
+        for (const auto& plant : samples) {
+            const auto P = plant.evaluate(omega);
+            templ.points.push_back(NicholsPoint::fromComplex(P));
+            
+            if (m_hasMultUncertainty) {
+                const auto W = m_multUncertainty.evaluate(omega);
+                const std::complex<double> PW = P * W;
+                for (int d = 0; d < 4; ++d) {
+                    const std::complex<double> delta(kDeltaRe[d], kDeltaIm[d]);
+                    templ.points.push_back(
+                        NicholsPoint::fromComplex(P + PW * delta));
+                }
+            }
         }
         
         m_templates.push_back(templ);

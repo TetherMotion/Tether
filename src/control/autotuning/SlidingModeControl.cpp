@@ -738,36 +738,57 @@ void HigherOrderSMC::setGains(const std::vector<double>& gains) {
 
 double HigherOrderSMC::compute(double sigma, const std::vector<double>& sigmaDerivatives,
                                 double dt) {
-    double u = 0.0;
+    // Nested integral-chain reaching law for order r. With gains
+    // k_1..k_r and exponents alpha_i = (r-i)/(r-i+1):
+    //
+    //   u   = -k_1*|σ|^a1*sign(σ) + z_1
+    //   z_i' = -k_{i+1}*|σ|^a{i+1}*sign(σ) + z_{i+1}   (i = 1..r-2)
+    //   z_{r-1}' = -k_r*sign(σ)
+    //
+    // The innermost integrator supplies the sign reaching action; each
+    // outer integrator smooths one level, giving finite-time convergence
+    // of the order-(r-1) sliding variable with chattering confined to
+    // the highest derivative. For r = 2 this reduces exactly to the
+    // super-twisting algorithm; for r = 1 it is the sign reaching law.
+    // sigmaDerivatives is accepted for API compatibility — the nested
+    // reaching law acts on σ itself, so the derivatives are not needed.
+    (void)sigmaDerivatives;
     
-    // Higher-order SMC drives σ, σ̇, ..., σ^(r-1) to zero
-    // Using nested structure or super-twisting extensions
+    const int r = std::max(1, m_order);
+    const size_t nGains = m_gains.size();
+    auto gain = [&](int i) -> double {
+        return (i >= 0 && static_cast<size_t>(i) < nGains) ? m_gains[i] : 1.0;
+    };
     
-    if (m_order == 1) {
-        // First order: u = -K·sign(σ)
-        double sign_sigma = (sigma > 0) ? 1.0 : ((sigma < 0) ? -1.0 : 0.0);
-        u = -m_gains[0] * sign_sigma;
-    } else if (m_order == 2) {
-        // Second order (super-twisting)
-        double sign_sigma = (sigma > 0) ? 1.0 : ((sigma < 0) ? -1.0 : 0.0);
-        double sqrt_sigma = std::sqrt(std::abs(sigma));
-        
-        u = -m_gains[0] * sqrt_sigma * sign_sigma;
-        if (!m_integralStates.empty()) {
-            m_integralStates[0] += -m_gains[1] * sign_sigma * dt;
-            u += m_integralStates[0];
-        }
-    } else {
-        // General higher-order: recursive structure
-        // Simplified implementation
-        double sign_sigma = (sigma > 0) ? 1.0 : ((sigma < 0) ? -1.0 : 0.0);
-        for (size_t i = 0; i < m_gains.size(); i++) {
-            double power = 1.0 - static_cast<double>(i) / m_order;
-            u -= m_gains[i] * std::pow(std::abs(sigma), power) * sign_sigma;
+    if (static_cast<int>(m_integralStates.size()) != r - 1) {
+        m_integralStates.assign(r - 1, 0.0);
+    }
+    
+    const double sgn = (sigma > 0.0) ? 1.0 : ((sigma < 0.0) ? -1.0 : 0.0);
+    const double absS = std::abs(sigma);
+    
+    // phi_i(σ) = |σ|^alpha_i * sign(σ), alpha_i = (r-i)/(r-i+1)
+    auto phi = [&](int i) -> double {
+        const double alpha = static_cast<double>(r - i) /
+                             static_cast<double>(r - i + 1);
+        return std::pow(absS, alpha) * sgn;
+    };
+    
+    // Propagate the integrator chain inside-out:
+    //   z_{r-1}' = -k_r*sign(σ)
+    //   z_i'     = -k_{i+1}*phi_{i+1}(σ) + z_{i+1}   for i = r-2 .. 1
+    // states[j] holds z_{j+1}.
+    if (r >= 2) {
+        m_integralStates[r - 2] += (-gain(r - 1) * sgn) * dt;
+        for (int i = r - 3; i >= 0; --i) {
+            const double zNext = m_integralStates[i + 1];
+            m_integralStates[i] += (-gain(i + 1) * phi(i + 2) + zNext) * dt;
         }
     }
     
-    return u;
+    // Control output: u = -k_1*phi_1(σ) + z_1  (z_1 = 0 for r = 1)
+    const double z1 = (r >= 2) ? m_integralStates[0] : 0.0;
+    return -gain(0) * phi(1) + z1;
 }
 
 } // namespace tether::control

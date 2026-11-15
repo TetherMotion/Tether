@@ -308,9 +308,13 @@ private:
     std::vector<double> m_integralCoeffs;  // GL coefficients for integral
     std::vector<double> m_derivCoeffs;     // GL coefficients for derivative
     
-    // State for Oustaloup approximation
+    // State for Oustaloup approximation — per-section previous output
+    // (m_*State) and previous section input (m_*InPrev) for the
+    // two-tap Tustin difference equation.
     std::vector<double> m_integralState;
     std::vector<double> m_derivState;
+    std::vector<double> m_integralInPrev;
+    std::vector<double> m_derivInPrev;
     
     // Accumulated values
     double m_fractionalIntegral{0.0};
@@ -343,14 +347,14 @@ private:
  * 
  * ## Transfer Function
  * ```
- *        N   s + ω_k'
+ *        N   s + ω_k
  * s^α ≈ K∏  ─────────
- *       k=1 s + ω_k
- * 
- * Where:
- *   ω_k = ωb⋅(ωh/ωb)^((k+N+(1-α)/2)/(2N+1))   (poles)
- *   ω_k'= ωb⋅(ωh/ωb)^((k+N+(1+α)/2)/(2N+1))   (zeros)
- *   K = ωh^α                                   (gain)
+ *       k=1 s + ω'_k
+ *
+ * Where (zero-pole recursions, k = 1..N, r = ωh/ωb):
+ *   ω_k  = ωb·r^((2k-1-α)/(2N))   (zeros)
+ *   ω'_k = ωb·r^((2k-1+α)/(2N))   (poles)
+ *   K = ωh^α                       (gain)
  * ```
  */
 class OustaloupFilter {
@@ -387,7 +391,8 @@ private:
     std::vector<double> m_zeros;
     double m_gain{1.0};
     
-    std::vector<double> m_state;  // Filter state
+    std::vector<double> m_state;   // Per-section previous output
+    std::vector<double> m_inPrev;  // Per-section previous input
 };
 
 } // namespace tether::control

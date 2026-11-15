@@ -105,8 +105,10 @@ void FractionalPIDController::setOustaloupParams(double omegaLow, double omegaHi
     m_oustaloupOrder = std::clamp(order, 1, 10);
     
     // Resize Oustaloup state vectors
-    m_integralState.resize(m_oustaloupOrder, 0.0);
-    m_derivState.resize(m_oustaloupOrder, 0.0);
+    m_integralState.assign(m_oustaloupOrder, 0.0);
+    m_derivState.assign(m_oustaloupOrder, 0.0);
+    m_integralInPrev.assign(m_oustaloupOrder, 0.0);
+    m_derivInPrev.assign(m_oustaloupOrder, 0.0);
 }
 
 void FractionalPIDController::setAntiWindup(AntiWindupMethod method, double param) {
@@ -333,64 +335,88 @@ ControllerOutput FractionalPIDController::computeImpl(const ControllerInput& inp
     return output;
 }
 
+namespace {
+
+// Oustaloup recursive approximation (ORA) of s^alpha over
+// [omegaLow, omegaHigh] with N first-order sections:
+//   s^alpha ≈ omegaHigh^alpha · Prod_k (s + wz_k)/(s + wp_k)
+//   wz_k = omegaLow·r^((2k-1-alpha)/(2N)),  wp_k = omegaLow·r^((2k-1+alpha)/(2N))
+//   r = omegaHigh/omegaLow,  k = 1..N
+// Verified exact at the band center for alpha = 1.
+struct OustaloupSection {
+    double a{0.0};    // y[n-1] coefficient
+    double b0{0.0};   // x[n] coefficient
+    double b1{0.0};   // x[n-1] coefficient
+};
+
+std::vector<OustaloupSection> oustaloupSections(double alpha, double omegaLow,
+                                               double omegaHigh, int order,
+                                               double dt) {
+    std::vector<OustaloupSection> sections(order);
+    if (omegaLow <= 0.0 || omegaHigh <= omegaLow || dt <= 0.0) {
+        for (auto& s : sections) { s.a = 0.0; s.b0 = 1.0; s.b1 = 0.0; }
+        return sections;
+    }
+    const double r = omegaHigh / omegaLow;
+    const double twoN = 2.0 * order;
+    for (int k = 0; k < order; ++k) {
+        // k is 0-based; formulas use k' = k+1.
+        const double eZ = (2.0 * (k + 1) - 1.0 - alpha) / twoN;
+        const double eP = (2.0 * (k + 1) - 1.0 + alpha) / twoN;
+        const double wz = omegaLow * std::pow(r, eZ);
+        const double wp = omegaLow * std::pow(r, eP);
+
+        // Tustin discretization of (s + wz)/(s + wp):
+        //   a  = (2 - wp·dt)/(2 + wp·dt)
+        //   b0 = (2 + wz·dt)/(2 + wp·dt)
+        //   b1 = (2 - wz·dt)/(2 + wp·dt)
+        const double den = 2.0 + wp * dt;
+        sections[k].a  = (2.0 - wp * dt) / den;
+        sections[k].b0 = (2.0 + wz * dt) / den;
+        sections[k].b1 = (2.0 - wz * dt) / den;
+    }
+    return sections;
+}
+
+// Cascade the sections: x feeds section 0, each section's output feeds
+// the next. Per-section states hold previous output (yPrev) and
+// previous input (xPrev).
+double oustaloupCascade(const std::vector<OustaloupSection>& sections,
+                        double input,
+                        std::vector<double>& yPrev,
+                        std::vector<double>& xPrev) {
+    if (yPrev.size() != sections.size()) yPrev.assign(sections.size(), 0.0);
+    if (xPrev.size() != sections.size()) xPrev.assign(sections.size(), 0.0);
+
+    double x = input;
+    for (size_t k = 0; k < sections.size(); ++k) {
+        const auto& s = sections[k];
+        const double y = s.a * yPrev[k] + s.b0 * x + s.b1 * xPrev[k];
+        xPrev[k] = x;
+        yPrev[k] = y;
+        x = y;
+    }
+    return x;
+}
+
+} // namespace
+
 double FractionalPIDController::computeOustaloupIntegral(double error, double dt) {
-    // Oustaloup approximation for s^(-λ)
-    // Simplified implementation using recursive filter sections
-    
-    if (m_integralState.size() != static_cast<size_t>(m_oustaloupOrder)) {
-        m_integralState.resize(m_oustaloupOrder, 0.0);
-    }
-    
-    // Compute pole and zero frequencies
-    double omegaRatio = m_omegaHigh / m_omegaLow;
-    double output = error;
-    
-    for (int k = 0; k < m_oustaloupOrder; k++) {
-        // Zero and pole for this section
-        double kNorm = (k - (m_oustaloupOrder - 1) / 2.0 + 0.5) / m_oustaloupOrder;
-        double omegaZero = m_omegaLow * std::pow(omegaRatio, kNorm + (1.0 + m_lambda) / 2.0);
-        double omegaPole = m_omegaLow * std::pow(omegaRatio, kNorm + (1.0 - m_lambda) / 2.0);
-        
-        // First-order section: (s + ωz) / (s + ωp)
-        // Tustin: y[n] = a*y[n-1] + b*(x[n] + x[n-1])
-        double alpha = (2.0 - omegaPole * dt) / (2.0 + omegaPole * dt);
-        double beta = dt * omegaZero / (2.0 + omegaPole * dt);
-        
-        double newState = alpha * m_integralState[k] + beta * (output + output);
-        output = newState;
-        m_integralState[k] = newState;
-    }
-    
-    // Apply gain factor
-    double gain = std::pow(m_omegaHigh, -m_lambda);
-    return output * gain;
+    // ORA approximation of s^(-lambda)
+    const auto sections = oustaloupSections(-m_lambda, m_omegaLow,
+                                            m_omegaHigh, m_oustaloupOrder, dt);
+    const double out = oustaloupCascade(sections, error,
+                                        m_integralState, m_integralInPrev);
+    return out * std::pow(m_omegaHigh, -m_lambda);
 }
 
 double FractionalPIDController::computeOustaloupDerivative(double error, double dt) {
-    // Oustaloup approximation for s^μ
-    
-    if (m_derivState.size() != static_cast<size_t>(m_oustaloupOrder)) {
-        m_derivState.resize(m_oustaloupOrder, 0.0);
-    }
-    
-    double omegaRatio = m_omegaHigh / m_omegaLow;
-    double output = error;
-    
-    for (int k = 0; k < m_oustaloupOrder; k++) {
-        double kNorm = (k - (m_oustaloupOrder - 1) / 2.0 + 0.5) / m_oustaloupOrder;
-        double omegaZero = m_omegaLow * std::pow(omegaRatio, kNorm + (1.0 - m_mu) / 2.0);
-        double omegaPole = m_omegaLow * std::pow(omegaRatio, kNorm + (1.0 + m_mu) / 2.0);
-        
-        double alpha = (2.0 - omegaPole * dt) / (2.0 + omegaPole * dt);
-        double beta = (2.0 * omegaZero) / (2.0 + omegaPole * dt);
-        
-        double newState = alpha * m_derivState[k] + beta * (output - m_derivState[k]);
-        output = newState;
-        m_derivState[k] = newState;
-    }
-    
-    double gain = std::pow(m_omegaHigh, m_mu);
-    return output * gain;
+    // ORA approximation of s^mu
+    const auto sections = oustaloupSections(m_mu, m_omegaLow,
+                                            m_omegaHigh, m_oustaloupOrder, dt);
+    const double out = oustaloupCascade(sections, error,
+                                        m_derivState, m_derivInPrev);
+    return out * std::pow(m_omegaHigh, m_mu);
 }
 
 void FractionalPIDController::resetImpl() {
@@ -401,6 +427,8 @@ void FractionalPIDController::resetImpl() {
     
     std::fill(m_integralState.begin(), m_integralState.end(), 0.0);
     std::fill(m_derivState.begin(), m_derivState.end(), 0.0);
+    std::fill(m_integralInPrev.begin(), m_integralInPrev.end(), 0.0);
+    std::fill(m_derivInPrev.begin(), m_derivInPrev.end(), 0.0);
 }
 
 // ============================================================================
@@ -414,45 +442,47 @@ void OustaloupFilter::configure(double alpha, double omegaLow, double omegaHigh,
     m_omegaHigh = omegaHigh;
     m_order = std::clamp(order, 1, 10);
     
-    // Compute poles and zeros
+    // Oustaloup recursive approximation (ORA), k = 0..N-1:
+    //   zeros: wz_k = ωb·r^((2k+1-α)/(2N))
+    //   poles: wp_k = ωb·r^((2k+1+α)/(2N))
+    //   gain  = ωh^α
     m_poles.resize(m_order);
     m_zeros.resize(m_order);
-    
-    double omegaRatio = m_omegaHigh / m_omegaLow;
+    const double omegaRatio = m_omegaHigh / m_omegaLow;
+    const double twoN = 2.0 * m_order;
     
     for (int k = 0; k < m_order; k++) {
-        double kNorm = (2.0 * k - m_order + 1) / (2.0 * m_order);
-        
-        // Zeros: ω'_k = ωb * (ωh/ωb)^((k+N+(1+α)/2)/(2N+1))
-        m_zeros[k] = m_omegaLow * std::pow(omegaRatio, kNorm + (1.0 + m_alpha) / 2.0);
-        
-        // Poles: ω_k = ωb * (ωh/ωb)^((k+N+(1-α)/2)/(2N+1))
-        m_poles[k] = m_omegaLow * std::pow(omegaRatio, kNorm + (1.0 - m_alpha) / 2.0);
+        m_zeros[k] = m_omegaLow * std::pow(omegaRatio,
+            (2.0 * k + 1.0 - m_alpha) / twoN);
+        m_poles[k] = m_omegaLow * std::pow(omegaRatio,
+            (2.0 * k + 1.0 + m_alpha) / twoN);
     }
     
     // Gain
     m_gain = std::pow(m_omegaHigh, m_alpha);
     
     // Initialize state
-    m_state.resize(m_order, 0.0);
+    m_state.assign(m_order, 0.0);
+    m_inPrev.assign(m_order, 0.0);
 }
 
 double OustaloupFilter::process(double input, double dt) {
     double output = input;
     
     for (int k = 0; k < m_order; k++) {
-        // Each section: (s + ω'_k) / (s + ω_k)
-        // Discretized using Tustin
-        double wz = m_zeros[k];
-        double wp = m_poles[k];
+        // Each section: (s + wz_k) / (s + wp_k), Tustin-discretized:
+        //   y[n] = a·y[n-1] + b0·x[n] + b1·x[n-1]
+        const double wz = m_zeros[k];
+        const double wp = m_poles[k];
+        const double den = 2.0 + wp * dt;
+        const double a  = (2.0 - wp * dt) / den;
+        const double b0 = (2.0 + wz * dt) / den;
+        const double b1 = (2.0 - wz * dt) / den;
         
-        double a = (2.0 - wp * dt) / (2.0 + wp * dt);
-        double b0 = (2.0 + wz * dt) / (2.0 + wp * dt);
-        double b1 = (-2.0 + wz * dt) / (2.0 + wp * dt);
-        
-        double newOutput = a * m_state[k] + b0 * output;
-        m_state[k] = newOutput;
-        output = newOutput;
+        const double y = a * m_state[k] + b0 * output + b1 * m_inPrev[k];
+        m_inPrev[k] = output;
+        m_state[k] = y;
+        output = y;
     }
     
     return output * m_gain;
@@ -460,6 +490,7 @@ double OustaloupFilter::process(double input, double dt) {
 
 void OustaloupFilter::reset() {
     std::fill(m_state.begin(), m_state.end(), 0.0);
+    std::fill(m_inPrev.begin(), m_inPrev.end(), 0.0);
 }
 
 } // namespace tether::control

@@ -116,6 +116,7 @@ SimulationCostFunction::SimulationCostFunction(
 
 double SimulationCostFunction::evaluate(const ParameterVector& params) {
     if (!m_controller || !m_model) return std::numeric_limits<double>::max();
+    if (m_reference.empty() || m_dt <= 0.0) return std::numeric_limits<double>::max();
     
     // Set parameters
     if (!m_controller->setParameters(params)) {
@@ -125,13 +126,74 @@ double SimulationCostFunction::evaluate(const ParameterVector& params) {
     // Reset controller
     m_controller->reset();
     
-    // Simulate
-    std::vector<double> input(m_reference.size(), 0.0);  // Placeholder
-    std::vector<double> response = m_controller->evaluate(input, m_reference, m_dt);
+    // Closed-loop simulation. The TunableController::evaluate API is batch
+    // (whole trajectory in, whole trajectory out), so the loop is solved as
+    // a fixed point: guess the process output y, compute the control
+    // trajectory u = C(y, r), simulate the plant P(u) -> y', and iterate
+    // until y' stops changing. For a stable, contractive closed loop this
+    // converges in a few iterations; diverging parameter sets produce a
+    // non-finite or exploding response which maps to max cost.
+    const size_t n = m_reference.size();
+    const FOPDTModel plant = m_model->toFOPDT();
     
-    // Compute cost
+    // Discrete-time FOPDT simulator: transport delay line + first-order lag.
+    const int delaySteps = plant.L > 0.0
+        ? static_cast<int>(std::lround(plant.L / m_dt)) : 0;
+    std::vector<double> delayLine(delaySteps + 1, 0.0);
+    size_t delayIdx = 0;
+    const double a = plant.tau > 0.0
+        ? 1.0 - std::exp(-m_dt / plant.tau) : 1.0;
+    const double K = plant.K;
+    
+    auto simulatePlant = [&](const std::vector<double>& u,
+                             std::vector<double>& y) {
+        std::fill(delayLine.begin(), delayLine.end(), 0.0);
+        delayIdx = 0;
+        double state = 0.0;
+        y.assign(n, 0.0);
+        for (size_t i = 0; i < n; ++i) {
+            const double ui = i < u.size() ? u[i] : 0.0;
+            double ud = ui;
+            if (delaySteps > 0) {
+                ud = delayLine[delayIdx];
+                delayLine[delayIdx] = ui;
+                delayIdx = (delayIdx + 1) % delayLine.size();
+            }
+            state += a * (K * ud - state);
+            y[i] = state;
+        }
+    };
+    
+    std::vector<double> yPrev(n, 0.0), yNew;
+    constexpr int kMaxFixedPointIters = 12;
+    for (int iter = 0; iter < kMaxFixedPointIters; ++iter) {
+        std::vector<double> u = m_controller->evaluate(yPrev, m_reference, m_dt);
+        simulatePlant(u, yNew);
+        
+        // Divergence guard: an exploding or non-finite response means the
+        // parameter set destabilizes the loop.
+        double maxAbs = 0.0;
+        for (double v : yNew) {
+            if (!std::isfinite(v)) return std::numeric_limits<double>::max();
+            maxAbs = std::max(maxAbs, std::abs(v));
+        }
+        if (maxAbs > 1e8) return std::numeric_limits<double>::max();
+        
+        double maxDiff = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            maxDiff = std::max(maxDiff, std::abs(yNew[i] - yPrev[i]));
+        }
+        // Damped update improves convergence for mildly contractive loops.
+        const double relax = (iter < 4) ? 0.5 : 1.0;
+        for (size_t i = 0; i < n; ++i) {
+            yPrev[i] += relax * (yNew[i] - yPrev[i]);
+        }
+        if (maxDiff < 1e-9 * std::max(1.0, maxAbs)) break;
+    }
+    
+    // Compute cost on the converged process output
     return StandardCostFunctions::combinedCost(
-        response, m_reference, m_weightOvershoot, m_weightSettling, m_weightControl, m_dt);
+        yNew, m_reference, m_weightOvershoot, m_weightSettling, m_weightControl, m_dt);
 }
 
 void SimulationCostFunction::setWeights(double ise, double overshoot, 
