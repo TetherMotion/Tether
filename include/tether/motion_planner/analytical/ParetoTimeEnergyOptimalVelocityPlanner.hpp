@@ -5126,7 +5126,11 @@ public:
                 bool ok = true;
                 auto go = [&](double sigma, double jh, bool isSnap,
                               double dur) {
-                    if (!ok || dur <= 1e-14) return;
+                    // Tiny positive durations still carry the state
+                    // transition — σ legs collapse to instantaneous
+                    // j-jumps under a huge snap bound — only emit /
+                    // measure work is skipped inside step.
+                    if (!ok || dur <= 0.0) return;
                     ok = step(sigma, jh, isSnap, dur) >= dur - 1e-12;
                 };
                 const double aEps = 1e-9, jEps = 1e-12;
@@ -5194,11 +5198,11 @@ public:
                 bool stop = false;
                 auto step = [&](double sigma, double jh, bool isSnap,
                                 double dur) -> double {
-                    if (stop || dur <= 1e-14) return 0.0;
+                    if (stop || dur <= 0.0) return 0.0;
                     double use = dur;
                     if (emit) {
                         use = emit(sigma, jh, isSnap, dur);
-                        if (use <= 1e-14) { stop = true; return 0.0; }
+                        if (use <= 0.0) { stop = true; return 0.0; }
                     }
                     s += isSnap ? dsSnap(st, sigma, use)
                                 : dsSing(st, jh, use);
@@ -5548,7 +5552,18 @@ public:
                         use = tauForDs(st, sigma, jh, isSnap, rem);
                         if (!std::isfinite(use) || use < 0.0) use = 0.0;
                     }
-                    if (use <= 1e-14) return 0.0;
+                    if (use <= 0.0) return 0.0;
+                    if (use <= 1e-14) {
+                        // Degenerate duration — σ legs collapse to
+                        // instantaneous j-jumps under a huge snap
+                        // bound. ds≈0, dt≈0: apply the state change,
+                        // emit no arc (downstream consumers assume
+                        // finite durations).
+                        if (isSnap) applySnap(st, sigma, use);
+                        else applySing(st, jh, use);
+                        tCursor += use;
+                        return use;
+                    }
                     // Certified mid-phase envelope check: truncate
                     // just before the first point the adaptive scan
                     // cannot certify below env (env breakpoints inside
@@ -5648,7 +5663,14 @@ public:
                         dur = q.j / sm;
                         return true;
                     }
-                    if (q.j < jm - 1e-12) {
+                    // σ+ is productive only while below the accel
+                    // bleed curve j_B = sqrt(2·sm·(am - a)): at
+                    // a ≈ am there is no room for more jerk — hold
+                    // +am instead of ping-ponging j (degenerate with
+                    // a huge snap bound, where σ legs are instant).
+                    const double jBleed = std::sqrt(std::max(
+                        0.0, 2.0 * sm * (am - q.a)));
+                    if (q.j < jm - 1e-12 && q.j < jBleed - 1e-9) {
                         // σ+ until j=+jm or the +j bleed curve.
                         sigma = +sm; jh = 0.0; isSnap = true;
                         dur = (jm - q.j) / sm;
@@ -5978,7 +6000,7 @@ public:
                         dur = 0.0;
                     }
                     const double used = emit(sigma, jh, isSnap, dur);
-                    if (used <= 1e-14) {
+                    if (used <= 0.0) {
                         if (std::getenv("TETHER_DEBUG_TOPRA"))
                             std::fprintf(stderr,
                                 "[TOPRA emit fail] i=%d s=%.4f/%.4f "

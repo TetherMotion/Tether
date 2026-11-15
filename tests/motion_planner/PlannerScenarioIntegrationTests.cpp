@@ -1773,6 +1773,77 @@ TEST(PlannerScenarios_Toppra, HeadToHeadVsPareto) {
     }
 }
 
+// With the snap limit relaxed to ~infinity the snap-space emission
+// must collapse to jerk-space bang-bang (σ phases become
+// instantaneous j-jumps, singular legs are j = ±jm holds) — the
+// trajectory time should approach TOPP-RA's. This isolates how much
+// of the head-to-head gap is the structural cost of a finite snap
+// bound versus emission sub-optimality.
+TEST(PlannerScenarios_Toppra, HugeSnapLimitRecoversJerkOptimal) {
+    struct Case {
+        const char* name;
+        std::string gcode;
+        KinematicLimits<3, double> lim;
+        double feed;
+        std::size_t toppraSamples;
+    };
+    auto relaxed = [](KinematicLimits<3, double> L) {
+        L.path.maxPathSnap = 1e100;
+        return L;
+    };
+    const std::vector<Case> cases = {
+        {"BenchLayer60", benchLayerGcode(60.0), relaxed(printerLimits()),
+         200.0, 6000},
+        {"SpiralVase", spiralGcode(360, 20.0, 5.0, 4000),
+         relaxed(printerLimits()), 100.0, 3000},
+        {"CncDrill3x3", drillGcode(3, 3, 20.0, 5.0),
+         relaxed(cncLimits()), 80.0, 1200},
+    };
+
+    for (const auto& c : cases) {
+        auto r = buildPathFromGcode(c.gcode, c.lim);
+        ASSERT_TRUE(r.failedAt.empty())
+            << c.name << " pipeline failed at " << r.failedAt;
+
+        double paretoT = 0.0, paretoMs = 0.0, toppraT = 0.0;
+        {
+            mpa::ParetoTimeEnergyOptimalVelocityPlanner<3, double> p(
+                c.lim, {});
+            const auto t0 = std::chrono::steady_clock::now();
+            auto prof = p.computeProfile(
+                r.path, c.feed, 0.0, 0.0,
+                std::min<std::size_t>(
+                    40000, std::max<std::size_t>(
+                        400, r.numNurbsPieces * 20)));
+            paretoMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t0).count();
+            ASSERT_NE(prof, nullptr) << c.name << " Pareto failed";
+            ASSERT_NE(p.weightedSource(), nullptr);
+            paretoT = p.weightedSource()->totalTime();
+        }
+        {
+            mpa::AnalyticalJerkLimitedTOPPRA<3, double> tp(
+                c.lim, /*buildHybrid=*/false);
+            auto prof = tp.computeProfile(
+                r.path, c.feed, 0.0, 0.0, c.toppraSamples);
+            ASSERT_NE(prof, nullptr) << c.name << " TOPP-RA failed";
+            ASSERT_NE(tp.ssrSource(), nullptr);
+            toppraT = tp.ssrSource()->totalTime();
+        }
+
+        std::cout << std::fixed << std::setprecision(3)
+                  << c.name << " (snap=1e100): T pareto=" << paretoT
+                  << "s toppra=" << toppraT << "s (delta "
+                  << std::setprecision(1)
+                  << 100.0 * (toppraT - paretoT) / paretoT << "%)"
+                  << " | solve pareto=" << paretoMs << "ms\n";
+        // Snap-free emission should land within ~15% of TOPP-RA.
+        EXPECT_LT(paretoT, toppraT * 1.15)
+            << c.name << " snap-relaxed Pareto " << paretoT
+            << "s is far above TOPP-RA " << toppraT << "s";
+    }
+}
+
 // The Hybrid's per-element LGL build used to explode near low-velocity
 // edges: v(s) ~ sqrt(s* - s) has unbounded slope there, so the midpoint
 // certificates never converged and every such arc split to max depth
