@@ -264,39 +264,41 @@ protected:
     }
 };
 
-TEST_F(FoEManagerInitializedTest, UploadFileReturnsInvalidState) {
+TEST_F(FoEManagerInitializedTest, UploadFileLocalFileError) {
     FoETransferConfig cfg;
     cfg.filename = "firmware.bin";
+    // Mock transport fileOpen() returns false -> local file error.
     FoEResult r = mgr_.uploadFile("/tmp/firmware.bin", cfg);
     EXPECT_FALSE(r.success);
-    EXPECT_EQ(r.error_code, FoEError::INVALID_STATE);
+    EXPECT_EQ(r.error_code, FoEError::LOCAL_FILE_ERROR);
 }
 
-TEST_F(FoEManagerInitializedTest, DownloadFileReturnsInvalidState) {
+TEST_F(FoEManagerInitializedTest, DownloadFileLocalFileError) {
     FoETransferConfig cfg;
     cfg.filename = "log.txt";
     FoEResult r = mgr_.downloadFile("/tmp/log.txt", cfg);
     EXPECT_FALSE(r.success);
-    EXPECT_EQ(r.error_code, FoEError::INVALID_STATE);
+    EXPECT_EQ(r.error_code, FoEError::LOCAL_FILE_ERROR);
 }
 
-TEST_F(FoEManagerInitializedTest, UploadMemoryReturnsInvalidState) {
+TEST_F(FoEManagerInitializedTest, UploadMemoryMailboxError) {
     uint8_t data[32] = {0xAA};
     FoETransferConfig cfg;
     cfg.filename = "data.bin";
+    // Mock transport mailboxWrite() returns false -> mailbox error.
     FoEResult r = mgr_.uploadMemory(data, sizeof(data), cfg);
     EXPECT_FALSE(r.success);
-    EXPECT_EQ(r.error_code, FoEError::INVALID_STATE);
+    EXPECT_EQ(r.error_code, FoEError::MAILBOX_ERROR);
 }
 
-TEST_F(FoEManagerInitializedTest, DownloadMemoryReturnsInvalidState) {
+TEST_F(FoEManagerInitializedTest, DownloadMemoryMailboxError) {
     uint8_t buf[64] = {};
     size_t received = 0;
     FoETransferConfig cfg;
     cfg.filename = "data.bin";
     FoEResult r = mgr_.downloadMemory(buf, sizeof(buf), &received, cfg);
     EXPECT_FALSE(r.success);
-    EXPECT_EQ(r.error_code, FoEError::INVALID_STATE);
+    EXPECT_EQ(r.error_code, FoEError::MAILBOX_ERROR);
 }
 
 // ============================================================================
@@ -618,26 +620,28 @@ TEST(FoE_FreeFunction, UploadDownload) {
     FoETransferConfig cfg;
     cfg.filename = "test.bin";
 
-    // Upload file (stubbed -> INVALID_STATE)
+    // Upload file (mock transport fails -> LOCAL_FILE_ERROR)
     FoEResult r = foe_upload_file(mgr, "/tmp/test.bin", cfg);
     EXPECT_FALSE(r.success);
-    EXPECT_EQ(r.error_code, FoEError::INVALID_STATE);
+    EXPECT_EQ(r.error_code, FoEError::LOCAL_FILE_ERROR);
 
     // Download file
     r = foe_download_file(mgr, "/tmp/test.bin", cfg);
     EXPECT_FALSE(r.success);
-    EXPECT_EQ(r.error_code, FoEError::INVALID_STATE);
+    EXPECT_EQ(r.error_code, FoEError::LOCAL_FILE_ERROR);
 
-    // Upload memory
+    // Upload memory (mock mailbox fails -> MAILBOX_ERROR)
     uint8_t data[16] = {};
     r = foe_upload_memory(mgr, data, sizeof(data), cfg);
     EXPECT_FALSE(r.success);
+    EXPECT_EQ(r.error_code, FoEError::MAILBOX_ERROR);
 
     // Download memory
     uint8_t buf[16] = {};
     size_t received = 0;
     r = foe_download_memory(mgr, buf, sizeof(buf), &received, cfg);
     EXPECT_FALSE(r.success);
+    EXPECT_EQ(r.error_code, FoEError::MAILBOX_ERROR);
 }
 
 // ============================================================================

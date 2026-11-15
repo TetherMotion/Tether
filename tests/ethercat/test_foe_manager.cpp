@@ -7,7 +7,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <deque>
+#include <vector>
 
 #include "tether/ethercat/FoE.hpp"
 
@@ -125,7 +129,8 @@ TEST(FoEManagerTest, TransferApiRequiresInit) {
     EXPECT_FALSE(mgr.uploadFileAsync("x", cfg, &handle));
     EXPECT_FALSE(mgr.downloadFileAsync("x", cfg, &handle));
 
-    // After init the stubs report INVALID_STATE / false.
+    // After init the sync calls fail fast (no filename -> INVALID_STATE)
+    // and the async calls are accepted onto the worker queue.
     ASSERT_TRUE(mgr.init());
     EXPECT_EQ(mgr.uploadFile("x", cfg).error_code, FoEError::INVALID_STATE);
     EXPECT_EQ(mgr.downloadFile("x", cfg).error_code, FoEError::INVALID_STATE);
@@ -133,8 +138,12 @@ TEST(FoEManagerTest, TransferApiRequiresInit) {
               FoEError::INVALID_STATE);
     EXPECT_EQ(mgr.downloadMemory(nullptr, 0, &received, cfg).error_code,
               FoEError::INVALID_STATE);
-    EXPECT_FALSE(mgr.uploadFileAsync("x", cfg, &handle));
-    EXPECT_FALSE(mgr.downloadFileAsync("x", cfg, &handle));
+    EXPECT_TRUE(mgr.uploadFileAsync("x", cfg, &handle));
+    EXPECT_TRUE(mgr.waitComplete(&handle, 2000));
+    EXPECT_EQ(handle.result.error_code, FoEError::INVALID_STATE);
+    EXPECT_TRUE(mgr.downloadFileAsync("x", cfg, &handle));
+    EXPECT_TRUE(mgr.waitComplete(&handle, 2000));
+    EXPECT_EQ(handle.result.error_code, FoEError::INVALID_STATE);
 }
 
 TEST(FoEManagerTest, HandleHelpers) {
@@ -153,4 +162,143 @@ TEST(FoEManagerTest, HandleHelpers) {
     EXPECT_FALSE(handle.cancel.load());
     mgr.cancel(&handle);
     EXPECT_TRUE(handle.cancel.load());
+}
+
+// ============================================================================
+// Scripted slave transport — exercises the real FoE protocol exchange.
+// ============================================================================
+
+namespace {
+
+// Emulates a FoE slave: WRQ -> ACK(0); each DATA -> ACK(block); RRQ ->
+// ACK(0,size) then DATA blocks of `file` content, one per master ACK.
+class ScriptedFoESlave : public IFoETransport {
+public:
+    std::vector<uint8_t> file;     // content the "slave" serves
+    std::vector<uint8_t> uploaded; // bytes received via DATA blocks
+
+    bool mailboxWrite(uint16_t, uint16_t, uint16_t, const uint8_t* data,
+                      size_t len, uint8_t*) override {
+        if (len < 1) return false;
+        const uint8_t op = data[0];
+        if (op == 2) {                    // WRQ -> ACK block 0
+            pushMsg({4, 0, 0, 0, 0, 0});
+        } else if (op == 3) {             // DATA -> ACK same block
+            if (len > 6) uploaded.insert(uploaded.end(), data + 6, data + len);
+            pushMsg({4, 0, data[2], data[3], data[4], data[5]});
+        } else if (op == 1) {             // RRQ -> ACK(0,size) + first DATA
+            const uint32_t sz = static_cast<uint32_t>(file.size());
+            pushMsg({4, 0, 0, 0, 0, 0,
+                     static_cast<uint8_t>(sz), static_cast<uint8_t>(sz >> 8),
+                     static_cast<uint8_t>(sz >> 16), static_cast<uint8_t>(sz >> 24)});
+            rxOffset_ = 0;
+            rxBlock_ = 1;
+            txDone_ = false;
+            pumpData();
+        } else if (op == 4) {             // master ACK -> next DATA block
+            if (!txDone_) pumpData();
+        }
+        return true;
+    }
+
+    bool mailboxRead(uint16_t, uint16_t, uint16_t, uint8_t* data, size_t cap,
+                     size_t* len, uint32_t) override {
+        if (msgs_.empty()) return false;
+        const auto& m = msgs_.front();
+        if (m.size() > cap) return false;
+        std::memcpy(data, m.data(), m.size());
+        *len = m.size();
+        msgs_.pop_front();
+        return true;
+    }
+
+    bool fileOpen(const char*, bool, uint32_t* size) override {
+        readPos_ = 0;
+        if (size) *size = static_cast<uint32_t>(file.size());
+        return true;
+    }
+    int32_t fileRead(void* buf, size_t n) override {
+        const size_t avail = file.size() - readPos_;
+        const size_t c = std::min(n, avail);
+        std::memcpy(buf, file.data() + readPos_, c);
+        readPos_ += c;
+        return static_cast<int32_t>(c);
+    }
+    int32_t fileWrite(const void* buf, size_t n) override {
+        const uint8_t* p = static_cast<const uint8_t*>(buf);
+        uploaded.insert(uploaded.end(), p, p + n);
+        return static_cast<int32_t>(n);
+    }
+    void fileClose() override {}
+    uint32_t getTimeMs() override { return 0; }
+    void delayMs(uint32_t) override {}
+
+private:
+    void pushMsg(std::vector<uint8_t> m) { msgs_.push_back(std::move(m)); }
+
+    void pumpData() {
+        std::vector<uint8_t> m = {3, 0,
+            static_cast<uint8_t>(rxBlock_),
+            static_cast<uint8_t>(rxBlock_ >> 8),
+            static_cast<uint8_t>(rxBlock_ >> 16),
+            static_cast<uint8_t>(rxBlock_ >> 24)};
+        const size_t n = std::min<size_t>(496, file.size() - rxOffset_);
+        m.insert(m.end(), file.begin() + rxOffset_,
+                 file.begin() + rxOffset_ + n);
+        rxOffset_ += n;
+        ++rxBlock_;
+        txDone_ = (n < 496);   // short/empty block terminates the transfer
+        pushMsg(std::move(m));
+    }
+
+    std::deque<std::vector<uint8_t>> msgs_;
+    size_t rxOffset_ = 0;
+    uint32_t rxBlock_ = 1;
+    bool txDone_ = false;
+    size_t readPos_ = 0;
+};
+
+} // namespace
+
+TEST(FoEManagerTest, UploadMemoryRoundTrip) {
+    ScriptedFoESlave slave;
+    const std::vector<uint8_t> payload = {1, 2, 3, 4, 5, 6, 7, 8};
+    slave.file = payload;
+    FoEManager mgr(slave);
+    ASSERT_TRUE(mgr.init());
+
+    FoETransferConfig cfg;
+    cfg.filename = "fw.bin";
+    cfg.slave_index = 1;
+    cfg.timeout_ms = 1000;
+
+    FoEResult r = mgr.uploadMemory(payload.data(), payload.size(), cfg);
+    EXPECT_TRUE(r.success) << "err=" << static_cast<int>(r.error_code);
+    EXPECT_EQ(r.bytes_transferred, payload.size());
+    EXPECT_EQ(slave.uploaded, payload);
+    EXPECT_EQ(mgr.getStats().uploads_completed, 1u);
+    mgr.deinit();
+}
+
+TEST(FoEManagerTest, DownloadMemoryRoundTrip) {
+    ScriptedFoESlave slave;
+    std::vector<uint8_t> payload(600);
+    for (size_t i = 0; i < payload.size(); ++i) payload[i] = static_cast<uint8_t>(i);
+    slave.file = payload;
+    FoEManager mgr(slave);
+    ASSERT_TRUE(mgr.init());
+
+    uint8_t buf[1024] = {};
+    size_t received = 0;
+    FoETransferConfig cfg;
+    cfg.filename = "log.bin";
+    cfg.slave_index = 1;
+    cfg.timeout_ms = 1000;
+
+    FoEResult r = mgr.downloadMemory(buf, sizeof(buf), &received, cfg);
+    EXPECT_TRUE(r.success) << "err=" << static_cast<int>(r.error_code);
+    EXPECT_EQ(received, payload.size());
+    EXPECT_EQ(std::memcmp(buf, payload.data(), payload.size()), 0);
+    EXPECT_EQ(mgr.getStats().downloads_completed, 1u);
+    mgr.deinit();
 }

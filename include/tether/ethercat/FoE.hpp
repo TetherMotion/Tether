@@ -476,6 +476,9 @@ private:
 
     bool enqueueRequest(const RequestEntry& entry);
     bool dequeueRequest(RequestEntry& entry);
+    void workerFunction();
+    FoEResult executeRequest(const RequestEntry& entry);
+    void recordResult(const RequestEntry& entry, const FoEResult& result);
 };
 
 // ============================================================================
