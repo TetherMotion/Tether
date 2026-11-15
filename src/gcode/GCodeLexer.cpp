@@ -678,6 +678,19 @@ LexerToken Lexer::scanNumber(bool allowSign) {
             advance();
             continue;
         }
+        if ((c == 'e' || c == 'E')) {
+            // Scientific-notation exponent: "1.5e-3". The 'e' is only an
+            // exponent marker when followed by [+-]?digit — otherwise it is
+            // the E word letter (extrusion axis), e.g. "X1.5E0.2".
+            size_t j = m_pos + 1;
+            if (j < m_len && (m_source[j] == '+' || m_source[j] == '-')) ++j;
+            if (j < m_len && isDigit(m_source[j])) {
+                advance();
+                if (m_pos < m_len && (current() == '+' || current() == '-'))
+                    advance();
+                continue; // digit loop consumes the exponent
+            }
+        }
         if (m_config.allowSpacesInNumbers && is_space(c) && c != '\n') {
             advance();
             continue;

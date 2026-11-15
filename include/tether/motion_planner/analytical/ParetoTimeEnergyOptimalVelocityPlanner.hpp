@@ -4128,6 +4128,11 @@ public:
             bool interiorMin = false; /**< True for splits at interior
                                    velocity-limit minima — the newest
                                    mechanism, dropped first on fallback */
+            bool isStamp = false;   /**< True when a binding corner-velocity
+                                   stamp forces this split — a hard point
+                                   constraint that survives EVERY fallback
+                                   (a feed-step-only split may be dropped;
+                                   a stamp may never be crossed faster) */
         };
 
         std::vector<PathSplit> splits;
@@ -4159,7 +4164,8 @@ public:
                 const double crossV =
                     std::min({cornerV, fL, fR, machineCap});
                 splits.push_back(
-                    {segs[i].cumulativeArcLength, crossV, 0.0, false});
+                    {segs[i].cumulativeArcLength, crossV, 0.0, false,
+                     false, bindingCorner});
                 haveJunctionSplits = true;
             }
         }
@@ -4300,6 +4306,8 @@ public:
                     } else if (!merged.back().isDwell) {
                         merged.back().boundaryV = std::min(
                             merged.back().boundaryV, sp.boundaryV);
+                        merged.back().isStamp =
+                            merged.back().isStamp || sp.isStamp;
                     }
                     // else: junction coincident with a dwell -> dropped
                 } else {
@@ -4474,22 +4482,31 @@ public:
             // Equalising its two boundary speeds to the lower value
             // gives a constant-speed crawl that always fits, so the
             // staircase keeps a slower but feasible solution instead of
-            // dropping to the fallback. Lowering a boundary can demand
-            // more deceleration from the other side, so affected
-            // neighbours are re-checked (bounded passes; values only
-            // decrease).
-            for (int pass = 0; pass < 4; ++pass) {
+            // dropping to the fallback.
+            //
+            // Iterate to a FIXED POINT: lowering a shared boundary can
+            // *lengthen* the transition a decelerating left neighbour
+            // needs (it must shed more speed), so a tightening cascades
+            // up the chain — the former bounded-pass loop exited
+            // mid-cascade and left pieces infeasible at solve time.
+            // effB values only decrease and are bounded below, so the
+            // loop converges; the pass cap is a safety net only.
+            // Feasibility is checked against safeLen (stricter than the
+            // solve-time gate's len+1e-10) so landed values cannot slip
+            // through a tolerance gap.
+            for (int pass = 0; pass < 256; ++pass) {
                 bool changed = false;
                 for (size_t i = 0; i <= sp.size(); ++i) {
                     auto& pc = pcs[i];
                     if (!pc.solver || !pc.haveBound) continue;
                     const double len = pc.sEnd - pc.sStart;
+                    const double safeLen = len * (1.0 - 1e-6);
                     const double vL = (i == 0)
                         ? static_cast<double>(v0) : effB[i - 1];
                     const double vR = (i == sp.size())
                         ? static_cast<double>(endVelocity) : effB[i];
                     if (pc.solver->boundaryTransitionFeasible(
-                            vL, vR, len))
+                            vL, vR, safeLen))
                         continue;
                     // Asymmetric remedy: keep the already-feasible
                     // side and bisect only the higher boundary down
@@ -4498,11 +4515,9 @@ public:
                     // carry speed on short connectors. Feasibility
                     // is monotone in the varied side (accel distance
                     // grows with the exit speed, decel distance with
-                    // the entry speed); len is shrunk so the landed
-                    // value satisfies the stricter solve-time gate.
+                    // the entry speed).
                     double lo = std::min(vL, vR);
                     double hi = std::max(vL, vR);
-                    const double safeLen = len * (1.0 - 1e-6);
                     for (int k = 0; k < 24; ++k) {
                         const double mid = 0.5 * (lo + hi);
                         const double tL = (vR > vL) ? vL : mid;
@@ -4523,6 +4538,34 @@ public:
                             effB[i - 1] = lo;
                             changed = true;
                         }
+                    }
+                }
+                if (!changed) break;
+            }
+            // Safety net for the (unseen) non-converged case: any piece
+            // still infeasible gets its higher boundary clamped to the
+            // lower side — a constant-speed pulse always fits
+            // (minDist(v,v,v)=0). Clamping re-cascades, so loop until
+            // stable; values still only decrease.
+            for (int pass = 0; pass < 32; ++pass) {
+                bool changed = false;
+                for (size_t i = 0; i <= sp.size(); ++i) {
+                    auto& pc = pcs[i];
+                    if (!pc.solver || !pc.haveBound) continue;
+                    const double len = pc.sEnd - pc.sStart;
+                    const double vL = (i == 0)
+                        ? static_cast<double>(v0) : effB[i - 1];
+                    const double vR = (i == sp.size())
+                        ? static_cast<double>(endVelocity) : effB[i];
+                    if (pc.solver->boundaryTransitionFeasible(
+                            vL, vR, len * (1.0 - 1e-6)))
+                        continue;
+                    const double m = std::min(vL, vR);
+                    if (vL > vR && i > 0 && effB[i - 1] > m) {
+                        effB[i - 1] = m; changed = true;
+                    }
+                    if (vR > vL && i < sp.size() && effB[i] > m) {
+                        effB[i] = m; changed = true;
                     }
                 }
                 if (!changed) break;
@@ -4610,16 +4653,20 @@ public:
                 }
                 // Second fallback: junction splitting produced an
                 // infeasible sub-problem (e.g. a boundary velocity the
-                // neighbours cannot reach). Drop to the previous
-                // behaviour: dwell-only splits, or the single whole-path
-                // solve when there are no dwells.
+                // neighbours cannot reach). Keep every HARD point
+                // constraint — dwells and binding corner stamps —
+                // dropping only the soft feed-step junctions. Stamps
+                // are non-negotiable: a whole-path solve could cross a
+                // stamped junction above its corner speed, which is a
+                // real constraint violation, not just a quality loss.
                 if (!solved && haveJunctionSplits) {
-                    std::vector<PathSplit> dwellOnly;
+                    std::vector<PathSplit> hardOnly;
                     for (const auto& sp : splits)
-                        if (sp.isDwell) dwellOnly.push_back(sp);
-                    solved = dwellOnly.empty()
+                        if (sp.isDwell || sp.isStamp)
+                            hardOnly.push_back(sp);
+                    solved = hardOnly.empty()
                         ? solveWhole(failReason)
-                        : solveSplit(dwellOnly, failReason);
+                        : solveSplit(hardOnly, failReason);
                 }
             }
         } else {
