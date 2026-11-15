@@ -498,7 +498,16 @@ double NurbsCurve::length() const {
 
 void NurbsCurve::ensureArcLengthLut() const {
     if (!lutU_.empty()) return;
-    constexpr int N = 128;
+    // Table density ~4 entries per knot span, clamped to [16, 128]. A
+    // degree-p piece with few spans (e.g. a recompressor fit) needs far
+    // fewer quadrature intervals than a fixed 128 for a reliable Newton
+    // seed; complex pieces keep the historical 128-entry resolution.
+    int nSpan = 0;
+    for (std::size_t i = degree_;
+         i + 1 < knots_.size() && i < degree_ + controlPoints_.size(); ++i) {
+        if (knots_[i + 1] > knots_[i]) ++nSpan;
+    }
+    const int N = std::clamp(4 * nSpan, 16, 128);
     const double u0 = knotMin(), u1 = knotMax();
     lutU_.resize(N + 1);
     lutS_.resize(N + 1);

@@ -212,22 +212,21 @@ LSQFit fitLeastSquares(const std::vector<RVec>& pts,
 // ============================================================================
 
 /**
- * Certified bound on |C'(u)| over the fitted (non-rational) B-spline:
- * the derivative is itself a B-spline with control points
- *   Q_i = p·(P_{i+1} − P_i)/(U_{i+p+1} − U_{i+1}),
- * so the convex-hull property gives |C'(u)| ≤ max_i |Q_i|.
+ * Derivative control-point magnitudes |Q_i| of the fitted (non-rational)
+ * B-spline: Q_i = p·(P_{i+1} − P_i)/(U_{i+p+1} − U_{i+1}). The convex-hull
+ * property gives |C'(u)| ≤ max_i |Q_i| over the active index range.
  */
-double speedBound(const std::vector<RVec>& cps,
-                  const std::vector<double>& knots, int degree) {
-    double bound = 0.0;
-    const int n = static_cast<int>(cps.size()) - 1;
-    for (int i = 0; i < n; ++i) {
+std::vector<double> derivMagnitudes(const std::vector<RVec>& cps,
+                                    const std::vector<double>& knots,
+                                    int degree) {
+    const std::size_t n = cps.size() - 1;
+    std::vector<double> q(n, 0.0);
+    for (std::size_t i = 0; i + 1 < cps.size(); ++i) {
         const double den = knots[i + degree + 1] - knots[i + 1];
         if (den <= kTol) continue;
-        bound = std::max(bound,
-                         degree * (cps[i + 1] - cps[i]).norm() / den);
+        q[i] = degree * (cps[i + 1] - cps[i]).norm() / den;
     }
-    return bound;
+    return q;
 }
 
 struct Cert {
@@ -252,49 +251,123 @@ Cert certify(const NurbsCurve& curve, const std::vector<RVec>& vts,
     double worst = 0.0;
 
     // Direction 1: source vertices → curve. |C(t_i) − v_i| is itself a
-    // valid upper bound on the vertex's distance to the curve — evaluate
-    // it first and only pay for the root-isolated pointCurveDistance
-    // where the residual is a substantial fraction of tol.
+    // valid upper bound on the vertex's distance to the curve — when it
+    // is ≤ tol the vertex is already certified, so the root-isolated
+    // pointCurveDistance is only needed as a last-chance rescue when
+    // the residual exceeds tol (the fitted curve may still pass near
+    // the vertex at a different parameter).
     for (std::size_t i = 1; i + 1 < vts.size(); ++i) {
         const double res_i =
             curve.evaluate(params[i]).distanceTo(vts[i]);
         double d = res_i;
-        if (res_i > 0.5 * tol)
+        if (res_i > tol)
             d = pointCurveDistance(curve, vts[i]).distance;
         if (d > worst) { worst = d; res.splitHint = i; }
         if (worst > tol) { res.deviation = worst; return res; }
     }
 
-    // Direction 2: curve → polyline. Double the sample density until the
-    // gap bound cannot hide a violation larger than tol.
+    // Direction 2: curve → polyline.
+    //
+    // polylineDist is O(nVerts) per sample — too slow as an inner loop.
+    // Since params[] is monotone, the sample at curve parameter u has
+    // its nearest polyline segment near the segment index implied by u;
+    // a window of ±kWin segments around that index is scanned instead.
+    // A windowed minimum is ≥ the true distance (fewer candidates), so
+    // every bound below stays conservative — over-estimates only ever
+    // make us reject, never accept. When the windowed value exceeds tol
+    // the exact full scan is used (accurate rejection + split hint).
+    //
+    // Interval refinement: rather than one uniform dense grid, each
+    // interval [ua,ub] is bounded by
+    //   max(da,db) + 0.5·(ub−ua)·max|C'|_[ua,ub]
+    // with the *local* derivative-control-point bound for that span.
+    // Only intervals whose bound can hide a violation are bisected —
+    // good fits stay coarse everywhere except their tight spots.
     const double uMin = curve.knotMin(), uMax = curve.knotMax();
-    const double speed = speedBound(curve.controlPoints(), curve.knots(),
-                                    curve.degree());
-    std::size_t K = std::max<std::size_t>(
-        64, 8 * (curve.numControlPoints() - curve.degree()));
-    for (;;) {
-        const double h = (uMax - uMin) / K;
-        double maxSample = 0.0;
-        std::size_t worstSample = 0;
-        for (std::size_t k = 0; k <= K; ++k) {
-            const double u = uMin + h * k;
-            const double d = polylineDist(curve.evaluate(u), vts);
-            if (d > maxSample) { maxSample = d; worstSample = k; }
+    const int p = curve.degree();
+    const auto& cpRef = curve.controlPoints();
+    const auto& knRef = curve.knots();
+    const int ncpI = static_cast<int>(curve.numControlPoints());
+    const std::vector<double> qmag = derivMagnitudes(cpRef, knRef, p);
+    auto localSpeed = [&](double ua, double ub) {
+        const int sa = findSpan(knRef, p, ua, ncpI);
+        const int sb = findSpan(knRef, p, ub, ncpI);
+        const int lo = std::max(0, sa - p);
+        const int hi = std::min(static_cast<int>(qmag.size()) - 1,
+                                std::max(sb - 1, lo));
+        double s = 0.0;
+        for (int i = lo; i <= hi; ++i) s = std::max(s, qmag[i]);
+        return s;
+    };
+    const std::size_t nSeg = vts.size() - 1;
+    constexpr std::size_t kWin = 8;
+    auto windowedDist = [&](const RVec& pt, double u) {
+        const auto it = std::upper_bound(params.begin(), params.end(), u);
+        const std::size_t segIdx =
+            std::min<std::size_t>(
+                it == params.begin() ? 0
+                                     : std::size_t(it - params.begin()) - 1,
+                nSeg - 1);
+        const std::size_t lo = segIdx > kWin ? segIdx - kWin : 0;
+        const std::size_t hi = std::min(segIdx + kWin, nSeg - 1);
+        double best = std::numeric_limits<double>::infinity();
+        for (std::size_t i = lo; i <= hi; ++i)
+            best = std::min(best, pointSegDist(pt, vts[i], vts[i + 1]));
+        if (best > tol) best = polylineDist(pt, vts);
+        return best;
+    };
+
+    struct Iv { double ua, ub, da, db; };
+    std::vector<Iv> work;
+    const std::size_t K0 = std::max<std::size_t>(
+        32, 2 * (curve.numControlPoints() - curve.degree()));
+    const double h0 = (uMax - uMin) / K0;
+    std::vector<double> d0(K0 + 1, 0.0);
+    double bound = 0.0, worstU = uMin;
+    {
+        bool earlyFail = false;
+        for (std::size_t k = 0; k <= K0; ++k) {
+            const double u = uMin + h0 * k;
+            d0[k] = windowedDist(curve.evaluate(u), u);
+            if (d0[k] > tol) {          // confirmed violation — fail fast
+                worst = std::max(worst, d0[k]);
+                worstU = u;
+                earlyFail = true;
+                break;
+            }
         }
-        const double bound = maxSample + 0.5 * h * speed;
-        // The certified deviation is the bound at the *finest* sampling
-        // reached — the loose margin at coarse K is not a violation.
-        if (bound <= tol || maxSample > tol || K >= 16384) {
-            worst = std::max(worst, bound);
-            const double uw = uMin + h * worstSample;
-            auto it = std::lower_bound(params.begin(), params.end(), uw);
-            res.splitHint = std::min<std::size_t>(
-                it == params.end() ? vts.size() - 1
-                                   : it - params.begin(),
-                vts.size() - 1);
-            break;
+        if (!earlyFail) {
+            for (std::size_t k = 0; k < K0; ++k)
+                work.push_back({uMin + h0 * k, uMin + h0 * (k + 1),
+                                d0[k], d0[k + 1]});
+            constexpr std::size_t kMaxEvals = 8192;
+            std::size_t evals = K0 + 1;
+            while (!work.empty()) {
+                const Iv iv = work.back(); work.pop_back();
+                const double locB = std::max(iv.da, iv.db)
+                    + 0.5 * (iv.ub - iv.ua) * localSpeed(iv.ua, iv.ub);
+                if (locB <= tol || evals >= kMaxEvals) {
+                    if (locB > bound) {
+                        bound = locB;
+                        worstU = 0.5 * (iv.ua + iv.ub);
+                    }
+                    continue;
+                }
+                const double um = 0.5 * (iv.ua + iv.ub);
+                const double dm = windowedDist(curve.evaluate(um), um);
+                ++evals;
+                if (dm > tol) { bound = dm; worstU = um; break; }
+                work.push_back({iv.ua, um, iv.da, dm});
+                work.push_back({um, iv.ub, dm, iv.db});
+            }
         }
-        K *= 2; // gap bound dominates — sample denser
+    }
+    worst = std::max(worst, bound);
+    {
+        auto it = std::lower_bound(params.begin(), params.end(), worstU);
+        res.splitHint = std::min<std::size_t>(
+            it == params.end() ? vts.size() - 1 : it - params.begin(),
+            vts.size() - 1);
     }
     res.deviation = worst;
     res.ok = worst <= tol;

@@ -195,23 +195,41 @@ corner velocities + dwell points) →
   pieces (arcs/splines stay verbatim), G0 gaps, dwell piece-boundaries
   (hard breaks), and junctions > `cornerAngleDeg`. Each candidate is
   certified in both directions: source vertices → `pointCurveDistance`
-  (Bernstein root isolation) and dense curve samples → polyline with a
-  convex-hull |C′| gap bound. Failures grow CPs to `maxControlPoints`,
-  then split at the worst vertex; at the depth cap the source pieces are
-  emitted verbatim, so the output never exceeds `tolerance`. Converter
-  attribute merge is conservative: feedRate → min positive (tightest cap
-  wins), deviations/extruderSpeeds → max, dwells remap onto output
-  boundaries via the returned `sourceMap`. Measured on a real 55k-segment
-  print: ~1.3–1.5× fewer pieces (file is mostly legitimate zigzag/travel
-  geometry that is *correctly* preserved); tessellated curves alone go
-  10–50× (49-piece rounded-square loop → 9 pieces; 200-chord arc → 1
-  piece at 13 µm deviation). Pitfalls learned the hard way: the dir-2 gap
-  bound must use the *final* K-doubling iteration's bound, not the loose
-  early estimate; `lsqKnots` needs strictly-increasing interior knots
-  (duplicate knots → 0/0 basis → NaN CPs); and a boundary split hint must
-  clamp to an interior vertex or the split never happens. Not applied to
-  outside-circle-blended paths. `PathRecompressor*` and
-  `BadGcodeRecompressionEndToEnd` pin it.
+  (Bernstein root isolation — only when the chord residual exceeds tol,
+  since the residual is itself an upper bound) and curve → polyline via
+  adaptive interval refinement (`max(da,db) + 0.5·h·localSpeed` per
+  interval with local derivative-CP bounds; only possibly-violating
+  intervals get bisected). Per-sample polyline distance uses a ±8-segment
+  window around the monotone chord parameter — a subset min is an
+  over-estimate, so the bound stays conservative and only >tol samples
+  fall back to the full O(n) scan. Failures grow CPs to
+  `maxControlPoints`, then split at the worst vertex; at the depth cap
+  the source pieces are emitted verbatim, so the output never exceeds
+  `tolerance`. Converter attribute merge is conservative: feedRate → min
+  positive (tightest cap wins), deviations/extruderSpeeds → max, dwells
+  remap onto output boundaries via the returned `sourceMap` (skipped
+  entirely when no dwells — piece.length() is quadrature per piece).
+  `result.recompression` carries sourcePieces/fitted/split/verbatim and
+  the certified deviation. Measured on a real 69k-segment print: ~1.37×
+  fewer pieces at tol=0.02mm in ~2.3s (was 14.6s before the cert
+  optimizations — windowed distances + adaptive refinement fixed the
+  quadratic polylineDist scans); tessellated curves alone go 10–50×
+  (49-piece rounded-square loop → 9 pieces; 200-chord arc → 1 piece at
+  13 µm deviation). Pitfalls learned the hard way: `lsqKnots` needs
+  strictly-increasing interior knots (duplicates → 0/0 basis → NaN CPs);
+  and a boundary split hint must clamp to an interior vertex or the
+  split never happens. Not applied to outside-circle-blended paths.
+  `PathRecompressor*` and `BadGcodeRecompressionEndToEnd` pin it.
+  `--recompress`/`--analytical` on `gcode_motion_benchmark` drive it.
+- **Recompressed-path planner cost**: Pareto `computeProfile` is ~1.9×
+  slower on fitted paths (435 vs 232 ms on the 69k file) — degree-3
+  pieces pay `invertLength`'s LUT build + Newton per s-eval where lines
+  are trivial. `NurbsCurve::ensureArcLengthLut` now sizes the table at
+  ~4 entries/knot-span clamped to [16,128] (was fixed 128) which buys
+  ~30% there; residual cost is inherent curve evaluation. Analytical
+  jerk-limited TOPP-RA does NOT scale to real files at all (>90 s on
+  1,945 pieces — windowed solve per stamped junction), so Pareto stays
+  the production default.
 
 - **Solver model**: one scalar `(V, A, J, snap)` bound per piece via
   `globalBounds()` over a sampled grid, then one accel/decel pulse per

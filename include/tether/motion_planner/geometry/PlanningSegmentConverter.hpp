@@ -29,6 +29,8 @@
 #include "tether/motion_planner/geometry/NurbsCurve.hpp"
 #include "tether/motion_planner/geometry/PiecewiseNurbsPath.hpp"
 
+#include <cstddef>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -40,6 +42,18 @@ struct DwellPoint {
     double duration = 0.0; /**< Dwell duration (seconds) */
 };
 
+/**
+ * Statistics from geometric recompression (populated only when
+ * `SegmentRecompressOptions::enabled` and recompression actually ran).
+ */
+struct RecompressionStats {
+    std::size_t sourcePieces = 0;        /**< pieces before recompression */
+    std::size_t runsFitted = 0;          /**< runs replaced by fitted pieces */
+    std::size_t runsSplit = 0;           /**< runs recursively split */
+    std::size_t piecesKeptVerbatim = 0;  /**< source pieces copied unchanged */
+    double maxCertifiedDeviation = 0.0;  /**< certified Hausdorff bound [mm] */
+};
+
 /**@brief Result of converting PlanningSegments to a NURBS path. */
 struct PlanningSegmentNurbsResult {
     PiecewiseNurbsPath path; /**< The assembled NURBS path */
@@ -47,6 +61,7 @@ struct PlanningSegmentNurbsResult {
     std::vector<float> extruderSpeeds; /**< Per-piece extruder speed (mm/s) */
     std::vector<double> feedRates; /**< Per-piece feed rate (mm/s, converted from mm/min) */
     std::vector<DwellPoint> dwellPoints; /**< Dwell points (G4 commands), in arc-length order */
+    std::optional<RecompressionStats> recompression; /**< Set when recompression ran */
 };
 
 /**

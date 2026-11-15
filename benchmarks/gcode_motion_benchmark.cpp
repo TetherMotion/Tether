@@ -40,6 +40,7 @@
 #include "tether/gcode/GCodeInterpreter.hpp"
 #include "tether/gcode/motion/G64CornerMode.hpp"
 #include "tether/motion_planner/PathAdapter.hpp"
+#include "tether/motion_planner/analytical/AnalyticalTOPPRA.hpp"
 #include "tether/motion_planner/analytical/ParetoTimeEnergyOptimalVelocityPlanner.hpp"
 #include "tether/motion_planner/geometry/PlanningSegmentConverter.hpp"
 #include "tether/motion_planner/analytical/extrusion/AnalyticalExtrusionTypes.hpp"
@@ -84,6 +85,7 @@ using GCode::PlanningSegmentResult;
 using GCode::CornerAnalyzer;
 using MotionPlanner::PathAdapter;
 using MotionPlanner::analytical::ParetoTimeEnergyOptimalVelocityPlanner;
+using MotionPlanner::analytical::AnalyticalJerkLimitedTOPPRA;
 using MotionPlanner::analytical::CostWeights;
 using MotionPlanner::analytical::WeightedSwitchingStructure;
 using MotionPlanner::KinematicLimits;
@@ -559,6 +561,8 @@ struct Options {
     double max_velocity = 200.0;     // mm/s
     double max_accel = 2000.0;       // mm/s²
     double max_jerk = 20000.0;       // mm/s³ (0 = disable)
+    double recompress_tol = -1.0;    // mm (<0 = recompression OFF)
+    bool analytical = false;         // also run AnalyticalTOPPRA (Step 3d)
 };
 
 bool parse_args(int argc, char* argv[], Options& opt) {
@@ -578,6 +582,8 @@ bool parse_args(int argc, char* argv[], Options& opt) {
         else if (a == "--max-velocity")  { const char* v = next("--max-velocity"); if (!v) return false; opt.max_velocity = std::strtod(v, nullptr); }
         else if (a == "--max-accel")     { const char* v = next("--max-accel"); if (!v) return false; opt.max_accel = std::strtod(v, nullptr); }
         else if (a == "--max-jerk")      { const char* v = next("--max-jerk"); if (!v) return false; opt.max_jerk = std::strtod(v, nullptr); }
+        else if (a == "--recompress")    { const char* v = next("--recompress"); if (!v) return false; opt.recompress_tol = std::strtod(v, nullptr); }
+        else if (a == "--analytical")    opt.analytical = true;
         else if (a == "-h" || a == "--help") {
             std::cout <<
                 "Usage: gcode_motion_benchmark <gcode_file> [options]\n"
@@ -588,7 +594,10 @@ bool parse_args(int argc, char* argv[], Options& opt) {
                 "  --max-samples N           Cap dense sample count (default 1000000; 0=uncapped)\n"
                 "  --max-velocity V  Path velocity limit mm/s (default 200)\n"
                 "  --max-accel A     Path acceleration limit mm/s² (default 2000)\n"
-                "  --max-jerk J      Path jerk limit mm/s³ (default 20000; 0 disables)\n";
+                "  --max-jerk J      Path jerk limit mm/s³ (default 20000; 0 disables)\n"
+                "  --recompress TOL  Enable geometric NURBS recompression with\n"
+                "                    certified deviation bound TOL mm (default off)\n"
+                "  --analytical      Also run AnalyticalTOPPRA on the same path (Step 3d)\n";
             return false;
         } else if (a.size() > 0 && a[0] == '-') {
             std::cerr << "Error: unknown option '" << a << "'\n";
@@ -717,9 +726,19 @@ int main(int argc, char* argv[]) {
     std::optional<tether::motion::PlanningSegmentNurbsResult> nurbsResult;
     try {
         Timer t; t.start();
-        nurbsResult = tether::motion::piecewiseNurbsFromSegments(segments);
-        report.add("Step 3: piecewiseNurbsFromSegments", t.ms(),
-                   nurbsResult->path.numPieces());
+        if (opt.recompress_tol >= 0.0) {
+            tether::motion::SegmentRecompressOptions rcOpts;
+            rcOpts.enabled = true;
+            rcOpts.tolerance = opt.recompress_tol;
+            nurbsResult = tether::motion::piecewiseNurbsFromSegments(
+                segments, rcOpts);
+        } else {
+            nurbsResult = tether::motion::piecewiseNurbsFromSegments(segments);
+        }
+        const char* label = opt.recompress_tol >= 0.0
+            ? "Step 3: piecewiseNurbsFromSegments (+recompress)"
+            : "Step 3: piecewiseNurbsFromSegments";
+        report.add(label, t.ms(), nurbsResult->path.numPieces());
     } catch (const std::exception& e) {
         std::cerr << "Error: NURBS construction failed: " << e.what() << '\n';
         return 1;
@@ -728,6 +747,16 @@ int main(int argc, char* argv[]) {
     std::cout << "NURBS path: " << nurbsResult->path.numPieces()
               << " pieces, total length " << std::fixed
               << std::setprecision(2) << pathLength << " mm\n";
+    if (nurbsResult->recompression) {
+        const auto& rs = *nurbsResult->recompression;
+        std::cout << "Recompression: " << rs.sourcePieces << " -> "
+                  << nurbsResult->path.numPieces() << " pieces ("
+                  << rs.runsFitted << " fitted, " << rs.runsSplit
+                  << " splits, " << rs.piecesKeptVerbatim
+                  << " verbatim), certified dev "
+                  << std::setprecision(4) << rs.maxCertifiedDeviation
+                  << " mm\n";
+    }
 
     // ── Step 3b: Pareto time-energy-optimal velocity profile ─────────────────
     // Uses Tether's ParetoTimeEnergyOptimalVelocityPlanner (the default
@@ -790,6 +819,26 @@ int main(int argc, char* argv[]) {
         } catch (const std::exception& e) {
             report.add("Step 3c: Analytical extrusion (FAILED)", 0.0, 0,
                        std::string("exception: ") + e.what());
+        }
+
+        // ── Step 3d (optional): AnalyticalTOPPRA on the same path ────────
+        if (opt.analytical) {
+            AnalyticalJerkLimitedTOPPRA<3, double> atp(limits);
+            try {
+                Timer t; t.start();
+                auto aprofile = atp.computeProfile(
+                    pathAdapter, feedRate, 0.0, 0.0, 1000);
+                auto ssr = atp.ssrSource();
+                auto* aSampled =
+                    dynamic_cast<SampledVelocityProfile*>(aprofile.get());
+                report.add("Step 3d: AnalyticalTOPPRA computeProfile",
+                           t.ms(), ssr ? ssr->numArcs() : 0,
+                           (aSampled && aSampled->points().empty())
+                               ? "EMPTY PROFILE" : "");
+            } catch (const std::exception& e) {
+                report.add("Step 3d: AnalyticalTOPPRA (FAILED)", 0.0, 0,
+                           std::string("exception: ") + e.what());
+            }
         }
     } else {
         report.add("Step 3b: Pareto (SKIPPED — too many pieces)", 0.0, 0,

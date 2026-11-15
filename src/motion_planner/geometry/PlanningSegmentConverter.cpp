@@ -404,30 +404,42 @@ PlanningSegmentNurbsResult piecewiseNurbsFromSegments(
         // Remap dwell arc lengths: a dwell at source-piece boundary k
         // sits at the start of the output piece whose source range
         // begins at k (guaranteed — dwells are hard breaks). A dwell at
-        // the path end maps to the total length.
-        std::vector<double> outPrefix(nOut + 1, 0.0);
-        for (std::size_t j = 0; j < nOut; ++j)
-            outPrefix[j + 1] = outPrefix[j] + rc.path.piece(j).length();
-        const std::size_t nSrc = path.numPieces();
-        for (std::size_t d = 0; d < dwellPoints.size(); ++d) {
-            const std::size_t k = dwellBreakPieces[d];
-            if (k >= nSrc) {
-                dwellPoints[d].arcLength = outPrefix[nOut];
-                continue;
-            }
-            for (std::size_t j = 0; j < nOut; ++j) {
-                if (rc.sourceMap[j].srcBegin == k) {
-                    dwellPoints[d].arcLength = outPrefix[j];
-                    break;
+        // the path end maps to the total length. Skipped entirely when
+        // there are no dwells — piece(j).length() is adaptive
+        // quadrature on non-line pieces and costs ~µs·100 each.
+        if (!dwellPoints.empty()) {
+            std::vector<double> outPrefix(nOut + 1, 0.0);
+            for (std::size_t j = 0; j < nOut; ++j)
+                outPrefix[j + 1] = outPrefix[j] + rc.path.piece(j).length();
+            const std::size_t nSrc = path.numPieces();
+            for (std::size_t d = 0; d < dwellPoints.size(); ++d) {
+                const std::size_t k = dwellBreakPieces[d];
+                if (k >= nSrc) {
+                    dwellPoints[d].arcLength = outPrefix[nOut];
+                    continue;
+                }
+                for (std::size_t j = 0; j < nOut; ++j) {
+                    if (rc.sourceMap[j].srcBegin == k) {
+                        dwellPoints[d].arcLength = outPrefix[j];
+                        break;
+                    }
                 }
             }
         }
+
+        RecompressionStats stats;
+        stats.sourcePieces = path.numPieces();
+        stats.runsFitted = rc.runsFitted;
+        stats.runsSplit = rc.runsSplit;
+        stats.piecesKeptVerbatim = rc.piecesKeptVerbatim;
+        stats.maxCertifiedDeviation = rc.maxCertifiedDeviation;
 
         return {std::move(rc.path),
                 std::move(deviations),
                 std::move(extruderSpeeds),
                 std::move(feedRates),
-                std::move(dwellPoints)};
+                std::move(dwellPoints),
+                std::move(stats)};
     }
 
     return {std::move(path),
