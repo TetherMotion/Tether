@@ -70,6 +70,7 @@
 
 #include "AnalyticalTypes.hpp"
 #include "ConstraintEvaluator.hpp"
+#include "ExactEnvelope.hpp"
 #include "NumericalUtils.hpp"
 #include "AnalyticalTOPPRA.hpp"
 #include "AnalyticalSSRVelocityProfile.hpp"
@@ -85,6 +86,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -1528,11 +1530,10 @@ public:
         v0_ = static_cast<double>(startVelocity);
         vf_ = static_cast<double>(endVelocity);
         constraintCacheSize_ = std::max(constraintCacheSize, size_t(10));
-        // Reuse intervalBound()'s cache only when it was built at this
-        // grid size — a different size implies different node spacing
-        // and a stale grid would silently misalign velocityLimitAt().
-        const bool haveBounds =
-            intervalBoundsValid_ && cacheGridSize_ == constraintCacheSize_;
+        // Reuse intervalBound()'s envelope + bounds when fresh — the
+        // certified envelope is resolution-independent, so the former
+        // grid-size equality condition is gone.
+        const bool haveBounds = intervalBoundsValid_;
         intervalBoundsValid_ = false;
         if (!haveBounds) {
             buildConstraintCache();
@@ -1552,7 +1553,8 @@ public:
             return velocityLimitAt(s);
         };
         auto result = optimizePulsePlan(
-            vLimit, v0_, vf_, haveBounds ? &lastIntervalBounds_ : nullptr);
+            vLimit, v0_, vf_, haveBounds ? &lastIntervalBounds_ : nullptr,
+            /*envelopeTrusted=*/true);
 
         arcs_ = std::move(result.arcs);
         lastCost_ = result.cost;
@@ -1765,7 +1767,8 @@ public:
         lastIntervalBounds_ = globalBounds(
             vLimit, sTotal_,
             std::min(entryCap, vLimit(0.0)),
-            std::min(exitCap, vLimit(sTotal_)));
+            std::min(exitCap, vLimit(sTotal_)),
+            /*envelopeTrusted=*/true);
         // solve() reuses this cache + bounds when called at the same
         // grid size, halving the split-solve cost per piece.
         intervalBoundsValid_ = true;
@@ -1818,11 +1821,10 @@ public:
         vf_ = static_cast<double>(endVelocity);
         constraintCacheSize_ = std::max(constraintCacheSize, size_t(10));
         buildConstraintCache();
-        buildFineVelocityGrid();
     }
 
     /**
-     * @brief Get the default v_lim profile (from backward pass + fine grid).
+     * @brief Get the default v_lim profile (exact limit + look-ahead).
      *
      * This is the v_lim function used by the standard solver. It can be
      * passed to forwardPass() for testing.
@@ -1830,8 +1832,7 @@ public:
      * @param s Arc length [units].
      */
     double defaultVLimAt(double s) const {
-        double vGrid = vLimFineGrid_[fineGridIndex(s)];
-        return lookAheadVLimit(s, vGrid);
+        return lookAheadVLimit(s, velocityLimitAt(s));
     }
 
     /**
@@ -2342,7 +2343,8 @@ private:
         const std::function<double(double)>& vLimit,
         double sTotal,
         double entryCap = std::numeric_limits<double>::infinity(),
-        double exitCap = std::numeric_limits<double>::infinity()) const {
+        double exitCap = std::numeric_limits<double>::infinity(),
+        bool envelopeTrusted = false) const {
         PlanningBounds bounds;
         if (!(sTotal > 0.0)) {
             bounds.failureReason = "Path has non-positive length";
@@ -2376,55 +2378,167 @@ private:
         bounds.jerk = static_cast<double>(effectiveJerk);
         bounds.snap = static_cast<double>(effectiveSnap);
 
-        // The first and last grid samples sit on enforced boundaries:
-        // the caller's start/end velocities for a whole path, or the
-        // split-point crossing speeds for a sub-path (which solveSplit
-        // clamps to the interval bounds on BOTH sides). A pointwise dip
-        // exactly at an endpoint is honoured by that boundary speed, so
-        // it must not collapse the interior envelope — otherwise every
-        // piece touching a cusp inherits the cusp's bound for its whole
-        // length. All three constraint loops below therefore scan the
-        // interior samples only (samples >= 32 guarantees >= 31 of them).
-        const size_t samples = std::max<size_t>(constraintCacheSize_, 32);
-        for (size_t i = 1; i < samples; ++i) {
-            const double s = sTotal * static_cast<double>(i) /
-                             static_cast<double>(samples);
-            const double v = vLimit(s);
-            if (!std::isfinite(v) || v < 0.0) {
-                bounds.failureReason = "Non-finite or negative velocity limit";
-                return bounds;
+        // Evaluation positions: the certified envelope's interior
+        // candidates (every point where the velocity limit can be
+        // extremal or switch its binding term) plus its authority
+        // probes (per-axis κ_i² and κ²·v_axis⁴ stationary points where
+        // centripetal consumption can peak without an envelope
+        // extremum). Endpoint candidates are EXCLUDED — a pointwise dip
+        // exactly at an enforced boundary is honoured by the boundary
+        // speed, so it must not collapse the interior envelope — while
+        // a dip infinitesimally inside the interval is a real interior
+        // constraint and stays.
+        //
+        // For the production callable (velocityLimitAt, the evaluator's
+        // closed-form limit) this set is exact: between consecutive
+        // candidates the envelope is single-term and monotone, so the
+        // candidate minimum IS the interval minimum — no sampling.
+        // For an opaque callable (forwardPass test injection) adaptive
+        // midpoint discovery below follows every dip a bracket reveals
+        // and descends flat-but-wide gaps to a bounded depth — bisection,
+        // not a dense grid.
+        const double sEps = 1e-9 * std::max(1.0, sTotal);
+        std::vector<double> envPts;    // interior candidates
+        std::vector<double> probePts;  // interior authority probes
+        if (envelope_) {
+            envPts.reserve(envelope_->candidates.size());
+            for (const auto& c : envelope_->candidates) {
+                if (c.s > sEps && c.s < sTotal - sEps)
+                    envPts.push_back(c.s);
             }
-            bounds.velocity = std::min(bounds.velocity, v);
+            probePts.reserve(envelope_->authorityProbes.size());
+            for (const double s : envelope_->authorityProbes) {
+                if (s > sEps && s < sTotal - sEps) probePts.push_back(s);
+            }
+        }
+
+        // Seed evaluations: both endpoints (bracketing only — their
+        // values never enter the interior bound) plus interior seeds.
+        // For the trusted envelope the values are already computed:
+        // candidate vg is exactly what the evaluator's velocityLimit
+        // returns (geometric terms only — stamps are point constraints
+        // owned by boundary velocities, so they must not collapse the
+        // interior bound; this also keeps interior dwell stamps (v=0)
+        // out of the bound, as the pre-envelope grid did).
+        struct EvalPt { double s, v; };
+        std::vector<EvalPt> evals;
+        if (envelopeTrusted && envelope_) {
+            for (const auto& c : envelope_->candidates) {
+                if (!std::isfinite(c.vg) || c.vg < 0.0) {
+                    bounds.failureReason =
+                        "Non-finite or negative velocity limit";
+                    return bounds;
+                }
+                if (c.s > sEps && c.s < sTotal - sEps) {
+                    bounds.velocity = std::min(bounds.velocity, c.vg);
+                }
+            }
+            if (!std::isfinite(bounds.velocity)) {
+                // No interior candidates: the open interval is
+                // provably single-term and monotone (any extremum or
+                // term crossing would be a candidate), so its infimum
+                // is the smaller one-sided geometric limit at an
+                // endpoint.
+                for (const auto& c : envelope_->candidates) {
+                    bounds.velocity = std::min(bounds.velocity, c.vg);
+                }
+            }
+        } else {
+            evals.reserve(envPts.size() + 2);
+            evals.push_back({0.0, vLimit(0.0)});
+            for (const double s : envPts) evals.push_back({s, vLimit(s)});
+            evals.push_back({sTotal, vLimit(sTotal)});
+            for (const auto& e : evals) {
+                if (!std::isfinite(e.v) || e.v < 0.0) {
+                    bounds.failureReason =
+                        "Non-finite or negative velocity limit";
+                    return bounds;
+                }
+            }
+            for (std::size_t i = 1; i + 1 < evals.size(); ++i) {
+                bounds.velocity = std::min(bounds.velocity, evals[i].v);
+            }
+        }
+
+        // Adaptive discovery: bisect brackets where the callable dips
+        // below both endpoints (a hidden dip), or where a flat bracket
+        // is wide enough to hide structure an opaque callable may have.
+        // Skipped entirely for the envelope-backed production callable:
+        // between consecutive candidates the envelope is single-term and
+        // monotone, so no midpoint can undercut its bracket — the whole
+        // discovery could only burn evaluations for points that cannot
+        // change the bound. It exists solely for opaque callables
+        // (forwardPass test injection), where it must stay bisection,
+        // not a dense grid.
+        std::vector<double> discovered;
+        if (!envelopeTrusted) {
+            struct Bracket { double lo, vLo, hi, vHi; int depth; };
+            std::vector<Bracket> stack;
+            stack.reserve(evals.size());
+            for (std::size_t i = 0; i + 1 < evals.size(); ++i) {
+                stack.push_back({evals[i].s, evals[i].v,
+                                 evals[i + 1].s, evals[i + 1].v, 0});
+            }
+            std::size_t discoveredCount = 0;
+            while (!stack.empty() && discoveredCount < 2048) {
+                const Bracket b = stack.back();
+                stack.pop_back();
+                const double width = b.hi - b.lo;
+                if (!(width > sEps)) continue;
+                const double m = 0.5 * (b.lo + b.hi);
+                const double vm = vLimit(m);
+                if (!std::isfinite(vm) || vm < 0.0) {
+                    bounds.failureReason =
+                        "Non-finite or negative velocity limit";
+                    return bounds;
+                }
+                bounds.velocity = std::min(bounds.velocity, vm);
+                discovered.push_back(m);
+                ++discoveredCount;
+                const bool dip = vm < 0.995 * std::min(b.vLo, b.vHi);
+                if (dip && b.depth < 12) {
+                    stack.push_back({b.lo, b.vLo, m, vm, b.depth + 1});
+                    stack.push_back({m, vm, b.hi, b.vHi, b.depth + 1});
+                } else if (!dip && b.depth < 8 &&
+                           width > sTotal / 256.0) {
+                    stack.push_back({b.lo, b.vLo, m, vm, b.depth + 1});
+                    stack.push_back({m, vm, b.hi, b.vHi, b.depth + 1});
+                }
+            }
         }
         if (!(bounds.velocity > 0.0) || !std::isfinite(bounds.velocity)) {
             bounds.failureReason = "Path velocity envelope contains a stop";
             return bounds;
         }
 
-        // When the sample grid coincides with the constraint cache grid,
-        // reuse the precomputed geometric coefficients. Evaluating the
-        // NURBS path at every sample dominates solve time on curved paths.
-        const bool useCache =
-            samples == constraintCacheSize_ &&
-            gridCoeffs_.size() == constraintCacheSize_ + 1 &&
-            sTotal == sTotal_;
+        // Authority evaluation positions: interior candidates ∪ probes ∪
+        // discovered points. Geometric coefficients (tangent, curvature,
+        // jounce) depend only on s — evaluated ONCE per point and reused
+        // by every bound query and bisection iteration at that point, so
+        // the headroom searches cost pure algebra, not path evaluations.
+        std::vector<double> authPts = envPts;
+        authPts.insert(authPts.end(), probePts.begin(), probePts.end());
+        authPts.insert(authPts.end(), discovered.begin(), discovered.end());
+        std::sort(authPts.begin(), authPts.end());
+        authPts.erase(std::unique(authPts.begin(), authPts.end(),
+                                  [sEps](double a, double b) {
+                                      return b - a < sEps;
+                                  }),
+                      authPts.end());
+
+        std::vector<KinematicCoefficients> authCoeffs;
+        authCoeffs.reserve(authPts.size());
+        for (const double s : authPts) {
+            authCoeffs.push_back(evaluator_.computeCoefficients(
+                static_cast<T>(s), T(0), T(0), path_));
+        }
+
         const auto accelBoundsAt = [&](size_t i, double velocity) {
-            if (useCache) return accelBoundsFromCache(i, velocity);
-            const T s = static_cast<T>(sTotal * static_cast<double>(i) /
-                                        static_cast<double>(samples));
-            const auto b = evaluator_.accelerationBounds(
-                s, static_cast<T>(velocity), path_);
-            return std::pair<double, double>{
-                static_cast<double>(b.first),
-                static_cast<double>(b.second)};
+            return accelBoundsFromCoeffs(authCoeffs[i], velocity);
         };
         const auto etaBoundsAt = [&](size_t i, double velocity,
                                      double accel) -> EtaBounds {
-            if (useCache) return etaBoundsFromCache(i, velocity, accel);
-            const T s = static_cast<T>(sTotal * static_cast<double>(i) /
-                                        static_cast<double>(samples));
-            return evaluator_.etaBounds(s, static_cast<T>(velocity),
-                                        static_cast<T>(accel), path_);
+            return etaBoundsFromCoeffs(authCoeffs[i], velocity, accel);
         };
 
         // Acceleration constraints depend on speed. The symmetric
@@ -2476,14 +2590,16 @@ private:
                    sTotal * (1.0 - 1e-6);
         };
 
-        for (size_t i = 1; i < samples; ++i) {
-            const double s = sTotal * static_cast<double>(i) /
-                             static_cast<double>(samples);
+        for (std::size_t pi = 0; pi < authPts.size(); ++pi) {
+            const double s = authPts[pi];
             double vLocal = std::min(
-                bounds.velocity, static_cast<double>(vLimit(s)));
+                bounds.velocity,
+                envelopeTrusted
+                    ? vLimFromCoeffs(authCoeffs[pi], s)
+                    : static_cast<double>(vLimit(s)));
 
             const auto symmetricAt = [&](double v) {
-                const auto [aMin, aMax] = accelBoundsAt(i, v);
+                const auto [aMin, aMax] = accelBoundsAt(pi, v);
                 return std::min(aMax, -aMin);
             };
 
@@ -2525,9 +2641,8 @@ private:
         // keeps the centripetal term from consuming the entire axis budget.
         const double jerkHeadroom = std::max(1.0, 0.02 * bounds.jerk);
 
-        for (size_t i = 1; i < samples; ++i) {
-            const T s = static_cast<T>(sTotal * static_cast<double>(i) /
-                                        static_cast<double>(samples));
+        for (std::size_t pi = 0; pi < authPts.size(); ++pi) {
+            const double s = authPts[pi];
             // Evaluate jerk bounds at the local velocity limit, not the
             // global envelope. At high-curvature points (corners), the
             // velocity limit drops, reducing centripetal jerk consumption
@@ -2535,7 +2650,10 @@ private:
             // envelope velocity here would make corners with high curvature
             // incorrectly drive the jerk bound negative for the entire path.
             double vLocal = std::min(
-                bounds.velocity, static_cast<double>(vLimit(s)));
+                bounds.velocity,
+                envelopeTrusted
+                    ? vLimFromCoeffs(authCoeffs[pi], s)
+                    : static_cast<double>(vLimit(s)));
 
             // Best (widest) symmetric tangential jerk this sample affords
             // at a given velocity, over the extreme acceleration levels.
@@ -2548,7 +2666,7 @@ private:
                 double sym = std::numeric_limits<double>::max();
                 for (const double a : {-bounds.acceleration, 0.0,
                                        bounds.acceleration}) {
-                    const auto interval = etaBoundsAt(i, v, a);
+                    const auto interval = etaBoundsAt(pi, v, a);
                     sym = std::min(sym, std::min(interval.eta_max,
                                                  -interval.eta_min));
                 }
@@ -2862,7 +2980,8 @@ private:
     ForwardPassResult optimizePulsePlan(
         const std::function<double(double)>& vLimit,
         double startVelocity, double endVelocity,
-        const PlanningBounds* precomputedBounds = nullptr) const {
+        const PlanningBounds* precomputedBounds = nullptr,
+        bool envelopeTrusted = false) const {
         ForwardPassResult best;
         best.failureReason = "No feasible snap-space pulse candidate";
         double bestCost = std::numeric_limits<double>::infinity();
@@ -2877,7 +2996,9 @@ private:
         // the identical envelope, solve() passes it in to skip the rescan.
         const auto baseBounds = precomputedBounds
             ? *precomputedBounds
-            : globalBounds(vLimit, sTotal_);
+            : globalBounds(vLimit, sTotal_, std::numeric_limits<double>::infinity(),
+                           std::numeric_limits<double>::infinity(),
+                           envelopeTrusted);
         constexpr size_t kCandidates = 41;
         for (size_t i = 0; i < kCandidates; ++i) {
             const double fraction = static_cast<double>(i) /
@@ -2912,13 +3033,6 @@ private:
     size_t constraintCacheSize_ = 200;
     double ds_ = 0.0;
 
-    size_t fineGridSize_ = 0;
-    double dsFine_ = 0.0;
-    std::vector<double> vLimFineGrid_;
-    std::vector<double> vLimGeoGrid_;  /**< Pre-fold geometric vLim
-        on the coarse grid: equals Evaluator::velocityLimit minus the
-        per-segment term; lets velocityLimitAt() answer bounds-grid
-        samples without re-evaluating the path. */
     PlanningBounds lastIntervalBounds_;
     bool intervalBoundsValid_ = false; /**< intervalBound() cache+bounds
         are fresh for a following solve() at cacheGridSize_. */
@@ -2927,8 +3041,10 @@ private:
     std::vector<std::pair<double, double>> corners_;
     double aMaxForLookahead_ = 0.0;
 
-    std::vector<KinematicCoefficients> gridCoeffs_;
-    std::vector<double> vLimGrid_;
+    /**Certified per-piece velocity-envelope analysis — replaces the
+        former sampled constraint grids. Set by buildConstraintCache()
+        (the name is kept; it now builds the exact envelope). */
+    std::optional<typename ExactEnvelope<Dim, T>::Result> envelope_;
 
     std::vector<Arc> arcs_;
     double lastCost_ = 0.0;
@@ -3101,319 +3217,58 @@ private:
     }
 
     /**
-     * @brief Precompute the path geometry and velocity limit on the solver grid.
+     * @brief Build the certified velocity-envelope analysis of the path.
      *
-     * This is the dominant cost for NURBS/arc paths: each constraint query
-     * otherwise inverts arc length and evaluates high-order NURBS derivatives.
-     * Caching once per solve makes every simulateAndCost call
-     * O(constraintCacheSize) instead of O(constraintCacheSize * pathEvalCost).
-     *
-     * When the path has per-segment velocity limits (feed rates + corner
-     * velocities), a fine velocity-limit grid is built in addition to the
-     * coarse coefficient grid. The fine grid captures per-segment feed rate
-     * transitions and corner velocity dips. Backward and forward velocity
-     * limit propagation ensures the solver decelerates before corners and
-     * accelerates after them, given the acceleration constraints.
+     * Replaces the former coarse/fine constraint grids: ExactEnvelope
+     * derives every point where the velocity limit can be minimal or
+     * change its binding term (all curvature/per-axis extrema, pairwise
+     * term crossings, segment-feed steps, corner stamps) via certified
+     * Bernstein-form root isolation on each Bézier span — no sampling,
+     * no missed dips, grid-resolution independent. The result drives
+     * globalBounds() evaluation positions and the look-ahead corner set.
      */
     void buildConstraintCache() {
         if (sTotal_ <= 0.0 || constraintCacheSize_ == 0) return;
-
-        // --- Coarse grid: geometric coefficients (tangent, curvature, etc.) ---
-        // This is the expensive part (NURBS evaluation per point).
+        // Nominal step retained only for the legacy gridStep() accessor.
         ds_ = sTotal_ / static_cast<double>(constraintCacheSize_);
-        gridCoeffs_.resize(constraintCacheSize_ + 1);
-        vLimGrid_.resize(constraintCacheSize_ + 1);
-        vLimGeoGrid_.resize(constraintCacheSize_ + 1);
 
-        for (size_t i = 0; i <= constraintCacheSize_; ++i) {
-            double s = std::min(static_cast<double>(i) * ds_, sTotal_);
-            gridCoeffs_[i] = evaluator_.computeCoefficients(
-                static_cast<T>(s), T(0), T(0), path_);
+        envelope_ = ExactEnvelope<Dim, T>().analyze(
+            path_, limits_, feedRate_, 0.0, sTotal_);
 
-            // Velocity limit from the cached coefficients (path-level + curvature
-            // + per-axis directional limit).
-            double kappa = gridCoeffs_[i].kappa;
-            double vLim = static_cast<double>(
-                std::min(feedRate_, limits_.path.maxPathVelocity));
-            if (kappa > static_cast<double>(MathConstants::EPSILON) &&
-                limits_.path.maxCentripetalAcceleration > T(0)) {
-                double vCurvature = std::sqrt(
-                    static_cast<double>(limits_.path.maxCentripetalAcceleration)
-                    / kappa);
-                vLim = std::min(vLim, vCurvature);
+        // Look-ahead corner set: every certified local minimum of the
+        // envelope (junction stamps are folded in as point dips), plus
+        // feed step-down boundaries, plus the enforced terminal point —
+        // the same role the fine-grid dip scan played, at exact
+        // positions and values.
+        corners_.clear();
+        for (const auto& m : envelope_->localMinima) {
+            corners_.emplace_back(m.s, m.v);
+        }
+        const auto& cand = envelope_->candidates;
+        for (std::size_t i = 1; i < cand.size(); ++i) {
+            // A sharp drop between consecutive candidates that does not
+            // bottom out at a local minimum is a step-down boundary
+            // (feed change) — the look-ahead must brake into it.
+            if (cand[i].v < 0.7 * cand[i - 1].v &&
+                !(i + 1 < cand.size() && cand[i].v < cand[i + 1].v)) {
+                corners_.emplace_back(cand[i].s, cand[i].v);
             }
-            auto maxVel = limits_.maxVelocityForDirection(
-                toVec(gridCoeffs_[i].tangent));
-            vLim = std::min(vLim, static_cast<double>(maxVel));
-            // Keep a pre-fold copy: the fine-grid pass folds corner
-            // dips and accel propagation back into vLimGrid_, but the
-            // pure geometric limit is what Evaluator::velocityLimit
-            // reproduces (minus the per-segment term, applied on top
-            // by velocityLimitAt).
-            vLimGeoGrid_[i] = vLimGrid_[i] = std::max(vLim, 0.0);
         }
 
-        // --- Fine grid: velocity limit with per-segment constraints ---
-        buildFineVelocityGrid();
-
-        // Detect corners from the fine grid vLim profile if none were
-        // found from explicit corner velocities. Points where vLim drops
-        // significantly are treated as corners for look-ahead planning.
-        if (corners_.empty()) {
-            for (size_t i = 2; i + 2 < vLimFineGrid_.size(); ++i) {
-                double vPrev = vLimFineGrid_[i - 1];
-                double vCur  = vLimFineGrid_[i];
-                double vNext = vLimFineGrid_[i + 1];
-                if (vCur < vPrev - 0.1 && vCur < vNext - 0.1) {
-                    double s = static_cast<double>(i) * dsFine_;
-                    corners_.emplace_back(s, vCur);
-                }
-            }
-            // Also detect significant drops
-            for (size_t i = 1; i < vLimFineGrid_.size(); ++i) {
-                double vPrev = vLimFineGrid_[i - 1];
-                double vCur  = vLimFineGrid_[i];
-                if (vPrev > 0 && vCur < vPrev * 0.7) {
-                    double s = static_cast<double>(i) * dsFine_;
-                    bool found = false;
-                    for (const auto& [sC, vC] : corners_) {
-                        if (std::abs(sC - s) < dsFine_ * 2) { found = true; break; }
-                    }
-                    if (!found) corners_.emplace_back(s, vCur);
-                }
-            }
-            std::sort(corners_.begin(), corners_.end(),
-                [](const auto& a, const auto& b) { return a.first < b.first; });
-        }
-
-        // Always ensure the terminal point (sEnd, vf_) is in corners_ so
-        // the look-ahead TOPPRA backward pass creates a deceleration profile
-        // toward the end. Also ensure aMaxForLookahead_ is set.
         if (aMaxForLookahead_ <= 0.0) {
-            aMaxForLookahead_ = static_cast<double>(limits_.path.maxPathAcceleration);
+            aMaxForLookahead_ = static_cast<double>(
+                limits_.path.maxPathAcceleration);
             if (aMaxForLookahead_ <= 0.0) aMaxForLookahead_ = 500.0;
-            // The look-ahead now uses a snapspace-aware formula that accounts
-            // for jerk/snap ramp time, so we use the full aMax here.
         }
-        // Add terminal point as a corner if not already present
         bool hasTerminal = false;
         for (const auto& [sC, vC] : corners_) {
             if (std::abs(sC - sTotal_) < 1e-6) { hasTerminal = true; break; }
         }
         if (!hasTerminal) {
             corners_.emplace_back(sTotal_, vf_);
-            std::sort(corners_.begin(), corners_.end(),
-                [](const auto& a, const auto& b) { return a.first < b.first; });
         }
-    }
-
-    /**
-     * @brief Build the fine velocity-limit grid.
-     *
-     * If the path has per-segment velocity limits, the fine grid is enlarged
-     * to capture per-segment feed rate transitions and corner velocity dips.
-     * The geometric velocity limit is interpolated from the coarse grid.
-     * Backward and forward propagation ensures the velocity limit accounts
-     * for the machine's acceleration/deceleration capabilities.
-     *
-     * If no per-segment limits are present, the fine grid is identical to
-     * the coarse grid (backward compatible).
-     */
-    void buildFineVelocityGrid() {
-        const bool hasPerSeg = path_.hasPerSegmentVelocityLimits();
-
-        if (!hasPerSeg) {
-            // Backward compatible: fine grid = coarse grid.
-            fineGridSize_ = constraintCacheSize_;
-            dsFine_ = ds_;
-            vLimFineGrid_ = vLimGrid_;  // copy
-            return;
-        }
-
-        // Build a fine velocity-limit grid with per-segment feed rates,
-        // corner velocities, and backward/forward propagation.
-        //
-        // The solver queries this fine grid for velocity limits, but uses
-        // the coarse grid step size for the simulation. The backward/forward
-        // propagation on the fine grid ensures the velocity limit profile
-        // is achievable given the acceleration constraints, creating a
-        // smooth deceleration/acceleration profile around corners.
-        const size_t numSegs = path_.numSegments();
-        const size_t minFine = numSegs * 2;
-        fineGridSize_ = std::max(constraintCacheSize_, minFine);
-        const size_t kMaxFine = 500000;
-        fineGridSize_ = std::min(fineGridSize_, kMaxFine);
-
-        dsFine_ = sTotal_ / static_cast<double>(fineGridSize_);
-        vLimFineGrid_.resize(fineGridSize_ + 1);
-
-        // Fill the fine grid: interpolate geometric vLim from coarse grid
-        // and apply per-segment velocity limits (feed rate + corner velocity).
-        for (size_t i = 0; i <= fineGridSize_; ++i) {
-            double s = std::min(static_cast<double>(i) * dsFine_, sTotal_);
-            double geoVLim = interpolateCoarseVLim(s);
-            double segVLim = path_.maxVelocityAtArcLength(static_cast<T>(s));
-            vLimFineGrid_[i] = std::max(std::min(geoVLim, segVLim), 0.0);
-        }
-
-        // Direct corner constraint stamping on the fine grid.
-        double aMax = static_cast<double>(limits_.path.maxPathAcceleration);
-        if (aMax <= 0.0) aMax = 1.0;
-        aMaxForLookahead_ = aMax;  // Cache for look-ahead in simulateAndCost
-
-        const double vMaxGlobal = static_cast<double>(
-            std::min(feedRate_, limits_.path.maxPathVelocity));
-        const double maxStampDist = vMaxGlobal * vMaxGlobal / (2.0 * aMax);
-        const int stampRadius = std::max(1,
-            (int)std::ceil(maxStampDist / dsFine_));
-
-        const auto& cornerVel = path_.cornerVelocities();
-        corners_.clear();
-        if (!cornerVel.empty()) {
-            const auto& segs = path_.segments();
-            for (size_t i = 0; i < cornerVel.size(); ++i) {
-                if (!std::isfinite(cornerVel[i])) continue;
-                if (i == 0 || i + 1 >= cornerVel.size()) continue;
-                double s;
-                if (i < segs.size()) {
-                    s = static_cast<double>(segs[i].cumulativeArcLength);
-                } else {
-                    s = sTotal_;
-                }
-                corners_.emplace_back(s, cornerVel[i]);
-            }
-        }
-
-        // Also detect corners from the fine grid vLim profile.
-        // Points where vLim drops significantly are treated as corners
-        // for the look-ahead forward planning.
-        if (corners_.empty() || corners_.size() <= 1) {
-            // Scan the fine grid for local minima in vLim
-            for (size_t i = 2; i + 2 < vLimFineGrid_.size(); ++i) {
-                double vPrev = vLimFineGrid_[i - 1];
-                double vCur  = vLimFineGrid_[i];
-                double vNext = vLimFineGrid_[i + 1];
-                // Detect local minimum: vCur < vPrev and vCur < vNext
-                if (vCur < vPrev - 0.1 && vCur < vNext - 0.1) {
-                    double s = static_cast<double>(i) * dsFine_;
-                    corners_.emplace_back(s, vCur);
-                }
-            }
-            // Also detect significant drops (not just local minima)
-            for (size_t i = 1; i < vLimFineGrid_.size(); ++i) {
-                double vPrev = vLimFineGrid_[i - 1];
-                double vCur  = vLimFineGrid_[i];
-                if (vPrev > 0 && vCur < vPrev * 0.7) {
-                    double s = static_cast<double>(i) * dsFine_;
-                    // Check not already added
-                    bool found = false;
-                    for (const auto& [sC, vC] : corners_) {
-                        if (std::abs(sC - s) < dsFine_ * 2) { found = true; break; }
-                    }
-                    if (!found) corners_.emplace_back(s, vCur);
-                }
-            }
-            std::sort(corners_.begin(), corners_.end(),
-                [](const auto& a, const auto& b) { return a.first < b.first; });
-        }
-
-        // corners_ is already sorted by arc length (segments are ordered).
-
-        for (const auto& [sCorner, vCorner] : corners_) {
-            if (vCorner >= vMaxGlobal && vCorner > 0) continue;
-            int centerIdx = (int)(sCorner / dsFine_ + 0.5);
-            int lo = std::max(0, centerIdx - stampRadius);
-            int hi = std::min((int)fineGridSize_, centerIdx + stampRadius);
-            for (int i = lo; i <= hi; ++i) {
-                double s = static_cast<double>(i) * dsFine_;
-                double d = std::abs(s - sCorner);
-                double vMax = std::sqrt(vCorner * vCorner + 2.0 * aMax * d);
-                vLimFineGrid_[i] = std::min(vLimFineGrid_[i], vMax);
-            }
-        }
-
-        // Also update the coarse grid with the min-filtered fine grid values
-        // so that the coarse grid is consistent.
-        for (size_t i = 0; i <= constraintCacheSize_; ++i) {
-            double sCoarse = static_cast<double>(i) * ds_;
-            size_t iFineLo = (size_t)(sCoarse / dsFine_);
-            size_t iFineHi = (size_t)((sCoarse + ds_) / dsFine_);
-            if (iFineHi > fineGridSize_) iFineHi = fineGridSize_;
-            if (iFineLo > fineGridSize_) iFineLo = fineGridSize_;
-            double vMin = vLimFineGrid_[iFineLo];
-            for (size_t j = iFineLo + 1; j <= iFineHi; ++j) {
-                if (vLimFineGrid_[j] < vMin) vMin = vLimFineGrid_[j];
-            }
-            vLimGrid_[i] = std::min(vLimGrid_[i], vMin);
-        }
-
-        // Apply backward/forward propagation on the FINE grid.
-        //
-        // This propagates the geometric vLim (curvature, feed rate, axis
-        // limits) to ensure the solver can decelerate/accelerate between
-        // grid points. Uses the bang-bang formula (v² + 2*aMax*ds) because:
-        //   - The grid step is small, so snap/jerk ramp is negligible
-        //   - The snapspace braking constraint is handled analytically
-        //     by lookAheadVLimit(), which does the backward pass from
-        //     actual corners using the exact sStop function.
-        //
-        // Backward: vLim[i] = min(vLim[i], sqrt(vLim[i+1]^2 + 2*aMax*dsFine))
-        for (size_t i = fineGridSize_; i > 0; --i) {
-            double vNext = vLimFineGrid_[i];
-            double vProp = std::sqrt(vNext * vNext + 2.0 * aMax * dsFine_);
-            vLimFineGrid_[i - 1] = std::min(vLimFineGrid_[i - 1], vProp);
-        }
-        // Forward: vLim[i] = min(vLim[i], sqrt(vLim[i-1]^2 + 2*aMax*dsFine))
-        for (size_t i = 1; i <= fineGridSize_; ++i) {
-            double vPrev = vLimFineGrid_[i - 1];
-            double vProp = std::sqrt(vPrev * vPrev + 2.0 * aMax * dsFine_);
-            vLimFineGrid_[i] = std::min(vLimFineGrid_[i], vProp);
-        }
-
-        // Re-update the coarse grid from the propagated fine grid.
-        for (size_t i = 0; i <= constraintCacheSize_; ++i) {
-            double sCoarse = static_cast<double>(i) * ds_;
-            size_t iFineLo = (size_t)(sCoarse / dsFine_);
-            size_t iFineHi = (size_t)((sCoarse + ds_) / dsFine_);
-            if (iFineHi > fineGridSize_) iFineHi = fineGridSize_;
-            if (iFineLo > fineGridSize_) iFineLo = fineGridSize_;
-            double vMin = vLimFineGrid_[iFineLo];
-            for (size_t j = iFineLo + 1; j <= iFineHi; ++j) {
-                if (vLimFineGrid_[j] < vMin) vMin = vLimFineGrid_[j];
-            }
-            vLimGrid_[i] = std::min(vLimGrid_[i], vMin);
-        }
-
-        // Note: The analytical TOPPRA backward pass (look-ahead from exact
-        // corner positions) is NOT precomputed into the coarse grid. Instead,
-        // it is computed on-the-fly in simulateAndCost() via lookAheadVLimit().
-        // This is the continuous-form TOPPRA backward pass:
-        //   v_req(s) = min over upcoming corners of sqrt(v_c² + 2*a_max*d)
-        // It works regardless of grid resolution, which is critical for large
-        // paths where the grid step is much larger than the braking distance.
-    }
-
-    /**Interpolate the geometric velocity limit from the coarse grid. */
-    double interpolateCoarseVLim(double s) const {
-        if (constraintCacheSize_ == 0 || ds_ <= 0.0) {
-            return static_cast<double>(
-                std::min(feedRate_, limits_.path.maxPathVelocity));
-        }
-        double idxF = s / ds_;
-        size_t idx0 = static_cast<size_t>(std::floor(idxF));
-        size_t idx1 = idx0 + 1;
-        if (idx0 >= constraintCacheSize_) return vLimGrid_.back();
-        if (idx1 > constraintCacheSize_) idx1 = constraintCacheSize_;
-        double frac = idxF - static_cast<double>(idx0);
-        return vLimGrid_[idx0] * (1.0 - frac) + vLimGrid_[idx1] * frac;
-    }
-
-    /**Fine grid index for arc length s (uniform grid, O(1)). */
-    size_t fineGridIndex(double s) const {
-        if (dsFine_ <= 0.0) return 0;
-        long idx = static_cast<long>(std::floor(s / dsFine_ + 0.5));
-        return static_cast<size_t>(
-            std::clamp(idx, 0L, static_cast<long>(fineGridSize_)));
+        std::sort(corners_.begin(), corners_.end(),
+            [](const auto& a, const auto& b) { return a.first < b.first; });
     }
 
     /**
@@ -3485,53 +3340,54 @@ private:
         return vEff;
     }
 
-    /**Convert fixed-size coefficient storage to Vec<Dim,T>. */
-    Vec<Dim, T> toVec(
-        const std::array<double, KinematicCoefficients::kMaxDim>& v) const {
-        Vec<Dim, T> result;
-        for (size_t i = 0; i < Dim && i < v.size(); ++i) {
-            result[i] = static_cast<T>(v[i]);
-        }
-        return result;
-    }
-
-    size_t gridIndex(double s) const {
-        if (ds_ <= 0.0) return 0;
-        long idx = static_cast<long>(std::floor(s / ds_ + 0.5));
-        return static_cast<size_t>(
-            std::clamp(idx, 0L, static_cast<long>(constraintCacheSize_)));
-    }
-
-    /**Compute acceleration bounds [a_min, a_max] from cached grid coefficients. */
     /**
-     * @brief Velocity limit at arc length s, cache-backed.
+     * @brief Velocity limit at arc length s — exact point evaluation.
      *
-     * Identical formula to Evaluator::velocityLimit: when s coincides
-     * with a coarse-grid node, the geometric terms come from
-     * vLimGeoGrid_ (same coefficients the evaluator would compute) and
-     * only the cheap per-segment lookup is added. Off-grid queries fall
-     * back to a direct evaluator call. Produces the same values while
-     * skipping the path evaluation that dominates bounds sampling.
+     * The evaluator's closed-form limit (feed, path cap, per-segment
+     * feed, centripetal, per-axis) evaluated directly at s; every point
+     * where its value can be extremal or change binding term is already
+     * a certified envelope candidate, so point queries need no grid.
      */
     double velocityLimitAt(double s) const {
         s = std::clamp(s, 0.0, sTotal_);
-        if (ds_ > 0.0 && !vLimGeoGrid_.empty()) {
-            const size_t i =
-                static_cast<size_t>(s / ds_ + 0.5);
-            if (i < vLimGeoGrid_.size() &&
-                std::abs(static_cast<double>(i) * ds_ - s) <=
-                    1e-9 * std::max(1.0, sTotal_)) {
-                const double segLim = static_cast<double>(
-                    path_.maxVelocityAtArcLength(static_cast<T>(s)));
-                return std::max(std::min(vLimGeoGrid_[i], segLim), 0.0);
-            }
-        }
         return static_cast<double>(evaluator_.velocityLimit(
             static_cast<T>(s), path_));
     }
 
-    std::pair<double, double> accelBoundsFromCache(size_t idx, double v) const {
-        const auto& c = gridCoeffs_[idx];
+    /**
+     * @brief Velocity limit at s recomputed from point coefficients.
+     *
+     * Identical formula to ConstraintEvaluator::velocityLimit's
+     * non-grid path — feed cap, path cap, per-segment feed, centripetal
+     * √(a_cent/κ), per-axis vmax/|T_i| — but the κ and tangent come from
+     * coefficients already evaluated at s, so the authority loops avoid
+     * a second path evaluation per point.
+     */
+    double vLimFromCoeffs(const KinematicCoefficients& c,
+                          double s) const {
+        double limit = static_cast<double>(feedRate_);
+        limit = std::min(limit,
+                         static_cast<double>(limits_.path.maxPathVelocity));
+        limit = std::min(limit, static_cast<double>(
+            path_.maxVelocityAtArcLength(static_cast<T>(s))));
+        if (c.kappa > static_cast<double>(MathConstants::EPSILON) &&
+            limits_.path.maxCentripetalAcceleration > T(0)) {
+            limit = std::min(limit, std::sqrt(
+                static_cast<double>(limits_.path.maxCentripetalAcceleration) /
+                c.kappa));
+        }
+        Vec<Dim, T> tangent;
+        for (std::size_t i = 0; i < Dim; ++i) {
+            tangent[i] = static_cast<T>(c.tangent[i]);
+        }
+        limit = std::min(limit, static_cast<double>(
+            limits_.maxVelocityForDirection(tangent)));
+        return std::max(limit, 0.0);
+    }
+
+    /**Acceleration bounds [a_min, a_max] from point coefficients. */
+    std::pair<double, double> accelBoundsFromCoeffs(
+        const KinematicCoefficients& c, double v) const {
         double a_min = -static_cast<double>(limits_.path.maxPathAcceleration);
         double a_max =  static_cast<double>(limits_.path.maxPathAcceleration);
 
@@ -3556,14 +3412,13 @@ private:
         return {a_min, a_max};
     }
 
-    /**Compute eta bounds [eta_min, eta_max] from cached grid coefficients. */
-    EtaBounds etaBoundsFromCache(size_t idx, double v, double a) const {
+    /**Eta bounds [eta_min, eta_max] from point coefficients. */
+    EtaBounds etaBoundsFromCoeffs(
+        const KinematicCoefficients& c, double v, double a) const {
         EtaBounds b;
         b.eta_min = -static_cast<double>(limits_.path.maxPathJerk);
         b.eta_max =  static_cast<double>(limits_.path.maxPathJerk);
 
-        // If jerk limiting is disabled the evaluator returns huge bounds.
-        // Cap to a finite effective jerk to keep the arc time scale healthy.
         if (!limits_.path.jerkLimitEnabled) {
             b.eta_min = -1e18;
             b.eta_max =  1e18;
@@ -3577,12 +3432,8 @@ private:
             b.eta_max = std::min(b.eta_max,  jEff);
         }
 
-        const auto& c = gridCoeffs_[idx];
-        double v_d = v;
-        double a_d = a;
-        double v3 = v_d * v_d * v_d;
-        double va = v_d * a_d;
-
+        double v3 = v * v * v;
+        double va = v * a;
         for (size_t i = 0; i < Dim && i < c.tangent.size(); ++i) {
             double alpha = c.tangent[i];
             double beta = c.jounce[i] * v3 + 3.0 * c.curvature[i] * va;
@@ -3604,9 +3455,9 @@ private:
                 }
             }
         }
-
         return b;
     }
+
 
     /**
      * @brief Forward state-machine simulation for fixed j* (snapspace).
@@ -4326,80 +4177,84 @@ public:
         {
             const double Ltot = static_cast<double>(pathLength);
             if (Ltot > 0.0) {
-                Evaluator vLimEval(limits_, feedRate);
-                constexpr int nScan = 1024;
-                const double dsScan = Ltot / nScan;
-                std::vector<double> vl(nScan + 1);
-                for (int i = 0; i <= nScan; ++i) {
-                    vl[i] = static_cast<double>(vLimEval.velocityLimit(
-                        static_cast<T>(Ltot * i / nScan), *pathCopy));
-                }
-                // Deep-dip detection: a sample belongs to a bottleneck
-                // when its limit lies below half of BOTH flanking
-                // maxima — the signature of a valley rather than mild
-                // variation. The level-set partition then runs inside
-                // each contiguous deep run only, so gently varying
-                // paths pay the scan cost (~1 ms) but zero extra
-                // sub-solves.
-                constexpr int W = 24;
-                std::vector<int> cutIdx;
-                const int maxCuts = 32;
-                for (int i = 1; i < nScan; ++i) {
-                    double fl = 0.0, fr = 0.0;
-                    for (int k = std::max(0, i - W); k < i; ++k)
-                        fl = std::max(fl, vl[k]);
-                    for (int k = i + 1; k <= std::min(nScan, i + W); ++k)
-                        fr = std::max(fr, vl[k]);
-                    const double flank = std::min(fl, fr);
-                    if (!(flank > 0.0) || vl[i] >= 0.5 * flank) continue;
-                    // Inside a deep run: factor-of-two level set.
-                    double level = vl[i];
-                    cutIdx.push_back(i);
-                    while (i + 1 < nScan) {
-                        const int j = i + 1;
-                        fl = 0.0; fr = 0.0;
-                        for (int k = std::max(0, j - W); k < j; ++k)
-                            fl = std::max(fl, vl[k]);
-                        for (int k = j + 1;
-                             k <= std::min(nScan, j + W); ++k)
-                            fr = std::max(fr, vl[k]);
-                        const double flankJ = std::min(fl, fr);
-                        if (!(flankJ > 0.0) || vl[j] >= 0.5 * flankJ)
-                            break;
-                        ++i;
-                        if (vl[j] < 0.5 * level ||
-                            vl[j] > 2.0 * level) {
-                            level = vl[j];
-                            cutIdx.push_back(j);
-                            if (static_cast<int>(cutIdx.size()) >=
-                                maxCuts)
-                                break;
+                // Certified envelope over the whole path: every point
+                // where the limit can be extremal or change binding
+                // term — the deep valleys the level-set partition
+                // exists to isolate are exactly its local minima and
+                // the factor-2 transitions between adjacent candidates.
+                // Replaces the former 1024-sample scan.
+                const auto envRes = ExactEnvelope<Dim, T>().analyze(
+                    *pathCopy, limits_, feedRate, 0.0, Ltot);
+                const auto& cand = envRes.candidates;
+                const int nC = static_cast<int>(cand.size());
+                if (nC >= 3) {
+                    // Flank window: the former ±24 grid cells of a
+                    // 1024-sample scan, expressed in path length.
+                    const double W = 24.0 * Ltot / 1024.0;
+                    const double dsScan = Ltot / 1024.0;
+                    const int maxCuts = 32;
+                    std::vector<double> cutS;
+                    // Flank maxima over distance windows — two-pointer
+                    // window on the sorted candidates, O(n).
+                    std::vector<int> wl(nC), wr(nC);
+                    {
+                        int loI = 0, hiI = 0;
+                        for (int i = 0; i < nC; ++i) {
+                            while (loI < i &&
+                                   cand[i].s - cand[loI].s > W) ++loI;
+                            wl[i] = loI;
+                            while (hiI < nC &&
+                                   cand[hiI].s - cand[i].s <= W) ++hiI;
+                            wr[i] = hiI;  // exclusive
                         }
                     }
-                }
-                // Collapse near-coincident cuts (level-set edges can be
-                // one grid step apart on a narrow valley).
-                {
-                    std::vector<int> filtered;
-                    for (const int idx : cutIdx) {
-                        if (filtered.empty() || idx - filtered.back() > 2)
-                            filtered.push_back(idx);
+                    const auto deepAt = [&](int i) -> bool {
+                        double fl = 0.0, fr = 0.0;
+                        for (int k = wl[i]; k < i; ++k)
+                            fl = std::max(fl, cand[k].v);
+                        for (int k = i + 1; k < wr[i]; ++k)
+                            fr = std::max(fr, cand[k].v);
+                        const double flank = std::min(fl, fr);
+                        return flank > 0.0 && cand[i].v < 0.5 * flank;
+                    };
+                    for (int i = 1; i + 1 < nC; ++i) {
+                        if (!deepAt(i)) continue;
+                        // Inside a deep run: factor-of-two level set on
+                        // consecutive deep candidates.
+                        double level = cand[i].v;
+                        cutS.push_back(cand[i].s);
+                        while (i + 1 < nC) {
+                            const int j = i + 1;
+                            if (!deepAt(j)) break;
+                            ++i;
+                            if (cand[j].v < 0.5 * level ||
+                                cand[j].v > 2.0 * level) {
+                                level = cand[j].v;
+                                cutS.push_back(cand[j].s);
+                                if (static_cast<int>(cutS.size()) >=
+                                    maxCuts)
+                                    break;
+                            }
+                        }
                     }
-                    cutIdx = std::move(filtered);
-                }
-                if (!cutIdx.empty()) {
-                    for (const int idx : cutIdx) {
-                        const double sCut = Ltot * idx / nScan;
+                    // Collapse near-coincident cuts (former <=2-sample
+                    // merge on a 1024 grid → ~0.2% of path length).
+                    {
+                        std::vector<double> filtered;
+                        const double mergeD = 2.0 * dsScan;
+                        for (const double s : cutS) {
+                            if (filtered.empty() ||
+                                s - filtered.back() > mergeD)
+                                filtered.push_back(s);
+                        }
+                        cutS = std::move(filtered);
+                    }
+                    for (const double sCut : cutS) {
                         if (sCut < 4.0 * dsScan ||
                             sCut > Ltot - 4.0 * dsScan)
                             continue;
                         // Skip cuts adjacent to dwell/junction splits —
                         // that machinery already localises those regions.
-                        // Interior cuts do NOT suppress each other: the
-                        // level-set spacing and the <=2-sample collapse
-                        // above already prevent fragmentation, and a
-                        // narrow valley legitimately needs a cut on each
-                        // side so the dip sits inside its own piece.
                         bool nearSplit = false;
                         for (const auto& sp : splits) {
                             if (sp.interiorMin) continue;
@@ -4612,7 +4467,6 @@ public:
                 effB[j] = std::min({sp[j].boundaryV,
                                     pcs[j].bound, pcs[j + 1].bound});
             }
-
             // Phase 2.5 — transition-length enforcement: a piece too
             // short for its boundary-velocity pulse under its own bounds
             // would be reported infeasible by its sub-solve (e.g. a

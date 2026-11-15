@@ -232,11 +232,29 @@ corner velocities + dwell points) →
   the production default.
 
 - **Solver model**: one scalar `(V, A, J, snap)` bound per piece via
-  `globalBounds()` over a sampled grid, then one accel/decel pulse per
-  piece (`optimizePulsePlan`). The fine-grid TOPP-RA machinery
-  (forward pass / snapspace) is retained under `#if 0` but inactive —
-  the pulse staircase approximates the true continuous optimal
-  envelope, it does not reach it.
+  `globalBounds()` over the *certified* envelope's candidate set, then
+  one accel/decel pulse per piece (`optimizePulsePlan`). The fine-grid
+  TOPP-RA machinery (forward pass / snapspace) is retained under
+  `#if 0` but inactive — the pulse staircase approximates the true
+  continuous optimal envelope, it does not reach it.
+- **Certified envelope** (`analytical/ExactEnvelope.hpp`): per piece,
+  `bezierDecompose()` gives exact Bernstein spans; the velocity terms
+  (`√(a_c/κ)`, `vmax_i/|T_i|`, feeds) become polynomial/rational
+  expressions whose stationarity polynomials are solved by
+  `bernstein::isolateRoots` + Newton polish — every envelope extremum
+  and binding-term crossing is a candidate, no sampling anywhere.
+  Stamps fold into endpoint candidates via `min`; coincident one-sided
+  junction candidates merge with `vg = min(both sides)` (regression:
+  keeping the looser side's geometric value let a pulse ride 25 mm/s
+  into a 20 mm/s Z-only piece — `JunctionMergesTighterOneSidedLimit`
+  pins it). Authority probes (stationary points of per-axis `κ_i²` and
+  `κ²·v_axis⁴`) cover accel/jerk headroom dips that don't coincide
+  with envelope extrema. `envelopeTrusted` callers skip adaptive
+  discovery entirely; opaque `forwardPass` callables still get
+  midpoint/bisection discovery (proof-by-dip brackets only — not a
+  production grid). Measured: BenchLayer Pareto solve 1005 ms → ~45 ms
+  (also memoized `KinematicCoefficients` — T, κ⃗, jounce, κ depend on
+  `s` only, so accel/jerk bisections are pure algebra in `v`,`a`).
 - **Corner model**: `PathAdapter::computeCornerVelocities` measures the
   true junction angle from *endpoint* tangents of adjacent pieces —
   never midpoint tangents. For arcs/higher-degree pieces the mid-tangent
@@ -244,25 +262,29 @@ corner velocities + dwell points) →
   looked collinear → `∞` stamp → carried ~38 mm/s through a sharp
   corner; tangent-continuous blend entries got phantom-limited).
   Stamps feed `effB`/`boundaryV` requests and are non-negotiable.
-- **Bound semantics**: `globalBounds()` treats first/last grid samples
-  as enforced boundary conditions (v0/vf or split-boundary speeds) and
-  scans only the open interval for velocity/accel/jerk envelopes;
-  `intervalBound()` returns `min(interior, vLimit(0), vLimit(sTotal))`
-  so a curvature/velocity dip exactly at a split point is enforced via
-  the boundary speed, not smeared across the adjacent pieces.
+- **Bound semantics**: `globalBounds()` treats first/last envelope
+  candidates as enforced boundary conditions (v0/vf or split-boundary
+  speeds) and bounds the open interval from interior candidates +
+  authority probes; `intervalBound()` returns
+  `min(interior, vLimit(0), vLimit(sTotal))` so a curvature/velocity
+  dip exactly at a split point is enforced via the boundary speed, not
+  smeared across the adjacent pieces.
 - **Jerk bounds**: axis jerk maps as `|T_i·eta + jounce_i·v³ +
   3·κ_i·v·a| <= jMaxI`. The `±bounds.acceleration` trials are a
-  worst-case accel assumption. Both accel and jerk scans trade
-  velocity for authority: when a sample's symmetric headroom falls
+  worst-case accel assumption. Both accel and jerk evaluations trade
+  velocity for authority: when a probe's symmetric headroom falls
   below the designed floor (2% of the limit) the velocity envelope is
   bisected down to where the floor fits — that knee is why many curved
   paths land on jMax ~= 0.02·jerkLimit. The `1 mm/s³` floor is for
   truly degenerate geometry only.
 - **Splitting**: junction splits (feed steps), dwell splits, and
-  interior `vLim` deep-dip splits (>2× below flanks, 1024-pt scan).
-  Pieces get interval bounds first, boundary speeds are equalized
-  against `min(boundL, boundR)`, then each piece solves with its own
-  length-scaled constraint grid (~0.1 mm/node, floor 32).
+  interior `vLim` deep-dip splits (>2× below flanks — detected from
+  the envelope's candidate sequence, no scan). Pieces get interval
+  bounds first, boundary speeds are equalized against
+  `min(boundL, boundR)`, then each piece solves with its own
+  interval bounds (resolution-independent —
+  `constraintCacheSize` only remains as a compat knob;
+  `ExactEnvelopePlanner.CacheSizeParameterIsInert` pins invariance).
 - **Transition consistency**: `intervalBound()` verifies the piece's
   `(V,A,J)` triple is *self-consistent*: `minimumDistanceForPeak(v,
   vIn, vOut) <= sTotal·(1-1e-6)` — the full pulse through the candidate
