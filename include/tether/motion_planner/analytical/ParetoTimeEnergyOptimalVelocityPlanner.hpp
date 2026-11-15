@@ -1804,6 +1804,90 @@ public:
     }
 
     /**
+     * @brief Distance feasibility of a v0 → vf transition over `length`
+     *        under the last intervalBound() bounds — WITHOUT the
+     *        interval velocity-minimum cap.
+     *
+     * The time-optimal sweep lets boundary speeds and pulse peaks exceed
+     * the interval minimum of the velocity envelope (the envelope is
+     * verified pointwise by the caller), so only the
+     * acceleration/jerk/snap-limited transition distance gates here.
+     */
+    bool transitionDistanceFeasible(double v0, double vf,
+                                    double length) const {
+        const auto& bounds = lastIntervalBounds_;
+        if (v0 < 0.0 || vf < 0.0 ||
+            !(bounds.acceleration > 0.0) || !(bounds.jerk > 0.0) ||
+            !(bounds.snap > 0.0)) {
+            return false;
+        }
+        return minimumDistanceForPeak(std::max(v0, vf), v0, vf, bounds) <=
+               length + 1e-9;
+    }
+
+    /**
+     * @brief Largest pulse peak reachable over `length` between boundary
+     *        speeds v0/vf under the last intervalBound() bounds.
+     *
+     * Returns NaN when the plain transition does not fit. The velocity
+     * bound is not consulted — bisection is over the dynamic reach
+     * only; the caller clamps the result by its own envelope analysis.
+     */
+    double reachablePeak(double v0, double vf, double length) const {
+        const auto& bounds = lastIntervalBounds_;
+        if (!(bounds.acceleration > 0.0) || !(bounds.jerk > 0.0) ||
+            !(bounds.snap > 0.0)) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        double peak = std::max(v0, vf);
+        if (minimumDistanceForPeak(peak, v0, vf, bounds) >
+            length + 1e-9) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        double lo = peak, hi = peak + 1.0;
+        for (int i = 0;
+             i < 200 &&
+             minimumDistanceForPeak(hi, v0, vf, bounds) <= length;
+             ++i) {
+            hi *= 2.0;
+        }
+        for (int i = 0; i < 80; ++i) {
+            const double mid = 0.5 * (lo + hi);
+            if (minimumDistanceForPeak(mid, v0, vf, bounds) <= length)
+                lo = mid;
+            else
+                hi = mid;
+        }
+        return lo;
+    }
+
+    /**
+     * @brief Build a boundary-transition pulse with the peak capped at
+     *        `peakCap` rather than the interval velocity bound.
+     *
+     * The acceleration/jerk/snap bounds come from the last
+     * intervalBound() call. Used by the time-optimal path, where the
+     * velocity envelope is enforced pointwise by the caller's
+     * arc-level envelope check instead of a scalar interval minimum.
+     */
+    ForwardPassResult buildTransitionPlan(double v0, double vf,
+                                          double length,
+                                          double peakCap) const {
+        PlanningBounds bounds = lastIntervalBounds_;
+        bounds.velocity = peakCap;
+        return buildPulsePlan(bounds, v0, vf, length, 0.0, 1.0);
+    }
+
+    /** Acceleration bound from the last intervalBound() call. */
+    double accelBound() const {
+        return lastIntervalBounds_.acceleration;
+    }
+    /** Jerk bound from the last intervalBound() call. */
+    double jerkBound() const { return lastIntervalBounds_.jerk; }
+    /** Snap bound from the last intervalBound() call. */
+    double snapBound() const { return lastIntervalBounds_.snap; }
+
+    /**
      * @brief Prepare the solver for forward-pass testing.
      *
      * Builds the constraint cache and fine velocity grid, and sets up
@@ -4170,6 +4254,16 @@ public:
             }
         }
 
+        // Certified envelope over the whole path: every point where the
+        // limit can be extremal or change binding term — the deep valleys
+        // the level-set partition exists to isolate are exactly its local
+        // minima and the factor-2 transitions between adjacent candidates.
+        // Replaces the former 1024-sample scan. Computed once here and
+        // reused by the time-optimal split generation below.
+        const auto envRes = ExactEnvelope<Dim, T>().analyze(
+            *pathCopy, limits_, feedRate, 0.0,
+            static_cast<double>(pathLength));
+
         // 3. Interior level-set splitting: a sub-path's scalar bounds are
         //    the MINIMUM of its velocity-limit samples, so one low point
         //    caps the whole interval it sits in. Partition the path into
@@ -4183,14 +4277,6 @@ public:
         {
             const double Ltot = static_cast<double>(pathLength);
             if (Ltot > 0.0) {
-                // Certified envelope over the whole path: every point
-                // where the limit can be extremal or change binding
-                // term — the deep valleys the level-set partition
-                // exists to isolate are exactly its local minima and
-                // the factor-2 transitions between adjacent candidates.
-                // Replaces the former 1024-sample scan.
-                const auto envRes = ExactEnvelope<Dim, T>().analyze(
-                    *pathCopy, limits_, feedRate, 0.0, Ltot);
                 const auto& cand = envRes.candidates;
                 const int nC = static_cast<int>(cand.size());
                 if (nC >= 3) {
@@ -4623,6 +4709,1340 @@ public:
             return true;
         };
 
+        // ---------------------------------------------------------------
+        // Time-optimal construction (snap-space TOPP-RA equivalent).
+        //
+        // Constraint points sit at every certified envelope candidate,
+        // so each piece carries a single monotone envelope term. Boundary
+        // speeds come from the classic backward/forward reachable sweep —
+        // inverting the snap-limited transition distance at each
+        // constraint point — and each piece's pulse peak is verified
+        // pointwise against the envelope instead of capped at the
+        // interval minimum. No interval-min collapse, no dense sampling:
+        // the only envelope evaluations are at candidate positions and
+        // at pulse-arc extrema, plus bisection root-finding.
+        Evaluator envEvaluator(limits_, feedRate);
+        const auto envAt = [&](double sGlobal) -> double {
+            const double s = std::clamp(
+                sGlobal, 0.0, static_cast<double>(pathLength));
+            return static_cast<double>(envEvaluator.velocityLimit(
+                static_cast<T>(s), *pathCopy)) *
+                (1.0 - 1e-9);
+        };
+        constexpr double kEnvTol = 1e-6;
+        // "At the ceiling" ease band: envAt carries a 1e-9 certification
+        // margin, and boundary speeds are evaluated at neighbouring
+        // positions, so a state sitting on the raw envelope can be a
+        // few ulps above the margin-scaled value. States within the
+        // band are legal ceiling states; the band is far below any
+        // physical tolerance (~1e-7·v mm/s).
+        const auto envEase = [](double v) {
+            return 1e-7 * (1.0 + std::abs(v));
+        };
+
+        // Certified adaptive scan of g(τ) = v(τ) − env(s0 + ds(τ)) over
+        // τ∈[0,dur]: returns the first τ where the envelope constraint
+        // cannot be certified — a point evaluation below the envelope,
+        // or an unresolved fp-scale gap — or +inf when the whole phase
+        // is certified. The envelope is single-term and monotone
+        // between consecutive ExactEnvelope candidates (its term only
+        // changes at candidates), so a τ-interval is certified when
+        //   max(v(ta), v(tb)) + J·h²/8  ≤  min(env(sa), env(sb))
+        // with J = max|j| over the interval bounding |v''|. Failing
+        // intervals split at interior env breakpoints first (the
+        // monotone-env bound only holds within one term-span), then
+        // halve in τ — adaptive refinement, never dense sampling.
+        const auto firstEnvViolation =
+            [&](double s0, double dur, const auto& vAtF,
+                const auto& dsAtF, const auto& jAtF) -> double {
+            const double infD =
+                std::numeric_limits<double>::infinity();
+            if (!(dur > 0.0)) return infD;
+            if (vAtF(0.0) > envAt(s0) + envEase(vAtF(0.0)))
+                return 0.0;
+            const double sEnd = s0 + dsAtF(dur);
+            if (vAtF(dur) > envAt(sEnd) + envEase(vAtF(dur)))
+                return dur;
+            // Arc-bounded ds→τ inverse: ds(τ) is monotone on a valid
+            // phase (v ≥ 0), so bisection on the arc's own duration is
+            // robust where an extrapolating bracket could overshoot
+            // into the post-arc region.
+            const auto tauInArc = [&](double dsq) {
+                if (dsq <= 0.0) return 0.0;
+                if (dsAtF(dur) <= dsq) return dur;
+                double lo = 0.0, hi = dur;
+                for (int k = 0; k < 60; ++k) {
+                    const double mid = 0.5 * (lo + hi);
+                    (dsAtF(mid) < dsq) ? lo = mid : hi = mid;
+                }
+                return 0.5 * (lo + hi);
+            };
+            // τ-positions of env breakpoints inside the arc's s-span.
+            std::vector<double> tBps;
+            for (const auto& c : envRes.candidates) {
+                if (c.s <= s0 + 1e-9) continue;
+                if (c.s >= sEnd - 1e-9) break;
+                const double tb = tauInArc(c.s - s0);
+                if (std::isfinite(tb) && tb > 1e-12 &&
+                    tb < dur - 1e-12)
+                    tBps.push_back(tb);
+            }
+            std::sort(tBps.begin(), tBps.end());
+            tBps.push_back(dur);
+            double bad = infD;
+            double ta = 0.0, va = vAtF(0.0);
+            const auto walk = [&](auto&& self, double la, double lb,
+                                  double lva, double lvb) -> bool {
+                const double h = lb - la;
+                const double sa = s0 + dsAtF(la);
+                const double sb = s0 + dsAtF(lb);
+                const double eLo = std::min(envAt(sa), envAt(sb));
+                const double J =
+                    std::max(std::abs(jAtF(la)), std::abs(jAtF(lb)));
+                const double vHi =
+                    std::max(lva, lvb) + J * h * h * 0.125;
+                if (vHi <= eLo + envEase(vHi))
+                    return false;  // certified under the envelope
+                if (h < 1e-12) {
+                    const double lm = 0.5 * (la + lb);
+                    if (vAtF(lm) > envAt(s0 + dsAtF(lm)) +
+                                       envEase(vAtF(lm))) {
+                        bad = lm;
+                        return true;
+                    }
+                    return false;  // fp-scale residual: accept
+                }
+                const double lm = 0.5 * (la + lb);
+                const double lvm = vAtF(lm);
+                if (self(self, la, lm, lva, lvm)) return true;
+                return self(self, lm, lb, lvm, lvb);
+            };
+            for (const double tb : tBps) {
+                if (walk(walk, ta, tb, va, vAtF(tb))) break;
+                ta = tb;
+                va = vAtF(tb);
+            }
+            return bad;
+        };
+
+        // Arc-level envelope check: arc v(τ) must not exceed env(s).
+        // Endpoints and interiorCap point constraints are checked
+        // exactly; the interior is certified by firstEnvViolation's
+        // adaptive bounded scan (no dense sampling). Arcs carry global
+        // s — pass sOff=0 when they do.
+        const auto arcsWithinEnvelope =
+            [&](const std::vector<typename WSS::Arc>& wArcs,
+                double sOff,
+                const std::vector<std::pair<double, double>>*
+                    interiorCaps = nullptr) -> bool {
+            for (const auto& arc : wArcs) {
+                if (arc.type == WeightedArcType::DWELL) continue;
+                const double s0 = arc.s0 + sOff;
+                const double s1 = arc.s1 + sOff;
+                // Interior constraint points (skipped candidates) must
+                // be satisfied exactly at their s-position.
+                if (interiorCaps) {
+                    for (const auto& [cs, cap] : *interiorCaps) {
+                        if (cs <= s0 + 1e-9 || cs >= s1 - 1e-9)
+                            continue;
+                        // Arc-bounded ds→τ inverse: bisection on
+                        // [0, dur] (ds monotone for a valid arc)
+                        // — the extrapolating tau_for_ds can
+                        // overshoot into the post-arc region and
+                        // fail to converge.
+                        double lo = 0.0, hi = arc.duration;
+                        const auto dsOf = [&](double t) {
+                            return arc.type ==
+                                    WeightedArcType::SINGULAR
+                                ? SingularJSeg::ds(arc.v0, arc.a0,
+                                                   arc.j_star, t)
+                                : SnapSeg::ds(arc.v0, arc.a0, arc.j0,
+                                              arc.sigma, t);
+                        };
+                        for (int k = 0; k < 60; ++k) {
+                            const double mid = 0.5 * (lo + hi);
+                            (dsOf(mid) < cs - s0) ? lo = mid
+                                                  : hi = mid;
+                        }
+                        const double tau = 0.5 * (lo + hi);
+                        const double vMid =
+                            arc.type == WeightedArcType::SINGULAR
+                                ? SingularJSeg::v(arc.v0, arc.a0,
+                                                  arc.j_star, tau)
+                                : SnapSeg::v(arc.v0, arc.a0,
+                                             arc.j0, arc.sigma, tau);
+                        if (vMid > cap) {
+                            if (std::getenv("TETHER_DEBUG_TOPRA"))
+                                std::fprintf(stderr,
+                                    "[TOPRA capV] s=[%.4f,%.4f] "
+                                    "cs=%.4f vMid=%.4f cap=%.4f "
+                                    "v0=%.4f v1=%.4f a0=%.2f j0=%.2f "
+                                    "sig=%.0f dur=%.4g\n",
+                                    s0, s1, cs, vMid, cap, arc.v0,
+                                    arc.v1, arc.a0, arc.j0,
+                                    arc.sigma, arc.duration);
+                            return false;
+                        }
+                    }
+                }
+                const double e0 = envAt(s0);
+                const double e1 = envAt(s1);
+                if (arc.v0 > e0 + envEase(arc.v0) ||
+                    arc.v1 > e1 + envEase(arc.v1)) {
+                    if (std::getenv("TETHER_DEBUG_TOPRA"))
+                        std::fprintf(stderr,
+                            "[TOPRA endV] s=[%.4f,%.4f] v0=%.4f "
+                            "v1=%.4f e0=%.4f e1=%.4f a0=%.2f j0=%.2f "
+                            "sig=%.0f dur=%.4g\n",
+                            s0, s1, arc.v0, arc.v1, e0, e1, arc.a0,
+                            arc.j0, arc.sigma, arc.duration);
+                    return false;
+                }
+                const bool isSnap =
+                    arc.type == WeightedArcType::SNAP_PLUS ||
+                    arc.type == WeightedArcType::SNAP_MINUS;
+                const double sig = isSnap ? arc.sigma : 0.0;
+                const double jk = isSnap ? arc.j0 : arc.j_star;
+                auto vAt = [&](double tau) {
+                    return isSnap
+                        ? SnapSeg::v(arc.v0, arc.a0, arc.j0, sig, tau)
+                        : SingularJSeg::v(arc.v0, arc.a0, jk, tau);
+                };
+                auto dsAt = [&](double tau) {
+                    return isSnap
+                        ? SnapSeg::ds(arc.v0, arc.a0, arc.j0, sig, tau)
+                        : SingularJSeg::ds(arc.v0, arc.a0, jk, tau);
+                };
+                const double dur = arc.duration;
+                const auto jAt = [&](double tau) {
+                    return isSnap ? arc.j0 + sig * tau : jk;
+                };
+                const double vio = firstEnvViolation(
+                    s0, dur, vAt, dsAt, jAt);
+                if (std::isfinite(vio)) {
+                    if (std::getenv("TETHER_DEBUG_TOPRA"))
+                        std::fprintf(stderr,
+                            "[TOPRA envV] s=[%.4f,%.4f] tau=%.4g "
+                            "v=%.4f env=%.4f v0=%.4f v1=%.4f "
+                            "e0=%.4f e1=%.4f a0=%.2f j0=%.2f "
+                            "sig=%.0f dur=%.4g\n",
+                            s0, s1, vio, vAt(vio),
+                            envAt(s0 + dsAt(vio)), arc.v0, arc.v1,
+                            e0, e1, arc.a0, arc.j0, sig, dur);
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        // Solve split pieces with the TOPP-RA sweep + envelope-verified
+        // peaks. Same PieceCtx setup as solveSplit; different boundary
+        // and per-piece phases.
+        const auto solveSplitTopra =
+            [&](const std::vector<PathSplit>& sp,
+                std::string& failReason) -> bool {
+            std::vector<typename WSS::Arc> tmpArcs;
+            double tmpCost = 0.0;
+            double tmpAStar = 0.0;
+
+            // Candidate thinning: cold (a=j=0) boundary transitions over
+            // candidate-dense stretches are reachable only at speeds far
+            // below the envelope — adjacent low points would diffuse and
+            // collapse the boundary array. Merge soft candidates into
+            // longer pieces whenever the merged boundary pair remains
+            // cold-feasible; hard points (dwells/stamps) always split,
+            // and every skipped point is kept as an interior cap the
+            // pulse must satisfy exactly at its s-position.
+            Solver mergeProbe(*pathCopy, limits_, wEff, feedRate);
+            mergeProbe.intervalBound(constraintCacheSize);
+            std::vector<PathSplit> msp;
+            std::vector<std::vector<std::pair<double, double>>> caps;
+            {
+                double pieceStart = 0.0;
+                double pendingV = static_cast<double>(v0);
+                std::vector<std::pair<double, double>> cur;
+                for (const auto& spj : sp) {
+                    const double cap =
+                        std::min(spj.boundaryV, envAt(spj.s));
+                    const double len = spj.s - pieceStart;
+                    const bool mergeable =
+                        !spj.isDwell && !spj.isStamp &&
+                        mergeProbe.transitionDistanceFeasible(
+                            pendingV, cap, len * (1.0 - 1e-6));
+                    if (mergeable) {
+                        cur.emplace_back(spj.s, cap);
+                        continue;
+                    }
+                    msp.push_back(spj);
+                    caps.push_back(std::move(cur));
+                    cur.clear();
+                    pieceStart = spj.s;
+                    pendingV = cap;
+                }
+                caps.push_back(std::move(cur));
+            }
+            const std::vector<PathSplit>& splits = msp;
+
+            const auto& originalPath = pathCopy->inner();
+            struct PieceCtx {
+                double sStart = 0.0;
+                double sEnd = 0.0;
+                std::unique_ptr<Path> adapter;
+                std::unique_ptr<Solver> solver;
+                size_t cacheSize = 200;
+                const std::vector<std::pair<double, double>>*
+                    interiorCaps = nullptr;
+            };
+            std::deque<PieceCtx> pcs(splits.size() + 1);
+            for (size_t i = 0; i <= splits.size(); ++i) {
+                auto& pc = pcs[i];
+                pc.sStart = (i == 0) ? 0.0 : splits[i - 1].s;
+                pc.sEnd = (i == splits.size())
+                    ? static_cast<double>(pathLength) : splits[i].s;
+                pc.interiorCaps = &caps[i];
+                if (pc.sEnd - pc.sStart < 1e-9) continue;
+                auto subNurbsPath = originalPath.trim(pc.sStart, pc.sEnd);
+                pc.adapter =
+                    std::make_unique<Path>(std::move(subNurbsPath));
+                if (pathCopy->hasPerSegmentVelocityLimits()) {
+                    const auto& origFeedRates =
+                        pathCopy->segmentMaxVelocities();
+                    const auto& subSegs = pc.adapter->segments();
+                    std::vector<double> subFeedRates;
+                    subFeedRates.reserve(subSegs.size());
+                    for (size_t j = 0; j < subSegs.size(); ++j) {
+                        double subMidLocal =
+                            subSegs[j].cumulativeArcLength +
+                            subSegs[j].arcLength * 0.5;
+                        double globalS = pc.sStart + subMidLocal;
+                        size_t origIdx =
+                            pathCopy->segmentIndexAtArcLength(
+                                static_cast<T>(globalS));
+                        subFeedRates.push_back(
+                            origIdx < origFeedRates.size()
+                                ? origFeedRates[origIdx]
+                                : std::numeric_limits<double>::infinity());
+                    }
+                    pc.adapter->setSegmentVelocityLimits(subFeedRates);
+                    pc.adapter->computeCornerVelocities(
+                        0.05,
+                        static_cast<double>(
+                            limits_.path.maxCentripetalAcceleration));
+                }
+                pc.solver = std::make_unique<Solver>(
+                    *pc.adapter, limits_, wEff, feedRate);
+                const double pieceLen = pc.sEnd - pc.sStart;
+                pc.cacheSize = std::max<size_t>(
+                    32, std::min(constraintCacheSize,
+                        static_cast<size_t>(
+                            std::ceil(pieceLen / 0.1)) + 1));
+                pc.solver->intervalBound(pc.cacheSize);
+            }
+
+            // Boundary speeds B[0..nsp+1] (split points + endpoints).
+            const int nsp = static_cast<int>(splits.size());
+            std::vector<double> B(nsp + 2);
+            B.front() = static_cast<double>(v0);
+            B.back() = static_cast<double>(endVelocity);
+            for (int j = 0; j < nsp; ++j)
+                B[j + 1] = std::min(splits[j].boundaryV, envAt(splits[j].s));
+
+            // ---- Hot-state emission machinery --------------------------
+            // A boundary crossing in the optimal profile carries (a,j)
+            // through the point — mid-run boundaries see the accel/decel
+            // ramp pass straight through. Only profile extrema and hard
+            // points reset to (a,j)=0. The emitters below simulate the
+            // bang-bang snap phases directly (no grid, no fixed step —
+            // adaptive root-finds only).
+
+            struct HotSt { double v, a, j; };
+
+            const auto dsSnap = [](const HotSt& st, double sigma,
+                                   double dur) {
+                return SnapSeg::ds(st.v, st.a, st.j, sigma, dur);
+            };
+            const auto dsSing = [](const HotSt& st, double jh,
+                                   double dur) {
+                return SingularJSeg::ds(st.v, st.a, jh, dur);
+            };
+            const auto applySnap = [](HotSt& st, double sigma,
+                                      double dur) {
+                const double nv = SnapSeg::v(st.v, st.a, st.j, sigma, dur);
+                const double na = SnapSeg::a(st.a, st.j, sigma, dur);
+                const double nj = SnapSeg::j(st.j, sigma, dur);
+                st.v = nv; st.a = na; st.j = nj;
+            };
+            const auto applySing = [](HotSt& st, double jh,
+                                      double dur) {
+                const double nv = SingularJSeg::v(st.v, st.a, jh, dur);
+                const double na = SingularJSeg::a(st.a, jh, dur);
+                st.v = nv; st.a = na; st.j = jh;
+            };
+            // τ inside a phase where v(τ)=vT (bisection, monotone in
+            // the decel direction we use it).
+            const auto tauForV = [](const HotSt& st, double sigma,
+                                    double jh, bool isSnap,
+                                    double vT, double dur) -> double {
+                auto vAt = [&](double t) {
+                    return isSnap
+                        ? SnapSeg::v(st.v, st.a, st.j, sigma, t)
+                        : SingularJSeg::v(st.v, st.a, jh, t);
+                };
+                if ((vAt(0.0) - vT) * (vAt(dur) - vT) > 0.0) return dur;
+                double lo = 0.0, hi = dur;
+                for (int k = 0; k < 60; ++k) {
+                    const double mid = 0.5 * (lo + hi);
+                    ((vAt(mid) - vT) * (vAt(0.0) - vT) <= 0.0)
+                        ? hi = mid : lo = mid;
+                }
+                return 0.5 * (lo + hi);
+            };
+            // τ inside a phase covering `ds` (delegates to the closed
+            // solvers).
+            const auto tauForDs = [](const HotSt& st, double sigma,
+                                     double jh, bool isSnap,
+                                     double ds) -> double {
+                return isSnap
+                    ? SnapSeg::tau_for_ds(st.v, st.a, st.j, sigma, ds)
+                    : SingularJSeg::tau_for_ds(st.v, st.a, jh, ds);
+            };
+
+            // Drive (a,j) → (aT, 0) via a j-excursion with a closed-form
+            // switch. For a0 > aT the σ-/σ+ pair landing a=aT solves
+            //   j* = -sqrt(σ(a0 - aT) + j0²/2);
+            // when |j*| > jm the excursion caps at ±jm plus a jm-hold
+            // until a reaches the return curve aT + j*²/(2σ). `step`
+            // advances `tp` (or emits the arc advancing the aliased
+            // state) and returns the used duration — a truncated step
+            // ends the excursion early.
+            const auto driveExc =
+                [&](HotSt& tp, double aT, double jm, double sm,
+                    const std::function<double(double, double, bool,
+                                               double)>& step) {
+                bool ok = true;
+                auto go = [&](double sigma, double jh, bool isSnap,
+                              double dur) {
+                    if (!ok || dur <= 1e-14) return;
+                    ok = step(sigma, jh, isSnap, dur) >= dur - 1e-12;
+                };
+                const double aEps = 1e-9, jEps = 1e-12;
+                // Up to two passes: an over-deep j can overshoot the
+                // landing — a mirrored second pass corrects it.
+                for (int it = 0; it < 2; ++it) {
+                if (tp.a > aT + aEps ||
+                    (std::abs(tp.a - aT) <= aEps && tp.j > jEps)) {
+                    // +a: σ- excursion j0 → -jp → 0.
+                    const double jp = std::sqrt(std::max(
+                        0.0, sm * (tp.a - aT) + tp.j * tp.j / 2.0));
+                    if (jp <= jm + jEps) {
+                        if (tp.j > -jp + jEps)
+                            go(-sm, 0.0, true, (tp.j + jp) / sm);
+                        go(+sm, 0.0, true, -tp.j / sm);
+                    } else {
+                        if (tp.j > -jm + jEps)
+                            go(-sm, 0.0, true, (tp.j + jm) / sm);
+                        const double aR = aT + jm * jm / (2.0 * sm);
+                        if (tp.j < -jEps && tp.a > aR)
+                            go(0.0, tp.j, false,
+                               (tp.a - aR) / (-tp.j));
+                        go(+sm, 0.0, true, -tp.j / sm);
+                    }
+                } else if (tp.a < aT - aEps ||
+                           (std::abs(tp.a - aT) <= aEps &&
+                            tp.j < -jEps)) {
+                    // -a: σ+ excursion j0 → +jp → 0.
+                    const double jp = std::sqrt(std::max(
+                        0.0, sm * (aT - tp.a) + tp.j * tp.j / 2.0));
+                    if (jp <= jm + jEps) {
+                        if (tp.j < jp - jEps)
+                            go(+sm, 0.0, true, (jp - tp.j) / sm);
+                        go(-sm, 0.0, true, tp.j / sm);
+                    } else {
+                        if (tp.j < jm - jEps)
+                            go(+sm, 0.0, true, (jm - tp.j) / sm);
+                        const double aR = aT - jm * jm / (2.0 * sm);
+                        if (tp.j > jEps && tp.a < aR)
+                            go(0.0, tp.j, false,
+                               (tp.a - aR) / (-tp.j));
+                        go(-sm, 0.0, true, tp.j / sm);
+                    }
+                } else {
+                    break;   // converged: a≈aT and j≈0
+                }
+                }
+            };
+
+            // Max-brake from `st` to vT.
+            //   cold → land at (vT, a=0, j=j_free)
+            //   hot  → land the moment v reaches vT (a=-aE, j=0)
+            // The decel level aE is bisected so the minimal sequence
+            // (j-excursion → -aE, optional cold tail) drops at most
+            // v0 - vT — full -am would overshoot small drops. `emit`
+            // is invoked per phase and may truncate; ~0 return stops.
+            // Returns {ds, terminal}.
+            const auto brakeRun =
+                [&](HotSt st, double vT, bool cold, double am,
+                    double jm, double sm,
+                    const std::function<double(double, double, bool,
+                                               double)>& emit)
+                    -> std::pair<double, HotSt> {
+                double s = 0.0;
+                bool stop = false;
+                auto step = [&](double sigma, double jh, bool isSnap,
+                                double dur) -> double {
+                    if (stop || dur <= 1e-14) return 0.0;
+                    double use = dur;
+                    if (emit) {
+                        use = emit(sigma, jh, isSnap, dur);
+                        if (use <= 1e-14) { stop = true; return 0.0; }
+                    }
+                    s += isSnap ? dsSnap(st, sigma, use)
+                                : dsSing(st, jh, use);
+                    if (isSnap) applySnap(st, sigma, use);
+                    else applySing(st, jh, use);
+                    if (use < dur - 1e-12) stop = true;
+                    return use;
+                };
+                // Cold tail lands (vT, 0, 0): a full closed-form
+                // excursion from (-aE, j≈0) to zero accel and jerk.
+                const auto tailPhases = [&](HotSt& tp,
+                                            bool doEmit) -> double {
+                    const double vBef = tp.v;
+                    if (doEmit) {
+                        driveExc(tp, 0.0, jm, sm, step);
+                        return 0.0;
+                    }
+                    const std::function<double(double, double, bool,
+                                               double)>
+                        sim = [&](double sigma, double jh, bool isSnap,
+                                  double dur) {
+                            if (isSnap) applySnap(tp, sigma, dur);
+                            else applySing(tp, jh, dur);
+                            return dur;
+                        };
+                    driveExc(tp, 0.0, jm, sm, sim);
+                    return vBef - tp.v;
+                };
+                // Excursion-terminal margin at decel level aE:
+                // v after the j-excursion to (a=-aE, j=0), minus the
+                // reserve the cold tail still needs. Decreasing in
+                // aE; the largest aE with margin ≥ 0 is feasible
+                // (any surplus is absorbed by the -aE hold).
+                const auto excMargin = [&](double aE) {
+                    HotSt tp = st;
+                    const std::function<double(double, double, bool,
+                                               double)>
+                        simStep = [&](double sigma, double jh,
+                                      bool isSnap,
+                                      double dur) -> double {
+                        if (isSnap) applySnap(tp, sigma, dur);
+                        else applySing(tp, jh, dur);
+                        return dur;
+                    };
+                    driveExc(tp, -aE, jm, sm, simStep);
+                    double reserve = vT;
+                    if (cold) {
+                        HotSt tq = tp;
+                        const double vBef = tq.v;
+                        tailPhases(tq, false);
+                        reserve += vBef - tq.v;
+                    }
+                    return tp.v - reserve;
+                };
+                // Choose aE: am when the full sequence leaves margin;
+                // otherwise the level whose excursion lands exactly
+                // on the reserve (zero hold).
+                double aE = am;
+                const double dvNeed = st.v - vT;
+                // Non-cold targets below vT need nothing. Cold
+                // targets with a hot (a,j) still need the shedding
+                // excursion — it raises v past vT before the tail
+                // lands (vT, a≈0).
+                if (dvNeed <= 0.0 &&
+                    (!cold || (std::abs(st.a) < 1e-9 &&
+                               std::abs(st.j) < 1e-9)))
+                    return {0.0, st};
+                if (excMargin(am) < 0.0) {
+                    if (excMargin(0.0) <= 0.0) {
+                        // Even a bleed lands below vT — emit anyway
+                        // so the caller sees the overshoot.
+                        aE = 0.0;
+                    } else {
+                        double lo = 0.0, hi = am;
+                        for (int k = 0; k < 50; ++k) {
+                            const double mid = 0.5 * (lo + hi);
+                            (excMargin(mid) < 0.0) ? hi = mid
+                                                   : lo = mid;
+                        }
+                        aE = 0.5 * (lo + hi);
+                    }
+                }
+                if (aE > 1e-9)
+                    driveExc(st, -aE, jm, sm, step);
+                const double tailDv = cold ? [&] {
+                    HotSt tp = st;
+                    const double vBef = tp.v;
+                    tailPhases(tp, false);
+                    return vBef - tp.v;
+                }() : 0.0;
+                if (!stop && st.a < -1e-14 && st.v > vT) {
+                    const double vStop = cold ? vT + tailDv : vT;
+                    const double t = (st.v - vStop) / (-st.a);
+                    if (t > 0.0) step(0.0, 0.0, false, t);
+                }
+                if (cold && !stop) tailPhases(st, true);
+                return {s, st};
+            };
+
+            // Distance-only version of brakeRun. +inf when the cold
+            // terminal undershoots vT (braking overshot the target).
+            const auto brakeDist = [&](const HotSt& st, double vT,
+                                       bool cold, double am,
+                                       double jm, double sm) {
+                // Below the cap needs no braking — unless a cold
+                // target must shed a hot (a,j) before arrival;
+                // brakeRun's shedding sequence covers that.
+                const bool hot =
+                    std::abs(st.a) > 1e-9 || std::abs(st.j) > 1e-9;
+                if (st.v <= vT && !(cold && hot)) return 0.0;
+                const std::function<double(double, double, bool,
+                                           double)>
+                    noEmit;
+                auto res = brakeRun(st, vT, cold, am, jm, sm, noEmit);
+                // +inf only when the brake sequence lands above the
+                // target — undershooting below is legal.
+                if (res.first > 0.0 &&
+                    res.second.v > vT + 1e-6 * (1.0 + vT))
+                    return std::numeric_limits<double>::infinity();
+                return res.first;
+            };
+
+            // Bleed (a,j) → (0,0): closed-form excursion via driveExc.
+            // With emitFn set the emitted arcs advance the aliased
+            // state; empty emitFn simulates on `tp` in place. Returns
+            // Δv used (signed: + while bleeding +a).
+            const auto bleedRun =
+                [&](HotSt& tp,
+                    const std::function<double(double, double, bool,
+                                               double)>& emitFn,
+                    double am, double jm, double sm) -> double {
+                (void)am;
+                const double vBef = tp.v;
+                if (std::abs(tp.a) < 1e-9 && std::abs(tp.j) < 1e-9)
+                    return 0.0;
+                const auto step = [&](double sigma, double jh,
+                                      bool isSnap,
+                                      double dur) -> double {
+                    if (emitFn) return emitFn(sigma, jh, isSnap, dur);
+                    if (isSnap) applySnap(tp, sigma, dur);
+                    else applySing(tp, jh, dur);
+                    return dur;
+                };
+                driveExc(tp, 0.0, jm, sm, step);
+                return tp.v - vBef;
+            };
+
+            // Δv the (a,j)→0 bleed consumes from `q` (simulation).
+            const auto bleedDv = [&](const HotSt& q, double am,
+                                     double jm, double sm) {
+                HotSt tp = q;
+                const std::function<double(double, double, bool,
+                                           double)>
+                    noEmit;
+                return bleedRun(tp, noEmit, am, jm, sm);
+            };
+            // Distance the (a,j)→0 bleed covers from `q`.
+            const auto bleedDs = [&](const HotSt& q, double am,
+                                     double jm, double sm) {
+                HotSt tp = q;
+                double ds = 0.0;
+                const std::function<double(double, double, bool,
+                                           double)>
+                    meas = [&](double sigma, double jh, bool isSnap,
+                               double dur) -> double {
+                        const double d = isSnap
+                            ? dsSnap(tp, sigma, dur)
+                            : dsSing(tp, jh, dur);
+                        if (isSnap) applySnap(tp, sigma, dur);
+                        else applySing(tp, jh, dur);
+                        ds += d;
+                        return dur;
+                    };
+                bleedRun(tp, meas, am, jm, sm);
+                return ds;
+            };
+
+
+            // Reachability-only feasibility for the boundary sweep.
+            // Intervals adjacent to a hard boundary (stamp/dwell/
+            // interior-min) must be cold-reachable — the boundary
+            // resets (a,j). Mid-run intervals carry the ramp state
+            // through, so the trapezoid bound |vR²-vL²|/(2·a) is the
+            // correct hot reach for them.
+            const auto hardSplit = [&](int i) -> bool {
+                if (i <= 0 || i > nsp) return true;
+                const auto& sp = splits[static_cast<size_t>(i - 1)];
+                return sp.isStamp || sp.isDwell || sp.interiorMin;
+            };
+            const auto transitionOk = [&](int i, double vL,
+                                          double vR) -> bool {
+                auto& pc = pcs[static_cast<size_t>(i)];
+                if (!pc.solver) return std::abs(vL - vR) <= 1e-9;
+                const double len = pc.sEnd - pc.sStart;
+                const double usable = len * (1.0 - 1e-6);
+                if (vR < vL - 1e-9) {
+                    // Deceleration: certify against the actual
+                    // emit-side brake sequence — the solver's
+                    // transition model under-prices snap-limited
+                    // shedding. cold=true is the conservative bound
+                    // (the shed tail only adds distance).
+                    const double am = pc.solver->accelBound();
+                    const double jm = pc.solver->jerkBound();
+                    const double sm = pc.solver->snapBound();
+                    const double bD =
+                        brakeDist(HotSt{vL, 0.0, 0.0}, vR, true,
+                                  am, jm, sm);
+                    return std::isfinite(bD) && bD <= usable;
+                }
+                if (!hardSplit(i) && !hardSplit(i + 1) &&
+                    i > 0 && i < nsp) {
+                    const double am = pc.solver->accelBound();
+                    if (am > 0.0)
+                        return usable >=
+                            std::abs(vR * vR - vL * vL) / (2.0 * am);
+                }
+                return pc.solver->transitionDistanceFeasible(
+                    vL, vR, usable);
+            };
+
+            // Largest feasible entry speed <= cap given exit speed vR.
+            // For cap > vR the answer is the decel-limit boundary on
+            // [vR, cap]; for cap <= vR an infeasible cap means the exit
+            // is unreachable from below — return cap unchanged and let
+            // the forward pass lower vR instead.
+            const auto maxEntry = [&](int i, double vR,
+                                      double cap) -> double {
+                if (transitionOk(i, cap, vR)) return cap;
+                if (cap <= vR || !transitionOk(i, vR, vR)) return cap;
+                double lo = vR, hi = cap;
+                for (int k = 0; k < 48; ++k) {
+                    const double mid = 0.5 * (lo + hi);
+                    if (transitionOk(i, mid, vR)) lo = mid;
+                    else hi = mid;
+                }
+                return lo;
+            };
+            // Largest feasible exit speed <= cap given entry speed vL —
+            // mirror image of maxEntry.
+            const auto maxExit = [&](int i, double vL,
+                                     double cap) -> double {
+                if (transitionOk(i, vL, cap)) return cap;
+                if (cap <= vL || !transitionOk(i, vL, vL)) return cap;
+                double lo = vL, hi = cap;
+                for (int k = 0; k < 48; ++k) {
+                    const double mid = 0.5 * (lo + hi);
+                    if (transitionOk(i, vL, mid)) lo = mid;
+                    else hi = mid;
+                }
+                return lo;
+            };
+            // Backward/forward reachable sweep, iterated to a fixed
+            // point: forward-lowered exits can invalidate entries the
+            // backward pass accepted, so the pair repeats until
+            // boundary speeds stop moving (they only decrease, so
+            // convergence is guaranteed).
+            for (int pass = 0; pass < 32; ++pass) {
+                bool changed = false;
+                for (int i = nsp; i >= 1; --i) {
+                    const double prev = B[static_cast<size_t>(i)];
+                    const double nv =
+                        maxEntry(i, B[static_cast<size_t>(i + 1)], prev);
+                    if (nv < prev - 1e-9) {
+                        B[static_cast<size_t>(i)] = nv;
+                        changed = true;
+                    }
+                }
+                for (int i = 0; i <= nsp; ++i) {
+                    const double prev = B[static_cast<size_t>(i + 1)];
+                    const double nv =
+                        maxExit(i, B[static_cast<size_t>(i)], prev);
+                    if (nv < prev - 1e-9) {
+                        B[static_cast<size_t>(i + 1)] = nv;
+                        changed = true;
+                    }
+                }
+                if (!changed) break;
+            }
+            if (std::getenv("TETHER_DEBUG_TOPRA_B")) {
+                std::fprintf(stderr, "[TOPRA B]");
+                for (int j = 0; j <= nsp + 1; j += 20)
+                    std::fprintf(stderr, " %d:%.2f", j,
+                                 B[static_cast<size_t>(j)]);
+                std::fprintf(stderr, "\n");
+            }
+
+            // Boundary classification: cold landing (a,j → 0) at profile
+            // extrema, hard points, and endpoints; hot crossing
+            // (a=±amax carried) at mid-run boundaries.
+            const auto coldBoundary = [&](int i) -> bool {
+                if (i <= 0 || i > nsp) return true;
+                const auto& sp = splits[static_cast<size_t>(i - 1)];
+                if (sp.isStamp || sp.isDwell || sp.interiorMin)
+                    return true;
+                const double bl = B[static_cast<size_t>(i - 1)];
+                const double bc = B[static_cast<size_t>(i)];
+                const double br = B[static_cast<size_t>(i + 1)];
+                return (bc <= bl && bc <= br) || (bc >= bl && bc >= br);
+            };
+
+            // Forward-emit one piece: max-effort accel until the brake
+            // point, then brake onto vT. `st` carries (v,a,j) in/out —
+            // hot boundary crossings keep their ramp state. Emitted arcs
+            // are appended to `out` with global s/t offsets; `tCursor`
+            // and `tmpCost` accumulate. Returns false on a boundary
+            // miss or a phase that cannot cover distance forward.
+            double tCursor = 0.0;
+            const auto emitPiece = [&](int i, HotSt& st, double vT,
+                                       bool coldLand,
+                                       std::vector<typename WSS::Arc>&
+                                           out) -> bool {
+                auto& pc = pcs[static_cast<size_t>(i)];
+                const double len = pc.sEnd - pc.sStart;
+                const double am = pc.solver->accelBound();
+                const double jm = pc.solver->jerkBound();
+                const double sm = pc.solver->snapBound();
+                const double bleed = jm * jm / (2.0 * sm);
+                const double sOff = pc.sStart;
+                if (am <= 0.0 || jm <= 0.0 || sm <= 0.0) return false;
+                double sAcc = 0.0;
+                double sLimit = len;
+                // Append a phase as an arc; `use` may truncate `dur`
+                // at the current target. Returns the used duration.
+                const auto emit = [&](double sigma, double jh,
+                                      bool isSnap,
+                                      double dur) -> double {
+                    double use = dur;
+                    const double rem = sLimit - sAcc;
+                    if (std::getenv("TETHER_DEBUG_TOPRA") && i < 6)
+                        std::fprintf(stderr,
+                            "  emit i=%d s=%.4f st=(%.3f,%.3f,%.3f) "
+                            "ph=(%.0f,%.0f,%d,dur=%.4g) lim=%.4f\n",
+                            i, sAcc, st.v, st.a, st.j, sigma, jh,
+                            isSnap ? 1 : 0, dur, sLimit);
+                    const double full = isSnap ? dsSnap(st, sigma, dur)
+                                               : dsSing(st, jh, dur);
+                    if (full > rem) {
+                        use = tauForDs(st, sigma, jh, isSnap, rem);
+                        if (!std::isfinite(use) || use < 0.0) use = 0.0;
+                    }
+                    if (use <= 1e-14) return 0.0;
+                    // Certified mid-phase envelope check: truncate
+                    // just before the first point the adaptive scan
+                    // cannot certify below env (env breakpoints inside
+                    // the phase, v-chord bounds, τ-bisection).
+                    {
+                        auto vPh = [&](double t) {
+                            return isSnap
+                                ? SnapSeg::v(st.v, st.a, st.j,
+                                             sigma, t)
+                                : SingularJSeg::v(st.v, st.a, jh, t);
+                        };
+                        auto dsPh = [&](double t) {
+                            return isSnap
+                                ? dsSnap(st, sigma, t)
+                                : dsSing(st, jh, t);
+                        };
+                        auto jPh = [&](double t) {
+                            return isSnap ? st.j + sigma * t : jh;
+                        };
+                        const double vio = firstEnvViolation(
+                            sOff + sAcc, use, vPh, dsPh, jPh);
+                        if (vio < use) {
+                            // Bisect the first crossing env = v.
+                            double lo = 0.0, hi = vio;
+                            for (int k = 0; k < 40; ++k) {
+                                const double mid = 0.5 * (lo + hi);
+                                (vPh(mid) >
+                                 envAt(sOff + sAcc + dsPh(mid)) +
+                                     envEase(vPh(mid)))
+                                    ? hi = mid : lo = mid;
+                            }
+                            use = lo * (1.0 - 1e-9);
+                            if (use <= 1e-14) return 0.0;
+                        }
+                    }
+                    typename WSS::Arc arc;
+                    arc.type = isSnap
+                        ? (sigma >= 0.0 ? WeightedArcType::SNAP_PLUS
+                                        : WeightedArcType::SNAP_MINUS)
+                        : WeightedArcType::SINGULAR;
+                    arc.s0 = sOff + sAcc;
+                    arc.t0 = tCursor;
+                    arc.v0 = st.v; arc.a0 = st.a; arc.j0 = st.j;
+                    arc.sigma = isSnap ? sigma : 0.0;
+                    arc.j_star = isSnap ? 0.0 : jh;
+                    arc.eta = arc.sigma; arc.a_star = arc.j_star;
+                    arc.duration = use;
+                    HotSt adv = st;
+                    if (isSnap) applySnap(adv, sigma, use);
+                    else applySing(adv, jh, use);
+                    arc.s1 = sOff + sAcc +
+                        (isSnap ? dsSnap(st, sigma, use)
+                                : dsSing(st, jh, use));
+                    arc.v1 = adv.v; arc.a1 = adv.a; arc.j1 = adv.j;
+                    sAcc = arc.s1 - sOff;
+                    tCursor += use;
+                    tmpAStar = std::max(
+                        tmpAStar,
+                        std::max(std::abs(arc.a0), std::abs(arc.a1)));
+                    // weighted cost increment (time + energy terms)
+                    const double tau = use;
+                    if (isSnap) {
+                        const double intJ2 =
+                            st.j * st.j * tau + st.j * sigma * tau * tau
+                            + sigma * sigma * tau * tau * tau / 3.0;
+                        const double intA2 =
+                            st.a * st.a * tau + st.a * st.j * tau * tau
+                            + (st.j * st.j + st.a * sigma) / 3.0
+                                * tau * tau * tau
+                            + st.j * sigma / 4.0 * tau * tau * tau * tau
+                            + sigma * sigma / 20.0
+                                * tau * tau * tau * tau * tau;
+                        tmpCost += wEff.w_t * tau + wEff.w_j * intJ2
+                            + wEff.w_a * intA2;
+                    } else {
+                        const double intJ2 = jh * jh * tau;
+                        const double intA2 =
+                            st.a * st.a * tau
+                            + st.a * jh * tau * tau
+                            + jh * jh / 3.0 * tau * tau * tau;
+                        tmpCost += wEff.w_t * tau + wEff.w_j * intJ2
+                            + wEff.w_a * intA2;
+                    }
+                    st = adv;
+                    out.push_back(arc);
+                    return use;
+                };
+                // Choose the next max-accel phase from the state.
+                const auto accelPhase = [&](const HotSt& q,
+                                            double& sigma, double& jh,
+                                            bool& isSnap,
+                                            double& dur) -> bool {
+                    const double curve = am - q.j * q.j / (2.0 * sm);
+                    if (q.j > 1e-12 && q.a >= curve - 1e-9) {
+                        // j-bleed: σ- until j=0 lands a=+am.
+                        sigma = -sm; jh = 0.0; isSnap = true;
+                        dur = q.j / sm;
+                        return true;
+                    }
+                    if (q.j < jm - 1e-12) {
+                        // σ+ until j=+jm or the +j bleed curve.
+                        sigma = +sm; jh = 0.0; isSnap = true;
+                        dur = (jm - q.j) / sm;
+                        auto g = [&](double tau) {
+                            const double aa = q.a + q.j * tau +
+                                0.5 * sm * tau * tau;
+                            const double jj = q.j + sm * tau;
+                            return aa + jj * jj / (2.0 * sm) - am;
+                        };
+                        if (g(dur) > 0.0) {
+                            double lo = 0.0, hi = dur;
+                            for (int k = 0; k < 50; ++k) {
+                                const double mid = 0.5 * (lo + hi);
+                                (g(mid) > 0.0) ? hi = mid : lo = mid;
+                            }
+                            dur = 0.5 * (lo + hi);
+                        }
+                        return true;
+                    }
+                    if (q.a < am - bleed - 1e-9 && q.j > 1e-12) {
+                        // +jm hold until the bleed curve.
+                        sigma = 0.0; jh = q.j; isSnap = false;
+                        dur = (am - bleed - q.a) / q.j;
+                        return true;
+                    }
+                    // +am hold (unbounded — switch found by caller).
+                    sigma = 0.0; jh = 0.0; isSnap = false;
+                    dur = std::numeric_limits<double>::infinity();
+                    return true;
+                };
+
+                // Constraint targets in order: interior caps (skipped
+                // candidates — hot landing, a carries through), then
+                // the piece boundary.
+                struct Tgt { double s; double v; bool cold; };
+                std::vector<Tgt> tgts;
+                if (pc.interiorCaps) {
+                    tgts.reserve(pc.interiorCaps->size() + 1);
+                    for (const auto& cp : *pc.interiorCaps)
+                        tgts.push_back({cp.first - pc.sStart,
+                                        cp.second, false});
+                }
+                std::sort(tgts.begin(), tgts.end(),
+                          [](const Tgt& a, const Tgt& b) {
+                              return a.s < b.s;
+                          });
+                tgts.push_back({len, vT, coldLand});
+
+                // Forward emission with lookahead: at every step the
+                // brake slack to EACH remaining target is
+                //   slack_k = (s_k - s) - brakeDist(st → t_k);
+                // braking starts when the minimum slack reaches 0.
+                int guard = 0;
+                int stall = 0;
+                size_t tIdx = 0;
+                sLimit = len;
+                while (sAcc < len - 1e-6) {
+                    if (guard++ > 4096 || stall > 4) {
+                        if (std::getenv("TETHER_DEBUG_TOPRA"))
+                            std::fprintf(stderr,
+                                "[TOPRA stall] i=%d s=%.9f len=%.9f "
+                                "st=(%.4f,%.4f,%.4f) tIdx=%zu\n",
+                                i, sAcc, len, st.v, st.a, st.j, tIdx);
+                        return false;
+                    }
+                    // Consume targets the trajectory has crossed.
+                    while (tIdx < tgts.size() &&
+                           sAcc >= tgts[tIdx].s - 1e-6) {
+                        if (st.v >
+                            tgts[tIdx].v + 1e-5 * (1.0 + tgts[tIdx].v)) {
+                            if (std::getenv("TETHER_DEBUG_TOPRA"))
+                                std::fprintf(stderr,
+                                    "[TOPRA miss] i=%d st.v=%.4f > "
+                                    "tg.v=%.4f @s=%.4f/%.4f a=%.4f "
+                                    "j=%.4f cold=%d\n",
+                                    i, st.v, tgts[tIdx].v,
+                                    tgts[tIdx].s, len, st.a, st.j,
+                                    tgts[tIdx].cold ? 1 : 0);
+                            return false;
+                        }
+                        ++tIdx;
+                    }
+                    if (tIdx >= tgts.size()) break;
+                    const double envNow = envAt(sOff + sAcc);
+                    const double dv = bleedDv(st, am, jm, sm);
+                    // Binding decel target over the remainder.
+                    double bestSlack =
+                        std::numeric_limits<double>::infinity();
+                    size_t bind = tgts.size();
+                    for (size_t k = tIdx; k < tgts.size(); ++k) {
+                        const double remK = tgts[k].s - sAcc;
+                        // Decel targets bind the brake slack; cold
+                        // targets also bind when a hot (a,j) must
+                        // shed before arrival.
+                        if (st.v > tgts[k].v + 1e-9 ||
+                            (tgts[k].cold &&
+                             (std::abs(st.a) > 1e-9 ||
+                              std::abs(st.j) > 1e-9))) {
+                            const double bD =
+                                brakeDist(st, tgts[k].v, tgts[k].cold,
+                                          am, jm, sm);
+                            // Fire slightly earlier than urgent()'s
+                            // brake term so an overdue state always
+                            // maps to the brake, never the stall.
+                            const double slack =
+                                remK * (1.0 - 1e-5) - bD;
+                            if (slack < bestSlack) {
+                                bestSlack = slack;
+                                bind = k;
+                            }
+                        }
+                    }
+                    if (std::getenv("TETHER_DEBUG_TOPRA") && i < 6)
+                        std::fprintf(stderr,
+                            "  iter i=%d s=%.4f st=(%.3f,%.3f,%.3f) "
+                            "env=%.3f dv=%.3f slack=%.4g bind=%zu "
+                            "tIdx=%zu\n",
+                            i, sAcc, st.v, st.a, st.j, envNow, dv,
+                            bestSlack, bind, tIdx);
+                    // Emit-capable bleed with post-bleed brake
+                    // feasibility: simulate the bleed first, then
+                    // require the brake to every later decel/cold
+                    // target still to fit — the bleed itself eats
+                    // braking distance.
+                    const auto tryBleed = [&]() -> bool {
+                        if (dv <= 1e-6) return false;
+                        HotSt q1 = st;
+                        double ds1 = 0.0;
+                        const std::function<double(double, double,
+                                                   bool, double)>
+                            meas =
+                                [&](double sigma, double jh,
+                                    bool isSnap, double dur) {
+                                    const double d = isSnap
+                                        ? dsSnap(q1, sigma, dur)
+                                        : dsSing(q1, jh, dur);
+                                    if (isSnap)
+                                        applySnap(q1, sigma, dur);
+                                    else
+                                        applySing(q1, jh, dur);
+                                    ds1 += d;
+                                    return dur;
+                                };
+                        bleedRun(q1, meas, am, jm, sm);
+                        const double dsEnd = sAcc + ds1;
+                        for (size_t k = tIdx; k < tgts.size(); ++k) {
+                            const double remK = tgts[k].s - dsEnd;
+                            const double bD =
+                                brakeDist(q1, tgts[k].v, tgts[k].cold,
+                                          am, jm, sm);
+                            if (std::getenv("TETHER_DEBUG_TOPRA") &&
+                                i < 6)
+                                std::fprintf(stderr,
+                                    "  tryBleed i=%d q1=(%.3f,%.3f,"
+                                    "%.3f) ds1=%.3f k=%zu remK=%.3f "
+                                    "bD=%.4g\n",
+                                    i, q1.v, q1.a, q1.j, ds1, k,
+                                    remK, bD);
+                            // Fail when the bleed lands above the
+                            // target and either crosses it mid-
+                            // flight or leaves no room to brake.
+                            if (q1.v > tgts[k].v + 1e-9 &&
+                                (remK <= 0.0 ||
+                                 bD > remK * (1.0 - 1e-6)))
+                                return false;
+                        }
+                        bleedRun(st, emit, am, jm, sm);
+                        return true;
+                    };
+                    // A) Bleed (a,j)→0 when the accel-state energy
+                    // would carry v to the env cap, or when a cold
+                    // target's shed distance is already overdue.
+                    const double capA = envNow;
+                    bool wantBleed =
+                        st.v + dv >= capA - 1e-9 * (1.0 + capA);
+                    if (!wantBleed) {
+                        const double bDs = bleedDs(st, am, jm, sm);
+                        for (size_t k = tIdx; k < tgts.size(); ++k) {
+                            if (tgts[k].cold &&
+                                bDs > tgts[k].s - sAcc) {
+                                wantBleed = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (wantBleed && tryBleed())
+                        continue;
+                    // B) Brake slack exhausted → max-brake to the
+                    // binding target (may span several caps).
+                    if (bind < tgts.size() && bestSlack <= 1e-9) {
+                        sLimit = tgts[bind].s;
+                        brakeRun(st, tgts[bind].v, tgts[bind].cold,
+                                 am, jm, sm, emit);
+                        sLimit = len;
+                        continue;
+                    }
+                    // C) Accelerate or cruise: at the envelope
+                    // ceiling with ~zero hot state the correct
+                    // action is a j=0 hold (constant v), not more
+                    // acceleration. Otherwise one accel phase whose
+                    // switch is found by the urgency bisection.
+                    double sigma = 0.0, jh = 0.0, dur = 0.0;
+                    bool isSnap = false;
+                    const bool atCap =
+                        dv <= 1e-6 &&
+                        st.v >= envNow - 1e-9 * (1.0 + envNow);
+                    if (atCap && (std::abs(st.a) > 1e-9 ||
+                                  std::abs(st.j) > 1e-9)) {
+                        // Tiny residual (a,j): kill it and land
+                        // back on the ceiling.
+                        bleedRun(st, emit, am, jm, sm);
+                        continue;
+                    }
+                    if (atCap) {
+                        isSnap = false;
+                        jh = 0.0;
+                        dur = (sLimit - sAcc) /
+                            std::max(st.v, 1e-9);
+                    } else {
+                        if (!accelPhase(st, sigma, jh, isSnap, dur))
+                            return false;
+                        if (!isSnap && jh == 0.0) {
+                            const double disc = st.v * st.v +
+                                2.0 * am * (len - sAcc);
+                            dur = std::max(
+                                (-st.v + std::sqrt(disc)) / am,
+                                1e-12);
+                        }
+                    }
+                    auto urgent = [&](double tau) -> double {
+                        HotSt q = st;
+                        const double dq = isSnap
+                            ? dsSnap(st, sigma, tau)
+                            : dsSing(st, jh, tau);
+                        if (isSnap) applySnap(q, sigma, tau);
+                        else applySing(q, jh, tau);
+                        const double envQ = envAt(sOff + sAcc + dq);
+                        const double dv2 = bleedDv(q, am, jm, sm);
+                        // Envelope ceiling: the bleed-back must stay
+                        // under the envelope at every point.
+                        double u = q.v + dv2 - envQ;
+                        if (std::getenv("TETHER_DEBUG_TOPRA_B") &&
+                            i < 6)
+                            std::fprintf(stderr,
+                                "    urg i=%d tau=%.4g dq=%.4g "
+                                "q=(%.3f,%.3f,%.3f) envQ=%.3f "
+                                "dv2=%.3f u0=%.4g\n",
+                                i, tau, dq, q.v, q.a, q.j, envQ,
+                                dv2, u);
+                        for (size_t k = tIdx; k < tgts.size(); ++k) {
+                            const double remK =
+                                tgts[k].s - sAcc - dq;
+                            if (remK <= 0.0) {
+                                // crossed target k mid-phase.
+                                u = std::max(u, q.v - tgts[k].v);
+                                continue;
+                            }
+                            if (q.v > tgts[k].v + 1e-9 ||
+                                (tgts[k].cold &&
+                                 (std::abs(q.a) > 1e-9 ||
+                                  std::abs(q.j) > 1e-9))) {
+                                const double bD =
+                                    brakeDist(q, tgts[k].v,
+                                              tgts[k].cold,
+                                              am, jm, sm);
+                                u = std::max(
+                                    u, bD - remK * (1.0 - 1e-6));
+                            }
+                        }
+                        return u;
+                    };
+                    if (dur > 1e-14 && urgent(dur) > 0.0 &&
+                        urgent(0.0) <= envEase(st.v)) {
+                        double lo = 0.0, hi = dur;
+                        for (int k = 0; k < 48; ++k) {
+                            const double mid = 0.5 * (lo + hi);
+                            (urgent(mid) > 0.0) ? hi = mid : lo = mid;
+                        }
+                        dur = 0.5 * (lo + hi);
+                        if (dur < 1e-9) {
+                            // Bisected to ~0: the constraint is
+                            // binding now — fall to the overdue
+                            // dispatch below.
+                            if (tryBleed())
+                                continue;
+                            if (bind < tgts.size()) {
+                                sLimit = tgts[bind].s;
+                                brakeRun(st, tgts[bind].v,
+                                         tgts[bind].cold,
+                                         am, jm, sm, emit);
+                                sLimit = len;
+                                continue;
+                            }
+                        }
+                    } else if (urgent(0.0) > envEase(st.v)) {
+                        // Already overdue: shed hot state via the
+                        // feasibility-checked bleed, else run the
+                        // shedding brake to the binding target
+                        // regardless of slack — it's the only
+                        // remaining legal action.
+                        if (tryBleed())
+                            continue;
+                        if (bind < tgts.size()) {
+                            sLimit = tgts[bind].s;
+                            brakeRun(st, tgts[bind].v, tgts[bind].cold,
+                                     am, jm, sm, emit);
+                            sLimit = len;
+                            continue;
+                        }
+                        dur = 0.0;
+                    }
+                    const double used = emit(sigma, jh, isSnap, dur);
+                    if (used <= 1e-14) {
+                        if (std::getenv("TETHER_DEBUG_TOPRA"))
+                            std::fprintf(stderr,
+                                "[TOPRA emit fail] i=%d s=%.4f/%.4f "
+                                "st=(%.4f,%.4f,%.4f) "
+                                "ph=(%.1f,%.1f,%d,dur=%.4g)\n",
+                                i, sAcc, len, st.v, st.a, st.j,
+                                sigma, jh, isSnap ? 1 : 0, dur);
+                        ++stall;
+                        // Cover a tiny residual to the piece end
+                        // with a j=0 hold rather than spin.
+                        if (len - sAcc < 1e-4 && st.v > 1e-9 &&
+                            std::abs(st.a) < 1e-9 &&
+                            std::abs(st.j) < 1e-9) {
+                            emit(0.0, 0.0, false,
+                                 (len - sAcc) / st.v);
+                            stall = 0;
+                        }
+                        continue;
+                    }
+                    stall = 0;
+                }
+                // Consume the terminal target for the boundary check.
+                while (tIdx < tgts.size() &&
+                       sAcc >= tgts[tIdx].s - 1e-6) {
+                    if (st.v >
+                        tgts[tIdx].v + 1e-5 * (1.0 + tgts[tIdx].v)) {
+                        if (std::getenv("TETHER_DEBUG_TOPRA"))
+                            std::fprintf(stderr,
+                                "[TOPRA miss] i=%d st.v=%.4f > "
+                                "tg.v=%.4f @s=%.4f/%.4f cold=%d\n",
+                                i, st.v, tgts[tIdx].v,
+                                tgts[tIdx].s, len,
+                                tgts[tIdx].cold ? 1 : 0);
+                        return false;
+                    }
+                    ++tIdx;
+                }
+                if (sAcc < len - 1e-6 &&
+                    std::getenv("TETHER_DEBUG_TOPRA"))
+                    std::fprintf(stderr,
+                        "[TOPRA short] i=%d s=%.4f < len=%.4f\n",
+                        i, sAcc, len);
+                return sAcc >= len - 1e-6;
+            };
+
+            // Sequential emission: hot state carries across boundaries.
+            HotSt st{static_cast<double>(v0), 0.0, 0.0};
+            for (int i = 0; i <= nsp; ++i) {
+                auto& pc = pcs[static_cast<size_t>(i)];
+                const double len = pc.sEnd - pc.sStart;
+                // Dwell arc precedes this sub-path — emitted even for
+                // zero-length pieces (consecutive dwells at one point).
+                if (i > 0 && splits[static_cast<size_t>(i - 1)].isDwell) {
+                    auto dArc = makeDwellArc(pc.sStart,
+                        splits[static_cast<size_t>(i - 1)].dwell);
+                    dArc.t0 = tCursor;
+                    tCursor += dArc.duration;
+                    tmpArcs.push_back(dArc);
+                    tmpCost += wEff.w_t *
+                        splits[static_cast<size_t>(i - 1)].dwell;
+                    st = HotSt{0.0, 0.0, 0.0};
+                }
+                if (!pc.solver || len < 1e-9) continue;
+                const double vT = B[static_cast<size_t>(i + 1)];
+                const bool coldLand = coldBoundary(i + 1);
+                const size_t arcBef = tmpArcs.size();
+                if (!emitPiece(i, st, vT, coldLand, tmpArcs)) {
+                    failReason = "Snap-space emission failed in "
+                                 "time-optimal solve";
+                    return false;
+                }
+                // Pointwise envelope certification on the emitted arcs.
+                std::vector<typename WSS::Arc> pieceArcs(
+                    tmpArcs.begin() + static_cast<long>(arcBef),
+                    tmpArcs.end());
+                if (!arcsWithinEnvelope(pieceArcs, 0.0,
+                                        pc.interiorCaps)) {
+                    failReason = "Envelope violation in time-optimal "
+                                 "emission";
+                    return false;
+                }
+                // Boundary-speed miss on hard points → fail.
+                if (coldLand && st.v > vT + 1e-6 * (1.0 + vT)) {
+                    failReason = "Cold boundary miss in time-optimal "
+                                 "emission";
+                    return false;
+                }
+            }
+            arcs = std::move(tmpArcs);
+            optimalAStar = tmpAStar;
+            costValue = tmpCost;
+            return true;
+        };
+
         const auto solveWhole = [&](std::string& failReason) -> bool {
             Solver solver(*pathCopy, limits_, wEff, feedRate);
             arcs = solver.solve(v0, endVelocity, constraintCacheSize);
@@ -4636,8 +6056,86 @@ public:
         };
 
         std::string failReason;
-        bool solved;
-        if (!splits.empty()) {
+        bool solved = false;
+
+        // Time-optimal construction when the weight fraction on time
+        // meets the configured threshold: split at every certified
+        // envelope candidate, sweep boundary speeds forward/backward,
+        // and verify each piece's pulse pointwise against the envelope.
+        const double wSum = wEff.w_t + wEff.w_a + wEff.w_j;
+        const bool timeOptimal = wSum > 0.0 &&
+            wEff.w_t >= timeOptimalThreshold_ * wSum;
+        if (timeOptimal) {
+            std::vector<PathSplit> topraSplits;
+            for (const auto& [s, dur] : dwellPoints)
+                topraSplits.push_back({s, 0.0, dur, true});
+            const double Ltot = static_cast<double>(pathLength);
+            const double eps =
+                std::max(1e-4 * Ltot, 1e-3);
+            for (const auto& c : envRes.candidates) {
+                if (c.s <= 1e-9 || c.s >= Ltot - 1e-9) continue;
+                // Hard boundaries: corner stamps, envelope local
+                // minima, and envelope discontinuities (feed steps).
+                // The optimal profile is kinked at these points, so a
+                // smooth pulse cannot substitute for a real boundary.
+                bool hard =
+                    c.term == ExactEnvelope<Dim, T>::Term::Stamp;
+                if (!hard) {
+                    for (const auto& m : envRes.localMinima) {
+                        if (std::abs(m.s - c.s) < 1e-6 * Ltot + 1e-6) {
+                            hard = true;
+                            break;
+                        }
+                    }
+                }
+                if (!hard) {
+                    const double eL = envAt(c.s - eps);
+                    const double eR = envAt(c.s + eps);
+                    if (std::abs(eR - eL) >
+                        1e-3 * std::max(eL, 1.0))
+                        hard = true;
+                }
+                topraSplits.push_back(
+                    {c.s, c.v, 0.0, false, false, hard});
+            }
+            std::stable_sort(topraSplits.begin(), topraSplits.end(),
+                [](const PathSplit& a, const PathSplit& b) {
+                    return a.s < b.s;
+                });
+            {
+                std::vector<PathSplit> merged;
+                for (const auto& sp : topraSplits) {
+                    if (!merged.empty() && sp.s - merged.back().s < 1e-9 &&
+                        !sp.isDwell && !merged.back().isDwell) {
+                        merged.back().boundaryV = std::min(
+                            merged.back().boundaryV, sp.boundaryV);
+                        merged.back().isStamp =
+                            merged.back().isStamp || sp.isStamp;
+                    } else {
+                        merged.push_back(sp);
+                    }
+                }
+                topraSplits = std::move(merged);
+            }
+            solved = solveSplitTopra(topraSplits, failReason);
+            if (std::getenv("TETHER_DEBUG_TOPRA")) {
+                std::fprintf(stderr,
+                    "[TOPRA] splits=%zu solved=%d reason=%s\n",
+                    topraSplits.size(), solved ? 1 : 0,
+                    failReason.c_str());
+                if (solved && std::getenv("TETHER_DEBUG_TOPRA_DUMP"))
+                    for (const auto& a : arcs)
+                        std::fprintf(stderr,
+                            "  arc s=[%.3f,%.3f] v=[%.3f,%.3f] "
+                            "a0=%.2f j0=%.2f type=%d dur=%.4g "
+                            "env0=%.2f env1=%.2f\n",
+                            a.s0, a.s1, a.v0, a.v1, a.a0, a.j0,
+                            static_cast<int>(a.type), a.duration,
+                            envAt(a.s0), envAt(a.s1));
+            }
+        }
+
+        if (!solved && !splits.empty()) {
             solved = solveSplit(splits, failReason);
             if (!solved) {
                 // First fallback: drop the interior-minimum splits (the
@@ -4669,7 +6167,7 @@ public:
                         : solveSplit(hardOnly, failReason);
                 }
             }
-        } else {
+        } else if (!solved) {
             solved = solveWhole(failReason);
         }
 
@@ -4761,6 +6259,26 @@ public:
      */
     void setWeights(CostWeights w) { weights_ = w; }
 
+    /**
+     * @brief Fraction of total cost weight on time at/above which the
+     *        planner switches to the time-optimal construction.
+     *
+     * When w_t / (w_t + w_a + w_j) >= timeOptimalThreshold, computeProfile
+     * builds the snap-space TOPP-RA–equivalent profile: constraint points
+     * at every certified envelope candidate, boundary speeds from a
+     * backward/forward reachable sweep, and per-interval peaks verified
+     * pointwise against the velocity envelope (no interval-min collapse,
+     * no dense sampling). Default 0.999999 — the time-optimal
+     * construction ignores w_a/w_j entirely, so it must only engage
+     * when the energy weight is numerically negligible; any
+     * physically-meaningful energy weight routes to the weighted
+     * solve where it can actually trade time against energy.
+     */
+    double timeOptimalThreshold() const { return timeOptimalThreshold_; }
+    void setTimeOptimalThreshold(double t) {
+        timeOptimalThreshold_ = std::clamp(t, 0.0, 1.0);
+    }
+
     // --- VelocityProfiler interface ---
 
     Limits limits() const override { return limits_; }
@@ -4777,6 +6295,7 @@ public:
 private:
     Limits limits_;
     CostWeights weights_;
+    double timeOptimalThreshold_ = 0.999999;
     std::shared_ptr<const Path> pathCopy_;
     std::shared_ptr<WSS> wss_;
     std::string lastFailure_;
