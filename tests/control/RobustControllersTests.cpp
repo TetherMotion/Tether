@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <memory>
+#include <vector>
 
 #include "tether/control/Controllers.hpp"
 #include "tether/control/RobustControllers.hpp"
@@ -148,8 +149,22 @@ TEST_F(H2ControllerTest, Design) {
     
     h2->setRegulatorProblem(A, B, C, Q, R, W, V, 2, 1, 1);
     
-    bool result = h2->design();
-    // Design may or may not succeed depending on system
+    // The plant is stabilizable/detectable: the two CAREs must solve.
+    EXPECT_TRUE(h2->design());
+}
+
+TEST_F(H2ControllerTest, DesignFailsOnNonStabilizable) {
+    // Integrator with no input path: (A,B) not stabilizable -> CARE fails.
+    double A[4] = {0, 1, 0, 0};
+    double B[2] = {0, 0};
+    double C[2] = {1, 0};
+    double Q[4] = {10, 0, 0, 1};
+    double R[1] = {0.1};
+    double W[4] = {0.01, 0, 0, 0.01};
+    double V[1] = {0.1};
+    
+    h2->setRegulatorProblem(A, B, C, Q, R, W, V, 2, 1, 1);
+    EXPECT_FALSE(h2->design());
 }
 
 TEST_F(H2ControllerTest, GetH2Norm) {
@@ -162,11 +177,12 @@ TEST_F(H2ControllerTest, GetH2Norm) {
     double V[1] = {0.1};
     
     h2->setRegulatorProblem(A, B, C, Q, R, W, V, 2, 1, 1);
-    h2->design();
+    ASSERT_TRUE(h2->design());
     
     double norm = h2->getH2Norm();
-    // H2 norm should be non-negative
-    EXPECT_GE(norm, 0.0);
+    // Real Gramian computation: finite and positive for a nontrivial problem
+    EXPECT_TRUE(std::isfinite(norm));
+    EXPECT_GT(norm, 0.0);
 }
 
 TEST_F(H2ControllerTest, GetControllerMatrices) {
@@ -179,10 +195,15 @@ TEST_F(H2ControllerTest, GetControllerMatrices) {
     double V[1] = {0.1};
     
     h2->setRegulatorProblem(A, B, C, Q, R, W, V, 2, 1, 1);
-    h2->design();
+    ASSERT_TRUE(h2->design());
     
     double Ak[16], Bk[4], Ck[4], Dk[1];
     h2->getControllerMatrices(Ak, Bk, Ck, Dk);
+    // Controller order equals plant order (n=2); Ck is nu x nk = 1x2
+    bool anyNonzero = false;
+    for (int i = 0; i < 2; ++i)
+        anyNonzero |= (std::abs(Ck[i]) > 1e-9);
+    EXPECT_TRUE(anyNonzero);
 }
 
 TEST_F(H2ControllerTest, BasicCompute) {
@@ -653,10 +674,12 @@ TEST(MuSynthesisTest, DKIteration) {
     int blockSizes[] = {2, 1};
     mu.setUncertaintyStructure(blockSizes, 2, nullptr);
     
+    // Without a configured generalized plant the iteration must fail
+    // truthfully rather than claim progress.
     bool result = mu.dkIteration();
-    
-    // Placeholder always returns true
-    EXPECT_TRUE(result);
+    EXPECT_FALSE(result);
+    EXPECT_FALSE(mu.hasController());
+    EXPECT_EQ(mu.getIterationCount(), 0);
 }
 
 // ============================================================================
@@ -892,6 +915,152 @@ TEST_F(HInfinityControllerTest, IsAchievableVerySmallGamma) {
 }
 
 // ============================================================================
+// H-infinity synthesis verification (DGKF two-Riccati solution)
+// ============================================================================
+
+TEST(HInfinitySynthesisTest, AugmentedPlantPopulated) {
+    HInfinityController hinf;
+    double A[4] = {0, 1, -1, -1};
+    double B[2] = {0, 1};
+    double C[2] = {1, 0};
+    double D[1] = {0};
+
+    hinf.setPlant(A, B, C, D, 2, 1, 1);
+    hinf.setSensitivityWeight(2.0, 10.0, 0.5);
+    hinf.setControlWeight(1.0);
+    hinf.setComplementaryWeight(1.0, 50.0, 0.1);
+
+    ASSERT_TRUE(hinf.designOptimal(0.01) > 0.0);
+
+    int n = 0, nw = 0, nu = 0, nz = 0, ny = 0;
+    hinf.getAugmentedDimensions(n, nw, nu, nz, ny);
+    // plant(2) + W1(1) + W2(1) + W3(1) states; w = [r;d;n] = 3; z = 3 channels
+    EXPECT_EQ(n, 5);
+    EXPECT_EQ(nw, 3);
+    EXPECT_EQ(nu, 1);
+    EXPECT_EQ(nz, 3);
+    EXPECT_EQ(ny, 1);
+
+    std::vector<double> Aa(n * n), B1(n * nw), C1(nz * n), D12(nz * nu), D21(ny * nw);
+    hinf.getAugmentedPlant(Aa.data(), B1.data(), nullptr, C1.data(), nullptr,
+                           nullptr, D12.data(), D21.data(), nullptr);
+    double aMax = 0, bMax = 0, cMax = 0;
+    for (double v : Aa) aMax = std::max(aMax, std::abs(v));
+    for (double v : B1) bMax = std::max(bMax, std::abs(v));
+    for (double v : C1) cMax = std::max(cMax, std::abs(v));
+    EXPECT_GT(aMax, 0.0);
+    EXPECT_GT(bMax, 0.0);
+    EXPECT_GT(cMax, 0.0);
+    // D12 must be nonzero (control penalty -> full column rank)
+    double d12Max = 0;
+    for (double v : D12) d12Max = std::max(d12Max, std::abs(v));
+    EXPECT_GT(d12Max, 0.0);
+    // D21 must be nonzero (noise/reference reach measurement)
+    double d21Max = 0;
+    for (double v : D21) d21Max = std::max(d21Max, std::abs(v));
+    EXPECT_GT(d21Max, 0.0);
+}
+
+TEST(HInfinitySynthesisTest, DesignFailsBelowGammaMin) {
+    HInfinityController hinf;
+    double A[4] = {0, 1, -1, -1};
+    double B[2] = {0, 1};
+    double C[2] = {1, 0};
+    double D[1] = {0};
+
+    hinf.setPlant(A, B, C, D, 2, 1, 1);
+    hinf.setSensitivityWeight(2.0, 10.0, 0.01);
+    hinf.setControlWeight(1.0);
+    hinf.setComplementaryWeight(1.0, 50.0, 0.01);
+
+    // gamma_min ~ 81 for these weights; tiny gamma must be rejected
+    EXPECT_FALSE(hinf.isAchievable(1.0));
+    EXPECT_FALSE(hinf.design(1.0));
+    EXPECT_TRUE(hinf.isAchievable(200.0));
+    EXPECT_TRUE(hinf.design(200.0));
+    EXPECT_GT(hinf.getGamma(), 0.0);
+}
+
+TEST(HInfinitySynthesisTest, ClosedLoopStableAndResponds) {
+    HInfinityController hinf;
+    double A[4] = {0, 1, -1, -1};
+    double B[2] = {0, 1};
+    double C[2] = {1, 0};
+    double D[1] = {0};
+
+    hinf.setPlant(A, B, C, D, 2, 1, 1);
+    hinf.setSensitivityWeight(2.0, 10.0, 0.5);
+    hinf.setControlWeight(1.0);
+    hinf.setComplementaryWeight(1.0, 50.0, 0.1);
+    ASSERT_GT(hinf.designOptimal(0.01), 0.0);
+
+    // Simulate closed loop: x' = Ax + Bu, y = Cx, e = r - y
+    double x[2] = {0.0, 0.0};
+    const double dt = 0.01, r = 1.0;
+    double ymax = 0.0;
+    for (int k = 0; k < 30000; ++k) {
+        ControllerInput in;
+        in.reference = r;
+        in.measured = x[0];
+        in.dt = dt;
+        ControllerOutput out = hinf.compute(in);
+        ASSERT_TRUE(std::isfinite(out.control));
+        double u = out.control;
+        ymax = std::max(ymax, std::abs(x[0]));
+        double x0d = x[1];
+        double x1d = -x[0] - x[1] + u;
+        x[0] += x0d * dt;
+        x[1] += x1d * dt;
+        ASSERT_TRUE(std::isfinite(x[0]) && std::isfinite(x[1]));
+    }
+    // loop must be stable and bounded; output must move toward the reference
+    EXPECT_LT(ymax, 5.0);
+    EXPECT_GT(x[0], 0.1);   // responds to r = 1 (Hinf tracking is conservative)
+}
+
+TEST(HInfinitySynthesisTest, GeneralizedPlantFeedthroughPreserved) {
+    HInfinityController hinf;
+    double A[1] = {-1.0}, B1[1] = {1.0}, B2[1] = {1.0};
+    double C1[1] = {1.0}, C2[1] = {1.0};
+    double D11[1] = {0.0}, D12[1] = {0.1}, D21[1] = {1.0}, D22[1] = {0.0};
+    hinf.setGeneralizedPlant(A, B1, B2, C1, C2, D11, D12, D21, D22,
+                             1, 1, 1, 1, 1);
+    ASSERT_TRUE(hinf.designOptimal(0.01) >= 0.0);
+
+    int n = 0, nw = 0, nu = 0, nz = 0, ny = 0;
+    hinf.getAugmentedDimensions(n, nw, nu, nz, ny);
+    EXPECT_EQ(n, 1);
+    std::vector<double> D12v(nz * nu), D21v(ny * nw);
+    hinf.getAugmentedPlant(nullptr, nullptr, nullptr, nullptr, nullptr,
+                           nullptr, D12v.data(), D21v.data(), nullptr);
+    EXPECT_NEAR(D12v[0], 0.1, 1e-12);
+    EXPECT_NEAR(D21v[0], 1.0, 1e-12);
+}
+
+TEST(HInfinitySynthesisTest, GeneralizedPlantDesignSucceeds) {
+    HInfinityController hinf;
+    double A[1] = {-1.0}, B1[1] = {1.0}, B2[1] = {1.0};
+    double C1[1] = {1.0}, C2[1] = {1.0};
+    double D11[1] = {0.0}, D12[1] = {0.1}, D21[1] = {1.0}, D22[1] = {0.0};
+    hinf.setGeneralizedPlant(A, B1, B2, C1, C2, D11, D12, D21, D22,
+                             1, 1, 1, 1, 1);
+    // trivially rejectable plant -> very small gamma achievable
+    EXPECT_TRUE(hinf.isAchievable(1.0));
+    EXPECT_TRUE(hinf.design(1.0));
+}
+
+TEST(HInfinitySynthesisTest, GeneralizedPlantRejectsRankDeficient) {
+    HInfinityController hinf;
+    double A[1] = {-1.0}, B1[1] = {1.0}, B2[1] = {1.0};
+    double C1[1] = {1.0}, C2[1] = {1.0};
+    double D11[1] = {0.0}, D12[1] = {0.0}, D21[1] = {1.0}, D22[1] = {0.0};
+    // D12 = 0 -> R singular -> cannot satisfy DGKF assumptions
+    hinf.setGeneralizedPlant(A, B1, B2, C1, C2, D11, D12, D21, D22,
+                             1, 1, 1, 1, 1);
+    EXPECT_FALSE(hinf.design(10.0));
+}
+
+// ============================================================================
 // Additional Integration Tests
 // ============================================================================
 
@@ -973,7 +1142,193 @@ TEST(RobustIntegrationTest, MuSynthesisWorkflow) {
     EXPECT_GE(ub1, 0.0);
     EXPECT_GE(ub2, 0.0);
     
-    // D-K iteration step
-    bool converged = mu.dkIteration();
-    EXPECT_TRUE(converged);
+    // D-K iteration without a configured plant must fail truthfully
+    EXPECT_FALSE(mu.dkIteration());
+    EXPECT_FALSE(mu.hasController());
+}
+
+// ============================================================================
+// mu-analysis: structured singular value upper bounds
+// ============================================================================
+
+TEST(MuAnalysisTest, DiagonalMatrixTwoScalarBlocks) {
+    // mu(diag(2, 0.5)) = 2 for two independent scalar blocks:
+    // Delta = diag(d1, d2) can choose d1 = 0.5 making I - M*Delta singular.
+    MuSynthesisFramework mu;
+    int sz[2] = {1, 1};
+    mu.setUncertaintyStructure(sz, 2);
+    double M[4] = {2, 0, 0, 0.5};
+    EXPECT_NEAR(mu.computeMuUpperBound(M, 2), 2.0, 1e-3);
+}
+
+TEST(MuAnalysisTest, NilpotentMatrixBoundVanishes) {
+    // M = [[0,1],[0,0]] is nilpotent: mu = 0 because D-scaling can make
+    // DMD^-1 arbitrarily small (d1/d2 -> 0).
+    MuSynthesisFramework mu;
+    int sz[2] = {1, 1};
+    mu.setUncertaintyStructure(sz, 2);
+    double M[4] = {0, 1, 0, 0};
+    EXPECT_LT(mu.computeMuUpperBound(M, 2), 1e-3);
+}
+
+TEST(MuAnalysisTest, PermutationMatrixScalarBlocks) {
+    // M = [[0,1],[1,0]]: mu = 1 (det(I - M*diag(d1,d2)) = 1 - d1*d2).
+    MuSynthesisFramework mu;
+    int sz[2] = {1, 1};
+    mu.setUncertaintyStructure(sz, 2);
+    double M[4] = {0, 1, 1, 0};
+    EXPECT_NEAR(mu.computeMuUpperBound(M, 2), 1.0, 1e-3);
+}
+
+TEST(MuAnalysisTest, FullBlockNoScalingGain) {
+    // A single full 2x2 block only admits D = d*I (scalar commutant),
+    // so the bound equals sigma_bar(M) = 1 — no improvement possible.
+    MuSynthesisFramework mu;
+    int sz[1] = {2};
+    mu.setUncertaintyStructure(sz, 1);
+    double M[4] = {0, 1, 1, 0};
+    EXPECT_NEAR(mu.computeMuUpperBound(M, 2), 1.0, 1e-3);
+}
+
+TEST(MuAnalysisTest, RepeatedScalarBlock) {
+    // Delta = delta*I_2 on the swap matrix: mu = 1 since delta = +-1 works.
+    MuSynthesisFramework mu;
+    int sz[1] = {2};
+    bool rep[1] = {true};
+    mu.setUncertaintyStructure(sz, 1, rep);
+    double M[4] = {0, 1, 1, 0};
+    EXPECT_NEAR(mu.computeMuUpperBound(M, 2), 1.0, 1e-3);
+}
+
+TEST(MuAnalysisTest, DScalingBeatsUnstructuredNorm) {
+    // M = [[1,2],[0,1]] with two scalar blocks: sigma_bar ~ 2.56 but
+    // det(I - M*diag(d1,d2)) = (1-d1)^2 vanishes at d1 = 1, so mu = 1.
+    // A correct D-scaling must find a bound well below sigma_bar.
+    MuSynthesisFramework mu;
+    int sz[2] = {1, 1};
+    mu.setUncertaintyStructure(sz, 2);
+    double M[4] = {1, 2, 0, 1};
+    double ub = mu.computeMuUpperBound(M, 2);
+    EXPECT_NEAR(ub, 1.0, 1e-2);
+    EXPECT_LT(ub, 2.0);   // much better than sigma_bar = 2.56
+}
+
+TEST(MuAnalysisTest, MissingStructureFallsBackToUnstructured) {
+    // No uncertainty structure: must return sigma_bar(M), a valid bound.
+    MuSynthesisFramework mu;
+    double M[4] = {0, 1, 1, 0};
+    EXPECT_NEAR(mu.computeMuUpperBound(M, 2), 1.0, 1e-6);
+}
+
+TEST(MuAnalysisTest, MismatchedStructureFallsBack) {
+    // Block sizes {1,2} sum to 3 != n = 2: fall back to sigma_bar.
+    MuSynthesisFramework mu;
+    int sz[2] = {1, 2};
+    mu.setUncertaintyStructure(sz, 2);
+    double M[4] = {0, 1, 1, 0};
+    EXPECT_NEAR(mu.computeMuUpperBound(M, 2), 1.0, 1e-6);
+}
+
+TEST(MuAnalysisTest, ComplexFrequencyResponse) {
+    // M(jw) = 1/(jw+1) as a 1x1 complex matrix with one scalar block:
+    // mu = |M| so the bound should equal the magnitude at w = 0 -> 1.
+    MuSynthesisFramework mu;
+    int sz[1] = {1};
+    mu.setUncertaintyStructure(sz, 1);
+    std::complex<double> M0[1] = {std::complex<double>(1.0, 0.0)};
+    EXPECT_NEAR(mu.computeMuUpperBound(M0, 1), 1.0, 1e-6);
+    std::complex<double> M10[1] = {std::complex<double>(1.0/11.0, -10.0/11.0)};
+    EXPECT_NEAR(mu.computeMuUpperBound(M10, 1), std::abs(M10[0]), 1e-6);
+}
+
+// ============================================================================
+// D-K iteration
+// ============================================================================
+
+TEST(MuSynthesisDKTest, IterationOnScalarUncertainty) {
+    // Plant: x' = -x + u + w_d, y = x + w_n
+    //   w = [w_n ; w_d]   (uncertainty channel LAST)
+    //   z = [0.1*u ; x]   (uncertainty output LAST)
+    // For a single scalar block D-scaling cannot reduce |M(jw)|, so the
+    // reported bound must equal max_w |T_{w_d->x}(jw)| of the synthesized
+    // closed loop. We verify the bound is finite, positive, and that the
+    // controller matrices are populated.
+    MuSynthesisFramework dk;
+    int bsz[1] = {1};
+    dk.setUncertaintyStructure(bsz, 1);
+
+    double A  = -1.0;
+    double B1[2] = {0.0, 1.0};
+    double B2    = 1.0;
+    double C1[2] = {0.0, 1.0};    // z2 = x
+    double C2    = 1.0;
+    double D11[4] = {0,0,0,0};
+    double D12[2] = {0.1, 0.0};   // z1 += 0.1 u
+    double D21[2] = {1.0, 0.0};   // w_n -> y
+    double D22    = 0.0;
+
+    dk.setGeneralizedPlant(&A, B1, &B2, C1, &C2, D11, D12, D21, &D22,
+                           1, 2, 1, 2, 1, 1, 1);
+    dk.setFrequencyGrid(0.1, 100.0, 25);
+
+    int iters = dk.dkIterate(6, 0.02);
+    EXPECT_GE(iters, 1);
+    EXPECT_TRUE(dk.hasController());
+    EXPECT_GT(dk.getMuBound(), 0.0);
+    EXPECT_TRUE(std::isfinite(dk.getMuBound()));
+
+    double Ak[1], Bk[1], Ck[1], Dk[1];
+    int nk = 0;
+    dk.getControllerMatrices(Ak, Bk, Ck, Dk, nk);
+    EXPECT_EQ(nk, 1);
+    EXPECT_FALSE(std::abs(Ck[0]) < 1e-12 && std::abs(Dk[0]) < 1e-12);
+}
+
+TEST(MuSynthesisDKTest, IterationReducesBoundWithStructure) {
+    // Two independent scalar uncertainty channels on a 2-state plant.
+    // D-K should produce a stabilizing controller and a finite bound.
+    // Plant: double integrator-ish x' = [[0,1],[-2,-1]] x + [0;1] u
+    //        w_d enters both states; y = x1 + noise.
+    // w = [w_perf(2) ; w_d(2)] -> nw=4 ; z = [x(2) ; u_weighted? ...]
+    // Keep it small: n=2, nu=1, ny=1, nz=3 (z=[x1;x2;0.1u]? unc = last 2 rows)
+    // Simpler valid config: z = [z_perf(1) ; z_unc(2)]
+    //   z_perf = x1,  z_unc = [x1, x2]  -> but rows must be linearly...
+    // Use: z = [0.1u ; x1 ; x2], unc rows = last 2 (x1,x2); w = [w_n ; w_d1 ; w_d2]
+    MuSynthesisFramework dk;
+    int bsz[2] = {1, 1};
+    dk.setUncertaintyStructure(bsz, 2);
+
+    double A[4] = {0, 1, -2, -1};
+    // B1 is n x nw = 2x3, w = [w_n, w_d1, w_d2]
+    double B1r[6] = {0, 0.5, 0.1,   0, 0.2, 0.4};
+    double B2[2] = {0, 1};
+    // z = [0.1u ; x1 ; x2]: nz=3, C1 = 3x2, D12 = 3x1
+    double C1[6] = {0,0,  1,0,  0,1};   // z2=x1, z3=x2 (row-major 3x2)
+    double C2[2] = {1, 0};             // y = x1
+    double D11[9] = {0};
+    double D12[3] = {0.1, 0, 0};
+    double D21[3] = {1, 0, 0};         // w_n -> y
+    double D22 = 0.0;
+
+    dk.setGeneralizedPlant(A, B1r, B2, C1, C2, D11, D12, D21, &D22,
+                           2, 3, 1, 3, 1, 2, 2);
+    dk.setFrequencyGrid(0.1, 100.0, 21);
+
+    int iters = dk.dkIterate(6, 0.02);
+    EXPECT_GE(iters, 1);
+    EXPECT_TRUE(dk.hasController());
+    EXPECT_TRUE(std::isfinite(dk.getMuBound()));
+    EXPECT_GT(dk.getMuBound(), 0.0);
+}
+
+TEST(MuSynthesisDKTest, InvalidUncertaintyConfigFails) {
+    // nUncW != nUncZ must fail.
+    MuSynthesisFramework dk;
+    int bsz[1] = {1};
+    dk.setUncertaintyStructure(bsz, 1);
+    double A = -1.0, B1[2] = {0,1}, B2 = 1.0, C1[2] = {0,1}, C2 = 1.0;
+    double D11[4] = {0}, D12[2] = {0.1,0}, D21[2] = {1,0}, D22 = 0;
+    dk.setGeneralizedPlant(&A, B1, &B2, C1, &C2, D11, D12, D21, &D22,
+                           1, 2, 1, 2, 1, 1, 2);   // nUncZ=2 > nz? -> invalid anyway
+    EXPECT_FALSE(dk.dkIteration());
 }

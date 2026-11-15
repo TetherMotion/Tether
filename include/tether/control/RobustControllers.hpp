@@ -171,6 +171,7 @@
 #include "ControllerBase.hpp"
 #include "StateSpaceControllers.hpp"
 #include <array>
+#include <complex>
 #include <functional>
 
 namespace tether::control {
@@ -352,6 +353,8 @@ protected:
     void resetImpl() override;
 
 private:
+    void discretizeController(double dt);
+
     int m_n{0}, m_nw{0}, m_nu{0}, m_nz{0}, m_ny{0};
     
     // Generalized plant matrices
@@ -362,6 +365,9 @@ private:
     std::array<double, MAX_OUTPUT_DIM * MAX_STATE_DIM> m_C2{};
     std::array<double, MAX_OUTPUT_DIM * MAX_STATE_DIM> m_D12{};
     std::array<double, MAX_OUTPUT_DIM * MAX_STATE_DIM> m_D21{};
+    // max |D11| / |D22| seen at setGeneralizedPlant() time (H2 needs ~0)
+    double m_d11Max{0.0}, m_d22Max{0.0};
+    bool m_plantValid{false};
     
     // Controller matrices (state-space)
     int m_nk{0};  // Controller order
@@ -369,6 +375,11 @@ private:
     std::array<double, MAX_STATE_DIM * MAX_OUTPUT_DIM> m_Bk{};
     std::array<double, MAX_CONTROL_DIM * MAX_STATE_DIM> m_Ck{};
     std::array<double, MAX_CONTROL_DIM * MAX_OUTPUT_DIM> m_Dk{};
+    
+    // Discretized controller cache (Tustin), refreshed when dt changes
+    double m_dtLast{-1.0};
+    std::array<double, MAX_STATE_DIM * MAX_STATE_DIM> m_Adk{};
+    std::array<double, MAX_STATE_DIM * MAX_OUTPUT_DIM> m_Bdk{};
     
     // Controller state
     std::array<double, MAX_STATE_DIM> m_xk{};
@@ -392,9 +403,26 @@ private:
  * Find K such that ||F_l(P, K)||∞ < γ
  * 
  * ## Solution
- * Uses γ-iteration: for given γ, check if Riccati equations
- * have stabilizing solutions with required properties.
- * 
+ * DGKF two-Riccati state-space solution: for a given γ, two
+ * game-type algebraic Riccati equations are solved via Hamiltonian
+ * invariant-subspace iteration, the coupling condition ρ(XY) < γ² is
+ * checked, and the central controller is assembled from X, Y, γ.
+ * designOptimal() brackets and bisects γ_min.
+ *
+ * ## Plant description
+ * Two equivalent front-ends:
+ *  - setPlant() + weighting functions W1/W2/W3 builds a mixed-sensitivity
+ *    generalized plant with exogenous input w = [reference; disturbance;
+ *    sensor noise] and performance output z = [W1·e; W2·u; W3·y].
+ *    Requires a strictly proper plant (D = 0). If no W2 is configured a
+ *    small static control penalty is added automatically so that D12 has
+ *    full column rank (a DGKF requirement).
+ *  - setGeneralizedPlant() accepts a user-supplied generalized plant
+ *    (xdot = Ax + B1 w + B2 u, z = C1 x + D11 w + D12 u,
+ *    y = C2 x + D21 w + D22 u). The two-Riccati solution requires the
+ *    standard assumptions D11 = D22 = 0, rank(D12) = nu,
+ *    rank(D21) = ny; violations make design() fail cleanly.
+ *
  * ## Mixed Sensitivity
  * Common design approach:
  * ```
@@ -402,6 +430,16 @@ private:
  * ||W₂·KS || < γ
  * ||W₃·T  ||∞
  * ```
+ *
+ * ## Notes
+ * - The controller is continuous-time; compute() discretizes it with the
+ *   Tustin (bilinear) transform, cached per sample period.
+ * - For SISO use the controller sees the tracking error
+ *   (reference - measured) as its measurement; MIMO callers supply the
+ *   measurement vector through ControllerInput::state.
+ * - γ is the achieved closed-loop ∞-norm bound, not a tracking spec:
+ *   tighter weights (smaller ε in W1) raise γ_min and trade robustness
+ *   against nominal performance.
  */
 class HInfinityController : public ControllerBase {
 public:
@@ -520,6 +558,21 @@ public:
      */
     void getControllerMatrices(double* Ak, double* Bk, double* Ck, double* Dk) const;
 
+    /**
+     * @brief Get augmented generalized-plant dimensions
+     */
+    void getAugmentedDimensions(int& n, int& nw, int& nu, int& nz, int& ny) const {
+        n = m_na; nw = m_nw; nu = m_nu; nz = m_nz; ny = m_ny;
+    }
+
+    /**
+     * @brief Get augmented generalized-plant matrices (row-major, sized by
+     *        getAugmentedDimensions()). Requires a prior design() call.
+     */
+    void getAugmentedPlant(double* A, double* B1, double* B2, double* C1,
+                           double* C2, double* D11, double* D12,
+                           double* D21, double* D22) const;
+
 protected:
     ControllerOutput computeImpl(const ControllerInput& input) override;
     void resetImpl() override;
@@ -541,18 +594,28 @@ private:
     // Augmented plant (with weights)
     static constexpr int MAX_AUG = 2 * MAX_STATE_DIM;
     int m_na{0};  // Augmented state dimension
+    bool m_genMode{false};   // true: setGeneralizedPlant() used (no weight augmentation)
     std::array<double, MAX_AUG * MAX_AUG> m_Aa{};
-    std::array<double, MAX_AUG * MAX_STATE_DIM> m_B1a{};
+    std::array<double, MAX_AUG * MAX_AUG> m_B1a{};
     std::array<double, MAX_AUG * MAX_CONTROL_DIM> m_B2a{};
     std::array<double, MAX_AUG * MAX_AUG> m_C1a{};
     std::array<double, MAX_OUTPUT_DIM * MAX_AUG> m_C2a{};
-    
-    // Controller matrices
+    std::array<double, MAX_AUG * MAX_AUG> m_D11a{};
+    std::array<double, MAX_AUG * MAX_CONTROL_DIM> m_D12a{};
+    std::array<double, MAX_OUTPUT_DIM * MAX_AUG> m_D21a{};
+    std::array<double, MAX_OUTPUT_DIM * MAX_CONTROL_DIM> m_D22a{};
+
+    // Controller matrices (continuous-time design)
     int m_nk{0};
     std::array<double, MAX_AUG * MAX_AUG> m_Ak{};
     std::array<double, MAX_AUG * MAX_OUTPUT_DIM> m_Bk{};
     std::array<double, MAX_CONTROL_DIM * MAX_AUG> m_Ck{};
     std::array<double, MAX_CONTROL_DIM * MAX_OUTPUT_DIM> m_Dk{};
+
+    // Discretized controller cache (Tustin), refreshed when dt changes
+    double m_dtLast{-1.0};
+    std::array<double, MAX_AUG * MAX_AUG> m_Adk{};
+    std::array<double, MAX_AUG * MAX_OUTPUT_DIM> m_Bdk{};
     
     // Controller state
     std::array<double, MAX_AUG> m_xk{};
@@ -564,6 +627,7 @@ private:
     void buildAugmentedPlant();
     bool solveHinfRiccati(double gamma, double* X, double* Y);
     void computeController(double gamma, const double* X, const double* Y);
+    void discretizeController(double dt);
 };
 
 // ============================================================================
@@ -590,31 +654,161 @@ class MuSynthesisFramework {
 public:
     /**
      * @brief Define uncertainty structure
-     * @param blockSizes Sizes of uncertainty blocks
-     * @param numBlocks Number of blocks
-     * @param repeated Which blocks are repeated scalars
+     * @param blockSizes Sizes of uncertainty blocks (must tile the
+     *        uncertainty dimension d = nUncW = nUncZ)
+     * @param numBlocks Number of blocks (max 10)
+     * @param repeated Which blocks are repeated scalars. A non-repeated
+     *        block of size k is treated as a full k×k uncertainty block;
+     *        a repeated block of size k is δ·I_k.
      */
     void setUncertaintyStructure(const int* blockSizes, int numBlocks,
                                   const bool* repeated = nullptr);
     
     /**
-     * @brief Compute μ upper bound for a transfer function
-     * @param M Transfer function matrix at frequency ω
-     * @param n Matrix dimension
-     * @return Upper bound on μ
+     * @brief Compute μ upper bound for a transfer-function matrix
+     * @param M Real matrix (e.g. M(jω) real part is NOT sufficient for
+     *        frequency-domain use — pass a real representation; for
+     *        complex M(jω) the D-K iteration uses the complex variant
+     *        internally)
+     * @param n Matrix dimension (must equal the tiled uncertainty
+     *        dimension, or the unstructured bound σ̄(M) is returned)
+     * @return Upper bound on μ: min over block-structured positive
+     *         D-scalings of σ̄(DMD⁻¹). Always >= true μ (conservative).
+     *         If the uncertainty structure is unset or does not tile n,
+     *         returns the unstructured bound σ̄(M), which is still a
+     *         valid (looser) upper bound.
      */
     double computeMuUpperBound(const double* M, int n) const;
+
+    /**
+     * @brief Compute μ upper bound for a complex frequency response M(jω)
+     *
+     * Same D-scaling optimization as the real overload, but the scaling
+     * matrices are restricted to real positive diagonal blocks (a valid,
+     * slightly conservative, bound for complex μ).
+     *
+     * @param M Row-major n×n complex matrix
+     * @param n Matrix dimension
+     * @return Upper bound on μ(M(jω))
+     */
+    double computeMuUpperBound(const std::complex<double>* M, int n) const;
+
+    /**
+     * @brief Set the generalized plant for D-K iteration
+     *
+     * Standard LFT form: xdot = Ax + B1 w + B2 u,
+     * z = C1 x + D11 w + D12 u,  y = C2 x + D21 w + D22 u.
+     * The uncertainty block Δ maps the LAST nUncZ rows of z to the LAST
+     * nUncW columns of w (requires nUncW == nUncZ == d, and the
+     * configured block sizes must sum to d).
+     *
+     * Limits: n <= 12, nw <= 12, nu,ny <= 6, nz <= 6.
+     * The H-infinity K-step requires the standard DGKF assumptions
+     * (D11 = D22 = 0, rank(D12) = nu, rank(D21) = ny); violations make
+     * dkIteration() return false.
+     *
+     * @param nUncW Number of trailing exogenous-input channels in w
+     * @param nUncZ Number of trailing performance-output channels in z
+     */
+    void setGeneralizedPlant(const double* A, const double* B1, const double* B2,
+                             const double* C1, const double* C2,
+                             const double* D11, const double* D12,
+                             const double* D21, const double* D22,
+                             int n, int nw, int nu, int nz, int ny,
+                             int nUncW, int nUncZ);
+
+    /**
+     * @brief Set the frequency grid used by the D-step
+     * @param wMin Minimum frequency [rad/s] (must be > 0)
+     * @param wMax Maximum frequency [rad/s]
+     * @param nPoints Number of log-spaced grid points (max 64)
+     */
+    void setFrequencyGrid(double wMin, double wMax, int nPoints);
     
     /**
      * @brief Perform one D-K iteration
-     * @return `true` if the iteration converged or made progress
+     *
+     * K-step: the current static D-scaling is folded into the generalized
+     * plant and an H-infinity controller is synthesized (optimal-γ
+     * bisection). D-step: the static block-scaling minimizing
+     * max_ω σ̄(D·M(jω)·D⁻¹) over the frequency grid is refit by
+     * coordinate descent, where M(jω) is the Δ-channel block of the
+     * closed-loop transfer F_u(P,K).
+     *
+     * @return true if a controller was synthesized and the μ-bound was
+     *         computed (progress made); false if no plant is configured,
+     *         the structure is invalid, or H-infinity synthesis failed.
      */
     bool dkIteration();
+
+    /**
+     * @brief Run D-K iterations until convergence or maxIter
+     * @param maxIter Maximum iterations (default 10)
+     * @param tol Relative bound-improvement tolerance (default 0.01)
+     * @return Number of iterations actually performed
+     */
+    int dkIterate(int maxIter = 10, double tol = 0.01);
+
+    /** @brief Last achieved μ upper bound (max over frequency grid) */
+    double getMuBound() const { return m_bound; }
+    /** @brief Number of completed D-K iterations */
+    int getIterationCount() const { return m_iter; }
+    /** @brief Whether the last dkIterate() converged within tol */
+    bool isConverged() const { return m_converged; }
+    /** @brief Whether a controller has been synthesized */
+    bool hasController() const { return m_hasK; }
+
+    /**
+     * @brief Get the latest synthesized controller matrices
+     * @param nk Controller order on output
+     */
+    void getControllerMatrices(double* Ak, double* Bk, double* Ck, double* Dk,
+                               int& nk) const;
     
 private:
     std::array<int, 10> m_blockSizes{};
     std::array<bool, 10> m_repeated{};
     int m_numBlocks{0};
+
+    // D-K state: log-domain D-scaling parameters (persistent across
+    // iterations; param order is deterministic from the block structure)
+    static constexpr int MAX_MU_D = MAX_OUTPUT_DIM;   // uncertainty dim <= 6
+    std::array<double, MAX_MU_D> m_dX{};
+    int m_nDPar{0};
+
+    // Generalized plant for D-K iteration
+    static constexpr int MAX_MU_N = MAX_STATE_DIM;    // 12
+    int m_n{0}, m_nw{0}, m_nu{0}, m_nz{0}, m_ny{0};
+    int m_nUncW{0}, m_nUncZ{0};
+    bool m_hasPlant{false};
+    std::array<double, MAX_MU_N * MAX_MU_N> m_A{};
+    std::array<double, MAX_MU_N * MAX_MU_N> m_B1{};
+    std::array<double, MAX_MU_N * MAX_CONTROL_DIM> m_B2{};
+    std::array<double, MAX_OUTPUT_DIM * MAX_MU_N> m_C1{};
+    std::array<double, MAX_OUTPUT_DIM * MAX_MU_N> m_C2{};
+    std::array<double, MAX_OUTPUT_DIM * MAX_MU_N> m_D11{};
+    std::array<double, MAX_OUTPUT_DIM * MAX_CONTROL_DIM> m_D12{};
+    std::array<double, MAX_OUTPUT_DIM * MAX_MU_N> m_D21{};
+    std::array<double, MAX_OUTPUT_DIM * MAX_CONTROL_DIM> m_D22{};
+
+    // Latest synthesized controller (order = plant order)
+    int m_nk{0};
+    std::array<double, MAX_MU_N * MAX_MU_N> m_Ak{};
+    std::array<double, MAX_MU_N * MAX_OUTPUT_DIM> m_Bk{};
+    std::array<double, MAX_CONTROL_DIM * MAX_MU_N> m_Ck{};
+    std::array<double, MAX_CONTROL_DIM * MAX_OUTPUT_DIM> m_Dk{};
+    bool m_hasK{false};
+
+    // Frequency grid for the D-step
+    static constexpr int MAX_GRID = 64;
+    std::array<double, MAX_GRID> m_freqs{};
+    int m_nGrid{0};
+    double m_wMin{1e-2}, m_wMax{1e4};
+
+    // Iteration state
+    double m_bound{0.0};
+    int m_iter{0};
+    bool m_converged{false};
 };
 
 } // namespace tether::control
