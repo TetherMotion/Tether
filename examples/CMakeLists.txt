@@ -699,6 +699,8 @@ if(PkgConfig_FOUND)
     pkg_check_modules(HMI_PNG  QUIET libpng)
     pkg_check_modules(HMI_VK   QUIET vulkan)
     pkg_check_modules(HMI_SHDC QUIET shaderc)
+    # optional: SDL2 windowed swapchain backend for hmi_remote --window
+    pkg_check_modules(HMI_SDL2 QUIET sdl2)
 endif()
 set(GLYB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../dependencies/glyb")
 if(HMI_FT_FOUND AND HMI_HB_FOUND AND HMI_PNG_FOUND AND Threads_FOUND
@@ -737,14 +739,30 @@ if(HMI_FT_FOUND AND HMI_HB_FOUND AND HMI_PNG_FOUND AND Threads_FOUND
         ${CMAKE_CURRENT_SOURCE_DIR}/common/HmiAuto.cpp)
 
     if(HMI_VK_FOUND AND HMI_SHDC_FOUND)
+        # SDL2 enables the windowed VkSwapchainKHR backend in
+        # common/HmiVulkan.cpp (TETHER_HMI_SDL2); without it the targets
+        # still build — windowed APIs return false.
+        set(HMI_WIN_LIBS "")
+        set(HMI_WIN_DEFS "")
+        if(HMI_SDL2_FOUND)
+            set(HMI_WIN_LIBS ${HMI_SDL2_LIBRARIES})
+            set(HMI_WIN_DEFS TETHER_HMI_SDL2)
+        else()
+            message(STATUS "SDL2 not found; hmi windowed mode disabled")
+        endif()
+
         add_executable(hmi_vulkan hmi_vulkan.cpp ${HMI_COMMON_SRC})
         list(APPEND TETHER_EXAMPLE_TARGETS hmi_vulkan)
         target_link_libraries(hmi_vulkan PRIVATE
             tether_glyb_hmi ${HMI_VK_LIBRARIES} ${HMI_SHDC_LIBRARIES}
-            Threads::Threads)
+            ${HMI_WIN_LIBS} Threads::Threads)
         target_include_directories(hmi_vulkan PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
-            ${HMI_VK_INCLUDE_DIRS} ${HMI_SHDC_INCLUDE_DIRS})
+            ${HMI_VK_INCLUDE_DIRS} ${HMI_SHDC_INCLUDE_DIRS}
+            ${HMI_SDL2_INCLUDE_DIRS})
+        if(HMI_WIN_DEFS)
+            target_compile_definitions(hmi_vulkan PRIVATE ${HMI_WIN_DEFS})
+        endif()
 
         # Remote HMI: TetherIOClient over TCP → plc.* catalog →
         # auto/authored screen → shared scene builders → Vulkan.
@@ -753,10 +771,15 @@ if(HMI_FT_FOUND AND HMI_HB_FOUND AND HMI_PNG_FOUND AND Threads_FOUND
             list(APPEND TETHER_EXAMPLE_TARGETS hmi_remote)
             target_link_libraries(hmi_remote PRIVATE
                 tether_glyb_hmi ${HMI_VK_LIBRARIES} ${HMI_SHDC_LIBRARIES}
+                ${HMI_WIN_LIBS}
                 tether_io_protocol tether_common Threads::Threads)
             target_include_directories(hmi_remote PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}
-                ${HMI_VK_INCLUDE_DIRS} ${HMI_SHDC_INCLUDE_DIRS})
+                ${HMI_VK_INCLUDE_DIRS} ${HMI_SHDC_INCLUDE_DIRS}
+                ${HMI_SDL2_INCLUDE_DIRS})
+            if(HMI_WIN_DEFS)
+                target_compile_definitions(hmi_remote PRIVATE ${HMI_WIN_DEFS})
+            endif()
         else()
             message(STATUS "tether_io_protocol not built; "
                            "skipping hmi_remote")

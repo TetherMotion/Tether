@@ -28,6 +28,10 @@
 #include <string>
 #include <variant>
 #include <vector>
+#ifdef TETHER_HMI_SDL2
+#include <SDL.h>
+#include <SDL_vulkan.h>
+#endif
 #include <hb.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -424,13 +428,16 @@ struct Gpu {
     uint32_t qfamily = 0;
     vk::CommandPool pool;
 
-    bool init() {
+    bool init(const std::vector<const char*>& instExts = {},
+              const std::vector<const char*>& devExts = {}) {
         vk::ApplicationInfo app;
         app.pApplicationName = "hmi_vulkan";
         app.applicationVersion = 1;
         app.apiVersion = VK_API_VERSION_1_2;
         vk::InstanceCreateInfo ici;
         ici.pApplicationInfo = &app;
+        ici.enabledExtensionCount = uint32_t(instExts.size());
+        ici.ppEnabledExtensionNames = instExts.data();
         instance = vk::createInstance(ici);
         auto physDevs = instance.enumeratePhysicalDevices();
         if (physDevs.empty()) {
@@ -452,6 +459,8 @@ struct Gpu {
         vk::DeviceCreateInfo dci;
         dci.queueCreateInfoCount = 1;
         dci.pQueueCreateInfos = &dq;
+        dci.enabledExtensionCount = uint32_t(devExts.size());
+        dci.ppEnabledExtensionNames = devExts.data();
         dev = phys.createDevice(dci);
         queue = dev.getQueue(qfamily, 0);
         vk::CommandPoolCreateInfo cpi;
@@ -476,10 +485,13 @@ vk::CommandBuffer allocCmd(Gpu& gpu) {
 // HmiRenderer::Impl — persistent device/pipelines; per-frame targets.
 // ==========================================================================
 
+struct HmiWin;
+
 struct HmiRenderer::Impl {
     Gpu gpu;
     TextEngine te;
     bool inited = false;
+    std::unique_ptr<HmiWin> win;
 
     // persistent GPU objects
     vk::ShaderModule sVert, sFrag, tVert, tFrag;
@@ -494,6 +506,7 @@ struct HmiRenderer::Impl {
     uint32_t atlasW = 0, atlasH = 0;
 
     ~Impl() {
+        shutdownWindow();
         if (!inited || !gpu.dev) return;
         vk::Device dev = gpu.dev;
         if (atlasW) {
@@ -513,6 +526,8 @@ struct HmiRenderer::Impl {
         if (tFrag) dev.destroyShaderModule(tFrag);
         if (rp) dev.destroyRenderPass(rp);
     }
+
+    void shutdownWindow();
 
     bool ensureAtlasImage() {
         font_atlas* atlas = te.atlas();
@@ -838,17 +853,177 @@ struct HmiRenderer::Impl {
 };
 
 // ==========================================================================
+// Windowed swapchain backend (SDL2 surface → VkSwapchainKHR → present)
+// ==========================================================================
+
+#ifdef TETHER_HMI_SDL2
+
+struct HmiWin {
+    SDL_Window* window = nullptr;
+    vk::SurfaceKHR surface;
+    vk::SwapchainKHR swapchain;
+    vk::Format format = vk::Format::eUndefined;
+    vk::Extent2D extent{};
+    std::vector<vk::Image> images;
+    std::vector<vk::ImageView> views;
+    std::vector<vk::Framebuffer> fbs;
+    std::vector<vk::Semaphore> imgAvail, renderDone;
+    std::vector<vk::Fence> inFlight;
+    vk::DescriptorPool dpool;
+    vk::DescriptorSet dset;
+    uint32_t frame = 0;
+    bool dead = false;
+    int drawW = 0, drawH = 0;
+};
+
+namespace {
+
+void destroySwapchainObjects(HmiRenderer::Impl& im, HmiWin& w) {
+    vk::Device dev = im.gpu.dev;
+    for (auto fb : w.fbs) dev.destroyFramebuffer(fb);
+    for (auto v : w.views) dev.destroyImageView(v);
+    w.fbs.clear(); w.views.clear(); w.images.clear();
+    if (w.swapchain) {
+        dev.destroySwapchainKHR(w.swapchain);
+        w.swapchain = vk::SwapchainKHR();
+    }
+    for (auto s : w.imgAvail) dev.destroySemaphore(s);
+    for (auto s : w.renderDone) dev.destroySemaphore(s);
+    for (auto f : w.inFlight) dev.destroyFence(f);
+    w.imgAvail.clear(); w.renderDone.clear(); w.inFlight.clear();
+    if (w.dpool) { dev.destroyDescriptorPool(w.dpool); w.dpool = vk::DescriptorPool(); }
+    w.dset = vk::DescriptorSet();
+    w.extent = vk::Extent2D{0, 0};
+}
+
+bool createSwapchain(HmiRenderer::Impl& im, HmiWin& w, int reqW, int reqH) {
+    vk::Device dev = im.gpu.dev;
+    vk::PhysicalDevice phys = im.gpu.phys;
+
+    vk::SurfaceCapabilitiesKHR caps =
+        phys.getSurfaceCapabilitiesKHR(w.surface);
+    std::vector<vk::SurfaceFormatKHR> fmts =
+        phys.getSurfaceFormatsKHR(w.surface);
+    std::vector<vk::PresentModeKHR> modes =
+        phys.getSurfacePresentModesKHR(w.surface);
+
+    vk::SurfaceFormatKHR fmt = fmts.empty()
+        ? vk::SurfaceFormatKHR{vk::Format::eB8G8R8A8Unorm,
+                               vk::ColorSpaceKHR::eSrgbNonlinear}
+        : fmts[0];
+    for (const auto& f : fmts) {
+        if (f.format == vk::Format::eB8G8R8A8Unorm ||
+            f.format == vk::Format::eR8G8B8A8Unorm) {
+            fmt = f;
+            break;
+        }
+    }
+    vk::PresentModeKHR pm = vk::PresentModeKHR::eFifo;
+    for (auto m : modes)
+        if (m == vk::PresentModeKHR::eMailbox) { pm = m; break; }
+
+    vk::Extent2D ext = caps.currentExtent;
+    if (ext.width == 0xFFFFFFFFu) {
+        ext.width = uint32_t(std::clamp(reqW, 1, 16384));
+        ext.height = uint32_t(std::clamp(reqH, 1, 16384));
+    }
+    ext.width = std::clamp(ext.width, caps.minImageExtent.width,
+                           caps.maxImageExtent.width);
+    ext.height = std::clamp(ext.height, caps.minImageExtent.height,
+                            caps.maxImageExtent.height);
+
+    uint32_t count = std::max(2u, caps.minImageCount);
+    if (caps.maxImageCount > 0) count = std::min(count, caps.maxImageCount);
+
+    vk::SwapchainCreateInfoKHR sci;
+    sci.surface = w.surface;
+    sci.minImageCount = count;
+    sci.imageFormat = fmt.format;
+    sci.imageColorSpace = fmt.colorSpace;
+    sci.imageExtent = ext;
+    sci.imageArrayLayers = 1;
+    sci.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
+    sci.imageSharingMode = vk::SharingMode::eExclusive;
+    sci.preTransform = caps.currentTransform;
+    sci.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
+    sci.presentMode = pm;
+    sci.clipped = VK_TRUE;
+    sci.oldSwapchain = w.swapchain;
+    w.swapchain = dev.createSwapchainKHR(sci);
+    w.format = fmt.format;
+    w.extent = ext;
+
+    w.images = dev.getSwapchainImagesKHR(w.swapchain);
+    count = uint32_t(w.images.size());
+    w.views.resize(count);
+    w.fbs.resize(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        vk::ImageViewCreateInfo ivi;
+        ivi.image = w.images[i];
+        ivi.viewType = vk::ImageViewType::e2D;
+        ivi.format = w.format;
+        ivi.subresourceRange =
+            {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+        w.views[i] = dev.createImageView(ivi);
+        vk::FramebufferCreateInfo fbci;
+        fbci.renderPass = im.rp;
+        fbci.attachmentCount = 1;
+        fbci.pAttachments = &w.views[i];
+        fbci.width = ext.width;
+        fbci.height = ext.height;
+        fbci.layers = 1;
+        w.fbs[i] = dev.createFramebuffer(fbci);
+    }
+
+    w.imgAvail.resize(count);
+    w.renderDone.resize(count);
+    w.inFlight.resize(count);
+    vk::SemaphoreCreateInfo semci;
+    vk::FenceCreateInfo fci;
+    fci.flags = vk::FenceCreateFlagBits::eSignaled;
+    for (uint32_t i = 0; i < count; ++i) {
+        w.imgAvail[i] = dev.createSemaphore(semci);
+        w.renderDone[i] = dev.createSemaphore(semci);
+        w.inFlight[i] = dev.createFence(fci);
+    }
+    w.frame = 0;
+    w.dpool = vk::DescriptorPool();
+    w.dset = vk::DescriptorSet();
+    return true;
+}
+
+} // namespace
+
+#endif // TETHER_HMI_SDL2
+
+void HmiRenderer::Impl::shutdownWindow() {
+#ifdef TETHER_HMI_SDL2
+    if (!win) return;
+    if (gpu.dev && win->swapchain) {
+        gpu.dev.waitIdle();
+        destroySwapchainObjects(*this, *win);
+    }
+    if (win->surface && gpu.instance) {
+        gpu.instance.destroySurfaceKHR(win->surface);
+        win->surface = vk::SurfaceKHR{};
+    }
+    if (win->window) { SDL_DestroyWindow(win->window); win->window = nullptr; }
+    win.reset();
+#endif
+}
+
+// ==========================================================================
 // HmiRenderer public API
 // ==========================================================================
 
 HmiRenderer::HmiRenderer() = default;
 HmiRenderer::~HmiRenderer() = default;
 
-bool HmiRenderer::init(const std::string& fontPath) {
-    impl_ = std::make_unique<Impl>();
-    Impl& im = *impl_;
-    if (!im.gpu.init()) { impl_.reset(); return false; }
-    if (!im.te.init(fontPath)) { impl_.reset(); return false; }
+/** Shared post-device init: text engine, shaders, pipelines, render
+ *  pass, atlas sampler. gpu.init() must have run already. */
+static bool finishInit(HmiRenderer::Impl& im,
+                       const std::string& fontPath) {
+    if (!im.te.init(fontPath)) return false;
     vk::Device dev = im.gpu.dev;
 
     // compile shaders
@@ -1038,10 +1213,371 @@ bool HmiRenderer::init(const std::string& fontPath) {
     sci.maxLod = 0.f;
     im.sampler = dev.createSampler(sci);
 
-    if (!im.solidPipe || !im.textPipe) { impl_.reset(); return false; }
+    if (!im.solidPipe || !im.textPipe) return false;
     im.inited = true;
     return true;
 }
+
+bool HmiRenderer::init(const std::string& fontPath) {
+    impl_ = std::make_unique<Impl>();
+    Impl& im = *impl_;
+    if (!im.gpu.init()) { impl_.reset(); return false; }
+    if (!finishInit(im, fontPath)) { impl_.reset(); return false; }
+    return true;
+}
+
+#ifdef TETHER_HMI_SDL2
+
+bool HmiRenderer::initWindowed(const std::string& fontPath, int w, int h,
+                               const std::string& title) {
+    impl_ = std::make_unique<Impl>();
+    Impl& im = *impl_;
+
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        std::cerr << "SDL_Init: " << SDL_GetError() << "\n";
+        impl_.reset();
+        return false;
+    }
+    im.win = std::make_unique<HmiWin>();
+    HmiWin& win = *im.win;
+    win.window = SDL_CreateWindow(
+        title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        w, h,
+        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
+            SDL_WINDOW_SHOWN);
+    if (!win.window) {
+        std::cerr << "SDL_CreateWindow: " << SDL_GetError() << "\n";
+        impl_.reset();
+        return false;
+    }
+
+    uint32_t extCount = 0;
+    SDL_Vulkan_GetInstanceExtensions(win.window, &extCount, nullptr);
+    std::vector<const char*> extNames(extCount);
+    SDL_Vulkan_GetInstanceExtensions(win.window, &extCount,
+                                     extNames.data());
+    std::vector<const char*> instExts(extNames.begin(), extNames.end());
+    instExts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+    instExts.push_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
+#endif
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+    instExts.push_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
+#endif
+
+    if (!im.gpu.init(instExts, {VK_KHR_SWAPCHAIN_EXTENSION_NAME})) {
+        impl_.reset();
+        return false;
+    }
+    VkSurfaceKHR surf = VK_NULL_HANDLE;
+    SDL_bool sres = SDL_Vulkan_CreateSurface(
+        win.window, static_cast<VkInstance>(im.gpu.instance), &surf);
+    if (!sres || surf == VK_NULL_HANDLE) {
+        std::cerr << "SDL_Vulkan_CreateSurface failed\n";
+        impl_.reset();
+        return false;
+    }
+    win.surface = vk::SurfaceKHR(surf);
+
+    if (!finishInit(im, fontPath)) { impl_.reset(); return false; }
+    if (!createSwapchain(im, win, w, h)) { impl_.reset(); return false; }
+    SDL_Vulkan_GetDrawableSize(win.window, &win.drawW, &win.drawH);
+    return true;
+}
+
+bool HmiRenderer::windowed() const {
+    return impl_ && impl_->win && impl_->win->swapchain;
+}
+
+void HmiRenderer::pumpWindowEvents() {
+#ifdef TETHER_HMI_SDL2
+    if (!impl_ || !impl_->win) return;
+    SDL_Event ev;
+    while (SDL_PollEvent(&ev)) {
+        if (ev.type == SDL_QUIT ||
+            (ev.type == SDL_WINDOWEVENT &&
+             ev.window.event == SDL_WINDOWEVENT_CLOSE))
+            impl_->win->dead = true;
+    }
+#endif
+}
+
+bool HmiRenderer::windowAlive() const {
+    return impl_ && impl_->win && !impl_->win->dead &&
+           impl_->win->swapchain;
+}
+
+std::pair<int, int> HmiRenderer::windowExtent() const {
+    if (!impl_ || !impl_->win || !impl_->win->window)
+        return {0, 0};
+    int w = 0, h = 0;
+    SDL_Vulkan_GetDrawableSize(impl_->win->window, &w, &h);
+    return {w, h};
+}
+
+void HmiRenderer::closeWindow() {
+#ifdef TETHER_HMI_SDL2
+    if (!impl_ || !impl_->win) return;
+    HmiWin& w = *impl_->win;
+    if (w.swapchain || !w.views.empty())
+        destroySwapchainObjects(*impl_, w);
+    if (w.surface) {
+        vk::Instance inst = impl_->gpu.instance;
+        inst.destroySurfaceKHR(w.surface);
+        w.surface = vk::SurfaceKHR();
+    }
+    if (w.window) { SDL_DestroyWindow(w.window); w.window = nullptr; }
+    impl_->win.reset();
+#endif
+}
+
+bool HmiRenderer::renderWindowed(const HmiScene& scene) {
+#ifdef TETHER_HMI_SDL2
+    if (!impl_ || !impl_->win || !impl_->win->swapchain) return false;
+    Impl& im = *impl_;
+    HmiWin& w = *im.win;
+    vk::Device dev = im.gpu.dev;
+
+    if (!im.inited || !im.ensureAtlasImage()) return false;
+    font_atlas* atlas = im.te.atlas();
+    if (!atlas || !atlas->pixels) return false;
+
+    // drawable resize → recreate swapchain
+    int dw = 0, dh = 0;
+    SDL_Vulkan_GetDrawableSize(w.window, &dw, &dh);
+    if (dw <= 0 || dh <= 0) return true;   // minimized — skip frame
+    if (dw != w.drawW || dh != w.drawH) {
+        // wait idle before tearing down images in use
+        dev.waitIdle();
+        destroySwapchainObjects(im, w);
+        if (!createSwapchain(im, w, dw, dh)) { w.dead = true; return false; }
+        w.drawW = dw; w.drawH = dh;
+    }
+
+    const uint32_t W = w.extent.width, H = w.extent.height;
+    const uint32_t frame = w.frame % uint32_t(w.fbs.size());
+
+    // wait for this slot's previous frame, then acquire
+    dev.waitForFences(w.inFlight[frame], true, UINT64_MAX);
+    {
+        vk::Fence f = w.inFlight[frame];
+        dev.resetFences(1, &f);
+    }
+    uint32_t imgIdx = 0;
+    vk::Result ar = static_cast<vk::Result>(dev.acquireNextImageKHR(
+        w.swapchain, UINT64_MAX, w.imgAvail[frame],
+        vk::Fence{}, &imgIdx));
+    if (ar == vk::Result::eErrorOutOfDateKHR ||
+        ar == vk::Result::eSuboptimalKHR) {
+        dev.waitIdle();
+        destroySwapchainObjects(im, w);
+        if (!createSwapchain(im, w, dw, dh)) { w.dead = true; return false; }
+        w.drawW = dw; w.drawH = dh;
+        return true; // next frame retries
+    }
+    if (ar != vk::Result::eSuccess) {
+        if (ar == vk::Result::eErrorDeviceLost ||
+            ar == vk::Result::eErrorSurfaceLostKHR) w.dead = true;
+        return false;
+    }
+
+    // ---- geometry ----
+    Geom geom;
+    buildGeom(scene, geom, im.te);
+
+    // persistent text descriptor (atlas is stable for the session)
+    if (!w.dset) {
+        vk::DescriptorPoolSize dps;
+        dps.type = vk::DescriptorType::eCombinedImageSampler;
+        dps.descriptorCount = 1;
+        vk::DescriptorPoolCreateInfo dpci;
+        dpci.maxSets = 1;
+        dpci.poolSizeCount = 1;
+        dpci.pPoolSizes = &dps;
+        w.dpool = dev.createDescriptorPool(dpci);
+        vk::DescriptorSetAllocateInfo dai;
+        dai.descriptorPool = w.dpool;
+        dai.descriptorSetCount = 1;
+        dai.pSetLayouts = &im.dsl;
+        w.dset = dev.allocateDescriptorSets(dai)[0];
+        vk::DescriptorImageInfo dii;
+        dii.sampler = im.sampler;
+        dii.imageView = im.atlasView;
+        dii.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+        vk::WriteDescriptorSet wds;
+        wds.dstSet = w.dset;
+        wds.dstBinding = 0;
+        wds.descriptorCount = 1;
+        wds.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+        wds.pImageInfo = &dii;
+        dev.updateDescriptorSets(wds, nullptr);
+    }
+
+    // ---- per-frame geometry buffers ----
+    Buf solidVB, solidIB, textVB, textIB;
+    if (!geom.solid.empty()) {
+        solidVB = uploadBuffer(dev, im.gpu.phys, im.gpu.queue, im.gpu.pool,
+                               geom.solid.data(),
+                               geom.solid.size() * sizeof(SolidVert),
+                               vk::BufferUsageFlagBits::eVertexBuffer);
+        solidIB = uploadBuffer(dev, im.gpu.phys, im.gpu.queue, im.gpu.pool,
+                               geom.solidIdx.data(),
+                               geom.solidIdx.size() * 4,
+                               vk::BufferUsageFlagBits::eIndexBuffer);
+    }
+    if (!geom.text.empty()) {
+        textVB = uploadBuffer(dev, im.gpu.phys, im.gpu.queue, im.gpu.pool,
+                              geom.text.data(),
+                              geom.text.size() * sizeof(TextVert),
+                              vk::BufferUsageFlagBits::eVertexBuffer);
+        textIB = uploadBuffer(dev, im.gpu.phys, im.gpu.queue, im.gpu.pool,
+                              geom.textIdx.data(),
+                              geom.textIdx.size() * 4,
+                              vk::BufferUsageFlagBits::eIndexBuffer);
+    }
+
+    // ---- record ----
+    vk::CommandBuffer cmd = allocCmd(im.gpu);
+    vk::CommandBufferBeginInfo cbi;
+    cmd.begin(cbi);
+
+    vk::ClearValue clear;
+    if (scene.hasBg) {
+        clear.color = vk::ClearColorValue{scene.br, scene.bg,
+                                          scene.bb, scene.ba};
+    } else {
+        clear.color = vk::ClearColorValue{0.07f, 0.07f, 0.09f, 1.f};
+    }
+    vk::RenderPassBeginInfo rpbi;
+    rpbi.renderPass = im.rp;
+    rpbi.framebuffer = w.fbs[imgIdx];
+    rpbi.renderArea = vk::Rect2D{{{0, 0}, {W, H}}};
+    rpbi.clearValueCount = 1;
+    rpbi.pClearValues = &clear;
+    cmd.beginRenderPass(rpbi, vk::SubpassContents::eInline);
+
+    // letterbox: uniform-fit the scene into the drawable
+    float s = std::min(float(W) / std::max(1.f, scene.w),
+                       float(H) / std::max(1.f, scene.h));
+    float vw = scene.w * s, vh = scene.h * s;
+    float vx = (float(W) - vw) * 0.5f, vy = (float(H) - vh) * 0.5f;
+    vk::Viewport viewport;
+    viewport.x = vx; viewport.y = vy;
+    viewport.width = vw; viewport.height = vh;
+    viewport.minDepth = 0; viewport.maxDepth = 1;
+    vk::Rect2D scissor{{{int(vx), int(vy)},
+                        {uint32_t(vw), uint32_t(vh)}}};
+    cmd.setViewport(0, viewport);
+    cmd.setScissor(0, scissor);
+    float pcData[2] = {scene.w, scene.h};
+
+    if (!geom.solid.empty()) {
+        vk::Buffer vbs[1] = {solidVB.buf};
+        VkDeviceSize offs[1] = {0};
+        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, im.solidPipe);
+        cmd.pushConstants(im.pcLayout,
+                          vk::ShaderStageFlagBits::eVertex, 0, 8, pcData);
+        cmd.bindVertexBuffers(0, vbs, offs);
+        cmd.bindIndexBuffer(solidIB.buf, 0, vk::IndexType::eUint32);
+        cmd.drawIndexed(uint32_t(geom.solidIdx.size()), 1, 0, 0, 0);
+    }
+    if (!geom.text.empty()) {
+        vk::Buffer vbs[1] = {textVB.buf};
+        VkDeviceSize offs[1] = {0};
+        vk::DescriptorSet dsets[1] = {w.dset};
+        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, im.textPipe);
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                               im.textLayout, 0, dsets, nullptr);
+        cmd.pushConstants(im.textLayout,
+                          vk::ShaderStageFlagBits::eVertex, 0, 8,
+                          pcData);
+        cmd.bindVertexBuffers(0, vbs, offs);
+        cmd.bindIndexBuffer(textIB.buf, 0, vk::IndexType::eUint32);
+        cmd.drawIndexed(uint32_t(geom.textIdx.size()), 1, 0, 0, 0);
+    }
+    cmd.endRenderPass();
+
+    // attachment → present source
+    vk::ImageMemoryBarrier pres;
+    pres.oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    pres.newLayout = vk::ImageLayout::ePresentSrcKHR;
+    pres.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    pres.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    pres.image = w.images[imgIdx];
+    pres.subresourceRange =
+        {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+    pres.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+    pres.dstAccessMask = vk::AccessFlags{};
+    vk::ImageMemoryBarrier barr[1] = {pres};
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eColorAttachmentOutput,
+        vk::PipelineStageFlagBits::eBottomOfPipe,
+        vk::DependencyFlags{}, {}, {}, barr);
+    cmd.end();
+
+    vk::PipelineStageFlags waitStage =
+        vk::PipelineStageFlagBits::eColorAttachmentOutput;
+    vk::SubmitInfo si;
+    si.waitSemaphoreCount = 1;
+    si.pWaitSemaphores = &w.imgAvail[frame];
+    si.pWaitDstStageMask = &waitStage;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cmd;
+    si.signalSemaphoreCount = 1;
+    si.pSignalSemaphores = &w.renderDone[frame];
+    im.gpu.queue.submit(si, w.inFlight[frame]);
+
+    vk::PresentInfoKHR pi;
+    pi.waitSemaphoreCount = 1;
+    pi.pWaitSemaphores = &w.renderDone[frame];
+    pi.swapchainCount = 1;
+    pi.pSwapchains = &w.swapchain;
+    pi.pImageIndices = &imgIdx;
+    vk::Result pr = static_cast<vk::Result>(
+        im.gpu.queue.presentKHR(pi));
+    if (pr == vk::Result::eErrorOutOfDateKHR ||
+        pr == vk::Result::eSuboptimalKHR) {
+        // recreate on next frame
+    } else if (pr != vk::Result::eSuccess) {
+        if (pr == vk::Result::eErrorSurfaceLostKHR ||
+            pr == vk::Result::eErrorDeviceLost ||
+            pr == vk::Result::eErrorOutOfDateKHR) {
+            // surface lost — try recreate next call
+        }
+    }
+
+    // ---- cleanup per-frame objects ----
+    if (!geom.solid.empty()) {
+        dev.destroyBuffer(solidVB.buf); dev.freeMemory(solidVB.mem);
+        dev.destroyBuffer(solidIB.buf); dev.freeMemory(solidIB.mem);
+    }
+    if (!geom.text.empty()) {
+        dev.destroyBuffer(textVB.buf); dev.freeMemory(textVB.mem);
+        dev.destroyBuffer(textIB.buf); dev.freeMemory(textIB.mem);
+    }
+    dev.freeCommandBuffers(im.gpu.pool, cmd);
+    w.frame++;
+    return true;
+#else
+    (void)scene;
+    return false;
+#endif
+}
+
+#else // !TETHER_HMI_SDL2
+
+bool HmiRenderer::initWindowed(const std::string&, int, int,
+                               const std::string&) {
+    return false;
+}
+bool HmiRenderer::windowed() const { return false; }
+void HmiRenderer::pumpWindowEvents() {}
+bool HmiRenderer::windowAlive() const { return false; }
+std::pair<int, int> HmiRenderer::windowExtent() const { return {0, 0}; }
+void HmiRenderer::closeWindow() {}
+bool HmiRenderer::renderWindowed(const HmiScene&) { return false; }
+
+#endif // TETHER_HMI_SDL2
 
 bool HmiRenderer::render(const HmiScene& scene, int scale, HmiImage& out) {
     if (!impl_) return false;

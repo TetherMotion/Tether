@@ -32,6 +32,33 @@ public:
      *  @param fontPath TTF/OTF path; empty → DejaVu Sans Mono search. */
     bool init(const std::string& fontPath = {});
 
+    /** Windowed variant (requires the SDL2 build — TETHER_HMI_SDL2):
+     *  creates an SDL window + VkSurfaceKHR + swapchain on top of the
+     *  same device/pipelines as init(). @p w/@p h are the initial
+     *  window size in pixels; the scene is letterboxed to fit. */
+    bool initWindowed(const std::string& fontPath, int w, int h,
+                      const std::string& title = "hmi");
+
+    /** True when a windowed swapchain is active. */
+    bool windowed() const;
+
+    /** Pump SDL events (close/resize). Call once per frame. */
+    void pumpWindowEvents();
+
+    /** False after the user closed the window or the surface was lost. */
+    bool windowAlive() const;
+
+    /** Current drawable size in pixels (for aspect/fit decisions). */
+    std::pair<int, int> windowExtent() const;
+
+    /** Render @p scene and present it to the window. The scene is
+     *  uniformly scaled to fit the drawable with letterbox margins in
+     *  the scene background color. Returns false on device loss. */
+    bool renderWindowed(const HmiScene& scene);
+
+    /** Tear down window/swapchain resources (device stays alive). */
+    void closeWindow();
+
     /** Render @p scene at @p scale → RGBA pixels.
      *  Output size = round(scene.w*scale) × round(scene.h*scale).
      *  Returns false on GPU/alloc failure. */
@@ -47,8 +74,11 @@ public:
 
     bool ok() const { return impl_ != nullptr; }
 
-private:
+    /* Impl is public so the TU-local swapchain helpers in
+       HmiVulkan.cpp can name it (examples-internal header). */
     struct Impl;
+
+private:
     std::unique_ptr<Impl> impl_;
 };
 

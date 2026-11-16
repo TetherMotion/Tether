@@ -307,6 +307,8 @@ static void usage(const char* a0) {
         "  --scale N                pixel scale (default 2)\n"
         "  --font PATH              font file\n"
         "  --out PREFIX             output prefix (default hmi_remote)\n"
+        "  --window [WxH via --winsize]  live swapchain window (SDL2)\n"
+        "  --winsize WxH             window size (default 1280x720)\n"
         "  --list                   list catalog + screen, no render\n";
 }
 
@@ -314,7 +316,9 @@ int main(int argc, char** argv) {
     std::string host = "127.0.0.1", screenPath, fontPath, outPrefix = "hmi_remote";
     uint16_t port = 43770;
     int frames = 1, scale = 2, periodMs = 500;
-    bool autoScreenMode = true, listOnly = false;
+    int winW = 1280, winH = 720;
+    bool autoScreenMode = true, listOnly = false, windowed = false;
+    bool framesSet = false;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto need = [&](const char* k) -> const char* {
@@ -325,16 +329,25 @@ int main(int argc, char** argv) {
         else if (a == "--port") port = uint16_t(std::atoi(need("--port")));
         else if (a == "--screen") { screenPath = need("--screen"); autoScreenMode = false; }
         else if (a == "--auto") autoScreenMode = true;
-        else if (a == "--frames") frames = std::atoi(need("--frames"));
+        else if (a == "--frames") { frames = std::atoi(need("--frames")); framesSet = true; }
         else if (a == "--period") periodMs = std::atoi(need("--period"));
         else if (a == "--scale") scale = std::atoi(need("--scale"));
         else if (a == "--font") fontPath = need("--font");
         else if (a == "--out") outPrefix = need("--out");
+        else if (a == "--window") windowed = true;
+        else if (a == "--winsize") {
+            std::string v = need("--winsize");
+            if (std::sscanf(v.c_str(), "%dx%d", &winW, &winH) != 2) {
+                usage(argv[0]); return 2;
+            }
+        }
         else if (a == "--list") listOnly = true;
         else { usage(argv[0]); return 2; }
     }
     std::signal(SIGINT, onSig);
     std::signal(SIGTERM, onSig);
+    /* windowed mode defaults to "until the window closes" */
+    if (windowed && !framesSet) frames = 0;
 
     auto tcp = tether::io::tcpConnect(host.c_str(), port, 5000);
     if (!tcp) {
@@ -428,13 +441,23 @@ int main(int argc, char** argv) {
     }
 
     HmiRenderer renderer;
-    if (!renderer.init(fontPath)) {
+    if (windowed) {
+        if (!renderer.initWindowed(fontPath, winW, winH, "hmi_remote")) {
+            std::cerr << "windowed renderer init failed "
+                         "(needs SDL2 build + a display)\n";
+            return 1;
+        }
+    } else if (!renderer.init(fontPath)) {
         std::cerr << "renderer init failed\n";
         return 1;
     }
 
     int frame = 0;
     while (!g_stop && (frames == 0 || frame < frames)) {
+        if (windowed) {
+            renderer.pumpWindowEvents();
+            if (!renderer.windowAlive()) break;
+        }
         // build the full-screen scene
         HmiScene scene;
         scene.w = totalW + layout.originX;
@@ -462,21 +485,30 @@ int main(int argc, char** argv) {
             }
         }
 
-        char path[512];
-        std::snprintf(path, sizeof path, "%s_%04d.ppm",
-                      outPrefix.c_str(), frame);
-        if (!renderer.renderPpm(scene, scale, path)) {
-            std::cerr << "render failed at frame " << frame << "\n";
-            return 1;
+        if (windowed) {
+            if (!renderer.renderWindowed(scene)) {
+                std::cerr << "window render failed at frame " << frame
+                          << "\n";
+                return 1;
+            }
+        } else {
+            char path[512];
+            std::snprintf(path, sizeof path, "%s_%04d.ppm",
+                          outPrefix.c_str(), frame);
+            if (!renderer.renderPpm(scene, scale, path)) {
+                std::cerr << "render failed at frame " << frame << "\n";
+                return 1;
+            }
+            std::cerr << "frame " << frame << " → " << path
+                      << " (" << scene.w << "x" << scene.h << ", "
+                      << scene.ops.size() << " ops, "
+                      << screen.widgets.size() << " widgets)\n";
         }
-        std::cerr << "frame " << frame << " → " << path
-                  << " (" << scene.w << "x" << scene.h << ", "
-                  << scene.ops.size() << " ops, "
-                  << screen.widgets.size() << " widgets)\n";
         ++frame;
         if (frames != 0 && frame >= frames) break;
         std::this_thread::sleep_for(
             std::chrono::milliseconds(periodMs));
     }
+    renderer.closeWindow();
     return 0;
 }
