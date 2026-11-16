@@ -88,7 +88,7 @@ struct OvenControllerConfig {
     // tests); increase lqiR for even softer action, decrease for faster.
     double lqiQxSensor{0.01};       /**< LQI weight, sensor-zone state */
     double lqiQxProduct{0.004};     /**< LQI weight, product-zone state */
-    double lqiQi{0.004};            /**< LQI integral weight */
+    double lqiQi{0.02};             /**< LQI integral weight */
     double lqiR{1000.0};            /**< LQI control weight */
     double observerQProc{1e-4};     /**< Observer process-noise density */
     double observerRMeas{0.09};     /**< Observer measurement variance [°C²] */

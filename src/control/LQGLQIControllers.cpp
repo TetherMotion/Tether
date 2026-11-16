@@ -113,34 +113,78 @@ void LQIController::setSystemMatrices(const double* A, const double* B, const do
     m_n = std::min(n, static_cast<int>(MAX_STATE_DIM));
     m_m = std::min(m, static_cast<int>(MAX_CONTROL_DIM));
     m_p = std::min(p, static_cast<int>(MAX_OUTPUT_DIM));
-    
+    m_discreteDesign = false;
+
     std::memcpy(m_A.data(), A, m_n * m_n * sizeof(double));
     std::memcpy(m_B.data(), B, m_n * m_m * sizeof(double));
     std::memcpy(m_C.data(), C, m_p * m_n * sizeof(double));
-    
+
     int na = m_n + m_p;
-    
+
     std::fill(m_Aa.begin(), m_Aa.end(), 0.0);
     std::fill(m_Ba.begin(), m_Ba.end(), 0.0);
-    
+
     for (int i = 0; i < m_n; i++) {
         for (int j = 0; j < m_n; j++) {
             m_Aa[i * na + j] = m_A[i * m_n + j];
         }
     }
-    
+
+    // Continuous integrator: xᵢ' = r − y → bottom-left block = −C.
     for (int i = 0; i < m_p; i++) {
         for (int j = 0; j < m_n; j++) {
             m_Aa[(m_n + i) * na + j] = -m_C[i * m_n + j];
         }
     }
-    
+
     for (int i = 0; i < m_n; i++) {
         for (int j = 0; j < m_m; j++) {
             m_Ba[i * m_m + j] = m_B[i * m_m + j];
         }
     }
-    
+
+    m_designed = false;
+}
+
+void LQIController::setDiscreteSystemMatrices(const double* Ad, const double* Bd,
+                                               const double* C, int n, int m, int p,
+                                               double dt) {
+    m_n = std::min(n, static_cast<int>(MAX_STATE_DIM));
+    m_m = std::min(m, static_cast<int>(MAX_CONTROL_DIM));
+    m_p = std::min(p, static_cast<int>(MAX_OUTPUT_DIM));
+    m_discreteDesign = true;
+    m_designDt = std::max(dt, 1e-6);
+
+    std::memcpy(m_A.data(), Ad, m_n * m_n * sizeof(double));
+    std::memcpy(m_B.data(), Bd, m_n * m_m * sizeof(double));
+    std::memcpy(m_C.data(), C, m_p * m_n * sizeof(double));
+
+    const int na = m_n + m_p;
+
+    std::fill(m_Aa.begin(), m_Aa.end(), 0.0);
+    std::fill(m_Ba.begin(), m_Ba.end(), 0.0);
+
+    for (int i = 0; i < m_n; i++) {
+        for (int j = 0; j < m_n; j++) {
+            m_Aa[i * na + j] = m_A[i * m_n + j];
+        }
+    }
+
+    // Discrete integrator matching computeImpl():
+    //   xᵢ[k+1] = xᵢ[k] + (r − y)·dt → bottom-left = −dt·C, bottom-right = I.
+    for (int i = 0; i < m_p; i++) {
+        for (int j = 0; j < m_n; j++) {
+            m_Aa[(m_n + i) * na + j] = -m_designDt * m_C[i * m_n + j];
+        }
+        m_Aa[(m_n + i) * na + (m_n + i)] = 1.0;
+    }
+
+    for (int i = 0; i < m_n; i++) {
+        for (int j = 0; j < m_m; j++) {
+            m_Ba[i * m_m + j] = m_B[i * m_m + j];
+        }
+    }
+
     m_designed = false;
 }
 
@@ -181,7 +225,11 @@ bool LQIController::design() {
     int na = m_n + m_p;
     
     LQRController lqrAug;
-    lqrAug.setSystemMatrices(m_Aa.data(), m_Ba.data(), na, m_m);
+    if (m_discreteDesign) {
+        lqrAug.setDiscreteSystemMatrices(m_Aa.data(), m_Ba.data(), na, m_m);
+    } else {
+        lqrAug.setSystemMatrices(m_Aa.data(), m_Ba.data(), na, m_m);
+    }
     lqrAug.setWeightMatrices(m_Qa.data(), m_R.data());
     
     if (!lqrAug.computeGain()) {
@@ -275,42 +323,98 @@ namespace StateSpace {
 
 void discretize(const double* A, const double* B, double dt,
                 double* Ad, double* Bd, int n, int m) {
-    matIdentity(Ad, n);
-    for (int i = 0; i < n * n; i++) {
-        Ad[i] += A[i] * dt;
+    // Exact zero-order-hold discretization via the Van Loan augmented
+    // matrix exponential:
+    //   expm([A B; 0 0] * dt) = [Ad  Bd; 0  I]
+    const int na = n + m;
+    std::vector<double> Maug(static_cast<size_t>(na) * na, 0.0);
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) Maug[i * na + j] = A[i * n + j];
+        for (int j = 0; j < m; ++j) Maug[i * na + n + j] = B[i * m + j];
     }
-    
-    for (int i = 0; i < n * m; i++) {
-        Bd[i] = B[i] * dt;
+    std::vector<double> E(static_cast<size_t>(na) * na, 0.0);
+    matrixExponential(Maug.data(), dt, E.data(), na);
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) Ad[i * n + j] = E[i * na + j];
+        for (int j = 0; j < m; ++j) Bd[i * m + j] = E[i * na + n + j];
     }
 }
 
+namespace {
+
+// Numerical rank of a row-major r x c matrix via singular values.
+// Tolerance follows the standard SVD rank rule: max(r,c) * eps * sigma_max.
+int matrixRank(const std::vector<double>& M, int r, int c) {
+    if (r <= 0 || c <= 0 || M.empty()) return 0;
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        mat(M.data(), r, c);
+    const auto sv = mat.template jacobiSvd<Eigen::ComputeThinU | Eigen::ComputeThinV>()
+                        .singularValues();
+    if (sv.size() == 0) return 0;
+    const double tol = std::max(r, c) * 2.220446049250313e-16 * sv(0);
+    int rank = 0;
+    for (int i = 0; i < sv.size(); ++i)
+        if (sv(i) > tol) ++rank;
+    return rank;
+}
+
+} // namespace
+
 bool isControllable(const double* A, const double* B, int n, int m) {
-    std::vector<double> C(n * n * m);
-    std::vector<double> temp(n * m);
-    std::vector<double> Apow(n * n);
-    
-    matIdentity(Apow.data(), n);
-    
-    for (int k = 0; k < n; k++) {
-        matMul(Apow.data(), B, temp.data(), n, n, m);
-        
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < m; j++) {
-                C[i * n * m + k * m + j] = temp[i * m + j];
+    if (n <= 0 || m <= 0 || !A || !B) return false;
+    // Controllability matrix [B, AB, A^2 B, ..., A^(n-1) B] (n x n*m).
+    std::vector<double> ctrb(static_cast<size_t>(n) * n * m, 0.0);
+    std::vector<double> Apow(static_cast<size_t>(n) * n, 0.0);
+    for (int i = 0; i < n; ++i) Apow[static_cast<size_t>(i) * n + i] = 1.0;
+    for (int k = 0; k < n; ++k) {
+        // block k = A^k B
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < m; ++j) {
+                double s = 0.0;
+                for (int l = 0; l < n; ++l)
+                    s += Apow[static_cast<size_t>(i) * n + l] * B[static_cast<size_t>(l) * m + j];
+                ctrb[(static_cast<size_t>(k) * n + i) * m + j] = s;
             }
-        }
-        
-        std::vector<double> newApow(n * n);
-        matMul(Apow.data(), A, newApow.data(), n, n, n);
-        matCopy(newApow.data(), Apow.data(), n, n);
+        // Apow <- A * Apow for the next power
+        std::vector<double> next(static_cast<size_t>(n) * n, 0.0);
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j) {
+                double s = 0.0;
+                for (int l = 0; l < n; ++l)
+                    s += A[static_cast<size_t>(i) * n + l] * Apow[static_cast<size_t>(l) * n + j];
+                next[static_cast<size_t>(i) * n + j] = s;
+            }
+        Apow.swap(next);
     }
-    
-    return true;
+    return matrixRank(ctrb, n, n * m) == n;
 }
 
 bool isObservable(const double* A, const double* C, int n, int p) {
-    return true;
+    if (n <= 0 || p <= 0 || !A || !C) return false;
+    // Observability matrix [C; CA; ...; CA^(n-1)] ((p*n) x n).
+    std::vector<double> obsv(static_cast<size_t>(p) * n * n, 0.0);
+    std::vector<double> Apow(static_cast<size_t>(n) * n, 0.0);
+    for (int i = 0; i < n; ++i) Apow[static_cast<size_t>(i) * n + i] = 1.0;
+    for (int k = 0; k < n; ++k) {
+        // block k (p rows) = C A^k
+        for (int i = 0; i < p; ++i)
+            for (int j = 0; j < n; ++j) {
+                double s = 0.0;
+                for (int l = 0; l < n; ++l)
+                    s += C[static_cast<size_t>(i) * n + l] * Apow[static_cast<size_t>(l) * n + j];
+                obsv[(static_cast<size_t>(k) * p + i) * n + j] = s;
+            }
+        std::vector<double> next(static_cast<size_t>(n) * n, 0.0);
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j) {
+                double s = 0.0;
+                for (int l = 0; l < n; ++l)
+                    s += A[static_cast<size_t>(i) * n + l] * Apow[static_cast<size_t>(l) * n + j];
+                next[static_cast<size_t>(i) * n + j] = s;
+            }
+        Apow.swap(next);
+    }
+    return matrixRank(obsv, p * n, n) == n;
 }
 
 void matrixExponential(const double* A, double t, double* expAt, int n) {

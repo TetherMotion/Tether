@@ -547,6 +547,27 @@ public:
      */
     void setSystemMatrices(const double* A, const double* B, const double* C,
                            int n, int m, int p);
+
+    /**
+     * @brief Set discrete-time system matrices
+     *
+     * Same augmentation as setSystemMatrices() but the regulator is
+     * designed by solving the discrete algebraic Riccati equation on the
+     * augmented pair, and the integral state uses the same
+     * `xᵢ += (r − y)·dt` update as computeImpl().  Use this when A/B are
+     * already discrete-time (Ad, Bd) — e.g. from StateSpace::discretize()
+     * or a hand-built Euler model.
+     *
+     * @param Ad Discrete state matrix (n×n)
+     * @param Bd Discrete input matrix (n×m)
+     * @param C  Output matrix (p×n)
+     * @param n,m,p Dimensions
+     * @param dt Design/sample period [s] used for the integral-state
+     *           augmentation and matching computeImpl()'s integration.
+     */
+    void setDiscreteSystemMatrices(const double* Ad, const double* Bd,
+                                   const double* C, int n, int m, int p,
+                                   double dt);
     
     /**
      * @brief Set augmented weight matrices
@@ -657,6 +678,8 @@ private:
     double m_integralMax{1e6};
     
     bool m_designed{false};
+    bool m_discreteDesign{false};
+    double m_designDt{0.0};
 };
 
 // ============================================================================

@@ -114,7 +114,12 @@ measured y (zone 1) ──► OvenThermalObserver ──► x̂ = [T̂_s, T̂_p]
   not misread as process noise. Corrects with the raw measurement.
 - **LQI**: `LQIController` on the augmented (state + integral) system,
   `C = [0,1]` so the integrator drives the *product* temperature to the
-  reference. It is fed **deviation states** `z = x̂ − x_ss(r)` with
+  reference. The regulator is designed **discrete-time**: the backend
+  Euler-discretizes the coupled plant at `backendDt` and solves the
+  discrete algebraic Riccati equation on the augmented pair
+  (`xi[k+1] = xi[k] + dt·(r − y)` — the same update `computeImpl()`
+  runs), so the gains match the sampled-data loop exactly. It is fed
+  **deviation states** `z = x̂ − x_ss(r)` with
   `reference = 0`: Tether's LQI penalizes absolute state, and feeding
   ~100 °C absolutes would create an uncorrectable ~10⁴ bias. The analytic
   steady-state map `x1_ss = r + (βP·(r−T_amb) − d)/γPS` also gives
@@ -249,7 +254,7 @@ The LQI backend still needs the **FOPDT autotune for the SISO layer**
      coupling rates share one conductance; their ratio is the inverse
      capacitance ratio.
 2. **LQI weights are performance knobs, not physics.** Defaults
-   (`qxSensor=0.01, qxProduct=0.004, qi=0.004, R=1000`) are verified
+   (`qxSensor=0.01, qxProduct=0.004, qi=0.02, R=1000`) are verified
    smooth for typical oven time constants. Direction: raise `lqiR` for
    softer/slower, lower for more aggressive — too low produces a
    limit cycle (u banging 0↔1 around setpoint). `qi` sets integral
@@ -329,7 +334,7 @@ Everything else applies to both.
 | `maxTempC` / `overTempHysteresis` | 400 / 5 °C | **Set these for your process.** Hard interlock: output → uMin above the limit, resumes below limit−hysteresis. Residual overshoot is physical coast-down (no active cooling). |
 | `feedbackBackend` | PI | `LQI` for non-collocated sensing (sensor ≠ controlled mass). See "Feedback backends". |
 | `coupled.*` | defaults | LQI backend's two-state plant params. Start from `makeCoupledParams(cfg.model)`; refine coupling/loss-split from commissioning data (empty vs loaded step response). |
-| `lqiQxSensor/QxProduct/Qi/R` | 0.01/0.004/0.004/1000 | LQI performance weights (not physical). Larger `lqiR` → softer/slower; smaller → more aggressive (watch for limit cycle). |
+| `lqiQxSensor/QxProduct/Qi/R` | 0.01/0.004/0.02/1000 | LQI performance weights (not physical). Larger `lqiR` → softer/slower; smaller → more aggressive (watch for limit cycle). `qi` is scaled for the discrete `dt`-integrator — retune if `backendDt` changes a lot. |
 | `observerQProc` / `observerRMeas` | 1e-4 / 0.09 | Observer bandwidth: larger QProc/RMeas ratio → trusts sensor more (faster state convergence, more noise feedthrough). `observerRMeas` ≈ sensor variance (σ=0.3 °C → 0.09). |
 | `backendDt` | 0.5 s | Observer/LQI design step; set ≈ actual loop dt. |
 

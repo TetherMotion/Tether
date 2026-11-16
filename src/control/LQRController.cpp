@@ -8,7 +8,10 @@
 #include "control/StateSpaceControllers.hpp"
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <cstring>
+
+#include <Eigen/Dense>
 
 namespace tether::control {
 
@@ -72,61 +75,83 @@ bool LQRController::computeGain() {
 bool LQRController::solveRiccati() {
     const int n = m_n;
     const int m = m_m;
-    
-    matCopy(m_Q.data(), m_P.data(), n, n);
-    
-    std::array<double, MAX_CONTROL_DIM * MAX_CONTROL_DIM> Rinv{};
-    if (!matInverse(m_R.data(), Rinv.data(), m)) {
+
+    // Solve the continuous algebraic Riccati equation
+    //   A'P + PA - P B R^-1 B' P + Q = 0
+    // for the unique stabilizing PSD solution P via the Hamiltonian
+    // invariant-subspace method: H = [A, -G; -Q, -A'] with
+    // G = B R^-1 B'.  The n-dimensional stable invariant subspace of H
+    // yields P = Z2 Z1^-1 (same construction as the H-infinity solver).
+    using Mat = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>;
+    using CMat = Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic>;
+
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        A(m_A.data(), n, n);
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        B(m_B.data(), n, m);
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        Qm(m_Q.data(), n, n);
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        Rm(m_R.data(), m, m);
+
+    Eigen::LDLT<Mat> ldlt(Rm);
+    if (ldlt.info() != Eigen::Success) return false;
+    const Mat Rinv = ldlt.solve(Mat::Identity(m, m));
+
+    const Mat G = B * Rinv * B.transpose();
+    const Mat Qs = 0.5 * (Qm + Qm.transpose());
+
+    Mat H(2 * n, 2 * n);
+    H << A, -G, -Qs, -A.transpose();
+
+    Eigen::EigenSolver<Mat> es(H);
+    if (es.info() != Eigen::Success) return false;
+
+    const auto& w = es.eigenvalues();
+    const auto& V = es.eigenvectors();
+    CMat Z(2 * n, n);
+    int cnt = 0;
+    for (int i = 0; i < 2 * n; ++i) {
+        if (w[i].real() < -1e-9) {
+            if (cnt >= n) return false;  // Hamiltonian must have exactly n stable eigenvalues
+            Z.col(cnt++) = V.col(i);
+        }
+    }
+    if (cnt != n) return false;
+
+    CMat Xc = Z.bottomRows(n) * Z.topRows(n).inverse();
+    const double scale = std::max(1.0, Xc.real().cwiseAbs().maxCoeff());
+    if (Xc.imag().cwiseAbs().maxCoeff() > 1e-6 * scale) return false;
+    Mat X = Xc.real();
+    X = 0.5 * (X + X.transpose());
+
+    // Residual check on the CARE.
+    const Mat R = A.transpose() * X + X * A - X * G * X + Qs;
+    const double rnorm = R.cwiseAbs().maxCoeff();
+    const double rscale = (A.transpose() * X).cwiseAbs().maxCoeff()
+                        + (X * A).cwiseAbs().maxCoeff()
+                        + Qs.cwiseAbs().maxCoeff()
+                        + (X * G * X).cwiseAbs().maxCoeff();
+    if (!(rnorm <= 1e-6 * std::max(1.0, rscale))) return false;
+
+    // Stabilizing check: A - G X must be Hurwitz, and P >= 0.
+    Eigen::EigenSolver<Mat> ecs(A - G * X);
+    if (ecs.info() != Eigen::Success || ecs.eigenvalues().real().maxCoeff() >= 1e-7)
         return false;
-    }
-    
-    std::array<double, MAX_STATE_DIM * MAX_CONTROL_DIM> BRinv{};
-    matMul(m_B.data(), Rinv.data(), BRinv.data(), n, m, m);
-    
-    std::array<double, MAX_STATE_DIM * MAX_STATE_DIM> BRinvBt{};
-    std::array<double, MAX_CONTROL_DIM * MAX_STATE_DIM> Bt{};
-    matTranspose(m_B.data(), Bt.data(), n, m);
-    matMul(BRinv.data(), Bt.data(), BRinvBt.data(), n, m, n);
-    
-    std::array<double, MAX_STATE_DIM * MAX_STATE_DIM> Pnew{};
-    std::array<double, MAX_STATE_DIM * MAX_STATE_DIM> At{};
-    matTranspose(m_A.data(), At.data(), n, n);
-    
-    const int maxIter = 1000;
-    const double tol = 1e-10;
-    double dt = 0.01;
-    
-    for (int iter = 0; iter < maxIter; iter++) {
-        std::array<double, MAX_STATE_DIM * MAX_STATE_DIM> AtP{}, PA{}, PBRBtP{};
-        
-        matMul(At.data(), m_P.data(), AtP.data(), n, n, n);
-        matMul(m_P.data(), m_A.data(), PA.data(), n, n, n);
-        
-        std::array<double, MAX_STATE_DIM * MAX_STATE_DIM> PBRinvBt{};
-        matMul(m_P.data(), BRinvBt.data(), PBRinvBt.data(), n, n, n);
-        matMul(PBRinvBt.data(), m_P.data(), PBRBtP.data(), n, n, n);
-        
-        for (int i = 0; i < n * n; i++) {
-            double Pdot = AtP[i] + PA[i] - PBRBtP[i] + m_Q[i];
-            Pnew[i] = m_P[i] + dt * Pdot;
-        }
-        
-        double diff = 0;
-        for (int i = 0; i < n * n; i++) {
-            diff += (Pnew[i] - m_P[i]) * (Pnew[i] - m_P[i]);
-        }
-        
-        matCopy(Pnew.data(), m_P.data(), n, n);
-        
-        if (std::sqrt(diff) < tol) {
-            break;
-        }
-    }
-    
-    std::array<double, MAX_CONTROL_DIM * MAX_STATE_DIM> BtP{};
-    matMul(Bt.data(), m_P.data(), BtP.data(), m, n, n);
-    matMul(Rinv.data(), BtP.data(), m_K.data(), m, m, n);
-    
+    Eigen::SelfAdjointEigenSolver<Mat> ps(X);
+    if (ps.info() != Eigen::Success) return false;
+    if (ps.eigenvalues().minCoeff() < -1e-7 * std::max(1.0, ps.eigenvalues().maxCoeff()))
+        return false;
+
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+            m_P[i * n + j] = X(i, j);
+
+    const Mat K = Rinv * B.transpose() * X;  // m x n
+    for (int i = 0; i < m; ++i)
+        for (int j = 0; j < n; ++j)
+            m_K[i * n + j] = K(i, j);
+
     m_gainComputed = true;
     return true;
 }
@@ -144,9 +169,9 @@ bool LQRController::solveDiscreteRiccati() {
     matTranspose(m_A.data(), At.data(), n, n);
     matTranspose(m_B.data(), Bt.data(), n, m);
     
-    const int maxIter = 1000;
+    const int maxIter = 50000;
     const double tol = 1e-10;
-    
+
     for (int iter = 0; iter < maxIter; iter++) {
         std::array<double, MAX_STATE_DIM * MAX_STATE_DIM> PA{}, AtPA{};
         matMul(m_P.data(), m_A.data(), PA.data(), n, n, n);

@@ -554,6 +554,10 @@ TEST(StateSpaceHelpersTest, Discretize) {
     // Ad should be close to I + A*dt for small dt
     EXPECT_NEAR(Ad[0], 1.0, 0.01);  // [1,0] diagonal
     EXPECT_NEAR(Ad[3], 1.0, 0.01);  // [1,1] diagonal
+    // Exact ZOH: Ad = expm(A dt) = [1 dt; 0 1], Bd = [dt^2/2; dt]
+    EXPECT_NEAR(Ad[1], 0.01, 1e-9);
+    EXPECT_NEAR(Bd[0], 0.00005, 1e-9);
+    EXPECT_NEAR(Bd[1], 0.01, 1e-9);
 }
 
 TEST(StateSpaceHelpersTest, IsControllable) {
@@ -565,6 +569,18 @@ TEST(StateSpaceHelpersTest, IsControllable) {
     EXPECT_TRUE(ctrl);
 }
 
+TEST(StateSpaceHelpersTest, IsControllableRejectsUncontrollable) {
+    // Two decoupled integrators, input only reaches the first state:
+    // x1' = u, x2' = 0  ->  x2 is unreachable.
+    double A[4] = {0, 0, 0, 0};
+    double B[2] = {1, 0};
+    EXPECT_FALSE(StateSpace::isControllable(A, B, 2, 1));
+
+    // B = 0 reaches nothing.
+    double B0[2] = {0, 0};
+    EXPECT_FALSE(StateSpace::isControllable(A, B0, 2, 1));
+}
+
 TEST(StateSpaceHelpersTest, IsObservable) {
     double A[4] = {0, 1, 0, 0};
     double C[2] = {1, 0};  // Measure position
@@ -572,6 +588,16 @@ TEST(StateSpaceHelpersTest, IsObservable) {
     bool obs = StateSpace::isObservable(A, C, 2, 1);
     // System is observable from position
     EXPECT_TRUE(obs);
+}
+
+TEST(StateSpaceHelpersTest, IsObservableRejectsUnobservable) {
+    // Decoupled stable states; measuring only x1 leaves x2 unobservable.
+    double A[4] = {-1, 0, 0, -2};   // diag(-1,-2)
+    double C[2] = {1, 0};           // measure only x1
+    EXPECT_FALSE(StateSpace::isObservable(A, C, 2, 1));
+
+    double C2[2] = {1, 1};          // measure both -> observable
+    EXPECT_TRUE(StateSpace::isObservable(A, C2, 2, 1));
 }
 
 TEST(StateSpaceHelpersTest, MatrixExponential) {

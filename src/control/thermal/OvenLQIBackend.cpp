@@ -128,7 +128,10 @@ void OvenLQIBackend::redesign(double dt) {
     // Controlled output: product-zone temperature → C = [0, 1]
     double C[2] = {0.0, 1.0};
 
-    m_lqi.setSystemMatrices(Ad, Bd, C, 2, 1, 1);
+    // Discrete design: the augmented regulator is solved via the DARE on
+    // the same Ad/Bd the observer runs — consistent with computeImpl()'s
+    // xᵢ += (r − y)·dt integration.
+    m_lqi.setDiscreteSystemMatrices(Ad, Bd, C, 2, 1, 1, m_dtDesign);
 
     double Qx[4] = {m_qxSensor, 0.0, 0.0, m_qxProduct};
     double Qi[1] = {m_qi};
