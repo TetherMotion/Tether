@@ -1,12 +1,15 @@
 /**
  * @file GCodeStubs.cpp
- * @brief Stub implementations for motion handler constructors.
+ * @brief Link/compat implementations for motion handler scaffolding.
  *
  * @details
  * The motion handler classes (LinearMotionHandler, ArcMotionHandler, etc.)
- * have their APIs declared in headers but are not yet fully implemented.
- * This file provides the minimal constructor implementations needed to
- * link the GCodeInterpreter.
+ * have their APIs declared in headers, but the production motion pipeline
+ * lives in GCodeInterpreter_*.cpp (handleMotion / executeCannedCycle /
+ * executeProbe).  These handler objects are not dispatched to by the
+ * interpreter; the process* entry points below therefore fail explicitly
+ * rather than silently reporting success for a move that never happened.
+ * ToolTable and the compensation helpers in this file are real and used.
  */
 
 #include "tether/gcode/motion/GCodeG0G1.hpp"
@@ -17,23 +20,44 @@
 #include "tether/gcode/motion/GCodeToolComp.hpp"
 #include "tether/gcode/motion/GCodeAdvancedMotion.hpp"
 
+#include <cstdio>
+
 namespace GCode {
+
+namespace {
+Error handlerNotImplemented(const char* what) {
+    Error err;
+    err.code = ErrorCode::INVALID_MOTION;
+    std::snprintf(err.message.data(), err.message.size(),
+                  "%s: handler not implemented (use Interpreter pipeline)",
+                  what);
+    return err;
+}
+} // namespace
 
 // --- LinearMotionHandler ---
 LinearMotionHandler::LinearMotionHandler(const LinearMotionConfig& config)
     : m_config(config) {}
 Error LinearMotionHandler::processG0(const Block&, MachineState&, VariableSystem&,
-                                     std::vector<MotionSegment>&) { return Error{}; }
+                                     std::vector<MotionSegment>&) {
+    return handlerNotImplemented("G0");
+}
 Error LinearMotionHandler::processG1(const Block&, MachineState&, VariableSystem&,
-                                     std::vector<MotionSegment>&) { return Error{}; }
+                                     std::vector<MotionSegment>&) {
+    return handlerNotImplemented("G1");
+}
 
 // --- ArcMotionHandler ---
 ArcMotionHandler::ArcMotionHandler(const ArcMotionConfig& config)
     : m_config(config) {}
 Error ArcMotionHandler::processG2(const Block&, MachineState&, VariableSystem&,
-                                  std::vector<MotionSegment>&) { return Error{}; }
+                                  std::vector<MotionSegment>&) {
+    return handlerNotImplemented("G2");
+}
 Error ArcMotionHandler::processG3(const Block&, MachineState&, VariableSystem&,
-                                  std::vector<MotionSegment>&) { return Error{}; }
+                                  std::vector<MotionSegment>&) {
+    return handlerNotImplemented("G3");
+}
 
 // --- SplineHandler ---
 SplineHandler::SplineHandler(const SplineConfig& config)

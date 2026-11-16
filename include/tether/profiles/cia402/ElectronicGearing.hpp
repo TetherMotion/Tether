@@ -106,6 +106,12 @@ struct GearingSlave {
     int32_t syncPosition{0}; /**< Position at engage */
     int32_t targetPosition{0}; /**< Calculated target position */
     uint64_t engageStartTime{0}; /**< Time engage started */
+
+    // Ramped gear-ratio change (setGearRatio with ramp=true)
+    bool ratioRampActive{false};
+    double ratioRampFrom{0.0};
+    double ratioRampTo{0.0};
+    uint64_t ratioRampStartUs{0};
 };
 
 /**

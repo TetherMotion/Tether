@@ -223,6 +223,22 @@ public:
     HomingError getError() const { return m_error; }
 
     /**
+     * @brief Configure stall detection for block homing (methods 17-30)
+     *
+     * Block detection declares the mechanical stop reached when the axis is
+     * commanded to move but the position stays within `moveEpsilon` counts
+     * for `stallTimeMs`.  Defaults: 200 ms, 2 counts.
+     *
+     * @param stallTimeMs Duration of frozen position that indicates a block
+     * @param moveEpsilon Position change (counts) below which motion counts
+     *        as stalled
+     */
+    void setStallDetection(uint32_t stallTimeMs, int32_t moveEpsilon) {
+        m_stallTimeUs = static_cast<uint64_t>(stallTimeMs) * 1000;
+        m_stallMoveEpsilon = moveEpsilon;
+    }
+
+    /**
      * @brief Get home position (after homing complete)
      * @return Position registered as machine zero [counts]
      */
@@ -341,6 +357,13 @@ private:
     
     // Backend
     DriveBackendPtr m_backend;
+
+    // Block-homing stall detection state (methods 17-30)
+    bool m_blockTracking{false};
+    int64_t m_blockRefPos{0};
+    uint64_t m_blockLastMoveUs{0};
+    uint64_t m_stallTimeUs{200000};
+    int32_t m_stallMoveEpsilon{2};
 };
 
 } // namespace CiA402

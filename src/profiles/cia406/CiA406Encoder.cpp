@@ -612,27 +612,43 @@ bool Encoder::presetPosition(int32_t position) {
 
 bool Encoder::startReference(const ReferenceConfig& config) {
     TETHER_LOGI(TAG, "Starting reference procedure for encoder {}", m_coe.slaveIndex());
-    
-    // Write reference position
-    writeObject(ReferencePosition, 0, &config.reference_position, 
-                sizeof(config.reference_position));
-    
-    // Configure direction
+
+    if (config.mode == ReferenceMode::None) {
+        TETHER_LOGE(TAG, "Reference mode None cannot start a procedure");
+        return false;
+    }
+
+    // Write reference position — the encoder presets to this value when
+    // the reference trigger occurs.
+    if (!writeObject(ReferencePosition, 0, &config.reference_position,
+                     sizeof(config.reference_position))) {
+        TETHER_LOGE(TAG, "Failed to write reference position");
+        return false;
+    }
+
+    // Configure counting direction
     uint8_t direction = config.direction_positive ? 0 : 1;
-    writeObject(CountingDirection, 0, &direction, sizeof(direction));
-    
-    // Start reference (implementation depends on encoder capabilities)
-    // For now, just set current position as reference
+    if (!writeObject(CountingDirection, 0, &direction, sizeof(direction))) {
+        TETHER_LOGE(TAG, "Failed to write counting direction");
+        return false;
+    }
+
     if (config.mode == ReferenceMode::CurrentPosition) {
         return presetPosition(config.reference_position);
     }
-    
-    // For other modes, would need to trigger reference procedure
+
+    // Trigger-based modes: the encoder hardware performs the preset when
+    // the configured trigger (zero pulse / limit / external input) occurs.
+    // Arm the pending state; processStatus() clears it on reference_done.
+    reference_pending_ = true;
+    pending_reference_ = config;
+    TETHER_LOGI(TAG, "Reference armed (mode {}), waiting for trigger",
+                static_cast<int>(config.mode));
     return true;
 }
 
 void Encoder::abortReference() {
-    // Implementation depends on encoder
+    reference_pending_ = false;
 }
 
 // ============================================================================

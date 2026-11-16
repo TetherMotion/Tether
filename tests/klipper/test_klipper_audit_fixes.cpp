@@ -267,10 +267,12 @@ TEST_F(AuditStubTest, MachineServiceActionReturnsError) {
     EXPECT_TRUE(result.has("error"));
 }
 
-TEST_F(AuditStubTest, MachineUpdateRefreshReturnsError) {
+TEST_F(AuditStubTest, MachineUpdateRefreshSucceeds) {
+    // Refresh is implemented: it re-polls tracked components that map to
+    // local git checkouts.  With none configured it is a successful no-op.
     auto result = server_.callEndpoint("machine/update/refresh", JsonValue(std::map<std::string, JsonValue>{}));
     ASSERT_TRUE(result.isObject());
-    EXPECT_TRUE(result.has("error"));
+    EXPECT_TRUE(result.has("result"));
 }
 
 TEST_F(AuditStubTest, MachineUpdateUpdateReturnsError) {

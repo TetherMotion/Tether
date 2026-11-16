@@ -324,6 +324,21 @@ public:
      */
     virtual bool getPDOMapping(uint16_t pdoIndex,
                                std::vector<ODEntryInfo>& entries) const = 0;
+
+    /**
+     * @brief List all registered object indices (for SDO Info GetODList)
+     *
+     * Fills @p indices with the sorted set of object indices that have at
+     * least one registered subindex.  The default implementation reports
+     * unsupported so dictionaries that cannot enumerate fail cleanly.
+     *
+     * @param indices Receives the list of object indices.
+     * @return true when the index list was produced.
+     */
+    virtual bool getIndices(std::vector<uint16_t>& indices) const {
+        indices.clear();
+        return false;
+    }
     
     // ========================================================================
     // Serialization

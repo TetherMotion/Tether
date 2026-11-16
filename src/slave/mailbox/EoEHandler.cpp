@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <mutex>
 #include <vector>
 #include <queue>
 #include <array>
@@ -247,6 +248,7 @@ public:
         uint64_t fragmentsSent{0};
         uint64_t reassemblyErrors{0};
         uint64_t ipParamRequests{0};
+        uint64_t framesFiltered{0};
     };
     
     Stats getStats() const { return stats_; }
@@ -343,6 +345,12 @@ private:
         
         // Clean up fragments
         rxFragments_.erase(it);
+        
+        // Apply the configured frame filter before delivery.
+        if (!framePassesFilter(frame)) {
+            stats_.framesFiltered++;
+            return true;
+        }
         
         // Deliver frame
         if (frameReceivedCallback_) {
@@ -517,15 +525,106 @@ private:
     
     bool handleSetFilter(const uint8_t* data, size_t length,
                         uint8_t* response, size_t& responseLength) {
-        // Filter support not implemented
-        return sendResponse(EOE_TYPE_SET_FILTER_RESP, EOE_RESULT_NO_FILTER_SUPPORT,
+        // ETG.1020 SetFilter: MAC(6) + EtherType(2), optionally followed by
+        // VLAN priority(1) + VLAN ID(2).  A request shorter than 8 bytes is
+        // malformed; all-zero MAC disables filtering (accept all).
+        if (length < 8) {
+            return sendResponse(EOE_TYPE_SET_FILTER_RESP,
+                                EOE_RESULT_UNSPECIFIED_ERROR,
+                                response, responseLength);
+        }
+
+        std::array<uint8_t, 6> mac;
+        memcpy(mac.data(), data, 6);
+        const uint16_t ethertype = data[6] | (data[7] << 8);
+        uint8_t vlanPri = 0;
+        uint16_t vlanId = 0;
+        if (length >= 11) {
+            vlanPri = data[8] & 0x0F;
+            vlanId = data[9] | (data[10] << 8);
+        }
+
+        const bool allZero = std::all_of(mac.begin(), mac.end(),
+                                         [](uint8_t b) { return b == 0; });
+        {
+            std::lock_guard<std::mutex> lk(filterMutex_);
+            filterActive_ = !allZero;
+            filterMac_ = mac;
+            filterEthertype_ = ethertype;
+            filterVlanPri_ = vlanPri;
+            filterVlanId_ = vlanId;
+        }
+        return sendResponse(EOE_TYPE_SET_FILTER_RESP, EOE_RESULT_SUCCESS,
                            response, responseLength);
     }
     
     bool handleGetFilter(uint8_t* response, size_t& responseLength) {
-        // Filter support not implemented
-        return sendResponse(EOE_TYPE_GET_FILTER_RESP, EOE_RESULT_NO_FILTER_SUPPORT,
-                           response, responseLength);
+        // Response: result(2) + MAC(6) + EtherType(2) + VLAN pri(1) + VLAN ID(2)
+        if (responseLength < 13) {
+            return sendResponse(EOE_TYPE_GET_FILTER_RESP,
+                                EOE_RESULT_UNSPECIFIED_ERROR,
+                                response, responseLength);
+        }
+        std::array<uint8_t, 6> mac{};
+        uint16_t ethertype = 0;
+        uint8_t vlanPri = 0;
+        uint16_t vlanId = 0;
+        bool active = false;
+        {
+            std::lock_guard<std::mutex> lk(filterMutex_);
+            mac = filterMac_;
+            ethertype = filterEthertype_;
+            vlanPri = filterVlanPri_;
+            vlanId = filterVlanId_;
+            active = filterActive_;
+        }
+        if (!active) {
+            // No filter configured — report NO_FILTER_SUPPORT semantics via
+            // success with a zeroed filter (accept-all).
+            mac.fill(0);
+            ethertype = 0;
+        }
+
+        response[0] = (EOE_TYPE_GET_FILTER_RESP << 4);
+        response[1] = 0;
+        response[2] = EOE_RESULT_SUCCESS & 0xFF;
+        response[3] = (EOE_RESULT_SUCCESS >> 8) & 0xFF;
+        memcpy(response + 4, mac.data(), 6);
+        response[10] = ethertype & 0xFF;
+        response[11] = (ethertype >> 8) & 0xFF;
+        response[12] = vlanPri & 0x0F;
+        if (responseLength >= 15) {
+            response[13] = vlanId & 0xFF;
+            response[14] = (vlanId >> 8) & 0xFF;
+            responseLength = 15;
+        } else {
+            responseLength = 13;
+        }
+        return true;
+    }
+
+    // Returns true when the reassembled Ethernet frame passes the
+    // configured filter (or no filter is active).
+    bool framePassesFilter(const std::vector<uint8_t>& frame) const {
+        std::lock_guard<std::mutex> lk(filterMutex_);
+        if (!filterActive_) return true;
+        // Ethernet header: dst MAC[0..5], src MAC[6..11], EtherType[12..13]
+        // (or 802.1Q tag at 12..15 pushing EtherType to 16..17).
+        if (frame.size() < 14) return false;
+        if (std::memcmp(frame.data(), filterMac_.data(), 6) != 0) {
+            // Accept broadcast as well when the filter targets broadcast.
+            static const uint8_t bcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+            if (std::memcmp(filterMac_.data(), bcast, 6) != 0) return false;
+            if (std::memcmp(frame.data(), bcast, 6) != 0) return false;
+        }
+        if (filterEthertype_ != 0) {
+            size_t etOff = 12;
+            const uint16_t tag = frame[12] << 8 | frame[13];
+            if (tag == 0x8100 && frame.size() >= 18) etOff = 16;
+            const uint16_t et = frame[etOff] << 8 | frame[etOff + 1];
+            if (et != filterEthertype_) return false;
+        }
+        return true;
     }
     
     bool sendResponse(uint8_t frameType, uint16_t result,
@@ -555,6 +654,14 @@ private:
     
     // Callback
     std::function<void(const uint8_t*, size_t)> frameReceivedCallback_;
+
+    // Frame filter (ETG.1020): destination MAC + EtherType (+ optional VLAN)
+    mutable std::mutex filterMutex_;
+    bool filterActive_{false};
+    std::array<uint8_t, 6> filterMac_{};
+    uint16_t filterEthertype_{0};
+    uint8_t filterVlanPri_{0};
+    uint16_t filterVlanId_{0};
     
     // Statistics
     Stats stats_;

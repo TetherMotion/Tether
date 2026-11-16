@@ -437,11 +437,46 @@ Error CoordinateSystemManager::processG10L20(
 Error CoordinateSystemManager::processG28(
     const Block& block, MachineState& state,
     std::vector<MotionSegment>& segments) {
-    // TODO: emit motion segments to the reference point via an intermediate.
-    // For now, store the reference and update state.
-    (void)block;
-    (void)state;
-    (void)segments;
+    return moveViaReference(block, m_g28Reference, state, segments);
+}
+
+Error CoordinateSystemManager::moveViaReference(
+    const Block& block, const Position& refMachine,
+    MachineState& state, std::vector<MotionSegment>& segments) {
+    const double unitScale = (state.units == Units::INCH) ? 25.4 : 1.0;
+
+    // Intermediate point: each axis word moves that axis to the given
+    // program coordinate first (Klipper G28 semantics).
+    static const std::pair<WordLetter, Axis> kAxisWords[] = {
+        {WordLetter::X, Axis::X}, {WordLetter::Y, Axis::Y},
+        {WordLetter::Z, Axis::Z}, {WordLetter::A, Axis::A},
+        {WordLetter::B, Axis::B}, {WordLetter::C, Axis::C}};
+    bool hasIntermediate = false;
+    Position intermediate = state.workPosition;
+    for (const auto& [letter, axis] : kAxisWords) {
+        if (block.hasWord(letter)) {
+            intermediate[axis] = block.getWord(letter) * unitScale;
+            hasIntermediate = true;
+        }
+    }
+    if (hasIntermediate) {
+        MotionSegment seg;
+        seg.type = MotionSegment::Type::RAPID;
+        seg.endPosition = toMachineCoords(intermediate);
+        seg.lineNumber = block.sourceLineNumber;
+        segments.push_back(seg);
+        state.workPosition = intermediate;
+        state.machinePosition = seg.endPosition;
+    }
+
+    // Final move to the stored reference (machine coordinates).
+    MotionSegment seg;
+    seg.type = MotionSegment::Type::RAPID;
+    seg.endPosition = refMachine;
+    seg.lineNumber = block.sourceLineNumber;
+    segments.push_back(seg);
+    state.machinePosition = refMachine;
+    state.workPosition = toProgramCoords(refMachine);
     return Error{};
 }
 
@@ -455,8 +490,11 @@ Error CoordinateSystemManager::processG28_1(
 Error CoordinateSystemManager::processG30(
     const Block& block, int32_t pWord,
     MachineState& state, std::vector<MotionSegment>& segments) {
-    (void)block; (void)pWord; (void)state; (void)segments;
-    return Error{};
+    if (pWord < 1 || pWord > 4) {
+        return makeError(ErrorCode::INVALID_MOTION,
+                         "G30 P word out of range (1-4)");
+    }
+    return moveViaReference(block, m_g30References[pWord - 1], state, segments);
 }
 
 Error CoordinateSystemManager::processG30_1(

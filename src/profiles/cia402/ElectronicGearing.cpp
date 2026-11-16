@@ -206,9 +206,22 @@ void GearingController::updateSlave(GearingSlave& slave,
         return;
     }
     
-    // Calculate effective ratio
-    double targetRatio = static_cast<double>(slave.config.numerator) / 
-                         slave.config.denominator;
+    // Calculate target ratio, applying any in-progress ratio ramp
+    double targetRatio;
+    if (slave.ratioRampActive) {
+        const double elapsedMs =
+            (esp_timer_get_time() - slave.ratioRampStartUs) / 1000.0;
+        const double t = std::clamp(elapsedMs / static_cast<double>(m_rampTimeMs),
+                                    0.0, 1.0);
+        targetRatio = slave.ratioRampFrom +
+                      (slave.ratioRampTo - slave.ratioRampFrom) * t;
+        if (t >= 1.0) {
+            slave.ratioRampActive = false;
+        }
+    } else {
+        targetRatio = static_cast<double>(slave.config.numerator) /
+                      slave.config.denominator;
+    }
     slave.currentRatio = targetRatio * rampFactor;
     
     // Calculate master delta since engage
@@ -294,13 +307,39 @@ void GearingController::setGearRatio(size_t slaveIndex,
     }
     
     GearingSlave& slave = m_slaves[slaveIndex];
-    
-    // TODO: Implement ramped ratio change
+
+    const double newRatio = static_cast<double>(numerator) / denominator;
+    if (ramp && slave.state != GearingState::Disengaged &&
+        slave.state != GearingState::Disengaging && m_rampTimeMs > 0) {
+        // Ramp the effective ratio over m_rampTimeMs.  The "from" value is
+        // the current *target* ratio (currentRatio additionally carries the
+        // engage/disengage rampFactor, which must not be baked in).
+        double fromRatio;
+        if (slave.ratioRampActive) {
+            const double elapsedMs =
+                (esp_timer_get_time() - slave.ratioRampStartUs) / 1000.0;
+            const double t = std::clamp(
+                elapsedMs / static_cast<double>(m_rampTimeMs), 0.0, 1.0);
+            fromRatio = slave.ratioRampFrom +
+                        (slave.ratioRampTo - slave.ratioRampFrom) * t;
+        } else {
+            fromRatio = static_cast<double>(slave.config.numerator) /
+                        slave.config.denominator;
+        }
+        slave.ratioRampActive = true;
+        slave.ratioRampFrom = fromRatio;
+        slave.ratioRampTo = newRatio;
+        slave.ratioRampStartUs = esp_timer_get_time();
+    } else {
+        slave.ratioRampActive = false;
+    }
+
     slave.config.numerator = numerator;
     slave.config.denominator = denominator;
     
-    TETHER_LOGI(TAG, "Slave {} ratio changed to {}:{}", 
-             (int)slaveIndex, (long)numerator, (long)denominator);
+    TETHER_LOGI(TAG, "Slave {} ratio changed to {}:{}{}", 
+             (int)slaveIndex, (long)numerator, (long)denominator,
+             (ramp ? " (ramped)" : ""));
 }
 
 void GearingController::adjustOffset(size_t slaveIndex, int32_t offsetDelta) {

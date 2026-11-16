@@ -398,7 +398,8 @@ private:
     JsonValue handleServerKlippyLog(const JsonValue& params);
     JsonValue handleServerMoonrakerLog(const JsonValue& params);
     JsonValue handleMachineServicesList(const JsonValue& params);
-    JsonValue handleMachineServiceAction(const JsonValue& params);
+    JsonValue handleMachineServiceAction(const JsonValue& params,
+                                         const std::string& action = "");
     JsonValue handleMachineUpdateList(const JsonValue& params);
     JsonValue handleMachineUpdateRefresh(const JsonValue& params);
     JsonValue handleMachineUpdateUpdate(const JsonValue& params);

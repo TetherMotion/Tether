@@ -226,12 +226,10 @@ private:
                           std::function<void(const drogon::HttpResponsePtr&)>&& callback);
 
     // ------------------------------------------------------------------
-    // Stub handlers (sensors, wled, mqtt, extensions, timelapse, sudo, octoprint)
+    // Peripheral/stub-surface handlers (sensors, wled, mqtt, extensions,
+    // timelapse, sudo, canbus, video) and OctoPrint compatibility
     // ------------------------------------------------------------------
 
-    void handleStubEmpty(const drogon::HttpRequestPtr& req,
-                         std::function<void(const drogon::HttpResponsePtr&)>&& callback,
-                         const std::string& componentName);
     void handleOctoprintVersion(const drogon::HttpRequestPtr& req,
                                 std::function<void(const drogon::HttpResponsePtr&)>&& callback);
     void handleOctoprintServer(const drogon::HttpRequestPtr& req,

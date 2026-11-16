@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -16,8 +18,145 @@
 #include <set>
 #include <sstream>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 namespace tether::klipper::klippy {
+
+namespace {
+
+/**
+ * @brief Run a shell command, returning its exit status (or -1 on spawn
+ *        failure).  When @p output is non-null it receives combined
+ *        stdout+stderr.
+ */
+int runCommand(const std::string& cmd, std::string* output = nullptr) {
+    FILE* fp = popen((cmd + " 2>&1").c_str(), "r");
+    if (!fp) return -1;
+    char buf[512];
+    std::string out;
+    while (fgets(buf, sizeof(buf), fp)) out += buf;
+    int status = pclose(fp);
+    if (output) *output = out;
+    if (status < 0) return -1;
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    return -1;
+}
+
+/**@brief Whether the file looks like a git work tree. */
+bool isGitRepo(const std::string& dir) {
+    if (dir.empty()) return false;
+    return runCommand("git -C \"" + dir + "\" rev-parse --is-inside-work-tree") == 0;
+}
+
+/**@brief Resolve an update component name to its source directory.
+ *        Returns empty when the component is unknown. */
+std::string updateComponentDir(const UdsServerConfig& cfg,
+                               const std::string& component) {
+    // The only component with a known on-disk source tree is the klipper
+    // firmware itself (Tether's klipperPath).
+    if (component == "klipper" || component == "tether") {
+        return cfg.klipperPath;
+    }
+    return {};
+}
+
+/**@brief Standard base64 decode (RFC 4648, with padding).  Returns empty on
+ *        malformed input. */
+std::string base64Decode(const std::string& in) {
+    static const std::string tbl =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(in.size() * 3 / 4);
+    int val = 0, bits = -8;
+    for (unsigned char c : in) {
+        if (c == '=') break;
+        size_t pos = tbl.find(static_cast<char>(c));
+        if (pos == std::string::npos) {
+            if (c == '\n' || c == '\r' || c == ' ' || c == '\t') continue;
+            return {};
+        }
+        val = (val << 6) + static_cast<int>(pos);
+        bits += 6;
+        if (bits >= 0) {
+            out.push_back(static_cast<char>((val >> bits) & 0xFF));
+            bits -= 8;
+        }
+    }
+    return out;
+}
+
+/**@brief Extract `; THUMBNAIL` blocks from G-code source text.
+ *        Returns a list of {width, height, mime, data(base64)}. */
+struct EmbeddedThumbnail {
+    int width{0};
+    int height{0};
+    std::string mimeType;
+    std::string base64;
+};
+
+std::vector<EmbeddedThumbnail> extractThumbnails(const std::string& path) {
+    std::vector<EmbeddedThumbnail> thumbs;
+    std::ifstream f(path);
+    if (!f) return thumbs;
+    std::string line;
+    EmbeddedThumbnail* cur = nullptr;
+    std::string b64;
+    while (std::getline(f, line)) {
+        if (line.rfind("; THUMBNAIL begin", 0) == 0) {
+            // "; THUMBNAIL begin <w>x<h> <size>"
+            EmbeddedThumbnail t;
+            auto bpos = line.find("begin");
+            if (bpos != std::string::npos) {
+                auto rest = line.substr(bpos + 5);
+                auto xpos = rest.find('x');
+                if (xpos != std::string::npos) {
+                    t.width = std::atoi(rest.c_str());
+                    t.height = std::atoi(rest.c_str() + xpos + 1);
+                }
+            }
+            thumbs.push_back(t);
+            cur = &thumbs.back();
+            b64.clear();
+        } else if (cur && line.rfind("; THUMBNAIL end", 0) == 0) {
+            std::string decoded = base64Decode(b64);
+            if (!decoded.empty()) {
+                if (decoded.size() > 8 && decoded[0] == '\x89' &&
+                    decoded.compare(1, 3, "PNG") == 0) {
+                    cur->mimeType = "image/png";
+                } else if (decoded.size() > 3 &&
+                           static_cast<unsigned char>(decoded[0]) == 0xFF &&
+                           static_cast<unsigned char>(decoded[1]) == 0xD8) {
+                    cur->mimeType = "image/jpeg";
+                } else {
+                    cur->mimeType = "image/png";
+                }
+                cur->base64 = b64;
+            }
+            cur = nullptr;
+            b64.clear();
+        } else if (cur) {
+            // Base64 payload lines (may be raw or "; "-prefixed depending
+            // on the slicer).
+            std::string payload = line;
+            if (payload.rfind(";", 0) == 0) {
+                payload = payload.substr(1);
+                if (!payload.empty() && payload[0] == ' ') payload.erase(0, 1);
+            }
+            for (char c : payload) {
+                if (!std::isspace(static_cast<unsigned char>(c))) b64 += c;
+            }
+        }
+    }
+    // Drop entries whose payload never terminated/decoded.
+    thumbs.erase(std::remove_if(thumbs.begin(), thumbs.end(),
+                                [](const EmbeddedThumbnail& t) {
+                                    return t.base64.empty();
+                                }),
+                 thumbs.end());
+    return thumbs;
+}
+
+} // namespace
 
 // ============================================================================
 // C1: New Moonraker-compatible endpoint handlers
@@ -132,17 +271,63 @@ JsonValue KlippyServer::handleServerFilesMetascan(const JsonValue& params) {
 
 JsonValue KlippyServer::handleServerFilesThumbnails(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
-    // Thumbnail extraction from G-code is not yet implemented
-    result["error"] = JsonValue("Thumbnail extraction not implemented");
-    result["code"] = JsonValue(static_cast<int64_t>(501));
+    std::string filename = params.has("filename") && params.find("filename")->isString()
+        ? params.find("filename")->asString() : "";
+    if (filename.empty()) {
+        result["error"] = JsonValue("Filename required");
+        return JsonValue(result);
+    }
+
+    namespace fs = std::filesystem;
+    fs::path fullPath = fs::path(fileRoot_) / filename;
+    if (!fs::exists(fullPath)) {
+        result["error"] = JsonValue("File not found");
+        return JsonValue(result);
+    }
+
+    // Extract embedded "; THUMBNAIL" blocks (slicer-embedded PNG/JPEG).
+    auto thumbs = extractThumbnails(fullPath.string());
+    std::vector<JsonValue> arr;
+    for (const auto& t : thumbs) {
+        std::map<std::string, JsonValue> info;
+        info["width"] = JsonValue(static_cast<int64_t>(t.width));
+        info["height"] = JsonValue(static_cast<int64_t>(t.height));
+        info["size"] = JsonValue(static_cast<int64_t>(
+            base64Decode(t.base64).size()));
+        info["mime_type"] = JsonValue(t.mimeType);
+        info["data"] = JsonValue(t.base64);
+        arr.push_back(JsonValue(info));
+    }
+    std::map<std::string, JsonValue> payload;
+    payload["thumbnails"] = JsonValue(arr);
+    result["result"] = JsonValue(payload);
     return JsonValue(result);
 }
 
 JsonValue KlippyServer::handleServerLogsRollover(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
-    // Log rotation requires system-level access not available in this context
-    result["error"] = JsonValue("Log rotation not implemented");
-    result["code"] = JsonValue(static_cast<int64_t>(501));
+    namespace fs = std::filesystem;
+
+    // Moonraker rotates klippy.log -> klippy.log.1 (single generation kept).
+    const std::string& logPath = config_.logFile;
+    if (logPath.empty() || !fs::exists(logPath)) {
+        result["error"] = JsonValue("Log file not found");
+        return JsonValue(result);
+    }
+    std::error_code ec;
+    fs::path rotated = fs::path(logPath + ".1");
+    fs::rename(logPath, rotated, ec);
+    if (ec) {
+        result["error"] = JsonValue("Failed to rotate log: " + ec.message());
+        return JsonValue(result);
+    }
+    // Recreate an empty log so writers can continue.
+    std::ofstream fresh(logPath, std::ios::trunc);
+    if (!fresh) {
+        result["error"] = JsonValue("Failed to recreate log file");
+        return JsonValue(result);
+    }
+    result["result"] = JsonValue(true);
     return JsonValue(result);
 }
 
@@ -187,14 +372,29 @@ JsonValue KlippyServer::handleMachineServicesList(const JsonValue& params) {
     });
 }
 
-JsonValue KlippyServer::handleMachineServiceAction(const JsonValue& params) {
+JsonValue KlippyServer::handleMachineServiceAction(const JsonValue& params,
+                                                   const std::string& action) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
     std::string service = params.has("service") && params.find("service")->isString()
         ? params.find("service")->asString() : "";
+    // Moonraker also accepts an explicit "action" parameter.
+    std::string act = action;
+    if (act.empty() && params.has("action") &&
+        params.find("action")->isString()) {
+        act = params.find("action")->asString();
+    }
 
     if (service.empty()) {
         result["error"] = JsonValue("Service name required");
+        return JsonValue(result);
+    }
+    if (act.empty()) {
+        result["error"] = JsonValue("Service action required");
+        return JsonValue(result);
+    }
+    if (act != "start" && act != "stop" && act != "restart") {
+        result["error"] = JsonValue("Invalid service action '" + act + "'");
         return JsonValue(result);
     }
 
@@ -204,9 +404,28 @@ JsonValue KlippyServer::handleMachineServiceAction(const JsonValue& params) {
         return JsonValue(result);
     }
 
-    // Service control via systemctl is not implemented in this context
-    result["error"] = JsonValue("Service action '" + service + "' not implemented (requires systemctl access)");
-    result["code"] = JsonValue(static_cast<int64_t>(501));
+    // Drive the real systemd unit when available.  Moonraker service names
+    // map to systemd units; append ".service" when no suffix is present.
+    std::string unit = service;
+    if (unit.find('.') == std::string::npos) unit += ".service";
+    std::string output;
+    int rc = runCommand("systemctl " + act + " \"" + unit + "\"", &output);
+    if (rc != 0) {
+        result["error"] = JsonValue("systemctl " + act + " " + unit +
+                                    " failed (rc=" + std::to_string(rc) + ")" +
+                                    (output.empty() ? "" : ": " + output));
+        return JsonValue(result);
+    }
+
+    // Reflect the new state in the service table.
+    if (act == "stop") {
+        it->second.activeState = "inactive";
+        it->second.subState = "dead";
+    } else {
+        it->second.activeState = "active";
+        it->second.subState = "running";
+    }
+    result["result"] = JsonValue(true);
     return JsonValue(result);
 }
 
@@ -224,9 +443,31 @@ JsonValue KlippyServer::handleMachineUpdateList(const JsonValue& params) {
 }
 
 JsonValue KlippyServer::handleMachineUpdateRefresh(const JsonValue& params) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::map<std::string, JsonValue> result;
-    result["error"] = JsonValue("Update refresh not implemented");
-    result["code"] = JsonValue(static_cast<int64_t>(501));
+
+    // Refresh every tracked component that maps to a local git checkout:
+    // fetch and compare HEAD against its upstream.
+    bool any = false;
+    for (const auto& [component, _] : updateStatus_) {
+        std::string dir = updateComponentDir(config_, component);
+        if (dir.empty() || !isGitRepo(dir)) continue;
+        any = true;
+        runCommand("git -C \"" + dir + "\" fetch --quiet");
+        std::string out;
+        int rc = runCommand(
+            "git -C \"" + dir + "\" rev-list --count HEAD..@{u} 2>/dev/null",
+            &out);
+        int behind = (rc == 0) ? std::atoi(out.c_str()) : 0;
+        updateStatus_[component] = (behind > 0)
+            ? "update-available" : "up-to-date";
+    }
+    if (!any && updateStatus_.empty()) {
+        // Nothing tracked — still a successful no-op refresh.
+        result["result"] = JsonValue(true);
+        return JsonValue(result);
+    }
+    result["result"] = JsonValue(true);
     return JsonValue(result);
 }
 
@@ -238,8 +479,30 @@ JsonValue KlippyServer::handleMachineUpdateUpdate(const JsonValue& params) {
         result["error"] = JsonValue("Missing 'component' parameter");
         return JsonValue(result);
     }
-    result["error"] = JsonValue("Update of '" + component + "' not implemented");
-    result["code"] = JsonValue(static_cast<int64_t>(501));
+    std::string dir = updateComponentDir(config_, component);
+    if (dir.empty()) {
+        result["error"] = JsonValue("Unknown update component '" + component + "'");
+        return JsonValue(result);
+    }
+    if (!isGitRepo(dir)) {
+        result["error"] = JsonValue("Component '" + component +
+                                    "' is not a git checkout: " + dir);
+        return JsonValue(result);
+    }
+
+    std::string output;
+    int rc = runCommand("git -C \"" + dir + "\" pull --ff-only", &output);
+    if (rc != 0) {
+        result["error"] = JsonValue("git pull failed (rc=" +
+                                    std::to_string(rc) + ")" +
+                                    (output.empty() ? "" : ": " + output));
+        return JsonValue(result);
+    }
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        updateStatus_[component] = "up-to-date";
+    }
+    result["result"] = JsonValue(true);
     return JsonValue(result);
 }
 
@@ -251,8 +514,33 @@ JsonValue KlippyServer::handleMachineUpdateRecover(const JsonValue& params) {
         result["error"] = JsonValue("Missing 'component' parameter");
         return JsonValue(result);
     }
-    result["error"] = JsonValue("Recovery of '" + component + "' not implemented");
-    result["code"] = JsonValue(static_cast<int64_t>(501));
+    std::string dir = updateComponentDir(config_, component);
+    if (dir.empty()) {
+        result["error"] = JsonValue("Unknown update component '" + component + "'");
+        return JsonValue(result);
+    }
+    if (!isGitRepo(dir)) {
+        result["error"] = JsonValue("Component '" + component +
+                                    "' is not a git checkout: " + dir);
+        return JsonValue(result);
+    }
+
+    // Recovery = restore tracked files to HEAD and remove untracked
+    // artifacts, matching Moonraker's "recover to last known good state".
+    std::string output;
+    int rc = runCommand("git -C \"" + dir + "\" reset --hard HEAD && "
+                        "git -C \"" + dir + "\" clean -fd", &output);
+    if (rc != 0) {
+        result["error"] = JsonValue("git recovery failed (rc=" +
+                                    std::to_string(rc) + ")" +
+                                    (output.empty() ? "" : ": " + output));
+        return JsonValue(result);
+    }
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        updateStatus_[component] = "up-to-date";
+    }
+    result["result"] = JsonValue(true);
     return JsonValue(result);
 }
 
@@ -460,8 +748,74 @@ JsonValue KlippyServer::handleAnnouncementsList(const JsonValue& params) {
 
 JsonValue KlippyServer::handleAnnouncementsUpdate(const JsonValue& params) {
     std::map<std::string, JsonValue> result;
-    result["error"] = JsonValue("Announcement update not implemented (requires network access to Moonraker announcement API)");
-    result["code"] = JsonValue(static_cast<int64_t>(501));
+
+    // Announcement sources, in priority order:
+    //  1. explicit "path" parameter (local JSON file)
+    //  2. announcements.json next to the printer config
+    //  3. announcements.json inside klipperPath
+    std::string path;
+    if (params.has("path") && params.find("path")->isString()) {
+        path = params.find("path")->asString();
+    }
+    if (path.empty()) {
+        namespace fs = std::filesystem;
+        fs::path cfgDir = fs::path(config_.configFile).parent_path();
+        fs::path candidate = cfgDir / "announcements.json";
+        if (fs::exists(candidate)) path = candidate.string();
+    }
+    if (path.empty() && !config_.klipperPath.empty()) {
+        namespace fs = std::filesystem;
+        fs::path candidate =
+            fs::path(config_.klipperPath) / "announcements.json";
+        if (fs::exists(candidate)) path = candidate.string();
+    }
+    if (path.empty()) {
+        result["error"] = JsonValue(
+            "No announcement source: set 'path' or provide announcements.json");
+        return JsonValue(result);
+    }
+
+    std::ifstream f(path);
+    if (!f) {
+        result["error"] = JsonValue("Cannot open announcement source: " + path);
+        return JsonValue(result);
+    }
+    std::stringstream ss;
+    ss << f.rdbuf();
+    auto doc = JsonValue::parse(ss.str());
+    if (!doc || !doc->isArray()) {
+        result["error"] = JsonValue("Invalid announcement feed format");
+        return JsonValue(result);
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    size_t added = 0;
+    for (const auto& item : doc->asArray()) {
+        if (!item.isObject()) continue;
+        auto getStr = [&](const char* k) -> std::string {
+            const JsonValue* v = item.find(k);
+            return (v && v->isString()) ? v->asString() : "";
+        };
+        std::string entryId = getStr("entry_id");
+        if (entryId.empty()) entryId = getStr("id");
+        if (entryId.empty()) continue;
+        bool exists = false;
+        for (const auto& a : announcements_) {
+            if (a.entryId == entryId) { exists = true; break; }
+        }
+        if (exists) continue;
+        Announcement a;
+        a.entryId = entryId;
+        a.title = getStr("title");
+        a.description = getStr("description");
+        a.url = getStr("url");
+        a.date = getStr("date");
+        a.severity = getStr("severity");
+        if (a.severity.empty()) a.severity = "info";
+        announcements_.push_back(a);
+        ++added;
+    }
+    result["result"] = JsonValue(static_cast<int64_t>(added));
     return JsonValue(result);
 }
 

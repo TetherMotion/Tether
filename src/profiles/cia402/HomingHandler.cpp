@@ -5,6 +5,7 @@
 
 #include "profiles/cia402/HomingHandler.hpp"
 #include "tether/platform/EspCompat.hpp"
+#include <cstdlib>
 
 static const char* TAG = "HomingHandler";
 
@@ -44,6 +45,9 @@ bool HomingHandler::start() {
     m_switchFound = false;
     m_indexFound = false;
     m_startTime = esp_timer_get_time();
+    m_blockTracking = false;
+    m_blockRefPos = 0;
+    m_blockLastMoveUs = 0;
     
     // Get initial search direction
     m_searchDirection = getInitialDirection(m_method);
@@ -268,11 +272,28 @@ void HomingHandler::processHomeSwitchOnly(int32_t position,
 void HomingHandler::processBlockHoming(int32_t position, 
                                        const HomingSwitchStatus& status) {
     // Methods 17-30: Block detection (mechanical stop)
-    // Uses torque/current limiting to detect block
-    
-    // Simplified implementation - check for stall or limit
+    // The axis is driven into the stop; reaching it is detected either by a
+    // limit switch or by the position freezing while motion is commanded.
     if (status.negativeLimitActive || status.positiveLimitActive) {
         TETHER_LOGD(TAG, "Block/limit detected at {}", (long)position);
+        stop();
+        m_homePosition = position + m_params.offset;
+        complete(true);
+        return;
+    }
+
+    // Stall detection: the drive keeps commanding velocity, but the actual
+    // position has not moved beyond the epsilon for m_stallTimeUs.
+    const uint64_t nowUs = esp_timer_get_time();
+    if (!m_blockTracking ||
+        std::llabs(static_cast<int64_t>(position) - m_blockRefPos) > m_stallMoveEpsilon) {
+        m_blockTracking = true;
+        m_blockRefPos = position;
+        m_blockLastMoveUs = nowUs;
+        return;
+    }
+    if (nowUs - m_blockLastMoveUs >= m_stallTimeUs) {
+        TETHER_LOGD(TAG, "Block detected (stall) at {}", (long)position);
         stop();
         m_homePosition = position + m_params.offset;
         complete(true);

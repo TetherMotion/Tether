@@ -1193,66 +1193,106 @@ void KlippyHttpServer::registerFileRoutes() {
 void KlippyHttpServer::registerStubRoutes() {
     auto& app = drogon::app();
 
-    // Sensors (stub — no sensors configured)
+    // Helper: Moonraker-shaped error for features with no backend.
+    auto stubError = [this](const drogon::HttpRequestPtr& req,
+               std::function<void(const drogon::HttpResponsePtr&)>&& cb,
+               const std::string& message) {
+        auto resp = drogon::HttpResponse::newHttpResponse();
+        resp->setStatusCode(drogon::HttpStatusCode::k400BadRequest);
+        resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+        resp->setBody(buildErrorResponse(400, message));
+        addCorsHeaders(resp, req);
+        cb(resp);
+    };
+
+    // Helper: shaped empty list/object response for list-style endpoints.
+    auto stubJson = [this](const drogon::HttpRequestPtr& req,
+               std::function<void(const drogon::HttpResponsePtr&)>&& cb,
+               const std::map<std::string, klippy::JsonValue>& payload) {
+        auto resp = drogon::HttpResponse::newHttpResponse();
+        resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+        addCorsHeaders(resp, req);
+        resp->setBody(buildSuccessResponse(klippy::JsonValue(payload)));
+        cb(resp);
+    };
+
+    // Sensors — no sensor devices are registered with this server, so the
+    // list is genuinely empty; lookups/measurements report not-found.
     app.registerHandler("/server/sensors/list",
-        [this](const drogon::HttpRequestPtr& req,
+        [this, stubJson](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
-            handleStubEmpty(req, std::move(cb), "sensors");
+            stubJson(req, std::move(cb),
+                {{"sensors", klippy::JsonValue(std::vector<klippy::JsonValue>{})}});
         }, withAuth(config_.requireAuth, {drogon::Get}));
 
     app.registerHandler("/server/sensors/sensor",
-        [this](const drogon::HttpRequestPtr& req,
+        [this, stubError](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
-            handleStubEmpty(req, std::move(cb), "sensors");
+            stubError(req, std::move(cb), "Sensor not found");
         }, withAuth(config_.requireAuth, {drogon::Get}));
 
     app.registerHandler("/server/sensors/measurements",
-        [this](const drogon::HttpRequestPtr& req,
+        [this, stubJson](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
-            handleStubEmpty(req, std::move(cb), "sensors");
+            stubJson(req, std::move(cb),
+                {{"measurements", klippy::JsonValue(std::vector<klippy::JsonValue>{})}});
         }, withAuth(config_.requireAuth, {drogon::Get}));
 
-    // WLED (stub)
+    // WLED — requires a configured WLED device; none is present.
     for (const auto& sub : {"strips", "status", "on", "off", "toggle", "get_strip"}) {
         app.registerHandler("/machine/wled/" + std::string(sub),
-            [this, sub](const drogon::HttpRequestPtr& req,
+            [this, stubError, sub](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
-                handleStubEmpty(req, std::move(cb), "wled");
+                stubError(req, std::move(cb),
+                          "WLED device not configured");
             }, withAuth(config_.requireAuth, {drogon::Get, drogon::Post}));
     }
 
-    // MQTT (stub)
+    // MQTT — requires a configured MQTT broker; none is present.
     app.registerHandler("/server/mqtt/publish",
-        [this](const drogon::HttpRequestPtr& req,
+        [this, stubError](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
-            handleStubEmpty(req, std::move(cb), "mqtt");
+            stubError(req, std::move(cb), "MQTT is not configured");
         }, withAuth(config_.requireAuth, {drogon::Post}));
 
     app.registerHandler("/server/mqtt/subscribe",
-        [this](const drogon::HttpRequestPtr& req,
+        [this, stubError](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
-            handleStubEmpty(req, std::move(cb), "mqtt");
+            stubError(req, std::move(cb), "MQTT is not configured");
         }, withAuth(config_.requireAuth, {drogon::Post}));
 
-    // Extensions (stub)
+    // Extensions — none installed.
     app.registerHandler("/server/extensions/list",
-        [this](const drogon::HttpRequestPtr& req,
+        [this, stubJson](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
-            handleStubEmpty(req, std::move(cb), "extensions");
+            stubJson(req, std::move(cb),
+                {{"extensions", klippy::JsonValue(std::vector<klippy::JsonValue>{})}});
         }, withAuth(config_.requireAuth, {drogon::Get}));
 
     app.registerHandler("/server/extensions/request",
-        [this](const drogon::HttpRequestPtr& req,
+        [this, stubError](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
-            handleStubEmpty(req, std::move(cb), "extensions");
+            stubError(req, std::move(cb), "Extension not found");
         }, withAuth(config_.requireAuth, {drogon::Post}));
 
-    // Timelapse (stub)
-    for (const auto& sub : {"settings", "saveframes", "render", "lastframeinfo"}) {
-        app.registerHandler("/machine/timelapse/" + std::string(sub),
-            [this, sub](const drogon::HttpRequestPtr& req,
+    // Timelapse — no timelapse subsystem; settings reads return empty,
+    // actions report unavailable.
+    app.registerHandler("/machine/timelapse/settings",
+        [this, stubJson, stubError](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
-                handleStubEmpty(req, std::move(cb), "timelapse");
+            if (req->getMethod() == drogon::Get) {
+                stubJson(req, std::move(cb),
+                    {{"settings", klippy::JsonValue(std::map<std::string, klippy::JsonValue>{})}});
+            } else {
+                stubError(req, std::move(cb), "Timelapse is not available");
+            }
+        }, withAuth(config_.requireAuth, {drogon::Get, drogon::Post}));
+
+    for (const auto& sub : {"saveframes", "render", "lastframeinfo"}) {
+        app.registerHandler("/machine/timelapse/" + std::string(sub),
+            [this, stubError, sub](const drogon::HttpRequestPtr& req,
+               std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
+                stubError(req, std::move(cb), "Timelapse is not available");
             }, withAuth(config_.requireAuth, {drogon::Get, drogon::Post}));
     }
 
@@ -1283,15 +1323,15 @@ void KlippyHttpServer::registerStubRoutes() {
 
     // Peripherals (stubs for canbus and video)
     app.registerHandler("/machine/peripherals/canbus",
-        [this](const drogon::HttpRequestPtr& req,
+        [this, stubError](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
-            handleStubEmpty(req, std::move(cb), "canbus");
+            stubError(req, std::move(cb), "CAN bus not configured");
         }, withAuth(config_.requireAuth, {drogon::Get}));
 
     app.registerHandler("/machine/peripherals/video",
-        [this](const drogon::HttpRequestPtr& req,
+        [this, stubError](const drogon::HttpRequestPtr& req,
                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
-            handleStubEmpty(req, std::move(cb), "video");
+            stubError(req, std::move(cb), "Video peripheral not configured");
         }, withAuth(config_.requireAuth, {drogon::Get}));
 
     // OctoPrint compatibility
@@ -2202,21 +2242,6 @@ void KlippyHttpServer::handleAccessInfo(
 // ============================================================================
 // Stub handlers
 // ============================================================================
-
-void KlippyHttpServer::handleStubEmpty(
-    const drogon::HttpRequestPtr& req,
-    std::function<void(const drogon::HttpResponsePtr&)>&& callback,
-    const std::string& componentName) {
-
-    auto resp = drogon::HttpResponse::newHttpResponse();
-    resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-    addCorsHeaders(resp, req);
-
-    std::map<std::string, klippy::JsonValue> result;
-    result[componentName] = klippy::JsonValue(std::vector<klippy::JsonValue>{});
-    resp->setBody(buildSuccessResponse(klippy::JsonValue(result)));
-    callback(resp);
-}
 
 void KlippyHttpServer::handleOctoprintVersion(
     const drogon::HttpRequestPtr& req,

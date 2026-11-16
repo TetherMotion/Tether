@@ -88,9 +88,9 @@ KlippyServer::KlippyServer(UdsServerConfig cfg)
     registerEndpoint("server/klippy_log", [this](const JsonValue& p) { return handleServerKlippyLog(p); });
     registerEndpoint("server/moonraker_log", [this](const JsonValue& p) { return handleServerMoonrakerLog(p); });
     registerEndpoint("machine/services/list", [this](const JsonValue& p) { return handleMachineServicesList(p); });
-    registerEndpoint("machine/services/restart", [this](const JsonValue& p) { return handleMachineServiceAction(p); });
-    registerEndpoint("machine/services/stop", [this](const JsonValue& p) { return handleMachineServiceAction(p); });
-    registerEndpoint("machine/services/start", [this](const JsonValue& p) { return handleMachineServiceAction(p); });
+    registerEndpoint("machine/services/restart", [this](const JsonValue& p) { return handleMachineServiceAction(p, "restart"); });
+    registerEndpoint("machine/services/stop", [this](const JsonValue& p) { return handleMachineServiceAction(p, "stop"); });
+    registerEndpoint("machine/services/start", [this](const JsonValue& p) { return handleMachineServiceAction(p, "start"); });
     registerEndpoint("machine/update/list", [this](const JsonValue& p) { return handleMachineUpdateList(p); });
     registerEndpoint("machine/update/refresh", [this](const JsonValue& p) { return handleMachineUpdateRefresh(p); });
     registerEndpoint("machine/update/update", [this](const JsonValue& p) { return handleMachineUpdateUpdate(p); });

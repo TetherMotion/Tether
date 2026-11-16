@@ -678,15 +678,86 @@ TEST_F(AoEHandlerTest, WriteControl) {
     EXPECT_EQ(adsState, 6u); // STOP
 }
 
-TEST_F(AoEHandlerTest, ReadSymbolByNameNotImplemented) {
-    // ADS Read via ADSIGRP_SYM_VAL_BYNAME is explicitly not implemented
+TEST_F(AoEHandlerTest, ReadSymbolByFlatAddress) {
+    // {0xF004, 0} addresses MAIN.Counter in the flat symbol space.
     auto req = buildAdsReadReq(ADSIGRP_SYM_VAL_BYNAME, 0, 4);
     bool ok = handler->processRequest(req.data(), req.size(), resp, respLen);
     EXPECT_TRUE(ok);
 
     uint32_t errCode;
     memcpy(&errCode, resp + 32, 4);
-    EXPECT_NE(errCode, 0u); // returns ADS_ERR_NO_IO
+    EXPECT_EQ(errCode, 0u);
+
+    uint32_t cbLen;
+    memcpy(&cbLen, resp + 36, 4);
+    EXPECT_EQ(cbLen, 4u);
+}
+
+TEST_F(AoEHandlerTest, ReadSymbolByName) {
+    // Proper ADS SYM_VAL_BYNAME: NUL-terminated name after AdsReadRequest.
+    auto req = buildAdsReadReq(ADSIGRP_SYM_VAL_BYNAME, 0, 4);
+    const char* name = "MAIN.Position";
+    req.insert(req.end(), name, name + strlen(name) + 1);
+    // Fix cbData in the AMS header (offset 20) to cover the name bytes.
+    const uint32_t cbData = 12 + static_cast<uint32_t>(strlen(name) + 1);
+    req[20] = cbData & 0xFF; req[21] = (cbData >> 8) & 0xFF;
+    req[22] = (cbData >> 16) & 0xFF; req[23] = (cbData >> 24) & 0xFF;
+
+    respLen = sizeof(resp);
+    bool ok = handler->processRequest(req.data(), req.size(), resp, respLen);
+    EXPECT_TRUE(ok);
+
+    uint32_t errCode;
+    memcpy(&errCode, resp + 32, 4);
+    EXPECT_EQ(errCode, 0u);
+}
+
+TEST_F(AoEHandlerTest, ReadSymbolByNameUnknown) {
+    auto req = buildAdsReadReq(ADSIGRP_SYM_VAL_BYNAME, 0, 4);
+    const char* name = "NO.SUCH.Symbol";
+    req.insert(req.end(), name, name + strlen(name) + 1);
+    const uint32_t cbData = 12 + static_cast<uint32_t>(strlen(name) + 1);
+    req[20] = cbData & 0xFF; req[21] = (cbData >> 8) & 0xFF;
+    req[22] = (cbData >> 16) & 0xFF; req[23] = (cbData >> 24) & 0xFF;
+
+    respLen = sizeof(resp);
+    bool ok = handler->processRequest(req.data(), req.size(), resp, respLen);
+    EXPECT_TRUE(ok);
+
+    uint32_t errCode;
+    memcpy(&errCode, resp + 32, 4);
+    EXPECT_NE(errCode, 0u);
+}
+
+TEST_F(AoEHandlerTest, WriteAndReadBackGeneric) {
+    // Generic ReadWrite: write 4 bytes to MAIN.Counter {0xF004,0} then
+    // read them back in one command.
+    auto h = buildAmsHeader(ADS_CMD_READ_WRITE, 16 + 4, 7);
+    h.resize(32 + 16 + 4, 0);
+    auto put32 = [&](size_t off, uint32_t v) {
+        h[off]=v&0xFF; h[off+1]=(v>>8)&0xFF;
+        h[off+2]=(v>>16)&0xFF; h[off+3]=(v>>24)&0xFF;
+    };
+    put32(32, ADSIGRP_SYM_VAL_BYNAME);   // indexGroup
+    put32(36, 0);                        // indexOffset
+    put32(40, 4);                        // cbReadLength
+    put32(44, 4);                        // cbWriteLength
+    const uint8_t wdata[4] = {0x11, 0x22, 0x33, 0x44};
+    memcpy(h.data() + 48, wdata, 4);
+
+    respLen = sizeof(resp);
+    bool ok = handler->processRequest(h.data(), h.size(), resp, respLen);
+    EXPECT_TRUE(ok);
+
+    uint32_t errCode;
+    memcpy(&errCode, resp + 32, 4);
+    EXPECT_EQ(errCode, 0u);
+
+    // Read-back data at offset 32+4+4 = 40
+    EXPECT_EQ(resp[40], 0x11);
+    EXPECT_EQ(resp[41], 0x22);
+    EXPECT_EQ(resp[42], 0x33);
+    EXPECT_EQ(resp[43], 0x44);
 }
 
 TEST_F(AoEHandlerTest, WriteSymbol) {
@@ -883,21 +954,36 @@ TEST_F(EoEHandlerTest, SetIPParam) {
     EXPECT_EQ(resp[15], 42);
 }
 
-TEST_F(EoEHandlerTest, SetFilterUnsupported) {
+TEST_F(EoEHandlerTest, SetFilterMalformedRejected) {
+    // Filter request shorter than MAC(6)+EtherType(2) is malformed.
     auto req = buildEoEHeader(EOE_TYPE_SET_FILTER_REQ);
+    req.resize(4 + 4, 0);  // only 4 payload bytes
     bool ok = handler->processRequest(req.data(), req.size(), resp, respLen);
     EXPECT_TRUE(ok);
-    // Result should be unsupported (0x0301)
     uint16_t result = resp[2] | (resp[3] << 8);
-    EXPECT_EQ(result, 0x0301);
+    EXPECT_EQ(result, 0x0002u);  // UNSPECIFIED_ERROR
 }
 
-TEST_F(EoEHandlerTest, GetFilterUnsupported) {
-    auto req = buildEoEHeader(EOE_TYPE_GET_FILTER_REQ);
+TEST_F(EoEHandlerTest, SetGetFilterRoundTrip) {
+    // MAC + EtherType filter.
+    auto req = buildEoEHeader(EOE_TYPE_SET_FILTER_REQ);
+    const uint8_t filt[8] = {0x00,0x11,0x22,0x33,0x44,0x55, 0x08,0x00};
+    req.insert(req.end(), filt, filt + 8);
     bool ok = handler->processRequest(req.data(), req.size(), resp, respLen);
     EXPECT_TRUE(ok);
     uint16_t result = resp[2] | (resp[3] << 8);
-    EXPECT_EQ(result, 0x0301);
+    EXPECT_EQ(result, 0x0000u);  // SUCCESS
+
+    auto getReq = buildEoEHeader(EOE_TYPE_GET_FILTER_REQ);
+    respLen = sizeof(resp);
+    ok = handler->processRequest(getReq.data(), getReq.size(), resp, respLen);
+    EXPECT_TRUE(ok);
+    result = resp[2] | (resp[3] << 8);
+    EXPECT_EQ(result, 0x0000u);
+    EXPECT_EQ(resp[4], 0x00);
+    EXPECT_EQ(resp[5], 0x11);
+    EXPECT_EQ(resp[10], 0x08);
+    EXPECT_EQ(resp[11], 0x00);
 }
 
 TEST_F(EoEHandlerTest, UnsupportedFrameType) {

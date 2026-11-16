@@ -604,6 +604,12 @@ public:
      * @return true when the encoder reference procedure finished.
      */
     bool isReferenced() const { return status_.reference_done; }
+
+    /**
+     * @brief Check if a trigger-based reference is armed and awaiting its
+     *        hardware trigger (zero pulse / limit / external input)
+     */
+    bool isReferencePending() const { return reference_pending_; }
     
     /**
      * @brief Abort ongoing reference procedure
@@ -852,6 +858,13 @@ private:
     // Event handling
     EncoderEventCallback event_callback_;
     uint16_t previous_alarms_{0};
+    bool prev_ref_done_{false};
+
+    // Pending trigger-based reference (OnZeroPulse/OnLimitSwitch/
+    // OnExternalInput): the encoder hardware presets when the trigger
+    // arrives; we track the armed state until reference_done is seen.
+    bool reference_pending_{false};
+    ReferenceConfig pending_reference_{};
     
     // Internal helpers
     bool detectEncoderClass();

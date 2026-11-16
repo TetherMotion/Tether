@@ -232,16 +232,134 @@ public:
         
         return true;
     }
-    
-    // Serialization
-    bool save(std::vector<uint8_t>& data) const override {
-        // Simple serialization: not implemented for now
-        data.clear();
+
+    bool getIndices(std::vector<uint16_t>& indices) const override {
+        indices = indices_;
         return true;
     }
-    
+
+    // Serialization
+    //
+    // Wire format (all integers little-endian):
+    //   magic "TODS" (4) | version u16 (=1) | object count u32
+    //   per object:
+    //     index u16 | subindex u8 | dataType u8 | accessType u8
+    //     | bitLength u16 | defaultValue u32 | nameLen u16 | name bytes
+    //     | dataLen u32 | data bytes
+    //
+    // Read/write callbacks are runtime bindings and are NOT serialized;
+    // objects restored by load() behave as plain storage objects unless
+    // the application re-registers callbacks afterwards. load() merges
+    // into the existing dictionary: same-key objects are replaced,
+    // unrelated objects are kept, and existing callbacks on overwritten
+    // keys are preserved.
+    bool save(std::vector<uint8_t>& data) const override {
+        data.clear();
+        data.reserve(objects_.size() * 24);
+
+        auto put8  = [&](uint8_t v)  { data.push_back(v); };
+        auto put16 = [&](uint16_t v) {
+            put8(static_cast<uint8_t>(v));
+            put8(static_cast<uint8_t>(v >> 8));
+        };
+        auto put32 = [&](uint32_t v) {
+            put16(static_cast<uint16_t>(v));
+            put16(static_cast<uint16_t>(v >> 16));
+        };
+
+        data.insert(data.end(), {'T', 'O', 'D', 'S'});
+        put16(1);  // version
+        put32(static_cast<uint32_t>(objects_.size()));
+
+        for (const auto& [key, obj] : objects_) {
+            put16(static_cast<uint16_t>(key >> 8));   // index
+            put8(static_cast<uint8_t>(key & 0xFF));   // subindex
+            put8(static_cast<uint8_t>(obj.dataType));
+            put8(obj.accessType);
+            put16(obj.bitLength);
+            put32(obj.defaultValue);
+            put16(static_cast<uint16_t>(std::min<size_t>(obj.name.size(), 0xFFFF)));
+            data.insert(data.end(), obj.name.begin(),
+                        obj.name.begin() + std::min<size_t>(obj.name.size(), 0xFFFF));
+            put32(static_cast<uint32_t>(obj.data.size()));
+            data.insert(data.end(), obj.data.begin(), obj.data.end());
+        }
+        return true;
+    }
+
     bool load(const std::vector<uint8_t>& data) override {
-        // Simple deserialization: not implemented for now
+        static constexpr uint8_t kMagic[4] = {'T', 'O', 'D', 'S'};
+        if (data.size() < 10 ||
+            std::memcmp(data.data(), kMagic, 4) != 0) {
+            return false;
+        }
+
+        size_t pos = 4;
+        auto get8 = [&]() -> uint8_t {
+            return pos < data.size() ? data[pos++] : 0;
+        };
+        auto get16 = [&]() -> uint16_t {
+            uint16_t v = get8() | (static_cast<uint16_t>(get8()) << 8);
+            return v;
+        };
+        auto get32 = [&]() -> uint32_t {
+            return get16() | (static_cast<uint32_t>(get16()) << 16);
+        };
+
+        const uint16_t version = get16();
+        if (version != 1) return false;
+        const uint32_t count = get32();
+
+        // Parse all records first so a malformed blob cannot leave the
+        // dictionary half-populated.
+        struct Record {
+            ODEntryInfo info;
+            std::vector<uint8_t> bytes;
+        };
+        std::vector<Record> records;
+        records.reserve(std::min<uint32_t>(count, 4096));
+
+        for (uint32_t i = 0; i < count; ++i) {
+            if (pos + 13 > data.size()) return false;
+            Record rec;
+            rec.info.index = get16();
+            rec.info.subindex = get8();
+            rec.info.dataType = static_cast<ObjectDictionaryDataType>(get8());
+            rec.info.accessType = get8();
+            rec.info.bitLength = get16();
+            rec.info.defaultValue = get32();
+            const uint16_t nameLen = get16();
+            if (pos + nameLen + 4 > data.size()) return false;
+            rec.info.name.assign(reinterpret_cast<const char*>(data.data() + pos), nameLen);
+            pos += nameLen;
+            const uint32_t dataLen = get32();
+            if (pos + dataLen > data.size()) return false;
+            rec.bytes.assign(data.begin() + pos, data.begin() + pos + dataLen);
+            pos += dataLen;
+            records.push_back(std::move(rec));
+        }
+
+        // Apply (merge semantics — see comment above save()).
+        for (auto& rec : records) {
+            const auto key = makeKey(rec.info.index, rec.info.subindex);
+            const auto existing = objects_.find(key);
+            const bool hadCallbacks =
+                existing != objects_.end() &&
+                (existing->second.readCallback || existing->second.writeCallback);
+
+            registerObject(rec.info);  // replaces any same-key object
+
+            auto it = objects_.find(key);
+            if (it == objects_.end()) return false;
+            const size_t cap = it->second.data.size();
+            const size_t n = std::min(cap, rec.bytes.size());
+            if (n > 0) std::memcpy(it->second.data.data(), rec.bytes.data(), n);
+
+            if (hadCallbacks) {
+                it->second.readCallback = existing->second.readCallback;
+                it->second.writeCallback = existing->second.writeCallback;
+            }
+        }
         return true;
     }
     
@@ -689,20 +807,39 @@ private:
     
     bool processGetODList(const uint8_t* data, size_t length,
                            uint8_t* response, size_t& responseLength) {
-        // opcode(2) + list type(2) request, opcode(2) + list type(2) response
+        // Request:  opcode(1) + reserved(1) + listType(2)
+        // Response: opcode(1) + reserved(1) + listType(2) + u16 indices...
         if (length < 4 || responseLength < 4) {
             return false;
         }
-        // This requires knowing all indices - we can iterate if needed
-        // For now, return a minimal response
-        uint16_t listType = data[2] | (data[3] << 8);
-        
+        const uint16_t listType = data[2] | (data[3] << 8);
+
+        std::vector<uint16_t> indices;
+        if (!objectDictionary_->getIndices(indices)) {
+            return false;  // dictionary cannot enumerate -> fail honestly
+        }
+        std::sort(indices.begin(), indices.end());
+        indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+
+        // CiA301 carries the complete OD list in one (unsegmented) SDO
+        // Info response — it must fit the mailbox payload or the request
+        // fails rather than returning a silently truncated list.
+        const size_t maxIndices = (responseLength - 4) / 2;
+        if (indices.size() > maxIndices) {
+            return false;
+        }
+
         response[0] = SDO_INFO_GET_OD_LIST_RES;
         response[1] = 0;
         response[2] = listType & 0xFF;
         response[3] = (listType >> 8) & 0xFF;
-        
-        responseLength = 4;
+        size_t pos = 4;
+        for (uint16_t idx : indices) {
+            response[pos++] = idx & 0xFF;
+            response[pos++] = (idx >> 8) & 0xFF;
+        }
+
+        responseLength = pos;
         return true;
     }
     

@@ -400,20 +400,13 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                     if (m_userGCodeCallback)
                         return m_userGCodeCallback(29, block);
                     return Error{};
-                case 28: {
-                    // G28 — Go to reference point 1
-                    // Store current position, then rapid to reference
-                    Position target = m_coordinates.getG28Reference();
-                    MotionSegment seg;
-                    seg.type = MotionSegment::Type::RAPID;
-                    seg.endPosition = m_coordinates.toMachineCoords(target);
-                    seg.lineNumber = block.sourceLineNumber;
-                    segments.push_back(seg);
-                    m_machineState.workPosition = target;
-                    m_machineState.machinePosition =
-                        m_coordinates.toMachineCoords(target);
-                    return Error{};
-                }
+                case 28: // G28 — Go to reference point 1 (via optional
+                         // intermediate point given by axis words)
+                    return m_coordinates.processG28(
+                        block, m_machineState, segments);
+                case 281: // G28.1 — Store current position as reference
+                    return m_coordinates.processG28_1(
+                        m_machineState.machinePosition, m_variables);
                 case 30: {
                     // Feature::G30_PROBE — Marlin/RepRap single-point probe.
                     if (featureEnabled(Feature::G30_PROBE)) {
@@ -459,17 +452,18 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                         }
                         return Error{};
                     }
-                    // G30 — Go to reference point 2
-                    Position target = m_coordinates.getG30Reference(1);
-                    MotionSegment seg;
-                    seg.type = MotionSegment::Type::RAPID;
-                    seg.endPosition = m_coordinates.toMachineCoords(target);
-                    seg.lineNumber = block.sourceLineNumber;
-                    segments.push_back(seg);
-                    m_machineState.workPosition = target;
-                    m_machineState.machinePosition =
-                        m_coordinates.toMachineCoords(target);
-                    return Error{};
+                    // G30 — Go to secondary reference point (P1-P4)
+                    return m_coordinates.processG30(
+                        block,
+                        static_cast<int32_t>(
+                            block.getWord(WordLetter::P, 1)),
+                        m_machineState, segments);
+                }
+                case 301: { // G30.1 — Store current position as a G30 ref
+                    const int32_t p =
+                        static_cast<int32_t>(block.getWord(WordLetter::P, 1));
+                    return m_coordinates.processG30_1(
+                        m_machineState.machinePosition, p, m_variables);
                 }
                 case 53: {
                     // G53 — Move in machine coordinates (non-modal)
@@ -643,13 +637,20 @@ Error Interpreter::dispatchGCode(double gcode, const Block& block,
                 case 923: // G92.3 — Restore G92
                     return m_coordinates.processG92_3(m_machineState);
                 default:
+                    // Unknown non-modal code — offer to the user handler
+                    // (gcode_macro equivalent) before ignoring.
+                    if (m_userGCodeCallback)
+                        return m_userGCodeCallback(gnum, block);
                     break;
             }
             return Error{};
         }
 
         default:
-            // Unhandled modal group — ignore for now
+            // Modal group outside the known set — offer to the user
+            // handler before ignoring.
+            if (m_userGCodeCallback)
+                return m_userGCodeCallback(gnum, block);
             return Error{};
     }
 }

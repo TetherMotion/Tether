@@ -855,6 +855,18 @@ public:
     void reset();
     
 private:
+    /**
+     * @brief Shared G28/G30 move: optional intermediate point (program
+     *        coords, axis words) followed by a rapid to the stored machine
+     *        reference position.
+     */
+    Error moveViaReference(
+        const Block& block,
+        const Position& refMachine,
+        MachineState& state,
+        std::vector<MotionSegment>& segments
+    );
+
     // Work coordinate systems (index 0-8 = WCS 1-9)
     std::array<WorkCoordinateSystem, NUM_WORK_COORD_SYSTEMS> m_wcs;
 
